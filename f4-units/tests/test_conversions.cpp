@@ -1,212 +1,208 @@
 #include <f4/f4_units.hpp>
-#include "catch.hpp"
-// floating matchers included in amalgamated
+#include <gtest/gtest.h>
 
 using namespace f4;
-using namespace Catch::Matchers;
 
 // ============================================================================
 // Length
 // ============================================================================
 
-TEST_CASE("Length: feet to meters", "[conversions][length]") {
+TEST(LengthConversion, FeetToMeters) {
     auto ft = Quantity<Feet>(1000.0);
-    auto m = ft.to<Meters>();
-    REQUIRE_THAT(m.value(), WithinAbs(304.8, 1e-9));
+    EXPECT_NEAR(ft.to<Meters>().value(), 304.8, 1e-9);
 }
 
-TEST_CASE("Length: nautical miles to meters", "[conversions][length]") {
+TEST(LengthConversion, NauticalMilesToMeters) {
     auto nm = Quantity<NauticalMiles>(1.0);
-    REQUIRE_THAT(nm.to<Meters>().value(), WithinAbs(1852.0, 1e-6));
+    EXPECT_NEAR(nm.to<Meters>().value(), 1852.0, 1e-6);
 }
 
-TEST_CASE("Length: kilometers to miles", "[conversions][length]") {
+TEST(LengthConversion, KilometersToMiles) {
     auto km = Quantity<Kilometers>(1.0);
-    REQUIRE_THAT(km.to<Miles>().value(), WithinAbs(0.621371, 1e-5));
+    EXPECT_NEAR(km.to<Miles>().value(), 0.621371, 1e-5);
 }
 
-TEST_CASE("Length: roundtrip meters -> feet -> meters", "[conversions][length]") {
+TEST(LengthConversion, RoundtripMetersFeetMeters) {
     auto orig = Quantity<Meters>(100.0);
     auto rt = orig.to<Feet>().to<Meters>();
-    REQUIRE_THAT(rt.value(), WithinAbs(100.0, 1e-9));
+    EXPECT_NEAR(rt.value(), 100.0, 1e-9);
 }
 
-TEST_CASE("Length: roundtrip nautical miles -> feet -> nautical miles", "[conversions][length]") {
+TEST(LengthConversion, RoundtripNmFeetNm) {
     auto orig = Quantity<NauticalMiles>(5.0);
     auto rt = orig.to<Feet>().to<NauticalMiles>();
-    REQUIRE_THAT(rt.value(), WithinAbs(5.0, 1e-9));
+    EXPECT_NEAR(rt.value(), 5.0, 1e-9);
 }
 
-TEST_CASE("Length: inches to centimeters", "[conversions][length]") {
+TEST(LengthConversion, InchesToCentimeters) {
     auto in = Quantity<Inches>(1.0);
-    REQUIRE_THAT(in.to<Centimeters>().value(), WithinAbs(2.54, 1e-9));
+    EXPECT_NEAR(in.to<Centimeters>().value(), 2.54, 1e-9);
 }
 
 // ============================================================================
 // Speed
 // ============================================================================
 
-TEST_CASE("Speed: knots to m/s", "[conversions][speed]") {
+TEST(SpeedConversion, KnotsToMps) {
     auto kts = Quantity<Knots>(100.0);
-    REQUIRE_THAT(kts.to<MetersPerSecond>().value(), WithinAbs(51.4444, 1e-3));
+    EXPECT_NEAR(kts.to<MetersPerSecond>().value(), 51.4444, 1e-3);
 }
 
-TEST_CASE("Speed: knots to mph", "[conversions][speed]") {
+TEST(SpeedConversion, KnotsToMph) {
     auto kts = Quantity<Knots>(100.0);
-    REQUIRE_THAT(kts.to<MilesPerHour>().value(), WithinAbs(115.078, 1e-3));
+    EXPECT_NEAR(kts.to<MilesPerHour>().value(), 115.078, 1e-3);
 }
 
-TEST_CASE("Speed: roundtrip knots -> m/s -> knots", "[conversions][speed]") {
+TEST(SpeedConversion, RoundtripKnotsMpsKnots) {
     auto orig = Quantity<Knots>(250.0);
     auto rt = orig.to<MetersPerSecond>().to<Knots>();
-    REQUIRE_THAT(rt.value(), WithinAbs(250.0, 1e-9));
+    EXPECT_NEAR(rt.value(), 250.0, 1e-9);
 }
 
-TEST_CASE("Speed: m/s to kph", "[conversions][speed]") {
+TEST(SpeedConversion, MpsToKph) {
     auto mps = Quantity<MetersPerSecond>(10.0);
-    REQUIRE_THAT(mps.to<KilometersPerHour>().value(), WithinAbs(36.0, 1e-9));
+    EXPECT_NEAR(mps.to<KilometersPerHour>().value(), 36.0, 1e-9);
 }
 
-TEST_CASE("Speed: ft/s to m/s", "[conversions][speed]") {
+TEST(SpeedConversion, FpsToMps) {
     auto fps = Quantity<FeetPerSecond>(100.0);
-    REQUIRE_THAT(fps.to<MetersPerSecond>().value(), WithinAbs(30.48, 1e-6));
+    EXPECT_NEAR(fps.to<MetersPerSecond>().value(), 30.48, 1e-6);
 }
 
 // ============================================================================
 // Pressure
 // ============================================================================
 
-TEST_CASE("Pressure: PSI to pascals", "[conversions][pressure]") {
+TEST(PressureConversion, PsiToPascals) {
     auto psi = Quantity<PSI>(1.0);
-    REQUIRE_THAT(psi.to<Pascals>().value(), WithinAbs(6894.757, 1e-3));
+    EXPECT_NEAR(psi.to<Pascals>().value(), 6894.757, 1e-3);
 }
 
-TEST_CASE("Pressure: atmosphere to pascals", "[conversions][pressure]") {
+TEST(PressureConversion, AtmosphereToPascals) {
     auto atm = Quantity<Atmospheres>(1.0);
-    REQUIRE_THAT(atm.to<Pascals>().value(), WithinAbs(101325.0, 1e-6));
+    EXPECT_NEAR(atm.to<Pascals>().value(), 101325.0, 1e-6);
 }
 
-TEST_CASE("Pressure: 29.92 inHg = 1 atm", "[conversions][pressure]") {
+TEST(PressureConversion, InHgToPascals) {
     auto inhg = Quantity<InHg>(29.92);
-    auto pa = inhg.to<Pascals>();
-    REQUIRE_THAT(pa.value(), WithinAbs(101325.0, 10.0));
+    EXPECT_NEAR(inhg.to<Pascals>().value(), 101325.0, 10.0);
 }
 
-TEST_CASE("Pressure: 144 PSF = 1 PSI", "[conversions][pressure]") {
+TEST(PressureConversion, PsfToPsi) {
     auto psf = Quantity<PSF>(144.0);
-    REQUIRE_THAT(psf.to<PSI>().value(), WithinAbs(1.0, 1e-9));
+    EXPECT_NEAR(psf.to<PSI>().value(), 1.0, 1e-9);
 }
 
-TEST_CASE("Pressure: hPa = mbar", "[conversions][pressure]") {
+TEST(PressureConversion, HPaEqualsMbar) {
     auto hpa = Quantity<Hectopascals>(1013.25);
-    REQUIRE_THAT(hpa.to<Millibars>().value(), WithinAbs(1013.25, 1e-9));
+    EXPECT_NEAR(hpa.to<Millibars>().value(), 1013.25, 1e-9);
 }
 
-TEST_CASE("Pressure: roundtrip PSI -> inHg -> PSI", "[conversions][pressure]") {
+TEST(PressureConversion, RoundtripPsiInHgPsi) {
     auto orig = Quantity<PSI>(14.696);
     auto rt = orig.to<InHg>().to<PSI>();
-    REQUIRE_THAT(rt.value(), WithinAbs(14.696, 1e-6));
+    EXPECT_NEAR(rt.value(), 14.696, 1e-6);
 }
 
 // ============================================================================
 // Mass
 // ============================================================================
 
-TEST_CASE("Mass: pounds to kilograms", "[conversions][mass]") {
+TEST(MassConversion, PoundsToKilograms) {
     auto lb = Quantity<Pounds>(1.0);
-    REQUIRE_THAT(lb.to<Kilograms>().value(), WithinAbs(0.45359237, 1e-9));
+    EXPECT_NEAR(lb.to<Kilograms>().value(), 0.45359237, 1e-9);
 }
 
-TEST_CASE("Mass: slugs to kilograms", "[conversions][mass]") {
+TEST(MassConversion, SlugsToKilograms) {
     auto sl = Quantity<Slugs>(1.0);
-    REQUIRE_THAT(sl.to<Kilograms>().value(), WithinAbs(14.593903, 1e-6));
+    EXPECT_NEAR(sl.to<Kilograms>().value(), 14.593903, 1e-6);
 }
 
-TEST_CASE("Mass: roundtrip kg -> lb -> kg", "[conversions][mass]") {
+TEST(MassConversion, RoundtripKgLbKg) {
     auto orig = Quantity<Kilograms>(100.0);
     auto rt = orig.to<Pounds>().to<Kilograms>();
-    REQUIRE_THAT(rt.value(), WithinAbs(100.0, 1e-9));
+    EXPECT_NEAR(rt.value(), 100.0, 1e-9);
 }
 
 // ============================================================================
 // Time
 // ============================================================================
 
-TEST_CASE("Time: hours to seconds", "[conversions][time]") {
+TEST(TimeConversion, HoursToSeconds) {
     auto hr = Quantity<Hours>(1.0);
-    REQUIRE_THAT(hr.to<Seconds>().value(), WithinAbs(3600.0, 1e-9));
+    EXPECT_NEAR(hr.to<Seconds>().value(), 3600.0, 1e-9);
 }
 
-TEST_CASE("Time: minutes to seconds", "[conversions][time]") {
+TEST(TimeConversion, MinutesToSeconds) {
     auto min = Quantity<Minutes>(1.0);
-    REQUIRE_THAT(min.to<Seconds>().value(), WithinAbs(60.0, 1e-9));
+    EXPECT_NEAR(min.to<Seconds>().value(), 60.0, 1e-9);
 }
 
-TEST_CASE("Time: roundtrip seconds -> hours -> seconds", "[conversions][time]") {
+TEST(TimeConversion, RoundtripSecondsHoursSeconds) {
     auto orig = Quantity<Seconds>(7200.0);
     auto rt = orig.to<Hours>().to<Seconds>();
-    REQUIRE_THAT(rt.value(), WithinAbs(7200.0, 1e-9));
+    EXPECT_NEAR(rt.value(), 7200.0, 1e-9);
 }
 
 // ============================================================================
 // Angle
 // ============================================================================
 
-TEST_CASE("Angle: 180 degrees to pi radians", "[conversions][angle]") {
+TEST(AngleConversion, DegreesToRadians) {
     auto deg = Quantity<Degrees>(180.0);
-    REQUIRE_THAT(deg.to<Radians>().value(), WithinAbs(3.14159265358979, 1e-9));
+    EXPECT_NEAR(deg.to<Radians>().value(), 3.14159265358979, 1e-9);
 }
 
-TEST_CASE("Angle: 360 degrees to 2*pi radians", "[conversions][angle]") {
+TEST(AngleConversion, FullCircleTo2PiRadians) {
     auto deg = Quantity<Degrees>(360.0);
-    REQUIRE_THAT(deg.to<Radians>().value(), WithinAbs(6.28318530717959, 1e-9));
+    EXPECT_NEAR(deg.to<Radians>().value(), 6.28318530717959, 1e-9);
 }
 
-TEST_CASE("Angle: 6400 mils to 360 degrees", "[conversions][angle]") {
+TEST(AngleConversion, MilsToDegrees) {
     auto mil = Quantity<Mils>(6400.0);
-    REQUIRE_THAT(mil.to<Degrees>().value(), WithinAbs(360.0, 1e-6));
+    EXPECT_NEAR(mil.to<Degrees>().value(), 360.0, 1e-6);
 }
 
-TEST_CASE("Angle: roundtrip degrees -> radians -> degrees", "[conversions][angle]") {
+TEST(AngleConversion, RoundtripDegreesRadiansDegrees) {
     auto orig = Quantity<Degrees>(45.0);
     auto rt = orig.to<Radians>().to<Degrees>();
-    REQUIRE_THAT(rt.value(), WithinAbs(45.0, 1e-9));
+    EXPECT_NEAR(rt.value(), 45.0, 1e-9);
 }
 
 // ============================================================================
 // Area
 // ============================================================================
 
-TEST_CASE("Area: square feet to square meters", "[conversions][area]") {
+TEST(AreaConversion, SquareFeetToSquareMeters) {
     auto ft2 = Quantity<SquareFeet>(1.0);
-    REQUIRE_THAT(ft2.to<SquareMeters>().value(), WithinAbs(0.09290304, 1e-9));
+    EXPECT_NEAR(ft2.to<SquareMeters>().value(), 0.09290304, 1e-9);
 }
 
-TEST_CASE("Area: roundtrip m^2 -> ft^2 -> m^2", "[conversions][area]") {
+TEST(AreaConversion, RoundtripSqMSqFtSqM) {
     auto orig = Quantity<SquareMeters>(100.0);
     auto rt = orig.to<SquareFeet>().to<SquareMeters>();
-    REQUIRE_THAT(rt.value(), WithinAbs(100.0, 1e-9));
+    EXPECT_NEAR(rt.value(), 100.0, 1e-9);
 }
 
 // ============================================================================
 // Density
 // ============================================================================
 
-TEST_CASE("Density: slugs/ft^3 to kg/m^3", "[conversions][density]") {
+TEST(DensityConversion, SlugsPerFt3ToKgPerM3) {
     auto sl = Quantity<SlugsPerCubicFoot>(1.0);
-    REQUIRE_THAT(sl.to<KilogramsPerCubicMeter>().value(), WithinAbs(515.379, 1e-3));
+    EXPECT_NEAR(sl.to<KilogramsPerCubicMeter>().value(), 515.379, 1e-3);
 }
 
 // ============================================================================
 // Force
 // ============================================================================
 
-TEST_CASE("Force: pounds-force to newtons", "[conversions][force]") {
+TEST(ForceConversion, PoundForceToNewtons) {
     auto lbf = Quantity<PoundForce>(1.0);
-    REQUIRE_THAT(lbf.to<Newtons>().value(), WithinAbs(4.44822, 1e-5));
+    EXPECT_NEAR(lbf.to<Newtons>().value(), 4.44822, 1e-5);
 }
 
-TEST_CASE("Force: kN to N", "[conversions][force]") {
+TEST(ForceConversion, KiloNewtonsToNewtons) {
     auto kn = Quantity<KiloNewtons>(5.0);
-    REQUIRE_THAT(kn.to<Newtons>().value(), WithinAbs(5000.0, 1e-9));
+    EXPECT_NEAR(kn.to<Newtons>().value(), 5000.0, 1e-9);
 }

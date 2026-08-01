@@ -1,1 +1,6 @@
-*/Build
+Build/
+build/
+cmake-build-*/
+.vs/
+*.user
+*.suo

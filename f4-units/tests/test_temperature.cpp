@@ -1,151 +1,146 @@
 #include <f4/f4_units.hpp>
-#include "catch.hpp"
-// floating matchers included in amalgamated
+#include <gtest/gtest.h>
 
 using namespace f4;
-using namespace Catch::Matchers;
 
 // ============================================================================
 // Celsius <-> Kelvin
 // ============================================================================
 
-TEST_CASE("Celsius to Kelvin: 0 C = 273.15 K", "[temperature]") {
+TEST(Temperature, CelsiusToKelvin) {
     auto c = Quantity<Celsius>(0.0);
-    REQUIRE_THAT(c.to<Kelvin>().value(), WithinAbs(273.15, 1e-9));
+    EXPECT_NEAR(c.to<Kelvin>().value(), 273.15, 1e-9);
 }
 
-TEST_CASE("Kelvin to Celsius: 273.15 K = 0 C", "[temperature]") {
+TEST(Temperature, KelvinToCelsius) {
     auto k = Quantity<Kelvin>(273.15);
-    REQUIRE_THAT(k.to<Celsius>().value(), WithinAbs(0.0, 1e-9));
+    EXPECT_NEAR(k.to<Celsius>().value(), 0.0, 1e-9);
 }
 
 // ============================================================================
 // Fahrenheit <-> Kelvin
 // ============================================================================
 
-TEST_CASE("Fahrenheit to Kelvin: 32 F = 273.15 K (freezing)", "[temperature]") {
+TEST(Temperature, FahrenheitToKelvinFreezing) {
     auto f = Quantity<Fahrenheit>(32.0);
-    REQUIRE_THAT(f.to<Kelvin>().value(), WithinAbs(273.15, 1e-6));
+    EXPECT_NEAR(f.to<Kelvin>().value(), 273.15, 1e-6);
 }
 
-TEST_CASE("Fahrenheit to Kelvin: 212 F = 373.15 K (boiling)", "[temperature]") {
+TEST(Temperature, FahrenheitToKelvinBoiling) {
     auto f = Quantity<Fahrenheit>(212.0);
-    REQUIRE_THAT(f.to<Kelvin>().value(), WithinAbs(373.15, 1e-6));
+    EXPECT_NEAR(f.to<Kelvin>().value(), 373.15, 1e-6);
 }
 
-TEST_CASE("Kelvin to Fahrenheit: 273.15 K = 32 F", "[temperature]") {
+TEST(Temperature, KelvinToFahrenheit) {
     auto k = Quantity<Kelvin>(273.15);
-    REQUIRE_THAT(k.to<Fahrenheit>().value(), WithinAbs(32.0, 1e-6));
+    EXPECT_NEAR(k.to<Fahrenheit>().value(), 32.0, 1e-6);
 }
 
 // ============================================================================
 // Fahrenheit <-> Celsius
 // ============================================================================
 
-TEST_CASE("Fahrenheit to Celsius: 100 F = 37.7778 C", "[temperature]") {
+TEST(Temperature, FahrenheitToCelsius) {
     auto f = Quantity<Fahrenheit>(100.0);
-    REQUIRE_THAT(f.to<Celsius>().value(), WithinAbs(37.7778, 1e-4));
+    EXPECT_NEAR(f.to<Celsius>().value(), 37.7778, 1e-4);
 }
 
-TEST_CASE("Celsius to Fahrenheit: 100 C = 212 F", "[temperature]") {
+TEST(Temperature, CelsiusToFahrenheit) {
     auto c = Quantity<Celsius>(100.0);
-    REQUIRE_THAT(c.to<Fahrenheit>().value(), WithinAbs(212.0, 1e-6));
+    EXPECT_NEAR(c.to<Fahrenheit>().value(), 212.0, 1e-6);
 }
 
-TEST_CASE("Fahrenheit to Celsius: -40 F = -40 C (convergence)", "[temperature]") {
+TEST(Temperature, FahrenheitCelsiusConvergence) {
     auto f = Quantity<Fahrenheit>(-40.0);
-    REQUIRE_THAT(f.to<Celsius>().value(), WithinAbs(-40.0, 1e-6));
+    EXPECT_NEAR(f.to<Celsius>().value(), -40.0, 1e-6);
 }
 
 // ============================================================================
 // Rankine
 // ============================================================================
 
-TEST_CASE("Rankine to Kelvin: 491.67 R = 273.15 K", "[temperature]") {
+TEST(Temperature, RankineToKelvin) {
     auto r = Quantity<Rankine>(491.67);
-    REQUIRE_THAT(r.to<Kelvin>().value(), WithinAbs(273.15, 1e-6));
+    EXPECT_NEAR(r.to<Kelvin>().value(), 273.15, 1e-6);
 }
 
-TEST_CASE("Fahrenheit to Rankine: 32 F = 491.67 R", "[temperature]") {
+TEST(Temperature, FahrenheitToRankine) {
     auto f = Quantity<Fahrenheit>(32.0);
-    REQUIRE_THAT(f.to<Rankine>().value(), WithinAbs(491.67, 1e-3));
+    EXPECT_NEAR(f.to<Rankine>().value(), 491.67, 1e-3);
 }
 
-TEST_CASE("Rankine to Fahrenheit: 0 R = -459.67 F", "[temperature]") {
+TEST(Temperature, RankineToFahrenheit) {
     auto r = Quantity<Rankine>(0.0);
-    REQUIRE_THAT(r.to<Fahrenheit>().value(), WithinAbs(-459.67, 1e-3));
+    EXPECT_NEAR(r.to<Fahrenheit>().value(), -459.67, 1e-3);
 }
 
 // ============================================================================
-// Roundtrips (verify no accumulated error)
+// Roundtrips
 // ============================================================================
 
-TEST_CASE("Roundtrip: C -> K -> C", "[temperature][roundtrip]") {
+TEST(Temperature, RoundtripCelsiusKelvinCelsius) {
     auto orig = Quantity<Celsius>(-40.0);
     auto rt = orig.to<Kelvin>().to<Celsius>();
-    REQUIRE_THAT(rt.value(), WithinAbs(-40.0, 1e-9));
+    EXPECT_NEAR(rt.value(), -40.0, 1e-9);
 }
 
-TEST_CASE("Roundtrip: F -> K -> F", "[temperature][roundtrip]") {
+TEST(Temperature, RoundtripFahrenheitKelvinFahrenheit) {
     auto orig = Quantity<Fahrenheit>(-40.0);
     auto rt = orig.to<Kelvin>().to<Fahrenheit>();
-    REQUIRE_THAT(rt.value(), WithinAbs(-40.0, 1e-6));
+    EXPECT_NEAR(rt.value(), -40.0, 1e-6);
 }
 
-TEST_CASE("Roundtrip: F -> C -> F", "[temperature][roundtrip]") {
+TEST(Temperature, RoundtripFahrenheitCelsiusFahrenheit) {
     auto orig = Quantity<Fahrenheit>(98.6);
     auto rt = orig.to<Celsius>().to<Fahrenheit>();
-    REQUIRE_THAT(rt.value(), WithinAbs(98.6, 1e-6));
+    EXPECT_NEAR(rt.value(), 98.6, 1e-6);
 }
 
-TEST_CASE("Roundtrip: C -> R -> C", "[temperature][roundtrip]") {
+TEST(Temperature, RoundtripCelsiusRankineCelsius) {
     auto orig = Quantity<Celsius>(20.0);
     auto rt = orig.to<Rankine>().to<Celsius>();
-    REQUIRE_THAT(rt.value(), WithinAbs(20.0, 1e-6));
+    EXPECT_NEAR(rt.value(), 20.0, 1e-6);
 }
 
-TEST_CASE("Roundtrip: K -> F -> K", "[temperature][roundtrip]") {
+TEST(Temperature, RoundtripKelvinFahrenheitKelvin) {
     auto orig = Quantity<Kelvin>(300.0);
     auto rt = orig.to<Fahrenheit>().to<Kelvin>();
-    REQUIRE_THAT(rt.value(), WithinAbs(300.0, 1e-6));
+    EXPECT_NEAR(rt.value(), 300.0, 1e-6);
 }
 
 // ============================================================================
 // ISA reference values
 // ============================================================================
 
-TEST_CASE("ISA sea level: 288.15 K = 15 C", "[temperature][isa]") {
+TEST(Temperature, ISASeaLevel) {
     auto k = Quantity<Kelvin>(288.15);
-    REQUIRE_THAT(k.to<Celsius>().value(), WithinAbs(15.0, 1e-9));
+    EXPECT_NEAR(k.to<Celsius>().value(), 15.0, 1e-9);
 }
 
-TEST_CASE("ISA tropopause: 216.65 K = -56.5 C", "[temperature][isa]") {
+TEST(Temperature, ISATropopause) {
     auto k = Quantity<Kelvin>(216.65);
-    REQUIRE_THAT(k.to<Celsius>().value(), WithinAbs(-56.5, 1e-9));
+    EXPECT_NEAR(k.to<Celsius>().value(), -56.5, 1e-9);
 }
 
 // ============================================================================
 // Temperature arithmetic (same unit)
 // ============================================================================
 
-TEST_CASE("Temperature addition (same unit)", "[temperature][arithmetic]") {
-    // Note: adding absolute temperatures is physically questionable.
-    // This is allowed for simplicity; a future refinement could
-    // distinguish absolute vs. relative temperatures (as in Boost.Units).
+TEST(Temperature, SameUnitAddition) {
     auto a = Quantity<Kelvin>(100.0);
     auto b = Quantity<Kelvin>(50.0);
-    REQUIRE_THAT((a + b).value(), WithinAbs(150.0, 1e-9));
+    EXPECT_NEAR((a + b).value(), 150.0, 1e-9);
 }
 
-TEST_CASE("Temperature scalar multiplication", "[temperature][arithmetic]") {
+TEST(Temperature, ScalarMultiplication) {
     auto k = Quantity<Kelvin>(300.0);
-    REQUIRE_THAT((k * 2.0).value(), WithinAbs(600.0, 1e-9));
+    EXPECT_NEAR((k * 2.0).value(), 600.0, 1e-9);
 }
 
-TEST_CASE("Temperature comparison (different units)", "[temperature][comparison]") {
+TEST(Temperature, CrossUnitComparison) {
     auto k = Quantity<Kelvin>(273.15);
     auto c = Quantity<Celsius>(0.0);
-    REQUIRE(k == c);
-    REQUIRE(k > Quantity<Celsius>(-1.0));
-    REQUIRE(k < Quantity<Celsius>(1.0));
+    EXPECT_EQ(k, c);
+    EXPECT_GT(k, Quantity<Celsius>(-1.0));
+    EXPECT_LT(k, Quantity<Celsius>(1.0));
 }

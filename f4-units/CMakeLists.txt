@@ -1,24 +1,20 @@
-include(FetchContent)
+cmake_minimum_required(VERSION 3.20)
+project(f4-units VERSION 0.1.0 LANGUAGES CXX DESCRIPTION "Compile-time physical quantity types for flight simulation")
 
-FetchContent_Declare(
-    Catch2
-    GIT_REPOSITORY https://github.com/catchorg/Catch2.git
-    GIT_TAG v3.5.2
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+# Header-only library target
+add_library(f4-units INTERFACE)
+target_include_directories(f4-units INTERFACE
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
 )
-FetchContent_MakeAvailable(Catch2)
-list(APPEND CMAKE_MODULE_PATH "${catch2_SOURCE_DIR}/extras")
-include(Catch)
 
-# Helper function
-function(f4_add_test name source)
-    add_executable(${name} ${source})
-    target_link_libraries(${name} PRIVATE Catch2::Catch2WithMain f4-units)
-    catch_discover_tests(${name})
-endfunction()
-
-f4_add_test(test_dimension    test_dimension.cpp)
-f4_add_test(test_conversions test_conversions.cpp)
-f4_add_test(test_arithmetic  test_arithmetic.cpp)
-f4_add_test(test_temperature test_temperature.cpp)
-f4_add_test(test_aviation    test_aviation.cpp)
-f4_add_test(test_derived     test_derived.cpp)
+# Tests
+option(F4_UNITS_BUILD_TESTS "Build unit tests" ON)
+if(F4_UNITS_BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(tests)
+endif()

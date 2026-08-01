@@ -1,238 +1,229 @@
 #include <f4/f4_units.hpp>
-#include "catch.hpp"
-// floating matchers included in amalgamated
+#include <gtest/gtest.h>
 
 using namespace f4;
 using namespace f4::literals;
-using namespace Catch::Matchers;
 
 // ============================================================================
 // Same-type arithmetic
 // ============================================================================
 
-TEST_CASE("Same-type addition", "[arithmetic]") {
+TEST(Arithmetic, SameTypeAddition) {
     auto a = Quantity<Meters>(100.0);
     auto b = Quantity<Meters>(50.0);
-    REQUIRE_THAT((a + b).value(), WithinAbs(150.0, 1e-9));
+    EXPECT_NEAR((a + b).value(), 150.0, 1e-9);
 }
 
-TEST_CASE("Same-type subtraction", "[arithmetic]") {
+TEST(Arithmetic, SameTypeSubtraction) {
     auto a = Quantity<Meters>(100.0);
     auto b = Quantity<Meters>(30.0);
-    REQUIRE_THAT((a - b).value(), WithinAbs(70.0, 1e-9));
+    EXPECT_NEAR((a - b).value(), 70.0, 1e-9);
 }
 
-TEST_CASE("Compound assignment", "[arithmetic]") {
+TEST(Arithmetic, CompoundAssignment) {
     auto d = Quantity<Meters>(100.0);
     d += Quantity<Meters>(50.0);
-    REQUIRE_THAT(d.value(), WithinAbs(150.0, 1e-9));
+    EXPECT_NEAR(d.value(), 150.0, 1e-9);
     d -= Quantity<Meters>(25.0);
-    REQUIRE_THAT(d.value(), WithinAbs(125.0, 1e-9));
+    EXPECT_NEAR(d.value(), 125.0, 1e-9);
     d *= 2.0;
-    REQUIRE_THAT(d.value(), WithinAbs(250.0, 1e-9));
+    EXPECT_NEAR(d.value(), 250.0, 1e-9);
     d /= 5.0;
-    REQUIRE_THAT(d.value(), WithinAbs(50.0, 1e-9));
+    EXPECT_NEAR(d.value(), 50.0, 1e-9);
 }
 
-TEST_CASE("Unary plus and minus", "[arithmetic]") {
+TEST(Arithmetic, UnaryPlusAndMinus) {
     auto a = Quantity<Meters>(50.0);
-    REQUIRE_THAT((+a).value(), WithinAbs(50.0, 1e-9));
-    REQUIRE_THAT((-a).value(), WithinAbs(-50.0, 1e-9));
+    EXPECT_NEAR((+a).value(), 50.0, 1e-9);
+    EXPECT_NEAR((-a).value(), -50.0, 1e-9);
 }
 
 // ============================================================================
 // Scalar arithmetic
 // ============================================================================
 
-TEST_CASE("Scalar multiplication (right)", "[arithmetic]") {
+TEST(Arithmetic, ScalarMultiplicationRight) {
     auto d = 100.0_m;
-    REQUIRE_THAT((d * 2.0).value(), WithinAbs(200.0, 1e-9));
-    REQUIRE_THAT((d * 0.5).value(), WithinAbs(50.0, 1e-9));
+    EXPECT_NEAR((d * 2.0).value(), 200.0, 1e-9);
+    EXPECT_NEAR((d * 0.5).value(), 50.0, 1e-9);
 }
 
-TEST_CASE("Scalar multiplication (left)", "[arithmetic]") {
+TEST(Arithmetic, ScalarMultiplicationLeft) {
     auto d = 100.0_m;
-    REQUIRE_THAT((3.0 * d).value(), WithinAbs(300.0, 1e-9));
-    REQUIRE_THAT((0.25 * d).value(), WithinAbs(25.0, 1e-9));
+    EXPECT_NEAR((3.0 * d).value(), 300.0, 1e-9);
+    EXPECT_NEAR((0.25 * d).value(), 25.0, 1e-9);
 }
 
-TEST_CASE("Scalar division", "[arithmetic]") {
+TEST(Arithmetic, ScalarDivision) {
     auto d = 100.0_m;
-    REQUIRE_THAT((d / 4.0).value(), WithinAbs(25.0, 1e-9));
+    EXPECT_NEAR((d / 4.0).value(), 25.0, 1e-9);
 }
 
-TEST_CASE("Scalar / Quantity gives inverse dimension", "[arithmetic]") {
+TEST(Arithmetic, ScalarOverQuantityGivesInverseDimension) {
     auto inv = 2.0 / 100.0_m;
-    // 2.0 / 100.0 m = 0.02 1/m
-    // Result is in base units of dim_invert(LengthDim) = 1/m
-    REQUIRE_THAT(inv.value(), WithinAbs(0.02, 1e-9));
+    EXPECT_NEAR(inv.value(), 0.02, 1e-9);
 }
 
 // ============================================================================
 // Heterogeneous arithmetic (same dimension, different unit)
 // ============================================================================
 
-TEST_CASE("Heterogeneous addition: meters + feet", "[arithmetic]") {
+TEST(Arithmetic, HeterogeneousAdditionMetersFeet) {
     auto m = Quantity<Meters>(100.0);
-    auto ft = Quantity<Feet>(328.084);  // ~100 m
-    auto result = m + ft;  // result in meters (LHS unit)
-    REQUIRE_THAT(result.value(), WithinAbs(199.9975, 1e-3));
+    auto ft = Quantity<Feet>(328.084);
+    auto result = m + ft;
+    EXPECT_NEAR(result.value(), 199.9975, 1e-3);
 }
 
-TEST_CASE("Heterogeneous subtraction: meters - feet", "[arithmetic]") {
+TEST(Arithmetic, HeterogeneousSubtractionFeet) {
     auto d = 1000.0_ft;
     auto cut = 400.0_ft;
-    // 1000 ft - 400 ft in feet
-    REQUIRE_THAT((d - cut).value(), WithinAbs(600.0, 1e-9));
+    EXPECT_NEAR((d - cut).value(), 600.0, 1e-9);
 }
 
-TEST_CASE("Heterogeneous addition: knots + m/s", "[arithmetic]") {
+TEST(Arithmetic, HeterogeneousAdditionKnotsMps) {
     auto kts = 200.0_kn;
     auto mps = 50.0_mps;
-    auto result = kts + mps;  // result in knots (LHS unit)
-    // 200 kn = 102.888 m/s, + 50 m/s = 152.888 m/s = 297.27 kn
-    REQUIRE_THAT(result.value(), WithinAbs(297.27, 0.01));
+    auto result = kts + mps;
+    EXPECT_NEAR(result.value(), 297.27, 0.01);
 }
 
 // ============================================================================
 // Cross-dimension arithmetic
 // ============================================================================
 
-TEST_CASE("Speed * Time = Length", "[arithmetic][cross-dim]") {
-    auto speed = 100.0_kn;  // 100 knots
-    auto time = 2.0_hr;     // 2 hours
-    auto dist = speed * time;  // in meters (SI base)
-    // 100 kn = 51.444 m/s, 2 hr = 7200 s => 370,400 m = 370.4 km
+TEST(Arithmetic, SpeedTimesTimeEqualsLength) {
+    auto speed = 100.0_kn;
+    auto time = 2.0_hr;
+    auto dist = speed * time;
     auto km = dist.to<Kilometers>();
-    REQUIRE_THAT(km.value(), WithinAbs(370.4, 0.01));
+    EXPECT_NEAR(km.value(), 370.4, 0.01);
 }
 
-TEST_CASE("Mass * Acceleration = Force", "[arithmetic][cross-dim]") {
+TEST(Arithmetic, MassTimesAccelerationEqualsForce) {
     auto mass = Quantity<Kilograms>(1000.0);
     auto accel = Quantity<MetersPerSecondSquared>(9.81);
     auto force = mass * accel;
-    REQUIRE_THAT(force.to<Newtons>().value(), WithinAbs(9810.0, 1e-6));
+    EXPECT_NEAR(force.to<Newtons>().value(), 9810.0, 1e-6);
 }
 
-TEST_CASE("Force / Area = Pressure", "[arithmetic][cross-dim]") {
+TEST(Arithmetic, ForceOverAreaEqualsPressure) {
     auto force = 10000.0_N;
     auto area = Quantity<SquareMeters>(1.0);
     auto pressure = force / area;
-    REQUIRE_THAT(pressure.to<Pascals>().value(), WithinAbs(10000.0, 1e-6));
-    auto psi = pressure.to<PSI>();
-    REQUIRE_THAT(psi.value(), WithinAbs(1.45038, 1e-3));
+    EXPECT_NEAR(pressure.to<Pascals>().value(), 10000.0, 1e-6);
+    EXPECT_NEAR(pressure.to<PSI>().value(), 1.45038, 1e-3);
 }
 
-TEST_CASE("Length * Length = Area", "[arithmetic][cross-dim]") {
+TEST(Arithmetic, LengthTimesLengthEqualsArea) {
     auto l = 10.0_m;
     auto area = l * l;
-    // Result is in base unit (m^2), which IS SquareMeters
-    REQUIRE_THAT(area.to<SquareMeters>().value(), WithinAbs(100.0, 1e-9));
-    auto ft2 = area.to<SquareFeet>();
-    REQUIRE_THAT(ft2.value(), WithinAbs(1076.39, 0.01));
+    EXPECT_NEAR(area.to<SquareMeters>().value(), 100.0, 1e-9);
+    EXPECT_NEAR(area.to<SquareFeet>().value(), 1076.39, 0.01);
 }
 
-TEST_CASE("Length / Time = Speed", "[arithmetic][cross-dim]") {
+TEST(Arithmetic, LengthOverTimeEqualsSpeed) {
     auto dist = 100.0_m;
     auto time = Quantity<Seconds>(10.0);
     auto speed = dist / time;
-    REQUIRE_THAT(speed.to<MetersPerSecond>().value(), WithinAbs(10.0, 1e-9));
+    EXPECT_NEAR(speed.to<MetersPerSecond>().value(), 10.0, 1e-9);
 }
 
 // ============================================================================
 // qpow and qsqrt
 // ============================================================================
 
-TEST_CASE("qpow: Length^2 = Area", "[arithmetic][pow]") {
+TEST(Arithmetic, QpowLengthSquaredEqualsArea) {
     auto l = 10.0_m;
     auto area = qpow<2>(l);
-    REQUIRE_THAT(area.to<SquareMeters>().value(), WithinAbs(100.0, 1e-9));
+    EXPECT_NEAR(area.to<SquareMeters>().value(), 100.0, 1e-9);
 }
 
-TEST_CASE("qpow: Length^3 = Volume", "[arithmetic][pow]") {
+TEST(Arithmetic, QpowLengthCubedEqualsVolume) {
     auto l = 5.0_m;
     auto vol = qpow<3>(l);
-    REQUIRE_THAT(vol.to<CubicMeters>().value(), WithinAbs(125.0, 1e-9));
+    EXPECT_NEAR(vol.to<CubicMeters>().value(), 125.0, 1e-9);
 }
 
-TEST_CASE("qpow: negative exponent", "[arithmetic][pow]") {
+TEST(Arithmetic, QpowNegativeExponent) {
     auto l = 10.0_m;
     auto inv = qpow<-1>(l);
-    REQUIRE_THAT(inv.value(), WithinAbs(0.1, 1e-9));
+    EXPECT_NEAR(inv.value(), 0.1, 1e-9);
 }
 
-TEST_CASE("qsqrt: Area -> Length", "[arithmetic][sqrt]") {
+TEST(Arithmetic, QsqrtAreaToLength) {
     auto area = Quantity<SquareMeters>(100.0);
     auto l = qsqrt(area);
-    REQUIRE_THAT(l.to<Meters>().value(), WithinAbs(10.0, 1e-9));
+    EXPECT_NEAR(l.to<Meters>().value(), 10.0, 1e-9);
 }
 
-TEST_CASE("qsqrt: Volume -> Length", "[arithmetic][sqrt]") {
-    auto vol = Quantity<CubicMeters>(27.0);
-    auto l = qsqrt(qsqrt(vol));  // sqrt twice = fourth root
-    REQUIRE_THAT(l.to<Meters>().value(), WithinAbs(3.0, 1e-9));
+TEST(Arithmetic, QsqrtL4ToLengthViaDoubleSqrt) {
+    auto l = 3.0_m;
+    auto l4 = qpow<4>(l);
+    auto l2 = qsqrt(l4);
+    auto back = qsqrt(l2);
+    EXPECT_NEAR(back.to<Meters>().value(), 3.0, 1e-9);
 }
 
 // ============================================================================
 // Comparisons
 // ============================================================================
 
-TEST_CASE("Same-type comparison", "[arithmetic][comparison]") {
+TEST(Arithmetic, SameTypeComparison) {
     auto a = 100.0_m;
     auto b = 100.0_m;
     auto c = 200.0_m;
-    REQUIRE(a == b);
-    REQUIRE(a != c);
-    REQUIRE(a < c);
-    REQUIRE(a <= b);
-    REQUIRE(c > a);
-    REQUIRE(c >= b);
+    EXPECT_EQ(a, b);
+    EXPECT_NE(a, c);
+    EXPECT_LT(a, c);
+    EXPECT_LE(a, b);
+    EXPECT_GT(c, a);
+    EXPECT_GE(c, b);
 }
 
-TEST_CASE("Heterogeneous comparison: meters vs feet", "[arithmetic][comparison]") {
-    auto a = 100.0_m;        // 100 m
-    auto b = 300.0_ft;       // 91.44 m
-    auto c = 400.0_ft;       // 121.92 m
-    REQUIRE(a > b);   // 100 m > 91.44 m
-    REQUIRE(a < c);   // 100 m < 121.92 m
-    REQUIRE(!(a == b));
+TEST(Arithmetic, HeterogeneousComparisonMetersFeet) {
+    auto a = 100.0_m;
+    auto b = 300.0_ft;
+    auto c = 400.0_ft;
+    EXPECT_GT(a, b);
+    EXPECT_LT(a, c);
+    EXPECT_NE(a, b);
 }
 
-TEST_CASE("Heterogeneous comparison: knots vs m/s", "[arithmetic][comparison]") {
+TEST(Arithmetic, HeterogeneousComparisonKnotsMps) {
     auto kts = 100.0_kn;
     auto mps = 50.0_mps;
-    // 100 kn = 51.44 m/s > 50 m/s
-    REQUIRE(kts > mps);
+    EXPECT_GT(kts, mps);
 }
 
 // ============================================================================
 // Literals
 // ============================================================================
 
-TEST_CASE("Literal operators", "[arithmetic][literals]") {
+TEST(Arithmetic, LiteralOperators) {
     auto d = 5.0_m + 3.0_ft;
-    REQUIRE_THAT(d.value(), WithinAbs(5.9144, 1e-9));
+    EXPECT_NEAR(d.value(), 5.9144, 1e-9);
 
     auto s = 250.0_kn;
-    REQUIRE_THAT(s.to<MetersPerSecond>().value(), WithinAbs(128.611, 1e-3));
+    EXPECT_NEAR(s.to<MetersPerSecond>().value(), 128.611, 1e-3);
 
     auto p = 14.7_psi;
-    REQUIRE_THAT(p.to<Pascals>().value(), WithinAbs(101325.0, 1.0));
+    EXPECT_NEAR(p.to<Pascals>().value(), 101325.0, 1.0);
 
     auto a = 2.0_m * 3.0_m;
-    REQUIRE_THAT(a.to<SquareMeters>().value(), WithinAbs(6.0, 1e-9));
+    EXPECT_NEAR(a.to<SquareMeters>().value(), 6.0, 1e-9);
 }
 
 // ============================================================================
 // in() shorthand
 // ============================================================================
 
-TEST_CASE("in() extracts value in target unit", "[arithmetic]") {
+TEST(Arithmetic, InExtractsValueInTargetUnit) {
     auto d = 1000.0_ft;
-    REQUIRE_THAT(d.in<Meters>(), WithinAbs(304.8, 1e-9));
+    EXPECT_NEAR(d.in<Meters>(), 304.8, 1e-9);
 }
 
-TEST_CASE("in_base() extracts value in SI base unit", "[arithmetic]") {
+TEST(Arithmetic, InBaseExtractsValueInSI) {
     auto d = 1000.0_ft;
-    REQUIRE_THAT(d.in_base(), WithinAbs(304.8, 1e-9));
+    EXPECT_NEAR(d.in_base(), 304.8, 1e-9);
 }

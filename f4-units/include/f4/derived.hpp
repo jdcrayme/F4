@@ -5,6 +5,10 @@
 
 namespace f4 {
 
+// Concept: a unit whose dimension is Speed (L/T).
+template<typename U>
+concept speed_unit = same_dimension_v<typename U::dimension, SpeedDim>;
+
 // Physical constants for air (ISA standard atmosphere).
 namespace detail {
     /// Ratio of specific heats for dry air (dimensionless).
@@ -46,11 +50,13 @@ inline Quantity<MetersPerSecond> speed_of_sound(Quantity<Kelvin> temperature) {
 ///
 /// The dimensional arithmetic is checked at compile time:
 ///   Density (kg/m^3) * Speed^2 (m^2/s^2) = kg/(m*s^2) = Pa
+template<speed_unit U, typename R>
 inline Quantity<Pascals> dynamic_pressure(
     Quantity<KilogramsPerCubicMeter> density,
-    Quantity<MetersPerSecond> true_airspeed)
+    Quantity<U, R> true_airspeed)
 {
-    return 0.5 * density * true_airspeed * true_airspeed;
+    auto tas_mps = true_airspeed.template to<MetersPerSecond>();
+    return 0.5 * density * tas_mps * tas_mps;
 }
 
 /// Mach number: M = V / a
@@ -62,11 +68,14 @@ inline Quantity<Pascals> dynamic_pressure(
 /// This is a pure ratio computation. For a full atmosphere-based
 /// conversion (speed -> Mach without supplying sos explicitly),
 /// use IAtmosphereProvider::mach_from_tas().
+template<speed_unit U1, typename R1, speed_unit U2, typename R2>
 inline Quantity<MachUnit> mach_number(
-    Quantity<MetersPerSecond> true_airspeed,
-    Quantity<MetersPerSecond> sos)
+    Quantity<U1, R1> true_airspeed,
+    Quantity<U2, R2> sos)
 {
-    return Quantity<MachUnit>(true_airspeed.value() / sos.value());
+    return Quantity<MachUnit>(
+        true_airspeed.template to<MetersPerSecond>().value() /
+        sos.template to<MetersPerSecond>().value());
 }
 
 /// Wing loading: W / S
