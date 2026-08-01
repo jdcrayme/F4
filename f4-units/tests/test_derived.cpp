@@ -90,7 +90,9 @@ TEST(WingLoading, F16C) {
     auto weight = weight_from_mass(mass);
     auto area = Quantity<SquareMeters>(27.87);
     auto wl = wing_loading(weight, area);
-    EXPECT_NEAR(wl.to<Pascals>().value(), 4223.5, 1.0);
+    // W = 12000 * 9.80665 = 117679.8 N
+    // WL = 117679.8 / 27.87 = 4222.5 Pa
+    EXPECT_NEAR(wl.to<Pascals>().value(), 4222.5, 1.0);
     EXPECT_NEAR(wl.to<PSF>().value(), 88.2, 0.1);
 }
 

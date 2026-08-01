@@ -70,9 +70,9 @@ TEST(Arithmetic, ScalarOverQuantityGivesInverseDimension) {
 
 TEST(Arithmetic, HeterogeneousAdditionMetersFeet) {
     auto m = Quantity<Meters>(100.0);
-    auto ft = Quantity<Feet>(328.084);
+    auto ft = Quantity<Feet>(328.084);  // ~100 m
     auto result = m + ft;
-    EXPECT_NEAR(result.value(), 199.9975, 1e-3);
+    EXPECT_NEAR(result.value(), 200.0, 1e-3);
 }
 
 TEST(Arithmetic, HeterogeneousSubtractionFeet) {
@@ -85,7 +85,8 @@ TEST(Arithmetic, HeterogeneousAdditionKnotsMps) {
     auto kts = 200.0_kn;
     auto mps = 50.0_mps;
     auto result = kts + mps;
-    EXPECT_NEAR(result.value(), 297.27, 0.01);
+    // 200 kn + 50 m/s = 200 kn + 97.19 kn = 297.19 kn
+    EXPECT_NEAR(result.value(), 297.19, 0.01);
 }
 
 // ============================================================================
@@ -207,7 +208,7 @@ TEST(Arithmetic, LiteralOperators) {
     auto s = 250.0_kn;
     EXPECT_NEAR(s.to<MetersPerSecond>().value(), 128.611, 1e-3);
 
-    auto p = 14.7_psi;
+    auto p = 14.696_psi;
     EXPECT_NEAR(p.to<Pascals>().value(), 101325.0, 1.0);
 
     auto a = 2.0_m * 3.0_m;
