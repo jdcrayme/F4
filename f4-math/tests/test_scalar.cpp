@@ -4,7 +4,6 @@
 
 #include <cmath>
 #include <limits>
-#include <numbers>
 
 using namespace f4::math;
 
@@ -78,19 +77,19 @@ TEST(WrapPiTest, ZeroStaysZero) {
 
 TEST(WrapPiTest, PiStaysPi) {
     // +pi maps to +pi (not -pi) — the boundary convention we chose.
-    EXPECT_NEAR(wrapPi(std::numbers::pi), std::numbers::pi, 1e-12);
+    EXPECT_NEAR(wrapPi(M_PI), M_PI, 1e-12);
 }
 
 TEST(WrapPiTest, NegativePiBecomesPositivePi) {
-    EXPECT_NEAR(wrapPi(-std::numbers::pi), std::numbers::pi, 1e-12);
+    EXPECT_NEAR(wrapPi(-M_PI), M_PI, 1e-12);
 }
 
 TEST(WrapPiTest, TwoPiWrapsToZero) {
-    EXPECT_NEAR(wrapPi(2.0 * std::numbers::pi), 0.0, 1e-12);
+    EXPECT_NEAR(wrapPi(2.0 * M_PI), 0.0, 1e-12);
 }
 
 TEST(WrapPiTest, ThreeHalvesPiWrapsToMinusHalfPi) {
-    EXPECT_NEAR(wrapPi(1.5 * std::numbers::pi), -0.5 * std::numbers::pi, 1e-12);
+    EXPECT_NEAR(wrapPi(1.5 * M_PI), -0.5 * M_PI, 1e-12);
 }
 
 TEST(WrapPiTest, WrapInvariantUnderTwoPiShift) {
@@ -98,7 +97,7 @@ TEST(WrapPiTest, WrapInvariantUnderTwoPiShift) {
     for (int i = -100; i <= 100; ++i) {
         double x = i * 0.12345;
         double a = wrapPi(x);
-        double b = wrapPi(x + 2.0 * std::numbers::pi);
+        double b = wrapPi(x + 2.0 * M_PI);
         EXPECT_NEAR(a, b, 1e-9) << "x = " << x;
     }
 }
@@ -107,8 +106,8 @@ TEST(WrapPiTest, ResultInRange) {
     for (int i = -1000; i <= 1000; ++i) {
         double x = i * 0.317;
         double y = wrapPi(x);
-        EXPECT_GT(y, -std::numbers::pi - 1e-9);
-        EXPECT_LE(y, std::numbers::pi + 1e-9);
+        EXPECT_GT(y, -M_PI - 1e-9);
+        EXPECT_LE(y, M_PI + 1e-9);
     }
 }
 
@@ -125,11 +124,11 @@ TEST(Wrap2PiTest, ZeroStaysZero) {
 }
 
 TEST(Wrap2PiTest, TwoPiWrapsToZero) {
-    EXPECT_NEAR(wrap2Pi(2.0 * std::numbers::pi), 0.0, 1e-12);
+    EXPECT_NEAR(wrap2Pi(2.0 * M_PI), 0.0, 1e-12);
 }
 
 TEST(Wrap2PiTest, NegativeBecomesPositive) {
-    EXPECT_NEAR(wrap2Pi(-0.5), 2.0 * std::numbers::pi - 0.5, 1e-12);
+    EXPECT_NEAR(wrap2Pi(-0.5), 2.0 * M_PI - 0.5, 1e-12);
 }
 
 TEST(Wrap2PiTest, ResultInRange) {
@@ -137,7 +136,7 @@ TEST(Wrap2PiTest, ResultInRange) {
         double x = i * 0.317;
         double y = wrap2Pi(x);
         EXPECT_GE(y, -1e-9);
-        EXPECT_LT(y, 2.0 * std::numbers::pi + 1e-9);
+        EXPECT_LT(y, 2.0 * M_PI + 1e-9);
     }
 }
 

@@ -140,6 +140,55 @@ double cl = cl_table(0.8, 4.0);  // Mach 0.8, alpha 4 deg
 JSONs, f16 field spot-checks, table interpolation correctness, round-trip
 integrity).
 
+### f4-flight-model — 6-DOF flight dynamics
+
+Static library implementing the full 6-DOF flight dynamics: atmosphere,
+aerodynamics, flight control system, engine, equations of motion, and gear
+model. The FlightModel orchestrator ties them together with sub-stepping
+and a trim solver.
+
+```cpp
+#include <f4/flight/f4_flight.hpp>
+using namespace f4::flight;
+
+// Load config (from f4-data)
+auto result = f4::data::loadConfig("f16.json");
+auto cfg = result.config;
+
+// Initialize at 10000 ft, 500 ft/s, heading North, airborne
+FlightModel fm;
+fm.init(cfg, 10000.0, 500.0, 0.0, true);
+fm.trim();  // find 1-G level flight trim
+
+// Run the simulation
+PilotInput input;
+input.throttle = 0.5;
+for (int frame = 0; frame < 3600; ++frame) {  // 60 seconds at 60 Hz
+    fm.update(1.0/60.0, input, 0.0, {0,0,-1});
+}
+
+// Read the results
+double altitude = -fm.state().kin.z;      // ft
+double airspeed = fm.state().kin.vt;       // ft/s
+double mach     = fm.state().mach;
+double gLoad    = fm.state().loads.nzcgs;
+```
+
+**Modules**:
+- `constants.hpp` — physical constants (GRAVITY=32.177, atmosphere params)
+- `aircraft_state.hpp` — runtime state structs (kinematic, aero, engine, FCS, gear)
+- `atmosphere.hpp` — 3-layer ISA model, Mach↔KCAS conversion
+- `aerodynamics.hpp` — CL/CD/CY lookup, ground effect, stall model, force transformation
+- `fcs.hpp` — G-command PI controller, roll rate command, yaw stub
+- `engine.hpp` — turbofan with afterburner, spool dynamics, fuel flow
+- `eom.hpp` — quaternion kinematics, body rates, ground clamp
+- `gear.hpp` — strut compression, friction, gear actuation
+- `flight_model.hpp` — orchestrator with sub-stepping and trim solver
+
+**Tests**: 23 tests (atmosphere model validation, trim convergence, 60-second
+stability run, FCS response, throttle response, ground operations, multi-
+aircraft init).
+
 ## Building
 
 ```bash
@@ -149,6 +198,7 @@ ctest --test-dir build/f4-units/tests --output-on-failure
 ctest --test-dir build/f4-math/tests --output-on-failure
 ctest --test-dir build/f4-convert/tests --output-on-failure
 ctest --test-dir build/f4-data/tests --output-on-failure
+ctest --test-dir build/f4-flight-model/tests --output-on-failure
 ```
 
 Requires CMake 3.20+ and a C++20 compiler (MSVC 19.28+, GCC 10+, Clang 12+).

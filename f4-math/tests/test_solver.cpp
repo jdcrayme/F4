@@ -3,7 +3,6 @@
 #include <gtest/gtest.h>
 
 #include <cmath>
-#include <numbers>
 
 using namespace f4::math;
 
@@ -138,7 +137,7 @@ TEST(BisectionTest, ConvergesToTolerance) {
     auto f = [](double x) { return std::sin(x); };
     auto r = bisection(f, 3.0, 4.0, 1e-12);
     EXPECT_TRUE(r.converged);
-    EXPECT_NEAR(r.root, std::numbers::pi, 1e-9);
+    EXPECT_NEAR(r.root, M_PI, 1e-9);
 }
 
 // ============================================================================

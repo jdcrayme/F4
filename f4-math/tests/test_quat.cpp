@@ -3,7 +3,6 @@
 #include <gtest/gtest.h>
 
 #include <cmath>
-#include <numbers>
 
 using namespace f4::math;
 
@@ -71,8 +70,8 @@ TEST(QuatTest, ProductAppliesRightFirst) {
     //   first rotate 90° about Y: (0,0,1) -> (1,0,0)
     //   then rotate 90° about X:  (1,0,0) -> (1,0,0)  (X-axis unchanged by X-rotation)
     // Result: (1, 0, 0).
-    Quatd qx = Quatd::from_axis_angle({1.0, 0.0, 0.0}, std::numbers::pi / 2.0);
-    Quatd qy = Quatd::from_axis_angle({0.0, 1.0, 0.0}, std::numbers::pi / 2.0);
+    Quatd qx = Quatd::from_axis_angle({1.0, 0.0, 0.0}, M_PI / 2.0);
+    Quatd qy = Quatd::from_axis_angle({0.0, 1.0, 0.0}, M_PI / 2.0);
     Quatd q = qx * qy;
     Vec3d v = q.rotate({0.0, 0.0, 1.0});
     EXPECT_NEAR(v.x,  1.0, 1e-9);
@@ -142,9 +141,9 @@ TEST(QuatTest, AxisAngleZeroIsIdentity) {
 }
 
 TEST(QuatTest, AxisAngleNinetyAboutX) {
-    Quatd q = Quatd::from_axis_angle({1.0, 0.0, 0.0}, std::numbers::pi / 2.0);
-    EXPECT_NEAR(q.w,  std::cos(std::numbers::pi / 4.0), kEps);
-    EXPECT_NEAR(q.x,  std::sin(std::numbers::pi / 4.0), kEps);
+    Quatd q = Quatd::from_axis_angle({1.0, 0.0, 0.0}, M_PI / 2.0);
+    EXPECT_NEAR(q.w,  std::cos(M_PI / 4.0), kEps);
+    EXPECT_NEAR(q.x,  std::sin(M_PI / 4.0), kEps);
     EXPECT_NEAR(q.y,  0.0, kEps);
     EXPECT_NEAR(q.z,  0.0, kEps);
 }
@@ -163,7 +162,7 @@ TEST(QuatTest, RotateZeroAngleIsIdentity) {
 }
 
 TEST(QuatTest, RotateNinetyAboutZ) {
-    Quatd q = Quatd::from_axis_angle({0.0, 0.0, 1.0}, std::numbers::pi / 2.0);
+    Quatd q = Quatd::from_axis_angle({0.0, 0.0, 1.0}, M_PI / 2.0);
     Vec3d v{1.0, 0.0, 0.0};
     Vec3d r = q.rotate(v);
     EXPECT_NEAR(r.x, 0.0, kEps);
@@ -221,9 +220,9 @@ TEST(QuatTest, EulerZyxRoundTrip) {
 }
 
 TEST(QuatTest, EulerZyxPureYaw) {
-    Quatd q = Quatd::from_euler_zyx(std::numbers::pi / 4.0, 0.0, 0.0);
+    Quatd q = Quatd::from_euler_zyx(M_PI / 4.0, 0.0, 0.0);
     auto [y, p, r] = q.to_euler_zyx();
-    EXPECT_NEAR(y, std::numbers::pi / 4.0, kEps);
+    EXPECT_NEAR(y, M_PI / 4.0, kEps);
     EXPECT_NEAR(p, 0.0, kEps);
     EXPECT_NEAR(r, 0.0, kEps);
 }
@@ -273,7 +272,7 @@ TEST(SlerpTest, AtHalfIsMidpoint) {
 TEST(SlerpTest, TakesShorterPath) {
     // a and -b represent a >180° rotation; slerp should take the short way.
     Quatd a = Quatd::identity();
-    Quatd b = Quatd::from_axis_angle({1.0, 0.0, 0.0}, std::numbers::pi - 0.1);
+    Quatd b = Quatd::from_axis_angle({1.0, 0.0, 0.0}, M_PI - 0.1);
     Quatd negB{-b.w, -b.x, -b.y, -b.z};
     Quatd r1 = a.slerp(b, 0.5);
     Quatd r2 = a.slerp(negB, 0.5);
