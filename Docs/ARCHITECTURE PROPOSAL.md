@@ -2482,4 +2482,186 @@ gantt
 | Phase 4: Campaign | 6 weeks | Mission profiles parallel with ATM; A* parallel with route planning | **Medium** — complex interactions |
 | Phase 5: AI | 7 weeks | BVR/WVR parallel with navigation/landing | **High** — largest system, most behaviors |
 | Phase 6: Integration | 4 weeks | Sequential (depends on all above) | Medium — threading bugs |
-| **Total** | **~22 weeks** | | |
+
+---
+
+## 18. Implementation Notes & Revised Sequencing
+
+This section captures design decisions and sequencing changes made during
+implementation, informed by lessons from the F4Flight predecessor project
+([jdcrayme/F4Flight](https://github.com/jdcrayme/F4Flight)).
+
+### 18.1 Observability as a First-Class Design Principle
+
+The F4Flight `digi/` AI module "evolved to a level of complexity where
+unpredictable behavior was impossible to track down." Its HTML/screenshot-
+based visualization tools were a dead end: screenshots cannot be parsed by
+either humans or scripts to draw causal conclusions, and text data could
+not be extracted from flight scenarios in a usable form.
+
+**The remedy**: every stateful system in F4 must produce machine-parseable
+text traces as a built-in capability, not an afterthought. A trace is a
+bounded ring buffer of records, each emitted as one greppable line:
+
+```
+tick=4521 from=Idle to=PullUp event=TerrainWarning fired=1 guard=PASS reason="alt<200ft"
+```
+
+This format supports:
+- **Grep**: `grep "fired=0" trace.log` finds every rejected transition
+- **Diff**: run before/after a change, diff the traces, see the regression
+- **Commit**: a trace can be checked in as a regression baseline
+- **Multi-entity merge**: prefix each line with `entity=Blue2` (provided by
+  f4-entities, not f4-state-machine — the SM is ID-agnostic by design)
+
+### 18.2 f4-state-machine Implementation Notes
+
+The implementation (see `f4-state-machine/`) extends the §7 proposal in
+three ways, all in service of observability:
+
+1. **Entry/exit actions (UML 2 semantics)**: states have `on_enter`/`on_exit`
+   actions that fire in the correct order (source exit → transition action →
+   target entry). The 17-state landing SM and the AAR SM need entry actions
+   ("on entering Approach, configure flaps/gear"). Without them, side-effects
+   scatter back into switch statements.
+
+2. **Actions receive the event**: `action(const Event&)` — payload-carrying
+   events (landing clearance with runway heading, weapon release with
+   coordinates) are inspected at the point of transition, not via globals.
+   This is an upgrade over the proposal's nullary `void()` action.
+
+3. **Built-in text trace**: every transition is recorded in a bounded
+   `Trace` ring buffer (default 1024, configurable, can be unbounded) and
+   emitted as parseable text. Rejections are off by default (signal-dense)
+   but toggleable via `trace.set_trace_rejections(true)`.
+
+**Production overhead**: zero when the trace is not attached. The trace is
+opt-in via a raw pointer (`sm.set_trace(&trace)`); in production the pointer
+is null, the `if (trace_)` check is predicted-not-taken, and record-
+construction never runs. The hot path in `process()` is a linear scan of
+the transition vector (O(n), n ≤ 24 for the AI DigiMode ladder) — ~120–240ns
+per call. At 60 Hz × 16 aircraft = 960 calls/sec ≈ 0.023% of one core.
+
+**Payload-carrying events**: `std::variant<EventA, EventB, ...>` of structs
+is supported via `.on_if()` (predicate-based matching by type) alongside
+`.on()` (value-based matching for plain enums). Each variant alternative
+needs `operator==` (C++20 `= default` suffices). See `test_atc_sm.cpp` for
+a worked example.
+
+### 18.3 The Stall SM Migration (First Consumer)
+
+The f4-flight-model stall logic was migrated from a per-frame boolean
+(`stalled = vcas < stallSpeed || alpha > criticalAOA`) to a 6-state machine
+built on f4-state-machine, matching FreeFalcon's `StallMode` enum
+(`airframe.h:1240`) and the §7.3 transition table.
+
+**The polling→event bridge**: FreeFalcon's stall logic is polling-based
+(conditions checked each frame in a `switch(stallMode)` block scattered
+across `airframe.cpp`, `eom.cpp`, `pitch.cpp`, `aero.cpp`). f4-state-machine
+is event-driven. The bridge is `StallDetector::detectEvent()` — each frame,
+the FlightModel polls the flight state, determines which event (if any) to
+emit, and feeds it to the SM. This is the standard pattern for adapting
+polling-based state machines to an event-driven framework.
+
+**Separation of concerns**:
+- Aero layer: owns DETECTION (computes `stalled` flag + `stallSpeed`)
+- Stall SM: owns the STATE LIFECYCLE (None → EnteringDeepStall → DeepStall → ...)
+- Aero layer: owns FORCE MODIFICATION (reads SM state: FlatSpin → lift=0)
+- FlightModel: owns ORCHESTRATION (calls detector, feeds SM, writes state back)
+
+**Force modifications implemented**:
+- FlatSpin → lift = 0 (matching FreeFalcon `aero.cpp:319`)
+- Other stall states → existing lift reduction (unchanged)
+- Per-state body-rate modifications (EnteringDeepStall pitch damping, etc.)
+  are deferred to a future fidelity pass — the current implementation
+  captures the state structure and transition lifecycle.
+
+**Validation**: the 23 existing flight-model tests still pass (stability
+regression gate). 3 new integration tests verify the SM lifecycle
+(stall entry, dwell, deep stall, recovery) with trace output.
+
+### 18.4 Revised Implementation Sequence
+
+The original roadmap (§17) sequences: Foundation → Infrastructure → Flight
+Model → Campaign → AI → Integration. Based on implementation experience
+and the F4Flight lessons, the sequence is revised:
+
+| Step | Libraries | Rationale |
+|------|-----------|-----------|
+| 1. ✅ Foundation | f4-units, f4-math, f4-data, f4-convert | Done (Phase 1) |
+| 2. ✅ State machine | f4-state-machine | Done (Phase 2a) |
+| 3. ✅ Stall SM migration | f4-flight-model stall SM | First consumer; validates framework |
+| 4. Entities | f4-entities | Defines the world's component model |
+| 5. **World-data parser** | **f4-world-convert, f4-world** | **NEW milestone** (see §18.5) |
+| 6. Messaging | f4-messaging | Entities communicate (against a real world) |
+| 7. AI | f4-ai | Built against ground truth from the start |
+| 8. Campaign | f4-campaign | Largest net-new piece; benefits from proven abstractions |
+| 9. Simulation | f4-simulation | Threading + clock + camp↔sim bridge |
+
+Key changes from the original roadmap:
+- **Stall SM migration** (step 3) is done before entities — it validates
+  f4-state-machine against real dynamics before entities/messaging lock it in.
+- **World-data parser** (step 5) is a new milestone, inserted before
+  messaging and AI. See §18.5 for rationale.
+- **AI before campaign** (steps 7–8 reversed): AI has a proven implementation
+  to rehost (from F4Flight, restructured onto the new abstractions); campaign
+  is the largest net-new piece. Let the AI port stress-test the
+  entities/messaging abstractions against real complexity first, so campaign
+  builds on a proven foundation.
+
+### 18.5 The World-Data Parser (New Milestone)
+
+**The injection-harness trap**: when DIGI has no real world to respond to,
+test harnesses inject synthetic threats/targets/waypoints. Those harnesses
+*become the world* in the AI's eyes — but they're ad-hoc, inconsistent
+between tests, and hide the fact that you're testing the AI against a
+fiction. The AI looks correct against the harness, then behaves goofily
+against reality, and you can't tell which side is wrong.
+
+**The structural fix**: build a real world, parsed from real data, so the
+AI always runs against ground truth. This is the direct analog of what
+f4-convert/f4-data did for aircraft:
+
+| Aircraft data (done) | World data (new milestone) |
+|---|---|
+| `f4-convert`: `.dat` → JSON | `f4-world-convert`: theater/campaign files → JSON |
+| `f4-data`: typed `AircraftConfig` | `f4-world`: typed `WorldState` |
+| Libraries never see binary `.dat` | Libraries never see binary theater/campaign |
+
+FreeFalcon's world data is a bigger lift than `.dat` was: theater terrain is
+hundreds of MB (vs. tens of KB), the structure is relational (units belong
+to objectives belong to teams; squadrons are stationed at airbases), and
+campaign files capture temporal state (current unit positions, damage,
+orders), not just definitions.
+
+**Where it fits**: after `f4-entities` (which defines the component model =
+the parser's target schema) and before `f4-messaging`/`f4-ai` (which need
+a real world to operate against). Once `f4-world` exists, the entity system
+is populated from real data, the AI navigates real terrain and finds real
+targets, and the injection harnesses go away entirely.
+
+### 18.6 The F4Flight Lesson
+
+The F4Flight `digi/` module reached 50 headers, 26 source files, and 58
+test scenarios before the rewrite. It was not a failure of effort — it was
+a failure of approach. The key lessons that inform F4's design:
+
+1. **Design-first, not port-first**: F4Flight ported FreeFalcon's behavior
+   incrementally, accumulating complexity faster than it could be observed.
+   F4 designs the abstraction (state machine, entity system, message bus)
+   first, validates it against a small real consumer (stall SM), then builds
+   domain code on top.
+
+2. **Text traces, not screenshots**: F4Flight's HTML/screenshot visualization
+   was a dead end — neither humans nor scripts can draw causal conclusions
+   from screenshots. F4's trace is greppable, diffable, and committable.
+
+3. **Real world data, not injection harnesses**: F4Flight's test harnesses
+   became the AI's world, hiding the gap between test fiction and reality.
+   F4 builds a world-data parser (§18.5) so the AI always runs against
+   ground truth.
+
+These lessons do not change the architecture's goals (§1) or principles
+(§2). They change the *sequencing* (§18.4) and add *observability* as an
+implicit fifth principle: every system must be inspectable from text output
+alone, without rendering or screenshot analysis.

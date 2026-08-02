@@ -140,12 +140,56 @@ double cl = cl_table(0.8, 4.0);  // Mach 0.8, alpha 4 deg
 JSONs, f16 field spot-checks, table interpolation correctness, round-trip
 integrity).
 
+### f4-state-machine — Type-safe state machines with transition tables
+
+Header-only C++20 library providing transition-table-driven state machines
+with a fluent builder, per-state entry/exit actions (UML 2 semantics), guard
+predicates, a layered priority-ladder machine (for the AI DigiMode), and a
+built-in text trace for observability. Zero dependencies.
+
+```cpp
+#include <f4/fsm/f4_fsm.hpp>
+using namespace f4::fsm;
+
+// Build a 6-state stall SM from a transition table
+auto sm = StateMachine<StallState, StallEvent>::Builder()
+    .initial(StallState::None)
+    .on(StallState::None, StallState::EnteringDeepStall, StallEvent::AoAExceed)
+    .on(StallState::EnteringDeepStall, StallState::DeepStall, StallEvent::TimerExpired)
+    // ...
+    .build();
+
+// Attach a trace for debugging (zero overhead when not attached)
+Trace<StallState, StallEvent> trace;
+sm.set_trace(&trace);
+// Each transition is recorded as one greppable text line:
+//   tick=1 from=None to=EnteringDeepStall event=AoAExceed fired=1
+```
+
+**Modules**:
+- `transition.hpp` — one (from, event) → (to, action) row, with optional
+  matcher, guard, and reason string
+- `state_machine.hpp` — `StateMachine` + fluent `Builder`, UML-2 entry/exit
+  actions, `on()`/`on_if()` (value vs predicate matching), trace + observer
+- `layered.hpp` — `LayeredStateMachine` priority ladder (AI DigiMode)
+- `trace.hpp` — bounded ring buffer + `to_text()` / `summary()`
+- `serialize.hpp` — `to_text(sm)` table dump (no JSON dependency)
+
+**Tests**: 41 unit tests (core SM behavior, stall SM lifecycle, ATC/landing
+SM with payload-carrying variant events, layered priority preemption, trace
+recording and text emission, serialization round-trip). Zero dependencies.
+
+**Design principle**: observability is not optional. Every transition is
+recorded with enough context to diagnose it from text alone — no screenshot
+parsing. The trace is zero-overhead in production (opt-in via raw pointer).
+
 ### f4-flight-model — 6-DOF flight dynamics
 
 Static library implementing the full 6-DOF flight dynamics: atmosphere,
-aerodynamics, flight control system, engine, equations of motion, and gear
-model. The FlightModel orchestrator ties them together with sub-stepping
-and a trim solver.
+aerodynamics, flight control system, engine, equations of motion, gear
+model, and a 6-state stall state machine (built on f4-state-machine). The
+FlightModel orchestrator ties them together with sub-stepping and a trim
+solver.
 
 ```cpp
 #include <f4/flight/f4_flight.hpp>
@@ -183,11 +227,13 @@ double gLoad    = fm.state().loads.nzcgs;
 - `engine.hpp` — turbofan with afterburner, spool dynamics, fuel flow
 - `eom.hpp` — quaternion kinematics, body rates, ground clamp
 - `gear.hpp` — strut compression, friction, gear actuation
-- `flight_model.hpp` — orchestrator with sub-stepping and trim solver
+- `stall_state.hpp` — 6-state stall SM (None → EnteringDeepStall → DeepStall
+  → Spinning/FlatSpin → Recovering → None), built on f4-state-machine
+- `flight_model.hpp` — orchestrator with sub-stepping, trim solver, and stall SM
 
-**Tests**: 23 tests (atmosphere model validation, trim convergence, 60-second
+**Tests**: 26 tests (atmosphere model validation, trim convergence, 60-second
 stability run, FCS response, throttle response, ground operations, multi-
-aircraft init).
+aircraft init, stall SM integration with trace verification).
 
 ## Building
 
@@ -196,6 +242,7 @@ cmake -B build -S .
 cmake --build build
 ctest --test-dir build/f4-units/tests --output-on-failure
 ctest --test-dir build/f4-math/tests --output-on-failure
+ctest --test-dir build/f4-state-machine/tests --output-on-failure
 ctest --test-dir build/f4-convert/tests --output-on-failure
 ctest --test-dir build/f4-data/tests --output-on-failure
 ctest --test-dir build/f4-flight-model/tests --output-on-failure
