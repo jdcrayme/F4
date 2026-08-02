@@ -21,5 +21,6 @@ add_subdirectory(f4-data)
 add_subdirectory(f4-convert)
 add_subdirectory(f4-world-convert) # .cam campaign archive -> JSON (keystone)
 add_subdirectory(f4-world)         # typed WorldState -> populates f4-entities
+add_subdirectory(f4-terrain)       # theater terrain (elevation/palette/overlay)
 add_subdirectory(f4-world-vis)     # SVG/HTML tile-map renderer for world data
 add_subdirectory(f4-flight-model)

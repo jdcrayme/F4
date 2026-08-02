@@ -13,10 +13,11 @@ target_include_directories(f4-world-vis
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>
 )
+target_link_libraries(f4-world-vis PUBLIC f4-terrain)
 
-# CLI tool: reads a world JSON (from cam2json) and emits an HTML map.
+# CLI tool: reads a world JSON + optional terrain dir, emits an HTML map.
 add_executable(world2map cli/world2map.cpp)
-target_link_libraries(world2map PRIVATE f4-world-vis)
+target_link_libraries(world2map PRIVATE f4-world-vis f4-terrain)
 
 option(F4_WORLD_VIS_BUILD_TESTS "Build unit tests" ON)
 if(F4_WORLD_VIS_BUILD_TESTS)

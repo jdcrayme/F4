@@ -1,14 +1,14 @@
 // f4-world-vis/cli/world2map.cpp
 //
 // CLI: read a world JSON (from cam2json) and emit an HTML map (default) or
-// raw SVG. Mirrors f4-world-convert's cam2json pattern: thin main() that
-// calls into the library.
+// raw SVG. Optionally takes a terrain directory for real elevation tiles.
 //
-//   world2map save1.json            -> save1.html
-//   world2map save1.json out.svg    -> out.svg (raw SVG, no HTML wrapper)
-//   world2map save1.json out.html   -> out.html (standalone, browser-openable)
+//   world2map save1.json                              -> save1.html (land mask)
+//   world2map save1.json out.svg                      -> out.svg (raw SVG)
+//   world2map save1.json out.html terrain/            -> out.html (real terrain)
 
 #include <f4/vis/svg_map.hpp>
+#include <f4/terrain/terrain_data.hpp>
 
 #include <cstdio>
 #include <cstdlib>
@@ -94,14 +94,28 @@ struct SimpleJson {
 } // namespace
 
 int main(int argc, char** argv) {
-    if (argc < 2 || argc > 3) {
-        std::cerr << "usage: world2map <world.json> [output.html|output.svg]\n";
+    if (argc < 2 || argc > 4) {
+        std::cerr << "usage: world2map <world.json> [output.html|output.svg] [terrain_dir]\n";
+        std::cerr << "  terrain_dir: optional dir with THEATER.MAP/.MEA/.O2 for real terrain tiles\n";
         return 2;
     }
     const std::string in_path = argv[1];
-    std::string out_path = (argc == 3) ? argv[2] : in_path;
+    std::string out_path = (argc >= 3) ? argv[2] : in_path;
     if (out_path.find('.') == std::string::npos) out_path += ".html";
     const bool want_svg = out_path.size() >= 4 && out_path.substr(out_path.size()-4) == ".svg";
+    const bool has_terrain = (argc >= 4);
+
+    f4::terrain::TerrainData terrain;
+    if (has_terrain) {
+        try {
+            terrain.load(argv[3]);
+            std::cerr << "  loaded terrain: " << terrain.header.width << "x"
+                      << terrain.header.height << " grid\n";
+        } catch (const std::exception& e) {
+            std::cerr << "world2map: terrain load failed: " << e.what()
+                      << " (falling back to land mask)\n";
+        }
+    }
 
     // Read the JSON file.
     std::ifstream f(in_path);
@@ -200,10 +214,18 @@ int main(int argc, char** argv) {
 
     auto colors = f4::vis::default_team_colors();
     std::string output;
-    if (want_svg) {
-        output = f4::vis::render_svg(objectives, units, colors);
+    if (has_terrain) {
+        if (want_svg) {
+            output = f4::vis::render_svg_with_terrain(objectives, units, colors, terrain);
+        } else {
+            output = f4::vis::render_html_with_terrain(objectives, units, colors, terrain);
+        }
     } else {
-        output = f4::vis::render_html(objectives, units, colors);
+        if (want_svg) {
+            output = f4::vis::render_svg(objectives, units, colors);
+        } else {
+            output = f4::vis::render_html(objectives, units, colors);
+        }
     }
 
     std::ofstream out(out_path);

@@ -148,3 +148,43 @@ Stage Summary:
 - Visualization delivered: open save1_map.html in a browser to see the Korea theater with 2659 objectives colored by team. Layer-toggle checkboxes in the toolbar.
 - The layered SVG architecture is the answer to "how to visualize": terrain/grid/objectives/units/legend are independent <g> layers. Future layers (threat heatmap, flight paths, rail/road) drop in without touching the renderer.
 - Next: (1) port UnitClass subclass Save() tails for full unit decode; (2) add theater terrain tiles (needs terrain data upload); (3) threat heatmap layer from f4-campaign ThreatMap; (4) flight path layer from mission waypoints.
+
+---
+Task ID: VIS-2
+Agent: main (orchestrator)
+Task: Match the visualization to the Falcon 4 campaign screenshot aesthetic; prepare for terrain data.
+
+Work Log:
+- Received screenshot of Falcon 4 campaign map (pasted_image_1785681213613.png).
+- Analyzed screenshot with VLM CLI to extract the exact visual style:
+  * Water: deep cerulean blue (#006994)
+  * Land: tan/beige (#B5A188 base, #8C7D66 shadows)
+  * Enemy entities: bright red (#E60000)
+  * Friendly entities: cyan/turquoise (#00C5CD)
+  * No grid lines visible (coastline defined by color/texture contrast)
+  * Icons: squares for units, runway symbols for airbases
+- NOTE: User mentioned uploading a terrain zip in /temp, but only the screenshot arrived in /home/z/my-project/upload/. No terrain zip found after exhaustive search. Proceeding with improvements that don't require terrain data; will request re-upload.
+- Rewrote f4-world-vis with Falcon 4 aesthetic:
+  * New palette: FalconPalette struct with WATER/LAND/LAND_DARK constants matching screenshot
+  * Team color mapping: owner 1/5/6 (enemy/DPRK/PRC) = red; owner 2/3/4 (friendly/ROK/Japan) = cyan; owner 0 = gray
+  * Land mask algorithm: derives a coastline from objective positions (objectives only exist on land). Builds a density grid (8-cell blocks), marks cells with objectives, dilates by 1 cell to smooth. Produces 5956 tan rectangles forming the Korea landmass.
+  * Water layer: full deep-blue background
+  * Airbase detection: heuristic on entity_type range (2120-2300) + high priority → runway icon (rect with threshold marks) instead of circle
+  * Grid off by default (matches screenshot)
+  * Dark toolbar/legend styling matching the Falcon 4 UI chrome
+  * Updated HTML wrapper with dark theme, layer toggles for water/land/grid/objectives/units/legend
+- Updated tests (8 tests, all pass): verify Falcon palette colors, land mask derivation, airbase runway icons, grid-off-by-default
+- Regenerated save1_map.html (918KB) with the new aesthetic:
+  * 5956 land rectangles forming Korea landmass
+  * 2646 objective circles (non-airbase)
+  * 14 runway-shaped airbase icons
+  * Deep blue water background
+  * Red (enemy/PRC) and cyan (friendly/ROK) objective coloring
+- Full project: 549 tests green across 11 libraries, zero regressions.
+- Refreshed F4-docs.zip (628KB).
+
+Stage Summary:
+- Visualization now matches the Falcon 4 screenshot aesthetic without needing terrain tile data.
+- Land mask derived from objective positions produces a recognizable Korea coastline.
+- When the terrain zip arrives, the land mask layer is replaced by actual terrain tiles (color-coded by terrain type). The renderer architecture supports this — just swap emit_land_mask() for emit_terrain_tiles().
+- Still pending: the terrain zip upload (not found in upload directory). Need user to re-upload.

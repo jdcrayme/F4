@@ -39,17 +39,20 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <f4/terrain/terrain_data.hpp>
 
 namespace f4::vis {
 
 struct MapRendererConfig {
     double pixels_per_cell = 2.0;       // SVG px per grid cell
     int     grid_size = 1024;           // theater grid dimensions (cells)
-    bool    show_grid = true;
+    int     land_cell_size = 8;         // land-mask cell size in grid units
+    bool    show_grid = false;          // off by default (matches screenshot)
     bool    show_objectives = true;
     bool    show_units = true;
     bool    show_legend = true;
-    bool    show_terrain_placeholder = true;  // until real terrain data exists
+    bool    show_land_mask = true;      // derived coastline (no terrain data)
+    bool    show_water = true;          // deep blue background
 };
 
 struct ObjectivePoint {
@@ -76,6 +79,13 @@ struct TeamColor {
     std::string stroke;
 };
 
+/// Falcon 4 palette constants for terrain/water (matches the campaign screenshot).
+struct FalconPalette {
+    static constexpr const char* WATER     = "#006994";
+    static constexpr const char* LAND      = "#B5A188";
+    static constexpr const char* LAND_DARK = "#8C7D66";
+};
+
 /// Default team color palette keyed by owner (Control) value.
 /// owner 0 = neutral, 1 = enemy (red), 2 = ally (blue), 3..7 = others.
 [[nodiscard]] std::unordered_map<int, TeamColor> default_team_colors();
@@ -96,6 +106,26 @@ struct TeamColor {
     const std::vector<ObjectivePoint>& objectives,
     const std::vector<UnitPoint>& units,
     const std::unordered_map<int, TeamColor>& team_colors,
+    const MapRendererConfig& config = {});
+
+/// Render with real terrain tiles (from f4-terrain). Replaces the derived
+/// land-mask with actual color-coded elevation tiles: deep blue water,
+/// tan lowlands, brown mountains, white peaks. The terrain grid (128×128)
+/// is scaled up to fill the theater grid (1024×1024); each terrain cell
+/// becomes an 8×8 block of SVG pixels.
+[[nodiscard]] std::string render_svg_with_terrain(
+    const std::vector<ObjectivePoint>& objectives,
+    const std::vector<UnitPoint>& units,
+    const std::unordered_map<int, TeamColor>& team_colors,
+    const terrain::TerrainData& terrain,
+    const MapRendererConfig& config = {});
+
+/// HTML wrapper for the terrain-aware render.
+[[nodiscard]] std::string render_html_with_terrain(
+    const std::vector<ObjectivePoint>& objectives,
+    const std::vector<UnitPoint>& units,
+    const std::unordered_map<int, TeamColor>& team_colors,
+    const terrain::TerrainData& terrain,
     const MapRendererConfig& config = {});
 
 } // namespace f4::vis
