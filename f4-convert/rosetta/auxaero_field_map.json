@@ -1,0 +1,5008 @@
+{
+  "_meta": {
+    "description": "Rosetta Stone mapping .dat AuxAeroData keys to typed struct fields.",
+    "source_of_truth": "FreeFalcon src/sim/airframe/readin.cpp, AuxAeroDataDesc[] table",
+    "source_file": "/home/z/my-project/scripts/freefalcon-central/src/sim/airframe/readin.cpp",
+    "entry_count": 455,
+    "type_meanings": {
+      "ID_FLOAT": "single double-precision float",
+      "ID_INT": "single integer (also used for booleans; see field default)",
+      "ID_VECTOR": "three doubles (x y z), typically a body-frame position"
+    },
+    "usage": "f4-convert uses this map to populate the typed AuxAero struct from the rawAuxAeroData verbatim map. f4-data uses it to validate that every key in a JSON has a known field mapping. If a key appears in a .dat file but not in this map, it is captured verbatim into rawAuxAeroData but does not get a typed field \u2014 that is by design, not a bug."
+  },
+  "categories": [
+    {
+      "name": "engine",
+      "entries": [
+        {
+          "key": "normSpoolRate",
+          "type": "ID_FLOAT",
+          "field": "normSpoolRate",
+          "default": "0.7"
+        },
+        {
+          "key": "abSpoolRate",
+          "type": "ID_FLOAT",
+          "field": "abSpoolRate",
+          "default": "0.4"
+        },
+        {
+          "key": "jfsSpoolUpRate",
+          "type": "ID_FLOAT",
+          "field": "jfsSpoolUpRate",
+          "default": "15"
+        },
+        {
+          "key": "jfsSpoolUpLimit",
+          "type": "ID_FLOAT",
+          "field": "jfsSpoolUpLimit",
+          "default": "0.25"
+        },
+        {
+          "key": "lightupSpoolRate",
+          "type": "ID_FLOAT",
+          "field": "lightupSpoolRate",
+          "default": "10"
+        },
+        {
+          "key": "flameoutSpoolRate",
+          "type": "ID_FLOAT",
+          "field": "flameoutSpoolRate",
+          "default": "5"
+        },
+        {
+          "key": "jfsRechargeTime",
+          "type": "ID_FLOAT",
+          "field": "jfsRechargeTime",
+          "default": "60"
+        },
+        {
+          "key": "jfsMinRechargeRpm",
+          "type": "ID_FLOAT",
+          "field": "jfsMinRechargeRpm",
+          "default": "0.12"
+        },
+        {
+          "key": "jfsSpinTime",
+          "type": "ID_FLOAT",
+          "field": "jfsSpinTime",
+          "default": "240"
+        },
+        {
+          "key": "mainGenRpm",
+          "type": "ID_FLOAT",
+          "field": "mainGenRpm",
+          "default": "0.63"
+        },
+        {
+          "key": "stbyGenRpm",
+          "type": "ID_FLOAT",
+          "field": "stbyGenRpm",
+          "default": "0.6"
+        },
+        {
+          "key": "epuBurnTime",
+          "type": "ID_FLOAT",
+          "field": "epuBurnTime",
+          "default": "600"
+        },
+        {
+          "key": "DeepStallEngineStall",
+          "type": "ID_INT",
+          "field": "DeepStallEngineStall",
+          "default": "0"
+        },
+        {
+          "key": "engineDamageStopThreshold",
+          "type": "ID_INT",
+          "field": "engineDamageStopThreshold",
+          "default": "13"
+        },
+        {
+          "key": "engineDamageNoRestartThreshold",
+          "type": "ID_INT",
+          "field": "engineDamageNoRestartThreshold",
+          "default": "50"
+        },
+        {
+          "key": "engineDamageHitThreshold",
+          "type": "ID_INT",
+          "field": "engineDamageHitThreshold",
+          "default": "0"
+        }
+      ]
+    },
+    {
+      "name": "fcs_inertia",
+      "entries": [
+        {
+          "key": "rollMomentum",
+          "type": "ID_FLOAT",
+          "field": "rollMomentum",
+          "default": "1"
+        },
+        {
+          "key": "pitchMomentum",
+          "type": "ID_FLOAT",
+          "field": "pitchMomentum",
+          "default": "1"
+        },
+        {
+          "key": "yawMomentum",
+          "type": "ID_FLOAT",
+          "field": "yawMomentum",
+          "default": "1"
+        },
+        {
+          "key": "pitchElasticity",
+          "type": "ID_FLOAT",
+          "field": "pitchElasticity",
+          "default": "1"
+        },
+        {
+          "key": "gearPitchFactor",
+          "type": "ID_FLOAT",
+          "field": "gearPitchFactor",
+          "default": "0.1"
+        },
+        {
+          "key": "rollGearGain",
+          "type": "ID_FLOAT",
+          "field": "rollGearGain",
+          "default": "0.6"
+        },
+        {
+          "key": "yawGearGain",
+          "type": "ID_FLOAT",
+          "field": "yawGearGain",
+          "default": "0.6"
+        },
+        {
+          "key": "pitchGearGain",
+          "type": "ID_FLOAT",
+          "field": "pitchGearGain",
+          "default": "0.8"
+        },
+        {
+          "key": "rollCouple",
+          "type": "ID_FLOAT",
+          "field": "rollCouple",
+          "default": "0"
+        },
+        {
+          "key": "rollLimitForAiInWP",
+          "type": "ID_FLOAT",
+          "field": "rollLimitForAiInWP",
+          "default": "180.0"
+        }
+      ]
+    },
+    {
+      "name": "geometry_visuals",
+      "entries": [
+        {
+          "key": "sinkRate",
+          "type": "ID_FLOAT",
+          "field": "sinkRate",
+          "default": "15"
+        },
+        {
+          "key": "area2Span",
+          "type": "ID_FLOAT",
+          "field": "area2Span",
+          "default": "0.1066"
+        },
+        {
+          "key": "landingAOA",
+          "type": "ID_FLOAT",
+          "field": "landingAOA",
+          "default": "12.5"
+        },
+        {
+          "key": "dragChuteCd",
+          "type": "ID_FLOAT",
+          "field": "dragChuteCd",
+          "default": "0"
+        },
+        {
+          "key": "dragChuteMaxSpeed",
+          "type": "ID_FLOAT",
+          "field": "dragChuteMaxSpeed",
+          "default": "170"
+        },
+        {
+          "key": "gunLocation",
+          "type": "ID_VECTOR",
+          "field": "gunLocation",
+          "default": "2 -2 0"
+        },
+        {
+          "key": "gunTrailID",
+          "type": "ID_INT",
+          "field": "gunTrailID",
+          "default": "11"
+        },
+        {
+          "key": "engineSmokes",
+          "type": "ID_INT",
+          "field": "engineSmokes",
+          "default": "0"
+        },
+        {
+          "key": "wingTipLocation",
+          "type": "ID_VECTOR",
+          "field": "wingTipLocation",
+          "default": "0 0 0"
+        },
+        {
+          "key": "vortex1Location",
+          "type": "ID_VECTOR",
+          "field": "vortex1Location",
+          "default": "0 0 0"
+        },
+        {
+          "key": "vortex2Location",
+          "type": "ID_VECTOR",
+          "field": "vortex2Location",
+          "default": "0 0 0"
+        },
+        {
+          "key": "vortexPS1Location",
+          "type": "ID_VECTOR",
+          "field": "vortexPS1Location",
+          "default": "0 0 0"
+        },
+        {
+          "key": "vortexPS2Location",
+          "type": "ID_VECTOR",
+          "field": "vortexPS2Location",
+          "default": "0 0 0"
+        },
+        {
+          "key": "vortexPS3Location",
+          "type": "ID_VECTOR",
+          "field": "vortexPS3Location",
+          "default": "0 0 0"
+        },
+        {
+          "key": "vortexAOALimit",
+          "type": "ID_VECTOR",
+          "field": "vortexAOALimit",
+          "default": "29.5"
+        },
+        {
+          "key": "refuelLocation",
+          "type": "ID_VECTOR",
+          "field": "refuelLocation",
+          "default": "0 0 0"
+        },
+        {
+          "key": "hardpoint1Grp",
+          "type": "ID_INT",
+          "field": "hardpointrg[0]",
+          "default": "-1"
+        },
+        {
+          "key": "hardpoint2Grp",
+          "type": "ID_INT",
+          "field": "hardpointrg[1]",
+          "default": "-1"
+        },
+        {
+          "key": "hardpoint3Grp",
+          "type": "ID_INT",
+          "field": "hardpointrg[2]",
+          "default": "-1"
+        },
+        {
+          "key": "hardpoint4Grp",
+          "type": "ID_INT",
+          "field": "hardpointrg[3]",
+          "default": "-1"
+        },
+        {
+          "key": "hardpoint5Grp",
+          "type": "ID_INT",
+          "field": "hardpointrg[4]",
+          "default": "-1"
+        },
+        {
+          "key": "hardpoint6Grp",
+          "type": "ID_INT",
+          "field": "hardpointrg[5]",
+          "default": "-1"
+        },
+        {
+          "key": "hardpoint7Grp",
+          "type": "ID_INT",
+          "field": "hardpointrg[6]",
+          "default": "-1"
+        },
+        {
+          "key": "hardpoint8Grp",
+          "type": "ID_INT",
+          "field": "hardpointrg[7]",
+          "default": "-1"
+        },
+        {
+          "key": "hardpoint9Grp",
+          "type": "ID_INT",
+          "field": "hardpointrg[8]",
+          "default": "-1"
+        },
+        {
+          "key": "hardpoint10Grp",
+          "type": "ID_INT",
+          "field": "hardpointrg[9]",
+          "default": "-1"
+        },
+        {
+          "key": "hardpoint11Grp",
+          "type": "ID_INT",
+          "field": "hardpointrg[10]",
+          "default": "-1"
+        },
+        {
+          "key": "hardpoint12Grp",
+          "type": "ID_INT",
+          "field": "hardpointrg[11]",
+          "default": "-1"
+        },
+        {
+          "key": "hardpoint13Grp",
+          "type": "ID_INT",
+          "field": "hardpointrg[12]",
+          "default": "-1"
+        },
+        {
+          "key": "hardpoint14Grp",
+          "type": "ID_INT",
+          "field": "hardpointrg[13]",
+          "default": "-1"
+        },
+        {
+          "key": "hardpoint15Grp",
+          "type": "ID_INT",
+          "field": "hardpointrg[14]",
+          "default": "-1"
+        },
+        {
+          "key": "hardpoint16Grp",
+          "type": "ID_INT",
+          "field": "hardpointrg[15]",
+          "default": "-1"
+        },
+        {
+          "key": "refuelSpeed",
+          "type": "ID_FLOAT",
+          "field": "refuelSpeed",
+          "default": "310.0"
+        },
+        {
+          "key": "refuelAltitude",
+          "type": "ID_FLOAT",
+          "field": "refuelAltitude",
+          "default": "22500.0"
+        },
+        {
+          "key": "refuelRate",
+          "type": "ID_FLOAT",
+          "field": "refuelRate",
+          "default": "50.0"
+        },
+        {
+          "key": "refuelBoomSlot0",
+          "type": "ID_INT",
+          "field": "refuelBoomSlot",
+          "default": "0"
+        },
+        {
+          "key": "refuelDrogueSlot0",
+          "type": "ID_INT",
+          "field": "refuelDrogueSlot[0]",
+          "default": "0"
+        },
+        {
+          "key": "refuelDrogueSlot1",
+          "type": "ID_INT",
+          "field": "refuelDrogueSlot[1]",
+          "default": "1"
+        },
+        {
+          "key": "refuelDrogueSlot2",
+          "type": "ID_INT",
+          "field": "refuelDrogueSlot[2]",
+          "default": "2"
+        }
+      ]
+    },
+    {
+      "name": "surfaces_flaps",
+      "entries": [
+        {
+          "key": "tefMaxAngle",
+          "type": "ID_FLOAT",
+          "field": "tefMaxAngle",
+          "default": "20"
+        },
+        {
+          "key": "CLtefFactor",
+          "type": "ID_FLOAT",
+          "field": "CLtefFactor",
+          "default": "0.05"
+        },
+        {
+          "key": "CDtefFactor",
+          "type": "ID_FLOAT",
+          "field": "CDtefFactor",
+          "default": "0.05"
+        },
+        {
+          "key": "tefNStages",
+          "type": "ID_INT",
+          "field": "tefNStages",
+          "default": "2"
+        },
+        {
+          "key": "tefTakeoff",
+          "type": "ID_FLOAT",
+          "field": "tefTakeOff",
+          "default": "0"
+        },
+        {
+          "key": "tefRate",
+          "type": "ID_FLOAT",
+          "field": "tefRate",
+          "default": "5"
+        },
+        {
+          "key": "lefRate",
+          "type": "ID_FLOAT",
+          "field": "lefRate",
+          "default": "5"
+        },
+        {
+          "key": "lefGround",
+          "type": "ID_FLOAT",
+          "field": "lefGround",
+          "default": "-2"
+        },
+        {
+          "key": "lefMaxAngle",
+          "type": "ID_FLOAT",
+          "field": "lefMaxAngle",
+          "default": "20"
+        },
+        {
+          "key": "lefMaxMach",
+          "type": "ID_FLOAT",
+          "field": "lefMaxMach",
+          "default": "0.4"
+        },
+        {
+          "key": "lefNStages",
+          "type": "ID_INT",
+          "field": "lefNStages",
+          "default": "1"
+        },
+        {
+          "key": "CDlefFactor",
+          "type": "ID_FLOAT",
+          "field": "CDlefFactor",
+          "default": "0.0"
+        },
+        {
+          "key": "CDSPDBFactor",
+          "type": "ID_FLOAT",
+          "field": "CDSPDBFactor",
+          "default": "0.08"
+        },
+        {
+          "key": "CDLDGFactor",
+          "type": "ID_FLOAT",
+          "field": "CDLDGFactor",
+          "default": "0.06"
+        },
+        {
+          "key": "flapGearRelative",
+          "type": "ID_INT",
+          "field": "flapGearRelative",
+          "default": "1"
+        },
+        {
+          "key": "flapVcasRange",
+          "type": "ID_FLOAT",
+          "field": "flapVcasRange",
+          "default": "130"
+        },
+        {
+          "key": "flap2Nozzle",
+          "type": "ID_INT",
+          "field": "flap2Nozzle",
+          "default": "0"
+        }
+      ]
+    },
+    {
+      "name": "misc",
+      "entries": [
+        {
+          "key": "hasFlapperons",
+          "type": "ID_INT",
+          "field": "hasFlapperons",
+          "default": "1"
+        },
+        {
+          "key": "hasTef",
+          "type": "ID_INT",
+          "field": "hasTef",
+          "default": "2"
+        },
+        {
+          "key": "hasLef",
+          "type": "ID_INT",
+          "field": "hasLef",
+          "default": "2"
+        },
+        {
+          "key": "maxFlapVcas",
+          "type": "ID_FLOAT",
+          "field": "maxFlapVcas",
+          "default": "370"
+        },
+        {
+          "key": "hasSwingWing",
+          "type": "ID_INT",
+          "field": "hasSwingWing",
+          "default": "0"
+        },
+        {
+          "key": "elevatorRoll",
+          "type": "ID_INT",
+          "field": "elevatorRolls",
+          "default": "1"
+        },
+        {
+          "key": "minFuelFlow",
+          "type": "ID_FLOAT",
+          "field": "minFuelFlow",
+          "default": "1200"
+        },
+        {
+          "key": "largeVortex",
+          "type": "ID_INT",
+          "field": "largeVortex",
+          "default": "0"
+        },
+        {
+          "key": "hp1SwitchDofRate",
+          "type": "ID_VECTOR",
+          "field": "hpSwitchDofRate[0]",
+          "default": "-1 -1 0"
+        },
+        {
+          "key": "hp2SwitchDofRate",
+          "type": "ID_VECTOR",
+          "field": "hpSwitchDofRate[1]",
+          "default": "-1 -1 0"
+        },
+        {
+          "key": "hp3SwitchDofRate",
+          "type": "ID_VECTOR",
+          "field": "hpSwitchDofRate[2]",
+          "default": "-1 -1 0"
+        },
+        {
+          "key": "hp4SwitchDofRate",
+          "type": "ID_VECTOR",
+          "field": "hpSwitchDofRate[3]",
+          "default": "-1 -1 0"
+        },
+        {
+          "key": "hp5SwitchDofRate",
+          "type": "ID_VECTOR",
+          "field": "hpSwitchDofRate[4]",
+          "default": "-1 -1 0"
+        },
+        {
+          "key": "hp6SwitchDofRate",
+          "type": "ID_VECTOR",
+          "field": "hpSwitchDofRate[5]",
+          "default": "-1 -1 0"
+        },
+        {
+          "key": "hp7SwitchDofRate",
+          "type": "ID_VECTOR",
+          "field": "hpSwitchDofRate[6]",
+          "default": "-1 -1 0"
+        },
+        {
+          "key": "hp8SwitchDofRate",
+          "type": "ID_VECTOR",
+          "field": "hpSwitchDofRate[7]",
+          "default": "-1 -1 0"
+        },
+        {
+          "key": "hp9SwitchDofRate",
+          "type": "ID_VECTOR",
+          "field": "hpSwitchDofRate[8]",
+          "default": "-1 -1 0"
+        },
+        {
+          "key": "hp10SwitchDofRate",
+          "type": "ID_VECTOR",
+          "field": "hpSwitchDofRate[9]",
+          "default": "-1 -1 0"
+        },
+        {
+          "key": "hp11SwitchDofRate",
+          "type": "ID_VECTOR",
+          "field": "hpSwitchDofRate[10]",
+          "default": "-1 -1 0"
+        },
+        {
+          "key": "hp12SwitchDofRate",
+          "type": "ID_VECTOR",
+          "field": "hpSwitchDofRate[11]",
+          "default": "-1 -1 0"
+        },
+        {
+          "key": "hp13SwitchDofRate",
+          "type": "ID_VECTOR",
+          "field": "hpSwitchDofRate[12]",
+          "default": "-1 -1 0"
+        },
+        {
+          "key": "hp14SwitchDofRate",
+          "type": "ID_VECTOR",
+          "field": "hpSwitchDofRate[13]",
+          "default": "-1 -1 0"
+        },
+        {
+          "key": "hp15SwitchDofRate",
+          "type": "ID_VECTOR",
+          "field": "hpSwitchDofRate[14]",
+          "default": "-1 -1 0"
+        },
+        {
+          "key": "hp16SwitchDofRate",
+          "type": "ID_VECTOR",
+          "field": "hpSwitchDofRate[15]",
+          "default": "-1 -1 0"
+        },
+        {
+          "key": "gunSwitchDofRate",
+          "type": "ID_LOOKUPTABLE",
+          "field": "gunSwitchDofRate",
+          "default": "-1 -1 0"
+        },
+        {
+          "key": "sndExt",
+          "type": "ID_INT",
+          "field": "sndExt",
+          "default": "35"
+        },
+        {
+          "key": "sndWind",
+          "type": "ID_INT",
+          "field": "sndWind",
+          "default": "33"
+        },
+        {
+          "key": "sndAbInt",
+          "type": "ID_INT",
+          "field": "sndAbInt",
+          "default": "40"
+        },
+        {
+          "key": "sndAbExt",
+          "type": "ID_INT",
+          "field": "sndAbExt",
+          "default": "39"
+        },
+        {
+          "key": "sndEject",
+          "type": "ID_INT",
+          "field": "sndEject",
+          "default": "5"
+        },
+        {
+          "key": "sndSpdBrakeStart",
+          "type": "ID_INT",
+          "field": "sndSpdBrakeStart",
+          "default": "141"
+        },
+        {
+          "key": "sndSpdBrakeLoop",
+          "type": "ID_INT",
+          "field": "sndSpdBrakeLoop",
+          "default": "140"
+        },
+        {
+          "key": "sndSpdBrakeEnd",
+          "type": "ID_INT",
+          "field": "sndSpdBrakeEnd",
+          "default": "139"
+        },
+        {
+          "key": "sndSpdBrakeWind",
+          "type": "ID_INT",
+          "field": "sndSpdBrakeWind",
+          "default": "142"
+        },
+        {
+          "key": "sndGunStart",
+          "type": "ID_INT",
+          "field": "sndGunStart",
+          "default": "25"
+        },
+        {
+          "key": "sndGunLoop",
+          "type": "ID_INT",
+          "field": "sndGunLoop",
+          "default": "26"
+        },
+        {
+          "key": "sndGunEnd",
+          "type": "ID_INT",
+          "field": "sndGunEnd",
+          "default": "27"
+        },
+        {
+          "key": "sndBBPullup",
+          "type": "ID_INT",
+          "field": "sndBBPullup",
+          "default": "68"
+        },
+        {
+          "key": "sndBBBingo",
+          "type": "ID_INT",
+          "field": "sndBBBingo",
+          "default": "66"
+        },
+        {
+          "key": "sndBBWarning",
+          "type": "ID_INT",
+          "field": "sndBBWarning",
+          "default": "63"
+        },
+        {
+          "key": "sndBBCaution",
+          "type": "ID_INT",
+          "field": "sndBBCaution",
+          "default": "64"
+        },
+        {
+          "key": "sndBBChaffFlareLow",
+          "type": "ID_INT",
+          "field": "sndBBChaffFlareLow",
+          "default": "184"
+        },
+        {
+          "key": "sndBBFlare",
+          "type": "ID_INT",
+          "field": "sndBBFlare",
+          "default": "138"
+        },
+        {
+          "key": "sndBBChaffFlare",
+          "type": "ID_INT",
+          "field": "sndBBChaffFlare",
+          "default": "183"
+        },
+        {
+          "key": "sndBBChaffFlareOut",
+          "type": "ID_INT",
+          "field": "sndBBChaffFlareOut",
+          "default": "185"
+        },
+        {
+          "key": "sndBBLock",
+          "type": "ID_INT",
+          "field": "sndBBLock",
+          "default": "67"
+        },
+        {
+          "key": "sndTouchDown",
+          "type": "ID_INT",
+          "field": "sndTouchDown",
+          "default": "42"
+        },
+        {
+          "key": "sndWheelBrakes",
+          "type": "ID_INT",
+          "field": "sndWheelBrakes",
+          "default": "132"
+        },
+        {
+          "key": "sndDragChute",
+          "type": "ID_INT",
+          "field": "sndDragChute",
+          "default": "217"
+        },
+        {
+          "key": "sndFlapStart",
+          "type": "ID_INT",
+          "field": "sndFlapStart",
+          "default": "145"
+        },
+        {
+          "key": "sndFlapLoop",
+          "type": "ID_INT",
+          "field": "sndFlapLoop",
+          "default": "144"
+        },
+        {
+          "key": "sndFlapEnd",
+          "type": "ID_INT",
+          "field": "sndFlapEnd",
+          "default": "143"
+        },
+        {
+          "key": "sndHookStart",
+          "type": "ID_INT",
+          "field": "sndHookStart",
+          "default": "195"
+        },
+        {
+          "key": "sndHookLoop",
+          "type": "ID_INT",
+          "field": "sndHookLoop",
+          "default": "194"
+        },
+        {
+          "key": "sndHookEnd",
+          "type": "ID_INT",
+          "field": "sndHookEnd",
+          "default": "193"
+        },
+        {
+          "key": "sndGearCloseStart",
+          "type": "ID_INT",
+          "field": "sndGearCloseStart",
+          "default": "147"
+        },
+        {
+          "key": "sndGearCloseEnd",
+          "type": "ID_INT",
+          "field": "sndGearCloseEnd",
+          "default": "146"
+        },
+        {
+          "key": "sndGearOpenStart",
+          "type": "ID_INT",
+          "field": "sndGearOpenStart",
+          "default": "149"
+        },
+        {
+          "key": "sndGearOpenEnd",
+          "type": "ID_INT",
+          "field": "sndGearOpenEnd",
+          "default": "150"
+        },
+        {
+          "key": "sndGearLoop",
+          "type": "ID_INT",
+          "field": "sndGearLoop",
+          "default": "148"
+        },
+        {
+          "key": "sndCanopyOpenStart",
+          "type": "ID_INT",
+          "field": "sndCanopyOpenStart",
+          "default": "271"
+        },
+        {
+          "key": "sndCanopyOpenEnd",
+          "type": "ID_INT",
+          "field": "sndCanopyOpenEnd",
+          "default": "272"
+        },
+        {
+          "key": "sndCanopyCloseStart",
+          "type": "ID_INT",
+          "field": "sndCanopyCloseStart",
+          "default": "273"
+        },
+        {
+          "key": "sndCanopyCloseEnd",
+          "type": "ID_INT",
+          "field": "sndCanopyCloseEnd",
+          "default": "274"
+        },
+        {
+          "key": "sndCanopyLoop",
+          "type": "ID_INT",
+          "field": "sndCanopyLoop",
+          "default": "275"
+        },
+        {
+          "key": "startGroundAvoidCheck",
+          "type": "ID_FLOAT",
+          "field": "startGroundAvoidCheck",
+          "default": "3000.0"
+        },
+        {
+          "key": "limitPstick",
+          "type": "ID_INT",
+          "field": "limitPstick",
+          "default": "1"
+        },
+        {
+          "key": "decelDistance",
+          "type": "ID_FLOAT",
+          "field": "decelDistance",
+          "default": "1000.0"
+        },
+        {
+          "key": "followRate",
+          "type": "ID_FLOAT",
+          "field": "followRate",
+          "default": "20.0"
+        },
+        {
+          "key": "desiredClosureFactor",
+          "type": "ID_FLOAT",
+          "field": "desiredClosureFactor",
+          "default": "0.25"
+        },
+        {
+          "key": "IL78Factor",
+          "type": "ID_FLOAT",
+          "field": "IL78Factor",
+          "default": "0.0"
+        },
+        {
+          "key": "longLeg",
+          "type": "ID_FLOAT",
+          "field": "longLeg",
+          "default": "100.0"
+        },
+        {
+          "key": "shortLeg",
+          "type": "ID_FLOAT",
+          "field": "shortLeg",
+          "default": "25.0"
+        },
+        {
+          "key": "AIBoomDistance",
+          "type": "ID_FLOAT",
+          "field": "AIBoomDistance",
+          "default": "50.0"
+        },
+        {
+          "key": "nBooms",
+          "type": "ID_INT",
+          "field": "numBooms",
+          "default": "1"
+        },
+        {
+          "key": "BoomRFPos",
+          "type": "ID_VECTOR",
+          "field": "BoomRFPos",
+          "default": "0 0 0"
+        },
+        {
+          "key": "BoomStoredAngle",
+          "type": "ID_FLOAT",
+          "field": "BoomStoredAngle",
+          "default": "14"
+        },
+        {
+          "key": "nDrogues",
+          "type": "ID_INT",
+          "field": "numDrogues",
+          "default": "0"
+        },
+        {
+          "key": "activeDrogue",
+          "type": "ID_INT",
+          "field": "activeDrogue",
+          "default": "1"
+        },
+        {
+          "key": "DrogueExt",
+          "type": "ID_FLOAT",
+          "field": "DrogueExt",
+          "default": "40"
+        },
+        {
+          "key": "DrogueRFPos",
+          "type": "ID_VECTOR",
+          "field": "DrogueRFPos",
+          "default": "-60 0 0"
+        },
+        {
+          "key": "boomParent",
+          "type": "ID_INT",
+          "field": "boomParent",
+          "default": "2211"
+        },
+        {
+          "key": "drogueParent",
+          "type": "ID_INT",
+          "field": "drogueParent",
+          "default": "2221"
+        },
+        {
+          "key": "tankerType",
+          "type": "ID_INT",
+          "field": "tankerType",
+          "default": "6"
+        },
+        {
+          "key": "BingoReturnDistance",
+          "type": "ID_FLOAT",
+          "field": "BingoReturnDistance",
+          "default": "0.0"
+        },
+        {
+          "key": "jokerFactor",
+          "type": "ID_FLOAT",
+          "field": "jokerFactor",
+          "default": "2.0"
+        },
+        {
+          "key": "bingoFactor",
+          "type": "ID_FLOAT",
+          "field": "bingoFactor",
+          "default": "5.0"
+        },
+        {
+          "key": "fumesFactor",
+          "type": "ID_FLOAT",
+          "field": "fumesFactor",
+          "default": "15.0"
+        },
+        {
+          "key": "maxRippleCount",
+          "type": "ID_INT",
+          "field": "maxRippleCount",
+          "default": "19"
+        },
+        {
+          "key": "largePark",
+          "type": "ID_INT",
+          "field": "largePark",
+          "default": "0"
+        },
+        {
+          "key": "HtsAble",
+          "type": "ID_INT",
+          "field": "HtsAble",
+          "default": "0"
+        },
+        {
+          "key": "Has_TFR",
+          "type": "ID_INT",
+          "field": "Has_TFR",
+          "default": "0"
+        },
+        {
+          "key": "PID_K",
+          "type": "ID_FLOAT",
+          "field": "PID_K",
+          "default": "0.5"
+        },
+        {
+          "key": "PID_KI",
+          "type": "ID_FLOAT",
+          "field": "PID_KI",
+          "default": "0.0"
+        },
+        {
+          "key": "PID_KD",
+          "type": "ID_FLOAT",
+          "field": "PID_KD",
+          "default": "0.39"
+        },
+        {
+          "key": "TFR_LimitMX",
+          "type": "ID_INT",
+          "field": "TFR_LimitMX",
+          "default": "0"
+        },
+        {
+          "key": "TFR_Corner",
+          "type": "ID_FLOAT",
+          "field": "TFR_Corner",
+          "default": "350.0"
+        },
+        {
+          "key": "TFR_Gain",
+          "type": "ID_FLOAT",
+          "field": "TFR_Gain",
+          "default": "0.010"
+        },
+        {
+          "key": "EVA_Gain",
+          "type": "ID_FLOAT",
+          "field": "EVA_Gain",
+          "default": "5.0"
+        },
+        {
+          "key": "TFR_MaxRoll",
+          "type": "ID_FLOAT",
+          "field": "TFR_MaxRoll",
+          "default": "20.0"
+        },
+        {
+          "key": "TFR_SoftG",
+          "type": "ID_FLOAT",
+          "field": "TFR_SoftG",
+          "default": "2.0"
+        },
+        {
+          "key": "TFR_MedG",
+          "type": "ID_FLOAT",
+          "field": "TFR_MedG",
+          "default": "4.0"
+        },
+        {
+          "key": "TFR_HardG",
+          "type": "ID_FLOAT",
+          "field": "TFR_HardG",
+          "default": "6.0"
+        },
+        {
+          "key": "TFR_Clearance",
+          "type": "ID_FLOAT",
+          "field": "TFR_Clearance",
+          "default": "20.0"
+        },
+        {
+          "key": "SlowPercent",
+          "type": "ID_FLOAT",
+          "field": "SlowPercent",
+          "default": "0.0"
+        },
+        {
+          "key": "TFR_lookAhead",
+          "type": "ID_FLOAT",
+          "field": "TFR_lookAhead",
+          "default": "4000.0"
+        },
+        {
+          "key": "EVA1_SoftFactor",
+          "type": "ID_FLOAT",
+          "field": "EVA1_SoftFactor",
+          "default": "0.6"
+        },
+        {
+          "key": "EVA2_SoftFactor",
+          "type": "ID_FLOAT",
+          "field": "EVA2_SoftFactor",
+          "default": "0.4"
+        },
+        {
+          "key": "EVA1_MedFactor",
+          "type": "ID_FLOAT",
+          "field": "EVA1_MedFactor",
+          "default": "0.8"
+        },
+        {
+          "key": "EVA2_MedFactor",
+          "type": "ID_FLOAT",
+          "field": "EVA2_MedFactor",
+          "default": "0.6"
+        },
+        {
+          "key": "EVA1_HardFactor",
+          "type": "ID_FLOAT",
+          "field": "EVA1_HardFactor",
+          "default": "1.2"
+        },
+        {
+          "key": "EVA2_HardFactor",
+          "type": "ID_FLOAT",
+          "field": "EVA2_HardFactor",
+          "default": "0.9"
+        },
+        {
+          "key": "TFR_GammaCorrMult",
+          "type": "ID_FLOAT",
+          "field": "TFR_GammaCorrMult",
+          "default": "1.0"
+        },
+        {
+          "key": "LantirnCameraX",
+          "type": "ID_FLOAT",
+          "field": "LantirnCameraX",
+          "default": "10.0"
+        },
+        {
+          "key": "LantirnCameraY",
+          "type": "ID_FLOAT",
+          "field": "LantirnCameraY",
+          "default": "2.0"
+        },
+        {
+          "key": "LantirnCameraZ",
+          "type": "ID_FLOAT",
+          "field": "LantirnCameraZ",
+          "default": "5.0"
+        },
+        {
+          "key": "MinTGTMAR",
+          "type": "ID_FLOAT",
+          "field": "minTGTMAR",
+          "default": "0.0"
+        },
+        {
+          "key": "MaxMARIdedStart",
+          "type": "ID_FLOAT",
+          "field": "maxMARIdedStart",
+          "default": "0.0"
+        },
+        {
+          "key": "AddMARIded5k",
+          "type": "ID_FLOAT",
+          "field": "addMARIded5k",
+          "default": "0.0"
+        },
+        {
+          "key": "AddMARIded18k",
+          "type": "ID_FLOAT",
+          "field": "addMARIded18k",
+          "default": "0.0"
+        },
+        {
+          "key": "AddMARIded28k",
+          "type": "ID_FLOAT",
+          "field": "addMARIded28k",
+          "default": "0.0"
+        },
+        {
+          "key": "AddMARIdedSpike",
+          "type": "ID_FLOAT",
+          "field": "addMARIdedSpike",
+          "default": "0.0"
+        },
+        {
+          "key": "animEngineRPMMult",
+          "type": "ID_FLOAT",
+          "field": "animEngineRPMMult",
+          "default": "1000.0"
+        },
+        {
+          "key": "animSpoiler1Max",
+          "type": "ID_FLOAT",
+          "field": "animSpoiler1Max",
+          "default": "0.0"
+        },
+        {
+          "key": "animSpoiler1Rate",
+          "type": "ID_FLOAT",
+          "field": "animSpoiler1Rate",
+          "default": "45.0"
+        },
+        {
+          "key": "animSpoiler1OffAtWingSweep",
+          "type": "ID_FLOAT",
+          "field": "animSpoiler1OffAtWingSweep",
+          "default": "70.0"
+        },
+        {
+          "key": "animSpoiler1AirBrake",
+          "type": "ID_INT",
+          "field": "animSpoiler1AirBrake",
+          "default": "1"
+        },
+        {
+          "key": "animSpoiler2Max",
+          "type": "ID_FLOAT",
+          "field": "animSpoiler2Max",
+          "default": "0.0"
+        },
+        {
+          "key": "animSpoiler2Rate",
+          "type": "ID_FLOAT",
+          "field": "animSpoiler2Rate",
+          "default": "20.0"
+        },
+        {
+          "key": "animSpoiler2OffAtWingSweep",
+          "type": "ID_FLOAT",
+          "field": "animSpoiler2OffAtWingSweep",
+          "default": "45.0"
+        },
+        {
+          "key": "animSpoiler2AirBrake",
+          "type": "ID_INT",
+          "field": "animSpoiler2AirBrake",
+          "default": "1"
+        },
+        {
+          "key": "animExhNozIdle",
+          "type": "ID_FLOAT",
+          "field": "animExhNozIdle",
+          "default": "0.0"
+        },
+        {
+          "key": "animExhNozMil",
+          "type": "ID_FLOAT",
+          "field": "animExhNozMil",
+          "default": "10.0"
+        },
+        {
+          "key": "animExhNozAB",
+          "type": "ID_FLOAT",
+          "field": "animExhNozAB",
+          "default": "0.0"
+        },
+        {
+          "key": "animExhNozRate",
+          "type": "ID_FLOAT",
+          "field": "animExhNozRate",
+          "default": "5.0"
+        },
+        {
+          "key": "animStrobeOnTime",
+          "type": "ID_FLOAT",
+          "field": "animStrobeOnTime",
+          "default": "0.08"
+        },
+        {
+          "key": "animStrobeOffTime",
+          "type": "ID_FLOAT",
+          "field": "animStrobeOffTime",
+          "default": "2.0"
+        },
+        {
+          "key": "animWingFlashOnTime",
+          "type": "ID_FLOAT",
+          "field": "animWingFlashOnTime",
+          "default": "0.4"
+        },
+        {
+          "key": "animWingFlashOffTime",
+          "type": "ID_FLOAT",
+          "field": "animWingFlashOffTime",
+          "default": "0.5"
+        },
+        {
+          "key": "animHookAngle",
+          "type": "ID_FLOAT",
+          "field": "animHookAngle",
+          "default": "60.0"
+        },
+        {
+          "key": "animHookRate",
+          "type": "ID_FLOAT",
+          "field": "animHookRate",
+          "default": "10.0"
+        },
+        {
+          "key": "animThrRevAngle",
+          "type": "ID_FLOAT",
+          "field": "animThrRevAngle",
+          "default": "60.0"
+        },
+        {
+          "key": "animThrRevRate",
+          "type": "ID_FLOAT",
+          "field": "animThrRevRate",
+          "default": "10.0"
+        },
+        {
+          "key": "catapultThrustMultiplier",
+          "type": "ID_FLOAT",
+          "field": "catapultThrustMultiplier",
+          "default": "4.0"
+        },
+        {
+          "key": "hasProgrammableEWS",
+          "type": "ID_INT",
+          "field": "hasProgrammableEWS",
+          "default": "1"
+        },
+        {
+          "key": "dataLinkCapLevel",
+          "type": "ID_INT",
+          "field": "dataLinkCapLevel",
+          "default": "1"
+        },
+        {
+          "key": "animWingFoldAngle",
+          "type": "ID_FLOAT",
+          "field": "animWingFoldAngle",
+          "default": "110.0"
+        },
+        {
+          "key": "animWingFoldRate",
+          "type": "ID_FLOAT",
+          "field": "animWingFoldRate",
+          "default": "5.0"
+        },
+        {
+          "key": "animAileronRate",
+          "type": "ID_FLOAT",
+          "field": "animAileronRate",
+          "default": "45.0"
+        },
+        {
+          "key": "animSwingWingStages",
+          "type": "ID_INT",
+          "field": "animSwingWingStages",
+          "default": "2"
+        },
+        {
+          "key": "animSwingWingAngle1",
+          "type": "ID_FLOAT",
+          "field": "animSwingWingAngle[0]",
+          "default": "25.0"
+        },
+        {
+          "key": "animSwingWingAngle2",
+          "type": "ID_FLOAT",
+          "field": "animSwingWingAngle[1]",
+          "default": "50.0"
+        },
+        {
+          "key": "animSwingWingAngle3",
+          "type": "ID_FLOAT",
+          "field": "animSwingWingAngle[2]",
+          "default": "0.0"
+        },
+        {
+          "key": "animSwingWingAngle4",
+          "type": "ID_FLOAT",
+          "field": "animSwingWingAngle[3]",
+          "default": "0.0"
+        },
+        {
+          "key": "animSwingWingAngle5",
+          "type": "ID_FLOAT",
+          "field": "animSwingWingAngle[4]",
+          "default": "0.0"
+        },
+        {
+          "key": "animSwingWingAngle6",
+          "type": "ID_FLOAT",
+          "field": "animSwingWingAngle[5]",
+          "default": "0.0"
+        },
+        {
+          "key": "animSwingWingAngle7",
+          "type": "ID_FLOAT",
+          "field": "animSwingWingAngle[6]",
+          "default": "0.0"
+        },
+        {
+          "key": "animSwingWingAngle8",
+          "type": "ID_FLOAT",
+          "field": "animSwingWingAngle[7]",
+          "default": "0.0"
+        },
+        {
+          "key": "animSwingWingAngle9",
+          "type": "ID_FLOAT",
+          "field": "animSwingWingAngle[8]",
+          "default": "0.0"
+        },
+        {
+          "key": "animSwingWingAngle10",
+          "type": "ID_FLOAT",
+          "field": "animSwingWingAngle[9]",
+          "default": "0.0"
+        },
+        {
+          "key": "animSwingWingRate",
+          "type": "ID_FLOAT",
+          "field": "animSwingWingRate",
+          "default": "5.0"
+        },
+        {
+          "key": "animWheelRadius1",
+          "type": "ID_FLOAT",
+          "field": "animWheelRadius[0]",
+          "default": "0.0"
+        },
+        {
+          "key": "animWheelRadius2",
+          "type": "ID_FLOAT",
+          "field": "animWheelRadius[1]",
+          "default": "0.0"
+        },
+        {
+          "key": "animWheelRadius3",
+          "type": "ID_FLOAT",
+          "field": "animWheelRadius[2]",
+          "default": "0.0"
+        },
+        {
+          "key": "animWheelRadius4",
+          "type": "ID_FLOAT",
+          "field": "animWheelRadius[3]",
+          "default": "0.0"
+        },
+        {
+          "key": "animWheelRadius5",
+          "type": "ID_FLOAT",
+          "field": "animWheelRadius[4]",
+          "default": "0.0"
+        },
+        {
+          "key": "animWheelRadius6",
+          "type": "ID_FLOAT",
+          "field": "animWheelRadius[5]",
+          "default": "0.0"
+        },
+        {
+          "key": "animWheelRadius7",
+          "type": "ID_FLOAT",
+          "field": "animWheelRadius[6]",
+          "default": "0.0"
+        },
+        {
+          "key": "animWheelRadius8",
+          "type": "ID_FLOAT",
+          "field": "animWheelRadius[7]",
+          "default": "0.0"
+        },
+        {
+          "key": "animRefuelAngle",
+          "type": "ID_FLOAT",
+          "field": "animRefuelAngle",
+          "default": "1.0"
+        },
+        {
+          "key": "animRefuelRate",
+          "type": "ID_FLOAT",
+          "field": "animRefuelRate",
+          "default": ".5"
+        },
+        {
+          "key": "animGearMaxComp1",
+          "type": "ID_FLOAT",
+          "field": "animGearMaxComp[0]",
+          "default": "0.0"
+        },
+        {
+          "key": "animGearMaxComp2",
+          "type": "ID_FLOAT",
+          "field": "animGearMaxComp[1]",
+          "default": "0.0"
+        },
+        {
+          "key": "animGearMaxComp3",
+          "type": "ID_FLOAT",
+          "field": "animGearMaxComp[2]",
+          "default": "0.0"
+        },
+        {
+          "key": "animGearMaxComp4",
+          "type": "ID_FLOAT",
+          "field": "animGearMaxComp[3]",
+          "default": "0.0"
+        },
+        {
+          "key": "animGearMaxComp5",
+          "type": "ID_FLOAT",
+          "field": "animGearMaxComp[4]",
+          "default": "0.0"
+        },
+        {
+          "key": "animGearMaxComp6",
+          "type": "ID_FLOAT",
+          "field": "animGearMaxComp[5]",
+          "default": "0.0"
+        },
+        {
+          "key": "animGearMaxComp7",
+          "type": "ID_FLOAT",
+          "field": "animGearMaxComp[6]",
+          "default": "0.0"
+        },
+        {
+          "key": "animGearMaxComp8",
+          "type": "ID_FLOAT",
+          "field": "animGearMaxComp[7]",
+          "default": "0.0"
+        },
+        {
+          "key": "animGearMaxExt1",
+          "type": "ID_FLOAT",
+          "field": "animGearMaxExt[0]",
+          "default": "0.0"
+        },
+        {
+          "key": "animGearMaxExt2",
+          "type": "ID_FLOAT",
+          "field": "animGearMaxExt[1]",
+          "default": "0.0"
+        },
+        {
+          "key": "animGearMaxExt3",
+          "type": "ID_FLOAT",
+          "field": "animGearMaxExt[2]",
+          "default": "0.0"
+        },
+        {
+          "key": "animGearMaxExt4",
+          "type": "ID_FLOAT",
+          "field": "animGearMaxExt[3]",
+          "default": "0.0"
+        },
+        {
+          "key": "animGearMaxExt5",
+          "type": "ID_FLOAT",
+          "field": "animGearMaxExt[4]",
+          "default": "0.0"
+        },
+        {
+          "key": "animGearMaxExt6",
+          "type": "ID_FLOAT",
+          "field": "animGearMaxExt[5]",
+          "default": "0.0"
+        },
+        {
+          "key": "animGearMaxExt7",
+          "type": "ID_FLOAT",
+          "field": "animGearMaxExt[6]",
+          "default": "0.0"
+        },
+        {
+          "key": "animGearMaxExt8",
+          "type": "ID_FLOAT",
+          "field": "animGearMaxExt[7]",
+          "default": "0.0"
+        },
+        {
+          "key": "sndExternalVol",
+          "type": "ID_FLOAT",
+          "field": "sndExternalVol",
+          "default": "-2000.0"
+        },
+        {
+          "key": "sndInt",
+          "type": "ID_INT",
+          "field": "sndInt",
+          "default": "-1"
+        },
+        {
+          "key": "sndIntChart",
+          "type": "ID_LOOKUPTABLE",
+          "field": "sndIntChart",
+          "default": "1  0 1"
+        },
+        {
+          "key": "sndAbIntChart",
+          "type": "ID_LOOKUPTABLE",
+          "field": "sndAbIntChart",
+          "default": "2  0 0  1 1"
+        },
+        {
+          "key": "sndInt2Chart",
+          "type": "ID_LOOKUPTABLE",
+          "field": "sndInt2Chart",
+          "default": "3  0 0  1 1  1.035 1"
+        },
+        {
+          "key": "sndExtChart",
+          "type": "ID_LOOKUPTABLE",
+          "field": "sndExtChart",
+          "default": "1  0 1"
+        },
+        {
+          "key": "sndAbExtChart",
+          "type": "ID_LOOKUPTABLE",
+          "field": "sndAbExtChart",
+          "default": "2  0 0  1 1"
+        },
+        {
+          "key": "sndExt2Chart",
+          "type": "ID_LOOKUPTABLE",
+          "field": "sndExt2Chart",
+          "default": "3  0 0  1 1  1.035 1"
+        },
+        {
+          "key": "sndIntPitchChart",
+          "type": "ID_LOOKUPTABLE",
+          "field": "sndIntPitchChart",
+          "default": "2 0 0 1.03 1.47"
+        },
+        {
+          "key": "sndAbIntPitchChart",
+          "type": "ID_LOOKUPTABLE",
+          "field": "sndAbIntPitchChart",
+          "default": "2 0 0 1.03 1.47"
+        },
+        {
+          "key": "sndInt2PitchChart",
+          "type": "ID_LOOKUPTABLE",
+          "field": "sndInt2PitchChart",
+          "default": "2 0 0 1.03 1.47"
+        },
+        {
+          "key": "sndExtPitchChart",
+          "type": "ID_LOOKUPTABLE",
+          "field": "sndExtPitchChart",
+          "default": "2 0 0 1.03 1.47"
+        },
+        {
+          "key": "sndAbExtPitchChart",
+          "type": "ID_LOOKUPTABLE",
+          "field": "sndAbExtPitchChart",
+          "default": "2 0 0 1.03 1.47"
+        },
+        {
+          "key": "sndExt2PitchChart",
+          "type": "ID_LOOKUPTABLE",
+          "field": "sndExt2PitchChart",
+          "default": "2 0 0 1.03 1.47"
+        },
+        {
+          "key": "sndInt2",
+          "type": "ID_INT",
+          "field": "sndInt2",
+          "default": "0"
+        },
+        {
+          "key": "sndExt2",
+          "type": "ID_INT",
+          "field": "sndExt2",
+          "default": "0"
+        },
+        {
+          "key": "sndAero1",
+          "type": "ID_INT",
+          "field": "sndAero[0]",
+          "default": "0"
+        },
+        {
+          "key": "sndAero2",
+          "type": "ID_INT",
+          "field": "sndAero[1]",
+          "default": "0"
+        },
+        {
+          "key": "sndAero3",
+          "type": "ID_INT",
+          "field": "sndAero[2]",
+          "default": "0"
+        },
+        {
+          "key": "sndAero4",
+          "type": "ID_INT",
+          "field": "sndAero[3]",
+          "default": "0"
+        },
+        {
+          "key": "sndAero1AOAChart",
+          "type": "ID_LOOKUPTABLE",
+          "field": "sndAeroAOAChart[0]",
+          "default": "1 0 0"
+        },
+        {
+          "key": "sndAero2AOAChart",
+          "type": "ID_LOOKUPTABLE",
+          "field": "sndAeroAOAChart[1]",
+          "default": "1 0 0"
+        },
+        {
+          "key": "sndAero3AOAChart",
+          "type": "ID_LOOKUPTABLE",
+          "field": "sndAeroAOAChart[2]",
+          "default": "1 0 0"
+        },
+        {
+          "key": "sndAero4AOAChart",
+          "type": "ID_LOOKUPTABLE",
+          "field": "sndAeroAOAChart[3]",
+          "default": "1 0 0"
+        },
+        {
+          "key": "FlarePos1",
+          "type": "ID_VECTOR",
+          "field": "Flare.Pos[0]",
+          "default": "0 0 0"
+        },
+        {
+          "key": "FlareVec1",
+          "type": "ID_VECTOR",
+          "field": "Flare.Vec[0]",
+          "default": "0 0 200"
+        },
+        {
+          "key": "FlareCount1",
+          "type": "ID_INT",
+          "field": "Flare.Decoys[0]",
+          "default": "30"
+        },
+        {
+          "key": "FlarePos2",
+          "type": "ID_VECTOR",
+          "field": "Flare.Pos[1]",
+          "default": "0 0 0"
+        },
+        {
+          "key": "FlareVec2",
+          "type": "ID_VECTOR",
+          "field": "Flare.Vec[1]",
+          "default": "0 0 200"
+        },
+        {
+          "key": "FlareCount2",
+          "type": "ID_INT",
+          "field": "Flare.Decoys[1]",
+          "default": "30"
+        },
+        {
+          "key": "FlarePos3",
+          "type": "ID_VECTOR",
+          "field": "Flare.Pos[2]",
+          "default": "0 0 0"
+        },
+        {
+          "key": "FlareVec3",
+          "type": "ID_VECTOR",
+          "field": "Flare.Vec[2]",
+          "default": "0 0 200"
+        },
+        {
+          "key": "FlareCount3",
+          "type": "ID_INT",
+          "field": "Flare.Decoys[2]",
+          "default": "30"
+        },
+        {
+          "key": "FlarePos4",
+          "type": "ID_VECTOR",
+          "field": "Flare.Pos[3]",
+          "default": "0 0 0"
+        },
+        {
+          "key": "FlareVec4",
+          "type": "ID_VECTOR",
+          "field": "Flare.Vec[3]",
+          "default": "0 0,200"
+        },
+        {
+          "key": "FlareCount4",
+          "type": "ID_INT",
+          "field": "Flare.Decoys[3]",
+          "default": "30"
+        },
+        {
+          "key": "FlarePos5",
+          "type": "ID_VECTOR",
+          "field": "Flare.Pos[4]",
+          "default": "0 0 0"
+        },
+        {
+          "key": "FlareVec5",
+          "type": "ID_VECTOR",
+          "field": "Flare.Vec[4]",
+          "default": "0 0 200"
+        },
+        {
+          "key": "FlareCount5",
+          "type": "ID_INT",
+          "field": "Flare.Decoys[4]",
+          "default": "30"
+        },
+        {
+          "key": "FlarePos6",
+          "type": "ID_VECTOR",
+          "field": "Flare.Pos[5]",
+          "default": "0 0 0"
+        },
+        {
+          "key": "FlareVec6",
+          "type": "ID_VECTOR",
+          "field": "Flare.Vec[5]",
+          "default": "0 0 200"
+        },
+        {
+          "key": "FlareCount6",
+          "type": "ID_INT",
+          "field": "Flare.Decoys[5]",
+          "default": "30"
+        },
+        {
+          "key": "FlarePos7",
+          "type": "ID_VECTOR",
+          "field": "Flare.Pos[6]",
+          "default": "0 0 0"
+        },
+        {
+          "key": "FlareVec7",
+          "type": "ID_VECTOR",
+          "field": "Flare.Vec[6]",
+          "default": "0 0 200"
+        },
+        {
+          "key": "FlareCount7",
+          "type": "ID_INT",
+          "field": "Flare.Decoys[6]",
+          "default": "30"
+        },
+        {
+          "key": "FlarePos8",
+          "type": "ID_VECTOR",
+          "field": "Flare.Pos[7]",
+          "default": "0 0 0"
+        },
+        {
+          "key": "FlareVec8",
+          "type": "ID_VECTOR",
+          "field": "Flare.Vec[7]",
+          "default": "0 0 200"
+        },
+        {
+          "key": "FlareCount8",
+          "type": "ID_INT",
+          "field": "Flare.Decoys[7]",
+          "default": "30"
+        },
+        {
+          "key": "FlarePos9",
+          "type": "ID_VECTOR",
+          "field": "Flare.Pos[8]",
+          "default": "0 0 0"
+        },
+        {
+          "key": "FlareVec9",
+          "type": "ID_VECTOR",
+          "field": "Flare.Vec[8]",
+          "default": "0 0 200"
+        },
+        {
+          "key": "FlareCount9",
+          "type": "ID_INT",
+          "field": "Flare.Decoys[8]",
+          "default": "30"
+        },
+        {
+          "key": "FlarePos10",
+          "type": "ID_VECTOR",
+          "field": "Flare.Pos[9]",
+          "default": "0 0 0"
+        },
+        {
+          "key": "FlareVec10",
+          "type": "ID_VECTOR",
+          "field": "Flare.Vec[9]",
+          "default": "0 0 200"
+        },
+        {
+          "key": "FlareCount10",
+          "type": "ID_INT",
+          "field": "Flare.Decoys[9]",
+          "default": "30"
+        },
+        {
+          "key": "FlareSeq",
+          "type": "ID_INT",
+          "field": "Flare.Sequence",
+          "default": "0"
+        },
+        {
+          "key": "FlareDispensers",
+          "type": "ID_INT",
+          "field": "Flare.Count",
+          "default": "1"
+        },
+        {
+          "key": "ChaffPos1",
+          "type": "ID_VECTOR",
+          "field": "Chaff.Pos[0]",
+          "default": "0 0 0"
+        },
+        {
+          "key": "ChaffVec1",
+          "type": "ID_VECTOR",
+          "field": "Chaff.Vec[0]",
+          "default": "0 0 200"
+        },
+        {
+          "key": "ChaffCount1",
+          "type": "ID_INT",
+          "field": "Chaff.Decoys[0]",
+          "default": "30"
+        },
+        {
+          "key": "ChaffPos2",
+          "type": "ID_VECTOR",
+          "field": "Chaff.Pos[1]",
+          "default": "0 0 0"
+        },
+        {
+          "key": "ChaffVec2",
+          "type": "ID_VECTOR",
+          "field": "Chaff.Vec[1]",
+          "default": "0 0 200"
+        },
+        {
+          "key": "ChaffCount2",
+          "type": "ID_INT",
+          "field": "Chaff.Decoys[1]",
+          "default": "30"
+        },
+        {
+          "key": "ChaffPos3",
+          "type": "ID_VECTOR",
+          "field": "Chaff.Pos[2]",
+          "default": "0 0 0"
+        },
+        {
+          "key": "ChaffVec3",
+          "type": "ID_VECTOR",
+          "field": "Chaff.Vec[2]",
+          "default": "0 0 200"
+        },
+        {
+          "key": "ChaffCount3",
+          "type": "ID_INT",
+          "field": "Chaff.Decoys[2]",
+          "default": "30"
+        },
+        {
+          "key": "ChaffPos4",
+          "type": "ID_VECTOR",
+          "field": "Chaff.Pos[3]",
+          "default": "0 0 0"
+        },
+        {
+          "key": "ChaffVec4",
+          "type": "ID_VECTOR",
+          "field": "Chaff.Vec[3]",
+          "default": "0 0 200"
+        },
+        {
+          "key": "ChaffCount4",
+          "type": "ID_INT",
+          "field": "Chaff.Decoys[3]",
+          "default": "30"
+        },
+        {
+          "key": "ChaffPos5",
+          "type": "ID_VECTOR",
+          "field": "Chaff.Pos[4]",
+          "default": "0 0 0"
+        },
+        {
+          "key": "ChaffVec5",
+          "type": "ID_VECTOR",
+          "field": "Chaff.Vec[4]",
+          "default": "0 0 200"
+        },
+        {
+          "key": "ChaffCount5",
+          "type": "ID_INT",
+          "field": "Chaff.Decoys[4]",
+          "default": "30"
+        },
+        {
+          "key": "ChaffPos6",
+          "type": "ID_VECTOR",
+          "field": "Chaff.Pos[5]",
+          "default": "0 0 0"
+        },
+        {
+          "key": "ChaffVec6",
+          "type": "ID_VECTOR",
+          "field": "Chaff.Vec[5]",
+          "default": "0 0 200"
+        },
+        {
+          "key": "ChaffCount6",
+          "type": "ID_INT",
+          "field": "Chaff.Decoys[5]",
+          "default": "30"
+        },
+        {
+          "key": "ChaffPos7",
+          "type": "ID_VECTOR",
+          "field": "Chaff.Pos[6]",
+          "default": "0 0 0"
+        },
+        {
+          "key": "ChaffVec7",
+          "type": "ID_VECTOR",
+          "field": "Chaff.Vec[6]",
+          "default": "0 0 200"
+        },
+        {
+          "key": "ChaffCount7",
+          "type": "ID_INT",
+          "field": "Chaff.Decoys[6]",
+          "default": "30"
+        },
+        {
+          "key": "ChaffPos8",
+          "type": "ID_VECTOR",
+          "field": "Chaff.Pos[7]",
+          "default": "0 0 0"
+        },
+        {
+          "key": "ChaffVec8",
+          "type": "ID_VECTOR",
+          "field": "Chaff.Vec[7]",
+          "default": "0 0 200"
+        },
+        {
+          "key": "ChaffCount8",
+          "type": "ID_INT",
+          "field": "Chaff.Decoys[7]",
+          "default": "30"
+        },
+        {
+          "key": "ChaffPos9",
+          "type": "ID_VECTOR",
+          "field": "Chaff.Pos[8]",
+          "default": "0 0 0"
+        },
+        {
+          "key": "ChaffVec9",
+          "type": "ID_VECTOR",
+          "field": "Chaff.Vec[8]",
+          "default": "0 0 200"
+        },
+        {
+          "key": "ChaffCount9",
+          "type": "ID_INT",
+          "field": "Chaff.Decoys[8]",
+          "default": "30"
+        },
+        {
+          "key": "ChaffPos10",
+          "type": "ID_VECTOR",
+          "field": "Chaff.Pos[9]",
+          "default": "0 0 0"
+        },
+        {
+          "key": "ChaffVec10",
+          "type": "ID_VECTOR",
+          "field": "Chaff.Vec[9]",
+          "default": "0 0 200"
+        },
+        {
+          "key": "ChaffCount10",
+          "type": "ID_INT",
+          "field": "Chaff.Decoys[9]",
+          "default": "30"
+        },
+        {
+          "key": "ChaffSeq",
+          "type": "ID_INT",
+          "field": "Chaff.Sequence",
+          "default": "0"
+        },
+        {
+          "key": "ChaffDispensers",
+          "type": "ID_INT",
+          "field": "Chaff.Count",
+          "default": "1"
+        },
+        {
+          "key": "PilotEyePos",
+          "type": "ID_VECTOR",
+          "field": "pilotEyePos",
+          "default": "15 0 -3"
+        },
+        {
+          "key": "typeAC",
+          "type": "ID_INT",
+          "field": "typeAC",
+          "default": "0"
+        },
+        {
+          "key": "elevRate",
+          "type": "ID_FLOAT",
+          "field": "elevRate",
+          "default": "90"
+        },
+        {
+          "key": "gunPitch",
+          "type": "ID_FLOAT",
+          "field": "gunElevation",
+          "default": "0"
+        },
+        {
+          "key": "gunYaw",
+          "type": "ID_FLOAT",
+          "field": "gunAzimuth",
+          "default": "0"
+        },
+        {
+          "key": "MeanTimeBetweenFailures",
+          "type": "ID_FLOAT",
+          "field": "MeanTimeBetweenFailures",
+          "default": "0"
+        },
+        {
+          "key": "anim",
+          "type": "ID_FLOAT",
+          "field": "anim",
+          "default": "0.0"
+        },
+        {
+          "key": "animIntakeRamp1",
+          "type": "ID_2DTABLE",
+          "field": "animIntakeRamp[0]",
+          "default": "0 0"
+        },
+        {
+          "key": "animIntakeRamp2",
+          "type": "ID_2DTABLE",
+          "field": "animIntakeRamp[1]",
+          "default": "0 0"
+        },
+        {
+          "key": "animIntakeRamp3",
+          "type": "ID_2DTABLE",
+          "field": "animIntakeRamp[2]",
+          "default": "0 0"
+        },
+        {
+          "key": "FTITStart",
+          "type": "ID_FLOAT",
+          "field": "FTITStart",
+          "default": "5.0"
+        },
+        {
+          "key": "FTITIdle",
+          "type": "ID_FLOAT",
+          "field": "FTITIdle",
+          "default": "7.0"
+        },
+        {
+          "key": "FTITMax",
+          "type": "ID_FLOAT",
+          "field": "FTITMax",
+          "default": "8.9"
+        },
+        {
+          "key": "criticalAOA",
+          "type": "ID_FLOAT",
+          "field": "criticalAOA",
+          "default": "0.0"
+        },
+        {
+          "key": "hasIFF",
+          "type": "ID_INT",
+          "field": "hasIFF",
+          "default": "0"
+        },
+        {
+          "key": "hasThrRev",
+          "type": "ID_INT",
+          "field": "hasThrRev",
+          "default": "0"
+        }
+      ]
+    },
+    {
+      "name": "surfaces_other",
+      "entries": [
+        {
+          "key": "rudderMaxAngle",
+          "type": "ID_FLOAT",
+          "field": "rudderMaxAngle",
+          "default": "20"
+        },
+        {
+          "key": "aileronMaxAngle",
+          "type": "ID_FLOAT",
+          "field": "aileronMaxAngle",
+          "default": "20"
+        },
+        {
+          "key": "elevonMaxAngle",
+          "type": "ID_FLOAT",
+          "field": "elevonMaxAngle",
+          "default": "20"
+        },
+        {
+          "key": "airbrakeMaxAngle",
+          "type": "ID_FLOAT",
+          "field": "airbrakeMaxAngle",
+          "default": "60"
+        },
+        {
+          "key": "isComplex",
+          "type": "ID_INT",
+          "field": "isComplex",
+          "default": "0"
+        },
+        {
+          "key": "canopyMaxAngle",
+          "type": "ID_FLOAT",
+          "field": "canopyMaxAngle",
+          "default": "20"
+        },
+        {
+          "key": "canopyRate",
+          "type": "ID_FLOAT",
+          "field": "canopyRate",
+          "default": "5"
+        },
+        {
+          "key": "swingwingHinge",
+          "type": "ID_VECTOR",
+          "field": "swingWingHinge",
+          "default": "2 3 0"
+        }
+      ]
+    },
+    {
+      "name": "fuel_consumables",
+      "entries": [
+        {
+          "key": "fuelFlowFactorNormal",
+          "type": "ID_FLOAT",
+          "field": "fuelFlowFactorNormal",
+          "default": "0.25"
+        },
+        {
+          "key": "fuelFlowFactorAb",
+          "type": "ID_FLOAT",
+          "field": "fuelFlowFactorAb",
+          "default": "0.65"
+        },
+        {
+          "key": "fuelFwdRes",
+          "type": "ID_FLOAT",
+          "field": "fuelFwdRes",
+          "default": "0"
+        },
+        {
+          "key": "fuelAftRes",
+          "type": "ID_FLOAT",
+          "field": "fuelAftRes",
+          "default": "0"
+        },
+        {
+          "key": "fuelFwd1",
+          "type": "ID_FLOAT",
+          "field": "fuelFwd1",
+          "default": "0"
+        },
+        {
+          "key": "fuelAft1",
+          "type": "ID_FLOAT",
+          "field": "fuelAft1",
+          "default": "0"
+        },
+        {
+          "key": "fuelWingAl",
+          "type": "ID_FLOAT",
+          "field": "fuelWingAl",
+          "default": "0"
+        },
+        {
+          "key": "fuelWingFr",
+          "type": "ID_FLOAT",
+          "field": "fuelWingFr",
+          "default": "0"
+        },
+        {
+          "key": "fuelFwdResRate",
+          "type": "ID_FLOAT",
+          "field": "fuelFwdResRate",
+          "default": "0"
+        },
+        {
+          "key": "fuelAftResRate",
+          "type": "ID_FLOAT",
+          "field": "fuelAftResRate",
+          "default": "0"
+        },
+        {
+          "key": "fuelFwd1Rate",
+          "type": "ID_FLOAT",
+          "field": "fuelFwd1Rate",
+          "default": "0"
+        },
+        {
+          "key": "fuelAft1Rate",
+          "type": "ID_FLOAT",
+          "field": "fuelAft1Rate",
+          "default": "0"
+        },
+        {
+          "key": "fuelWingAlRate",
+          "type": "ID_FLOAT",
+          "field": "fuelWingAlRate",
+          "default": "0"
+        },
+        {
+          "key": "fuelWingFrRate",
+          "type": "ID_FLOAT",
+          "field": "fuelWingFrRate",
+          "default": "0"
+        },
+        {
+          "key": "fuelClineRate",
+          "type": "ID_FLOAT",
+          "field": "fuelClineRate",
+          "default": "0"
+        },
+        {
+          "key": "fuelWingExtRate",
+          "type": "ID_FLOAT",
+          "field": "fuelWingExtRate",
+          "default": "0"
+        },
+        {
+          "key": "fuelMinFwd",
+          "type": "ID_FLOAT",
+          "field": "fuelMinFwd",
+          "default": "400"
+        },
+        {
+          "key": "fuelMinAft",
+          "type": "ID_FLOAT",
+          "field": "fuelMinAft",
+          "default": "250"
+        },
+        {
+          "key": "nChaff",
+          "type": "ID_INT",
+          "field": "nChaff",
+          "default": "60"
+        },
+        {
+          "key": "nFlare",
+          "type": "ID_INT",
+          "field": "nFlare",
+          "default": "30"
+        },
+        {
+          "key": "fuelGaugeMultiplier",
+          "type": "ID_FLOAT",
+          "field": "fuelGaugeMultiplier",
+          "default": "10"
+        }
+      ]
+    },
+    {
+      "name": "engine_geometry",
+      "entries": [
+        {
+          "key": "nEngines",
+          "type": "ID_INT",
+          "field": "nEngines",
+          "default": "1"
+        },
+        {
+          "key": "engine1Location",
+          "type": "ID_VECTOR",
+          "field": "engineLocation[0]",
+          "default": "0 0 0"
+        },
+        {
+          "key": "engine2Location",
+          "type": "ID_VECTOR",
+          "field": "engineLocation[1]",
+          "default": "0 0 0"
+        },
+        {
+          "key": "engine3Location",
+          "type": "ID_VECTOR",
+          "field": "engineLocation[2]",
+          "default": "0 0 0"
+        },
+        {
+          "key": "engine4Location",
+          "type": "ID_VECTOR",
+          "field": "engineLocation[3]",
+          "default": "0 0 0"
+        },
+        {
+          "key": "engine5Location",
+          "type": "ID_VECTOR",
+          "field": "engineLocation[4]",
+          "default": "0 0 0"
+        },
+        {
+          "key": "engine6Location",
+          "type": "ID_VECTOR",
+          "field": "engineLocation[5]",
+          "default": "0 0 0"
+        },
+        {
+          "key": "engine7Location",
+          "type": "ID_VECTOR",
+          "field": "engineLocation[6]",
+          "default": "0 0 0"
+        },
+        {
+          "key": "engine8Location",
+          "type": "ID_VECTOR",
+          "field": "engineLocation[7]",
+          "default": "0 0 0"
+        },
+        {
+          "key": "typeEngine",
+          "type": "ID_INT",
+          "field": "typeEngine",
+          "default": "0"
+        }
+      ]
+    },
+    {
+      "name": "weapons_delivery",
+      "entries": [
+        {
+          "key": "sndOverSpeed1",
+          "type": "ID_INT",
+          "field": "sndOverSpeed1",
+          "default": "191"
+        },
+        {
+          "key": "sndOverSpeed2",
+          "type": "ID_INT",
+          "field": "sndOverSpeed2",
+          "default": "192"
+        },
+        {
+          "key": "sndBBAltitude",
+          "type": "ID_INT",
+          "field": "sndBBAltitude",
+          "default": "65"
+        },
+        {
+          "key": "sndLowSpeed",
+          "type": "ID_INT",
+          "field": "sndLowSpeed",
+          "default": "167"
+        },
+        {
+          "key": "maxLasingAlt",
+          "type": "ID_FLOAT",
+          "field": "maxLasingAlt",
+          "default": "25000.0"
+        },
+        {
+          "key": "animSwingWingMach1",
+          "type": "ID_FLOAT",
+          "field": "animSwingWingMach[0]",
+          "default": "0.6"
+        },
+        {
+          "key": "animSwingWingMach2",
+          "type": "ID_FLOAT",
+          "field": "animSwingWingMach[1]",
+          "default": "0.8"
+        },
+        {
+          "key": "animSwingWingMach3",
+          "type": "ID_FLOAT",
+          "field": "animSwingWingMach[2]",
+          "default": "0.0"
+        },
+        {
+          "key": "animSwingWingMach4",
+          "type": "ID_FLOAT",
+          "field": "animSwingWingMach[3]",
+          "default": "0.0"
+        },
+        {
+          "key": "animSwingWingMach5",
+          "type": "ID_FLOAT",
+          "field": "animSwingWingMach[4]",
+          "default": "0.0"
+        },
+        {
+          "key": "animSwingWingMach6",
+          "type": "ID_FLOAT",
+          "field": "animSwingWingMach[5]",
+          "default": "0.0"
+        },
+        {
+          "key": "animSwingWingMach7",
+          "type": "ID_FLOAT",
+          "field": "animSwingWingMach[6]",
+          "default": "0.0"
+        },
+        {
+          "key": "animSwingWingMach8",
+          "type": "ID_FLOAT",
+          "field": "animSwingWingMach[7]",
+          "default": "0.0"
+        },
+        {
+          "key": "animSwingWingMach9",
+          "type": "ID_FLOAT",
+          "field": "animSwingWingMach[8]",
+          "default": "0.0"
+        },
+        {
+          "key": "animSwingWingMach10",
+          "type": "ID_FLOAT",
+          "field": "animSwingWingMach[9]",
+          "default": "0.0"
+        },
+        {
+          "key": "sndAero1SpeedChart",
+          "type": "ID_LOOKUPTABLE",
+          "field": "sndAeroSpeedChart[0]",
+          "default": "1 0 0"
+        },
+        {
+          "key": "sndAero2SpeedChart",
+          "type": "ID_LOOKUPTABLE",
+          "field": "sndAeroSpeedChart[1]",
+          "default": "1 0 0"
+        },
+        {
+          "key": "sndAero3SpeedChart",
+          "type": "ID_LOOKUPTABLE",
+          "field": "sndAeroSpeedChart[2]",
+          "default": "1 0 0"
+        },
+        {
+          "key": "sndAero4SpeedChart",
+          "type": "ID_LOOKUPTABLE",
+          "field": "sndAeroSpeedChart[3]",
+          "default": "1 0 0"
+        },
+        {
+          "key": "A2GJDAMAlt",
+          "type": "ID_FLOAT",
+          "field": "A2GJDAMAlt",
+          "default": "-1"
+        },
+        {
+          "key": "A2GJSOWAlt",
+          "type": "ID_FLOAT",
+          "field": "A2GJSOWAlt",
+          "default": "-1"
+        },
+        {
+          "key": "A2GHarmAlt",
+          "type": "ID_FLOAT",
+          "field": "A2GHarmAlt",
+          "default": "-1"
+        },
+        {
+          "key": "A2GAGMAlt",
+          "type": "ID_FLOAT",
+          "field": "A2GAGMAlt",
+          "default": "-1"
+        },
+        {
+          "key": "A2GGBUAlt",
+          "type": "ID_FLOAT",
+          "field": "A2GGBUAlt",
+          "default": "-1"
+        },
+        {
+          "key": "A2GDumbHDAlt",
+          "type": "ID_FLOAT",
+          "field": "A2GDumbHDAlt",
+          "default": "-1"
+        },
+        {
+          "key": "A2GClusterAlt",
+          "type": "ID_FLOAT",
+          "field": "A2GClusterAlt",
+          "default": "-1"
+        },
+        {
+          "key": "A2GDumbLDAlt",
+          "type": "ID_FLOAT",
+          "field": "A2GDumbLDAlt",
+          "default": "-1"
+        },
+        {
+          "key": "A2GGenericBombAlt",
+          "type": "ID_FLOAT",
+          "field": "A2GGenericBombAlt",
+          "default": "-1"
+        },
+        {
+          "key": "A2GGunRocketAlt",
+          "type": "ID_FLOAT",
+          "field": "A2GGunRocketAlt",
+          "default": "-1"
+        },
+        {
+          "key": "A2GCameraAlt",
+          "type": "ID_FLOAT",
+          "field": "A2GCameraAlt",
+          "default": "-1"
+        },
+        {
+          "key": "A2GBombMissileAlt",
+          "type": "ID_FLOAT",
+          "field": "A2GBombMissileAlt",
+          "default": "-1"
+        },
+        {
+          "key": "A2GJDAMAlt",
+          "type": "ID_FLOAT",
+          "field": "A2GJDAMAlt",
+          "default": "20000.0"
+        },
+        {
+          "key": "A2GJSOWAlt",
+          "type": "ID_FLOAT",
+          "field": "A2GJSOWAlt",
+          "default": "25000.0"
+        },
+        {
+          "key": "A2GHarmAlt",
+          "type": "ID_FLOAT",
+          "field": "A2GHarmAlt",
+          "default": "20000.0"
+        },
+        {
+          "key": "A2GAGMAlt",
+          "type": "ID_FLOAT",
+          "field": "A2GAGMAlt",
+          "default": "18000.0"
+        },
+        {
+          "key": "A2GGBUAlt",
+          "type": "ID_FLOAT",
+          "field": "A2GGBUAlt",
+          "default": "18000.0"
+        },
+        {
+          "key": "A2GDumbHDAlt",
+          "type": "ID_FLOAT",
+          "field": "A2GDumbHDAlt",
+          "default": "1500.0"
+        },
+        {
+          "key": "A2GClusterAlt",
+          "type": "ID_FLOAT",
+          "field": "A2GClusterAlt",
+          "default": "15000.0"
+        },
+        {
+          "key": "A2GDumbLDAlt",
+          "type": "ID_FLOAT",
+          "field": "A2GDumbLDAlt",
+          "default": "15000.0"
+        },
+        {
+          "key": "A2GGenericBombAlt",
+          "type": "ID_FLOAT",
+          "field": "A2GGenericBombAlt",
+          "default": "1000.0"
+        },
+        {
+          "key": "A2GGunRocketAlt",
+          "type": "ID_FLOAT",
+          "field": "A2GGunRocketAlt",
+          "default": "8000.0"
+        },
+        {
+          "key": "A2GCameraAlt",
+          "type": "ID_FLOAT",
+          "field": "A2GCameraAlt",
+          "default": "12000.0"
+        },
+        {
+          "key": "A2GBombMissileAlt",
+          "type": "ID_FLOAT",
+          "field": "A2GBombMissileAlt",
+          "default": "13000.0"
+        }
+      ]
+    }
+  ],
+  "keys": {
+    "normSpoolRate": {
+      "type": "ID_FLOAT",
+      "field": "normSpoolRate",
+      "default": "0.7"
+    },
+    "abSpoolRate": {
+      "type": "ID_FLOAT",
+      "field": "abSpoolRate",
+      "default": "0.4"
+    },
+    "jfsSpoolUpRate": {
+      "type": "ID_FLOAT",
+      "field": "jfsSpoolUpRate",
+      "default": "15"
+    },
+    "jfsSpoolUpLimit": {
+      "type": "ID_FLOAT",
+      "field": "jfsSpoolUpLimit",
+      "default": "0.25"
+    },
+    "lightupSpoolRate": {
+      "type": "ID_FLOAT",
+      "field": "lightupSpoolRate",
+      "default": "10"
+    },
+    "flameoutSpoolRate": {
+      "type": "ID_FLOAT",
+      "field": "flameoutSpoolRate",
+      "default": "5"
+    },
+    "jfsRechargeTime": {
+      "type": "ID_FLOAT",
+      "field": "jfsRechargeTime",
+      "default": "60"
+    },
+    "jfsMinRechargeRpm": {
+      "type": "ID_FLOAT",
+      "field": "jfsMinRechargeRpm",
+      "default": "0.12"
+    },
+    "jfsSpinTime": {
+      "type": "ID_FLOAT",
+      "field": "jfsSpinTime",
+      "default": "240"
+    },
+    "mainGenRpm": {
+      "type": "ID_FLOAT",
+      "field": "mainGenRpm",
+      "default": "0.63"
+    },
+    "stbyGenRpm": {
+      "type": "ID_FLOAT",
+      "field": "stbyGenRpm",
+      "default": "0.6"
+    },
+    "epuBurnTime": {
+      "type": "ID_FLOAT",
+      "field": "epuBurnTime",
+      "default": "600"
+    },
+    "DeepStallEngineStall": {
+      "type": "ID_INT",
+      "field": "DeepStallEngineStall",
+      "default": "0"
+    },
+    "engineDamageStopThreshold": {
+      "type": "ID_INT",
+      "field": "engineDamageStopThreshold",
+      "default": "13"
+    },
+    "engineDamageNoRestartThreshold": {
+      "type": "ID_INT",
+      "field": "engineDamageNoRestartThreshold",
+      "default": "50"
+    },
+    "engineDamageHitThreshold": {
+      "type": "ID_INT",
+      "field": "engineDamageHitThreshold",
+      "default": "0"
+    },
+    "rollMomentum": {
+      "type": "ID_FLOAT",
+      "field": "rollMomentum",
+      "default": "1"
+    },
+    "pitchMomentum": {
+      "type": "ID_FLOAT",
+      "field": "pitchMomentum",
+      "default": "1"
+    },
+    "yawMomentum": {
+      "type": "ID_FLOAT",
+      "field": "yawMomentum",
+      "default": "1"
+    },
+    "pitchElasticity": {
+      "type": "ID_FLOAT",
+      "field": "pitchElasticity",
+      "default": "1"
+    },
+    "gearPitchFactor": {
+      "type": "ID_FLOAT",
+      "field": "gearPitchFactor",
+      "default": "0.1"
+    },
+    "rollGearGain": {
+      "type": "ID_FLOAT",
+      "field": "rollGearGain",
+      "default": "0.6"
+    },
+    "yawGearGain": {
+      "type": "ID_FLOAT",
+      "field": "yawGearGain",
+      "default": "0.6"
+    },
+    "pitchGearGain": {
+      "type": "ID_FLOAT",
+      "field": "pitchGearGain",
+      "default": "0.8"
+    },
+    "sinkRate": {
+      "type": "ID_FLOAT",
+      "field": "sinkRate",
+      "default": "15"
+    },
+    "tefMaxAngle": {
+      "type": "ID_FLOAT",
+      "field": "tefMaxAngle",
+      "default": "20"
+    },
+    "hasFlapperons": {
+      "type": "ID_INT",
+      "field": "hasFlapperons",
+      "default": "1"
+    },
+    "hasTef": {
+      "type": "ID_INT",
+      "field": "hasTef",
+      "default": "2"
+    },
+    "CLtefFactor": {
+      "type": "ID_FLOAT",
+      "field": "CLtefFactor",
+      "default": "0.05"
+    },
+    "CDtefFactor": {
+      "type": "ID_FLOAT",
+      "field": "CDtefFactor",
+      "default": "0.05"
+    },
+    "tefNStages": {
+      "type": "ID_INT",
+      "field": "tefNStages",
+      "default": "2"
+    },
+    "tefTakeoff": {
+      "type": "ID_FLOAT",
+      "field": "tefTakeOff",
+      "default": "0"
+    },
+    "tefRate": {
+      "type": "ID_FLOAT",
+      "field": "tefRate",
+      "default": "5"
+    },
+    "lefRate": {
+      "type": "ID_FLOAT",
+      "field": "lefRate",
+      "default": "5"
+    },
+    "hasLef": {
+      "type": "ID_INT",
+      "field": "hasLef",
+      "default": "2"
+    },
+    "lefGround": {
+      "type": "ID_FLOAT",
+      "field": "lefGround",
+      "default": "-2"
+    },
+    "lefMaxAngle": {
+      "type": "ID_FLOAT",
+      "field": "lefMaxAngle",
+      "default": "20"
+    },
+    "lefMaxMach": {
+      "type": "ID_FLOAT",
+      "field": "lefMaxMach",
+      "default": "0.4"
+    },
+    "lefNStages": {
+      "type": "ID_INT",
+      "field": "lefNStages",
+      "default": "1"
+    },
+    "CDlefFactor": {
+      "type": "ID_FLOAT",
+      "field": "CDlefFactor",
+      "default": "0.0"
+    },
+    "CDSPDBFactor": {
+      "type": "ID_FLOAT",
+      "field": "CDSPDBFactor",
+      "default": "0.08"
+    },
+    "CDLDGFactor": {
+      "type": "ID_FLOAT",
+      "field": "CDLDGFactor",
+      "default": "0.06"
+    },
+    "flapGearRelative": {
+      "type": "ID_INT",
+      "field": "flapGearRelative",
+      "default": "1"
+    },
+    "maxFlapVcas": {
+      "type": "ID_FLOAT",
+      "field": "maxFlapVcas",
+      "default": "370"
+    },
+    "flapVcasRange": {
+      "type": "ID_FLOAT",
+      "field": "flapVcasRange",
+      "default": "130"
+    },
+    "area2Span": {
+      "type": "ID_FLOAT",
+      "field": "area2Span",
+      "default": "0.1066"
+    },
+    "rudderMaxAngle": {
+      "type": "ID_FLOAT",
+      "field": "rudderMaxAngle",
+      "default": "20"
+    },
+    "aileronMaxAngle": {
+      "type": "ID_FLOAT",
+      "field": "aileronMaxAngle",
+      "default": "20"
+    },
+    "elevonMaxAngle": {
+      "type": "ID_FLOAT",
+      "field": "elevonMaxAngle",
+      "default": "20"
+    },
+    "airbrakeMaxAngle": {
+      "type": "ID_FLOAT",
+      "field": "airbrakeMaxAngle",
+      "default": "60"
+    },
+    "hasSwingWing": {
+      "type": "ID_INT",
+      "field": "hasSwingWing",
+      "default": "0"
+    },
+    "isComplex": {
+      "type": "ID_INT",
+      "field": "isComplex",
+      "default": "0"
+    },
+    "landingAOA": {
+      "type": "ID_FLOAT",
+      "field": "landingAOA",
+      "default": "12.5"
+    },
+    "dragChuteCd": {
+      "type": "ID_FLOAT",
+      "field": "dragChuteCd",
+      "default": "0"
+    },
+    "dragChuteMaxSpeed": {
+      "type": "ID_FLOAT",
+      "field": "dragChuteMaxSpeed",
+      "default": "170"
+    },
+    "rollCouple": {
+      "type": "ID_FLOAT",
+      "field": "rollCouple",
+      "default": "0"
+    },
+    "elevatorRoll": {
+      "type": "ID_INT",
+      "field": "elevatorRolls",
+      "default": "1"
+    },
+    "canopyMaxAngle": {
+      "type": "ID_FLOAT",
+      "field": "canopyMaxAngle",
+      "default": "20"
+    },
+    "canopyRate": {
+      "type": "ID_FLOAT",
+      "field": "canopyRate",
+      "default": "5"
+    },
+    "fuelFlowFactorNormal": {
+      "type": "ID_FLOAT",
+      "field": "fuelFlowFactorNormal",
+      "default": "0.25"
+    },
+    "fuelFlowFactorAb": {
+      "type": "ID_FLOAT",
+      "field": "fuelFlowFactorAb",
+      "default": "0.65"
+    },
+    "minFuelFlow": {
+      "type": "ID_FLOAT",
+      "field": "minFuelFlow",
+      "default": "1200"
+    },
+    "fuelFwdRes": {
+      "type": "ID_FLOAT",
+      "field": "fuelFwdRes",
+      "default": "0"
+    },
+    "fuelAftRes": {
+      "type": "ID_FLOAT",
+      "field": "fuelAftRes",
+      "default": "0"
+    },
+    "fuelFwd1": {
+      "type": "ID_FLOAT",
+      "field": "fuelFwd1",
+      "default": "0"
+    },
+    "fuelAft1": {
+      "type": "ID_FLOAT",
+      "field": "fuelAft1",
+      "default": "0"
+    },
+    "fuelWingAl": {
+      "type": "ID_FLOAT",
+      "field": "fuelWingAl",
+      "default": "0"
+    },
+    "fuelWingFr": {
+      "type": "ID_FLOAT",
+      "field": "fuelWingFr",
+      "default": "0"
+    },
+    "fuelFwdResRate": {
+      "type": "ID_FLOAT",
+      "field": "fuelFwdResRate",
+      "default": "0"
+    },
+    "fuelAftResRate": {
+      "type": "ID_FLOAT",
+      "field": "fuelAftResRate",
+      "default": "0"
+    },
+    "fuelFwd1Rate": {
+      "type": "ID_FLOAT",
+      "field": "fuelFwd1Rate",
+      "default": "0"
+    },
+    "fuelAft1Rate": {
+      "type": "ID_FLOAT",
+      "field": "fuelAft1Rate",
+      "default": "0"
+    },
+    "fuelWingAlRate": {
+      "type": "ID_FLOAT",
+      "field": "fuelWingAlRate",
+      "default": "0"
+    },
+    "fuelWingFrRate": {
+      "type": "ID_FLOAT",
+      "field": "fuelWingFrRate",
+      "default": "0"
+    },
+    "fuelClineRate": {
+      "type": "ID_FLOAT",
+      "field": "fuelClineRate",
+      "default": "0"
+    },
+    "fuelWingExtRate": {
+      "type": "ID_FLOAT",
+      "field": "fuelWingExtRate",
+      "default": "0"
+    },
+    "fuelMinFwd": {
+      "type": "ID_FLOAT",
+      "field": "fuelMinFwd",
+      "default": "400"
+    },
+    "fuelMinAft": {
+      "type": "ID_FLOAT",
+      "field": "fuelMinAft",
+      "default": "250"
+    },
+    "nChaff": {
+      "type": "ID_INT",
+      "field": "nChaff",
+      "default": "60"
+    },
+    "nFlare": {
+      "type": "ID_INT",
+      "field": "nFlare",
+      "default": "30"
+    },
+    "gunLocation": {
+      "type": "ID_VECTOR",
+      "field": "gunLocation",
+      "default": "2 -2 0"
+    },
+    "gunTrailID": {
+      "type": "ID_INT",
+      "field": "gunTrailID",
+      "default": "11"
+    },
+    "nEngines": {
+      "type": "ID_INT",
+      "field": "nEngines",
+      "default": "1"
+    },
+    "engine1Location": {
+      "type": "ID_VECTOR",
+      "field": "engineLocation[0]",
+      "default": "0 0 0"
+    },
+    "engine2Location": {
+      "type": "ID_VECTOR",
+      "field": "engineLocation[1]",
+      "default": "0 0 0"
+    },
+    "engine3Location": {
+      "type": "ID_VECTOR",
+      "field": "engineLocation[2]",
+      "default": "0 0 0"
+    },
+    "engine4Location": {
+      "type": "ID_VECTOR",
+      "field": "engineLocation[3]",
+      "default": "0 0 0"
+    },
+    "engine5Location": {
+      "type": "ID_VECTOR",
+      "field": "engineLocation[4]",
+      "default": "0 0 0"
+    },
+    "engine6Location": {
+      "type": "ID_VECTOR",
+      "field": "engineLocation[5]",
+      "default": "0 0 0"
+    },
+    "engine7Location": {
+      "type": "ID_VECTOR",
+      "field": "engineLocation[6]",
+      "default": "0 0 0"
+    },
+    "engine8Location": {
+      "type": "ID_VECTOR",
+      "field": "engineLocation[7]",
+      "default": "0 0 0"
+    },
+    "engineSmokes": {
+      "type": "ID_INT",
+      "field": "engineSmokes",
+      "default": "0"
+    },
+    "wingTipLocation": {
+      "type": "ID_VECTOR",
+      "field": "wingTipLocation",
+      "default": "0 0 0"
+    },
+    "vortex1Location": {
+      "type": "ID_VECTOR",
+      "field": "vortex1Location",
+      "default": "0 0 0"
+    },
+    "vortex2Location": {
+      "type": "ID_VECTOR",
+      "field": "vortex2Location",
+      "default": "0 0 0"
+    },
+    "vortexPS1Location": {
+      "type": "ID_VECTOR",
+      "field": "vortexPS1Location",
+      "default": "0 0 0"
+    },
+    "vortexPS2Location": {
+      "type": "ID_VECTOR",
+      "field": "vortexPS2Location",
+      "default": "0 0 0"
+    },
+    "vortexPS3Location": {
+      "type": "ID_VECTOR",
+      "field": "vortexPS3Location",
+      "default": "0 0 0"
+    },
+    "largeVortex": {
+      "type": "ID_INT",
+      "field": "largeVortex",
+      "default": "0"
+    },
+    "vortexAOALimit": {
+      "type": "ID_VECTOR",
+      "field": "vortexAOALimit",
+      "default": "29.5"
+    },
+    "refuelLocation": {
+      "type": "ID_VECTOR",
+      "field": "refuelLocation",
+      "default": "0 0 0"
+    },
+    "hardpoint1Grp": {
+      "type": "ID_INT",
+      "field": "hardpointrg[0]",
+      "default": "-1"
+    },
+    "hardpoint2Grp": {
+      "type": "ID_INT",
+      "field": "hardpointrg[1]",
+      "default": "-1"
+    },
+    "hardpoint3Grp": {
+      "type": "ID_INT",
+      "field": "hardpointrg[2]",
+      "default": "-1"
+    },
+    "hardpoint4Grp": {
+      "type": "ID_INT",
+      "field": "hardpointrg[3]",
+      "default": "-1"
+    },
+    "hardpoint5Grp": {
+      "type": "ID_INT",
+      "field": "hardpointrg[4]",
+      "default": "-1"
+    },
+    "hardpoint6Grp": {
+      "type": "ID_INT",
+      "field": "hardpointrg[5]",
+      "default": "-1"
+    },
+    "hardpoint7Grp": {
+      "type": "ID_INT",
+      "field": "hardpointrg[6]",
+      "default": "-1"
+    },
+    "hardpoint8Grp": {
+      "type": "ID_INT",
+      "field": "hardpointrg[7]",
+      "default": "-1"
+    },
+    "hardpoint9Grp": {
+      "type": "ID_INT",
+      "field": "hardpointrg[8]",
+      "default": "-1"
+    },
+    "hardpoint10Grp": {
+      "type": "ID_INT",
+      "field": "hardpointrg[9]",
+      "default": "-1"
+    },
+    "hardpoint11Grp": {
+      "type": "ID_INT",
+      "field": "hardpointrg[10]",
+      "default": "-1"
+    },
+    "hardpoint12Grp": {
+      "type": "ID_INT",
+      "field": "hardpointrg[11]",
+      "default": "-1"
+    },
+    "hardpoint13Grp": {
+      "type": "ID_INT",
+      "field": "hardpointrg[12]",
+      "default": "-1"
+    },
+    "hardpoint14Grp": {
+      "type": "ID_INT",
+      "field": "hardpointrg[13]",
+      "default": "-1"
+    },
+    "hardpoint15Grp": {
+      "type": "ID_INT",
+      "field": "hardpointrg[14]",
+      "default": "-1"
+    },
+    "hardpoint16Grp": {
+      "type": "ID_INT",
+      "field": "hardpointrg[15]",
+      "default": "-1"
+    },
+    "hp1SwitchDofRate": {
+      "type": "ID_VECTOR",
+      "field": "hpSwitchDofRate[0]",
+      "default": "-1 -1 0"
+    },
+    "hp2SwitchDofRate": {
+      "type": "ID_VECTOR",
+      "field": "hpSwitchDofRate[1]",
+      "default": "-1 -1 0"
+    },
+    "hp3SwitchDofRate": {
+      "type": "ID_VECTOR",
+      "field": "hpSwitchDofRate[2]",
+      "default": "-1 -1 0"
+    },
+    "hp4SwitchDofRate": {
+      "type": "ID_VECTOR",
+      "field": "hpSwitchDofRate[3]",
+      "default": "-1 -1 0"
+    },
+    "hp5SwitchDofRate": {
+      "type": "ID_VECTOR",
+      "field": "hpSwitchDofRate[4]",
+      "default": "-1 -1 0"
+    },
+    "hp6SwitchDofRate": {
+      "type": "ID_VECTOR",
+      "field": "hpSwitchDofRate[5]",
+      "default": "-1 -1 0"
+    },
+    "hp7SwitchDofRate": {
+      "type": "ID_VECTOR",
+      "field": "hpSwitchDofRate[6]",
+      "default": "-1 -1 0"
+    },
+    "hp8SwitchDofRate": {
+      "type": "ID_VECTOR",
+      "field": "hpSwitchDofRate[7]",
+      "default": "-1 -1 0"
+    },
+    "hp9SwitchDofRate": {
+      "type": "ID_VECTOR",
+      "field": "hpSwitchDofRate[8]",
+      "default": "-1 -1 0"
+    },
+    "hp10SwitchDofRate": {
+      "type": "ID_VECTOR",
+      "field": "hpSwitchDofRate[9]",
+      "default": "-1 -1 0"
+    },
+    "hp11SwitchDofRate": {
+      "type": "ID_VECTOR",
+      "field": "hpSwitchDofRate[10]",
+      "default": "-1 -1 0"
+    },
+    "hp12SwitchDofRate": {
+      "type": "ID_VECTOR",
+      "field": "hpSwitchDofRate[11]",
+      "default": "-1 -1 0"
+    },
+    "hp13SwitchDofRate": {
+      "type": "ID_VECTOR",
+      "field": "hpSwitchDofRate[12]",
+      "default": "-1 -1 0"
+    },
+    "hp14SwitchDofRate": {
+      "type": "ID_VECTOR",
+      "field": "hpSwitchDofRate[13]",
+      "default": "-1 -1 0"
+    },
+    "hp15SwitchDofRate": {
+      "type": "ID_VECTOR",
+      "field": "hpSwitchDofRate[14]",
+      "default": "-1 -1 0"
+    },
+    "hp16SwitchDofRate": {
+      "type": "ID_VECTOR",
+      "field": "hpSwitchDofRate[15]",
+      "default": "-1 -1 0"
+    },
+    "gunSwitchDofRate": {
+      "type": "ID_LOOKUPTABLE",
+      "field": "gunSwitchDofRate",
+      "default": "-1 -1 0"
+    },
+    "sndExt": {
+      "type": "ID_INT",
+      "field": "sndExt",
+      "default": "35"
+    },
+    "sndWind": {
+      "type": "ID_INT",
+      "field": "sndWind",
+      "default": "33"
+    },
+    "sndAbInt": {
+      "type": "ID_INT",
+      "field": "sndAbInt",
+      "default": "40"
+    },
+    "sndAbExt": {
+      "type": "ID_INT",
+      "field": "sndAbExt",
+      "default": "39"
+    },
+    "sndEject": {
+      "type": "ID_INT",
+      "field": "sndEject",
+      "default": "5"
+    },
+    "sndSpdBrakeStart": {
+      "type": "ID_INT",
+      "field": "sndSpdBrakeStart",
+      "default": "141"
+    },
+    "sndSpdBrakeLoop": {
+      "type": "ID_INT",
+      "field": "sndSpdBrakeLoop",
+      "default": "140"
+    },
+    "sndSpdBrakeEnd": {
+      "type": "ID_INT",
+      "field": "sndSpdBrakeEnd",
+      "default": "139"
+    },
+    "sndSpdBrakeWind": {
+      "type": "ID_INT",
+      "field": "sndSpdBrakeWind",
+      "default": "142"
+    },
+    "sndOverSpeed1": {
+      "type": "ID_INT",
+      "field": "sndOverSpeed1",
+      "default": "191"
+    },
+    "sndOverSpeed2": {
+      "type": "ID_INT",
+      "field": "sndOverSpeed2",
+      "default": "192"
+    },
+    "sndGunStart": {
+      "type": "ID_INT",
+      "field": "sndGunStart",
+      "default": "25"
+    },
+    "sndGunLoop": {
+      "type": "ID_INT",
+      "field": "sndGunLoop",
+      "default": "26"
+    },
+    "sndGunEnd": {
+      "type": "ID_INT",
+      "field": "sndGunEnd",
+      "default": "27"
+    },
+    "sndBBPullup": {
+      "type": "ID_INT",
+      "field": "sndBBPullup",
+      "default": "68"
+    },
+    "sndBBBingo": {
+      "type": "ID_INT",
+      "field": "sndBBBingo",
+      "default": "66"
+    },
+    "sndBBWarning": {
+      "type": "ID_INT",
+      "field": "sndBBWarning",
+      "default": "63"
+    },
+    "sndBBCaution": {
+      "type": "ID_INT",
+      "field": "sndBBCaution",
+      "default": "64"
+    },
+    "sndBBChaffFlareLow": {
+      "type": "ID_INT",
+      "field": "sndBBChaffFlareLow",
+      "default": "184"
+    },
+    "sndBBFlare": {
+      "type": "ID_INT",
+      "field": "sndBBFlare",
+      "default": "138"
+    },
+    "sndBBChaffFlare": {
+      "type": "ID_INT",
+      "field": "sndBBChaffFlare",
+      "default": "183"
+    },
+    "sndBBChaffFlareOut": {
+      "type": "ID_INT",
+      "field": "sndBBChaffFlareOut",
+      "default": "185"
+    },
+    "sndBBAltitude": {
+      "type": "ID_INT",
+      "field": "sndBBAltitude",
+      "default": "65"
+    },
+    "sndBBLock": {
+      "type": "ID_INT",
+      "field": "sndBBLock",
+      "default": "67"
+    },
+    "sndTouchDown": {
+      "type": "ID_INT",
+      "field": "sndTouchDown",
+      "default": "42"
+    },
+    "sndWheelBrakes": {
+      "type": "ID_INT",
+      "field": "sndWheelBrakes",
+      "default": "132"
+    },
+    "sndDragChute": {
+      "type": "ID_INT",
+      "field": "sndDragChute",
+      "default": "217"
+    },
+    "sndLowSpeed": {
+      "type": "ID_INT",
+      "field": "sndLowSpeed",
+      "default": "167"
+    },
+    "sndFlapStart": {
+      "type": "ID_INT",
+      "field": "sndFlapStart",
+      "default": "145"
+    },
+    "sndFlapLoop": {
+      "type": "ID_INT",
+      "field": "sndFlapLoop",
+      "default": "144"
+    },
+    "sndFlapEnd": {
+      "type": "ID_INT",
+      "field": "sndFlapEnd",
+      "default": "143"
+    },
+    "sndHookStart": {
+      "type": "ID_INT",
+      "field": "sndHookStart",
+      "default": "195"
+    },
+    "sndHookLoop": {
+      "type": "ID_INT",
+      "field": "sndHookLoop",
+      "default": "194"
+    },
+    "sndHookEnd": {
+      "type": "ID_INT",
+      "field": "sndHookEnd",
+      "default": "193"
+    },
+    "sndGearCloseStart": {
+      "type": "ID_INT",
+      "field": "sndGearCloseStart",
+      "default": "147"
+    },
+    "sndGearCloseEnd": {
+      "type": "ID_INT",
+      "field": "sndGearCloseEnd",
+      "default": "146"
+    },
+    "sndGearOpenStart": {
+      "type": "ID_INT",
+      "field": "sndGearOpenStart",
+      "default": "149"
+    },
+    "sndGearOpenEnd": {
+      "type": "ID_INT",
+      "field": "sndGearOpenEnd",
+      "default": "150"
+    },
+    "sndGearLoop": {
+      "type": "ID_INT",
+      "field": "sndGearLoop",
+      "default": "148"
+    },
+    "sndCanopyOpenStart": {
+      "type": "ID_INT",
+      "field": "sndCanopyOpenStart",
+      "default": "271"
+    },
+    "sndCanopyOpenEnd": {
+      "type": "ID_INT",
+      "field": "sndCanopyOpenEnd",
+      "default": "272"
+    },
+    "sndCanopyCloseStart": {
+      "type": "ID_INT",
+      "field": "sndCanopyCloseStart",
+      "default": "273"
+    },
+    "sndCanopyCloseEnd": {
+      "type": "ID_INT",
+      "field": "sndCanopyCloseEnd",
+      "default": "274"
+    },
+    "sndCanopyLoop": {
+      "type": "ID_INT",
+      "field": "sndCanopyLoop",
+      "default": "275"
+    },
+    "rollLimitForAiInWP": {
+      "type": "ID_FLOAT",
+      "field": "rollLimitForAiInWP",
+      "default": "180.0"
+    },
+    "flap2Nozzle": {
+      "type": "ID_INT",
+      "field": "flap2Nozzle",
+      "default": "0"
+    },
+    "startGroundAvoidCheck": {
+      "type": "ID_FLOAT",
+      "field": "startGroundAvoidCheck",
+      "default": "3000.0"
+    },
+    "limitPstick": {
+      "type": "ID_INT",
+      "field": "limitPstick",
+      "default": "1"
+    },
+    "refuelSpeed": {
+      "type": "ID_FLOAT",
+      "field": "refuelSpeed",
+      "default": "310.0"
+    },
+    "refuelAltitude": {
+      "type": "ID_FLOAT",
+      "field": "refuelAltitude",
+      "default": "22500.0"
+    },
+    "decelDistance": {
+      "type": "ID_FLOAT",
+      "field": "decelDistance",
+      "default": "1000.0"
+    },
+    "followRate": {
+      "type": "ID_FLOAT",
+      "field": "followRate",
+      "default": "20.0"
+    },
+    "desiredClosureFactor": {
+      "type": "ID_FLOAT",
+      "field": "desiredClosureFactor",
+      "default": "0.25"
+    },
+    "IL78Factor": {
+      "type": "ID_FLOAT",
+      "field": "IL78Factor",
+      "default": "0.0"
+    },
+    "longLeg": {
+      "type": "ID_FLOAT",
+      "field": "longLeg",
+      "default": "100.0"
+    },
+    "shortLeg": {
+      "type": "ID_FLOAT",
+      "field": "shortLeg",
+      "default": "25.0"
+    },
+    "refuelRate": {
+      "type": "ID_FLOAT",
+      "field": "refuelRate",
+      "default": "50.0"
+    },
+    "AIBoomDistance": {
+      "type": "ID_FLOAT",
+      "field": "AIBoomDistance",
+      "default": "50.0"
+    },
+    "nBooms": {
+      "type": "ID_INT",
+      "field": "numBooms",
+      "default": "1"
+    },
+    "BoomRFPos": {
+      "type": "ID_VECTOR",
+      "field": "BoomRFPos",
+      "default": "0 0 0"
+    },
+    "BoomStoredAngle": {
+      "type": "ID_FLOAT",
+      "field": "BoomStoredAngle",
+      "default": "14"
+    },
+    "nDrogues": {
+      "type": "ID_INT",
+      "field": "numDrogues",
+      "default": "0"
+    },
+    "activeDrogue": {
+      "type": "ID_INT",
+      "field": "activeDrogue",
+      "default": "1"
+    },
+    "DrogueExt": {
+      "type": "ID_FLOAT",
+      "field": "DrogueExt",
+      "default": "40"
+    },
+    "DrogueRFPos": {
+      "type": "ID_VECTOR",
+      "field": "DrogueRFPos",
+      "default": "-60 0 0"
+    },
+    "boomParent": {
+      "type": "ID_INT",
+      "field": "boomParent",
+      "default": "2211"
+    },
+    "drogueParent": {
+      "type": "ID_INT",
+      "field": "drogueParent",
+      "default": "2221"
+    },
+    "refuelBoomSlot0": {
+      "type": "ID_INT",
+      "field": "refuelBoomSlot",
+      "default": "0"
+    },
+    "refuelDrogueSlot0": {
+      "type": "ID_INT",
+      "field": "refuelDrogueSlot[0]",
+      "default": "0"
+    },
+    "refuelDrogueSlot1": {
+      "type": "ID_INT",
+      "field": "refuelDrogueSlot[1]",
+      "default": "1"
+    },
+    "refuelDrogueSlot2": {
+      "type": "ID_INT",
+      "field": "refuelDrogueSlot[2]",
+      "default": "2"
+    },
+    "tankerType": {
+      "type": "ID_INT",
+      "field": "tankerType",
+      "default": "6"
+    },
+    "BingoReturnDistance": {
+      "type": "ID_FLOAT",
+      "field": "BingoReturnDistance",
+      "default": "0.0"
+    },
+    "jokerFactor": {
+      "type": "ID_FLOAT",
+      "field": "jokerFactor",
+      "default": "2.0"
+    },
+    "bingoFactor": {
+      "type": "ID_FLOAT",
+      "field": "bingoFactor",
+      "default": "5.0"
+    },
+    "fumesFactor": {
+      "type": "ID_FLOAT",
+      "field": "fumesFactor",
+      "default": "15.0"
+    },
+    "maxRippleCount": {
+      "type": "ID_INT",
+      "field": "maxRippleCount",
+      "default": "19"
+    },
+    "largePark": {
+      "type": "ID_INT",
+      "field": "largePark",
+      "default": "0"
+    },
+    "HtsAble": {
+      "type": "ID_INT",
+      "field": "HtsAble",
+      "default": "0"
+    },
+    "Has_TFR": {
+      "type": "ID_INT",
+      "field": "Has_TFR",
+      "default": "0"
+    },
+    "PID_K": {
+      "type": "ID_FLOAT",
+      "field": "PID_K",
+      "default": "0.5"
+    },
+    "PID_KI": {
+      "type": "ID_FLOAT",
+      "field": "PID_KI",
+      "default": "0.0"
+    },
+    "PID_KD": {
+      "type": "ID_FLOAT",
+      "field": "PID_KD",
+      "default": "0.39"
+    },
+    "TFR_LimitMX": {
+      "type": "ID_INT",
+      "field": "TFR_LimitMX",
+      "default": "0"
+    },
+    "TFR_Corner": {
+      "type": "ID_FLOAT",
+      "field": "TFR_Corner",
+      "default": "350.0"
+    },
+    "TFR_Gain": {
+      "type": "ID_FLOAT",
+      "field": "TFR_Gain",
+      "default": "0.010"
+    },
+    "EVA_Gain": {
+      "type": "ID_FLOAT",
+      "field": "EVA_Gain",
+      "default": "5.0"
+    },
+    "TFR_MaxRoll": {
+      "type": "ID_FLOAT",
+      "field": "TFR_MaxRoll",
+      "default": "20.0"
+    },
+    "TFR_SoftG": {
+      "type": "ID_FLOAT",
+      "field": "TFR_SoftG",
+      "default": "2.0"
+    },
+    "TFR_MedG": {
+      "type": "ID_FLOAT",
+      "field": "TFR_MedG",
+      "default": "4.0"
+    },
+    "TFR_HardG": {
+      "type": "ID_FLOAT",
+      "field": "TFR_HardG",
+      "default": "6.0"
+    },
+    "TFR_Clearance": {
+      "type": "ID_FLOAT",
+      "field": "TFR_Clearance",
+      "default": "20.0"
+    },
+    "SlowPercent": {
+      "type": "ID_FLOAT",
+      "field": "SlowPercent",
+      "default": "0.0"
+    },
+    "TFR_lookAhead": {
+      "type": "ID_FLOAT",
+      "field": "TFR_lookAhead",
+      "default": "4000.0"
+    },
+    "EVA1_SoftFactor": {
+      "type": "ID_FLOAT",
+      "field": "EVA1_SoftFactor",
+      "default": "0.6"
+    },
+    "EVA2_SoftFactor": {
+      "type": "ID_FLOAT",
+      "field": "EVA2_SoftFactor",
+      "default": "0.4"
+    },
+    "EVA1_MedFactor": {
+      "type": "ID_FLOAT",
+      "field": "EVA1_MedFactor",
+      "default": "0.8"
+    },
+    "EVA2_MedFactor": {
+      "type": "ID_FLOAT",
+      "field": "EVA2_MedFactor",
+      "default": "0.6"
+    },
+    "EVA1_HardFactor": {
+      "type": "ID_FLOAT",
+      "field": "EVA1_HardFactor",
+      "default": "1.2"
+    },
+    "EVA2_HardFactor": {
+      "type": "ID_FLOAT",
+      "field": "EVA2_HardFactor",
+      "default": "0.9"
+    },
+    "TFR_GammaCorrMult": {
+      "type": "ID_FLOAT",
+      "field": "TFR_GammaCorrMult",
+      "default": "1.0"
+    },
+    "LantirnCameraX": {
+      "type": "ID_FLOAT",
+      "field": "LantirnCameraX",
+      "default": "10.0"
+    },
+    "LantirnCameraY": {
+      "type": "ID_FLOAT",
+      "field": "LantirnCameraY",
+      "default": "2.0"
+    },
+    "LantirnCameraZ": {
+      "type": "ID_FLOAT",
+      "field": "LantirnCameraZ",
+      "default": "5.0"
+    },
+    "MinTGTMAR": {
+      "type": "ID_FLOAT",
+      "field": "minTGTMAR",
+      "default": "0.0"
+    },
+    "MaxMARIdedStart": {
+      "type": "ID_FLOAT",
+      "field": "maxMARIdedStart",
+      "default": "0.0"
+    },
+    "AddMARIded5k": {
+      "type": "ID_FLOAT",
+      "field": "addMARIded5k",
+      "default": "0.0"
+    },
+    "AddMARIded18k": {
+      "type": "ID_FLOAT",
+      "field": "addMARIded18k",
+      "default": "0.0"
+    },
+    "AddMARIded28k": {
+      "type": "ID_FLOAT",
+      "field": "addMARIded28k",
+      "default": "0.0"
+    },
+    "AddMARIdedSpike": {
+      "type": "ID_FLOAT",
+      "field": "addMARIdedSpike",
+      "default": "0.0"
+    },
+    "animEngineRPMMult": {
+      "type": "ID_FLOAT",
+      "field": "animEngineRPMMult",
+      "default": "1000.0"
+    },
+    "animSpoiler1Max": {
+      "type": "ID_FLOAT",
+      "field": "animSpoiler1Max",
+      "default": "0.0"
+    },
+    "animSpoiler1Rate": {
+      "type": "ID_FLOAT",
+      "field": "animSpoiler1Rate",
+      "default": "45.0"
+    },
+    "animSpoiler1OffAtWingSweep": {
+      "type": "ID_FLOAT",
+      "field": "animSpoiler1OffAtWingSweep",
+      "default": "70.0"
+    },
+    "animSpoiler1AirBrake": {
+      "type": "ID_INT",
+      "field": "animSpoiler1AirBrake",
+      "default": "1"
+    },
+    "animSpoiler2Max": {
+      "type": "ID_FLOAT",
+      "field": "animSpoiler2Max",
+      "default": "0.0"
+    },
+    "animSpoiler2Rate": {
+      "type": "ID_FLOAT",
+      "field": "animSpoiler2Rate",
+      "default": "20.0"
+    },
+    "animSpoiler2OffAtWingSweep": {
+      "type": "ID_FLOAT",
+      "field": "animSpoiler2OffAtWingSweep",
+      "default": "45.0"
+    },
+    "animSpoiler2AirBrake": {
+      "type": "ID_INT",
+      "field": "animSpoiler2AirBrake",
+      "default": "1"
+    },
+    "animExhNozIdle": {
+      "type": "ID_FLOAT",
+      "field": "animExhNozIdle",
+      "default": "0.0"
+    },
+    "animExhNozMil": {
+      "type": "ID_FLOAT",
+      "field": "animExhNozMil",
+      "default": "10.0"
+    },
+    "animExhNozAB": {
+      "type": "ID_FLOAT",
+      "field": "animExhNozAB",
+      "default": "0.0"
+    },
+    "animExhNozRate": {
+      "type": "ID_FLOAT",
+      "field": "animExhNozRate",
+      "default": "5.0"
+    },
+    "animStrobeOnTime": {
+      "type": "ID_FLOAT",
+      "field": "animStrobeOnTime",
+      "default": "0.08"
+    },
+    "animStrobeOffTime": {
+      "type": "ID_FLOAT",
+      "field": "animStrobeOffTime",
+      "default": "2.0"
+    },
+    "animWingFlashOnTime": {
+      "type": "ID_FLOAT",
+      "field": "animWingFlashOnTime",
+      "default": "0.4"
+    },
+    "animWingFlashOffTime": {
+      "type": "ID_FLOAT",
+      "field": "animWingFlashOffTime",
+      "default": "0.5"
+    },
+    "animHookAngle": {
+      "type": "ID_FLOAT",
+      "field": "animHookAngle",
+      "default": "60.0"
+    },
+    "animHookRate": {
+      "type": "ID_FLOAT",
+      "field": "animHookRate",
+      "default": "10.0"
+    },
+    "animThrRevAngle": {
+      "type": "ID_FLOAT",
+      "field": "animThrRevAngle",
+      "default": "60.0"
+    },
+    "animThrRevRate": {
+      "type": "ID_FLOAT",
+      "field": "animThrRevRate",
+      "default": "10.0"
+    },
+    "catapultThrustMultiplier": {
+      "type": "ID_FLOAT",
+      "field": "catapultThrustMultiplier",
+      "default": "4.0"
+    },
+    "maxLasingAlt": {
+      "type": "ID_FLOAT",
+      "field": "maxLasingAlt",
+      "default": "25000.0"
+    },
+    "hasProgrammableEWS": {
+      "type": "ID_INT",
+      "field": "hasProgrammableEWS",
+      "default": "1"
+    },
+    "dataLinkCapLevel": {
+      "type": "ID_INT",
+      "field": "dataLinkCapLevel",
+      "default": "1"
+    },
+    "animWingFoldAngle": {
+      "type": "ID_FLOAT",
+      "field": "animWingFoldAngle",
+      "default": "110.0"
+    },
+    "animWingFoldRate": {
+      "type": "ID_FLOAT",
+      "field": "animWingFoldRate",
+      "default": "5.0"
+    },
+    "animAileronRate": {
+      "type": "ID_FLOAT",
+      "field": "animAileronRate",
+      "default": "45.0"
+    },
+    "animSwingWingStages": {
+      "type": "ID_INT",
+      "field": "animSwingWingStages",
+      "default": "2"
+    },
+    "animSwingWingMach1": {
+      "type": "ID_FLOAT",
+      "field": "animSwingWingMach[0]",
+      "default": "0.6"
+    },
+    "animSwingWingMach2": {
+      "type": "ID_FLOAT",
+      "field": "animSwingWingMach[1]",
+      "default": "0.8"
+    },
+    "animSwingWingMach3": {
+      "type": "ID_FLOAT",
+      "field": "animSwingWingMach[2]",
+      "default": "0.0"
+    },
+    "animSwingWingMach4": {
+      "type": "ID_FLOAT",
+      "field": "animSwingWingMach[3]",
+      "default": "0.0"
+    },
+    "animSwingWingMach5": {
+      "type": "ID_FLOAT",
+      "field": "animSwingWingMach[4]",
+      "default": "0.0"
+    },
+    "animSwingWingMach6": {
+      "type": "ID_FLOAT",
+      "field": "animSwingWingMach[5]",
+      "default": "0.0"
+    },
+    "animSwingWingMach7": {
+      "type": "ID_FLOAT",
+      "field": "animSwingWingMach[6]",
+      "default": "0.0"
+    },
+    "animSwingWingMach8": {
+      "type": "ID_FLOAT",
+      "field": "animSwingWingMach[7]",
+      "default": "0.0"
+    },
+    "animSwingWingMach9": {
+      "type": "ID_FLOAT",
+      "field": "animSwingWingMach[8]",
+      "default": "0.0"
+    },
+    "animSwingWingMach10": {
+      "type": "ID_FLOAT",
+      "field": "animSwingWingMach[9]",
+      "default": "0.0"
+    },
+    "animSwingWingAngle1": {
+      "type": "ID_FLOAT",
+      "field": "animSwingWingAngle[0]",
+      "default": "25.0"
+    },
+    "animSwingWingAngle2": {
+      "type": "ID_FLOAT",
+      "field": "animSwingWingAngle[1]",
+      "default": "50.0"
+    },
+    "animSwingWingAngle3": {
+      "type": "ID_FLOAT",
+      "field": "animSwingWingAngle[2]",
+      "default": "0.0"
+    },
+    "animSwingWingAngle4": {
+      "type": "ID_FLOAT",
+      "field": "animSwingWingAngle[3]",
+      "default": "0.0"
+    },
+    "animSwingWingAngle5": {
+      "type": "ID_FLOAT",
+      "field": "animSwingWingAngle[4]",
+      "default": "0.0"
+    },
+    "animSwingWingAngle6": {
+      "type": "ID_FLOAT",
+      "field": "animSwingWingAngle[5]",
+      "default": "0.0"
+    },
+    "animSwingWingAngle7": {
+      "type": "ID_FLOAT",
+      "field": "animSwingWingAngle[6]",
+      "default": "0.0"
+    },
+    "animSwingWingAngle8": {
+      "type": "ID_FLOAT",
+      "field": "animSwingWingAngle[7]",
+      "default": "0.0"
+    },
+    "animSwingWingAngle9": {
+      "type": "ID_FLOAT",
+      "field": "animSwingWingAngle[8]",
+      "default": "0.0"
+    },
+    "animSwingWingAngle10": {
+      "type": "ID_FLOAT",
+      "field": "animSwingWingAngle[9]",
+      "default": "0.0"
+    },
+    "animSwingWingRate": {
+      "type": "ID_FLOAT",
+      "field": "animSwingWingRate",
+      "default": "5.0"
+    },
+    "animWheelRadius1": {
+      "type": "ID_FLOAT",
+      "field": "animWheelRadius[0]",
+      "default": "0.0"
+    },
+    "animWheelRadius2": {
+      "type": "ID_FLOAT",
+      "field": "animWheelRadius[1]",
+      "default": "0.0"
+    },
+    "animWheelRadius3": {
+      "type": "ID_FLOAT",
+      "field": "animWheelRadius[2]",
+      "default": "0.0"
+    },
+    "animWheelRadius4": {
+      "type": "ID_FLOAT",
+      "field": "animWheelRadius[3]",
+      "default": "0.0"
+    },
+    "animWheelRadius5": {
+      "type": "ID_FLOAT",
+      "field": "animWheelRadius[4]",
+      "default": "0.0"
+    },
+    "animWheelRadius6": {
+      "type": "ID_FLOAT",
+      "field": "animWheelRadius[5]",
+      "default": "0.0"
+    },
+    "animWheelRadius7": {
+      "type": "ID_FLOAT",
+      "field": "animWheelRadius[6]",
+      "default": "0.0"
+    },
+    "animWheelRadius8": {
+      "type": "ID_FLOAT",
+      "field": "animWheelRadius[7]",
+      "default": "0.0"
+    },
+    "animRefuelAngle": {
+      "type": "ID_FLOAT",
+      "field": "animRefuelAngle",
+      "default": "1.0"
+    },
+    "animRefuelRate": {
+      "type": "ID_FLOAT",
+      "field": "animRefuelRate",
+      "default": ".5"
+    },
+    "fuelGaugeMultiplier": {
+      "type": "ID_FLOAT",
+      "field": "fuelGaugeMultiplier",
+      "default": "10"
+    },
+    "animGearMaxComp1": {
+      "type": "ID_FLOAT",
+      "field": "animGearMaxComp[0]",
+      "default": "0.0"
+    },
+    "animGearMaxComp2": {
+      "type": "ID_FLOAT",
+      "field": "animGearMaxComp[1]",
+      "default": "0.0"
+    },
+    "animGearMaxComp3": {
+      "type": "ID_FLOAT",
+      "field": "animGearMaxComp[2]",
+      "default": "0.0"
+    },
+    "animGearMaxComp4": {
+      "type": "ID_FLOAT",
+      "field": "animGearMaxComp[3]",
+      "default": "0.0"
+    },
+    "animGearMaxComp5": {
+      "type": "ID_FLOAT",
+      "field": "animGearMaxComp[4]",
+      "default": "0.0"
+    },
+    "animGearMaxComp6": {
+      "type": "ID_FLOAT",
+      "field": "animGearMaxComp[5]",
+      "default": "0.0"
+    },
+    "animGearMaxComp7": {
+      "type": "ID_FLOAT",
+      "field": "animGearMaxComp[6]",
+      "default": "0.0"
+    },
+    "animGearMaxComp8": {
+      "type": "ID_FLOAT",
+      "field": "animGearMaxComp[7]",
+      "default": "0.0"
+    },
+    "animGearMaxExt1": {
+      "type": "ID_FLOAT",
+      "field": "animGearMaxExt[0]",
+      "default": "0.0"
+    },
+    "animGearMaxExt2": {
+      "type": "ID_FLOAT",
+      "field": "animGearMaxExt[1]",
+      "default": "0.0"
+    },
+    "animGearMaxExt3": {
+      "type": "ID_FLOAT",
+      "field": "animGearMaxExt[2]",
+      "default": "0.0"
+    },
+    "animGearMaxExt4": {
+      "type": "ID_FLOAT",
+      "field": "animGearMaxExt[3]",
+      "default": "0.0"
+    },
+    "animGearMaxExt5": {
+      "type": "ID_FLOAT",
+      "field": "animGearMaxExt[4]",
+      "default": "0.0"
+    },
+    "animGearMaxExt6": {
+      "type": "ID_FLOAT",
+      "field": "animGearMaxExt[5]",
+      "default": "0.0"
+    },
+    "animGearMaxExt7": {
+      "type": "ID_FLOAT",
+      "field": "animGearMaxExt[6]",
+      "default": "0.0"
+    },
+    "animGearMaxExt8": {
+      "type": "ID_FLOAT",
+      "field": "animGearMaxExt[7]",
+      "default": "0.0"
+    },
+    "sndExternalVol": {
+      "type": "ID_FLOAT",
+      "field": "sndExternalVol",
+      "default": "-2000.0"
+    },
+    "sndInt": {
+      "type": "ID_INT",
+      "field": "sndInt",
+      "default": "-1"
+    },
+    "sndIntChart": {
+      "type": "ID_LOOKUPTABLE",
+      "field": "sndIntChart",
+      "default": "1  0 1"
+    },
+    "sndAbIntChart": {
+      "type": "ID_LOOKUPTABLE",
+      "field": "sndAbIntChart",
+      "default": "2  0 0  1 1"
+    },
+    "sndInt2Chart": {
+      "type": "ID_LOOKUPTABLE",
+      "field": "sndInt2Chart",
+      "default": "3  0 0  1 1  1.035 1"
+    },
+    "sndExtChart": {
+      "type": "ID_LOOKUPTABLE",
+      "field": "sndExtChart",
+      "default": "1  0 1"
+    },
+    "sndAbExtChart": {
+      "type": "ID_LOOKUPTABLE",
+      "field": "sndAbExtChart",
+      "default": "2  0 0  1 1"
+    },
+    "sndExt2Chart": {
+      "type": "ID_LOOKUPTABLE",
+      "field": "sndExt2Chart",
+      "default": "3  0 0  1 1  1.035 1"
+    },
+    "sndIntPitchChart": {
+      "type": "ID_LOOKUPTABLE",
+      "field": "sndIntPitchChart",
+      "default": "2 0 0 1.03 1.47"
+    },
+    "sndAbIntPitchChart": {
+      "type": "ID_LOOKUPTABLE",
+      "field": "sndAbIntPitchChart",
+      "default": "2 0 0 1.03 1.47"
+    },
+    "sndInt2PitchChart": {
+      "type": "ID_LOOKUPTABLE",
+      "field": "sndInt2PitchChart",
+      "default": "2 0 0 1.03 1.47"
+    },
+    "sndExtPitchChart": {
+      "type": "ID_LOOKUPTABLE",
+      "field": "sndExtPitchChart",
+      "default": "2 0 0 1.03 1.47"
+    },
+    "sndAbExtPitchChart": {
+      "type": "ID_LOOKUPTABLE",
+      "field": "sndAbExtPitchChart",
+      "default": "2 0 0 1.03 1.47"
+    },
+    "sndExt2PitchChart": {
+      "type": "ID_LOOKUPTABLE",
+      "field": "sndExt2PitchChart",
+      "default": "2 0 0 1.03 1.47"
+    },
+    "sndInt2": {
+      "type": "ID_INT",
+      "field": "sndInt2",
+      "default": "0"
+    },
+    "sndExt2": {
+      "type": "ID_INT",
+      "field": "sndExt2",
+      "default": "0"
+    },
+    "sndAero1": {
+      "type": "ID_INT",
+      "field": "sndAero[0]",
+      "default": "0"
+    },
+    "sndAero2": {
+      "type": "ID_INT",
+      "field": "sndAero[1]",
+      "default": "0"
+    },
+    "sndAero3": {
+      "type": "ID_INT",
+      "field": "sndAero[2]",
+      "default": "0"
+    },
+    "sndAero4": {
+      "type": "ID_INT",
+      "field": "sndAero[3]",
+      "default": "0"
+    },
+    "sndAero1AOAChart": {
+      "type": "ID_LOOKUPTABLE",
+      "field": "sndAeroAOAChart[0]",
+      "default": "1 0 0"
+    },
+    "sndAero2AOAChart": {
+      "type": "ID_LOOKUPTABLE",
+      "field": "sndAeroAOAChart[1]",
+      "default": "1 0 0"
+    },
+    "sndAero3AOAChart": {
+      "type": "ID_LOOKUPTABLE",
+      "field": "sndAeroAOAChart[2]",
+      "default": "1 0 0"
+    },
+    "sndAero4AOAChart": {
+      "type": "ID_LOOKUPTABLE",
+      "field": "sndAeroAOAChart[3]",
+      "default": "1 0 0"
+    },
+    "sndAero1SpeedChart": {
+      "type": "ID_LOOKUPTABLE",
+      "field": "sndAeroSpeedChart[0]",
+      "default": "1 0 0"
+    },
+    "sndAero2SpeedChart": {
+      "type": "ID_LOOKUPTABLE",
+      "field": "sndAeroSpeedChart[1]",
+      "default": "1 0 0"
+    },
+    "sndAero3SpeedChart": {
+      "type": "ID_LOOKUPTABLE",
+      "field": "sndAeroSpeedChart[2]",
+      "default": "1 0 0"
+    },
+    "sndAero4SpeedChart": {
+      "type": "ID_LOOKUPTABLE",
+      "field": "sndAeroSpeedChart[3]",
+      "default": "1 0 0"
+    },
+    "FlarePos1": {
+      "type": "ID_VECTOR",
+      "field": "Flare.Pos[0]",
+      "default": "0 0 0"
+    },
+    "FlareVec1": {
+      "type": "ID_VECTOR",
+      "field": "Flare.Vec[0]",
+      "default": "0 0 200"
+    },
+    "FlareCount1": {
+      "type": "ID_INT",
+      "field": "Flare.Decoys[0]",
+      "default": "30"
+    },
+    "FlarePos2": {
+      "type": "ID_VECTOR",
+      "field": "Flare.Pos[1]",
+      "default": "0 0 0"
+    },
+    "FlareVec2": {
+      "type": "ID_VECTOR",
+      "field": "Flare.Vec[1]",
+      "default": "0 0 200"
+    },
+    "FlareCount2": {
+      "type": "ID_INT",
+      "field": "Flare.Decoys[1]",
+      "default": "30"
+    },
+    "FlarePos3": {
+      "type": "ID_VECTOR",
+      "field": "Flare.Pos[2]",
+      "default": "0 0 0"
+    },
+    "FlareVec3": {
+      "type": "ID_VECTOR",
+      "field": "Flare.Vec[2]",
+      "default": "0 0 200"
+    },
+    "FlareCount3": {
+      "type": "ID_INT",
+      "field": "Flare.Decoys[2]",
+      "default": "30"
+    },
+    "FlarePos4": {
+      "type": "ID_VECTOR",
+      "field": "Flare.Pos[3]",
+      "default": "0 0 0"
+    },
+    "FlareVec4": {
+      "type": "ID_VECTOR",
+      "field": "Flare.Vec[3]",
+      "default": "0 0,200"
+    },
+    "FlareCount4": {
+      "type": "ID_INT",
+      "field": "Flare.Decoys[3]",
+      "default": "30"
+    },
+    "FlarePos5": {
+      "type": "ID_VECTOR",
+      "field": "Flare.Pos[4]",
+      "default": "0 0 0"
+    },
+    "FlareVec5": {
+      "type": "ID_VECTOR",
+      "field": "Flare.Vec[4]",
+      "default": "0 0 200"
+    },
+    "FlareCount5": {
+      "type": "ID_INT",
+      "field": "Flare.Decoys[4]",
+      "default": "30"
+    },
+    "FlarePos6": {
+      "type": "ID_VECTOR",
+      "field": "Flare.Pos[5]",
+      "default": "0 0 0"
+    },
+    "FlareVec6": {
+      "type": "ID_VECTOR",
+      "field": "Flare.Vec[5]",
+      "default": "0 0 200"
+    },
+    "FlareCount6": {
+      "type": "ID_INT",
+      "field": "Flare.Decoys[5]",
+      "default": "30"
+    },
+    "FlarePos7": {
+      "type": "ID_VECTOR",
+      "field": "Flare.Pos[6]",
+      "default": "0 0 0"
+    },
+    "FlareVec7": {
+      "type": "ID_VECTOR",
+      "field": "Flare.Vec[6]",
+      "default": "0 0 200"
+    },
+    "FlareCount7": {
+      "type": "ID_INT",
+      "field": "Flare.Decoys[6]",
+      "default": "30"
+    },
+    "FlarePos8": {
+      "type": "ID_VECTOR",
+      "field": "Flare.Pos[7]",
+      "default": "0 0 0"
+    },
+    "FlareVec8": {
+      "type": "ID_VECTOR",
+      "field": "Flare.Vec[7]",
+      "default": "0 0 200"
+    },
+    "FlareCount8": {
+      "type": "ID_INT",
+      "field": "Flare.Decoys[7]",
+      "default": "30"
+    },
+    "FlarePos9": {
+      "type": "ID_VECTOR",
+      "field": "Flare.Pos[8]",
+      "default": "0 0 0"
+    },
+    "FlareVec9": {
+      "type": "ID_VECTOR",
+      "field": "Flare.Vec[8]",
+      "default": "0 0 200"
+    },
+    "FlareCount9": {
+      "type": "ID_INT",
+      "field": "Flare.Decoys[8]",
+      "default": "30"
+    },
+    "FlarePos10": {
+      "type": "ID_VECTOR",
+      "field": "Flare.Pos[9]",
+      "default": "0 0 0"
+    },
+    "FlareVec10": {
+      "type": "ID_VECTOR",
+      "field": "Flare.Vec[9]",
+      "default": "0 0 200"
+    },
+    "FlareCount10": {
+      "type": "ID_INT",
+      "field": "Flare.Decoys[9]",
+      "default": "30"
+    },
+    "FlareSeq": {
+      "type": "ID_INT",
+      "field": "Flare.Sequence",
+      "default": "0"
+    },
+    "FlareDispensers": {
+      "type": "ID_INT",
+      "field": "Flare.Count",
+      "default": "1"
+    },
+    "ChaffPos1": {
+      "type": "ID_VECTOR",
+      "field": "Chaff.Pos[0]",
+      "default": "0 0 0"
+    },
+    "ChaffVec1": {
+      "type": "ID_VECTOR",
+      "field": "Chaff.Vec[0]",
+      "default": "0 0 200"
+    },
+    "ChaffCount1": {
+      "type": "ID_INT",
+      "field": "Chaff.Decoys[0]",
+      "default": "30"
+    },
+    "ChaffPos2": {
+      "type": "ID_VECTOR",
+      "field": "Chaff.Pos[1]",
+      "default": "0 0 0"
+    },
+    "ChaffVec2": {
+      "type": "ID_VECTOR",
+      "field": "Chaff.Vec[1]",
+      "default": "0 0 200"
+    },
+    "ChaffCount2": {
+      "type": "ID_INT",
+      "field": "Chaff.Decoys[1]",
+      "default": "30"
+    },
+    "ChaffPos3": {
+      "type": "ID_VECTOR",
+      "field": "Chaff.Pos[2]",
+      "default": "0 0 0"
+    },
+    "ChaffVec3": {
+      "type": "ID_VECTOR",
+      "field": "Chaff.Vec[2]",
+      "default": "0 0 200"
+    },
+    "ChaffCount3": {
+      "type": "ID_INT",
+      "field": "Chaff.Decoys[2]",
+      "default": "30"
+    },
+    "ChaffPos4": {
+      "type": "ID_VECTOR",
+      "field": "Chaff.Pos[3]",
+      "default": "0 0 0"
+    },
+    "ChaffVec4": {
+      "type": "ID_VECTOR",
+      "field": "Chaff.Vec[3]",
+      "default": "0 0 200"
+    },
+    "ChaffCount4": {
+      "type": "ID_INT",
+      "field": "Chaff.Decoys[3]",
+      "default": "30"
+    },
+    "ChaffPos5": {
+      "type": "ID_VECTOR",
+      "field": "Chaff.Pos[4]",
+      "default": "0 0 0"
+    },
+    "ChaffVec5": {
+      "type": "ID_VECTOR",
+      "field": "Chaff.Vec[4]",
+      "default": "0 0 200"
+    },
+    "ChaffCount5": {
+      "type": "ID_INT",
+      "field": "Chaff.Decoys[4]",
+      "default": "30"
+    },
+    "ChaffPos6": {
+      "type": "ID_VECTOR",
+      "field": "Chaff.Pos[5]",
+      "default": "0 0 0"
+    },
+    "ChaffVec6": {
+      "type": "ID_VECTOR",
+      "field": "Chaff.Vec[5]",
+      "default": "0 0 200"
+    },
+    "ChaffCount6": {
+      "type": "ID_INT",
+      "field": "Chaff.Decoys[5]",
+      "default": "30"
+    },
+    "ChaffPos7": {
+      "type": "ID_VECTOR",
+      "field": "Chaff.Pos[6]",
+      "default": "0 0 0"
+    },
+    "ChaffVec7": {
+      "type": "ID_VECTOR",
+      "field": "Chaff.Vec[6]",
+      "default": "0 0 200"
+    },
+    "ChaffCount7": {
+      "type": "ID_INT",
+      "field": "Chaff.Decoys[6]",
+      "default": "30"
+    },
+    "ChaffPos8": {
+      "type": "ID_VECTOR",
+      "field": "Chaff.Pos[7]",
+      "default": "0 0 0"
+    },
+    "ChaffVec8": {
+      "type": "ID_VECTOR",
+      "field": "Chaff.Vec[7]",
+      "default": "0 0 200"
+    },
+    "ChaffCount8": {
+      "type": "ID_INT",
+      "field": "Chaff.Decoys[7]",
+      "default": "30"
+    },
+    "ChaffPos9": {
+      "type": "ID_VECTOR",
+      "field": "Chaff.Pos[8]",
+      "default": "0 0 0"
+    },
+    "ChaffVec9": {
+      "type": "ID_VECTOR",
+      "field": "Chaff.Vec[8]",
+      "default": "0 0 200"
+    },
+    "ChaffCount9": {
+      "type": "ID_INT",
+      "field": "Chaff.Decoys[8]",
+      "default": "30"
+    },
+    "ChaffPos10": {
+      "type": "ID_VECTOR",
+      "field": "Chaff.Pos[9]",
+      "default": "0 0 0"
+    },
+    "ChaffVec10": {
+      "type": "ID_VECTOR",
+      "field": "Chaff.Vec[9]",
+      "default": "0 0 200"
+    },
+    "ChaffCount10": {
+      "type": "ID_INT",
+      "field": "Chaff.Decoys[9]",
+      "default": "30"
+    },
+    "ChaffSeq": {
+      "type": "ID_INT",
+      "field": "Chaff.Sequence",
+      "default": "0"
+    },
+    "ChaffDispensers": {
+      "type": "ID_INT",
+      "field": "Chaff.Count",
+      "default": "1"
+    },
+    "PilotEyePos": {
+      "type": "ID_VECTOR",
+      "field": "pilotEyePos",
+      "default": "15 0 -3"
+    },
+    "typeAC": {
+      "type": "ID_INT",
+      "field": "typeAC",
+      "default": "0"
+    },
+    "typeEngine": {
+      "type": "ID_INT",
+      "field": "typeEngine",
+      "default": "0"
+    },
+    "elevRate": {
+      "type": "ID_FLOAT",
+      "field": "elevRate",
+      "default": "90"
+    },
+    "gunPitch": {
+      "type": "ID_FLOAT",
+      "field": "gunElevation",
+      "default": "0"
+    },
+    "gunYaw": {
+      "type": "ID_FLOAT",
+      "field": "gunAzimuth",
+      "default": "0"
+    },
+    "MeanTimeBetweenFailures": {
+      "type": "ID_FLOAT",
+      "field": "MeanTimeBetweenFailures",
+      "default": "0"
+    },
+    "anim": {
+      "type": "ID_FLOAT",
+      "field": "anim",
+      "default": "0.0"
+    },
+    "A2GJDAMAlt": {
+      "type": "ID_FLOAT",
+      "field": "A2GJDAMAlt",
+      "default": "20000.0"
+    },
+    "A2GJSOWAlt": {
+      "type": "ID_FLOAT",
+      "field": "A2GJSOWAlt",
+      "default": "25000.0"
+    },
+    "A2GHarmAlt": {
+      "type": "ID_FLOAT",
+      "field": "A2GHarmAlt",
+      "default": "20000.0"
+    },
+    "A2GAGMAlt": {
+      "type": "ID_FLOAT",
+      "field": "A2GAGMAlt",
+      "default": "18000.0"
+    },
+    "A2GGBUAlt": {
+      "type": "ID_FLOAT",
+      "field": "A2GGBUAlt",
+      "default": "18000.0"
+    },
+    "A2GDumbHDAlt": {
+      "type": "ID_FLOAT",
+      "field": "A2GDumbHDAlt",
+      "default": "1500.0"
+    },
+    "A2GClusterAlt": {
+      "type": "ID_FLOAT",
+      "field": "A2GClusterAlt",
+      "default": "15000.0"
+    },
+    "A2GDumbLDAlt": {
+      "type": "ID_FLOAT",
+      "field": "A2GDumbLDAlt",
+      "default": "15000.0"
+    },
+    "A2GGenericBombAlt": {
+      "type": "ID_FLOAT",
+      "field": "A2GGenericBombAlt",
+      "default": "1000.0"
+    },
+    "A2GGunRocketAlt": {
+      "type": "ID_FLOAT",
+      "field": "A2GGunRocketAlt",
+      "default": "8000.0"
+    },
+    "A2GCameraAlt": {
+      "type": "ID_FLOAT",
+      "field": "A2GCameraAlt",
+      "default": "12000.0"
+    },
+    "A2GBombMissileAlt": {
+      "type": "ID_FLOAT",
+      "field": "A2GBombMissileAlt",
+      "default": "13000.0"
+    },
+    "swingwingHinge": {
+      "type": "ID_VECTOR",
+      "field": "swingWingHinge",
+      "default": "2 3 0"
+    },
+    "animIntakeRamp1": {
+      "type": "ID_2DTABLE",
+      "field": "animIntakeRamp[0]",
+      "default": "0 0"
+    },
+    "animIntakeRamp2": {
+      "type": "ID_2DTABLE",
+      "field": "animIntakeRamp[1]",
+      "default": "0 0"
+    },
+    "animIntakeRamp3": {
+      "type": "ID_2DTABLE",
+      "field": "animIntakeRamp[2]",
+      "default": "0 0"
+    },
+    "FTITStart": {
+      "type": "ID_FLOAT",
+      "field": "FTITStart",
+      "default": "5.0"
+    },
+    "FTITIdle": {
+      "type": "ID_FLOAT",
+      "field": "FTITIdle",
+      "default": "7.0"
+    },
+    "FTITMax": {
+      "type": "ID_FLOAT",
+      "field": "FTITMax",
+      "default": "8.9"
+    },
+    "criticalAOA": {
+      "type": "ID_FLOAT",
+      "field": "criticalAOA",
+      "default": "0.0"
+    },
+    "hasIFF": {
+      "type": "ID_INT",
+      "field": "hasIFF",
+      "default": "0"
+    },
+    "hasThrRev": {
+      "type": "ID_INT",
+      "field": "hasThrRev",
+      "default": "0"
+    }
+  }
+}

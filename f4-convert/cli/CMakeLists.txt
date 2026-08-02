@@ -1,0 +1,18 @@
+# f4-convert/cli/CMakeLists.txt
+#
+# CLI tool wrappers around the f4-convert library. Each is a thin main()
+# so that the parsing/serialization logic stays in the library where it's
+# unit-testable.
+
+add_executable(dat2json     dat2json.cpp)
+target_link_libraries(dat2json PRIVATE f4-convert)
+
+add_executable(dat_validate dat_validate.cpp)
+target_link_libraries(dat_validate PRIVATE f4-convert)
+
+add_executable(json_diff    json_diff.cpp)
+target_link_libraries(json_diff PRIVATE f4-convert)
+
+# Install the CLI tools so they can be called from the build tree or after install.
+install(TARGETS dat2json dat_validate json_diff
+        RUNTIME DESTINATION bin)

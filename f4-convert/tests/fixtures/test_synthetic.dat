@@ -1,0 +1,186 @@
+# Title: Synthetic Test Aircraft
+# Author: f4-convert test suite
+# Revision: 1.0
+#
+# Minimal .dat file exercising every parser branch. All values are chosen
+# to be distinctive (not round numbers) so a round-trip test can detect
+# field-level errors. DO NOT use this file for actual flight simulation —
+# the aerodynamic coefficients are placeholders.
+
+# --- Input data (positional) ---
+# Format (per FreeFalcon readin.cpp ReadData):
+#   emptyWeight  area  internalFuel  aoaMax  aoaMin  betaMax  betaMin
+#   maxGs  maxRoll  minVcas  maxVcas  cornerVcas  thetaMax
+#   numGear
+#   gear[0].x gear[0].y gear[0].z gear[0].range
+#   gear[1]...
+#   cgLoc  length  span  fusRadius  tailHt
+19900.0  300.0  7162.0
+40.0  -8.0  30.0  -30.0
+9.0  190.0  250.0  850.0  420.0
+35.0
+3
+16.5  0.0   5.88  90.0
+30.0  -3.88 5.88  90.0
+30.0  3.88  5.88  90.0
+27.0  47.0  32.0  2.5  4.5
+
+# --- Aero tables (CL, CD, CY) ---
+# Small 3-mach x 4-alpha table.
+3
+0.0  0.5  1.0
+4
+0.0  5.0  10.0  15.0
+1.0
+0.10  0.30  0.60  0.90
+0.10  0.35  0.70  1.05
+0.05  0.20  0.40  0.60
+1.0
+0.02  0.04  0.08  0.16
+0.03  0.06  0.12  0.24
+0.10  0.20  0.40  0.80
+1.0
+0.00  -0.01  -0.02  -0.03
+0.00  -0.02  -0.04  -0.06
+0.00  -0.05  -0.10  -0.15
+
+# --- Engine (engopt fuelflow format) ---
+# Layout (per FreeFalcon AirframeEngineRead):
+#   engopt [options...]
+#   thrustFactor  fuelFlowFactor
+#   numMach
+#   mach[0..numMach-1]
+#   numAlt
+#   alt[0..numAlt-1]
+#   thrust_idle[alt=0][mach=0..numMach-1]   <- alt is OUTER, mach is INNER
+#   thrust_idle[alt=1][...]
+#   ... (numAlt rows)
+#   thrust_mil[...]   (numAlt rows)
+#   thrust_ab[...]    (numAlt rows)
+#   fuelflow_idle[...] (only if engopt fuelflow)
+#   fuelflow_mil[...]
+#   fuelflow_ab[...]
+engopt fuelflow
+1.0  1.0
+5
+0.0  0.4  0.8  1.2  2.0
+4
+0.0  10000.0  30000.0  50000.0
+# thrust_idle: 4 alt rows x 5 mach cols
+2000.0  1800.0  1200.0  600.0  300.0
+2000.0  1800.0  1200.0  600.0  300.0
+2000.0  1800.0  1200.0  600.0  300.0
+2000.0  1800.0  1200.0  600.0  300.0
+# thrust_mil: 4 alt rows x 5 mach cols
+18000.0  16000.0  10000.0  5000.0  2500.0
+18000.0  16000.0  10000.0  5000.0  2500.0
+18000.0  16000.0  10000.0  5000.0  2500.0
+18000.0  16000.0  10000.0  5000.0  2500.0
+# thrust_ab: 4 alt rows x 5 mach cols
+28000.0  26000.0  18000.0  9000.0  4500.0
+28000.0  26000.0  18000.0  9000.0  4500.0
+28000.0  26000.0  18000.0  9000.0  4500.0
+28000.0  26000.0  18000.0  9000.0  4500.0
+# fuelflow_idle: 4 alt rows x 5 mach cols
+100.0  90.0  60.0  30.0  15.0
+100.0  90.0  60.0  30.0  15.0
+100.0  90.0  60.0  30.0  15.0
+100.0  90.0  60.0  30.0  15.0
+# fuelflow_mil: 4 alt rows x 5 mach cols
+900.0  800.0  500.0  250.0  125.0
+900.0  800.0  500.0  250.0  125.0
+900.0  800.0  500.0  250.0  125.0
+900.0  800.0  500.0  250.0  125.0
+# fuelflow_ab: 4 alt rows x 5 mach cols
+1400.0  1300.0  800.0  400.0  200.0
+1400.0  1300.0  800.0  400.0  200.0
+1400.0  1300.0  800.0  400.0  200.0
+1400.0  1300.0  800.0  400.0  200.0
+
+# --- Roll command table ---
+3
+0.0  10.0  20.0
+4
+0.0  100.0  500.0  1000.0
+1.0
+10.0  20.0  30.0  40.0
+20.0  40.0  60.0  80.0
+30.0  60.0  90.0  120.0
+
+# --- Limiters ---
+# 18 limiters (one per LimiterKey). Format: type key values...
+# type 0 = Line (x1 y1 x2 y2)
+# type 1 = Value (x1)
+# type 2 = Percent (x1)
+# type 3 = ThreePoint (x0 y0 x1 y1 x2 y2)
+# type 4 = MinMax (min max)
+18
+0  0  -4.0  -3.0  0.0  -1.0
+0  1   4.0   3.0  30.0  9.0
+0  2   0.0   0.0  30.0  300.0
+0  3  -30.0  0.0  30.0  5.0
+0  4   0.0   0.0  30.0  10.0
+1  5   0.0
+2  6   1.0
+1  7   15.0
+0  8   0.0   0.0  20.0  25.0
+0  9   0.0   0.0  20.0  30.0
+0 10   0.0   0.0  1.0   0.5
+0 11   0.0   0.0  1.0   0.5
+0 12   0.0   0.5  1.0   1.0
+0 13   0.0   0.0  1.0   0.5
+0 14   0.0   1.0  1.0   0.0
+0 15   0.0   0.0  1.0   0.0
+0 16   0.0   9.0  1.0   7.0
+0 17   0.0  25.0  30.0  15.0
+
+# --- AuxAeroData (key/value pairs) ---
+normSpoolRate 3.0
+abSpoolRate 10.5
+jfsSpoolUpRate 15
+jfsSpoolUpLimit 0.25
+lightupSpoolRate 10
+flameoutSpoolRate 80
+jfsRechargeTime 60
+jfsMinRechargeRpm 0.12
+jfsSpinTime 240
+mainGenRpm 0.63
+stbyGenRpm 0.6
+epuBurnTime 600
+fuelFlowFactorNormal 0.87
+fuelFlowFactorAb 2.0
+minFuelFlow 868
+hasLef 1
+hasTef 2
+lefGround -2
+lefMaxAngle 25
+lefMaxMach 0.99
+lefRate 25
+tefMaxAngle 21.5
+tefTakeOff 21.5
+tefRate 80
+CLtefFactor 0.13
+CDtefFactor 0.8
+CDlefFactor 0
+CDSPDBFactor 0.034
+CDLDGFactor 0.06
+dragChuteCd 0
+area2Span 0.1066
+rollMomentum 1
+pitchMomentum 1.3
+yawMomentum 1
+pitchElasticity 1
+sinkRate 15
+gearPitchFactor 0
+rollGearGain 0.6
+yawGearGain 0.6
+pitchGearGain 0.8
+landingAOA 12.5
+rollCouple -0.05
+elevatorRoll 1
+criticalAOA 0
+nEngines 1
+typeEngine 5
+# An unknown key, just to verify it gets captured verbatim.
+customUnknownKey 42.0 with trailing tokens
+END
