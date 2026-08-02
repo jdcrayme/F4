@@ -392,12 +392,45 @@ ctest --test-dir build/f4-state-machine/tests --output-on-failure
 ctest --test-dir build/f4-entities/tests --output-on-failure
 ctest --test-dir build/f4-convert/tests --output-on-failure
 ctest --test-dir build/f4-data/tests --output-on-failure
+ctest --test-dir build/f4-world-convert/tests --output-on-failure
+ctest --test-dir build/f4-world/tests --output-on-failure
+ctest --test-dir build/f4-terrain/tests --output-on-failure
+ctest --test-dir build/f4-world-vis/tests --output-on-failure
 ctest --test-dir build/f4-flight-model/tests --output-on-failure
 ```
 
 Requires CMake 3.20+ and a C++20 compiler (MSVC 19.28+, GCC 10+, Clang 12+).
 Tests use [Google Test](https://github.com/google/googletest) v1.14.0,
 fetched automatically via CMake's FetchContent.
+
+## One-Click Visualization
+
+After building, generate the theater map (real Korea terrain + campaign
+objectives) with a single command:
+
+```bash
+cmake --build build --target visualize
+```
+
+Then open `build/save1_map.html` in your browser. This produces a 1.6 MB
+HTML file with:
+- 16,384 color-coded terrain tiles (deep blue ocean, tan lowlands, brown
+  mountains, white peaks) from real `THEATER.MEA` elevation data
+- 2,659 campaign objectives overlaid as circles (red = enemy/PRC, cyan =
+  friendly/ROK) with airbase-specific runway icons
+- Layer-toggle checkboxes (terrain / grid / objectives / units / legend)
+
+**Alternative — the shell script** (auto-opens browser, handles custom files):
+
+```bash
+./visualize.sh                          # build + generate + open in browser
+./visualize.sh --no-open                # generate but don't auto-open
+./visualize.sh path/to/your.cam         # use a custom campaign file
+```
+
+The script finds cmake (even if installed via `pip`), locates the bundled
+`save1.cam` fixture and terrain files automatically, and copies the final
+map to the repo root for easy access.
 
 ## Design Principles
 
