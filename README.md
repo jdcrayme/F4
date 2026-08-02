@@ -6,6 +6,46 @@ C++20 libraries. See `Docs/ARCHITECTURE PROPOSAL.md` for the full design.
 
 ## Libraries
 
+### f4-geo — Strong-typed coordinate frames & geodesy
+
+Header-only C++20 library providing distinct types for the three absolute
+position representations (sim-local `WorldPosition`, geodetic `LatLonAlt`,
+Earth-centered `ECEFPosition`) plus the `TheaterDatum` that binds the sim
+frame to the Earth. Extends the f4-units philosophy (phantom dimensions) to
+coordinate frames: no implicit conversion, every crossing is a named call.
+
+```cpp
+#include <f4/geo/f4_geo.hpp>
+using namespace f4::geo;
+
+// Source of truth: the sim-local frame, feet, z-up.
+WorldPosition ownship{5000.0, -3000.0, 20000.0};
+
+// Earth-frame views require a datum (the sim↔Earth bridge):
+TheaterDatum datum(LatLonAlt{38.0 * DEG_TO_RAD, -77.0 * DEG_TO_RAD, 0.0});
+LatLonAlt lla = to_lla(ownship, datum);          // flat-earth, <1m at theater scale
+ECEFPosition ecef = to_ecef(ownship, datum);     // exact WGS84 (DIS wire format)
+
+// Relative/reference views (Category B — carry a reference, not freely
+// interconvertible with absolute types):
+BRA bra = to_bra(ownship, target);               // bearing/range/alt from ownship
+BullseyeOffset be = to_bullseye(bullseye, target);
+```
+
+**Modules**: `constants.hpp` (WGS84 + unit factors), `position.hpp` (the three
+absolute strong types), `datum.hpp` (`TheaterDatum`), `conversions.hpp` (the
+conversion lattice — exact WGS84 LLA↔ECEF, flat-earth World↔LLA, composed
+World↔ECEF), `relative.hpp` (`BRA`, `BullseyeOffset` with inverse `from_bullseye`).
+
+**Tests**: 30 (WGS84 known points, LLA↔ECEF round-trip, World↔LLA round-trip
+identity, heading rotation, BRA/Bullseye geometry). Zero external dependencies
+beyond the standard library — maximally portable and testable.
+
+**Design rationale**: DIS-readiness is a design gate, not a deliverable. A
+future `f4-dis` adapter is `to_ecef(pos, datum)` on transmit, `to_world(ecef,
+datum)` on receive — no rewrite. Real-world data import (terrain, airbases,
+waypoints given as lat/lon) flows through the same datum into the sim frame.
+
 ### f4-units — Compile-time physical quantity types
 
 Header-only C++20 library providing type-safe dimensional analysis with
@@ -183,6 +223,111 @@ recording and text emission, serialization round-trip). Zero dependencies.
 recorded with enough context to diagnose it from text alone — no screenshot
 parsing. The trace is zero-overhead in production (opt-in via raw pointer).
 
+### f4-entities — Component-based entity system
+
+Static library replacing FreeFalcon's deep inheritance hierarchy
+(`VuEntity -> FalconEntity -> SimBaseClass -> ... -> AircraftClass`,
+200+ member god-classes) with a lightweight ID handle + typed components.
+Entities are generation-tagged stable handles; behavior/data lives in
+components that can be added, removed, and queried independently.
+
+```cpp
+#include <f4/entities/f4_entities.hpp>
+using namespace f4::entities;
+
+EntityWorld world;
+EntityHandle h = world.create();
+h.set_tag(tags::ROLE, TagValue::from(std::string("fighter")));
+h.set_tag(tags::TEAM, TagValue::from(std::string("blue")));
+
+// TransformComponent carries the strong-typed f4::geo::WorldPosition:
+auto& tf = h.add<TransformComponent>();
+tf.position = f4::geo::WorldPosition{5000.0, -3000.0, 20000.0};
+tf.qw = 1.0;   // identity orientation
+
+// Query all blue fighters:
+auto blue_fighters = world.with_tag(tags::TEAM, TagValue::from(std::string("blue")));
+
+// Spatial radius query (linear scan; SpatialIndex available for hot paths):
+auto nearby = world.within_radius(0, 0, 0, 50000.0);
+```
+
+**Modules**: `entity.hpp` (`EntityId`, `EntityWorld`, `EntityHandle`, tags,
+`Component`/CRTP, `TransformComponent` using `f4::geo::WorldPosition`,
+`CampaignIdentityComponent`), `spatial_index.hpp` (3D hash grid for radius
+queries, cell-sized to the typical query radius).
+
+**Tests**: 20 (entity lifecycle, generation bump on destroy, component
+add/get/has/remove, tag filtering, within-radius, spatial index
+insert/query/update/remove across cell boundaries). Links f4-geo (PUBLIC) —
+the strong-typed position is the design decision made concrete.
+
+### f4-world-convert — FreeFalcon .cam campaign archive → JSON
+
+Static library + CLI that convert FreeFalcon's binary `.cam` campaign
+archives to open JSON. A `.cam` file is a "campressed" container holding
+10+ typed sub-files (`.cmp` campaign metadata, `.obj` objectives, `.uni`
+units, `.tea` teams, `.wth` weather, `.ver` version, ...). The converter
+parses the container, LZSS-decompresses the `.cmp` sub-file (faithful port
+of FreeFalcon's decompressor), decodes the campaign header + 8 team slots,
+and preserves undecoded sub-files as base64 for incremental decoding.
+
+```bash
+# Convert a real campaign save to JSON
+cam2json save1.cam            # -> save1.json (259 KB)
+```
+
+```json
+{
+  "archive":     { "file_size": 197340, "subfiles": [ {name,offset,size}, ... ] },
+  "version":     63,
+  "campaign":    { "current_time": 32400000, "teams": [
+                     {"slot":1,"name":"U.S."}, {"slot":2,"name":"ROK"},
+                     {"slot":3,"name":"Japan"}, {"slot":4,"name":"CIS"},
+                     {"slot":5,"name":"PRC"}, {"slot":6,"name":"DPRK"}, ...
+                  ] },
+  "raw_subfiles": { "obj": {...}, "uni": {...}, "tea": {...}, ... }
+}
+```
+
+**Components**: `lzss.hpp` (LZSS decompressor — byte-exact port of
+FreeFalcon's `LZSS_Expand`), `cam_archive.hpp` (`.cam` container parser),
+`campaign_decoder.hpp` (`.cmp` decode: LZSS-expand + struct parse of
+`CurrentTime`, TE block, `team_name[8][20]`/`team_motto[8][200]`),
+`world_json.hpp` (JSON emitter with base64 preservation of undecoded sub-files).
+
+**Tests**: 16 (LZSS byte-exactness against real `.cmp` payload, container
+manifest parsing, campaign header decode, team-name extraction, JSON emit).
+Validated against a real Korea-theater `save1.cam` fixture.
+
+### f4-world — Typed WorldState from campaign data
+
+Static library that loads the JSON produced by `f4-world-convert` into typed
+structs (`CampaignState`, `TeamState[8]`, `WorldState`) and populates an
+`f4-entities` `EntityWorld` from them. Each team becomes an entity tagged
+with `role=team`, `team=<name>`, `alive=true` and carrying a
+`CampaignIdentityComponent`. This is the keystone from §18.5: the entity
+system is now populated from **real** campaign data, structurally retiring
+the injection-harness trap.
+
+```cpp
+#include <f4/world/f4_world.hpp>
+using namespace f4::world;
+
+WorldState ws;
+ws.load("save1.json");              // real campaign data
+f4::entities::EntityWorld ew;
+auto team_ids = populate_teams(ew, ws);   // 7 entities (skips empty slot 0)
+
+// The EntityWorld now answers tag queries against REAL team identities:
+auto rok = ew.with_tag(tags::TEAM, TagValue::from(std::string("ROK")));
+```
+
+**Tests**: 7 (JSON field loading, team-slot parsing, entity creation with
+correct tags/identity, tag-based queries). End-to-end test loads the real
+`save1.cam`-derived JSON and verifies all 8 team names (ROK, Japan, PRC,
+DPRK, U.S., CIS, Gorn) round-trip from binary → JSON → typed structs.
+
 ### f4-flight-model — 6-DOF flight dynamics
 
 Static library implementing the full 6-DOF flight dynamics: atmosphere,
@@ -242,7 +387,9 @@ cmake -B build -S .
 cmake --build build
 ctest --test-dir build/f4-units/tests --output-on-failure
 ctest --test-dir build/f4-math/tests --output-on-failure
+ctest --test-dir build/f4-geo/tests --output-on-failure
 ctest --test-dir build/f4-state-machine/tests --output-on-failure
+ctest --test-dir build/f4-entities/tests --output-on-failure
 ctest --test-dir build/f4-convert/tests --output-on-failure
 ctest --test-dir build/f4-data/tests --output-on-failure
 ctest --test-dir build/f4-flight-model/tests --output-on-failure

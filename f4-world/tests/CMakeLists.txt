@@ -1,0 +1,40 @@
+include(FetchContent)
+
+FetchContent_Declare(
+    googletest
+    GIT_REPOSITORY https://github.com/google/googletest.git
+    GIT_TAG v1.14.0
+)
+set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(googletest)
+
+enable_testing()
+include(GoogleTest)
+
+# Generate the real world JSON fixture from save1.cam at build time, so the
+# f4-world tests can validate end-to-end (.cam -> JSON -> typed WorldState)
+# against real campaign data.
+set(WORLD_CAM_FIXTURE "${CMAKE_CURRENT_SOURCE_DIR}/../../f4-world-convert/tests/fixtures/save1.cam")
+set(WORLD_JSON_FIXTURE "${CMAKE_BINARY_DIR}/generated_world_fixtures/save1.json")
+add_custom_command(
+    OUTPUT ${WORLD_JSON_FIXTURE}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/generated_world_fixtures
+    COMMAND cam2json ${WORLD_CAM_FIXTURE} ${WORLD_JSON_FIXTURE}
+    DEPENDS cam2json ${WORLD_CAM_FIXTURE}
+    COMMENT "Generating save1.json from save1.cam (end-to-end fixture)"
+)
+
+function(f4_add_test name source)
+    add_executable(${name} ${source})
+    target_link_libraries(${name} PRIVATE GTest::gtest_main f4-world)
+    target_compile_definitions(${name} PRIVATE
+        WORLD_JSON_FIXTURE="${WORLD_JSON_FIXTURE}")
+    gtest_discover_tests(${name})
+endfunction()
+
+f4_add_test(test_world_state  test_world_state.cpp)
+f4_add_test(test_world_loader test_world_loader.cpp)
+
+# Ensure the JSON fixture is generated before the state tests run.
+add_custom_target(world_json_fixture ALL DEPENDS ${WORLD_JSON_FIXTURE})
+add_dependencies(test_world_state world_json_fixture)

@@ -14,7 +14,12 @@ set(F4_GENERATED_FIXTURES_DIR "${CMAKE_BINARY_DIR}/generated_fixtures" CACHE PAT
 
 add_subdirectory(f4-units)
 add_subdirectory(f4-math)
+add_subdirectory(f4-geo)          # strong-typed coordinate frames & geodesy
 add_subdirectory(f4-state-machine)
+add_subdirectory(f4-entities)     # component-based entity system (uses f4-geo)
 add_subdirectory(f4-data)
 add_subdirectory(f4-convert)
+add_subdirectory(f4-world-convert) # .cam campaign archive -> JSON (keystone)
+add_subdirectory(f4-world)         # typed WorldState -> populates f4-entities
+add_subdirectory(f4-world-vis)     # SVG/HTML tile-map renderer for world data
 add_subdirectory(f4-flight-model)
