@@ -4,3 +4,11 @@ cmake-build-*/
 .vs/
 *.user
 *.suo
+
+# CMake in-tree generation artifacts (should not exist, but guard against
+# accidental in-source configure polluting the source tree)
+CTestTestfile.cmake
+cmake_install.cmake
+*_discovery.cmake
+*_include.cmake
+CMakeFiles/

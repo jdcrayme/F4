@@ -21,9 +21,13 @@ endfunction()
 
 # Pass the path to the generated JSON fixtures (produced by f4-convert at
 # build time) to the test executables that need them.
-f4_fm_add_test(test_atmosphere   test_atmosphere.cpp)
-f4_fm_add_test(test_flight_model test_flight_model.cpp)
+f4_fm_add_test(test_atmosphere           test_atmosphere.cpp)
+f4_fm_add_test(test_flight_model         test_flight_model.cpp)
+f4_fm_add_test(test_stall_sm_integration test_stall_sm_integration.cpp)
 
 target_compile_definitions(test_flight_model PRIVATE
     F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}")
+target_compile_definitions(test_stall_sm_integration PRIVATE
+    F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}")
 add_dependencies(test_flight_model convert_golden_fixtures)
+add_dependencies(test_stall_sm_integration convert_golden_fixtures)

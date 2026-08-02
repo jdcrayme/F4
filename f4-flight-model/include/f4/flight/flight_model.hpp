@@ -19,6 +19,7 @@
 #include "f4/flight/eom.hpp"
 #include "f4/flight/fcs.hpp"
 #include "f4/flight/gear.hpp"
+#include "f4/flight/stall_state.hpp"
 #include "f4/data/aircraft_config.hpp"
 
 namespace f4::flight {
@@ -88,6 +89,19 @@ public:
     /// within the iteration limit.
     bool trim();
 
+    // --- Stall state machine access ---
+
+    /// The stall state machine. Hosts may attach a trace for debugging:
+    ///   f4::fsm::Trace<StallState, StallEvent> trace;
+    ///   fm.stallSM().set_trace(&trace);
+    ///   trace.set_trace_rejections(true);  // to diagnose "why no transition?"
+    StallSM&       stallSM()       noexcept { return stallSM_; }
+    const StallSM& stallSM() const noexcept { return stallSM_; }
+
+    /// The stall config (tunable thresholds).
+    StallConfig&       stallConfig()       noexcept { return stallCfg_; }
+    const StallConfig& stallConfig() const noexcept { return stallCfg_; }
+
 private:
     /// Run one minor-frame step.
     void minorStep(double dt, const PilotInput& input);
@@ -101,6 +115,11 @@ private:
     /// Compute load factors (G) from current force state.
     void accelerometers();
 
+    /// Update the stall state machine: poll flight state, emit events,
+    /// write the SM's current state back to AeroState for next frame's
+    /// force modification. Called once per minor frame, after aero.
+    void updateStallSM(double dt, const PilotInput& input);
+
     data::AircraftConfig cfg_;
     AircraftState        state_;
 
@@ -109,6 +128,11 @@ private:
     FlightControlSystem   fcs_;
     GearModel             gear_;
     EquationsOfMotion     eom_;
+
+    // Stall state machine (f4-state-machine)
+    StallSM    stallSM_;
+    StallConfig stallCfg_;
+    double     stallTimer_{0.0};  // time in current stall state (seconds)
 
     /// Cached copy of the most recent PilotInput (needed by updateGear
     /// which runs before minorStep but needs the brake handle state).

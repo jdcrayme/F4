@@ -134,8 +134,16 @@ struct AeroState {
     double dragChutePos{0.0};  // drag chute
 
     // Stall state
+    //   `stalled` is the per-frame DETECTION flag (computed by aero each
+    //   frame from vcas/stallSpeed/alpha). `stallState` is the LIFECYCLE
+    //   state from the f4-state-machine stall SM (None -> EnteringDeepStall
+    //   -> DeepStall -> Spinning/FlatSpin -> Recovering -> None). The aero
+    //   force model reads stallState to modify lift (FlatSpin -> lift=0).
     bool   stalled{false};
     double stallSpeed{0.0};    // kcas
+    int    stallState{0};      // StallState enum value (0 = None); int to
+                               // avoid pulling f4-state-machine into the
+                               // state header. Cast via static_cast<StallState>.
 
     // Incremental CD from external stores (set by host for weapons/fuel tanks)
     double cdStores{0.0};

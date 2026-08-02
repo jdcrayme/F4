@@ -40,7 +40,7 @@ using namespace f4::data;
 // Construction
 // ---------------------------------------------------------------------------
 FlightModel::FlightModel()
-    : aero_(), engine_(), fcs_(), gear_(), eom_() {}
+    : aero_(), engine_(), fcs_(), gear_(), eom_(), stallSM_(makeStallMachine()) {}
 
 // ---------------------------------------------------------------------------
 // init: initialize the flight model with a config and initial conditions.
@@ -64,6 +64,11 @@ void FlightModel::init(const AircraftConfig& cfg,
     fcs_    = FlightControlSystem(&cfg_, &cfg_.geometry, &cfg_.aux);
     gear_   = GearModel(&cfg_.geometry, &cfg_.aux);
     eom_    = EquationsOfMotion(&cfg_.geometry, &cfg_.aux);
+
+    // Rebuild the stall state machine (picks up any config changes)
+    stallSM_ = makeStallMachine(stallCfg_);
+    stallTimer_ = 0.0;
+    state_.aero.stallState = static_cast<int>(StallState::None);
 
     // --- Initial kinematic state ---
     KinematicState& k = state_.kin;
@@ -320,6 +325,10 @@ void FlightModel::minorStep(double dt, const PilotInput& input) {
     // 6. Load factors (G)
     accelerometers();
 
+    // 6.5 Stall state machine: poll flight state, emit events, update
+    // AeroState.stallState for next frame's aero force modification.
+    updateStallSM(dt, input);
+
     // 7. EOM (integrate body rates, quaternion, position)
     eom_.update(dt, input, state_);
 
@@ -437,6 +446,51 @@ bool FlightModel::trim() {
 
     state_.trimming = false;
     return false;  // did not converge
+}
+
+// ---------------------------------------------------------------------------
+// updateStallSM: poll flight state, emit events to the stall SM, write the
+// SM's current state back to AeroState for next frame's force modification.
+//
+// This is the bridge between FreeFalcon's polling-based stall logic and
+// f4-state-machine's event-driven model. Called once per minor frame,
+// after aero (which computed the `stalled` detection flag) and before EOM.
+// ---------------------------------------------------------------------------
+void FlightModel::updateStallSM(double dt, const PilotInput& input) {
+    AeroState& a = state_.aero;
+    const StallState currentState = static_cast<StallState>(a.stallState);
+
+    // Accumulate time in the current state
+    stallTimer_ += dt;
+
+    // Poll flight state and determine which event (if any) to emit
+    StallDetection det;
+    det.currentState   = currentState;
+    det.aeroStalled    = a.stalled;
+    det.alpha_deg      = a.alpha_deg;
+    det.vcas_kts       = state_.vcas;
+    det.stallSpeed_kts = a.stallSpeed;
+    det.qbar           = state_.qbar;
+    det.timeInState_s  = stallTimer_;
+    det.pstick         = input.pstick;
+
+    const StallEvent evt = detectStallEvent(det, stallCfg_);
+
+    // Only process if the SM can actually fire this event from the current
+    // state (avoids no-op process() calls and spurious trace entries).
+    if (stallSM_.can_fire(evt)) {
+        const StallState prev = stallSM_.current();
+        stallSM_.process(evt);
+        const StallState next = stallSM_.current();
+        if (next != prev) {
+            // State changed — reset the dwell timer
+            stallTimer_ = 0.0;
+        }
+    }
+
+    // Write the SM's current state back to AeroState for next frame's
+    // aero force modification (FlatSpin -> lift=0, etc.)
+    a.stallState = static_cast<int>(stallSM_.current());
 }
 
 }  // namespace f4::flight

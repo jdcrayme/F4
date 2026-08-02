@@ -186,11 +186,21 @@ void Aerodynamics::update(double alpha_deg,
     // Forces are ACCELERATIONS (ft/s^2 = force/mass).
     // lift = CL * qsom, drag = CD * qsom.
     //
-    // When stalled, lift is reduced per the FreeFalcon formula:
-    //   lift = min(0, cl*0.5) * (vcas/stallSpeed) * qsom
-    // This drives lift toward 0 or negative, causing the aircraft to fall.
+    // Stall force model (matches FreeFalcon aero.cpp:319-327):
+    //   FlatSpin  -> lift = 0 (terminal, no lift whatsoever)
+    //   Stalled   -> lift = min(0, cl*0.5) * (vcas/stallSpeed) * qsom
+    //                (drives lift toward 0 or negative, aircraft falls)
+    //   Normal    -> lift = cl * qsom
+    //
+    // The stallState is read from AeroState (set by the FlightModel's stall
+    // SM at the end of the previous frame). This introduces a 1-frame latency
+    // (the SM state lags the aero detection by one minor frame) which is
+    // negligible at 240 Hz.
     double lift;
-    if (stalled && stallSpeed > 1e-3) {
+    const int stallState = aero.stallState;  // 0=None, 4=FlatSpin
+    if (stallState == 4) {  // FlatSpin
+        lift = 0.0;  // FreeFalcon aero.cpp:319: lift = 0.0f
+    } else if (stalled && stallSpeed > 1e-3) {
         const double cl_stalled = std::min(0.0, cl * 0.5);
         lift = cl_stalled * (vcas_kts / stallSpeed) * qsom;
     } else if (vt_ftps < 1e-3) {
