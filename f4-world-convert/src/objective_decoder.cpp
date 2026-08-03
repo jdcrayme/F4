@@ -79,6 +79,7 @@ DecodedObjectives decode_obj(const uint8_t* data, std::size_t size) {
                            static_cast<std::size_t>(uncompressed));
 
     Cursor c{buf.data(), buf.data() + buf.size()};
+    out.inner_size = buf.size();
     out.objectives.reserve(static_cast<std::size_t>(out.count));
 
     // gCampDataVersion < 70: CampBaseClass::Load skips pos_.z_ (set to 0).
@@ -168,6 +169,11 @@ DecodedObjectives decode_obj(const uint8_t* data, std::size_t size) {
             break;
         }
     }
+
+    // Record how far we got. On a clean decode this equals inner_size;
+    // on a cursor desync it's the offset where we stopped (so the caller
+    // can report how much was left unconsumed).
+    out.bytes_consumed = static_cast<std::size_t>(c.p - buf.data());
 
     return out;
 }

@@ -135,6 +135,8 @@ std::string to_world_json(const CamArchive& cam, const WorldJsonOptions& opts) {
                 o << ",\n  \"objectives\": {\n";
                 o << "    \"count\": " << objs.count << ",\n";
                 o << "    \"decoded\": " << objs.objectives.size() << ",\n";
+                o << "    \"bytes_consumed\": " << objs.bytes_consumed << ",\n";
+                o << "    \"inner_size\": " << objs.inner_size << ",\n";
                 o << "    \"items\": [\n";
                 for (std::size_t i = 0; i < objs.objectives.size(); ++i) {
                     const auto& ob = objs.objectives[i];

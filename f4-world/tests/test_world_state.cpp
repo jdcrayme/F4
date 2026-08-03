@@ -211,3 +211,119 @@ TEST(WorldState, LoadTerrainResolvesRelativePath) {
     EXPECT_EQ(ws.terrain.header.height, 2u);
     EXPECT_EQ(ws.terrain.tile_types.size(), 4u);
 }
+
+// ============================================================================
+// REFACTOR-4: Verify objective link data round-trips through the JSON →
+// loader pipeline. The link data (road/rail network) is decoded by
+// f4-world-convert, emitted to JSON, and parsed by f4-world's loader. This
+// test verifies the round-trip preserves link count, neighbor VU_IDs, and
+// the road/rail classification.
+//
+// This is the consumer-side gate: if the loader drops or mis-parses any
+// link field, f4-ai (which will use the link network for pathfinding)
+// would see a corrupted graph. The test catches that here, before f4-ai
+// is built on top.
+// ============================================================================
+TEST(WorldState, RealCamJsonObjectiveLinksRoundTrip) {
+    const std::string path = WORLD_JSON_FIXTURE;
+    if (!std::filesystem::exists(path)) GTEST_SKIP() << "fixture JSON not generated yet";
+    auto json = read_file(path);
+    WorldState ws;
+    ws.load_from_string(json);
+
+    ASSERT_EQ(ws.objectives.size(), 2659u);
+
+    // Tally total links across all objectives. The convert-side test
+    // verifies the count is > 100; the loader must preserve every one.
+    std::size_t total_links = 0;
+    std::size_t objectives_with_links = 0;
+    for (const auto& o : ws.objectives) {
+        if (!o.links.empty()) ++objectives_with_links;
+        total_links += o.links.size();
+    }
+    EXPECT_GT(total_links, 100u)
+        << "expected the road/rail network to survive the JSON round-trip";
+    EXPECT_GT(objectives_with_links, 100u)
+        << "expected many objectives to retain their link lists";
+
+    // At least some links must be classified as roads (the is_road bool
+    // must survive the round-trip, not just the neighbor VU_IDs).
+    // NOTE: is_rail is NOT checked here because railroads are modeled as
+    // objective types (TYPE_RAILROAD=24), not as link movement costs —
+    // see the convert-side test RoadLinksArePresent for the full
+    // explanation.
+    std::size_t road_links = 0;
+    for (const auto& o : ws.objectives) {
+        for (const auto& link : o.links) {
+            if (link.is_road) ++road_links;
+        }
+    }
+    EXPECT_GT(road_links, 100u)
+        << "expected road classification to survive the JSON round-trip";
+
+    // Neighbor VU_IDs must survive the round-trip. A zero neighbor_num
+    // would indicate the loader dropped the field.
+    std::size_t zero_neighbor_nums = 0;
+    for (const auto& o : ws.objectives) {
+        for (const auto& link : o.links) {
+            if (link.neighbor_num == 0) ++zero_neighbor_nums;
+        }
+    }
+    // Allow a small fraction (some links may legitimately have num=0),
+    // but the vast majority must be non-zero.
+    const double zero_fraction =
+        static_cast<double>(zero_neighbor_nums) / static_cast<double>(total_links);
+    EXPECT_LT(zero_fraction, 0.01)
+        << zero_neighbor_nums << " of " << total_links
+        << " links have zero neighbor_num after round-trip";
+}
+
+// Synthetic round-trip test: verify the loader correctly parses a known
+// link array from JSON. This isolates the loader from the decoder — if
+// this test fails but RealCamJsonObjectiveLinksRoundTrip passes, the
+// decoder is correct but the loader has a parsing bug.
+TEST(WorldState, ParsesSyntheticObjectiveLinks) {
+    WorldState ws;
+    ws.load_from_string(R"({
+        "version": 63,
+        "campaign": { "teams": [] },
+        "objectives": {
+            "count": 1,
+            "decoded": 1,
+            "items": [
+                {
+                    "type": 6,
+                    "type_name": "Bridge",
+                    "x": 500,
+                    "y": 500,
+                    "owner": 2,
+                    "links": [
+                        {"n": 12345, "c": 67890, "road": true,  "rail": false},
+                        {"n": 99999, "c": 11111, "road": false, "rail": true},
+                        {"n": 1,      "c": 2,      "road": true,  "rail": true}
+                    ]
+                }
+            ]
+        }
+    })");
+    ASSERT_EQ(ws.objectives.size(), 1u);
+    ASSERT_EQ(ws.objectives[0].links.size(), 3u);
+
+    // First link: road only
+    EXPECT_EQ(ws.objectives[0].links[0].neighbor_num, 12345u);
+    EXPECT_EQ(ws.objectives[0].links[0].neighbor_creator, 67890u);
+    EXPECT_TRUE(ws.objectives[0].links[0].is_road);
+    EXPECT_FALSE(ws.objectives[0].links[0].is_rail);
+
+    // Second link: rail only
+    EXPECT_EQ(ws.objectives[0].links[1].neighbor_num, 99999u);
+    EXPECT_EQ(ws.objectives[0].links[1].neighbor_creator, 11111u);
+    EXPECT_FALSE(ws.objectives[0].links[1].is_road);
+    EXPECT_TRUE(ws.objectives[0].links[1].is_rail);
+
+    // Third link: both road and rail
+    EXPECT_EQ(ws.objectives[0].links[2].neighbor_num, 1u);
+    EXPECT_EQ(ws.objectives[0].links[2].neighbor_creator, 2u);
+    EXPECT_TRUE(ws.objectives[0].links[2].is_road);
+    EXPECT_TRUE(ws.objectives[0].links[2].is_rail);
+}

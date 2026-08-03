@@ -46,10 +46,19 @@
 //   [if has_radar_data: RadarRangeClass]
 //
 // For the first pass we decode the positional and identity fields (type,
-// x, y, z, owner, nameid, priority) — enough to place objectives on the
-// map and color them by team. The variable-length feature/radar data is
-// parsed but not yet exposed as typed fields; it's preserved in the JSON
-// for future decoders.
+// x, y, z, owner, nameid, priority) AND the variable-length link data
+// (road/rail network — each link is 8 uchar costs + 8-byte neighbor VU_ID
+// = 16 bytes). The fstatus array is parsed to advance the cursor but not
+// exposed as a typed field (it's a per-feature status bitmap whose
+// semantics depend on the objective type). The optional RadarRangeClass
+// (32 bytes) is likewise parsed to advance the cursor but not exposed —
+// it's only present for radar-type objectives and will be exposed when
+// f4-radar lands.
+//
+// The DecodedObjectives struct carries bytes_consumed and inner_size for
+// cursor-landing verification (parity with DecodedUnits): on a clean
+// decode, bytes_consumed == inner_size. If they differ, the cursor
+// desynced on some record and the decoder stopped early.
 
 #pragma once
 
@@ -160,6 +169,17 @@ struct ObjectiveRecord {
 struct DecodedObjectives {
     int16_t count = 0;
     std::vector<ObjectiveRecord> objectives;
+
+    /// Number of bytes consumed from the decompressed buffer. On a clean
+    /// decode (all `count` records parsed without cursor desync), this
+    /// equals inner_size. If less, the decoder stopped early — the
+    /// objectives vector contains only the records that decoded cleanly.
+    std::size_t bytes_consumed = 0;
+
+    /// Total size of the decompressed buffer (the LZSS payload's
+    /// uncompressed size from the sub-file header). bytes_consumed should
+    /// equal inner_size on a clean decode.
+    std::size_t inner_size = 0;
 };
 
 /// Decode the .obj sub-file's raw bytes. Throws on malformed input.
