@@ -97,9 +97,33 @@ set(TINYFILEDIALOGS_SOURCES
 # ============================================================================
 # Static library: rendering logic (terrain tiles, objective icons, inspector
 # panel). Linked by the CLI exe and (future) by editor embeds.
+#
+# Source layout (after the god-file split — see viewer_state.hpp for the
+# per-concern breakdown):
+#   viewer_app.cpp      — lifecycle (ctor/dtor/run) + set_initial_camera
+#                         + schedule_screenshot
+#   icons.cpp           — Impl icon-table + draw_icon + icon_for_*
+#   camera.cpp          — Impl world<->screen transforms + fit_to_world
+#   file_ops.cpp        — load_*_json / import_cam_archive / import_terrain_binary
+#   install_flow.cpp    — set_install_path* / open_campaign_dialog /
+#                         load_campaign_from_install / install_diagnostics_text
+#                         / open_install_diagnostics / open_hex_inspector_with_file
+#   diagnostics.cpp     — build_install_diagnostics / build_campaign_load_error
+#   canvas.cpp          — handle_input / draw_canvas (Raylib 2D render)
+#   imgui_panels.cpp    — draw_imgui (menus, layers, legend, inspector, modals)
+#                         + open_file_dialog (legacy text-input modal)
+# Plus the pre-existing hex/ (Hex Inspector) + file_dialog.cpp (tinyfiledialogs
+# wrapper) + settings.cpp (persisted settings JSON).
 # ============================================================================
 add_library(f4_world_viewer STATIC
     src/viewer_app.cpp
+    src/icons.cpp
+    src/camera.cpp
+    src/file_ops.cpp
+    src/install_flow.cpp
+    src/diagnostics.cpp
+    src/canvas.cpp
+    src/imgui_panels.cpp
     src/file_dialog.cpp
     src/settings.cpp
     src/hex/hex_model.cpp
@@ -114,6 +138,7 @@ target_include_directories(f4_world_viewer
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>
     PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
         ${IMGUI_DIR}
         ${IMGUI_DIR}/backends
         ${RLIMGUI_DIR}
