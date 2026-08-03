@@ -262,6 +262,102 @@ add/get/has/remove, tag filtering, within-radius, spatial index
 insert/query/update/remove across cell boundaries). Links f4-geo (PUBLIC) —
 the strong-typed position is the design decision made concrete.
 
+### f4-messaging — Type-safe message bus with explicit thread boundaries
+
+Static library replacing FreeFalcon's 76+ `FalconEvent` subclasses (each
+with `#pragma pack(1)` `DATA_BLOCK`s, manual `Encode`/`Decode`, routed via
+`switch(FalconMsgID)`) with three small primitives: plain-data message
+structs, a type-indexed `MessageBus` for fan-out, and a thread-safe
+`MessageQueue<Msg>` for SPSC patterns.
+
+```cpp
+#include <f4/messaging/f4_messaging.hpp>
+using namespace f4::messaging;
+
+MessageBus sim_bus;
+sim_bus.subscribe<DamageMsg>([](const DamageMsg& m) {
+    // ... apply damage to m.target_id ...
+});
+
+// Same-thread delivery (hot path):
+sim_bus.publish(DamageMsg{target_id=7, source_id=1, strength=0.5f});
+
+// Cross-thread delivery (campaign → sim):
+MessageBus campaign_bus;
+// In the campaign thread:
+send_to(sim_bus, MissionAssignMsg{...});
+// In the sim thread, at the top of the tick:
+sim_bus.flush_pending();   // delivers all cross-thread messages
+```
+
+**Modules**: `bus.hpp` (`MessageBus` — `subscribe` / `publish` /
+`publish_deferred` / `flush_pending` / `send_to` friend; `MessageQueue<Msg>`
+— `push` / `drain`).
+
+**Threading model**: `publish()` and `publish_deferred()` are safe to
+call concurrently from multiple producer threads. Each subsystem owns a
+bus; each tick starts with `flush_pending()`. Handlers may themselves
+`publish` / `publish_deferred` — the swap-then-drain `flush_pending`
+prevents unbounded recursion.
+
+**Tests**: 28 (subscribe/publish/unsubscribe semantics, multi-handler
+dispatch order, payload-carrying messages, deferred + flush, send_to
+cross-bus, recursive-flush safety, 4-thread × 250-msg stress,
+bidirectional sim+campaign topology). Zero external dependencies.
+
+### f4-json — Minimal dependency-free JSON reader/writer
+
+Static library providing the JSON reader and writer used by f4-world,
+f4-terrain, and f4-world-viewer/settings. Replaces three duplicated
+hand-rolled implementations (~410 LoC of copy-pasted parser code) with
+one shared library. Header-only; the API is shape-compatible with the
+local `JsonReader` classes that lived in f4-world and f4-terrain, so the
+refactor was mechanical.
+
+```cpp
+#include <f4/json/f4_json.hpp>
+using f4::json::Reader;
+using f4::json::Writer;
+
+// Walk a known schema (the pattern used by f4-world, f4-terrain):
+Reader r(json_string);
+r.skip_ws(); r.expect('{');
+while (!r.consume('}')) {
+    std::string key = r.read_string();
+    r.expect(':');
+    if      (key == "name")  name = r.read_string();
+    else if (key == "width") width = r.read_int();
+    else                     r.skip_value();
+    (void)r.consume(',');
+}
+
+// Emit (the pattern used by f4-terrain's to_terrain_json):
+Writer w;
+w.raw("{\n");
+w.raw("  \"theater\": "); w.string("Korea"); w.raw(",\n");
+w.raw("  \"width\": ");   w.number(128);     w.raw("\n");
+w.raw("}\n");
+std::string out = w.str();
+```
+
+**Modules**: `reader.hpp` (`Reader` — recursive-descent parser for
+objects/arrays/strings/numbers/bool/null with escape decoding including
+basic `\uXXXX`), `writer.hpp` (`Writer` — `raw` / `string` /
+`number<T>` / `number_key` / `string_key` with templated integral
+overloads to avoid ambiguity).
+
+**Tests**: 45 (peek/expect/consume, escape decoding, integer/float
+parsing, skip_value across object/array/bare tokens, writer escaping,
+round-trip preservation of all field types, nested-object round-trip).
+Zero external dependencies.
+
+**Why not nlohmann/json here?** f4-geo, f4-entities, f4-messaging, and
+f4-state-machine all keep a zero-deps stance so they can be lifted into
+any host project. f4-world and f4-terrain inherit that stance. We
+control both ends of the wire format — a 200-line reader is sufficient
+and faster to compile than a 25k-line header. nlohmann/json stays in
+f4-convert / f4-data where its richer random-access API is needed.
+
 ### f4-install — Falcon 4.0 install layout locator
 
 Static library that owns the layout knowledge of a Falcon 4.0 / FreeFalcon

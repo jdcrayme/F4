@@ -15,11 +15,12 @@ target_include_directories(f4-world
         $<INSTALL_INTERFACE:include>
 )
 # f4-world consumes the typed EntityWorld (to populate it), the geo types
-# (for future objective/unit positioning), and f4-terrain (for the optional
-# load_terrain() convenience). It does NOT depend on f4-world-convert — the
-# contract between them is JSON, so the library and the converter are
-# independently testable.
-target_link_libraries(f4-world PUBLIC f4-entities f4-geo f4-terrain)
+# (for future objective/unit positioning), f4-terrain (for the optional
+# load_terrain() convenience), and f4-json (for parsing the world-state
+# JSON emitted by f4-world-convert). It does NOT depend on f4-world-convert
+# itself — the contract between them is JSON, so the library and the
+# converter are independently testable.
+target_link_libraries(f4-world PUBLIC f4-entities f4-geo f4-terrain f4-json)
 
 # Tests
 option(F4_WORLD_BUILD_TESTS "Build unit tests" ON)

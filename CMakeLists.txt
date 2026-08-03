@@ -14,9 +14,11 @@ set(F4_GENERATED_FIXTURES_DIR "${CMAKE_BINARY_DIR}/generated_fixtures" CACHE PAT
 
 add_subdirectory(f4-units)
 add_subdirectory(f4-math)
+add_subdirectory(f4-json)         # minimal dependency-free JSON reader/writer
 add_subdirectory(f4-geo)          # strong-typed coordinate frames & geodesy
 add_subdirectory(f4-state-machine)
 add_subdirectory(f4-entities)     # component-based entity system (uses f4-geo)
+add_subdirectory(f4-messaging)    # type-safe message bus with cross-thread queuing
 add_subdirectory(f4-data)
 add_subdirectory(f4-convert)
 add_subdirectory(f4-install)      # locates Falcon 4.0 install layout (FALCON4.ct, terrdata/, campaign/)

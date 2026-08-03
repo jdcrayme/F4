@@ -12,7 +12,8 @@ enable_testing()
 include(GoogleTest)
 
 # --- Settings tests ---
-# Link only against settings.cpp — no raylib dep.
+# Link against settings.cpp + f4-json (settings.cpp uses f4::json::Reader
+# and f4::json::Writer for the on-disk settings format). No raylib dep.
 add_executable(test_settings
     test_settings.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/settings.cpp
@@ -20,7 +21,7 @@ add_executable(test_settings
 target_include_directories(test_settings PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../include
 )
-target_link_libraries(test_settings PRIVATE GTest::gtest_main)
+target_link_libraries(test_settings PRIVATE GTest::gtest_main f4-json)
 gtest_discover_tests(test_settings)
 
 # --- Hex model + decoders tests ---

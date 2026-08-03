@@ -1,9 +1,15 @@
 // f4-world-viewer/src/settings.cpp
+//
+// Persisted viewer settings, read/written as a tiny JSON document.
+// Refactored to use f4-json's Reader/Writer instead of the hand-rolled
+// json_escape / json_unescape / extract_string_field helpers that lived
+// here previously. The on-disk format is unchanged, so existing settings
+// files from previous viewer versions load without migration.
 
 #include <f4/viewer/settings.hpp>
 
-#include <cctype>
-#include <cstdio>
+#include <f4/json/f4_json.hpp>
+
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -14,114 +20,36 @@ namespace f4::viewer {
 
 namespace {
 
-/// Escape a string for embedding in JSON. Handles backslash, quote, and
-/// the common control chars. We don't bother with Unicode escapes —
-/// paths on disk are byte sequences and we'll round-trip them as UTF-8.
-std::string json_escape(const std::string& s) {
-    std::string out;
-    out.reserve(s.size() + 8);
-    for (char c : s) {
-        switch (c) {
-            case '\\': out += "\\\\"; break;
-            case '"':  out += "\\\""; break;
-            case '\b': out += "\\b";  break;
-            case '\f': out += "\\f";  break;
-            case '\n': out += "\\n";  break;
-            case '\r': out += "\\r";  break;
-            case '\t': out += "\\t";  break;
-            default:
-                // Pass through printable ASCII and all bytes >= 0x80
-                // (UTF-8 continuation bytes — preserves paths with
-                // non-ASCII characters without breaking JSON validity).
-                if (static_cast<unsigned char>(c) < 0x20) {
-                    // Other control chars: \u00XX escape.
-                    char buf[8];
-                    std::snprintf(buf, sizeof(buf), "\\u%04x",
-                                  static_cast<unsigned char>(c));
-                    out += buf;
-                } else {
-                    out += c;
-                }
-                break;
-        }
-    }
-    return out;
-}
+using f4::json::Reader;
+using f4::json::Writer;
 
-/// Unescape a JSON string value (the content between the quotes).
-/// Returns false on malformed escape sequence — caller treats as parse
-/// failure for the whole field.
-bool json_unescape(std::string& s) {
-    for (std::size_t i = 0; i < s.size(); ++i) {
-        if (s[i] != '\\') continue;
-        if (i + 1 >= s.size()) return false;
-        char esc = s[i + 1];
-        std::size_t consume = 2;
-        switch (esc) {
-            case '\\': s[i] = '\\'; break;
-            case '"':  s[i] = '"';  break;
-            case '/':  s[i] = '/';  break;  // optional JSON escape
-            case 'b':  s[i] = '\b'; break;
-            case 'f':  s[i] = '\f'; break;
-            case 'n':  s[i] = '\n'; break;
-            case 'r':  s[i] = '\r'; break;
-            case 't':  s[i] = '\t'; break;
-            case 'u': {
-                // \uXXXX — we only handle ASCII range (XXXX <= 0x7F).
-                // Higher code points would need surrogate pair handling;
-                // paths in practice don't contain \u escapes.
-                if (i + 5 >= s.size()) return false;
-                char buf[5] = {s[i+2], s[i+3], s[i+4], s[i+5], 0};
-                char* end = nullptr;
-                long code = std::strtol(buf, &end, 16);
-                if (end != buf + 4) return false;
-                s[i] = static_cast<char>(code);
-                consume = 6;
-                break;
-            }
-            default: return false;
+// Walk a flat JSON object and populate the settings struct. Unknown keys
+// are skipped (forward-compat: if a future viewer adds a "theme" field,
+// older viewers ignore it instead of failing). Returns false on any parse
+// error — the caller treats the whole file as unreadable and falls back
+// to defaults.
+bool parse_settings_object(const std::string& json, ViewerSettings& s) {
+    try {
+        Reader r(json);
+        r.skip_ws();
+        r.expect('{');
+        if (r.consume('}')) return true;  // empty object
+        for (;;) {
+            std::string key = r.read_string();
+            r.expect(':');
+            if      (key == "install_path")        s.install_path       = r.read_string();
+            else if (key == "last_theater_key")    s.last_theater_key   = r.read_string();
+            else if (key == "last_campaign_stem")  s.last_campaign_stem = r.read_string();
+            else if (key == "last_world_json")     s.last_world_json    = r.read_string();
+            else if (key == "last_terrain_json")   s.last_terrain_json  = r.read_string();
+            else                                    r.skip_value();
+            if (r.consume('}')) break;
+            r.expect(',');
         }
-        s.erase(i + 1, consume - 1);
+        return true;
+    } catch (const std::exception&) {
+        return false;
     }
-    return true;
-}
-
-/// Extract the string value of "key" from a flat JSON object. Returns
-/// empty string if not found or malformed. Only handles top-level
-/// string fields (no nested objects/arrays) — sufficient for our
-/// settings schema.
-std::string extract_string_field(const std::string& json,
-                                  const std::string& key) {
-    // Build the search pattern: "key" :
-    std::string needle = "\"" + key + "\"";
-    std::size_t pos = 0;
-    while ((pos = json.find(needle, pos)) != std::string::npos) {
-        pos += needle.size();
-        // Skip whitespace.
-        while (pos < json.size() && std::isspace(static_cast<unsigned char>(json[pos]))) ++pos;
-        if (pos >= json.size() || json[pos] != ':') continue;
-        ++pos;
-        while (pos < json.size() && std::isspace(static_cast<unsigned char>(json[pos]))) ++pos;
-        if (pos >= json.size() || json[pos] != '"') continue;
-        ++pos;  // skip opening quote
-        // Find the closing quote (handling escaped quotes).
-        std::string value;
-        while (pos < json.size() && json[pos] != '"') {
-            if (json[pos] == '\\' && pos + 1 < json.size()) {
-                value += json[pos];
-                value += json[pos + 1];
-                pos += 2;
-            } else {
-                value += json[pos];
-                ++pos;
-            }
-        }
-        if (pos >= json.size()) return {};  // unterminated string
-        // Successfully extracted a value — unescape and return.
-        if (!json_unescape(value)) return {};
-        return value;
-    }
-    return {};
 }
 
 } // namespace
@@ -164,24 +92,20 @@ std::filesystem::path settings_file_path() {
 }
 
 std::string settings_to_json(const ViewerSettings& s) {
-    std::ostringstream ss;
-    ss << "{\n";
-    ss << "  \"install_path\": \"" << json_escape(s.install_path.string()) << "\",\n";
-    ss << "  \"last_theater_key\": \"" << json_escape(s.last_theater_key) << "\",\n";
-    ss << "  \"last_campaign_stem\": \"" << json_escape(s.last_campaign_stem) << "\",\n";
-    ss << "  \"last_world_json\": \"" << json_escape(s.last_world_json.string()) << "\",\n";
-    ss << "  \"last_terrain_json\": \"" << json_escape(s.last_terrain_json.string()) << "\"\n";
-    ss << "}\n";
-    return ss.str();
+    Writer w;
+    w.raw("{\n");
+    w.raw("  \"install_path\": ");       w.string(s.install_path.string());        w.raw(",\n");
+    w.raw("  \"last_theater_key\": ");   w.string(s.last_theater_key);             w.raw(",\n");
+    w.raw("  \"last_campaign_stem\": "); w.string(s.last_campaign_stem);           w.raw(",\n");
+    w.raw("  \"last_world_json\": ");    w.string(s.last_world_json.string());     w.raw(",\n");
+    w.raw("  \"last_terrain_json\": ");  w.string(s.last_terrain_json.string());   w.raw("\n");
+    w.raw("}\n");
+    return w.str();
 }
 
 ViewerSettings settings_from_json(const std::string& json) {
     ViewerSettings s;
-    s.install_path        = extract_string_field(json, "install_path");
-    s.last_theater_key    = extract_string_field(json, "last_theater_key");
-    s.last_campaign_stem  = extract_string_field(json, "last_campaign_stem");
-    s.last_world_json     = extract_string_field(json, "last_world_json");
-    s.last_terrain_json   = extract_string_field(json, "last_terrain_json");
+    parse_settings_object(json, s);
     return s;
 }
 
@@ -193,7 +117,9 @@ ViewerSettings load_settings() {
         if (!f) return {};
         std::stringstream buf;
         buf << f.rdbuf();
-        return settings_from_json(buf.str());
+        ViewerSettings s;
+        if (parse_settings_object(buf.str(), s)) return s;
+        return {};
     } catch (const std::exception&) {
         // Corrupted or unreadable — return defaults. The viewer must
         // never fail to start because of a settings file.

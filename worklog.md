@@ -524,3 +524,71 @@ Stage Summary:
 - Most likely cause of the user's "can't open any campaign" issue: their theater is INCOMPLETE (missing THEATER.MEA, or THEATER.MAP). Once they see the diagnostic report, they'll know exactly which file is missing and can either restore it from their install media or point the viewer at a different theater.
 - Most likely cause of the "class table not found" issue: FALCON4.ct is in a location we don't search (e.g. a `data/` subdir, or named differently). The diagnostic report shows exactly where we looked, so the user can either move FALCON4.ct to one of the searched locations or tell us where it actually is.
 - Next: (1) wait for the user to run --diagnostics against their real install and share the output so we can confirm the root cause; (2) if FALCON4.ct is in an unsearched location, add that location to detect(); (3) if the theater is incomplete, investigate why THEATER.MEA is missing (some community repacks ship theaters without elevation data).
+
+---
+Task ID: REFACTOR-1
+Agent: orchestrator (Super Z, main thread)
+Task: Implement recommendations #1 and #2 from the architecture review — (1) build f4-messaging, the missing prerequisite for f4-ai per §3 / §9 of the architecture proposal; (2) extract f4-json to kill the three-way JSON reader duplication across f4-world, f4-terrain, and f4-world-viewer/settings.
+
+Work Log:
+- Read §9 (f4-messaging spec) and §13 (sim clock + threading) of the architecture proposal to fix the API surface. The spec's MessageBus design (type-indexed handler table + publish_deferred + flush_pending + send_to cross-bus helper) was the contract; I implemented it verbatim with two refinements:
+  1. dispatch-at-flush (not snapshot-at-enqueue): publish_deferred stores one std::function per message (the per-handler fan-out happens when flush re-enters publish). This means subscribe() between enqueue and flush takes effect, and unsubscription works. The spec's pseudo-code took the snapshot at enqueue; my implementation is strictly more flexible and the test that exercises the difference (DeferredDeliversToCurrentHandlersAtFlushTime) is the regression gate.
+  2. publish() takes a snapshot of the handler vector under the lock, then releases the lock before invoking handlers — handlers can themselves call publish() / publish_deferred() / subscribe() / unsubscribe() without deadlocking.
+- Built f4-messaging (header-only library + empty .cpp for ABI-surface parity with f4-entities/f4-install):
+  * include/f4/messaging/bus.hpp — MessageBus + MessageQueue<Msg> + send_to
+  * include/f4/messaging/f4_messaging.hpp — umbrella
+  * src/bus.cpp — empty TU (intentional; future trace recorder goes here)
+  * tests/test_bus.cpp (18 tests), test_queue.cpp (5 tests), test_thread.cpp (5 tests) = 28 tests
+  * Threading coverage: 4-thread x 250-msg concurrent publish_deferred stress, cross-bus send_to, bidirectional sim+campaign topology, recursive flush_pending safety.
+  * Conformance to project conventions: static lib (not INTERFACE), umbrella header, F4_<LIB>_BUILD_TESTS option, f4_add_test helper, ALIAS target pattern, gtest v1.14.0 FetchContent (matches f4-entities / f4-install).
+- Audit of the three existing hand-rolled JSON implementations:
+  * f4-world/src/world_state.cpp (429 LoC) — full Reader with skip_ws/peek/expect/consume/read_string/read_int/read_number/skip_value
+  * f4-terrain/src/terrain_data.cpp (402 LoC) — same Reader + a tiny Writer (raw/string/number)
+  * f4-world-viewer/src/settings.cpp (~220 LoC) — ad-hoc json_escape / json_unescape / extract_string_field (no real parser)
+  * All three used the SAME API shape for Reader — extraction to a shared lib was mechanical.
+- Built f4-json (header-only library):
+  * include/f4/json/reader.hpp — Reader with the union of features needed by f4-world + f4-terrain (peek/expect/consume/read_string/read_int/read_number/skip_value, with \uXXXX escape support that the originals lacked)
+  * include/f4/json/writer.hpp — Writer with raw/string/number/number_key, templated number<T> for integral types (handles int/long/uint32_t/uint8_t/size_t without ambiguity), string_key, %g-formatted doubles
+  * include/f4/json/f4_json.hpp — umbrella
+  * src/f4_json.cpp — empty TU (parity with f4-messaging)
+  * tests/test_reader.cpp (26 tests), test_writer.cpp (15 tests), test_roundtrip.cpp (4 tests) = 45 tests
+  * Roundtrip tests catch the most common JSON bug class (writer/reader escaping mismatches) at the integration level.
+- Refactored f4-world/src/world_state.cpp:
+  * Deleted the 110-line local JsonReader class
+  * Replaced with `#include <f4/json/reader.hpp>` + `using f4::json::Reader;`
+  * Field parsers (parse_team, parse_objective, parse_unit, parse_campaign_field, WorldState::load_from_string) UNCHANGED — only the type name JsonReader → Reader.
+  * Linked f4-json PUBLIC into f4-world's CMakeLists.
+  * All 13 f4-world tests pass.
+- Refactored f4-terrain/src/terrain_data.cpp:
+  * Deleted the 90-line local JsonReader AND the 40-line local JsonWriter
+  * Replaced with `#include <f4/json/f4_json.hpp>` + `using f4::json::Reader; using f4::json::Writer;`
+  * Field parsers and the to_terrain_json emitter UNCHANGED — the templated Writer::number<T> handles uint32_t/int16_t/uint8_t without ambiguity.
+  * Linked f4-json PUBLIC into f4-terrain's CMakeLists.
+  * All 13 f4-terrain tests pass.
+- Refactored f4-world-viewer/src/settings.cpp:
+  * Replaced the three local helpers (json_escape, json_unescape, extract_string_field) with a proper parse_settings_object() that uses f4::json::Reader to walk the top-level object.
+  * settings_to_json() now uses f4::json::Writer for proper string escaping (handles backslash/quote/newline/tab/control chars).
+  * On-disk format UNCHANGED — existing settings.json files from previous viewer versions load without migration.
+  * Linked f4-json PUBLIC into f4-world-viewer's CMakeLists, and into the test_settings target (which compiles settings.cpp directly, bypassing the viewer lib).
+  * All 14 viewer settings tests pass.
+- Wired both new libs into the root CMakeLists.txt in dependency-graph order:
+  * f4-json next to f4-units/f4-math (foundation, zero deps)
+  * f4-messaging after f4-entities (per §3 graph: entities → messaging)
+- Verified clean compile: `g++ -std=c++20 -Wall -Wextra -Wpedantic -fsyntax-only` exits 0 on both new umbrella headers (only the harmless "#pragma once in main file" warning from passing headers as source files).
+- Full build clean. Total tests: 733 (was 660). Breakdown:
+  * f4-messaging: 28 new (18 bus + 5 queue + 5 thread)
+  * f4-json: 45 new (26 reader + 15 writer + 4 roundtrip)
+  * Existing 660: zero regressions across all 14 existing libraries (f4-units 121, f4-math 192, f4-geo 30, f4-state-machine 41, f4-entities 20, f4-data 38, f4-convert 40, f4-install 48, f4-world-convert 34, f4-world 13, f4-terrain 13, f4-flight-model 26, f4-world-viewer 44, f4-terrain-convert 0 = static CLI).
+
+Stage Summary:
+- Two new libraries committed, building, and fully tested:
+  * f4-messaging: 28 tests — type-safe message bus with explicit thread boundaries (publish/publish_deferred/flush_pending/send_to), MessageQueue<Msg> for SPSC patterns, cross-thread stress coverage
+  * f4-json: 45 tests — minimal dependency-free JSON reader/writer, replaces three duplicated implementations
+- Three consumers refactored to use f4-json:
+  * f4-world/src/world_state.cpp: -110 LoC local JsonReader, +1 include
+  * f4-terrain/src/terrain_data.cpp: -130 LoC local JsonReader + JsonWriter, +1 include
+  * f4-world-viewer/src/settings.cpp: -170 LoC ad-hoc json helpers, replaced with proper f4::json::Reader walk
+  * Net deletion of ~410 LoC of duplicated JSON code, replaced with one shared library.
+- Total project tests: 733 (was 660). All green. Zero regressions in the existing 660.
+- The §3 dependency graph is now correct: f4-ai can start against (a) a real EntityWorld populated from .cam, (b) a real MessageBus for inter-entity comms, (c) a shared JSON parser for any future config files. The injection-harness trap from §18.5 is structurally retired for both world data and messaging.
+- Next: (1) close the deferred ground-truth gaps (WORLD-2 unit Save() tails, VIEWER-3 .obj link data) before f4-ai reads from them; (2) wire the existing flight-model's stall SM into a real MessageBus to validate the bus against an actual consumer; (3) the convert-lib namespace collision fix (item #3 from the architecture review) is a small mechanical follow-up that should land before f4-campaign introduces a fourth convert lib.

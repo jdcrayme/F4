@@ -1,14 +1,15 @@
 // f4-world/src/world_state.cpp — JSON loader for WorldState.
 //
-// A minimal, dependency-free JSON reader sufficient for the world-state
-// schema emitted by f4-world-convert. We parse the fields we need and skip
-// everything else. This keeps f4-world free of external JSON dependencies;
-// if richer querying is ever needed, nlohmann/json is available in the
-// build tree and can be linked instead.
+// Uses f4-json's dependency-free Reader to walk the world-state schema
+// emitted by f4-world-convert. The reader is shape-compatible with the
+// hand-rolled JsonReader that lived here previously — the field parsers
+// below are unchanged from the original implementation; only the local
+// class definition has been replaced with #include <f4/json/reader.hpp>.
 
 #include <f4/world/world_state.hpp>
 
-#include <cctype>
+#include <f4/json/reader.hpp>
+
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
@@ -18,120 +19,10 @@ namespace f4::world {
 
 namespace {
 
-// Tiny recursive-descent JSON reader. Handles objects, arrays, strings,
-// numbers (integers), booleans, null. Sufficient for the world JSON schema.
-class JsonReader {
-public:
-    explicit JsonReader(const std::string& s) : s_(s), pos_(0) {}
-
-    void skip_ws() {
-        while (pos_ < s_.size() && std::isspace(static_cast<unsigned char>(s_[pos_]))) ++pos_;
-    }
-
-    bool peek(char ch) {
-        skip_ws();
-        return pos_ < s_.size() && s_[pos_] == ch;
-    }
-
-    void expect(char ch) {
-        skip_ws();
-        if (pos_ >= s_.size() || s_[pos_] != ch)
-            throw std::runtime_error(std::string("JSON: expected '") + ch + "'");
-        ++pos_;
-    }
-
-    bool consume(char ch) {
-        if (peek(ch)) { ++pos_; return true; }
-        return false;
-    }
-
-    std::string read_string() {
-        skip_ws();
-        expect('"');
-        std::string out;
-        while (pos_ < s_.size() && s_[pos_] != '"') {
-            if (s_[pos_] == '\\' && pos_ + 1 < s_.size()) {
-                char esc = s_[pos_ + 1];
-                switch (esc) {
-                    case '"': out += '"'; break;
-                    case '\\': out += '\\'; break;
-                    case '/': out += '/'; break;
-                    case 'n': out += '\n'; break;
-                    case 't': out += '\t'; break;
-                    case 'r': out += '\r'; break;
-                    default: out += esc; break;
-                }
-                pos_ += 2;
-            } else {
-                out += s_[pos_++];
-            }
-        }
-        expect('"');
-        return out;
-    }
-
-    long read_int() {
-        skip_ws();
-        std::size_t start = pos_;
-        if (pos_ < s_.size() && (s_[pos_] == '-' || s_[pos_] == '+')) ++pos_;
-        while (pos_ < s_.size() && std::isdigit(static_cast<unsigned char>(s_[pos_]))) ++pos_;
-        if (start == pos_) throw std::runtime_error("JSON: expected number");
-        return std::strtol(s_.c_str() + start, nullptr, 10);
-    }
-
-    double read_number() {
-        skip_ws();
-        std::size_t start = pos_;
-        if (pos_ < s_.size() && (s_[pos_] == '-' || s_[pos_] == '+')) ++pos_;
-        while (pos_ < s_.size() &&
-               (std::isdigit(static_cast<unsigned char>(s_[pos_])) ||
-                s_[pos_] == '.' || s_[pos_] == 'e' || s_[pos_] == 'E' ||
-                s_[pos_] == '+' || s_[pos_] == '-'))
-            ++pos_;
-        if (start == pos_) throw std::runtime_error("JSON: expected number");
-        return std::strtod(s_.c_str() + start, nullptr);
-    }
-
-    // Skip the value at the current position (for fields we don't need).
-    void skip_value() {
-        skip_ws();
-        if (pos_ >= s_.size()) return;
-        char c = s_[pos_];
-        if (c == '"') { (void)read_string(); }
-        else if (c == '{') {
-            ++pos_;
-            skip_ws();
-            if (consume('}')) return;
-            for (;;) {
-                (void)read_string();
-                expect(':');
-                skip_value();
-                if (consume('}')) break;
-                expect(',');
-            }
-        } else if (c == '[') {
-            ++pos_;
-            skip_ws();
-            if (consume(']')) return;
-            for (;;) {
-                skip_value();
-                if (consume(']')) break;
-                expect(',');
-            }
-        } else {
-            while (pos_ < s_.size() && s_[pos_] != ',' && s_[pos_] != '}' &&
-                   s_[pos_] != ']' && !std::isspace(static_cast<unsigned char>(s_[pos_])))
-                ++pos_;
-        }
-    }
-
-private:
-    const std::string& s_;
-    std::size_t pos_;
-};
+using f4::json::Reader;
 
 // Parse a team slot object starting at the '{'.
-TeamState parse_team(JsonReader& r) {
+TeamState parse_team(Reader& r) {
     TeamState t;
     r.skip_ws(); r.expect('{');
     if (r.consume('}')) return t;
@@ -150,7 +41,7 @@ TeamState parse_team(JsonReader& r) {
     return t;
 }
 
-ObjectiveState parse_objective(JsonReader& r) {
+ObjectiveState parse_objective(Reader& r) {
     ObjectiveState o;
     r.skip_ws(); r.expect('{');
     if (r.consume('}')) return o;
@@ -205,7 +96,7 @@ ObjectiveState parse_objective(JsonReader& r) {
     return o;
 }
 
-UnitState parse_unit(JsonReader& r) {
+UnitState parse_unit(Reader& r) {
     UnitState u;
     r.skip_ws(); r.expect('{');
     if (r.consume('}')) return u;
@@ -284,7 +175,7 @@ UnitState parse_unit(JsonReader& r) {
     return u;
 }
 
-void parse_campaign_field(JsonReader& r, const std::string& key, CampaignState& c) {
+void parse_campaign_field(Reader& r, const std::string& key, CampaignState& c) {
     if      (key == "current_time")         c.current_time = static_cast<int32_t>(r.read_int());
     else if (key == "te_start_time")        c.te_start_time = static_cast<int32_t>(r.read_int());
     else if (key == "te_time_limit")        c.te_time_limit = static_cast<int32_t>(r.read_int());
@@ -311,7 +202,7 @@ void parse_campaign_field(JsonReader& r, const std::string& key, CampaignState& 
 } // namespace
 
 void WorldState::load_from_string(const std::string& json) {
-    JsonReader r(json);
+    Reader r(json);
 
     r.skip_ws();
     r.expect('{');

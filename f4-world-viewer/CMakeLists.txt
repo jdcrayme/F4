@@ -125,6 +125,7 @@ target_link_libraries(f4_world_viewer PUBLIC
     f4-world-convert
     f4-terrain-convert
     f4-install
+    f4-json
 )
 target_link_libraries(f4_world_viewer PRIVATE raylib)
 # tinyfiledialogs needs to be compiled as C (it's a .c file). Set the

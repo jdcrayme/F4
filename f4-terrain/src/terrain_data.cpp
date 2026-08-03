@@ -1,8 +1,14 @@
 // f4-terrain/src/terrain_data.cpp
+//
+// Uses f4-json's dependency-free Reader and Writer for the terrain JSON
+// intermediate format. The field parsers below are unchanged from the
+// original implementation; only the local Reader/Writer classes
+// have been replaced with #include <f4/json/f4_json.hpp>.
 
 #include <f4/terrain/terrain_data.hpp>
 
-#include <cctype>
+#include <f4/json/f4_json.hpp>
+
 #include <cstdio>
 #include <cstring>
 #include <fstream>
@@ -18,6 +24,9 @@ std::string Color4::hex() const {
 }
 
 namespace {
+
+using f4::json::Reader;
+using f4::json::Writer;
 
 struct Cursor {
     const uint8_t* p;
@@ -45,141 +54,6 @@ std::vector<uint8_t> read_file(const std::filesystem::path& path) {
     if (got != buf.size()) throw std::runtime_error("terrain: short read on " + path.string());
     return buf;
 }
-
-// ---------------------------------------------------------------------------
-// Minimal JSON writer — emits a compact, human-readable document. We avoid
-// pulling in nlohmann/json here to keep f4-terrain dependency-free (matches
-// the existing f4-world-convert pattern of hand-rolled JSON emission).
-// ---------------------------------------------------------------------------
-class JsonWriter {
-public:
-    void put(char c) { buf_.push_back(c); }
-    void put(const char* s) { while (*s) buf_.push_back(*s++); }
-    void put(const std::string& s) { buf_.append(s); }
-
-    void raw(const char* s) { put(s); }
-    void string(const std::string& s) {
-        put('"');
-        for (char ch : s) {
-            switch (ch) {
-                case '"':  put("\\\""); break;
-                case '\\': put("\\\\"); break;
-                case '\n': put("\\n");  break;
-                case '\r': put("\\r");  break;
-                case '\t': put("\\t");  break;
-                default:
-                    if (static_cast<unsigned char>(ch) < 0x20) {
-                        char tmp[8];
-                        std::snprintf(tmp, sizeof(tmp), "\\u%04x", ch);
-                        put(tmp);
-                    } else {
-                        put(ch);
-                    }
-            }
-        }
-        put('"');
-    }
-    void number(long v) {
-        char tmp[24];
-        std::snprintf(tmp, sizeof(tmp), "%ld", v);
-        put(tmp);
-    }
-
-    [[nodiscard]] std::string str() const { return buf_; }
-private:
-    std::string buf_;
-};
-
-// ---------------------------------------------------------------------------
-// Minimal JSON reader — sufficient for the terrain JSON schema (objects,
-// arrays of numbers, strings). Mirrors the JsonReader pattern in f4-world.
-// ---------------------------------------------------------------------------
-class JsonReader {
-public:
-    explicit JsonReader(const std::string& s) : s_(s), pos_(0) {}
-
-    void skip_ws() {
-        while (pos_ < s_.size() && std::isspace(static_cast<unsigned char>(s_[pos_]))) ++pos_;
-    }
-    bool peek(char ch) { skip_ws(); return pos_ < s_.size() && s_[pos_] == ch; }
-    void expect(char ch) {
-        skip_ws();
-        if (pos_ >= s_.size() || s_[pos_] != ch)
-            throw std::runtime_error(std::string("terrain JSON: expected '") + ch + "'");
-        ++pos_;
-    }
-    bool consume(char ch) { if (peek(ch)) { ++pos_; return true; } return false; }
-
-    std::string read_string() {
-        skip_ws();
-        expect('"');
-        std::string out;
-        while (pos_ < s_.size() && s_[pos_] != '"') {
-            if (s_[pos_] == '\\' && pos_ + 1 < s_.size()) {
-                char esc = s_[pos_ + 1];
-                switch (esc) {
-                    case '"': out += '"'; break;
-                    case '\\': out += '\\'; break;
-                    case '/': out += '/'; break;
-                    case 'n': out += '\n'; break;
-                    case 't': out += '\t'; break;
-                    case 'r': out += '\r'; break;
-                    default: out += esc; break;
-                }
-                pos_ += 2;
-            } else {
-                out += s_[pos_++];
-            }
-        }
-        expect('"');
-        return out;
-    }
-
-    long read_int() {
-        skip_ws();
-        std::size_t start = pos_;
-        if (pos_ < s_.size() && (s_[pos_] == '-' || s_[pos_] == '+')) ++pos_;
-        while (pos_ < s_.size() && std::isdigit(static_cast<unsigned char>(s_[pos_]))) ++pos_;
-        if (start == pos_) throw std::runtime_error("terrain JSON: expected number");
-        return std::strtol(s_.c_str() + start, nullptr, 10);
-    }
-
-    void skip_value() {
-        skip_ws();
-        if (pos_ >= s_.size()) return;
-        char c = s_[pos_];
-        if (c == '"') { (void)read_string(); }
-        else if (c == '{') {
-            ++pos_;
-            skip_ws();
-            if (consume('}')) return;
-            for (;;) {
-                (void)read_string();
-                expect(':');
-                skip_value();
-                if (consume('}')) break;
-                expect(',');
-            }
-        } else if (c == '[') {
-            ++pos_;
-            skip_ws();
-            if (consume(']')) return;
-            for (;;) {
-                skip_value();
-                if (consume(']')) break;
-                expect(',');
-            }
-        } else {
-            while (pos_ < s_.size() && s_[pos_] != ',' && s_[pos_] != '}' &&
-                   s_[pos_] != ']' && !std::isspace(static_cast<unsigned char>(s_[pos_])))
-                ++pos_;
-        }
-    }
-
-private:
-    const std::string& s_;
-    std::size_t pos_;
-};
 
 } // namespace
 
@@ -249,7 +123,7 @@ void TerrainData::load(const std::filesystem::path& terrain_dir) {
 // JSON load (intermediate format produced by f4-terrain-convert)
 // ---------------------------------------------------------------------------
 void TerrainData::load_terrain_json_from_string(const std::string& json) {
-    JsonReader r(json);
+    Reader r(json);
     r.skip_ws();
     r.expect('{');
     if (r.consume('}')) return;
@@ -320,7 +194,7 @@ void TerrainData::load_terrain_json(const std::filesystem::path& json_path) {
 // JSON save (to_terrain_json / save_terrain_json)
 // ---------------------------------------------------------------------------
 std::string TerrainData::to_terrain_json(const std::string& theater_name) const {
-    JsonWriter w;
+    Writer w;
     w.raw("{\n");
 
     if (!theater_name.empty()) {
