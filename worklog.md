@@ -232,3 +232,42 @@ Stage Summary:
 - Viewer screenshot shows 4x more units visible than before (PRC magenta went from 292 sampled cells to 1,166). Friendly blue units (60,140,220) now visible — they were in the undecoded tail before.
 - JSON output now carries subclass-specific fields (supply, morale, fatigue, fuel, elements) ready for the digi AI to consume when we start f4-ai.
 - Next: (1) start f4-ai against the real WorldState (the original §18.5 goal — we now have ground truth for 683 units); (2) port the .obj objective decoder's variable-length link data (currently we decode the fixed fields only); (3) add L-file terrain decoding for higher-resolution terrain tiles; (4) add a "Flight Plans" layer to the viewer using the decoded waypoints.
+
+---
+Task ID: VIEWER-3
+Agent: orchestrator (Super Z, main thread)
+Task: Fix the map visualization so objectives render as type-specific icons (airbase / bridge / city / port / ...) instead of giant colored circles, and ensure the icons in f4-world-viewer/assets/icons/ actually render on screen.
+
+Work Log:
+- Diagnosed two root causes:
+  1. The bundled test fixture save1.world.json was generated BEFORE the class_table integration was added, so it had no `objective_type` field. The viewer's `icon_for_objective_type(0)` returned -1, which made `draw_icon()` fall back to a giant colored circle (radius = size_px * 0.5 = (base_size + priority) * 0.5, with priority 1..100 → up to 50 px circles).
+  2. `ViewerApp::import_cam_archive` (the in-process File > Import .cam path) never loaded FALCON4.ct, so even when users imported a fresh .cam, the resulting JSON still had no `objective_type` and the same fallback path triggered.
+- Fixed draw_icon() fallback: the circle is now capped at `min(size_px * 0.4, 5px)` so unknown objectives stay small.
+- Decoupled icon size from priority. Objective icon size is now `clamp(8 + cam_zoom * 0.6, 10, 24)` — it scales mildly with zoom but never blows up to giant sizes. Priority is encoded instead as a gold ring (two tiers: priority >= 40 = faint gold, >= 70 = bright gold) drawn AROUND the icon. Same idea for unit icons.
+- Added `f4::convert::find_class_table(reference_file)` to f4-world-convert as a shared helper. Searches: next to reference file (typically the .cam), one and two dirs up, then CWD-relative well-known paths (./FALCON4.ct, ./assets/FALCON4.ct, ./temp/FALCON4.ct, f4-world-convert/tests/fixtures/FALCON4.ct, plus ../ and ../../ variants).
+- Wired find_class_table into:
+  * `cam2json` CLI (replaces the old single-dir lookup; adds `--class-table <path>` flag for explicit override).
+  * `ViewerApp::import_cam_archive` (auto-resolves FALCON4.ct next to the .cam being imported; on success emits objective_type+unit_subtype into the world JSON; on failure shows a clear error in the status bar telling the user where to put the file).
+- Added a CMake post-build command that copies FALCON4.ct from f4-world-convert/tests/fixtures/ to the build directory, so both cam2json and f4-world-viewer find it from CWD when run from the build dir.
+- Regenerated the bundled save1.world.json fixture using the fixed cam2json. The new fixture contains:
+  * objective_type for ALL 2659 objectives (distribution: 50 airbase, 42 airstrip, 60 armybase, 691 bridge, 361 city, 117 factory, 531 town, 456 village, 57 HARTS, 41 port, 21 radar, 9 powerplant, 26 depot, 62 intersection, 27 nuclear, 22 radio_tower, 35 railroad, 8 refinery, 12 border, 19 chemical, 8 chemical, 1 fortification, 2 pass).
+  * unit_subtype for ALL 683 units (battalions: 14 subtypes including armor/infantry/artillery/supply/engineer; squadrons: fighter/bomber/transport/helicopter/etc.; taskforces: carrier/cruiser/etc.).
+- Added two new tests to test_objectives.cpp:
+  * JsonResolvesObjectiveTypeWithClassTable — verifies objective_type appears in the JSON only when a ClassTable is passed, and that >= 2000 of the 2659 objectives resolve to a known type (currently 2659 of 2659 resolve).
+  * FindClassTableLocatesFixtureNextToCam — verifies find_class_table() locates FALCON4.ct next to save1.cam.
+- Added `--zoom N` and `--center x,y` CLI flags to f4-world-viewer (plus `set_initial_camera()` public API) so the viewer can be launched focused on a specific region — useful for screenshots and for inspecting individual objectives without manual panning.
+- Fixed `run()` to respect the user's initial camera (don't auto-fit-to-world when set_initial_camera() was called).
+- Verified end-to-end via headless Xvfb + Mesa swrast screenshot capture:
+  * Fit-to-world view (zoom ≈ 0.835, 2659 objectives packed in ~855×855 px): icons render as small tinted sprites with ~5,188 distinct colors in a 200×200 sample region (vs 86 distinct colors in the previous "giant circles" version). PRC magenta appears in 1,278 distinct shades (texture detail), not one solid color.
+  * Zoomed view (zoom=12, center=500,500): VLM confirms "icons clearly have distinct silhouettes representing different objective types — shapes resembling airplanes (airbases), buildings/structures, bridges, and other military installations. ... yellow/gold ring or circle drawn around them, highlighting them as high-priority objectives."
+  * Both screenshots saved to /home/z/my-project/download/viewer_fit_to_world.png and viewer_zoomed.png for visual inspection.
+- Full test suite passes: 42 binaries, 478 tests total. Zero regressions. (f4-world-convert: 8+10 = 18 tests, f4-world: 9+4 = 13 tests, all others unchanged.)
+
+Stage Summary:
+- Two root causes fixed: (1) FALCON4.ct class table is now loaded automatically by both the cam2json CLI and the viewer's File > Import .cam path, populating objective_type and unit_subtype in the world JSON; (2) icon size is decoupled from priority (priority now drives a gold halo, not giant icons), and the fallback circle for unknown objective types is small (5 px max) instead of giant (50 px).
+- The bundled save1.world.json fixture is now generated with class_table integration — it carries objective_type for every objective and unit_subtype for every unit, so the viewer can pick type-specific icons out-of-the-box.
+- Total project tests: 480 (was 478 — added 2 new class_table integration tests). All green.
+- Files saved to /home/z/my-project/download/ for visual verification:
+  * viewer_fit_to_world.png — fit-to-world view (2659 objectives, magenta PRC dominates)
+  * viewer_zoomed.png — zoom=12 view showing individual icon sprites with distinguishable shapes
+- Next: (1) start f4-ai against the real WorldState (§18.5 goal); (2) wire up an f4-world-viewer test harness so the viewer itself can be smoke-tested on CI; (3) add a "Flight Plans" layer using the decoded waypoints; (4) port the .obj objective decoder's variable-length link data for full objective coverage.

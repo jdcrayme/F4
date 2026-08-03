@@ -24,6 +24,7 @@
 #include <f4/convert/cam_archive.hpp>
 #include <f4/convert/world_json.hpp>
 #include <f4/convert/terrain_converter.hpp>
+#include <f4/convert/class_table.hpp>
 #include <f4/terrain/terrain_data.hpp>
 #include <f4/world/world_state.hpp>
 
@@ -85,6 +86,7 @@ struct ViewerApp::Impl {
     bool dragging = false;
     Vector2 drag_start = {0, 0};
     float drag_cam_x0 = 0, drag_cam_y0 = 0;
+    bool initial_camera_set = false;  // true if set_initial_camera() was called
 
     // Data
     f4::world::WorldState world;
@@ -229,11 +231,16 @@ struct ViewerApp::Impl {
 
     /// Draw an icon centered at screen position (sx, sy) with the given
     /// pixel size. The icon is tinted by the owner color so team affiliation
-    /// is still visible. If no icon is loaded, falls back to a drawn circle.
+    /// is still visible. If no icon is loaded, falls back to a small drawn
+    /// circle (sized independently of priority so unknown objectives don't
+    /// become giant discs).
     void draw_icon(int icon_idx, float sx, float sy, float size_px,
                    const RlColor& tint) {
         if (icon_idx < 0 || icon_idx >= ICON_COUNT || icons[icon_idx].id == 0) {
-            DrawCircleV({sx, sy}, size_px * 0.5f,
+            // Fallback circle: fixed small radius so unknown objectives
+            // stay readable when zoomed out, instead of giant discs.
+            const float fallback_radius = std::min(size_px * 0.4f, 5.0f);
+            DrawCircleV({sx, sy}, fallback_radius,
                         Color{tint.r, tint.g, tint.b, 220});
             return;
         }
@@ -374,8 +381,12 @@ void ViewerApp::run() {
     // Load icon textures (falls back to drawn shapes if not found).
     impl_->load_icons();
 
-    // Default to a fit-to-world view.
-    impl_->fit_to_world();
+    // Default to a fit-to-world view — UNLESS the caller already set an
+    // initial camera via set_initial_camera() (e.g. via --zoom/--center
+    // CLI flags). In that case, respect the user's choice.
+    if (!impl_->initial_camera_set) {
+        impl_->fit_to_world();
+    }
 
     while (!WindowShouldClose()) {
         // Handle window resize
@@ -459,6 +470,30 @@ void ViewerApp::import_cam_archive(const std::filesystem::path& cam_path) {
     f4::convert::WorldJsonOptions opts;
     opts.theater = "korea";
     opts.terrain_file = "korea.terrain.json";
+
+    // Auto-search for FALCON4.ct (the class table) in a few standard
+    // locations. Without it, objectives carry only their raw entity_type
+    // and the viewer can't pick icons — they all fall back to circles.
+    // The class table is a binary file shipped with the game data; the
+    // repo bundles a copy in f4-world-convert/tests/fixtures/FALCON4.ct
+    // so we can resolve types out-of-the-box.
+    f4::convert::ClassTable class_table;
+    const auto ct_path = f4::convert::find_class_table(cam_path);
+    if (!ct_path.empty()) {
+        try {
+            class_table.load(ct_path);
+            opts.class_table = &class_table;
+            impl_->status_msg = "Loaded class table: " + ct_path.string() +
+                " (" + std::to_string(class_table.size()) + " entries)";
+        } catch (const std::exception& e) {
+            impl_->last_error = "Class table load failed: " + std::string(e.what());
+        }
+    } else {
+        impl_->last_error =
+            "FALCON4.ct not found — objectives will render as fallback circles "
+            "(no icon mapping). Place FALCON4.ct next to the .cam or in assets/.";
+    }
+
     const std::string json = f4::convert::to_world_json(cam, opts);
 
     // Write to a temp file next to the .cam, then load via the normal path.
@@ -476,6 +511,13 @@ void ViewerApp::schedule_screenshot(float delay_sec, const std::string& path) {
     impl_->screenshot_pending = true;
     impl_->screenshot_at = GetTime() + delay_sec;
     impl_->screenshot_path = path;
+}
+
+void ViewerApp::set_initial_camera(float center_x, float center_y, float zoom) {
+    impl_->cam_x = center_x;
+    impl_->cam_y = center_y;
+    impl_->cam_zoom = zoom;
+    impl_->initial_camera_set = true;
 }
 
 // ---------------------------------------------------------------------------
@@ -643,10 +685,18 @@ void ViewerApp::draw_canvas() {
 
     // --- Objectives ---
     // Render with type-specific icons (airbase, bridge, city, port, radar,
-    // powerplant, railroad, factory). Unknown types fall back to a circle.
-    // Icons are tinted by owner color so team affiliation is visible.
+    // powerplant, railroad, factory). Unknown types fall back to a small
+    // circle (sized independently of priority). Icons are tinted by owner
+    // color so team affiliation is visible. Priority is encoded as a thin
+    // gold ring around high-priority objectives, NOT as icon size — this
+    // keeps the map legible even when priority values are 1-100.
     if (impl_->show_objectives && impl_->world_loaded) {
-        const float base_size = std::max(6.0f, 16.0f * (impl_->cam_zoom / 4.0f));
+        // Icon diameter in pixels. Scales mildly with zoom so icons stay
+        // readable when zoomed in but never dominate the screen. The cap
+        // keeps the fit-to-world view legible when thousands of objectives
+        // share the screen.
+        const float base_size = std::clamp(8.0f + impl_->cam_zoom * 0.6f,
+                                           10.0f, 24.0f);
         for (int i = 0; i < static_cast<int>(impl_->world.objectives.size()); ++i) {
             const auto& o = impl_->world.objectives[i];
             const Vector2 p = impl_->world_to_screen(o.x, o.y);
@@ -654,13 +704,22 @@ void ViewerApp::draw_canvas() {
             // Use objective_type (from class table) if available; otherwise
             // fall back to the raw type (entity_type) which won't match icons.
             const int icon_idx = Impl::icon_for_objective_type(o.objective_type);
-            const float size = base_size + o.priority * 1.0f;
-            impl_->draw_icon(icon_idx, p.x, p.y, size, c);
+            impl_->draw_icon(icon_idx, p.x, p.y, base_size, c);
+            // Priority halo: gold ring for high-priority objectives (>=40).
+            // Two tiers for visual hierarchy without making icons huge.
+            if (o.priority >= 40) {
+                const float ring_r = base_size * 0.5f + 3.0f;
+                const Color ring = (o.priority >= 70)
+                    ? Color{255, 215, 0,   255}
+                    : Color{255, 215, 0,   150};
+                DrawCircleLines(static_cast<int>(p.x), static_cast<int>(p.y),
+                                static_cast<int>(ring_r), ring);
+            }
             // Outline selected.
             if (impl_->sel_kind == Impl::SelectionKind::Objective &&
                 impl_->sel_index == i) {
                 DrawCircleLines(static_cast<int>(p.x), static_cast<int>(p.y),
-                                static_cast<int>(size * 0.6f + 4),
+                                static_cast<int>(base_size * 0.6f + 4),
                                 Color{255, 255, 0, 255});
             }
         }
@@ -676,7 +735,8 @@ void ViewerApp::draw_canvas() {
     //   Flight     → hollow circle (drawn — no icon)
     //   Package    → plus/cross (drawn — no icon)
     if (impl_->show_units && impl_->world_loaded) {
-        const float s = std::max(6.0f, 14.0f * (impl_->cam_zoom / 4.0f));
+        // Unit icon diameter — fixed for consistency with objective icons.
+        const float s = std::clamp(6.0f + impl_->cam_zoom * 0.5f, 8.0f, 20.0f);
         for (int i = 0; i < static_cast<int>(impl_->world.units.size()); ++i) {
             const auto& u = impl_->world.units[i];
             const Vector2 p = impl_->world_to_screen(u.x, u.y);

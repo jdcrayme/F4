@@ -175,4 +175,20 @@ private:
     std::vector<ClassTableEntry> entries_;
 };
 
+/// Search for FALCON4.ct (the class table) in well-known locations.
+/// Used by the cam2json CLI and the f4-world-viewer's in-process .cam
+/// import path so both resolve objective_type without requiring the user
+/// to point at the file manually.
+///
+/// Search order:
+///   1. Same directory as `reference_file` (typically the .cam file —
+///      the game ships FALCON4.ct next to its saves).
+///   2. ../FALCON4.ct, ../../FALCON4.ct (if reference_file is nested).
+///   3. CWD-relative: ./FALCON4.ct, ./assets/FALCON4.ct, ./temp/FALCON4.ct,
+///      f4-world-convert/tests/fixtures/FALCON4.ct (+ ../ variants).
+///
+/// `reference_file` may be empty — only the CWD-relative search is performed.
+/// Returns an empty path if not found.
+[[nodiscard]] std::filesystem::path find_class_table(const std::filesystem::path& reference_file);
+
 } // namespace f4::convert

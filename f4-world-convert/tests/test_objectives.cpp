@@ -4,7 +4,9 @@
 #include <f4/convert/cam_archive.hpp>
 #include <f4/convert/objective_decoder.hpp>
 #include <f4/convert/world_json.hpp>
+#include <f4/convert/class_table.hpp>
 
+#include <filesystem>
 #include <set>
 
 using namespace f4::convert;
@@ -78,4 +80,56 @@ TEST(Objectives, JsonContainsObjectivesArray) {
     EXPECT_NE(json.find("\"objectives\""), std::string::npos);
     EXPECT_NE(json.find("\"count\": 2659"), std::string::npos);
     EXPECT_NE(json.find("\"decoded\": 2659"), std::string::npos);
+}
+
+// When a class table is provided, the JSON must include the resolved
+// objective_type field (1-39) for each objective. Without the class table,
+// the field is omitted entirely — which is what causes the viewer to fall
+// back to drawing every objective as a generic colored circle.
+TEST(Objectives, JsonResolvesObjectiveTypeWithClassTable) {
+    auto cam = load_fixture();
+
+    // Sanity: without a class table, objective_type must NOT appear.
+    std::string json_no_ct = to_world_json(cam);
+    EXPECT_EQ(json_no_ct.find("\"objective_type\""), std::string::npos);
+
+    // Load the bundled FALCON4.ct fixture.
+    ClassTable ct;
+    ASSERT_TRUE(std::filesystem::exists(FIXTURE_DIR "FALCON4.ct"))
+        << "Missing FALCON4.ct test fixture";
+    ct.load(std::string(FIXTURE_DIR) + "FALCON4.ct");
+    ASSERT_GT(ct.size(), 0u);
+
+    WorldJsonOptions opts;
+    opts.class_table = &ct;
+    std::string json_with_ct = to_world_json(cam, opts);
+
+    // With the class table, objective_type must appear and at least one
+    // objective must resolve to a non-zero type (i.e. icon-mappable).
+    EXPECT_NE(json_with_ct.find("\"objective_type\""), std::string::npos);
+
+    // Re-decode and verify the resolver maps at least ~80% of objectives
+    // to a known ObjectiveType (1-39). A few may be 0 if the class table
+    // doesn't have entries for every entity_type, but the vast majority
+    // should resolve since this is a real Korea campaign.
+    const SubFile* obj = cam.find("obj");
+    ASSERT_NE(obj, nullptr);
+    DecodedObjectives objs = decode_obj(obj->data.data(), obj->data.size());
+    int resolved = 0;
+    for (const auto& o : objs.objectives) {
+        const uint8_t t = ct.objective_type_for(o.entity_type);
+        if (t > 0) ++resolved;
+    }
+    // 2659 objectives in the fixture; expect at least 2000 resolved.
+    EXPECT_GE(resolved, 2000)
+        << "Class table resolved too few objective types";
+}
+
+// find_class_table() should locate the FALCON4.ct fixture when given the
+// .cam path as a reference (it lives next to save1.cam in the fixtures dir).
+TEST(Objectives, FindClassTableLocatesFixtureNextToCam) {
+    auto ct_path = find_class_table(FIXTURE_DIR "save1.cam");
+    EXPECT_FALSE(ct_path.empty());
+    EXPECT_TRUE(std::filesystem::exists(ct_path));
+    EXPECT_EQ(ct_path.filename(), "FALCON4.ct");
 }

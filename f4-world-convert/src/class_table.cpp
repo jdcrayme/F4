@@ -83,4 +83,45 @@ uint8_t ClassTable::unit_subtype_for(uint16_t entity_type) const noexcept {
     return e->stype;
 }
 
+std::filesystem::path find_class_table(const std::filesystem::path& reference_file) {
+    const std::string filename = "FALCON4.ct";
+    auto candidate_in = [&filename](const std::filesystem::path& dir) -> std::filesystem::path {
+        if (dir.empty()) return {};
+        auto p = dir / filename;
+        return std::filesystem::exists(p) ? p : std::filesystem::path{};
+    };
+
+    // 1. Next to the reference file (typically the .cam).
+    if (!reference_file.empty()) {
+        auto p = candidate_in(reference_file.parent_path());
+        if (!p.empty()) return p;
+        // 2. Up a directory or two.
+        auto parent = reference_file.parent_path().parent_path();
+        if (!parent.empty()) {
+            p = candidate_in(parent);
+            if (!p.empty()) return p;
+        }
+    }
+
+    // 3. CWD-relative — covers the common case where the viewer or CLI is
+    // run from the build directory (CMake copies fixtures there) or from
+    // the project root (the source-tree fixtures are at known paths).
+    const char* cwd_relative[] = {
+        "FALCON4.ct",
+        "assets/FALCON4.ct",
+        "temp/FALCON4.ct",
+        "f4-world-convert/tests/fixtures/FALCON4.ct",
+        "../f4-world-convert/tests/fixtures/FALCON4.ct",
+        "../../f4-world-convert/tests/fixtures/FALCON4.ct",
+        "../temp/FALCON4.ct",
+        "../../temp/FALCON4.ct",
+    };
+    for (const char* rel : cwd_relative) {
+        if (std::filesystem::exists(rel)) {
+            return std::filesystem::path(rel);
+        }
+    }
+    return {};
+}
+
 } // namespace f4::convert

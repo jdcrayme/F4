@@ -35,6 +35,11 @@ public:
     void import_terrain_binary(const std::filesystem::path& terrain_dir);
     void import_cam_archive(const std::filesystem::path& cam_path);
 
+    /// Set the initial camera position (grid coordinates) and zoom (pixels
+    /// per grid unit). Call before run(). Useful for screenshots and for
+    /// launching the viewer focused on a region of interest.
+    void set_initial_camera(float center_x, float center_y, float zoom);
+
     /// Test/smoke-test helper: schedule a screenshot to be taken after `delay_sec`
     /// seconds. Useful for headless verification on CI / Linux dev boxes.
     void schedule_screenshot(float delay_sec, const std::string& path);

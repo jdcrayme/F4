@@ -29,6 +29,21 @@ target_include_directories(f4-world-convert
 add_executable(cam2json cli/cam2json.cpp)
 target_link_libraries(cam2json PRIVATE f4-world-convert)
 
+# Copy FALCON4.ct (the class table) next to cam2json so the CLI finds it
+# from CWD when run via `cmake --build build --target world`. The class
+# table maps entity_type values (100-2000+) to ObjectiveType (1-39) and
+# unit subtypes (armor/infantry/fighter/...), so without it objectives
+# render as generic circles in the viewer instead of type-specific icons.
+set(F4_CT_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/FALCON4.ct")
+if(EXISTS "${F4_CT_SOURCE}")
+    add_custom_command(TARGET cam2json POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${F4_CT_SOURCE}"
+            "${CMAKE_BINARY_DIR}/FALCON4.ct"
+        COMMENT "Copying FALCON4.ct class table to build directory"
+    )
+endif()
+
 # Tests
 option(F4_WORLD_CONVERT_BUILD_TESTS "Build unit tests" ON)
 if(F4_WORLD_CONVERT_BUILD_TESTS)
