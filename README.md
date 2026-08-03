@@ -395,7 +395,6 @@ ctest --test-dir build/f4-data/tests --output-on-failure
 ctest --test-dir build/f4-world-convert/tests --output-on-failure
 ctest --test-dir build/f4-world/tests --output-on-failure
 ctest --test-dir build/f4-terrain/tests --output-on-failure
-ctest --test-dir build/f4-world-vis/tests --output-on-failure
 ctest --test-dir build/f4-flight-model/tests --output-on-failure
 ```
 
@@ -403,34 +402,109 @@ Requires CMake 3.20+ and a C++20 compiler (MSVC 19.28+, GCC 10+, Clang 12+).
 Tests use [Google Test](https://github.com/google/googletest) v1.14.0,
 fetched automatically via CMake's FetchContent.
 
-## One-Click Visualization
+### Visual Studio on Windows
 
-After building, generate the theater map (real Korea terrain + campaign
-objectives) with a single command:
+The libraries build cleanly with the Visual Studio 17 2022 generator:
 
-```bash
-cmake --build build --target visualize
+```cmd
+cmake -B build -G "Visual Studio 17 2022"
+cmake --build build --config Release
+:: Open build\F4.sln in Visual Studio, set a startup project, F5 to debug.
 ```
 
-Then open `build/save1_map.html` in your browser. This produces a 1.6 MB
-HTML file with:
-- 16,384 color-coded terrain tiles (deep blue ocean, tan lowlands, brown
-  mountains, white peaks) from real `THEATER.MEA` elevation data
-- 2,659 campaign objectives overlaid as circles (red = enemy/PRC, cyan =
-  friendly/ROK) with airbase-specific runway icons
-- Layer-toggle checkboxes (terrain / grid / objectives / units / legend)
+The `f4-world-viewer` target is set up with `VS_DEBUGGER_WORKING_DIRECTORY`
+and `VS_DEBUGGER_COMMAND_ARGUMENTS` so pressing F5 in Visual Studio will
+launch the viewer pointed at the bundled `save1.world.json` +
+`korea.terrain.json` fixtures (after running the `world` target once).
 
-**Alternative — the shell script** (auto-opens browser, handles custom files):
+## World Data Pipeline
 
-```bash
-./visualize.sh                          # build + generate + open in browser
-./visualize.sh --no-open                # generate but don't auto-open
-./visualize.sh path/to/your.cam         # use a custom campaign file
+The F4 sim consumes two kinds of JSON files, both produced by converter CLIs:
+
+```
+THEATER.MAP/.MEA/.O2  ─→  f4-terrain-convert (terrain2json)  ─→  korea.terrain.json
+                                                                         │
+save1.cam  ─────────→  f4-world-convert (cam2json)  ─→  save1.world.json ─┘
+                                                                         │
+                                                                         ↓
+                                                               f4-world (loader)
+                                                                         │
+                                                                         ↓
+                                                              WorldState { terrain,
+                                                                            campaign,
+                                                                            objectives,
+                                                                            units, teams }
 ```
 
-The script finds cmake (even if installed via `pip`), locates the bundled
-`save1.cam` fixture and terrain files automatically, and copies the final
-map to the repo root for easy access.
+**Generate both at once:**
+
+```bash
+cmake --build build --target world
+```
+
+This produces `build/korea.terrain.json` (~85 KB) and `build/save1.world.json`
+(~430 KB) from the bundled fixtures. The terrain JSON is intentionally small
+and human-readable for easy diffing — 16,384 tile-type entries as a flat
+JSON array.
+
+### Format
+
+`korea.terrain.json`:
+```json
+{
+  "theater": "korea",
+  "width": 128,
+  "height": 128,
+  "tile_types": [0, 0, 0, 1, 2, 3, ...]   // 16,384 entries, TileType enum
+}
+```
+
+`save1.world.json`:
+```json
+{
+  "theater": "korea",
+  "terrain_file": "korea.terrain.json",   // relative path
+  "version": 63,
+  "campaign": { ... },
+  "objectives": { "count": 2659, "items": [...] },
+  "units": { "count": 683, "items": [...] },
+  ...
+}
+```
+
+## Interactive World Viewer
+
+`f4-world-viewer` is a Raylib + Dear ImGui desktop app for inspecting world
+data. It's the primary way to validate what's in the world before developing
+more advanced systems (digi AI, ATO).
+
+**Run it:**
+
+```bash
+cmake --build build --target f4-world-viewer
+./build/f4-world-viewer/f4-world-viewer build/save1.world.json build/korea.terrain.json
+```
+
+Or from Visual Studio: set `f4-world-viewer` as the startup project and press F5.
+
+**Features:**
+- Color-coded terrain tiles (water / lowland / hills / mountains / peaks)
+- Campaign objectives as circles, colored by owner team
+- Campaign units as squares with destination lines
+- Click-to-inspect any objective or unit → ImGui panel shows all decoded fields
+- Pan (drag), zoom (wheel), fit-to-world (View menu)
+- Layer toggles (terrain / objectives / units / grid / legend)
+- File menu wraps the CLI converters in-process:
+  - **Open World JSON** — load an existing `*.world.json`
+  - **Open Terrain JSON** — load an existing `*.terrain.json`
+  - **Import .cam Archive** — runs `cam2json` in-process, writes a `.world.json`
+    next to the source, and loads it
+  - **Import THEATER.\* Binary** — runs `terrain2json` in-process and loads
+    the resulting terrain JSON
+- F2 takes a screenshot (saved as `f4_viewer_screenshot.png` in the CWD)
+
+This is the starting point for a future world editor: the same load/render
+pipeline will gain edit/save capabilities as new systems come online.
 
 ## Design Principles
 

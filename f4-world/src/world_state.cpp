@@ -1,11 +1,10 @@
 // f4-world/src/world_state.cpp — JSON loader for WorldState.
 //
 // A minimal, dependency-free JSON reader sufficient for the world-state
-// schema emitted by f4-world-convert. We parse only the fields we need
-// (version, campaign header, teams) and skip everything else. This keeps
-// f4-world free of external JSON dependencies; if richer querying is ever
-// needed, nlohmann/json is already available in the build tree and can be
-// linked instead.
+// schema emitted by f4-world-convert. We parse the fields we need and skip
+// everything else. This keeps f4-world free of external JSON dependencies;
+// if richer querying is ever needed, nlohmann/json is available in the
+// build tree and can be linked instead.
 
 #include <f4/world/world_state.hpp>
 
@@ -80,8 +79,20 @@ public:
         return std::strtol(s_.c_str() + start, nullptr, 10);
     }
 
-    // Read the value at the current position and discard it (for fields we
-    // don't need). Handles nested objects/arrays/strings/numbers.
+    double read_number() {
+        skip_ws();
+        std::size_t start = pos_;
+        if (pos_ < s_.size() && (s_[pos_] == '-' || s_[pos_] == '+')) ++pos_;
+        while (pos_ < s_.size() &&
+               (std::isdigit(static_cast<unsigned char>(s_[pos_])) ||
+                s_[pos_] == '.' || s_[pos_] == 'e' || s_[pos_] == 'E' ||
+                s_[pos_] == '+' || s_[pos_] == '-'))
+            ++pos_;
+        if (start == pos_) throw std::runtime_error("JSON: expected number");
+        return std::strtod(s_.c_str() + start, nullptr);
+    }
+
+    // Skip the value at the current position (for fields we don't need).
     void skip_value() {
         skip_ws();
         if (pos_ >= s_.size()) return;
@@ -92,7 +103,7 @@ public:
             skip_ws();
             if (consume('}')) return;
             for (;;) {
-                (void)read_string();   // key
+                (void)read_string();
                 expect(':');
                 skip_value();
                 if (consume('}')) break;
@@ -108,26 +119,9 @@ public:
                 expect(',');
             }
         } else {
-            // number, true, false, null — read until delimiter
             while (pos_ < s_.size() && s_[pos_] != ',' && s_[pos_] != '}' &&
                    s_[pos_] != ']' && !std::isspace(static_cast<unsigned char>(s_[pos_])))
                 ++pos_;
-        }
-    }
-
-    // Position the reader at the value for a given top-level key. Returns
-    // false if the key isn't found. Assumes we're at the start of an object.
-    bool find_key(const std::string& key) {
-        skip_ws();
-        expect('{');
-        if (consume('}')) return false;
-        for (;;) {
-            std::string k = read_string();
-            expect(':');
-            if (k == key) return true;
-            skip_value();
-            if (consume('}')) return false;
-            expect(',');
         }
     }
 
@@ -136,67 +130,113 @@ private:
     std::size_t pos_;
 };
 
-void parse_campaign(JsonReader& r, CampaignState& c) {
-    r.skip_ws();
-    r.expect('{');
-    if (r.consume('}')) return;
+// Parse a team slot object starting at the '{'.
+TeamState parse_team(JsonReader& r) {
+    TeamState t;
+    r.skip_ws(); r.expect('{');
+    if (r.consume('}')) return t;
     for (;;) {
-        std::string key = r.read_string();
+        std::string k = r.read_string();
         r.expect(':');
-        if (key == "current_time")         c.current_time = static_cast<int32_t>(r.read_int());
-        else if (key == "te_start_time")   c.te_start_time = static_cast<int32_t>(r.read_int());
-        else if (key == "te_time_limit")   c.te_time_limit = static_cast<int32_t>(r.read_int());
-        else if (key == "te_victory_points")c.te_victory_points = static_cast<int32_t>(r.read_int());
-        else if (key == "te_type")         c.te_type = static_cast<int32_t>(r.read_int());
-        else if (key == "te_number_teams") c.te_number_teams = static_cast<int32_t>(r.read_int());
-        else if (key == "te_team")         c.te_team = static_cast<int32_t>(r.read_int());
-        else if (key == "te_flags")        c.te_flags = static_cast<int32_t>(r.read_int());
-        else if (key == "te_number_aircraft" || key == "te_team_pts") {
-            // array of ints
-            r.skip_ws(); r.expect('[');
-            std::vector<int32_t> arr;
-            if (!r.peek(']')) for (;;) {
-                arr.push_back(static_cast<int32_t>(r.read_int()));
-                if (r.consume(']')) break;
-                r.expect(',');
-            }
-            if (key == "te_number_aircraft") c.te_number_aircraft = arr;
-            else c.te_team_pts = arr;
-        }
-        else if (key == "teams") {
-            r.skip_ws(); r.expect('[');
-            if (r.consume(']')) { /* empty */ }
-            else for (;;) {
-                r.skip_ws(); r.expect('{');
-                TeamState t;
-                if (!r.peek('}')) for (;;) {
-                    std::string tk = r.read_string();
-                    r.expect(':');
-                    if (tk == "slot")        t.slot = static_cast<int>(r.read_int());
-                    else if (tk == "flags")  t.flags = static_cast<uint8_t>(r.read_int());
-                    else if (tk == "colour") t.colour = static_cast<uint8_t>(r.read_int());
-                    else if (tk == "name")   t.name = r.read_string();
-                    else if (tk == "motto")  t.motto = r.read_string();
-                    else r.skip_value();
-                    if (r.consume('}')) break;
-                    r.expect(',');
-                }
-                // teams array entry consumed
-                {
-                    // capture into outer scope
-                }
-                if (key == "teams") {
-                    // We need to push back — but we're inside the teams branch.
-                    // Use a static lambda-free approach: re-read into a temp.
-                }
-                r.skip_ws();
-                if (r.consume(']')) { /* done */ break; }
-                r.expect(',');
-            }
-        }
-        else r.skip_value();
+        if      (k == "slot")    t.slot    = static_cast<int>(r.read_int());
+        else if (k == "flags")   t.flags   = static_cast<uint8_t>(r.read_int());
+        else if (k == "colour")  t.colour  = static_cast<uint8_t>(r.read_int());
+        else if (k == "name")    t.name    = r.read_string();
+        else if (k == "motto")   t.motto   = r.read_string();
+        else                     r.skip_value();
         if (r.consume('}')) break;
         r.expect(',');
+    }
+    return t;
+}
+
+ObjectiveState parse_objective(JsonReader& r) {
+    ObjectiveState o;
+    r.skip_ws(); r.expect('{');
+    if (r.consume('}')) return o;
+    for (;;) {
+        std::string k = r.read_string();
+        r.expect(':');
+        if      (k == "type")         o.type         = static_cast<int16_t>(r.read_int());
+        else if (k == "x")            o.x            = static_cast<int16_t>(r.read_int());
+        else if (k == "y")            o.y            = static_cast<int16_t>(r.read_int());
+        else if (k == "z")            o.z            = static_cast<float>(r.read_number());
+        else if (k == "owner")        o.owner        = static_cast<uint8_t>(r.read_int());
+        else if (k == "priority")     o.priority     = static_cast<uint8_t>(r.read_int());
+        else if (k == "nameid")       o.nameid       = static_cast<int16_t>(r.read_int());
+        else if (k == "camp_id")      o.camp_id      = static_cast<int16_t>(r.read_int());
+        else if (k == "entity_type")  o.entity_type  = static_cast<uint16_t>(r.read_int());
+        else                          r.skip_value();
+        if (r.consume('}')) break;
+        r.expect(',');
+    }
+    return o;
+}
+
+UnitState parse_unit(JsonReader& r) {
+    UnitState u;
+    r.skip_ws(); r.expect('{');
+    if (r.consume('}')) return u;
+    for (;;) {
+        std::string k = r.read_string();
+        r.expect(':');
+        if      (k == "type")           u.type           = static_cast<int16_t>(r.read_int());
+        else if (k == "unit_class") {
+            // String → enum. Unknown if not recognized.
+            std::string s = r.read_string();
+            if      (s == "battalion") u.unit_class = UnitClass::Battalion;
+            else if (s == "brigade")   u.unit_class = UnitClass::Brigade;
+            else if (s == "squadron")  u.unit_class = UnitClass::Squadron;
+            else if (s == "taskforce") u.unit_class = UnitClass::TaskForce;
+            else if (s == "flight")    u.unit_class = UnitClass::Flight;
+            else if (s == "package")   u.unit_class = UnitClass::Package;
+            else                        u.unit_class = UnitClass::Unknown;
+        }
+        else if (k == "x")              u.x              = static_cast<int16_t>(r.read_int());
+        else if (k == "y")              u.y              = static_cast<int16_t>(r.read_int());
+        else if (k == "z")              u.z              = static_cast<float>(r.read_number());
+        else if (k == "owner")          u.owner          = static_cast<uint8_t>(r.read_int());
+        else if (k == "dest_x")         u.dest_x         = static_cast<int16_t>(r.read_int());
+        else if (k == "dest_y")         u.dest_y         = static_cast<int16_t>(r.read_int());
+        else if (k == "name_id")        u.name_id        = static_cast<int16_t>(r.read_int());
+        else if (k == "camp_id")        u.camp_id        = static_cast<int16_t>(r.read_int());
+        else if (k == "entity_type")    u.entity_type    = static_cast<uint16_t>(r.read_int());
+        else if (k == "reinforcement")  u.reinforcement  = static_cast<int16_t>(r.read_int());
+        else if (k == "wp_count")       u.wp_count       = static_cast<uint8_t>(r.read_int());
+        else if (k == "losses")         u.losses         = static_cast<uint8_t>(r.read_int());
+        else if (k == "supply")         u.supply         = static_cast<uint8_t>(r.read_int());
+        else if (k == "morale")         u.morale         = static_cast<uint8_t>(r.read_int());
+        else if (k == "fatigue")        u.fatigue        = static_cast<uint8_t>(r.read_int());
+        else if (k == "elements")       u.elements       = static_cast<uint8_t>(r.read_int());
+        else if (k == "fuel")           u.fuel           = static_cast<int32_t>(r.read_int());
+        else                            r.skip_value();
+        if (r.consume('}')) break;
+        r.expect(',');
+    }
+    return u;
+}
+
+void parse_campaign_field(JsonReader& r, const std::string& key, CampaignState& c) {
+    if      (key == "current_time")         c.current_time = static_cast<int32_t>(r.read_int());
+    else if (key == "te_start_time")        c.te_start_time = static_cast<int32_t>(r.read_int());
+    else if (key == "te_time_limit")        c.te_time_limit = static_cast<int32_t>(r.read_int());
+    else if (key == "te_victory_points")    c.te_victory_points = static_cast<int32_t>(r.read_int());
+    else if (key == "te_type")              c.te_type = static_cast<int32_t>(r.read_int());
+    else if (key == "te_number_teams")      c.te_number_teams = static_cast<int32_t>(r.read_int());
+    else if (key == "te_team")              c.te_team = static_cast<int32_t>(r.read_int());
+    else if (key == "te_flags")             c.te_flags = static_cast<int32_t>(r.read_int());
+    else if (key == "te_number_aircraft" || key == "te_team_pts") {
+        r.skip_ws(); r.expect('[');
+        std::vector<int32_t> arr;
+        if (!r.peek(']')) for (;;) {
+            arr.push_back(static_cast<int32_t>(r.read_int()));
+            if (r.consume(']')) break;
+            r.expect(',');
+        }
+        if (key == "te_number_aircraft") c.te_number_aircraft = std::move(arr);
+        else                              c.te_team_pts = std::move(arr);
+    } else {
+        r.skip_value();
     }
 }
 
@@ -205,77 +245,89 @@ void parse_campaign(JsonReader& r, CampaignState& c) {
 void WorldState::load_from_string(const std::string& json) {
     JsonReader r(json);
 
-    // Top-level object.
     r.skip_ws();
     r.expect('{');
     if (r.consume('}')) return;
+
     for (;;) {
         std::string key = r.read_string();
         r.expect(':');
+
         if (key == "version") {
             version = static_cast<int>(r.read_int());
+        } else if (key == "theater") {
+            theater = r.read_string();
+        } else if (key == "terrain_file") {
+            terrain_file = r.read_string();
         } else if (key == "campaign") {
-            parse_campaign(r, campaign);
-            // parse_campaign needs to also fill teams — restructure below.
+            // Parse campaign object — may contain a teams array we capture
+            // into the WorldState (not CampaignState).
+            r.skip_ws(); r.expect('{');
+            if (r.consume('}')) continue;
+            for (;;) {
+                std::string ck = r.read_string();
+                r.expect(':');
+                if (ck == "teams") {
+                    r.skip_ws(); r.expect('[');
+                    if (r.consume(']')) { /* empty */ }
+                    else for (;;) {
+                        teams.push_back(parse_team(r));
+                        if (r.consume(']')) break;
+                        r.expect(',');
+                    }
+                } else {
+                    parse_campaign_field(r, ck, campaign);
+                }
+                if (r.consume('}')) break;
+                r.expect(',');
+            }
+        } else if (key == "objectives") {
+            // The objective decoder emits: { "count": N, "decoded": M, "items": [...] }
+            r.skip_ws(); r.expect('{');
+            if (r.consume('}')) continue;
+            for (;;) {
+                std::string ok = r.read_string();
+                r.expect(':');
+                if (ok == "items") {
+                    r.skip_ws(); r.expect('[');
+                    if (r.consume(']')) { /* empty */ }
+                    else for (;;) {
+                        objectives.push_back(parse_objective(r));
+                        if (r.consume(']')) break;
+                        r.expect(',');
+                    }
+                } else {
+                    r.skip_value();
+                }
+                if (r.consume('}')) break;
+                r.expect(',');
+            }
+        } else if (key == "units") {
+            r.skip_ws(); r.expect('{');
+            if (r.consume('}')) continue;
+            for (;;) {
+                std::string uk = r.read_string();
+                r.expect(':');
+                if (uk == "items") {
+                    r.skip_ws(); r.expect('[');
+                    if (r.consume(']')) { /* empty */ }
+                    else for (;;) {
+                        units.push_back(parse_unit(r));
+                        if (r.consume(']')) break;
+                        r.expect(',');
+                    }
+                } else {
+                    r.skip_value();
+                }
+                if (r.consume('}')) break;
+                r.expect(',');
+            }
         } else {
             r.skip_value();
         }
+
         if (r.consume('}')) break;
         r.expect(',');
-    }
-
-    // Second pass for teams (they're nested inside campaign, but the
-    // parse_campaign above left them out for clarity — re-parse from the
-    // raw string to extract the teams array).
-    // Actually, let's do it properly: re-walk to campaign.teams.
-    JsonReader r2(json);
-    r2.skip_ws();
-    r2.expect('{');
-    if (r2.consume('}')) return;
-    for (;;) {
-        std::string k = r2.read_string();
-        r2.expect(':');
-        if (k == "campaign") {
-            r2.skip_ws(); r2.expect('{');
-            if (r2.consume('}')) { /* no teams */ }
-            else for (;;) {
-                std::string ck = r2.read_string();
-                r2.expect(':');
-                if (ck == "teams") {
-                    r2.skip_ws(); r2.expect('[');
-                    if (r2.consume(']')) { /* empty */ }
-                    else for (;;) {
-                        r2.skip_ws(); r2.expect('{');
-                        TeamState t;
-                        if (!r2.peek('}')) for (;;) {
-                            std::string tk = r2.read_string();
-                            r2.expect(':');
-                            if (tk == "slot")        t.slot = static_cast<int>(r2.read_int());
-                            else if (tk == "flags")  t.flags = static_cast<uint8_t>(r2.read_int());
-                            else if (tk == "colour") t.colour = static_cast<uint8_t>(r2.read_int());
-                            else if (tk == "name")   t.name = r2.read_string();
-                            else if (tk == "motto")  t.motto = r2.read_string();
-                            else r2.skip_value();
-                            if (r2.consume('}')) break;
-                            r2.expect(',');
-                        }
-                        teams.push_back(std::move(t));
-                        if (r2.consume(']')) break;
-                        r2.expect(',');
-                    }
-                    // teams found — we can stop.
-                    return;
-                } else {
-                    r2.skip_value();
-                }
-                if (r2.consume('}')) break;
-                r2.expect(',');
-            }
-        } else {
-            r2.skip_value();
-        }
-        if (r2.consume('}')) break;
-        r2.expect(',');
     }
 }
 
@@ -285,6 +337,25 @@ void WorldState::load(const std::filesystem::path& json_path) {
     std::ostringstream ss;
     ss << f.rdbuf();
     load_from_string(ss.str());
+
+    // Remember where we loaded from so load_terrain() can resolve the
+    // terrain_file path relative to the world JSON's directory.
+    world_json_dir_ = json_path.parent_path().string();
+}
+
+void WorldState::load_terrain(const std::filesystem::path& base_dir) {
+    if (terrain_file.empty())
+        throw std::runtime_error("WorldState: no terrain_file referenced");
+
+    std::filesystem::path resolved = terrain_file;
+    if (!base_dir.empty()) {
+        resolved = std::filesystem::path(base_dir) / terrain_file;
+    } else if (!world_json_dir_.empty()) {
+        resolved = std::filesystem::path(world_json_dir_) / terrain_file;
+    }
+
+    terrain.load_terrain_json(resolved);
+    terrain_loaded = true;
 }
 
 } // namespace f4::world

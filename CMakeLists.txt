@@ -22,24 +22,23 @@ add_subdirectory(f4-convert)
 add_subdirectory(f4-world-convert) # .cam campaign archive -> JSON (keystone)
 add_subdirectory(f4-world)         # typed WorldState -> populates f4-entities
 add_subdirectory(f4-terrain)       # theater terrain (elevation/palette/overlay)
-add_subdirectory(f4-world-vis)     # SVG/HTML tile-map renderer for world data
+add_subdirectory(f4-terrain-convert) # THEATER.* -> korea.terrain.json (CLI)
+add_subdirectory(f4-world-viewer)  # Raylib + Dear ImGui interactive viewer
 add_subdirectory(f4-flight-model)
 
 # ============================================================================
-# Convenience targets — one-command visualization
+# Convenience targets — one-command world generation
 # ============================================================================
 #
-#   cmake --build build --target visualize
-#       Converts the bundled save1.cam to JSON, generates an HTML map with
-#       real Korea terrain tiles, and copies it to build/save1_map.html.
-#       Open that file in a browser.
+#   cmake --build build --target world
+#       Converts the bundled save1.cam to JSON, and the bundled THEATER.*
+#       files to terrain.json. Both outputs land in build/.
 #
 #   cmake --build build --target json
-#       Just the .cam -> JSON step (no map).
+#       Just the .cam -> JSON step (no terrain).
 #
-#   For custom .cam files or auto-open in browser, use visualize.sh directly:
-#       ./visualize.sh path/to/your.cam
-#       ./visualize.sh --no-open
+#   For interactive inspection: run f4-world-viewer, then use File > Open
+#   to load the world JSON and terrain JSON files in the build/ directory.
 #
 
 # Locate the bundled campaign fixture and terrain data.
@@ -56,28 +55,31 @@ endif()
 add_custom_target(json
     COMMAND $<TARGET_FILE:cam2json>
             "${F4_CAM_FIXTURE}"
-            "${CMAKE_BINARY_DIR}/save1.json"
+            "${CMAKE_BINARY_DIR}/save1.world.json"
     DEPENDS cam2json
-    COMMENT "Converting save1.cam -> save1.json"
+    COMMENT "Converting save1.cam -> save1.world.json"
     VERBATIM
 )
 
-# .cam -> JSON -> HTML map (with terrain)
-add_custom_target(visualize
-    # Step 1: .cam -> JSON
+# THEATER.* -> terrain.json
+add_custom_target(terrain-json
+    COMMAND $<TARGET_FILE:terrain2json>
+            "${F4_TERRAIN_DIR}"
+            "${CMAKE_BINARY_DIR}/korea.terrain.json"
+    DEPENDS terrain2json
+    COMMENT "Converting THEATER.* -> korea.terrain.json"
+    VERBATIM
+)
+
+# Both at once
+add_custom_target(world
     COMMAND $<TARGET_FILE:cam2json>
             "${F4_CAM_FIXTURE}"
-            "${CMAKE_BINARY_DIR}/save1.json"
-    # Step 2: JSON -> HTML map (with terrain tiles)
-    COMMAND $<TARGET_FILE:world2map>
-            "${CMAKE_BINARY_DIR}/save1.json"
-            "${CMAKE_BINARY_DIR}/save1_map.html"
+            "${CMAKE_BINARY_DIR}/save1.world.json"
+    COMMAND $<TARGET_FILE:terrain2json>
             "${F4_TERRAIN_DIR}"
-    # Step 3: also generate a land-mask-only version (no terrain data needed)
-    COMMAND $<TARGET_FILE:world2map>
-            "${CMAKE_BINARY_DIR}/save1.json"
-            "${CMAKE_BINARY_DIR}/save1_map_noterrain.html"
-    DEPENDS cam2json world2map
-    COMMENT "Generating theater visualization: build/save1_map.html"
+            "${CMAKE_BINARY_DIR}/korea.terrain.json"
+    DEPENDS cam2json terrain2json
+    COMMENT "Generating world JSON + terrain JSON"
     VERBATIM
 )

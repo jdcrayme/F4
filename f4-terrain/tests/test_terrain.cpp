@@ -99,3 +99,61 @@ TEST(Terrain, VerticalFlipIsApplied) {
     }
     EXPECT_TRUE(northern_land) << "expected mountains in northern Korea";
 }
+
+// ---------------------------------------------------------------------------
+// JSON round-trip tests
+// ---------------------------------------------------------------------------
+TEST(Terrain, TileTypesDerivedFromElevation) {
+    auto td = load_fixture();
+    EXPECT_EQ(td.tile_types.size(), td.elevation.size());
+    // Every tile_types entry must be a valid TileType value (0..5).
+    for (auto t : td.tile_types) {
+        EXPECT_LE(t, 5) << "invalid TileType value";
+    }
+    // Korea has both water and land — at least one cell of each.
+    bool has_water = false, has_land = false;
+    for (auto t : td.tile_types) {
+        if (t == 0) has_water = true;
+        else has_land = true;
+    }
+    EXPECT_TRUE(has_water);
+    EXPECT_TRUE(has_land);
+}
+
+TEST(Terrain, JsonRoundTripPreservesTileTypes) {
+    auto td = load_fixture();
+    const std::string json = td.to_terrain_json("korea");
+    EXPECT_FALSE(json.empty());
+    EXPECT_NE(json.find("\"theater\": \"korea\""), std::string::npos);
+    EXPECT_NE(json.find("\"width\": 128"), std::string::npos);
+
+    // Load it back.
+    TerrainData td2;
+    td2.load_terrain_json_from_string(json);
+    EXPECT_EQ(td2.header.width, td.header.width);
+    EXPECT_EQ(td2.header.height, td.header.height);
+    EXPECT_EQ(td2.tile_types, td.tile_types);
+}
+
+TEST(Terrain, JsonRoundTripPreservesElevation) {
+    auto td = load_fixture();
+    const std::string json = td.to_terrain_json("korea");
+    TerrainData td2;
+    td2.load_terrain_json_from_string(json);
+    EXPECT_EQ(td2.elevation, td.elevation);
+}
+
+TEST(Terrain, JsonColorForTileTypeMatchesClassifier) {
+    auto td = load_fixture();
+    // For every cell, the color returned by terrain_color() must match
+    // color_for_tile_type(tile_type_at()).
+    for (uint32_t y = 0; y < td.header.height; ++y)
+    for (uint32_t x = 0; x < td.header.width; ++x) {
+        const auto t = td.tile_type_at(x, y);
+        const auto c = td.terrain_color(x, y);
+        const auto expected = TerrainData::color_for_tile_type(t);
+        EXPECT_EQ(c.r, expected.r);
+        EXPECT_EQ(c.g, expected.g);
+        EXPECT_EQ(c.b, expected.b);
+    }
+}

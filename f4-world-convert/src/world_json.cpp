@@ -54,9 +54,15 @@ std::string base64_encode(const uint8_t* data, std::size_t len) {
 
 } // namespace
 
-std::string to_world_json(const CamArchive& cam) {
+std::string to_world_json(const CamArchive& cam, const WorldJsonOptions& opts) {
     std::ostringstream o;
     o << "{\n";
+
+    // --- Theater + terrain reference (NEW) ---
+    // The world JSON is paired with a separate terrain JSON. We record the
+    // theater name and the terrain file path so consumers can load both.
+    o << "  \"theater\": \"" << json_escape(opts.theater) << "\",\n";
+    o << "  \"terrain_file\": \"" << json_escape(opts.terrain_file) << "\",\n";
 
     // --- Container manifest ---
     o << "  \"archive\": {\n";
@@ -160,17 +166,29 @@ std::string to_world_json(const CamArchive& cam) {
                 o << ",\n  \"units\": {\n";
                 o << "    \"count\": " << units.count << ",\n";
                 o << "    \"decoded\": " << units.units.size() << ",\n";
+                o << "    \"bytes_consumed\": " << units.bytes_consumed << ",\n";
+                o << "    \"inner_size\": " << units.inner_size << ",\n";
                 o << "    \"items\": [\n";
                 for (std::size_t i = 0; i < units.units.size(); ++i) {
                     const auto& u = units.units[i];
                     o << "      {\"type\": " << u.type
+                      << ", \"unit_class\": \"" << unit_class_name(u.unit_class) << "\""
                       << ", \"x\": " << u.x
                       << ", \"y\": " << u.y
                       << ", \"z\": " << (std::isnan(u.z) ? 0.0f : u.z)
                       << ", \"owner\": " << static_cast<int>(u.owner)
+                      << ", \"camp_id\": " << u.camp_id
                       << ", \"name_id\": " << u.name_id
                       << ", \"dest_x\": " << u.dest_x
                       << ", \"dest_y\": " << u.dest_y
+                      << ", \"reinforcement\": " << u.reinforcement
+                      << ", \"wp_count\": " << static_cast<int>(u.wp_count)
+                      << ", \"supply\": " << static_cast<int>(u.subclass.supply)
+                      << ", \"morale\": " << static_cast<int>(u.subclass.morale)
+                      << ", \"fatigue\": " << static_cast<int>(u.subclass.fatigue)
+                      << ", \"fuel\": " << u.subclass.fuel
+                      << ", \"elements\": " << static_cast<int>(u.subclass.elements)
+                      << ", \"losses\": " << static_cast<int>(u.losses)
                       << "}";
                     if (i + 1 < units.units.size()) o << ",";
                     o << "\n";

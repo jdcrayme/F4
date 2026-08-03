@@ -12,11 +12,23 @@
 
 namespace f4::convert {
 
+/// Optional metadata for the world JSON emitter.
+struct WorldJsonOptions {
+    /// Theater identifier (e.g. "korea"). Emitted as the top-level "theater"
+    /// field so consumers can look up the corresponding terrain file.
+    std::string theater = "korea";
+    /// Filename of the terrain JSON to reference (NOT embed). The world JSON
+    /// records the path so f4-world can load the terrain side-by-side. The
+    /// path is interpreted relative to the world JSON's location.
+    std::string terrain_file = "korea.terrain.json";
+};
+
 /// Build the world JSON document from a loaded .cam archive.
 /// Includes: the container manifest (all sub-files), the decoded .ver
 /// version, the decoded .cmp campaign header (CurrentTime, TE block, all
 /// 8 team name/motto slots), and raw sub-file bytes (base64) for types
 /// not yet decoded.
-[[nodiscard]] std::string to_world_json(const CamArchive& cam);
+[[nodiscard]] std::string to_world_json(const CamArchive& cam,
+                                         const WorldJsonOptions& opts = {});
 
 } // namespace f4::convert

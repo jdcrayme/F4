@@ -2,8 +2,10 @@
 
 #include <f4/terrain/terrain_data.hpp>
 
+#include <cctype>
 #include <cstdio>
 #include <cstring>
+#include <fstream>
 #include <sstream>
 #include <stdexcept>
 
@@ -44,8 +46,146 @@ std::vector<uint8_t> read_file(const std::filesystem::path& path) {
     return buf;
 }
 
+// ---------------------------------------------------------------------------
+// Minimal JSON writer — emits a compact, human-readable document. We avoid
+// pulling in nlohmann/json here to keep f4-terrain dependency-free (matches
+// the existing f4-world-convert pattern of hand-rolled JSON emission).
+// ---------------------------------------------------------------------------
+class JsonWriter {
+public:
+    void put(char c) { buf_.push_back(c); }
+    void put(const char* s) { while (*s) buf_.push_back(*s++); }
+    void put(const std::string& s) { buf_.append(s); }
+
+    void raw(const char* s) { put(s); }
+    void string(const std::string& s) {
+        put('"');
+        for (char ch : s) {
+            switch (ch) {
+                case '"':  put("\\\""); break;
+                case '\\': put("\\\\"); break;
+                case '\n': put("\\n");  break;
+                case '\r': put("\\r");  break;
+                case '\t': put("\\t");  break;
+                default:
+                    if (static_cast<unsigned char>(ch) < 0x20) {
+                        char tmp[8];
+                        std::snprintf(tmp, sizeof(tmp), "\\u%04x", ch);
+                        put(tmp);
+                    } else {
+                        put(ch);
+                    }
+            }
+        }
+        put('"');
+    }
+    void number(long v) {
+        char tmp[24];
+        std::snprintf(tmp, sizeof(tmp), "%ld", v);
+        put(tmp);
+    }
+
+    [[nodiscard]] std::string str() const { return buf_; }
+private:
+    std::string buf_;
+};
+
+// ---------------------------------------------------------------------------
+// Minimal JSON reader — sufficient for the terrain JSON schema (objects,
+// arrays of numbers, strings). Mirrors the JsonReader pattern in f4-world.
+// ---------------------------------------------------------------------------
+class JsonReader {
+public:
+    explicit JsonReader(const std::string& s) : s_(s), pos_(0) {}
+
+    void skip_ws() {
+        while (pos_ < s_.size() && std::isspace(static_cast<unsigned char>(s_[pos_]))) ++pos_;
+    }
+    bool peek(char ch) { skip_ws(); return pos_ < s_.size() && s_[pos_] == ch; }
+    void expect(char ch) {
+        skip_ws();
+        if (pos_ >= s_.size() || s_[pos_] != ch)
+            throw std::runtime_error(std::string("terrain JSON: expected '") + ch + "'");
+        ++pos_;
+    }
+    bool consume(char ch) { if (peek(ch)) { ++pos_; return true; } return false; }
+
+    std::string read_string() {
+        skip_ws();
+        expect('"');
+        std::string out;
+        while (pos_ < s_.size() && s_[pos_] != '"') {
+            if (s_[pos_] == '\\' && pos_ + 1 < s_.size()) {
+                char esc = s_[pos_ + 1];
+                switch (esc) {
+                    case '"': out += '"'; break;
+                    case '\\': out += '\\'; break;
+                    case '/': out += '/'; break;
+                    case 'n': out += '\n'; break;
+                    case 't': out += '\t'; break;
+                    case 'r': out += '\r'; break;
+                    default: out += esc; break;
+                }
+                pos_ += 2;
+            } else {
+                out += s_[pos_++];
+            }
+        }
+        expect('"');
+        return out;
+    }
+
+    long read_int() {
+        skip_ws();
+        std::size_t start = pos_;
+        if (pos_ < s_.size() && (s_[pos_] == '-' || s_[pos_] == '+')) ++pos_;
+        while (pos_ < s_.size() && std::isdigit(static_cast<unsigned char>(s_[pos_]))) ++pos_;
+        if (start == pos_) throw std::runtime_error("terrain JSON: expected number");
+        return std::strtol(s_.c_str() + start, nullptr, 10);
+    }
+
+    void skip_value() {
+        skip_ws();
+        if (pos_ >= s_.size()) return;
+        char c = s_[pos_];
+        if (c == '"') { (void)read_string(); }
+        else if (c == '{') {
+            ++pos_;
+            skip_ws();
+            if (consume('}')) return;
+            for (;;) {
+                (void)read_string();
+                expect(':');
+                skip_value();
+                if (consume('}')) break;
+                expect(',');
+            }
+        } else if (c == '[') {
+            ++pos_;
+            skip_ws();
+            if (consume(']')) return;
+            for (;;) {
+                skip_value();
+                if (consume(']')) break;
+                expect(',');
+            }
+        } else {
+            while (pos_ < s_.size() && s_[pos_] != ',' && s_[pos_] != '}' &&
+                   s_[pos_] != ']' && !std::isspace(static_cast<unsigned char>(s_[pos_])))
+                ++pos_;
+        }
+    }
+
+private:
+    const std::string& s_;
+    std::size_t pos_;
+};
+
 } // namespace
 
+// ---------------------------------------------------------------------------
+// Binary load (THEATER.* files)
+// ---------------------------------------------------------------------------
 void TerrainData::load(const std::filesystem::path& terrain_dir) {
     // --- THEATER.MAP: header + palette ---
     auto map_data = read_file(terrain_dir / "THEATER.MAP");
@@ -97,8 +237,136 @@ void TerrainData::load(const std::filesystem::path& terrain_dir) {
             }
         }
     }
+
+    // --- Derive tile_types from elevation ---
+    tile_types.resize(elevation.size());
+    for (std::size_t i = 0; i < elevation.size(); ++i) {
+        tile_types[i] = static_cast<uint8_t>(tile_type_from_elevation(elevation[i]));
+    }
 }
 
+// ---------------------------------------------------------------------------
+// JSON load (intermediate format produced by f4-terrain-convert)
+// ---------------------------------------------------------------------------
+void TerrainData::load_terrain_json_from_string(const std::string& json) {
+    JsonReader r(json);
+    r.skip_ws();
+    r.expect('{');
+    if (r.consume('}')) return;
+
+    // We collect fields by walking the top-level object. Both tile_types
+    // and elevations are arrays of integers — we detect which is which by
+    // key name.
+    for (;;) {
+        std::string key = r.read_string();
+        r.expect(':');
+
+        if (key == "width") {
+            header.width = static_cast<uint32_t>(r.read_int());
+        } else if (key == "height") {
+            header.height = static_cast<uint32_t>(r.read_int());
+        } else if (key == "theater" || key == "tile_size_feet" ||
+                   key == "origin_lat_rad" || key == "origin_lon_rad") {
+            // Strings (theater) or floats — read and skip.
+            r.skip_value();
+        } else if (key == "tile_types" || key == "elevations_ft") {
+            // Array of integers.
+            r.skip_ws();
+            r.expect('[');
+            std::vector<int> tmp;
+            if (!r.peek(']')) for (;;) {
+                tmp.push_back(static_cast<int>(r.read_int()));
+                if (r.consume(']')) break;
+                r.expect(',');
+            }
+            if (key == "tile_types") {
+                tile_types.clear();
+                tile_types.reserve(tmp.size());
+                for (int v : tmp) tile_types.push_back(static_cast<uint8_t>(v));
+            } else {
+                elevation.clear();
+                elevation.reserve(tmp.size());
+                for (int v : tmp) elevation.push_back(static_cast<int16_t>(v));
+            }
+        } else {
+            r.skip_value();
+        }
+
+        if (r.consume('}')) break;
+        r.expect(',');
+    }
+
+    if (header.width == 0 || header.height == 0)
+        throw std::runtime_error("terrain JSON: missing width/height");
+    if (tile_types.empty())
+        throw std::runtime_error("terrain JSON: missing tile_types array");
+    const std::size_t expected_count =
+        static_cast<std::size_t>(header.width) * header.height;
+    if (tile_types.size() != expected_count)
+        throw std::runtime_error("terrain JSON: tile_types length mismatch");
+    // If elevation wasn't included, leave it empty (viewer doesn't need it
+    // for tile rendering; only the binary loader populates it).
+}
+
+void TerrainData::load_terrain_json(const std::filesystem::path& json_path) {
+    std::ifstream f(json_path);
+    if (!f) throw std::runtime_error("terrain: cannot open " + json_path.string());
+    std::ostringstream ss;
+    ss << f.rdbuf();
+    load_terrain_json_from_string(ss.str());
+}
+
+// ---------------------------------------------------------------------------
+// JSON save (to_terrain_json / save_terrain_json)
+// ---------------------------------------------------------------------------
+std::string TerrainData::to_terrain_json(const std::string& theater_name) const {
+    JsonWriter w;
+    w.raw("{\n");
+
+    if (!theater_name.empty()) {
+        w.raw("  \"theater\": "); w.string(theater_name); w.raw(",\n");
+    }
+    w.raw("  \"width\": ");  w.number(header.width);  w.raw(",\n");
+    w.raw("  \"height\": "); w.number(header.height); w.raw(",\n");
+
+    // Tile types: one integer per cell, row-major (y=0 north, x=0 west).
+    // Emitted as a flat JSON array — compact but still diff-friendly at
+    // 16,384 entries (~50 KB). For multi-MB L-file grids we'll switch to
+    // a binary sidecar; the JSON shape stays the same.
+    w.raw("  \"tile_types\": [");
+    const std::size_t n = tile_types.size();
+    for (std::size_t i = 0; i < n; ++i) {
+        if (i) w.raw(",");
+        w.number(tile_types[i]);
+    }
+    w.raw("]");
+
+    // Elevation is optional in the JSON — only emit if populated (i.e.
+    // loaded from binary). When loading back, the viewer can reconstruct
+    // tile colors from tile_types alone.
+    if (!elevation.empty()) {
+        w.raw(",\n  \"elevations_ft\": [");
+        for (std::size_t i = 0; i < elevation.size(); ++i) {
+            if (i) w.raw(",");
+            w.number(elevation[i]);
+        }
+        w.raw("]");
+    }
+
+    w.raw("\n}\n");
+    return w.str();
+}
+
+void TerrainData::save_terrain_json(const std::filesystem::path& json_path,
+                                    const std::string& theater_name) const {
+    std::ofstream f(json_path);
+    if (!f) throw std::runtime_error("terrain: cannot write " + json_path.string());
+    f << to_terrain_json(theater_name);
+}
+
+// ---------------------------------------------------------------------------
+// Accessors
+// ---------------------------------------------------------------------------
 int16_t TerrainData::elevation_at(uint32_t x, uint32_t y) const {
     if (x >= header.width || y >= header.height) return 0;
     return elevation[y * header.width + x];
@@ -109,20 +377,26 @@ uint8_t TerrainData::overlay_at(uint32_t x, uint32_t y) const {
     return overlay[y * header.width + x];
 }
 
+TileType TerrainData::tile_type_at(uint32_t x, uint32_t y) const {
+    if (x >= header.width || y >= header.height) return TileType::Water;
+    if (tile_types.empty()) return TileType::Water;
+    return static_cast<TileType>(tile_types[y * header.width + x]);
+}
+
 Color4 TerrainData::terrain_color(uint32_t x, uint32_t y) const {
-    const int16_t elev = elevation_at(x, y);
-    // Water (elevation <= 0): deep blue, matching the Falcon 4 screenshot.
-    if (elev <= 0) return Color4{0x00, 0x69, 0x94, 0xFF};
-    // Land: classify by elevation into terrain-type bands.
-    // These thresholds approximate the Falcon 4 palette and produce a
-    // recognizable Korea landmass. The palette from THEATER.MAP has the
-    // exact colors but the index->terrain-type mapping isn't documented;
-    // this derived palette is the first-pass visualization.
-    if (elev < 500)  return Color4{0xB5, 0xA1, 0x88, 0xFF};  // lowland tan
-    if (elev < 1500) return Color4{0x9C, 0x8C, 0x6B, 0xFF};  // hills brown
-    if (elev < 3000) return Color4{0x8C, 0x7B, 0x5A, 0xFF};  // mountains
-    if (elev < 5000) return Color4{0x6B, 0x5D, 0x4A, 0xFF};  // high mountains
-    return Color4{0xE8, 0xE8, 0xE8, 0xFF};                    // peaks (snow)
+    return color_for_tile_type(tile_type_at(x, y));
+}
+
+Color4 TerrainData::color_for_tile_type(TileType t) {
+    switch (t) {
+        case TileType::Water:     return Color4{0x00, 0x69, 0x94, 0xFF}; // deep blue
+        case TileType::Lowland:   return Color4{0xB5, 0xA1, 0x88, 0xFF}; // tan
+        case TileType::Hills:     return Color4{0x9C, 0x8C, 0x6B, 0xFF}; // brown
+        case TileType::Mountains: return Color4{0x8C, 0x7B, 0x5A, 0xFF}; // dark brown
+        case TileType::HighMtn:   return Color4{0x6B, 0x5D, 0x4A, 0xFF}; // darker
+        case TileType::Peaks:     return Color4{0xE8, 0xE8, 0xE8, 0xFF}; // snow
+    }
+    return Color4{0, 0, 0, 0xFF};
 }
 
 } // namespace f4::terrain

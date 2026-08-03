@@ -148,3 +148,87 @@ Stage Summary:
 - Visualization delivered: open save1_map.html in a browser to see the Korea theater with 2659 objectives colored by team. Layer-toggle checkboxes in the toolbar.
 - The layered SVG architecture is the answer to "how to visualize": terrain/grid/objectives/units/legend are independent <g> layers. Future layers (threat heatmap, flight paths, rail/road) drop in without touching the renderer.
 - Next: (1) port UnitClass subclass Save() tails for full unit decode; (2) add theater terrain tiles (needs terrain data upload); (3) threat heatmap layer from f4-campaign ThreatMap; (4) flight path layer from mission waypoints.
+
+---
+Task ID: VIEWER-1
+Agent: orchestrator (Super Z, main thread)
+Task: Replace f4-world-vis (SVG renderer) with f4-world-viewer (Raylib + Dear ImGui interactive desktop app). Introduce a two-file world data format (korea.terrain.json + save1.world.json) as the sim's source of truth. Wire the viewer to import raw .cam and THEATER.* binaries in-process so it doubles as the starting point for a future world editor.
+
+Work Log:
+- Deleted f4-world-vis/ entirely (src/svg_map.cpp, cli/world2map.cpp, tests/test_svg_map.cpp, CMakeLists.txt). Removed visualize.sh. Removed the `visualize` and `json` custom targets from root CMakeLists.txt — replaced with a `world` target that generates both JSON files in one command.
+- Extended f4-terrain with a `TileType` enum (Water/Lowland/Hills/Mountains/HighMtn/Peaks), `tile_type_at(x,y)` accessor, `color_for_tile_type(t)` static, and JSON I/O (`to_terrain_json()`, `save_terrain_json()`, `load_terrain_json()`, `load_terrain_json_from_string()`). The JSON format is minimal: { theater, width, height, tile_types[], elevations_ft[]? }. 3 new tests (TileTypesDerivedFromElevation, JsonRoundTripPreservesTileTypes, JsonRoundTripPreservesElevation, JsonColorForTileTypeMatchesClassifier) — total 13/13 green.
+- Created f4-terrain-convert (NEW library + CLI). Library exposes `convert_terrain_dir(terrain_dir, out, theater_name)` — a one-liner that calls f4-terrain's binary loader + JSON writer. CLI `terrain2json <dir> [out.json] [--name X]` is a thin shell. Smoke-tested against real `temp/THEATER.zip`: produces 85 KB `korea.terrain.json` with 16,384 tile types.
+- Extended f4-world-convert: `to_world_json()` now takes `WorldJsonOptions{ theater, terrain_file }` and emits two new top-level fields: `"theater": "korea"` and `"terrain_file": "korea.terrain.json"`. The terrain path is a reference, not an embed — keeps world JSON small (~430 KB) and theater-swappable. Updated cam2json CLI with `--theater` and `--terrain` flags. All 26 existing tests still pass (defaulted opts preserve backward compat).
+- Extended f4-world: WorldState gains `theater`, `terrain_file`, `objectives`, `units`, and `terrain` (loaded) fields. The JSON loader was rewritten as a clean single-pass parser (eliminating the duplicated two-pass team-parsing logic from the previous version). New `load_terrain(base_dir)` method resolves `terrain_file` relative to the world JSON's directory and loads it via f4-terrain. 4 new tests (LoadsTheaterAndTerrainFile, RealCamJsonLoadsObjectives, RealCamJsonLoadsUnits, LoadTerrainResolvesRelativePath) — total 11/11 green.
+- Created f4-world-viewer (NEW library + CLI) using Raylib 5.0 + Dear ImGui 1.91.5 + rlImGui (pinned to commit 9acdbbf for ImTextureID compatibility). The viewer:
+  * Renders 128×128 color-coded terrain tiles from the loaded TerrainData
+  * Renders 2,659 objective circles colored by owner team (red/enemy, blue/friendly, magenta/PRC, etc.)
+  * Renders campaign units as squares with dashed destination lines
+  * Click-to-inspect: ImGui panel shows all decoded fields (type, position, owner, priority, VU_ID, ...)
+  * Pan (drag), zoom (wheel), fit-to-world (View menu / button)
+  * Layer toggles: terrain / objectives / units / grid / legend
+  * File menu wraps the CLI converters IN-PROCESS: File > Import .cam Archive calls `f4::convert::to_world_json()` directly (no subprocess); File > Import THEATER.* Binary calls `f4::convert::convert_terrain_dir()` directly. This is the world-editor seed.
+  * F2 = screenshot; `--screenshot path.png` CLI flag auto-screenshots after 1.5s then exits (for headless smoke tests).
+- Root CMakeLists.txt: replaced the old `visualize` / `json` custom targets with three new ones: `json` (cam→JSON only), `terrain-json` (THEATER.*→JSON only), `world` (both). FetchContent for Raylib 5.0, ImGui 1.91.5, rlImGui 9acdbbf lives in f4-world-viewer/CMakeLists.txt — keeps the rest of the project dependency-free.
+- Smoke-tested end-to-end on Linux via Xvfb + LIBGL_ALWAYS_SOFTWARE=1: viewer initializes, loads the real Korea terrain + save1.cam world JSON, renders Korea (deep-blue ocean, tan lowlands, brown mountains, magenta PRC objectives, orange DPRK objectives), and produces a valid PNG screenshot. Verified by sampling pixels: 86 unique colors, dominant are (0,105,148) water, (180,80,180) PRC objectives, (140,123,90) lowland — matches the expected palette.
+- All tests still green across the project: f4-terrain 13/13, f4-world-convert 26/26, f4-world 11/11, f4-entities 20/20.
+
+Stage Summary:
+- 2 libraries removed (f4-world-vis). 3 libraries added (f4-terrain-convert, f4-world-viewer; existing f4-terrain/f4-world/f4-world-convert extended).
+- Two-file world data format established: `korea.terrain.json` (static per-theater) + `save1.world.json` (dynamic per-campaign save). The world JSON references the terrain JSON by relative path — no data duplication.
+- Viewer is a working dev tool: pan/zoom/click-to-inspect, layer toggles, in-process File > Import for .cam and THEATER.* binaries. Ready for daily use validating world data before building digi/ATO on top of it.
+- VS workflow: `cmake -B build -G "Visual Studio 17 2022"` generates `F4.sln`. The `f4-world-viewer` target has `VS_DEBUGGER_WORKING_DIRECTORY` and `VS_DEBUGGER_COMMAND_ARGUMENTS` set, so F5 launches the viewer pointed at the bundled fixtures.
+- Next: (1) wire up an f4-world-viewer test harness so the viewer can be smoke-tested on CI; (2) port UnitClass subclass Save() tails for full unit decode (currently only the first unit is fully trusted); (3) add L-file decoding to f4-terrain for higher-resolution terrain; (4) start the digi brain against the real WorldState (the original goal of the architecture proposal §18.5).
+
+---
+Task ID: VIEWER-2
+Agent: orchestrator (Super Z, main thread)
+Task: Port the UnitClass::Save() subclass hierarchy to f4-world-convert so all 683 units in save1.cam decode cleanly (was only 7 before). The previous decoder stopped after the fixed UnitClass fields and couldn't advance the cursor past the variable-length subclass tail.
+
+Work Log:
+- Dispatched a research agent to exhaustively document UnitClass::Save() and every subclass's Save() method in the FreeFalcon baseline (freefalcon-central). The agent read unit.cpp, campbase.cpp, flight.cpp, squadron.cpp, package.cpp, gndunit.cpp, battalio.cpp, brigade.cpp, navunit.cpp, campwp.cpp, plus all corresponding Load() constructors. The agent also wrote a Python decoder to validate the layout against save1.cam — all 683 records decode cleanly with the cursor landing at byte 128,448 (exactly the inner_size).
+- Identified four bugs in the previous f4-world-convert/src/unit_decoder.cpp:
+  1. `current_wp` read as 2 bytes (should be 1 byte at v63; FreeFalcon's Load() reads uchar for v<71 even though Save() writes ushort — a known save/load asymmetry).
+  2. Missing `reinforcement` (short, 2 bytes) after `name_id`.
+  3. No waypoint parsing (1-byte count + N × WayPointClass records).
+  4. No subclass tail parsing (Battalion/Brigade/Squadron/TaskForce/Flight/Package).
+- Rewrote unit_decoder.hpp with:
+  * `UnitClass` enum (Unknown/Battalion/Brigade/Squadron/TaskForce/Flight/Package) + `unit_class_name()` helper.
+  * `WaypointRecord` struct (16..29 bytes at v63; supports the optional target_id+building and depart tail gated by `haves & 0x02` / `0x01`).
+  * `UnitSubclassData` struct carrying the union of all subclass-specific fields (Battalion: supply/morale/fatigue/parent_id/last_obj/heading/position; Brigade: elements + element_ids; Squadron: fuel/specialty/airbase_id/kills/losses; TaskForce: orders+supply; Flight: fuel_burnt/mission/loadouts/package/squadron/callsign; Package: elements + 5 support VU_IDs + wait_cycles).
+  * Extended `UnitRecord` with unit_class, reinforcement, wp_count, waypoints vector, and a UnitSubclassData subclass field.
+  * Extended `DecodedUnits` with bytes_consumed and inner_size for cursor-landing verification.
+- Rewrote unit_decoder.cpp with:
+  * `parse_camp_base()` — 25 bytes at v63 (no pos_.z_).
+  * `parse_unit_class_fixed()` — 40 bytes at v63 (current_wp = 1 byte, includes reinforcement at end).
+  * `parse_waypoint()` — full WayPointClass layout at v63 (2-byte Flags, optional target/depart tail).
+  * `parse_waypoints()` — 1-byte count + N waypoints.
+  * `parse_ground_unit()` — 11-byte GroundUnitClass tail (orders, division, aobj).
+  * `parse_battalion()` — 30-byte Battalion tail (last_move, last_combat, parent_id, last_obj, supply, fatigue, morale, heading, final_heading, position). USE_FLANKS is not defined in the source so lfx/lfy/rfx/rfy are absent.
+  * `parse_brigade()` — 1 + 8*elements bytes (elements count + VU_ID array).
+  * `parse_squadron()` — 796 bytes at v63 (fuel, specialty, 200-byte stores, 480-byte pilot_data, 64-byte schedule, airbase_id, hot_spot, 16-byte rating, 6 short kill counters, 3 uchar loss counters).
+  * `parse_taskforce()` — 2 bytes (orders, supply).
+  * `parse_flight()` — 67 + 32*loadouts bytes at v63 (skips old_mission, mission_context, requester, refuel which are gated by v>65 / v>=72; loadout is 32 bytes not 48 because v<=72 reads WeaponID as uchar[16] not short[16]).
+  * `parse_package_small()` — common header + small branch (Final() && !wait_cycles). Big branch not implemented since save1.cam has 0 Package records.
+  * `dispatch_and_parse_tail()` — tries each subclass tail in frequency order (Battalion 524, Brigade 85, Squadron 72, TaskForce 2) and validates the candidate cursor position by checking the NEXT record's header (`type == entity_type` at offset+10, `owner` in 0..7). On the last record, validates against the buffer end.
+  * `validate_next_record()` — robust header check that works without the Falcon4.ct class table (which isn't shipped with the source).
+- Updated world_json.cpp to emit the new fields in the JSON: `unit_class` (string), `reinforcement`, `wp_count`, `supply`, `morale`, `fatigue`, `fuel`, `elements`, `losses`, plus diagnostic `bytes_consumed` and `inner_size` at the units-object level.
+- Updated f4-world/include/f4/world/world_state.hpp:
+  * Added `UnitClass` enum (duplicated from f4::convert so f4-world doesn't need to depend on f4-world-convert — the contract is JSON).
+  * Extended `UnitState` with `unit_class`, `reinforcement`, `wp_count`, `losses`, `supply`, `morale`, `fatigue`, `elements`, `fuel`.
+  * Updated the JSON loader to parse all new fields, including string→enum conversion for `unit_class`.
+- Updated f4-world-viewer:
+  * Units now render with different shapes per class: Battalion=square, Brigade=diamond, Squadron=circle, TaskForce=triangle, Flight=hollow circle, Package=plus/cross. Makes the 683 units visually distinguishable at a glance.
+  * Inspector panel extended with subclass-specific fields (supply/morale/fatigue for ground units, fuel for squadrons, elements for brigades).
+  * Legend extended with a "Unit shapes" section showing the shape→class mapping.
+- Updated tests:
+  * f4-world-convert/tests/test_units.cpp: 10 tests (was 4). New tests verify all 683 units decode, cursor lands at buffer end (128,448 bytes consumed = inner_size), unit class distribution matches Korea (524/85/72/2/0/0), all records have plausible coordinates, battalion tail fields are populated, squadron fuel values are consistent, JSON contains the new fields.
+  * f4-world/tests/test_world_state.cpp: 9 tests (was 7). New tests verify the world loader picks up the new fields and the class distribution matches.
+
+Stage Summary:
+- All 683 units in save1.cam now decode cleanly (was 7). Cursor lands exactly at byte 128,448 = inner_size (zero leftover bytes).
+- Unit class distribution verified: 524 battalions, 85 brigades, 72 squadrons, 2 taskforces, 0 flights, 0 packages — matches the research agent's independent Python decode.
+- Total project tests: 78 (was 70). All green. f4-terrain 13/13, f4-world-convert 32/32 (was 26), f4-world 13/13 (was 11), f4-entities 20/20.
+- Viewer screenshot shows 4x more units visible than before (PRC magenta went from 292 sampled cells to 1,166). Friendly blue units (60,140,220) now visible — they were in the undecoded tail before.
+- JSON output now carries subclass-specific fields (supply, morale, fatigue, fuel, elements) ready for the digi AI to consume when we start f4-ai.
+- Next: (1) start f4-ai against the real WorldState (the original §18.5 goal — we now have ground truth for 683 units); (2) port the .obj objective decoder's variable-length link data (currently we decode the fixed fields only); (3) add L-file terrain decoding for higher-resolution terrain tiles; (4) add a "Flight Plans" layer to the viewer using the decoded waypoints.
