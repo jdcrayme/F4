@@ -8,6 +8,7 @@
 
 #include <f4/convert/cam_archive.hpp>
 #include <f4/convert/campaign_decoder.hpp>
+#include <f4/convert/class_table.hpp>
 #include <string>
 
 namespace f4::convert {
@@ -21,6 +22,11 @@ struct WorldJsonOptions {
     /// records the path so f4-world can load the terrain side-by-side. The
     /// path is interpreted relative to the world JSON's location.
     std::string terrain_file = "korea.terrain.json";
+    /// Optional class table (Falcon4.ct). When loaded, each objective's
+    /// entity_type is resolved to an ObjectiveType enum value (1-39) and
+    /// emitted as the "objective_type" field. Without it, objectives only
+    /// carry the raw entity_type and the viewer can't pick icons.
+    const ClassTable* class_table = nullptr;
 };
 
 /// Build the world JSON document from a loaded .cam archive.

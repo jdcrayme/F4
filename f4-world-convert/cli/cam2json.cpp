@@ -46,6 +46,26 @@ int main(int argc, char** argv) {
     try {
         f4::convert::CamArchive cam;
         cam.load(in);
+
+        // Try to load FALCON4.ct from the same directory as the .cam file.
+        // This enables objective_type resolution (entity_type → ObjectiveType
+        // enum 1-39) so the viewer can pick the right icon. If the file
+        // isn't found, we proceed without it — objectives will still have
+        // their raw entity_type but no icon mapping.
+        f4::convert::ClassTable class_table;
+        const auto ct_path = in.parent_path() / "FALCON4.ct";
+        if (std::filesystem::exists(ct_path)) {
+            try {
+                class_table.load(ct_path);
+                opts.class_table = &class_table;
+                std::cerr << "  class_table: " << class_table.size() << " entries (from " << ct_path << ")\n";
+            } catch (const std::exception& e) {
+                std::cerr << "  class_table: failed to load (" << e.what() << ") — proceeding without\n";
+            }
+        } else {
+            std::cerr << "  class_table: FALCON4.ct not found next to .cam — proceeding without\n";
+        }
+
         const std::string json = f4::convert::to_world_json(cam, opts);
         std::ofstream f(out);
         if (!f) throw std::runtime_error("cannot write " + out.string());

@@ -139,15 +139,37 @@ std::string to_world_json(const CamArchive& cam, const WorldJsonOptions& opts) {
                 for (std::size_t i = 0; i < objs.objectives.size(); ++i) {
                     const auto& ob = objs.objectives[i];
                     o << "      {\"type\": " << ob.type
-                      << ", \"type_name\": \"" << json_escape(objective_type_name(ob.type)) << "\""
-                      << ", \"x\": " << ob.x
+                      << ", \"type_name\": \"" << json_escape(objective_type_name(ob.type)) << "\"";
+                    // If a class table is available, resolve entity_type to
+                    // ObjectiveType (1-39) and emit it. This lets the viewer
+                    // pick the right icon without needing the class table.
+                    if (opts.class_table && opts.class_table->loaded()) {
+                        const uint8_t obj_type =
+                            opts.class_table->objective_type_for(ob.entity_type);
+                        o << ", \"objective_type\": " << static_cast<int>(obj_type);
+                    }
+                    o << ", \"x\": " << ob.x
                       << ", \"y\": " << ob.y
                       << ", \"z\": " << (std::isnan(ob.z) ? 0.0f : ob.z)
                       << ", \"owner\": " << static_cast<int>(ob.owner)
                       << ", \"nameid\": " << ob.nameid
                       << ", \"priority\": " << static_cast<int>(ob.priority)
                       << ", \"camp_id\": " << ob.camp_id
-                      << "}";
+                      << ", \"links\": [";
+                    // Emit the link data (road/rail network). Each link is
+                    // a neighbor VU_ID + the 8 movement costs. The viewer
+                    // uses costs[Wheeled] and costs[Rail] to color the link
+                    // as a road (brown) or rail (dark gray).
+                    for (std::size_t j = 0; j < ob.link_data.size(); ++j) {
+                        const auto& lk = ob.link_data[j];
+                        if (j) o << ", ";
+                        o << "{\"n\": " << lk.neighbor_num
+                          << ", \"c\": " << static_cast<int>(lk.neighbor_creator)
+                          << ", \"road\": " << (lk.is_road() ? "true" : "false")
+                          << ", \"rail\": " << (lk.is_rail() ? "true" : "false")
+                          << "}";
+                    }
+                    o << "]}";
                     if (i + 1 < objs.objectives.size()) o << ",";
                     o << "\n";
                 }
@@ -172,8 +194,17 @@ std::string to_world_json(const CamArchive& cam, const WorldJsonOptions& opts) {
                 for (std::size_t i = 0; i < units.units.size(); ++i) {
                     const auto& u = units.units[i];
                     o << "      {\"type\": " << u.type
-                      << ", \"unit_class\": \"" << unit_class_name(u.unit_class) << "\""
-                      << ", \"x\": " << u.x
+                      << ", \"unit_class\": \"" << unit_class_name(u.unit_class) << "\"";
+                    // If a class table is available, resolve entity_type to
+                    // unit subtype (STYPE_UNIT_*) — distinguishes armor/infantry/
+                    // artillery/supply/engineer battalions, fighter/bomber/transport
+                    // squadrons, carrier/destroyer/frigate task forces, etc.
+                    if (opts.class_table && opts.class_table->loaded()) {
+                        const uint8_t sub =
+                            opts.class_table->unit_subtype_for(u.entity_type);
+                        o << ", \"unit_subtype\": " << static_cast<int>(sub);
+                    }
+                    o << ", \"x\": " << u.x
                       << ", \"y\": " << u.y
                       << ", \"z\": " << (std::isnan(u.z) ? 0.0f : u.z)
                       << ", \"owner\": " << static_cast<int>(u.owner)
@@ -188,8 +219,35 @@ std::string to_world_json(const CamArchive& cam, const WorldJsonOptions& opts) {
                       << ", \"fatigue\": " << static_cast<int>(u.subclass.fatigue)
                       << ", \"fuel\": " << u.subclass.fuel
                       << ", \"elements\": " << static_cast<int>(u.subclass.elements)
-                      << ", \"losses\": " << static_cast<int>(u.losses)
-                      << "}";
+                      << ", \"losses\": " << static_cast<int>(u.losses);
+                    // Hierarchy: Battalion.parent_id and Brigade.element_ids.
+                    // Used by the viewer to highlight parent/child units.
+                    if (u.unit_class == UnitClass::Battalion) {
+                        o << ", \"parent_id\": " << u.subclass.parent_id_num;
+                    } else if (u.unit_class == UnitClass::Brigade) {
+                        o << ", \"element_ids\": [";
+                        for (std::size_t j = 0; j < u.subclass.element_ids.size(); j += 2) {
+                            if (j) o << ", ";
+                            o << u.subclass.element_ids[j];  // num (creator is at j+1)
+                        }
+                        o << "]";
+                    } else if (u.unit_class == UnitClass::Squadron) {
+                        // Pilot roster: 48 pilots per squadron.
+                        o << ", \"pilots\": [";
+                        for (std::size_t j = 0; j < u.subclass.pilots.size(); ++j) {
+                            const auto& p = u.subclass.pilots[j];
+                            if (j) o << ", ";
+                            o << "{\"id\": " << p.pilot_id
+                              << ", \"skill\": " << static_cast<int>(p.skill)
+                              << ", \"status\": " << static_cast<int>(p.status)
+                              << ", \"aa\": " << static_cast<int>(p.aa_kills)
+                              << ", \"ag\": " << static_cast<int>(p.ag_kills)
+                              << ", \"missions\": " << p.missions_flown
+                              << "}";
+                        }
+                        o << "]";
+                    }
+                    o << "}";
                     if (i + 1 < units.units.size()) o << ",";
                     o << "\n";
                 }

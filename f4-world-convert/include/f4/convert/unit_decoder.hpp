@@ -99,6 +99,24 @@ struct WaypointRecord {
     int32_t  depart = 0;
 };
 
+/// One pilot in a squadron's roster. PilotClass is 10 bytes (pilot.h:32):
+///   short pilot_id(2) + uchar pilot_skill_and_rating(1) + uchar pilot_status(1)
+///   + uchar aa_kills(1) + uchar ag_kills(1) + uchar as_kills(1) + uchar an_kills(1)
+///   + short missions_flown(2)
+/// pilot_skill_and_rating: low byte = skill (0-100), high byte = rating.
+/// pilot_status: 0=available, 1=dead, 2=on leave, 3=in hospital, etc.
+struct PilotRecord {
+    int16_t  pilot_id = 0;
+    uint8_t  skill = 0;         // low byte of pilot_skill_and_rating
+    uint8_t  rating = 0;        // high byte of pilot_skill_and_rating
+    uint8_t  status = 0;
+    uint8_t  aa_kills = 0;
+    uint8_t  ag_kills = 0;
+    uint8_t  as_kills = 0;
+    uint8_t  an_kills = 0;
+    int16_t  missions_flown = 0;
+};
+
 /// Subclass-specific tail fields. Only the fields relevant to the
 /// decoded UnitClass are populated; others stay at default values.
 struct UnitSubclassData {
@@ -129,8 +147,9 @@ struct UnitSubclassData {
     // Squadron:
     int32_t  fuel = 0;
     uint8_t  specialty = 0;
-    // stores[] (200 bytes) and pilot_data[] (480 bytes) and schedule[] (64 bytes)
-    // are decoded but not exposed — too large to be useful in the viewer.
+    // stores[] (200 bytes) and schedule[] (64 bytes) are decoded but not
+    // exposed — too large to be useful in the viewer.
+    std::vector<PilotRecord> pilots;   // 48 pilots per squadron (PILOTS_PER_SQUADRON)
     uint32_t airbase_id_creator = 0;
     uint32_t airbase_id_num = 0;
     uint32_t hot_spot_creator = 0;

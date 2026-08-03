@@ -197,8 +197,28 @@ void parse_brigade(Cursor& c, UnitSubclassData& s) {
 void parse_squadron(Cursor& c, UnitSubclassData& s) {
     s.fuel      = c.i32();
     s.specialty = c.u8();
-    c.skip(200);                  // stores[200] — not exposed
-    c.skip(480);                  // pilot_data[48 * 10] — not exposed
+    c.skip(200);                  // stores[200] — not exposed (weapon stockpile)
+    // Parse pilot_data: 48 pilots × 10 bytes = 480 bytes.
+    // PilotClass layout (pilot.h:32):
+    //   short pilot_id(2) + uchar pilot_skill_and_rating(1) + uchar pilot_status(1)
+    //   + uchar aa_kills(1) + uchar ag_kills(1) + uchar as_kills(1) + uchar an_kills(1)
+    //   + short missions_flown(2) = 10 bytes
+    s.pilots.clear();
+    s.pilots.reserve(48);
+    for (int i = 0; i < 48; ++i) {
+        PilotRecord p;
+        p.pilot_id = c.i16();
+        uint8_t skill_rating = c.u8();
+        p.skill = skill_rating & 0x0F;        // low nibble (or byte — unclear)
+        p.rating = (skill_rating >> 4) & 0x0F;
+        p.status = c.u8();
+        p.aa_kills = c.u8();
+        p.ag_kills = c.u8();
+        p.as_kills = c.u8();
+        p.an_kills = c.u8();
+        p.missions_flown = c.i16();
+        s.pilots.push_back(p);
+    }
     c.skip(64);                   // schedule[16 * 4] — not exposed
     VuId ab = read_vu_id(c);
     s.airbase_id_num = ab.num;

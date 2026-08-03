@@ -91,6 +91,42 @@ enum ObjectiveType : int16_t {
 /// Human-readable name for an objective type (for visualization labels).
 [[nodiscard]] std::string objective_type_name(int16_t type);
 
+/// Movement type indices (from falcent.h MoveType enum). Used to interpret
+/// the costs[] array in ObjectiveLink. The cost for a given movement type
+/// indicates whether a link supports that movement mode — a low cost means
+/// the link is a fast path for that mode, a high/zero cost means it's slow
+/// or impassable.
+enum MoveType : int {
+    NoMove   = 0,
+    Foot     = 1,
+    Wheeled  = 2,   // roads
+    Tracked  = 3,
+    LowAir   = 4,
+    Air      = 5,
+    Naval    = 6,
+    Rail     = 7,   // railroads
+    MOVEMENT_TYPES = 8,
+};
+
+/// One link between two objectives. Part of the road/rail network.
+/// Layout: uchar costs[8] + VU_ID(8 bytes) = 16 bytes total.
+/// The VU_ID refers to the NEIGHBORING objective (the other end of the link).
+struct ObjectiveLink {
+    uint8_t costs[MOVEMENT_TYPES] = {0};   // cost to traverse for each MoveType
+    uint32_t neighbor_creator = 0;          // VU_ID.creator of the linked objective
+    uint32_t neighbor_num = 0;              // VU_ID.num of the linked objective
+
+    /// Is this a road link? (Wheeled movement cost is non-zero and reasonable)
+    [[nodiscard]] bool is_road() const noexcept {
+        return costs[Wheeled] > 0 && costs[Wheeled] < 250;
+    }
+
+    /// Is this a rail link? (Rail movement cost is non-zero)
+    [[nodiscard]] bool is_rail() const noexcept {
+        return costs[Rail] > 0 && costs[Rail] < 250;
+    }
+};
+
 struct ObjectiveRecord {
     int16_t  type = 0;          // ObjectiveType
     // CampBaseClass fields:
@@ -115,7 +151,9 @@ struct ObjectiveRecord {
     int16_t  nameid = 0;
     uint8_t  first_owner = 0;
     uint8_t  links = 0;
-    // fstatus and link/radar data are parsed to advance the cursor but not
+    // Decoded link data (road/rail network):
+    std::vector<ObjectiveLink> link_data;
+    // fstatus and radar data are parsed to advance the cursor but not
     // yet exposed as typed fields (kept verbatim for future passes).
 };
 

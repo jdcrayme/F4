@@ -157,16 +157,48 @@ ObjectiveState parse_objective(JsonReader& r) {
     for (;;) {
         std::string k = r.read_string();
         r.expect(':');
-        if      (k == "type")         o.type         = static_cast<int16_t>(r.read_int());
-        else if (k == "x")            o.x            = static_cast<int16_t>(r.read_int());
-        else if (k == "y")            o.y            = static_cast<int16_t>(r.read_int());
-        else if (k == "z")            o.z            = static_cast<float>(r.read_number());
-        else if (k == "owner")        o.owner        = static_cast<uint8_t>(r.read_int());
-        else if (k == "priority")     o.priority     = static_cast<uint8_t>(r.read_int());
-        else if (k == "nameid")       o.nameid       = static_cast<int16_t>(r.read_int());
-        else if (k == "camp_id")      o.camp_id      = static_cast<int16_t>(r.read_int());
-        else if (k == "entity_type")  o.entity_type  = static_cast<uint16_t>(r.read_int());
-        else                          r.skip_value();
+        if      (k == "type")            o.type            = static_cast<int16_t>(r.read_int());
+        else if (k == "objective_type")  o.objective_type  = static_cast<uint8_t>(r.read_int());
+        else if (k == "x")               o.x               = static_cast<int16_t>(r.read_int());
+        else if (k == "y")               o.y               = static_cast<int16_t>(r.read_int());
+        else if (k == "z")               o.z               = static_cast<float>(r.read_number());
+        else if (k == "owner")           o.owner           = static_cast<uint8_t>(r.read_int());
+        else if (k == "priority")        o.priority        = static_cast<uint8_t>(r.read_int());
+        else if (k == "nameid")          o.nameid          = static_cast<int16_t>(r.read_int());
+        else if (k == "camp_id")         o.camp_id         = static_cast<int16_t>(r.read_int());
+        else if (k == "entity_type")     o.entity_type     = static_cast<uint16_t>(r.read_int());
+        else if (k == "links") {
+            // Array of {n, c, road, rail} objects.
+            r.skip_ws(); r.expect('[');
+            if (r.consume(']')) { /* empty */ }
+            else for (;;) {
+                r.skip_ws(); r.expect('{');
+                ObjectiveLink link;
+                if (!r.peek('}')) for (;;) {
+                    std::string lk = r.read_string();
+                    r.expect(':');
+                    if      (lk == "n")    link.neighbor_num    = static_cast<uint32_t>(r.read_int());
+                    else if (lk == "c")    link.neighbor_creator = static_cast<uint32_t>(r.read_int());
+                    else if (lk == "road") {
+                        r.skip_ws();
+                        if (r.consume('t')) { link.is_road = true;  r.skip_value(); }
+                        else                { link.is_road = false; r.skip_value(); }
+                    }
+                    else if (lk == "rail") {
+                        r.skip_ws();
+                        if (r.consume('t')) { link.is_rail = true;  r.skip_value(); }
+                        else                { link.is_rail = false; r.skip_value(); }
+                    }
+                    else r.skip_value();
+                    if (r.consume('}')) break;
+                    r.expect(',');
+                } else r.consume('}');
+                o.links.push_back(link);
+                if (r.consume(']')) break;
+                r.expect(',');
+            }
+        }
+        else                             r.skip_value();
         if (r.consume('}')) break;
         r.expect(',');
     }
@@ -182,7 +214,6 @@ UnitState parse_unit(JsonReader& r) {
         r.expect(':');
         if      (k == "type")           u.type           = static_cast<int16_t>(r.read_int());
         else if (k == "unit_class") {
-            // String → enum. Unknown if not recognized.
             std::string s = r.read_string();
             if      (s == "battalion") u.unit_class = UnitClass::Battalion;
             else if (s == "brigade")   u.unit_class = UnitClass::Brigade;
@@ -192,6 +223,7 @@ UnitState parse_unit(JsonReader& r) {
             else if (s == "package")   u.unit_class = UnitClass::Package;
             else                        u.unit_class = UnitClass::Unknown;
         }
+        else if (k == "unit_subtype")   u.unit_subtype   = static_cast<uint8_t>(r.read_int());
         else if (k == "x")              u.x              = static_cast<int16_t>(r.read_int());
         else if (k == "y")              u.y              = static_cast<int16_t>(r.read_int());
         else if (k == "z")              u.z              = static_cast<float>(r.read_number());
@@ -209,6 +241,42 @@ UnitState parse_unit(JsonReader& r) {
         else if (k == "fatigue")        u.fatigue        = static_cast<uint8_t>(r.read_int());
         else if (k == "elements")       u.elements       = static_cast<uint8_t>(r.read_int());
         else if (k == "fuel")           u.fuel           = static_cast<int32_t>(r.read_int());
+        else if (k == "parent_id")      u.parent_id      = static_cast<uint32_t>(r.read_int());
+        else if (k == "element_ids") {
+            // Array of integers (VU_ID.num values).
+            r.skip_ws(); r.expect('[');
+            if (r.consume(']')) { /* empty */ }
+            else for (;;) {
+                u.element_ids.push_back(static_cast<uint32_t>(r.read_int()));
+                if (r.consume(']')) break;
+                r.expect(',');
+            }
+        }
+        else if (k == "pilots") {
+            // Array of pilot objects.
+            r.skip_ws(); r.expect('[');
+            if (r.consume(']')) { /* empty */ }
+            else for (;;) {
+                r.skip_ws(); r.expect('{');
+                PilotState p;
+                if (!r.peek('}')) for (;;) {
+                    std::string pk = r.read_string();
+                    r.expect(':');
+                    if      (pk == "id")       p.pilot_id       = static_cast<int16_t>(r.read_int());
+                    else if (pk == "skill")    p.skill          = static_cast<uint8_t>(r.read_int());
+                    else if (pk == "status")   p.status         = static_cast<uint8_t>(r.read_int());
+                    else if (pk == "aa")       p.aa_kills       = static_cast<uint8_t>(r.read_int());
+                    else if (pk == "ag")       p.ag_kills       = static_cast<uint8_t>(r.read_int());
+                    else if (pk == "missions") p.missions_flown = static_cast<int16_t>(r.read_int());
+                    else                       r.skip_value();
+                    if (r.consume('}')) break;
+                    r.expect(',');
+                } else r.consume('}');
+                u.pilots.push_back(p);
+                if (r.consume(']')) break;
+                r.expect(',');
+            }
+        }
         else                            r.skip_value();
         if (r.consume('}')) break;
         r.expect(',');

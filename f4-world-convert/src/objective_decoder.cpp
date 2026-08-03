@@ -129,9 +129,20 @@ DecodedObjectives decode_obj(const uint8_t* data, std::size_t size) {
             c.p += 8;                                   // skip parent VU_ID
             o.first_owner  = c.u8();
             o.links        = c.u8();
-            // Skip the link data: each CampObjectiveLinkDataType is
+            // Decode the link data (road/rail network). Each link is:
             //   uchar costs[MOVEMENT_TYPES=8] + VU_ID(8 bytes) = 16 bytes.
-            c.p += static_cast<std::size_t>(o.links) * 16;
+            // The VU_ID refers to the neighboring objective.
+            o.link_data.clear();
+            o.link_data.reserve(o.links);
+            for (uint8_t i = 0; i < o.links; ++i) {
+                ObjectiveLink link;
+                for (int j = 0; j < 8; ++j) {
+                    link.costs[j] = c.u8();
+                }
+                link.neighbor_num = c.u32();
+                link.neighbor_creator = c.u32();
+                o.link_data.push_back(link);
+            }
             uint8_t has_radar = c.u8();
             if (has_radar) c.p += 32;   // RadarRangeClass = float detect_ratio[8] = 32 bytes
 
@@ -144,7 +155,13 @@ DecodedObjectives decode_obj(const uint8_t* data, std::size_t size) {
                 break;
             }
 
-            o.type = static_cast<int16_t>(o.entity_type);  // class table index
+            // The sentinel is o->Type() which returns share_.entityType_
+            // (the class-table index, 100-2000+) — NOT the ObjectiveType
+            // enum (1-39). To map entity_type → ObjectiveType we need the
+            // Falcon4.ct class table file (game data, not in source tree).
+            // For now, store the entity_type as `type` and leave icon
+            // mapping to a future class-table parser.
+            o.type = static_cast<int16_t>(o.entity_type);
             out.objectives.push_back(o);
         } catch (...) {
             c.p = before;

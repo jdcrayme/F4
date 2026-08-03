@@ -48,10 +48,19 @@ struct CampaignState {
     std::vector<int32_t> te_team_pts;           // 8
 };
 
+/// One link in the road/rail network. Connects this objective to a neighbor.
+struct ObjectiveLink {
+    uint32_t neighbor_num = 0;      // VU_ID.num of the linked objective
+    uint32_t neighbor_creator = 0;  // VU_ID.creator
+    bool is_road = false;           // supports wheeled movement
+    bool is_rail = false;           // supports rail movement
+};
+
 /// A campaign objective (airbase, bridge, city, port, ...). Mirrors the
 /// fields decoded by f4-world-convert's objective_decoder.
 struct ObjectiveState {
-    int16_t  type = 0;
+    int16_t  type = 0;          // entity_type (class table index, 100+)
+    uint8_t  objective_type = 0; // ObjectiveType enum (1-39), 0 if unknown
     uint32_t id_creator = 0;
     uint32_t id_num = 0;
     uint16_t entity_type = 0;
@@ -62,6 +71,7 @@ struct ObjectiveState {
     int16_t  camp_id = 0;
     uint8_t  priority = 0;
     int16_t  nameid = 0;
+    std::vector<ObjectiveLink> links;   // road/rail network connections
 };
 
 /// Unit subclass — same enum as f4::convert::UnitClass, duplicated here so
@@ -90,12 +100,23 @@ enum class UnitClass : uint8_t {
     return "unknown";
 }
 
+/// One pilot in a squadron's roster.
+struct PilotState {
+    int16_t  pilot_id = 0;
+    uint8_t  skill = 0;
+    uint8_t  status = 0;        // 0=available, 1=dead, 2=on leave, etc.
+    uint8_t  aa_kills = 0;
+    uint8_t  ag_kills = 0;
+    int16_t  missions_flown = 0;
+};
+
 /// A campaign unit (flight, battalion, squadron, ship). Mirrors the fields
 /// decoded by f4-world-convert's unit_decoder. Includes the subclass-specific
 /// tail fields that are most useful for visualization and AI consumption.
 struct UnitState {
     int16_t  type = 0;             // share_.entityType_ (100..2000)
     UnitClass unit_class = UnitClass::Unknown;
+    uint8_t  unit_subtype = 0;     // STYPE_UNIT_* (armor/infantry/fighter/bomber/...)
 
     // CampBaseClass:
     uint32_t id_creator = 0;
@@ -121,6 +142,13 @@ struct UnitState {
     uint8_t  fatigue = 0;          // Battalion
     uint8_t  elements = 0;         // Brigade / Package
     int32_t  fuel = 0;             // Squadron
+
+    // Hierarchy (Battalion/Brigade):
+    uint32_t parent_id = 0;                    // Battalion → parent Brigade VU_ID.num
+    std::vector<uint32_t> element_ids;         // Brigade → child Battalion VU_IDs
+
+    // Squadron pilot roster:
+    std::vector<PilotState> pilots;
 };
 
 struct WorldState {

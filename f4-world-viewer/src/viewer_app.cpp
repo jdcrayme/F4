@@ -40,6 +40,7 @@
 #include <iostream>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace f4::viewer {
@@ -101,6 +102,7 @@ struct ViewerApp::Impl {
     bool show_units = true;
     bool show_grid = false;
     bool show_legend = true;
+    bool show_routes = true;       // road/rail network from objective link_data
 
     // Status
     std::string status_msg;
@@ -124,32 +126,86 @@ struct ViewerApp::Impl {
     double screenshot_at = 0.0;    // GetTime() value
     std::string screenshot_path;
 
+    // VU_ID.num → objective index lookup. Built when a world is loaded.
+    // Used by the routes layer to resolve link neighbor VU_IDs to
+    // objective positions (so we can draw lines between them).
+    std::unordered_map<uint32_t, int> obj_id_to_index;
+
+    /// Rebuild the VU_ID → objective index map. Call after loading a world.
+    void rebuild_objective_index() {
+        obj_id_to_index.clear();
+        obj_id_to_index.reserve(world.objectives.size());
+        for (int i = 0; i < static_cast<int>(world.objectives.size()); ++i) {
+            obj_id_to_index[world.objectives[i].id_num] = i;
+        }
+    }
+
     // Icon textures (loaded from f4-world-viewer/assets/icons/*.png).
-    // Indexed by ObjectiveType enum value (for objectives) or UnitClass
-    // enum value (for units). nullptr = no icon (fall back to drawn shape).
+    // The spritesheet has 24 icons across 4 rows × 6 cols:
+    //   Row 1: bridge, village, town, city, factory, road_intersection
+    //   Row 2: armybase, sam_site, airbase, airstrip, port, road
+    //   Row 3: harts, armor, artillery, supply, infantry, engineering
+    //   Row 4: fighter, bomber, transport, helicopter, naval_surface, carrier
+    // Plus legacy icons: powerplant, radar, railroad, square, diamond, circle, triangle
     //
-    // Objective icon indices (matching the user's spritesheet order):
-    //   0=airbase, 1=bridge, 2=city, 3=port,
-    //   4=radar, 5=powerplant, 6=railroad, 7=factory
-    // Unit shape icon indices:
-    //   8=square(Battalion), 9=diamond(Brigade), 10=circle(Squadron),
-    //   11=triangle(TaskForce)
-    Texture2D icons[12] = {};
+    // Icon name → index mapping. Loaded by name; -1 = not loaded.
+    enum IconIndex : int {
+        // Row 1 (objectives):
+        ICON_BRIDGE = 0,
+        ICON_VILLAGE,
+        ICON_TOWN,
+        ICON_CITY,
+        ICON_FACTORY,
+        ICON_ROAD_INTERSECTION,
+        // Row 2 (objectives):
+        ICON_ARMYBASE,
+        ICON_SAM_SITE,
+        ICON_AIRBASE,
+        ICON_AIRSTRIP,
+        ICON_PORT,
+        ICON_ROAD,
+        // Row 3 (ground unit subtypes):
+        ICON_HARTS,
+        ICON_ARMOR,
+        ICON_ARTILLERY,
+        ICON_SUPPLY,
+        ICON_INFANTRY,
+        ICON_ENGINEERING,
+        // Row 4 (air/naval unit subtypes):
+        ICON_FIGHTER,
+        ICON_BOMBER,
+        ICON_TRANSPORT,
+        ICON_HELICOPTER,
+        ICON_NAVAL_SURFACE,
+        ICON_CARRIER,
+        // Legacy icons (kept for backward compat):
+        ICON_POWERPLANT,
+        ICON_RADAR,
+        ICON_RAILROAD,
+        ICON_SQUARE,
+        ICON_DIAMOND,
+        ICON_CIRCLE,
+        ICON_TRIANGLE,
+        ICON_COUNT
+    };
+
+    Texture2D icons[ICON_COUNT] = {};
     bool icons_loaded = false;
 
-    /// Load all 12 icon PNGs from the assets/icons/ directory next to the
-    /// executable. Called once at startup. If the directory doesn't exist
-    /// (e.g. running from the build dir without install), the viewer falls
-    /// back to drawn shapes.
+    /// Load all icon PNGs from the assets/icons/ directory. Called once at
+    /// startup. Falls back to drawn shapes if not found.
     void load_icons() {
         if (icons_loaded) return;
         const char* names[] = {
-            "airbase", "bridge", "city", "port",
-            "radar", "powerplant", "railroad", "factory",
+            "bridge", "village", "town", "city", "factory", "road_intersection",
+            "armybase", "sam_site", "airbase", "airstrip", "port", "road",
+            "harts", "armor", "artillery", "supply", "infantry", "engineering",
+            "fighter", "bomber", "transport", "helicopter", "naval_surface", "carrier",
+            "powerplant", "radar", "railroad",
             "square", "diamond", "circle", "triangle"
         };
-        // Try multiple search paths: next to the exe, then ../assets/icons,
-        // then ../../assets/icons (covers common build-dir layouts).
+        static_assert(sizeof(names)/sizeof(names[0]) == ICON_COUNT,
+                      "icon name table size mismatch");
         const char* search_dirs[] = {
             "assets/icons",
             "../assets/icons",
@@ -158,7 +214,7 @@ struct ViewerApp::Impl {
         };
         for (const char* dir : search_dirs) {
             bool found_any = false;
-            for (int i = 0; i < 12; ++i) {
+            for (int i = 0; i < ICON_COUNT; ++i) {
                 std::string path = std::string(dir) + "/" + names[i] + ".png";
                 if (FileExists(path.c_str())) {
                     icons[i] = LoadTexture(path.c_str());
@@ -173,12 +229,10 @@ struct ViewerApp::Impl {
 
     /// Draw an icon centered at screen position (sx, sy) with the given
     /// pixel size. The icon is tinted by the owner color so team affiliation
-    /// is still visible. If no icon is loaded (idx out of range or texture
-    /// not found), falls back to a drawn circle.
+    /// is still visible. If no icon is loaded, falls back to a drawn circle.
     void draw_icon(int icon_idx, float sx, float sy, float size_px,
                    const RlColor& tint) {
-        if (icon_idx < 0 || icon_idx >= 12 || icons[icon_idx].id == 0) {
-            // Fallback: draw a filled circle.
+        if (icon_idx < 0 || icon_idx >= ICON_COUNT || icons[icon_idx].id == 0) {
             DrawCircleV({sx, sy}, size_px * 0.5f,
                         Color{tint.r, tint.g, tint.b, 220});
             return;
@@ -194,31 +248,84 @@ struct ViewerApp::Impl {
                        Color{tint.r, tint.g, tint.b, 255});
     }
 
-    /// Map an ObjectiveType (from f4-world-convert's objective_decoder.hpp)
-    /// to an icon index. Returns -1 if no icon exists for this type.
-    static int icon_for_objective_type(int16_t type) {
-        switch (type) {
-            case 1:  return 0;   // TYPE_AIRBASE -> airbase
-            case 6:  return 1;   // TYPE_BRIDGE -> bridge
-            case 8:  return 2;   // TYPE_CITY -> city
-            case 19: return 3;   // TYPE_PORT -> port
-            case 21: return 4;   // TYPE_RADAR -> radar
-            case 20: return 5;   // TYPE_POWERPLANT -> powerplant
-            case 24: return 6;   // TYPE_RAILROAD -> railroad
-            case 11: return 7;   // TYPE_FACTORY -> factory
-            default: return -1;  // no icon — fall back to circle
+    /// Map an ObjectiveType (enum 1-39, from the class table) to an icon.
+    /// Returns -1 if no icon exists for this type.
+    static int icon_for_objective_type(uint8_t obj_type) {
+        switch (obj_type) {
+            case 1:  return ICON_AIRBASE;            // TYPE_AIRBASE
+            case 2:  return ICON_AIRSTRIP;           // TYPE_AIRSTRIP
+            case 3:  return ICON_ARMYBASE;           // TYPE_ARMYBASE
+            case 6:  return ICON_BRIDGE;             // TYPE_BRIDGE
+            case 8:  return ICON_CITY;               // TYPE_CITY
+            case 11: return ICON_FACTORY;            // TYPE_FACTORY
+            case 15: return ICON_ROAD_INTERSECTION;  // TYPE_INTERSECT
+            case 19: return ICON_PORT;               // TYPE_PORT
+            case 26: return ICON_ROAD;               // TYPE_ROAD
+            case 28: return ICON_TOWN;               // TYPE_TOWN
+            case 29: return ICON_VILLAGE;            // TYPE_VILLAGE
+            case 30: return ICON_HARTS;              // TYPE_HARTS
+            case 31: return ICON_SAM_SITE;           // TYPE_SAM_SITE
+            // Legacy icons (kept for types without a dedicated new icon):
+            case 20: return ICON_POWERPLANT;         // TYPE_POWERPLANT
+            case 21: return ICON_RADAR;              // TYPE_RADAR
+            case 24: return ICON_RAILROAD;           // TYPE_RAILROAD
+            case 23: return ICON_RAILROAD;           // TYPE_RAIL_TERMINAL (reuse)
+            // Types without icons — fall back to circle:
+            // 4=BEACH, 5=BORDER, 7=CHEMICAL, 9=COM_CONTROL, 10=DEPOT,
+            // 12=FORD, 13=FORTIFICATION, 14=HILL_TOP, 17=NUCLEAR, 18=PASS,
+            // 22=RADIO_TOWER, 25=REFINERY, 39=AIR_TERMINAL
+            default: return -1;
         }
     }
 
-    /// Map a UnitClass to an icon index.
-    static int icon_for_unit_class(f4::world::UnitClass c) {
-        switch (c) {
-            case f4::world::UnitClass::Battalion: return 8;  // square
-            case f4::world::UnitClass::Brigade:   return 9;  // diamond
-            case f4::world::UnitClass::Squadron:  return 10; // circle
-            case f4::world::UnitClass::TaskForce: return 11; // triangle
-            default: return -1;
+    /// Map a unit_class + unit_subtype to an icon. Uses the subtype to pick
+    /// a specific icon (armor/infantry/fighter/bomber/...) when available;
+    /// falls back to the generic shape icon (square/diamond/circle/triangle)
+    /// if no subtype-specific icon exists.
+    int icon_for_unit(f4::world::UnitClass cls, uint8_t subtype) const {
+        // Land battalions/brigades: use subtype-specific ground icons.
+        if (cls == f4::world::UnitClass::Battalion ||
+            cls == f4::world::UnitClass::Brigade) {
+            switch (subtype) {
+                case 3:  return ICON_ARMOR;        // STYPE_LAND_ARMOR
+                case 5:  return ICON_ENGINEERING;  // STYPE_LAND_ENGINEER
+                case 7:  return ICON_INFANTRY;     // STYPE_LAND_INFANTRY
+                case 11: return ICON_ARTILLERY;    // STYPE_LAND_SP_ARTILLERY
+                case 13: return ICON_SUPPLY;       // STYPE_LAND_SUPPLY
+                case 14: return ICON_ARTILLERY;    // STYPE_LAND_TOWED_ARTILLERY (reuse)
+                // No dedicated icon for: 1=AIR_DEFENSE, 2=AIRMOBILE, 4=ARMORED_CAV,
+                // 6=HQ, 8=MARINE, 9=MECHANIZED, 10=ROCKET, 12=SS_MISSILE
+                default: break;
+            }
+            // Fall back to generic shape.
+            return (cls == f4::world::UnitClass::Battalion) ? ICON_SQUARE : ICON_DIAMOND;
         }
+        // Squadrons: use subtype-specific air icons.
+        if (cls == f4::world::UnitClass::Squadron) {
+            switch (subtype) {
+                case 1:  return ICON_TRANSPORT;    // STYPE_AIR_AIR_TRANSPORT
+                case 4:  return ICON_HELICOPTER;   // STYPE_AIR_ATTACK_HELO
+                case 6:  return ICON_BOMBER;       // STYPE_AIR_BOMBER
+                case 8:  return ICON_FIGHTER;      // STYPE_AIR_FIGHTER
+                case 9:  return ICON_FIGHTER;      // STYPE_AIR_FIGHTER_BOMBER (reuse)
+                case 13: return ICON_TRANSPORT;    // STYPE_AIR_TANKER (reuse transport)
+                case 14: return ICON_HELICOPTER;   // STYPE_AIR_TRANSPORT_HELO
+                // No dedicated icon for: 2=ASW, 3=ATTACK, 5=AWACS, 7=ECM,
+                // 10=JSTAR, 11=RECON, 12=RECON_HELO
+                default: break;
+            }
+            return ICON_CIRCLE;
+        }
+        // Task forces: use subtype-specific naval icons.
+        if (cls == f4::world::UnitClass::TaskForce) {
+            switch (subtype) {
+                case 3:  return ICON_CARRIER;        // STYPE_SEA_CARRIER
+                // No dedicated icon for: 1=AMPHIBIOUS, 2=BATTLESHIP, 4=CRUISER,
+                // 5=DESTROYER, 6=FRIGATE, 7=PATROL, 8/9/10=supply/tanker/transport
+                default: return ICON_TRIANGLE;
+            }
+        }
+        return -1;
     }
 
     // --- Helpers ---
@@ -325,6 +432,7 @@ void ViewerApp::load_world_json(const std::filesystem::path& path) {
     impl_->status_msg = "Loaded world: " + path.string() +
         "  (" + std::to_string(impl_->world.objectives.size()) + " objectives, " +
         std::to_string(impl_->world.units.size()) + " units)";
+    impl_->rebuild_objective_index();
 
     // Try to auto-load the referenced terrain file.
     if (!impl_->world.terrain_file.empty()) {
@@ -502,6 +610,37 @@ void ViewerApp::draw_canvas() {
         }
     }
 
+    // --- Routes (road/rail network from objective link_data) ---
+    // Draw thin lines between connected objectives. Roads are tan/brown,
+    // rail links are dark gray. This is the ground movement network that
+    // ground units (battalions/brigades) use to navigate.
+    if (impl_->show_routes && impl_->world_loaded) {
+        const Color road_color = {180, 160, 120, 140};
+        const Color rail_color = {100, 100, 110, 160};
+        const Color sel_color  = {255, 255, 100, 220};
+        for (int i = 0; i < static_cast<int>(impl_->world.objectives.size()); ++i) {
+            const auto& o = impl_->world.objectives[i];
+            const Vector2 p = impl_->world_to_screen(o.x, o.y);
+            for (const auto& link : o.links) {
+                // Resolve neighbor VU_ID → objective index → position
+                auto it = impl_->obj_id_to_index.find(link.neighbor_num);
+                if (it == impl_->obj_id_to_index.end()) continue;
+                const auto& n = impl_->world.objectives[it->second];
+                const Vector2 q = impl_->world_to_screen(n.x, n.y);
+                // Draw each link once (only when i < neighbor_index to avoid
+                // drawing every road twice).
+                if (i >= it->second) continue;
+                const Color c = link.is_rail ? rail_color : road_color;
+                DrawLineEx(p, q, 1.0f, c);
+                // Highlight links from the selected objective.
+                if (impl_->sel_kind == Impl::SelectionKind::Objective &&
+                    impl_->sel_index == i) {
+                    DrawLineEx(p, q, 2.0f, sel_color);
+                }
+            }
+        }
+    }
+
     // --- Objectives ---
     // Render with type-specific icons (airbase, bridge, city, port, radar,
     // powerplant, railroad, factory). Unknown types fall back to a circle.
@@ -512,7 +651,9 @@ void ViewerApp::draw_canvas() {
             const auto& o = impl_->world.objectives[i];
             const Vector2 p = impl_->world_to_screen(o.x, o.y);
             const RlColor c = color_for_owner(o.owner);
-            const int icon_idx = Impl::icon_for_objective_type(o.type);
+            // Use objective_type (from class table) if available; otherwise
+            // fall back to the raw type (entity_type) which won't match icons.
+            const int icon_idx = Impl::icon_for_objective_type(o.objective_type);
             const float size = base_size + o.priority * 1.0f;
             impl_->draw_icon(icon_idx, p.x, p.y, size, c);
             // Outline selected.
@@ -541,7 +682,9 @@ void ViewerApp::draw_canvas() {
             const Vector2 p = impl_->world_to_screen(u.x, u.y);
             const RlColor c = color_for_owner(u.owner);
             const Color fill = {c.r, c.g, c.b, 220};
-            const int icon_idx = Impl::icon_for_unit_class(u.unit_class);
+            // Use subtype-specific icon when available; falls back to generic
+            // shape icon (square/diamond/circle/triangle) if not.
+            const int icon_idx = impl_->icon_for_unit(u.unit_class, u.unit_subtype);
 
             if (icon_idx >= 0) {
                 // Use the sprite icon.
@@ -622,6 +765,7 @@ void ViewerApp::draw_imgui() {
         }
         if (ImGui::BeginMenu("View")) {
             ImGui::Checkbox("Terrain",     &impl_->show_terrain);
+            ImGui::Checkbox("Routes",      &impl_->show_routes);
             ImGui::Checkbox("Objectives",  &impl_->show_objectives);
             ImGui::Checkbox("Units",       &impl_->show_units);
             ImGui::Checkbox("Grid",        &impl_->show_grid);
@@ -645,6 +789,7 @@ void ViewerApp::draw_imgui() {
     if (ImGui::Begin("Layers", nullptr,
                      ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_AlwaysAutoResize)) {
         ImGui::Checkbox("Terrain",     &impl_->show_terrain);
+        ImGui::Checkbox("Routes",      &impl_->show_routes);
         ImGui::Checkbox("Objectives",  &impl_->show_objectives);
         ImGui::Checkbox("Units",       &impl_->show_units);
         ImGui::Checkbox("Grid",        &impl_->show_grid);
@@ -700,13 +845,17 @@ void ViewerApp::draw_imgui() {
                 ImGui::TextUnformatted(team_names[i]);
             }
             ImGui::Separator();
-            ImGui::TextUnformatted("Unit shapes");
-            ImGui::TextUnformatted("[] Battalion");
-            ImGui::TextUnformatted("<> Brigade");
-            ImGui::TextUnformatted("o  Squadron");
-            ImGui::TextUnformatted("^  TaskForce");
-            ImGui::TextUnformatted("() Flight");
-            ImGui::TextUnformatted("+  Package");
+            ImGui::TextUnformatted("Unit subtypes");
+            ImGui::TextDisabled("(ground units use subtype icons)");
+            ImGui::TextUnformatted("Armor  Artillery  Infantry");
+            ImGui::TextUnformatted("Supply Engineer  HARTS");
+            ImGui::TextDisabled("(air units use subtype icons)");
+            ImGui::TextUnformatted("Fighter Bomber  Transport");
+            ImGui::TextUnformatted("Helicopter  Carrier");
+            ImGui::Separator();
+            ImGui::TextUnformatted("Generic shapes (fallback)");
+            ImGui::TextUnformatted("[] Battalion  <> Brigade");
+            ImGui::TextUnformatted("o  Squadron  ^  TaskForce");
         }
         ImGui::End();
     }
@@ -722,11 +871,12 @@ void ViewerApp::draw_imgui() {
             const auto& o = impl_->world.objectives[impl_->sel_index];
             ImGui::Text("Objective #%d", impl_->sel_index);
             ImGui::Separator();
-            ImGui::Text("Type:      %d", o.type);
+            ImGui::Text("Obj Type:  %d", o.objective_type);
+            ImGui::Text("Entity:    %d", o.type);
             ImGui::Text("Position:   (%d, %d, %.0f ft)", o.x, o.y, o.z);
             ImGui::Text("Owner:      %d", o.owner);
             ImGui::Text("Priority:   %d", o.priority);
-            ImGui::Text("Name ID:    %d", o.nameid);
+            ImGui::Text("Links:     %d (road/rail connections)", static_cast<int>(o.links.size()));
             ImGui::Text("Camp ID:    %d", o.camp_id);
             ImGui::Text("Entity:     %d", o.entity_type);
             ImGui::Text("VU_ID:      0x%08x/0x%08x", o.id_creator, o.id_num);
@@ -750,16 +900,41 @@ void ViewerApp::draw_imgui() {
             ImGui::Separator();
             switch (u.unit_class) {
                 case f4::world::UnitClass::Battalion:
+                    ImGui::Text("Supply:    %d%%", u.supply);
+                    ImGui::Text("Morale:    %d%%", u.morale);
+                    ImGui::Text("Fatigue:   %d%%", u.fatigue);
+                    ImGui::Text("Parent:    %d", u.parent_id);
+                    break;
                 case f4::world::UnitClass::Brigade:
                     ImGui::Text("Supply:    %d%%", u.supply);
                     ImGui::Text("Morale:    %d%%", u.morale);
                     ImGui::Text("Fatigue:   %d%%", u.fatigue);
-                    if (u.unit_class == f4::world::UnitClass::Brigade) {
-                        ImGui::Text("Elements:  %d", u.elements);
+                    ImGui::Text("Elements:  %d", u.elements);
+                    if (ImGui::TreeNode("Child battalions")) {
+                        for (uint32_t eid : u.element_ids) {
+                            ImGui::Text("  ID: %d", eid);
+                        }
+                        ImGui::TreePop();
                     }
                     break;
                 case f4::world::UnitClass::Squadron:
                     ImGui::Text("Fuel:      %d lbs", u.fuel);
+                    if (ImGui::TreeNode("Pilots", "Pilots (%d)", static_cast<int>(u.pilots.size()))) {
+                        ImGui::Text("ID    Skill Status AA  Missions");
+                        for (const auto& p : u.pilots) {
+                            const char* status_str = "?";
+                            switch (p.status) {
+                                case 0: status_str = "OK"; break;
+                                case 1: status_str = "Dead"; break;
+                                case 2: status_str = "Leave"; break;
+                                case 3: status_str = "Hosp"; break;
+                            }
+                            ImGui::Text("%-5d %-5d %-6s %-3d %d",
+                                        p.pilot_id, p.skill, status_str,
+                                        p.aa_kills, p.missions_flown);
+                        }
+                        ImGui::TreePop();
+                    }
                     break;
                 case f4::world::UnitClass::TaskForce:
                     ImGui::Text("Supply:    %d%%", u.supply);
