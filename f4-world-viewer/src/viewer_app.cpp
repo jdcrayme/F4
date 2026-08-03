@@ -124,6 +124,103 @@ struct ViewerApp::Impl {
     double screenshot_at = 0.0;    // GetTime() value
     std::string screenshot_path;
 
+    // Icon textures (loaded from f4-world-viewer/assets/icons/*.png).
+    // Indexed by ObjectiveType enum value (for objectives) or UnitClass
+    // enum value (for units). nullptr = no icon (fall back to drawn shape).
+    //
+    // Objective icon indices (matching the user's spritesheet order):
+    //   0=airbase, 1=bridge, 2=city, 3=port,
+    //   4=radar, 5=powerplant, 6=railroad, 7=factory
+    // Unit shape icon indices:
+    //   8=square(Battalion), 9=diamond(Brigade), 10=circle(Squadron),
+    //   11=triangle(TaskForce)
+    Texture2D icons[12] = {};
+    bool icons_loaded = false;
+
+    /// Load all 12 icon PNGs from the assets/icons/ directory next to the
+    /// executable. Called once at startup. If the directory doesn't exist
+    /// (e.g. running from the build dir without install), the viewer falls
+    /// back to drawn shapes.
+    void load_icons() {
+        if (icons_loaded) return;
+        const char* names[] = {
+            "airbase", "bridge", "city", "port",
+            "radar", "powerplant", "railroad", "factory",
+            "square", "diamond", "circle", "triangle"
+        };
+        // Try multiple search paths: next to the exe, then ../assets/icons,
+        // then ../../assets/icons (covers common build-dir layouts).
+        const char* search_dirs[] = {
+            "assets/icons",
+            "../assets/icons",
+            "../../assets/icons",
+            "../../../f4-world-viewer/assets/icons",
+        };
+        for (const char* dir : search_dirs) {
+            bool found_any = false;
+            for (int i = 0; i < 12; ++i) {
+                std::string path = std::string(dir) + "/" + names[i] + ".png";
+                if (FileExists(path.c_str())) {
+                    icons[i] = LoadTexture(path.c_str());
+                    SetTextureFilter(icons[i], TEXTURE_FILTER_BILINEAR);
+                    found_any = true;
+                }
+            }
+            if (found_any) break;
+        }
+        icons_loaded = true;
+    }
+
+    /// Draw an icon centered at screen position (sx, sy) with the given
+    /// pixel size. The icon is tinted by the owner color so team affiliation
+    /// is still visible. If no icon is loaded (idx out of range or texture
+    /// not found), falls back to a drawn circle.
+    void draw_icon(int icon_idx, float sx, float sy, float size_px,
+                   const RlColor& tint) {
+        if (icon_idx < 0 || icon_idx >= 12 || icons[icon_idx].id == 0) {
+            // Fallback: draw a filled circle.
+            DrawCircleV({sx, sy}, size_px * 0.5f,
+                        Color{tint.r, tint.g, tint.b, 220});
+            return;
+        }
+        const Texture2D& tex = icons[icon_idx];
+        const Rectangle src = {0, 0,
+                               static_cast<float>(tex.width),
+                               static_cast<float>(tex.height)};
+        const Rectangle dst = {sx - size_px * 0.5f, sy - size_px * 0.5f,
+                               size_px, size_px};
+        const Vector2 origin = {0, 0};
+        DrawTexturePro(tex, src, dst, origin, 0.0f,
+                       Color{tint.r, tint.g, tint.b, 255});
+    }
+
+    /// Map an ObjectiveType (from f4-world-convert's objective_decoder.hpp)
+    /// to an icon index. Returns -1 if no icon exists for this type.
+    static int icon_for_objective_type(int16_t type) {
+        switch (type) {
+            case 1:  return 0;   // TYPE_AIRBASE -> airbase
+            case 6:  return 1;   // TYPE_BRIDGE -> bridge
+            case 8:  return 2;   // TYPE_CITY -> city
+            case 19: return 3;   // TYPE_PORT -> port
+            case 21: return 4;   // TYPE_RADAR -> radar
+            case 20: return 5;   // TYPE_POWERPLANT -> powerplant
+            case 24: return 6;   // TYPE_RAILROAD -> railroad
+            case 11: return 7;   // TYPE_FACTORY -> factory
+            default: return -1;  // no icon — fall back to circle
+        }
+    }
+
+    /// Map a UnitClass to an icon index.
+    static int icon_for_unit_class(f4::world::UnitClass c) {
+        switch (c) {
+            case f4::world::UnitClass::Battalion: return 8;  // square
+            case f4::world::UnitClass::Brigade:   return 9;  // diamond
+            case f4::world::UnitClass::Squadron:  return 10; // circle
+            case f4::world::UnitClass::TaskForce: return 11; // triangle
+            default: return -1;
+        }
+    }
+
     // --- Helpers ---
 
     // Convert world (grid) coordinates to screen pixels.
@@ -166,6 +263,9 @@ void ViewerApp::run() {
     InitWindow(impl_->window_w, impl_->window_h, "F4 World Viewer");
     SetTargetFPS(60);
     rlImGuiSetup(true);
+
+    // Load icon textures (falls back to drawn shapes if not found).
+    impl_->load_icons();
 
     // Default to a fit-to-world view.
     impl_->fit_to_world();
@@ -403,88 +503,65 @@ void ViewerApp::draw_canvas() {
     }
 
     // --- Objectives ---
+    // Render with type-specific icons (airbase, bridge, city, port, radar,
+    // powerplant, railroad, factory). Unknown types fall back to a circle.
+    // Icons are tinted by owner color so team affiliation is visible.
     if (impl_->show_objectives && impl_->world_loaded) {
-        const float base_r = std::max(2.0f, 6.0f * (impl_->cam_zoom / 4.0f));
+        const float base_size = std::max(6.0f, 16.0f * (impl_->cam_zoom / 4.0f));
         for (int i = 0; i < static_cast<int>(impl_->world.objectives.size()); ++i) {
             const auto& o = impl_->world.objectives[i];
             const Vector2 p = impl_->world_to_screen(o.x, o.y);
             const RlColor c = color_for_owner(o.owner);
-            const float r = base_r + o.priority * 0.5f;
-            DrawCircleV(p, r, Color{c.r, c.g, c.b, 220});
+            const int icon_idx = Impl::icon_for_objective_type(o.type);
+            const float size = base_size + o.priority * 1.0f;
+            impl_->draw_icon(icon_idx, p.x, p.y, size, c);
             // Outline selected.
             if (impl_->sel_kind == Impl::SelectionKind::Objective &&
                 impl_->sel_index == i) {
                 DrawCircleLines(static_cast<int>(p.x), static_cast<int>(p.y),
-                                static_cast<int>(r + 3),
+                                static_cast<int>(size * 0.6f + 4),
                                 Color{255, 255, 0, 255});
             }
         }
     }
 
     // --- Units ---
-    // Render with different shapes per unit class so they're visually
-    // distinguishable on the map:
-    //   Battalion  → square
-    //   Brigade    → diamond (rotated square)
-    //   Squadron   → circle
-    //   TaskForce  → triangle
-    //   Flight     → small circle (hollow)
-    //   Package    → plus/cross
+    // Render with class-specific icons (square, diamond, circle, triangle)
+    // tinted by owner color. Falls back to drawn shapes if icons aren't loaded.
+    //   Battalion  → square icon
+    //   Brigade    → diamond icon
+    //   Squadron   → circle icon
+    //   TaskForce  → triangle icon
+    //   Flight     → hollow circle (drawn — no icon)
+    //   Package    → plus/cross (drawn — no icon)
     if (impl_->show_units && impl_->world_loaded) {
-        const float s = std::max(3.0f, 8.0f * (impl_->cam_zoom / 4.0f));
+        const float s = std::max(6.0f, 14.0f * (impl_->cam_zoom / 4.0f));
         for (int i = 0; i < static_cast<int>(impl_->world.units.size()); ++i) {
             const auto& u = impl_->world.units[i];
             const Vector2 p = impl_->world_to_screen(u.x, u.y);
             const RlColor c = color_for_owner(u.owner);
             const Color fill = {c.r, c.g, c.b, 220};
+            const int icon_idx = Impl::icon_for_unit_class(u.unit_class);
 
-            switch (u.unit_class) {
-                case f4::world::UnitClass::Battalion: {
-                    const Rectangle rect = {p.x - s * 0.5f, p.y - s * 0.5f, s, s};
-                    DrawRectangleRec(rect, fill);
-                    break;
-                }
-                case f4::world::UnitClass::Brigade: {
-                    // Diamond = square rotated 45°.
-                    Vector2 verts[4] = {
-                        {p.x,         p.y - s * 0.7f},
-                        {p.x + s*0.7f,p.y         },
-                        {p.x,         p.y + s * 0.7f},
-                        {p.x - s*0.7f,p.y         },
-                    };
-                    DrawTriangle(verts[0], verts[1], verts[2], fill);
-                    DrawTriangle(verts[0], verts[2], verts[3], fill);
-                    break;
-                }
-                case f4::world::UnitClass::Squadron: {
-                    DrawCircleV(p, s * 0.6f, fill);
-                    break;
-                }
-                case f4::world::UnitClass::TaskForce: {
-                    // Triangle pointing up.
-                    Vector2 verts[3] = {
-                        {p.x,         p.y - s * 0.7f},
-                        {p.x + s*0.7f,p.y + s * 0.5f},
-                        {p.x - s*0.7f,p.y + s * 0.5f},
-                    };
-                    DrawTriangle(verts[0], verts[1], verts[2], fill);
-                    break;
-                }
-                case f4::world::UnitClass::Flight: {
-                    DrawCircleLines(static_cast<int>(p.x), static_cast<int>(p.y),
-                                    static_cast<int>(s * 0.6f), fill);
-                    break;
-                }
-                case f4::world::UnitClass::Package: {
-                    // Plus/cross.
-                    DrawLineEx({p.x - s, p.y}, {p.x + s, p.y}, s * 0.4f, fill);
-                    DrawLineEx({p.x, p.y - s}, {p.x, p.y + s}, s * 0.4f, fill);
-                    break;
-                }
-                case f4::world::UnitClass::Unknown: {
-                    const Rectangle rect = {p.x - s * 0.5f, p.y - s * 0.5f, s, s};
-                    DrawRectangleRec(rect, fill);
-                    break;
+            if (icon_idx >= 0) {
+                // Use the sprite icon.
+                impl_->draw_icon(icon_idx, p.x, p.y, s, c);
+            } else {
+                // No icon for this class — draw a fallback shape.
+                switch (u.unit_class) {
+                    case f4::world::UnitClass::Flight:
+                        DrawCircleLines(static_cast<int>(p.x), static_cast<int>(p.y),
+                                        static_cast<int>(s * 0.5f), fill);
+                        break;
+                    case f4::world::UnitClass::Package:
+                        DrawLineEx({p.x - s * 0.6f, p.y}, {p.x + s * 0.6f, p.y},
+                                   s * 0.3f, fill);
+                        DrawLineEx({p.x, p.y - s * 0.6f}, {p.x, p.y + s * 0.6f},
+                                   s * 0.3f, fill);
+                        break;
+                    default:
+                        DrawCircleV(p, s * 0.4f, fill);
+                        break;
                 }
             }
 
@@ -498,7 +575,7 @@ void ViewerApp::draw_canvas() {
             if (impl_->sel_kind == Impl::SelectionKind::Unit &&
                 impl_->sel_index == i) {
                 DrawCircleLines(static_cast<int>(p.x), static_cast<int>(p.y),
-                                static_cast<int>(s + 4),
+                                static_cast<int>(s * 0.6f + 4),
                                 Color{255, 255, 0, 255});
             }
         }
@@ -722,12 +799,18 @@ void ViewerApp::draw_imgui() {
     // functions after rlImGuiEnd() crashes because the ImGui frame is
     // already finalized (the ID stack is empty, GetID() dereferences
     // an empty ImVector).
-    if (impl_->pending_dialog_open) {
-        if (!ImGui::IsPopupOpen("FilePicker") && !impl_->pending_dialog_title.empty()) {
-            ImGui::OpenPopup("FilePicker");
+    //
+    // BUG FIX: The popup ID in OpenPopup() MUST match the name passed to
+    // BeginPopupModal(). Previously we used "FilePicker" in OpenPopup but
+    // the title string in BeginPopupModal — the IDs didn't match so the
+    // popup never opened. Now both use the title string as the ID.
+    if (impl_->pending_dialog_open && !impl_->pending_dialog_title.empty()) {
+        const char* popup_id = impl_->pending_dialog_title.c_str();
+        if (!ImGui::IsPopupOpen(popup_id)) {
+            ImGui::OpenPopup(popup_id);
         }
-        ImGui::SetNextWindowSize(ImVec2(500, 140), ImGuiCond_FirstUseEver);
-        if (ImGui::BeginPopupModal(impl_->pending_dialog_title.c_str(),
+        ImGui::SetNextWindowSize(ImVec2(500, 160), ImGuiCond_FirstUseEver);
+        if (ImGui::BeginPopupModal(popup_id,
                                     &impl_->pending_dialog_open,
                                     ImGuiWindowFlags_NoResize)) {
             ImGui::TextUnformatted("Path:");
@@ -782,7 +865,14 @@ void ViewerApp::open_file_dialog(const char* title, const char* filters,
     impl_->pending_dialog_title = title;
     impl_->pending_dialog_filters = filters ? filters : "";
     impl_->pending_dialog_callback = std::move(on_ok);
-    impl_->pending_dialog_path[0] = '\0';
+    // Pre-fill with the last world JSON path if available — saves typing.
+    if (!impl_->last_world_json_path.empty()) {
+        std::string s = impl_->last_world_json_path.string();
+        std::snprintf(impl_->pending_dialog_path, sizeof(impl_->pending_dialog_path),
+                      "%s", s.c_str());
+    } else {
+        impl_->pending_dialog_path[0] = '\0';
+    }
     impl_->pending_dialog_open = true;
 }
 

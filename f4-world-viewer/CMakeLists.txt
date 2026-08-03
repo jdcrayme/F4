@@ -120,3 +120,14 @@ set_target_properties(f4-world-viewer PROPERTIES
     VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
     VS_DEBUGGER_COMMAND_ARGUMENTS "save1.world.json korea.terrain.json"
 )
+
+# ============================================================================
+# Copy icon assets to the build directory so the viewer can find them at
+# runtime. The viewer searches assets/icons/ relative to the working dir.
+# ============================================================================
+add_custom_command(TARGET f4-world-viewer POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        ${CMAKE_CURRENT_SOURCE_DIR}/assets/icons
+        ${CMAKE_BINARY_DIR}/assets/icons
+    COMMENT "Copying icon assets to build directory"
+)
