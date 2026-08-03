@@ -9,6 +9,11 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # + JSON emitter. No external dependencies beyond the standard library (the
 # JSON is emitted by hand to match f4-convert's pattern — nlohmann/json is
 # available to f4-data/f4-world on the consuming side).
+#
+# Links f4-install so find_class_table() can delegate the install-aware
+# class-table resolution to f4::install::Installation. The dependency is
+# PUBLIC because the viewer (which links f4-world-convert) will also want
+# to call f4-install directly when implementing the new Open Campaign flow.
 add_library(f4-world-convert STATIC
     src/lzss.cpp
     src/cam_archive.cpp
@@ -24,6 +29,7 @@ target_include_directories(f4-world-convert
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>
 )
+target_link_libraries(f4-world-convert PUBLIC f4-install)
 
 # CLI tool
 add_executable(cam2json cli/cam2json.cpp)

@@ -63,6 +63,18 @@ if(NOT rlimgui_POPULATED)
     set(RLIMGUI_DIR ${rlimgui_SOURCE_DIR})
 endif()
 
+# tinyfiledialogs — native OS file/folder pickers on Windows, macOS, Linux.
+# Replaces the ad-hoc ImGui text-input modal we shipped originally. Single
+# .c file, no external deps (uses Win32 dialog on Windows, zenity/kdialog
+# on Linux, AppleScript on macOS).
+#
+# Vendored under third_party/tinyfiledialogs/ rather than FetchContent'd
+# because the upstream repo (SourceForge git) doesn't tag releases and
+# we want a known-good snapshot. v3.21.3 (Feb 2026) — Zlib license.
+# Update by replacing the .c/.h files from a fresh clone of:
+#   git clone http://git.code.sf.net/p/tinyfiledialogs/code
+set(TINYFILEDIALOGS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/tinyfiledialogs)
+
 # Build Dear ImGui sources directly into our viewer library (avoids dealing
 # with imgui's own CMake target which pulls in many backends we don't need).
 set(IMGUI_SOURCES
@@ -76,14 +88,26 @@ set(RLIMGUI_SOURCES
     ${RLIMGUI_DIR}/rlImGui.cpp
 )
 
+# tinyfiledialogs is a single .c file. We compile it with C11 and link it
+# directly into the viewer library — no separate target needed.
+set(TINYFILEDIALOGS_SOURCES
+    ${TINYFILEDIALOGS_DIR}/tinyfiledialogs.c
+)
+
 # ============================================================================
 # Static library: rendering logic (terrain tiles, objective icons, inspector
 # panel). Linked by the CLI exe and (future) by editor embeds.
 # ============================================================================
 add_library(f4_world_viewer STATIC
     src/viewer_app.cpp
+    src/file_dialog.cpp
+    src/settings.cpp
+    src/hex/hex_model.cpp
+    src/hex/decoders.cpp
+    src/hex/hex_inspector.cpp
     ${IMGUI_SOURCES}
     ${RLIMGUI_SOURCES}
+    ${TINYFILEDIALOGS_SOURCES}
 )
 target_include_directories(f4_world_viewer
     PUBLIC
@@ -93,14 +117,20 @@ target_include_directories(f4_world_viewer
         ${IMGUI_DIR}
         ${IMGUI_DIR}/backends
         ${RLIMGUI_DIR}
+        ${TINYFILEDIALOGS_DIR}
 )
 target_link_libraries(f4_world_viewer PUBLIC
     f4-terrain
     f4-world
     f4-world-convert
     f4-terrain-convert
+    f4-install
 )
 target_link_libraries(f4_world_viewer PRIVATE raylib)
+# tinyfiledialogs needs to be compiled as C (it's a .c file). Set the
+# language explicitly on the source so CMake doesn't try to compile it
+# as C++ just because the rest of the target is C++.
+set_source_files_properties(${TINYFILEDIALOGS_SOURCES} PROPERTIES LANGUAGE C)
 
 # Visual Studio: set the working directory to the build dir so relative
 # fixture paths resolve correctly when running via F5.
@@ -110,6 +140,15 @@ set_target_properties(f4_world_viewer PROPERTIES
 
 # Alias for namespaced consumption.
 add_library(F4::WorldViewer ALIAS f4_world_viewer)
+
+# Tests — settings module only (no raylib dep). The full viewer is
+# exercised via the screenshot smoke test in cli/main.cpp's --screenshot
+# path, run by hand or by future CI.
+option(F4_WORLD_VIEWER_BUILD_TESTS "Build unit tests" ON)
+if(F4_WORLD_VIEWER_BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(tests)
+endif()
 
 # ============================================================================
 # CLI tool: f4-world-viewer [world.json] [terrain.json]

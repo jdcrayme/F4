@@ -2,6 +2,8 @@
 
 #include <f4/convert/class_table.hpp>
 
+#include <f4/install/installation.hpp>
+
 #include <cstdio>
 #include <cstring>
 #include <stdexcept>
@@ -84,44 +86,30 @@ uint8_t ClassTable::unit_subtype_for(uint16_t entity_type) const noexcept {
 }
 
 std::filesystem::path find_class_table(const std::filesystem::path& reference_file) {
-    const std::string filename = "FALCON4.ct";
-    auto candidate_in = [&filename](const std::filesystem::path& dir) -> std::filesystem::path {
-        if (dir.empty()) return {};
-        auto p = dir / filename;
-        return std::filesystem::exists(p) ? p : std::filesystem::path{};
-    };
-
-    // 1. Next to the reference file (typically the .cam).
-    if (!reference_file.empty()) {
-        auto p = candidate_in(reference_file.parent_path());
-        if (!p.empty()) return p;
-        // 2. Up a directory or two.
-        auto parent = reference_file.parent_path().parent_path();
-        if (!parent.empty()) {
-            p = candidate_in(parent);
-            if (!p.empty()) return p;
-        }
-    }
-
-    // 3. CWD-relative — covers the common case where the viewer or CLI is
-    // run from the build directory (CMake copies fixtures there) or from
-    // the project root (the source-tree fixtures are at known paths).
-    const char* cwd_relative[] = {
-        "FALCON4.ct",
-        "assets/FALCON4.ct",
-        "temp/FALCON4.ct",
-        "f4-world-convert/tests/fixtures/FALCON4.ct",
-        "../f4-world-convert/tests/fixtures/FALCON4.ct",
-        "../../f4-world-convert/tests/fixtures/FALCON4.ct",
-        "../temp/FALCON4.ct",
-        "../../temp/FALCON4.ct",
-    };
-    for (const char* rel : cwd_relative) {
-        if (std::filesystem::exists(rel)) {
-            return std::filesystem::path(rel);
-        }
-    }
-    return {};
+    // Delegates to f4::install::Installation. The Installation object is
+    // constructed fresh each call (cheap — detect() is just a directory
+    // walk), so this remains a stateless free function.
+    //
+    // Search order (preserves the pre-f4-install behavior exactly):
+    //   1. Same directory as `reference_file` (typically the .cam).
+    //   2. Up one or two directories from `reference_file`.
+    //   3. CWD-relative well-known paths.
+    //
+    // The f4-install version adds case-insensitive matching (catches
+    // "falcon4.ct" on Linux when the install ships "FALCON4.ct"). The
+    // legacy CWD fallback is preserved verbatim via
+    // f4::install::find_class_table_cwd_fallback(), so existing call
+    // sites (cam2json CLI run from the build dir, viewer run from
+    // source tree) continue to find the bundled fixture FALCON4.ct
+    // without an install configured.
+    //
+    // Callers that want install-aware resolution should call
+    // f4::install::Installation::find_class_table() directly, passing
+    // an Installation detected from the user's install path. This free
+    // function uses an empty Installation, so the install-aware step is
+    // skipped and behavior is unchanged.
+    f4::install::Installation inst;  // empty install — no root set
+    return inst.find_class_table(reference_file);
 }
 
 } // namespace f4::convert

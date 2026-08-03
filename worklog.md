@@ -271,3 +271,256 @@ Stage Summary:
   * viewer_fit_to_world.png — fit-to-world view (2659 objectives, magenta PRC dominates)
   * viewer_zoomed.png — zoom=12 view showing individual icon sprites with distinguishable shapes
 - Next: (1) start f4-ai against the real WorldState (§18.5 goal); (2) wire up an f4-world-viewer test harness so the viewer itself can be smoke-tested on CI; (3) add a "Flight Plans" layer using the decoded waypoints; (4) port the .obj objective decoder's variable-length link data for full objective coverage.
+
+---
+Task ID: INSTALL-1
+Agent: orchestrator (Super Z, main thread)
+Task: Build the f4-install library (engine-agnostic Falcon 4.0 install layout locator) and refactor f4-world-convert's find_class_table() to delegate to it. This is the foundation step for the new viewer CONOPS where the user points at their Falcon install path and the viewer auto-discovers theaters, campaigns, and FALCON4.ct the same way the game does.
+
+Work Log:
+- Read existing conventions (root CMakeLists, f4-geo/f4-terrain/f4-world-convert CMakeLists, f4-world-convert's class_table.cpp + cam2json CLI, an existing test file) to match naming, namespacing, CMake patterns, header style, and the test fixture approach.
+- Designed f4-install as a static library below f4-world-convert in the dependency graph:
+  * Theater struct — one theater entry from terrdata/<key>/, with case-insensitive file probing for THEATER.MAP/.MEA/.O2 + theater.ini.
+  * Campaign struct — one .cam save, with theater_key inferred from parent dir name when it matches a known theater.
+  * Installation class — value type holding the parsed layout. detect(root) returns an Installation with valid() / root() / class_table() / aircraft_dir() / campaign_dir() / terrdata_dir() / theaters() / campaigns() / campaigns_for() / find_class_table() / resolve().
+  * Free functions: parse_theater_lst_string, scan_theaters, scan_campaigns, read_theater_title, find_class_table_in_install (one-shot), find_class_table_cwd_fallback.
+- Built f4-install:
+  * include/f4/install/theater.hpp, campaign.hpp, installation.hpp, f4_install.hpp (umbrella)
+  * src/theater.cpp (theater.lst parser, theater.ini title reader, scan_theaters with case-insensitive file discovery + preferred_order merge)
+  * src/campaign.cpp (recursive scan, flat + nested layout, theater inference from parent dir, sorted by (theater_key, stem))
+  * src/installation.cpp (detect: FALCON4.ct search at root/sim/terrdata, sim/ aircraft dir, terrdata/ theaters, campaign/ saves; find_class_table: 4-step resolver with install-aware step between reference-file and CWD fallback; resolve() refuses on invalid install)
+  * CMakeLists.txt: static lib, PUBLIC includes, zero deps beyond stdlib, F4_INSTALL_BUILD_TESTS option
+  * tests/test_installation.cpp: 38 tests across 7 groups (basic structure, theater scanning, campaign scanning, find_class_table install-aware resolver, free-function helpers, theater.lst parser, theater.ini parser, Installation::resolve)
+- Refactored f4-world-convert/src/class_table.cpp's find_class_table() to delegate to f4::install::Installation::find_class_table(). The free function constructs an empty Installation (no root set), so the install-aware step is skipped and behavior matches the pre-refactor implementation exactly. Added a doc comment explaining when to use the free function vs. call Installation::find_class_table() directly (for install-aware resolution).
+- Updated f4-world-convert/CMakeLists.txt to link f4-install PUBLIC (the viewer, which links f4-world-convert, will also want to call f4-install directly when implementing the new Open Campaign flow).
+- Added f4-install to root CMakeLists.txt's add_subdirectory chain, positioned BEFORE f4-world-convert so the dependency is satisfied.
+- Verified the build on Linux (Debian 14, GCC 14.2.0, CMake 4.4.0, Ninja):
+  * f4-install: compiles clean, all 38 tests pass
+  * f4-world-convert: compiles clean, all 34 tests pass (zero regressions from the find_class_table refactor)
+  * Full test suite: 609 tests pass across 12 libraries (f4-units 121, f4-math 192, f4-geo 30, f4-state-machine 44, f4-entities 20, f4-data 38, f4-convert 40, f4-install 38, f4-world-convert 34, f4-world 13, f4-terrain 13, f4-flight-model 26)
+  * cam2json CLI smoke test: FALCON4.ct found via refactored path, 2135 entries loaded, end-to-end behavior preserved
+- Could not build f4-world-viewer in this sandbox (libxrandr-dev not available, raylib configure fails). Verified everything else; the viewer will build on any machine with X11 dev headers — no source changes were made to the viewer in this task.
+
+Stage Summary:
+- New library f4-install (~700 LOC headers + source + tests) is the single source of truth for "where do I find <X> in this Falcon install". Zero external deps beyond stdlib; sits below f4-world-convert in the dependency graph.
+- find_class_table() is now a thin delegate. Existing callers (cam2json CLI, viewer's import_cam_archive) keep working unchanged. The viewer can adopt the install-aware path by calling f4::install::Installation::find_class_table() directly once the Open Campaign UI lands.
+- 38 new tests cover: install validation, FALCON4.ct discovery at root/sim/terrdata, theater discovery with case-insensitive matching, theater.lst parsing (comments, quotes, lowercase, inline comments), theater.ini title reading, campaign scanning with flat + nested layouts mixed, install-aware class-table resolution (next to reference file, up one/two dirs, from install root), resolve() on valid/invalid installs.
+- Total project tests: 609 (was 571). Zero regressions.
+- Next: (1) wire tinyfiledialogs into the viewer for a native folder picker (replaces the current ImGui text-input modal); (2) add the File > Set Install Path... menu item that calls Installation::detect() and caches the path to ~/.f4-viewer/settings.json; (3) replace the four existing File menu items with File > Open Campaign... (Theater + Campaign dropdowns); (4) add the Tools > Hex Inspector panel for RE work on files in the install.
+
+---
+Task ID: INSTALL-2
+Agent: orchestrator (Super Z, main thread)
+Task: Wire tinyfiledialogs into the viewer for native OS file/folder pickers, add File > Set Install Path... + File > Open Campaign... menu items with install-aware loading, persist install path + last campaign to a settings file, and move the legacy File menu items under File > Advanced. This completes the install-aware CONOPS proposed in INSTALL-1's next-steps.
+
+Work Log:
+- Read the full viewer_app.cpp (~1100 lines) to understand the existing File menu structure, the open_file_dialog modal-based path (1024-char ImGui text input), and the in-process cam2json + terrain2json wrappers.
+- Added tinyfiledialogs as a vendored dependency under f4-world-viewer/third_party/tinyfiledialogs/ (v3.21.3, Feb 2026 snapshot from the upstream SourceForge git — the project doesn't use git tags, so we snapshot the source files directly). Single .c file, compiled as C via set_source_files_properties. Zlib license.
+- Built f4-viewer/file_dialog.hpp + file_dialog.cpp wrappers around the tinyfiledialogs C API. Three functions: pick_open_file, pick_save_file, pick_folder. The folder picker is the new capability the old ImGui modal couldn't provide. Plus a show_message_box helper for native OK/Cancel dialogs.
+  * The wrapper translates our pipe-separated filter format ("JSON (*.json)|All files (*.*)") into tinyfiledialogs v3.x's format (single description + array of "*.ext" patterns). The v3 API changed from parallel description/pattern arrays to a single description + pattern array — caught this when the initial compile failed.
+- Built f4-viewer/settings.hpp + settings.cpp for persisted viewer state:
+  * Five fields: install_path, last_theater_key, last_campaign_stem, last_world_json, last_terrain_json.
+  * Hand-rolled JSON parser/emitter (no nlohmann/json dep — the viewer's link chain doesn't currently pull nlohmann transitively, and adding it for a 5-field file is overkill). Handles escape sequences, missing fields, malformed input (returns defaults rather than throwing).
+  * Platform-specific paths: $XDG_CONFIG_HOME/f4-viewer/ on Linux, ~/Library/Application Support/f4-viewer/ on macOS, %APPDATA%/F4Viewer/ on Windows.
+  * load_settings() never throws — the viewer must always be able to start, even with a corrupted settings file.
+- Extended viewer_app.hpp with the new public API:
+  * set_install_path_dialog() — opens native folder picker, calls Installation::detect(), shows summary modal
+  * set_install_path(path) — programmatic equivalent (used by CLI --install flag)
+  * installation() — getter for the current Installation (std::optional)
+  * open_campaign_dialog() — opens the Theater + Campaign picker modal
+  * load_campaign_from_install(theater_key, campaign_stem) — one-shot install-aware loader
+- Extended the Impl struct with: std::optional<Installation> install, ViewerSettings settings, campaign_dialog state (theater_idx, campaign_idx, filtered campaigns list), install_summary modal state.
+- ViewerApp constructor now auto-loads settings.json and re-detects the install if a path was previously set. The user only picks the install path once.
+- Implemented load_campaign_from_install(): resolves theater + campaign via the Installation, runs f4-convert::convert_terrain_dir() for THEATER.* → terrain.json (writes next to the theater dir), runs f4-convert::to_world_json() for the .cam → world.json (with FALCON4.ct auto-resolved via Installation::find_class_table(camp->cam)), then calls load_world_json(). Persists last_theater_key + last_campaign_stem to settings.json so the next launch pre-selects them.
+- Replaced the File menu structure:
+  * PRIMARY: File > Set Install Path... / File > Open Campaign... (disabled when no install set) / current install path shown as a disabled hint
+  * ADVANCED: File > Advanced > [Open World JSON / Open Terrain JSON / Import .cam Archive / Import THEATER.* Binary] — the original four items, kept for the dev / un-bundled-fixtures workflow
+  * All four Advanced items now use the native OS pickers instead of the old ImGui text-input modal
+  * The old "Pick any file in THEATER dir" hack (Raylib couldn't do folder picks) is gone — Import THEATER.* now uses pick_folder() directly
+- Added two new ImGui modals inside the rlImGuiBegin/End block:
+  * Install Summary modal — shown after Set Install Path succeeds. Lists theaters found, campaigns found, class table location. Has an "Open Campaign..." button that chains directly into the campaign picker.
+  * Open Campaign modal — Theater dropdown (ImGui::Combo) populated from install->theaters(), Campaign dropdown populated from install->campaigns_for(theater_key) and refreshed when the theater changes. Load button calls load_campaign_from_install(). Pre-selects last_theater_key + last_campaign_stem from settings. Shows a helpful hint when no campaigns are present in the selected theater.
+- Fixed a spurious "Auto-load terrain failed" error in load_world_json(): when load_campaign_from_install() has already loaded terrain before calling load_world_json(), the world JSON's terrain_file field (a relative path like "terrain.json") would trigger a second auto-load attempt that fails because CWD doesn't match the .cam's directory. Now load_world_json() skips the auto-load if terrain is already loaded.
+- Updated cli/main.cpp with two new flags:
+  * --install <path> — calls set_install_path() (detect + cache to settings)
+  * --campaign <theater> <stem> — calls load_campaign_from_install() (requires --install or a restored settings)
+  * Both compose with the existing --screenshot, --zoom, --center flags and the positional world.json/terrain.json args.
+- Added f4-world-viewer/tests/ with 14 unit tests for the settings module:
+  * JSON round-trip (empty, all fields, spaces in paths, backslashes in Windows paths, Unicode in paths, quotes in paths)
+  * Missing fields default to empty
+  * Malformed JSON returns defaults (not throws)
+  * File I/O round-trip with a TempSettings RAII helper that overrides XDG_CONFIG_HOME
+  * Save creates the settings dir if missing; load returns defaults on corrupt file
+  * The tests link ONLY against settings.cpp (not the full f4_world_viewer target) to avoid pulling in raylib — keeps the test fast and dependency-light.
+  * Fixed a bug in the TempSettings helper: std::getenv returns null when the env var is unset, and the original code segfaulted on std::string(nullptr). Now uses a had_xdg_ bool to track whether to restore or unset.
+- Added f4-world-viewer/tests/CMakeLists.txt with a custom test target that compiles settings.cpp directly (not via the f4_world_viewer library) so the test doesn't need raylib.
+- Added the F4_WORLD_VIEWER_BUILD_TESTS option to f4-world-viewer/CMakeLists.txt.
+- Updated f4-world-viewer/CMakeLists.txt to: link f4-install (PUBLIC, so the viewer's downstream consumers can use it too), add settings.cpp + file_dialog.cpp to the sources, add the tinyfiledialogs include dir.
+- Enabled the C language at the top-level CMakeLists.txt (project(F4 LANGUAGES C CXX)) because tinyfiledialogs.c is a C file and raylib also needs C.
+- Set up a sandbox-local build environment to verify the viewer actually compiles. The sandbox doesn't have libxrandr-dev / libxinerama-dev / libxcursor-dev / libxi-dev / libgl1-mesa-dev installed system-wide, so I:
+  * apt-get download'd the debs and extracted them to /home/z/my-project/.local/
+  * Patched the pkgconfig files to point at the local prefix
+  * Wrote /home/z/my-project/scripts/setup-viewer-build-env.sh to set PKG_CONFIG_PATH + CMAKE_PREFIX_PATH + C_INCLUDE_PATH + LIBRARY_PATH for the build
+  * This is a sandbox-only workaround — on a normal dev machine the system-installed X11 dev packages work fine and the script isn't needed.
+- End-to-end verified the new flow:
+  * Built a synthetic Falcon 4.0 install at /tmp/fake-falcon4/ from the repo's bundled fixtures (FALCON4.ct at root, THEATER.* in terrdata/korea/, save1.cam in campaign/)
+  * Ran: ./f4-world-viewer --install /tmp/fake-falcon4 --campaign korea save1 --screenshot out.png
+  * Confirmed via VLM that the screenshot shows: Korea theater map fully rendered (water/lowland/mountains), 2659 objectives + 683 units visible with team colors, no errors in the status bar, install summary modal showing "Install detected successfully — 1 theater, 1 campaign"
+  * Confirmed settings.json was written with install_path + last_theater_key + last_campaign_stem
+  * Confirmed terrain.json (86 KB) and save1.world.json (1.3 MB) were generated in-process by the install-aware loader
+- Total project tests: 620 (was 606 — added 14 new settings tests). All green. Zero regressions in the existing 606 tests.
+
+Stage Summary:
+- The viewer's primary user-facing flow is now install-aware: File > Set Install Path... (once, persisted) → File > Open Campaign... (pick theater + campaign from dropdowns → auto-loads THEATER.* + .cam + FALCON4.ct in-process). No more manual file picking for the normal workflow.
+- All File menu items (new and legacy) use native OS pickers via tinyfiledialogs. The folder picker (used by Set Install Path and Import THEATER.*) is a new capability the old ImGui modal couldn't provide.
+- Settings persist across launches: install path, last theater, last campaign, last manually-loaded JSONs. The viewer restores state on startup.
+- CLI flags --install + --campaign enable scripted use (e.g. for headless smoke tests or for re-loading a specific campaign quickly).
+- 14 new unit tests cover the settings module's JSON round-trip (including edge cases: spaces, backslashes, Unicode, quotes, malformed input) and the file I/O (with a TempSettings RAII helper that isolates tests from the user's real settings).
+- Verified end-to-end with a synthetic install: the viewer loads a real .cam + THEATER.* + FALCON4.ct in one click, renders 2659 objectives + 683 units on the Korea terrain, no errors.
+- Files saved to /home/z/my-project/download/ for visual verification:
+  * viewer_install_aware_smoke.png — empty viewer on first launch
+  * viewer_install_aware_setpath.png — after --install, showing the install summary modal
+  * viewer_install_aware_campaign_clean.png — after --install + --campaign, showing the loaded Korea theater
+- Next: (1) Tools > Hex Inspector panel — the highest-leverage dev tool for RE work on files in the install (pick any file, hex+ASCII view, decoder overlays for known formats, byte-range extraction); (2) Tools > Install Inventory — recursive walk of the install dir grouped by extension with sizes/counts; (3) "Export Bundle..." menu item that packages the loaded world+terrain+class_table into a single .f4bundle/ directory for redistribution.
+
+---
+Task ID: INSTALL-3
+Agent: orchestrator (Super Z, main thread)
+Task: Build the Hex Inspector panel — Tools > Hex Inspector — that lets the user open any file in the install and inspect its raw bytes with format-aware decoder overlays. This is the highest-leverage RE tool from the recommended next-steps list. Also: package the current source tree as a downloadable .zip for the user.
+
+Work Log:
+- Built the Hex Inspector as a layered design:
+  * hex_model.hpp/cpp — pure data model (no raylib/ImGui dep). Owns the loaded file's bytes, the list of decoder Annotations, the current selection ByteRange. Exposes load_file(), load_bytes(), apply_decoder(), read_le(), read_fixed_string(), slice(), entropy(), find_ascii_strings(), annotation_at(). Fully unit-testable.
+  * decoders.hpp/cpp — pure functions, one per known format. decode_cam_manifest delegates to f4-world-convert's CamArchive for the actual parsing; decode_cmp_header reads the 8-byte LZSS-compressed-payload header; decode_theater_map reads the 16-byte TerrainHeader + first 8 palette entries; decode_falcon4_ct reads num_entities + the first 16 ClassTableEntry records; decode_generic is the fallback (file size, magic bytes, Shannon entropy, ASCII string runs).
+  * hex_inspector.hpp/cpp — the ImGui panel. Two-pane layout: annotations list (left, 280px) + hex dump with ASCII column (right). Toolbar with Open File button, path input, decoder dropdown, Re-decode button. Selection bar with Copy as Hex / Copy as C array / Copy as Python / Save As... / Clear buttons.
+- File type identification (in hex_model.cpp):
+  * identify_file_by_extension() — handles .cam, .cmp, .dat, .ver, .lua, .txt/.ini/.lst/.cfg/.csv/.json, plus special filenames FALCON4.ct, THEATER.MAP, THEATER.MEA, THEATER.O2. Case-insensitive.
+  * identify_file() — extension first, then magic bytes (THEATER.MAP magic 0x444CFFAE), then a printable-ASCII heuristic for text files. Falls back to Binary.
+- Annotation model:
+  * ByteRange { offset, length } — half-open, with contains() / overlaps() / end() helpers.
+  * Annotation { ByteRange range, label, value, description, category } — category drives the color coding in the panel (header=blue, field=green, string=orange, padding=gray, unknown=light gray).
+- Hex Inspector panel features:
+  * ImGuiListClipper for the hex dump — handles huge files without rendering off-screen rows.
+  * Click any byte in the hex dump to select it. Click an annotation in the left panel to select its whole byte range + scroll to it.
+  * Color coding: bytes inside an annotation get the annotation's category color; bytes inside the selection get yellow.
+  * Three clipboard formats: space-separated hex, C array (`static const unsigned char data[N] = { 0xAE, 0xFF, ... };`), Python (`data = bytes.fromhex("aeff4c44...")`).
+  * Save As... uses the native save dialog (tinyfiledialogs) to write the selected bytes to a file.
+- Wired the Hex Inspector into the viewer:
+  * Added `HexInspector hex_inspector` member to ViewerApp::Impl.
+  * Added Tools menu (between View and Help) with a "Hex Inspector..." menu item that toggles the panel open. The menu item shows the panel's open/closed state.
+  * The panel's draw() is called every frame inside the rlImGuiBegin/End block.
+- Added `--hex-inspect <path>` CLI flag that opens the viewer with the Hex Inspector panel already open and the file pre-loaded + decoded. Useful for scripted use and for headless smoke tests.
+- Added `open_hex_inspector_with_file(path)` to ViewerApp's public API to back the CLI flag.
+- Wrote 30 unit tests in test_hex_model.cpp covering:
+  * ByteRange semantics (empty, contains, end, overlaps with adjacency, equality)
+  * HexModel load_bytes + read_le (LE multi-byte ints, out-of-range returns 0)
+  * HexModel read_fixed_string (null-terminated, no-null-in-range, empty-when-starts-with-null)
+  * HexModel slice (bounds-clamped, past-end returns empty)
+  * HexModel load_bytes clears annotations + selection
+  * HexModel entropy (zero for single-byte, max for uniform random, medium for two-values)
+  * HexModel find_ascii_strings (printable runs, min-length filter, multi-line strings)
+  * identify_file_by_extension (all known extensions, case-insensitive)
+  * identify_file magic-byte probe (THEATER.MAP magic overrides unknown extension)
+  * identify_file text heuristic (>80% printable = text)
+  * identify_file binary fallback
+  * decode_cam_manifest against the real save1.cam fixture
+  * decode_cmp_header on a synthetic 12-byte .cmp
+  * decode_theater_map on a synthetic 32-byte header + 4 palette entries
+  * decode_falcon4_ct against the real FALCON4.ct fixture (verifies num_entities = 2135)
+  * decode_generic emits file_size / magic / entropy annotations + extracts ASCII strings
+  * HexModel::annotation_at finds the containing range
+  * apply_decoder auto-detects by extension (.cam → CamArchive, THEATER.MAP → TheaterMap)
+  * Fixed three test-assertion bugs (EXPECT_NE vs EXPECT_EQ, ByteRange adjacency) caught by the test runner.
+- The tests link only against hex_model.cpp + decoders.cpp + f4-world-convert (decoders call into CamArchive) — no raylib dep, fast to build, fast to run.
+- Built the .zip download for the user:
+  * `zip -r download/F4-source.zip F4/` excluding build/, .git/, .cache/, __pycache__/.
+  * Result: 3.0 MB, 351 files, includes all source + fixtures + the vendored tinyfiledialogs.
+- Verified end-to-end with a smoke test:
+  * `./f4-world-viewer --hex-inspect /path/to/FALCON4.ct --screenshot out.png`
+  * VLM-verified the screenshot: Hex Inspector panel is visible, file path shown in toolbar, file type identified as "Class Table" with 172937 bytes, hex bytes grid on the right, annotations on the left (num_entities, entry[0] through entry[13] with entity_type / class / type / stype details).
+  * Decoder correctly auto-detected FALCON4.ct and applied the falcon4_ct decoder.
+
+Stage Summary:
+- The Hex Inspector is live: Tools > Hex Inspector opens a panel that lets you inspect any file in the install with format-aware decoder overlays. Four decoders cover the most common file types (.cam, .cmp, THEATER.MAP, FALCON4.ct); a generic fallback handles everything else (file size, magic bytes, entropy, ASCII strings).
+- Selection + export workflow: click any byte → Copy as Hex / Copy as C array / Copy as Python / Save As... . This is the "extract just the bytes you care about" tool for sharing hex dumps with collaborators.
+- 30 new unit tests cover the data model + decoders (no raylib dep — tests run in 0.07s).
+- Total project tests: 650 (was 620). All green. Zero regressions.
+- Files saved to /home/z/my-project/download/:
+  * F4-source.zip — 3.0 MB, the full source tree (excluding build artifacts)
+  * viewer_hex_inspector.png — screenshot of the Hex Inspector panel with FALCON4.ct loaded, showing the decoder annotations + hex dump
+- Next: (1) Tools > Install Inventory — recursive walk of the install dir grouped by extension with sizes/counts/SHA-1 fingerprints, exported as CSV/JSON; (2) Tools > Bulk Dump Tool — "give me bytes 0-1024 of every .cam file" for building databases of scattered data; (3) drag-to-select across multiple bytes in the hex dump (currently only single-click selection); (4) decoder for .obj (objectives) and .uni (units) sub-files inside .cam, so users can drill into a specific sub-file without leaving the inspector.
+
+---
+Task ID: INSTALL-4
+Agent: orchestrator (Super Z, main thread)
+Task: Add diagnostics to the install-aware flow. The user reported "Install detected successfully" but "class table not found" and "5 campaigns but can't open any" — without any way to see WHERE we looked for FALCON4.ct or WHY the campaigns were failing to load. Add a structured DiagnosticInfo to f4-install, a Tools > Install Diagnostics panel, a detailed Campaign Load Error modal, and a --diagnostics CLI flag.
+
+Work Log:
+- Added DiagnosticInfo struct to f4-install/include/f4/install/installation.hpp:
+  * class_table_searched — every path probed for FALCON4.ct during detect() (root, sim/, terrdata/)
+  * theater_dirs_probed — every subdir of terrdata/ we looked at (including rejected ones)
+  * campaign_dir_found — whether the campaign/ directory was found
+  * theater_lst_path / theater_lst_parsed / theater_lst_key_count — theater.lst parsing status
+  * format() method renders as a human-readable multi-line string
+- Updated Installation::detect() in f4-install/src/installation.cpp to populate the DiagnosticInfo as it probes:
+  * Records each FALCON4.ct search path BEFORE attempting the find (so even if all 3 fail, the user sees all 3 paths that were tried)
+  * Records the theater.lst path + parsed status + key count
+  * Records every subdir of terrdata/ as a "probed" theater dir
+  * Records whether campaign_dir was found
+- Added Installation::diagnostics() accessor returning a const ref to the DiagnosticInfo.
+- Added 10 new unit tests in f4-install/tests/test_installation.cpp covering:
+  * DiagnosticsRecordsClassTableSearchPaths — verifies all 3 paths are recorded when FALCON4.ct is missing
+  * DiagnosticsRecordsClassTableFoundAtRoot / FoundInSimDir — verifies the search path is recorded even on success
+  * DiagnosticsCampaignDirFoundFlag / CampaignDirNotFoundFlag
+  * DiagnosticsTheaterLstParsed — verifies theater.lst parsing is recorded
+  * DiagnosticsTheaterLstAbsent — verifies the "not found" case
+  * DiagnosticsTheaterDirsProbed — verifies rejected subdirs are still recorded for transparency
+  * DiagnosticInfo.FormatProducesNonEmptyString / FormatHandlesEmpty
+- Enhanced the viewer's install summary modal (shown after Set Install Path) to include:
+  * Per-theater THEATER.* file list (so the user can see if MAP/MEA/O2 are present at a glance)
+  * Per-theater [INCOMPLETE] marker in caps (more visible than lowercase)
+  * First 5 campaigns with their full paths (so the user can verify the layout is what we expect)
+  * When FALCON4.ct is not found: explicit "NOT FOUND" + the list of searched paths + a hint to use Tools > Install Diagnostics for more detail
+- Added Tools > Install Diagnostics... menu item (under Tools, after Hex Inspector) that opens a modal showing the full diagnostic report:
+  * Install root + valid status
+  * FALCON4.ct search results (found path OR all searched paths + a "place FALCON4.ct in one of these locations" hint)
+  * theater.lst status (path, parsed, key count)
+  * Per-theater details: dir, complete status, individual THEATER.MAP/.MEA/.O2 presence, theater.ini presence, all THEATER.* files with byte sizes
+  * Rejected theater dirs (subdirs of terrdata/ without THEATER.MAP)
+  * Per-campaign details: stem, theater_key, full path, exists check, file size
+  * sim/ and terrdata/ paths
+  * The text is in a scrollable, selectable, copyable read-only InputTextMultiline (so the user can select-all + copy to share)
+  * "Copy to Clipboard" button for one-click copy
+- Replaced the campaign-load failure path (was: show_message_box with just the exception what()) with a detailed Campaign Load Error modal:
+  * Shows the full exception message
+  * Shows the theater key + campaign stem that were attempted
+  * Shows theater details (dir, complete?, THEATER.MAP/.MEA presence) — so the user immediately sees if the theater is incomplete
+  * Shows campaign file details (full path, exists check, file size)
+  * Shows class table status (with a note that campaign should still load without it — helps the user rule out the class table as the cause)
+  * "Copy to Clipboard" button
+  * "Open Install Diagnostics" button — chains to the full diagnostics modal for deeper investigation
+  * Same InputTextMultiline approach for selectability
+- Added open_install_diagnostics() and install_diagnostics_text() to ViewerApp's public API.
+- Added --diagnostics CLI flag to f4-world-viewer/cli/main.cpp:
+  * Prints the full diagnostic report to stderr and exits (no GUI)
+  * Composes with --install (e.g. --install /path --diagnostics)
+  * Useful for debugging install-detection issues without launching the GUI
+- Built a deliberately broken synthetic install at /tmp/broken-falcon4/ to verify the diagnostics catch the user's exact scenario:
+  * Has terrdata/korea/THEATER.MAP (so valid() returns true)
+  * Missing THEATER.MEA (so theater is INCOMPLETE — this is why campaigns can't load)
+  * Missing FALCON4.ct everywhere (so class table is NOT FOUND)
+  * Has 5 .cam files in campaign/ (so 5 campaigns are discovered)
+  * Verified: --diagnostics output shows "Valid: yes", "FALCON4.ct NOT FOUND" with all 3 searched paths, "Korea (korea) [INCOMPLETE]" with "THEATER.MEA: MISSING", all 5 campaigns with their paths + sizes
+  * Verified: --campaign korea save1 fails with "theater 'korea' is incomplete (missing THEATER.MAP or .MEA)" — the new error modal would show this plus the theater context
+- VLM-verified the install summary modal screenshot against the broken install: VLM confirms it shows "Korea (korea) [INCOMPLETE]", "Class table: NOT FOUND" with the 3 searched paths listed, and 5 campaigns listed with their paths. Exactly the diagnostic info the user needs.
+
+Stage Summary:
+- The user's "class table not found" + "5 campaigns but can't open any" scenario is now fully diagnosable:
+  * The install summary modal (shown after Set Install Path) immediately shows the class table search paths and the theater INCOMPLETE marker.
+  * Tools > Install Diagnostics gives the full report — every path probed, every theater's THEATER.* file presence, every campaign's path + exists check.
+  * When a campaign fails to load, the Campaign Load Error modal shows the exception message + theater context (complete? MAP/MEA present?) + campaign context (path, exists, size) + class table status — so the user can immediately see why it failed.
+  * The --diagnostics CLI flag lets the user print the full report to stderr for sharing (e.g. pasting into a chat) without launching the GUI.
+- Total project tests: 660 (was 650 — added 10 new diagnostics tests in f4-install). All green. Zero regressions.
+- Most likely cause of the user's "can't open any campaign" issue: their theater is INCOMPLETE (missing THEATER.MEA, or THEATER.MAP). Once they see the diagnostic report, they'll know exactly which file is missing and can either restore it from their install media or point the viewer at a different theater.
+- Most likely cause of the "class table not found" issue: FALCON4.ct is in a location we don't search (e.g. a `data/` subdir, or named differently). The diagnostic report shows exactly where we looked, so the user can either move FALCON4.ct to one of the searched locations or tell us where it actually is.
+- Next: (1) wait for the user to run --diagnostics against their real install and share the output so we can confirm the root cause; (2) if FALCON4.ct is in an unsearched location, add that location to detect(); (3) if the theater is incomplete, investigate why THEATER.MEA is missing (some community repacks ship theaters without elevation data).

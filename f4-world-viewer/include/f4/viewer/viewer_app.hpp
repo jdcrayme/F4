@@ -2,10 +2,21 @@
 //
 // Interactive Raylib + Dear ImGui application for inspecting F4 world data.
 //
-// The viewer loads:
-//   - A terrain JSON (produced by f4-terrain-convert) for the tile grid
-//   - A world JSON (produced by f4-world-convert's cam2json) for objectives,
-//     units, and campaign state
+// CONOPS — the primary user-facing flow is:
+//
+//   1. First launch: File > Set Install Path... → native folder picker.
+//      The viewer calls f4::install::Installation::detect() and shows
+//      a summary (theaters + campaigns found, FALCON4.ct located).
+//      The path is cached to settings.json so the user only picks it once.
+//
+//   2. File > Open Campaign... → modal with Theater + Campaign dropdowns
+//      populated from the Installation. On OK: the viewer loads
+//      THEATER.* (in-process terrain2json), the chosen .cam (in-process
+//      cam2json with FALCON4.ct auto-resolved), and renders.
+//
+//   3. File > Advanced > ... — the original four menu items (Open World
+//      JSON, Open Terrain JSON, Import .cam, Import THEATER.*) kept for
+//      the dev / un-bundled-fixtures workflow.
 //
 // Both can be loaded from the File menu, or passed as CLI args. The viewer
 // also wraps the CLI converters in-process, so the user can directly import
@@ -14,9 +25,13 @@
 
 #pragma once
 
+#include <f4/install/installation.hpp>
+#include <f4/viewer/settings.hpp>
+
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 
 namespace f4::viewer {
@@ -29,11 +44,62 @@ public:
     // Lifecycle
     void run();   // blocking — enters the Raylib event loop
 
-    // File operations (callable from ImGui menus)
+    // --- Install-aware API (new primary flow) ---
+
+    /// Open a native folder picker, call Installation::detect() on the
+    /// chosen path, cache it to settings, and return whether the
+    /// installation validated. On success, callers can call
+    /// open_campaign_dialog() to let the user pick a campaign.
+    /// On cancel, returns false and leaves any existing installation
+    /// unchanged.
+    bool set_install_path_dialog();
+
+    /// Set the install path directly (no dialog). Used by CLI flags
+    /// (--install <path>) and by tests. Returns whether detect()
+    /// validated the path.
+    bool set_install_path(const std::filesystem::path& path);
+
+    /// The currently-configured installation (may be std::nullopt if the
+    /// user hasn't set one yet, or if detect() failed).
+    [[nodiscard]] const std::optional<f4::install::Installation>& installation() const noexcept;
+
+    /// Open the Theater + Campaign picker modal. Populated from the
+    /// current installation. No-op if no installation is set (the
+    /// caller should call set_install_path_dialog() first).
+    void open_campaign_dialog();
+
+    // --- File operations (callable from ImGui menus) ---
+
     void load_terrain_json(const std::filesystem::path& path);
     void load_world_json(const std::filesystem::path& path);
     void import_terrain_binary(const std::filesystem::path& terrain_dir);
     void import_cam_archive(const std::filesystem::path& cam_path);
+
+    /// Install-aware campaign load: takes a Theater key + Campaign
+    /// stem, resolves them to on-disk paths via the Installation,
+    /// and runs the in-process converters (terrain2json + cam2json
+    /// with auto-resolved FALCON4.ct) to populate WorldState. This
+    /// is the "one-click load" the new CONOPS promises.
+    /// Throws on missing files or parse errors — caller catches and
+    /// shows the error in the status bar.
+    void load_campaign_from_install(const std::string& theater_key,
+                                     const std::string& campaign_stem);
+
+    /// Open the Hex Inspector panel (Tools > Hex Inspector) with a file
+    /// pre-loaded. Used by the --hex-inspect CLI flag for scripted use
+    /// and for headless smoke tests. Throws on I/O error.
+    void open_hex_inspector_with_file(const std::filesystem::path& path);
+
+    /// Open the Install Diagnostics modal (Tools > Install Diagnostics).
+    /// Builds the full diagnostic report from the current Installation
+    /// and shows it in a scrollable, copyable text panel.
+    /// No-op if no install is set (the modal will say so).
+    void open_install_diagnostics();
+
+    /// Get the current install diagnostic report as a string. Used by
+    /// the --diagnostics CLI flag to print to stderr. Returns a "no
+    /// install set" message if no install is configured.
+    [[nodiscard]] std::string install_diagnostics_text() const;
 
     /// Set the initial camera position (grid coordinates) and zoom (pixels
     /// per grid unit). Call before run(). Useful for screenshots and for

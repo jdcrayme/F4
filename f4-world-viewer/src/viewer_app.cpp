@@ -5,19 +5,26 @@
 // Layout:
 //   ┌──────────────────────────────────────────────────────────────────┐
 //   │ Menu bar: File | View | Help                                    │
-//   ├──────────────────────────────────────────────────┬───────────────┤
-//   │ Raylib canvas (2D top-down)                      │ ImGui: layers │
-//   │   • Color-coded terrain tiles                    │   + inspector │
-//   │   • Objective circles by team                    │   + status    │
-//   │   • Unit squares by team                         │               │
-//   │   Pan: drag  Zoom: wheel  Click: select          │               │
-//   └──────────────────────────────────────────────────┴───────────────┘
+//   ├──────────────────────────────────────────┬───────────────────────┤
+//   │ Raylib canvas (2D top-down)              │ ImGui: layers         │
+//   │   • Color-coded terrain tiles            │   + inspector         │
+//   │   • Objective icons by type + team       │   + status            │
+//   │   • Unit squares by team                 │   + install info      │
+//   │   Pan: drag  Zoom: wheel  Click: select  │                       │
+//   └──────────────────────────────────────────┴───────────────────────┘
+//
+// Primary user flow (install-aware):
+//
+//   File > Set Install Path...   → native folder picker → detect()
+//   File > Open Campaign...      → Theater + Campaign dropdowns
+//                                  → in-process terrain2json + cam2json
+//                                    with FALCON4.ct auto-resolved
 //
 // The viewer wraps the cam2json and terrain2json CLIs in-process (calls
 // the libraries directly), so the user can import raw FreeFalcon binary
-// files from the File menu without leaving the app. This is the starting
-// point for a future world editor: the same load/render pipeline will
-// gain edit/save capabilities as new systems come online.
+// files without leaving the app. This is the starting point for a future
+// world editor: the same load/render pipeline will gain edit/save
+// capabilities as new systems come online.
 
 #include <f4/viewer/viewer_app.hpp>
 
@@ -25,7 +32,11 @@
 #include <f4/convert/world_json.hpp>
 #include <f4/convert/terrain_converter.hpp>
 #include <f4/convert/class_table.hpp>
+#include <f4/install/installation.hpp>
 #include <f4/terrain/terrain_data.hpp>
+#include <f4/viewer/file_dialog.hpp>
+#include <f4/viewer/hex_inspector.hpp>
+#include <f4/viewer/settings.hpp>
 #include <f4/world/world_state.hpp>
 
 #include <imgui.h>
@@ -40,6 +51,8 @@
 #include <fstream>
 #include <iostream>
 #include <memory>
+#include <optional>
+#include <sstream>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -114,9 +127,52 @@ struct ViewerApp::Impl {
     std::filesystem::path last_world_json_path;
     std::filesystem::path last_terrain_json_path;
 
-    // Pending file dialog (Raylib doesn't ship a native picker, so we use
-    // a simple ImGui text-input modal. A real file browser will replace
-    // this in a future pass — likely via tinyfiledialogs.)
+    // --- Install-aware state (new primary flow) ---
+
+    // The Falcon 4.0 installation the user pointed at. std::nullopt until
+    // they pick one (or until we restore it from settings on startup).
+    std::optional<f4::install::Installation> install;
+
+    // Persisted viewer settings — install path, last theater/campaign, etc.
+    // Loaded on construction, saved on every change.
+    ViewerSettings settings;
+
+    // Theater + Campaign picker modal state. We track the selected indices
+    // (into install->theaters() and the filtered campaigns list) so the
+    // ImGui Combo can show the current selection. Recomputed on open.
+    bool campaign_dialog_open = false;
+    int campaign_dialog_theater_idx = 0;   // index into install->theaters()
+    int campaign_dialog_campaign_idx = 0;  // index into filtered list
+    std::vector<f4::install::Campaign> campaign_dialog_campaigns;  // for current theater
+
+    // Install summary modal state — shown after Set Install Path to
+    // confirm what was detected (theaters, campaigns, class table).
+    bool install_summary_open = false;
+    std::string install_summary_text;
+
+    // Install diagnostics modal state — shown via Tools > Install
+    // Diagnostics. More detailed than the summary modal: includes every
+    // path probed for FALCON4.ct, every theater dir probed, etc.
+    bool install_diagnostics_open = false;
+    std::string install_diagnostics_text;
+
+    // Campaign load error modal state. When load_campaign_from_install
+    // throws, we capture the exception message + diagnostic context
+    // (theater complete?, .cam file exists?, class table found?) into
+    // this string and show it in a proper modal so the user can copy
+    // the full text. More useful than a native message box because the
+    // text is selectable and scrollable.
+    bool campaign_load_error_open = false;
+    std::string campaign_load_error_text;
+
+    // Hex Inspector panel — owned by the viewer, opened via Tools menu.
+    HexInspector hex_inspector;
+
+    // Pending file dialog (legacy fallback — used by File > Advanced >
+    // ... menu items when tinyfiledialogs is unavailable or for ad-hoc
+    // path entry. We keep it around because the native picker doesn't
+    // support filter overrides the way the old modal did, and it's
+    // useful as a back door.)
     bool pending_dialog_open = false;
     char pending_dialog_path[1024] = {0};
     std::string pending_dialog_title;
@@ -369,7 +425,26 @@ struct ViewerApp::Impl {
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
-ViewerApp::ViewerApp()  : impl_(std::make_unique<Impl>()) {}
+ViewerApp::ViewerApp()  : impl_(std::make_unique<Impl>()) {
+    // Restore the last install path from persisted settings. If the user
+    // has already pointed at a Falcon install, we don't make them do it
+    // again on every launch — detect() runs in ~50ms, fast enough that
+    // there's no perceptible startup delay.
+    impl_->settings = load_settings();
+    if (!impl_->settings.install_path.empty()) {
+        try {
+            auto inst = f4::install::Installation::detect(impl_->settings.install_path);
+            if (inst.valid()) {
+                impl_->install = std::move(inst);
+            }
+        } catch (const std::exception&) {
+            // Settings file may point at a path that no longer exists.
+            // Leave install as std::nullopt; the user will be prompted
+            // to set a new path when they try to open a campaign.
+        }
+    }
+}
+
 ViewerApp::~ViewerApp() = default;
 
 void ViewerApp::run() {
@@ -445,8 +520,13 @@ void ViewerApp::load_world_json(const std::filesystem::path& path) {
         std::to_string(impl_->world.units.size()) + " units)";
     impl_->rebuild_objective_index();
 
-    // Try to auto-load the referenced terrain file.
-    if (!impl_->world.terrain_file.empty()) {
+    // Try to auto-load the referenced terrain file — but only if terrain
+    // isn't already loaded. This prevents a spurious "auto-load failed"
+    // error when load_campaign_from_install() has already loaded terrain
+    // before calling us: the world JSON's terrain_file field is relative
+    // to the .cam's directory (e.g. "terrain.json"), and that path may
+    // not resolve correctly from CWD.
+    if (!impl_->world.terrain_file.empty() && !impl_->world.terrain_loaded) {
         try {
             impl_->world.load_terrain();
             impl_->status_msg += "  + terrain: " + impl_->world.terrain_file;
@@ -519,6 +599,453 @@ void ViewerApp::set_initial_camera(float center_x, float center_y, float zoom) {
     impl_->cam_zoom = zoom;
     impl_->initial_camera_set = true;
 }
+
+// ---------------------------------------------------------------------------
+// Install-aware API (new primary flow)
+// ---------------------------------------------------------------------------
+bool ViewerApp::set_install_path_dialog() {
+    // Use the current install path (or last world JSON dir) as the
+    // starting point for the folder picker — saves navigation.
+    std::filesystem::path start = impl_->settings.install_path;
+    if (start.empty() && !impl_->last_world_json_path.empty()) {
+        start = impl_->last_world_json_path.parent_path();
+    }
+
+    auto path = pick_folder("Select Falcon 4.0 Install Directory", start);
+    if (path.empty()) return false;  // user cancelled
+
+    return set_install_path(path);
+}
+
+bool ViewerApp::set_install_path(const std::filesystem::path& path) {
+    try {
+        auto inst = f4::install::Installation::detect(path);
+        if (!inst.valid()) {
+            impl_->last_error = "Not a Falcon 4.0 install: " + path.string() +
+                "\n\nExpected: a directory containing FALCON4.ct and/or a terrdata/ subdirectory.";
+            show_message_box("Invalid Install Path", impl_->last_error, "warning");
+            return false;
+        }
+        impl_->install = std::move(inst);
+        impl_->settings.install_path = path;
+        save_settings(impl_->settings);
+
+        // Build a summary for the confirmation modal.
+        std::ostringstream ss;
+        ss << "Install detected successfully.\n\n";
+        ss << "Root: " << impl_->install->root().string() << "\n\n";
+
+        ss << "Theaters: " << impl_->install->theaters().size() << "\n";
+        for (const auto& t : impl_->install->theaters()) {
+            ss << "  - " << t.display_name << " (" << t.key << ")";
+            ss << (t.complete() ? "" : " [INCOMPLETE]");
+            ss << "\n";
+            // Show which THEATER.* files are present (helps diagnose
+            // incomplete theaters — missing THEATER.MAP or .MEA breaks
+            // campaign loading for every campaign in that theater).
+            ss << "      files: ";
+            if (t.theater_files.empty()) {
+                ss << "(none)";
+            } else {
+                bool first = true;
+                for (const auto& f : t.theater_files) {
+                    if (!first) ss << ", ";
+                    ss << f.filename().string();
+                    first = false;
+                }
+            }
+            ss << "\n";
+        }
+
+        ss << "\nCampaigns: " << impl_->install->campaigns().size() << "\n";
+        // Show the first few campaigns with their paths so the user can
+        // verify the layout (flat vs. nested) is what we expect.
+        const std::size_t max_camp_show = 5;
+        for (std::size_t i = 0;
+             i < std::min(impl_->install->campaigns().size(), max_camp_show); ++i) {
+            const auto& c = impl_->install->campaigns()[i];
+            ss << "  - " << c.stem;
+            if (!c.theater_key.empty()) ss << "  [" << c.theater_key << "]";
+            ss << "\n      " << c.cam.string() << "\n";
+        }
+        if (impl_->install->campaigns().size() > max_camp_show) {
+            ss << "  ... and " << (impl_->install->campaigns().size() - max_camp_show)
+               << " more\n";
+        }
+
+        ss << "\nClass table: ";
+        if (impl_->install->class_table().empty()) {
+            ss << "NOT FOUND\n";
+            ss << "  Searched:\n";
+            for (const auto& p : impl_->install->diagnostics().class_table_searched) {
+                ss << "    " << p.string() << "\n";
+            }
+            ss << "  (Objectives will lack icons. Use Tools > Install Diagnostics\n"
+               << "   for more detail, or place FALCON4.ct in one of these locations.)\n";
+        } else {
+            ss << impl_->install->class_table().string() << "\n";
+        }
+        impl_->install_summary_text = ss.str();
+        impl_->install_summary_open = true;
+        impl_->status_msg = "Install: " + path.string();
+        return true;
+    } catch (const std::exception& e) {
+        impl_->last_error = std::string("Install detection failed: ") + e.what();
+        show_message_box("Install Detection Failed", impl_->last_error, "error");
+        return false;
+    }
+}
+
+const std::optional<f4::install::Installation>&
+ViewerApp::installation() const noexcept {
+    return impl_->install;
+}
+
+void ViewerApp::open_campaign_dialog() {
+    if (!impl_->install || !impl_->install->valid()) {
+        // No install set — prompt the user to pick one first.
+        show_message_box("No Install Set",
+                          "You need to set the Falcon 4.0 install path first.\n"
+                          "Use File > Set Install Path... to pick the directory.",
+                          "warning");
+        return;
+    }
+    if (impl_->install->theaters().empty()) {
+        show_message_box("No Theaters Found",
+                          "The install at " + impl_->install->root().string() +
+                          "\ncontains no theaters under terrdata/.\n"
+                          "Make sure the install is intact.",
+                          "warning");
+        return;
+    }
+
+    // Pre-select the last theater the user picked, if it's still present.
+    impl_->campaign_dialog_theater_idx = 0;
+    if (!impl_->settings.last_theater_key.empty()) {
+        for (size_t i = 0; i < impl_->install->theaters().size(); ++i) {
+            if (impl_->install->theaters()[i].key == impl_->settings.last_theater_key) {
+                impl_->campaign_dialog_theater_idx = static_cast<int>(i);
+                break;
+            }
+        }
+    }
+
+    // Populate the campaigns list for the selected theater.
+    const auto& theater = impl_->install->theaters()[impl_->campaign_dialog_theater_idx];
+    impl_->campaign_dialog_campaigns = impl_->install->campaigns_for(theater.key);
+    impl_->campaign_dialog_campaign_idx = 0;
+
+    // Pre-select last campaign stem, if still present.
+    if (!impl_->settings.last_campaign_stem.empty()) {
+        for (size_t i = 0; i < impl_->campaign_dialog_campaigns.size(); ++i) {
+            if (impl_->campaign_dialog_campaigns[i].stem == impl_->settings.last_campaign_stem) {
+                impl_->campaign_dialog_campaign_idx = static_cast<int>(i);
+                break;
+            }
+        }
+    }
+
+    impl_->campaign_dialog_open = true;
+}
+
+void ViewerApp::load_campaign_from_install(const std::string& theater_key,
+                                             const std::string& campaign_stem) {
+    if (!impl_->install) {
+        throw std::runtime_error("load_campaign_from_install: no install set");
+    }
+    const auto* theater = impl_->install->find_theater(theater_key);
+    if (!theater) {
+        throw std::runtime_error("theater not found: " + theater_key);
+    }
+    if (!theater->complete()) {
+        throw std::runtime_error("theater '" + theater_key +
+            "' is incomplete (missing THEATER.MAP or .MEA)");
+    }
+
+    // Find the campaign in this theater with the matching stem.
+    auto camps = impl_->install->campaigns_for(theater_key);
+    const f4::install::Campaign* camp = nullptr;
+    for (const auto& c : camps) {
+        if (c.stem == campaign_stem) { camp = &c; break; }
+    }
+    if (!camp) {
+        throw std::runtime_error("campaign '" + campaign_stem +
+            "' not found in theater '" + theater_key + "'");
+    }
+
+    // Step 1: convert THEATER.* → terrain JSON in a temp file next to
+    // the theater dir. We use a temp file rather than in-memory because
+    // f4-terrain's loader expects a path.
+    const auto terrain_json = theater->dir / "terrain.json";
+    f4::convert::convert_terrain_dir(theater->dir, terrain_json, theater_key);
+    impl_->world.terrain.load_terrain_json(terrain_json);
+    impl_->world.terrain_loaded = true;
+    impl_->last_terrain_json_path = terrain_json;
+    impl_->status_msg = "Terrain: " + theater_key + " (" +
+        std::to_string(impl_->world.terrain.header.width) + "x" +
+        std::to_string(impl_->world.terrain.header.height) + ")";
+
+    // Step 2: convert .cam → world JSON using the install's class table.
+    // Use the install-aware resolver — finds FALCON4.ct automatically.
+    f4::convert::CamArchive cam;
+    cam.load(camp->cam);
+    f4::convert::WorldJsonOptions opts;
+    opts.theater = theater_key;
+    opts.terrain_file = terrain_json.filename().string();
+
+    f4::convert::ClassTable class_table;
+    const auto ct_path = impl_->install->find_class_table(camp->cam);
+    if (!ct_path.empty()) {
+        try {
+            class_table.load(ct_path);
+            opts.class_table = &class_table;
+        } catch (const std::exception& e) {
+            impl_->last_error = "Class table load failed: " + std::string(e.what());
+        }
+    } else {
+        impl_->last_error = "FALCON4.ct not found — objectives will lack icons";
+    }
+
+    const std::string json = f4::convert::to_world_json(cam, opts);
+
+    // Write next to the .cam, then load via the normal path.
+    auto world_json = camp->cam;
+    world_json.replace_extension(".world.json");
+    {
+        std::ofstream f(world_json);
+        if (!f) throw std::runtime_error("cannot write " + world_json.string());
+        f << json;
+    }
+    load_world_json(world_json);
+
+    // Persist the last theater + campaign so the next launch pre-selects them.
+    impl_->settings.last_theater_key = theater_key;
+    impl_->settings.last_campaign_stem = campaign_stem;
+    save_settings(impl_->settings);
+}
+
+void ViewerApp::open_hex_inspector_with_file(const std::filesystem::path& path) {
+    impl_->hex_inspector.open();
+    impl_->hex_inspector.load_file(path);
+}
+
+// ---------------------------------------------------------------------------
+// Diagnostics helpers (forward declarations — defined below)
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// Build a comprehensive diagnostic report for the current install.
+/// Used by Tools > Install Diagnostics and by --diagnostics CLI flag.
+std::string build_install_diagnostics(const f4::install::Installation& inst);
+
+/// Build a detailed error report for a failed campaign load.
+std::string build_campaign_load_error(const f4::install::Installation& inst,
+                                       const std::string& theater_key,
+                                       const std::string& campaign_stem,
+                                       const std::string& exception_msg);
+
+} // namespace
+
+std::string ViewerApp::install_diagnostics_text() const {
+    if (!impl_->install) {
+        return "No install set. Use File > Set Install Path... to configure one.\n";
+    }
+    return build_install_diagnostics(*impl_->install);
+}
+
+void ViewerApp::open_install_diagnostics() {
+    if (!impl_->install) {
+        impl_->install_diagnostics_text =
+            "No install set.\n\nUse File > Set Install Path... to pick your "
+            "Falcon 4.0 install directory first.";
+    } else {
+        impl_->install_diagnostics_text = build_install_diagnostics(*impl_->install);
+    }
+    impl_->install_diagnostics_open = true;
+}
+
+// ---------------------------------------------------------------------------
+// Diagnostics helpers (definitions)
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// Build a comprehensive diagnostic report for the current install.
+/// Used by Tools > Install Diagnostics and by --diagnostics CLI flag.
+std::string build_install_diagnostics(const f4::install::Installation& inst) {
+    std::ostringstream ss;
+    ss << "=== Install Diagnostics ===\n\n";
+    ss << "Root: " << inst.root().string() << "\n";
+    ss << "Valid: " << (inst.valid() ? "yes" : "no") << "\n\n";
+
+    ss << "--- FALCON4.ct (class table) ---\n";
+    if (inst.class_table().empty()) {
+        ss << "NOT FOUND. Searched these locations:\n";
+        for (const auto& p : inst.diagnostics().class_table_searched) {
+            ss << "  " << p.string() << "\n";
+        }
+        ss << "\nTo fix: place FALCON4.ct in one of the above locations.\n"
+           << "The class table maps entity_type values (100+) to ObjectiveType\n"
+           << "and unit subtypes. Without it, objectives render as generic\n"
+           << "circles instead of type-specific icons.\n";
+    } else {
+        ss << "Found: " << inst.class_table().string() << "\n";
+    }
+    ss << "\n";
+
+    ss << "--- theater.lst ---\n";
+    if (inst.diagnostics().theater_lst_path.empty()) {
+        ss << "Not found in terrdata/. Fell back to directory scan.\n";
+    } else {
+        ss << "Path: " << inst.diagnostics().theater_lst_path.string() << "\n";
+        ss << "Parsed: " << (inst.diagnostics().theater_lst_parsed ? "yes" : "no") << "\n";
+        ss << "Keys: " << inst.diagnostics().theater_lst_key_count << "\n";
+    }
+    ss << "\n";
+
+    ss << "--- Theaters (" << inst.theaters().size() << ") ---\n";
+    for (const auto& t : inst.theaters()) {
+        ss << "  " << t.display_name << " (" << t.key << ")";
+        ss << (t.complete() ? "" : " [INCOMPLETE]");
+        ss << "\n";
+        ss << "    dir: " << t.dir.string() << "\n";
+        ss << "    THEATER.MAP: " << (t.theater_map.empty() ? "MISSING" : "present") << "\n";
+        ss << "    THEATER.MEA: " << (t.theater_mea.empty() ? "MISSING" : "present") << "\n";
+        ss << "    THEATER.O2:  " << (t.theater_o2.empty() ? "(absent)" : "present") << "\n";
+        ss << "    theater.ini: " << (t.theater_ini.empty() ? "(absent)" : "present") << "\n";
+        if (!t.theater_files.empty()) {
+            ss << "    All THEATER.* files (" << t.theater_files.size() << "):\n";
+            for (const auto& f : t.theater_files) {
+                ss << "      " << f.filename().string()
+                   << "  (" << std::filesystem::file_size(f) << " bytes)\n";
+            }
+        }
+        ss << "\n";
+    }
+
+    ss << "--- Theater dirs probed but rejected (no THEATER.MAP) ---\n";
+    if (inst.diagnostics().theater_dirs_probed.empty()) {
+        ss << "  (none — no subdirs found in terrdata/, or terrdata/ itself missing)\n";
+    } else {
+        // Show dirs that aren't in theaters() (rejected).
+        for (const auto& dir : inst.diagnostics().theater_dirs_probed) {
+            bool is_a_theater = false;
+            for (const auto& t : inst.theaters()) {
+                if (t.dir == dir) { is_a_theater = true; break; }
+            }
+            if (!is_a_theater) {
+                ss << "  " << dir.string() << "\n";
+            }
+        }
+    }
+    ss << "\n";
+
+    ss << "--- Campaigns (" << inst.campaigns().size() << ") ---\n";
+    ss << "Campaign dir: ";
+    if (inst.campaign_dir().empty()) {
+        ss << "NOT FOUND\n";
+    } else {
+        ss << inst.campaign_dir().string() << "\n";
+    }
+    for (const auto& c : inst.campaigns()) {
+        ss << "  " << c.stem;
+        if (!c.theater_key.empty()) ss << "  [" << c.theater_key << "]";
+        else ss << "  [flat layout]";
+        ss << "\n";
+        ss << "    path: " << c.cam.string() << "\n";
+        ss << "    exists: " << (std::filesystem::exists(c.cam) ? "yes" : "NO") << "\n";
+        if (std::filesystem::exists(c.cam)) {
+            std::error_code ec;
+            const auto sz = std::filesystem::file_size(c.cam, ec);
+            if (!ec) ss << "    size: " << sz << " bytes\n";
+        }
+    }
+    ss << "\n";
+
+    ss << "--- Other paths ---\n";
+    ss << "sim/ (aircraft): ";
+    ss << (inst.aircraft_dir().empty() ? "(absent)" : inst.aircraft_dir().string());
+    ss << "\n";
+    ss << "terrdata/: ";
+    ss << (inst.terrdata_dir().empty() ? "(absent)" : inst.terrdata_dir().string());
+    ss << "\n";
+
+    return ss.str();
+}
+
+/// Build a detailed error report for a failed campaign load. Used by
+/// the campaign-load error modal to show the user the full context
+/// (theater info, .cam file info, class table info) alongside the
+/// exception message — so they can diagnose the failure without
+/// having to open the diagnostics panel separately.
+std::string build_campaign_load_error(const f4::install::Installation& inst,
+                                       const std::string& theater_key,
+                                       const std::string& campaign_stem,
+                                       const std::string& exception_msg) {
+    std::ostringstream ss;
+    ss << "Campaign load failed.\n\n";
+    ss << "Error: " << exception_msg << "\n\n";
+    ss << "--- Context ---\n";
+    ss << "Theater key: " << theater_key << "\n";
+    ss << "Campaign stem: " << campaign_stem << "\n\n";
+
+    const auto* theater = inst.find_theater(theater_key);
+    if (!theater) {
+        ss << "Theater '" << theater_key << "' not found in install.\n";
+        ss << "Available theaters:\n";
+        for (const auto& t : inst.theaters()) {
+            ss << "  - " << t.key << " (" << t.display_name << ")\n";
+        }
+    } else {
+        ss << "Theater: " << theater->display_name << " (" << theater->key << ")\n";
+        ss << "  dir: " << theater->dir.string() << "\n";
+        ss << "  complete: " << (theater->complete() ? "yes" : "NO") << "\n";
+        ss << "  THEATER.MAP: " << (theater->theater_map.empty() ? "MISSING" : "present") << "\n";
+        ss << "  THEATER.MEA: " << (theater->theater_mea.empty() ? "MISSING" : "present") << "\n";
+    }
+    ss << "\n";
+
+    // Find the campaign.
+    auto camps = inst.campaigns_for(theater_key);
+    const f4::install::Campaign* camp = nullptr;
+    for (const auto& c : camps) {
+        if (c.stem == campaign_stem) { camp = &c; break; }
+    }
+    if (!camp) {
+        ss << "Campaign '" << campaign_stem << "' not found.\n";
+        ss << "Available campaigns for theater '" << theater_key << "':\n";
+        if (camps.empty()) {
+            ss << "  (none)\n";
+        } else {
+            for (const auto& c : camps) {
+                ss << "  - " << c.stem << "  →  " << c.cam.string() << "\n";
+            }
+        }
+    } else {
+        ss << "Campaign file: " << camp->cam.string() << "\n";
+        ss << "  exists: " << (std::filesystem::exists(camp->cam) ? "yes" : "NO") << "\n";
+        if (std::filesystem::exists(camp->cam)) {
+            std::error_code ec;
+            const auto sz = std::filesystem::file_size(camp->cam, ec);
+            if (!ec) ss << "  size: " << sz << " bytes\n";
+        }
+    }
+    ss << "\n";
+
+    ss << "Class table: ";
+    if (inst.class_table().empty()) {
+        ss << "NOT FOUND (objectives will lack icons, but campaign should still load)\n";
+    } else {
+        ss << inst.class_table().string() << "\n";
+    }
+    ss << "\n";
+
+    ss << "Use Tools > Install Diagnostics for the full diagnostic report.\n";
+    return ss.str();
+}
+
+} // namespace
 
 // ---------------------------------------------------------------------------
 // Input
@@ -794,26 +1321,74 @@ void ViewerApp::draw_imgui() {
     // --- Menu bar ---
     if (ImGui::BeginMainMenuBar()) {
         if (ImGui::BeginMenu("File")) {
-            if (ImGui::MenuItem("Open World JSON...")) {
-                open_file_dialog("Open World JSON", "*.world.json\0*.json\0",
-                                 [this](const std::string& path) { load_world_json(path); });
+            // --- Primary flow (install-aware) ---
+            if (ImGui::MenuItem("Set Install Path...")) {
+                set_install_path_dialog();
             }
-            if (ImGui::MenuItem("Open Terrain JSON...")) {
-                open_file_dialog("Open Terrain JSON", "*.terrain.json\0*.json\0",
-                                 [this](const std::string& path) { load_terrain_json(path); });
+            if (ImGui::MenuItem("Open Campaign...", nullptr, false,
+                                 impl_->install.has_value())) {
+                open_campaign_dialog();
+            }
+            // Show the current install path as a disabled hint so the
+            // user can see at a glance whether an install is configured.
+            if (impl_->install) {
+                ImGui::TextDisabled("    %s",
+                    impl_->install->root().string().c_str());
+            } else {
+                ImGui::TextDisabled("    (no install set)");
             }
             ImGui::Separator();
-            if (ImGui::MenuItem("Import .cam Archive...")) {
-                open_file_dialog("Import .cam", "*.cam\0*.*\0",
-                                 [this](const std::string& path) { import_cam_archive(path); });
-            }
-            if (ImGui::MenuItem("Import THEATER.* Binary...")) {
-                // For directory selection we fall back to picking any file
-                // in the directory — Raylib doesn't ship a folder picker.
-                open_file_dialog("Pick any file in THEATER dir", "*.*\0",
-                                 [this](const std::string& path) {
-                                     import_terrain_binary(std::filesystem::path(path).parent_path());
-                                 });
+
+            // --- Advanced / dev path (legacy + manual file picking) ---
+            if (ImGui::BeginMenu("Advanced")) {
+                if (ImGui::MenuItem("Open World JSON...")) {
+                    auto path = pick_open_file(
+                        "Open World JSON",
+                        "World JSON (*.world.json)|JSON (*.json)|All files (*.*)",
+                        impl_->last_world_json_path);
+                    if (!path.empty()) {
+                        try { load_world_json(path); }
+                        catch (const std::exception& e) {
+                            impl_->last_error = e.what();
+                        }
+                    }
+                }
+                if (ImGui::MenuItem("Open Terrain JSON...")) {
+                    auto path = pick_open_file(
+                        "Open Terrain JSON",
+                        "Terrain JSON (*.terrain.json)|JSON (*.json)|All files (*.*)",
+                        impl_->last_terrain_json_path);
+                    if (!path.empty()) {
+                        try { load_terrain_json(path); }
+                        catch (const std::exception& e) {
+                            impl_->last_error = e.what();
+                        }
+                    }
+                }
+                ImGui::Separator();
+                if (ImGui::MenuItem("Import .cam Archive...")) {
+                    auto path = pick_open_file(
+                        "Import .cam",
+                        "Campaign Archive (*.cam)|All files (*.*)",
+                        impl_->last_world_json_path);
+                    if (!path.empty()) {
+                        try { import_cam_archive(path); }
+                        catch (const std::exception& e) {
+                            impl_->last_error = e.what();
+                        }
+                    }
+                }
+                if (ImGui::MenuItem("Import THEATER.* Binary...")) {
+                    // Now that we have a real folder picker, this Just Works.
+                    auto dir = pick_folder("Select THEATER.* Directory");
+                    if (!dir.empty()) {
+                        try { import_terrain_binary(dir); }
+                        catch (const std::exception& e) {
+                            impl_->last_error = e.what();
+                        }
+                    }
+                }
+                ImGui::EndMenu();
             }
             ImGui::Separator();
             if (ImGui::MenuItem("Exit", "Alt+F4")) {
@@ -832,6 +1407,24 @@ void ViewerApp::draw_imgui() {
             ImGui::Checkbox("Legend",      &impl_->show_legend);
             ImGui::Separator();
             if (ImGui::MenuItem("Fit to World")) impl_->fit_to_world();
+            ImGui::EndMenu();
+        }
+        if (ImGui::BeginMenu("Tools")) {
+            // Hex Inspector — opens a panel for inspecting raw bytes of
+            // any file (FALCON4.ct, .cam, THEATER.*, etc.) with decoder
+            // overlays. The primary RE tool.
+            const bool hex_open = impl_->hex_inspector.is_open();
+            if (ImGui::MenuItem("Hex Inspector...", nullptr, hex_open)) {
+                if (!hex_open) impl_->hex_inspector.open();
+            }
+            ImGui::Separator();
+            // Install Diagnostics — shows the full diagnostic report
+            // (where we looked for FALCON4.ct, every theater dir probed,
+            // every campaign path + exists check). The "what's actually
+            // wrong with my install" tool.
+            if (ImGui::MenuItem("Install Diagnostics...")) {
+                open_install_diagnostics();
+            }
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("Help")) {
@@ -1085,6 +1678,218 @@ void ViewerApp::draw_imgui() {
             ImGui::EndPopup();
         }
     }
+
+    // --- Install summary modal (shown after Set Install Path succeeds) ---
+    if (impl_->install_summary_open) {
+        if (!ImGui::IsPopupOpen("Install Summary")) {
+            ImGui::OpenPopup("Install Summary");
+        }
+        ImGui::SetNextWindowSize(ImVec2(500, 360), ImGuiCond_FirstUseEver);
+        if (ImGui::BeginPopupModal("Install Summary",
+                                    &impl_->install_summary_open,
+                                    ImGuiWindowFlags_NoResize)) {
+            ImGui::TextUnformatted(impl_->install_summary_text.c_str());
+            ImGui::Separator();
+            if (ImGui::Button("Open Campaign...")) {
+                impl_->install_summary_open = false;
+                ImGui::CloseCurrentPopup();
+                open_campaign_dialog();
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Close")) {
+                impl_->install_summary_open = false;
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::EndPopup();
+        }
+    }
+
+    // --- Open Campaign modal (Theater + Campaign dropdowns) ---
+    if (impl_->campaign_dialog_open && impl_->install) {
+        if (!ImGui::IsPopupOpen("Open Campaign")) {
+            ImGui::OpenPopup("Open Campaign");
+        }
+        ImGui::SetNextWindowSize(ImVec2(440, 220), ImGuiCond_FirstUseEver);
+        if (ImGui::BeginPopupModal("Open Campaign",
+                                    &impl_->campaign_dialog_open,
+                                    ImGuiWindowFlags_NoResize)) {
+            // --- Theater dropdown ---
+            const auto& theaters = impl_->install->theaters();
+            const auto* cur_theater =
+                (impl_->campaign_dialog_theater_idx >= 0 &&
+                 impl_->campaign_dialog_theater_idx < static_cast<int>(theaters.size()))
+                    ? &theaters[impl_->campaign_dialog_theater_idx] : nullptr;
+            const std::string theater_preview = cur_theater
+                ? (cur_theater->display_name + " (" + cur_theater->key + ")")
+                : "(none)";
+            if (ImGui::BeginCombo("Theater", theater_preview.c_str())) {
+                for (int i = 0; i < static_cast<int>(theaters.size()); ++i) {
+                    const bool sel = (i == impl_->campaign_dialog_theater_idx);
+                    const std::string label = theaters[i].display_name + " (" +
+                                              theaters[i].key + ")";
+                    if (ImGui::Selectable(label.c_str(), sel)) {
+                        impl_->campaign_dialog_theater_idx = i;
+                        // Theater changed — refresh the campaigns list.
+                        impl_->campaign_dialog_campaigns =
+                            impl_->install->campaigns_for(theaters[i].key);
+                        impl_->campaign_dialog_campaign_idx = 0;
+                    }
+                    if (sel) ImGui::SetItemDefaultFocus();
+                }
+                ImGui::EndCombo();
+            }
+
+            // --- Campaign dropdown (depends on selected theater) ---
+            const auto& camps = impl_->campaign_dialog_campaigns;
+            const std::string camp_preview =
+                (impl_->campaign_dialog_campaign_idx >= 0 &&
+                 impl_->campaign_dialog_campaign_idx < static_cast<int>(camps.size()))
+                    ? camps[impl_->campaign_dialog_campaign_idx].display_name
+                    : "(no campaigns)";
+            if (ImGui::BeginCombo("Campaign", camp_preview.c_str())) {
+                if (camps.empty()) {
+                    ImGui::TextDisabled("No .cam saves found in this theater");
+                }
+                for (int i = 0; i < static_cast<int>(camps.size()); ++i) {
+                    const bool sel = (i == impl_->campaign_dialog_campaign_idx);
+                    if (ImGui::Selectable(camps[i].display_name.c_str(), sel)) {
+                        impl_->campaign_dialog_campaign_idx = i;
+                    }
+                    if (sel) ImGui::SetItemDefaultFocus();
+                }
+                ImGui::EndCombo();
+            }
+
+            ImGui::Separator();
+            if (ImGui::Button("Load") &&
+                impl_->campaign_dialog_campaign_idx >= 0 &&
+                impl_->campaign_dialog_campaign_idx < static_cast<int>(camps.size())) {
+                const auto& theater = theaters[impl_->campaign_dialog_theater_idx];
+                const auto& camp = camps[impl_->campaign_dialog_campaign_idx];
+                try {
+                    load_campaign_from_install(theater.key, camp.stem);
+                    impl_->campaign_dialog_open = false;
+                    ImGui::CloseCurrentPopup();
+                } catch (const std::exception& e) {
+                    // Build a detailed error report so the user can see
+                    // exactly what failed (incomplete theater? missing
+                    // .cam? parse error?) without having to open the
+                    // diagnostics panel separately.
+                    impl_->last_error = e.what();
+                    impl_->campaign_load_error_text = build_campaign_load_error(
+                        *impl_->install, theater.key, camp.stem, e.what());
+                    impl_->campaign_load_error_open = true;
+                }
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Cancel")) {
+                impl_->campaign_dialog_open = false;
+                ImGui::CloseCurrentPopup();
+            }
+
+            // Helpful hint when no campaigns are present.
+            if (camps.empty() && cur_theater) {
+                ImGui::Separator();
+                ImGui::TextWrapped(
+                    "No .cam files found under campaign/%s/ or campaign/.\n"
+                    "Start a new campaign in Falcon 4.0 first, then refresh.",
+                    cur_theater->key.c_str());
+            }
+            ImGui::EndPopup();
+        }
+    }
+
+    // --- Install Diagnostics modal (Tools > Install Diagnostics) ---
+    if (impl_->install_diagnostics_open) {
+        if (!ImGui::IsPopupOpen("Install Diagnostics")) {
+            ImGui::OpenPopup("Install Diagnostics");
+        }
+        ImGui::SetNextWindowSize(ImVec2(700, 500), ImGuiCond_FirstUseEver);
+        if (ImGui::BeginPopupModal("Install Diagnostics",
+                                    &impl_->install_diagnostics_open,
+                                    ImGuiWindowFlags_NoResize)) {
+            // Render the diagnostic text in a scrollable, selectable
+            // (copyable) read-only text box. The user can select-all +
+            // copy to share the full report.
+            ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.10f, 0.10f, 0.12f, 1.0f));
+            ImGui::BeginChild("diag_text", ImVec2(0, -40), true,
+                               ImGuiWindowFlags_HorizontalScrollbar);
+            // Use InputTextMultiline as a read-only text viewer — it
+            // supports selection + copy out of the box, unlike
+            // ImGui::TextUnformatted which doesn't allow selection.
+            // We use a sufficiently large buffer and disable editing.
+            // (The text is in impl_->install_diagnostics_text, which we
+            // need to copy into a mutable buffer for InputTextMultiline.)
+            static std::string diag_buf;  // static so it persists across frames
+            diag_buf = impl_->install_diagnostics_text;
+            diag_buf.resize(diag_buf.size() + 1, '\0');  // room for null terminator
+            ImGui::InputTextMultiline("##diag_input",
+                                       diag_buf.data(), diag_buf.size(),
+                                       ImVec2(-1, -1),
+                                       ImGuiInputTextFlags_ReadOnly |
+                                       ImGuiInputTextFlags_AllowTabInput);
+            ImGui::EndChild();
+            ImGui::PopStyleColor();
+            ImGui::Separator();
+            if (ImGui::Button("Copy to Clipboard")) {
+                ImGui::SetClipboardText(impl_->install_diagnostics_text.c_str());
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Close")) {
+                impl_->install_diagnostics_open = false;
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::EndPopup();
+        }
+    }
+
+    // --- Campaign Load Error modal ---
+    // Shown when load_campaign_from_install throws. Shows the full error
+    // message + theater/campaign/class-table context so the user can
+    // diagnose the failure without having to open the diagnostics panel.
+    if (impl_->campaign_load_error_open) {
+        if (!ImGui::IsPopupOpen("Campaign Load Failed")) {
+            ImGui::OpenPopup("Campaign Load Failed");
+        }
+        ImGui::SetNextWindowSize(ImVec2(600, 450), ImGuiCond_FirstUseEver);
+        if (ImGui::BeginPopupModal("Campaign Load Failed",
+                                    &impl_->campaign_load_error_open,
+                                    ImGuiWindowFlags_NoResize)) {
+            ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.18f, 0.10f, 0.10f, 1.0f));
+            ImGui::BeginChild("err_text", ImVec2(0, -40), true,
+                               ImGuiWindowFlags_HorizontalScrollbar);
+            // Same InputTextMultiline trick for selectability.
+            static std::string err_buf;
+            err_buf = impl_->campaign_load_error_text;
+            err_buf.resize(err_buf.size() + 1, '\0');
+            ImGui::InputTextMultiline("##err_input",
+                                       err_buf.data(), err_buf.size(),
+                                       ImVec2(-1, -1),
+                                       ImGuiInputTextFlags_ReadOnly |
+                                       ImGuiInputTextFlags_AllowTabInput);
+            ImGui::EndChild();
+            ImGui::PopStyleColor();
+            ImGui::Separator();
+            if (ImGui::Button("Copy to Clipboard")) {
+                ImGui::SetClipboardText(impl_->campaign_load_error_text.c_str());
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Open Install Diagnostics")) {
+                impl_->campaign_load_error_open = false;
+                ImGui::CloseCurrentPopup();
+                open_install_diagnostics();
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Close")) {
+                impl_->campaign_load_error_open = false;
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::EndPopup();
+        }
+    }
+
+    // --- Hex Inspector panel (Tools > Hex Inspector) ---
+    impl_->hex_inspector.draw();
 
     rlImGuiEnd();
 }

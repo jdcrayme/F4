@@ -1,0 +1,46 @@
+include(FetchContent)
+
+FetchContent_Declare(
+    googletest
+    GIT_REPOSITORY https://github.com/google/googletest.git
+    GIT_TAG v1.14.0
+)
+set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(googletest)
+
+enable_testing()
+include(GoogleTest)
+
+# --- Settings tests ---
+# Link only against settings.cpp — no raylib dep.
+add_executable(test_settings
+    test_settings.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/settings.cpp
+)
+target_include_directories(test_settings PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include
+)
+target_link_libraries(test_settings PRIVATE GTest::gtest_main)
+gtest_discover_tests(test_settings)
+
+# --- Hex model + decoders tests ---
+# Link against hex_model.cpp + decoders.cpp + f4-world-convert (decoders
+# call into CamArchive). Still no raylib dep — the model + decoders are
+# pure data-manipulation code.
+add_executable(test_hex_model
+    test_hex_model.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/hex/hex_model.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/hex/decoders.cpp
+)
+target_include_directories(test_hex_model PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include
+)
+target_link_libraries(test_hex_model PRIVATE
+    GTest::gtest_main
+    f4-world-convert
+)
+target_compile_definitions(test_hex_model PRIVATE
+    FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../f4-world-convert/tests/fixtures/"
+    TERRAIN_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../f4-terrain/tests/fixtures/"
+)
+gtest_discover_tests(test_hex_model)

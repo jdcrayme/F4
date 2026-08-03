@@ -262,6 +262,48 @@ add/get/has/remove, tag filtering, within-radius, spatial index
 insert/query/update/remove across cell boundaries). Links f4-geo (PUBLIC) —
 the strong-typed position is the design decision made concrete.
 
+### f4-install — Falcon 4.0 install layout locator
+
+Static library that owns the layout knowledge of a Falcon 4.0 / FreeFalcon
+installation: where `FALCON4.ct` lives, how to enumerate theaters under
+`terrdata/`, how to find `.cam` saves under `campaign/`, and how to
+resolve any well-known file by name. Zero external dependencies beyond
+the standard library — portable across Windows, macOS, and Linux.
+
+```cpp
+#include <f4/install/f4_install.hpp>
+using namespace f4::install;
+
+// Point at the user's Falcon 4.0 install:
+auto inst = Installation::detect("/path/to/falcon4");
+if (!inst.valid()) { /* show error */ }
+
+// Enumerate theaters (from terrdata/theater.lst + directory scan):
+for (const auto& t : inst.theaters()) {
+    std::cout << t.display_name << " (" << t.key << ")\n";
+}
+
+// Enumerate campaigns (recursive walk of campaign/):
+for (const auto& c : inst.campaigns_for("korea")) {
+    std::cout << "  " << c.stem << " — " << c.cam << "\n";
+}
+
+// Auto-resolve FALCON4.ct for a given .cam (searches next to .cam, up
+// directories, then install root, then CWD fallback):
+auto ct = inst.find_class_table(c.cam);
+```
+
+The viewer and the `cam2json` CLI both call into `f4-install` so the
+install-layout knowledge lives in one place. `f4-world-convert`'s
+existing `find_class_table()` helper now delegates here.
+
+**Tests**: 38 (install validation, FALCON4.ct discovery at root/sim/terrdata,
+theater discovery with case-insensitive matching, `theater.lst` parsing
+with comments/quotes/lowercase/inline-comments, `theater.ini` title
+reading, campaign scanning with flat + nested layouts mixed, install-aware
+class-table resolution at each search step, `resolve()` on valid/invalid
+installs). Zero external dependencies.
+
 ### f4-world-convert — FreeFalcon .cam campaign archive → JSON
 
 Static library + CLI that convert FreeFalcon's binary `.cam` campaign
@@ -396,6 +438,8 @@ ctest --test-dir build/f4-world-convert/tests --output-on-failure
 ctest --test-dir build/f4-world/tests --output-on-failure
 ctest --test-dir build/f4-terrain/tests --output-on-failure
 ctest --test-dir build/f4-flight-model/tests --output-on-failure
+ctest --test-dir build/f4-install/tests --output-on-failure
+ctest --test-dir build/f4-world-viewer/tests --output-on-failure
 ```
 
 Requires CMake 3.20+ and a C++20 compiler (MSVC 19.28+, GCC 10+, Clang 12+).
@@ -478,30 +522,139 @@ JSON array.
 data. It's the primary way to validate what's in the world before developing
 more advanced systems (digi AI, ATO).
 
-**Run it:**
+### Quick start (install-aware flow — recommended)
 
 ```bash
 cmake --build build --target f4-world-viewer
-./build/f4-world-viewer/f4-world-viewer build/save1.world.json build/korea.terrain.json
+./build/f4-world-viewer/f4-world-viewer
 ```
 
-Or from Visual Studio: set `f4-world-viewer` as the startup project and press F5.
+Then in the app:
 
-**Features:**
+1. **File > Set Install Path...** → pick your Falcon 4.0 install directory
+   (the one containing `FALCON4.ct` and `terrdata/`). The viewer detects
+   theaters, campaigns, and the class table automatically, and caches the
+   path to `~/.config/f4-viewer/settings.json` (Linux) /
+   `~/Library/Application Support/f4-viewer/` (macOS) /
+   `%APPDATA%/F4Viewer/` (Windows). You only do this once.
+
+2. **File > Open Campaign...** → pick a Theater from the dropdown, then a
+   Campaign. The viewer runs the in-process converters (`terrain2json` +
+   `cam2json` with auto-resolved `FALCON4.ct`) and renders the result.
+
+The install path persists across launches — next time, just open the
+viewer and pick a campaign. The last theater + campaign are also
+remembered, so re-launching restores your previous session.
+
+### CLI (for scripts / smoke tests)
+
+```bash
+# Set install path + load a campaign in one shot
+./build/f4-world-viewer/f4-world-viewer \
+    --install /path/to/falcon4 \
+    --campaign korea save1
+
+# Take a screenshot after 1.5s and exit (headless smoke test)
+./build/f4-world-viewer/f4-world-viewer \
+    --install /path/to/falcon4 \
+    --campaign korea save1 \
+    --screenshot out.png
+
+# Focus on a specific region (grid coordinates)
+./build/f4-world-viewer/f4-world-viewer save1.world.json --zoom 8 --center 500,500
+```
+
+The `--install` flag updates `settings.json` (same as File > Set Install
+Path). The `--campaign` flag uses the install-aware loader — it auto-loads
+`THEATER.*` and the `.cam` plus `FALCON4.ct` in one call. Both flags can
+be combined with the existing positional `world.json terrain.json` args
+and `--screenshot` / `--zoom` / `--center`.
+
+### Advanced (manual file picking)
+
+The original four File menu items are preserved under **File > Advanced**
+for the dev / un-bundled-fixtures workflow:
+
+- **Open World JSON** — load an existing `*.world.json`
+- **Open Terrain JSON** — load an existing `*.terrain.json`
+- **Import .cam Archive** — runs `cam2json` in-process, writes a `.world.json`
+  next to the source, and loads it
+- **Import THEATER.\* Binary** — runs `terrain2json` in-process and loads
+  the resulting terrain JSON
+
+All four use native OS file/folder pickers (via `tinyfiledialogs`) — no
+more typing paths into a text input. The folder picker (used by Set
+Install Path and Import THEATER.*) is new; the old ImGui modal couldn't
+do folder selection.
+
+### Features
+
 - Color-coded terrain tiles (water / lowland / hills / mountains / peaks)
-- Campaign objectives as circles, colored by owner team
-- Campaign units as squares with destination lines
+- Campaign objectives as type-specific icons (airbase / bridge / city /
+  port / ...) colored by owner team, with gold rings on high-priority targets
+- Campaign units as squares/diamonds/circles/triangles by class, with
+  subtype-specific icons (armor / fighter / carrier / ...) where available
 - Click-to-inspect any objective or unit → ImGui panel shows all decoded fields
 - Pan (drag), zoom (wheel), fit-to-world (View menu)
-- Layer toggles (terrain / objectives / units / grid / legend)
-- File menu wraps the CLI converters in-process:
-  - **Open World JSON** — load an existing `*.world.json`
-  - **Open Terrain JSON** — load an existing `*.terrain.json`
-  - **Import .cam Archive** — runs `cam2json` in-process, writes a `.world.json`
-    next to the source, and loads it
-  - **Import THEATER.\* Binary** — runs `terrain2json` in-process and loads
-    the resulting terrain JSON
+- Layer toggles (terrain / objectives / units / grid / legend / routes)
+- **Tools > Hex Inspector** — inspect raw bytes of any file in the install
+  with format-aware decoder overlays (see below)
 - F2 takes a screenshot (saved as `f4_viewer_screenshot.png` in the CWD)
+
+### Hex Inspector (Tools menu)
+
+The Hex Inspector is the primary reverse-engineering tool. Open any file
+in the install — `FALCON4.ct`, a `.cam` save, `THEATER.MAP`, an unknown
+binary — and get a scrollable hex+ASCII view with decoder annotations
+that label what each byte range means.
+
+**Layout:**
+```
+┌────────────────────────────────────────────────────────────────────┐
+│ [Open File...] [path/to/file.cam   197340 bytes   .cam]            │
+│ [decoder: Campaign Archive (.cam) ▼]   [Re-decode]                  │
+├────────────────────────────┬───────────────────────────────────────┤
+│ Annotations (left, 280px)  │  Hex dump + ASCII (right)              │
+│  • magic          0x444C.. │  00000000  AE FF 4C 44 ... │ ..L.D... │
+│  • manifest_off   197328   │  00000010  ...                      │
+│  • subfile:save1.cmp  4420 │  (click a byte to select)            │
+│  ...                       │                                       │
+├────────────────────────────┴───────────────────────────────────────┤
+│ Selection: [0..16]  16 bytes                                        │
+│ [Copy as Hex] [Copy as C array] [Copy as Python] [Save As...]      │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+**Decoders** (auto-selected by file extension / magic bytes, manually
+overridable via the dropdown):
+- **Campaign Archive (.cam)** — annotates the manifest offset, every
+  sub-file's byte range, and the trailing manifest directory
+- **Campaign Metadata (.cmp)** — annotates the 8-byte header
+  (reserved_skip + decompressed_size) + the LZSS-compressed payload
+- **Theater Header (THEATER.MAP)** — annotates magic / width / height /
+  ft_to_cell + the first 8 palette entries
+- **Class Table (FALCON4.ct)** — annotates num_entities + the first 16
+  ClassTableEntry records (entity_type, domain, class, type, stype)
+- **Generic** (fallback) — annotates file size, first 16 magic bytes,
+  Shannon entropy estimate, ASCII string runs ≥ 4 chars
+
+**Selection + export:** click any byte in the hex dump to select it;
+click an annotation to select its whole byte range. Then:
+- **Copy as Hex** — space-separated hex bytes (`AE FF 4C 44`)
+- **Copy as C array** — `static const unsigned char data[N] = { 0xAE, 0xFF, ... };`
+- **Copy as Python** — `data = bytes.fromhex("aeff4c44...")`
+- **Save As...** — native save dialog, writes the raw bytes to a file
+
+This is the "extract just the bytes you care about" tool — when you
+need to share a hex dump of a specific structure with a collaborator
+(or with me), select the range and copy it in your preferred format.
+
+**CLI** (for scripted use / smoke tests):
+```bash
+./build/f4-world-viewer/f4-world-viewer --hex-inspect /path/to/FALCON4.ct
+```
+Opens the viewer with the Hex Inspector panel already open and the file
+loaded + decoded.
 
 This is the starting point for a future world editor: the same load/render
 pipeline will gain edit/save capabilities as new systems come online.
