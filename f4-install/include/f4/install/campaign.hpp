@@ -4,8 +4,8 @@
 //
 // A "campaign" is a single saved game state — a .cam file produced when
 // the player starts or saves a campaign. Each .cam is a self-contained
-// archive (see f4-world-convert/include/f4/convert/cam_archive.hpp for
-// the container format) holding campaign metadata, objectives, units,
+// archive (see f4-world-convert/include/f4/world_convert/cam_archive.hpp
+// for the container format) holding campaign metadata, objectives, units,
 // teams, weather, and version.
 //
 // On-disk layout varies between Falcon versions:

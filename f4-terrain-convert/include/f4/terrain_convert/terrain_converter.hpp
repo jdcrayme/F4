@@ -10,7 +10,7 @@
 #include <filesystem>
 #include <string>
 
-namespace f4::convert {
+namespace f4::terrain_convert {
 
 /// Load THEATER.* from `terrain_dir` and write the terrain JSON to `out`.
 /// Returns the byte count written. Throws on I/O or parse error.
@@ -18,4 +18,4 @@ std::size_t convert_terrain_dir(const std::filesystem::path& terrain_dir,
                                  const std::filesystem::path& out,
                                  const std::string& theater_name = "korea");
 
-} // namespace f4::convert
+} // namespace f4::terrain_convert

@@ -592,3 +592,72 @@ Stage Summary:
 - Total project tests: 733 (was 660). All green. Zero regressions in the existing 660.
 - The §3 dependency graph is now correct: f4-ai can start against (a) a real EntityWorld populated from .cam, (b) a real MessageBus for inter-entity comms, (c) a shared JSON parser for any future config files. The injection-harness trap from §18.5 is structurally retired for both world data and messaging.
 - Next: (1) close the deferred ground-truth gaps (WORLD-2 unit Save() tails, VIEWER-3 .obj link data) before f4-ai reads from them; (2) wire the existing flight-model's stall SM into a real MessageBus to validate the bus against an actual consumer; (3) the convert-lib namespace collision fix (item #3 from the architecture review) is a small mechanical follow-up that should land before f4-campaign introduces a fourth convert lib.
+
+---
+Task ID: REFACTOR-2
+Agent: orchestrator (Super Z, main thread)
+Task: Wire the flight-model's stall state machine into a real MessageBus. The bus had 28 unit tests covering the API in isolation; this is the first end-to-end validation against an actual subsystem. Validates (a) the bus API works against real game code, (b) the dispatch-during-update pattern fits a 60 Hz sim loop, (c) the cross-thread publish_deferred/flush_pending model works for the §9.3 sim↔campaign topology.
+
+Work Log:
+- Read §9 (f4-messaging spec) and §13 (sim clock + threading) of the architecture proposal to confirm the threading model: sim thread owns the sim bus, calls flush_pending() at the top of the tick, then runs the per-frame update. The FlightModel publishes via publish() (same-thread, synchronous) — this matches the spec exactly.
+- Designed the message type set:
+  * StallStateChangeMessage — published when the stall SM transitions to a new state. Fires AT MOST once per minor frame (a typical sortie sees 0-5 of these). Carries aircraft_id, from_state, to_state, sim_time_s, alpha_deg, vcas_kts, qbar_psf for consumer context.
+  * StallWarningMessage — published on the RISING EDGE of the aero stall flag (the "I just noticed we're stalling" signal, fires BEFORE the SM processes the event so aural-cue consumers get minimum-latency notification). Distinct from the state-change message because some consumers (aural cue) want the earliest possible notification, others (formation AI) want the SM's authoritative state.
+  * Decision: per-frame telemetry (alpha, speed, G) stays in AircraftState, NOT on the bus. The bus is for CROSS-SUBSYSTEM notification, not high-frequency telemetry. A per-frame "alpha=12.3" message would flood the bus at 360 Hz; the bus carries only the small set of events that other subsystems (UI audio cues, AI threat assessment, debrief logging) actually need to react to.
+- Created f4-flight-model/include/f4/flight/messages.hpp with the two message types. Plain structs, public fields, no inheritance, no virtuals — matches the §9.2 examples (DamageMessage, MissileFireMessage, WingmanCommandMessage).
+- Modified FlightModel to add an OPTIONAL MessageBus* (nullptr by default, set via set_message_bus()). When the bus is attached, updateStallSM() publishes:
+  * StallWarningMessage on the rising edge of aero.stalled (prevAeroStalled_ tracks the previous frame's flag for edge detection).
+  * StallStateChangeMessage when the SM transitions to a new state.
+  When no bus is attached, the FlightModel behaves exactly as before — the publish path is a single null-pointer branch skipped. This is the regression gate: existing tests with no bus must see zero behavior change.
+- Added set_aircraft_id() and set_sim_time() hooks. The FlightModel does NOT own entity IDs or sim time (§13.2 makes SimClock the single source of truth for time); the host supplies these so messages carry accurate context for consumer routing.
+- Added f4-messaging as a PUBLIC dependency of f4-flight-model (the FlightModel's public API exposes set_message_bus(MessageBus*) and messages.hpp is a public header).
+- Wrote 5 integration tests in test_stall_bus_integration.cpp:
+  1. PublishesStateChangesOnBus — drives F-16 into a stall, verifies recorded messages match SM transitions (correct aircraft_id, from_state != to_state, first transition is from None).
+  2. NoBusAttachedBehavesIdentically — regression gate for the bus_==nullptr branches. Verifies the FlightModel runs without a bus and message_bus() returns nullptr.
+  3. MultipleSubscribersBothFire — §9 fan-out semantics: two handlers for the same message type both fire, in registration order, with identical payloads.
+  4. CrossThreadForwardingViaSendTo — the §9.3 sim↔campaign topology. Sim thread publishes on its bus; a sim-bus handler forwards to the campaign bus via send_to() (which is publish_deferred); a separate "campaign thread" drains via flush_pending(). Verifies cross-thread delivery works for real flight-model events.
+  5. BusAndTraceCoexist — verifies the new MessageBus integration does NOT break the existing f4::fsm::Trace observability mechanism. Both can be attached simultaneously without interference.
+- Total project tests: 738 (was 733 — added 5 new bus-integration tests in f4-flight-model). All green. Zero regressions in the existing 733.
+
+Stage Summary:
+- f4-messaging now has its first real consumer. The bus is no longer "tested in isolation only" — it carries real flight-model events through a real 60 Hz update loop, against real F-16 flight dynamics, in the same code path the sim will use.
+- The §9.3 sim↔campaign topology is exercised end-to-end: sim-thread publish → sim-bus handler → send_to(campaign_bus, ...) → campaign-thread flush_pending. This is the pattern f4-campaign will use to send mission assignments to the sim, and f4-ai will use to send wingman commands.
+- The bus is optional by design: existing FlightModel users (tests, future code that doesn't need cross-subsystem events) pay zero cost. The opt-in is one line: `fm.set_message_bus(&bus);`.
+- The injection-harness trap from §18.5 is now FULLY retired: f4-ai can start against (a) a real EntityWorld populated from .cam, (b) a real MessageBus VALIDATED AGAINST REAL CONSUMER CODE, (c) a shared JSON parser. The "but does the bus actually work against game code?" question is now answered by tests, not by hope.
+- Next: (1) REFACTOR-3 (convert-lib namespace fix) — landed next; (2) close the deferred ground-truth gaps (WORLD-2 unit Save() tails, VIEWER-3 .obj link data) before f4-ai reads from them.
+
+---
+Task ID: REFACTOR-3
+Agent: orchestrator (Super Z, main thread)
+Task: Fix the convert-lib namespace collision identified in the architecture review (item #3). Three libraries — f4-convert, f4-world-convert, f4-terrain-convert — all used `namespace f4::convert` and the `f4/convert/` header path. When a host linked two of them (the viewer links f4-world-convert AND f4-terrain-convert), the namespaces collided. The symbol names didn't actually clash (CamArchive vs TerrainConverter etc.) but the design was fragile: adding a new symbol in one lib could collide with a future symbol in another, and "which library owns namespace f4::convert?" was unclear. Fix per project convention `f4::<libname>`: f4-convert keeps `namespace f4::convert` (it's the original); f4-world-convert → `namespace f4::world_convert`; f4-terrain-convert → `namespace f4::terrain_convert`. Also relocate the header include paths to match.
+
+Work Log:
+- Audited the collision with ripgrep: 49 files used `namespace f4::convert` across the three libs. The header paths `f4/convert/cam_archive.hpp` (from f4-world-convert) and `f4/convert/terrain_converter.hpp` (from f4-terrain-convert) coexisted only because their filenames differed — a fragile invariant.
+- Wrote /home/z/my-project/scripts/rename_convert_namespaces.py to do the rename mechanically. Per the Script Persistence Rule, the script is saved (not inline) so it can be re-run if needed. The script:
+  * For each lib, walks all .hpp/.cpp files and applies 4 regex substitutions: `namespace f4::convert {` → `namespace f4::<new_ns> {`, `} // namespace f4::convert` → `} // namespace f4::<new_ns>`, `using namespace f4::convert;` → `using namespace f4::<new_ns>;`, `f4::convert::` → `f4::<new_ns>::`, and `#include <f4/convert/X.hpp>` → `#include <f4/<new_ns>/X.hpp>` (only for the headers in that lib's set).
+  * Physically moves the header files from include/f4/convert/ to include/f4/<new_ns>/.
+  * Removes the now-empty include/f4/convert/ directory.
+  * Also processes consumer files outside the convert lib dirs (viewer_app.cpp, decoders.cpp, install/campaign.hpp).
+  * Idempotent: re-running on already-renamed files is a no-op (the patterns only match the old namespace/include paths).
+- Ran the script:
+  * f4-world-convert: 22 source files updated, 8 headers relocated (cam_archive, campaign_decoder, class_table, lzss, objective_decoder, team_decoder, unit_decoder, world_json).
+  * f4-terrain-convert: 3 source files updated, 1 header relocated (terrain_converter).
+  * Consumer files: 2 updated (viewer_app.cpp, decoders.cpp).
+- Hit one issue: the script's regex blindly replaced `f4::convert::` everywhere in viewer_app.cpp, but viewer_app.cpp uses BOTH f4-world-convert symbols (e.g. to_world_json) AND f4-terrain-convert symbols (convert_terrain_dir). The script applied only the world_convert rename spec to the consumer file, so two call sites (`f4::convert::convert_terrain_dir(...)`) got renamed to `f4::world_convert::convert_terrain_dir(...)` instead of `f4::terrain_convert::convert_terrain_dir(...)`. Fixed manually: viewer_app.cpp lines 543 and 780 now correctly use `f4::terrain_convert::convert_terrain_dir`.
+- Updated stale comments in 3 files that referenced the old `f4::convert::` namespace:
+  * f4-install/include/f4/install/campaign.hpp line 7: comment referenced the old `f4/convert/cam_archive.hpp` path.
+  * f4-world/include/f4/world/world_state.hpp line 77: comment referenced `f4::convert::UnitClass` (now `f4::world_convert::UnitClass`).
+  * f4-install/include/f4/install/installation.hpp line 136: comment referenced `f4::convert::find_class_table()` (now `f4::world_convert::find_class_table()`).
+- Verified zero stale references: `rg "namespace f4::convert|f4::convert::|using namespace f4::convert"` now returns ONLY f4-convert's own files (which correctly keep `namespace f4::convert`) and historical worklog.md entries (which are append-only history and should not be retroactively rewritten).
+- Full build clean. Total tests: 738 (unchanged from REFACTOR-2 — no new tests, just renames). All green. Zero regressions.
+
+Stage Summary:
+- The convert-lib namespace collision is resolved. Each convert lib now owns a namespace matching its lib name per project convention:
+  * f4-convert → namespace f4::convert (aircraft .dat → JSON)
+  * f4-world-convert → namespace f4::world_convert (.cam campaign archive → JSON)
+  * f4-terrain-convert → namespace f4::terrain_convert (THEATER.* binary → terrain JSON)
+- Header include paths now match: `f4/convert/dat_parser.hpp`, `f4/world_convert/cam_archive.hpp`, `f4/terrain_convert/terrain_converter.hpp`. No more "two libs, same header path" fragility.
+- The path is clear for f4-campaign to introduce a fourth convert lib (e.g. f4-campaign-convert for mission profile data) without namespace conflicts.
+- The rename script is persisted at /home/z/my-project/scripts/rename_convert_namespaces.py for future reference (e.g. if a similar collision arises elsewhere, the script can be adapted).
+- Total project tests: 738 (unchanged). All green. Zero regressions.
+- Next: (1) close the deferred ground-truth gaps (WORLD-2 unit Save() tails, VIEWER-3 .obj link data) before f4-ai reads from them; (2) the viewer_app.cpp god-file split (item #5 from the architecture review) — 1920 LoC in one file is the next refactor target; (3) then f4-ai can start against a clean foundation.

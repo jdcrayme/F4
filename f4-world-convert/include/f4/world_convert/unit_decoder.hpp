@@ -42,7 +42,7 @@
 #include <string>
 #include <vector>
 
-namespace f4::convert {
+namespace f4::world_convert {
 
 /// FreeFalcon unit subclass. Determined by validating the candidate tail
 /// against the next record's header (see file header comment).
@@ -265,4 +265,4 @@ struct DecodedUnits {
 /// landing exactly at the buffer end.
 [[nodiscard]] DecodedUnits decode_uni(const uint8_t* data, std::size_t size);
 
-} // namespace f4::convert
+} // namespace f4::world_convert

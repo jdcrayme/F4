@@ -6,12 +6,12 @@
 
 #pragma once
 
-#include <f4/convert/cam_archive.hpp>
-#include <f4/convert/campaign_decoder.hpp>
-#include <f4/convert/class_table.hpp>
+#include <f4/world_convert/cam_archive.hpp>
+#include <f4/world_convert/campaign_decoder.hpp>
+#include <f4/world_convert/class_table.hpp>
 #include <string>
 
-namespace f4::convert {
+namespace f4::world_convert {
 
 /// Optional metadata for the world JSON emitter.
 struct WorldJsonOptions {
@@ -37,4 +37,4 @@ struct WorldJsonOptions {
 [[nodiscard]] std::string to_world_json(const CamArchive& cam,
                                          const WorldJsonOptions& opts = {});
 
-} // namespace f4::convert
+} // namespace f4::world_convert

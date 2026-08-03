@@ -57,7 +57,7 @@
 #include <string>
 #include <vector>
 
-namespace f4::convert {
+namespace f4::world_convert {
 
 /// FreeFalcon objective type constants (from classtbl.h:65). Only the
 /// campaign-objective-relevant subset; others are unused.
@@ -165,4 +165,4 @@ struct DecodedObjectives {
 /// Decode the .obj sub-file's raw bytes. Throws on malformed input.
 [[nodiscard]] DecodedObjectives decode_obj(const uint8_t* data, std::size_t size);
 
-} // namespace f4::convert
+} // namespace f4::world_convert

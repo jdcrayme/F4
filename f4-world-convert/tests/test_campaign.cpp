@@ -4,13 +4,13 @@
 // that the code runs.
 
 #include <gtest/gtest.h>
-#include <f4/convert/cam_archive.hpp>
-#include <f4/convert/campaign_decoder.hpp>
-#include <f4/convert/world_json.hpp>
+#include <f4/world_convert/cam_archive.hpp>
+#include <f4/world_convert/campaign_decoder.hpp>
+#include <f4/world_convert/world_json.hpp>
 
 #include <algorithm>
 
-using namespace f4::convert;
+using namespace f4::world_convert;
 
 namespace {
 CampaignHeader decode_fixture_cmp() {

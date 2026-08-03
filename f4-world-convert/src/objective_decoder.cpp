@@ -1,12 +1,12 @@
 // f4-world-convert/src/objective_decoder.cpp
 
-#include <f4/convert/objective_decoder.hpp>
-#include <f4/convert/lzss.hpp>
+#include <f4/world_convert/objective_decoder.hpp>
+#include <f4/world_convert/lzss.hpp>
 
 #include <cstring>
 #include <stdexcept>
 
-namespace f4::convert {
+namespace f4::world_convert {
 
 namespace {
 
@@ -172,4 +172,4 @@ DecodedObjectives decode_obj(const uint8_t* data, std::size_t size) {
     return out;
 }
 
-} // namespace f4::convert
+} // namespace f4::world_convert

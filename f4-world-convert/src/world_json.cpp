@@ -1,14 +1,14 @@
 // f4-world-convert/src/world_json.cpp
 
-#include <f4/convert/world_json.hpp>
-#include <f4/convert/objective_decoder.hpp>
-#include <f4/convert/unit_decoder.hpp>
+#include <f4/world_convert/world_json.hpp>
+#include <f4/world_convert/objective_decoder.hpp>
+#include <f4/world_convert/unit_decoder.hpp>
 
 #include <cmath>
 #include <sstream>
 #include <stdexcept>
 
-namespace f4::convert {
+namespace f4::world_convert {
 
 namespace {
 
@@ -281,4 +281,4 @@ std::string to_world_json(const CamArchive& cam, const WorldJsonOptions& opts) {
     return o.str();
 }
 
-} // namespace f4::convert
+} // namespace f4::world_convert

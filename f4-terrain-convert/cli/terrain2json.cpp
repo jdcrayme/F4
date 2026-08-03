@@ -8,7 +8,7 @@
 //
 // The terrain_dir must contain THEATER.MAP, THEATER.MEA, and THEATER.O2.
 
-#include <f4/convert/terrain_converter.hpp>
+#include <f4/terrain_convert/terrain_converter.hpp>
 
 #include <cstdio>
 #include <filesystem>
@@ -35,7 +35,7 @@ int main(int argc, char** argv) {
     }
 
     try {
-        const std::size_t bytes = f4::convert::convert_terrain_dir(terrain_dir, out, theater_name);
+        const std::size_t bytes = f4::terrain_convert::convert_terrain_dir(terrain_dir, out, theater_name);
         std::cout << "wrote " << out << " (" << bytes << " bytes) from " << terrain_dir << "\n";
         return 0;
     } catch (const std::exception& e) {

@@ -133,7 +133,7 @@ public:
 
     /// Install-aware class-table resolver.
     ///
-    /// Used to back f4::convert::find_class_table(). Search order:
+    /// Used to back f4::world_convert::find_class_table(). Search order:
     ///   1. Same directory as `reference_file` (the game ships FALCON4.ct
     ///      next to .cam saves).
     ///   2. Up one or two directories from `reference_file`.

@@ -1,6 +1,6 @@
 // f4-world-convert/src/class_table.cpp
 
-#include <f4/convert/class_table.hpp>
+#include <f4/world_convert/class_table.hpp>
 
 #include <f4/install/installation.hpp>
 
@@ -8,7 +8,7 @@
 #include <cstring>
 #include <stdexcept>
 
-namespace f4::convert {
+namespace f4::world_convert {
 
 namespace {
 
@@ -112,4 +112,4 @@ std::filesystem::path find_class_table(const std::filesystem::path& reference_fi
     return inst.find_class_table(reference_file);
 }
 
-} // namespace f4::convert
+} // namespace f4::world_convert

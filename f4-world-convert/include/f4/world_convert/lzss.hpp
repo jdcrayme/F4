@@ -21,7 +21,7 @@
 #include <cstdint>
 #include <vector>
 
-namespace f4::convert {
+namespace f4::world_convert {
 
 constexpr int LZSS_INDEX_BIT_COUNT = 12;
 constexpr int LZSS_LENGTH_BIT_COUNT = 4;
@@ -37,4 +37,4 @@ constexpr int LZSS_BREAK_EVEN = (1 + LZSS_INDEX_BIT_COUNT + LZSS_LENGTH_BIT_COUN
                                                std::size_t src_size,
                                                std::size_t uncomp_size);
 
-} // namespace f4::convert
+} // namespace f4::world_convert

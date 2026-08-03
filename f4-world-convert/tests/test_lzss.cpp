@@ -6,13 +6,13 @@
 // decompress to exactly `datasize` bytes and contain readable team names).
 
 #include <gtest/gtest.h>
-#include <f4/convert/lzss.hpp>
+#include <f4/world_convert/lzss.hpp>
 
 #include <cstring>
 #include <fstream>
 #include <vector>
 
-using namespace f4::convert;
+using namespace f4::world_convert;
 
 // A minimal valid LZSS stream: one flag byte 0xFF (8 literal bits), then
 // 8 literal bytes 'A'..'H'. Should decompress to "ABCDEFGH".

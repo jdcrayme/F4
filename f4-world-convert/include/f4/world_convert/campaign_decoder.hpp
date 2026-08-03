@@ -36,7 +36,7 @@
 #include <string>
 #include <vector>
 
-namespace f4::convert {
+namespace f4::world_convert {
 
 struct TeamEntry {
     uint8_t flags = 0;
@@ -71,4 +71,4 @@ struct CampaignHeader {
 /// Read the .ver sub-file (a text decimal version number, e.g. "63").
 [[nodiscard]] int read_version(const uint8_t* data, std::size_t size);
 
-} // namespace f4::convert
+} // namespace f4::world_convert

@@ -1,12 +1,12 @@
 // f4-world-convert/src/cam_archive.cpp
 
-#include <f4/convert/cam_archive.hpp>
+#include <f4/world_convert/cam_archive.hpp>
 
 #include <cstdio>
 #include <cstring>
 #include <stdexcept>
 
-namespace f4::convert {
+namespace f4::world_convert {
 
 std::string SubFile::ext() const {
     const auto dot = name.rfind('.');
@@ -74,4 +74,4 @@ const SubFile* CamArchive::find(const std::string& want_ext) const {
     return nullptr;
 }
 
-} // namespace f4::convert
+} // namespace f4::world_convert

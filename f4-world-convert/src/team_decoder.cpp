@@ -11,12 +11,12 @@
 // NavalTaskingManagerClass(FILE*) constructors. That's a future milestone
 // tied to the f4-campaign ATM pipeline (architecture §11.3).
 
-#include <f4/convert/team_decoder.hpp>
+#include <f4/world_convert/team_decoder.hpp>
 
 #include <cstring>
 #include <stdexcept>
 
-namespace f4::convert {
+namespace f4::world_convert {
 
 namespace {
 struct Cursor {
@@ -83,4 +83,4 @@ DecodedTeams decode_tea(const uint8_t* data, std::size_t size) {
     return out;
 }
 
-} // namespace f4::convert
+} // namespace f4::world_convert

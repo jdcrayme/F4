@@ -1,9 +1,9 @@
 // f4-terrain-convert/src/terrain_converter.cpp
 
-#include <f4/convert/terrain_converter.hpp>
+#include <f4/terrain_convert/terrain_converter.hpp>
 #include <f4/terrain/terrain_data.hpp>
 
-namespace f4::convert {
+namespace f4::terrain_convert {
 
 std::size_t convert_terrain_dir(const std::filesystem::path& terrain_dir,
                                  const std::filesystem::path& out,
@@ -14,4 +14,4 @@ std::size_t convert_terrain_dir(const std::filesystem::path& terrain_dir,
     return td.to_terrain_json(theater_name).size();
 }
 
-} // namespace f4::convert
+} // namespace f4::terrain_convert

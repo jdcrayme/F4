@@ -19,13 +19,13 @@
 // validate the NEXT record's header (type == entity_type at offset+10,
 // owner in 0..7). On the last record, we validate against the buffer end.
 
-#include <f4/convert/unit_decoder.hpp>
-#include <f4/convert/lzss.hpp>
+#include <f4/world_convert/unit_decoder.hpp>
+#include <f4/world_convert/lzss.hpp>
 
 #include <cstring>
 #include <stdexcept>
 
-namespace f4::convert {
+namespace f4::world_convert {
 
 namespace {
 struct Cursor {
@@ -500,4 +500,4 @@ DecodedUnits decode_uni(const uint8_t* data, std::size_t size) {
     return out;
 }
 
-} // namespace f4::convert
+} // namespace f4::world_convert

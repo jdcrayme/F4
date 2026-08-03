@@ -4,14 +4,14 @@
 // decode cleanly with the cursor landing exactly at the buffer end.
 
 #include <gtest/gtest.h>
-#include <f4/convert/cam_archive.hpp>
-#include <f4/convert/unit_decoder.hpp>
-#include <f4/convert/world_json.hpp>
+#include <f4/world_convert/cam_archive.hpp>
+#include <f4/world_convert/unit_decoder.hpp>
+#include <f4/world_convert/world_json.hpp>
 
 #include <map>
 #include <set>
 
-using namespace f4::convert;
+using namespace f4::world_convert;
 
 namespace {
 CamArchive load_fixture() {

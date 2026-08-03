@@ -74,9 +74,9 @@ struct ObjectiveState {
     std::vector<ObjectiveLink> links;   // road/rail network connections
 };
 
-/// Unit subclass — same enum as f4::convert::UnitClass, duplicated here so
-/// f4-world doesn't need to depend on f4-world-convert (the contract between
-/// them is JSON, not the C++ type).
+/// Unit subclass — same enum as f4::world_convert::UnitClass, duplicated
+/// here so f4-world doesn't need to depend on f4-world-convert (the contract
+/// between them is JSON, not the C++ type).
 enum class UnitClass : uint8_t {
     Unknown    = 0,
     Battalion  = 1,

@@ -25,7 +25,7 @@
 #include <string>
 #include <vector>
 
-namespace f4::convert {
+namespace f4::world_convert {
 
 struct TeamRecord {
     uint32_t id_creator = 0;
@@ -57,4 +57,4 @@ struct DecodedTeams {
 /// The .cmp decoder already provides team names; this adds team state.
 [[nodiscard]] DecodedTeams decode_tea(const uint8_t* data, std::size_t size);
 
-} // namespace f4::convert
+} // namespace f4::world_convert

@@ -68,6 +68,7 @@ void FlightModel::init(const AircraftConfig& cfg,
     // Rebuild the stall state machine (picks up any config changes)
     stallSM_ = makeStallMachine(stallCfg_);
     stallTimer_ = 0.0;
+    prevAeroStalled_ = false;
     state_.aero.stallState = static_cast<int>(StallState::None);
 
     // --- Initial kinematic state ---
@@ -455,6 +456,16 @@ bool FlightModel::trim() {
 // This is the bridge between FreeFalcon's polling-based stall logic and
 // f4-state-machine's event-driven model. Called once per minor frame,
 // after aero (which computed the `stalled` detection flag) and before EOM.
+//
+// Message bus integration (REFACTOR-2): when a MessageBus is attached,
+// this function also publishes:
+//   - StallWarningMessage on the rising edge of `aero.stalled` (the
+//     earliest possible stall notification — fires BEFORE the SM processes
+//     the event, so aural-cue consumers can react with minimum latency).
+//   - StallStateChangeMessage when the SM transitions to a new state
+//     (the authoritative "the SM has decided" notification).
+// Both fire on the calling (sim) thread via publish() — see the threading
+// note in flight_model.hpp.
 // ---------------------------------------------------------------------------
 void FlightModel::updateStallSM(double dt, const PilotInput& input) {
     AeroState& a = state_.aero;
@@ -476,6 +487,21 @@ void FlightModel::updateStallSM(double dt, const PilotInput& input) {
 
     const StallEvent evt = detectStallEvent(det, stallCfg_);
 
+    // Rising-edge stall warning: publish BEFORE the SM processes the event
+    // so consumers get the earliest possible notification. The warning
+    // fires on the transition from "not stalled" to "stalled" — one
+    // message per stall entry, not one per stalled frame.
+    if (bus_ && a.stalled && !prevAeroStalled_) {
+        StallWarningMessage msg;
+        msg.aircraft_id     = aircraft_id_;
+        msg.sim_time_s      = sim_time_s_;
+        msg.alpha_deg       = a.alpha_deg;
+        msg.vcas_kts        = state_.vcas;
+        msg.stall_speed_kts = a.stallSpeed;
+        bus_->publish(msg);
+    }
+    prevAeroStalled_ = a.stalled;
+
     // Only process if the SM can actually fire this event from the current
     // state (avoids no-op process() calls and spurious trace entries).
     if (stallSM_.can_fire(evt)) {
@@ -485,6 +511,19 @@ void FlightModel::updateStallSM(double dt, const PilotInput& input) {
         if (next != prev) {
             // State changed — reset the dwell timer
             stallTimer_ = 0.0;
+
+            // Publish the state-change event (authoritative SM notification).
+            if (bus_) {
+                StallStateChangeMessage msg;
+                msg.aircraft_id = aircraft_id_;
+                msg.from_state  = prev;
+                msg.to_state    = next;
+                msg.sim_time_s  = sim_time_s_;
+                msg.alpha_deg   = a.alpha_deg;
+                msg.vcas_kts    = state_.vcas;
+                msg.qbar_psf    = state_.qbar;
+                bus_->publish(msg);
+            }
         }
     }
 

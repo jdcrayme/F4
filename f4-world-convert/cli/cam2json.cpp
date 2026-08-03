@@ -9,9 +9,9 @@
 // Mirrors f4-convert's dat2json: thin main() that calls into the library,
 // so all logic is testable in-process.
 
-#include <f4/convert/cam_archive.hpp>
-#include <f4/convert/world_json.hpp>
-#include <f4/convert/class_table.hpp>
+#include <f4/world_convert/cam_archive.hpp>
+#include <f4/world_convert/world_json.hpp>
+#include <f4/world_convert/class_table.hpp>
 
 #include <cstdio>
 #include <filesystem>
@@ -34,7 +34,7 @@ int main(int argc, char** argv) {
         out.replace_extension(".world.json");
     }
 
-    f4::convert::WorldJsonOptions opts;
+    f4::world_convert::WorldJsonOptions opts;
     std::filesystem::path explicit_ct;
     for (int i = 2; i < argc; ++i) {
         const std::string a = argv[i];
@@ -48,7 +48,7 @@ int main(int argc, char** argv) {
     }
 
     try {
-        f4::convert::CamArchive cam;
+        f4::world_convert::CamArchive cam;
         cam.load(in);
 
         // Resolve FALCON4.ct (the class table). Without it, objectives carry
@@ -57,12 +57,12 @@ int main(int argc, char** argv) {
         //   1. Explicit --class-table path (if provided)
         //   2. Same directory as the .cam (the game ships them together)
         //   3. CWD-relative well-known paths (build dir, source fixtures)
-        f4::convert::ClassTable class_table;
+        f4::world_convert::ClassTable class_table;
         std::filesystem::path ct_path;
         if (!explicit_ct.empty()) {
             ct_path = explicit_ct;
         } else {
-            ct_path = f4::convert::find_class_table(in);
+            ct_path = f4::world_convert::find_class_table(in);
         }
         if (!ct_path.empty()) {
             try {
@@ -79,7 +79,7 @@ int main(int argc, char** argv) {
                       << " lack objective_type (use --class-table to specify)\n";
         }
 
-        const std::string json = f4::convert::to_world_json(cam, opts);
+        const std::string json = f4::world_convert::to_world_json(cam, opts);
         std::ofstream f(out);
         if (!f) throw std::runtime_error("cannot write " + out.string());
         f << json;
@@ -90,7 +90,7 @@ int main(int argc, char** argv) {
         std::cerr << "  terrain_file: " << opts.terrain_file << "\n";
         std::cerr << "  subfiles:     " << cam.subfiles().size() << "\n";
         if (const auto* v = cam.find("ver")) {
-            std::cerr << "  version:      " << f4::convert::read_version(v->data.data(), v->data.size()) << "\n";
+            std::cerr << "  version:      " << f4::world_convert::read_version(v->data.data(), v->data.size()) << "\n";
         }
         for (const auto& sf : cam.subfiles()) {
             std::cerr << "    " << sf.name << "  (" << sf.size << " bytes)\n";

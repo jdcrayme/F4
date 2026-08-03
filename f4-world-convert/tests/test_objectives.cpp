@@ -1,15 +1,15 @@
 // test_objectives.cpp — .obj objective decoder against the real save1.cam.
 
 #include <gtest/gtest.h>
-#include <f4/convert/cam_archive.hpp>
-#include <f4/convert/objective_decoder.hpp>
-#include <f4/convert/world_json.hpp>
-#include <f4/convert/class_table.hpp>
+#include <f4/world_convert/cam_archive.hpp>
+#include <f4/world_convert/objective_decoder.hpp>
+#include <f4/world_convert/world_json.hpp>
+#include <f4/world_convert/class_table.hpp>
 
 #include <filesystem>
 #include <set>
 
-using namespace f4::convert;
+using namespace f4::world_convert;
 
 namespace {
 CamArchive load_fixture() {

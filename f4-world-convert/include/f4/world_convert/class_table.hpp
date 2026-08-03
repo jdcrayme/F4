@@ -53,7 +53,7 @@
 #include <string>
 #include <vector>
 
-namespace f4::convert {
+namespace f4::world_convert {
 
 /// VU classInfo_ indices (from f4vu.h).
 enum : int {
@@ -191,4 +191,4 @@ private:
 /// Returns an empty path if not found.
 [[nodiscard]] std::filesystem::path find_class_table(const std::filesystem::path& reference_file);
 
-} // namespace f4::convert
+} // namespace f4::world_convert

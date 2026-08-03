@@ -28,10 +28,10 @@
 
 #include <f4/viewer/viewer_app.hpp>
 
-#include <f4/convert/cam_archive.hpp>
-#include <f4/convert/world_json.hpp>
-#include <f4/convert/terrain_converter.hpp>
-#include <f4/convert/class_table.hpp>
+#include <f4/world_convert/cam_archive.hpp>
+#include <f4/world_convert/world_json.hpp>
+#include <f4/terrain_convert/terrain_converter.hpp>
+#include <f4/world_convert/class_table.hpp>
 #include <f4/install/installation.hpp>
 #include <f4/terrain/terrain_data.hpp>
 #include <f4/viewer/file_dialog.hpp>
@@ -540,14 +540,14 @@ void ViewerApp::load_world_json(const std::filesystem::path& path) {
 void ViewerApp::import_terrain_binary(const std::filesystem::path& terrain_dir) {
     // Use the in-process library so we don't shell out to terrain2json.
     const auto out = terrain_dir / "terrain.json";
-    f4::convert::convert_terrain_dir(terrain_dir, out, "korea");
+    f4::terrain_convert::convert_terrain_dir(terrain_dir, out, "korea");
     load_terrain_json(out);
 }
 
 void ViewerApp::import_cam_archive(const std::filesystem::path& cam_path) {
-    f4::convert::CamArchive cam;
+    f4::world_convert::CamArchive cam;
     cam.load(cam_path);
-    f4::convert::WorldJsonOptions opts;
+    f4::world_convert::WorldJsonOptions opts;
     opts.theater = "korea";
     opts.terrain_file = "korea.terrain.json";
 
@@ -557,8 +557,8 @@ void ViewerApp::import_cam_archive(const std::filesystem::path& cam_path) {
     // The class table is a binary file shipped with the game data; the
     // repo bundles a copy in f4-world-convert/tests/fixtures/FALCON4.ct
     // so we can resolve types out-of-the-box.
-    f4::convert::ClassTable class_table;
-    const auto ct_path = f4::convert::find_class_table(cam_path);
+    f4::world_convert::ClassTable class_table;
+    const auto ct_path = f4::world_convert::find_class_table(cam_path);
     if (!ct_path.empty()) {
         try {
             class_table.load(ct_path);
@@ -574,7 +574,7 @@ void ViewerApp::import_cam_archive(const std::filesystem::path& cam_path) {
             "(no icon mapping). Place FALCON4.ct next to the .cam or in assets/.";
     }
 
-    const std::string json = f4::convert::to_world_json(cam, opts);
+    const std::string json = f4::world_convert::to_world_json(cam, opts);
 
     // Write to a temp file next to the .cam, then load via the normal path.
     auto out = cam_path;
@@ -777,7 +777,7 @@ void ViewerApp::load_campaign_from_install(const std::string& theater_key,
     // the theater dir. We use a temp file rather than in-memory because
     // f4-terrain's loader expects a path.
     const auto terrain_json = theater->dir / "terrain.json";
-    f4::convert::convert_terrain_dir(theater->dir, terrain_json, theater_key);
+    f4::terrain_convert::convert_terrain_dir(theater->dir, terrain_json, theater_key);
     impl_->world.terrain.load_terrain_json(terrain_json);
     impl_->world.terrain_loaded = true;
     impl_->last_terrain_json_path = terrain_json;
@@ -787,13 +787,13 @@ void ViewerApp::load_campaign_from_install(const std::string& theater_key,
 
     // Step 2: convert .cam → world JSON using the install's class table.
     // Use the install-aware resolver — finds FALCON4.ct automatically.
-    f4::convert::CamArchive cam;
+    f4::world_convert::CamArchive cam;
     cam.load(camp->cam);
-    f4::convert::WorldJsonOptions opts;
+    f4::world_convert::WorldJsonOptions opts;
     opts.theater = theater_key;
     opts.terrain_file = terrain_json.filename().string();
 
-    f4::convert::ClassTable class_table;
+    f4::world_convert::ClassTable class_table;
     const auto ct_path = impl_->install->find_class_table(camp->cam);
     if (!ct_path.empty()) {
         try {
@@ -806,7 +806,7 @@ void ViewerApp::load_campaign_from_install(const std::string& theater_key,
         impl_->last_error = "FALCON4.ct not found — objectives will lack icons";
     }
 
-    const std::string json = f4::convert::to_world_json(cam, opts);
+    const std::string json = f4::world_convert::to_world_json(cam, opts);
 
     // Write next to the .cam, then load via the normal path.
     auto world_json = camp->cam;

@@ -10,6 +10,11 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 #   - f4-data          (for AircraftConfig, table accessors)
 #   - f4-math          (for Table2D, Vec3, Quat, filters — transitively via f4-data)
 #   - f4-state-machine (for the stall state machine — the first real consumer)
+#   - f4-messaging     (for the optional MessageBus integration — the first
+#                       real consumer of the bus. The dependency is PUBLIC
+#                       because the FlightModel's public API exposes
+#                       set_message_bus(MessageBus*) and messages.hpp is a
+#                       public header.)
 #
 # f4-units is NOT a dependency. The flight model uses raw Imperial doubles
 # internally to match the coefficient tables exactly. Typed Quantity
@@ -30,6 +35,7 @@ target_include_directories(f4-flight-model PUBLIC
 target_link_libraries(f4-flight-model PUBLIC
     f4-data
     f4-state-machine
+    f4-messaging
 )
 
 # Tests

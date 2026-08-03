@@ -2,7 +2,7 @@
 
 #include <f4/viewer/decoders.hpp>
 
-#include <f4/convert/cam_archive.hpp>
+#include <f4/world_convert/cam_archive.hpp>
 
 #include <algorithm>
 #include <array>
@@ -69,7 +69,7 @@ std::vector<Annotation> decode_cam_manifest(const HexModel& m) {
 
     // Delegate to f4-world-convert's CamArchive for the actual parsing.
     // We catch any exception — the decoder must be permissive.
-    f4::convert::CamArchive cam;
+    f4::world_convert::CamArchive cam;
     try {
         cam.load(m.path());
     } catch (const std::exception&) {

@@ -1,12 +1,12 @@
 // test_cam_archive.cpp — .cam container parser against the real fixture.
 
 #include <gtest/gtest.h>
-#include <f4/convert/cam_archive.hpp>
-#include <f4/convert/campaign_decoder.hpp>
+#include <f4/world_convert/cam_archive.hpp>
+#include <f4/world_convert/campaign_decoder.hpp>
 
 #include <algorithm>
 
-using namespace f4::convert;
+using namespace f4::world_convert;
 
 namespace {
 CamArchive load_fixture() {

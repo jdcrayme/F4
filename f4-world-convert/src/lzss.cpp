@@ -1,11 +1,11 @@
 // f4-world-convert/src/lzss.cpp — faithful port of FreeFalcon LZSS_Expand.
 
-#include <f4/convert/lzss.hpp>
+#include <f4/world_convert/lzss.hpp>
 
 #include <cstring>
 #include <stdexcept>
 
-namespace f4::convert {
+namespace f4::world_convert {
 
 namespace {
 
@@ -94,4 +94,4 @@ std::vector<uint8_t> lzss_expand(const uint8_t* input,
     return out;
 }
 
-} // namespace f4::convert
+} // namespace f4::world_convert

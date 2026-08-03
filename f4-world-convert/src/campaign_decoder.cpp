@@ -1,13 +1,13 @@
 // f4-world-convert/src/campaign_decoder.cpp
 
-#include <f4/convert/campaign_decoder.hpp>
-#include <f4/convert/lzss.hpp>
+#include <f4/world_convert/campaign_decoder.hpp>
+#include <f4/world_convert/lzss.hpp>
 
 #include <cstdlib>
 #include <cstring>
 #include <stdexcept>
 
-namespace f4::convert {
+namespace f4::world_convert {
 
 namespace {
 
@@ -102,4 +102,4 @@ CampaignHeader decode_cmp(const uint8_t* data, std::size_t size) {
     return h;
 }
 
-} // namespace f4::convert
+} // namespace f4::world_convert

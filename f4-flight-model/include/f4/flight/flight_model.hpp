@@ -20,7 +20,11 @@
 #include "f4/flight/fcs.hpp"
 #include "f4/flight/gear.hpp"
 #include "f4/flight/stall_state.hpp"
+#include "f4/flight/messages.hpp"
 #include "f4/data/aircraft_config.hpp"
+#include "f4/messaging/bus.hpp"
+
+#include <cstdint>
 
 namespace f4::flight {
 
@@ -102,6 +106,42 @@ public:
     StallConfig&       stallConfig()       noexcept { return stallCfg_; }
     const StallConfig& stallConfig() const noexcept { return stallCfg_; }
 
+    // --- Message bus integration (optional) ---
+    //
+    // The FlightModel is the first real consumer of f4-messaging. When a
+    // MessageBus is attached, the FlightModel publishes a small set of
+    // event messages (StallStateChangeMessage, StallWarningMessage) on
+    // interesting transitions. When no bus is attached (the default), the
+    // FlightModel behaves exactly as before — the bus is a nullptr and
+    // the publish path is a single branch skipped.
+    //
+    // Threading: the bus must outlive the FlightModel. The FlightModel
+    // publishes via publish() (same-thread, synchronous) — this matches
+    // §13.2's "sim thread owns the sim bus, calls flush_pending() at the
+    // top of the tick, then runs the per-frame update". Other threads
+    // that want flight-model events subscribe to the same sim bus and
+    // use publish_deferred()/flush_pending() for cross-thread delivery.
+    //
+    // Optional context fields:
+    //   aircraft_id : host-supplied entity ID, included in every published
+    //                 message. Defaults to 0 (unassigned). Set this when
+    //                 the host creates the FlightModel for a specific
+    //                 entity so consumers can route by aircraft.
+    //   sim_time_s  : host-supplied sim time, included in every published
+    //                 message. Defaults to 0. Set this each tick before
+    //                 calling update() so messages carry an accurate
+    //                 timestamp. (We do NOT compute sim time inside the
+    //                 FlightModel — §13.2 makes SimClock the single
+    //                 source of truth for time.)
+    void set_message_bus(messaging::MessageBus* bus) noexcept { bus_ = bus; }
+    [[nodiscard]] messaging::MessageBus* message_bus() const noexcept { return bus_; }
+
+    void set_aircraft_id(std::uint64_t id) noexcept { aircraft_id_ = id; }
+    [[nodiscard]] std::uint64_t aircraft_id() const noexcept { return aircraft_id_; }
+
+    void set_sim_time(double t) noexcept { sim_time_s_ = t; }
+    [[nodiscard]] double sim_time() const noexcept { return sim_time_s_; }
+
 private:
     /// Run one minor-frame step.
     void minorStep(double dt, const PilotInput& input);
@@ -133,6 +173,17 @@ private:
     StallSM    stallSM_;
     StallConfig stallCfg_;
     double     stallTimer_{0.0};  // time in current stall state (seconds)
+
+    // Previous-frame aero stall flag, for rising-edge detection on the
+    // StallWarningMessage publish. Reset to false in init().
+    bool       prevAeroStalled_{false};
+
+    // Optional MessageBus for cross-subsystem event publishing. nullptr
+    // by default — the FlightModel runs standalone until the host attaches
+    // a bus.
+    messaging::MessageBus* bus_{nullptr};
+    std::uint64_t          aircraft_id_{0};
+    double                 sim_time_s_{0.0};
 
     /// Cached copy of the most recent PilotInput (needed by updateGear
     /// which runs before minorStep but needs the brake handle state).

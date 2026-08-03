@@ -21,7 +21,7 @@
 #include <string>
 #include <vector>
 
-namespace f4::convert {
+namespace f4::world_convert {
 
 struct SubFile {
     std::string name;          // e.g. "save1.cmp"
@@ -54,4 +54,4 @@ private:
     std::vector<SubFile> subfiles_;
 };
 
-} // namespace f4::convert
+} // namespace f4::world_convert

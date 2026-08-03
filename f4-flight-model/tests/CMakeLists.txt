@@ -12,7 +12,7 @@ enable_testing()
 include(GoogleTest)
 
 # Each test target links against f4-flight-model (which transitively pulls
-# in f4-data, f4-math, and nlohmann_json).
+# in f4-data, f4-math, f4-state-machine, f4-messaging, and nlohmann_json).
 function(f4_fm_add_test name source)
     add_executable(${name} ${source})
     target_link_libraries(${name} PRIVATE GTest::gtest_main f4-flight-model)
@@ -24,10 +24,14 @@ endfunction()
 f4_fm_add_test(test_atmosphere           test_atmosphere.cpp)
 f4_fm_add_test(test_flight_model         test_flight_model.cpp)
 f4_fm_add_test(test_stall_sm_integration test_stall_sm_integration.cpp)
+f4_fm_add_test(test_stall_bus_integration test_stall_bus_integration.cpp)
 
 target_compile_definitions(test_flight_model PRIVATE
     F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}")
 target_compile_definitions(test_stall_sm_integration PRIVATE
     F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}")
+target_compile_definitions(test_stall_bus_integration PRIVATE
+    F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}")
 add_dependencies(test_flight_model convert_golden_fixtures)
 add_dependencies(test_stall_sm_integration convert_golden_fixtures)
+add_dependencies(test_stall_bus_integration convert_golden_fixtures)
