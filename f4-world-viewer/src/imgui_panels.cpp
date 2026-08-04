@@ -216,7 +216,7 @@ void ViewerApp::draw_imgui() {
 
         ImGui::Separator();
         ImGui::Text("Camera");
-        ImGui::SliderFloat("Zoom", &impl_->cam_zoom, 0.1f, 2000.0f, "%.1f");
+        ImGui::SliderFloat("Zoom", &impl_->cam_zoom, 0.1f, 150.0f, "%.1f");
         if (ImGui::Button("Fit to World")) impl_->fit_to_world();
 
         ImGui::Separator();
