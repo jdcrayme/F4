@@ -25,9 +25,11 @@
 #include <f4/viewer/file_dialog.hpp>
 #include <f4/world_convert/cam_archive.hpp>
 #include <f4/world_convert/class_table.hpp>
+#include <f4/world_convert/theater_data.hpp>
 #include <f4/world_convert/world_json.hpp>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <ctime>
 #include <filesystem>
@@ -240,6 +242,34 @@ void ViewerApp::load_campaign_from_install(const std::string& theater_key,
         }
     } else {
         impl_->last_error = "FALCON4.ct not found — objectives will lack icons";
+    }
+
+    // Always load the theater object database (Falcon4.OCD/PHD/PD/UCD/
+    // VCD/FCD/FED) so the world JSON carries objective class names,
+    // airfield ground layouts (runways, taxiways, parking, helipads,
+    // docks), unit class names, and per-group vehicle composition.
+    // Without this, the Ground Layout window never lights up because
+    // world_json.cpp gates the `ground_layout` and `features` arrays on
+    // opts.theater_db being set.
+    //
+    // Two search locations cover both on-disk layouts used by Falcon
+    // variants: install-level `terrdata/objects` (vanilla Falcon 4.0 /
+    // FreeFalcon / Allied Force) and per-theater `<terrdata>/<key>/
+    // objects` (some community theaters). load_all() skips missing
+    // files silently, so probing both is safe; we stop as soon as at
+    // least one table is loaded.
+    f4::world_convert::TheaterObjectDatabase theater_db;
+    const std::array<std::filesystem::path, 2> objects_dirs = {
+        impl_->install->terrdata_dir() / "objects",
+        theater->dir / "objects",
+    };
+    for (const auto& d : objects_dirs) {
+        if (d.empty() || !std::filesystem::exists(d)) continue;
+        theater_db.load_all(d);
+        if (theater_db.loaded()) break;
+    }
+    if (theater_db.loaded()) {
+        opts.theater_db = &theater_db;
     }
 
     const std::string json = f4::world_convert::to_world_json(cam, opts);
