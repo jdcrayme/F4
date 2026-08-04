@@ -518,6 +518,35 @@ double gLoad    = fm.state().loads.nzcgs;
 stability run, FCS response, throttle response, ground operations, multi-
 aircraft init, stall SM integration with trace verification).
 
+### f4-ai — AI brain (planned)
+
+Composed-module AI brain replacing FreeFalcon's 1209-line `DigitalBrain` god-class.
+Each tactical behavior is an independent module with its own state machine and
+trace. A `LayeredStateMachine` resolves the 26-priority DigiMode ladder.
+
+```cpp
+#include <f4/ai/f4_ai.hpp>
+using namespace f4::ai;
+
+DigitalBrain brain;
+brain.initialize(ownship_id, world, bus, SkillLevel::Veteran);
+
+// Per-frame update — produces control output for FlightModel
+for (int frame = 0; frame < 3600 * 60; ++frame) {  // 60 seconds at 60 Hz
+    AIControlOutput output = brain.update(1.0 / 60.0);
+    PilotInput input = to_pilot_input(output);
+    fm.update(1.0 / 60.0, input, groundZ, groundNormal);
+}
+```
+
+**Modules** (planned — see `Docs/AI_IMPLEMENTATION_PLAN.md`):
+SensorFusion, TakeoffModule, LandingModule, NavigationModule,
+RefuelModule, CollisionAvoidModule, BVRModule, WVRModule,
+MissileModule, WingmanModule, DigitalBrain orchestrator.
+
+**Dependencies**: f4-flight-model, f4-entities, f4-messaging, f4-state-machine,
+f4-geo, f4-data, f4-math.
+
 ## Building
 
 ```bash
