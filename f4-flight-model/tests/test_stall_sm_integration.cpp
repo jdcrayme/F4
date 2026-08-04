@@ -134,7 +134,7 @@ TEST(StallSMIntegration, StallEntryAndRecoveryLifecycle) {
     input.throttle = 1.0;  // full power
 
     bool sawRecovering = false;
-    bool sawRecovered = false;
+    [[maybe_unused]] bool sawRecovered = false;
 
     for (int frame = 0; frame < 30 * 60; ++frame) {
         fm.update(dt, input, 0.0, groundNormal);

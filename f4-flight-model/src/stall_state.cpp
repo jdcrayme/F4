@@ -17,6 +17,7 @@ namespace f4::flight {
 // callback the FlightModel provides). Guards check the StallConfig thresholds.
 // ---------------------------------------------------------------------------
 StallSM makeStallMachine(const StallConfig& cfg) {
+    (void)cfg;  // transitions are static; cfg thresholds are checked in detectStallEvent
     return StallSM::Builder()
         .initial(StallState::None)
         .state(StallState::None,              "None")

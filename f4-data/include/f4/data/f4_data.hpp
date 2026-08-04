@@ -11,4 +11,5 @@
 
 #include "f4/data/aircraft_config.hpp"
 #include "f4/data/config_loader.hpp"
+#include "f4/data/engine_rpm_schedule.hpp"
 #include "f4/data/table_accessors.hpp"

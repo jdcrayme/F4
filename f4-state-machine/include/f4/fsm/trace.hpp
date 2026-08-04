@@ -14,7 +14,7 @@
 //
 // FORMAT
 //   Each transition is one line:
-//     tick=<n> from=<S> to=<S> event=<E> guard=<PASS|FAIL|NONE> \
+//     tick=<n> from=<S> to=<S> event=<E> guard=<PASS|FAIL|NONE>
 //     action=<RAN|NONE> entry=<RAN|NONE> exit=<RAN|NONE> reason="<text>"
 //   "guard=FAIL" lines record a transition that was CONSIDERED but rejected
 //   by its guard — these are recorded only when trace_rejections is enabled,

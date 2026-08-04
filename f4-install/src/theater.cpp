@@ -64,7 +64,7 @@ std::vector<std::string> parse_theater_lst_string(const std::string& content) {
         // Skip comments.
         if (t.starts_with('#') || t.starts_with("//") || t.starts_with(';')) continue;
         // Strip trailing inline comments (// or # or ;).
-        for (const std::string& prefix : {"//", "#", ";"}) {
+        for (const char* prefix : {"//", "#", ";"}) {
             const auto pos = t.find(prefix);
             if (pos != std::string::npos) t = trim(t.substr(0, pos));
         }

@@ -135,7 +135,7 @@ DecodedObjectives decode_obj(const uint8_t* data, std::size_t size) {
             // The VU_ID refers to the neighboring objective.
             o.link_data.clear();
             o.link_data.reserve(o.links);
-            for (uint8_t i = 0; i < o.links; ++i) {
+            for (uint8_t li = 0; li < o.links; ++li) {
                 ObjectiveLink link;
                 for (int j = 0; j < 8; ++j) {
                     link.costs[j] = c.u8();

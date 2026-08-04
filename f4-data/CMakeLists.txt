@@ -16,6 +16,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 add_library(f4-data STATIC
     src/aircraft_config.cpp
     src/config_loader.cpp
+    src/engine_rpm_schedule.cpp
 )
 target_include_directories(f4-data PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include

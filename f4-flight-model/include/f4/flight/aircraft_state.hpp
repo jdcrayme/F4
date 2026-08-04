@@ -169,6 +169,13 @@ struct EngineState {
 
     // Spool filter state (first-order lag on RPM)
     math::LagFilter rpmLag;
+
+    // Per-state seed flag: false until the first update() call that sees
+    // a nonzero rpm. When false, update() seeds rpmLag to the current rpm
+    // to avoid a spool-up transient from 0. Lives on EngineState (not
+    // EngineModel) so that resetting or replacing the state also resets
+    // the seed — critical for retrims and scenario resets.
+    bool   rpmLagSeeded{false};
 };
 
 // ---------------------------------------------------------------------------

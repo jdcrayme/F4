@@ -36,7 +36,7 @@ struct HarmonicState {
 TEST(EulerTest, ExponentialDecayConvergesFirstOrder) {
     const double k = 0.5;
     const double y0 = 1.0;
-    auto f = [k](double /*y*/) { return -k * 1.0; };  // placeholder, replaced below
+    [[maybe_unused]] auto f = [k](double /*y*/) { return -k * 1.0; };  // placeholder, replaced below
 
     // Use a struct-free version: state is just double, derivative is -k*state.
     auto deriv = [k](double s) { return -k * s; };

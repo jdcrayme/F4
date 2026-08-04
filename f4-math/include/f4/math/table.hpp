@@ -129,7 +129,7 @@ public:
 
         const double t = static_cast<double>(query - x_[i]) /
                          static_cast<double>(x_[i + 1] - x_[i]);
-        return y_[i] + (y_[i + 1] - y_[i]) * t;
+        return static_cast<Y>(y_[i] + (y_[i + 1] - y_[i]) * t);
     }
 
     [[nodiscard]] std::size_t size() const noexcept { return x_.size(); }
@@ -142,7 +142,7 @@ private:
         // edge_idx is the bracket whose slope we extend.
         const double t = static_cast<double>(query - x_[edge_idx]) /
                          static_cast<double>(x_[edge_idx + 1] - x_[edge_idx]);
-        return y_[edge_idx] + (y_[edge_idx + 1] - y_[edge_idx]) * t;
+        return static_cast<Y>(y_[edge_idx] + (y_[edge_idx + 1] - y_[edge_idx]) * t);
     }
 };
 
@@ -216,12 +216,14 @@ public:
         // --- Resolve the row bracket [r0, r1] and fractional tr ---
         std::size_t r0, r1;
         double tr;
-        bool row_clamped = resolve_axis(rows_, row_query, last_row_, r0, r1, tr, "row");
+        [[maybe_unused]] bool row_clamped =
+            resolve_axis(rows_, row_query, last_row_, r0, r1, tr, "row");
 
         // --- Resolve the col bracket [c0, c1] and fractional tc ---
         std::size_t c0, c1;
         double tc;
-        bool col_clamped = resolve_axis(cols_, col_query, last_col_, c0, c1, tc, "col");
+        [[maybe_unused]] bool col_clamped =
+            resolve_axis(cols_, col_query, last_col_, c0, c1, tc, "col");
 
         // If both axes were clamped AND we're in Error mode, the resolver
         // already threw. If one axis is clamped in Clamp mode, we still want

@@ -13,6 +13,7 @@
 //   - nEngines folded into thrust multiplicatively (single RPM state).
 
 #include "f4/flight/engine.hpp"
+#include "f4/data/engine_rpm_schedule.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -62,47 +63,19 @@ EngineModel::EngineModel(const EngineTable* table, const AuxAero* aux)
 // RPM schedules at various altitudes and Mach numbers. This adjusts the
 // commanded RPM based on the engine type and flight conditions.
 //
-// Ported from FreeFalcon engine.cpp's engineRpmMods().
+// The schedule is now DATA (f4::data::EngineRpmSchedule) rather than an
+// if/else chain. The two built-in schedules (PW-100/220 family and
+// PW-229/GE-110/129 family) are defined in
+// f4-data/src/engine_rpm_schedule.cpp. Adding a new engine family is now
+// "add another builtin" rather than "extend this if/else". When f4-data's
+// JSON schema grows to load schedules from config, this function doesn't
+// change at all — the schedule is just data.
 // ---------------------------------------------------------------------------
 double EngineModel::engineRpmMods(double rpmCmd, double alt_ft,
                                    double mach, double vcas) const noexcept {
-    (void)vcas;
     const int typeEngine = aux_ ? aux_->typeEngine : 2;
-
-    if (typeEngine == 1 || typeEngine == 2) {
-        // PW-100 / PW-220
-        if (mach >= 0.84 && mach <= 1.4) {
-            rpmCmd = std::max(rpmCmd, mach / 1.4);
-        }
-        if (mach > 1.4) {
-            rpmCmd = std::max(rpmCmd, 0.99);
-        }
-        if (alt_ft > 10000.0) {
-            rpmCmd = std::max(rpmCmd, (alt_ft / 10000.0) / 30.0 + 0.7);
-        }
-        if (alt_ft >= 35000.0 && alt_ft <= 45000.0 && mach >= 0.4 && mach <= 0.8) {
-            rpmCmd = std::min(rpmCmd, 1.025);
-        }
-        if (alt_ft > 45000.0 && alt_ft <= 55000.0 && mach >= 0.4 && mach <= 0.95) {
-            rpmCmd = std::min(rpmCmd, 1.01);
-        }
-        if (alt_ft > 55000.0 || mach <= 0.4) {
-            rpmCmd = std::min(rpmCmd, 0.99);
-        }
-    } else {
-        // PW-229 / GE-110 / GE-129 (types 3, 4, 5)
-        if (mach > 0.55 && mach < 1.1) {
-            rpmCmd = std::max(rpmCmd, 0.79);
-        }
-        if (mach >= 1.1 && mach <= 1.4) {
-            rpmCmd = std::max(rpmCmd, mach / 1.4);
-        }
-        if (alt_ft > 50000.0 && vcas < 250.0) {
-            rpmCmd = std::min(rpmCmd, 0.99);  // AB no-light zone
-        }
-    }
-
-    return rpmCmd;
+    const auto& schedule = data::EngineRpmSchedule::builtin(typeEngine);
+    return schedule.apply(rpmCmd, mach, alt_ft, vcas);
 }
 
 // ---------------------------------------------------------------------------
@@ -126,11 +99,16 @@ void EngineModel::update(double dt,
     }
 
     // --- First-call sync: initialize the lag filter to current RPM ---
-    // This prevents a spool-up transient on the first frame.
-    static bool firstCall = true;
-    if (firstCall && state.rpm > 0.0) {
+    // This prevents a spool-up transient on the first frame. The seed flag
+    // lives on EngineState (not EngineModel) so that:
+    //   - multi-aircraft scenarios work (each aircraft has its own state)
+    //   - resetting/replacing the state (retrim, scenario reset) also
+    //     resets the seed, so the lag filter is re-seeded on the next call
+    // The original bug was a function-local `static bool firstCall` which
+    // was shared process-wide — only the first aircraft ever got seeded.
+    if (!state.rpmLagSeeded && state.rpm > 0.0) {
         state.rpmLag.reset(state.rpm);
-        firstCall = false;
+        state.rpmLagSeeded = true;
     }
 
     // --- Throttle position ---

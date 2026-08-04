@@ -25,6 +25,11 @@ f4_fm_add_test(test_atmosphere           test_atmosphere.cpp)
 f4_fm_add_test(test_flight_model         test_flight_model.cpp)
 f4_fm_add_test(test_stall_sm_integration test_stall_sm_integration.cpp)
 f4_fm_add_test(test_stall_bus_integration test_stall_bus_integration.cpp)
+f4_fm_add_test(test_engine               test_engine.cpp)
+f4_fm_add_test(test_aerodynamics         test_aerodynamics.cpp)
+f4_fm_add_test(test_gear                 test_gear.cpp)
+f4_fm_add_test(test_fcs                  test_fcs.cpp)
+f4_fm_add_test(test_eom                  test_eom.cpp)
 
 target_compile_definitions(test_flight_model PRIVATE
     F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}")

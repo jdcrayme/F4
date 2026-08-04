@@ -22,6 +22,7 @@ endfunction()
 f4_data_add_test(test_validation      test_validation.cpp)
 f4_data_add_test(test_config_loader   test_config_loader.cpp)
 f4_data_add_test(test_table_accessors test_table_accessors.cpp)
+f4_data_add_test(test_engine_rpm_schedule test_engine_rpm_schedule.cpp)
 
 # Pass the path to the generated JSON fixtures (produced by f4-convert at
 # build time) to the test executables that need them.

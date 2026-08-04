@@ -161,6 +161,10 @@ void FlightControlSystem::computeGains(double qbar, double qsom, double vt,
                                        bool landingGains, double gearPos,
                                        FcsState& fcs) const {
     (void)gearPos;  // landing gains applied separately below
+    (void)clift0;   // reserved for future lift-curve refinement
+    (void)clalpha;  // reserved: clalph0 (static slope) is currently used instead
+    (void)cosgam;   // reserved for future flight-path-angle coupling
+    (void)cosmu;    // reserved for future velocity-axis coupling
 
     const double cosphiLim = std::max(0.0, cosphi);
 
@@ -311,6 +315,8 @@ void FlightControlSystem::runPitch(double dt, double qbar, double qsom,
                                     FcsState& fcs, AeroState& aero) const {
     (void)qbar; (void)vt; (void)vcas_kts; (void)alpha_deg;
     (void)cl; (void)clalpha; (void)singam;
+    (void)cnalpha;  // reserved for future yaw-damping coupling
+    (void)input;    // pitch channel reads fcs.pshape, not raw pilot input
 
     // --- Commanded G ---
     double ptcmd = fcs.pshape * fcs.kp01;

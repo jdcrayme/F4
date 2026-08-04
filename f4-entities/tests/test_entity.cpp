@@ -80,7 +80,7 @@ TEST(Components, AddGetHasRemove) {
 TEST(Components, WithComponentFindsOnlyEntitiesThatHaveIt) {
     EntityWorld w;
     EntityHandle a = w.create();
-    EntityHandle b = w.create();
+    [[maybe_unused]] EntityHandle b = w.create();
     EntityHandle c = w.create();
     a.add<TransformComponent>();
     c.add<TransformComponent>();

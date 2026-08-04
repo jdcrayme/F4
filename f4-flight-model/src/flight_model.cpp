@@ -362,9 +362,9 @@ void FlightModel::update(double dt, const PilotInput& input,
     state_.aero.dbrake = std::clamp((input.speedBrake + 1.0) * 0.5, 0.0, 1.0);
 
     // Actuate flaps (TEF/LEF) toward commanded positions
-    auto actuate = [](double& pos, double cmd, double rate, double dt) {
+    auto actuate = [](double& pos, double cmd, double rate, double step_dt) {
         const double diff = cmd - pos;
-        const double step = rate * dt;
+        const double step = rate * step_dt;
         if (std::fabs(diff) < step) {
             pos = cmd;
         } else {
