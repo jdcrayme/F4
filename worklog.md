@@ -1018,3 +1018,61 @@ Stage Summary:
 - The user can now run `f4-world-viewer --install <vanilla-path> --list-files vanilla.txt` and `f4-world-viewer --install <bms-path> --list-files bms.txt`, share both files, and the dev team can diff them to document the layout differences and simplify the file-search logic in f4-install.
 - No tests added in this iteration — the snapshot module is viewer-only and has no existing unit-test harness (the existing tests are in f4-world-convert/tests/). A future task can add a unit-test harness for snapshot.cpp by constructing a synthetic install tree in a temp dir.
 - Files modified: snapshot.hpp, snapshot.cpp, viewer_app.hpp, install_flow.cpp, imgui_panels.cpp, cli/main.cpp, Docs/FALCON4_FILE_LAYOUT.md, worklog.md.
+
+---
+Task ID: INSTALL-1
+Agent: main (orchestrator)
+Task: Analyze the two recursive file listings the user produced with the new --list-files flag (vanilla Steam Falcon 4.0 + BMS 4.35) and document both install layouts in Docs/FALCON4_FILE_LAYOUT.md, then propose simplifications to the file-search logic in f4-install.
+
+Work Log:
+- Received two listing files from the user:
+  * /home/z/my-project/upload/vanilla_listing.txt — 1,448 lines, 103 KB, vanilla Steam Falcon 4.0 install at D:\SteamLibrary\steamapps\common\Falcon 4.0
+  * /home/z/my-project/upload/BMS_listing.txt — 16,609 lines, 1.2 MB, BMS 4.35 install at D:\Falcon BMS 4.35\Data
+- Wrote /home/z/my-project/scripts/analyze_install_listings.py — parses the snapshot listing format, extracts header / resolved paths / theaters / campaigns / recursive file list / totals, and produces a side-by-side markdown comparison report. Output saved to /home/z/my-project/scripts/install_comparison.md.
+- Ran the analysis and discovered MAJOR structural differences between the two installs:
+  * Total scale: vanilla 1,386 files / 61 dirs / 610 MB; BMS 16,555 files / 242 dirs / 9.0 GB (15× larger)
+  * BMS puts everything under <BMS-root>/Data/ subfolder; vanilla has data at the install root
+  * BMS uses mixed-case dir names (Sim/, TerrData/, Korea/, Terrain/) — vanilla uses lowercase (sim/, terrdata/, korea/, terrain/)
+  * Vanilla class_table is at terrdata/objects/FALCON4.ct (lowercase, binary 12 KB); BMS does NOT ship FALCON4.ct at all — uses TerrData/Objects/FALCON4_CT.XML (5.9 MB XML)
+  * BMS aircraft_dir resolved to Sim/ (capital S); vanilla aircraft_dir is empty (aircraft inside Simdata.ZIP)
+  * BMS theater dir is TerrData/Korea/Terrain/ (capital K, capital T); vanilla is terrdata/korea/terrain/
+  * BMS only ships THEATER.MAP + THEATER.MEA (2 files); vanilla ships full L0-L5 + O0-O5 (12 files)
+  * Vanilla campaigns live under campaign/SAVE/ (extra SAVE/ subdir!); BMS puts them directly under Campaign/
+  * theater.lst: vanilla doesn't have one at all (theater scan falls back to scanning terrdata/); BMS puts it at TerrData/TheaterDefinition/theater.lst (different subdir)
+- BIG FINDING: BMS replaced ALL the binary Falcon4.* data files with XML equivalents:
+  * FALCON4_CT.XML (5.9 MB, replaces FALCON4.ct)
+  * FALCON4_OCD.XML, _PHD.XML, _PDX.XML, _UCD.XML, _VCD.XML, _FCD.XML, _FED.XML (all the files we currently parse, in XML form)
+  * Plus many NEW BMS-specific tables: FALCON4_ACD.XML (aircraft class data), _DDP, _ICD, _RCD, _RKT, _RWD, _SSD, _SWD, _VSD, _WCD, _WLD
+  * Also ships per-instance XML files in SSD/ and UCD/ subdirs (one per squadron / static site)
+- BMS-specific data dirs not in vanilla:
+  * Sim/Vehdef/ — 65 .veh files (vehicle definitions, likely BMS replacement for parts of VCD)
+  * Sim/Sensdata/ — IRST/RWR sensor files (.irs, .rwr)
+  * Sim/Sigdata/ — IR/RCS/Visual signature files (.ir0/.ir1/.ir2, .rcs, .vis)
+  * Sim/Startdat/ — startup .dat files (Sim.dat, ia*.dat, single.dat, twoplay.dat, fourplay.dat, zero.dat)
+  * TerrData/ATC/ — 22 .dat files, ONE PER AIRBASE (Chongju.dat, Kimpo.dat, Osan.dat, Pusan.dat, etc.) — BMS split the ATC layout data per-airbase instead of in a single Falcon4.PHD/PD
+  * Add-On Korea TvT/ — full 648-file BMS Theater-vs-Theater mod (mirrors the main TerrData/ layout)
+  * Engine/ — BMS renderer: Materials/, Shaders/ (D3D11 .sca shader cache files)
+- BMS uses .ogg audio (684 files) where vanilla uses .wav (192 files); BMS uses .dds textures (11,130 files, 6 GB) where vanilla uses mixed .dds/.tga
+- Wrote up the full side-by-side comparison in Docs/FALCON4_FILE_LAYOUT.md §1.1 with:
+  * §1.1.1 — vanilla layout diagram (every top-level dir + key file paths)
+  * §1.1.2 — BMS layout diagram (every top-level dir + key file paths, noting the XML data files, per-airbase ATC, .veh vehicle defs, Add-On Korea TvT mod, Engine/ renderer dir)
+  * Each diagram includes the resolved paths (class_table, aircraft_dir, terrdata_dir, campaign_dir, theater_dir) so future contributors can see at a glance where each piece lives
+- Added §1.2 "Install-detection simplifications" with 7 concrete proposed changes to f4-install, each with code-level guidance:
+  1. §1.2.1 — Detect BMS by Data/ subfolder + auto-descend (with false-positive guard: only descend if Data/ contains TerrData/ or Sim/)
+  2. §1.2.2 — Detect BMS by class-table format: try FALCON4.ct first, then FALCON4_CT.XML (requires new XML parser — task BMS-CT-1)
+  3. §1.2.3 — Case-insensitive Sim/ aircraft dir detection (currently only looks for lowercase sim/)
+  4. §1.2.4 — Theater terrain/ subdir case-insensitive (catch Terrain/ capital T used by BMS)
+  5. §1.2.5 — Drop the L*/O* theater file requirement for BMS (BMS only ships MAP+MEA, regenerates the rest on the fly)
+  6. §1.2.6 — theater.lst fallback paths: terrdata/theater.lst → TerrData/TheaterDefinition/theater.lst → scan terrdata/ for dirs (already implemented as final fallback)
+  7. §1.2.7 — Campaign dir: scan both campaign/ and campaign/SAVE/ (case-insensitive) for .cam files (vanilla Steam puts saves under SAVE/)
+- Added an "Open questions" update to §9 noting that BMS uses an entirely different data format (XML) and that the existing binary parsers in theater_data.cpp won't work on BMS installs — we'll need parallel XML parsers for BMS support.
+
+Stage Summary:
+- Both install layouts are now fully documented in Docs/FALCON4_FILE_LAYOUT.md §1.1 with directory trees, file counts, and resolved path summaries.
+- The single biggest finding: BMS replaced the binary Falcon4.* files (OCD/PHD/PD/UCD/VCD/FED/FCD/CT) with XML equivalents (FALCON4_OCD.XML, etc.). Our existing binary parsers in theater_data.cpp will not work on BMS installs — BMS support requires a parallel set of XML parsers (future task BMS-DATA-1).
+- The second-biggest finding: BMS split the ATC layout data per-airbase into TerrData/ATC/<airbase>.dat files (22 of them) instead of using a single Falcon4.PHD/PD pair. This is a fundamentally different ATC data model.
+- The third-biggest finding: BMS ships 65 .veh files in Sim/Vehdef/ (vehicle definitions) — likely a more granular replacement for parts of VCD.
+- Proposed 7 concrete install-detection simplifications in §1.2, with code-level guidance for each. Implementation is tracked as future task INSTALL-1-IMPL.
+- No code changes in this iteration — documentation-only. The proposed simplifications will be implemented in a follow-up task once we agree on the approach (especially the BMS XML class table parser, which is a non-trivial new component).
+- Files modified: Docs/FALCON4_FILE_LAYOUT.md (added §1.1 + §1.2), worklog.md (this entry).
+- Scripts added: /home/z/my-project/scripts/analyze_install_listings.py (reusable — can be re-run if the user provides additional install listings, e.g. FreeFalcon or BMS 4.37).
