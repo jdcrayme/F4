@@ -16,6 +16,8 @@ namespace {
 // + visType[7] = 14 + vehicleDataIndex = 2 + dataType = 1 + dataPtr = 4).
 constexpr std::size_t ENTRY_SIZE = 81;
 constexpr std::size_t CLASSINFO_OFFSET = 8;  // offset of classInfo_[8] within entry
+constexpr std::size_t DATATYPE_OFFSET   = 76; // offset of dataType within entry
+constexpr std::size_t DATAPTR_OFFSET    = 77; // offset of dataPtr (4 bytes, LE)
 
 std::vector<uint8_t> read_file(const std::filesystem::path& path) {
     FILE* fp = std::fopen(path.string().c_str(), "rb");
@@ -58,11 +60,19 @@ void ClassTable::load(const std::filesystem::path& ct_path) {
     for (int i = 0; i < num_entities; ++i) {
         const std::size_t offset = 2 + static_cast<std::size_t>(i) * ENTRY_SIZE;
         const uint8_t* classinfo = data.data() + offset + CLASSINFO_OFFSET;
+        const uint8_t* datatype_p = data.data() + offset + DATATYPE_OFFSET;
+        const uint8_t* dataptr_p  = data.data() + offset + DATAPTR_OFFSET;
         ClassTableEntry e;
         e.domain = classinfo[0];
         e.cls    = classinfo[1];
         e.type   = classinfo[2];
         e.stype  = classinfo[3];
+        e.data_type = datatype_p[0];
+        // dataPtr is a 32-bit value on disk (FF was 32-bit; the on-disk format
+        // stores it as a 4-byte LE integer regardless of host pointer size).
+        uint32_t data_ptr;
+        std::memcpy(&data_ptr, dataptr_p, 4);
+        e.data_ptr_index = data_ptr;
         entries_.push_back(e);
     }
 }
@@ -83,6 +93,16 @@ uint8_t ClassTable::unit_subtype_for(uint16_t entity_type) const noexcept {
     const auto* e = lookup(entity_type);
     if (!e || e->cls != CLASS_UNIT) return 0;
     return e->stype;
+}
+
+bool ClassTable::data_ptr_for(uint16_t entity_type,
+                              uint8_t& out_data_type,
+                              uint32_t& out_data_ptr_index) const noexcept {
+    const auto* e = lookup(entity_type);
+    if (!e || e->data_type == DTYPE_NOTHING) return false;
+    out_data_type = e->data_type;
+    out_data_ptr_index = e->data_ptr_index;
+    return true;
 }
 
 std::filesystem::path find_class_table(const std::filesystem::path& reference_file) {

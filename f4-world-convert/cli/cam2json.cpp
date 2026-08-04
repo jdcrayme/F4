@@ -2,9 +2,10 @@
 //
 // CLI: convert a FreeFalcon .cam campaign archive to open JSON.
 //
-//   cam2json save1.cam                       -> writes save1.world.json
-//   cam2json save1.cam out.json              -> writes out.json
+//   cam2json save1.cam                                -> writes save1.world.json
+//   cam2json save1.cam out.json                       -> writes out.json
 //   cam2json save1.cam out.json --theater korea --terrain korea.terrain.json
+//   cam2json save1.cam out.json --theater-data ./terrdata/objects
 //
 // Mirrors f4-convert's dat2json: thin main() that calls into the library,
 // so all logic is testable in-process.
@@ -12,6 +13,7 @@
 #include <f4/world_convert/cam_archive.hpp>
 #include <f4/world_convert/world_json.hpp>
 #include <f4/world_convert/class_table.hpp>
+#include <f4/world_convert/theater_data.hpp>
 
 #include <cstdio>
 #include <filesystem>
@@ -20,9 +22,16 @@
 #include <string>
 
 int main(int argc, char** argv) {
-    if (argc < 2 || argc > 8) {
+    if (argc < 2 || argc > 12) {
         std::cerr << "usage: cam2json <input.cam> [output.json] "
-                     "[--theater <name>] [--terrain <file>] [--class-table <FALCON4.ct>]\n";
+                     "[--theater <name>] [--terrain <file>] "
+                     "[--class-table <FALCON4.ct>] "
+                     "[--theater-data <dir>]\n"
+                     "  --theater-data: directory containing Falcon4.OCD/.PHD/.PD/"
+                     ".UCD/.VCD/.FED/.FCD (typically <install>/terrdata/objects).\n"
+                     "                  When provided, the world JSON is enriched with\n"
+                     "                  objective class names, airbase ground layouts,\n"
+                     "                  unit class names, and per-group vehicle composition.\n";
         return 2;
     }
     const std::filesystem::path in = argv[1];
@@ -36,6 +45,7 @@ int main(int argc, char** argv) {
 
     f4::world_convert::WorldJsonOptions opts;
     std::filesystem::path explicit_ct;
+    std::filesystem::path theater_data_dir;
     for (int i = 2; i < argc; ++i) {
         const std::string a = argv[i];
         if (a == "--theater" && i + 1 < argc) {
@@ -44,6 +54,8 @@ int main(int argc, char** argv) {
             opts.terrain_file = argv[++i];
         } else if (a == "--class-table" && i + 1 < argc) {
             explicit_ct = argv[++i];
+        } else if (a == "--theater-data" && i + 1 < argc) {
+            theater_data_dir = argv[++i];
         }
     }
 
@@ -77,6 +89,30 @@ int main(int argc, char** argv) {
         } else {
             std::cerr << "  class_table: FALCON4.ct not found — objectives will"
                       << " lack objective_type (use --class-table to specify)\n";
+        }
+
+        // Optional: load the theater object database (Falcon4.OCD/PHD/PD/
+        // UCD/VCD/FED/FCD) from the user-supplied directory. This enriches
+        // the world JSON with objective class names, airbase ground layouts,
+        // unit class names, and per-group vehicle composition. Missing files
+        // are skipped silently — only the files that exist are loaded.
+        f4::world_convert::TheaterObjectDatabase theater_db;
+        if (!theater_data_dir.empty()) {
+            theater_db.load_all(theater_data_dir);
+            if (theater_db.loaded()) {
+                opts.theater_db = &theater_db;
+                std::cerr << "  theater_db: loaded ("
+                          << "OCD=" << theater_db.objectives.size() << ", "
+                          << "PHD=" << theater_db.pt_headers.size() << ", "
+                          << "PD="  << theater_db.pt_data.size() << ", "
+                          << "UCD=" << theater_db.units.size() << ", "
+                          << "VCD=" << theater_db.vehicles.size() << ", "
+                          << "FCD=" << theater_db.features.size() << ", "
+                          << "FED=" << theater_db.feature_entries.size() << ")\n";
+            } else {
+                std::cerr << "  theater_db: no Falcon4.* data files found in "
+                          << theater_data_dir << " — proceeding without\n";
+            }
         }
 
         const std::string json = f4::world_convert::to_world_json(cam, opts);

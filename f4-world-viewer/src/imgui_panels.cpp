@@ -150,6 +150,18 @@ void ViewerApp::draw_imgui() {
             if (ImGui::MenuItem("Install Diagnostics...")) {
                 open_install_diagnostics();
             }
+            ImGui::Separator();
+            // Snapshot Install Files — TEMPORARY diagnostic tool for the
+            // static-data parsing milestone. Walks the install, dumps the
+            // first 8 KB of every interesting Falcon4 data file (PHD/PD/
+            // OCD/UCD/VCD/FED/FCD/AII/ct) as hex+ASCII to a single text
+            // file the user can email back for ground-truth RE. See
+            // Docs/FALCON4_FILE_LAYOUT.md and snapshot.hpp.
+            if (ImGui::MenuItem("Snapshot Install Files...",
+                                 nullptr, false,
+                                 impl_->install.has_value())) {
+                open_snapshot_dialog();
+            }
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("Help")) {

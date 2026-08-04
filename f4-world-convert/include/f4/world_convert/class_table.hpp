@@ -86,6 +86,19 @@ enum : int {
 /// VU_LAST_ENTITY_TYPE — entity_type values start at 100.
 constexpr int VU_LAST_ENTITY_TYPE = 100;
 
+/// Falcon4EntityClassType.dataType values (from classtbl.h). Tells us which
+/// data table to index into via dataPtr. We only need the 4 objective/unit/
+/// vehicle/feature types for now — the rest (weapon, rack, ...) are skipped.
+enum DataType : int {
+    DTYPE_NOTHING    = 0,
+    DTYPE_OBJECTIVE  = 1,
+    DTYPE_UNIT       = 2,
+    DTYPE_VEHICLE    = 3,
+    DTYPE_WEAPON     = 4,
+    DTYPE_FEATURE    = 5,
+    DTYPE_SQUAD_STORES = 6,
+};
+
 /// Unit subtypes for DOMAIN_LAND / TYPE_BATTALION (classtbl.h:319-332).
 enum LandUnitSubtype : int {
     STYPE_LAND_AIR_DEFENSE     = 1,
@@ -143,6 +156,13 @@ struct ClassTableEntry {
     uint8_t cls = 0;         // classInfo_[1]
     uint8_t type = 0;        // classInfo_[2] — ObjectiveType for objectives
     uint8_t stype = 0;       // classInfo_[3]
+
+    // Trailing fields (offset 76-80 in the on-disk Falcon4EntityClassType).
+    // dataType tells us which data table to index into; dataPtr is the
+    // 32-bit (on disk) index into that table. On 64-bit hosts we read it
+    // as uint32_t (the on-disk value is always 32-bit per FF's design).
+    uint8_t  data_type = 0;      // DTYPE_OBJECTIVE / DTYPE_UNIT / DTYPE_VEHICLE / ...
+    uint32_t data_ptr_index = 0; // index into the corresponding data table
 };
 
 /// Human-readable name for a unit subtype. Looks up the appropriate enum
@@ -229,6 +249,15 @@ public:
     /// battalion types (armor/infantry/artillery/supply/engineer/...) and
     /// squadron types (fighter/bomber/transport/awacs/...).
     [[nodiscard]] uint8_t unit_subtype_for(uint16_t entity_type) const noexcept;
+
+    /// Resolve entity_type → data table index. The data_type field tells
+    /// you which theater-data table to look up (objective/unit/vehicle/
+    /// feature); data_ptr_index is the 0-based index into that table.
+    /// Returns false if the entity_type is not found or has no data table
+    /// entry (dataType == DTYPE_NOTHING).
+    [[nodiscard]] bool data_ptr_for(uint16_t entity_type,
+                                    uint8_t& out_data_type,
+                                    uint32_t& out_data_ptr_index) const noexcept;
 
     /// Number of entries loaded.
     [[nodiscard]] std::size_t size() const noexcept { return entries_.size(); }

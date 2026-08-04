@@ -13,6 +13,11 @@
 //   f4-world-viewer --install /path/to/falcon4 --diagnostics
 //                                                         -> print install diagnostics
 //                                                            to stderr + exit (no GUI)
+//   f4-world-viewer --install /path/to/falcon4 --snapshot out.txt
+//                                                         -> write install snapshot
+//                                                            (hex dumps of every
+//                                                             interesting data file)
+//                                                            to out.txt + exit
 //   f4-world-viewer world.json terrain.json --screenshot out.png
 //       Take a screenshot after 1.5 seconds and exit. Useful for headless
 //       smoke tests; on Windows you'd run this from a cmd window.
@@ -64,6 +69,12 @@ int main(int argc, char** argv) {
     // open" issues without having to launch the GUI.
     bool print_diagnostics = false;
 
+    // --snapshot <path> — write install snapshot (hex dumps of every
+    // interesting data file) to <path> and exit. TEMPORARY diagnostic
+    // tool for the static-data parsing milestone. See snapshot.hpp.
+    std::string snapshot_path;
+    bool have_snapshot = false;
+
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
         if (a == "--screenshot" && i + 1 < argc) {
@@ -95,6 +106,9 @@ int main(int argc, char** argv) {
             have_hex_inspect = true;
         } else if (a == "--diagnostics") {
             print_diagnostics = true;
+        } else if (a == "--snapshot" && i + 1 < argc) {
+            snapshot_path = argv[++i];
+            have_snapshot = true;
         } else if (positional == 0) {
             try { app.load_world_json(a); }
             catch (const std::exception& e) { std::cerr << "world load: " << e.what() << "\n"; }
@@ -136,6 +150,22 @@ int main(int argc, char** argv) {
     if (print_diagnostics) {
         std::cerr << app.install_diagnostics_text();
         return 0;
+    }
+
+    // Write an install snapshot to disk + exit (no GUI). TEMPORARY
+    // diagnostic tool for the static-data parsing milestone — dumps
+    // the first 8 KB of every interesting Falcon4 data file as a hex
+    // dump, so the dev team can ground-truth binary struct layouts.
+    // The user runs: f4-world-viewer --install /path --snapshot out.txt
+    if (have_snapshot) {
+        std::string err;
+        if (app.snapshot_install_files(snapshot_path, &err)) {
+            std::cerr << "snapshot written to: " << snapshot_path << "\n";
+            return 0;
+        } else {
+            std::cerr << "snapshot failed: " << err << "\n";
+            return 1;
+        }
     }
 
     if (have_initial_camera) {

@@ -18,6 +18,7 @@
 
 #include "viewer_state.hpp"
 #include "diagnostics.hpp"
+#include "snapshot.hpp"
 
 #include <f4/install/installation.hpp>
 #include <f4/terrain_convert/terrain_converter.hpp>
@@ -27,6 +28,8 @@
 #include <f4/world_convert/world_json.hpp>
 
 #include <algorithm>
+#include <chrono>
+#include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -278,6 +281,67 @@ void ViewerApp::open_install_diagnostics() {
         impl_->install_diagnostics_text = build_install_diagnostics(*impl_->install);
     }
     impl_->install_diagnostics_open = true;
+}
+
+void ViewerApp::open_snapshot_dialog() {
+    if (!impl_->install) {
+        impl_->last_error =
+            "No install set. Use File > Set Install Path... to pick your "
+            "Falcon 4.0 install directory first.";
+        show_message_box("No Install Set", impl_->last_error, "warning");
+        return;
+    }
+
+    // Default the save picker to a sensible location: next to the
+    // install root, with a timestamped default filename.
+    const auto ts = []() {
+        using std::chrono::system_clock;
+        const auto now = system_clock::now();
+        const std::time_t t = system_clock::to_time_t(now);
+        std::tm tm{};
+#if defined(_WIN32)
+        gmtime_s(&tm, &t);
+#else
+        gmtime_r(&t, &tm);
+#endif
+        char buf[32];
+        std::strftime(buf, sizeof(buf), "%Y%m%d_%H%M%S", &tm);
+        return std::string(buf);
+    }();
+
+    const auto default_name = "f4_install_snapshot_" + ts + ".txt";
+    auto default_path = impl_->install->root() / default_name;
+
+    auto out = pick_save_file(
+        "Save Install Snapshot",
+        "Text files (*.txt)|All files (*.*)",
+        default_path);
+    if (out.empty()) return;  // user cancelled
+
+    std::string err;
+    if (!snapshot_install_files(out, &err)) {
+        impl_->last_error = "Snapshot failed: " + err;
+        show_message_box("Snapshot Failed", impl_->last_error, "error");
+        return;
+    }
+
+    impl_->status_msg = "Snapshot saved: " + out.string() +
+        " (" + std::to_string(std::filesystem::file_size(out)) + " bytes)";
+    show_message_box("Snapshot Saved",
+        ("Saved install snapshot to:\n" + out.string() +
+         "\n\nMail or upload this file to the dev team — it contains hex "
+         "dumps of every interesting Falcon4 data file in your install.").c_str(),
+        "info");
+}
+
+bool ViewerApp::snapshot_install_files(const std::filesystem::path& output_path,
+                                        std::string* err_out) {
+    if (!impl_->install) {
+        if (err_out) *err_out = "no install set";
+        return false;
+    }
+    SnapshotOptions opts;  // defaults: 8 KB per file, no tail, with listings
+    return write_install_snapshot(*impl_->install, output_path, opts, err_out);
 }
 
 } // namespace f4::viewer

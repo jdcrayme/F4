@@ -101,6 +101,25 @@ public:
     /// install set" message if no install is configured.
     [[nodiscard]] std::string install_diagnostics_text() const;
 
+    /// Open a native save-file dialog and write a snapshot of the
+    /// current install to the chosen path. The snapshot is a plain
+    /// ASCII text file containing hex+ASCII dumps of the first N bytes
+    /// of every interesting Falcon4 data file (Falcon4.PHD, .PD, .OCD,
+    /// .UCD, .VCD, .FED, .FCD, .AII, FALCON4.ct, etc.). Intended for
+    /// sharing with the dev team to ground-truth binary-format reverse
+    /// engineering — see Docs/FALCON4_FILE_LAYOUT.md.
+    ///
+    /// No-op (shows an error in the status bar) if no install is set.
+    /// Throws std::runtime_error on I/O failure.
+    void open_snapshot_dialog();
+
+    /// Write an install snapshot to `output_path` directly (no dialog).
+    /// Used by the --snapshot CLI flag for headless use. Returns true
+    /// on success; on failure, sets `err_out` (if non-null) and returns
+    /// false. No-op (returns false, sets err_out) if no install is set.
+    bool snapshot_install_files(const std::filesystem::path& output_path,
+                                 std::string* err_out = nullptr);
+
     /// Set the initial camera position (grid coordinates) and zoom (pixels
     /// per grid unit). Call before run(). Useful for screenshots and for
     /// launching the viewer focused on a region of interest.

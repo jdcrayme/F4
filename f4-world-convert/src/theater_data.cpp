@@ -1,0 +1,507 @@
+// f4-world-convert/src/theater_data.cpp
+//
+// Implementation of the Falcon4.OCD/PHD/PD/UCD/VCD/FED/FCD parsers.
+// See theater_data.hpp for the file-format documentation and struct sizes.
+
+#include <f4/world_convert/theater_data.hpp>
+
+#include <algorithm>
+#include <cctype>
+#include <cstdio>
+#include <cstring>
+#include <stdexcept>
+#include <string>
+
+namespace f4::world_convert {
+
+namespace {
+
+// ============================================================================
+// I/O helpers
+// ============================================================================
+
+std::vector<uint8_t> read_file(const std::filesystem::path& path) {
+    FILE* fp = std::fopen(path.string().c_str(), "rb");
+    if (!fp) throw std::runtime_error("theater_data: cannot open " + path.string());
+    std::fseek(fp, 0, SEEK_END);
+    const long sz = std::ftell(fp);
+    std::fseek(fp, 0, SEEK_SET);
+    if (sz < 0) { std::fclose(fp); throw std::runtime_error("theater_data: ftell failed"); }
+    std::vector<uint8_t> buf(static_cast<std::size_t>(sz));
+    const std::size_t got = std::fread(buf.data(), 1, buf.size(), fp);
+    std::fclose(fp);
+    if (got != buf.size()) throw std::runtime_error("theater_data: short read on " + path.string());
+    return buf;
+}
+
+// ============================================================================
+// Cursor — sequential little-endian reader. Bounds-checked.
+// ============================================================================
+
+struct Cursor {
+    const uint8_t* p;
+    const uint8_t* end;
+    explicit Cursor(const std::vector<uint8_t>& buf)
+        : p(buf.data()), end(buf.data() + buf.size()) {}
+
+    [[nodiscard]] bool eof() const noexcept { return p >= end; }
+    [[nodiscard]] std::size_t remaining() const noexcept {
+        return static_cast<std::size_t>(end - p);
+    }
+
+    uint8_t  u8 () { check(1); uint8_t  v = p[0];                          p += 1; return v; }
+    int8_t   s8 () { check(1); int8_t   v = static_cast<int8_t>(p[0]);     p += 1; return v; }
+    uint16_t u16() { check(2); uint16_t v; std::memcpy(&v, p, 2);          p += 2; return v; }
+    int16_t  s16() { check(2); int16_t  v; std::memcpy(&v, p, 2);          p += 2; return v; }
+    uint32_t u32() { check(4); uint32_t v; std::memcpy(&v, p, 4);          p += 4; return v; }
+    int32_t  s32() { check(4); int32_t  v; std::memcpy(&v, p, 4);          p += 4; return v; }
+    float    f32() { check(4); float    v; std::memcpy(&v, p, 4);          p += 4; return v; }
+
+    void read_bytes(uint8_t* dst, std::size_t n) {
+        check(n);
+        std::memcpy(dst, p, n);
+        p += n;
+    }
+
+private:
+    void check(std::size_t n) const {
+        if (static_cast<std::size_t>(end - p) < n) {
+            throw std::runtime_error("theater_data: unexpected end of file");
+        }
+    }
+};
+
+// ============================================================================
+// FF-DB Control: read entries count, handling the trailing-short fallback.
+// ============================================================================
+
+int16_t read_entry_count(const std::vector<uint8_t>& buf, std::size_t record_size) {
+    if (buf.size() < 2) throw std::runtime_error("theater_data: file too small for header");
+    int16_t entries;
+    std::memcpy(&entries, buf.data(), 2);
+
+    // FF-DB Control: if header says 0, the real count is in the last 2 bytes.
+    if (entries == 0) {
+        if (buf.size() < 4) throw std::runtime_error("theater_data: FF-DB file too small");
+        std::memcpy(&entries, buf.data() + buf.size() - 2, 2);
+        if (entries <= 0) {
+            throw std::runtime_error("theater_data: FF-DB Control: trailing count also 0");
+        }
+        // Sanity check: file should be at least 2 + entries * record_size + 2
+        const std::size_t expected = 2 + static_cast<std::size_t>(entries) * record_size + 2;
+        if (buf.size() < expected) {
+            throw std::runtime_error("theater_data: FF-DB Control: file too small for "
+                                     + std::to_string(entries) + " entries");
+        }
+        return entries;
+    }
+
+    if (entries < 0) throw std::runtime_error("theater_data: negative entry count");
+
+    // Standard format: file size must equal 2 + entries * record_size.
+    const std::size_t expected = 2 + static_cast<std::size_t>(entries) * record_size;
+    if (buf.size() < expected) {
+        throw std::runtime_error("theater_data: file too small for "
+                                 + std::to_string(entries) + " entries (expected "
+                                 + std::to_string(expected) + ", got "
+                                 + std::to_string(buf.size()) + ")");
+    }
+    return entries;
+}
+
+// ============================================================================
+// char-array → std::string helper. Trims trailing NULs.
+// ============================================================================
+
+std::string trim_name(const uint8_t* src, std::size_t len) {
+    std::size_t actual = 0;
+    while (actual < len && src[actual] != 0) ++actual;
+    return std::string(reinterpret_cast<const char*>(src), actual);
+}
+
+} // namespace
+
+// ============================================================================
+// Helpers — point/movement type names
+// ============================================================================
+
+const char* point_type_name(uint8_t pt) noexcept {
+    switch (pt) {
+        case PT_RUNWAY:        return "Runway";
+        case PT_TAKEOFF:       return "Takeoff";
+        case PT_TAXI:          return "Taxi";
+        case PT_SAM:           return "SAM";
+        case PT_ARTILLERY:     return "Artillery";
+        case PT_AAA:           return "AAA";
+        case PT_RADAR:         return "Radar";
+        case PT_RUNWAY_DIM:    return "Runway Dim";
+        case PT_SUPPORT:       return "Support";
+        case PT_STATIC_RADAR:  return "Static Radar";
+        case PT_SMALL_PARK:    return "Small Park";
+        case PT_LARGE_PARK:    return "Large Park";
+        case PT_SMALL_DOCK:    return "Small Dock";
+        case PT_LARGE_DOCK:    return "Large Dock";
+        case PT_TAKE_RUNWAY:   return "Take Runway";
+        case PT_HELICOPTER:    return "Helicopter";
+        case PT_FOLLOW_ME:     return "Follow Me";
+        case PT_TRACK:         return "Track";
+        case PT_CRIT_TAXI:     return "Crit Taxi";
+        default:               return "Unknown";
+    }
+}
+
+const char* point_list_type_name(uint8_t plt) noexcept {
+    switch (plt) {
+        case PLT_RUNWAY:        return "Runway";
+        case PLT_SAM:           return "SAM";
+        case PLT_ARTILLERY:     return "Artillery";
+        case PLT_AAA:           return "AAA";
+        case PLT_RUNWAY_DIM:    return "Runway Dim";
+        case PLT_STATIC_RADAR:  return "Static Radar";
+        case PLT_PARK:          return "Parking";
+        case PLT_RUNWAY_LT:     return "Runway Left";
+        case PLT_RUNWAY_RT:     return "Runway Right";
+        case PLT_HELICOPTER:    return "Helicopter";
+        case PLT_FOLLOW_ME:     return "Follow Me";
+        case PLT_DOCK:          return "Dock";
+        case PLT_TRACK:         return "Track";
+        default:                return "Unknown";
+    }
+}
+
+const char* movement_type_name(int32_t mt) noexcept {
+    switch (mt) {
+        case 0: return "NoMove";
+        case 1: return "Foot";
+        case 2: return "Wheeled";
+        case 3: return "Tracked";
+        case 4: return "LowAir";
+        case 5: return "Air";
+        case 6: return "Naval";
+        case 7: return "Rail";
+        default: return "Unknown";
+    }
+}
+
+// ============================================================================
+// File finders — case-insensitive fallback for cross-platform
+// ============================================================================
+
+std::filesystem::path
+find_theater_file(const std::filesystem::path& base_path,
+                  const std::string& ext) {
+    // 1. base_path + "." + ext
+    {
+        auto p = base_path;
+        p += ".";
+        p += ext;
+        if (std::filesystem::exists(p)) return p;
+    }
+    // 2. base_path verbatim
+    if (std::filesystem::exists(base_path)) return base_path;
+
+    // 3. Case-insensitive search in base_path's parent directory.
+    //    Look for any file matching "<stem>.<ext>" case-insensitively.
+    const auto parent = base_path.parent_path().empty()
+        ? std::filesystem::current_path()
+        : base_path.parent_path();
+    const auto stem = base_path.filename().string();
+    if (stem.empty()) return {};
+    if (parent.empty() || !std::filesystem::exists(parent)) return {};
+
+    std::string stem_lower = stem;
+    std::string ext_lower = ext;
+    std::transform(stem_lower.begin(), stem_lower.end(), stem_lower.begin(),
+                   [](unsigned char c) { return std::tolower(c); });
+    std::transform(ext_lower.begin(), ext_lower.end(), ext_lower.begin(),
+                   [](unsigned char c) { return std::tolower(c); });
+
+    for (const auto& entry : std::filesystem::directory_iterator(parent)) {
+        if (!entry.is_regular_file()) continue;
+        auto name = entry.path().filename().string();
+        std::transform(name.begin(), name.end(), name.begin(),
+                       [](unsigned char c) { return std::tolower(c); });
+        if (name == stem_lower + "." + ext_lower) {
+            return entry.path();
+        }
+    }
+    return {};
+}
+
+// ============================================================================
+// Per-file loaders
+// ============================================================================
+
+void load_objective_data(const std::filesystem::path& base_path,
+                         ObjectiveClassTable& out) {
+    const auto path = find_theater_file(base_path, "OCD");
+    if (path.empty()) throw std::runtime_error("theater_data: Falcon4.OCD not found");
+    const auto buf = read_file(path);
+    const int16_t n = read_entry_count(buf, OCD_RECORD_SIZE);
+
+    Cursor c(buf);
+    c.p = buf.data() + 2;  // skip the 2-byte count
+
+    out.entries.clear();
+    out.entries.reserve(static_cast<std::size_t>(n));
+    for (int16_t i = 0; i < n; ++i) {
+        ObjectiveClassData e;
+        e.index         = c.s16();
+        uint8_t name_buf[20];
+        c.read_bytes(name_buf, 20);
+        e.name          = trim_name(name_buf, 20);
+        e.data_rate     = c.s16();
+        e.deag_distance = c.s16();
+        e.pt_data_index = c.s16();
+        c.read_bytes(e.detection.data(), TD_MOVEMENT_TYPES);
+        c.read_bytes(e.damage_mod.data(), TD_OTHER_DAM + 1);
+        // 1 byte of padding after DamageMod[11] to align IconIndex to offset 48
+        // within the entry (struct uses default 2-byte alignment; DamageMod
+        // ends at offset 47 → next 2-byte-aligned slot is 48).
+        c.p += 1;
+        e.icon_index    = c.s16();
+        e.features      = c.u8();
+        e.radar_feature = c.u8();
+        e.first_feature = c.s16();
+        out.entries.push_back(std::move(e));
+    }
+}
+
+void load_pt_header_data(const std::filesystem::path& base_path,
+                         PtHeaderTable& out) {
+    const auto path = find_theater_file(base_path, "PHD");
+    if (path.empty()) throw std::runtime_error("theater_data: Falcon4.PHD not found");
+    const auto buf = read_file(path);
+    const int16_t n = read_entry_count(buf, PHD_RECORD_SIZE);
+
+    Cursor c(buf);
+    c.p = buf.data() + 2;
+
+    out.entries.clear();
+    out.entries.reserve(static_cast<std::size_t>(n));
+    for (int16_t i = 0; i < n; ++i) {
+        PtHeaderData e;
+        e.obj_id     = c.s16();
+        e.type       = c.u8();
+        e.count      = c.u8();
+        c.read_bytes(e.features.data(), TD_MAX_FEAT_DEPEND);
+        e.data       = c.s16();
+        e.sin_heading = c.f32();
+        e.cos_heading = c.f32();
+        e.first      = c.s16();
+        e.tex_idx    = c.s16();
+        e.runway_num = c.s8();
+        e.ltrt       = c.s8();
+        e.next_header = c.s16();
+        // 1 byte of trailing padding to align struct size to 4 (largest
+        // member is float, so struct size must be a multiple of 4).
+        c.p += 1;
+        out.entries.push_back(std::move(e));
+    }
+}
+
+void load_pt_data(const std::filesystem::path& base_path,
+                  PtDataTable& out) {
+    const auto path = find_theater_file(base_path, "PD");
+    if (path.empty()) throw std::runtime_error("theater_data: Falcon4.PD not found");
+    const auto buf = read_file(path);
+    const int16_t n = read_entry_count(buf, PD_RECORD_SIZE);
+
+    Cursor c(buf);
+    c.p = buf.data() + 2;
+
+    out.entries.clear();
+    out.entries.reserve(static_cast<std::size_t>(n));
+    for (int16_t i = 0; i < n; ++i) {
+        PtData e;
+        e.x_offset = c.f32();
+        e.y_offset = c.f32();
+        e.type     = c.u8();
+        e.flags    = c.u8();
+        // The struct's on-disk size is 12 bytes (2 bytes of trailing padding
+        // for 4-byte float alignment). Skip the padding.
+        c.p += 2;
+        out.entries.push_back(std::move(e));
+    }
+}
+
+void load_unit_data(const std::filesystem::path& base_path,
+                    UnitClassTable& out) {
+    const auto path = find_theater_file(base_path, "UCD");
+    if (path.empty()) throw std::runtime_error("theater_data: Falcon4.UCD not found");
+    const auto buf = read_file(path);
+    const int16_t n = read_entry_count(buf, UCD_RECORD_SIZE);
+
+    Cursor c(buf);
+    c.p = buf.data() + 2;
+
+    out.entries.clear();
+    out.entries.reserve(static_cast<std::size_t>(n));
+    for (int16_t i = 0; i < n; ++i) {
+        UnitClassData e;
+        e.index = c.s16();
+        for (int j = 0; j < TD_VEHICLE_GROUPS_PER_UNIT; ++j) e.num_elements[j] = c.s32();
+        for (int j = 0; j < TD_VEHICLE_GROUPS_PER_UNIT; ++j) e.vehicle_type[j] = c.s16();
+        for (int j = 0; j < TD_VEHICLE_GROUPS_PER_UNIT; ++j)
+            c.read_bytes(e.vehicle_class[j].data(), 8);
+        e.flags = c.u16();
+        uint8_t name_buf[20];
+        c.read_bytes(name_buf, 20);
+        e.name = trim_name(name_buf, 20);
+        // MoveType enum is 4 bytes on disk (default enum underlying type = int)
+        e.movement_type = c.s32();
+        e.movement_speed = c.s16();
+        e.max_range      = c.s16();
+        e.fuel           = c.s32();
+        e.rate           = c.s16();
+        e.pt_data_index  = c.s16();
+        c.read_bytes(e.scores.data(), TD_MAXIMUM_ROLES);
+        e.role           = c.u8();
+        c.read_bytes(e.hit_chance.data(), TD_MOVEMENT_TYPES);
+        c.read_bytes(e.strength.data(), TD_MOVEMENT_TYPES);
+        c.read_bytes(e.range.data(), TD_MOVEMENT_TYPES);
+        c.read_bytes(e.detection.data(), TD_MOVEMENT_TYPES);
+        c.read_bytes(e.damage_mod.data(), TD_OTHER_DAM + 1);
+        e.radar_vehicle  = c.u8();
+        e.special_index  = c.s16();
+        e.icon_index     = c.s16();
+        out.entries.push_back(std::move(e));
+    }
+}
+
+void load_vehicle_data(const std::filesystem::path& base_path,
+                       VehicleClassTable& out) {
+    const auto path = find_theater_file(base_path, "VCD");
+    if (path.empty()) throw std::runtime_error("theater_data: Falcon4.VCD not found");
+    const auto buf = read_file(path);
+    const int16_t n = read_entry_count(buf, VCD_RECORD_SIZE);
+
+    Cursor c(buf);
+    c.p = buf.data() + 2;
+
+    out.entries.clear();
+    out.entries.reserve(static_cast<std::size_t>(n));
+    for (int16_t i = 0; i < n; ++i) {
+        VehicleClassData e;
+        e.index            = c.s16();
+        e.hit_points       = c.s16();
+        e.flags            = c.u32();
+        uint8_t name_buf[15];
+        c.read_bytes(name_buf, 15);
+        e.name = trim_name(name_buf, 15);
+        uint8_t nctr_buf[5];
+        c.read_bytes(nctr_buf, 5);
+        e.nctr = trim_name(nctr_buf, 5);
+        e.rcs_factor       = c.f32();
+        e.max_wt           = c.s32();
+        e.empty_wt         = c.s32();
+        e.fuel_wt          = c.s32();
+        e.fuel_econ        = c.s16();
+        e.engine_sound     = c.s16();
+        e.high_alt         = c.s16();
+        e.low_alt          = c.s16();
+        e.cruise_alt       = c.s16();
+        e.max_speed        = c.s16();
+        e.radar_type       = c.s16();
+        e.number_of_pilots = c.s16();
+        e.rack_flags       = c.u16();
+        e.visible_flags    = c.u16();
+        e.callsign_index   = c.u8();
+        e.callsign_slots   = c.u8();
+        c.read_bytes(e.hit_chance.data(), TD_MOVEMENT_TYPES);
+        c.read_bytes(e.strength.data(), TD_MOVEMENT_TYPES);
+        c.read_bytes(e.range.data(), TD_MOVEMENT_TYPES);
+        c.read_bytes(e.detection.data(), TD_MOVEMENT_TYPES);
+        for (int j = 0; j < TD_HARDPOINT_MAX; ++j) e.weapon[j]  = c.s16();
+        for (int j = 0; j < TD_HARDPOINT_MAX; ++j) e.weapons[j] = c.u8();
+        c.read_bytes(e.damage_mod.data(), TD_OTHER_DAM + 1);
+        out.entries.push_back(std::move(e));
+    }
+}
+
+void load_feature_data(const std::filesystem::path& base_path,
+                       FeatureClassTable& out) {
+    const auto path = find_theater_file(base_path, "FCD");
+    if (path.empty()) throw std::runtime_error("theater_data: Falcon4.FCD not found");
+    const auto buf = read_file(path);
+    const int16_t n = read_entry_count(buf, FCD_RECORD_SIZE);
+
+    Cursor c(buf);
+    c.p = buf.data() + 2;
+
+    out.entries.clear();
+    out.entries.reserve(static_cast<std::size_t>(n));
+    for (int16_t i = 0; i < n; ++i) {
+        FeatureClassData e;
+        e.index        = c.s16();
+        e.repair_time  = c.s16();
+        e.priority     = c.u8();
+        e.flags        = c.u16();
+        uint8_t name_buf[20];
+        c.read_bytes(name_buf, 20);
+        e.name = trim_name(name_buf, 20);
+        e.hit_points   = c.s16();
+        e.height       = c.s16();
+        e.angle        = c.f32();
+        e.radar_type   = c.s16();
+        c.read_bytes(e.detection.data(), TD_MOVEMENT_TYPES);
+        c.read_bytes(e.damage_mod.data(), TD_OTHER_DAM + 1);
+        out.entries.push_back(std::move(e));
+    }
+}
+
+void load_feature_entry_data(const std::filesystem::path& base_path,
+                             FeatureEntryTable& out) {
+    const auto path = find_theater_file(base_path, "FED");
+    if (path.empty()) throw std::runtime_error("theater_data: Falcon4.FED not found");
+    const auto buf = read_file(path);
+    const int16_t n = read_entry_count(buf, FED_RECORD_SIZE);
+
+    Cursor c(buf);
+    c.p = buf.data() + 2;
+
+    out.entries.clear();
+    out.entries.reserve(static_cast<std::size_t>(n));
+    for (int16_t i = 0; i < n; ++i) {
+        FeatureEntryData e;
+        e.index    = c.s16();
+        e.flags    = c.u16();
+        c.read_bytes(e.e_class.data(), 8);
+        e.value    = c.u8();
+        e.offset_x = c.f32();
+        e.offset_y = c.f32();
+        e.offset_z = c.f32();
+        e.facing   = c.s16();
+        // The struct's on-disk size is 32 bytes, but the sum of fields is:
+        // 2 + 2 + 8 + 1 + 12 + 2 = 27 bytes. There are 5 bytes of trailing
+        // padding to align the struct size to 4 (the largest member is float,
+        // 4-byte aligned). Skip the padding.
+        c.p += (FED_RECORD_SIZE - 27);
+        out.entries.push_back(std::move(e));
+    }
+}
+
+// ============================================================================
+// TheaterObjectDatabase — convenience bulk loader
+// ============================================================================
+
+void TheaterObjectDatabase::load_all(const std::filesystem::path& dir) {
+    const auto base = dir / "Falcon4";
+    auto try_load = [&](void (*fn)(const std::filesystem::path&,
+                                    ObjectiveClassTable&),
+                        ObjectiveClassTable& tbl) {
+        try { fn(base, tbl); } catch (const std::exception&) { /* skip */ }
+    };
+    // We need a separate lambda per table type because the function pointer
+    // signature differs per table. Easier to just inline each call.
+    try { load_objective_data     (base, objectives);      } catch (const std::exception&) {}
+    try { load_pt_header_data     (base, pt_headers);      } catch (const std::exception&) {}
+    try { load_pt_data            (base, pt_data);         } catch (const std::exception&) {}
+    try { load_unit_data          (base, units);           } catch (const std::exception&) {}
+    try { load_vehicle_data       (base, vehicles);        } catch (const std::exception&) {}
+    try { load_feature_data       (base, features);        } catch (const std::exception&) {}
+    try { load_feature_entry_data (base, feature_entries); } catch (const std::exception&) {}
+    (void)try_load;  // silence unused-variable warning
+}
+
+} // namespace f4::world_convert

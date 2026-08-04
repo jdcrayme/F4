@@ -153,6 +153,26 @@ std::string to_world_json(const CamArchive& cam, const WorldJsonOptions& opts) {
                     o << "      {\"type\": " << ob.type
                       << ", \"type_name\": \"" << json_escape(objective_type_name(static_cast<int16_t>(obj_type))) << "\""
                       << ", \"objective_type\": " << static_cast<int>(obj_type);
+                    // Theater-db enrichment (Falcon4.OCD): emit the objective's
+                    // class name (e.g. "Airbase A-3", "Bridge B-12") and the
+                    // # of features (buildings, runways, etc.). For airbases,
+                    // also walk the PtHeader chain to emit ground layout.
+                    if (opts.theater_db && opts.theater_db->objectives.loaded()
+                        && obj_type > 0) {
+                        const auto* ocd = opts.theater_db->objectives.at(
+                            static_cast<std::size_t>(obj_type) - 1);
+                        // Note: ObjDataTable is indexed by (ObjectiveType - 1)
+                        // in FreeFalcon — entry 0 is "Airbase" (type 1), etc.
+                        // (See entity.cpp:234-235: builds NumObjectiveTypes from
+                        // the largest classInfo_[VU_TYPE] value seen.)
+                        if (ocd) {
+                            o << ", \"class_name\": \"" << json_escape(ocd->name) << "\""
+                              << ", \"features_count\": " << static_cast<int>(ocd->features)
+                              << ", \"radar_feature\": " << static_cast<int>(ocd->radar_feature)
+                              << ", \"deag_distance\": " << ocd->deag_distance
+                              << ", \"pt_data_index\": " << ocd->pt_data_index;
+                        }
+                    }
                     o << ", \"x\": " << ob.x
                       << ", \"y\": " << ob.y
                       << ", \"z\": " << (std::isnan(ob.z) ? 0.0f : ob.z)
@@ -182,6 +202,55 @@ std::string to_world_json(const CamArchive& cam, const WorldJsonOptions& opts) {
                         o << "]";
                     } else {
                         o << ", \"has_radar\": false";
+                    }
+                    // Airbase ground layout (Falcon4.PHD/PD): walk the
+                    // PtHeader chain starting at pt_data_index, emitting
+                    // each list (runway/taxiway/parking) as a sub-array
+                    // of points. Only emitted when theater_db is loaded
+                    // AND we have an OCD entry with a non-zero pt_data_index.
+                    if (opts.theater_db && opts.theater_db->objectives.loaded()
+                        && opts.theater_db->pt_headers.loaded()
+                        && opts.theater_db->pt_data.loaded()
+                        && obj_type > 0) {
+                        const auto* ocd = opts.theater_db->objectives.at(
+                            static_cast<std::size_t>(obj_type) - 1);
+                        if (ocd && ocd->pt_data_index > 0) {
+                            o << ", \"ground_layout\": [";
+                            // Walk the nextHeader chain. Hard cap at 64 hops
+                            // to defend against cyclic/buggy data.
+                            int16_t hdr_idx = ocd->pt_data_index;
+                            bool first_hdr = true;
+                            for (int hop = 0; hop < 64 && hdr_idx > 0; ++hop) {
+                                const auto* hdr = opts.theater_db->pt_headers.at(
+                                    static_cast<std::size_t>(hdr_idx));
+                                if (!hdr) break;
+                                if (!first_hdr) o << ", ";
+                                first_hdr = false;
+                                o << "{\"type\": " << static_cast<int>(hdr->type)
+                                  << ", \"type_name\": \"" << json_escape(point_list_type_name(hdr->type)) << "\""
+                                  << ", \"count\": " << static_cast<int>(hdr->count)
+                                  << ", \"runway_num\": " << static_cast<int>(hdr->runway_num)
+                                  << ", \"heading\": " << hdr->data
+                                  << ", \"sin_h\": " << hdr->sin_heading
+                                  << ", \"cos_h\": " << hdr->cos_heading
+                                  << ", \"points\": [";
+                                for (int pi = 0; pi < hdr->count; ++pi) {
+                                    const auto* pt = opts.theater_db->pt_data.at(
+                                        static_cast<std::size_t>(hdr->first) + pi);
+                                    if (!pt) break;
+                                    if (pi) o << ", ";
+                                    o << "{\"x\": " << pt->x_offset
+                                      << ", \"y\": " << pt->y_offset
+                                      << ", \"type\": " << static_cast<int>(pt->type)
+                                      << ", \"type_name\": \"" << json_escape(point_type_name(pt->type)) << "\""
+                                      << ", \"flags\": " << static_cast<int>(pt->flags)
+                                      << "}";
+                                }
+                                o << "]}";
+                                hdr_idx = hdr->next_header;
+                            }
+                            o << "]";
+                        }
                     }
                     o << ", \"links\": [";
                     // Emit the link data (road/rail network). Each link is
@@ -236,6 +305,61 @@ std::string to_world_json(const CamArchive& cam, const WorldJsonOptions& opts) {
                     }
                     o << ", \"unit_subtype\": " << static_cast<int>(unit_sub)
                       << ", \"domain\": " << static_cast<int>(unit_domain);
+                    // Theater-db enrichment (Falcon4.UCD + VCD): emit the
+                    // unit's class name (e.g. "Armor", "Infantry", "Fighter
+                    // Squadron") and the per-group vehicle composition.
+                    // Looked up via class_table.data_ptr_for(entity_type) →
+                    // DTYPE_UNIT → index into UCD.
+                    if (opts.theater_db && opts.theater_db->units.loaded()
+                        && opts.class_table && opts.class_table->loaded()) {
+                        uint8_t dt = 0;
+                        uint32_t dp = 0;
+                        if (opts.class_table->data_ptr_for(u.entity_type, dt, dp)
+                            && dt == DTYPE_UNIT) {
+                            const auto* ucd = opts.theater_db->units.at(dp);
+                            if (ucd) {
+                                o << ", \"class_name\": \"" << json_escape(ucd->name) << "\""
+                                  << ", \"movement_type\": " << ucd->movement_type
+                                  << ", \"movement_type_name\": \"" << json_escape(movement_type_name(ucd->movement_type)) << "\""
+                                  << ", \"movement_speed\": " << ucd->movement_speed
+                                  << ", \"max_range\": " << ucd->max_range
+                                  << ", \"fuel\": " << ucd->fuel
+                                  << ", \"pt_data_index\": " << ucd->pt_data_index;
+                                // Vehicle composition: 16 groups, each with
+                                // a vehicle-type index (into VCD) and a count.
+                                // Combine with roster to get live per-group
+                                // counts. Emit as array of group objects.
+                                o << ", \"vehicle_groups\": [";
+                                bool first_grp = true;
+                                for (int g = 0; g < TD_VEHICLE_GROUPS_PER_UNIT; ++g) {
+                                    const int32_t n_elements = ucd->num_elements[g];
+                                    const int16_t vt = ucd->vehicle_type[g];
+                                    if (n_elements <= 0 || vt <= 0) continue;
+                                    if (!first_grp) o << ", ";
+                                    first_grp = false;
+                                    // Decode live count from roster (2 bits/group)
+                                    const int live = (u.roster >> (g * 2)) & 0x03;
+                                    o << "{\"group\": " << g
+                                      << ", \"vehicle_type\": " << vt
+                                      << ", \"count\": " << n_elements
+                                      << ", \"live_count\": " << live;
+                                    // Look up vehicle name from VCD
+                                    if (opts.theater_db->vehicles.loaded()) {
+                                        const auto* vcd = opts.theater_db->vehicles.at(
+                                            static_cast<std::size_t>(vt) - VU_LAST_ENTITY_TYPE);
+                                        if (vcd) {
+                                            o << ", \"vehicle_name\": \"" << json_escape(vcd->name) << "\""
+                                              << ", \"vehicle_nctr\": \"" << json_escape(vcd->nctr) << "\""
+                                              << ", \"hit_points\": " << vcd->hit_points
+                                              << ", \"max_speed\": " << vcd->max_speed;
+                                        }
+                                    }
+                                    o << "}";
+                                }
+                                o << "]";
+                            }
+                        }
+                    }
                     // roster: 32-bit packed per-group vehicle count (2 bits
                     // per group, 16 groups, max 3 per group). GetNumVehicles(vg)
                     // = (roster >> (vg*2)) & 0x03. Live campaign state.

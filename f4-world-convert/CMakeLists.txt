@@ -22,6 +22,7 @@ add_library(f4-world-convert STATIC
     src/unit_decoder.cpp
     src/team_decoder.cpp
     src/class_table.cpp
+    src/theater_data.cpp
     src/world_json.cpp
 )
 target_include_directories(f4-world-convert

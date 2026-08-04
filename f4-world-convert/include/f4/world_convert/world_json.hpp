@@ -9,6 +9,7 @@
 #include <f4/world_convert/cam_archive.hpp>
 #include <f4/world_convert/campaign_decoder.hpp>
 #include <f4/world_convert/class_table.hpp>
+#include <f4/world_convert/theater_data.hpp>
 #include <string>
 
 namespace f4::world_convert {
@@ -27,6 +28,24 @@ struct WorldJsonOptions {
     /// emitted as the "objective_type" field. Without it, objectives only
     /// carry the raw entity_type and the viewer can't pick icons.
     const ClassTable* class_table = nullptr;
+    /// Optional theater object database (Falcon4.OCD/PHD/PD/UCD/VCD/FED/FCD).
+    /// When loaded, enriches the world JSON with:
+    ///   - Objective class names ("Airbase A-3", "Bridge B-12", ...) — pulled
+    ///     from Falcon4.OCD.Name using the class-table-resolved objective
+    ///     type as the index.
+    ///   - Airbase ground layout — runway/taxiway/parking point lists pulled
+    ///     from Falcon4.PHD/PD using ObjClassData.pt_data_index. Lets the
+    ///     viewer draw runways and parking spots at real positions.
+    ///   - Unit class names ("Armor", "Infantry", ...) — pulled from
+    ///     Falcon4.UCD.Name using the class-table-resolved unit subclass
+    ///     index. Without this, units only carry their (domain, subtype)
+    ///     pair (e.g. "Armor") but not their full class name (e.g. "M1A2
+    ///     Abrams Tank Platoon").
+    ///   - Vehicle class composition (via Falcon4.VCD) — gives per-vehicle
+    ///     hit points, fuel, weapons, RCS, etc. Combined with UnitClassData's
+    ///     num_elements[] and vehicle_type[], this fully resolves a unit's
+    ///     vehicle roster.
+    const TheaterObjectDatabase* theater_db = nullptr;
 };
 
 /// Build the world JSON document from a loaded .cam archive.

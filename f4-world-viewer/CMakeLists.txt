@@ -108,7 +108,11 @@ set(TINYFILEDIALOGS_SOURCES
 #   install_flow.cpp    — set_install_path* / open_campaign_dialog /
 #                         load_campaign_from_install / install_diagnostics_text
 #                         / open_install_diagnostics / open_hex_inspector_with_file
+#                         / open_snapshot_dialog / snapshot_install_files
 #   diagnostics.cpp     — build_install_diagnostics / build_campaign_load_error
+#   snapshot.cpp        — build_install_snapshot / write_install_snapshot
+#                         (TEMPORARY diagnostic tool for the static-data
+#                          parsing milestone; see snapshot.hpp)
 #   canvas.cpp          — handle_input / draw_canvas (Raylib 2D render)
 #   imgui_panels.cpp    — draw_imgui (menus, layers, legend, inspector, modals)
 #                         + open_file_dialog (legacy text-input modal)
@@ -122,6 +126,7 @@ add_library(f4_world_viewer STATIC
     src/file_ops.cpp
     src/install_flow.cpp
     src/diagnostics.cpp
+    src/snapshot.cpp
     src/canvas.cpp
     src/imgui_panels.cpp
     src/file_dialog.cpp
