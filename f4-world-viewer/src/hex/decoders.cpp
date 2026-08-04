@@ -2,7 +2,9 @@
 
 #include <f4/viewer/decoders.hpp>
 
+#include <f4/viewer/enum_text.hpp>   // domain_name, vu_class_name, data_type_name
 #include <f4/world_convert/cam_archive.hpp>
+#include <f4/world_convert/class_table.hpp>   // unit_subtype_name, DOMAIN_*
 
 #include <algorithm>
 #include <array>
@@ -287,11 +289,26 @@ std::vector<Annotation> decode_falcon4_ct(const HexModel& m) {
         const uint8_t type   = m.byte_at(ci_off + 2);
         const uint8_t stype  = m.byte_at(ci_off + 3);
 
+        // Decode the four classInfo bytes to human-readable names so the
+        // user doesn't have to keep the classtbl.h constants in their head.
+        // The domain+stype pair resolves to a unit-subtype name (e.g.
+        // "Armor" / "Fighter" / "Carrier") via f4-world-convert's lookup.
         std::ostringstream ss;
         ss << "domain=" << static_cast<int>(domain)
-           << " class=" << static_cast<int>(cls)
-           << " type=" << static_cast<int>(type)
-           << " stype=" << static_cast<int>(stype);
+           << " (" << f4::viewer::domain_name(domain) << ")  "
+           << "class=" << static_cast<int>(cls)
+           << " (" << f4::viewer::vu_class_name(cls) << ")  "
+           << "type=" << static_cast<int>(type) << "  "
+           << "stype=" << static_cast<int>(stype);
+        // For unit entries (class == CLASS_UNIT == 6), also resolve the
+        // subtype name. For objective entries (class == 4), `type` is the
+        // ObjectiveType enum (1-39) — we don't decode it here because
+        // the ObjectiveType names live in objective_decoder.hpp, which
+        // would be a heavier include. The user can look up `type` in
+        // the inspector's "Type:" line if they want the name.
+        if (cls == 6 /* CLASS_UNIT */ && stype > 0) {
+            ss << " (" << f4::world_convert::unit_subtype_name(domain, stype) << ")";
+        }
         out.push_back({
             {entry_off, ENTRY_SIZE},
             "entry[" + std::to_string(i) + "] (entity_type " +
@@ -302,6 +319,35 @@ std::vector<Annotation> decode_falcon4_ct(const HexModel& m) {
             "classInfo_[0..3] = (domain, class, type, stype).",
             "field"
         });
+
+        // Annotate the trailing dataType byte (offset 76 within entry) and
+        // the dataPtr index (offset 77, 4 bytes LE). These are the keys
+        // for navigating from a class-table entry to its corresponding
+        // OCD/UCD/VCD/FCD record — without them, the user can't tell
+        // where to look up the per-class metadata.
+        if (entry_off + 81 <= m.size()) {
+            const std::size_t dt_off = entry_off + 76;
+            const std::size_t dp_off = entry_off + 77;
+            const uint8_t dt = m.byte_at(dt_off);
+            const uint32_t dp = static_cast<uint32_t>(m.read_le(dp_off, 4));
+            out.push_back({
+                {dt_off, 1},
+                "entry[" + std::to_string(i) + "].dataType",
+                std::to_string(static_cast<int>(dt)) + " (" +
+                    f4::viewer::data_type_name(dt) + ")",
+                "DataType enum: tells which theater-data table dataPtr "
+                "indexes into (1=OCD, 2=UCD, 3=VCD, 5=FCD).",
+                "field"
+            });
+            out.push_back({
+                {dp_off, 4},
+                "entry[" + std::to_string(i) + "].dataPtr",
+                std::to_string(dp),
+                "Index into the " + std::string(f4::viewer::data_type_name(dt)) +
+                    " table.",
+                "field"
+            });
+        }
     }
     if (num > static_cast<int>(sample_count)) {
         const std::size_t remaining = num - sample_count;

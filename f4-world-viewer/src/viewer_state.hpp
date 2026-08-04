@@ -115,6 +115,15 @@ struct ViewerApp::Impl {
     bool show_grid = false;
     bool show_legend = true;
     bool show_routes = true;       // road/rail network from objective link_data
+    // Visualization overlays — toggled off by default to reduce clutter
+    // when the user just wants to see the strategic picture. Enable
+    // individually to inspect specific layers.
+    bool show_radar_arcs = false;             // 8-wedge detection coverage per radar objective
+    bool show_ground_layout_overlay = true;   // runway/taxi/parking shapes on main canvas (zoom-gated)
+    bool show_unit_destinations = true;       // thin line from unit to (dest_x, dest_y)
+    bool show_waypoints = true;               // unit waypoint polyline + dots
+    bool show_squadron_links = true;          // squadron → home airbase thin line
+    bool show_hierarchy_lines = false;        // battalion → brigade parent lines (planned)
 
     // Status
     std::string status_msg;
@@ -281,6 +290,14 @@ struct ViewerApp::Impl {
 
     /// Fit camera to show the entire theater grid (1024x1024 by default).
     void fit_to_world();
+
+    /// Fit the main canvas to the bounding box of the selected
+    /// objective's ground_layout + features. The bbox is in FEET
+    /// relative to the objective center; we convert to grid units
+    /// (1 grid = 1024 ft) and center the camera on the objective
+    /// with a zoom that fits the bbox with a small margin. No-op
+    /// if the objective has no layout or features.
+    void fit_to_selection_layout();
 };
 
 } // namespace f4::viewer

@@ -59,4 +59,56 @@ void ViewerApp::Impl::fit_to_world() {
     cam_zoom = std::min(zoom_x, zoom_y) * 0.95f;
 }
 
+void ViewerApp::Impl::fit_to_selection_layout() {
+    // Requires a selected objective with ground_layout or features.
+    if (sel_kind != SelectionKind::Objective || sel_index < 0 ||
+        sel_index >= static_cast<int>(world.objectives.size())) return;
+    const auto& obj = world.objectives[sel_index];
+    if (obj.ground_layout.empty() && obj.features.empty()) return;
+
+    // Compute the bbox in FEET relative to objective center.
+    float min_x = 1e30f, min_y = 1e30f, max_x = -1e30f, max_y = -1e30f;
+    bool any = false;
+    for (const auto& gl : obj.ground_layout) {
+        for (const auto& pt : gl.points) {
+            min_x = std::min(min_x, pt.x);  min_y = std::min(min_y, pt.y);
+            max_x = std::max(max_x, pt.x);  max_y = std::max(max_y, pt.y);
+            any = true;
+        }
+    }
+    for (const auto& f : obj.features) {
+        if (f.index == 0 && f.offset_x == 0.0f && f.offset_y == 0.0f) continue;
+        min_x = std::min(min_x, f.offset_x);  min_y = std::min(min_y, f.offset_y);
+        max_x = std::max(max_x, f.offset_x);  max_y = std::max(max_y, f.offset_y);
+        any = true;
+    }
+    if (!any) return;
+
+    // Add a 10% margin so points don't sit on the screen edge.
+    const float margin_x = (max_x - min_x) * 0.10f + 100.0f;
+    const float margin_y = (max_y - min_y) * 0.10f + 100.0f;
+    min_x -= margin_x;  min_y -= margin_y;
+    max_x += margin_x;  max_y += margin_y;
+    const float w_ft = max_x - min_x;
+    const float h_ft = max_y - min_y;
+
+    // Convert feet → grid units (1 grid unit = 1024 ft) and center
+    // the camera on the objective. The bbox is relative to the
+    // objective center, so the world-space center of the bbox is
+    // (obj.x + bbox_center_x / 1024, obj.y + bbox_center_y / 1024).
+    constexpr float FT_PER_GRID = 1024.0f;
+    const float bbox_cx_ft = (min_x + max_x) * 0.5f;
+    const float bbox_cy_ft = (min_y + max_y) * 0.5f;
+    cam_x = static_cast<float>(obj.x) + bbox_cx_ft / FT_PER_GRID;
+    cam_y = static_cast<float>(obj.y) + bbox_cy_ft / FT_PER_GRID;
+    // Zoom: fit the bbox into the window with the margin. Use the
+    // larger of the two zoom values to ensure the whole bbox fits.
+    const float w_grid = w_ft / FT_PER_GRID;
+    const float h_grid = h_ft / FT_PER_GRID;
+    const float zoom_x = (w_grid > 0.0f) ? static_cast<float>(window_w)  / w_grid : 100.0f;
+    const float zoom_y = (h_grid > 0.0f) ? static_cast<float>(window_h)  / h_grid : 100.0f;
+    cam_zoom = std::min(zoom_x, zoom_y) * 0.95f;
+    cam_zoom = std::clamp(cam_zoom, 0.05f, 2000.0f);
+}
+
 } // namespace f4::viewer

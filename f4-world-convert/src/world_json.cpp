@@ -215,6 +215,61 @@ std::string to_world_json(const CamArchive& cam, const WorldJsonOptions& opts) {
                               << ", \"radar_feature\": " << static_cast<int>(ocd->radar_feature)
                               << ", \"deag_distance\": " << ocd->deag_distance
                               << ", \"pt_data_index\": " << ocd->pt_data_index;
+                            // Per-objective feature placements (Falcon4.FED +
+                            // FCD). Walks `ocd->first_feature .. first_feature +
+                            // features - 1` in the FED table. Each FED record's
+                            // `index` field is an entity_type; we match it
+                            // against FCD records' `index` field (both are
+                            // entity_types referring to the same feature class)
+                            // to find the feature's name + hit points.
+                            // The class-table data_ptr_for() lookup is NOT
+                            // reliable here because the fixture's class table
+                            // may not have DTYPE_FEATURE entries for every
+                            // entity_type referenced by FED records — the
+                            // FCD.index ↔ FED.index match is more direct and
+                            // works against any class-table state.
+                            if (ocd->features > 0 && ocd->first_feature > 0
+                                && opts.theater_db->feature_entries.loaded()
+                                && opts.theater_db->features.loaded()) {
+                                o << ", \"features\": [";
+                                bool first_feat = true;
+                                for (int fi = 0; fi < ocd->features; ++fi) {
+                                    const auto* fed = opts.theater_db->feature_entries.at(
+                                        static_cast<std::size_t>(ocd->first_feature) + fi);
+                                    if (!fed) break;
+                                    if (!first_feat) o << ", ";
+                                    first_feat = false;
+                                    o << "{\"index\": " << fed->index
+                                      << ", \"flags\": " << fed->flags
+                                      << ", \"value\": " << static_cast<int>(fed->value)
+                                      << ", \"offset_x\": " << fed->offset_x
+                                      << ", \"offset_y\": " << fed->offset_y
+                                      << ", \"offset_z\": " << fed->offset_z
+                                      << ", \"facing\": " << fed->facing;
+                                    // Resolve FED.index → FCD by matching the
+                                    // entity_type (both records' `index` fields
+                                    // are entity_types referring to the same
+                                    // feature class). Linear scan is fine — FCD
+                                    // is typically a few hundred entries.
+                                    for (std::size_t fci = 0;
+                                         fci < opts.theater_db->features.size();
+                                         ++fci) {
+                                        const auto* fcd =
+                                            opts.theater_db->features.at(fci);
+                                        if (fcd &&
+                                            fcd->index == fed->index) {
+                                            o << ", \"name\": \"" << json_escape(fcd->name) << "\""
+                                              << ", \"hit_points\": " << fcd->hit_points
+                                              << ", \"repair_time\": " << fcd->repair_time
+                                              << ", \"priority\": " << static_cast<int>(fcd->priority)
+                                              << ", \"feat_flags\": " << fcd->flags;
+                                            break;
+                                        }
+                                    }
+                                    o << "}";
+                                }
+                                o << "]";
+                            }
                         }
                     }
                     o << ", \"x\": " << ob.x

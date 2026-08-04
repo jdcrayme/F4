@@ -129,6 +129,8 @@ add_library(f4_world_viewer STATIC
     src/snapshot.cpp
     src/canvas.cpp
     src/imgui_panels.cpp
+    src/ground_layout_view.cpp
+    src/campaign_and_teams_view.cpp
     src/file_dialog.cpp
     src/settings.cpp
     src/hex/hex_model.cpp

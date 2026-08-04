@@ -22,10 +22,12 @@
 #include "diagnostics.hpp"
 
 #include <f4/terrain/terrain_data.hpp>
+#include <f4/viewer/enum_text.hpp>
 #include <f4/viewer/file_dialog.hpp>
 #include <f4/world/world_state.hpp>
 #include <f4/world_convert/class_table.hpp>      // unit_subtype_name(), DOMAIN_*
 #include <f4/world_convert/objective_decoder.hpp> // objective_type_name()
+#include <f4/world_convert/theater_data.hpp>     // point_type_name(), point_list_type_name()
 
 #include <imgui.h>
 #include <rlImGui.h>
@@ -124,12 +126,20 @@ void ViewerApp::draw_imgui() {
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("View")) {
+            ImGui::TextDisabled("Base layers");
             ImGui::Checkbox("Terrain",     &impl_->show_terrain);
             ImGui::Checkbox("Routes",      &impl_->show_routes);
             ImGui::Checkbox("Objectives",  &impl_->show_objectives);
             ImGui::Checkbox("Units",       &impl_->show_units);
             ImGui::Checkbox("Grid",        &impl_->show_grid);
             ImGui::Checkbox("Legend",      &impl_->show_legend);
+            ImGui::Separator();
+            ImGui::TextDisabled("Overlays");
+            ImGui::Checkbox("Radar arcs",          &impl_->show_radar_arcs);
+            ImGui::Checkbox("Ground layout",       &impl_->show_ground_layout_overlay);
+            ImGui::Checkbox("Unit destinations",   &impl_->show_unit_destinations);
+            ImGui::Checkbox("Waypoints",           &impl_->show_waypoints);
+            ImGui::Checkbox("Squadron→Airbase",    &impl_->show_squadron_links);
             ImGui::Separator();
             if (ImGui::MenuItem("Fit to World")) impl_->fit_to_world();
             ImGui::EndMenu();
@@ -189,16 +199,24 @@ void ViewerApp::draw_imgui() {
     ImGui::SetNextWindowSize(ImVec2(240, 0), ImGuiCond_FirstUseEver);
     if (ImGui::Begin("Layers", nullptr,
                      ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::TextDisabled("Base");
         ImGui::Checkbox("Terrain",     &impl_->show_terrain);
         ImGui::Checkbox("Routes",      &impl_->show_routes);
         ImGui::Checkbox("Objectives",  &impl_->show_objectives);
         ImGui::Checkbox("Units",       &impl_->show_units);
         ImGui::Checkbox("Grid",        &impl_->show_grid);
         ImGui::Checkbox("Legend",      &impl_->show_legend);
+        ImGui::Separator();
+        ImGui::TextDisabled("Overlays");
+        ImGui::Checkbox("Radar arcs",         &impl_->show_radar_arcs);
+        ImGui::Checkbox("Ground layout",      &impl_->show_ground_layout_overlay);
+        ImGui::Checkbox("Unit destinations",  &impl_->show_unit_destinations);
+        ImGui::Checkbox("Waypoints",          &impl_->show_waypoints);
+        ImGui::Checkbox("Squadron→Airbase",   &impl_->show_squadron_links);
 
         ImGui::Separator();
         ImGui::Text("Camera");
-        ImGui::SliderFloat("Zoom", &impl_->cam_zoom, 0.1f, 30.0f, "%.2f");
+        ImGui::SliderFloat("Zoom", &impl_->cam_zoom, 0.1f, 2000.0f, "%.1f");
         if (ImGui::Button("Fit to World")) impl_->fit_to_world();
 
         ImGui::Separator();
@@ -317,8 +335,30 @@ void ViewerApp::draw_imgui() {
             ImGui::Text("Priority:  %d", o.priority);
             ImGui::Text("Camp ID:   %d", o.camp_id);
             ImGui::Text("Name ID:   %d", o.nameid);
-            ImGui::Text("First own: %d", o.first_owner);
-            ImGui::Text("Parent ID: %d", o.parent_id);
+            // first_owner uses the same Control enum as owner — decode it.
+            ImGui::Text("First own: %d (%s)", o.first_owner,
+                        f4::viewer::control_name(o.first_owner));
+            // parent_id resolves to the parent objective's name when we can
+            // find it in the VU_ID → objective index map.
+            {
+                const char* parent_label = "(none)";
+                std::string parent_buf;
+                auto it = impl_->obj_id_to_index.find(o.parent_id);
+                if (o.parent_id != 0 &&
+                    it != impl_->obj_id_to_index.end() &&
+                    it->second < static_cast<int>(impl_->world.objectives.size())) {
+                    const auto& par = impl_->world.objectives[it->second];
+                    if (!par.class_name.empty()) {
+                        parent_buf = par.class_name + " (#" +
+                                     std::to_string(it->second) + ")";
+                        parent_label = parent_buf.c_str();
+                    } else {
+                        parent_buf = "objective #" + std::to_string(it->second);
+                        parent_label = parent_buf.c_str();
+                    }
+                }
+                ImGui::Text("Parent ID: 0x%08x  %s", o.parent_id, parent_label);
+            }
             ImGui::Text("Links:     %d (road/rail)", static_cast<int>(o.links.size()));
             ImGui::Text("VU_ID:     0x%08x/0x%08x", o.id_creator, o.id_num);
             ImGui::Separator();
@@ -326,7 +366,12 @@ void ViewerApp::draw_imgui() {
             ImGui::Text("Fuel:      %d", o.fuel);
             ImGui::Text("Losses:    %d", o.losses);
             ImGui::Text("Last rep:  %d", o.last_repair);
-            ImGui::Text("Obj flags: 0x%08x", o.obj_flags);
+            // obj_flags is a bitmap — decode the well-known bits.
+            {
+                char flag_buf[128];
+                f4::viewer::obj_flags_text(o.obj_flags, flag_buf, sizeof(flag_buf));
+                ImGui::Text("Obj flags: 0x%08x (%s)", o.obj_flags, flag_buf);
+            }
             // Theater static-data enrichment (from Falcon4.OCD):
             if (o.features_count > 0 || o.deag_distance > 0 || o.pt_data_index > 0) {
                 ImGui::Separator();
@@ -350,30 +395,31 @@ void ViewerApp::draw_imgui() {
                 if (ImGui::TreeNode("Ground Layout", "Ground Layout (%d lists)", static_cast<int>(o.ground_layout.size()))) {
                     for (std::size_t li = 0; li < o.ground_layout.size(); ++li) {
                         const auto& gl = o.ground_layout[li];
-                        const char* type_str = "?";
-                        switch (gl.type) {
-                            case 1:  type_str = "Runway"; break;
-                            case 2:  type_str = "Taxiway"; break;
-                            case 3:  type_str = "Intersection"; break;
-                            case 8:  type_str = "RunwayDim"; break;
-                            case 11: type_str = "SmallPark"; break;
-                            case 12: type_str = "LargePark"; break;
-                            case 13: type_str = "TempPark"; break;
-                            case 14: type_str = "Overrun"; break;
-                            case 15: type_str = "TaxiEdge"; break;
-                            default: break;
-                        }
-                        char label[64];
+                        // Use the proper PointListType decoder from
+                        // f4-world-convert instead of the inline switch.
+                        const char* type_str =
+                            f4::world_convert::point_list_type_name(gl.type);
+                        char label[96];
                         std::snprintf(label, sizeof(label), "[%zu] %s (runway %d, %d pts, %.0f deg)",
                                       li, type_str, gl.runway_num,
                                       static_cast<int>(gl.points.size()), gl.heading_deg);
                         if (ImGui::TreeNode(label)) {
-                            ImGui::Text("  type: %d  count: %d  ltrt: %d",
-                                        gl.type, gl.count, gl.ltrt);
+                            // Decode ltrt: -1=Left, +1=Right, 0=Center.
+                            ImGui::Text("  type: %d (%s)  count: %d  ltrt: %d (%s)",
+                                        gl.type, type_str, gl.count, gl.ltrt,
+                                        f4::viewer::ltrt_name(gl.ltrt));
                             int pi = 0;
                             for (const auto& pt : gl.points) {
-                                ImGui::Text("  pt %d: (%.0f, %.0f) type=%d flags=0x%02x",
-                                            pi++, pt.x, pt.y, pt.type, pt.flags);
+                                // Decode point type (1=Runway, 3=Taxi,
+                                // 11=SmallPark, ...) and point flags bitmap
+                                // (PT_FIRST / PT_LAST / PT_OCCUPIED).
+                                char flag_buf[32];
+                                f4::viewer::point_flags_text(
+                                    pt.flags, flag_buf, sizeof(flag_buf));
+                                ImGui::Text("  pt %d: (%.0f, %.0f) type=%d (%s) flags=0x%02x (%s)",
+                                            pi++, pt.x, pt.y, pt.type,
+                                            f4::world_convert::point_type_name(pt.type),
+                                            pt.flags, flag_buf);
                             }
                             ImGui::TreePop();
                         }
@@ -404,8 +450,11 @@ void ViewerApp::draw_imgui() {
                         f4::world::unit_class_name(u.unit_class),
                         subtype_str);
             ImGui::Text("Type:      %d", u.type);
-            ImGui::Text("Subtype:   %d", u.unit_subtype);
-            ImGui::Text("Domain:    %d", u.domain);
+            ImGui::Text("Subtype:   %d (%s)", u.unit_subtype, subtype_str);
+            // Domain: 2=Air, 3=Land, 4=Sea — decode so the user doesn't have
+            // to keep the enum table in their head.
+            ImGui::Text("Domain:    %d (%s)", u.domain,
+                        f4::viewer::domain_name(u.domain));
             ImGui::Text("Position:  (%d, %d, %.0f ft)", u.x, u.y, u.z);
             ImGui::Text("Owner:     %d (%s)", u.owner, team_name);
             ImGui::Text("Destination:(%d, %d)", u.dest_x, u.dest_y);
@@ -469,7 +518,26 @@ void ViewerApp::draw_imgui() {
                     ImGui::Text("Final hdg: %d deg", static_cast<int>(u.final_heading * 360 / 256));
                     ImGui::Text("Last move: %d", u.last_move);
                     ImGui::Text("Last cmbt: %d", u.last_combat);
-                    ImGui::Text("Parent:    %d", u.parent_id);
+                    // Resolve parent_id (VU_ID.num of the brigade) to a
+                    // unit name via the unit_id_to_index lookup table.
+                    {
+                        const char* parent_label = "(none)";
+                        std::string parent_buf;
+                        auto it = impl_->unit_id_to_index.find(u.parent_id);
+                        if (u.parent_id != 0 &&
+                            it != impl_->unit_id_to_index.end() &&
+                            it->second < static_cast<int>(impl_->world.units.size())) {
+                            const auto& par = impl_->world.units[it->second];
+                            if (!par.class_name.empty()) {
+                                parent_buf = par.class_name + " (unit #" +
+                                             std::to_string(it->second) + ")";
+                            } else {
+                                parent_buf = "unit #" + std::to_string(it->second);
+                            }
+                            parent_label = parent_buf.c_str();
+                        }
+                        ImGui::Text("Parent:    0x%08x  %s", u.parent_id, parent_label);
+                    }
                     break;
                 case f4::world::UnitClass::Brigade:
                     ImGui::Text("Supply:    %d%%", u.supply);
@@ -478,15 +546,51 @@ void ViewerApp::draw_imgui() {
                     ImGui::Text("Elements:  %d", u.elements);
                     if (ImGui::TreeNode("Child battalions")) {
                         for (uint32_t eid : u.element_ids) {
-                            ImGui::Text("  ID: %d", eid);
+                            // Resolve each child battalion VU_ID.num to
+                            // its name via the unit_id_to_index map.
+                            const char* child_label = "(missing)";
+                            std::string child_buf;
+                            auto it = impl_->unit_id_to_index.find(eid);
+                            if (it != impl_->unit_id_to_index.end() &&
+                                it->second < static_cast<int>(impl_->world.units.size())) {
+                                const auto& child = impl_->world.units[it->second];
+                                if (!child.class_name.empty()) {
+                                    child_buf = child.class_name + " (unit #" +
+                                                std::to_string(it->second) + ")";
+                                } else {
+                                    child_buf = "unit #" + std::to_string(it->second);
+                                }
+                                child_label = child_buf.c_str();
+                            }
+                            ImGui::Text("  ID 0x%08x  %s", eid, child_label);
                         }
                         ImGui::TreePop();
                     }
                     break;
                 case f4::world::UnitClass::Squadron:
                     ImGui::Text("Fuel:      %d lbs", u.fuel);
-                    ImGui::Text("Airbase:   %d", u.airbase_id);
-                    ImGui::Text("Specialty: %d", u.specialty);
+                    // Resolve airbase_id (VU_ID.num) to the airbase
+                    // objective's name via the obj_id_to_index map.
+                    {
+                        const char* ab_label = "(none)";
+                        std::string ab_buf;
+                        auto it = impl_->obj_id_to_index.find(u.airbase_id);
+                        if (u.airbase_id != 0 &&
+                            it != impl_->obj_id_to_index.end() &&
+                            it->second < static_cast<int>(impl_->world.objectives.size())) {
+                            const auto& ab = impl_->world.objectives[it->second];
+                            if (!ab.class_name.empty()) {
+                                ab_buf = ab.class_name + " (obj #" +
+                                         std::to_string(it->second) + ")";
+                            } else {
+                                ab_buf = "objective #" + std::to_string(it->second);
+                            }
+                            ab_label = ab_buf.c_str();
+                        }
+                        ImGui::Text("Airbase:   0x%08x  %s", u.airbase_id, ab_label);
+                    }
+                    ImGui::Text("Specialty: %d (%s)", u.specialty,
+                                f4::viewer::squadron_specialty_name(u.specialty));
                     ImGui::Separator();
                     ImGui::Text("AA kills:  %d", u.aa_kills);
                     ImGui::Text("AG kills:  %d", u.ag_kills);
@@ -498,17 +602,22 @@ void ViewerApp::draw_imgui() {
                     ImGui::Text("Pilot loss:%d", u.pilot_losses);
                     ImGui::Text("Patch:     %d", u.squadron_patch);
                     if (ImGui::TreeNode("Pilots", "Pilots (%d)", static_cast<int>(u.pilots.size()))) {
-                        ImGui::Text("ID    Skill Rating Status AA  AG  AS  AN  Missions");
+                        ImGui::Text("ID    Skill        Rating     Status  AA  AG  Missions");
                         for (const auto& p : u.pilots) {
-                            const char* status_str = "?";
-                            switch (p.status) {
-                                case 0: status_str = "OK"; break;
-                                case 1: status_str = "Dead"; break;
-                                case 2: status_str = "Leave"; break;
-                                case 3: status_str = "Hosp"; break;
-                            }
-                            ImGui::Text("%-5d %-5d %-6d %-6s %-3d %-3d %-3d %-3d %d",
-                                        p.pilot_id, p.skill, p.rating, status_str,
+                            // Decode skill (0=Recruit..3=Ace) and rating
+                            // (same enum) instead of bare ints.
+                            char skill_buf[32];
+                            std::snprintf(skill_buf, sizeof(skill_buf),
+                                          "%d (%s)", p.skill,
+                                          f4::viewer::pilot_skill_name(p.skill));
+                            char rating_buf[32];
+                            std::snprintf(rating_buf, sizeof(rating_buf),
+                                          "%d (%s)", p.rating,
+                                          f4::viewer::pilot_skill_name(p.rating));
+                            ImGui::Text("%-5ld %-12s %-10s %-7s %-3d %-3d %d",
+                                        static_cast<long>(p.pilot_id),
+                                        skill_buf, rating_buf,
+                                        f4::viewer::pilot_status_name(p.status),
                                         p.aa_kills, p.ag_kills, p.missions_flown);
                         }
                         ImGui::TreePop();
@@ -526,12 +635,17 @@ void ViewerApp::draw_imgui() {
             if (!u.waypoints.empty()) {
                 ImGui::Separator();
                 if (ImGui::TreeNode("Waypoints", "Waypoints (%d)", static_cast<int>(u.waypoints.size()))) {
-                    ImGui::Text("idx  x    y    z    action  depart");
+                    ImGui::Text("idx  x    y    z    action              depart");
                     int wi = 0;
                     for (const auto& w : u.waypoints) {
-                        ImGui::Text("%-4d %-4d %-4d %-4d %-7d %d",
+                        // Decode WP_ACTION (Takeoff/Land/Strike/CAP/...)
+                        char action_buf[40];
+                        std::snprintf(action_buf, sizeof(action_buf),
+                                      "%d (%s)", static_cast<int>(w.action),
+                                      f4::viewer::wp_action_name(w.action));
+                        ImGui::Text("%-4d %-4d %-4d %-4d %-19s %d",
                                     wi++, w.x, w.y, w.z,
-                                    static_cast<int>(w.action), w.depart);
+                                    action_buf, w.depart);
                     }
                     ImGui::TreePop();
                 }
@@ -829,6 +943,17 @@ void ViewerApp::draw_imgui() {
 
     // --- Hex Inspector panel (Tools > Hex Inspector) ---
     impl_->hex_inspector.draw();
+
+    // --- Ground Layout view (auto-opens when an objective with
+    // ground_layout is selected — shows runway/taxiway/parking/SAM-site
+    // geometry in a dedicated 2D window).
+    draw_ground_layout_view();
+
+    // --- Campaign + Teams panels (auto-open when a world is loaded —
+    // show CampaignState fields and the .tea-enriched team roster
+    // with stance matrix, country memberships, experience, and command
+    // chain).
+    draw_campaign_and_teams_view();
 
     rlImGuiEnd();
 }

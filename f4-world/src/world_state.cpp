@@ -34,6 +34,41 @@ TeamState parse_team(Reader& r) {
         else if (k == "colour")  t.colour  = static_cast<uint8_t>(r.read_int());
         else if (k == "name")    t.name    = r.read_string();
         else if (k == "motto")   t.motto   = r.read_string();
+        // --- .tea enrichment fields (emitted by world_json when .tea
+        // was successfully decoded). Each team slot may or may not have
+        // these — the .tea decoder finds them by `who` field match.
+        else if (k == "cteam")              { t.cteam              = static_cast<int16_t>(r.read_int()); t.tea_loaded = true; }
+        else if (k == "team_flags")         { t.team_flags         = static_cast<int16_t>(r.read_int()); }
+        else if (k == "first_colonel")      { t.first_colonel      = static_cast<int16_t>(r.read_int()); }
+        else if (k == "first_commander")    { t.first_commander    = static_cast<int16_t>(r.read_int()); }
+        else if (k == "first_wingman")      { t.first_wingman      = static_cast<int16_t>(r.read_int()); }
+        else if (k == "last_wingman")       { t.last_wingman       = static_cast<int16_t>(r.read_int()); }
+        else if (k == "air_experience")         { t.air_experience         = static_cast<uint8_t>(r.read_int()); }
+        else if (k == "air_defense_experience") { t.air_defense_experience = static_cast<uint8_t>(r.read_int()); }
+        else if (k == "ground_experience")      { t.ground_experience      = static_cast<uint8_t>(r.read_int()); }
+        else if (k == "naval_experience")       { t.naval_experience       = static_cast<uint8_t>(r.read_int()); }
+        else if (k == "member") {
+            // Array of NUM_COUNS country membership bytes (0 or 1).
+            r.skip_ws(); r.expect('[');
+            if (r.consume(']')) { /* empty */ }
+            else for (;;) {
+                t.member.push_back(static_cast<uint8_t>(r.read_int()));
+                if (r.consume(']')) break;
+                r.expect(',');
+            }
+            t.tea_loaded = true;
+        }
+        else if (k == "stance") {
+            // Array of NUM_TEAMS stance int16s (stance toward each team).
+            r.skip_ws(); r.expect('[');
+            if (r.consume(']')) { /* empty */ }
+            else for (;;) {
+                t.stance.push_back(static_cast<int16_t>(r.read_int()));
+                if (r.consume(']')) break;
+                r.expect(',');
+            }
+            t.tea_loaded = true;
+        }
         else                     r.skip_value();
         if (r.consume('}')) break;
         r.expect(',');
@@ -126,6 +161,47 @@ ObjectiveState parse_objective(Reader& r) {
         else if (k == "radar_feature")   o.radar_feature   = static_cast<uint8_t>(r.read_int());
         else if (k == "deag_distance")   o.deag_distance   = static_cast<uint8_t>(r.read_int());
         else if (k == "pt_data_index")   o.pt_data_index   = static_cast<uint16_t>(r.read_int());
+        else if (k == "features") {
+            // Array of feature placement objects (from Falcon4.FED + FCD).
+            // Each feature has: index (entity_type), flags, value, offset_x/y/z,
+            // facing, and optional name/hit_points/repair_time/priority/feat_flags
+            // resolved from FCD.
+            r.skip_ws(); r.expect('[');
+            if (r.consume(']')) { /* empty */ }
+            else for (;;) {
+                r.skip_ws(); r.expect('{');
+                FeatureEntryState fes;
+                if (!r.peek('}')) for (;;) {
+                    std::string fk = r.read_string();
+                    r.expect(':');
+                    if      (fk == "index")        fes.index        = static_cast<int16_t>(r.read_int());
+                    else if (fk == "flags")        fes.flags        = static_cast<uint16_t>(r.read_int());
+                    else if (fk == "value")        fes.value        = static_cast<uint8_t>(r.read_int());
+                    else if (fk == "offset_x")     fes.offset_x     = static_cast<float>(r.read_number());
+                    else if (fk == "offset_y")     fes.offset_y     = static_cast<float>(r.read_number());
+                    else if (fk == "offset_z")     fes.offset_z     = static_cast<float>(r.read_number());
+                    else if (fk == "facing")       fes.facing       = static_cast<int16_t>(r.read_int());
+                    else if (fk == "name")         fes.name         = r.read_string();
+                    else if (fk == "hit_points")   fes.hit_points   = static_cast<int16_t>(r.read_int());
+                    else                           r.skip_value();
+                    if (r.consume('}')) break;
+                    r.expect(',');
+                } else r.consume('}');
+                // Resolve damage_state from the parent objective's fstatus
+                // bitmap (2 bits per feature, indexed by feature position
+                // within the objective's feature list). 0=intact, 1=damaged,
+                // 2=destroyed, 3=heavily destroyed.
+                const std::size_t fidx = o.features.size();
+                const std::size_t byte_idx = fidx / 4;
+                const std::size_t bit_shift = (fidx % 4) * 2;
+                if (byte_idx < o.fstatus.size()) {
+                    fes.damage_state = (o.fstatus[byte_idx] >> bit_shift) & 0x03;
+                }
+                o.features.push_back(fes);
+                if (r.consume(']')) break;
+                r.expect(',');
+            }
+        }
         else if (k == "ground_layout") {
             // Array of ground-layout list objects, each with type, count,
             // runway_num, ltrt, heading_deg, and a points array.

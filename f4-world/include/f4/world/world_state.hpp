@@ -33,6 +33,27 @@ struct TeamState {
     uint8_t colour = 0;
     std::string name;           // e.g. "ROK", "Japan", "PRC"
     std::string motto;
+
+    // --- Enrichment from .tea (TeamRecord) ---
+    // These fields are emitted by f4-world-convert's world_json when a
+    // .tea sub-file was successfully decoded. They're optional — fresh
+    // campaign saves without .tea data will leave them at defaults.
+    // `tea_loaded` is true when the .tea block was found and parsed for
+    // this team slot; the viewer uses it to decide whether to render
+    // the enrichment panel.
+    bool     tea_loaded = false;
+    int16_t  cteam = 0;          // current team (may differ from slot during realignment)
+    int16_t  team_flags = 0;     // TeamRecord.flags (renamed to disambiguate from .cmp flags)
+    std::vector<uint8_t>  member;  // NUM_COUNS country memberships (0/1 per slot)
+    std::vector<int16_t>  stance;  // NUM_TEAMS stance values toward each other team
+    int16_t  first_colonel = 0;     // pilot slot indices into the global pilot pool
+    int16_t  first_commander = 0;
+    int16_t  first_wingman = 0;
+    int16_t  last_wingman = 0;
+    uint8_t  air_experience = 0;          // 0..100
+    uint8_t  air_defense_experience = 0;
+    uint8_t  ground_experience = 0;
+    uint8_t  naval_experience = 0;
 };
 
 struct CampaignState {
@@ -54,6 +75,42 @@ struct ObjectiveLink {
     uint32_t neighbor_creator = 0;  // VU_ID.creator
     bool is_road = false;           // supports wheeled movement
     bool is_rail = false;           // supports rail movement
+};
+
+/// One feature class (building/structure type) — mirrors the fields we
+/// need from FeatureClassData (Falcon4.FCD). Loaded as theater-db
+/// enrichment alongside FeatureEntryState.
+struct FeatureClassState {
+    int16_t  index = 0;
+    std::string name;           // e.g. "Control Tower", "Runway", "Hangar"
+    int16_t  hit_points = 0;
+    int16_t  repair_time = 0;   // seconds to repair from destroyed to operational
+    uint8_t  priority = 0;      // display priority
+    uint16_t flags = 0;         // FEAT_ flags bitmap
+    int16_t  radar_type = 0;    // index into Falcon4.RCD (NOT yet parsed)
+};
+
+/// One feature placement on an objective — mirrors FeatureEntryData
+/// (Falcon4.FED). Combined with the objective's `fstatus` byte array
+/// (2-bit-per-feature damage bitmap), gives the live damage state of
+/// every building/runway/feature on every objective.
+struct FeatureEntryState {
+    int16_t  index = 0;          // entity_type of the feature (class-table index)
+    uint16_t flags = 0;
+    uint8_t  value = 0;          // % loss in operational status for destruction
+    float    offset_x = 0.0f;    // X offset from objective center (feet)
+    float    offset_y = 0.0f;
+    float    offset_z = 0.0f;
+    int16_t  facing = 0;         // facing angle (degrees)
+    // Resolved from FCD via the class table when theater_db is loaded.
+    // Empty when no FCD entry was found for this feature's entity_type.
+    std::string name;            // e.g. "Control Tower", "Runway 09/27"
+    int16_t  hit_points = 0;     // from FCD
+    // Live damage state derived from the parent objective's fstatus
+    // bitmap (2 bits per feature, 0=intact, 1=damaged, 2=destroyed,
+    // 3=heavily destroyed). Resolved by the consumer (parse_objective)
+    // using the feature's index within the objective's feature list.
+    uint8_t  damage_state = 0;   // 0..3, 0=intact
 };
 
 /// One point in an airbase ground layout (runway/taxiway/parking).
@@ -116,6 +173,10 @@ struct ObjectiveState {
     uint8_t  deag_distance = 0;       // distance at which to deaggregate
     uint16_t pt_data_index = 0;       // index into PHD table
     std::vector<GroundLayoutList> ground_layout;  // runway/taxiway/parking lists
+    // Per-objective feature placements (from Falcon4.FED + FCD). Combined
+    // with the fstatus bitmap above, gives the live damage state of every
+    // building/runway/feature on this objective.
+    std::vector<FeatureEntryState> features;
 };
 
 /// Unit subclass — same enum as f4::world_convert::UnitClass, duplicated

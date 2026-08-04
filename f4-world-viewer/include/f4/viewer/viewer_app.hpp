@@ -158,6 +158,8 @@ private:
     void handle_input();
     void draw_canvas();
     void draw_imgui();
+    void draw_ground_layout_view();
+    void draw_campaign_and_teams_view();
     void open_file_dialog(const char* title, const char* filters,
                           std::function<void(const std::string&)> on_ok);
 };
