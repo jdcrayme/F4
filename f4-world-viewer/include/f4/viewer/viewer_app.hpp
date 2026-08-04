@@ -120,6 +120,27 @@ public:
     bool snapshot_install_files(const std::filesystem::path& output_path,
                                  std::string* err_out = nullptr);
 
+    /// Open a native save-file dialog and write a RECURSIVE FILE
+    /// LISTING of the current install to the chosen path. The output is
+    /// a plain ASCII text file listing every regular file (relative
+    /// path + size in bytes) under the install root, sorted within each
+    /// directory. No hex dumps — much smaller than the full snapshot.
+    ///
+    /// Intended for documenting install layouts across vanilla /
+    /// FreeFalcon / BMS installs side-by-side, and for spotting files
+    /// our curated snapshot list missed. See Docs/FALCON4_FILE_LAYOUT.md.
+    ///
+    /// No-op (shows an error in the status bar) if no install is set.
+    void open_list_files_dialog();
+
+    /// Write a recursive file listing to `output_path` directly (no
+    /// dialog). Used by the --list-files CLI flag for headless use.
+    /// Returns true on success; on failure, sets `err_out` (if non-null)
+    /// and returns false. No-op (returns false, sets err_out) if no
+    /// install is set.
+    bool list_install_files(const std::filesystem::path& output_path,
+                             std::string* err_out = nullptr);
+
     /// Set the initial camera position (grid coordinates) and zoom (pixels
     /// per grid unit). Call before run(). Useful for screenshots and for
     /// launching the viewer focused on a region of interest.

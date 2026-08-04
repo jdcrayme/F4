@@ -344,4 +344,74 @@ bool ViewerApp::snapshot_install_files(const std::filesystem::path& output_path,
     return write_install_snapshot(*impl_->install, output_path, opts, err_out);
 }
 
+void ViewerApp::open_list_files_dialog() {
+    if (!impl_->install) {
+        impl_->last_error =
+            "No install set. Use File > Set Install Path... to pick your "
+            "Falcon 4.0 install directory first.";
+        show_message_box("No Install Set", impl_->last_error, "warning");
+        return;
+    }
+
+    // Default the save picker to a sensible location: next to the
+    // install root, with a timestamped default filename.
+    const auto ts = []() {
+        using std::chrono::system_clock;
+        const auto now = system_clock::now();
+        const std::time_t t = system_clock::to_time_t(now);
+        std::tm tm{};
+#if defined(_WIN32)
+        gmtime_s(&tm, &t);
+#else
+        gmtime_r(&t, &tm);
+#endif
+        char buf[32];
+        std::strftime(buf, sizeof(buf), "%Y%m%d_%H%M%S", &tm);
+        return std::string(buf);
+    }();
+
+    const auto default_name = "f4_install_filelisting_" + ts + ".txt";
+    auto default_path = impl_->install->root() / default_name;
+
+    auto out = pick_save_file(
+        "Save Install File Listing",
+        "Text files (*.txt)|All files (*.*)",
+        default_path);
+    if (out.empty()) return;  // user cancelled
+
+    std::string err;
+    if (!list_install_files(out, &err)) {
+        impl_->last_error = "File listing failed: " + err;
+        show_message_box("File Listing Failed", impl_->last_error, "error");
+        return;
+    }
+
+    impl_->status_msg = "File listing saved: " + out.string() +
+        " (" + std::to_string(std::filesystem::file_size(out)) + " bytes)";
+    show_message_box("File Listing Saved",
+        ("Saved install file listing to:\n" + out.string() +
+         "\n\nMail or upload this file to the dev team — it contains the "
+         "name, path, and size of every file under the install root. "
+         "Running it on multiple installs (vanilla / FreeFalcon / BMS) "
+         "lets us document each layout and simplify the file-search "
+         "logic in f4-install.").c_str(),
+        "info");
+}
+
+bool ViewerApp::list_install_files(const std::filesystem::path& output_path,
+                                    std::string* err_out) {
+    if (!impl_->install) {
+        if (err_out) *err_out = "no install set";
+        return false;
+    }
+    // Listing-only mode: skip curated hex dumps, enable the full
+    // recursive walk. Disables the per-directory catch-all listings
+    // too (the full walk already covers them).
+    SnapshotOptions opts;
+    opts.full_recursive_listing = true;
+    opts.skip_curated_dumps = true;
+    opts.list_terrdata_files = false;  // redundant under full walk
+    return write_install_snapshot(*impl_->install, output_path, opts, err_out);
+}
+
 } // namespace f4::viewer

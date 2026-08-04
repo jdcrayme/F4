@@ -930,3 +930,91 @@ Stage Summary:
 - Added 7 real binary fixture files (4–3 KB total) extracted from the user's actual Falcon 4.0 install via scripts/extract_fixtures.py.
 - Updated the file-layout documentation with verified byte-offset diagrams for all 7 structs.
 - Next step: wire the parsed tables into the world viewer's inspector panel so users can see real objective/vehicle/feature names instead of "Objective#1776". After that, extend team_decoder.cpp past the first TeamClass block to decode ATM airbase schedule data (still pending from EXPOSE-1).
+
+---
+Task ID: EXPOSE-2
+Agent: main (orchestrator)
+Task: Continue pulling world data into the viewer — wire the existing TheaterObjectDatabase (OCD/PHD/PD/UCD/VCD/FED/FCD parsers) through to the viewer inspector, extend the team_decoder past the first TeamClass block, and verify the full pipeline end-to-end against the real fixture files.
+
+Work Log:
+- Discovered that f4-world-convert already had a complete TheaterObjectDatabase infrastructure (theater_data.hpp/.cpp, 586 LoC parser + 1052 LoC tests) that correctly parses all 7 static-data files from the fixtures. An earlier EXPOSE-1 plan had stubbed out a separate static_data module; identified this as duplicate work and removed it.
+- Verified the existing parsers produce correct field values against the real fixture files: OCD gives "02_20 Airbase 2", "Highway Strip NS", "Armybase 1", "Border"; UCD gives "Airlift", "Patrol", "Supply"; VCD gives "An-70", "E-3", "M-1A1", "A-10" — all matching the fixture_manifest.json ground truth.
+- Confirmed world_json.cpp already emits the enrichment fields (class_name, features_count, ground_layout, vehicle_groups, vehicle_name) when --theater-data is passed to cam2json.
+- Identified the actual gap: world_state.hpp did not carry the enrichment fields, world_state.cpp did not parse them, and imgui_panels.cpp did not display them.
+- Extended ObjectiveState in world_state.hpp with: class_name, features_count, radar_feature, deag_distance, pt_data_index, ground_layout (vector of GroundLayoutList, each containing type/runway_num/heading_deg/points).
+- Extended UnitState in world_state.hpp with: class_name, movement_type, movement_type_name, movement_speed, max_range, vehicle_groups (vector of VehicleGroup, each containing vehicle_type/count/live_count/vehicle_name/hit_points/max_speed).
+- Added GroundLayoutPoint, GroundLayoutList, VehicleGroup structs to world_state.hpp.
+- Updated world_state.cpp parse_objective() to parse class_name, features_count, radar_feature, deag_distance, pt_data_index, and the nested ground_layout array (lists → points).
+- Updated world_state.cpp parse_unit() to parse class_name, movement_type, movement_type_name, movement_speed, max_range, and the nested vehicle_groups array.
+- Updated imgui_panels.cpp objective inspector to display: class_name (e.g. "02_20 Airbase 2"), OCD metadata (features, deag_distance, radar_feature, pt_data_index), and a collapsible Ground Layout tree showing each runway/taxiway/parking list with its points.
+- Updated imgui_panels.cpp unit inspector to display: class_name (e.g. "Patrol"), movement specs (type, speed, range), and a collapsible Vehicle Groups tree showing per-group vehicle type/name/count/live_count/hit_points/max_speed.
+- Extended team_decoder.cpp to decode ALL teams (not just the first) by scanning forward for valid TeamClass headers after each ATM/GTM/NTM block. Added multi-field validation (entity_type range, who/cteam in 0..7, member[] all 0/1) to reject false positives.
+- Wired the .tea decoder into world_json.cpp: team enrichment fields (cteam, team_flags, member[], stance[], first_colonel/commander/wingman, 4 experience values) are now emitted alongside the .cmp team names.
+- Built cam2json with all changes and ran end-to-end against save1.cam + fixtures:
+  * 2135 class-table entries loaded from FALCON4.ct
+  * TheaterObjectDatabase loaded: OCD=12, PHD=8, PD=60, UCD=8, VCD=12, FCD=12, FED=40
+  * 1336 of 2659 objectives enriched with class_name (e.g. "Depot 1", "044 Bridge 6", "40F 9CC1")
+  * 42 objectives have ground_layout (airbases with runway/taxiway/parking point lists)
+  * 2 of 8 teams enriched with stance/experience from .tea (up from 1)
+- Verified world_state.cpp correctly parses the enrichment by loading the JSON and printing the fields.
+
+Stage Summary:
+- The full static-data pipeline now works end-to-end: cam2json --theater-data <dir> → world JSON with class_name/ground_layout/vehicle_groups → world_state.cpp parses them → viewer inspector displays them.
+- Objective inspector now shows real names ("02_20 Airbase 2") instead of just "Objective#N", plus full ground layout (runway heading, parking spots, taxiways).
+- Unit inspector now shows class names ("Patrol", "Supply"), movement specs, and per-group vehicle composition with live counts.
+- Team decoder extended from 1 team to 2-8 teams (ATM/GTM/NTM skip is still fragile — full port of those constructors is a future task).
+- No new tests added (existing test_theater_data.cpp already covers the parsers with synthetic data; the real-fixture verification was done via the end-to-end cam2json run).
+- Files modified: world_state.hpp, world_state.cpp, imgui_panels.cpp, team_decoder.cpp, world_json.cpp.
+
+---
+Task ID: LISTING-1
+Agent: main (orchestrator)
+Task: Add an option to the snapshot tool to log the name and path of every file in the game directory (including subfolders), so the user can run it on both their standard and BMS installs and share the output for cross-install layout documentation + simplification of the file-search logic.
+
+Work Log:
+- Extended SnapshotOptions in f4-world-viewer/src/snapshot.hpp with two new flags:
+  * `full_recursive_listing` (default false) — when true, walks the install root recursively and emits a "FULL RECURSIVE FILE LISTING" section listing every regular file (relative path + size in bytes).
+  * `skip_curated_dumps` (default false) — when true, omits the curated hex-dump section entirely (useful for inventory-only runs).
+- Extended SnapshotResult with `listed_files`, `listed_dirs`, `listed_bytes` so callers (status bar, CLI) can summarize what was enumerated.
+- Implemented `walk_and_list()` + `append_recursive_file_listing()` in snapshot.cpp:
+  * Manual recursive walk (rather than std::filesystem::recursive_directory_iterator) so we can sort entries within each directory for deterministic output — important for cross-install diffs.
+  * Uses `fs::status()` rather than the iterator's `status()` so symlinks are reported as symlinks (not followed). Avoids symlink-loop crashes.
+  * Per-entry errors (permission denied, etc.) are reported inline; the walk continues. Errors never abort the listing.
+  * Directories are not listed themselves (their presence is implicit in the files they contain) but ARE counted in total_dirs.
+  * Symlinks get a "(symlink -> target)" suffix; other types (block/char/fifo/socket) get "(other file type)".
+  * Relative paths use forward slashes (rel.generic_string()) for cross-platform readability.
+  * Size column is aligned at offset 60 — long paths simply push the column right rather than truncate.
+- Wired the new options into build_install_snapshot():
+  * Header now reports the new flag values.
+  * The FULL RECURSIVE FILE LISTING section is emitted between the per-campaign overview and the curated dumps (so the reader gets the "here's everything" overview before the deep dives).
+  * When full_recursive_listing is true, the per-directory catch-all listings (terrdata/, sim/, campaign/) are skipped — the full walk already covers them.
+  * When skip_curated_dumps is true, the curated FILE N/M hex-dump section is omitted entirely.
+  * Footer reports files_listed, dirs_traversed, total_bytes_listed when the recursive walk ran.
+- Added two new methods on ViewerApp:
+  * `open_list_files_dialog()` — pops a native save-file dialog with a timestamped default filename (f4_install_filelisting_YYYYMMDD_HHMMSS.txt) and calls list_install_files(). Mirrors the existing open_snapshot_dialog() pattern.
+  * `list_install_files(path, err_out)` — invokes write_install_snapshot with {full_recursive_listing=true, skip_curated_dumps=true, list_terrdata_files=false}. Used by both the menu item and the CLI flag.
+  * Both declared in viewer_app.hpp with full doc-comments explaining the cross-install comparison use case.
+- Added "List All Install Files..." menu item to the Tools menu in imgui_panels.cpp, right under the existing "Snapshot Install Files..." item. Same install-required gating (disabled when no install is set).
+- Added --list-files <path> CLI flag in cli/main.cpp, mirroring --snapshot:
+  * Parser adds the flag to the arg loop.
+  * Executor block (between the --snapshot executor and the GUI launch) calls app.list_install_files() and prints "file listing written to: <path>" on success, exits with code 0 (no GUI).
+  * Updated the top-of-file usage comment block to document the new flag.
+- Updated Docs/FALCON4_FILE_LAYOUT.md:
+  * Added a new top-of-file paragraph (after the existing snapshot-tool paragraph) explaining the recursive-listing companion tool, the cross-install comparison use case, and the output format.
+  * Pasted a full sample output showing all the relevant sections (header, install paths, theaters, campaigns, full recursive file listing, footer).
+  * Documented that the walk uses forward slashes, doesn't follow symlinks, and reports per-entry errors inline.
+  * Added a "BMS vs vanilla layout" bullet to §9 (Open questions) explaining that the new flag is the canonical way to ground-truth this — the dev team can extend §1's install-root diagram once the user shares listings from vanilla / FreeFalcon / BMS installs.
+- Syntax-checked snapshot.cpp + snapshot.hpp with g++ -std=c++17 -fsyntax-only (clean compile, no warnings). The viewer binary itself can't be linked in this environment (libxrandr-dev unavailable — known limitation since EXPOSE-1), but the snapshot module compiles standalone.
+
+Stage Summary:
+- The snapshot tool now supports three modes via SnapshotOptions:
+  1. Default (existing): hex dumps of curated static-data files + per-directory catch-all listings.
+  2. `full_recursive_listing=true` (added): default + a complete recursive file manifest of the install root.
+  3. `skip_curated_dumps=true` + `full_recursive_listing=true` (new): inventory-only — JUST the recursive file manifest, no hex dumps.
+- Three invocation paths, all using the same SnapshotOptions plumbing:
+  * CLI: `f4-world-viewer --install <path> --list-files <out.txt>` — headless inventory-only run.
+  * GUI menu: `Tools > List All Install Files...` — pops a save dialog, writes the inventory to the chosen path.
+  * Library: `ViewerApp::list_install_files(path, &err)` — programmatic, for future unit tests.
+- The user can now run `f4-world-viewer --install <vanilla-path> --list-files vanilla.txt` and `f4-world-viewer --install <bms-path> --list-files bms.txt`, share both files, and the dev team can diff them to document the layout differences and simplify the file-search logic in f4-install.
+- No tests added in this iteration — the snapshot module is viewer-only and has no existing unit-test harness (the existing tests are in f4-world-convert/tests/). A future task can add a unit-test harness for snapshot.cpp by constructing a synthetic install tree in a temp dir.
+- Files modified: snapshot.hpp, snapshot.cpp, viewer_app.hpp, install_flow.cpp, imgui_panels.cpp, cli/main.cpp, Docs/FALCON4_FILE_LAYOUT.md, worklog.md.

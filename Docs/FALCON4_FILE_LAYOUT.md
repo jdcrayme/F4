@@ -11,6 +11,66 @@ The snapshot tool (`Tools > Snapshot Install Files...` in the viewer, or
 `--snapshot <path>` on the CLI) is the canonical way to get real bytes from a
 real install to ground-truth struct layouts while writing parsers.
 
+A companion tool — the recursive file listing (`Tools > List All Install Files...`
+in the viewer, or `--list-files <path>` on the CLI) — produces a plain-text
+manifest of every regular file under the install root (relative path + size in
+bytes, sorted within each directory). Running it on multiple installs (vanilla /
+FreeFalcon / BMS) and sharing the outputs lets us document each layout
+side-by-side and simplify the file-search logic in `f4-install`. The output
+format is:
+
+```
+=== F4 INSTALL SNAPSHOT ===
+generated:                2026-08-04T12:34:56Z
+install_root:             C:/Falcon4
+install_valid:            yes
+per_file_byte_cap:        8192
+include_tail:             no
+full_recursive_listing:   yes
+skip_curated_dumps:       yes
+file_count:               17
+
+--- Resolved install paths ---
+  class_table:  C:/Falcon4/FALCON4.CT
+  aircraft_dir: C:/Falcon4/sim
+  ...
+
+--- Theaters (1) ---
+  Korea (korea)
+    dir: C:/Falcon4/terrdata/korea
+    THEATER.MAP: present (1024 bytes)
+    ...
+
+--- Campaigns (1) ---
+  save1  [korea]
+    save1.cam: present (524288 bytes)
+
+=== FULL RECURSIVE FILE LISTING ===
+walk_root: C:/Falcon4
+  FALCON4.CT                                                 12345 bytes
+  sim/F-16.dat                                                8192 bytes
+  sim/F-18.dat                                                8192 bytes
+  terrdata/objects/Falcon4.OCD                               73728 bytes
+  terrdata/objects/Falcon4.PHD                                5120 bytes
+  terrdata/korea/THEATER.MAP                                 65536 bytes
+  terrdata/korea/THEATER.MEA                               8388608 bytes
+  ...
+total_files: 1247
+total_dirs: 87
+total_bytes: 4567890123
+
+=== END OF SNAPSHOT ===
+files_dumped: 0
+files_missing: 0
+files_listed: 1247
+dirs_traversed: 87
+total_bytes_listed: 4567890123
+```
+
+The recursive listing uses forward slashes for the relative path (cross-platform
+readability), does NOT follow symlinks (so symlink loops can't crash the walk),
+and reports any per-entry errors inline rather than aborting the walk.
+
 ---
 
 ## 1. Install root layout
@@ -568,3 +628,11 @@ These are gaps in this document that the snapshot tool will help close:
   `objective_name[]` field we already expose; the question is whether
   the snapshot's `Falcon4.OCD` dump matches the class names we'd expect
   for those instances.
+- **BMS vs vanilla layout** — the `--list-files` flag (or its menu
+  counterpart `Tools > List All Install Files...`) is the canonical way
+  to ground-truth this. Run it on a vanilla install, a FreeFalcon
+  install, and a BMS install, share the three output files, and the dev
+  team can extend §1's install-root diagram to cover all three variants
+  and simplify the file-search logic in `f4-install` (e.g. detect BMS
+  installs by the presence of `Data/` or `Falcon BMS.cfg`, instead of
+  scanning for `terrdata/`).

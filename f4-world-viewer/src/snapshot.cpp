@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <ctime>
@@ -255,6 +256,156 @@ std::string file_summary(const std::filesystem::path& p) {
 }
 
 // -------------------------------------------------------------------------
+// Recursive file-listing walker. Called when opts.full_recursive_listing
+// is set. Walks the entire install root recursively and appends every
+// regular file (relative path + size) to `out`, sorted within each
+// directory for deterministic output. Symlinks are listed but NOT
+// followed (so symlink loops can't crash the walk). Directories are not
+// listed themselves but ARE counted in dir_count.
+//
+// `base` is the install root used to compute the relative path; it does
+// not change across the recursion.
+//
+// Errors (permission denied, etc.) on individual entries are reported
+// inline and don't abort the walk — we want to know about every file we
+// couldn't read, not crash on the first one.
+// -------------------------------------------------------------------------
+void walk_and_list(std::ostringstream& out,
+                   const std::filesystem::path& dir,
+                   const std::filesystem::path& base,
+                   std::size_t& file_count,
+                   std::size_t& dir_count,
+                   std::uintmax_t& total_bytes) {
+    namespace fs = std::filesystem;
+    std::error_code iter_ec;
+    std::vector<fs::path> entries;
+    for (auto it = fs::directory_iterator(dir, iter_ec);
+         !iter_ec && it != fs::directory_iterator();
+         it.increment(iter_ec)) {
+        entries.push_back(it->path());
+    }
+    if (iter_ec) {
+        out << "  (error iterating " << dir.string()
+            << ": " << iter_ec.message() << ")\n";
+        return;
+    }
+    std::sort(entries.begin(), entries.end());
+
+    constexpr std::size_t kPathColumn = 60;  // align sizes in a column
+    for (const auto& entry : entries) {
+        std::error_code rel_ec;
+        const auto rel = fs::relative(entry, base, rel_ec);
+        std::string rel_str = rel_ec ? entry.string() : rel.generic_string();
+
+        std::error_code type_ec;
+        const auto status = fs::status(entry, type_ec);
+        if (type_ec) {
+            out << "  " << rel_str;
+            if (rel_str.size() < kPathColumn) {
+                out << std::string(kPathColumn - rel_str.size(), ' ');
+            } else {
+                out << "  ";
+            }
+            out << "(status error: " << type_ec.message() << ")\n";
+            continue;
+        }
+
+        if (fs::is_directory(status)) {
+            ++dir_count;
+            // Recurse. Don't print directory entries themselves — their
+            // presence is implicit in the paths of the files they contain.
+            walk_and_list(out, entry, base, file_count, dir_count, total_bytes);
+        } else if (fs::is_regular_file(status)) {
+            ++file_count;
+            std::error_code sz_ec;
+            const auto sz = fs::file_size(entry, sz_ec);
+            out << "  " << rel_str;
+            if (rel_str.size() < kPathColumn) {
+                out << std::string(kPathColumn - rel_str.size(), ' ');
+            } else {
+                out << "  ";
+            }
+            if (sz_ec) {
+                out << "(size error: " << sz_ec.message() << ")\n";
+            } else {
+                total_bytes += sz;
+                out << sz << " bytes\n";
+            }
+        } else if (fs::is_symlink(status)) {
+            // Read the link target — but do NOT follow it.
+            ++file_count;
+            std::error_code link_ec;
+            const auto target = fs::read_symlink(entry, link_ec);
+            out << "  " << rel_str;
+            if (rel_str.size() < kPathColumn) {
+                out << std::string(kPathColumn - rel_str.size(), ' ');
+            } else {
+                out << "  ";
+            }
+            if (link_ec) {
+                out << "(symlink; target unreadable: "
+                    << link_ec.message() << ")\n";
+            } else {
+                out << "(symlink -> " << target.string() << ")\n";
+            }
+        } else {
+            // Other (block/char/fifo/socket) — rare but possible on
+            // POSIX. Report it so the user knows something unusual is
+            // sitting in the install tree.
+            ++file_count;
+            out << "  " << rel_str;
+            if (rel_str.size() < kPathColumn) {
+                out << std::string(kPathColumn - rel_str.size(), ' ');
+            } else {
+                out << "  ";
+            }
+            out << "(other file type)\n";
+        }
+    }
+}
+
+// -------------------------------------------------------------------------
+// Top-level wrapper around walk_and_list() — emits the section header,
+// runs the walk, then emits the section footer with summary counts.
+// -------------------------------------------------------------------------
+void append_recursive_file_listing(std::ostringstream& out,
+                                    const std::filesystem::path& walk_root,
+                                    SnapshotResult& result) {
+    namespace fs = std::filesystem;
+    out << "\n=== FULL RECURSIVE FILE LISTING ===\n";
+    out << "walk_root: " << walk_root.string() << "\n";
+
+    std::error_code root_ec;
+    if (!fs::exists(walk_root, root_ec)) {
+        out << "(walk_root does not exist)\n";
+        out << "total_files: 0\n";
+        out << "total_dirs: 0\n";
+        out << "total_bytes: 0\n";
+        return;
+    }
+    if (!fs::is_directory(walk_root, root_ec)) {
+        out << "(walk_root is not a directory)\n";
+        out << "total_files: 0\n";
+        out << "total_dirs: 0\n";
+        out << "total_bytes: 0\n";
+        return;
+    }
+
+    std::size_t file_count = 0;
+    std::size_t dir_count = 0;
+    std::uintmax_t total_bytes = 0;
+    walk_and_list(out, walk_root, walk_root, file_count, dir_count, total_bytes);
+
+    out << "total_files: " << file_count << "\n";
+    out << "total_dirs: " << dir_count << "\n";
+    out << "total_bytes: " << total_bytes << "\n";
+
+    result.listed_files = file_count;
+    result.listed_dirs = dir_count;
+    result.listed_bytes = total_bytes;
+}
+
+// -------------------------------------------------------------------------
 // Append a single file's snapshot section to `out`.
 // -------------------------------------------------------------------------
 void append_file_section(std::ostringstream& out,
@@ -383,6 +534,8 @@ SnapshotResult build_install_snapshot(const f4::install::Installation& inst,
     out << "install_valid: " << (inst.valid() ? "yes" : "no") << "\n";
     out << "per_file_byte_cap: " << opts.per_file_byte_cap << "\n";
     out << "include_tail: " << (opts.include_tail ? "yes" : "no") << "\n";
+    out << "full_recursive_listing: " << (opts.full_recursive_listing ? "yes" : "no") << "\n";
+    out << "skip_curated_dumps: " << (opts.skip_curated_dumps ? "yes" : "no") << "\n";
     out << "file_count: " << kCuratedFiles.size() << "\n";
 
     out << "\n--- Resolved install paths ---\n";
@@ -420,33 +573,45 @@ SnapshotResult build_install_snapshot(const f4::install::Installation& inst,
         out << "\n    " << file_summary(c.cam) << "\n";
     }
 
+    // --- Optional full recursive file listing ---
+    // Comes before the curated dumps so the reader gets the "here's
+    // everything in this install" overview first, then the deep dives.
+    if (opts.full_recursive_listing) {
+        append_recursive_file_listing(out, inst.root(), result);
+    }
+
     // --- Curated file dumps ---
-    out << "\n=== CURATED FILE DUMPS ===\n";
-    int file_idx = 0;
-    for (const char* rel : kCuratedFiles) {
-        ++file_idx;
-        const std::filesystem::path relative(rel);
-        const auto resolved = resolve_case_insensitive(inst.root(), relative);
-        if (resolved.empty()) {
-            // File not found — record it as absent but still emit a
-            // section so the user can see we looked for it.
-            std::ostringstream dummy;
-            std::size_t dummy_dumped = 0, dummy_missing = 0;
-            append_file_section(dummy, file_idx, static_cast<int>(kCuratedFiles.size()),
-                                rel, inst.root() / relative, opts,
-                                dummy_dumped, dummy_missing);
-            out << dummy.str();
-            result.files_missing += dummy_missing;
-            result.files_dumped  += dummy_dumped;
-        } else {
-            append_file_section(out, file_idx, static_cast<int>(kCuratedFiles.size()),
-                                rel, resolved, opts,
-                                result.files_dumped, result.files_missing);
+    // Skippable via opts.skip_curated_dumps for inventory-only runs.
+    if (!opts.skip_curated_dumps) {
+        out << "\n=== CURATED FILE DUMPS ===\n";
+        int file_idx = 0;
+        for (const char* rel : kCuratedFiles) {
+            ++file_idx;
+            const std::filesystem::path relative(rel);
+            const auto resolved = resolve_case_insensitive(inst.root(), relative);
+            if (resolved.empty()) {
+                // File not found — record it as absent but still emit a
+                // section so the user can see we looked for it.
+                std::ostringstream dummy;
+                std::size_t dummy_dumped = 0, dummy_missing = 0;
+                append_file_section(dummy, file_idx, static_cast<int>(kCuratedFiles.size()),
+                                    rel, inst.root() / relative, opts,
+                                    dummy_dumped, dummy_missing);
+                out << dummy.str();
+                result.files_missing += dummy_missing;
+                result.files_dumped  += dummy_dumped;
+            } else {
+                append_file_section(out, file_idx, static_cast<int>(kCuratedFiles.size()),
+                                    rel, resolved, opts,
+                                    result.files_dumped, result.files_missing);
+            }
         }
     }
 
     // --- Optional directory listings (catch files we missed) ---
-    if (opts.list_terrdata_files) {
+    // Skip when full_recursive_listing is on — the full walk already
+    // covers these directories.
+    if (opts.list_terrdata_files && !opts.full_recursive_listing) {
         out << "\n=== DIRECTORY LISTINGS (catch-all) ===\n";
         if (!inst.terrdata_dir().empty()) {
             append_directory_listing(out, "terrdata/",
@@ -474,6 +639,11 @@ SnapshotResult build_install_snapshot(const f4::install::Installation& inst,
     out << "\n=== END OF SNAPSHOT ===\n";
     out << "files_dumped: " << result.files_dumped << "\n";
     out << "files_missing: " << result.files_missing << "\n";
+    if (opts.full_recursive_listing) {
+        out << "files_listed: " << result.listed_files << "\n";
+        out << "dirs_traversed: " << result.listed_dirs << "\n";
+        out << "total_bytes_listed: " << result.listed_bytes << "\n";
+    }
 
     result.text = out.str();
     result.total_bytes = result.text.size();

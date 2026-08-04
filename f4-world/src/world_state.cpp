@@ -120,6 +120,59 @@ ObjectiveState parse_objective(Reader& r) {
                 r.expect(',');
             }
         }
+        // --- Theater static-data enrichment fields (from Falcon4.OCD/PHD/PD) ---
+        else if (k == "class_name")      o.class_name      = r.read_string();
+        else if (k == "features_count")  o.features_count  = static_cast<uint8_t>(r.read_int());
+        else if (k == "radar_feature")   o.radar_feature   = static_cast<uint8_t>(r.read_int());
+        else if (k == "deag_distance")   o.deag_distance   = static_cast<uint8_t>(r.read_int());
+        else if (k == "pt_data_index")   o.pt_data_index   = static_cast<uint16_t>(r.read_int());
+        else if (k == "ground_layout") {
+            // Array of ground-layout list objects, each with type, count,
+            // runway_num, ltrt, heading_deg, and a points array.
+            r.skip_ws(); r.expect('[');
+            if (r.consume(']')) { /* empty */ }
+            else for (;;) {
+                r.skip_ws(); r.expect('{');
+                GroundLayoutList gll;
+                if (!r.peek('}')) for (;;) {
+                    std::string gk = r.read_string();
+                    r.expect(':');
+                    if      (gk == "type")         gll.type         = static_cast<uint8_t>(r.read_int());
+                    else if (gk == "count")        gll.count        = static_cast<uint8_t>(r.read_int());
+                    else if (gk == "runway_num")   gll.runway_num   = static_cast<uint8_t>(r.read_int());
+                    else if (gk == "ltrt")         gll.ltrt         = static_cast<int8_t>(r.read_int());
+                    else if (gk == "heading_deg")  gll.heading_deg  = static_cast<float>(r.read_number());
+                    else if (gk == "points") {
+                        r.skip_ws(); r.expect('[');
+                        if (r.consume(']')) { /* empty */ }
+                        else for (;;) {
+                            r.skip_ws(); r.expect('{');
+                            GroundLayoutPoint pt;
+                            if (!r.peek('}')) for (;;) {
+                                std::string pk = r.read_string();
+                                r.expect(':');
+                                if      (pk == "x")     pt.x     = static_cast<float>(r.read_number());
+                                else if (pk == "y")     pt.y     = static_cast<float>(r.read_number());
+                                else if (pk == "type")  pt.type  = static_cast<uint8_t>(r.read_int());
+                                else if (pk == "flags") pt.flags = static_cast<uint8_t>(r.read_int());
+                                else                    r.skip_value();
+                                if (r.consume('}')) break;
+                                r.expect(',');
+                            } else r.consume('}');
+                            gll.points.push_back(pt);
+                            if (r.consume(']')) break;
+                            r.expect(',');
+                        }
+                    }
+                    else r.skip_value();
+                    if (r.consume('}')) break;
+                    r.expect(',');
+                } else r.consume('}');
+                o.ground_layout.push_back(gll);
+                if (r.consume(']')) break;
+                r.expect(',');
+            }
+        }
         else                             r.skip_value();
         if (r.consume('}')) break;
         r.expect(',');
@@ -247,6 +300,40 @@ UnitState parse_unit(Reader& r) {
                     r.expect(',');
                 } else r.consume('}');
                 u.pilots.push_back(p);
+                if (r.consume(']')) break;
+                r.expect(',');
+            }
+        }
+        // --- Theater static-data enrichment fields (from Falcon4.UCD/VCD) ---
+        else if (k == "class_name")          u.class_name          = r.read_string();
+        else if (k == "movement_type")       u.movement_type       = static_cast<int32_t>(r.read_int());
+        else if (k == "movement_type_name")  u.movement_type_name  = r.read_string();
+        else if (k == "movement_speed")      u.movement_speed      = static_cast<int16_t>(r.read_int());
+        else if (k == "max_range")           u.max_range           = static_cast<int16_t>(r.read_int());
+        else if (k == "vehicle_groups") {
+            // Array of vehicle group objects with vehicle_type, count,
+            // live_count, vehicle_name, vehicle_nctr, hit_points, max_speed.
+            r.skip_ws(); r.expect('[');
+            if (r.consume(']')) { /* empty */ }
+            else for (;;) {
+                r.skip_ws(); r.expect('{');
+                VehicleGroup vg;
+                if (!r.peek('}')) for (;;) {
+                    std::string gk = r.read_string();
+                    r.expect(':');
+                    if      (gk == "group")         vg.group         = static_cast<uint8_t>(r.read_int());
+                    else if (gk == "vehicle_type")  vg.vehicle_type  = static_cast<int16_t>(r.read_int());
+                    else if (gk == "count")         vg.count         = static_cast<int32_t>(r.read_int());
+                    else if (gk == "live_count")    vg.live_count    = static_cast<int32_t>(r.read_int());
+                    else if (gk == "vehicle_name")  vg.vehicle_name  = r.read_string();
+                    else if (gk == "vehicle_nctr")  vg.vehicle_nctr  = r.read_string();
+                    else if (gk == "hit_points")    vg.hit_points    = static_cast<int16_t>(r.read_int());
+                    else if (gk == "max_speed")     vg.max_speed     = static_cast<int16_t>(r.read_int());
+                    else                            r.skip_value();
+                    if (r.consume('}')) break;
+                    r.expect(',');
+                } else r.consume('}');
+                u.vehicle_groups.push_back(vg);
                 if (r.consume(']')) break;
                 r.expect(',');
             }

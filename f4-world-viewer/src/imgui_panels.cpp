@@ -162,6 +162,17 @@ void ViewerApp::draw_imgui() {
                                  impl_->install.has_value())) {
                 open_snapshot_dialog();
             }
+            // List All Install Files — Walks the ENTIRE install root
+            // recursively and lists every regular file (relative path
+            // + size) to a single text file. No hex dumps — much smaller
+            // than the snapshot. Used to document install layouts across
+            // vanilla / FreeFalcon / BMS installs side-by-side and to
+            // spot files our curated snapshot list missed.
+            if (ImGui::MenuItem("List All Install Files...",
+                                 nullptr, false,
+                                 impl_->install.has_value())) {
+                open_list_files_dialog();
+            }
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("Help")) {
@@ -293,6 +304,12 @@ void ViewerApp::draw_imgui() {
                     : std::string("Unknown");
             ImGui::Text("Objective #%d", impl_->sel_index);
             ImGui::Separator();
+            // Show the objective's class name (e.g. "02_20 Airbase 2") when
+            // available — much more useful than just "Airbase". Falls back
+            // to the objective_type name when no class_name was loaded.
+            if (!o.class_name.empty()) {
+                ImGui::Text("Name:      %s", o.class_name.c_str());
+            }
             ImGui::Text("Type:      %s (%d)", obj_type_name_str.c_str(), o.objective_type);
             ImGui::Text("Entity:    %d", o.type);
             ImGui::Text("Position:  (%d, %d, %.0f ft)", o.x, o.y, o.z);
@@ -310,11 +327,58 @@ void ViewerApp::draw_imgui() {
             ImGui::Text("Losses:    %d", o.losses);
             ImGui::Text("Last rep:  %d", o.last_repair);
             ImGui::Text("Obj flags: 0x%08x", o.obj_flags);
+            // Theater static-data enrichment (from Falcon4.OCD):
+            if (o.features_count > 0 || o.deag_distance > 0 || o.pt_data_index > 0) {
+                ImGui::Separator();
+                ImGui::TextUnformatted("Objective class data (OCD):");
+                ImGui::Text("Features:  %d", o.features_count);
+                ImGui::Text("Deag dist: %d", o.deag_distance);
+                ImGui::Text("Radar feat:%d", o.radar_feature);
+                ImGui::Text("PT index:  %d", o.pt_data_index);
+            }
             if (o.has_radar) {
                 ImGui::Separator();
                 ImGui::TextUnformatted("Radar detection arcs:");
                 for (int i = 0; i < 8; ++i) {
                     ImGui::Text("  arc %d: %.3f", i, o.detect_ratio[i]);
+                }
+            }
+            // Airbase ground layout (from Falcon4.PHD/PD): show runway/
+            // taxiway/parking lists with their points.
+            if (!o.ground_layout.empty()) {
+                ImGui::Separator();
+                if (ImGui::TreeNode("Ground Layout", "Ground Layout (%d lists)", static_cast<int>(o.ground_layout.size()))) {
+                    for (std::size_t li = 0; li < o.ground_layout.size(); ++li) {
+                        const auto& gl = o.ground_layout[li];
+                        const char* type_str = "?";
+                        switch (gl.type) {
+                            case 1:  type_str = "Runway"; break;
+                            case 2:  type_str = "Taxiway"; break;
+                            case 3:  type_str = "Intersection"; break;
+                            case 8:  type_str = "RunwayDim"; break;
+                            case 11: type_str = "SmallPark"; break;
+                            case 12: type_str = "LargePark"; break;
+                            case 13: type_str = "TempPark"; break;
+                            case 14: type_str = "Overrun"; break;
+                            case 15: type_str = "TaxiEdge"; break;
+                            default: break;
+                        }
+                        char label[64];
+                        std::snprintf(label, sizeof(label), "[%zu] %s (runway %d, %d pts, %.0f deg)",
+                                      li, type_str, gl.runway_num,
+                                      static_cast<int>(gl.points.size()), gl.heading_deg);
+                        if (ImGui::TreeNode(label)) {
+                            ImGui::Text("  type: %d  count: %d  ltrt: %d",
+                                        gl.type, gl.count, gl.ltrt);
+                            int pi = 0;
+                            for (const auto& pt : gl.points) {
+                                ImGui::Text("  pt %d: (%.0f, %.0f) type=%d flags=0x%02x",
+                                            pi++, pt.x, pt.y, pt.type, pt.flags);
+                            }
+                            ImGui::TreePop();
+                        }
+                    }
+                    ImGui::TreePop();
                 }
             }
         } else if (impl_->sel_kind == Impl::SelectionKind::Unit) {
@@ -331,6 +395,11 @@ void ViewerApp::draw_imgui() {
                 u.domain, u.unit_subtype);
             ImGui::Text("Unit #%d", impl_->sel_index);
             ImGui::Separator();
+            // Show the unit's class name (e.g. "Patrol", "Armor Battalion")
+            // when available — much more useful than just "battalion".
+            if (!u.class_name.empty()) {
+                ImGui::Text("Name:      %s", u.class_name.c_str());
+            }
             ImGui::Text("Class:     %s (%s)",
                         f4::world::unit_class_name(u.unit_class),
                         subtype_str);
@@ -345,6 +414,18 @@ void ViewerApp::draw_imgui() {
             ImGui::Text("Reinforc.: %d", u.reinforcement);
             ImGui::Text("Waypoints: %d", u.wp_count);
             ImGui::Text("Losses:    %d", u.losses);
+            // Movement specs (from Falcon4.UCD):
+            if (u.movement_type > 0 || u.movement_speed > 0) {
+                ImGui::Separator();
+                ImGui::TextUnformatted("Movement (UCD):");
+                if (!u.movement_type_name.empty()) {
+                    ImGui::Text("  Type:     %s (%d)", u.movement_type_name.c_str(), u.movement_type);
+                } else {
+                    ImGui::Text("  Type:     %d", u.movement_type);
+                }
+                ImGui::Text("  Speed:    %d", u.movement_speed);
+                ImGui::Text("  Range:    %d km", u.max_range);
+            }
             // Roster: 16 groups × 2 bits. Show live vehicle count per group.
             // GetNumVehicles(vg) = (roster >> (vg*2)) & 0x03 — max 3/group.
             {
@@ -353,6 +434,27 @@ void ViewerApp::draw_imgui() {
                     total_vehicles += (u.roster >> (vg * 2)) & 0x03;
                 }
                 ImGui::Text("Roster:    0x%08x (%d vehicles)", u.roster, total_vehicles);
+            }
+            // Vehicle composition (from Falcon4.UCD + VCD): per-group vehicle
+            // types and names, with live counts from the roster.
+            if (!u.vehicle_groups.empty()) {
+                if (ImGui::TreeNode("Vehicle Groups", "Vehicle Groups (%d)", static_cast<int>(u.vehicle_groups.size()))) {
+                    ImGui::Text("grp  type  count  live  name         HP   speed");
+                    int nominal_total = 0;
+                    int live_total = 0;
+                    for (const auto& vg : u.vehicle_groups) {
+                        ImGui::Text("%-4d %-5d %-6d %-5d %-12s %-4d %d",
+                                    vg.group, vg.vehicle_type, vg.count,
+                                    vg.live_count,
+                                    vg.vehicle_name.empty() ? "?" : vg.vehicle_name.c_str(),
+                                    vg.hit_points, vg.max_speed);
+                        nominal_total += vg.count;
+                        live_total += vg.live_count;
+                    }
+                    ImGui::Separator();
+                    ImGui::Text("Total:     %d nominal, %d live", nominal_total, live_total);
+                    ImGui::TreePop();
+                }
             }
             ImGui::Text("Entity:    %d", u.entity_type);
             ImGui::Text("VU_ID:     0x%08x/0x%08x", u.id_creator, u.id_num);

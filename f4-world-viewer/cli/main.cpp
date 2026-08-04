@@ -18,6 +18,12 @@
 //                                                            (hex dumps of every
 //                                                             interesting data file)
 //                                                            to out.txt + exit
+//   f4-world-viewer --install /path/to/falcon4 --list-files out.txt
+//                                                         -> write recursive file
+//                                                            listing (every file
+//                                                            under install root,
+//                                                            path + size, no hex)
+//                                                            to out.txt + exit
 //   f4-world-viewer world.json terrain.json --screenshot out.png
 //       Take a screenshot after 1.5 seconds and exit. Useful for headless
 //       smoke tests; on Windows you'd run this from a cmd window.
@@ -75,6 +81,14 @@ int main(int argc, char** argv) {
     std::string snapshot_path;
     bool have_snapshot = false;
 
+    // --list-files <path> — write a recursive file listing of the
+    // install (every regular file's relative path + size, no hex dumps)
+    // to <path> and exit. Used to document install layouts across
+    // vanilla / FreeFalcon / BMS installs and to spot files our
+    // curated snapshot list missed. See snapshot.hpp.
+    std::string list_files_path;
+    bool have_list_files = false;
+
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
         if (a == "--screenshot" && i + 1 < argc) {
@@ -109,6 +123,9 @@ int main(int argc, char** argv) {
         } else if (a == "--snapshot" && i + 1 < argc) {
             snapshot_path = argv[++i];
             have_snapshot = true;
+        } else if (a == "--list-files" && i + 1 < argc) {
+            list_files_path = argv[++i];
+            have_list_files = true;
         } else if (positional == 0) {
             try { app.load_world_json(a); }
             catch (const std::exception& e) { std::cerr << "world load: " << e.what() << "\n"; }
@@ -164,6 +181,24 @@ int main(int argc, char** argv) {
             return 0;
         } else {
             std::cerr << "snapshot failed: " << err << "\n";
+            return 1;
+        }
+    }
+
+    // Write a recursive file listing to disk + exit (no GUI). The user
+    // runs: f4-world-viewer --install /path --list-files out.txt
+    // The output is a plain-text manifest of every regular file under
+    // the install root (relative path + size in bytes), sorted within
+    // each directory. Used to document install layouts across vanilla
+    // / FreeFalcon / BMS installs side-by-side and to spot files our
+    // curated snapshot list missed.
+    if (have_list_files) {
+        std::string err;
+        if (app.list_install_files(list_files_path, &err)) {
+            std::cerr << "file listing written to: " << list_files_path << "\n";
+            return 0;
+        } else {
+            std::cerr << "file listing failed: " << err << "\n";
             return 1;
         }
     }

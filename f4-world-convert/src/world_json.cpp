@@ -3,6 +3,7 @@
 #include <f4/world_convert/world_json.hpp>
 #include <f4/world_convert/objective_decoder.hpp>
 #include <f4/world_convert/unit_decoder.hpp>
+#include <f4/world_convert/team_decoder.hpp>
 
 #include <cmath>
 #include <sstream>
@@ -112,13 +113,56 @@ std::string to_world_json(const CamArchive& cam, const WorldJsonOptions& opts) {
         }
         o << "],\n";
         o << "    \"teams\": [\n";
+        // Decode .tea for team enrichment (stance, experience, member countries).
+        // The .tea decoder scans for all TeamClass blocks; if it fails or
+        // finds fewer teams than .cmp, we just omit the enrichment fields.
+        DecodedTeams tea_teams;
+        const SubFile* tea_sf = cam.find("tea");
+        if (tea_sf) {
+            try {
+                tea_teams = decode_tea(tea_sf->data.data(), tea_sf->data.size());
+            } catch (...) {
+                // .tea parse failed — proceed with .cmp-only team data
+            }
+        }
         for (std::size_t i = 0; i < h.teams.size(); ++i) {
             const auto& t = h.teams[i];
             o << "      {\"slot\": " << i
               << ", \"flags\": " << static_cast<int>(t.flags)
               << ", \"colour\": " << static_cast<int>(t.colour)
               << ", \"name\": \"" << json_escape(t.name) << "\""
-              << ", \"motto\": \"" << json_escape(t.motto) << "\"}";
+              << ", \"motto\": \"" << json_escape(t.motto) << "\"";
+            // Enrich with .tea data if available for this team slot.
+            // The .tea decoder's TeamRecord.who field is the team index (0..7),
+            // matching the .cmp team slot.
+            for (const auto& tt : tea_teams.teams) {
+                if (tt.who == static_cast<int16_t>(i)) {
+                    o << ", \"cteam\": " << tt.cteam
+                      << ", \"team_flags\": " << tt.flags
+                      << ", \"member\": [";
+                    for (std::size_t j = 0; j < tt.member.size(); ++j) {
+                        if (j) o << ", ";
+                        o << static_cast<int>(tt.member[j]);
+                    }
+                    o << "]"
+                      << ", \"stance\": [";
+                    for (std::size_t j = 0; j < tt.stance.size(); ++j) {
+                        if (j) o << ", ";
+                        o << tt.stance[j];
+                    }
+                    o << "]"
+                      << ", \"first_colonel\": " << tt.first_colonel
+                      << ", \"first_commander\": " << tt.first_commander
+                      << ", \"first_wingman\": " << tt.first_wingman
+                      << ", \"last_wingman\": " << tt.last_wingman
+                      << ", \"air_experience\": " << static_cast<int>(tt.air_experience)
+                      << ", \"air_defense_experience\": " << static_cast<int>(tt.air_defense_experience)
+                      << ", \"ground_experience\": " << static_cast<int>(tt.ground_experience)
+                      << ", \"naval_experience\": " << static_cast<int>(tt.naval_experience);
+                    break;
+                }
+            }
+            o << "}";
             if (i + 1 < h.teams.size()) o << ",";
             o << "\n";
         }

@@ -56,6 +56,26 @@ struct ObjectiveLink {
     bool is_rail = false;           // supports rail movement
 };
 
+/// One point in an airbase ground layout (runway/taxiway/parking).
+/// Mirrors the data emitted by world_json.cpp's ground_layout array.
+struct GroundLayoutPoint {
+    float    x = 0.0f;             // offset from objective center (feet)
+    float    y = 0.0f;
+    uint8_t  type = 0;             // PtType (1=Runway, 2=Taxiway, 11=SmallPark, ...)
+    uint8_t  flags = 0;            // PtDataFlags bitmap
+};
+
+/// One list of ground-layout points (e.g. a runway, a taxiway, a parking row).
+/// Each list has a type and a chain of points.
+struct GroundLayoutList {
+    uint8_t  type = 0;             // PointListType (1=Runway, 8=RunwayDim, 11=Parking, ...)
+    uint8_t  count = 0;            // # of points in this list
+    uint8_t  runway_num = 0;       // which runway (0/1/2), if type is runway
+    int8_t   ltrt = 0;             // -1=left, +1=right, 0=neither
+    float    heading_deg = 0.0f;   // runway heading in degrees (from sin/cos)
+    std::vector<GroundLayoutPoint> points;
+};
+
 /// A campaign objective (airbase, bridge, city, port, ...). Mirrors the
 /// fields decoded by f4-world-convert's objective_decoder.
 struct ObjectiveState {
@@ -86,6 +106,16 @@ struct ObjectiveState {
     bool     has_radar = false;
     float    detect_ratio[8] = {0.0f};
     std::vector<ObjectiveLink> links;   // road/rail network connections
+
+    // --- Theater static-data enrichment (from Falcon4.OCD/PHD/PD) ---
+    // Populated when the world JSON was built with a loaded TheaterObjectDatabase.
+    // Empty/default when no static data was available.
+    std::string class_name;           // e.g. "02_20 Airbase 2", "Highway Strip NS"
+    uint8_t  features_count = 0;      // # of features (buildings, runways, etc.)
+    uint8_t  radar_feature = 0;       // which feature provides radar (255=none)
+    uint8_t  deag_distance = 0;       // distance at which to deaggregate
+    uint16_t pt_data_index = 0;       // index into PHD table
+    std::vector<GroundLayoutList> ground_layout;  // runway/taxiway/parking lists
 };
 
 /// Unit subclass — same enum as f4::world_convert::UnitClass, duplicated
@@ -141,6 +171,20 @@ struct WaypointState {
     uint32_t target_creator = 0;
     uint8_t  target_building = 0;     // feature index on the target objective
     int32_t  depart = 0;              // departure time (campaign seconds)
+};
+
+/// One vehicle group in a unit's composition. Combined with the unit's
+/// roster (2 bits/group, 16 groups), gives the live vehicle count per group.
+/// Mirrors the data emitted by world_json.cpp's vehicle_groups array.
+struct VehicleGroup {
+    uint8_t  group = 0;           // group index (0-15)
+    int16_t  vehicle_type = 0;    // VCD index
+    int32_t  count = 0;           // nominal vehicle count for this group
+    int32_t  live_count = 0;      // live count from roster (0-3)
+    std::string vehicle_name;     // from VCD (e.g. "M-1A1", "F-16C")
+    std::string vehicle_nctr;     // NCTR classification (radar IFF)
+    int16_t  hit_points = 0;      // from VCD
+    int16_t  max_speed = 0;       // from VCD (knots for air, kph for ground)
 };
 
 /// A campaign unit (flight, battalion, squadron, ship). Mirrors the fields
@@ -214,6 +258,16 @@ struct UnitState {
 
     // Squadron pilot roster:
     std::vector<PilotState> pilots;
+
+    // --- Theater static-data enrichment (from Falcon4.UCD/VCD) ---
+    // Populated when the world JSON was built with a loaded TheaterObjectDatabase.
+    // Empty/default when no static data was available.
+    std::string class_name;           // e.g. "Patrol", "Supply", "Armor Battalion"
+    int32_t  movement_type = 0;       // MoveType (1=Foot, 2=Wheeled, 5=Air, 6=Naval, ...)
+    std::string movement_type_name;   // human-readable
+    int16_t  movement_speed = 0;      // kph or knots
+    int16_t  max_range = 0;           // km
+    std::vector<VehicleGroup> vehicle_groups;  // per-group vehicle composition
 };
 
 struct WorldState {
