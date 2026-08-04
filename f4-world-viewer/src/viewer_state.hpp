@@ -11,7 +11,8 @@
 // moves the Impl struct + per-concern implementations into:
 //   viewer_state.hpp    — this file (Impl struct + color helpers)
 //   viewer_app.cpp      — lifecycle (ctor/dtor/run) + small helpers
-//   icons.cpp           — Impl icon-table + draw_icon + icon_for_*
+//   symbols.cpp         — procedural symbol drawing (replaces the old
+//                         PNG-icon system — see symbols.hpp)
 //   camera.cpp          — Impl world<->screen transforms + fit_to_world
 //   file_ops.cpp        — ViewerApp::load_*_json / import_*
 //   install_flow.cpp    — ViewerApp::set_install_path* / open_campaign_dialog
@@ -44,6 +45,8 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+
+#include "symbols.hpp"  // SymbolKind, symbol_for_*, draw_symbol_imgui
 
 namespace f4::viewer {
 
@@ -80,11 +83,11 @@ inline RlColor to_rl(const f4::terrain::Color4& c) {
 // toggles, status, install-aware state, modals, hex inspector, screenshots)
 // so a reader can find what they need without scanning the whole struct.
 //
-// Member-function definitions that need to touch this struct (load_icons,
-// draw_icon, icon_for_*, world_to_screen, screen_to_world, fit_to_world,
-// rebuild_objective_index) live in icons.cpp and camera.cpp — declared
-// here, defined there. The free functions in diagnostics.cpp take a
-// const Installation& and don't need Impl access.
+// Member-function definitions that need to touch this struct (draw_symbol,
+// world_to_screen, screen_to_world, fit_to_world, rebuild_objective_index)
+// live in symbols.cpp and camera.cpp — declared here, defined there. The
+// free functions in diagnostics.cpp take a const Installation& and don't
+// need Impl access.
 // ---------------------------------------------------------------------------
 struct ViewerApp::Impl {
     // Window / camera
@@ -97,11 +100,74 @@ struct ViewerApp::Impl {
     Vector2 drag_start = {0, 0};
     float drag_cam_x0 = 0, drag_cam_y0 = 0;
     bool initial_camera_set = false;  // true if set_initial_camera() was called
+    // Phase 2 fix: File > Exit was a no-op — the menu item's comment
+    // admitted it. We now set this flag and check it in run()'s loop.
+    bool should_exit = false;
+
+    // Phase 2: Objective search/filter. When non-empty, only objectives
+    // whose class_name contains this substring (case-insensitive) are
+    // drawn on the canvas. Empty = show all.
+    char objective_search[128] = {0};
+    // POLISH-2.2: cached lowercase version of objective_search. The
+    // canvas loop used to allocate + lowercase a std::string needle
+    // PER OBJECTIVE PER FRAME (2659 objectives × 60fps = ~160k
+    // allocations/sec just for the search). Now we lowercase the
+    // needle ONCE per frame (when ImGui::InputText reports a change)
+    // and store it here. The canvas loop reads this directly.
+    //
+    // Updated by update_search_cache() — call after every InputText
+    // that writes to objective_search.
+    char objective_search_lower[128] = {0};
+    /// Recompute objective_search_lower from objective_search.
+    /// Call after any ImGui::InputText that modifies objective_search.
+    /// Defined inline here (trivial).
+    void update_search_cache() {
+        for (int i = 0; i < 128; ++i) {
+            char c = objective_search[i];
+            if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+            objective_search_lower[i] = c;
+            if (c == '\0') break;
+        }
+    }
+    // Phase 2: Team filter. 0xFF = no filter; otherwise only objectives
+    // and units owned by this team are drawn (others are dimmed).
+    uint8_t team_filter = 0xFF;
 
     // Data
     f4::world::WorldState world;
     bool world_loaded = false;
     std::string world_path_display;
+
+    // POLISH-2.1: RenderTexture terrain cache. The naive draw loop called
+    // DrawRectangleRec once per terrain cell — 128×128 = 16,384 calls per
+    // frame just for terrain, which dominated the frame time on large
+    // theaters. We now render the terrain into a 1024×1024 RenderTexture
+    // (1 pixel per theater grid unit) ONCE when the terrain is loaded,
+    // then blit it each frame with a single DrawTexturePro that the
+    // world_to_screen transform positions/scales. This drops terrain
+    // draw cost from ~16k ops to 1 op per frame, with zero visual
+    // difference at typical zoom levels.
+    //
+    // The texture is grid-space (not screen-space) so it's zoom/pan
+    // invariant — we never need to re-render it unless the terrain
+    // data itself changes (load_terrain_json / unload).
+    //
+    // NOTE: The RenderTexture is allocated on the GPU via Raylib —
+    // we MUST UnloadRenderTexture() before re-allocating and on
+    // viewer shutdown. The destructor handles shutdown; ensure_terrain_cache()
+    // handles re-allocation.
+    RenderTexture2D terrain_cache = {0};
+    bool terrain_cache_valid = false;  // true once terrain_cache holds the current terrain
+    /// (Re)render the terrain into terrain_cache. No-op if the cache
+    /// is already valid. Allocates the RenderTexture on first call,
+    /// reuses it on subsequent calls (terrain_cache_valid is reset
+    /// by invalidate_terrain_cache() when new terrain is loaded).
+    /// Defined in canvas.cpp (next to draw_canvas which consumes it).
+    void ensure_terrain_cache();
+    /// Mark the terrain cache as stale. Called whenever a new terrain
+    /// is loaded (file_ops.cpp::load_terrain_json) so the next
+    /// draw_canvas() re-renders it.
+    void invalidate_terrain_cache();
 
     // Selection
     enum class SelectionKind { None, Objective, Unit };
@@ -124,6 +190,17 @@ struct ViewerApp::Impl {
     bool show_waypoints = true;               // unit waypoint polyline + dots
     bool show_squadron_links = true;          // squadron → home airbase thin line
     bool show_hierarchy_lines = false;        // battalion → brigade parent lines (planned)
+    // POLISH-2.4: minimap in the bottom-right corner of the canvas.
+    // Shows the whole 1024×1024 theater at a glance: terrain thumbnail
+    // (re-uses the cached terrain texture), objective dots (colored by
+    // owner), unit dots (colored by owner), and a yellow rectangle
+    // marking the current main-canvas viewport. Click anywhere on the
+    // minimap to pan the main canvas to that location.
+    bool show_minimap = true;
+    // Minimap size in pixels (square). 192 keeps it readable without
+    // eating too much canvas real estate. Sized for ~1080p displays;
+    // adjust if the window is much smaller.
+    int minimap_size = 192;
 
     // Status
     std::string status_msg;
@@ -171,6 +248,15 @@ struct ViewerApp::Impl {
     bool campaign_load_error_open = false;
     std::string campaign_load_error_text;
 
+    // Phase 2: scratch buffers for the diagnostics + error modals.
+    // Previously these were `static std::string` inside the function
+    // bodies (imgui_panels.cpp:914, 953) — not thread-safe, not
+    // reentrant, reallocated every frame, and the "static so it
+    // persists" comment was misleading (the buffer was resized every
+    // frame anyway). Moved here as proper Impl members.
+    std::string diag_buf;
+    std::string err_buf;
+
     // Hex Inspector panel — owned by the viewer, opened via Tools menu.
     HexInspector hex_inspector;
 
@@ -205,80 +291,22 @@ struct ViewerApp::Impl {
     /// Defined in camera.cpp.
     void rebuild_objective_index();
 
-    // Icon textures (loaded from f4-world-viewer/assets/icons/*.png).
-    // The spritesheet has 24 icons across 4 rows × 6 cols:
-    //   Row 1: bridge, village, town, city, factory, road_intersection
-    //   Row 2: armybase, sam_site, airbase, airstrip, port, road
-    //   Row 3: harts, armor, artillery, supply, infantry, engineering
-    //   Row 4: fighter, bomber, transport, helicopter, naval_surface, carrier
-    // Plus legacy icons: powerplant, radar, railroad, square, diamond, circle, triangle
+    // --- Procedural symbols (replaces the old PNG-icon system) ---
     //
-    // Icon name → index mapping. Loaded by name; -1 = not loaded.
-    enum IconIndex : int {
-        // Row 1 (objectives):
-        ICON_BRIDGE = 0,
-        ICON_VILLAGE,
-        ICON_TOWN,
-        ICON_CITY,
-        ICON_FACTORY,
-        ICON_ROAD_INTERSECTION,
-        // Row 2 (objectives):
-        ICON_ARMYBASE,
-        ICON_SAM_SITE,
-        ICON_AIRBASE,
-        ICON_AIRSTRIP,
-        ICON_PORT,
-        ICON_ROAD,
-        // Row 3 (ground unit subtypes):
-        ICON_HARTS,
-        ICON_ARMOR,
-        ICON_ARTILLERY,
-        ICON_SUPPLY,
-        ICON_INFANTRY,
-        ICON_ENGINEERING,
-        // Row 4 (air/naval unit subtypes):
-        ICON_FIGHTER,
-        ICON_BOMBER,
-        ICON_TRANSPORT,
-        ICON_HELICOPTER,
-        ICON_NAVAL_SURFACE,
-        ICON_CARRIER,
-        // Legacy icons (kept for backward compat):
-        ICON_POWERPLANT,
-        ICON_RADAR,
-        ICON_RAILROAD,
-        ICON_SQUARE,
-        ICON_DIAMOND,
-        ICON_CIRCLE,
-        ICON_TRIANGLE,
-        ICON_COUNT
-    };
-
-    Texture2D icons[ICON_COUNT] = {};
-    bool icons_loaded = false;
-
-    /// Load all icon PNGs from the assets/icons/ directory. Called once at
-    /// startup. Falls back to drawn shapes if not found.
-    /// Defined in icons.cpp.
-    void load_icons();
-
-    /// Draw an icon centered at screen position (sx, sy) with the given
-    /// pixel size. The icon is tinted by the owner color so team affiliation
-    /// is still visible. If no icon is loaded, falls back to a small drawn
-    /// circle (sized independently of priority so unknown objectives don't
-    /// become giant discs). Defined in icons.cpp.
-    void draw_icon(int icon_idx, float sx, float sy, float size_px,
-                   const RlColor& tint);
-
-    /// Map an ObjectiveType (enum 1-39, from the class table) to an icon.
-    /// Returns -1 if no icon exists for this type. Defined in icons.cpp.
-    static int icon_for_objective_type(uint8_t obj_type);
-
-    /// Map a unit_class + unit_subtype to an icon. Uses the subtype to pick
-    /// a specific icon (armor/infantry/fighter/bomber/...) when available;
-    /// falls back to the generic shape icon (square/diamond/circle/triangle)
-    /// if no subtype-specific icon exists. Defined in icons.cpp.
-    int icon_for_unit(f4::world::UnitClass cls, uint8_t subtype) const;
+    // Every objective and unit on the canvas is drawn by draw_symbol() from
+    // raylib primitives — no texture assets, no PNG loading. The SymbolKind
+    // enum + symbol_for_* helpers live in symbols.hpp; the rendering code
+    // lives in symbols.cpp. See symbols.hpp for the full vocabulary.
+    //
+    // draw_symbol renders a symbol centered at (sx, sy) with extent
+    // size_px (width = height). The fill color is typically the team
+    // color; the outline is a contrasting color (usually a darkened
+    // version of fill, or pure black for max contrast at small sizes).
+    // Set filled=false for outline-only rendering (used for hover/
+    // selection state). Defined in symbols.cpp.
+    void draw_symbol(SymbolKind kind, float sx, float sy, float size_px,
+                     const RlColor& fill, const RlColor& outline,
+                     bool filled = true);
 
     // --- Camera transforms (defined in camera.cpp) ---
 

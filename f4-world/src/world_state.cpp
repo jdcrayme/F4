@@ -124,8 +124,14 @@ ObjectiveState parse_objective(Reader& r) {
             }
             r.expect(']');
         }
+        // Phase 3: real radar range from Falcon4.RCD.
+        else if (k == "radar_range_km")   o.radar_range_km   = static_cast<float>(r.read_number());
+        else if (k == "radar_name")       o.radar_name       = r.read_string();
+        else if (k == "radar_type_idx")   o.radar_type_idx   = static_cast<int16_t>(r.read_int());
         else if (k == "links") {
-            // Array of {n, c, road, rail} objects.
+            // Array of {n, c, road, rail, costs[8]} objects.
+            // Phase 1 fix A.4: costs[8] is the per-movement-type traversal
+            // cost array (Foot/Wheeled/Tracked/LowAir/Air/Naval/Rail).
             r.skip_ws(); r.expect('[');
             if (r.consume(']')) { /* empty */ }
             else for (;;) {
@@ -146,6 +152,15 @@ ObjectiveState parse_objective(Reader& r) {
                         if (r.consume('t')) { link.is_rail = true;  r.skip_value(); }
                         else                { link.is_rail = false; r.skip_value(); }
                     }
+                    else if (lk == "costs") {
+                        // Per-movement-type traversal cost array (8 uchar).
+                        r.skip_ws(); r.expect('[');
+                        for (int ci = 0; ci < 8; ++ci) {
+                            if (ci) r.expect(',');
+                            link.costs[ci] = static_cast<uint8_t>(r.read_int());
+                        }
+                        r.expect(']');
+                    }
                     else r.skip_value();
                     if (r.consume('}')) break;
                     r.expect(',');
@@ -161,6 +176,17 @@ ObjectiveState parse_objective(Reader& r) {
         else if (k == "radar_feature")   o.radar_feature   = static_cast<uint8_t>(r.read_int());
         else if (k == "deag_distance")   o.deag_distance   = static_cast<uint8_t>(r.read_int());
         else if (k == "pt_data_index")   o.pt_data_index   = static_cast<uint16_t>(r.read_int());
+        // Phase 1 fix A.7: OCD detection[8] — per-movement-type electronic
+        // detection ranges. Previously emitted by world_json.cpp only when
+        // theater_db was loaded but dropped here.
+        else if (k == "detection") {
+            r.skip_ws(); r.expect('[');
+            for (int di = 0; di < 8; ++di) {
+                if (di) r.expect(',');
+                o.objective_detection[di] = static_cast<uint8_t>(r.read_int());
+            }
+            r.expect(']');
+        }
         else if (k == "features") {
             // Array of feature placement objects (from Falcon4.FED + FCD).
             // Each feature has: index (entity_type), flags, value, offset_x/y/z,
@@ -183,6 +209,12 @@ ObjectiveState parse_objective(Reader& r) {
                     else if (fk == "facing")       fes.facing       = static_cast<int16_t>(r.read_int());
                     else if (fk == "name")         fes.name         = r.read_string();
                     else if (fk == "hit_points")   fes.hit_points   = static_cast<int16_t>(r.read_int());
+                    // Phase 1 fix A.5: previously emitted by world_json.cpp
+                    // but dropped here because FeatureEntryState had no slots.
+                    else if (fk == "repair_time")  fes.repair_time  = static_cast<int16_t>(r.read_int());
+                    else if (fk == "priority")     fes.priority     = static_cast<uint8_t>(r.read_int());
+                    else if (fk == "feat_flags")   fes.feat_flags   = static_cast<uint16_t>(r.read_int());
+                    else if (fk == "radar_type")   fes.radar_type   = static_cast<int16_t>(r.read_int());
                     else                           r.skip_value();
                     if (r.consume('}')) break;
                     r.expect(',');
@@ -370,6 +402,10 @@ UnitState parse_unit(Reader& r) {
                     else if (pk == "status")   p.status         = static_cast<uint8_t>(r.read_int());
                     else if (pk == "aa")       p.aa_kills       = static_cast<uint8_t>(r.read_int());
                     else if (pk == "ag")       p.ag_kills       = static_cast<uint8_t>(r.read_int());
+                    // Phase 1 fix A.6: as/an kills were decoded by
+                    // unit_decoder.cpp but dropped by PilotState.
+                    else if (pk == "as")       p.as_kills       = static_cast<uint8_t>(r.read_int());
+                    else if (pk == "an")       p.an_kills       = static_cast<uint8_t>(r.read_int());
                     else if (pk == "missions") p.missions_flown = static_cast<int16_t>(r.read_int());
                     else                       r.skip_value();
                     if (r.consume('}')) break;
@@ -414,6 +450,39 @@ UnitState parse_unit(Reader& r) {
                 r.expect(',');
             }
         }
+        // Phase 1 fix A.8: UCD scores[16] — per-mission-role scoring.
+        // Previously emitted by world_json.cpp but dropped here.
+        else if (k == "scores") {
+            r.skip_ws(); r.expect('[');
+            for (int si = 0; si < 16; ++si) {
+                if (si) r.expect(',');
+                u.unit_class_scores[si] = static_cast<uint8_t>(r.read_int());
+            }
+            r.expect(']');
+        }
+        // Phase 1 fix A.1: Flight subclass fields. Previously decoded by
+        // unit_decoder.cpp but never emitted/consumed.
+        else if (k == "flight_altitude")    u.flight_altitude    = static_cast<float>(r.read_number());
+        else if (k == "fuel_burnt")         u.fuel_burnt         = static_cast<int32_t>(r.read_int());
+        else if (k == "time_on_target")     u.time_on_target     = static_cast<int32_t>(r.read_int());
+        else if (k == "mission_over_time")  u.mission_over_time  = static_cast<int32_t>(r.read_int());
+        else if (k == "mission_target")     u.mission_target     = static_cast<int16_t>(r.read_int());
+        else if (k == "loadouts")           u.loadouts           = static_cast<uint8_t>(r.read_int());
+        else if (k == "mission")            u.mission            = static_cast<uint8_t>(r.read_int());
+        else if (k == "flight_priority")    u.flight_priority    = static_cast<uint8_t>(r.read_int());
+        else if (k == "mission_id")         u.mission_id         = static_cast<uint8_t>(r.read_int());
+        else if (k == "eval_flags")         u.eval_flags         = static_cast<uint8_t>(r.read_int());
+        else if (k == "package_id")         u.package_id         = static_cast<uint32_t>(r.read_int());
+        else if (k == "squadron_id")        u.squadron_id        = static_cast<uint32_t>(r.read_int());
+        else if (k == "callsign_id")        u.callsign_id        = static_cast<uint8_t>(r.read_int());
+        else if (k == "callsign_num")       u.callsign_num       = static_cast<uint8_t>(r.read_int());
+        // Phase 1 fix A.1: Package subclass fields.
+        else if (k == "wait_cycles")        u.wait_cycles        = static_cast<uint8_t>(r.read_int());
+        else if (k == "interceptor_id")     u.interceptor_id     = static_cast<uint32_t>(r.read_int());
+        else if (k == "awacs_id")           u.awacs_id           = static_cast<uint32_t>(r.read_int());
+        else if (k == "jstar_id")           u.jstar_id           = static_cast<uint32_t>(r.read_int());
+        else if (k == "ecm_id")             u.ecm_id             = static_cast<uint32_t>(r.read_int());
+        else if (k == "tanker_id")          u.tanker_id          = static_cast<uint32_t>(r.read_int());
         else                            r.skip_value();
         if (r.consume('}')) break;
         r.expect(',');

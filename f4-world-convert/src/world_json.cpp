@@ -215,6 +215,15 @@ std::string to_world_json(const CamArchive& cam, const WorldJsonOptions& opts) {
                               << ", \"radar_feature\": " << static_cast<int>(ocd->radar_feature)
                               << ", \"deag_distance\": " << ocd->deag_distance
                               << ", \"pt_data_index\": " << ocd->pt_data_index;
+                            // OCD.Detection[8] — per-movement-type electronic
+                            // detection ranges. Phase 1 fix A.7: previously
+                            // decoded by theater_data.cpp but never emitted.
+                            o << ", \"detection\": [";
+                            for (int di = 0; di < TD_MOVEMENT_TYPES; ++di) {
+                                if (di) o << ", ";
+                                o << static_cast<int>(ocd->detection[di]);
+                            }
+                            o << "]";
                             // Per-objective feature placements (Falcon4.FED +
                             // FCD). Walks `ocd->first_feature .. first_feature +
                             // features - 1` in the FED table. Each FED record's
@@ -262,7 +271,8 @@ std::string to_world_json(const CamArchive& cam, const WorldJsonOptions& opts) {
                                               << ", \"hit_points\": " << fcd->hit_points
                                               << ", \"repair_time\": " << fcd->repair_time
                                               << ", \"priority\": " << static_cast<int>(fcd->priority)
-                                              << ", \"feat_flags\": " << fcd->flags;
+                                              << ", \"feat_flags\": " << fcd->flags
+                                              << ", \"radar_type\": " << fcd->radar_type;
                                             break;
                                         }
                                     }
@@ -299,6 +309,52 @@ std::string to_world_json(const CamArchive& cam, const WorldJsonOptions& opts) {
                             o << ob.detect_ratio[ri];
                         }
                         o << "]";
+                        // Phase 3: look up the radar's actual range from
+                        // Falcon4.RCD via OCD.radar_feature → FED.index →
+                        // FCD.radar_type → RCD.range_km. Previously the
+                        // viewer used a fabricated 32-grid-unit constant
+                        // for ALL radar objectives regardless of type.
+                        if (opts.theater_db && opts.theater_db->radars.loaded()
+                            && opts.theater_db->features.loaded()
+                            && opts.theater_db->feature_entries.loaded()
+                            && obj_type > 0) {
+                            const auto* ocd_r = opts.theater_db->objectives.at(
+                                static_cast<std::size_t>(obj_type) - 1);
+                            if (ocd_r && ocd_r->radar_feature != 255
+                                && ocd_r->radar_feature > 0
+                                && ocd_r->first_feature > 0) {
+                                // radar_feature is the feature index within
+                                // the objective's feature list; look up the
+                                // corresponding FED entry.
+                                const auto* fed_r = opts.theater_db->feature_entries.at(
+                                    static_cast<std::size_t>(ocd_r->first_feature)
+                                    + ocd_r->radar_feature - 1);
+                                if (fed_r) {
+                                    // Find FCD by matching index (= entity_type).
+                                    int16_t radar_type_idx = -1;
+                                    for (std::size_t fci = 0;
+                                         fci < opts.theater_db->features.size();
+                                         ++fci) {
+                                        const auto* fcd_r =
+                                            opts.theater_db->features.at(fci);
+                                        if (fcd_r && fcd_r->index == fed_r->index) {
+                                            radar_type_idx = fcd_r->radar_type;
+                                            break;
+                                        }
+                                    }
+                                    // Look up RCD by radar_type_idx.
+                                    if (radar_type_idx >= 0) {
+                                        const auto* rcd = opts.theater_db->radars.at(
+                                            static_cast<std::size_t>(radar_type_idx));
+                                        if (rcd) {
+                                            o << ", \"radar_range_km\": " << rcd->range_km
+                                              << ", \"radar_name\": \"" << json_escape(rcd->name) << "\""
+                                              << ", \"radar_type_idx\": " << static_cast<int>(radar_type_idx);
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     } else {
                         o << ", \"has_radar\": false";
                     }
@@ -355,7 +411,10 @@ std::string to_world_json(const CamArchive& cam, const WorldJsonOptions& opts) {
                     // Emit the link data (road/rail network). Each link is
                     // a neighbor VU_ID + the 8 movement costs. The viewer
                     // uses costs[Wheeled] and costs[Rail] to color the link
-                    // as a road (brown) or rail (dark gray).
+                    // as a road (brown) or rail (dark gray). The full
+                    // costs[8] array is also emitted so the campaign A*
+                    // pathfinder (architecture §11.4) can use per-mode
+                    // traversal costs when computing routes.
                     for (std::size_t j = 0; j < ob.link_data.size(); ++j) {
                         const auto& lk = ob.link_data[j];
                         if (j) o << ", ";
@@ -363,7 +422,12 @@ std::string to_world_json(const CamArchive& cam, const WorldJsonOptions& opts) {
                           << ", \"c\": " << static_cast<int>(lk.neighbor_creator)
                           << ", \"road\": " << (lk.is_road() ? "true" : "false")
                           << ", \"rail\": " << (lk.is_rail() ? "true" : "false")
-                          << "}";
+                          << ", \"costs\": [";
+                        for (int ci = 0; ci < 8; ++ci) {
+                            if (ci) o << ", ";
+                            o << static_cast<int>(lk.costs[ci]);
+                        }
+                        o << "]}";
                     }
                     o << "]}";
                     if (i + 1 < objs.objectives.size()) o << ",";
@@ -454,6 +518,18 @@ std::string to_world_json(const CamArchive& cam, const WorldJsonOptions& opts) {
                                         }
                                     }
                                     o << "}";
+                                }
+                                o << "]";
+                                // UCD.Scores[16] — per-mission-role scoring.
+                                // Phase 1 fix A.8: previously decoded by
+                                // theater_data.cpp but never emitted. Lets
+                                // the campaign AI pick the best unit class
+                                // for a given mission type (BARCAP, INTERCEPT,
+                                // CAS, ...). Higher score = better suited.
+                                o << ", \"scores\": [";
+                                for (int si = 0; si < TD_MAXIMUM_ROLES; ++si) {
+                                    if (si) o << ", ";
+                                    o << static_cast<int>(ucd->scores[si]);
                                 }
                                 o << "]";
                             }
@@ -553,6 +629,34 @@ std::string to_world_json(const CamArchive& cam, const WorldJsonOptions& opts) {
                               << "}";
                         }
                         o << "]";
+                    } else if (u.unit_class == UnitClass::Flight) {
+                        // Phase 1 fix A.1: previously decoded by unit_decoder.cpp
+                        // but never emitted. A Flight is a single-aircraft
+                        // mission element within a Package.
+                        o << ", \"flight_altitude\": " << u.subclass.altitude
+                          << ", \"fuel_burnt\": " << u.subclass.fuel_burnt
+                          << ", \"time_on_target\": " << u.subclass.time_on_target
+                          << ", \"mission_over_time\": " << u.subclass.mission_over_time
+                          << ", \"mission_target\": " << u.subclass.mission_target
+                          << ", \"loadouts\": " << static_cast<int>(u.subclass.loadouts)
+                          << ", \"mission\": " << static_cast<int>(u.subclass.mission)
+                          << ", \"flight_priority\": " << static_cast<int>(u.subclass.priority)
+                          << ", \"mission_id\": " << static_cast<int>(u.subclass.mission_id)
+                          << ", \"eval_flags\": " << static_cast<int>(u.subclass.eval_flags)
+                          << ", \"package_id\": " << u.subclass.package_num
+                          << ", \"squadron_id\": " << u.subclass.squadron_num
+                          << ", \"callsign_id\": " << static_cast<int>(u.subclass.callsign_id)
+                          << ", \"callsign_num\": " << static_cast<int>(u.subclass.callsign_num);
+                    } else if (u.unit_class == UnitClass::Package) {
+                        // Phase 1 fix A.1: previously decoded by unit_decoder.cpp
+                        // but never emitted. A Package groups multiple Flights
+                        // into a coordinated strike/mission.
+                        o << ", \"wait_cycles\": " << static_cast<int>(u.subclass.wait_cycles)
+                          << ", \"interceptor_id\": " << u.subclass.interceptor_num
+                          << ", \"awacs_id\": " << u.subclass.awacs_num
+                          << ", \"jstar_id\": " << u.subclass.jstar_num
+                          << ", \"ecm_id\": " << u.subclass.ecm_num
+                          << ", \"tanker_id\": " << u.subclass.tanker_num;
                     }
                     o << "}";
                     if (i + 1 < units.units.size()) o << ",";

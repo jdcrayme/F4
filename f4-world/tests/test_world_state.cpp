@@ -327,3 +327,283 @@ TEST(WorldState, ParsesSyntheticObjectiveLinks) {
     EXPECT_TRUE(ws.objectives[0].links[2].is_road);
     EXPECT_TRUE(ws.objectives[0].links[2].is_rail);
 }
+
+// ============================================================================
+// PHASE 1 TESTS — dropped-fields pass (world_state.cpp consumer side)
+// ============================================================================
+
+TEST(WorldStatePhase1, ParsesObjectiveLinkCosts) {
+    // A.4: ObjectiveLink.costs[8] — full per-movement-type traversal cost
+    // array. Previously emitted as just is_road/is_rail booleans.
+    WorldState ws;
+    ws.load_from_string(R"({
+        "version": 63,
+        "campaign": {"teams": []},
+        "objectives": {
+            "count": 1, "decoded": 1, "items": [
+                {
+                    "type": 100, "x": 100, "y": 200, "owner": 1,
+                    "links": [
+                        {"n": 42, "c": 0, "road": true, "rail": false,
+                         "costs": [63, 25, 74, 51, 17, 12, 255, 255]}
+                    ]
+                }
+            ]
+        },
+        "raw_subfiles": {}
+    })");
+    ASSERT_EQ(ws.objectives.size(), 1u);
+    ASSERT_EQ(ws.objectives[0].links.size(), 1u);
+    const auto& link = ws.objectives[0].links[0];
+    EXPECT_EQ(link.neighbor_num, 42u);
+    EXPECT_TRUE(link.is_road);
+    EXPECT_FALSE(link.is_rail);
+    // Verify all 8 cost values match what we wrote.
+    EXPECT_EQ(link.costs[0], 63);
+    EXPECT_EQ(link.costs[1], 25);
+    EXPECT_EQ(link.costs[2], 74);
+    EXPECT_EQ(link.costs[3], 51);
+    EXPECT_EQ(link.costs[4], 17);
+    EXPECT_EQ(link.costs[5], 12);
+    EXPECT_EQ(link.costs[6], 255);
+    EXPECT_EQ(link.costs[7], 255);
+}
+
+TEST(WorldStatePhase1, ParsesObjectiveDetection) {
+    // A.7: ObjectiveClassData.Detection[8] — per-movement-type electronic
+    // detection ranges.
+    WorldState ws;
+    ws.load_from_string(R"({
+        "version": 63,
+        "campaign": {"teams": []},
+        "objectives": {
+            "count": 1, "decoded": 1, "items": [
+                {
+                    "type": 100, "x": 0, "y": 0, "owner": 1,
+                    "detection": [10, 20, 30, 40, 50, 60, 70, 80]
+                }
+            ]
+        },
+        "raw_subfiles": {}
+    })");
+    ASSERT_EQ(ws.objectives.size(), 1u);
+    EXPECT_EQ(ws.objectives[0].objective_detection[0], 10);
+    EXPECT_EQ(ws.objectives[0].objective_detection[1], 20);
+    EXPECT_EQ(ws.objectives[0].objective_detection[7], 80);
+}
+
+TEST(WorldStatePhase1, ParsesFeatureEntryFcdFields) {
+    // A.5: FeatureEntryState gains repair_time, priority, feat_flags,
+    // radar_type (previously emitted by world_json.cpp but dropped on parse).
+    WorldState ws;
+    ws.load_from_string(R"({
+        "version": 63,
+        "campaign": {"teams": []},
+        "objectives": {
+            "count": 1, "decoded": 1, "items": [
+                {
+                    "type": 100, "x": 0, "y": 0, "owner": 1,
+                    "features_count": 1,
+                    "features": [
+                        {"index": 100, "flags": 1, "value": 50,
+                         "offset_x": 100.0, "offset_y": 200.0, "offset_z": 0.0,
+                         "facing": 90, "name": "Control Tower",
+                         "hit_points": 500, "repair_time": 48,
+                         "priority": 3, "feat_flags": 7, "radar_type": 32}
+                    ]
+                }
+            ]
+        },
+        "raw_subfiles": {}
+    })");
+    ASSERT_EQ(ws.objectives.size(), 1u);
+    ASSERT_EQ(ws.objectives[0].features.size(), 1u);
+    const auto& f = ws.objectives[0].features[0];
+    EXPECT_EQ(f.name, "Control Tower");
+    EXPECT_EQ(f.hit_points, 500);
+    EXPECT_EQ(f.repair_time, 48);
+    EXPECT_EQ(f.priority, 3);
+    EXPECT_EQ(f.feat_flags, 7u);
+    EXPECT_EQ(f.radar_type, 32);
+}
+
+TEST(WorldStatePhase1, ParsesPilotAsAnKills) {
+    // A.6: PilotState gains as_kills, an_kills (previously decoded by
+    // unit_decoder.cpp but dropped by PilotState).
+    WorldState ws;
+    ws.load_from_string(R"({
+        "version": 63,
+        "campaign": {"teams": []},
+        "units": {
+            "count": 1, "decoded": 1, "items": [
+                {
+                    "type": 170, "unit_class": "squadron", "x": 0, "y": 0,
+                    "owner": 1, "roster": 0, "wp_count": 0,
+                    "pilots": [
+                        {"id": 1, "skill": 80, "rating": 4, "status": 0,
+                         "aa": 5, "ag": 3, "as": 2, "an": 1, "missions": 10}
+                    ]
+                }
+            ]
+        },
+        "raw_subfiles": {}
+    })");
+    ASSERT_EQ(ws.units.size(), 1u);
+    ASSERT_EQ(ws.units[0].pilots.size(), 1u);
+    const auto& p = ws.units[0].pilots[0];
+    EXPECT_EQ(p.aa_kills, 5);
+    EXPECT_EQ(p.ag_kills, 3);
+    EXPECT_EQ(p.as_kills, 2);
+    EXPECT_EQ(p.an_kills, 1);
+}
+
+TEST(WorldStatePhase1, ParsesUnitClassScores) {
+    // A.8: UnitClassData.Scores[16] — per-mission-role scoring.
+    WorldState ws;
+    ws.load_from_string(R"({
+        "version": 63,
+        "campaign": {"teams": []},
+        "units": {
+            "count": 1, "decoded": 1, "items": [
+                {
+                    "type": 170, "unit_class": "battalion", "x": 0, "y": 0,
+                    "owner": 1, "roster": 0, "wp_count": 0,
+                    "scores": [10, 20, 30, 40, 50, 60, 70, 80,
+                                90, 100, 110, 120, 130, 140, 150, 160]
+                }
+            ]
+        },
+        "raw_subfiles": {}
+    })");
+    ASSERT_EQ(ws.units.size(), 1u);
+    EXPECT_EQ(ws.units[0].unit_class_scores[0], 10);
+    EXPECT_EQ(ws.units[0].unit_class_scores[5], 60);
+    EXPECT_EQ(ws.units[0].unit_class_scores[15], 160);
+}
+
+TEST(WorldStatePhase1, ParsesFlightSubclassFields) {
+    // A.1: Flight subclass fields (flight_altitude, fuel_burnt, mission, etc.)
+    WorldState ws;
+    ws.load_from_string(R"({
+        "version": 63,
+        "campaign": {"teams": []},
+        "units": {
+            "count": 1, "decoded": 1, "items": [
+                {
+                    "type": 170, "unit_class": "flight", "x": 100, "y": 200,
+                    "owner": 1, "roster": 0, "wp_count": 0,
+                    "flight_altitude": 25000.0, "fuel_burnt": 5000,
+                    "time_on_target": 3600, "mission_over_time": 7200,
+                    "mission_target": 42, "loadouts": 4,
+                    "mission": 3, "flight_priority": 2, "mission_id": 7,
+                    "eval_flags": 1, "package_id": 999, "squadron_id": 888,
+                    "callsign_id": 5, "callsign_num": 2
+                }
+            ]
+        },
+        "raw_subfiles": {}
+    })");
+    ASSERT_EQ(ws.units.size(), 1u);
+    EXPECT_EQ(ws.units[0].unit_class, UnitClass::Flight);
+    EXPECT_FLOAT_EQ(ws.units[0].flight_altitude, 25000.0f);
+    EXPECT_EQ(ws.units[0].fuel_burnt, 5000);
+    EXPECT_EQ(ws.units[0].time_on_target, 3600);
+    EXPECT_EQ(ws.units[0].mission_over_time, 7200);
+    EXPECT_EQ(ws.units[0].mission_target, 42);
+    EXPECT_EQ(ws.units[0].loadouts, 4);
+    EXPECT_EQ(ws.units[0].mission, 3);
+    EXPECT_EQ(ws.units[0].flight_priority, 2);
+    EXPECT_EQ(ws.units[0].mission_id, 7);
+    EXPECT_EQ(ws.units[0].eval_flags, 1);
+    EXPECT_EQ(ws.units[0].package_id, 999u);
+    EXPECT_EQ(ws.units[0].squadron_id, 888u);
+    EXPECT_EQ(ws.units[0].callsign_id, 5);
+    EXPECT_EQ(ws.units[0].callsign_num, 2);
+}
+
+TEST(WorldStatePhase1, ParsesPackageSubclassFields) {
+    // A.1: Package subclass fields (wait_cycles, interceptor_id, awacs_id, ...)
+    WorldState ws;
+    ws.load_from_string(R"({
+        "version": 63,
+        "campaign": {"teams": []},
+        "units": {
+            "count": 1, "decoded": 1, "items": [
+                {
+                    "type": 170, "unit_class": "package", "x": 100, "y": 200,
+                    "owner": 1, "roster": 0, "wp_count": 0,
+                    "wait_cycles": 3, "interceptor_id": 111,
+                    "awacs_id": 222, "jstar_id": 333,
+                    "ecm_id": 444, "tanker_id": 555
+                }
+            ]
+        },
+        "raw_subfiles": {}
+    })");
+    ASSERT_EQ(ws.units.size(), 1u);
+    EXPECT_EQ(ws.units[0].unit_class, UnitClass::Package);
+    EXPECT_EQ(ws.units[0].wait_cycles, 3);
+    EXPECT_EQ(ws.units[0].interceptor_id, 111u);
+    EXPECT_EQ(ws.units[0].awacs_id, 222u);
+    EXPECT_EQ(ws.units[0].jstar_id, 333u);
+    EXPECT_EQ(ws.units[0].ecm_id, 444u);
+    EXPECT_EQ(ws.units[0].tanker_id, 555u);
+}
+
+// ============================================================================
+// PHASE 3 TESTS — Falcon4.RCD radar range fields
+// ============================================================================
+
+TEST(WorldStatePhase3, ParsesRadarRangeAndName) {
+    // Phase 3: ObjectiveState gains radar_range_km, radar_name,
+    // radar_type_idx. Previously the viewer used a fabricated 32-grid-unit
+    // constant for ALL radar objectives.
+    WorldState ws;
+    ws.load_from_string(R"({
+        "version": 63,
+        "campaign": {"teams": []},
+        "objectives": {
+            "count": 1, "decoded": 1, "items": [
+                {
+                    "type": 100, "x": 500, "y": 500, "owner": 1,
+                    "has_radar": true,
+                    "detect_ratio": [0.8, 0.9, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2],
+                    "radar_range_km": 245.5,
+                    "radar_name": "Pat Hand SA-10",
+                    "radar_type_idx": 18
+                }
+            ]
+        },
+        "raw_subfiles": {}
+    })");
+    ASSERT_EQ(ws.objectives.size(), 1u);
+    EXPECT_TRUE(ws.objectives[0].has_radar);
+    EXPECT_FLOAT_EQ(ws.objectives[0].radar_range_km, 245.5f);
+    EXPECT_EQ(ws.objectives[0].radar_name, "Pat Hand SA-10");
+    EXPECT_EQ(ws.objectives[0].radar_type_idx, 18);
+}
+
+TEST(WorldStatePhase3, RadarFieldsDefaultWhenAbsent) {
+    // When the world JSON doesn't carry radar_range_km (e.g. when
+    // theater_db wasn't loaded by cam2json), the fields stay at defaults.
+    WorldState ws;
+    ws.load_from_string(R"({
+        "version": 63,
+        "campaign": {"teams": []},
+        "objectives": {
+            "count": 1, "decoded": 1, "items": [
+                {
+                    "type": 100, "x": 500, "y": 500, "owner": 1,
+                    "has_radar": true,
+                    "detect_ratio": [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5]
+                }
+            ]
+        },
+        "raw_subfiles": {}
+    })");
+    ASSERT_EQ(ws.objectives.size(), 1u);
+    EXPECT_TRUE(ws.objectives[0].has_radar);
+    EXPECT_FLOAT_EQ(ws.objectives[0].radar_range_km, 0.0f);
+    EXPECT_TRUE(ws.objectives[0].radar_name.empty());
+    EXPECT_EQ(ws.objectives[0].radar_type_idx, -1);
+}

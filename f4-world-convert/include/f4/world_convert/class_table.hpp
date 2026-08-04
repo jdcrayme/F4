@@ -87,16 +87,25 @@ enum : int {
 constexpr int VU_LAST_ENTITY_TYPE = 100;
 
 /// Falcon4EntityClassType.dataType values (from classtbl.h). Tells us which
-/// data table to index into via dataPtr. We only need the 4 objective/unit/
-/// vehicle/feature types for now — the rest (weapon, rack, ...) are skipped.
+/// data table to index into via dataPtr. The on-disk values were verified
+/// against real Falcon4.ct data (Phase 1 fix): the previously-documented
+/// values were off by one or more, which silently broke the UCD enrichment
+/// path in world_json.cpp (units always failed the `dt == DTYPE_UNIT`
+/// check, so no unit ever received class_name / vehicle_groups / scores).
+///
+/// Verified mapping (entity class → on-disk dataType byte):
+///   CLASS_FEATURE  (2) → dataType 1 → FCD table
+///   CLASS_OBJECTIVE(4) → dataType 3 → OCD table
+///   CLASS_UNIT     (6) → dataType 4 → UCD table
+///   CLASS_VEHICLE  (7) → dataType 5 → VCD table
 enum DataType : int {
     DTYPE_NOTHING    = 0,
-    DTYPE_OBJECTIVE  = 1,
-    DTYPE_UNIT       = 2,
-    DTYPE_VEHICLE    = 3,
-    DTYPE_WEAPON     = 4,
-    DTYPE_FEATURE    = 5,
-    DTYPE_SQUAD_STORES = 6,
+    DTYPE_FEATURE    = 1,    // Falcon4.FCD
+    DTYPE_OBJECTIVE  = 3,    // Falcon4.OCD
+    DTYPE_UNIT       = 4,    // Falcon4.UCD
+    DTYPE_VEHICLE    = 5,    // Falcon4.VCD
+    DTYPE_WEAPON     = 6,    // (orientation uncertain — not used by F4 yet)
+    DTYPE_SQUAD_STORES = 7,  // (orientation uncertain — not used by F4 yet)
 };
 
 /// Unit subtypes for DOMAIN_LAND / TYPE_BATTALION (classtbl.h:319-332).

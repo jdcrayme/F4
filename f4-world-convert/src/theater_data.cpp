@@ -560,6 +560,44 @@ void load_feature_entry_data(const std::filesystem::path& base_path,
     }
 }
 
+void load_radar_data(const std::filesystem::path& base_path,
+                     RadarClassTable& out) {
+    const auto path = find_theater_file(base_path, "RCD");
+    if (path.empty()) throw std::runtime_error("theater_data: Falcon4.RCD not found");
+    const auto buf = read_file(path);
+    const int16_t n = read_entry_count(buf, RCD_RECORD_SIZE);
+
+    Cursor c(buf);
+    c.p = buf.data() + 2;
+
+    out.entries.clear();
+    out.entries.reserve(static_cast<std::size_t>(n));
+    for (int16_t i = 0; i < n; ++i) {
+        // Best-known MSVC layout for RadarClassDataType (Phase 3 — partial
+        // decode). The full FreeFalcon struct has more fields (RcsType,
+        // per-band DetectionChance, radar flags, etc.) but for visualization
+        // we only need Index + Name + Range. The remaining 26 bytes per
+        // record are skipped as opaque padding; consumers that need other
+        // fields can extend this struct and parser later.
+        //
+        //   off 0: Index    (short, 2)
+        //   off 2: Name[28] (char[28], 28) — radar name
+        //   off30: Range    (float, 4)     — detection range (km)
+        //   off34: *(26 bytes opaque padding)*
+        //   total = 60 bytes
+        RadarClassData e;
+        e.index = c.s16();
+        uint8_t name_buf[28];
+        c.read_bytes(name_buf, 28);
+        e.name = trim_name(name_buf, 28);
+        e.range_km = c.f32();
+        // Skip the remaining 26 bytes of opaque fields (radar type flags,
+        // per-band detection ratios, etc.).
+        c.p += 26;
+        out.entries.push_back(std::move(e));
+    }
+}
+
 // ============================================================================
 // TheaterObjectDatabase — convenience bulk loader
 // ============================================================================
@@ -580,6 +618,7 @@ void TheaterObjectDatabase::load_all(const std::filesystem::path& dir) {
     try { load_vehicle_data       (base, vehicles);        } catch (const std::exception&) {}
     try { load_feature_data       (base, features);        } catch (const std::exception&) {}
     try { load_feature_entry_data (base, feature_entries); } catch (const std::exception&) {}
+    try { load_radar_data         (base, radars);          } catch (const std::exception&) {}
     (void)try_load;  // silence unused-variable warning
 }
 

@@ -18,6 +18,7 @@
 
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <string>
@@ -75,6 +76,13 @@ struct ObjectiveLink {
     uint32_t neighbor_creator = 0;  // VU_ID.creator
     bool is_road = false;           // supports wheeled movement
     bool is_rail = false;           // supports rail movement
+    /// Per-movement-type traversal cost (FreeFalcon MoveType enum, 8 values).
+    /// Index 0=NoMove, 1=Foot, 2=Wheeled, 3=Tracked, 4=LowAir, 5=Air,
+    /// 6=Naval, 7=Rail. A value of 255 means "impassable for this mode".
+    /// Low cost = fast path; high cost = slow path. Used by the campaign
+    /// pathfinder (A* with threat-map weighting — see ARCHITECTURE
+    /// PROPOSAL §11.4) to compute routes through the objective network.
+    uint8_t costs[8] = {0};
 };
 
 /// One feature class (building/structure type) — mirrors the fields we
@@ -106,6 +114,12 @@ struct FeatureEntryState {
     // Empty when no FCD entry was found for this feature's entity_type.
     std::string name;            // e.g. "Control Tower", "Runway 09/27"
     int16_t  hit_points = 0;     // from FCD
+    // Additional FCD fields (previously decoded then dropped on the floor
+    // because this struct had no slots for them — Phase 1 fix).
+    int16_t  repair_time = 0;    // seconds to repair from destroyed to operational
+    uint8_t  priority = 0;       // display priority
+    uint16_t feat_flags = 0;     // FEAT_ flags bitmap from FCD
+    int16_t  radar_type = 0;     // index into Falcon4.RCD (NOT yet parsed)
     // Live damage state derived from the parent objective's fstatus
     // bitmap (2 bits per feature, 0=intact, 1=damaged, 2=destroyed,
     // 3=heavily destroyed). Resolved by the consumer (parse_objective)
@@ -162,6 +176,12 @@ struct ObjectiveState {
     // Radar detection arcs (only populated when has_radar == true).
     bool     has_radar = false;
     float    detect_ratio[8] = {0.0f};
+    // Phase 3: real radar range from Falcon4.RCD. Previously the viewer
+    // used a fabricated 32-grid-unit constant. Populated when theater_db
+    // is loaded and the OCD → FED → FCD → RCD chain resolves.
+    float    radar_range_km = 0.0f;   // 0 = unknown / use fallback
+    std::string radar_name;           // e.g. "APG-68", "Pat Hand"
+    int16_t  radar_type_idx = -1;     // index into Falcon4.RCD
     std::vector<ObjectiveLink> links;   // road/rail network connections
 
     // --- Theater static-data enrichment (from Falcon4.OCD/PHD/PD) ---
@@ -172,6 +192,10 @@ struct ObjectiveState {
     uint8_t  radar_feature = 0;       // which feature provides radar (255=none)
     uint8_t  deag_distance = 0;       // distance at which to deaggregate
     uint16_t pt_data_index = 0;       // index into PHD table
+    // OCD.Detection[8] — electronic detection ranges per movement type
+    // (Foot/Wheeled/Tracked/LowAir/Air/Naval/Rail/...). Phase 1 fix A.7:
+    // previously decoded by theater_data.cpp but never emitted.
+    std::array<uint8_t, 8> objective_detection{};
     std::vector<GroundLayoutList> ground_layout;  // runway/taxiway/parking lists
     // Per-objective feature placements (from Falcon4.FED + FCD). Combined
     // with the fstatus bitmap above, gives the live damage state of every
@@ -211,8 +235,10 @@ struct PilotState {
     uint8_t  skill = 0;
     uint8_t  rating = 0;
     uint8_t  status = 0;        // 0=available, 1=dead, 2=on leave, etc.
-    uint8_t  aa_kills = 0;
-    uint8_t  ag_kills = 0;
+    uint8_t  aa_kills = 0;      // air-to-air kills
+    uint8_t  ag_kills = 0;      // air-to-ground kills
+    uint8_t  as_kills = 0;      // air-to-sea kills (Phase 1 fix — was dropped)
+    uint8_t  an_kills = 0;      // air-to-naval kills (Phase 1 fix — was dropped)
     int16_t  missions_flown = 0;
 };
 
@@ -320,6 +346,33 @@ struct UnitState {
     // Squadron pilot roster:
     std::vector<PilotState> pilots;
 
+    // Flight (AirUnit subclass — Phase 1 fix: was decoded but never emitted):
+    // A Flight is a single aircraft mission element (one package contains
+    // multiple flights). These fields describe the mission state.
+    float    flight_altitude = 0.0f;          // pos_.z_ (feet)
+    int32_t  fuel_burnt = 0;                  // fuel consumed so far (lbs)
+    int32_t  time_on_target = 0;              // CampaignTime
+    int32_t  mission_over_time = 0;           // CampaignTime
+    int16_t  mission_target = 0;              // target ID slot
+    uint8_t  loadouts = 0;                    // # of loadout entries (one per aircraft)
+    uint8_t  mission = 0;                     // MissionType enum (BARCAP, INTERCEPT, ...)
+    uint8_t  flight_priority = 0;             // mission priority
+    uint8_t  mission_id = 0;                  // mission instance ID
+    uint8_t  eval_flags = 0;                  // post-mission evaluation state
+    uint32_t package_id = 0;                  // VU_ID.num of parent Package
+    uint32_t squadron_id = 0;                 // VU_ID.num of owning Squadron
+    uint8_t  callsign_id = 0;                 // callsign pool index
+    uint8_t  callsign_num = 0;                // callsign slot within pool
+
+    // Package (AirUnit subclass — Phase 1 fix: was decoded but never emitted):
+    // A Package groups multiple Flights into a coordinated strike/mission.
+    uint8_t  wait_cycles = 0;                 // ATO wait cycles remaining
+    uint32_t interceptor_id = 0;              // VU_ID.num of interceptor flight
+    uint32_t awacs_id = 0;                    // VU_ID.num of AWACS flight
+    uint32_t jstar_id = 0;                    // VU_ID.num of JSTARS flight
+    uint32_t ecm_id = 0;                      // VU_ID.num of ECM flight
+    uint32_t tanker_id = 0;                   // VU_ID.num of tanker flight
+
     // --- Theater static-data enrichment (from Falcon4.UCD/VCD) ---
     // Populated when the world JSON was built with a loaded TheaterObjectDatabase.
     // Empty/default when no static data was available.
@@ -329,6 +382,12 @@ struct UnitState {
     int16_t  movement_speed = 0;      // kph or knots
     int16_t  max_range = 0;           // km
     std::vector<VehicleGroup> vehicle_groups;  // per-group vehicle composition
+
+    // --- Unit class scores (Phase 1 fix — A.8: UnitClassData.scores[16]) ---
+    // Per-mission-role scoring (16 uchar values from Falcon4.UCD.Scores).
+    // Higher score = better suited for that mission role. Populated when
+    // theater_db is loaded.
+    std::array<uint8_t, 16> unit_class_scores{};
 };
 
 struct WorldState {

@@ -5,7 +5,7 @@
 // of the original 1920-LoC god-file after the architecture-review split
 // (item #5) into:
 //   viewer_state.hpp    — Impl struct + color helpers
-//   icons.cpp           — icon-table + draw_icon + icon_for_*
+//   symbols.cpp         — procedural symbol drawing (replaces icons.cpp)
 //   camera.cpp          — world<->screen transforms + fit_to_world
 //   file_ops.cpp        — load_*_json / import_*
 //   install_flow.cpp    — set_install_path* / open_campaign_dialog /
@@ -26,6 +26,7 @@
 #include <f4/viewer/settings.hpp>
 #include <rlImGui.h>
 #include <raylib.h>
+#include <imgui.h>
 
 #include <memory>
 #include <string>
@@ -55,16 +56,26 @@ ViewerApp::ViewerApp()  : impl_(std::make_unique<Impl>()) {
     }
 }
 
-ViewerApp::~ViewerApp() = default;
+ViewerApp::~ViewerApp() {
+    // POLISH-2.1: free the cached terrain RenderTexture. Only safe to
+    // call UnloadRenderTexture if a GL context still exists — and at
+    // dtor time, run() has already returned (which called CloseWindow).
+    // Raylib's UnloadRenderTexture is a no-op (or silently safe) when
+    // the texture id is 0, but calling it after CloseWindow would crash
+    // on some drivers. We guard on terrain_cache.id != 0 AND check
+    // IsWindowReady() — the latter returns true only between InitWindow
+    // and CloseWindow.
+    if (impl_->terrain_cache.id != 0 && IsWindowReady()) {
+        UnloadRenderTexture(impl_->terrain_cache);
+        impl_->terrain_cache = {0};
+    }
+}
 
 void ViewerApp::run() {
     SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_VSYNC_HINT);
     InitWindow(impl_->window_w, impl_->window_h, "F4 World Viewer");
     SetTargetFPS(60);
     rlImGuiSetup(true);
-
-    // Load icon textures (falls back to drawn shapes if not found).
-    impl_->load_icons();
 
     // Default to a fit-to-world view — UNLESS the caller already set an
     // initial camera via set_initial_camera() (e.g. via --zoom/--center
@@ -73,7 +84,7 @@ void ViewerApp::run() {
         impl_->fit_to_world();
     }
 
-    while (!WindowShouldClose()) {
+    while (!WindowShouldClose() && !impl_->should_exit) {
         // Handle window resize
         const int new_w = GetScreenWidth();
         const int new_h = GetScreenHeight();
@@ -98,6 +109,18 @@ void ViewerApp::run() {
             impl_->screenshot_pending = false;
         }
 
+        // Phase 2: keyboard shortcuts.
+        //   F = fit to world
+        //   Esc = clear selection
+        //   / = focus search box (handled in Layers panel via ImGui)
+        if (IsKeyPressed(KEY_F) && !ImGui::GetIO().WantCaptureKeyboard) {
+            impl_->fit_to_world();
+        }
+        if (IsKeyPressed(KEY_ESCAPE) && !ImGui::GetIO().WantCaptureKeyboard) {
+            impl_->sel_kind = Impl::SelectionKind::None;
+            impl_->sel_index = -1;
+        }
+
         BeginDrawing();
         ClearBackground(Color{20, 22, 28, 255});
         draw_canvas();
@@ -106,6 +129,16 @@ void ViewerApp::run() {
     }
 
     rlImGuiShutdown();
+    // POLISH-2.1: free the cached terrain RenderTexture BEFORE
+    // CloseWindow — once the GL context is gone, UnloadRenderTexture
+    // can't free GPU memory and may crash on some drivers. The dtor
+    // also checks IsWindowReady() as a safety net for the case where
+    // run() never got called (CLI-only usage).
+    if (impl_->terrain_cache.id != 0) {
+        UnloadRenderTexture(impl_->terrain_cache);
+        impl_->terrain_cache = {0};
+        impl_->terrain_cache_valid = false;
+    }
     CloseWindow();
 }
 

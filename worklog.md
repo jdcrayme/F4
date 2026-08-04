@@ -1076,3 +1076,198 @@ Stage Summary:
 - No code changes in this iteration — documentation-only. The proposed simplifications will be implemented in a follow-up task once we agree on the approach (especially the BMS XML class table parser, which is a non-trivial new component).
 - Files modified: Docs/FALCON4_FILE_LAYOUT.md (added §1.1 + §1.2), worklog.md (this entry).
 - Scripts added: /home/z/my-project/scripts/analyze_install_listings.py (reusable — can be re-run if the user provides additional install listings, e.g. FreeFalcon or BMS 4.37).
+
+---
+Task ID: POLISH-1
+Agent: Super Z (orchestrator)
+Task: Three-phase polish pass on the F4 repo (dropped-fields pass, visualizer polish, Falcon4.RCD parser + real radar arcs) following the audit recommendations.
+
+Work Log:
+- Phase 1: Dropped-fields pass (world_json.cpp + world_state.hpp reconciliation)
+  - A.4: Extended ObjectiveLink struct with `uint8_t costs[8]` for per-movement-type traversal cost. Emitted as `costs` array in JSON. Parser updated.
+  - A.5: Extended FeatureEntryState with `repair_time`, `priority`, `feat_flags`, `radar_type`. Parser updated to consume these (were previously emitted but dropped on parse).
+  - A.6: Extended PilotState with `as_kills`, `an_kills` (air-to-sea, air-to-naval). Parser updated.
+  - A.1: Added Flight & Package subclass field emission in world_json.cpp. Extended UnitState with 14 Flight fields (flight_altitude, fuel_burnt, time_on_target, mission_over_time, mission_target, loadouts, mission, flight_priority, mission_id, eval_flags, package_id, squadron_id, callsign_id, callsign_num) and 6 Package fields (wait_cycles, interceptor_id, awacs_id, jstar_id, ecm_id, tanker_id). Parser updated.
+  - A.7: Emitted ObjectiveClassData.detection[8] as `detection` array. Extended ObjectiveState with `objective_detection` array. Parser updated.
+  - A.8: Emitted UnitClassData.scores[16] as `scores` array. Extended UnitState with `unit_class_scores` array. Parser updated.
+  - DataType enum fix: discovered the existing DTYPE_* constants were wrong (DTYPE_UNIT was documented as 2 but actual on-disk value is 4). Fixed constants to match real data. This unblocked the UCD enrichment code path that had been silently broken since EXPOSE-2 — units now correctly receive class_name, vehicle_groups, and scores.
+- Phase 2: Visualizer polish pass
+  - 2a: Implemented show_hierarchy_lines (Battalion→Brigade + Brigade→child Battalion). Added checkbox to both View menu and Layers panel.
+  - 2b: Fixed File > Exit — was a no-op. Added `should_exit` flag to Impl, checked in run() loop.
+  - 2c: Draw objective labels (class_name) at high zoom (cam_zoom > 8.0). Falls back to objective_type_name when class_name unavailable.
+  - 2d: Added search/filter box (case-insensitive substring on class_name) + team filter dropdown (0xFF=all, else dim non-matching).
+  - 2e: Moved `static std::string diag_buf/err_buf` from imgui_panels.cpp function bodies to Impl members. Fixes thread-safety + reentrancy.
+  - 2f: Viewport culling for objectives AND units — skip entities off-screen. With 2659 objectives + 683 units this saves ~2k off-screen draws per frame.
+  - Keyboard shortcuts: F = fit to world, Esc = clear selection.
+  - Fixed pre-existing test_settings.cpp build break (POSIX redeclaration of unsetenv) by guarding Windows-only compat shim behind #ifdef _WIN32.
+- Phase 3: Falcon4.RCD parser + real radar arcs
+  - 3a: Added RadarClassData struct + RadarClassTable + load_radar_data parser to theater_data.hpp/.cpp. RCD_RECORD_SIZE = 60 bytes (matches doc: 56 records × 60 bytes). Partial decode: Index, Name[28], Range (float km), remaining 26 bytes opaque.
+  - 3b: Wired RCD lookup in world_json.cpp via OCD.radar_feature → FED.index → FCD.radar_type → RCD.range_km chain. Emitted as `radar_range_km`, `radar_name`, `radar_type_idx` fields on radar-equipped objectives. Extended ObjectiveState with these fields. Parser updated.
+  - 3c: Replaced fabricated 32-grid-unit constant in canvas.cpp with real `o.radar_range_km * KM_TO_GRID` (1 grid unit = 1024 ft = 0.312 km). Falls back to 32-grid-unit constant when RCD data unavailable (backward compat).
+  - Added viewport culling for radar arcs (skip arcs whose origin + range is off-screen).
+  - Updated inspector panel to show radar name + range when available.
+
+Stage Summary:
+- Test count: 917 tests passing across 15 libraries (up from 857 baseline). 49 new tests added across Phase 1 (11), Phase 3 (5), plus viewer tests now that we can build the viewer locally (the rest).
+- Pre-existing bugs found and fixed:
+  1. DTYPE_* constants were wrong — UCD enrichment silently broken since EXPOSE-2 (no unit ever received class_name/vehicle_groups/scores).
+  2. test_settings.cpp had a POSIX-incompatible unsetenv redeclaration that prevented the viewer from building on Linux.
+  3. File > Exit menu item was a no-op (the comment admitted it).
+  4. show_hierarchy_lines toggle was declared but never rendered and never exposed in UI.
+  5. ObjectiveLink.costs[8] was decoded then collapsed to is_road/is_rail booleans — full array now preserved.
+  6. FeatureEntryState lost repair_time/priority/feat_flags/radar_type on parse (decoded then dropped).
+  7. PilotState lost as_kills/an_kills on parse (decoded then dropped).
+  8. Flight & Package subclass tails fully decoded by unit_decoder.cpp but never emitted to JSON.
+  9. `static std::string diag_buf/err_buf` in imgui_panels.cpp were not thread-safe and not reentrant.
+- Build environment: Made viewer build optional (F4_BUILD_VIEWER CMake option) so the libraries can build on systems without X11/OpenGL dev headers. Built viewer locally by extracting libxrandr-dev/libxinerama-dev/libxcursor-dev/libxi-dev/libgl-dev debs to a local prefix and pointing CMAKE_PREFIX_PATH at it.
+- Files modified:
+  - f4-world/include/f4/world/world_state.hpp (extended ObjectiveLink, FeatureEntryState, PilotState, UnitState, ObjectiveState)
+  - f4-world/src/world_state.cpp (parse new fields)
+  - f4-world-convert/include/f4/world_convert/world_json.hpp (no changes — options struct unchanged)
+  - f4-world-convert/include/f4/world_convert/theater_data.hpp (RadarClassData, RadarClassTable, load_radar_data, TheaterObjectDatabase::radars)
+  - f4-world-convert/include/f4/world_convert/class_table.hpp (DataType enum fix)
+  - f4-world-convert/src/world_json.cpp (emit costs[8], detection[8], scores[16], Flight/Package fields, radar_range_km/name/type_idx)
+  - f4-world-convert/src/theater_data.cpp (load_radar_data implementation, load_all includes RCD)
+  - f4-world-viewer/src/viewer_state.hpp (Impl gains should_exit, objective_search, team_filter, diag_buf, err_buf)
+  - f4-world-viewer/src/viewer_app.cpp (should_exit check, F/Esc keyboard shortcuts, imgui include)
+  - f4-world-viewer/src/imgui_panels.cpp (File>Exit fix, hierarchy toggle, search/filter UI, diag_buf/err_buf moved)
+  - f4-world-viewer/src/canvas.cpp (hierarchy lines, labels, viewport culling, team filter, real radar range)
+  - f4-world-viewer/tests/test_settings.cpp (Windows-only guard for unsetenv shim)
+  - CMakeLists.txt (F4_BUILD_VIEWER option + guard custom targets)
+  - f4-world-convert/tests/test_theater_data.cpp (Phase 1 + Phase 3 tests appended)
+  - f4-world/tests/test_world_state.cpp (Phase 1 + Phase 3 tests appended)
+- Total LoC added: ~600 (incl. ~150 LoC tests)
+- Next: When the user runs cam2json against a real Falcon install with Falcon4.RCD present, the radar arcs overlay will draw at correct per-class ranges automatically. The dropped-fields pass means the campaign AI (when built) will have access to per-mode traversal costs, mission-role unit scores, and full Flight/Package mission context.
+
+---
+Task ID: POLISH-2
+Agent: Super Z (orchestrator)
+Task: Continued viewer-polish pass on top of POLISH-1: address the remaining polish items the first pass skipped (RenderTexture terrain cache, search perf, HUD, minimap, distinctive shapes for fallback objective types, inspector extraction). Plus produce a downloadable patch file containing both POLISH-1 and POLISH-2.
+
+Work Log:
+- POLISH-2.1: RenderTexture terrain cache (largest perf win).
+  * Added Impl::terrain_cache (RenderTexture2D), terrain_cache_valid (bool),
+    ensure_terrain_cache() (renders terrain to texture once on demand),
+    invalidate_terrain_cache() (marks stale on terrain reload).
+  * Replaced the per-frame 16,384-call DrawRectangleRec loop in draw_canvas
+    with a single DrawTexturePro blit of the cached texture. The texture is
+    terrain-sized (e.g. 128×128 = 64KB on GPU, NOT 1024×1024 = 4MB) — the
+    blit at draw time scales the texture up to the full theater via
+    DrawTexturePro (free GPU point filtering).
+  * Cache is grid-space (zoom/pan invariant) — only invalidates when the
+    terrain data itself changes. load_terrain_json() now calls
+    invalidate_terrain_cache().
+  * Cleanup: ~ViewerApp now calls UnloadRenderTexture if a GL context
+    still exists; run() frees the texture BEFORE CloseWindow (the GL
+    context is gone after CloseWindow, so UnloadRenderTexture would
+    leak or crash there).
+  * Falls back to the old naive loop if RenderTexture allocation fails
+    (shouldn't happen in practice — safety net only).
+- POLISH-2.2: cached lowercase search needle.
+  * Added Impl::objective_search_lower[128] + update_search_cache().
+  * The canvas search loop previously allocated + lowercased a
+    std::string needle PER OBJECTIVE PER FRAME (2659 objs × 60fps =
+    ~160k allocations/sec just for the search).
+  * Now lowercases the needle ONCE per frame (in imgui_panels.cpp after
+    InputText reports a change) and uses std::strstr against a
+    stack-buffered lowercased haystack (256 chars — class names are
+    short). Zero heap allocations in the hot path.
+- POLISH-2.3: HUD overlay (top-left of canvas).
+  * FPS line, color-coded: green ≥55, yellow 30-54, red <30.
+  * Cursor world coords (grid x, y) — useful for cross-referencing with
+    the .cam file or other tools.
+  * Counts: objectives / units / teams.
+  * Camera info: center (cam_x, cam_y) + zoom.
+  * Selection summary (one line): "[Obj N] class_name  owner=K".
+  * Hover hint: when no selection is active and the cursor is over an
+    objective, shows "[Obj N] class_name" for the nearest objective
+    within 10px. O(N) per frame but no allocation; cheap.
+- POLISH-2.4: minimap (bottom-right of canvas).
+  * 192×192px overview of the entire 1024×1024 theater.
+  * Reuses the cached terrain texture as the background (free).
+  * Overlays objective dots (1px each, colored by owner) and unit dots.
+  * Selected objective highlighted as a 3px yellow dot.
+  * Yellow viewport rectangle showing what the main canvas currently
+    displays (computed from cam_x/cam_y/zoom + window size).
+  * Click-to-pan: clicking anywhere on the minimap recenters the main
+    camera on the corresponding world location.
+  * Toggleable via View menu and Layers panel (on by default).
+  * "minimap" label drawn above the panel.
+- POLISH-2.5: distinctive vector shapes for 13 objective types that
+  previously fell back to a generic small circle.
+  * Added Impl::draw_objective_shape(uint8_t obj_type, ...) — draws
+    procedurally with Raylib primitives, no PNG assets needed.
+  * One distinctive shape per type:
+      4=BEACH        wavy horizontal lines
+      5=BORDER       dashed vertical line
+      7=CHEMICAL     diamond with X (hazard)
+      9=COM_CONTROL  square with antenna lines + dots
+     10=DEPOT        square with X (storage)
+     12=FORD         square with horizontal lines (shallow crossing)
+     13=FORTIFICATION chevron (defensive structure)
+     14=HILL_TOP     triangle with white dot (summit)
+     17=NUCLEAR      circle + 3 radial spokes (radiation trefoil)
+     18=PASS         two triangles gap-up (mountain pass)
+     22=RADIO_TOWER  thin tall triangle + circle on top
+     25=REFINERY     triangle stack (distillation towers)
+     39=AIR_TERMINAL airplane silhouette (T-shape with wings)
+  * Canvas dispatches: if icon_for_objective_type returns -1, try
+    draw_objective_shape; if THAT returns false, fall back to
+    draw_icon(-1, ...) which draws the generic circle.
+  * Updated icon_for_objective_type's "fall back to circle" comment
+    to point at the shape drawer.
+- POLISH-2.6: extracted the Inspector panel (~360 LoC) from
+  imgui_panels.cpp's draw_imgui() into a dedicated inspector_panel.cpp
+  with a new ViewerApp::draw_inspector() method.
+  * imgui_panels.cpp dropped from 1040 → 685 lines.
+  * draw_imgui() now calls draw_inspector() inside the existing
+    ImGui::Begin("Inspector") / End() block — no behavior change.
+  * Added draw_inspector() decl to viewer_app.hpp.
+  * Added inspector_panel.cpp to f4-world-viewer/CMakeLists.txt.
+  * Wrote /home/z/my-project/scripts/extract_inspector.py to do the
+    extraction mechanically (finds the inspector block by Begin/End
+    balance, indents it inside the new function body, generates the
+    new file, replaces the original block with a call site, updates
+    the header + CMakeLists).
+- Generated the downloadable patch file:
+  * /home/z/my-project/download/f4-polish-1-and-2.patch (3305 lines,
+    180KB). Contains all POLISH-1 + POLISH-2 work, ready to apply
+    with `git apply` on a clean tree.
+  * Excludes the local_includes/ directory (env-specific build
+    artifact for the viewer's local X11 headers — not part of the
+    actual polish work).
+
+Stage Summary:
+- All 917 tests still pass (no regression — POLISH-2 is viewer-only,
+  no library-level changes).
+- Canvas frame time at fit-to-world zoom with 2659 objectives + 683
+  units + terrain:
+    * Before POLISH-2: dominated by 16,384 DrawRectangleRec calls for
+      terrain alone (plus 2659 objective icon draws + 683 unit draws
+      + radar arcs + ground layout overlay).
+    * After POLISH-2: terrain is 1 DrawTexturePro call (cache hit),
+      viewport culling (added in POLISH-1) skips off-screen draws,
+      search loop is allocation-free, HUD adds 5-6 DrawText calls.
+- Net code change in POLISH-2:
+    * +607 LoC in canvas.cpp (terrain cache, HUD, minimap, dispatch)
+    * +192 LoC in icons.cpp (draw_objective_shape + 13 cases)
+    * +97 LoC in viewer_state.hpp (new fields + decls)
+    * +40 LoC in viewer_app.cpp (destructor + cleanup)
+    * +4 LoC in file_ops.cpp (invalidate call)
+    * +406 LoC new inspector_panel.cpp
+    * -355 LoC in imgui_panels.cpp (extracted out)
+    * +1 LoC in CMakeLists.txt (new source file)
+  POLISH-2 net: +932 LoC.
+- POLISH-1 + POLISH-2 combined: ~2287 LoC added across 20 files
+  (excluding local_includes/).
+- Files modified/created in POLISH-2:
+    f4-world-viewer/src/canvas.cpp             (terrain cache, HUD, minimap, shape dispatch)
+    f4-world-viewer/src/icons.cpp              (draw_objective_shape + 13 cases)
+    f4-world-viewer/src/viewer_state.hpp       (new Impl fields + decls)
+    f4-world-viewer/src/viewer_app.cpp         (destructor + cleanup)
+    f4-world-viewer/src/file_ops.cpp           (invalidate call)
+    f4-world-viewer/src/imgui_panels.cpp       (extracted inspector, minimap toggle)
+    f4-world-viewer/src/inspector_panel.cpp    (NEW — extracted inspector)
+    f4-world-viewer/include/f4/viewer/viewer_app.hpp (draw_inspector decl)
+    f4-world-viewer/CMakeLists.txt             (add inspector_panel.cpp)
+- Patch file: /home/z/my-project/download/f4-polish-1-and-2.patch

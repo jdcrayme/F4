@@ -26,7 +26,10 @@ add_subdirectory(f4-world-convert) # .cam campaign archive -> JSON (keystone)
 add_subdirectory(f4-world)         # typed WorldState -> populates f4-entities
 add_subdirectory(f4-terrain)       # theater terrain (elevation/palette/overlay)
 add_subdirectory(f4-terrain-convert) # THEATER.* -> korea.terrain.json (CLI)
-add_subdirectory(f4-world-viewer)  # Raylib + Dear ImGui interactive viewer
+option(F4_BUILD_VIEWER "Build the Raylib + Dear ImGui interactive viewer (requires X11 + OpenGL dev headers)" ON)
+if(F4_BUILD_VIEWER)
+    add_subdirectory(f4-world-viewer)  # Raylib + Dear ImGui interactive viewer
+endif()
 add_subdirectory(f4-flight-model)
 
 # ============================================================================
@@ -55,6 +58,7 @@ if(NOT EXISTS "${F4_TERRAIN_DIR}/THEATER.MEA")
 endif()
 
 # .cam -> JSON
+if(TARGET cam2json)
 add_custom_target(json
     COMMAND $<TARGET_FILE:cam2json>
             "${F4_CAM_FIXTURE}"
@@ -86,3 +90,4 @@ add_custom_target(world
     COMMENT "Generating world JSON + terrain JSON"
     VERBATIM
 )
+endif()

@@ -33,6 +33,10 @@ void ViewerApp::load_terrain_json(const std::filesystem::path& path) {
     impl_->world.terrain_loaded = true;
     impl_->last_terrain_json_path = path;
     impl_->status_msg = "Loaded terrain: " + path.string();
+    // POLISH-2.1: invalidate the terrain RenderTexture cache so the
+    // next draw_canvas() re-renders it from the newly-loaded data.
+    // (Safe to call before GL context exists — just sets a flag.)
+    impl_->invalidate_terrain_cache();
     impl_->fit_to_world();
 }
 

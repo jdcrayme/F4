@@ -1050,3 +1050,216 @@ TEST(TheaterDataRealFixtures, LoadAllFromRealFixtures) {
     EXPECT_EQ(db.features.size(),        12u);
     EXPECT_EQ(db.feature_entries.size(), 40u);
 }
+
+// ============================================================================
+// PHASE 1 TESTS — dropped-fields pass (world_json.cpp + world_state.hpp)
+//
+// These tests verify that fields which were previously decoded but dropped
+// on the way to the viewer are now properly emitted in the world JSON and
+// consumed by WorldState::load_from_string.
+// ============================================================================
+
+// A.4: ObjectiveLink.costs[8] — full per-movement-type traversal cost array
+TEST(TheaterDataPhase1, ObjectiveLinkCostsEmitted) {
+    const std::string cam_path = std::string(FIXTURE_DIR) + "save1.cam";
+    ASSERT_TRUE(std::filesystem::exists(cam_path));
+
+    f4::world_convert::CamArchive cam;
+    ASSERT_NO_THROW(cam.load(cam_path));
+
+    f4::world_convert::WorldJsonOptions opts;
+    std::string json;
+    ASSERT_NO_THROW(json = f4::world_convert::to_world_json(cam, opts));
+
+    // The "costs" field should appear in the JSON for every link.
+    EXPECT_NE(json.find("\"costs\""), std::string::npos);
+
+    // Verify shape: find a link with costs[8] and check it has 8 values.
+    // We look for the pattern "costs": [N, N, N, N, N, N, N, N]
+    auto pos = json.find("\"costs\": [");
+    ASSERT_NE(pos, std::string::npos);
+    // Count commas in the next 60 chars to verify 8 elements (7 commas).
+    int commas = 0;
+    for (std::size_t i = pos; i < pos + 80 && i < json.size(); ++i) {
+        if (json[i] == ',') ++commas;
+        if (json[i] == ']') break;
+    }
+    EXPECT_EQ(commas, 7);  // 8 elements → 7 commas
+}
+
+// A.7: ObjectiveClassData.Detection[8] — per-movement-type electronic
+// detection ranges, emitted as the "detection" array on each objective
+// when theater_db is loaded.
+TEST(TheaterDataPhase1, ObjectiveDetectionEmittedWhenTheaterDbLoaded) {
+    const std::string cam_path = std::string(FIXTURE_DIR) + "save1.cam";
+    ASSERT_TRUE(std::filesystem::exists(cam_path));
+
+    f4::world_convert::CamArchive cam;
+    ASSERT_NO_THROW(cam.load(cam_path));
+
+    // Use the real fixture OCD (12 entries) so the OCD lookup succeeds
+    // for objective types in the fixture.
+    f4::world_convert::TheaterObjectDatabase theater_db;
+    EXPECT_NO_THROW(theater_db.load_all(std::string(FIXTURE_DIR)));
+    ASSERT_TRUE(theater_db.objectives.loaded());
+
+    f4::world_convert::ClassTable class_table;
+    ASSERT_NO_THROW(class_table.load(std::string(FIXTURE_DIR) + "FALCON4.ct"));
+
+    f4::world_convert::WorldJsonOptions opts;
+    opts.class_table = &class_table;
+    opts.theater_db = &theater_db;
+
+    std::string json;
+    ASSERT_NO_THROW(json = f4::world_convert::to_world_json(cam, opts));
+
+    // The "detection" field should appear next to "pt_data_index".
+    EXPECT_NE(json.find("\"detection\""), std::string::npos);
+}
+
+// A.8: UnitClassData.Scores[16] — per-mission-role scoring, emitted as the
+// "scores" array on each unit when theater_db is loaded and the class
+// table resolves the unit's entity_type to DTYPE_UNIT.
+TEST(TheaterDataPhase1, UnitClassScoresEmittedWhenTheaterDbLoaded) {
+    const std::string cam_path = std::string(FIXTURE_DIR) + "save1.cam";
+    ASSERT_TRUE(std::filesystem::exists(cam_path));
+
+    f4::world_convert::CamArchive cam;
+    ASSERT_NO_THROW(cam.load(cam_path));
+
+    f4::world_convert::TheaterObjectDatabase theater_db;
+    EXPECT_NO_THROW(theater_db.load_all(std::string(FIXTURE_DIR)));
+    ASSERT_TRUE(theater_db.units.loaded());
+
+    f4::world_convert::ClassTable class_table;
+    ASSERT_NO_THROW(class_table.load(std::string(FIXTURE_DIR) + "FALCON4.ct"));
+
+    f4::world_convert::WorldJsonOptions opts;
+    opts.class_table = &class_table;
+    opts.theater_db = &theater_db;
+
+    std::string json;
+    ASSERT_NO_THROW(json = f4::world_convert::to_world_json(cam, opts));
+
+    // The "scores" field should appear when a unit's entity_type resolves
+    // to DTYPE_UNIT (which is now correctly = 4 after the Phase 1 fix).
+    // Before the fix, no unit ever received "scores" because the data_type
+    // check always failed (units have data_type=4, not 2 as documented).
+    EXPECT_NE(json.find("\"scores\""), std::string::npos);
+    // And class_name should now appear too (same code path was broken).
+    EXPECT_NE(json.find("\"class_name\": \"Air Defense\""), std::string::npos);
+}
+
+// A.1: Flight subclass fields. The save1.cam fixture has 0 flights, so we
+// can't test end-to-end, but we verify the JSON emitter produces the
+// expected field names by checking the source code path. (If a flight
+// appears, the fields will be emitted — we verified this manually with
+// python against the regenerated JSON.)
+//
+// Instead, we verify the data_type fix: UCD enrichment now triggers for
+// units (previously it was a no-op due to the wrong DTYPE_UNIT value).
+TEST(TheaterDataPhase1, DataTypeFixUnblocksUcdEnrichment) {
+    // Verify the DTYPE_UNIT constant matches what the class table actually
+    // produces for unit entity_types.
+    f4::world_convert::ClassTable class_table;
+    ASSERT_NO_THROW(class_table.load(std::string(FIXTURE_DIR) + "FALCON4.ct"));
+
+    // ET=170 is a known unit (class=CLASS_UNIT=6). Before the fix, its
+    // data_type was 4 but DTYPE_UNIT was 2 — mismatch. After the fix,
+    // DTYPE_UNIT=4 matches.
+    const auto* e = class_table.lookup(170);
+    ASSERT_NE(e, nullptr);
+    uint8_t dt = 0;
+    uint32_t dp = 0;
+    EXPECT_TRUE(class_table.data_ptr_for(170, dt, dp));
+    EXPECT_EQ(dt, f4::world_convert::DTYPE_UNIT);
+}
+
+// ============================================================================
+// PHASE 3 TESTS — Falcon4.RCD parser + real radar ranges
+// ============================================================================
+
+TEST(TheaterDataPhase3, RcdParserLoadsFromRealFixtureIfPresent) {
+    // The RCD fixture is optional (it ships only with full installs, not
+    // with the stripped-down repo fixture set). If present, verify the
+    // parser loads it cleanly. If absent, skip silently — the parser is
+    // still exercised by the synthetic-data test below.
+    const std::string path = std::string(FIXTURE_DIR) + "Falcon4.RCD";
+    if (!std::filesystem::exists(path)) {
+        GTEST_SKIP() << "Falcon4.RCD fixture not present (optional)";
+    }
+    f4::world_convert::RadarClassTable tbl;
+    EXPECT_NO_THROW(f4::world_convert::load_radar_data(path, tbl));
+    EXPECT_GT(tbl.size(), 0u);
+    // The file-layout doc says 56 records × 60 bytes.
+    // Don't hard-assert 56 in case the user's install differs, but verify
+    // it's a reasonable count.
+    EXPECT_LT(tbl.size(), 200u);
+    // First record should have a non-empty name (typically a real radar
+    // model name like "APG-68" or an early-warning radar name).
+    if (tbl.size() > 0) {
+        EXPECT_FALSE(tbl.entries[0].name.empty());
+    }
+}
+
+TEST(TheaterDataPhase3, RcdParserHandlesSyntheticData) {
+    // Build a synthetic Falcon4.RCD with 3 records and verify the parser
+    // extracts Index, Name, Range correctly.
+    const auto dir = std::filesystem::temp_directory_path() / "f4_rcd_test";
+    std::filesystem::create_directories(dir);
+    const auto path = dir / "Falcon4.RCD";
+
+    // Build the file: [short count=3][3 × 60-byte records]
+    std::vector<uint8_t> buf;
+    buf.reserve(2 + 3 * 60);
+    const int16_t count = 3;
+    buf.insert(buf.end(), reinterpret_cast<const uint8_t*>(&count),
+               reinterpret_cast<const uint8_t*>(&count) + 2);
+
+    auto write_record = [&](int16_t idx, const std::string& name, float range) {
+        buf.insert(buf.end(), reinterpret_cast<const uint8_t*>(&idx),
+                   reinterpret_cast<const uint8_t*>(&idx) + 2);
+        uint8_t name_buf[28] = {0};
+        const std::size_t n = std::min<std::size_t>(name.size(), 27);
+        std::memcpy(name_buf, name.data(), n);
+        buf.insert(buf.end(), name_buf, name_buf + 28);
+        buf.insert(buf.end(), reinterpret_cast<const uint8_t*>(&range),
+                   reinterpret_cast<const uint8_t*>(&range) + 4);
+        // 26 bytes of opaque padding
+        for (int i = 0; i < 26; ++i) buf.push_back(0);
+    };
+    write_record(0, "Test Radar A", 50.0f);
+    write_record(1, "Test Radar B", 150.0f);
+    write_record(2, "Test Radar C", 300.0f);
+
+    {
+        std::ofstream f(path, std::ios::binary);
+        f.write(reinterpret_cast<const char*>(buf.data()),
+                static_cast<std::streamsize>(buf.size()));
+    }
+
+    f4::world_convert::RadarClassTable tbl;
+    EXPECT_NO_THROW(f4::world_convert::load_radar_data(dir / "Falcon4", tbl));
+    ASSERT_EQ(tbl.size(), 3u);
+    EXPECT_EQ(tbl.entries[0].index, 0);
+    EXPECT_EQ(tbl.entries[0].name, "Test Radar A");
+    EXPECT_FLOAT_EQ(tbl.entries[0].range_km, 50.0f);
+    EXPECT_EQ(tbl.entries[1].index, 1);
+    EXPECT_EQ(tbl.entries[1].name, "Test Radar B");
+    EXPECT_FLOAT_EQ(tbl.entries[1].range_km, 150.0f);
+    EXPECT_EQ(tbl.entries[2].name, "Test Radar C");
+    EXPECT_FLOAT_EQ(tbl.entries[2].range_km, 300.0f);
+
+    std::filesystem::remove_all(dir);
+}
+
+TEST(TheaterDataPhase3, LoadAllIncludesRcdWhenPresent) {
+    // TheaterObjectDatabase::load_all should attempt to load Falcon4.RCD
+    // alongside the other 7 files. Since the fixture dir doesn't have
+    // RCD, this just verifies the call doesn't throw.
+    f4::world_convert::TheaterObjectDatabase db;
+    EXPECT_NO_THROW(db.load_all(std::string(FIXTURE_DIR)));
+    // The RCD table may or may not be loaded depending on whether the
+    // fixture is present — either is acceptable. We just verify that
+    // load_all didn't throw trying to load it.
+}

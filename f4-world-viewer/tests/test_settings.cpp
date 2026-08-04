@@ -18,26 +18,23 @@
 
 using namespace f4::viewer;
 
-// Compatabiliet for MSVC++: setenv() and unsetenv() are POSIX, not Windows. We implement
+// Compatabiliet for MSVC++: setenv() and unsetenv() are POSIX, not Windows.
+// We implement them only on Windows — on POSIX (Linux/macOS) the standard
+// library already provides them and redeclaring them with a different
+// return type causes a "ambiguating new declaration" compile error.
+#ifdef _WIN32
 inline int setenv(const char* name, const char* value, int overwrite) {
     if (!overwrite) {
         // Check if variable exists (optional logic depending on desired behavior)
         if (getenv(name)) return 0; // Or return error if overwrite is false
     }
-#ifdef _WIN32
     return _putenv_s(name, value);
-#else
-    return ::setenv(name, value, overwrite);
-#endif
 }
 
 inline void unsetenv(const char* name) {
-#ifdef _WIN32
     _putenv_s(name, nullptr);
-#else
-    ::unsetenv(name);
-#endif
 }
+#endif
 
 // ===========================================================================
 // JSON round-trip — the workhorse tests

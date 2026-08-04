@@ -158,6 +158,9 @@ private:
     void handle_input();
     void draw_canvas();
     void draw_imgui();
+    /// Inspector panel (selected objective/unit detail).
+    /// POLISH-2.6: extracted from draw_imgui() for readability.
+    void draw_inspector();
     void draw_ground_layout_view();
     void draw_campaign_and_teams_view();
     void open_file_dialog(const char* title, const char* filters,

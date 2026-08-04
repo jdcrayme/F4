@@ -76,6 +76,7 @@ constexpr std::size_t UCD_RECORD_SIZE = 336;  // UnitClassDataType
 constexpr std::size_t VCD_RECORD_SIZE = 160;  // VehicleClassDataType
 constexpr std::size_t FED_RECORD_SIZE = 32;   // FeatureEntry
 constexpr std::size_t FCD_RECORD_SIZE = 60;   // FeatureClassDataType
+constexpr std::size_t RCD_RECORD_SIZE = 60;   // RadarClassDataType (Phase 3)
 
 // ============================================================================
 // Point type enum (from ptdata.h:40-60) — used by PtHeaderDataType.type
@@ -248,6 +249,35 @@ struct FeatureEntryData {
     int16_t  facing = 0;            // facing angle (degrees)
 };
 
+/// RadarClassData — one entry in Falcon4.RCD (RadarDataTable).
+///
+/// Phase 3 fix: previously NOT parsed, which forced the viewer's radar arcs
+/// overlay to use a fabricated "32 grid units ≈ 10 km" constant radius
+/// (see canvas.cpp's nominal_radius_grid). With the real RCD data, each
+/// radar-equipped objective's coverage can be drawn at its actual range.
+///
+/// On-disk record size: 60 bytes (verified against snapshot dumps showing
+/// 56 records × 60 bytes). The struct layout below is a partial decode of
+/// FreeFalcon's RadarClassDataType (from simdata.h) — we capture the
+/// fields most useful for visualization (Index, Name, Range). The
+/// remaining bytes are skipped as opaque padding; consumers that need
+/// other fields (RcsType, DetectionChance per band, etc.) can extend
+/// this struct and the parser later.
+///
+/// Best-known on-disk layout (Phase 3; will be refined when more
+/// ground-truth is available):
+///   off 0: Index       (short, 2)
+///   off 2: Name[28]    (char[28], 28) — radar name, e.g. "APG-68", "Straight Flush"
+///   off30: Range       (float, 4)     — detection range (km)
+///   off34: *(remaining 26 bytes — opaque; includes radar type flags,
+///           per-band detection ratios, etc.)*
+///   total = 60 bytes
+struct RadarClassData {
+    int16_t  index = 0;            // cross-reference index used by VCD/FCD radar_type
+    std::string name;              // 28-byte char array, e.g. "APG-68", "Pat Hand"
+    float    range_km = 0.0f;      // detection range in kilometers
+};
+
 // ============================================================================
 // Container types — one struct per file, holding all parsed records.
 // ============================================================================
@@ -316,6 +346,15 @@ struct FeatureEntryTable {
     }
 };
 
+struct RadarClassTable {
+    std::vector<RadarClassData> entries;
+    [[nodiscard]] bool loaded() const noexcept { return !entries.empty(); }
+    [[nodiscard]] std::size_t size() const noexcept { return entries.size(); }
+    [[nodiscard]] const RadarClassData* at(std::size_t i) const noexcept {
+        return i < entries.size() ? &entries[i] : nullptr;
+    }
+};
+
 // ============================================================================
 // Top-level loaders — one per file. Each reads the file, verifies the
 // size-assertion (file_size == sizeof(struct) * count + 2), and decodes
@@ -363,6 +402,13 @@ void load_feature_data(const std::filesystem::path& base_path,
 void load_feature_entry_data(const std::filesystem::path& base_path,
                              FeatureEntryTable& out);
 
+/// Load Falcon4.RCD — radar class definitions (range + detection ratios).
+/// Phase 3 fix: previously NOT parsed, which forced the viewer's radar arcs
+/// overlay to use a fabricated constant radius. With this loader, the
+/// viewer can draw radar coverage at the actual range for each radar type.
+void load_radar_data(const std::filesystem::path& base_path,
+                     RadarClassTable& out);
+
 // ============================================================================
 // Convenience: a single aggregate holding all seven tables. Use this when
 // you want to load the entire static-object database in one shot.
@@ -376,17 +422,18 @@ struct TheaterObjectDatabase {
     VehicleClassTable   vehicles;       // Falcon4.VCD
     FeatureClassTable   features;       // Falcon4.FCD
     FeatureEntryTable   feature_entries; // Falcon4.FED
+    RadarClassTable     radars;         // Falcon4.RCD (Phase 3)
 
-    /// Load all seven files from `dir/Falcon4.{OCD,PHD,PD,UCD,VCD,FCD,FED}`.
+    /// Load all eight files from `dir/Falcon4.{OCD,PHD,PD,UCD,VCD,FCD,FED,RCD}`.
     /// Missing files are skipped silently (their table stays empty). Use
     /// the per-table `loaded()` method to check which parsed successfully.
     void load_all(const std::filesystem::path& dir);
 
-    /// True if at least one of the seven tables is loaded.
+    /// True if at least one of the eight tables is loaded.
     [[nodiscard]] bool loaded() const noexcept {
         return objectives.loaded() || pt_headers.loaded() || pt_data.loaded()
             || units.loaded()       || vehicles.loaded()  || features.loaded()
-            || feature_entries.loaded();
+            || feature_entries.loaded() || radars.loaded();
     }
 };
 

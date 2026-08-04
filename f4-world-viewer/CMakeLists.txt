@@ -102,7 +102,8 @@ set(TINYFILEDIALOGS_SOURCES
 # per-concern breakdown):
 #   viewer_app.cpp      — lifecycle (ctor/dtor/run) + set_initial_camera
 #                         + schedule_screenshot
-#   icons.cpp           — Impl icon-table + draw_icon + icon_for_*
+#   symbols.cpp         — procedural symbol drawing (replaces icons.cpp —
+#                         no PNG assets, see symbols.hpp)
 #   camera.cpp          — Impl world<->screen transforms + fit_to_world
 #   file_ops.cpp        — load_*_json / import_cam_archive / import_terrain_binary
 #   install_flow.cpp    — set_install_path* / open_campaign_dialog /
@@ -121,7 +122,7 @@ set(TINYFILEDIALOGS_SOURCES
 # ============================================================================
 add_library(f4_world_viewer STATIC
     src/viewer_app.cpp
-    src/icons.cpp
+    src/symbols.cpp
     src/camera.cpp
     src/file_ops.cpp
     src/install_flow.cpp
@@ -129,6 +130,7 @@ add_library(f4_world_viewer STATIC
     src/snapshot.cpp
     src/canvas.cpp
     src/imgui_panels.cpp
+    src/inspector_panel.cpp
     src/ground_layout_view.cpp
     src/campaign_and_teams_view.cpp
     src/file_dialog.cpp
@@ -193,13 +195,7 @@ set_target_properties(f4-world-viewer PROPERTIES
     VS_DEBUGGER_COMMAND_ARGUMENTS "save1.world.json korea.terrain.json"
 )
 
-# ============================================================================
-# Copy icon assets to the build directory so the viewer can find them at
-# runtime. The viewer searches assets/icons/ relative to the working dir.
-# ============================================================================
-add_custom_command(TARGET f4-world-viewer POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-        ${CMAKE_CURRENT_SOURCE_DIR}/assets/icons
-        ${CMAKE_BINARY_DIR}/assets/icons
-    COMMENT "Copying icon assets to build directory"
-)
+# NOTE: The viewer no longer ships or loads any PNG icon assets. Every
+# objective and unit is drawn procedurally from raylib primitives — see
+# src/symbols.cpp. The assets/icons/ directory is kept in the source tree
+# for historical reference only and is NOT copied to the build directory.
