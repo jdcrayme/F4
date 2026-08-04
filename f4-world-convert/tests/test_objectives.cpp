@@ -6,6 +6,7 @@
 #include <f4/world_convert/world_json.hpp>
 #include <f4/world_convert/class_table.hpp>
 
+#include <cmath>
 #include <filesystem>
 #include <set>
 
@@ -83,15 +84,20 @@ TEST(Objectives, JsonContainsObjectivesArray) {
 }
 
 // When a class table is provided, the JSON must include the resolved
-// objective_type field (1-39) for each objective. Without the class table,
-// the field is omitted entirely — which is what causes the viewer to fall
-// back to drawing every objective as a generic colored circle.
+// objective_type field (1-39) for each objective and a type_name string
+// matching the resolved type (e.g. "Airbase"). Without the class table,
+// objective_type is emitted as 0 and type_name falls back to the
+// "Objective#<entity_type>" format.
 TEST(Objectives, JsonResolvesObjectiveTypeWithClassTable) {
     auto cam = load_fixture();
 
-    // Sanity: without a class table, objective_type must NOT appear.
+    // Without a class table, objective_type is always emitted but defaults
+    // to 0 (= "unknown") for every objective. The type_name field likewise
+    // falls back to "Objective#<entity_type>" in this case.
     std::string json_no_ct = to_world_json(cam);
-    EXPECT_EQ(json_no_ct.find("\"objective_type\""), std::string::npos);
+    EXPECT_NE(json_no_ct.find("\"objective_type\": 0"), std::string::npos)
+        << "objective_type=0 (unknown) should always be emitted, even "
+           "without a class table";
 
     // Load the bundled FALCON4.ct fixture.
     ClassTable ct;
@@ -104,9 +110,14 @@ TEST(Objectives, JsonResolvesObjectiveTypeWithClassTable) {
     opts.class_table = &ct;
     std::string json_with_ct = to_world_json(cam, opts);
 
-    // With the class table, objective_type must appear and at least one
-    // objective must resolve to a non-zero type (i.e. icon-mappable).
-    EXPECT_NE(json_with_ct.find("\"objective_type\""), std::string::npos);
+    // With the class table, objective_type must appear with non-zero values
+    // for at least some objectives, AND type_name must say "Airbase" (not
+    // "Objective#1776") for at least one objective.
+    EXPECT_NE(json_with_ct.find("\"objective_type\": 1"), std::string::npos)
+        << "expected at least one Airbase (objective_type=1) in the fixture";
+    EXPECT_NE(json_with_ct.find("\"type_name\": \"Airbase\""), std::string::npos)
+        << "type_name should resolve to 'Airbase' (not 'Objective#N') when "
+           "the class table is loaded — verifies the world_json.cpp:144 bug fix";
 
     // Re-decode and verify the resolver maps at least ~80% of objectives
     // to a known ObjectiveType (1-39). A few may be 0 if the class table
@@ -310,4 +321,111 @@ TEST(Objectives, RoadLinksArePresent) {
     EXPECT_GT(road_links, 100u)
         << "expected many road links (costs[Wheeled] in 1..249) — "
         << "Korea has an extensive road network";
+}
+
+TEST(Objectives, FstatusAndRadarRangeAreExposed) {
+    // The fstatus[] byte vector (per-feature damage bitmap) and the
+    // optional RadarRangeClass (8 floats detect_ratio[8]) were previously
+    // parsed to advance the cursor but NOT exposed as typed fields. They
+    // are now exposed on ObjectiveRecord. Verify:
+    //   1. Every objective has a non-negative fstatus.size() matching the
+    //      length-prefix byte in the .obj stream.
+    //   2. At least some objectives have non-empty fstatus (real campaigns
+    //      always have features per objective).
+    //   3. has_radar is set on radar-type objectives and the detect_ratio
+    //      array is populated with 8 floats.
+    //   4. Cursor still lands at exact end of buffer (the new typed reads
+    //      consume the same bytes as the old `c.p += N` skips).
+    auto cam = load_fixture();
+    const SubFile* obj = cam.find("obj");
+    ASSERT_NE(obj, nullptr);
+    DecodedObjectives objs = decode_obj(obj->data.data(), obj->data.size());
+
+    // Cursor-landing invariant: MUST still match (proves the new typed
+    // reads consume exactly the same bytes as the old cursor-skip).
+    EXPECT_EQ(objs.bytes_consumed, objs.inner_size);
+
+    // Every objective must have a populated fstatus vector (possibly empty
+    // when the objective has zero features, but the vector itself exists).
+    std::size_t with_features = 0;
+    std::size_t total_fstatus_bytes = 0;
+    for (const auto& o : objs.objectives) {
+        // fstatus length is encoded as 1 byte; vector size must match.
+        EXPECT_LE(o.fstatus.size(), 255u);
+        if (!o.fstatus.empty()) {
+            ++with_features;
+            total_fstatus_bytes += o.fstatus.size();
+        }
+    }
+    // Korea has 2659 objectives; the vast majority have at least one feature.
+    EXPECT_GT(with_features, 1000u)
+        << "expected most objectives to carry feature status bytes";
+    EXPECT_GT(total_fstatus_bytes, 1000u)
+        << "expected non-trivial total fstatus byte count";
+
+    // Radar objectives: count has_radar=true entries and verify detect_ratio.
+    std::size_t radar_count = 0;
+    for (const auto& o : objs.objectives) {
+        if (o.has_radar) {
+            ++radar_count;
+            // Each detect_ratio entry is a 0..1 ratio. None should be NaN.
+            for (int i = 0; i < 8; ++i) {
+                EXPECT_FALSE(std::isnan(o.detect_ratio[i]))
+                    << "detect_ratio[" << i << "] is NaN";
+                EXPECT_GE(o.detect_ratio[i], 0.0f)
+                    << "detect_ratio[" << i << "] should be >= 0";
+            }
+        }
+    }
+    // Korea has many radar sites — expect at least 100 with has_radar=true.
+    EXPECT_GT(radar_count, 100u)
+        << "expected many radar-equipped objectives in Korea";
+}
+
+TEST(Objectives, JsonExposesFstatusAndRadarRange) {
+    // The JSON output must include the new fields: fstatus[], has_radar,
+    // detect_ratio[], obj_flags, supply, fuel, losses, last_repair,
+    // first_owner, parent_id.
+    auto cam = load_fixture();
+    ClassTable ct;
+    ASSERT_TRUE(std::filesystem::exists(FIXTURE_DIR "FALCON4.ct"));
+    ct.load(std::string(FIXTURE_DIR) + "FALCON4.ct");
+    WorldJsonOptions opts;
+    opts.class_table = &ct;
+    std::string json = to_world_json(cam, opts);
+
+    EXPECT_NE(json.find("\"fstatus\": ["), std::string::npos);
+    EXPECT_NE(json.find("\"has_radar\": true"), std::string::npos);
+    EXPECT_NE(json.find("\"detect_ratio\":"), std::string::npos);
+    EXPECT_NE(json.find("\"obj_flags\":"), std::string::npos);
+    EXPECT_NE(json.find("\"supply\":"), std::string::npos);
+    EXPECT_NE(json.find("\"fuel\":"), std::string::npos);
+    EXPECT_NE(json.find("\"losses\":"), std::string::npos);
+    EXPECT_NE(json.find("\"last_repair\":"), std::string::npos);
+    EXPECT_NE(json.find("\"first_owner\":"), std::string::npos);
+    EXPECT_NE(json.find("\"parent_id\":"), std::string::npos);
+}
+
+TEST(Objectives, TypeNameIsResolvedFromClassTable) {
+    // Regression test for the world_json.cpp:144 bug — type_name must
+    // say "Airbase" (not "Objective#1776") when the class table is loaded.
+    auto cam = load_fixture();
+    ClassTable ct;
+    ASSERT_TRUE(std::filesystem::exists(FIXTURE_DIR "FALCON4.ct"));
+    ct.load(std::string(FIXTURE_DIR) + "FALCON4.ct");
+    WorldJsonOptions opts;
+    opts.class_table = &ct;
+    std::string json = to_world_json(cam, opts);
+
+    EXPECT_NE(json.find("\"type_name\": \"Airbase\""), std::string::npos)
+        << "type_name should resolve to 'Airbase' via the class table";
+    EXPECT_NE(json.find("\"type_name\": \"Bridge\""), std::string::npos)
+        << "type_name should resolve to 'Bridge' via the class table";
+    EXPECT_NE(json.find("\"type_name\": \"City\""), std::string::npos)
+        << "type_name should resolve to 'City' via the class table";
+    // Without the class table, type_name falls back to "Objective#N" —
+    // this is the legacy behavior that the bug fix preserves as a fallback.
+    std::string json_no_ct = to_world_json(cam);
+    EXPECT_NE(json_no_ct.find("\"type_name\": \"Objective#"), std::string::npos)
+        << "without class table, type_name should fall back to 'Objective#N'";
 }

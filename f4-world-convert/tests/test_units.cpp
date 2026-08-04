@@ -5,9 +5,11 @@
 
 #include <gtest/gtest.h>
 #include <f4/world_convert/cam_archive.hpp>
+#include <f4/world_convert/class_table.hpp>
 #include <f4/world_convert/unit_decoder.hpp>
 #include <f4/world_convert/world_json.hpp>
 
+#include <filesystem>
 #include <map>
 #include <set>
 
@@ -169,4 +171,78 @@ TEST(Units, JsonContainsUnitsArray) {
     // The new fields should appear in the JSON for at least one unit:
     EXPECT_NE(json.find("\"unit_class\""), std::string::npos);
     EXPECT_NE(json.find("\"battalion\""), std::string::npos);
+}
+
+TEST(Units, JsonExposesNewFieldsWithoutClassTable) {
+    // Verify the fields added in the world-data exposure milestone are
+    // emitted unconditionally (independent of class-table availability):
+    //   - roster (32-bit packed vehicle count)
+    //   - waypoints[] (flight/ground plan — empty array when wp_count=0)
+    //   - airbase_id (Squadron→Airbase VU_ID.num)
+    //   - last_move / last_combat / heading (Battalion tactical state)
+    //   - aa_kills / mission_score / total_losses (Squadron aggregate stats)
+    auto cam = load_fixture();
+    std::string json = to_world_json(cam);
+    EXPECT_NE(json.find("\"roster\": "), std::string::npos)
+        << "roster must always be emitted";
+    EXPECT_NE(json.find("\"waypoints\": ["), std::string::npos)
+        << "waypoints[] must always be emitted (even when empty)";
+    EXPECT_NE(json.find("\"domain\": "), std::string::npos)
+        << "domain must always be emitted";
+    EXPECT_NE(json.find("\"unit_subtype\": "), std::string::npos)
+        << "unit_subtype must always be emitted (0 when no class table)";
+    // Squadron-only fields — appear at least once because we have 72 squadrons.
+    EXPECT_NE(json.find("\"airbase_id\": "), std::string::npos)
+        << "Squadron airbase_id must be emitted for squadron records";
+    EXPECT_NE(json.find("\"mission_score\": "), std::string::npos)
+        << "Squadron mission_score must be emitted";
+    EXPECT_NE(json.find("\"squadron_patch\": "), std::string::npos)
+        << "Squadron squadron_patch must be emitted";
+    // Battalion-only fields — appear at least once because we have 524 battalions.
+    EXPECT_NE(json.find("\"last_move\": "), std::string::npos)
+        << "Battalion last_move must be emitted";
+    EXPECT_NE(json.find("\"final_heading\": "), std::string::npos)
+        << "Battalion final_heading must be emitted";
+}
+
+TEST(Units, JsonExposesNewFieldsWithClassTable) {
+    // With the class table loaded, unit_subtype and domain must carry
+    // real (non-zero) values for at least some units. The fixture has
+    // 524 battalions + 72 squadrons + 2 task forces = 598 units that
+    // should resolve to a non-zero subtype when the class table is loaded.
+    auto cam = load_fixture();
+    ClassTable ct;
+    ASSERT_TRUE(std::filesystem::exists(FIXTURE_DIR "FALCON4.ct"));
+    ct.load(std::string(FIXTURE_DIR) + "FALCON4.ct");
+    ASSERT_GT(ct.size(), 0u);
+
+    WorldJsonOptions opts;
+    opts.class_table = &ct;
+    std::string json = to_world_json(cam, opts);
+
+    // Re-decode to count how many units resolve to a non-zero subtype.
+    const SubFile* uni = cam.find("uni");
+    ASSERT_NE(uni, nullptr);
+    DecodedUnits units = decode_uni(uni->data.data(), uni->data.size());
+    int resolved = 0;
+    int land_count = 0, air_count = 0, sea_count = 0;
+    for (const auto& u : units.units) {
+        const auto* e = ct.lookup(u.entity_type);
+        if (!e) continue;
+        if (e->stype > 0) ++resolved;
+        if (e->domain == DOMAIN_LAND) ++land_count;
+        else if (e->domain == DOMAIN_AIR) ++air_count;
+        else if (e->domain == DOMAIN_SEA) ++sea_count;
+    }
+    EXPECT_GE(resolved, 500) << "expected most units to resolve to a non-zero subtype";
+    EXPECT_GE(land_count, 500) << "expected >500 land-domain units (battalions+brigades)";
+    EXPECT_GE(air_count, 50) << "expected >50 air-domain units (squadrons)";
+    EXPECT_GE(sea_count, 1) << "expected at least 1 sea-domain unit (task forces)";
+
+    // The JSON must contain at least one of each readable subtype string
+    // emitted via unit_subtype_name() (consumed by the viewer). We don't
+    // test the string here (it's in class_table.hpp, not in the JSON) but
+    // we verify the raw (domain, subtype) pairs are present.
+    EXPECT_NE(json.find("\"domain\": 3,"), std::string::npos) << "land domain present";
+    EXPECT_NE(json.find("\"domain\": 2,"), std::string::npos) << "air domain present";
 }

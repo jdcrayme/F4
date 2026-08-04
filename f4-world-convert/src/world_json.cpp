@@ -140,16 +140,19 @@ std::string to_world_json(const CamArchive& cam, const WorldJsonOptions& opts) {
                 o << "    \"items\": [\n";
                 for (std::size_t i = 0; i < objs.objectives.size(); ++i) {
                     const auto& ob = objs.objectives[i];
-                    o << "      {\"type\": " << ob.type
-                      << ", \"type_name\": \"" << json_escape(objective_type_name(ob.type)) << "\"";
-                    // If a class table is available, resolve entity_type to
-                    // ObjectiveType (1-39) and emit it. This lets the viewer
-                    // pick the right icon without needing the class table.
+                    // Resolve objective_type via the class table when available
+                    // (1-39). Falls back to 0 = "unknown" if no class table.
+                    uint8_t obj_type = 0;
                     if (opts.class_table && opts.class_table->loaded()) {
-                        const uint8_t obj_type =
-                            opts.class_table->objective_type_for(ob.entity_type);
-                        o << ", \"objective_type\": " << static_cast<int>(obj_type);
+                        obj_type = opts.class_table->objective_type_for(ob.entity_type);
                     }
+                    // type_name: derived from the resolved objective_type (NOT
+                    // from the raw entity_type, which is a class-table index
+                    // like 1776 — passing it to objective_type_name would
+                    // produce "Objective#1776" instead of "Airbase").
+                    o << "      {\"type\": " << ob.type
+                      << ", \"type_name\": \"" << json_escape(objective_type_name(static_cast<int16_t>(obj_type))) << "\""
+                      << ", \"objective_type\": " << static_cast<int>(obj_type);
                     o << ", \"x\": " << ob.x
                       << ", \"y\": " << ob.y
                       << ", \"z\": " << (std::isnan(ob.z) ? 0.0f : ob.z)
@@ -157,7 +160,30 @@ std::string to_world_json(const CamArchive& cam, const WorldJsonOptions& opts) {
                       << ", \"nameid\": " << ob.nameid
                       << ", \"priority\": " << static_cast<int>(ob.priority)
                       << ", \"camp_id\": " << ob.camp_id
-                      << ", \"links\": [";
+                      << ", \"obj_flags\": " << ob.obj_flags
+                      << ", \"supply\": " << static_cast<int>(ob.supply)
+                      << ", \"fuel\": " << static_cast<int>(ob.fuel)
+                      << ", \"losses\": " << static_cast<int>(ob.losses)
+                      << ", \"last_repair\": " << ob.last_repair
+                      << ", \"first_owner\": " << static_cast<int>(ob.first_owner)
+                      << ", \"parent_id\": " << ob.parent_id_num
+                      << ", \"fstatus\": [";
+                    for (std::size_t fi = 0; fi < ob.fstatus.size(); ++fi) {
+                        if (fi) o << ", ";
+                        o << static_cast<int>(ob.fstatus[fi]);
+                    }
+                    o << "]";
+                    if (ob.has_radar) {
+                        o << ", \"has_radar\": true, \"detect_ratio\": [";
+                        for (int ri = 0; ri < 8; ++ri) {
+                            if (ri) o << ", ";
+                            o << ob.detect_ratio[ri];
+                        }
+                        o << "]";
+                    } else {
+                        o << ", \"has_radar\": false";
+                    }
+                    o << ", \"links\": [";
                     // Emit the link data (road/rail network). Each link is
                     // a neighbor VU_ID + the 8 movement costs. The viewer
                     // uses costs[Wheeled] and costs[Rail] to color the link
@@ -197,15 +223,23 @@ std::string to_world_json(const CamArchive& cam, const WorldJsonOptions& opts) {
                     const auto& u = units.units[i];
                     o << "      {\"type\": " << u.type
                       << ", \"unit_class\": \"" << unit_class_name(u.unit_class) << "\"";
-                    // If a class table is available, resolve entity_type to
-                    // unit subtype (STYPE_UNIT_*) — distinguishes armor/infantry/
-                    // artillery/supply/engineer battalions, fighter/bomber/transport
-                    // squadrons, carrier/destroyer/frigate task forces, etc.
+                    // unit_subtype: 0 if no class table, else STYPE_UNIT_*.
+                    // Emitted unconditionally so the viewer can rely on the
+                    // field always being present (consistent with objective_type).
+                    uint8_t unit_sub = 0;
+                    uint8_t unit_domain = 0;
                     if (opts.class_table && opts.class_table->loaded()) {
-                        const uint8_t sub =
-                            opts.class_table->unit_subtype_for(u.entity_type);
-                        o << ", \"unit_subtype\": " << static_cast<int>(sub);
+                        unit_sub = opts.class_table->unit_subtype_for(u.entity_type);
+                        if (const auto* e = opts.class_table->lookup(u.entity_type)) {
+                            unit_domain = e->domain;
+                        }
                     }
+                    o << ", \"unit_subtype\": " << static_cast<int>(unit_sub)
+                      << ", \"domain\": " << static_cast<int>(unit_domain);
+                    // roster: 32-bit packed per-group vehicle count (2 bits
+                    // per group, 16 groups, max 3 per group). GetNumVehicles(vg)
+                    // = (roster >> (vg*2)) & 0x03. Live campaign state.
+                    o << ", \"roster\": " << u.roster;
                     o << ", \"x\": " << u.x
                       << ", \"y\": " << u.y
                       << ", \"z\": " << (std::isnan(u.z) ? 0.0f : u.z)
@@ -216,6 +250,32 @@ std::string to_world_json(const CamArchive& cam, const WorldJsonOptions& opts) {
                       << ", \"dest_y\": " << u.dest_y
                       << ", \"reinforcement\": " << u.reinforcement
                       << ", \"wp_count\": " << static_cast<int>(u.wp_count)
+                      << ", \"waypoints\": [";
+                    // Each waypoint: grid_x/y/z, arrive, action, route_action,
+                    // formation, flags, optional target_id+target_building,
+                    // optional depart. Drawn on the canvas as a polyline.
+                    for (std::size_t wi = 0; wi < u.waypoints.size(); ++wi) {
+                        const auto& w = u.waypoints[wi];
+                        if (wi) o << ", ";
+                        o << "{\"x\": " << w.grid_x
+                          << ", \"y\": " << w.grid_y
+                          << ", \"z\": " << w.grid_z
+                          << ", \"arrive\": " << w.arrive
+                          << ", \"action\": " << static_cast<int>(w.action)
+                          << ", \"route_action\": " << static_cast<int>(w.route_action)
+                          << ", \"formation\": " << static_cast<int>(w.formation)
+                          << ", \"flags\": " << w.flags;
+                        if (w.haves & 0x02) {
+                            o << ", \"target_num\": " << w.target_id_num
+                              << ", \"target_creator\": " << w.target_id_creator
+                              << ", \"target_building\": " << static_cast<int>(w.target_building);
+                        }
+                        if (w.haves & 0x01) {
+                            o << ", \"depart\": " << w.depart;
+                        }
+                        o << "}";
+                    }
+                    o << "]"
                       << ", \"supply\": " << static_cast<int>(u.subclass.supply)
                       << ", \"morale\": " << static_cast<int>(u.subclass.morale)
                       << ", \"fatigue\": " << static_cast<int>(u.subclass.fatigue)
@@ -225,7 +285,12 @@ std::string to_world_json(const CamArchive& cam, const WorldJsonOptions& opts) {
                     // Hierarchy: Battalion.parent_id and Brigade.element_ids.
                     // Used by the viewer to highlight parent/child units.
                     if (u.unit_class == UnitClass::Battalion) {
-                        o << ", \"parent_id\": " << u.subclass.parent_id_num;
+                        o << ", \"parent_id\": " << u.subclass.parent_id_num
+                          << ", \"last_move\": " << u.subclass.last_move
+                          << ", \"last_combat\": " << u.subclass.last_combat
+                          << ", \"heading\": " << static_cast<int>(u.subclass.heading)
+                          << ", \"final_heading\": " << static_cast<int>(u.subclass.final_heading)
+                          << ", \"position\": " << static_cast<int>(u.subclass.position);
                     } else if (u.unit_class == UnitClass::Brigade) {
                         o << ", \"element_ids\": [";
                         for (std::size_t j = 0; j < u.subclass.element_ids.size(); j += 2) {
@@ -234,6 +299,20 @@ std::string to_world_json(const CamArchive& cam, const WorldJsonOptions& opts) {
                         }
                         o << "]";
                     } else if (u.unit_class == UnitClass::Squadron) {
+                        // Squadron→Airbase link: VU_ID of the objective this
+                        // squadron is based at. Used by the viewer to draw
+                        // a line from the squadron to its home airbase.
+                        o << ", \"airbase_id\": " << u.subclass.airbase_id_num
+                          << ", \"specialty\": " << static_cast<int>(u.subclass.specialty)
+                          << ", \"aa_kills\": " << u.subclass.aa_kills
+                          << ", \"ag_kills\": " << u.subclass.ag_kills
+                          << ", \"as_kills\": " << u.subclass.as_kills
+                          << ", \"an_kills\": " << u.subclass.an_kills
+                          << ", \"missions_flown\": " << u.subclass.missions_flown
+                          << ", \"mission_score\": " << u.subclass.mission_score
+                          << ", \"total_losses\": " << static_cast<int>(u.subclass.total_losses)
+                          << ", \"pilot_losses\": " << static_cast<int>(u.subclass.pilot_losses)
+                          << ", \"squadron_patch\": " << static_cast<int>(u.subclass.squadron_patch);
                         // Pilot roster: 48 pilots per squadron.
                         o << ", \"pilots\": [";
                         for (std::size_t j = 0; j < u.subclass.pilots.size(); ++j) {
@@ -241,9 +320,12 @@ std::string to_world_json(const CamArchive& cam, const WorldJsonOptions& opts) {
                             if (j) o << ", ";
                             o << "{\"id\": " << p.pilot_id
                               << ", \"skill\": " << static_cast<int>(p.skill)
+                              << ", \"rating\": " << static_cast<int>(p.rating)
                               << ", \"status\": " << static_cast<int>(p.status)
                               << ", \"aa\": " << static_cast<int>(p.aa_kills)
                               << ", \"ag\": " << static_cast<int>(p.ag_kills)
+                              << ", \"as\": " << static_cast<int>(p.as_kills)
+                              << ", \"an\": " << static_cast<int>(p.an_kills)
                               << ", \"missions\": " << p.missions_flown
                               << "}";
                         }

@@ -48,12 +48,11 @@
 // For the first pass we decode the positional and identity fields (type,
 // x, y, z, owner, nameid, priority) AND the variable-length link data
 // (road/rail network — each link is 8 uchar costs + 8-byte neighbor VU_ID
-// = 16 bytes). The fstatus array is parsed to advance the cursor but not
-// exposed as a typed field (it's a per-feature status bitmap whose
-// semantics depend on the objective type). The optional RadarRangeClass
-// (32 bytes) is likewise parsed to advance the cursor but not exposed —
-// it's only present for radar-type objectives and will be exposed when
-// f4-radar lands.
+// = 16 bytes). The fstatus[] per-feature damage bitmap and the optional
+// RadarRangeClass.detect_ratio[8] are also decoded into typed fields on
+// ObjectiveRecord (fstatus as a raw byte vector, detect_ratio as 8 floats
+// guarded by has_radar). Interpreting fstatus requires the per-objective
+// Features count from Falcon4.OCD (not yet parsed by this library).
 //
 // The DecodedObjectives struct carries bytes_consumed and inner_size for
 // cursor-landing verification (parity with DecodedUnits): on a clean
@@ -158,12 +157,28 @@ struct ObjectiveRecord {
     uint8_t  losses = 0;
     uint8_t  priority = 0;
     int16_t  nameid = 0;
+    uint32_t parent_id_creator = 0;   // VU_ID of parent objective (0/0 if none)
+    uint32_t parent_id_num = 0;
     uint8_t  first_owner = 0;
     uint8_t  links = 0;
     // Decoded link data (road/rail network):
     std::vector<ObjectiveLink> link_data;
-    // fstatus and radar data are parsed to advance the cursor but not
-    // yet exposed as typed fields (kept verbatim for future passes).
+
+    /// Per-feature damage state — packed 2 bits per feature, total
+    /// `(Features * 2 + 7) / 8` bytes (Features comes from the objective's
+    /// ObjClassDataType entry, which is loaded from `Falcon4.OCD` — not yet
+    /// parsed by this library, so the raw byte vector is exposed verbatim
+    /// for downstream consumers). FreeFalcon's CheckHeaderStatus combines
+    /// PtHeaderDataType.features[] indices with these bits to derive
+    /// per-runway / per-taxiway / per-parking-spot status.
+    std::vector<uint8_t> fstatus;
+
+    /// Radar detection arcs — only populated when has_radar_data is true
+    /// (i.e. the objective is a radar site). 8 floats matching FreeFalcon's
+    /// RadarRangeClass.detect_ratio[NUM_RADAR_ARCS]. Each float is a 0..1
+    /// detection ratio for one of 8 azimuthal arcs covering 360°.
+    bool     has_radar = false;
+    float    detect_ratio[8] = {0.0f};
 };
 
 struct DecodedObjectives {

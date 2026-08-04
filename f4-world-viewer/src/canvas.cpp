@@ -285,6 +285,36 @@ void ViewerApp::draw_canvas() {
                 DrawLineEx(p, d, 1.0f, Color{c.r, c.g, c.b, 160});
             }
 
+            // Waypoint polyline: draws the unit's flight/ground plan as a
+            // thin dashed line through each waypoint. Only meaningful when
+            // wp_count > 0 (rare in fresh campaign saves, common once
+            // missions are assigned).
+            if (u.wp_count > 0 && !u.waypoints.empty()) {
+                Vector2 prev = p;
+                for (const auto& w : u.waypoints) {
+                    const Vector2 q = impl_->world_to_screen(
+                        static_cast<float>(w.x), static_cast<float>(w.y));
+                    DrawLineEx(prev, q, 1.0f, Color{c.r, c.g, c.b, 200});
+                    // Small marker at each waypoint
+                    DrawCircleV(q, 2.0f, Color{c.r, c.g, c.b, 220});
+                    prev = q;
+                }
+            }
+
+            // Squadron → home airbase link line. The airbase_id is the
+            // VU_ID.num of the objective this squadron is based at. Drawn
+            // as a thin curved-feeling straight line in the squadron's
+            // team color so the user can see at a glance where each
+            // squadron calls home.
+            if (u.unit_class == f4::world::UnitClass::Squadron && u.airbase_id != 0) {
+                auto it = impl_->obj_id_to_index.find(u.airbase_id);
+                if (it != impl_->obj_id_to_index.end() && it->second < static_cast<int>(impl_->world.objectives.size())) {
+                    const auto& ab = impl_->world.objectives[it->second];
+                    const Vector2 a = impl_->world_to_screen(ab.x, ab.y);
+                    DrawLineEx(p, a, 0.5f, Color{c.r, c.g, c.b, 90});
+                }
+            }
+
             // Selection outline (yellow, drawn around any shape)
             if (impl_->sel_kind == Impl::SelectionKind::Unit &&
                 impl_->sel_index == i) {

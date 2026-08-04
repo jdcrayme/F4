@@ -71,6 +71,20 @@ struct ObjectiveState {
     int16_t  camp_id = 0;
     uint8_t  priority = 0;
     int16_t  nameid = 0;
+    // Logistics & state (decoded by f4-world-convert, now exposed):
+    uint32_t obj_flags = 0;
+    uint8_t  supply = 0;
+    uint8_t  fuel = 0;
+    uint8_t  losses = 0;
+    int32_t  last_repair = 0;
+    uint8_t  first_owner = 0;
+    uint32_t parent_id = 0;     // VU_ID.num of parent objective (0 if none)
+    // Per-feature damage bitmap (packed 2 bits per feature). Raw bytes —
+    // interpreting requires the Features count from Falcon4.OCD.
+    std::vector<uint8_t> fstatus;
+    // Radar detection arcs (only populated when has_radar == true).
+    bool     has_radar = false;
+    float    detect_ratio[8] = {0.0f};
     std::vector<ObjectiveLink> links;   // road/rail network connections
 };
 
@@ -104,10 +118,29 @@ enum class UnitClass : uint8_t {
 struct PilotState {
     int16_t  pilot_id = 0;
     uint8_t  skill = 0;
+    uint8_t  rating = 0;
     uint8_t  status = 0;        // 0=available, 1=dead, 2=on leave, etc.
     uint8_t  aa_kills = 0;
     uint8_t  ag_kills = 0;
     int16_t  missions_flown = 0;
+};
+
+/// One waypoint in a unit's flight/ground plan. Mirrors WaypointRecord
+/// in f4-world-convert (campwp.cpp:89 at v63).
+struct WaypointState {
+    int16_t  x = 0;             // grid column
+    int16_t  y = 0;             // grid row
+    int16_t  z = 0;             // altitude (feet)
+    int32_t  arrive = 0;        // arrival time (campaign seconds)
+    uint8_t  action = 0;        // WP_ACTION enum
+    uint8_t  route_action = 0;
+    uint8_t  formation = 0;
+    int16_t  flags = 0;
+    // Optional (present only when the original `haves` flag was set):
+    uint32_t target_num = 0;          // VU_ID.num of target
+    uint32_t target_creator = 0;
+    uint8_t  target_building = 0;     // feature index on the target objective
+    int32_t  depart = 0;              // departure time (campaign seconds)
 };
 
 /// A campaign unit (flight, battalion, squadron, ship). Mirrors the fields
@@ -117,6 +150,7 @@ struct UnitState {
     int16_t  type = 0;             // share_.entityType_ (100..2000)
     UnitClass unit_class = UnitClass::Unknown;
     uint8_t  unit_subtype = 0;     // STYPE_UNIT_* (armor/infantry/fighter/bomber/...)
+    uint8_t  domain = 0;           // VU_DOMAIN (2=air, 3=land, 4=sea) — needed to interpret unit_subtype
 
     // CampBaseClass:
     uint32_t id_creator = 0;
@@ -136,6 +170,17 @@ struct UnitState {
     uint8_t  wp_count = 0;
     uint8_t  losses = 0;
 
+    /// Per-group vehicle count, packed 2 bits/group × 16 groups (32 bits).
+    /// GetNumVehicles(vg) = (roster >> (vg*2)) & 0x03 — max 3 vehicles per
+    /// group, 16 groups, 48 vehicles max per battalion. Combined with the
+    /// UnitClassDataType table (not yet parsed), this gives the live
+    /// vehicle composition of the unit.
+    uint32_t roster = 0;
+
+    /// Waypoint list (flight plan / ground movement plan). Empty when
+    /// wp_count == 0. Drawn on the canvas as a polyline.
+    std::vector<WaypointState> waypoints;
+
     // Subclass-specific (only populated for the matching unit_class):
     uint8_t  supply = 0;           // Battalion / TaskForce / Brigade
     uint8_t  morale = 0;           // Battalion
@@ -146,6 +191,26 @@ struct UnitState {
     // Hierarchy (Battalion/Brigade):
     uint32_t parent_id = 0;                    // Battalion → parent Brigade VU_ID.num
     std::vector<uint32_t> element_ids;         // Brigade → child Battalion VU_IDs
+
+    // Battalion tactical state:
+    int32_t  last_move = 0;        // CampaignTime of last move
+    int32_t  last_combat = 0;      // CampaignTime of last combat
+    uint8_t  heading = 0;          // current heading (0-255, *1.4 deg)
+    uint8_t  final_heading = 0;    // commanded heading
+    uint8_t  position = 0;         // formation position slot
+
+    // Squadron:
+    uint32_t airbase_id = 0;       // VU_ID.num of home airbase objective
+    uint8_t  specialty = 0;
+    int16_t  aa_kills = 0;
+    int16_t  ag_kills = 0;
+    int16_t  as_kills = 0;
+    int16_t  an_kills = 0;
+    int16_t  missions_flown = 0;
+    int16_t  mission_score = 0;
+    uint8_t  total_losses = 0;
+    uint8_t  pilot_losses = 0;
+    uint8_t  squadron_patch = 0;
 
     // Squadron pilot roster:
     std::vector<PilotState> pilots;

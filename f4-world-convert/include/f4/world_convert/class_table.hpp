@@ -145,6 +145,71 @@ struct ClassTableEntry {
     uint8_t stype = 0;       // classInfo_[3]
 };
 
+/// Human-readable name for a unit subtype. Looks up the appropriate enum
+/// table (LandUnitSubtype / AirUnitSubtype / SeaUnitSubtype) based on
+/// domain. Returns "Unknown" for unrecognized values. Used by the viewer
+/// to show e.g. "Armor" / "Fighter" / "Carrier" next to the unit icon.
+[[nodiscard]] inline const char* unit_subtype_name(uint8_t domain, uint8_t stype) {
+    switch (domain) {
+        case DOMAIN_LAND:
+            switch (stype) {
+                case STYPE_LAND_AIR_DEFENSE:     return "Air Defense";
+                case STYPE_LAND_AIRMOBILE:       return "Airmobile";
+                case STYPE_LAND_ARMOR:           return "Armor";
+                case STYPE_LAND_ARMORED_CAV:     return "Armored Cav";
+                case STYPE_LAND_ENGINEER:        return "Engineer";
+                case STYPE_LAND_HQ:              return "HQ";
+                case STYPE_LAND_INFANTRY:        return "Infantry";
+                case STYPE_LAND_MARINE:          return "Marine";
+                case STYPE_LAND_MECHANIZED:      return "Mechanized";
+                case STYPE_LAND_ROCKET:          return "Rocket";
+                case STYPE_LAND_SP_ARTILLERY:    return "SP Artillery";
+                case STYPE_LAND_SS_MISSILE:      return "SS Missile";
+                case STYPE_LAND_SUPPLY:          return "Supply";
+                case STYPE_LAND_TOWED_ARTILLERY: return "Towed Artillery";
+                default:                          break;
+            }
+            break;
+        case DOMAIN_AIR:
+            switch (stype) {
+                case STYPE_AIR_AIR_TRANSPORT:    return "Air Transport";
+                case STYPE_AIR_ASW:              return "ASW";
+                case STYPE_AIR_ATTACK:           return "Attack";
+                case STYPE_AIR_ATTACK_HELO:      return "Attack Helo";
+                case STYPE_AIR_AWACS:            return "AWACS";
+                case STYPE_AIR_BOMBER:           return "Bomber";
+                case STYPE_AIR_ECM:              return "ECM";
+                case STYPE_AIR_FIGHTER:          return "Fighter";
+                case STYPE_AIR_FIGHTER_BOMBER:   return "Fighter-Bomber";
+                case STYPE_AIR_JSTAR:            return "JSTAR";
+                case STYPE_AIR_RECON:            return "Recon";
+                case STYPE_AIR_RECON_HELO:       return "Recon Helo";
+                case STYPE_AIR_TANKER:           return "Tanker";
+                case STYPE_AIR_TRANSPORT_HELO:   return "Transport Helo";
+                default:                          break;
+            }
+            break;
+        case DOMAIN_SEA:
+            switch (stype) {
+                case STYPE_SEA_AMPHIBIOUS:       return "Amphibious";
+                case STYPE_SEA_BATTLESHIP:       return "Battleship";
+                case STYPE_SEA_CARRIER:          return "Carrier";
+                case STYPE_SEA_CRUISER:          return "Cruiser";
+                case STYPE_SEA_DESTROYER:        return "Destroyer";
+                case STYPE_SEA_FRIGATE:          return "Frigate";
+                case STYPE_SEA_PATROL:           return "Patrol";
+                case STYPE_SEA_SEA_SUPPLY:       return "Sea Supply";
+                case STYPE_SEA_SEA_TANKER:       return "Sea Tanker";
+                case STYPE_SEA_SEA_TRANSPORT:    return "Sea Transport";
+                default:                          break;
+            }
+            break;
+        default:
+            break;
+    }
+    return "Unknown";
+}
+
 /// Parsed Falcon4.ct class table. Maps entity_type (100+index) to
 /// ClassTableEntry.
 class ClassTable {

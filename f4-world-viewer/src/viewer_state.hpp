@@ -186,6 +186,12 @@ struct ViewerApp::Impl {
     // objective positions (so we can draw lines between them).
     std::unordered_map<uint32_t, int> obj_id_to_index;
 
+    /// VU_ID.num → unit index lookup. Built when a world is loaded.
+    /// Used to resolve Squadron→Airbase link lines and Battalion→Brigade
+    /// hierarchy lines (when the parent_id / airbase_id refers to another
+    /// entity by VU_ID.num).
+    std::unordered_map<uint32_t, int> unit_id_to_index;
+
     /// Rebuild the VU_ID → objective index map. Call after loading a world.
     /// Defined in camera.cpp.
     void rebuild_objective_index();

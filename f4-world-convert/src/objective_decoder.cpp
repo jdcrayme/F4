@@ -123,11 +123,20 @@ DecodedObjectives decode_obj(const uint8_t* data, std::size_t size) {
             o.supply       = c.u8();
             o.fuel         = c.u8();
             o.losses       = c.u8();
+            // Per-feature damage bitmap: 1-byte length prefix + N bytes.
+            // 2 bits per feature (VIS_NORMAL / DAMAGED / DESTROYED / REPAIRED).
+            // The feature count comes from the objective's ObjClassDataType
+            // entry in Falcon4.OCD — not yet parsed, so we expose the raw
+            // bytes verbatim for downstream consumers.
             uint8_t fstatus_len = c.u8();
-            if (fstatus_len > 0) c.p += fstatus_len;   // skip fstatus bytes
+            o.fstatus.resize(fstatus_len);
+            if (fstatus_len > 0) c.read(o.fstatus.data(), fstatus_len);
             o.priority     = c.u8();
             o.nameid       = c.i16();
-            c.p += 8;                                   // skip parent VU_ID
+            // Parent VU_ID (8 bytes). 0/0 means no parent. The .cam writes
+            // VU_ID as num(4) + creator(4) — same order as CampBaseClass.id.
+            o.parent_id_num      = c.u32();
+            o.parent_id_creator  = c.u32();
             o.first_owner  = c.u8();
             o.links        = c.u8();
             // Decode the link data (road/rail network). Each link is:
@@ -144,8 +153,15 @@ DecodedObjectives decode_obj(const uint8_t* data, std::size_t size) {
                 link.neighbor_creator = c.u32();
                 o.link_data.push_back(link);
             }
-            uint8_t has_radar = c.u8();
-            if (has_radar) c.p += 32;   // RadarRangeClass = float detect_ratio[8] = 32 bytes
+            // Optional RadarRangeClass: present only when has_radar_data != 0.
+            // 8 floats = 32 bytes — detect_ratio[NUM_RADAR_ARCS=8], each a
+            // 0..1 detection ratio for one of 8 azimuthal arcs.
+            o.has_radar = (c.u8() != 0);
+            if (o.has_radar) {
+                for (int j = 0; j < 8; ++j) {
+                    o.detect_ratio[j] = c.f32();
+                }
+            }
 
             // Sanity gate: sentinel must be nonzero (SaveBaseObjectives
             // writes o->Type() which is > 0 for real objectives), and the

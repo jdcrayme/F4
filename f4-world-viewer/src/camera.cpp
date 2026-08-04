@@ -24,6 +24,14 @@ void ViewerApp::Impl::rebuild_objective_index() {
     for (int i = 0; i < static_cast<int>(world.objectives.size()); ++i) {
         obj_id_to_index[world.objectives[i].id_num] = i;
     }
+
+    // Also build the unit VU_ID → unit index map. Used by the canvas to
+    // draw Squadron→Airbase and Battalion→Brigade hierarchy lines.
+    unit_id_to_index.clear();
+    unit_id_to_index.reserve(world.units.size());
+    for (int i = 0; i < static_cast<int>(world.units.size()); ++i) {
+        unit_id_to_index[world.units[i].id_num] = i;
+    }
 }
 
 Vector2 ViewerApp::Impl::world_to_screen(float gx, float gy) const {

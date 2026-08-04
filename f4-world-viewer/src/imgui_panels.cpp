@@ -24,6 +24,8 @@
 #include <f4/terrain/terrain_data.hpp>
 #include <f4/viewer/file_dialog.hpp>
 #include <f4/world/world_state.hpp>
+#include <f4/world_convert/class_table.hpp>      // unit_subtype_name(), DOMAIN_*
+#include <f4/world_convert/objective_decoder.hpp> // objective_type_name()
 
 #include <imgui.h>
 #include <rlImGui.h>
@@ -207,7 +209,14 @@ void ViewerApp::draw_imgui() {
             }
             ImGui::Separator();
             ImGui::TextUnformatted("Teams (color)");
-            const char* team_names[] = {
+            // Resolve team names from the loaded WorldState.teams[] when
+            // available. Falls back to the legacy hardcoded names only
+            // when no world is loaded. The .cmp file's 8 team slots each
+            // carry a 20-byte name string — using them ensures the legend
+            // matches whatever campaign is actually loaded (e.g. slot 1
+            // is "U.S." in the Korea fixture, NOT "Enemy" as the legacy
+            // array claimed).
+            const char* fallback_names[] = {
                 "0 Neutral", "1 Enemy", "2 Friendly", "3 ROK",
                 "4 Japan", "5 DPRK", "6 PRC", "7 Other"
             };
@@ -218,7 +227,18 @@ void ViewerApp::draw_imgui() {
                 ImGui::TextUnformatted("##");
                 ImGui::PopStyleColor();
                 ImGui::SameLine();
-                ImGui::TextUnformatted(team_names[i]);
+                if (impl_->world_loaded && i < static_cast<int>(impl_->world.teams.size())) {
+                    const auto& t = impl_->world.teams[i];
+                    char label[64];
+                    if (t.name.empty() || t.name == "XX") {
+                        std::snprintf(label, sizeof(label), "%d (empty)", i);
+                    } else {
+                        std::snprintf(label, sizeof(label), "%d %s", i, t.name.c_str());
+                    }
+                    ImGui::TextUnformatted(label);
+                } else {
+                    ImGui::TextUnformatted(fallback_names[i]);
+                }
             }
             ImGui::Separator();
             ImGui::TextUnformatted("Unit subtypes");
@@ -245,31 +265,83 @@ void ViewerApp::draw_imgui() {
             ImGui::TextDisabled("Click an objective or unit to inspect.");
         } else if (impl_->sel_kind == Impl::SelectionKind::Objective) {
             const auto& o = impl_->world.objectives[impl_->sel_index];
+            // Resolve the team name from WorldState.teams[] when available.
+            // Falls back to "(unknown)" if no world loaded or owner out of range.
+            const char* team_name = "(no world)";
+            if (impl_->world_loaded && o.owner < impl_->world.teams.size()) {
+                const auto& t = impl_->world.teams[o.owner];
+                team_name = t.name.empty() ? "(empty)" : t.name.c_str();
+            }
+            // Resolve the objective type name (e.g. "Airbase"). Falls back to
+            // "Unknown" when objective_type == 0 (no class table loaded).
+            const std::string obj_type_name_str =
+                (o.objective_type > 0)
+                    ? f4::world_convert::objective_type_name(
+                          static_cast<int16_t>(o.objective_type))
+                    : std::string("Unknown");
             ImGui::Text("Objective #%d", impl_->sel_index);
             ImGui::Separator();
-            ImGui::Text("Obj Type:  %d", o.objective_type);
+            ImGui::Text("Type:      %s (%d)", obj_type_name_str.c_str(), o.objective_type);
             ImGui::Text("Entity:    %d", o.type);
-            ImGui::Text("Position:   (%d, %d, %.0f ft)", o.x, o.y, o.z);
-            ImGui::Text("Owner:      %d", o.owner);
-            ImGui::Text("Priority:   %d", o.priority);
-            ImGui::Text("Links:     %d (road/rail connections)", static_cast<int>(o.links.size()));
-            ImGui::Text("Camp ID:    %d", o.camp_id);
-            ImGui::Text("Entity:     %d", o.entity_type);
-            ImGui::Text("VU_ID:      0x%08x/0x%08x", o.id_creator, o.id_num);
+            ImGui::Text("Position:  (%d, %d, %.0f ft)", o.x, o.y, o.z);
+            ImGui::Text("Owner:     %d (%s)", o.owner, team_name);
+            ImGui::Text("Priority:  %d", o.priority);
+            ImGui::Text("Camp ID:   %d", o.camp_id);
+            ImGui::Text("Name ID:   %d", o.nameid);
+            ImGui::Text("First own: %d", o.first_owner);
+            ImGui::Text("Parent ID: %d", o.parent_id);
+            ImGui::Text("Links:     %d (road/rail)", static_cast<int>(o.links.size()));
+            ImGui::Text("VU_ID:     0x%08x/0x%08x", o.id_creator, o.id_num);
+            ImGui::Separator();
+            ImGui::Text("Supply:    %d", o.supply);
+            ImGui::Text("Fuel:      %d", o.fuel);
+            ImGui::Text("Losses:    %d", o.losses);
+            ImGui::Text("Last rep:  %d", o.last_repair);
+            ImGui::Text("Obj flags: 0x%08x", o.obj_flags);
+            if (o.has_radar) {
+                ImGui::Separator();
+                ImGui::TextUnformatted("Radar detection arcs:");
+                for (int i = 0; i < 8; ++i) {
+                    ImGui::Text("  arc %d: %.3f", i, o.detect_ratio[i]);
+                }
+            }
         } else if (impl_->sel_kind == Impl::SelectionKind::Unit) {
             const auto& u = impl_->world.units[impl_->sel_index];
+            const char* team_name = "(no world)";
+            if (impl_->world_loaded && u.owner < impl_->world.teams.size()) {
+                const auto& t = impl_->world.teams[u.owner];
+                team_name = t.name.empty() ? "(empty)" : t.name.c_str();
+            }
+            // Subtype name (e.g. "Armor", "Fighter-Bomber"). Uses the
+            // domain+subtype pair emitted by the converter. Falls back to
+            // "Unknown" when subtype == 0 (no class table loaded).
+            const char* subtype_str = f4::world_convert::unit_subtype_name(
+                u.domain, u.unit_subtype);
             ImGui::Text("Unit #%d", impl_->sel_index);
             ImGui::Separator();
-            ImGui::Text("Class:     %s (type %d)",
-                        f4::world::unit_class_name(u.unit_class), u.type);
+            ImGui::Text("Class:     %s (%s)",
+                        f4::world::unit_class_name(u.unit_class),
+                        subtype_str);
+            ImGui::Text("Type:      %d", u.type);
+            ImGui::Text("Subtype:   %d", u.unit_subtype);
+            ImGui::Text("Domain:    %d", u.domain);
             ImGui::Text("Position:  (%d, %d, %.0f ft)", u.x, u.y, u.z);
-            ImGui::Text("Owner:     %d", u.owner);
+            ImGui::Text("Owner:     %d (%s)", u.owner, team_name);
             ImGui::Text("Destination:(%d, %d)", u.dest_x, u.dest_y);
             ImGui::Text("Name ID:   %d", u.name_id);
             ImGui::Text("Camp ID:   %d", u.camp_id);
             ImGui::Text("Reinforc.: %d", u.reinforcement);
             ImGui::Text("Waypoints: %d", u.wp_count);
             ImGui::Text("Losses:    %d", u.losses);
+            // Roster: 16 groups × 2 bits. Show live vehicle count per group.
+            // GetNumVehicles(vg) = (roster >> (vg*2)) & 0x03 — max 3/group.
+            {
+                int total_vehicles = 0;
+                for (int vg = 0; vg < 16; ++vg) {
+                    total_vehicles += (u.roster >> (vg * 2)) & 0x03;
+                }
+                ImGui::Text("Roster:    0x%08x (%d vehicles)", u.roster, total_vehicles);
+            }
             ImGui::Text("Entity:    %d", u.entity_type);
             ImGui::Text("VU_ID:     0x%08x/0x%08x", u.id_creator, u.id_num);
             // Subclass-specific fields:
@@ -279,6 +351,10 @@ void ViewerApp::draw_imgui() {
                     ImGui::Text("Supply:    %d%%", u.supply);
                     ImGui::Text("Morale:    %d%%", u.morale);
                     ImGui::Text("Fatigue:   %d%%", u.fatigue);
+                    ImGui::Text("Heading:   %d deg", static_cast<int>(u.heading * 360 / 256));
+                    ImGui::Text("Final hdg: %d deg", static_cast<int>(u.final_heading * 360 / 256));
+                    ImGui::Text("Last move: %d", u.last_move);
+                    ImGui::Text("Last cmbt: %d", u.last_combat);
                     ImGui::Text("Parent:    %d", u.parent_id);
                     break;
                 case f4::world::UnitClass::Brigade:
@@ -295,8 +371,20 @@ void ViewerApp::draw_imgui() {
                     break;
                 case f4::world::UnitClass::Squadron:
                     ImGui::Text("Fuel:      %d lbs", u.fuel);
+                    ImGui::Text("Airbase:   %d", u.airbase_id);
+                    ImGui::Text("Specialty: %d", u.specialty);
+                    ImGui::Separator();
+                    ImGui::Text("AA kills:  %d", u.aa_kills);
+                    ImGui::Text("AG kills:  %d", u.ag_kills);
+                    ImGui::Text("AS kills:  %d", u.as_kills);
+                    ImGui::Text("AN kills:  %d", u.an_kills);
+                    ImGui::Text("Missions:  %d", u.missions_flown);
+                    ImGui::Text("Score:     %d", u.mission_score);
+                    ImGui::Text("Total loss:%d", u.total_losses);
+                    ImGui::Text("Pilot loss:%d", u.pilot_losses);
+                    ImGui::Text("Patch:     %d", u.squadron_patch);
                     if (ImGui::TreeNode("Pilots", "Pilots (%d)", static_cast<int>(u.pilots.size()))) {
-                        ImGui::Text("ID    Skill Status AA  Missions");
+                        ImGui::Text("ID    Skill Rating Status AA  AG  AS  AN  Missions");
                         for (const auto& p : u.pilots) {
                             const char* status_str = "?";
                             switch (p.status) {
@@ -305,9 +393,9 @@ void ViewerApp::draw_imgui() {
                                 case 2: status_str = "Leave"; break;
                                 case 3: status_str = "Hosp"; break;
                             }
-                            ImGui::Text("%-5d %-5d %-6s %-3d %d",
-                                        p.pilot_id, p.skill, status_str,
-                                        p.aa_kills, p.missions_flown);
+                            ImGui::Text("%-5d %-5d %-6d %-6s %-3d %-3d %-3d %-3d %d",
+                                        p.pilot_id, p.skill, p.rating, status_str,
+                                        p.aa_kills, p.ag_kills, p.missions_flown);
                         }
                         ImGui::TreePop();
                     }
@@ -319,6 +407,20 @@ void ViewerApp::draw_imgui() {
                 case f4::world::UnitClass::Package:
                 case f4::world::UnitClass::Unknown:
                     break;
+            }
+            // Waypoint list (only if non-empty)
+            if (!u.waypoints.empty()) {
+                ImGui::Separator();
+                if (ImGui::TreeNode("Waypoints", "Waypoints (%d)", static_cast<int>(u.waypoints.size()))) {
+                    ImGui::Text("idx  x    y    z    action  depart");
+                    int wi = 0;
+                    for (const auto& w : u.waypoints) {
+                        ImGui::Text("%-4d %-4d %-4d %-4d %-7d %d",
+                                    wi++, w.x, w.y, w.z,
+                                    static_cast<int>(w.action), w.depart);
+                    }
+                    ImGui::TreePop();
+                }
             }
         }
     }

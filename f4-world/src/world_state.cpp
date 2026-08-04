@@ -49,6 +49,7 @@ ObjectiveState parse_objective(Reader& r) {
         std::string k = r.read_string();
         r.expect(':');
         if      (k == "type")            o.type            = static_cast<int16_t>(r.read_int());
+        else if (k == "type_name")       r.skip_value();  // display only
         else if (k == "objective_type")  o.objective_type  = static_cast<uint8_t>(r.read_int());
         else if (k == "x")               o.x               = static_cast<int16_t>(r.read_int());
         else if (k == "y")               o.y               = static_cast<int16_t>(r.read_int());
@@ -58,6 +59,36 @@ ObjectiveState parse_objective(Reader& r) {
         else if (k == "nameid")          o.nameid          = static_cast<int16_t>(r.read_int());
         else if (k == "camp_id")         o.camp_id         = static_cast<int16_t>(r.read_int());
         else if (k == "entity_type")     o.entity_type     = static_cast<uint16_t>(r.read_int());
+        else if (k == "obj_flags")       o.obj_flags       = static_cast<uint32_t>(r.read_int());
+        else if (k == "supply")          o.supply          = static_cast<uint8_t>(r.read_int());
+        else if (k == "fuel")            o.fuel            = static_cast<uint8_t>(r.read_int());
+        else if (k == "losses")          o.losses          = static_cast<uint8_t>(r.read_int());
+        else if (k == "last_repair")     o.last_repair     = static_cast<int32_t>(r.read_int());
+        else if (k == "first_owner")     o.first_owner     = static_cast<uint8_t>(r.read_int());
+        else if (k == "parent_id")       o.parent_id       = static_cast<uint32_t>(r.read_int());
+        else if (k == "fstatus") {
+            // Array of uchar values (per-feature damage bitmap).
+            r.skip_ws(); r.expect('[');
+            if (r.consume(']')) { /* empty */ }
+            else for (;;) {
+                o.fstatus.push_back(static_cast<uint8_t>(r.read_int()));
+                if (r.consume(']')) break;
+                r.expect(',');
+            }
+        }
+        else if (k == "has_radar") {
+            r.skip_ws();
+            if (r.consume('t')) { o.has_radar = true;  r.skip_value(); }
+            else                { o.has_radar = false; r.skip_value(); }
+        }
+        else if (k == "detect_ratio") {
+            r.skip_ws(); r.expect('[');
+            for (int i = 0; i < 8; ++i) {
+                if (i) r.expect(',');
+                o.detect_ratio[i] = static_cast<float>(r.read_number());
+            }
+            r.expect(']');
+        }
         else if (k == "links") {
             // Array of {n, c, road, rail} objects.
             r.skip_ws(); r.expect('[');
@@ -115,6 +146,8 @@ UnitState parse_unit(Reader& r) {
             else                        u.unit_class = UnitClass::Unknown;
         }
         else if (k == "unit_subtype")   u.unit_subtype   = static_cast<uint8_t>(r.read_int());
+        else if (k == "domain")         u.domain         = static_cast<uint8_t>(r.read_int());
+        else if (k == "roster")         u.roster         = static_cast<uint32_t>(r.read_int());
         else if (k == "x")              u.x              = static_cast<int16_t>(r.read_int());
         else if (k == "y")              u.y              = static_cast<int16_t>(r.read_int());
         else if (k == "z")              u.z              = static_cast<float>(r.read_number());
@@ -126,6 +159,39 @@ UnitState parse_unit(Reader& r) {
         else if (k == "entity_type")    u.entity_type    = static_cast<uint16_t>(r.read_int());
         else if (k == "reinforcement")  u.reinforcement  = static_cast<int16_t>(r.read_int());
         else if (k == "wp_count")       u.wp_count       = static_cast<uint8_t>(r.read_int());
+        else if (k == "waypoints") {
+            // Array of waypoint objects. Each waypoint has x/y/z + action +
+            // route_action + formation + flags + optional target_num/creator/
+            // building + optional depart.
+            r.skip_ws(); r.expect('[');
+            if (r.consume(']')) { /* empty */ }
+            else for (;;) {
+                r.skip_ws(); r.expect('{');
+                WaypointState w;
+                if (!r.peek('}')) for (;;) {
+                    std::string wk = r.read_string();
+                    r.expect(':');
+                    if      (wk == "x")                w.x                = static_cast<int16_t>(r.read_int());
+                    else if (wk == "y")                w.y                = static_cast<int16_t>(r.read_int());
+                    else if (wk == "z")                w.z                = static_cast<int16_t>(r.read_int());
+                    else if (wk == "arrive")           w.arrive           = static_cast<int32_t>(r.read_int());
+                    else if (wk == "action")           w.action           = static_cast<uint8_t>(r.read_int());
+                    else if (wk == "route_action")     w.route_action     = static_cast<uint8_t>(r.read_int());
+                    else if (wk == "formation")        w.formation        = static_cast<uint8_t>(r.read_int());
+                    else if (wk == "flags")            w.flags            = static_cast<int16_t>(r.read_int());
+                    else if (wk == "target_num")       w.target_num       = static_cast<uint32_t>(r.read_int());
+                    else if (wk == "target_creator")   w.target_creator   = static_cast<uint32_t>(r.read_int());
+                    else if (wk == "target_building")  w.target_building  = static_cast<uint8_t>(r.read_int());
+                    else if (wk == "depart")           w.depart           = static_cast<int32_t>(r.read_int());
+                    else                               r.skip_value();
+                    if (r.consume('}')) break;
+                    r.expect(',');
+                } else r.consume('}');
+                u.waypoints.push_back(w);
+                if (r.consume(']')) break;
+                r.expect(',');
+            }
+        }
         else if (k == "losses")         u.losses         = static_cast<uint8_t>(r.read_int());
         else if (k == "supply")         u.supply         = static_cast<uint8_t>(r.read_int());
         else if (k == "morale")         u.morale         = static_cast<uint8_t>(r.read_int());
@@ -133,6 +199,22 @@ UnitState parse_unit(Reader& r) {
         else if (k == "elements")       u.elements       = static_cast<uint8_t>(r.read_int());
         else if (k == "fuel")           u.fuel           = static_cast<int32_t>(r.read_int());
         else if (k == "parent_id")      u.parent_id      = static_cast<uint32_t>(r.read_int());
+        else if (k == "last_move")      u.last_move      = static_cast<int32_t>(r.read_int());
+        else if (k == "last_combat")    u.last_combat    = static_cast<int32_t>(r.read_int());
+        else if (k == "heading")        u.heading        = static_cast<uint8_t>(r.read_int());
+        else if (k == "final_heading")  u.final_heading  = static_cast<uint8_t>(r.read_int());
+        else if (k == "position")       u.position       = static_cast<uint8_t>(r.read_int());
+        else if (k == "airbase_id")     u.airbase_id     = static_cast<uint32_t>(r.read_int());
+        else if (k == "specialty")      u.specialty      = static_cast<uint8_t>(r.read_int());
+        else if (k == "aa_kills")       u.aa_kills       = static_cast<int16_t>(r.read_int());
+        else if (k == "ag_kills")       u.ag_kills       = static_cast<int16_t>(r.read_int());
+        else if (k == "as_kills")       u.as_kills       = static_cast<int16_t>(r.read_int());
+        else if (k == "an_kills")       u.an_kills       = static_cast<int16_t>(r.read_int());
+        else if (k == "missions_flown") u.missions_flown = static_cast<int16_t>(r.read_int());
+        else if (k == "mission_score")  u.mission_score  = static_cast<int16_t>(r.read_int());
+        else if (k == "total_losses")   u.total_losses   = static_cast<uint8_t>(r.read_int());
+        else if (k == "pilot_losses")   u.pilot_losses   = static_cast<uint8_t>(r.read_int());
+        else if (k == "squadron_patch") u.squadron_patch = static_cast<uint8_t>(r.read_int());
         else if (k == "element_ids") {
             // Array of integers (VU_ID.num values).
             r.skip_ws(); r.expect('[');
@@ -155,6 +237,7 @@ UnitState parse_unit(Reader& r) {
                     r.expect(':');
                     if      (pk == "id")       p.pilot_id       = static_cast<int16_t>(r.read_int());
                     else if (pk == "skill")    p.skill          = static_cast<uint8_t>(r.read_int());
+                    else if (pk == "rating")   p.rating         = static_cast<uint8_t>(r.read_int());
                     else if (pk == "status")   p.status         = static_cast<uint8_t>(r.read_int());
                     else if (pk == "aa")       p.aa_kills       = static_cast<uint8_t>(r.read_int());
                     else if (pk == "ag")       p.ag_kills       = static_cast<uint8_t>(r.read_int());
