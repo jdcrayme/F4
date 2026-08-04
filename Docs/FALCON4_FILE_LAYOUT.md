@@ -93,138 +93,273 @@ by index.
 | File              | C struct (FreeFalcon)         | Records                | F4 status                  |
 |-------------------|-------------------------------|------------------------|----------------------------|
 | `Falcon4.ct`      | `ClassTableEntry[]`           | entity_type → type/subtype map | **PARSED** by `f4-world-convert/class_table` |
-| `Falcon4.PHD`     | `PtHeaderDataType[]`          | per-airbase layout header (runway heading, runway length, parking counts, links into PD) | **NOT PARSED** — top priority |
-| `Falcon4.PD`      | `PtDataType[]`                | runway / taxi / parking points (linked-list traversal) | **NOT PARSED** — top priority |
-| `Falcon4.OCD`     | `ObjClassDataType[]`          | objective class name + data (radar ranges, features, unit slots, supply) | **NOT PARSED** — top priority |
-| `Falcon4.UCD`     | `UnitClassDataType[]`         | unit class composition (vehicle type + count per group, default roster, icons) | **NOT PARSED** — high priority |
-| `Falcon4.VCD`     | `VehicleClassDataType[]`      | per-vehicle data (name, speed, armor, weapons, 3D model index) | **NOT PARSED** — medium priority |
-| `Falcon4.FED`     | `FeatureClassDataType[]`      | feature class definitions (name, model index, armor) | **NOT PARSED** — medium priority |
-| `Falcon4.FCD`     | `FeatureDataType[]`           | feature instances on objectives (offset, heading, class index) | **NOT PARSED** — medium priority |
+| `Falcon4.PHD`     | `PtHeaderDataType[]`          | per-airbase layout header (runway heading, runway length, parking counts, links into PD) | ✅ **PARSED** — `theater_data.hpp` (verified against real data) |
+| `Falcon4.PD`      | `PtDataType[]`                | runway / taxi / parking points (linked-list traversal) | ✅ **PARSED** — `theater_data.hpp` (verified) |
+| `Falcon4.OCD`     | `ObjClassDataType[]`          | objective class name + data (radar ranges, features, unit slots, supply) | ✅ **PARSED** — `theater_data.hpp` (verified) |
+| `Falcon4.UCD`     | `UnitClassDataType[]`         | unit class composition (vehicle type + count per group, default roster, icons) | ✅ **PARSED** — `theater_data.hpp` (verified) |
+| `Falcon4.VCD`     | `VehicleClassDataType[]`      | per-vehicle data (name, speed, armor, weapons, 3D model index) | ✅ **PARSED** — `theater_data.hpp` (verified) |
+| `Falcon4.FED`     | `FeatureEntry[]`              | feature placements (offset/facing per feature on each objective) | ✅ **PARSED** — `theater_data.hpp` (verified) |
+| `Falcon4.FCD`     | `FeatureClassDataType[]`      | feature class definitions (name, hit points, repair time) | ✅ **PARSED** — `theater_data.hpp` (verified) |
 | `Falcon4.OTD`     | `ObjectiveTypeData[]`         | objective type table (may be absent in some installs) | **NOT PARSED** — low priority |
 | `Falcon4.ORD`     | `ObjectiveRadarData[]`        | per-objective radar data (may be absent) | **NOT PARSED** — low priority |
-| `Falcon4.RCD`     | `RadarClassData[]`            | radar class definitions (may be absent) | **NOT PARSED** — low priority |
+| `Falcon4.RCD`     | `RadarClassData[]`            | radar class definitions (range + detection ratios) | **NOT PARSED** — 56 records × 60 bytes confirmed in snapshot |
 
 ### 3.1 `Falcon4.PHD` — PtHeaderDataType
 
-Per-airbase ground-layout header. One record per airbase objective. Source:
-`src/sim/include/atcbrain.h:154-200` in the FreeFalcon tree.
+Per-airbase ground-layout header. **One record per point-list** (runway, taxi
+chain, parking row, etc.) — NOT one per airbase. An airbase with 2 runways +
+3 taxiways + 1 parking row has 6 PHD records chained via `nextHeader`.
 
-Each record contains:
-- `ID` (VU_ID) — should match the airbase objective's VU_ID
-- `runwayIdx` (int) — index into `Falcon4.PD` of the first runway point
-- `runwayNum` (int) — number of runways (1 typically, 2 for big fields)
-- `runwayHeading` (float) — heading in radians
-- `dimension` (PtHeaderDimensions) — runway length / width
-- `parkingSpots` (int) — count of SmallParkPt + LargeParkPt entries
-- `taxiways` (int) — count of taxi links
-- `links` — indices into `Falcon4.PD` forming the runway/taxi/parking graph
+**Verified source**: `src/falclib/include/entity.h:177-191` in the FreeFalcon tree.
+
+**Verified on-disk record size**: 28 bytes (MSVC default 8-byte alignment).
+
+```
+off 0: objID        (short, 2)  — ID of the objective this layout belongs to
+off 2: type         (uchar, 1) — PointListType (1=Runway, 8=RunwayDim, 11=Parking, ...)
+off 3: count        (uchar, 1) — # of PtData points in this list
+off 4: features[5]  (uchar[5]) — feature indices this list depends on (255 = unused)
+off 9: *1 byte pad*             — MSVC: aligns `data` to 2-byte boundary
+off10: data         (short, 2) — type-specific (e.g. runway heading in degrees)
+off12: sinHeading   (float, 4) — sin(heading) — precomputed for runtime speed
+off16: cosHeading   (float, 4) — cos(heading)
+off20: first        (short, 2) — index of first PtData point in Falcon4.PD
+off22: texIdx       (short, 2) — texture index for runway rendering
+off24: runwayNum    (char, 1) — which runway this list applies to (-1 if N/A)
+off25: ltrt         (char, 1) — left/right offset flag
+off26: nextHeader   (short, 2) — index of next header in chain (0 = end)
+```
+
+**Verification**: For record 1 of the real Falcon4.PHD, `data=20` (heading
+20°) and `sinHeading=0.342`, `cosHeading=0.940` — these match sin(20°) and
+cos(20°) exactly. ✓
 
 The ATC runtime class (`ATCBrain` in FreeFalcon) is **not serialized** — it
-is rebuilt from this file + the objective `fstatus[]` byte array at campaign
+is rebuilt from PHD + PD + the objective `fstatus[]` byte array at campaign
 load time.
 
 ### 3.2 `Falcon4.PD` — PtDataType
 
-One record per ground point. Source: `src/sim/include/atcbrain.h:201-318` in
-the FreeFalcon tree.
+One record per ground-layout point. **Verified source**:
+`src/falclib/include/entity.h:193-198`.
 
-Each record contains:
-- `type` (uchar) — point type (see §3.3)
-- `x`, `y` (float) — local grid coords relative to airbase center
-- `next` (int) — index of next point in linked list (-1 = end)
-- `prev` (int) — index of previous point
-- `branch` (int) — index of branch point (taxi intersections)
-- `dist` (float) — distance to next point (used for ATC speed commands)
+**Verified on-disk record size**: 12 bytes.
 
-The linked-list traversal is the core data structure: a runway is a chain of
-`RunwayPt` (type 1) terminated by `RunwayDimPt` (type 8). A taxiway is a
-chain of `TaxiPt` (type 9). Parking spots are leaf nodes of type
-`SmallParkPt` (11) / `LargeParkPt` (12).
+```
+off 0: xOffset  (float, 4) — X offset (feet) from objective tile center
+off 4: yOffset  (float, 4) — Y offset (feet) from objective tile center
+off 8: type     (uchar, 1) — PointType (see §3.3)
+off 9: flags    (uchar, 1) — PT_FIRST / PT_LAST / PT_OCCUPIED
+off10: *2 bytes trailing pad* — MSVC: struct size must be multiple of 4
+```
+
+The linked-list traversal lives in the PHD side: PHD's `first` + `count`
+fields define a contiguous slice of PD records that form one logical path
+(runway centerline, taxiway, parking row, etc.). This is NOT a per-record
+`next` pointer as previously documented — it's a slice indexed by
+`PHD.first .. PHD.first + PHD.count - 1`.
+
+**Verification**: For record 1 of real Falcon4.PD, `xOffset=2699 ft`,
+`yOffset=2956 ft`, `type=1` (RunwayPt), `flags=1` (PT_FIRST) — sensible
+runway threshold coordinates. ✓
 
 ### 3.3 `PtDataType.type` enum
 
+Verified against `src/falclib/include/ptdata.h:40-60` in the FreeFalcon tree.
+
 | Value | Constant             | Meaning                          |
 |-------|----------------------|----------------------------------|
-| 0     | `NotUsed`            | empty slot                       |
-| 1     | `RunwayPt`           | runway centerline point          |
-| 2     | `RunwayExtPt`        | runway extension / overrun       |
-| 3     | `TaxiPt` (ext)       | taxiway point (extended)         |
-| 4     | `TaxiIntersectionPt` | taxi intersection                |
-| 8     | `RunwayDimPt`        | runway threshold / dimension     |
-| 9     | `TaxiPt`             | taxiway point                    |
-| 10    | `TakeOffPt`          | takeoff position                 |
-| 11    | `SmallParkPt`        | small parking spot (fighter)     |
-| 12    | `LargeParkPt`        | large parking spot (cargo/bomber)|
-| 13    | `RunwayPt` (alt)     | alternate runway point           |
+| 0     | `PT_NOT_USED`        | empty slot                       |
+| 1     | `PT_RUNWAY`          | runway threshold (takeoff/landing end) |
+| 2     | `PT_TAKEOFF`         | takeoff position (held short of runway) |
+| 3     | `PT_TAXI`            | taxiway node                     |
+| 4     | `PT_SAM`             | SAM site placement               |
+| 5     | `PT_ARTILLERY`       | artillery placement              |
+| 6     | `PT_AAA`             | AAA placement                    |
+| 7     | `PT_RADAR`           | radar placement                  |
+| 8     | `PT_RUNWAY_DIM`      | runway dimensional point (length/width marks) |
+| 9     | `PT_SUPPORT`         | support vehicle placement        |
+| 10    | `PT_STATIC_RADAR`    | static radar (building-sized)    |
+| 11    | `PT_SMALL_PARK`      | small parking spot (fighters)    |
+| 12    | `PT_LARGE_PARK`      | large parking spot (transports/bombers) |
+| 13    | `PT_SMALL_DOCK`      | small dock (small boats)         |
+| 14    | `PT_LARGE_DOCK`      | large dock (capital ships)       |
+| 15    | `PT_TAKE_RUNWAY`     | runway access point (taxiway → runway) |
+| 16    | `PT_HELICOPTER`      | helicopter pad                   |
+| 17    | `PT_FOLLOW_ME`       | follow-me truck rendezvous       |
+| 18    | `PT_TRACK`           | track/path point (ground vehicle routes) |
+| 19    | `PT_CRIT_TAXI`       | critical taxiway intersection    |
 
 ### 3.4 `Falcon4.OCD` — ObjClassDataType
 
-Per objective class. Source: `src/campaign/include/campobj.h` in the FreeFalcon
-tree (the struct is large — ~560 bytes/entry).
+Per objective class. **Verified source**: `src/falclib/include/entity.h:66-79`.
 
-Each record contains:
-- `Name` (char[20]) — objective class name (e.g. `"Airbase"`, `"Port"`,
-  `"Army Base"`)
-- `Domain` (uchar) — air/ground/naval
-- `RadarRange` (RadarRangeClass, 32 bytes) — 8 arcs × detect_ratio float
-- `FeatureEntries` (int) — count of feature slots
-- `Features` (FeatureEntry[]) — feature class index + offset within objective
-- `Priority` (int) — strategic priority (affects AI target selection)
-- `RepairTime`, `RebuildTime` (floats)
-- `SupplyLevel`, `FuelLevel` (ints)
+**Verified on-disk record size**: 54 bytes.
 
-**Naming**: This is **the** source of objective names. Currently
-`objective_type_name()` returns a static `"Objective#N"` string because we
-don't load OCD. Once OCD is parsed, the inspector / canvas should display
-the real name (`"Kunsan AB"`, not `"Objective#9"` — well, the per-instance
-name actually lives in the `.obj` records as `objective_name[]`, but the
-**class** name comes from OCD).
+```
+off 0: Index          (short, 2)   — descriptionIndex pointing back into FALCON4.ct
+off 2: Name[20]       (char[20])   — class name (e.g. "02_20 Airbase 2", "Highway Strip NS",
+                                       "Armybase 1", "Border", "044 Bridge 6", "304 BioWeapons")
+off22: DataRate       (short, 2)   — sort/recovery rate
+off24: DeagDistance   (short, 2)   — distance (m) at which to deaggregate
+off26: PtDataIndex    (short, 2)   — index into PtHeaderDataTable (airbase layout)
+off28: Detection[8]   (uchar[8])   — electronic detection ranges per movement type
+off36: DamageMod[11]  (uchar[11])  — damage modifiers per damage type
+off47: *1 byte pad*                 — MSVC: aligns IconIndex to 2-byte boundary
+off48: IconIndex      (short, 2)   — index into icon sheet
+off50: Features       (uchar, 1)   — # of features in this objective
+off51: RadarFeature   (uchar, 1)   — ID of the radar feature (255 = none)
+off52: FirstFeature   (short, 2)   — index of first FeatureEntry in FED
+```
+
+**Verification**: Real Falcon4.OCD record 1 has name "02_20 Airbase 2",
+features=108, pt_data_index=1, first_feature=1. Record 4 ("Border") has
+radar_feature=255 (no radar). All names parse as clean ASCII. ✓
 
 ### 3.5 `Falcon4.UCD` — UnitClassDataType
 
-Per unit class. Source: `src/campaign/include/campunit.h` in the FreeFalcon
-tree.
+Per unit class. **Verified source**: `src/falclib/include/entity.h:30-54`.
 
-Each record contains:
-- `Name` (char[20]) — unit class name (e.g. `"M1A1 Tank Platoon"`)
-- `Domain` (uchar)
-- `Type` (uchar) — armor/infantry/AAA/SAM/…
-- `VehicleType` (VehicleClassData[] indexed) — what vehicles this unit fields
-- `TotalVehicles` (int) — total vehicles in unit
-- `GroupCounts` (int[16]) — default per-group vehicle count (16 groups max)
-- `Formation` (int) — default formation index
-- `IconImage` (int) — icon index into the icons sheet
+**Verified on-disk record size**: 336 bytes.
 
-**Combines with `roster`** (uint32, 2 bits/group × 16 groups = live per-group
-vehicle count, exposed in EXPOSE-1) to give per-group vehicle type + count at
-runtime.
+```
+off   0: Index                (short, 2)
+off   2: *2 bytes pad*        — MSVC: aligns NumElements to 4-byte boundary
+off   4: NumElements[16]      (int[16], 64)   — per-group vehicle count
+off  68: VehicleType[16]      (short[16], 32) — class-table index per group
+off 100: VehicleClass[16][8]  (uchar[128])    — 8-byte entity class descriptors
+off 228: Flags                (ushort, 2)     — VEH_ capability flags
+off 230: Name[20]             (char[20])      — e.g. "Airlift", "Patrol", "Supply",
+                                                 "Air Defense", "Armored"
+off 250: *2 bytes pad*        — MSVC: aligns MovementType to 4-byte boundary
+off 252: MovementType         (int, 4)        — MoveType enum (1=Foot, 2=Wheeled, 3=Tracked,
+                                                 4=LowAir, 5=Air, 6=Naval, 7=Rail)
+off 256: MovementSpeed        (short, 2)      — cruise speed (kph)
+off 258: MaxRange             (short, 2)      — movement/flight range (km)
+off 260: Fuel                 (long, 4)       — internal fuel (lbs)
+off 264: Rate                 (short, 2)      — fuel usage (lbs/min at cruise)
+off 266: PtDataIndex          (short, 2)      — index into PtHeaderDataTable (formation)
+off 268: Scores[16]           (uchar[16])     — score per mission role
+off 284: Role                 (uchar, 1)      — standard mission role
+off 285: HitChance[8]         (uchar[8])      — best hit chance per movement type
+off 293: Strength[8]          (uchar[8])      — full strength per movement type
+off 301: Range[8]             (uchar[8])      — firing range per movement type
+off 309: Detection[8]         (uchar[8])      — electronic detection ranges
+off 317: DamageMod[11]        (uchar[11])     — damage modifiers per type
+off 328: RadarVehicle         (uchar, 1)      — ID of radar vehicle (group index)
+off 329: *1 byte pad*         — MSVC: aligns SpecialIndex to 2-byte boundary
+off 330: SpecialIndex         (short, 2)      — for squadrons: index to max stores table
+off 332: IconIndex            (short, 2)      — icon index into icons sheet
+off 334: *2 bytes trailing pad* — MSVC: struct size must be multiple of 4
+```
+
+**Verification**: Record 1 has name="Airlift", movement_type=5 (Air),
+movement_speed=999, max_range=400, fuel=30, rate=100, role=20. Record 2 has
+name="Patrol", movement_type=6 (Naval), num_elements=[1,1,0,...],
+vehicle_type=[578,578,0,...]. All sensible. ✓
 
 ### 3.6 `Falcon4.VCD` — VehicleClassDataType
 
-Per vehicle class. Source: `src/campaign/include/vehclas.h` in the FreeFalcon
-tree.
+Per vehicle class. **Verified source**: `src/falclib/include/entity.h:137-167`.
 
-Each record contains:
-- `Name` (char[20])
-- `Domain`, `Type` (uchar)
-- `VehicleID` (int) — index into 3D model table
-- `HitChance` (int) — base to-hit modifier
-- `MaxSpeed`, `MaxRange` (int)
-- `Fuel` (float)
-- `SensorClass` (int) — radar/IR/visual flags
-- `WeaponSlots` (WeaponSlot[]) — count + types of weapons carried
+**Verified on-disk record size**: 160 bytes. **No mid-struct padding** — every
+field is naturally aligned at its current offset.
+
+```
+off   0: Index             (short, 2)
+off   2: HitPoints         (short, 2)
+off   4: Flags             (uint, 4)       — VEH_ flags
+off   8: Name[15]          (char[15])      — e.g. "An-70", "E-3", "M-1A1", "A-10",
+                                              "B-52G", "MiG-29", "C-130", "M-60"
+off  23: NCTR[5]           (char[5])       — NCTR (non-cooperative target recognition) string
+off  28: RCSfactor         (float, 4)      — log2(1 + RCS relative to F-16)
+off  32: MaxWt             (long, 4)       — max loaded weight (lbs)
+off  36: EmptyWt           (long, 4)       — empty weight (lbs)
+off  40: FuelWt            (long, 4)       — max fuel weight (lbs)
+off  44: FuelEcon          (short, 2)      — fuel usage (lbs/min)
+off  46: EngineSound       (short, 2)      — SoundFX sample index
+off  48: HighAlt           (short, 2)      — in hundreds of feet
+off  50: LowAlt            (short, 2)
+off  52: CruiseAlt         (short, 2)
+off  54: MaxSpeed          (short, 2)      — kph
+off  56: RadarType         (short, 2)      — index into RadarDataTable (Falcon4.RCD)
+off  58: NumberOfPilots    (short, 2)      — # of pilots (for eject)
+off  60: RackFlags         (ushort, 2)     — bit per hardpoint: needs a rack?
+off  62: VisibleFlags      (ushort, 2)     — bit per hardpoint: visible?
+off  64: CallsignIndex     (uchar, 1)
+off  65: CallsignSlots     (uchar, 1)
+off  66: HitChance[8]      (uchar[8])      — per-movement-type hit chance
+off  74: Strength[8]       (uchar[8])
+off  82: Range[8]          (uchar[8])
+off  90: Detection[8]      (uchar[8])
+off  98: Weapon[16]        (short[16], 32) — weapon ID per hardpoint (or weapon list ID)
+off 130: Weapons[16]       (uchar[16])     — # of shots per hardpoint (full supply)
+off 146: DamageMod[11]     (uchar[11])     — damage modifiers per type
+off 157: *3 bytes trailing pad* — MSVC: struct size must be multiple of 4
+```
+
+**Verification**: Record 1 has name="An-70", hit_points=150, flags=1105,
+rcs_factor=3.4594. Record 2 has name="E-3", max_wt=325000, empty_wt=170277,
+fuel_wt=155450, fuel_econ=235, max_speed=853, radar_type=18. Record 4 has
+name="A-10", max_wt=50000, max_speed=680. All match real aircraft. ✓
 
 ### 3.7 `Falcon4.FED` / `Falcon4.FCD` — Features
 
-`FED` is the feature class table (names + 3D model index + armor + repair time).
-`FCD` is the per-objective-type feature placement template (which features an
-airbase has, and where). Together they define what gets rendered when an
-objective is deaggregated: runway sections, hangars, fuel tanks, radar
-antennas, etc.
+`FED` (FeatureEntry) is the per-objective-type feature placement table —
+which features an objective has, and where they go (offset from center,
+facing). `FCD` (FeatureClassDataType) is the feature class table — name,
+hit points, repair time, radar type.
+
+**Verified source**: `src/falclib/include/entity.h:56-64` (FeatureEntry),
+`src/falclib/include/entity.h:122-135` (FeatureClassDataType).
+
+**Verified FED record size**: 32 bytes.
+
+```
+off 0: Index      (short, 2)    — entity class index of the feature
+off 2: Flags      (ushort, 2)
+off 4: eClass[8]  (uchar[8])    — 8-byte entity class descriptor
+off12: Value      (uchar, 1)    — % loss in operational status for destruction
+off13: *3 bytes pad*            — MSVC: aligns Offset to 4-byte boundary (vector is 4-aligned)
+off16: Offset.x   (float, 4)    — X offset from objective center (feet)
+off20: Offset.y   (float, 4)    — Y offset from objective center (feet)
+off24: Offset.z   (float, 4)    — Z offset from objective center (feet)
+off28: Facing     (Int16, 2)    — facing angle (degrees)
+off30: *2 bytes trailing pad*   — MSVC: struct size must be multiple of 4
+```
+
+**Verified FCD record size**: 60 bytes.
+
+```
+off 0: Index        (short, 2)   — descriptionIndex pointing here
+off 2: RepairTime   (short, 2)   — seconds to repair from destroyed to operational
+off 4: Priority     (uchar, 1)   — display priority
+off 5: *1 byte pad*               — MSVC: aligns Flags to 2-byte boundary
+off 6: Flags        (ushort, 2)   — FEAT_ flags
+off 8: Name[20]     (char[20])    — e.g. "Bridge", "Bush", "Control Tower", "Fuel Tank",
+                                     "Hangar", "Runway", "Tree", "Barracks", "High rise",
+                                     "Mayday Stadium"
+off28: HitPoints    (short, 2)
+off30: Height       (short, 2)    — height of vehicle ramp (if any)
+off32: Angle        (float, 4)    — angle of vehicle ramp (if any)
+off36: RadarType    (short, 2)    — index into RadarDataTable (Falcon4.RCD)
+off38: Detection[8] (uchar[8])
+off46: DamageMod[11](uchar[11])
+off57: *3 bytes trailing pad*     — MSVC: struct size must be multiple of 4
+```
+
+**Verification**:
+- FED record 2 has index=987, offset=(1368, 152, 0) ft, facing=20°.
+- FED record 3 has index=995, offset=(3193, 2838, 0) ft, facing=20°.
+- FCD record 1 has name="Bridge", repair_time=72, hit_points=500.
+- FCD record 3 has name="Control Tower", repair_time=48, radar_type=32,
+  detection=[0,0,0,0,40,100,0,0] (has radar detection capability).
+All match expected real-world values. ✓
 
 `fstatus[]` (the byte array on each objective, exposed in EXPOSE-1) is a
-2-bit-per-feature damage bitmap indexing into FCD's feature list for that
-objective's type.
+2-bit-per-feature damage bitmap indexing into FED's feature list for that
+objective's class. So FED + `fstatus[]` together give you the live damage
+state of every building/runway/feature on every objective.
 
 ---
 

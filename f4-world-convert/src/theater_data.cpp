@@ -280,22 +280,36 @@ void load_pt_header_data(const std::filesystem::path& base_path,
     out.entries.clear();
     out.entries.reserve(static_cast<std::size_t>(n));
     for (int16_t i = 0; i < n; ++i) {
+        // MSVC layout (default 8-byte alignment):
+        //   off 0: objID       (short, 2)
+        //   off 2: type        (uchar, 1)
+        //   off 3: count       (uchar, 1)
+        //   off 4: features[5] (uchar[5], 5)
+        //   off 9: *1 byte pad* (for 2-byte align of `data`)
+        //   off10: data        (short, 2)
+        //   off12: sinHeading  (float, 4)
+        //   off16: cosHeading  (float, 4)
+        //   off20: first       (short, 2)
+        //   off22: texIdx      (short, 2)
+        //   off24: runwayNum   (char, 1)
+        //   off25: ltrt        (char, 1)
+        //   off26: nextHeader  (short, 2)
+        //   total = 28 bytes (no trailing pad; 28 is already a multiple of 4)
         PtHeaderData e;
         e.obj_id     = c.s16();
         e.type       = c.u8();
         e.count      = c.u8();
-        c.read_bytes(e.features.data(), TD_MAX_FEAT_DEPEND);
-        e.data       = c.s16();
+        c.read_bytes(e.features.data(), TD_MAX_FEAT_DEPEND);  // 5 bytes, cursor at 9
+        c.p += 1;                                                          // skip pad, cursor at 10
+        e.data        = c.s16();
         e.sin_heading = c.f32();
         e.cos_heading = c.f32();
-        e.first      = c.s16();
-        e.tex_idx    = c.s16();
-        e.runway_num = c.s8();
-        e.ltrt       = c.s8();
+        e.first       = c.s16();
+        e.tex_idx     = c.s16();
+        e.runway_num  = c.s8();
+        e.ltrt        = c.s8();
         e.next_header = c.s16();
-        // 1 byte of trailing padding to align struct size to 4 (largest
-        // member is float, so struct size must be a multiple of 4).
-        c.p += 1;
+        // cursor at 28, no trailing pad needed
         out.entries.push_back(std::move(e));
     }
 }
@@ -338,8 +352,38 @@ void load_unit_data(const std::filesystem::path& base_path,
     out.entries.clear();
     out.entries.reserve(static_cast<std::size_t>(n));
     for (int16_t i = 0; i < n; ++i) {
+        // MSVC layout (default 8-byte alignment). Verified against real
+        // Falcon4.UCD bytes — see scripts/parse_snapshot.py.
+        //   off   0: index             (short, 2)
+        //   off   2: *2 bytes pad*     (for 4-byte align of NumElements)
+        //   off   4: num_elements[16]  (int[16], 64)
+        //   off  68: vehicle_type[16]  (short[16], 32)
+        //   off 100: vehicle_class[16][8] (uchar[128], 128)
+        //   off 228: flags             (ushort, 2)
+        //   off 230: name[20]          (char[20], 20)
+        //   off 250: *2 bytes pad*     (for 4-byte align of MovementType)
+        //   off 252: movement_type     (int, 4)
+        //   off 256: movement_speed    (short, 2)
+        //   off 258: max_range         (short, 2)
+        //   off 260: fuel              (long, 4)
+        //   off 264: rate              (short, 2)
+        //   off 266: pt_data_index     (short, 2)
+        //   off 268: scores[16]        (uchar[16], 16)
+        //   off 284: role              (uchar, 1)
+        //   off 285: hit_chance[8]     (uchar[8], 8)
+        //   off 293: strength[8]       (uchar[8], 8)
+        //   off 301: range[8]          (uchar[8], 8)
+        //   off 309: detection[8]      (uchar[8], 8)
+        //   off 317: damage_mod[11]    (uchar[11], 11)
+        //   off 328: radar_vehicle     (uchar, 1)
+        //   off 329: *1 byte pad*      (for 2-byte align of SpecialIndex)
+        //   off 330: special_index     (short, 2)
+        //   off 332: icon_index        (short, 2)
+        //   off 334: *2 bytes trailing pad* (struct size must be multiple of 4)
+        //   total = 336 bytes
         UnitClassData e;
         e.index = c.s16();
+        c.p += 2;  // skip 2 bytes pad
         for (int j = 0; j < TD_VEHICLE_GROUPS_PER_UNIT; ++j) e.num_elements[j] = c.s32();
         for (int j = 0; j < TD_VEHICLE_GROUPS_PER_UNIT; ++j) e.vehicle_type[j] = c.s16();
         for (int j = 0; j < TD_VEHICLE_GROUPS_PER_UNIT; ++j)
@@ -348,7 +392,7 @@ void load_unit_data(const std::filesystem::path& base_path,
         uint8_t name_buf[20];
         c.read_bytes(name_buf, 20);
         e.name = trim_name(name_buf, 20);
-        // MoveType enum is 4 bytes on disk (default enum underlying type = int)
+        c.p += 2;  // skip 2 bytes pad before movement_type (4-byte align)
         e.movement_type = c.s32();
         e.movement_speed = c.s16();
         e.max_range      = c.s16();
@@ -363,8 +407,10 @@ void load_unit_data(const std::filesystem::path& base_path,
         c.read_bytes(e.detection.data(), TD_MOVEMENT_TYPES);
         c.read_bytes(e.damage_mod.data(), TD_OTHER_DAM + 1);
         e.radar_vehicle  = c.u8();
+        c.p += 1;  // skip 1 byte pad before special_index (2-byte align)
         e.special_index  = c.s16();
         e.icon_index     = c.s16();
+        c.p += 2;  // skip 2 bytes trailing pad (struct size to multiple of 4)
         out.entries.push_back(std::move(e));
     }
 }
@@ -382,6 +428,9 @@ void load_vehicle_data(const std::filesystem::path& base_path,
     out.entries.clear();
     out.entries.reserve(static_cast<std::size_t>(n));
     for (int16_t i = 0; i < n; ++i) {
+        // MSVC layout (default 8-byte alignment). NO mid-struct padding —
+        // every field is naturally aligned at its current offset.
+        // Total field bytes = 157, trailing pad = 3 bytes → record size = 160.
         VehicleClassData e;
         e.index            = c.s16();
         e.hit_points       = c.s16();
@@ -415,6 +464,8 @@ void load_vehicle_data(const std::filesystem::path& base_path,
         for (int j = 0; j < TD_HARDPOINT_MAX; ++j) e.weapon[j]  = c.s16();
         for (int j = 0; j < TD_HARDPOINT_MAX; ++j) e.weapons[j] = c.u8();
         c.read_bytes(e.damage_mod.data(), TD_OTHER_DAM + 1);
+        // cursor at 157; skip 3 bytes of trailing pad to reach 160
+        c.p += 3;
         out.entries.push_back(std::move(e));
     }
 }
@@ -432,10 +483,26 @@ void load_feature_data(const std::filesystem::path& base_path,
     out.entries.clear();
     out.entries.reserve(static_cast<std::size_t>(n));
     for (int16_t i = 0; i < n; ++i) {
+        // MSVC layout (default 8-byte alignment):
+        //   off 0: index        (short, 2)
+        //   off 2: repair_time  (short, 2)
+        //   off 4: priority     (uchar, 1)
+        //   off 5: *1 byte pad* (for 2-byte align of Flags)
+        //   off 6: flags        (ushort, 2)
+        //   off 8: name[20]     (char[20], 20)
+        //   off28: hit_points   (short, 2)
+        //   off30: height       (short, 2)
+        //   off32: angle        (float, 4) — 4-byte aligned ✓
+        //   off36: radar_type   (short, 2)
+        //   off38: detection[8] (uchar[8], 8)
+        //   off46: damage_mod[11] (uchar[11], 11) → ends at 57
+        //   off57: *3 bytes trailing pad* (struct size to multiple of 4)
+        //   total = 60 bytes
         FeatureClassData e;
         e.index        = c.s16();
         e.repair_time  = c.s16();
         e.priority     = c.u8();
+        c.p += 1;  // skip 1 byte pad before flags (2-byte align)
         e.flags        = c.u16();
         uint8_t name_buf[20];
         c.read_bytes(name_buf, 20);
@@ -446,6 +513,8 @@ void load_feature_data(const std::filesystem::path& base_path,
         e.radar_type   = c.s16();
         c.read_bytes(e.detection.data(), TD_MOVEMENT_TYPES);
         c.read_bytes(e.damage_mod.data(), TD_OTHER_DAM + 1);
+        // cursor at 57; skip 3 bytes of trailing pad to reach 60
+        c.p += 3;
         out.entries.push_back(std::move(e));
     }
 }
@@ -463,20 +532,30 @@ void load_feature_entry_data(const std::filesystem::path& base_path,
     out.entries.clear();
     out.entries.reserve(static_cast<std::size_t>(n));
     for (int16_t i = 0; i < n; ++i) {
+        // MSVC layout (default 8-byte alignment). Verified against real
+        // Falcon4.FED bytes — see scripts/parse_snapshot.py.
+        //   off 0: index     (short, 2)
+        //   off 2: flags     (ushort, 2)
+        //   off 4: eClass[8] (uchar[8], 8)
+        //   off12: value     (uchar, 1)
+        //   off13: *3 bytes pad* (for 4-byte align of Offset which is a vector)
+        //   off16: offset.x  (float, 4)
+        //   off20: offset.y  (float, 4)
+        //   off24: offset.z  (float, 4)
+        //   off28: facing    (Int16, 2)
+        //   off30: *2 bytes trailing pad* (struct size to multiple of 4)
+        //   total = 32 bytes
         FeatureEntryData e;
         e.index    = c.s16();
         e.flags    = c.u16();
         c.read_bytes(e.e_class.data(), 8);
         e.value    = c.u8();
+        c.p += 3;  // skip 3 bytes pad before Offset (4-byte align of vector)
         e.offset_x = c.f32();
         e.offset_y = c.f32();
         e.offset_z = c.f32();
         e.facing   = c.s16();
-        // The struct's on-disk size is 32 bytes, but the sum of fields is:
-        // 2 + 2 + 8 + 1 + 12 + 2 = 27 bytes. There are 5 bytes of trailing
-        // padding to align the struct size to 4 (the largest member is float,
-        // 4-byte aligned). Skip the padding.
-        c.p += (FED_RECORD_SIZE - 27);
+        c.p += 2;  // skip 2 bytes trailing pad
         out.entries.push_back(std::move(e));
     }
 }

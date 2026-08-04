@@ -81,6 +81,23 @@ std::vector<uint8_t> build_synthetic_ocd(int n_entries) {
 }
 
 // Build a synthetic Falcon4.PHD file with N entries.
+//
+// Layout follows MSVC default 8-byte alignment (verified against real
+// Falcon4.PHD bytes — see scripts/parse_snapshot.py):
+//   off 0: objID       (short, 2)
+//   off 2: type        (uchar, 1)
+//   off 3: count       (uchar, 1)
+//   off 4: features[5] (uchar[5], 5)
+//   off 9: *1 byte pad* (for 2-byte align of `data`)
+//   off10: data        (short, 2)
+//   off12: sinHeading  (float, 4)
+//   off16: cosHeading  (float, 4)
+//   off20: first       (short, 2)
+//   off22: texIdx      (short, 2)
+//   off24: runwayNum   (char, 1)
+//   off25: ltrt        (char, 1)
+//   off26: nextHeader  (short, 2)
+//   total = 28 bytes
 std::vector<uint8_t> build_synthetic_phd(int n_entries) {
     std::vector<uint8_t> buf;
     buf.reserve(2 + static_cast<std::size_t>(n_entries) * f4::world_convert::PHD_RECORD_SIZE);
@@ -99,6 +116,8 @@ std::vector<uint8_t> build_synthetic_phd(int n_entries) {
         buf.push_back(static_cast<uint8_t>(i + 2));
         // features[5] (uchar[5])
         for (int j = 0; j < 5; ++j) buf.push_back(static_cast<uint8_t>(j));
+        // *** 1 byte of padding (MSVC: aligns `data` to 2-byte boundary) ***
+        buf.push_back(0);
         // data (int16) — heading
         const int16_t heading = static_cast<int16_t>(i * 10);
         buf.push_back(static_cast<uint8_t>(heading & 0xFF));
@@ -127,9 +146,7 @@ std::vector<uint8_t> build_synthetic_phd(int n_entries) {
         const int16_t next = (i + 1 < n_entries) ? static_cast<int16_t>(i + 1) : 0;
         buf.push_back(static_cast<uint8_t>(next & 0xFF));
         buf.push_back(static_cast<uint8_t>((next >> 8) & 0xFF));
-        // 1 byte of trailing padding to align struct size to 4 (largest
-        // member is float, so struct size must be a multiple of 4).
-        buf.push_back(0);
+        // NO trailing pad — 28 is already a multiple of 4
     }
     return buf;
 }
@@ -605,4 +622,431 @@ TEST(TheaterData, WorldJsonEmitsGroundLayoutForAirbases) {
     EXPECT_NE(json.find("\"Parking\""), std::string::npos);
 
     std::filesystem::remove_all(dir);
+}
+
+// ============================================================================
+// REAL-FIXTURE TESTS
+//
+// These tests load the actual binary fixture files extracted from a real
+// Falcon 4 installation (see scripts/extract_fixtures.py). They assert
+// specific known values that were verified against the FreeFalcon source
+// code struct definitions and the snapshot dump.
+//
+// If any of these tests fail, the parser is reading the wrong bytes —
+// most likely a missing MSVC padding skip was reintroduced.
+// ============================================================================
+
+TEST(TheaterDataRealFixtures, PhdParsesRealSnapshotData) {
+    // Fixture: 8 records from a real Falcon4.PHD (first 8 of 297).
+    // Recorded known values (verified by scripts/parse_snapshot.py):
+    //   [0]: null entry (obj_id=0, all zero except cos_heading=1.0)
+    //   [1]: obj_id=1, type=1 (Runway), count=22, data=20 (heading 20°),
+    //        sin=0.342, cos=0.940, first=1, tex_idx=2, runway_num=0,
+    //        ltrt=-1, next_header=2
+    //   [2]: obj_id=1, type=1, count=21, data=200 (heading 200°),
+    //        sin=-0.342, cos=-0.940, first=23, next_header=3
+    const std::string path = std::string(FIXTURE_DIR) + "Falcon4.PHD";
+    ASSERT_TRUE(std::filesystem::exists(path)) << "Missing fixture: " << path;
+
+    f4::world_convert::PtHeaderTable tbl;
+    ASSERT_NO_THROW(f4::world_convert::load_pt_header_data(path, tbl));
+    ASSERT_EQ(tbl.size(), 8);
+
+    // Entry 0: null entry
+    const auto* e0 = tbl.at(0);
+    ASSERT_NE(e0, nullptr);
+    EXPECT_EQ(e0->obj_id, 0);
+    EXPECT_EQ(e0->type, 0);
+    EXPECT_EQ(e0->count, 0);
+    EXPECT_FLOAT_EQ(e0->sin_heading, 0.0f);
+    EXPECT_FLOAT_EQ(e0->cos_heading, 1.0f);
+
+    // Entry 1: runway list for airbase 1, heading 20°
+    const auto* e1 = tbl.at(1);
+    ASSERT_NE(e1, nullptr);
+    EXPECT_EQ(e1->obj_id, 1);
+    EXPECT_EQ(e1->type, 1);                       // PT_RUNWAY list
+    EXPECT_EQ(e1->count, 22);
+    EXPECT_EQ(e1->data, 20);                      // heading = 20 degrees
+    EXPECT_NEAR(e1->sin_heading, 0.3420201539993286f, 1e-6f);  // sin(20°)
+    EXPECT_NEAR(e1->cos_heading, 0.9396926164627075f, 1e-6f);  // cos(20°)
+    EXPECT_EQ(e1->first, 1);
+    EXPECT_EQ(e1->tex_idx, 2);
+    EXPECT_EQ(e1->runway_num, 0);
+    EXPECT_EQ(e1->ltrt, -1);
+    EXPECT_EQ(e1->next_header, 2);
+
+    // Entry 2: runway list for airbase 1, heading 200° (opposite direction)
+    const auto* e2 = tbl.at(2);
+    ASSERT_NE(e2, nullptr);
+    EXPECT_EQ(e2->obj_id, 1);
+    EXPECT_EQ(e2->type, 1);
+    EXPECT_EQ(e2->count, 21);
+    EXPECT_EQ(e2->data, 200);                     // heading = 200 degrees
+    EXPECT_NEAR(e2->sin_heading, -0.3420201539993286f, 1e-6f); // sin(200°) = -sin(20°)
+    EXPECT_NEAR(e2->cos_heading, -0.9396926164627075f, 1e-6f); // cos(200°) = -cos(20°)
+    EXPECT_EQ(e2->first, 23);
+    EXPECT_EQ(e2->next_header, 3);
+}
+
+TEST(TheaterDataRealFixtures, PdParsesRealSnapshotData) {
+    // Fixture: 60 records from a real Falcon4.PD (first 60 of 3690).
+    // Entry 1 is the first runway point: x=2699 ft, y=2956 ft, type=1 (Runway)
+    const std::string path = std::string(FIXTURE_DIR) + "Falcon4.PD";
+    ASSERT_TRUE(std::filesystem::exists(path)) << "Missing fixture: " << path;
+
+    f4::world_convert::PtDataTable tbl;
+    ASSERT_NO_THROW(f4::world_convert::load_pt_data(path, tbl));
+    ASSERT_EQ(tbl.size(), 60);
+
+    // Entry 0: null point
+    const auto* e0 = tbl.at(0);
+    ASSERT_NE(e0, nullptr);
+    EXPECT_FLOAT_EQ(e0->x_offset, 0.0f);
+    EXPECT_FLOAT_EQ(e0->y_offset, 0.0f);
+    EXPECT_EQ(e0->type, 0);
+
+    // Entry 1: first runway point
+    const auto* e1 = tbl.at(1);
+    ASSERT_NE(e1, nullptr);
+    EXPECT_FLOAT_EQ(e1->x_offset, 2699.0f);
+    EXPECT_FLOAT_EQ(e1->y_offset, 2956.0f);
+    EXPECT_EQ(e1->type, 1);                       // PT_RUNWAY
+    EXPECT_EQ(e1->flags, 1);                      // PT_FIRST
+
+    // Entry 3: take-runway point
+    const auto* e3 = tbl.at(3);
+    ASSERT_NE(e3, nullptr);
+    EXPECT_FLOAT_EQ(e3->x_offset, 305.0f);
+    EXPECT_FLOAT_EQ(e3->y_offset, -3637.0f);
+    EXPECT_EQ(e3->type, 15);                      // PT_TAKE_RUNWAY
+}
+
+TEST(TheaterDataRealFixtures, OcdParsesRealSnapshotData) {
+    // Fixture: 12 records from a real Falcon4.OCD (first 12 of 667).
+    // Recorded known values:
+    //   [1]: index=125, name="02_20 Airbase 2", features=108, pt_data_index=1
+    //   [2]: index=126, name="Highway Strip NS", features=13
+    //   [3]: index=127, name="Armybase 1", features=11
+    //   [4]: index=128, name="Border", features=1, radar_feature=255
+    const std::string path = std::string(FIXTURE_DIR) + "Falcon4.OCD";
+    ASSERT_TRUE(std::filesystem::exists(path)) << "Missing fixture: " << path;
+
+    f4::world_convert::ObjectiveClassTable tbl;
+    ASSERT_NO_THROW(f4::world_convert::load_objective_data(path, tbl));
+    ASSERT_EQ(tbl.size(), 12);
+
+    const auto* e1 = tbl.at(1);
+    ASSERT_NE(e1, nullptr);
+    EXPECT_EQ(e1->index, 125);
+    EXPECT_EQ(e1->name, "02_20 Airbase 2");
+    EXPECT_EQ(e1->features, 108);
+    EXPECT_EQ(e1->pt_data_index, 1);
+    EXPECT_EQ(e1->deag_distance, 70);
+    EXPECT_EQ(e1->data_rate, 2);
+    EXPECT_EQ(e1->first_feature, 1);
+
+    const auto* e2 = tbl.at(2);
+    ASSERT_NE(e2, nullptr);
+    EXPECT_EQ(e2->name, "Highway Strip NS");
+    EXPECT_EQ(e2->features, 13);
+    EXPECT_EQ(e2->pt_data_index, 9);
+    EXPECT_EQ(e2->deag_distance, 50);
+
+    const auto* e3 = tbl.at(3);
+    ASSERT_NE(e3, nullptr);
+    EXPECT_EQ(e3->name, "Armybase 1");
+    EXPECT_EQ(e3->features, 11);
+    EXPECT_EQ(e3->pt_data_index, 14);
+
+    const auto* e4 = tbl.at(4);
+    ASSERT_NE(e4, nullptr);
+    EXPECT_EQ(e4->name, "Border");
+    EXPECT_EQ(e4->features, 1);
+    EXPECT_EQ(e4->radar_feature, 255);  // 0xFF = no radar feature
+}
+
+TEST(TheaterDataRealFixtures, UcdParsesRealSnapshotData) {
+    // Fixture: 8 records from a real Falcon4.UCD (first 8 of 296).
+    // Recorded known values:
+    //   [1]: index=332, name="Airlift", movement_type=5 (Air),
+    //        movement_speed=999, max_range=400, fuel=30, rate=100, role=20
+    //   [2]: index=828, name="Patrol", movement_type=6 (Naval),
+    //        movement_speed=45, max_range=100, num_elements=[1,1,0,...],
+    //        vehicle_type=[578,578,0,...]
+    //   [4]: index=78, name="Supply", movement_type=2 (Wheeled),
+    //        movement_speed=60, num_elements=[3,3,3,3,0,...]
+    const std::string path = std::string(FIXTURE_DIR) + "Falcon4.UCD";
+    ASSERT_TRUE(std::filesystem::exists(path)) << "Missing fixture: " << path;
+
+    f4::world_convert::UnitClassTable tbl;
+    ASSERT_NO_THROW(f4::world_convert::load_unit_data(path, tbl));
+    ASSERT_EQ(tbl.size(), 8);
+
+    const auto* e1 = tbl.at(1);
+    ASSERT_NE(e1, nullptr);
+    EXPECT_EQ(e1->index, 332);
+    EXPECT_EQ(e1->name, "Airlift");
+    EXPECT_EQ(e1->movement_type, 5);              // Air
+    EXPECT_EQ(e1->movement_speed, 999);
+    EXPECT_EQ(e1->max_range, 400);
+    EXPECT_EQ(e1->fuel, 30);
+    EXPECT_EQ(e1->rate, 100);
+    EXPECT_EQ(e1->role, 20);
+
+    const auto* e2 = tbl.at(2);
+    ASSERT_NE(e2, nullptr);
+    EXPECT_EQ(e2->index, 828);
+    EXPECT_EQ(e2->name, "Patrol");
+    EXPECT_EQ(e2->movement_type, 6);              // Naval
+    EXPECT_EQ(e2->movement_speed, 45);
+    EXPECT_EQ(e2->max_range, 100);
+    ASSERT_EQ(e2->num_elements.size(), 16u);
+    EXPECT_EQ(e2->num_elements[0], 1);
+    EXPECT_EQ(e2->num_elements[1], 1);
+    EXPECT_EQ(e2->num_elements[2], 0);
+    ASSERT_EQ(e2->vehicle_type.size(), 16u);
+    EXPECT_EQ(e2->vehicle_type[0], 578);
+    EXPECT_EQ(e2->vehicle_type[1], 578);
+    EXPECT_EQ(e2->vehicle_type[2], 0);
+
+    const auto* e4 = tbl.at(4);
+    ASSERT_NE(e4, nullptr);
+    EXPECT_EQ(e4->index, 78);
+    EXPECT_EQ(e4->name, "Supply");
+    EXPECT_EQ(e4->movement_type, 2);              // Wheeled
+    EXPECT_EQ(e4->movement_speed, 60);
+    EXPECT_EQ(e4->num_elements[0], 3);
+    EXPECT_EQ(e4->num_elements[1], 3);
+    EXPECT_EQ(e4->num_elements[2], 3);
+    EXPECT_EQ(e4->num_elements[3], 3);
+    EXPECT_EQ(e4->num_elements[4], 0);
+}
+
+TEST(TheaterDataRealFixtures, VcdParsesRealSnapshotData) {
+    // Fixture: 12 records from a real Falcon4.VCD (first 12 of 285).
+    // Recorded known values:
+    //   [1]: index=213, name="An-70", hit_points=150, flags=1105,
+    //        rcs_factor=3.4594, number_of_pilots=3, engine_sound=16
+    //   [2]: index=221, name="E-3", hit_points=150, flags=66641,
+    //        max_wt=325000, empty_wt=170277, fuel_wt=155450, fuel_econ=235,
+    //        max_speed=853, radar_type=18, number_of_pilots=6
+    //   [3]: index=2, name="M-1A1", hit_points=300, flags=7260,
+    //        max_speed=60, number_of_pilots=3
+    //   [4]: index=179, name="A-10", hit_points=200, flags=1041,
+    //        max_wt=50000, empty_wt=24959, fuel_wt=3400, fuel_econ=31,
+    //        max_speed=680, number_of_pilots=1
+    const std::string path = std::string(FIXTURE_DIR) + "Falcon4.VCD";
+    ASSERT_TRUE(std::filesystem::exists(path)) << "Missing fixture: " << path;
+
+    f4::world_convert::VehicleClassTable tbl;
+    ASSERT_NO_THROW(f4::world_convert::load_vehicle_data(path, tbl));
+    ASSERT_EQ(tbl.size(), 12);
+
+    const auto* e1 = tbl.at(1);
+    ASSERT_NE(e1, nullptr);
+    EXPECT_EQ(e1->index, 213);
+    EXPECT_EQ(e1->name, "An-70");
+    EXPECT_EQ(e1->hit_points, 150);
+    EXPECT_EQ(e1->flags, 1105u);
+    EXPECT_NEAR(e1->rcs_factor, 3.4594316482543945f, 1e-6f);
+    EXPECT_EQ(e1->engine_sound, 16);
+    EXPECT_EQ(e1->high_alt, 300);
+    EXPECT_EQ(e1->low_alt, 300);
+    EXPECT_EQ(e1->cruise_alt, 200);
+    EXPECT_EQ(e1->number_of_pilots, 3);
+
+    const auto* e2 = tbl.at(2);
+    ASSERT_NE(e2, nullptr);
+    EXPECT_EQ(e2->index, 221);
+    EXPECT_EQ(e2->name, "E-3");
+    EXPECT_EQ(e2->hit_points, 150);
+    EXPECT_EQ(e2->flags, 66641u);
+    EXPECT_EQ(e2->max_wt, 325000);
+    EXPECT_EQ(e2->empty_wt, 170277);
+    EXPECT_EQ(e2->fuel_wt, 155450);
+    EXPECT_EQ(e2->fuel_econ, 235);
+    EXPECT_EQ(e2->max_speed, 853);
+    EXPECT_EQ(e2->radar_type, 18);
+    EXPECT_EQ(e2->number_of_pilots, 6);
+    EXPECT_EQ(e2->callsign_index, 44);
+    EXPECT_EQ(e2->callsign_slots, 2);
+
+    const auto* e3 = tbl.at(3);
+    ASSERT_NE(e3, nullptr);
+    EXPECT_EQ(e3->index, 2);
+    EXPECT_EQ(e3->name, "M-1A1");
+    EXPECT_EQ(e3->hit_points, 300);
+    EXPECT_EQ(e3->flags, 7260u);
+    EXPECT_EQ(e3->max_speed, 60);
+    EXPECT_EQ(e3->number_of_pilots, 3);
+    // M-1A1 has weapons on hardpoints 0-3
+    ASSERT_EQ(e3->weapon.size(), 16u);
+    EXPECT_EQ(e3->weapon[0], 57);
+    EXPECT_EQ(e3->weapon[1], 28);
+    EXPECT_EQ(e3->weapon[2], 95);
+    EXPECT_EQ(e3->weapon[3], 86);
+    EXPECT_EQ(e3->weapon[4], 0);
+    ASSERT_EQ(e3->weapons.size(), 16u);
+    EXPECT_EQ(e3->weapons[0], 75);
+    EXPECT_EQ(e3->weapons[1], 75);
+    EXPECT_EQ(e3->weapons[2], 50);
+    EXPECT_EQ(e3->weapons[3], 10);
+
+    const auto* e4 = tbl.at(4);
+    ASSERT_NE(e4, nullptr);
+    EXPECT_EQ(e4->index, 179);
+    EXPECT_EQ(e4->name, "A-10");
+    EXPECT_EQ(e4->hit_points, 200);
+    EXPECT_EQ(e4->flags, 1041u);
+    EXPECT_EQ(e4->max_wt, 50000);
+    EXPECT_EQ(e4->empty_wt, 24959);
+    EXPECT_EQ(e4->fuel_wt, 3400);
+    EXPECT_EQ(e4->fuel_econ, 31);
+    EXPECT_EQ(e4->max_speed, 680);
+    EXPECT_EQ(e4->number_of_pilots, 1);
+    EXPECT_EQ(e4->rack_flags, 4030);
+    EXPECT_EQ(e4->visible_flags, 4030);
+}
+
+TEST(TheaterDataRealFixtures, FedParsesRealSnapshotData) {
+    // Fixture: 40 records from a real Falcon4.FED (first 40 of 7592).
+    // Recorded known values:
+    //   [1]: index=1918, e_class=[3,2,46,11,255,255,255,255], offsets=0,0,0
+    //   [2]: index=987, e_class=[3,2,30,3,...], offset=(1368, 152, 0), facing=20
+    //   [3]: index=995, offset=(3193, 2838, 0), facing=20
+    //   [4]: index=996, offset=(736, -3917, 0), facing=20
+    const std::string path = std::string(FIXTURE_DIR) + "Falcon4.FED";
+    ASSERT_TRUE(std::filesystem::exists(path)) << "Missing fixture: " << path;
+
+    f4::world_convert::FeatureEntryTable tbl;
+    ASSERT_NO_THROW(f4::world_convert::load_feature_entry_data(path, tbl));
+    ASSERT_EQ(tbl.size(), 40);
+
+    const auto* e1 = tbl.at(1);
+    ASSERT_NE(e1, nullptr);
+    EXPECT_EQ(e1->index, 1918);
+    EXPECT_EQ(e1->flags, 0);
+    ASSERT_EQ(e1->e_class.size(), 8u);
+    EXPECT_EQ(e1->e_class[0], 3);
+    EXPECT_EQ(e1->e_class[1], 2);
+    EXPECT_EQ(e1->e_class[2], 46);
+    EXPECT_EQ(e1->e_class[3], 11);
+    EXPECT_EQ(e1->e_class[4], 255);
+    EXPECT_FLOAT_EQ(e1->offset_x, 0.0f);
+    EXPECT_FLOAT_EQ(e1->offset_y, 0.0f);
+    EXPECT_FLOAT_EQ(e1->offset_z, 0.0f);
+    EXPECT_EQ(e1->facing, 0);
+
+    const auto* e2 = tbl.at(2);
+    ASSERT_NE(e2, nullptr);
+    EXPECT_EQ(e2->index, 987);
+    EXPECT_EQ(e2->e_class[2], 30);
+    EXPECT_EQ(e2->e_class[3], 3);
+    EXPECT_FLOAT_EQ(e2->offset_x, 1368.0f);
+    EXPECT_FLOAT_EQ(e2->offset_y, 152.0f);
+    EXPECT_FLOAT_EQ(e2->offset_z, 0.0f);
+    EXPECT_EQ(e2->facing, 20);
+
+    const auto* e3 = tbl.at(3);
+    ASSERT_NE(e3, nullptr);
+    EXPECT_EQ(e3->index, 995);
+    EXPECT_FLOAT_EQ(e3->offset_x, 3193.0f);
+    EXPECT_FLOAT_EQ(e3->offset_y, 2838.0f);
+    EXPECT_FLOAT_EQ(e3->offset_z, 0.0f);
+    EXPECT_EQ(e3->facing, 20);
+
+    const auto* e4 = tbl.at(4);
+    ASSERT_NE(e4, nullptr);
+    EXPECT_EQ(e4->index, 996);
+    EXPECT_FLOAT_EQ(e4->offset_x, 736.0f);
+    EXPECT_FLOAT_EQ(e4->offset_y, -3917.0f);
+    EXPECT_FLOAT_EQ(e4->offset_z, 0.0f);
+    EXPECT_EQ(e4->facing, 20);
+}
+
+TEST(TheaterDataRealFixtures, FcdParsesRealSnapshotData) {
+    // Fixture: 12 records from a real Falcon4.FCD (first 12 of 593).
+    // Recorded known values:
+    //   [1]: index=151, name="Bridge", repair_time=72, flags=517, hit_points=500
+    //   [2]: index=155, name="Bush", repair_time=720, priority=3, flags=2049,
+    //        hit_points=5
+    //   [3]: index=150, name="Control Tower", repair_time=48, priority=1,
+    //        flags=6145, hit_points=250, radar_type=32
+    //   [4]: index=152, name="Fuel Tank", repair_time=96, hit_points=200
+    const std::string path = std::string(FIXTURE_DIR) + "Falcon4.FCD";
+    ASSERT_TRUE(std::filesystem::exists(path)) << "Missing fixture: " << path;
+
+    f4::world_convert::FeatureClassTable tbl;
+    ASSERT_NO_THROW(f4::world_convert::load_feature_data(path, tbl));
+    ASSERT_EQ(tbl.size(), 12);
+
+    const auto* e1 = tbl.at(1);
+    ASSERT_NE(e1, nullptr);
+    EXPECT_EQ(e1->index, 151);
+    EXPECT_EQ(e1->name, "Bridge");
+    EXPECT_EQ(e1->repair_time, 72);
+    EXPECT_EQ(e1->priority, 0);
+    EXPECT_EQ(e1->flags, 517);
+    EXPECT_EQ(e1->hit_points, 500);
+    EXPECT_EQ(e1->radar_type, 0);
+
+    const auto* e2 = tbl.at(2);
+    ASSERT_NE(e2, nullptr);
+    EXPECT_EQ(e2->index, 155);
+    EXPECT_EQ(e2->name, "Bush");
+    EXPECT_EQ(e2->repair_time, 720);
+    EXPECT_EQ(e2->priority, 3);
+    EXPECT_EQ(e2->flags, 2049);
+    EXPECT_EQ(e2->hit_points, 5);
+
+    const auto* e3 = tbl.at(3);
+    ASSERT_NE(e3, nullptr);
+    EXPECT_EQ(e3->index, 150);
+    EXPECT_EQ(e3->name, "Control Tower");
+    EXPECT_EQ(e3->repair_time, 48);
+    EXPECT_EQ(e3->priority, 1);
+    EXPECT_EQ(e3->flags, 6145);
+    EXPECT_EQ(e3->hit_points, 250);
+    EXPECT_EQ(e3->radar_type, 32);
+    // Control Tower has electronic detection capability
+    EXPECT_EQ(e3->detection[4], 40);
+    EXPECT_EQ(e3->detection[5], 100);
+
+    const auto* e4 = tbl.at(4);
+    ASSERT_NE(e4, nullptr);
+    EXPECT_EQ(e4->index, 152);
+    EXPECT_EQ(e4->name, "Fuel Tank");
+    EXPECT_EQ(e4->repair_time, 96);
+    EXPECT_EQ(e4->hit_points, 200);
+}
+
+TEST(TheaterDataRealFixtures, LoadAllFromRealFixtures) {
+    // Load all 7 theater-data files from the fixtures directory.
+    // Each fixture is a real (truncated) Falcon4 file extracted via
+    // scripts/extract_fixtures.py. The TheaterObjectDatabase::load_all
+    // should silently skip any that don't exist (we ship all 7).
+    const std::string dir = std::string(FIXTURE_DIR);
+
+    f4::world_convert::TheaterObjectDatabase db;
+    EXPECT_NO_THROW(db.load_all(dir));
+    EXPECT_TRUE(db.loaded());
+
+    // All 7 tables should be loaded (we ship all 7 fixtures).
+    EXPECT_TRUE(db.objectives.loaded());
+    EXPECT_TRUE(db.pt_headers.loaded());
+    EXPECT_TRUE(db.pt_data.loaded());
+    EXPECT_TRUE(db.units.loaded());
+    EXPECT_TRUE(db.vehicles.loaded());
+    EXPECT_TRUE(db.features.loaded());
+    EXPECT_TRUE(db.feature_entries.loaded());
+
+    // Verify expected counts match what extract_fixtures.py wrote.
+    EXPECT_EQ(db.objectives.size(),      12u);
+    EXPECT_EQ(db.pt_headers.size(),       8u);
+    EXPECT_EQ(db.pt_data.size(),         60u);
+    EXPECT_EQ(db.units.size(),            8u);
+    EXPECT_EQ(db.vehicles.size(),        12u);
+    EXPECT_EQ(db.features.size(),        12u);
+    EXPECT_EQ(db.feature_entries.size(), 40u);
 }
