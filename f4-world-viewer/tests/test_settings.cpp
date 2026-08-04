@@ -18,6 +18,27 @@
 
 using namespace f4::viewer;
 
+// Compatabiliet for MSVC++: setenv() and unsetenv() are POSIX, not Windows. We implement
+inline int setenv(const char* name, const char* value, int overwrite) {
+    if (!overwrite) {
+        // Check if variable exists (optional logic depending on desired behavior)
+        if (getenv(name)) return 0; // Or return error if overwrite is false
+    }
+#ifdef _WIN32
+    return _putenv_s(name, value);
+#else
+    return ::setenv(name, value, overwrite);
+#endif
+}
+
+inline void unsetenv(const char* name) {
+#ifdef _WIN32
+    _putenv_s(name, nullptr);
+#else
+    ::unsetenv(name);
+#endif
+}
+
 // ===========================================================================
 // JSON round-trip — the workhorse tests
 // ===========================================================================
