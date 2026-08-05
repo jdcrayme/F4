@@ -32,7 +32,6 @@
 #pragma once
 
 #include <f4/entities/types.hpp>     // for f4::entities::UnitClass
-#include <f4/world/world_state.hpp>
 
 #include <cstdint>
 

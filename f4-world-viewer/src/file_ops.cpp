@@ -20,6 +20,7 @@
 #include <f4/world_convert/cam_archive.hpp>
 #include <f4/world_convert/class_table.hpp>
 #include <f4/world_convert/world_json.hpp>
+#include <f4/world/detail/world_state.hpp>
 
 #include <filesystem>
 #include <fstream>
@@ -29,8 +30,8 @@
 namespace f4::viewer {
 
 void ViewerApp::load_terrain_json(const std::filesystem::path& path) {
-    impl_->world.terrain.load_terrain_json(path);
-    impl_->world.terrain_loaded = true;
+    impl_->terrain.load_terrain_json(path);
+    impl_->terrain_loaded = true;
     impl_->last_terrain_json_path = path;
     impl_->status_msg = "Loaded terrain: " + path.string();
     // POLISH-2.1: invalidate the terrain RenderTexture cache so the
@@ -41,14 +42,42 @@ void ViewerApp::load_terrain_json(const std::filesystem::path& path) {
 }
 
 void ViewerApp::load_world_json(const std::filesystem::path& path) {
-    impl_->world.load(path);
+    // Load WorldState from JSON, then populate EntityWorld via the ECS bridge.
+    f4::world::WorldState ws;
+    ws.load(path);
+
+    // Extract metadata before populating (we need these even if pop fails).
+    impl_->theater_name = ws.theater;
+    impl_->world_version = ws.version;
+    impl_->terrain_file_ref = ws.terrain_file;
+
+    // If the WorldState already has terrain loaded, transfer it.
+    if (ws.terrain_loaded) {
+        impl_->terrain = std::move(ws.terrain);
+        impl_->terrain_loaded = true;
+    }
+
+    // Populate EntityWorld from WorldState via the ECS bridge.
+    impl_->eworld = f4::entities::EntityWorld();  // clear previous
+    impl_->pop = f4::world::populate_world(impl_->eworld, ws);
+
+    // Build team_by_slot mapping: slot index → team EntityId.
+    impl_->team_by_slot.clear();
+    impl_->team_by_slot.resize(8);  // 8 team slots max
+    for (const auto& tid : impl_->pop.teams) {
+        auto h = f4::entities::EntityHandle(tid, &impl_->eworld);
+        auto* cid = h.get<f4::entities::CampaignIdentityComponent>();
+        if (cid && cid->team_id >= 0 && cid->team_id < 8) {
+            impl_->team_by_slot[static_cast<size_t>(cid->team_id)] = tid;
+        }
+    }
+
     impl_->world_loaded = true;
     impl_->world_path_display = path.string();
     impl_->last_world_json_path = path;
     impl_->status_msg = "Loaded world: " + path.string() +
-        "  (" + std::to_string(impl_->world.objectives.size()) + " objectives, " +
-        std::to_string(impl_->world.units.size()) + " units)";
-    impl_->rebuild_objective_index();
+        "  (" + std::to_string(impl_->pop.objectives.size()) + " objectives, " +
+        std::to_string(impl_->pop.units.size()) + " units)";
 
     // Try to auto-load the referenced terrain file — but only if terrain
     // isn't already loaded. This prevents a spurious "auto-load failed"
@@ -56,10 +85,12 @@ void ViewerApp::load_world_json(const std::filesystem::path& path) {
     // before calling us: the world JSON's terrain_file field is relative
     // to the .cam's directory (e.g. "terrain.json"), and that path may
     // not resolve correctly from CWD.
-    if (!impl_->world.terrain_file.empty() && !impl_->world.terrain_loaded) {
+    if (!impl_->terrain_file_ref.empty() && !impl_->terrain_loaded) {
         try {
-            impl_->world.load_terrain();
-            impl_->status_msg += "  + terrain: " + impl_->world.terrain_file;
+            impl_->terrain.load_terrain_json(
+                std::filesystem::path(path.parent_path()) / impl_->terrain_file_ref);
+            impl_->terrain_loaded = true;
+            impl_->status_msg += "  + terrain: " + impl_->terrain_file_ref;
         } catch (const std::exception& e) {
             impl_->last_error = "Auto-load terrain failed: " + std::string(e.what());
         }

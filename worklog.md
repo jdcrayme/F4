@@ -1271,3 +1271,26 @@ Stage Summary:
     f4-world-viewer/include/f4/viewer/viewer_app.hpp (draw_inspector decl)
     f4-world-viewer/CMakeLists.txt             (add inspector_panel.cpp)
 - Patch file: /home/z/my-project/download/f4-polish-1-and-2.patch
+
+---
+Task ID: ECS-PHASE4-FINAL
+Agent: main (continuation)
+Task: Complete Phase 4 of ECS Decoupling Plan — Step 4a (WorldState → detail header) and verify Step 4c (viewer migration)
+
+Work Log:
+- Verified viewer migration to EntityWorld was already done by previous session (viewer_state.hpp, canvas.cpp, inspector_panel.cpp, etc. all updated)
+- Moved world_state.hpp from include/f4/world/ to include/f4/world/detail/world_state.hpp
+- Updated all includes: world_loader.hpp, world_state.cpp, file_ops.cpp
+- Updated f4_world.hpp umbrella to NOT include world_state.hpp by default
+- Added detail/ header comment explaining WorldState is now an implementation detail
+- Deleted old public world_state.hpp
+- Updated ECS_DECOUPLING_PLAN.md status to "Complete — Phases 1–4 all done"
+- Rebuilt project (without viewer — X11" dev headers unavailable in CI env)
+- All 917+ tests pass across 15 libraries
+
+Stage Summary:
+- WorldState is now a private implementation detail (detail/world_state.hpp)
+- The public API of f4-world exposes only: load(), load_from_string(), populate_*(), IDataSource interfaces, PopulatedWorld
+- The viewer uses EntityWorld exclusively for rendering (no WorldState in viewer_state.hpp)
+- WorldState is only included explicitly by: world_loader.hpp (adapters), world_state.cpp (loader), file_ops.cpp (terrain metadata)
+- All 4 phases of the ECS Decoupling Plan are complete

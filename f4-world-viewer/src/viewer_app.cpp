@@ -118,7 +118,7 @@ void ViewerApp::run() {
         }
         if (IsKeyPressed(KEY_ESCAPE) && !ImGui::GetIO().WantCaptureKeyboard) {
             impl_->sel_kind = Impl::SelectionKind::None;
-            impl_->sel_index = -1;
+            impl_->sel_entity = f4::entities::EntityId{};
         }
 
         BeginDrawing();

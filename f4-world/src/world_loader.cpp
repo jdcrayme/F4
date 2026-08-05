@@ -1,12 +1,18 @@
-// f4-world/src/world_loader.cpp — populate f4-entities from WorldState.
+// f4-world/src/world_loader.cpp — populate f4-entities from data sources.
 //
 // Phase 1: populate_teams adds TeamComponent (with .tea enrichment data) and
 // a narrowed CampaignIdentityComponent (team_id + callsign only).
 //
 // Phase 3: populate_objectives, populate_units, populate_campaign, populate_world
-// bridge all entity types. This is the ONLY place where WorldState's format-
-// derived fields (VU_ID, nameid, obj_flags) are resolved into domain
-// components. Consumers work through EntityWorld, never WorldState directly.
+// bridge all entity types via WorldState.
+//
+// Phase 4: Interface-based bridge overloads accept ICampaignSource, ITeamSource,
+// IObjectiveSource, IUnitSource. These are the PRIMARY implementations.
+// The monolithic WorldStateAdapter has been replaced by four separate adapters
+// (CampaignAdapter, TeamAdapter, ObjectiveAdapter, UnitAdapter) to eliminate
+// name collisions between IObjectiveSource and IUnitSource. WorldState-based
+// functions are thin convenience wrappers that create a WorldStateAdapters
+// bundle and delegate. load()/load_from_string() hide WorldState entirely.
 
 #include <f4/world/world_loader.hpp>
 #include <f4/geo/constants.hpp>
@@ -42,64 +48,72 @@ static const char* domain_name(uint8_t domain) {
 }
 
 // ============================================================================
-// populate_campaign
+// populate_campaign — interface-based (Phase 4 primary)
 // ============================================================================
-EntityId populate_campaign(EntityWorld& world, const WorldState& ws) {
+EntityId populate_campaign(EntityWorld& world, const ICampaignSource& src) {
     auto h = world.create();
     h.set_tag(tags::ROLE, TagValue::from(std::string("campaign")));
     h.set_tag(tags::ALIVE, TagValue::from(true));
 
     auto& cs = h.add<CampaignStateComponent>();
-    cs.current_time       = ws.campaign.current_time;
-    cs.te_start_time      = ws.campaign.te_start_time;
-    cs.te_time_limit      = ws.campaign.te_time_limit;
-    cs.te_victory_points  = ws.campaign.te_victory_points;
-    cs.te_type            = ws.campaign.te_type;
-    cs.te_number_teams    = ws.campaign.te_number_teams;
-    cs.te_team            = ws.campaign.te_team;
-    cs.te_flags           = ws.campaign.te_flags;
-    cs.te_number_aircraft = ws.campaign.te_number_aircraft;
-    cs.te_team_pts        = ws.campaign.te_team_pts;
+    cs.current_time       = src.current_time();
+    cs.te_start_time      = src.te_start_time();
+    cs.te_time_limit      = src.te_time_limit();
+    cs.te_victory_points  = src.te_victory_points();
+    cs.te_type            = src.te_type();
+    cs.te_number_teams    = src.te_number_teams();
+    cs.te_team            = src.te_team();
+    cs.te_flags           = src.te_flags();
+    cs.te_number_aircraft = src.te_number_aircraft();
+    cs.te_team_pts        = src.te_team_pts();
 
     return h.id();
 }
 
 // ============================================================================
-// populate_teams (Phase 1 — unchanged, just reformatted)
+// populate_campaign — WorldState convenience wrapper
 // ============================================================================
-std::vector<EntityId> populate_teams(EntityWorld& world, const WorldState& ws) {
+EntityId populate_campaign(EntityWorld& world, const WorldState& ws) {
+    CampaignAdapter adapter(ws);
+    return populate_campaign(world, static_cast<const ICampaignSource&>(adapter));
+}
+
+// ============================================================================
+// populate_teams — interface-based (Phase 4 primary)
+// ============================================================================
+std::vector<EntityId> populate_teams(EntityWorld& world, const ITeamSource& src) {
     std::vector<EntityId> ids;
-    for (const auto& t : ws.teams) {
-        // Slot 0 with an empty or placeholder name is the neutral/unused slot.
-        if (t.name.empty()) continue;
+    for (int i = 0; i < src.team_count(); ++i) {
+        // Skip slots with empty names (neutral/unused).
+        if (src.name(i).empty()) continue;
 
         auto h = world.create();
         h.set_tag(tags::ROLE, TagValue::from(std::string("team")));
-        h.set_tag(tags::TEAM, TagValue::from(t.name));
+        h.set_tag(tags::TEAM, TagValue::from(src.name(i)));
         h.set_tag(tags::ALIVE, TagValue::from(true));
 
         // Narrowed CampaignIdentityComponent — only team_id + callsign.
         auto& cid = h.add<CampaignIdentityComponent>();
-        cid.team_id = t.slot;
-        cid.callsign = t.name;
+        cid.team_id = src.slot(i);
+        cid.callsign = src.name(i);
 
         // TeamComponent — carries all team-specific data including .tea
         // enrichment (stance, member, experience, pilot slots).
         auto& tc = h.add<TeamComponent>();
-        tc.slot = t.slot;
-        tc.flags = t.flags;
-        tc.colour = t.colour;
-        tc.motto = t.motto;
-        tc.stance = t.stance;
-        tc.member = t.member;
-        tc.air_experience = t.air_experience;
-        tc.ground_experience = t.ground_experience;
-        tc.naval_experience = t.naval_experience;
-        tc.air_defense_experience = t.air_defense_experience;
-        tc.first_colonel = t.first_colonel;
-        tc.first_commander = t.first_commander;
-        tc.first_wingman = t.first_wingman;
-        tc.last_wingman = t.last_wingman;
+        tc.slot = src.slot(i);
+        tc.flags = src.flags(i);
+        tc.colour = src.colour(i);
+        tc.motto = src.motto(i);
+        tc.stance = src.stance(i);
+        tc.member = src.member(i);
+        tc.air_experience = src.air_experience(i);
+        tc.ground_experience = src.ground_experience(i);
+        tc.naval_experience = src.naval_experience(i);
+        tc.air_defense_experience = src.air_defense_experience(i);
+        tc.first_colonel = src.first_colonel(i);
+        tc.first_commander = src.first_commander(i);
+        tc.first_wingman = src.first_wingman(i);
+        tc.last_wingman = src.last_wingman(i);
 
         ids.push_back(h.id());
     }
@@ -107,194 +121,216 @@ std::vector<EntityId> populate_teams(EntityWorld& world, const WorldState& ws) {
 }
 
 // ============================================================================
-// populate_objectives (Phase 3)
+// populate_teams — WorldState convenience wrapper
+// ============================================================================
+std::vector<EntityId> populate_teams(EntityWorld& world, const WorldState& ws) {
+    TeamAdapter adapter(ws);
+    return populate_teams(world, static_cast<const ITeamSource&>(adapter));
+}
+
+// ============================================================================
+// populate_objectives — interface-based (Phase 4 primary)
+// ============================================================================
+std::vector<EntityId> populate_objectives(
+    EntityWorld& world,
+    const IObjectiveSource& src,
+    std::unordered_map<uint32_t, EntityId>& obj_id_map)
+{
+    std::vector<EntityId> ids;
+    ids.reserve(static_cast<size_t>(src.objective_count()));
+
+    for (int i = 0; i < src.objective_count(); ++i) {
+        auto h = world.create();
+
+        // --- Tags ---
+        h.set_tag(tags::ROLE, TagValue::from(std::string("objective")));
+        h.set_tag(tags::TEAM, TagValue::from(static_cast<int64_t>(src.owner(i))));
+        h.set_tag(tags::ALIVE, TagValue::from(true));
+
+        // --- Transform (grid → feet) ---
+        auto& tf = h.add<TransformComponent>();
+        tf.position = grid_to_feet(src.x(i), src.y(i), src.z(i));
+
+        // --- Always-present objective components ---
+        auto& ot = h.add<ObjectiveTypeComponent>();
+        ot.type = src.type(i);
+        ot.class_table_index = static_cast<int16_t>(src.entity_type(i));
+        ot.class_name = src.class_name(i);
+
+        auto& own = h.add<OwnershipComponent>();
+        own.team = src.owner(i);
+        own.first_owner = src.first_owner(i);
+
+        auto& pri = h.add<ObjectivePriorityComponent>();
+        pri.priority = src.priority(i);
+        pri.nameid = src.nameid(i);
+        pri.obj_flags = src.obj_flags(i);
+        pri.parent_id = src.parent_id(i);
+
+        // --- Conditional components ---
+
+        // Supply/fuel/losses — add when supply data is present
+        if (src.has_supply(i)) {
+            auto& sup = h.add<SupplyStateComponent>();
+            sup.supply = src.supply(i);
+            sup.fuel = src.fuel(i);
+            sup.losses = src.losses(i);
+            sup.last_repair = src.last_repair(i);
+        }
+
+        // Damage bitmap — add when features have damage data
+        if (src.has_fstatus(i)) {
+            auto& dmg = h.add<DamageBitmapComponent>();
+            dmg.fstatus = src.fstatus(i);
+        }
+
+        // Radar — only when the objective has radar
+        if (src.has_radar(i)) {
+            auto& rad = h.add<RadarComponent>();
+            const float* dr = src.detect_ratio(i);
+            if (dr) {
+                for (int j = 0; j < 8; ++j) rad.detect_ratio[j] = dr[j];
+            }
+            rad.range_km = src.radar_range_km(i);
+            rad.name = src.radar_name(i);
+            rad.radar_type_idx = src.radar_type_idx(i);
+        }
+
+        // Network links — when the objective has road/rail connections
+        if (src.has_links(i)) {
+            auto& nl = h.add<NetworkLinksComponent>();
+            nl.links = src.links(i);
+        }
+
+        // Ground layout — when the objective is an airbase with layout data
+        if (src.has_ground_layout(i)) {
+            auto& gl = h.add<GroundLayoutComponent>();
+            gl.layouts = src.ground_layout(i);
+        }
+
+        // Feature set — when the objective has features (buildings, structures)
+        if (src.has_features(i)) {
+            auto& fs = h.add<FeatureSetComponent>();
+            fs.features_count = src.features_count(i);
+            fs.radar_feature = src.radar_feature(i);
+            fs.deag_distance = src.deag_distance(i);
+            fs.pt_data_index = src.pt_data_index(i);
+            fs.objective_detection = src.objective_detection(i);
+            fs.features = src.features(i);
+        }
+
+        // --- PropertyBag for format residue ---
+        {
+            auto& pb = h.add<PropertyBag>();
+            pb.ints["vu_id_creator"] = static_cast<int64_t>(src.id_creator(i));
+            pb.ints["vu_id_num"]     = static_cast<int64_t>(src.id_num(i));
+            pb.ints["entity_type"]   = static_cast<int64_t>(src.entity_type(i));
+            pb.ints["camp_id"]       = static_cast<int64_t>(src.camp_id(i));
+            pb.ints["objective_type"]= static_cast<int64_t>(src.objective_type(i));
+        }
+
+        // Build VU_ID→EntityId map for cross-reference resolution
+        if (src.id_num(i) != 0) {
+            obj_id_map[src.id_num(i)] = h.id();
+        }
+
+        ids.push_back(h.id());
+    }
+    return ids;
+}
+
+// ============================================================================
+// populate_objectives — WorldState convenience wrapper
 // ============================================================================
 std::vector<EntityId> populate_objectives(
     EntityWorld& world,
     const WorldState& ws,
     std::unordered_map<uint32_t, EntityId>& obj_id_map)
 {
-    std::vector<EntityId> ids;
-    ids.reserve(ws.objectives.size());
-
-    for (const auto& o : ws.objectives) {
-        auto h = world.create();
-
-        // --- Tags ---
-        h.set_tag(tags::ROLE, TagValue::from(std::string("objective")));
-        // Owner as a team tag: 0=neutral, 1=enemy, 2=friendly, etc.
-        h.set_tag(tags::TEAM, TagValue::from(static_cast<int64_t>(o.owner)));
-        h.set_tag(tags::ALIVE, TagValue::from(true));
-
-        // --- Transform (grid → feet) ---
-        auto& tf = h.add<TransformComponent>();
-        tf.position = grid_to_feet(o.x, o.y, o.z);
-
-        // --- Always-present objective components ---
-        auto& ot = h.add<ObjectiveTypeComponent>();
-        ot.type = o.type;
-        ot.class_table_index = static_cast<int16_t>(o.entity_type);
-        ot.class_name = o.class_name;
-
-        auto& own = h.add<OwnershipComponent>();
-        own.team = o.owner;
-        own.first_owner = o.first_owner;
-
-        auto& pri = h.add<ObjectivePriorityComponent>();
-        pri.priority = o.priority;
-        pri.nameid = o.nameid;
-        pri.obj_flags = o.obj_flags;
-        pri.parent_id = o.parent_id;
-
-        // --- Conditional components ---
-
-        // Supply/fuel/losses — add when any supply data is non-default
-        if (o.supply != 0 || o.fuel != 0 || o.losses != 0 || o.last_repair != 0) {
-            auto& sup = h.add<SupplyStateComponent>();
-            sup.supply = o.supply;
-            sup.fuel = o.fuel;
-            sup.losses = o.losses;
-            sup.last_repair = o.last_repair;
-        }
-
-        // Damage bitmap — add when features have damage data
-        if (!o.fstatus.empty()) {
-            auto& dmg = h.add<DamageBitmapComponent>();
-            dmg.fstatus = o.fstatus;
-        }
-
-        // Radar — only when the objective has radar
-        if (o.has_radar) {
-            auto& rad = h.add<RadarComponent>();
-            for (int i = 0; i < 8; ++i) rad.detect_ratio[i] = o.detect_ratio[i];
-            rad.range_km = o.radar_range_km;
-            rad.name = o.radar_name;
-            rad.radar_type_idx = o.radar_type_idx;
-        }
-
-        // Network links — when the objective has road/rail connections
-        if (!o.links.empty()) {
-            auto& nl = h.add<NetworkLinksComponent>();
-            nl.links = o.links;
-        }
-
-        // Ground layout — when the objective is an airbase with layout data
-        if (!o.ground_layout.empty()) {
-            auto& gl = h.add<GroundLayoutComponent>();
-            gl.layouts = o.ground_layout;
-        }
-
-        // Feature set — when the objective has features (buildings, structures)
-        if (o.features_count > 0 || !o.features.empty()) {
-            auto& fs = h.add<FeatureSetComponent>();
-            fs.features_count = o.features_count;
-            fs.radar_feature = o.radar_feature;
-            fs.deag_distance = o.deag_distance;
-            fs.pt_data_index = o.pt_data_index;
-            fs.objective_detection = o.objective_detection;
-            fs.features = o.features;
-        }
-
-        // --- PropertyBag for format residue ---
-        // VU_ID, entity_type, obj_flags are format concepts that don't belong
-        // in domain components. They go into PropertyBag so systems that need
-        // them (e.g. save-file round-trip) can access them, but they don't
-        // pollute the domain model.
-        {
-            auto& pb = h.add<PropertyBag>();
-            pb.ints["vu_id_creator"] = static_cast<int64_t>(o.id_creator);
-            pb.ints["vu_id_num"]     = static_cast<int64_t>(o.id_num);
-            pb.ints["entity_type"]   = static_cast<int64_t>(o.entity_type);
-            pb.ints["camp_id"]       = static_cast<int64_t>(o.camp_id);
-        }
-
-        // Build VU_ID→EntityId map for cross-reference resolution
-        if (o.id_num != 0) {
-            obj_id_map[o.id_num] = h.id();
-        }
-
-        ids.push_back(h.id());
-    }
-    return ids;
+    ObjectiveAdapter adapter(ws);
+    return populate_objectives(world,
+                               static_cast<const IObjectiveSource&>(adapter),
+                               obj_id_map);
 }
 
 // ============================================================================
-// populate_units (Phase 3)
+// populate_units — interface-based (Phase 4 primary)
 // ============================================================================
 std::vector<EntityId> populate_units(
     EntityWorld& world,
-    const WorldState& ws,
+    const IUnitSource& src,
     const std::unordered_map<uint32_t, EntityId>& obj_id_map,
     std::unordered_map<uint32_t, EntityId>& unit_id_map)
 {
     std::vector<EntityId> ids;
-    ids.reserve(ws.units.size());
+    ids.reserve(static_cast<size_t>(src.unit_count()));
 
-    for (const auto& u : ws.units) {
+    // --- First pass: create all unit entities ---
+    for (int i = 0; i < src.unit_count(); ++i) {
         auto h = world.create();
 
         // --- Tags ---
-        h.set_tag(tags::ROLE, TagValue::from(std::string(unit_class_name(u.unit_class))));
-        h.set_tag(tags::TEAM, TagValue::from(static_cast<int64_t>(u.owner)));
-        h.set_tag(tags::OPDOMAIN, TagValue::from(std::string(domain_name(u.domain))));
+        h.set_tag(tags::ROLE, TagValue::from(std::string(unit_class_name(src.unit_class(i)))));
+        h.set_tag(tags::TEAM, TagValue::from(static_cast<int64_t>(src.owner(i))));
+        h.set_tag(tags::OPDOMAIN, TagValue::from(std::string(domain_name(src.domain(i)))));
         h.set_tag(tags::ALIVE, TagValue::from(true));
 
         // --- Transform (grid → feet) ---
         auto& tf = h.add<TransformComponent>();
-        tf.position = grid_to_feet(u.x, u.y, u.z);
+        tf.position = grid_to_feet(src.x(i), src.y(i), src.z(i));
 
         // --- UnitCoreComponent (all units) ---
         auto& uc = h.add<UnitCoreComponent>();
-        uc.unit_class = u.unit_class;
-        uc.domain = u.domain;
-        uc.unit_subtype = u.unit_subtype;
-        uc.class_table_index = static_cast<int16_t>(u.entity_type);
-        uc.roster = u.roster;
-        uc.class_name = u.class_name;
+        uc.unit_class = src.unit_class(i);
+        uc.domain = src.domain(i);
+        uc.unit_subtype = src.unit_subtype(i);
+        uc.class_table_index = static_cast<int16_t>(src.entity_type(i));
+        uc.roster = src.roster(i);
+        uc.class_name = src.class_name(i);
 
         // --- Subclass-specific components ---
-        switch (u.unit_class) {
+        switch (src.unit_class(i)) {
             case UnitClass::Battalion:
             case UnitClass::Brigade:
             case UnitClass::TaskForce: {
                 // Ground tactical state
                 auto& gt = h.add<GroundTacticalComponent>();
-                gt.supply = u.supply;
-                gt.morale = u.morale;
-                gt.fatigue = u.fatigue;
-                gt.heading = u.heading;
-                gt.final_heading = u.final_heading;
-                gt.position = u.position;
-                gt.last_move = u.last_move;
-                gt.last_combat = u.last_combat;
+                gt.supply = src.supply(i);
+                gt.morale = src.morale(i);
+                gt.fatigue = src.fatigue(i);
+                gt.heading = src.heading(i);
+                gt.final_heading = src.final_heading(i);
+                gt.position = src.position(i);
+                gt.last_move = src.last_move(i);
+                gt.last_combat = src.last_combat(i);
 
                 // Hierarchy — Battalion has parent brigade, Brigade has child battalions
-                if (u.parent_id != 0 || !u.element_ids.empty()) {
+                if (src.parent_id(i) != 0 || !src.element_ids(i).empty()) {
                     auto& hier = h.add<HierarchyComponent>();
-                    hier.parent_id = u.parent_id;
-                    hier.element_ids = u.element_ids;
+                    hier.parent_id = src.parent_id(i);
+                    hier.element_ids = src.element_ids(i);
                 }
                 break;
             }
             case UnitClass::Squadron: {
                 auto& sq = h.add<SquadronComponent>();
-                sq.airbase_id = u.airbase_id;
-                sq.specialty = u.specialty;
-                sq.aa_kills = u.aa_kills;
-                sq.ag_kills = u.ag_kills;
-                sq.as_kills = u.as_kills;
-                sq.an_kills = u.an_kills;
-                sq.missions_flown = u.missions_flown;
-                sq.mission_score = u.mission_score;
-                sq.total_losses = u.total_losses;
-                sq.pilot_losses = u.pilot_losses;
-                sq.squadron_patch = u.squadron_patch;
-                sq.fuel = u.fuel;
-                sq.pilots = u.pilots;
+                sq.airbase_id = src.airbase_id(i);
+                sq.specialty = src.specialty(i);
+                sq.aa_kills = src.aa_kills(i);
+                sq.ag_kills = src.ag_kills(i);
+                sq.as_kills = src.as_kills(i);
+                sq.an_kills = src.an_kills(i);
+                sq.missions_flown = src.missions_flown(i);
+                sq.mission_score = src.mission_score(i);
+                sq.total_losses = src.total_losses(i);
+                sq.pilot_losses = src.pilot_losses(i);
+                sq.squadron_patch = src.squadron_patch(i);
+                sq.fuel = src.fuel(i);
+                sq.pilots = src.pilots(i);
 
                 // Resolve Squadron→airbase cross-reference
-                if (u.airbase_id != 0) {
-                    auto it = obj_id_map.find(u.airbase_id);
+                if (src.airbase_id(i) != 0) {
+                    auto it = obj_id_map.find(src.airbase_id(i));
                     if (it != obj_id_map.end()) {
                         sq.airbase = it->second;
                     }
@@ -303,31 +339,31 @@ std::vector<EntityId> populate_units(
             }
             case UnitClass::Flight: {
                 auto& fp = h.add<FlightPlanComponent>();
-                fp.altitude = u.flight_altitude;
-                fp.fuel_burnt = u.fuel_burnt;
-                fp.time_on_target = u.time_on_target;
-                fp.mission_over_time = u.mission_over_time;
-                fp.mission_target = u.mission_target;
-                fp.loadouts = u.loadouts;
-                fp.mission = u.mission;
-                fp.flight_priority = u.flight_priority;
-                fp.mission_id = u.mission_id;
-                fp.eval_flags = u.eval_flags;
-                fp.callsign_id = u.callsign_id;
-                fp.callsign_num = u.callsign_num;
+                fp.altitude = src.flight_altitude(i);
+                fp.fuel_burnt = src.fuel_burnt(i);
+                fp.time_on_target = src.time_on_target(i);
+                fp.mission_over_time = src.mission_over_time(i);
+                fp.mission_target = src.mission_target(i);
+                fp.loadouts = src.loadouts(i);
+                fp.mission = src.mission(i);
+                fp.flight_priority = src.flight_priority(i);
+                fp.mission_id = src.mission_id(i);
+                fp.eval_flags = src.eval_flags(i);
+                fp.callsign_id = src.callsign_id(i);
+                fp.callsign_num = src.callsign_num(i);
                 // VU_ID cross-references — resolved in second pass
-                fp.package_id = u.package_id;
-                fp.squadron_id = u.squadron_id;
+                fp.package_id = src.package_id(i);
+                fp.squadron_id = src.squadron_id(i);
                 break;
             }
             case UnitClass::Package: {
                 auto& ps = h.add<PackageSupportComponent>();
-                ps.wait_cycles = u.wait_cycles;
-                ps.interceptor_id = u.interceptor_id;
-                ps.awacs_id = u.awacs_id;
-                ps.jstar_id = u.jstar_id;
-                ps.ecm_id = u.ecm_id;
-                ps.tanker_id = u.tanker_id;
+                ps.wait_cycles = src.wait_cycles(i);
+                ps.interceptor_id = src.interceptor_id(i);
+                ps.awacs_id = src.awacs_id(i);
+                ps.jstar_id = src.jstar_id(i);
+                ps.ecm_id = src.ecm_id(i);
+                ps.tanker_id = src.tanker_id(i);
                 break;
             }
             default:
@@ -337,57 +373,65 @@ std::vector<EntityId> populate_units(
         // --- Conditional components ---
 
         // Waypoint plan — when the unit has waypoints
-        if (!u.waypoints.empty()) {
+        if (src.has_waypoints(i)) {
             auto& wp = h.add<WaypointPlanComponent>();
-            wp.waypoints = u.waypoints;
+            wp.waypoints = src.waypoints(i);
         }
 
         // Vehicle composition — when the unit has vehicle groups
-        if (!u.vehicle_groups.empty()) {
+        if (src.has_vehicle_groups(i)) {
             auto& vc = h.add<VehicleCompositionComponent>();
-            vc.groups = u.vehicle_groups;
+            vc.groups = src.vehicle_groups(i);
         }
 
         // Unit class scores — when any score is non-zero
         {
+            const auto& scores = src.unit_class_scores(i);
             bool has_scores = false;
-            for (auto s : u.unit_class_scores) {
+            for (auto s : scores) {
                 if (s != 0) { has_scores = true; break; }
             }
             if (has_scores) {
                 auto& ucs = h.add<UnitClassScoreComponent>();
-                ucs.scores = u.unit_class_scores;
+                ucs.scores = scores;
             }
         }
 
         // --- PropertyBag for format residue ---
         {
             auto& pb = h.add<PropertyBag>();
-            pb.ints["vu_id_creator"] = static_cast<int64_t>(u.id_creator);
-            pb.ints["vu_id_num"]     = static_cast<int64_t>(u.id_num);
-            pb.ints["entity_type"]   = static_cast<int64_t>(u.entity_type);
-            pb.ints["camp_id"]       = static_cast<int64_t>(u.camp_id);
-            pb.ints["name_id"]       = static_cast<int64_t>(u.name_id);
-            pb.ints["reinforcement"] = static_cast<int64_t>(u.reinforcement);
-            pb.ints["dest_x"]        = static_cast<int64_t>(u.dest_x);
-            pb.ints["dest_y"]        = static_cast<int64_t>(u.dest_y);
-            if (u.movement_type != 0) {
-                pb.ints["movement_type"] = static_cast<int64_t>(u.movement_type);
+            pb.ints["vu_id_creator"] = static_cast<int64_t>(src.id_creator(i));
+            pb.ints["vu_id_num"]     = static_cast<int64_t>(src.id_num(i));
+            pb.ints["entity_type"]   = static_cast<int64_t>(src.entity_type(i));
+            pb.ints["camp_id"]       = static_cast<int64_t>(src.camp_id(i));
+            pb.ints["name_id"]       = static_cast<int64_t>(src.name_id(i));
+            pb.ints["reinforcement"] = static_cast<int64_t>(src.reinforcement(i));
+            pb.ints["dest_x"]        = static_cast<int64_t>(src.dest_x(i));
+            pb.ints["dest_y"]        = static_cast<int64_t>(src.dest_y(i));
+            pb.ints["losses"]        = static_cast<int64_t>(src.losses(i));
+            pb.ints["wp_count"]      = static_cast<int64_t>(src.wp_count(i));
+            // Store elements count for Brigade/Package
+            if (src.unit_class(i) == UnitClass::Brigade ||
+                src.unit_class(i) == UnitClass::Package) {
+                pb.ints["elements"] = static_cast<int64_t>(src.element_ids(i).size());
             }
-            if (u.movement_speed != 0) {
-                pb.ints["movement_speed"] = static_cast<int64_t>(u.movement_speed);
+            if (src.movement_type(i) != 0) {
+                pb.ints["movement_type"] = static_cast<int64_t>(src.movement_type(i));
             }
-            if (u.max_range != 0) {
-                pb.ints["max_range"] = static_cast<int64_t>(u.max_range);
+            if (src.movement_speed(i) != 0) {
+                pb.ints["movement_speed"] = static_cast<int64_t>(src.movement_speed(i));
             }
-            if (!u.movement_type_name.empty()) {
-                pb.strings["movement_type_name"] = u.movement_type_name;
+            if (src.max_range(i) != 0) {
+                pb.ints["max_range"] = static_cast<int64_t>(src.max_range(i));
+            }
+            if (!src.movement_type_name(i).empty()) {
+                pb.strings["movement_type_name"] = src.movement_type_name(i);
             }
         }
 
         // Build VU_ID→EntityId map
-        if (u.id_num != 0) {
-            unit_id_map[u.id_num] = h.id();
+        if (src.id_num(i) != 0) {
+            unit_id_map[src.id_num(i)] = h.id();
         }
 
         ids.push_back(h.id());
@@ -396,11 +440,10 @@ std::vector<EntityId> populate_units(
     // --- Second pass: resolve unit→unit cross-references ---
     // Now that all units have EntityIds, resolve Flight→Package, Flight→Squadron,
     // Battalion→Brigade, and Package support flights.
-    for (size_t i = 0; i < ws.units.size(); ++i) {
-        const auto& u = ws.units[i];
-        EntityHandle h(ids[i], &world);
+    for (int i = 0; i < src.unit_count(); ++i) {
+        EntityHandle h(ids[static_cast<size_t>(i)], &world);
 
-        switch (u.unit_class) {
+        switch (src.unit_class(i)) {
             case UnitClass::Battalion:
             case UnitClass::Brigade: {
                 // Resolve hierarchy parent (battalion→brigade)
@@ -479,17 +522,84 @@ std::vector<EntityId> populate_units(
 }
 
 // ============================================================================
-// populate_world (Phase 3 — orchestrator)
+// populate_units — WorldState convenience wrapper
 // ============================================================================
-PopulatedWorld populate_world(EntityWorld& world, const WorldState& ws) {
+std::vector<EntityId> populate_units(
+    EntityWorld& world,
+    const WorldState& ws,
+    const std::unordered_map<uint32_t, EntityId>& obj_id_map,
+    std::unordered_map<uint32_t, EntityId>& unit_id_map)
+{
+    UnitAdapter adapter(ws);
+    return populate_units(world,
+                          static_cast<const IUnitSource&>(adapter),
+                          obj_id_map,
+                          unit_id_map);
+}
+
+// ============================================================================
+// populate_world — interface-based (Phase 4 primary)
+// ============================================================================
+PopulatedWorld populate_world(EntityWorld& world,
+                              const ICampaignSource& camp_src,
+                              const ITeamSource& team_src,
+                              const IObjectiveSource& obj_src,
+                              const IUnitSource& unit_src)
+{
     PopulatedWorld pw;
 
-    pw.campaign = populate_campaign(world, ws);
-    pw.teams    = populate_teams(world, ws);
-    pw.objectives = populate_objectives(world, ws, pw.objective_id_map);
-    pw.units    = populate_units(world, ws, pw.objective_id_map, pw.unit_id_map);
+    pw.campaign   = populate_campaign(world, camp_src);
+    pw.teams      = populate_teams(world, team_src);
+    pw.objectives = populate_objectives(world, obj_src, pw.objective_id_map);
+    pw.units      = populate_units(world, unit_src, pw.objective_id_map, pw.unit_id_map);
 
     return pw;
+}
+
+// ============================================================================
+// populate_world — WorldState convenience wrapper
+// ============================================================================
+PopulatedWorld populate_world(EntityWorld& world, const WorldState& ws) {
+    WorldStateAdapters adapters(ws);
+    return populate_world(world,
+                          static_cast<const ICampaignSource&>(adapters.campaign),
+                          static_cast<const ITeamSource&>(adapters.teams),
+                          static_cast<const IObjectiveSource&>(adapters.objectives),
+                          static_cast<const IUnitSource&>(adapters.units));
+}
+
+// ============================================================================
+// Convenience API — load from file
+// ============================================================================
+PopulatedWorld load(const std::filesystem::path& json_path,
+                    EntityWorld& world)
+{
+    WorldState ws;
+    ws.load(json_path);
+
+    WorldStateAdapters adapters(ws);
+    return populate_world(world,
+                          static_cast<const ICampaignSource&>(adapters.campaign),
+                          static_cast<const ITeamSource&>(adapters.teams),
+                          static_cast<const IObjectiveSource&>(adapters.objectives),
+                          static_cast<const IUnitSource&>(adapters.units));
+}
+
+// ============================================================================
+// Convenience API — load from string
+// ============================================================================
+PopulatedWorld load_from_string(const std::string& json,
+                                EntityWorld& world)
+{
+    WorldState ws;
+    ws.load_from_string(json);
+
+    WorldStateAdapters adapters(ws);
+    return populate_world(world,
+                          static_cast<const ICampaignSource&>(adapters.campaign),
+                          static_cast<const ITeamSource&>(adapters.teams),
+                          static_cast<const IObjectiveSource&>(adapters.objectives),
+                          static_cast<const IUnitSource&>(adapters.units));
 }
 
 } // namespace f4::world

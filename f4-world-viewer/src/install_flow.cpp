@@ -216,12 +216,12 @@ void ViewerApp::load_campaign_from_install(const std::string& theater_key,
     // f4-terrain's loader expects a path.
     const auto terrain_json = theater->dir / "terrain.json";
     f4::terrain_convert::convert_terrain_dir(theater->dir, terrain_json, theater_key);
-    impl_->world.terrain.load_terrain_json(terrain_json);
-    impl_->world.terrain_loaded = true;
+    impl_->terrain.load_terrain_json(terrain_json);
+    impl_->terrain_loaded = true;
     impl_->last_terrain_json_path = terrain_json;
     impl_->status_msg = "Terrain: " + theater_key + " (" +
-        std::to_string(impl_->world.terrain.header.width) + "x" +
-        std::to_string(impl_->world.terrain.header.height) + ")";
+        std::to_string(impl_->terrain.header.width) + "x" +
+        std::to_string(impl_->terrain.header.height) + ")";
 
     // Step 2: convert .cam → world JSON using the install's class table.
     // Use the install-aware resolver — finds FALCON4.ct automatically.

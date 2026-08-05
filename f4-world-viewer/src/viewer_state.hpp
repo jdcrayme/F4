@@ -32,9 +32,10 @@
 #include <f4/viewer/hex_inspector.hpp>
 #include <f4/viewer/settings.hpp>
 
+#include <f4/entities/entity.hpp>
 #include <f4/install/installation.hpp>
 #include <f4/terrain/terrain_data.hpp>
-#include <f4/world/world_state.hpp>
+#include <f4/world/world_loader.hpp>
 
 #include <raylib.h>
 
@@ -133,10 +134,19 @@ struct ViewerApp::Impl {
     // and units owned by this team are drawn (others are dimmed).
     uint8_t team_filter = 0xFF;
 
-    // Data
-    f4::world::WorldState world;
+    // Data — EntityWorld (populated from WorldState via the ECS bridge)
+    f4::entities::EntityWorld eworld;
+    f4::world::PopulatedWorld pop;
+    f4::terrain::TerrainData terrain;
+    bool terrain_loaded = false;
+    std::string theater_name;       // from WorldState.theater
+    int world_version = 0;          // from WorldState.version
+    std::string terrain_file_ref;   // from WorldState.terrain_file
     bool world_loaded = false;
     std::string world_path_display;
+    /// Team entity IDs indexed by team slot (0..7). Built when a world
+    /// is loaded so we can resolve owner slot → team entity quickly.
+    std::vector<f4::entities::EntityId> team_by_slot;
 
     // POLISH-2.1: RenderTexture terrain cache. The naive draw loop called
     // DrawRectangleRec once per terrain cell — 128×128 = 16,384 calls per
@@ -169,10 +179,61 @@ struct ViewerApp::Impl {
     /// draw_canvas() re-renders it.
     void invalidate_terrain_cache();
 
-    // Selection
+    // Selection — now uses EntityId instead of (kind, index)
     enum class SelectionKind { None, Objective, Unit };
     SelectionKind sel_kind = SelectionKind::None;
-    int sel_index = -1;          // index into world.objectives / world.units
+    f4::entities::EntityId sel_entity;  // valid when sel_kind != None
+
+    // --- ECS access helpers (inline) ---
+    /// Create an EntityHandle for a given EntityId in our EntityWorld.
+    f4::entities::EntityHandle handle(f4::entities::EntityId id) const {
+        return f4::entities::EntityHandle(id,
+            const_cast<f4::entities::EntityWorld*>(&eworld));
+    }
+    /// Get the grid X coordinate from a TransformComponent (feet → grid).
+    static float grid_x(const f4::entities::TransformComponent* tr) {
+        return tr ? static_cast<float>(tr->position.x / 1024.0) : 0.0f;
+    }
+    /// Get the grid Y coordinate from a TransformComponent (feet → grid).
+    static float grid_y(const f4::entities::TransformComponent* tr) {
+        return tr ? static_cast<float>(tr->position.y / 1024.0) : 0.0f;
+    }
+    /// Get objective_type from PropertyBag (0 if absent).
+    static uint8_t obj_type_from_pb(const f4::entities::PropertyBag* pb) {
+        if (pb) {
+            auto it = pb->ints.find("objective_type");
+            if (it != pb->ints.end()) return static_cast<uint8_t>(it->second);
+        }
+        return 0;
+    }
+    /// Get an int from PropertyBag, with default.
+    static int64_t pb_int(const f4::entities::PropertyBag* pb,
+                          const std::string& key, int64_t def = 0) {
+        if (pb) {
+            auto it = pb->ints.find(key);
+            if (it != pb->ints.end()) return it->second;
+        }
+        return def;
+    }
+    /// Get a string from PropertyBag.
+    static const std::string& pb_str(const f4::entities::PropertyBag* pb,
+                                      const std::string& key) {
+        if (pb) {
+            auto it = pb->strings.find(key);
+            if (it != pb->strings.end()) return it->second;
+        }
+        static const std::string empty;
+        return empty;
+    }
+    /// Resolve a team name by owner slot index.
+    const char* team_name_for_slot(uint8_t owner) const {
+        if (owner < team_by_slot.size()) {
+            auto h = handle(team_by_slot[owner]);
+            auto* cid = h.get<f4::entities::CampaignIdentityComponent>();
+            if (cid && !cid->callsign.empty()) return cid->callsign.c_str();
+        }
+        return "(empty)";
+    }
 
     // Layer toggles
     bool show_terrain = true;
@@ -276,20 +337,8 @@ struct ViewerApp::Impl {
     double screenshot_at = 0.0;    // GetTime() value
     std::string screenshot_path;
 
-    // VU_ID.num → objective index lookup. Built when a world is loaded.
-    // Used by the routes layer to resolve link neighbor VU_IDs to
-    // objective positions (so we can draw lines between them).
-    std::unordered_map<uint32_t, int> obj_id_to_index;
-
-    /// VU_ID.num → unit index lookup. Built when a world is loaded.
-    /// Used to resolve Squadron→Airbase link lines and Battalion→Brigade
-    /// hierarchy lines (when the parent_id / airbase_id refers to another
-    /// entity by VU_ID.num).
-    std::unordered_map<uint32_t, int> unit_id_to_index;
-
-    /// Rebuild the VU_ID → objective index map. Call after loading a world.
-    /// Defined in camera.cpp.
-    void rebuild_objective_index();
+    // VU_ID.num → EntityId lookups are now in pop.objective_id_map and
+    // pop.unit_id_map (populated by populate_world). No separate rebuild needed.
 
     // --- Procedural symbols (replaces the old PNG-icon system) ---
     //

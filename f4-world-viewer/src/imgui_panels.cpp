@@ -24,7 +24,6 @@
 #include <f4/terrain/terrain_data.hpp>
 #include <f4/viewer/enum_text.hpp>
 #include <f4/viewer/file_dialog.hpp>
-#include <f4/world/world_state.hpp>
 #include <f4/world_convert/class_table.hpp>      // unit_subtype_name(), DOMAIN_*
 #include <f4/world_convert/objective_decoder.hpp> // objective_type_name()
 #include <f4/world_convert/theater_data.hpp>     // point_type_name(), point_list_type_name()
@@ -315,13 +314,16 @@ void ViewerApp::draw_imgui() {
                 ImGui::TextUnformatted("##");
                 ImGui::PopStyleColor();
                 ImGui::SameLine();
-                if (impl_->world_loaded && i < static_cast<int>(impl_->world.teams.size())) {
-                    const auto& t = impl_->world.teams[i];
+                if (impl_->world_loaded && i < static_cast<int>(impl_->pop.teams.size())) {
+                    auto h = impl_->handle(impl_->pop.teams[i]);
+                    auto* cid = h.get<f4::entities::CampaignIdentityComponent>();
+                    auto* tc = h.get<f4::entities::TeamComponent>();
+                    const auto& t_name = cid ? cid->callsign : std::string();
                     char label[64];
-                    if (t.name.empty() || t.name == "XX") {
+                    if (t_name.empty() || t_name == "XX") {
                         std::snprintf(label, sizeof(label), "%d (empty)", i);
                     } else {
-                        std::snprintf(label, sizeof(label), "%d %s", i, t.name.c_str());
+                        std::snprintf(label, sizeof(label), "%d %s", i, t_name.c_str());
                     }
                     ImGui::TextUnformatted(label);
                 } else {
@@ -456,8 +458,8 @@ void ViewerApp::draw_imgui() {
         if (impl_->world_loaded) {
             ImGui::SameLine();
             ImGui::TextDisabled("|  %d objectives  %d units",
-                                impl_->world.objectives.size(),
-                                impl_->world.units.size());
+                                impl_->pop.objectives.size(),
+                                impl_->pop.units.size());
         }
     }
     ImGui::End();

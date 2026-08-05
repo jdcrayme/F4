@@ -1,9 +1,9 @@
 // f4-world-viewer/src/camera.cpp
 //
-// World <-> screen transforms + camera fit + objective-index rebuild.
+// World <-> screen transforms + camera fit.
 // These are ViewerApp::Impl member functions that touch only Impl's
 // camera state (cam_x/cam_y/cam_zoom/window_w/window_h) and the
-// world data (for rebuild_objective_index).
+// entity data (for fit_to_selection_layout).
 //
 // Split out of the original 1920-LoC viewer_app.cpp god-file (item #5
 // of the architecture review). No behavior change.
@@ -17,22 +17,6 @@
 #include <algorithm>
 
 namespace f4::viewer {
-
-void ViewerApp::Impl::rebuild_objective_index() {
-    obj_id_to_index.clear();
-    obj_id_to_index.reserve(world.objectives.size());
-    for (int i = 0; i < static_cast<int>(world.objectives.size()); ++i) {
-        obj_id_to_index[world.objectives[i].id_num] = i;
-    }
-
-    // Also build the unit VU_ID → unit index map. Used by the canvas to
-    // draw Squadron→Airbase and Battalion→Brigade hierarchy lines.
-    unit_id_to_index.clear();
-    unit_id_to_index.reserve(world.units.size());
-    for (int i = 0; i < static_cast<int>(world.units.size()); ++i) {
-        unit_id_to_index[world.units[i].id_num] = i;
-    }
-}
 
 Vector2 ViewerApp::Impl::world_to_screen(float gx, float gy) const {
     const float cx = window_w * 0.5f;
@@ -61,26 +45,35 @@ void ViewerApp::Impl::fit_to_world() {
 
 void ViewerApp::Impl::fit_to_selection_layout() {
     // Requires a selected objective with ground_layout or features.
-    if (sel_kind != SelectionKind::Objective || sel_index < 0 ||
-        sel_index >= static_cast<int>(world.objectives.size())) return;
-    const auto& obj = world.objectives[sel_index];
-    if (obj.ground_layout.empty() && obj.features.empty()) return;
+    if (sel_kind != SelectionKind::Objective || !sel_entity.valid()) return;
+    auto h = handle(sel_entity);
+    auto* tr = h.get<f4::entities::TransformComponent>();
+    auto* gl = h.get<f4::entities::GroundLayoutComponent>();
+    auto* fs = h.get<f4::entities::FeatureSetComponent>();
+    if (!tr) return;
+    const bool has_layout = gl && !gl->layouts.empty();
+    const bool has_features = fs && !fs->features.empty();
+    if (!has_layout && !has_features) return;
 
     // Compute the bbox in FEET relative to objective center.
     float min_x = 1e30f, min_y = 1e30f, max_x = -1e30f, max_y = -1e30f;
     bool any = false;
-    for (const auto& gl : obj.ground_layout) {
-        for (const auto& pt : gl.points) {
-            min_x = std::min(min_x, pt.x);  min_y = std::min(min_y, pt.y);
-            max_x = std::max(max_x, pt.x);  max_y = std::max(max_y, pt.y);
-            any = true;
+    if (gl) {
+        for (const auto& layout : gl->layouts) {
+            for (const auto& pt : layout.points) {
+                min_x = std::min(min_x, pt.x);  min_y = std::min(min_y, pt.y);
+                max_x = std::max(max_x, pt.x);  max_y = std::max(max_y, pt.y);
+                any = true;
+            }
         }
     }
-    for (const auto& f : obj.features) {
-        if (f.index == 0 && f.offset_x == 0.0f && f.offset_y == 0.0f) continue;
-        min_x = std::min(min_x, f.offset_x);  min_y = std::min(min_y, f.offset_y);
-        max_x = std::max(max_x, f.offset_x);  max_y = std::max(max_y, f.offset_y);
-        any = true;
+    if (fs) {
+        for (const auto& f : fs->features) {
+            if (f.index == 0 && f.offset_x == 0.0f && f.offset_y == 0.0f) continue;
+            min_x = std::min(min_x, f.offset_x);  min_y = std::min(min_y, f.offset_y);
+            max_x = std::max(max_x, f.offset_x);  max_y = std::max(max_y, f.offset_y);
+            any = true;
+        }
     }
     if (!any) return;
 
@@ -99,8 +92,10 @@ void ViewerApp::Impl::fit_to_selection_layout() {
     constexpr float FT_PER_GRID = 1024.0f;
     const float bbox_cx_ft = (min_x + max_x) * 0.5f;
     const float bbox_cy_ft = (min_y + max_y) * 0.5f;
-    cam_x = static_cast<float>(obj.x) + bbox_cx_ft / FT_PER_GRID;
-    cam_y = static_cast<float>(obj.y) + bbox_cy_ft / FT_PER_GRID;
+    const float obj_gx = grid_x(tr);
+    const float obj_gy = grid_y(tr);
+    cam_x = obj_gx + bbox_cx_ft / FT_PER_GRID;
+    cam_y = obj_gy + bbox_cy_ft / FT_PER_GRID;
     // Zoom: fit the bbox into the window with the margin. Use the
     // larger of the two zoom values to ensure the whole bbox fits.
     const float w_grid = w_ft / FT_PER_GRID;

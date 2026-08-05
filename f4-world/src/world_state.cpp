@@ -6,7 +6,7 @@
 // below are unchanged from the original implementation; only the local
 // class definition has been replaced with #include <f4/json/reader.hpp>.
 
-#include <f4/world/world_state.hpp>
+#include <f4/world/detail/world_state.hpp>
 
 #include <f4/json/reader.hpp>
 

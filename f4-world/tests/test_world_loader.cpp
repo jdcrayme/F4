@@ -680,11 +680,11 @@ TEST(PopulateUnits, DomainTags) {
 
     // Battalion → domain="ground"
     EntityHandle h_bat(ids[0], &ew);
-    EXPECT_EQ(h_bat.get_tag(tags::DOMAIN)->str_val, "ground");
+    EXPECT_EQ(h_bat.get_tag(tags::OPDOMAIN)->str_val, "ground");
 
     // Squadron → domain="air"
     EntityHandle h_sq(ids[2], &ew);
-    EXPECT_EQ(h_sq.get_tag(tags::DOMAIN)->str_val, "air");
+    EXPECT_EQ(h_sq.get_tag(tags::OPDOMAIN)->str_val, "air");
 }
 
 TEST(PopulateUnits, RoleTags) {
@@ -875,4 +875,185 @@ TEST(PopulateWorld, RealFixture) {
 
     auto all_ownership = ew.with_component<OwnershipComponent>();
     EXPECT_EQ(all_ownership.size(), pw.objectives.size());
+}
+
+// ============================================================================
+// Phase 4: Adapter interfaces
+// ============================================================================
+
+TEST(WorldStateAdapters, CampaignAdapterImplementsInterface) {
+    WorldState ws;
+    ws.campaign.current_time = 1000;
+    ws.campaign.te_victory_points = 42;
+    ws.campaign.te_flags = 7;
+    ws.campaign.te_number_aircraft = {1,2,3,4,5,6,7,8};
+    ws.campaign.te_team_pts = {10,20,30,40,50,60,70,80};
+
+    CampaignAdapter adapter(ws);
+    const ICampaignSource& src = adapter;
+
+    EXPECT_EQ(src.current_time(), 1000);
+    EXPECT_EQ(src.te_victory_points(), 42);
+    EXPECT_EQ(src.te_flags(), 7);
+    ASSERT_EQ(src.te_number_aircraft().size(), 8u);
+    EXPECT_EQ(src.te_number_aircraft()[3], 4);
+}
+
+TEST(WorldStateAdapters, TeamAdapterImplementsInterface) {
+    WorldState ws;
+    ws.teams = {
+        {0, 0, 0, "", ""},
+        {1, 1, 1, "U.S.", "E Pluribus"},
+        {2, 2, 2, "ROK", ""},
+    };
+    ws.teams[1].tea_loaded = true;
+    ws.teams[1].stance = {50, -50, 0, 0, 0, 0, 0, 0};
+
+    TeamAdapter adapter(ws);
+    const ITeamSource& src = adapter;
+
+    EXPECT_EQ(src.team_count(), 3);
+    EXPECT_EQ(src.name(1), "U.S.");
+    EXPECT_EQ(src.motto(1), "E Pluribus");
+    EXPECT_TRUE(src.tea_loaded(1));
+    ASSERT_EQ(src.stance(1).size(), 8u);
+    EXPECT_EQ(src.stance(1)[0], 50);
+    EXPECT_EQ(src.name(0), "");  // empty slot
+}
+
+TEST(WorldStateAdapters, ObjectiveAdapterImplementsInterface) {
+    WorldState ws = make_objective_world();
+
+    ObjectiveAdapter adapter(ws);
+    const IObjectiveSource& src = adapter;
+
+    EXPECT_EQ(src.objective_count(), 3);
+    EXPECT_EQ(src.x(0), 500);
+    EXPECT_EQ(src.y(0), 400);
+    EXPECT_FLOAT_EQ(src.z(0), 100.0f);
+    EXPECT_EQ(src.owner(0), 2);
+    EXPECT_TRUE(src.has_radar(0));
+    EXPECT_FALSE(src.has_radar(1));
+    EXPECT_TRUE(src.has_supply(0));
+    EXPECT_TRUE(src.has_links(0));
+    EXPECT_TRUE(src.has_ground_layout(0));
+    EXPECT_TRUE(src.has_features(0));
+    EXPECT_EQ(src.class_name(0), "02_20 Airbase 2");
+}
+
+TEST(WorldStateAdapters, UnitAdapterImplementsInterface) {
+    WorldState ws = make_unit_world();
+
+    UnitAdapter adapter(ws);
+    const IUnitSource& src = adapter;
+
+    EXPECT_EQ(src.unit_count(), 5);
+    EXPECT_EQ(src.unit_class(0), UnitClass::Battalion);
+    EXPECT_EQ(src.domain(0), 3);
+    EXPECT_EQ(src.class_name(0), "Armor Battalion");
+    EXPECT_TRUE(src.has_waypoints(3));   // Flight has waypoints
+    EXPECT_FALSE(src.has_waypoints(0));  // Battalion doesn't
+    EXPECT_TRUE(src.has_vehicle_groups(0));  // Battalion has vehicles
+}
+
+TEST(WorldStateAdapters, PopulateViaInterfacesMatchesWorldState) {
+    // The interface-based bridge should produce the same result as the
+    // WorldState-based bridge.
+    WorldState ws = make_test_world();
+    ws.objectives = make_objective_world().objectives;
+    ws.units = make_unit_world().units;
+
+    // WorldState-based
+    EntityWorld ew1;
+    auto pw1 = populate_world(ew1, ws);
+
+    // Interface-based
+    EntityWorld ew2;
+    WorldStateAdapters adapters(ws);
+    auto pw2 = populate_world(ew2,
+        static_cast<const ICampaignSource&>(adapters.campaign),
+        static_cast<const ITeamSource&>(adapters.teams),
+        static_cast<const IObjectiveSource&>(adapters.objectives),
+        static_cast<const IUnitSource&>(adapters.units));
+
+    // Same entity counts
+    EXPECT_EQ(pw1.teams.size(), pw2.teams.size());
+    EXPECT_EQ(pw1.objectives.size(), pw2.objectives.size());
+    EXPECT_EQ(pw1.units.size(), pw2.units.size());
+
+    // Same component queries
+    EXPECT_EQ(ew1.with_component<RadarComponent>().size(),
+              ew2.with_component<RadarComponent>().size());
+    EXPECT_EQ(ew1.with_component<GroundTacticalComponent>().size(),
+              ew2.with_component<GroundTacticalComponent>().size());
+    EXPECT_EQ(ew1.with_component<SquadronComponent>().size(),
+              ew2.with_component<SquadronComponent>().size());
+}
+
+// ============================================================================
+// Phase 4: Convenience API (load / load_from_string)
+// ============================================================================
+
+TEST(ConvenienceAPI, LoadFromString) {
+    std::string json = R"({
+        "version": 63,
+        "campaign": {
+            "current_time": 1000,
+            "te_start_time": 0,
+            "te_time_limit": 0,
+            "te_victory_points": 42,
+            "te_type": 0,
+            "te_number_teams": 0,
+            "te_team": 0,
+            "te_flags": 7,
+            "te_number_aircraft": [1,2,3,4,5,6,7,8],
+            "te_team_pts": [10,20,30,40,50,60,70,80],
+            "teams": [
+                {"slot": 1, "flags": 1, "colour": 1, "name": "U.S.", "motto": ""}
+            ],
+            "decoded_bytes": 100,
+            "undecoded_bytes": 0
+        },
+        "objectives": {"count": 0, "decoded": 0, "bytes_consumed": 0, "inner_size": 0, "items": []},
+        "units": {"count": 0, "decoded": 0, "bytes_consumed": 0, "inner_size": 0, "items": []},
+        "raw_subfiles": {}
+    })";
+
+    EntityWorld ew;
+    auto pw = load_from_string(json, ew);
+
+    // Campaign entity
+    EXPECT_TRUE(pw.campaign.valid());
+    auto camp_entities = ew.with_component<CampaignStateComponent>();
+    EXPECT_EQ(camp_entities.size(), 1u);
+    EntityHandle camp_h(camp_entities[0], &ew);
+    auto* cs = camp_h.get<CampaignStateComponent>();
+    ASSERT_NE(cs, nullptr);
+    EXPECT_EQ(cs->current_time, 1000);
+    EXPECT_EQ(cs->te_victory_points, 42);
+
+    // Team entity
+    EXPECT_EQ(pw.teams.size(), 1u);
+    auto team_entities = ew.with_component<TeamComponent>();
+    EXPECT_EQ(team_entities.size(), 1u);
+}
+
+TEST(ConvenienceAPI, LoadRealFixture) {
+    const char* path = WORLD_JSON_FIXTURE;
+    ASSERT_NE(path, nullptr);
+
+    EntityWorld ew;
+    auto pw = load(path, ew);
+
+    // Same results as the manual WorldState → populate_world pipeline
+    EXPECT_TRUE(pw.campaign.valid());
+    EXPECT_GE(pw.teams.size(), 4u);
+    EXPECT_EQ(pw.objectives.size(), 2659u);
+    EXPECT_EQ(pw.units.size(), 683u);
+
+    // Can query by components
+    auto radar = ew.with_component<RadarComponent>();
+    EXPECT_GT(radar.size(), 0u);
+    auto ground = ew.with_component<GroundTacticalComponent>();
+    EXPECT_GT(ground.size(), 0u);
 }
