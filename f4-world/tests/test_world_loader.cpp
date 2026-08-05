@@ -1,10 +1,15 @@
 // test_world_loader.cpp — populate f4-entities from WorldState.
+//
+// Phase 1: populate_teams tests.
+// Phase 3: populate_objectives, populate_units, populate_campaign, populate_world tests.
 
 #include <gtest/gtest.h>
 #include <f4/world/f4_world.hpp>
 #include <f4/entities/f4_entities.hpp>
 
 #include <algorithm>
+#include <filesystem>
+#include <fstream>
 
 using namespace f4::world;
 using namespace f4::entities;
@@ -21,13 +26,131 @@ WorldState make_test_world() {
     };
     return ws;
 }
+
+// Build a small WorldState with 3 objectives for bridge testing.
+WorldState make_objective_world() {
+    WorldState ws;
+    ws.version = 63;
+
+    // Objective 1: airbase with radar, supply, links, ground layout, features
+    ObjectiveState o1;
+    o1.type = 100; o1.entity_type = 100; o1.x = 500; o1.y = 400; o1.z = 100.0f;
+    o1.owner = 2; o1.first_owner = 2; o1.priority = 5; o1.nameid = 10;
+    o1.id_creator = 1; o1.id_num = 1001; o1.camp_id = 50;
+    o1.obj_flags = 0x00FF; o1.parent_id = 0;
+    o1.supply = 80; o1.fuel = 60; o1.losses = 10; o1.last_repair = 5000;
+    o1.has_radar = true;
+    for (int i = 0; i < 8; ++i) o1.detect_ratio[i] = 0.1f * i;
+    o1.radar_range_km = 245.5f; o1.radar_name = "APG-68"; o1.radar_type_idx = 18;
+    o1.class_name = "02_20 Airbase 2";
+    ObjectiveLink link1; link1.neighbor_num = 1002; link1.is_road = true; link1.costs[1] = 25;
+    o1.links.push_back(link1);
+    GroundLayoutList gl1; gl1.type = 1; gl1.heading_deg = 90.0f;
+    o1.ground_layout.push_back(gl1);
+    o1.features_count = 3; o1.radar_feature = 2;
+    FeatureEntryState fe1; fe1.name = "Control Tower"; fe1.hit_points = 500;
+    o1.features.push_back(fe1);
+
+    // Objective 2: bridge — no radar, minimal data
+    ObjectiveState o2;
+    o2.type = 200; o2.entity_type = 200; o2.x = 600; o2.y = 500; o2.z = 0.0f;
+    o2.owner = 1; o2.first_owner = 1; o2.priority = 3; o2.nameid = 20;
+    o2.id_creator = 1; o2.id_num = 1002; o2.camp_id = 51;
+    o2.class_name = "Highway Bridge";
+
+    // Objective 3: city with supply but no radar, with fstatus
+    ObjectiveState o3;
+    o3.type = 300; o3.entity_type = 300; o3.x = 700; o3.y = 600; o3.z = 50.0f;
+    o3.owner = 2; o3.first_owner = 1; o3.priority = 7; o3.nameid = 30;
+    o3.id_creator = 2; o3.id_num = 1003; o3.camp_id = 52;
+    o3.supply = 40; o3.fuel = 30; o3.losses = 5; o3.last_repair = 3000;
+    o3.fstatus = {0, 1, 2, 3};
+    o3.class_name = "Seoul";
+
+    ws.objectives = {o1, o2, o3};
+    return ws;
 }
+
+// Build a small WorldState with varied unit types for bridge testing.
+WorldState make_unit_world() {
+    WorldState ws;
+    ws.version = 63;
+
+    // Battalion with hierarchy
+    UnitState u1;
+    u1.type = 170; u1.unit_class = UnitClass::Battalion; u1.domain = 3;
+    u1.unit_subtype = 1; u1.entity_type = 170; u1.x = 400; u1.y = 300; u1.z = 0.0f;
+    u1.owner = 2; u1.id_creator = 1; u1.id_num = 2001; u1.camp_id = 60;
+    u1.roster = 0xAAAAAAAA; u1.class_name = "Armor Battalion";
+    u1.supply = 80; u1.morale = 70; u1.fatigue = 30;
+    u1.heading = 128; u1.final_heading = 130; u1.position = 2;
+    u1.last_move = 5000; u1.last_combat = 4000;
+    u1.parent_id = 3001;  // parent brigade
+    u1.vehicle_groups = {VehicleGroup{0, 100, 3, 3, "M-1A1", "MBT", 500, 60}};
+    for (auto& s : u1.unit_class_scores) s = 0;
+    u1.unit_class_scores[0] = 10; u1.unit_class_scores[3] = 80;
+
+    // Brigade with children
+    UnitState u2;
+    u2.type = 180; u2.unit_class = UnitClass::Brigade; u2.domain = 3;
+    u2.unit_subtype = 2; u2.entity_type = 180; u2.x = 410; u2.y = 310; u2.z = 0.0f;
+    u2.owner = 2; u2.id_creator = 1; u2.id_num = 3001; u2.camp_id = 61;
+    u2.class_name = "Armor Brigade";
+    u2.supply = 90; u2.morale = 80;
+    u2.element_ids = {2001};  // child battalion
+
+    // Squadron
+    UnitState u3;
+    u3.type = 500; u3.unit_class = UnitClass::Squadron; u3.domain = 2;
+    u3.unit_subtype = 3; u3.entity_type = 500; u3.x = 500; u3.y = 400; u3.z = 0.0f;
+    u3.owner = 2; u3.id_creator = 1; u3.id_num = 4001; u3.camp_id = 70;
+    u3.class_name = "18th Fighter Squadron";
+    u3.airbase_id = 1001;  // references objective o1
+    u3.specialty = 2; u3.fuel = 10000; u3.aa_kills = 5;
+    PilotState p; p.pilot_id = 1; p.skill = 80; p.aa_kills = 3;
+    u3.pilots.push_back(p);
+
+    // Flight
+    UnitState u4;
+    u4.type = 600; u4.unit_class = UnitClass::Flight; u4.domain = 2;
+    u4.unit_subtype = 4; u4.entity_type = 600; u4.x = 510; u4.y = 410; u4.z = 25000.0f;
+    u4.owner = 2; u4.id_creator = 1; u4.id_num = 5001; u4.camp_id = 80;
+    u4.class_name = "Strike Flight";
+    u4.flight_altitude = 25000.0f; u4.fuel_burnt = 5000;
+    u4.mission = 3; u4.package_id = 6001; u4.squadron_id = 4001;
+    WaypointState wp; wp.x = 520; wp.y = 420; wp.arrive = 3600;
+    u4.waypoints.push_back(wp);
+
+    // Package
+    UnitState u5;
+    u5.type = 700; u5.unit_class = UnitClass::Package; u5.domain = 2;
+    u5.unit_subtype = 5; u5.entity_type = 700; u5.x = 505; u5.y = 405; u5.z = 0.0f;
+    u5.owner = 2; u5.id_creator = 1; u5.id_num = 6001; u5.camp_id = 90;
+    u5.class_name = "Strike Package";
+    u5.wait_cycles = 3; u5.interceptor_id = 0; u5.awacs_id = 0;
+
+    ws.units = {u1, u2, u3, u4, u5};
+    return ws;
+}
+
+// Read a file into a string (for the real fixture test).
+std::string read_file(const std::string& path) {
+    std::ifstream f(path);
+    if (!f) return {};
+    std::ostringstream ss;
+    ss << f.rdbuf();
+    return ss.str();
+}
+}
+
+// ============================================================================
+// Phase 1: populate_teams — existing tests
+// ============================================================================
 
 TEST(WorldLoader, CreatesEntityPerNonEmptyTeam) {
     EntityWorld ew;
     WorldState ws = make_test_world();
     auto ids = populate_teams(ew, ws);
-    // Slot 0 has empty name -> skipped. 3 teams created.
     EXPECT_EQ(ids.size(), 3u);
     EXPECT_EQ(ew.size(), 3u);
 }
@@ -37,19 +160,16 @@ TEST(WorldLoader, TeamEntitiesHaveCorrectTagsAndIdentity) {
     WorldState ws = make_test_world();
     auto ids = populate_teams(ew, ws);
 
-    // Find the ROK team entity.
     auto rok_ids = ew.with_tag(tags::TEAM, TagValue::from(std::string("ROK")));
     ASSERT_EQ(rok_ids.size(), 1u);
     EntityHandle h(rok_ids[0], &ew);
     ASSERT_TRUE(h.valid());
 
-    // CampaignIdentityComponent is narrowed: team_id + callsign only.
     auto* cid = h.get<CampaignIdentityComponent>();
     ASSERT_NE(cid, nullptr);
     EXPECT_EQ(cid->team_id, 2);
     EXPECT_EQ(cid->callsign, "ROK");
 
-    // TeamComponent carries the team-specific data.
     auto* tc = h.get<TeamComponent>();
     ASSERT_NE(tc, nullptr);
     EXPECT_EQ(tc->slot, 2);
@@ -67,7 +187,6 @@ TEST(WorldLoader, TeamComponentCarriesTeaEnrichment) {
     ws.teams = {
         {1, 1, 1, "U.S.", "E Pluribus"},
     };
-    // Simulate .tea enrichment data.
     ws.teams[0].tea_loaded = true;
     ws.teams[0].stance = {50, -50, 0, 0, 0, 0, 0, 0};
     ws.teams[0].member = {1, 0, 1, 0, 0, 0, 0, 0};
@@ -96,7 +215,7 @@ TEST(WorldLoader, EmptyNameSlotsAreSkipped) {
     ws.teams = {
         {0, 0, 0, "", ""},
         {1, 0, 0, "Alpha", ""},
-        {2, 0, 0, "", ""},      // empty, skipped
+        {2, 0, 0, "", ""},
         {3, 0, 0, "Bravo", ""},
     };
     auto ids = populate_teams(ew, ws);
@@ -104,9 +223,6 @@ TEST(WorldLoader, EmptyNameSlotsAreSkipped) {
 }
 
 TEST(WorldLoader, CanQueryTeamsByTeamTag) {
-    // This is the structural payoff: after populate_teams, the EntityWorld
-    // can answer "give me all ROK entities" / "all PRC entities" via tag
-    // queries — against REAL campaign data, not a synthetic harness.
     EntityWorld ew;
     WorldState ws = make_test_world();
     populate_teams(ew, ws);
@@ -122,8 +238,6 @@ TEST(WorldLoader, CanQueryTeamsByTeamTag) {
 }
 
 TEST(WorldLoader, CampaignIdentityNoLongerHasUnitTypeName) {
-    // Verify that CampaignIdentityComponent is narrowed — it should NOT
-    // have a unit_type_name field. This test confirms the Phase 1 change.
     EntityWorld ew;
     WorldState ws = make_test_world();
     populate_teams(ew, ws);
@@ -134,9 +248,631 @@ TEST(WorldLoader, CampaignIdentityNoLongerHasUnitTypeName) {
 
     auto* cid = h.get<CampaignIdentityComponent>();
     ASSERT_NE(cid, nullptr);
-    // CampaignIdentityComponent now only has team_id and callsign.
     EXPECT_EQ(cid->team_id, 1);
     EXPECT_EQ(cid->callsign, "U.S.");
-    // unit_type_name was removed — there is no field to test,
-    // the fact that this compiles confirms the narrowing.
+}
+
+// ============================================================================
+// Phase 3: populate_campaign
+// ============================================================================
+
+TEST(PopulateCampaign, CreatesSingleEntityWithCampaignState) {
+    EntityWorld ew;
+    WorldState ws;
+    ws.campaign.current_time = 1000;
+    ws.campaign.te_victory_points = 42;
+    ws.campaign.te_flags = 7;
+    ws.campaign.te_number_aircraft = {1,2,3,4,5,6,7,8};
+    ws.campaign.te_team_pts = {10,20,30,40,50,60,70,80};
+
+    auto id = populate_campaign(ew, ws);
+    EXPECT_TRUE(id.valid());
+    EXPECT_EQ(ew.size(), 1u);
+
+    EntityHandle h(id, &ew);
+    EXPECT_TRUE(h.has<CampaignStateComponent>());
+
+    auto* cs = h.get<CampaignStateComponent>();
+    ASSERT_NE(cs, nullptr);
+    EXPECT_EQ(cs->current_time, 1000);
+    EXPECT_EQ(cs->te_victory_points, 42);
+    EXPECT_EQ(cs->te_flags, 7);
+    ASSERT_EQ(cs->te_number_aircraft.size(), 8u);
+    EXPECT_EQ(cs->te_number_aircraft[3], 4);
+}
+
+TEST(PopulateCampaign, HasCorrectTags) {
+    EntityWorld ew;
+    WorldState ws;
+    auto id = populate_campaign(ew, ws);
+
+    EntityHandle h(id, &ew);
+    EXPECT_TRUE(h.has_tag(tags::ROLE));
+    EXPECT_EQ(h.get_tag(tags::ROLE)->str_val, "campaign");
+    EXPECT_TRUE(h.has_tag(tags::ALIVE));
+}
+
+// ============================================================================
+// Phase 3: populate_objectives
+// ============================================================================
+
+TEST(PopulateObjectives, Count) {
+    EntityWorld ew;
+    WorldState ws = make_objective_world();
+    std::unordered_map<uint32_t, EntityId> obj_id_map;
+    auto ids = populate_objectives(ew, ws, obj_id_map);
+    EXPECT_EQ(ids.size(), 3u);
+}
+
+TEST(PopulateObjectives, AllHaveTransform) {
+    EntityWorld ew;
+    WorldState ws = make_objective_world();
+    std::unordered_map<uint32_t, EntityId> obj_id_map;
+    auto ids = populate_objectives(ew, ws, obj_id_map);
+
+    // Every objective entity must have a TransformComponent with correct
+    // grid→feet position.
+    for (size_t i = 0; i < ids.size(); ++i) {
+        EntityHandle h(ids[i], &ew);
+        ASSERT_TRUE(h.has<TransformComponent>());
+        auto* tf = h.get<TransformComponent>();
+        // Verify grid→feet conversion: 1 grid = 1024 ft, z already in ft.
+        EXPECT_DOUBLE_EQ(tf->position.x, static_cast<double>(ws.objectives[i].x) * 1024.0);
+        EXPECT_DOUBLE_EQ(tf->position.y, static_cast<double>(ws.objectives[i].y) * 1024.0);
+        EXPECT_DOUBLE_EQ(tf->position.z, static_cast<double>(ws.objectives[i].z));
+    }
+}
+
+TEST(PopulateObjectives, AlwaysPresentComponents) {
+    EntityWorld ew;
+    WorldState ws = make_objective_world();
+    std::unordered_map<uint32_t, EntityId> obj_id_map;
+    auto ids = populate_objectives(ew, ws, obj_id_map);
+
+    // Every objective must have ObjectiveTypeComponent, OwnershipComponent,
+    // ObjectivePriorityComponent, and PropertyBag.
+    for (auto id : ids) {
+        EntityHandle h(id, &ew);
+        EXPECT_TRUE(h.has<ObjectiveTypeComponent>());
+        EXPECT_TRUE(h.has<OwnershipComponent>());
+        EXPECT_TRUE(h.has<ObjectivePriorityComponent>());
+        EXPECT_TRUE(h.has<PropertyBag>());
+    }
+}
+
+TEST(PopulateObjectives, ConditionalRadar) {
+    EntityWorld ew;
+    WorldState ws = make_objective_world();
+    std::unordered_map<uint32_t, EntityId> obj_id_map;
+    auto ids = populate_objectives(ew, ws, obj_id_map);
+
+    // o1 has radar, o2 and o3 don't.
+    EntityHandle h1(ids[0], &ew);
+    EXPECT_TRUE(h1.has<RadarComponent>());
+    auto* rad = h1.get<RadarComponent>();
+    EXPECT_FLOAT_EQ(rad->range_km, 245.5f);
+    EXPECT_EQ(rad->name, "APG-68");
+    EXPECT_EQ(rad->radar_type_idx, 18);
+
+    EntityHandle h2(ids[1], &ew);
+    EXPECT_FALSE(h2.has<RadarComponent>());
+
+    EntityHandle h3(ids[2], &ew);
+    EXPECT_FALSE(h3.has<RadarComponent>());
+}
+
+TEST(PopulateObjectives, ConditionalSupply) {
+    EntityWorld ew;
+    WorldState ws = make_objective_world();
+    std::unordered_map<uint32_t, EntityId> obj_id_map;
+    auto ids = populate_objectives(ew, ws, obj_id_map);
+
+    // o1 and o3 have supply, o2 doesn't.
+    EntityHandle h1(ids[0], &ew);
+    EXPECT_TRUE(h1.has<SupplyStateComponent>());
+    auto* sup = h1.get<SupplyStateComponent>();
+    EXPECT_EQ(sup->supply, 80);
+    EXPECT_EQ(sup->fuel, 60);
+
+    EntityHandle h2(ids[1], &ew);
+    EXPECT_FALSE(h2.has<SupplyStateComponent>());
+
+    EntityHandle h3(ids[2], &ew);
+    EXPECT_TRUE(h3.has<SupplyStateComponent>());
+}
+
+TEST(PopulateObjectives, ConditionalDamageBitmap) {
+    EntityWorld ew;
+    WorldState ws = make_objective_world();
+    std::unordered_map<uint32_t, EntityId> obj_id_map;
+    auto ids = populate_objectives(ew, ws, obj_id_map);
+
+    // o3 has fstatus, o1 and o2 don't.
+    EntityHandle h3(ids[2], &ew);
+    EXPECT_TRUE(h3.has<DamageBitmapComponent>());
+    EXPECT_EQ(h3.get<DamageBitmapComponent>()->fstatus.size(), 4u);
+
+    EntityHandle h1(ids[0], &ew);
+    EXPECT_FALSE(h1.has<DamageBitmapComponent>());
+}
+
+TEST(PopulateObjectives, NetworkLinksRoundTrip) {
+    EntityWorld ew;
+    WorldState ws = make_objective_world();
+    std::unordered_map<uint32_t, EntityId> obj_id_map;
+    auto ids = populate_objectives(ew, ws, obj_id_map);
+
+    // o1 has links, o2 and o3 don't.
+    EntityHandle h1(ids[0], &ew);
+    EXPECT_TRUE(h1.has<NetworkLinksComponent>());
+    auto* nl = h1.get<NetworkLinksComponent>();
+    ASSERT_EQ(nl->links.size(), 1u);
+    EXPECT_EQ(nl->links[0].neighbor_num, 1002u);
+    EXPECT_TRUE(nl->links[0].is_road);
+    EXPECT_EQ(nl->links[0].costs[1], 25);
+
+    EntityHandle h2(ids[1], &ew);
+    EXPECT_FALSE(h2.has<NetworkLinksComponent>());
+}
+
+TEST(PopulateObjectives, GroundLayoutAndFeatures) {
+    EntityWorld ew;
+    WorldState ws = make_objective_world();
+    std::unordered_map<uint32_t, EntityId> obj_id_map;
+    auto ids = populate_objectives(ew, ws, obj_id_map);
+
+    // o1 has ground layout and features.
+    EntityHandle h1(ids[0], &ew);
+    EXPECT_TRUE(h1.has<GroundLayoutComponent>());
+    ASSERT_EQ(h1.get<GroundLayoutComponent>()->layouts.size(), 1u);
+    EXPECT_FLOAT_EQ(h1.get<GroundLayoutComponent>()->layouts[0].heading_deg, 90.0f);
+
+    EXPECT_TRUE(h1.has<FeatureSetComponent>());
+    auto* fs = h1.get<FeatureSetComponent>();
+    EXPECT_EQ(fs->features_count, 3);
+    EXPECT_EQ(fs->radar_feature, 2);
+    ASSERT_EQ(fs->features.size(), 1u);
+    EXPECT_EQ(fs->features[0].name, "Control Tower");
+
+    // o2 doesn't have ground layout or features.
+    EntityHandle h2(ids[1], &ew);
+    EXPECT_FALSE(h2.has<GroundLayoutComponent>());
+    EXPECT_FALSE(h2.has<FeatureSetComponent>());
+}
+
+TEST(PopulateObjectives, PropertyBagCarriesFormatResidue) {
+    EntityWorld ew;
+    WorldState ws = make_objective_world();
+    std::unordered_map<uint32_t, EntityId> obj_id_map;
+    auto ids = populate_objectives(ew, ws, obj_id_map);
+
+    EntityHandle h1(ids[0], &ew);
+    auto* pb = h1.get<PropertyBag>();
+    ASSERT_NE(pb, nullptr);
+    EXPECT_EQ(pb->ints.at("vu_id_creator"), 1);
+    EXPECT_EQ(pb->ints.at("vu_id_num"), 1001);
+    EXPECT_EQ(pb->ints.at("entity_type"), 100);
+    EXPECT_EQ(pb->ints.at("camp_id"), 50);
+}
+
+TEST(PopulateObjectives, IdMapBuilt) {
+    EntityWorld ew;
+    WorldState ws = make_objective_world();
+    std::unordered_map<uint32_t, EntityId> obj_id_map;
+    auto ids = populate_objectives(ew, ws, obj_id_map);
+
+    // All three objectives have non-zero id_num, so they should be in the map.
+    EXPECT_EQ(obj_id_map.size(), 3u);
+    EXPECT_TRUE(obj_id_map.count(1001));
+    EXPECT_TRUE(obj_id_map.count(1002));
+    EXPECT_TRUE(obj_id_map.count(1003));
+    EXPECT_EQ(obj_id_map.at(1001), ids[0]);
+}
+
+TEST(PopulateObjectives, TagsAreCorrect) {
+    EntityWorld ew;
+    WorldState ws = make_objective_world();
+    std::unordered_map<uint32_t, EntityId> obj_id_map;
+    auto ids = populate_objectives(ew, ws, obj_id_map);
+
+    EntityHandle h1(ids[0], &ew);
+    EXPECT_TRUE(h1.has_tag(tags::ROLE));
+    EXPECT_EQ(h1.get_tag(tags::ROLE)->str_val, "objective");
+    EXPECT_TRUE(h1.has_tag(tags::ALIVE));
+    // Owner 2 → team tag is int 2
+    EXPECT_EQ(h1.get_tag(tags::TEAM)->int_val, 2);
+}
+
+// ============================================================================
+// Phase 3: populate_units
+// ============================================================================
+
+TEST(PopulateUnits, Count) {
+    EntityWorld ew;
+    WorldState ws = make_unit_world();
+    // Need an objective id map for Squadron→airbase resolution.
+    std::unordered_map<uint32_t, EntityId> obj_id_map;
+    // Pre-populate with the airbase objective (id_num=1001).
+    auto obj_h = ew.create();
+    obj_id_map[1001] = obj_h.id();
+
+    std::unordered_map<uint32_t, EntityId> unit_id_map;
+    auto ids = populate_units(ew, ws, obj_id_map, unit_id_map);
+    EXPECT_EQ(ids.size(), 5u);
+}
+
+TEST(PopulateUnits, AllHaveTransformAndCoreComponent) {
+    EntityWorld ew;
+    WorldState ws = make_unit_world();
+    std::unordered_map<uint32_t, EntityId> obj_id_map;
+    std::unordered_map<uint32_t, EntityId> unit_id_map;
+    auto ids = populate_units(ew, ws, obj_id_map, unit_id_map);
+
+    for (size_t i = 0; i < ids.size(); ++i) {
+        EntityHandle h(ids[i], &ew);
+        ASSERT_TRUE(h.has<TransformComponent>());
+        ASSERT_TRUE(h.has<UnitCoreComponent>());
+        ASSERT_TRUE(h.has<PropertyBag>());
+
+        // Verify grid→feet position
+        auto* tf = h.get<TransformComponent>();
+        EXPECT_DOUBLE_EQ(tf->position.x, static_cast<double>(ws.units[i].x) * 1024.0);
+        EXPECT_DOUBLE_EQ(tf->position.y, static_cast<double>(ws.units[i].y) * 1024.0);
+        EXPECT_DOUBLE_EQ(tf->position.z, static_cast<double>(ws.units[i].z));
+    }
+}
+
+TEST(PopulateUnits, SubclassComponents) {
+    EntityWorld ew;
+    WorldState ws = make_unit_world();
+    std::unordered_map<uint32_t, EntityId> obj_id_map;
+    std::unordered_map<uint32_t, EntityId> unit_id_map;
+    auto ids = populate_units(ew, ws, obj_id_map, unit_id_map);
+
+    // Battalion → GroundTacticalComponent + HierarchyComponent
+    EntityHandle h_bat(ids[0], &ew);
+    EXPECT_TRUE(h_bat.has<GroundTacticalComponent>());
+    EXPECT_TRUE(h_bat.has<HierarchyComponent>());
+    auto* gt = h_bat.get<GroundTacticalComponent>();
+    EXPECT_EQ(gt->supply, 80);
+    EXPECT_EQ(gt->morale, 70);
+    EXPECT_EQ(gt->heading, 128);
+
+    // Brigade → GroundTacticalComponent + HierarchyComponent
+    EntityHandle h_bri(ids[1], &ew);
+    EXPECT_TRUE(h_bri.has<GroundTacticalComponent>());
+    EXPECT_TRUE(h_bri.has<HierarchyComponent>());
+
+    // Squadron → SquadronComponent
+    EntityHandle h_sq(ids[2], &ew);
+    EXPECT_TRUE(h_sq.has<SquadronComponent>());
+    EXPECT_FALSE(h_sq.has<GroundTacticalComponent>());
+    auto* sq = h_sq.get<SquadronComponent>();
+    EXPECT_EQ(sq->specialty, 2);
+    EXPECT_EQ(sq->fuel, 10000);
+    ASSERT_EQ(sq->pilots.size(), 1u);
+    EXPECT_EQ(sq->pilots[0].pilot_id, 1);
+
+    // Flight → FlightPlanComponent
+    EntityHandle h_fl(ids[3], &ew);
+    EXPECT_TRUE(h_fl.has<FlightPlanComponent>());
+    EXPECT_FALSE(h_fl.has<GroundTacticalComponent>());
+    auto* fp = h_fl.get<FlightPlanComponent>();
+    EXPECT_FLOAT_EQ(fp->altitude, 25000.0f);
+    EXPECT_EQ(fp->mission, 3);
+
+    // Package → PackageSupportComponent
+    EntityHandle h_pk(ids[4], &ew);
+    EXPECT_TRUE(h_pk.has<PackageSupportComponent>());
+    auto* ps = h_pk.get<PackageSupportComponent>();
+    EXPECT_EQ(ps->wait_cycles, 3);
+}
+
+TEST(PopulateUnits, ConditionalWaypointsAndVehicles) {
+    EntityWorld ew;
+    WorldState ws = make_unit_world();
+    std::unordered_map<uint32_t, EntityId> obj_id_map;
+    std::unordered_map<uint32_t, EntityId> unit_id_map;
+    auto ids = populate_units(ew, ws, obj_id_map, unit_id_map);
+
+    // Flight (u4) has waypoints
+    EntityHandle h_fl(ids[3], &ew);
+    EXPECT_TRUE(h_fl.has<WaypointPlanComponent>());
+    ASSERT_EQ(h_fl.get<WaypointPlanComponent>()->waypoints.size(), 1u);
+    EXPECT_EQ(h_fl.get<WaypointPlanComponent>()->waypoints[0].x, 520);
+
+    // Battalion (u1) has no waypoints
+    EntityHandle h_bat(ids[0], &ew);
+    EXPECT_FALSE(h_bat.has<WaypointPlanComponent>());
+
+    // Battalion (u1) has vehicle groups
+    EXPECT_TRUE(h_bat.has<VehicleCompositionComponent>());
+    ASSERT_EQ(h_bat.get<VehicleCompositionComponent>()->groups.size(), 1u);
+    EXPECT_EQ(h_bat.get<VehicleCompositionComponent>()->groups[0].vehicle_name, "M-1A1");
+
+    // Squadron (u3) has no vehicle groups
+    EntityHandle h_sq(ids[2], &ew);
+    EXPECT_FALSE(h_sq.has<VehicleCompositionComponent>());
+}
+
+TEST(PopulateUnits, ConditionalUnitClassScores) {
+    EntityWorld ew;
+    WorldState ws = make_unit_world();
+    std::unordered_map<uint32_t, EntityId> obj_id_map;
+    std::unordered_map<uint32_t, EntityId> unit_id_map;
+    auto ids = populate_units(ew, ws, obj_id_map, unit_id_map);
+
+    // Battalion has non-zero scores
+    EntityHandle h_bat(ids[0], &ew);
+    EXPECT_TRUE(h_bat.has<UnitClassScoreComponent>());
+    EXPECT_EQ(h_bat.get<UnitClassScoreComponent>()->scores[0], 10);
+    EXPECT_EQ(h_bat.get<UnitClassScoreComponent>()->scores[3], 80);
+
+    // Brigade has all-zero scores → no component
+    EntityHandle h_bri(ids[1], &ew);
+    EXPECT_FALSE(h_bri.has<UnitClassScoreComponent>());
+}
+
+TEST(PopulateUnits, HierarchyResolved) {
+    EntityWorld ew;
+    WorldState ws = make_unit_world();
+    std::unordered_map<uint32_t, EntityId> obj_id_map;
+    std::unordered_map<uint32_t, EntityId> unit_id_map;
+    auto ids = populate_units(ew, ws, obj_id_map, unit_id_map);
+
+    // Battalion's parent should resolve to the Brigade entity.
+    EntityHandle h_bat(ids[0], &ew);
+    auto* hier = h_bat.get<HierarchyComponent>();
+    ASSERT_NE(hier, nullptr);
+    EXPECT_TRUE(hier->parent.valid());
+    EXPECT_EQ(hier->parent, ids[1]);  // Brigade
+
+    // Brigade's children should include the Battalion.
+    EntityHandle h_bri(ids[1], &ew);
+    auto* bri_hier = h_bri.get<HierarchyComponent>();
+    ASSERT_NE(bri_hier, nullptr);
+    ASSERT_EQ(bri_hier->children.size(), 1u);
+    EXPECT_EQ(bri_hier->children[0], ids[0]);  // Battalion
+}
+
+TEST(PopulateUnits, SquadronAirbaseResolved) {
+    EntityWorld ew;
+    WorldState ws = make_unit_world();
+    // Need an objective entity for the airbase (id_num=1001).
+    std::unordered_map<uint32_t, EntityId> obj_id_map;
+    auto obj_h = ew.create();
+    obj_id_map[1001] = obj_h.id();
+
+    std::unordered_map<uint32_t, EntityId> unit_id_map;
+    auto ids = populate_units(ew, ws, obj_id_map, unit_id_map);
+
+    // Squadron's airbase should resolve to the objective entity.
+    EntityHandle h_sq(ids[2], &ew);
+    auto* sq = h_sq.get<SquadronComponent>();
+    ASSERT_NE(sq, nullptr);
+    EXPECT_TRUE(sq->airbase.valid());
+    EXPECT_EQ(sq->airbase, obj_h.id());
+}
+
+TEST(PopulateUnits, FlightPackageAndSquadronResolved) {
+    EntityWorld ew;
+    WorldState ws = make_unit_world();
+    std::unordered_map<uint32_t, EntityId> obj_id_map;
+    std::unordered_map<uint32_t, EntityId> unit_id_map;
+    auto ids = populate_units(ew, ws, obj_id_map, unit_id_map);
+
+    // Flight's package and squadron should be resolved.
+    EntityHandle h_fl(ids[3], &ew);
+    auto* fp = h_fl.get<FlightPlanComponent>();
+    ASSERT_NE(fp, nullptr);
+    EXPECT_TRUE(fp->package.valid());
+    EXPECT_EQ(fp->package, ids[4]);  // Package
+    EXPECT_TRUE(fp->squadron.valid());
+    EXPECT_EQ(fp->squadron, ids[2]);  // Squadron
+}
+
+TEST(PopulateUnits, DomainTags) {
+    EntityWorld ew;
+    WorldState ws = make_unit_world();
+    std::unordered_map<uint32_t, EntityId> obj_id_map;
+    std::unordered_map<uint32_t, EntityId> unit_id_map;
+    auto ids = populate_units(ew, ws, obj_id_map, unit_id_map);
+
+    // Battalion → domain="ground"
+    EntityHandle h_bat(ids[0], &ew);
+    EXPECT_EQ(h_bat.get_tag(tags::DOMAIN)->str_val, "ground");
+
+    // Squadron → domain="air"
+    EntityHandle h_sq(ids[2], &ew);
+    EXPECT_EQ(h_sq.get_tag(tags::DOMAIN)->str_val, "air");
+}
+
+TEST(PopulateUnits, RoleTags) {
+    EntityWorld ew;
+    WorldState ws = make_unit_world();
+    std::unordered_map<uint32_t, EntityId> obj_id_map;
+    std::unordered_map<uint32_t, EntityId> unit_id_map;
+    auto ids = populate_units(ew, ws, obj_id_map, unit_id_map);
+
+    EntityHandle h_bat(ids[0], &ew);
+    EXPECT_EQ(h_bat.get_tag(tags::ROLE)->str_val, "battalion");
+
+    EntityHandle h_sq(ids[2], &ew);
+    EXPECT_EQ(h_sq.get_tag(tags::ROLE)->str_val, "squadron");
+
+    EntityHandle h_fl(ids[3], &ew);
+    EXPECT_EQ(h_fl.get_tag(tags::ROLE)->str_val, "flight");
+
+    EntityHandle h_pk(ids[4], &ew);
+    EXPECT_EQ(h_pk.get_tag(tags::ROLE)->str_val, "package");
+}
+
+TEST(PopulateUnits, IdMapBuilt) {
+    EntityWorld ew;
+    WorldState ws = make_unit_world();
+    std::unordered_map<uint32_t, EntityId> obj_id_map;
+    std::unordered_map<uint32_t, EntityId> unit_id_map;
+    auto ids = populate_units(ew, ws, obj_id_map, unit_id_map);
+
+    EXPECT_EQ(unit_id_map.size(), 5u);
+    EXPECT_TRUE(unit_id_map.count(2001));
+    EXPECT_TRUE(unit_id_map.count(3001));
+    EXPECT_TRUE(unit_id_map.count(4001));
+    EXPECT_TRUE(unit_id_map.count(5001));
+    EXPECT_TRUE(unit_id_map.count(6001));
+}
+
+// ============================================================================
+// Phase 3: populate_world (end-to-end)
+// ============================================================================
+
+TEST(PopulateWorld, CreatesAllEntityKinds) {
+    EntityWorld ew;
+    WorldState ws = make_test_world();
+    ws.objectives = make_objective_world().objectives;
+    ws.units = make_unit_world().units;
+
+    auto pw = populate_world(ew, ws);
+
+    // Campaign: 1 entity
+    EXPECT_TRUE(pw.campaign.valid());
+
+    // Teams: 3 non-empty teams
+    EXPECT_EQ(pw.teams.size(), 3u);
+
+    // Objectives: 3
+    EXPECT_EQ(pw.objectives.size(), 3u);
+
+    // Units: 5
+    EXPECT_EQ(pw.units.size(), 5u);
+
+    // Total entities: 1 + 3 + 3 + 5 = 12
+    EXPECT_EQ(ew.size(), 12u);
+
+    // ID maps populated
+    EXPECT_EQ(pw.objective_id_map.size(), 3u);
+    EXPECT_EQ(pw.unit_id_map.size(), 5u);
+}
+
+TEST(PopulateWorld, CanQueryByComponent) {
+    EntityWorld ew;
+    WorldState ws = make_test_world();
+    ws.objectives = make_objective_world().objectives;
+    ws.units = make_unit_world().units;
+
+    auto pw = populate_world(ew, ws);
+
+    // Query all objectives (by component type)
+    auto obj_entities = ew.with_component<ObjectiveTypeComponent>();
+    EXPECT_EQ(obj_entities.size(), 3u);
+
+    // Query all units (by component type)
+    auto unit_entities = ew.with_component<UnitCoreComponent>();
+    EXPECT_EQ(unit_entities.size(), 5u);
+
+    // Query all teams (by component type)
+    auto team_entities = ew.with_component<TeamComponent>();
+    EXPECT_EQ(team_entities.size(), 3u);
+
+    // Query campaign
+    auto campaign_entities = ew.with_component<CampaignStateComponent>();
+    EXPECT_EQ(campaign_entities.size(), 1u);
+
+    // Query radar objectives
+    auto radar_entities = ew.with_component<RadarComponent>();
+    EXPECT_EQ(radar_entities.size(), 1u);
+
+    // Query ground units
+    auto ground_units = ew.with_component<GroundTacticalComponent>();
+    EXPECT_EQ(ground_units.size(), 2u);  // battalion + brigade
+
+    // Query flights
+    auto flights = ew.with_component<FlightPlanComponent>();
+    EXPECT_EQ(flights.size(), 1u);
+}
+
+// ============================================================================
+// Phase 3: Real fixture end-to-end test
+// ============================================================================
+
+TEST(PopulateWorld, RealFixture) {
+    // Load the real save1.cam-derived JSON and populate EntityWorld.
+    // This validates the entire pipeline:
+    //   .cam → JSON → WorldState → EntityWorld
+    const char* path = WORLD_JSON_FIXTURE;
+    ASSERT_NE(path, nullptr);
+
+    WorldState ws;
+    ws.load(path);
+
+    // The real Korea save has 8 teams, 2659 objectives, 683 units.
+    EXPECT_EQ(ws.teams.size(), 8u);
+    EXPECT_EQ(ws.objectives.size(), 2659u);
+    EXPECT_EQ(ws.units.size(), 683u);
+
+    EntityWorld ew;
+    auto pw = populate_world(ew, ws);
+
+    // Campaign entity
+    EXPECT_TRUE(pw.campaign.valid());
+    EntityHandle camp_h(pw.campaign, &ew);
+    EXPECT_TRUE(camp_h.has<CampaignStateComponent>());
+
+    // Team entities: some slots may be empty, so count via component
+    auto team_entities = ew.with_component<TeamComponent>();
+    EXPECT_GE(team_entities.size(), 4u);  // at least U.S., ROK, Japan, DPRK
+    EXPECT_LE(team_entities.size(), 8u);
+
+    // Objective entities: one per WorldState objective
+    EXPECT_EQ(pw.objectives.size(), 2659u);
+    auto obj_with_transform = ew.with_component<ObjectiveTypeComponent>();
+    EXPECT_EQ(obj_with_transform.size(), 2659u);
+
+    // Every objective has TransformComponent, OwnershipComponent, PropertyBag
+    for (auto id : pw.objectives) {
+        EntityHandle h(id, &ew);
+        ASSERT_TRUE(h.has<TransformComponent>());
+        ASSERT_TRUE(h.has<OwnershipComponent>());
+        ASSERT_TRUE(h.has<PropertyBag>());
+    }
+
+    // Unit entities: one per WorldState unit
+    EXPECT_EQ(pw.units.size(), 683u);
+    auto unit_with_core = ew.with_component<UnitCoreComponent>();
+    EXPECT_EQ(unit_with_core.size(), 683u);
+
+    // Every unit has TransformComponent, UnitCoreComponent, PropertyBag
+    for (auto id : pw.units) {
+        EntityHandle h(id, &ew);
+        ASSERT_TRUE(h.has<TransformComponent>());
+        ASSERT_TRUE(h.has<UnitCoreComponent>());
+        ASSERT_TRUE(h.has<PropertyBag>());
+    }
+
+    // Verify some radar objectives exist
+    auto radar_objs = ew.with_component<RadarComponent>();
+    EXPECT_GT(radar_objs.size(), 0u);
+
+    // Verify unit class distribution via components.
+    // The Korea save1 fixture has battalions, brigades, taskforces, and
+    // squadrons — but no flights or packages (those are created at runtime
+    // by the ATO, not saved in the campaign file).
+    auto ground_tactical = ew.with_component<GroundTacticalComponent>();
+    auto squadrons = ew.with_component<SquadronComponent>();
+    EXPECT_GT(ground_tactical.size(), 0u);
+    EXPECT_GT(squadrons.size(), 0u);
+
+    // VU_ID→EntityId maps: populated when WorldState entries have non-zero
+    // id_num. The current save1.cam fixture does not emit VU_ID fields
+    // (id_num, id_creator), so the maps may be empty. They will be
+    // populated once f4-world-convert emits VU_ID data.
+    // Cross-reference resolution requires VU_ID data to work.
+
+    // Verify the structural payoff: we can query entities by component
+    // type, not by indexing into WorldState vectors.
+    auto all_transforms = ew.with_component<TransformComponent>();
+    EXPECT_EQ(all_transforms.size(), pw.objectives.size() + pw.units.size());
+
+    auto all_ownership = ew.with_component<OwnershipComponent>();
+    EXPECT_EQ(all_ownership.size(), pw.objectives.size());
 }

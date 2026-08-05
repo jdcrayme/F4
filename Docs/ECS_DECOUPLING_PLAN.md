@@ -1,6 +1,6 @@
 # ECS Decoupling Plan — Decoupling World Implementation from Legacy File Formats
 
-> **Status**: Active  
+> **Status**: Active — Phases 1–3 complete ✅  
 > **Created**: 2025-08-05  
 > **Companion**: [Architecture Proposal §8](ARCHITECTURE%20PROPOSAL.md#8-f4-entities--entity-system), [§18.5](ARCHITECTURE%20PROPOSAL.md#185-the-world-data-parser-new-milestone)  
 > **Goal**: Make `EntityWorld` the runtime representation of the game world, with `WorldState` as a private implementation detail of the format bridge.

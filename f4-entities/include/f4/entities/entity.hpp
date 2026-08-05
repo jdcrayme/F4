@@ -126,7 +126,7 @@ namespace f4::entities {
     namespace tags {
         inline constexpr const char* ROLE = "role";    // "fighter","bomber","tanker","awacs",...
         inline constexpr const char* TEAM = "team";    // "red","blue"
-        //inline constexpr const char* DOMAIN = "domain";  // "air","ground","naval"
+        inline constexpr const char* OPDOMAIN = "domain";  // "air","ground","naval"
         inline constexpr const char* ALIVE = "alive";   // bool
         inline constexpr const char* STEALTH = "stealth"; // bool
     }
