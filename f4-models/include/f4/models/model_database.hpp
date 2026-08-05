@@ -18,12 +18,15 @@
 #pragma once
 
 #include <f4/models/model_record.hpp>
+#include <f4/models/model_lod.hpp>
+#include <f4/models/geometry.hpp>
 
 #include <array>
 #include <climits>
 #include <cstdint>
 #include <filesystem>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace f4::models {
@@ -82,6 +85,16 @@ public:
     /// Parse geometry for a specific LOD of a model.
     [[nodiscard]] std::string parse_lod(int parent_index, int lod_index);
 
+    /// Extract renderable geometry from a parsed BSP tree.
+    /// Call after parse_lod(). Returns the geometry for the given LOD.
+    /// @param parent_index  Model index
+    /// @param lod_index     LOD index within the model (0 = highest detail)
+    /// @param state         DOF/switch state controls
+    /// @return              Extracted geometry (empty on failure)
+    [[nodiscard]] ModelGeometry extract_model_geometry(
+        int parent_index, int lod_index,
+        const ModelState& state = {}) const;
+
     // ── Accessors ─────────────────────────────────────────────────────
 
     [[nodiscard]] bool valid() const noexcept { return version_ != 0; }
@@ -120,6 +133,9 @@ public:
     [[nodiscard]] std::vector<const ModelRecord*> find_by_class(
         std::string_view class_name) const;
 
+    /// Access the parsed BSP tree for a model/LOD. Returns nullptr if not parsed.
+    [[nodiscard]] const BspTree* bsp_tree(int parent_index, int lod_index) const;
+
     // ── File Finder ───────────────────────────────────────────────────
 
     /// Find KoreaObj.HDR and KoreaObj.LOD in common locations.
@@ -148,6 +164,23 @@ private:
 
     // HDR raw data (kept for LOD parsing)
     std::vector<uint8_t> hdr_data_;
+
+    // Parsed LOD data, keyed by (parent_index << 8 | lod_index)
+    // Stored sparse — only filled when parse_lod() is called.
+    struct LodKey {
+        int parent_index;
+        int lod_index;
+        bool operator==(const LodKey& o) const {
+            return parent_index == o.parent_index && lod_index == o.lod_index;
+        }
+    };
+    struct LodKeyHash {
+        std::size_t operator()(const LodKey& k) const {
+            return static_cast<std::size_t>(k.parent_index) * 256 +
+                   static_cast<std::size_t>(k.lod_index);
+        }
+    };
+    std::unordered_map<LodKey, ModelLod, LodKeyHash> parsed_lods_;
 };
 
 } // namespace f4::models

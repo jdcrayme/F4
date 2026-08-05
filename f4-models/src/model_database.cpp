@@ -4,11 +4,13 @@
 
 #include <f4/models/model_database.hpp>
 #include <f4/models/model_record.hpp>
+#include <f4/models/geometry.hpp>
 
 #include "bin_reader.hpp"
 #include "hdr_parser.hpp"
 #include "bsp_parser.hpp"
 #include "dx_parser.hpp"
+#include "geometry_extractor.hpp"
 
 #include <algorithm>
 #include <array>
@@ -269,13 +271,9 @@ std::string ModelDatabase::parse_lod(int parent_index, int lod_index) {
         mlod.data = std::move(bsp_data);
     }
 
-    // We don't store ModelLod in ModelRecord currently — that's a future
-    // enhancement. For now, the parse validates the data and the caller
-    // can use the returned ModelLod for rendering.
-
-    // Actually, let's add a vector of parsed LODs to ModelRecord
-    // We need to modify ModelRecord to hold parsed LODs.
-    // For now, this just validates the data can be parsed.
+    // Store the parsed LOD for later retrieval
+    LodKey key{parent_index, lod_index};
+    parsed_lods_[key] = std::move(mlod);
 
     return {};
 }
@@ -283,6 +281,33 @@ std::string ModelDatabase::parse_lod(int parent_index, int lod_index) {
 const ModelRecord* ModelDatabase::model(int index) const noexcept {
     if (index < 0 || index >= static_cast<int>(parents_.size())) return nullptr;
     return &parents_[index];
+}
+
+ModelGeometry ModelDatabase::extract_model_geometry(
+    int parent_index, int lod_index,
+    const ModelState& state) const
+{
+    LodKey key{parent_index, lod_index};
+    auto it = parsed_lods_.find(key);
+    if (it == parsed_lods_.end()) {
+        return {};  // not parsed yet
+    }
+
+    const auto& mlod = it->second;
+    const BspTree* tree = mlod.bsp_tree();
+    if (!tree) {
+        return {};  // DX format not yet supported for extraction
+    }
+
+    std::string err;
+    return detail::extract_geometry(*tree, state, 0, err);
+}
+
+const BspTree* ModelDatabase::bsp_tree(int parent_index, int lod_index) const {
+    LodKey key{parent_index, lod_index};
+    auto it = parsed_lods_.find(key);
+    if (it == parsed_lods_.end()) return nullptr;
+    return it->second.bsp_tree();
 }
 
 std::vector<const ModelRecord*> ModelDatabase::find_by_slots(

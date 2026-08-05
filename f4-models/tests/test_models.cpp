@@ -5,6 +5,10 @@
 
 #include <f4/models/f4_models.hpp>
 
+// Access internal poly_parser for header size tests
+// (poly_parser.hpp is internal to the library but we need it for testing)
+#include "poly_parser.hpp"
+
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -199,6 +203,182 @@ TEST_F(ModelsFixtureTest, ParseModelLod) {
     EXPECT_TRUE(parse_err.empty()) << "Parse error: " << parse_err;
 }
 
+TEST_F(ModelsFixtureTest, GeometryExtraction) {
+    f4::models::ModelDatabase db;
+    auto err = db.load(hdr_path(), lod_path());
+    ASSERT_TRUE(err.empty()) << err;
+
+    // Parse model 1 LOD 0 (F-16, should have substantial geometry)
+    auto parse_err = db.parse_lod(1, 0);
+    ASSERT_TRUE(parse_err.empty()) << "Parse error: " << parse_err;
+
+    // Extract geometry
+    auto geom = db.extract_model_geometry(1, 0);
+
+    // Model 1 (F-16) has BSP geometry with real polygons.
+    // After fixing poly_parser field order and switch node traversal,
+    // we should get actual meshes with triangles.
+    EXPECT_GT(geom.meshes.size(), 0u)
+        << "Model 1 LOD 0 should produce at least one mesh";
+    EXPECT_GT(geom.total_triangles(), 0u)
+        << "Model 1 LOD 0 should produce triangles";
+    EXPECT_GT(geom.total_vertices(), 0u)
+        << "Model 1 LOD 0 should produce vertices";
+
+    // Verify vertex positions are not all zero (real geometry, not default)
+    bool has_nonzero_pos = false;
+    for (const auto& mesh : geom.meshes) {
+        for (const auto& v : mesh.vertices) {
+            if (v.position.x != 0 || v.position.y != 0 || v.position.z != 0) {
+                has_nonzero_pos = true;
+                break;
+            }
+        }
+        if (has_nonzero_pos) break;
+    }
+    EXPECT_TRUE(has_nonzero_pos) << "Vertices should have non-zero positions";
+}
+
+TEST_F(ModelsFixtureTest, BspTreeStructure) {
+    f4::models::ModelDatabase db;
+    auto err = db.load(hdr_path(), lod_path());
+    ASSERT_TRUE(err.empty()) << err;
+
+    // Parse model 1 and check BSP tree structure
+    auto parse_err = db.parse_lod(1, 0);
+    ASSERT_TRUE(parse_err.empty()) << parse_err;
+
+    // Extract geometry and verify it produces real output
+    auto geom = db.extract_model_geometry(1, 0);
+    EXPECT_GT(geom.total_triangles(), 0u)
+        << "Model 1 should produce triangles after bug fixes";
+}
+
+TEST_F(ModelsFixtureTest, GeometryBatchExtract) {
+    // Test geometry extraction across many models to verify robustness.
+    // Parse and extract LOD 0 for the first 50 non-DX models.
+    f4::models::ModelDatabase db;
+    auto err = db.load(hdr_path(), lod_path());
+    ASSERT_TRUE(err.empty()) << err;
+
+    int models_with_geometry = 0;
+    int models_parsed = 0;
+    int total_triangles = 0;
+
+    int limit = std::min(50, db.n_models());
+    for (int idx = 0; idx < limit; ++idx) {
+        auto* m = db.model(idx);
+        if (!m || m->lods.empty()) continue;
+
+        auto parse_err = db.parse_lod(idx, 0);
+        if (!parse_err.empty()) continue;
+        models_parsed++;
+
+        auto geom = db.extract_model_geometry(idx, 0);
+        if (geom.total_triangles() > 0) {
+            models_with_geometry++;
+            total_triangles += static_cast<int>(geom.total_triangles());
+        }
+    }
+
+    // At least some models should produce geometry
+    EXPECT_GT(models_parsed, 0) << "Should parse at least some models";
+    EXPECT_GT(models_with_geometry, 0)
+        << "At least some models should produce geometry";
+    EXPECT_GT(total_triangles, 0)
+        << "Should have total triangles > 0 across batch";
+}
+
+TEST_F(ModelsFixtureTest, GeometryVertexAttributes) {
+    // Test that textured models have UV coordinates and texture IDs
+    f4::models::ModelDatabase db;
+    auto err = db.load(hdr_path(), lod_path());
+    ASSERT_TRUE(err.empty()) << err;
+
+    // Model 1 (F-16) should have textured polygons
+    auto parse_err = db.parse_lod(1, 0);
+    ASSERT_TRUE(parse_err.empty()) << parse_err;
+
+    auto geom = db.extract_model_geometry(1, 0);
+    ASSERT_GT(geom.total_triangles(), 0u);
+
+    // Check that some vertices have UV coordinates
+    bool has_uv = false;
+    bool has_normals = false;
+    bool has_tex_id = false;
+    for (const auto& mesh : geom.meshes) {
+        for (const auto& v : mesh.vertices) {
+            if (v.uv.u != 0 || v.uv.v != 0) has_uv = true;
+            if (v.normal.x != 0 || v.normal.y != 0 || v.normal.z != 0) has_normals = true;
+            if (v.tex_id >= 0) has_tex_id = true;
+        }
+    }
+    EXPECT_TRUE(has_uv) << "Textured model should have UV coordinates";
+    EXPECT_TRUE(has_normals) << "Model should have face normals";
+    EXPECT_TRUE(has_tex_id) << "Textured model should have texture IDs";
+}
+
+TEST_F(ModelsFixtureTest, GeometryRobustnessWide) {
+    // Parse a wide range of models to verify no crashes or corruption.
+    // Test models with different characteristics.
+    f4::models::ModelDatabase db;
+    auto err = db.load(hdr_path(), lod_path());
+    ASSERT_TRUE(err.empty()) << err;
+
+    // Test specific model indices: air, ground, feature types
+    for (int idx : {1, 2, 3, 5, 10, 42, 100, 200, 500, 1000}) {
+        if (idx >= db.n_models()) continue;
+        auto* m = db.model(idx);
+        if (!m) continue;
+
+        // Parse all LODs
+        for (int lod = 0; lod < static_cast<int>(m->lods.size()); ++lod) {
+            auto pe = db.parse_lod(idx, lod);
+            EXPECT_TRUE(pe.empty())
+                << "Parse error for model " << idx << " LOD " << lod << ": " << pe;
+
+            if (pe.empty()) {
+                auto geom = db.extract_model_geometry(idx, lod);
+                // Just verify no crash — geometry may be empty for some LODs
+                (void)geom;
+            }
+        }
+    }
+}
+
+TEST_F(ModelsFixtureTest, ModelGeometryTypes) {
+    // Test the geometry types themselves
+    f4::models::Mesh m1;
+    m1.vertices = {
+        {{0,0,0}, {0,0,1}, {0,0}, 0, -1},
+        {{1,0,0}, {0,0,1}, {1,0}, 0, -1},
+        {{1,1,0}, {0,0,1}, {1,1}, 0, -1},
+    };
+    m1.triangles = {{0, 1, 2, -1}};
+    m1.tex_id = -1;
+    EXPECT_EQ(m1.triangle_count(), 1u);
+
+    f4::models::Mesh m2;
+    m2.vertices = {
+        {{0,1,0}, {0,0,1}, {0,1}, 0, -1},
+        {{1,1,0}, {0,0,1}, {1,1}, 0, -1},
+        {{1,2,0}, {0,0,1}, {1,2}, 0, -1},
+    };
+    m2.triangles = {{0, 1, 2, -1}};
+    m2.tex_id = -1;
+
+    f4::models::ModelGeometry geom;
+    geom.meshes = {m1, m2};
+    EXPECT_EQ(geom.total_triangles(), 2u);
+    EXPECT_EQ(geom.total_vertices(), 6u);
+
+    auto merged = geom.merged();
+    EXPECT_EQ(merged.triangle_count(), 2u);
+    EXPECT_EQ(merged.vertices.size(), 6u);
+    // Check that triangle indices were remapped
+    EXPECT_EQ(merged.triangles[1].v0, 3u);  // was 0 + offset 3
+}
+
 TEST_F(ModelsFixtureTest, Version) {
     f4::models::ModelDatabase db;
     auto err = db.load_hdr(hdr_path());
@@ -267,4 +447,57 @@ TEST(DxDetection, Checksum) {
     // A BSP tag count (e.g. 308) should NOT match DX format
     uint32_t bsp = 308;
     EXPECT_FALSE((bsp & 0xFFFF) == ((~bsp >> 16) & 0xFFFF));
+}
+
+// ── PolyType Header Size Tests ────────────────────────────────────────────
+
+TEST(PolyParser, HeaderSizes) {
+    // Verify on-disk header sizes match FreeFalcon's class layout
+    namespace fm = f4::models;
+    using f4::models::detail::prim_header_size;
+
+    // PointF/LineF → PrimPointFC/PrimLineFC = 16
+    EXPECT_EQ(prim_header_size(fm::PolyType::PointF), 16);
+    EXPECT_EQ(prim_header_size(fm::PolyType::LineF), 16);
+
+    // F/AF → PolyFC = 32
+    EXPECT_EQ(prim_header_size(fm::PolyType::F), 32);
+    EXPECT_EQ(prim_header_size(fm::PolyType::AF), 32);
+
+    // FL/AFL → PolyFCN = 36
+    EXPECT_EQ(prim_header_size(fm::PolyType::FL), 36);
+    EXPECT_EQ(prim_header_size(fm::PolyType::AFL), 36);
+
+    // G/AG → PolyVC = 32
+    EXPECT_EQ(prim_header_size(fm::PolyType::G), 32);
+    EXPECT_EQ(prim_header_size(fm::PolyType::AG), 32);
+
+    // GL/AGL → PolyVCN = 36
+    EXPECT_EQ(prim_header_size(fm::PolyType::GL), 36);
+    EXPECT_EQ(prim_header_size(fm::PolyType::AGL), 36);
+
+    // Tex/ATex/CTex/CATex/BAptTex → PolyTexFC = 40
+    EXPECT_EQ(prim_header_size(fm::PolyType::Tex), 40);
+    EXPECT_EQ(prim_header_size(fm::PolyType::ATex), 40);
+    EXPECT_EQ(prim_header_size(fm::PolyType::CTex), 40);
+    EXPECT_EQ(prim_header_size(fm::PolyType::CATex), 40);
+    EXPECT_EQ(prim_header_size(fm::PolyType::BAptTex), 40);
+
+    // TexL/ATexL/CTexL/CATexL → PolyTexFCN = 44
+    EXPECT_EQ(prim_header_size(fm::PolyType::TexL), 44);
+    EXPECT_EQ(prim_header_size(fm::PolyType::ATexL), 44);
+    EXPECT_EQ(prim_header_size(fm::PolyType::CTexL), 44);
+    EXPECT_EQ(prim_header_size(fm::PolyType::CATexL), 44);
+
+    // TexG/ATexG/CTexG/CATexG → PolyTexVC = 40
+    EXPECT_EQ(prim_header_size(fm::PolyType::TexG), 40);
+    EXPECT_EQ(prim_header_size(fm::PolyType::ATexG), 40);
+    EXPECT_EQ(prim_header_size(fm::PolyType::CTexG), 40);
+    EXPECT_EQ(prim_header_size(fm::PolyType::CATexG), 40);
+
+    // TexGL/ATexGL/CTexGL/CATexGL → PolyTexVCN = 44
+    EXPECT_EQ(prim_header_size(fm::PolyType::TexGL), 44);
+    EXPECT_EQ(prim_header_size(fm::PolyType::ATexGL), 44);
+    EXPECT_EQ(prim_header_size(fm::PolyType::CTexGL), 44);
+    EXPECT_EQ(prim_header_size(fm::PolyType::CATexGL), 44);
 }

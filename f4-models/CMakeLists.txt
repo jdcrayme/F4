@@ -9,6 +9,9 @@ add_library(f4-models STATIC
     src/hdr_parser.cpp
     src/bsp_parser.cpp
     src/dx_parser.cpp
+    src/poly_parser.cpp
+    src/geometry_extractor.cpp
+    src/geometry.cpp
     src/model_database.cpp
     src/model_json.cpp
 )

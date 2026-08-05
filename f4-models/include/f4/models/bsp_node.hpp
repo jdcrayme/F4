@@ -116,10 +116,12 @@ struct BspTree {
     /// BSwitchNode::switch_children_offset indexes into this.
     std::vector<NodeIdx> switch_children;
 
-    /// Raw polygon data bytes (not yet parsed into typed Prims).
-    /// Prim/Poly parsing is deferred — tools that need polygon data
-    /// can call parse_primitives() on the relevant byte ranges.
-    std::vector<uint8_t> poly_data;
+    /// NodeTreeData buffer (nodes + shared pools, AFTER tag count + tag list).
+    /// ALL on-disk offsets in the BSP tree (subtree, sibling, front, back,
+    /// prim_offset, xyz, rgba, uv, coords, normals, tex_ids) are relative
+    /// to byte 0 of this buffer. The poly_parser and geometry_extractor
+    /// use this buffer directly with unadjusted offsets.
+    std::vector<uint8_t> lod_buffer;
 
     /// Total tag count (from the BSP header).
     int32_t tag_count = 0;
