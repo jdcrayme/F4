@@ -26,6 +26,7 @@ add_subdirectory(f4-world-convert) # .cam campaign archive -> JSON (keystone)
 add_subdirectory(f4-world)         # typed WorldState -> populates f4-entities
 add_subdirectory(f4-terrain)       # theater terrain (elevation/palette/overlay)
 add_subdirectory(f4-terrain-convert) # THEATER.* -> korea.terrain.json (CLI)
+add_subdirectory(f4-models)        # KoreaObj.HDR/LOD 3D model database parser
 option(F4_BUILD_VIEWER "Build the Raylib + Dear ImGui interactive viewer (requires X11 + OpenGL dev headers)" ON)
 if(F4_BUILD_VIEWER)
     add_subdirectory(f4-world-viewer)  # Raylib + Dear ImGui interactive viewer
