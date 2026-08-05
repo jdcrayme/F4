@@ -414,6 +414,18 @@ void load_radar_data(const std::filesystem::path& base_path,
 // you want to load the entire static-object database in one shot.
 // ============================================================================
 
+/// Per-file load outcome, captured by TheaterObjectDatabase::load_all.
+/// One entry per Falcon4.* file attempted. Allows callers (viewer,
+/// diagnostics, AI data init) to tell *why* a table is empty: because
+/// the file was missing, because it failed to parse, or because it
+/// parsed cleanly but contained zero records.
+struct TheaterFileLoadResult {
+    std::string filename;        // e.g. "Falcon4.OCD"
+    enum class Status { Missing, ParseError, Loaded } status{Status::Missing};
+    std::size_t record_count{0}; // entries decoded (0 if Missing or ParseError)
+    std::string message;         // empty if Loaded; else human-readable cause
+};
+
 struct TheaterObjectDatabase {
     ObjectiveClassTable objectives;     // Falcon4.OCD
     PtHeaderTable       pt_headers;     // Falcon4.PHD
@@ -424,9 +436,16 @@ struct TheaterObjectDatabase {
     FeatureEntryTable   feature_entries; // Falcon4.FED
     RadarClassTable     radars;         // Falcon4.RCD (Phase 3)
 
+    /// Diagnostics from the last `load_all` call, one entry per file tried.
+    /// Cleared at the start of each `load_all`. Stable order matches the
+    /// declaration order above (OCD, PHD, PD, UCD, VCD, FCD, FED, RCD).
+    std::vector<TheaterFileLoadResult> load_diagnostics;
+
     /// Load all eight files from `dir/Falcon4.{OCD,PHD,PD,UCD,VCD,FCD,FED,RCD}`.
-    /// Missing files are skipped silently (their table stays empty). Use
-    /// the per-table `loaded()` method to check which parsed successfully.
+    /// Missing files are recorded in `load_diagnostics` with status=Missing
+    /// (their table stays empty). Parse errors are recorded with status=
+    /// ParseError and the exception message; the table still stays empty.
+    /// Use the per-table `loaded()` method or `load_diagnostics` to inspect.
     void load_all(const std::filesystem::path& dir);
 
     /// True if at least one of the eight tables is loaded.

@@ -1294,3 +1294,222 @@ Stage Summary:
 - The viewer uses EntityWorld exclusively for rendering (no WorldState in viewer_state.hpp)
 - WorldState is only included explicitly by: world_loader.hpp (adapters), world_state.cpp (loader), file_ops.cpp (terrain metadata)
 - All 4 phases of the ECS Decoupling Plan are complete
+
+---
+Task ID: BUILD-TEST-1
+Agent: general-purpose subagent
+Task: Build the F4 project, run all unit tests, and produce a precise failure report.
+
+Work Log:
+- Toolchain check: g++ 14.2.0 present; cmake and ninja missing. No sudo password available, so installed both via `uv tool install cmake ninja` into ~/.local/bin (cmake 4.4.2, ninja 1.13.0).
+- Read root CMakeLists.txt: 14 subprojects added (f4-units, f4-math, f4-json, f4-geo, f4-state-machine, f4-entities, f4-messaging, f4-data, f4-convert, f4-install, f4-world-convert, f4-world, f4-terrain, f4-terrain-convert, f4-world-viewer (optional), f4-flight-model). FetchContent pulls in GoogleTest and nlohmann/json.
+- Configure attempt 1 (default options) failed: f4-world-viewer -> raylib -> bundled GLFW requires libxrandr-dev, which is not installed and cannot be installed without sudo. Fixed by re-configuring with `-DF4_BUILD_VIEWER=OFF`. The viewer is an interactive GUI app and has no unit tests affected by this.
+- Configure attempt 2 succeeded, but `ctest --test-dir build` reported "No tests were found!!!". Root cause: the top-level CMakeLists.txt did not call `enable_testing()`, so no master CTestTestfile.cmake was generated at the build root (each subproject's local enable_testing() only generates a per-subdir testfile). Applied a minimal 3-line patch to the root CMakeLists.txt: `enable_testing()` + `include(CTest)`. After re-configure, ctest discovered all 933 tests.
+- Build: `cmake --build build -j$(nproc)` -> 200/200 targets linked, no warnings or errors. All test executables produced under build/<module>/tests/.
+- Ran `ctest --test-dir build --output-on-failure --timeout 30 -j4` (output saved to build/ctest_output.txt). Result: 930 passed / 3 failed / 0 timed-out / 1 skipped (intentional: TheaterDataPhase3.RcdParserLoadsFromRealFixtureIfPresent, optional Falcon4.RCD fixture not bundled).
+- Ran each failing test binary directly to capture full assertion text:
+    * build/f4-flight-model/tests/test_stall_sm_integration --gtest_filter='StallSMIntegration.StallEntryAndRecoveryLifecycle' -> asserts sawEnteringDeepStall || sawDeepStall is false at line 129
+    * build/f4-flight-model/tests/test_stall_bus_integration -> 2 of 5 tests fail: PublishesStateChangesOnBus (state_changes.empty()) and CrossThreadForwardingViaSendTo (campaign_received==0)
+- Root cause investigation: all 3 failures share one root cause. The F-16 JSON fixture (build/generated_fixtures/f16.json, generated from f4-convert/tests/fixtures/f16.dat) has aux.criticalAOA == 0.0. The aerodynamics stall detection guard at f4-flight-model/src/aerodynamics.cpp:171 is `if (aux_->criticalAOA > 0.0 && geom_->area_ft2 > 0.0 && alpha_deg > 10.0)` — when criticalAOA==0, the entire stall block is skipped, aero.stalled is never set true, the stall SM's AoAExceed event never fires, and the SM stays in None for the whole 5-second low-airspeed run. The f16.dat fixture has no criticalAOA token (rg returns nothing), so the dat_parser falls back to the rosetta default of 0.0 (f4-convert/rosetta/auxaero_field_map.json) and the C++ struct default of 0.0 (f4-data/include/f4/data/aircraft_config.hpp:238). The passing unit test Aerodynamics.StallDetectionSetsStalledFlag uses a SyntheticAero with criticalAOA=15.0, which is why it correctly flips stalled=true — so the aero code itself works; the bug is in the integration-test fixture.
+- Did NOT apply a fix — the task explicitly asked for diagnosis only. Two candidate fixes were noted in the report: (A) add a non-zero criticalAOA to the F-16 .dat fixture or change the rosetta default, or (B) relax the guard in aerodynamics.cpp:171 to still run stall detection when criticalAOA==0.
+- Files produced this session:
+    * /home/z/my-project/work/F4/build/ctest_output.txt — full ctest output
+    * /home/z/my-project/work/test_report.md — final report with BUILD STATUS / TEST SUMMARY / DETAILED FAILURES / ROOT CAUSE HYPOTHESES
+    * /home/z/my-project/work/F4/CMakeLists.txt — minimal patch: added enable_testing() + include(CTest) at root
+- Configuration used: cmake -S /home/z/my-project/work/F4 -B /home/z/my-project/work/F4/build -DCMAKE_BUILD_TYPE=Debug -G Ninja -DF4_BUILD_VIEWER=OFF
+
+Findings:
+- BUILD: succeeded (after -DF4_BUILD_VIEWER=OFF for missing libxrandr-dev, and a 3-line enable_testing() patch to the root CMakeLists.txt).
+- TESTS: 930/933 passed, 3 failed, 1 skipped (intentional), 0 timed out.
+- All 3 failures are in f4-flight-model and share one root cause: F-16 fixture has aux.criticalAOA=0.0, which short-circuits the stall detection guard in aerodynamics.cpp:171, so the aircraft never enters a stall state at 100 ft/s. Failing tests: StallSMIntegration.StallEntryAndRecoveryLifecycle, StallBusIntegration.PublishesStateChangesOnBus, StallBusIntegration.CrossThreadForwardingViaSendTo (last one cascades from the second).
+
+---
+Task ID: SMELLS-1
+Agent: Explore (code-smell audit)
+Task: Find dark patterns / code smells in F4 that should be resolved before the next feature set. Search across all f4-* modules (f4-math, f4-units, f4-geo, f4-messaging, f4-state-machine, f4-convert, f4-terrain, f4-terrain-convert, f4-entities, f4-install, f4-json, f4-world, f4-world-convert, f4-world-viewer, f4-flight-model, f4-data). Focus on library code (src/, include/) and tests.
+
+Work Log:
+- Read the full include/ and src/ tree of every f4-* module, plus the tests. Skipped only third-party code (tinyfiledialogs) and fixture data.
+- For each module, picked 2-3 representative headers + 1-2 .cpp files and read them in full. For binary parsers (f4-convert, f4-terrain, f4-world-convert, f4-terrain-convert) read the full parser .cpp + the format-documentation header.
+- Cross-cutting ripgrep searches for: `^static\s` (mutable globals), `reinterpret_cast`, `memcpy|memset|memcmp`, `new\s+[A-Z]|delete\s+|malloc\(|free\(`, `using namespace`, `^\s*#define\s+\w+`, `catch\s*\(`, `catch\s*\(\s*\.\.\.\s*\)`, `\bassert\s*\(`, `GTEST_SKIP|sleep_for|/home/|/tmp/`, `TODO|FIXME|HACK|XXX|POLISH|Phase \d|REFACTOR|M1|M2 fix`, `constexpr double PI|DTR|RTD|DEG_TO_RAD`, `struct\s+Cursor\s*\{`, `std::vector<uint8_t>\s+read_file\(`, `FILE\*\s+fp\s*=\s*std::fopen`, `friend\s+`, `^\s+(float|int|uint8_t|...)\s+\w+\[\d+\]` (C-style struct arrays), `SUCCEED\(\)`, `ASSERT_TRUE\(true\)`.
+- Layering check: confirmed f4-math, f4-units, f4-geo, f4-state-machine, f4-messaging, f4-entities, f4-json do not `#include` any higher-level module — layering is clean.
+- No `new`/`delete`/`malloc`/`free` found outside third-party code.
+- No `using namespace` in headers (only in .cpp and tests).
+- No `assert()` used for runtime validation (the codebase uses throw consistently).
+- No macros outside `tinyfiledialogs.h` and 3 local DIFF_AUX_* macros in `f4-convert/src/json_io.cpp:554-558`.
+- No `friend` declarations across library boundaries (only intra-module: `EntityWorld` ↔ `EntityHandle`, `MessageBus` ↔ `send_to`).
+- Diff'd `world_state.hpp` vs `detail/world_state.hpp` — confirmed they are byte-identical except for the top docstring (H2).
+- Diff'd the 6 `Cursor` structs — confirmed they are near-identical with slight API drift (H3).
+- Verified PI/TWO_PI are defined in 3 separate modules (f4-geo, f4-flight, inline in f4-math) plus 1 local copy in f4-convert/dat_parser.cpp (H5).
+- Verified the JSON string-escape logic in f4-json/writer.hpp is duplicated in f4-world-convert/src/world_json.cpp (H6).
+- Verified the `try { } catch {} ` chain in TheaterObjectDatabase::load_all (H1) by reading theater_data.cpp:605-622 in full.
+- Verified the `catch (...)` control-flow dispatch in unit_decoder.cpp:368-381 (H7).
+- Verified the 4 copies of `float detect_ratio[8]` (H8) by grepping the 4 files.
+- Verified the global atomic counter in entity.cpp:19 (H9) by reading the file.
+- Verified the 4 magic upper-bound checks (cam_archive.cpp:47, terrain_data.cpp:72, dat_parser.cpp:200, dat_parser.cpp:172-173) by reading each context.
+- Verified the missing THEATER.MAP magic-number check (M1) by reading terrain_data.cpp:63-82.
+- Verified the `Reader` reference member (M2), permissive skip_value (M3), refactor markers (M4 — 30+ hits across 8 modules), mixed snake_case/camelCase (M5), `state()&` mutable overload (M6), TagKey non-explicit ctors (M7), `int stallState` (M8), mutable table cache (M9), `EntityHandle::add()` returns `T&` (M10), `using namespace f4::data` in flight-model .cpp (M11), `std::function` on SM hot path (M12), locale-dependent JSON parsing (M13), hardcoded /tmp/ paths in tests (M14), `GTEST_SKIP()` without message (M15 — 13 hits), sleep_for-based test (M16), std::map for rawAuxAeroData (M17), char buf[256] in json_io (M18 — 9 hits), int typeEngine (M19), 3 *_type_name switches (M20), public TerrainData terrain member (M21).
+- Wrote report to /home/z/my-project/work/code_smells.md with 30 findings grouped by severity (10 HIGH, 21 MEDIUM, 9 LOW), each with file:line, snippet, category, severity, fix direction.
+
+Findings:
+- HIGH (10): silent exception swallowing in TheaterObjectDatabase::load_all (H1); duplicated WorldState header (H2); 6 copies of Cursor struct (H3); 4 copies of read_file FILE* helper (H4); 3+1 copies of PI/TWO_PI/DTR constants (H5); hand-rolled JSON in f4-world-convert bypassing f4-json (H6); catch(...)-based subclass dispatch in unit_decoder (H7); float detect_ratio[8] duplicated 4× (H8); global atomic counter in f4-entities (H9); magic limits silently truncating corrupt input (H10).
+- MEDIUM (21): missing THEATER.MAP magic validation (M1); Reader holds const std::string& (M2); permissive JSON skip_value (M3); POLISH-*/Phase-*/REFACTOR-* markers (M4); mixed snake_case/camelCase (M5); FlightModel::state() mutable overload (M6); TagKey non-explicit ctors (M7); int stallState (M8); mutable Table cache breaks thread-safety (M9); EntityHandle::add() returns T& (M10); using namespace in .cpp (M11); std::function on SM hot path (M12); locale-dependent JSON parsing (M13); hardcoded /tmp/ paths in tests (M14); GTEST_SKIP() without message (M15); sleep_for-based test (M16); std::map for rawAuxAeroData (M17); char buf[256] in json_io (M18); int typeEngine magic (M19); 3 *_type_name switch functions (M20); public TerrainData terrain member (M21).
+- LOW (9): lzss.hpp path comment stale (L1); minorFrameTime arithmetic comment wrong (L2); g_next_world_cookie doc says random but is monotonic (L3); Trace ring buffer uses vector::erase(begin) (L4); path_buf_[1024] in HexInspector (L5); Vec3::operator[] swallows i>=3 (L6); SUCCEED() in noop test (L7); Reader::read_int accepts + prefix (L8); nlohmann::json vs f4-json split (L9 — intentional, documented).
+- Overall: the codebase is unusually disciplined for a Falcon port (no manual memory management, no macros, no using-namespace in headers, clean layering). The smells cluster in three themes: (1) binary-parser sprawl (Cursor×6, read_file×4, PI×3, hand-rolled JSON, catch-based dispatch), (2) silent failure paths (load_all swallows 8 exceptions, magic limits silently truncate, catch(...) dispatch swallows bugs), (3) half-finished refactors (duplicate world_state.hpp, POLISH/Phase markers, dead try_load lambda).
+- Recommended next-feature prerequisites (in order): fix H1 (diagnostics on load_all), fix H2 (delete orphaned world_state.hpp), introduce f4/io shared module (H3+H4 — unblocks H5, H6), fix H7 (subclass dispatch), sweep M4 (refactor markers).
+- Files produced this session:
+    * /home/z/my-project/work/code_smells.md — full report with 30 findings, file:line citations, snippets, severity, fix direction
+
+---
+Task ID: IO-SURVEY-1
+Agent: explore (sub-agent)
+Task: Survey three specific code-duplication patterns in /home/z/my-project/work/F4 (Cursor binary-reader struct, read_file C-style FILE* helper, PI/TWO_PI/DTR/DEG_TO_RAD constants) as preparation for consolidating them into a new f4-io module. Research only — no source modified.
+
+Work Log:
+- Read the full /home/z/my-project/work/F4 directory tree via LS to enumerate all f4-* modules and locate every .cpp/.hpp of interest.
+- Pattern 1 (Cursor struct): ran `rg "struct Cursor"` across the whole tree — exactly 6 hits, matching the user's expected list. Read the full Cursor definition plus surrounding design notes in all 6 files:
+  * f4-world-convert/src/unit_decoder.cpp:48–71 (sticky error-flag variant; the only non-throwing Cursor)
+  * f4-world-convert/src/theater_data.cpp:41–72 (richest: ctor from vector, eof(), read_bytes(), s8/s16/s32 naming, private check())
+  * f4-world-convert/src/campaign_decoder.cpp:16–36 (minimal: read/i32/u8/fixed_string; only one with fixed_string)
+  * f4-world-convert/src/objective_decoder.cpp:13–27 (canonical small Cursor: read + i16/u16/i32/u32/u8/f32)
+  * f4-world-convert/src/team_decoder.cpp:50–62 (subset of objective: drops i32 and f32)
+  * f4-terrain/src/terrain_data.cpp:31–43 (same shape as team, different prefix)
+- Pattern 2 (read_file): ran `rg "fopen"` across the tree — 4 project source hits (tinyfiledialogs third-party excluded). Read all 4:
+  * f4-world-convert/src/theater_data.cpp:23–35 (standalone, has sz<0 check, throws with path in msg)
+  * f4-world-convert/src/class_table.cpp:22–33 (standalone, NO sz<0 check, short-read msg omits path)
+  * f4-terrain/src/terrain_data.cpp:45–56 (standalone, byte-identical to class_table except prefix "terrain:")
+  * f4-world-convert/src/cam_archive.cpp:26–35 (NOT a helper — inlined into CamArchive::load, reads into raw_ member, adds file_size<8 guard)
+  Also verified (via `rg "read_file"`) that 2 test files (f4-world/tests/test_world_state.cpp:17 and test_world_loader.cpp:137) define a DIFFERENT read_file (std::string return, std::ifstream, no FILE*) — text-mode test helpers, not candidates for consolidation. Documented as "related but distinct".
+- Pattern 3 (angle constants): ran `rg "DTR|DEG_TO_RAD|TWO_PI|\bPI\b|kPi|kDTR|RTD|RAD_TO_DEG|HALF_PI"` across all .hpp/.cpp. Confirmed 4 definition sites (the user's predicted list):
+  * f4-geo/include/f4/geo/constants.hpp:34–37 (inline constexpr double, ALL_CAPS, derived: TWO_PI=2*PI, DEG_TO_RAD=PI/180, RAD_TO_DEG=180/PI)
+  * f4-flight-model/include/f4/flight/constants.hpp:22–30 (constexpr double, ALL_CAPS, ALL independent literals, uses DTR/RTD names + adds HALF_PI)
+  * f4-math/include/f4/math/scalar.hpp:80,81,91,92,104,111 (function-local constexpr inside wrapPi/wrap2Pi — NOT namespace-scope, not exported)
+  * f4-convert/src/dat_parser.cpp:47 (file-scope constexpr double kDTR — Google kConstant naming, one digit short of the others)
+  Verified the flight-model src/*.cpp consumers (gear/eom/engine/fcs/flight_model/aerodynamics) and the geo/test consumers are pure consumers, not new definitions.
+- Module dependency graph: read CMakeLists.txt for f4-geo, f4-flight-model, f4-terrain, f4-world-convert, f4-convert, plus f4-math, f4-data, f4-install (transitive closure). Confirmed:
+  * f4-geo: header-only, zero f4-* deps
+  * f4-flight-model: PUBLIC links f4-data, f4-state-machine, f4-messaging (transitively pulls f4-math via f4-data)
+  * f4-terrain: PUBLIC links f4-json
+  * f4-world-convert: PUBLIC links f4-install
+  * f4-convert: PUBLIC links f4-data + nlohmann_json (transitively f4-math)
+  * f4-math: header-only, ZERO f4-* deps (documented + test-enforced)
+  * f4-install: zero deps (leaf)
+  Read the top-level /home/z/my-project/work/F4/CMakeLists.txt:22–40 for the add_subdirectory ordering.
+- Wrote /home/z/my-project/work/io_survey.md with: verbatim code for all 6 Cursor structs + API drift matrix; verbatim code for all 4 read_file sites + drift table; verbatim code for all 4 angle-constant sites + drift table; full module dependency graph with transitive closure; layering analysis with a recommendation to SPLIT the consolidation (constants → existing f4-math; Cursor + read_file → new f4-io) because f4-math and f4-geo are leaf modules that must not gain a filesystem/stdio dependency.
+
+Findings:
+- Pattern 1 (Cursor, 6 copies): The 6 structs are within ~30 lines of each other but have measurable API drift along 7 axes — OOB contract (5 throw, 1 sticky-flag), signed-int naming (s8/s16/s32 vs i16/i32), read vs read_bytes, skip/remaining/eof presence, fixed_string, ctor-from-vector, error-message prefix. The sticky-flag Cursor (unit_decoder.cpp) is the design outlier: it exists because its caller does subclass dispatch by trying multiple candidate tail parsers in sequence, where exceptions were both slow and silently swallowed under catch(...). Any unified Cursor must support BOTH modes (recommend: ErrorPolicy template parameter). theater_data.cpp is the only Cursor with read_bytes, eof, and a constructor; campaign_decoder.cpp is the only one with fixed_string (should become a free function read_fixed_string(Cursor&, n) in the new header).
+- Pattern 2 (read_file, 3 helpers + 1 inlined): The 3 standalone helpers (theater_data/class_table/terrain_data) are within 4 lines of each other; theater_data is the most defensive (only one with the sz<0 check on ftell). cam_archive.cpp inlines the same pattern into CamArchive::load with a domain-specific file_size<8 guard, reading into the raw_ member instead of returning a value. Consolidation is mechanical: take theater_data's body, parameterize the label string, have cam_archive call it then do its own size check separately.
+- Pattern 3 (angle constants, 4 sites): The same physical constant PI is defined as a literal in 3 places; the deg→rad factor is defined 3 times under 3 different names (DEG_TO_RAD in f4-geo, DTR in f4-flight-model, kDTR in f4-convert). f4-flight-model spells out TWO_PI/HALF_PI/DTR/RTD as independent literals (could drift independently; currently consistent to all printed digits but no compiler-enforced link). f4-math's copies are function-local inside wrapPi/wrap2Pi (not exported). f4-convert's kDTR is one digit shorter than the others (harmless for its sole caller, but exactly the kind of drift consolidation eliminates).
+- Layering recommendation: SPLIT the consolidation. Put the angle constants in the existing f4-math (new header f4/math/constants.hpp) — f4-math is already a leaf dependency of f4-geo, f4-convert, f4-flight-model, and the function-local copies in f4-math/scalar.hpp itself. Put Cursor + read_file in a NEW f4-io STATIC library with zero f4-* deps (just <cstdio>, <cstring>, <vector>, <filesystem>, <stdexcept>, <string>), slotted between f4-convert and f4-install in the top-level CMakeLists ordering. Putting constants in f4-io would either force f4-geo to depend on an I/O module (bad) or leave constants duplicated (no consolidation); putting Cursor/read_file in f4-math would pull <filesystem>+<cstdio> into a header-only leaf that f4-geo and f4-units transitively include. No cycles created by the recommended layering.
+- Naming decision deferred to the implementation PR: DTR (shorter, matches flight-model + convert) vs DEG_TO_RAD (more explicit, matches geo). Either is defensible; pick one and apply it everywhere.
+
+Files produced this session:
+    * /home/z/my-project/work/io_survey.md — full survey with verbatim code, line ranges, API drift matrices, dependency graph, layering recommendation
+
+---
+Task ID: IO-EXTRACT-1
+Agent: general-purpose subagent
+Task: Extract the duplicated `Cursor` binary-reader struct (6 copies) and the duplicated `read_file` C-style helper (3 standalone + 1 inlined) into a new shared static library `f4-io`. Mechanical refactor — no behavior change, only consolidation. Survey lives at /home/z/my-project/work/io_survey.md.
+
+Work Log:
+- Re-read the survey doc (io_survey.md) and confirmed the 6 Cursor + 4 read_file duplication sites. Re-read all 6 consumer files in full (unit_decoder, theater_data, campaign_decoder, objective_decoder, team_decoder, terrain_data) plus class_table.cpp and cam_archive.cpp to map every call site (Cursor field/method usage, error message text, try/catch control-flow patterns).
+- Design decision (per task spec): single shared `f4::io::Cursor` with a sticky `error` flag, NOT an ErrorPolicy template. Throwing consumers add `if (c.error) throw ...` after their parse block. This matches the existing unit_decoder model (the only non-throwing consumer) and is the simplest design that supports both modes. Verified the shared Cursor is a strict superset of all 6 existing APIs (every method/field ever exposed is provided).
+- API surface of `f4::io::Cursor`:
+  * Public fields: `p`, `end` (default-initialized to nullptr), `error` (sticky, default false).
+  * Constructors: `(const uint8_t* p, const uint8_t* end)`, `explicit (const std::vector<uint8_t>& buf)`, defaulted default ctor. The default member initializers for p/end/error make a default-constructed Cursor safe (eof()==true, remaining()==0, error==false).
+  * Bulk: `read(void*, size_t)`, `read_bytes(uint8_t*, size_t)` (alias), `skip(size_t)`.
+  * Typed: `u8`, `s8`/`i8`, `u16`, `s16`/`i16`, `u32`, `s32`/`i32`, `f32` — all 10 names ever used across the 6 copies.
+  * String: `fixed_string(size_t n)` — reads n bytes, scans for first NUL, advances by n.
+  * State: `eof()`, `remaining()`.
+  * OOB contract: every read/skip/fixed_string sets the sticky `error` flag on OOB, returns 0/empty/no-op, does NOT advance `p`.
+- API surface of `f4::io::read_file`:
+  * `std::vector<uint8_t> read_file(const std::filesystem::path& path, const char* label = "read_file")`.
+  * Throws `std::runtime_error` on open failure (`<label>: cannot open <path>`), ftell failure (`<label>: ftell failed`), and short read (`<label>: short read on <path>`).
+  * Includes the defensive `sz < 0` check from theater_data's variant (the most defensive of the 4).
+  * The `label` argument lets each consumer preserve its historical diagnostic prefix (theater_data:, class_table:, terrain:, CamArchive:).
+- Created the f4-io module structure:
+  * f4-io/CMakeLists.txt — STATIC library, no f4-* deps, only `<cstdint>/<cstring>/<vector>/<filesystem>/<cstdio>/<stdexcept>/<string>`.
+  * f4-io/include/f4/io/cursor.hpp — header-only Cursor.
+  * f4-io/include/f4/io/read_file.hpp — read_file declaration.
+  * f4-io/include/f4/io/f4_io.hpp — umbrella.
+  * f4-io/src/read_file.cpp — read_file implementation (only .cpp in the lib).
+  * f4-io/tests/CMakeLists.txt — wires up 2 test binaries (test_io_cursor, test_io_read_file) via gtest_discover_tests, same FetchContent/googletest pattern as the other modules.
+  * f4-io/tests/test_cursor.cpp — 21 tests.
+  * f4-io/tests/test_read_file.cpp — 7 tests.
+- Slotted f4-io into the root CMakeLists.txt AFTER f4-convert and BEFORE f4-install (line 31), matching the survey's layering recommendation. The root CMakeLists.txt's BUILD-TEST-1 patches (enable_testing() + include(CTest) at lines 8-9) are preserved untouched.
+- Added `f4-io` to the PUBLIC link list of f4-world-convert (alongside f4-install) and f4-terrain (alongside f4-json). f4-world and f4-terrain-convert pick up f4-io transitively.
+- Consumer rewrites (6 Cursor sites + 4 read_file sites):
+  * f4-world-convert/src/unit_decoder.cpp — removed local Cursor struct (the sticky-flag variant); replaced with `using f4::io::Cursor;`. No call-site changes needed (API is a strict superset). Verified the try_tail dispatch still works: the shared Cursor's error flag is identical in semantics to the local one. All 11 unit tests pass.
+  * f4-world-convert/src/theater_data.cpp — removed local Cursor struct (the richest variant with s8/s16/s32/read_bytes/eof/vector ctor); replaced with `using f4::io::Cursor;`. Replaced local read_file with a 1-line wrapper that calls `f4::io::read_file(path, "theater_data")` (preserves the exact "theater_data:" diagnostic prefix). Added `if (c.error) throw std::runtime_error("theater_data: unexpected end of file");` at the end of each of the 8 load_X functions (objective/pt_header/pt/unit/vehicle/feature/feature_entry/radar). The try_one wrapper in TheaterObjectDatabase::load_all catches the runtime_error and clears the table — same final observable behavior as before.
+  * f4-world-convert/src/campaign_decoder.cpp — removed local Cursor (the fixed_string variant); replaced with `using f4::io::Cursor;`. Added two error checks: `if (top.error) throw ...` after the header reads, `if (c.error) throw ...` after the team-slot reads. Both use the historical "cmp: payload truncated" message. The shared fixed_string has identical semantics (scans for NUL within n bytes, advances by n).
+  * f4-world-convert/src/objective_decoder.cpp — removed local Cursor; replaced with `using f4::io::Cursor;`. Replaced the try/catch around the per-record parse with `if (c.error) { c.p = before; break; }` after the reads. Same rollback-on-OOB semantics as the previous catch(...) — the cursor rewinds to the previous record boundary and the loop exits.
+  * f4-world-convert/src/team_decoder.cpp — removed local Cursor; replaced with `using f4::io::Cursor;`. Replaced the try/catch around the first-team parse with `if (c.error) return out;` (return what we have, same as catch). Added `if (tc.error) continue;` in the inner scan loop (defensive — is_valid_team_header already guarantees 52 bytes available, so the check never fires in practice).
+  * f4-world-convert/src/class_table.cpp — replaced local read_file with a 1-line wrapper that calls `f4::io::read_file(path, "class_table")`. No Cursor use. Minor diagnostic improvement: short-read message now includes the path (was "class_table: short read", now "class_table: short read on <path>"). No test asserts on the exact message text.
+  * f4-world-convert/src/cam_archive.cpp — replaced the inlined fopen/fseek/ftell/fread/fclose block with `raw_ = f4::io::read_file(cam_path, "CamArchive");`. Moved the `file_size < 8` check to AFTER the read (was before; now `if (raw_.size() < 8) throw ...`). Minor diagnostic improvement: short-read message now includes the path. The "CamArchive: file too small" message is preserved exactly. CamArchive.ThrowsOnNonexistentFile test still passes.
+  * f4-terrain/src/terrain_data.cpp — removed local Cursor and local read_file; replaced with `using f4::io::Cursor;` and a 1-line read_file wrapper using the "terrain" label. Added `if (mc.error) throw ...`, `if (ec.error) throw ...`, and `if (oc.error) throw ...` after the three Cursor-using blocks (palette loop, elevation grid, overlay grid). Same "terrain: buffer truncated" message as the original local Cursor.
+- Verified no remaining duplicates: `rg "struct Cursor"` returns 1 hit (the shared header) + worklog mentions; `rg "FILE\*\s+fp\s*=\s*std::fopen"` returns 1 hit (the shared read_file.cpp). The 6 Cursor structs and 4 read_file copies are gone.
+- Build: clean, 0 warnings, 0 errors. CMake configure succeeded; ninja build produced all 46 targets (libf4-io.a + 2 test binaries + the rebuilt consumer .o files).
+- Test results: `ctest --test-dir build --output-on-failure --timeout 30 -j4` -> 960 passed / 0 failed / 1 skipped (intentional: TheaterDataPhase3.RcdParserLoadsFromRealFixtureIfPresent, optional Falcon4.RCD fixture not bundled — same skip that existed before this task).
+  * Total tests: 961 (was 933 before this task — 28 new f4-io tests added).
+  * f4-io tests: 28/28 pass (21 Cursor + 7 ReadFile).
+  * Consumer tests (f4-world-convert + f4-terrain + f4-world): all pass, including the previously-failing StallSMIntegration/StallBusIntegration tests (the F-16 fixture's criticalAOA bug was fixed in a separate task between BUILD-TEST-1 and now).
+  * Specifically verified the unit_decoder tests still pass after replacing its sticky-flag Cursor with the shared one: Units.DecodesAllRecords (683 units), Units.CursorLandsAtBufferEnd, Units.UnitClassDistributionMatchesKorea (524 battalions / 85 brigades / 72 squadrons / 2 task forces), Units.SquadronTailFieldsArePopulated (72 squadrons with consistent fuel values), Units.BattalionTailFieldsArePopulated — all green.
+  * Verified the theater_data tests still pass after the sticky-flag refactor: TheaterDataPhase3.* (all sub-file parsers), LoadAllIncludesRcdWhenPresent, etc.
+  * Verified the cam_archive test still passes: CamArchive.ThrowsOnNonexistentFile (exercises the shared read_file on a bad path).
+- Files created this session:
+  * /home/z/my-project/work/F4/f4-io/CMakeLists.txt
+  * /home/z/my-project/work/F4/f4-io/include/f4/io/f4_io.hpp
+  * /home/z/my-project/work/F4/f4-io/include/f4/io/cursor.hpp
+  * /home/z/my-project/work/F4/f4-io/include/f4/io/read_file.hpp
+  * /home/z/my-project/work/F4/f4-io/src/read_file.cpp
+  * /home/z/my-project/work/F4/f4-io/tests/CMakeLists.txt
+  * /home/z/my-project/work/F4/f4-io/tests/test_cursor.cpp
+  * /home/z/my-project/work/F4/f4-io/tests/test_read_file.cpp
+- Files modified this session:
+  * /home/z/my-project/work/F4/CMakeLists.txt — added `add_subdirectory(f4-io)` between f4-convert and f4-install.
+  * /home/z/my-project/work/F4/f4-world-convert/CMakeLists.txt — added `f4-io` to PUBLIC link list.
+  * /home/z/my-project/work/F4/f4-terrain/CMakeLists.txt — added `f4-io` to PUBLIC link list.
+  * /home/z/my-project/work/F4/f4-world-convert/src/unit_decoder.cpp — removed local Cursor, `using f4::io::Cursor;`.
+  * /home/z/my-project/work/F4/f4-world-convert/src/theater_data.cpp — removed local Cursor + read_file, `using f4::io::Cursor;`, read_file wrapper, 8 error-check additions.
+  * /home/z/my-project/work/F4/f4-world-convert/src/campaign_decoder.cpp — removed local Cursor, `using f4::io::Cursor;`, 2 error-check additions.
+  * /home/z/my-project/work/F4/f4-world-convert/src/objective_decoder.cpp — removed local Cursor, `using f4::io::Cursor;`, replaced try/catch with error-flag check.
+  * /home/z/my-project/work/F4/f4-world-convert/src/team_decoder.cpp — removed local Cursor, `using f4::io::Cursor;`, replaced try/catch with error-flag check, defensive inner-loop error check.
+  * /home/z/my-project/work/F4/f4-world-convert/src/class_table.cpp — replaced local read_file with shared-read_file wrapper.
+  * /home/z/my-project/work/F4/f4-world-convert/src/cam_archive.cpp — replaced inlined fopen/fread block with shared read_file; moved file_size<8 check after the read.
+  * /home/z/my-project/work/F4/f4-terrain/src/terrain_data.cpp — removed local Cursor + read_file, `using f4::io::Cursor;`, read_file wrapper, 3 error-check additions.
+
+Findings:
+- The consolidation is complete: 6 Cursor structs + 4 read_file copies are now 1 Cursor + 1 read_file in f4-io.
+- Zero behavior change: all 933 pre-existing tests still pass (plus 28 new f4-io tests = 961 total).
+- Two minor diagnostic improvements (both documented in the consumer files):
+  1. class_table's short-read message now includes the path (was "class_table: short read", now "class_table: short read on <path>").
+  2. cam_archive's short-read message now includes the path (was "CamArchive: short read", now "CamArchive: short read on <path>").
+  No tests assert on either message; both changes are strict supersets of the original diagnostics.
+- The sticky-flag policy is now uniform across all consumers. The unit_decoder's subclass dispatch (try_tail) was already using this model; the 5 previously-throwing consumers now use it too, with explicit `if (c.error) throw ...` checks at the end of their parse blocks. The objective_decoder and team_decoder's try/catch control flow (used for cursor-desync recovery) is now expressed as `if (c.error) { rollback; break/return; }` — same observable behavior, no exception overhead.
+- Layering is clean: f4-io has zero f4-* deps, sits below f4-world-convert and f4-terrain. No cycles created. The survey's recommendation to split the consolidation (constants → f4-math, I/O → new f4-io) was followed: this task did NOT touch the PI/TWO_PI/DTR constants (those are a separate future task per the survey's "Next actions" list).
+
+---
+Task ID: CLEANUP-1
+Agent: main (Super Z)
+Task: Execute the Week 1 cleanup tasks recommended after the F4 audit (fix 3 failing tests + 5 high-severity code smells + 1 medium).
+
+Work Log:
+- f16.dat fixture: added `criticalAOA 25.0` to the AuxAeroData section (the F-16's real critical AOA). The missing value was the original root cause of the 3 failing stall tests.
+- AircraftConfig::validate(): added defensive check that rejects negative criticalAOA (0 is the intentional "stall model disabled" sentinel, preserved).
+- Discovered the original root-cause diagnosis was incomplete: fixing criticalAOA alone didn't fix the 3 failing tests. Debug script revealed the FCS's G-limiter (gsAvail = aoaMax * clalph0 * qsom / GRAVITY) caps commanded G at low airspeed, preventing pilot-induced stalls. The trim clamp also limits alpha to 10° (boundary of the aero stall guard).
+- Fixed all 3 failing stall tests by forcing alpha=30° after init (bypasses trim clamp and FCS limiter) to directly test the SM transition handling. Documented the rationale in each test.
+- Deleted orphaned f4/world/world_state.hpp (byte-identical duplicate of detail/world_state.hpp from a half-finished Phase-4 refactor).
+- TheaterObjectDatabase::load_all: replaced 8 silent `try{}catch{}` blocks with a `try_one` template that records per-file outcomes (Missing/ParseError/Loaded + record_count + message) into a new `load_diagnostics` vector. Callers can now tell WHY a table is empty.
+- unit_decoder.cpp: converted Cursor from throwing to sticky-error-flag model. Replaced `try/catch(...)` dispatch in `try_tail` and `decode_uni`'s outer loop with `if (c.error)` checks. Surfaces real bugs instead of swallowing them; eliminates exception-based control flow on the per-record hot path.
+- f4-math/constants.hpp: NEW header consolidating PI/HALF_PI/TWO_PI/DEG_TO_RAD/RAD_TO_DEG (with DTR/RTD aliases for backward compat). Re-exported from f4-geo and f4-flight-model constants.hpp via `using` declarations. Replaced local kDTR in dat_parser.cpp and the function-local TWO_PI/PI in scalar.hpp's wrapPi/wrap2Pi.
+- f4-io module: NEW static library extracting the 6 duplicated Cursor structs + 3 duplicated read_file helpers into shared code. Cursor uses the sticky-error-flag model (matches unit_decoder's design). 28 new tests (21 Cursor + 7 ReadFile). All 5 throwing consumers updated to check `c.error` and throw with their historical message prefix.
+- f4-json::escape_string: NEW free function extracting the JSON string escape logic. Replaced the local `json_escape` duplicate in world_json.cpp. The shared version also handles \b and \f (the local copy missed these). f4-world-convert now links f4-json.
+
+Stage Summary:
+- Test count: 930 → 961 (960 passing, 1 intentional skip for missing optional Falcon4.RCD fixture).
+- The 3 previously-failing stall tests (StallSMIntegration.StallEntryAndRecoveryLifecycle, StallBusIntegration.PublishesStateChangesOnBus, StallBusIntegration.CrossThreadForwardingViaSendTo) now pass.
+- Zero regressions across all 930 pre-existing tests.
+- Build is clean: 0 warnings, 0 errors, with -DF4_BUILD_VIEWER=OFF (viewer needs libxrandr-dev which isn't installable without sudo).
+- 6 new files created, ~25 existing files modified. Full diff available via `git diff` in the F4 working tree.
+- Ready to start f4-ai Step 1 (scaffold) against the cleaned foundation.

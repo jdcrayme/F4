@@ -277,6 +277,14 @@ ConfigValidationReport AircraftConfig::validate() const {
         r.issues.push_back({Sev::Warning, "aux.nEngines",
             "nEngines < 1 is unusual; defaulting to single-engine model"});
     }
+    // criticalAOA: a value of exactly 0 is the intentional sentinel for
+    // "stall model disabled" (see Aerodynamics::update guard). Negative
+    // values are nonsensical and would always evaluate to "stalled" — reject.
+    if (isFinite(aux.criticalAOA) && aux.criticalAOA < 0.0) {
+        r.issues.push_back({Sev::Error, "aux.criticalAOA",
+            "criticalAOA must be >= 0 (0 disables the stall model); got " +
+            std::to_string(aux.criticalAOA)});
+    }
 
     // --- Gear points ---
     for (std::size_t i = 0; i < geometry.gear.size(); ++i) {

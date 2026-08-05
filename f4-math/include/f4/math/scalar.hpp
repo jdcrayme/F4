@@ -19,6 +19,8 @@
 
 #pragma once
 
+#include <f4/math/constants.hpp>
+
 #include <cmath>
 #include <concepts>
 #include <type_traits>
@@ -77,8 +79,6 @@ constexpr T deadBand(T x, T band) noexcept {
 // compare wrapped angles for equality.
 // ============================================================================
 inline double wrapPi(double x) noexcept {
-    constexpr double TWO_PI = 6.28318530717958647692;
-    constexpr double PI     = 3.14159265358979323846;
     double y = std::fmod(x + PI, TWO_PI);
     if (y < 0.0) y += TWO_PI;
     y -= PI;
@@ -88,12 +88,12 @@ inline double wrapPi(double x) noexcept {
 }
 
 inline float wrapPi(float x) noexcept {
-    constexpr float TWO_PI = 6.28318530717958647692f;
-    constexpr float PI     = 3.14159265358979323846f;
-    float y = std::fmod(x + PI, TWO_PI);
-    if (y < 0.0f) y += TWO_PI;
-    y -= PI;
-    if (y <= -PI + 1e-7f) y = PI;
+    constexpr float TWO_PI_f = static_cast<float>(TWO_PI);
+    constexpr float PI_f     = static_cast<float>(PI);
+    float y = std::fmod(x + PI_f, TWO_PI_f);
+    if (y < 0.0f) y += TWO_PI_f;
+    y -= PI_f;
+    if (y <= -PI_f + 1e-7f) y = PI_f;
     return y;
 }
 
@@ -101,16 +101,15 @@ inline float wrapPi(float x) noexcept {
 // wrap2Pi — wrap angle (radians) to [0, 2*pi).
 // ============================================================================
 inline double wrap2Pi(double x) noexcept {
-    constexpr double TWO_PI = 6.28318530717958647692;
     double y = std::fmod(x, TWO_PI);
     if (y < 0.0) y += TWO_PI;
     return y;
 }
 
 inline float wrap2Pi(float x) noexcept {
-    constexpr float TWO_PI = 6.28318530717958647692f;
-    float y = std::fmod(x, TWO_PI);
-    if (y < 0.0f) y += TWO_PI;
+    constexpr float TWO_PI_f = static_cast<float>(TWO_PI);
+    float y = std::fmod(x, TWO_PI_f);
+    if (y < 0.0f) y += TWO_PI_f;
     return y;
 }
 

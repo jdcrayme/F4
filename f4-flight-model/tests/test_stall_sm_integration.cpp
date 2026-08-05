@@ -83,20 +83,39 @@ TEST(StallSMIntegration, StallSMDoesNotBreakStability) {
 // SM transitions. The trace is dumped as text and checked for expected
 // records.
 //
-// Stall induction: spawn at very low airspeed (100 ft/s ≈ 59 kts, well below
-// the F-16's ~140 kcas stall speed) at altitude. The aero layer will detect
-// stall immediately. The SM should transition:
+// Stall induction: spawn at low airspeed (100 ft/s ≈ 59 kts, well below
+// the F-16's ~140 kcas stall speed) at altitude, then FORCE alpha above
+// criticalAOA (25°) by directly setting state.aero.alpha_deg = 30° after
+// init. This bypasses the trim clamp (which limits trim alpha to 10°)
+// and the FCS's G-limiter (which would otherwise cap commanded G at
+// gsAvail = aoaMax * clalph0 * qsom / GRAVITY, a tiny number at 100 ft/s
+// that prevents the pilot from commanding enough alpha to stall).
+//
+// With alpha=30° > criticalAOA=25°, the aero layer immediately sets
+// `stalled`, and the SM transitions:
 //   None -> EnteringDeepStall (AoAExceed)
 //   EnteringDeepStall -> DeepStall (TimerExpired, after dwell)
 //
-// Then we push the stick forward (pstick = -1.0) to induce recovery, and
-// the SM should eventually transition to Recovering -> None.
+// Then we push the stick forward (pstick = -1.0) and add power to recover.
+// The SM should eventually transition to Recovering -> None.
+//
+// Why not induce the stall via pilot input? The F-16's FLCS has a G-limiter
+// that prevents the pilot from commanding more G than the wings can produce
+// at the current airspeed. At 100 ft/s, the wings can produce <0.5G, so
+// full aft stick commands <0.5G — not enough to stall. The forced-alpha
+// approach tests the SM's transition handling directly, which is what these
+// tests are actually about.
 // ============================================================================
 TEST(StallSMIntegration, StallEntryAndRecoveryLifecycle) {
     auto cfg = loadF16();
     FlightModel fm;
-    // Spawn at 5000 ft, 100 ft/s (very slow), wings level
-    fm.init(cfg, 5000.0, 100.0, 0.0, true);
+    // Spawn at 10000 ft, 100 ft/s (very slow), wings level
+    fm.init(cfg, 10000.0, 100.0, 0.0, true);
+
+    // Force the aircraft into a stalled state: alpha=30° exceeds criticalAOA=25°.
+    fm.state().aero.alpha_deg = 30.0;
+    fm.state().fcs.pitchAlphaLag.reset(30.0);
+    fm.state().fcs.aoacmd = 30.0;
 
     // Attach a trace to the stall SM
     f4::fsm::Trace<StallState, StallEvent> trace;
@@ -106,10 +125,10 @@ TEST(StallSMIntegration, StallEntryAndRecoveryLifecycle) {
     const double dt = 1.0 / 60.0;
     const f4::math::Vec3d groundNormal{0.0, 0.0, -1.0};
 
-    // Phase 1: Let the stall develop (5 seconds at low speed)
+    // Phase 1: Let the stall develop (5 seconds, full aft stick, no power)
     PilotInput input;
-    input.throttle = 0.3;  // low power
-    input.pstick = 0.0;    // neutral
+    input.throttle = 0.0;    // cut throttle — no engine recovery
+    input.pstick = 1.0;      // full aft — hold the stall
 
     bool sawEnteringDeepStall = false;
     bool sawDeepStall = false;
@@ -125,9 +144,9 @@ TEST(StallSMIntegration, StallEntryAndRecoveryLifecycle) {
     }
 
     // The stall SM should have entered stall states
-    // (At 100 ft/s the F-16 should definitely be stalled)
+    // (Forced alpha=30° > criticalAOA=25° triggers the aero stall guard)
     EXPECT_TRUE(sawEnteringDeepStall || sawDeepStall)
-        << "Expected stall SM to enter a stall state at 100 ft/s";
+        << "Expected stall SM to enter a stall state when alpha=30° exceeds criticalAOA=25°";
 
     // Phase 2: Attempt recovery — push stick forward, add power
     input.pstick = -1.0;   // full forward (nose down)
@@ -178,7 +197,12 @@ TEST(StallSMIntegration, StallEntryAndRecoveryLifecycle) {
 TEST(StallSMIntegration, TraceIsParseableAndComplete) {
     auto cfg = loadF16();
     FlightModel fm;
-    fm.init(cfg, 5000.0, 100.0, 0.0, true);
+    fm.init(cfg, 10000.0, 100.0, 0.0, true);
+
+    // Force the aircraft into a stalled state (see lifecycle test for rationale).
+    fm.state().aero.alpha_deg = 30.0;
+    fm.state().fcs.pitchAlphaLag.reset(30.0);
+    fm.state().fcs.aoacmd = 30.0;
 
     f4::fsm::Trace<StallState, StallEvent> trace;
     fm.stallSM().set_trace(&trace);
@@ -186,7 +210,8 @@ TEST(StallSMIntegration, TraceIsParseableAndComplete) {
     const double dt = 1.0 / 60.0;
     const f4::math::Vec3d groundNormal{0.0, 0.0, -1.0};
     PilotInput input;
-    input.throttle = 0.3;
+    input.throttle = 0.0;
+    input.pstick = 1.0;   // full aft — hold the stall
 
     // Run for 3 seconds (enough to see stall entry + EnteringDeepStall dwell)
     for (int frame = 0; frame < 3 * 60; ++frame) {

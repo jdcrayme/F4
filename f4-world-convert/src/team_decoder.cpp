@@ -40,6 +40,7 @@
 // membership) for ALL teams.
 
 #include <f4/world_convert/team_decoder.hpp>
+#include <f4/io/cursor.hpp>
 
 #include <cstring>
 #include <stdexcept>
@@ -47,19 +48,12 @@
 namespace f4::world_convert {
 
 namespace {
-struct Cursor {
-    const uint8_t* p;
-    const uint8_t* end;
-    void read(void* dst, std::size_t n) {
-        if (p + n > end) throw std::runtime_error("tea: buffer truncated");
-        std::memcpy(dst, p, n);
-        p += n;
-    }
-    int16_t  i16() { int16_t v=0;  read(&v,2); return v; }
-    uint16_t u16() { uint16_t v=0; read(&v,2); return v; }
-    uint32_t u32() { uint32_t v=0; read(&v,4); return v; }
-    uint8_t  u8()  { uint8_t v=0;  read(&v,1); return v; }
-};
+
+// Cursor replaced by the shared f4::io::Cursor. The shared Cursor uses a
+// sticky `error` flag instead of throwing on OOB; decode_tea checks the
+// flag (instead of the previous try/catch around parse_team_class) and
+// treats an OOB exactly as before: return what we have so far.
+using f4::io::Cursor;
 
 // Size of the TeamClass fixed block at v63 (see header comment).
 constexpr std::size_t TEAM_CLASS_SIZE = 52;
@@ -131,11 +125,11 @@ DecodedTeams decode_tea(const uint8_t* data, std::size_t size) {
     out.teams.reserve(static_cast<std::size_t>(out.count));
 
     // Decode the first team's TeamClass block (always at offset 2).
-    try {
-        out.teams.push_back(parse_team_class(c));
-    } catch (...) {
-        return out;  // truncated — return what we have
-    }
+    // The sticky `error` flag replaces the previous try/catch around
+    // parse_team_class: if the parse OOBs, return what we have (empty).
+    TeamRecord first = parse_team_class(c);
+    if (c.error) return out;
+    out.teams.push_back(std::move(first));
 
     // For each subsequent team, scan forward from the current cursor
     // position looking for a valid TeamClass header. The ATM/GTM/NTM
@@ -161,6 +155,10 @@ DecodedTeams decode_tea(const uint8_t* data, std::size_t size) {
             // a byte pattern matching our header check.
             Cursor tc{probe, c.end};
             TeamRecord t = parse_team_class(tc);
+            // Skip candidates that errored out (defensive — is_valid_team_header
+            // already guarantees 52 bytes are available, so tc.error should
+            // never be set here) or whose `who` field doesn't match i.
+            if (tc.error) continue;
             if (t.who == i) {
                 out.teams.push_back(std::move(t));
                 c.p = tc.p;  // advance main cursor past this team's TeamClass

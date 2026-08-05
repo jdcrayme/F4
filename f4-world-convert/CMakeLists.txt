@@ -6,14 +6,14 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 # Static library: LZSS decompressor + .cam container parser + campaign decoder
-# + JSON emitter. No external dependencies beyond the standard library (the
-# JSON is emitted by hand to match f4-convert's pattern — nlohmann/json is
-# available to f4-data/f4-world on the consuming side).
-#
-# Links f4-install so find_class_table() can delegate the install-aware
-# class-table resolution to f4::install::Installation. The dependency is
-# PUBLIC because the viewer (which links f4-world-convert) will also want
-# to call f4-install directly when implementing the new Open Campaign flow.
+# + JSON emitter. Dependencies:
+#   - f4-install: find_class_table() delegates install-aware class-table
+#     resolution to f4::install::Installation.
+#   - f4-io: shared Cursor binary reader + read_file helper.
+#   - f4-json: shared escape_string() used by world_json.cpp (eliminates
+#     the local json_escape duplicate).
+# nlohmann/json is available to f4-data/f4-world on the consuming side
+# (the world_json emitter is hand-rolled to match f4-convert's pattern).
 add_library(f4-world-convert STATIC
     src/lzss.cpp
     src/cam_archive.cpp
@@ -30,7 +30,7 @@ target_include_directories(f4-world-convert
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>
 )
-target_link_libraries(f4-world-convert PUBLIC f4-install)
+target_link_libraries(f4-world-convert PUBLIC f4-install f4-io f4-json)
 
 # CLI tool
 add_executable(cam2json cli/cam2json.cpp)

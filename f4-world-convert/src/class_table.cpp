@@ -3,8 +3,8 @@
 #include <f4/world_convert/class_table.hpp>
 
 #include <f4/install/installation.hpp>
+#include <f4/io/read_file.hpp>
 
-#include <cstdio>
 #include <cstring>
 #include <stdexcept>
 
@@ -19,17 +19,12 @@ constexpr std::size_t CLASSINFO_OFFSET = 8;  // offset of classInfo_[8] within e
 constexpr std::size_t DATATYPE_OFFSET   = 76; // offset of dataType within entry
 constexpr std::size_t DATAPTR_OFFSET    = 77; // offset of dataPtr (4 bytes, LE)
 
+// Thin wrapper around f4::io::read_file that preserves the historical
+// "class_table:" diagnostic prefix. The shared helper adds the path to
+// the short-read message (a minor diagnostic improvement; the original
+// class_table short-read message omitted the path).
 std::vector<uint8_t> read_file(const std::filesystem::path& path) {
-    FILE* fp = std::fopen(path.string().c_str(), "rb");
-    if (!fp) throw std::runtime_error("class_table: cannot open " + path.string());
-    std::fseek(fp, 0, SEEK_END);
-    const long sz = std::ftell(fp);
-    std::fseek(fp, 0, SEEK_SET);
-    std::vector<uint8_t> buf(static_cast<std::size_t>(sz));
-    const std::size_t got = std::fread(buf.data(), 1, buf.size(), fp);
-    std::fclose(fp);
-    if (got != buf.size()) throw std::runtime_error("class_table: short read");
-    return buf;
+    return f4::io::read_file(path, "class_table");
 }
 
 } // namespace

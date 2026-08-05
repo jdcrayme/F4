@@ -17,7 +17,7 @@ target_include_directories(f4-terrain
 # load_terrain_json / to_terrain_json pair). f4-json is a PUBLIC dep because
 # f4-world (which transitively links f4-terrain) consumes the same JSON
 # schema and benefits from the same Reader/Writer when extending it.
-target_link_libraries(f4-terrain PUBLIC f4-json)
+target_link_libraries(f4-terrain PUBLIC f4-json f4-io)
 
 option(F4_TERRAIN_BUILD_TESTS "Build unit tests" ON)
 if(F4_TERRAIN_BUILD_TESTS)

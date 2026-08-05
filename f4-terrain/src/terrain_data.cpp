@@ -7,6 +7,8 @@
 
 #include <f4/terrain/terrain_data.hpp>
 
+#include <f4/io/cursor.hpp>
+#include <f4/io/read_file.hpp>
 #include <f4/json/f4_json.hpp>
 
 #include <cstdio>
@@ -25,34 +27,14 @@ std::string Color4::hex() const {
 
 namespace {
 
+using f4::io::Cursor;
 using f4::json::Reader;
 using f4::json::Writer;
 
-struct Cursor {
-    const uint8_t* p;
-    const uint8_t* end;
-    void read(void* dst, std::size_t n) {
-        if (p + n > end) throw std::runtime_error("terrain: buffer truncated");
-        std::memcpy(dst, p, n);
-        p += n;
-    }
-    uint32_t u32() { uint32_t v=0; read(&v,4); return v; }
-    uint16_t u16() { uint16_t v=0; read(&v,2); return v; }
-    int16_t  i16() { int16_t v=0;  read(&v,2); return v; }
-    uint8_t  u8()  { uint8_t v=0;  read(&v,1); return v; }
-};
-
+// Thin wrapper around f4::io::read_file that preserves the historical
+// "terrain:" diagnostic prefix.
 std::vector<uint8_t> read_file(const std::filesystem::path& path) {
-    FILE* fp = std::fopen(path.string().c_str(), "rb");
-    if (!fp) throw std::runtime_error("terrain: cannot open " + path.string());
-    std::fseek(fp, 0, SEEK_END);
-    const long sz = std::ftell(fp);
-    std::fseek(fp, 0, SEEK_SET);
-    std::vector<uint8_t> buf(static_cast<std::size_t>(sz));
-    const std::size_t got = std::fread(buf.data(), 1, buf.size(), fp);
-    std::fclose(fp);
-    if (got != buf.size()) throw std::runtime_error("terrain: short read on " + path.string());
-    return buf;
+    return f4::io::read_file(path, "terrain");
 }
 
 } // namespace
@@ -80,6 +62,7 @@ void TerrainData::load(const std::filesystem::path& terrain_dir) {
         c.r = mc.u8(); c.g = mc.u8(); c.b = mc.u8(); c.a = mc.u8();
         palette.push_back(c);
     }
+    if (mc.error) throw std::runtime_error("terrain: buffer truncated");
 
     // --- THEATER.MEA: elevation grid (Int16, vertically flipped) ---
     auto mea_data = read_file(terrain_dir / "THEATER.MEA");
@@ -97,6 +80,7 @@ void TerrainData::load(const std::filesystem::path& terrain_dir) {
             elevation[sim_y * header.width + x] = ec.i16();
         }
     }
+    if (ec.error) throw std::runtime_error("terrain: buffer truncated");
 
     // --- THEATER.O2: overlay (uint8, same flip) ---
     auto o2_data = read_file(terrain_dir / "THEATER.O2");
@@ -110,6 +94,7 @@ void TerrainData::load(const std::filesystem::path& terrain_dir) {
                 overlay[sim_y * header.width + x] = oc.u8();
             }
         }
+        if (oc.error) throw std::runtime_error("terrain: buffer truncated");
     }
 
     // --- Derive tile_types from elevation ---

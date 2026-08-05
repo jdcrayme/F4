@@ -21,6 +21,8 @@
 
 #include "f4/convert/dat_parser.hpp"
 
+#include <f4/math/constants.hpp>
+
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -44,7 +46,8 @@ using f4::data::GearPoint;
 using f4::data::RollCommandTable;
 
 // Conversion constant: degrees to radians (for thetaMax storage).
-constexpr double kDTR = 0.017453292519943295;
+// Single source of truth is f4/math/constants.hpp.
+constexpr double kDTR = f4::math::DEG_TO_RAD;
 
 // ---------------------------------------------------------------------------
 // TokenStream

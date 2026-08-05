@@ -5,9 +5,11 @@
 
 #include <f4/world_convert/theater_data.hpp>
 
+#include <f4/io/cursor.hpp>
+#include <f4/io/read_file.hpp>
+
 #include <algorithm>
 #include <cctype>
-#include <cstdio>
 #include <cstring>
 #include <stdexcept>
 #include <string>
@@ -17,59 +19,20 @@ namespace f4::world_convert {
 namespace {
 
 // ============================================================================
-// I/O helpers
+// I/O helpers — thin wrappers over the shared f4::io primitives.
+//
+// The local read_file delegate keeps the "theater_data:" diagnostic prefix
+// that callers (and TheaterObjectDatabase::load_all) rely on when labelling
+// per-file failures. The Cursor is the shared sticky-flag reader; the
+// bounds-check is now a post-parse `if (c.error) throw ...` at the end of
+// each load_X function below.
 // ============================================================================
 
 std::vector<uint8_t> read_file(const std::filesystem::path& path) {
-    FILE* fp = std::fopen(path.string().c_str(), "rb");
-    if (!fp) throw std::runtime_error("theater_data: cannot open " + path.string());
-    std::fseek(fp, 0, SEEK_END);
-    const long sz = std::ftell(fp);
-    std::fseek(fp, 0, SEEK_SET);
-    if (sz < 0) { std::fclose(fp); throw std::runtime_error("theater_data: ftell failed"); }
-    std::vector<uint8_t> buf(static_cast<std::size_t>(sz));
-    const std::size_t got = std::fread(buf.data(), 1, buf.size(), fp);
-    std::fclose(fp);
-    if (got != buf.size()) throw std::runtime_error("theater_data: short read on " + path.string());
-    return buf;
+    return f4::io::read_file(path, "theater_data");
 }
 
-// ============================================================================
-// Cursor — sequential little-endian reader. Bounds-checked.
-// ============================================================================
-
-struct Cursor {
-    const uint8_t* p;
-    const uint8_t* end;
-    explicit Cursor(const std::vector<uint8_t>& buf)
-        : p(buf.data()), end(buf.data() + buf.size()) {}
-
-    [[nodiscard]] bool eof() const noexcept { return p >= end; }
-    [[nodiscard]] std::size_t remaining() const noexcept {
-        return static_cast<std::size_t>(end - p);
-    }
-
-    uint8_t  u8 () { check(1); uint8_t  v = p[0];                          p += 1; return v; }
-    int8_t   s8 () { check(1); int8_t   v = static_cast<int8_t>(p[0]);     p += 1; return v; }
-    uint16_t u16() { check(2); uint16_t v; std::memcpy(&v, p, 2);          p += 2; return v; }
-    int16_t  s16() { check(2); int16_t  v; std::memcpy(&v, p, 2);          p += 2; return v; }
-    uint32_t u32() { check(4); uint32_t v; std::memcpy(&v, p, 4);          p += 4; return v; }
-    int32_t  s32() { check(4); int32_t  v; std::memcpy(&v, p, 4);          p += 4; return v; }
-    float    f32() { check(4); float    v; std::memcpy(&v, p, 4);          p += 4; return v; }
-
-    void read_bytes(uint8_t* dst, std::size_t n) {
-        check(n);
-        std::memcpy(dst, p, n);
-        p += n;
-    }
-
-private:
-    void check(std::size_t n) const {
-        if (static_cast<std::size_t>(end - p) < n) {
-            throw std::runtime_error("theater_data: unexpected end of file");
-        }
-    }
-};
+using f4::io::Cursor;
 
 // ============================================================================
 // FF-DB Control: read entries count, handling the trailing-short fallback.
@@ -265,6 +228,7 @@ void load_objective_data(const std::filesystem::path& base_path,
         e.first_feature = c.s16();
         out.entries.push_back(std::move(e));
     }
+    if (c.error) throw std::runtime_error("theater_data: unexpected end of file");
 }
 
 void load_pt_header_data(const std::filesystem::path& base_path,
@@ -312,6 +276,7 @@ void load_pt_header_data(const std::filesystem::path& base_path,
         // cursor at 28, no trailing pad needed
         out.entries.push_back(std::move(e));
     }
+    if (c.error) throw std::runtime_error("theater_data: unexpected end of file");
 }
 
 void load_pt_data(const std::filesystem::path& base_path,
@@ -337,6 +302,7 @@ void load_pt_data(const std::filesystem::path& base_path,
         c.p += 2;
         out.entries.push_back(std::move(e));
     }
+    if (c.error) throw std::runtime_error("theater_data: unexpected end of file");
 }
 
 void load_unit_data(const std::filesystem::path& base_path,
@@ -413,6 +379,7 @@ void load_unit_data(const std::filesystem::path& base_path,
         c.p += 2;  // skip 2 bytes trailing pad (struct size to multiple of 4)
         out.entries.push_back(std::move(e));
     }
+    if (c.error) throw std::runtime_error("theater_data: unexpected end of file");
 }
 
 void load_vehicle_data(const std::filesystem::path& base_path,
@@ -468,6 +435,7 @@ void load_vehicle_data(const std::filesystem::path& base_path,
         c.p += 3;
         out.entries.push_back(std::move(e));
     }
+    if (c.error) throw std::runtime_error("theater_data: unexpected end of file");
 }
 
 void load_feature_data(const std::filesystem::path& base_path,
@@ -517,6 +485,7 @@ void load_feature_data(const std::filesystem::path& base_path,
         c.p += 3;
         out.entries.push_back(std::move(e));
     }
+    if (c.error) throw std::runtime_error("theater_data: unexpected end of file");
 }
 
 void load_feature_entry_data(const std::filesystem::path& base_path,
@@ -558,6 +527,7 @@ void load_feature_entry_data(const std::filesystem::path& base_path,
         c.p += 2;  // skip 2 bytes trailing pad
         out.entries.push_back(std::move(e));
     }
+    if (c.error) throw std::runtime_error("theater_data: unexpected end of file");
 }
 
 void load_radar_data(const std::filesystem::path& base_path,
@@ -596,30 +566,79 @@ void load_radar_data(const std::filesystem::path& base_path,
         c.p += 26;
         out.entries.push_back(std::move(e));
     }
+    if (c.error) throw std::runtime_error("theater_data: unexpected end of file");
 }
 
 // ============================================================================
 // TheaterObjectDatabase — convenience bulk loader
 // ============================================================================
 
+namespace {
+
+// Try one loader, recording the outcome in `diag`. The `ext` is used both
+// to locate the file (via find_theater_file) and to label the diagnostic.
+// Returns true iff the file was found AND parsed without throwing.
+//
+// We deliberately probe find_theater_file ourselves rather than letting the
+// loader's internal "not found" throw propagate, so we can distinguish
+// "file missing" (Status::Missing) from "file present but corrupt"
+// (Status::ParseError). The previous implementation swallowed both cases
+// under the same `catch (...) {}` and lost the diagnostic entirely.
+template <class TableT>
+void try_one(void (*fn)(const std::filesystem::path&, TableT&),
+             const std::filesystem::path& base,
+             const std::string& ext,
+             TableT& tbl,
+             TheaterFileLoadResult& diag) {
+    diag.filename = std::string("Falcon4.") + ext;
+    const auto path = find_theater_file(base, ext);
+    if (path.empty()) {
+        diag.status = TheaterFileLoadResult::Status::Missing;
+        diag.message = "file not found in theater directory";
+        return;
+    }
+    try {
+        fn(base, tbl);
+        diag.status = TheaterFileLoadResult::Status::Loaded;
+        diag.record_count = tbl.entries.size();
+        diag.message.clear();
+    } catch (const std::exception& e) {
+        diag.status = TheaterFileLoadResult::Status::ParseError;
+        diag.record_count = 0;
+        diag.message = e.what();
+        // tbl may be partially populated if the loader threw mid-loop; clear
+        // it so loaded() reflects reality and downstream code doesn't see
+        // a half-decoded table.
+        tbl.entries.clear();
+    }
+}
+
+} // anonymous namespace
+
 void TheaterObjectDatabase::load_all(const std::filesystem::path& dir) {
     const auto base = dir / "Falcon4";
-    auto try_load = [&](void (*fn)(const std::filesystem::path&,
-                                    ObjectiveClassTable&),
-                        ObjectiveClassTable& tbl) {
-        try { fn(base, tbl); } catch (const std::exception&) { /* skip */ }
-    };
-    // We need a separate lambda per table type because the function pointer
-    // signature differs per table. Easier to just inline each call.
-    try { load_objective_data     (base, objectives);      } catch (const std::exception&) {}
-    try { load_pt_header_data     (base, pt_headers);      } catch (const std::exception&) {}
-    try { load_pt_data            (base, pt_data);         } catch (const std::exception&) {}
-    try { load_unit_data          (base, units);           } catch (const std::exception&) {}
-    try { load_vehicle_data       (base, vehicles);        } catch (const std::exception&) {}
-    try { load_feature_data       (base, features);        } catch (const std::exception&) {}
-    try { load_feature_entry_data (base, feature_entries); } catch (const std::exception&) {}
-    try { load_radar_data         (base, radars);          } catch (const std::exception&) {}
-    (void)try_load;  // silence unused-variable warning
+    load_diagnostics.clear();
+    load_diagnostics.reserve(8);
+
+    // Inline each call rather than looping over a function-pointer table —
+    // the eight loaders have eight distinct table types and a template is
+    // cleaner than a void*-erasing wrapper.
+    load_diagnostics.emplace_back();
+    try_one(load_objective_data,     base, "OCD", objectives,      load_diagnostics.back());
+    load_diagnostics.emplace_back();
+    try_one(load_pt_header_data,     base, "PHD", pt_headers,      load_diagnostics.back());
+    load_diagnostics.emplace_back();
+    try_one(load_pt_data,            base, "PD",  pt_data,         load_diagnostics.back());
+    load_diagnostics.emplace_back();
+    try_one(load_unit_data,          base, "UCD", units,           load_diagnostics.back());
+    load_diagnostics.emplace_back();
+    try_one(load_vehicle_data,       base, "VCD", vehicles,        load_diagnostics.back());
+    load_diagnostics.emplace_back();
+    try_one(load_feature_data,       base, "FCD", features,        load_diagnostics.back());
+    load_diagnostics.emplace_back();
+    try_one(load_feature_entry_data, base, "FED", feature_entries, load_diagnostics.back());
+    load_diagnostics.emplace_back();
+    try_one(load_radar_data,         base, "RCD", radars,          load_diagnostics.back());
 }
 
 } // namespace f4::world_convert

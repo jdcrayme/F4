@@ -4,6 +4,7 @@
 #include <f4/world_convert/objective_decoder.hpp>
 #include <f4/world_convert/unit_decoder.hpp>
 #include <f4/world_convert/team_decoder.hpp>
+#include <f4/json/writer.hpp>
 
 #include <cmath>
 #include <sstream>
@@ -13,28 +14,14 @@ namespace f4::world_convert {
 
 namespace {
 
-std::string json_escape(const std::string& s) {
-    std::string out;
-    out.reserve(s.size() + 2);
-    for (char ch : s) {
-        switch (ch) {
-            case '"':  out += "\\\""; break;
-            case '\\': out += "\\\\"; break;
-            case '\n': out += "\\n";  break;
-            case '\r': out += "\\r";  break;
-            case '\t': out += "\\t";  break;
-            default:
-                if (static_cast<unsigned char>(ch) < 0x20) {
-                    char buf[8];
-                    std::snprintf(buf, sizeof(buf), "\\u%04x", ch);
-                    out += buf;
-                } else {
-                    out += ch;
-                }
-        }
-    }
-    return out;
-}
+// Use the shared JSON string escaper from f4-json instead of a local copy.
+// The shared version handles the same escapes (\" \\ \n \r \t \u00xx) plus
+// \b and \f, which the local copy missed. For world_json's inputs (theater
+// names, team names, file paths, objective names) the difference is moot —
+// none of these contain backspace or formfeed characters — but using the
+// shared function eliminates the duplication and ensures we stay compliant
+// with the JSON spec.
+using f4::json::escape_string;
 
 std::string base64_encode(const uint8_t* data, std::size_t len) {
     static const char alphabet[] =
@@ -62,8 +49,8 @@ std::string to_world_json(const CamArchive& cam, const WorldJsonOptions& opts) {
     // --- Theater + terrain reference (NEW) ---
     // The world JSON is paired with a separate terrain JSON. We record the
     // theater name and the terrain file path so consumers can load both.
-    o << "  \"theater\": \"" << json_escape(opts.theater) << "\",\n";
-    o << "  \"terrain_file\": \"" << json_escape(opts.terrain_file) << "\",\n";
+    o << "  \"theater\": \"" << escape_string(opts.theater) << "\",\n";
+    o << "  \"terrain_file\": \"" << escape_string(opts.terrain_file) << "\",\n";
 
     // --- Container manifest ---
     o << "  \"archive\": {\n";
@@ -72,7 +59,7 @@ std::string to_world_json(const CamArchive& cam, const WorldJsonOptions& opts) {
     const auto& sfs = cam.subfiles();
     for (std::size_t i = 0; i < sfs.size(); ++i) {
         const auto& sf = sfs[i];
-        o << "      {\"name\": \"" << json_escape(sf.name) << "\", "
+        o << "      {\"name\": \"" << escape_string(sf.name) << "\", "
           << "\"offset\": " << sf.offset << ", "
           << "\"size\": " << sf.size << "}";
         if (i + 1 < sfs.size()) o << ",";
@@ -130,8 +117,8 @@ std::string to_world_json(const CamArchive& cam, const WorldJsonOptions& opts) {
             o << "      {\"slot\": " << i
               << ", \"flags\": " << static_cast<int>(t.flags)
               << ", \"colour\": " << static_cast<int>(t.colour)
-              << ", \"name\": \"" << json_escape(t.name) << "\""
-              << ", \"motto\": \"" << json_escape(t.motto) << "\"";
+              << ", \"name\": \"" << escape_string(t.name) << "\""
+              << ", \"motto\": \"" << escape_string(t.motto) << "\"";
             // Enrich with .tea data if available for this team slot.
             // The .tea decoder's TeamRecord.who field is the team index (0..7),
             // matching the .cmp team slot.
@@ -195,7 +182,7 @@ std::string to_world_json(const CamArchive& cam, const WorldJsonOptions& opts) {
                     // like 1776 — passing it to objective_type_name would
                     // produce "Objective#1776" instead of "Airbase").
                     o << "      {\"type\": " << ob.type
-                      << ", \"type_name\": \"" << json_escape(objective_type_name(static_cast<int16_t>(obj_type))) << "\""
+                      << ", \"type_name\": \"" << escape_string(objective_type_name(static_cast<int16_t>(obj_type))) << "\""
                       << ", \"objective_type\": " << static_cast<int>(obj_type);
                     // Theater-db enrichment (Falcon4.OCD): emit the objective's
                     // class name (e.g. "Airbase A-3", "Bridge B-12") and the
@@ -210,7 +197,7 @@ std::string to_world_json(const CamArchive& cam, const WorldJsonOptions& opts) {
                         // (See entity.cpp:234-235: builds NumObjectiveTypes from
                         // the largest classInfo_[VU_TYPE] value seen.)
                         if (ocd) {
-                            o << ", \"class_name\": \"" << json_escape(ocd->name) << "\""
+                            o << ", \"class_name\": \"" << escape_string(ocd->name) << "\""
                               << ", \"features_count\": " << static_cast<int>(ocd->features)
                               << ", \"radar_feature\": " << static_cast<int>(ocd->radar_feature)
                               << ", \"deag_distance\": " << ocd->deag_distance
@@ -267,7 +254,7 @@ std::string to_world_json(const CamArchive& cam, const WorldJsonOptions& opts) {
                                             opts.theater_db->features.at(fci);
                                         if (fcd &&
                                             fcd->index == fed->index) {
-                                            o << ", \"name\": \"" << json_escape(fcd->name) << "\""
+                                            o << ", \"name\": \"" << escape_string(fcd->name) << "\""
                                               << ", \"hit_points\": " << fcd->hit_points
                                               << ", \"repair_time\": " << fcd->repair_time
                                               << ", \"priority\": " << static_cast<int>(fcd->priority)
@@ -348,7 +335,7 @@ std::string to_world_json(const CamArchive& cam, const WorldJsonOptions& opts) {
                                             static_cast<std::size_t>(radar_type_idx));
                                         if (rcd) {
                                             o << ", \"radar_range_km\": " << rcd->range_km
-                                              << ", \"radar_name\": \"" << json_escape(rcd->name) << "\""
+                                              << ", \"radar_name\": \"" << escape_string(rcd->name) << "\""
                                               << ", \"radar_type_idx\": " << static_cast<int>(radar_type_idx);
                                         }
                                     }
@@ -382,7 +369,7 @@ std::string to_world_json(const CamArchive& cam, const WorldJsonOptions& opts) {
                                 if (!first_hdr) o << ", ";
                                 first_hdr = false;
                                 o << "{\"type\": " << static_cast<int>(hdr->type)
-                                  << ", \"type_name\": \"" << json_escape(point_list_type_name(hdr->type)) << "\""
+                                  << ", \"type_name\": \"" << escape_string(point_list_type_name(hdr->type)) << "\""
                                   << ", \"count\": " << static_cast<int>(hdr->count)
                                   << ", \"runway_num\": " << static_cast<int>(hdr->runway_num)
                                   << ", \"heading\": " << hdr->data
@@ -397,7 +384,7 @@ std::string to_world_json(const CamArchive& cam, const WorldJsonOptions& opts) {
                                     o << "{\"x\": " << pt->x_offset
                                       << ", \"y\": " << pt->y_offset
                                       << ", \"type\": " << static_cast<int>(pt->type)
-                                      << ", \"type_name\": \"" << json_escape(point_type_name(pt->type)) << "\""
+                                      << ", \"type_name\": \"" << escape_string(point_type_name(pt->type)) << "\""
                                       << ", \"flags\": " << static_cast<int>(pt->flags)
                                       << "}";
                                 }
@@ -436,7 +423,7 @@ std::string to_world_json(const CamArchive& cam, const WorldJsonOptions& opts) {
                 o << "    ]\n";
                 o << "  }";
             } catch (const std::exception& e) {
-                o << ",\n  \"objectives\": {\"error\": \"" << json_escape(e.what()) << "\"}";
+                o << ",\n  \"objectives\": {\"error\": \"" << escape_string(e.what()) << "\"}";
             }
         }
 
@@ -481,9 +468,9 @@ std::string to_world_json(const CamArchive& cam, const WorldJsonOptions& opts) {
                             && dt == DTYPE_UNIT) {
                             const auto* ucd = opts.theater_db->units.at(dp);
                             if (ucd) {
-                                o << ", \"class_name\": \"" << json_escape(ucd->name) << "\""
+                                o << ", \"class_name\": \"" << escape_string(ucd->name) << "\""
                                   << ", \"movement_type\": " << ucd->movement_type
-                                  << ", \"movement_type_name\": \"" << json_escape(movement_type_name(ucd->movement_type)) << "\""
+                                  << ", \"movement_type_name\": \"" << escape_string(movement_type_name(ucd->movement_type)) << "\""
                                   << ", \"movement_speed\": " << ucd->movement_speed
                                   << ", \"max_range\": " << ucd->max_range
                                   << ", \"fuel\": " << ucd->fuel
@@ -511,8 +498,8 @@ std::string to_world_json(const CamArchive& cam, const WorldJsonOptions& opts) {
                                         const auto* vcd = opts.theater_db->vehicles.at(
                                             static_cast<std::size_t>(vt) - VU_LAST_ENTITY_TYPE);
                                         if (vcd) {
-                                            o << ", \"vehicle_name\": \"" << json_escape(vcd->name) << "\""
-                                              << ", \"vehicle_nctr\": \"" << json_escape(vcd->nctr) << "\""
+                                            o << ", \"vehicle_name\": \"" << escape_string(vcd->name) << "\""
+                                              << ", \"vehicle_nctr\": \"" << escape_string(vcd->nctr) << "\""
                                               << ", \"hit_points\": " << vcd->hit_points
                                               << ", \"max_speed\": " << vcd->max_speed;
                                         }
@@ -665,7 +652,7 @@ std::string to_world_json(const CamArchive& cam, const WorldJsonOptions& opts) {
                 o << "    ]\n";
                 o << "  }";
             } catch (const std::exception& e) {
-                o << ",\n  \"units\": {\"error\": \"" << json_escape(e.what()) << "\"}";
+                o << ",\n  \"units\": {\"error\": \"" << escape_string(e.what()) << "\"}";
             }
         }
 

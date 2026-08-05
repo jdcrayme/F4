@@ -21,6 +21,7 @@
 
 #include <f4/world_convert/unit_decoder.hpp>
 #include <f4/world_convert/lzss.hpp>
+#include <f4/io/cursor.hpp>
 
 #include <cstring>
 #include <stdexcept>
@@ -28,28 +29,13 @@
 namespace f4::world_convert {
 
 namespace {
-struct Cursor {
-    const uint8_t* p;
-    const uint8_t* end;
-    void read(void* dst, std::size_t n) {
-        if (p + n > end) throw std::runtime_error("uni: buffer truncated");
-        std::memcpy(dst, p, n);
-        p += n;
-    }
-    int16_t  i16() { int16_t v=0;  read(&v,2); return v; }
-    uint16_t u16() { uint16_t v=0; read(&v,2); return v; }
-    int32_t  i32() { int32_t v=0;  read(&v,4); return v; }
-    uint32_t u32() { uint32_t v=0; read(&v,4); return v; }
-    uint8_t  u8()  { uint8_t v=0;  read(&v,1); return v; }
-    float    f32() { float v=0;   read(&v,4); return v; }
-    void skip(std::size_t n) {
-        if (p + n > end) throw std::runtime_error("uni: buffer truncated (skip)");
-        p += n;
-    }
-    [[nodiscard]] std::size_t remaining() const noexcept {
-        return static_cast<std::size_t>(end - p);
-    }
-};
+
+// Lightweight sequential cursor over a byte buffer. Replaced by the shared
+// f4::io::Cursor (header <f4/io/cursor.hpp>); see that header for the
+// design rationale for the sticky `error` flag (this is the only Cursor
+// call site that drives the subclass-dispatch path in try_tail below,
+// which is why the sticky-flag policy exists in the first place).
+using f4::io::Cursor;
 
 // Read a VU_ID as a (creator, num) pair.
 struct VuId { uint32_t creator; uint32_t num; };
@@ -364,18 +350,19 @@ bool validate_next_record(const uint8_t* p, const uint8_t* end) {
 // Try a subclass tail parser. Returns true if the candidate cursor position
 // validates. On success, fills `out` and advances `c` to the new position.
 // On failure, leaves `c` unchanged.
+//
+// Uses Cursor's sticky error flag rather than try/catch — see the design
+// note on Cursor above. This avoids exception-based control flow on the
+// per-record hot path and surfaces real bugs (which would throw) instead
+// of swallowing them under catch(...).
 template<typename ParseFn>
 bool try_tail(Cursor& c, Cursor& snapshot, const uint8_t* end,
               UnitRecord& u, ParseFn parse) {
     Cursor trial = snapshot;   // start from the post-waypoint position
-    try {
-        parse(trial, u.subclass);
-        if (validate_next_record(trial.p, end)) {
-            c = trial;
-            return true;
-        }
-    } catch (...) {
-        // tail parse went out of bounds — not a match
+    parse(trial, u.subclass);
+    if (!trial.error && validate_next_record(trial.p, end)) {
+        c = trial;
+        return true;
     }
     return false;
 }
@@ -467,33 +454,36 @@ DecodedUnits decode_uni(const uint8_t* data, std::size_t size) {
     out.units.reserve(static_cast<std::size_t>(out.count));
 
     int decoded = 0;
-    while (decoded < out.count && c.remaining() > 0) {
+    while (decoded < out.count && c.remaining() > 0 && !c.error) {
         const uint8_t* record_start = c.p;
-        try {
-            UnitRecord u;
-            u.type = c.i16();
-            parse_camp_base(c, u);
-            parse_unit_class_fixed(c, u);
-            parse_waypoints(c, u);
-            u.unit_class = dispatch_and_parse_tail(c, record_start, c.end, u);
+        UnitRecord u;
+        u.type = c.i16();
+        parse_camp_base(c, u);
+        parse_unit_class_fixed(c, u);
+        parse_waypoints(c, u);
+        u.unit_class = dispatch_and_parse_tail(c, record_start, c.end, u);
 
-            // If dispatch failed, stop here (cursor stays at the failed
-            // position so the caller can see bytes_consumed).
-            if (u.unit_class == UnitClass::Unknown && c.p == record_start + 2 + 25 + 40 + 1 + static_cast<std::size_t>(u.wp_count) * 16) {
-                // Cursor is right after waypoints — try_tail left it there.
-                // That's a hard stop.
-                out.bytes_consumed = static_cast<std::size_t>(c.p - buf.data());
-                break;
-            }
-
-            out.units.push_back(std::move(u));
-            ++decoded;
-        } catch (const std::exception&) {
-            // Out of buffer mid-record — stop and report position.
+        // Cursor's sticky error flag is set when a read/skip went OOB.
+        // This is the "buffer truncated mid-record" case — stop and
+        // report the position of the start of the partial record (so
+        // the caller can see bytes_consumed up to the last full record).
+        if (c.error) {
             c.p = record_start;
             out.bytes_consumed = static_cast<std::size_t>(c.p - buf.data());
             break;
         }
+
+        // If dispatch failed, stop here (cursor stays at the failed
+        // position so the caller can see bytes_consumed).
+        if (u.unit_class == UnitClass::Unknown && c.p == record_start + 2 + 25 + 40 + 1 + static_cast<std::size_t>(u.wp_count) * 16) {
+            // Cursor is right after waypoints — try_tail left it there.
+            // That's a hard stop.
+            out.bytes_consumed = static_cast<std::size_t>(c.p - buf.data());
+            break;
+        }
+
+        out.units.push_back(std::move(u));
+        ++decoded;
     }
 
     out.bytes_consumed = static_cast<std::size_t>(c.p - buf.data());

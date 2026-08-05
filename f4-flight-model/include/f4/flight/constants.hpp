@@ -11,23 +11,26 @@
 // original Falcon 4 values. The gravity constant (32.177) is intentionally
 // the legacy value, NOT the standard 32.17405 — the coefficient tables were
 // tuned for 32.177 and changing it would alter the flight feel.
+//
+// The angle constants (PI, HALF_PI, TWO_PI, DTR, RTD) are re-exported from
+// f4-math/include/f4/math/constants.hpp so the project has a single source
+// of truth for pi. New code should include <f4/math/constants.hpp> directly.
 
 #pragma once
+
+#include <f4/math/constants.hpp>
 
 namespace f4::flight {
 
 // ---------------------------------------------------------------------------
-// Angle conversions
+// Angle constants — re-exported from f4-math for backward compatibility.
+// New call sites should include <f4/math/constants.hpp> directly.
 // ---------------------------------------------------------------------------
-constexpr double RTD = 57.2957795130823208767;   // radians -> degrees
-constexpr double DTR = 0.017453292519943295769;  // degrees -> radians
-
-// ---------------------------------------------------------------------------
-// Circle constants
-// ---------------------------------------------------------------------------
-constexpr double PI      = 3.14159265358979323846;
-constexpr double HALF_PI = 1.57079632679489661923;
-constexpr double TWO_PI  = 6.28318530717958647692;
+using f4::math::PI;
+using f4::math::HALF_PI;
+using f4::math::TWO_PI;
+using f4::math::DTR;
+using f4::math::RTD;
 
 // ---------------------------------------------------------------------------
 // Gravitational acceleration

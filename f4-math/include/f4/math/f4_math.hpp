@@ -8,6 +8,7 @@
 
 #pragma once
 
+#include "f4/math/constants.hpp"
 #include "f4/math/scalar.hpp"
 #include "f4/math/table.hpp"
 #include "f4/math/integration.hpp"

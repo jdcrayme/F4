@@ -1,10 +1,16 @@
 // f4-geo/constants.hpp
 //
 // Physical constants for geodesy (WGS84 ellipsoid) and unit conversions
-// used by the coordinate strong types. Pure compile-time constants, no
-// dependencies.
+// used by the coordinate strong types. Pure compile-time constants.
+//
+// Angle constants (PI, TWO_PI, DEG_TO_RAD, RAD_TO_DEG) are re-exported
+// here for backward compatibility, but the single source of truth is
+// f4-math/include/f4/math/constants.hpp. New code should include that
+// directly.
 
 #pragma once
+
+#include <f4/math/constants.hpp>
 
 namespace f4::geo {
 
@@ -31,9 +37,13 @@ inline constexpr double METERS_PER_FOOT = 1.0 / FEET_PER_METER;
 inline constexpr double METERS_PER_NM   = 1852.0;
 inline constexpr double FEET_PER_NM     = METERS_PER_NM * FEET_PER_METER; // 6076.11548...
 
-inline constexpr double PI        = 3.14159265358979323846;
-inline constexpr double TWO_PI    = 2.0 * PI;
-inline constexpr double DEG_TO_RAD = PI / 180.0;
-inline constexpr double RAD_TO_DEG = 180.0 / PI;
+// ============================================================================
+// Angle constants — re-exported from f4-math for backward compatibility.
+// New call sites should include <f4/math/constants.hpp> directly.
+// ============================================================================
+using f4::math::PI;
+using f4::math::TWO_PI;
+using f4::math::DEG_TO_RAD;
+using f4::math::RAD_TO_DEG;
 
 } // namespace f4::geo

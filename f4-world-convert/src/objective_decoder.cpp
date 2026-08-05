@@ -2,6 +2,7 @@
 
 #include <f4/world_convert/objective_decoder.hpp>
 #include <f4/world_convert/lzss.hpp>
+#include <f4/io/cursor.hpp>
 
 #include <cstring>
 #include <stdexcept>
@@ -10,21 +11,12 @@ namespace f4::world_convert {
 
 namespace {
 
-struct Cursor {
-    const uint8_t* p;
-    const uint8_t* end;
-    void read(void* dst, std::size_t n) {
-        if (p + n > end) throw std::runtime_error("obj: buffer truncated");
-        std::memcpy(dst, p, n);
-        p += n;
-    }
-    int16_t  i16() { int16_t v=0;  read(&v,2); return v; }
-    uint16_t u16() { uint16_t v=0; read(&v,2); return v; }
-    int32_t  i32() { int32_t v=0;  read(&v,4); return v; }
-    uint32_t u32() { uint32_t v=0; read(&v,4); return v; }
-    uint8_t  u8()  { uint8_t v=0;  read(&v,1); return v; }
-    float    f32() { float v=0;   read(&v,4); return v; }
-};
+// Cursor replaced by the shared f4::io::Cursor. The shared Cursor uses a
+// sticky `error` flag instead of throwing on OOB; decode_obj checks the
+// flag (instead of the previous try/catch around the per-record parse)
+// and treats an OOB exactly as before: roll back to the previous record
+// boundary and stop decoding.
+using f4::io::Cursor;
 
 } // namespace
 
@@ -96,94 +88,97 @@ DecodedObjectives decode_obj(const uint8_t* data, std::size_t size) {
     // ObjectiveClass::Save tail for 100% coverage.
     for (int16_t i = 0; i < out.count; ++i) {
         const uint8_t* before = c.p;
-        try {
-            ObjectiveRecord o;
-            // The [short] before each record is a nonzero sentinel written by
-            // SaveBaseObjectives (o->Type() as a short). NewObjective() only
-            // checks tid==0 (skip). The actual objective class is in the
-            // entity_type field that follows the VU_ID. We store both.
-            int16_t sentinel = c.i16();
+        ObjectiveRecord o;
+        // The [short] before each record is a nonzero sentinel written by
+        // SaveBaseObjectives (o->Type() as a short). NewObjective() only
+        // checks tid==0 (skip). The actual objective class is in the
+        // entity_type field that follows the VU_ID. We store both.
+        int16_t sentinel = c.i16();
 
-            // --- CampBaseClass::Save ---
-            o.id_creator   = c.u32();         // VU_ID.creator
-            o.id_num       = c.u32();         // VU_ID.num
-            o.entity_type  = c.u16();
-            o.x            = c.i16();         // GridIndex x
-            o.y            = c.i16();         // GridIndex y
-            if (has_z) o.z = c.f32(); else o.z = 0.0f;   // version-gated
-            o.spot_time    = c.i32();
-            o.spotted      = c.i16();
-            o.base_flags   = c.i16();
-            o.owner        = c.u8();          // Control
-            o.camp_id      = c.i16();
+        // --- CampBaseClass::Save ---
+        o.id_creator   = c.u32();         // VU_ID.creator
+        o.id_num       = c.u32();         // VU_ID.num
+        o.entity_type  = c.u16();
+        o.x            = c.i16();         // GridIndex x
+        o.y            = c.i16();         // GridIndex y
+        if (has_z) o.z = c.f32(); else o.z = 0.0f;   // version-gated
+        o.spot_time    = c.i32();
+        o.spotted      = c.i16();
+        o.base_flags   = c.i16();
+        o.owner        = c.u8();          // Control
+        o.camp_id      = c.i16();
 
-            // --- ObjectiveClass::Save ---
-            o.last_repair  = c.i32();
-            o.obj_flags    = c.u32();
-            o.supply       = c.u8();
-            o.fuel         = c.u8();
-            o.losses       = c.u8();
-            // Per-feature damage bitmap: 1-byte length prefix + N bytes.
-            // 2 bits per feature (VIS_NORMAL / DAMAGED / DESTROYED / REPAIRED).
-            // The feature count comes from the objective's ObjClassDataType
-            // entry in Falcon4.OCD — not yet parsed, so we expose the raw
-            // bytes verbatim for downstream consumers.
-            uint8_t fstatus_len = c.u8();
-            o.fstatus.resize(fstatus_len);
-            if (fstatus_len > 0) c.read(o.fstatus.data(), fstatus_len);
-            o.priority     = c.u8();
-            o.nameid       = c.i16();
-            // Parent VU_ID (8 bytes). 0/0 means no parent. The .cam writes
-            // VU_ID as num(4) + creator(4) — same order as CampBaseClass.id.
-            o.parent_id_num      = c.u32();
-            o.parent_id_creator  = c.u32();
-            o.first_owner  = c.u8();
-            o.links        = c.u8();
-            // Decode the link data (road/rail network). Each link is:
-            //   uchar costs[MOVEMENT_TYPES=8] + VU_ID(8 bytes) = 16 bytes.
-            // The VU_ID refers to the neighboring objective.
-            o.link_data.clear();
-            o.link_data.reserve(o.links);
-            for (uint8_t li = 0; li < o.links; ++li) {
-                ObjectiveLink link;
-                for (int j = 0; j < 8; ++j) {
-                    link.costs[j] = c.u8();
-                }
-                link.neighbor_num = c.u32();
-                link.neighbor_creator = c.u32();
-                o.link_data.push_back(link);
+        // --- ObjectiveClass::Save ---
+        o.last_repair  = c.i32();
+        o.obj_flags    = c.u32();
+        o.supply       = c.u8();
+        o.fuel         = c.u8();
+        o.losses       = c.u8();
+        // Per-feature damage bitmap: 1-byte length prefix + N bytes.
+        // 2 bits per feature (VIS_NORMAL / DAMAGED / DESTROYED / REPAIRED).
+        // The feature count comes from the objective's ObjClassDataType
+        // entry in Falcon4.OCD — not yet parsed, so we expose the raw
+        // bytes verbatim for downstream consumers.
+        uint8_t fstatus_len = c.u8();
+        o.fstatus.resize(fstatus_len);
+        if (fstatus_len > 0) c.read(o.fstatus.data(), fstatus_len);
+        o.priority     = c.u8();
+        o.nameid       = c.i16();
+        // Parent VU_ID (8 bytes). 0/0 means no parent. The .cam writes
+        // VU_ID as num(4) + creator(4) — same order as CampBaseClass.id.
+        o.parent_id_num      = c.u32();
+        o.parent_id_creator  = c.u32();
+        o.first_owner  = c.u8();
+        o.links        = c.u8();
+        // Decode the link data (road/rail network). Each link is:
+        //   uchar costs[MOVEMENT_TYPES=8] + VU_ID(8 bytes) = 16 bytes.
+        // The VU_ID refers to the neighboring objective.
+        o.link_data.clear();
+        o.link_data.reserve(o.links);
+        for (uint8_t li = 0; li < o.links; ++li) {
+            ObjectiveLink link;
+            for (int j = 0; j < 8; ++j) {
+                link.costs[j] = c.u8();
             }
-            // Optional RadarRangeClass: present only when has_radar_data != 0.
-            // 8 floats = 32 bytes — detect_ratio[NUM_RADAR_ARCS=8], each a
-            // 0..1 detection ratio for one of 8 azimuthal arcs.
-            o.has_radar = (c.u8() != 0);
-            if (o.has_radar) {
-                for (int j = 0; j < 8; ++j) {
-                    o.detect_ratio[j] = c.f32();
-                }
+            link.neighbor_num = c.u32();
+            link.neighbor_creator = c.u32();
+            o.link_data.push_back(link);
+        }
+        // Optional RadarRangeClass: present only when has_radar_data != 0.
+        // 8 floats = 32 bytes — detect_ratio[NUM_RADAR_ARCS=8], each a
+        // 0..1 detection ratio for one of 8 azimuthal arcs.
+        o.has_radar = (c.u8() != 0);
+        if (o.has_radar) {
+            for (int j = 0; j < 8; ++j) {
+                o.detect_ratio[j] = c.f32();
             }
+        }
 
-            // Sanity gate: sentinel must be nonzero (SaveBaseObjectives
-            // writes o->Type() which is > 0 for real objectives), and the
-            // grid coordinates must be plausible. If these fail, the cursor
-            // has desynced.
-            if (sentinel == 0 || o.x < -10 || o.x > 2048 || o.y < -10 || o.y > 2048) {
-                c.p = before;
-                break;
-            }
-
-            // The sentinel is o->Type() which returns share_.entityType_
-            // (the class-table index, 100-2000+) — NOT the ObjectiveType
-            // enum (1-39). To map entity_type → ObjectiveType we need the
-            // Falcon4.ct class table file (game data, not in source tree).
-            // For now, store the entity_type as `type` and leave icon
-            // mapping to a future class-table parser.
-            o.type = static_cast<int16_t>(o.entity_type);
-            out.objectives.push_back(o);
-        } catch (...) {
+        // Cursor OOB: the sticky `error` flag replaces the previous
+        // try/catch around the per-record parse. Roll back to the previous
+        // record boundary and stop, exactly as the catch(...) did.
+        if (c.error) {
             c.p = before;
             break;
         }
+
+        // Sanity gate: sentinel must be nonzero (SaveBaseObjectives
+        // writes o->Type() which is > 0 for real objectives), and the
+        // grid coordinates must be plausible. If these fail, the cursor
+        // has desynced.
+        if (sentinel == 0 || o.x < -10 || o.x > 2048 || o.y < -10 || o.y > 2048) {
+            c.p = before;
+            break;
+        }
+
+        // The sentinel is o->Type() which returns share_.entityType_
+        // (the class-table index, 100-2000+) — NOT the ObjectiveType
+        // enum (1-39). To map entity_type → ObjectiveType we need the
+        // Falcon4.ct class table file (game data, not in source tree).
+        // For now, store the entity_type as `type` and leave icon
+        // mapping to a future class-table parser.
+        o.type = static_cast<int16_t>(o.entity_type);
+        out.objectives.push_back(o);
     }
 
     // Record how far we got. On a clean decode this equals inner_size;

@@ -1,8 +1,8 @@
 // f4-world-convert/src/cam_archive.cpp
 
 #include <f4/world_convert/cam_archive.hpp>
+#include <f4/io/read_file.hpp>
 
-#include <cstdio>
 #include <cstring>
 #include <stdexcept>
 
@@ -23,16 +23,14 @@ void CamArchive::load(const std::filesystem::path& cam_path) {
     raw_.clear();
 
     // Read the whole file into memory — .cam files are small (~200 KB).
-    FILE* fp = std::fopen(cam_path.string().c_str(), "rb");
-    if (!fp) throw std::runtime_error("CamArchive: cannot open " + cam_path.string());
-    std::fseek(fp, 0, SEEK_END);
-    const long file_size = std::ftell(fp);
-    std::fseek(fp, 0, SEEK_SET);
-    if (file_size < 8) { std::fclose(fp); throw std::runtime_error("CamArchive: file too small"); }
-    raw_.resize(static_cast<std::size_t>(file_size));
-    const std::size_t got = std::fread(raw_.data(), 1, raw_.size(), fp);
-    std::fclose(fp);
-    if (got != raw_.size()) throw std::runtime_error("CamArchive: short read");
+    // Delegates to the shared f4::io::read_file (label "CamArchive" so the
+    // diagnostic prefix matches the historical inlined version).
+    raw_ = f4::io::read_file(cam_path, "CamArchive");
+
+    // The manifest offset lives in the first 4 bytes; an 8-byte file is
+    // the minimum viable .cam. Reject anything smaller with a clear
+    // diagnostic before we try to interpret the header.
+    if (raw_.size() < 8) throw std::runtime_error("CamArchive: file too small");
 
     // First int32 = manifest offset.
     int32_t manifest_off = 0;

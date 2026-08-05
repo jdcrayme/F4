@@ -2,6 +2,7 @@
 
 #include <f4/world_convert/campaign_decoder.hpp>
 #include <f4/world_convert/lzss.hpp>
+#include <f4/io/cursor.hpp>
 
 #include <cstdlib>
 #include <cstring>
@@ -11,29 +12,13 @@ namespace f4::world_convert {
 
 namespace {
 
-// Cursor over the decompressed payload — reads little-endian primitives and
-// bounds-checks every access.
-struct Cursor {
-    const uint8_t* p;
-    const uint8_t* end;
-
-    void read(void* dst, std::size_t n) {
-        if (p + n > end) throw std::runtime_error("cmp: payload truncated");
-        std::memcpy(dst, p, n);
-        p += n;
-    }
-    int32_t i32() { int32_t v=0; read(&v,4); return v; }
-    uint8_t u8()  { uint8_t v=0; read(&v,1); return v; }
-    std::string fixed_string(std::size_t maxlen) {
-        if (p + maxlen > end) throw std::runtime_error("cmp: string truncated");
-        // The field is a fixed-width char array, null-terminated within it.
-        std::size_t len = 0;
-        while (len < maxlen && p[len] != 0) ++len;
-        std::string s(reinterpret_cast<const char*>(p), len);
-        p += maxlen;
-        return s;
-    }
-};
+// Cursor over the decompressed payload — replaced by the shared
+// f4::io::Cursor. The shared Cursor uses a sticky `error` flag instead of
+// throwing on OOB; decode_cmp checks the flag after each logical parse
+// block and throws std::runtime_error("cmp: payload truncated") so the
+// observable behaviour (caller sees a runtime_error on truncation) is
+// unchanged.
+using f4::io::Cursor;
 
 } // namespace
 
@@ -55,6 +40,7 @@ CampaignHeader decode_cmp(const uint8_t* data, std::size_t size) {
     Cursor top{data, data + size};
     h.reserved_skip = top.i32();
     h.decompressed_size = top.i32();
+    if (top.error) throw std::runtime_error("cmp: payload truncated");
 
     if (h.decompressed_size <= 0)
         throw std::runtime_error("cmp: invalid decompressed size");
@@ -95,6 +81,8 @@ CampaignHeader decode_cmp(const uint8_t* data, std::size_t size) {
         h.teams[i].name = c.fixed_string(20);
         h.teams[i].motto = c.fixed_string(200);
     }
+
+    if (c.error) throw std::runtime_error("cmp: payload truncated");
 
     // Preserve the remaining decompressed bytes for future decoders.
     h.remaining_payload.assign(c.p, c.end);

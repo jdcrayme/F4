@@ -58,7 +58,7 @@ AircraftConfig loadF16() {
 TEST(StallBusIntegration, PublishesStateChangesOnBus) {
     auto cfg = loadF16();
     FlightModel fm;
-    fm.init(cfg, 5000.0, 100.0, 0.0, true);
+    fm.init(cfg, 10000.0, 100.0, 0.0, true);
     fm.set_aircraft_id(42);
 
     // Set up the bus + recording subscribers
@@ -75,11 +75,21 @@ TEST(StallBusIntegration, PublishesStateChangesOnBus) {
 
     fm.set_message_bus(&bus);
 
-    // Drive the flight model for 5 seconds at low speed (stall induction)
+    // Force the aircraft into a stalled state: alpha=30° exceeds criticalAOA=25°.
+    // See test_stall_sm_integration's lifecycle test for the rationale (the
+    // FCS's G-limiter prevents pilot-induced stalls at 100 ft/s).
+    fm.state().aero.alpha_deg = 30.0;
+    fm.state().fcs.pitchAlphaLag.reset(30.0);
+    fm.state().fcs.aoacmd = 30.0;
+
+    // Drive the flight model for 5 seconds with full aft stick and cut
+    // throttle — hold the stall so the SM has time to transition through
+    // EnteringDeepStall -> DeepStall.
     const double dt = 1.0 / 60.0;
     const f4::math::Vec3d groundNormal{0.0, 0.0, -1.0};
     PilotInput input;
-    input.throttle = 0.3;
+    input.throttle = 0.0;
+    input.pstick = 1.0;   // full aft — hold the stall
 
     for (int frame = 0; frame < 5 * 60; ++frame) {
         fm.set_sim_time(frame * dt);
@@ -87,11 +97,10 @@ TEST(StallBusIntegration, PublishesStateChangesOnBus) {
         if (-fm.state().kin.z < 500.0) break;  // don't hit the ground
     }
 
-    // If the SM transitioned, we should have received messages.
-    // At 100 ft/s the F-16 will stall, so at least one state change is
-    // expected (None -> EnteringDeepStall).
+    // Forced alpha=30° > criticalAOA=25° triggers the aero stall guard,
+    // so at least one state change is expected (None -> EnteringDeepStall).
     EXPECT_FALSE(state_changes.empty())
-        << "Expected at least one stall state change at 100 ft/s";
+        << "Expected at least one stall state change when alpha=30° exceeds criticalAOA=25°";
 
     // Every recorded state change must have:
     //   - the correct aircraft_id (42)
@@ -131,13 +140,21 @@ TEST(StallBusIntegration, PublishesStateChangesOnBus) {
 TEST(StallBusIntegration, NoBusAttachedBehavesIdentically) {
     auto cfg = loadF16();
     FlightModel fm;
-    fm.init(cfg, 5000.0, 100.0, 0.0, true);
+    fm.init(cfg, 10000.0, 100.0, 0.0, true);
     // NOTE: no set_message_bus() call — bus_ is nullptr.
 
+    // Force the aircraft into a stalled state (see PublishesStateChangesOnBus).
+    fm.state().aero.alpha_deg = 30.0;
+    fm.state().fcs.pitchAlphaLag.reset(30.0);
+    fm.state().fcs.aoacmd = 30.0;
+
+    // Drive the flight model for 5 seconds with full aft stick + cut throttle
+    // to hold the stall.
     const double dt = 1.0 / 60.0;
     const f4::math::Vec3d groundNormal{0.0, 0.0, -1.0};
     PilotInput input;
-    input.throttle = 0.3;
+    input.throttle = 0.0;
+    input.pstick = 1.0;
 
     // Run 5 seconds — should complete without crashing
     for (int frame = 0; frame < 5 * 60; ++frame) {
@@ -165,7 +182,7 @@ TEST(StallBusIntegration, NoBusAttachedBehavesIdentically) {
 TEST(StallBusIntegration, MultipleSubscribersBothFire) {
     auto cfg = loadF16();
     FlightModel fm;
-    fm.init(cfg, 5000.0, 100.0, 0.0, true);
+    fm.init(cfg, 10000.0, 100.0, 0.0, true);
 
     MessageBus bus;
     std::vector<StallState> handler_a_states;
@@ -180,10 +197,16 @@ TEST(StallBusIntegration, MultipleSubscribersBothFire) {
 
     fm.set_message_bus(&bus);
 
+    // Force the aircraft into a stalled state (see PublishesStateChangesOnBus).
+    fm.state().aero.alpha_deg = 30.0;
+    fm.state().fcs.pitchAlphaLag.reset(30.0);
+    fm.state().fcs.aoacmd = 30.0;
+
     const double dt = 1.0 / 60.0;
     const f4::math::Vec3d groundNormal{0.0, 0.0, -1.0};
     PilotInput input;
-    input.throttle = 0.3;
+    input.throttle = 0.0;
+    input.pstick = 1.0;
 
     for (int frame = 0; frame < 5 * 60; ++frame) {
         fm.update(dt, input, 0.0, groundNormal);
@@ -233,7 +256,7 @@ TEST(StallBusIntegration, MultipleSubscribersBothFire) {
 TEST(StallBusIntegration, CrossThreadForwardingViaSendTo) {
     auto cfg = loadF16();
     FlightModel fm;
-    fm.init(cfg, 5000.0, 100.0, 0.0, true);
+    fm.init(cfg, 10000.0, 100.0, 0.0, true);
     fm.set_aircraft_id(7);
 
     // Sim bus (owned by the main/sim thread — the FlightModel publishes here)
@@ -248,6 +271,11 @@ TEST(StallBusIntegration, CrossThreadForwardingViaSendTo) {
     });
 
     fm.set_message_bus(&sim_bus);
+
+    // Force the aircraft into a stalled state (see PublishesStateChangesOnBus).
+    fm.state().aero.alpha_deg = 30.0;
+    fm.state().fcs.pitchAlphaLag.reset(30.0);
+    fm.state().fcs.aoacmd = 30.0;
 
     // Spawn the "campaign thread" — it polls flush_pending until it sees
     // at least one state-change message, then exits.
@@ -275,14 +303,13 @@ TEST(StallBusIntegration, CrossThreadForwardingViaSendTo) {
         campaign_bus.flush_pending();
     });
 
-    // Run the sim (main thread) for 5 seconds. The FlightModel publishes
-    // on the sim bus (same-thread); the sim-bus handler forwards to the
-    // campaign bus via send_to (which is publish_deferred — enqueues on
-    // the campaign bus); the campaign thread drains via flush_pending.
+    // Run the sim (main thread) for 5 seconds. Full aft stick + cut throttle
+    // holds the stall so the SM produces state changes for the campaign thread.
     const double dt = 1.0 / 60.0;
     const f4::math::Vec3d groundNormal{0.0, 0.0, -1.0};
     PilotInput input;
-    input.throttle = 0.3;
+    input.throttle = 0.0;
+    input.pstick = 1.0;
 
     for (int frame = 0; frame < 5 * 60; ++frame) {
         fm.update(dt, input, 0.0, groundNormal);
@@ -295,8 +322,8 @@ TEST(StallBusIntegration, CrossThreadForwardingViaSendTo) {
     campaign_thread.join();
 
     // The campaign thread should have received at least one state-change
-    // message via the cross-bus forward. (At 100 ft/s the F-16 will stall,
-    // producing at least one None -> EnteringDeepStall transition.)
+    // message via the cross-bus forward. Forced alpha=30° produces at least
+    // one None -> EnteringDeepStall transition.
     EXPECT_GT(campaign_received.load(std::memory_order_acquire), 0)
         << "Campaign thread should have received at least one forwarded event";
 }
@@ -311,7 +338,7 @@ TEST(StallBusIntegration, CrossThreadForwardingViaSendTo) {
 TEST(StallBusIntegration, BusAndTraceCoexist) {
     auto cfg = loadF16();
     FlightModel fm;
-    fm.init(cfg, 5000.0, 100.0, 0.0, true);
+    fm.init(cfg, 10000.0, 100.0, 0.0, true);
 
     // Attach BOTH a trace (the existing observability mechanism) and a
     // MessageBus (the new one). They must coexist without interference.
@@ -328,7 +355,8 @@ TEST(StallBusIntegration, BusAndTraceCoexist) {
     const double dt = 1.0 / 60.0;
     const f4::math::Vec3d groundNormal{0.0, 0.0, -1.0};
     PilotInput input;
-    input.throttle = 0.3;
+    input.throttle = 0.0;
+    input.pstick = 1.0;
 
     for (int frame = 0; frame < 5 * 60; ++frame) {
         fm.update(dt, input, 0.0, groundNormal);
