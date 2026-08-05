@@ -51,6 +51,13 @@ namespace f4::messaging {
 //     Multiple producer threads can enqueue concurrently.
 //   - flush_pending() must be called from the owning (consumer) thread.
 //
+// Reentrant publish safety:
+//   A handler called from publish() may itself call publish() on the same
+//   bus (e.g. a stall handler publishing a warning). The handlers_mutex_ is
+//   a std::recursive_mutex so this is safe — the recursive lock succeeds
+//   on the same thread. If this were a plain std::mutex, the second
+//   publish() would deadlock.
+//
 // Handler storage:
 //   Handlers are stored as std::function<void(const void*)> keyed by
 //   std::type_index(typeid(Msg)). The type-erased call wraps a
@@ -215,7 +222,7 @@ public:
     }
 
 private:
-    mutable std::mutex handlers_mutex_;
+    mutable std::recursive_mutex handlers_mutex_;
     std::unordered_map<std::type_index, std::vector<HandlerFn>> handlers_;
 
     mutable std::mutex pending_mutex_;

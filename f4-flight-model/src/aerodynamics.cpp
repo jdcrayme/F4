@@ -19,6 +19,7 @@
 //     stability rotated by beta
 
 #include "f4/flight/aerodynamics.hpp"
+#include "f4/flight/stall_state.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -175,7 +176,7 @@ void Aerodynamics::update(double alpha_deg,
         const double weight_lbs = mass_from_qsom * GRAVITY;
         const double ws = weight_lbs / S;  // wing loading W/S
         if (std::fabs(cl) > 1e-3) {
-            stallSpeed = 17.16 * std::sqrt(ws / std::fabs(cl));
+            stallSpeed = K_STALL * std::sqrt(ws / std::fabs(cl));
         }
         if (vcas_kts < stallSpeed || alpha_deg > aux_->criticalAOA) {
             stalled = true;
@@ -197,8 +198,11 @@ void Aerodynamics::update(double alpha_deg,
     // (the SM state lags the aero detection by one minor frame) which is
     // negligible at 240 Hz.
     double lift;
-    const int stallState = aero.stallState;  // 0=None, 4=FlatSpin
-    if (stallState == 4) {  // FlatSpin
+    // Use the typed StallState enum instead of raw int comparison.
+    // Previously this was `const int stallState = aero.stallState; if (stallState == 4)`
+    // which was a magic-number comparison — fragile and unclear.
+    const StallState stallState = static_cast<StallState>(aero.stallState);
+    if (stallState == StallState::FlatSpin) {  // FlatSpin: lift = 0
         lift = 0.0;  // FreeFalcon aero.cpp:319: lift = 0.0f
     } else if (stalled && stallSpeed > 1e-3) {
         const double cl_stalled = std::min(0.0, cl * 0.5);

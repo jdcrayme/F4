@@ -73,7 +73,7 @@ StallSM makeStallMachine(const StallConfig& cfg) {
 // the one most relevant to the current state is chosen (matching FreeFalcon's
 // switch-case priority).
 // ---------------------------------------------------------------------------
-StallEvent detectStallEvent(const StallDetection& d, const StallConfig& cfg) {
+std::optional<StallEvent> detectStallEvent(const StallDetection& d, const StallConfig& cfg) {
     switch (d.currentState) {
         case StallState::None:
             // FreeFalcon: stall entry when vcas < stallSpeed || alpha > criticalAOA
@@ -124,9 +124,8 @@ StallEvent detectStallEvent(const StallDetection& d, const StallConfig& cfg) {
                 return StallEvent::AoAExceed;
             break;
     }
-    // No event this frame. Return a default; the caller should check
-    // sm.can_fire() before calling process() to avoid a no-op.
-    return StallEvent::AoAExceed;  // sentinel — caller must check can_fire()
+    // No event this frame.
+    return std::nullopt;
 }
 
 }  // namespace f4::flight

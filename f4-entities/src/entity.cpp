@@ -11,6 +11,16 @@ namespace f4::entities {
 // ============================================================================
 // EntityWorld
 // ============================================================================
+
+// Global atomic counter for generating unique world cookies.
+// Each EntityWorld gets a unique cookie at construction, so EntityHandle
+// can detect use-after-free if a new world is allocated at the same
+// address as a destroyed one.
+static std::atomic<uint64_t> g_next_world_cookie{1};
+
+EntityWorld::EntityWorld()
+    : cookie_(g_next_world_cookie.fetch_add(1, std::memory_order_relaxed)) {}
+
 EntityHandle EntityWorld::create() {
     uint32_t index;
     if (!free_list_.empty()) {
@@ -111,7 +121,8 @@ std::vector<EntityId> EntityWorld::within_radius(double cx, double cy, double cz
 // EntityHandle
 // ============================================================================
 bool EntityHandle::valid() const noexcept {
-    return world_ && world_->alive(id_);
+    if (!world_ || cookie_ != world_->cookie_) return false;
+    return world_->alive(id_);
 }
 
 void EntityHandle::set_tag(const TagKey& key, TagValue value) {
@@ -158,19 +169,25 @@ int64_t SpatialIndex::to_key(int cx, int cy, int cz) const noexcept {
 void SpatialIndex::insert(EntityId id, double x, double y, double z) noexcept {
     const int64_t key = to_key(x, y, z);
     grid_[key].push_back(CellEntry{id, x, y, z});
+    id_to_key_[id] = key;  // reverse index for O(1) removal
 }
 
 void SpatialIndex::remove(EntityId id) noexcept {
-    // Removing requires knowing which cell the id is in; we scan all cells.
-    // For production hot paths a reverse index (id -> cell key) would be
-    // added, but the common usage pattern is update() (remove+insert) driven
-    // by the world tick, where callers know the new position. The simple
-    // implementation here is correct and adequate for moderate entity counts.
-    for (auto& [key, entries] : grid_) {
-        for (auto it = entries.begin(); it != entries.end(); ++it) {
-            if (it->id == id) { entries.erase(it); break; }
-        }
+    // O(1) removal using the reverse index. Previously this scanned ALL
+    // cells, which was O(cells * entries_per_cell) — very expensive when
+    // many entities are moving each frame (every update = remove + insert).
+    auto rit = id_to_key_.find(id);
+    if (rit == id_to_key_.end()) return;
+    const int64_t key = rit->second;
+    id_to_key_.erase(rit);
+
+    auto git = grid_.find(key);
+    if (git == grid_.end()) return;
+    auto& entries = git->second;
+    for (auto it = entries.begin(); it != entries.end(); ++it) {
+        if (it->id == id) { entries.erase(it); break; }
     }
+    if (entries.empty()) grid_.erase(git);
 }
 
 std::vector<EntityId> SpatialIndex::query_radius(double cx, double cy, double cz,

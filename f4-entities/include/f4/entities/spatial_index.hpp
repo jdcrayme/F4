@@ -19,6 +19,15 @@
 
 #include "entity.hpp"
 
+namespace std {
+    template<>
+    struct hash<f4::entities::EntityId> {
+        std::size_t operator()(const f4::entities::EntityId& id) const noexcept {
+            return std::hash<uint64_t>{}(id.value);
+        }
+    };
+} // namespace std
+
 namespace f4::entities {
 
 class SpatialIndex {
@@ -26,7 +35,7 @@ public:
     explicit SpatialIndex(double cell_size = 30000.0) noexcept
         : cell_size_(cell_size), inv_cell_size_(1.0 / cell_size) {}
 
-    void clear() noexcept { grid_.clear(); }
+    void clear() noexcept { grid_.clear(); id_to_key_.clear(); }
 
     /// Insert or update an entity's position in the grid.
     void insert(EntityId id, double x, double y, double z) noexcept;
@@ -58,6 +67,11 @@ private:
     // cell key -> entries in that cell. Linear scan within a cell is fine
     // because cells are sized to the query radius (few entries per cell).
     std::unordered_map<int64_t, std::vector<CellEntry>> grid_;
+    // Reverse index: entity id -> cell key, for O(1) removal instead of
+    // the previous O(cells * entries) brute-force scan. The update() method
+    // is the hot path (called every frame for every moving entity), and the
+    // old remove() implementation scanned ALL cells to find the entity.
+    std::unordered_map<EntityId, int64_t> id_to_key_;
 };
 
 } // namespace f4::entities

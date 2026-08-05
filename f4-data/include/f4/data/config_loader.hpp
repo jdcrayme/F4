@@ -24,6 +24,7 @@ struct LoadResult {
     AircraftConfig config;
     bool ok = false;
     std::vector<std::string> errors;
+    std::vector<std::string> warnings;  // non-fatal: missing fields that defaulted
 };
 
 /// Load an AircraftConfig from a JSON file on disk.

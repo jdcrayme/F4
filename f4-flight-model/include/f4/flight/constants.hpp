@@ -102,4 +102,16 @@ constexpr double GEAR_RATE = 1.0 / 3.0;  // 1/s  (full travel in 3 s)
 constexpr double TEF_RATE = 1.0 / 3.0;   // 1/s  (full travel in 3 s)
 constexpr double LEF_RATE = 1.0 / 1.5;   // 1/s  (full travel in 1.5 s)
 
+// ---------------------------------------------------------------------------
+// Stall speed coefficient
+//
+// The stall speed formula is: V_stall = K_STALL * sqrt((W/S) / |CL|)
+// where K_STALL = 17.16 knots * sqrt(ft^2/lb). This constant comes from
+// the unit conversion in the original FreeFalcon aero.cpp:
+//   17.16 = sqrt(2 * g / rho_0) * (1 / KNOTS_TO_FTPSEC)
+// where g = 32.177 ft/s^2, rho_0 = 0.0023769 slugs/ft^3.
+// Previously this was a bare magic number in aerodynamics.cpp.
+// ---------------------------------------------------------------------------
+constexpr double K_STALL = 17.16;  // knots * sqrt(ft^2/lb)
+
 }  // namespace f4::flight

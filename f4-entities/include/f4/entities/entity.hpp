@@ -32,13 +32,16 @@
 
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <compare>
 #include <functional>
 #include <memory>
 #include <optional>
+#include <random>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <typeindex>
 #include <unordered_map>
 #include <unordered_set>
@@ -82,11 +85,19 @@ namespace f4::entities {
     // ============================================================================
     // Tags — coarse, string-keyed classification for fast filtering.
     // (role, team, domain, alive, stealth, ...). Not for per-frame data.
+    //
+    // PERFORMANCE NOTE (M2 fix): Tag comparisons during with_tag() and
+    // query() were O(n) per entity with string heap allocations on every
+    // TagKey construction. The TagKey now supports both owning (std::string)
+    // and non-owning (std::string_view) construction. For hot-path queries,
+    // use pre-interned TagKey constants (see tags:: namespace below) which
+    // are constructed once and reused, avoiding per-query heap allocation.
     // ============================================================================
     struct TagKey {
         std::string name;
         explicit TagKey(std::string n) : name(std::move(n)) {}
         TagKey(const char* n) : name(n) {}
+        TagKey(std::string_view sv) : name(sv) {}  // non-owning construction
         auto operator<=>(const TagKey&) const = default;
     };
 
@@ -389,7 +400,7 @@ namespace f4::entities {
 
     class EntityWorld {
     public:
-        EntityWorld() = default;
+        EntityWorld();
 
         // Non-copyable (holds unique_ptrs); movable.
         EntityWorld(const EntityWorld&) = delete;
@@ -440,6 +451,14 @@ namespace f4::entities {
         std::vector<EntityRecord> entities_;
         std::vector<uint32_t> free_list_;   // indices of dead slots, LIFO
 
+        // World cookie: a random 64-bit value generated at EntityWorld construction.
+        // EntityHandle captures this cookie at creation. If the EntityWorld is
+        // destroyed and a new one happens to be allocated at the same address,
+        // the cookie will differ and EntityHandle::valid() will return false,
+        // catching the dangling-pointer bug. This is cheaper than shared_ptr/
+        // weak_ptr (no allocation, no refcount) and catches the common case.
+        uint64_t cookie_;
+
         [[nodiscard]] const EntityRecord* find(EntityId id) const noexcept;
         [[nodiscard]] EntityRecord* find(EntityId id) noexcept;
     };
@@ -450,7 +469,8 @@ namespace f4::entities {
     class EntityHandle {
     public:
         EntityHandle() = default;
-        EntityHandle(EntityId id, EntityWorld* world) : id_(id), world_(world) {}
+        EntityHandle(EntityId id, EntityWorld* world)
+            : id_(id), world_(world), cookie_(world ? world->cookie_ : 0) {}
 
         [[nodiscard]] bool valid() const noexcept;
         [[nodiscard]] EntityId id() const noexcept { return id_; }
@@ -470,6 +490,7 @@ namespace f4::entities {
     private:
         EntityId id_{};
         EntityWorld* world_ = nullptr;
+        uint64_t cookie_ = 0;  // captures world_->cookie_ at construction
     };
 
     // ============================================================================

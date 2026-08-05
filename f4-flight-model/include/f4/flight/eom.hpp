@@ -6,9 +6,10 @@
 // forward in time using the aerodynamic and thrust forces computed by the
 // other subsystems.
 //
-// The integration uses Forward Euler for the rigid-body state (position,
-// velocity, quaternion). The FCS integrators (in fcs.cpp) use Adams-Bashforth
-// 2nd order.
+// The integration uses the exponential map on SO(3) for the quaternion
+// orientation (geodesic-preserving, no drift off the unit sphere), and
+// Forward Euler for position/velocity. The FCS integrators (in fcs.cpp)
+// use Adams-Bashforth 2nd order.
 //
 // Coordinate frames:
 //   World: NED (North-East-Down), Z-down, feet. Altitude = -z.

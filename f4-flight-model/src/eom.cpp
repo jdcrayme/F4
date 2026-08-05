@@ -188,24 +188,56 @@ void EquationsOfMotion::calcBodyRates(double dt, double qsom, double cnalpha,
 // ---------------------------------------------------------------------------
 // calcBodyOrientation: integrate the quaternion from body rates.
 //
-// Uses Forward Euler: q_{n+1} = q_n + dt * q_dot, then normalize.
-// q_dot = 0.5 * q * omega_quat, where omega_quat = (0, p, q, r).
+// Uses the exponential map on SO(3) for quaternion integration:
+//   q_{n+1} = q_n * exp(0.5 * dt * omega_quat)
+// where omega_quat = (0, p, q, r) is the angular velocity in body frame.
+//
+// The exponential map preserves the unit-quaternion constraint to machine
+// precision (no re-normalization needed for small dt*omega), unlike Forward
+// Euler (q += dt * q_dot) which drifts off the unit sphere and must be
+// re-normalized every step. For large angular rates or coarse time steps
+// the exponential map is also more accurate because it integrates along
+// the geodesic of SO(3), not along the tangent space.
+//
+// Implementation:
+//   Let omega = (p, q, r) and theta = |omega| * dt.
+//   If theta is very small (< 1e-10), use the first-order approximation
+//   dq = 0.5 * dt * omega to avoid division by zero.
+//   Otherwise:
+//     axis = omega / |omega|
+//     half_angle = 0.5 * theta
+//     dq = (cos(half_angle), axis * sin(half_angle))
+//     q_{n+1} = q_n * dq
+//
+// This is the Rodrigues rotation formula in quaternion form.
 // ---------------------------------------------------------------------------
 void EquationsOfMotion::calcBodyOrientation(double dt, AircraftState& state) const {
     KinematicState& k = state.kin;
 
-    // Quaternion derivative: q_dot = 0.5 * q * (0, p, q, r)
-    // Hamilton product, scalar-first convention.
-    const double w = k.quat.w, x = k.quat.x, y = k.quat.y, z = k.quat.z;
     const double p = k.p, q = k.q, r = k.r;
 
-    const double dw = 0.5 * (-x * p - y * q - z * r);
-    const double dx = 0.5 * ( w * p - z * q + y * r);
-    const double dy = 0.5 * ( z * p + w * q - x * r);
-    const double dz = 0.5 * (-y * p + x * q + w * r);
+    // Angular velocity magnitude * dt
+    const double omegaMag = std::sqrt(p * p + q * q + r * r);
+    const double theta = omegaMag * dt;
 
-    // Forward Euler step + normalize
-    k.quat = Quatd(w + dw * dt, x + dx * dt, y + dy * dt, z + dz * dt).normalized();
+    Quatd dq;
+    if (theta < 1e-10) {
+        // First-order approximation for very small rotations
+        // dq ≈ (1, 0.5*dt*p, 0.5*dt*q, 0.5*dt*r)
+        dq = Quatd(1.0, 0.5 * dt * p, 0.5 * dt * q, 0.5 * dt * r).normalized();
+    } else {
+        // Exponential map: dq = (cos(theta/2), (omega/|omega|) * sin(theta/2))
+        const double halfTheta = 0.5 * theta;
+        const double invOmegaMag = 1.0 / omegaMag;
+        const double s = std::sin(halfTheta);
+        dq = Quatd(std::cos(halfTheta),
+                    s * p * invOmegaMag,
+                    s * q * invOmegaMag,
+                    s * r * invOmegaMag);
+    }
+
+    // Right-multiply: q_{n+1} = q_n * dq (body-frame angular velocity)
+    k.quat = (k.quat * dq).normalized();
 
     // Recover euler angles from the quaternion (ZYX convention)
     // theta = asin(2*(w*y - x*z))

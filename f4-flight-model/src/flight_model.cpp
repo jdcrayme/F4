@@ -485,7 +485,7 @@ void FlightModel::updateStallSM(double dt, const PilotInput& input) {
     det.timeInState_s  = stallTimer_;
     det.pstick         = input.pstick;
 
-    const StallEvent evt = detectStallEvent(det, stallCfg_);
+    const auto evtOpt = detectStallEvent(det, stallCfg_);
 
     // Rising-edge stall warning: publish BEFORE the SM processes the event
     // so consumers get the earliest possible notification. The warning
@@ -502,27 +502,31 @@ void FlightModel::updateStallSM(double dt, const PilotInput& input) {
     }
     prevAeroStalled_ = a.stalled;
 
-    // Only process if the SM can actually fire this event from the current
-    // state (avoids no-op process() calls and spurious trace entries).
-    if (stallSM_.can_fire(evt)) {
-        const StallState prev = stallSM_.current();
-        stallSM_.process(evt);
-        const StallState next = stallSM_.current();
-        if (next != prev) {
-            // State changed — reset the dwell timer
-            stallTimer_ = 0.0;
+    // Only process if there is an event AND the SM can actually fire it
+    // from the current state (avoids no-op process() calls and spurious
+    // trace entries).
+    if (evtOpt.has_value()) {
+        const StallEvent evt = evtOpt.value();
+        if (stallSM_.can_fire(evt)) {
+            const StallState prev = stallSM_.current();
+            stallSM_.process(evt);
+            const StallState next = stallSM_.current();
+            if (next != prev) {
+                // State changed — reset the dwell timer
+                stallTimer_ = 0.0;
 
-            // Publish the state-change event (authoritative SM notification).
-            if (bus_) {
-                StallStateChangeMessage msg;
-                msg.aircraft_id = aircraft_id_;
-                msg.from_state  = prev;
-                msg.to_state    = next;
-                msg.sim_time_s  = sim_time_s_;
-                msg.alpha_deg   = a.alpha_deg;
-                msg.vcas_kts    = state_.vcas;
-                msg.qbar_psf    = state_.qbar;
-                bus_->publish(msg);
+                // Publish the state-change event (authoritative SM notification).
+                if (bus_) {
+                    StallStateChangeMessage msg;
+                    msg.aircraft_id = aircraft_id_;
+                    msg.from_state  = prev;
+                    msg.to_state    = next;
+                    msg.sim_time_s  = sim_time_s_;
+                    msg.alpha_deg   = a.alpha_deg;
+                    msg.vcas_kts    = state_.vcas;
+                    msg.qbar_psf    = state_.qbar;
+                    bus_->publish(msg);
+                }
             }
         }
     }

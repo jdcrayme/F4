@@ -30,6 +30,21 @@ using json = nlohmann::json;
 
 namespace {
 
+// Helper: read a double field with missing-key warning.
+// j.value() silently defaults missing fields to the struct's default (often 0.0),
+// which can hide config errors (e.g. a missing emptyWeight_lbs silently becomes
+// 0 lbs). This wrapper emits a warning so the caller knows a field was defaulted.
+template<typename T>
+T value_with_warning(const json& j, const std::string& key, T default_val,
+                     const std::string& section, std::vector<std::string>& warnings) {
+    if (!j.contains(key)) {
+        warnings.push_back(section + "." + key + " missing, defaulted to " +
+                           std::to_string(default_val));
+        return default_val;
+    }
+    return j.value(key, default_val);
+}
+
 void readGear(const json& j, GearPoint& g) {
     g.x     = j.at(0).get<double>();
     g.y     = j.at(1).get<double>();
@@ -37,11 +52,12 @@ void readGear(const json& j, GearPoint& g) {
     g.range = j.at(3).get<double>();
 }
 
-void readGeometry(const json& j, AircraftGeometry& g) {
-    g.emptyWeight_lbs  = j.value("emptyWeight_lbs",  g.emptyWeight_lbs);
-    g.area_ft2         = j.value("area_ft2",         g.area_ft2);
-    g.internalFuel_lbs = j.value("internalFuel_lbs", g.internalFuel_lbs);
-    g.maxFuel_lbs      = j.value("maxFuel_lbs",      g.maxFuel_lbs);
+void readGeometry(const json& j, AircraftGeometry& g,
+                  std::vector<std::string>& warnings) {
+    g.emptyWeight_lbs  = value_with_warning(j, "emptyWeight_lbs",  g.emptyWeight_lbs,  "geometry", warnings);
+    g.area_ft2         = value_with_warning(j, "area_ft2",         g.area_ft2,         "geometry", warnings);
+    g.internalFuel_lbs = value_with_warning(j, "internalFuel_lbs", g.internalFuel_lbs, "geometry", warnings);
+    g.maxFuel_lbs      = value_with_warning(j, "maxFuel_lbs",      g.maxFuel_lbs,      "geometry", warnings);
     g.aoaMax_deg       = j.value("aoaMax_deg",       g.aoaMax_deg);
     g.aoaMin_deg       = j.value("aoaMin_deg",       g.aoaMin_deg);
     g.betaMax_deg      = j.value("betaMax_deg",      g.betaMax_deg);
@@ -170,7 +186,7 @@ LoadResult loadConfigFromString(const std::string& jsonStr) {
 
         cfg.name        = j.value("name",        cfg.name);
         cfg.description = j.value("description", cfg.description);
-        if (j.contains("geometry")) readGeometry(j.at("geometry"), cfg.geometry);
+        if (j.contains("geometry")) readGeometry(j.at("geometry"), cfg.geometry, result.warnings);
         if (j.contains("aux"))      readAux(j.at("aux"),           cfg.aux);
         if (j.contains("aero"))     readAero(j.at("aero"),         cfg.aero);
         if (j.contains("engine"))   readEngine(j.at("engine"),     cfg.engine);

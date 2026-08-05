@@ -141,9 +141,13 @@ struct StallDetection {
 };
 
 /// Determine which event (if any) to emit this frame.
-/// Returns the event, or a default-constructed StallEvent{} if none.
-/// The caller checks the return against the SM's can_fire() to decide
-/// whether to call process().
+/// Returns std::optional<StallEvent> — has a value when an event should
+/// be emitted, std::nullopt when no event applies this frame.
+///
+/// Previously this returned StallEvent::AoAExceed as a sentinel for
+/// "no event", which was ambiguous (AoAExceed is also a real event).
+/// The std::optional return type makes the "no event" case explicit
+/// and eliminates the sentinel-value anti-pattern.
 ///
 /// Logic (mapped from FreeFalcon airframe.cpp switch(stallMode)):
 ///   None: if aeroStalled -> AoAExceed
@@ -152,7 +156,7 @@ struct StallDetection {
 ///   Spinning/FlatSpin: if pstick < -0.3 (pushover) -> RecoveryAttempt
 ///   Recovering: if qbar > recoveryQbar && alpha < recoveryAlpha -> Recovered
 ///   Recovering: if alpha > restallAlpha -> AoAExceed (re-stall)
-StallEvent detectStallEvent(const StallDetection& d, const StallConfig& cfg);
+std::optional<StallEvent> detectStallEvent(const StallDetection& d, const StallConfig& cfg);
 
 /// Human-readable name for a stall state (for trace/debug output).
 inline const char* stallStateName(StallState s) {
