@@ -322,11 +322,40 @@ void FlightControlSystem::runPitch(double dt, double qbar, double qsom,
     double ptcmd = fcs.pshape * fcs.kp01;
 
     // Limit the command to available G.
-    const double maxNegGs = applyLimiter(LimiterKey::NegGLimiter, vcas_kts);
-    const double gsAvail  = geom_->aoaMax_deg * clalph0 * qsom / GRAVITY;
-    const double maxCmd   = maxGs;
-    const double minCmd   = std::max(maxNegGs, -gsAvail);
-    ptcmd = std::clamp(ptcmd, minCmd, std::min(gsAvail, maxCmd));
+    //
+    // applyLimiter() returns its input verbatim when the limiter is not
+    // configured (default-constructed Line with all-zero coords). For the
+    // damper limiters that is the desired passthrough (input is qbar, a
+    // unitless pressure, and the "limited" output is also a dimensionless
+    // scale). For NegGLimiter, however, the input is vcas_kts and the
+    // expected output is in G — returning vcas_kts (~300) when unconfigured
+    // produces a nonsense maxNegGs and inverts the clamp bounds (MSVC's
+    // debug CRT asserts; libstdc++ silently produces garbage). Detect the
+    // passthrough case explicitly and fall back to a symmetric -maxGs.
+    double maxNegGs = applyLimiter(LimiterKey::NegGLimiter, vcas_kts);
+    {
+        const Limiter& nlim = cfg_ ? cfg_->limiter(LimiterKey::NegGLimiter) : Limiter{};
+        const bool unconfigured = (nlim.type == LimiterType::Line &&
+                                   nlim.x1 == 0.0 && nlim.x2 == 0.0 &&
+                                   nlim.y1 == 0.0 && nlim.y2 == 0.0);
+        if (unconfigured) maxNegGs = -maxGs;
+    }
+
+    // gsAvail can collapse to 0 (or even go negative) when clalph0 is 0
+    // — which happens for synthetic test fixtures and for any aircraft
+    // whose .dat aero tables haven't been populated yet. In that case the
+    // G-limiting clamp range degenerates and std::clamp(v, lo, hi) would
+    // be called with lo > hi, which is undefined behavior (libstdc++
+    // returns garbage; MSVC's debug CRT asserts). Guard explicitly.
+    const double gsAvail = std::max(0.0,
+        geom_->aoaMax_deg * clalph0 * qsom / GRAVITY);
+    const double maxCmd  = maxGs;
+    const double upper   = std::min(gsAvail, maxCmd);
+    // Defensive: never let lower > upper. If maxNegGs > upper (can only
+    // happen via a misconfigured limiter), pin lower to upper so the clamp
+    // becomes a no-op rather than UB.
+    const double lower   = std::min(maxNegGs, upper);
+    ptcmd = std::clamp(ptcmd, lower, upper);
     fcs.ptcmd = ptcmd;
 
     // --- G error ---

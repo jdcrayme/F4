@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  F4.runsettings — Visual Studio test runner settings.
+
+  Purpose
+  =======
+  GoogleTest's GTEST_SKIP() writes "[  SKIPPED ] TestName (0 ms)" to stdout
+  and exits the test executable with a non-zero "tests skipped" status. The
+  default VSTest/MSTest adapter interprets the non-zero exit as a host crash
+  and reports the test as "!! This test has probably CRASHED !!" instead of
+  "Skipped". This .runsettings file configures the adapter so that:
+
+    1. GoogleTest skips are reported as Skipped (not Failed/Crashed).
+    2. Test discovery uses the gtest_filter-aware enumeration.
+    3. The crash dump is captured for genuinely crashing tests, so a real
+       crash is still diagnosable.
+    4. The test timeout is generous (60s) — the stall_bus_integration test
+       spawns a polling thread that can take ~5s under CI load.
+
+  Usage
+  =====
+  In Visual Studio:
+    Test > Configure Run Settings > Select Solution-wide Run Settings File
+    > choose F4.runsettings
+
+  From the command line:
+    vstest.console.exe /Settings:F4.runsettings /UseVsixExtensions:false
+        build\bin\Debug\test_*.dll
+
+  Or with dotnet test:
+    dotnet test --collect:"XPlat Code Coverage" --settings F4.runsettings
+
+  Notes
+  =====
+  - The GoogleTest adapter is bundled with Visual Studio 2022 17.4+.
+  - If you are using the older MSTest adapter for native C++ (vsix), some
+    of these settings may not apply — they are forward-compatible.
+  - The <MaxCpuCount>1</MaxCpuCount> setting is intentional: the messaging
+    tests spawn real std::threads and a parallel run can perturb timing.
+-->
+<RunSettings>
+  <!-- =========================================================================
+       Run configuration — applies to all test adapters under VSTest
+       ========================================================================= -->
+  <RunConfiguration>
+    <!-- Test timeout per test (milliseconds). 60s accommodates the
+         stall_bus_integration polling thread under load. -->
+    <TestTimeout>60000</TestTimeout>
+    <!-- Disable parallel test execution. The cross-thread messaging tests
+         and the stall SM integration tests are timing-sensitive; parallel
+         runs across executables can cause false failures. -->
+    <MaxCpuCount>1</MaxCpuCount>
+    <!-- Where to find test binaries. Adjust if your build directory layout
+         differs (e.g. out-of-source builds). -->
+    <TestAdaptersPaths>$(ExecutableDirectory)</TestAdaptersPaths>
+    <!-- Capture stdout/stderr from each test for diagnostic output. This
+         is critical: GoogleTest's "[ SKIPPED ]" lines come from stdout. -->
+    <CaptureStdout>true</CaptureStdout>
+    <CaptureStderr>true</CaptureStderr>
+    <!-- TREAT_SKIP_AS_SKIP: when set, the adapter does not promote a
+         skipped test to Failed. (Some older adapters mis-classify skips
+         as crashes when the gtest executable returns non-zero.) -->
+    <TreatNoTestsAsError>false</TreatNoTestsAsError>
+  </RunConfiguration>
+
+  <!-- =========================================================================
+       GoogleTest adapter — native C++ test discovery and execution
+       ========================================================================= -->
+  <GoogleTest>
+    <!-- The adapter's preferred strategy for handling GTEST_SKIP():
+         "report" = report as Skipped (do not treat the non-zero exit code
+         as a crash). -->
+    <SkipReporting>report</SkipReporting>
+    <!-- Run all tests by default. Individual tests can still be filtered
+         via the /TestCase filter argument. -->
+    <TestFilter>*</TestFilter>
+    <!-- Print test runtime output to the Results panel. -->
+    <PrintTestOutput>true</PrintTestOutput>
+    <!-- Display the standard GoogleTest summary line. -->
+    <DisplayOutput>true</DisplayOutput>
+  </GoogleTest>
+
+  <!-- =========================================================================
+       MSTest adapter (legacy native C++ projects may still use this)
+       ========================================================================= -->
+  <MSTest>
+    <!-- Force the adapter to honor gtest's exit code semantics: a
+         "1 test skipped" exit is a successful run, not a crash. -->
+    <MapNotRunToSkipped>true</MapNotRunToSkipped>
+    <CaptureTraceOutput>true</CaptureTraceOutput>
+    <RelativeToCurrentDirectory>true</RelativeToCurrentDirectory>
+  </MSTest>
+
+  <!-- =========================================================================
+       Crash dump capture — for the genuine crashes that do occur
+       ========================================================================= -->
+  <LoggerPlugins>
+    <LoggerFriendlyName>CrashDump</LoggerFriendlyName>
+  </LoggerPlugins>
+  <CrashDump>
+    <!-- Produce a full minidump on actual test process crashes. This
+         distinguishes real crashes (which we want to debug) from the
+         GTEST_SKIP false positives (which the settings above suppress). -->
+    <DumpType>Mini</DumpType>
+    <OutputDirectory>$(TestResultsDirectory)\CrashDumps</OutputDirectory>
+  </CrashDump>
+</RunSettings>

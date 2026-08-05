@@ -158,13 +158,34 @@ find_theater_file(const std::filesystem::path& base_path,
         auto p = base_path;
         p += ".";
         p += ext;
-        if (std::filesystem::exists(p)) return p;
+        if (std::filesystem::exists(p)) {
+            // On case-insensitive filesystems (NTFS, FAT, default macOS APFS),
+            // std::filesystem::exists() returns true even when the on-disk
+            // filename case differs from the constructed path. The caller
+            // expects the on-disk case (so that subsequent file operations
+            // and the test fixtures match byte-for-byte). weakly_canonical()
+            // resolves the actual on-disk name; fall back to the constructed
+            // path only if canonicalization fails.
+            std::error_code ec;
+            auto real = std::filesystem::weakly_canonical(p, ec);
+            if (!ec) return real;
+            return p;
+        }
     }
     // 2. base_path verbatim
-    if (std::filesystem::exists(base_path)) return base_path;
+    if (std::filesystem::exists(base_path)) {
+        std::error_code ec;
+        auto real = std::filesystem::weakly_canonical(base_path, ec);
+        if (!ec) return real;
+        return base_path;
+    }
 
     // 3. Case-insensitive search in base_path's parent directory.
     //    Look for any file matching "<stem>.<ext>" case-insensitively.
+    //    (On case-sensitive filesystems this is the only path that runs;
+    //    on case-insensitive filesystems step 1 already hit and returned
+    //    the canonicalized path, but we keep this branch for safety in
+    //    case weakly_canonical fails to resolve the case.)
     const auto parent = base_path.parent_path().empty()
         ? std::filesystem::current_path()
         : base_path.parent_path();

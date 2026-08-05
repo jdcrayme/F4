@@ -1,0 +1,7 @@
+<RunSettings>
+  <LoggerRunSettings>
+    <Loggers>
+      <Logger friendlyName="trx" />
+    </Loggers>
+  </LoggerRunSettings>
+</RunSettings>

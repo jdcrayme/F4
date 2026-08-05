@@ -18,21 +18,40 @@
 
 using namespace f4::viewer;
 
-// Compatabiliet for MSVC++: setenv() and unsetenv() are POSIX, not Windows.
-// We implement them only on Windows — on POSIX (Linux/macOS) the standard
-// library already provides them and redeclaring them with a different
-// return type causes a "ambiguating new declaration" compile error.
+// Compatibility shim for MSVC++: setenv() and unsetenv() are POSIX, not
+// Windows. We implement them only on Windows — on POSIX (Linux/macOS) the
+// standard library already provides them and redeclaring them with a
+// different return type causes a "ambiguating new declaration" compile error.
+//
+// unsetenv: _putenv_s(name, nullptr) is documented as "delete the variable"
+// but the UCRT debug build asserts `value != nullptr` before reaching that
+// code path (putenv.cpp:235 "Assertion failed: value != nullptr"). The
+// bulletproof approach is the Win32 SetEnvironmentVariableA, which actually
+// removes the variable when passed nullptr for the value.
 #ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+
 inline int setenv(const char* name, const char* value, int overwrite) {
     if (!overwrite) {
         // Check if variable exists (optional logic depending on desired behavior)
         if (getenv(name)) return 0; // Or return error if overwrite is false
     }
-    return _putenv_s(name, value);
+    // SetEnvironmentVariableA returns BOOL (1 on success, 0 on failure).
+    // Match POSIX setenv's return convention: 0 on success, -1 on failure.
+    return SetEnvironmentVariableA(name, value) ? 0 : -1;
 }
 
-inline void unsetenv(const char* name) {
-    _putenv_s(name, nullptr);
+inline int unsetenv(const char* name) {
+    // Passing nullptr as the value removes the variable from the environment
+    // block. This is the documented Win32 behavior and avoids the UCRT debug
+    // assertion that _putenv_s(name, nullptr) triggers.
+    return SetEnvironmentVariableA(name, nullptr) ? 0 : -1;
 }
 #endif
 
