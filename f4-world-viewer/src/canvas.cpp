@@ -515,7 +515,7 @@ void ViewerApp::draw_canvas() {
             // team color so the user can see at a glance where each
             // squadron calls home. Gated by show_squadron_links toggle.
             if (impl_->show_squadron_links &&
-                u.unit_class == f4::world::UnitClass::Squadron && u.airbase_id != 0) {
+                u.unit_class == f4::entities::UnitClass::Squadron && u.airbase_id != 0) {
                 auto it = impl_->obj_id_to_index.find(u.airbase_id);
                 if (it != impl_->obj_id_to_index.end() && it->second < static_cast<int>(impl_->world.objectives.size())) {
                     const auto& ab = impl_->world.objectives[it->second];
@@ -532,7 +532,7 @@ void ViewerApp::draw_canvas() {
             // — it adds significant visual clutter for theaters with many
             // battalions).
             if (impl_->show_hierarchy_lines &&
-                u.unit_class == f4::world::UnitClass::Battalion && u.parent_id != 0) {
+                u.unit_class == f4::entities::UnitClass::Battalion && u.parent_id != 0) {
                 auto it = impl_->unit_id_to_index.find(u.parent_id);
                 if (it != impl_->unit_id_to_index.end() && it->second < static_cast<int>(impl_->world.units.size())) {
                     const auto& parent = impl_->world.units[it->second];
@@ -547,7 +547,7 @@ void ViewerApp::draw_canvas() {
             // brigade side too, so the link appears even if only the brigade
             // is selected). Same visual style as battalion→brigade above.
             if (impl_->show_hierarchy_lines &&
-                u.unit_class == f4::world::UnitClass::Brigade &&
+                u.unit_class == f4::entities::UnitClass::Brigade &&
                 !u.element_ids.empty()) {
                 for (uint32_t child_id : u.element_ids) {
                     if (child_id == 0) continue;

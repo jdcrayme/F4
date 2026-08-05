@@ -15,6 +15,14 @@
 // (loaded separately via f4-terrain). As f4-world-convert learns to decode
 // more sub-files (objective deltas, weather, events, flight plans), this
 // struct grows to carry them.
+//
+// SHARED TYPES: ObjectiveLink, GroundLayoutList, GroundLayoutPoint,
+// FeatureEntryState, FeatureClassState, WaypointState, PilotState,
+// VehicleGroup, and the UnitClass enum are now defined in
+// f4-entities/include/f4/entities/types.hpp. This header re-exports them
+// via using-declarations so existing code using f4::world::ObjectiveLink
+// etc. continues to compile. New code should prefer the f4::entities
+// namespace directly.
 
 #pragma once
 
@@ -24,9 +32,29 @@
 #include <string>
 #include <vector>
 
+#include <f4/entities/types.hpp>
 #include <f4/terrain/terrain_data.hpp>
 
 namespace f4::world {
+
+// ============================================================================
+// Re-export shared types from f4::entities into f4::world for backward
+// compatibility. Existing code that uses f4::world::ObjectiveLink etc.
+// continues to work. New code should use f4::entities::ObjectiveLink.
+// ============================================================================
+using ObjectiveLink      = f4::entities::ObjectiveLink;
+using GroundLayoutList   = f4::entities::GroundLayoutList;
+using GroundLayoutPoint  = f4::entities::GroundLayoutPoint;
+using FeatureEntryState  = f4::entities::FeatureEntryState;
+using FeatureClassState  = f4::entities::FeatureClassState;
+using WaypointState      = f4::entities::WaypointState;
+using PilotState         = f4::entities::PilotState;
+using VehicleGroup       = f4::entities::VehicleGroup;
+using UnitClass          = f4::entities::UnitClass;
+// unit_class_name() is available as f4::entities::unit_class_name().
+// Code that previously used f4::world::unit_class_name should switch
+// to f4::entities::unit_class_name (or rely on ADL via unqualified call
+// when the UnitClass argument is f4::entities::UnitClass).
 
 struct TeamState {
     int slot = 0;               // 0..7
@@ -68,83 +96,6 @@ struct CampaignState {
     int32_t te_flags = 0;
     std::vector<int32_t> te_number_aircraft;   // 8
     std::vector<int32_t> te_team_pts;           // 8
-};
-
-/// One link in the road/rail network. Connects this objective to a neighbor.
-struct ObjectiveLink {
-    uint32_t neighbor_num = 0;      // VU_ID.num of the linked objective
-    uint32_t neighbor_creator = 0;  // VU_ID.creator
-    bool is_road = false;           // supports wheeled movement
-    bool is_rail = false;           // supports rail movement
-    /// Per-movement-type traversal cost (FreeFalcon MoveType enum, 8 values).
-    /// Index 0=NoMove, 1=Foot, 2=Wheeled, 3=Tracked, 4=LowAir, 5=Air,
-    /// 6=Naval, 7=Rail. A value of 255 means "impassable for this mode".
-    /// Low cost = fast path; high cost = slow path. Used by the campaign
-    /// pathfinder (A* with threat-map weighting — see ARCHITECTURE
-    /// PROPOSAL §11.4) to compute routes through the objective network.
-    uint8_t costs[8] = {0};
-};
-
-/// One feature class (building/structure type) — mirrors the fields we
-/// need from FeatureClassData (Falcon4.FCD). Loaded as theater-db
-/// enrichment alongside FeatureEntryState.
-struct FeatureClassState {
-    int16_t  index = 0;
-    std::string name;           // e.g. "Control Tower", "Runway", "Hangar"
-    int16_t  hit_points = 0;
-    int16_t  repair_time = 0;   // seconds to repair from destroyed to operational
-    uint8_t  priority = 0;      // display priority
-    uint16_t flags = 0;         // FEAT_ flags bitmap
-    int16_t  radar_type = 0;    // index into Falcon4.RCD (NOT yet parsed)
-};
-
-/// One feature placement on an objective — mirrors FeatureEntryData
-/// (Falcon4.FED). Combined with the objective's `fstatus` byte array
-/// (2-bit-per-feature damage bitmap), gives the live damage state of
-/// every building/runway/feature on every objective.
-struct FeatureEntryState {
-    int16_t  index = 0;          // entity_type of the feature (class-table index)
-    uint16_t flags = 0;
-    uint8_t  value = 0;          // % loss in operational status for destruction
-    float    offset_x = 0.0f;    // X offset from objective center (feet)
-    float    offset_y = 0.0f;
-    float    offset_z = 0.0f;
-    int16_t  facing = 0;         // facing angle (degrees)
-    // Resolved from FCD via the class table when theater_db is loaded.
-    // Empty when no FCD entry was found for this feature's entity_type.
-    std::string name;            // e.g. "Control Tower", "Runway 09/27"
-    int16_t  hit_points = 0;     // from FCD
-    // Additional FCD fields (previously decoded then dropped on the floor
-    // because this struct had no slots for them — Phase 1 fix).
-    int16_t  repair_time = 0;    // seconds to repair from destroyed to operational
-    uint8_t  priority = 0;       // display priority
-    uint16_t feat_flags = 0;     // FEAT_ flags bitmap from FCD
-    int16_t  radar_type = 0;     // index into Falcon4.RCD (NOT yet parsed)
-    // Live damage state derived from the parent objective's fstatus
-    // bitmap (2 bits per feature, 0=intact, 1=damaged, 2=destroyed,
-    // 3=heavily destroyed). Resolved by the consumer (parse_objective)
-    // using the feature's index within the objective's feature list.
-    uint8_t  damage_state = 0;   // 0..3, 0=intact
-};
-
-/// One point in an airbase ground layout (runway/taxiway/parking).
-/// Mirrors the data emitted by world_json.cpp's ground_layout array.
-struct GroundLayoutPoint {
-    float    x = 0.0f;             // offset from objective center (feet)
-    float    y = 0.0f;
-    uint8_t  type = 0;             // PtType (1=Runway, 2=Taxiway, 11=SmallPark, ...)
-    uint8_t  flags = 0;            // PtDataFlags bitmap
-};
-
-/// One list of ground-layout points (e.g. a runway, a taxiway, a parking row).
-/// Each list has a type and a chain of points.
-struct GroundLayoutList {
-    uint8_t  type = 0;             // PointListType (1=Runway, 8=RunwayDim, 11=Parking, ...)
-    uint8_t  count = 0;            // # of points in this list
-    uint8_t  runway_num = 0;       // which runway (0/1/2), if type is runway
-    int8_t   ltrt = 0;             // -1=left, +1=right, 0=neither
-    float    heading_deg = 0.0f;   // runway heading in degrees (from sin/cos)
-    std::vector<GroundLayoutPoint> points;
 };
 
 /// A campaign objective (airbase, bridge, city, port, ...). Mirrors the
@@ -201,77 +152,6 @@ struct ObjectiveState {
     // with the fstatus bitmap above, gives the live damage state of every
     // building/runway/feature on this objective.
     std::vector<FeatureEntryState> features;
-};
-
-/// Unit subclass — same enum as f4::world_convert::UnitClass, duplicated
-/// here so f4-world doesn't need to depend on f4-world-convert (the contract
-/// between them is JSON, not the C++ type).
-enum class UnitClass : uint8_t {
-    Unknown    = 0,
-    Battalion  = 1,
-    Brigade    = 2,
-    Squadron   = 3,
-    TaskForce  = 4,
-    Flight     = 5,
-    Package    = 6,
-};
-
-[[nodiscard]] inline const char* unit_class_name(UnitClass c) noexcept {
-    switch (c) {
-        case UnitClass::Battalion:  return "battalion";
-        case UnitClass::Brigade:    return "brigade";
-        case UnitClass::Squadron:   return "squadron";
-        case UnitClass::TaskForce:  return "taskforce";
-        case UnitClass::Flight:     return "flight";
-        case UnitClass::Package:    return "package";
-        case UnitClass::Unknown:    break;
-    }
-    return "unknown";
-}
-
-/// One pilot in a squadron's roster.
-struct PilotState {
-    int16_t  pilot_id = 0;
-    uint8_t  skill = 0;
-    uint8_t  rating = 0;
-    uint8_t  status = 0;        // 0=available, 1=dead, 2=on leave, etc.
-    uint8_t  aa_kills = 0;      // air-to-air kills
-    uint8_t  ag_kills = 0;      // air-to-ground kills
-    uint8_t  as_kills = 0;      // air-to-sea kills (Phase 1 fix — was dropped)
-    uint8_t  an_kills = 0;      // air-to-naval kills (Phase 1 fix — was dropped)
-    int16_t  missions_flown = 0;
-};
-
-/// One waypoint in a unit's flight/ground plan. Mirrors WaypointRecord
-/// in f4-world-convert (campwp.cpp:89 at v63).
-struct WaypointState {
-    int16_t  x = 0;             // grid column
-    int16_t  y = 0;             // grid row
-    int16_t  z = 0;             // altitude (feet)
-    int32_t  arrive = 0;        // arrival time (campaign seconds)
-    uint8_t  action = 0;        // WP_ACTION enum
-    uint8_t  route_action = 0;
-    uint8_t  formation = 0;
-    int16_t  flags = 0;
-    // Optional (present only when the original `haves` flag was set):
-    uint32_t target_num = 0;          // VU_ID.num of target
-    uint32_t target_creator = 0;
-    uint8_t  target_building = 0;     // feature index on the target objective
-    int32_t  depart = 0;              // departure time (campaign seconds)
-};
-
-/// One vehicle group in a unit's composition. Combined with the unit's
-/// roster (2 bits/group, 16 groups), gives the live vehicle count per group.
-/// Mirrors the data emitted by world_json.cpp's vehicle_groups array.
-struct VehicleGroup {
-    uint8_t  group = 0;           // group index (0-15)
-    int16_t  vehicle_type = 0;    // VCD index
-    int32_t  count = 0;           // nominal vehicle count for this group
-    int32_t  live_count = 0;      // live count from roster (0-3)
-    std::string vehicle_name;     // from VCD (e.g. "M-1A1", "F-16C")
-    std::string vehicle_nctr;     // NCTR classification (radar IFF)
-    int16_t  hit_points = 0;      // from VCD
-    int16_t  max_speed = 0;       // from VCD (knots for air, kph for ground)
 };
 
 /// A campaign unit (flight, battalion, squadron, ship). Mirrors the fields

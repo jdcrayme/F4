@@ -4,6 +4,10 @@
 // becomes an entity tagged with team identity; as objective/unit decoders
 // come online, this is where they spawn entities with TransformComponents
 // positioned at real theater coordinates.
+//
+// Phase 1: populate_teams now adds TeamComponent (carrying .tea enrichment
+// data: stance, member, experience, pilot slots) and a narrowed
+// CampaignIdentityComponent (team_id + callsign only).
 
 #pragma once
 
@@ -15,6 +19,8 @@ namespace f4::world {
 /// Populate an EntityWorld with team entities from the WorldState.
 /// Each non-empty team slot becomes an entity with:
 ///   - a CampaignIdentityComponent (team_id, callsign = team name)
+///   - a TeamComponent (slot, flags, colour, motto, stance, member,
+///     experience, pilot slots)
 ///   - tags: role="team", team=<name>, alive=true
 /// Returns the created entity IDs.
 ///

@@ -172,3 +172,347 @@ TEST(WithinRadius, FindsEntitiesInsideAndExcludesOutside) {
     auto ids = w.within_radius(0, 0, 0, 500.0);
     ASSERT_EQ(ids.size(), 2u);   // a and b are within 500 ft; c is not
 }
+
+// ============================================================================
+// Phase 1: TeamComponent + narrowed CampaignIdentityComponent
+// ============================================================================
+TEST(TeamComponent, CanBeAddedAndQueried) {
+    EntityWorld w;
+    auto h = w.create();
+    auto& tc = h.add<TeamComponent>();
+    tc.slot = 2;
+    tc.flags = 1;
+    tc.colour = 3;
+    tc.motto = "E Pluribus";
+    tc.stance = {50, -50, 0, 0, 0, 0, 0, 0};
+    tc.member = {1, 0, 1, 0, 0, 0, 0, 0};
+    tc.air_experience = 80;
+    tc.ground_experience = 60;
+    tc.naval_experience = 40;
+    tc.air_defense_experience = 70;
+
+    EXPECT_TRUE(h.has<TeamComponent>());
+    auto* got = h.get<TeamComponent>();
+    ASSERT_NE(got, nullptr);
+    EXPECT_EQ(got->slot, 2);
+    EXPECT_EQ(got->motto, "E Pluribus");
+    ASSERT_EQ(got->stance.size(), 8u);
+    EXPECT_EQ(got->stance[0], 50);
+    EXPECT_EQ(got->air_experience, 80);
+}
+
+TEST(CampaignIdentityComponent, IsNarrowedToTeamIdAndCallsign) {
+    EntityWorld w;
+    auto h = w.create();
+    auto& cid = h.add<CampaignIdentityComponent>();
+    cid.team_id = 3;
+    cid.callsign = "Viper";
+    // unit_type_name field no longer exists — the fact that this compiles
+    // confirms the Phase 1 narrowing.
+
+    EXPECT_TRUE(h.has<CampaignIdentityComponent>());
+    auto* got = h.get<CampaignIdentityComponent>();
+    ASSERT_NE(got, nullptr);
+    EXPECT_EQ(got->team_id, 3);
+    EXPECT_EQ(got->callsign, "Viper");
+}
+
+// ============================================================================
+// Phase 2b: Objective components — compile and instantiate
+// ============================================================================
+TEST(ObjectiveComponents, ObjectiveTypeComponent) {
+    EntityWorld w;
+    auto h = w.create();
+    auto& c = h.add<ObjectiveTypeComponent>();
+    c.type = 100;
+    c.class_table_index = 6;
+    c.class_name = "02_20 Airbase 2";
+    EXPECT_TRUE(h.has<ObjectiveTypeComponent>());
+    EXPECT_EQ(h.get<ObjectiveTypeComponent>()->type, 100);
+}
+
+TEST(ObjectiveComponents, OwnershipComponent) {
+    EntityWorld w;
+    auto h = w.create();
+    auto& c = h.add<OwnershipComponent>();
+    c.team = 2;
+    c.first_owner = 1;
+    EXPECT_TRUE(h.has<OwnershipComponent>());
+    EXPECT_EQ(h.get<OwnershipComponent>()->team, 2);
+}
+
+TEST(ObjectiveComponents, SupplyStateComponent) {
+    EntityWorld w;
+    auto h = w.create();
+    auto& c = h.add<SupplyStateComponent>();
+    c.supply = 80;
+    c.fuel = 60;
+    c.losses = 10;
+    c.last_repair = 1000;
+    EXPECT_TRUE(h.has<SupplyStateComponent>());
+}
+
+TEST(ObjectiveComponents, DamageBitmapComponent) {
+    EntityWorld w;
+    auto h = w.create();
+    auto& c = h.add<DamageBitmapComponent>();
+    c.fstatus = {0, 1, 2, 3};
+    EXPECT_TRUE(h.has<DamageBitmapComponent>());
+    EXPECT_EQ(h.get<DamageBitmapComponent>()->fstatus.size(), 4u);
+}
+
+TEST(ObjectiveComponents, RadarComponent) {
+    EntityWorld w;
+    auto h = w.create();
+    auto& c = h.add<RadarComponent>();
+    c.detect_ratio[0] = 0.8f;
+    c.range_km = 245.5f;
+    c.name = "Pat Hand SA-10";
+    c.radar_type_idx = 18;
+    EXPECT_TRUE(h.has<RadarComponent>());
+    EXPECT_FLOAT_EQ(h.get<RadarComponent>()->range_km, 245.5f);
+}
+
+TEST(ObjectiveComponents, NetworkLinksComponent) {
+    EntityWorld w;
+    auto h = w.create();
+    auto& c = h.add<NetworkLinksComponent>();
+    ObjectiveLink link;
+    link.neighbor_num = 12345;
+    link.is_road = true;
+    link.costs[1] = 25;
+    c.links.push_back(link);
+    EXPECT_TRUE(h.has<NetworkLinksComponent>());
+    ASSERT_EQ(h.get<NetworkLinksComponent>()->links.size(), 1u);
+    EXPECT_EQ(h.get<NetworkLinksComponent>()->links[0].neighbor_num, 12345u);
+}
+
+TEST(ObjectiveComponents, GroundLayoutComponent) {
+    EntityWorld w;
+    auto h = w.create();
+    auto& c = h.add<GroundLayoutComponent>();
+    GroundLayoutList gl;
+    gl.type = 1;
+    gl.heading_deg = 90.0f;
+    c.layouts.push_back(gl);
+    EXPECT_TRUE(h.has<GroundLayoutComponent>());
+}
+
+TEST(ObjectiveComponents, FeatureSetComponent) {
+    EntityWorld w;
+    auto h = w.create();
+    auto& c = h.add<FeatureSetComponent>();
+    c.features_count = 5;
+    c.radar_feature = 2;
+    FeatureEntryState fe;
+    fe.name = "Control Tower";
+    fe.hit_points = 500;
+    c.features.push_back(fe);
+    EXPECT_TRUE(h.has<FeatureSetComponent>());
+    EXPECT_EQ(h.get<FeatureSetComponent>()->features[0].name, "Control Tower");
+}
+
+TEST(ObjectiveComponents, ObjectivePriorityComponent) {
+    EntityWorld w;
+    auto h = w.create();
+    auto& c = h.add<ObjectivePriorityComponent>();
+    c.priority = 5;
+    c.nameid = 42;
+    c.obj_flags = 0x1234;
+    c.parent_id = 999;
+    EXPECT_TRUE(h.has<ObjectivePriorityComponent>());
+}
+
+// ============================================================================
+// Phase 2b: Unit components — compile and instantiate
+// ============================================================================
+TEST(UnitComponents, UnitCoreComponent) {
+    EntityWorld w;
+    auto h = w.create();
+    auto& c = h.add<UnitCoreComponent>();
+    c.unit_class = UnitClass::Battalion;
+    c.domain = 3;
+    c.unit_subtype = 1;
+    c.class_table_index = 170;
+    c.roster = 0xAAAAAAAA;
+    c.class_name = "Armor Battalion";
+    EXPECT_TRUE(h.has<UnitCoreComponent>());
+    EXPECT_EQ(h.get<UnitCoreComponent>()->unit_class, UnitClass::Battalion);
+}
+
+TEST(UnitComponents, WaypointPlanComponent) {
+    EntityWorld w;
+    auto h = w.create();
+    auto& c = h.add<WaypointPlanComponent>();
+    WaypointState wp;
+    wp.x = 500;
+    wp.y = 300;
+    wp.arrive = 3600;
+    c.waypoints.push_back(wp);
+    EXPECT_TRUE(h.has<WaypointPlanComponent>());
+    ASSERT_EQ(h.get<WaypointPlanComponent>()->waypoints.size(), 1u);
+}
+
+TEST(UnitComponents, GroundTacticalComponent) {
+    EntityWorld w;
+    auto h = w.create();
+    auto& c = h.add<GroundTacticalComponent>();
+    c.supply = 80;
+    c.morale = 70;
+    c.fatigue = 30;
+    c.heading = 128;
+    c.last_move = 5000;
+    EXPECT_TRUE(h.has<GroundTacticalComponent>());
+}
+
+TEST(UnitComponents, HierarchyComponent) {
+    EntityWorld w;
+    auto h = w.create();
+    auto& c = h.add<HierarchyComponent>();
+    c.parent_id = 42;
+    c.element_ids = {10, 20, 30};
+    EXPECT_TRUE(h.has<HierarchyComponent>());
+    EXPECT_EQ(h.get<HierarchyComponent>()->parent_id, 42u);
+}
+
+TEST(UnitComponents, SquadronComponent) {
+    EntityWorld w;
+    auto h = w.create();
+    auto& c = h.add<SquadronComponent>();
+    c.airbase_id = 555;
+    c.specialty = 2;
+    c.fuel = 10000;
+    c.aa_kills = 5;
+    PilotState p;
+    p.pilot_id = 1;
+    p.skill = 80;
+    p.aa_kills = 3;
+    c.pilots.push_back(p);
+    EXPECT_TRUE(h.has<SquadronComponent>());
+    ASSERT_EQ(h.get<SquadronComponent>()->pilots.size(), 1u);
+}
+
+TEST(UnitComponents, FlightPlanComponent) {
+    EntityWorld w;
+    auto h = w.create();
+    auto& c = h.add<FlightPlanComponent>();
+    c.altitude = 25000.0f;
+    c.fuel_burnt = 5000;
+    c.mission = 3;
+    c.package_id = 999;
+    c.squadron_id = 888;
+    EXPECT_TRUE(h.has<FlightPlanComponent>());
+    EXPECT_FLOAT_EQ(h.get<FlightPlanComponent>()->altitude, 25000.0f);
+}
+
+TEST(UnitComponents, PackageSupportComponent) {
+    EntityWorld w;
+    auto h = w.create();
+    auto& c = h.add<PackageSupportComponent>();
+    c.wait_cycles = 3;
+    c.interceptor_id = 111;
+    c.awacs_id = 222;
+    c.tanker_id = 555;
+    EXPECT_TRUE(h.has<PackageSupportComponent>());
+}
+
+TEST(UnitComponents, VehicleCompositionComponent) {
+    EntityWorld w;
+    auto h = w.create();
+    auto& c = h.add<VehicleCompositionComponent>();
+    VehicleGroup vg;
+    vg.group = 0;
+    vg.vehicle_name = "M-1A1";
+    vg.count = 3;
+    c.groups.push_back(vg);
+    EXPECT_TRUE(h.has<VehicleCompositionComponent>());
+    EXPECT_EQ(h.get<VehicleCompositionComponent>()->groups[0].vehicle_name, "M-1A1");
+}
+
+TEST(UnitComponents, UnitClassScoreComponent) {
+    EntityWorld w;
+    auto h = w.create();
+    auto& c = h.add<UnitClassScoreComponent>();
+    c.scores[0] = 10;
+    c.scores[15] = 160;
+    EXPECT_TRUE(h.has<UnitClassScoreComponent>());
+    EXPECT_EQ(h.get<UnitClassScoreComponent>()->scores[0], 10);
+}
+
+// ============================================================================
+// Phase 2b: Utility components — compile and instantiate
+// ============================================================================
+TEST(UtilityComponents, PropertyBag) {
+    EntityWorld w;
+    auto h = w.create();
+    auto& c = h.add<PropertyBag>();
+    c.ints["vu_id_creator"] = 42;
+    c.floats["some_ratio"] = 0.75;
+    c.strings["notes"] = "reverse-engineered";
+    EXPECT_TRUE(h.has<PropertyBag>());
+    EXPECT_EQ(h.get<PropertyBag>()->ints["vu_id_creator"], 42);
+}
+
+TEST(UtilityComponents, CampaignStateComponent) {
+    EntityWorld w;
+    auto h = w.create();
+    auto& c = h.add<CampaignStateComponent>();
+    c.current_time = 1000;
+    c.te_victory_points = 42;
+    c.te_flags = 7;
+    c.te_number_aircraft = {1,2,3,4,5,6,7,8};
+    c.te_team_pts = {10,20,30,40,50,60,70,80};
+    EXPECT_TRUE(h.has<CampaignStateComponent>());
+    EXPECT_EQ(h.get<CampaignStateComponent>()->current_time, 1000);
+}
+
+// ============================================================================
+// Phase 2b: Conditional component pattern — the key ECS design
+// ============================================================================
+TEST(ConditionalComponents, ObjectiveWithAndWithoutRadar) {
+    EntityWorld w;
+
+    // Airbase with radar — gets RadarComponent.
+    auto with_radar = w.create();
+    with_radar.add<TransformComponent>();
+    with_radar.add<ObjectiveTypeComponent>();
+    with_radar.add<OwnershipComponent>();
+    with_radar.add<RadarComponent>();
+    EXPECT_TRUE(with_radar.has<RadarComponent>());
+
+    // Bridge without radar — no RadarComponent.
+    auto no_radar = w.create();
+    no_radar.add<TransformComponent>();
+    no_radar.add<ObjectiveTypeComponent>();
+    no_radar.add<OwnershipComponent>();
+    EXPECT_FALSE(no_radar.has<RadarComponent>());
+
+    // Systems query only entities that have radar:
+    auto radar_entities = w.with_component<RadarComponent>();
+    EXPECT_EQ(radar_entities.size(), 1u);
+}
+
+TEST(ConditionalComponents, UnitSubclassDispatchViaComponents) {
+    EntityWorld w;
+
+    // Battalion — gets GroundTacticalComponent + HierarchyComponent.
+    auto battalion = w.create();
+    battalion.add<UnitCoreComponent>().unit_class = UnitClass::Battalion;
+    battalion.add<GroundTacticalComponent>();
+    battalion.add<HierarchyComponent>();
+    EXPECT_TRUE(battalion.has<GroundTacticalComponent>());
+    EXPECT_TRUE(battalion.has<HierarchyComponent>());
+
+    // Flight — gets FlightPlanComponent, NOT GroundTacticalComponent.
+    auto flight = w.create();
+    flight.add<UnitCoreComponent>().unit_class = UnitClass::Flight;
+    flight.add<FlightPlanComponent>();
+    EXPECT_TRUE(flight.has<FlightPlanComponent>());
+    EXPECT_FALSE(flight.has<GroundTacticalComponent>());
+
+    // Systems query by component type, not by if/else on unit_class:
+    auto ground_units = w.with_component<GroundTacticalComponent>();
+    auto air_units = w.with_component<FlightPlanComponent>();
+    EXPECT_EQ(ground_units.size(), 1u);
+    EXPECT_EQ(air_units.size(), 1u);
+}

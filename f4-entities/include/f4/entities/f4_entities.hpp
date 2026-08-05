@@ -2,5 +2,6 @@
 
 #pragma once
 
+#include "types.hpp"
 #include "entity.hpp"
 #include "spatial_index.hpp"

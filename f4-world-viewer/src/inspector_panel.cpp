@@ -195,7 +195,7 @@ void ViewerApp::draw_inspector() {
                     ImGui::Text("Name:      %s", u.class_name.c_str());
                 }
                 ImGui::Text("Class:     %s (%s)",
-                            f4::world::unit_class_name(u.unit_class),
+                            f4::entities::unit_class_name(u.unit_class),
                             subtype_str);
                 ImGui::Text("Type:      %d", u.type);
                 ImGui::Text("Subtype:   %d (%s)", u.unit_subtype, subtype_str);
@@ -258,7 +258,7 @@ void ViewerApp::draw_inspector() {
                 // Subclass-specific fields:
                 ImGui::Separator();
                 switch (u.unit_class) {
-                    case f4::world::UnitClass::Battalion:
+                    case f4::entities::UnitClass::Battalion:
                         ImGui::Text("Supply:    %d%%", u.supply);
                         ImGui::Text("Morale:    %d%%", u.morale);
                         ImGui::Text("Fatigue:   %d%%", u.fatigue);
@@ -287,7 +287,7 @@ void ViewerApp::draw_inspector() {
                             ImGui::Text("Parent:    0x%08x  %s", u.parent_id, parent_label);
                         }
                         break;
-                    case f4::world::UnitClass::Brigade:
+                    case f4::entities::UnitClass::Brigade:
                         ImGui::Text("Supply:    %d%%", u.supply);
                         ImGui::Text("Morale:    %d%%", u.morale);
                         ImGui::Text("Fatigue:   %d%%", u.fatigue);
@@ -315,7 +315,7 @@ void ViewerApp::draw_inspector() {
                             ImGui::TreePop();
                         }
                         break;
-                    case f4::world::UnitClass::Squadron:
+                    case f4::entities::UnitClass::Squadron:
                         ImGui::Text("Fuel:      %d lbs", u.fuel);
                         // Resolve airbase_id (VU_ID.num) to the airbase
                         // objective's name via the obj_id_to_index map.
@@ -371,12 +371,12 @@ void ViewerApp::draw_inspector() {
                             ImGui::TreePop();
                         }
                         break;
-                    case f4::world::UnitClass::TaskForce:
+                    case f4::entities::UnitClass::TaskForce:
                         ImGui::Text("Supply:    %d%%", u.supply);
                         break;
-                    case f4::world::UnitClass::Flight:
-                    case f4::world::UnitClass::Package:
-                    case f4::world::UnitClass::Unknown:
+                    case f4::entities::UnitClass::Flight:
+                    case f4::entities::UnitClass::Package:
+                    case f4::entities::UnitClass::Unknown:
                         break;
                 }
                 // Waypoint list (only if non-empty)

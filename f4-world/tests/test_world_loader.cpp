@@ -43,14 +43,51 @@ TEST(WorldLoader, TeamEntitiesHaveCorrectTagsAndIdentity) {
     EntityHandle h(rok_ids[0], &ew);
     ASSERT_TRUE(h.valid());
 
-    auto* id = h.get<CampaignIdentityComponent>();
-    ASSERT_NE(id, nullptr);
-    EXPECT_EQ(id->team_id, 2);
-    EXPECT_EQ(id->callsign, "ROK");
+    // CampaignIdentityComponent is narrowed: team_id + callsign only.
+    auto* cid = h.get<CampaignIdentityComponent>();
+    ASSERT_NE(cid, nullptr);
+    EXPECT_EQ(cid->team_id, 2);
+    EXPECT_EQ(cid->callsign, "ROK");
+
+    // TeamComponent carries the team-specific data.
+    auto* tc = h.get<TeamComponent>();
+    ASSERT_NE(tc, nullptr);
+    EXPECT_EQ(tc->slot, 2);
+    EXPECT_EQ(tc->flags, 2);
+    EXPECT_EQ(tc->colour, 2);
 
     EXPECT_TRUE(h.has_tag(tags::ALIVE));
     EXPECT_TRUE(h.has_tag(tags::ROLE));
     EXPECT_EQ(h.get_tag(tags::ROLE)->str_val, "team");
+}
+
+TEST(WorldLoader, TeamComponentCarriesTeaEnrichment) {
+    EntityWorld ew;
+    WorldState ws;
+    ws.teams = {
+        {1, 1, 1, "U.S.", "E Pluribus"},
+    };
+    // Simulate .tea enrichment data.
+    ws.teams[0].tea_loaded = true;
+    ws.teams[0].stance = {50, -50, 0, 0, 0, 0, 0, 0};
+    ws.teams[0].member = {1, 0, 1, 0, 0, 0, 0, 0};
+    ws.teams[0].air_experience = 80;
+    ws.teams[0].ground_experience = 60;
+
+    auto ids = populate_teams(ew, ws);
+    ASSERT_EQ(ids.size(), 1u);
+    EntityHandle h(ids[0], &ew);
+
+    auto* tc = h.get<TeamComponent>();
+    ASSERT_NE(tc, nullptr);
+    EXPECT_EQ(tc->motto, "E Pluribus");
+    ASSERT_EQ(tc->stance.size(), 8u);
+    EXPECT_EQ(tc->stance[0], 50);
+    EXPECT_EQ(tc->stance[1], -50);
+    ASSERT_EQ(tc->member.size(), 8u);
+    EXPECT_EQ(tc->member[0], 1);
+    EXPECT_EQ(tc->air_experience, 80);
+    EXPECT_EQ(tc->ground_experience, 60);
 }
 
 TEST(WorldLoader, EmptyNameSlotsAreSkipped) {
@@ -82,4 +119,24 @@ TEST(WorldLoader, CanQueryTeamsByTeamTag) {
     EXPECT_EQ(rok.size(), 1u);
     EXPECT_EQ(japan.size(), 1u);
     EXPECT_EQ(none.size(), 0u);
+}
+
+TEST(WorldLoader, CampaignIdentityNoLongerHasUnitTypeName) {
+    // Verify that CampaignIdentityComponent is narrowed — it should NOT
+    // have a unit_type_name field. This test confirms the Phase 1 change.
+    EntityWorld ew;
+    WorldState ws = make_test_world();
+    populate_teams(ew, ws);
+
+    auto us_ids = ew.with_tag(tags::TEAM, TagValue::from(std::string("U.S.")));
+    ASSERT_EQ(us_ids.size(), 1u);
+    EntityHandle h(us_ids[0], &ew);
+
+    auto* cid = h.get<CampaignIdentityComponent>();
+    ASSERT_NE(cid, nullptr);
+    // CampaignIdentityComponent now only has team_id and callsign.
+    EXPECT_EQ(cid->team_id, 1);
+    EXPECT_EQ(cid->callsign, "U.S.");
+    // unit_type_name was removed — there is no field to test,
+    // the fact that this compiles confirms the narrowing.
 }

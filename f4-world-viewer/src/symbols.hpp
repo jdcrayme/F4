@@ -31,7 +31,8 @@
 
 #pragma once
 
-#include <f4/world/world_state.hpp>  // for f4::world::UnitClass
+#include <f4/entities/types.hpp>     // for f4::entities::UnitClass
+#include <f4/world/world_state.hpp>
 
 #include <cstdint>
 
@@ -124,7 +125,7 @@ enum class SymbolKind : uint16_t {
 [[nodiscard]] SymbolKind symbol_for_objective_type(uint8_t obj_type) noexcept;
 
 // Map a unit_class + unit_subtype to a SymbolKind. Pure function.
-[[nodiscard]] SymbolKind symbol_for_unit(f4::world::UnitClass cls,
+[[nodiscard]] SymbolKind symbol_for_unit(f4::entities::UnitClass cls,
                                           uint8_t subtype) noexcept;
 
 // Free-function ImGui variant — renders the same symbol vocabulary into an

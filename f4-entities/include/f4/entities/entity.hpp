@@ -22,6 +22,13 @@
 //     strong type. This is the design decision made concrete: the source of
 //     truth is the sim-local frame, and Earth-frame coordinates are derived
 //     views obtained via f4-geo conversions (requiring a TheaterDatum).
+//   - Components are named after domain concepts, not file fields.
+//     ObjectiveTypeComponent, not obj_flags. SupplyStateComponent, not
+//     supply+fuel+losses. The bridge (world_loader.cpp) is the only place
+//     where format-derived names (VU_ID, nameid, obj_flags) are resolved.
+//   - Components are added conditionally. Not every objective has radar,
+//     not every unit has waypoints. The ECS has<T>() check replaces
+//     if (field != 0) guards on a god-struct.
 
 #pragma once
 
@@ -38,6 +45,7 @@
 #include <vector>
 
 #include <f4/geo/position.hpp>
+#include "types.hpp"
 
 namespace f4::entities {
 
@@ -152,10 +160,226 @@ namespace f4::entities {
     };
 
     /// Links a sim entity to its campaign-level identity.
+    /// Narrowed: only team_id + callsign. unit_type_name removed — it
+    /// belonged on TeamComponent (for teams) or will live on a future
+    /// unit-class component (for units). See ECS_DECOUPLING_PLAN §3.
     struct CampaignIdentityComponent : Component<CampaignIdentityComponent> {
         int team_id = 0;
-        std::string unit_type_name;   // e.g. "F-16C_50"
         std::string callsign;
+    };
+
+    // --- Team component (Phase 1) -----------------------------------------------
+
+    /// Team-specific data. Every team entity carries this. Previously this
+    /// data was stuffed into CampaignIdentityComponent (which served two
+    /// roles). Now each entity kind gets its own focused component.
+    struct TeamComponent : Component<TeamComponent> {
+        int slot = 0;                    // 0..7
+        uint8_t flags = 0;
+        uint8_t colour = 0;
+        std::string motto;
+        std::vector<int16_t> stance;     // stance toward each other team
+        std::vector<uint8_t> member;     // country memberships
+        uint8_t air_experience = 0;
+        uint8_t ground_experience = 0;
+        uint8_t naval_experience = 0;
+        uint8_t air_defense_experience = 0;
+        int16_t first_colonel = 0;
+        int16_t first_commander = 0;
+        int16_t first_wingman = 0;
+        int16_t last_wingman = 0;
+    };
+
+    // --- Objective components (Phase 2b) -----------------------------------------
+
+    /// Classifies the objective type (airbase, bridge, city, ...).
+    struct ObjectiveTypeComponent : Component<ObjectiveTypeComponent> {
+        int16_t type = 0;               // entity_type (class table index, 100+)
+        int16_t class_table_index = 0;
+        std::string class_name;         // e.g. "02_20 Airbase 2"
+    };
+
+    /// Who owns this objective (current + first/original owner).
+    struct OwnershipComponent : Component<OwnershipComponent> {
+        uint8_t team = 0;               // current owner (0=neutral, 1=enemy, 2=friendly, ...)
+        uint8_t first_owner = 0;        // original owner
+    };
+
+    /// Supply/fuel/losses state for objectives that have logistics.
+    struct SupplyStateComponent : Component<SupplyStateComponent> {
+        uint8_t supply = 0;
+        uint8_t fuel = 0;
+        uint8_t losses = 0;
+        int32_t last_repair = 0;
+    };
+
+    /// Per-feature damage bitmap (raw 2-bit-per-feature bitmap from .obj).
+    struct DamageBitmapComponent : Component<DamageBitmapComponent> {
+        std::vector<uint8_t> fstatus;   // packed 2 bits per feature
+    };
+
+    /// Radar detection arcs and range. Only on objectives with radar.
+    struct RadarComponent : Component<RadarComponent> {
+        float detect_ratio[8] = {0.0f};
+        float range_km = 0.0f;
+        std::string name;               // e.g. "APG-68", "Pat Hand"
+        int16_t radar_type_idx = -1;    // index into Falcon4.RCD
+    };
+
+    /// Road/rail network connections to neighboring objectives.
+    struct NetworkLinksComponent : Component<NetworkLinksComponent> {
+        std::vector<ObjectiveLink> links;
+    };
+
+    /// Airbase ground layout (runway/taxiway/parking). Only on airbases.
+    struct GroundLayoutComponent : Component<GroundLayoutComponent> {
+        std::vector<GroundLayoutList> layouts;
+    };
+
+    /// Per-objective feature placements (buildings, structures).
+    struct FeatureSetComponent : Component<FeatureSetComponent> {
+        uint8_t features_count = 0;
+        uint8_t radar_feature = 0;      // which feature provides radar (255=none)
+        uint8_t deag_distance = 0;
+        uint16_t pt_data_index = 0;
+        std::array<uint8_t, 8> objective_detection{};
+        std::vector<FeatureEntryState> features;
+    };
+
+    /// Objective priority and name index.
+    struct ObjectivePriorityComponent : Component<ObjectivePriorityComponent> {
+        uint8_t priority = 0;
+        int16_t nameid = 0;             // index into the name table
+        uint32_t obj_flags = 0;         // opaque bitmap from .obj
+        uint32_t parent_id = 0;         // VU_ID.num of parent objective (0 if none)
+    };
+
+    // --- Unit components (Phase 2b) ----------------------------------------------
+
+    /// Core identity shared by all unit types.
+    struct UnitCoreComponent : Component<UnitCoreComponent> {
+        UnitClass unit_class = UnitClass::Unknown;
+        uint8_t domain = 0;             // VU_DOMAIN (2=air, 3=land, 4=sea)
+        uint8_t unit_subtype = 0;       // STYPE_UNIT_* (armor/infantry/fighter/bomber/...)
+        int16_t class_table_index = 0;  // entity_type from class table
+        uint32_t roster = 0;            // packed 2 bits/group x 16 groups
+        std::string class_name;         // e.g. "Armor Battalion"
+    };
+
+    /// Waypoint plan for units with waypoints.
+    struct WaypointPlanComponent : Component<WaypointPlanComponent> {
+        std::vector<WaypointState> waypoints;
+    };
+
+    /// Ground tactical state for Battalion, Brigade, TaskForce.
+    struct GroundTacticalComponent : Component<GroundTacticalComponent> {
+        uint8_t supply = 0;
+        uint8_t morale = 0;
+        uint8_t fatigue = 0;
+        uint8_t heading = 0;           // current heading (0-255, *1.4 deg)
+        uint8_t final_heading = 0;     // commanded heading
+        uint8_t position = 0;          // formation position slot
+        int32_t last_move = 0;         // CampaignTime of last move
+        int32_t last_combat = 0;       // CampaignTime of last combat
+    };
+
+    /// Parent/children hierarchy for Battalion -> Brigade.
+    struct HierarchyComponent : Component<HierarchyComponent> {
+        EntityId parent;                        // resolved EntityId (not VU_ID)
+        std::vector<EntityId> children;         // resolved EntityIds
+        // Raw VU_IDs kept for bridge-time resolution (Phase 3 second pass)
+        uint32_t parent_id = 0;                 // VU_ID.num of parent
+        std::vector<uint32_t> element_ids;      // VU_ID.nums of children
+    };
+
+    /// Squadron-specific state.
+    struct SquadronComponent : Component<SquadronComponent> {
+        EntityId airbase;                       // resolved EntityId of home airbase
+        uint32_t airbase_id = 0;                // VU_ID.num (for bridge-time resolution)
+        uint8_t specialty = 0;
+        int16_t aa_kills = 0;
+        int16_t ag_kills = 0;
+        int16_t as_kills = 0;
+        int16_t an_kills = 0;
+        int16_t missions_flown = 0;
+        int16_t mission_score = 0;
+        uint8_t total_losses = 0;
+        uint8_t pilot_losses = 0;
+        uint8_t squadron_patch = 0;
+        int32_t fuel = 0;
+        std::vector<PilotState> pilots;
+    };
+
+    /// Flight-specific state (mission element within a package).
+    struct FlightPlanComponent : Component<FlightPlanComponent> {
+        float altitude = 0.0f;                  // flight altitude (feet)
+        int32_t fuel_burnt = 0;
+        int32_t time_on_target = 0;             // CampaignTime
+        int32_t mission_over_time = 0;          // CampaignTime
+        int16_t mission_target = 0;             // target ID slot
+        uint8_t loadouts = 0;                   // # of loadout entries
+        uint8_t mission = 0;                    // MissionType enum
+        uint8_t flight_priority = 0;
+        uint8_t mission_id = 0;
+        uint8_t eval_flags = 0;
+        uint8_t callsign_id = 0;
+        uint8_t callsign_num = 0;
+        // Cross-references (resolved in Phase 3 second pass)
+        EntityId package;                       // resolved EntityId of parent Package
+        EntityId squadron;                      // resolved EntityId of owning Squadron
+        uint32_t package_id = 0;                // VU_ID.num (bridge-time)
+        uint32_t squadron_id = 0;               // VU_ID.num (bridge-time)
+    };
+
+    /// Package-specific state (groups multiple Flights).
+    struct PackageSupportComponent : Component<PackageSupportComponent> {
+        uint8_t wait_cycles = 0;
+        // Cross-references (resolved in Phase 3 second pass)
+        EntityId interceptor;                   // resolved EntityId
+        EntityId awacs;
+        EntityId jstar;
+        EntityId ecm;
+        EntityId tanker;
+        uint32_t interceptor_id = 0;            // VU_ID.num (bridge-time)
+        uint32_t awacs_id = 0;
+        uint32_t jstar_id = 0;
+        uint32_t ecm_id = 0;
+        uint32_t tanker_id = 0;
+    };
+
+    /// Vehicle composition for units with vehicle groups.
+    struct VehicleCompositionComponent : Component<VehicleCompositionComponent> {
+        std::vector<VehicleGroup> groups;
+    };
+
+    /// Per-mission-role scoring (16 uchar values from Falcon4.UCD.Scores).
+    struct UnitClassScoreComponent : Component<UnitClassScoreComponent> {
+        std::array<uint8_t, 16> scores{};
+    };
+
+    // --- Utility components (Phase 2b) -------------------------------------------
+
+    /// Typed key-value bag for unstable/reverse-engineering fields. Fields
+    /// that vary across Falcon versions or lack a clear domain meaning go
+    /// here. Once proven, they are promoted to proper components.
+    struct PropertyBag : Component<PropertyBag> {
+        std::unordered_map<std::string, int64_t>    ints;
+        std::unordered_map<std::string, double>     floats;
+        std::unordered_map<std::string, std::string> strings;
+    };
+
+    /// Campaign-level time and TE (Tactical Engagement) state.
+    struct CampaignStateComponent : Component<CampaignStateComponent> {
+        int32_t current_time = 0;
+        int32_t te_start_time = 0;
+        int32_t te_time_limit = 0;
+        int32_t te_victory_points = 0;
+        int32_t te_type = 0;
+        int32_t te_number_teams = 0;
+        int32_t te_team = 0;
+        int32_t te_flags = 0;
+        std::vector<int32_t> te_number_aircraft;
+        std::vector<int32_t> te_team_pts;
     };
 
     // ============================================================================
@@ -197,7 +421,7 @@ namespace f4::entities {
         friend class EntityHandle;
 
         struct EntityRecord {
-			EntityRecord() = default;
+                        EntityRecord() = default;
 
             TagSet tags;
             std::unordered_map<std::type_index, std::unique_ptr<ComponentBase>> components;

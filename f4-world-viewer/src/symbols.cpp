@@ -64,10 +64,10 @@ SymbolKind symbol_for_objective_type(uint8_t t) noexcept {
     }
 }
 
-SymbolKind symbol_for_unit(f4::world::UnitClass cls, uint8_t subtype) noexcept {
+SymbolKind symbol_for_unit(f4::entities::UnitClass cls, uint8_t subtype) noexcept {
     switch (cls) {
-        case f4::world::UnitClass::Battalion:
-        case f4::world::UnitClass::Brigade: {
+        case f4::entities::UnitClass::Battalion:
+        case f4::entities::UnitClass::Brigade: {
             // Ground unit subtypes — same glyph vocabulary for both
             // battalion (rect frame) and brigade (diamond frame). The
             // caller (draw_symbol) picks the frame based on cls.
@@ -80,11 +80,11 @@ SymbolKind symbol_for_unit(f4::world::UnitClass cls, uint8_t subtype) noexcept {
                 case 14: return SymbolKind::UnitArtillery;   // STYPE_LAND_TOWED_ARTILLERY
                 default: break;
             }
-            return (cls == f4::world::UnitClass::Battalion)
+            return (cls == f4::entities::UnitClass::Battalion)
                        ? SymbolKind::UnitBattalion
                        : SymbolKind::UnitBrigade;
         }
-        case f4::world::UnitClass::Squadron: {
+        case f4::entities::UnitClass::Squadron: {
             switch (subtype) {
                 case 1:  return SymbolKind::UnitTransport;   // STYPE_AIR_AIR_TRANSPORT
                 case 4:  return SymbolKind::UnitHelicopter;  // STYPE_AIR_ATTACK_HELO
@@ -97,15 +97,15 @@ SymbolKind symbol_for_unit(f4::world::UnitClass cls, uint8_t subtype) noexcept {
             }
             return SymbolKind::UnitSquadron;
         }
-        case f4::world::UnitClass::TaskForce: {
+        case f4::entities::UnitClass::TaskForce: {
             switch (subtype) {
                 case 3:  return SymbolKind::UnitCarrier;     // STYPE_SEA_CARRIER
                 default: break;
             }
             return SymbolKind::UnitNavalSurface;
         }
-        case f4::world::UnitClass::Flight:   return SymbolKind::UnitFlight;
-        case f4::world::UnitClass::Package:  return SymbolKind::UnitPackage;
+        case f4::entities::UnitClass::Flight:   return SymbolKind::UnitFlight;
+        case f4::entities::UnitClass::Package:  return SymbolKind::UnitPackage;
         default: return SymbolKind::UnitUnknown;
     }
 }
