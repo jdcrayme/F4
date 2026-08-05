@@ -1,0 +1,10098 @@
+          "max_range": 250.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3477,
+          "max_range": 500.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3478,
+          "max_range": 1500.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3479,
+          "max_range": 4000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3480,
+          "max_range": 10000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3481,
+          "max_range": 25000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 12,
+          "max_range": 36000.0
+        }
+      ],
+      "slot_positions": [
+        [
+          -3.5,
+          -16.5,
+          -0.1
+        ],
+        [
+          -5.0,
+          -14.0,
+          -0.086
+        ],
+        [
+          -3.0,
+          -11.0,
+          -0.086
+        ],
+        [
+          0.463,
+          -6.371,
+          -0.086
+        ],
+        [
+          0.033,
+          -0.021,
+          2.794
+        ],
+        [
+          0.463,
+          6.371,
+          -0.086
+        ],
+        [
+          -3.0,
+          11.0,
+          -0.086
+        ],
+        [
+          -5.0,
+          14.0,
+          -0.086
+        ],
+        [
+          -3.5,
+          16.5,
+          -0.1
+        ],
+        [
+          -37.97,
+          0.031,
+          0.25
+        ],
+        [
+          -37.97,
+          0.002,
+          -0.635
+        ],
+        [
+          -37.97,
+          -0.367,
+          -0.42
+        ],
+        [
+          -37.97,
+          -0.391,
+          0.007
+        ],
+        [
+          -37.97,
+          0.39,
+          -0.411
+        ],
+        [
+          -37.97,
+          0.423,
+          0.019
+        ]
+      ]
+    },
+    {
+      "index": 1053,
+      "radius": 24.014,
+      "bounding_box": [
+        -18.624,
+        19.887,
+        -15.921,
+        17.008,
+        -8.211,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 7,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3482,
+          "max_range": 150.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3483,
+          "max_range": 300.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3484,
+          "max_range": 750.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3485,
+          "max_range": 1500.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3486,
+          "max_range": 3000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 407,
+          "max_range": 6000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 359,
+          "max_range": 50000.0
+        }
+      ]
+    },
+    {
+      "index": 1054,
+      "radius": 5.025,
+      "bounding_box": [
+        -5.017,
+        4.5,
+        -0.737,
+        0.726,
+        -0.597,
+        0.868
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 5,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3487,
+          "max_range": 100.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3488,
+          "max_range": 300.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3489,
+          "max_range": 600.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3490,
+          "max_range": 1000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3491,
+          "max_range": 50000.0
+        }
+      ]
+    },
+    {
+      "index": 1055,
+      "radius": 456.475,
+      "bounding_box": [
+        -379.637,
+        376.162,
+        -441.112,
+        272.627,
+        -33.847,
+        0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3492,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1056,
+      "radius": 152.158,
+      "bounding_box": [
+        -126.546,
+        131.658,
+        -147.037,
+        90.876,
+        -11.282,
+        0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3493,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1057,
+      "radius": 101.218,
+      "bounding_box": [
+        -96.03,
+        72.63,
+        -21.8,
+        18.2,
+        -48.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3494,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1058,
+      "radius": 809.818,
+      "bounding_box": [
+        -83.165,
+        252.21,
+        -182.761,
+        425.081,
+        -800.0,
+        800.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 4,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3495,
+          "max_range": 4800.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3496,
+          "max_range": 20000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3497,
+          "max_range": 72000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3498,
+          "max_range": 100000.0
+        }
+      ]
+    },
+    {
+      "index": 1059,
+      "radius": 752.068,
+      "bounding_box": [
+        -204.0,
+        209.0,
+        -242.937,
+        370.278,
+        -644.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 4,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3499,
+          "max_range": 8000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3500,
+          "max_range": 64000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3501,
+          "max_range": 72000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3502,
+          "max_range": 100000.0
+        }
+      ]
+    },
+    {
+      "index": 1060,
+      "radius": 421.157,
+      "bounding_box": [
+        -130.608,
+        130.608,
+        -54.966,
+        196.309,
+        -392.618,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 4,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3503,
+          "max_range": 4000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3504,
+          "max_range": 13000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3505,
+          "max_range": 45000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3506,
+          "max_range": 100000.0
+        }
+      ]
+    },
+    {
+      "index": 1061,
+      "radius": 243.803,
+      "bounding_box": [
+        -60.056,
+        49.944,
+        -86.217,
+        70.533,
+        -220.596,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 4,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3507,
+          "max_range": 1850.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3508,
+          "max_range": 7500.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3509,
+          "max_range": 64000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3510,
+          "max_range": 100000.0
+        }
+      ]
+    },
+    {
+      "index": 1062,
+      "radius": 475.012,
+      "bounding_box": [
+        -80.0,
+        150.0,
+        -400.0,
+        250.0,
+        -251.27,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 4,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3511,
+          "max_range": 4500.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3512,
+          "max_range": 17500.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3513,
+          "max_range": 48000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3514,
+          "max_range": 100000.0
+        }
+      ]
+    },
+    {
+      "index": 1063,
+      "radius": 401.386,
+      "bounding_box": [
+        -200.0,
+        80.0,
+        -300.0,
+        50.0,
+        -299.753,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 4,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3515,
+          "max_range": 4500.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3516,
+          "max_range": 18000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3517,
+          "max_range": 48000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3518,
+          "max_range": 100000.0
+        }
+      ]
+    },
+    {
+      "index": 1064,
+      "radius": 336.249,
+      "bounding_box": [
+        -79.229,
+        150.0,
+        -211.805,
+        80.0,
+        -310.908,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 4,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3519,
+          "max_range": 2400.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3520,
+          "max_range": 24000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3521,
+          "max_range": 72000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3522,
+          "max_range": 100000.0
+        }
+      ]
+    },
+    {
+      "index": 1065,
+      "radius": 351.321,
+      "bounding_box": [
+        -110.923,
+        107.077,
+        -133.846,
+        138.654,
+        -313.647,
+        44.921
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 4,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3523,
+          "max_range": 5000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3524,
+          "max_range": 16000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3525,
+          "max_range": 48000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3526,
+          "max_range": 100000.0
+        }
+      ]
+    },
+    {
+      "index": 1066,
+      "radius": 4.243,
+      "bounding_box": [
+        -0.0,
+        0.0,
+        -3.0,
+        3.0,
+        -3.0,
+        3.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3527,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1067,
+      "radius": 0.995,
+      "bounding_box": [
+        -0.995,
+        0.0,
+        -0.065,
+        0.065,
+        -0.063,
+        0.05
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 3,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3528,
+          "max_range": 100.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3529,
+          "max_range": 500.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3530,
+          "max_range": 1000.0
+        }
+      ]
+    },
+    {
+      "index": 1068,
+      "radius": 539.608,
+      "bounding_box": [
+        -140.18,
+        414.646,
+        -159.348,
+        525.158,
+        -51.692,
+        6.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 4,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3531,
+          "max_range": 1600.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3532,
+          "max_range": 48000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3533,
+          "max_range": 72000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3534,
+          "max_range": 100000.0
+        }
+      ]
+    },
+    {
+      "index": 1069,
+      "radius": 104.435,
+      "bounding_box": [
+        -104.338,
+        63.777,
+        -81.063,
+        80.378,
+        -42.005,
+        11.431
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 6,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3535,
+          "max_range": 500.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3536,
+          "max_range": 2500.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3537,
+          "max_range": 10000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3538,
+          "max_range": 10000000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3539,
+          "max_range": 10000000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3540,
+          "max_range": 10000000.0
+        }
+      ]
+    },
+    {
+      "index": 1070,
+      "radius": 230.541,
+      "bounding_box": [
+        -196.534,
+        196.211,
+        -130.807,
+        121.427,
+        -90.877,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 4,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3541,
+          "max_range": 2500.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3542,
+          "max_range": 18000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3543,
+          "max_range": 40000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3544,
+          "max_range": 72000.0
+        }
+      ]
+    },
+    {
+      "index": 1071,
+      "radius": 619.461,
+      "bounding_box": [
+        -471.633,
+        450.0,
+        -400.0,
+        -23.0,
+        -63.263,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 4,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3545,
+          "max_range": 12000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3546,
+          "max_range": 32000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3547,
+          "max_range": 76000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3548,
+          "max_range": 100000.0
+        }
+      ]
+    },
+    {
+      "index": 1072,
+      "radius": 108.407,
+      "bounding_box": [
+        -20.0,
+        20.0,
+        -30.025,
+        30.025,
+        -104.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3549,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1073,
+      "radius": 108.407,
+      "bounding_box": [
+        -20.0,
+        20.0,
+        -30.025,
+        30.025,
+        -104.0,
+        -20.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3550,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1074,
+      "radius": 108.407,
+      "bounding_box": [
+        -20.0,
+        20.0,
+        -30.025,
+        30.025,
+        -104.0,
+        -20.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3551,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1075,
+      "radius": 108.434,
+      "bounding_box": [
+        -21.55,
+        19.39,
+        -29.96,
+        35.295,
+        -103.378,
+        1.61
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3552,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1076,
+      "radius": 108.127,
+      "bounding_box": [
+        -25.424,
+        15.516,
+        -32.286,
+        32.97,
+        -103.378,
+        1.61
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3553,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1077,
+      "radius": 109.786,
+      "bounding_box": [
+        -21.55,
+        20.0,
+        -30.025,
+        35.295,
+        -103.378,
+        1.61
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3554,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1078,
+      "radius": 109.786,
+      "bounding_box": [
+        -21.55,
+        19.39,
+        -30.025,
+        35.295,
+        -103.378,
+        -20.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3555,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1079,
+      "radius": 71.326,
+      "bounding_box": [
+        -21.55,
+        13.46,
+        -29.097,
+        29.097,
+        -63.378,
+        0.044
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3556,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1080,
+      "radius": 77.286,
+      "bounding_box": [
+        -59.944,
+        60.056,
+        -30.02,
+        30.03,
+        -48.527,
+        -20.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3557,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1081,
+      "radius": 77.286,
+      "bounding_box": [
+        -59.944,
+        60.056,
+        -30.02,
+        30.03,
+        -48.527,
+        -20.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3558,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1082,
+      "radius": 77.286,
+      "bounding_box": [
+        -59.944,
+        60.056,
+        -30.02,
+        30.03,
+        -48.527,
+        -20.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3559,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1083,
+      "radius": 72.046,
+      "bounding_box": [
+        -56.22,
+        60.056,
+        -30.02,
+        30.03,
+        -46.255,
+        0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3560,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1084,
+      "radius": 72.109,
+      "bounding_box": [
+        -60.17,
+        56.105,
+        -30.056,
+        29.994,
+        -46.255,
+        0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3561,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1085,
+      "radius": 72.109,
+      "bounding_box": [
+        -60.17,
+        60.056,
+        -30.056,
+        29.994,
+        -46.255,
+        0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3562,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1086,
+      "radius": 72.801,
+      "bounding_box": [
+        -59.944,
+        70.0,
+        -30.02,
+        30.03,
+        -28.527,
+        0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3563,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1087,
+      "radius": 146.177,
+      "bounding_box": [
+        -140.0,
+        140.0,
+        -30.037,
+        30.037,
+        -29.421,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3564,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1088,
+      "radius": 146.177,
+      "bounding_box": [
+        -140.347,
+        140.0,
+        -40.0,
+        30.037,
+        -29.421,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3565,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1089,
+      "radius": 125.304,
+      "bounding_box": [
+        -120.0,
+        120.0,
+        -30.02,
+        30.03,
+        -48.527,
+        -20.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3566,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1090,
+      "radius": 125.304,
+      "bounding_box": [
+        -120.0,
+        120.0,
+        -30.02,
+        30.03,
+        -48.527,
+        -20.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3567,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1091,
+      "radius": 125.443,
+      "bounding_box": [
+        -111.16,
+        120.133,
+        -30.02,
+        30.03,
+        -47.351,
+        -0.119
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3568,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1092,
+      "radius": 130.18,
+      "bounding_box": [
+        -104.939,
+        126.354,
+        -28.719,
+        31.33,
+        -47.351,
+        -0.119
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3569,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1093,
+      "radius": 127.312,
+      "bounding_box": [
+        -122.742,
+        122.742,
+        -27.638,
+        32.477,
+        -34.327,
+        -0.119
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3570,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1094,
+      "radius": 127.312,
+      "bounding_box": [
+        -122.742,
+        122.742,
+        -27.638,
+        32.477,
+        -34.327,
+        -0.119
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3570,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1095,
+      "radius": 189.884,
+      "bounding_box": [
+        -173.75,
+        186.25,
+        -28.901,
+        31.148,
+        -48.527,
+        -20.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3571,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1096,
+      "radius": 183.903,
+      "bounding_box": [
+        -180.33,
+        179.67,
+        -30.02,
+        30.03,
+        -48.527,
+        -20.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3572,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1097,
+      "radius": 189.711,
+      "bounding_box": [
+        -161.949,
+        186.25,
+        -30.02,
+        30.03,
+        -48.233,
+        -1.529
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3573,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1098,
+      "radius": 189.711,
+      "bounding_box": [
+        -186.25,
+        161.949,
+        -30.03,
+        30.02,
+        -48.233,
+        -1.529
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3574,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1099,
+      "radius": 190.915,
+      "bounding_box": [
+        -168.519,
+        187.3,
+        -42.637,
+        36.849,
+        -45.181,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3575,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1100,
+      "radius": 190.915,
+      "bounding_box": [
+        -168.519,
+        187.3,
+        -42.637,
+        36.849,
+        -45.181,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3575,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1101,
+      "radius": 101.966,
+      "bounding_box": [
+        -83.471,
+        83.597,
+        -40.0,
+        40.0,
+        -50.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3576,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1102,
+      "radius": 101.966,
+      "bounding_box": [
+        -83.471,
+        83.597,
+        -30.145,
+        30.12,
+        -50.0,
+        -20.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3577,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1103,
+      "radius": 101.966,
+      "bounding_box": [
+        -83.471,
+        83.597,
+        -30.145,
+        30.12,
+        -50.0,
+        -20.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3578,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1104,
+      "radius": 131.086,
+      "bounding_box": [
+        -126.608,
+        65.343,
+        -36.682,
+        43.318,
+        -50.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3579,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1105,
+      "radius": 136.22,
+      "bounding_box": [
+        -59.849,
+        132.102,
+        -37.303,
+        42.697,
+        -50.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3580,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1106,
+      "radius": 112.267,
+      "bounding_box": [
+        -83.471,
+        104.068,
+        -40.0,
+        40.0,
+        -50.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3581,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1107,
+      "radius": 112.267,
+      "bounding_box": [
+        -70.0,
+        104.068,
+        -30.542,
+        30.542,
+        -50.0,
+        -18.886
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3582,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1108,
+      "radius": 101.98,
+      "bounding_box": [
+        -100.0,
+        83.471,
+        -40.0,
+        40.0,
+        -30.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3583,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1109,
+      "radius": 161.926,
+      "bounding_box": [
+        -150.042,
+        151.063,
+        -40.659,
+        40.489,
+        -50.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3584,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1110,
+      "radius": 161.926,
+      "bounding_box": [
+        -150.042,
+        151.063,
+        -30.0,
+        30.0,
+        -50.0,
+        -20.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3585,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1111,
+      "radius": 176.882,
+      "bounding_box": [
+        -150.0,
+        171.779,
+        -40.659,
+        40.489,
+        -54.0,
+        0.004
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3586,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1112,
+      "radius": 161.926,
+      "bounding_box": [
+        -150.042,
+        151.063,
+        -30.0,
+        30.0,
+        -50.0,
+        -20.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3587,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1113,
+      "radius": 162.048,
+      "bounding_box": [
+        -126.608,
+        151.063,
+        -40.659,
+        40.489,
+        -50.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3588,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1114,
+      "radius": 156.24,
+      "bounding_box": [
+        -124.468,
+        153.204,
+        -40.601,
+        40.547,
+        -50.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3589,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1115,
+      "radius": 176.867,
+      "bounding_box": [
+        -151.182,
+        171.779,
+        -40.659,
+        40.489,
+        -50.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3590,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1116,
+      "radius": 176.867,
+      "bounding_box": [
+        -151.182,
+        171.779,
+        -30.542,
+        30.542,
+        -50.0,
+        -20.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3591,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1117,
+      "radius": 174.724,
+      "bounding_box": [
+        -151.0,
+        171.779,
+        -50.0,
+        60.0,
+        -34.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3592,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1118,
+      "radius": 109.189,
+      "bounding_box": [
+        -92.12,
+        92.12,
+        -30.597,
+        30.597,
+        -50.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3593,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1119,
+      "radius": 109.189,
+      "bounding_box": [
+        -92.12,
+        92.12,
+        -30.597,
+        30.597,
+        -50.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3594,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1120,
+      "radius": 109.189,
+      "bounding_box": [
+        -92.12,
+        92.12,
+        -30.597,
+        30.597,
+        -50.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3595,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1121,
+      "radius": 112.158,
+      "bounding_box": [
+        -88.62,
+        95.62,
+        -30.597,
+        30.597,
+        -50.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3596,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1122,
+      "radius": 112.158,
+      "bounding_box": [
+        -88.62,
+        95.62,
+        -30.597,
+        30.597,
+        -50.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3597,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1123,
+      "radius": 112.158,
+      "bounding_box": [
+        -88.62,
+        95.62,
+        -30.597,
+        30.597,
+        -50.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3598,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1124,
+      "radius": 167.716,
+      "bounding_box": [
+        -163.621,
+        156.393,
+        -30.934,
+        29.115,
+        -90.0,
+        0.002
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3599,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1125,
+      "radius": 167.712,
+      "bounding_box": [
+        -163.621,
+        155.56,
+        -30.91,
+        29.115,
+        -90.0,
+        -19.875
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3600,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1126,
+      "radius": 167.945,
+      "bounding_box": [
+        -165.076,
+        150.0,
+        -30.91,
+        32.705,
+        -92.346,
+        0.004
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3601,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1127,
+      "radius": 167.712,
+      "bounding_box": [
+        -163.621,
+        155.56,
+        -30.91,
+        29.115,
+        -90.0,
+        -19.875
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3602,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1128,
+      "radius": 168.035,
+      "bounding_box": [
+        -164.616,
+        155.56,
+        -30.91,
+        30.91,
+        -90.069,
+        0.002
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3603,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1129,
+      "radius": 181.724,
+      "bounding_box": [
+        -177.298,
+        142.878,
+        -30.773,
+        31.046,
+        -90.069,
+        0.002
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3604,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1130,
+      "radius": 168.972,
+      "bounding_box": [
+        -165.076,
+        150.0,
+        -29.115,
+        30.025,
+        -92.346,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3605,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1131,
+      "radius": 138.975,
+      "bounding_box": [
+        -35.884,
+        134.235,
+        -29.115,
+        30.025,
+        -92.346,
+        -19.351
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3606,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1132,
+      "radius": 350.571,
+      "bounding_box": [
+        -250.0,
+        350.0,
+        -70.0,
+        60.0,
+        -50.07,
+        0.177
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3607,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1133,
+      "radius": 155.005,
+      "bounding_box": [
+        -150.0,
+        150.0,
+        -30.025,
+        30.025,
+        -25.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3608,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1134,
+      "radius": 155.005,
+      "bounding_box": [
+        -150.0,
+        150.0,
+        -30.025,
+        30.025,
+        -25.0,
+        -20.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3609,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1135,
+      "radius": 155.005,
+      "bounding_box": [
+        -150.0,
+        150.0,
+        -30.025,
+        30.025,
+        -25.0,
+        -20.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3610,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1136,
+      "radius": 155.005,
+      "bounding_box": [
+        -150.0,
+        150.0,
+        -30.025,
+        30.025,
+        -25.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3611,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1137,
+      "radius": 191.996,
+      "bounding_box": [
+        -110.0,
+        190.0,
+        -32.438,
+        27.611,
+        -25.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3612,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1138,
+      "radius": 154.277,
+      "bounding_box": [
+        -150.0,
+        150.0,
+        -30.025,
+        30.03,
+        -20.0,
+        0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3613,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1139,
+      "radius": 155.005,
+      "bounding_box": [
+        -150.0,
+        150.0,
+        -35.201,
+        30.025,
+        -25.0,
+        0.694
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3614,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1140,
+      "radius": 302.533,
+      "bounding_box": [
+        -300.0,
+        300.0,
+        -30.025,
+        30.025,
+        -25.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3615,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1141,
+      "radius": 302.533,
+      "bounding_box": [
+        -300.0,
+        300.0,
+        -30.025,
+        30.025,
+        -25.0,
+        -20.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3616,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1142,
+      "radius": 302.533,
+      "bounding_box": [
+        -300.0,
+        300.0,
+        -30.025,
+        30.025,
+        -25.0,
+        -20.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3617,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1143,
+      "radius": 302.35,
+      "bounding_box": [
+        -299.819,
+        299.99,
+        -30.025,
+        30.025,
+        -24.995,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3618,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1144,
+      "radius": 393.599,
+      "bounding_box": [
+        -207.083,
+        392.726,
+        -33.854,
+        26.195,
+        -24.995,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3619,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1145,
+      "radius": 302.161,
+      "bounding_box": [
+        -300.0,
+        300.0,
+        -30.025,
+        30.025,
+        -24.981,
+        1.359
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3620,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1146,
+      "radius": 302.161,
+      "bounding_box": [
+        -300.0,
+        300.0,
+        -30.025,
+        30.025,
+        -24.981,
+        1.359
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3620,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1147,
+      "radius": 302.159,
+      "bounding_box": [
+        -300.0,
+        300.0,
+        -30.02,
+        30.02,
+        -130.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3621,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1148,
+      "radius": 302.159,
+      "bounding_box": [
+        -300.0,
+        300.0,
+        -30.0,
+        30.0,
+        -130.0,
+        -20.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3622,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1149,
+      "radius": 299.562,
+      "bounding_box": [
+        -298.056,
+        298.056,
+        -40.0,
+        40.0,
+        -130.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3623,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1150,
+      "radius": 302.159,
+      "bounding_box": [
+        -300.0,
+        300.0,
+        -30.0,
+        30.0,
+        -130.0,
+        -20.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3624,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1151,
+      "radius": 329.815,
+      "bounding_box": [
+        -271.44,
+        327.803,
+        -39.634,
+        40.366,
+        -130.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3625,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1152,
+      "radius": 303.969,
+      "bounding_box": [
+        -296.962,
+        302.281,
+        -38.114,
+        41.886,
+        -130.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3626,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1153,
+      "radius": 302.497,
+      "bounding_box": [
+        -300.0,
+        300.0,
+        -40.0,
+        40.0,
+        -130.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3627,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1154,
+      "radius": 146.373,
+      "bounding_box": [
+        -101.01,
+        110.0,
+        -40.0,
+        40.0,
+        -130.0,
+        -20.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3628,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1155,
+      "radius": 274.643,
+      "bounding_box": [
+        -273.0,
+        273.0,
+        -40.0,
+        40.0,
+        -80.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3629,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1156,
+      "radius": 901.639,
+      "bounding_box": [
+        300.0,
+        900.659,
+        -30.025,
+        30.025,
+        -29.421,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3630,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1157,
+      "radius": 901.639,
+      "bounding_box": [
+        300.0,
+        900.659,
+        -30.025,
+        30.025,
+        -29.421,
+        -20.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3631,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1158,
+      "radius": 901.639,
+      "bounding_box": [
+        300.0,
+        900.659,
+        -30.025,
+        30.025,
+        -29.421,
+        -20.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3632,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1159,
+      "radius": 302.928,
+      "bounding_box": [
+        -300.659,
+        300.0,
+        -30.025,
+        30.025,
+        -29.421,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3633,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1160,
+      "radius": 440.141,
+      "bounding_box": [
+        -161.543,
+        439.116,
+        -30.025,
+        30.025,
+        -29.421,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3634,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1161,
+      "radius": 303.583,
+      "bounding_box": [
+        -300.659,
+        300.0,
+        -30.025,
+        30.025,
+        -29.421,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3635,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1162,
+      "radius": 303.583,
+      "bounding_box": [
+        -300.659,
+        300.0,
+        -30.025,
+        30.025,
+        -29.421,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3636,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1163,
+      "radius": 94.699,
+      "bounding_box": [
+        -75.0,
+        75.0,
+        -30.006,
+        30.006,
+        -49.421,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3637,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1164,
+      "radius": 86.602,
+      "bounding_box": [
+        -76.557,
+        74.083,
+        -30.006,
+        30.006,
+        -38.247,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3638,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1165,
+      "radius": 111.701,
+      "bounding_box": [
+        -102.604,
+        48.037,
+        -28.101,
+        31.912,
+        -38.247,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3639,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1166,
+      "radius": 90.139,
+      "bounding_box": [
+        -75.0,
+        75.0,
+        -30.0,
+        30.0,
+        -40.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3640,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1167,
+      "radius": 94.826,
+      "bounding_box": [
+        -75.0,
+        75.0,
+        -40.0,
+        50.656,
+        -39.063,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3641,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1168,
+      "radius": 100.279,
+      "bounding_box": [
+        -75.0,
+        75.0,
+        -30.0,
+        30.0,
+        -59.421,
+        -40.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3642,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1169,
+      "radius": 92.095,
+      "bounding_box": [
+        -85.685,
+        59.203,
+        -63.022,
+        33.756,
+        -19.421,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3643,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1170,
+      "radius": 85.132,
+      "bounding_box": [
+        -64.5,
+        80.389,
+        -28.018,
+        68.76,
+        -19.421,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3644,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1171,
+      "radius": 95.0,
+      "bounding_box": [
+        -75.0,
+        75.0,
+        -30.0,
+        30.0,
+        -50.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3645,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1172,
+      "radius": 0.0,
+      "bounding_box": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        -0.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3646,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1173,
+      "radius": 602.149,
+      "bounding_box": [
+        -600.638,
+        600.68,
+        -30.025,
+        30.025,
+        -29.421,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3647,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1174,
+      "radius": 602.128,
+      "bounding_box": [
+        -600.659,
+        600.659,
+        -30.025,
+        30.025,
+        -29.421,
+        -20.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3648,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1175,
+      "radius": 643.953,
+      "bounding_box": [
+        -600.784,
+        643.484,
+        -30.025,
+        46.94,
+        -30.669,
+        6.914
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3649,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1176,
+      "radius": 602.128,
+      "bounding_box": [
+        -600.659,
+        600.659,
+        -30.025,
+        30.025,
+        -29.421,
+        -20.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3650,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1177,
+      "radius": 604.042,
+      "bounding_box": [
+        -599.358,
+        602.578,
+        -30.025,
+        30.025,
+        -29.421,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3651,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1178,
+      "radius": 620.908,
+      "bounding_box": [
+        -581.755,
+        620.181,
+        -30.025,
+        30.025,
+        -29.421,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3652,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1179,
+      "radius": 572.205,
+      "bounding_box": [
+        -570.659,
+        570.0,
+        -30.025,
+        30.025,
+        -29.421,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3653,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1180,
+      "radius": 433.936,
+      "bounding_box": [
+        -430.0,
+        430.0,
+        -30.001,
+        30.001,
+        -120.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3654,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1181,
+      "radius": 433.936,
+      "bounding_box": [
+        -430.0,
+        430.0,
+        -30.001,
+        30.001,
+        -120.0,
+        -20.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3655,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1182,
+      "radius": 431.296,
+      "bounding_box": [
+        -430.0,
+        430.0,
+        -32.31,
+        33.416,
+        -119.939,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3656,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1183,
+      "radius": 433.936,
+      "bounding_box": [
+        -430.0,
+        430.0,
+        -30.001,
+        30.001,
+        -120.0,
+        -20.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3657,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1184,
+      "radius": 434.185,
+      "bounding_box": [
+        -430.0,
+        430.0,
+        -32.31,
+        33.416,
+        -120.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3658,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1185,
+      "radius": 472.151,
+      "bounding_box": [
+        -468.306,
+        391.694,
+        -32.306,
+        33.419,
+        -120.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3659,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1186,
+      "radius": 431.045,
+      "bounding_box": [
+        -430.0,
+        430.0,
+        -30.004,
+        30.002,
+        -119.939,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3660,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1187,
+      "radius": 429.682,
+      "bounding_box": [
+        -428.603,
+        428.603,
+        -30.004,
+        30.002,
+        -119.939,
+        -5.033
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3661,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1188,
+      "radius": 430.387,
+      "bounding_box": [
+        -429.126,
+        429.126,
+        -32.941,
+        33.335,
+        -76.064,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3662,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1189,
+      "radius": 108.407,
+      "bounding_box": [
+        -20.0,
+        20.0,
+        -30.025,
+        30.025,
+        -104.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3663,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1190,
+      "radius": 77.286,
+      "bounding_box": [
+        -59.944,
+        60.056,
+        -30.02,
+        30.03,
+        -48.527,
+        -20.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3664,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1191,
+      "radius": 546.119,
+      "bounding_box": [
+        -545.762,
+        545.762,
+        -18.28,
+        18.28,
+        -15.438,
+        11.438
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 5,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3665,
+          "max_range": 1000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3666,
+          "max_range": 2500.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3667,
+          "max_range": 5000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3668,
+          "max_range": 10000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3669,
+          "max_range": 2500000.0
+        }
+      ]
+    },
+    {
+      "index": 1192,
+      "radius": 82.745,
+      "bounding_box": [
+        -1.328,
+        -0.0,
+        -82.721,
+        82.721,
+        -4.792,
+        0.165
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3670,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1193,
+      "radius": 546.119,
+      "bounding_box": [
+        -545.762,
+        545.762,
+        -18.28,
+        18.28,
+        -15.438,
+        11.438
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 5,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3671,
+          "max_range": 1000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3672,
+          "max_range": 2500.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3673,
+          "max_range": 5000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3674,
+          "max_range": 10000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3675,
+          "max_range": 2500000.0
+        }
+      ]
+    },
+    {
+      "index": 1194,
+      "radius": 252.58,
+      "bounding_box": [
+        -239.693,
+        239.693,
+        -79.65,
+        79.65,
+        -0.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 4,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3676,
+          "max_range": 2500.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3677,
+          "max_range": 10000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3678,
+          "max_range": 25000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3679,
+          "max_range": 10000000.0
+        }
+      ]
+    },
+    {
+      "index": 1195,
+      "radius": 143.081,
+      "bounding_box": [
+        -42.785,
+        42.785,
+        -42.449,
+        43.12,
+        -129.547,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3680,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1196,
+      "radius": 50.538,
+      "bounding_box": [
+        -50.378,
+        1.688,
+        -19.455,
+        29.909,
+        -11.613,
+        17.966
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 9,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3681,
+          "max_range": 600000.0
+        }
+      ],
+      "slot_positions": [
+        [
+          -17.86,
+          -15.839,
+          3.213
+        ],
+        [
+          -19.92,
+          -13.439,
+          3.227
+        ],
+        [
+          -18.5,
+          -10.559,
+          3.227
+        ],
+        [
+          -14.66,
+          -5.76,
+          3.227
+        ],
+        [
+          0.04,
+          0.046,
+          2.234
+        ],
+        [
+          -14.66,
+          5.759,
+          3.227
+        ],
+        [
+          -18.5,
+          10.559,
+          3.227
+        ],
+        [
+          -19.92,
+          13.439,
+          3.227
+        ],
+        [
+          -17.86,
+          15.838,
+          3.213
+        ]
+      ]
+    },
+    {
+      "index": 1197,
+      "radius": 50.538,
+      "bounding_box": [
+        -50.378,
+        1.688,
+        -19.455,
+        29.909,
+        -11.613,
+        17.966
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 9,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 4,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3682,
+          "max_range": 600000.0
+        }
+      ],
+      "slot_positions": [
+        [
+          -17.86,
+          -15.839,
+          3.213
+        ],
+        [
+          -19.92,
+          -13.439,
+          3.227
+        ],
+        [
+          -18.5,
+          -10.559,
+          3.227
+        ],
+        [
+          -14.66,
+          -5.76,
+          3.227
+        ],
+        [
+          0.04,
+          0.046,
+          2.234
+        ],
+        [
+          -14.66,
+          5.759,
+          3.227
+        ],
+        [
+          -18.5,
+          10.559,
+          3.227
+        ],
+        [
+          -19.92,
+          13.439,
+          3.227
+        ],
+        [
+          -17.86,
+          15.838,
+          3.213
+        ]
+      ]
+    },
+    {
+      "index": 1198,
+      "radius": 160.876,
+      "bounding_box": [
+        -87.5,
+        87.5,
+        -135.0,
+        135.0,
+        -0.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3683,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1199,
+      "radius": 172.191,
+      "bounding_box": [
+        -164.859,
+        168.675,
+        -34.622,
+        33.468,
+        -90.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3684,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1200,
+      "radius": 172.191,
+      "bounding_box": [
+        -167.863,
+        168.675,
+        -34.622,
+        33.468,
+        -100.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3685,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1201,
+      "radius": 181.758,
+      "bounding_box": [
+        -100.0,
+        100.0,
+        -130.0,
+        100.0,
+        -159.362,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 4,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3686,
+          "max_range": 3000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3687,
+          "max_range": 8000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3688,
+          "max_range": 20000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3689,
+          "max_range": 44000.0
+        }
+      ]
+    },
+    {
+      "index": 1202,
+      "radius": 1584.808,
+      "bounding_box": [
+        -1249.01,
+        1019.929,
+        -971.4,
+        975.495,
+        -408.51,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 5,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3690,
+          "max_range": 10000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3691,
+          "max_range": 40000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3692,
+          "max_range": 70000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3693,
+          "max_range": 90000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3694,
+          "max_range": 10000000.0
+        }
+      ]
+    },
+    {
+      "index": 1203,
+      "radius": 705.996,
+      "bounding_box": [
+        -452.344,
+        470.345,
+        -488.454,
+        526.504,
+        -219.759,
+        0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 5,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3695,
+          "max_range": 10000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3696,
+          "max_range": 40000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3697,
+          "max_range": 70000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3698,
+          "max_range": 90000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3699,
+          "max_range": 10000000.0
+        }
+      ]
+    },
+    {
+      "index": 1204,
+      "radius": 640.312,
+      "bounding_box": [
+        -500.0,
+        423.015,
+        -435.581,
+        340.199,
+        -218.832,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 5,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3700,
+          "max_range": 10000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3701,
+          "max_range": 40000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3702,
+          "max_range": 70000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3703,
+          "max_range": 90000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3704,
+          "max_range": 10000000.0
+        }
+      ]
+    },
+    {
+      "index": 1205,
+      "radius": 707.107,
+      "bounding_box": [
+        -500.0,
+        500.0,
+        -504.892,
+        503.139,
+        -267.522,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 6,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3705,
+          "max_range": 10000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3706,
+          "max_range": 45000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3707,
+          "max_range": 55000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3708,
+          "max_range": 65000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3709,
+          "max_range": 75000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3710,
+          "max_range": 10000000.0
+        }
+      ]
+    },
+    {
+      "index": 1206,
+      "radius": 1275.081,
+      "bounding_box": [
+        -852.23,
+        979.567,
+        -755.538,
+        816.26,
+        -357.859,
+        0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 5,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3711,
+          "max_range": 10000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3712,
+          "max_range": 40000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3713,
+          "max_range": 70000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3714,
+          "max_range": 90000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3715,
+          "max_range": 10000000.0
+        }
+      ]
+    },
+    {
+      "index": 1207,
+      "radius": 283.69,
+      "bounding_box": [
+        -154.255,
+        154.255,
+        -199.964,
+        159.964,
+        -274.391,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 5,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3716,
+          "max_range": 1000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3717,
+          "max_range": 5000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3718,
+          "max_range": 10000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3719,
+          "max_range": 25000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3720,
+          "max_range": 10000000.0
+        }
+      ]
+    },
+    {
+      "index": 1208,
+      "radius": 2828.427,
+      "bounding_box": [
+        -2000.0,
+        2000.0,
+        -2000.0,
+        2000.0,
+        -347.752,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 5,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3721,
+          "max_range": 10000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3722,
+          "max_range": 40000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3723,
+          "max_range": 80000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3724,
+          "max_range": 150000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3725,
+          "max_range": 10000000.0
+        }
+      ]
+    },
+    {
+      "index": 1209,
+      "radius": 326.377,
+      "bounding_box": [
+        -30.11,
+        54.284,
+        -54.21,
+        50.367,
+        -325.522,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 5,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3726,
+          "max_range": 2500.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3727,
+          "max_range": 9000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3728,
+          "max_range": 25000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3729,
+          "max_range": 50000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3730,
+          "max_range": 10000000.0
+        }
+      ]
+    },
+    {
+      "index": 1210,
+      "radius": 407.455,
+      "bounding_box": [
+        -158.639,
+        256.464,
+        -227.996,
+        170.525,
+        -394.584,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 5,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3731,
+          "max_range": 1000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3732,
+          "max_range": 5000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3733,
+          "max_range": 10000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3734,
+          "max_range": 25000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3735,
+          "max_range": 10000000.0
+        }
+      ]
+    },
+    {
+      "index": 1211,
+      "radius": 172.191,
+      "bounding_box": [
+        -167.863,
+        168.675,
+        -34.622,
+        33.468,
+        -26.979,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3736,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1212,
+      "radius": 172.191,
+      "bounding_box": [
+        -167.863,
+        168.675,
+        -34.622,
+        33.468,
+        -90.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3737,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1213,
+      "radius": 194.293,
+      "bounding_box": [
+        -167.863,
+        168.675,
+        -34.622,
+        33.468,
+        -90.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3738,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1214,
+      "radius": 111.606,
+      "bounding_box": [
+        -90.0,
+        90.0,
+        -66.0,
+        66.0,
+        -0.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3739,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1215,
+      "radius": 400.451,
+      "bounding_box": [
+        -231.201,
+        231.201,
+        -231.201,
+        231.201,
+        -231.201,
+        231.201
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3740,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1216,
+      "radius": 44.063,
+      "bounding_box": [
+        -26.015,
+        19.887,
+        -21.426,
+        21.589,
+        -28.261,
+        14.754
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 7,
+      "nslots": 3,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3741,
+          "max_range": 150.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3742,
+          "max_range": 300.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3743,
+          "max_range": 750.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3744,
+          "max_range": 1500.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3745,
+          "max_range": 3000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3746,
+          "max_range": 6000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 359,
+          "max_range": 50000.0
+        }
+      ],
+      "slot_positions": [
+        [
+          0.0,
+          -15.0,
+          -0.0
+        ],
+        [
+          -1.799,
+          3.884,
+          0.007
+        ],
+        [
+          0.051,
+          8.01,
+          0.409
+        ]
+      ]
+    },
+    {
+      "index": 1217,
+      "radius": 35.372,
+      "bounding_box": [
+        -20.96,
+        19.887,
+        -16.371,
+        17.008,
+        -23.206,
+        9.699
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 7,
+      "nslots": 2,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3747,
+          "max_range": 150.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3748,
+          "max_range": 300.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3749,
+          "max_range": 750.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 725,
+          "max_range": 1500.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 726,
+          "max_range": 3000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 727,
+          "max_range": 6000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 359,
+          "max_range": 50000.0
+        }
+      ],
+      "slot_positions": [
+        [
+          0.051,
+          6.562,
+          0.447
+        ],
+        [
+          -1.888,
+          4.332,
+          0.007
+        ]
+      ]
+    },
+    {
+      "index": 1218,
+      "radius": 91.584,
+      "bounding_box": [
+        -80.29,
+        74.198,
+        -78.585,
+        78.585,
+        -36.835,
+        11.544
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 2,
+      "nslots": 3,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3750,
+          "max_range": 30000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 12,
+          "max_range": 50000.0
+        }
+      ],
+      "slot_positions": [
+        [
+          -2.838,
+          -59.657,
+          -3.626
+        ],
+        [
+          -2.827,
+          59.654,
+          -3.543
+        ],
+        [
+          -42.924,
+          -8.912,
+          -4.649
+        ]
+      ]
+    },
+    {
+      "index": 1219,
+      "radius": 47.989,
+      "bounding_box": [
+        -27.707,
+        27.707,
+        -27.707,
+        27.707,
+        -27.707,
+        27.707
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 6,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3751,
+          "max_range": 100.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3752,
+          "max_range": 200.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3753,
+          "max_range": 500.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3754,
+          "max_range": 800.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3755,
+          "max_range": 1500.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3756,
+          "max_range": 10000.0
+        }
+      ]
+    },
+    {
+      "index": 1220,
+      "radius": 80.307,
+      "bounding_box": [
+        -44.654,
+        40.791,
+        -42.711,
+        42.735,
+        -51.273,
+        34.172
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 7,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3757,
+          "max_range": 150.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3758,
+          "max_range": 300.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3759,
+          "max_range": 750.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3760,
+          "max_range": 1500.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3761,
+          "max_range": 3000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3762,
+          "max_range": 6000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 359,
+          "max_range": 50000.0
+        }
+      ]
+    },
+    {
+      "index": 1221,
+      "radius": 301.715,
+      "bounding_box": [
+        -174.195,
+        174.195,
+        -174.195,
+        174.195,
+        -174.195,
+        174.195
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3763,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1222,
+      "radius": 36.102,
+      "bounding_box": [
+        -22.625,
+        13.556,
+        -17.748,
+        17.643,
+        -21.828,
+        13.562
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 7,
+      "nslots": 8,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3764,
+          "max_range": 150.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3765,
+          "max_range": 300.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3766,
+          "max_range": 750.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 709,
+          "max_range": 1500.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 710,
+          "max_range": 3000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 407,
+          "max_range": 6000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 359,
+          "max_range": 50000.0
+        }
+      ],
+      "slot_positions": [
+        [
+          -1.32,
+          4.587,
+          3.37
+        ],
+        [
+          -0.01,
+          4.587,
+          3.37
+        ],
+        [
+          1.314,
+          4.587,
+          3.37
+        ],
+        [
+          1.31,
+          4.963,
+          2.416
+        ],
+        [
+          -1.324,
+          4.963,
+          2.416
+        ],
+        [
+          -0.015,
+          4.963,
+          2.416
+        ],
+        [
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0
+        ]
+      ]
+    },
+    {
+      "index": 1223,
+      "radius": 49.886,
+      "bounding_box": [
+        -10.476,
+        49.318,
+        -4.897,
+        4.897,
+        -4.098,
+        5.696
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 1,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 3,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3767,
+          "max_range": 600000.0
+        }
+      ],
+      "slot_positions": [
+        [
+          -5.579,
+          0.0,
+          0.799
+        ],
+        [
+          -5.579,
+          0.0,
+          0.519
+        ],
+        [
+          -5.579,
+          0.0,
+          1.079
+        ],
+        [
+          -5.579,
+          0.28,
+          0.799
+        ]
+      ]
+    },
+    {
+      "index": 1224,
+      "radius": 1.782,
+      "bounding_box": [
+        -1.753,
+        1.737,
+        -0.439,
+        0.337,
+        -1.145,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3768,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1225,
+      "radius": 4.043,
+      "bounding_box": [
+        -4.001,
+        2.466,
+        -0.516,
+        0.509,
+        -1.899,
+        -0.045
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3769,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1226,
+      "radius": 66.051,
+      "bounding_box": [
+        -37.788,
+        36.508,
+        -37.071,
+        37.226,
+        -39.358,
+        34.939
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 7,
+      "nslots": 1,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3770,
+          "max_range": 150.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3771,
+          "max_range": 300.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3772,
+          "max_range": 750.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3773,
+          "max_range": 1500.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3774,
+          "max_range": 3000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3775,
+          "max_range": 6000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 359,
+          "max_range": 50000.0
+        }
+      ],
+      "slot_positions": [
+        [
+          -0.56,
+          18.829,
+          6.981
+        ]
+      ]
+    },
+    {
+      "index": 1227,
+      "radius": 6.194,
+      "bounding_box": [
+        -6.187,
+        4.986,
+        -0.128,
+        0.128,
+        -0.0,
+        0.3
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 6,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3776,
+          "max_range": 70.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3777,
+          "max_range": 120.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3778,
+          "max_range": 300.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3779,
+          "max_range": 1000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3780,
+          "max_range": 1500.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3781,
+          "max_range": 50000.0
+        }
+      ]
+    },
+    {
+      "index": 1228,
+      "radius": 1332.623,
+      "bounding_box": [
+        -1273.042,
+        1273.704,
+        -190.044,
+        395.98,
+        -0.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 4,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3782,
+          "max_range": 12000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3378,
+          "max_range": 64000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3379,
+          "max_range": 120000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3380,
+          "max_range": 10000000.0
+        }
+      ]
+    },
+    {
+      "index": 1229,
+      "radius": 1838.247,
+      "bounding_box": [
+        -1834.12,
+        1774.096,
+        -190.134,
+        190.108,
+        -0.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 4,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3783,
+          "max_range": 12000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 2111,
+          "max_range": 64000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 2112,
+          "max_range": 120000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 2113,
+          "max_range": 10000000.0
+        }
+      ]
+    },
+    {
+      "index": 1230,
+      "radius": 6302.497,
+      "bounding_box": [
+        -2169.389,
+        1239.074,
+        -4965.521,
+        6278.999,
+        -0.0,
+        0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 7,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3784,
+          "max_range": 8000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3785,
+          "max_range": 10000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3786,
+          "max_range": 15000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3787,
+          "max_range": 20000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3788,
+          "max_range": 25000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3789,
+          "max_range": 30000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3790,
+          "max_range": 10000000.0
+        }
+      ]
+    },
+    {
+      "index": 1231,
+      "radius": 4504.177,
+      "bounding_box": [
+        -4497.103,
+        4387.316,
+        -1542.232,
+        318.857,
+        -0.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 7,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3791,
+          "max_range": 8000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3792,
+          "max_range": 10000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3793,
+          "max_range": 15000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3794,
+          "max_range": 20000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3795,
+          "max_range": 25000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3796,
+          "max_range": 30000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3797,
+          "max_range": 10000000.0
+        }
+      ]
+    },
+    {
+      "index": 1232,
+      "radius": 5109.739,
+      "bounding_box": [
+        -4137.894,
+        4060.203,
+        -278.795,
+        3317.375,
+        -0.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 7,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3798,
+          "max_range": 8000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3799,
+          "max_range": 10000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3800,
+          "max_range": 15000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3801,
+          "max_range": 20000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3802,
+          "max_range": 25000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3803,
+          "max_range": 30000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3804,
+          "max_range": 10000000.0
+        }
+      ]
+    },
+    {
+      "index": 1233,
+      "radius": 23.209,
+      "bounding_box": [
+        2.332,
+        23.172,
+        -4.657,
+        4.657,
+        -4.24,
+        3.06
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 2,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3805,
+          "max_range": 600000.0
+        }
+      ],
+      "slot_positions": [
+        [
+          -0.56,
+          18.829,
+          6.981
+        ],
+        [
+          13.341,
+          0.059,
+          -0.29
+        ]
+      ]
+    },
+    {
+      "index": 1234,
+      "radius": 21.737,
+      "bounding_box": [
+        -19.773,
+        -11.611,
+        -9.828,
+        -3.794,
+        -0.237,
+        1.238
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 6,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3806,
+          "max_range": 600000.0
+        }
+      ],
+      "slot_positions": [
+        [
+          -0.56,
+          18.829,
+          6.981
+        ],
+        [
+          13.341,
+          0.059,
+          -0.29
+        ],
+        [
+          1.314,
+          4.587,
+          3.37
+        ],
+        [
+          1.31,
+          4.963,
+          2.416
+        ],
+        [
+          -1.324,
+          4.963,
+          2.416
+        ],
+        [
+          -16.887,
+          -6.813,
+          0.576
+        ]
+      ]
+    },
+    {
+      "index": 1235,
+      "radius": 18.14,
+      "bounding_box": [
+        -8.0,
+        5.407,
+        -16.291,
+        -3.823,
+        -0.586,
+        0.07
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 5,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3807,
+          "max_range": 600000.0
+        }
+      ],
+      "slot_positions": [
+        [
+          -0.56,
+          18.829,
+          6.981
+        ],
+        [
+          13.341,
+          0.059,
+          -0.29
+        ],
+        [
+          1.314,
+          4.587,
+          3.37
+        ],
+        [
+          1.31,
+          4.963,
+          2.416
+        ],
+        [
+          -3.523,
+          -8.316,
+          -0.005
+        ]
+      ]
+    },
+    {
+      "index": 1236,
+      "radius": 24.049,
+      "bounding_box": [
+        -21.174,
+        7.331,
+        -4.657,
+        4.657,
+        -11.401,
+        4.237
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 3,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 6,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3808,
+          "max_range": 600000.0
+        }
+      ],
+      "slot_positions": [
+        [
+          -0.56,
+          18.829,
+          6.981
+        ],
+        [
+          13.341,
+          0.059,
+          -0.29
+        ],
+        [
+          -6.464,
+          -0.013,
+          0.247
+        ]
+      ]
+    },
+    {
+      "index": 1237,
+      "radius": 29.232,
+      "bounding_box": [
+        22.146,
+        29.225,
+        -1.472,
+        1.449,
+        -1.617,
+        1.144
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 1,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3809,
+          "max_range": 600000.0
+        }
+      ],
+      "slot_positions": [
+        [
+          24.835,
+          -0.012,
+          0.14
+        ]
+      ]
+    },
+    {
+      "index": 1238,
+      "radius": 21.737,
+      "bounding_box": [
+        -19.773,
+        -11.611,
+        3.794,
+        9.828,
+        -0.237,
+        1.238
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 7,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3810,
+          "max_range": 600000.0
+        }
+      ],
+      "slot_positions": [
+        [
+          24.835,
+          -0.012,
+          0.14
+        ],
+        [
+          13.341,
+          0.059,
+          -0.29
+        ],
+        [
+          -6.464,
+          -0.013,
+          0.247
+        ],
+        [
+          1.31,
+          4.963,
+          2.416
+        ],
+        [
+          -3.523,
+          -8.316,
+          -0.005
+        ],
+        [
+          -16.887,
+          -6.813,
+          0.576
+        ],
+        [
+          -16.887,
+          6.813,
+          0.576
+        ]
+      ]
+    },
+    {
+      "index": 1239,
+      "radius": 18.14,
+      "bounding_box": [
+        -8.0,
+        5.407,
+        3.819,
+        16.291,
+        -0.586,
+        0.07
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 4,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3811,
+          "max_range": 600000.0
+        }
+      ],
+      "slot_positions": [
+        [
+          24.835,
+          -0.012,
+          0.14
+        ],
+        [
+          13.341,
+          0.059,
+          -0.29
+        ],
+        [
+          -6.464,
+          -0.013,
+          0.247
+        ],
+        [
+          -3.523,
+          8.316,
+          -0.005
+        ]
+      ]
+    },
+    {
+      "index": 1240,
+      "radius": 11210.336,
+      "bounding_box": [
+        -456.369,
+        7476.903,
+        -8977.714,
+        -209.356,
+        -0.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3812,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1241,
+      "radius": 6825.665,
+      "bounding_box": [
+        -3671.991,
+        6763.393,
+        -1010.832,
+        3325.212,
+        -0.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 7,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3813,
+          "max_range": 8000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3814,
+          "max_range": 10000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3815,
+          "max_range": 15000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3816,
+          "max_range": 20000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3817,
+          "max_range": 25000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3818,
+          "max_range": 30000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3819,
+          "max_range": 10000000.0
+        }
+      ]
+    },
+    {
+      "index": 1242,
+      "radius": 5742.351,
+      "bounding_box": [
+        -5413.371,
+        5602.19,
+        -2093.816,
+        2569.995,
+        -0.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 7,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3820,
+          "max_range": 8000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3821,
+          "max_range": 10000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3822,
+          "max_range": 15000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3823,
+          "max_range": 20000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3824,
+          "max_range": 25000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3825,
+          "max_range": 30000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3826,
+          "max_range": 10000000.0
+        }
+      ]
+    },
+    {
+      "index": 1243,
+      "radius": 8238.515,
+      "bounding_box": [
+        -7221.333,
+        8193.98,
+        -1000.537,
+        3298.535,
+        -0.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 7,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3827,
+          "max_range": 8000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3828,
+          "max_range": 10000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3829,
+          "max_range": 15000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3830,
+          "max_range": 20000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3831,
+          "max_range": 25000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3832,
+          "max_range": 30000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3833,
+          "max_range": 10000000.0
+        }
+      ]
+    },
+    {
+      "index": 1244,
+      "radius": 8099.671,
+      "bounding_box": [
+        -8088.756,
+        3683.105,
+        -1098.789,
+        4209.026,
+        -0.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 7,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3834,
+          "max_range": 8000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3835,
+          "max_range": 10000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3836,
+          "max_range": 15000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3837,
+          "max_range": 20000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3838,
+          "max_range": 25000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3839,
+          "max_range": 30000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3840,
+          "max_range": 10000000.0
+        }
+      ]
+    },
+    {
+      "index": 1245,
+      "radius": 334.828,
+      "bounding_box": [
+        -204.227,
+        333.281,
+        -35.054,
+        35.051,
+        -94.184,
+        0.001
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3841,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1246,
+      "radius": 1.0,
+      "bounding_box": [
+        -0.998,
+        0.806,
+        -0.506,
+        0.506,
+        -0.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 3,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3842,
+          "max_range": 750.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3843,
+          "max_range": 1000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 2226,
+          "max_range": 30000.0
+        }
+      ]
+    },
+    {
+      "index": 1247,
+      "radius": 1.011,
+      "bounding_box": [
+        -0.838,
+        1.011,
+        -0.919,
+        0.917,
+        -0.0,
+        0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 3,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3844,
+          "max_range": 750.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3845,
+          "max_range": 1000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 2226,
+          "max_range": 30000.0
+        }
+      ]
+    },
+    {
+      "index": 1248,
+      "radius": 0.998,
+      "bounding_box": [
+        -0.729,
+        0.998,
+        -0.579,
+        0.58,
+        -0.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 3,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3846,
+          "max_range": 750.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3847,
+          "max_range": 1000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 2226,
+          "max_range": 30000.0
+        }
+      ]
+    },
+    {
+      "index": 1249,
+      "radius": 0.75,
+      "bounding_box": [
+        -0.712,
+        0.732,
+        -0.485,
+        0.485,
+        -0.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 3,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 2230,
+          "max_range": 750.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 2231,
+          "max_range": 1000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 2226,
+          "max_range": 30000.0
+        }
+      ]
+    },
+    {
+      "index": 1250,
+      "radius": 10.222,
+      "bounding_box": [
+        -8.727,
+        9.02,
+        0.0,
+        0.0,
+        -4.81,
+        0.025
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3848,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1251,
+      "radius": 10.222,
+      "bounding_box": [
+        -8.727,
+        9.02,
+        0.0,
+        0.0,
+        -4.81,
+        0.025
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3849,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1252,
+      "radius": 10.222,
+      "bounding_box": [
+        -8.727,
+        9.02,
+        0.0,
+        0.0,
+        -4.81,
+        0.025
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3850,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1253,
+      "radius": 10.222,
+      "bounding_box": [
+        -8.727,
+        9.02,
+        0.0,
+        0.0,
+        -4.81,
+        0.025
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3851,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1254,
+      "radius": 10.222,
+      "bounding_box": [
+        -8.727,
+        9.02,
+        0.0,
+        0.0,
+        -4.81,
+        0.025
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3852,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1255,
+      "radius": 10.222,
+      "bounding_box": [
+        -8.727,
+        9.02,
+        0.0,
+        0.0,
+        -4.81,
+        0.025
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3853,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1256,
+      "radius": 10.222,
+      "bounding_box": [
+        -8.727,
+        9.02,
+        0.0,
+        0.0,
+        -4.81,
+        0.025
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3854,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1257,
+      "radius": 10.222,
+      "bounding_box": [
+        -8.727,
+        9.02,
+        0.0,
+        0.0,
+        -4.81,
+        0.025
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3855,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1258,
+      "radius": 10.222,
+      "bounding_box": [
+        -8.727,
+        9.02,
+        0.0,
+        0.0,
+        -4.81,
+        0.025
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3856,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1259,
+      "radius": 10.222,
+      "bounding_box": [
+        -8.727,
+        9.02,
+        0.0,
+        0.0,
+        -4.81,
+        0.025
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3857,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1260,
+      "radius": 10.222,
+      "bounding_box": [
+        -8.727,
+        9.02,
+        0.0,
+        0.0,
+        -4.81,
+        0.025
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3858,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1261,
+      "radius": 10.222,
+      "bounding_box": [
+        -8.727,
+        9.02,
+        0.0,
+        0.0,
+        -4.81,
+        0.025
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3859,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1262,
+      "radius": 10.222,
+      "bounding_box": [
+        -8.727,
+        9.02,
+        0.0,
+        0.0,
+        -4.81,
+        0.025
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3860,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1263,
+      "radius": 10.222,
+      "bounding_box": [
+        -8.727,
+        9.02,
+        0.0,
+        0.0,
+        -4.81,
+        0.025
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3861,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1264,
+      "radius": 10.222,
+      "bounding_box": [
+        -8.727,
+        9.02,
+        0.0,
+        0.0,
+        -4.81,
+        0.025
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3862,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1265,
+      "radius": 10.222,
+      "bounding_box": [
+        -8.727,
+        9.02,
+        0.0,
+        0.0,
+        -4.81,
+        0.025
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3863,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1266,
+      "radius": 10.222,
+      "bounding_box": [
+        -8.727,
+        9.02,
+        0.0,
+        0.0,
+        -4.81,
+        0.025
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3864,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1267,
+      "radius": 10.222,
+      "bounding_box": [
+        -8.727,
+        9.02,
+        0.0,
+        0.0,
+        -4.81,
+        0.025
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3865,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1268,
+      "radius": 10.222,
+      "bounding_box": [
+        -8.727,
+        9.02,
+        0.0,
+        0.0,
+        -4.81,
+        0.025
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3866,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1269,
+      "radius": 10.222,
+      "bounding_box": [
+        -8.727,
+        9.02,
+        0.0,
+        0.0,
+        -4.81,
+        0.025
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3867,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1270,
+      "radius": 10.222,
+      "bounding_box": [
+        -8.727,
+        9.02,
+        0.0,
+        0.0,
+        -4.81,
+        0.025
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3868,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1271,
+      "radius": 10.222,
+      "bounding_box": [
+        -8.727,
+        9.02,
+        0.0,
+        0.0,
+        -4.81,
+        0.025
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3869,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1272,
+      "radius": 10.222,
+      "bounding_box": [
+        -8.727,
+        9.02,
+        0.0,
+        0.0,
+        -4.81,
+        0.025
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3870,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1273,
+      "radius": 10.222,
+      "bounding_box": [
+        -8.727,
+        9.02,
+        0.0,
+        0.0,
+        -4.81,
+        0.025
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3871,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1274,
+      "radius": 10.222,
+      "bounding_box": [
+        -8.727,
+        9.02,
+        0.0,
+        0.0,
+        -4.81,
+        0.025
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3872,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1275,
+      "radius": 10.222,
+      "bounding_box": [
+        -8.727,
+        9.02,
+        0.0,
+        0.0,
+        -4.81,
+        0.025
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3873,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1276,
+      "radius": 10.222,
+      "bounding_box": [
+        -8.727,
+        9.02,
+        0.0,
+        0.0,
+        -4.81,
+        0.025
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3874,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1277,
+      "radius": 10.222,
+      "bounding_box": [
+        -8.727,
+        9.02,
+        0.0,
+        0.0,
+        -4.81,
+        0.025
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3875,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1278,
+      "radius": 10.222,
+      "bounding_box": [
+        -8.727,
+        9.02,
+        0.0,
+        0.0,
+        -4.81,
+        0.025
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3876,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1279,
+      "radius": 10.222,
+      "bounding_box": [
+        -8.727,
+        9.02,
+        0.0,
+        0.0,
+        -4.81,
+        0.025
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3877,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1280,
+      "radius": 10.222,
+      "bounding_box": [
+        -8.727,
+        9.02,
+        0.0,
+        0.0,
+        -4.81,
+        0.025
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3878,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1281,
+      "radius": 10.222,
+      "bounding_box": [
+        -8.727,
+        9.02,
+        0.0,
+        0.0,
+        -4.81,
+        0.025
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3879,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1282,
+      "radius": 10.222,
+      "bounding_box": [
+        -8.727,
+        9.02,
+        0.0,
+        0.0,
+        -4.81,
+        0.025
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3880,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1283,
+      "radius": 10.222,
+      "bounding_box": [
+        -8.727,
+        9.02,
+        0.0,
+        0.0,
+        -4.81,
+        0.025
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3881,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1284,
+      "radius": 10.222,
+      "bounding_box": [
+        -8.727,
+        9.02,
+        0.0,
+        0.0,
+        -4.81,
+        0.025
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3882,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1285,
+      "radius": 10.222,
+      "bounding_box": [
+        -8.727,
+        9.02,
+        0.0,
+        0.0,
+        -4.81,
+        0.025
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3883,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1286,
+      "radius": 1612.452,
+      "bounding_box": [
+        -450.0,
+        150.0,
+        -50.0,
+        1600.0,
+        -0.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 5,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3884,
+          "max_range": 1000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3885,
+          "max_range": 4000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3886,
+          "max_range": 9000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3887,
+          "max_range": 20000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3888,
+          "max_range": 80000.0
+        }
+      ]
+    },
+    {
+      "index": 1287,
+      "radius": 1930.026,
+      "bounding_box": [
+        -650.0,
+        1250.0,
+        -200.0,
+        1600.0,
+        -0.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 5,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3889,
+          "max_range": 1000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3890,
+          "max_range": 4000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3891,
+          "max_range": 9000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3892,
+          "max_range": 20000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3893,
+          "max_range": 80000.0
+        }
+      ]
+    },
+    {
+      "index": 1288,
+      "radius": 29.232,
+      "bounding_box": [
+        -21.174,
+        29.225,
+        -16.291,
+        16.291,
+        -11.401,
+        4.237
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 7,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 6,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3894,
+          "max_range": 600000.0
+        }
+      ],
+      "slot_positions": [
+        [
+          24.835,
+          -0.012,
+          0.14
+        ],
+        [
+          13.341,
+          0.059,
+          -0.29
+        ],
+        [
+          -6.464,
+          -0.013,
+          0.247
+        ],
+        [
+          -3.523,
+          8.316,
+          -0.005
+        ],
+        [
+          -3.523,
+          -8.316,
+          -0.005
+        ],
+        [
+          -16.887,
+          -6.813,
+          0.576
+        ],
+        [
+          -16.887,
+          6.813,
+          0.576
+        ]
+      ]
+    },
+    {
+      "index": 1289,
+      "radius": 1470.544,
+      "bounding_box": [
+        -450.0,
+        700.0,
+        -1400.0,
+        50.0,
+        -0.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 5,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3895,
+          "max_range": 1000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3896,
+          "max_range": 4000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3897,
+          "max_range": 11000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3898,
+          "max_range": 20000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3899,
+          "max_range": 80000.0
+        }
+      ]
+    },
+    {
+      "index": 1290,
+      "radius": 1835.756,
+      "bounding_box": [
+        -1400.0,
+        1600.0,
+        -900.0,
+        400.0,
+        -0.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 5,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3900,
+          "max_range": 1500.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3901,
+          "max_range": 4000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3902,
+          "max_range": 12000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3903,
+          "max_range": 25000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3904,
+          "max_range": 80000.0
+        }
+      ]
+    },
+    {
+      "index": 1291,
+      "radius": 1773.415,
+      "bounding_box": [
+        -1350.0,
+        1250.0,
+        350.0,
+        1150.0,
+        -0.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 5,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3905,
+          "max_range": 1000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3906,
+          "max_range": 4000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3907,
+          "max_range": 9000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3908,
+          "max_range": 20000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3909,
+          "max_range": 80000.0
+        }
+      ]
+    },
+    {
+      "index": 1292,
+      "radius": 1303.84,
+      "bounding_box": [
+        -900.0,
+        150.0,
+        -1300.0,
+        700.0,
+        -0.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 5,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3910,
+          "max_range": 1000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3911,
+          "max_range": 4000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3912,
+          "max_range": 9000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3913,
+          "max_range": 20000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3914,
+          "max_range": 80000.0
+        }
+      ]
+    },
+    {
+      "index": 1293,
+      "radius": 1872.164,
+      "bounding_box": [
+        -1050.0,
+        700.0,
+        0.0,
+        1600.0,
+        -0.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 5,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3915,
+          "max_range": 1000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3916,
+          "max_range": 4000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3917,
+          "max_range": 12000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3918,
+          "max_range": 20000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3919,
+          "max_range": 80000.0
+        }
+      ]
+    },
+    {
+      "index": 1294,
+      "radius": 1843.909,
+      "bounding_box": [
+        -1200.0,
+        1350.0,
+        -1400.0,
+        1000.0,
+        -0.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 5,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3920,
+          "max_range": 1000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3921,
+          "max_range": 4000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3922,
+          "max_range": 9000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3923,
+          "max_range": 20000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3924,
+          "max_range": 80000.0
+        }
+      ]
+    },
+    {
+      "index": 1295,
+      "radius": 2047.486,
+      "bounding_box": [
+        -1290.0,
+        -690.0,
+        740.0,
+        1590.0,
+        -0.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 5,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3925,
+          "max_range": 1000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3926,
+          "max_range": 4000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3927,
+          "max_range": 9000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3928,
+          "max_range": 20000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3929,
+          "max_range": 80000.0
+        }
+      ]
+    },
+    {
+      "index": 1296,
+      "radius": 1749.286,
+      "bounding_box": [
+        -1500.0,
+        -400.0,
+        -900.0,
+        150.0,
+        -0.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 5,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3930,
+          "max_range": 1000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3931,
+          "max_range": 4000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3932,
+          "max_range": 9000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3933,
+          "max_range": 20000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3934,
+          "max_range": 80000.0
+        }
+      ]
+    },
+    {
+      "index": 1297,
+      "radius": 1564.169,
+      "bounding_box": [
+        -1265.0,
+        835.0,
+        470.0,
+        970.0,
+        -0.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 5,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3935,
+          "max_range": 1000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3936,
+          "max_range": 4000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3937,
+          "max_range": 9000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3938,
+          "max_range": 20000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3939,
+          "max_range": 80000.0
+        }
+      ]
+    },
+    {
+      "index": 1298,
+      "radius": 1835.756,
+      "bounding_box": [
+        82.222,
+        1600.0,
+        -900.0,
+        306.667,
+        -0.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 5,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3940,
+          "max_range": 1000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3941,
+          "max_range": 4000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3942,
+          "max_range": 11000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3943,
+          "max_range": 21000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3944,
+          "max_range": 80000.0
+        }
+      ]
+    },
+    {
+      "index": 1299,
+      "radius": 447.214,
+      "bounding_box": [
+        150.0,
+        250.0,
+        -400.0,
+        200.0,
+        -0.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 5,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3945,
+          "max_range": 1000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3946,
+          "max_range": 4000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3947,
+          "max_range": 10000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3948,
+          "max_range": 20000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3949,
+          "max_range": 80000.0
+        }
+      ]
+    },
+    {
+      "index": 1300,
+      "radius": 0.974,
+      "bounding_box": [
+        -0.939,
+        0.871,
+        -0.77,
+        0.77,
+        -0.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 3,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3950,
+          "max_range": 750.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3951,
+          "max_range": 1000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3952,
+          "max_range": 30000.0
+        }
+      ]
+    },
+    {
+      "index": 1301,
+      "radius": 4.896,
+      "bounding_box": [
+        -2.502,
+        4.573,
+        -0.854,
+        0.755,
+        -0.0,
+        2.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 2,
+      "nslots": 2,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3953,
+          "max_range": 200.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3954,
+          "max_range": 1000.0
+        }
+      ],
+      "slot_positions": [
+        [
+          1.0,
+          -0.8,
+          1.646
+        ],
+        [
+          1.0,
+          0.8,
+          1.646
+        ]
+      ]
+    },
+    {
+      "index": 1302,
+      "radius": 3.613,
+      "bounding_box": [
+        -1.847,
+        3.375,
+        -0.63,
+        0.558,
+        -0.0,
+        1.476
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 2,
+      "nslots": 2,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3955,
+          "max_range": 200.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3956,
+          "max_range": 1000.0
+        }
+      ],
+      "slot_positions": [
+        [
+          0.738,
+          -0.59,
+          1.215
+        ],
+        [
+          0.738,
+          0.59,
+          1.215
+        ]
+      ]
+    },
+    {
+      "index": 1303,
+      "radius": 3.622,
+      "bounding_box": [
+        -1.849,
+        3.382,
+        -0.63,
+        0.559,
+        -0.0,
+        2.071
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 2,
+      "nslots": 3,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3957,
+          "max_range": 200.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3958,
+          "max_range": 1000.0
+        }
+      ],
+      "slot_positions": [
+        [
+          0.74,
+          -0.0,
+          1.997
+        ],
+        [
+          0.74,
+          -0.592,
+          1.218
+        ],
+        [
+          0.74,
+          0.592,
+          1.218
+        ]
+      ]
+    },
+    {
+      "index": 1304,
+      "radius": 3.229,
+      "bounding_box": [
+        -2.57,
+        3.033,
+        -0.111,
+        0.111,
+        -0.0,
+        1.114
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 2,
+      "nslots": 1,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3959,
+          "max_range": 200.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3960,
+          "max_range": 1000.0
+        }
+      ],
+      "slot_positions": [
+        [
+          0.5,
+          -0.0,
+          1.11
+        ]
+      ]
+    },
+    {
+      "index": 1305,
+      "radius": 4.896,
+      "bounding_box": [
+        -2.5,
+        4.573,
+        -0.755,
+        0.755,
+        -0.0,
+        2.8
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 3,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3961,
+          "max_range": 600000.0
+        }
+      ],
+      "slot_positions": [
+        [
+          1.0,
+          -0.0,
+          2.7
+        ],
+        [
+          1.0,
+          0.8,
+          1.646
+        ],
+        [
+          1.0,
+          -0.8,
+          1.646
+        ]
+      ]
+    },
+    {
+      "index": 1306,
+      "radius": 3.83,
+      "bounding_box": [
+        -3.683,
+        3.746,
+        -0.827,
+        0.827,
+        -0.05,
+        2.376
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 6,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3962,
+          "max_range": 70.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3963,
+          "max_range": 120.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3964,
+          "max_range": 300.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 2913,
+          "max_range": 1000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 2914,
+          "max_range": 1500.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 2915,
+          "max_range": 50000.0
+        }
+      ]
+    },
+    {
+      "index": 1307,
+      "radius": 3.796,
+      "bounding_box": [
+        -2.506,
+        3.549,
+        -1.876,
+        1.876,
+        -0.005,
+        1.508
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3965,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1308,
+      "radius": 3.771,
+      "bounding_box": [
+        -2.78,
+        3.275,
+        -1.876,
+        1.876,
+        -0.005,
+        2.627
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3966,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1309,
+      "radius": 88.378,
+      "bounding_box": [
+        -11.251,
+        11.251,
+        -11.945,
+        12.596,
+        -86.762,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3967,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1310,
+      "radius": 11.228,
+      "bounding_box": [
+        -9.285,
+        7.882,
+        -5.563,
+        6.312,
+        -0.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3968,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1311,
+      "radius": 5.816,
+      "bounding_box": [
+        -4.272,
+        5.813,
+        -3.201,
+        3.991,
+        -0.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3969,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1312,
+      "radius": 42.64,
+      "bounding_box": [
+        -23.304,
+        23.342,
+        -35.492,
+        35.515,
+        -9.091,
+        0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 4,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 2,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3970,
+          "max_range": 640.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3971,
+          "max_range": 6700.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3972,
+          "max_range": 12000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3973,
+          "max_range": 32640.0
+        }
+      ]
+    },
+    {
+      "index": 1313,
+      "radius": 150.001,
+      "bounding_box": [
+        -5.417,
+        4.583,
+        -5.513,
+        4.487,
+        -150.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 5,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3974,
+          "max_range": 500.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3975,
+          "max_range": 1500.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3976,
+          "max_range": 3000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3977,
+          "max_range": 25000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3978,
+          "max_range": 100000.0
+        }
+      ]
+    },
+    {
+      "index": 1314,
+      "radius": 0.842,
+      "bounding_box": [
+        -0.609,
+        0.842,
+        -0.482,
+        0.489,
+        -0.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 3,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3979,
+          "max_range": 750.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3980,
+          "max_range": 1000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 2226,
+          "max_range": 30000.0
+        }
+      ]
+    },
+    {
+      "index": 1315,
+      "radius": 0.787,
+      "bounding_box": [
+        -0.773,
+        0.787,
+        -0.482,
+        0.482,
+        -0.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 3,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3981,
+          "max_range": 750.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3982,
+          "max_range": 1000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 2226,
+          "max_range": 30000.0
+        }
+      ]
+    },
+    {
+      "index": 1316,
+      "radius": 0.997,
+      "bounding_box": [
+        -0.525,
+        0.997,
+        -0.542,
+        0.542,
+        -0.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 3,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3983,
+          "max_range": 750.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3984,
+          "max_range": 1000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 2226,
+          "max_range": 30000.0
+        }
+      ]
+    },
+    {
+      "index": 1317,
+      "radius": 1.185,
+      "bounding_box": [
+        -0.769,
+        1.185,
+        -0.618,
+        0.618,
+        -0.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 3,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3985,
+          "max_range": 750.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3986,
+          "max_range": 1000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 2226,
+          "max_range": 30000.0
+        }
+      ]
+    },
+    {
+      "index": 1318,
+      "radius": 0.917,
+      "bounding_box": [
+        -0.917,
+        0.725,
+        -0.416,
+        0.416,
+        -0.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 3,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3987,
+          "max_range": 750.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3988,
+          "max_range": 1000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 2226,
+          "max_range": 30000.0
+        }
+      ]
+    },
+    {
+      "index": 1319,
+      "radius": 0.903,
+      "bounding_box": [
+        -0.892,
+        0.892,
+        -0.842,
+        0.842,
+        -0.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3989,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1320,
+      "radius": 0.34,
+      "bounding_box": [
+        -0.312,
+        0.34,
+        -0.025,
+        0.011,
+        -0.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 3,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3990,
+          "max_range": 750.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3991,
+          "max_range": 10000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3992,
+          "max_range": 30000.0
+        }
+      ]
+    },
+    {
+      "index": 1321,
+      "radius": 172.191,
+      "bounding_box": [
+        -167.863,
+        168.675,
+        -41.208,
+        39.542,
+        -26.979,
+        12.329
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3993,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1322,
+      "radius": 172.191,
+      "bounding_box": [
+        -167.863,
+        168.675,
+        -41.208,
+        39.542,
+        -74.271,
+        12.329
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3994,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1323,
+      "radius": 194.293,
+      "bounding_box": [
+        -167.863,
+        168.675,
+        -34.622,
+        44.428,
+        -90.0,
+        12.329
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3995,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1324,
+      "radius": 373.496,
+      "bounding_box": [
+        -41.88,
+        141.703,
+        -345.571,
+        17.093,
+        -20.059,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 4,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 3996,
+          "max_range": 2400.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3997,
+          "max_range": 6400.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3998,
+          "max_range": 12000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 3999,
+          "max_range": 100000.0
+        }
+      ]
+    },
+    {
+      "index": 1325,
+      "radius": 0.0,
+      "bounding_box": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 0,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 0,
+      "ndynamic_coords": 0
+    },
+    {
+      "index": 1326,
+      "radius": 209.244,
+      "bounding_box": [
+        -87.5,
+        87.5,
+        -190.071,
+        190.071,
+        -0.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 46,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 4000,
+          "max_range": 64000.0
+        }
+      ]
+    },
+    {
+      "index": 1327,
+      "radius": 209.244,
+      "bounding_box": [
+        -87.5,
+        87.5,
+        -190.071,
+        190.071,
+        -0.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 46,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 4001,
+          "max_range": 64000.0
+        }
+      ]
+    },
+    {
+      "index": 1328,
+      "radius": 30.794,
+      "bounding_box": [
+        -30.226,
+        29.693,
+        -27.241,
+        27.241,
+        -8.675,
+        6.782
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 7,
+      "nslots": 5,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 4002,
+          "max_range": 250.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 4003,
+          "max_range": 750.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 4004,
+          "max_range": 1500.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 4005,
+          "max_range": 3000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 4006,
+          "max_range": 6000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 255,
+          "max_range": 10000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 12,
+          "max_range": 36000.0
+        }
+      ],
+      "slot_positions": [
+        [
+          2.157,
+          -12.735,
+          -1.346
+        ],
+        [
+          4.198,
+          -8.735,
+          -1.346
+        ],
+        [
+          2.157,
+          -0.068,
+          1.857
+        ],
+        [
+          4.198,
+          8.735,
+          -1.346
+        ],
+        [
+          2.157,
+          12.735,
+          -1.346
+        ]
+      ]
+    },
+    {
+      "index": 1329,
+      "radius": 127.653,
+      "bounding_box": [
+        -88.031,
+        85.247,
+        -84.326,
+        84.186,
+        -63.326,
+        68.182
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 7,
+      "nslots": 6,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 4007,
+          "max_range": 500.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 4008,
+          "max_range": 1000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 4009,
+          "max_range": 3000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 4010,
+          "max_range": 6000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 4011,
+          "max_range": 20000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 255,
+          "max_range": 45000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 12,
+          "max_range": 65000.0
+        }
+      ],
+      "slot_positions": [
+        [
+          44.178,
+          -2.78,
+          2.583
+        ],
+        [
+          44.178,
+          2.556,
+          2.583
+        ],
+        [
+          13.755,
+          -5.165,
+          2.583
+        ],
+        [
+          13.755,
+          5.165,
+          2.583
+        ],
+        [
+          -37.719,
+          -5.563,
+          2.583
+        ],
+        [
+          -37.719,
+          5.563,
+          2.583
+        ]
+      ]
+    },
+    {
+      "index": 1330,
+      "radius": 95.812,
+      "bounding_box": [
+        -90.26,
+        88.096,
+        -80.939,
+        81.108,
+        -32.145,
+        13.269
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 7,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 4012,
+          "max_range": 500.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 4013,
+          "max_range": 1000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 4014,
+          "max_range": 3000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 4015,
+          "max_range": 6000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 4016,
+          "max_range": 20000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 255,
+          "max_range": 45000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 12,
+          "max_range": 65000.0
+        }
+      ]
+    },
+    {
+      "index": 1331,
+      "radius": 44.853,
+      "bounding_box": [
+        -36.993,
+        44.785,
+        -21.693,
+        21.71,
+        -15.142,
+        9.897
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 8,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 4017,
+          "max_range": 250.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 4018,
+          "max_range": 500.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 4019,
+          "max_range": 1200.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 4020,
+          "max_range": 1750.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 4021,
+          "max_range": 3000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 4022,
+          "max_range": 7500.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 4023,
+          "max_range": 20000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 12,
+          "max_range": 36000.0
+        }
+      ]
+    },
+    {
+      "index": 1332,
+      "radius": 63.306,
+      "bounding_box": [
+        -45.935,
+        50.918,
+        -60.646,
+        60.646,
+        -0.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 5,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 4024,
+          "max_range": 200.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 4025,
+          "max_range": 400.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 4026,
+          "max_range": 600.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 4027,
+          "max_range": 1000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 4028,
+          "max_range": 1500.0
+        }
+      ]
+    },
+    {
+      "index": 1333,
+      "radius": 37.856,
+      "bounding_box": [
+        -34.065,
+        15.515,
+        -27.804,
+        2.551,
+        -4.648,
+        0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 3,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 4029,
+          "max_range": 400.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 4030,
+          "max_range": 1000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 4031,
+          "max_range": 1500.0
+        }
+      ]
+    },
+    {
+      "index": 1334,
+      "radius": 30.265,
+      "bounding_box": [
+        -6.663,
+        10.639,
+        -22.172,
+        28.162,
+        -13.165,
+        0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 7,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 4032,
+          "max_range": 275.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 4033,
+          "max_range": 750.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 4034,
+          "max_range": 1500.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 4035,
+          "max_range": 3000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 4036,
+          "max_range": 7000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 4037,
+          "max_range": 10000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 4038,
+          "max_range": 50000.0
+        }
+      ]
+    },
+    {
+      "index": 1335,
+      "radius": 37.856,
+      "bounding_box": [
+        -34.065,
+        15.924,
+        -16.511,
+        2.551,
+        -4.648,
+        0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 3,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 4039,
+          "max_range": 400.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 4040,
+          "max_range": 1000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 4041,
+          "max_range": 1500.0
+        }
+      ]
+    },
+    {
+      "index": 1336,
+      "radius": 1.06,
+      "bounding_box": [
+        -1.06,
+        1.033,
+        -0.962,
+        0.976,
+        -0.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 3,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 4042,
+          "max_range": 750.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 4043,
+          "max_range": 1000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 2226,
+          "max_range": 30000.0
+        }
+      ]
+    },
+    {
+      "index": 1337,
+      "radius": 1.091,
+      "bounding_box": [
+        -1.053,
+        1.047,
+        -0.954,
+        0.954,
+        -0.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 3,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 4044,
+          "max_range": 750.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 4045,
+          "max_range": 1000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 4046,
+          "max_range": 30000.0
+        }
+      ]
+    },
+    {
+      "index": 1338,
+      "radius": 0.947,
+      "bounding_box": [
+        -0.601,
+        0.947,
+        -0.45,
+        0.45,
+        -0.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 3,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 4047,
+          "max_range": 750.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 4048,
+          "max_range": 1000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 2226,
+          "max_range": 30000.0
+        }
+      ]
+    },
+    {
+      "index": 1339,
+      "radius": 1.06,
+      "bounding_box": [
+        -1.06,
+        1.033,
+        -0.962,
+        0.976,
+        -0.0,
+        -0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 1,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 4049,
+          "max_range": 600000.0
+        }
+      ]
+    },
+    {
+      "index": 1340,
+      "radius": 43.425,
+      "bounding_box": [
+        -8.919,
+        19.232,
+        -15.607,
+        40.267,
+        -13.165,
+        0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 3,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 4050,
+          "max_range": 400.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 4051,
+          "max_range": 1000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 4052,
+          "max_range": 1500.0
+        }
+      ]
+    },
+    {
+      "index": 1341,
+      "radius": 47.112,
+      "bounding_box": [
+        -23.088,
+        19.232,
+        -44.451,
+        40.267,
+        -13.165,
+        0.0
+      ],
+      "radar_signature": 0.0,
+      "ir_signature": 0.0,
+      "nlod": 3,
+      "nslots": 0,
+      "nswitches": 0,
+      "ndofs": 0,
+      "ntexture_sets": 1,
+      "ndynamic_coords": 0,
+      "lods": [
+        {
+          "name": "",
+          "lod_table_idx": 4053,
+          "max_range": 400.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 4054,
+          "max_range": 1000.0
+        },
+        {
+          "name": "",
+          "lod_table_idx": 4055,
+          "max_range": 1500.0
+        }
+      ]
+    }
+  ]
+}
+
+jdcra@Frost MINGW64 /e/tmp/f4-model-tool
+$
