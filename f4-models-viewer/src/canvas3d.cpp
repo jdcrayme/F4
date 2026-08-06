@@ -20,7 +20,6 @@ static constexpr Color GRID_COLOR     = {60, 60, 60, 255};
 static constexpr Color AXIS_X_COLOR   = {220, 60, 60, 255};   // Red = X
 static constexpr Color AXIS_Y_COLOR   = {60, 220, 60, 255};   // Green = Y (up)
 static constexpr Color AXIS_Z_COLOR   = {60, 60, 220, 255};   // Blue = Z
-static constexpr Color WIRE_COLOR     = {200, 200, 200, 255};  // wireframe overlay
 static constexpr Color BSphere_COLOR  = {255, 200, 60, 80};    // bounding sphere
 static constexpr Color AABB_COLOR     = {60, 200, 255, 80};    // AABB
 

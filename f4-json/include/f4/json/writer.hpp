@@ -31,42 +31,6 @@
 
 namespace f4::json {
 
-// ===========================================================================
-// Free function: escape a string into JSON literal form (WITHOUT the
-// surrounding quotes). Shared between Writer::string() and external
-// callers that need to escape a string for embedding in a hand-rolled
-// JSON document (e.g. f4-world-convert's world_json.cpp).
-//
-// Handles the JSON-required escapes: " \ \b \f \n \r \t, plus \u00xx for
-// other C0 control characters (< 0x20). Non-ASCII bytes (>= 0x80) are
-// passed through verbatim — consumers are expected to provide UTF-8.
-// ===========================================================================
-inline std::string escape_string(std::string_view s) {
-    std::string out;
-    out.reserve(s.size() + 2);
-    for (char ch : s) {
-        switch (ch) {
-            case '"':  out += "\\\""; break;
-            case '\\': out += "\\\\"; break;
-            case '\b': out += "\\b";  break;
-            case '\f': out += "\\f";  break;
-            case '\n': out += "\\n";  break;
-            case '\r': out += "\\r";  break;
-            case '\t': out += "\\t";  break;
-            default:
-                if (static_cast<unsigned char>(ch) < 0x20) {
-                    char tmp[8];
-                    std::snprintf(tmp, sizeof(tmp), "\\u%04x",
-                                  static_cast<unsigned char>(ch));
-                    out += tmp;
-                } else {
-                    out += ch;
-                }
-        }
-    }
-    return out;
-}
-
 class Writer {
 public:
     void put(char c) { buf_.push_back(c); }
@@ -84,7 +48,26 @@ public:
     // or external data — paths, team names, theater names, etc.
     void string(std::string_view s) {
         put('"');
-        put(escape_string(s));
+        for (char ch : s) {
+            switch (ch) {
+                case '"':  put("\\\""); break;
+                case '\\': put("\\\\"); break;
+                case '\b': put("\\b");  break;
+                case '\f': put("\\f");  break;
+                case '\n': put("\\n");  break;
+                case '\r': put("\\r");  break;
+                case '\t': put("\\t");  break;
+                default:
+                    if (static_cast<unsigned char>(ch) < 0x20) {
+                        char tmp[8];
+                        std::snprintf(tmp, sizeof(tmp), "\\u%04x",
+                                      static_cast<unsigned char>(ch));
+                        put(tmp);
+                    } else {
+                        put(ch);
+                    }
+            }
+        }
         put('"');
     }
 

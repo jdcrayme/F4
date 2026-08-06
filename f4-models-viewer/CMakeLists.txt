@@ -41,7 +41,7 @@ if(NOT imgui_POPULATED)
         GIT_TAG        v1.91.5
         GIT_SHALLOW    TRUE
     )
-    FetchContent_Populate(imgui)
+    FetchContent_MakeAvailable(imgui)
 endif()
 set(IMGUI_DIR ${imgui_SOURCE_DIR})
 
@@ -53,7 +53,7 @@ if(NOT rlimgui_POPULATED)
         GIT_REPOSITORY https://github.com/raylib-extras/rlImGui.git
         GIT_TAG        9acdbbf
     )
-    FetchContent_Populate(rlimgui)
+    FetchContent_MakeAvailable(rlimgui)
 endif()
 set(RLIMGUI_DIR ${rlimgui_SOURCE_DIR})
 

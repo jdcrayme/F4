@@ -2,11 +2,7 @@
 //
 // Orbit camera helpers for 3D model viewing.
 // All functions are Impl member functions, declared in viewer_state.hpp
-// and defined in camera3d.cpp:
-//   void Impl::update_camera_from_orbit();
-//   void Impl::handle_camera_input();
-//   void Impl::fit_to_model();
-//   void Impl::reset_camera();
+// and defined in camera3d.cpp.
 
 #pragma once
 

@@ -37,31 +37,31 @@ FetchContent_MakeAvailable(raylib)
 # rewrite). rlImGui must be pinned to a commit that predates the 1.92
 # migration — see commit dc7479b on rlImGui main.
 set(IMGUI_DISABLE_OBSOLETE_FUNCTIONS OFF CACHE BOOL "" FORCE)
-FetchContent_Declare(
-    imgui
-    GIT_REPOSITORY https://github.com/ocornut/imgui.git
-    GIT_TAG        v1.91.5
-    GIT_SHALLOW    TRUE
-)
 FetchContent_GetProperties(imgui)
 if(NOT imgui_POPULATED)
-    FetchContent_Populate(imgui)
-    set(IMGUI_DIR ${imgui_SOURCE_DIR})
+    FetchContent_Declare(
+        imgui
+        GIT_REPOSITORY https://github.com/ocornut/imgui.git
+        GIT_TAG        v1.91.5
+        GIT_SHALLOW    TRUE
+    )
+    FetchContent_MakeAvailable(imgui)
 endif()
+set(IMGUI_DIR ${imgui_SOURCE_DIR})
 
 # rlImGui — pinned to commit 9acdbbf (uses ImTextureID, compatible with
 # ImGui 1.91.x). The 1.92 migration that introduced ImTextureData landed
 # in commit dc7479b.
-FetchContent_Declare(
-    rlimgui
-    GIT_REPOSITORY https://github.com/raylib-extras/rlImGui.git
-    GIT_TAG        9acdbbf
-)
 FetchContent_GetProperties(rlimgui)
 if(NOT rlimgui_POPULATED)
-    FetchContent_Populate(rlimgui)
-    set(RLIMGUI_DIR ${rlimgui_SOURCE_DIR})
+    FetchContent_Declare(
+        rlimgui
+        GIT_REPOSITORY https://github.com/raylib-extras/rlImGui.git
+        GIT_TAG        9acdbbf
+    )
+    FetchContent_MakeAvailable(rlimgui)
 endif()
+set(RLIMGUI_DIR ${rlimgui_SOURCE_DIR})
 
 # tinyfiledialogs — native OS file/folder pickers on Windows, macOS, Linux.
 # Replaces the ad-hoc ImGui text-input modal we shipped originally. Single

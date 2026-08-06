@@ -7,9 +7,6 @@
 //   f4-models-viewer --lod 1                               -> select LOD level
 //   f4-models-viewer --screenshot out.png                  -> take screenshot
 //   f4-models-viewer --width 1920 --height 1080            -> set window size
-//   f4-models-viewer KoreaObj.HDR KoreaObj.LOD --screenshot out.png
-//       Take a screenshot after 1.5 seconds and exit. Useful for headless
-//       smoke tests.
 
 #include <f4/models_viewer/viewer_app.hpp>
 

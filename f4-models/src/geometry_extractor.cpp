@@ -145,17 +145,20 @@ void walk_node(WalkContext& ctx, NodeIdx node_idx)
             auto base = static_cast<std::size_t>(node.switch_children_offset);
             auto count = static_cast<std::size_t>(node.n_children);
 
+            // Bounds check: base + count must fit within switch_children
+            if (base + count > ctx.tree.switch_children.size()) {
+                break;  // corrupted switch children — skip
+            }
+
             if (active_child >= 0 && active_child < static_cast<int>(count)) {
                 // Walk only the selected child
                 auto child_idx = ctx.tree.switch_children[base + static_cast<std::size_t>(active_child)];
-                walk_node(ctx, child_idx);
+                if (child_idx >= 0) walk_node(ctx, child_idx);
             } else {
                 // No state override — walk all children
                 for (std::size_t k = 0; k < count; ++k) {
-                    if (base + k < ctx.tree.switch_children.size()) {
-                        auto child_idx = ctx.tree.switch_children[base + k];
-                        if (child_idx >= 0) walk_node(ctx, child_idx);
-                    }
+                    auto child_idx = ctx.tree.switch_children[base + k];
+                    if (child_idx >= 0) walk_node(ctx, child_idx);
                 }
             }
         }

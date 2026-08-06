@@ -74,7 +74,7 @@ static void draw_menu_bar(ViewerApp::Impl& impl) {
                 const char* dir_result = tinyfd_selectFolderDialog(
                     "Select Falcon 4.0 Install Directory", "");
                 if (dir_result) {
-                    std::filesystem::path install_path(dir_result);
+                   std::filesystem::path install_path(dir_result);
                     auto inst = f4::install::Installation::detect(install_path);
                     if (inst.valid()) {
                         impl.install = std::move(inst);
@@ -107,7 +107,6 @@ static void draw_menu_bar(ViewerApp::Impl& impl) {
         // ── Help ──────────────────────────────────────────────────────
         if (ImGui::BeginMenu("Help")) {
             if (ImGui::MenuItem("Controls")) {
-                // Could open a popup — for now just set status
                 impl.status_msg = "L-drag: orbit | R-drag: pan | Scroll: zoom | F: fit | R: reset";
             }
             ImGui::EndMenu();
@@ -145,7 +144,6 @@ static void draw_model_browser(ViewerApp::Impl& impl) {
                         if (filter_buf[0] != '\0') {
                             char idx_buf[32];
                             std::snprintf(idx_buf, sizeof(idx_buf), "%d", i);
-                            // Simple substring match on index or visual class
                             std::string_view vc = m.visual_class();
                             std::string label = idx_buf + std::string(" ") +
                                                 std::string(vc);

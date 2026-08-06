@@ -507,7 +507,10 @@ bool parse_bsp_tree(
     }
 
     // ── Parse switch children arrays ────────────────────────────────
-    for (const auto& node : tree.nodes) {
+    // We must update node.switch_children_offset from the on-disk byte
+    // offset to the index into tree.switch_children. The byte offset is
+    // only used temporarily to read the raw child offset array.
+    for (auto& node : tree.nodes) {
         if ((node.type == BspNodeType::BSwitchNode ||
              node.type == BspNodeType::BXSwitchNode) &&
             node.n_children > 0 && node.switch_children_offset >= 0)
@@ -529,6 +532,13 @@ bool parse_bsp_tree(
                         tree.switch_children[base + k] = NULL_NODE;
                     }
                 }
+                // Update switch_children_offset from byte offset to
+                // array index so geometry_extractor can use it directly.
+                node.switch_children_offset = static_cast<int32_t>(base);
+            } else {
+                // Could not read children — mark as invalid
+                node.switch_children_offset = -1;
+                node.n_children = 0;
             }
         }
     }
