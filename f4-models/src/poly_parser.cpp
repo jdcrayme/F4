@@ -383,6 +383,56 @@ void prim_to_mesh(
             mesh.triangles.push_back(tri);
         }
     }
+
+    // After emitting triangles, ensure the vertex normals are consistent
+    // with the triangle winding. FreeFalcon stores the plane normal with
+    // each Poly, but some polygons have the normal pointing inward
+    // (opposite to the triangle winding). For correct lighting, we flip
+    // the normal if it disagrees with the winding direction.
+    //
+    // We only do this for the first vertex (v0) of each triangle, since
+    // the plane normal is the same for all vertices of a flat-shaded poly.
+    // (Gouraud/VC variants have per-vertex normals stored separately and
+    // are left unchanged.)
+    if (prim.type != PolyType::G && prim.type != PolyType::GL &&
+        prim.type != PolyType::TexG && prim.type != PolyType::TexGL &&
+        prim.type != PolyType::CTexG && prim.type != PolyType::CTexGL &&
+        prim.type != PolyType::AG && prim.type != PolyType::AGL &&
+        prim.type != PolyType::ATexG && prim.type != PolyType::ATexGL &&
+        prim.type != PolyType::CATexG && prim.type != PolyType::CATexGL &&
+        !mesh.triangles.empty() && mesh.vertices.size() > base_vert)
+    {
+        // Check the last emitted triangle's winding vs the plane normal
+        const auto& last_tri = mesh.triangles.back();
+        if (last_tri.v0 < mesh.vertices.size() &&
+            last_tri.v1 < mesh.vertices.size() &&
+            last_tri.v2 < mesh.vertices.size())
+        {
+            const auto& a = mesh.vertices[last_tri.v0].position;
+            const auto& b = mesh.vertices[last_tri.v1].position;
+            const auto& c = mesh.vertices[last_tri.v2].position;
+            // Winding normal: (b-a) x (c-a)
+            float ux = b.x - a.x, uy = b.y - a.y, uz = b.z - a.z;
+            float vx = c.x - a.x, vy = c.y - a.y, vz = c.z - a.z;
+            float wx = uy * vz - uz * vy;
+            float wy = uz * vx - ux * vz;
+            float wz = ux * vy - uy * vx;
+            // Dot with plane normal
+            float dot = wx * prim.plane.a + wy * prim.plane.b + wz * prim.plane.c;
+            // If dot < 0, the winding disagrees with the plane normal.
+            // Flip all vertex normals for this prim so they match the winding.
+            if (dot < 0) {
+                for (int i = 0; i < prim.n_verts; ++i) {
+                    if (base_vert + i < mesh.vertices.size()) {
+                        auto& n = mesh.vertices[base_vert + i].normal;
+                        n.x = -n.x;
+                        n.y = -n.y;
+                        n.z = -n.z;
+                    }
+                }
+            }
+        }
+    }
 }
 
 } // namespace f4::models::detail

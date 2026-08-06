@@ -113,6 +113,14 @@ void ViewerApp::Impl::draw_canvas() {
     // future changes to LoadMaterialDefault() don't silently darken meshes.)
     mat.maps[MATERIAL_MAP_DIFFUSE].color = WHITE;
 
+    // CRITICAL: Disable backface culling. FreeFalcon's models were designed
+    // to render WITHOUT backface culling — many polygons have CCW winding
+    // (opposite to the plane normal) and would be invisible if culled.
+    // The diagnostic showed 7.7% of triangles are back-facing; without
+    // this disable, those triangles (and the surfaces they belong to)
+    // would appear as holes in the model.
+    rlDisableBackfaceCulling();
+
     if (show_wireframe) {
         rlEnableWireMode();
     }
@@ -129,6 +137,10 @@ void ViewerApp::Impl::draw_canvas() {
     if (show_wireframe) {
         rlDisableWireMode();
     }
+
+    // Re-enable backface culling for subsequent draws (grid, axes, etc.
+    // don't need it, but it's good practice to restore default state).
+    rlEnableBackfaceCulling();
 
     // Draw line primitives (LineF) — Raylib's DrawMesh only handles triangle
     // lists, so we draw each line segment via DrawLine3D.

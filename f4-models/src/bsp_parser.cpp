@@ -318,22 +318,25 @@ NodeIdx walk_node(WalkCtx& ctx, int32_t offset) {
     }
 
     case BspNodeType::BSwitchNode: {
+        // On-disk BSwitchNode layout (from FreeFalcon bspnodes.h):
+        //   vtable(4) + sibling(4) + switch_number(4) + n_children(4)
+        //            + child_offsets_ptr(4)
+        //
+        // The child_offsets_ptr points to an int32 array of n_children
+        // byte offsets. We read the pointer, then walk each child inline
+        // so they end up in tree.nodes / offset_map.
+        //
+        // Some BSwitchNode variants store n_children=0 but still have
+        // children (the count field is unreliable for certain modded
+        // files). We handle this with a buffer-wide vtable scan in a
+        // second pass below (see parse_bsp_tree post-pass).
         int32_t children_off;
         if (!r.read(node.switch_number)) goto trunc;
         if (!r.read(node.n_children)) goto trunc;
         if (!r.read(children_off)) goto trunc;
         node.switch_children_offset = children_off;
 
-        // CRITICAL: walk each child NOW so they end up in tree.nodes and
-        // offset_map. Without this, switch subtrees (which usually contain
-        // the actual renderable primitives for the parent) are dropped
-        // from the tree entirely. The post-pass that resolves the child
-        // byte offsets into NodeIdx values via offset_map will then find
-        // them — previously it always returned NULL_NODE.
-        //
-        // The on-disk layout is `int32_t child_offsets[n_children]` at
-        // children_off (a byte offset into nodeTreeData). Each entry is
-        // a byte offset to the child subtree root.
+        // Walk each child NOW so they end up in tree.nodes and offset_map.
         if (children_off >= 0 && node.n_children > 0 && node.n_children < 64) {
             auto base = static_cast<std::size_t>(children_off);
             auto count = static_cast<std::size_t>(node.n_children);
@@ -344,9 +347,6 @@ NodeIdx walk_node(WalkCtx& ctx, int32_t offset) {
                                 ctx.base + base + k * sizeof(int32_t),
                                 sizeof(int32_t));
                     if (child_off >= 0) {
-                        // Recurse — this populates tree.nodes / offset_map
-                        // as a side effect. The returned NodeIdx is not
-                        // stored here; the post-pass below re-resolves it.
                         (void)walk_node(ctx, child_off);
                     }
                 }
@@ -363,7 +363,6 @@ NodeIdx walk_node(WalkCtx& ctx, int32_t offset) {
         if (!r.read(children_off)) goto trunc;
         node.switch_children_offset = children_off;
 
-        // Same as BSwitchNode — walk children now so they're in the map.
         if (children_off >= 0 && node.n_children > 0 && node.n_children < 64) {
             auto base = static_cast<std::size_t>(children_off);
             auto count = static_cast<std::size_t>(node.n_children);
@@ -515,7 +514,12 @@ bool parse_bsp_tree(
     // Some tags may be unused if the tree has shared nodes
     // but we should have consumed most of them
 
-    // ── Extract shared data pools from BRoot nodes ──────────────────
+    // ── Extract shared data pools from BRoot/BSubTree nodes ─────────
+    // The first BRoot with n_coords > 0 populates tree.coords (the
+    // "default" pool used when no subtree-specific pool is active).
+    // Nested BSubTree nodes inside BDofNode/BSwitchNode/etc. carry their
+    // own pools — those are read on-demand by the geometry_extractor's
+    // ActivePool stack, NOT copied here (they'd overwrite the root pool).
     for (const auto& node : tree.nodes) {
         if (node.type == BspNodeType::BRoot && node.n_coords > 0) {
             if (node.coords_offset >= 0) {
@@ -551,10 +555,19 @@ bool parse_bsp_tree(
         }
     }
 
-    // ── Parse switch children arrays ────────────────────────────────
-    // We must update node.switch_children_offset from the on-disk byte
-    // offset to the index into tree.switch_children. The byte offset is
-    // only used temporarily to read the raw child offset array.
+    // ── Post-pass: resolve switch children + scan for unvisited nodes ─────
+    //
+    // 1. Resolve switch children byte offsets to NodeIdx values via offset_map.
+    //    (The walk above already visited the children, so they're in the map.)
+    //
+    // 2. Buffer-wide vtable scan: some BSwitchNode variants store n_children=0
+    //    but still have children. The walk above skipped them. We scan the
+    //    entire lod_buffer for 4-byte values that look like byte offsets to
+    //    nodes (i.e., the target starts with a vtable in 0x004651xx range).
+    //    Any unvisited nodes found are walked, which may consume remaining
+    //    tags and unlock geometry that was previously missed.
+
+    // Pass 1: resolve switch children via offset_map
     for (auto& node : tree.nodes) {
         if ((node.type == BspNodeType::BSwitchNode ||
              node.type == BspNodeType::BXSwitchNode) &&
@@ -577,14 +590,46 @@ bool parse_bsp_tree(
                         tree.switch_children[base + k] = NULL_NODE;
                     }
                 }
-                // Update switch_children_offset from byte offset to
-                // array index so geometry_extractor can use it directly.
                 node.switch_children_offset = static_cast<int32_t>(base);
             } else {
-                // Could not read children — mark as invalid
                 node.switch_children_offset = -1;
                 node.n_children = 0;
             }
+        }
+    }
+
+    // Pass 2: buffer-wide vtable scan for unvisited nodes.
+    // This catches switch children that were missed because n_children=0
+    // or children_off was garbage. We scan every 4-byte-aligned position
+    // in the buffer; if the value looks like a valid byte offset AND the
+    // target starts with a vtable pattern AND the target hasn't been
+    // visited yet, we walk it.
+    //
+    // This is O(buffer_size / 4) but only runs once per LOD parse, and
+    // the walk_node calls are guarded by offset_map (already-visited
+    // nodes are skipped).
+    {
+        const uint8_t* buf = node_data;
+        std::size_t buf_sz = node_data_size;
+        int tags_before = ctx.tag_pos;
+
+        for (std::size_t i = 0; i + 4 <= buf_sz; i += 4) {
+            int32_t off = -1;
+            std::memcpy(&off, buf + i, 4);
+            // Quick filter: offset must be within buffer and 4-byte aligned
+            if (off < 0 || static_cast<std::size_t>(off) + 4 > buf_sz)
+                continue;
+            if (off % 4 != 0) continue;
+            // Check if target looks like a node (starts with vtable)
+            uint32_t target_vt = 0;
+            std::memcpy(&target_vt, buf + off, 4);
+            if (target_vt < 0x00460000 || target_vt > 0x00470000)
+                continue;
+            // Check if already visited
+            if (ctx.offset_map.count(off) > 0) continue;
+            // Walk it — this consumes a tag and populates the node
+            if (ctx.tag_pos >= ctx.tag_count) break;
+            (void)walk_node(ctx, static_cast<int32_t>(off));
         }
     }
 
