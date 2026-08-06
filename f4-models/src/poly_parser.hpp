@@ -67,6 +67,68 @@ struct DecodedPrim {
 /// for the given PolyType.
 [[nodiscard]] int32_t prim_header_size(PolyType type) noexcept;
 
+/// Affine transform: v' = rotation * v + translation.
+/// Used to accumulate DOF/translate/scale transforms during tree walk.
+/// nullptr means identity (no transform).
+struct AffineTransform {
+    Mat3x3 rotation;    // default = identity
+    Vec3   translation; // default = zero
+
+    AffineTransform() {
+        // Identity transform
+        rotation.m[0][0] = 1; rotation.m[0][1] = 0; rotation.m[0][2] = 0;
+        rotation.m[1][0] = 0; rotation.m[1][1] = 1; rotation.m[1][2] = 0;
+        rotation.m[2][0] = 0; rotation.m[2][1] = 0; rotation.m[2][2] = 1;
+        translation = {0, 0, 0};
+    }
+
+    /// Apply to a point: rotation * p + translation
+    Vec3 apply_point(const Vec3& p) const {
+        return {
+            rotation.m[0][0]*p.x + rotation.m[0][1]*p.y + rotation.m[0][2]*p.z + translation.x,
+            rotation.m[1][0]*p.x + rotation.m[1][1]*p.y + rotation.m[1][2]*p.z + translation.y,
+            rotation.m[2][0]*p.x + rotation.m[2][1]*p.y + rotation.m[2][2]*p.z + translation.z
+        };
+    }
+
+    /// Apply rotation only to a direction (normal): rotation * n
+    Vec3 apply_direction(const Vec3& n) const {
+        return {
+            rotation.m[0][0]*n.x + rotation.m[0][1]*n.y + rotation.m[0][2]*n.z,
+            rotation.m[1][0]*n.x + rotation.m[1][1]*n.y + rotation.m[1][2]*n.z,
+            rotation.m[2][0]*n.x + rotation.m[2][1]*n.y + rotation.m[2][2]*n.z
+        };
+    }
+
+    /// Check if this is approximately the identity transform.
+    bool is_identity() const {
+        return rotation.m[0][0] == 1.f && rotation.m[0][1] == 0.f && rotation.m[0][2] == 0.f &&
+               rotation.m[1][0] == 0.f && rotation.m[1][1] == 1.f && rotation.m[1][2] == 0.f &&
+               rotation.m[2][0] == 0.f && rotation.m[2][1] == 0.f && rotation.m[2][2] == 1.f &&
+               translation.x == 0.f && translation.y == 0.f && translation.z == 0.f;
+    }
+
+    /// Compose two transforms: result = a ∘ b  (apply b first, then a)
+    /// result.rotation    = a.rotation * b.rotation
+    /// result.translation = a.rotation * b.translation + a.translation
+    static AffineTransform compose(const AffineTransform& a,
+                                   const AffineTransform& b) {
+        AffineTransform result;
+        // Matrix multiply: a.rotation * b.rotation
+        for (int i = 0; i < 3; ++i) {
+            for (int j = 0; j < 3; ++j) {
+                result.rotation.m[i][j] = 0;
+                for (int k = 0; k < 3; ++k) {
+                    result.rotation.m[i][j] += a.rotation.m[i][k] * b.rotation.m[k][j];
+                }
+            }
+        }
+        // Translation: a.rotation * b.translation + a.translation
+        result.translation = a.apply_direction(b.translation) + a.translation;
+        return result;
+    }
+};
+
 /// Convert a decoded Prim + BSP tree data into renderable vertices/triangles.
 /// The resulting triangles are appended to `mesh`.
 ///
@@ -77,11 +139,16 @@ struct DecodedPrim {
 /// pool stack.
 ///
 /// `tex_ids` / `n_tex_ids` — the active tex_ids pool, same reasoning.
+///
+/// `transform` — optional affine transform to apply to vertex positions
+/// and normals (from accumulated DOF/translate/scale stack).
+/// nullptr means no transform (identity).
 void prim_to_mesh(
     const DecodedPrim& prim,
     const BspTree& tree,
     Mesh& mesh,
     const Vec3* coords, std::size_t n_coords,
-    const int32_t* tex_ids, std::size_t n_tex_ids);
+    const int32_t* tex_ids, std::size_t n_tex_ids,
+    const AffineTransform* transform = nullptr);
 
 } // namespace f4::models::detail

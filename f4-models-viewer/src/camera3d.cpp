@@ -143,7 +143,7 @@ void ViewerApp::Impl::fit_to_model() {
     const auto* rec = db.model(selected_parent);
     if (!rec) return;
 
-    // Convert bounding box center from LH Z-up to RH Y-up
+    // Convert bounding box center from LH Y-up to RH Y-up
     cam_target = to_raylib(rec->bbox.center_x(),
                            rec->bbox.center_y(),
                            rec->bbox.center_z());

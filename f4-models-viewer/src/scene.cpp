@@ -3,7 +3,7 @@
 // Converts f4::models::ModelGeometry → Raylib ::Mesh array.
 // For each f4::models::Mesh:
 //   - Create a Raylib ::Mesh with vertexCount and triangleCount
-//   - Fill vertex positions (applying LH Z-up → RH Y-up conversion)
+//   - Fill vertex positions (applying LH Y-up → RH Y-up conversion)
 //   - Fill normals (same conversion)
 //   - Fill texcoords if present
 //   - Fill colors by resolving ColorBank indices (Prim.rgba is an INT INDEX
@@ -117,7 +117,7 @@ std::vector<::Mesh> build_raylib_meshes(
         for (int i = 0; i < vert_count; ++i) {
             const auto& v = src_mesh.vertices[static_cast<std::size_t>(i)];
 
-            // Position: LH Z-up → RH Y-up
+            // Position: LH Y-up → RH Y-up
             const Vector3 pos = to_raylib(v.position.x, v.position.y, v.position.z);
             rm.vertices[i * 3 + 0] = pos.x;
             rm.vertices[i * 3 + 1] = pos.y;
@@ -197,6 +197,29 @@ void ViewerApp::Impl::rebuild_meshes() {
             status_msg = "Parse error: " + err;
             meshes_dirty = false;
             return;
+        }
+    }
+
+    // Update DOF ranges from the BSP tree (if parsed)
+    // The BSP tree nodes contain actual min/max for BXDofNode/BTransNode,
+    // which are more accurate than the hardcoded [0, 2π] defaults.
+    const auto* bsp = db.bsp_tree(selected_parent, selected_lod);
+    if (bsp) {
+        for (const auto& node : bsp->nodes) {
+            if (node.type == f4::models::BspNodeType::BXDofNode ||
+                node.type == f4::models::BspNodeType::BTransNode ||
+                node.type == f4::models::BspNodeType::BScaleNode) {
+                // Find the matching DofState and update its range
+                for (auto& ds : model_state.dofs) {
+                    if (ds.dof_number == node.dof_number) {
+                        if (node.dof_min != 0 || node.dof_max != 0) {
+                            ds.min = node.dof_min;
+                            ds.max = node.dof_max;
+                        }
+                        break;
+                    }
+                }
+            }
         }
     }
 

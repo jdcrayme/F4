@@ -296,7 +296,8 @@ void prim_to_mesh(
     const BspTree& tree,
     Mesh& mesh,
     const Vec3* coords, std::size_t n_coords,
-    const int32_t* tex_ids, std::size_t n_tex_ids)
+    const int32_t* tex_ids, std::size_t n_tex_ids,
+    const AffineTransform* transform)
 {
     (void)tree;  // kept for backward compat / future use
     if (prim.n_verts <= 0 || prim.type == PolyType::Unknown) return;
@@ -306,6 +307,9 @@ void prim_to_mesh(
     // Resolve vertex positions from the supplied active coord pool.
     // (Previously this always used tree.coords, which produced garbage
     // for prims inside non-root subtrees — see Fix #4.)
+    //
+    // If a DOF/translate/scale transform is active, apply it to both
+    // positions and normals after resolving from the coord pool.
     for (int i = 0; i < prim.n_verts; ++i) {
         Vertex v;
 
@@ -321,6 +325,12 @@ void prim_to_mesh(
         // Normal from plane (if available, use face normal)
         if (prim.plane.a != 0 || prim.plane.b != 0 || prim.plane.c != 0) {
             v.normal = {prim.plane.a, prim.plane.b, prim.plane.c};
+        }
+
+        // Apply DOF/translate/scale transform if present
+        if (transform) {
+            v.position = transform->apply_point(v.position);
+            v.normal   = transform->apply_direction(v.normal);
         }
 
         // UV coords

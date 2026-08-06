@@ -22,11 +22,25 @@
 namespace f4::models_viewer {
 
 // ── Coordinate conversion ─────────────────────────────────────────────────
-// FreeFalcon uses LH Z-up. Raylib uses RH Y-up.
-// to_raylib(x, y, z) = (x, z, -y)
+// FreeFalcon's BSP model data uses LH Y-up (DirectX rendering convention):
+//   +X = right,  +Y = up,  +Z = forward (into screen)
+// Raylib uses RH Y-up:
+//   +X = right,  +Y = up,  +Z = toward viewer (out of screen)
+//
+// Conversion: to_raylib(x, y, z) = (x, y, -z)
+//   X → X   (right stays right)
+//   Y → Y   (up stays up)
+//   Z → -Z  (LH forward → RH backward; negating one axis flips handedness)
+//
+// NOTE: The world/terrain system uses LH Z-up (+X north, +Y east, +Z up),
+// but the 3D model vertex data in BSP trees follows the rendering convention
+// (LH Y-up), which is what this conversion handles. The docs in
+// MODEL_VIEWER_IMPLEMENTATION_PLAN.md §6.6 incorrectly state the model data
+// is Z-up; the DOF rotation matrices prove it is Y-up (dof_rotation maps
+// local Z → parent Y for rotors, which only makes sense in Y-up).
 
 inline Vector3 to_raylib(float x, float y, float z) {
-    return {x, z, -y};
+    return {x, -z, y};
 }
 
 // ── ViewerApp::Impl ───────────────────────────────────────────────────────

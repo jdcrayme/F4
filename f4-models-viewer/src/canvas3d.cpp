@@ -58,7 +58,7 @@ void ViewerApp::Impl::draw_bounding_volumes() {
     }
 
     if (show_aabb) {
-        // Convert AABB corners from LH Z-up to RH Y-up
+        // Convert AABB corners from LH Y-up to RH Y-up
         const Vector3 bmin = to_raylib(rec->bbox.min_x,
                                        rec->bbox.min_y,
                                        rec->bbox.min_z);

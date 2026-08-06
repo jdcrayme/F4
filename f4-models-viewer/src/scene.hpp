@@ -2,7 +2,7 @@
 //
 // ModelGeometry → Raylib ::Mesh conversion.
 // Converts the engine-agnostic f4::models geometry into GPU-ready
-// Raylib meshes, applying the LH Z-up → RH Y-up coordinate transform.
+// Raylib meshes, applying the LH Y-up → RH Y-up coordinate transform.
 
 #pragma once
 
@@ -19,7 +19,7 @@ namespace f4::models_viewer {
 
 /// Build Raylib meshes from extracted model geometry.
 /// Each f4::models::Mesh becomes one Raylib ::Mesh (uploaded to GPU).
-/// Applies LH Z-up → RH Y-up coordinate conversion and resolves
+/// Applies LH Y-up → RH Y-up coordinate conversion and resolves
 /// vertex color indices through the ColorBank (Prim.rgba is an int index
 /// into the ColorBank, NOT packed ABGR — see f4-models ColorBank docs).
 std::vector<::Mesh> build_raylib_meshes(

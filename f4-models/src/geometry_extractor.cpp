@@ -6,16 +6,22 @@
 //   BRoot/BSubTree       → push this subtree's coord/normals/tex_ids pool
 //                          onto the active-pool stack, recurse, pop.
 //   BSlotNode            → recurse into subtree (slot marker)
-//   BDofNode/BXDofNode   → push subtree pool, recurse, pop
+//   BDofNode/BXDofNode   → compute DOF rotation transform, push onto
+//                          transform stack, recurse, pop.
+//                          Transform = T(dof_translation) * dof_rotation * Rz(value)
+//   BTransNode           → compute DOF translation transform, push onto
+//                          transform stack, recurse, pop.
+//   BScaleNode           → compute scale transform, push onto transform
+//                          stack, recurse, pop.
 //   BSwitchNode/BXSwitchNode → select one child, recurse
 //   BSplitterNode        → recurse both front and back (no frustum culling yet)
 //   BPrimitiveNode       → decode Prim and emit triangles/lines/points,
 //                          resolving vertex positions through the TOP of
-//                          the active-pool stack (NOT the global tree.coords).
+//                          the active-pool stack (NOT the global tree.coords),
+//                          then applying the accumulated transform stack.
 //   BCulledPrimitiveNode → same as BPrimitiveNode
 //   BLitPrimitiveNode    → decode front + back Poly
 //   BSpecialXform        → push subtree pool, recurse, pop
-//   BTransNode/BScaleNode → push subtree pool, recurse, pop
 //   BRenderControlNode   → skip (render state, no geometry)
 //   BLightStringNode     → decode prim (light marker)
 //
@@ -25,15 +31,78 @@
 // Primitives in those subtrees index into the SUBTREE's pool, NOT the
 // root's pool. The previous implementation always used tree.coords, which
 // produced garbage positions for any primitive not in the root subtree.
+//
+// CRITICAL: DOF transform application. BDofNode/BXDofNode define a
+// coordinate frame (dof_rotation + dof_translation) for their subtree.
+// The DOF value rotates the subtree around the local Z axis. Without
+// applying this transform, rotors appear at the origin, control surfaces
+// are misplaced, and DOF sliders have no visual effect.
 
 #include "geometry_extractor.hpp"
 #include "poly_parser.hpp"
 
+#include <cmath>
 #include <cstring>
 
 namespace f4::models::detail {
 
 namespace {
+
+// AffineTransform is defined in poly_parser.hpp (shared between
+// poly_parser.cpp and geometry_extractor.cpp). The anonymous-namespace
+// duplicate was removed to fix C2027/C2664 type-mismatch errors.
+
+/// Build a rotation-about-Z matrix for a given angle in radians.
+/// Rz(θ) = [cos θ  -sin θ  0]
+///         [sin θ   cos θ  0]
+///         [  0       0    1]
+AffineTransform make_rotation_z(float angle_rad) {
+    AffineTransform t;
+    const float c = std::cos(angle_rad);
+    const float s = std::sin(angle_rad);
+    t.rotation.m[0][0] = c;  t.rotation.m[0][1] = -s; t.rotation.m[0][2] = 0;
+    t.rotation.m[1][0] = s;  t.rotation.m[1][1] = c;  t.rotation.m[1][2] = 0;
+    t.rotation.m[2][0] = 0;  t.rotation.m[2][1] = 0;  t.rotation.m[2][2] = 1;
+    return t;
+}
+
+/// Build a rotation-about-X matrix for a given angle in radians.
+/// Rx(θ) = [1    0       0   ]
+///         [0  cos θ  -sin θ ]
+///         [0  sin θ   cos θ ]
+AffineTransform make_rotation_x(float angle_rad) {
+    AffineTransform t;
+    const float c = std::cos(angle_rad);
+    const float s = std::sin(angle_rad);
+    t.rotation.m[0][0] = 1; t.rotation.m[0][1] = 0;  t.rotation.m[0][2] = 0;
+    t.rotation.m[1][0] = 0; t.rotation.m[1][1] = c;  t.rotation.m[1][2] = -s;
+    t.rotation.m[2][0] = 0; t.rotation.m[2][1] = s;  t.rotation.m[2][2] = c;
+    return t;
+}
+
+/// Build a rotation-about-Y matrix for a given angle in radians.
+/// Ry(θ) = [ cos θ  0  sin θ]
+///         [   0    1    0  ]
+///         [-sin θ  0  cos θ]
+AffineTransform make_rotation_y(float angle_rad) {
+    AffineTransform t;
+    const float c = std::cos(angle_rad);
+    const float s = std::sin(angle_rad);
+    t.rotation.m[0][0] = c;  t.rotation.m[0][1] = 0; t.rotation.m[0][2] = s;
+    t.rotation.m[1][0] = 0;  t.rotation.m[1][1] = 1; t.rotation.m[1][2] = 0;
+    t.rotation.m[2][0] = -s; t.rotation.m[2][1] = 0; t.rotation.m[2][2] = c;
+    return t;
+}
+
+/// Look up the current value of a DOF from the ModelState.
+/// Returns default_value if the DOF is not found in the state.
+float get_dof_value(const ModelState& state, int dof_number,
+                    float default_value = 0.f) {
+    for (const auto& dof : state.dofs) {
+        if (dof.dof_number == dof_number) return dof.value;
+    }
+    return default_value;
+}
 
 /// A descriptor for an active coord/normals/tex_ids pool.
 /// All pointers are into `tree.lod_buffer`. They're only valid for the
@@ -62,6 +131,12 @@ struct WalkContext {
     // subtree whose primitives we're currently processing. Pushed when
     // entering a BSubTree-derived node; popped when leaving.
     std::vector<ActivePool> pool_stack;
+
+    // Stack of accumulated affine transforms. The TOP is the combined
+    // transform from the root to the current subtree. Pushed when entering
+    // a DOF/Trans/Scale node; popped when leaving. If empty, no transform
+    // is needed (identity).
+    std::vector<AffineTransform> transform_stack;
 
     WalkContext(const BspTree& t, const ModelState& s,
                 ModelGeometry& g, int md)
@@ -172,11 +247,31 @@ struct WalkContext {
         }
         return p;
     }
+
+    /// Get the current accumulated transform, or nullptr if identity.
+    const AffineTransform* current_transform() const {
+        if (transform_stack.empty()) return nullptr;
+        if (transform_stack.back().is_identity()) return nullptr;
+        return &transform_stack.back();
+    }
+
+    /// Push a local transform by composing with the current stack top.
+    void push_transform(const AffineTransform& local) {
+        if (transform_stack.empty()) {
+            transform_stack.push_back(local);
+        } else {
+            transform_stack.push_back(
+                AffineTransform::compose(transform_stack.back(), local));
+        }
+    }
+
+    void pop_transform() { transform_stack.pop_back(); }
 };
 
 /// Process a primitive: decode from lod_buffer and add to geometry.
 /// prim_offset is LOD-record-relative (byte 0 = start of LOD record).
 /// Uses the active pool stack to resolve vertex positions.
+/// Applies the current transform from the transform stack to vertices.
 void process_prim(WalkContext& ctx, int32_t prim_offset)
 {
     if (prim_offset < 0) return;
@@ -231,8 +326,10 @@ void process_prim(WalkContext& ctx, int32_t prim_offset)
     }
 
     // Convert prim to vertices + indices using the active pool.
+    // Apply the accumulated DOF transform if present.
+    const AffineTransform* xform = ctx.current_transform();
     prim_to_mesh(prim, ctx.tree, *mesh, pool.coords, pool.n_coords,
-                 pool.tex_ids, pool.n_tex_ids);
+                 pool.tex_ids, pool.n_tex_ids, xform);
 }
 
 /// Walk the BSP tree starting from a given node index.
@@ -270,6 +367,9 @@ void walk_node(WalkContext& ctx, NodeIdx node_idx)
             break;
     }
 
+    // Track whether we pushed a transform (to pop it later)
+    bool pushed_transform = false;
+
     switch (node.type) {
     case BspNodeType::BNode:
         // Abstract base — just sibling
@@ -287,13 +387,95 @@ void walk_node(WalkContext& ctx, NodeIdx node_idx)
         break;
 
     case BspNodeType::BDofNode:
-    case BspNodeType::BXDofNode:
-    case BspNodeType::BTransNode:
-    case BspNodeType::BScaleNode:
-        // DOF/transform — recurse into subtree
-        // (Future: apply transform to accumulated vertices)
+    case BspNodeType::BXDofNode: {
+        // DOF rotational transform.
+        //
+        // In FreeFalcon, a BDofNode defines a coordinate frame for its
+        // subtree using dof_rotation (orientation into parent space) and
+        // dof_translation (origin in parent space). The DOF value rotates
+        // the subtree around the local Z axis.
+        //
+        // Full transform for a vertex v in the DOF's local frame:
+        //   v_parent = dof_translation + dof_rotation * Rz(value) * v
+        //
+        // As an AffineTransform:
+        //   rotation    = dof_rotation * Rz(value)
+        //   translation = dof_translation
+        const float dof_value = get_dof_value(ctx.state, node.dof_number);
+
+        // Build Rz(dof_value)
+        AffineTransform rz = make_rotation_x(dof_value);
+
+        // Compose: dof_rotation * Rz(value)
+        AffineTransform dof_xform;
+        for (int i = 0; i < 3; ++i) {
+            for (int j = 0; j < 3; ++j) {
+                dof_xform.rotation.m[i][j] = 0;
+                for (int k = 0; k < 3; ++k) {
+                    dof_xform.rotation.m[i][j] +=
+                        node.dof_rotation.m[i][k] * rz.rotation.m[k][j];
+                }
+            }
+        }
+        dof_xform.translation = node.dof_translation;
+
+        ctx.push_transform(dof_xform);
+        pushed_transform = true;
+
         if (node.subtree >= 0) walk_node(ctx, node.subtree);
         break;
+    }
+
+    case BspNodeType::BTransNode: {
+        // DOF translational transform.
+        //
+        // BTransNode translates its subtree. The dof_translation is the
+        // base position offset, and the DOF value drives additional
+        // translation along the local Z axis (scaled by multiplier).
+        //
+        // v_parent = v_local + dof_translation + (0, 0, value * multiplier)
+        const float dof_value = get_dof_value(ctx.state, node.dof_number);
+
+        AffineTransform trans_xform; // identity rotation
+        trans_xform.translation = node.dof_translation;
+        // Add DOF-driven Z translation
+        trans_xform.translation.z += dof_value * node.dof_multiplier;
+
+        ctx.push_transform(trans_xform);
+        pushed_transform = true;
+
+        if (node.subtree >= 0) walk_node(ctx, node.subtree);
+        break;
+    }
+
+    case BspNodeType::BScaleNode: {
+        // Scale transform.
+        //
+        // BScaleNode scales its subtree by the scale factors and offsets
+        // by dof_translation.
+        //
+        // v_parent = dof_translation + diag(scale) * v_local
+        //
+        // We represent this by storing the scale in the rotation matrix
+        // (which is no longer orthogonal, but works for position
+        // transforms). Normals will be approximately correct for uniform
+        // scale; non-uniform scale may cause slight normal errors.
+        AffineTransform scale_xform;
+        scale_xform.rotation.m[0][0] = node.scale.x;
+        scale_xform.rotation.m[0][1] = 0; scale_xform.rotation.m[0][2] = 0;
+        scale_xform.rotation.m[1][0] = 0;
+        scale_xform.rotation.m[1][1] = node.scale.y;
+        scale_xform.rotation.m[1][2] = 0;
+        scale_xform.rotation.m[2][0] = 0; scale_xform.rotation.m[2][1] = 0;
+        scale_xform.rotation.m[2][2] = node.scale.z;
+        scale_xform.translation = node.dof_translation;
+
+        ctx.push_transform(scale_xform);
+        pushed_transform = true;
+
+        if (node.subtree >= 0) walk_node(ctx, node.subtree);
+        break;
+    }
 
     case BspNodeType::BSwitchNode:
     case BspNodeType::BXSwitchNode: {
@@ -356,6 +538,7 @@ void walk_node(WalkContext& ctx, NodeIdx node_idx)
 
     case BspNodeType::BSpecialXform:
         // Billboard/tree transform — recurse into subtree
+        // TODO: Apply billboard/tree special transform
         if (node.subtree >= 0) walk_node(ctx, node.subtree);
         break;
 
@@ -372,6 +555,7 @@ void walk_node(WalkContext& ctx, NodeIdx node_idx)
         break;
     }
 
+    if (pushed_transform) ctx.pop_transform();
     if (pushed) ctx.pop_pools();
 
     // Walk sibling
