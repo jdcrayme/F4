@@ -66,6 +66,21 @@ struct ViewerApp::Impl {
     bool meshes_dirty = true;
     std::size_t total_tri_count = 0;  // across all meshes
 
+    // ── Lines + Points (LineF / PointF primitives) ───────────────────
+    // These don't fit Raylib's ::Mesh triangle-list model, so we draw them
+    // separately via DrawLine3D / DrawCube in canvas3d.cpp.
+    struct LineSeg {
+        Vector3 a, b;
+        Color   color;
+    };
+    struct PointMark {
+        Vector3 p;
+        Color   color;
+        float   size;
+    };
+    std::vector<LineSeg>   line_segs;
+    std::vector<PointMark> point_marks;
+
     // ── Display toggles ───────────────────────────────────────────────
     bool show_wireframe = false;
     bool show_grid = true;

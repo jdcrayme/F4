@@ -82,7 +82,12 @@ void ViewerApp::run() {
 
         // Draw
         BeginDrawing();
-        ClearBackground({30, 30, 30, 255});
+        // Use a brighter, neutral background so vertex-colored meshes show up
+        // clearly. The previous dark-grey background (30,30,30) was visually
+        // indistinguishable from many of the garbage colors produced by the
+        // old "treat ColorBank index as packed ABGR" bug. A medium grey gives
+        // good contrast against both light and dark vertex colors.
+        ClearBackground({100, 100, 110, 255});
         impl_->draw_canvas();
         impl_->draw_imgui();
         EndDrawing();

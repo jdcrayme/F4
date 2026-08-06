@@ -28,6 +28,8 @@ struct HdrParseResult {
     bool is_new_format = false;
     bool has_lod_names = false;
 
+    ColorBank color_bank;  ///< Parsed ColorBank (empty if parse fails)
+
     std::vector<LodTableEntry> lod_entries;
     std::vector<ModelRecord> parents;
 };

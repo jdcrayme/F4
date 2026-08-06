@@ -294,21 +294,27 @@ bool decode_prim(
 void prim_to_mesh(
     const DecodedPrim& prim,
     const BspTree& tree,
-    Mesh& mesh)
+    Mesh& mesh,
+    const Vec3* coords, std::size_t n_coords,
+    const int32_t* tex_ids, std::size_t n_tex_ids)
 {
-    if (prim.n_verts < 3 || prim.type == PolyType::Unknown) return;  // need at least a triangle
+    (void)tree;  // kept for backward compat / future use
+    if (prim.n_verts <= 0 || prim.type == PolyType::Unknown) return;
 
     auto base_vert = static_cast<uint32_t>(mesh.vertices.size());
 
-    // Resolve vertex positions from the coords pool
+    // Resolve vertex positions from the supplied active coord pool.
+    // (Previously this always used tree.coords, which produced garbage
+    // for prims inside non-root subtrees — see Fix #4.)
     for (int i = 0; i < prim.n_verts; ++i) {
         Vertex v;
 
-        // Position from xyz index → coords pool
+        // Position from xyz index → active coords pool
         if (i < static_cast<int>(prim.xyz_indices.size())) {
             int32_t idx = prim.xyz_indices[i];
-            if (idx >= 0 && idx < static_cast<int>(tree.coords.size())) {
-                v.position = tree.coords[idx];
+            if (idx >= 0 && coords &&
+                static_cast<std::size_t>(idx) < n_coords) {
+                v.position = coords[idx];
             }
         }
 
@@ -322,10 +328,10 @@ void prim_to_mesh(
             v.uv = prim.uv_coords[i];
         }
 
-        // Texture ID (resolve local tex_index through BspTree::tex_ids)
-        if (prim.tex_index >= 0 &&
-            prim.tex_index < static_cast<int>(tree.tex_ids.size())) {
-            v.tex_id = tree.tex_ids[prim.tex_index];
+        // Texture ID (resolve local tex_index through the ACTIVE tex_ids pool)
+        if (prim.tex_index >= 0 && tex_ids &&
+            prim.tex_index < static_cast<int>(n_tex_ids)) {
+            v.tex_id = tex_ids[prim.tex_index];
         }
 
         // Color (flat or per-vertex)
@@ -338,21 +344,44 @@ void prim_to_mesh(
         mesh.vertices.push_back(v);
     }
 
-    // Fan triangulation: for n verts, create (n-2) triangles
-    // All sharing vertex 0 (convex polygon assumed)
+    // Resolve the texture id (for tagging the primitives). We share the
+    // mesh's tex_id field already, but the per-primitive tag is useful
+    // for exporters that walk triangles/lines individually.
     int32_t tex = -1;
-    if (prim.tex_index >= 0 &&
-        prim.tex_index < static_cast<int>(tree.tex_ids.size())) {
-        tex = tree.tex_ids[prim.tex_index];
+    if (prim.tex_index >= 0 && tex_ids &&
+        prim.tex_index < static_cast<int>(n_tex_ids)) {
+        tex = tex_ids[prim.tex_index];
     }
 
-    for (int i = 1; i < prim.n_verts - 1; ++i) {
-        Triangle tri;
-        tri.v0 = base_vert;
-        tri.v1 = base_vert + i;
-        tri.v2 = base_vert + i + 1;
-        tri.tex_id = tex;
-        mesh.triangles.push_back(tri);
+    // Emit primitive indices based on the PolyType.
+    //
+    // PointF (n=1)         → 1 point
+    // LineF  (n=2)         → 1 line
+    // F/FL/G/GL/Tex*/...   → (n-2) triangles via fan triangulation
+    //
+    // Fan triangulation assumes convex polygons (Falcon's prim writer
+    // guarantees convexity — see bspbuild.exe's FLT importer).
+    if (prim.type == PolyType::PointF) {
+        Point pt;
+        pt.v0 = base_vert;
+        pt.tex_id = tex;
+        mesh.points.push_back(pt);
+    } else if (prim.type == PolyType::LineF) {
+        Line ln;
+        ln.v0 = base_vert;
+        ln.v1 = (prim.n_verts >= 2) ? base_vert + 1 : base_vert;
+        ln.tex_id = tex;
+        mesh.lines.push_back(ln);
+    } else {
+        // Triangle fan: (v0, vi, vi+1) for i in [1, n-1)
+        for (int i = 1; i < prim.n_verts - 1; ++i) {
+            Triangle tri;
+            tri.v0 = base_vert;
+            tri.v1 = base_vert + static_cast<uint32_t>(i);
+            tri.v2 = base_vert + static_cast<uint32_t>(i + 1);
+            tri.tex_id = tex;
+            mesh.triangles.push_back(tri);
+        }
     }
 }
 

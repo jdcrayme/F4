@@ -323,7 +323,35 @@ NodeIdx walk_node(WalkCtx& ctx, int32_t offset) {
         if (!r.read(node.n_children)) goto trunc;
         if (!r.read(children_off)) goto trunc;
         node.switch_children_offset = children_off;
-        // Switch children are walked later after all nodes are discovered
+
+        // CRITICAL: walk each child NOW so they end up in tree.nodes and
+        // offset_map. Without this, switch subtrees (which usually contain
+        // the actual renderable primitives for the parent) are dropped
+        // from the tree entirely. The post-pass that resolves the child
+        // byte offsets into NodeIdx values via offset_map will then find
+        // them — previously it always returned NULL_NODE.
+        //
+        // The on-disk layout is `int32_t child_offsets[n_children]` at
+        // children_off (a byte offset into nodeTreeData). Each entry is
+        // a byte offset to the child subtree root.
+        if (children_off >= 0 && node.n_children > 0 && node.n_children < 64) {
+            auto base = static_cast<std::size_t>(children_off);
+            auto count = static_cast<std::size_t>(node.n_children);
+            if (base + count * sizeof(int32_t) <= ctx.base_size) {
+                for (std::size_t k = 0; k < count; ++k) {
+                    int32_t child_off = -1;
+                    std::memcpy(&child_off,
+                                ctx.base + base + k * sizeof(int32_t),
+                                sizeof(int32_t));
+                    if (child_off >= 0) {
+                        // Recurse — this populates tree.nodes / offset_map
+                        // as a side effect. The returned NodeIdx is not
+                        // stored here; the post-pass below re-resolves it.
+                        (void)walk_node(ctx, child_off);
+                    }
+                }
+            }
+        }
         break;
     }
 
@@ -334,6 +362,23 @@ NodeIdx walk_node(WalkCtx& ctx, int32_t offset) {
         if (!r.read(node.n_children)) goto trunc;
         if (!r.read(children_off)) goto trunc;
         node.switch_children_offset = children_off;
+
+        // Same as BSwitchNode — walk children now so they're in the map.
+        if (children_off >= 0 && node.n_children > 0 && node.n_children < 64) {
+            auto base = static_cast<std::size_t>(children_off);
+            auto count = static_cast<std::size_t>(node.n_children);
+            if (base + count * sizeof(int32_t) <= ctx.base_size) {
+                for (std::size_t k = 0; k < count; ++k) {
+                    int32_t child_off = -1;
+                    std::memcpy(&child_off,
+                                ctx.base + base + k * sizeof(int32_t),
+                                sizeof(int32_t));
+                    if (child_off >= 0) {
+                        (void)walk_node(ctx, child_off);
+                    }
+                }
+            }
+        }
         break;
     }
 

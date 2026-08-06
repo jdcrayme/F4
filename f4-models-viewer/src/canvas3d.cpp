@@ -98,26 +98,56 @@ void ViewerApp::Impl::draw_canvas() {
         draw_axes(50.0f);
     }
 
-    // Draw meshes
+    // Draw meshes with the default material. Raylib's default material is
+    // white diffuse + vertex-color support — vertex colors set in scene.cpp
+    // are multiplied by the material's diffuse color, so the result is the
+    // vertex color (resolved through ColorBank) modulated by white. This
+    // makes flat-shaded (untextured) meshes visible with their actual
+    // ColorBank colors, and textured meshes appear white pending texture
+    // binding (Phase V2 work).
     const Matrix identity = MatrixIdentity();
     Material mat = LoadMaterialDefault();
+
+    // Tint the material diffuse white so vertex colors pass through unchanged.
+    // (The default material's diffuse is already white, but be explicit so
+    // future changes to LoadMaterialDefault() don't silently darken meshes.)
+    mat.maps[MATERIAL_MAP_DIFFUSE].color = WHITE;
 
     if (show_wireframe) {
         rlEnableWireMode();
     }
 
     for (const auto& mesh : raylib_meshes) {
-        DrawMesh(mesh, mat, identity);
+        // Only call DrawMesh if the mesh actually has triangles. Meshes with
+        // only lines/points (LineF/PointF primitives emitted by far LODs)
+        // have triangleCount == 0 and are drawn separately below.
+        if (mesh.triangleCount > 0) {
+            DrawMesh(mesh, mat, identity);
+        }
     }
 
     if (show_wireframe) {
         rlDisableWireMode();
     }
 
+    // Draw line primitives (LineF) — Raylib's DrawMesh only handles triangle
+    // lists, so we draw each line segment via DrawLine3D.
+    for (const auto& seg : line_segs) {
+        DrawLine3D(seg.a, seg.b, seg.color);
+    }
+
+    // Draw point primitives (PointF) as small cubes for visibility.
+    for (const auto& pm : point_marks) {
+        DrawCube(pm.p, pm.size, pm.size, pm.size, pm.color);
+    }
+
     // Bounding volumes
     draw_bounding_volumes();
 
     EndMode3D();
+
+    // UnloadMaterial on the default material would leak; LoadMaterialDefault()
+    // returns a shared singleton that must NOT be UnloadMaterial'd. Leave it.
 }
 
 } // namespace f4::models_viewer

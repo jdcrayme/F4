@@ -32,22 +32,62 @@ struct Triangle {
     int32_t  tex_id = -1;               ///< texture ID for this face
 };
 
+// ── Line (LineF primitive) ────────────────────────────────────────────────
+/// A 2-vertex line segment. Emitted from LineF primitives.
+struct Line {
+    uint32_t v0 = 0, v1 = 0;       ///< indices into vertex array
+    int32_t  tex_id = -1;
+};
+
+// ── Point (PointF primitive) ─────────────────────────────────────────────
+/// A single vertex point. Emitted from PointF primitives.
+struct Point {
+    uint32_t v0 = 0;                ///< index into vertex array
+    int32_t  tex_id = -1;
+};
+
+// ── Primitive Kind ────────────────────────────────────────────────────────
+/// Coarse classification for a mesh's primitive type. A mesh contains
+/// either triangles, lines, or points — never a mix. This drives the
+/// Raylib upload (rlgl primitive type) and the draw call (DrawMesh vs
+/// DrawMeshInstanced for lines/points).
+enum class PrimitiveKind : uint8_t {
+    Triangles = 0,  ///< mesh.triangles populated
+    Lines     = 1,  ///< mesh.lines populated
+    Points    = 2,  ///< mesh.points populated
+};
+
 // ── Mesh ──────────────────────────────────────────────────────────────────
-/// One draw-call worth of geometry — all triangles share the same
-/// material/texture. A complete model may have multiple meshes.
+/// One draw-call worth of geometry — all primitives share the same
+/// material/texture and the same primitive kind. A complete model may
+/// have multiple meshes.
 
 struct Mesh {
     std::vector<Vertex>   vertices;
     std::vector<Triangle> triangles;
+    std::vector<Line>      lines;       ///< only populated when kind == Lines
+    std::vector<Point>     points;      ///< only populated when kind == Points
     int32_t               tex_id = -1;     ///< common texture ID (-1 = mixed)
+    PrimitiveKind         kind = PrimitiveKind::Triangles;
     std::string           name;             ///< optional debug name
 
     /// Merge another mesh into this one (remaps vertex indices).
+    /// Only valid when both meshes have the same PrimitiveKind.
     void merge(const Mesh& other);
 
     [[nodiscard]] bool empty() const noexcept {
-        return vertices.empty() && triangles.empty();
+        return vertices.empty() && triangles.empty() &&
+               lines.empty() && points.empty();
     }
+    [[nodiscard]] std::size_t primitive_count() const noexcept {
+        switch (kind) {
+            case PrimitiveKind::Triangles: return triangles.size();
+            case PrimitiveKind::Lines:     return lines.size();
+            case PrimitiveKind::Points:    return points.size();
+        }
+        return 0;
+    }
+    /// Kept for backward compat — returns triangle count.
     [[nodiscard]] std::size_t triangle_count() const noexcept {
         return triangles.size();
     }

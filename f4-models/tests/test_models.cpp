@@ -116,6 +116,35 @@ TEST_F(ModelsFixtureTest, LoadHdrOnly) {
     EXPECT_GT(db.n_textures(), 0);
 }
 
+TEST_F(ModelsFixtureTest, ColorBankParsed) {
+    // The ColorBank must be parsed and exposed so the viewer can resolve
+    // Prim.rgba indices into actual RGBA colors. Previously the parser
+    // skipped the ColorBank entirely (r.skip(n_colors * 16)) and the
+    // viewer treated color indices as packed ABGR — producing garbage.
+    f4::models::ModelDatabase db;
+    auto err = db.load_hdr(hdr_path());
+    ASSERT_TRUE(err.empty()) << err;
+
+    const auto& cb = db.color_bank();
+    EXPECT_FALSE(cb.empty()) << "ColorBank should not be empty after load";
+    EXPECT_GT(cb.size(), 100u) << "KoreaObj.HDR has ~1596 colors";
+    EXPECT_GT(cb.n_darkened, 0) << "KoreaObj.HDR has ~669 darkened colors";
+
+    // Look up common indices found in the fixture's prims (873, 38, 81).
+    // Each should produce a non-zero packed RGBA. (Specific values depend
+    // on the fixture but every index used by a real prim should resolve.)
+    for (int idx : {0, 1, 38, 81, 100, 500, 873}) {
+        if (static_cast<std::size_t>(idx) >= cb.size()) continue;
+        const uint32_t rgba = cb.rgba_at(idx);
+        EXPECT_NE(rgba, 0u)
+            << "ColorBank index " << idx << " should resolve to non-zero RGBA";
+    }
+
+    // Out-of-range indices should return 0 (transparent), not crash.
+    EXPECT_EQ(cb.rgba_at(-1), 0u);
+    EXPECT_EQ(cb.rgba_at(static_cast<int>(cb.size())), 0u);
+}
+
 TEST_F(ModelsFixtureTest, LoadHdrAndLod) {
     f4::models::ModelDatabase db;
     auto err = db.load(hdr_path(), lod_path());
@@ -344,6 +373,87 @@ TEST_F(ModelsFixtureTest, GeometryRobustnessWide) {
             }
         }
     }
+}
+
+TEST_F(ModelsFixtureTest, LineAndPointPrimitivesEmitted) {
+    // Far LODs often use LineF / PointF primitives for distance markers.
+    // The old prim_to_mesh silently dropped anything with n_verts < 3,
+    // which made ~145 LODs in this fixture render as empty. After the
+    // fix, those should produce Lines / Points instead.
+    f4::models::ModelDatabase db;
+    auto err = db.load(hdr_path(), lod_path());
+    ASSERT_TRUE(err.empty()) << err;
+
+    int models_with_lines = 0;
+    int models_with_points = 0;
+    int models_with_tris = 0;
+
+    // Sample every 6th parent (matches the diagnostic script).
+    int stride = std::max(1, db.n_models() / 200);
+    for (int idx = 0; idx < db.n_models(); idx += stride) {
+        auto* m = db.model(idx);
+        if (!m || m->lods.empty()) continue;
+
+        for (int lod = 0; lod < static_cast<int>(m->lods.size()); ++lod) {
+            auto pe = db.parse_lod(idx, lod);
+            if (!pe.empty()) continue;
+
+            auto geom = db.extract_model_geometry(idx, lod);
+            for (const auto& mesh : geom.meshes) {
+                if (mesh.kind == f4::models::PrimitiveKind::Lines &&
+                    !mesh.lines.empty()) {
+                    ++models_with_lines;
+                }
+                if (mesh.kind == f4::models::PrimitiveKind::Points &&
+                    !mesh.points.empty()) {
+                    ++models_with_points;
+                }
+                if (mesh.kind == f4::models::PrimitiveKind::Triangles &&
+                    !mesh.triangles.empty()) {
+                    ++models_with_tris;
+                }
+            }
+        }
+    }
+
+    // Without the LineF/PointF fix, models_with_lines == 0 and a big chunk
+    // of LODs would be empty. After the fix, we expect at least some lines.
+    EXPECT_GT(models_with_lines, 0)
+        << "LineF primitives should now be emitted as PrimitiveKind::Lines";
+    EXPECT_GT(models_with_tris, 0)
+        << "Triangle primitives should still be emitted";
+    // Points are rarer; just verify the path doesn't crash.
+}
+
+TEST_F(ModelsFixtureTest, EmptyLodCountReduced) {
+    // Regression test for the "switch children not walked" + "per-subtree
+    // pool binding" fixes. Before the fixes, ~26% of sampled LODs returned
+    // 0 vertices. After the fixes, it should be < 5%.
+    f4::models::ModelDatabase db;
+    auto err = db.load(hdr_path(), lod_path());
+    ASSERT_TRUE(err.empty()) << err;
+
+    int total_lods = 0;
+    int empty_lods = 0;
+    int stride = std::max(1, db.n_models() / 200);
+    for (int idx = 0; idx < db.n_models(); idx += stride) {
+        auto* m = db.model(idx);
+        if (!m || m->lods.empty()) continue;
+        for (int lod = 0; lod < static_cast<int>(m->lods.size()); ++lod) {
+            auto pe = db.parse_lod(idx, lod);
+            if (!pe.empty()) continue;
+            ++total_lods;
+            auto geom = db.extract_model_geometry(idx, lod);
+            if (geom.total_vertices() == 0) ++empty_lods;
+        }
+    }
+
+    ASSERT_GT(total_lods, 100) << "sample should cover >100 LODs";
+    const double empty_pct = 100.0 * empty_lods / total_lods;
+    EXPECT_LT(empty_pct, 5.0)
+        << "Empty LOD rate is " << empty_pct << "% (was 26% before fixes; "
+        << "should now be < 5%). " << empty_lods << " empty out of "
+        << total_lods;
 }
 
 TEST_F(ModelsFixtureTest, ModelGeometryTypes) {

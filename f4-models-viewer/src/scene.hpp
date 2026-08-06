@@ -10,14 +10,21 @@
 
 #include <vector>
 
-namespace f4::models { struct ModelGeometry; }
+namespace f4::models {
+struct ModelGeometry;
+class  ColorBank;
+}  // namespace f4::models
 
 namespace f4::models_viewer {
 
 /// Build Raylib meshes from extracted model geometry.
 /// Each f4::models::Mesh becomes one Raylib ::Mesh (uploaded to GPU).
-/// Applies LH Z-up → RH Y-up coordinate conversion.
-std::vector<::Mesh> build_raylib_meshes(const f4::models::ModelGeometry& geom);
+/// Applies LH Z-up → RH Y-up coordinate conversion and resolves
+/// vertex color indices through the ColorBank (Prim.rgba is an int index
+/// into the ColorBank, NOT packed ABGR — see f4-models ColorBank docs).
+std::vector<::Mesh> build_raylib_meshes(
+    const f4::models::ModelGeometry& geom,
+    const f4::models::ColorBank& color_bank);
 
 /// Unload (free GPU memory for) a vector of Raylib meshes.
 void unload_meshes(std::vector<::Mesh>& meshes);

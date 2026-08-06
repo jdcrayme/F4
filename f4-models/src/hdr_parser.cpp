@@ -67,9 +67,42 @@ bool parse_hdr(
         err = "HDR truncated in ColorBank header";
         return false;
     }
-    if (!r.skip(result.n_colors * S_PCOLOR)) {
-        err = "HDR truncated in ColorBank data";
-        return false;
+
+    // Read the ColorBank as n_colors × 16 bytes (4 floats: r, g, b, a).
+    // FreeFalcon's Pcolor is `struct Pcolor { float r, g, b, a; };` —
+    // see `graphics/include/grtypes.h`. Written by
+    // `ColorBankClass::ReadPool` in `graphics/bsplib/colorbank.cpp`.
+    //
+    // We pre-multiply into a uint8 RGBA to make the runtime path cheap
+    // (viewer calls rgba_at(index) and unpacks to Raylib Color).
+    result.color_bank.colors.clear();
+    result.color_bank.colors.reserve(static_cast<std::size_t>(result.n_colors));
+    result.color_bank.n_darkened = result.n_dark_colors;
+    for (int i = 0; i < result.n_colors; ++i) {
+        float fr = 0, fg = 0, fb = 0, fa = 0;
+        if (!r.read(fr) || !r.read(fg) || !r.read(fb) || !r.read(fa)) {
+            err = "HDR truncated in ColorBank entry " + std::to_string(i);
+            return false;
+        }
+        ColorEntry c;
+        // Falcon floats are typically 0..1; clamp just in case.
+        auto clamp_f = [](float v) -> uint8_t {
+            if (v <= 0.0f) return 0;
+            if (v >= 1.0f) return 255;
+            return static_cast<uint8_t>(v * 255.0f + 0.5f);
+        };
+        c.r = clamp_f(fr);
+        c.g = clamp_f(fg);
+        c.b = clamp_f(fb);
+        c.a = clamp_f(fa);
+        // Many Pcolor entries have a=0 in the source data; treat 0 alpha
+        // as fully opaque (Falcon treats them as opaque; alpha 0 was the
+        // engine's "darkened" placeholder). Only PolyTex* variants with
+        // a real chroma key actually use alpha.
+        if (c.a == 0 && (c.r != 0 || c.g != 0 || c.b != 0)) {
+            c.a = 255;
+        }
+        result.color_bank.colors.push_back(c);
     }
 
     // PaletteBank

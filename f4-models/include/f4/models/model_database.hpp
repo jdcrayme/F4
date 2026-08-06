@@ -33,10 +33,42 @@ namespace f4::models {
 
 // ── HDR Banks ─────────────────────────────────────────────────────────────
 
-/// One color entry from the ColorBank (16 bytes on disk).
+/// One color entry from the ColorBank.
+///
+/// On disk this is 16 bytes: 4 floats (r,g,b,a) per FreeFalcon's Pcolor.
+/// FreeFalcon writes raw float32 RGBA in `ColorBankClass::ReadPool`, see
+/// `graphics/bsplib/colorbank.cpp`. Indices 0..n_darkened_colors-1 are
+/// "darkened" entries used for time-of-day modulation; the rest are static.
 struct ColorEntry {
     uint8_t r = 0, g = 0, b = 0, a = 255;
-    // 12 bytes padding on disk (total 16)
+};
+
+/// The ColorBank — array of `colors` plus the count of "darkened" colors.
+///
+/// Referenced by `Prim.rgba` / `PolyFC.rgba` etc. In FreeFalcon, those fields
+/// are `int rgba` (NOT packed ARGB), and the runtime resolves them through
+/// `TheColorBank->GetColorEntry(rgba)` to get a `Pcolor` struct.
+///
+/// See `f4-models/src/hdr_parser.cpp` for the parsing entry point.
+struct ColorBank {
+    std::vector<ColorEntry> colors;
+    int n_darkened = 0;
+
+    [[nodiscard]] std::size_t size() const noexcept { return colors.size(); }
+    [[nodiscard]] bool empty() const noexcept { return colors.empty(); }
+
+    /// Resolve an index into a packed RGBA uint32 (0xRRGGBBAA) suitable
+    /// for passing to Raylib's Color. Out-of-range indices return 0
+    /// (transparent). This mirrors `ColorBankClass::GetColorEntry`.
+    [[nodiscard]] uint32_t rgba_at(int index) const noexcept {
+        if (index < 0 || static_cast<std::size_t>(index) >= colors.size())
+            return 0;
+        const auto& c = colors[static_cast<std::size_t>(index)];
+        return (static_cast<uint32_t>(c.r) << 24) |
+               (static_cast<uint32_t>(c.g) << 16) |
+               (static_cast<uint32_t>(c.b) << 8)  |
+               (static_cast<uint32_t>(c.a));
+    }
 };
 
 /// One palette from the PaletteBank (1032 bytes on disk).
@@ -119,6 +151,11 @@ public:
     /// LOD file path used for loading.
     [[nodiscard]] const std::filesystem::path& lod_path() const noexcept { return lod_path_; }
 
+    /// The parsed ColorBank. Used by the viewer/exporter to resolve
+    /// `Prim.rgba` (an int index) to an actual RGBA color. See
+    /// `ColorBank::rgba_at(int)`.
+    [[nodiscard]] const ColorBank& color_bank() const noexcept { return color_bank_; }
+
     // ── Query ─────────────────────────────────────────────────────────
 
     /// Find models with the given number of slots range.
@@ -151,6 +188,8 @@ private:
     int max_tags_ = 0;
     bool is_new_format_ = false;
     bool has_lod_names_ = false;
+
+    ColorBank color_bank_;
 
     std::filesystem::path hdr_path_;
     std::filesystem::path lod_path_;

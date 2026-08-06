@@ -69,9 +69,19 @@ struct DecodedPrim {
 
 /// Convert a decoded Prim + BSP tree data into renderable vertices/triangles.
 /// The resulting triangles are appended to `mesh`.
+///
+/// `coords` / `n_coords` — the active coord pool (from the current
+/// subtree, NOT necessarily tree.coords). This is critical: prims inside
+/// a BSubTree/BDofNode/etc. index into that subtree's local coord pool,
+/// not the root's. Pass the active pool from the geometry_extractor's
+/// pool stack.
+///
+/// `tex_ids` / `n_tex_ids` — the active tex_ids pool, same reasoning.
 void prim_to_mesh(
     const DecodedPrim& prim,
     const BspTree& tree,
-    Mesh& mesh);
+    Mesh& mesh,
+    const Vec3* coords, std::size_t n_coords,
+    const int32_t* tex_ids, std::size_t n_tex_ids);
 
 } // namespace f4::models::detail

@@ -181,6 +181,7 @@ std::string ModelDatabase::load_hdr(
     max_tags_ = result.max_tags;
     is_new_format_ = result.is_new_format;
     has_lod_names_ = result.has_lod_names;
+    color_bank_ = std::move(result.color_bank);
     lod_entries_ = std::move(result.lod_entries);
     parents_ = std::move(result.parents);
 
