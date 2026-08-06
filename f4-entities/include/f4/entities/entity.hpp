@@ -142,6 +142,16 @@ namespace f4::entities {
         inline constexpr const char* STEALTH = "stealth"; // bool
     }
 
+    // detail::next_world_cookie — internal helper used by EntityWorld's
+    // custom move ctor/assign to regenerate the world cookie on the
+    // destination. Declared here (in the public header) so the inline
+    // move ctor can call it; defined out-of-line in entity.cpp where the
+    // global atomic counter lives. Not part of the public API — do not
+    // call from outside the entity library.
+    namespace detail {
+        [[nodiscard]] uint64_t next_world_cookie() noexcept;
+    }
+
     // ============================================================================
     // Components — typed data blobs attached to entities.
     // ============================================================================
@@ -405,8 +415,37 @@ namespace f4::entities {
         // Non-copyable (holds unique_ptrs); movable.
         EntityWorld(const EntityWorld&) = delete;
         EntityWorld& operator=(const EntityWorld&) = delete;
-        EntityWorld(EntityWorld&&) noexcept = default;
-        EntityWorld& operator=(EntityWorld&&) noexcept = default;
+
+        // Custom move constructor: regenerates the cookie so that
+        // EntityHandles captured against the source (moved-from) world
+        // fail validation against the destination. The defaulted move
+        // ctor would copy the cookie, defeating the use-after-free
+        // detection that the cookie is there to provide.
+        //
+        // We deliberately do NOT invalidate handles captured against the
+        // source BEFORE the move — those handles already hold the source's
+        // cookie, and after the move the source's destructor runs (or its
+        // cookie becomes stale), so the handles correctly fail validation
+        // against the destination. The new cookie simply ensures handles
+        // captured against the destination are bound to ITS cookie, not
+        // the source's.
+        EntityWorld(EntityWorld&& other) noexcept
+            : entities_(std::move(other.entities_))
+            , free_list_(std::move(other.free_list_))
+            , cookie_(detail::next_world_cookie())
+        {}
+
+        // Move assignment: same reasoning — regenerate the cookie so old
+        // handles against `*this` (before the assignment) don't accidentally
+        // validate against the new contents.
+        EntityWorld& operator=(EntityWorld&& other) noexcept {
+            if (this != &other) {
+                entities_  = std::move(other.entities_);
+                free_list_ = std::move(other.free_list_);
+                cookie_    = detail::next_world_cookie();
+            }
+            return *this;
+        }
 
         [[nodiscard]] EntityHandle create();
         void destroy(EntityId id);

@@ -18,6 +18,20 @@ namespace {
 // boundary and stop decoding.
 using f4::io::Cursor;
 
+// ============================================================================
+// Format constants — Falcon 4 .cam objective records.
+//
+// Sources: FreeFalcon campbase.cpp (CampBaseClass::Save/Load) and
+// objective.cpp (ObjectiveClass::Save/Load). Constants gathered here so
+// the parser below reads as a description of the format.
+// ============================================================================
+constexpr int    OBJ_HEADER_BYTES      = 10;     // i16 count + i32 uncompressed + i32 compressed
+constexpr int    LINK_COSTS_PER_LINK   = 8;      // MoveType enum count: road/rail/etc. — costs[N] in each ObjectiveLink
+constexpr int    NUM_RADAR_ARCS        = 8;      // RadarRangeClass detect_ratio[8]
+constexpr int16_t GRID_COORD_MIN       = -10;    // sanity gate: grid coords outside [MIN,MAX] indicate desync
+constexpr int16_t GRID_COORD_MAX       = 2048;   // Korea theater grid extent (32 tiles × 64 cells = 2048)
+constexpr std::size_t VU_ID_BYTES      = 8;      // u32 num + u32 creator
+
 } // namespace
 
 std::string objective_type_name(int16_t type) {
@@ -52,7 +66,7 @@ std::string objective_type_name(int16_t type) {
 
 DecodedObjectives decode_obj(const uint8_t* data, std::size_t size) {
     DecodedObjectives out;
-    if (size < 10) throw std::runtime_error("obj: sub-file too small for header");
+    if (size < OBJ_HEADER_BYTES) throw std::runtime_error("obj: sub-file too small for header");
 
     Cursor top{data, data + size};
     out.count = top.i16();
@@ -63,8 +77,8 @@ DecodedObjectives decode_obj(const uint8_t* data, std::size_t size) {
     if (uncompressed <= 0) throw std::runtime_error("obj: invalid uncompressed size");
     if (compressed <= 0) throw std::runtime_error("obj: invalid compressed size");
 
-    const uint8_t* comp = data + 10;
-    if (static_cast<std::size_t>(compressed) > size - 10)
+    const uint8_t* comp = data + OBJ_HEADER_BYTES;
+    if (static_cast<std::size_t>(compressed) > size - OBJ_HEADER_BYTES)
         throw std::runtime_error("obj: compressed payload exceeds sub-file size");
 
     auto buf = lzss_expand(comp, static_cast<std::size_t>(compressed),
@@ -131,13 +145,13 @@ DecodedObjectives decode_obj(const uint8_t* data, std::size_t size) {
         o.first_owner  = c.u8();
         o.links        = c.u8();
         // Decode the link data (road/rail network). Each link is:
-        //   uchar costs[MOVEMENT_TYPES=8] + VU_ID(8 bytes) = 16 bytes.
+        //   uchar costs[LINK_COSTS_PER_LINK] + VU_ID(VU_ID_BYTES) = 16 bytes.
         // The VU_ID refers to the neighboring objective.
         o.link_data.clear();
         o.link_data.reserve(o.links);
         for (uint8_t li = 0; li < o.links; ++li) {
             ObjectiveLink link;
-            for (int j = 0; j < 8; ++j) {
+            for (int j = 0; j < LINK_COSTS_PER_LINK; ++j) {
                 link.costs[j] = c.u8();
             }
             link.neighbor_num = c.u32();
@@ -145,11 +159,11 @@ DecodedObjectives decode_obj(const uint8_t* data, std::size_t size) {
             o.link_data.push_back(link);
         }
         // Optional RadarRangeClass: present only when has_radar_data != 0.
-        // 8 floats = 32 bytes — detect_ratio[NUM_RADAR_ARCS=8], each a
-        // 0..1 detection ratio for one of 8 azimuthal arcs.
+        // NUM_RADAR_ARCS floats = 32 bytes — detect_ratio[NUM_RADAR_ARCS],
+        // each a 0..1 detection ratio for one of NUM_RADAR_ARCS azimuthal arcs.
         o.has_radar = (c.u8() != 0);
         if (o.has_radar) {
-            for (int j = 0; j < 8; ++j) {
+            for (int j = 0; j < NUM_RADAR_ARCS; ++j) {
                 o.detect_ratio[j] = c.f32();
             }
         }
@@ -166,7 +180,8 @@ DecodedObjectives decode_obj(const uint8_t* data, std::size_t size) {
         // writes o->Type() which is > 0 for real objectives), and the
         // grid coordinates must be plausible. If these fail, the cursor
         // has desynced.
-        if (sentinel == 0 || o.x < -10 || o.x > 2048 || o.y < -10 || o.y > 2048) {
+        if (sentinel == 0 || o.x < GRID_COORD_MIN || o.x > GRID_COORD_MAX ||
+                           o.y < GRID_COORD_MIN || o.y > GRID_COORD_MAX) {
             c.p = before;
             break;
         }

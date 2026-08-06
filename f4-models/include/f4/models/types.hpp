@@ -12,6 +12,8 @@
 
 #include <cstdint>
 
+#include <f4/math/vec3.hpp>
+
 namespace f4::models {
 
 // ── BSP Node Types ────────────────────────────────────────────────────────
@@ -106,14 +108,16 @@ enum class PolyType : uint8_t {
 [[nodiscard]] const char* poly_type_name(PolyType t) noexcept;
 
 // ── Math Types ────────────────────────────────────────────────────────────
-
-struct Vec3 {
-    float x = 0, y = 0, z = 0;
-
-    [[nodiscard]] bool operator==(const Vec3& o) const noexcept {
-        return x == o.x && y == o.y && z == o.z;
-    }
-};
+//
+// Vec3 is an alias for f4::math::Vec3<float> — the previous duplicate
+// definition here was removed in the 2025 cleanup pass. Consumers get the
+// full Vec3 operator set (dot, cross, length, normalize, hadamard, etc.)
+// from f4-math, instead of the bare struct that only had operator==.
+//
+// Layout: 3 contiguous floats, 12 bytes, no padding — identical to the
+// previous struct, so sizeof(Vec3) in the binary parsers (which read
+// arrays of Vec3 directly from disk) is unchanged.
+using Vec3 = f4::math::Vec3<float>;
 
 struct Mat3x3 {
     // Row-major: m[row][col]

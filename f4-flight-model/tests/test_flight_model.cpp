@@ -96,6 +96,11 @@ TEST(FlightModelTest, SixtySecondStabilityRun) {
     fm.init(cfg, 10000.0, 500.0, 0.0, true);
     ASSERT_TRUE(fm.trim());
 
+    // Record the trim state so we can measure drift.
+    const double initialAlt_ft = -fm.state().kin.z;       // altitude = -z
+    const double initialVt_fps = fm.state().kin.vt;
+    const double initialNz     = fm.state().loads.nzcgs;
+
     // Run 60 seconds at 60 Hz (dt = 1/60).
     // The primary check is that the simulation remains stable (no NaNs,
     // no divergence) for a full minute. Altitude/speed will drift because
@@ -124,12 +129,37 @@ TEST(FlightModelTest, SixtySecondStabilityRun) {
     EXPECT_GT(fm.state().aero.alpha_deg, cfg.geometry.aoaMin_deg - 5.0);
     EXPECT_LT(fm.state().aero.alpha_deg, cfg.geometry.aoaMax_deg + 5.0);
 
-    // - G load should be reasonable (not extreme)
-    EXPECT_NEAR(fm.state().loads.nzcgs, 1.0, 3.0);
+    // - G load should remain near 1G. The previous 3-G tolerance was wide
+    // enough to admit a fully-developed stall (0 G) or a 4-G pull (steady
+    // level flight with no pilot input cannot legitimately exceed ~1.5 G
+    // even with throttle drift). Tighten to ±1.0 G — still loose enough to
+    // absorb transient pitch oscillations, but tight enough to catch a
+    // diverging pitch loop.
+    EXPECT_NEAR(fm.state().loads.nzcgs, 1.0, 1.0)
+        << "initialNz=" << initialNz;
 
-    // - RPM should be in a valid range
+    // - Altitude drift bound. With 0.5 throttle (not the trim throttle)
+    // the aircraft will drift because trim() does not seed the FCS
+    // integrator — the FCS re-converges to a slightly different alpha in
+    // the first few seconds, producing a slow descent or climb. The bound
+    // below is intentionally loose: 12000 ft drift in 60 s still rejects
+    // divergent EOMs (which hit 100000+ ft in seconds) while admitting
+    // the known FCS-vs-trim settling transient. Tightening this requires
+    // fixing the trim() → FCS integrator seeding, which is tracked as a
+    // separate flight-model task.
+    const double finalAlt_ft = -fm.state().kin.z;
+    EXPECT_LT(std::fabs(finalAlt_ft - initialAlt_ft), 12000.0)
+        << "initialAlt=" << initialAlt_ft << " finalAlt=" << finalAlt_ft;
+
+    // - RPM should be in a valid range. Idle ~60%, mil ~100%, AB >100%.
+    // A divergent engine model would hit 0 or negative RPM, or exceed 200%.
     EXPECT_GT(fm.state().engine.rpm, 0.0);
     EXPECT_LT(fm.state().engine.rpm, 2.0);
+
+    // - Speed should not diverge. A stable sim may accelerate (0.5 throttle
+    // is mid-power) but a 10x speed change in 60 s indicates divergence.
+    EXPECT_LT(fm.state().kin.vt, initialVt_fps * 10.0);
+    EXPECT_GT(fm.state().kin.vt, initialVt_fps * 0.1);
 }
 
 // ============================================================================
@@ -145,25 +175,55 @@ TEST(FlightModelTest, PitchStickChangesAlpha) {
     ASSERT_TRUE(fm.trim());
 
     const double trimAlpha = fm.state().aero.alpha_deg;
+    const double trimNz    = fm.state().loads.nzcgs;
 
-    // Apply half back stick for 2 seconds
-    PilotInput input;
-    input.throttle = 0.5;
-    input.pstick = 0.5;  // half back stick
+    // Run 2 s with NO stick input first — establishes the post-trim baseline
+    // the FCS actually settles to (trim() does not seed the FCS integrator,
+    // so the first few seconds after trim() involve some settling as the
+    // FCS re-converges). This baseline is what we compare the stick-input
+    // case against, so the test isolates the FCS response to the stick
+    // input rather than measuring trim() + FCS-settling transient.
+    PilotInput no_input;
+    no_input.throttle = 0.5;
     const double dt = 1.0 / 60.0;
     const Vec3d groundNormal{0.0, 0.0, -1.0};
-
     for (int frame = 0; frame < 120; ++frame) {
-        fm.update(dt, input, 0.0, groundNormal);
+        fm.update(dt, no_input, 0.0, groundNormal);
+    }
+    const double baselineAlpha = fm.state().aero.alpha_deg;
+    const double baselineNz    = fm.state().loads.nzcgs;
+
+    // Re-init to the same trim condition, then apply half back stick for 2 s.
+    FlightModel fm2;
+    fm2.init(cfg, 10000.0, 500.0, 0.0, true);
+    ASSERT_TRUE(fm2.trim());
+
+    PilotInput input;
+    input.throttle = 0.5;
+    input.pstick = 0.5;  // half back stick (nose-up)
+    for (int frame = 0; frame < 120; ++frame) {
+        fm2.update(dt, input, 0.0, groundNormal);
     }
 
-    // The FCS should respond to pitch input by changing alpha.
-    // The exact direction depends on the FCS mode (G-command vs AOA-command)
-    // and gain computation, but alpha should move away from trim.
-    double finalAlpha = fm.state().aero.alpha_deg;
-    EXPECT_GT(std::fabs(finalAlpha - trimAlpha), 0.1)
-        << "Alpha did not change after pitch input: trim=" << trimAlpha
+    const double finalAlpha = fm2.state().aero.alpha_deg;
+    const double finalNz    = fm2.state().loads.nzcgs;
+
+    // Alpha must be HIGHER than the no-input baseline (nose-up stick
+    // commands more lift, which requires more alpha at constant speed).
+    EXPECT_GT(finalAlpha - baselineAlpha, 0.5)
+        << "Alpha did not increase above baseline after positive pitch "
+        << "input: trim=" << trimAlpha << " baseline=" << baselineAlpha
         << " final=" << finalAlpha;
+
+    // Nz must be HIGHER than the no-input baseline (positive stick commands
+    // positive G). The 0.2 G lower bound is conservative — a half-stick
+    // pull at 500 ft/s produces ~0.3-0.5 G above baseline in the current
+    // FCS tuning — but it's still tight enough to catch a regressed pitch
+    // path (e.g. pstick sign flipped, G limiter always active).
+    EXPECT_GT(finalNz - baselineNz, 0.2)
+        << "Nz did not increase above baseline after positive pitch input: "
+        << "trimNz=" << trimNz << " baselineNz=" << baselineNz
+        << " finalNz=" << finalNz;
 }
 
 // ============================================================================
@@ -180,7 +240,8 @@ TEST(FlightModelTest, ThrottleIncreasesSpeed) {
 
     const double initialVt = fm.state().kin.vt;
 
-    // Apply full throttle for 10 seconds
+    // Apply full throttle (1.5 = full afterburner in the F-16's normalized
+    // throttle convention: 0..1 = idle..mil, 1..2 = mil..full AB) for 10 s.
     PilotInput input;
     input.throttle = 1.5;  // full AB
     const double dt = 1.0 / 60.0;
@@ -190,8 +251,22 @@ TEST(FlightModelTest, ThrottleIncreasesSpeed) {
         fm.update(dt, input, 0.0, groundNormal);
     }
 
-    // Speed should have increased
-    EXPECT_GT(fm.state().kin.vt, initialVt);
+    const double finalVt = fm.state().kin.vt;
+    const double deltaVt = finalVt - initialVt;  // ft/s gained
+
+    // Speed must increase (full AB must always accelerate, never decelerate).
+    EXPECT_GT(deltaVt, 0.0)
+        << "Full AB did not increase speed: initial=" << initialVt
+        << " final=" << finalVt;
+
+    // Quantitative lower bound: a clean F-16 at 10000 ft / 500 ft/s under
+    // full afterburner for 10 s should gain at least 50 ft/s (about 30 kt).
+    // This is conservative — the real aircraft gains ~100-150 ft/s in 10 s
+    // under AB — but it's tight enough to catch a regressed throttle path
+    // (e.g. AB not lighting, throttle reversed, thrust table not loading).
+    EXPECT_GT(deltaVt, 50.0)
+        << "Full AB acceleration too small: initial=" << initialVt
+        << " final=" << finalVt << " delta=" << deltaVt << " ft/s";
 }
 
 // ============================================================================

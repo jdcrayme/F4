@@ -13,7 +13,7 @@ using namespace f4::geo;
 
 TEST(Position, WorldPositionDefaultConstructsToZero) {
     WorldPosition p;
-    EXPECT_EQ(p, (WorldPosition{0.0, 0.0, 0.0}));
+    EXPECT_EQ(p, WorldPosition(0.0, 0.0, 0.0));
 }
 
 TEST(Position, WorldPositionComparisonIsValueBased) {
@@ -24,10 +24,10 @@ TEST(Position, WorldPositionComparisonIsValueBased) {
 TEST(Position, WorldPositionOffsetArithmetic) {
     WorldPosition a(1000.0, 2000.0, 5000.0);
     WorldPosition b(   0.0,  500.0,   50.0);
-    EXPECT_EQ(a + b, (WorldPosition{1000.0, 2500.0, 5050.0}));
-    EXPECT_EQ(a - b, (WorldPosition{1000.0, 1500.0, 4950.0}));
+    EXPECT_EQ(a + b, WorldPosition(1000.0, 2500.0, 5050.0));
+    EXPECT_EQ(a - b, WorldPosition(1000.0, 1500.0, 4950.0));
     a += b;
-    EXPECT_EQ(a, (WorldPosition{1000.0, 2500.0, 5050.0}));
+    EXPECT_EQ(a, WorldPosition(1000.0, 2500.0, 5050.0));
 }
 
 TEST(Position, WorldPositionDistance3D) {
@@ -44,7 +44,7 @@ TEST(Position, WorldPositionDistanceHorizontalIgnoresAltitude) {
 
 TEST(Position, LatLonAltDefaultsAndAccessors) {
     LatLonAlt lla;
-    EXPECT_EQ(lla, (LatLonAlt{0.0, 0.0, 0.0}));
+    EXPECT_EQ(lla, LatLonAlt(0.0, 0.0, 0.0));
     // 1000 ft altitude -> meters.
     LatLonAlt up(0, 0, 1000.0);
     EXPECT_NEAR(up.alt_meters(), 304.8, 1e-9);
@@ -53,7 +53,18 @@ TEST(Position, LatLonAltDefaultsAndAccessors) {
 TEST(Position, ECEFFieldsAreAccessible) {
     ECEFPosition e(6378137.0, 0.0, 0.0);
     EXPECT_DOUBLE_EQ(e.x, 6378137.0);
-    EXPECT_EQ(e, (ECEFPosition{6378137.0, 0.0, 0.0}));
+    EXPECT_EQ(e, ECEFPosition(6378137.0, 0.0, 0.0));
+}
+
+TEST(Position, FromDegreesFactoryConvertsCorrectly) {
+    // The from_degrees factory is the recommended way to construct a
+    // LatLonAlt from human-readable coordinates. It applies DEG_TO_RAD
+    // so callers don't have to remember the radians convention.
+    LatLonAlt lla = LatLonAlt::from_degrees(38.0, -77.0, 1000.0);
+    EXPECT_NEAR(lla.lat, 38.0 * DEG_TO_RAD, 1e-12);
+    EXPECT_NEAR(lla.lon, -77.0 * DEG_TO_RAD, 1e-12);
+    EXPECT_NEAR(lla.alt, 1000.0, 1e-12);
+    EXPECT_NEAR(lla.alt_meters(), 304.8, 1e-9);
 }
 
 TEST(Position, NoImplicitConversionBetweenFrames) {
@@ -67,5 +78,14 @@ TEST(Position, NoImplicitConversionBetweenFrames) {
     //   f(w);                          // no implicit conversion
     //
     // Every crossing must be a named to_lla()/to_ecef()/to_world() call.
+    //
+    // Additionally, the 3-arg ctors are explicit — so this also fails:
+    //
+    //   LatLonAlt lla = {0.0, 0.0, 0.0};   // copy-init from brace init
+    //   void g(LatLonAlt);
+    //   g({0.0, 0.0, 0.0});                 // implicit conversion
+    //
+    // Callers must use either `LatLonAlt{...}` (direct-init, allowed) or
+    // the typed factory `LatLonAlt::from_degrees(...)`.
     SUCCEED();
 }

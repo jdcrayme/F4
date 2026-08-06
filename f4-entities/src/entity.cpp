@@ -18,6 +18,14 @@ namespace f4::entities {
 // address as a destroyed one.
 static std::atomic<uint64_t> g_next_world_cookie{1};
 
+// Used by EntityWorld's custom move ctor/assign to regenerate the cookie
+// on the destination (declared as a friend in entity.hpp so it can call
+// the static counter). Kept out-of-line here so the cookie counter stays
+// file-local — no other TU can mint cookies.
+uint64_t f4::entities::detail::next_world_cookie() noexcept {
+    return g_next_world_cookie.fetch_add(1, std::memory_order_relaxed);
+}
+
 EntityWorld::EntityWorld()
     : cookie_(g_next_world_cookie.fetch_add(1, std::memory_order_relaxed)) {}
 

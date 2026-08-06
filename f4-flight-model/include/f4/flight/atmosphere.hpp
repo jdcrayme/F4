@@ -176,9 +176,16 @@ inline AtmosphereOutput computeAtmosphere(double alt_ft,
     out.pa     = pdelta * PASL;                    // P = delta * P0
 
     // Mach number and dynamic pressure
-    const double safe_vt = (vt_ftps > 1.0) ? vt_ftps : 1.0;  // avoid div-by-zero
-    out.mach = safe_vt / out.sound;
-    out.qbar = 0.5 * out.rho * safe_vt * safe_vt;             // q = 0.5 * rho * V^2
+    //
+    // The "safe_vt" floor (1.0 ft/s) protects the qovt = qbar/vt division
+    // from divide-by-zero at zero airspeed. Mach and qbar themselves are
+    // well-defined at vt=0 (Mach=0, qbar=0) and must use the ACTUAL vt,
+    // not the floor — otherwise a stationary aircraft reports Mach ~= 1/sound
+    // and qbar ~= 0.5*rho (a 1 ft/s breeze), which propagates into the FCS
+    // as a phantom airload.
+    const double safe_vt = (vt_ftps > 1.0) ? vt_ftps : 1.0;  // for qovt only
+    out.mach = (vt_ftps > 0.0) ? (vt_ftps / out.sound) : 0.0;
+    out.qbar = 0.5 * out.rho * vt_ftps * vt_ftps;             // q = 0.5 * rho * V^2
     out.qovt = out.qbar / safe_vt;
 
     // Normalized dynamic pressure: qsom = q * S / m

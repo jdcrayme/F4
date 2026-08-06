@@ -20,6 +20,19 @@ namespace {
 // unchanged.
 using f4::io::Cursor;
 
+// ============================================================================
+// Format constants — Falcon 4 .cam campaign archive layout.
+//
+// These are properties of the on-disk binary format (FreeFalcon's
+// campdb.cpp / campaign.cpp), not tunable parameters. They are gathered
+// here so the parser below reads as a description of the format rather
+// than a sea of bare integers. Each is documented with its source.
+// ============================================================================
+constexpr int NUM_TEAMS = 8;            // FreeFalcon MAX_TEAMS — fixed at 8 in the .cam format
+constexpr int TEAM_NAME_LEN = 20;       // team.name char[N] in TeamBlock
+constexpr int TEAM_MOTTO_LEN = 200;     // team.motto char[N] in TeamBlock
+constexpr int CMP_HEADER_BYTES = 8;     // cmp sub-file: 2 × i32 (reserved + decompressed_size)
+
 } // namespace
 
 int read_version(const uint8_t* data, std::size_t size) {
@@ -35,19 +48,19 @@ int read_version(const uint8_t* data, std::size_t size) {
 
 CampaignHeader decode_cmp(const uint8_t* data, std::size_t size) {
     CampaignHeader h;
-    if (size < 8) throw std::runtime_error("cmp: sub-file too small");
+    if (size < CMP_HEADER_BYTES) throw std::runtime_error("cmp: sub-file too small");
 
     Cursor top{data, data + size};
     h.reserved_skip = top.i32();
     h.decompressed_size = top.i32();
-    if (top.error) throw std::runtime_error("cmp: payload truncated");
+    top.check_and_throw("cmp: payload truncated");
 
     if (h.decompressed_size <= 0)
         throw std::runtime_error("cmp: invalid decompressed size");
 
     // The compressed payload starts right after the 8-byte header.
-    const uint8_t* comp = data + 8;
-    const std::size_t comp_size = size - 8;
+    const uint8_t* comp = data + CMP_HEADER_BYTES;
+    const std::size_t comp_size = size - CMP_HEADER_BYTES;
 
     auto payload = lzss_expand(comp, comp_size,
                                static_cast<std::size_t>(h.decompressed_size));
@@ -64,25 +77,25 @@ CampaignHeader decode_cmp(const uint8_t* data, std::size_t size) {
     // gCampDataVersion >= 52: TE block
     h.te_type = c.i32();
     h.te_number_teams = c.i32();
-    h.te_number_aircraft.resize(8);
-    for (int i = 0; i < 8; ++i) h.te_number_aircraft[i] = c.i32();
-    h.te_number_f16s.resize(8);
-    for (int i = 0; i < 8; ++i) h.te_number_f16s[i] = c.i32();
+    h.te_number_aircraft.resize(NUM_TEAMS);
+    for (int i = 0; i < NUM_TEAMS; ++i) h.te_number_aircraft[i] = c.i32();
+    h.te_number_f16s.resize(NUM_TEAMS);
+    for (int i = 0; i < NUM_TEAMS; ++i) h.te_number_f16s[i] = c.i32();
     h.te_team = c.i32();
-    h.te_team_pts.resize(8);
-    for (int i = 0; i < 8; ++i) h.te_team_pts[i] = c.i32();
+    h.te_team_pts.resize(NUM_TEAMS);
+    for (int i = 0; i < NUM_TEAMS; ++i) h.te_team_pts[i] = c.i32();
     h.te_flags = c.i32();
 
-    // 8 team slots: { u8 flags; u8 colour; char[20] name; char[200] motto; }
-    h.teams.resize(8);
-    for (int i = 0; i < 8; ++i) {
+    // NUM_TEAMS team slots: { u8 flags; u8 colour; char[NAME_LEN] name; char[MOTTO_LEN] motto; }
+    h.teams.resize(NUM_TEAMS);
+    for (int i = 0; i < NUM_TEAMS; ++i) {
         h.teams[i].flags = c.u8();
         h.teams[i].colour = c.u8();
-        h.teams[i].name = c.fixed_string(20);
-        h.teams[i].motto = c.fixed_string(200);
+        h.teams[i].name    = c.fixed_string(TEAM_NAME_LEN);
+        h.teams[i].motto   = c.fixed_string(TEAM_MOTTO_LEN);
     }
 
-    if (c.error) throw std::runtime_error("cmp: payload truncated");
+    c.check_and_throw("cmp: payload truncated");
 
     // Preserve the remaining decompressed bytes for future decoders.
     h.remaining_payload.assign(c.p, c.end);

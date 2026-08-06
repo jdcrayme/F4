@@ -8,7 +8,7 @@ using namespace f4::geo;
 
 TEST(Datum, DefaultConstructsToZeroOriginZeroHeading) {
     TheaterDatum d;
-    EXPECT_EQ(d.origin, (LatLonAlt{0.0, 0.0, 0.0}));
+    EXPECT_EQ(d.origin, LatLonAlt(0.0, 0.0, 0.0));
     EXPECT_DOUBLE_EQ(d.heading_rad, 0.0);
 }
 
@@ -29,6 +29,6 @@ TEST(Datum, ComparisonIsValueBased) {
 
 TEST(Datum, IdentityFactory) {
     TheaterDatum d = TheaterDatum::identity();
-    EXPECT_EQ(d.origin, (LatLonAlt{0.0, 0.0, 0.0}));
+    EXPECT_EQ(d.origin, LatLonAlt(0.0, 0.0, 0.0));
     EXPECT_DOUBLE_EQ(d.heading_rad, 0.0);
 }

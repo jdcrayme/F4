@@ -145,8 +145,9 @@ constexpr T sign(T x) noexcept {
 
 // ============================================================================
 // squared — x*x. Tiny helper, but it makes intent explicit at call sites
-// like `qsquared = squared(mach)` and avoids the common typo `mach * mach`
-// being silently miscompiled to `mach * mach2` in long expressions.
+// like `const auto mach_sq = squared(mach);` and avoids the common typo
+// `mach * mach` being silently miscompiled to `mach * mach2` in long
+// expressions.
 // ============================================================================
 template<Numeric T>
 constexpr T squared(T x) noexcept { return x * x; }

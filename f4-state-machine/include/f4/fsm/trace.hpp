@@ -29,6 +29,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <deque>
 #include <functional>
 #include <string>
 #include <string_view>
@@ -62,9 +63,10 @@ public:
     void set_capacity(std::size_t n) noexcept {
         capacity_ = n;
         if (n != 0 && records_.size() > n) {
-            // Evict oldest until within capacity.
-            records_.erase(records_.begin(),
-                           records_.begin() + static_cast<std::ptrdiff_t>(records_.size() - n));
+            // Evict oldest until within capacity. pop_front on std::deque
+            // is O(1) per element; the previous std::vector impl was O(n)
+            // per pop_front (and was called on every append when full).
+            while (records_.size() > n) records_.pop_front();
         }
     }
     std::size_t capacity() const noexcept { return capacity_; }
@@ -78,16 +80,28 @@ public:
     bool trace_rejections() const noexcept { return trace_rejections_; }
 
     /// Append a record. Called by StateMachine::process().
+    ///
+    /// O(1) amortized: push_back + (when full) pop_front are both O(1)
+    /// on std::deque. The previous std::vector implementation was O(n)
+    /// per append when full because erase(begin()) shifts every element.
+    /// At 360 Hz on a 1024-record trace, that's a measurable cost on the
+    /// minor frame.
     void append(Record r) {
         if (!r.fired && !trace_rejections_) return;
         if (capacity_ != 0 && records_.size() >= capacity_) {
-            records_.erase(records_.begin());
+            records_.pop_front();
         }
         records_.push_back(std::move(r));
     }
 
-    /// Read-only access to the records.
-    const std::vector<Record>& records() const noexcept { return records_; }
+    /// Read-only access to the records as a vector. This is a copy (the
+    /// internal storage is a std::deque for O(1) push/pop at both ends),
+    /// but trace inspection is rare (test/diagnostic only) so the copy
+    /// cost is acceptable. The previous API returned `const vector<>&`
+    /// which forced vector storage and made append O(n).
+    std::vector<Record> records() const {
+        return std::vector<Record>(records_.begin(), records_.end());
+    }
 
     /// Clear the trace (does not reset tick).
     void clear() noexcept { records_.clear(); }
@@ -181,7 +195,11 @@ private:
         return "event(" + std::to_string(static_cast<long long>(e)) + ')';
     }
 
-    std::vector<Record> records_;
+    // std::deque gives O(1) push_back and pop_front — important for the
+    // hot-path append() when the trace is at capacity. The previous
+    // std::vector storage made append O(n) when full (erase(begin())
+    // shifts every element).
+    std::deque<Record>  records_;
     std::size_t         capacity_{1024};
     bool                trace_rejections_{false};
 };

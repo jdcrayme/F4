@@ -20,8 +20,12 @@ target_include_directories(f4-models
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>
 )
-# f4-models uses f4-json for JSON export of model data
-target_link_libraries(f4-models PUBLIC f4-json)
+# f4-models uses f4-json for JSON export of model data, and f4-math for
+# the Vec3 / Mat3x3 types (f4::models::Vec3 is now an alias for
+# f4::math::Vec3<float> — the previous duplicate definition in types.hpp
+# was removed in the 2025 cleanup pass to avoid the two types drifting
+# apart as f4-math::Vec3 gains operators).
+target_link_libraries(f4-models PUBLIC f4-json f4-math)
 
 option(F4_MODELS_BUILD_TESTS "Build unit tests" ON)
 if(F4_MODELS_BUILD_TESTS)

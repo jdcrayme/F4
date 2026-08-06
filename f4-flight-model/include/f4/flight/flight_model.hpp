@@ -190,7 +190,7 @@ private:
     PilotInput lastInput_{};
 
     int    minorPerMajor_{6};
-    double minorFrameTime_{1.0 / 360.0};  // 6 sub-steps of 1/60s = 1/10s major
+    double minorFrameTime_{1.0 / 360.0};  // 6 sub-steps of 1/360s each = 1/60s major (60 Hz major, 360 Hz minor)
 };
 
 }  // namespace f4::flight

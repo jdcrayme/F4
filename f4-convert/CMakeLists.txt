@@ -21,13 +21,13 @@ FetchContent_MakeAvailable(nlohmann_json)
 # ---------------------------------------------------------------------------
 # f4-convert library (parser + JSON I/O).
 #
-# Depends on f4-data for the AircraftConfig struct (which f4-data owns).
-# The JSON I/O code in f4-convert/src/json_io.cpp is a COPY of f4-data's
-# config_loader.cpp — they must stay in sync. Both copies exist because
-# f4-convert cannot depend on f4-data at build time for the JSON writer
-# (that would be fine), but f4-convert also needs to produce JSON that
-# f4-data can read, so the format must be identical. The round-trip tests
-# in both libraries verify this.
+# Depends on f4-data for the AircraftConfig struct AND for the canonical
+# JSON writer/reader (f4-data::writeConfig / loadConfig). f4-convert's
+# json_io.cpp is a thin adapter that delegates to f4-data for the actual
+# serialization; only diffConfigs() is unique to f4-convert (f4-data does
+# no comparison). The previous duplication (two copies of the JSON
+# writer/reader that "MUST stay in sync") was eliminated in the 2025
+# cleanup pass.
 # ---------------------------------------------------------------------------
 add_library(f4-convert STATIC
     src/dat_parser.cpp

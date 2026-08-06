@@ -24,7 +24,12 @@ struct BinReader {
     BinReader(const uint8_t* d, std::size_t s) : data(d), size(s), pos(0) {}
 
     [[nodiscard]] bool ok() const noexcept { return pos <= size; }
-    [[nodiscard]] bool remaining() const noexcept { return size - pos; }
+    // Returns the number of bytes remaining in the buffer. Renamed from
+    // `remaining()` (which returned bool via implicit conversion and was a
+    // footgun: `auto n = r.remaining();` silently got 0 or 1, not the byte
+    // count). Use has_remaining() for the boolean check.
+    [[nodiscard]] std::size_t remaining_bytes() const noexcept { return size - pos; }
+    [[nodiscard]] bool has_remaining() const noexcept { return pos < size; }
     [[nodiscard]] std::size_t offset() const noexcept { return pos; }
 
     template<typename T>

@@ -37,12 +37,15 @@ TEST(LlaEcef, NorthPoleZeroAlt) {
 
 TEST(LlaEcef, RoundTripMultiplePoints) {
     // A spread of points: equator, mid-lat, high-lat, with altitude.
+    // Each point uses an explicit LatLonAlt(...) ctor call because the
+    // 3-arg ctor is explicit — braced-init inside a vector initializer
+    // would be copy-init and fail to compile.
     const std::vector<LatLonAlt> points = {
-        {0.0,            0.0,             0.0},
-        {38.95 * DEG_TO_RAD, -77.0 * DEG_TO_RAD, 30000.0},   // ~Washington DC, FL300
-        {60.0 * DEG_TO_RAD,  120.0 * DEG_TO_RAD, 0.0},       // high northern latitude
-        {-33.0 * DEG_TO_RAD, 151.0 * DEG_TO_RAD, 5000.0},    // ~Sydney
-        {0.0,            90.0 * DEG_TO_RAD, 0.0},
+        LatLonAlt(0.0,            0.0,             0.0),
+        LatLonAlt(38.95 * DEG_TO_RAD, -77.0 * DEG_TO_RAD, 30000.0),   // ~Washington DC, FL300
+        LatLonAlt(60.0 * DEG_TO_RAD,  120.0 * DEG_TO_RAD, 0.0),       // high northern latitude
+        LatLonAlt(-33.0 * DEG_TO_RAD, 151.0 * DEG_TO_RAD, 5000.0),    // ~Sydney
+        LatLonAlt(0.0,            90.0 * DEG_TO_RAD, 0.0),
     };
     for (const auto& orig : points) {
         const ECEFPosition e = to_ecef(orig);
@@ -61,12 +64,14 @@ TEST(LlaEcef, RoundTripMultiplePoints) {
 
 TEST(WorldLla, RoundTripIsIdentityAtOriginDatum) {
     // Datum with origin on the equator, sim frame aligned to ENU.
-    TheaterDatum d(LatLonAlt{0.0, 0.0, 0.0}, 0.0);
+    TheaterDatum d(LatLonAlt(0.0, 0.0, 0.0), 0.0);
+    // Each point uses an explicit WorldPosition(...) ctor call because the
+    // 3-arg ctor is explicit.
     const std::vector<WorldPosition> pts = {
-        {0.0, 0.0, 0.0},
-        {10000.0, 20000.0, 5000.0},     // ~3 NM east, ~6 NM north
-        {-50000.0, 80000.0, 30000.0},
-        {0.0, 6076.1154855643, 0.0},    // 1 NM north
+        WorldPosition(0.0, 0.0, 0.0),
+        WorldPosition(10000.0, 20000.0, 5000.0),     // ~3 NM east, ~6 NM north
+        WorldPosition(-50000.0, 80000.0, 30000.0),
+        WorldPosition(0.0, 6076.1154855643, 0.0),    // 1 NM north
     };
     for (const auto& w : pts) {
         const LatLonAlt lla = to_lla(w, d);
@@ -78,7 +83,7 @@ TEST(WorldLla, RoundTripIsIdentityAtOriginDatum) {
 }
 
 TEST(WorldLla, NorthOffsetIncreasesLatitude) {
-    TheaterDatum d(LatLonAlt{0.0, 0.0, 0.0}, 0.0);
+    TheaterDatum d(LatLonAlt(0.0, 0.0, 0.0), 0.0);
     WorldPosition one_nm_north(0.0, 6076.1154855643, 0.0);  // 1 NM = 1852 m
     LatLonAlt lla = to_lla(one_nm_north, d);
     EXPECT_GT(lla.lat, 0.0);
@@ -88,7 +93,7 @@ TEST(WorldLla, NorthOffsetIncreasesLatitude) {
 }
 
 TEST(WorldLla, EastOffsetIncreasesLongitude) {
-    TheaterDatum d(LatLonAlt{0.0, 0.0, 0.0}, 0.0);
+    TheaterDatum d(LatLonAlt(0.0, 0.0, 0.0), 0.0);
     WorldPosition one_nm_east(6076.1154855643, 0.0, 0.0);
     LatLonAlt lla = to_lla(one_nm_east, d);
     EXPECT_NEAR(lla.lat, 0.0, 1e-12);
@@ -99,7 +104,7 @@ TEST(WorldLla, EastOffsetIncreasesLongitude) {
 
 TEST(WorldLla, HeadingRotationMapsSimYToEast) {
     // Datum heading = +90 deg: sim +Y points east.
-    TheaterDatum d(LatLonAlt{0.0, 0.0, 0.0}, PI / 2.0);
+    TheaterDatum d(LatLonAlt(0.0, 0.0, 0.0), PI / 2.0);
     WorldPosition one_nm_along_sim_y(0.0, 6076.1154855643, 0.0);
     LatLonAlt lla = to_lla(one_nm_along_sim_y, d);
     // Going 1 NM along sim +Y with heading 90 should move us EAST, so lon>0, lat~0.
@@ -110,7 +115,7 @@ TEST(WorldLla, HeadingRotationMapsSimYToEast) {
 
 TEST(WorldLla, HeadingRoundTripIsIdentity) {
     // Round-trip must hold for any heading, not just zero.
-    TheaterDatum d(LatLonAlt{38.0 * DEG_TO_RAD, -77.0 * DEG_TO_RAD, 0.0}, 0.7);
+    TheaterDatum d(LatLonAlt(38.0 * DEG_TO_RAD, -77.0 * DEG_TO_RAD, 0.0), 0.7);
     WorldPosition w(12345.6, -7890.1, 25000.0);
     LatLonAlt lla = to_lla(w, d);
     WorldPosition back = to_world(lla, d);
@@ -120,7 +125,7 @@ TEST(WorldLla, HeadingRoundTripIsIdentity) {
 }
 
 TEST(WorldLla, AltitudeIsPreservedAcrossFrames) {
-    TheaterDatum d(LatLonAlt{0.0, 0.0, 0.0}, 0.0);
+    TheaterDatum d(LatLonAlt(0.0, 0.0, 0.0), 0.0);
     WorldPosition w(0.0, 0.0, 25000.0);   // FL250
     LatLonAlt lla = to_lla(w, d);
     EXPECT_NEAR(lla.alt, 25000.0, 1e-9);
@@ -131,7 +136,7 @@ TEST(WorldLla, AltitudeIsPreservedAcrossFrames) {
 // ============================================================================
 
 TEST(WorldEcef, RoundTripComposed) {
-    TheaterDatum d(LatLonAlt{38.0 * DEG_TO_RAD, -77.0 * DEG_TO_RAD, 0.0}, 0.0);
+    TheaterDatum d(LatLonAlt(38.0 * DEG_TO_RAD, -77.0 * DEG_TO_RAD, 0.0), 0.0);
     WorldPosition w(50000.0, -30000.0, 20000.0);
     ECEFPosition e = to_ecef(w, d);
     WorldPosition back = to_world(e, d);

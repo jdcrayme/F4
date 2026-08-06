@@ -27,13 +27,25 @@ namespace f4::models::detail {
 
 namespace {
 
-constexpr uint32_t FORMAT_VERSION = 0x03087000;
+// ============================================================================
+// Format constants — KoreaObj.HDR / KoreaObj.DXH header format.
+//
+// Sources: FreeFalcon src/graphics/bsplib/objectparent.cpp (ReadParentFile)
+// and the BMS derived format. Constants gathered here so the parser below
+// reads as a description of the format rather than a sea of bare integers.
+// ============================================================================
+constexpr uint32_t FORMAT_VERSION = 0x03087000;  // FreeFalcon HDR format v3.08.70.00 — written by WriteParentFile
+constexpr uint32_t OLD_FORMAT_SENTINEL = 0xFEEF; // TextureBank.maxCS value indicating pre-DX (classic BSP) format.
+                                                  // When maxCS == 0xFEEF the file has no DX texture slots; otherwise
+                                                  // it's the new-format DX texture count.
 constexpr int S_PFR      = 48;   // ParentFileRecord on disk
 constexpr int S_LODREC   = 8;    // LOD record (obj + maxRange)
 constexpr int S_PPOINT   = 12;   // 3 floats
 constexpr int S_PCOLOR   = 16;
 constexpr int S_DPAL     = 1032;
 constexpr int S_TEXENTRY = 40;
+constexpr int LOD_ENTRY_BYTES = 20;   // 12 spare + 4 offset + 4 size
+constexpr int LOD_ENTRY_SPARE = 12;   // unknown 12 bytes preceding offset+size
 
 } // anonymous namespace
 
@@ -82,7 +94,7 @@ bool parse_hdr(
         err = "HDR truncated in TextureBank maxCS";
         return false;
     }
-    result.is_new_format = (max_cs != 0xFEEF);
+    result.is_new_format = (max_cs != OLD_FORMAT_SENTINEL);
     if (!r.skip(result.n_textures * S_TEXENTRY)) {
         err = "HDR truncated in TextureBank data";
         return false;
@@ -102,8 +114,8 @@ bool parse_hdr(
     for (int i = 0; i < result.n_lod_entries; ++i) {
         LodTableEntry e;
         e.index = i;
-        // Each entry is 20 bytes: 12 unknown + 4 offset + 4 size
-        if (!r.skip(12) || !r.read(e.offset) || !r.read(e.size)) {
+        // Each entry is LOD_ENTRY_BYTES: LOD_ENTRY_SPARE spare + 4 offset + 4 size
+        if (!r.skip(LOD_ENTRY_SPARE) || !r.read(e.offset) || !r.read(e.size)) {
             err = "HDR truncated in LOD table entry " + std::to_string(i);
             return false;
         }

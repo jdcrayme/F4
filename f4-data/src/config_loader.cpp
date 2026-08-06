@@ -2,16 +2,17 @@
 //
 // JSON serialization for AircraftConfig using nlohmann/json.
 //
-// This is the SAME serialization format that f4-convert produces (they share
-// the AircraftConfig struct). f4-convert has its own copy of the JSON I/O
-// code (in f4-convert/src/json_io.cpp) because f4-convert must not depend on
-// f4-data at build time — that would create a circular dependency
-// (f4-convert generates the JSONs that f4-data loads, so f4-data can't
-// depend on f4-convert; and f4-convert uses the AircraftConfig struct that
-// f4-data owns, so f4-convert depends on f4-data).
+// This is the CANONICAL implementation of the AircraftConfig JSON format.
+// f4-convert's json_io.cpp delegates to these functions (writeConfig /
+// loadConfig / loadConfigFromString) rather than maintaining a duplicate
+// copy — the previous "both copies MUST stay in sync" hazard was
+// eliminated in the 2025 cleanup pass. f4-convert retains its own
+// diffConfigs() helper because f4-data does no comparison, only I/O.
 //
-// Both copies MUST stay in sync. If the JSON format changes, update both.
-// The round-trip tests in both libraries verify this.
+// Format: 1:1 mapping of AircraftConfig fields to JSON keys. Arrays of
+// doubles are JSON arrays of numbers. The rawAuxAeroData map is a JSON
+// object (key -> string) preserving verbatim .dat capture for lossless
+// round-trip.
 
 #include "f4/data/config_loader.hpp"
 

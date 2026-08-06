@@ -249,7 +249,7 @@ void load_objective_data(const std::filesystem::path& base_path,
         e.first_feature = c.s16();
         out.entries.push_back(std::move(e));
     }
-    if (c.error) throw std::runtime_error("theater_data: unexpected end of file");
+    c.check_and_throw("theater_data: unexpected end of file");
 }
 
 void load_pt_header_data(const std::filesystem::path& base_path,
@@ -297,7 +297,7 @@ void load_pt_header_data(const std::filesystem::path& base_path,
         // cursor at 28, no trailing pad needed
         out.entries.push_back(std::move(e));
     }
-    if (c.error) throw std::runtime_error("theater_data: unexpected end of file");
+    c.check_and_throw("theater_data: unexpected end of file");
 }
 
 void load_pt_data(const std::filesystem::path& base_path,
@@ -323,7 +323,7 @@ void load_pt_data(const std::filesystem::path& base_path,
         c.p += 2;
         out.entries.push_back(std::move(e));
     }
-    if (c.error) throw std::runtime_error("theater_data: unexpected end of file");
+    c.check_and_throw("theater_data: unexpected end of file");
 }
 
 void load_unit_data(const std::filesystem::path& base_path,
@@ -400,7 +400,7 @@ void load_unit_data(const std::filesystem::path& base_path,
         c.p += 2;  // skip 2 bytes trailing pad (struct size to multiple of 4)
         out.entries.push_back(std::move(e));
     }
-    if (c.error) throw std::runtime_error("theater_data: unexpected end of file");
+    c.check_and_throw("theater_data: unexpected end of file");
 }
 
 void load_vehicle_data(const std::filesystem::path& base_path,
@@ -456,7 +456,7 @@ void load_vehicle_data(const std::filesystem::path& base_path,
         c.p += 3;
         out.entries.push_back(std::move(e));
     }
-    if (c.error) throw std::runtime_error("theater_data: unexpected end of file");
+    c.check_and_throw("theater_data: unexpected end of file");
 }
 
 void load_feature_data(const std::filesystem::path& base_path,
@@ -506,7 +506,7 @@ void load_feature_data(const std::filesystem::path& base_path,
         c.p += 3;
         out.entries.push_back(std::move(e));
     }
-    if (c.error) throw std::runtime_error("theater_data: unexpected end of file");
+    c.check_and_throw("theater_data: unexpected end of file");
 }
 
 void load_feature_entry_data(const std::filesystem::path& base_path,
@@ -548,7 +548,7 @@ void load_feature_entry_data(const std::filesystem::path& base_path,
         c.p += 2;  // skip 2 bytes trailing pad
         out.entries.push_back(std::move(e));
     }
-    if (c.error) throw std::runtime_error("theater_data: unexpected end of file");
+    c.check_and_throw("theater_data: unexpected end of file");
 }
 
 void load_radar_data(const std::filesystem::path& base_path,
@@ -587,7 +587,7 @@ void load_radar_data(const std::filesystem::path& base_path,
         c.p += 26;
         out.entries.push_back(std::move(e));
     }
-    if (c.error) throw std::runtime_error("theater_data: unexpected end of file");
+    c.check_and_throw("theater_data: unexpected end of file");
 }
 
 // ============================================================================

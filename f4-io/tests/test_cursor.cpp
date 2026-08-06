@@ -252,3 +252,58 @@ TEST(Cursor, DefaultConstructorIsEmpty) {
     EXPECT_TRUE(c.eof());
     EXPECT_EQ(c.remaining(), 0u);
 }
+
+// ============================================================================
+// check_and_throw() — converts the silent sticky error flag into an
+// observable exception at the end of a parse block.
+// ============================================================================
+
+TEST(Cursor, CheckAndThrowNoopsWhenNoError) {
+    auto buf = make_pattern();
+    Cursor c(buf);
+    c.u32();   // ok, no error
+    EXPECT_NO_THROW(c.check_and_throw("should not throw"));
+    EXPECT_FALSE(c.error);
+}
+
+TEST(Cursor, CheckAndThrowThrowsAfterOobRead) {
+    std::vector<uint8_t> buf = {1, 2, 3};
+    Cursor c(buf);
+    c.u32();  // OOB (only 3 bytes available), sets sticky flag, returns 0
+    EXPECT_TRUE(c.error);
+    EXPECT_THROW(c.check_and_throw("payload truncated"), std::runtime_error);
+}
+
+TEST(Cursor, CheckAndThrowIncludesContextInMessage) {
+    std::vector<uint8_t> buf = {1};
+    Cursor c(buf);
+    c.u32();  // OOB
+    try {
+        c.check_and_throw("my specific context string");
+        FAIL() << "expected throw";
+    } catch (const std::runtime_error& e) {
+        EXPECT_STREQ(e.what(), "my specific context string");
+    }
+}
+
+TEST(Cursor, CheckAndThrowAcceptsStdString) {
+    std::vector<uint8_t> buf = {1};
+    Cursor c(buf);
+    c.u32();  // OOB
+    const std::string ctx = "std::string context";
+    EXPECT_THROW(c.check_and_throw(ctx), std::runtime_error);
+}
+
+TEST(Cursor, CheckAndThrowAfterSkipOob) {
+    auto buf = make_pattern();
+    Cursor c(buf);
+    c.skip(buf.size() + 1);  // OOB skip
+    EXPECT_THROW(c.check_and_throw("skip OOB"), std::runtime_error);
+}
+
+TEST(Cursor, CheckAndThrowAfterFixedStringOob) {
+    auto buf = make_pattern();
+    Cursor c(buf);
+    c.fixed_string(buf.size() + 1);  // OOB
+    EXPECT_THROW(c.check_and_throw("fixed_string OOB"), std::runtime_error);
+}

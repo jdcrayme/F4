@@ -45,7 +45,10 @@ struct WorldPosition {
     double z{};   // up,    feet
 
     constexpr WorldPosition() = default;
-    constexpr WorldPosition(double x_, double y_, double z_) noexcept
+    // explicit: prevents accidental implicit conversion from a 3-double
+    // brace initializer (e.g. `{x, y, z}` passed to a function expecting
+    // a LatLonAlt). Direct-init `WorldPosition{x, y, z}` still works.
+    constexpr explicit WorldPosition(double x_, double y_, double z_) noexcept
         : x(x_), y(y_), z(z_) {}
 
     auto operator<=>(const WorldPosition&) const = default;
@@ -55,10 +58,10 @@ struct WorldPosition {
     // proliferating type zoo. For richer vector math (cross products, etc.)
     // convert to f4::math::Vec3d at the call site.
     constexpr WorldPosition operator+(const WorldPosition& o) const noexcept {
-        return {x + o.x, y + o.y, z + o.z};
+        return WorldPosition{x + o.x, y + o.y, z + o.z};
     }
     constexpr WorldPosition operator-(const WorldPosition& o) const noexcept {
-        return {x - o.x, y - o.y, z - o.z};
+        return WorldPosition{x - o.x, y - o.y, z - o.z};
     }
     constexpr WorldPosition& operator+=(const WorldPosition& o) noexcept {
         x += o.x; y += o.y; z += o.z; return *this;
@@ -86,14 +89,36 @@ struct LatLonAlt {
     double alt{};
 
     constexpr LatLonAlt() = default;
-    constexpr LatLonAlt(double lat_, double lon_, double alt_) noexcept
-        : lat(lat_), lon(lon_), alt(alt_) {}
+    // explicit: the ctor takes (lat_rad, lon_rad, alt_ft) — making it
+    // explicit forces callers to either use the typed factories below
+    // (from_degrees) or write `LatLonAlt{lat_rad, lon_rad, alt_ft}`
+    // explicitly. This closes the most common bug: passing degrees where
+    // radians are expected, which compiles silently because both are
+    // `double`.
+    constexpr explicit LatLonAlt(double lat_rad, double lon_rad, double alt_ft) noexcept
+        : lat(lat_rad), lon(lon_rad), alt(alt_ft) {}
 
     auto operator<=>(const LatLonAlt&) const = default;
 
     // Altitude in meters, for ECEF interop and DIS serialization.
     [[nodiscard]] constexpr double alt_meters() const noexcept {
         return alt * METERS_PER_FOOT;
+    }
+
+    // ---- Typed factories ----
+    //
+    // Use these when the inputs are in degrees (the common case for
+    // theater definitions, DIS input, and human-readable coordinates).
+    // The radians ctor above is for code that has already converted
+    // (e.g. internal conversions.hpp paths).
+    //
+    // Example:
+    //   LatLonAlt lla = LatLonAlt::from_degrees(38.0, -77.0, 0.0);
+    //   // lla.lat == 38 * DEG_TO_RAD, lla.lon == -77 * DEG_TO_RAD
+    //
+    [[nodiscard]] static constexpr LatLonAlt from_degrees(
+        double lat_deg, double lon_deg, double alt_ft) noexcept {
+        return LatLonAlt{lat_deg * DEG_TO_RAD, lon_deg * DEG_TO_RAD, alt_ft};
     }
 };
 
@@ -111,7 +136,9 @@ struct ECEFPosition {
     double z{};
 
     constexpr ECEFPosition() = default;
-    constexpr ECEFPosition(double x_, double y_, double z_) noexcept
+    // explicit: same reasoning as WorldPosition/LatLonAlt — prevents
+    // accidental implicit conversion from a 3-double brace init.
+    constexpr explicit ECEFPosition(double x_, double y_, double z_) noexcept
         : x(x_), y(y_), z(z_) {}
 
     auto operator<=>(const ECEFPosition&) const = default;

@@ -38,6 +38,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -133,6 +134,46 @@ struct Cursor {
     // OOB — callers should check `error` first).
     [[nodiscard]] std::size_t remaining() const noexcept {
         return static_cast<std::size_t>(end - p);
+    }
+
+    // ---- Sticky-error helper ------------------------------------------
+    //
+    // Throws std::runtime_error if the sticky error flag is set, including
+    // the caller's `context` string in the message. This is the recommended
+    // way to convert the silent sticky-flag into an observable exception
+    // at the end of a parse block, instead of forcing every caller to
+    // write `if (c.error) throw std::runtime_error(...)` by hand.
+    //
+    // Use after each logical block of reads:
+    //
+    //     Cursor c{buf.data(), buf.data() + buf.size()};
+    //     h.field_a = c.i32();
+    //     h.field_b = c.i32();
+    //     h.name    = c.fixed_string(NAME_LEN);
+    //     c.check_and_throw("header: payload truncated");  // converts sticky to throw
+    //
+    // If `error` is not set, this is a no-op.
+    //
+    // Rationale: the original Cursor design (worklog.md:1504) chose
+    // sticky-flag over throw-on-OOB to surface real bugs in subclass
+    // dispatch paths where exceptions would be caught and swallowed. But
+    // the consequence was that any caller who forgot to check `error`
+    // would silently produce zeroed records. check_and_throw() gives
+    // those callers a one-line idiomatic check, and the existing throw-
+    // style call sites (campaign_decoder, objective_decoder, etc.) can
+    // be progressively migrated to use it for consistency.
+    void check_and_throw(const char* context) const {
+        if (error) {
+            throw std::runtime_error(std::string(context));
+        }
+    }
+
+    // Convenience overload for string literals — avoids the explicit
+    // std::string construction at every call site.
+    void check_and_throw(const std::string& context) const {
+        if (error) {
+            throw std::runtime_error(context);
+        }
     }
 };
 
