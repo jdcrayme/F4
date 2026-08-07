@@ -115,7 +115,7 @@ TEST(JsonWriter, ComposeSmallObject) {
     r.skip_ws();
     r.expect('{');
     std::string theater;
-    long width = 0, height = 0;
+    long long width = 0, height = 0;
     while (!r.consume('}')) {
         std::string k = r.read_string();
         r.expect(':');

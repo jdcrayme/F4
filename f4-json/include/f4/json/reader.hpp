@@ -157,7 +157,16 @@ public:
     }
 
     // Read a JSON integer (may be negative). Throws if no digits present.
-    long read_int() {
+    //
+    // Returns `long long` (always 64-bit on all platforms) rather than
+    // `long` (which is 32-bit on MSVC/Windows, 64-bit on Linux/macOS).
+    // The campaign JSON contains uint32_t fields like `obj_flags` and
+    // `parent_id` whose values can exceed INT32_MAX (2,147,483,647) —
+    // e.g. obj_flags=3958048256. With `long` return type, std::from_chars
+    // succeeds on Linux (64-bit long) but returns result_out_of_range on
+    // Windows (32-bit long), causing a platform-dependent parse failure.
+    // `long long` is 64-bit everywhere, eliminating the divergence.
+    long long read_int() {
         skip_ws();
         std::size_t start = pos_;
         if (pos_ < s_.size() && (s_[pos_] == '-' || s_[pos_] == '+')) {
@@ -180,7 +189,7 @@ public:
         // in exotic locales). The digit characters 0-9 are locale-independent
         // but the explicit-from_chars form is the C++20 idiomatic choice and
         // removes any locale-sensitive stdlib surface from the hot path.
-        long result = 0;
+        long long result = 0;
         const char* first = s_.data() + start;
         const char* last  = s_.data() + pos_;
         auto [ptr, ec] = std::from_chars(first, last, result, 10);

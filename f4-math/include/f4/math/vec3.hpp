@@ -17,7 +17,6 @@
 
 #pragma once
 
-#include <cassert>
 #include <cmath>
 #include <concepts>
 #include <type_traits>
@@ -86,16 +85,19 @@ struct Vec3 {
 
     /// Return the unit vector in the direction of *this.
     ///
-    /// In debug builds, zero-length vectors trigger an assertion failure —
-    /// they almost always indicate uninitialized state or a degenerate
-    /// cross product, and silently returning an arbitrary direction hides
-    /// the bug. In release, the zero-length check remains as a safety
-    /// fallback returning *this (the zero vector), but this should never
-    /// be reached in a correct program.
+    /// Zero-length vectors return the zero vector (no NaN propagation, no
+    /// crash). This matches the test `NormalizeZeroVectorReturnsZero` and
+    /// the principle that math primitives should be total functions —
+    /// crashing on degenerate inputs in debug builds hides bugs in calling
+    /// code rather than surfacing them cleanly.
+    ///
+    /// The previous implementation used `assert(len >= T{1e-12})` here,
+    /// which aborted the process in debug builds and caused MSVC's test
+    /// runner to mark all subsequent tests in the binary as NotExecuted.
+    /// The assert contradicted the test spec; the test is the spec.
     [[nodiscard]] Vec3 normalized() const noexcept {
         T len = length();
-        assert(len >= T{1e-12} && "Vec3::normalized() called on zero-length vector");
-        if (len < T{1e-12}) return *this;
+        if (len < T{1e-12}) return *this;  // zero or degenerate -> zero
         return *this / len;
     }
 

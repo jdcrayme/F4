@@ -14,7 +14,7 @@ namespace {
 
 // Sample document shape — mirrors the terrain.json schema (string fields,
 // numeric fields, a flat array of integers).
-std::string emit_sample(const std::string& theater, long width, long height,
+std::string emit_sample(const std::string& theater, long long width, long long height,
                         const std::vector<int>& tiles) {
     Writer w;
     w.raw("{\n");
@@ -24,7 +24,7 @@ std::string emit_sample(const std::string& theater, long width, long height,
     w.raw("  \"tile_types\": [");
     for (std::size_t i = 0; i < tiles.size(); ++i) {
         if (i) w.raw(",");
-        w.number(static_cast<long>(tiles[i]));
+        w.number(static_cast<long long>(tiles[i]));
     }
     w.raw("]\n");
     w.raw("}\n");
@@ -41,7 +41,7 @@ TEST(JsonRoundtrip, RoundtripsPreserveAllFields) {
     r.expect('{');
 
     std::string theater;
-    long width = 0, height = 0;
+    long long width = 0, height = 0;
     std::vector<int> tiles;
     while (!r.consume('}')) {
         std::string k = r.read_string();
@@ -134,7 +134,7 @@ TEST(JsonRoundtrip, NestedObjectRoundtrips) {
     Reader r(w.str());
     r.skip_ws();
     r.expect('{');
-    long c = 0;
+    long long c = 0;
     while (!r.consume('}')) {
         std::string k = r.read_string();
         r.expect(':');

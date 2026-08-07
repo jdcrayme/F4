@@ -143,7 +143,7 @@ TEST(JsonReader, ReadIntLocaleIndependent) {
     }
     std::string s = "-12345";
     Reader r(s);
-    EXPECT_EQ(r.read_int(), -12345L);
+    EXPECT_EQ(r.read_int(), -12345LL);
     std::setlocale(LC_NUMERIC, saved);
 }
 
@@ -221,7 +221,7 @@ TEST(JsonReader, ParseSimpleObject) {
     r.skip_ws();
     r.expect('{');
     std::string name;
-    long width = 0;
+    long long width = 0;
     while (!r.consume('}')) {
         std::string key = r.read_string();
         r.expect(':');
@@ -239,7 +239,7 @@ TEST(JsonReader, ParseArrayOfInts) {
     Reader r(s);
     r.skip_ws();
     r.expect('[');
-    std::vector<long> out;
+    std::vector<long long> out;
     if (!r.peek(']')) {
         for (;;) {
             out.push_back(r.read_int());

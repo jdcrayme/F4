@@ -60,6 +60,7 @@ if(F4_BUILD_VIEWER)
     add_subdirectory(f4-world-viewer)  # Raylib + Dear ImGui interactive viewer
 endif()
 add_subdirectory(f4-flight-model)
+add_subdirectory(f4-ai)             # AI brain: SensorFusion + tactic modules (composed)
 
 # ============================================================================
 # Convenience targets — one-command world generation

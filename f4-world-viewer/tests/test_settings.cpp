@@ -160,34 +160,58 @@ TEST(SettingsJson, MalformedJsonReturnsDefaults) {
 
 namespace {
 
-/// RAII temp settings file. Overrides settings_file_path() by setting
-/// XDG_CONFIG_HOME (on Linux) — the only platform where we can do this
-/// portably in a test.
+/// RAII temp settings file. Overrides the platform-specific settings
+/// directory env var (XDG_CONFIG_HOME on Linux, APPDATA on Windows) so
+/// each test gets an isolated, throwaway settings dir.
+///
+/// On Windows, settings_dir() resolves to %APPDATA%/F4Viewer. Without
+/// overriding APPDATA, tests would hit the real user settings dir and
+/// see stale state from previous runs — causing the "file missing"
+/// and "dir missing" tests to fail non-deterministically.
 class TempSettings {
 public:
     TempSettings() {
-        // Create a temp dir for XDG_CONFIG_HOME
         std::random_device rd;
         std::mt19937 gen(rd());
         std::uniform_int_distribution<int> dist(0, 99999999);
-        // Save the current value (may be null — handle that case).
-        if (const char* cur = std::getenv("XDG_CONFIG_HOME")) {
-            old_xdg_ = cur;
-            had_xdg_ = true;
-        } else {
-            had_xdg_ = false;
-        }
         temp_dir_ = (std::filesystem::temp_directory_path() /
                      ("f4-settings-test-" + std::to_string(dist(gen)))).string();
         std::filesystem::create_directories(temp_dir_);
+
+#if defined(_WIN32)
+        // Windows: settings_dir() reads APPDATA.
+        if (const char* cur = std::getenv("APPDATA")) {
+            old_env_ = cur;
+            had_env_ = true;
+        } else {
+            had_env_ = false;
+        }
+        _putenv_s("APPDATA", temp_dir_.c_str());
+#else
+        // Linux/BSD: settings_dir() reads XDG_CONFIG_HOME.
+        if (const char* cur = std::getenv("XDG_CONFIG_HOME")) {
+            old_env_ = cur;
+            had_env_ = true;
+        } else {
+            had_env_ = false;
+        }
         setenv("XDG_CONFIG_HOME", temp_dir_.c_str(), 1);
+#endif
     }
     ~TempSettings() {
-        if (had_xdg_) {
-            setenv("XDG_CONFIG_HOME", old_xdg_.c_str(), 1);
+#if defined(_WIN32)
+        if (had_env_) {
+            _putenv_s("APPDATA", old_env_.c_str());
+        } else {
+            _putenv_s("APPDATA", "");
+        }
+#else
+        if (had_env_) {
+            setenv("XDG_CONFIG_HOME", old_env_.c_str(), 1);
         } else {
             unsetenv("XDG_CONFIG_HOME");
         }
+#endif
         std::error_code ec;
         std::filesystem::remove_all(temp_dir_, ec);
     }
@@ -195,8 +219,8 @@ public:
     TempSettings& operator=(const TempSettings&) = delete;
 
 private:
-    std::string old_xdg_;
-    bool had_xdg_ = false;
+    std::string old_env_;
+    bool had_env_ = false;
     std::string temp_dir_;
 };
 
