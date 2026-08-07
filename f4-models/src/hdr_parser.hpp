@@ -9,6 +9,7 @@
 
 #include <f4/models/model_database.hpp>
 #include <f4/models/model_record.hpp>
+#include <f4/models/texture.hpp>
 
 #include <cstdint>
 #include <string>
@@ -29,6 +30,9 @@ struct HdrParseResult {
     bool has_lod_names = false;
 
     ColorBank color_bank;  ///< Parsed ColorBank (empty if parse fails)
+
+    std::vector<DiskPalette> palettes;    ///< Parsed PaletteBank (256 ARGB entries each)
+    std::vector<TexBankEntry> tex_entries; ///< Parsed TextureBank (40 bytes each)
 
     std::vector<LodTableEntry> lod_entries;
     std::vector<ModelRecord> parents;

@@ -7,6 +7,7 @@
 //   - DOF panel (sliders for each DOF)
 //   - Switch panel (combo boxes for each switch)
 //   - LOD panel (radio buttons for LOD selection)
+//   - Texture info panel (texture bank stats, per-mesh texture IDs)
 //   - Status bar (model count, selected model, triangle count, FPS)
 
 #include "viewer_state.hpp"
@@ -15,6 +16,7 @@
 
 #include <f4/models/model_database.hpp>
 #include <f4/models/model_record.hpp>
+#include <f4/models/texture.hpp>
 
 #include <imgui.h>
 #include <rlImGui.h>
@@ -82,6 +84,26 @@ static void draw_menu_bar(ViewerApp::Impl& impl) {
                     } else {
                         impl.status_msg = "Not a valid Falcon install: " +
                                           install_path.string();
+                    }
+                }
+            }
+
+            if (ImGui::MenuItem("Load TEX...")) {
+                const char* tex_filter[] = {"*.Tex", "*.tex", "*.TEX"};
+                const char* tex_result = tinyfd_openFileDialog(
+                    "Open KoreaObj.Tex", "",
+                    3, tex_filter, "TEX files", 0);
+                if (tex_result) {
+                    std::filesystem::path tex_path(tex_result);
+                    std::string err = impl.db.load_tex(tex_path);
+                    if (err.empty()) {
+                        impl.status_msg = "Loaded TEX: " +
+                                         std::to_string(impl.db.tex_entries().size()) +
+                                         " textures from " + tex_path.filename().string();
+                        // Force mesh rebuild to pick up textures
+                        impl.meshes_dirty = true;
+                    } else {
+                        impl.status_msg = "TEX load error: " + err;
                     }
                 }
             }
@@ -377,6 +399,73 @@ static void draw_lod_panel(ViewerApp::Impl& impl) {
     ImGui::End();
 }
 
+// ── Texture info panel ──────────────────────────────────────────────────────
+static void draw_texture_panel(ViewerApp::Impl& impl) {
+    ImGui::SetNextWindowSize({320, 300}, ImGuiCond_FirstUseEver);
+    if (ImGui::Begin("Textures")) {
+        const auto& tex_entries = impl.db.tex_entries();
+        const auto& palettes = impl.db.palettes();
+
+        if (tex_entries.empty()) {
+            ImGui::TextDisabled("No texture bank loaded.");
+            ImGui::TextDisabled("Use File > Load TEX to load KoreaObj.Tex.");
+        } else {
+            ImGui::Text("Textures: %d", static_cast<int>(tex_entries.size()));
+            ImGui::Text("Palettes: %d", static_cast<int>(palettes.size()));
+            ImGui::Text("Cached: %d", static_cast<int>(impl.texture_cache.size()));
+
+            // Texture set selector
+            const auto* rec = impl.db.model(impl.selected_parent);
+            if (rec && rec->n_texture_sets > 1) {
+                ImGui::Separator();
+                ImGui::Text("Texture Sets: %d", rec->n_texture_sets);
+                const char* set_names[] = {"Summer", "Winter", "Desert", "Set 3", "Set 4"};
+                for (int i = 0; i < rec->n_texture_sets && i < 5; ++i) {
+                    if (ImGui::RadioButton(set_names[i],
+                            impl.selected_texture_set == i)) {
+                        impl.selected_texture_set = i;
+                        // Texture set change requires mesh rebuild since
+                        // tex_id mapping changes per set.
+                        impl.meshes_dirty = true;
+                    }
+                }
+            }
+
+            // Per-mesh texture IDs for current model
+            if (!impl.mesh_entries.empty()) {
+                ImGui::Separator();
+                if (ImGui::TreeNode("Mesh Textures")) {
+                    for (std::size_t i = 0; i < impl.mesh_entries.size(); ++i) {
+                        const auto& me = impl.mesh_entries[i];
+                        int tex_id = me.tex_id;
+                        if (tex_id >= 0) {
+                            // Show texture info
+                            const auto& entry = tex_entries[static_cast<std::size_t>(tex_id)];
+                            ImGui::Text("[%zu] tex=%d  dim=%u  pal=%d  size=%u",
+                                        i, tex_id, entry.dimension,
+                                        entry.palette_id, entry.file_size);
+
+                            // Show if texture is cached/decoded
+                            auto it = impl.texture_cache.find(tex_id);
+                            if (it != impl.texture_cache.end() && it->second.uploaded) {
+                                ImGui::SameLine();
+                                ImGui::TextColored({0.5f, 1.0f, 0.5f, 1.0f}, "OK");
+                            } else {
+                                ImGui::SameLine();
+                                ImGui::TextColored({1.0f, 0.5f, 0.5f, 1.0f}, "?");
+                            }
+                        } else {
+                            ImGui::Text("[%zu] (untextured)", i);
+                        }
+                    }
+                    ImGui::TreePop();
+                }
+            }
+        }
+    }
+    ImGui::End();
+}
+
 // ── Status bar ─────────────────────────────────────────────────────────────
 static void draw_status_bar(ViewerApp::Impl& impl) {
     const float height = ImGui::GetFrameHeight();
@@ -426,6 +515,7 @@ void ViewerApp::Impl::draw_imgui() {
     draw_dof_panel(*this);
     draw_switch_panel(*this);
     draw_lod_panel(*this);
+    draw_texture_panel(*this);
     draw_status_bar(*this);
     rlImGuiEnd();
 }

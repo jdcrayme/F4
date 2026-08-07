@@ -14,6 +14,7 @@ add_library(f4-models STATIC
     src/geometry.cpp
     src/model_database.cpp
     src/model_json.cpp
+    src/tex_reader.cpp
 )
 target_include_directories(f4-models
     PUBLIC
@@ -25,7 +26,7 @@ target_include_directories(f4-models
 # f4::math::Vec3<float> — the previous duplicate definition in types.hpp
 # was removed in the 2025 cleanup pass to avoid the two types drifting
 # apart as f4-math::Vec3 gains operators).
-target_link_libraries(f4-models PUBLIC f4-json f4-math)
+target_link_libraries(f4-models PUBLIC f4-json f4-math f4-lzss)
 
 option(F4_MODELS_BUILD_TESTS "Build unit tests" ON)
 if(F4_MODELS_BUILD_TESTS)

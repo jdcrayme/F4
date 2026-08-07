@@ -11,12 +11,19 @@
 //     model_database.hpp). Falls back to a light gray for textured meshes
 //     (their color comes from the texture, not the ColorBank).
 //   - Call UploadMesh(&mesh, true) to upload to GPU
+//
+// Texture upload:
+//   - After meshes are built, each RaylibMeshEntry has a tex_id.
+//   - upload_textures() lazily decodes TEX blobs via ModelDatabase::fetch_texture
+//     and uploads the RGBA8 data to GPU as Texture2D + Material.
+//   - canvas3d.cpp uses the per-mesh material for DrawMesh.
 
 #include "viewer_state.hpp"
 #include "scene.hpp"
 
 #include <f4/models/geometry.hpp>
 #include <f4/models/model_database.hpp>
+#include <f4/models/texture.hpp>
 
 #include <raylib.h>
 
@@ -172,8 +179,9 @@ void unload_meshes(std::vector<::Mesh>& meshes) {
 // These are called from the main loop via Impl.
 
 void ViewerApp::Impl::rebuild_meshes() {
-    // Free old meshes
+    // Free old meshes and textures
     f4::models_viewer::unload_meshes(raylib_meshes);
+    mesh_entries.clear();
     line_segs.clear();
     point_marks.clear();
     total_tri_count = 0;
@@ -236,6 +244,18 @@ void ViewerApp::Impl::rebuild_meshes() {
 
     // Convert to Raylib meshes, resolving ColorBank indices to RGBA.
     raylib_meshes = build_raylib_meshes(geom, db.color_bank());
+
+    // Build mesh_entries with tex_id for per-mesh material lookup
+    mesh_entries.clear();
+    mesh_entries.reserve(geom.meshes.size());
+    for (std::size_t i = 0; i < geom.meshes.size(); ++i) {
+        RaylibMeshEntry entry;
+        if (i < raylib_meshes.size()) {
+            entry.mesh = raylib_meshes[i];
+        }
+        entry.tex_id = geom.meshes[i].tex_id;
+        mesh_entries.push_back(entry);
+    }
 
     // Collect lines and points into separate lists for canvas drawing.
     // Raylib's ::Mesh / DrawMesh path only handles triangle lists; lines
@@ -301,18 +321,109 @@ void ViewerApp::Impl::rebuild_meshes() {
     }
 
     meshes_dirty = false;
+
+    // Upload textures for the new meshes
+    upload_textures();
+
+    // Count textured meshes for status
+    int n_textured = 0;
+    for (const auto& me : mesh_entries) {
+        if (me.tex_id >= 0) ++n_textured;
+    }
+
     status_msg = "Loaded model " + std::to_string(selected_parent) +
                  " LOD " + std::to_string(selected_lod) +
                  " — " + std::to_string(total_tri_count) + " triangles" +
                  " + " + std::to_string(line_segs.size()) + " lines" +
-                 " + " + std::to_string(point_marks.size()) + " points";
+                 " + " + std::to_string(point_marks.size()) + " points" +
+                 " | " + std::to_string(n_textured) + " textured meshes";
 }
 
 void ViewerApp::Impl::unload_meshes() {
+    unload_textures();
     f4::models_viewer::unload_meshes(raylib_meshes);
+    mesh_entries.clear();
     line_segs.clear();
     point_marks.clear();
     total_tri_count = 0;
+}
+
+// ── Texture upload ────────────────────────────────────────────────────────
+//
+// For each mesh that has a tex_id, lazily decode the TEX blob via
+// ModelDatabase::fetch_texture(), convert the DecodedTexture's RGBA8 pixel
+// data to a Raylib Image, then upload as Texture2D. Create a Material with
+// the texture bound to MATERIAL_MAP_DIFFUSE.
+
+void ViewerApp::Impl::upload_textures() {
+    if (!doc_loaded) return;
+
+    for (auto& me : mesh_entries) {
+        if (me.tex_id < 0) continue;  // no texture for this mesh
+
+        // Already in cache?
+        if (texture_cache.count(me.tex_id)) continue;
+
+        // Decode the texture (lazy, cached in ModelDatabase)
+        const auto* decoded = db.fetch_texture(me.tex_id);
+        if (!decoded || !decoded->valid()) {
+            // Mark as cached-but-failed so we don't retry
+            TexCacheEntry ce;
+            ce.uploaded = false;
+            texture_cache[me.tex_id] = ce;
+            continue;
+        }
+
+        // Create a Raylib Image from the RGBA8 pixel data.
+        // DecodedTexture stores pixels as RGBA8 (R, G, B, A per pixel),
+        // but Raylib's LoadImageFromMemory expects UNCOMPRESSED_R8G8B8A8
+        // which is the same layout.
+        Image img = {};
+        img.data = RL_MALLOC(decoded->width * decoded->height * 4);
+        if (!img.data) {
+            TexCacheEntry ce;
+            ce.uploaded = false;
+            texture_cache[me.tex_id] = ce;
+            continue;
+        }
+        std::memcpy(img.data, decoded->rgba.data(),
+                     static_cast<std::size_t>(decoded->width * decoded->height * 4));
+        img.width = decoded->width;
+        img.height = decoded->height;
+        img.mipmaps = 1;
+        img.format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8;
+
+        // Upload to GPU
+        Texture2D tex = LoadTextureFromImage(img);
+
+        // Create a material with this texture bound
+        Material mat = LoadMaterialDefault();
+        mat.maps[MATERIAL_MAP_DIFFUSE].texture = tex;
+        mat.maps[MATERIAL_MAP_DIFFUSE].color = WHITE;
+
+        TexCacheEntry ce;
+        ce.texture = tex;
+        ce.material = mat;
+        ce.has_alpha = decoded->has_alpha;
+        ce.uploaded = true;
+        texture_cache[me.tex_id] = ce;
+
+        // Free the CPU-side image (GPU copy is retained)
+        UnloadImage(img);
+    }
+}
+
+void ViewerApp::Impl::unload_textures() {
+    for (auto& [id, ce] : texture_cache) {
+        if (ce.uploaded) {
+            // Unload the texture from GPU
+            UnloadTexture(ce.texture);
+            // The material references the texture; setting it to default
+            // prevents dangling GPU resource access.
+            ce.material.maps[MATERIAL_MAP_DIFFUSE].texture = {};
+        }
+    }
+    texture_cache.clear();
 }
 
 } // namespace f4::models_viewer

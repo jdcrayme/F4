@@ -98,20 +98,13 @@ void ViewerApp::Impl::draw_canvas() {
         draw_axes(50.0f);
     }
 
-    // Draw meshes with the default material. Raylib's default material is
-    // white diffuse + vertex-color support — vertex colors set in scene.cpp
-    // are multiplied by the material's diffuse color, so the result is the
-    // vertex color (resolved through ColorBank) modulated by white. This
-    // makes flat-shaded (untextured) meshes visible with their actual
-    // ColorBank colors, and textured meshes appear white pending texture
-    // binding (Phase V2 work).
+    // Draw meshes with per-mesh materials. Textured meshes use the material
+    // from the texture cache (which has the decoded TEX bound as diffuse).
+    // Untextured meshes (tex_id < 0) use the default white material so
+    // vertex colors (resolved through ColorBank) pass through unchanged.
     const Matrix identity = MatrixIdentity();
-    Material mat = LoadMaterialDefault();
-
-    // Tint the material diffuse white so vertex colors pass through unchanged.
-    // (The default material's diffuse is already white, but be explicit so
-    // future changes to LoadMaterialDefault() don't silently darken meshes.)
-    mat.maps[MATERIAL_MAP_DIFFUSE].color = WHITE;
+    Material default_mat = LoadMaterialDefault();
+    default_mat.maps[MATERIAL_MAP_DIFFUSE].color = WHITE;
 
     // CRITICAL: Disable backface culling. FreeFalcon's models were designed
     // to render WITHOUT backface culling — many polygons have CCW winding
@@ -125,12 +118,21 @@ void ViewerApp::Impl::draw_canvas() {
         rlEnableWireMode();
     }
 
-    for (const auto& mesh : raylib_meshes) {
+    for (const auto& entry : mesh_entries) {
+        const auto& mesh = entry.mesh;
         // Only call DrawMesh if the mesh actually has triangles. Meshes with
         // only lines/points (LineF/PointF primitives emitted by far LODs)
         // have triangleCount == 0 and are drawn separately below.
         if (mesh.triangleCount > 0) {
-            DrawMesh(mesh, mat, identity);
+            // Look up material from texture cache
+            Material* mat_to_use = &default_mat;
+            if (entry.tex_id >= 0) {
+                auto it = texture_cache.find(entry.tex_id);
+                if (it != texture_cache.end() && it->second.uploaded) {
+                    mat_to_use = &it->second.material;
+                }
+            }
+            DrawMesh(mesh, *mat_to_use, identity);
         }
     }
 
@@ -160,6 +162,7 @@ void ViewerApp::Impl::draw_canvas() {
 
     // UnloadMaterial on the default material would leak; LoadMaterialDefault()
     // returns a shared singleton that must NOT be UnloadMaterial'd. Leave it.
+    // Individual texture materials in texture_cache are cleaned up in unload_textures().
 }
 
 } // namespace f4::models_viewer

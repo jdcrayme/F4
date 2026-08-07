@@ -20,6 +20,7 @@
 #include <f4/models/model_record.hpp>
 #include <f4/models/model_lod.hpp>
 #include <f4/models/geometry.hpp>
+#include <f4/models/texture.hpp>
 
 #include <array>
 #include <climits>
@@ -72,12 +73,14 @@ struct ColorBank {
 };
 
 /// One palette from the PaletteBank (1032 bytes on disk).
+/// Deprecated — use DiskPalette from texture.hpp instead.
 struct PaletteEntry {
     std::array<uint8_t, 256> indices = {};  // 256 index bytes
     // 776 bytes padding on disk (total 1032)
 };
 
 /// One texture entry from the TextureBank (40 bytes on disk).
+/// Deprecated — use TexBankEntry from texture.hpp instead.
 struct TextureEntry {
     std::array<char, 40> raw = {};  // raw 40 bytes (filename + flags)
     /// Extract the texture filename (null-terminated within the 40 bytes).
@@ -108,6 +111,10 @@ public:
     /// Load only the HDR file (model directory, no geometry).
     [[nodiscard]] std::string load_hdr(
         const std::filesystem::path& hdr_path);
+
+    /// Load the .TEX file (texture blobs). Must call after load() or load_hdr().
+    [[nodiscard]] std::string load_tex(
+        const std::filesystem::path& tex_path);
 
     /// Parse geometry for one model (all LODs).
     /// Must be called after load() or load_hdr().
@@ -173,12 +180,34 @@ public:
     /// Access the parsed BSP tree for a model/LOD. Returns nullptr if not parsed.
     [[nodiscard]] const BspTree* bsp_tree(int parent_index, int lod_index) const;
 
+    // ── Texture Access ────────────────────────────────────────────────
+
+    /// Fetch a decoded texture by index (lazy, cached, thread-safe).
+    /// Returns nullptr if texture not available or decoding fails.
+    const DecodedTexture* fetch_texture(int tex_index) const;
+
+    /// The parsed PaletteBank.
+    [[nodiscard]] const std::vector<DiskPalette>& palettes() const noexcept { return palettes_; }
+
+    /// The parsed TextureBank entries.
+    [[nodiscard]] const std::vector<TexBankEntry>& tex_entries() const noexcept { return tex_entries_; }
+
+    /// TEX file path used for loading.
+    [[nodiscard]] const std::filesystem::path& tex_path() const noexcept { return tex_path_; }
+
     // ── File Finder ───────────────────────────────────────────────────
 
     /// Find KoreaObj.HDR and KoreaObj.LOD in common locations.
     /// Searches for both classic (.HDR/.LOD) and DX (.DXH/.DXL) variants.
     static std::pair<std::filesystem::path, std::filesystem::path>
     find_koreaobj_files(const std::filesystem::path& install_root);
+
+    /// Find KoreaObj.Tex in common locations (same dir as HDR/LOD or install root).
+    static std::filesystem::path
+    find_tex_file(const std::filesystem::path& install_root);
+
+    /// Find KoreaObj.Tex next to the already-loaded HDR file.
+    [[nodiscard]] std::filesystem::path find_tex_next_to_hdr() const;
 
 private:
     uint32_t version_ = 0;
@@ -203,6 +232,16 @@ private:
 
     // HDR raw data (kept for LOD parsing)
     std::vector<uint8_t> hdr_data_;
+
+    // TEX file data and parsed texture bank
+    std::vector<uint8_t> tex_data_;
+    bool tex_loaded_ = false;
+    std::filesystem::path tex_path_;
+    std::vector<DiskPalette> palettes_;
+    std::vector<TexBankEntry> tex_entries_;
+
+    // Lazy-decoded texture cache (keyed by tex_index)
+    mutable std::unordered_map<int, DecodedTexture> decoded_textures_;
 
     // Parsed LOD data, keyed by (parent_index << 8 | lod_index)
     // Stored sparse — only filled when parse_lod() is called.

@@ -110,9 +110,26 @@ bool parse_hdr(
         err = "HDR truncated in PaletteBank header";
         return false;
     }
-    if (!r.skip(result.n_palettes * S_DPAL)) {
-        err = "HDR truncated in PaletteBank data";
-        return false;
+    // Read each palette: 256 × 4-byte ARGB entries + 8 bytes padding = 1032 bytes
+    result.palettes.reserve(static_cast<std::size_t>(result.n_palettes));
+    for (int i = 0; i < result.n_palettes; ++i) {
+        DiskPalette pal;
+        // Read 256 ARGB uint32 entries
+        for (int j = 0; j < 256; ++j) {
+            uint32_t argb;
+            if (!r.read(argb)) {
+                err = "HDR truncated in palette " + std::to_string(i) +
+                      " entry " + std::to_string(j);
+                return false;
+            }
+            pal.colors[static_cast<std::size_t>(j)] = argb;
+        }
+        // Skip 8 bytes of padding (1032 - 256*4 = 8)
+        if (!r.skip(8)) {
+            err = "HDR truncated in palette " + std::to_string(i) + " padding";
+            return false;
+        }
+        result.palettes.push_back(pal);
     }
 
     // TextureBank
@@ -128,9 +145,29 @@ bool parse_hdr(
         return false;
     }
     result.is_new_format = (max_cs != OLD_FORMAT_SENTINEL);
-    if (!r.skip(result.n_textures * S_TEXENTRY)) {
-        err = "HDR truncated in TextureBank data";
-        return false;
+    // Read each texture entry: 40 bytes on disk (10 × uint32)
+    result.tex_entries.reserve(static_cast<std::size_t>(result.n_textures));
+    for (int i = 0; i < result.n_textures; ++i) {
+        // On-disk layout (40 bytes = 10 uint32s):
+        //   [0] fileOffset   [1] fileSize   [2] dimension  [3] paletteID
+        //   [4] spare        [5] format     [6] chromaKey  [7] spare2
+        //   [8] extra        [9] spare3
+        uint32_t vals[10];
+        for (int j = 0; j < 10; ++j) {
+            if (!r.read(vals[j])) {
+                err = "HDR truncated in TextureBank entry " + std::to_string(i);
+                return false;
+            }
+        }
+        TexBankEntry entry;
+        entry.file_offset = vals[0];
+        entry.file_size   = vals[1];
+        entry.dimension   = vals[2];
+        entry.palette_id  = static_cast<int32_t>(vals[3]);
+        entry.format      = vals[5];
+        entry.chroma_key  = vals[6];
+        entry.extra       = vals[8];
+        result.tex_entries.push_back(entry);
     }
 
     // LOD table

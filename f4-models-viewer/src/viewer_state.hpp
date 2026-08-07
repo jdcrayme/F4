@@ -10,6 +10,7 @@
 
 #include <f4/models/model_database.hpp>
 #include <f4/models/geometry.hpp>
+#include <f4/models/texture.hpp>
 #include <f4/install/installation.hpp>
 
 #include <raylib.h>
@@ -17,6 +18,7 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace f4::models_viewer {
@@ -80,6 +82,27 @@ struct ViewerApp::Impl {
     bool meshes_dirty = true;
     std::size_t total_tri_count = 0;  // across all meshes
 
+    // ── Texture cache ─────────────────────────────────────────────────
+    // Each mesh entry tracks its tex_id for per-mesh material lookup.
+    struct RaylibMeshEntry {
+        ::Mesh mesh = {};
+        int tex_id = -1;              ///< texture bank index for this mesh
+    };
+    std::vector<RaylibMeshEntry> mesh_entries;
+
+    // GPU texture cache: tex_id → uploaded Texture2D.
+    // Populated lazily in upload_textures() when a mesh needs a texture.
+    struct TexCacheEntry {
+        ::Texture2D texture = {};
+        ::Material material = {};
+        bool has_alpha = false;
+        bool uploaded = false;        ///< true once texture is on GPU
+    };
+    std::unordered_map<int, TexCacheEntry> texture_cache;
+
+    // ── Texture set selection ─────────────────────────────────────────
+    int selected_texture_set = 0;     ///< 0=summer, 1=winter, 2=desert
+
     // ── Lines + Points (LineF / PointF primitives) ───────────────────
     // These don't fit Raylib's ::Mesh triangle-list model, so we draw them
     // separately via DrawLine3D / DrawCube in canvas3d.cpp.
@@ -127,6 +150,8 @@ struct ViewerApp::Impl {
     // scene.cpp
     void rebuild_meshes();
     void unload_meshes();
+    void upload_textures();
+    void unload_textures();
 
     // canvas3d.cpp
     void draw_canvas();

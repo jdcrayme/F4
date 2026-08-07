@@ -11,6 +11,7 @@
 #include "bsp_parser.hpp"
 #include "dx_parser.hpp"
 #include "geometry_extractor.hpp"
+#include "tex_reader.hpp"
 
 #include <algorithm>
 #include <array>
@@ -182,6 +183,8 @@ std::string ModelDatabase::load_hdr(
     is_new_format_ = result.is_new_format;
     has_lod_names_ = result.has_lod_names;
     color_bank_ = std::move(result.color_bank);
+    palettes_ = std::move(result.palettes);
+    tex_entries_ = std::move(result.tex_entries);
     lod_entries_ = std::move(result.lod_entries);
     parents_ = std::move(result.parents);
 
@@ -376,6 +379,103 @@ ModelDatabase::find_koreaobj_files(const std::filesystem::path& install_root)
     }
 
     return {hdr, lod};
+}
+
+// ── TEX file finder ──────────────────────────────────────────────────────
+
+std::filesystem::path ModelDatabase::find_tex_file(
+    const std::filesystem::path& install_root)
+{
+    namespace fs = std::filesystem;
+
+    std::array<fs::path, 3> dirs = {
+        install_root,
+        install_root / "terrdata" / "objects",
+        install_root / "terrdata" / "korea" / "objects",
+    };
+
+    std::array<std::string, 2> tex_names = {"KoreaObj.Tex", "KoreaObj.tex"};
+
+    for (const auto& d : dirs) {
+        if (!fs::exists(d)) continue;
+        for (const auto& n : tex_names) {
+            auto p = d / n;
+            if (fs::exists(p)) return p;
+        }
+    }
+
+    return {};
+}
+
+std::filesystem::path ModelDatabase::find_tex_next_to_hdr() const {
+    namespace fs = std::filesystem;
+
+    if (hdr_path_.empty()) return {};
+
+    auto dir = hdr_path_.parent_path();
+    auto stem = hdr_path_.stem().string();
+
+    // Try same stem with .Tex extension
+    std::array<std::string, 2> tex_names = {
+        stem + ".Tex",
+        stem + ".tex",
+    };
+    for (const auto& n : tex_names) {
+        auto p = dir / n;
+        if (fs::exists(p)) return p;
+    }
+
+    return {};
+}
+
+// ── TEX loading ───────────────────────────────────────────────────────────
+
+std::string ModelDatabase::load_tex(
+    const std::filesystem::path& tex_path)
+{
+    tex_data_ = detail::read_file(tex_path);
+    if (tex_data_.empty()) {
+        return "cannot read TEX file: " + tex_path.string();
+    }
+    tex_path_ = tex_path;
+    tex_loaded_ = true;
+
+    // Clear any previously decoded textures (they reference the old TEX data)
+    decoded_textures_.clear();
+
+    return {};
+}
+
+const DecodedTexture* ModelDatabase::fetch_texture(int tex_index) const {
+    if (!tex_loaded_) return nullptr;
+    if (tex_index < 0 || tex_index >= static_cast<int>(tex_entries_.size())) {
+        return nullptr;
+    }
+
+    // Check cache
+    auto it = decoded_textures_.find(tex_index);
+    if (it != decoded_textures_.end()) {
+        return &it->second;
+    }
+
+    // Lazy decode
+    const auto& entry = tex_entries_[static_cast<std::size_t>(tex_index)];
+    DecodedTexture decoded;
+    std::string err;
+    if (!detail::read_tex_blob(
+            tex_data_.data(), tex_data_.size(),
+            entry, palettes_, tex_index,
+            decoded, err)) {
+        // Cache the failure as an empty texture so we don't retry
+        // every frame for broken textures.
+        decoded = {};
+        decoded.tex_id = tex_index;
+        decoded_textures_[tex_index] = std::move(decoded);
+        return nullptr;
+    }
+
+    auto [inserted_it, _] = decoded_textures_.emplace(tex_index, std::move(decoded));
+    return &inserted_it->second;
 }
 
 } // namespace f4::models

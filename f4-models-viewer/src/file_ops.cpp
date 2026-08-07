@@ -1,7 +1,8 @@
 // f4-models-viewer/src/file_ops.cpp
 //
 // File operations — loading model database from HDR/LOD files and
-// finding KoreaObj files from an install path.
+// finding KoreaObj files from an install path. After HDR/LOD are
+// loaded, automatically attempts to load the TEX file for textures.
 
 #include "viewer_state.hpp"
 #include "file_ops.hpp"
@@ -42,6 +43,18 @@ void ViewerApp::Impl::load_model_files(
     doc_loaded = true;
     status_msg = "Loaded " + std::to_string(db.n_models()) +
                  " models from " + hdr_path.filename().string();
+
+    // Auto-load TEX file if found next to the HDR
+    auto tex_path = db.find_tex_next_to_hdr();
+    if (!tex_path.empty()) {
+        std::string tex_err = db.load_tex(tex_path);
+        if (tex_err.empty()) {
+            status_msg += " + TEX (" +
+                         std::to_string(db.tex_entries().size()) + " textures)";
+        } else {
+            status_msg += " | TEX load failed: " + tex_err;
+        }
+    }
 
     // Auto-select first model if available
     if (db.n_models() > 0) {
