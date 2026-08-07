@@ -376,13 +376,17 @@ void ViewerApp::draw_canvas() {
                 255};
             impl_->draw_symbol(kind, p.x, p.y, s, c, outline);
 
-            // Destination line
-            if (impl_->show_unit_destinations && pb) {
-                const int16_t dest_x = static_cast<int16_t>(impl_->pb_int(pb, "dest_x"));
-                const int16_t dest_y = static_cast<int16_t>(impl_->pb_int(pb, "dest_y"));
-                if (dest_x != static_cast<int16_t>(ux) || dest_y != static_cast<int16_t>(uy)) {
-                    const Vector2 d = impl_->world_to_screen(dest_x, dest_y);
-                    DrawLineEx(p, d, 1.0f, Color{c.r, c.g, c.b, 160});
+            // Destination line — reads from MovementOrdersComponent (promoted
+            // from PropertyBag in Phase 5 cleanup).
+            if (impl_->show_unit_destinations) {
+                auto* mo = h.get<f4::entities::MovementOrdersComponent>();
+                if (mo) {
+                    const int16_t dest_x = mo->dest_x;
+                    const int16_t dest_y = mo->dest_y;
+                    if (dest_x != static_cast<int16_t>(ux) || dest_y != static_cast<int16_t>(uy)) {
+                        const Vector2 d = impl_->world_to_screen(dest_x, dest_y);
+                        DrawLineEx(p, d, 1.0f, Color{c.r, c.g, c.b, 160});
+                    }
                 }
             }
 
