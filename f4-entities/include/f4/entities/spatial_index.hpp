@@ -19,16 +19,17 @@
 
 #include "entity.hpp"
 
-namespace std {
-    template<>
-    struct hash<f4::entities::EntityId> {
-        std::size_t operator()(const f4::entities::EntityId& id) const noexcept {
-            return std::hash<uint64_t>{}(id.value);
-        }
-    };
-} // namespace std
-
 namespace f4::entities {
+
+/// Custom hasher for EntityId — replaces the previous std::hash specialization
+/// which was undefined behavior per [namespace.std]/2 (adding specializations
+/// to namespace std for user-defined types that don't depend on program-defined
+/// types in the signature). Use as: unordered_map<EntityId, V, EntityIdHash>.
+struct EntityIdHash {
+    std::size_t operator()(const EntityId& id) const noexcept {
+        return std::hash<uint64_t>{}(id.value);
+    }
+};
 
 class SpatialIndex {
 public:
@@ -71,7 +72,7 @@ private:
     // the previous O(cells * entries) brute-force scan. The update() method
     // is the hot path (called every frame for every moving entity), and the
     // old remove() implementation scanned ALL cells to find the entity.
-    std::unordered_map<EntityId, int64_t> id_to_key_;
+    std::unordered_map<EntityId, int64_t, EntityIdHash> id_to_key_;
 };
 
 } // namespace f4::entities

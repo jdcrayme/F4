@@ -22,11 +22,17 @@
 #include "f4/flight/stall_state.hpp"
 
 #include <algorithm>
+#include <cassert>
 #include <cmath>
 
 namespace f4::flight {
 
-using namespace f4::data;
+using f4::data::AeroTable;
+using f4::data::AircraftGeometry;
+using f4::data::AuxAero;
+using f4::data::makeClTable;
+using f4::data::makeCdTable;
+using f4::data::makeCyTable;
 
 // ---------------------------------------------------------------------------
 // Construction: build Table2D views from the config's raw vectors.
@@ -35,6 +41,9 @@ Aerodynamics::Aerodynamics(const AeroTable* table,
                            const AircraftGeometry* geom,
                            const AuxAero* aux)
     : table_(table), geom_(geom), aux_(aux) {
+    assert(table_ != nullptr && "Aerodynamics: table must not be null");
+    assert(geom_  != nullptr && "Aerodynamics: geom must not be null");
+    assert(aux_   != nullptr && "Aerodynamics: aux must not be null");
     if (table_) {
         cl_ = makeClTable(*table_);
         cd_ = makeCdTable(*table_);
@@ -158,11 +167,11 @@ void Aerodynamics::update(Angle alpha,
     const double agl_ft = std::fabs(groundZ_ft - z_ft);
     if (agl_ft < span * 0.2) {
         // Close to ground: full ground effect
-        const double g = 1.13;
+        const double g = GROUND_EFFECT_CL_MULT;
         cl *= g; clalpha *= g; cnalpha *= g;
     } else if (agl_ft < span) {
         // Transition zone: linear fade from 1.13 to 1.0
-        const double f = 1.13 - ((agl_ft - span * 0.2) / (span * 0.8)) * 0.13;
+        const double f = GROUND_EFFECT_CL_MULT - ((agl_ft - span * 0.2) / (span * 0.8)) * (GROUND_EFFECT_CL_MULT - 1.0);
         cl *= f; clalpha *= f; cnalpha *= f;
     }
 
@@ -184,7 +193,7 @@ void Aerodynamics::update(Angle alpha,
         // Recover mass from qsom: qsom = q*S/m  =>  m = q*S/qsom
         const double q_val = qbar;
         const double S = geom_->area_ft2;
-        const double mass_from_qsom = (qsom > 1e-6) ? (q_val * S / qsom) : 1.0;
+        const double mass_from_qsom = (qsom > QSOM_FLOOR) ? (q_val * S / qsom) : 1.0;
         const double weight_lbs = mass_from_qsom * GRAVITY;
         const double ws = weight_lbs / S;  // wing loading W/S
         if (std::fabs(cl) > 1e-3) {
@@ -213,13 +222,13 @@ void Aerodynamics::update(Angle alpha,
     // Use the typed StallState enum instead of raw int comparison.
     // Previously this was `const int stallState = aero.stallState; if (stallState == 4)`
     // which was a magic-number comparison — fragile and unclear.
-    const StallState stallState = static_cast<StallState>(aero.stallState);
+    const StallState stallState = aero.stallState;
     if (stallState == StallState::FlatSpin) {  // FlatSpin: lift = 0
         lift = 0.0;  // FreeFalcon aero.cpp:319: lift = 0.0f
-    } else if (stalled && stallSpeed > 1e-3) {
+    } else if (stalled && stallSpeed > MIN_VT) {
         const double cl_stalled = std::min(0.0, cl * 0.5);
         lift = cl_stalled * (vcas_kts / stallSpeed) * qsom;
-    } else if (vt_ftps < 1e-3) {
+    } else if (vt_ftps < MIN_VT) {
         lift = 0.0;  // avoid NaN at zero airspeed
     } else {
         lift = cl * qsom;

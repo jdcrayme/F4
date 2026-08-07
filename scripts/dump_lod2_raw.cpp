@@ -13,6 +13,7 @@
 #include <filesystem>
 #include <vector>
 
+// using-namespace in a standalone script file — acceptable (not a header).
 using namespace f4::models;
 using namespace f4::models::detail;
 

@@ -46,6 +46,94 @@ T value_with_warning(const json& j, const std::string& key, T default_val,
     return j.value(key, default_val);
 }
 
+// ---------------------------------------------------------------------------
+// Field-list macros for X-macro read/write generation.
+// Each entry is (json_key, struct_field, default_value).
+// Adding a new scalar field requires editing only the corresponding list;
+// fields with special handling (nested objects, arrays, validation) are
+// kept outside the macro expansion.
+// ---------------------------------------------------------------------------
+
+#define F4_AUX_AERO_FIELDS(X) \
+    X("fuelFlowFactorNormal", fuelFlowFactorNormal, 0.25) \
+    X("fuelFlowFactorAb",     fuelFlowFactorAb,     0.65) \
+    X("minFuelFlow",          minFuelFlow,          1200.0) \
+    X("normSpoolRate",        normSpoolRate,        0.7) \
+    X("abSpoolRate",          abSpoolRate,          0.4) \
+    X("jfsSpoolUpRate",       jfsSpoolUpRate,       10.0) \
+    X("jfsSpoolUpLimit",      jfsSpoolUpLimit,      0.7) \
+    X("lightupSpoolRate",     lightupSpoolRate,     10.0) \
+    X("flameoutSpoolRate",    flameoutSpoolRate,    5.0) \
+    X("jfsRechargeTime",      jfsRechargeTime,      60.0) \
+    X("jfsMinRechargeRpm",    jfsMinRechargeRpm,    0.12) \
+    X("jfsSpinTime",          jfsSpinTime,          240.0) \
+    X("mainGenRpm",           mainGenRpm,           0.63) \
+    X("stbyGenRpm",           stbyGenRpm,           0.60) \
+    X("epuBurnTime",          epuBurnTime,          600.0) \
+    X("hasLef",               hasLef,               false) \
+    X("hasTef",               hasTef,               false) \
+    X("tefMaxAngle",          tefMaxAngle,          20.0) \
+    X("lefMaxAngle",          lefMaxAngle,          20.0) \
+    X("tefRate",              tefRate,              1.0) \
+    X("lefRate",              lefRate,              1.0) \
+    X("tefTakeOff",           tefTakeOff,           20.0) \
+    X("lefGround",            lefGround,            0.0) \
+    X("lefMaxMach",           lefMaxMach,           1.0) \
+    X("rudderMaxAngle",       rudderMaxAngle,       30.0) \
+    X("aileronMaxAngle",      aileronMaxAngle,      20.0) \
+    X("airbrakeMaxAngle",     airbrakeMaxAngle,     60.0) \
+    X("CLtefFactor",          CLtefFactor,          0.05) \
+    X("CDtefFactor",          CDtefFactor,          0.05) \
+    X("CDlefFactor",          CDlefFactor,          0.05) \
+    X("CDSPDBFactor",         CDSPDBFactor,         0.08) \
+    X("CDLDGFactor",          CDLDGFactor,          0.06) \
+    X("dragChuteCd",          dragChuteCd,          0.0) \
+    X("area2Span",            area2Span,            0.1066) \
+    X("rollMomentum",         rollMomentum,         1.0) \
+    X("pitchMomentum",        pitchMomentum,        1.0) \
+    X("yawMomentum",          yawMomentum,          1.0) \
+    X("pitchElasticity",      pitchElasticity,      1.0) \
+    X("sinkRate",             sinkRate,             15.0) \
+    X("gearPitchFactor",      gearPitchFactor,      0.0) \
+    X("rollGearGain",         rollGearGain,         0.6) \
+    X("yawGearGain",          yawGearGain,          0.6) \
+    X("pitchGearGain",        pitchGearGain,        0.8) \
+    X("landingAOA",           landingAOA,           12.5) \
+    X("rollCouple",           rollCouple,           0.0) \
+    X("elevatorRolls",        elevatorRolls,        false) \
+    X("criticalAOA",          criticalAOA,          0.0) \
+    X("nEngines",             nEngines,             1) \
+    X("typeEngine",           typeEngine,           2)
+
+// Geometry scalar fields only — the first four fields use value_with_warning
+// and the gear field requires nested-object handling, so they stay outside.
+#define F4_GEOMETRY_SCALAR_FIELDS(X) \
+    X("aoaMax_deg",       aoaMax_deg,       25.0) \
+    X("aoaMin_deg",       aoaMin_deg,       -5.0) \
+    X("betaMax_deg",      betaMax_deg,      30.0) \
+    X("betaMin_deg",      betaMin_deg,      -30.0) \
+    X("maxGs",            maxGs,            9.0) \
+    X("maxRoll_deg",      maxRoll_deg,      80.0) \
+    X("minVcas_kts",      minVcas_kts,      140.0) \
+    X("maxVcas_kts",      maxVcas_kts,      800.0) \
+    X("cornerVcas_kts",   cornerVcas_kts,   330.0) \
+    X("thetaMax_rad",     thetaMax_rad,     1.4) \
+    X("cgLoc_ft",         cgLoc_ft,         0.0) \
+    X("length_ft",        length_ft,        0.0) \
+    X("span_ft",          span_ft,          0.0) \
+    X("fusRadius_ft",     fusRadius_ft,     0.0) \
+    X("tailHt_ft",        tailHt_ft,        0.0)
+
+// Engine scalar fields only — the table arrays require .get<vector<double>>()
+// handling, so they stay outside.
+#define F4_ENGINE_SCALAR_FIELDS(X) \
+    X("thrustFactor",   thrustFactor,   1.0) \
+    X("fuelFlowFactor", fuelFlowFactor, 1.0)
+
+// ---------------------------------------------------------------------------
+// Readers
+// ---------------------------------------------------------------------------
+
 void readGear(const json& j, GearPoint& g) {
     g.x     = j.at(0).get<double>();
     g.y     = j.at(1).get<double>();
@@ -55,25 +143,18 @@ void readGear(const json& j, GearPoint& g) {
 
 void readGeometry(const json& j, AircraftGeometry& g,
                   std::vector<std::string>& warnings) {
+    // Warning-gated fields (kept outside the macro)
     g.emptyWeight_lbs  = value_with_warning(j, "emptyWeight_lbs",  g.emptyWeight_lbs,  "geometry", warnings);
     g.area_ft2         = value_with_warning(j, "area_ft2",         g.area_ft2,         "geometry", warnings);
     g.internalFuel_lbs = value_with_warning(j, "internalFuel_lbs", g.internalFuel_lbs, "geometry", warnings);
     g.maxFuel_lbs      = value_with_warning(j, "maxFuel_lbs",      g.maxFuel_lbs,      "geometry", warnings);
-    g.aoaMax_deg       = j.value("aoaMax_deg",       g.aoaMax_deg);
-    g.aoaMin_deg       = j.value("aoaMin_deg",       g.aoaMin_deg);
-    g.betaMax_deg      = j.value("betaMax_deg",      g.betaMax_deg);
-    g.betaMin_deg      = j.value("betaMin_deg",      g.betaMin_deg);
-    g.maxGs            = j.value("maxGs",            g.maxGs);
-    g.maxRoll_deg      = j.value("maxRoll_deg",      g.maxRoll_deg);
-    g.minVcas_kts      = j.value("minVcas_kts",      g.minVcas_kts);
-    g.maxVcas_kts      = j.value("maxVcas_kts",      g.maxVcas_kts);
-    g.cornerVcas_kts   = j.value("cornerVcas_kts",   g.cornerVcas_kts);
-    g.thetaMax_rad     = j.value("thetaMax_rad",     g.thetaMax_rad);
-    g.cgLoc_ft         = j.value("cgLoc_ft",         g.cgLoc_ft);
-    g.length_ft        = j.value("length_ft",        g.length_ft);
-    g.span_ft          = j.value("span_ft",          g.span_ft);
-    g.fusRadius_ft     = j.value("fusRadius_ft",     g.fusRadius_ft);
-    g.tailHt_ft        = j.value("tailHt_ft",        g.tailHt_ft);
+
+    // Scalar fields via field-list macro
+#define F4_READ_FIELD(key, field, def) g.field = j.value(key, static_cast<decltype(g.field)>(def));
+    F4_GEOMETRY_SCALAR_FIELDS(F4_READ_FIELD)
+#undef F4_READ_FIELD
+
+    // Nested gear array
     if (j.contains("gear")) {
         g.gear.clear();
         for (const auto& gj : j.at("gear")) {
@@ -85,55 +166,9 @@ void readGeometry(const json& j, AircraftGeometry& g,
 }
 
 void readAux(const json& j, AuxAero& a) {
-    a.fuelFlowFactorNormal = j.value("fuelFlowFactorNormal", a.fuelFlowFactorNormal);
-    a.fuelFlowFactorAb     = j.value("fuelFlowFactorAb",     a.fuelFlowFactorAb);
-    a.minFuelFlow          = j.value("minFuelFlow",          a.minFuelFlow);
-    a.normSpoolRate        = j.value("normSpoolRate",        a.normSpoolRate);
-    a.abSpoolRate          = j.value("abSpoolRate",          a.abSpoolRate);
-    a.jfsSpoolUpRate       = j.value("jfsSpoolUpRate",       a.jfsSpoolUpRate);
-    a.jfsSpoolUpLimit      = j.value("jfsSpoolUpLimit",      a.jfsSpoolUpLimit);
-    a.lightupSpoolRate     = j.value("lightupSpoolRate",     a.lightupSpoolRate);
-    a.flameoutSpoolRate    = j.value("flameoutSpoolRate",    a.flameoutSpoolRate);
-    a.jfsRechargeTime      = j.value("jfsRechargeTime",      a.jfsRechargeTime);
-    a.jfsMinRechargeRpm    = j.value("jfsMinRechargeRpm",    a.jfsMinRechargeRpm);
-    a.jfsSpinTime          = j.value("jfsSpinTime",          a.jfsSpinTime);
-    a.mainGenRpm           = j.value("mainGenRpm",           a.mainGenRpm);
-    a.stbyGenRpm           = j.value("stbyGenRpm",           a.stbyGenRpm);
-    a.epuBurnTime          = j.value("epuBurnTime",          a.epuBurnTime);
-    a.hasLef               = j.value("hasLef",               a.hasLef);
-    a.hasTef               = j.value("hasTef",               a.hasTef);
-    a.tefMaxAngle          = j.value("tefMaxAngle",          a.tefMaxAngle);
-    a.lefMaxAngle          = j.value("lefMaxAngle",          a.lefMaxAngle);
-    a.tefRate              = j.value("tefRate",              a.tefRate);
-    a.lefRate              = j.value("lefRate",              a.lefRate);
-    a.tefTakeOff           = j.value("tefTakeOff",           a.tefTakeOff);
-    a.lefGround             = j.value("lefGround",            a.lefGround);
-    a.lefMaxMach           = j.value("lefMaxMach",           a.lefMaxMach);
-    a.rudderMaxAngle       = j.value("rudderMaxAngle",       a.rudderMaxAngle);
-    a.aileronMaxAngle      = j.value("aileronMaxAngle",      a.aileronMaxAngle);
-    a.airbrakeMaxAngle     = j.value("airbrakeMaxAngle",     a.airbrakeMaxAngle);
-    a.CLtefFactor          = j.value("CLtefFactor",          a.CLtefFactor);
-    a.CDtefFactor          = j.value("CDtefFactor",          a.CDtefFactor);
-    a.CDlefFactor          = j.value("CDlefFactor",          a.CDlefFactor);
-    a.CDSPDBFactor         = j.value("CDSPDBFactor",         a.CDSPDBFactor);
-    a.CDLDGFactor          = j.value("CDLDGFactor",          a.CDLDGFactor);
-    a.dragChuteCd          = j.value("dragChuteCd",          a.dragChuteCd);
-    a.area2Span            = j.value("area2Span",            a.area2Span);
-    a.rollMomentum         = j.value("rollMomentum",         a.rollMomentum);
-    a.pitchMomentum        = j.value("pitchMomentum",        a.pitchMomentum);
-    a.yawMomentum          = j.value("yawMomentum",          a.yawMomentum);
-    a.pitchElasticity      = j.value("pitchElasticity",      a.pitchElasticity);
-    a.sinkRate             = j.value("sinkRate",             a.sinkRate);
-    a.gearPitchFactor      = j.value("gearPitchFactor",      a.gearPitchFactor);
-    a.rollGearGain         = j.value("rollGearGain",         a.rollGearGain);
-    a.yawGearGain          = j.value("yawGearGain",          a.yawGearGain);
-    a.pitchGearGain        = j.value("pitchGearGain",        a.pitchGearGain);
-    a.landingAOA           = j.value("landingAOA",           a.landingAOA);
-    a.rollCouple           = j.value("rollCouple",           a.rollCouple);
-    a.elevatorRolls        = j.value("elevatorRolls",        a.elevatorRolls);
-    a.criticalAOA          = j.value("criticalAOA",          a.criticalAOA);
-    a.nEngines             = j.value("nEngines",             a.nEngines);
-    a.typeEngine           = j.value("typeEngine",           a.typeEngine);
+#define F4_READ_FIELD(key, field, def) a.field = j.value(key, static_cast<decltype(a.field)>(def));
+    F4_AUX_AERO_FIELDS(F4_READ_FIELD)
+#undef F4_READ_FIELD
 }
 
 void readAero(const json& j, AeroTable& a) {
@@ -148,8 +183,12 @@ void readAero(const json& j, AeroTable& a) {
 }
 
 void readEngine(const json& j, EngineTable& e) {
-    e.thrustFactor   = j.value("thrustFactor",   e.thrustFactor);
-    e.fuelFlowFactor = j.value("fuelFlowFactor", e.fuelFlowFactor);
+    // Scalar fields via field-list macro
+#define F4_READ_FIELD(key, field, def) e.field = j.value(key, static_cast<decltype(e.field)>(def));
+    F4_ENGINE_SCALAR_FIELDS(F4_READ_FIELD)
+#undef F4_READ_FIELD
+
+    // Table arrays (kept outside the macro)
     if (j.contains("alt_ft"))      e.alt_ft      = j.at("alt_ft").get<std::vector<double>>();
     if (j.contains("mach"))        e.mach        = j.at("mach").get<std::vector<double>>();
     if (j.contains("thrust_idle")) e.thrust_idle = j.at("thrust_idle").get<std::vector<double>>();
@@ -241,25 +280,18 @@ json gearToJson(const GearPoint& g) {
 
 json geometryToJson(const AircraftGeometry& g) {
     json j;
+    // Warning-gated fields (kept outside the macro)
     j["emptyWeight_lbs"]    = g.emptyWeight_lbs;
     j["area_ft2"]           = g.area_ft2;
     j["internalFuel_lbs"]   = g.internalFuel_lbs;
     j["maxFuel_lbs"]        = g.maxFuel_lbs;
-    j["aoaMax_deg"]         = g.aoaMax_deg;
-    j["aoaMin_deg"]         = g.aoaMin_deg;
-    j["betaMax_deg"]        = g.betaMax_deg;
-    j["betaMin_deg"]        = g.betaMin_deg;
-    j["maxGs"]              = g.maxGs;
-    j["maxRoll_deg"]        = g.maxRoll_deg;
-    j["minVcas_kts"]        = g.minVcas_kts;
-    j["maxVcas_kts"]        = g.maxVcas_kts;
-    j["cornerVcas_kts"]     = g.cornerVcas_kts;
-    j["thetaMax_rad"]       = g.thetaMax_rad;
-    j["cgLoc_ft"]           = g.cgLoc_ft;
-    j["length_ft"]          = g.length_ft;
-    j["span_ft"]            = g.span_ft;
-    j["fusRadius_ft"]       = g.fusRadius_ft;
-    j["tailHt_ft"]          = g.tailHt_ft;
+
+    // Scalar fields via field-list macro
+#define F4_WRITE_FIELD(key, field, _def) j[key] = g.field;
+    F4_GEOMETRY_SCALAR_FIELDS(F4_WRITE_FIELD)
+#undef F4_WRITE_FIELD
+
+    // Nested gear array
     json gearArr = json::array();
     for (const auto& gp : g.gear) gearArr.push_back(gearToJson(gp));
     j["gear"] = gearArr;
@@ -268,55 +300,9 @@ json geometryToJson(const AircraftGeometry& g) {
 
 json auxToJson(const AuxAero& a) {
     json j;
-    j["fuelFlowFactorNormal"] = a.fuelFlowFactorNormal;
-    j["fuelFlowFactorAb"]     = a.fuelFlowFactorAb;
-    j["minFuelFlow"]          = a.minFuelFlow;
-    j["normSpoolRate"]        = a.normSpoolRate;
-    j["abSpoolRate"]          = a.abSpoolRate;
-    j["jfsSpoolUpRate"]       = a.jfsSpoolUpRate;
-    j["jfsSpoolUpLimit"]      = a.jfsSpoolUpLimit;
-    j["lightupSpoolRate"]     = a.lightupSpoolRate;
-    j["flameoutSpoolRate"]    = a.flameoutSpoolRate;
-    j["jfsRechargeTime"]      = a.jfsRechargeTime;
-    j["jfsMinRechargeRpm"]    = a.jfsMinRechargeRpm;
-    j["jfsSpinTime"]          = a.jfsSpinTime;
-    j["mainGenRpm"]           = a.mainGenRpm;
-    j["stbyGenRpm"]           = a.stbyGenRpm;
-    j["epuBurnTime"]          = a.epuBurnTime;
-    j["hasLef"]               = a.hasLef;
-    j["hasTef"]               = a.hasTef;
-    j["tefMaxAngle"]          = a.tefMaxAngle;
-    j["lefMaxAngle"]          = a.lefMaxAngle;
-    j["tefRate"]              = a.tefRate;
-    j["lefRate"]              = a.lefRate;
-    j["tefTakeOff"]           = a.tefTakeOff;
-    j["lefGround"]            = a.lefGround;
-    j["lefMaxMach"]           = a.lefMaxMach;
-    j["rudderMaxAngle"]       = a.rudderMaxAngle;
-    j["aileronMaxAngle"]      = a.aileronMaxAngle;
-    j["airbrakeMaxAngle"]     = a.airbrakeMaxAngle;
-    j["CLtefFactor"]          = a.CLtefFactor;
-    j["CDtefFactor"]          = a.CDtefFactor;
-    j["CDlefFactor"]          = a.CDlefFactor;
-    j["CDSPDBFactor"]         = a.CDSPDBFactor;
-    j["CDLDGFactor"]          = a.CDLDGFactor;
-    j["dragChuteCd"]          = a.dragChuteCd;
-    j["area2Span"]            = a.area2Span;
-    j["rollMomentum"]         = a.rollMomentum;
-    j["pitchMomentum"]        = a.pitchMomentum;
-    j["yawMomentum"]          = a.yawMomentum;
-    j["pitchElasticity"]      = a.pitchElasticity;
-    j["sinkRate"]             = a.sinkRate;
-    j["gearPitchFactor"]      = a.gearPitchFactor;
-    j["rollGearGain"]         = a.rollGearGain;
-    j["yawGearGain"]          = a.yawGearGain;
-    j["pitchGearGain"]        = a.pitchGearGain;
-    j["landingAOA"]           = a.landingAOA;
-    j["rollCouple"]           = a.rollCouple;
-    j["elevatorRolls"]        = a.elevatorRolls;
-    j["criticalAOA"]          = a.criticalAOA;
-    j["nEngines"]             = a.nEngines;
-    j["typeEngine"]           = a.typeEngine;
+#define F4_WRITE_FIELD(key, field, _def) j[key] = a.field;
+    F4_AUX_AERO_FIELDS(F4_WRITE_FIELD)
+#undef F4_WRITE_FIELD
     return j;
 }
 
@@ -335,8 +321,12 @@ json aeroToJson(const AeroTable& a) {
 
 json engineToJson(const EngineTable& e) {
     json j;
-    j["thrustFactor"]    = e.thrustFactor;
-    j["fuelFlowFactor"]  = e.fuelFlowFactor;
+    // Scalar fields via field-list macro
+#define F4_WRITE_FIELD(key, field, _def) j[key] = e.field;
+    F4_ENGINE_SCALAR_FIELDS(F4_WRITE_FIELD)
+#undef F4_WRITE_FIELD
+
+    // Table arrays (kept outside the macro)
     j["alt_ft"]          = e.alt_ft;
     j["mach"]            = e.mach;
     j["thrust_idle"]     = e.thrust_idle;

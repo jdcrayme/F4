@@ -119,20 +119,20 @@ namespace f4::entities {
 
 } // namespace f4::entities
 
-// std::hash specialization for TagKey — required for unordered_map<TagKey,_>.
-// Must be in namespace std and visible before TagSet is defined below.
-namespace std {
-    template<>
-    struct hash<f4::entities::TagKey> {
-        std::size_t operator()(const f4::entities::TagKey& k) const noexcept {
+// Custom hasher for TagKey — replaces the previous std::hash specialization
+// which was undefined behavior per [namespace.std]/2. Must be visible before
+// TagSet is defined below.
+namespace f4::entities {
+    struct TagKeyHash {
+        std::size_t operator()(const TagKey& k) const noexcept {
             return std::hash<std::string>{}(k.name);
         }
     };
-} // namespace std
+} // namespace f4::entities
 
 namespace f4::entities {
 
-    using TagSet = std::unordered_map<TagKey, TagValue>;
+    using TagSet = std::unordered_map<TagKey, TagValue, TagKeyHash>;
 
     namespace tags {
         inline constexpr const char* ROLE = "role";    // "fighter","bomber","tanker","awacs",...

@@ -13,6 +13,7 @@
 
 #include "f4/flight/aerodynamics.hpp"
 #include "f4/flight/constants.hpp"
+#include "f4/flight/stall_state.hpp"
 
 #include <gtest/gtest.h>
 
@@ -72,7 +73,7 @@ AeroState makeAero() {
     a.gearPos = 0.0;  // gear up
     a.dragChutePos = 0.0;
     a.cdStores = 0.0;
-    a.stallState = 0;  // None
+    a.stallState = StallState::None;
     return a;
 }
 
@@ -310,7 +311,7 @@ TEST(Aerodynamics, FlatSpinZeroesLift) {
     Aerodynamics a(&sa.table, &sa.geom, &sa.aux);
 
     AeroState s = makeAero();
-    s.stallState = 4;  // FlatSpin
+    s.stallState = StallState::FlatSpin;
     a.update(angle_from_degrees(10.0), angle_from_degrees(0.0), 0.0, 100.0, 1.0, 10.0, 1000.0, 0.0, -1100.0, 100.0, 0.0, s);
     EXPECT_DOUBLE_EQ(s.lift, 0.0);
 }

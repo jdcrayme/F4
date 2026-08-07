@@ -60,7 +60,7 @@ namespace f4::flight {
 // Stall states (6 — matches §7.3; Crashing is handled by the ground model,
 // not the stall SM).
 // ---------------------------------------------------------------------------
-enum class StallState {
+enum class StallState : int {
     None,               // normal flight
     EnteringDeepStall,  // stall detected, transitioning to deep stall
     DeepStall,          // sustained stalled condition

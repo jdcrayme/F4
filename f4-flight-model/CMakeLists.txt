@@ -8,7 +8,8 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # ---------------------------------------------------------------------------
 # f4-flight-model depends on:
 #   - f4-data          (for AircraftConfig, table accessors)
-#   - f4-math          (for Table2D, Vec3, Quat, filters — transitively via f4-data)
+#   - f4-math          (for Table2D, Vec3, Quat, filters — explicit PUBLIC dep,
+#                       used in public headers)
 #   - f4-state-machine (for the stall state machine — the first real consumer)
 #   - f4-messaging     (for the optional MessageBus integration — the first
 #                       real consumer of the bus. The dependency is PUBLIC
@@ -34,6 +35,7 @@ target_include_directories(f4-flight-model PUBLIC
 )
 target_link_libraries(f4-flight-model PUBLIC
     f4-data
+    f4-math
     f4-state-machine
     f4-messaging
     f4-units

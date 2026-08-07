@@ -34,7 +34,7 @@ namespace f4::flight {
 
 using f4::math::Vec3d;
 using f4::math::Quatd;
-using namespace f4::data;
+using f4::data::AircraftConfig;
 
 // ---------------------------------------------------------------------------
 // Construction
@@ -50,6 +50,18 @@ void FlightModel::init(const AircraftConfig& cfg,
                        double initialVt_ftps,
                        double initialHeading_rad,
                        bool inAir) {
+    initSubsystems(cfg);
+    initKinematics(initialAltitude_ft, initialVt_ftps, initialHeading_rad);
+    initFuelState();
+    initGearAndEngine(inAir);
+    initTrimAndAtmosphere(initialAltitude_ft);
+}
+
+// ---------------------------------------------------------------------------
+// initSubsystems: validate config, reset state, reconstruct subsystems,
+// rebuild stall SM.
+// ---------------------------------------------------------------------------
+void FlightModel::initSubsystems(const AircraftConfig& cfg) {
     // Validate config: aero tables must be non-empty
     if (cfg.aero.mach.empty() || cfg.aero.alpha_deg.empty() || cfg.aero.clift.empty()) {
         throw std::runtime_error("FlightModel::init: aero tables are empty");
@@ -69,9 +81,16 @@ void FlightModel::init(const AircraftConfig& cfg,
     stallSM_ = makeStallMachine(stallCfg_);
     stallTimer_ = 0.0;
     prevAeroStalled_ = false;
-    state_.aero.stallState = static_cast<int>(StallState::None);
+    state_.aero.stallState = StallState::None;
+}
 
-    // --- Initial kinematic state ---
+// ---------------------------------------------------------------------------
+// initKinematics: set initial position, velocity, heading, and quaternion
+// (level, wings level).
+// ---------------------------------------------------------------------------
+void FlightModel::initKinematics(double initialAltitude_ft,
+                                 double initialVt_ftps,
+                                 double initialHeading_rad) {
     KinematicState& k = state_.kin;
     k.z = -initialAltitude_ft;  // NED: altitude = -z
     k.vt = initialVt_ftps;
@@ -88,15 +107,24 @@ void FlightModel::init(const AircraftConfig& cfg,
     k.xdot = initialVt_ftps * std::cos(initialHeading_rad);
     k.ydot = initialVt_ftps * std::sin(initialHeading_rad);
     k.zdot = 0.0;
+}
 
-    // --- Fuel state ---
+// ---------------------------------------------------------------------------
+// initFuelState: initialise fuel state from config.
+// ---------------------------------------------------------------------------
+void FlightModel::initFuelState() {
     FuelState& fuel = state_.fuel;
     fuel.emptyWeight_lbs = cfg_.geometry.emptyWeight_lbs;
     fuel.fuel_lbs = cfg_.geometry.internalFuel_lbs;
     fuel.weight_lbs = fuel.emptyWeight_lbs + fuel.fuel_lbs + fuel.externalFuel_lbs;
     fuel.mass_slugs = fuel.weight_lbs / GRAVITY;
     fuel.loadingFraction = fuel.weight_lbs / std::max(1.0, fuel.emptyWeight_lbs);
+}
 
+// ---------------------------------------------------------------------------
+// initGearAndEngine: initialise gear state and engine to idle.
+// ---------------------------------------------------------------------------
+void FlightModel::initGearAndEngine(bool inAir) {
     // --- Gear ---
     gear_.init(state_.gear);
     state_.gear.inAir = inAir;
@@ -104,8 +132,16 @@ void FlightModel::init(const AircraftConfig& cfg,
     state_.aero.gearPos = inAir ? 0.0 : 1.0;
 
     // --- Engine ---
-    state_.engine.rpm = 0.7;  // idle
+    state_.engine.rpm = RPM_IDLE;  // idle
     state_.engine.engLit = true;
+}
+
+// ---------------------------------------------------------------------------
+// initTrimAndAtmosphere: atmosphere, alpha trim, FCS filter init,
+// quaternion rebuild from euler, trig cache, aero recompute, load factors.
+// ---------------------------------------------------------------------------
+void FlightModel::initTrimAndAtmosphere(double initialAltitude_ft) {
+    KinematicState& k = state_.kin;
 
     // --- Atmosphere ---
     updateAtmosphere();
@@ -119,7 +155,8 @@ void FlightModel::init(const AircraftConfig& cfg,
                  initialAltitude_ft, state_.gear.groundZ_ft, k.z,
                  state_.vcas, 0.0, state_.aero);
 
-    if (inAir && state_.qsom > 1e-6) {
+    // state_.gear.inAir was set by initGearAndEngine() before us.
+    if (state_.gear.inAir && state_.qsom > QSOM_FLOOR) {
         // Target CL for 1-G level flight
         const double targetCl = GRAVITY / state_.qsom;
         // Scan the mach=0 row of the CL table for the nearest alpha
@@ -239,7 +276,7 @@ void FlightModel::updateGear(double dt) {
     if (!g.inAir) {
         const double lift_lbs = a.lift * state_.fuel.mass_slugs;
         const double weight_lbs = state_.fuel.weight_lbs;
-        if (lift_lbs > weight_lbs * 1.05 && state_.kin.zdot < -0.5) {
+        if (lift_lbs > weight_lbs * LIFTOFF_LIFT_MARGIN && state_.kin.zdot < -LIFTOFF_ZDOT_THRESH) {
             g.inAir = true;
         }
     }
@@ -286,17 +323,29 @@ void FlightModel::minorStep(double dt, const PilotInput& input) {
     updateAtmosphere();
 
     // 2. FCS (computes commanded alpha, beta, roll rate)
-    const bool gearDown = (a.gearPos > 0.5);
-    fcs_.update(dt, state_.qbar, state_.qsom, state_.mach,
-                k.vt, state_.vcas,
-                a.alpha, a.beta,
-                k.cosmu, k.cosgam, k.singam,
-                k.costhe, k.cosphi, k.phi,
-                state_.fuel.loadingFraction,
-                state_.gear.inAir,
-                state_.loads.nzcgs, state_.loads.nycgw,
-                gearDown, input.refueling, false,
-                input, f, a);
+    FlightConditions fc;
+    fc.qbar            = state_.qbar;
+    fc.qsom            = state_.qsom;
+    fc.mach            = state_.mach;
+    fc.vt              = k.vt;
+    fc.vcas            = state_.vcas;
+    fc.alpha           = a.alpha;
+    fc.beta            = a.beta;
+    fc.sinalp          = k.sinalp;
+    fc.cosalp          = k.cosalp;
+    fc.sinbet          = k.sinbet;
+    fc.cosbet          = k.cosbet;
+    fc.cosmu           = k.cosmu;
+    fc.cosgam          = k.cosgam;
+    fc.singam          = k.singam;
+    fc.costhe          = k.costhe;
+    fc.cosphi          = k.cosphi;
+    fc.phi             = k.phi;
+    fc.loadingFraction = state_.fuel.loadingFraction;
+    fc.inAir           = state_.gear.inAir;
+    fc.nzcgs           = state_.loads.nzcgs;
+    fc.nycgw           = state_.loads.nycgw;
+    fcs_.update(input, fc, f, a, dt);
 
     // 3. Aerodynamics (recompute forces at the new alpha/beta)
     const double alt_ft = -k.z;
@@ -335,7 +384,7 @@ void FlightModel::minorStep(double dt, const PilotInput& input) {
     eom_.update(dt, input, state_);
 
     // 8. Burn fuel
-    const double burnRate = e.fuelFlow / 3600.0;  // lb/hr -> lb/s
+    const double burnRate = e.fuelFlow / SEC_PER_HOUR;  // lb/hr -> lb/s
     state_.fuel.fuel_lbs -= burnRate * dt;
     state_.fuel.fuel_lbs = std::max(0.0, state_.fuel.fuel_lbs);
     state_.fuel.weight_lbs = state_.fuel.emptyWeight_lbs
@@ -471,7 +520,7 @@ bool FlightModel::trim() {
 // ---------------------------------------------------------------------------
 void FlightModel::updateStallSM(double dt, const PilotInput& input) {
     AeroState& a = state_.aero;
-    const StallState currentState = static_cast<StallState>(a.stallState);
+    const StallState currentState = a.stallState;
 
     // Accumulate time in the current state
     stallTimer_ += dt;
@@ -535,7 +584,7 @@ void FlightModel::updateStallSM(double dt, const PilotInput& input) {
 
     // Write the SM's current state back to AeroState for next frame's
     // aero force modification (FlatSpin -> lift=0, etc.)
-    a.stallState = static_cast<int>(stallSM_.current());
+    a.stallState = stallSM_.current();
 }
 
 }  // namespace f4::flight

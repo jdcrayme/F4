@@ -22,7 +22,8 @@ class GearModel {
 public:
     GearModel() = default;
 
-    /// Construct with config pointers. Pointers must remain valid.
+    /// Construct with config pointers. Pointers must remain valid for the
+    /// lifetime of this object. Null pointers are rejected via assert().
     GearModel(const data::AircraftGeometry* geom, const data::AuxAero* aux);
 
     /// Initialize the gear state (sizes the wheels vector).

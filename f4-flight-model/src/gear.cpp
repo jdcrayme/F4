@@ -7,6 +7,7 @@
 #include "f4/flight/gear.hpp"
 
 #include <algorithm>
+#include <cassert>
 #include <cmath>
 
 namespace f4::flight {
@@ -15,7 +16,10 @@ namespace f4::flight {
 // Construction
 // ---------------------------------------------------------------------------
 GearModel::GearModel(const data::AircraftGeometry* geom, const data::AuxAero* aux)
-    : geom_(geom), aux_(aux) {}
+    : geom_(geom), aux_(aux) {
+    assert(geom_ != nullptr && "GearModel: geom must not be null");
+    assert(aux_  != nullptr && "GearModel: aux must not be null");
+}
 
 // ---------------------------------------------------------------------------
 // init: size the wheels vector to match the config's gear points.
@@ -61,11 +65,11 @@ double GearModel::computeMinHeight(const GearState& gear, double gearPos) const 
 // ---------------------------------------------------------------------------
 double GearModel::calcMuFric(bool wheelBrakes, bool parkingBrake,
                               bool onObject, bool overRunway) {
-    if (onObject)     return 20.0;  // carrier deck (effectively infinite)
-    if (parkingBrake) return 0.7;
-    if (wheelBrakes)  return 0.7;
-    if (overRunway)   return 0.04;  // paved
-    return 0.5;                      // grass / dirt
+    if (onObject)     return MU_CARRIER;  // carrier deck (effectively infinite)
+    if (parkingBrake) return MU_BRAKING;
+    if (wheelBrakes)  return MU_BRAKING;
+    if (overRunway)   return MU_PAVED;  // paved
+    return MU_GRASS;                      // grass / dirt
 }
 
 // ---------------------------------------------------------------------------

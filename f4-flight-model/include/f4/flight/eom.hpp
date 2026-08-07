@@ -31,7 +31,8 @@ class EquationsOfMotion {
 public:
     EquationsOfMotion() = default;
 
-    /// Construct with config pointers. Pointers must remain valid.
+    /// Construct with config pointers. Pointers must remain valid for the
+    /// lifetime of this object. Null pointers are rejected via assert().
     explicit EquationsOfMotion(const data::AircraftGeometry* geom,
                                const data::AuxAero* aux);
 

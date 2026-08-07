@@ -160,6 +160,26 @@ private:
     /// force modification. Called once per minor frame, after aero.
     void updateStallSM(double dt, const PilotInput& input);
 
+    // --- init() sub-functions (pure refactor, no logic change) ---
+
+    /// Validate config, reset state, reconstruct subsystems, rebuild stall SM.
+    void initSubsystems(const data::AircraftConfig& cfg);
+
+    /// Set initial position, velocity, heading, and quaternion (level wings).
+    void initKinematics(double initialAltitude_ft,
+                        double initialVt_ftps,
+                        double initialHeading_rad);
+
+    /// Initialise fuel state from config.
+    void initFuelState();
+
+    /// Initialise gear and engine to idle / on-ground or in-air state.
+    void initGearAndEngine(bool inAir);
+
+    /// Atmosphere, trim alpha, FCS filter init, quaternion rebuild from euler,
+    /// trig cache, aero recompute, and load factors.
+    void initTrimAndAtmosphere(double initialAltitude_ft);
+
     data::AircraftConfig cfg_;
     AircraftState        state_;
 

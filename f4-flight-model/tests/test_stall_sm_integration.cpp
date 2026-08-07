@@ -72,10 +72,10 @@ TEST(StallSMIntegration, StallSMDoesNotBreakStability) {
     EXPECT_GT(to_degrees(fm.state().aero.alpha), cfg.geometry.aoaMin_deg - 5.0);
     EXPECT_LT(to_degrees(fm.state().aero.alpha), cfg.geometry.aoaMax_deg + 5.0);
 
-    // The stall SM must be in a valid state (0-5, within the enum range)
-    const int ss = fm.state().aero.stallState;
-    EXPECT_GE(ss, 0);
-    EXPECT_LE(ss, 5);
+    // The stall SM must be in a valid state
+    const StallState ss = fm.state().aero.stallState;
+    EXPECT_GE(static_cast<int>(ss), 0);
+    EXPECT_LE(static_cast<int>(ss), 5);
 }
 
 // ============================================================================
@@ -135,7 +135,7 @@ TEST(StallSMIntegration, StallEntryAndRecoveryLifecycle) {
 
     for (int frame = 0; frame < 5 * 60; ++frame) {
         fm.update(dt, input, 0.0, groundNormal);
-        const StallState ss = static_cast<StallState>(fm.state().aero.stallState);
+        const StallState ss = fm.state().aero.stallState;
         if (ss == StallState::EnteringDeepStall) sawEnteringDeepStall = true;
         if (ss == StallState::DeepStall) sawDeepStall = true;
 
@@ -157,7 +157,7 @@ TEST(StallSMIntegration, StallEntryAndRecoveryLifecycle) {
 
     for (int frame = 0; frame < 30 * 60; ++frame) {
         fm.update(dt, input, 0.0, groundNormal);
-        const StallState ss = static_cast<StallState>(fm.state().aero.stallState);
+        const StallState ss = fm.state().aero.stallState;
         if (ss == StallState::Recovering) sawRecovering = true;
         if (ss == StallState::None && sawRecovering) {
             sawRecovered = true;

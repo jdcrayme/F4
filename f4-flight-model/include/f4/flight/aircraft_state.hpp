@@ -39,6 +39,13 @@
 
 #include <vector>
 
+// Forward-declared so AeroState::stallState can be typed without pulling
+// in the full stall_state.hpp (and its f4::fsm dependency).
+// Defined in f4/flight/stall_state.hpp.
+namespace f4::flight {
+enum class StallState : int;
+}
+
 namespace f4::flight {
 
 // ---------------------------------------------------------------------------
@@ -167,9 +174,7 @@ struct AeroState {
     //   force model reads stallState to modify lift (FlatSpin -> lift=0).
     bool   stalled{false};
     double stallSpeed{0.0};    // kcas
-    int    stallState{0};      // StallState enum value (0 = None); int to
-                               // avoid pulling f4-state-machine into the
-                               // state header. Cast via static_cast<StallState>.
+    StallState stallState{StallState{0}};  // typed lifecycle state (0 = None)
 
     // Incremental CD from external stores (set by host for weapons/fuel tanks)
     double cdStores{0.0};

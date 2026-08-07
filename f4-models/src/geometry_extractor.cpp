@@ -199,6 +199,25 @@ struct WalkContext {
 
     /// Push a subtree's pools onto the stack if they're non-empty.
     /// Returns true if anything was pushed (caller must pop).
+    ///
+    /// reinterpret_cast SAFETY: The LOD buffer contains packed binary data read
+    /// from the KoreaObj.LOD file format. The offsets within the buffer may not
+    /// be aligned to alignof(Vec3) or alignof(int32_t), making the
+    /// reinterpret_cast technically undefined behavior per the C++ standard
+    /// (strict aliasing + alignment requirements).
+    ///
+    /// This is tolerated because:
+    ///   1. x86/x86-64 supports unaligned access to float/int32_t in hardware
+    ///      (no SIGBUS, just a potential performance penalty).
+    ///   2. The original FreeFalcon code uses the same pattern (memory-mapping
+    ///      the file and casting offsets to typed pointers).
+    ///   3. All major compilers (GCC, Clang, MSVC) handle this correctly in
+    ///      practice, especially with -fno-strict-aliasing.
+    ///
+    /// A future "aligned reader" refactor could eliminate this UB by either
+    /// copying pool data into aligned storage or using std::memcpy for each
+    /// element access. This is deferred because it would require restructuring
+    /// the pool-pointer architecture and would add copy overhead.
     bool push_pools(const BspNode& node) {
         const auto* buf = tree.lod_buffer.data();
         const auto  sz  = tree.lod_buffer.size();

@@ -38,7 +38,8 @@ target_include_directories(f4-convert PUBLIC
 )
 target_link_libraries(f4-convert PUBLIC
     f4-data
-    nlohmann_json::nlohmann_json
+PRIVATE
+    f4-math
 )
 
 # ---------------------------------------------------------------------------

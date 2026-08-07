@@ -41,6 +41,7 @@ public:
 
     /// Construct with pointers to the config tables.
     /// The pointers must remain valid for the lifetime of this object.
+    /// Null pointers are rejected via assert().
     Aerodynamics(const data::AeroTable* table,
                  const data::AircraftGeometry* geom,
                  const data::AuxAero* aux);

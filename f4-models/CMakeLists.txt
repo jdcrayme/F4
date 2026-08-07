@@ -26,10 +26,15 @@ target_include_directories(f4-models
 # f4::math::Vec3<float> — the previous duplicate definition in types.hpp
 # was removed in the 2025 cleanup pass to avoid the two types drifting
 # apart as f4-math::Vec3 gains operators).
-target_link_libraries(f4-models PUBLIC f4-json f4-math f4-lzss)
+target_link_libraries(f4-models PUBLIC f4-math PRIVATE f4-json f4-lzss)
 
 option(F4_MODELS_BUILD_TESTS "Build unit tests" ON)
 if(F4_MODELS_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
+endif()
+
+option(F4_MODELS_BUILD_DIAG "Build diagnostic CLI tools (require game data)" OFF)
+if(F4_MODELS_BUILD_DIAG)
+    add_subdirectory(diag)
 endif()

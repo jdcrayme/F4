@@ -28,6 +28,10 @@
 
 namespace f4::world {
 
+// using namespace f4::entities — retained because 30+ entity types are used
+// in this file. Explicit using-declarations for each would be ~30 lines of
+// noise with no readability benefit. using-namespace is acceptable in .cpp
+// implementation files (only headers are the real risk).
 using namespace f4::entities;
 
 // ============================================================================

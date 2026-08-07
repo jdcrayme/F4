@@ -1,20 +1,17 @@
-// f4-world-convert/include/f4/convert/lzss.hpp
+// f4-world-convert/include/f4/world_convert/lzss.hpp
 //
-// LZSS decompressor — faithful port of FreeFalcon's LZSS_Expand()
-// (src/utils/lzss.cpp). The campaign metadata sub-file (.cmp) inside a .cam
-// archive is LZSS-compressed; this decompresses it so the campaign header
+// LZSS decompression adapter — delegates to f4::lzss::decompress().
+//
+// The campaign metadata sub-file (.cmp) inside a .cam archive is
+// LZSS-compressed; lzss_expand() decompresses it so the campaign header
 // fields (CurrentTime, team names, etc.) can be parsed.
 //
-// Algorithm: classic Nelson & Gailly LZSS with "blocked I/O":
-//   - 12-bit window index  (WINDOW_SIZE = 4096)
-//   - 4-bit match length   (BREAK_EVEN = 1, so match length = 1..16)
-//   - Flag byte: 8 bits, LSB-first. Bit set (1) = literal byte;
-//     bit clear (0) = (position,length) match pair (2 bytes).
-//   - Match token layout: [len_hi:4 | pos_hi:4] [pos_lo:8]
-//       position = ((byteA & 0x0F) << 8) | byteB   (12-bit)
-//       length   = (byteA >> 4) + BREAK_EVEN        (1..16)
+// The canonical implementation lives in f4-lzss (f4::lzss::decompress).
+// This module provides a compatibility wrapper that translates the
+// error convention (f4::lzss returns empty on failure; lzss_expand
+// throws std::runtime_error).
 //
-// This is a byte-exact port verified against the real save1.cam fixture.
+// Algorithm details: see f4-lzss/include/f4/lzss/lzss.hpp.
 
 #pragma once
 
@@ -23,6 +20,10 @@
 
 namespace f4::world_convert {
 
+// Legacy constants — kept for backward compatibility. The canonical
+// definitions live in f4-lzss; these are duplicated here only so that
+// existing code referencing f4::world_convert::LZSS_WINDOW_SIZE etc.
+// continues to compile. New code should use f4::lzss directly.
 constexpr int LZSS_INDEX_BIT_COUNT = 12;
 constexpr int LZSS_LENGTH_BIT_COUNT = 4;
 constexpr int LZSS_WINDOW_SIZE = 1 << LZSS_INDEX_BIT_COUNT;          // 4096

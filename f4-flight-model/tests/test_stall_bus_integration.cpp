@@ -163,7 +163,7 @@ TEST(StallBusIntegration, NoBusAttachedBehavesIdentically) {
     }
 
     // The SM should have transitioned (same as the bus-attached test)
-    const int ss = fm.state().aero.stallState;
+    const auto ss = static_cast<int>(fm.state().aero.stallState);
     EXPECT_GE(ss, 0);
     EXPECT_LE(ss, 5);
 

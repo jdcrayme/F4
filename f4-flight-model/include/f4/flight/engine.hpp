@@ -35,7 +35,8 @@ class EngineModel {
 public:
     EngineModel() = default;
 
-    /// Construct with config pointers. Pointers must remain valid.
+    /// Construct with config pointers. Pointers must remain valid for the
+    /// lifetime of this object. Null pointers are rejected via assert().
     explicit EngineModel(const data::EngineTable* table,
                          const data::AuxAero* aux);
 
@@ -58,7 +59,7 @@ public:
                 double throttle,
                 double ethrst,
                 bool   simplified,
-                EngineState& state) const;
+                EngineState& state);
 
     /// Compute body-axis thrust forces (ft/s^2) from thrust acceleration.
     /// Used by the FlightModel to augment the aerodynamic forces.
@@ -72,7 +73,10 @@ public:
                            double& xsprop,
                            double& zsprop);
 
-    double fuelFlow() const noexcept { return lastFuelFlow_; }
+    /// Return the last computed fuel flow from the given engine state.
+    /// This is a convenience accessor — fuel flow is stored in EngineState
+    /// (per-aircraft mutable state), not in EngineModel.
+    static double fuelFlow(const EngineState& state) noexcept { return state.fuelFlow; }
 
 private:
     /// Per-engine-type RPM schedule modifications.
@@ -94,8 +98,6 @@ private:
     math::Table2D<double, double, double> ffAb_;
     bool hasAB_{false};
     bool hasFuelFlowTables_{false};
-
-    mutable double lastFuelFlow_{0.0};
 };
 
 }  // namespace f4::flight

@@ -36,11 +36,18 @@
 #include "f4/flight/fcs.hpp"
 
 #include <algorithm>
+#include <cassert>
 #include <cmath>
 
 namespace f4::flight {
 
-using namespace f4::data;
+using f4::data::AircraftConfig;
+using f4::data::AircraftGeometry;
+using f4::data::AuxAero;
+using f4::data::LimiterKey;
+using f4::data::Limiter;
+using f4::data::LimiterType;
+using f4::data::makeRollRateTable;
 using f4::math::LagFilter;
 using f4::math::AdamsBash2Filter;
 using f4::math::LeadLagFilter;
@@ -52,6 +59,9 @@ FlightControlSystem::FlightControlSystem(const AircraftConfig* cfg,
                                          const AircraftGeometry* geom,
                                          const AuxAero* aux)
     : cfg_(cfg), geom_(geom), aux_(aux) {
+    assert(cfg_  != nullptr && "FlightControlSystem: cfg must not be null");
+    assert(geom_ != nullptr && "FlightControlSystem: geom must not be null");
+    assert(aux_  != nullptr && "FlightControlSystem: aux must not be null");
     if (cfg_ && !cfg_->rollCmd.rollRate.empty()) {
         rollCmdTable_ = makeRollRateTable(cfg_->rollCmd);
     }
@@ -77,20 +87,34 @@ double FlightControlSystem::applyLimiter(LimiterKey key, double x) const {
 // ---------------------------------------------------------------------------
 // update: run the full FCS for one time step.
 // ---------------------------------------------------------------------------
-void FlightControlSystem::update(double dt,
-                                 double qbar, double qsom, double mach,
-                                 double vt_ftps, double vcas_kts,
-                                 Angle alpha, Angle beta,
-                                 double cosmu, double cosgam, double singam,
-                                 double costhe, double cosphi, Angle phi,
-                                 double loadingFraction,
-                                 bool inAir,
-                                 double nzcgs, double nycgw,
-                                 bool gearDown, bool refueling,
-                                 bool landingGainsActive,
-                                 const PilotInput& input,
-                                 FcsState& fcs,
-                                 AeroState& aero) const {
+void FlightControlSystem::update(const PilotInput& pilot,
+                                 const FlightConditions& fc,
+                                 FcsState& fcsState,
+                                 AeroState& aeroState,
+                                 double dt) const {
+    // Unpack flight conditions for readability
+    const double qbar            = fc.qbar;
+    const double qsom            = fc.qsom;
+    const double mach            = fc.mach;
+    const double vt_ftps         = fc.vt;
+    const double vcas_kts        = fc.vcas;
+    const Angle  alpha           = fc.alpha;
+    const Angle  beta            = fc.beta;
+    const double cosmu           = fc.cosmu;
+    const double cosgam          = fc.cosgam;
+    const double singam          = fc.singam;
+    const double costhe          = fc.costhe;
+    const double cosphi          = fc.cosphi;
+    const Angle  phi             = fc.phi;
+    const double loadingFraction = fc.loadingFraction;
+    const bool   inAir           = fc.inAir;
+    const double nzcgs           = fc.nzcgs;
+    const double nycgw           = fc.nycgw;
+
+    // References to mutable state (named to match the rest of the impl)
+    FcsState& fcs  = fcsState;
+    AeroState& aero = aeroState;
+
     (void)mach;  // not directly used by FCS (aero tables handle Mach effects)
 
     // The FCS internals still work in degrees for alpha/beta (table lookups,
@@ -101,7 +125,8 @@ void FlightControlSystem::update(double dt,
 
     // Landing gains are active when gear is down, refueling, or explicitly
     // requested by the host (e.g. approach mode).
-    const bool landingGains = landingGainsActive || gearDown || refueling;
+    const bool gearDown = (aero.gearPos > 0.5);
+    const bool landingGains = pilot.refueling || gearDown;
 
     // --- Damper gains from limiters ---
     // These scale the pitch/roll/yaw outputs based on dynamic pressure.
@@ -113,8 +138,8 @@ void FlightControlSystem::update(double dt,
     // Computed here because kp01 (in computeGains) depends on it.
     // pshape = pstick^2 * sign(pstick): squares the input (so small inputs
     // are suppressed) and preserves the sign.
-    fcs.pshape = input.pstick * input.pstick;
-    if (input.pstick < 0.0) fcs.pshape = -fcs.pshape;
+    fcs.pshape = pilot.pstick * pilot.pstick;
+    if (pilot.pstick < 0.0) fcs.pshape = -fcs.pshape;
 
     // --- Compute gains (pitch/roll/yaw) ---
     computeGains(qbar, qsom, vt_ftps, alpha,
@@ -136,15 +161,15 @@ void FlightControlSystem::update(double dt,
              alpha, cosmu, cosgam, singam,
              nzcgs, aero.cl, aero.clalpha, aero.clalph0,
              aero.cnalpha, aoamin, aoamax, maxGs,
-             input, fcs, aero);
+             pilot, fcs, aero);
 
     runRoll(dt, qbar, vcas_kts, alpha,
             aero.gearPos, phi,
-            input, fcs);
+            pilot, fcs);
 
     runYaw(dt, qbar, qsom, vt_ftps, vcas_kts,
            beta, nycgw, betmin, betmax,
-           input, fcs, aero);
+           pilot, fcs, aero);
 
     // Suppress unused-variable warnings for the locals extracted above;
     // they are retained for clarity at the FCS-internal boundary even when
@@ -239,8 +264,8 @@ void FlightControlSystem::computeGains(double qbar, double qsom, double vt,
     const double pfreq1 = (std::sqrt(pradcl) - pcoef1) * 0.5;
     const double pfreq2 = -pcoef1 - pfreq1;
 
-    fcs.tp02 = (std::fabs(pfreq1) > 1e-6) ? 1.0 / pfreq1 : 1.0;
-    fcs.tp03 = std::max(0.5, (std::fabs(pfreq2) > 1e-6) ? 1.0 / pfreq2 : 1.0);
+    fcs.tp02 = (std::fabs(pfreq1) > QSOM_FLOOR) ? 1.0 / pfreq1 : 1.0;
+    fcs.tp03 = std::max(0.5, (std::fabs(pfreq2) > QSOM_FLOOR) ? 1.0 / pfreq2 : 1.0);
 
     // --- kp05: pitch feedback gain ---
     // Differs between AOA-command mode and G-command mode.
@@ -295,14 +320,14 @@ void FlightControlSystem::computeGains(double qbar, double qsom, double vt,
     const double yfreq1 = (std::sqrt(yradcl) - ycoef1) * 0.5;
     const double yfreq2 = -ycoef1 - yfreq1;
 
-    fcs.ty02 = (std::fabs(yfreq2) > 1e-6) ? 1.0 / yfreq2 : 1.0;
+    fcs.ty02 = (std::fabs(yfreq2) > QSOM_FLOOR) ? 1.0 / yfreq2 : 1.0;
 
     // ky05: yaw feedback gain.
     // IMPORTANT: preserve the sign of the denominator. Earlier versions used
     // max(1e-6, denom) which destroyed the sign when cy < 0, causing the yaw
     // damper to become a positive-feedback loop.
     const double denom = qsom * cy * yfreq1 * yfreq2;
-    if (std::fabs(denom) > 1e-6) {
+    if (std::fabs(denom) > QSOM_FLOOR) {
         fcs.ky05 = -GRAVITY * wy01 * wy01 / denom;
     }
 
@@ -418,7 +443,7 @@ void FlightControlSystem::runPitch(double dt, double qbar, double qsom,
     const double old_alpha = to_degrees(aero.alpha);
     const double new_alpha_deg = new_alpha;
     aero.alpha_dot = angular_rate_from_degrees_per_second(
-        (new_alpha_deg - old_alpha) / std::max(dt, 1e-6));
+        (new_alpha_deg - old_alpha) / std::max(dt, QSOM_FLOOR));
     aero.alpha = angle_from_degrees(new_alpha);
 }
 
