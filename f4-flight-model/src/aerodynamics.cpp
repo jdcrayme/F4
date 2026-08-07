@@ -44,9 +44,15 @@ Aerodynamics::Aerodynamics(const AeroTable* table,
 
 // ---------------------------------------------------------------------------
 // update(): compute aerodynamic forces for one time step.
+//
+// alpha / beta are passed as the strong Angle type. Internally we extract
+// the degree value once (the F-16 aero tables are degree-indexed and we
+// do NOT convert them — converting the data would alter the flight feel).
+// All inline arithmetic that needs radians uses to_radians(alpha) so the
+// unit crossing is explicit at each call site.
 // ---------------------------------------------------------------------------
-void Aerodynamics::update(double alpha_deg,
-                          double beta_deg,
+void Aerodynamics::update(Angle alpha,
+                          Angle beta,
                           double mach,
                           double vt_ftps,
                           double qbar,
@@ -65,9 +71,15 @@ void Aerodynamics::update(double alpha_deg,
         return;
     }
 
+    // --- Extract degree values for table lookups (the single place the
+    // degree convention survives; the F-16 aero tables are physically
+    // indexed in degrees). ---
+    const double alpha_deg = to_degrees(alpha);
+    const double beta_deg  = to_degrees(beta);
+
     // --- Trigonometry ---
-    const double alp_rad = alpha_deg * DTR;
-    const double bet_rad = beta_deg * DTR;
+    const double alp_rad = to_radians(alpha);
+    const double bet_rad = to_radians(beta);
     const double cosalp = std::cos(alp_rad);
     const double sinalp = std::sin(alp_rad);
     const double cosbet = std::cos(bet_rad);

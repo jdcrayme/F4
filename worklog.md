@@ -1513,3 +1513,26 @@ Stage Summary:
 - Build is clean: 0 warnings, 0 errors, with -DF4_BUILD_VIEWER=OFF (viewer needs libxrandr-dev which isn't installable without sudo).
 - 6 new files created, ~25 existing files modified. Full diff available via `git diff` in the F4 working tree.
 - Ready to start f4-ai Step 1 (scaffold) against the cleaned foundation.
+
+---
+Task ID: angle-migration-phase-4
+Agent: main (interactive session)
+Task: Resolve CRITICAL #1 from the original review — migrate f4-flight-model's AircraftState angle fields from raw `double` (degrees/radians mixed by comment convention only) to the strong `f4::flight::Angle` / `AngularRate` types built on f4-units. Close the historical "pass degrees where radians are expected" silent-compile hazard.
+
+Work Log:
+- Audited f4-units: confirmed existing infrastructure (Quantity<U,R>, Radians, Degrees, AngleDim, literals). No new library code needed; just flight-local aliases.
+- Wrote `f4-flight-model/include/f4/flight/angle.hpp` (~120 lines): `Angle = Quantity<Radians>`, `AngularRate = Quantity<RadiansPerSecond>` (with the new `RadiansPerSecond = Unit<Dimension<0,0,-1,0,1>, 1.0, 0.0>` unit definition since `Unit` requires explicit ToBase/Offset). Named factories `angle_from_degrees/_radians`, `angular_rate_from_degrees_per_second/_radians_per_second`, `zero_angle`, `zero_angular_rate`. Accessors `to_degrees`, `to_radians`, `to_deg_per_s`, `to_rad_per_s`.
+- Migrated `AircraftState` fields in `aircraft_state.hpp`: sigma/gmma/mu/psi/theta/phi (euler, all `Angle`), alpha/beta/alpha_dot/beta_dot (aero, `Angle`/`AngularRate`), aoacmd/betcmd (FCS commands, `Angle`). Body rates p/q/r kept as raw `double` (rad/s) — documented: they feed the quaternion integrator and never compare with degree-valued quantities, so typing them would add friction without closing a real gap.
+- Updated `Aerodynamics::update()` and `FlightControlSystem::update()` (+ `computeGains`/`runPitch`/`runRoll`/`runYaw`) signatures: `alpha_deg`/`beta_deg`/`phi_rad` params → `Angle`.
+- Updated the 4 .cpp implementations: boundary-extraction pattern (`const double alpha_deg = to_degrees(alpha);` at the top of each function so the F-16 degree-indexed aero tables continue to work without conversion; the body of each function is mostly unchanged). Write-backs via `angle_from_degrees(...)` / `angle_from_radians(...)` / `zero_angle()`.
+- Updated `eom.cpp::trigonometry()` to extract radians via `to_radians(k.theta)` etc. instead of reading raw `k.theta`. Quaternion recovery writes via `angle_from_radians(...)`. Ground clamp uses `zero_angle()`.
+- Updated `flight_model.cpp`: init(), minorStep(), trim(), updateStallSM() all converted. The bridge from typed `aero.alpha` to plain-data `StallDetection::alpha_deg` is one `to_degrees(a.alpha)` call.
+- Added `f4-units` as PUBLIC dependency in `f4-flight-model/CMakeLists.txt` (was explicitly NOT a dependency before).
+- Wrote `/home/z/my-project/scripts/patch_flight_model_tests.py` to mechanically migrate the test files: wraps `a.update(5.0, 0.0, ...)` calls as `a.update(angle_from_degrees(5.0), angle_from_degrees(0.0), ...)`, same for `fcs.update(...)`, plus field assignments and EXPECT_* reads. Manually fixed the few edge cases the regex missed (mixed-comment forms, multi-line calls).
+- Added `f4-flight-model/tests/test_angle.cpp` with 11 tests covering factories, accessors, round-trip conversions, arithmetic, and the explicit-ctor guarantee.
+
+Stage Summary:
+- All 1012 tests pass (up from 998 before this pass; +14 = 11 new test_angle tests + 3 the previous cleanup pass added). Zero regressions.
+- The Angle strong-type now enforces the radians-vs-degrees convention at compile time across `f4-flight-model`. The historical hazard where `alpha_deg` (degrees) and `theta` (radians) could be silently interchanged because both were `double` is closed.
+- The F-16 aero tables remain degree-indexed (deliberate — converting the data would alter the flight feel). The degree convention now survives at exactly one place: the lookup call site, where `alpha_deg` is a local extracted via `to_degrees(alpha)` and named `_deg` to make the convention explicit.
+- 4 deferred items from the previous cleanup pass remain: `f4-messaging::publish()` shared_mutex refactor, `LayeredStateMachine::applyInhibition()` `force_to_state()`, `dat_parser.cpp` exception-as-control-flow, and (from the original review) items 2/3/4/5: IUnitSource tagged-union interface split, WorldState header-leak fix, VU_ID cross-ref field clearing, and PropertyBag promotion. These are the next candidates for a focused cleanup PR.

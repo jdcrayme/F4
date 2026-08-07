@@ -30,6 +30,7 @@ f4_fm_add_test(test_aerodynamics         test_aerodynamics.cpp)
 f4_fm_add_test(test_gear                 test_gear.cpp)
 f4_fm_add_test(test_fcs                  test_fcs.cpp)
 f4_fm_add_test(test_eom                  test_eom.cpp)
+f4_fm_add_test(test_angle                test_angle.cpp)
 
 target_compile_definitions(test_flight_model PRIVATE
     F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}")

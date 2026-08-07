@@ -65,12 +65,12 @@ TEST(StallSMIntegration, StallSMDoesNotBreakStability) {
     EXPECT_TRUE(std::isfinite(fm.state().kin.z));
     EXPECT_TRUE(std::isfinite(fm.state().kin.vt));
     EXPECT_TRUE(std::isfinite(fm.state().loads.nzcgs));
-    EXPECT_TRUE(std::isfinite(fm.state().aero.alpha_deg));
+    EXPECT_TRUE(std::isfinite(to_degrees(fm.state().aero.alpha)));
     EXPECT_TRUE(std::isfinite(fm.state().engine.rpm));
 
     // Alpha within limits (same check as test_flight_model)
-    EXPECT_GT(fm.state().aero.alpha_deg, cfg.geometry.aoaMin_deg - 5.0);
-    EXPECT_LT(fm.state().aero.alpha_deg, cfg.geometry.aoaMax_deg + 5.0);
+    EXPECT_GT(to_degrees(fm.state().aero.alpha), cfg.geometry.aoaMin_deg - 5.0);
+    EXPECT_LT(to_degrees(fm.state().aero.alpha), cfg.geometry.aoaMax_deg + 5.0);
 
     // The stall SM must be in a valid state (0-5, within the enum range)
     const int ss = fm.state().aero.stallState;
@@ -85,7 +85,7 @@ TEST(StallSMIntegration, StallSMDoesNotBreakStability) {
 //
 // Stall induction: spawn at low airspeed (100 ft/s ≈ 59 kts, well below
 // the F-16's ~140 kcas stall speed) at altitude, then FORCE alpha above
-// criticalAOA (25°) by directly setting state.aero.alpha_deg = 30° after
+// criticalAOA (25°) by directly setting state.aero.alpha = angle_from_degrees(30)° after
 // init. This bypasses the trim clamp (which limits trim alpha to 10°)
 // and the FCS's G-limiter (which would otherwise cap commanded G at
 // gsAvail = aoaMax * clalph0 * qsom / GRAVITY, a tiny number at 100 ft/s
@@ -113,9 +113,9 @@ TEST(StallSMIntegration, StallEntryAndRecoveryLifecycle) {
     fm.init(cfg, 10000.0, 100.0, 0.0, true);
 
     // Force the aircraft into a stalled state: alpha=30° exceeds criticalAOA=25°.
-    fm.state().aero.alpha_deg = 30.0;
+    fm.state().aero.alpha = angle_from_degrees(30.0);
     fm.state().fcs.pitchAlphaLag.reset(30.0);
-    fm.state().fcs.aoacmd = 30.0;
+    fm.state().fcs.aoacmd = angle_from_degrees(30.0);
 
     // Attach a trace to the stall SM
     f4::fsm::Trace<StallState, StallEvent> trace;
@@ -200,9 +200,9 @@ TEST(StallSMIntegration, TraceIsParseableAndComplete) {
     fm.init(cfg, 10000.0, 100.0, 0.0, true);
 
     // Force the aircraft into a stalled state (see lifecycle test for rationale).
-    fm.state().aero.alpha_deg = 30.0;
+    fm.state().aero.alpha = angle_from_degrees(30.0);
     fm.state().fcs.pitchAlphaLag.reset(30.0);
-    fm.state().fcs.aoacmd = 30.0;
+    fm.state().fcs.aoacmd = angle_from_degrees(30.0);
 
     f4::fsm::Trace<StallState, StallEvent> trace;
     fm.stallSM().set_trace(&trace);

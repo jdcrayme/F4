@@ -75,8 +75,8 @@ void FlightModel::init(const AircraftConfig& cfg,
     KinematicState& k = state_.kin;
     k.z = -initialAltitude_ft;  // NED: altitude = -z
     k.vt = initialVt_ftps;
-    k.psi = initialHeading_rad;
-    k.sigma = initialHeading_rad;
+    k.psi = angle_from_radians(initialHeading_rad);
+    k.sigma = angle_from_radians(initialHeading_rad);
 
     // Initial quaternion from heading (level, wings level)
     // ZYX euler: psi=heading, theta=0, phi=0
@@ -112,9 +112,9 @@ void FlightModel::init(const AircraftConfig& cfg,
 
     // --- Initial alpha (trim estimate) ---
     // Find the alpha that produces CL = W / (q*S) = g / qsom
-    state_.aero.alpha_deg = 0.0;
-    state_.aero.beta_deg = 0.0;
-    aero_.update(state_.aero.alpha_deg, state_.aero.beta_deg,
+    state_.aero.alpha = zero_angle();
+    state_.aero.beta = zero_angle();
+    aero_.update(state_.aero.alpha, state_.aero.beta,
                  state_.mach, k.vt, state_.qbar, state_.qsom,
                  initialAltitude_ft, state_.gear.groundZ_ft, k.z,
                  state_.vcas, 0.0, state_.aero);
@@ -136,7 +136,7 @@ void FlightModel::init(const AircraftConfig& cfg,
                 }
             }
         }
-        state_.aero.alpha_deg = std::clamp(bestAlpha, -2.0, 10.0);
+        state_.aero.alpha = angle_from_degrees(std::clamp(bestAlpha, -2.0, 10.0));
     }
 
     // --- Engine at MIL for trim ---
@@ -146,37 +146,38 @@ void FlightModel::init(const AircraftConfig& cfg,
     // --- FCS filter initialization ---
     // Initialize the pitch lead-lag filter to the trim alpha so the first
     // frame doesn't produce a transient.
-    state_.fcs.pitchAlphaLag.reset(state_.aero.alpha_deg);
+    state_.fcs.pitchAlphaLag.reset(to_degrees(state_.aero.alpha));
     state_.fcs.pitchRateLag.reset(0.0);
-    state_.fcs.aoacmd = state_.aero.alpha_deg;
+    state_.fcs.aoacmd = state_.aero.alpha;
 
     // --- Set theta so gamma = theta - alpha = 0 (level flight) ---
-    k.theta = state_.aero.alpha_deg * DTR;
+    // Both are Angle; theta = alpha (in radians) for level flight.
+    k.theta = state_.aero.alpha;
     // Rebuild quaternion from euler
     const double cr = std::cos(0.0);           // phi = 0
     const double sr = std::sin(0.0);
-    const double cp = std::cos(k.theta * 0.5);
-    const double sp = std::sin(k.theta * 0.5);
-    const double cy2 = std::cos(k.psi * 0.5);
-    const double sy2 = std::sin(k.psi * 0.5);
+    const double cp = std::cos(to_radians(k.theta) * 0.5);
+    const double sp = std::sin(to_radians(k.theta) * 0.5);
+    const double cy2 = std::cos(to_radians(k.psi) * 0.5);
+    const double sy2 = std::sin(to_radians(k.psi) * 0.5);
     k.quat = Quatd(cr * cp * cy2 + sr * sp * sy2,
                    sr * cp * cy2 - cr * sp * sy2,
                    cr * sp * cy2 + sr * cp * sy2,
                    cr * cp * sy2 - sr * sp * cy2).normalized();
 
     // Recompute trig cache
-    k.sinthe = std::sin(k.theta);  k.costhe = std::cos(k.theta);
-    k.sinpsi = std::sin(k.psi);    k.cospsi = std::cos(k.psi);
+    k.sinthe = std::sin(to_radians(k.theta));  k.costhe = std::cos(to_radians(k.theta));
+    k.sinpsi = std::sin(to_radians(k.psi));    k.cospsi = std::cos(to_radians(k.psi));
     k.sinphi = 0.0;                k.cosphi = 1.0;
-    k.sinalp = std::sin(state_.aero.alpha_deg * DTR);
-    k.cosalp = std::cos(state_.aero.alpha_deg * DTR);
+    k.sinalp = std::sin(to_radians(state_.aero.alpha));
+    k.cosalp = std::cos(to_radians(state_.aero.alpha));
     k.sinbet = 0.0;                k.cosbet = 1.0;
-    k.gmma = 0.0;  k.singam = 0.0;  k.cosgam = 1.0;
-    k.mu = 0.0;    k.sinmu = 0.0;   k.cosmu = 1.0;
+    k.gmma = zero_angle();  k.singam = 0.0;  k.cosgam = 1.0;
+    k.mu = zero_angle();    k.sinmu = 0.0;   k.cosmu = 1.0;
     k.sigma = k.psi;  k.sinsig = k.sinpsi;  k.cossig = k.cospsi;
 
     // Recompute aero forces at the trim alpha
-    aero_.update(state_.aero.alpha_deg, state_.aero.beta_deg,
+    aero_.update(state_.aero.alpha, state_.aero.beta,
                  state_.mach, k.vt, state_.qbar, state_.qsom,
                  initialAltitude_ft, state_.gear.groundZ_ft, k.z,
                  state_.vcas, 0.0, state_.aero);
@@ -288,7 +289,7 @@ void FlightModel::minorStep(double dt, const PilotInput& input) {
     const bool gearDown = (a.gearPos > 0.5);
     fcs_.update(dt, state_.qbar, state_.qsom, state_.mach,
                 k.vt, state_.vcas,
-                a.alpha_deg, a.beta_deg,
+                a.alpha, a.beta,
                 k.cosmu, k.cosgam, k.singam,
                 k.costhe, k.cosphi, k.phi,
                 state_.fuel.loadingFraction,
@@ -299,7 +300,7 @@ void FlightModel::minorStep(double dt, const PilotInput& input) {
 
     // 3. Aerodynamics (recompute forces at the new alpha/beta)
     const double alt_ft = -k.z;
-    aero_.update(a.alpha_deg, a.beta_deg,
+    aero_.update(a.alpha, a.beta,
                  state_.mach, k.vt, state_.qbar, state_.qsom,
                  alt_ft, state_.gear.groundZ_ft, k.z,
                  state_.vcas, input.pstick, a);
@@ -404,7 +405,7 @@ bool FlightModel::trim() {
     for (int iter = 0; iter < kMaxIter; ++iter) {
         updateAtmosphere();
 
-        aero_.update(state_.aero.alpha_deg, state_.aero.beta_deg,
+        aero_.update(state_.aero.alpha, state_.aero.beta,
                      state_.mach, state_.kin.vt, state_.qbar, state_.qsom,
                      -state_.kin.z, state_.gear.groundZ_ft, state_.kin.z,
                      state_.vcas, 0.0, state_.aero);
@@ -436,9 +437,10 @@ bool FlightModel::trim() {
 
         // Adjust alpha toward 1 G
         double dalpha = (1.0 - nzcgs) * kAlphaK;
-        state_.aero.alpha_deg = std::clamp(state_.aero.alpha_deg + dalpha,
-                                           cfg_.geometry.aoaMin_deg,
-                                           cfg_.geometry.aoaMax_deg);
+        state_.aero.alpha = angle_from_degrees(
+            std::clamp(to_degrees(state_.aero.alpha) + dalpha,
+                       cfg_.geometry.aoaMin_deg,
+                       cfg_.geometry.aoaMax_deg));
 
         // Adjust throttle toward zero axial acceleration
         throttleCmd -= ax_stab * kThrotK;
@@ -478,7 +480,7 @@ void FlightModel::updateStallSM(double dt, const PilotInput& input) {
     StallDetection det;
     det.currentState   = currentState;
     det.aeroStalled    = a.stalled;
-    det.alpha_deg      = a.alpha_deg;
+    det.alpha_deg      = to_degrees(a.alpha);
     det.vcas_kts       = state_.vcas;
     det.stallSpeed_kts = a.stallSpeed;
     det.qbar           = state_.qbar;
@@ -495,7 +497,7 @@ void FlightModel::updateStallSM(double dt, const PilotInput& input) {
         StallWarningMessage msg;
         msg.aircraft_id     = aircraft_id_;
         msg.sim_time_s      = sim_time_s_;
-        msg.alpha_deg       = a.alpha_deg;
+        msg.alpha_deg       = to_degrees(a.alpha);
         msg.vcas_kts        = state_.vcas;
         msg.stall_speed_kts = a.stallSpeed;
         bus_->publish(msg);
@@ -522,7 +524,7 @@ void FlightModel::updateStallSM(double dt, const PilotInput& input) {
                     msg.from_state  = prev;
                     msg.to_state    = next;
                     msg.sim_time_s  = sim_time_s_;
-                    msg.alpha_deg   = a.alpha_deg;
+                    msg.alpha_deg   = to_degrees(a.alpha);
                     msg.vcas_kts    = state_.vcas;
                     msg.qbar_psf    = state_.qbar;
                     bus_->publish(msg);

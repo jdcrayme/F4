@@ -122,12 +122,12 @@ TEST(FlightModelTest, SixtySecondStabilityRun) {
     EXPECT_TRUE(std::isfinite(fm.state().kin.z));
     EXPECT_TRUE(std::isfinite(fm.state().kin.vt));
     EXPECT_TRUE(std::isfinite(fm.state().loads.nzcgs));
-    EXPECT_TRUE(std::isfinite(fm.state().aero.alpha_deg));
+    EXPECT_TRUE(std::isfinite(to_degrees(fm.state().aero.alpha)));
     EXPECT_TRUE(std::isfinite(fm.state().engine.rpm));
 
     // - Alpha should be within the aircraft's limits (no stall/spin divergence)
-    EXPECT_GT(fm.state().aero.alpha_deg, cfg.geometry.aoaMin_deg - 5.0);
-    EXPECT_LT(fm.state().aero.alpha_deg, cfg.geometry.aoaMax_deg + 5.0);
+    EXPECT_GT(to_degrees(fm.state().aero.alpha), cfg.geometry.aoaMin_deg - 5.0);
+    EXPECT_LT(to_degrees(fm.state().aero.alpha), cfg.geometry.aoaMax_deg + 5.0);
 
     // - G load should remain near 1G. The previous 3-G tolerance was wide
     // enough to admit a fully-developed stall (0 G) or a 4-G pull (steady
@@ -174,7 +174,7 @@ TEST(FlightModelTest, PitchStickChangesAlpha) {
     fm.init(cfg, 10000.0, 500.0, 0.0, true);
     ASSERT_TRUE(fm.trim());
 
-    const double trimAlpha = fm.state().aero.alpha_deg;
+    const double trimAlpha = to_degrees(fm.state().aero.alpha);
     const double trimNz    = fm.state().loads.nzcgs;
 
     // Run 2 s with NO stick input first — establishes the post-trim baseline
@@ -190,7 +190,7 @@ TEST(FlightModelTest, PitchStickChangesAlpha) {
     for (int frame = 0; frame < 120; ++frame) {
         fm.update(dt, no_input, 0.0, groundNormal);
     }
-    const double baselineAlpha = fm.state().aero.alpha_deg;
+    const double baselineAlpha = to_degrees(fm.state().aero.alpha);
     const double baselineNz    = fm.state().loads.nzcgs;
 
     // Re-init to the same trim condition, then apply half back stick for 2 s.
@@ -205,7 +205,7 @@ TEST(FlightModelTest, PitchStickChangesAlpha) {
         fm2.update(dt, input, 0.0, groundNormal);
     }
 
-    const double finalAlpha = fm2.state().aero.alpha_deg;
+    const double finalAlpha = to_degrees(fm2.state().aero.alpha);
     const double finalNz    = fm2.state().loads.nzcgs;
 
     // Alpha must be HIGHER than the no-input baseline (nose-up stick

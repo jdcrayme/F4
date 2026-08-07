@@ -60,9 +60,10 @@ void EquationsOfMotion::update(double dt, const PilotInput& input,
         k.p = 0.0;
         k.r = 0.0;
         // Clamp roll to 0 (wings level on ground)
-        k.phi = 0.0;
+        k.phi = zero_angle();
         // Clamp pitch to a reasonable range for ground operation
-        k.theta = std::clamp(k.theta, -2.0 * DTR, 15.0 * DTR);
+        k.theta = angle_from_radians(std::clamp(to_radians(k.theta),
+                                                  -2.0 * DTR, 15.0 * DTR));
 
         // Nose-wheel steering: turn the aircraft via rudder pedal input.
         // Steer rate is higher at low speed (for taxi) and lower at high speed.
@@ -76,19 +77,25 @@ void EquationsOfMotion::update(double dt, const PilotInput& input,
             steerRate = 5.0;   // deg/s at high speed (rudder authority)
         }
         // Positive ypedal = right turn = psi decreases (NED CCW frame)
-        k.psi -= input.ypedal * steerRate * DTR * dt;
+        const double psi_delta_rad = -input.ypedal * steerRate * DTR * dt;
+        k.psi = angle_from_radians(to_radians(k.psi) + psi_delta_rad);
         // Wrap psi to [-pi, pi]
-        if (k.psi > PI)  k.psi -= TWO_PI;
-        if (k.psi < -PI) k.psi += TWO_PI;
+        double psi_rad = to_radians(k.psi);
+        if (psi_rad > PI)  psi_rad -= TWO_PI;
+        if (psi_rad < -PI) psi_rad += TWO_PI;
+        k.psi = angle_from_radians(psi_rad);
 
         // Rebuild quaternion from clamped euler angles
         // ZYX convention: q = qz(psi) * qy(theta) * qx(phi)
-        const double cr = std::cos(k.phi * 0.5);
-        const double sr = std::sin(k.phi * 0.5);
-        const double cp = std::cos(k.theta * 0.5);
-        const double sp = std::sin(k.theta * 0.5);
-        const double cy = std::cos(k.psi * 0.5);
-        const double sy = std::sin(k.psi * 0.5);
+        const double phi_rad   = to_radians(k.phi);
+        const double theta_rad = to_radians(k.theta);
+        const double psi_rad2  = to_radians(k.psi);
+        const double cr = std::cos(phi_rad * 0.5);
+        const double sr = std::sin(phi_rad * 0.5);
+        const double cp = std::cos(theta_rad * 0.5);
+        const double sp = std::sin(theta_rad * 0.5);
+        const double cy = std::cos(psi_rad2 * 0.5);
+        const double sy = std::sin(psi_rad2 * 0.5);
         k.quat = Quatd(cr * cp * cy + sr * sp * sy,
                        sr * cp * cy - cr * sp * sy,
                        cr * sp * cy + sr * cp * sy,
@@ -244,9 +251,9 @@ void EquationsOfMotion::calcBodyOrientation(double dt, AircraftState& state) con
     // psi   = atan2(2*(w*z + x*y), 1 - 2*(y^2 + z^2))
     // phi   = atan2(2*(w*x + y*z), 1 - 2*(x^2 + y^2))
     const double w2 = k.quat.w, x2 = k.quat.x, y2 = k.quat.y, z2 = k.quat.z;
-    k.theta = std::asin(std::clamp(2.0 * (w2 * y2 - x2 * z2), -1.0, 1.0));
-    k.psi   = std::atan2(2.0 * (w2 * z2 + x2 * y2), 1.0 - 2.0 * (y2 * y2 + z2 * z2));
-    k.phi   = std::atan2(2.0 * (w2 * x2 + y2 * z2), 1.0 - 2.0 * (x2 * x2 + y2 * y2));
+    k.theta = angle_from_radians(std::asin(std::clamp(2.0 * (w2 * y2 - x2 * z2), -1.0, 1.0)));
+    k.psi   = angle_from_radians(std::atan2(2.0 * (w2 * z2 + x2 * y2), 1.0 - 2.0 * (y2 * y2 + z2 * z2)));
+    k.phi   = angle_from_radians(std::atan2(2.0 * (w2 * x2 + y2 * z2), 1.0 - 2.0 * (x2 * x2 + y2 * y2)));
 }
 
 // ---------------------------------------------------------------------------
@@ -259,26 +266,38 @@ void EquationsOfMotion::trigonometry(AircraftState& state) const {
     KinematicState& k = state.kin;
     AeroState& a = state.aero;
 
+    // Extract radians once for the trig calls. The body angles (theta, phi,
+    // psi) and the aero angles (alpha, beta) are all stored as the strong
+    // Angle type; sin/cos are dimensionless.
+    const double theta_rad = to_radians(k.theta);
+    const double phi_rad   = to_radians(k.phi);
+    const double psi_rad   = to_radians(k.psi);
+    const double alpha_rad = to_radians(a.alpha);
+    const double beta_rad  = to_radians(a.beta);
+
     // Body angle trig
-    k.sinthe = std::sin(k.theta);  k.costhe = std::cos(k.theta);
-    k.sinphi = std::sin(k.phi);    k.cosphi = std::cos(k.phi);
-    k.sinpsi = std::sin(k.psi);    k.cospsi = std::cos(k.psi);
+    k.sinthe = std::sin(theta_rad);  k.costhe = std::cos(theta_rad);
+    k.sinphi = std::sin(phi_rad);    k.cosphi = std::cos(phi_rad);
+    k.sinpsi = std::sin(psi_rad);    k.cospsi = std::cos(psi_rad);
 
     // Alpha/beta trig
-    k.sinalp = std::sin(a.alpha_deg * DTR);  k.cosalp = std::cos(a.alpha_deg * DTR);
-    k.sinbet = std::sin(a.beta_deg * DTR);   k.cosbet = std::cos(a.beta_deg * DTR);
+    k.sinalp = std::sin(alpha_rad);  k.cosalp = std::cos(alpha_rad);
+    k.sinbet = std::sin(beta_rad);   k.cosbet = std::cos(beta_rad);
 
     // Velocity-vector euler angles (approximation):
     //   gamma (flight path angle) = theta - alpha * cos(phi)
     //   sigma (velocity heading) = psi + beta * cos(theta)
     //   mu (velocity roll)       = phi
-    k.gmma = k.theta - a.alpha_deg * DTR * k.cosphi;
-    k.sigma = k.psi + a.beta_deg * DTR * k.costhe;
-    k.mu = k.phi;
+    k.gmma  = angle_from_radians(theta_rad - alpha_rad * k.cosphi);
+    k.sigma = angle_from_radians(psi_rad + beta_rad * k.costhe);
+    k.mu    = k.phi;
 
-    k.singam = std::sin(k.gmma);  k.cosgam = std::cos(k.gmma);
-    k.sinsig = std::sin(k.sigma); k.cossig = std::cos(k.sigma);
-    k.sinmu  = std::sin(k.mu);    k.cosmu  = std::cos(k.mu);
+    const double gmma_rad  = to_radians(k.gmma);
+    const double sigma_rad = to_radians(k.sigma);
+    const double mu_rad    = to_radians(k.mu);
+    k.singam = std::sin(gmma_rad);  k.cosgam = std::cos(gmma_rad);
+    k.sinsig = std::sin(sigma_rad); k.cossig = std::cos(sigma_rad);
+    k.sinmu  = std::sin(mu_rad);    k.cosmu  = std::cos(mu_rad);
 
     // World-frame velocities from true airspeed + wind
     k.xdot = k.vt * k.cosgam * k.cossig + state.windX;
@@ -351,7 +370,7 @@ void EquationsOfMotion::integratePosition(double dt, double cosgam, double singa
         k.zdot = 0.0;
         k.singam = 0.0;
         k.cosgam = 1.0;
-        k.gmma = 0.0;
+        k.gmma = zero_angle();
     }
 }
 

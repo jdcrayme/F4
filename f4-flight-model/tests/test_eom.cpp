@@ -53,8 +53,8 @@ AircraftState makeLevelFlight() {
     s.kin.xdot = 500.0; s.kin.ydot = 0.0; s.kin.zdot = 0.0;
     s.kin.vt = 500.0;
     s.kin.quat = math::Quatd::identity();  // wings level, nose north
-    s.kin.psi = 0.0; s.kin.theta = 0.0; s.kin.phi = 0.0;
-    s.kin.sigma = 0.0; s.kin.gmma = 0.0; s.kin.mu = 0.0;
+    s.kin.psi = angle_from_radians(0.0); s.kin.theta = angle_from_radians(0.0); s.kin.phi = angle_from_radians(0.0);
+    s.kin.sigma = angle_from_radians(0.0); s.kin.gmma = angle_from_radians(0.0); s.kin.mu = angle_from_radians(0.0);
     s.kin.cosalp = 1.0; s.kin.sinalp = 0.0;
     s.kin.cosbet = 1.0; s.kin.sinbet = 0.0;
     s.kin.cosgam = 1.0; s.kin.singam = 0.0;
@@ -224,10 +224,10 @@ TEST(EomTrigonometry, SinCosConsistentWithEulerAngles) {
     PilotInput input{};
     eom.update(0.01, input, s);
 
-    EXPECT_NEAR(s.kin.sinthe, std::sin(s.kin.theta), 1e-3);
-    EXPECT_NEAR(s.kin.costhe, std::cos(s.kin.theta), 1e-3);
-    EXPECT_NEAR(s.kin.sinphi, std::sin(s.kin.phi), 1e-3);
-    EXPECT_NEAR(s.kin.cosphi, std::cos(s.kin.phi), 1e-3);
+    EXPECT_NEAR(s.kin.sinthe, std::sin(to_radians(s.kin.theta)), 1e-3);
+    EXPECT_NEAR(s.kin.costhe, std::cos(to_radians(s.kin.theta)), 1e-3);
+    EXPECT_NEAR(s.kin.sinphi, std::sin(to_radians(s.kin.phi)), 1e-3);
+    EXPECT_NEAR(s.kin.cosphi, std::cos(to_radians(s.kin.phi)), 1e-3);
 }
 
 // ============================================================================
@@ -250,11 +250,11 @@ TEST(EomGround, NoseWheelSteeringTurnsHeading) {
     PilotInput input{};
     input.ypedal = 1.0;  // full right pedal
 
-    const double psi0 = s.kin.psi;
+    const double psi0 = to_radians(s.kin.psi);
     eom.update(0.1, input, s);
     // After 0.1s at 30 deg/s with full right pedal: psi should decrease
     // (positive ypedal = right turn = psi decreases in NED CCW frame).
-    EXPECT_LT(s.kin.psi, psi0)
+    EXPECT_LT(to_radians(s.kin.psi), psi0)
         << "right pedal on ground should turn heading right (psi decreases)";
 }
 
@@ -269,12 +269,12 @@ TEST(EomGround, GroundClampsRollToZero) {
     s.gear.groundZ_ft = 0.0;
     s.gear.minHeight_ft = 3.0;
     s.kin.z = -3.0;
-    s.kin.phi = 0.5;  // start with some roll
+    s.kin.phi = angle_from_radians(0.5);  // start with some roll
     s.kin.p = 0.0;
 
     PilotInput input{};
     eom.update(0.01, input, s);
-    EXPECT_NEAR(s.kin.phi, 0.0, 1e-6) << "ground should clamp roll to 0";
+    EXPECT_NEAR(to_radians(s.kin.phi), 0.0, 1e-6) << "ground should clamp roll to 0";
 }
 
 TEST(EomGround, GroundClampsPitchToRange) {
@@ -288,11 +288,11 @@ TEST(EomGround, GroundClampsPitchToRange) {
     s.gear.groundZ_ft = 0.0;
     s.gear.minHeight_ft = 3.0;
     s.kin.z = -3.0;
-    s.kin.theta = 0.5;  // 0.5 rad ≈ 28.6°, above the 15° clamp
+    s.kin.theta = angle_from_radians(0.5);  // 0.5 rad ≈ 28.6°, above the 15° clamp
 
     PilotInput input{};
     eom.update(0.01, input, s);
-    EXPECT_LE(s.kin.theta, 15.0 * DTR + 1e-6) << "ground should clamp pitch to 15°";
+    EXPECT_LE(to_radians(s.kin.theta), 15.0 * DTR + 1e-6) << "ground should clamp pitch to 15°";
 }
 
 // ============================================================================

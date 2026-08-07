@@ -240,7 +240,7 @@ $ rm -rf build && cmake -G Ninja -DCMAKE_BUILD_TYPE=Release \
     -DF4_BUILD_MODEL_VIEWER=OFF -DF4_BUILD_VIEWER=OFF ..
 $ cmake --build . -j2
 $ ctest -j2
-100% tests passed out of 998
+100% tests passed out of 1012
 ```
 
 (Viewers are OFF because they require X11 + OpenGL dev headers not
@@ -258,6 +258,7 @@ are higher-risk or require more design work:
   types is invasive — every consumer of `AeroState` / `KinematicState`
   / `calcBodyRates` needs updating. Recommend doing this as a separate
   dedicated PR with its own test pass, not as part of a cleanup batch.
+  **DONE — see "Phase 4 — Angle Strong-Type Migration" below.**
 
 - **`f4-messaging::publish()` shared_mutex refactor** (CRITICAL #5).
   The current `recursive_mutex` + vector copy on every publish is a
@@ -278,3 +279,90 @@ are higher-risk or require more design work:
   std::optional<double>` to `TokenStream` and replacing 5+ sites.
 
 These are all good candidates for the next cleanup pass.
+
+## Phase 4 — Angle Strong-Type Migration (CRITICAL #1)
+
+Resolves the largest correctness hazard flagged in the original review:
+`AircraftState` stored angles as raw `double` with the unit convention
+documented only in comments (alpha/beta in degrees, euler angles in
+radians, alpha_dot in deg/s). Passing a degree value where radians were
+expected (or vice versa) compiled silently because both are `double`.
+
+### Approach
+
+`f4-units` already provides a complete `Quantity<U,R>` framework with
+`Radians`, `Degrees`, dimension arithmetic, and user-defined literals.
+The flight model now uses these directly via flight-local aliases and
+factory functions in a new public header:
+
+**`f4-flight-model/include/f4/flight/angle.hpp`** (new, ~120 lines):
+- `Angle` = `f4::Quantity<f4::Radians>` (radians canonical storage)
+- `AngularRate` = `f4::Quantity<f4::RadiansPerSecond>` (rad/s canonical)
+- Factories: `angle_from_degrees(d)`, `angle_from_radians(r)`,
+  `angular_rate_from_degrees_per_second(dps)`,
+  `angular_rate_from_radians_per_second(rps)`, `zero_angle()`,
+  `zero_angular_rate()`
+- Accessors: `to_degrees(a)`, `to_radians(a)`, `to_deg_per_s(r)`,
+  `to_rad_per_s(r)`
+- The `Angle` ctor is `explicit` (inherited from `Quantity`), so
+  implicit `double -> Angle` conversion is rejected at compile time.
+  Call sites must pick a side via the named factories.
+
+### Changes by file
+
+| File | Change |
+|------|--------|
+| `f4-flight-model/include/f4/flight/angle.hpp` | **New** — Angle / AngularRate aliases + factories + accessors |
+| `f4-flight-model/include/f4/flight/aircraft_state.hpp` | All euler angles (sigma, gmma, mu, psi, theta, phi) and aero angles (alpha, beta, alpha_dot, beta_dot) and FCS commands (aoacmd, betcmd) migrated from raw `double` to `Angle` / `AngularRate`. Body rates (p, q, r) kept as raw double with a comment explaining why (they're integrated into the quaternion and never compared with degree-valued quantities). |
+| `f4-flight-model/include/f4/flight/aerodynamics.hpp` | `Aerodynamics::update()` signature: `alpha_deg`/`beta_deg` params → `alpha`/`beta` of type `Angle` |
+| `f4-flight-model/include/f4/flight/fcs.hpp` | `FlightControlSystem::update()` + `computeGains` + `runPitch` + `runRoll` + `runYaw`: `alpha_deg`/`beta_deg`/`phi_rad` params → `Angle` |
+| `f4-flight-model/src/aerodynamics.cpp` | Extract `alpha_deg`/`beta_deg` locals via `to_degrees()` at the top of `update()` (the F-16 aero tables are degree-indexed and we deliberately do NOT convert them). Body unchanged. |
+| `f4-flight-model/src/fcs.cpp` | Same boundary-extraction pattern. Write-backs via `angle_from_degrees(...)`. |
+| `f4-flight-model/src/eom.cpp` | `trigonometry()` reads `to_radians(k.theta)` etc. instead of `k.theta` directly. Quaternion recovery writes via `angle_from_radians(...)`. Ground clamp uses `zero_angle()`. |
+| `f4-flight-model/src/flight_model.cpp` | `init()`, `minorStep()`, `trim()`, `updateStallSM()` — all `alpha_deg`/`beta_deg` field references converted to `alpha`/`beta` (Angle) with `to_degrees()` extraction at the boundary. |
+| `f4-flight-model/CMakeLists.txt` | Added `f4-units` as a PUBLIC dependency (was previously explicitly NOT a dependency). |
+| `f4-flight-model/tests/*.cpp` | All `a.update(alpha, beta, ...)` and `fcs.update(..., alpha, beta, ..., phi, ...)` call sites updated to pass `angle_from_degrees(x)` for angle args. Direct field assignments (`aero.alpha_deg = 30.0`) updated to `aero.alpha = angle_from_degrees(30.0)`. Field reads in EXPECT_* macros wrapped with `to_degrees(...)`. |
+| `f4-flight-model/tests/test_angle.cpp` | **New** — 11 unit tests covering the Angle / AngularRate factories, accessors, round-trip conversions, arithmetic, and the explicit-ctor guarantee. |
+
+### What was deliberately NOT changed
+
+- **The F-16 aero coefficient tables remain degree-indexed.** They are
+  physical data files in degrees; converting the data would alter the
+  flight feel. The degree convention now survives at exactly one place:
+  the lookup call site (`table(mach, alpha_deg)`), where `alpha_deg` is
+  a local extracted via `to_degrees(alpha)` and named `_deg` to make
+  the convention explicit.
+- **`StallConfig::*_deg` and `StallDetection::alpha_deg` / `*_deg`
+  fields.** These are plain-data fields consumed by the polling
+  detection logic and serialized into bus messages. They are
+  deliberately `double` (degrees) because they cross the bus boundary
+  as plain data and consumers (UI audio cues, JSON config) want
+  degrees. The bridge from the typed `AeroState::alpha` to the plain
+  `StallDetection::alpha_deg` is one `to_degrees(a.alpha)` call in
+  `flight_model.cpp::updateStallSM()`.
+- **Body rates p, q, r in `KinematicState`.** They are rad/s and feed
+  the quaternion integrator + FCS roll-rate lag, never a degree-valued
+  comparison. Typing them would add friction without closing a real
+  correctness gap. Documented in the file-level comment.
+- **`AeroState::clalpha`, `clalph0`, `cnalpha`.** These are
+  dimensionless aerodynamic derivatives (dCL/dalpha per radian), not
+  angles. Correctly `double`.
+- **`FcsState::startRoll`.** This is the time-integral of p (rad), not
+  an angle. Documented.
+
+### Verification
+
+Clean build from scratch:
+```
+$ rm -rf build && cmake -G Ninja -DCMAKE_BUILD_TYPE=Release \
+    -DF4_BUILD_MODEL_VIEWER=OFF -DF4_BUILD_VIEWER=OFF ..
+$ cmake --build . -j2
+$ ctest -j2
+100% tests passed out of 1012
+```
+
+The 11 new `test_angle` tests cover the Angle/AngularRate contract
+itself; the existing 1001 flight-model / world / etc. tests confirm
+the migration didn't change runtime behavior (the same trim alpha
+converges, the same stall transitions fire, the same FCS gains
+compute).

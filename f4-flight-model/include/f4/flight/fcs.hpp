@@ -47,11 +47,12 @@ public:
     ///   dt                  : time step (seconds)
     ///   qbar, qsom, mach    : current atmosphere outputs
     ///   vt_ftps, vcas_kts   : true/calibrated airspeed
-    ///   alpha_deg, beta_deg : current alpha/beta
+    ///   alpha               : current angle of attack (strong Angle)
+    ///   beta                : current sideslip (strong Angle)
     ///   cosmu, cosgam       : velocity-vector trig
     ///   singam              : sin(flight path angle)
     ///   costhe, cosphi      : body attitude trig
-    ///   phi_rad             : body roll angle (radians)
+    ///   phi                 : body roll angle (strong Angle)
     ///   loadingFraction     : weight / emptyWeight (affects gains)
     ///   inAir               : airborne flag (affects ground fade)
     ///   nzcgs, nycgw        : current load factors (feedback)
@@ -61,21 +62,21 @@ public:
     ///   input               : pilot input
     ///   fcs                 : [in,out] FCS state (filter states, gains)
     ///   aero                : [in,out] aero state (reads gearPos, writes
-    ///                         alpha_deg, beta_deg)
+    ///                         alpha, beta)
     void update(double dt,
                 double qbar,
                 double qsom,
                 double mach,
                 double vt_ftps,
                 double vcas_kts,
-                double alpha_deg,
-                double beta_deg,
+                Angle  alpha,
+                Angle  beta,
                 double cosmu,
                 double cosgam,
                 double singam,
                 double costhe,
                 double cosphi,
-                double phi_rad,
+                Angle  phi,
                 double loadingFraction,
                 bool   inAir,
                 double nzcgs,
@@ -93,7 +94,7 @@ public:
 private:
     /// Compute FCS gains (pitch/roll/yaw) from current flight state.
     /// This is the port of FreeFalcon's gain.cpp.
-    void computeGains(double qbar, double qsom, double vt, double alpha_deg,
+    void computeGains(double qbar, double qsom, double vt, Angle alpha,
                       double clift0, double clalph0, double clalpha, double cnalpha,
                       double cy,
                       double cosgam, double cosmu, double costhe, double cosphi,
@@ -103,21 +104,21 @@ private:
 
     /// Run the pitch channel: G-command PI controller with anti-windup.
     void runPitch(double dt, double qbar, double qsom, double vt, double vcas_kts,
-                  double alpha_deg, double cosmu, double cosgam, double singam,
+                  Angle alpha, double cosmu, double cosgam, double singam,
                   double nzcgs, double cl, double clalpha, double clalph0,
                   double cnalpha, double aoamin, double aoamax, double maxGs,
                   const PilotInput& input,
                   FcsState& fcs, AeroState& aero) const;
 
     /// Run the roll channel: rate command with alpha-based rate limiting.
-    void runRoll(double dt, double qbar, double vcas_kts, double alpha_deg,
-                 double gearPos, double phi_rad,
+    void runRoll(double dt, double qbar, double vcas_kts, Angle alpha,
+                 double gearPos, Angle phi,
                  const PilotInput& input,
                  FcsState& fcs) const;
 
     /// Run the yaw channel: beta-command PI (mostly stubbed).
     void runYaw(double dt, double qbar, double qsom, double vt, double vcas_kts,
-                double beta_deg, double nycgw, double betmin, double betmax,
+                Angle beta, double nycgw, double betmin, double betmax,
                 const PilotInput& input,
                 FcsState& fcs, AeroState& aero) const;
 

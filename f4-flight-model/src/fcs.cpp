@@ -80,9 +80,9 @@ double FlightControlSystem::applyLimiter(LimiterKey key, double x) const {
 void FlightControlSystem::update(double dt,
                                  double qbar, double qsom, double mach,
                                  double vt_ftps, double vcas_kts,
-                                 double alpha_deg, double beta_deg,
+                                 Angle alpha, Angle beta,
                                  double cosmu, double cosgam, double singam,
-                                 double costhe, double cosphi, double phi_rad,
+                                 double costhe, double cosphi, Angle phi,
                                  double loadingFraction,
                                  bool inAir,
                                  double nzcgs, double nycgw,
@@ -92,6 +92,12 @@ void FlightControlSystem::update(double dt,
                                  FcsState& fcs,
                                  AeroState& aero) const {
     (void)mach;  // not directly used by FCS (aero tables handle Mach effects)
+
+    // The FCS internals still work in degrees for alpha/beta (table lookups,
+    // limiter inputs, aoamin/aoamax bounds). Extract once at the boundary.
+    const double alpha_deg = to_degrees(alpha);
+    const double beta_deg  = to_degrees(beta);
+    const double phi_rad   = to_radians(phi);
 
     // Landing gains are active when gear is down, refueling, or explicitly
     // requested by the host (e.g. approach mode).
@@ -111,7 +117,7 @@ void FlightControlSystem::update(double dt,
     if (input.pstick < 0.0) fcs.pshape = -fcs.pshape;
 
     // --- Compute gains (pitch/roll/yaw) ---
-    computeGains(qbar, qsom, vt_ftps, alpha_deg,
+    computeGains(qbar, qsom, vt_ftps, alpha,
                  aero.clift0, aero.clalph0, aero.clalpha, aero.cnalpha,
                  aero.cy,
                  cosgam, cosmu, costhe, cosphi,
@@ -127,18 +133,23 @@ void FlightControlSystem::update(double dt,
     const double maxGs  = geom_->maxGs;
 
     runPitch(dt, qbar, qsom, vt_ftps, vcas_kts,
-             alpha_deg, cosmu, cosgam, singam,
+             alpha, cosmu, cosgam, singam,
              nzcgs, aero.cl, aero.clalpha, aero.clalph0,
              aero.cnalpha, aoamin, aoamax, maxGs,
              input, fcs, aero);
 
-    runRoll(dt, qbar, vcas_kts, alpha_deg,
-            aero.gearPos, phi_rad,
+    runRoll(dt, qbar, vcas_kts, alpha,
+            aero.gearPos, phi,
             input, fcs);
 
     runYaw(dt, qbar, qsom, vt_ftps, vcas_kts,
-           beta_deg, nycgw, betmin, betmax,
+           beta, nycgw, betmin, betmax,
            input, fcs, aero);
+
+    // Suppress unused-variable warnings for the locals extracted above;
+    // they are retained for clarity at the FCS-internal boundary even when
+    // a future refactor moves them deeper into the channel functions.
+    (void)alpha_deg; (void)beta_deg; (void)phi_rad;
 }
 
 // ---------------------------------------------------------------------------
@@ -150,7 +161,7 @@ void FlightControlSystem::update(double dt,
 // at desired locations (2nd-order system design).
 // ---------------------------------------------------------------------------
 void FlightControlSystem::computeGains(double qbar, double qsom, double vt,
-                                       double alpha_deg,
+                                       Angle alpha,
                                        double clift0, double clalph0,
                                        double clalpha, double cnalpha,
                                        double cy,
@@ -166,6 +177,7 @@ void FlightControlSystem::computeGains(double qbar, double qsom, double vt,
     (void)cosgam;   // reserved for future flight-path-angle coupling
     (void)cosmu;    // reserved for future velocity-axis coupling
 
+    const double alpha_deg = to_degrees(alpha);
     const double cosphiLim = std::max(0.0, cosphi);
 
     // --- Available G from lift ---
@@ -306,14 +318,15 @@ void FlightControlSystem::computeGains(double qbar, double qsom, double vt,
 // ---------------------------------------------------------------------------
 void FlightControlSystem::runPitch(double dt, double qbar, double qsom,
                                     double vt, double vcas_kts,
-                                    double alpha_deg, double cosmu,
+                                    Angle alpha, double cosmu,
                                     double cosgam, double singam,
                                     double nzcgs, double cl, double clalpha,
                                     double clalph0, double cnalpha,
                                     double aoamin, double aoamax, double maxGs,
                                     const PilotInput& input,
                                     FcsState& fcs, AeroState& aero) const {
-    (void)qbar; (void)vt; (void)vcas_kts; (void)alpha_deg;
+    (void)qbar; (void)vt; (void)vcas_kts;
+    (void)alpha;  // pitch channel writes aero.alpha; current value unused
     (void)cl; (void)clalpha; (void)singam;
     (void)cnalpha;  // reserved for future yaw-damping coupling
     (void)input;    // pitch channel reads fcs.pshape, not raw pilot input
@@ -386,10 +399,10 @@ void FlightControlSystem::runPitch(double dt, double qbar, double qsom,
 
     // --- Alpha command ---
     double aoacmd = std::clamp((eprop + eintg) * fcs.plsdamp, aoamin, aoamax);
-    fcs.aoacmd = aoacmd;
+    fcs.aoacmd = angle_from_degrees(aoacmd);
 
     // --- Lead-lag filter (F7Tust) ---
-    // Shapes the alpha command to produce the final alpha_deg.
+    // Shapes the alpha command to produce the final alpha.
     // Time constants are scaled by pitchMomentum (aircraft inertia multiplier).
     const double tau1 = fcs.tp01 * aux_->pitchMomentum;
     const double tau2 = fcs.tp02 * aux_->pitchMomentum;
@@ -399,20 +412,28 @@ void FlightControlSystem::runPitch(double dt, double qbar, double qsom,
 
     // --- Alpha rate (for the EOM) ---
     // Compute alpha_dot from the change in alpha across this frame.
-    const double old_alpha = aero.alpha_deg;
-    aero.alpha_dot = (new_alpha - old_alpha) / std::max(dt, 1e-6);
-    aero.alpha_deg = new_alpha;
+    // alpha_dot is stored as AngularRate (rad/s canonical); convert from
+    // the degree-valued finite difference at the assignment site so the
+    // unit crossing is explicit.
+    const double old_alpha = to_degrees(aero.alpha);
+    const double new_alpha_deg = new_alpha;
+    aero.alpha_dot = angular_rate_from_degrees_per_second(
+        (new_alpha_deg - old_alpha) / std::max(dt, 1e-6));
+    aero.alpha = angle_from_degrees(new_alpha);
 }
 
 // ---------------------------------------------------------------------------
 // runRoll: rate command with alpha-based rate limiting.
 // ---------------------------------------------------------------------------
 void FlightControlSystem::runRoll(double dt, double qbar, double vcas_kts,
-                                   double alpha_deg, double gearPos,
-                                   double phi_rad,
+                                   Angle alpha, double gearPos,
+                                   Angle phi,
                                    const PilotInput& input,
                                    FcsState& fcs) const {
     (void)qbar;
+
+    const double alpha_deg = to_degrees(alpha);
+    const double phi_rad   = to_radians(phi);
 
     // --- Shaped roll stick input ---
     double rshape = input.rstick * input.rstick;
@@ -471,12 +492,12 @@ void FlightControlSystem::runRoll(double dt, double qbar, double vcas_kts,
 // ---------------------------------------------------------------------------
 void FlightControlSystem::runYaw(double dt, double qbar, double qsom,
                                   double vt, double vcas_kts,
-                                  double beta_deg, double nycgw,
+                                  Angle beta, double nycgw,
                                   double betmin, double betmax,
                                   const PilotInput& input,
                                   FcsState& fcs, AeroState& aero) const {
     (void)qbar; (void)qsom; (void)vt; (void)vcas_kts;
-    (void)beta_deg; (void)betmin; (void)betmax; (void)nycgw;
+    (void)beta; (void)betmin; (void)betmax; (void)nycgw;
 
     // --- Shaped pedal input ---
     double yshape = input.ypedal * input.ypedal;
@@ -497,12 +518,12 @@ void FlightControlSystem::runYaw(double dt, double qbar, double qsom,
     double eintg = fcs.yawIntegral.step(fcs.ky03 * error, dt);
     eintg = std::clamp(eintg, betmin, betmax);
     double betcmd = std::clamp((eprop + eintg) * fcs.ylsdamp, betmin, betmax);
-    fcs.betcmd = betcmd;
+    fcs.betcmd = angle_from_degrees(betcmd);
 
     // Force beta to 0 — the EOM has no rudder dynamics, so any non-zero
     // beta would create positive feedback.
-    aero.beta_deg = 0.0;
-    aero.beta_dot = 0.0;
+    aero.beta = zero_angle();
+    aero.beta_dot = zero_angular_rate();
 }
 
 }  // namespace f4::flight

@@ -50,8 +50,11 @@ public:
     /// Reads the current flight state (alpha, beta, mach, etc.) and writes
     /// the computed forces and coefficients into `aero`.
     ///
-    ///   alpha_deg   : angle of attack (degrees)
-    ///   beta_deg    : sideslip angle (degrees)
+    ///   alpha       : angle of attack (strong Angle type — degrees or
+    ///                 radians, picked explicitly via to_degrees/to_radians
+    ///                 at the call site; the F-16 aero tables are degree-
+    ///                 indexed and the implementation extracts degrees once)
+    ///   beta        : sideslip angle (Angle)
     ///   mach        : Mach number
     ///   vt_ftps     : true airspeed (ft/s)
     ///   qbar        : dynamic pressure (lb/ft^2)
@@ -63,8 +66,8 @@ public:
     ///   pstick      : pitch stick input (-1..+1, for side-force shaping)
     ///   aero        : [in,out] aero state (reads tefPos/lefPos/dbrake/gearPos,
     ///                 writes cl/cd/cy/forces/stall)
-    void update(double alpha_deg,
-                double beta_deg,
+    void update(Angle alpha,
+                Angle beta,
                 double mach,
                 double vt_ftps,
                 double qbar,

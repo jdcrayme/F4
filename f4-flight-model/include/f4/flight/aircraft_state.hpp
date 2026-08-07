@@ -12,15 +12,27 @@
 //   Body:  X-forward, Y-right, Z-down.
 //
 // Angle conventions:
-//   alpha, beta are stored in DEGREES (matches legacy convention).
-//   sigma, gmma, mu, psi, theta, phi are stored in RADIANS.
-//   Body rates p, q, r are in rad/s.
+//   All angles (alpha, beta, sigma, gmma, mu, psi, theta, phi) are stored
+//   as the strong type `f4::flight::Angle` (alias for f4::Quantity<f4::Radians>).
+//   Canonical storage is radians; use `.to_degrees()` / `.to_radians()` (or
+//   `f4::flight::to_degrees(a)` / `to_radians(a)`) at the call site to pick a
+//   unit explicitly. This closes the historical hazard where alpha/beta
+//   were degrees while the euler angles were radians, all stored as raw
+//   `double` and distinguishable only by comment.
+//
+//   alpha_dot, beta_dot are `AngularRate` (rad/s canonical).
+//
+//   Body rates p, q, r stay as raw `double` (rad/s). They are integrated
+//   into the quaternion by the EOM and never compared with degree-valued
+//   quantities elsewhere; typing them would add friction without closing
+//   a real correctness gap.
 //
 // Ported from F4Flight's aircraft_state.h.
 
 #pragma once
 
 #include "f4/flight/constants.hpp"
+#include "f4/flight/angle.hpp"
 #include "f4/math/vec3.hpp"
 #include "f4/math/quat.hpp"
 #include "f4/math/filters.hpp"
@@ -71,18 +83,25 @@ struct KinematicState {
     // q rotates a body-frame vector into the world frame.
     math::Quatd quat;
 
-    // Body angular rates (rad/s): p=roll, q=pitch, r=yaw
+    // Body angular rates (rad/s): p=roll, q=pitch, r=yaw.
+    // Kept as raw double — see file-level note. They feed the quaternion
+    // integrator and the FCS roll-rate lag, never a degree-valued comparison.
     double p{0.0}, q{0.0}, r{0.0};
 
-    // Euler angles (radians), recovered from the quaternion.
+    // Euler angles, recovered from the quaternion.
     // sigma = velocity-vector heading, gmma = flight path angle,
     // mu = velocity-vector roll, psi = body yaw, theta = body pitch,
     // phi = body roll.
-    double sigma{0.0}, gmma{0.0}, mu{0.0};
-    double psi{0.0}, theta{0.0}, phi{0.0};
+    Angle sigma{zero_angle()};
+    Angle gmma{zero_angle()};
+    Angle mu{zero_angle()};
+    Angle psi{zero_angle()};
+    Angle theta{zero_angle()};
+    Angle phi{zero_angle()};
 
     // Trigonometry cache (computed every frame by trigonometry()).
     // Stored to avoid recomputing sin/cos in multiple subsystems.
+    // These are dimensionless ratios — plain doubles, NOT Angle values.
     double sinalp{0.0}, cosalp{1.0};  // alpha
     double sinbet{0.0}, cosbet{1.0};  // beta
     double singam{0.0}, cosgam{1.0};  // flight path angle
@@ -103,10 +122,17 @@ struct KinematicState {
 // EOM can integrate them directly without dividing by mass each frame.
 // ---------------------------------------------------------------------------
 struct AeroState {
-    double alpha_deg{0.0};    // angle of attack, degrees
-    double beta_deg{0.0};     // sideslip angle, degrees
-    double alpha_dot{0.0};    // alpha rate, deg/s
-    double beta_dot{0.0};     // beta rate, deg/s
+    // Angle of attack and sideslip. Stored as the strong Angle type so the
+    // radians-vs-degrees convention is enforced at the type level. The F-16
+    // coefficient tables remain degree-indexed; use to_degrees() at the
+    // lookup call site (the one place where the degree convention survives).
+    Angle alpha{zero_angle()};    // angle of attack
+    Angle beta{zero_angle()};     // sideslip angle
+
+    // Time derivatives. AngularRate carries its own units (rad/s canonical);
+    // use to_deg_per_s() / to_rad_per_s() at call sites that need a number.
+    AngularRate alpha_dot{zero_angular_rate()};
+    AngularRate beta_dot{zero_angular_rate()};
 
     // Aerodynamic coefficients (dimensionless)
     double cl{0.0}, cd{0.0}, cy{0.0};
@@ -209,8 +235,8 @@ struct FcsState {
     double tp01{0.2}, tp02{0.2}, tp03{0.2};  // lead-lag time constants
     double zp01{0.9};                         // pitch damping ratio
     double pshape{0.0};                       // shaped pitch stick input
-    double ptcmd{0.0};                        // commanded pitch (G or alpha)
-    double aoacmd{0.0};                       // commanded alpha
+    double ptcmd{0.0};                        // commanded pitch (G or alpha — G is dimensionless)
+    Angle aoacmd{zero_angle()};               // commanded alpha
     bool   aoaCmdModeRuntime{false};          // true = alpha-command, false = G-command
 
     // --- Roll channel ---
@@ -222,7 +248,11 @@ struct FcsState {
     double pstab{0.0};             // filtered roll rate
     double maxRoll{80.0};          // roll limit (deg) — set by steering layer
     double maxRollDelta{5.0};      // roll-rate damping window (deg)
-    double startRoll{0.0};         // integrated roll (rad) for damping
+    // startRoll accumulates the integrated body-axis roll rate (rad). Kept
+    // as raw double — it is the time integral of p (rad/s) and is only ever
+    // compared with the deg-valued maxRollDelta via an explicit RTD scaling
+    // at the comparison site (see fcs.cpp runRoll).
+    double startRoll{0.0};
 
     // --- Yaw channel ---
     math::LagFilter       yawBetaLag;
@@ -230,7 +260,7 @@ struct FcsState {
     double ky02{1.0}, ky03{2.0}, ky05{1.0};  // yaw gains
     double ty02{0.3};                          // yaw lag time constant
     double yshape{0.0};                        // shaped pedal input
-    double betcmd{0.0};                        // commanded beta
+    Angle betcmd{zero_angle()};                // commanded beta
 
     // --- Damper gains (from limiters) ---
     double plsdamp{1.0}, rlsdamp{1.0}, ylsdamp{1.0};

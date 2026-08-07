@@ -15,10 +15,10 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 #                       because the FlightModel's public API exposes
 #                       set_message_bus(MessageBus*) and messages.hpp is a
 #                       public header.)
-#
-# f4-units is NOT a dependency. The flight model uses raw Imperial doubles
-# internally to match the coefficient tables exactly. Typed Quantity
-# accessors can be added at the host boundary.
+#   - f4-units         (for the strong-typed Angle / AngularRate wrappers
+#                       used by AircraftState. The dependency is PUBLIC
+#                       because angle.hpp is a public header and
+#                       AircraftState's fields are visible to consumers.)
 # ---------------------------------------------------------------------------
 add_library(f4-flight-model STATIC
     src/aerodynamics.cpp
@@ -36,6 +36,7 @@ target_link_libraries(f4-flight-model PUBLIC
     f4-data
     f4-state-machine
     f4-messaging
+    f4-units
 )
 
 # Tests

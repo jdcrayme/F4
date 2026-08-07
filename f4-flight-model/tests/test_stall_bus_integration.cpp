@@ -78,9 +78,9 @@ TEST(StallBusIntegration, PublishesStateChangesOnBus) {
     // Force the aircraft into a stalled state: alpha=30° exceeds criticalAOA=25°.
     // See test_stall_sm_integration's lifecycle test for the rationale (the
     // FCS's G-limiter prevents pilot-induced stalls at 100 ft/s).
-    fm.state().aero.alpha_deg = 30.0;
+    fm.state().aero.alpha = angle_from_degrees(30.0);
     fm.state().fcs.pitchAlphaLag.reset(30.0);
-    fm.state().fcs.aoacmd = 30.0;
+    fm.state().fcs.aoacmd = angle_from_degrees(30.0);
 
     // Drive the flight model for 5 seconds with full aft stick and cut
     // throttle — hold the stall so the SM has time to transition through
@@ -144,9 +144,9 @@ TEST(StallBusIntegration, NoBusAttachedBehavesIdentically) {
     // NOTE: no set_message_bus() call — bus_ is nullptr.
 
     // Force the aircraft into a stalled state (see PublishesStateChangesOnBus).
-    fm.state().aero.alpha_deg = 30.0;
+    fm.state().aero.alpha = angle_from_degrees(30.0);
     fm.state().fcs.pitchAlphaLag.reset(30.0);
-    fm.state().fcs.aoacmd = 30.0;
+    fm.state().fcs.aoacmd = angle_from_degrees(30.0);
 
     // Drive the flight model for 5 seconds with full aft stick + cut throttle
     // to hold the stall.
@@ -198,9 +198,9 @@ TEST(StallBusIntegration, MultipleSubscribersBothFire) {
     fm.set_message_bus(&bus);
 
     // Force the aircraft into a stalled state (see PublishesStateChangesOnBus).
-    fm.state().aero.alpha_deg = 30.0;
+    fm.state().aero.alpha = angle_from_degrees(30.0);
     fm.state().fcs.pitchAlphaLag.reset(30.0);
-    fm.state().fcs.aoacmd = 30.0;
+    fm.state().fcs.aoacmd = angle_from_degrees(30.0);
 
     const double dt = 1.0 / 60.0;
     const f4::math::Vec3d groundNormal{0.0, 0.0, -1.0};
@@ -273,9 +273,9 @@ TEST(StallBusIntegration, CrossThreadForwardingViaSendTo) {
     fm.set_message_bus(&sim_bus);
 
     // Force the aircraft into a stalled state (see PublishesStateChangesOnBus).
-    fm.state().aero.alpha_deg = 30.0;
+    fm.state().aero.alpha = angle_from_degrees(30.0);
     fm.state().fcs.pitchAlphaLag.reset(30.0);
-    fm.state().fcs.aoacmd = 30.0;
+    fm.state().fcs.aoacmd = angle_from_degrees(30.0);
 
     // Spawn the "campaign thread" — it polls flush_pending until it sees
     // at least one state-change message, then exits.

@@ -148,9 +148,9 @@ TEST(FcsPitch, ZeroStickProducesZeroCommand) {
     PilotInput input = makeInput();
 
     fcs.update(/*dt=*/0.01, /*qbar=*/100.0, /*qsom=*/10.0, /*mach=*/0.5,
-               /*vt=*/500.0, /*vcas=*/300.0, /*alpha=*/5.0, /*beta=*/0.0,
+               /*vt=*/500.0, /*vcas=*/300.0, angle_from_degrees(5.0), angle_from_degrees(0.0),
                /*cosmu=*/1.0, /*cosgam=*/1.0, /*singam=*/0.0,
-               /*costhe=*/1.0, /*cosphi=*/1.0, /*phi=*/0.0,
+               /*costhe=*/1.0, /*cosphi=*/1.0, angle_from_degrees(0.0),
                /*loading=*/1.0, /*inAir=*/true,
                /*nzcgs=*/1.0, /*nycgw=*/0.0,
                /*gearDown=*/false, /*refueling=*/false, /*landing=*/false,
@@ -173,8 +173,7 @@ TEST(FcsPitch, FullForwardStickProducesNegativeCommand) {
     PilotInput input = makeInput();
     input.pstick = -1.0;
 
-    fcs.update(0.01, 100.0, 10.0, 0.5, 500.0, 300.0, 5.0, 0.0,
-               1.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0, true, 1.0, 0.0,
+    fcs.update(0.01, 100.0, 10.0, 0.5, 500.0, 300.0, angle_from_degrees(5.0), angle_from_degrees(0.0), 1.0, 1.0, 0.0, 1.0, 1.0, angle_from_degrees(0.0), 1.0, true, 1.0, 0.0,
                false, false, false, input, fcs_state, aero);
 
     EXPECT_LT(fcs_state.ptcmd, 0.0)
@@ -194,8 +193,7 @@ TEST(FcsPitch, FullAftStickProducesPositiveCommand) {
     PilotInput input = makeInput();
     input.pstick = 1.0;
 
-    fcs.update(0.01, 100.0, 10.0, 0.5, 500.0, 300.0, 5.0, 0.0,
-               1.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0, true, 1.0, 0.0,
+    fcs.update(0.01, 100.0, 10.0, 0.5, 500.0, 300.0, angle_from_degrees(5.0), angle_from_degrees(0.0), 1.0, 1.0, 0.0, 1.0, 1.0, angle_from_degrees(0.0), 1.0, true, 1.0, 0.0,
                false, false, false, input, fcs_state, aero);
 
     EXPECT_GT(fcs_state.ptcmd, 0.0)
@@ -216,8 +214,7 @@ TEST(FcsPitch, CommandLimitedByMaxGs) {
     PilotInput input = makeInput();
     input.pstick = 1.0;
 
-    fcs.update(0.01, 200.0, 30.0, 0.5, 500.0, 300.0, 5.0, 0.0,
-               1.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0, true, 1.0, 0.0,
+    fcs.update(0.01, 200.0, 30.0, 0.5, 500.0, 300.0, angle_from_degrees(5.0), angle_from_degrees(0.0), 1.0, 1.0, 0.0, 1.0, 1.0, angle_from_degrees(0.0), 1.0, true, 1.0, 0.0,
                false, false, false, input, fcs_state, aero);
 
     EXPECT_LE(fcs_state.ptcmd, sf.geom.maxGs + 0.01);
@@ -235,8 +232,7 @@ TEST(FcsRoll, ZeroStickProducesZeroRollRate) {
     AeroState aero;
     PilotInput input = makeInput();
 
-    fcs.update(0.01, 100.0, 10.0, 0.5, 500.0, 300.0, 5.0, 0.0,
-               1.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0, true, 1.0, 0.0,
+    fcs.update(0.01, 100.0, 10.0, 0.5, 500.0, 300.0, angle_from_degrees(5.0), angle_from_degrees(0.0), 1.0, 1.0, 0.0, 1.0, 1.0, angle_from_degrees(0.0), 1.0, true, 1.0, 0.0,
                false, false, false, input, fcs_state, aero);
 
     EXPECT_NEAR(fcs_state.pscmd, 0.0, 5.0)
@@ -252,8 +248,7 @@ TEST(FcsRoll, RightStickProducesPositiveRollRate) {
     PilotInput input = makeInput();
     input.rstick = 1.0;  // full right
 
-    fcs.update(0.01, 100.0, 10.0, 0.5, 500.0, 300.0, 5.0, 0.0,
-               1.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0, true, 1.0, 0.0,
+    fcs.update(0.01, 100.0, 10.0, 0.5, 500.0, 300.0, angle_from_degrees(5.0), angle_from_degrees(0.0), 1.0, 1.0, 0.0, 1.0, 1.0, angle_from_degrees(0.0), 1.0, true, 1.0, 0.0,
                false, false, false, input, fcs_state, aero);
 
     EXPECT_GT(fcs_state.pscmd, 0.0)
@@ -269,8 +264,7 @@ TEST(FcsRoll, LeftStickProducesNegativeRollRate) {
     PilotInput input = makeInput();
     input.rstick = -1.0;  // full left
 
-    fcs.update(0.01, 100.0, 10.0, 0.5, 500.0, 300.0, 5.0, 0.0,
-               1.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0, true, 1.0, 0.0,
+    fcs.update(0.01, 100.0, 10.0, 0.5, 500.0, 300.0, angle_from_degrees(5.0), angle_from_degrees(0.0), 1.0, 1.0, 0.0, 1.0, 1.0, angle_from_degrees(0.0), 1.0, true, 1.0, 0.0,
                false, false, false, input, fcs_state, aero);
 
     EXPECT_LT(fcs_state.pscmd, 0.0)
@@ -293,14 +287,12 @@ TEST(FcsLandingGains, GearDownActivatesLandingGains) {
     PilotInput input = makeInput();
 
     // Airborne, gear up
-    fcs.update(0.01, 100.0, 10.0, 0.5, 500.0, 300.0, 5.0, 0.0,
-               1.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0, true, 1.0, 0.0,
+    fcs.update(0.01, 100.0, 10.0, 0.5, 500.0, 300.0, angle_from_degrees(5.0), angle_from_degrees(0.0), 1.0, 1.0, 0.0, 1.0, 1.0, angle_from_degrees(0.0), 1.0, true, 1.0, 0.0,
                /*gearDown=*/false, /*refueling=*/false, /*landing=*/false,
                input, fcs_airborne, aero);
 
     // Landing, gear down
-    fcs.update(0.01, 100.0, 10.0, 0.5, 500.0, 300.0, 5.0, 0.0,
-               1.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0, /*inAir=*/false, 1.0, 0.0,
+    fcs.update(0.01, 100.0, 10.0, 0.5, 500.0, 300.0, angle_from_degrees(5.0), angle_from_degrees(0.0), 1.0, 1.0, 0.0, 1.0, 1.0, angle_from_degrees(0.0), 1.0, /*inAir=*/false, 1.0, 0.0,
                /*gearDown=*/true, /*refueling=*/false, /*landing=*/false,
                input, fcs_landing, aero);
 
@@ -320,12 +312,10 @@ TEST(FcsLandingGains, RefuelingActivatesLandingGains) {
     AeroState aero;
     PilotInput input = makeInput();
 
-    fcs.update(0.01, 100.0, 10.0, 0.5, 500.0, 300.0, 5.0, 0.0,
-               1.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0, true, 1.0, 0.0,
+    fcs.update(0.01, 100.0, 10.0, 0.5, 500.0, 300.0, angle_from_degrees(5.0), angle_from_degrees(0.0), 1.0, 1.0, 0.0, 1.0, 1.0, angle_from_degrees(0.0), 1.0, true, 1.0, 0.0,
                false, /*refueling=*/false, false, input, fcs_normal, aero);
 
-    fcs.update(0.01, 100.0, 10.0, 0.5, 500.0, 300.0, 5.0, 0.0,
-               1.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0, true, 1.0, 0.0,
+    fcs.update(0.01, 100.0, 10.0, 0.5, 500.0, 300.0, angle_from_degrees(5.0), angle_from_degrees(0.0), 1.0, 1.0, 0.0, 1.0, 1.0, angle_from_degrees(0.0), 1.0, true, 1.0, 0.0,
                false, /*refueling=*/true, false, input, fcs_refuel, aero);
 
     EXPECT_NE(fcs_normal.kp05, fcs_refuel.kp05);
@@ -347,13 +337,13 @@ TEST(FcsGroundFade, LowQbarOnGroundReducesKp05) {
     PilotInput input = makeInput();
 
     // Very low qbar on ground
-    fcs.update(0.01, /*qbar=*/10.0, 10.0, 0.1, 100.0, 100.0, 2.0, 0.0,
-               1.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0, /*inAir=*/false, 1.0, 0.0,
+    fcs.update(0.01, /*qbar=*/10.0, 10.0, 0.1, 100.0, 100.0, angle_from_degrees(2.0), angle_from_degrees(0.0),
+               1.0, 1.0, 0.0, 1.0, 1.0, angle_from_degrees(0.0), 1.0, /*inAir=*/false, 1.0, 0.0,
                true, false, false, input, fcs_low_q, aero);
 
     // Higher qbar on ground
-    fcs.update(0.01, /*qbar=*/70.0, 10.0, 0.5, 500.0, 300.0, 5.0, 0.0,
-               1.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0, /*inAir=*/false, 1.0, 0.0,
+    fcs.update(0.01, /*qbar=*/70.0, 10.0, 0.5, 500.0, 300.0, angle_from_degrees(5.0), angle_from_degrees(0.0),
+               1.0, 1.0, 0.0, 1.0, 1.0, angle_from_degrees(0.0), 1.0, /*inAir=*/false, 1.0, 0.0,
                true, false, false, input, fcs_high_q, aero);
 
     EXPECT_LT(fcs_low_q.kp05, fcs_high_q.kp05)
@@ -375,8 +365,7 @@ TEST(FcsYaw, PedalInputDoesNotCrash) {
     PilotInput input = makeInput();
     input.ypedal = 0.5;
 
-    fcs.update(0.01, 100.0, 10.0, 0.5, 500.0, 300.0, 5.0, 0.0,
-               1.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0, true, 1.0, 0.0,
+    fcs.update(0.01, 100.0, 10.0, 0.5, 500.0, 300.0, angle_from_degrees(5.0), angle_from_degrees(0.0), 1.0, 1.0, 0.0, 1.0, 1.0, angle_from_degrees(0.0), 1.0, true, 1.0, 0.0,
                false, false, false, input, fcs_state, aero);
 
     // The yaw channel forces beta to 0 (stubbed). Just verify it ran.
