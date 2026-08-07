@@ -145,13 +145,42 @@ bool parse_hdr(
         return false;
     }
     result.is_new_format = (max_cs != OLD_FORMAT_SENTINEL);
-    // Read each texture entry: 40 bytes on disk (10 × uint32)
+    // Read each texture entry: 40 bytes on disk (10 × uint32).
+    //
+    // The on-disk layout corresponds to FreeFalcon's TempTexBankEntry
+    // struct (texbank.h), which contains a Texture object by value.
+    // The original Falcon 4.0 Texture struct (24 bytes on x86) has
+    // an extra 4-byte field between imageData and flags that is not
+    // present in modern FreeFalcon's DiskTexture — likely a remnant
+    // of the original DX5-era struct (possibly a secondary image
+    // pointer or a dimensions duplicate). The empirical layout,
+    // verified by hex-dumping raw HDR bytes and cross-referencing
+    // with known flag values (0xA0 = MPR_TI_CHROMAKEY|ALPHA|PALETTE)
+    // and chroma-key values (0xFFFF0000 = blue), is:
+    //
+    //   [0]  fileOffset       — byte offset into .TEX file
+    //   [1]  fileSize         — compressed size in bytes
+    //   [2]  dimension        — texture width = height (power of 2)
+    //   [3]  imageData (ptr)  — always 0 on disk (runtime pointer)
+    //   [4]  unused           — always 0 (legacy field / padding)
+    //   [5]  flags            — MPR_TI_* flags (0xA0=palette+alpha+chroma)
+    //   [6]  chromaKey        — transparency color key (ABGR format)
+    //   [7]  palette (ptr)    — always 0 on disk (runtime pointer)
+    //   [8]  palID            — index into PaletteBank
+    //   [9]  refCount         — always 0 on disk (runtime counter)
+    //
+    // CRITICAL: palID is at index [8], NOT [3]. The previous code
+    // read palette_id from vals[3] (the imageData pointer, always 0),
+    // causing ALL textures to use palette 0. Textures that needed
+    // palette 1, 2, or 3 were resolved through the wrong palette and
+    // appeared as random noise.
+    //
+    // References:
+    //   FreeFalcon: src/graphics/include/texbank.h (TempTexBankEntry)
+    //   FreeFalcon: src/graphics/include/tex.h (Texture class)
+    //   FreeFalcon: src/graphics/include/context.h (MPR_TI_* flags)
     result.tex_entries.reserve(static_cast<std::size_t>(result.n_textures));
     for (int i = 0; i < result.n_textures; ++i) {
-        // On-disk layout (40 bytes = 10 uint32s):
-        //   [0] fileOffset   [1] fileSize   [2] dimension  [3] paletteID
-        //   [4] spare        [5] format     [6] chromaKey  [7] spare2
-        //   [8] extra        [9] spare3
         uint32_t vals[10];
         for (int j = 0; j < 10; ++j) {
             if (!r.read(vals[j])) {
@@ -163,10 +192,9 @@ bool parse_hdr(
         entry.file_offset = vals[0];
         entry.file_size   = vals[1];
         entry.dimension   = vals[2];
-        entry.palette_id  = static_cast<int32_t>(vals[3]);
-        entry.format      = vals[5];
+        entry.palette_id  = static_cast<int32_t>(vals[8]);  // palID at [8]
+        entry.flags       = vals[5];
         entry.chroma_key  = vals[6];
-        entry.extra       = vals[8];
         result.tex_entries.push_back(entry);
     }
 

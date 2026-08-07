@@ -305,11 +305,32 @@ void process_prim(WalkContext& ctx, int32_t prim_offset)
 
     // Resolve the texture ID using the ACTIVE pool (not tree.tex_ids).
     // This is the key fix for per-subtree pool binding.
+    //
+    // Texture set offset (FreeFalcon Phase T9):
+    //   FreeFalcon's BRoot stores one tex_ids[] pool of length
+    //   nTexIDs = nTextureSets * texturesPerSet. At draw time it computes
+    //   texOffset = TextureSet * (nTexIDs / nTextureSets) and indexes
+    //   the pool as pTexIDs[texOffset + texIndex]. We replicate this
+    //   by adding the same offset to prim.tex_index before lookup.
+    //
+    //   For models with n_texture_sets == 1, tex_offset is 0 and this
+    //   is a no-op. For multi-set models (summer/winter/desert), this
+    //   selects the correct third of the pool.
     ActivePool pool = ctx.active();
     int32_t tex_id = -1;
     if (prim.tex_index >= 0 && pool.tex_ids &&
-        prim.tex_index < static_cast<int>(pool.n_tex_ids)) {
-        tex_id = pool.tex_ids[prim.tex_index];
+        pool.n_tex_ids > 0) {
+        // Compute the per-set stride. Guard against divide-by-zero
+        // (n_texture_sets <= 0 is treated as 1).
+        const int n_sets = (ctx.state.n_texture_sets > 0)
+                            ? ctx.state.n_texture_sets : 1;
+        const int stride = static_cast<int>(pool.n_tex_ids) / n_sets;
+        const int tex_offset = ctx.state.texture_set * stride;
+        const int effective_idx = prim.tex_index + tex_offset;
+        if (effective_idx >= 0 &&
+            effective_idx < static_cast<int>(pool.n_tex_ids)) {
+            tex_id = pool.tex_ids[effective_idx];
+        }
     }
 
     // Find or create a mesh for this (texture, primitive_kind) pair.

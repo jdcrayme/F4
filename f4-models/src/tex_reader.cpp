@@ -105,11 +105,22 @@ bool read_tex_blob(
     // Step 4-6: Resolve palette indices → RGBA8 with chroma key
     const auto& palette = palettes[static_cast<std::size_t>(entry.palette_id)];
 
-    // Extract chroma key RGB components for comparison
+    // Extract chroma key RGB components for comparison.
+    //
+    // The chroma_key field in TexBankEntry is stored in the same ABGR
+    // (DirectDraw) layout as the palette entries — see the comment on
+    // DiskPalette::resolve in texture.hpp. We must extract R/B from the
+    // same byte positions used for palette resolution, otherwise the
+    // chroma-key comparison would compare the wrong channels and the
+    // transparent pixels would never match.
+    //
+    // Reference value: 0xFFFF0000 = pure blue (sky/backdrop chroma key)
+    //   With ABGR extraction: ck_r=0x00, ck_g=0x00, ck_b=0xFF → blue ✓
+    //   With ARGB extraction: ck_r=0xFF, ck_g=0x00, ck_b=0x00 → red ✗
     const uint32_t ck = entry.chroma_key;
-    const uint8_t ck_r = static_cast<uint8_t>((ck >> 16) & 0xFF);
+    const uint8_t ck_r = static_cast<uint8_t>(ck & 0xFF);
     const uint8_t ck_g = static_cast<uint8_t>((ck >> 8)  & 0xFF);
-    const uint8_t ck_b = static_cast<uint8_t>(ck & 0xFF);
+    const uint8_t ck_b = static_cast<uint8_t>((ck >> 16) & 0xFF);
     const bool has_chroma_key = (ck != 0);
 
     out.rgba.resize(total_pixels * 4);
