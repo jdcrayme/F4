@@ -35,10 +35,10 @@ struct ParseResult {
 
 // Parse a Falcon 4 .dat file from disk. Returns a ParseResult; check
 // `result.ok` before using `result.config`.
-ParseResult loadFile(const std::string& path);
+[[nodiscard]] ParseResult loadFile(const std::string& path);
 
 // Parse a Falcon 4 .dat file from an in-memory string (mainly for tests).
 // sourceName is used in error/warning messages (typically the file path).
-ParseResult loadString(const std::string& contents, const std::string& sourceName = "<string>");
+[[nodiscard]] ParseResult loadString(const std::string& contents, const std::string& sourceName = "<string>");
 
 } // namespace f4::convert

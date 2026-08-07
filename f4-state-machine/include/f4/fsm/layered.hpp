@@ -118,13 +118,20 @@ public:
 private:
     /// Apply inter-layer inhibition: for each active (non-idle) layer,
     /// force any layers in its inhibit_mask back to their idle state.
+    ///
+    /// C2 FIX: Uses force_to_state(idle_state) instead of reset().
+    /// reset() fires the initial state's entry action (which may have
+    /// side effects like starting timers or publishing messages), but
+    /// inhibition is an administrative suppression — the suppressed layer
+    /// should silently return to idle without side effects. force_to_state()
+    /// sets the state without firing any actions.
     void applyInhibition() {
         for (std::size_t i = 0; i < layers_.size(); ++i) {
             if (layers_[i].sm.current() != layers_[i].idle_state) {
                 // Layer i is active — suppress its inhibited layers
                 for (const auto& j : layers_[i].inhibit_mask) {
                     if (j < layers_.size() && j != i) {
-                        layers_[j].sm.reset();  // force back to initial/idle
+                        layers_[j].sm.force_to_state(layers_[j].idle_state);
                     }
                 }
             }

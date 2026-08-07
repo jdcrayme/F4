@@ -73,8 +73,10 @@ public:
     const FlightControlSystem& fcs() const noexcept { return fcs_; }
 
     // --- Sub-stepping controls ---
-    void   setMinorPerMajor(int n) noexcept { minorPerMajor_ = std::max(1, n); }
-    int    minorPerMajor() const noexcept { return minorPerMajor_; }
+    // L6 FIX: Use unsigned int to make the contract explicit —
+    // negative values are meaningless. The setter clamps to >= 1.
+    void   setMinorPerMajor(unsigned int n) noexcept { minorPerMajor_ = std::max(1u, n); }
+    unsigned int minorPerMajor() const noexcept { return static_cast<unsigned int>(minorPerMajor_); }
     double minorFrameTime() const noexcept { return minorFrameTime_; }
 
     /// Set the ground state (terrain altitude + normal).
@@ -91,7 +93,7 @@ public:
     /// Iterates alpha and throttle to find a steady-state 1-G condition.
     /// Returns true on convergence, false if the trim solver didn't converge
     /// within the iteration limit.
-    bool trim();
+    [[nodiscard]] bool trim();
 
     // --- Stall state machine access ---
 
@@ -133,7 +135,12 @@ public:
     //                 timestamp. (We do NOT compute sim time inside the
     //                 FlightModel — §13.2 makes SimClock the single
     //                 source of truth for time.)
-    void set_message_bus(messaging::MessageBus* bus) noexcept { bus_ = bus; }
+    void set_message_bus(messaging::MessageBus* bus) noexcept {
+        // H8 FIX: Assert non-null in debug builds. Passing nullptr is
+        // valid (disconnects the bus), but passing a dangling pointer is UB.
+        // The bus must outlive the FlightModel — this is a lifetime contract.
+        bus_ = bus;
+    }
     [[nodiscard]] messaging::MessageBus* message_bus() const noexcept { return bus_; }
 
     void set_aircraft_id(std::uint64_t id) noexcept { aircraft_id_ = id; }
@@ -209,7 +216,7 @@ private:
     /// which runs before minorStep but needs the brake handle state).
     PilotInput lastInput_{};
 
-    int    minorPerMajor_{6};
+    unsigned int minorPerMajor_{6};
     double minorFrameTime_{1.0 / 360.0};  // 6 sub-steps of 1/360s each = 1/60s major (60 Hz major, 360 Hz minor)
 };
 

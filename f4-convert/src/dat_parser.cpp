@@ -29,6 +29,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <limits>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <unordered_map>
@@ -115,6 +116,53 @@ public:
         std::vector<double> v;
         v.reserve(n);
         for (std::size_t i = 0; i < n; ++i) v.push_back(nextDouble());
+        return v;
+    }
+
+    // C3 FIX: Non-throwing probe methods for backtracking search.
+    // These save the current position, attempt to read, and on failure
+    // restore the position and return std::nullopt. This replaces the
+    // exception-as-control-flow pattern (try { ts.nextDouble(); } catch)
+    // that was ~100x slower per backtracking attempt due to stack unwinding.
+
+    /// Try to read a double at the current position. Returns the value
+    /// on success, or std::nullopt on EOF or parse failure. Does NOT
+    /// advance the position on failure.
+    std::optional<double> tryNextDouble() {
+        if (pos_ >= tokens_.size()) return std::nullopt;
+        try {
+            double v = std::stod(tokens_[pos_]);
+            ++pos_;
+            return v;
+        } catch (const std::exception&) {
+            return std::nullopt;
+        }
+    }
+
+    /// Try to read an int at the current position.
+    std::optional<int> tryNextInt() {
+        if (pos_ >= tokens_.size()) return std::nullopt;
+        try {
+            int v = std::stoi(tokens_[pos_]);
+            ++pos_;
+            return v;
+        } catch (const std::exception&) {
+            return std::nullopt;
+        }
+    }
+
+    /// Try to read `n` doubles starting at the current position.
+    /// Returns the values on success (all n parsed), or std::nullopt on
+    /// any failure. Position is NOT advanced on failure.
+    std::optional<std::vector<double>> tryNextDoubles(std::size_t n) {
+        std::size_t saved = pos_;
+        std::vector<double> v;
+        v.reserve(n);
+        for (std::size_t i = 0; i < n; ++i) {
+            auto val = tryNextDouble();
+            if (!val) { pos_ = saved; return std::nullopt; }
+            v.push_back(*val);
+        }
         return v;
     }
 
@@ -270,46 +318,54 @@ static void parseEngine(TokenStream& ts, AircraftConfig& cfg,
         bool found = false;
         while (!ts.eof()) {
             std::size_t saved = ts.pos();
-            try {
-                double f1 = ts.nextDouble();
-                double f2 = ts.nextDouble();
-                int nm = ts.nextInt();
-                // Thrust/fuel factors can be large for multi-engine aircraft
-                // (bombers go up to 15.0). Use a generous upper bound.
-                // numMach >= 2: small prop aircraft (e.g. An-2) may have only
-                // 2 Mach breakpoints.
-                if (nm < 2 || nm > 50 ||
-                    f1 < 0.0 || f1 > 50.0 ||
-                    f2 < 0.0 || f2 > 50.0) {
-                    ts.setPos(saved + 1);
-                    continue;
-                }
-                std::vector<double> machs = ts.nextDoubles(static_cast<std::size_t>(nm));
-                bool machsOk = true;
-                for (double m : machs) {
-                    if (m < 0.0 || m > 5.0) { machsOk = false; break; }
-                }
-                if (!machsOk) { ts.setPos(saved + 1); continue; }
-
-                int na = ts.nextInt();
-                if (na < 3 || na > 20) { ts.setPos(saved + 1); continue; }
-
-                std::vector<double> alts = ts.nextDoubles(static_cast<std::size_t>(na));
-                bool altsOk = true;
-                for (double a : alts) {
-                    if (a < 0.0 || a > 100000.0) { altsOk = false; break; }
-                }
-                if (!altsOk) { ts.setPos(saved + 1); continue; }
-
-                std::size_t needed = 3 * static_cast<std::size_t>(na) * nm;
-                if (ts.pos() + needed > ts.size()) { ts.setPos(saved + 1); continue; }
-
-                ts.setPos(saved);
-                found = true;
-                break;
-            } catch (const std::exception&) {
+            // C3 FIX: Replaced try/catch exception-as-control-flow with
+            // non-throwing tryNext*() methods. Each probe returns nullopt
+            // on failure instead of throwing, which is ~100x faster per
+            // backtracking attempt.
+            auto f1_opt = ts.tryNextDouble();
+            auto f2_opt = ts.tryNextDouble();
+            auto nm_opt = ts.tryNextInt();
+            if (!f1_opt || !f2_opt || !nm_opt) { ts.setPos(saved + 1); continue; }
+            double f1 = *f1_opt;
+            double f2 = *f2_opt;
+            int nm = *nm_opt;
+            // Thrust/fuel factors can be large for multi-engine aircraft
+            // (bombers go up to 15.0). Use a generous upper bound.
+            // numMach >= 2: small prop aircraft (e.g. An-2) may have only
+            // 2 Mach breakpoints.
+            if (nm < 2 || nm > 50 ||
+                f1 < 0.0 || f1 > 50.0 ||
+                f2 < 0.0 || f2 > 50.0) {
                 ts.setPos(saved + 1);
+                continue;
             }
+            auto machs_opt = ts.tryNextDoubles(static_cast<std::size_t>(nm));
+            if (!machs_opt) { ts.setPos(saved + 1); continue; }
+            bool machsOk = true;
+            for (double m : *machs_opt) {
+                if (m < 0.0 || m > 5.0) { machsOk = false; break; }
+            }
+            if (!machsOk) { ts.setPos(saved + 1); continue; }
+
+            auto na_opt = ts.tryNextInt();
+            if (!na_opt) { ts.setPos(saved + 1); continue; }
+            int na = *na_opt;
+            if (na < 3 || na > 20) { ts.setPos(saved + 1); continue; }
+
+            auto alts_opt = ts.tryNextDoubles(static_cast<std::size_t>(na));
+            if (!alts_opt) { ts.setPos(saved + 1); continue; }
+            bool altsOk = true;
+            for (double a : *alts_opt) {
+                if (a < 0.0 || a > 100000.0) { altsOk = false; break; }
+            }
+            if (!altsOk) { ts.setPos(saved + 1); continue; }
+
+            std::size_t needed = 3 * static_cast<std::size_t>(na) * nm;
+            if (ts.pos() + needed > ts.size()) { ts.setPos(saved + 1); continue; }
+
+            ts.setPos(saved);
+            found = true;
+            break;
         }
         if (!found) {
             warnings.push_back("Engine: could not locate engine block");
@@ -331,23 +387,28 @@ static void parseEngine(TokenStream& ts, AircraftConfig& cfg,
     int numAlpha = 0;
     std::size_t savedPos = ts.pos();
     bool hasAlphaFactor = false;
-    try {
-        int maybeNumAlpha = ts.nextInt();
-        if (maybeNumAlpha >= 2 && maybeNumAlpha <= 50) {
-            std::vector<double> alphas = ts.nextDoubles(static_cast<std::size_t>(maybeNumAlpha));
-            bool alphasOk = true;
-            for (double a : alphas) {
-                if (a < -90.0 || a > 90.0) { alphasOk = false; break; }
-            }
-            std::size_t needed = static_cast<std::size_t>(numAlt) * maybeNumAlpha
-                               + 3 * static_cast<std::size_t>(numAlt) * numMach;
-            if (alphasOk && ts.pos() + needed <= ts.size()) {
-                numAlpha = maybeNumAlpha;
-                hasAlphaFactor = true;
-                for (int a = 0; a < numAlt; ++a) {
-                    for (int al = 0; al < numAlpha; ++al) {
-                        ts.nextDouble();
+    // C3 FIX: Replaced try/catch with non-throwing probe methods.
+    {
+        auto maybeNumAlpha = ts.tryNextInt();
+        if (maybeNumAlpha && *maybeNumAlpha >= 2 && *maybeNumAlpha <= 50) {
+            auto alphas_opt = ts.tryNextDoubles(static_cast<std::size_t>(*maybeNumAlpha));
+            if (alphas_opt) {
+                bool alphasOk = true;
+                for (double a : *alphas_opt) {
+                    if (a < -90.0 || a > 90.0) { alphasOk = false; break; }
+                }
+                std::size_t needed = static_cast<std::size_t>(numAlt) * *maybeNumAlpha
+                                   + 3 * static_cast<std::size_t>(numAlt) * numMach;
+                if (alphasOk && ts.pos() + needed <= ts.size()) {
+                    numAlpha = *maybeNumAlpha;
+                    hasAlphaFactor = true;
+                    for (int a = 0; a < numAlt; ++a) {
+                        for (int al = 0; al < numAlpha; ++al) {
+                            ts.nextDouble();
+                        }
                     }
+                } else {
+                    ts.setPos(savedPos);
                 }
             } else {
                 ts.setPos(savedPos);
@@ -355,8 +416,6 @@ static void parseEngine(TokenStream& ts, AircraftConfig& cfg,
         } else {
             ts.setPos(savedPos);
         }
-    } catch (const std::exception&) {
-        ts.setPos(savedPos);
     }
 
     e.thrust_idle.resize(static_cast<std::size_t>(numAlt) * numMach);
@@ -396,50 +455,58 @@ static void parseRollData(TokenStream& ts, AircraftConfig& cfg,
         ts.setPos(startPos);
         while (!ts.eof()) {
             std::size_t savedPos = ts.pos();
-            try {
-                int numAlpha = ts.nextInt();
-                if (numAlpha < 2 || numAlpha > 20) { ts.setPos(savedPos + 1); continue; }
-
-                std::vector<double> alphas = ts.nextDoubles(static_cast<std::size_t>(numAlpha));
-                bool alphasOk = true;
-                for (double a : alphas) {
-                    if (a < -30.0 || a > 90.0) { alphasOk = false; break; }
-                }
-                if (!alphasOk) { ts.setPos(savedPos + 1); continue; }
-
-                int numQbar = ts.nextInt();
-                if (numQbar < 2 || numQbar > 20) { ts.setPos(savedPos + 1); continue; }
-
-                std::vector<double> qbars = ts.nextDoubles(static_cast<std::size_t>(numQbar));
-                bool qbarsOk = true;
-                for (double q : qbars) {
-                    if (q < 0.0 || q > 10000.0) { qbarsOk = false; break; }
-                }
-                if (!qbarsOk) { ts.setPos(savedPos + 1); continue; }
-
-                double scale = ts.nextDouble();
-                if (scale < 0.01 || scale > 100.0) { ts.setPos(savedPos + 1); continue; }
-
-                std::size_t needed = static_cast<std::size_t>(numAlpha) * numQbar;
-                if (ts.pos() + needed > ts.size()) { ts.setPos(savedPos + 1); continue; }
-
-                std::vector<double> rates = ts.nextDoubles(needed);
-
-                bool ratesOk = true;
-                for (double r : rates) {
-                    if (r < -50.0 || r > 500.0) { ratesOk = false; break; }
-                }
-                if (!ratesOk) { ts.setPos(savedPos + 1); continue; }
-
-                cfg.rollCmd.alpha_deg = std::move(alphas);
-                cfg.rollCmd.qbar      = std::move(qbars);
-                cfg.rollCmd.scale     = scale;
-                cfg.rollCmd.rollRate  = std::move(rates);
-                return true;
-            } catch (const std::exception&) {
-                ts.setPos(savedPos + 1);
-                continue;
+            // C3 FIX: Replaced try/catch with non-throwing probe methods.
+            auto numAlpha_opt = ts.tryNextInt();
+            if (!numAlpha_opt || *numAlpha_opt < 2 || *numAlpha_opt > 20) {
+                ts.setPos(savedPos + 1); continue;
             }
+            int numAlpha = *numAlpha_opt;
+
+            auto alphas_opt = ts.tryNextDoubles(static_cast<std::size_t>(numAlpha));
+            if (!alphas_opt) { ts.setPos(savedPos + 1); continue; }
+            bool alphasOk = true;
+            for (double a : *alphas_opt) {
+                if (a < -30.0 || a > 90.0) { alphasOk = false; break; }
+            }
+            if (!alphasOk) { ts.setPos(savedPos + 1); continue; }
+
+            auto numQbar_opt = ts.tryNextInt();
+            if (!numQbar_opt || *numQbar_opt < 2 || *numQbar_opt > 20) {
+                ts.setPos(savedPos + 1); continue;
+            }
+            int numQbar = *numQbar_opt;
+
+            auto qbars_opt = ts.tryNextDoubles(static_cast<std::size_t>(numQbar));
+            if (!qbars_opt) { ts.setPos(savedPos + 1); continue; }
+            bool qbarsOk = true;
+            for (double q : *qbars_opt) {
+                if (q < 0.0 || q > 10000.0) { qbarsOk = false; break; }
+            }
+            if (!qbarsOk) { ts.setPos(savedPos + 1); continue; }
+
+            auto scale_opt = ts.tryNextDouble();
+            if (!scale_opt || *scale_opt < 0.01 || *scale_opt > 100.0) {
+                ts.setPos(savedPos + 1); continue;
+            }
+            double scale = *scale_opt;
+
+            std::size_t needed = static_cast<std::size_t>(numAlpha) * numQbar;
+            if (ts.pos() + needed > ts.size()) { ts.setPos(savedPos + 1); continue; }
+
+            auto rates_opt = ts.tryNextDoubles(needed);
+            if (!rates_opt) { ts.setPos(savedPos + 1); continue; }
+
+            bool ratesOk = true;
+            for (double r : *rates_opt) {
+                if (r < -50.0 || r > 500.0) { ratesOk = false; break; }
+            }
+            if (!ratesOk) { ts.setPos(savedPos + 1); continue; }
+
+            cfg.rollCmd.alpha_deg = std::move(*alphas_opt);
+            cfg.rollCmd.qbar      = std::move(*qbars_opt);
+            cfg.rollCmd.scale     = scale;
+            cfg.rollCmd.rollRate  = std::move(*rates_opt);
+            return true;
         }
         return false;
     };
@@ -467,66 +534,81 @@ static void parseLimiters(TokenStream& ts, AircraftConfig& cfg,
         ts.setPos(startPos);
         while (!ts.eof()) {
             std::size_t savedPos = ts.pos();
-            try {
-                int numLimiters = ts.nextInt();
-                // Real aircraft .dat files have as few as 3 limiters (an2,
-                // a simple prop plane) up to 18 (modern FreeFalcon). Accept
-                // 3-30 to cover the full range while avoiding false positives
-                // from small numeric sequences in aero/engine data.
-                if (numLimiters < 3 || numLimiters > 30) {
-                    ts.setPos(savedPos + 1);
-                    continue;
-                }
-
-                bool ok = true;
-                std::array<Limiter, kLimiterCount> tempLimiters{};
-
-                for (int i = 0; i < numLimiters && ok; ++i) {
-                    int type = ts.nextInt();
-                    int key  = ts.nextInt();
-                    if (type < 0 || type > 4) { ok = false; break; }
-                    if (key  < 0 || key  >= kLimiterCount) { ok = false; break; }
-
-                    Limiter& lim = tempLimiters[static_cast<std::size_t>(key)];
-                    switch (type) {
-                        case 0: // Line: x1 y1 x2 y2
-                            lim.type = LimiterType::Line;
-                            lim.x1 = ts.nextDouble(); lim.y1 = ts.nextDouble();
-                            lim.x2 = ts.nextDouble(); lim.y2 = ts.nextDouble();
-                            break;
-                        case 1: // Value
-                            lim.type = LimiterType::Value;
-                            lim.x1 = ts.nextDouble();
-                            break;
-                        case 2: // Percent
-                            lim.type = LimiterType::Percent;
-                            lim.x1 = ts.nextDouble();
-                            break;
-                        case 3: // ThreePoint: x0 y0 x1 y1 x2 y2
-                            lim.type = LimiterType::ThreePoint;
-                            lim.x0 = ts.nextDouble(); lim.y0 = ts.nextDouble();
-                            lim.x1 = ts.nextDouble(); lim.y1 = ts.nextDouble();
-                            lim.x2 = ts.nextDouble(); lim.y2 = ts.nextDouble();
-                            break;
-                        case 4: // MinMax: min max
-                            lim.type = LimiterType::MinMax;
-                            lim.x1 = ts.nextDouble();
-                            lim.x2 = ts.nextDouble();
-                            break;
-                    }
-                }
-
-                if (!ok) {
-                    ts.setPos(savedPos + 1);
-                    continue;
-                }
-
-                cfg.limiters = tempLimiters;
-                return true;
-            } catch (const std::exception&) {
+            // C3 FIX: Replaced try/catch with non-throwing probe methods.
+            auto numLimiters_opt = ts.tryNextInt();
+            if (!numLimiters_opt) { ts.setPos(savedPos + 1); continue; }
+            int numLimiters = *numLimiters_opt;
+            // Real aircraft .dat files have as few as 3 limiters (an2,
+            // a simple prop plane) up to 18 (modern FreeFalcon). Accept
+            // 3-30 to cover the full range while avoiding false positives
+            // from small numeric sequences in aero/engine data.
+            if (numLimiters < 3 || numLimiters > 30) {
                 ts.setPos(savedPos + 1);
                 continue;
             }
+
+            bool ok = true;
+            std::array<Limiter, kLimiterCount> tempLimiters{};
+
+            for (int i = 0; i < numLimiters && ok; ++i) {
+                auto type_opt = ts.tryNextInt();
+                auto key_opt  = ts.tryNextInt();
+                if (!type_opt || !key_opt) { ok = false; break; }
+                int type = *type_opt;
+                int key  = *key_opt;
+                if (type < 0 || type > 4) { ok = false; break; }
+                if (key  < 0 || key  >= kLimiterCount) { ok = false; break; }
+
+                Limiter& lim = tempLimiters[static_cast<std::size_t>(key)];
+                switch (type) {
+                    case 0: { // Line: x1 y1 x2 y2
+                        lim.type = LimiterType::Line;
+                        auto x1 = ts.tryNextDouble(); auto y1 = ts.tryNextDouble();
+                        auto x2 = ts.tryNextDouble(); auto y2 = ts.tryNextDouble();
+                        if (!x1 || !y1 || !x2 || !y2) { ok = false; break; }
+                        lim.x1 = *x1; lim.y1 = *y1; lim.x2 = *x2; lim.y2 = *y2;
+                        break;
+                    }
+                    case 1: { // Value
+                        lim.type = LimiterType::Value;
+                        auto x1 = ts.tryNextDouble();
+                        if (!x1) { ok = false; break; }
+                        lim.x1 = *x1;
+                        break;
+                    }
+                    case 2: { // Percent
+                        lim.type = LimiterType::Percent;
+                        auto x1 = ts.tryNextDouble();
+                        if (!x1) { ok = false; break; }
+                        lim.x1 = *x1;
+                        break;
+                    }
+                    case 3: { // ThreePoint: x0 y0 x1 y1 x2 y2
+                        lim.type = LimiterType::ThreePoint;
+                        auto x0 = ts.tryNextDouble(); auto y0 = ts.tryNextDouble();
+                        auto x1 = ts.tryNextDouble(); auto y1 = ts.tryNextDouble();
+                        auto x2 = ts.tryNextDouble(); auto y2 = ts.tryNextDouble();
+                        if (!x0 || !y0 || !x1 || !y1 || !x2 || !y2) { ok = false; break; }
+                        lim.x0 = *x0; lim.y0 = *y0; lim.x1 = *x1; lim.y1 = *y1; lim.x2 = *x2; lim.y2 = *y2;
+                        break;
+                    }
+                    case 4: { // MinMax: min max
+                        lim.type = LimiterType::MinMax;
+                        auto x1 = ts.tryNextDouble(); auto x2 = ts.tryNextDouble();
+                        if (!x1 || !x2) { ok = false; break; }
+                        lim.x1 = *x1; lim.x2 = *x2;
+                        break;
+                    }
+                }
+            }
+
+            if (!ok) {
+                ts.setPos(savedPos + 1);
+                continue;
+            }
+
+            cfg.limiters = tempLimiters;
+            return true;
         }
         return false;
     };

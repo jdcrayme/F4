@@ -307,6 +307,19 @@ public:
         }
     }
 
+    /// Force the machine to state `s` WITHOUT firing any entry/exit actions
+    /// or recording a transition. This is an administrative reset — use it
+    /// to suppress a layer in a LayeredStateMachine (C2 fix) or to restore
+    /// a machine to a known state for testing. The tick counter is NOT
+    /// cleared (unlike reset()) — the machine's timeline continues.
+    ///
+    /// IMPORTANT: this bypasses UML 2 transition semantics. Do NOT use
+    /// this as a substitute for process() in normal operation. The only
+    /// correct use cases are inter-layer inhibition and test fixtures.
+    void force_to_state(StateEnum s) noexcept {
+        current_ = s;
+    }
+
     /// Monotonic tick counter (increments on every process() call).
     [[nodiscard]] std::size_t tick() const noexcept { return tick_; }
 

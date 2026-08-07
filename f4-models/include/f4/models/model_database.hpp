@@ -26,6 +26,7 @@
 #include <climits>
 #include <cstdint>
 #include <filesystem>
+#include <shared_mutex>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -241,6 +242,10 @@ private:
     std::vector<TexBankEntry> tex_entries_;
 
     // Lazy-decoded texture cache (keyed by tex_index)
+    // M8 FIX: Added shared_mutex for thread safety. fetch_texture() is
+    // const and lazily populates this map. Two threads calling
+    // fetch_texture() concurrently would otherwise have a data race.
+    mutable std::shared_mutex texture_cache_mutex_;
     mutable std::unordered_map<int, DecodedTexture> decoded_textures_;
 
     // Parsed LOD data, keyed by (parent_index << 8 | lod_index)

@@ -225,23 +225,32 @@ TEST(Cursor, PointerPairConstructorMatchesVectorConstructor) {
     EXPECT_EQ(c_vec.u8(), c_ptr.u8());
 }
 
-TEST(Cursor, CopyConstructorPreservesState) {
+TEST(Cursor, SaveRestorePreservesState) {
     auto buf = make_pattern();
     Cursor c(buf);
     c.skip(3);
-    Cursor copy = c;
-    EXPECT_EQ(copy.p, c.p);
-    EXPECT_EQ(copy.end, c.end);
-    EXPECT_FALSE(copy.error);
-    // Advance the copy; the original is unchanged.
-    copy.u8();
-    EXPECT_NE(copy.p, c.p);
+    auto saved = c.save();
+    EXPECT_EQ(saved.p, c.p);
+    EXPECT_FALSE(saved.error);
 
-    // Now error path: copy an errored cursor.
+    // Advance the cursor; the saved position is unchanged.
+    c.u8();
+    EXPECT_NE(c.p, saved.p);
+
+    // Restore — cursor goes back to the saved position.
+    c.restore(saved);
+    EXPECT_EQ(c.p, saved.p);
+    EXPECT_FALSE(c.error);
+
+    // Now error path: save an errored cursor.
     c.skip(buf.size() + 1);
     EXPECT_TRUE(c.error);
-    Cursor err_copy = c;
-    EXPECT_TRUE(err_copy.error);
+    auto err_saved = c.save();
+    EXPECT_TRUE(err_saved.error);
+
+    // Restore the errored state.
+    c.restore(err_saved);
+    EXPECT_TRUE(c.error);
 }
 
 TEST(Cursor, DefaultConstructorIsEmpty) {

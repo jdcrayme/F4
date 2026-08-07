@@ -348,33 +348,38 @@ bool validate_next_record(const uint8_t* p, const uint8_t* end) {
 }
 
 // Try a subclass tail parser. Returns true if the candidate cursor position
-// validates. On success, fills `out` and advances `c` to the new position.
-// On failure, leaves `c` unchanged.
+// validates. On success, fills `out` and leaves `c` at the advanced position.
+// On failure, rolls `c` back to its pre-parse position.
 //
-// Uses Cursor's sticky error flag rather than try/catch — see the design
-// note on Cursor above. This avoids exception-based control flow on the
-// per-record hot path and surfaces real bugs (which would throw) instead
-// of swallowing them under catch(...).
+// Uses Cursor's save/restore mechanism instead of copying the Cursor (which
+// is non-copyable by design — see Position struct in cursor.hpp). Also uses
+// the sticky error flag rather than try/catch — see the design note on
+// Cursor above. This avoids exception-based control flow on the per-record
+// hot path and surfaces real bugs (which would throw) instead of swallowing
+// them under catch(...).
 template<typename ParseFn>
-bool try_tail(Cursor& c, Cursor& snapshot, const uint8_t* end,
+bool try_tail(Cursor& c, const uint8_t* end,
               UnitRecord& u, ParseFn parse) {
-    Cursor trial = snapshot;   // start from the post-waypoint position
-    parse(trial, u.subclass);
-    if (!trial.error && validate_next_record(trial.p, end)) {
-        c = trial;
-        return true;
+    auto saved = c.save();      // snapshot position before trial parse
+    parse(c, u.subclass);
+    if (!c.error && validate_next_record(c.p, end)) {
+        return true;            // commit — c is already advanced
     }
+    c.restore(saved);           // rollback
     return false;
 }
 
 UnitClass dispatch_and_parse_tail(Cursor& c, const uint8_t* record_start,
                                    const uint8_t* end, UnitRecord& u) {
-    Cursor snapshot = c;   // post-waypoint position
+    // Cursor is at post-waypoint position. try_tail uses save/restore
+    // internally, so on failure the cursor rolls back here automatically.
+    // No need for a separate snapshot copy.
+
     // Try each subclass in order of frequency in save1.cam.
     // (Battalion 524, Brigade 85, Squadron 72, TaskForce 2, Flight 0, Package 0.)
 
     // Battalion: 11 (GroundUnit) + 30 (Battalion) = 41 bytes
-    if (try_tail(c, snapshot, end, u, [](Cursor& cc, UnitSubclassData& s) {
+    if (try_tail(c, end, u, [](Cursor& cc, UnitSubclassData& s) {
             parse_ground_unit(cc, s);
             parse_battalion(cc, s);
         })) {
@@ -383,7 +388,7 @@ UnitClass dispatch_and_parse_tail(Cursor& c, const uint8_t* record_start,
     u.subclass = UnitSubclassData{};   // reset between attempts
 
     // Brigade: 11 (GroundUnit) + 1 + 8*elements bytes
-    if (try_tail(c, snapshot, end, u, [](Cursor& cc, UnitSubclassData& s) {
+    if (try_tail(c, end, u, [](Cursor& cc, UnitSubclassData& s) {
             parse_ground_unit(cc, s);
             parse_brigade(cc, s);
         })) {
@@ -392,7 +397,7 @@ UnitClass dispatch_and_parse_tail(Cursor& c, const uint8_t* record_start,
     u.subclass = UnitSubclassData{};
 
     // Squadron: 796 bytes
-    if (try_tail(c, snapshot, end, u, [](Cursor& cc, UnitSubclassData& s) {
+    if (try_tail(c, end, u, [](Cursor& cc, UnitSubclassData& s) {
             parse_squadron(cc, s);
         })) {
         return UnitClass::Squadron;
@@ -400,7 +405,7 @@ UnitClass dispatch_and_parse_tail(Cursor& c, const uint8_t* record_start,
     u.subclass = UnitSubclassData{};
 
     // TaskForce: 2 bytes
-    if (try_tail(c, snapshot, end, u, [](Cursor& cc, UnitSubclassData& s) {
+    if (try_tail(c, end, u, [](Cursor& cc, UnitSubclassData& s) {
             parse_taskforce(cc, s);
         })) {
         return UnitClass::TaskForce;
@@ -408,7 +413,7 @@ UnitClass dispatch_and_parse_tail(Cursor& c, const uint8_t* record_start,
     u.subclass = UnitSubclassData{};
 
     // Flight: 67 + 32*loadouts bytes
-    if (try_tail(c, snapshot, end, u, [](Cursor& cc, UnitSubclassData& s) {
+    if (try_tail(c, end, u, [](Cursor& cc, UnitSubclassData& s) {
             parse_flight(cc, s);
         })) {
         return UnitClass::Flight;
@@ -418,7 +423,7 @@ UnitClass dispatch_and_parse_tail(Cursor& c, const uint8_t* record_start,
     // Package (small branch only — big branch is not yet implemented).
     // On save1.cam there are no Package records, so this is a best-effort
     // attempt for future fixtures.
-    if (try_tail(c, snapshot, end, u, [](Cursor& cc, UnitSubclassData& s) {
+    if (try_tail(c, end, u, [](Cursor& cc, UnitSubclassData& s) {
             parse_package_small(cc, s);
         })) {
         return UnitClass::Package;

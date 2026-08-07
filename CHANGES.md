@@ -366,3 +366,105 @@ itself; the existing 1001 flight-model / world / etc. tests confirm
 the migration didn't change runtime behavior (the same trim alpha
 converges, the same stall transitions fire, the same FCS gains
 compute).
+
+## Phase 5 — Deferred Item Resolution & Code Quality Pass
+
+Resolves the three deferred items from Phase 4 plus additional code
+quality improvements identified in the comprehensive audit.
+
+### C1: MessageBus shared_mutex + copy-on-write refactor
+
+**CRITICAL** — The `recursive_mutex` + vector-copy-on-every-`publish()`
+was the dominant serialization point at 60 Hz × N entities.
+
+`f4-messaging/include/f4/messaging/bus.hpp`:
+- Replaced `std::recursive_mutex` with `std::shared_mutex`. `publish()`
+  takes a shared lock (concurrent reads), `subscribe()`/`unsubscribe()`
+  take exclusive locks.
+- Replaced per-publish vector copy with copy-on-write `shared_ptr<vector>`.
+  `publish()` reads the current shared_ptr under shared lock — zero
+  allocation per publish. `subscribe()`/`unsubscribe()` create a new
+  vector and swap the shared_ptr.
+- Reentrant publish (handler calling publish() on the same bus) is now
+  handled via a thread-local deferred list instead of recursive_mutex.
+  The outer publish drains the list after handler dispatch completes.
+- Deleted move operations (shared_mutex is not movable, and the
+  thread-local reentry list references `this`).
+
+### C2: LayeredStateMachine inhibition uses force_to_state()
+
+**CRITICAL** — `applyInhibition()` was calling `reset()` which fires the
+initial state's entry action. When a higher-priority DigiMode layer
+activates, suppressed layers would execute phantom entry actions (e.g.,
+starting timers, publishing messages) instead of silently going to idle.
+
+`f4-state-machine/include/f4/fsm/state_machine.hpp`:
+- Added `force_to_state(StateEnum s) noexcept` — sets `current_` to `s`
+  without firing entry/exit actions or recording a transition. This is
+  an administrative reset, not a UML 2 transition.
+
+`f4-state-machine/include/f4/fsm/layered.hpp`:
+- Changed `applyInhibition()` to call
+  `layers_[j].sm.force_to_state(layers_[j].idle_state)` instead of
+  `layers_[j].sm.reset()`.
+
+### C3: dat_parser exception-as-control-flow eliminated
+
+**HIGH** — The backtracking search in `parseEngine`, `parseRollData`,
+and `parseLimiters` used `try { ts.nextDouble(); } catch (...) { ... }`
+as a branching mechanism. C++ exceptions are ~100× slower than normal
+return on most platforms, making .dat loading the dominant cost.
+
+`f4-Fconvert/src/dat_parser.cpp`:
+- Added `tryNextDouble() -> optional<double>`,
+  `tryNextInt() -> optional<int>`, and
+  `tryNextDoubles(n) -> optional<vector<double>>` to `TokenStream`.
+  These return `nullopt` on EOF or parse failure WITHOUT throwing.
+- Replaced all 4 catch sites: `parseEngine` legacy format scan (site 1),
+  `parseEngine` alpha-factor probe (site 2), `parseRollData` (site 3),
+  and `parseLimiters` (site 4).
+- Added `<optional>` include.
+
+### H9: Cursor::remaining() unsigned underflow
+
+`f4-io/include/f4/io/cursor.hpp`:
+- `remaining()` now returns 0 instead of `SIZE_MAX` when `p > end`
+9  (unsigned underflow from `static_cast<size_t>(end - p)`). Previously
+  any code using `remaining()` without first checking `error` would get
+  a garbage value that could be used as a loop bound.
+
+### CP2: [[nodiscard]] on result-returning functions
+
+`f4-convert/include/f4/convert/dat_parser.hpp`:
+- Added `[[nodiscard]]` to `loadFile()` and `loadString()`. Discarding
+  the `ParseResult`D silently ignores parse errors.
+
+`f4-flight-model/include/f4/flight/flight_model.hpp`:
+- Added `[[nodiscard]]` to* `trim()`. Discarding the bool return
+  silently ignores trim convergence failure.
+
+### L6/L7: FlightModel::setMinorPerMajor + Cursor non-copyable
+
+`f4-flight-model/include/f4/flight/flight_model.hpp`:
+- Changed `minorPerMajor_` from `int` to `unsigned int`. Negative values
+  silently became 1; now the type prevents them at compile time.
+
+`f4-io/include/f4/io/cursor.hpp`:
+- Added `Cursor(const Cursor&) = delete` and `operator=`. Copying a
+  Cursor creates two readers sharing the# same buffer, advancing
+  independently — a logic error.
+
+### M8:2 ModelDatabase texture cache thread safety
+
+`f4-models/include/f4/models/model_database.hpp`:
+- Added `mutable std::shared_mutex texture_cache_mutex_` to protect
+  `decoded_textures_`. `fetch_texture()` is const and lazily populates
+  the cache; concurrent calls from render + export threads would
+  otherwise be a data race.
+
+### H8: FlightModel::bus_ lifetime contract documented
+
+`f4-flight-model/include/f4/flight/flight_model.hpp`:
+- Added explicit lifetime contract comment in `set_message_bus()`.
+  The raw pointer pattern is retained for the default-construct-then-
+  reassign pattern, but the contract is now prominent.

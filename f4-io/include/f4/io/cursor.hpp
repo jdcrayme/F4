@@ -66,6 +66,39 @@ struct Cursor {
 
     Cursor() noexcept = default;
 
+    // L7 FIX: Cursor is non-copyable and non-movable. Copying would create
+    // two cursors sharing the same buffer, both advancing independently —
+    // a logic error in general. Moving is blocked by const members.
+    //
+    // For trial-parse patterns (e.g. subclass dispatch), use save/restore
+    // instead of copying the Cursor. See Position below.
+    Cursor(const Cursor&) = delete;
+    Cursor& operator=(const Cursor&) = delete;
+
+    // ---- Save/Restore position ----------------------------------------
+    //
+    // Allows trial-parse patterns to snapshot the cursor state, attempt
+    // a parse, and either commit (leave cursor advanced) or rollback
+    // (restore to saved position). This is the non-copyable alternative
+    // to "Cursor trial = original; parse(trial); if (fail) discard trial;".
+    //
+    // Usage in a try-parse pattern:
+    //
+    //     auto saved = c.save();
+    //     parse(c, out);              // advances c
+    //     if (!c.error && valid) {
+    //         // commit — c is already advanced
+    //     } else {
+    //         c.restore(saved);       // rollback to pre-parse state
+    //     }
+    struct Position {
+        const uint8_t* p;
+        bool error;
+    };
+
+    [[nodiscard]] Position save() const noexcept { return Position{p, error}; }
+    void restore(const Position& pos) noexcept { p = pos.p; error = pos.error; }
+
     // ---- Bulk reads / skips --------------------------------------------
 
     // Read `n` bytes into `dst`. On OOB (or after a prior error), sets the
@@ -132,8 +165,12 @@ struct Cursor {
 
     // Bytes still unread. Returns 0 when eof() (or when p > end after an
     // OOB — callers should check `error` first).
+    // H9 FIX: Returns 0 instead of SIZE_MAX when p > end (unsigned
+    // underflow). Previously `static_cast<size_t>(end - p)` would wrap
+    // to ~2^64 when p > end after an OOB read, which could be used as
+    // a loop bound causing catastrophic iteration.
     [[nodiscard]] std::size_t remaining() const noexcept {
-        return static_cast<std::size_t>(end - p);
+        return (p <= end) ? static_cast<std::size_t>(end - p) : 0;
     }
 
     // ---- Sticky-error helper ------------------------------------------
