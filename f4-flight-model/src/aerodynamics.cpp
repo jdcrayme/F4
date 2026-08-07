@@ -60,19 +60,20 @@ Aerodynamics::Aerodynamics(const AeroTable* table,
 // All inline arithmetic that needs radians uses to_radians(alpha) so the
 // unit crossing is explicit at each call site.
 // ---------------------------------------------------------------------------
-void Aerodynamics::update(Angle alpha,
-                          Angle beta,
-                          double mach,
-                          double vt_ftps,
-                          double qbar,
-                          double qsom,
-                          double altitude_ft,
-                          double groundZ_ft,
-                          double z_ft,
-                          double vcas_kts,
-                          double pstick,
-                          AeroState& aero) const {
-    (void)altitude_ft;  // ground effect uses AGL = |groundZ - z| instead
+void Aerodynamics::update(const AeroInputs& in, AeroState& aero) const {
+    // Unpack for readability — the struct groups these for type safety
+    // at the call site, but internally the math is identical.
+    const Angle  alpha      = in.alpha;
+    const Angle  beta       = in.beta;
+    const double mach       = in.mach;
+    const double vt_ftps    = in.vt_ftps;
+    const double qbar       = in.qbar;
+    const double qsom       = in.qsom;
+    const double groundZ_ft = in.groundZ_ft;
+    const double z_ft       = in.z_ft;
+    const double vcas_kts   = in.vcas_kts;
+    const double pstick     = in.pstick;
+    // altitude_ft is unused — ground effect uses AGL = |groundZ - z| instead
 
     if (!table_ || !geom_ || !aux_) {
         aero.lift = aero.drag = 0.0;

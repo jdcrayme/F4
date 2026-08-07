@@ -45,13 +45,26 @@ void EquationsOfMotion::update(double dt, const PilotInput& input,
     GearState& g = state.gear;
 
     // Step 1: compute body rates from commanded G and roll rate
-    calcBodyRates(dt, state.qsom, a.cnalpha,
-                  k.cosmu, k.cosgam, k.singam,
-                  k.cosbet, k.cosalp, k.sinalp,
-                  state.loads.nzcgs, state.loads.nycgw, f.pstab,
-                  aux_ ? aux_->pitchMomentum : 1.0,
-                  aux_ ? aux_->pitchElasticity : 1.0,
-                  state);
+    {
+        TrigCache trig;
+        trig.cosmu  = k.cosmu;
+        trig.cosgam = k.cosgam;
+        trig.singam = k.singam;
+        trig.cosbet = k.cosbet;
+        trig.cosalp = k.cosalp;
+        trig.sinalp = k.sinalp;
+
+        LoadFactors loads;
+        loads.nzcgs = state.loads.nzcgs;
+        loads.nycgw = state.loads.nycgw;
+        loads.pstab = f.pstab;
+
+        calcBodyRates(dt, state.qsom, a.cnalpha,
+                      trig, loads,
+                      aux_ ? aux_->pitchMomentum : 1.0,
+                      aux_ ? aux_->pitchElasticity : 1.0,
+                      state);
+    }
 
     // Step 2: integrate quaternion orientation
     calcBodyOrientation(dt, state);
@@ -127,13 +140,12 @@ void EquationsOfMotion::update(double dt, const PilotInput& input,
 // using the turn-rate equation, then filtered through a first-order lag.
 // ---------------------------------------------------------------------------
 void EquationsOfMotion::calcBodyRates(double dt, double qsom, double cnalpha,
-                                       double cosmu, double cosgam, double singam,
-                                       double cosbet, double cosalp, double sinalp,
-                                       double nzcgs, double nycgw, double pstab,
+                                       const TrigCache& trig,
+                                       const LoadFactors& loads,
                                        double pitchMomentum, double pitchElasticity,
                                        AircraftState& state) const {
     (void)qsom; (void)cnalpha;
-    (void)singam; (void)cosbet; (void)cosalp; (void)sinalp;
+    (void)trig.singam; (void)trig.cosbet; (void)trig.cosalp; (void)trig.sinalp;
     (void)pitchMomentum;
 
     KinematicState& k = state.kin;
@@ -156,16 +168,16 @@ void EquationsOfMotion::calcBodyRates(double dt, double qsom, double cnalpha,
     double qptchc;
     if (gearPos < 1.0) {
         // Gear transitioning: use 0.2 factor
-        qptchc = std::atan(nzcgs * GRAVITY / tempVt)
+        qptchc = std::atan(loads.nzcgs * GRAVITY / tempVt)
                - std::atan(0.2 * gearPos * state.qsom / tempVt);
     } else {
         // Gear down: use 0.1 factor
-        qptchc = std::atan(nzcgs * GRAVITY / tempVt)
+        qptchc = std::atan(loads.nzcgs * GRAVITY / tempVt)
                - std::atan(0.1 * gearPos * state.qsom / tempVt);
     }
     // Gravity turn-rate compensation: in banked flight, gravity creates a
     // turn rate that the FCS must cancel to maintain the commanded G.
-    qptchc -= std::atan(cosmu * cosgam * GRAVITY / tempVt);
+    qptchc -= std::atan(trig.cosmu * trig.cosgam * GRAVITY / tempVt);
 
     // Filter the pitch rate command through a first-order lag.
     // Time constant is scaled by pitchElasticity (aircraft structural flexibility).
@@ -175,11 +187,11 @@ void EquationsOfMotion::calcBodyRates(double dt, double qsom, double cnalpha,
     // --- Yaw rate ---
     // r = (nycgw + cosgam * sinmu) * g / V
     // The cosgam*sinmu term is the gravity-induced yaw rate in banked flight.
-    k.r = (nycgw + cosgam * k.sinmu) * GRAVITY / tempVt;
+    k.r = (loads.nycgw + trig.cosgam * k.sinmu) * GRAVITY / tempVt;
 
     // --- Roll rate ---
     // Roll rate comes directly from the FCS roll channel (already filtered).
-    k.p = pstab;
+    k.p = loads.pstab;
 
     // --- Body-rate clamps ---
     // These prevent quaternion tumbling during transients. Without them,

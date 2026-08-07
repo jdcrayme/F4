@@ -27,10 +27,38 @@
 #include "f4/flight/flight_model.hpp"
 
 #include <algorithm>
+#include <cassert>
 #include <cmath>
 #include <stdexcept>
 
 namespace f4::flight {
+
+// ---------------------------------------------------------------------------
+// PilotInput::validate — clamp all inputs to documented ranges
+// ---------------------------------------------------------------------------
+void PilotInput::validate() noexcept {
+    // In debug, assert before clamping so the caller knows they sent bad data.
+    assert(pstick    >= -1.0 && pstick    <= 1.0 && "pstick out of range [-1, +1]");
+    assert(rstick    >= -1.0 && rstick    <= 1.0 && "rstick out of range [-1, +1]");
+    assert(ypedal    >= -1.0 && ypedal    <= 1.0 && "ypedal out of range [-1, +1]");
+    assert(throttle  >=  0.0 && throttle  <= 1.5 && "throttle out of range [0, 1.5]");
+    assert(speedBrake >= -1.0 && speedBrake <= 1.0 && "speedBrake out of range [-1, +1]");
+    assert(gearHandle >= -1.0 && gearHandle <= 1.0 && "gearHandle out of range [-1, +1]");
+    assert(hookHandle >= -1.0 && hookHandle <= 1.0 && "hookHandle out of range [-1, +1]");
+    assert(tefCmd    >=  0.0 && tefCmd    <= 1.0 && "tefCmd out of range [0, 1]");
+    assert(lefCmd    >=  0.0 && lefCmd    <= 1.0 && "lefCmd out of range [0, 1]");
+
+    // Always clamp in release so the flight model never sees out-of-range input.
+    pstick    = std::clamp(pstick,    -1.0, 1.0);
+    rstick    = std::clamp(rstick,    -1.0, 1.0);
+    ypedal    = std::clamp(ypedal,    -1.0, 1.0);
+    throttle  = std::clamp(throttle,   0.0, 1.5);
+    speedBrake = std::clamp(speedBrake, -1.0, 1.0);
+    gearHandle = std::clamp(gearHandle, -1.0, 1.0);
+    hookHandle = std::clamp(hookHandle, -1.0, 1.0);
+    tefCmd    = std::clamp(tefCmd,     0.0, 1.0);
+    lefCmd    = std::clamp(lefCmd,     0.0, 1.0);
+}
 
 using f4::math::Vec3d;
 using f4::math::Quatd;
@@ -150,12 +178,19 @@ void FlightModel::initTrimAndAtmosphere(double initialAltitude_ft) {
     // Find the alpha that produces CL = W / (q*S) = g / qsom
     state_.aero.alpha = zero_angle();
     state_.aero.beta = zero_angle();
-    aero_.update(state_.aero.alpha, state_.aero.beta,
-                 state_.mach, k.vt, state_.qbar, state_.qsom,
-                 initialAltitude_ft, state_.gear.groundZ_ft, k.z,
-                 state_.vcas, 0.0, state_.aero);
-
-    // state_.gear.inAir was set by initGearAndEngine() before us.
+    AeroInputs aeroIn;
+    aeroIn.alpha      = state_.aero.alpha;
+    aeroIn.beta       = state_.aero.beta;
+    aeroIn.mach       = state_.mach;
+    aeroIn.vt_ftps    = k.vt;
+    aeroIn.qbar       = state_.qbar;
+    aeroIn.qsom       = state_.qsom;
+    aeroIn.altitude_ft = initialAltitude_ft;
+    aeroIn.groundZ_ft = state_.gear.groundZ_ft;
+    aeroIn.z_ft       = k.z;
+    aeroIn.vcas_kts   = state_.vcas;
+    aeroIn.pstick     = 0.0;
+    aero_.update(aeroIn, state_.aero);
     if (state_.gear.inAir && state_.qsom > QSOM_FLOOR) {
         // Target CL for 1-G level flight
         const double targetCl = GRAVITY / state_.qsom;
@@ -214,10 +249,9 @@ void FlightModel::initTrimAndAtmosphere(double initialAltitude_ft) {
     k.sigma = k.psi;  k.sinsig = k.sinpsi;  k.cossig = k.cospsi;
 
     // Recompute aero forces at the trim alpha
-    aero_.update(state_.aero.alpha, state_.aero.beta,
-                 state_.mach, k.vt, state_.qbar, state_.qsom,
-                 initialAltitude_ft, state_.gear.groundZ_ft, k.z,
-                 state_.vcas, 0.0, state_.aero);
+    aeroIn.alpha = state_.aero.alpha;
+    aeroIn.beta  = state_.aero.beta;
+    aero_.update(aeroIn, state_.aero);
 
     // Compute load factors
     accelerometers();
@@ -349,10 +383,19 @@ void FlightModel::minorStep(double dt, const PilotInput& input) {
 
     // 3. Aerodynamics (recompute forces at the new alpha/beta)
     const double alt_ft = -k.z;
-    aero_.update(a.alpha, a.beta,
-                 state_.mach, k.vt, state_.qbar, state_.qsom,
-                 alt_ft, state_.gear.groundZ_ft, k.z,
-                 state_.vcas, input.pstick, a);
+    AeroInputs aeroIn;
+    aeroIn.alpha      = a.alpha;
+    aeroIn.beta       = a.beta;
+    aeroIn.mach       = state_.mach;
+    aeroIn.vt_ftps    = k.vt;
+    aeroIn.qbar       = state_.qbar;
+    aeroIn.qsom       = state_.qsom;
+    aeroIn.altitude_ft = alt_ft;
+    aeroIn.groundZ_ft = state_.gear.groundZ_ft;
+    aeroIn.z_ft       = k.z;
+    aeroIn.vcas_kts   = state_.vcas;
+    aeroIn.pstick     = input.pstick;
+    aero_.update(aeroIn, a);
 
     // 4. Engine
     engine_.update(dt, alt_ft, state_.mach, k.vt,
@@ -400,16 +443,21 @@ void FlightModel::minorStep(double dt, const PilotInput& input) {
 // ---------------------------------------------------------------------------
 void FlightModel::update(double dt, const PilotInput& input,
                           double groundZ_ft, const Vec3d& groundNormal) {
+    // Validate pilot input — clamp to documented ranges, assert in debug.
+    // This is the hardened boundary: AI/scripting/network input is untrusted.
+    PilotInput safeInput = input;
+    safeInput.validate();
+
     // Store ground state
     state_.gear.groundZ_ft = groundZ_ft;
     state_.gear.groundNormal = groundNormal;
 
     // Cache pilot input (needed by updateGear for brake state)
-    lastInput_ = input;
+    lastInput_ = safeInput;
 
     // Map speed brake handle to dbrake position
     // speedBrake: -1 (retracted) .. +1 (extended)  ->  dbrake: 0..1
-    state_.aero.dbrake = std::clamp((input.speedBrake + 1.0) * 0.5, 0.0, 1.0);
+    state_.aero.dbrake = std::clamp((safeInput.speedBrake + 1.0) * 0.5, 0.0, 1.0);
 
     // Actuate flaps (TEF/LEF) toward commanded positions
     auto actuate = [](double& pos, double cmd, double rate, double step_dt) {
@@ -421,8 +469,8 @@ void FlightModel::update(double dt, const PilotInput& input,
             pos += (diff > 0.0 ? step : -step);
         }
     };
-    actuate(state_.aero.tefPos, input.tefCmd, TEF_RATE, dt);
-    actuate(state_.aero.lefPos, input.lefCmd, LEF_RATE, dt);
+    actuate(state_.aero.tefPos, safeInput.tefCmd, TEF_RATE, dt);
+    actuate(state_.aero.lefPos, safeInput.lefCmd, LEF_RATE, dt);
 
     // Update gear (once per major frame)
     updateGear(dt);
@@ -430,7 +478,7 @@ void FlightModel::update(double dt, const PilotInput& input,
     // Sub-step
     const double minorDt = dt / minorPerMajor_;
     for (int i = 0; i < minorPerMajor_; ++i) {
-        minorStep(minorDt, input);
+        minorStep(minorDt, safeInput);
     }
 }
 
@@ -454,10 +502,19 @@ bool FlightModel::trim() {
     for (int iter = 0; iter < kMaxIter; ++iter) {
         updateAtmosphere();
 
-        aero_.update(state_.aero.alpha, state_.aero.beta,
-                     state_.mach, state_.kin.vt, state_.qbar, state_.qsom,
-                     -state_.kin.z, state_.gear.groundZ_ft, state_.kin.z,
-                     state_.vcas, 0.0, state_.aero);
+        AeroInputs aeroIn;
+        aeroIn.alpha      = state_.aero.alpha;
+        aeroIn.beta       = state_.aero.beta;
+        aeroIn.mach       = state_.mach;
+        aeroIn.vt_ftps    = state_.kin.vt;
+        aeroIn.qbar       = state_.qbar;
+        aeroIn.qsom       = state_.qsom;
+        aeroIn.altitude_ft = -state_.kin.z;
+        aeroIn.groundZ_ft = state_.gear.groundZ_ft;
+        aeroIn.z_ft       = state_.kin.z;
+        aeroIn.vcas_kts   = state_.vcas;
+        aeroIn.pstick     = 0.0;
+        aero_.update(aeroIn, state_.aero);
 
         // Large dt so the engine spool catches up quickly
         engine_.update(10.0, -state_.kin.z, state_.mach, state_.kin.vt,

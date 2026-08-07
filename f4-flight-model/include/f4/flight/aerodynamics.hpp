@@ -35,6 +35,26 @@ namespace f4::flight {
 /// separate moment coefficient tables. This matches the original Falcon 4
 /// approach, which uses a command-augmentation system rather than a
 /// full 6-DOF moment model.
+/// Input parameters for Aerodynamics::update().
+///
+/// Groups the 11 input values that were previously passed as positional
+/// doubles — a transposition (e.g. groundZ_ft where altitude_ft belongs)
+/// compiled cleanly and produced silently wrong forces. The in/out
+/// AeroState& is kept separate to make the read/write boundary explicit.
+struct AeroInputs {
+    Angle  alpha{zero_angle()};     // angle of attack
+    Angle  beta{zero_angle()};      // sideslip angle
+    double mach{0.0};              // Mach number
+    double vt_ftps{0.0};          // true airspeed (ft/s)
+    double qbar{0.0};             // dynamic pressure (lb/ft^2)
+    double qsom{0.0};             // normalized dynamic pressure q*S/m
+    double altitude_ft{0.0};      // altitude above sea level (ft)
+    double groundZ_ft{0.0};       // terrain altitude at aircraft position (ft)
+    double z_ft{0.0};             // aircraft Z position (ft, NED: negative = up)
+    double vcas_kts{0.0};         // calibrated airspeed (knots)
+    double pstick{0.0};           // pitch stick input (-1..+1, for side-force shaping)
+};
+
 class Aerodynamics {
 public:
     Aerodynamics() = default;
@@ -48,37 +68,9 @@ public:
 
     /// Recompute aerodynamic forces for one time step.
     ///
-    /// Reads the current flight state (alpha, beta, mach, etc.) and writes
-    /// the computed forces and coefficients into `aero`.
-    ///
-    ///   alpha       : angle of attack (strong Angle type — degrees or
-    ///                 radians, picked explicitly via to_degrees/to_radians
-    ///                 at the call site; the F-16 aero tables are degree-
-    ///                 indexed and the implementation extracts degrees once)
-    ///   beta        : sideslip angle (Angle)
-    ///   mach        : Mach number
-    ///   vt_ftps     : true airspeed (ft/s)
-    ///   qbar        : dynamic pressure (lb/ft^2)
-    ///   qsom        : normalized dynamic pressure q*S/m (ft/s^2 per unit CL)
-    ///   altitude_ft : altitude above sea level (ft)
-    ///   groundZ_ft  : terrain altitude at aircraft position (ft)
-    ///   z_ft        : aircraft Z position (ft, NED: negative = up)
-    ///   vcas_kts    : calibrated airspeed (knots)
-    ///   pstick      : pitch stick input (-1..+1, for side-force shaping)
-    ///   aero        : [in,out] aero state (reads tefPos/lefPos/dbrake/gearPos,
-    ///                 writes cl/cd/cy/forces/stall)
-    void update(Angle alpha,
-                Angle beta,
-                double mach,
-                double vt_ftps,
-                double qbar,
-                double qsom,
-                double altitude_ft,
-                double groundZ_ft,
-                double z_ft,
-                double vcas_kts,
-                double pstick,
-                AeroState& aero) const;
+    /// Reads the current flight state from `in` and writes the computed
+    /// forces and coefficients into `aero` (in/out).
+    void update(const AeroInputs& in, AeroState& aero) const;
 
 private:
     const data::AeroTable*         table_{nullptr};

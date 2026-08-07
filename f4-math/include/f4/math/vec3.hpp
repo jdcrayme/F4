@@ -17,6 +17,7 @@
 
 #pragma once
 
+#include <cassert>
 #include <cmath>
 #include <concepts>
 #include <type_traits>
@@ -83,8 +84,17 @@ struct Vec3 {
         return std::sqrt(length_squared());
     }
 
+    /// Return the unit vector in the direction of *this.
+    ///
+    /// In debug builds, zero-length vectors trigger an assertion failure —
+    /// they almost always indicate uninitialized state or a degenerate
+    /// cross product, and silently returning an arbitrary direction hides
+    /// the bug. In release, the zero-length check remains as a safety
+    /// fallback returning *this (the zero vector), but this should never
+    /// be reached in a correct program.
     [[nodiscard]] Vec3 normalized() const noexcept {
         T len = length();
+        assert(len >= T{1e-12} && "Vec3::normalized() called on zero-length vector");
         if (len < T{1e-12}) return *this;
         return *this / len;
     }

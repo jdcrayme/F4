@@ -77,6 +77,28 @@ AeroState makeAero() {
     return a;
 }
 
+/// Helper to build AeroInputs from positional parameters (mirrors the old API).
+AeroInputs makeAeroIn(Angle alpha, Angle beta,
+                      double mach, double vt_ftps,
+                      double qbar, double qsom,
+                      double altitude_ft, double groundZ_ft,
+                      double z_ft, double vcas_kts,
+                      double pstick) {
+    AeroInputs in;
+    in.alpha      = alpha;
+    in.beta       = beta;
+    in.mach       = mach;
+    in.vt_ftps    = vt_ftps;
+    in.qbar       = qbar;
+    in.qsom       = qsom;
+    in.altitude_ft = altitude_ft;
+    in.groundZ_ft = groundZ_ft;
+    in.z_ft       = z_ft;
+    in.vcas_kts   = vcas_kts;
+    in.pstick     = pstick;
+    return in;
+}
+
 }  // namespace
 
 // ============================================================================
@@ -87,9 +109,9 @@ TEST(Aerodynamics, ClAtGridPointMach0Alpha0) {
     SyntheticAero sa;
     Aerodynamics a(&sa.table, &sa.geom, &sa.aux);
     AeroState s = makeAero();
-    a.update(angle_from_degrees(0.0), angle_from_degrees(0.0), /*mach=*/0.0, /*vt=*/100.0,
+    a.update(makeAeroIn(angle_from_degrees(0.0), angle_from_degrees(0.0), /*mach=*/0.0, /*vt=*/100.0,
              /*qbar=*/1.0, /*qsom=*/1.0, /*alt=*/1000.0, /*groundZ=*/0.0,
-             /*z=*/-1000.0, /*vcas=*/100.0, /*pstick=*/0.0, s);
+             /*z=*/-1000.0, /*vcas=*/100.0, /*pstick=*/0.0), s);
     EXPECT_NEAR(s.cl, 0.0, 1e-9);
 }
 
@@ -97,7 +119,7 @@ TEST(Aerodynamics, ClAtGridPointMach0Alpha10) {
     SyntheticAero sa;
     Aerodynamics a(&sa.table, &sa.geom, &sa.aux);
     AeroState s = makeAero();
-    a.update(angle_from_degrees(10.0), angle_from_degrees(0.0), 0.0, 100.0, 1.0, 1.0, 1000.0, 0.0, -1000.0, 100.0, 0.0, s);
+    a.update(makeAeroIn(angle_from_degrees(10.0), angle_from_degrees(0.0), 0.0, 100.0, 1.0, 1.0, 1000.0, 0.0, -1000.0, 100.0, 0.0), s);
     EXPECT_NEAR(s.cl, 1.0, 1e-9);
 }
 
@@ -108,7 +130,7 @@ TEST(Aerodynamics, ClAtMidpointMachHalfAlphaHalf) {
     SyntheticAero sa;
     Aerodynamics a(&sa.table, &sa.geom, &sa.aux);
     AeroState s = makeAero();
-    a.update(angle_from_degrees(5.0), angle_from_degrees(0.0), 0.5, 100.0, 1.0, 1.0, 1000.0, 0.0, -1000.0, 100.0, 0.0, s);
+    a.update(makeAeroIn(angle_from_degrees(5.0), angle_from_degrees(0.0), 0.5, 100.0, 1.0, 1.0, 1000.0, 0.0, -1000.0, 100.0, 0.0), s);
     EXPECT_NEAR(s.cl, 0.55, 1e-9);
 }
 
@@ -117,7 +139,7 @@ TEST(Aerodynamics, ClScalesWithClFactor) {
     sa.table.clFactor = 2.0;
     Aerodynamics a(&sa.table, &sa.geom, &sa.aux);
     AeroState s = makeAero();
-    a.update(angle_from_degrees(10.0), angle_from_degrees(0.0), 0.0, 100.0, 1.0, 1.0, 1000.0, 0.0, -1000.0, 100.0, 0.0, s);
+    a.update(makeAeroIn(angle_from_degrees(10.0), angle_from_degrees(0.0), 0.0, 100.0, 1.0, 1.0, 1000.0, 0.0, -1000.0, 100.0, 0.0), s);
     EXPECT_NEAR(s.cl, 2.0, 1e-9);  // 1.0 * 2.0
 }
 
@@ -133,12 +155,12 @@ TEST(Aerodynamics, GroundEffectBoostsClNearGround) {
 
     // Away from ground (AGL = 1000 ft)
     AeroState s_away = makeAero();
-    a.update(angle_from_degrees(10.0), angle_from_degrees(0.0), 0.0, 100.0, 1.0, 1.0, 1000.0, 0.0, -1100.0, 100.0, 0.0, s_away);
+    a.update(makeAeroIn(angle_from_degrees(10.0), angle_from_degrees(0.0), 0.0, 100.0, 1.0, 1.0, 1000.0, 0.0, -1100.0, 100.0, 0.0), s_away);
     const double cl_away = s_away.cl;
 
     // Near ground (AGL = 3 ft, within 0.2*span = 6 ft)
     AeroState s_near = makeAero();
-    a.update(angle_from_degrees(10.0), angle_from_degrees(0.0), 0.0, 100.0, 1.0, 1.0, 100.0, 0.0, -3.0, 100.0, 0.0, s_near);
+    a.update(makeAeroIn(angle_from_degrees(10.0), angle_from_degrees(0.0), 0.0, 100.0, 1.0, 1.0, 100.0, 0.0, -3.0, 100.0, 0.0), s_near);
     const double cl_near = s_near.cl;
 
     EXPECT_NEAR(cl_near / cl_away, 1.13, 1e-3)
@@ -151,13 +173,13 @@ TEST(Aerodynamics, GroundEffectFadesInTransitionZone) {
     Aerodynamics a(&sa.table, &sa.geom, &sa.aux);
 
     AeroState s_away = makeAero();
-    a.update(angle_from_degrees(10.0), angle_from_degrees(0.0), 0.0, 100.0, 1.0, 1.0, 1000.0, 0.0, -1100.0, 100.0, 0.0, s_away);
+    a.update(makeAeroIn(angle_from_degrees(10.0), angle_from_degrees(0.0), 0.0, 100.0, 1.0, 1.0, 1000.0, 0.0, -1100.0, 100.0, 0.0), s_away);
     const double cl_baseline = s_away.cl;
 
     // AGL = 18 ft (midpoint of transition zone: 6..30)
     // Expected factor = 1.13 - ((18 - 6) / (30 - 6)) * 0.13 = 1.13 - 0.5*0.13 = 1.065
     AeroState s_mid = makeAero();
-    a.update(angle_from_degrees(10.0), angle_from_degrees(0.0), 0.0, 100.0, 1.0, 1.0, 100.0, 0.0, -18.0, 100.0, 0.0, s_mid);
+    a.update(makeAeroIn(angle_from_degrees(10.0), angle_from_degrees(0.0), 0.0, 100.0, 1.0, 1.0, 100.0, 0.0, -18.0, 100.0, 0.0), s_mid);
     EXPECT_NEAR(s_mid.cl / cl_baseline, 1.065, 1e-3);
 }
 
@@ -166,11 +188,11 @@ TEST(Aerodynamics, GroundEffectOffBeyondOneSpan) {
     Aerodynamics a(&sa.table, &sa.geom, &sa.aux);
 
     AeroState s_away = makeAero();
-    a.update(angle_from_degrees(10.0), angle_from_degrees(0.0), 0.0, 100.0, 1.0, 1.0, 1000.0, 0.0, -1100.0, 100.0, 0.0, s_away);
+    a.update(makeAeroIn(angle_from_degrees(10.0), angle_from_degrees(0.0), 0.0, 100.0, 1.0, 1.0, 1000.0, 0.0, -1100.0, 100.0, 0.0), s_away);
 
     // AGL = 35 ft > span (30 ft) → no ground effect.
     AeroState s_beyond = makeAero();
-    a.update(angle_from_degrees(10.0), angle_from_degrees(0.0), 0.0, 100.0, 1.0, 1.0, 100.0, 0.0, -35.0, 100.0, 0.0, s_beyond);
+    a.update(makeAeroIn(angle_from_degrees(10.0), angle_from_degrees(0.0), 0.0, 100.0, 1.0, 1.0, 100.0, 0.0, -35.0, 100.0, 0.0), s_beyond);
     EXPECT_NEAR(s_beyond.cl, s_away.cl, 1e-9);
 }
 
@@ -186,11 +208,11 @@ TEST(Aerodynamics, TefBoostsCl) {
 
     AeroState s_no_tef = makeAero();
     s_no_tef.tefPos = 0.0;
-    a.update(angle_from_degrees(10.0), angle_from_degrees(0.0), 0.0, 100.0, 1.0, 1.0, 1000.0, 0.0, -1100.0, 100.0, 0.0, s_no_tef);
+    a.update(makeAeroIn(angle_from_degrees(10.0), angle_from_degrees(0.0), 0.0, 100.0, 1.0, 1.0, 1000.0, 0.0, -1100.0, 100.0, 0.0), s_no_tef);
 
     AeroState s_tef = makeAero();
     s_tef.tefPos = 1.0;
-    a.update(angle_from_degrees(10.0), angle_from_degrees(0.0), 0.0, 100.0, 1.0, 1.0, 1000.0, 0.0, -1100.0, 100.0, 0.0, s_tef);
+    a.update(makeAeroIn(angle_from_degrees(10.0), angle_from_degrees(0.0), 0.0, 100.0, 1.0, 1.0, 1000.0, 0.0, -1100.0, 100.0, 0.0), s_tef);
 
     EXPECT_NEAR(s_tef.cl / s_no_tef.cl, 1.05, 1e-3);
 }
@@ -205,11 +227,11 @@ TEST(Aerodynamics, LefChangesCd) {
     Aerodynamics a(&sa.table, &sa.geom, &sa.aux);
 
     AeroState s_no_lef = makeAero();
-    a.update(angle_from_degrees(10.0), angle_from_degrees(0.0), 0.0, 100.0, 1.0, 1.0, 1000.0, 0.0, -1100.0, 100.0, 0.0, s_no_lef);
+    a.update(makeAeroIn(angle_from_degrees(10.0), angle_from_degrees(0.0), 0.0, 100.0, 1.0, 1.0, 1000.0, 0.0, -1100.0, 100.0, 0.0), s_no_lef);
 
     AeroState s_lef = makeAero();
     s_lef.lefPos = 1.0;
-    a.update(angle_from_degrees(10.0), angle_from_degrees(0.0), 0.0, 100.0, 1.0, 1.0, 1000.0, 0.0, -1100.0, 100.0, 0.0, s_lef);
+    a.update(makeAeroIn(angle_from_degrees(10.0), angle_from_degrees(0.0), 0.0, 100.0, 1.0, 1.0, 1000.0, 0.0, -1100.0, 100.0, 0.0), s_lef);
 
     EXPECT_NE(s_lef.cd, s_no_lef.cd)
         << "LEF deployment should change CD (via alpha shift and/or CDlefFactor)";
@@ -226,11 +248,11 @@ TEST(Aerodynamics, SpeedBrakeAddsDrag) {
     Aerodynamics a(&sa.table, &sa.geom, &sa.aux);
 
     AeroState s_no_brake = makeAero();
-    a.update(angle_from_degrees(10.0), angle_from_degrees(0.0), 0.0, 100.0, 1.0, 1.0, 1000.0, 0.0, -1100.0, 100.0, 0.0, s_no_brake);
+    a.update(makeAeroIn(angle_from_degrees(10.0), angle_from_degrees(0.0), 0.0, 100.0, 1.0, 1.0, 1000.0, 0.0, -1100.0, 100.0, 0.0), s_no_brake);
 
     AeroState s_brake = makeAero();
     s_brake.dbrake = 1.0;
-    a.update(angle_from_degrees(10.0), angle_from_degrees(0.0), 0.0, 100.0, 1.0, 1.0, 1000.0, 0.0, -1100.0, 100.0, 0.0, s_brake);
+    a.update(makeAeroIn(angle_from_degrees(10.0), angle_from_degrees(0.0), 0.0, 100.0, 1.0, 1.0, 1000.0, 0.0, -1100.0, 100.0, 0.0), s_brake);
 
     EXPECT_NEAR(s_brake.cd - s_no_brake.cd, 0.08, 1e-9);
 }
@@ -243,11 +265,11 @@ TEST(Aerodynamics, GearAddsDrag) {
 
     AeroState s_gear_up = makeAero();
     s_gear_up.gearPos = 0.0;
-    a.update(angle_from_degrees(10.0), angle_from_degrees(0.0), 0.0, 100.0, 1.0, 1.0, 1000.0, 0.0, -1100.0, 100.0, 0.0, s_gear_up);
+    a.update(makeAeroIn(angle_from_degrees(10.0), angle_from_degrees(0.0), 0.0, 100.0, 1.0, 1.0, 1000.0, 0.0, -1100.0, 100.0, 0.0), s_gear_up);
 
     AeroState s_gear_down = makeAero();
     s_gear_down.gearPos = 1.0;
-    a.update(angle_from_degrees(10.0), angle_from_degrees(0.0), 0.0, 100.0, 1.0, 1.0, 1000.0, 0.0, -1100.0, 100.0, 0.0, s_gear_down);
+    a.update(makeAeroIn(angle_from_degrees(10.0), angle_from_degrees(0.0), 0.0, 100.0, 1.0, 1.0, 1000.0, 0.0, -1100.0, 100.0, 0.0), s_gear_down);
 
     EXPECT_NEAR(s_gear_down.cd - s_gear_up.cd, 0.06, 1e-9);
 }
@@ -258,11 +280,11 @@ TEST(Aerodynamics, StoresDragAddedToCd) {
 
     AeroState s = makeAero();
     s.cdStores = 0.15;
-    a.update(angle_from_degrees(10.0), angle_from_degrees(0.0), 0.0, 100.0, 1.0, 1.0, 1000.0, 0.0, -1100.0, 100.0, 0.0, s);
+    a.update(makeAeroIn(angle_from_degrees(10.0), angle_from_degrees(0.0), 0.0, 100.0, 1.0, 1.0, 1000.0, 0.0, -1100.0, 100.0, 0.0), s);
 
     AeroState s_no_stores = makeAero();
     s_no_stores.cdStores = 0.0;
-    a.update(angle_from_degrees(10.0), angle_from_degrees(0.0), 0.0, 100.0, 1.0, 1.0, 1000.0, 0.0, -1100.0, 100.0, 0.0, s_no_stores);
+    a.update(makeAeroIn(angle_from_degrees(10.0), angle_from_degrees(0.0), 0.0, 100.0, 1.0, 1.0, 1000.0, 0.0, -1100.0, 100.0, 0.0), s_no_stores);
 
     EXPECT_NEAR(s.cd - s_no_stores.cd, 0.15, 1e-9);
 }
@@ -275,11 +297,11 @@ TEST(Aerodynamics, DragChuteAddsDragWhenDeployed) {
 
     AeroState s_no_chute = makeAero();
     s_no_chute.dragChutePos = 0.0;
-    a.update(angle_from_degrees(10.0), angle_from_degrees(0.0), 0.0, 100.0, 1.0, 1.0, 1000.0, 0.0, -1100.0, 100.0, 0.0, s_no_chute);
+    a.update(makeAeroIn(angle_from_degrees(10.0), angle_from_degrees(0.0), 0.0, 100.0, 1.0, 1.0, 1000.0, 0.0, -1100.0, 100.0, 0.0), s_no_chute);
 
     AeroState s_chute = makeAero();
     s_chute.dragChutePos = 1.0;
-    a.update(angle_from_degrees(10.0), angle_from_degrees(0.0), 0.0, 100.0, 1.0, 1.0, 1000.0, 0.0, -1100.0, 100.0, 0.0, s_chute);
+    a.update(makeAeroIn(angle_from_degrees(10.0), angle_from_degrees(0.0), 0.0, 100.0, 1.0, 1.0, 1000.0, 0.0, -1100.0, 100.0, 0.0), s_chute);
 
     EXPECT_NEAR(s_chute.cd - s_no_chute.cd, 0.3, 1e-9);
 }
@@ -291,11 +313,11 @@ TEST(Aerodynamics, DragChuteDoesNotDeployBelowHalfThreshold) {
 
     AeroState s = makeAero();
     s.dragChutePos = 0.4;  // below 0.5 threshold
-    a.update(angle_from_degrees(10.0), angle_from_degrees(0.0), 0.0, 100.0, 1.0, 1.0, 1000.0, 0.0, -1100.0, 100.0, 0.0, s);
+    a.update(makeAeroIn(angle_from_degrees(10.0), angle_from_degrees(0.0), 0.0, 100.0, 1.0, 1.0, 1000.0, 0.0, -1100.0, 100.0, 0.0), s);
 
     AeroState s_zero = makeAero();
     s_zero.dragChutePos = 0.0;
-    a.update(angle_from_degrees(10.0), angle_from_degrees(0.0), 0.0, 100.0, 1.0, 1.0, 1000.0, 0.0, -1100.0, 100.0, 0.0, s_zero);
+    a.update(makeAeroIn(angle_from_degrees(10.0), angle_from_degrees(0.0), 0.0, 100.0, 1.0, 1.0, 1000.0, 0.0, -1100.0, 100.0, 0.0), s_zero);
 
     EXPECT_NEAR(s.cd, s_zero.cd, 1e-9)
         << "drag chute below 0.5 should not add drag";
@@ -312,7 +334,7 @@ TEST(Aerodynamics, FlatSpinZeroesLift) {
 
     AeroState s = makeAero();
     s.stallState = StallState::FlatSpin;
-    a.update(angle_from_degrees(10.0), angle_from_degrees(0.0), 0.0, 100.0, 1.0, 10.0, 1000.0, 0.0, -1100.0, 100.0, 0.0, s);
+    a.update(makeAeroIn(angle_from_degrees(10.0), angle_from_degrees(0.0), 0.0, 100.0, 1.0, 10.0, 1000.0, 0.0, -1100.0, 100.0, 0.0), s);
     EXPECT_DOUBLE_EQ(s.lift, 0.0);
 }
 
@@ -322,7 +344,7 @@ TEST(Aerodynamics, ZeroAirspeedZeroesLift) {
     Aerodynamics a(&sa.table, &sa.geom, &sa.aux);
 
     AeroState s = makeAero();
-    a.update(angle_from_degrees(10.0), angle_from_degrees(0.0), 0.0, /*vt=*/0.0, 1.0, 1.0, 1000.0, 0.0, -1100.0, 100.0, 0.0, s);
+    a.update(makeAeroIn(angle_from_degrees(10.0), angle_from_degrees(0.0), 0.0, /*vt=*/0.0, 1.0, 1.0, 1000.0, 0.0, -1100.0, 100.0, 0.0), s);
     EXPECT_DOUBLE_EQ(s.lift, 0.0);
 }
 
@@ -331,7 +353,7 @@ TEST(Aerodynamics, NormalFlightLiftIsClTimesQsom) {
     Aerodynamics a(&sa.table, &sa.geom, &sa.aux);
 
     AeroState s = makeAero();
-    a.update(angle_from_degrees(10.0), angle_from_degrees(0.0), 0.0, 100.0, 1.0, /*qsom=*/5.0, 1000.0, 0.0, -1100.0, 100.0, 0.0, s);
+    a.update(makeAeroIn(angle_from_degrees(10.0), angle_from_degrees(0.0), 0.0, 100.0, 1.0, /*qsom=*/5.0, 1000.0, 0.0, -1100.0, 100.0, 0.0), s);
     // lift = cl * qsom = 1.0 * 5.0 = 5.0
     EXPECT_NEAR(s.lift, s.cl * 5.0, 1e-9);
 }
@@ -344,7 +366,7 @@ TEST(Aerodynamics, StallDetectionSetsStalledFlag) {
 
     AeroState s = makeAero();
     // alpha = 20 > criticalAOA = 15 → stalled
-    a.update(angle_from_degrees(20.0), angle_from_degrees(0.0), 0.0, 100.0, 1.0, 5.0, 1000.0, 0.0, -1100.0, 100.0, 0.0, s);
+    a.update(makeAeroIn(angle_from_degrees(20.0), angle_from_degrees(0.0), 0.0, 100.0, 1.0, 5.0, 1000.0, 0.0, -1100.0, 100.0, 0.0), s);
     EXPECT_TRUE(s.stalled);
 }
 
@@ -355,7 +377,7 @@ TEST(Aerodynamics, NoStallWhenCriticalAoaIsZero) {
     Aerodynamics a(&sa.table, &sa.geom, &sa.aux);
 
     AeroState s = makeAero();
-    a.update(angle_from_degrees(30.0), angle_from_degrees(0.0), 0.0, 100.0, 1.0, 5.0, 1000.0, 0.0, -1100.0, 100.0, 0.0, s);
+    a.update(makeAeroIn(angle_from_degrees(30.0), angle_from_degrees(0.0), 0.0, 100.0, 1.0, 5.0, 1000.0, 0.0, -1100.0, 100.0, 0.0), s);
     EXPECT_FALSE(s.stalled);
     EXPECT_DOUBLE_EQ(s.stallSpeed, 0.0);
 }
@@ -369,7 +391,7 @@ TEST(Aerodynamics, StabilityAxesLiftIsNegativeZ) {
     SyntheticAero sa;
     Aerodynamics a(&sa.table, &sa.geom, &sa.aux);
     AeroState s = makeAero();
-    a.update(angle_from_degrees(10.0), angle_from_degrees(0.0), 0.0, 100.0, 1.0, 5.0, 1000.0, 0.0, -1100.0, 100.0, 0.0, s);
+    a.update(makeAeroIn(angle_from_degrees(10.0), angle_from_degrees(0.0), 0.0, 100.0, 1.0, 5.0, 1000.0, 0.0, -1100.0, 100.0, 0.0), s);
     EXPECT_NEAR(s.zsaero, -s.lift, 1e-9);
 }
 
@@ -378,7 +400,7 @@ TEST(Aerodynamics, StabilityAxesDragIsNegativeX) {
     SyntheticAero sa;
     Aerodynamics a(&sa.table, &sa.geom, &sa.aux);
     AeroState s = makeAero();
-    a.update(angle_from_degrees(10.0), angle_from_degrees(0.0), 0.0, 100.0, 1.0, 5.0, 1000.0, 0.0, -1100.0, 100.0, 0.0, s);
+    a.update(makeAeroIn(angle_from_degrees(10.0), angle_from_degrees(0.0), 0.0, 100.0, 1.0, 5.0, 1000.0, 0.0, -1100.0, 100.0, 0.0), s);
     EXPECT_NEAR(s.xsaero, -s.drag, 1e-9);
 }
 
@@ -387,7 +409,7 @@ TEST(Aerodynamics, BodyAxesCombineLiftAndDragAtZeroAlpha) {
     SyntheticAero sa;
     Aerodynamics a(&sa.table, &sa.geom, &sa.aux);
     AeroState s = makeAero();
-    a.update(angle_from_degrees(0.0), angle_from_degrees(0.0), 0.0, 100.0, 1.0, 5.0, 1000.0, 0.0, -1100.0, 100.0, 0.0, s);
+    a.update(makeAeroIn(angle_from_degrees(0.0), angle_from_degrees(0.0), 0.0, 100.0, 1.0, 5.0, 1000.0, 0.0, -1100.0, 100.0, 0.0), s);
     EXPECT_NEAR(s.xaero, -s.drag, 1e-9);
     EXPECT_NEAR(s.zaero, -s.lift, 1e-9);
 }
@@ -399,7 +421,7 @@ TEST(Aerodynamics, BetaRotatesWindAxes) {
     sa.table.cy = { 0.1, 0.1, 0.1, 0.1 };
     Aerodynamics a(&sa.table, &sa.geom, &sa.aux);
     AeroState s = makeAero();
-    a.update(angle_from_degrees(5.0), angle_from_degrees(10.0), 0.0, 100.0, 1.0, 5.0, 1000.0, 0.0, -1100.0, 100.0, 0.0, s);
+    a.update(makeAeroIn(angle_from_degrees(5.0), angle_from_degrees(10.0), 0.0, 100.0, 1.0, 5.0, 1000.0, 0.0, -1100.0, 100.0, 0.0), s);
 
     // With nonzero beta and nonzero yaero, the wind-axis rotation should
     // produce different values from the stability-axis values.

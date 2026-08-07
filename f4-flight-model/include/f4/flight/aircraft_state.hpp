@@ -74,6 +74,15 @@ struct PilotInput {
     bool parkingBrake{false};
     bool noseSteerOn{true};
     bool refueling{false};
+
+    /// Validate and clamp all inputs to their documented ranges.
+    ///
+    /// This is the boundary between external input (AI, scripting, network)
+    /// and the flight model — the most hardened interface in the system.
+    /// Call this before passing PilotInput to FlightModel::update().
+    /// Out-of-range inputs are clamped; in debug builds, out-of-range
+    /// values also trigger an assertion failure.
+    void validate() noexcept;
 };
 
 // ---------------------------------------------------------------------------

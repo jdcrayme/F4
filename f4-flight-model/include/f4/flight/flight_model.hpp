@@ -41,6 +41,15 @@ class FlightModel {
 public:
     FlightModel();
 
+    // --- Non-copyable, non-movable ---
+    // FlightModel holds raw pointers (subsystems → cfg_ members, bus_) whose
+    // validity depends on this instance's address. Moving would dangle those
+    // pointers silently. Copying would create two owners of the same bus.
+    FlightModel(const FlightModel&) = delete;
+    FlightModel& operator=(const FlightModel&) = delete;
+    FlightModel(FlightModel&&) = delete;
+    FlightModel& operator=(FlightModel&&) = delete;
+
     /// Initialise the flight model with the given configuration.
     ///
     ///   initialAltitude_ft : initial altitude AGL (feet, positive up)

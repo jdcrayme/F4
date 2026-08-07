@@ -47,11 +47,32 @@ public:
     void update(double dt, const PilotInput& input, AircraftState& state) const;
 
 private:
+    /// Cached trig values consumed by calcBodyRates.
+    /// Groups the 6 sin/cos values that were previously passed as 6
+    /// positional doubles — a transposition (e.g. cosmu where cosgam
+    /// belongs) compiled cleanly and produced silently wrong body rates.
+    struct TrigCache {
+        double cosmu{1.0};
+        double cosgam{1.0};
+        double singam{0.0};
+        double cosbet{1.0};
+        double cosalp{1.0};
+        double sinalp{0.0};
+    };
+
+    /// Load factors consumed by calcBodyRates.
+    /// Groups the load-factor values previously passed as positional
+    /// doubles alongside the roll rate.
+    struct LoadFactors {
+        double nzcgs{0.0};   // stability-axis normal load factor
+        double nycgw{0.0};   // wind-axis side load factor
+        double pstab{0.0};   // filtered roll rate (rad/s, from FCS)
+    };
+
     /// Compute body rates (p, q, r) from the commanded G and roll rate.
     void calcBodyRates(double dt, double qsom, double cnalpha,
-                       double cosmu, double cosgam, double singam,
-                       double cosbet, double cosalp, double sinalp,
-                       double nzcgs, double nycgw, double pstab,
+                       const TrigCache& trig,
+                       const LoadFactors& loads,
                        double pitchMomentum, double pitchElasticity,
                        AircraftState& state) const;
 

@@ -19,6 +19,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <cmath>
 #include <concepts>
 #include <type_traits>
@@ -85,8 +86,14 @@ struct Quat {
     [[nodiscard]] constexpr Quat conjugate() const noexcept {
         return {w, -x, -y, -z};
     }
+    /// Compute the multiplicative inverse.
+    ///
+    /// In debug builds, a zero-norm quaternion triggers an assertion
+    /// failure — this almost always indicates uninitialized data. In
+    /// release, identity() is returned as a safe fallback.
     [[nodiscard]] constexpr Quat inverse() const noexcept {
         T n2 = norm_squared();
+        assert(n2 >= T{1e-20} && "Quat::inverse() called on zero-norm quaternion");
         if (n2 < T{1e-20}) return identity();
         return conjugate() / n2;
     }
@@ -98,8 +105,14 @@ struct Quat {
     [[nodiscard]] T norm() const noexcept {
         return std::sqrt(norm_squared());
     }
+    /// Return the unit quaternion in the direction of *this.
+    ///
+    /// In debug builds, a zero-norm quaternion triggers an assertion
+    /// failure — this almost always indicates uninitialized data. In
+    /// release, identity() is returned as a safe fallback.
     [[nodiscard]] Quat normalized() const noexcept {
         T n = norm();
+        assert(n >= T{1e-12} && "Quat::normalized() called on zero-norm quaternion");
         if (n < T{1e-12}) return identity();
         return *this / n;
     }
