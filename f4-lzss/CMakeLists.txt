@@ -16,8 +16,8 @@ target_include_directories(f4-lzss
 
 # f4-lzss has zero external dependencies.
 
-#option(F4_LZSS_BUILD_TESTS "Build unit tests" ON)
-#if(F4_LZSS_BUILD_TESTS)
-#    enable_testing()
-#    add_subdirectory(tests)
-#endif()
+option(F4_LZSS_BUILD_TESTS "Build unit tests" ON)
+if(F4_LZSS_BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(tests)
+endif()

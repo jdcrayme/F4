@@ -89,12 +89,11 @@ void EngineModel::update(double dt,
                          double throttle,
                          double ethrst,
                          bool   simplified,
-                         EngineState& state) const {
+                         EngineState& state) {
     // Guard: no table or zero mass
-    if (!table_ || !aux_ || mass_slugs <= 1e-6) {
+    if (!table_ || !aux_ || mass_slugs <= MASS_FLOOR) {
         state.thrust = 0.0;
         state.fuelFlow = 0.0;
-        lastFuelFlow_ = 0.0;
         return;
     }
 
@@ -120,8 +119,8 @@ void EngineModel::update(double dt,
     // Mach (ram pressure = slower spool).
     // IMPORTANT: altitude sign is +alt/25000 (NOT -alt/25000). Earlier
     // F4Flight versions had this sign-flipped.
-    double spoolrate = aux_->normSpoolRate + (alt_ft / 25000.0) - (mach / 2.0);
-    spoolrate = std::max(0.1, spoolrate);  // floor
+    double spoolrate = aux_->normSpoolRate + (alt_ft / SPOOL_ALT_DIV) - (mach / SPOOL_MACH_DIV);
+    spoolrate = std::max(SPOOL_RATE_FLOOR, spoolrate);
 
     // --- RPM branch (branch on RPM value, not throttle) ---
     // This ensures the AB branch doesn't engage until RPM has spooled up
@@ -129,9 +128,9 @@ void EngineModel::update(double dt,
     double rpmCmd;
     double thrtb1;  // thrust acceleration (ft/s^2)
 
-    if (state.rpm < 0.68 && state.engLit) {
+    if (state.rpm < RPM_LIGHTUP_THRESH && state.engLit) {
         // Lightup zone: RPM is below idle, spool up to idle
-        rpmCmd = 0.7;
+        rpmCmd = RPM_IDLE;
         spoolrate = aux_->lightupSpoolRate;
         thrtb1 = 0.0;
     } else if (state.rpm <= 1.0) {
@@ -139,15 +138,15 @@ void EngineModel::update(double dt,
         const double th1 = thrustIdle_(alt_ft, mach);
         const double th2 = thrustMil_(alt_ft, mach);
         thrtb1 = ((th2 - th1) * pwrlev + th1) / mass_slugs;
-        // RPM command: 0.7 (idle) to 1.0+ (MIL). Allow exceeding 1.0 so
+        // RPM command: idle (0.7) to 1.0+ (MIL). Allow exceeding 1.0 so
         // the AB branch engages on the next frame when throttle > 1.0.
-        rpmCmd = 0.7 + 0.3 * pwrlev;
+        rpmCmd = RPM_IDLE + RPM_MIL_RANGE * pwrlev;
     } else if (state.rpm > 1.0 && hasAB) {
         // Afterburner: interpolate between MIL and AB thrust
         const double th1 = thrustMil_(alt_ft, mach);
         const double th2 = thrustAb_(alt_ft, mach);
         thrtb1 = (2.0 * (th2 - th1) * (pwrlev - 1.0) + th1) / mass_slugs;
-        rpmCmd = 1.0 + 0.06 * (pwrlev - 1.0);
+        rpmCmd = 1.0 + RPM_AB_GAIN * (pwrlev - 1.0);
     } else {
         // No AB fitted or RPM in normal range
         thrtb1 = thrustMil_(alt_ft, mach) / mass_slugs;
@@ -163,7 +162,7 @@ void EngineModel::update(double dt,
     state.rpm = state.rpmLag.step(rpmCmd, spoolrate, dt);
 
     // --- AB lit flag ---
-    state.aburnLit = (pwrlev > 1.0) && (state.rpm > 0.95) && hasAB;
+    state.aburnLit = (pwrlev > 1.0) && (state.rpm > RPM_AB_LIGHTUP) && hasAB;
 
     // --- Flameout ---
     if (!state.engLit) {
@@ -195,32 +194,31 @@ void EngineModel::update(double dt,
         ff = factor * state.thrust * mass_slugs;
     }
 
-    if (simplified) ff *= 0.75;               // AI simplified model
+    if (simplified) ff *= AI_FUEL_FLOW_FACTOR;    // AI simplified model
     ff = std::max(ff, static_cast<double>(aux_->minFuelFlow));
     ff *= nEngines;
 
     // --- Smooth fuel flow (first-order, tau = 0.1s) ---
     // This prevents fuel flow from jumping instantaneously when the throttle
     // moves, which would cause unrealistic fuel-burn spikes.
-    const double alpha = dt / (dt + 0.1);
+    const double alpha = dt / (dt + FUEL_FLOW_TAU);
     state.fuelFlow += (ff - state.fuelFlow) * alpha;
     state.fuelFlow = std::max(state.fuelFlow, static_cast<double>(aux_->minFuelFlow));
-    lastFuelFlow_ = state.fuelFlow;
 
     // --- FTIT (turbine temperature, 0..10 normalized) ---
     double ftitCmd;
-    if (state.rpm < 0.7) {
-        ftitCmd = 5.1 * (state.rpm / 0.7);
-    } else if (state.rpm < 0.9) {
-        ftitCmd = 5.1 + (state.rpm - 0.7) / 0.2 * 1.0;
+    if (state.rpm < RPM_IDLE) {
+        ftitCmd = FTIT_IDLE_TEMP * (state.rpm / RPM_IDLE);
+    } else if (state.rpm < FTIT_MIL_LOW_RPM) {
+        ftitCmd = FTIT_IDLE_TEMP + (state.rpm - RPM_IDLE) / FTIT_MIL_LOW_RANGE * FTIT_MIL_LOW_GAIN;
     } else if (state.rpm < 1.0) {
-        ftitCmd = 6.1 + (state.rpm - 0.9) / 0.1 * 1.5;
+        ftitCmd = 6.1 + (state.rpm - FTIT_MIL_LOW_RPM) / FTIT_MIL_HIGH_RANGE * FTIT_MIL_HIGH_GAIN;
     } else {
-        ftitCmd = 7.6 + (state.rpm - 1.0) / 0.03 * 0.1;
+        ftitCmd = 7.6 + (state.rpm - 1.0) / FTIT_AB_RPM_RANGE * FTIT_AB_GAIN;
     }
-    ftitCmd = std::clamp(ftitCmd, 0.0, 10.0);
-    // FTIT lag (tau = 0.7s)
-    state.ftit += (ftitCmd - state.ftit) * dt / (dt + 0.7);
+    ftitCmd = std::clamp(ftitCmd, 0.0, FTIT_MAX);
+    // FTIT lag
+    state.ftit += (ftitCmd - state.ftit) * dt / (dt + FTIT_TAU);
 }
 
 // ---------------------------------------------------------------------------
@@ -241,7 +239,7 @@ void EngineModel::bodyForces(double thrust_accel,
                               double& zsprop) {
     yprop = 0.0;  // thrust is always in the XZ plane
 
-    if (nozzlePos <= 1e-6) {
+    if (nozzlePos <= NOZZLE_POS_THRESH) {
         // Normal (non-vectored) thrust: along body X
         xprop = thrust_accel;
         zprop = 0.0;

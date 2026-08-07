@@ -23,6 +23,7 @@ target_include_directories(f4-data PUBLIC
 )
 target_link_libraries(f4-data PUBLIC
     f4-math
+PRIVATE
     nlohmann_json::nlohmann_json
 )
 

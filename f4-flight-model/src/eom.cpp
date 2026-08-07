@@ -55,7 +55,7 @@ void EquationsOfMotion::update(double dt, const PilotInput& input,
     // Step 3: ground attitude clamp + nose-wheel steering
     // When on ground and close to the terrain, clamp roll to 0 and limit
     // pitch. Apply nose-wheel steering from the rudder pedals.
-    if (!g.inAir && (g.groundZ_ft - k.z) < (g.minHeight_ft + 5.0)) {
+    if (!g.inAir && (g.groundZ_ft - k.z) < (g.minHeight_ft + MIN_HEIGHT_MARGIN)) {
         // Zero roll and yaw rates (but NOT pitch — needed for rotation damping)
         k.p = 0.0;
         k.r = 0.0;
@@ -68,11 +68,11 @@ void EquationsOfMotion::update(double dt, const PilotInput& input,
         // Nose-wheel steering: turn the aircraft via rudder pedal input.
         // Steer rate is higher at low speed (for taxi) and lower at high speed.
         double steerRate;
-        if (k.vt < 50.0) {
-            steerRate = 30.0;  // deg/s at taxi speed
-        } else if (k.vt < 150.0) {
-            // Linear fade from 30 to 5 deg/s
-            steerRate = 30.0 * (150.0 - k.vt) / 100.0 + 5.0;
+        if (k.vt < STEER_RATE_LOW_VT) {
+            steerRate = TAXI_STEER_RATE;  // deg/s at taxi speed
+        } else if (k.vt < STEER_RATE_HIGH_VT) {
+            // Linear fade from TAXI_STEER_RATE to 5 deg/s
+            steerRate = TAXI_STEER_RATE * (STEER_RATE_HIGH_VT - k.vt) / (STEER_RATE_HIGH_VT - STEER_RATE_LOW_VT) + 5.0;
         } else {
             steerRate = 5.0;   // deg/s at high speed (rudder authority)
         }
@@ -182,9 +182,9 @@ void EquationsOfMotion::calcBodyRates(double dt, double qsom, double cnalpha,
     // a large transient (e.g. from a stall) can produce body rates that
     // cause the quaternion to diverge, which produces garbage euler angles
     // on the next frame, which produces more garbage, etc.
-    k.p = std::clamp(k.p, -4.5, 4.5);  // roll:  ±4.5 rad/s (257 deg/s)
-    k.q = std::clamp(k.q, -3.0, 3.0);  // pitch: ±3.0 rad/s (172 deg/s)
-    k.r = std::clamp(k.r, -4.0, 4.0);  // yaw:   ±4.0 rad/s (229 deg/s)
+    k.p = std::clamp(k.p, -MAX_BODY_RATE_P, MAX_BODY_RATE_P);  // roll:  ±4.5 rad/s (257 deg/s)
+    k.q = std::clamp(k.q, -MAX_BODY_RATE_Q, MAX_BODY_RATE_Q);  // pitch: ±3.0 rad/s (172 deg/s)
+    k.r = std::clamp(k.r, -MAX_BODY_RATE_R, MAX_BODY_RATE_R);  // yaw:   ±4.0 rad/s (229 deg/s)
 
     // --- Integrated roll (for FCS roll damping) ---
     // startRoll accumulates the total roll, which the FCS uses to scale
@@ -228,7 +228,7 @@ void EquationsOfMotion::calcBodyOrientation(double dt, AircraftState& state) con
     const double theta = omegaMag * dt;
 
     Quatd dq;
-    if (theta < 1e-10) {
+    if (theta < QUAT_SMALL) {
         // First-order approximation for very small rotations
         // dq ≈ (1, 0.5*dt*p, 0.5*dt*q, 0.5*dt*r)
         dq = Quatd(1.0, 0.5 * dt * p, 0.5 * dt * q, 0.5 * dt * r).normalized();

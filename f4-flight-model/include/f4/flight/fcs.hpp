@@ -24,6 +24,46 @@
 
 namespace f4::flight {
 
+/// Flight-condition parameters passed to FlightControlSystem::update().
+///
+/// Groups the atmospheric, kinematic, and load-factor state that the FCS
+/// reads each frame. Constructed by the flight model from AircraftState
+/// fields before calling FCS::update().
+struct FlightConditions {
+    // --- Atmospheric / airspeed ---
+    double qbar{0.0};            // dynamic pressure (lb/ft²)
+    double qsom{0.0};            // normalized dynamic pressure
+    double mach{0.0};            // Mach number
+    double vt{0.0};              // true airspeed (ft/s)
+    double vcas{0.0};            // calibrated airspeed (knots)
+
+    // --- Angle of attack / sideslip ---
+    Angle alpha{zero_angle()};   // angle of attack
+    Angle beta{zero_angle()};    // sideslip
+    double sinalp{0.0};          // sin(alpha)
+    double cosalp{1.0};          // cos(alpha)
+    double sinbet{0.0};          // sin(beta)
+    double cosbet{1.0};          // cos(beta)
+
+    // --- Attitude trig (velocity vector) ---
+    double cosmu{1.0};           // cos(velocity roll)
+    double cosgam{1.0};          // cos(flight path angle)
+    double singam{0.0};          // sin(flight path angle)
+
+    // --- Attitude trig (body) ---
+    double costhe{1.0};          // cos(body pitch)
+    double cosphi{1.0};          // cos(body roll)
+    Angle phi{zero_angle()};     // body roll angle
+
+    // --- Loading / status ---
+    double loadingFraction{1.0}; // weight / emptyWeight
+    bool inAir{true};            // airborne flag
+
+    // --- Load factors ---
+    double nzcgs{0.0};          // stability-axis normal load factor
+    double nycgw{0.0};          // wind-axis side load factor
+};
+
 /// Flight Control System.
 ///
 /// Translates pilot inputs into commanded aerodynamic state (alpha, beta,
@@ -40,53 +80,20 @@ public:
 
     /// Run the full FCS update for one time step.
     ///
-    /// Reads pilot input and current flight state, computes gains, then
-    /// runs the pitch/roll/yaw channels. Writes commanded alpha, beta,
-    /// and roll rate into `aero` and `fcs`.
+    /// Reads pilot input and current flight conditions, computes gains,
+    /// then runs the pitch/roll/yaw channels. Writes commanded alpha,
+    /// beta, and roll rate into `aeroState` and `fcsState`.
     ///
-    ///   dt                  : time step (seconds)
-    ///   qbar, qsom, mach    : current atmosphere outputs
-    ///   vt_ftps, vcas_kts   : true/calibrated airspeed
-    ///   alpha               : current angle of attack (strong Angle)
-    ///   beta                : current sideslip (strong Angle)
-    ///   cosmu, cosgam       : velocity-vector trig
-    ///   singam              : sin(flight path angle)
-    ///   costhe, cosphi      : body attitude trig
-    ///   phi                 : body roll angle (strong Angle)
-    ///   loadingFraction     : weight / emptyWeight (affects gains)
-    ///   inAir               : airborne flag (affects ground fade)
-    ///   nzcgs, nycgw        : current load factors (feedback)
-    ///   gearDown            : gear is down (enables landing gains)
-    ///   refueling           : refueling mode (enables landing gains)
-    ///   landingGainsActive  : explicitly request landing gains
-    ///   input               : pilot input
-    ///   fcs                 : [in,out] FCS state (filter states, gains)
-    ///   aero                : [in,out] aero state (reads gearPos, writes
-    ///                         alpha, beta)
-    void update(double dt,
-                double qbar,
-                double qsom,
-                double mach,
-                double vt_ftps,
-                double vcas_kts,
-                Angle  alpha,
-                Angle  beta,
-                double cosmu,
-                double cosgam,
-                double singam,
-                double costhe,
-                double cosphi,
-                Angle  phi,
-                double loadingFraction,
-                bool   inAir,
-                double nzcgs,
-                double nycgw,
-                bool   gearDown,
-                bool   refueling,
-                bool   landingGainsActive,
-                const PilotInput& input,
-                FcsState& fcs,
-                AeroState& aero) const;
+    ///   pilot     : pilot input (stick, pedal, refueling flag)
+    ///   fc        : flight-condition snapshot (atmosphere, kinematics, loads)
+    ///   fcsState  : [in,out] FCS state (filter states, gains)
+    ///   aeroState : [in,out] aero state (reads gearPos, writes alpha, beta)
+    ///   dt        : time step (seconds)
+    void update(const PilotInput& pilot,
+               const FlightConditions& fc,
+               FcsState& fcsState,
+               AeroState& aeroState,
+               double dt) const;
 
     /// Apply a named limiter to input x. Returns the limited value.
     double applyLimiter(data::LimiterKey key, double x) const;

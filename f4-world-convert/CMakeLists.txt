@@ -5,8 +5,11 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# Static library: LZSS decompressor + .cam container parser + campaign decoder
-# + JSON emitter. Dependencies:
+# Static library: LZSS decompressor adapter + .cam container parser + campaign
+# decoder + JSON emitter. Dependencies:
+#   - f4-lzss: canonical LZSS decompression (f4::lzss::decompress). The
+#     local lzss.cpp is now a thin adapter that delegates to f4-lzss
+#     instead of duplicating the algorithm.
 #   - f4-install: find_class_table() delegates install-aware class-table
 #     resolution to f4::install::Installation.
 #   - f4-io: shared Cursor binary reader + read_file helper.
@@ -30,7 +33,7 @@ target_include_directories(f4-world-convert
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>
 )
-target_link_libraries(f4-world-convert PUBLIC f4-install f4-io f4-json)
+target_link_libraries(f4-world-convert PRIVATE f4-lzss f4-install f4-io f4-json)
 
 # CLI tool
 add_executable(cam2json cli/cam2json.cpp)

@@ -14,10 +14,10 @@ target_include_directories(f4-terrain
         $<INSTALL_INTERFACE:include>
 )
 # f4-terrain uses f4-json for the terrain JSON intermediate format (the
-# load_terrain_json / to_terrain_json pair). f4-json is a PUBLIC dep because
-# f4-world (which transitively links f4-terrain) consumes the same JSON
-# schema and benefits from the same Reader/Writer when extending it.
-target_link_libraries(f4-terrain PUBLIC f4-json f4-io)
+# load_terrain_json / to_terrain_json pair) and f4-io for binary file reading.
+# Both are PRIVATE: they are implementation details not exposed in public
+# headers. f4-world (which links f4-terrain) declares its own f4-json dep.
+target_link_libraries(f4-terrain PRIVATE f4-json f4-io)
 
 option(F4_TERRAIN_BUILD_TESTS "Build unit tests" ON)
 if(F4_TERRAIN_BUILD_TESTS)

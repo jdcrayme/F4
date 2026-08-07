@@ -20,7 +20,7 @@ target_include_directories(f4-world
 # JSON emitted by f4-world-convert). It does NOT depend on f4-world-convert
 # itself — the contract between them is JSON, so the library and the
 # converter are independently testable.
-target_link_libraries(f4-world PUBLIC f4-entities f4-geo f4-terrain f4-json)
+target_link_libraries(f4-world PUBLIC f4-entities f4-terrain PRIVATE f4-geo f4-json)
 
 # Tests
 option(F4_WORLD_BUILD_TESTS "Build unit tests" ON)

@@ -16,7 +16,7 @@ target_include_directories(f4-terrain-convert
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>
 )
-target_link_libraries(f4-terrain-convert PUBLIC f4-terrain)
+target_link_libraries(f4-terrain-convert PRIVATE f4-terrain)
 
 # CLI tool: terrain2json <terrain_dir> [out.json]
 add_executable(terrain2json cli/terrain2json.cpp)

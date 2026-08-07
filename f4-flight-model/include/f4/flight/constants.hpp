@@ -117,4 +117,94 @@ constexpr double LEF_RATE = 1.0 / 1.5;   // 1/s  (full travel in 1.5 s)
 // ---------------------------------------------------------------------------
 constexpr double K_STALL = 17.16;  // knots * sqrt(ft^2/lb)
 
+// ---------------------------------------------------------------------------
+// Epsilon / floor values
+//
+// Small-number guards used throughout the physics code to prevent
+// division-by-zero, NaN, and degenerate quaternion normalization.
+// ---------------------------------------------------------------------------
+constexpr double QSOM_FLOOR     = 1e-6;   // near-zero normalized dynamic pressure
+constexpr double MIN_VT         = 1e-3;   // near-zero true airspeed (ft/s)
+constexpr double QUAT_SMALL     = 1e-10;  // small-angle threshold for quaternion normalization
+constexpr double MASS_FLOOR     = 1e-6;   // near-zero mass (slugs) — guards div-by-zero
+
+// ---------------------------------------------------------------------------
+// Ground effect
+//
+// Within 0.2*span of the ground, lift is multiplied by 1.13 (13% increase
+// from ground cushion). Between 0.2 and 1.0 span, the factor fades linearly
+// back to 1.0.
+// ---------------------------------------------------------------------------
+constexpr double GROUND_EFFECT_CL_MULT = 1.13;  // 13% lift increase near ground
+
+// ---------------------------------------------------------------------------
+// Gear friction coefficients
+//
+// Rolling / braking friction for different surface types. The carrier deck
+// value is very high (effectively infinite) to model the arresting cable.
+// ---------------------------------------------------------------------------
+constexpr double MU_PAVED   = 0.04;   // rolling friction on paved surface
+constexpr double MU_GRASS   = 0.5;    // rolling friction on grass
+constexpr double MU_BRAKING = 0.7;    // braking friction
+constexpr double MU_CARRIER = 20.0;   // carrier deck friction (very high)
+
+// ---------------------------------------------------------------------------
+// EOM / steering limits
+//
+// Ground-steering rate limits and body-rate clamps used by the equations of
+// motion. The body-rate clamps prevent quaternion tumbling during transients
+// (e.g. stall, ground contact).
+// ---------------------------------------------------------------------------
+constexpr double TAXI_STEER_RATE    = 30.0;  // deg/s max taxi steering rate
+constexpr double STEER_RATE_LOW_VT  = 50.0;  // ft/s boundary for steer rate fade
+constexpr double STEER_RATE_HIGH_VT = 150.0; // ft/s boundary for steer rate fade
+constexpr double MIN_HEIGHT_MARGIN  = 5.0;   // ft margin above gear min height
+constexpr double MAX_BODY_RATE_P    = 4.5;   // rad/s body roll rate clamp
+constexpr double MAX_BODY_RATE_Q    = 3.0;   // rad/s body pitch rate clamp
+constexpr double MAX_BODY_RATE_R    = 4.0;   // rad/s body yaw rate clamp
+
+// ---------------------------------------------------------------------------
+// Engine model constants
+//
+// These are the hard-coded physics parameters from FreeFalcon's engine.cpp.
+// They are not aircraft-specific (those come from AuxAero/EngineTable);
+// they define the shape of the RPM/FTIT/fuel-flow schedules.
+// ---------------------------------------------------------------------------
+
+// Spool rate schedule
+constexpr double SPOOL_ALT_DIV       = 25000.0;  // ft   altitude normalization divisor
+constexpr double SPOOL_MACH_DIV      = 2.0;       //      Mach divisor for spool rate
+constexpr double SPOOL_RATE_FLOOR    = 0.1;       // 1/s  minimum spool rate
+
+// RPM thresholds and schedule
+constexpr double RPM_LIGHTUP_THRESH  = 0.68;  // below this RPM, engine enters lightup zone
+constexpr double RPM_IDLE            = 0.7;   // normalized idle RPM (0-1 scale)
+constexpr double RPM_MIL_RANGE       = 0.3;   // RPM range from idle (0.7) to MIL (1.0)
+constexpr double RPM_AB_GAIN         = 0.06;  // AB RPM increment: 1.0 + 0.06*(throttle-1.0)
+constexpr double RPM_AB_LIGHTUP      = 0.95;  // RPM threshold for AB lightup flag
+
+// Fuel flow
+constexpr double AI_FUEL_FLOW_FACTOR = 0.75;  // AI simplified fuel-flow scaling
+constexpr double FUEL_FLOW_TAU       = 0.1;   // s   fuel-flow smoothing lag time constant
+constexpr double SEC_PER_HOUR        = 3600.0; // s/hr  for lb/hr -> lb/s conversion
+
+// FTIT (turbine inlet temperature, normalized 0-10 scale)
+constexpr double FTIT_IDLE_TEMP      = 5.1;   // FTIT at idle RPM (0.7)
+constexpr double FTIT_MIL_LOW_RPM    = 0.9;   // RPM boundary: low-MIL -> high-MIL FTIT band
+constexpr double FTIT_MIL_LOW_RANGE  = 0.2;   // RPM range from idle (0.7) to 0.9
+constexpr double FTIT_MIL_LOW_GAIN   = 1.0;   // FTIT gain in low-MIL band
+constexpr double FTIT_MIL_HIGH_RANGE = 0.1;   // RPM range from 0.9 to 1.0
+constexpr double FTIT_MIL_HIGH_GAIN  = 1.5;   // FTIT gain in high-MIL band
+constexpr double FTIT_AB_RPM_RANGE   = 0.03;  // RPM range per unit throttle above MIL in AB
+constexpr double FTIT_AB_GAIN        = 0.1;   // FTIT gain in AB band
+constexpr double FTIT_MAX            = 10.0;  // FTIT normalized clamp maximum
+constexpr double FTIT_TAU            = 0.7;   // s   FTIT lag time constant
+
+// Nozzle / vectored thrust
+constexpr double NOZZLE_POS_THRESH   = 1e-6;  // threshold: nozzle position > 0 means vectored
+
+// Lift-off detection
+constexpr double LIFTOFF_LIFT_MARGIN = 1.05;  // lift must exceed weight by 5% for lift-off
+constexpr double LIFTOFF_ZDOT_THRESH = 0.5;   // ft/s  zdot threshold for lift-off detection
+
 }  // namespace f4::flight

@@ -111,16 +111,19 @@ std::vector<::Mesh> build_raylib_meshes(
         rm.vertexCount   = vert_count;
         rm.triangleCount = tri_count;
 
-        // Allocate Raylib mesh arrays. Raylib expects these as float*
-        // (3 floats per vertex for positions/normals, 2 for texcoords).
-        rm.vertices = new float[vert_count * 3];
-        rm.normals  = new float[vert_count * 3];
-        rm.texcoords = new float[vert_count * 2];
-        rm.colors   = new unsigned char[vert_count * 4];
+        // Allocate Raylib mesh arrays using RL_MALLOC so that UnloadMesh
+        // can correctly free them with RL_FREE (Raylib's ownership model).
+        // The previous code used new[] which caused UB when UnloadMesh called
+        // RL_FREE on new[]-allocated memory, and leaked when meshes were
+        // rebuilt without calling UnloadMesh first.
+        rm.vertices = static_cast<float*>(RL_MALLOC(vert_count * 3 * sizeof(float)));
+        rm.normals  = static_cast<float*>(RL_MALLOC(vert_count * 3 * sizeof(float)));
+        rm.texcoords = static_cast<float*>(RL_MALLOC(vert_count * 2 * sizeof(float)));
+        rm.colors   = static_cast<unsigned char*>(RL_MALLOC(vert_count * 4 * sizeof(unsigned char)));
 
         if (tri_count > 0) {
             // Triangle list (indices: 3 per triangle).
-            rm.indices = new unsigned short[tri_count * 3];
+            rm.indices = static_cast<unsigned short*>(RL_MALLOC(tri_count * 3 * sizeof(unsigned short)));
         }
 
         // Fill vertex attributes
