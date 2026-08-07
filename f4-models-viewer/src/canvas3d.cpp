@@ -136,6 +136,12 @@ static const char* kLitShaderFS =
     "out vec4 finalColor;\n"
     "void main() {\n"
     "    vec4 tex = texture(texture0, fragTexCoord);\n"
+    "    // Chroma-key transparency: FreeFalcon's .TEX textures mark\n"
+    "    // transparent pixels with alpha=0 (set in tex_reader.cpp when\n"
+    "    // the palette-resolved color matches the TexBankEntry chroma key).\n"
+    "    // discard prevents both color AND depth writes, so transparent\n"
+    "    // pixels don't occlude geometry behind them.\n"
+    "    if (tex.a < 0.5) discard;\n"
     "    vec3 N = normalize(fragNormal);\n"
     "    vec3 L = normalize(-lightDir);\n"
     "    float NdotL = max(dot(N, L), 0.0);\n"
@@ -252,32 +258,72 @@ void ViewerApp::Impl::draw_canvas() {
         rlEnableWireMode();
     }
 
-    for (const auto& entry : mesh_entries) {
-        const auto& mesh = entry.mesh;
-        // Only call DrawMesh if the mesh actually has triangles. Meshes with
-        // only lines/points (LineF/PointF primitives emitted by far LODs)
-        // have triangleCount == 0 and are drawn separately below.
-        if (mesh.triangleCount > 0) {
-            // Look up material from texture cache
-            Material* mat_to_use = &default_mat;
-            if (entry.tex_id >= 0) {
-                auto it = texture_cache.find(entry.tex_id);
-                if (it != texture_cache.end() && it->second.uploaded) {
-                    mat_to_use = &it->second.material;
-                    // If lighting is active, swap the textured material's
-                    // shader to the lit shader too (texture_cache materials
-                    // use Raylib's default unlit shader by default).
-                    if (lighting_active) {
-                        mat_to_use->shader = lit_shader;
-                    }
-                }
+    // Draw opaque meshes first, then alpha meshes. FreeFalcon's .TEX
+    // chroma-key textures have alpha=0 on transparent pixels. Without
+    // depth-sorted transparency, drawing alpha meshes before opaque
+    // ones causes transparent pixels to write depth and occlude the
+    // opaque geometry behind them. Drawing opaque first, then alpha,
+    // ensures transparent pixels are blended correctly.
+    //
+    // The lit shader also has `if (tex.a < 0.5) discard;` which
+    // prevents transparent pixels from writing color OR depth — so
+    // even without perfect depth sorting, chroma-key cutouts render
+    // correctly. This sort is a belt-and-suspenders safety net for
+    // the unlit path (Raylib's default shader doesn't discard).
+    std::vector<std::size_t> opaque_order;
+    std::vector<std::size_t> alpha_order;
+    opaque_order.reserve(mesh_entries.size());
+    alpha_order.reserve(mesh_entries.size());
+    for (std::size_t i = 0; i < mesh_entries.size(); ++i) {
+        const auto& entry = mesh_entries[i];
+        bool has_alpha = false;
+        if (entry.tex_id >= 0) {
+            auto it = texture_cache.find(entry.tex_id);
+            if (it != texture_cache.end() && it->second.uploaded) {
+                has_alpha = it->second.has_alpha;
             }
-            DrawMesh(mesh, *mat_to_use, identity);
-            ++stats_draw_calls;
-            ++stats_meshes_drawn;
-            stats_vertices_drawn += static_cast<std::size_t>(mesh.vertexCount);
+        }
+        if (has_alpha) {
+            alpha_order.push_back(i);
+        } else {
+            opaque_order.push_back(i);
         }
     }
+
+    // Enable alpha blending for the whole mesh pass. Opaque pixels
+    // (alpha=255) are unaffected; transparent pixels (alpha=0) blend
+    // to the background. This is required for the unlit path; the lit
+    // shader's discard handles it more efficiently but blend mode is
+    // still safe to leave on.
+    BeginBlendMode(BLEND_ALPHA);
+
+    auto draw_entry = [&](std::size_t idx) {
+        const auto& entry = mesh_entries[idx];
+        const auto& mesh = entry.mesh;
+        if (mesh.triangleCount <= 0) return;
+
+        Material* mat_to_use = &default_mat;
+        if (entry.tex_id >= 0) {
+            auto it = texture_cache.find(entry.tex_id);
+            if (it != texture_cache.end() && it->second.uploaded) {
+                mat_to_use = &it->second.material;
+                if (lighting_active) {
+                    mat_to_use->shader = lit_shader;
+                }
+            }
+        }
+        DrawMesh(mesh, *mat_to_use, identity);
+        ++stats_draw_calls;
+        ++stats_meshes_drawn;
+        stats_vertices_drawn += static_cast<std::size_t>(mesh.vertexCount);
+    };
+
+    // Opaque first
+    for (auto idx : opaque_order) draw_entry(idx);
+    // Alpha last
+    for (auto idx : alpha_order) draw_entry(idx);
+
+    EndBlendMode();
 
     if (show_wireframe) {
         rlDisableWireMode();

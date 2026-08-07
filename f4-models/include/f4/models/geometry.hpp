@@ -133,6 +133,22 @@ struct ModelState {
     std::vector<DofState>    dofs;
     std::vector<SwitchState> switches;
     int                      lod_level = 0;  ///< active LOD level
+
+    // Texture set selection (summer/winter/desert).
+    //
+    // FreeFalcon's BRoot stores a single tex_ids[] pool whose length is
+    // nTexIDs = nTextureSets * texturesPerSet. At draw time the engine
+    // computes texOffset = TextureSet * (nTexIDs / nTextureSets) and
+    // indexes the pool as pTexIDs[texOffset + texIndex]. We replicate
+    // this by adding the same offset to prim.tex_index before looking
+    // up the pool.
+    //
+    // n_texture_sets must be set by the caller (typically from
+    // ModelRecord::n_texture_sets) so the extractor can compute the
+    // per-set stride. texture_set selects which set is active
+    // (0 = summer, 1 = winter, 2 = desert, etc.).
+    int texture_set   = 0;
+    int n_texture_sets = 1;
 };
 
 } // namespace f4::models

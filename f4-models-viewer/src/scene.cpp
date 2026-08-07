@@ -231,7 +231,15 @@ void ViewerApp::Impl::rebuild_meshes() {
         }
     }
 
-    // Extract geometry with current model state
+    // Extract geometry with current model state.
+    //
+    // Pass the selected texture set + the model's n_texture_sets so the
+    // geometry extractor can apply the FreeFalcon textureSetOffset
+    // (Phase T9). For single-set models this is a no-op; for multi-set
+    // models (summer/winter/desert) it selects the correct third of
+    // the BRoot's tex_ids pool.
+    model_state.texture_set   = selected_texture_set;
+    model_state.n_texture_sets = rec ? std::max(1, static_cast<int>(rec->n_texture_sets)) : 1;
     auto geom = db.extract_model_geometry(selected_parent, selected_lod, model_state);
 
     if (geom.meshes.empty()) {

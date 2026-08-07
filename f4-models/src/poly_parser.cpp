@@ -219,17 +219,75 @@ bool decode_prim(
         }
     }
 
-    // CRITICAL: Read texture fields BEFORE intensity fields for textured types.
-    // On-disk C++ class hierarchy order:
-    //   PolyTexFC  = PolyFC + texIndex + uv          (40 bytes)
-    //   PolyTexFCN = PolyTexFC + I                   (44 bytes)
-    //   PolyTexVC  = PolyVC + texIndex + uv          (40 bytes)
-    //   PolyTexVCN = PolyTexVC + I_offset            (44 bytes)
-    // For non-textured FCN/VCN types (FL, AFL, GL, AGL), intensity
-    // comes right after the color field (no texture in between).
+    // CRITICAL: Field order for TexFCN / TexVCN poly types.
+    //
+    // The previous implementation read texture fields (texIndex, uv_offset)
+    // BEFORE the intensity field (I or I_offset). This is WRONG — it
+    // assumed PolyTexFCN inherited from PolyTexFC, but the FreeFalcon
+    // class hierarchy is:
+    //
+    //   Prim → Poly → PolyFC → PolyFCN → PolyTexFCN
+    //                       └→ PolyTexFC (separate branch)
+    //
+    //   Prim → Poly → PolyVC → PolyVCN → PolyTexVCN
+    //                      └→ PolyTexVC (separate branch)
+    //
+    // So the on-disk layout for PolyTexFCN is:
+    //   [Prim header][plane][rgba][I][texIndex][uv_offset]
+    //                            ^^^ intensity comes BEFORE texIndex
+    //
+    // and for PolyTexVCN:
+    //   [Prim header][plane][rgba_offset][I_offset][texIndex][uv_offset]
+    //                                          ^^^^ i_offset comes BEFORE texIndex
+    //
+    // The bug manifested as: the helicopter body (model 829) had 92
+    // TexL + TexGL polys, but their tex_index was being read from the
+    // intensity field (small int like 8, 91, 149) which was out of
+    // bounds for the 3-entry tex_ids pool, causing tex_id to default
+    // to -1 and the body to appear "untextured". Meanwhile the actual
+    // tex_index (small int 0, 1, 2) was being read as uv_offset,
+    // pointing into the prim header itself (garbage UVs).
+    //
+    // Reference: FreeFalcon src/graphics/include/polylib.h
+    //   typedef struct PolyFCN: public PolyFC { int I; };
+    //   typedef struct PolyTexFCN: public PolyFCN { int texIndex; Ptexcoord *uv; };
+    //
+    // Read order (matches C++ struct inheritance/memory layout):
+    //   1. rgba / rgba_offset  (PolyFC / PolyVC)
+    //   2. intensity / i_offset  (PolyFCN / PolyVCN — BEFORE texture)
+    //   3. texIndex + uv_offset  (PolyTex* — AFTER intensity)
+
+    if (has_flat_intensity(out.type)) {
+        // PolyFCN / PolyTexFCN: intensity comes after rgba, BEFORE texture.
+        // For non-Tex FCN types (FL, AFL), there's no texture block after,
+        // so this just reads the trailing intensity field.
+        if (!r.read(out.intensity)) {
+            err = "prim intensity truncated";
+            return false;
+        }
+    } else if (has_vertex_intensities(out.type)) {
+        // PolyVCN / PolyTexVCN: intensity offset comes after rgba_offset,
+        // BEFORE texture.
+        int32_t i_offset;
+        if (!r.read(i_offset)) {
+            err = "prim intensity offset truncated";
+            return false;
+        }
+        if (out.n_verts > 0 && i_offset >= 0) {
+            auto off = static_cast<std::size_t>(i_offset);
+            auto nv = static_cast<std::size_t>(out.n_verts);
+            if (off + nv * sizeof(int32_t) <= buffer_size) {
+                out.intensity_indices.resize(nv);
+                std::memcpy(out.intensity_indices.data(), base + off,
+                            nv * sizeof(int32_t));
+            }
+        }
+    }
 
     if (has_texture(out.type)) {
-        // texIndex + uv offset (comes BEFORE intensity in Tex variants)
+        // texIndex + uv_offset come AFTER intensity for TexFCN/TexVCN
+        // types, and right after rgba/rgba_offset for TexFC/TexVC types
+        // (which have no intensity).
         if (!r.read(out.tex_index)) {
             err = "prim tex index truncated";
             return false;
@@ -247,30 +305,6 @@ bool decode_prim(
                 out.uv_coords.resize(nv);
                 std::memcpy(out.uv_coords.data(), base + off,
                             nv * sizeof(TexCoord));
-            }
-        }
-    }
-
-    if (has_flat_intensity(out.type)) {
-        // PolyFCN / PolyTexFCN: intensity (AFTER texture for TexFCN types)
-        if (!r.read(out.intensity)) {
-            err = "prim intensity truncated";
-            return false;
-        }
-    } else if (has_vertex_intensities(out.type)) {
-        // PolyVCN / PolyTexVCN: intensity offset (AFTER texture for TexVCN types)
-        int32_t i_offset;
-        if (!r.read(i_offset)) {
-            err = "prim intensity offset truncated";
-            return false;
-        }
-        if (out.n_verts > 0 && i_offset >= 0) {
-            auto off = static_cast<std::size_t>(i_offset);
-            auto nv = static_cast<std::size_t>(out.n_verts);
-            if (off + nv * sizeof(int32_t) <= buffer_size) {
-                out.intensity_indices.resize(nv);
-                std::memcpy(out.intensity_indices.data(), base + off,
-                            nv * sizeof(int32_t));
             }
         }
     }

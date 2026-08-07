@@ -2,22 +2,27 @@
 //
 // LZSS decompression — FreeFalcon / Falcon 4.0 variant.
 //
-// FreeFalcon uses a 16-bit sliding window LZSS scheme for compressing
+// FreeFalcon uses a 12-bit sliding window LZSS scheme for compressing
 // texture blobs (KoreaObj.Tex) and campaign save archives (.cam).
-// The algorithm is implemented in FreeFalcon's ImageMemClass::Expand
-// (graphics/image/imagebuf.cpp) and Falcon4.h::Decompress.
+// The algorithm is implemented in FreeFalcon's LZSS_Expand()
+// (src/utils/lzss.cpp) and used by ImageMemClass::Expand.
 //
 // Format:
 //   Stream of (flag_byte, 8 tokens) groups.
-//   Flag byte: bit N (0..7) indicates token type:
-//     0 = literal byte (1 byte)
-//     1 = match reference (2 bytes: 12-bit offset + 4-bit length)
-//   Match encoding (2 bytes, little-endian):
-//     byte0 = (offset_high << 4) | length_minus_3
-//     byte1 = offset_low
-//     offset = (offset_high << 8) | offset_low   (0..4095)
-//     length = length_minus_3 + 3                 (3..18)
-//   The sliding window is 4096 bytes (12-bit offset).
+//   Flag byte: bit N (0..7, LSB first) indicates token type:
+//     1 = literal byte (1 byte)
+//     0 = match reference (2 bytes)
+//
+//   Match encoding (2 bytes):
+//     byte0: high nibble = length (0..15, stored raw)
+//            low nibble  = position bits [11:8]
+//     byte1: position bits [7:0]
+//     position = byte1 | ((byte0 & 0x0F) << 8)   → 12-bit window index
+//     length   = (byte0 >> 4) + BREAK_EVEN       → 1..16 (BREAK_EVEN=1)
+//
+//   The sliding window is a 4096-byte RING BUFFER (not the output
+//   buffer). current_position starts at 1 and wraps with MOD_WINDOW.
+//   Match positions index into this ring buffer.
 
 #pragma once
 
