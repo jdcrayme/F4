@@ -546,11 +546,8 @@ TEST(FileFinder, FindInTempDir) {
 // ── DX Format Detection ───────────────────────────────────────────────────
 
 TEST(DxDetection, Checksum) {
-    // Valid DX header: lower 16 bits == complement of upper 16 bits
-    // Example: 0x1234EDCB -> (0x1234 & 0xFFFF) should equal (~0xEDCB >> 0 & 0xFFFF)
-    uint32_t valid_dx = 0x0000FFFF; // (0x0000) == (~0xFFFF >> 16) & 0xFFFF = 0x0000... no
-    // Let's compute a valid one: version=0x1234, checksum=~0x1234=0xEDCB
-    // Packed: 0xEDCB1234
+    // Valid DX header: lower 16 bits == complement of upper 16 bits.
+    // version=0x1234, checksum=~0x1234=0xEDCB, packed: 0xEDCB1234
     uint32_t dx = 0xEDCB1234u;
     EXPECT_TRUE((dx & 0xFFFF) == ((~dx >> 16) & 0xFFFF));
 

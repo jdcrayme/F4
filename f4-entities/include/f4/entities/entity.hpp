@@ -45,6 +45,7 @@
 #include <typeindex>
 #include <unordered_map>
 #include <unordered_set>
+#include <variant>
 #include <vector>
 
 #include <f4/geo/position.hpp>
@@ -102,17 +103,35 @@ namespace f4::entities {
     };
 
     struct TagValue {
-        enum class Type { String, Int, Float, Bool };
-        Type type = Type::Bool;
-        std::string str_val;
-        int64_t int_val = 0;
-        double float_val = 0.0;
-        bool bool_val = false;
+        // Type-safe sum type. Replaces the previous hand-rolled tagged union
+        // (4 parallel fields, only 1 populated, ~40 bytes wasted per int/bool
+        // tag). std::variant gives us auto-visitors, no wasted storage, and
+        // compile-time type safety.
+        using Variant = std::variant<std::string, int64_t, double, bool>;
+        Variant value;
 
-        static TagValue from(std::string s) { TagValue v; v.type = Type::String; v.str_val = std::move(s); return v; }
-        static TagValue from(int64_t i) { TagValue v; v.type = Type::Int;    v.int_val = i;            return v; }
-        static TagValue from(double f) { TagValue v; v.type = Type::Float;  v.float_val = f;          return v; }
-        static TagValue from(bool b) { TagValue v; v.type = Type::Bool;   v.bool_val = b;           return v; }
+        // Type tag retained for backward compatibility with code that
+        // switches on TagValue::Type. Prefer as_string()/as_int()/... or
+        // std::visit for new code.
+        enum class Type { String, Int, Float, Bool };
+        [[nodiscard]] Type type() const noexcept {
+            return static_cast<Type>(value.index());
+        }
+
+        static TagValue from(std::string s) { TagValue v; v.value = std::move(s); return v; }
+        static TagValue from(int64_t i)      { TagValue v; v.value = i;            return v; }
+        static TagValue from(double f)        { TagValue v; v.value = f;            return v; }
+        static TagValue from(bool b)          { TagValue v; v.value = b;            return v; }
+
+        // Type-safe accessors. Return nullptr if the variant doesn't hold
+        // the requested type. Replaces the old str_val/int_val/float_val/
+        // bool_val fields (which were default-constructed zeros/empties for
+        // the inactive type — silently returning a fake value instead of
+        // surfacing the type mismatch).
+        [[nodiscard]] const std::string* as_string() const noexcept { return std::get_if<0>(&value); }
+        [[nodiscard]] const int64_t*     as_int()    const noexcept { return std::get_if<1>(&value); }
+        [[nodiscard]] const double*      as_float()  const noexcept { return std::get_if<2>(&value); }
+        [[nodiscard]] const bool*        as_bool()   const noexcept { return std::get_if<3>(&value); }
 
         auto operator<=>(const TagValue&) const = default;
     };

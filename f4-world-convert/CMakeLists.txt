@@ -28,6 +28,8 @@ add_library(f4-world-convert STATIC
     src/theater_data.cpp
     src/world_json.cpp
 )
+target_link_libraries(f4-world-convert PUBLIC f4_warnings)
+
 target_include_directories(f4-world-convert
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>

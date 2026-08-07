@@ -177,7 +177,8 @@ public:
         } else {
             had_xdg_ = false;
         }
-        temp_dir_ = "/tmp/f4-settings-test-" + std::to_string(dist(gen));
+        temp_dir_ = (std::filesystem::temp_directory_path() /
+                     ("f4-settings-test-" + std::to_string(dist(gen)))).string();
         std::filesystem::create_directories(temp_dir_);
         setenv("XDG_CONFIG_HOME", temp_dir_.c_str(), 1);
     }

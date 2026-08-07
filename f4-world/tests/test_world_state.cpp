@@ -191,14 +191,15 @@ TEST(WorldState, RealCamJsonBattalionSupplyIsPopulated) {
 TEST(WorldState, LoadTerrainResolvesRelativePath) {
     // Generate a tiny terrain JSON in a temp dir, write a world JSON that
     // references it by basename, and verify load_terrain() finds it.
-    const std::string tmp_dir = "/tmp/f4_world_state_test";
+    const std::string tmp_dir =
+        (std::filesystem::temp_directory_path() / "f4_world_state_test").string();
     std::filesystem::create_directories(tmp_dir);
-    const std::string terrain_path = std::string(tmp_dir) + "/korea.terrain.json";
+    const std::string terrain_path = tmp_dir + "/korea.terrain.json";
     {
         std::ofstream f(terrain_path);
         f << R"({"theater":"korea","width":2,"height":2,"tile_types":[0,1,2,3]})";
     }
-    const std::string world_path = std::string(tmp_dir) + "/test.world.json";
+    const std::string world_path = tmp_dir + "/test.world.json";
     {
         std::ofstream f(world_path);
         f << R"({"version":63,"theater":"korea","terrain_file":"korea.terrain.json","campaign":{"teams":[]}})";

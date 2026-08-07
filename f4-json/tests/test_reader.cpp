@@ -2,6 +2,7 @@
 
 #include <gtest/gtest.h>
 #include <f4/json/f4_json.hpp>
+#include <clocale>      // std::setlocale
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -116,6 +117,36 @@ TEST(JsonReader, ReadNumberNegativeFloat) {
     EXPECT_NEAR(r.read_number(), -0.025, 1e-9);
 }
 
+// Verifies that read_number() is locale-independent: a German LC_NUMERIC
+// ("de_DE.UTF-8") would have caused std::strtod to parse "3.14" as 3.0
+// (treating '.' as a thousand separator). std::from_chars is locale-free
+// by spec, so the result must be identical in every locale.
+// Skipped on systems that lack the de_DE locale installed.
+TEST(JsonReader, ReadNumberLocaleIndependent) {
+    const char* saved = std::setlocale(LC_NUMERIC, nullptr);
+    if (std::setlocale(LC_NUMERIC, "de_DE.UTF-8") == nullptr &&
+        std::setlocale(LC_NUMERIC, "de_DE")         == nullptr) {
+        GTEST_SKIP() << "de_DE locale not installed; cannot verify locale-independence";
+    }
+    std::string s = "3.14";
+    Reader r(s);
+    EXPECT_NEAR(r.read_number(), 3.14, 1e-9);
+    // Restore caller's locale
+    std::setlocale(LC_NUMERIC, saved);
+}
+
+TEST(JsonReader, ReadIntLocaleIndependent) {
+    const char* saved = std::setlocale(LC_NUMERIC, nullptr);
+    if (std::setlocale(LC_NUMERIC, "de_DE.UTF-8") == nullptr &&
+        std::setlocale(LC_NUMERIC, "de_DE")         == nullptr) {
+        GTEST_SKIP() << "de_DE locale not installed; cannot verify locale-independence";
+    }
+    std::string s = "-12345";
+    Reader r(s);
+    EXPECT_EQ(r.read_int(), -12345L);
+    std::setlocale(LC_NUMERIC, saved);
+}
+
 TEST(JsonReader, SkipValueString) {
     std::string s = "\"skip me\" rest";
     Reader r(s);
@@ -153,6 +184,35 @@ TEST(JsonReader, SkipValueNull) {
     Reader r(s);
     r.skip_value();
     EXPECT_EQ(r.position(), 4u);
+}
+
+TEST(JsonReader, SkipValueFalse) {
+    std::string s = "false}";
+    Reader r(s);
+    r.skip_value();
+    EXPECT_EQ(r.position(), 5u);
+}
+
+TEST(JsonReader, SkipValueNumber) {
+    std::string s = "3.14e-2,";
+    Reader r(s);
+    r.skip_value();
+    EXPECT_EQ(r.position(), 7u);
+}
+
+TEST(JsonReader, SkipValueRejectsMalformedBareToken) {
+    // `truu` is not a valid JSON bare token. Previously the parser silently
+    // swallowed any non-structural char run; now it throws.
+    std::string s = "truu}";
+    Reader r(s);
+    EXPECT_THROW(r.skip_value(), std::runtime_error);
+}
+
+TEST(JsonReader, SkipValueRejectsBarePunctuation) {
+    // `@#$%` is not a valid JSON bare token.
+    std::string s = "@#$%";
+    Reader r(s);
+    EXPECT_THROW(r.skip_value(), std::runtime_error);
 }
 
 TEST(JsonReader, ParseSimpleObject) {

@@ -33,6 +33,8 @@ add_library(f4-convert STATIC
     src/dat_parser.cpp
     src/json_io.cpp
 )
+target_link_libraries(f4-convert PUBLIC f4_warnings)
+
 target_include_directories(f4-convert PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )

@@ -30,6 +30,8 @@ add_library(f4-flight-model STATIC
     src/flight_model.cpp
     src/stall_state.cpp
 )
+target_link_libraries(f4-flight-model PUBLIC f4_warnings)
+
 target_include_directories(f4-flight-model PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )

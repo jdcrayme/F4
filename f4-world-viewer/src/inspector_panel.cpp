@@ -187,8 +187,7 @@ void ViewerApp::draw_inspector() {
                 } else {
                 const float ux = impl_->grid_x(tr), uy = impl_->grid_y(tr);
                 auto team_tag = h.get_tag(f4::entities::tags::TEAM);
-                const uint8_t owner = (team_tag && team_tag->type == f4::entities::TagValue::Type::Int)
-                    ? static_cast<uint8_t>(team_tag->int_val) : 0;
+                const uint8_t owner = (team_tag && team_tag->as_int()) ? static_cast<uint8_t>(*team_tag->as_int()) : 0;
                 const char* team_name = impl_->world_loaded
                     ? impl_->team_name_for_slot(owner) : "(no world)";
                 const char* subtype_str = f4::world_convert::unit_subtype_name(

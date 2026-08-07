@@ -11,6 +11,8 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # maximally portable and testable. (f4-units quantities can be used alongside
 # these types by callers but are not required.)
 add_library(f4-geo INTERFACE)
+target_link_libraries(f4-geo INTERFACE f4_warnings)
+
 target_include_directories(f4-geo INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>

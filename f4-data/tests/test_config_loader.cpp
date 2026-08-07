@@ -160,7 +160,8 @@ TEST(ConfigLoaderTest, WriteConfigToDiskRoundTrips) {
     auto r1 = loadConfig(srcPath);
     ASSERT_TRUE(r1.ok);
 
-    const std::string outPath = "/tmp/f4_data_write_test.json";
+    const std::string outPath =
+        (std::filesystem::temp_directory_path() / "f4_data_write_test.json").string();
     ASSERT_TRUE(writeConfig(r1.config, outPath));
 
     auto r2 = loadConfig(outPath);

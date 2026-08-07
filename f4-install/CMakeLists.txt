@@ -18,6 +18,8 @@ add_library(f4-install STATIC
     src/theater.cpp
     src/campaign.cpp
 )
+target_link_libraries(f4-install PUBLIC f4_warnings)
+
 target_include_directories(f4-install
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>

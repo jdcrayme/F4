@@ -8,6 +8,8 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 add_library(f4-lzss STATIC
     src/lzss.cpp
 )
+target_link_libraries(f4-lzss PUBLIC f4_warnings)
+
 target_include_directories(f4-lzss
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>

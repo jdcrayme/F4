@@ -162,6 +162,17 @@ struct ObjectiveState {
 /// A campaign unit (flight, battalion, squadron, ship). Mirrors the fields
 /// decoded by f4-world-convert's unit_decoder. Includes the subclass-specific
 /// tail fields that are most useful for visualization and AI consumption.
+///
+/// \note INTERNAL — DO NOT consume directly from outside f4-world.
+/// This struct is a tagged-union mirror of the binary campaign format and
+/// is retained as an implementation detail of the WorldStateAdapter
+/// (the bridge's concrete IUnitCoreSource implementation). New consumers
+/// should read from `EntityWorld` components (`UnitCoreComponent`,
+/// `GroundTacticalComponent`, `SquadronComponent`, `FlightPlanComponent`,
+/// `PackageSupportComponent`) populated by `populate_world()`, or implement
+/// `IUnitCoreSource` directly to plug in an alternative data source. See
+/// ECS_DECOUPLING_PLAN.md §6 and test_interface_bridge.cpp for the
+/// contract test.
 struct UnitState {
     int16_t  type = 0;             // share_.entityType_ (100..2000)
     UnitClass unit_class = UnitClass::Unknown;

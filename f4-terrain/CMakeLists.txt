@@ -8,6 +8,8 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 add_library(f4-terrain STATIC
     src/terrain_data.cpp
 )
+target_link_libraries(f4-terrain PUBLIC f4_warnings)
+
 target_include_directories(f4-terrain
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>

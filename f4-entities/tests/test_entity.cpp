@@ -107,7 +107,7 @@ TEST(Tags, SetGetHas) {
     h.set_tag(tags::ROLE, TagValue::from(std::string("fighter")));
     h.set_tag(tags::TEAM, TagValue::from(std::string("blue")));
     EXPECT_TRUE(h.has_tag(tags::ROLE));
-    EXPECT_EQ(h.get_tag(tags::ROLE)->str_val, "fighter");
+    EXPECT_EQ(*h.get_tag(tags::ROLE)->as_string(), "fighter");
     EXPECT_FALSE(h.has_tag(tags::STEALTH));
 }
 

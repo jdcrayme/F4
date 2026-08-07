@@ -22,6 +22,8 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 add_library(f4-io STATIC
     src/read_file.cpp
 )
+target_link_libraries(f4-io PUBLIC f4_warnings)
+
 target_include_directories(f4-io
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>

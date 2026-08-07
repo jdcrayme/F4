@@ -11,6 +11,8 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 add_library(f4-terrain-convert STATIC
     src/terrain_converter.cpp
 )
+target_link_libraries(f4-terrain-convert PUBLIC f4_warnings)
+
 target_include_directories(f4-terrain-convert
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>

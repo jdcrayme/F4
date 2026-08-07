@@ -2,6 +2,7 @@
 
 #include <f4/viewer/hex_model.hpp>
 #include <f4/viewer/decoders.hpp>
+#include <f4/terrain/terrain_data.hpp>  // THEATER_MAP_MAGIC
 
 #include <algorithm>
 #include <cmath>
@@ -72,10 +73,10 @@ FileType identify_file(const std::filesystem::path& path,
                                (static_cast<uint32_t>(data[1]) << 8) |
                                (static_cast<uint32_t>(data[2]) << 16) |
                                (static_cast<uint32_t>(data[3]) << 24);
-        // THEATER.MAP magic is 0x444CFFAE ("LD" + magic bytes) — but Falcon
-        // ships it as a file with the name THEATER.MAP, so the extension
-        // check above catches it. We still probe in case it's been renamed.
-        if (magic == 0x444CFFAE) return FileType::TheaterMap;
+        // THEATER.MAP magic — but Falcon ships it as a file with the name
+        // THEATER.MAP, so the extension check above catches it. We still
+        // probe in case it's been renamed.
+        if (magic == f4::terrain::THEATER_MAP_MAGIC) return FileType::TheaterMap;
     }
 
     // Probe for text content (heuristic: > 80% printable ASCII in first 1KB).

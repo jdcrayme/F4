@@ -10,7 +10,6 @@
 
 #include <algorithm>
 #include <filesystem>
-#include <fstream>
 
 using namespace f4::world;
 using namespace f4::entities;
@@ -133,15 +132,6 @@ WorldState make_unit_world() {
     ws.units = {u1, u2, u3, u4, u5};
     return ws;
 }
-
-// Read a file into a string (for the real fixture test).
-std::string read_file(const std::string& path) {
-    std::ifstream f(path);
-    if (!f) return {};
-    std::ostringstream ss;
-    ss << f.rdbuf();
-    return ss.str();
-}
 }
 
 // ============================================================================
@@ -179,7 +169,7 @@ TEST(WorldLoader, TeamEntitiesHaveCorrectTagsAndIdentity) {
 
     EXPECT_TRUE(h.has_tag(tags::ALIVE));
     EXPECT_TRUE(h.has_tag(tags::ROLE));
-    EXPECT_EQ(h.get_tag(tags::ROLE)->str_val, "team");
+    EXPECT_EQ(*h.get_tag(tags::ROLE)->as_string(), "team");
 }
 
 TEST(WorldLoader, TeamComponentCarriesTeaEnrichment) {
@@ -289,7 +279,7 @@ TEST(PopulateCampaign, HasCorrectTags) {
 
     EntityHandle h(id, &ew);
     EXPECT_TRUE(h.has_tag(tags::ROLE));
-    EXPECT_EQ(h.get_tag(tags::ROLE)->str_val, "campaign");
+    EXPECT_EQ(*h.get_tag(tags::ROLE)->as_string(), "campaign");
     EXPECT_TRUE(h.has_tag(tags::ALIVE));
 }
 
@@ -478,10 +468,10 @@ TEST(PopulateObjectives, TagsAreCorrect) {
 
     EntityHandle h1(ids[0], &ew);
     EXPECT_TRUE(h1.has_tag(tags::ROLE));
-    EXPECT_EQ(h1.get_tag(tags::ROLE)->str_val, "objective");
+    EXPECT_EQ(*h1.get_tag(tags::ROLE)->as_string(), "objective");
     EXPECT_TRUE(h1.has_tag(tags::ALIVE));
     // Owner 2 → team tag is int 2
-    EXPECT_EQ(h1.get_tag(tags::TEAM)->int_val, 2);
+    EXPECT_EQ(*h1.get_tag(tags::TEAM)->as_int(), 2);
 }
 
 // ============================================================================
@@ -681,11 +671,11 @@ TEST(PopulateUnits, DomainTags) {
 
     // Battalion → domain="ground"
     EntityHandle h_bat(ids[0], &ew);
-    EXPECT_EQ(h_bat.get_tag(tags::OPDOMAIN)->str_val, "ground");
+    EXPECT_EQ(*h_bat.get_tag(tags::OPDOMAIN)->as_string(), "ground");
 
     // Squadron → domain="air"
     EntityHandle h_sq(ids[2], &ew);
-    EXPECT_EQ(h_sq.get_tag(tags::OPDOMAIN)->str_val, "air");
+    EXPECT_EQ(*h_sq.get_tag(tags::OPDOMAIN)->as_string(), "air");
 }
 
 TEST(PopulateUnits, RoleTags) {
@@ -696,16 +686,16 @@ TEST(PopulateUnits, RoleTags) {
     auto ids = populate_units(ew, ws, obj_id_map, unit_id_map);
 
     EntityHandle h_bat(ids[0], &ew);
-    EXPECT_EQ(h_bat.get_tag(tags::ROLE)->str_val, "battalion");
+    EXPECT_EQ(*h_bat.get_tag(tags::ROLE)->as_string(), "battalion");
 
     EntityHandle h_sq(ids[2], &ew);
-    EXPECT_EQ(h_sq.get_tag(tags::ROLE)->str_val, "squadron");
+    EXPECT_EQ(*h_sq.get_tag(tags::ROLE)->as_string(), "squadron");
 
     EntityHandle h_fl(ids[3], &ew);
-    EXPECT_EQ(h_fl.get_tag(tags::ROLE)->str_val, "flight");
+    EXPECT_EQ(*h_fl.get_tag(tags::ROLE)->as_string(), "flight");
 
     EntityHandle h_pk(ids[4], &ew);
-    EXPECT_EQ(h_pk.get_tag(tags::ROLE)->str_val, "package");
+    EXPECT_EQ(*h_pk.get_tag(tags::ROLE)->as_string(), "package");
 }
 
 TEST(PopulateUnits, IdMapBuilt) {

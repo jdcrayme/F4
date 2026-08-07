@@ -18,6 +18,8 @@ add_library(f4-data STATIC
     src/config_loader.cpp
     src/engine_rpm_schedule.cpp
 )
+target_link_libraries(f4-data PUBLIC f4_warnings)
+
 target_include_directories(f4-data PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )

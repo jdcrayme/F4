@@ -28,7 +28,12 @@ struct BinReader {
     // `remaining()` (which returned bool via implicit conversion and was a
     // footgun: `auto n = r.remaining();` silently got 0 or 1, not the byte
     // count). Use has_remaining() for the boolean check.
-    [[nodiscard]] std::size_t remaining_bytes() const noexcept { return size - pos; }
+    //
+    // Guards against unsigned underflow when pos > size (e.g. after an OOB
+    // read) — same fix as f4::io::Cursor::remaining() (CHANGES.md H9).
+    [[nodiscard]] std::size_t remaining_bytes() const noexcept {
+        return (pos <= size) ? (size - pos) : 0;
+    }
     [[nodiscard]] bool has_remaining() const noexcept { return pos < size; }
     [[nodiscard]] std::size_t offset() const noexcept { return pos; }
 

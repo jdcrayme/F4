@@ -1,15 +1,6 @@
-include(FetchContent)
-
-FetchContent_Declare(
-    googletest
-    GIT_REPOSITORY https://github.com/google/googletest.git
-    GIT_TAG v1.14.0
-)
-set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(googletest)
-
-enable_testing()
-include(GoogleTest)
+# GoogleTest is fetched and GoogleTest module included from the root
+# CMakeLists.txt (via cmake/f4_deps.cmake). This file only registers
+# test executables via gtest_discover_tests().
 
 # --- Settings tests ---
 # Link against settings.cpp + f4-json (settings.cpp uses f4::json::Reader
@@ -39,6 +30,7 @@ target_include_directories(test_hex_model PRIVATE
 target_link_libraries(test_hex_model PRIVATE
     GTest::gtest_main
     f4-world-convert
+	f4-terrain
 )
 target_compile_definitions(test_hex_model PRIVATE
     FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../f4-world-convert/tests/fixtures/"

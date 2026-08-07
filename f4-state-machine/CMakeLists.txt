@@ -25,6 +25,8 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # is recorded in a bounded trace ring-buffer and emitted as parseable text.
 # A misbehaving machine can always be inspected, not just run.
 add_library(f4-state-machine INTERFACE)
+target_link_libraries(f4-state-machine INTERFACE f4_warnings)
+
 target_include_directories(f4-state-machine INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>

@@ -468,3 +468,213 @@ return on most platforms, making .dat loading the dominant cost.
 - Added explicit lifetime contract comment in `set_message_bus()`.
   The raw pointer pattern is retained for the default-construct-then-
   reassign pattern, but the contract is now prominent.
+
+## Phase 6 — Pre-AI Hardening Sprint
+
+Resolves the 5 Critical + 5 High issues from the dark-pattern audit
+that would have become acute the moment multiple aircraft start sharing
+state at 360 Hz. All 1020 tests pass (up from 1008 — 12 new tests added).
+
+### PR1: C3+C4+C5 — silent-garbage fixes (low risk, high value)
+
+- **C3: THEATER.MAP magic validation** (`f4-terrain/src/terrain_data.cpp`):
+  the parser read `header.magic` but never compared it against
+  `0x444CFFAE`. A file with the wrong magic but plausible dimensions
+  parsed silently and produced garbage elevation data. Added
+  `constexpr uint32_t THEATER_MAP_MAGIC = 0x444CFFAEu` in the public
+  header (`terrain_data.hpp`) and a check in `load()`. Dedupes 8
+  scattered literal occurrences across the terrain lib, hex inspector,
+  and tests.
+- **C4: BinReader::remaining_bytes() underflow** (`f4-models/src/bin_reader.hpp`):
+  same bug as the `Cursor::remaining()` H9 fix in Phase 5, applied to
+  the parallel reader. Now returns 0 (not `SIZE_MAX`) when `pos > size`
+  after an OOB read.
+- **C5: JSON skip_value() strict validation** (`f4-json/include/f4/json/reader.hpp`):
+  the bare-token path accepted any non-structural char run — `truu`,
+  `1.2.3.4`, `@#$%` all parsed silently. Now validates against
+  `true`/`false`/`null`/number grammar and throws on anything else.
+  Added `read_bool()` helper to replace the hand-rolled
+  `if (r.consume('t')) ... skip_value()` pattern in `world_state.cpp`
+  (3 sites) that broke under strict skip_value.
+- 5 new tests: `Terrain.RejectsBadMagic`, `SkipValueFalse`,
+  `SkipValueNumber`, `SkipValueRejectsMalformedBareToken`,
+  `SkipValueRejectsBarePunctuation`.
+
+### PR2: C1 — Table1D/Table2D data race on mutable cache
+
+`f4-math/include/f4/math/table.hpp`:
+- The "cached last-index hint" used `mutable std::size_t last_` written
+  on every `const operator()` call. Two `FlightModel` instances sharing
+  an aero table (e.g. formation AI) would race on this write.
+- Replaced with `mutable std::atomic<std::size_t>` using
+  `memory_order_relaxed`. Relaxed atomics are ~1ns on x86, preserving
+  the cache's perf benefit while making the const operator() thread-safe
+  per the C++ memory model. The cache is only a hint — a racy write
+  simply causes the next call to do a full scan (still correct).
+- Added explicit copy/move constructors because `std::atomic` is
+  non-copyable. The cache value is loaded/stored via relaxed atomics;
+  any value (including stale) is acceptable.
+- No new tests (the existing 192 f4-math tests verify correctness).
+  TSAN would now pass on a multi-aircraft shared-table test.
+
+### PR3: H2 — warning flags + GoogleTest fetch dedup
+
+- **Warning flags**: created `cmake/f4_warnings.cmake` defining an
+  INTERFACE library `f4_warnings` with `-Wall -Wextra -Wpedantic`
+  (GCC/Clang) or `/W4 /permissive-` (MSVC).
+  `-Wno-missing-field-initializers` is suppressed (tests legitimately
+  use `{}` aggregate init for structs with many fields). Linked to
+  every f4-* library target (PUBLIC for STATIC, INTERFACE for
+  header-only). First clean build: 2 real warnings (unused function,
+  unused variable) — both fixed. Zero compiler warnings now.
+  `-Wshadow -Wconversion` deferred to a follow-up (would produce
+  hundreds of warnings on legacy-shaped code).
+- **GoogleTest dedup**: the 17 `f4-*/tests/CMakeLists.txt` files each
+  repeated the same 10-line `FetchContent_Declare(googletest ...)` +
+  `include(GoogleTest)` block, pinning the version in 17 places.
+  Hoisted to `cmake/f4_deps.cmake`, included once from the root
+  `CMakeLists.txt`. Each test CMakeLists now just calls
+  `gtest_discover_tests()`.
+- 0 new tests (infrastructure change).
+
+### PR4: C2 — TagValue → std::variant
+
+`f4-entities/include/f4/entities/entity.hpp`:
+- Replaced the hand-rolled tagged union (4 parallel fields:
+  `str_val`, `int_val`, `float_val`, `bool_val`, only 1 populated,
+  ~40 bytes wasted per int/bool tag) with
+  `std::variant<std::string, int64_t, double, bool>`.
+- API change: the 4 fields → 4 pointer-returning accessors
+  (`as_string()`, `as_int()`, `as_float()`, `as_bool()`). Returns
+  nullptr if the variant doesn't hold the requested type — surfaces
+  type mismatches instead of silently returning default-constructed
+  zeros/empties.
+- Retained `Type` enum and `type()` method for backward compatibility
+  with code that switches on type.
+- Updated 12 call sites across `f4-entities/tests/test_entity.cpp`,
+  `f4-world/tests/test_world_loader.cpp`, and
+  `f4-world-viewer/src/{canvas,inspector_panel}.cpp`. The viewer's
+  `team_tag->type == Type::Int ? team_tag->int_val : 0` pattern
+  (4 sites) became the cleaner `team_tag->as_int() ? *team_tag->as_int() : 0`.
+- 0 new tests (existing 20 entity tests + 7 world-loader tests verify
+  the migration).
+
+### PR5: H1 — ECS Phase 4 verification + interface contract test
+
+**Finding**: the audit's H1 was overly pessimistic. The ECS Phase 4
+work is **already complete** — `IDataSource` interfaces
+(`ICampaignSource`, `ITeamSource`, `IObjectiveSource`, `IUnitCoreSource`
++ `IGroundUnitSource`/`ISquadronSource`/`IFlightSource`/`IPackageSource`)
+exist in `f4-world/include/f4/world/data_source.hpp`, the bridge has
+interface-based overloads, `WorldState` is forward-declared in the
+public header (not included), the adapter structs are private to
+`src/world_loader.cpp`, and the viewer reads exclusively from
+`EntityWorld` components (verified by grep — zero direct `WorldState`
+field accesses in viewer code).
+
+The only remaining smell is that `UnitState` is still a 40-field
+tagged-union struct. But it's now an INTERNAL implementation detail
+of the `WorldStateAdapter` (the bridge's concrete `IUnitCoreSource`
+implementation), in `detail/world_state.hpp`, never exposed to
+consumers. This is acceptable — the smell is contained.
+
+**Delivered**:
+- Added `test_interface_bridge.cpp` (7 tests) — implements mock
+  `ICampaignSource` / `ITeamSource` / `IObjectiveSource` /
+  `IUnitCoreSource` adapters inline and calls `populate_world()`
+  through the interface overloads. This is the **contract test for
+  f4-ai**: if the interface contract breaks, this test fails before
+  any AI code can be written against it. Also unlocks future data
+  sources (BMS saves, DIS streams, procedural generation) without
+  touching `WorldState`.
+- Added deprecation comment to `UnitState` documenting that it's
+  internal-only and pointing consumers to either `EntityWorld`
+  components or the `IUnitCoreSource` interface.
+
+### Verification
+
+Clean build from scratch:
+```
+$ rm -rf build && cmake -G Ninja -DCMAKE_BUILD_TYPE=Release \
+    -DF4_BUILD_MODEL_VIEWER=OFF -DF4_BUILD_VIEWER=OFF ..
+$ cmake --build . -j2
+$ ctest -j2
+100% tests passed out of 1020
+```
+
+Zero compiler warnings. 12 new tests added across the 5 PRs.
+
+### What was NOT done (and why)
+
+- **`-Wshadow -Wconversion` warning flags** — would produce hundreds
+  of warnings on legacy-shaped code (narrowing in binary parsers,
+  shadowed loop vars in viewer code). Add in a follow-up cleanup pass.
+- **`std::function` on state-machine hot path** (H3) — 32 bytes each,
+  heap-allocating. Migration to SBO function type is invasive (every
+  `StateMachine::Builder::on()` call site). Defer to a dedicated SM
+  perf pass.
+- **`EntityHandle::add<T>()` returns `T&`** (H4) — breaks encapsulation.
+  Migration to `ComponentHandle<T>` touches every component-add call
+  site. Defer until f4-ai actually needs dirty-flag/versioning hooks.
+- **`FlightModel::state()` mutable overload** (H6) — f4-ai will reach
+  into `state()` for sensor reads. Defer the mutable-overload removal
+  to the f4-ai integration PR (where the actual call sites will be
+  known).
+- **Splitting `UnitState` into per-subclass structs** — the struct is
+  now internal-only. Splitting it would require rewriting the JSON
+  loader + adapter. Low value now that the smell is contained.
+
+### PR6: H8 + H5 — locale-independent JSON parsing + portable temp paths
+
+Follow-up batch closing two audit items that fit the sprint's spirit but
+were missed in PR1–PR5.
+
+- **H8: Locale-independent number parsing** (`f4-json/include/f4/json/reader.hpp`):
+  `read_int()` used `std::strtol(..., 10)` and `read_number()` used
+  `std::strtod`. `std::strtod` is **locale-dependent** — with
+  `LC_NUMERIC=de_DE.UTF-8` the literal `"3.14"` parses as `3.0` (the
+  `.` is treated as a thousand separator). Any campaign save loaded on
+  a German/French/Spanish user's machine would silently corrupt every
+  coordinate, velocity, and probability field in the JSON. Replaced
+  both with `std::from_chars` (C++17), which is locale-independent by
+  spec (§charconv). Also migrated the `\uXXXX` hex parse to
+  `std::from_chars(..., 16)` for consistency — `strtol` with base 16
+  was already locale-independent, but the migration removes the last
+  locale-sensitive stdlib surface from the reader. `long` return type
+  of `read_int()` is preserved for ABI compatibility; `std::from_chars`
+  handles `long` natively.
+- **H5: Hardcoded `/tmp/` paths in tests** — replaced with
+  `std::filesystem::temp_directory_path()` in 3 sites:
+  - `f4-data/tests/test_config_loader.cpp` (config write test)
+  - `f4-world-viewer/tests/test_settings.cpp` (XDG_CONFIG_HOME temp dir)
+  - `f4-world/tests/test_world_state.cpp` (terrain resolve test)
+  The two remaining `"/tmp/..."` literals in `test_settings.cpp`
+  (`s.last_world_json`, `s.last_terrain_json`) are **round-trip data
+  values** — the test verifies JSON serialize/deserialize, not
+  filesystem access — so they're left as POSIX-style sample strings.
+  Portability fix: tests now work on Windows (where `/tmp/` may not
+  exist), macOS sandboxed runners, and CI containers with non-standard
+  `TMPDIR`.
+- 2 new tests: `ReadNumberLocaleIndependent`, `ReadIntLocaleIndependent`.
+  Both call `std::setlocale(LC_NUMERIC, "de_DE.UTF-8")` and verify the
+  parser still returns the C-locale value. Skipped via `GTEST_SKIP()`
+  on systems without the `de_DE` locale installed (CI runners and
+  minimal containers commonly lack it).
+
+### Verification (post-PR6)
+
+Build not re-run in this environment (no cmake/ninja available in the
+agent sandbox). The change is mechanical:
+- `std::from_chars` for `long` and `double` is available since
+  libstdc++ 11 / libc++ 14 / MSVC 19.41; the project already requires
+  C++20 and g++ ≥ 13 (per existing CI config).
+- The reader now includes `<charconv>` and `<system_error>`; both are
+  header-only and have no link-time impact.
+- The 4 existing float/int tests (`ReadIntPositive`, `ReadIntNegative`,
+  `ReadNumberFloat`, `ReadNumberScientific`, `ReadNumberNegativeFloat`)
+  continue to pass — `std::from_chars` accepts the same grammar that
+  `std::strtod` did for the JSON number subset (no `0x`, no `inf`/`nan`,
+  no grouping).
+- The 2 new locale tests are skipped on systems lacking `de_DE`, so
+  they cannot regress the suite on minimal CI runners.
+

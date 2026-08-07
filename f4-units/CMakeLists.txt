@@ -7,6 +7,8 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 # Header-only library target
 add_library(f4-units INTERFACE)
+target_link_libraries(f4-units INTERFACE f4_warnings)
+
 target_include_directories(f4-units INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>

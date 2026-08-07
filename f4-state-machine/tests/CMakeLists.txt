@@ -1,15 +1,6 @@
-include(FetchContent)
-
-FetchContent_Declare(
-    googletest
-    GIT_REPOSITORY https://github.com/google/googletest.git
-    GIT_TAG v1.14.0
-)
-set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(googletest)
-
-enable_testing()
-include(GoogleTest)
+# GoogleTest is fetched and GoogleTest module included from the root
+# CMakeLists.txt (via cmake/f4_deps.cmake). This file only registers
+# test executables via gtest_discover_tests().
 
 # Each test target links ONLY against f4-state-machine. If a test ever needs
 # f4-math, f4-data, or any other library, that is a coupling bug and the test

@@ -51,6 +51,8 @@ void TerrainData::load(const std::filesystem::path& terrain_dir) {
     header.width         = mc.u32();
     header.height        = mc.u32();
     header.ft_to_mea_cell= mc.u32();
+    if (header.magic != THEATER_MAP_MAGIC)
+        throw std::runtime_error("THEATER.MAP: bad magic (expected 0x444CFFAE)");
     if (header.width == 0 || header.height == 0 || header.width > 4096 || header.height > 4096)
         throw std::runtime_error("THEATER.MAP: implausible grid dimensions");
     // Remaining bytes = RGBA palette.

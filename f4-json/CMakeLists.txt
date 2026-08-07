@@ -22,6 +22,8 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 add_library(f4-json STATIC
     src/f4_json.cpp
 )
+target_link_libraries(f4-json PUBLIC f4_warnings)
+
 target_include_directories(f4-json
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>

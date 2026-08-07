@@ -112,9 +112,7 @@ ObjectiveState parse_objective(Reader& r) {
             }
         }
         else if (k == "has_radar") {
-            r.skip_ws();
-            if (r.consume('t')) { o.has_radar = true;  r.skip_value(); }
-            else                { o.has_radar = false; r.skip_value(); }
+            o.has_radar = r.read_bool();
         }
         else if (k == "detect_ratio") {
             r.skip_ws(); r.expect('[');
@@ -142,16 +140,8 @@ ObjectiveState parse_objective(Reader& r) {
                     r.expect(':');
                     if      (lk == "n")    link.neighbor_num    = static_cast<uint32_t>(r.read_int());
                     else if (lk == "c")    link.neighbor_creator = static_cast<uint32_t>(r.read_int());
-                    else if (lk == "road") {
-                        r.skip_ws();
-                        if (r.consume('t')) { link.is_road = true;  r.skip_value(); }
-                        else                { link.is_road = false; r.skip_value(); }
-                    }
-                    else if (lk == "rail") {
-                        r.skip_ws();
-                        if (r.consume('t')) { link.is_rail = true;  r.skip_value(); }
-                        else                { link.is_rail = false; r.skip_value(); }
-                    }
+                    else if (lk == "road") link.is_road = r.read_bool();
+                    else if (lk == "rail") link.is_rail = r.read_bool();
                     else if (lk == "costs") {
                         // Per-movement-type traversal cost array (8 uchar).
                         r.skip_ws(); r.expect('[');

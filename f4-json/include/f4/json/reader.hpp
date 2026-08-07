@@ -30,10 +30,13 @@
 #pragma once
 
 #include <cctype>
+#include <charconv>
 #include <cstddef>
-#include <cstdlib>
+#include <cstdlib>      // std::strtol is still used for \u hex (locale-independent for base 16)
 #include <stdexcept>
 #include <string>
+#include <string_view>
+#include <system_error>
 
 namespace f4::json {
 
@@ -124,12 +127,15 @@ public:
                             throw std::runtime_error(
                                 "f4::json: truncated \\u escape");
                         }
-                        char buf[5] = {
-                            s_[pos_+2], s_[pos_+3], s_[pos_+4], s_[pos_+5], 0
-                        };
-                        char* end = nullptr;
-                        long code = std::strtol(buf, &end, 16);
-                        if (end != buf + 4) {
+                        // std::from_chars with base 16 is locale-independent
+                        // (hex digits are locale-independent, but using
+                        // from_chars here keeps the entire reader free of
+                        // locale-sensitive stdlib surface).
+                        int code = 0;
+                        const char* first = s_.data() + pos_ + 2;
+                        const char* last  = s_.data() + pos_ + 6;
+                        auto [ptr, ec] = std::from_chars(first, last, code, 16);
+                        if (ec != std::errc{} || ptr != last) {
                             throw std::runtime_error(
                                 "f4::json: malformed \\u escape");
                         }
@@ -169,7 +175,21 @@ public:
                 "f4::json: expected integer at position " +
                 std::to_string(start));
         }
-        return std::strtol(s_.c_str() + start, nullptr, 10);
+        // std::from_chars is locale-independent (unlike std::strtol with
+        // base 0, which can interpret grouping/negative zero differently
+        // in exotic locales). The digit characters 0-9 are locale-independent
+        // but the explicit-from_chars form is the C++20 idiomatic choice and
+        // removes any locale-sensitive stdlib surface from the hot path.
+        long result = 0;
+        const char* first = s_.data() + start;
+        const char* last  = s_.data() + pos_;
+        auto [ptr, ec] = std::from_chars(first, last, result, 10);
+        if (ec != std::errc{}) {
+            throw std::runtime_error(
+                "f4::json: integer parse failed at position " +
+                std::to_string(start));
+        }
+        return result;
     }
 
     // Read a JSON number (integer or float, possibly in scientific notation).
@@ -191,7 +211,38 @@ public:
                 "f4::json: expected number at position " +
                 std::to_string(start));
         }
-        return std::strtod(s_.c_str() + start, nullptr);
+        // CRITICAL: std::strtod is locale-dependent. With LC_NUMERIC=de_DE.UTF-8
+        // the literal "3.14" parses as 3.0 (the '.' is treated as a thousand
+        // separator). This broke .tea/.cmp/.obj loaders the moment a non-C
+        // locale was active. std::from_chars is locale-independent by spec
+        // (C++17 §charconv), so the parse result is identical in every locale.
+        double result = 0.0;
+        const char* first = s_.data() + start;
+        const char* last  = s_.data() + pos_;
+        auto [ptr, ec] = std::from_chars(first, last, result);
+        if (ec != std::errc{}) {
+            throw std::runtime_error(
+                "f4::json: number parse failed at position " +
+                std::to_string(start));
+        }
+        return result;
+    }
+
+    // Read a JSON boolean (literal `true` or `false`). Throws on anything
+    // else. Replaces the hand-rolled `if (r.consume('t')) ... skip_value()`
+    // pattern that breaks under strict skip_value validation (CHANGES.md C5).
+    bool read_bool() {
+        skip_ws();
+        if (pos_ + 4 <= s_.size() && s_.compare(pos_, 4, "true") == 0) {
+            pos_ += 4;
+            return true;
+        }
+        if (pos_ + 5 <= s_.size() && s_.compare(pos_, 5, "false") == 0) {
+            pos_ += 5;
+            return false;
+        }
+        throw std::runtime_error(
+            "f4::json: expected bool at position " + std::to_string(pos_));
     }
 
     // Skip the value at the current position: any of string / number /
@@ -224,12 +275,43 @@ public:
                 expect(',');
             }
         } else {
-            // Bare token: true, false, null, or a number. Advance until
-            // we hit a structural delimiter or whitespace.
-            while (pos_ < s_.size() &&
-                   s_[pos_] != ',' && s_[pos_] != '}' && s_[pos_] != ']' &&
-                   !std::isspace(static_cast<unsigned char>(s_[pos_]))) {
-                ++pos_;
+            // Bare token: must be one of true / false / null / a JSON number.
+            // We validate against the literals and a permissive number grammar;
+            // anything else (e.g. `truu`, `1.2.3.4`, `@#$%`) is a malformed
+            // document and we throw rather than silently dropping the field.
+            static constexpr std::string_view kTrue  = "true";
+            static constexpr std::string_view kFalse = "false";
+            static constexpr std::string_view kNull  = "null";
+            auto starts_with = [&](std::string_view kw) {
+                return pos_ + kw.size() <= s_.size() &&
+                       s_.compare(pos_, kw.size(), kw) == 0;
+            };
+            if (starts_with(kTrue)) {
+                pos_ += kTrue.size();
+            } else if (starts_with(kFalse)) {
+                pos_ += kFalse.size();
+            } else if (starts_with(kNull)) {
+                pos_ += kNull.size();
+            } else {
+                // Number grammar: optional sign, digits, optional .digits,
+                // optional (e|E) optional +-digits. We accept the run and
+                // then verify the consumed slice is non-empty and contains
+                // at least one digit.
+                const std::size_t tok_start = pos_;
+                if (pos_ < s_.size() && (s_[pos_] == '-' || s_[pos_] == '+')) ++pos_;
+                bool saw_digit = false;
+                while (pos_ < s_.size() &&
+                       (std::isdigit(static_cast<unsigned char>(s_[pos_])) ||
+                        s_[pos_] == '.' || s_[pos_] == 'e' || s_[pos_] == 'E' ||
+                        s_[pos_] == '+' || s_[pos_] == '-')) {
+                    if (std::isdigit(static_cast<unsigned char>(s_[pos_]))) saw_digit = true;
+                    ++pos_;
+                }
+                if (pos_ == tok_start || !saw_digit) {
+                    throw std::runtime_error(
+                        "f4::json: malformed bare token at position " +
+                        std::to_string(tok_start));
+                }
             }
         }
     }

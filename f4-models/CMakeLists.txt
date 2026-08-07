@@ -16,6 +16,8 @@ add_library(f4-models STATIC
     src/model_json.cpp
     src/tex_reader.cpp
 )
+target_link_libraries(f4-models PUBLIC f4_warnings)
+
 target_include_directories(f4-models
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>

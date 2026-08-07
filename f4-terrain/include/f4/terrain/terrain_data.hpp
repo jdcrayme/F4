@@ -41,6 +41,12 @@
 
 namespace f4::terrain {
 
+/// THEATER.MAP file magic (bytes on disk in little-endian: AE FF 4C 44).
+/// Documented in the header comment above; validated by load(). Exposed
+/// publicly so consumers (hex inspector, tests, future converters) all
+/// agree on a single source of truth instead of repeating the literal.
+constexpr uint32_t THEATER_MAP_MAGIC = 0x444CFFAEu;
+
 /// Coarse terrain classification used for color-coding and (future) movement
 /// costs. Mirrors the bands used by FreeFalcon's renderer for fallback
 /// shading when textures aren't loaded. Sufficient for strategic-map

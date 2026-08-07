@@ -90,6 +90,7 @@ add_library(f4_models_viewer STATIC
     ${RLIMGUI_SOURCES}
     ${TINYFILEDIALOGS_SOURCES}
 )
+target_link_libraries(f4_models_viewer PUBLIC f4_warnings)
 target_include_directories(f4_models_viewer
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>

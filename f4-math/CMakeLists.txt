@@ -12,6 +12,8 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # never any domain library). This guarantees the library can be lifted into
 # any project without dragging in domain coupling.
 add_library(f4-math INTERFACE)
+target_link_libraries(f4-math INTERFACE f4_warnings)
+
 target_include_directories(f4-math INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>

@@ -13,7 +13,11 @@
 //
 //   2. The cached last-index hint is preserved (this is the perf-critical
 //      optimization for 240 Hz aero lookups where Mach/alpha advance
-//      smoothly frame-to-frame).
+//      smoothly frame-to-frame). The cache uses std::atomic with relaxed
+//      ordering so concurrent reads on a shared table (e.g. multiple AI
+//      aircraft sharing an AircraftConfig's aero tables) are race-free.
+//      Relaxed atomics are ~1ns on x86, preserving the cache's perf benefit
+//      while making the const operator() thread-safe by the C++ memory model.
 //
 //   3. The original FF TwoDimensionTable::Lookup (falclib/lookuptable.cpp)
 //      has a bug: the fraction computation uses `breakPoint[t]` for both
@@ -29,6 +33,7 @@
 #pragma once
 
 #include <algorithm>
+#include <atomic>
 #include <concepts>
 #include <cstddef>
 #include <functional>
@@ -62,8 +67,10 @@ concept Interpolable = requires(T a, T b, double t) {
 //
 // Layout: two parallel vectors x_[i] and y_[i]. The x_ axis MUST be sorted
 // ascending; this is checked at construction time. Lookups use a cached
-// last index (mutable, mutated through const operator()) for fast smooth-
-// frame-to-frame access.
+// last index (mutable atomic, mutated through const operator()) for fast
+// smooth-frame-to-frame access. The atomic is race-free under concurrent
+// reads; the cache is only a hint, so a racy write simply causes the next
+// call to do a full scan (still correct).
 // ============================================================================
 template<typename X, typename Y>
     requires Interpolable<X> && Interpolable<Y>
@@ -71,7 +78,7 @@ class Table1D {
     std::vector<X> x_;
     std::vector<Y> y_;
     BoundaryMode mode_ = BoundaryMode::Clamp;
-    mutable std::size_t last_ = 0;
+    mutable std::atomic<std::size_t> last_{0};
 
 public:
     Table1D() = default;
@@ -87,6 +94,39 @@ public:
         if (!std::is_sorted(x_.begin(), x_.end())) {
             throw std::invalid_argument("Table1D: x breakpoints must be sorted ascending");
         }
+    }
+
+    // Note: std::atomic is non-copyable, so we define explicit copy/move
+    // that load/store the cache via relaxed atomics. The cache value itself
+    // is just a hint, so any value (including stale) is acceptable.
+    Table1D(const Table1D& other)
+        : x_(other.x_), y_(other.y_), mode_(other.mode_),
+          last_(other.last_.load(std::memory_order_relaxed)) {}
+
+    Table1D& operator=(const Table1D& other) {
+        if (this != &other) {
+            x_ = other.x_;
+            y_ = other.y_;
+            mode_ = other.mode_;
+            last_.store(other.last_.load(std::memory_order_relaxed),
+                        std::memory_order_relaxed);
+        }
+        return *this;
+    }
+
+    Table1D(Table1D&& other) noexcept
+        : x_(std::move(other.x_)), y_(std::move(other.y_)), mode_(other.mode_),
+          last_(other.last_.load(std::memory_order_relaxed)) {}
+
+    Table1D& operator=(Table1D&& other) noexcept {
+        if (this != &other) {
+            x_ = std::move(other.x_);
+            y_ = std::move(other.y_);
+            mode_ = other.mode_;
+            last_.store(other.last_.load(std::memory_order_relaxed),
+                        std::memory_order_relaxed);
+        }
+        return *this;
     }
 
     // Lookup y(x) via linear interpolation. Uses cached last index for speed.
@@ -115,7 +155,7 @@ public:
         }
 
         // --- Interior: find bracket using cached hint ---
-        std::size_t i = last_;
+        std::size_t i = last_.load(std::memory_order_relaxed);
         if (i >= n - 1) i = 0;
 
         if (query < x_[i]) {
@@ -125,7 +165,7 @@ public:
             // Scan forward
             while (i < n - 2 && query >= x_[i + 1]) ++i;
         }
-        last_ = i;
+        last_.store(i, std::memory_order_relaxed);
 
         const double t = static_cast<double>(query - x_[i]) /
                          static_cast<double>(x_[i + 1] - x_[i]);
@@ -163,8 +203,9 @@ class Table2D {
     std::vector<ColX> cols_;       // inner (fast) axis, e.g. alpha
     std::vector<Z>    data_;       // data_[row * num_cols + col]
     BoundaryMode mode_ = BoundaryMode::Clamp;
-    mutable std::size_t last_row_ = 0;
-    mutable std::size_t last_col_ = 0;
+    // Atomic relaxed — see Table1D comment. Race-free under concurrent reads.
+    mutable std::atomic<std::size_t> last_row_{0};
+    mutable std::atomic<std::size_t> last_col_{0};
 
 public:
     Table2D() = default;
@@ -206,6 +247,46 @@ public:
         validate_axes();
     }
 
+    // Explicit copy/move — std::atomic is non-copyable.
+    Table2D(const Table2D& other)
+        : rows_(other.rows_), cols_(other.cols_), data_(other.data_), mode_(other.mode_),
+          last_row_(other.last_row_.load(std::memory_order_relaxed)),
+          last_col_(other.last_col_.load(std::memory_order_relaxed)) {}
+
+    Table2D& operator=(const Table2D& other) {
+        if (this != &other) {
+            rows_ = other.rows_;
+            cols_ = other.cols_;
+            data_ = other.data_;
+            mode_ = other.mode_;
+            last_row_.store(other.last_row_.load(std::memory_order_relaxed),
+                            std::memory_order_relaxed);
+            last_col_.store(other.last_col_.load(std::memory_order_relaxed),
+                            std::memory_order_relaxed);
+        }
+        return *this;
+    }
+
+    Table2D(Table2D&& other) noexcept
+        : rows_(std::move(other.rows_)), cols_(std::move(other.cols_)),
+          data_(std::move(other.data_)), mode_(other.mode_),
+          last_row_(other.last_row_.load(std::memory_order_relaxed)),
+          last_col_(other.last_col_.load(std::memory_order_relaxed)) {}
+
+    Table2D& operator=(Table2D&& other) noexcept {
+        if (this != &other) {
+            rows_ = std::move(other.rows_);
+            cols_ = std::move(other.cols_);
+            data_ = std::move(other.data_);
+            mode_ = other.mode_;
+            last_row_.store(other.last_row_.load(std::memory_order_relaxed),
+                            std::memory_order_relaxed);
+            last_col_.store(other.last_col_.load(std::memory_order_relaxed),
+                            std::memory_order_relaxed);
+        }
+        return *this;
+    }
+
     // Lookup z(row_query, col_query) via bilinear interpolation.
     Z operator()(RowX row_query, ColX col_query) const {
         const std::size_t nr = rows_.size();
@@ -216,14 +297,18 @@ public:
         // --- Resolve the row bracket [r0, r1] and fractional tr ---
         std::size_t r0, r1;
         double tr;
+        std::size_t row_hint = last_row_.load(std::memory_order_relaxed);
         [[maybe_unused]] bool row_clamped =
-            resolve_axis(rows_, row_query, last_row_, r0, r1, tr, "row");
+            resolve_axis(rows_, row_query, row_hint, r0, r1, tr, "row");
+        last_row_.store(row_hint, std::memory_order_relaxed);
 
         // --- Resolve the col bracket [c0, c1] and fractional tc ---
         std::size_t c0, c1;
         double tc;
+        std::size_t col_hint = last_col_.load(std::memory_order_relaxed);
         [[maybe_unused]] bool col_clamped =
-            resolve_axis(cols_, col_query, last_col_, c0, c1, tc, "col");
+            resolve_axis(cols_, col_query, col_hint, c0, c1, tc, "col");
+        last_col_.store(col_hint, std::memory_order_relaxed);
 
         // If both axes were clamped AND we're in Error mode, the resolver
         // already threw. If one axis is clamped in Clamp mode, we still want

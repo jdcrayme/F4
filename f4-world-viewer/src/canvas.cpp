@@ -359,8 +359,7 @@ void ViewerApp::draw_canvas() {
 
             // Owner from tag
             auto team_tag = h.get_tag(f4::entities::tags::TEAM);
-            const uint8_t owner = (team_tag && team_tag->type == f4::entities::TagValue::Type::Int)
-                ? static_cast<uint8_t>(team_tag->int_val) : 0;
+            const uint8_t owner = (team_tag && team_tag->as_int()) ? static_cast<uint8_t>(*team_tag->as_int()) : 0;
             RlColor c = color_for_owner(owner);
             if (impl_->team_filter != 0xFF && owner != impl_->team_filter) {
                 c.r = static_cast<unsigned char>(c.r * 0.3f);
@@ -653,8 +652,7 @@ void ViewerApp::draw_canvas() {
                 if (uc) {
                     const char* name = uc->class_name.empty() ? "(no class)" : uc->class_name.c_str();
                     auto team_tag = h.get_tag(f4::entities::tags::TEAM);
-                    const uint8_t owner = (team_tag && team_tag->type == f4::entities::TagValue::Type::Int)
-                        ? static_cast<uint8_t>(team_tag->int_val) : 0;
+                    const uint8_t owner = (team_tag && team_tag->as_int()) ? static_cast<uint8_t>(*team_tag->as_int()) : 0;
                     snprintf(buf, sizeof(buf), "Sel: [Unit] %s  owner=%u", name, owner);
                     draw_text(buf, accent);
                 }
@@ -763,8 +761,7 @@ void ViewerApp::draw_canvas() {
                 auto* tr = h.get<f4::entities::TransformComponent>();
                 if (!tr) continue;
                 auto team_tag = h.get_tag(f4::entities::tags::TEAM);
-                const uint8_t owner = (team_tag && team_tag->type == f4::entities::TagValue::Type::Int)
-                    ? static_cast<uint8_t>(team_tag->int_val) : 0;
+                const uint8_t owner = (team_tag && team_tag->as_int()) ? static_cast<uint8_t>(*team_tag->as_int()) : 0;
                 const Vector2 p = world_to_mini(impl_->grid_x(tr), impl_->grid_y(tr));
                 const RlColor uc = color_for_owner(owner);
                 DrawPixel(static_cast<int>(p.x), static_cast<int>(p.y),
