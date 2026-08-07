@@ -462,6 +462,26 @@ TEST(UnitComponents, UnitClassScoreComponent) {
     EXPECT_EQ(h.get<UnitClassScoreComponent>()->scores[0], 10);
 }
 
+TEST(UnitComponents, MovementOrdersComponent) {
+    EntityWorld w;
+    auto h = w.create();
+    auto& c = h.add<MovementOrdersComponent>();
+    c.dest_x = 500;
+    c.dest_y = -300;
+    c.movement_type = 4;
+    c.movement_speed = 30;
+    c.max_range = 250;
+    c.movement_type_name = "Wheeled";
+    EXPECT_TRUE(h.has<MovementOrdersComponent>());
+    auto* got = h.get<MovementOrdersComponent>();
+    EXPECT_EQ(got->dest_x, 500);
+    EXPECT_EQ(got->dest_y, -300);
+    EXPECT_EQ(got->movement_type, 4);
+    EXPECT_EQ(got->movement_speed, 30);
+    EXPECT_EQ(got->max_range, 250);
+    EXPECT_EQ(got->movement_type_name, "Wheeled");
+}
+
 // ============================================================================
 // Phase 2b: Utility components — compile and instantiate
 // ============================================================================

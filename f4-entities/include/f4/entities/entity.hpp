@@ -387,6 +387,25 @@ namespace f4::entities {
         std::array<uint8_t, 16> scores{};
     };
 
+    /// Movement orders for ground units (Battalion / Brigade / TaskForce).
+    ///
+    /// Promoted from PropertyBag residue (Phase 5 cleanup). Previously these
+    /// fields were dumped into PropertyBag with hardcoded string keys
+    /// ("dest_x", "dest_y", "movement_speed", "max_range", "movement_type",
+    /// "movement_type_name"). They have clear domain meaning — they describe
+    /// where a ground unit is ordered to move and how fast it can get there —
+    /// so they deserve a typed component.
+    ///
+    /// Conditionally added: only when at least one field is non-zero/non-empty.
+    struct MovementOrdersComponent : Component<MovementOrdersComponent> {
+        int16_t dest_x = 0;             // destination grid X
+        int16_t dest_y = 0;             // destination grid Y
+        int32_t movement_type = 0;      // MoveType enum (from Falcon4.UCD)
+        int16_t movement_speed = 0;     // max speed (units TBD by MoveType)
+        int16_t max_range = 0;          // max travel range
+        std::string movement_type_name; // human-readable MoveType name
+    };
+
     // --- Utility components (Phase 2b) -------------------------------------------
 
     /// Typed key-value bag for unstable/reverse-engineering fields. Fields
