@@ -25,10 +25,12 @@
 // tinyfiledialogs for native file open dialogs
 #include <tinyfiledialogs.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <string>
+#include <vector>
 
 namespace f4::models_viewer {
 
@@ -110,6 +112,23 @@ static void draw_menu_bar(ViewerApp::Impl& impl) {
 
             ImGui::Separator();
 
+            if (ImGui::MenuItem("Save Screenshot...", "F2")) {
+                const char* png_filter[] = {"*.png"};
+                const char* png_result = tinyfd_saveFileDialog(
+                    "Save Screenshot", "f4_model_viewer.png",
+                    1, png_filter, "PNG images");
+                if (png_result) {
+                    // Schedule a screenshot 0.5s in the future (gives the
+                    // dialog time to close and the next frame to render).
+                    impl.screenshot_pending = true;
+                    impl.screenshot_at = GetTime() + 0.5;
+                    impl.screenshot_path = std::filesystem::path(png_result);
+                    impl.status_msg = std::string("Screenshot queued: ") + png_result;
+                }
+            }
+
+            ImGui::Separator();
+
             if (ImGui::MenuItem("Exit", "Alt+F4")) {
                 impl.should_exit = true;
             }
@@ -123,13 +142,17 @@ static void draw_menu_bar(ViewerApp::Impl& impl) {
             ImGui::Checkbox("Axes", &impl.show_axes);
             ImGui::Checkbox("Bounding Sphere", &impl.show_bounding_sphere);
             ImGui::Checkbox("AABB", &impl.show_aabb);
+            ImGui::Separator();
+            ImGui::Checkbox("Lighting", &impl.lighting_enabled);
+            ImGui::Checkbox("Light Gizmo", &impl.show_light_gizmo);
+            ImGui::Checkbox("Stats Overlay", &impl.show_stats_overlay);
             ImGui::EndMenu();
         }
 
         // ── Help ──────────────────────────────────────────────────────
         if (ImGui::BeginMenu("Help")) {
             if (ImGui::MenuItem("Controls")) {
-                impl.status_msg = "L-drag: orbit | R-drag: pan | Scroll: zoom | F: fit | R: reset";
+                impl.status_msg = "L-drag: orbit | R-drag: pan | Scroll: zoom | F: fit | R: reset | F2: screenshot";
             }
             ImGui::EndMenu();
         }
@@ -205,6 +228,21 @@ static void draw_model_browser(ViewerApp::Impl& impl) {
                                 ss.active_child = 0;
                                 ss.n_children = 2;
                                 impl.model_state.switches.push_back(ss);
+                            }
+
+                            // Rebuild animation tracks for the new model.
+                            // DOF 0 is auto-enabled by convention (typically
+                            // the rotor for aircraft).
+                            impl.animations.clear();
+                            impl.animations.reserve(m.effective_dofs());
+                            for (int d = 0; d < m.effective_dofs(); ++d) {
+                                ViewerApp::Impl::AnimationTrack t;
+                                t.dof_number = d;
+                                t.enabled = (d == 0);
+                                t.speed = (d == 0) ? 8.0f : 1.0f;
+                                t.phase = 0.0f;
+                                t.wrap_2pi = true;
+                                impl.animations.push_back(t);
                             }
 
                             impl.fit_to_model();
@@ -296,23 +334,343 @@ static void draw_inspector(ViewerApp::Impl& impl) {
 
 // ── DOF panel ──────────────────────────────────────────────────────────────
 static void draw_dof_panel(ViewerApp::Impl& impl) {
-    ImGui::SetNextWindowSize({300, 200}, ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize({320, 240}, ImGuiCond_FirstUseEver);
     if (ImGui::Begin("DOFs")) {
         if (impl.model_state.dofs.empty()) {
             ImGui::TextDisabled("No DOFs for this model.");
         } else {
+            // Header row: master controls
+            if (ImGui::Button("Reset All")) {
+                impl.reset_animations();
+            }
+            ImGui::SameLine();
+            if (ImGui::Button(impl.animation_paused ? "Play" : "Pause")) {
+                impl.animation_paused = !impl.animation_paused;
+            }
+            ImGui::SameLine();
+            ImGui::TextDisabled("(%d DOFs)", static_cast<int>(impl.model_state.dofs.size()));
+
+            ImGui::Separator();
+
+            // Sliders
             bool changed = false;
             for (auto& dof : impl.model_state.dofs) {
                 ImGui::PushID(dof.dof_number);
+
+                // Find the matching animation track (if any) so we can
+                // show an Auto checkbox on the same row as the slider.
+                ViewerApp::Impl::AnimationTrack* track = nullptr;
+                for (auto& t : impl.animations) {
+                    if (t.dof_number == dof.dof_number) { track = &t; break; }
+                }
+
                 char label[64];
                 std::snprintf(label, sizeof(label), "DOF %d", dof.dof_number);
                 if (ImGui::SliderFloat(label, &dof.value, dof.min, dof.max)) {
                     changed = true;
+                    // If the user drags a DOF manually, disable its
+                    // animation track to avoid fighting.
+                    if (track) track->enabled = false;
                 }
+
+                // Auto checkbox on the same row, right-aligned
+                if (track) {
+                    ImGui::SameLine();
+                    char cb_label[64];
+                    std::snprintf(cb_label, sizeof(cb_label), "Auto##%d", dof.dof_number);
+                    if (ImGui::Checkbox(cb_label, &track->enabled)) {
+                        // Enabling auto resets phase so it starts cleanly
+                        if (track->enabled) track->phase = 0.0f;
+                    }
+                }
+
                 ImGui::PopID();
             }
             if (changed) {
                 impl.meshes_dirty = true;
+            }
+        }
+    }
+    ImGui::End();
+}
+
+// ── Animation panel ────────────────────────────────────────────────────────
+// Per-track speed / mode controls. Each DOF with an animation track gets
+// a row: [enabled] [speed slider] [mode dropdown] [phase reset]
+static void draw_animation_panel(ViewerApp::Impl& impl) {
+    ImGui::SetNextWindowSize({340, 220}, ImGuiCond_FirstUseEver);
+    if (ImGui::Begin("Animation")) {
+        if (impl.animations.empty()) {
+            ImGui::TextDisabled("No DOFs (select a model first).");
+        } else {
+            // Global controls
+            if (ImGui::Button(impl.animation_paused ? "Resume All##anim" : "Pause All##anim")) {
+                impl.animation_paused = !impl.animation_paused;
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Reset Phases")) {
+                for (auto& t : impl.animations) t.phase = 0.0f;
+            }
+            ImGui::SameLine();
+            ImGui::TextDisabled("(space toggles)");
+
+            ImGui::Separator();
+
+            // Per-track controls
+            bool changed = false;
+            for (auto& t : impl.animations) {
+                ImGui::PushID(t.dof_number);
+
+                // Find the matching DofState for live value display
+                const f4::models::DofState* ds = nullptr;
+                for (const auto& d : impl.model_state.dofs) {
+                    if (d.dof_number == t.dof_number) { ds = &d; break; }
+                }
+
+                char header[64];
+                std::snprintf(header, sizeof(header),
+                              "DOF %d%s", t.dof_number,
+                              t.enabled ? " (running)" : "");
+                if (ImGui::Checkbox(header, &t.enabled)) {
+                    if (t.enabled) t.phase = 0.0f;
+                    changed = true;
+                }
+
+                if (t.enabled) {
+                    ImGui::Indent(16.0f);
+                    ImGui::SetNextItemWidth(180);
+                    if (ImGui::SliderFloat("Speed (Hz)", &t.speed, 0.0f, 30.0f, "%.2f")) {
+                        changed = true;
+                    }
+                    ImGui::SameLine();
+                    if (ImGui::Button("Reset##phase")) {
+                        t.phase = 0.0f;
+                    }
+
+                    ImGui::SetNextItemWidth(180);
+                    const char* mode = t.wrap_2pi ? "Wrap 0..2pi" : "Ping-pong min..max";
+                    if (ImGui::BeginCombo("Mode##anim", mode)) {
+                        if (ImGui::Selectable("Wrap 0..2pi", t.wrap_2pi)) {
+                            t.wrap_2pi = true; changed = true;
+                        }
+                        if (ImGui::Selectable("Ping-pong min..max", !t.wrap_2pi)) {
+                            t.wrap_2pi = false; changed = true;
+                        }
+                        ImGui::EndCombo();
+                    }
+
+                    if (ds) {
+                        ImGui::TextDisabled("value=%.3f  range=[%.2f, %.2f]",
+                                            ds->value, ds->min, ds->max);
+                    }
+                    ImGui::Unindent(16.0f);
+                }
+
+                ImGui::PopID();
+                ImGui::Separator();
+            }
+            if (changed) impl.meshes_dirty = true;
+        }
+    }
+    ImGui::End();
+}
+
+// ── Lighting panel ─────────────────────────────────────────────────────────
+static void draw_lighting_panel(ViewerApp::Impl& impl) {
+    ImGui::SetNextWindowSize({300, 280}, ImGuiCond_FirstUseEver);
+    if (ImGui::Begin("Lighting")) {
+        ImGui::Checkbox("Enable directional light", &impl.lighting_enabled);
+        ImGui::Checkbox("Show light gizmo", &impl.show_light_gizmo);
+        ImGui::Separator();
+
+        // Direction as separate sliders — easier to drag than a 3-float widget
+        float dir[3] = { impl.light_direction.x,
+                         impl.light_direction.y,
+                         impl.light_direction.z };
+        ImGui::Text("Direction (world space)");
+        ImGui::SetNextItemWidth(-1);
+        if (ImGui::SliderFloat3("##dir", dir, -1.0f, 1.0f, "%.2f")) {
+            impl.light_direction = { dir[0], dir[1], dir[2] };
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Normalize")) {
+            const float l = std::sqrt(dir[0]*dir[0] + dir[1]*dir[1] + dir[2]*dir[2]);
+            if (l > 0.0001f) {
+                impl.light_direction = { dir[0]/l, dir[1]/l, dir[2]/l };
+            }
+        }
+
+        // Quick presets
+        ImGui::Text("Presets:");
+        ImGui::SameLine();
+        if (ImGui::Button("Overhead")) {
+            impl.light_direction = { 0.0f, -1.0f, 0.0f };
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Sunset")) {
+            impl.light_direction = { 0.7f, -0.3f, 0.7f };
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Front-right")) {
+            impl.light_direction = { 0.65f, -1.0f, 0.35f };
+        }
+
+        ImGui::Separator();
+        ImGui::SetNextItemWidth(180);
+        ImGui::SliderFloat("Intensity", &impl.light_intensity, 0.0f, 3.0f, "%.2f");
+
+        // Color editors
+        float amb[4] = { impl.ambient_color.r / 255.0f,
+                         impl.ambient_color.g / 255.0f,
+                         impl.ambient_color.b / 255.0f,
+                         impl.ambient_color.a / 255.0f };
+        float light[4] = { impl.light_color.r / 255.0f,
+                           impl.light_color.g / 255.0f,
+                           impl.light_color.b / 255.0f,
+                           impl.light_color.a / 255.0f };
+        if (ImGui::ColorEdit4("Ambient", amb)) {
+            impl.ambient_color = {
+                static_cast<unsigned char>(amb[0] * 255.0f),
+                static_cast<unsigned char>(amb[1] * 255.0f),
+                static_cast<unsigned char>(amb[2] * 255.0f),
+                static_cast<unsigned char>(amb[3] * 255.0f)
+            };
+        }
+        if (ImGui::ColorEdit4("Light", light)) {
+            impl.light_color = {
+                static_cast<unsigned char>(light[0] * 255.0f),
+                static_cast<unsigned char>(light[1] * 255.0f),
+                static_cast<unsigned char>(light[2] * 255.0f),
+                static_cast<unsigned char>(light[3] * 255.0f)
+            };
+        }
+    }
+    ImGui::End();
+}
+
+// ── Materials panel (ColorBank viewer) ─────────────────────────────────────
+// Renders the parsed ColorBank as a grid of swatches. Clicking a swatch
+// copies its RGBA value to the status bar — useful for identifying which
+// index a particular vertex color resolves to.
+static void draw_materials_panel(ViewerApp::Impl& impl) {
+    ImGui::SetNextWindowSize({400, 320}, ImGuiCond_FirstUseEver);
+    if (ImGui::Begin("Materials (ColorBank)")) {
+        const auto& cb = impl.db.color_bank();
+        if (cb.empty()) {
+            ImGui::TextDisabled("No ColorBank loaded.");
+            ImGui::TextDisabled("Load an HDR file to populate the ColorBank.");
+        } else {
+            ImGui::Text("ColorBank: %zu entries (%d darkened)",
+                        cb.size(), cb.n_darkened);
+            ImGui::Separator();
+
+            // Lazy-rebuild the swatch texture if it's stale or missing.
+            if (impl.colorbank_dirty || impl.colorbank_texture.id == 0) {
+                impl.rebuild_colorbank_texture();
+            }
+
+            // Render the texture as a grid of swatches using ImageButton.
+            // Each swatch is 16x16 in the panel; the underlying texture is
+            // one pixel per swatch scaled up viaImageButton.
+            const int swatch_px = 16;
+            const int cols = impl.colorbank_cols;
+            const int total = static_cast<int>(cb.size());
+            const int rows = (total + cols - 1) / cols;
+
+            ImGui::Text("Grid: %d cols x %d rows", cols, rows);
+            ImGui::Separator();
+
+            // Draw swatch grid using individual color buttons (more portable
+            // than ImageButton and works even if the texture upload failed).
+            for (int i = 0; i < total; ++i) {
+                if (i % cols != 0) ImGui::SameLine();
+
+                const uint32_t rgba = cb.rgba_at(i);
+                const unsigned char r = (rgba >> 24) & 0xFF;
+                const unsigned char g = (rgba >> 16) & 0xFF;
+                const unsigned char b = (rgba >> 8) & 0xFF;
+                const unsigned char a = rgba & 0xFF;
+
+                ImGui::PushID(i);
+                const ImVec4 col(r / 255.0f, g / 255.0f, b / 255.0f, a / 255.0f);
+                char btn_label[32];
+                std::snprintf(btn_label, sizeof(btn_label), "%d", i);
+                if (ImGui::ColorButton(btn_label, col,
+                                        ImGuiColorEditFlags_NoTooltip |
+                                        ImGuiColorEditFlags_AlphaPreview,
+                                        ImVec2(swatch_px, swatch_px))) {
+                    char msg[128];
+                    std::snprintf(msg, sizeof(msg),
+                        "ColorBank[%d] = R%d G%d B%d A%d", i, r, g, b, a);
+                    impl.status_msg = msg;
+                }
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("[%d] R%d G%d B%d A%d", i, r, g, b, a);
+                }
+                ImGui::PopID();
+            }
+
+            ImGui::Separator();
+            ImGui::TextDisabled("Click a swatch to copy its index/value to the status bar.");
+        }
+    }
+    ImGui::End();
+}
+
+// ── Texture Thumbnails panel ────────────────────────────────────────────────
+// Shows a scrollable grid of decoded RGBA thumbnails. Uses the same
+// texture_cache that the canvas populates lazily — to view a thumbnail,
+// the user must first select a model whose meshes reference it (which
+// triggers fetch_texture() in scene.cpp's upload_textures()).
+static void draw_texture_thumbnails_panel(ViewerApp::Impl& impl) {
+    ImGui::SetNextWindowSize({420, 360}, ImGuiCond_FirstUseEver);
+    if (ImGui::Begin("Texture Thumbnails")) {
+        const auto& tex_entries = impl.db.tex_entries();
+        if (tex_entries.empty()) {
+            ImGui::TextDisabled("No TEX bank loaded.");
+            ImGui::TextDisabled("Use File > Load TEX... or load HDR/LOD/TEX trio.");
+        } else {
+            ImGui::Text("Textures: %zu  |  Cached: %zu",
+                        tex_entries.size(), impl.texture_cache.size());
+            ImGui::Separator();
+
+            const int thumb_px = 64;
+            const int avail = static_cast<int>(ImGui::GetContentRegionAvail().x);
+            const int cols = std::max(1, avail / (thumb_px + 8));
+
+            int shown = 0;
+            for (std::size_t i = 0; i < tex_entries.size(); ++i) {
+                const auto& entry = tex_entries[i];
+                auto it = impl.texture_cache.find(static_cast<int>(i));
+                if (it == impl.texture_cache.end() || !it->second.uploaded) {
+                    // Skip textures that aren't decoded yet. The user can
+                    // populate the cache by selecting models that use them.
+                    continue;
+                }
+
+                if (shown % cols != 0) ImGui::SameLine();
+                ++shown;
+
+                ImGui::PushID(static_cast<int>(i));
+
+                // Render the cached Texture2D via rlImGuiImage
+                const Texture2D& tex = it->second.texture;
+                rlImGuiImageButtonSize("##tex", &tex,
+                                        Vector2(thumb_px, thumb_px));
+
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip(
+                        "tex %zu\ndim=%u\npal=%d\nsize=%u bytes\nalpha=%s",
+                        i, entry.dimension, entry.palette_id, entry.file_size,
+                        it->second.has_alpha ? "yes" : "no");
+                }
+                ImGui::PopID();
+            }
+
+            if (shown == 0) {
+                ImGui::TextDisabled("No textures decoded yet.");
+                ImGui::TextDisabled("Select a model whose meshes reference textures");
+                ImGui::TextDisabled("to populate this cache.");
             }
         }
     }
@@ -516,8 +874,67 @@ void ViewerApp::Impl::draw_imgui() {
     draw_switch_panel(*this);
     draw_lod_panel(*this);
     draw_texture_panel(*this);
+    draw_animation_panel(*this);
+    draw_lighting_panel(*this);
+    draw_materials_panel(*this);
+    draw_texture_thumbnails_panel(*this);
     draw_status_bar(*this);
     rlImGuiEnd();
+}
+
+// ── ColorBank texture builders ─────────────────────────────────────────────
+// A small 1-row RGBA8 image (one pixel per ColorBank entry) is uploaded
+// to the GPU lazily and used by the Materials panel. The texture itself
+// isn't currently used for rendering (the panel uses ImGui ColorButton
+// instead because it's more portable), but having it on the GPU lets a
+// future debug overlay show the bank inline without round-tripping through
+// ImGui. Kept small (32 cols x ceil(n/32) rows) so the upload is cheap.
+
+void ViewerApp::Impl::rebuild_colorbank_texture() {
+    if (colorbank_texture.id != 0) {
+        UnloadTexture(colorbank_texture);
+        colorbank_texture = {};
+    }
+    colorbank_dirty = false;
+
+    const auto& cb = db.color_bank();
+    if (cb.empty()) return;
+
+    const int cols = colorbank_cols;
+    const int total = static_cast<int>(cb.size());
+    const int rows = (total + cols - 1) / cols;
+    const int w = cols;
+    const int h = rows;
+
+    std::vector<uint8_t> pixels(static_cast<std::size_t>(w * h) * 4, 0);
+    for (int i = 0; i < total; ++i) {
+        const uint32_t rgba = cb.rgba_at(i);
+        const int x = i % cols;
+        const int y = i / cols;
+        uint8_t* p = &pixels[(static_cast<std::size_t>(y) * w + x) * 4];
+        p[0] = static_cast<uint8_t>((rgba >> 24) & 0xFF);  // R
+        p[1] = static_cast<uint8_t>((rgba >> 16) & 0xFF);  // G
+        p[2] = static_cast<uint8_t>((rgba >> 8) & 0xFF);   // B
+        p[3] = static_cast<uint8_t>(rgba & 0xFF);          // A
+    }
+
+    Image img = {};
+    img.data = pixels.data();
+    img.width = w;
+    img.height = h;
+    img.mipmaps = 1;
+    img.format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8;
+    // LoadTextureFromImage copies the pixel data, so it's safe for the
+    // local `pixels` vector to go out of scope after this call.
+    colorbank_texture = LoadTextureFromImage(img);
+}
+
+void ViewerApp::Impl::unload_colorbank_texture() {
+    if (colorbank_texture.id != 0) {
+        UnloadTexture(colorbank_texture);
+        colorbank_texture = {};
+    }
+    colorbank_dirty = true;
 }
 
 } // namespace f4::models_viewer

@@ -124,6 +124,54 @@ struct ViewerApp::Impl {
     bool show_axes = true;
     bool show_bounding_sphere = false;
     bool show_aabb = false;
+    bool show_stats_overlay = true;       ///< top-left canvas overlay
+    bool show_light_gizmo = true;          ///< directional-light arrow
+
+    // ── Lighting ──────────────────────────────────────────────────────
+    // When lighting_enabled is true, meshes are drawn with a custom lit
+    // shader (loaded lazily on first draw_canvas call) that implements
+    // lambertian diffuse + ambient. Most FreeFalcon models look
+    // dramatically better with a single directional light because their
+    // vertex normals were authored for it. When the shader fails to
+    // compile (e.g. on a headless GL context), the viewer silently
+    // falls back to Raylib's default unlit shader.
+    bool   lighting_enabled = true;
+    Vector3 light_direction = { 0.65f, -1.0f, 0.35f };  // world-space, normalized lazily
+    float  light_intensity  = 1.0f;
+    Color  ambient_color    = { 60, 60, 70, 255 };
+    Color  light_color      = { 255, 250, 235, 255 };
+    Shader lit_shader       = {};
+    bool   lit_shader_loaded = false;  ///< true once we've tried (id may still be 0 on failure)
+    int    lit_shader_dir_loc       = -1;
+    int    lit_shader_color_loc     = -1;
+    int    lit_shader_ambient_loc   = -1;
+
+    // ── Animation ─────────────────────────────────────────────────────
+    // Per-DOF auto-animation. Lets the user click "Auto" on a DOF slider
+    // (typically the rotor) to make it spin continuously. Useful for
+    // visually validating the DOF transform pipeline.
+    struct AnimationTrack {
+        int   dof_number = -1;     ///< which DOF this track drives
+        bool  enabled    = false;  ///< auto-animate this DOF
+        float speed      = 1.0f;   ///< cycles per second (1 = 2π rad/s)
+        float phase      = 0.0f;   ///< accumulated phase (radians)
+        bool  wrap_2pi   = true;   ///< true: 0..2π; false: min..max ping-pong
+    };
+    std::vector<AnimationTrack> animations;
+    bool animation_paused = false;
+
+    // ── Per-frame stats (reset every frame in draw_canvas) ────────────
+    int   stats_draw_calls = 0;
+    int   stats_meshes_drawn = 0;
+    std::size_t stats_vertices_drawn = 0;
+
+    // ── ColorBank thumbnail cache ─────────────────────────────────────
+    // A single RGBA8 Image (Texture2D on the GPU) holding a horizontal
+    // strip of every ColorBank entry, rebuilt lazily when the bank changes.
+    // Used by the Materials panel to render clickable swatches.
+    Texture2D colorbank_texture = {};
+    bool      colorbank_dirty   = true;
+    int       colorbank_cols    = 32;  ///< swatches per row
 
     // ── Status bar ────────────────────────────────────────────────────
     std::string status_msg;
@@ -156,11 +204,21 @@ struct ViewerApp::Impl {
     // canvas3d.cpp
     void draw_canvas();
     void draw_bounding_volumes();
+    void draw_stats_overlay();
+    void draw_light_gizmo();
 
     // file_ops.cpp
     void load_model_files(const std::filesystem::path& hdr_path,
                           const std::filesystem::path& lod_path);
     void load_from_install();
+
+    // animation.cpp logic (lives in viewer_app.cpp for now — small)
+    void tick_animation(float dt);
+    void reset_animations();
+
+    // colorbank.cpp logic (lives in imgui_panels.cpp for now)
+    void rebuild_colorbank_texture();
+    void unload_colorbank_texture();
 
     // imgui_panels.cpp
     void draw_imgui();

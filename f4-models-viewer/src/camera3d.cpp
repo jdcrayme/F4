@@ -58,6 +58,11 @@ void ViewerApp::Impl::handle_camera_input() {
         if (IsKeyPressed(KEY_R)) {
             reset_camera();
         }
+        // Space = pause/resume animation
+        if (IsKeyPressed(KEY_SPACE)) {
+            animation_paused = !animation_paused;
+            status_msg = animation_paused ? "Animation paused" : "Animation running";
+        }
     }
 
     // ── Mouse ─────────────────────────────────────────────────────────

@@ -31,7 +31,11 @@ void ViewerApp::Impl::load_model_files(
     selected_parent = -1;
     selected_lod = 0;
     model_state = {};
+    animations.clear();
     meshes_dirty = true;
+    // ColorBank may change between loads — invalidate the GPU thumbnail
+    // so the Materials panel rebuilds it lazily.
+    colorbank_dirty = true;
 
     // Load the database
     std::string err = db.load(hdr_path, lod_path);
@@ -80,6 +84,19 @@ void ViewerApp::Impl::load_model_files(
                 ss.active_child = 0;
                 ss.n_children = 2;  // default assumption
                 model_state.switches.push_back(ss);
+            }
+            // Build a matching animation track vector (DOF 0 auto-enabled
+            // by default — typical rotor convention for aircraft models).
+            animations.clear();
+            animations.reserve(rec->effective_dofs());
+            for (int i = 0; i < rec->effective_dofs(); ++i) {
+                AnimationTrack t;
+                t.dof_number = i;
+                t.enabled = (i == 0);
+                t.speed = (i == 0) ? 8.0f : 1.0f;
+                t.phase = 0.0f;
+                t.wrap_2pi = true;
+                animations.push_back(t);
             }
         }
 

@@ -17,6 +17,7 @@
 #include <raylib.h>
 
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <thread>
@@ -32,8 +33,17 @@ ViewerApp::ViewerApp() : impl_(std::make_unique<Impl>()) {
 // ── dtor ───────────────────────────────────────────────────────────────────
 ViewerApp::~ViewerApp() {
     // Free GPU meshes only if the GL context still exists
-    if (!impl_->raylib_meshes.empty() && IsWindowReady()) {
-        impl_->unload_meshes();
+    if (IsWindowReady()) {
+        if (!impl_->raylib_meshes.empty()) {
+            impl_->unload_meshes();
+        }
+        if (impl_->colorbank_texture.id != 0) {
+            impl_->unload_colorbank_texture();
+        }
+        if (impl_->lit_shader.id != 0) {
+            UnloadShader(impl_->lit_shader);
+            impl_->lit_shader = {};
+        }
     }
 }
 
@@ -54,6 +64,8 @@ void ViewerApp::run() {
         impl_->screenshot_at = GetTime() + 1.5;
     }
 
+    float last_frame_time = static_cast<float>(GetTime());
+
     while (!WindowShouldClose() && !impl_->should_exit) {
         // Window resize
         const int new_w = GetScreenWidth();
@@ -62,6 +74,13 @@ void ViewerApp::run() {
             impl_->window_w = new_w;
             impl_->window_h = new_h;
         }
+
+        // Frame time (clamped to 1/15s to avoid huge jumps on stalls)
+        const float now = static_cast<float>(GetTime());
+        float dt = now - last_frame_time;
+        last_frame_time = now;
+        if (dt > 1.0f / 15.0f) dt = 1.0f / 15.0f;
+        if (dt < 0.0f) dt = 0.0f;
 
         // Input
         impl_->handle_camera_input();
@@ -80,6 +99,12 @@ void ViewerApp::run() {
             impl_->screenshot_pending = false;
         }
 
+        // Animation tick: advances enabled DOF tracks and marks the
+        // mesh cache dirty so the geometry is rebuilt with new DOF values.
+        if (dt > 0.0f) {
+            impl_->tick_animation(dt);
+        }
+
         // Draw
         BeginDrawing();
         // Use a brighter, neutral background so vertex-colored meshes show up
@@ -95,7 +120,82 @@ void ViewerApp::run() {
 
     rlImGuiShutdown();
     impl_->unload_meshes();
+    if (impl_->colorbank_texture.id != 0) {
+        impl_->unload_colorbank_texture();
+    }
+    if (impl_->lit_shader.id != 0) {
+        UnloadShader(impl_->lit_shader);
+        impl_->lit_shader = {};
+        impl_->lit_shader_loaded = false;
+    }
     CloseWindow();
+}
+
+// ── tick_animation ─────────────────────────────────────────────────────────
+// Advance enabled animation tracks. Each track writes its computed value
+// into the corresponding DofState, then marks meshes_dirty so the next
+// draw_canvas() rebuilds the geometry with the new DOF value.
+//
+// Two modes per track:
+//   wrap_2pi == true : value = phase (mod 2π)   — typical rotor spin
+//   wrap_2pi == false: ping-pong between min and max over a half-cycle
+void ViewerApp::Impl::tick_animation(float dt) {
+    if (animation_paused) return;
+    bool any_enabled = false;
+    for (const auto& t : animations) {
+        if (t.enabled && t.dof_number >= 0) { any_enabled = true; break; }
+    }
+    if (!any_enabled) return;
+
+    bool changed = false;
+    for (auto& t : animations) {
+        if (!t.enabled || t.dof_number < 0) continue;
+
+        // Find the matching DofState
+        f4::models::DofState* ds = nullptr;
+        for (auto& d : model_state.dofs) {
+            if (d.dof_number == t.dof_number) { ds = &d; break; }
+        }
+        if (!ds) continue;
+
+        const float range = t.wrap_2pi ? 6.28318530718f : (ds->max - ds->min);
+        if (range <= 0.0f) continue;
+
+        // Advance phase by 2π × speed × dt (one full revolution per second
+        // at speed=1 in wrap mode, or one full min→max→min cycle in
+        // ping-pong mode).
+        t.phase += 6.28318530718f * t.speed * dt;
+
+        if (t.wrap_2pi) {
+            // Wrap into [0, 2π)
+            while (t.phase >= 6.28318530718f) t.phase -= 6.28318530718f;
+            while (t.phase < 0.0f) t.phase += 6.28318530718f;
+            ds->value = t.phase;
+        } else {
+            // Ping-pong: triangle wave between min and max
+            const float period = 6.28318530718f;
+            float p = t.phase;
+            while (p >= period) p -= period;
+            // Map [0, 2π) → [0, 2] → fold to [0, 1]
+            float frac = p / period;            // 0..1
+            frac = frac * 2.0f;                 // 0..2
+            if (frac > 1.0f) frac = 2.0f - frac; // 1..0
+            ds->value = ds->min + frac * range;
+        }
+        changed = true;
+    }
+    if (changed) meshes_dirty = true;
+}
+
+// ── reset_animations ────────────────────────────────────────────────────────
+void ViewerApp::Impl::reset_animations() {
+    for (auto& t : animations) {
+        t.phase = 0.0f;
+    }
+    for (auto& d : model_state.dofs) {
+        d.value = 0.0f;
+    }
+    meshes_dirty = true;
 }
 
 // ── set_install_path ───────────────────────────────────────────────────────
@@ -147,8 +247,25 @@ void ViewerApp::select_parent(int index) {
                 ss.n_children = 2;
                 impl_->model_state.switches.push_back(ss);
             }
+            // Build a matching animation track vector. By convention the
+            // first DOF is usually the rotor for aircraft, so default its
+            // speed to 8 Hz (typical helicopter rotor RPM range) — the user
+            // can disable or adjust it in the Animation panel.
+            impl_->animations.clear();
+            impl_->animations.reserve(rec->effective_dofs());
+            for (int d = 0; d < rec->effective_dofs(); ++d) {
+                Impl::AnimationTrack t;
+                t.dof_number = d;
+                t.enabled = (d == 0) && (rec->effective_dofs() >= 1);
+                t.speed = (d == 0) ? 8.0f : 1.0f;
+                t.phase = 0.0f;
+                t.wrap_2pi = true;
+                impl_->animations.push_back(t);
+            }
         }
         impl_->fit_to_model();
+    } else {
+        impl_->animations.clear();
     }
 }
 
