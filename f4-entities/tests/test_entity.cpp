@@ -369,17 +369,25 @@ TEST(UnitComponents, HierarchyComponent) {
     EntityWorld w;
     auto h = w.create();
     auto& c = h.add<HierarchyComponent>();
-    c.parent_id = 42;
-    c.element_ids = {10, 20, 30};
+    // The raw VU_ID fields (parent_id, element_ids) were removed;
+    // only the resolved EntityId fields remain.
+    EntityId fake_parent = EntityId::make(42, 1);
+    EntityId fake_child = EntityId::make(10, 1);
+    c.parent = fake_parent;
+    c.children.push_back(fake_child);
     EXPECT_TRUE(h.has<HierarchyComponent>());
-    EXPECT_EQ(h.get<HierarchyComponent>()->parent_id, 42u);
+    EXPECT_EQ(h.get<HierarchyComponent>()->parent, fake_parent);
+    ASSERT_EQ(h.get<HierarchyComponent>()->children.size(), 1u);
+    EXPECT_EQ(h.get<HierarchyComponent>()->children[0], fake_child);
 }
 
 TEST(UnitComponents, SquadronComponent) {
     EntityWorld w;
     auto h = w.create();
     auto& c = h.add<SquadronComponent>();
-    c.airbase_id = 555;
+    // airbase_id (raw VU_ID) was removed; use the resolved EntityId field.
+    EntityId fake_airbase = EntityId::make(555, 1);
+    c.airbase = fake_airbase;
     c.specialty = 2;
     c.fuel = 10000;
     c.aa_kills = 5;
@@ -389,6 +397,7 @@ TEST(UnitComponents, SquadronComponent) {
     p.aa_kills = 3;
     c.pilots.push_back(p);
     EXPECT_TRUE(h.has<SquadronComponent>());
+    EXPECT_EQ(h.get<SquadronComponent>()->airbase, fake_airbase);
     ASSERT_EQ(h.get<SquadronComponent>()->pilots.size(), 1u);
 }
 
@@ -399,10 +408,16 @@ TEST(UnitComponents, FlightPlanComponent) {
     c.altitude = 25000.0f;
     c.fuel_burnt = 5000;
     c.mission = 3;
-    c.package_id = 999;
-    c.squadron_id = 888;
+    // package_id / squadron_id (raw VU_IDs) were removed;
+    // use the resolved EntityId fields.
+    EntityId fake_pkg = EntityId::make(999, 1);
+    EntityId fake_sqn = EntityId::make(888, 1);
+    c.package = fake_pkg;
+    c.squadron = fake_sqn;
     EXPECT_TRUE(h.has<FlightPlanComponent>());
     EXPECT_FLOAT_EQ(h.get<FlightPlanComponent>()->altitude, 25000.0f);
+    EXPECT_EQ(h.get<FlightPlanComponent>()->package, fake_pkg);
+    EXPECT_EQ(h.get<FlightPlanComponent>()->squadron, fake_sqn);
 }
 
 TEST(UnitComponents, PackageSupportComponent) {
@@ -410,10 +425,18 @@ TEST(UnitComponents, PackageSupportComponent) {
     auto h = w.create();
     auto& c = h.add<PackageSupportComponent>();
     c.wait_cycles = 3;
-    c.interceptor_id = 111;
-    c.awacs_id = 222;
-    c.tanker_id = 555;
+    // Raw VU_ID fields (interceptor_id, awacs_id, etc.) were removed;
+    // use the resolved EntityId fields.
+    EntityId fake_int = EntityId::make(111, 1);
+    EntityId fake_awacs = EntityId::make(222, 1);
+    EntityId fake_tanker = EntityId::make(555, 1);
+    c.interceptor = fake_int;
+    c.awacs = fake_awacs;
+    c.tanker = fake_tanker;
     EXPECT_TRUE(h.has<PackageSupportComponent>());
+    EXPECT_EQ(h.get<PackageSupportComponent>()->interceptor, fake_int);
+    EXPECT_EQ(h.get<PackageSupportComponent>()->awacs, fake_awacs);
+    EXPECT_EQ(h.get<PackageSupportComponent>()->tanker, fake_tanker);
 }
 
 TEST(UnitComponents, VehicleCompositionComponent) {

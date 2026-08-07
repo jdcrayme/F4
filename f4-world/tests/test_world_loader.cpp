@@ -5,6 +5,7 @@
 
 #include <gtest/gtest.h>
 #include <f4/world/f4_world.hpp>
+#include <f4/world/detail/world_state.hpp>
 #include <f4/entities/f4_entities.hpp>
 
 #include <algorithm>
@@ -878,120 +879,19 @@ TEST(PopulateWorld, RealFixture) {
 }
 
 // ============================================================================
-// Phase 4: Adapter interfaces
-// ============================================================================
-
-TEST(WorldStateAdapters, CampaignAdapterImplementsInterface) {
-    WorldState ws;
-    ws.campaign.current_time = 1000;
-    ws.campaign.te_victory_points = 42;
-    ws.campaign.te_flags = 7;
-    ws.campaign.te_number_aircraft = {1,2,3,4,5,6,7,8};
-    ws.campaign.te_team_pts = {10,20,30,40,50,60,70,80};
-
-    CampaignAdapter adapter(ws);
-    const ICampaignSource& src = adapter;
-
-    EXPECT_EQ(src.current_time(), 1000);
-    EXPECT_EQ(src.te_victory_points(), 42);
-    EXPECT_EQ(src.te_flags(), 7);
-    ASSERT_EQ(src.te_number_aircraft().size(), 8u);
-    EXPECT_EQ(src.te_number_aircraft()[3], 4);
-}
-
-TEST(WorldStateAdapters, TeamAdapterImplementsInterface) {
-    WorldState ws;
-    ws.teams = {
-        {0, 0, 0, "", ""},
-        {1, 1, 1, "U.S.", "E Pluribus"},
-        {2, 2, 2, "ROK", ""},
-    };
-    ws.teams[1].tea_loaded = true;
-    ws.teams[1].stance = {50, -50, 0, 0, 0, 0, 0, 0};
-
-    TeamAdapter adapter(ws);
-    const ITeamSource& src = adapter;
-
-    EXPECT_EQ(src.team_count(), 3);
-    EXPECT_EQ(src.name(1), "U.S.");
-    EXPECT_EQ(src.motto(1), "E Pluribus");
-    EXPECT_TRUE(src.tea_loaded(1));
-    ASSERT_EQ(src.stance(1).size(), 8u);
-    EXPECT_EQ(src.stance(1)[0], 50);
-    EXPECT_EQ(src.name(0), "");  // empty slot
-}
-
-TEST(WorldStateAdapters, ObjectiveAdapterImplementsInterface) {
-    WorldState ws = make_objective_world();
-
-    ObjectiveAdapter adapter(ws);
-    const IObjectiveSource& src = adapter;
-
-    EXPECT_EQ(src.objective_count(), 3);
-    EXPECT_EQ(src.x(0), 500);
-    EXPECT_EQ(src.y(0), 400);
-    EXPECT_FLOAT_EQ(src.z(0), 100.0f);
-    EXPECT_EQ(src.owner(0), 2);
-    EXPECT_TRUE(src.has_radar(0));
-    EXPECT_FALSE(src.has_radar(1));
-    EXPECT_TRUE(src.has_supply(0));
-    EXPECT_TRUE(src.has_links(0));
-    EXPECT_TRUE(src.has_ground_layout(0));
-    EXPECT_TRUE(src.has_features(0));
-    EXPECT_EQ(src.class_name(0), "02_20 Airbase 2");
-}
-
-TEST(WorldStateAdapters, UnitAdapterImplementsInterface) {
-    WorldState ws = make_unit_world();
-
-    UnitAdapter adapter(ws);
-    const IUnitSource& src = adapter;
-
-    EXPECT_EQ(src.unit_count(), 5);
-    EXPECT_EQ(src.unit_class(0), UnitClass::Battalion);
-    EXPECT_EQ(src.domain(0), 3);
-    EXPECT_EQ(src.class_name(0), "Armor Battalion");
-    EXPECT_TRUE(src.has_waypoints(3));   // Flight has waypoints
-    EXPECT_FALSE(src.has_waypoints(0));  // Battalion doesn't
-    EXPECT_TRUE(src.has_vehicle_groups(0));  // Battalion has vehicles
-}
-
-TEST(WorldStateAdapters, PopulateViaInterfacesMatchesWorldState) {
-    // The interface-based bridge should produce the same result as the
-    // WorldState-based bridge.
-    WorldState ws = make_test_world();
-    ws.objectives = make_objective_world().objectives;
-    ws.units = make_unit_world().units;
-
-    // WorldState-based
-    EntityWorld ew1;
-    auto pw1 = populate_world(ew1, ws);
-
-    // Interface-based
-    EntityWorld ew2;
-    WorldStateAdapters adapters(ws);
-    auto pw2 = populate_world(ew2,
-        static_cast<const ICampaignSource&>(adapters.campaign),
-        static_cast<const ITeamSource&>(adapters.teams),
-        static_cast<const IObjectiveSource&>(adapters.objectives),
-        static_cast<const IUnitSource&>(adapters.units));
-
-    // Same entity counts
-    EXPECT_EQ(pw1.teams.size(), pw2.teams.size());
-    EXPECT_EQ(pw1.objectives.size(), pw2.objectives.size());
-    EXPECT_EQ(pw1.units.size(), pw2.units.size());
-
-    // Same component queries
-    EXPECT_EQ(ew1.with_component<RadarComponent>().size(),
-              ew2.with_component<RadarComponent>().size());
-    EXPECT_EQ(ew1.with_component<GroundTacticalComponent>().size(),
-              ew2.with_component<GroundTacticalComponent>().size());
-    EXPECT_EQ(ew1.with_component<SquadronComponent>().size(),
-              ew2.with_component<SquadronComponent>().size());
-}
-
-// ============================================================================
 // Phase 4: Convenience API (load / load_from_string)
+// ============================================================================
+//
+// NOTE: The per-Adapter tests (CampaignAdapterImplementsInterface, etc.) and
+// the PopulateViaInterfacesMatchesWorldState test were removed when the
+// Adapter structs moved from the public header to world_loader.cpp (header-
+// leak fix). The Adapters are now an implementation detail; their correctness
+// is verified end-to-end by the populate_world(eworld, ws) tests above,
+// which internally construct Adapters and delegate to the interface-based
+// bridge. A future test that wants to verify the interface path independently
+// of WorldState should implement I*Source with a mock and call
+// populate_world(eworld, mock_camp, mock_teams, mock_obj, mock_units)
+// directly — that tests the bridge without depending on private internals.
 // ============================================================================
 
 TEST(ConvenienceAPI, LoadFromString) {

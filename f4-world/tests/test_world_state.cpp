@@ -5,6 +5,8 @@
 
 #include <gtest/gtest.h>
 #include <f4/world/f4_world.hpp>
+#include <f4/world/detail/world_state.hpp>
+#include <f4/entities/types.hpp>
 
 #include <algorithm>
 #include <filesystem>

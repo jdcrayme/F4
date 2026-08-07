@@ -305,18 +305,28 @@ namespace f4::entities {
     };
 
     /// Parent/children hierarchy for Battalion -> Brigade.
+    ///
+    /// The raw VU_ID fields (parent_id, element_ids) that previously lived
+    /// here were removed — they duplicated the resolved EntityId fields
+    /// (parent, children) and were never cleared after the bridge's second
+    /// pass, creating a permanent "is this a live VU_ID or a stale one?"
+    /// ambiguity. The bridge now queries the IUnitSource directly during
+    /// the second pass instead of storing raw IDs on the component.
+    /// Consumers that need the raw VU_ID (e.g. for display) can look it
+    /// up via PopulatedWorld::unit_id_map, which maps VU_ID.num → EntityId.
     struct HierarchyComponent : Component<HierarchyComponent> {
-        EntityId parent;                        // resolved EntityId (not VU_ID)
-        std::vector<EntityId> children;         // resolved EntityIds
-        // Raw VU_IDs kept for bridge-time resolution (Phase 3 second pass)
-        uint32_t parent_id = 0;                 // VU_ID.num of parent
-        std::vector<uint32_t> element_ids;      // VU_ID.nums of children
+        EntityId parent;                        // resolved EntityId of parent
+        std::vector<EntityId> children;         // resolved EntityIds of children
     };
 
     /// Squadron-specific state.
+    ///
+    /// airbase_id (raw VU_ID) was removed — use the resolved `airbase`
+    /// EntityId field instead. The bridge resolves it during the second
+    /// pass; consumers that need the raw VU_ID for display can look it
+    /// up via PopulatedWorld::objective_id_map.
     struct SquadronComponent : Component<SquadronComponent> {
         EntityId airbase;                       // resolved EntityId of home airbase
-        uint32_t airbase_id = 0;                // VU_ID.num (for bridge-time resolution)
         uint8_t specialty = 0;
         int16_t aa_kills = 0;
         int16_t ag_kills = 0;
@@ -332,6 +342,9 @@ namespace f4::entities {
     };
 
     /// Flight-specific state (mission element within a package).
+    ///
+    /// package_id / squadron_id (raw VU_IDs) were removed — use the
+    /// resolved `package` / `squadron` EntityId fields instead.
     struct FlightPlanComponent : Component<FlightPlanComponent> {
         float altitude = 0.0f;                  // flight altitude (feet)
         int32_t fuel_burnt = 0;
@@ -345,27 +358,23 @@ namespace f4::entities {
         uint8_t eval_flags = 0;
         uint8_t callsign_id = 0;
         uint8_t callsign_num = 0;
-        // Cross-references (resolved in Phase 3 second pass)
+        // Cross-references (resolved in bridge second pass)
         EntityId package;                       // resolved EntityId of parent Package
         EntityId squadron;                      // resolved EntityId of owning Squadron
-        uint32_t package_id = 0;                // VU_ID.num (bridge-time)
-        uint32_t squadron_id = 0;               // VU_ID.num (bridge-time)
     };
 
     /// Package-specific state (groups multiple Flights).
+    ///
+    /// The raw VU_ID fields (interceptor_id, awacs_id, jstar_id, ecm_id,
+    /// tanker_id) were removed — use the resolved EntityId fields instead.
     struct PackageSupportComponent : Component<PackageSupportComponent> {
         uint8_t wait_cycles = 0;
-        // Cross-references (resolved in Phase 3 second pass)
+        // Cross-references (resolved in bridge second pass)
         EntityId interceptor;                   // resolved EntityId
         EntityId awacs;
         EntityId jstar;
         EntityId ecm;
         EntityId tanker;
-        uint32_t interceptor_id = 0;            // VU_ID.num (bridge-time)
-        uint32_t awacs_id = 0;
-        uint32_t jstar_id = 0;
-        uint32_t ecm_id = 0;
-        uint32_t tanker_id = 0;
     };
 
     /// Vehicle composition for units with vehicle groups.

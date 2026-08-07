@@ -285,20 +285,24 @@ void ViewerApp::draw_inspector() {
                             auto* hier = h.get<f4::entities::HierarchyComponent>();
                             const char* parent_label = "(none)";
                             std::string parent_buf;
-                            if (hier && hier->parent_id != 0) {
-                                auto it = impl_->pop.unit_id_map.find(hier->parent_id);
-                                if (it != impl_->pop.unit_id_map.end()) {
-                                    auto ph = impl_->handle(it->second);
-                                    auto* p_uc = ph.get<f4::entities::UnitCoreComponent>();
-                                    if (p_uc && !p_uc->class_name.empty()) {
-                                        parent_buf = p_uc->class_name;
-                                    } else {
-                                        parent_buf = "unit";
-                                    }
-                                    parent_label = parent_buf.c_str();
+                            // The raw parent_id VU_ID was removed from HierarchyComponent;
+                            // use the resolved parent EntityId directly.
+                            if (hier && hier->parent.valid()) {
+                                auto ph = impl_->handle(hier->parent);
+                                auto* p_uc = ph.get<f4::entities::UnitCoreComponent>();
+                                if (p_uc && !p_uc->class_name.empty()) {
+                                    parent_buf = p_uc->class_name;
+                                } else {
+                                    parent_buf = "unit";
                                 }
+                                parent_label = parent_buf.c_str();
                             }
-                            ImGui::Text("Parent:    0x%08x  %s", hier ? hier->parent_id : 0, parent_label);
+                            // Display the resolved EntityId (slot:generation) instead of
+                            // the raw VU_ID, which is no longer stored on the component.
+                            const uint64_t parent_raw = hier ? hier->parent.value : 0;
+                            ImGui::Text("Parent:    eid:%016llx  %s",
+                                        static_cast<unsigned long long>(parent_raw),
+                                        parent_label);
                         }
                         break;
                     }
@@ -311,14 +315,15 @@ void ViewerApp::draw_inspector() {
                         }
                         {
                             auto* hier = h.get<f4::entities::HierarchyComponent>();
-                            ImGui::Text("Elements:  %d", hier ? static_cast<int>(hier->element_ids.size()) : 0);
+                            // The raw element_ids VU_ID vector was removed;
+                            // use the resolved children EntityIds.
+                            ImGui::Text("Elements:  %d", hier ? static_cast<int>(hier->children.size()) : 0);
                             if (hier && ImGui::TreeNode("Child battalions")) {
-                                for (uint32_t eid : hier->element_ids) {
+                                for (const auto& child_eid : hier->children) {
                                     const char* child_label = "(missing)";
                                     std::string child_buf;
-                                    auto it = impl_->pop.unit_id_map.find(eid);
-                                    if (it != impl_->pop.unit_id_map.end()) {
-                                        auto ch = impl_->handle(it->second);
+                                    if (child_eid.valid()) {
+                                        auto ch = impl_->handle(child_eid);
                                         auto* c_uc = ch.get<f4::entities::UnitCoreComponent>();
                                         if (c_uc && !c_uc->class_name.empty()) {
                                             child_buf = c_uc->class_name;
@@ -327,7 +332,9 @@ void ViewerApp::draw_inspector() {
                                         }
                                         child_label = child_buf.c_str();
                                     }
-                                    ImGui::Text("  ID 0x%08x  %s", eid, child_label);
+                                    ImGui::Text("  eid:%016llx  %s",
+                                                static_cast<unsigned long long>(child_eid.value),
+                                                child_label);
                                 }
                                 ImGui::TreePop();
                             }
@@ -341,20 +348,21 @@ void ViewerApp::draw_inspector() {
                             {
                                 const char* ab_label = "(none)";
                                 std::string ab_buf;
-                                if (sq->airbase_id != 0) {
-                                    auto it = impl_->pop.objective_id_map.find(sq->airbase_id);
-                                    if (it != impl_->pop.objective_id_map.end()) {
-                                        auto ah = impl_->handle(it->second);
-                                        auto* a_ot = ah.get<f4::entities::ObjectiveTypeComponent>();
-                                        if (a_ot && !a_ot->class_name.empty()) {
-                                            ab_buf = a_ot->class_name;
-                                        } else {
-                                            ab_buf = "objective";
-                                        }
-                                        ab_label = ab_buf.c_str();
+                                // The raw airbase_id VU_ID was removed from SquadronComponent;
+                                // use the resolved airbase EntityId directly.
+                                if (sq->airbase.valid()) {
+                                    auto ah = impl_->handle(sq->airbase);
+                                    auto* a_ot = ah.get<f4::entities::ObjectiveTypeComponent>();
+                                    if (a_ot && !a_ot->class_name.empty()) {
+                                        ab_buf = a_ot->class_name;
+                                    } else {
+                                        ab_buf = "objective";
                                     }
+                                    ab_label = ab_buf.c_str();
                                 }
-                                ImGui::Text("Airbase:   0x%08x  %s", sq->airbase_id, ab_label);
+                                ImGui::Text("Airbase:   eid:%016llx  %s",
+                                            static_cast<unsigned long long>(sq->airbase.value),
+                                            ab_label);
                             }
                             ImGui::Text("Specialty: %d (%s)", sq->specialty,
                                         f4::viewer::squadron_specialty_name(sq->specialty));

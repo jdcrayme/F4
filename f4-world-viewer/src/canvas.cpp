@@ -405,15 +405,14 @@ void ViewerApp::draw_canvas() {
             if (impl_->show_squadron_links &&
                 uc->unit_class == f4::entities::UnitClass::Squadron) {
                 auto* sq = h.get<f4::entities::SquadronComponent>();
-                if (sq && sq->airbase_id != 0) {
-                    auto it = impl_->pop.objective_id_map.find(sq->airbase_id);
-                    if (it != impl_->pop.objective_id_map.end()) {
-                        auto ah = impl_->handle(it->second);
-                        auto* a_tr = ah.get<f4::entities::TransformComponent>();
-                        if (a_tr) {
-                            const Vector2 a = impl_->world_to_screen(impl_->grid_x(a_tr), impl_->grid_y(a_tr));
-                            DrawLineEx(p, a, 0.5f, Color{c.r, c.g, c.b, 90});
-                        }
+                // The raw airbase_id VU_ID was removed from SquadronComponent;
+                // use the resolved airbase EntityId directly (no map lookup needed).
+                if (sq && sq->airbase.valid()) {
+                    auto ah = impl_->handle(sq->airbase);
+                    auto* a_tr = ah.get<f4::entities::TransformComponent>();
+                    if (a_tr) {
+                        const Vector2 a = impl_->world_to_screen(impl_->grid_x(a_tr), impl_->grid_y(a_tr));
+                        DrawLineEx(p, a, 0.5f, Color{c.r, c.g, c.b, 90});
                     }
                 }
             }
@@ -422,15 +421,13 @@ void ViewerApp::draw_canvas() {
             if (impl_->show_hierarchy_lines &&
                 uc->unit_class == f4::entities::UnitClass::Battalion) {
                 auto* hier = h.get<f4::entities::HierarchyComponent>();
-                if (hier && hier->parent_id != 0) {
-                    auto it = impl_->pop.unit_id_map.find(hier->parent_id);
-                    if (it != impl_->pop.unit_id_map.end()) {
-                        auto ph = impl_->handle(it->second);
-                        auto* p_tr = ph.get<f4::entities::TransformComponent>();
-                        if (p_tr) {
-                            const Vector2 pp = impl_->world_to_screen(impl_->grid_x(p_tr), impl_->grid_y(p_tr));
-                            DrawLineEx(p, pp, 1.0f, Color{c.r, c.g, c.b, 140});
-                        }
+                // The raw parent_id VU_ID was removed; use the resolved parent EntityId.
+                if (hier && hier->parent.valid()) {
+                    auto ph = impl_->handle(hier->parent);
+                    auto* p_tr = ph.get<f4::entities::TransformComponent>();
+                    if (p_tr) {
+                        const Vector2 pp = impl_->world_to_screen(impl_->grid_x(p_tr), impl_->grid_y(p_tr));
+                        DrawLineEx(p, pp, 1.0f, Color{c.r, c.g, c.b, 140});
                     }
                 }
             }
@@ -439,17 +436,16 @@ void ViewerApp::draw_canvas() {
             if (impl_->show_hierarchy_lines &&
                 uc->unit_class == f4::entities::UnitClass::Brigade) {
                 auto* hier = h.get<f4::entities::HierarchyComponent>();
-                if (hier && !hier->element_ids.empty()) {
-                    for (uint32_t child_id : hier->element_ids) {
-                        if (child_id == 0) continue;
-                        auto it = impl_->pop.unit_id_map.find(child_id);
-                        if (it != impl_->pop.unit_id_map.end()) {
-                            auto ch = impl_->handle(it->second);
-                            auto* c_tr = ch.get<f4::entities::TransformComponent>();
-                            if (c_tr) {
-                                const Vector2 cp = impl_->world_to_screen(impl_->grid_x(c_tr), impl_->grid_y(c_tr));
-                                DrawLineEx(p, cp, 1.0f, Color{c.r, c.g, c.b, 140});
-                            }
+                // The raw element_ids VU_ID vector was removed; iterate the
+                // resolved children EntityIds directly.
+                if (hier && !hier->children.empty()) {
+                    for (const auto& child_eid : hier->children) {
+                        if (!child_eid.valid()) continue;
+                        auto ch = impl_->handle(child_eid);
+                        auto* c_tr = ch.get<f4::entities::TransformComponent>();
+                        if (c_tr) {
+                            const Vector2 cp = impl_->world_to_screen(impl_->grid_x(c_tr), impl_->grid_y(c_tr));
+                            DrawLineEx(p, cp, 1.0f, Color{c.r, c.g, c.b, 140});
                         }
                     }
                 }
