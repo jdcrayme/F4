@@ -75,14 +75,14 @@ std::vector<f4::entities::EntityId> populate_objectives(
     std::unordered_map<uint32_t, f4::entities::EntityId>& obj_id_map);
 std::vector<f4::entities::EntityId> populate_units(
     f4::entities::EntityWorld& world,
-    const IUnitSource& src,
+    const IUnitCoreSource& src,
     const std::unordered_map<uint32_t, f4::entities::EntityId>& obj_id_map,
     std::unordered_map<uint32_t, f4::entities::EntityId>& unit_id_map);
 PopulatedWorld populate_world(f4::entities::EntityWorld& world,
                                const ICampaignSource& camp_src,
                                const ITeamSource& team_src,
                                const IObjectiveSource& obj_src,
-                               const IUnitSource& unit_src);
+                               const IUnitCoreSource& unit_src);
 
 // ============================================================================
 // WorldState-based convenience overloads (backward compatible)

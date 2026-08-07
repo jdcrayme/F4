@@ -136,9 +136,27 @@ private:
     const WorldState* ws_;
 };
 
-struct UnitAdapter : IUnitSource {
+// ============================================================================
+// UnitAdapter — implements ALL unit interfaces (core + 4 subclass).
+//
+// The WorldState UnitState struct is a flat god-struct with all fields for
+// all subclasses, zero-initialized for unused ones. This adapter therefore
+// implements every interface trivially — each method reads the field
+// directly from UnitState, regardless of unit class.
+//
+// The as_*() methods return `this` when unit_class(i) matches the subclass,
+// nullptr otherwise. A future adapter (BMS, procedural) that only supports
+// some subclasses would return nullptr for the others without having to
+// implement the unsupported interface at all.
+// ============================================================================
+struct UnitAdapter : IUnitCoreSource,
+                     IGroundUnitSource,
+                     ISquadronSource,
+                     IFlightSource,
+                     IPackageSource {
     explicit UnitAdapter(const WorldState& ws) : ws_(&ws) {}
 
+    // --- IUnitCoreSource ---
     int unit_count() const override { return static_cast<int>(ws_->units.size()); }
     int16_t x(int i) const override { return ws_->units[i].x; }
     int16_t y(int i) const override { return ws_->units[i].y; }
@@ -152,49 +170,6 @@ struct UnitAdapter : IUnitSource {
     uint8_t owner(int i) const override { return ws_->units[i].owner; }
     bool has_waypoints(int i) const override { return !ws_->units[i].waypoints.empty(); }
     const std::vector<f4::entities::WaypointState>& waypoints(int i) const override { return ws_->units[i].waypoints; }
-    uint8_t supply(int i) const override { return ws_->units[i].supply; }
-    uint8_t morale(int i) const override { return ws_->units[i].morale; }
-    uint8_t fatigue(int i) const override { return ws_->units[i].fatigue; }
-    uint8_t heading(int i) const override { return ws_->units[i].heading; }
-    uint8_t final_heading(int i) const override { return ws_->units[i].final_heading; }
-    uint8_t position(int i) const override { return ws_->units[i].position; }
-    int32_t last_move(int i) const override { return ws_->units[i].last_move; }
-    int32_t last_combat(int i) const override { return ws_->units[i].last_combat; }
-    uint32_t parent_id(int i) const override { return ws_->units[i].parent_id; }
-    const std::vector<uint32_t>& element_ids(int i) const override { return ws_->units[i].element_ids; }
-    uint32_t airbase_id(int i) const override { return ws_->units[i].airbase_id; }
-    uint8_t specialty(int i) const override { return ws_->units[i].specialty; }
-    int16_t aa_kills(int i) const override { return ws_->units[i].aa_kills; }
-    int16_t ag_kills(int i) const override { return ws_->units[i].ag_kills; }
-    int16_t as_kills(int i) const override { return ws_->units[i].as_kills; }
-    int16_t an_kills(int i) const override { return ws_->units[i].an_kills; }
-    int16_t missions_flown(int i) const override { return ws_->units[i].missions_flown; }
-    int16_t mission_score(int i) const override { return ws_->units[i].mission_score; }
-    uint8_t total_losses(int i) const override { return ws_->units[i].total_losses; }
-    uint8_t pilot_losses(int i) const override { return ws_->units[i].pilot_losses; }
-    uint8_t squadron_patch(int i) const override { return ws_->units[i].squadron_patch; }
-    int32_t fuel(int i) const override { return ws_->units[i].fuel; }
-    const std::vector<f4::entities::PilotState>& pilots(int i) const override { return ws_->units[i].pilots; }
-    float flight_altitude(int i) const override { return ws_->units[i].flight_altitude; }
-    int32_t fuel_burnt(int i) const override { return ws_->units[i].fuel_burnt; }
-    int32_t time_on_target(int i) const override { return ws_->units[i].time_on_target; }
-    int32_t mission_over_time(int i) const override { return ws_->units[i].mission_over_time; }
-    int16_t mission_target(int i) const override { return ws_->units[i].mission_target; }
-    uint8_t loadouts(int i) const override { return ws_->units[i].loadouts; }
-    uint8_t mission(int i) const override { return ws_->units[i].mission; }
-    uint8_t flight_priority(int i) const override { return ws_->units[i].flight_priority; }
-    uint8_t mission_id(int i) const override { return ws_->units[i].mission_id; }
-    uint8_t eval_flags(int i) const override { return ws_->units[i].eval_flags; }
-    uint32_t package_id(int i) const override { return ws_->units[i].package_id; }
-    uint32_t squadron_id(int i) const override { return ws_->units[i].squadron_id; }
-    uint8_t callsign_id(int i) const override { return ws_->units[i].callsign_id; }
-    uint8_t callsign_num(int i) const override { return ws_->units[i].callsign_num; }
-    uint8_t wait_cycles(int i) const override { return ws_->units[i].wait_cycles; }
-    uint32_t interceptor_id(int i) const override { return ws_->units[i].interceptor_id; }
-    uint32_t awacs_id(int i) const override { return ws_->units[i].awacs_id; }
-    uint32_t jstar_id(int i) const override { return ws_->units[i].jstar_id; }
-    uint32_t ecm_id(int i) const override { return ws_->units[i].ecm_id; }
-    uint32_t tanker_id(int i) const override { return ws_->units[i].tanker_id; }
     bool has_vehicle_groups(int i) const override { return !ws_->units[i].vehicle_groups.empty(); }
     const std::vector<f4::entities::VehicleGroup>& vehicle_groups(int i) const override { return ws_->units[i].vehicle_groups; }
     const std::array<uint8_t, 16>& unit_class_scores(int i) const override { return ws_->units[i].unit_class_scores; }
@@ -212,6 +187,80 @@ struct UnitAdapter : IUnitSource {
     uint8_t losses(int i) const override { return ws_->units[i].losses; }
     uint8_t wp_count(int i) const override { return ws_->units[i].wp_count; }
     uint8_t elements(int i) const override { return ws_->units[i].elements; }
+
+    // --- Subclass accessors ---
+    // WorldState-backed adapter implements all subclass interfaces, so
+    // return `this` when the class matches. The ambiguous base class is
+    // resolved by the explicit static_cast.
+    const IGroundUnitSource* as_ground_unit(int i) const override {
+        using f4::entities::UnitClass;
+        const auto uc = unit_class(i);
+        return (uc == UnitClass::Battalion || uc == UnitClass::Brigade || uc == UnitClass::TaskForce)
+            ? static_cast<const IGroundUnitSource*>(this) : nullptr;
+    }
+    const ISquadronSource* as_squadron(int i) const override {
+        return (unit_class(i) == f4::entities::UnitClass::Squadron)
+            ? static_cast<const ISquadronSource*>(this) : nullptr;
+    }
+    const IFlightSource* as_flight(int i) const override {
+        return (unit_class(i) == f4::entities::UnitClass::Flight)
+            ? static_cast<const IFlightSource*>(this) : nullptr;
+    }
+    const IPackageSource* as_package(int i) const override {
+        return (unit_class(i) == f4::entities::UnitClass::Package)
+            ? static_cast<const IPackageSource*>(this) : nullptr;
+    }
+
+    // --- IGroundUnitSource ---
+    uint8_t supply(int i) const override { return ws_->units[i].supply; }
+    uint8_t morale(int i) const override { return ws_->units[i].morale; }
+    uint8_t fatigue(int i) const override { return ws_->units[i].fatigue; }
+    uint8_t heading(int i) const override { return ws_->units[i].heading; }
+    uint8_t final_heading(int i) const override { return ws_->units[i].final_heading; }
+    uint8_t position(int i) const override { return ws_->units[i].position; }
+    int32_t last_move(int i) const override { return ws_->units[i].last_move; }
+    int32_t last_combat(int i) const override { return ws_->units[i].last_combat; }
+    uint32_t parent_id(int i) const override { return ws_->units[i].parent_id; }
+    const std::vector<uint32_t>& element_ids(int i) const override { return ws_->units[i].element_ids; }
+
+    // --- ISquadronSource ---
+    uint32_t airbase_id(int i) const override { return ws_->units[i].airbase_id; }
+    uint8_t specialty(int i) const override { return ws_->units[i].specialty; }
+    int16_t aa_kills(int i) const override { return ws_->units[i].aa_kills; }
+    int16_t ag_kills(int i) const override { return ws_->units[i].ag_kills; }
+    int16_t as_kills(int i) const override { return ws_->units[i].as_kills; }
+    int16_t an_kills(int i) const override { return ws_->units[i].an_kills; }
+    int16_t missions_flown(int i) const override { return ws_->units[i].missions_flown; }
+    int16_t mission_score(int i) const override { return ws_->units[i].mission_score; }
+    uint8_t total_losses(int i) const override { return ws_->units[i].total_losses; }
+    uint8_t pilot_losses(int i) const override { return ws_->units[i].pilot_losses; }
+    uint8_t squadron_patch(int i) const override { return ws_->units[i].squadron_patch; }
+    int32_t fuel(int i) const override { return ws_->units[i].fuel; }
+    const std::vector<f4::entities::PilotState>& pilots(int i) const override { return ws_->units[i].pilots; }
+
+    // --- IFlightSource ---
+    float flight_altitude(int i) const override { return ws_->units[i].flight_altitude; }
+    int32_t fuel_burnt(int i) const override { return ws_->units[i].fuel_burnt; }
+    int32_t time_on_target(int i) const override { return ws_->units[i].time_on_target; }
+    int32_t mission_over_time(int i) const override { return ws_->units[i].mission_over_time; }
+    int16_t mission_target(int i) const override { return ws_->units[i].mission_target; }
+    uint8_t loadouts(int i) const override { return ws_->units[i].loadouts; }
+    uint8_t mission(int i) const override { return ws_->units[i].mission; }
+    uint8_t flight_priority(int i) const override { return ws_->units[i].flight_priority; }
+    uint8_t mission_id(int i) const override { return ws_->units[i].mission_id; }
+    uint8_t eval_flags(int i) const override { return ws_->units[i].eval_flags; }
+    uint32_t package_id(int i) const override { return ws_->units[i].package_id; }
+    uint32_t squadron_id(int i) const override { return ws_->units[i].squadron_id; }
+    uint8_t callsign_id(int i) const override { return ws_->units[i].callsign_id; }
+    uint8_t callsign_num(int i) const override { return ws_->units[i].callsign_num; }
+
+    // --- IPackageSource ---
+    uint8_t wait_cycles(int i) const override { return ws_->units[i].wait_cycles; }
+    uint32_t interceptor_id(int i) const override { return ws_->units[i].interceptor_id; }
+    uint32_t awacs_id(int i) const override { return ws_->units[i].awacs_id; }
+    uint32_t jstar_id(int i) const override { return ws_->units[i].jstar_id; }
+    uint32_t ecm_id(int i) const override { return ws_->units[i].ecm_id; }
+    uint32_t tanker_id(int i) const override { return ws_->units[i].tanker_id; }
 
 private:
     const WorldState* ws_;
@@ -464,7 +513,7 @@ std::vector<EntityId> populate_objectives(
 // ============================================================================
 std::vector<EntityId> populate_units(
     EntityWorld& world,
-    const IUnitSource& src,
+    const IUnitCoreSource& src,
     const std::unordered_map<uint32_t, EntityId>& obj_id_map,
     std::unordered_map<uint32_t, EntityId>& unit_id_map)
 {
@@ -495,81 +544,77 @@ std::vector<EntityId> populate_units(
         uc.class_name = src.class_name(i);
 
         // --- Subclass-specific components ---
-        switch (src.unit_class(i)) {
-            case UnitClass::Battalion:
-            case UnitClass::Brigade:
-            case UnitClass::TaskForce: {
-                // Ground tactical state
-                auto& gt = h.add<GroundTacticalComponent>();
-                gt.supply = src.supply(i);
-                gt.morale = src.morale(i);
-                gt.fatigue = src.fatigue(i);
-                gt.heading = src.heading(i);
-                gt.final_heading = src.final_heading(i);
-                gt.position = src.position(i);
-                gt.last_move = src.last_move(i);
-                gt.last_combat = src.last_combat(i);
+        // Each subclass interface is queried via as_*(). A nullptr return
+        // means the unit isn't of that class — the corresponding component
+        // is simply not added. A future adapter that doesn't support a
+        // subclass returns nullptr and the bridge skips it gracefully.
 
-                // Hierarchy — Battalion has parent brigade, Brigade has child battalions.
-                // The component no longer stores raw VU_IDs; the second pass
-                // queries src.parent_id(i) / src.element_ids(i) directly to
-                // resolve the EntityId cross-references.
-                if (src.parent_id(i) != 0 || !src.element_ids(i).empty()) {
-                    h.add<HierarchyComponent>();
-                }
-                break;
-            }
-            case UnitClass::Squadron: {
-                auto& sq = h.add<SquadronComponent>();
-                sq.specialty = src.specialty(i);
-                sq.aa_kills = src.aa_kills(i);
-                sq.ag_kills = src.ag_kills(i);
-                sq.as_kills = src.as_kills(i);
-                sq.an_kills = src.an_kills(i);
-                sq.missions_flown = src.missions_flown(i);
-                sq.mission_score = src.mission_score(i);
-                sq.total_losses = src.total_losses(i);
-                sq.pilot_losses = src.pilot_losses(i);
-                sq.squadron_patch = src.squadron_patch(i);
-                sq.fuel = src.fuel(i);
-                sq.pilots = src.pilots(i);
+        // Ground unit (Battalion / Brigade / TaskForce)
+        if (auto* gu = src.as_ground_unit(i)) {
+            auto& gt = h.add<GroundTacticalComponent>();
+            gt.supply = gu->supply(i);
+            gt.morale = gu->morale(i);
+            gt.fatigue = gu->fatigue(i);
+            gt.heading = gu->heading(i);
+            gt.final_heading = gu->final_heading(i);
+            gt.position = gu->position(i);
+            gt.last_move = gu->last_move(i);
+            gt.last_combat = gu->last_combat(i);
 
-                // Resolve Squadron→airbase cross-reference
-                if (src.airbase_id(i) != 0) {
-                    auto it = obj_id_map.find(src.airbase_id(i));
-                    if (it != obj_id_map.end()) {
-                        sq.airbase = it->second;
-                    }
+            // Hierarchy — Battalion has parent brigade, Brigade has child battalions.
+            if (gu->parent_id(i) != 0 || !gu->element_ids(i).empty()) {
+                h.add<HierarchyComponent>();
+            }
+        }
+
+        // Squadron
+        if (auto* sq_src = src.as_squadron(i)) {
+            auto& sq = h.add<SquadronComponent>();
+            sq.specialty = sq_src->specialty(i);
+            sq.aa_kills = sq_src->aa_kills(i);
+            sq.ag_kills = sq_src->ag_kills(i);
+            sq.as_kills = sq_src->as_kills(i);
+            sq.an_kills = sq_src->an_kills(i);
+            sq.missions_flown = sq_src->missions_flown(i);
+            sq.mission_score = sq_src->mission_score(i);
+            sq.total_losses = sq_src->total_losses(i);
+            sq.pilot_losses = sq_src->pilot_losses(i);
+            sq.squadron_patch = sq_src->squadron_patch(i);
+            sq.fuel = sq_src->fuel(i);
+            sq.pilots = sq_src->pilots(i);
+
+            // Resolve Squadron→airbase cross-reference
+            if (sq_src->airbase_id(i) != 0) {
+                auto it = obj_id_map.find(sq_src->airbase_id(i));
+                if (it != obj_id_map.end()) {
+                    sq.airbase = it->second;
                 }
-                break;
             }
-            case UnitClass::Flight: {
-                auto& fp = h.add<FlightPlanComponent>();
-                fp.altitude = src.flight_altitude(i);
-                fp.fuel_burnt = src.fuel_burnt(i);
-                fp.time_on_target = src.time_on_target(i);
-                fp.mission_over_time = src.mission_over_time(i);
-                fp.mission_target = src.mission_target(i);
-                fp.loadouts = src.loadouts(i);
-                fp.mission = src.mission(i);
-                fp.flight_priority = src.flight_priority(i);
-                fp.mission_id = src.mission_id(i);
-                fp.eval_flags = src.eval_flags(i);
-                fp.callsign_id = src.callsign_id(i);
-                fp.callsign_num = src.callsign_num(i);
-                // Cross-references (package, squadron) resolved in second pass
-                // by querying src.package_id(i) / src.squadron_id(i) directly.
-                break;
-            }
-            case UnitClass::Package: {
-                auto& ps = h.add<PackageSupportComponent>();
-                ps.wait_cycles = src.wait_cycles(i);
-                // Cross-references (interceptor, awacs, jstar, ecm, tanker)
-                // resolved in second pass by querying src.*_id(i) directly.
-                break;
-            }
-            default:
-                break;
+        }
+
+        // Flight
+        if (auto* fl = src.as_flight(i)) {
+            auto& fp = h.add<FlightPlanComponent>();
+            fp.altitude = fl->flight_altitude(i);
+            fp.fuel_burnt = fl->fuel_burnt(i);
+            fp.time_on_target = fl->time_on_target(i);
+            fp.mission_over_time = fl->mission_over_time(i);
+            fp.mission_target = fl->mission_target(i);
+            fp.loadouts = fl->loadouts(i);
+            fp.mission = fl->mission(i);
+            fp.flight_priority = fl->flight_priority(i);
+            fp.mission_id = fl->mission_id(i);
+            fp.eval_flags = fl->eval_flags(i);
+            fp.callsign_id = fl->callsign_id(i);
+            fp.callsign_num = fl->callsign_num(i);
+            // Cross-references (package, squadron) resolved in second pass.
+        }
+
+        // Package
+        if (auto* pk = src.as_package(i)) {
+            auto& ps = h.add<PackageSupportComponent>();
+            ps.wait_cycles = pk->wait_cycles(i);
+            // Cross-references resolved in second pass.
         }
 
         // --- Conditional components ---
@@ -599,7 +644,30 @@ std::vector<EntityId> populate_units(
             }
         }
 
-        // --- PropertyBag for format residue ---
+        // --- MovementOrdersComponent (conditional) ---
+        // Promoted from PropertyBag residue (Phase 5 cleanup). These fields
+        // have clear domain meaning — they describe where a ground unit is
+        // ordered to move and how fast it can get there. Only add the
+        // component when at least one field is non-zero/non-empty.
+        {
+            const int16_t dx = src.dest_x(i);
+            const int16_t dy = src.dest_y(i);
+            const int32_t mt = src.movement_type(i);
+            const int16_t ms = src.movement_speed(i);
+            const int16_t mr = src.max_range(i);
+            const std::string& mtn = src.movement_type_name(i);
+            if (dx != 0 || dy != 0 || mt != 0 || ms != 0 || mr != 0 || !mtn.empty()) {
+                auto& mo = h.add<MovementOrdersComponent>();
+                mo.dest_x = dx;
+                mo.dest_y = dy;
+                mo.movement_type = mt;
+                mo.movement_speed = ms;
+                mo.max_range = mr;
+                mo.movement_type_name = mtn;
+            }
+        }
+
+        // --- PropertyBag for format residue (genuinely unclassified fields) ---
         {
             auto& pb = h.add<PropertyBag>();
             pb.ints["vu_id_creator"] = static_cast<int64_t>(src.id_creator(i));
@@ -608,26 +676,13 @@ std::vector<EntityId> populate_units(
             pb.ints["camp_id"]       = static_cast<int64_t>(src.camp_id(i));
             pb.ints["name_id"]       = static_cast<int64_t>(src.name_id(i));
             pb.ints["reinforcement"] = static_cast<int64_t>(src.reinforcement(i));
-            pb.ints["dest_x"]        = static_cast<int64_t>(src.dest_x(i));
-            pb.ints["dest_y"]        = static_cast<int64_t>(src.dest_y(i));
             pb.ints["losses"]        = static_cast<int64_t>(src.losses(i));
             pb.ints["wp_count"]      = static_cast<int64_t>(src.wp_count(i));
-            // Store elements count for Brigade/Package
-            if (src.unit_class(i) == UnitClass::Brigade ||
-                src.unit_class(i) == UnitClass::Package) {
-                pb.ints["elements"] = static_cast<int64_t>(src.element_ids(i).size());
-            }
-            if (src.movement_type(i) != 0) {
-                pb.ints["movement_type"] = static_cast<int64_t>(src.movement_type(i));
-            }
-            if (src.movement_speed(i) != 0) {
-                pb.ints["movement_speed"] = static_cast<int64_t>(src.movement_speed(i));
-            }
-            if (src.max_range(i) != 0) {
-                pb.ints["max_range"] = static_cast<int64_t>(src.max_range(i));
-            }
-            if (!src.movement_type_name(i).empty()) {
-                pb.strings["movement_type_name"] = src.movement_type_name(i);
+            // Store elements count for Brigade (ground unit with children)
+            if (auto* gu = src.as_ground_unit(i)) {
+                if (src.unit_class(i) == UnitClass::Brigade) {
+                    pb.ints["elements"] = static_cast<int64_t>(gu->element_ids(i).size());
+                }
             }
         }
 
@@ -643,95 +698,92 @@ std::vector<EntityId> populate_units(
     // Now that all units have EntityIds, resolve Flight→Package, Flight→Squadron,
     // Battalion→Brigade, and Package support flights.
     //
-    // The raw VU_IDs are queried from the IUnitSource directly (src.parent_id(i),
-    // src.element_ids(i), src.package_id(i), etc.) rather than being stored on
-    // the components. This eliminates the "is this raw _id field live or stale?"
-    // ambiguity that existed when the components carried both the resolved
-    // EntityId and the raw VU_ID.
+    // The raw VU_IDs are queried from the subclass interfaces directly
+    // (gu->parent_id(i), fl->package_id(i), pk->interceptor_id(i), etc.)
+    // rather than being stored on the components. This eliminates the
+    // "is this raw _id field live or stale?" ambiguity that existed when
+    // the components carried both the resolved EntityId and the raw VU_ID.
     for (int i = 0; i < src.unit_count(); ++i) {
         EntityHandle h(ids[static_cast<size_t>(i)], &world);
 
-        switch (src.unit_class(i)) {
-            case UnitClass::Battalion:
-            case UnitClass::Brigade: {
-                auto* hier = h.get<HierarchyComponent>();
-                if (hier) {
-                    // Resolve parent (battalion→brigade)
-                    const uint32_t pid = src.parent_id(i);
-                    if (pid != 0) {
-                        auto it = unit_id_map.find(pid);
-                        if (it != unit_id_map.end()) {
-                            hier->parent = it->second;
-                        }
+        // Ground unit hierarchy (Battalion→Brigade, Brigade→children)
+        if (auto* gu = src.as_ground_unit(i)) {
+            auto* hier = h.get<HierarchyComponent>();
+            if (hier) {
+                // Resolve parent (battalion→brigade)
+                const uint32_t pid = gu->parent_id(i);
+                if (pid != 0) {
+                    auto it = unit_id_map.find(pid);
+                    if (it != unit_id_map.end()) {
+                        hier->parent = it->second;
                     }
-                    // Resolve children (brigade→battalions)
-                    const auto& elems = src.element_ids(i);
-                    if (!elems.empty()) {
-                        hier->children.clear();
-                        hier->children.reserve(elems.size());
-                        for (auto eid : elems) {
-                            auto it = unit_id_map.find(eid);
-                            if (it != unit_id_map.end()) {
-                                hier->children.push_back(it->second);
-                            }
+                }
+                // Resolve children (brigade→battalions)
+                const auto& elems = gu->element_ids(i);
+                if (!elems.empty()) {
+                    hier->children.clear();
+                    hier->children.reserve(elems.size());
+                    for (auto eid : elems) {
+                        auto it = unit_id_map.find(eid);
+                        if (it != unit_id_map.end()) {
+                            hier->children.push_back(it->second);
                         }
                     }
                 }
-                break;
             }
-            case UnitClass::Flight: {
-                auto* fp = h.get<FlightPlanComponent>();
-                if (fp) {
-                    const uint32_t pkg_id = src.package_id(i);
-                    if (pkg_id != 0) {
-                        auto it = unit_id_map.find(pkg_id);
-                        if (it != unit_id_map.end()) {
-                            fp->package = it->second;
-                        }
-                    }
-                    const uint32_t sqn_id = src.squadron_id(i);
-                    if (sqn_id != 0) {
-                        auto it = unit_id_map.find(sqn_id);
-                        if (it != unit_id_map.end()) {
-                            fp->squadron = it->second;
-                        }
+        }
+
+        // Flight → Package and Squadron
+        if (auto* fl = src.as_flight(i)) {
+            auto* fp = h.get<FlightPlanComponent>();
+            if (fp) {
+                const uint32_t pkg_id = fl->package_id(i);
+                if (pkg_id != 0) {
+                    auto it = unit_id_map.find(pkg_id);
+                    if (it != unit_id_map.end()) {
+                        fp->package = it->second;
                     }
                 }
-                break;
-            }
-            case UnitClass::Package: {
-                auto* ps = h.get<PackageSupportComponent>();
-                if (ps) {
-                    const uint32_t int_id = src.interceptor_id(i);
-                    if (int_id != 0) {
-                        auto it = unit_id_map.find(int_id);
-                        if (it != unit_id_map.end()) ps->interceptor = it->second;
-                    }
-                    const uint32_t aw_id = src.awacs_id(i);
-                    if (aw_id != 0) {
-                        auto it = unit_id_map.find(aw_id);
-                        if (it != unit_id_map.end()) ps->awacs = it->second;
-                    }
-                    const uint32_t js_id = src.jstar_id(i);
-                    if (js_id != 0) {
-                        auto it = unit_id_map.find(js_id);
-                        if (it != unit_id_map.end()) ps->jstar = it->second;
-                    }
-                    const uint32_t ecm_id = src.ecm_id(i);
-                    if (ecm_id != 0) {
-                        auto it = unit_id_map.find(ecm_id);
-                        if (it != unit_id_map.end()) ps->ecm = it->second;
-                    }
-                    const uint32_t tnk_id = src.tanker_id(i);
-                    if (tnk_id != 0) {
-                        auto it = unit_id_map.find(tnk_id);
-                        if (it != unit_id_map.end()) ps->tanker = it->second;
+                const uint32_t sqn_id = fl->squadron_id(i);
+                if (sqn_id != 0) {
+                    auto it = unit_id_map.find(sqn_id);
+                    if (it != unit_id_map.end()) {
+                        fp->squadron = it->second;
                     }
                 }
-                break;
             }
-            default:
-                break;
+        }
+
+        // Package → support flights
+        if (auto* pk = src.as_package(i)) {
+            auto* ps = h.get<PackageSupportComponent>();
+            if (ps) {
+                const uint32_t int_id = pk->interceptor_id(i);
+                if (int_id != 0) {
+                    auto it = unit_id_map.find(int_id);
+                    if (it != unit_id_map.end()) ps->interceptor = it->second;
+                }
+                const uint32_t aw_id = pk->awacs_id(i);
+                if (aw_id != 0) {
+                    auto it = unit_id_map.find(aw_id);
+                    if (it != unit_id_map.end()) ps->awacs = it->second;
+                }
+                const uint32_t js_id = pk->jstar_id(i);
+                if (js_id != 0) {
+                    auto it = unit_id_map.find(js_id);
+                    if (it != unit_id_map.end()) ps->jstar = it->second;
+                }
+                const uint32_t ecm_id = pk->ecm_id(i);
+                if (ecm_id != 0) {
+                    auto it = unit_id_map.find(ecm_id);
+                    if (it != unit_id_map.end()) ps->ecm = it->second;
+                }
+                const uint32_t tnk_id = pk->tanker_id(i);
+                if (tnk_id != 0) {
+                    auto it = unit_id_map.find(tnk_id);
+                    if (it != unit_id_map.end()) ps->tanker = it->second;
+                }
+            }
         }
     }
 
@@ -749,7 +801,7 @@ std::vector<EntityId> populate_units(
 {
     UnitAdapter adapter(ws);
     return populate_units(world,
-                          static_cast<const IUnitSource&>(adapter),
+                          static_cast<const IUnitCoreSource&>(adapter),
                           obj_id_map,
                           unit_id_map);
 }
@@ -761,7 +813,7 @@ PopulatedWorld populate_world(EntityWorld& world,
                               const ICampaignSource& camp_src,
                               const ITeamSource& team_src,
                               const IObjectiveSource& obj_src,
-                              const IUnitSource& unit_src)
+                              const IUnitCoreSource& unit_src)
 {
     PopulatedWorld pw;
 
@@ -782,7 +834,7 @@ PopulatedWorld populate_world(EntityWorld& world, const WorldState& ws) {
                           static_cast<const ICampaignSource&>(adapters.campaign),
                           static_cast<const ITeamSource&>(adapters.teams),
                           static_cast<const IObjectiveSource&>(adapters.objectives),
-                          static_cast<const IUnitSource&>(adapters.units));
+                          static_cast<const IUnitCoreSource&>(adapters.units));
 }
 
 // ============================================================================
@@ -799,7 +851,7 @@ PopulatedWorld load(const std::filesystem::path& json_path,
                           static_cast<const ICampaignSource&>(adapters.campaign),
                           static_cast<const ITeamSource&>(adapters.teams),
                           static_cast<const IObjectiveSource&>(adapters.objectives),
-                          static_cast<const IUnitSource&>(adapters.units));
+                          static_cast<const IUnitCoreSource&>(adapters.units));
 }
 
 // ============================================================================
@@ -816,7 +868,7 @@ PopulatedWorld load_from_string(const std::string& json,
                           static_cast<const ICampaignSource&>(adapters.campaign),
                           static_cast<const ITeamSource&>(adapters.teams),
                           static_cast<const IObjectiveSource&>(adapters.objectives),
-                          static_cast<const IUnitSource&>(adapters.units));
+                          static_cast<const IUnitCoreSource&>(adapters.units));
 }
 
 } // namespace f4::world

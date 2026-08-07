@@ -207,31 +207,32 @@ void ViewerApp::draw_inspector() {
                             f4::viewer::domain_name(uc->domain));
                 ImGui::Text("Position:  (%.0f, %.0f, %.0f ft)", ux, uy, tr->position.z);
                 ImGui::Text("Owner:     %d (%s)", owner, team_name);
-                ImGui::Text("Destination:(%d, %d)",
-                    static_cast<int>(impl_->pb_int(pb, "dest_x")),
-                    static_cast<int>(impl_->pb_int(pb, "dest_y")));
+                // Movement orders (promoted from PropertyBag to MovementOrdersComponent)
+                if (auto* mo = h.get<f4::entities::MovementOrdersComponent>()) {
+                    ImGui::Text("Destination:(%d, %d)",
+                                static_cast<int>(mo->dest_x),
+                                static_cast<int>(mo->dest_y));
+                    if (mo->movement_type > 0 || mo->movement_speed > 0) {
+                        ImGui::Separator();
+                        ImGui::TextUnformatted("Movement (UCD):");
+                        if (!mo->movement_type_name.empty()) {
+                            ImGui::Text("  Type:     %s (%d)",
+                                        mo->movement_type_name.c_str(),
+                                        mo->movement_type);
+                        } else {
+                            ImGui::Text("  Type:     %d", mo->movement_type);
+                        }
+                        ImGui::Text("  Speed:    %d", mo->movement_speed);
+                        ImGui::Text("  Range:    %d km", static_cast<int>(mo->max_range));
+                    }
+                } else {
+                    ImGui::TextDisabled("Destination: (no movement orders)");
+                }
                 ImGui::Text("Name ID:   %d", static_cast<int>(impl_->pb_int(pb, "name_id")));
                 ImGui::Text("Camp ID:   %d", static_cast<int>(impl_->pb_int(pb, "camp_id")));
                 ImGui::Text("Reinforc.: %d", static_cast<int>(impl_->pb_int(pb, "reinforcement")));
                 ImGui::Text("Waypoints: %d", static_cast<int>(impl_->pb_int(pb, "wp_count")));
                 ImGui::Text("Losses:    %d", static_cast<int>(impl_->pb_int(pb, "losses")));
-                // Movement specs
-                {
-                    int32_t mt = static_cast<int32_t>(impl_->pb_int(pb, "movement_type"));
-                    int16_t ms = static_cast<int16_t>(impl_->pb_int(pb, "movement_speed"));
-                    if (mt > 0 || ms > 0) {
-                        ImGui::Separator();
-                        ImGui::TextUnformatted("Movement (UCD):");
-                        const auto& mtn = impl_->pb_str(pb, "movement_type_name");
-                        if (!mtn.empty()) {
-                            ImGui::Text("  Type:     %s (%d)", mtn.c_str(), mt);
-                        } else {
-                            ImGui::Text("  Type:     %d", mt);
-                        }
-                        ImGui::Text("  Speed:    %d", ms);
-                        ImGui::Text("  Range:    %d km", static_cast<int>(impl_->pb_int(pb, "max_range")));
-                    }
-                }
                 // Roster
                 {
                     int total_vehicles = 0;
