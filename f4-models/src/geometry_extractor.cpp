@@ -104,6 +104,60 @@ float get_dof_value(const ModelState& state, int dof_number,
     return default_value;
 }
 
+// ── XDOF flag constants (from FreeFalcon bspnodes.cpp) ────────────────────
+// These flags control how the raw DOF value is processed before being
+// applied as a rotation angle or translation scale.
+static constexpr int32_t XDOF_NEGATE   = (1 << 0);  // negate the DOF value
+static constexpr int32_t XDOF_MINMAX   = (1 << 1);  // clamp to [min, max]
+static constexpr int32_t XDOF_SUBRANGE = (1 << 2);  // rescale to [0, 1] over [min, max]
+static constexpr int32_t XDOF_ISDOF    = (1 << 31); // value is in degrees, convert to radians
+
+/// Process a DOF value through the XDOF flags, replicating FreeFalcon's
+/// Process_DOFRot() from src/graphics/bsplib/bspnodes.cpp.
+///
+/// @param dof_value   raw DOF value from ModelState
+/// @param flags       XDOF_* flag bits from the BSP node
+/// @param min         DOF minimum (from BSP node)
+/// @param max         DOF maximum (from BSP node)
+/// @param multiplier  DOF multiplier (from BSP node)
+/// @return processed value = (flag-adjusted dof_value) * multiplier
+float process_dof_rot(float dof_value, int32_t flags,
+                      float min, float max, float multiplier) {
+    float result = dof_value;
+
+    if (flags & XDOF_NEGATE) {
+        result = -result;
+    }
+
+    if (flags & XDOF_MINMAX) {
+        if (result < min) result = min;
+        if (result > max) result = max;
+    }
+
+    if ((flags & XDOF_SUBRANGE) && min != max) {
+        // Rescale so result is 0.0 at min and 1.0 at max
+        result -= min;
+        result /= (max - min);
+
+        // If this is a rotational DOF stored in degrees, convert to radians
+        if (flags & XDOF_ISDOF) {
+            result *= 0.017453293f;  // PI / 180
+        }
+    }
+
+    result *= multiplier;
+    return result;
+}
+
+/// Convenience: get the DOF value from state AND process it through the
+/// node's flags/min/max/multiplier in one call.
+float get_processed_dof(const ModelState& state, const BspNode& node) {
+    float raw = get_dof_value(state, node.dof_number);
+    return process_dof_rot(raw, node.dof_flags,
+                            node.dof_min, node.dof_max,
+                            node.dof_multiplier);
+}
+
 /// A descriptor for an active coord/normals/tex_ids pool.
 /// All pointers are into `tree.lod_buffer`. They're only valid for the
 /// lifetime of the WalkContext (which holds a const ref to the tree).
@@ -305,11 +359,32 @@ void process_prim(WalkContext& ctx, int32_t prim_offset)
 
     // Resolve the texture ID using the ACTIVE pool (not tree.tex_ids).
     // This is the key fix for per-subtree pool binding.
+    //
+    // Texture set offset (FreeFalcon Phase T9):
+    //   FreeFalcon's BRoot stores one tex_ids[] pool of length
+    //   nTexIDs = nTextureSets * texturesPerSet. At draw time it computes
+    //   texOffset = TextureSet * (nTexIDs / nTextureSets) and indexes
+    //   the pool as pTexIDs[texOffset + texIndex]. We replicate this
+    //   by adding the same offset to prim.tex_index before lookup.
+    //
+    //   For models with n_texture_sets == 1, tex_offset is 0 and this
+    //   is a no-op. For multi-set models (summer/winter/desert), this
+    //   selects the correct third of the pool.
     ActivePool pool = ctx.active();
     int32_t tex_id = -1;
     if (prim.tex_index >= 0 && pool.tex_ids &&
-        prim.tex_index < static_cast<int>(pool.n_tex_ids)) {
-        tex_id = pool.tex_ids[prim.tex_index];
+        pool.n_tex_ids > 0) {
+        // Compute the per-set stride. Guard against divide-by-zero
+        // (n_texture_sets <= 0 is treated as 1).
+        const int n_sets = (ctx.state.n_texture_sets > 0)
+                            ? ctx.state.n_texture_sets : 1;
+        const int stride = static_cast<int>(pool.n_tex_ids) / n_sets;
+        const int tex_offset = ctx.state.texture_set * stride;
+        const int effective_idx = prim.tex_index + tex_offset;
+        if (effective_idx >= 0 &&
+            effective_idx < static_cast<int>(pool.n_tex_ids)) {
+            tex_id = pool.tex_ids[effective_idx];
+        }
     }
 
     // Find or create a mesh for this (texture, primitive_kind) pair.
@@ -390,30 +465,41 @@ void walk_node(WalkContext& ctx, NodeIdx node_idx)
     case BspNodeType::BXDofNode: {
         // DOF rotational transform.
         //
-        // In FreeFalcon, a BDofNode defines a coordinate frame for its
-        // subtree using dof_rotation (orientation into parent space) and
-        // dof_translation (origin in parent space). The DOF value rotates
-        // the subtree around the local Z axis.
+        // In FreeFalcon, a BDofNode/BXDofNode defines a coordinate frame
+        // for its subtree using dof_rotation (orientation into parent
+        // space) and dof_translation (origin in parent space). The DOF
+        // value rotates the subtree around the local X axis.
         //
-        // Full transform for a vertex v in the DOF's local frame:
-        //   v_parent = dof_translation + dof_rotation * Rz(value) * v
+        // FreeFalcon's BDofNode::Draw (bspnodes.cpp) builds:
+        //   dofRot = Rx(dofValue * multiplier)   [rotation around X, NOT Z]
+        //   R = rotation * dofRot                 [compose with frame]
+        //   T.x = translation.x + DOFTranslation  [translation along local X]
+        //   T.y = translation.y
+        //   T.z = translation.z
         //
-        // As an AffineTransform:
-        //   rotation    = dof_rotation * Rz(value)
-        //   translation = dof_translation
-        const float dof_value = get_dof_value(ctx.state, node.dof_number);
+        // For BXDofNode, the DOF value is processed through Process_DOFRot
+        // which applies XDOF_NEGATE / XDOF_MINMAX / XDOF_SUBRANGE flags
+        // before multiplying by the multiplier.
+        //
+        // NOTE: The previous code used make_rotation_x (correct!) but the
+        // comments said "Rz" (wrong). The rotation IS around X — this
+        // matches FreeFalcon's dofRot matrix which has cos/sin in the
+        // Y-Z submatrix. For a helicopter rotor whose dof_rotation maps
+        // local X → world Y (up), this produces correct spin behavior.
+        const float dof_value = get_processed_dof(ctx.state, node);
 
-        // Build Rz(dof_value)
-        AffineTransform rz = make_rotation_x(dof_value);
+        // Build Rx(dof_value) — rotation around local X axis
+        AffineTransform rx = make_rotation_x(dof_value);
 
-        // Compose: dof_rotation * Rz(value)
+        // Compose: dof_rotation * Rx(value)
+        // This transforms vertices as: v_parent = dof_rotation * Rx * v_local
         AffineTransform dof_xform;
         for (int i = 0; i < 3; ++i) {
             for (int j = 0; j < 3; ++j) {
                 dof_xform.rotation.m[i][j] = 0;
                 for (int k = 0; k < 3; ++k) {
                     dof_xform.rotation.m[i][j] +=
-                        node.dof_rotation.m[i][k] * rz.rotation.m[k][j];
+                        node.dof_rotation.m[i][k] * rx.rotation.m[k][j];
                 }
             }
         }
@@ -429,17 +515,28 @@ void walk_node(WalkContext& ctx, NodeIdx node_idx)
     case BspNodeType::BTransNode: {
         // DOF translational transform.
         //
-        // BTransNode translates its subtree. The dof_translation is the
-        // base position offset, and the DOF value drives additional
-        // translation along the local Z axis (scaled by multiplier).
+        // FreeFalcon's BTransNode::Draw (bspnodes.cpp):
+        //   a = Process_DOFRot(dofNumber, flags, min, max, multiplier, future)
+        //   T.x = translation.x * a
+        //   T.y = translation.y * a
+        //   T.z = translation.z * a
         //
-        // v_parent = v_local + dof_translation + (0, 0, value * multiplier)
-        const float dof_value = get_dof_value(ctx.state, node.dof_number);
+        // The ENTIRE translation vector is scaled by `a` (= processed DOF
+        // value). When a=0 the subtree is at the origin; when a=1 it's at
+        // the full translation. This is used for landing gear extension,
+        // canopy opening, etc.
+        //
+        // BUG (previous): the old code added `dof_value * multiplier` to
+        // the Z component only, which is completely wrong. It would place
+        // the subtree at `dof_translation` always (regardless of DOF
+        // value) and then add a Z offset — the opposite of the intended
+        // behavior.
+        const float a = get_processed_dof(ctx.state, node);
 
         AffineTransform trans_xform; // identity rotation
-        trans_xform.translation = node.dof_translation;
-        // Add DOF-driven Z translation
-        trans_xform.translation.z += dof_value * node.dof_multiplier;
+        trans_xform.translation.x = node.dof_translation.x * a;
+        trans_xform.translation.y = node.dof_translation.y * a;
+        trans_xform.translation.z = node.dof_translation.z * a;
 
         ctx.push_transform(trans_xform);
         pushed_transform = true;
@@ -449,25 +546,33 @@ void walk_node(WalkContext& ctx, NodeIdx node_idx)
     }
 
     case BspNodeType::BScaleNode: {
-        // Scale transform.
+        // DOF scale transform.
         //
-        // BScaleNode scales its subtree by the scale factors and offsets
-        // by dof_translation.
+        // FreeFalcon's BScaleNode::Draw (bspnodes.cpp):
+        //   a = Process_DOFRot(dofNumber, flags, min, max, multiplier, future)
+        //   dx = 1.0 - (1.0 - scale.x) * a
+        //   dy = 1.0 - (1.0 - scale.y) * a
+        //   dz = 1.0 - (1.0 - scale.z) * a
+        //   T = translation (constant, not scaled by DOF)
         //
-        // v_parent = dof_translation + diag(scale) * v_local
+        // The scale interpolates from 1.0 (when a=0, original size) to
+        // scale.xyz (when a=1, target size). This is used for things like
+        // speed brakes, spoilers, and airbrakes that deploy by scaling.
         //
-        // We represent this by storing the scale in the rotation matrix
-        // (which is no longer orthogonal, but works for position
-        // transforms). Normals will be approximately correct for uniform
-        // scale; non-uniform scale may cause slight normal errors.
+        // BUG (previous): the old code used scale.xyz directly as the
+        // scale factors, ignoring the DOF value entirely. This meant
+        // the subtree was always at the target scale regardless of the
+        // DOF slider position.
+        const float a = get_processed_dof(ctx.state, node);
+
+        const float sx = 1.0f - (1.0f - node.scale.x) * a;
+        const float sy = 1.0f - (1.0f - node.scale.y) * a;
+        const float sz = 1.0f - (1.0f - node.scale.z) * a;
+
         AffineTransform scale_xform;
-        scale_xform.rotation.m[0][0] = node.scale.x;
-        scale_xform.rotation.m[0][1] = 0; scale_xform.rotation.m[0][2] = 0;
-        scale_xform.rotation.m[1][0] = 0;
-        scale_xform.rotation.m[1][1] = node.scale.y;
-        scale_xform.rotation.m[1][2] = 0;
-        scale_xform.rotation.m[2][0] = 0; scale_xform.rotation.m[2][1] = 0;
-        scale_xform.rotation.m[2][2] = node.scale.z;
+        scale_xform.rotation.m[0][0] = sx; scale_xform.rotation.m[0][1] = 0;  scale_xform.rotation.m[0][2] = 0;
+        scale_xform.rotation.m[1][0] = 0;  scale_xform.rotation.m[1][1] = sy; scale_xform.rotation.m[1][2] = 0;
+        scale_xform.rotation.m[2][0] = 0;  scale_xform.rotation.m[2][1] = 0;  scale_xform.rotation.m[2][2] = sz;
         scale_xform.translation = node.dof_translation;
 
         ctx.push_transform(scale_xform);
