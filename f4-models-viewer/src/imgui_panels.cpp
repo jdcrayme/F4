@@ -225,7 +225,7 @@ static void draw_model_browser(ViewerApp::Impl& impl) {
                             for (int s = 0; s < m.effective_switches(); ++s) {
                                 f4::models::SwitchState ss;
                                 ss.switch_number = s;
-                                ss.active_child = 0;
+                                ss.active_child = -1;  // "Show All" default
                                 ss.n_children = 2;
                                 impl.model_state.switches.push_back(ss);
                             }
@@ -684,17 +684,41 @@ static void draw_switch_panel(ViewerApp::Impl& impl) {
         if (impl.model_state.switches.empty()) {
             ImGui::TextDisabled("No switches for this model.");
         } else {
+            // Help text explaining the "Show All" option
+            ImGui::TextDisabled("Tip: 'Show All' renders every child at once.");
+            ImGui::Separator();
+
             bool changed = false;
             for (auto& sw : impl.model_state.switches) {
                 ImGui::PushID(sw.switch_number);
                 char label[64];
-                std::snprintf(label, sizeof(label), "Switch %d", sw.switch_number);
+                std::snprintf(label, sizeof(label), "Switch %d (%d children)",
+                              sw.switch_number, sw.n_children);
 
-                // Combo box for child selection
-                char current[32];
-                std::snprintf(current, sizeof(current), "Child %d", sw.active_child);
+                // Combo box for child selection.
+                // active_child = -1 means "show all children" (FreeFalcon's
+                // default behavior when no switch state is set).
+                char current[48];
+                if (sw.active_child == -1) {
+                    std::snprintf(current, sizeof(current), "Show All");
+                } else {
+                    std::snprintf(current, sizeof(current), "Child %d", sw.active_child);
+                }
 
                 if (ImGui::BeginCombo(label, current)) {
+                    // "Show All" option — renders every child simultaneously.
+                    // Useful for switches that act as bitmasks (e.g. pylon
+                    // loadout selectors where each child is one store).
+                    {
+                        bool is_selected = (sw.active_child == -1);
+                        if (ImGui::Selectable("Show All", is_selected)) {
+                            sw.active_child = -1;
+                            changed = true;
+                        }
+                        if (is_selected) {
+                            ImGui::SetItemDefaultFocus();
+                        }
+                    }
                     for (int c = 0; c < sw.n_children; ++c) {
                         char child_label[32];
                         std::snprintf(child_label, sizeof(child_label), "Child %d", c);

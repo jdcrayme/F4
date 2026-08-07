@@ -243,7 +243,12 @@ void ViewerApp::select_parent(int index) {
             for (int s = 0; s < rec->effective_switches(); ++s) {
                 f4::models::SwitchState ss;
                 ss.switch_number = s;
-                ss.active_child = 0;
+                // Default to "Show All" — a model viewer should display
+                // all geometry by default. The sync_model_state_with_bsp_tree
+                // helper in scene.cpp will refine this once the BSP tree
+                // is parsed (setting correct n_children, removing switches
+                // not present in the tree).
+                ss.active_child = -1;  // "Show All"
                 ss.n_children = 2;
                 impl_->model_state.switches.push_back(ss);
             }

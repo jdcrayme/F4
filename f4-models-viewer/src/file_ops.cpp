@@ -81,7 +81,7 @@ void ViewerApp::Impl::load_model_files(
             for (int i = 0; i < rec->effective_switches(); ++i) {
                 f4::models::SwitchState ss;
                 ss.switch_number = i;
-                ss.active_child = 0;
+                ss.active_child = -1;  // "Show All" default
                 ss.n_children = 2;  // default assumption
                 model_state.switches.push_back(ss);
             }

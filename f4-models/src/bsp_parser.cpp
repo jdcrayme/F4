@@ -598,38 +598,75 @@ bool parse_bsp_tree(
         }
     }
 
-    // Pass 2: buffer-wide vtable scan for unvisited nodes.
-    // This catches switch children that were missed because n_children=0
-    // or children_off was garbage. We scan every 4-byte-aligned position
-    // in the buffer; if the value looks like a valid byte offset AND the
-    // target starts with a vtable pattern AND the target hasn't been
-    // visited yet, we walk it.
+    // Pass 2: targeted vtable scan for unvisited nodes.
     //
-    // This is O(buffer_size / 4) but only runs once per LOD parse, and
-    // the walk_node calls are guarded by offset_map (already-visited
-    // nodes are skipped).
-    {
-        const uint8_t* buf = node_data;
-        std::size_t buf_sz = node_data_size;
-        int tags_before = ctx.tag_pos;
+    // Some BSwitchNode variants store n_children=0 but still have real
+    // children in the buffer. The regular walk skips them, leaving real
+    // prim nodes orphaned and unconsumed tags in the tag list.
+    //
+    // The previous implementation of this scan used a broad threshold
+    // (0x00460000..0x00470000) which produced massive false positives on
+    // real Falcon4 LOD data — float coordinate values, normal values,
+    // and packed bit patterns routinely have bit representations in that
+    // range (e.g. 0x46xx xxxx ≈ +22000..+26000 as a float). Each false
+    // positive consumed a real tag and created a fake node whose
+    // sibling/subtree/children offsets were random float bit patterns,
+    // frequently pointing back to already-visited nodes (creating
+    // cycles). Concrete impact: model 1052 (F-16) LOD 0 had ~700 fake
+    // nodes with garbage dof_number / switch_number fields like
+    // dof#=1067981667 (=0x3F940000, a coordinate value).
+    //
+    // Two fixes:
+    //   1. Narrow the vtable range from 0x00460000..0x00470000 (64KB
+    //      window) to 0x00465000..0x00465200 (512-byte window). The
+    //      real BNode-class vtables for this FreeFalcon build all lie
+    //      in a ~176-byte sub-range (0x004650B8..0x00465168), so a
+    //      512-byte window comfortably covers them while excluding
+    //      virtually all float bit patterns (a float in this range
+    //      would be a denormalized value near 6.5e-39, which never
+    //      appears in coordinate/normal data).
+    //   2. Only run the scan when the regular walk consumed < 50% of
+    //      the tags. If the walk consumed most tags, the tree is
+    //      well-formed and any "orphaned" positions are likely fake
+    //      vtable matches in coordinate data, not real nodes. This
+    //      prevents the scan from polluting well-formed trees
+    //      (e.g. model 1052 LOD 0, where the walk consumed 887/1582
+    //      = 56% of tags).
+    //
+    // The 50% threshold is conservative: model 829 LOD 2 consumes
+    // only 6/75 = 8% of tags (broken BSwitchNode with n_children=0),
+    // well below the threshold. Model 1052 LOD 0 consumes 887/1582
+    // = 56%, above the threshold, so the scan is skipped.
+    const int tags_consumed = ctx.tag_pos;
+    const double consumption_ratio =
+        ctx.tag_count > 0
+            ? static_cast<double>(tags_consumed) / static_cast<double>(ctx.tag_count)
+            : 1.0;
 
-        for (std::size_t i = 0; i + 4 <= buf_sz; i += 4) {
-            int32_t off = -1;
-            std::memcpy(&off, buf + i, 4);
-            // Quick filter: offset must be within buffer and 4-byte aligned
-            if (off < 0 || static_cast<std::size_t>(off) + 4 > buf_sz)
-                continue;
-            if (off % 4 != 0) continue;
-            // Check if target looks like a node (starts with vtable)
-            uint32_t target_vt = 0;
-            std::memcpy(&target_vt, buf + off, 4);
-            if (target_vt < 0x00460000 || target_vt > 0x00470000)
-                continue;
+    if (consumption_ratio < 0.50) {
+        for (std::size_t i = 0; i + 4 <= node_data_size; i += 4) {
+            // Quick reject on the high bytes of the little-endian vtable.
+            // A vtable value of 0x004651xx is stored in memory as
+            // [xx, 0x51, 0x46, 0x00] (little-endian). So byte 3 (high
+            // byte) is 0x00, byte 2 is 0x46, and byte 1 is 0x50 or 0x51.
+            // This eliminates ~99.99% of buffer positions (most bytes
+            // are non-zero coordinate/normals data) without needing a
+            // full uint32 read + range check.
+            if (node_data[i + 3] != 0x00) continue;
+            if (node_data[i + 2] != 0x46) continue;
+            if (node_data[i + 1] != 0x50 && node_data[i + 1] != 0x51) continue;
+
+            uint32_t vt = 0;
+            std::memcpy(&vt, node_data + i, 4);
+            // Narrow range check (512-byte window: 0x00465000..0x004651FF)
+            if (vt < 0x00465000 || vt > 0x004651FF) continue;
+
             // Check if already visited
+            int32_t off = static_cast<int32_t>(i);
             if (ctx.offset_map.count(off) > 0) continue;
             // Walk it — this consumes a tag and populates the node
             if (ctx.tag_pos >= ctx.tag_count) break;
-            (void)walk_node(ctx, static_cast<int32_t>(off));
+            (void)walk_node(ctx, off);
         }
     }
 
