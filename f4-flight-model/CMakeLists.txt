@@ -20,6 +20,10 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 #                       used by AircraftState. The dependency is PUBLIC
 #                       because angle.hpp is a public header and
 #                       AircraftState's fields are visible to consumers.)
+#   - f4-entities      (for BehavioralComponent — Phase A.2 adds
+#                       FlightModelComponent, which inherits from
+#                       entities::BehavioralComponent<>. PUBLIC because
+#                       flight_model_component.hpp is a public header.)
 # ---------------------------------------------------------------------------
 add_library(f4-flight-model STATIC
     src/aerodynamics.cpp
@@ -41,6 +45,7 @@ target_link_libraries(f4-flight-model PUBLIC
     f4-state-machine
     f4-messaging
     f4-units
+    f4-entities
 )
 
 # Tests

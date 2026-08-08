@@ -1536,3 +1536,64 @@ Stage Summary:
 - The Angle strong-type now enforces the radians-vs-degrees convention at compile time across `f4-flight-model`. The historical hazard where `alpha_deg` (degrees) and `theta` (radians) could be silently interchanged because both were `double` is closed.
 - The F-16 aero tables remain degree-indexed (deliberate — converting the data would alter the flight feel). The degree convention now survives at exactly one place: the lookup call site, where `alpha_deg` is a local extracted via `to_degrees(alpha)` and named `_deg` to make the convention explicit.
 - 4 deferred items from the previous cleanup pass remain: `f4-messaging::publish()` shared_mutex refactor, `LayeredStateMachine::applyInhibition()` `force_to_state()`, `dat_parser.cpp` exception-as-control-flow, and (from the original review) items 2/3/4/5: IUnitSource tagged-union interface split, WorldState header-leak fix, VU_ID cross-ref field clearing, and PropertyBag promotion. These are the next candidates for a focused cleanup PR.
+
+---
+Task ID: PHASE-A-0
+Agent: main (orchestrator)
+Task: Phase A cleanup — fix dark patterns and code smells in takeoff_module, stub_atc, scenario_runner, and f4-messaging before adding new functionality.
+
+Work Log:
+- Identified root cause of existing test failure (TakeoffTestFixture.StubATCGrantsTaxiClearance): use-after-free bug in MessageBus reentrant publish. The deferred lambda captured &msg (reference to inner publish's stack parameter), which dangles by the time the drain loop runs. Fixed by capturing msg by value.
+- Fixed FlightRecorder.SummaryJsonContainsPhases test: was using json.find() with a regex-style pattern ("Takeoff(\"|\")Mode") which does literal search, not regex. Changed to literal "TakeoffMode".
+- Rewrote TakeoffModule:
+  * TaxiRequest now actually published: initialize() calls sm_.reset() to re-fire on_enter(RequestTaxi) with bus_ set. Previously the entry action fired during construction (bus_ was null) and silently no-op'd.
+  * TakeoffRequest moved from on_enter(TakeRunway) to on_enter(HoldShort) — aircraft requests takeoff clearance at the hold-short line, not after lining up.
+  * Taxi waypoint advancement implemented: check_taxi_progress() reads aircraft position, advances taxi_wp_index_ when within capture radius, fires RunwayAssigned when last waypoint reached.
+  * HoldShort and PrepToTakeRunway no longer auto-transition every tick. HoldShort waits for TakeoffClearance (via subscription). PrepToTakeRunway waits for runway alignment (checked in update()).
+  * const_cast removed: control methods are pure (const, no transitions). Transition decisions made in update() before calling controls. Added transition loop (max 8 iterations) to handle chained transitions in one tick.
+  * TakeRunway auto-transitions to Takeoff (TakeoffCommand) since StubATC's single TakeoffClearance grants both lineup and takeoff.
+  * Added taxi_wp_capture_radius_ft and centerline_align_tolerance_ft config parameters.
+  * Added current_position_ cache for waypoint/alignment checks.
+- Documented StubATC subscription-order requirement: must be constructed before AI module initialize() publishes TaxiRequest.
+- Added NED->ENU frame conversion helpers to f4/flight/aircraft_state.hpp: ned_to_enu_altitude_ft(), altitude_agl_ft(), altitude_msl_ft(). Replaced scattered -kin.z sign flips in scenario_runner.cpp and takeoff_module.cpp with named helpers.
+- Rewrote test_takeoff_module.cpp: 17 tests covering TaxiRequest publication, taxi waypoint advancement, HoldShort TakeoffRequest, full takeoff flow (parking -> taxi -> holdshort -> takeoff -> flyout -> done), per-state control outputs, configuration defaults.
+
+Stage Summary:
+- All 1084 tests pass (2 skipped due to locale, same as baseline).
+- 2 previously-failing tests now pass (StubATCGrantsTaxiClearance, SummaryJsonContainsPhases).
+- TakeoffModule now correctly implements the full ATC protocol: spawn -> TaxiRequest -> TaxiClearance -> taxi to hold-short -> TakeoffRequest -> TakeoffClearance -> takeoff roll -> liftoff -> climb -> Done.
+- No architectural changes yet (BehavioralComponent, FlightModelComponent, BrainComponent, f4-sim CLI are Phase A.1-A.5).
+
+---
+Task ID: A.1
+Agent: main (orchestrator)
+Task: Add BehavioralComponent base + priority() + EntityWorld::update_all() (two-pass implementation). No architectural changes to existing components — just the new base class, the loop primitive, and tests.
+
+Work Log:
+- Read current f4-entities: ComponentBase, Component<T> CRTP, EntityWorld (entities_/free_list_/cookie_), EntityHandle::add<T>() template. Confirmed all existing components are passive data — no update() method exists.
+- Design decision: BehavioralComponentBase adds priority() (int, default 0 = passive), update(dt, bus) (pure virtual), on_attached(EntityHandle&) (default no-op). BehavioralComponent<Derived> CRTP wrapper mirrors Component<Derived>.
+- Priority convention: BRAIN_THRESHOLD = 75. Brains return 100, physics return 50. update_all splits at this threshold.
+- Forward-declared f4::messaging::MessageBus in entity.hpp — library itself never calls MessageBus methods, so no header dep. Tests include <f4/messaging/bus.hpp> directly; f4-messaging added as PRIVATE dep to f4-entities tests only (library stays dep-free).
+- Implemented EntityWorld::update_all(dt, bus) in entity.cpp: two passes, dynamic_cast<BehavioralComponentBase*> per component. Documented that the eventual campaign-scale optimization is a cached priority-sorted vector on EntityRecord — defer until profiler says so.
+- Modified EntityHandle::add<T>() template body: `if constexpr (std::is_base_of_v<BehavioralComponentBase, T>)` calls comp->on_attached(*this) BEFORE moving the unique_ptr into the map. This gives behavioral components a stable back-reference to their owning handle for sibling-component lookup (the brain -> flight-model pattern A.2 needs).
+- Wrote test_behavioral_component.cpp (19 tests): priority defaults, type_id correctness, brain-before-physics ordering (single entity + cross-entity), dead-entity skipping (via external counter — reading the destroyed component would be UB), bus forwarding (synchronous publish reaches subscriber), on_attached lifecycle (called once, back-ref resolves sibling, survives across ticks), no-auto-flush contract.
+- Fixed one test bug: DeadEntitiesAreSkipped initially read dead_brain.update_count after w.destroy() — that's UB because the brain is destroyed with the entity. Rewrote to use a shared order_log vector that the dead brain would have pushed to if update_all had failed to skip it.
+- Build: f4-entities library + 3 test executables compile clean with -Wall -Wextra -Wpedantic.
+- Tests: 19/19 behavioral tests pass. Full project: 1103/1103 tests pass (2 JSON locale tests skipped, unrelated).
+
+Stage Summary:
+- New API surface in f4-entities/entity.hpp:
+    struct BehavioralComponentBase : ComponentBase {
+        virtual int priority() const noexcept;            // default 0
+        virtual void update(double dt, MessageBus& bus) = 0;
+        virtual void on_attached(EntityHandle& self);     // default no-op
+    };
+    template<typename Derived> struct BehavioralComponent : BehavioralComponentBase;
+    namespace update_phase { inline constexpr int BRAIN_THRESHOLD = 75;
+                             inline constexpr int BRAIN_PRIORITY = 100;
+                             inline constexpr int PHYSICS_PRIORITY = 50; }
+    void EntityWorld::update_all(double dt, messaging::MessageBus& bus);
+- Modified: EntityHandle::add<T>() now fires on_attached() for behavioral components via `if constexpr`.
+- New test file: f4-entities/tests/test_behavioral_component.cpp (19 tests).
+- Patch file: /home/z/my-project/download/phase-a1-behavioral-component.patch
+- Next: A.2 will add FlightModelComponent + BrainComponent wrapping FlightModel and TakeoffModule, using the on_attached() back-ref to resolve the FM pointer lazily.

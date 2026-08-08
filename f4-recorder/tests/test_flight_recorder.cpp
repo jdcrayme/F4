@@ -158,7 +158,7 @@ TEST(FlightRecorder, SummaryJsonContainsPhases) {
     std::string json = rec.to_summary_json("test_phases");
 
     EXPECT_NE(json.find("\"format\":\"f4-flight-summary\""), std::string::npos);
-    EXPECT_NE(json.find("\"Takeoff(\\\"|\\\")Mode\""), std::string::npos);  // mode appears
+    EXPECT_NE(json.find("\"TakeoffMode\""), std::string::npos);  // mode appears
     EXPECT_NE(json.find("\"Taxi\""), std::string::npos);
     EXPECT_NE(json.find("\"TakeRunway\""), std::string::npos);
 }

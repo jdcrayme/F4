@@ -9,4 +9,10 @@ function(f4_ai_add_test name source)
 endfunction()
 
 f4_ai_add_test(test_ai_sensor_fusion test_sensor_fusion.cpp)
-f4_ai_add_test(test_takeoff_module test_takeoff_module.cpp)
+f4_ai_add_test(test_takeoff_module   test_takeoff_module.cpp)
+f4_ai_add_test(test_brain_component  test_brain_component.cpp)
+
+# test_brain_component uses the F16 aircraft config from generated fixtures.
+target_compile_definitions(test_brain_component PRIVATE
+    F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}")
+add_dependencies(test_brain_component convert_golden_fixtures)

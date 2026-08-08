@@ -357,4 +357,31 @@ struct AircraftState {
     void reset() noexcept { *this = AircraftState{}; }
 };
 
+// ---------------------------------------------------------------------------
+// Frame conversion helpers
+//
+// The flight model uses NED (North-East-Down, z-down) internally — altitude
+// is -kin.z. The rest of the system (EntityWorld, recorder, geo) uses ENU
+// (East-North-Up, z-up) — altitude is +z. These helpers centralize the
+// conversion so callers don't scatter sign flips through their code.
+// ---------------------------------------------------------------------------
+
+/// Convert NED z-down altitude to ENU z-up altitude (feet).
+/// NED: z points down, so altitude = -z. ENU: z points up, so altitude = +z.
+/// The conversion is just a sign flip, but having it named makes the intent
+/// explicit at call sites.
+[[nodiscard]] inline double ned_to_enu_altitude_ft(double ned_z) noexcept {
+    return -ned_z;
+}
+
+/// Altitude AGL (feet) from the kinematic state + gear ground altitude.
+[[nodiscard]] inline double altitude_agl_ft(const AircraftState& s) noexcept {
+    return -s.kin.z - s.gear.groundZ_ft;
+}
+
+/// Altitude MSL (feet) from the kinematic state.
+[[nodiscard]] inline double altitude_msl_ft(const AircraftState& s) noexcept {
+    return -s.kin.z;
+}
+
 }  // namespace f4::flight

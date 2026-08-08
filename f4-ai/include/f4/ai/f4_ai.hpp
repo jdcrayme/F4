@@ -15,7 +15,7 @@
 //   f4::ai::modules::TakeoffModule — takeoff state machine (9 states)
 //   f4::ai::atc::StubATC          — stub ATC for testing/demos
 //   f4::ai::atc::messages         — ATC message types
-//   f4::ai::ScenarioRunner        — headless sim loop with recording
+//   f4::ai::BrainComponent        — BehavioralComponent wrapping TakeoffModule
 //
 // Components (planned, see AI_IMPLEMENTATION_PLAN.md §5):
 //   f4::ai::DigitalBrain          — orchestrator (LayeredStateMachine)
@@ -42,9 +42,13 @@
 #include <f4/ai/modules/takeoff_module.hpp>
 #include <f4/ai/modules/scripted_tanker.hpp>
 
+// Brain component (Phase A.2 — wraps a TakeoffModule as a BehavioralComponent)
+#include <f4/ai/brain_component.hpp>
+
 // ATC protocol
 #include <f4/ai/atc/messages.hpp>
 #include <f4/ai/atc/stub_atc.hpp>
 
-// Scenario runner
-#include <f4/ai/scenario_runner.hpp>
+// (ScenarioRunner was deleted in Phase A.2 — the sim loop now lives in the
+//  f4-sim CLI app, built on EntityWorld::update_all + BrainComponent +
+//  FlightModelComponent. See Docs/AI_IMPLEMENTATION_PLAN.md.)

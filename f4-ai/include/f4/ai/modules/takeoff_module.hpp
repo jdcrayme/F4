@@ -14,6 +14,19 @@
 //   HoldShort -> Wait (holding for clearance)
 //   Any -> EmergencyStop
 //
+// ATC protocol:
+//   on_enter(RequestTaxi): publishes TaxiRequest
+//   on_enter(HoldShort):   publishes TakeoffRequest
+//   TaxiClearance  -> ClearanceGranted event (RequestTaxi -> Taxi)
+//   TakeoffClearance -> TakeoffCommand event (HoldShort -> PrepToTakeRunway)
+//
+// The module tracks taxi waypoint progress by reading the aircraft position
+// from AircraftState each tick. When the last taxi waypoint is reached,
+// RunwayAssigned fires (Taxi -> HoldShort). When the aircraft is aligned
+// on the runway centerline, ClearanceGranted fires (PrepToTakeRunway ->
+// TakeRunway). When liftoff is detected, Liftoff fires (Takeoff -> FlyOut).
+// When departure altitude is reached, FlyOutComplete fires (FlyOut -> Done).
+//
 // Dependencies: f4-state-machine, f4-messaging, f4-entities, f4-geo, f4-data.
 // C++20.
 
@@ -69,9 +82,18 @@ enum class TakeoffEvent {
 class TakeoffModule {
 public:
     // --- Construction ---
+    // The SM is constructed with the initial state RequestTaxi. The entry
+    // action for RequestTaxi is a no-op at construction time (bus_ is null).
+    // Call initialize() to wire up the bus and re-fire the entry action,
+    // which publishes the TaxiRequest.
     TakeoffModule();
 
     // --- Initialization ---
+    // Wires up external references, subscribes to ATC clearances, and
+    // re-fires the RequestTaxi entry action to publish the TaxiRequest.
+    // The bus must already have the StubATC (or real ATC) subscribed,
+    // otherwise the TaxiRequest will have no handler and the module will
+    // stay in RequestTaxi forever.
     void initialize(
         std::uint64_t ownship_id,
         entities::EntityWorld& world,
@@ -79,8 +101,11 @@ public:
 
     // --- Per-tick update ---
     // Produces control outputs for the current state.
-    // The caller (DigitalBrain or ScenarioRunner) passes in the current
+    // The caller (BrainComponent or DigitalBrain) passes in the current
     // aircraft state and receives the AI's stick/throttle commands.
+    // Transition decisions (waypoint reached, liftoff detected, etc.) are
+    // made HERE, not in the per-state control methods — this keeps the
+    // control methods pure (const, no side effects) and avoids const_cast.
     AIControlOutput update(double dt, const flight::AircraftState* state);
 
     // --- Accessors ---
@@ -100,6 +125,15 @@ public:
     double takeoff_throttle{1.0};         // throttle during takeoff roll (1.0 = MIL)
     double rotate_pitch_cmd{0.5};         // pitch stick input at Vr
 
+    // Waypoint capture radius (feet). When the aircraft is within this
+    // distance of a taxi waypoint, it advances to the next one.
+    double taxi_wp_capture_radius_ft{50.0};
+
+    // Centerline alignment tolerance (feet). When the aircraft in
+    // PrepToTakeRunway is within this lateral distance of the runway
+    // centerline, it transitions to TakeRunway.
+    double centerline_align_tolerance_ft{10.0};
+
     // --- Trace ---
     void set_trace(fsm::Trace<TakeoffState, TakeoffEvent>* t) noexcept {
         sm_.set_trace(t);
@@ -117,10 +151,29 @@ private:
     // Non-static: entry actions capture `this` to publish ATC messages.
     fsm::StateMachine<TakeoffState, TakeoffEvent> build_sm();
 
-    // Per-state control logic.
-    AIControlOutput taxi_controls(double dt) const;
-    AIControlOutput takeoff_roll_controls(double dt) const;
-    AIControlOutput flyout_controls(double dt) const;
+    // Per-state control logic. These are pure functions of the cached
+    // aircraft state — they do NOT fire transitions. Transition decisions
+    // are made in update() before calling the control method.
+    AIControlOutput controls_for_request_taxi() const;
+    AIControlOutput controls_for_taxi() const;
+    AIControlOutput controls_for_hold_short() const;
+    AIControlOutput controls_for_wait() const;
+    AIControlOutput controls_for_prep_to_take_runway() const;
+    AIControlOutput controls_for_take_runway() const;
+    AIControlOutput controls_for_takeoff() const;
+    AIControlOutput controls_for_flyout() const;
+    AIControlOutput controls_for_emergency_stop() const;
+
+    // Transition checks — called from update() before control logic.
+    // Each returns true if the corresponding transition should fire.
+    void check_taxi_progress();           // Taxi -> HoldShort (RunwayAssigned)
+    void check_takeoff_clearance_ack();   // (no-op; handled by subscription)
+    void check_runway_alignment();        // PrepToTakeRunway -> TakeRunway
+    void check_liftoff();                 // Takeoff -> FlyOut
+    void check_departure_altitude();      // FlyOut -> Done
+
+    // Cache the current aircraft state fields for use by control methods.
+    void cache_aircraft_state(const flight::AircraftState* state);
 
     // --- Data members (ordered so sm_ is LAST) ---
     // C++ initializes members in declaration order. The StateMachine
@@ -146,11 +199,12 @@ private:
     geo::WorldPosition threshold_position_;
     geo::WorldPosition runway_end_position_;
 
-    // Cached state for control logic.
+    // Cached state for control logic (refreshed each update()).
+    geo::WorldPosition current_position_;
     double current_vcas_kts_{0.0};
-    double current_alt_agl_ft{0.0};
-    double current_alt_msl_ft{0.0};
-    double current_heading_rad{0.0};
+    double current_alt_agl_ft_{0.0};
+    double current_alt_msl_ft_{0.0};
+    double current_heading_rad_{0.0};
     bool on_ground_{true};
 
     // State machine (MUST be last — its ctor fires entry actions that

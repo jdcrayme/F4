@@ -189,7 +189,15 @@ public:
             reentry.inside = false;
         } else {
             // Reentrant: defer until the outer publish drains.
-            reentry.pending.push_back([this, snapshot, &msg]() {
+            //
+            // CRITICAL: capture msg BY VALUE, not by reference. The
+            // reentrant publish() call returns before the drain loop
+            // runs (the drain happens in the OUTER publish). If we
+            // captured &msg, it would dangle — pointing to the inner
+            // publish's stack parameter, destroyed when the inner call
+            // returned. This was the root cause of garbage aircraft_id
+            // values in the StubATC taxi-clearance round-trip test.
+            reentry.pending.push_back([this, snapshot, msg]() {
                 for (const auto& h : *snapshot) {
                     if (h) h(&msg);
                 }

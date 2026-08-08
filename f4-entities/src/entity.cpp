@@ -126,6 +126,55 @@ std::vector<EntityId> EntityWorld::within_radius(double cx, double cy, double cz
 }
 
 // ============================================================================
+// EntityWorld::update_all — the sim tick primitive.
+//
+// Two-pass implementation:
+//   Pass 1: every behavioral component with priority >= BRAIN_THRESHOLD
+//           (brains — produces control inputs and publishes ATC requests).
+//   Pass 2: every behavioral component with 0 < priority < BRAIN_THRESHOLD
+//           (physics — consumes the brain's outputs, integrates state).
+//
+// The dynamic_cast to BehavioralComponentBase* is the simplest correct way
+// to filter behavioral components from the type-erased components map. At
+// Phase A scale (N=1-4 entities, ~3 components each) the per-tick cost is
+// trivial (~12 dynamic_casts/tick = ~720/s at 60 Hz). The eventual
+// optimization at campaign scale is to cache a priority-sorted vector of
+// BehavioralComponentBase* on each EntityRecord, populated on add<T>() /
+// remove<T>() and invalidated on entity destroy. That replaces the
+// dynamic_cast with a direct iteration but adds bookkeeping complexity;
+// defer until a profiler says otherwise.
+//
+// Note: bus.flush_pending() is NOT called here. The caller owns the bus
+// lifecycle and is responsible for draining deferred messages after the
+// tick completes. This keeps update_all focused on "iterate components"
+// and avoids surprising side effects on the bus.
+// ============================================================================
+void EntityWorld::update_all(double dt, messaging::MessageBus& bus) {
+    // Pass 1: brains (priority >= BRAIN_THRESHOLD).
+    for (auto& rec : entities_) {
+        if (!rec.alive) continue;
+        for (auto& [tid, comp] : rec.components) {
+            auto* bc = dynamic_cast<BehavioralComponentBase*>(comp.get());
+            if (bc && bc->priority() >= update_phase::BRAIN_THRESHOLD) {
+                bc->update(dt, bus);
+            }
+        }
+    }
+
+    // Pass 2: physics (0 < priority < BRAIN_THRESHOLD).
+    for (auto& rec : entities_) {
+        if (!rec.alive) continue;
+        for (auto& [tid, comp] : rec.components) {
+            auto* bc = dynamic_cast<BehavioralComponentBase*>(comp.get());
+            const int prio = bc ? bc->priority() : 0;
+            if (prio > 0 && prio < update_phase::BRAIN_THRESHOLD) {
+                bc->update(dt, bus);
+            }
+        }
+    }
+}
+
+// ============================================================================
 // EntityHandle
 // ============================================================================
 bool EntityHandle::valid() const noexcept {

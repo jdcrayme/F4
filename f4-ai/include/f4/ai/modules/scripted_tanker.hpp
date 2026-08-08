@@ -5,7 +5,8 @@
 // This is NOT a real tanker AI. It exists so that the RefuelModule has
 // something to refuel from — a tanker that maintains a constant heading,
 // altitude, and speed. The entity's TransformComponent is updated each
-// tick by the ScenarioRunner (or by the ScriptedTanker's own update).
+// tick by EntityWorld::update_all() (or by the ScriptedTanker's own
+// update if wired as a BehavioralComponent).
 //
 // When a real tanker AI is built (part of WingmanModule / formation
 // logic), this can be replaced. But for AR demos and integration tests,

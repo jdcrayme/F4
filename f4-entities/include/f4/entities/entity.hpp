@@ -51,6 +51,14 @@
 #include <f4/geo/position.hpp>
 #include "types.hpp"
 
+// Forward declaration — full definition in <f4/messaging/bus.hpp>.
+// BehavioralComponentBase::update() takes a MessageBus& so behavioral
+// components can publish/subscribe without each one storing its own
+// pointer. The library itself never calls any MessageBus method, so a
+// forward declaration is sufficient here; consumers (tests, f4-sim)
+// include the full header.
+namespace f4::messaging { class MessageBus; }
+
 namespace f4::entities {
 
     // ============================================================================
@@ -181,6 +189,80 @@ namespace f4::entities {
 
     template<typename Derived>
     struct Component : ComponentBase {
+        [[nodiscard]] std::type_index type_id() const override {
+            return std::type_index(typeid(Derived));
+        }
+    };
+
+    // ============================================================================
+    // BehavioralComponent — components with per-tick update logic.
+    //
+    // All existing components (TransformComponent, TeamComponent, ...) are
+    // passive data: they hold state but do nothing each tick. A behavioral
+    // component adds an `update(dt, bus)` hook called by EntityWorld::
+    // update_all() once per tick.
+    //
+    // Update ordering is controlled by `priority()`:
+    //   - priority() == 0  : passive — not iterated by update_all(). This
+    //                        is the default for ComponentBase; behavioral
+    //                        components override to return a non-zero value.
+    //   - priority() >= 75 : runs in pass 1 ("brains"). Brains read world
+    //                        state and produce control inputs.
+    //   - 0 < priority() < 75 : runs in pass 2 ("physics"). Flight models,
+    //                        gear, sensors — anything that consumes the
+    //                        brain's outputs and advances simulation state.
+    //
+    // The two-pass split guarantees that by the time a flight model updates,
+    // every brain on every entity has already published its commands. This
+    // is the simplest correct ordering; the eventual optimization (campaign
+    // scale, N=1000+) is to cache a priority-sorted vector of behavioral
+    // component pointers per EntityRecord, avoiding the dynamic_cast in
+    // update_all(). At Phase A scale (N=1-4 entities, ~3 components each)
+    // the dynamic_cast is invisible in profiles.
+    //
+    // on_attached() is called once by EntityHandle::add<T>() after the
+    // component is constructed and stored on the entity. Override to
+    // capture a back-reference to the owning EntityHandle, so the
+    // behavioral component can look up sibling components on the same
+    // entity (e.g. a brain looking up its FlightModelComponent).
+    // ============================================================================
+    class EntityHandle;  // forward-declared for on_attached parameter
+
+    namespace update_phase {
+        // Components with priority >= BRAIN_THRESHOLD run in pass 1.
+        // Components with priority > 0 and < BRAIN_THRESHOLD run in pass 2.
+        // Components with priority == 0 are passive (not iterated).
+        inline constexpr int BRAIN_THRESHOLD = 75;
+
+        // Conventional priorities for built-in component families.
+        // (Informational; not enforced — any value > 0 means "active".)
+        inline constexpr int BRAIN_PRIORITY   = 100;  // AI brains, decision logic
+        inline constexpr int PHYSICS_PRIORITY = 50;  // flight models, gear, sensors
+    } // namespace update_phase
+
+    struct BehavioralComponentBase : ComponentBase {
+        // Higher priority runs earlier in the tick. Default 0 means
+        // "passive" — update_all() skips this component. Behavioral
+        // components override to return a value from update_phase::
+        // BRAIN_PRIORITY or update_phase::PHYSICS_PRIORITY (or a custom
+        // value that respects the threshold convention).
+        [[nodiscard]] virtual int priority() const noexcept { return 0; }
+
+        // Per-tick update. Called by EntityWorld::update_all() with the
+        // sim tick length (seconds) and the message bus. The bus is shared
+        // across all entities and components — synchronous publishes fire
+        // their handlers within this call; deferred publishes accumulate
+        // until the caller (f4-sim main loop) flushes them.
+        virtual void update(double dt, messaging::MessageBus& bus) = 0;
+
+        // Lifecycle hook: called once after EntityHandle::add<T>() stores
+        // this component on the entity. Override to capture a back-reference
+        // for sibling-component lookup. Default is a no-op.
+        virtual void on_attached(EntityHandle& self) { (void)self; }
+    };
+
+    template<typename Derived>
+    struct BehavioralComponent : BehavioralComponentBase {
         [[nodiscard]] std::type_index type_id() const override {
             return std::type_index(typeid(Derived));
         }
@@ -453,7 +535,8 @@ namespace f4::entities {
     // ============================================================================
     // EntityWorld — owns all entities, their components, and tags.
     // ============================================================================
-    class EntityHandle;
+    // EntityHandle forward-declared earlier (before BehavioralComponentBase)
+    // so on_attached() can take it by reference.
 
     class EntityWorld {
     public:
@@ -511,6 +594,23 @@ namespace f4::entities {
         [[nodiscard]] std::vector<EntityId> within_radius(double cx, double cy, double cz,
             double radius) const;
 
+        // --- Sim tick primitive ---
+        // Calls update(dt, bus) on every behavioral component of every live
+        // entity, in two passes:
+        //   Pass 1: components with priority() >= update_phase::BRAIN_THRESHOLD
+        //           (brains — produce control inputs).
+        //   Pass 2: components with 0 < priority() < BRAIN_THRESHOLD
+        //           (physics — consume the brain's outputs).
+        // Components with priority() == 0 (passive data: TransformComponent,
+        // TeamComponent, ...) are skipped.
+        //
+        // Threading: NOT thread-safe. Call from the sim thread only.
+        // Bus flushing: this call does NOT call bus.flush_pending(). The
+        // caller is responsible for draining deferred messages after the
+        // tick completes (typical pattern: update_all(dt, bus);
+        // bus.flush_pending();).
+        void update_all(double dt, messaging::MessageBus& bus);
+
         [[nodiscard]] std::size_t size() const noexcept { return entities_.size(); }
         [[nodiscard]] std::size_t capacity() const noexcept { return entities_.capacity(); }
 
@@ -560,6 +660,15 @@ namespace f4::entities {
 
         [[nodiscard]] bool valid() const noexcept;
         [[nodiscard]] EntityId id() const noexcept { return id_; }
+
+        // Accessor for the owning world. Used by behavioral components
+        // that need to pass the EntityWorld to subsystems that subscribe
+        // to the message bus or query other entities (e.g. BrainComponent
+        // passes the world to TakeoffModule::initialize so the module can
+        // be wired into the broader sim). Returns nullptr if the handle
+        // was default-constructed (not bound to any world).
+        [[nodiscard]] EntityWorld* world() noexcept { return world_; }
+        [[nodiscard]] const EntityWorld* world() const noexcept { return world_; }
 
         // --- Components ---
         template<typename T> [[nodiscard]] T* get() const;
@@ -625,6 +734,17 @@ namespace f4::entities {
         if (!rec) throw std::runtime_error("EntityHandle::add: invalid entity");
         auto comp = std::make_unique<T>(std::forward<Args>(args)...);
         T& ref = *comp;
+        // For behavioral components, fire on_attached() BEFORE we move the
+        // unique_ptr into the components map. This gives the component a
+        // stable back-reference to its owning EntityHandle (via `*this`)
+        // so it can look up sibling components (e.g. brain -> flight model)
+        // during subsequent update() calls. The component is still owned
+        // by the local unique_ptr at this point, so a throw from
+        // on_attached() will cleanly destroy it without leaving a half-
+        // registered entry in the map.
+        if constexpr (std::is_base_of_v<BehavioralComponentBase, T>) {
+            comp->on_attached(*this);
+        }
         rec->components[std::type_index(typeid(T))] = std::move(comp);
         return ref;
     }

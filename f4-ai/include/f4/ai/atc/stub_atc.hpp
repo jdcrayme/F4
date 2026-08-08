@@ -12,6 +12,16 @@
 //   - Uses preconfigured runway/airbase data from the ground layout.
 //   - Never denies a request, never issues holds, never spaces aircraft.
 //
+// SUBSCRIPTION ORDER: The StubATC subscribes in its constructor. It MUST
+// be constructed BEFORE any AI module calls initialize() (which publishes
+// a TaxiRequest). If the StubATC is constructed after the TaxiRequest is
+// published, the request will have no handler and the AI will stall in
+// RequestTaxi forever. The recommended wiring order is:
+//   1. Create MessageBus
+//   2. Create StubATC (subscribes to request types)
+//   3. Create AI module
+//   4. Call ai_module.initialize() (publishes TaxiRequest)
+//
 // When a real ATC module is built later, it implements the SAME message
 // types — so the AI modules never know the difference. The StubATC is
 // swapped out at the MessageBus wiring level, not in the AI code.

@@ -14,6 +14,7 @@ endfunction()
 # build time) to the test executables that need them.
 f4_fm_add_test(test_atmosphere           test_atmosphere.cpp)
 f4_fm_add_test(test_flight_model         test_flight_model.cpp)
+f4_fm_add_test(test_flight_model_component test_flight_model_component.cpp)
 f4_fm_add_test(test_stall_sm_integration test_stall_sm_integration.cpp)
 f4_fm_add_test(test_stall_bus_integration test_stall_bus_integration.cpp)
 f4_fm_add_test(test_engine               test_engine.cpp)
@@ -25,10 +26,13 @@ f4_fm_add_test(test_angle                test_angle.cpp)
 
 target_compile_definitions(test_flight_model PRIVATE
     F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}")
+target_compile_definitions(test_flight_model_component PRIVATE
+    F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}")
 target_compile_definitions(test_stall_sm_integration PRIVATE
     F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}")
 target_compile_definitions(test_stall_bus_integration PRIVATE
     F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}")
 add_dependencies(test_flight_model convert_golden_fixtures)
+add_dependencies(test_flight_model_component convert_golden_fixtures)
 add_dependencies(test_stall_sm_integration convert_golden_fixtures)
 add_dependencies(test_stall_bus_integration convert_golden_fixtures)
