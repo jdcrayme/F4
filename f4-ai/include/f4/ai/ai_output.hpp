@@ -37,6 +37,7 @@ struct AIControlOutput {
     // --- Surface / gear commands ---
     bool   gear_handle_down{false};
     bool   wheel_brakes{false};
+    bool   parking_brake{false};
 
     // --- Weapon system intent ---
     bool   trigger_down{false};     // gun trigger held

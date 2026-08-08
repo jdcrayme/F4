@@ -2,11 +2,11 @@
 # CMakeLists.txt (via cmake/f4_deps.cmake). This file only registers
 # test executables via gtest_discover_tests().
 
-function(f4_ai_add_test name source)
+function(f4_recorder_add_test name source)
     add_executable(${name} ${source})
-    target_link_libraries(${name} PRIVATE GTest::gtest_main f4-ai)
+    target_link_libraries(${name} PRIVATE GTest::gtest_main f4-recorder)
     gtest_discover_tests(${name})
 endfunction()
 
-f4_ai_add_test(test_ai_sensor_fusion test_sensor_fusion.cpp)
-f4_ai_add_test(test_takeoff_module test_takeoff_module.cpp)
+f4_recorder_add_test(test_flight_recorder test_flight_recorder.cpp)
+f4_recorder_add_test(test_path_geometry test_path_geometry.cpp)
