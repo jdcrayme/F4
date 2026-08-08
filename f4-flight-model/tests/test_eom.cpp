@@ -28,12 +28,12 @@ namespace {
 
 data::AircraftGeometry makeGeom() {
     data::AircraftGeometry g;
-    g.emptyWeight_lbs = 10000.0;
-    g.area_ft2 = 300.0;
-    g.span_ft = 30.0;
-    g.aoaMax_deg = 25.0;
+    g.emptyWeight = f4::Quantity<f4::Pounds>(10000.0);
+    g.area = f4::Quantity<f4::SquareFeet>(300.0);
+    g.span = f4::Quantity<f4::Feet>(30.0);
+    g.aoaMax = f4::Quantity<f4::Degrees>(25.0).to<f4::Radians>();
     g.maxGs = 9.0;
-    g.thetaMax_rad = 1.4;
+    g.thetaMax = f4::Quantity<f4::Radians>(1.4);
     return g;
 }
 

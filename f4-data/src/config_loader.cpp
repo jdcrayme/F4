@@ -54,7 +54,8 @@ T value_with_warning(const json& j, const std::string& key, T default_val,
 // kept outside the macro expansion.
 // ---------------------------------------------------------------------------
 
-#define F4_AUX_AERO_FIELDS(X) \
+// Fields that are plain double (use simple read/write)
+#define F4_AUX_AERO_DOUBLE_FIELDS(X) \
     X("fuelFlowFactorNormal", fuelFlowFactorNormal, 0.25) \
     X("fuelFlowFactorAb",     fuelFlowFactorAb,     0.65) \
     X("minFuelFlow",          minFuelFlow,          1200.0) \
@@ -70,18 +71,10 @@ T value_with_warning(const json& j, const std::string& key, T default_val,
     X("mainGenRpm",           mainGenRpm,           0.63) \
     X("stbyGenRpm",           stbyGenRpm,           0.60) \
     X("epuBurnTime",          epuBurnTime,          600.0) \
-    X("hasLef",               hasLef,               false) \
-    X("hasTef",               hasTef,               false) \
-    X("tefMaxAngle",          tefMaxAngle,          20.0) \
-    X("lefMaxAngle",          lefMaxAngle,          20.0) \
     X("tefRate",              tefRate,              1.0) \
     X("lefRate",              lefRate,              1.0) \
     X("tefTakeOff",           tefTakeOff,           20.0) \
     X("lefGround",            lefGround,            0.0) \
-    X("lefMaxMach",           lefMaxMach,           1.0) \
-    X("rudderMaxAngle",       rudderMaxAngle,       30.0) \
-    X("aileronMaxAngle",      aileronMaxAngle,      20.0) \
-    X("airbrakeMaxAngle",     airbrakeMaxAngle,     60.0) \
     X("CLtefFactor",          CLtefFactor,          0.05) \
     X("CDtefFactor",          CDtefFactor,          0.05) \
     X("CDlefFactor",          CDlefFactor,          0.05) \
@@ -98,31 +91,62 @@ T value_with_warning(const json& j, const std::string& key, T default_val,
     X("rollGearGain",         rollGearGain,         0.6) \
     X("yawGearGain",          yawGearGain,          0.6) \
     X("pitchGearGain",        pitchGearGain,        0.8) \
-    X("landingAOA",           landingAOA,           12.5) \
-    X("rollCouple",           rollCouple,           0.0) \
-    X("elevatorRolls",        elevatorRolls,        false) \
-    X("criticalAOA",          criticalAOA,          0.0) \
+    X("rollCouple",           rollCouple,           0.0)
+
+// Fields that are bool
+#define F4_AUX_AERO_BOOL_FIELDS(X) \
+    X("hasLef",               hasLef,               false) \
+    X("hasTef",               hasTef,               false) \
+    X("elevatorRolls",        elevatorRolls,        false)
+
+// Fields that are int
+#define F4_AUX_AERO_INT_FIELDS(X) \
     X("nEngines",             nEngines,             1) \
     X("typeEngine",           typeEngine,           2)
 
-// Geometry scalar fields only — the first four fields use value_with_warning
-// and the gear field requires nested-object handling, so they stay outside.
-#define F4_GEOMETRY_SCALAR_FIELDS(X) \
-    X("aoaMax_deg",       aoaMax_deg,       25.0) \
-    X("aoaMin_deg",       aoaMin_deg,       -5.0) \
-    X("betaMax_deg",      betaMax_deg,      30.0) \
-    X("betaMin_deg",      betaMin_deg,      -30.0) \
-    X("maxGs",            maxGs,            9.0) \
-    X("maxRoll_deg",      maxRoll_deg,      80.0) \
-    X("minVcas_kts",      minVcas_kts,      140.0) \
-    X("maxVcas_kts",      maxVcas_kts,      800.0) \
-    X("cornerVcas_kts",   cornerVcas_kts,   330.0) \
-    X("thetaMax_rad",     thetaMax_rad,     1.4) \
-    X("cgLoc_ft",         cgLoc_ft,         0.0) \
-    X("length_ft",        length_ft,        0.0) \
-    X("span_ft",          span_ft,          0.0) \
-    X("fusRadius_ft",     fusRadius_ft,     0.0) \
-    X("tailHt_ft",        tailHt_ft,        0.0)
+// Angle fields stored as radians, JSON uses degrees (tefMaxAngle, lefMaxAngle, etc.)
+#define F4_AUX_AERO_ANGLE_FIELDS(X) \
+    X("tefMaxAngle",          tefMaxAngle,          20.0) \
+    X("lefMaxAngle",          lefMaxAngle,          20.0) \
+    X("rudderMaxAngle",       rudderMaxAngle,       30.0) \
+    X("aileronMaxAngle",      aileronMaxAngle,      20.0) \
+    X("airbrakeMaxAngle",     airbrakeMaxAngle,     60.0) \
+    X("landingAOA",           landingAOA,           12.5) \
+    X("criticalAOA",          criticalAOA,          0.0)
+
+// Mach phantom-dimension field
+#define F4_AUX_AERO_MACH_FIELDS(X) \
+    X("lefMaxMach",           lefMaxMach,           1.0)
+
+// Geometry double fields (maxGs is the only plain double)
+#define F4_GEOMETRY_DOUBLE_FIELDS(X) \
+    X("maxGs",            maxGs,            9.0)
+
+// Geometry angle fields — JSON uses degrees, stored as radians
+#define F4_GEOMETRY_ANGLE_FIELDS(X) \
+    X("aoaMax_deg",       aoaMax,       25.0) \
+    X("aoaMin_deg",       aoaMin,       -5.0) \
+    X("betaMax_deg",      betaMax,      30.0) \
+    X("betaMin_deg",      betaMin,      -30.0) \
+    X("maxRoll_deg",      maxRoll,      80.0)
+
+// Geometry CAS fields — JSON uses knots
+#define F4_GEOMETRY_CAS_FIELDS(X) \
+    X("minVcas_kts",      minVcas,      140.0) \
+    X("maxVcas_kts",      maxVcas,      800.0) \
+    X("cornerVcas_kts",   cornerVcas,   330.0)
+
+// Geometry radian field — JSON uses radians
+#define F4_GEOMETRY_RADIAN_FIELDS(X) \
+    X("thetaMax_rad",     thetaMax,     1.4)
+
+// Geometry feet fields — JSON uses feet
+#define F4_GEOMETRY_FEET_FIELDS(X) \
+    X("cgLoc_ft",         cgLoc,         0.0) \
+    X("length_ft",        length,        0.0) \
+    X("span_ft",          span,          0.0) \
+    X("fusRadius_ft",     fusRadius,     0.0) \
+    X("tailHt_ft",        tailHt,        0.0)
 
 // Engine scalar fields only — the table arrays require .get<vector<double>>()
 // handling, so they stay outside.
@@ -135,24 +159,44 @@ T value_with_warning(const json& j, const std::string& key, T default_val,
 // ---------------------------------------------------------------------------
 
 void readGear(const json& j, GearPoint& g) {
-    g.x     = j.at(0).get<double>();
-    g.y     = j.at(1).get<double>();
-    g.z     = j.at(2).get<double>();
-    g.range = j.at(3).get<double>();
+    g.x     = f4::Quantity<f4::Feet>(j.at(0).get<double>());
+    g.y     = f4::Quantity<f4::Feet>(j.at(1).get<double>());
+    g.z     = f4::Quantity<f4::Feet>(j.at(2).get<double>());
+    g.range = f4::Quantity<f4::Degrees>(j.at(3).get<double>()).to<f4::Radians>();
 }
 
 void readGeometry(const json& j, AircraftGeometry& g,
                   std::vector<std::string>& warnings) {
     // Warning-gated fields (kept outside the macro)
-    g.emptyWeight_lbs  = value_with_warning(j, "emptyWeight_lbs",  g.emptyWeight_lbs,  "geometry", warnings);
-    g.area_ft2         = value_with_warning(j, "area_ft2",         g.area_ft2,         "geometry", warnings);
-    g.internalFuel_lbs = value_with_warning(j, "internalFuel_lbs", g.internalFuel_lbs, "geometry", warnings);
-    g.maxFuel_lbs      = value_with_warning(j, "maxFuel_lbs",      g.maxFuel_lbs,      "geometry", warnings);
+    g.emptyWeight  = f4::Quantity<f4::Pounds>(value_with_warning(j, "emptyWeight_lbs",  g.emptyWeight.value(),  "geometry", warnings));
+    g.area         = f4::Quantity<f4::SquareFeet>(value_with_warning(j, "area_ft2",         g.area.value(),         "geometry", warnings));
+    g.internalFuel = f4::Quantity<f4::Pounds>(value_with_warning(j, "internalFuel_lbs", g.internalFuel.value(), "geometry", warnings));
+    g.maxFuel      = f4::Quantity<f4::Pounds>(value_with_warning(j, "maxFuel_lbs",      g.maxFuel.value(),      "geometry", warnings));
 
-    // Scalar fields via field-list macro
-#define F4_READ_FIELD(key, field, def) g.field = j.value(key, static_cast<decltype(g.field)>(def));
-    F4_GEOMETRY_SCALAR_FIELDS(F4_READ_FIELD)
+    // Plain double fields
+#define F4_READ_FIELD(key, field, def) g.field = j.value(key, def);
+    F4_GEOMETRY_DOUBLE_FIELDS(F4_READ_FIELD)
 #undef F4_READ_FIELD
+
+    // Angle fields — JSON is in degrees, stored as radians
+#define F4_READ_ANGLE(key, field, def) g.field = f4::Quantity<f4::Degrees>(j.value(key, def)).to<f4::Radians>();
+    F4_GEOMETRY_ANGLE_FIELDS(F4_READ_ANGLE)
+#undef F4_READ_ANGLE
+
+    // CAS fields — JSON is in knots
+#define F4_READ_CAS(key, field, def) g.field = f4::Quantity<f4::CASKnots>(j.value(key, def));
+    F4_GEOMETRY_CAS_FIELDS(F4_READ_CAS)
+#undef F4_READ_CAS
+
+    // Radian field — JSON is in radians
+#define F4_READ_RAD(key, field, def) g.field = f4::Quantity<f4::Radians>(j.value(key, def));
+    F4_GEOMETRY_RADIAN_FIELDS(F4_READ_RAD)
+#undef F4_READ_RAD
+
+    // Feet fields — JSON is in feet
+#define F4_READ_FT(key, field, def) g.field = f4::Quantity<f4::Feet>(j.value(key, def));
+    F4_GEOMETRY_FEET_FIELDS(F4_READ_FT)
+#undef F4_READ_FT
 
     // Nested gear array
     if (j.contains("gear")) {
@@ -166,9 +210,30 @@ void readGeometry(const json& j, AircraftGeometry& g,
 }
 
 void readAux(const json& j, AuxAero& a) {
-#define F4_READ_FIELD(key, field, def) a.field = j.value(key, static_cast<decltype(a.field)>(def));
-    F4_AUX_AERO_FIELDS(F4_READ_FIELD)
+    // Plain double fields
+#define F4_READ_FIELD(key, field, def) a.field = j.value(key, def);
+    F4_AUX_AERO_DOUBLE_FIELDS(F4_READ_FIELD)
 #undef F4_READ_FIELD
+
+    // Bool fields
+#define F4_READ_BOOL(key, field, def) a.field = j.value(key, def);
+    F4_AUX_AERO_BOOL_FIELDS(F4_READ_BOOL)
+#undef F4_READ_BOOL
+
+    // Int fields
+#define F4_READ_INT(key, field, def) a.field = j.value(key, def);
+    F4_AUX_AERO_INT_FIELDS(F4_READ_INT)
+#undef F4_READ_INT
+
+    // Angle fields — JSON is in degrees, stored as radians
+#define F4_READ_ANGLE(key, field, def) a.field = f4::Quantity<f4::Degrees>(j.value(key, def)).to<f4::Radians>();
+    F4_AUX_AERO_ANGLE_FIELDS(F4_READ_ANGLE)
+#undef F4_READ_ANGLE
+
+    // Mach fields — JSON is a plain Mach number
+#define F4_READ_MACH(key, field, def) a.field = f4::Quantity<f4::MachUnit>(j.value(key, def));
+    F4_AUX_AERO_MACH_FIELDS(F4_READ_MACH)
+#undef F4_READ_MACH
 }
 
 void readAero(const json& j, AeroTable& a) {
@@ -275,21 +340,41 @@ LoadResult loadConfig(const std::string& path) {
 namespace {
 
 json gearToJson(const GearPoint& g) {
-    return json::array({g.x, g.y, g.z, g.range});
+    return json::array({g.x.value(), g.y.value(), g.z.value(), g.range.to<f4::Degrees>().value()});
 }
 
 json geometryToJson(const AircraftGeometry& g) {
     json j;
     // Warning-gated fields (kept outside the macro)
-    j["emptyWeight_lbs"]    = g.emptyWeight_lbs;
-    j["area_ft2"]           = g.area_ft2;
-    j["internalFuel_lbs"]   = g.internalFuel_lbs;
-    j["maxFuel_lbs"]        = g.maxFuel_lbs;
+    j["emptyWeight_lbs"]    = g.emptyWeight.value();
+    j["area_ft2"]           = g.area.value();
+    j["internalFuel_lbs"]   = g.internalFuel.value();
+    j["maxFuel_lbs"]        = g.maxFuel.value();
 
-    // Scalar fields via field-list macro
+    // Plain double fields
 #define F4_WRITE_FIELD(key, field, _def) j[key] = g.field;
-    F4_GEOMETRY_SCALAR_FIELDS(F4_WRITE_FIELD)
+    F4_GEOMETRY_DOUBLE_FIELDS(F4_WRITE_FIELD)
 #undef F4_WRITE_FIELD
+
+    // Angle fields — write degrees (JSON convention)
+#define F4_WRITE_ANGLE(key, field, _def) j[key] = g.field.to<f4::Degrees>().value();
+    F4_GEOMETRY_ANGLE_FIELDS(F4_WRITE_ANGLE)
+#undef F4_WRITE_ANGLE
+
+    // CAS fields — write knots
+#define F4_WRITE_CAS(key, field, _def) j[key] = g.field.value();
+    F4_GEOMETRY_CAS_FIELDS(F4_WRITE_CAS)
+#undef F4_WRITE_CAS
+
+    // Radian fields — write radians
+#define F4_WRITE_RAD(key, field, _def) j[key] = g.field.value();
+    F4_GEOMETRY_RADIAN_FIELDS(F4_WRITE_RAD)
+#undef F4_WRITE_RAD
+
+    // Feet fields — write feet
+#define F4_WRITE_FT(key, field, _def) j[key] = g.field.value();
+    F4_GEOMETRY_FEET_FIELDS(F4_WRITE_FT)
+#undef F4_WRITE_FT
 
     // Nested gear array
     json gearArr = json::array();
@@ -300,9 +385,31 @@ json geometryToJson(const AircraftGeometry& g) {
 
 json auxToJson(const AuxAero& a) {
     json j;
+    // Plain double fields
 #define F4_WRITE_FIELD(key, field, _def) j[key] = a.field;
-    F4_AUX_AERO_FIELDS(F4_WRITE_FIELD)
+    F4_AUX_AERO_DOUBLE_FIELDS(F4_WRITE_FIELD)
 #undef F4_WRITE_FIELD
+
+    // Bool fields
+#define F4_WRITE_BOOL(key, field, _def) j[key] = a.field;
+    F4_AUX_AERO_BOOL_FIELDS(F4_WRITE_BOOL)
+#undef F4_WRITE_BOOL
+
+    // Int fields
+#define F4_WRITE_INT(key, field, _def) j[key] = a.field;
+    F4_AUX_AERO_INT_FIELDS(F4_WRITE_INT)
+#undef F4_WRITE_INT
+
+    // Angle fields — write degrees (JSON convention)
+#define F4_WRITE_ANGLE(key, field, _def) j[key] = a.field.to<f4::Degrees>().value();
+    F4_AUX_AERO_ANGLE_FIELDS(F4_WRITE_ANGLE)
+#undef F4_WRITE_ANGLE
+
+    // Mach fields — write plain Mach number
+#define F4_WRITE_MACH(key, field, _def) j[key] = a.field.value();
+    F4_AUX_AERO_MACH_FIELDS(F4_WRITE_MACH)
+#undef F4_WRITE_MACH
+
     return j;
 }
 

@@ -123,6 +123,75 @@ struct LatLonAlt {
 };
 
 // ============================================================================
+// NEDPosition — North-East-Down local frame.
+//
+// Convention: NED (North-East-Down), all in FEET, z-down.
+//   x = north (feet)
+//   y = east  (feet)
+//   z = down  (feet, so altitude = -z)
+//
+// This is the frame used internally by the flight model (equations of
+// motion, aerodynamics, FCS). The EOM integrates position in NED and
+// then converts to ENU (WorldPosition) for entity storage via the
+// explicit to_enu() / to_ned() crossing functions.
+//
+// CRITICAL: NEDPosition and WorldPosition are distinct types. You
+// cannot accidentally pass a NED position where an ENU position is
+// expected. Every crossing is a named call:
+//   WorldPosition enu = to_enu(ned);
+//   NEDPosition    ned = to_ned(enu);
+// ============================================================================
+struct NEDPosition {
+    double x{};   // north, feet
+    double y{};   // east,  feet
+    double z{};   // down,  feet (altitude = -z)
+
+    constexpr NEDPosition() = default;
+    constexpr explicit NEDPosition(double x_, double y_, double z_) noexcept
+        : x(x_), y(y_), z(z_) {}
+
+    auto operator<=>(const NEDPosition&) const = default;
+
+    constexpr NEDPosition operator+(const NEDPosition& o) const noexcept {
+        return NEDPosition{x + o.x, y + o.y, z + o.z};
+    }
+    constexpr NEDPosition operator-(const NEDPosition& o) const noexcept {
+        return NEDPosition{x - o.x, y - o.y, z - o.z};
+    }
+    constexpr NEDPosition& operator+=(const NEDPosition& o) noexcept {
+        x += o.x; y += o.y; z += o.z; return *this;
+    }
+
+    [[nodiscard]] double distance_to(const NEDPosition& o) const noexcept {
+        const double dx = x - o.x, dy = y - o.y, dz = z - o.z;
+        return std::sqrt(dx * dx + dy * dy + dz * dz);
+    }
+
+    /// Altitude above ground (positive up), derived from the NED z component.
+    [[nodiscard]] constexpr double altitude_ft() const noexcept { return -z; }
+};
+
+// ============================================================================
+// Frame crossing: ENU ↔ NED
+//
+// These are the ONLY way to convert between WorldPosition (ENU) and
+// NEDPosition. The axes are remapped:
+//   ENU (x=E, y=N, z=U) ↔ NED (x=N, y=E, z=D)
+//   So: ned.x = enu.y,  ned.y = enu.x,  ned.z = -enu.z
+//       enu.x = ned.y,  enu.y = ned.x,  enu.z = -ned.z
+// ============================================================================
+
+/// Convert ENU (WorldPosition) to NED (NEDPosition).
+[[nodiscard]] constexpr NEDPosition to_ned(const WorldPosition& enu) noexcept {
+    return NEDPosition{enu.y, enu.x, -enu.z};
+}
+
+/// Convert NED (NEDPosition) to ENU (WorldPosition).
+[[nodiscard]] constexpr WorldPosition to_enu(const NEDPosition& ned) noexcept {
+    return WorldPosition{ned.y, ned.x, -ned.z};
+}
+
+// ============================================================================
 // ECEFPosition — Earth-Centered Earth-Fixed cartesian (WGS84).
 //   x, y, z in METERS.
 //

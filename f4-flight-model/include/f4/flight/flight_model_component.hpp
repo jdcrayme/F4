@@ -5,10 +5,20 @@
 // Phase A.2: this is the first behavioral component that owns real simulation
 // state. The brain (BrainComponent in f4-ai) runs in pass 1 (priority 100),
 // produces an AIControlOutput, converts it to a PilotInput, and writes it
-// to this component's pending_input_ slot. This component runs in pass 2
-// (priority 50), reads pending_input_, integrates the FlightModel one step,
-// then clears pending_input_ — so a tick where no brain ran produces idle
-// controls (zero stick, zero throttle, gear down, brakes on).
+// to this component's pending_input_ slot via the IPilotInputSink interface.
+// This component runs in pass 2 (priority 50), reads pending_input_,
+// integrates the FlightModel one step, then clears pending_input_ — so a
+// tick where no brain ran produces idle controls (zero stick, zero throttle,
+// gear down, brakes on).
+//
+// Phase 2 (H1/H2): FlightModelComponent implements IAircraftState and
+// IPilotInputSink. The AI accesses the flight model through these thin
+// interfaces rather than reaching into FlightModelComponent internals.
+// IAircraftState exposes the aircraft state subset the AI needs (position,
+// airspeed, altitude, heading, ground contact) in the AI's natural ENU
+// frame. IPilotInputSink exposes the write side (pending_input).
+// This decouples AI modules from the full AircraftState struct and
+// eliminates NED↔ENU conversion scattered through AI code.
 //
 // The component also exposes ground_z_ft / ground_normal slots that the
 // host (or a future terrain system) writes each tick. In Phase A the host
@@ -31,6 +41,8 @@
 
 #include "f4/flight/flight_model.hpp"
 #include "f4/flight/aircraft_state.hpp"
+#include "f4/flight/i_aircraft_state.hpp"
+#include "f4/flight/i_pilot_input_sink.hpp"
 
 #include <f4/entities/entity.hpp>
 #include <f4/messaging/bus.hpp>
@@ -40,7 +52,9 @@ namespace f4::flight {
 // ============================================================================
 // FlightModelComponent
 // ============================================================================
-class FlightModelComponent : public entities::BehavioralComponent<FlightModelComponent> {
+class FlightModelComponent : public entities::BehavioralComponent<FlightModelComponent>,
+                             public IAircraftState,
+                             public IPilotInputSink {
 public:
     FlightModelComponent() = default;
 
@@ -123,6 +137,49 @@ public:
     }
     [[nodiscard]] double       ground_z_ft()     const noexcept { return ground_z_ft_; }
     [[nodiscard]] math::Vec3d  ground_normal()   const noexcept { return ground_normal_; }
+
+    // --- IAircraftState implementation ---
+    // Presents aircraft state in ENU frame (the AI's natural frame).
+    // The flight model stores position internally as NED; these methods
+    // perform the conversion so AI consumers never handle NED directly.
+    //
+    // NED convention (internal): x=north, y=east, z=down
+    // ENU convention (interface): x=east, y=north, z=up
+    // Crossing: enu_x = ned_y,  enu_y = ned_x,  enu_z = -ned_z
+
+    double position_east_ft() const override {
+        return fm_.state().kin.y;   // NED y = east
+    }
+
+    double position_north_ft() const override {
+        return fm_.state().kin.x;   // NED x = north
+    }
+
+    double altitude_msl_ft() const override {
+        return -fm_.state().kin.z;  // NED z-down → ENU z-up
+    }
+
+    double altitude_agl_ft() const override {
+        const auto& s = fm_.state();
+        return -s.kin.z - s.gear.groundZ_ft;
+    }
+
+    double vcas_kts() const override {
+        return fm_.state().vcas;
+    }
+
+    double heading_rad() const override {
+        return to_radians(fm_.state().kin.psi);
+    }
+
+    bool on_ground() const override {
+        return !fm_.state().gear.inAir;
+    }
+
+    // --- IPilotInputSink implementation ---
+    void set_pending_input(const PilotInput& input) override {
+        pending_input_ = input;
+    }
 
 private:
     FlightModel fm_;

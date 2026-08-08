@@ -3,37 +3,48 @@
 // BrainComponent — wraps a TakeoffModule as a BehavioralComponent.
 //
 // Phase A.2: this is the first behavioral brain component. It runs in
-// pass 1 (priority 100), reads the parent entity's FlightModelComponent,
-// calls TakeoffModule::update() to get an AIControlOutput, converts it
-// to a PilotInput, and writes it to the FlightModelComponent's pending_input
-// slot. The FlightModelComponent then runs in pass 2 and integrates the
-// FlightModel with that input.
+// pass 1 (priority 100), reads the parent entity's aircraft state
+// through the IAircraftState interface, calls TakeoffModule::update()
+// to get an AIControlOutput, converts it to a PilotInput, and writes
+// it to the IPilotInputSink interface. The flight model component
+// then runs in pass 2 and integrates the FlightModel with that input.
 //
-// The brain resolves the FlightModelComponent pointer LAZILY in update(),
-// not in on_attached(). Why? At on_attached() time, the brain is being
-// added to the entity — but the FlightModelComponent may not have been
-// added yet (component add order is not guaranteed). Resolving lazily
-// in update() means the brain tolerates being added before OR after the
-// FlightModelComponent, as long as both are present by the first tick.
+// Phase 2+ (H1): BrainComponent is FULLY DECOUPLED from
+// FlightModelComponent. It resolves the aircraft state and control
+// sink via EntityHandle::get_interface<IAircraftState>() and
+// get_interface<IPilotInputSink>() — interface-based lookup that
+// doesn't require knowing the concrete component type. This means
+// f4-ai no longer depends on f4-flight-model at all; it depends only
+// on f4-flight-api (the lightweight interface library).
 //
-// If no FlightModelComponent is present on the entity, update() is a
-// no-op. This allows a brain to be added to an entity that's temporarily
-// "brain-only" (e.g. a ghost/replay entity) without crashing.
+// The brain resolves the interfaces LAZILY in update(), not in
+// on_attached(). Why? At on_attached() time, the brain is being
+// added to the entity — but the flight model component may not have
+// been added yet (Gcomponent add order is not guaranteed). Resolving
+// lazily in update() means the brain tolerates being added before OR
+// after the flight model component, as long as both are present by
+// the first tick.
+//
+// If no IAircraftState or IPilotInputSink is present on the entity,
+// update() is a no-op. This allows a brain to be added to an entity
+// that's temporarily "brain-only" (e.g. a ghost/replay entity)
+// without crashing.
 //
 // The AIControlOutput → PilotInput conversion lives here so the brain is
-// self-contained — the sim loop (f4-sim, Phase A.3) just calls
-// EntityWorld::update_all(dt, bus) and the brain writes the FM slot directly.
+// self-contained — the sim loop (f4-sim) just calls
+// EntityWorld::update_all(dt, bus) and the brain writes the sink directly.
 //
-// Dependencies: f4-entities (BehavioralComponent, EntityHandle),
-// f4-messaging (MessageBus), f4-flight-model (FlightModelComponent,
-// PilotInput, AircraftState). C++20.
+// Dependencies: f4-entities (BehavioralComponent, EntityHandle, get_interface),
+// f4-messaging (MessageBus), f4-flight-api (IAircraftState, IPilotInputSink,
+// PilotInput). NOT f4-flight-model. C++20.
 
 #pragma once
 
 #include <f4/entities/entity.hpp>
 #include <f4/messaging/bus.hpp>
-#include <f4/flight/flight_model_component.hpp>
-#include <f4/flight/aircraft_state.hpp>
+#include <f4/flight/api/i_aircraft_state.hpp>
+#include <f4/flight/api/i_pilot_input_sink.hpp>
+#include <f4/flight/api/pilot_input.hpp>
 
 #include "f4/ai/ai_output.hpp"
 #include "f4/ai/modules/takeoff_module.hpp"
@@ -52,8 +63,8 @@ public:
         return entities::update_phase::BRAIN_PRIORITY;  // 100, pass 1
     }
 
-    // Capture the owning EntityHandle so we can look up the sibling
-    // FlightModelComponent on demand. The handle is stable for the
+    // Capture the owning EntityHandle so we can look up sibling
+    // components on demand. The handle is stable for the
     // lifetime of the entity — EntityHandle is a value type that
     // captures (EntityId, EntityWorld*, cookie) at construction.
     void on_attached(entities::EntityHandle& self) override {
@@ -63,16 +74,17 @@ public:
     void update(double dt, messaging::MessageBus& bus) override {
         if (!owner_) return;  // not attached to any entity — no-op
 
-        // Lazily resolve the FlightModelComponent. We re-resolve every
-        // tick (one hashmap lookup) rather than caching the pointer,
-        // because the FM component can be removed and re-added by the
-        // host (e.g. entity "possessed" by a different brain). At
-        // Phase A scale this is invisible; if it ever shows up in
-        // profiles, cache the pointer and invalidate on remove.
-        auto* fm_comp = owner_->get<flight::FlightModelComponent>();
-        if (!fm_comp) return;  // no flight model on this entity — no-op
+        // Lazily resolve the flight model interfaces. We re-resolve every
+        // tick (one dynamic_cast scan per interface) rather than caching
+        // the pointers, because the flight model component can be removed
+        // and re-added by the host. At Phase A scale (3-5 components per
+        // entity) this is invisible; if it ever shows up in profiles,
+        // cache the pointers and invalidate on remove.
+        auto* state = owner_->get_interface<flight::IAircraftState>();
+        auto* sink  = owner_->get_interface<flight::IPilotInputSink>();
+        if (!state || !sink) return;  // no flight model on this entity
 
-        // Initialize the TakeoffModule on first update. We defer to
+        // Initialize the TakeoffModule onG first update. We defer to
         // first update() (rather than on_attached()) because the
         // MessageBus reference is passed to update() but not to
         // on_attached(). The module needs the bus to subscribe to ATC
@@ -85,11 +97,13 @@ public:
         }
 
         // Run the brain: produce AIControlOutput from the current state.
-        const auto& state = fm_comp->state();
-        const auto ai_out = module_.update(dt, &state);
+        // The IAircraftState interface presents position in ENU (the AI's
+        // natural frame) and exposes only the fields the AI needs.
+        const auto ai_out = module_.update(dt, state);
 
-        // Convert AIControlOutput → PilotInput and write to the FM slot.
-        fm_comp->pending_input() = map_to_pilot_input(ai_out);
+        // Write the AI output to the flight model's pending input slot
+        // via the IPilotInputSink interface.
+        sink->set_pending_input(map_to_pilot_input(ai_out));
     }
 
     // --- TakeoffModule access ---

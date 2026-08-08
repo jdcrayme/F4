@@ -46,6 +46,7 @@ target_link_libraries(f4-flight-model PUBLIC
     f4-messaging
     f4-units
     f4-entities
+    f4-flight-api
 )
 
 # Tests

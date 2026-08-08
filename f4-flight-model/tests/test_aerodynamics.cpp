@@ -50,10 +50,10 @@ struct SyntheticAero {
         table.cdFactor = 1.0;
         table.cyFactor = 1.0;
 
-        geom.area_ft2 = 300.0;    // F-16-ish wing area
-        geom.span_ft = 30.0;      // 30 ft span → ground effect zone at <6 ft
-        geom.emptyWeight_lbs = 10000.0;
-        geom.aoaMax_deg = 25.0;
+        geom.area = f4::Quantity<f4::SquareFeet>(300.0);    // F-16-ish wing area
+        geom.span = f4::Quantity<f4::Feet>(30.0);      // 30 ft span \xe2\x86\x92 ground effect zone at <6 ft
+        geom.emptyWeight = f4::Quantity<f4::Pounds>(10000.0);
+        geom.aoaMax = f4::Quantity<f4::Degrees>(25.0).to<f4::Radians>();
 
         aux.CLtefFactor = 0.05;
         aux.CDtefFactor = 0.05;
@@ -61,7 +61,7 @@ struct SyntheticAero {
         aux.CDSPDBFactor = 0.08;
         aux.CDLDGFactor = 0.06;
         aux.dragChuteCd = 0.0;
-        aux.criticalAOA = 0.0;    // disable stall model by default
+        aux.criticalAOA = f4::Quantity<f4::Radians>(0.0);    // disable stall model by default
     }
 };
 
@@ -361,7 +361,7 @@ TEST(Aerodynamics, NormalFlightLiftIsClTimesQsom) {
 TEST(Aerodynamics, StallDetectionSetsStalledFlag) {
     // With criticalAOA > 0 and alpha > criticalAOA, the stalled flag is set.
     SyntheticAero sa;
-    sa.aux.criticalAOA = 15.0;  // 15 deg critical AOA
+    sa.aux.criticalAOA = f4::Quantity<f4::Degrees>(15.0).to<f4::Radians>();  // 15 deg critical AOA
     Aerodynamics a(&sa.table, &sa.geom, &sa.aux);
 
     AeroState s = makeAero();
@@ -373,7 +373,7 @@ TEST(Aerodynamics, StallDetectionSetsStalledFlag) {
 TEST(Aerodynamics, NoStallWhenCriticalAoaIsZero) {
     // criticalAOA = 0 disables the stall model entirely.
     SyntheticAero sa;
-    sa.aux.criticalAOA = 0.0;
+    sa.aux.criticalAOA = f4::Quantity<f4::Radians>(0.0);
     Aerodynamics a(&sa.table, &sa.geom, &sa.aux);
 
     AeroState s = makeAero();

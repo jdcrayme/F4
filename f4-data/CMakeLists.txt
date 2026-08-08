@@ -8,10 +8,8 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # ---------------------------------------------------------------------------
 # f4-data depends on:
 #   - f4-math       (for Table2D table accessors)
+#   - f4-units     (for typed Quantity accessors on geometry fields)
 #   - nlohmann/json (for config loading from JSON)
-#
-# f4-units is NOT yet a dependency. Typed Quantity accessors will be added
-# when f4-flight-model lands and we know what units the consumers need.
 # ---------------------------------------------------------------------------
 add_library(f4-data STATIC
     src/aircraft_config.cpp
@@ -25,6 +23,7 @@ target_include_directories(f4-data PUBLIC
 )
 target_link_libraries(f4-data PUBLIC
     f4-math
+    f4-units
 PRIVATE
     nlohmann_json::nlohmann_json
 )

@@ -12,25 +12,25 @@ namespace {
 
 AircraftConfig makeValidConfig() {
     AircraftConfig c;
-    c.geometry.emptyWeight_lbs  = 19900.0;
-    c.geometry.area_ft2         = 300.0;
-    c.geometry.internalFuel_lbs = 7162.0;
-    c.geometry.maxFuel_lbs      = 7162.0;
-    c.geometry.aoaMax_deg       = 35.0;
-    c.geometry.aoaMin_deg       = -8.0;
-    c.geometry.betaMax_deg      = 30.0;
-    c.geometry.betaMin_deg      = -30.0;
+    c.geometry.emptyWeight  = f4::Quantity<f4::Pounds>(19900.0);
+    c.geometry.area         = f4::Quantity<f4::SquareFeet>(300.0);
+    c.geometry.internalFuel = f4::Quantity<f4::Pounds>(7162.0);
+    c.geometry.maxFuel      = f4::Quantity<f4::Pounds>(7162.0);
+    c.geometry.aoaMax       = f4::Quantity<f4::Degrees>(35.0).to<f4::Radians>();
+    c.geometry.aoaMin       = f4::Quantity<f4::Degrees>(-8.0).to<f4::Radians>();
+    c.geometry.betaMax      = f4::Quantity<f4::Degrees>(30.0).to<f4::Radians>();
+    c.geometry.betaMin      = f4::Quantity<f4::Degrees>(-30.0).to<f4::Radians>();
     c.geometry.maxGs            = 9.0;
-    c.geometry.maxRoll_deg      = 190.0;
-    c.geometry.minVcas_kts      = 250.0;
-    c.geometry.maxVcas_kts      = 850.0;
-    c.geometry.cornerVcas_kts   = 420.0;
-    c.geometry.thetaMax_rad     = 0.6;
-    c.geometry.cgLoc_ft         = 27.0;
-    c.geometry.length_ft        = 47.0;
-    c.geometry.span_ft          = 32.0;
-    c.geometry.fusRadius_ft     = 2.5;
-    c.geometry.tailHt_ft        = 4.5;
+    c.geometry.maxRoll      = f4::Quantity<f4::Degrees>(190.0).to<f4::Radians>();
+    c.geometry.minVcas      = f4::Quantity<f4::CASKnots>(250.0);
+    c.geometry.maxVcas      = f4::Quantity<f4::CASKnots>(850.0);
+    c.geometry.cornerVcas   = f4::Quantity<f4::CASKnots>(420.0);
+    c.geometry.thetaMax     = f4::Quantity<f4::Radians>(0.6);
+    c.geometry.cgLoc         = f4::Quantity<f4::Feet>(27.0);
+    c.geometry.length        = f4::Quantity<f4::Feet>(47.0);
+    c.geometry.span          = f4::Quantity<f4::Feet>(32.0);
+    c.geometry.fusRadius     = f4::Quantity<f4::Feet>(2.5);
+    c.geometry.tailHt        = f4::Quantity<f4::Feet>(4.5);
 
     c.aero.mach      = {0.0, 0.5, 1.0};
     c.aero.alpha_deg = {0.0, 5.0, 10.0, 15.0};
@@ -133,37 +133,37 @@ TEST(ValidationTest, ThrustTableSizeMismatchDetected) {
 
 TEST(ValidationTest, NegativeEmptyWeightDetected) {
     auto c = makeValidConfig();
-    c.geometry.emptyWeight_lbs = -1000.0;
+    c.geometry.emptyWeight = f4::Quantity<f4::Pounds>(-1000.0);
     auto r = c.validate();
     EXPECT_FALSE(r.ok());
 }
 
 TEST(ValidationTest, AoaMaxLessThanAoaMinDetected) {
     auto c = makeValidConfig();
-    c.geometry.aoaMax_deg = 5.0;
-    c.geometry.aoaMin_deg = 10.0;
+    c.geometry.aoaMax = f4::Quantity<f4::Degrees>(5.0).to<f4::Radians>();
+    c.geometry.aoaMin = f4::Quantity<f4::Degrees>(10.0).to<f4::Radians>();
     auto r = c.validate();
     EXPECT_FALSE(r.ok());
 }
 
 TEST(ValidationTest, MaxVcasNotGreaterThanMinVcasDetected) {
     auto c = makeValidConfig();
-    c.geometry.maxVcas_kts = 200.0;
-    c.geometry.minVcas_kts = 300.0;
+    c.geometry.maxVcas = f4::Quantity<f4::CASKnots>(200.0);
+    c.geometry.minVcas = f4::Quantity<f4::CASKnots>(300.0);
     auto r = c.validate();
     EXPECT_FALSE(r.ok());
 }
 
 TEST(ValidationTest, NaNInGeometryDetected) {
     auto c = makeValidConfig();
-    c.geometry.emptyWeight_lbs = std::numeric_limits<double>::quiet_NaN();
+    c.geometry.emptyWeight = f4::Quantity<f4::Pounds>(std::numeric_limits<double>::quiet_NaN());
     auto r = c.validate();
     EXPECT_FALSE(r.ok());
 }
 
 TEST(ValidationTest, UnusualAoaMaxWarns) {
     auto c = makeValidConfig();
-    c.geometry.aoaMax_deg = 0.5;  // outside typical 1..90 range
+    c.geometry.aoaMax = f4::Quantity<f4::Degrees>(0.5).to<f4::Radians>();  // outside typical 1..90 range
     auto r = c.validate();
     EXPECT_TRUE(r.hasWarnings());
 }

@@ -96,6 +96,9 @@ void EngineModel::update(double dt,
                          double ethrst,
                          bool   simplified,
                          EngineState& state) {
+    assert(table_ != nullptr && "EngineModel: table must not be null");
+    assert(aux_   != nullptr && "EngineModel: aux must not be null");
+
     // Guard: no table or zero mass
     if (!table_ || !aux_ || mass_slugs <= MASS_FLOOR) {
         state.thrust = 0.0;

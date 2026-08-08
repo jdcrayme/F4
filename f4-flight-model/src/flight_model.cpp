@@ -33,32 +33,9 @@
 
 namespace f4::flight {
 
-// ---------------------------------------------------------------------------
-// PilotInput::validate — clamp all inputs to documented ranges
-// ---------------------------------------------------------------------------
-void PilotInput::validate() noexcept {
-    // In debug, assert before clamping so the caller knows they sent bad data.
-    assert(pstick    >= -1.0 && pstick    <= 1.0 && "pstick out of range [-1, +1]");
-    assert(rstick    >= -1.0 && rstick    <= 1.0 && "rstick out of range [-1, +1]");
-    assert(ypedal    >= -1.0 && ypedal    <= 1.0 && "ypedal out of range [-1, +1]");
-    assert(throttle  >=  0.0 && throttle  <= 1.5 && "throttle out of range [0, 1.5]");
-    assert(speedBrake >= -1.0 && speedBrake <= 1.0 && "speedBrake out of range [-1, +1]");
-    assert(gearHandle >= -1.0 && gearHandle <= 1.0 && "gearHandle out of range [-1, +1]");
-    assert(hookHandle >= -1.0 && hookHandle <= 1.0 && "hookHandle out of range [-1, +1]");
-    assert(tefCmd    >=  0.0 && tefCmd    <= 1.0 && "tefCmd out of range [0, 1]");
-    assert(lefCmd    >=  0.0 && lefCmd    <= 1.0 && "lefCmd out of range [0, 1]");
-
-    // Always clamp in release so the flight model never sees out-of-range input.
-    pstick    = std::clamp(pstick,    -1.0, 1.0);
-    rstick    = std::clamp(rstick,    -1.0, 1.0);
-    ypedal    = std::clamp(ypedal,    -1.0, 1.0);
-    throttle  = std::clamp(throttle,   0.0, 1.5);
-    speedBrake = std::clamp(speedBrake, -1.0, 1.0);
-    gearHandle = std::clamp(gearHandle, -1.0, 1.0);
-    hookHandle = std::clamp(hookHandle, -1.0, 1.0);
-    tefCmd    = std::clamp(tefCmd,     0.0, 1.0);
-    lefCmd    = std::clamp(lefCmd,     0.0, 1.0);
-}
+// PilotInput::validate() has been moved to f4-flight-api/src/pilot_input.cpp.
+// It was extracted so that the API library is self-contained and f4-ai
+// can depend on it without pulling in the full flight model.
 
 using f4::math::Vec3d;
 using f4::math::Quatd;
@@ -142,8 +119,8 @@ void FlightModel::initKinematics(double initialAltitude_ft,
 // ---------------------------------------------------------------------------
 void FlightModel::initFuelState() {
     FuelState& fuel = state_.fuel;
-    fuel.emptyWeight_lbs = cfg_.geometry.emptyWeight_lbs;
-    fuel.fuel_lbs = cfg_.geometry.internalFuel_lbs;
+    fuel.emptyWeight_lbs = cfg_.geometry.emptyWeight.value();
+    fuel.fuel_lbs = cfg_.geometry.internalFuel.value();
     fuel.weight_lbs = fuel.emptyWeight_lbs + fuel.fuel_lbs + fuel.externalFuel_lbs;
     fuel.mass_slugs = fuel.weight_lbs / GRAVITY;
     fuel.loadingFraction = fuel.weight_lbs / std::max(1.0, fuel.emptyWeight_lbs);
@@ -263,7 +240,7 @@ void FlightModel::initTrimAndAtmosphere(double initialAltitude_ft) {
 void FlightModel::updateAtmosphere() {
     const double alt_ft = -state_.kin.z;  // NED: altitude = -z
     const auto out = computeAtmosphere(alt_ft, state_.kin.vt,
-                                       cfg_.geometry.area_ft2,
+                                       cfg_.geometry.area.value(),
                                        state_.fuel.mass_slugs);
     state_.rho   = out.rho;
     state_.pa    = out.pa;
@@ -545,8 +522,8 @@ bool FlightModel::trim() {
         double dalpha = (1.0 - nzcgs) * kAlphaK;
         state_.aero.alpha = angle_from_degrees(
             std::clamp(to_degrees(state_.aero.alpha) + dalpha,
-                       cfg_.geometry.aoaMin_deg,
-                       cfg_.geometry.aoaMax_deg));
+                       cfg_.geometry.aoaMin.to<f4::Degrees>().value(),
+                       cfg_.geometry.aoaMax.to<f4::Degrees>().value()));
 
         // Adjust throttle toward zero axial acceleration
         throttleCmd -= ax_stab * kThrotK;

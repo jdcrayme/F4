@@ -45,11 +45,14 @@ void GearModel::init(GearState& gear) const {
 // correct height above terrain.
 // ---------------------------------------------------------------------------
 double GearModel::computeMinHeight(const GearState& gear, double gearPos) const {
+    assert(geom_ != nullptr && "GearModel: geom must not be null");
+    assert(aux_  != nullptr && "GearModel: aux must not be null");
+
     (void)gear;
     if (!geom_ || geom_->gear.empty()) return 0.0;
     double h = 0.0;
     for (const auto& gp : geom_->gear) {
-        if (gp.z > h) h = gp.z;  // z is strut extended length (positive down)
+        if (gp.z.value() > h) h = gp.z.value();  // z is strut extended length (positive down)
     }
     return h * gearPos;  // gear-up = 0 clearance, gear-down = full strut
 }
@@ -83,12 +86,15 @@ double GearModel::calcMuFric(bool wheelBrakes, bool parkingBrake,
 void GearModel::updateStrutCompression(GearState& gear,
                                         double groundZ_ft, double z_ft,
                                         double vt_ftps, double dt) const {
+    assert(geom_ != nullptr && "GearModel: geom must not be null");
+    assert(aux_  != nullptr && "GearModel: aux must not be null");
+
     if (!geom_) return;
 
     const double agl_ft = std::fabs(groundZ_ft - z_ft);
 
     for (std::size_t i = 0; i < gear.wheels.size() && i < geom_->gear.size(); ++i) {
-        const double strutMax = geom_->gear[i].z;  // extended length (positive down)
+        const double strutMax = geom_->gear[i].z.value();  // extended length (positive down)
         double compression = strutMax - agl_ft;
         compression = std::clamp(compression, 0.0, strutMax);
 

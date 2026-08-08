@@ -69,8 +69,8 @@ TEST(StallSMIntegration, StallSMDoesNotBreakStability) {
     EXPECT_TRUE(std::isfinite(fm.state().engine.rpm));
 
     // Alpha within limits (same check as test_flight_model)
-    EXPECT_GT(to_degrees(fm.state().aero.alpha), cfg.geometry.aoaMin_deg - 5.0);
-    EXPECT_LT(to_degrees(fm.state().aero.alpha), cfg.geometry.aoaMax_deg + 5.0);
+    EXPECT_GT(to_degrees(fm.state().aero.alpha), cfg.geometry.aoaMin.to<f4::Degrees>().value() - 5.0);
+    EXPECT_LT(to_degrees(fm.state().aero.alpha), cfg.geometry.aoaMax.to<f4::Degrees>().value() + 5.0);
 
     // The stall SM must be in a valid state
     const StallState ss = fm.state().aero.stallState;

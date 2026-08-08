@@ -210,25 +210,25 @@ std::vector<std::string> diffConfigs(const AircraftConfig& a, const AircraftConf
     diffString("sourceFile",     a.sourceFile,     b.sourceFile,     diffs);
 
     // Geometry
-    diffDouble("geometry.emptyWeight_lbs",  a.geometry.emptyWeight_lbs,  b.geometry.emptyWeight_lbs,  tolerance, diffs);
-    diffDouble("geometry.area_ft2",         a.geometry.area_ft2,         b.geometry.area_ft2,         tolerance, diffs);
-    diffDouble("geometry.internalFuel_lbs", a.geometry.internalFuel_lbs, b.geometry.internalFuel_lbs, tolerance, diffs);
-    diffDouble("geometry.maxFuel_lbs",      a.geometry.maxFuel_lbs,      b.geometry.maxFuel_lbs,      tolerance, diffs);
-    diffDouble("geometry.aoaMax_deg",       a.geometry.aoaMax_deg,       b.geometry.aoaMax_deg,       tolerance, diffs);
-    diffDouble("geometry.aoaMin_deg",       a.geometry.aoaMin_deg,       b.geometry.aoaMin_deg,       tolerance, diffs);
-    diffDouble("geometry.betaMax_deg",      a.geometry.betaMax_deg,      b.geometry.betaMax_deg,      tolerance, diffs);
-    diffDouble("geometry.betaMin_deg",      a.geometry.betaMin_deg,      b.geometry.betaMin_deg,      tolerance, diffs);
+    diffDouble("geometry.emptyWeight_lbs",  a.geometry.emptyWeight.value(),  b.geometry.emptyWeight.value(),  tolerance, diffs);
+    diffDouble("geometry.area_ft2",         a.geometry.area.value(),         b.geometry.area.value(),         tolerance, diffs);
+    diffDouble("geometry.internalFuel_lbs", a.geometry.internalFuel.value(), b.geometry.internalFuel.value(), tolerance, diffs);
+    diffDouble("geometry.maxFuel_lbs",      a.geometry.maxFuel.value(),      b.geometry.maxFuel.value(),      tolerance, diffs);
+    diffDouble("geometry.aoaMax_deg",       a.geometry.aoaMax.to<f4::Degrees>().value(),       b.geometry.aoaMax.to<f4::Degrees>().value(),       tolerance, diffs);
+    diffDouble("geometry.aoaMin_deg",       a.geometry.aoaMin.to<f4::Degrees>().value(),       b.geometry.aoaMin.to<f4::Degrees>().value(),       tolerance, diffs);
+    diffDouble("geometry.betaMax_deg",      a.geometry.betaMax.to<f4::Degrees>().value(),      b.geometry.betaMax.to<f4::Degrees>().value(),      tolerance, diffs);
+    diffDouble("geometry.betaMin_deg",      a.geometry.betaMin.to<f4::Degrees>().value(),      b.geometry.betaMin.to<f4::Degrees>().value(),      tolerance, diffs);
     diffDouble("geometry.maxGs",            a.geometry.maxGs,            b.geometry.maxGs,            tolerance, diffs);
-    diffDouble("geometry.maxRoll_deg",      a.geometry.maxRoll_deg,      b.geometry.maxRoll_deg,      tolerance, diffs);
-    diffDouble("geometry.minVcas_kts",      a.geometry.minVcas_kts,      b.geometry.minVcas_kts,      tolerance, diffs);
-    diffDouble("geometry.maxVcas_kts",      a.geometry.maxVcas_kts,      b.geometry.maxVcas_kts,      tolerance, diffs);
-    diffDouble("geometry.cornerVcas_kts",   a.geometry.cornerVcas_kts,   b.geometry.cornerVcas_kts,   tolerance, diffs);
-    diffDouble("geometry.thetaMax_rad",     a.geometry.thetaMax_rad,     b.geometry.thetaMax_rad,     tolerance, diffs);
-    diffDouble("geometry.cgLoc_ft",         a.geometry.cgLoc_ft,         b.geometry.cgLoc_ft,         tolerance, diffs);
-    diffDouble("geometry.length_ft",        a.geometry.length_ft,        b.geometry.length_ft,        tolerance, diffs);
-    diffDouble("geometry.span_ft",          a.geometry.span_ft,          b.geometry.span_ft,          tolerance, diffs);
-    diffDouble("geometry.fusRadius_ft",     a.geometry.fusRadius_ft,     b.geometry.fusRadius_ft,     tolerance, diffs);
-    diffDouble("geometry.tailHt_ft",        a.geometry.tailHt_ft,        b.geometry.tailHt_ft,        tolerance, diffs);
+    diffDouble("geometry.maxRoll_deg",      a.geometry.maxRoll.to<f4::Degrees>().value(),      b.geometry.maxRoll.to<f4::Degrees>().value(),      tolerance, diffs);
+    diffDouble("geometry.minVcas_kts",      a.geometry.minVcas.value(),      b.geometry.minVcas.value(),      tolerance, diffs);
+    diffDouble("geometry.maxVcas_kts",      a.geometry.maxVcas.value(),      b.geometry.maxVcas.value(),      tolerance, diffs);
+    diffDouble("geometry.cornerVcas_kts",   a.geometry.cornerVcas.value(),   b.geometry.cornerVcas.value(),   tolerance, diffs);
+    diffDouble("geometry.thetaMax_rad",     a.geometry.thetaMax.value(),     b.geometry.thetaMax.value(),     tolerance, diffs);
+    diffDouble("geometry.cgLoc_ft",         a.geometry.cgLoc.value(),         b.geometry.cgLoc.value(),         tolerance, diffs);
+    diffDouble("geometry.length_ft",        a.geometry.length.value(),        b.geometry.length.value(),        tolerance, diffs);
+    diffDouble("geometry.span_ft",          a.geometry.span.value(),          b.geometry.span.value(),          tolerance, diffs);
+    diffDouble("geometry.fusRadius_ft",     a.geometry.fusRadius.value(),     b.geometry.fusRadius.value(),     tolerance, diffs);
+    diffDouble("geometry.tailHt_ft",        a.geometry.tailHt.value(),        b.geometry.tailHt.value(),        tolerance, diffs);
 
     if (a.geometry.gear.size() != b.geometry.gear.size()) {
         char buf[256];
@@ -238,19 +238,23 @@ std::vector<std::string> diffConfigs(const AircraftConfig& a, const AircraftConf
     } else {
         for (std::size_t i = 0; i < a.geometry.gear.size(); ++i) {
             diffDouble("geometry.gear[" + std::to_string(i) + "].x",
-                       a.geometry.gear[i].x, b.geometry.gear[i].x, tolerance, diffs);
+                       a.geometry.gear[i].x.value(), b.geometry.gear[i].x.value(), tolerance, diffs);
             diffDouble("geometry.gear[" + std::to_string(i) + "].y",
-                       a.geometry.gear[i].y, b.geometry.gear[i].y, tolerance, diffs);
+                       a.geometry.gear[i].y.value(), b.geometry.gear[i].y.value(), tolerance, diffs);
             diffDouble("geometry.gear[" + std::to_string(i) + "].z",
-                       a.geometry.gear[i].z, b.geometry.gear[i].z, tolerance, diffs);
+                       a.geometry.gear[i].z.value(), b.geometry.gear[i].z.value(), tolerance, diffs);
             diffDouble("geometry.gear[" + std::to_string(i) + "].range",
-                       a.geometry.gear[i].range, b.geometry.gear[i].range, tolerance, diffs);
+                       a.geometry.gear[i].range.to<f4::Degrees>().value(), b.geometry.gear[i].range.to<f4::Degrees>().value(), tolerance, diffs);
         }
     }
 
     // Aux
     #define DIFF_AUX_DOUBLE(field) \
         diffDouble("aux." #field, a.aux.field, b.aux.field, tolerance, diffs)
+    #define DIFF_AUX_ANGLE(field) \
+        diffDouble("aux." #field, a.aux.field.to<f4::Degrees>().value(), b.aux.field.to<f4::Degrees>().value(), tolerance, diffs)
+    #define DIFF_AUX_MACH(field) \
+        diffDouble("aux." #field, a.aux.field.value(), b.aux.field.value(), tolerance, diffs)
     #define DIFF_AUX_INT(field) \
         diffInt("aux." #field, a.aux.field, b.aux.field, diffs)
     #define DIFF_AUX_BOOL(field) \
@@ -273,16 +277,16 @@ std::vector<std::string> diffConfigs(const AircraftConfig& a, const AircraftConf
     DIFF_AUX_DOUBLE(epuBurnTime);
     DIFF_AUX_BOOL(hasLef);
     DIFF_AUX_BOOL(hasTef);
-    DIFF_AUX_DOUBLE(tefMaxAngle);
-    DIFF_AUX_DOUBLE(lefMaxAngle);
+    DIFF_AUX_ANGLE(tefMaxAngle);
+    DIFF_AUX_ANGLE(lefMaxAngle);
     DIFF_AUX_DOUBLE(tefRate);
     DIFF_AUX_DOUBLE(lefRate);
     DIFF_AUX_DOUBLE(tefTakeOff);
     DIFF_AUX_DOUBLE(lefGround);
-    DIFF_AUX_DOUBLE(lefMaxMach);
-    DIFF_AUX_DOUBLE(rudderMaxAngle);
-    DIFF_AUX_DOUBLE(aileronMaxAngle);
-    DIFF_AUX_DOUBLE(airbrakeMaxAngle);
+    DIFF_AUX_MACH(lefMaxMach);
+    DIFF_AUX_ANGLE(rudderMaxAngle);
+    DIFF_AUX_ANGLE(aileronMaxAngle);
+    DIFF_AUX_ANGLE(airbrakeMaxAngle);
     DIFF_AUX_DOUBLE(CLtefFactor);
     DIFF_AUX_DOUBLE(CDtefFactor);
     DIFF_AUX_DOUBLE(CDlefFactor);
@@ -299,14 +303,16 @@ std::vector<std::string> diffConfigs(const AircraftConfig& a, const AircraftConf
     DIFF_AUX_DOUBLE(rollGearGain);
     DIFF_AUX_DOUBLE(yawGearGain);
     DIFF_AUX_DOUBLE(pitchGearGain);
-    DIFF_AUX_DOUBLE(landingAOA);
+    DIFF_AUX_ANGLE(landingAOA);
     DIFF_AUX_DOUBLE(rollCouple);
     DIFF_AUX_BOOL(elevatorRolls);
-    DIFF_AUX_DOUBLE(criticalAOA);
+    DIFF_AUX_ANGLE(criticalAOA);
     DIFF_AUX_INT(nEngines);
     DIFF_AUX_INT(typeEngine);
 
     #undef DIFF_AUX_DOUBLE
+    #undef DIFF_AUX_ANGLE
+    #undef DIFF_AUX_MACH
     #undef DIFF_AUX_INT
     #undef DIFF_AUX_BOOL
 

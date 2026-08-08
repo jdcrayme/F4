@@ -205,36 +205,36 @@ static void parseInputData(TokenStream& ts, AircraftConfig& cfg,
                            std::vector<std::string>& /*warnings*/) {
     ts.setPos(0);
 
-    cfg.geometry.emptyWeight_lbs = ts.nextDouble();
-    cfg.geometry.area_ft2 = ts.nextDouble();
-    cfg.geometry.internalFuel_lbs = ts.nextDouble();
-    cfg.geometry.maxFuel_lbs = cfg.geometry.internalFuel_lbs;
+    cfg.geometry.emptyWeight = f4::Quantity<f4::Pounds>(ts.nextDouble());
+    cfg.geometry.area = f4::Quantity<f4::SquareFeet>(ts.nextDouble());
+    cfg.geometry.internalFuel = f4::Quantity<f4::Pounds>(ts.nextDouble());
+    cfg.geometry.maxFuel = cfg.geometry.internalFuel;
 
-    cfg.geometry.aoaMax_deg   = ts.nextDouble();
-    cfg.geometry.aoaMin_deg   = ts.nextDouble();
-    cfg.geometry.betaMax_deg  = ts.nextDouble();
-    cfg.geometry.betaMin_deg  = ts.nextDouble();
+    cfg.geometry.aoaMax   = f4::Quantity<f4::Degrees>(ts.nextDouble()).to<f4::Radians>();
+    cfg.geometry.aoaMin   = f4::Quantity<f4::Degrees>(ts.nextDouble()).to<f4::Radians>();
+    cfg.geometry.betaMax  = f4::Quantity<f4::Degrees>(ts.nextDouble()).to<f4::Radians>();
+    cfg.geometry.betaMin  = f4::Quantity<f4::Degrees>(ts.nextDouble()).to<f4::Radians>();
     cfg.geometry.maxGs        = ts.nextDouble();
-    cfg.geometry.maxRoll_deg  = ts.nextDouble();
-    cfg.geometry.minVcas_kts  = ts.nextDouble();
-    cfg.geometry.maxVcas_kts  = ts.nextDouble();
-    cfg.geometry.cornerVcas_kts = ts.nextDouble();
-    cfg.geometry.thetaMax_rad = ts.nextDouble() * kDTR; // stored as radians
+    cfg.geometry.maxRoll  = f4::Quantity<f4::Degrees>(ts.nextDouble()).to<f4::Radians>();
+    cfg.geometry.minVcas  = f4::Quantity<f4::CASKnots>(ts.nextDouble());
+    cfg.geometry.maxVcas  = f4::Quantity<f4::CASKnots>(ts.nextDouble());
+    cfg.geometry.cornerVcas = f4::Quantity<f4::CASKnots>(ts.nextDouble());
+    cfg.geometry.thetaMax = f4::Quantity<f4::Radians>(ts.nextDouble() * kDTR); // stored as radians
     int numGear = ts.nextInt();
     cfg.geometry.gear.resize(static_cast<std::size_t>(numGear));
 
     for (int i = 0; i < numGear; ++i) {
-        cfg.geometry.gear[i].x = ts.nextDouble();
-        cfg.geometry.gear[i].y = ts.nextDouble();
-        cfg.geometry.gear[i].z = ts.nextDouble();
-        cfg.geometry.gear[i].range = ts.nextDouble();
+        cfg.geometry.gear[i].x = f4::Quantity<f4::Feet>(ts.nextDouble());
+        cfg.geometry.gear[i].y = f4::Quantity<f4::Feet>(ts.nextDouble());
+        cfg.geometry.gear[i].z = f4::Quantity<f4::Feet>(ts.nextDouble());
+        cfg.geometry.gear[i].range = f4::Quantity<f4::Degrees>(ts.nextDouble()).to<f4::Radians>();
     }
 
-    cfg.geometry.cgLoc_ft     = ts.nextDouble();
-    cfg.geometry.length_ft    = ts.nextDouble();
-    cfg.geometry.span_ft      = ts.nextDouble();
-    cfg.geometry.fusRadius_ft = ts.nextDouble();
-    cfg.geometry.tailHt_ft    = ts.nextDouble();
+    cfg.geometry.cgLoc     = f4::Quantity<f4::Feet>(ts.nextDouble());
+    cfg.geometry.length    = f4::Quantity<f4::Feet>(ts.nextDouble());
+    cfg.geometry.span      = f4::Quantity<f4::Feet>(ts.nextDouble());
+    cfg.geometry.fusRadius = f4::Quantity<f4::Feet>(ts.nextDouble());
+    cfg.geometry.tailHt    = f4::Quantity<f4::Feet>(ts.nextDouble());
 }
 
 // ---------------------------------------------------------------------------
@@ -725,10 +725,10 @@ static void parseAuxAero(const std::string& contents,
             if (parseIntAt(value, pos, iv)) aux.hasTef = (iv != 0);
         }
         else if (key == "lefGround")    tryD(aux.lefGround);
-        else if (key == "lefMaxAngle")  tryD(aux.lefMaxAngle);
-        else if (key == "lefMaxMach")   tryD(aux.lefMaxMach);
+        else if (key == "lefMaxAngle")  { double v; if (parseDoubleAt(value, pos, v)) aux.lefMaxAngle = f4::Quantity<f4::Degrees>(v).to<f4::Radians>(); }
+        else if (key == "lefMaxMach")   { double v; if (parseDoubleAt(value, pos, v)) aux.lefMaxMach = f4::Quantity<f4::MachUnit>(v); }
         else if (key == "lefRate")      tryD(aux.lefRate);
-        else if (key == "tefMaxAngle")  tryD(aux.tefMaxAngle);
+        else if (key == "tefMaxAngle")  { double v; if (parseDoubleAt(value, pos, v)) aux.tefMaxAngle = f4::Quantity<f4::Degrees>(v).to<f4::Radians>(); }
         else if (key == "tefTakeoff" || key == "tefTakeOff") tryD(aux.tefTakeOff);
         else if (key == "tefRate")      tryD(aux.tefRate);
         else if (key == "CLtefFactor")  tryD(aux.CLtefFactor);
@@ -746,16 +746,16 @@ static void parseAuxAero(const std::string& contents,
         else if (key == "pitchGearGain")   tryD(aux.pitchGearGain);
         else if (key == "rollGearGain")    tryD(aux.rollGearGain);
         else if (key == "yawGearGain")     tryD(aux.yawGearGain);
-        else if (key == "rudderMaxAngle")  tryD(aux.rudderMaxAngle);
-        else if (key == "aileronMaxAngle") tryD(aux.aileronMaxAngle);
-        else if (key == "airbrakeMaxAngle") tryD(aux.airbrakeMaxAngle);
+        else if (key == "rudderMaxAngle")  { double v; if (parseDoubleAt(value, pos, v)) aux.rudderMaxAngle = f4::Quantity<f4::Degrees>(v).to<f4::Radians>(); }
+        else if (key == "aileronMaxAngle") { double v; if (parseDoubleAt(value, pos, v)) aux.aileronMaxAngle = f4::Quantity<f4::Degrees>(v).to<f4::Radians>(); }
+        else if (key == "airbrakeMaxAngle") { double v; if (parseDoubleAt(value, pos, v)) aux.airbrakeMaxAngle = f4::Quantity<f4::Degrees>(v).to<f4::Radians>(); }
         else if (key == "rollCouple")      tryD(aux.rollCouple);
         else if (key == "elevatorRoll" || key == "elevatorRolls") {
             if (parseIntAt(value, pos, iv)) aux.elevatorRolls = (iv != 0);
         }
         else if (key == "sinkRate")    tryD(aux.sinkRate);
-        else if (key == "landingAOA")  tryD(aux.landingAOA);
-        else if (key == "criticalAOA") tryD(aux.criticalAOA);
+        else if (key == "landingAOA")  { double v; if (parseDoubleAt(value, pos, v)) aux.landingAOA = f4::Quantity<f4::Degrees>(v).to<f4::Radians>(); }
+        else if (key == "criticalAOA") { double v; if (parseDoubleAt(value, pos, v)) aux.criticalAOA = f4::Quantity<f4::Degrees>(v).to<f4::Radians>(); }
         // Unknown keys: already captured in rawAuxAeroData.
     }
 }

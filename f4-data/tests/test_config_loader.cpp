@@ -69,13 +69,13 @@ TEST(ConfigLoaderTest, F16FixtureFieldsCorrect) {
     ASSERT_TRUE(result.ok) << "Failed to load f16.json";
 
     // From the real f16.dat file
-    EXPECT_NEAR(result.config.geometry.emptyWeight_lbs, 18238.0, 1e-6);
-    EXPECT_NEAR(result.config.geometry.area_ft2,           300.0, 1e-6);
-    EXPECT_NEAR(result.config.geometry.internalFuel_lbs,  7162.0, 1e-6);
-    EXPECT_NEAR(result.config.geometry.aoaMax_deg,          35.0, 1e-6);
-    EXPECT_NEAR(result.config.geometry.aoaMin_deg,         -15.0, 1e-6);
+    EXPECT_NEAR(result.config.geometry.emptyWeight.value(), 18238.0, 1e-6);
+    EXPECT_NEAR(result.config.geometry.area.value(),           300.0, 1e-6);
+    EXPECT_NEAR(result.config.geometry.internalFuel.value(),  7162.0, 1e-6);
+    EXPECT_NEAR(result.config.geometry.aoaMax.to<f4::Degrees>().value(),          35.0, 1e-6);
+    EXPECT_NEAR(result.config.geometry.aoaMin.to<f4::Degrees>().value(),         -15.0, 1e-6);
     EXPECT_NEAR(result.config.geometry.maxGs,                9.0, 1e-6);
-    EXPECT_NEAR(result.config.geometry.maxRoll_deg,        190.0, 1e-6);
+    EXPECT_NEAR(result.config.geometry.maxRoll.to<f4::Degrees>().value(),        190.0, 1e-6);
 
     EXPECT_EQ(result.config.aero.mach.size(),      7u);
     EXPECT_EQ(result.config.aero.alpha_deg.size(), 21u);
@@ -112,8 +112,8 @@ TEST(ConfigLoaderTest, RoundTripPreservesConfig) {
 
     // Every field should round-trip exactly.
     EXPECT_EQ(r1.config.name, r2.config.name);
-    EXPECT_NEAR(r1.config.geometry.emptyWeight_lbs,
-                r2.config.geometry.emptyWeight_lbs, 1e-12);
+    EXPECT_NEAR(r1.config.geometry.emptyWeight.value(),
+                r2.config.geometry.emptyWeight.value(), 1e-12);
     EXPECT_EQ(r1.config.aero.clift.size(), r2.config.aero.clift.size());
     EXPECT_EQ(r1.config.aero.clift, r2.config.aero.clift);
     EXPECT_EQ(r1.config.engine.thrust_mil, r2.config.engine.thrust_mil);

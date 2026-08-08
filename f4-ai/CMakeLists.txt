@@ -7,18 +7,21 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 # ---------------------------------------------------------------------------
 # f4-ai depends on:
-#   - f4-entities      (EntityWorld, TransformComponent, tag queries)
-#   - f4-messaging     (MessageBus — for RWRContactMessage and similar)
-#   - f4-geo           (WorldPosition, to_bra, BRA geometry)
+#   - f4-flight-api   (IAircraftState, IPilotInputSink, PilotInput — the
+#                      flight model contract. Phase 2+: replaced f4-flight-model
+#                      to break the circular dependency where AI modules know
+#                      about FlightModel internals.)
+#   - f4-entities     (EntityWorld, TransformComponent, tag queries, get_interface<>)
+#   - f4-messaging    (MessageBus — for RWRContactMessage and similar)
+#   - f4-geo          (WorldPosition, to_bra, BRA geometry)
 #   - f4-state-machine (LayeredStateMachine for the DigiMode priority ladder)
-#   - f4-flight-model  (AircraftState — read by tactic modules)
-#   - f4-data          (AircraftConfig — for aircraft-specific limits)
-#   - f4-math          (Table2D, filters — used by autopilot PIDs)
+#   - f4-data         (AircraftConfig — for aircraft-specific limits)
+#   - f4-math         (Table2D, filters — used by autopilot PIDs)
 #
-# f4-geo, f4-entities, f4-messaging are pulled in transitively by
-# f4-flight-model, but we list them explicitly to make the dependency
-# contract visible and to keep the link graph stable if f4-flight-model
-# ever drops one of them.
+# Phase 2+: f4-ai no longer depends on f4-flight-model. AI modules
+# access aircraft state through IAircraftState and write controls through
+# IPilotInputSink — both in f4-flight-api. BrainComponent resolves
+# these interfaces via EntityHandle::get_interface<I>().
 # ---------------------------------------------------------------------------
 add_library(f4-ai STATIC
     src/sensor_fusion.cpp
@@ -33,7 +36,7 @@ target_include_directories(f4-ai
 )
 
 target_link_libraries(f4-ai PUBLIC
-    f4-flight-model
+    f4-flight-api
     f4-entities
     f4-messaging
     f4-state-machine

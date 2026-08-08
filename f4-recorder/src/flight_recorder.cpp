@@ -4,6 +4,7 @@
 
 #include "f4/recorder/flight_recorder.hpp"
 #include "f4/json/writer.hpp"
+#include "f4/json/reader.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -281,18 +282,136 @@ std::string FlightRecorder::to_summary_json(
 // ============================================================================
 // JSON import (from_json)
 // ============================================================================
-// Minimal parser — reads the format produced by to_json(). Uses f4-json Reader
-// is not needed here since we control both ends; instead we parse the known
-// structure directly for efficiency.
-//
-// For now, from_json is a placeholder that will be implemented when the
-// replay viewer needs it. The write/load round-trip tests will drive the
-// implementation.
+// Parses the JSON format produced by to_json() using f4::json::Reader.
 
-FlightRecorder FlightRecorder::from_json(const std::string& /*json_str*/) {
-    // TODO: Implement when replay viewer needs loading.
-    // The JSON format is fully specified above; parsing is straightforward.
-    return FlightRecorder{};
+namespace {
+
+// Parse a {"x":..., "y":..., "z":...} object at the current Reader position.
+geo::WorldPosition parse_vec3(json::Reader& r) {
+    geo::WorldPosition pos;
+    r.expect('{');
+    while (!r.consume('}')) {
+        auto key = r.read_string();
+        r.expect(':');
+        if (key == "x")      { pos.x = r.read_number(); }
+        else if (key == "y") { pos.y = r.read_number(); }
+        else if (key == "z") { pos.z = r.read_number(); }
+        else { r.skip_value(); }
+        r.consume(',');
+    }
+    return pos;
+}
+
+// Parse a single snapshot object from the current Reader position.
+FlightSnapshot parse_snapshot(json::Reader& r) {
+    FlightSnapshot snap;
+    r.expect('{');
+    while (!r.consume('}')) {
+        auto key = r.read_string();
+        r.expect(':');
+
+        // Timing
+        if (key == "tick")              { snap.tick = static_cast<std::uint64_t>(r.read_int()); }
+        else if (key == "sim_time_s")   { snap.sim_time_s = r.read_number(); }
+
+        // Identity
+        else if (key == "entity_id")    { snap.entity_id = static_cast<std::uint64_t>(r.read_int()); }
+        else if (key == "callsign")     { snap.callsign = r.read_string(); }
+
+        // Position
+        else if (key == "position")     { snap.position = parse_vec3(r); }
+
+        // Attitude
+        else if (key == "heading_rad")  { snap.heading_rad = r.read_number(); }
+        else if (key == "pitch_rad")    { snap.pitch_rad = r.read_number(); }
+        else if (key == "roll_rad")     { snap.roll_rad = r.read_number(); }
+
+        // Airspeed / altitude
+        else if (key == "altitude_agl_ft")   { snap.altitude_agl_ft = r.read_number(); }
+        else if (key == "altitude_msl_ft")   { snap.altitude_msl_ft = r.read_number(); }
+        else if (key == "vcas_kts")          { snap.vcas_kts = r.read_number(); }
+        else if (key == "gs_kts")            { snap.gs_kts = r.read_number(); }
+        else if (key == "vt_fps")            { snap.vt_fps = r.read_number(); }
+        else if (key == "mach")              { snap.mach = r.read_number(); }
+
+        // Control inputs
+        else if (key == "pitch_cmd")         { snap.pitch_cmd = r.read_number(); }
+        else if (key == "roll_cmd")          { snap.roll_cmd = r.read_number(); }
+        else if (key == "yaw_cmd")           { snap.yaw_cmd = r.read_number(); }
+        else if (key == "throttle_cmd")      { snap.throttle_cmd = r.read_number(); }
+        else if (key == "speed_brake_cmd")   { snap.speed_brake_cmd = r.read_number(); }
+        else if (key == "gear_handle_down")  { snap.gear_handle_down = r.read_bool(); }
+        else if (key == "wheel_brakes")      { snap.wheel_brakes = r.read_bool(); }
+        else if (key == "nose_steer_on")     { snap.nose_steer_on = r.read_bool(); }
+
+        // AI brain state
+        else if (key == "ai_mode")           { snap.ai_mode = r.read_string(); }
+        else if (key == "ai_state")          { snap.ai_state = r.read_string(); }
+        else if (key == "ai_event")          { snap.ai_event = r.read_string(); }
+        else if (key == "ai_guard_result")   { snap.ai_guard_result = r.read_string(); }
+
+        // Intended path
+        else if (key == "target_position")        { snap.target_position = parse_vec3(r); }
+        else if (key == "target_description")     { snap.target_description = r.read_string(); }
+        else if (key == "cross_track_error_ft")   { snap.cross_track_error_ft = r.read_number(); }
+        else if (key == "along_track_error_ft")   { snap.along_track_error_ft = r.read_number(); }
+        else if (key == "vertical_error_ft")      { snap.vertical_error_ft = r.read_number(); }
+
+        // Ground state
+        else if (key == "on_ground")          { snap.on_ground = r.read_bool(); }
+        else if (key == "ground_speed_kts")   { snap.ground_speed_kts = r.read_number(); }
+
+        // Engine
+        else if (key == "engine_rpm")         { snap.engine_rpm = r.read_number(); }
+        else if (key == "afterburner_lit")    { snap.afterburner_lit = r.read_bool(); }
+        else if (key == "fuel_lbs")           { snap.fuel_lbs = r.read_number(); }
+
+        // G-loads
+        else if (key == "nz")                 { snap.nz = r.read_number(); }
+        else if (key == "nx")                 { snap.nx = r.read_number(); }
+
+        // Unknown field — skip
+        else { r.skip_value(); }
+
+        r.consume(',');  // optional trailing comma
+    }
+    return snap;
+}
+
+} // anonymous namespace
+
+FlightRecorder FlightRecorder::from_json(const std::string& json_str) {
+    FlightRecorder rec;
+    json::Reader r(json_str);
+    r.skip_ws();
+
+    r.expect('{');
+    while (!r.consume('}')) {
+        auto key = r.read_string();
+        r.expect(':');
+
+        if (key == "format") {
+            (void)r.read_string();  // "f4-flight-recording"
+        } else if (key == "version") {
+            (void)r.read_int();     // 1
+        } else if (key == "scenario") {
+            rec.set_scenario_name(r.read_string());
+        } else if (key == "snapshot_count") {
+            (void)r.read_int();     // informational; we just parse the array
+        } else if (key == "snapshots") {
+            r.expect('[');
+            while (!r.consume(']')) {
+                rec.record(parse_snapshot(r));
+                r.consume(',');
+            }
+        } else {
+            r.skip_value();
+        }
+
+        r.consume(',');  // optional trailing comma
+    }
+
+    return rec;
 }
 
 // ============================================================================

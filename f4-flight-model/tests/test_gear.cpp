@@ -21,11 +21,11 @@ namespace {
 // Minimal geometry for gear tests: 3 gear points (nose, left main, right main).
 data::AircraftGeometry makeGeom() {
     data::AircraftGeometry g;
-    g.emptyWeight_lbs = 10000.0;
+    g.emptyWeight = f4::Quantity<f4::Pounds>(10000.0);
     g.gear = {
-        { /*x=*/10.0, /*y=*/0.0,  /*z=*/3.0 },   // nose
-        { /*x=*/-2.0, /*y=*/5.0,  /*z=*/4.0 },   // left main
-        { /*x=*/-2.0, /*y=*/-5.0, /*z=*/4.0 },   // right main
+        { /*x=*/f4::Quantity<f4::Feet>(10.0), /*y=*/f4::Quantity<f4::Feet>(0.0),  /*z=*/f4::Quantity<f4::Feet>(3.0) },   // nose
+        { /*x=*/f4::Quantity<f4::Feet>(-2.0), /*y=*/f4::Quantity<f4::Feet>(5.0),  /*z=*/f4::Quantity<f4::Feet>(4.0) },   // left main
+        { /*x=*/f4::Quantity<f4::Feet>(-2.0), /*y=*/f4::Quantity<f4::Feet>(-5.0), /*z=*/f4::Quantity<f4::Feet>(4.0) },   // right main
     };
     return g;
 }

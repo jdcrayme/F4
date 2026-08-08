@@ -92,6 +92,10 @@ void FlightControlSystem::update(const PilotInput& pilot,
                                  FcsState& fcsState,
                                  AeroState& aeroState,
                                  double dt) const {
+    assert(cfg_  != nullptr && "FlightControlSystem: cfg must not be null");
+    assert(geom_ != nullptr && "FlightControlSystem: geom must not be null");
+    assert(aux_  != nullptr && "FlightControlSystem: aux must not be null");
+
     // Unpack flight conditions for readability
     const double qbar            = fc.qbar;
     const double qsom            = fc.qsom;
@@ -151,10 +155,10 @@ void FlightControlSystem::update(const PilotInput& pilot,
                  fcs);
 
     // --- Run channels (pitch must run before aero uses alpha) ---
-    const double aoamin = geom_->aoaMin_deg;
-    const double aoamax = geom_->aoaMax_deg;
-    const double betmin = geom_->betaMin_deg;
-    const double betmax = geom_->betaMax_deg;
+    const double aoamin = geom_->aoaMin.to<f4::Degrees>().value();
+    const double aoamax = geom_->aoaMax.to<f4::Degrees>().value();
+    const double betmin = geom_->betaMin.to<f4::Degrees>().value();
+    const double betmax = geom_->betaMax.to<f4::Degrees>().value();
     const double maxGs  = geom_->maxGs;
 
     runPitch(dt, qbar, qsom, vt_ftps, vcas_kts,
@@ -208,7 +212,7 @@ void FlightControlSystem::computeGains(double qbar, double qsom, double vt,
     // --- Available G from lift ---
     // gsAvail = max G the aircraft can produce at current alpha.
     // Uses clalph0 (static slope), NOT the local clalpha.
-    const double gsAvail = geom_->aoaMax_deg * clalph0 * qsom / GRAVITY;
+    const double gsAvail = geom_->aoaMax.to<f4::Degrees>().value() * clalph0 * qsom / GRAVITY;
 
     // --- Pitch damping ratio (zp01) ---
     // Reduced at low qbar (sloppy controls) and high loading (sluggish).
@@ -386,7 +390,7 @@ void FlightControlSystem::runPitch(double dt, double qbar, double qsom,
     // be called with lo > hi, which is undefined behavior (libstdc++
     // returns garbage; MSVC's debug CRT asserts). Guard explicitly.
     const double gsAvail = std::max(0.0,
-        geom_->aoaMax_deg * clalph0 * qsom / GRAVITY);
+        geom_->aoaMax.to<f4::Degrees>().value() * clalph0 * qsom / GRAVITY);
     const double maxCmd  = maxGs;
     const double upper   = std::min(gsAvail, maxCmd);
     // Defensive: never let lower > upper. If maxNegGs > upper (can only
@@ -533,7 +537,7 @@ void FlightControlSystem::runYaw(double dt, double qbar, double qsom,
     double nycmd = std::clamp(yshape * 2.0, -2.0, 2.0);
 
     // Limit to available side force
-    const double gsAvail = geom_->betaMax_deg * 0.05 * qsom / GRAVITY;
+    const double gsAvail = geom_->betaMax.to<f4::Degrees>().value() * 0.05 * qsom / GRAVITY;
     nycmd *= std::min(gsAvail / 2.0, 1.0);
     nycmd = applyLimiter(LimiterKey::YawAlphaLimiter, nycmd);
 

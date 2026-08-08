@@ -126,8 +126,8 @@ TEST(FlightModelTest, SixtySecondStabilityRun) {
     EXPECT_TRUE(std::isfinite(fm.state().engine.rpm));
 
     // - Alpha should be within the aircraft's limits (no stall/spin divergence)
-    EXPECT_GT(to_degrees(fm.state().aero.alpha), cfg.geometry.aoaMin_deg - 5.0);
-    EXPECT_LT(to_degrees(fm.state().aero.alpha), cfg.geometry.aoaMax_deg + 5.0);
+    EXPECT_GT(to_degrees(fm.state().aero.alpha), cfg.geometry.aoaMin.to<f4::Degrees>().value() - 5.0);
+    EXPECT_LT(to_degrees(fm.state().aero.alpha), cfg.geometry.aoaMax.to<f4::Degrees>().value() + 5.0);
 
     // - G load should remain near 1G. The previous 3-G tolerance was wide
     // enough to admit a fully-developed stall (0 G) or a 4-G pull (steady
@@ -334,5 +334,51 @@ TEST(FlightModelTest, MultipleAircraftInitAndRun) {
             << "NaN in z for " << name;
         EXPECT_TRUE(std::isfinite(fm.state().kin.vt))
             << "NaN in vt for " << name;
+    }
+}
+
+// ============================================================================
+// Trim convergence at multiple flight conditions
+// ============================================================================
+
+TEST(FlightModelTest, TrimConvergenceAtMultipleConditions) {
+    f4::data::AircraftConfig cfg;
+    if (!loadF16Config(cfg)) GTEST_SKIP();
+
+    struct TrimCondition {
+        double alt_ft;
+        double vt_fps;
+        double heading_rad;
+        bool in_air;
+        const char* label;
+    };
+
+    const TrimCondition conditions[] = {
+        {     0.0, 500.0, 0.0,                  true, "sea level, 500 ft/s, heading 0" },
+        { 10000.0, 400.0, 0.7853981633974483,   true, "10000 ft, 400 ft/s, heading pi/4" },
+        { 25000.0, 600.0, 1.5707963267948966,   true, "25000 ft, 600 ft/s, heading pi/2" },
+    };
+
+    for (const auto& cond : conditions) {
+        FlightModel fm;
+        fm.init(cfg, cond.alt_ft, cond.vt_fps, cond.heading_rad, cond.in_air);
+
+        bool converged = fm.trim();
+        EXPECT_TRUE(converged)
+            << "Trim did not converge at " << cond.label;
+
+        // Load factor should be near 1G (level flight)
+        EXPECT_NEAR(fm.state().loads.nzcgs, 1.0, 0.1)
+            << "nzcgs far from 1.0 at " << cond.label
+            << ": nzcgs=" << fm.state().loads.nzcgs;
+
+        // Alpha should be finite and within reasonable bounds (-30° to +30°)
+        double alpha_deg = to_degrees(fm.state().aero.alpha);
+        EXPECT_TRUE(std::isfinite(alpha_deg))
+            << "Alpha is non-finite at " << cond.label;
+        EXPECT_GT(alpha_deg, -30.0)
+            << "Alpha below -30 deg at " << cond.label << ": " << alpha_deg;
+        EXPECT_LT(alpha_deg, 30.0)
+            << "Alpha above +30 deg at " << cond.label << ": " << alpha_deg;
     }
 }

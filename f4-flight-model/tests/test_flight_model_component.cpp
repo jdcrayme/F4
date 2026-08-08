@@ -276,3 +276,83 @@ TEST(FlightModelComponent, UpdateAllSkipsUninitializedFM) {
 
     EXPECT_NO_THROW(w.update_all(1.0 / 60.0, bus));
 }
+
+// ============================================================================
+// IAircraftState interface — ENU position from NED internals
+// ============================================================================
+TEST(FlightModelComponent, IAircraftStateImplementsPositionEast) {
+    // NED: x=north, y=east, z=down. ENU: x=east, y=north, z=up.
+    // position_east_ft() should return NED y.
+    f4::data::AircraftConfig cfg;
+    if (!loadF16Config(cfg)) GTEST_SKIP() << "f16.json fixture not found";
+
+    FlightModelComponent fmc;
+    fmc.init(cfg, 0.0, 0.0, 0.0, false);
+
+    // Verify the component implements IAircraftState.
+    const IAircraftState* state = &fmc;
+    (void)state;
+
+    // After init at heading=0, the aircraft is at the origin.
+    // position_east_ft() = NED y = 0.
+    EXPECT_DOUBLE_EQ(fmc.position_east_ft(), 0.0);
+    EXPECT_DOUBLE_EQ(fmc.position_north_ft(), 0.0);
+    EXPECT_DOUBLE_EQ(fmc.altitude_msl_ft(), 0.0);
+}
+
+TEST(FlightModelComponent, IAircraftStateOnGround) {
+    f4::data::AircraftConfig cfg;
+    if (!loadF16Config(cfg)) GTEST_SKIP() << "f16.json fixture not found";
+
+    FlightModelComponent fmc;
+    fmc.init(cfg, 0.0, 0.0, 0.0, false);  // on ground
+    EXPECT_TRUE(fmc.on_ground());
+}
+
+TEST(FlightModelComponent, IAircraftStateInAir) {
+    f4::data::AircraftConfig cfg;
+    if (!loadF16Config(cfg)) GTEST_SKIP() << "f16.json fixture not found";
+
+    FlightModelComponent fmc;
+    fmc.init(cfg, 10000.0, 500.0, 0.0, true);  // in air
+    EXPECT_FALSE(fmc.on_ground());
+}
+
+// ============================================================================
+// IPilotInputSink interface — set_pending_input
+// ============================================================================
+TEST(FlightModelComponent, SetPendingInputViaInterface) {
+    FlightModelComponent fmc;
+
+    // Verify the component implements IPilotInputSink.
+    IPilotInputSink* sink = &fmc;
+
+    PilotInput pi;
+    pi.throttle = 0.75;
+    pi.pstick = 0.3;
+    pi.wheelBrakes = true;
+    sink->set_pending_input(pi);
+
+    EXPECT_DOUBLE_EQ(fmc.pending_input().throttle, 0.75);
+    EXPECT_DOUBLE_EQ(fmc.pending_input().pstick, 0.3);
+    EXPECT_TRUE(fmc.pending_input().wheelBrakes);
+}
+
+TEST(FlightModelComponent, SetPendingInputMatchesDirectWrite) {
+    // set_pending_input() should produce the same result as
+    // directly assigning to pending_input().
+    FlightModelComponent fmc1, fmc2;
+
+    PilotInput pi;
+    pi.throttle = 0.5;
+    pi.rstick = -0.2;
+    pi.gearHandle = -1.0;
+    pi.validate();
+
+    fmc1.set_pending_input(pi);
+    fmc2.pending_input() = pi;
+
+    EXPECT_DOUBLE_EQ(fmc1.pending_input().throttle, fmc2.pending_input().throttle);
+    EXPECT_DOUBLE_EQ(fmc1.pending_input().rstick, fmc2.pending_input().rstick);
+    EXPECT_DOUBLE_EQ(fmc1.pending_input().gearHandle, fmc2.pending_input().gearHandle);
+}

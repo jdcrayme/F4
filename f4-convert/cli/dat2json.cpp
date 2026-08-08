@@ -56,13 +56,13 @@ int main(int argc, char** argv) {
 
     auto const& c = result.config;
     std::printf("\nConverted aircraft: %s\n", c.name.c_str());
-    std::printf("  Empty weight:    %.1f lbs\n", c.geometry.emptyWeight_lbs);
-    std::printf("  Wing area:       %.1f ft^2\n", c.geometry.area_ft2);
-    std::printf("  Internal fuel:   %.1f lbs\n", c.geometry.internalFuel_lbs);
-    std::printf("  Span:            %.1f ft\n", c.geometry.span_ft);
+    std::printf("  Empty weight:    %.1f lbs\n", c.geometry.emptyWeight.value());
+    std::printf("  Wing area:       %.1f ft^2\n", c.geometry.area.value());
+    std::printf("  Internal fuel:   %.1f lbs\n", c.geometry.internalFuel.value());
+    std::printf("  Span:            %.1f ft\n", c.geometry.span.value());
     std::printf("  Max Gs:          %.1f\n", c.geometry.maxGs);
     std::printf("  AOA limits:      %.1f to %.1f deg\n",
-                c.geometry.aoaMin_deg, c.geometry.aoaMax_deg);
+                c.geometry.aoaMin.to<f4::Degrees>().value(), c.geometry.aoaMax.to<f4::Degrees>().value());
     std::printf("  Gear points:     %zu\n", c.geometry.gear.size());
     std::printf("  Engines:         %d (type %d)\n", c.aux.nEngines, c.aux.typeEngine);
     std::printf("  Aero table:      %zu mach x %zu alpha\n",

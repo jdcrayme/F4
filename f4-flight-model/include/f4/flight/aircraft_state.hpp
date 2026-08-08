@@ -36,6 +36,7 @@
 #include "f4/math/vec3.hpp"
 #include "f4/math/quat.hpp"
 #include "f4/math/filters.hpp"
+#include "f4/flight/api/pilot_input.hpp"
 
 #include <vector>
 
@@ -49,41 +50,11 @@ enum class StallState : int;
 namespace f4::flight {
 
 // ---------------------------------------------------------------------------
-// Pilot / AI input
-//
-// All control inputs are normalized:
-//   pstick, rstick, ypedal: [-1, +1]
-//   throttle: [0, 1.5] where 1.0 = MIL power, 1.5 = full afterburner
-//   speedBrake: [-1, +1] where -1 = retracted, +1 = fully extended
-//   gearHandle: [-1, +1] where -1 = up, +1 = down
-//   tefCmd, lefCmd: [0, 1] where 0 = retracted, 1 = fully extended
+// PilotInput is now defined in f4-flight-api (f4/flight/api/pilot_input.hpp).
+// It was moved out of aircraft_state.hpp so that AI and other consumers
+// can depend on the control contract without pulling in the full flight
+// model and its transitive dependencies (f4-data, f4-math, etc.).
 // ---------------------------------------------------------------------------
-struct PilotInput {
-    double pstick{0.0};      // pitch stick: -1 (nose down) .. +1 (nose up)
-    double rstick{0.0};      // roll stick:  -1 (full left) .. +1 (full right)
-    double ypedal{0.0};      // rudder pedal: -1 (full left) .. +1 (full right)
-    double throttle{0.0};    // 0..1.5 (1.0 = MIL, 1.5 = full AB)
-    double speedBrake{-1.0}; // -1 (retract) .. +1 (extend); default retracted
-    double gearHandle{1.0};  // -1 (up) .. +1 (down); default down
-    double hookHandle{0.0};  // -1 (up) .. +1 (down)
-
-    double tefCmd{0.0};      // trailing-edge flap command, 0..1
-    double lefCmd{0.0};      // leading-edge flap command, 0..1
-
-    bool wheelBrakes{false};
-    bool parkingBrake{false};
-    bool noseSteerOn{true};
-    bool refueling{false};
-
-    /// Validate and clamp all inputs to their documented ranges.
-    ///
-    /// This is the boundary between external input (AI, scripting, network)
-    /// and the flight model — the most hardened interface in the system.
-    /// Call this before passing PilotInput to FlightModel::update().
-    /// Out-of-range inputs are clamped; in debug builds, out-of-range
-    /// values also trigger an assertion failure.
-    void validate() noexcept;
-};
 
 // ---------------------------------------------------------------------------
 // Kinematic state: position, velocity, orientation, body rates

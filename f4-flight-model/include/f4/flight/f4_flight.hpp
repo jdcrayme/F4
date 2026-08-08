@@ -20,4 +20,6 @@
 #include "f4/flight/eom.hpp"
 #include "f4/flight/gear.hpp"
 #include "f4/flight/flight_model.hpp"
+#include "f4/flight/i_aircraft_state.hpp"
+#include "f4/flight/i_pilot_input_sink.hpp"
 #include "f4/flight/flight_model_component.hpp"

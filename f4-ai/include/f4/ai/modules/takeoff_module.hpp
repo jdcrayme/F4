@@ -21,13 +21,20 @@
 //   TakeoffClearance -> TakeoffCommand event (HoldShort -> PrepToTakeRunway)
 //
 // The module tracks taxi waypoint progress by reading the aircraft position
-// from AircraftState each tick. When the last taxi waypoint is reached,
+// from IAircraftState each tick. When the last taxi waypoint is reached,
 // RunwayAssigned fires (Taxi -> HoldShort). When the aircraft is aligned
 // on the runway centerline, ClearanceGranted fires (PrepToTakeRunway ->
 // TakeRunway). When liftoff is detected, Liftoff fires (Takeoff -> FlyOut).
 // When departure altitude is reached, FlyOutComplete fires (FlyOut -> Done).
 //
-// Dependencies: f4-state-machine, f4-messaging, f4-entities, f4-geo, f4-data.
+// Phase 2 (H2): The module takes const IAircraftState& instead of
+// const AircraftState*. This decouples the module from the full
+// AircraftState struct (35+ fields) and its NED coordinate convention.
+// The IAircraftState interface presents position in ENU (the AI's
+// natural frame) and exposes only the 7 fields the AI actually needs.
+//
+// Dependencies: f4-state-machine, f4-messaging, f4-entities, f4-geo, f4-data,
+// f4-flight-model (for IAircraftState interface only — NOT for AircraftState).
 // C++20.
 
 #pragma once
@@ -40,13 +47,10 @@
 #include <f4/fsm/state_machine.hpp>
 #include <f4/fsm/trace.hpp>
 #include <f4/geo/position.hpp>
+#include <f4/flight/api/i_aircraft_state.hpp>
 
 #include "f4/ai/ai_output.hpp"
 #include "f4/ai/atc/messages.hpp"
-
-// Forward declaration — the full definition is in <f4/flight/aircraft_state.hpp>.
-// The .cpp includes the full header; the header only needs the pointer type.
-namespace f4::flight { struct AircraftState; }
 
 namespace f4::ai::modules {
 
@@ -102,11 +106,17 @@ public:
     // --- Per-tick update ---
     // Produces control outputs for the current state.
     // The caller (BrainComponent or DigitalBrain) passes in the current
-    // aircraft state and receives the AI's stick/throttle commands.
+    // aircraft state (via the IAircraftState interface) and receives the
+    // AI's stick/throttle commands.
     // Transition decisions (waypoint reached, liftoff detected, etc.) are
     // made HERE, not in the per-state control methods — this keeps the
     // control methods pure (const, no side effects) and avoids const_cast.
-    AIControlOutput update(double dt, const flight::AircraftState* state);
+    //
+    // Phase 2: Takes const IAircraftState* instead of const AircraftState*.
+    // Null is allowed — update() will produce idle controls (brakes on,
+    // zero throttle) with no position tracking. This matches the old
+    // behavior where a null AircraftState was treated as a no-op.
+    AIControlOutput update(double dt, const flight::IAircraftState* state);
 
     // --- Accessors ---
     [[nodiscard]] TakeoffState state() const noexcept { return sm_.current(); }
@@ -173,7 +183,8 @@ private:
     void check_departure_altitude();      // FlyOut -> Done
 
     // Cache the current aircraft state fields for use by control methods.
-    void cache_aircraft_state(const flight::AircraftState* state);
+    // Phase 2: reads from IAircraftState instead of AircraftState.
+    void cache_aircraft_state(const flight::IAircraftState* state);
 
     // --- Data members (ordered so sm_ is LAST) ---
     // C++ initializes members in declaration order. The StateMachine

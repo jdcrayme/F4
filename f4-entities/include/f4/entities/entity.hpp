@@ -674,6 +674,7 @@ namespace f4::entities {
         template<typename T> [[nodiscard]] T* get() const;
         template<typename T> [[nodiscard]] T& require() const;
         template<typename T> [[nodiscard]] bool has() const;
+        template<typename I> [[nodiscard]] I* get_interface() const;
         template<typename T, typename... Args> T& add(Args&&... args);
         template<typename T> void remove();
 
@@ -725,6 +726,33 @@ namespace f4::entities {
     template<typename T>
     bool EntityHandle::has() const {
         return get<T>() != nullptr;
+    }
+
+    /// Interface-based component lookup. Scans all components on this
+    /// entity and returns the first one that implements interface I
+    /// (detected via dynamic_cast). Returns nullptr if none matches.
+    ///
+    /// This enables BrainComponent to find IAircraftState and
+    /// IPilotInputSink without depending on the concrete
+    /// FlightModelComponent type — a key decoupling mechanism.
+    ///
+    /// Complexity: O(n) where n is the number of components on this
+    /// entity (typically 3-5 at Phase A scale). For O(1) lookup,
+    /// use get<T>() with the concrete type instead.
+    ///
+    /// Requires RTTI (enabled by default in C++20; the entity system
+    /// already uses std::type_index and typeid()).
+    template<typename I>
+    I* EntityHandle::get_interface() const {
+        if (!world_) return nullptr;
+        auto* rec = world_->find(id_);
+        if (!rec) return nullptr;
+        for (const auto& [tid, comp] : rec->components) {
+            if (auto* iface = dynamic_cast<I*>(comp.get())) {
+                return iface;
+            }
+        }
+        return nullptr;
     }
 
     template<typename T, typename... Args>

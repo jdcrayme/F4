@@ -61,6 +61,10 @@ Aerodynamics::Aerodynamics(const AeroTable* table,
 // unit crossing is explicit at each call site.
 // ---------------------------------------------------------------------------
 void Aerodynamics::update(const AeroInputs& in, AeroState& aero) const {
+    assert(table_ != nullptr && "Aerodynamics: table must not be null");
+    assert(geom_  != nullptr && "Aerodynamics: geom must not be null");
+    assert(aux_   != nullptr && "Aerodynamics: aux must not be null");
+
     // Unpack for readability — the struct groups these for type safety
     // at the call site, but internally the math is identical.
     const Angle  alpha      = in.alpha;
@@ -164,7 +168,7 @@ void Aerodynamics::update(const AeroInputs& in, AeroState& aero) const {
     // --- Ground effect ---
     // Within 0.2*span of the ground: CL *= 1.13 (ground cushion).
     // Between 0.2 and 1.0 span: fades linearly back to 1.0.
-    const double span = geom_->span_ft;
+    const double span = geom_->span.value();
     const double agl_ft = std::fabs(groundZ_ft - z_ft);
     if (agl_ft < span * 0.2) {
         // Close to ground: full ground effect
@@ -190,17 +194,17 @@ void Aerodynamics::update(const AeroInputs& in, AeroState& aero) const {
     // and lift is reduced (goes to 0 or negative, scaled by speed ratio).
     bool stalled = false;
     double stallSpeed = 0.0;
-    if (aux_->criticalAOA > 0.0 && geom_->area_ft2 > 0.0 && alpha_deg > 10.0) {
+    if (aux_->criticalAOA.value() > 0.0 && geom_->area.value() > 0.0 && alpha_deg > 10.0) {
         // Recover mass from qsom: qsom = q*S/m  =>  m = q*S/qsom
         const double q_val = qbar;
-        const double S = geom_->area_ft2;
+        const double S = geom_->area.value();
         const double mass_from_qsom = (qsom > QSOM_FLOOR) ? (q_val * S / qsom) : 1.0;
         const double weight_lbs = mass_from_qsom * GRAVITY;
         const double ws = weight_lbs / S;  // wing loading W/S
         if (std::fabs(cl) > 1e-3) {
             stallSpeed = K_STALL * std::sqrt(ws / std::fabs(cl));
         }
-        if (vcas_kts < stallSpeed || alpha_deg > aux_->criticalAOA) {
+        if (vcas_kts < stallSpeed || alpha_deg > aux_->criticalAOA.to<f4::Degrees>().value()) {
             stalled = true;
         }
     }

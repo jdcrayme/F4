@@ -13,6 +13,10 @@
 
 #pragma once
 
+#include <f4/quantity.hpp>
+#include <f4/units.hpp>
+#include <f4/aviation.hpp>
+
 #include <array>
 #include <cstdint>
 #include <map>
@@ -135,10 +139,10 @@ struct Limiter {
 // Gear point: position in body axes (ft) + extension range.
 // ---------------------------------------------------------------------------
 struct GearPoint {
-    double x{0.0};       // body X (+forward), ft
-    double y{0.0};       // body Y (+right),  ft
-    double z{0.0};       // body Z (+down), strut extended length, ft
-    double range{0.0};   // deg, max extension angle (legacy field, unused in modern model)
+    f4::Quantity<f4::Feet> x{f4::Quantity<f4::Feet>(0)};       // body X (+forward), ft
+    f4::Quantity<f4::Feet> y{f4::Quantity<f4::Feet>(0)};       // body Y (+right),  ft
+    f4::Quantity<f4::Feet> z{f4::Quantity<f4::Feet>(0)};       // body Z (+down), strut extended length, ft
+    f4::Quantity<f4::Radians> range{f4::Quantity<f4::Radians>(0)};   // deg, max extension angle (legacy field, unused in modern model)
 };
 
 // ---------------------------------------------------------------------------
@@ -146,29 +150,29 @@ struct GearPoint {
 // Direct port of AeroDataSet::inputData[] (arfrmdat.h).
 // ---------------------------------------------------------------------------
 struct AircraftGeometry {
-    double emptyWeight_lbs{0.0};      // empty weight
-    double area_ft2{0.0};             // wing reference area
-    double internalFuel_lbs{0.0};     // internal fuel
-    double maxFuel_lbs{0.0};          // optional explicit max (else = internalFuel)
+    f4::Quantity<f4::Pounds> emptyWeight{f4::Quantity<f4::Pounds>(0)};      // empty weight
+    f4::Quantity<f4::SquareFeet> area{f4::Quantity<f4::SquareFeet>(0)};             // wing reference area
+    f4::Quantity<f4::Pounds> internalFuel{f4::Quantity<f4::Pounds>(0)};     // internal fuel
+    f4::Quantity<f4::Pounds> maxFuel{f4::Quantity<f4::Pounds>(0)};          // optional explicit max (else = internalFuel)
 
-    double aoaMax_deg{25.0};
-    double aoaMin_deg{-5.0};
-    double betaMax_deg{30.0};
-    double betaMin_deg{-30.0};
+    f4::Quantity<f4::Radians> aoaMax{f4::Quantity<f4::Degrees>(25.0).to<f4::Radians>()};
+    f4::Quantity<f4::Radians> aoaMin{f4::Quantity<f4::Degrees>(-5.0).to<f4::Radians>()};
+    f4::Quantity<f4::Radians> betaMax{f4::Quantity<f4::Degrees>(30.0).to<f4::Radians>()};
+    f4::Quantity<f4::Radians> betaMin{f4::Quantity<f4::Degrees>(-30.0).to<f4::Radians>()};
     double maxGs{9.0};
-    double maxRoll_deg{80.0};
-    double minVcas_kts{140.0};
-    double maxVcas_kts{800.0};
-    double cornerVcas_kts{330.0};
-    double thetaMax_rad{1.4};
+    f4::Quantity<f4::Radians> maxRoll{f4::Quantity<f4::Degrees>(80.0).to<f4::Radians>()};
+    f4::Quantity<f4::CASKnots> minVcas{f4::Quantity<f4::CASKnots>(140)};
+    f4::Quantity<f4::CASKnots> maxVcas{f4::Quantity<f4::CASKnots>(800)};
+    f4::Quantity<f4::CASKnots> cornerVcas{f4::Quantity<f4::CASKnots>(330)};
+    f4::Quantity<f4::Radians> thetaMax{f4::Quantity<f4::Radians>(1.4)};
 
     std::vector<GearPoint> gear;
 
-    double cgLoc_ft{0.0};             // CG location from nose, ft
-    double length_ft{0.0};            // fuselage length, ft
-    double span_ft{0.0};              // wingspan, ft
-    double fusRadius_ft{0.0};         // fuselage radius, ft
-    double tailHt_ft{0.0};            // tail height, ft
+    f4::Quantity<f4::Feet> cgLoc{f4::Quantity<f4::Feet>(0)};             // CG location from nose, ft
+    f4::Quantity<f4::Feet> length{f4::Quantity<f4::Feet>(0)};            // fuselage length, ft
+    f4::Quantity<f4::Feet> span{f4::Quantity<f4::Feet>(0)};              // wingspan, ft
+    f4::Quantity<f4::Feet> fusRadius{f4::Quantity<f4::Feet>(0)};         // fuselage radius, ft
+    f4::Quantity<f4::Feet> tailHt{f4::Quantity<f4::Feet>(0)};            // tail height, ft
 };
 
 // ---------------------------------------------------------------------------
@@ -199,17 +203,17 @@ struct AuxAero {
     // Surfaces
     bool   hasLef{false};
     bool   hasTef{false};
-    double tefMaxAngle{20.0};
-    double lefMaxAngle{20.0};
+    f4::Quantity<f4::Radians> tefMaxAngle{f4::Quantity<f4::Degrees>(20.0).to<f4::Radians>()};
+    f4::Quantity<f4::Radians> lefMaxAngle{f4::Quantity<f4::Degrees>(20.0).to<f4::Radians>()};
     double tefRate{1.0};
     double lefRate{1.0};
     double tefTakeOff{20.0};
     double lefGround{0.0};
-    double lefMaxMach{1.0};
+    f4::Quantity<f4::MachUnit> lefMaxMach{f4::Quantity<f4::MachUnit>(1.0)};
 
-    double rudderMaxAngle{30.0};
-    double aileronMaxAngle{20.0};
-    double airbrakeMaxAngle{60.0};
+    f4::Quantity<f4::Radians> rudderMaxAngle{f4::Quantity<f4::Degrees>(30.0).to<f4::Radians>()};
+    f4::Quantity<f4::Radians> aileronMaxAngle{f4::Quantity<f4::Degrees>(20.0).to<f4::Radians>()};
+    f4::Quantity<f4::Radians> airbrakeMaxAngle{f4::Quantity<f4::Degrees>(60.0).to<f4::Radians>()};
 
     // Aero factor contributions
     double CLtefFactor{0.05};
@@ -232,10 +236,10 @@ struct AuxAero {
     double rollGearGain{0.6};
     double yawGearGain{0.6};
     double pitchGearGain{0.8};
-    double landingAOA{12.5};
+    f4::Quantity<f4::Radians> landingAOA{f4::Quantity<f4::Degrees>(12.5).to<f4::Radians>()};
     double rollCouple{0.0};
     bool   elevatorRolls{false};
-    double criticalAOA{0.0};
+    f4::Quantity<f4::Radians> criticalAOA{f4::Quantity<f4::Radians>(0.0)};
 
     int    nEngines{1};
     int    typeEngine{2};              // 1 PW100, 2 PW220, 3 PW229, 4 GE110, 5 GE129

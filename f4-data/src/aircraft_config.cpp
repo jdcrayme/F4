@@ -237,37 +237,42 @@ ConfigValidationReport AircraftConfig::validate() const {
     }
 
     // --- Geometry ---
-    checkPositive(r, "geometry.emptyWeight_lbs", geometry.emptyWeight_lbs);
-    checkPositive(r, "geometry.area_ft2",        geometry.area_ft2);
-    checkPositive(r, "geometry.span_ft",         geometry.span_ft);
-    checkNonNegative(r, "geometry.internalFuel_lbs", geometry.internalFuel_lbs);
-    checkNonNegative(r, "geometry.length_ft",    geometry.length_ft);
+    checkPositive(r, "geometry.emptyWeight_lbs", geometry.emptyWeight.value());
+    checkPositive(r, "geometry.area_ft2",        geometry.area.value());
+    checkPositive(r, "geometry.span_ft",         geometry.span.value());
+    checkNonNegative(r, "geometry.internalFuel_lbs", geometry.internalFuel.value());
+    checkNonNegative(r, "geometry.length_ft",    geometry.length.value());
 
-    if (geometry.aoaMax_deg <= geometry.aoaMin_deg) {
+    const double aoaMax_deg = geometry.aoaMax.to<f4::Degrees>().value();
+    const double aoaMin_deg = geometry.aoaMin.to<f4::Degrees>().value();
+    const double betaMax_deg = geometry.betaMax.to<f4::Degrees>().value();
+    const double betaMin_deg = geometry.betaMin.to<f4::Degrees>().value();
+
+    if (aoaMax_deg <= aoaMin_deg) {
         r.issues.push_back({Sev::Error, "geometry.aoaMax_deg",
-            "aoaMax (" + std::to_string(geometry.aoaMax_deg) +
-            ") must be > aoaMin (" + std::to_string(geometry.aoaMin_deg) + ")"});
+            "aoaMax (" + std::to_string(aoaMax_deg) +
+            ") must be > aoaMin (" + std::to_string(aoaMin_deg) + ")"});
     }
-    if (geometry.aoaMax_deg > 90.0 || geometry.aoaMax_deg < 1.0) {
+    if (aoaMax_deg > 90.0 || aoaMax_deg < 1.0) {
         r.issues.push_back({Sev::Warning, "geometry.aoaMax_deg",
-            "value " + std::to_string(geometry.aoaMax_deg) +
+            "value " + std::to_string(aoaMax_deg) +
             " is outside the typical 1..90 deg range"});
     }
-    if (geometry.betaMax_deg <= geometry.betaMin_deg) {
+    if (betaMax_deg <= betaMin_deg) {
         r.issues.push_back({Sev::Error, "geometry.betaMax_deg",
             "betaMax must be > betaMin"});
     }
 
     checkPositive(r, "geometry.maxGs",          geometry.maxGs);
-    checkPositive(r, "geometry.maxRoll_deg",    geometry.maxRoll_deg);
-    checkPositive(r, "geometry.minVcas_kts",    geometry.minVcas_kts);
-    checkPositive(r, "geometry.maxVcas_kts",    geometry.maxVcas_kts);
-    checkPositive(r, "geometry.cornerVcas_kts", geometry.cornerVcas_kts);
-    if (geometry.maxVcas_kts <= geometry.minVcas_kts) {
+    checkPositive(r, "geometry.maxRoll_deg",    geometry.maxRoll.to<f4::Degrees>().value());
+    checkPositive(r, "geometry.minVcas_kts",    geometry.minVcas.value());
+    checkPositive(r, "geometry.maxVcas_kts",    geometry.maxVcas.value());
+    checkPositive(r, "geometry.cornerVcas_kts", geometry.cornerVcas.value());
+    if (geometry.maxVcas.value() <= geometry.minVcas.value()) {
         r.issues.push_back({Sev::Error, "geometry.maxVcas_kts",
             "maxVcas must be > minVcas"});
     }
-    checkFinite(r, "geometry.thetaMax_rad", geometry.thetaMax_rad);
+    checkFinite(r, "geometry.thetaMax_rad", geometry.thetaMax.value());
 
     // --- AuxAero (only fields the flight model reads) ---
     checkPositive(r, "aux.fuelFlowFactorNormal", aux.fuelFlowFactorNormal);
@@ -280,20 +285,21 @@ ConfigValidationReport AircraftConfig::validate() const {
     // criticalAOA: a value of exactly 0 is the intentional sentinel for
     // "stall model disabled" (see Aerodynamics::update guard). Negative
     // values are nonsensical and would always evaluate to "stalled" — reject.
-    if (isFinite(aux.criticalAOA) && aux.criticalAOA < 0.0) {
+    const double criticalAOA_deg = aux.criticalAOA.to<f4::Degrees>().value();
+    if (isFinite(criticalAOA_deg) && criticalAOA_deg < 0.0) {
         r.issues.push_back({Sev::Error, "aux.criticalAOA",
             "criticalAOA must be >= 0 (0 disables the stall model); got " +
-            std::to_string(aux.criticalAOA)});
+            std::to_string(criticalAOA_deg)});
     }
 
     // --- Gear points ---
     for (std::size_t i = 0; i < geometry.gear.size(); ++i) {
         const auto& g = geometry.gear[i];
         const std::string field = "geometry.gear[" + std::to_string(i) + "]";
-        checkFinite(r, (field + ".x").c_str(), g.x);
-        checkFinite(r, (field + ".y").c_str(), g.y);
-        checkFinite(r, (field + ".z").c_str(), g.z);
-        if (g.range < 0.0) {
+        checkFinite(r, (field + ".x").c_str(), g.x.value());
+        checkFinite(r, (field + ".y").c_str(), g.y.value());
+        checkFinite(r, (field + ".z").c_str(), g.z.value());
+        if (g.range.to<f4::Degrees>().value() < 0.0) {
             r.issues.push_back({Sev::Warning, field + ".range",
                 "negative strut range is unusual"});
         }

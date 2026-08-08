@@ -59,6 +59,7 @@ option(F4_BUILD_VIEWER "Build the Raylib + Dear ImGui interactive viewer (requir
 if(F4_BUILD_VIEWER)
     add_subdirectory(f4-world-viewer)  # Raylib + Dear ImGui interactive viewer
 endif()
+add_subdirectory(f4-flight-api)      # Flight model API interfaces (PilotInput, IAircraftState, IPilotInputSink)
 add_subdirectory(f4-flight-model)
 add_subdirectory(f4-recorder)        # Flight recording, replay, and LLM-friendly data export
 add_subdirectory(f4-ai)             # AI brain: SensorFusion + tactic modules (composed)

@@ -37,18 +37,18 @@ struct SyntheticFcs {
     data::AuxAero          aux;
 
     SyntheticFcs() {
-        geom.aoaMax_deg = 25.0;
-        geom.aoaMin_deg = -5.0;
+        geom.aoaMax = f4::Quantity<f4::Degrees>(25.0).to<f4::Radians>();
+        geom.aoaMin = f4::Quantity<f4::Degrees>(-5.0).to<f4::Radians>();
         geom.maxGs = 9.0;
-        geom.maxRoll_deg = 80.0;
-        geom.cornerVcas_kts = 330.0;
-        geom.minVcas_kts = 140.0;
-        geom.maxVcas_kts = 800.0;
+        geom.maxRoll = f4::Quantity<f4::Degrees>(80.0).to<f4::Radians>();
+        geom.cornerVcas = f4::Quantity<f4::CASKnots>(330.0);
+        geom.minVcas = f4::Quantity<f4::CASKnots>(140.0);
+        geom.maxVcas = f4::Quantity<f4::CASKnots>(800.0);
 
         aux.pitchGearGain = 0.8;
         aux.rollGearGain = 0.6;
         aux.yawGearGain = 0.6;
-        aux.landingAOA = 12.5;
+        aux.landingAOA = f4::Quantity<f4::Degrees>(12.5).to<f4::Radians>();
 
         // limiters is a std::array<Limiter, kLimiterCount>, already sized.
     }

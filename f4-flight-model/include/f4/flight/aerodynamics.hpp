@@ -60,7 +60,12 @@ public:
     Aerodynamics() = default;
 
     /// Construct with pointers to the config tables.
-    /// The pointers must remain valid for the lifetime of this object.
+    ///
+    /// LIFETIME CONTRACT: The pointed-to objects must outlive this Aerodynamics
+    /// instance. In practice, FlightModel stores AircraftConfig as a value member
+    /// and subsystems are reconstructed in initSubsystems(), so the contract holds.
+    /// Debug builds enforce this via assert() in both the constructor and update().
+    ///
     /// Null pointers are rejected via assert().
     Aerodynamics(const data::AeroTable* table,
                  const data::AircraftGeometry* geom,
@@ -70,6 +75,9 @@ public:
     ///
     /// Reads the current flight state from `in` and writes the computed
     /// forces and coefficients into `aero` (in/out).
+    ///
+    /// PRECONDITION: this object was constructed with non-null config pointers.
+    /// Violated precondition → assert failure in debug builds.
     void update(const AeroInputs& in, AeroState& aero) const;
 
 private:

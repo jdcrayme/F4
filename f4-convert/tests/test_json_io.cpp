@@ -22,29 +22,29 @@ AircraftConfig makeSampleConfig() {
     c.sourceRevision = "rev 1";
     c.sourceFile = "test.dat";
 
-    c.geometry.emptyWeight_lbs  = 19900.5;
-    c.geometry.area_ft2         = 300.25;
-    c.geometry.internalFuel_lbs = 7162.0;
-    c.geometry.maxFuel_lbs      = 7162.0;
-    c.geometry.aoaMax_deg       = 40.0;
-    c.geometry.aoaMin_deg       = -8.0;
-    c.geometry.betaMax_deg      = 30.0;
-    c.geometry.betaMin_deg      = -30.0;
+    c.geometry.emptyWeight  = f4::Quantity<f4::Pounds>(19900.5);
+    c.geometry.area         = f4::Quantity<f4::SquareFeet>(300.25);
+    c.geometry.internalFuel = f4::Quantity<f4::Pounds>(7162.0);
+    c.geometry.maxFuel      = f4::Quantity<f4::Pounds>(7162.0);
+    c.geometry.aoaMax       = f4::Quantity<f4::Degrees>(40.0).to<f4::Radians>();
+    c.geometry.aoaMin       = f4::Quantity<f4::Degrees>(-8.0).to<f4::Radians>();
+    c.geometry.betaMax      = f4::Quantity<f4::Degrees>(30.0).to<f4::Radians>();
+    c.geometry.betaMin      = f4::Quantity<f4::Degrees>(-30.0).to<f4::Radians>();
     c.geometry.maxGs            = 9.0;
-    c.geometry.maxRoll_deg      = 190.0;
-    c.geometry.minVcas_kts      = 250.0;
-    c.geometry.maxVcas_kts      = 850.0;
-    c.geometry.cornerVcas_kts   = 420.0;
-    c.geometry.thetaMax_rad     = 35.0 * 0.017453292519943295;
-    c.geometry.cgLoc_ft         = 27.0;
-    c.geometry.length_ft        = 47.0;
-    c.geometry.span_ft          = 32.0;
-    c.geometry.fusRadius_ft     = 2.5;
-    c.geometry.tailHt_ft        = 4.5;
+    c.geometry.maxRoll      = f4::Quantity<f4::Degrees>(190.0).to<f4::Radians>();
+    c.geometry.minVcas      = f4::Quantity<f4::CASKnots>(250.0);
+    c.geometry.maxVcas      = f4::Quantity<f4::CASKnots>(850.0);
+    c.geometry.cornerVcas   = f4::Quantity<f4::CASKnots>(420.0);
+    c.geometry.thetaMax     = f4::Quantity<f4::Radians>(35.0 * 0.017453292519943295);
+    c.geometry.cgLoc         = f4::Quantity<f4::Feet>(27.0);
+    c.geometry.length        = f4::Quantity<f4::Feet>(47.0);
+    c.geometry.span          = f4::Quantity<f4::Feet>(32.0);
+    c.geometry.fusRadius     = f4::Quantity<f4::Feet>(2.5);
+    c.geometry.tailHt        = f4::Quantity<f4::Feet>(4.5);
     c.geometry.gear = {
-        {16.5,  0.0, 5.88, 90.0},
-        {30.0, -3.88, 5.88, 90.0},
-        {30.0,  3.88, 5.88, 90.0},
+        {f4::Quantity<f4::Feet>(16.5),  f4::Quantity<f4::Feet>(0.0), f4::Quantity<f4::Feet>(5.88), f4::Quantity<f4::Degrees>(90.0).to<f4::Radians>()},
+        {f4::Quantity<f4::Feet>(30.0), f4::Quantity<f4::Feet>(-3.88), f4::Quantity<f4::Feet>(5.88), f4::Quantity<f4::Degrees>(90.0).to<f4::Radians>()},
+        {f4::Quantity<f4::Feet>(30.0),  f4::Quantity<f4::Feet>(3.88), f4::Quantity<f4::Feet>(5.88), f4::Quantity<f4::Degrees>(90.0).to<f4::Radians>()},
     };
 
     c.aux.normSpoolRate        = 3.0;
@@ -54,8 +54,8 @@ AircraftConfig makeSampleConfig() {
     c.aux.minFuelFlow          = 868.0;
     c.aux.hasLef               = true;
     c.aux.hasTef               = true;
-    c.aux.tefMaxAngle          = 21.5;
-    c.aux.lefMaxAngle          = 25.0;
+    c.aux.tefMaxAngle          = f4::Quantity<f4::Degrees>(21.5).to<f4::Radians>();
+    c.aux.lefMaxAngle          = f4::Quantity<f4::Degrees>(25.0).to<f4::Radians>();
     c.aux.pitchMomentum        = 1.3;
     c.aux.rollCouple           = -0.05;
     c.aux.elevatorRolls        = true;
@@ -189,7 +189,7 @@ TEST(JsonIoTest, ReadJsonRejectsMalformedJson) {
 TEST(JsonIoTest, DiffConfigsReportsDifferences) {
     auto a = makeSampleConfig();
     auto b = a;
-    b.geometry.emptyWeight_lbs = 99999.0;
+    b.geometry.emptyWeight = f4::Quantity<f4::Pounds>(99999.0);
     b.aux.normSpoolRate = 99.0;
     b.aero.mach[0] = -1.0;
     auto diffs = diffConfigs(a, b);
@@ -206,7 +206,7 @@ TEST(JsonIoTest, DiffConfigsReturnsEmptyForEqualConfigs) {
 TEST(JsonIoTest, DiffConfigsRespectsTolerance) {
     auto a = makeSampleConfig();
     auto b = a;
-    b.geometry.emptyWeight_lbs += 1e-9;  // tiny perturbation
+    b.geometry.emptyWeight = f4::Quantity<f4::Pounds>(b.geometry.emptyWeight.value() + 1e-9);  // tiny perturbation
     // With tolerance 1e-6, should be considered equal.
     auto diffs = diffConfigs(a, b, 1e-6);
     EXPECT_EQ(diffs.size(), 0u);

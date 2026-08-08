@@ -58,42 +58,42 @@ TEST(DatParserTest, SourceMetadataExtractedFromHeaderComments) {
 TEST(DatParserTest, GeometryFieldsParsedCorrectly) {
     auto r = loadSyntheticFixture();
     ASSERT_TRUE(r.ok);
-    EXPECT_NEAR(r.config.geometry.emptyWeight_lbs,  19900.0, 1e-9);
-    EXPECT_NEAR(r.config.geometry.area_ft2,            300.0, 1e-9);
-    EXPECT_NEAR(r.config.geometry.internalFuel_lbs,   7162.0, 1e-9);
-    // maxFuel_lbs is set to internalFuel_lbs by the parser (FF format has
+    EXPECT_NEAR(r.config.geometry.emptyWeight.value(),  19900.0, 1e-9);
+    EXPECT_NEAR(r.config.geometry.area.value(),            300.0, 1e-9);
+    EXPECT_NEAR(r.config.geometry.internalFuel.value(),   7162.0, 1e-9);
+    // maxFuel is set to internalFuel by the parser (FF format has
     // only one fuel value in the .dat file; maxFuel is derived).
-    EXPECT_NEAR(r.config.geometry.maxFuel_lbs,        r.config.geometry.internalFuel_lbs, 1e-9);
-    EXPECT_NEAR(r.config.geometry.aoaMax_deg,           40.0, 1e-9);
-    EXPECT_NEAR(r.config.geometry.aoaMin_deg,          -8.0,  1e-9);
-    EXPECT_NEAR(r.config.geometry.betaMax_deg,         30.0,  1e-9);
-    EXPECT_NEAR(r.config.geometry.betaMin_deg,        -30.0,  1e-9);
+    EXPECT_NEAR(r.config.geometry.maxFuel.value(),        r.config.geometry.internalFuel.value(), 1e-9);
+    EXPECT_NEAR(r.config.geometry.aoaMax.to<f4::Degrees>().value(),           40.0, 1e-9);
+    EXPECT_NEAR(r.config.geometry.aoaMin.to<f4::Degrees>().value(),          -8.0,  1e-9);
+    EXPECT_NEAR(r.config.geometry.betaMax.to<f4::Degrees>().value(),         30.0,  1e-9);
+    EXPECT_NEAR(r.config.geometry.betaMin.to<f4::Degrees>().value(),        -30.0,  1e-9);
     EXPECT_NEAR(r.config.geometry.maxGs,                9.0,  1e-9);
-    EXPECT_NEAR(r.config.geometry.maxRoll_deg,        190.0,  1e-9);
-    EXPECT_NEAR(r.config.geometry.minVcas_kts,        250.0,  1e-9);
-    EXPECT_NEAR(r.config.geometry.maxVcas_kts,        850.0,  1e-9);
-    EXPECT_NEAR(r.config.geometry.cornerVcas_kts,     420.0,  1e-9);
+    EXPECT_NEAR(r.config.geometry.maxRoll.to<f4::Degrees>().value(),        190.0,  1e-9);
+    EXPECT_NEAR(r.config.geometry.minVcas.value(),        250.0,  1e-9);
+    EXPECT_NEAR(r.config.geometry.maxVcas.value(),        850.0,  1e-9);
+    EXPECT_NEAR(r.config.geometry.cornerVcas.value(),     420.0,  1e-9);
     // thetaMax is 35.0 degrees in the .dat, stored as radians.
-    EXPECT_NEAR(r.config.geometry.thetaMax_rad, 35.0 * 0.017453292519943295, 1e-9);
-    EXPECT_NEAR(r.config.geometry.cgLoc_ft,           27.0, 1e-9);
-    EXPECT_NEAR(r.config.geometry.length_ft,          47.0, 1e-9);
-    EXPECT_NEAR(r.config.geometry.span_ft,            32.0, 1e-9);
-    EXPECT_NEAR(r.config.geometry.fusRadius_ft,        2.5, 1e-9);
-    EXPECT_NEAR(r.config.geometry.tailHt_ft,           4.5, 1e-9);
+    EXPECT_NEAR(r.config.geometry.thetaMax.value(), 35.0 * 0.017453292519943295, 1e-9);
+    EXPECT_NEAR(r.config.geometry.cgLoc.value(),           27.0, 1e-9);
+    EXPECT_NEAR(r.config.geometry.length.value(),          47.0, 1e-9);
+    EXPECT_NEAR(r.config.geometry.span.value(),            32.0, 1e-9);
+    EXPECT_NEAR(r.config.geometry.fusRadius.value(),        2.5, 1e-9);
+    EXPECT_NEAR(r.config.geometry.tailHt.value(),           4.5, 1e-9);
 }
 
 TEST(DatParserTest, GearPointsParsedCorrectly) {
     auto r = loadSyntheticFixture();
     ASSERT_TRUE(r.ok);
     ASSERT_EQ(r.config.geometry.gear.size(), 3u);
-    EXPECT_NEAR(r.config.geometry.gear[0].x, 16.5,  1e-9);
-    EXPECT_NEAR(r.config.geometry.gear[0].y,  0.0,  1e-9);
-    EXPECT_NEAR(r.config.geometry.gear[0].z,  5.88, 1e-9);
-    EXPECT_NEAR(r.config.geometry.gear[0].range, 90.0, 1e-9);
-    EXPECT_NEAR(r.config.geometry.gear[1].x, 30.0,  1e-9);
-    EXPECT_NEAR(r.config.geometry.gear[1].y, -3.88, 1e-9);
-    EXPECT_NEAR(r.config.geometry.gear[2].x, 30.0,  1e-9);
-    EXPECT_NEAR(r.config.geometry.gear[2].y,  3.88, 1e-9);
+    EXPECT_NEAR(r.config.geometry.gear[0].x.value(), 16.5,  1e-9);
+    EXPECT_NEAR(r.config.geometry.gear[0].y.value(),  0.0,  1e-9);
+    EXPECT_NEAR(r.config.geometry.gear[0].z.value(),  5.88, 1e-9);
+    EXPECT_NEAR(r.config.geometry.gear[0].range.to<f4::Degrees>().value(), 90.0, 1e-9);
+    EXPECT_NEAR(r.config.geometry.gear[1].x.value(), 30.0,  1e-9);
+    EXPECT_NEAR(r.config.geometry.gear[1].y.value(), -3.88, 1e-9);
+    EXPECT_NEAR(r.config.geometry.gear[2].x.value(), 30.0,  1e-9);
+    EXPECT_NEAR(r.config.geometry.gear[2].y.value(),  3.88, 1e-9);
 }
 
 // ============================================================================
@@ -277,8 +277,8 @@ TEST(DatParserTest, AuxAeroTypedFieldsPopulatedFromKeyValuePairs) {
     EXPECT_NEAR(r.config.aux.minFuelFlow,        868.0,  1e-9);
     EXPECT_EQ(r.config.aux.hasLef, true);
     EXPECT_EQ(r.config.aux.hasTef, true);
-    EXPECT_NEAR(r.config.aux.tefMaxAngle,    21.5, 1e-9);
-    EXPECT_NEAR(r.config.aux.lefMaxAngle,    25.0, 1e-9);
+    EXPECT_NEAR(r.config.aux.tefMaxAngle.to<f4::Degrees>().value(),    21.5, 1e-9);
+    EXPECT_NEAR(r.config.aux.lefMaxAngle.to<f4::Degrees>().value(),    25.0, 1e-9);
     EXPECT_NEAR(r.config.aux.pitchMomentum,   1.3, 1e-9);
     EXPECT_NEAR(r.config.aux.rollCouple,    -0.05, 1e-9);
     EXPECT_EQ(r.config.aux.elevatorRolls, true);
@@ -357,10 +357,10 @@ TEST(DatParserTest, LineCommentsAreStripped) {
     // sections will produce warnings but not errors).
     ASSERT_TRUE(r1.ok) << "with_comments failed: " << (r1.errors.empty() ? "" : r1.errors[0]);
     ASSERT_TRUE(r2.ok) << "without_comments failed: " << (r2.errors.empty() ? "" : r2.errors[0]);
-    EXPECT_NEAR(r1.config.geometry.emptyWeight_lbs,
-                r2.config.geometry.emptyWeight_lbs, 1e-9);
-    EXPECT_NEAR(r1.config.geometry.span_ft,
-                r2.config.geometry.span_ft, 1e-9);
+    EXPECT_NEAR(r1.config.geometry.emptyWeight.value(),
+                r2.config.geometry.emptyWeight.value(), 1e-9);
+    EXPECT_NEAR(r1.config.geometry.span.value(),
+                r2.config.geometry.span.value(), 1e-9);
 }
 
 TEST(DatParserTest, EmptyFileProducesError) {
@@ -373,4 +373,45 @@ TEST(DatParserTest, MissingFileProducesError) {
     EXPECT_FALSE(r.ok);
     ASSERT_FALSE(r.errors.empty());
     EXPECT_NE(r.errors[0].find("Could not open file"), std::string::npos);
+}
+
+// ============================================================================
+// Corrupt / truncated input
+// ============================================================================
+
+TEST(DatParserTest, TruncatedMidSection) {
+    // A minimal valid .dat header: empty weight, area, internal fuel,
+    // then truncate mid-table (after aoa/beta limits line but before
+    // the rest of the input section).
+    std::string truncated =
+        "19900 300 7162\n"
+        "40 -8 30 -30\n";
+    auto r = loadString(truncated, "truncated.dat");
+    EXPECT_FALSE(r.ok);
+}
+
+TEST(DatParserTest, GarbageAfterValidHeader) {
+    // Valid header followed by random garbage instead of the expected
+    // numeric sections. The parser should either report ok=false or
+    // produce warnings.
+    std::string garbage =
+        "19900 300 7162\n"
+        "40 -8 30 -30\n"
+        "9 190 250 850 420\n"
+        "13\n"
+        "0\n"
+        "27 47 32 2.5 4.5\n"
+        "GARBAGE_NOT_A_NUMBER !!!\n";
+    auto r = loadString(garbage, "garbage_after_header.dat");
+    EXPECT_TRUE(!r.ok || !r.warnings.empty());
+}
+
+TEST(DatParserTest, TooFewTokensInRow) {
+    // A row that has fewer tokens than expected for its section.
+    // The input section expects specific token counts per line;
+    // providing fewer should produce an error.
+    std::string too_few =
+        "19900\n";  // Only one token on the first data line (needs 3)
+    auto r = loadString(too_few, "too_few_tokens.dat");
+    EXPECT_TRUE(!r.ok || !r.errors.empty());
 }

@@ -19,9 +19,14 @@
 //      PrepToTakeRunway waits for runway alignment (checked in update()).
 //   5. const_cast removed. Control methods are pure (const, no transitions).
 //      Transition decisions are made in update() before calling controls.
+//
+// Phase 2 (H2): cache_aircraft_state() now reads from the IAircraftState
+// interface instead of the full AircraftState struct. The interface
+// presents position in ENU (the AI's natural frame), so the AI no longer
+// needs to do NED→ENU conversion or know about the flight model's
+// internal coordinate convention.
 
 #include "f4/ai/modules/takeoff_module.hpp"
-#include <f4/flight/aircraft_state.hpp>
 
 #include <cmath>
 
@@ -183,7 +188,7 @@ void TakeoffModule::initialize(
 // Per-tick update
 // ============================================================================
 
-AIControlOutput TakeoffModule::update(double dt, const flight::AircraftState* state)
+AIControlOutput TakeoffModule::update(double dt, const flight::IAircraftState* state)
 {
     // Cache aircraft state for control methods.
     cache_aircraft_state(state);
@@ -252,18 +257,22 @@ AIControlOutput TakeoffModule::update(double dt, const flight::AircraftState* st
 // Cache aircraft state
 // ============================================================================
 
-void TakeoffModule::cache_aircraft_state(const flight::AircraftState* state)
+void TakeoffModule::cache_aircraft_state(const flight::IAircraftState* state)
 {
     if (!state) return;
 
-    // NED (z-down) -> ENU (z-up) via the named helper.
+    // IAircraftState presents position in ENU (East-North-Up), which is
+    // the AI's natural coordinate frame. No NED→ENU conversion needed —
+    // the interface implementation (FlightModelComponent) already did it.
     current_position_ = geo::WorldPosition(
-        state->kin.x, state->kin.y, flight::ned_to_enu_altitude_ft(state->kin.z));
-    current_vcas_kts_ = state->vcas;
-    current_alt_agl_ft_ = flight::altitude_agl_ft(*state);
-    current_alt_msl_ft_ = flight::altitude_msl_ft(*state);
-    current_heading_rad_ = flight::to_radians(state->kin.psi);
-    on_ground_ = !state->gear.inAir;
+        state->position_east_ft(),
+        state->position_north_ft(),
+        state->altitude_msl_ft());
+    current_vcas_kts_ = state->vcas_kts();
+    current_alt_agl_ft_ = state->altitude_agl_ft();
+    current_alt_msl_ft_ = state->altitude_msl_ft();
+    current_heading_rad_ = state->heading_rad();
+    on_ground_ = state->on_ground();
 }
 
 // ============================================================================

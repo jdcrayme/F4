@@ -161,13 +161,13 @@ TEST(RealAircraftTest, F16FieldsParsedCorrectly) {
     EXPECT_TRUE(r.warnings.empty());
 
     // From f16.dat header comments and input-data section
-    EXPECT_NEAR(r.config.geometry.emptyWeight_lbs, 18238.0, 1e-6);
-    EXPECT_NEAR(r.config.geometry.area_ft2,           300.0, 1e-6);
-    EXPECT_NEAR(r.config.geometry.internalFuel_lbs,  7162.0, 1e-6);
-    EXPECT_NEAR(r.config.geometry.aoaMax_deg,          35.0, 1e-6);
-    EXPECT_NEAR(r.config.geometry.aoaMin_deg,         -15.0, 1e-6);
+    EXPECT_NEAR(r.config.geometry.emptyWeight.value(), 18238.0, 1e-6);
+    EXPECT_NEAR(r.config.geometry.area.value(),           300.0, 1e-6);
+    EXPECT_NEAR(r.config.geometry.internalFuel.value(),  7162.0, 1e-6);
+    EXPECT_NEAR(r.config.geometry.aoaMax.to<f4::Degrees>().value(),          35.0, 1e-6);
+    EXPECT_NEAR(r.config.geometry.aoaMin.to<f4::Degrees>().value(),         -15.0, 1e-6);
     EXPECT_NEAR(r.config.geometry.maxGs,                9.0, 1e-6);
-    EXPECT_NEAR(r.config.geometry.maxRoll_deg,        190.0, 1e-6);
+    EXPECT_NEAR(r.config.geometry.maxRoll.to<f4::Degrees>().value(),        190.0, 1e-6);
 
     // Aero table dimensions
     EXPECT_EQ(r.config.aero.mach.size(),      7u);

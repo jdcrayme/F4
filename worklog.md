@@ -1597,3 +1597,60 @@ Stage Summary:
 - New test file: f4-entities/tests/test_behavioral_component.cpp (19 tests).
 - Patch file: /home/z/my-project/download/phase-a1-behavioral-component.patch
 - Next: A.2 will add FlightModelComponent + BrainComponent wrapping FlightModel and TakeoffModule, using the on_attached() back-ref to resolve the FM pointer lazily.
+
+---
+Task ID: Phase2
+Agent: main (orchestrator)
+Task: Phase 2 — Harden the Type System: Decouple AI ↔ Flight Model (H1, H2)
+
+Work Log:
+- Analyzed coupling between BrainComponent and FlightModelComponent:
+  * BrainComponent includes <f4/flight/flight_model_component.hpp> directly
+  * Resolves FlightModelComponent via owner_->get<FlightModelComponent>()
+  * Reads fm_comp->state() returning const AircraftState& (35+ fields)
+  * Writes fm_comp->pending_input() = ... directly
+  * TakeoffModule::update() takes const AircraftState* but only reads 7 fields
+  * cache_aircraft_state() does manual NED→ENU conversion internally
+- Designed IAircraftState interface (thin read-only, ENU frame, 7 virtual methods):
+  * position_east_ft(), position_north_ft() — ENU position
+  * altitude_msl_ft(), altitude_agl_ft() — altitude helpers
+  * vcas_kts() — calibrated airspeed
+  * heading_rad() — heading in radians
+  * on_ground() — ground contact flag
+- Designed IPilotInputSink interface (write side):
+  * set_pending_input(const PilotInput&) — replaces direct pending_input() assignment
+- Created new interface headers:
+  * f4-flight-model/include/f4/flight/i_aircraft_state.hpp
+  * f4-flight-model/include/f4/flight/i_pilot_input_sink.hpp
+- Made FlightModelComponent implement both interfaces:
+  * Added IAircraftState and IPilotInputSink as base classes
+  * Implemented all 7 IAircraftState methods with NED→ENU conversion
+  * Implemented set_pending_input() delegating to pending_input_ assignment
+  * Kept existing pending_input() accessor for backward compatibility
+- Refactored TakeoffModule (H2):
+  * Changed update() signature from (double, const AircraftState*) to (double, const IAircraftState*)
+  * Changed cache_aircraft_state() to read from IAircraftState interface
+  * Removed #include <f4/flight/aircraft_state.hpp> from takeoff_module.cpp
+  * NED→ENU conversion now happens in FlightModelComponent's IAircraftState implementation
+- Refactored BrainComponent (H1):
+  * Changed module_.update() call to pass FlightModelComponent as IAircraftState*
+  * Changed fm_comp->pending_input() = ... to fm_comp->set_pending_input(...)
+  * BrainComponent now accesses FM state through interface, not internals
+- Updated test_takeoff_module.cpp:
+  * Created TestAircraftState adapter implementing IAircraftState
+  * All tests now use ENU positions directly (no NED conversion in test code)
+  * Added NullStateProducesIdleControls and InterfacePositionMatchesWorldPosition tests
+- Added interface tests to test_flight_model_component.cpp:
+  * IAircraftStateImplementsPositionEast — verifies ENU position from NED internals
+  * IAircraftStateOnGround / IAircraftStateInAir — verifies ground state
+  * SetPendingInputViaInterface — verifies IPilotInputSink works
+  * SetPendingInputMatchesDirectWrite — verifies equivalence with old API
+- Added interface headers to f4_flight.hpp umbrella
+- Build: 1171 tests pass (7 new), 2 skipped (locale-dependent)
+
+Stage Summary:
+- H1 (Decouple BrainComponent from FlightModelComponent): BrainComponent now accesses FM through IAircraftState/IPilotInputSink interfaces instead of directly calling state() and pending_input()
+- H2 (Introduce IAircraftState interface): TakeoffModule fully decoupled from AircraftState — takes const IAircraftState* with only 7 fields in ENU frame
+- Key architectural win: AI modules no longer need to know about NED coordinates or AircraftState internals. The interface implementation in FlightModelComponent handles the conversion.
+- Remaining: BrainComponent still resolves FlightModelComponent by concrete type (for get<>()). Full link-level decoupling (removing f4-flight-model from f4-ai CMake deps) requires interface-based entity lookup or host wiring — noted as Phase 2+ follow-up.
+- Patch file: /home/z/my-project/download/phase2.patch (2991 lines, applies cleanly)

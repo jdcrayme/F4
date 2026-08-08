@@ -6,20 +6,10 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 # ---------------------------------------------------------------------------
-# Fetch nlohmann/json single-header (used for JSON serialization).
-# This is the standard C++ JSON library and eliminates the entire class of
-# escaping/parsing bugs that F4Flight's hand-rolled writer had.
-# ---------------------------------------------------------------------------
-include(FetchContent)
-FetchContent_Declare(
-    nlohmann_json
-    GIT_REPOSITORY https://github.com/nlohmann/json.git
-    GIT_TAG v3.11.3
-)
-FetchContent_MakeAvailable(nlohmann_json)
-
-# ---------------------------------------------------------------------------
 # f4-convert library (parser + JSON I/O).
+#
+# nlohmann/json is now fetched in cmake/f4_deps.cmake (at the root level)
+# so that f4-data can link it too, despite being configured before f4-convert.
 #
 # Depends on f4-data for the AircraftConfig struct AND for the canonical
 # JSON writer/reader (f4-data::writeConfig / loadConfig). f4-convert's

@@ -39,6 +39,9 @@ EquationsOfMotion::EquationsOfMotion(const data::AircraftGeometry* geom,
 // ---------------------------------------------------------------------------
 void EquationsOfMotion::update(double dt, const PilotInput& input,
                                 AircraftState& state) const {
+    assert(geom_ != nullptr && "EquationsOfMotion: geom must not be null");
+    assert(aux_  != nullptr && "EquationsOfMotion: aux must not be null");
+
     KinematicState& k = state.kin;
     AeroState& a = state.aero;
     FcsState& f = state.fcs;

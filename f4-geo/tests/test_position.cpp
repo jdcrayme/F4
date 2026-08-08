@@ -74,10 +74,11 @@ TEST(Position, NoImplicitConversionBetweenFrames) {
     //   WorldPosition w;
     //   LatLonAlt lla = w;            // no implicit conversion
     //   ECEFPosition e = lla;          // no implicit conversion
+    //   NEDPosition n = w;             // no implicit conversion
     //   void f(LatLonAlt);
     //   f(w);                          // no implicit conversion
     //
-    // Every crossing must be a named to_lla()/to_ecef()/to_world() call.
+    // Every crossing must be a named to_lla()/to_ecef()/to_world()/to_ned()/to_enu() call.
     //
     // Additionally, the 3-arg ctors are explicit — so this also fails:
     //
@@ -88,4 +89,88 @@ TEST(Position, NoImplicitConversionBetweenFrames) {
     // Callers must use either `LatLonAlt{...}` (direct-init, allowed) or
     // the typed factory `LatLonAlt::from_degrees(...)`.
     SUCCEED();
+}
+
+// ============================================================================
+// NEDPosition — North-East-Down frame
+// ============================================================================
+
+TEST(NEDPosition, DefaultConstructsToZero) {
+    NEDPosition p;
+    EXPECT_EQ(p, NEDPosition(0.0, 0.0, 0.0));
+}
+
+TEST(NEDPosition, ComparisonIsValueBased) {
+    EXPECT_EQ(NEDPosition(1, 2, 3), NEDPosition(1, 2, 3));
+    EXPECT_NE(NEDPosition(1, 2, 3), NEDPosition(1, 2, 4));
+}
+
+TEST(NEDPosition, OffsetArithmetic) {
+    NEDPosition a(1000.0, 2000.0, -5000.0);
+    NEDPosition b(   0.0,  500.0,   -50.0);
+    EXPECT_EQ(a + b, NEDPosition(1000.0, 2500.0, -5050.0));
+    EXPECT_EQ(a - b, NEDPosition(1000.0, 1500.0, -4950.0));
+    a += b;
+    EXPECT_EQ(a, NEDPosition(1000.0, 2500.0, -5050.0));
+}
+
+TEST(NEDPosition, Distance3D) {
+    NEDPosition a(0, 0, 0);
+    NEDPosition b(3.0, 4.0, 12.0);   // 3-4-12 -> 13
+    EXPECT_DOUBLE_EQ(a.distance_to(b), 13.0);
+}
+
+TEST(NEDPosition, AltitudeIsNegativeZ) {
+    NEDPosition p(0, 0, -10000.0);  // 10000 ft up
+    EXPECT_DOUBLE_EQ(p.altitude_ft(), 10000.0);
+    NEDPosition ground(0, 0, 0.0);
+    EXPECT_DOUBLE_EQ(ground.altitude_ft(), 0.0);
+}
+
+// ============================================================================
+// Frame crossing: ENU ↔ NED
+// ============================================================================
+
+TEST(FrameCrossing, EnuToNedToEnuRoundTrip) {
+    WorldPosition enu(100.0, 200.0, 5000.0);  // E=100, N=200, U=5000
+    NEDPosition ned = to_ned(enu);
+    // NED: x=N=200, y=E=100, z=D=-5000
+    EXPECT_DOUBLE_EQ(ned.x, 200.0);
+    EXPECT_DOUBLE_EQ(ned.y, 100.0);
+    EXPECT_DOUBLE_EQ(ned.z, -5000.0);
+
+    WorldPosition roundtrip = to_enu(ned);
+    EXPECT_DOUBLE_EQ(roundtrip.x, 100.0);
+    EXPECT_DOUBLE_EQ(roundtrip.y, 200.0);
+    EXPECT_DOUBLE_EQ(roundtrip.z, 5000.0);
+}
+
+TEST(FrameCrossing, NedToEnuToNedRoundTrip) {
+    NEDPosition ned(300.0, 400.0, -10000.0);  // N=300, E=400, D=-10000
+    WorldPosition enu = to_enu(ned);
+    // ENU: x=E=400, y=N=300, z=U=10000
+    EXPECT_DOUBLE_EQ(enu.x, 400.0);
+    EXPECT_DOUBLE_EQ(enu.y, 300.0);
+    EXPECT_DOUBLE_EQ(enu.z, 10000.0);
+
+    NEDPosition roundtrip = to_ned(enu);
+    EXPECT_DOUBLE_EQ(roundtrip.x, 300.0);
+    EXPECT_DOUBLE_EQ(roundtrip.y, 400.0);
+    EXPECT_DOUBLE_EQ(roundtrip.z, -10000.0);
+}
+
+TEST(FrameCrossing, AltitudePreservedAcrossFrames) {
+    WorldPosition enu(0, 0, 25000.0);  // 25000 ft up in ENU
+    NEDPosition ned = to_ned(enu);
+    EXPECT_DOUBLE_EQ(ned.altitude_ft(), 25000.0);
+}
+
+TEST(FrameCrossing, ZeroIsOriginInBothFrames) {
+    WorldPosition enu_zero;
+    NEDPosition ned_zero = to_ned(enu_zero);
+    EXPECT_EQ(ned_zero, NEDPosition(0, 0, 0));
+
+    NEDPosition ned_origin;
+    WorldPosition enu_origin = to_enu(ned_origin);
+    EXPECT_EQ(enu_origin, WorldPosition(0, 0, 0));
 }
