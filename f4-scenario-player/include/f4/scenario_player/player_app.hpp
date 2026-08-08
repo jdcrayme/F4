@@ -1,0 +1,55 @@
+// f4-scenario-player/include/f4/scenario_player/player_app.hpp
+//
+// PlayerApp — top-level orchestrator for the f4-scenario-player host.
+//
+// Owns the Simulation (EntityWorld + MessageBus + ModelDatabase + tick
+// loop) and the Raylib renderer. The split mirrors f4-models-viewer:
+//   - f4-simulation::Simulation  (library, no rendering)
+//   - f4::scenario_player::PlayerApp (executable + Raylib)
+//
+// Lifecycle:
+//   PlayerApp app;
+//   app.load_scenario("scenarios/kunsan_parking.json");
+//   app.run();          // opens a window and runs the sim+render loop
+//
+// See Docs/SCENARIO_PLAYER_PLAN.md for the full plan.
+
+#pragma once
+
+#include <filesystem>
+#include <memory>
+
+namespace f4::scenario_player {
+
+class PlayerApp {
+public:
+    PlayerApp();
+    ~PlayerApp();
+
+    PlayerApp(const PlayerApp&) = delete;
+    PlayerApp& operator=(const PlayerApp&) = delete;
+    PlayerApp(PlayerApp&&) = delete;
+    PlayerApp& operator=(PlayerApp&&) = delete;
+
+    /// Load a scenario from a JSON file. Throws on parse / asset load
+    /// failure. Resolves asset paths (KoreaObj.HDR/.LOD/.TEX, f16.json,
+    /// trace.json) relative to the scenario file's parent directory.
+    void load_scenario(const std::filesystem::path& json_path);
+
+    /// Set the initial window size. Must be called before run().
+    void set_window_size(int width, int height) noexcept;
+
+    /// Schedule a single screenshot after `delay_sec` (for headless
+    /// smoke tests). The app exits after the screenshot is taken.
+    void schedule_screenshot(float delay_sec,
+                             const std::filesystem::path& path);
+
+    /// Run the render + sim loop until window close. Blocks.
+    void run();
+
+private:
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+};
+
+} // namespace f4::scenario_player

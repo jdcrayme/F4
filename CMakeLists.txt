@@ -63,6 +63,11 @@ add_subdirectory(f4-flight-api)      # Flight model API interfaces (PilotInput, 
 add_subdirectory(f4-flight-model)
 add_subdirectory(f4-recorder)        # Flight recording, replay, and LLM-friendly data export
 add_subdirectory(f4-ai)             # AI brain: SensorFusion + tactic modules (composed)
+add_subdirectory(f4-simulation)     # Orchestration: EntityWorld + MessageBus + ModelDatabase + tick loop (no rendering)
+option(F4_BUILD_SCENARIO_PLAYER "Build the f4-scenario-player (requires X11 + OpenGL dev headers)" ON)
+if(F4_BUILD_SCENARIO_PLAYER)
+    add_subdirectory(f4-scenario-player)  # Host executable: loads a scenario, runs the sim, renders with Raylib
+endif()
 
 # ============================================================================
 # Convenience targets — one-command world generation

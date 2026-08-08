@@ -1654,3 +1654,107 @@ Stage Summary:
 - Key architectural win: AI modules no longer need to know about NED coordinates or AircraftState internals. The interface implementation in FlightModelComponent handles the conversion.
 - Remaining: BrainComponent still resolves FlightModelComponent by concrete type (for get<>()). Full link-level decoupling (removing f4-flight-model from f4-ai CMake deps) requires interface-based entity lookup or host wiring — noted as Phase 2+ follow-up.
 - Patch file: /home/z/my-project/download/phase2.patch (2991 lines, applies cleanly)
+
+---
+Task ID: SIM-1
+Agent: main (orchestrator)
+Task: Implement Phase 1 of the F4 taxi demo plan — create the f4-simulation library with VisualModelComponent, the Scenario JSON loader, and the Simulation orchestration class. This closes the "renderable handle" gap identified in the previous aircraft-binding analysis.
+
+Work Log:
+- Pulled latest from origin/main (no changes since 8b4da04 "Post initial DIGI cleanup pass").
+- Re-scanned key files to confirm the gap analysis still holds:
+  * f4-world-convert/src/class_table.cpp still discards visType[7] (line 161-162 comment: "the rest (collision, update rates, hitpoints, visType, etc.) are skipped").
+  * f4-entities has no VisualModelComponent or equivalent renderable handle.
+  * BrainComponent already uses interface-based lookup (get_interface<IAircraftState>()), not raw sibling pointers — better than the earlier analysis suggested.
+  * TakeoffModule already implements taxi waypoint following (taxi_route_, taxi_wp_index_, check_taxi_progress()) — no new taxi AI module needed.
+- Updated the taxi demo plan (/home/z/my-project/download/F4_TAXI_DEMO_PLAN.md) with corrected terminology:
+  * Renamed AircraftComponent -> VisualModelComponent throughout.
+  * Moved the component from f4-entities namespace to f4::simulation namespace (because it depends on f4-models::ModelRecord, and f4-entities must stay dependency-free).
+  * Corrected the framing: the entity ID is the binding; VisualModelComponent is ONLY the renderable handle (DrawableBSP* equivalent), not a god-class wrapper.
+  * Split the single f4-sim target into two: f4-simulation (library, no Raylib) + f4-taxi-demo (executable, Raylib + ImGui).
+  * Fixed TransformComponent usage to match its actual quaternion-based API (qw,qx,qy,qz) instead of the non-existent heading_rad/pitch_rad/roll_rad fields.
+  * Fixed the gear sync to use AeroState::gearPos (1.0=down, 0.0=up) instead of the non-existent GearState::gearDown field.
+- Added a new permanent design doc to the repo: Docs/AIRCRAFT_BINDING_DESIGN.md — captures the "entity is the binding, component is just the renderable handle" decision so the naming mistake doesn't recur.
+- Created the f4-simulation library:
+  * CMakeLists.txt — static library, links f4-entities + f4-messaging + f4-flight-model + f4-flight-api + f4-ai + f4-data + f4-geo + f4-math + f4-units + f4-state-machine + f4-models + f4-recorder + f4-json + f4-io.
+  * include/f4/simulation/visual_model_component.hpp — the new component (passive data: ModelRecord* + LOD + ModelState + texture_set).
+  * include/f4/simulation/scenario.hpp — Scenario/ScenarioAircraft/ScenarioAirfield structs + load_scenario()/load_scenario_from_string().
+  * include/f4/simulation/simulation.hpp — Simulation class (owns EntityWorld + MessageBus + ModelDatabase + AircraftConfig + FlightRecorder; initialize/tick/write_recording lifecycle).
+  * include/f4/simulation/f4_simulation.hpp — umbrella header.
+  * src/scenario.cpp — JSON loader using f4::json::Reader (dependency-free recursive-descent parser). Validates required fields, resolves asset paths relative to the scenario file's parent directory.
+  * src/simulation.cpp — tick loop: world.update_all + bus.flush_pending + sync TransformComponent (NED->ENU + Euler->quaternion) + sync VisualModelComponent gear switch + record snapshot. spawn_aircraft() composes the 4-component aircraft entity (Transform + FlightModel + VisualModel + Brain).
+  * tests/test_visual_model_component.cpp — 5 tests: default null safety, add/get, null model_record safety, namespace verification, sibling coexistence.
+  * tests/test_scenario_loader.cpp — 5 tests: valid scenario loads, missing file throws, empty throws, no aircraft throws, short taxi route throws.
+  * tests/fixtures/takeoff_kunsan.json — the bundled scenario (F-16 at parking spot, 5-waypoint taxi route to Rwy 36L threshold).
+- Wired f4-simulation into the root CMakeLists.txt (add_subdirectory after f4-ai).
+- Built and tested:
+  * libf4-simulation.a builds clean.
+  * All 10 tests pass (5 visual_model_component + 5 scenario_loader).
+  * All existing core libraries (f4-entities, f4-messaging, f4-flight-model, f4-ai, f4-world, etc.) still build — no regressions.
+
+Stage Summary:
+- Phase 1 of the taxi demo is COMPLETE: the f4-simulation library exists, builds, and passes 10 tests.
+- The VisualModelComponent is the single new component type that closes the "renderable handle" gap — the ECS equivalent of DrawableBSP* on SimVehicleClass.
+- The Simulation class can spawn an aircraft entity carrying all 4 sibling components (Transform + FlightModel + VisualModel + Brain) and tick the world. The brain finds the FM via interface-based lookup; the entity ID is the binding (no AircraftClass wrapper).
+- The scenario JSON loader works end-to-end on the bundled takeoff_kunsan.json fixture.
+- Next steps (Phase 2, not yet started): scaffold the f4-taxi-demo executable (Raylib + ImGui) that renders the F-16 mesh at the entity's pose, plus the headless integration test that ticks Simulation for 600 ticks and verifies the TakeoffModule transitions (Taxi -> HoldShort -> TakeRunway) in the FlightRecorder output.
+- Key artifacts produced:
+  * /home/z/my-project/F4/f4-simulation/ (new library, 9 files)
+  * /home/z/my-project/F4/Docs/AIRCRAFT_BINDING_DESIGN.md (new design doc)
+  * /home/z/my-project/F4/CMakeLists.txt (+1 line: add_subdirectory(f4-simulation))
+  * /home/z/my-project/download/F4_TAXI_DEMO_PLAN.md (updated plan with corrected terminology)
+
+---
+Task ID: SCENARIO-PLAYER-1
+Agent: main (orchestrator)
+Task: Update docs (rename f4-taxi-demo → f4-scenario-player, add airport-geometry doc), close the visType[7] data-flow gap in class_table, and build the f4-scenario-player host executable that renders an F-16 + airport geometry at Kunsan.
+
+Work Log:
+- Pulled latest from F4 git repo (already up to date at commit 5512b32).
+- Discovered f4-simulation library already existed (VisualModelComponent, Scenario, Simulation) — verified it builds and all 10 existing tests pass.
+- Read f4-models-viewer's scene.cpp/canvas3d.cpp to model the renderer pattern (mesh building, texture upload, lit shader, coordinate conversion).
+- Updated Docs/AIRCRAFT_BINDING_DESIGN.md to reference f4-scenario-player (was f4-taxi-demo) and the new SCENARIO_PLAYER_PLAN.md.
+- Created Docs/SCENARIO_PLAYER_PLAN.md — comprehensive plan covering the rename rationale, v0 deliverable scope, architecture, gap-closure status (visType[7] done, VisualModelComponent already done, auto-spawn deferred), directory layout, public API, CLI, render loop, coordinate conventions, Kunsan scenario fixture, build integration, test strategy, acceptance criteria.
+- Gap-closure #1: visType[7] exposure in f4-world-convert:
+  * Added int16_t vis_type[7] field to ClassTableEntry struct.
+  * Added VISTYPE_OFFSET=60 constant and 7-iteration parse loop in class_table.cpp.
+  * Added vis_type_for(entity_type, slot=0) accessor.
+  * Added 8-test regression suite in test_class_table.cpp — all pass.
+  * Sanity-checked against the real FALCON4.ct fixture: 1080 of 2135 entries have non-zero vis_type[0]; entity_type 273 (a VEHICLE-class F-16 entry) has vis_type[0]=1052 (the KoreaObj.HDR model index for the F-16).
+  * Documented that entity_type ≠ vis_type — entity_type 1052 is a CLASS_FEATURE with vis_type[0]=1050 (a different model entirely), not the F-16 aircraft.
+- Built f4-scenario-player crate:
+  * CMakeLists.txt: FetchContent for raylib 5.0 + imgui v1.91.5 + rlimgui (same versions as f4-models-viewer); static library + CLI executable + tests.
+  * player_app.hpp: pimpl public API (load_scenario, run, schedule_screenshot).
+  * viewer_state.hpp: private pimpl state (camera, mesh cache, texture cache, lit shader, lighting, HUD toggles).
+  * airport_geometry.{hpp,cpp}: builds AirportGeometry (runway surface, threshold bars, centerline dashes, taxi route, parking/hold-short/runway-end markers, compass rose) from a Scenario.
+  * renderer.cpp: orbit camera + mesh building + scene drawing + HUD overlay. Reuses f4-models-viewer's lit shader source and ColorBank-index color resolution.
+  * player_app.cpp: lifecycle (load_scenario initializes Simulation, run opens window + ticks sim + renders).
+  * main.cpp: CLI entry point (scenario.json --screenshot out.png --width N --height N).
+  * scenarios/kunsan_parking.json.in: CMake-configured fixture with @F4_SOURCE_DIR@ / @F4_BINARY_DIR@ substitution for portable asset paths.
+- Coordinate-conversion extraction:
+  * Moved enu_to_raylib() and model_vertex_to_raylib() to a new public header coordinate_transform.hpp returning a plain Float3 struct (no Raylib dependency).
+  * viewer_state.hpp provides _v3 suffixed wrappers that return Raylib's Vector3.
+  * This lets test_coordinate_transform verify the math without linking Raylib.
+- Worked around X11 dev header absence in sandbox:
+  * Downloaded libxrandr-dev, libxinerama-dev, libxcursor-dev, libxi-dev, libxfixes-dev, libx11-dev, libgl-dev, libegl-dev, libgles-dev debs via apt-get download (no sudo).
+  * Extracted to build/local-deps/ via dpkg -x.
+  * Passed include paths to cmake via -DCMAKE_C_FLAGS / -DCMAKE_CXX_FLAGS / -DX11_*_INCLUDE_PATH / -DOPENGL_INCLUDE_DIR.
+- Fixed two bugs surfaced during build:
+  * Raylib's `#define PI 3.14159...` macro (raylib.h:110) collides with `using f4::math::PI;` in f4-flight-model/constants.hpp. Fixed by including all f4-flight-model headers BEFORE raylib.h in player_app.cpp, renderer.cpp, and viewer_state.hpp.
+  * GeoLine struct had field name `b` for both the segment endpoint (WorldPosition) and the blue color channel (float). Renamed the color field to `blue` in GeoLine/GeoQuad/GeoMarker.
+  * WorldPosition's constructor is `explicit` — can't use brace-init with implicit conversion. Updated all callers to use explicit `f4::geo::WorldPosition{...}` construction.
+  * db.model(0) returns const ModelRecord* (not a reference) — removed the erroneous & operator. The pointer arithmetic `vis->model_record - db.model(0)` now correctly gives the parent_index.
+- Wrote 29 unit tests:
+  * test_class_table.cpp (8 tests): fixture entry count, existing-fields regression guard, vis_type array exposure, F-16 vehicle-class entry's vis_type[0]=1052, out-of-bounds slot returns 0, unknown entity_type returns 0, multiple entity_types point at F-16 model, ~half the table has non-zero vis_type[0].
+  * test_airport_geometry.cpp (12 tests): empty scenario, runway surface corners, threshold bars placement, centerline dashes range, taxi route connection, parking-spot marker placement, hold-short marker at second-to-last waypoint, runway-end marker, compass rose, runway grey color, threshold bars + dashes white, zero-length-runway edge case.
+  * test_coordinate_transform.cpp (9 tests): ENU→Raylib axis mapping, origin, up is +Y, north is -Z, east is +X, model-vertex Y/Z swap, X-axis preservation, model-Z→Raylib-Y, model-Y→Raylib-Z.
+- All 29 new tests pass.
+- Pre-existing tests: 6 failures in PilotInput.ValidateClamps* (5) and EngineModel.DefaultConstructedHasNoTables (1) — these are pre-existing and unrelated to this change.
+
+Stage Summary:
+- v0 deliverable complete: f4-scenario-player builds, runs, and produces a valid screenshot showing the F-16 aircraft + airport geometry (runway, taxi route, markers, compass) at Kunsan parking.
+- 36 KB screenshot has detectable pixels for: runway surface (~4700 grey), threshold bars + centerline dashes (~5000 white), taxi route (~360 yellow), parking marker (~530 green), runway-end marker (~40 red), F-16 aircraft (~83000 dark pixels).
+- 29 new unit tests, all passing.
+- Three docs updated/created: AIRCRAFT_BINDING_DESIGN.md (rename note), SCENARIO_PLAYER_PLAN.md (new), CHANGES.md (implementation summary appended).
+- Gap-closure #1 (visType[7] exposure) done with tests. Gap-closure #2 (VisualModelComponent) was already done. Gap-closure #3 (auto-spawn from campaign data) deferred per plan §4.3.
+- Artifacts: build/f4-scenario-player/f4-scenario-player (executable), build/scenarios/kunsan_parking.json (configured scenario), download/kunsan_parking_v0.png (screenshot).

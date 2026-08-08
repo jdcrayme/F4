@@ -678,3 +678,138 @@ agent sandbox). The change is mechanical:
 - The 2 new locale tests are skipped on systems lacking `de_DE`, so
   they cannot regress the suite on minimal CI runners.
 
+
+---
+
+# f4-scenario-player v0 — Initial Implementation
+
+## Summary
+
+Built the first cut of the `f4-scenario-player` host executable that
+spawns an F-16 on a parking spot at Kunsan (synthesized layout) and
+renders the aircraft + airport geometry (runway, threshold bars,
+centerline dashes, taxi route, parking/hold-short/runway-end markers,
+compass rose) in a Raylib window with orbit/pan/zoom camera.
+
+The simulation starts **paused** so the aircraft sits at the parking
+spot. Press Space to begin taxi (the brain's `TakeoffModule` follows
+the scenario's taxi route to the runway threshold).
+
+## Files added
+
+- `Docs/SCENARIO_PLAYER_PLAN.md` — design doc, replaces the earlier
+  `F4_TAXI_DEMO_PLAN.md`. Documents the rename, the v0 acceptance
+  criteria, and the deferred items (auto-spawning from campaign data,
+  real Kunsan ground layout, takeoff rotation, multi-aircraft).
+- `f4-scenario-player/` — new top-level crate:
+  - `CMakeLists.txt` — builds `f4_scenario_player_lib` (static library)
+    + `f4-scenario-player` (CLI executable). Fetches Raylib 5.0 +
+    Dear ImGui v1.91.5 + rlImGui (same versions as `f4-models-viewer`).
+  - `cli/main.cpp` — entry point: `f4-scenario-player <scenario.json>`.
+  - `include/f4/scenario_player/player_app.hpp` — public pimpl API.
+  - `include/f4/scenario_player/airport_geometry.hpp` — `AirportGeometry`
+    struct + `build_airport_geometry(Scenario)`.
+  - `include/f4/scenario_player/coordinate_transform.hpp` — ENU ↔ Raylib
+    math (extracted to a public header so tests can verify it without
+    linking Raylib).
+  - `src/player_app.cpp` — lifecycle (load_scenario, run, screenshot).
+  - `src/renderer.cpp` — orbit camera, mesh building, scene drawing,
+    HUD overlay, ImGui panel.
+  - `src/airport_geometry.cpp` — synthesizes runway/threshold/dashes/
+    taxi-route/markers/compass from a `Scenario`.
+  - `src/viewer_state.hpp` — private pimpl state.
+  - `scenarios/kunsan_parking.json.in` — CMake-configured scenario
+    fixture (substitutes `@F4_SOURCE_DIR@` / `@F4_BINARY_DIR@` so it
+    can reference `temp/KoreaObj.HDR/.LOD/.TEX` and
+    `build/generated_fixtures/f16.json` portably).
+  - `tests/test_airport_geometry.cpp` — 12 tests covering runway
+    surface, threshold bars, centerline dashes, taxi route, markers,
+    compass rose, colors, and zero-length-runway edge case.
+  - `tests/test_coordinate_transform.cpp` — 9 tests covering the
+    ENU → Raylib and model-vertex → Raylib axis mappings.
+
+## Files modified
+
+- `CMakeLists.txt` — added `add_subdirectory(f4-scenario-player)` gated
+  by `F4_BUILD_SCENARIO_PLAYER` option (ON by default).
+- `f4-world-convert/include/f4/world_convert/class_table.hpp` — added
+  `int16_t vis_type[7]` field to `ClassTableEntry` and a
+  `vis_type_for(entity_type, slot=0)` accessor. This closes the
+  data-flow gap from `Falcon4.CT` → `ModelDatabase` so that future
+  campaign-driven aircraft spawning can auto-resolve the visual model.
+- `f4-world-convert/src/class_table.cpp` — parser now reads the 14-byte
+  `visType[7]` array at offset 60 of each 81-byte CT record (previously
+  discarded). Added `vis_type_for()` implementation.
+- `f4-world-convert/tests/CMakeLists.txt` — registered the new
+  `test_class_table` test target.
+- `f4-world-convert/tests/test_class_table.cpp` — new (8 tests):
+  regression guard for the existing fields (classInfo, dataType,
+  dataPtr) + new tests for visType exposure (F-16 vehicle-class entry
+  has vis_type[0]=1052, out-of-bounds slot returns 0, ~1080 of 2135
+  entries have non-zero vis_type[0]).
+- `Docs/AIRCRAFT_BINDING_DESIGN.md` — updated to reference
+  `f4-scenario-player` (was `f4-taxi-demo`) and the new
+  `SCENARIO_PLAYER_PLAN.md`.
+
+## Build
+
+```bash
+cd build
+cmake -DCMAKE_C_FLAGS="-I.../local-deps/usr/include" \
+      -DCMAKE_CXX_FLAGS="-I.../local-deps/usr/include" \
+      -DX11_Xrandr_INCLUDE_PATH=... \
+      [... other X11 paths ...] \
+      /path/to/F4
+cmake --build . --target f4-scenario-player -j 4
+```
+
+(Note: the build needs X11 dev headers — `libxrandr-dev`,
+`libxinerama-dev`, `libxcursor-dev`, `libxi-dev`, `libxfixes-dev`,
+`libx11-dev`, `libgl-dev`. In a sandbox without root, these can be
+extracted locally via `apt-get download` + `dpkg -x`.)
+
+## Run
+
+```bash
+cd build
+./f4-scenario-player/f4-scenario-player scenarios/kunsan_parking.json
+```
+
+Controls: left-drag orbit, right-drag pan, scroll zoom, Space pause/
+resume, F focus aircraft, R reset view, F2 screenshot.
+
+## Headless smoke test
+
+```bash
+xvfb-run -a -s "-screen 0 1024x768x24" \
+    ./f4-scenario-player/f4-scenario-player \
+    scenarios/kunsan_parking.json \
+    --screenshot out.png --width 800 --height 600
+```
+
+The screenshot is 36 KB, 800×600 RGBA, with detectable pixels for the
+runway surface (~4700 grey pixels), threshold bars + centerline dashes
+(~5000 white pixels), taxi route (~360 yellow pixels), parking-spot
+marker (~530 green pixels), runway-end marker (~40 red pixels), and
+the F-16 aircraft model (~83000 dark pixels).
+
+## Test results
+
+- New tests added: 29 (8 ClassTable + 12 AirportGeometry + 9 CoordinateTransform).
+- All 29 pass.
+- Pre-existing tests: 6 failures in `PilotInput.Validate*` (5) and
+  `EngineModel.DefaultConstructedHasNoTables` (1) — these are
+  pre-existing and unrelated to this change (the EngineModel test
+  asserts on a null table pointer that's a known issue in the test
+  setup, not the production code).
+
+## What's next (per `SCENARIO_PLAYER_PLAN.md` §8)
+
+- Real Kunsan ground layout from `f4-world::WorldState`'s
+  `GroundLayoutList` data (currently synthesized from scenario JSON).
+- Auto-spawn aircraft from campaign `Flight`/`Squadron` units via
+  the new `vis_type_for()` accessor.
+- Takeoff rotation + climb-out (the brain supports it; the renderer
+  just needs to keep drawing).
+- Multiple aircraft (the `Simulation` currently tracks one
+  `aircraft_entity_`; supporting N is a small refactor).

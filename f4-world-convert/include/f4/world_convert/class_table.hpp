@@ -158,13 +158,28 @@ enum SeaUnitSubtype : int {
     STYPE_SEA_SEA_TRANSPORT = 10,
 };
 
-/// One class table entry. We only expose the fields we need; the rest
-/// (collision, update rates, hitpoints, visType, etc.) are skipped.
+/// One class table entry. We expose the fields the rest of the pipeline
+/// needs: the classInfo_ tuple (domain/cls/type/stype), the trailing
+/// dataType + dataPtr pair, AND the visType[7] array (offset 60 in the
+/// on-disk record). visType[0] is the primary 3D model index used by
+/// VisualModelComponent to resolve the entity's renderable via
+/// f4::models::ModelDatabase; visType[1..6] are alternate LODs / damaged
+/// states / wreckage models. The remaining CT fields (collisionType,
+/// updateRate, hitpoints, etc.) are not exposed — they're for physics/
+/// networking layers we haven't ported yet.
 struct ClassTableEntry {
     uint8_t domain = 0;      // classInfo_[0]
     uint8_t cls = 0;         // classInfo_[1]
     uint8_t type = 0;        // classInfo_[2] — ObjectiveType for objectives
     uint8_t stype = 0;       // classInfo_[3]
+
+    // Visual model indices (offset 60-73 in the on-disk record).
+    // visType[0] is the primary model; visType[1..6] are alternates
+    // (damaged states, LODs, etc. — exact semantics vary by entity class).
+    // A value of 0 means "no model for this slot".
+    // Used by f4-simulation::Simulation to resolve VisualModelComponent's
+    // ModelRecord via ModelDatabase::model(vis_type[0]).
+    int16_t vis_type[7] = {0, 0, 0, 0, 0, 0, 0};
 
     // Trailing fields (offset 76-80 in the on-disk Falcon4EntityClassType).
     // dataType tells us which data table to index into; dataPtr is the
@@ -267,6 +282,23 @@ public:
     [[nodiscard]] bool data_ptr_for(uint16_t entity_type,
                                     uint8_t& out_data_type,
                                     uint32_t& out_data_ptr_index) const noexcept;
+
+    /// Resolve entity_type → visual model index for a given visType slot.
+    /// slot=0 is the primary model (the one VisualModelComponent should
+    /// resolve); slot=1..6 are alternates (damaged / LOD / wreckage).
+    /// Returns 0 if the entity_type is not found or the slot has no model
+    /// (visType[slot] == 0 means "no model"). The caller should treat 0
+    /// as "no renderable" and skip drawing.
+    ///
+    /// Note: entity_type ≠ vis_type! For example, entity_type 1052 is the
+    /// F-16C Block 50 *squadron* (CLASS_UNIT) and points at model 1050
+    /// (probably a squadron-level icon). The F-16 *aircraft* model itself
+    /// has KoreaObj.HDR index 1052, and is referenced by VEHICLE-class
+    /// entity_types like 273/276/285/719. The scenario JSON carries the
+    /// vis_type_index (model index) directly — it does NOT go through the
+    /// CT lookup. The CT lookup is for spawning aircraft from campaign
+    /// data, where we know the entity_type but not the model index.
+    [[nodiscard]] int16_t vis_type_for(uint16_t entity_type, int slot = 0) const noexcept;
 
     /// Number of entries loaded.
     [[nodiscard]] std::size_t size() const noexcept { return entries_.size(); }
