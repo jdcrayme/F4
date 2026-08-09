@@ -50,6 +50,33 @@ struct ScenarioAirfield {
     std::vector<geo::WorldPosition> taxi_route;  ///< parking -> hold short -> threshold
 };
 
+/// One static feature placement on the airfield — a building, runway section,
+/// taxiway segment, control tower, hangar, etc. Spawned as an entity with
+/// TransformComponent + VisualModelComponent (no flight model, no brain).
+///
+/// The vis_type_index is the direct index into KoreaObj.HDR's parent table
+/// (same keying model as ScenarioAircraft — we don't go through the
+/// Falcon4.CT entity_type → vis_type[0] lookup for hand-authored scenarios).
+/// A future campaign-derivation phase can add entity_type-based resolution.
+struct ScenarioFeature {
+    std::string name;                   ///< "Control Tower", "Runway Section 1"
+    int         vis_type_index{0};      ///< index into KoreaObj.HDR parent table
+    geo::WorldPosition position{};      ///< ENU feet, relative to theater datum
+    double      heading_rad{0.0};       ///< facing (rotation about Z-up)
+};
+
+/// How the Simulation should spawn aircraft for this scenario.
+///   - `ScenarioList`: spawn exactly the aircraft listed in `Scenario::aircraft`
+///     (Phase 1 behavior — hand-authored parking spots).
+///   - `CampaignFlights`: ignore `Scenario::aircraft` and instead load the
+///     referenced `world_json_path`, find every Flight-class unit, and spawn
+///     a child aircraft entity per flight at the squadron's airbase parking
+///     spot (Phase 2 — campaign-derived roster).
+enum class SpawnMode {
+    ScenarioList,
+    CampaignFlights,
+};
+
 /// A complete scenario.
 struct Scenario {
     std::string name;                   ///< "takeoff_kunsan"
@@ -61,8 +88,25 @@ struct Scenario {
     std::filesystem::path models_lod_path;   ///< KoreaObj.LOD
     std::filesystem::path models_tex_path;   ///< KoreaObj.TEX
 
+    // Phase 2: campaign-derivation inputs. Used only when spawn_mode ==
+    // CampaignFlights. The world_json_path points at a world JSON produced
+    // by f4-world-convert's cam2json (it carries objectives + units + the
+    // airbase ground layout). The class_table_path points at Falcon4.CT
+    // (needed to resolve entity_type → vis_type[0] for the spawned aircraft).
+    std::filesystem::path world_json_path;
+    std::filesystem::path class_table_path;
+
+    SpawnMode spawn_mode{SpawnMode::ScenarioList};
+
     std::vector<ScenarioAircraft> aircraft;
     ScenarioAirfield airfield;
+
+    /// Static feature placements on the airfield — buildings, runway sections,
+    /// taxiways, towers, hangars. Spawned as TransformComponent +
+    /// VisualModelComponent entities (no FM, no brain). The renderer iterates
+    /// all VisualModelComponent-bearing entities, so these get drawn alongside
+    /// the aircraft without any renderer-side special-casing.
+    std::vector<ScenarioFeature> airfield_features;
 
     double sim_dt{1.0 / 60.0};          ///< tick duration (seconds)
     int    total_ticks{600};            ///< 60 * 600 = 10 min default

@@ -66,7 +66,8 @@ public:
 
     /// Advance the simulation by one tick. Calls world_.update_all(dt, bus_),
     /// flushes deferred ATC messages, syncs TransformComponent + VisualModelComponent
-    /// from the FM state, and records a snapshot if recording is enabled.
+    /// from the FM state for every aircraft entity, and records a snapshot
+    /// per aircraft if recording is enabled.
     void tick(double dt);
 
     /// Write the flight recording to disk (if recording was enabled).
@@ -75,7 +76,29 @@ public:
     // --- Accessors for the renderer / host ---
     [[nodiscard]] entities::EntityWorld&       world()       noexcept { return world_; }
     [[nodiscard]] const entities::EntityWorld& world() const noexcept { return world_; }
-    [[nodiscard]] entities::EntityId aircraft_entity() const noexcept { return aircraft_entity_; }
+
+    /// The primary (first) aircraft entity. Convenience accessor for hosts
+    /// that only care about one aircraft (e.g. the camera focus). Returns
+    /// a default-constructed EntityId (value=0) if no aircraft were spawned.
+    [[nodiscard]] entities::EntityId aircraft_entity() const noexcept {
+        return aircraft_entities_.empty() ? entities::EntityId{} : aircraft_entities_.front();
+    }
+
+    /// All spawned aircraft entities. Phase 2: the sim tracks N aircraft,
+    /// one per Flight in the campaign (or one per ScenarioAircraft entry,
+    /// depending on spawn_mode).
+    [[nodiscard]] const std::vector<entities::EntityId>& aircraft_entities() const noexcept {
+        return aircraft_entities_;
+    }
+
+    /// All spawned airfield-feature entities (Phase 2A). Each carries
+    /// TransformComponent + VisualModelComponent (no FM, no brain). The
+    /// renderer iterates all VisualModelComponent-bearing entities to draw
+    /// both aircraft and features uniformly.
+    [[nodiscard]] const std::vector<entities::EntityId>& feature_entities() const noexcept {
+        return feature_entities_;
+    }
+
     [[nodiscard]] const f4::models::ModelDatabase& model_db() const noexcept { return *model_db_; }
     [[nodiscard]] const Scenario& scenario() const noexcept { return scenario_; }
     [[nodiscard]] double sim_time_s() const noexcept { return sim_time_s_; }
@@ -87,7 +110,10 @@ public:
 private:
     void load_models();           // KoreaObj.HDR/.LOD/.TEX -> ModelDatabase
     void load_aircraft_config();  // f16.json -> AircraftConfig
-    void spawn_aircraft();        // creates the F-16 entity with all 4 components
+    void spawn_aircraft();        // spawn_mode dispatch (scenario_list | campaign_flights)
+    void spawn_from_scenario_list();        // Phase 1: hand-authored aircraft[]
+    void spawn_from_campaign_flights();     // Phase 2: campaign-derived roster
+    void spawn_airfield_features();         // Phase 2A: static features → VMC entities
     void wire_atc();              // StubATC + AirfieldConfig from scenario
     void record_snapshot();
 
@@ -102,7 +128,16 @@ private:
     std::unique_ptr<f4::recorder::FlightRecorder> recorder_;
     f4::data::AircraftConfig aircraft_cfg_;
 
-    entities::EntityId aircraft_entity_{0};
+    // Phase 2: replaced the single `aircraft_entity_` with a vector. The
+    // Phase 1 spawn path (scenario_list) pushes one entry; the Phase 2 path
+    // (campaign_flights) pushes one per Flight unit found in the world JSON.
+    std::vector<entities::EntityId> aircraft_entities_;
+
+    // Phase 2A: static airfield-feature entities (buildings, runway sections,
+    // taxiways, towers, hangars). Each carries TransformComponent +
+    // VisualModelComponent. Tracked separately from aircraft so tick() doesn't
+    // try to sync them from a flight model (they have none).
+    std::vector<entities::EntityId> feature_entities_;
 
     double sim_time_s_{0.0};
     std::uint64_t tick_{0};

@@ -20,3 +20,4 @@
 #include "f4/simulation/visual_model_component.hpp"
 #include "f4/simulation/scenario.hpp"
 #include "f4/simulation/simulation.hpp"
+#include "f4/simulation/campaign_bridge.hpp"

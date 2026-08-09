@@ -250,7 +250,9 @@ static Color resolve_vertex_color(uint32_t color_index,
 }
 
 void PlayerApp::Impl::build_aircraft_meshes() {
-    unload_meshes();
+    // Phase 2A: this is now a thin wrapper that ensures the aircraft's
+    // mesh is in the cache. The actual mesh-building logic lives in
+    // build_mesh_for_model(), shared between aircraft and airfield features.
     if (!sim_initialized) { meshes_built = true; return; }
 
     auto h = f4::entities::EntityHandle(sim->aircraft_entity(), &sim->world());
@@ -261,18 +263,7 @@ void PlayerApp::Impl::build_aircraft_meshes() {
         return;
     }
 
-    const auto* rec = vis->model_record;
-    const int lod = vis->active_lod;
-    if (lod < 0 || lod >= static_cast<int>(rec->lods.size())) {
-        status_msg = "Invalid LOD index";
-        meshes_built = true;
-        return;
-    }
-
     auto& db = const_cast<f4::models::ModelDatabase&>(sim->model_db());
-    // Recover the parent index from the pointer. ModelDatabase::model(n)
-    // returns &parents_[n], so pointer arithmetic gives us the index back.
-    // This is safe because ModelRecord is stored in a contiguous vector.
     const auto* base = db.model(0);
     const int parent_index = base ? static_cast<int>(vis->model_record - base) : -1;
     if (parent_index < 0) {
@@ -280,29 +271,66 @@ void PlayerApp::Impl::build_aircraft_meshes() {
         meshes_built = true;
         return;
     }
+
+    build_mesh_for_model(parent_index);
+
+    meshes_built = true;
+    auto it = mesh_cache.find(parent_index);
+    if (it != mesh_cache.end()) {
+        int n_textured = 0;
+        for (const auto& me : it->second.meshes) if (me.tex_id >= 0) ++n_textured;
+        status_msg = "F-16 loaded: " + std::to_string(it->second.meshes.size()) +
+                     " meshes, " + std::to_string(n_textured) + " textured";
+    }
+}
+
+void PlayerApp::Impl::build_mesh_for_model(int parent_index) {
+    // Phase 2A: build (or skip if already cached) the Raylib Mesh objects
+    // for one KoreaObj model. The result is stored in mesh_cache[parent_index]
+    // so multiple entities sharing the same vis_type reuse one upload.
+    //
+    // Requires the GL context (UploadMesh). Called lazily from
+    // draw_visual_entities() the first time an entity with a previously-
+    // unseen parent_index is encountered, and eagerly from
+    // build_aircraft_meshes() at startup for the primary aircraft.
+    if (parent_index < 0) return;
+    auto it = mesh_cache.find(parent_index);
+    if (it != mesh_cache.end() && it->second.built) return;  // already cached
+
+    auto& db = const_cast<f4::models::ModelDatabase&>(sim->model_db());
+    const auto* rec = db.model(parent_index);
+    if (!rec || rec->lods.empty()) {
+        if (it != mesh_cache.end()) it->second.built = true;
+        else mesh_cache[parent_index].built = true;
+        return;
+    }
+    const int lod = 0;  // lock to LOD 0 (highest detail) for now
     auto err = db.parse_lod(parent_index, lod);
     if (!err.empty()) {
-        status_msg = "Parse error: " + err;
-        meshes_built = true;
+        if (it != mesh_cache.end()) it->second.built = true;
+        else mesh_cache[parent_index].built = true;
         return;
     }
 
-    // Set model_state's texture_set/n_texture_sets so multi-set models
-    // resolve correctly (mirrors f4-models-viewer scene.cpp:408).
-    vis->model_state.texture_set = vis->texture_set;
-    vis->model_state.n_texture_sets = std::max(1, static_cast<int>(rec->n_texture_sets));
+    // Use a default ModelState (texture_set=0, no switches). The aircraft's
+    // per-instance gear switch is baked into the extracted geometry at
+    // build time, so a future phase that needs to animate the gear will
+    // need to invalidate and rebuild the cache entry. For Phase 2A we
+    // accept static gear (already down at spawn, stays down during taxi).
+    f4::models::ModelState default_state;
+    default_state.texture_set = 0;
+    default_state.n_texture_sets = std::max(1, static_cast<int>(rec->n_texture_sets));
 
-    auto geom = db.extract_model_geometry(parent_index, lod, vis->model_state);
+    auto geom = db.extract_model_geometry(parent_index, lod, default_state);
     if (geom.meshes.empty()) {
-        status_msg = "No geometry extracted";
-        meshes_built = true;
+        mesh_cache[parent_index].built = true;
         return;
     }
 
     const auto& cb = db.color_bank();
 
-    aircraft_meshes.clear();
-    aircraft_meshes.reserve(geom.meshes.size());
+    MeshCacheEntry entry;
+    entry.meshes.reserve(geom.meshes.size());
     for (const auto& src : geom.meshes) {
         if (src.vertices.empty()) continue;
         if (src.kind == f4::models::PrimitiveKind::Triangles && src.triangles.empty()) continue;
@@ -353,59 +381,62 @@ void PlayerApp::Impl::build_aircraft_meshes() {
         MeshEntry me;
         me.mesh = rm;
         me.tex_id = src.tex_id;
-        aircraft_meshes.push_back(me);
+        entry.meshes.push_back(me);
     }
 
-    upload_textures();
-    meshes_built = true;
+    entry.built = true;
+    mesh_cache[parent_index] = std::move(entry);
 
-    int n_textured = 0;
-    for (const auto& me : aircraft_meshes) if (me.tex_id >= 0) ++n_textured;
-    status_msg = "F-16 loaded: " + std::to_string(aircraft_meshes.size()) +
-                 " meshes, " + std::to_string(n_textured) + " textured";
+    // Upload any new textures referenced by this model's meshes.
+    upload_textures();
 }
 
 void PlayerApp::Impl::upload_textures() {
     if (!sim_initialized) return;
     auto& db = const_cast<f4::models::ModelDatabase&>(sim->model_db());
 
-    for (auto& me : aircraft_meshes) {
-        if (me.tex_id < 0) continue;
-        if (texture_cache.count(me.tex_id)) continue;
+    // Phase 2A: walk every cached mesh entry across all models. The
+    // texture_cache keys by tex_id, so shared textures across models are
+    // only uploaded once.
+    for (auto& [parent_idx, cache_entry] : mesh_cache) {
+        for (auto& me : cache_entry.meshes) {
+            if (me.tex_id < 0) continue;
+            if (texture_cache.count(me.tex_id)) continue;
 
-        const auto* decoded = db.fetch_texture(me.tex_id);
-        if (!decoded || !decoded->valid()) {
-            TexCacheEntry ce; ce.uploaded = false;
+            const auto* decoded = db.fetch_texture(me.tex_id);
+            if (!decoded || !decoded->valid()) {
+                TexCacheEntry ce; ce.uploaded = false;
+                texture_cache[me.tex_id] = ce;
+                continue;
+            }
+
+            Image img = {};
+            img.data = RL_MALLOC(decoded->width * decoded->height * 4);
+            if (!img.data) {
+                TexCacheEntry ce; ce.uploaded = false;
+                texture_cache[me.tex_id] = ce;
+                continue;
+            }
+            std::memcpy(img.data, decoded->rgba.data(),
+                        static_cast<std::size_t>(decoded->width * decoded->height * 4));
+            img.width = decoded->width;
+            img.height = decoded->height;
+            img.mipmaps = 1;
+            img.format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8;
+
+            Texture2D tex = LoadTextureFromImage(img);
+            Material mat = LoadMaterialDefault();
+            mat.maps[MATERIAL_MAP_DIFFUSE].texture = tex;
+            mat.maps[MATERIAL_MAP_DIFFUSE].color = WHITE;
+
+            TexCacheEntry ce;
+            ce.texture = tex;
+            ce.material = mat;
+            ce.has_alpha = decoded->has_alpha;
+            ce.uploaded = true;
             texture_cache[me.tex_id] = ce;
-            continue;
+            UnloadImage(img);
         }
-
-        Image img = {};
-        img.data = RL_MALLOC(decoded->width * decoded->height * 4);
-        if (!img.data) {
-            TexCacheEntry ce; ce.uploaded = false;
-            texture_cache[me.tex_id] = ce;
-            continue;
-        }
-        std::memcpy(img.data, decoded->rgba.data(),
-                    static_cast<std::size_t>(decoded->width * decoded->height * 4));
-        img.width = decoded->width;
-        img.height = decoded->height;
-        img.mipmaps = 1;
-        img.format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8;
-
-        Texture2D tex = LoadTextureFromImage(img);
-        Material mat = LoadMaterialDefault();
-        mat.maps[MATERIAL_MAP_DIFFUSE].texture = tex;
-        mat.maps[MATERIAL_MAP_DIFFUSE].color = WHITE;
-
-        TexCacheEntry ce;
-        ce.texture = tex;
-        ce.material = mat;
-        ce.has_alpha = decoded->has_alpha;
-        ce.uploaded = true;
-        texture_cache[me.tex_id] = ce;
-        UnloadImage(img);
     }
 }
 
@@ -421,10 +452,15 @@ void PlayerApp::Impl::unload_textures() {
 
 void PlayerApp::Impl::unload_meshes() {
     unload_textures();
-    for (auto& me : aircraft_meshes) {
-        UnloadMesh(me.mesh);
+    // Phase 2A: walk every model in the mesh cache.
+    for (auto& [parent_idx, cache_entry] : mesh_cache) {
+        for (auto& me : cache_entry.meshes) {
+            UnloadMesh(me.mesh);
+        }
+        cache_entry.meshes.clear();
+        cache_entry.built = false;
     }
-    aircraft_meshes.clear();
+    mesh_cache.clear();
     meshes_built = false;
 }
 
@@ -512,93 +548,35 @@ void PlayerApp::Impl::draw_airport() {
 }
 
 void PlayerApp::Impl::draw_aircraft() {
+    // Phase 2A: legacy entry point — draws only the primary aircraft.
+    // Kept for compatibility; the real work now happens in draw_visual_entities().
     if (!show_aircraft || !sim_initialized) return;
-    if (!meshes_built) build_aircraft_meshes();
-    if (aircraft_meshes.empty()) return;
+    draw_visual_entities();
+}
 
-    // Get the aircraft's current transform (ENU position + quaternion).
-    auto h = f4::entities::EntityHandle(sim->aircraft_entity(), &sim->world());
-    auto* tf = h.get<f4::entities::TransformComponent>();
-    if (!tf) return;
+void PlayerApp::Impl::draw_visual_entities() {
+    // Phase 2A: walk every entity that has a VisualModelComponent and draw
+    // it. This unifies the aircraft and airfield-feature draw paths — both
+    // are just entities with a TransformComponent + VisualModelComponent,
+    // and the renderer doesn't care whether they also have a FlightModelComponent.
+    //
+    // The mesh cache is keyed by parent_index (the KoreaObj model number),
+    // so multiple entities sharing the same vis_type reuse one GPU upload.
+    // The cache is built lazily here — the first time we see a new
+    // parent_index, build_mesh_for_model() uploads it.
+    if (!sim_initialized) return;
+    if (!show_aircraft && !show_airport) return;  // both toggles off → skip
 
-    // Convert ENU position to Raylib RH Y-up.
-    const Vector3 pos_rh = enu_to_raylib_v3(tf->position.x, tf->position.y, tf->position.z);
+    // Collect all VMC-bearing entities. with_component<>() returns a fresh
+    // vector each call (O(N) walk over the world), so we do it once per
+    // frame, not once per mesh.
+    const auto entities = sim->world().with_component<f4::simulation::VisualModelComponent>();
+    if (entities.empty()) return;
 
-    // Build the entity's orientation matrix. The TransformComponent's
-    // quaternion is body-to-world in ENU. We need body-to-world in
-    // Raylib's RH Y-up frame.
-    //
-    // The body frame for aircraft is X-forward, Y-right, Z-down (NED body).
-    // The model's vertex data is in LH Y-up (X right, Y up, Z forward).
-    // We compose: world_matrix = T(pos_rh) * R_enu_to_rh * R_quat * R_body_to_model.
-    //
-    // Simplified approach: just rotate the entity's ENU quaternion into
-    // the Raylib frame by swapping axes. The quaternion (qw, qx, qy, qz)
-    // in ENU (x=east, y=north, z=up) becomes (qw, qz, qx, -qy) wait no.
-    //
-    // Actually, the simplest correct approach is to convert the
-    // TransformComponent's ENU Euler angles (psi, theta, phi) — which
-    // Simulation::tick() derives from the FM's NED state — into a
-    // Raylib quaternion via Raylib's QuaternionFromEuler.
-    //
-    // psi = yaw (around Z-up), theta = pitch (around Y-right), phi = roll (around X-forward)
-    //
-    // In Raylib's RH Y-up frame:
-    //   - yaw is around the Y axis (up)
-    //   - pitch is around the X axis (right) — but in Raylib, pitch up is +X rotation
-    //   - roll is around the Z axis (toward viewer, but body forward in RH Y-up is -Z, so roll is around -Z = -Z axis)
-    //
-    // To avoid sign confusion, use the TransformComponent's quaternion
-    // directly. We're given qw/qx/qy/qz in ENU frame. The conversion
-    // from ENU quaternion to Raylib RH Y-up quaternion is:
-    //   ENU axes: x=east, y=north, z=up
-    //   RH  axes: x=east, y=up,    z=-north  (i.e. toward viewer = -north)
-    //
-    // A rotation quaternion rotates a vector. If we have q_enu that
-    // rotates body→world in ENU, we need q_rh that rotates body→world
-    // in RH Y-up. The change-of-basis is:
-    //   rh_x = enu_x      (east → right)
-    //   rh_y = enu_z      (up → up)
-    //   rh_z = -enu_y     (north → -toward_viewer, i.e. forward in RH Y-up is -Z, so north → +Z = backward)
-    //
-    // Wait, north should map to "forward" in Raylib's RH Y-up because
-    // the aircraft is pointing north at the parking spot and we want
-    // it pointing forward (away from us, into the screen, which is -Z
-    // in Raylib). So north → -Z, i.e. rh_z = -enu_y. Yes, that's right.
-    //
-    // For a quaternion q = (w, x, y, z) representing a rotation in ENU,
-    // the equivalent quaternion in RH Y-up is (w, x', y', z') where:
-    //   x' = x_east (the component around the east axis) — stays the same since east→right
-    //   y' = z_up   (the component around the up axis) — moves to y because up→y
-    //   z' = -y_north (the component around the north axis) — moves to z and negated
-    //
-    // So: q_rh = (qw, qx, qz, -qy)
-    //
-    // (We're cheating slightly here because the body frame for the
-    // aircraft (X-forward) doesn't align with the model's local frame
-    // (LH Y-up, Z-forward), but the model_vertex_to_raylib conversion
-    // in build_aircraft_meshes already handles the body-frame rotation
-    // by negating Z. So we just need the world-frame rotation here.)
+    auto& db = const_cast<f4::models::ModelDatabase&>(sim->model_db());
+    const auto* base = db.model(0);
 
-    Quaternion q_rh = {
-        static_cast<float>(tf->qw),
-        static_cast<float>(tf->qx),
-        static_cast<float>(tf->qz),
-        static_cast<float>(-tf->qy)
-    };
-    // Normalize for safety (the FM should keep it normalized, but float
-    // precision can drift over long runs).
-    const float qlen = std::sqrt(q_rh.x*q_rh.x + q_rh.y*q_rh.y + q_rh.z*q_rh.z + q_rh.w*q_rh.w);
-    if (qlen > 0.0001f) {
-        q_rh.x /= qlen; q_rh.y /= qlen; q_rh.z /= qlen; q_rh.w /= qlen;
-    }
-
-    const Matrix model_matrix = MatrixMultiply(
-        MatrixTranslate(pos_rh.x, pos_rh.y, pos_rh.z),
-        QuaternionToMatrix(q_rh)
-    );
-
-    // Set up lighting.
+    // Set up lighting once per frame (shared across all entities).
     bool lighting_active = false;
     Vector3 light_dir = light_direction;
     const float dlen = std::sqrt(light_dir.x*light_dir.x +
@@ -645,21 +623,78 @@ void PlayerApp::Impl::draw_aircraft() {
     default_mat.maps[MATERIAL_MAP_DIFFUSE].color = WHITE;
     if (lighting_active) default_mat.shader = lit_shader;
 
-    for (const auto& me : aircraft_meshes) {
-        if (me.mesh.triangleCount <= 0) continue;
-        const Material* mat_to_use = &default_mat;
-        if (me.tex_id >= 0) {
-            auto it = texture_cache.find(me.tex_id);
-            if (it != texture_cache.end() && it->second.uploaded) {
-                mat_to_use = &it->second.material;
-                if (lighting_active) {
-                    // Swap the shader on a copy to avoid mutating the cached material.
-                    // (Raylib materials are value types; this is safe.)
-                    const_cast<Material*>(mat_to_use)->shader = lit_shader;
+    // Determine which entity is the "primary aircraft" so we can apply the
+    // show_aircraft toggle only to it (features are gated by show_airport).
+    const auto primary_aircraft_id = sim->aircraft_entity();
+
+    for (const auto eid : entities) {
+        auto h = f4::entities::EntityHandle(eid, &sim->world());
+        auto* vis = h.get<f4::simulation::VisualModelComponent>();
+        auto* tf  = h.get<f4::entities::TransformComponent>();
+        if (!vis || !vis->model_record || !tf) continue;
+
+        // Toggle gating: aircraft ↔ show_aircraft, features ↔ show_airport.
+        // The primary aircraft's entity ID matches aircraft_entity(); all
+        // other VMC-bearing entities are features.
+        const bool is_aircraft = (eid.value == primary_aircraft_id.value);
+        if (is_aircraft && !show_aircraft) continue;
+        if (!is_aircraft && !show_airport) continue;
+
+        // Resolve parent_index from the model_record pointer.
+        const int parent_index = base ? static_cast<int>(vis->model_record - base) : -1;
+        if (parent_index < 0) continue;
+
+        // Lazy mesh build: if this model isn't cached yet, build it now.
+        // This handles features that weren't pre-built at startup.
+        build_mesh_for_model(parent_index);
+
+        auto cache_it = mesh_cache.find(parent_index);
+        if (cache_it == mesh_cache.end() || cache_it->second.meshes.empty()) continue;
+
+        // Convert ENU position to Raylib RH Y-up.
+        const Vector3 pos_rh = enu_to_raylib_v3(tf->position.x, tf->position.y, tf->position.z);
+
+        // Convert ENU quaternion to Raylib RH Y-up quaternion.
+        // The TransformComponent's quaternion (qw, qx, qy, qz) is body→world
+        // in ENU (x=east, y=north, z=up). The basis change ENU → RH Y-up is
+        // (x, y, z)_enu → (x, z, -y)_rh, which gives the Hamilton-form rule
+        //   q_rh (Hamilton w,x,y,z) = (qw, qx, qz, -qy)
+        //
+        // IMPORTANT: Raylib's Quaternion struct is {x, y, z, w} — NOT {w,x,y,z}.
+        // The previous code initialized it as {qw, qx, qz, -qy} which put the
+        // scalar `qw` into the x field and produced a 180° X-rotation for an
+        // identity input. The correct initialization puts each Hamilton
+        // component into the matching Raylib field.
+        Quaternion q_rh = {
+            static_cast<float>(tf->qx),    // q.x  (was tf->qw — the bug)
+            static_cast<float>(tf->qz),    // q.y  (was tf->qx)
+            static_cast<float>(-tf->qy),   // q.z  (was tf->qz)
+            static_cast<float>(tf->qw)     // q.w  (was -tf->qy)
+        };
+        const float qlen = std::sqrt(q_rh.x*q_rh.x + q_rh.y*q_rh.y + q_rh.z*q_rh.z + q_rh.w*q_rh.w);
+        if (qlen > 0.0001f) {
+            q_rh.x /= qlen; q_rh.y /= qlen; q_rh.z /= qlen; q_rh.w /= qlen;
+        }
+
+        const Matrix model_matrix = MatrixMultiply(
+            MatrixTranslate(pos_rh.x, pos_rh.y, pos_rh.z),
+            QuaternionToMatrix(q_rh)
+        );
+
+        for (const auto& me : cache_it->second.meshes) {
+            if (me.mesh.triangleCount <= 0) continue;
+            const Material* mat_to_use = &default_mat;
+            if (me.tex_id >= 0) {
+                auto tex_it = texture_cache.find(me.tex_id);
+                if (tex_it != texture_cache.end() && tex_it->second.uploaded) {
+                    mat_to_use = &tex_it->second.material;
+                    if (lighting_active) {
+                        const_cast<Material*>(mat_to_use)->shader = lit_shader;
+                    }
                 }
             }
+            DrawMesh(me.mesh, *mat_to_use, model_matrix);
         }
-        DrawMesh(me.mesh, *mat_to_use, model_matrix);
     }
 
     EndBlendMode();
@@ -769,7 +804,7 @@ void PlayerApp::Impl::draw_scene() {
     }
 
     draw_airport();
-    draw_aircraft();
+    draw_visual_entities();
 
     EndMode3D();
 

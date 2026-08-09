@@ -82,6 +82,24 @@ ScenarioAircraft read_aircraft(f4::json::Reader& r) {
     return a;
 }
 
+ScenarioFeature read_feature(f4::json::Reader& r) {
+    ScenarioFeature f{};
+    r.expect('{');
+    bool first = true;
+    while (!r.consume('}')) {
+        if (!first) r.expect(',');
+        first = false;
+        const auto key = r.read_string();
+        r.expect(':');
+        if (key == "name")             f.name = r.read_string();
+        else if (key == "vis_type_index") f.vis_type_index = static_cast<int>(r.read_int());
+        else if (key == "position")    f.position = read_world_position(r);
+        else if (key == "heading_rad") f.heading_rad = r.read_number();
+        else                           skip_unknown(r);
+    }
+    return f;
+}
+
 ScenarioAirfield read_airfield(f4::json::Reader& r) {
     ScenarioAirfield af{};
     r.expect('{');
@@ -128,6 +146,14 @@ Scenario parse_scenario(f4::json::Reader& r) {
         else if (key == "models_hdr_path")   s.models_hdr_path = r.read_string();
         else if (key == "models_lod_path")   s.models_lod_path = r.read_string();
         else if (key == "models_tex_path")   s.models_tex_path = r.read_string();
+        else if (key == "world_json_path")   s.world_json_path = r.read_string();
+        else if (key == "class_table_path")  s.class_table_path = r.read_string();
+        else if (key == "spawn_mode") {
+            const auto mode = r.read_string();
+            if (mode == "scenario_list")         s.spawn_mode = SpawnMode::ScenarioList;
+            else if (mode == "campaign_flights") s.spawn_mode = SpawnMode::CampaignFlights;
+            else throw std::runtime_error("scenario: unknown spawn_mode '" + mode + "'");
+        }
         else if (key == "sim_dt")          s.sim_dt = r.read_number();
         else if (key == "total_ticks")     s.total_ticks = static_cast<int>(r.read_int());
         else if (key == "record")          s.record = r.read_bool();
@@ -142,6 +168,14 @@ Scenario parse_scenario(f4::json::Reader& r) {
             }
         } else if (key == "airfield") {
             s.airfield = read_airfield(r);
+        } else if (key == "airfield_features") {
+            r.expect('[');
+            bool arr_first = true;
+            while (!r.consume(']')) {
+                if (!arr_first) r.expect(',');
+                arr_first = false;
+                s.airfield_features.push_back(read_feature(r));
+            }
         } else {
             skip_unknown(r);
         }
@@ -152,22 +186,42 @@ Scenario parse_scenario(f4::json::Reader& r) {
 void validate(const Scenario& s) {
     if (s.name.empty())
         throw std::runtime_error("scenario: missing required field 'name'");
-    if (s.aircraft.empty())
-        throw std::runtime_error("scenario: no aircraft defined (need at least one)");
-    for (const auto& a : s.aircraft) {
-        if (a.callsign.empty())
-            throw std::runtime_error("scenario: aircraft missing 'callsign'");
-        if (a.aircraft_config_path.empty())
-            throw std::runtime_error("scenario: aircraft '" + a.callsign + "' missing 'aircraft_config_path'");
-        if (a.vis_type_index <= 0)
-            throw std::runtime_error("scenario: aircraft '" + a.callsign + "' has invalid vis_type_index");
-    }
-    if (s.airfield.taxi_route.size() < 2)
-        throw std::runtime_error("scenario: taxi_route must have at least 2 waypoints (start + threshold)");
     if (s.sim_dt <= 0.0)
         throw std::runtime_error("scenario: sim_dt must be positive");
     if (s.total_ticks <= 0)
         throw std::runtime_error("scenario: total_ticks must be positive");
+
+    // Validate airfield_features (optional but if present must be well-formed).
+    for (const auto& f : s.airfield_features) {
+        if (f.vis_type_index <= 0)
+            throw std::runtime_error("scenario: feature '" + f.name +
+                "' has invalid vis_type_index (must be > 0)");
+    }
+
+    // Spawn-mode-specific validation.
+    if (s.spawn_mode == SpawnMode::ScenarioList) {
+        if (s.aircraft.empty())
+            throw std::runtime_error("scenario: no aircraft defined (need at least one)");
+        for (const auto& a : s.aircraft) {
+            if (a.callsign.empty())
+                throw std::runtime_error("scenario: aircraft missing 'callsign'");
+            if (a.aircraft_config_path.empty())
+                throw std::runtime_error("scenario: aircraft '" + a.callsign + "' missing 'aircraft_config_path'");
+            if (a.vis_type_index <= 0)
+                throw std::runtime_error("scenario: aircraft '" + a.callsign + "' has invalid vis_type_index");
+        }
+        if (s.airfield.taxi_route.size() < 2)
+            throw std::runtime_error("scenario: taxi_route must have at least 2 waypoints (start + threshold)");
+    } else if (s.spawn_mode == SpawnMode::CampaignFlights) {
+        if (s.world_json_path.empty())
+            throw std::runtime_error("scenario: spawn_mode=campaign_flights requires 'world_json_path'");
+        if (s.class_table_path.empty())
+            throw std::runtime_error("scenario: spawn_mode=campaign_flights requires 'class_table_path'");
+        if (s.aircraft.empty() || s.aircraft.front().aircraft_config_path.empty())
+            throw std::runtime_error(
+                "scenario: spawn_mode=campaign_flights requires aircraft[0].aircraft_config_path "
+                "(used as the shared config for all spawned aircraft)");
+    }
 }
 
 // Resolve a relative path against the scenario file's parent directory.
@@ -200,6 +254,8 @@ Scenario load_scenario(const std::filesystem::path& json_path) {
     s.models_hdr_path   = resolve(base_dir, s.models_hdr_path);
     s.models_lod_path   = resolve(base_dir, s.models_lod_path);
     s.models_tex_path   = resolve(base_dir, s.models_tex_path);
+    s.world_json_path   = resolve(base_dir, s.world_json_path);
+    s.class_table_path  = resolve(base_dir, s.class_table_path);
     s.record_path       = resolve(base_dir, s.record_path);
 
     // Resolve aircraft config paths too.

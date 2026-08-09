@@ -131,3 +131,220 @@ TEST(ScenarioLoader, TaxiRouteWithTooFewWaypointsThrows) {
     })";
     EXPECT_THROW(load_scenario_from_string(json), std::runtime_error);
 }
+
+// === Phase 2: spawn_mode tests ===
+
+TEST(ScenarioLoader, DefaultsToScenarioListSpawnMode) {
+    // When "spawn_mode" is omitted, the default is ScenarioList (Phase 1
+    // behavior — backward compatible).
+    const std::string json = R"({
+        "name": "default_mode",
+        "theater": "korea",
+        "aircraft": [
+            {"callsign":"EAGLE1","aircraft_config_path":"f16.json","vis_type_index":1052,
+             "parking_spot":{"x":0,"y":0,"z":50},"heading_rad":0,"initial_fuel_lbs":6500}
+        ],
+        "airfield": {
+            "active_runway_id": 36,
+            "taxi_route": [{"x":0,"y":0,"z":0}, {"x":0,"y":100,"z":0}]
+        }
+    })";
+    auto s = load_scenario_from_string(json);
+    EXPECT_EQ(s.spawn_mode, SpawnMode::ScenarioList);
+}
+
+TEST(ScenarioLoader, ParsesCampaignFlightsSpawnMode) {
+    const std::string json = R"({
+        "name": "campaign_mode",
+        "theater": "korea",
+        "spawn_mode": "campaign_flights",
+        "world_json_path": "save1.world.json",
+        "class_table_path": "Falcon4.CT",
+        "aircraft": [
+            {"callsign":"TEMPLATE","aircraft_config_path":"f16.json","vis_type_index":1052,
+             "parking_spot":{"x":0,"y":0,"z":50},"heading_rad":0,"initial_fuel_lbs":6500}
+        ],
+        "airfield": {
+            "active_runway_id": 36,
+            "taxi_route": [{"x":0,"y":0,"z":0}, {"x":0,"y":100,"z":0}]
+        }
+    })";
+    auto s = load_scenario_from_string(json);
+    EXPECT_EQ(s.spawn_mode, SpawnMode::CampaignFlights);
+    EXPECT_EQ(s.world_json_path, "save1.world.json");
+    EXPECT_EQ(s.class_table_path, "Falcon4.CT");
+}
+
+TEST(ScenarioLoader, UnknownSpawnModeThrows) {
+    const std::string json = R"({
+        "name": "bad_mode",
+        "theater": "korea",
+        "spawn_mode": "magic_unicorns",
+        "aircraft": [
+            {"callsign":"EAGLE1","aircraft_config_path":"f16.json","vis_type_index":1052,
+             "parking_spot":{"x":0,"y":0,"z":50},"heading_rad":0,"initial_fuel_lbs":6500}
+        ],
+        "airfield": {
+            "active_runway_id": 36,
+            "taxi_route": [{"x":0,"y":0,"z":0}, {"x":0,"y":100,"z":0}]
+        }
+    })";
+    EXPECT_THROW(load_scenario_from_string(json), std::runtime_error);
+}
+
+TEST(ScenarioLoader, CampaignFlightsModeRequiresWorldJsonPath) {
+    // spawn_mode=campaign_flights without world_json_path must fail validation.
+    const std::string json = R"({
+        "name": "missing_world",
+        "theater": "korea",
+        "spawn_mode": "campaign_flights",
+        "class_table_path": "Falcon4.CT",
+        "aircraft": [
+            {"callsign":"T","aircraft_config_path":"f16.json","vis_type_index":1052,
+             "parking_spot":{"x":0,"y":0,"z":50},"heading_rad":0,"initial_fuel_lbs":6500}
+        ],
+        "airfield": {
+            "active_runway_id": 36,
+            "taxi_route": [{"x":0,"y":0,"z":0}, {"x":0,"y":100,"z":0}]
+        }
+    })";
+    EXPECT_THROW(load_scenario_from_string(json), std::runtime_error);
+}
+
+TEST(ScenarioLoader, CampaignFlightsModeRequiresClassTablePath) {
+    const std::string json = R"({
+        "name": "missing_ct",
+        "theater": "korea",
+        "spawn_mode": "campaign_flights",
+        "world_json_path": "save1.world.json",
+        "aircraft": [
+            {"callsign":"T","aircraft_config_path":"f16.json","vis_type_index":1052,
+             "parking_spot":{"x":0,"y":0,"z":50},"heading_rad":0,"initial_fuel_lbs":6500}
+        ],
+        "airfield": {
+            "active_runway_id": 36,
+            "taxi_route": [{"x":0,"y":0,"z":0}, {"x":0,"y":100,"z":0}]
+        }
+    })";
+    EXPECT_THROW(load_scenario_from_string(json), std::runtime_error);
+}
+
+TEST(ScenarioLoader, CampaignFlightsModeRequiresAircraftTemplate) {
+    // Even in campaign_flights mode, aircraft[0] must exist with an
+    // aircraft_config_path (used as the shared config for all spawned aircraft).
+    const std::string json = R"({
+        "name": "missing_template",
+        "theater": "korea",
+        "spawn_mode": "campaign_flights",
+        "world_json_path": "save1.world.json",
+        "class_table_path": "Falcon4.CT",
+        "aircraft": [],
+        "airfield": {
+            "active_runway_id": 36,
+            "taxi_route": [{"x":0,"y":0,"z":0}, {"x":0,"y":100,"z":0}]
+        }
+    })";
+    EXPECT_THROW(load_scenario_from_string(json), std::runtime_error);
+}
+
+// === Phase 2A: airfield_features tests ===
+
+TEST(ScenarioLoader, LoadsAirfieldFeaturesFromFixture) {
+    // The bundled takeoff_kunsan.json fixture now includes an
+    // airfield_features[] block (Phase 2A). Verify it parses.
+    const auto json = load_fixture("takeoff_kunsan.json");
+    ASSERT_FALSE(json.empty());
+
+    auto s = load_scenario_from_string(json);
+    ASSERT_EQ(s.airfield_features.size(), 4u);
+
+    // First feature: Runway Section 1
+    const auto& f0 = s.airfield_features[0];
+    EXPECT_EQ(f0.name, "Runway Section 1");
+    EXPECT_EQ(f0.vis_type_index, 121);
+    EXPECT_DOUBLE_EQ(f0.position.x, 500.0);
+    EXPECT_DOUBLE_EQ(f0.position.y, 8500.0);
+    EXPECT_DOUBLE_EQ(f0.position.z, 50.0);
+    EXPECT_DOUBLE_EQ(f0.heading_rad, 0.0);
+
+    // Second feature: another runway section (same vis_type — tests that
+    // multiple features with the same model are allowed)
+    const auto& f1 = s.airfield_features[1];
+    EXPECT_EQ(f1.name, "Runway Section 2");
+    EXPECT_EQ(f1.vis_type_index, 121);
+    EXPECT_DOUBLE_EQ(f1.position.y, 10500.0);
+
+    // Control Tower
+    const auto& f2 = s.airfield_features[2];
+    EXPECT_EQ(f2.name, "Control Tower");
+    EXPECT_EQ(f2.vis_type_index, 143);
+
+    // Hangar
+    const auto& f3 = s.airfield_features[3];
+    EXPECT_EQ(f3.name, "Hangar 1");
+    EXPECT_EQ(f3.vis_type_index, 169);
+}
+
+TEST(ScenarioLoader, EmptyAirfieldFeaturesIsAllowed) {
+    // airfield_features is optional — a scenario without it should still
+    // load (backward compatibility with Phase 1 scenarios).
+    const std::string json = R"({
+        "name": "no_features",
+        "theater": "korea",
+        "aircraft": [
+            {"callsign":"EAGLE1","aircraft_config_path":"f16.json","vis_type_index":1052,
+             "parking_spot":{"x":0,"y":0,"z":50},"heading_rad":0,"initial_fuel_lbs":6500}
+        ],
+        "airfield": {
+            "active_runway_id": 36,
+            "taxi_route": [{"x":0,"y":0,"z":0}, {"x":0,"y":100,"z":0}]
+        }
+    })";
+    auto s = load_scenario_from_string(json);
+    EXPECT_TRUE(s.airfield_features.empty());
+}
+
+TEST(ScenarioLoader, FeatureWithInvalidVisTypeThrows) {
+    // A feature with vis_type_index <= 0 is invalid — the model database
+    // can't resolve it. Validation should catch this at load time.
+    const std::string json = R"({
+        "name": "bad_feature",
+        "theater": "korea",
+        "aircraft": [
+            {"callsign":"EAGLE1","aircraft_config_path":"f16.json","vis_type_index":1052,
+             "parking_spot":{"x":0,"y":0,"z":50},"heading_rad":0,"initial_fuel_lbs":6500}
+        ],
+        "airfield": {
+            "active_runway_id": 36,
+            "taxi_route": [{"x":0,"y":0,"z":0}, {"x":0,"y":100,"z":0}]
+        },
+        "airfield_features": [
+            {"name":"Bad","vis_type_index":0,"position":{"x":0,"y":0,"z":0},"heading_rad":0}
+        ]
+    })";
+    EXPECT_THROW(load_scenario_from_string(json), std::runtime_error);
+}
+
+TEST(ScenarioLoader, FeatureWithNonZeroHeadingParses) {
+    // Verify the heading_rad field is parsed correctly (not just defaulted to 0).
+    const std::string json = R"({
+        "name": "rotated_feature",
+        "theater": "korea",
+        "aircraft": [
+            {"callsign":"EAGLE1","aircraft_config_path":"f16.json","vis_type_index":1052,
+             "parking_spot":{"x":0,"y":0,"z":50},"heading_rad":0,"initial_fuel_lbs":6500}
+        ],
+        "airfield": {
+            "active_runway_id": 36,
+            "taxi_route": [{"x":0,"y":0,"z":0}, {"x":0,"y":100,"z":0}]
+        },
+        "airfield_features": [
+            {"name":"Rotated Tower","vis_type_index":143,
+             "position":{"x":100,"y":200,"z":50},"heading_rad":1.5707963267948966}
+        ]
+    })";
+    auto s = load_scenario_from_string(json);
+    ASSERT_EQ(s.airfield_features.size(), 1u);
+    EXPECT_DOUBLE_EQ(s.airfield_features[0].heading_rad, 1.5707963267948966);
+    EXPECT_DOUBLE_EQ(s.airfield_features[0].position.x, 100.0);
+}

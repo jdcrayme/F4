@@ -78,16 +78,27 @@ struct PlayerApp::Impl {
     Vector3 drag_target0 = {};
     bool initial_camera_set = false;
 
-    // ── Aircraft mesh cache ───────────────────────────────────────────
-    // One entry per ModelGeometry::mesh. Rebuilt only when the model
-    // changes (which it doesn't — the F-16's model_record is fixed at
-    // scenario load). The entity's transform is applied per-frame as
-    // a DrawMesh model matrix.
+    // ── Visual-entity mesh cache (Phase 2A) ───────────────────────────
+    // One entry per unique model_record (keyed by parent_index). Multiple
+    // entities sharing the same vis_type reuse one mesh cache entry —
+    // e.g. three hangars of the same type upload their geometry only once.
+    //
+    // Built lazily from draw_visual_entities() the first time an entity
+    // with a previously-unseen parent_index is encountered. Requires the
+    // GL context (UploadMesh), so the first build happens inside run().
     struct MeshEntry {
         ::Mesh mesh = {};
         int tex_id = -1;  // -1 = no texture, use vertex colors
     };
-    std::vector<MeshEntry> aircraft_meshes;
+    struct MeshCacheEntry {
+        std::vector<MeshEntry> meshes;
+        bool built = false;
+    };
+    std::unordered_map<int, MeshCacheEntry> mesh_cache;  // key = parent_index
+
+    /// Legacy alias — the aircraft's mesh list, used by code paths that
+    /// haven't been refactored to walk the world yet. Points at the
+    /// mesh_cache entry for the aircraft's vis_type_index (built lazily).
     bool meshes_built = false;
 
     // ── Texture cache (lazy, like f4-models-viewer) ───────────────────
@@ -133,7 +144,8 @@ struct PlayerApp::Impl {
     void fit_to_aircraft();
     void reset_camera();
 
-    void build_aircraft_meshes();
+    void build_aircraft_meshes();       // legacy: ensures aircraft's mesh is cached
+    void build_mesh_for_model(int parent_index);  // Phase 2A: lazy mesh build
     void upload_textures();
     void unload_meshes();
     void unload_textures();
@@ -141,7 +153,8 @@ struct PlayerApp::Impl {
 
     void draw_scene();
     void draw_airport();
-    void draw_aircraft();
+    void draw_aircraft();               // legacy: draws only the primary aircraft
+    void draw_visual_entities();        // Phase 2A: walks all VMC-bearing entities
     void draw_hud();
 };
 

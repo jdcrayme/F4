@@ -813,3 +813,139 @@ the F-16 aircraft model (~83000 dark pixels).
   just needs to keep drawing).
 - Multiple aircraft (the `Simulation` currently tracks one
   `aircraft_entity_`; supporting N is a small refactor).
+
+---
+
+# Phase 2 — Campaign-Derived Scenarios
+
+## Summary
+
+Closed the §4.3 gap (deferred from Phase 1): the scenario player can now
+spawn aircraft from a real Falcon 4.0 campaign save instead of a hand-
+authored JSON aircraft list. Loading `save1.cam` (via `f4-world-convert`'s
+`cam2json`) produces a `WorldState` with `Flight`-class units; the new
+`spawn_aircraft_from_flights()` bridge walks those units, resolves each
+flight's squadron → airbase → parking spot, and composes a 4-component
+aircraft entity (`TransformComponent + FlightModelComponent +
+VisualModelComponent + BrainComponent`) per flight.
+
+## Changes
+
+- **`f4-simulation/scenario.hpp`**: Added `SpawnMode` enum (`ScenarioList`
+  | `CampaignFlights`) + `Scenario::world_json_path` + `class_table_path`
+  fields. Backward compatible — defaults to `ScenarioList`.
+- **`f4-simulation/campaign_bridge.{hpp,cpp}`** (new): Two functions:
+  - `derive_airfield_from_objective(obj, runway_id)` — pure conversion
+    from `ObjectiveState.ground_layout` to `ScenarioAirfield`. Returns
+    `nullopt` for non-airbases. Grid→ENU conversion (1024 ft/grid unit).
+    Builds taxi route from parking → follow-me → threshold.
+  - `spawn_aircraft_from_flights(world, ct, db, cfg, airfield, template)`
+    — walks `world.with_component<FlightPlanComponent>()`, resolves each
+    flight's squadron → airbase → transform for parking spot, applies
+    per-flight lateral offset (80 ft alternating ±), looks up vis_type
+    via `ClassTable::vis_type_for(squadron.class_table_index, 0)`,
+    composes the 4-component aircraft entity. Falls back gracefully when
+    CT lookup or squadron resolution fails.
+- **`f4-simulation/simulation.{hpp,cpp}`**: Replaced single
+  `aircraft_entity_` with `std::vector<EntityId> aircraft_entities_`.
+  Spawn dispatcher picks `spawn_from_scenario_list()` (Phase 1 path, now
+  iterates `scenario.aircraft[]`) or `spawn_from_campaign_flights()`
+  (Phase 2 path: loads WorldState, populates EntityWorld via
+  `f4-world::populate_world`, derives airfield, loads ClassTable, calls
+  `spawn_aircraft_from_flights()`). `tick()` and `record_snapshot()`
+  iterate the vector — one snapshot per aircraft per tick.
+- **`f4-simulation/CMakeLists.txt`**: Added `f4-world` + `f4-world-convert`
+  + `f4-terrain` to dependencies (transitively required by WorldState +
+  ClassTable).
+- **Tests**: 17 new tests.
+  - `test_campaign_bridge.cpp` (11 tests): 7 for `derive_airfield_*`
+    (nullopt paths, threshold/runway_end/departure_alt, taxi route,
+    heading conversion, runway_id propagation) + 4 for `spawn_*` (empty
+    world, one-per-flight, lateral offset, vis_type fallback, threshold
+    fallback).
+  - `test_scenario_loader.cpp` (+6 tests): `spawn_mode` parsing,
+    unknown-mode-throws, `campaign_flights` requires `world_json_path` /
+    `class_table_path` / aircraft template.
+- **Docs**: New `Docs/NEXT_PHASE_PLAN.md` documents Phase 2 scope +
+  acceptance criteria + implementation order.
+
+## Test Results
+
+- All 56 simulation tests pass (11 CampaignBridge + 6 new ScenarioLoader +
+  5 existing ScenarioLoader + 8 ClassTable + 5 VisualModelComponent +
+  21 others).
+- Full suite: 1265 of 1271 pass. The 6 failures are pre-existing
+  (`PilotInput.ValidateClamps*` + `EngineModel.DefaultConstructedHasNoTables`)
+  and unrelated to this change.
+
+## What's Next (Phase 3)
+
+- Wire `f4-scenario-player`'s renderer to iterate `sim.aircraft_entities()`
+  (currently draws only the singleton via `sim.aircraft_entity()`).
+- Build a `kunsan_from_campaign.json` scenario fixture that uses
+  `spawn_mode: "campaign_flights"` with the bundled `save1.world.json` +
+  `FALCON4.ct`.
+- Smoke-test with `--screenshot` to verify multiple F-16s are visible at
+  their campaign-derived parking spots.
+
+---
+
+## Phase 2A — Real Airfield Meshes
+
+**Goal:** Replace the procedural painted airfield (one dark-grey quad with
+threshold bars + centerline dashes) with **real KoreaObj BSP models** placed
+at Kunsan: runway sections, taxiway, control tower, hangars, fuel tanks,
+parking apron. The F-16 and airfield features share the same render path —
+both are just entities with a `VisualModelComponent`.
+
+### Architecture
+
+A new `ScenarioFeature` struct joins `ScenarioAircraft` and
+`ScenarioAirfield` in `f4-simulation/scenario.hpp`. Each feature carries
+`{name, vis_type_index, position, heading_rad}` — the same keying model as
+the aircraft block (direct KoreaObj model index, no class-table lookup).
+The scenario JSON gains an `airfield_features[]` block.
+
+`Simulation::spawn_airfield_features()` creates one entity per feature with
+`TransformComponent` + `VisualModelComponent` (no FM, no brain — static).
+Tracked in a separate `feature_entities_` vector so `tick()` doesn't try
+to sync them from a flight model.
+
+The renderer refactors `aircraft_meshes` (a flat `std::vector<MeshEntry>`)
+into `mesh_cache` (a `std::unordered_map<int, MeshCacheEntry>` keyed by
+`parent_index`). Multiple features sharing the same `vis_type` reuse one
+GPU upload. `draw_aircraft()` becomes `draw_visual_entities()` which walks
+`world.with_component<VisualModelComponent>()` and draws every entity —
+aircraft and features share the same draw path.
+
+### Files changed
+
+| File | Change |
+|------|--------|
+| `f4-simulation/include/f4/simulation/scenario.hpp` | New `ScenarioFeature` struct + `Scenario::airfield_features` vector |
+| `f4-simulation/src/scenario.cpp` | `read_feature()` parser + `airfield_features` block in `parse_scenario()` + validation |
+| `f4-simulation/include/f4/simulation/simulation.hpp` | `feature_entities_` vector + `feature_entities()` accessor + `spawn_airfield_features()` decl |
+| `f4-simulation/src/simulation.cpp` | `spawn_airfield_features()` impl + call from `initialize()` |
+| `f4-scenario-player/src/viewer_state.hpp` | `MeshCacheEntry` struct + `mesh_cache` map (replaces `aircraft_meshes` vector) + `build_mesh_for_model()` + `draw_visual_entities()` decls |
+| `f4-scenario-player/src/renderer.cpp` | `build_aircraft_meshes()` → thin wrapper; new `build_mesh_for_model(int)` lazy builder; `upload_textures()`/`unload_meshes()` walk `mesh_cache`; `draw_aircraft()` → `draw_visual_entities()` walks all VMC entities |
+| `f4-scenario-player/scenarios/kunsan_parking.json.in` | Adds 12 real feature placements (runway sections, threshold bars, taxiway, parking apron, control tower, hangars, fuel tank, runway access gate) |
+| `f4-simulation/tests/fixtures/takeoff_kunsan.json` | Adds 4-feature block for testing |
+| `f4-simulation/tests/test_scenario_loader.cpp` | 4 new tests for `airfield_features` parsing + validation |
+| `f4-simulation/tests/test_feature_spawning.cpp` | **NEW** — 8 integration tests for `spawn_airfield_features()` (entity creation, transform encoding, static-ness, model sharing, discoverability) |
+| `f4-simulation/tests/CMakeLists.txt` | Wires `test_feature_spawning` |
+
+### Test results
+
+- 4 new `ScenarioLoader` tests pass (fixture parsing, empty-allowed, invalid-throws, non-zero-heading)
+- 8 new `FeatureSpawning` integration tests pass (entity-per-feature, transform+VMC present, no-FM, tick-doesn't-modify, model-sharing, empty-spawns-zero, heading-to-quaternion, with_component-discovery)
+- All 19 prior `ScenarioLoader` + `CampaignBridge` tests still pass
+- `f4-scenario-player` builds clean and produces a screenshot showing 11 VAOs (F-16 sub-meshes + multiple feature models) loaded into VRAM
+- Pre-existing `PilotInputTest` failures are unrelated (assertion in `f4-flight-api/src/pilot_input.cpp:21`, present before Phase 2A)
+
+### What's next (Phase 2B)
+
+- Wire `BrainComponent` to drive the F-16 along the taxi route from parking
+  to hold-short, using `FlightModelComponent`'s nosewheel steering + ground
+  throttle.
+- Render the aircraft actually moving across the real airfield meshes.
+
