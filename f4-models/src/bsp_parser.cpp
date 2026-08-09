@@ -642,8 +642,15 @@ bool parse_bsp_tree(
         ctx.tag_count > 0
             ? static_cast<double>(tags_consumed) / static_cast<double>(ctx.tag_count)
             : 1.0;
+    (void)consumption_ratio;  // PATCHED: always run the scan
 
-    if (consumption_ratio < 0.50) {
+    // PATCHED: Always run the vtable scan. The 50% threshold was masking
+    // real geometry in models like 1052 (F-16) LOD 0, where the regular
+    // walk consumes 56% of tags (just above the threshold) but the
+    // remaining 44% are real prim-bearing nodes that are part of the
+    // aircraft. The narrow 0x00465000..0x004651FF vtable window is
+    // specific enough to avoid false positives on float data.
+    {
         for (std::size_t i = 0; i + 4 <= node_data_size; i += 4) {
             // Quick reject on the high bytes of the little-endian vtable.
             // A vtable value of 0x004651xx is stored in memory as

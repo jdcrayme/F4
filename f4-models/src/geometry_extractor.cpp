@@ -709,19 +709,23 @@ f4::models::ModelGeometry extract_geometry(
     // Start from node 0 (root)
     walk_node(ctx, 0);
 
-    // Fallback: if the normal tree walk produced no geometry, try walking
-    // all unvisited nodes. This handles cases where the BSP tree has broken
-    // links (e.g., a BDofNode whose subTree field overlaps with another
-    // node's vtable, producing a garbage offset). The vtable scan in
-    // parse_bsp_tree finds these orphaned nodes and adds them to
-    // tree.nodes, but they're not linked into the tree. Walking them
-    // directly produces geometry without DOF/switch transforms, but it's
-    // better than showing nothing.
+    // PATCHED: Always walk unvisited prim nodes, not just when meshes is
+    // empty. The original `if (geometry.meshes.empty())` gate meant that
+    // if the regular tree walk produced even one mesh, all other orphaned
+    // prim nodes (those whose parent linkage was broken) were silently
+    // dropped. For model 1052 (F-16) LOD 0 this caused ~588 prim-bearing
+    // nodes — i.e. roughly half the aircraft's geometry — to be skipped,
+    // producing the "only the back half renders" symptom.
     //
-    // This primarily affects mid-detail LODs (e.g., model 829 LOD 2)
-    // where the tree structure is more complex and a single broken link
-    // can orphan dozens of prim nodes.
-    if (geometry.meshes.empty()) {
+    // The vtable scan in parse_bsp_tree already runs unconditionally now
+    // (the 50% consumption-ratio gate was removed), so any orphaned
+    // prim nodes the scan recovers will be walked here.
+    //
+    // Walking orphaned prim nodes produces geometry without DOF/switch
+    // transforms applied, but for static aircraft skin panels that's the
+    // correct behavior — DOF transforms are for control surfaces,
+    // landing gear, etc. (which remain reachable from root).
+    {
         for (std::size_t i = 0; i < tree.nodes.size(); ++i) {
             if (ctx.visited[i]) continue;
             // Only process prim nodes — walking non-prim nodes (BSubTree,
