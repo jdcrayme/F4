@@ -739,6 +739,12 @@ void ViewerApp::draw_imgui() {
     // geometry in a dedicated 2D window).
     draw_ground_layout_view();
 
+    // --- Ground Layout 3D panel (auto-opens when an objective with
+    // ground_layout is selected — renders the airfield as filled
+    // runway/taxiway/parking geometry in an embedded Raylib BeginMode3D
+    // viewport, with orbit/zoom camera).
+    draw_ground_layout_3d();
+
     // --- Campaign + Teams panels (auto-open when a world is loaded —
     // show CampaignState fields and the .tea-enriched team roster
     // with stance matrix, country memberships, experience, and command

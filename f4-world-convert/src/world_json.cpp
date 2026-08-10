@@ -372,7 +372,7 @@ std::string to_world_json(const CamArchive& cam, const WorldJsonOptions& opts) {
                                   << ", \"type_name\": \"" << escape_string(point_list_type_name(hdr->type)) << "\""
                                   << ", \"count\": " << static_cast<int>(hdr->count)
                                   << ", \"runway_num\": " << static_cast<int>(hdr->runway_num)
-                                  << ", \"heading\": " << hdr->data
+                                  << ", \"heading_deg\": " << hdr->data
                                   << ", \"sin_h\": " << hdr->sin_heading
                                   << ", \"cos_h\": " << hdr->cos_heading
                                   << ", \"points\": [";

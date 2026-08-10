@@ -117,6 +117,17 @@ set(TINYFILEDIALOGS_SOURCES
 #   canvas.cpp          — handle_input / draw_canvas (Raylib 2D render)
 #   imgui_panels.cpp    — draw_imgui (menus, layers, legend, inspector, modals)
 #                         + open_file_dialog (legacy text-input modal)
+#   ground_layout_view.cpp   — 2D ImGui "Ground Layout" panel (top-down
+#                               line+dot rendering, per-list type colors).
+#   ground_layout_models.cpp — pure layout→geometry converter (no Raylib,
+#                               no ImGui). Builds AirfieldGeometry3D from
+#                               GroundLayoutComponent + FeatureSetComponent.
+#                               Unit-tested by tests/test_ground_layout_models.cpp.
+#   ground_layout_3d.cpp     — "Ground Layout 3D" ImGui panel: renders the
+#                               AirfieldGeometry3D into an offscreen
+#                               RenderTexture2D via BeginMode3D, displays
+#                               via rlImGuiImageSize, captures mouse input
+#                               for orbit/zoom.
 # Plus the pre-existing hex/ (Hex Inspector) + file_dialog.cpp (tinyfiledialogs
 # wrapper) + settings.cpp (persisted settings JSON).
 # ============================================================================
@@ -132,6 +143,8 @@ add_library(f4_world_viewer STATIC
     src/imgui_panels.cpp
     src/inspector_panel.cpp
     src/ground_layout_view.cpp
+    src/ground_layout_models.cpp
+    src/ground_layout_3d.cpp
     src/campaign_and_teams_view.cpp
     src/file_dialog.cpp
     src/settings.cpp
@@ -160,6 +173,7 @@ target_link_libraries(f4_world_viewer PUBLIC
     f4-world-convert
     f4-terrain-convert
     f4-install
+    f4-models
     f4-json
 )
 target_link_libraries(f4_world_viewer PRIVATE raylib)

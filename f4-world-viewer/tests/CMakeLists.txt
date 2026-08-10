@@ -26,14 +26,34 @@ add_executable(test_hex_model
 )
 target_include_directories(test_hex_model PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src
 )
 target_link_libraries(test_hex_model PRIVATE
     GTest::gtest_main
     f4-world-convert
-	f4-terrain
+        f4-terrain
 )
 target_compile_definitions(test_hex_model PRIVATE
     FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../f4-world-convert/tests/fixtures/"
     TERRAIN_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../f4-terrain/tests/fixtures/"
 )
 gtest_discover_tests(test_hex_model)
+
+# --- Ground-layout-models tests ---
+# Pure layout→geometry conversion. No raylib, no ImGui, no GL context.
+# Links against ground_layout_models.cpp + f4-entities (for
+# GroundLayoutList / FeatureEntryState types in f4/entities/types.hpp).
+add_executable(test_ground_layout_models
+    test_ground_layout_models.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/ground_layout_models.cpp
+)
+target_include_directories(test_ground_layout_models PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src
+)
+target_link_libraries(test_ground_layout_models PRIVATE
+    GTest::gtest_main
+    f4-entities
+)
+target_compile_features(test_ground_layout_models PRIVATE cxx_std_20)
+gtest_discover_tests(test_ground_layout_models)

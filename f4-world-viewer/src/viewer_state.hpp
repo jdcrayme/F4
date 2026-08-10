@@ -37,6 +37,20 @@
 #include <f4/terrain/terrain_data.hpp>
 #include <f4/world/world_loader.hpp>
 
+// KoreaObj model database + Falcon4.ct class table — used by the
+// Ground Layout 3D panel to render real 3D feature models (buildings,
+// towers, hangars, etc.) at their FeatureEntryState offsets.
+//
+// IMPORTANT: include these BEFORE <raylib.h>. Raylib defines `PI` as a
+// preprocessor macro which would otherwise collide with any `using PI`
+// declaration brought in transitively. We don't pull in f4-flight-model
+// here (no flight headers in the world-viewer), but keeping f4-models
+// before raylib is the safe pattern used across this codebase.
+#include <f4/models/model_database.hpp>
+#include <f4/models/geometry.hpp>
+#include <f4/models/texture.hpp>
+#include <f4/world_convert/class_table.hpp>
+
 #include <raylib.h>
 
 #include <cstdint>
@@ -48,6 +62,7 @@
 #include <vector>
 
 #include "symbols.hpp"  // SymbolKind, symbol_for_*, draw_symbol_imgui
+#include "ground_layout_models.hpp"  // AirfieldGeometry3D + builder
 
 namespace f4::viewer {
 
@@ -375,6 +390,194 @@ struct ViewerApp::Impl {
     /// with a zoom that fits the bbox with a small margin. No-op
     /// if the objective has no layout or features.
     void fit_to_selection_layout();
+
+    // -----------------------------------------------------------------------
+    // Ground Layout 3D panel state
+    // -----------------------------------------------------------------------
+    //
+    // The 3D panel renders the selected objective's airfield into an
+    // offscreen RenderTexture2D using Raylib's BeginMode3D, then
+    // displays the texture inside an ImGui window via rlImGuiImageSize.
+    // The camera orbits the airfield center; mouse drag rotates, scroll
+    // zooms (only when the ImGui window is hovered, so we don't steal
+    // input from the main 2D canvas).
+    //
+    // The geometry is rebuilt only when the selection changes (cached
+    // via ground_layout_3d_cached_entity). The RenderTexture is
+    // allocated lazily on first use and freed in the ViewerApp dtor.
+    RenderTexture2D ground_layout_3d_target = {0};
+    bool ground_layout_3d_target_valid = false;
+    int  ground_layout_3d_target_w = 0;
+    int  ground_layout_3d_target_h = 0;
+    Camera3D ground_layout_3d_camera = {};
+    bool ground_layout_3d_camera_inited = false;
+    // Orbit parameters (spherical). position is recomputed each frame
+    // from these + the airfield center.
+    float ground_layout_3d_yaw = 0.6f;        // radians, around +Z (up)
+    float ground_layout_3d_pitch = 0.5f;      // radians, from horizon
+    float ground_layout_3d_distance = 4000.0f; // feet, from center
+    // Airfield center in objective-local ENU feet (set when geometry is built).
+    float ground_layout_3d_center_x = 0.0f;
+    float ground_layout_3d_center_y = 0.0f;
+    // Cached geometry + the entity it was built from. Rebuild when the
+    // selected entity changes (compared by EntityId).
+    AirfieldGeometry3D ground_layout_3d_geometry;
+    f4::entities::EntityId ground_layout_3d_cached_entity;
+    bool ground_layout_3d_show_labels = true;
+    bool ground_layout_3d_show_features = true;
+    bool ground_layout_3d_show_runway = true;
+    bool ground_layout_3d_show_taxiways = true;
+    bool ground_layout_3d_show_parking = true;
+    bool ground_layout_3d_show_grid = true;
+    // When true, render real KoreaObj BSP models for features (buildings,
+    // towers, hangars, etc.) at their FeatureEntryState offsets, replacing
+    // the flat footprint quads. Requires KoreaObj.HDR/.LOD/.TEX to be
+    // discoverable under the current Installation. Falls back silently
+    // to footprint rendering when models aren't loaded (the panel still
+    // shows runway/taxiway/parking geometry).
+    bool ground_layout_3d_show_models = true;
+
+    // --- KoreaObj model database + class table (lazy) -------------------
+    //
+    // Loaded once on first use of draw_ground_layout_3d() when an
+    // installation is configured. We don't load eagerly at startup
+    // because:
+    //   - ModelDatabase::load() is ~50-150ms for a full KoreaObj
+    //   - The user may never open the 3D panel
+    //   - We need the GL context for any mesh upload, and that's not
+    //     available until run() calls InitWindow()
+    //
+    // `models_3d_load_attempted` distinguishes "haven't tried yet" from
+    // "tried and failed" so we don't re-attempt every frame after a
+    // failure (the failure message would otherwise pollute status_msg).
+    std::optional<f4::models::ModelDatabase> model_db_3d;
+    f4::world_convert::ClassTable class_table_3d;
+    bool models_3d_load_attempted = false;
+    bool models_3d_loaded = false;
+    std::string models_3d_error;  // empty if loaded successfully
+
+    // --- Mesh cache (one Raylib Mesh per unique KoreaObj parent_index) ---
+    //
+    // Mirrors the scenario-player's MeshCacheEntry structure. Built lazily
+    // from draw_ground_layout_3d() the first time a feature with a
+    // previously-unseen vis_type is encountered. Multiple features
+    // sharing the same vis_type (e.g. three hangars of type 169) reuse
+    // one GPU upload.
+    //
+    // All entries MUST be unloaded (UnloadMesh / UnloadTexture) before
+    // the GL context goes away — handled by unload_meshes_3d() called
+    // from ~ViewerApp() and run()'s shutdown path.
+    struct MeshEntry3D {
+        ::Mesh mesh = {};
+        int tex_id = -1;  // -1 = untextured, use vertex colors
+    };
+    struct MeshCacheEntry3D {
+        std::vector<MeshEntry3D> meshes;
+        bool built = false;
+    };
+    std::unordered_map<int, MeshCacheEntry3D> mesh_cache_3d;
+
+    // --- Texture cache (lazy, shared across meshes by tex_id) -----------
+    struct TexCacheEntry3D {
+        ::Texture2D texture = {};
+        ::Material material = {};
+        bool uploaded = false;
+    };
+    std::unordered_map<int, TexCacheEntry3D> texture_cache_3d;
+
+    // --- Lit shader (single directional sun + ambient) -----------------
+    //
+    // Same source as f4-scenario-player's renderer.cpp and f4-models-viewer's
+    // canvas3d.cpp. Compiled lazily on first draw call. If compilation
+    // fails (e.g. headless GL stub), we fall back to the unlit default
+    // material — features still render, just without directional shading.
+    Shader lit_shader_3d = {};
+    bool lit_shader_3d_loaded = false;
+    int lit_shader_3d_dir_loc = -1;
+    int lit_shader_3d_color_loc = -1;
+    int lit_shader_3d_ambient_loc = -1;
+
+    // --- Cached default material + 1x1 white fallback texture ----------
+    //
+    // The lit shader has `if (tex.a < 0.5) discard;` which kills fragments
+    // when the sampled texture alpha is below 0.5. For UTEXTURED meshes
+    // (tex_id < 0), the default material has NO texture bound to
+    // MATERIAL_MAP_DIFFUSE — the GLSL sampler then returns undefined data
+    // (most drivers return (0,0,0,0)), causing the discard to trigger and
+    // the entire mesh to disappear.
+    //
+    // Fix: create a 1x1 opaque-white RGBA texture once, bind it to the
+    // default material's diffuse map. Now `texture0` always samples
+    // (1,1,1,1) for untextured meshes → discard doesn't trigger → the
+    // mesh renders with vertex colors * lighting.
+    //
+    // Textured meshes use the per-tex_id material from texture_cache_3d
+    // (which already has the real texture bound), so they sample the
+    // actual texture as before.
+    //
+    // The default material is also cached (not recreated every frame).
+    // The previous code called LoadMaterialDefault() INSIDE the per-frame
+    // render loop, which leaks GPU memory (Material.maps is RL_CALLOC'd
+    // and never freed without UnloadMaterial).
+    Texture2D fallback_white_tex_3d = {};
+    bool fallback_white_tex_3d_valid = false;
+    Material default_mat_3d = {};
+    bool default_mat_3d_valid = false;
+
+    // --- Lighting state (matches scenario-player defaults) -------------
+    Vector3 light_3d_direction = { 0.65f, -1.0f, 0.35f };
+    float   light_3d_intensity = 1.0f;
+    Color   ambient_3d_color = { 80, 80, 90, 255 };
+    Color   light_3d_color   = { 255, 250, 235, 255 };
+
+    // --- Per-frame diagnostic counters for the 3D Models path -----------
+    //
+    // Reset at the start of each draw_ground_layout_3d() call, updated as
+    // features are walked, and displayed in the panel so the user can see
+    // exactly where the pipeline is dropping features (placeholder? no
+    // vis_type? empty mesh? 0 triangles?).
+    int diag_3d_features_total = 0;
+    int diag_3d_features_skipped_placeholder = 0;
+    int diag_3d_features_no_vistype = 0;
+    int diag_3d_features_no_mesh = 0;
+    int diag_3d_features_drawn = 0;
+    int diag_3d_meshes_drawn = 0;
+    int diag_3d_triangles_drawn = 0;
+
+    // --- Methods (defined in ground_layout_3d.cpp) ---------------------
+    //
+    // All require the GL context (rlImGuiSetup has been called). No-op
+    // or returning false when no Installation is configured or when
+    // KoreaObj files can't be found.
+    /// Lazily load KoreaObj.HDR/.LOD/.TEX + Falcon4.ct from the configured
+    /// Installation. Returns true on success. Idempotent — once loaded,
+    /// subsequent calls return true without re-loading. After a failure,
+    /// returns false and sets models_3d_error (further calls are no-ops
+    /// until models_3d_load_attempted is reset).
+    bool ensure_models_3d_loaded();
+    /// Compile the lit shader on first use. Returns true on success.
+    /// Idempotent. Returns false if the shader fails to compile (caller
+    /// should fall back to LoadMaterialDefault()).
+    bool ensure_lit_shader_3d();
+    /// Lazily create the 1x1 opaque-white fallback texture + the cached
+    /// default material that binds it. Idempotent. The default material
+    /// also gets the lit shader assigned (if compiled). Required so that
+    /// UTEXTURED meshes (tex_id < 0) sample (1,1,1,1) instead of undefined
+    /// data — without this, the lit shader's `if (tex.a < 0.5) discard;`
+    /// kills every fragment of every untextured mesh.
+    bool ensure_default_material_3d();
+    /// Build (or skip if cached) Raylib Mesh objects for one KoreaObj
+    /// model. Requires the GL context. No-op if parent_index < 0 or
+    /// already cached. Sets mesh_cache_3d[parent_index].built = true
+    /// even on failure (so we don't retry every frame).
+    void build_mesh_3d(int parent_index);
+    /// Upload any new textures referenced by built meshes but not yet
+    /// in texture_cache_3d. Called after every build_mesh_3d() batch.
+    void upload_textures_3d();
+    /// Free all cached meshes + textures. MUST be called before the GL
+    /// context goes away (i.e. before CloseWindow()). Safe to call when
+    /// nothing is cached (no-op). Also clears the lit shader.
+    void unload_meshes_3d();
 };
 
 } // namespace f4::viewer

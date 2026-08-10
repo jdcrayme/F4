@@ -239,7 +239,8 @@ ObjectiveState parse_objective(Reader& r) {
                     else if (gk == "count")        gll.count        = static_cast<uint8_t>(r.read_int());
                     else if (gk == "runway_num")   gll.runway_num   = static_cast<uint8_t>(r.read_int());
                     else if (gk == "ltrt")         gll.ltrt         = static_cast<int8_t>(r.read_int());
-                    else if (gk == "heading_deg")  gll.heading_deg  = static_cast<float>(r.read_number());
+                    else if (gk == "heading_deg" || gk == "heading")
+                        gll.heading_deg = static_cast<float>(r.read_number());
                     else if (gk == "points") {
                         r.skip_ws(); r.expect('[');
                         if (r.consume(']')) { /* empty */ }

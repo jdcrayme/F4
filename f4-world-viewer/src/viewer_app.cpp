@@ -69,6 +69,22 @@ ViewerApp::~ViewerApp() {
         UnloadRenderTexture(impl_->terrain_cache);
         impl_->terrain_cache = {0};
     }
+    // Free the Ground Layout 3D panel's RenderTexture (same GL-context
+    // constraint as above). Allocated lazily by draw_ground_layout_3d().
+    if (impl_->ground_layout_3d_target.id != 0 && IsWindowReady()) {
+        UnloadRenderTexture(impl_->ground_layout_3d_target);
+        impl_->ground_layout_3d_target = {0};
+        impl_->ground_layout_3d_target_valid = false;
+    }
+    // Free the KoreaObj mesh + texture caches used by the 3D panel.
+    // Same GL-context constraint — only safe if IsWindowReady() is true
+    // (i.e. run() has not yet returned). When run() does return, it
+    // calls unload_meshes_3d() BEFORE CloseWindow() in its shutdown
+    // path; this dtor call is a safety net for the case where the
+    // viewer is destroyed without run() ever being called (CLI-only usage).
+    if (IsWindowReady()) {
+        impl_->unload_meshes_3d();
+    }
 }
 
 void ViewerApp::run() {
@@ -139,6 +155,19 @@ void ViewerApp::run() {
         impl_->terrain_cache = {0};
         impl_->terrain_cache_valid = false;
     }
+    // Free the Ground Layout 3D panel's RenderTexture before the GL
+    // context goes away. Same rationale as above.
+    if (impl_->ground_layout_3d_target.id != 0) {
+        UnloadRenderTexture(impl_->ground_layout_3d_target);
+        impl_->ground_layout_3d_target = {0};
+        impl_->ground_layout_3d_target_valid = false;
+    }
+    // Free the KoreaObj mesh + texture caches used by the 3D panel.
+    // MUST be called before CloseWindow — UnloadMesh / UnloadTexture /
+    // UnloadShader all need the GL context. After this call, the cache
+    // is empty; subsequent selections won't re-render models until the
+    // user re-runs the viewer (which is fine — we're shutting down).
+    impl_->unload_meshes_3d();
     CloseWindow();
 }
 

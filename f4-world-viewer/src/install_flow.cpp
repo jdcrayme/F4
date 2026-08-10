@@ -68,6 +68,15 @@ bool ViewerApp::set_install_path(const std::filesystem::path& path) {
         impl_->settings.install_path = path;
         save_settings(impl_->settings);
 
+        // Reset the KoreaObj model load flag so the Ground Layout 3D
+        // panel re-attempts to load on next selection. The previous
+        // attempt may have failed because no install was set; now that
+        // we have one, retry. Existing mesh + texture caches are kept
+        // (they're still valid if models were loaded before — switching
+        // installs doesn't invalidate the in-memory model data).
+        impl_->models_3d_load_attempted = false;
+        impl_->models_3d_error.clear();
+
         // Build a summary for the confirmation modal.
         std::ostringstream ss;
         ss << "Install detected successfully.\n\n";
