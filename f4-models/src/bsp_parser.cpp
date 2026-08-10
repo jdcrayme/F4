@@ -30,8 +30,21 @@
 #include "bin_reader.hpp"
 
 #include <algorithm>
+#include <cstdio>
 #include <cstring>
+#include <cstdlib>
 #include <unordered_map>
+
+// DIAGNOSTIC: When env var F4_DIAG=1 is set, the parser emits detailed
+// stderr diagnostics about the vtable scan and switch nodes. Off by
+// default so production behavior is unchanged.
+static bool diag_enabled() {
+    static bool v = ([](){
+        const char* e = std::getenv("F4_DIAG");
+        return e && e[0] == '1';
+    })();
+    return v;
+}
 
 namespace f4::models::detail {
 
@@ -336,6 +349,13 @@ NodeIdx walk_node(WalkCtx& ctx, int32_t offset) {
         if (!r.read(children_off)) goto trunc;
         node.switch_children_offset = children_off;
 
+        // DIAGNOSTIC: log every BSwitchNode, especially n_children==0
+        if (diag_enabled()) {
+            std::fprintf(stderr,
+                "[DIAG] BSwitchNode @ off=%d switch_number=%d n_children=%d children_off=%d\n",
+                offset, node.switch_number, node.n_children, children_off);
+        }
+
         // Walk each child NOW so they end up in tree.nodes and offset_map.
         if (children_off >= 0 && node.n_children > 0 && node.n_children < 64) {
             auto base = static_cast<std::size_t>(children_off);
@@ -351,6 +371,18 @@ NodeIdx walk_node(WalkCtx& ctx, int32_t offset) {
                     }
                 }
             }
+        } else if (diag_enabled() && children_off >= 0 && node.n_children == 0) {
+            // n_children==0 with non-null children_off — suspect #2.
+            // Try to peek at the first child offset to see if there's
+            // actually data there.
+            int32_t peek = -1;
+            auto base = static_cast<std::size_t>(children_off);
+            if (base + sizeof(int32_t) <= ctx.base_size) {
+                std::memcpy(&peek, ctx.base + base, sizeof(int32_t));
+            }
+            std::fprintf(stderr,
+                "[DIAG]   ^-- SUSPECT: n_children=0 but children_off=%d (first child_off would be %d)\n",
+                children_off, peek);
         }
         break;
     }
@@ -362,6 +394,12 @@ NodeIdx walk_node(WalkCtx& ctx, int32_t offset) {
         if (!r.read(node.n_children)) goto trunc;
         if (!r.read(children_off)) goto trunc;
         node.switch_children_offset = children_off;
+
+        if (diag_enabled()) {
+            std::fprintf(stderr,
+                "[DIAG] BXSwitchNode @ off=%d switch_number=%d flags=%d n_children=%d children_off=%d\n",
+                offset, node.switch_number, node.switch_flags, node.n_children, children_off);
+        }
 
         if (children_off >= 0 && node.n_children > 0 && node.n_children < 64) {
             auto base = static_cast<std::size_t>(children_off);
@@ -377,6 +415,15 @@ NodeIdx walk_node(WalkCtx& ctx, int32_t offset) {
                     }
                 }
             }
+        } else if (diag_enabled() && children_off >= 0 && node.n_children == 0) {
+            int32_t peek = -1;
+            auto base = static_cast<std::size_t>(children_off);
+            if (base + sizeof(int32_t) <= ctx.base_size) {
+                std::memcpy(&peek, ctx.base + base, sizeof(int32_t));
+            }
+            std::fprintf(stderr,
+                "[DIAG]   ^-- SUSPECT: BXSwitchNode n_children=0 but children_off=%d (first child_off would be %d)\n",
+                children_off, peek);
         }
         break;
     }
@@ -598,83 +645,425 @@ bool parse_bsp_tree(
         }
     }
 
-    // Pass 2: targeted vtable scan for unvisited nodes.
+    // Pass 2: TAG-DRIVEN RECOVERY (replaces vtable scan).
     //
-    // Some BSwitchNode variants store n_children=0 but still have real
-    // children in the buffer. The regular walk skips them, leaving real
-    // prim nodes orphaned and unconsumed tags in the tag list.
+    // The previous implementation scanned the buffer in byte-offset
+    // order and walked any unvisited position whose 4-byte value
+    // matched the BNode-class vtable range (0x00465000..0x004651FF).
+    // This consumed tags in TAG-LIST order regardless of which buffer
+    // position was actually correct for that tag, producing massive
+    // false positives (positions in coordinate/normal/prim data where
+    // bytes happened to match the vtable pattern). Each false positive
+    // consumed a real tag and created a fake node whose fields were
+    // garbage float bit patterns.
     //
-    // The previous implementation of this scan used a broad threshold
-    // (0x00460000..0x00470000) which produced massive false positives on
-    // real Falcon4 LOD data — float coordinate values, normal values,
-    // and packed bit patterns routinely have bit representations in that
-    // range (e.g. 0x46xx xxxx ≈ +22000..+26000 as a float). Each false
-    // positive consumed a real tag and created a fake node whose
-    // sibling/subtree/children offsets were random float bit patterns,
-    // frequently pointing back to already-visited nodes (creating
-    // cycles). Concrete impact: model 1052 (F-16) LOD 0 had ~700 fake
-    // nodes with garbage dof_number / switch_number fields like
-    // dof#=1067981667 (=0x3F940000, a coordinate value).
+    // Diagnostic on model 1052 LOD 0: the previous scan consumed 695
+    // tags and produced 663 fake nodes (19 of 26 BSwitchNode tags were
+    // consumed by fakes with garbage switch_number values like
+    // 1048996681 = 0x3E880029 ≈ 0.25 as a float). 83 prims were
+    // rejected as type_val=27 because their prim_offset was a
+    // coordinate value misread as int32.
     //
-    // Two fixes:
-    //   1. Narrow the vtable range from 0x00460000..0x00470000 (64KB
-    //      window) to 0x00465000..0x00465200 (512-byte window). The
-    //      real BNode-class vtables for this FreeFalcon build all lie
-    //      in a ~176-byte sub-range (0x004650B8..0x00465168), so a
-    //      512-byte window comfortably covers them while excluding
-    //      virtually all float bit patterns (a float in this range
-    //      would be a denormalized value near 6.5e-39, which never
-    //      appears in coordinate/normal data).
-    //   2. Only run the scan when the regular walk consumed < 50% of
-    //      the tags. If the walk consumed most tags, the tree is
-    //      well-formed and any "orphaned" positions are likely fake
-    //      vtable matches in coordinate data, not real nodes. This
-    //      prevents the scan from polluting well-formed trees
-    //      (e.g. model 1052 LOD 0, where the walk consumed 887/1582
-    //      = 56% of tags).
+    // NEW STRATEGY: For each unconsumed tag, scan all unvisited
+    // vtable-pattern positions and walk the FIRST one whose
+    // type-specific fields validate cleanly against the tag's
+    // expected node layout. If no candidate validates, skip the tag
+    // (better to leave a tag unconsumed than to create a fake node
+    // that will pollute the tree with garbage geometry).
     //
-    // The 50% threshold is conservative: model 829 LOD 2 consumes
-    // only 6/75 = 8% of tags (broken BSwitchNode with n_children=0),
-    // well below the threshold. Model 1052 LOD 0 consumes 887/1582
-    // = 56%, above the threshold, so the scan is skipped.
+    // Validation rules per node type are derived from the on-disk
+    // layouts in walk_node() above. Ranges are conservative bounds
+    // that real Falcon data always satisfies but garbage float
+    // patterns almost never do.
+
     const int tags_consumed = ctx.tag_pos;
     const double consumption_ratio =
         ctx.tag_count > 0
             ? static_cast<double>(tags_consumed) / static_cast<double>(ctx.tag_count)
             : 1.0;
-    (void)consumption_ratio;  // PATCHED: always run the scan
+    (void)consumption_ratio;
 
-    // PATCHED: Always run the vtable scan. The 50% threshold was masking
-    // real geometry in models like 1052 (F-16) LOD 0, where the regular
-    // walk consumes 56% of tags (just above the threshold) but the
-    // remaining 44% are real prim-bearing nodes that are part of the
-    // aircraft. The narrow 0x00465000..0x004651FF vtable window is
-    // specific enough to avoid false positives on float data.
+    // Pre-compute the list of unvisited vtable-pattern positions.
+    // A position qualifies if:
+    //   - bytes [0..3] little-endian decode to a value in 0x00465000..0x004651FF
+    //   - the position is NOT already in ctx.offset_map (already visited)
+    // We iterate this list per-tag below.
+    struct VtHit { int32_t off; uint32_t vt; };
+    std::vector<VtHit> unvisited_vt_hits;
     {
         for (std::size_t i = 0; i + 4 <= node_data_size; i += 4) {
             // Quick reject on the high bytes of the little-endian vtable.
-            // A vtable value of 0x004651xx is stored in memory as
-            // [xx, 0x51, 0x46, 0x00] (little-endian). So byte 3 (high
-            // byte) is 0x00, byte 2 is 0x46, and byte 1 is 0x50 or 0x51.
-            // This eliminates ~99.99% of buffer positions (most bytes
-            // are non-zero coordinate/normals data) without needing a
-            // full uint32 read + range check.
             if (node_data[i + 3] != 0x00) continue;
             if (node_data[i + 2] != 0x46) continue;
             if (node_data[i + 1] != 0x50 && node_data[i + 1] != 0x51) continue;
-
             uint32_t vt = 0;
             std::memcpy(&vt, node_data + i, 4);
-            // Narrow range check (512-byte window: 0x00465000..0x004651FF)
             if (vt < 0x00465000 || vt > 0x004651FF) continue;
-
-            // Check if already visited
             int32_t off = static_cast<int32_t>(i);
             if (ctx.offset_map.count(off) > 0) continue;
-            // Walk it — this consumes a tag and populates the node
-            if (ctx.tag_pos >= ctx.tag_count) break;
-            (void)walk_node(ctx, off);
+            unvisited_vt_hits.push_back({off, vt});
         }
+    }
+
+    // Per-node-type validators. Each reads the type-specific fields
+    // at the candidate position and returns true if they look sane.
+    //
+    // node_data layout reminder (from walk_node above):
+    //   [0..3]    uint32  vtable  (already validated by the pre-filter)
+    //   [4..7]    int32   sibling_off  (validated below per-type)
+    //   [8..]     type-specific fields
+
+    auto read_i32_at = [&](std::size_t off, int32_t& out) -> bool {
+        if (off + 4 > node_data_size) return false;
+        std::memcpy(&out, node_data + off, 4);
+        return true;
+    };
+
+    // Validate that an offset is either -1 (null) or in-range.
+    auto valid_off = [&](int32_t v) -> bool {
+        return v == -1 || (v >= 0 && static_cast<std::size_t>(v) < node_data_size);
+    };
+
+    // Validate a pool descriptor (used by BRoot/BSubTree/BDofNode/etc.).
+    // node layout at offset `base`:
+    //   [base+8..11]   coords_off
+    //   [base+12..15]  n_coords
+    //   [base+16..19]  n_dynamic_coords
+    //   [base+20..23]  dynamic_coord_offset
+    //   [base+24..27]  normals_off
+    //   [base+28..31]  n_normals
+    //   [base+32..35]  subtree_off   (we don't validate subtree — it's
+    //                                  walked recursively and will be
+    //                                  visited via offset_map)
+    auto valid_subtree_pool = [&](std::size_t base) -> bool {
+        int32_t coords_off=0, n_coords=0, n_dyn=0, dyn_off=0,
+                normals_off=0, n_normals=0;
+        if (!read_i32_at(base + 8,  coords_off))    return false;
+        if (!read_i32_at(base + 12, n_coords))      return false;
+        if (!read_i32_at(base + 16, n_dyn))         return false;
+        if (!read_i32_at(base + 20, dyn_off))       return false;
+        if (!read_i32_at(base + 24, normals_off))   return false;
+        if (!read_i32_at(base + 28, n_normals))     return false;
+        // Counts: real Falcon trees have < 100k coords/normals per subtree.
+        if (n_coords < 0 || n_coords > 100000) return false;
+        if (n_normals < 0 || n_normals > 100000) return false;
+        if (n_dyn < 0 || n_dyn > 100000) return false;
+        // Offsets: -1 (null) or in-range.
+        if (!valid_off(coords_off))   return false;
+        if (!valid_off(normals_off))  return false;
+        // If a count is > 0, the corresponding offset must be in-range
+        // AND the pool [off, off + count*sizeof(Vec3)) must fit.
+        if (n_coords > 0) {
+            if (coords_off < 0) return false;
+            std::size_t need = static_cast<std::size_t>(coords_off)
+                             + static_cast<std::size_t>(n_coords) * sizeof(Vec3);
+            if (need > node_data_size) return false;
+        }
+        if (n_normals > 0) {
+            if (normals_off < 0) return false;
+            std::size_t need = static_cast<std::size_t>(normals_off)
+                             + static_cast<std::size_t>(n_normals) * sizeof(Vec3);
+            if (need > node_data_size) return false;
+        }
+        return true;
+    };
+
+    // Validate a prim header at the given offset.
+    // Prim header layout: type(4) + nVerts(4) + xyz_offset(4)
+    //   type ∈ [0, 26], nVerts ∈ [3, 1000] (per poly_parser sanity)
+    auto valid_prim_header = [&](int32_t prim_off) -> bool {
+        if (prim_off < 0) return false;
+        std::size_t po = static_cast<std::size_t>(prim_off);
+        if (po + 12 > node_data_size) return false;
+        int32_t type_val=0, n_verts=0, xyz_off=0;
+        std::memcpy(&type_val, node_data + po,      4);
+        std::memcpy(&n_verts,  node_data + po + 4,  4);
+        std::memcpy(&xyz_off,  node_data + po + 8,  4);
+        if (type_val < 0 || type_val >= 27) return false;
+        if (n_verts < 3 || n_verts > 1000)  return false;
+        // xyz_off must point to a vertex array of n_verts * 3 int32 indices
+        // (each index refers to a coord in the active pool). We don't
+        // know the active pool here, but the byte range must be valid.
+        if (xyz_off < 0) return false;
+        std::size_t need = static_cast<std::size_t>(xyz_off)
+                         + static_cast<std::size_t>(n_verts) * 3 * sizeof(int32_t);
+        if (need > node_data_size) return false;
+        return true;
+    };
+
+    // Per-type validator. `base` is the absolute offset of the node
+    // (i.e., the vtable-pattern position). Returns true if the bytes
+    // at [base, base + node_size_for_type] look like a real node of
+    // the given type.
+    auto validate_node = [&](std::size_t base, BspNodeType tag) -> bool {
+        // All nodes have vtable(4) + sibling(4).
+        int32_t sib_off = 0;
+        if (!read_i32_at(base + 4, sib_off)) return false;
+        if (!valid_off(sib_off)) return false;
+
+        switch (tag) {
+        case BspNodeType::BNode:
+            // vtable(4) + sibling(4) — no type-specific fields.
+            return true;
+
+        case BspNodeType::BSubTree:
+            return valid_subtree_pool(base);
+
+        case BspNodeType::BRoot: {
+            if (!valid_subtree_pool(base)) return false;
+            // BRoot adds: tex_off(4) + n_tex_ids(4) + script(4)
+            // after the BSubTree fields. Subtree fields end at base+36.
+            int32_t tex_off=0, n_tex_ids=0, script=0;
+            if (!read_i32_at(base + 36, tex_off))    return false;
+            if (!read_i32_at(base + 40, n_tex_ids))  return false;
+            if (!read_i32_at(base + 44, script))     return false;
+            if (n_tex_ids < 0 || n_tex_ids > 100000) return false;
+            if (!valid_off(tex_off)) return false;
+            if (n_tex_ids > 0) {
+                if (tex_off < 0) return false;
+                std::size_t need = static_cast<std::size_t>(tex_off)
+                                 + static_cast<std::size_t>(n_tex_ids) * sizeof(int32_t);
+                if (need > node_data_size) return false;
+            }
+            // script_number is typically 0 or small (index into script table).
+            // Garbage float patterns often produce huge script values.
+            if (script < -1 || script > 1024) return false;
+            return true;
+        }
+
+        case BspNodeType::BSlotNode: {
+            // BSlotNode: vtable(4)+sib(4) + rotation(36) + origin(12) + slot_number(4)
+            // Total 60 bytes. Only validate slot_number — rotations/origins
+            // are arbitrary floats.
+            int32_t slot_num = 0;
+            if (!read_i32_at(base + 52, slot_num)) return false;
+            // Real slot numbers are 0..63. Garbage float bit patterns
+            // in [0..63] are extremely rare (the float would have to
+            // be a tiny denormal).
+            if (slot_num < 0 || slot_num > 256) return false;
+            return true;
+        }
+
+        case BspNodeType::BDofNode:
+        case BspNodeType::BXDofNode:
+        case BspNodeType::BTransNode:
+        case BspNodeType::BScaleNode: {
+            // All start with BSubTree fields (valid_subtree_pool).
+            if (!valid_subtree_pool(base)) return false;
+            // After subtree fields (base+36): dof_number(4).
+            int32_t dof_num = 0;
+            if (!read_i32_at(base + 36, dof_num)) return false;
+            // Real DOF numbers are 0..31 (rarely up to 63). -1 means "no DOF".
+            // Garbage float bit patterns produce huge values here.
+            if (dof_num < -1 || dof_num > 128) return false;
+            return true;
+        }
+
+        case BspNodeType::BSwitchNode: {
+            // vtable(4)+sib(4)+switch_number(4)+n_children(4)+children_off(4) = 20 bytes
+            int32_t sw_num=0, n_ch=0, ch_off=0;
+            if (!read_i32_at(base + 8,  sw_num)) return false;
+            if (!read_i32_at(base + 12, n_ch))   return false;
+            if (!read_i32_at(base + 16, ch_off)) return false;
+            if (sw_num < -1 || sw_num > 64) return false;
+            if (n_ch < 0 || n_ch > 64) return false;
+            if (n_ch > 0) {
+                if (ch_off < 0) return false;
+                std::size_t need = static_cast<std::size_t>(ch_off)
+                                 + static_cast<std::size_t>(n_ch) * sizeof(int32_t);
+                if (need > node_data_size) return false;
+            }
+            return true;
+        }
+
+        case BspNodeType::BXSwitchNode: {
+            // vtable(4)+sib(4)+switch_number(4)+flags(4)+n_children(4)+children_off(4) = 24 bytes
+            int32_t sw_num=0, flags=0, n_ch=0, ch_off=0;
+            if (!read_i32_at(base + 8,  sw_num)) return false;
+            if (!read_i32_at(base + 12, flags))  return false;
+            if (!read_i32_at(base + 16, n_ch))   return false;
+            if (!read_i32_at(base + 20, ch_off)) return false;
+            if (sw_num < -1 || sw_num > 64) return false;
+            if (n_ch < 0 || n_ch > 64) return false;
+            // flags: only bit 0 defined (XSWT_REVERSED_EFFECT). Garbage
+            // float patterns usually have many bits set.
+            if (flags < 0 || flags > 0xFFFF) return false;
+            if (n_ch > 0) {
+                if (ch_off < 0) return false;
+                std::size_t need = static_cast<std::size_t>(ch_off)
+                                 + static_cast<std::size_t>(n_ch) * sizeof(int32_t);
+                if (need > node_data_size) return false;
+            }
+            return true;
+        }
+
+        case BspNodeType::BSplitterNode: {
+            // vtable(4)+sib(4) + plane ABCD(16) + front(4) + back(4) = 32 bytes
+            int32_t front_off=0, back_off=0;
+            if (!read_i32_at(base + 24, front_off)) return false;
+            if (!read_i32_at(base + 28, back_off))  return false;
+            if (!valid_off(front_off)) return false;
+            if (!valid_off(back_off))  return false;
+            // Plane coefficients (a,b,c,d) are floats; we don't validate them
+            // because real planes have arbitrary values. (We rely on the
+            // front/back offset validation as the main signal.)
+            return true;
+        }
+
+        case BspNodeType::BPrimitiveNode: {
+            // vtable(4)+sib(4)+prim_offset(4) = 12 bytes
+            int32_t prim_off = 0;
+            if (!read_i32_at(base + 8, prim_off)) return false;
+            return valid_prim_header(prim_off);
+        }
+
+        case BspNodeType::BLitPrimitiveNode: {
+            // vtable(4)+sib(4)+prim_offset(4)+back_poly_offset(4) = 16 bytes
+            int32_t prim_off=0, back_off=0;
+            if (!read_i32_at(base + 8,  prim_off)) return false;
+            if (!read_i32_at(base + 12, back_off)) return false;
+            if (!valid_prim_header(prim_off)) return false;
+            // back_poly_offset should also point to a valid prim header.
+            // (Some BLightStringNode-like variants may store -1, but
+            // a real BLitPrimitiveNode always has both polys.)
+            if (!valid_prim_header(back_off)) return false;
+            return true;
+        }
+
+        case BspNodeType::BCulledPrimitiveNode: {
+            // Same as BPrimitiveNode.
+            int32_t prim_off = 0;
+            if (!read_i32_at(base + 8, prim_off)) return false;
+            return valid_prim_header(prim_off);
+        }
+
+        case BspNodeType::BSpecialXform: {
+            // vtable(4)+sib(4)+coords_off(4)+n_coords(4)+type(4)+subtree_off(4) = 24 bytes
+            int32_t coords_off=0, n_coords=0, xform_type=0, sub_off=0;
+            if (!read_i32_at(base + 8,  coords_off)) return false;
+            if (!read_i32_at(base + 12, n_coords))   return false;
+            if (!read_i32_at(base + 16, xform_type)) return false;
+            if (!read_i32_at(base + 20, sub_off))    return false;
+            if (n_coords < 0 || n_coords > 100000) return false;
+            if (!valid_off(coords_off)) return false;
+            if (xform_type < 0 || xform_type > 2) return false;
+            if (!valid_off(sub_off)) return false;
+            return true;
+        }
+
+        case BspNodeType::BLightStringNode: {
+            // BPrimNode(12) + light_dir ABCD(16) + rgba_front(4) + rgba_back(4) = 36 bytes
+            int32_t prim_off = 0;
+            if (!read_i32_at(base + 8, prim_off)) return false;
+            if (!valid_prim_header(prim_off)) return false;
+            // rgba_front / rgba_back are color indices (typically < 256).
+            // Validate to reject float-bit-pattern false positives.
+            int32_t rgba_f = 0, rgba_b = 0;
+            if (!read_i32_at(base + 32, rgba_f)) return false;
+            if (!read_i32_at(base + 36, rgba_b)) return false;
+            // Falcon color bank indices are < 65536 typically. -1 = no color.
+            if (rgba_f < -1 || rgba_f > 65536) return false;
+            if (rgba_b < -1 || rgba_b > 65536) return false;
+            return true;
+        }
+
+        case BspNodeType::BRenderControlNode: {
+            // vtable(4)+sib(4)+ctrl(4)+iArg[4](16)+fArg[4](16) = 44 bytes
+            int32_t ctrl = 0;
+            if (!read_i32_at(base + 8, ctrl)) return false;
+            // ctrl ∈ {0, 1} per types.hpp (RenderControlType).
+            if (ctrl < 0 || ctrl > 1) return false;
+            // iArg values are typically small ints (< 65536) or -1.
+            // fArg values are typically 0.0 or small floats in [0, 1].
+            // We can't validate fArg without parsing floats, so we rely
+            // on iArg. Garbage float-bit-pattern false positives usually
+            // have at least one iArg with a huge value.
+            for (int k = 0; k < 4; ++k) {
+                int32_t ia = 0;
+                if (!read_i32_at(base + 12 + k * 4, ia)) return false;
+                if (ia < -1 || ia > 0x10000) return false;
+            }
+            return true;
+        }
+
+        default:
+            return false;
+        }
+    };
+
+    // Tag-driven recovery: for each unconsumed tag, find the first
+    // unvisited vtable-pattern position that validates for that tag's
+    // node type, and walk it.
+    int diag_tags_recovered = 0;
+    int diag_tags_skipped = 0;
+    int diag_candidates_rejected = 0;
+    int diag_vt_hits_total = static_cast<int>(unvisited_vt_hits.size());
+
+    while (ctx.tag_pos < ctx.tag_count) {
+        BspNodeType tag = ctx.tags[ctx.tag_pos];
+        if (tag == BspNodeType::Unknown) {
+            // Skip unknown tags (parser already flagged them).
+            ++ctx.tag_pos;
+            ++diag_tags_skipped;
+            continue;
+        }
+
+        // Find the first unvisited vtable hit that validates for this tag.
+        bool recovered = false;
+        for (auto& hit : unvisited_vt_hits) {
+            if (hit.off < 0) continue;  // already consumed (marked below)
+            if (ctx.offset_map.count(hit.off) > 0) {
+                // Visited since we built the list (e.g., by a previous tag's walk).
+                hit.off = -1;
+                continue;
+            }
+            if (!validate_node(static_cast<std::size_t>(hit.off), tag)) {
+                ++diag_candidates_rejected;
+                continue;
+            }
+            // Validate passed — walk this position. This consumes the tag.
+            if (diag_enabled()) {
+                std::fprintf(stderr,
+                    "[DIAG] RECOVER tag[%d/%d]=%d at off=%d vt=0x%08X\n",
+                    ctx.tag_pos, ctx.tag_count, static_cast<int>(tag),
+                    hit.off, hit.vt);
+            }
+            (void)walk_node(ctx, hit.off);
+            hit.off = -1;  // mark consumed so we don't try it again
+            ++diag_tags_recovered;
+            recovered = true;
+            break;
+        }
+
+        if (!recovered) {
+            // No candidate validated for this tag. Skip it rather than
+            // risking a fake node. (The tag's geometry is lost either way;
+            // skipping avoids polluting the tree with garbage.)
+            if (diag_enabled()) {
+                std::fprintf(stderr,
+                    "[DIAG] SKIP tag[%d/%d]=%d (no valid candidate; %zu hits tried)\n",
+                    ctx.tag_pos, ctx.tag_count, static_cast<int>(tag),
+                    unvisited_vt_hits.size());
+            }
+            ++ctx.tag_pos;
+            ++diag_tags_skipped;
+        }
+    }
+
+    if (diag_enabled()) {
+        std::fprintf(stderr,
+            "[DIAG] === tag-driven recovery summary ===\n"
+            "[DIAG]   tag_count=%d tags_consumed_before_recovery=%d (%.1f%%)\n"
+            "[DIAG]   tags_consumed_after_recovery=%d (%.1f%%)\n"
+            "[DIAG]   unvisited_vt_hits=%d\n"
+            "[DIAG]   tags_recovered=%d tags_skipped=%d candidates_rejected=%d\n"
+            "[DIAG]   total_nodes=%zu\n",
+            ctx.tag_count, tags_consumed, consumption_ratio * 100.0,
+            ctx.tag_pos,
+            ctx.tag_count > 0 ? 100.0 * static_cast<double>(ctx.tag_pos) / static_cast<double>(ctx.tag_count) : 0.0,
+            diag_vt_hits_total,
+            diag_tags_recovered, diag_tags_skipped, diag_candidates_rejected,
+            tree.nodes.size());
     }
 
     return true;

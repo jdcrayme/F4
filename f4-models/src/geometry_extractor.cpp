@@ -42,11 +42,22 @@
 #include "poly_parser.hpp"
 
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 namespace f4::models::detail {
 
 namespace {
+
+// DIAGNOSTIC: env-controlled stderr logging
+static bool diag_enabled() {
+    static bool v = ([](){
+        const char* e = std::getenv("F4_DIAG");
+        return e && e[0] == '1';
+    })();
+    return v;
+}
 
 // AffineTransform is defined in poly_parser.hpp (shared between
 // poly_parser.cpp and geometry_extractor.cpp). The anonymous-namespace
@@ -357,14 +368,40 @@ void process_prim(WalkContext& ctx, int32_t prim_offset)
                      ctx.tree.lod_buffer.size(),
                      prim_offset, prim, err)) {
         // Decoding failed — skip this prim
+        if (diag_enabled()) {
+            std::fprintf(stderr,
+                "[DIAG] REJECT prim_off=%d reason=decode_failed err=\"%s\"\n",
+                prim_offset, err.c_str());
+        }
         return;
     }
 
-    if (prim.type == PolyType::Unknown) return;
-    if (prim.n_verts <= 0) return;
+    if (prim.type == PolyType::Unknown) {
+        if (diag_enabled()) {
+            std::fprintf(stderr,
+                "[DIAG] REJECT prim_off=%d reason=unknown_type type_val=%d n_verts=%d\n",
+                prim_offset, static_cast<int>(prim.type), prim.n_verts);
+        }
+        return;
+    }
+    if (prim.n_verts <= 0) {
+        if (diag_enabled()) {
+            std::fprintf(stderr,
+                "[DIAG] REJECT prim_off=%d reason=n_verts_le_0 type=%d n_verts=%d\n",
+                prim_offset, static_cast<int>(prim.type), prim.n_verts);
+        }
+        return;
+    }
 
     // Safety: skip prims with unreasonable vertex counts
-    if (prim.n_verts > 1000) return;
+    if (prim.n_verts > 1000) {
+        if (diag_enabled()) {
+            std::fprintf(stderr,
+                "[DIAG] REJECT prim_off=%d reason=n_verts_gt_1000 type=%d n_verts=%d\n",
+                prim_offset, static_cast<int>(prim.type), prim.n_verts);
+        }
+        return;
+    }
 
     // Classify the primitive kind based on its PolyType.
     PrimitiveKind kind = PrimitiveKind::Triangles;
@@ -373,6 +410,11 @@ void process_prim(WalkContext& ctx, int32_t prim_offset)
     } else if (prim.type == PolyType::LineF) {
         kind = PrimitiveKind::Lines;
     } else if (prim.n_verts < 3) {
+        if (diag_enabled()) {
+            std::fprintf(stderr,
+                "[DIAG] REJECT prim_off=%d reason=n_verts_lt_3 type=%d n_verts=%d\n",
+                prim_offset, static_cast<int>(prim.type), prim.n_verts);
+        }
         return;
     }
 
@@ -725,6 +767,10 @@ f4::models::ModelGeometry extract_geometry(
     // transforms applied, but for static aircraft skin panels that's the
     // correct behavior — DOF transforms are for control surfaces,
     // landing gear, etc. (which remain reachable from root).
+    int diag_orphan_prim = 0;
+    int diag_orphan_lit = 0;
+    int diag_orphan_light_string = 0;
+    int diag_orphan_skipped_nonprim = 0;
     {
         for (std::size_t i = 0; i < tree.nodes.size(); ++i) {
             if (ctx.visited[i]) continue;
@@ -735,18 +781,55 @@ f4::models::ModelGeometry extract_geometry(
             if (node.type == BspNodeType::BPrimitiveNode ||
                 node.type == BspNodeType::BCulledPrimitiveNode) {
                 ctx.visited[i] = true;
+                ++diag_orphan_prim;
+                if (diag_enabled()) {
+                    const auto& ap = ctx.active();
+                    std::fprintf(stderr,
+                        "[DIAG] ORPHAN prim node[%zu] type=%d prim_off=%d active_coords=%p (n=%d) tree_coords=%p (n=%zu) match=%d\n",
+                        i, static_cast<int>(node.type), node.prim_offset,
+                        (const void*)ap.coords, (int)ap.n_coords,
+                        (const void*)tree.coords.data(), tree.coords.size(),
+                        (int)(ap.coords == tree.coords.data()));
+                }
                 process_prim(ctx, node.prim_offset);
             } else if (node.type == BspNodeType::BLitPrimitiveNode) {
                 ctx.visited[i] = true;
+                ++diag_orphan_lit;
+                if (diag_enabled()) {
+                    const auto& ap = ctx.active();
+                    std::fprintf(stderr,
+                        "[DIAG] ORPHAN lit node[%zu] prim_off=%d back_off=%d active_coords=%p (n=%d) tree_coords=%p (n=%zu) match=%d\n",
+                        i, node.prim_offset, node.back_poly_offset,
+                        (const void*)ap.coords, (int)ap.n_coords,
+                        (const void*)tree.coords.data(), tree.coords.size(),
+                        (int)(ap.coords == tree.coords.data()));
+                }
                 process_prim(ctx, node.prim_offset);
                 if (node.back_poly_offset >= 0) {
                     process_prim(ctx, node.back_poly_offset);
                 }
             } else if (node.type == BspNodeType::BLightStringNode) {
                 ctx.visited[i] = true;
+                ++diag_orphan_light_string;
                 process_prim(ctx, node.prim_offset);
+            } else {
+                ++diag_orphan_skipped_nonprim;
             }
         }
+    }
+
+    if (diag_enabled()) {
+        std::fprintf(stderr,
+            "[DIAG] === orphan rescue summary ===\n"
+            "[DIAG]   total_nodes=%zu visited_after_main_walk=%zu\n"
+            "[DIAG]   orphan_prim_rescued=%d orphan_lit_rescued=%d orphan_light_string=%d\n"
+            "[DIAG]   orphan_nonprim_skipped=%d\n"
+            "[DIAG]   meshes=%zu total_tris=%zu\n",
+            tree.nodes.size(), ctx.visited.size(),
+            diag_orphan_prim, diag_orphan_lit, diag_orphan_light_string,
+            diag_orphan_skipped_nonprim,
+            geometry.meshes.size(),
+            [&]{ std::size_t t=0; for (const auto& m : geometry.meshes) t += m.triangles.size(); return t; }());
     }
 
     return geometry;
