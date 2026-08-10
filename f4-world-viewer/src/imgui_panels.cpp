@@ -160,6 +160,12 @@ void ViewerApp::draw_imgui() {
             if (ImGui::MenuItem("Hex Inspector...", nullptr, hex_open)) {
                 if (!hex_open) impl_->hex_inspector.open();
             }
+            // Class Table Browser — browsable, filterable, exportable view
+            // over the Falcon4.ct class table + OCD/UCD/VCD/FCD data.
+            const bool ctb_open = impl_->class_table_browser.is_open();
+            if (ImGui::MenuItem("Class Table Browser...", nullptr, ctb_open)) {
+                if (!ctb_open) impl_->class_table_browser.open();
+            }
             ImGui::Separator();
             // Install Diagnostics — shows the full diagnostic report
             // (where we looked for FALCON4.ct, every theater dir probed,
@@ -733,6 +739,14 @@ void ViewerApp::draw_imgui() {
 
     // --- Hex Inspector panel (Tools > Hex Inspector) ---
     impl_->hex_inspector.draw();
+
+    // --- Class Table Browser panel (Tools > Class Table Browser) ---
+    // Provide the installation and model database for cross-referencing.
+    impl_->class_table_browser.set_install(
+        impl_->install.has_value() ? &*impl_->install : nullptr);
+    impl_->class_table_browser.set_model_db(
+        impl_->model_db_3d.has_value() ? &*impl_->model_db_3d : nullptr);
+    impl_->class_table_browser.draw();
 
     // --- Ground Layout view (auto-opens when an objective with
     // ground_layout is selected — shows runway/taxiway/parking/SAM-site

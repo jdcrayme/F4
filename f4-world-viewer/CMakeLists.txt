@@ -151,6 +151,7 @@ add_library(f4_world_viewer STATIC
     src/hex/hex_model.cpp
     src/hex/decoders.cpp
     src/hex/hex_inspector.cpp
+    src/class_table_browser.cpp
     ${IMGUI_SOURCES}
     ${RLIMGUI_SOURCES}
     ${TINYFILEDIALOGS_SOURCES}

@@ -30,6 +30,7 @@
 
 #include <f4/viewer/viewer_app.hpp>
 #include <f4/viewer/hex_inspector.hpp>
+#include <f4/viewer/class_table_browser.hpp>
 #include <f4/viewer/settings.hpp>
 
 #include <f4/entities/entity.hpp>
@@ -335,6 +336,9 @@ struct ViewerApp::Impl {
 
     // Hex Inspector panel — owned by the viewer, opened via Tools menu.
     HexInspector hex_inspector;
+
+    // Class Table Browser panel — owned by the viewer, opened via Tools menu.
+    ClassTableBrowser class_table_browser;
 
     // Pending file dialog (legacy fallback — used by File > Advanced >
     // ... menu items when tinyfiledialogs is unavailable or for ad-hoc
