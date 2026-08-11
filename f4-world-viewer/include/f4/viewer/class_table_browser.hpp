@@ -134,8 +134,12 @@ private:
     // Orbit camera (stored in model-space units; cam_target is the
     // model's bbox center so the camera actually orbits the model,
     // not the world origin).
-    float cam_azimuth_ = 0.7f;       // radians, horizontal orbit
-    float cam_elevation_ = 0.35f;    // radians, vertical orbit
+    // Defaults match f4-models-viewer (cam_yaw=45°, cam_pitch=30°) —
+    // see class_table_browser.cpp's fit_camera_to_model() for why the
+    // 30° pitch matters (side surfaces catch the directional light;
+    // top surfaces are dark due to inward-pointing BSP normals).
+    float cam_azimuth_ = 0.785398f;   // 45° in radians
+    float cam_elevation_ = 0.523599f; // 30° in radians
     float cam_distance_ = 100.0f;    // distance from cam_target
     float cam_target_x_ = 0.0f;      // model bbox center (RH Y-up)
     float cam_target_y_ = 0.0f;

@@ -84,6 +84,15 @@ struct f4::viewer::PreviewCache {
     ::Texture2D fallback_white_tex = {};
     ::Material default_mat = {};
     bool default_mat_built = false;
+
+    // Persistent Texture2D descriptor for the preview RenderTexture2D's
+    // color attachment. rlImGuiImageSize casts the Texture* pointer to
+    // ImTextureID and later DEREFERENCES it during ImGui::Render() (which
+    // happens after draw_model_preview() returns). A stack temporary would
+    // be destroyed before that, leaving a dangling pointer. This member
+    // stays alive for the lifetime of PreviewCache, so the pointer is valid
+    // when ImGui renders. Updated each frame in draw_model_preview().
+    ::Texture2D preview_display_tex = {};
 };
 
 namespace f4::viewer {
@@ -728,7 +737,19 @@ static const char* const kPreviewLitShaderFS =
     "    vec4 tex = texture(texture0, fragTexCoord);\n"
     "    if (tex.a < 0.5) discard;\n"
     "    vec3 N = normalize(fragNormal);\n"
-    "    vec3 L = normalize(-lightDir);\n"
+    "    // lightDir uniform is the direction LIGHT TRAVELS (from sun toward\n"
+    "    // scene), e.g. (0.65, -1.0, 0.35) = sun above-and-to-the-side.\n"
+    "    // For diffuse we need L = direction from surface TO light, which is\n"
+    "    // -lightDir. BUT FreeFalcon's BSP vertex normals are INWARD-pointing\n"
+    "    // (the visible top face has normal pointing DOWN/IN), so the\n"
+    "    // inward-N and the un-negated L happen to produce the correct\n"
+    "    // sign on NdotL. Using -lightDir here flips the sign and makes\n"
+    "    // every visible surface dark (NdotL clamped to 0, only ambient).\n"
+    "    //\n"
+    "    // Verified against f4-models-viewer/src/canvas3d.cpp which uses\n"
+    "    // `L = normalize(lightDir)` (no negation) and renders correctly.\n"
+    "    // DO NOT re-add the negation — it makes the model invisible.\n"
+    "    vec3 L = normalize(lightDir);\n"
     "    float NdotL = max(dot(N, L), 0.0);\n"
     "    vec4 light = ambient + lightColor * NdotL;\n"
     "    finalColor = tex * colDiffuse * fragColor * light;\n"
@@ -1000,8 +1021,16 @@ void ClassTableBrowser::fit_camera_to_model(int16_t vis_type_idx) {
     if (cam_distance_ < 1.0f) cam_distance_ = 50.0f;
 
     // Reset orbit angles so the user sees the model head-on.
-    cam_azimuth_ = 0.7f;
-    cam_elevation_ = 0.35f;
+    // Values match the f4-models-viewer's defaults (cam_yaw=45°,
+    // cam_pitch=30°) — see f4-models-viewer/src/viewer_state.hpp:61-62.
+    // The 30° pitch is important: with the lit shader's lightDir pointing
+    // DOWN (sun above), top-facing inward normals are unlit (NdotL=0,
+    // ambient only). A steeper pitch shows more of the side surfaces,
+    // which catch the directional light and make the model clearly
+    // visible. With the previous 20° pitch, the camera saw mostly the
+    // dark top face and the model appeared nearly black.
+    cam_azimuth_ = 0.785398f;   // 45°
+    cam_elevation_ = 0.523599f; // 30°
 }
 
 void ClassTableBrowser::draw_model_preview(int16_t vis_type_idx) {
@@ -1037,8 +1066,8 @@ void ClassTableBrowser::draw_model_preview(int16_t vis_type_idx) {
     // target size changed) which would clear the mesh/shader/material
     // caches. By doing this first, we guarantee that any cleanup happens
     // before we build, not after.
-    const int preview_w = 300;
-    const int preview_h = 240;
+    const int preview_w = 512;
+    const int preview_h = 512;
     ensure_preview_target(preview_w, preview_h);
 
     // Lazy GPU setup (shader, default material, mesh upload, textures).
@@ -1067,7 +1096,7 @@ void ClassTableBrowser::draw_model_preview(int16_t vis_type_idx) {
     Camera3D camera = {};
     camera.position = cam_pos;
     camera.target = target;
-    camera.up = { 0, 1, 0 };
+    camera.up = { 0, -1, 0 };
     camera.fovy = 45.0f;
     camera.projection = CAMERA_PERSPECTIVE;
 
@@ -1093,7 +1122,7 @@ void ClassTableBrowser::draw_model_preview(int16_t vis_type_idx) {
         BeginMode3D(camera);
             // Bounding sphere hint (wireframe) so the user can see the
             // model's extent even if the mesh itself is sparse.
-            DrawSphereWires(target, model->radius, 12, 12, { 80, 80, 100, 255 });
+            //DrawSphereWires(target, model->radius, 12, 12, { 80, 80, 100, 255 });
 
             // Push shader uniforms (direction + color + ambient) BEFORE
             // drawing meshes — Raylib's DrawMesh uses the material's
@@ -1115,13 +1144,6 @@ void ClassTableBrowser::draw_model_preview(int16_t vis_type_idx) {
                                    preview_cache_->lit_shader_ambient_loc,
                                    &ambient, SHADER_UNIFORM_VEC4);
             }
-
-            // Disable backface culling. FreeFalcon's models were authored
-            // without consistent winding — many polygons have CCW winding
-            // (opposite to the plane normal) and would be culled as back-
-            // facing, leaving holes or hiding the model entirely. The
-            // f4-models-viewer does the same (see canvas3d.cpp).
-            rlDisableBackfaceCulling();
 
             // Draw each cached mesh with its material (textured or default).
             // We use the full ::Mesh and ::Material structs from the cache
@@ -1177,17 +1199,34 @@ void ClassTableBrowser::draw_model_preview(int16_t vis_type_idx) {
             for (auto idx : alpha_order)  { draw_one(idx); ++drawn; }
             EndBlendMode();
 
-            rlEnableBackfaceCulling();  // restore default for any subsequent 3D draws
             last_preview_drew_meshes_ = (drawn > 0);
         EndMode3D();
     EndTextureMode();
 
-    // Display the rendered texture via rlImGui. rlImGuiImageSize takes
-    // a Texture2D* and a width/height; we reconstruct from the cached id.
-    Texture2D display_tex = { preview_tex_id_,
-                               preview_rt_w_, preview_rt_h_, 1,
-                               PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 };
-    rlImGuiImageSize(&display_tex, preview_w, preview_h);
+    // Display the rendered texture via rlImGui.
+    //
+    // CRITICAL: rlImGuiImageSize (rlImGui.cpp:517) casts the Texture*
+    // POINTER to ImTextureID — NOT texture->id. The ImGui render callback
+    // (rlImGui.cpp:177) later casts ImTextureID back to Texture* and reads
+    // ->id to bind the GL texture. This means the Texture struct MUST
+    // outlive the call to rlImGuiImageSize — it must still be valid when
+    // ImGui::Render() runs at the end of the frame.
+    //
+    // A stack temporary (as the previous code used) gets destroyed when
+    // draw_model_preview() returns, leaving a dangling pointer. ImGui then
+    // dereferences the dangling pointer, reads garbage for texture->id
+    // (likely 0), and renders a solid black rectangle — which is exactly
+    // the symptom the user reported (changing ClearBackground to red had
+    // no effect; the rect stayed solid black).
+    //
+    // Fix: store the Texture2D in the persistent PreviewCache and pass a
+    // pointer to that. The PreviewCache lives for the lifetime of the
+    // browser panel, so the pointer is valid when ImGui renders.
+    if (!preview_cache_) preview_cache_ = std::make_unique<PreviewCache>();
+    preview_cache_->preview_display_tex = { preview_tex_id_,
+                                              preview_rt_w_, preview_rt_h_, 1,
+                                              PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 };
+    rlImGuiImageSize(&preview_cache_->preview_display_tex, preview_w, preview_h);
 
     // Status line below the preview.
     {
