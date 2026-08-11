@@ -77,6 +77,10 @@ constexpr std::size_t VCD_RECORD_SIZE = 160;  // VehicleClassDataType
 constexpr std::size_t FED_RECORD_SIZE = 32;   // FeatureEntry
 constexpr std::size_t FCD_RECORD_SIZE = 60;   // FeatureClassDataType
 constexpr std::size_t RCD_RECORD_SIZE = 60;   // RadarClassDataType (Phase 3)
+constexpr std::size_t WCD_RECORD_SIZE = 60;   // WeaponClassDataType
+constexpr std::size_t SSD_RECORD_SIZE = 603;  // SquadronStoresDataType
+
+constexpr int TD_MAXIMUM_WEAPTYPES = 600;  // MAXIMUM_WEAPTYPES (camplib.h)
 
 // ============================================================================
 // Point type enum (from ptdata.h:40-60) — used by PtHeaderDataType.type
@@ -279,6 +283,79 @@ struct RadarClassData {
 };
 
 // ============================================================================
+// WeaponClassData — one entry in Falcon4.WCD (WeaponClassDataType).
+//
+// The WCD table is indexed by ClassTableEntry.data_ptr_index when
+// entry.data_type == DTYPE_WEAPON (6). Each entry describes a weapon type's
+// damage, range, guidance, and physical characteristics.
+//
+// On-disk layout (MSVC default 8-byte alignment, 60 bytes total):
+//   off  0: Index          (short, 2)   — cross-ref back into FALCON4.ct
+//   off  2: Strength       (ushort, 2)  — damage amount
+//   off  4: DamageType     (int, 4)     — DamType enum (0=none, 1=pen, 2=HE,
+//                                          3=heave, 4=incend, 5=prox, 6=kinetic,
+//                                          7=hydro, 8=chem, 9=nuclear/other)
+//   off  8: Range          (short, 2)   — range in km
+//   off 10: Flags          (ushort, 2)  — WEAP_ capability flags
+//   off 12: Name[20]       (char[20])   — e.g. "AIM-120 AMRAAM"
+//   off 32: HitChance[8]   (uchar[8])   — per movement-type hit chance
+//   off 40: FireRate       (uchar, 1)   — shots per barrage
+//   off 41: Rarity         (uchar, 1)   — % of full supply provided
+//   off 42: GuidanceFlags  (ushort, 2)  — guidance bitmask
+//   off 44: Collective     (uchar, 1)
+//   off 45: (1 byte pad)                 — MSVC aligns SimweapIndex to 2
+//   off 46: SimweapIndex   (short, 2)   — index into SimWeaponDataTable
+//   off 48: Weight         (ushort, 2)  — weight in lbs
+//   off 50: DragIndex      (short, 2)
+//   off 52: BlastRadius    (ushort, 2)  — blast radius in ft
+//   off 54: RadarType      (short, 2)   — index into Falcon4.RCD
+//   off 56: SimDataIdx     (short, 2)   — index into Falcon4.SWD
+//   off 58: MaxAlt         (char, 1)    — max altitude in 1000s of ft
+//   off 59: (1 byte trailing pad)       — struct size to multiple of 4
+// ============================================================================
+struct WeaponClassData {
+    int16_t  index = 0;
+    uint16_t strength = 0;           // damage amount
+    int32_t  damage_type = 0;        // DamType enum
+    int16_t  range_km = 0;           // range in km
+    uint16_t flags = 0;             // WEAP_ capability flags
+    std::string name;               // 20-byte char array, e.g. "AIM-120 AMRAAM"
+    std::array<uint8_t, TD_MOVEMENT_TYPES> hit_chance{};  // per movement-type
+    uint8_t  fire_rate = 0;          // shots per barrage
+    uint8_t  rarity = 0;             // % of full supply provided
+    uint16_t guidance_flags = 0;     // guidance bitmask
+    uint8_t  collective = 0;
+    int16_t  simweap_index = 0;      // index into SimWeaponDataTable
+    uint16_t weight = 0;            // weight in lbs
+    int16_t  drag_index = 0;
+    uint16_t blast_radius = 0;       // blast radius in ft
+    int16_t  radar_type = 0;         // index into RadarDataTable
+    int16_t  sim_data_idx = 0;       // index into SimWeaponDataTable
+    int8_t   max_alt = 0;            // max altitude in 1000s of ft
+};
+
+// ============================================================================
+// SquadronStoresData — one entry in Falcon4.SSD (SquadronStoresDataType).
+//
+// The SSD table is indexed by UnitClassData::special_index for squadron-type
+// units. Each entry records the quantity of each weapon type that the
+// squadron has in stock (indexed by weapon ID, 0..599). Three "infinite"
+// slots track always-available weapon types (AG, AA, gun).
+//
+// On-disk layout (603 bytes, alignment 1 — no padding needed):
+//   off   0: Stores[600]   (uchar[600]) — per-weapon-type store count
+//   off 600: infiniteAG     (uchar, 1)   — always-available AG weapon ID
+//   off 601: infiniteAA     (uchar, 1)   — always-available AA weapon ID
+//   off 602: infiniteGun    (uchar, 1)   — always-available gun weapon ID
+// ============================================================================
+struct SquadronStoresData {
+    std::array<uint8_t, TD_MAXIMUM_WEAPTYPES> stores{};  // per-weapon store count
+    uint8_t infinite_ag = 0;      // always-available AG weapon ID
+    uint8_t infinite_aa = 0;      // always-available AA weapon ID
+    uint8_t infinite_gun = 0;    // always-available gun weapon ID
+};
+
+// ============================================================================
 // Container types — one struct per file, holding all parsed records.
 // ============================================================================
 
@@ -355,6 +432,24 @@ struct RadarClassTable {
     }
 };
 
+struct WeaponClassTable {
+    std::vector<WeaponClassData> entries;
+    [[nodiscard]] bool loaded() const noexcept { return !entries.empty(); }
+    [[nodiscard]] std::size_t size() const noexcept { return entries.size(); }
+    [[nodiscard]] const WeaponClassData* at(std::size_t i) const noexcept {
+        return i < entries.size() ? &entries[i] : nullptr;
+    }
+};
+
+struct SquadronStoresTable {
+    std::vector<SquadronStoresData> entries;
+    [[nodiscard]] bool loaded() const noexcept { return !entries.empty(); }
+    [[nodiscard]] std::size_t size() const noexcept { return entries.size(); }
+    [[nodiscard]] const SquadronStoresData* at(std::size_t i) const noexcept {
+        return i < entries.size() ? &entries[i] : nullptr;
+    }
+};
+
 // ============================================================================
 // Top-level loaders — one per file. Each reads the file, verifies the
 // size-assertion (file_size == sizeof(struct) * count + 2), and decodes
@@ -409,6 +504,18 @@ void load_feature_entry_data(const std::filesystem::path& base_path,
 void load_radar_data(const std::filesystem::path& base_path,
                      RadarClassTable& out);
 
+/// Load Falcon4.WCD — per-weapon-class metadata (damage, range, guidance,
+/// hit chance, weight, blast radius). Indexed by ClassTableEntry.data_ptr_index
+/// when entry.data_type == DTYPE_WEAPON.
+void load_weapon_data(const std::filesystem::path& base_path,
+                       WeaponClassTable& out);
+
+/// Load Falcon4.SSD — per-squadron weapon stores (600-byte array of per-weapon
+/// quantities, plus 3 "infinite" weapon slots). Indexed by
+/// UnitClassData::special_index for squadron-type units.
+void load_squadron_stores_data(const std::filesystem::path& base_path,
+                                SquadronStoresTable& out);
+
 // ============================================================================
 // Convenience: a single aggregate holding all seven tables. Use this when
 // you want to load the entire static-object database in one shot.
@@ -435,13 +542,15 @@ struct TheaterObjectDatabase {
     FeatureClassTable   features;       // Falcon4.FCD
     FeatureEntryTable   feature_entries; // Falcon4.FED
     RadarClassTable     radars;         // Falcon4.RCD (Phase 3)
+    WeaponClassTable    weapons;        // Falcon4.WCD
+    SquadronStoresTable squad_stores;   // Falcon4.SSD
 
     /// Diagnostics from the last `load_all` call, one entry per file tried.
     /// Cleared at the start of each `load_all`. Stable order matches the
     /// declaration order above (OCD, PHD, PD, UCD, VCD, FCD, FED, RCD).
     std::vector<TheaterFileLoadResult> load_diagnostics;
 
-    /// Load all eight files from `dir/Falcon4.{OCD,PHD,PD,UCD,VCD,FCD,FED,RCD}`.
+    /// Load all ten files from `dir/Falcon4.{OCD,PHD,PD,UCD,VCD,FCD,FED,RCD,WCD,SSD}`.
     /// Missing files are recorded in `load_diagnostics` with status=Missing
     /// (their table stays empty). Parse errors are recorded with status=
     /// ParseError and the exception message; the table still stays empty.
@@ -452,7 +561,8 @@ struct TheaterObjectDatabase {
     [[nodiscard]] bool loaded() const noexcept {
         return objectives.loaded() || pt_headers.loaded() || pt_data.loaded()
             || units.loaded()       || vehicles.loaded()  || features.loaded()
-            || feature_entries.loaded() || radars.loaded();
+            || feature_entries.loaded() || radars.loaded()
+            || weapons.loaded()    || squad_stores.loaded();
     }
 };
 
@@ -471,6 +581,11 @@ struct TheaterObjectDatabase {
 /// Human-readable name for a MoveType (1=Foot, 2=Wheeled, 3=Tracked, ...).
 /// Returns "Unknown" for unrecognized values.
 [[nodiscard]] const char* movement_type_name(int32_t mt) noexcept;
+
+/// Human-readable name for a DamType (0=None, 1=Penetration, 2=HE, 3=Heave,
+/// 4=Incendiary, 5=Proximity, 6=Kinetic, 7=Hydrostatic, 8=Chemical,
+/// 9=Nuclear/Other). Returns "Unknown" for unrecognized values.
+[[nodiscard]] const char* damage_type_name(int32_t dt) noexcept;
 
 /// Find a file with the given base name and extension, trying several
 /// search paths. Returns an empty path if not found.

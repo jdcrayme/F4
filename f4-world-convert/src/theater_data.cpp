@@ -146,6 +146,22 @@ const char* movement_type_name(int32_t mt) noexcept {
     }
 }
 
+const char* damage_type_name(int32_t dt) noexcept {
+    switch (dt) {
+        case 0: return "None";
+        case 1: return "Penetration";
+        case 2: return "HE";
+        case 3: return "Heave";
+        case 4: return "Incendiary";
+        case 5: return "Proximity";
+        case 6: return "Kinetic";
+        case 7: return "Hydrostatic";
+        case 8: return "Chemical";
+        case 9: return "Nuclear";
+        default: return "Unknown";
+    }
+}
+
 // ============================================================================
 // File finders — case-insensitive fallback for cross-platform
 // ============================================================================
@@ -591,8 +607,105 @@ void load_radar_data(const std::filesystem::path& base_path,
 }
 
 // ============================================================================
-// TheaterObjectDatabase — convenience bulk loader
+// WeaponClassDataType — Falcon4.WCD (60 bytes per record)
 // ============================================================================
+
+void load_weapon_data(const std::filesystem::path& base_path,
+                       WeaponClassTable& out) {
+    const auto path = find_theater_file(base_path, "WCD");
+    if (path.empty()) throw std::runtime_error("theater_data: Falcon4.WCD not found");
+    const auto buf = read_file(path);
+    const int16_t n = read_entry_count(buf, WCD_RECORD_SIZE);
+
+    Cursor c(buf);
+    c.p = buf.data() + 2;
+
+    out.entries.clear();
+    out.entries.reserve(static_cast<std::size_t>(n));
+    for (int16_t i = 0; i < n; ++i) {
+        // MSVC layout (default 8-byte alignment). The DamType enum is 4 bytes
+        // (int-sized), which forces alignment of the struct to 4-byte boundary.
+        //   off  0: Index          (short, 2)
+        //   off  2: Strength       (ushort, 2)
+        //   off  4: DamageType     (int, 4)
+        //   off  8: Range          (short, 2)
+        //   off 10: Flags          (ushort, 2)
+        //   off 12: Name[20]       (char[20], 20)
+        //   off 32: HitChance[8]   (uchar[8], 8)
+        //   off 40: FireRate       (uchar, 1)
+        //   off 41: Rarity         (uchar, 1)
+        //   off 42: GuidanceFlags  (ushort, 2)
+        //   off 44: Collective     (uchar, 1)
+        //   off 45: *1 byte pad*   (MSVC aligns SimweapIndex to 2-byte boundary)
+        //   off 46: SimweapIndex   (short, 2)
+        //   off 48: Weight         (ushort, 2)
+        //   off 50: DragIndex      (short, 2)
+        //   off 52: BlastRadius    (ushort, 2)
+        //   off 54: RadarType      (short, 2)
+        //   off 56: SimDataIdx     (short, 2)
+        //   off 58: MaxAlt         (char, 1)
+        //   off 59: *1 byte trailing pad* (struct size to multiple of 4)
+        //   total = 60 bytes
+        WeaponClassData e;
+        e.index          = c.s16();
+        e.strength       = c.u16();
+        e.damage_type    = c.s32();
+        e.range_km       = c.s16();
+        e.flags          = c.u16();
+        uint8_t name_buf[20];
+        c.read_bytes(name_buf, 20);
+        e.name = trim_name(name_buf, 20);
+        c.read_bytes(e.hit_chance.data(), TD_MOVEMENT_TYPES);
+        e.fire_rate      = c.u8();
+        e.rarity         = c.u8();
+        e.guidance_flags = c.u16();
+        e.collective     = c.u8();
+        c.p += 1;  // skip 1 byte pad before SimweapIndex
+        e.simweap_index  = c.s16();
+        e.weight         = c.u16();
+        e.drag_index     = c.s16();
+        e.blast_radius   = c.u16();
+        e.radar_type     = c.s16();
+        e.sim_data_idx   = c.s16();
+        e.max_alt        = static_cast<int8_t>(c.u8());
+        c.p += 1;  // skip 1 byte trailing pad
+        out.entries.push_back(std::move(e));
+    }
+    c.check_and_throw("theater_data: unexpected end of file");
+}
+
+// ============================================================================
+// SquadronStoresDataType — Falcon4.SSD (603 bytes per record)
+// ============================================================================
+
+void load_squadron_stores_data(const std::filesystem::path& base_path,
+                                SquadronStoresTable& out) {
+    const auto path = find_theater_file(base_path, "SSD");
+    if (path.empty()) throw std::runtime_error("theater_data: Falcon4.SSD not found");
+    const auto buf = read_file(path);
+    const int16_t n = read_entry_count(buf, SSD_RECORD_SIZE);
+
+    Cursor c(buf);
+    c.p = buf.data() + 2;
+
+    out.entries.clear();
+    out.entries.reserve(static_cast<std::size_t>(n));
+    for (int16_t i = 0; i < n; ++i) {
+        // MSVC layout (alignment 1 — all fields are uchar, no padding):
+        //   off   0: Stores[600]   (uchar[600], 600) — per-weapon-type store count
+        //   off 600: infiniteAG    (uchar, 1)
+        //   off 601: infiniteAA    (uchar, 1)
+        //   off 602: infiniteGun   (uchar, 1)
+        //   total = 603 bytes
+        SquadronStoresData e;
+        c.read_bytes(e.stores.data(), TD_MAXIMUM_WEAPTYPES);
+        e.infinite_ag  = c.u8();
+        e.infinite_aa  = c.u8();
+        e.infinite_gun = c.u8();
+        out.entries.push_back(std::move(e));
+    }
+    c.check_and_throw("theater_data: unexpected end of file");
+}
 
 namespace {
 
@@ -639,11 +752,11 @@ void try_one(void (*fn)(const std::filesystem::path&, TableT&),
 void TheaterObjectDatabase::load_all(const std::filesystem::path& dir) {
     const auto base = dir / "Falcon4";
     load_diagnostics.clear();
-    load_diagnostics.reserve(8);
+    load_diagnostics.reserve(10);
 
     // Inline each call rather than looping over a function-pointer table —
-    // the eight loaders have eight distinct table types and a template is
-    // cleaner than a void*-erasing wrapper.
+    // the ten loaders have distinct table types and a template is cleaner
+    // than a void*-erasing wrapper.
     load_diagnostics.emplace_back();
     try_one(load_objective_data,     base, "OCD", objectives,      load_diagnostics.back());
     load_diagnostics.emplace_back();
@@ -660,6 +773,10 @@ void TheaterObjectDatabase::load_all(const std::filesystem::path& dir) {
     try_one(load_feature_entry_data, base, "FED", feature_entries, load_diagnostics.back());
     load_diagnostics.emplace_back();
     try_one(load_radar_data,         base, "RCD", radars,          load_diagnostics.back());
+    load_diagnostics.emplace_back();
+    try_one(load_weapon_data,        base, "WCD", weapons,         load_diagnostics.back());
+    load_diagnostics.emplace_back();
+    try_one(load_squadron_stores_data, base, "SSD", squad_stores, load_diagnostics.back());
 }
 
 } // namespace f4::world_convert
