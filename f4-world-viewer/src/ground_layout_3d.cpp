@@ -139,7 +139,8 @@ Color resolve_vertex_color(uint32_t color_index,
 }
 
 // ---------------------------------------------------------------------------
-// Lit shader source (same as f4-scenario-player's renderer.cpp)
+// Lit shader source (mirrors f4-models-viewer's canvas3d.cpp + the
+// CTB-BLACK-RENDER-FIX-2 patch applied to class_table_browser.cpp)
 // ---------------------------------------------------------------------------
 //
 // Forward-declared here so we can lazily compile it on first draw. The
@@ -147,6 +148,24 @@ Color resolve_vertex_color(uint32_t color_index,
 // default mesh pipeline. If compilation fails (e.g. headless GL stub
 // with no shader support), we fall back to LoadMaterialDefault() —
 // features still render, just unlit.
+//
+// CRITICAL (bug fix — same root cause as CTB-BLACK-RENDER-FIX-2):
+//   1. Use `matModel` (which Raylib's DrawMesh DOES upload via
+//      SHADER_LOC_MATRIX_MODEL) — NOT `modelView` (which Raylib does
+//      NOT upload, leaving the uniform as a zero matrix and zeroing
+//      every normal → NdotL collapses to 0 → only ambient survives).
+//      This matters MORE here than in the class browser because our
+//      per-feature model matrix is Translate * RotateY(facing); without
+//      matModel, the rotation never reaches the normals, so the sun
+//      hits every feature as if facing=0.
+//   2. Do NOT negate lightDir. FreeFalcon's BSP vertex normals are
+//      INWARD-pointing; the "wrong" sign convention in canvas3d
+//      (treating lightDir as the direction light travels, not the
+//      direction from surface to sun) and the inward normals cancel.
+//      Negating lightDir un-cancels them, making every surface receive
+//      NdotL=0. Verified by the test_match_model_viewer regression
+//      harness under Xvfb (models 109/119/1052 all render correctly
+//      with the no-negation form).
 const char* const kLitShaderVS_3d =
     "#version 330\n"
     "in vec3 vertexPosition;\n"
@@ -154,14 +173,14 @@ const char* const kLitShaderVS_3d =
     "in vec4 vertexColor;\n"
     "in vec3 vertexNormal;\n"
     "uniform mat4 mvp;\n"
-    "uniform mat4 modelView;\n"
+    "uniform mat4 matModel;\n"
     "out vec2 fragTexCoord;\n"
     "out vec4 fragColor;\n"
     "out vec3 fragNormal;\n"
     "void main() {\n"
     "    fragTexCoord = vertexTexCoord;\n"
     "    fragColor = vertexColor;\n"
-    "    fragNormal = normalize(mat3(modelView) * vertexNormal);\n"
+    "    fragNormal = normalize(mat3(matModel) * vertexNormal);\n"
     "    gl_Position = mvp * vec4(vertexPosition, 1.0);\n"
     "}\n";
 
@@ -180,7 +199,7 @@ const char* const kLitShaderFS_3d =
     "    vec4 tex = texture(texture0, fragTexCoord);\n"
     "    if (tex.a < 0.5) discard;\n"
     "    vec3 N = normalize(fragNormal);\n"
-    "    vec3 L = normalize(-lightDir);\n"
+    "    vec3 L = normalize(lightDir);\n"
     "    float NdotL = max(dot(N, L), 0.0);\n"
     "    vec4 light = ambient + lightColor * NdotL;\n"
     "    finalColor = tex * colDiffuse * fragColor * light;\n"
@@ -707,7 +726,7 @@ void ViewerApp::draw_ground_layout_3d() {
             target.z + d * cp * cy
         };
         impl_->ground_layout_3d_camera.target = target;
-        impl_->ground_layout_3d_camera.up = {0.0f, 1.0f, 0.0f};
+        impl_->ground_layout_3d_camera.up = {0.0f, -1.0f, 0.0f};
         impl_->ground_layout_3d_camera.fovy = 45.0f;
         impl_->ground_layout_3d_camera.projection = CAMERA_PERSPECTIVE;
     };
@@ -1028,10 +1047,36 @@ void ViewerApp::draw_ground_layout_3d() {
                             continue;
                         }
 
-                        // Resolve entity_type → vis_type[0] via the class table.
+                        // Resolve descriptionIndex → vis_type[0] via the class table.
+                        //
+                        // CRITICAL FIX (was the "feature renders as B-52" bug):
+                        // FeatureEntryState.index is NOT an entity_type — it is
+                        // a 0-based descriptionIndex directly into the class
+                        // table (verified against the FF source: FeatureEntry.Index
+                        // is "Entity class index of feature", and the eClass[8]
+                        // array on the same struct matches the classInfo_[8] of
+                        // the class table entry at that descriptionIndex).
+                        //
+                        // ClassTable::vis_type_for() expects an entity_type, which
+                        // is descriptionIndex + VU_LAST_ENTITY_TYPE (=100). The
+                        // old code passed f.index verbatim, which made the lookup
+                        // land at descriptionIndex-100 — i.e. a completely different
+                        // class table entry. For features whose descriptionIndex
+                        // happened to fall in the aircraft-entity range (858, 987,
+                        // 1018, 1019, ...), this returned aircraft vis_types
+                        // (B-52, F-16, ...), which is why a power plant rendered
+                        // as an upside-down B-52.
+                        //
+                        // Verification: every non-zero FED entry's eClass[0:4]
+                        // matches CT[f.index].classInfo[0:4] (39/39 on the real
+                        // Falcon4.FED fixture). After this fix, lookup(100 + 987)
+                        // = lookup(1087) → CT entry 987, classInfo=[3,2,30,3],
+                        // vis_type[0]=48 (a real feature model).
+                        constexpr uint16_t VU_LAST_ENTITY_TYPE = 100;
                         const auto vis_type =
                             impl_->class_table_3d.vis_type_for(
-                                static_cast<uint16_t>(f.index), 0);
+                                static_cast<uint16_t>(VU_LAST_ENTITY_TYPE +
+                                    static_cast<uint16_t>(f.index)), 0);
                         if (vis_type <= 0) {
                             ++impl_->diag_3d_features_no_vistype;
                             continue;  // no model for this feature
@@ -1055,11 +1100,45 @@ void ViewerApp::draw_ground_layout_3d() {
                         // equivalent to Raylib Y-axis rotation by the same
                         // angle, since ENU's +Z_up corresponds to Raylib's
                         // +Y_up under the enu_to_rl swap).
+                        //
+                        // CRITICAL FIX (was the "upside-down + multi-feature
+                        // renders nothing" bug):
+                        //
+                        // The model_vertex_to_rl(x,y,z) = (x, -z, y) transform
+                        // is a +90° X-axis rotation. For aircraft models
+                        // (authored with -Z=up in FF BSP), this happens to map
+                        // "up" to +Y in Raylib — right-side-up. But feature/
+                        // building models are authored with +Z=up, which maps
+                        // to -Y in Raylib — UPSIDE-DOWN.
+                        //
+                        // This had TWO visible symptoms:
+                        //   (a) Single-feature layouts (Town, Depot): the model
+                        //       renders upside-down but is still visible
+                        //       (there are no ground-level quads to occlude it).
+                        //   (b) Multi-feature layouts (bridge, airbase): the
+                        //       model's geometry extends BELOW ground (Y<0).
+                        //       The runway/taxiway quads at Y=0 write depth,
+                        //       and the below-ground fragments fail the depth
+                        //       test → the entire model is occluded → "nothing
+                        //       renders".
+                        //
+                        // Fix: add a 180° rotation around X (RotateX(π)) to the
+                        // model matrix, applied BEFORE the yaw rotation. This
+                        // flips Y → -Y (fixing the up direction: -Y → +Y) and
+                        // Z → -Z (inverting forward/backward). The Z inversion
+                        // means the model faces 180° off from the intended
+                        // facing; we compensate by adding π to the yaw.
+                        //
+                        // Net effect: model is right-side-up, geometry extends
+                        // ABOVE ground (Y>0), depth test passes, model is
+                        // visible in both single- and multi-feature layouts.
+                        constexpr float kPi = 3.14159265358979323846f;
                         const Vector3 pos_rh = enu_to_rl(
                             f.offset_x, f.offset_y, f.offset_z);
                         const float facing_rad = -f.facing *
-                            (3.14159265358979323846f / 180.0f);
-                        const Matrix rot = MatrixRotateY(facing_rad);
+                            (kPi / 180.0f) + kPi;  // +π compensates for Z-flip
+                        const Matrix rot = MatrixMultiply(
+                            MatrixRotateY(facing_rad), MatrixRotateX(kPi));
                         const Matrix model_matrix = MatrixMultiply(
                             MatrixTranslate(pos_rh.x, pos_rh.y, pos_rh.z), rot);
 
