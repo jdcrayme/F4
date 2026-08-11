@@ -1101,44 +1101,54 @@ void ViewerApp::draw_ground_layout_3d() {
                         // angle, since ENU's +Z_up corresponds to Raylib's
                         // +Y_up under the enu_to_rl swap).
                         //
-                        // CRITICAL FIX (was the "upside-down + multi-feature
-                        // renders nothing" bug):
+                        // CRITICAL FIX (was the "single-feature renders
+                        // upside-down + multi-feature renders nothing" bug):
                         //
-                        // The model_vertex_to_rl(x,y,z) = (x, -z, y) transform
-                        // is a +90° X-axis rotation. For aircraft models
-                        // (authored with -Z=up in FF BSP), this happens to map
-                        // "up" to +Y in Raylib — right-side-up. But feature/
-                        // building models are authored with +Z=up, which maps
-                        // to -Y in Raylib — UPSIDE-DOWN.
+                        // The previous "fix" added `MatrixRotateX(π)` (and a
+                        // compensating +π on the yaw) based on a wrong claim
+                        // that feature/building models are authored with +Z=up
+                        // while aircraft are authored with -Z=up. That claim
+                        // is FALSE: dumping the bbox of every model in
+                        // KoreaObj.LOD (scripts/dump_feature_bboxes.cpp) shows
+                        // buildings use the SAME -Z up convention as aircraft.
+                        // Examples (bbox Z range):
+                        //   * 1052 F-16:        [-39.05, +44.16] — top vtx z=-12.5
+                        //   * 119  helicopter:  [-27.81, +26.19] — symmetric
+                        //   * 109  building:    [ -4.55,   0.00] — extends -Z
+                        //   * 169  hangar:      [-30.86,   0.00] — extends -Z
+                        // Cross-checked against f4-models-viewer/src/canvas3d.cpp
+                        // which renders the SAME KoreaObj models (buildings
+                        // included) right-side-up with `MatrixIdentity()` and
+                        // the same per-vertex `to_raylib(x,y,z)=(x,-z,y)` — no
+                        // RotateX(π). The worklog (CTB-BLACK-RENDER-FIX-2)
+                        // confirms buildings 109, helicopters 119, and the
+                        // F-16 1052 all render correctly that way.
                         //
-                        // This had TWO visible symptoms:
+                        // The RotateX(π) caused TWO visible symptoms:
                         //   (a) Single-feature layouts (Town, Depot): the model
-                        //       renders upside-down but is still visible
-                        //       (there are no ground-level quads to occlude it).
+                        //       rendered upside-down but was still visible
+                        //       because no ground-level quads at Y=0 occluded
+                        //       it. The RotateX(π) flips Y → -Y (upside-down).
                         //   (b) Multi-feature layouts (bridge, airbase): the
-                        //       model's geometry extends BELOW ground (Y<0).
-                        //       The runway/taxiway quads at Y=0 write depth,
-                        //       and the below-ground fragments fail the depth
-                        //       test → the entire model is occluded → "nothing
-                        //       renders".
+                        //       model's geometry was pushed BELOW ground
+                        //       (Y<0). The runway/taxiway quads at Y=0 wrote
+                        //       depth, and the below-ground fragments failed
+                        //       the depth test → the entire model was occluded
+                        //       → "nothing renders". The +π yaw compensated
+                        //       the Z-flip from RotateX(π) but did nothing
+                        //       about the Y-flip.
                         //
-                        // Fix: add a 180° rotation around X (RotateX(π)) to the
-                        // model matrix, applied BEFORE the yaw rotation. This
-                        // flips Y → -Y (fixing the up direction: -Y → +Y) and
-                        // Z → -Z (inverting forward/backward). The Z inversion
-                        // means the model faces 180° off from the intended
-                        // facing; we compensate by adding π to the yaw.
-                        //
-                        // Net effect: model is right-side-up, geometry extends
-                        // ABOVE ground (Y>0), depth test passes, model is
-                        // visible in both single- and multi-feature layouts.
+                        // Fix: drop RotateX(π) and the +π yaw compensation.
+                        // The resulting model matrix matches f4-models-viewer
+                        // (Translate * RotateY, identity-ish orientation),
+                        // plus the existing footprint facing convention. The
+                        // per-vertex transform model_vertex_to_rl already maps
+                        // -Z up to +Y up — no extra matrix trickery needed.
                         constexpr float kPi = 3.14159265358979323846f;
                         const Vector3 pos_rh = enu_to_rl(
                             f.offset_x, f.offset_y, f.offset_z);
-                        const float facing_rad = -f.facing *
-                            (kPi / 180.0f) + kPi;  // +π compensates for Z-flip
-                        const Matrix rot = MatrixMultiply(
-                            MatrixRotateY(facing_rad), MatrixRotateX(kPi));
+                        const float facing_rad = (f.facing - 0) * (kPi / 180.0f);
+                        const Matrix rot = MatrixRotateY(facing_rad);
                         const Matrix model_matrix = MatrixMultiply(
                             MatrixTranslate(pos_rh.x, pos_rh.y, pos_rh.z), rot);
 

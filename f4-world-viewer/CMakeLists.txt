@@ -32,6 +32,31 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(raylib)
 
+# CRITICAL FIX (was the "multi-feature layouts render nothing" bug):
+# Raylib's default RL_CULL_DISTANCE_FAR is 1000.0, which is fine for tiny
+# model-viewer scenes (cam distance 80-250 ft) but WAY too small for the
+# Ground Layout 3D panel. Airfield bbox diagonals routinely exceed 7000 ft
+# (e.g. objective 125 "02_20 Airbase 2" has diag ~7471 ft), and
+# default_orbit_for_bbox sets camera distance = max(diag * 1.5, 500) ≈
+# 11200 ft — well beyond the 1000 ft default far clip. The result: every
+# 3D draw call inside BeginMode3D is clipped out, and the rendered
+# RenderTexture2D ends up as solid background color (only the 2D overlay
+# text/labels render, because BeginMode3D's frustum doesn't apply to 2D
+# draws). Single-feature layouts (Town, Depot) sometimes appeared to
+# render because their bbox is small enough that the camera distance stays
+# under 1000 ft.
+#
+# The far-clip is hard-coded in raylib's src/config.h (NOT guarded by
+# #ifndef, so a -D compile flag is silently re-defined to 1000.0). We
+# must patch config.h directly after FetchContent. 100000 ft covers the
+# largest theater-scale objective.
+file(READ "${raylib_SOURCE_DIR}/src/config.h" _raylib_config)
+string(REPLACE
+    "#define RL_CULL_DISTANCE_FAR              1000.0"
+    "#define RL_CULL_DISTANCE_FAR          100000.0"
+    _raylib_config "${_raylib_config}")
+file(WRITE "${raylib_SOURCE_DIR}/src/config.h" "${_raylib_config}")
+
 # Dear ImGui — core + Raylib backend bindings from raylib-extras.
 # Pin ImGui to v1.91.5 (last release before the 1.92 font/texture system
 # rewrite). rlImGui must be pinned to a commit that predates the 1.92

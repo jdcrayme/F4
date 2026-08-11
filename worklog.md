@@ -2069,3 +2069,60 @@ Stage Summary:
   * Verification screenshots at /home/z/my-project/download/mv_match_{109,119,1052}_rt.png.
   * Standalone test programs at /home/z/my-project/scripts/test_class_browser_render.cpp and /home/z/my-project/scripts/test_match_model_viewer.cpp (useful for future rendering regression tests).
 - Recommend: rebuild on the user's machine, reopen Class Table Browser, select any entry with a vis_type > 0. The preview pane should now show the model clearly lit (matching the f4-models-viewer's rendering quality).
+
+---
+Task ID: GLV3D-DIAG-1
+Agent: main (orchestrator)
+Task: Diagnose why multi-feature ground layouts don't render in the 3D layout view while single-feature layouts render upside-down. User reports both symptoms ARE present in the current `main` (commit 5943b60 "updates to ground layout"), even though that commit's comment block in ground_layout_3d.cpp:1104-1134 claims the MatrixRotateX(π) "fix" solves both.
+
+Work Log:
+- Cloned F4 repo to /home/z/my-project/F4. Confirmed latest commit 5943b60 contains the alleged fix at f4-world-viewer/src/ground_layout_3d.cpp:1135-1143 (MatrixRotateX(π) plus +π yaw compensation).
+- Read ground_layout_3d.cpp in full. The fix block applies model matrix = Translate(pos_rh) * RotateY(facing+π) * RotateX(π) to every feature. The accompanying comment claims: aircraft are "-Z up" in FF BSP, but feature/building models are "+Z up" — so RotateX(π) is needed to flip them right-side-up.
+- Cross-checked the model viewer (f4-models-viewer/src/canvas3d.cpp:204,320) which renders the SAME KoreaObj models (including buildings like model 109) with `Matrix identity = MatrixIdentity()` — NO RotateX(π). The worklog (CTB-BLACK-RENDER-FIX-2) confirms buildings 109, helicopters 119, and F-16 1052 all render correctly under the model viewer with identity model matrix + the same per-vertex transform `to_raylib(x,y,z) = (x,-z,y)`.
+- Wrote /home/z/my-project/scripts/dump_feature_bboxes.cpp + dump_model_vertices.cpp and ran them against /home/z/my-project/F4/temp/KoreaObj.HDR/.LOD. Findings:
+  * Model 109 (low-poly building): bbox Z=[-4.55, 0.00] — model extends DOWNWARD in -Z. Convention: -Z up (same as aircraft).
+  * Model 169 (hangar): bbox Z=[-30.86, 0.00] — same, -Z up.
+  * Model 1052 (F-16): bbox Z=[-39, +44], top vertex at z=-12.53 — also -Z up.
+  * Model 119 (helicopter): bbox Z=[-27.81, +26.19] — nearly symmetric; +Z extent is the rotor head, not the body.
+  * Aggregate across all 1342 models: 877 use -Z up, 170 "outliers" are mostly ground decals (Z~0) or aircraft with rotor masts.
+- CONCLUSION: The comment's claim that feature/building models use +Z up is FALSE. They use the SAME -Z up convention as aircraft. Therefore the existing per-vertex transform `model_vertex_to_rl(x,y,z) = (x,-z,y)` ALREADY maps them right-side-up (just like it does for aircraft in the model viewer). The added `MatrixRotateX(π)` rotates them 180° around X, which:
+  1. Flips Y → -Y → model becomes upside-down (visible in single-feature layouts where no ground quads occlude).
+  2. Flips the lighting normals → top face's normal now points down → top face is dark (compounding the visual issue).
+  3. Pushes model geometry to Y<0 → in multi-feature layouts, runway/taxiway quads at Y=0 write depth, and the below-ground fragments fail the depth test → entire model occluded → "nothing renders".
+- The +π added to the yaw compensates for the Z-flip from RotateX(π) but DOES NOT compensate for the Y-flip — so the model stays upside-down.
+
+Stage Summary:
+- ROOT CAUSE: The "fix" at ground_layout_3d.cpp:1135-1143 is itself the bug. It was added based on a wrong diagnosis (the comment's claim that features use +Z up). The bbox data and the model viewer's working rendering both prove features use the SAME -Z up convention as aircraft.
+- FIX: Remove the `MatrixRotateX(kPi)` and the `+ kPi` yaw compensation. Replace lines 1135-1143 with:
+    const Vector3 pos_rh = enu_to_rl(f.offset_x, f.offset_y, f.offset_z);
+    const float facing_rad = -f.facing * (kPi / 180.0f);
+    const Matrix rot = MatrixRotateY(facing_rad);
+    const Matrix model_matrix = MatrixMultiply(
+        MatrixTranslate(pos_rh.x, pos_rh.y, pos_rh.z), rot);
+  This matches the model viewer's working approach (Translate * RotateY, no RotateX) plus the existing footprint-code facing convention.
+- VERIFICATION: The model viewer already proves this matrix orientation renders buildings (109), helicopters (119), and aircraft (1052) right-side-up. After applying the fix, the world-viewer's 3D Layout panel should match.
+- Diagnostic scripts saved at /home/z/my-project/scripts/dump_feature_bboxes.cpp and dump_model_vertices.cpp — keep them as regression checks if the convention question ever comes up again.
+
+---
+Task ID: GLV3D-DIAG-2
+Agent: main (orchestrator)
+Task: After the previous RotateX(pi) fix was applied, multi-feature layouts STILL render no models in the Ground Layout 3D panel. Diagnose the remaining root cause.
+
+Work Log:
+- Cloned the F4 repo (already on branch fix/ground-layout-3d-feature-orientation with the RotateX(pi) revert committed).
+- Built the f4_world_viewer against a headless Xvfb+Mesa GL stack to enable local rendering tests. Bootstrapped the X11 dev headers (libxrandr-dev, libxcursor-dev, libxi-dev, libxfixes-dev, libxrender-dev, libx11-dev, libxext-dev, libxinerama-dev) into /tmp/gldev via apt-get download + dpkg-deb -x.
+- Wrote /home/z/my-project/scripts/test_multi_feature_render.cpp — a standalone program that replicates the ground_layout_3d.cpp draw path EXACTLY (same KoreaObj loading, same model_vertex_to_rl transform, same lit shader source, same Material setup, same per-feature model matrix Translate*RotateY, same rlDisableBackfaceCulling, same DrawMesh call) against real F4+CT+KoreaObj fixture data. Loaded the first 10 features of objective 125 "02_20 Airbase 2" (108 features in the real game, first_feature=1 in the FED fixture).
+- First run: 0 non-background pixels in the rendered image, despite 9/10 features drawing 22 meshes / 330 triangles. Camera pos=(7200, 7845, 6143), distance=11207 ft, bbox diag=7471 ft. DrawMesh was called, but nothing appeared in the framebuffer.
+- Wrote a minimal /tmp/simple_3d_test2.cpp that walks camera distances 100, 500, 999, 1000, 1001, 5000, 10000, 100000 and counts non-background pixels. Threshold: distance<=500 renders fully, distance>=999 renders NOTHING.
+- Confirmed root cause: Raylib 5.0's default RL_CULL_DISTANCE_FAR is 1000.0. The world-viewer's default_orbit_for_bbox sets distance = max(diag * 1.5, 500) — for any airfield with bbox diagonal > ~660 ft (essentially every multi-feature objective), the camera distance exceeds the far clip plane and EVERY 3D draw call inside BeginMode3D is clipped out. Single-feature layouts (Town, Depot) sometimes appeared to render because their bbox was small enough to keep the camera distance under 1000 ft.
+- Attempted fix #1 (DID NOT WORK): added `target_compile_definitions(raylib PUBLIC RL_CULL_DISTANCE_FAR=100000.0)` to f4-world-viewer/CMakeLists.txt. The compile-flags file showed `-DRL_CULL_DISTANCE_FAR=100000.0`, but the simple-distance test still showed the same 1000-ft threshold. Investigation: raylib's src/config.h hard-codes `#define RL_CULL_DISTANCE_FAR 1000.0` (NOT guarded by #ifndef), and config.h is included by rcore.c BEFORE rlgl.h. The #define in config.h silently overrides the command-line -D. Confirmed by inspecting the disassembly of rcore.c.o: BeginMode3D passes the value 1000.0 to rlFrustum regardless of the -D flag.
+- Applied fix #2 (WORKS): patch config.h directly after FetchContent_MakeAvailable(raylib) using file(READ)+string(REPLACE)+file(WRITE). The patched config.h reads `#define RL_CULL_DISTANCE_FAR 100000.0`. Rebuilt raylib from scratch; simple-distance test now shows pixels at all distances up to 100000 ft. Multi-feature test now renders 319212 non-bg pixels (66.5% coverage) with the ground quad + 9 feature models visible.
+
+Stage Summary:
+- ROOT CAUSE: Raylib 5.0 hard-codes RL_CULL_DISTANCE_FAR=1000.0 in src/config.h (not #ifndef-guarded, so a -D compile flag is silently overridden). The world-viewer's airfield-scale camera distances (typically 5000-15000 ft) exceed this 1000-ft far clip, causing every 3D draw inside BeginMode3D to be clipped out. Single-feature objectives sometimes appeared to render because their bbox was small enough to keep the camera within the 1000-ft clip.
+- FIX: Patch raylib's src/config.h after FetchContent_MakeAvailable in f4-world-viewer/CMakeLists.txt, replacing the hard-coded 1000.0 with 100000.0. Verified by:
+  * /home/z/my-project/scripts/test_multi_feature_render.cpp renders 319212 non-bg pixels with 9 feature models visible (was 0 before fix).
+  * /tmp/simple_3d_test2.cpp confirms pixels render at all camera distances up to 100000 ft (was clipped at 999 ft before fix).
+  * Rendered PNG saved at /home/z/my-project/download/multi_feature_render.png.
+- The fix is local to f4-world-viewer/CMakeLists.txt — the model-viewer and scenario-player use their own FetchContent and are unaffected (they don't need the larger far clip because their cameras operate at <300 ft distances). If a future feature in those viewers requires theater-scale camera distances, the same patch should be applied to their CMakeLists.
+- Diagnostic scripts saved at /home/z/my-project/scripts/test_multi_feature_render.cpp (full multi-feature pipeline test) and the build script at /home/z/my-project/scripts/build_test.sh — keep as regression checks.
