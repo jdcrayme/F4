@@ -649,6 +649,11 @@ void walk_node(WalkContext& ctx, NodeIdx node_idx)
         // tree.switch_children, indexed by node.switch_children_offset.
         // Default behavior: traverse ALL children (show everything).
         // Interactive: check state.switches for an active_child override.
+        //
+        // active_child sentinel values:
+        //   -2  = "None"     — walk no children (switch's geometry hidden)
+        //   -1  = "Show All" — walk every child
+        //   0..n-1 = "Specific Child" — walk only this child
         if (node.n_children > 0 && node.switch_children_offset >= 0) {
             // Check if ModelState has a specific child selection
             int active_child = -1;
@@ -667,12 +672,16 @@ void walk_node(WalkContext& ctx, NodeIdx node_idx)
                 break;  // corrupted switch children — skip
             }
 
-            if (active_child >= 0 && active_child < static_cast<int>(count)) {
+            if (active_child == -2) {
+                // "None" — walk no children (the switch's geometry is
+                // hidden entirely). Useful for inspecting the rest of
+                // the model without the switch's parts occluding it.
+            } else if (active_child >= 0 && active_child < static_cast<int>(count)) {
                 // Walk only the selected child
                 auto child_idx = ctx.tree.switch_children[base + static_cast<std::size_t>(active_child)];
                 if (child_idx >= 0) walk_node(ctx, child_idx);
             } else {
-                // No state override — walk all children
+                // active_child == -1 ("Show All") or out of range — walk all children
                 for (std::size_t k = 0; k < count; ++k) {
                     auto child_idx = ctx.tree.switch_children[base + k];
                     if (child_idx >= 0) walk_node(ctx, child_idx);
@@ -751,85 +760,35 @@ f4::models::ModelGeometry extract_geometry(
     // Start from node 0 (root)
     walk_node(ctx, 0);
 
-    // PATCHED: Always walk unvisited prim nodes, not just when meshes is
-    // empty. The original `if (geometry.meshes.empty())` gate meant that
-    // if the regular tree walk produced even one mesh, all other orphaned
-    // prim nodes (those whose parent linkage was broken) were silently
-    // dropped. For model 1052 (F-16) LOD 0 this caused ~588 prim-bearing
-    // nodes — i.e. roughly half the aircraft's geometry — to be skipped,
-    // producing the "only the back half renders" symptom.
+    // Orphan-rescue loop (removed — no longer needed).
     //
-    // The vtable scan in parse_bsp_tree already runs unconditionally now
-    // (the 50% consumption-ratio gate was removed), so any orphaned
-    // prim nodes the scan recovers will be walked here.
+    // The sibling-first walk order in bsp_parser.cpp now consumes 100% of
+    // tags on every well-formed model, so every prim node is reached by
+    // the main walk above. The orphan-rescue loop that was here (which
+    // iterated unvisited prim nodes and processed them with the root
+    // coord pool, producing garbage positions for DOF-controlled parts
+    // like the canopy) is dead code and was removed in the cleanup pass.
     //
-    // Walking orphaned prim nodes produces geometry without DOF/switch
-    // transforms applied, but for static aircraft skin panels that's the
-    // correct behavior — DOF transforms are for control surfaces,
-    // landing gear, etc. (which remain reachable from root).
-    int diag_orphan_prim = 0;
-    int diag_orphan_lit = 0;
-    int diag_orphan_light_string = 0;
-    int diag_orphan_skipped_nonprim = 0;
-    {
-        for (std::size_t i = 0; i < tree.nodes.size(); ++i) {
-            if (ctx.visited[i]) continue;
-            // Only process prim nodes — walking non-prim nodes (BSubTree,
-            // BDofNode, etc.) without their subtree context would be
-            // meaningless and could produce garbage geometry.
-            const auto& node = tree.nodes[i];
-            if (node.type == BspNodeType::BPrimitiveNode ||
-                node.type == BspNodeType::BCulledPrimitiveNode) {
-                ctx.visited[i] = true;
-                ++diag_orphan_prim;
-                if (diag_enabled()) {
-                    const auto& ap = ctx.active();
-                    std::fprintf(stderr,
-                        "[DIAG] ORPHAN prim node[%zu] type=%d prim_off=%d active_coords=%p (n=%d) tree_coords=%p (n=%zu) match=%d\n",
-                        i, static_cast<int>(node.type), node.prim_offset,
-                        (const void*)ap.coords, (int)ap.n_coords,
-                        (const void*)tree.coords.data(), tree.coords.size(),
-                        (int)(ap.coords == tree.coords.data()));
-                }
-                process_prim(ctx, node.prim_offset);
-            } else if (node.type == BspNodeType::BLitPrimitiveNode) {
-                ctx.visited[i] = true;
-                ++diag_orphan_lit;
-                if (diag_enabled()) {
-                    const auto& ap = ctx.active();
-                    std::fprintf(stderr,
-                        "[DIAG] ORPHAN lit node[%zu] prim_off=%d back_off=%d active_coords=%p (n=%d) tree_coords=%p (n=%zu) match=%d\n",
-                        i, node.prim_offset, node.back_poly_offset,
-                        (const void*)ap.coords, (int)ap.n_coords,
-                        (const void*)tree.coords.data(), tree.coords.size(),
-                        (int)(ap.coords == tree.coords.data()));
-                }
-                process_prim(ctx, node.prim_offset);
-                if (node.back_poly_offset >= 0) {
-                    process_prim(ctx, node.back_poly_offset);
-                }
-            } else if (node.type == BspNodeType::BLightStringNode) {
-                ctx.visited[i] = true;
-                ++diag_orphan_light_string;
-                process_prim(ctx, node.prim_offset);
-            } else {
-                ++diag_orphan_skipped_nonprim;
-            }
-        }
-    }
+    // If a future malformed model ever produces orphans, the diagnostic
+    // is still available via F4_DIAG=1 in bsp_parser.cpp.
 
     if (diag_enabled()) {
+        std::size_t visited_count = 0;
+        for (bool v : ctx.visited) if (v) ++visited_count;
+        std::size_t total_tris = 0;
+        for (const auto& m : geometry.meshes) total_tris += m.triangles.size();
         std::fprintf(stderr,
-            "[DIAG] === orphan rescue summary ===\n"
-            "[DIAG]   total_nodes=%zu visited_after_main_walk=%zu\n"
-            "[DIAG]   orphan_prim_rescued=%d orphan_lit_rescued=%d orphan_light_string=%d\n"
-            "[DIAG]   orphan_nonprim_skipped=%d\n"
+            "[DIAG] === geometry extraction summary ===\n"
+            "[DIAG]   nodes=%zu visited=%zu (%.1f%%)\n"
             "[DIAG]   meshes=%zu total_tris=%zu\n",
-            tree.nodes.size(), ctx.visited.size(),
-            diag_orphan_prim, diag_orphan_lit, diag_orphan_light_string,
-            diag_orphan_skipped_nonprim,
-            geometry.meshes.size(),
-            [&]{ std::size_t t=0; for (const auto& m : geometry.meshes) t += m.triangles.size(); return t; }());
+            tree.nodes.size(), visited_count,
+            tree.nodes.empty() ? 100.0 : 100.0 * visited_count / tree.nodes.size(),
+            geometry.meshes.size(), total_tris);
+        if (visited_count < tree.nodes.size()) {
+            std::fprintf(stderr,
+                "[DIAG] WARNING: %zu orphan nodes not visited by main walk\n",
+                tree.nodes.size() - visited_count);
+        }
     }
 
     return geometry;

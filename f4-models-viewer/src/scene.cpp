@@ -319,13 +319,14 @@ static void sync_model_state_with_bsp_tree(
         }
         ss.n_children = n_children;
         // Clamp active_child:
-        //   - If active_child is -1 (show all), keep it — still valid.
+        //   - If active_child is -2 ("None") or -1 ("Show All"), keep it.
         //   - If active_child >= n_children, reset to "Show All" (-1).
-        //   - active_child < -1 shouldn't happen; treat as "Show All".
-        if (ss.active_child != -1 && ss.active_child >= n_children) {
+        //   - active_child < -2 shouldn't happen; treat as "Show All".
+        if (ss.active_child != -1 && ss.active_child != -2 &&
+            ss.active_child >= n_children) {
             ss.active_child = -1;
         }
-        if (ss.active_child < -1) {
+        if (ss.active_child < -2) {
             ss.active_child = -1;
         }
         new_switches.push_back(ss);

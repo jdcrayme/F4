@@ -684,8 +684,8 @@ static void draw_switch_panel(ViewerApp::Impl& impl) {
         if (impl.model_state.switches.empty()) {
             ImGui::TextDisabled("No switches for this model.");
         } else {
-            // Help text explaining the "Show All" option
-            ImGui::TextDisabled("Tip: 'Show All' renders every child at once.");
+            // Help text explaining the options
+            ImGui::TextDisabled("Tip: 'None' hides all children. 'Show All' renders every child at once.");
             ImGui::Separator();
 
             bool changed = false;
@@ -696,16 +696,33 @@ static void draw_switch_panel(ViewerApp::Impl& impl) {
                               sw.switch_number, sw.n_children);
 
                 // Combo box for child selection.
-                // active_child = -1 means "show all children" (FreeFalcon's
-                // default behavior when no switch state is set).
+                // active_child sentinel values:
+                //   -2 = "None"     — hide all children
+                //   -1 = "Show All" — render every child simultaneously
+                //   0..n-1 = render only this child
                 char current[48];
-                if (sw.active_child == -1) {
+                if (sw.active_child == -2) {
+                    std::snprintf(current, sizeof(current), "None");
+                } else if (sw.active_child == -1) {
                     std::snprintf(current, sizeof(current), "Show All");
                 } else {
                     std::snprintf(current, sizeof(current), "Child %d", sw.active_child);
                 }
 
                 if (ImGui::BeginCombo(label, current)) {
+                    // "None" option — hide all children. Useful for
+                    // inspecting the rest of the model without the
+                    // switch's parts occluding it.
+                    {
+                        bool is_selected = (sw.active_child == -2);
+                        if (ImGui::Selectable("None", is_selected)) {
+                            sw.active_child = -2;
+                            changed = true;
+                        }
+                        if (is_selected) {
+                            ImGui::SetItemDefaultFocus();
+                        }
+                    }
                     // "Show All" option — renders every child simultaneously.
                     // Useful for switches that act as bitmasks (e.g. pylon
                     // loadout selectors where each child is one store).

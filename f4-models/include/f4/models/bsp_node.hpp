@@ -99,8 +99,11 @@ struct BspTree {
     /// referenced by index into this array.
     std::vector<BspNode> nodes;
 
-    /// Tag list — one BspNodeType per node, in disk order.
-    /// nodes[i] has type tags[i]. Useful for debugging.
+    /// Tag list — one BspNodeType per node, in sibling-first DFS walk order
+    /// (matches FreeFalcon's BNode::RestorePointers which walks sibling
+    /// before subtree, due to C++ base-class-constructor-runs-first
+    /// semantics). tags[i] is consumed by the i-th node visited during
+    /// the main walk. Useful for debugging.
     std::vector<BspNodeType> tags;
 
     /// Shared coordinate pool (all Vec3 points referenced by nodes).

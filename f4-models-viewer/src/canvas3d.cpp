@@ -98,10 +98,16 @@ void ViewerApp::Impl::draw_bounding_volumes() {
 // compilation failure (id == 0).
 //
 // Vertex shader: standard Raylib vertex pipeline + pass fragNormal in
-// world/view space. Note we use the modelView matrix's upper 3x3 for
-// normal transformation (no inverse-transpose, which is correct only
-// for uniform scaling — FreeFalcon's BScaleNodes do produce non-uniform
-// scaling, but the visual error is acceptable for a debug viewer).
+// world space.
+//
+// We use `vertexNormal` directly (no mat3(modelView) transform) because:
+//   1. Raylib's DrawMesh() does NOT upload a `modelView` uniform (there
+//      is no SHADER_LOC_MATRIX_MODELVIEW in rlgl.h). The uniform would
+//      default to a zero matrix, zeroing all normals and making the
+//      directional light component disappear — leaving only ambient.
+//   2. The viewer calls DrawMesh with an identity model matrix, so
+//      model-space normals are already in world space. The `lightDir`
+//      uniform is uploaded in world space, so dot(N, L) is correct.
 //
 // Fragment shader: tex * colDiffuse * fragColor * (ambient + lightColor * NdotL)
 
@@ -112,14 +118,13 @@ static const char* kLitShaderVS =
     "in vec4 vertexColor;\n"
     "in vec3 vertexNormal;\n"
     "uniform mat4 mvp;\n"
-    "uniform mat4 modelView;\n"
     "out vec2 fragTexCoord;\n"
     "out vec4 fragColor;\n"
     "out vec3 fragNormal;\n"
     "void main() {\n"
     "    fragTexCoord = vertexTexCoord;\n"
     "    fragColor = vertexColor;\n"
-    "    fragNormal = normalize(mat3(modelView) * vertexNormal);\n"
+    "    fragNormal = normalize(vertexNormal);\n"
     "    gl_Position = mvp * vec4(vertexPosition, 1.0);\n"
     "}\n";
 
@@ -143,7 +148,7 @@ static const char* kLitShaderFS =
     "    // pixels don't occlude geometry behind them.\n"
     "    if (tex.a < 0.5) discard;\n"
     "    vec3 N = normalize(fragNormal);\n"
-    "    vec3 L = normalize(-lightDir);\n"
+    "    vec3 L = normalize(lightDir);\n"
     "    float NdotL = max(dot(N, L), 0.0);\n"
     "    vec4 light = ambient + lightColor * NdotL;\n"
     "    finalColor = tex * colDiffuse * fragColor * light;\n"
@@ -219,10 +224,10 @@ void ViewerApp::Impl::draw_canvas() {
         lighting_active = true;
 
         if (lit_shader_dir_loc >= 0) {
-            // lightDir is the direction FROM the light TO the scene.
+            // lightDir is the direction FROM the surface TO the light
+            // (i.e., the direction a surface should face to be fully lit).
             // Our convention: light_direction points from scene toward
-            // the sun, so pass it as-is (the fragment shader negates it
-            // to get L = direction toward light).
+            // the sun, which is exactly this. Pass as-is.
             const float dir[3] = { light_dir.x, light_dir.y, light_dir.z };
             SetShaderValue(lit_shader, lit_shader_dir_loc, dir, SHADER_UNIFORM_VEC3);
         }

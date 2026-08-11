@@ -126,6 +126,9 @@ struct DofState {
 struct SwitchState {
     int  switch_number = -1;    ///< which switch this controls
     int  active_child  = 0;     ///< currently visible child index (0-based)
+                                ///< -2 = "None" (hide all children)
+                                ///< -1 = "Show All" (walk every child)
+                                ///< 0..n-1 = walk only this child
     int  n_children    = 0;     ///< total number of switch children
 };
 
