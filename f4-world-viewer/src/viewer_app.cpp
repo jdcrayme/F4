@@ -168,6 +168,14 @@ void ViewerApp::run() {
     // is empty; subsequent selections won't re-render models until the
     // user re-runs the viewer (which is fine — we're shutting down).
     impl_->unload_meshes_3d();
+    // Free the Class Table Browser's preview GPU resources (RenderTexture,
+    // cached meshes, textures, lit shader, default material). The browser
+    // owns its own cache (separate from impl_->mesh_cache_3d) so we must
+    // clean it up here too. We call close() (which is public and calls
+    // cleanup_preview() internally) rather than cleanup_preview() directly
+    // (which is private). Safe to call when the browser was never opened
+    // (cleanup_preview is a no-op in that case).
+    impl_->class_table_browser.close();
     CloseWindow();
 }
 

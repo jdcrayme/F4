@@ -1946,3 +1946,75 @@ Stage Summary:
 - Limitations: (1) lighting is a single directional sun + ambient (no shadows, no per-pixel specular); (2) LOD is locked to 0 (highest detail) — could be distance-based in the future; (3) damage states are not yet visually applied (vis_type[1..6] would give damaged/wrecked variants — currently always slot 0); (4) there's no "Reload Models" button — the load retry only happens via set_install_path().
 - Deliverable: f4-ground-layout-3d-feature-models.patch (37 KB) at /home/z/my-project/F4/f4-ground-layout-3d-feature-models.patch and /home/z/my-project/download/.
 - To apply: `cd F4 && git apply f4-ground-layout-3d-feature-models.patch` (clean apply on top of the v2 patch).
+
+---
+Task ID: CTB-BLACK-RENDER-FIX
+Agent: main (orchestrator)
+Task: Fix "render window just shows black for all models" in ClassTableBrowser after user had to add raymath.h to compile.
+
+Work Log:
+- Read f4-world-viewer/src/class_table_browser.cpp (draw_model_preview, ensure_preview_target, ensure_lit_shader, build_preview_meshes, upload_preview_textures).
+- Compared with the working f4-models-viewer/src/canvas3d.cpp lit shader + draw path.
+- Identified THREE issues, in order of severity:
+
+  1. (THE BLACK-RENDER BUG) RenderTexture2D reconstruction at the BeginTextureMode
+     call site only populated rt.id and rt.texture.id, leaving rt.texture.width
+     and rt.texture.height at 0. Raylib's BeginTextureMode() calls
+     rlViewport(0, 0, target.texture.width, target.texture.height) — with 0x0
+     the GL viewport becomes empty and every draw call inside BeginMode3D is
+     clipped out. ClearBackground still runs (glClear ignores viewport), so
+     the framebuffer ends up as the dark clear color (30,30,38) — which reads
+     as "black" to the user. Fix: populate the full Texture2D descriptor
+     (width, height, mipmaps=1, format=PIXELFORMAT_UNCOMPRESSED_R8G8B8A8)
+     before BeginTextureMode. We already had preview_rt_w_/preview_rt_h_
+     cached in the header for exactly this purpose; they just weren't being
+     used at the reconstruction site.
+
+  2. (SECONDARY — dim lighting) The vertex shader used
+        fragNormal = normalize(mat3(modelView) * vertexNormal);
+     but Raylib's DrawMesh does NOT upload a `modelView` uniform (no
+     SHADER_LOC_MATRIX_MODELVIEW in rlgl.h). The uniform defaults to a
+     zero matrix, zeroing all normals, which kills the directional light
+     component and leaves only ambient (0.30 brightness). The model would
+     still be visible but very dim. The working canvas3d.cpp documents
+     this exact issue and uses `fragNormal = normalize(vertexNormal);`
+     directly. Fix: drop the modelView uniform and use vertexNormal
+     directly — DrawMesh is called with an identity model matrix, so
+     model-space normals are already in world space.
+
+  3. (SECONDARY — missing triangles) The preview path did not call
+     rlDisableBackfaceCulling(). FreeFalcon models have inconsistent
+     winding (many polys are CCW relative to the plane normal); without
+     disabling culling, those polys are dropped as back-facing. The
+     working canvas3d.cpp calls rlDisableBackfaceCulling() before
+     DrawMesh and rlEnableBackfaceCulling() after. Fix: same pattern.
+
+  Also added <raymath.h> (for MatrixIdentity — user already had this
+  locally but it wasn't in the source tree) and <rlgl.h> (for
+  rlDisableBackfaceCulling/rlEnableBackfaceCulling).
+
+  While in the draw loop, also added:
+    - BeginBlendMode(BLEND_ALPHA) / EndBlendMode() around the mesh pass
+      (matches canvas3d.cpp; needed for chroma-key texture cutouts on
+      the unlit fallback path; the lit shader's `discard` handles it
+      on the lit path but the blend mode is a safe no-op there).
+    - Opaque-before-alpha draw ordering (matches canvas3d.cpp).
+    - Skip draw_one() when me.mesh.triangleCount <= 0 (avoids passing
+      empty meshes to DrawMesh, which is a no-op but wastes a bind).
+
+Stage Summary:
+- Modified: f4-world-viewer/src/class_table_browser.cpp
+  - Added includes: <raymath.h>, <rlgl.h>
+  - kPreviewLitShaderVS: dropped `uniform mat4 modelView;`, replaced
+    `normalize(mat3(modelView) * vertexNormal)` with
+    `normalize(vertexNormal)` (with explanatory comment).
+  - draw_model_preview: populate rt.texture.{width,height,mipmaps,format}
+    before BeginTextureMode (the actual black-render fix).
+  - draw_model_preview: add rlDisableBackfaceCulling() before the mesh
+    loop and rlEnableBackfaceCulling() after; wrap mesh loop in
+    BeginBlendMode(BLEND_ALPHA)/EndBlendMode(); split into opaque/alpha
+    order; skip empty meshes.
+- Not built locally — user builds on their machine. Recommend rebuild
+  + reopen Class Table Browser, select any entry with a vis_type > 0,
+  the preview pane should now show the model lit by the directional
+  sun + ambient, with the bounding-sphere wireframe as a faint guide.

@@ -33,6 +33,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <memory>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -40,10 +41,22 @@
 
 namespace f4::viewer {
 
+// Forward declaration — the full definition lives in class_table_browser.cpp
+// because it contains Raylib types (::Mesh, ::Material, ::Texture2D,
+// ::Shader, ::RenderTexture2D) that we don't want to leak into the public
+// header (raylib is a PRIVATE dependency of f4_world_viewer per the
+// CMakeLists). This is the PImpl idiom.
+struct PreviewCache;
+
 class ClassTableBrowser {
 public:
-    ClassTableBrowser() = default;
-    ~ClassTableBrowser();  // cleans up GPU resources
+    // Constructor and destructor defined out-of-line in class_table_browser.cpp
+    // because the destructor (and the implicitly-generated copy-elision cleanup
+    // path in the constructor) need the full PreviewCache definition, which
+    // lives in the .cpp (PImpl idiom — PreviewCache contains Raylib types that
+    // must not leak into this public header).
+    ClassTableBrowser();
+    ~ClassTableBrowser();
 
     // Non-copyable (owns GPU resources)
     ClassTableBrowser(const ClassTableBrowser&) = delete;
@@ -100,17 +113,38 @@ private:
     // --- 3D model preview state ---
     // RenderTexture2D stored as raw GPU texture ids + dimensions
     // (can't put Raylib types in header without pulling in raylib.h).
+    // UnloadRenderTexture only needs rt.id + rt.texture.id, so raw ids
+    // are sufficient here (unlike Mesh/Material/Shader which need their
+    // full structs for cleanup — those live in PreviewCache).
     unsigned int preview_rt_id_ = 0;       // RenderTexture2D.id
     unsigned int preview_tex_id_ = 0;      // RenderTexture2D.texture.id (color attachment)
     int preview_rt_w_ = 0;
     int preview_rt_h_ = 0;
     bool preview_rt_valid_ = false;
-    // Orbit camera
-    float cam_azimuth_ = 0.3f;
-    float cam_elevation_ = 0.4f;
-    float cam_distance_ = 50.0f;
-    // Track which models we've already called parse_lod() for
-    std::unordered_map<int16_t, bool> model_parse_attempted_;
+
+    // PreviewCache (PImpl) — holds all Raylib GPU resources that need
+    // full structs for cleanup: the mesh cache (per vis_type), texture
+    // cache (per tex_id), lit shader, default material, and fallback
+    // white texture. Defined in class_table_browser.cpp.
+    // Lazily allocated on first use (can't be allocated at construction
+    // time because the GL context doesn't exist yet — ViewerApp creates
+    // ClassTableBrowser before run() calls InitWindow).
+    std::unique_ptr<PreviewCache> preview_cache_;
+
+    // Orbit camera (stored in model-space units; cam_target is the
+    // model's bbox center so the camera actually orbits the model,
+    // not the world origin).
+    float cam_azimuth_ = 0.7f;       // radians, horizontal orbit
+    float cam_elevation_ = 0.35f;    // radians, vertical orbit
+    float cam_distance_ = 100.0f;    // distance from cam_target
+    float cam_target_x_ = 0.0f;      // model bbox center (RH Y-up)
+    float cam_target_y_ = 0.0f;
+    float cam_target_z_ = 0.0f;
+    // When the user picks a new visType, we refit the camera once.
+    int last_previewed_vis_type_ = -1;
+    // Diagnostic: did the last draw_model_preview() actually draw anything?
+    bool last_preview_drew_meshes_ = false;
+    std::string last_preview_status_;
 
     // --- Export state ---
     char export_path_buf_[1024] = {};
@@ -145,6 +179,34 @@ private:
 
     /// Ensure the RenderTexture2D for the preview exists.
     void ensure_preview_target(int w, int h);
+
+    /// Lazy-compile the lit shader (single directional sun + ambient).
+    /// Idempotent. Returns true if the shader is available (either
+    /// freshly compiled or already cached). Returns false if compilation
+    /// fails — caller falls back to unlit default material.
+    bool ensure_lit_shader();
+
+    /// Lazy-create the 1x1 white fallback texture + the cached default
+    /// material that binds it (and the lit shader, if available).
+    /// Required so untextured meshes sample (1,1,1,1) instead of
+    /// undefined data — the lit shader's `if (tex.a < 0.5) discard;`
+    /// would otherwise kill every fragment of every untextured mesh.
+    bool ensure_default_material();
+
+    /// Build (or skip if cached) Raylib Mesh objects for one KoreaObj
+    /// model. Requires the GL context. No-op if vis_type_idx <= 0 or
+    /// already cached. Sets preview_cache_->mesh_cache[vis_type_idx].built = true
+    /// even on failure (so we don't retry every frame).
+    void build_preview_meshes(int16_t vis_type_idx);
+
+    /// Upload any new textures referenced by built preview meshes but
+    /// not yet in preview_cache_->texture_cache. Called after build_preview_meshes().
+    void upload_preview_textures();
+
+    /// Fit the orbit camera to the model's bounding box so the model
+    /// fills a reasonable portion of the preview viewport. Called once
+    /// per new vis_type selection.
+    void fit_camera_to_model(int16_t vis_type_idx);
 
     /// Clean up GPU resources on close/reload.
     void cleanup_preview();

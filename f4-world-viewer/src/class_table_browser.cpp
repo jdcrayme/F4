@@ -22,6 +22,8 @@
 #include <imgui.h>
 #include <rlImGui.h>
 #include <raylib.h>
+#include <raymath.h>   // MatrixIdentity
+#include <rlgl.h>      // rlDisableBackfaceCulling
 
 #include <algorithm>
 #include <cmath>
@@ -31,6 +33,58 @@
 #include <iomanip>
 #include <sstream>
 #include <string>
+
+// ---------------------------------------------------------------------------
+// PreviewCache — PImpl holding all Raylib GPU resources owned by
+// ClassTableBrowser. Defined here (not in the header) because it contains
+// Raylib types that must NOT leak into the public header (raylib is a
+// PRIVATE dependency of f4_world_viewer).
+//
+// Members:
+//   mesh_cache     — per-vis_type vector of (::Mesh, tex_id). Each ::Mesh
+//                    is built via UploadMesh and must be freed with
+//                    UnloadMesh (which needs the full struct, not just
+//                    an id, to access vboId/vaoId for GPU cleanup).
+//   texture_cache  — per-tex_id (::Texture2D, ::Material). The Material
+//                    references the Texture on its diffuse map; both must
+//                    be freed (UnloadMaterial then UnloadTexture).
+//   lit_shader     — single directional+ambient shader, compiled once.
+//   default_mat    — cached Material with a 1x1 white texture on diffuse
+//                    (so untextured meshes sample (1,1,1,1) instead of
+//                    undefined data, which would trigger the lit shader's
+//                    `if (tex.a < 0.5) discard;` and hide the mesh).
+//   fallback_white_tex — the 1x1 texture bound to default_mat.
+// ---------------------------------------------------------------------------
+struct f4::viewer::PreviewCache {
+    struct MeshEntry {
+        ::Mesh mesh = {};
+        int32_t tex_id = -1;  // -1 = untextured, use default_mat
+    };
+    struct MeshCacheEntry {
+        std::vector<MeshEntry> meshes;
+        bool built = false;
+        bool valid = false;
+        std::size_t tri_count = 0;
+    };
+    std::unordered_map<int, MeshCacheEntry> mesh_cache;
+
+    struct TexCacheEntry {
+        ::Texture2D texture = {};
+        ::Material material = {};
+        bool uploaded = false;
+    };
+    std::unordered_map<int, TexCacheEntry> texture_cache;
+
+    ::Shader lit_shader = {};
+    bool lit_shader_built = false;
+    int lit_shader_dir_loc = -1;
+    int lit_shader_color_loc = -1;
+    int lit_shader_ambient_loc = -1;
+
+    ::Texture2D fallback_white_tex = {};
+    ::Material default_mat = {};
+    bool default_mat_built = false;
+};
 
 namespace f4::viewer {
 
@@ -57,13 +111,38 @@ const char* ClassTableBrowser::ct_data_type_name(uint8_t dt) noexcept {
 }
 
 // ---------------------------------------------------------------------------
-// Destructor — clean up GPU resources
+// Constructor — defined out-of-line because the implicit cleanup path
+// for the unique_ptr<PreviewCache> member needs the full PreviewCache type
+// (PImpl idiom). preview_cache_ is left null here; it's lazily allocated
+// on first GPU use in ensure_lit_shader()/ensure_default_material()/
+// build_preview_meshes(), which are all called from inside the ImGui frame
+// (GL context is available by then).
+// ---------------------------------------------------------------------------
+ClassTableBrowser::ClassTableBrowser() = default;
+
+// ---------------------------------------------------------------------------
+// Destructor — clean up GPU resources.
+//
+// Guard with IsWindowReady() because the dtor runs when ViewerApp's impl_
+// unique_ptr is destroyed, which happens AFTER ~ViewerApp's body — and
+// ~ViewerApp's body may have already called CloseWindow() (if run() ever
+// returned). Calling UnloadMesh / UnloadTexture / UnloadShader after the
+// GL context is gone crashes on some drivers.
+//
+// If the user closes the browser via the X button (close()), that happens
+// inside the ImGui frame, so IsWindowReady() is true and cleanup runs
+// normally.
 // ---------------------------------------------------------------------------
 ClassTableBrowser::~ClassTableBrowser() {
-    cleanup_preview();
+    if (IsWindowReady()) {
+        cleanup_preview();
+    }
 }
 
 void ClassTableBrowser::cleanup_preview() {
+    // Free the RenderTexture2D (color attachment + GL framebuffer).
+    // UnloadRenderTexture only needs rt.id + rt.texture.id, so the raw
+    // ids stored in the header are sufficient.
     if (preview_rt_valid_) {
         RenderTexture2D rt = {};
         rt.id = preview_rt_id_;
@@ -73,7 +152,80 @@ void ClassTableBrowser::cleanup_preview() {
         preview_rt_id_ = 0;
         preview_tex_id_ = 0;
     }
-    model_parse_attempted_.clear();
+
+    // Free all PreviewCache GPU resources. We must access the full
+    // Raylib structs (::Mesh, ::Material, ::Shader, ::Texture2D) because
+    // their Unload functions need internal fields (vboId arrays, maps
+    // pointers, locs pointers) that aren't captured by a bare id.
+    if (!preview_cache_) {
+        // Nothing was ever built (browser was never opened, or no model
+        // was ever previewed). Still reset the selection tracking.
+        last_previewed_vis_type_ = -1;
+        return;
+    }
+
+    // Free cached meshes. Each ::Mesh was allocated with RL_MALLOC for its
+    // vertex/normal/texcoord/color/indices arrays and uploaded with
+    // UploadMesh; UnloadMesh handles both the GPU VBOs/VAO and the CPU
+    // arrays. We pass the full struct so Raylib can access vboId/vaoId.
+    for (auto& [vis_idx, entry] : preview_cache_->mesh_cache) {
+        for (auto& me : entry.meshes) {
+            // me.mesh.vaoId != 0 means it was actually uploaded to GPU.
+            // (A default-constructed ::Mesh has vaoId == 0.)
+            if (me.mesh.vaoId != 0 || me.mesh.vboId[0] != 0) {
+                UnloadMesh(me.mesh);
+            }
+            me.mesh = {};
+        }
+    }
+    preview_cache_->mesh_cache.clear();
+
+    // Free cached textures + materials. Must come AFTER UnloadMesh
+    // (meshes don't reference textures, but materials do — unloading a
+    // material that still has a GPU texture bound can leave dangling
+    // state on some drivers). Order: unload material first (which
+    // detaches the texture), then unload the texture.
+    for (auto& [tex_id, ce] : preview_cache_->texture_cache) {
+        if (ce.uploaded) {
+            // Detach the texture from the material's diffuse map before
+            // unloading the material, so UnloadMaterial doesn't try to
+            // free a texture it doesn't own.
+            ce.material.maps[MATERIAL_MAP_DIFFUSE].texture = {};
+            UnloadMaterial(ce.material);
+            ce.material = {};
+            UnloadTexture(ce.texture);
+            ce.texture = {};
+            ce.uploaded = false;
+        }
+    }
+    preview_cache_->texture_cache.clear();
+
+    // Free the default material + fallback white texture + lit shader.
+    // These are built once per browser-open cycle; freeing them here lets
+    // us re-build cleanly if the user closes and re-opens the browser.
+    if (preview_cache_->default_mat_built) {
+        // Detach the fallback texture so UnloadMaterial doesn't free it
+        // (we own it separately).
+        preview_cache_->default_mat.maps[MATERIAL_MAP_DIFFUSE].texture = {};
+        UnloadMaterial(preview_cache_->default_mat);
+        preview_cache_->default_mat = {};
+        preview_cache_->default_mat_built = false;
+    }
+    if (preview_cache_->fallback_white_tex.id != 0) {
+        UnloadTexture(preview_cache_->fallback_white_tex);
+        preview_cache_->fallback_white_tex = {};
+    }
+    if (preview_cache_->lit_shader_built && preview_cache_->lit_shader.id != 0) {
+        UnloadShader(preview_cache_->lit_shader);
+        preview_cache_->lit_shader = {};
+        preview_cache_->lit_shader_built = false;
+        preview_cache_->lit_shader_dir_loc = -1;
+        preview_cache_->lit_shader_color_loc = -1;
+        preview_cache_->lit_shader_ambient_loc = -1;
+    }
+
+    // Reset selection tracking so the next preview refits the camera.
+    last_previewed_vis_type_ = -1;
 }
 
 // ---------------------------------------------------------------------------
@@ -476,7 +628,111 @@ void ClassTableBrowser::draw_table() {
 
 // ---------------------------------------------------------------------------
 // 3D Model Preview
+//
+// Pipeline (mirrors f4-models-viewer/src/scene.cpp + ViewerApp::Impl's
+// ground_layout_3d.cpp mesh cache):
+//   1. ensure_lit_shader()      — compile the directional+ambient shader
+//   2. ensure_default_material()— 1x1 white tex + default material
+//   3. build_preview_meshes()   — extract geometry, build Raylib ::Mesh,
+//                                  upload to GPU, cache by vis_type
+//   4. upload_preview_textures()- decode TEX blobs, upload as Texture2D
+//   5. fit_camera_to_model()    — point camera at bbox center, set distance
+//   6. BeginTextureMode + BeginMode3D + DrawMesh per mesh + EndMode3D +
+//      EndTextureMode, then rlImGuiImageSize to display.
+//
+// Coordinate conversion: FreeFalcon BSP vertices are LH Y-up
+//   +X=right, +Y=up, +Z=forward
+// Raylib is RH Y-up:
+//   +X=right, +Y=up, +Z=toward viewer
+// Conversion: (x, y, z) -> (x, -z, y)
+// (NOTE: the previous implementation used (x, y, -z) which matched the
+//  outdated comment in f4-models-viewer/src/viewer_state.hpp but NOT the
+//  actual working code. Models rendered sideways / upside-down.)
 // ---------------------------------------------------------------------------
+
+// LH Y-up (FreeFalcon model space) → RH Y-up (Raylib).
+static inline Vector3 model_vertex_to_rl(float x, float y, float z) noexcept {
+    return { x, -z, y };
+}
+
+// FreeFalcon's `Prim.rgba` is an INT index into the ColorBank (NOT packed
+// ABGR). Indices < 4096 look up the ColorBank; index 0 is a sentinel
+// ("no color") that we map to white for textured meshes or grey for
+// untextured. Out-of-range indices fall back to treating the value as
+// packed ABGR (rare; some legacy models).
+static Color resolve_vertex_color(uint32_t color_index,
+                                   const f4::models::ColorBank& color_bank,
+                                   bool mesh_is_textured) noexcept {
+    if (color_index == 0) {
+        return mesh_is_textured ? Color{255, 255, 255, 255}
+                                : Color{180, 180, 180, 255};
+    }
+    if (color_index < 4096) {
+        const int idx = static_cast<int>(color_index);
+        const uint32_t rgba = color_bank.rgba_at(idx);
+        if (rgba != 0) {
+            return Color{
+                static_cast<unsigned char>((rgba >> 24) & 0xFF),
+                static_cast<unsigned char>((rgba >> 16) & 0xFF),
+                static_cast<unsigned char>((rgba >> 8)  & 0xFF),
+                static_cast<unsigned char>(rgba & 0xFF)
+            };
+        }
+    }
+    return Color{
+        static_cast<unsigned char>(color_index & 0xFF),
+        static_cast<unsigned char>((color_index >> 8) & 0xFF),
+        static_cast<unsigned char>((color_index >> 16) & 0xFF),
+        static_cast<unsigned char>((color_index >> 24) & 0xFF)
+    };
+}
+
+// Lit shader source (same as ground_layout_3d.cpp's kLitShaderVS_3d/FS_3d
+// and f4-scenario-player's renderer.cpp). Single directional light +
+// ambient term on top of Raylib's default mesh pipeline.
+static const char* const kPreviewLitShaderVS =
+    "#version 330\n"
+    "in vec3 vertexPosition;\n"
+    "in vec2 vertexTexCoord;\n"
+    "in vec4 vertexColor;\n"
+    "in vec3 vertexNormal;\n"
+    "uniform mat4 mvp;\n"
+    "out vec2 fragTexCoord;\n"
+    "out vec4 fragColor;\n"
+    "out vec3 fragNormal;\n"
+    "void main() {\n"
+    "    fragTexCoord = vertexTexCoord;\n"
+    "    fragColor = vertexColor;\n"
+    "    // Use vertexNormal directly (no mat3(modelView) transform) because\n"
+    "    // Raylib's DrawMesh() does NOT upload a `modelView` uniform. The\n"
+    "    // uniform would default to a zero matrix, zeroing all normals and\n"
+    "    // making the directional light component disappear (leaving only\n"
+    "    // ambient). We call DrawMesh with an identity model matrix, so\n"
+    "    // model-space normals are already in world space.\n"
+    "    fragNormal = normalize(vertexNormal);\n"
+    "    gl_Position = mvp * vec4(vertexPosition, 1.0);\n"
+    "}\n";
+
+static const char* const kPreviewLitShaderFS =
+    "#version 330\n"
+    "in vec2 fragTexCoord;\n"
+    "in vec4 fragColor;\n"
+    "in vec3 fragNormal;\n"
+    "uniform sampler2D texture0;\n"
+    "uniform vec4 colDiffuse;\n"
+    "uniform vec3 lightDir;\n"
+    "uniform vec4 lightColor;\n"
+    "uniform vec4 ambient;\n"
+    "out vec4 finalColor;\n"
+    "void main() {\n"
+    "    vec4 tex = texture(texture0, fragTexCoord);\n"
+    "    if (tex.a < 0.5) discard;\n"
+    "    vec3 N = normalize(fragNormal);\n"
+    "    vec3 L = normalize(-lightDir);\n"
+    "    float NdotL = max(dot(N, L), 0.0);\n"
+    "    vec4 light = ambient + lightColor * NdotL;\n"
+    "    finalColor = tex * colDiffuse * fragColor * light;\n"
+    "}\n";
 
 void ClassTableBrowser::ensure_preview_target(int w, int h) {
     if (preview_rt_valid_ && preview_rt_w_ == w && preview_rt_h_ == h) return;
@@ -489,32 +745,319 @@ void ClassTableBrowser::ensure_preview_target(int w, int h) {
     preview_rt_valid_ = true;
 }
 
-void ClassTableBrowser::draw_model_preview(int16_t vis_type_idx) {
+bool ClassTableBrowser::ensure_lit_shader() {
+    // Lazy-allocate the PreviewCache on first GPU use. We can't allocate
+    // it in the constructor because the GL context doesn't exist yet
+    // (ViewerApp constructs ClassTableBrowser before run() → InitWindow).
+    if (!preview_cache_) preview_cache_ = std::make_unique<PreviewCache>();
+    if (preview_cache_->lit_shader_built) {
+        return preview_cache_->lit_shader.id != 0;
+    }
+    preview_cache_->lit_shader_built = true;
+    preview_cache_->lit_shader =
+        LoadShaderFromMemory(kPreviewLitShaderVS, kPreviewLitShaderFS);
+    if (preview_cache_->lit_shader.id == 0) return false;
+    preview_cache_->lit_shader_dir_loc =
+        GetShaderLocation(preview_cache_->lit_shader, "lightDir");
+    preview_cache_->lit_shader_color_loc =
+        GetShaderLocation(preview_cache_->lit_shader, "lightColor");
+    preview_cache_->lit_shader_ambient_loc =
+        GetShaderLocation(preview_cache_->lit_shader, "ambient");
+    return true;
+}
+
+bool ClassTableBrowser::ensure_default_material() {
+    if (!preview_cache_) preview_cache_ = std::make_unique<PreviewCache>();
+    if (preview_cache_->default_mat_built) {
+        return preview_cache_->default_mat.maps != nullptr;
+    }
+
+    // 1) 1x1 opaque-white fallback texture. Required so the lit shader's
+    //    `if (tex.a < 0.5) discard;` doesn't kill every fragment of every
+    //    untextured mesh (tex_id < 0). Without this, untextured meshes
+    //    sample undefined data from the default sampler, which on most
+    //    drivers returns (0,0,0,0) → fully transparent → discarded.
+    if (preview_cache_->fallback_white_tex.id == 0) {
+        Image img = {};
+        img.data = RL_MALLOC(4);
+        if (!img.data) return false;
+        unsigned char* px = static_cast<unsigned char*>(img.data);
+        px[0] = 255; px[1] = 255; px[2] = 255; px[3] = 255;
+        img.width = 1;
+        img.height = 1;
+        img.mipmaps = 1;
+        img.format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8;
+        preview_cache_->fallback_white_tex = LoadTextureFromImage(img);
+        UnloadImage(img);
+        if (preview_cache_->fallback_white_tex.id == 0) return false;
+    }
+
+    // 2) Default material with white texture on diffuse map + lit shader.
+    preview_cache_->default_mat = LoadMaterialDefault();
+    preview_cache_->default_mat.maps[MATERIAL_MAP_DIFFUSE].texture =
+        preview_cache_->fallback_white_tex;
+    preview_cache_->default_mat.maps[MATERIAL_MAP_DIFFUSE].color = WHITE;
+    if (preview_cache_->lit_shader.id != 0) {
+        preview_cache_->default_mat.shader = preview_cache_->lit_shader;
+    }
+    preview_cache_->default_mat_built = true;
+    return true;
+}
+
+void ClassTableBrowser::build_preview_meshes(int16_t vis_type_idx) {
+    if (vis_type_idx <= 0) return;
+    if (!preview_cache_) preview_cache_ = std::make_unique<PreviewCache>();
+
+    auto it = preview_cache_->mesh_cache.find(vis_type_idx);
+    if (it != preview_cache_->mesh_cache.end() && it->second.built) return;
+
+    if (!model_db_) {
+        if (it != preview_cache_->mesh_cache.end()) it->second.built = true;
+        else preview_cache_->mesh_cache[vis_type_idx].built = true;
+        return;
+    }
+
+    const auto* rec = model_db_->model(vis_type_idx);
+    if (!rec || rec->lods.empty()) {
+        if (it != preview_cache_->mesh_cache.end()) it->second.built = true;
+        else preview_cache_->mesh_cache[vis_type_idx].built = true;
+        return;
+    }
+
+    // Lock to LOD 0 (highest detail) for the preview.
+    const int lod = 0;
+    auto err = model_db_->parse_lod(vis_type_idx, lod);
+    if (!err.empty()) {
+        if (it != preview_cache_->mesh_cache.end()) it->second.built = true;
+        else preview_cache_->mesh_cache[vis_type_idx].built = true;
+        return;
+    }
+
+    f4::models::ModelState default_state;
+    default_state.texture_set = 0;
+    default_state.n_texture_sets = std::max(1, static_cast<int>(rec->n_texture_sets));
+
+    auto geom = model_db_->extract_model_geometry(vis_type_idx, lod, default_state);
+    if (geom.meshes.empty()) {
+        preview_cache_->mesh_cache[vis_type_idx].built = true;
+        return;
+    }
+
+    const auto& cb = model_db_->color_bank();
+
+    PreviewCache::MeshCacheEntry entry;
+    entry.meshes.reserve(geom.meshes.size());
+    std::size_t total_tris = 0;
+
+    for (const auto& src : geom.meshes) {
+        if (src.vertices.empty()) continue;
+        if (src.kind == f4::models::PrimitiveKind::Triangles && src.triangles.empty()) continue;
+        // Skip lines/points for the preview — they're rare and Raylib's
+        // DrawMesh only handles triangle lists. (f4-models-viewer draws
+        // them separately via DrawLine3D; we don't bother in the small
+        // preview pane.)
+        if (src.kind != f4::models::PrimitiveKind::Triangles) continue;
+
+        const bool mesh_is_textured = (src.tex_id >= 0);
+        const int vert_count = static_cast<int>(src.vertices.size());
+        const int tri_count  = static_cast<int>(src.triangles.size());
+
+        ::Mesh rm = {};
+        rm.vertexCount = vert_count;
+        rm.triangleCount = tri_count;
+        rm.vertices  = static_cast<float*>(RL_MALLOC(vert_count * 3 * sizeof(float)));
+        rm.normals   = static_cast<float*>(RL_MALLOC(vert_count * 3 * sizeof(float)));
+        rm.texcoords = static_cast<float*>(RL_MALLOC(vert_count * 2 * sizeof(float)));
+        rm.colors    = static_cast<unsigned char*>(RL_MALLOC(vert_count * 4 * sizeof(unsigned char)));
+        if (tri_count > 0) {
+            rm.indices = static_cast<unsigned short*>(RL_MALLOC(tri_count * 3 * sizeof(unsigned short)));
+        }
+
+        for (int i = 0; i < vert_count; ++i) {
+            const auto& v = src.vertices[static_cast<std::size_t>(i)];
+            const Vector3 pos = model_vertex_to_rl(v.position.x, v.position.y, v.position.z);
+            rm.vertices[i*3+0] = pos.x;
+            rm.vertices[i*3+1] = pos.y;
+            rm.vertices[i*3+2] = pos.z;
+            const Vector3 nrm = model_vertex_to_rl(v.normal.x, v.normal.y, v.normal.z);
+            rm.normals[i*3+0] = nrm.x;
+            rm.normals[i*3+1] = nrm.y;
+            rm.normals[i*3+2] = nrm.z;
+            rm.texcoords[i*2+0] = v.uv.u;
+            rm.texcoords[i*2+1] = v.uv.v;
+            const Color c = resolve_vertex_color(v.color, cb, mesh_is_textured);
+            rm.colors[i*4+0] = c.r;
+            rm.colors[i*4+1] = c.g;
+            rm.colors[i*4+2] = c.b;
+            rm.colors[i*4+3] = c.a;
+        }
+        if (tri_count > 0) {
+            for (int i = 0; i < tri_count; ++i) {
+                const auto& tri = src.triangles[static_cast<std::size_t>(i)];
+                rm.indices[i*3+0] = static_cast<unsigned short>(tri.v0);
+                rm.indices[i*3+1] = static_cast<unsigned short>(tri.v1);
+                rm.indices[i*3+2] = static_cast<unsigned short>(tri.v2);
+            }
+        }
+        UploadMesh(&rm, false);
+
+        PreviewCache::MeshEntry me;
+        me.mesh = rm;  // full struct — needed for UnloadMesh later
+        me.tex_id = src.tex_id;
+        entry.meshes.push_back(me);
+        total_tris += static_cast<std::size_t>(tri_count);
+    }
+
+    entry.built = true;
+    entry.valid = !entry.meshes.empty();
+    entry.tri_count = total_tris;
+    preview_cache_->mesh_cache[vis_type_idx] = std::move(entry);
+
+    upload_preview_textures();
+}
+
+void ClassTableBrowser::upload_preview_textures() {
+    if (!model_db_ || !preview_cache_) return;
+
+    for (auto& [vis_idx, cache_entry] : preview_cache_->mesh_cache) {
+        for (auto& me : cache_entry.meshes) {
+            if (me.tex_id < 0) continue;
+            if (preview_cache_->texture_cache.count(me.tex_id)) continue;
+
+            const auto* decoded = model_db_->fetch_texture(me.tex_id);
+            if (!decoded || !decoded->valid()) {
+                PreviewCache::TexCacheEntry ce; ce.uploaded = false;
+                preview_cache_->texture_cache[me.tex_id] = ce;
+                continue;
+            }
+
+            Image img = {};
+            img.data = RL_MALLOC(static_cast<std::size_t>(decoded->width)
+                                  * decoded->height * 4);
+            if (!img.data) {
+                PreviewCache::TexCacheEntry ce; ce.uploaded = false;
+                preview_cache_->texture_cache[me.tex_id] = ce;
+                continue;
+            }
+            std::memcpy(img.data, decoded->rgba.data(),
+                        static_cast<std::size_t>(decoded->width)
+                          * decoded->height * 4);
+            img.width = decoded->width;
+            img.height = decoded->height;
+            img.mipmaps = 1;
+            img.format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8;
+
+            Texture2D tex = LoadTextureFromImage(img);
+            Material mat = LoadMaterialDefault();
+            mat.maps[MATERIAL_MAP_DIFFUSE].texture = tex;
+            mat.maps[MATERIAL_MAP_DIFFUSE].color = WHITE;
+            if (preview_cache_->lit_shader.id != 0) {
+                mat.shader = preview_cache_->lit_shader;
+            }
+
+            PreviewCache::TexCacheEntry ce;
+            ce.texture = tex;
+            ce.material = mat;
+            ce.uploaded = true;
+            preview_cache_->texture_cache[me.tex_id] = ce;
+            UnloadImage(img);
+        }
+    }
+
+    // Retroactively assign the lit shader to materials cached before the
+    // shader finished compiling. Since we now store the full Material
+    // struct, we CAN mutate the shader field directly (unlike the old
+    // id-only approach).
+    if (preview_cache_->lit_shader.id != 0) {
+        for (auto& [id, ce] : preview_cache_->texture_cache) {
+            if (ce.uploaded && ce.material.shader.id != preview_cache_->lit_shader.id) {
+                ce.material.shader = preview_cache_->lit_shader;
+            }
+        }
+        // Also update the default material if it was built before the shader.
+        if (preview_cache_->default_mat_built &&
+            preview_cache_->default_mat.shader.id != preview_cache_->lit_shader.id) {
+            preview_cache_->default_mat.shader = preview_cache_->lit_shader;
+        }
+    }
+}
+
+void ClassTableBrowser::fit_camera_to_model(int16_t vis_type_idx) {
     if (!model_db_ || vis_type_idx <= 0) return;
+    const auto* rec = model_db_->model(vis_type_idx);
+    if (!rec) return;
+
+    // Bbox center is in LH Y-up model space; convert to Raylib RH Y-up.
+    const Vector3 center = model_vertex_to_rl(
+        rec->bbox.center_x(), rec->bbox.center_y(), rec->bbox.center_z());
+    cam_target_x_ = center.x;
+    cam_target_y_ = center.y;
+    cam_target_z_ = center.z;
+
+    // Distance = radius * 2.5 so the model fills a reasonable portion of
+    // the view at fovy=45. Degenerate (radius=0) models get a sane default.
+    cam_distance_ = rec->radius * 2.5f;
+    if (cam_distance_ < 1.0f) cam_distance_ = 50.0f;
+
+    // Reset orbit angles so the user sees the model head-on.
+    cam_azimuth_ = 0.7f;
+    cam_elevation_ = 0.35f;
+}
+
+void ClassTableBrowser::draw_model_preview(int16_t vis_type_idx) {
+    last_preview_drew_meshes_ = false;
+    last_preview_status_.clear();
+
+    if (!model_db_) {
+        ImGui::TextDisabled("Model database not loaded (set install path).");
+        last_preview_status_ = "no model_db";
+        return;
+    }
+    if (vis_type_idx <= 0) {
+        ImGui::TextDisabled("No vis_type selected.");
+        last_preview_status_ = "no vis_type";
+        return;
+    }
 
     const auto* model = model_db_->model(vis_type_idx);
     if (!model) {
         ImGui::TextDisabled("Model[%d] not found in database", vis_type_idx);
+        last_preview_status_ = "model not found";
         return;
     }
 
-    // Lazy-parse the LOD if not yet done
-    if (!model_parse_attempted_.count(vis_type_idx)) {
-        model_parse_attempted_[vis_type_idx] = true;
-        if (model->n_lods > 0) {
-            model_db_->parse_lod(vis_type_idx, 0);
-        }
+    // Refit camera when the user picks a different visType.
+    if (last_previewed_vis_type_ != vis_type_idx) {
+        fit_camera_to_model(vis_type_idx);
+        last_previewed_vis_type_ = vis_type_idx;
     }
 
-    const int preview_w = 280;
-    const int preview_h = 220;
+    // Ensure the RenderTexture2D exists BEFORE building any GPU resources,
+    // because ensure_preview_target() may call cleanup_preview() (if the
+    // target size changed) which would clear the mesh/shader/material
+    // caches. By doing this first, we guarantee that any cleanup happens
+    // before we build, not after.
+    const int preview_w = 300;
+    const int preview_h = 240;
     ensure_preview_target(preview_w, preview_h);
 
-    // Build camera from orbit params
+    // Lazy GPU setup (shader, default material, mesh upload, textures).
+    ensure_lit_shader();
+    ensure_default_material();
+    build_preview_meshes(vis_type_idx);
+
+    const auto cache_it = preview_cache_->mesh_cache.find(vis_type_idx);
+    if (cache_it == preview_cache_->mesh_cache.end() || !cache_it->second.valid) {
+        ImGui::TextDisabled("Model[%d] has no renderable geometry", vis_type_idx);
+        last_preview_status_ = "no geometry";
+        return;
+    }
+
+    // Build camera from orbit params + model bbox center.
     const float az = cam_azimuth_;
     const float el = cam_elevation_;
     const float dist = cam_distance_;
-    const Vector3 target = { 0, 0, 0 };
+    const Vector3 target = { cam_target_x_, cam_target_y_, cam_target_z_ };
     const Vector3 cam_pos = {
         target.x + dist * std::cos(el) * std::sin(az),
         target.y + dist * std::sin(el),
@@ -528,90 +1071,154 @@ void ClassTableBrowser::draw_model_preview(int16_t vis_type_idx) {
     camera.fovy = 45.0f;
     camera.projection = CAMERA_PERSPECTIVE;
 
-    // Render to offscreen target
-    // Reconstruct RenderTexture2D for BeginTextureMode
+    // Reconstruct RenderTexture2D for BeginTextureMode.
+    //
+    // CRITICAL: BeginTextureMode() calls rlViewport(0, 0, target.texture.width,
+    // target.texture.height). If width/height are 0 (as they would be if we
+    // only populated rt.id and rt.texture.id), the GL viewport becomes 0x0
+    // and every draw call inside BeginMode3D is clipped out — the framebuffer
+    // ends up with only the ClearBackground color (which reads as 'black' to
+    // the user). Populate the full texture descriptor so the viewport is set
+    // to the actual render-target size.
     RenderTexture2D rt = {};
     rt.id = preview_rt_id_;
-    rt.texture.id = preview_tex_id_;
+    rt.texture.id      = preview_tex_id_;
+    rt.texture.width   = preview_rt_w_;
+    rt.texture.height  = preview_rt_h_;
+    rt.texture.mipmaps = 1;
+    rt.texture.format  = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8;
 
     BeginTextureMode(rt);
         ClearBackground({ 30, 30, 38, 255 });
         BeginMode3D(camera);
-            // Draw bounding sphere as a wireframe sphere hint
+            // Bounding sphere hint (wireframe) so the user can see the
+            // model's extent even if the mesh itself is sparse.
             DrawSphereWires(target, model->radius, 12, 12, { 80, 80, 100, 255 });
 
-            // Extract geometry and draw mesh if available
-            auto geom = model_db_->extract_model_geometry(vis_type_idx, 0);
-            if (!geom.meshes.empty()) {
-                const auto& cb = model_db_->color_bank();
-                for (const auto& src_mesh : geom.meshes) {
-                    if (src_mesh.vertices.empty()) continue;
-                    if (src_mesh.kind == f4::models::PrimitiveKind::Triangles &&
-                        src_mesh.triangles.empty()) continue;
+            // Push shader uniforms (direction + color + ambient) BEFORE
+            // drawing meshes — Raylib's DrawMesh uses the material's
+            // shader, and our lit shader needs these uniforms set.
+            if (preview_cache_->lit_shader.id != 0) {
+                const Vector3 light_dir = { 0.65f, -1.0f, 0.35f };
+                const Vector4 light_col = { 1.0f, 0.98f, 0.92f, 1.0f };
+                const Vector4 ambient   = { 0.30f, 0.30f, 0.34f, 1.0f };
+                if (preview_cache_->lit_shader_dir_loc >= 0)
+                    SetShaderValue(preview_cache_->lit_shader,
+                                   preview_cache_->lit_shader_dir_loc,
+                                   &light_dir, SHADER_UNIFORM_VEC3);
+                if (preview_cache_->lit_shader_color_loc >= 0)
+                    SetShaderValue(preview_cache_->lit_shader,
+                                   preview_cache_->lit_shader_color_loc,
+                                   &light_col, SHADER_UNIFORM_VEC4);
+                if (preview_cache_->lit_shader_ambient_loc >= 0)
+                    SetShaderValue(preview_cache_->lit_shader,
+                                   preview_cache_->lit_shader_ambient_loc,
+                                   &ambient, SHADER_UNIFORM_VEC4);
+            }
 
-                    // Quick per-frame draw using DrawTriangle3D for triangles
-                    // (building+uploading a ::Mesh every frame is too expensive;
-                    //  we use the immediate-mode triangles for the preview)
-                    const bool mesh_is_textured = (src_mesh.tex_id >= 0);
-                    if (!src_mesh.triangles.empty()) {
-                        for (const auto& tri : src_mesh.triangles) {
-                            if (tri.v0 >= src_mesh.vertices.size() ||
-                                tri.v1 >= src_mesh.vertices.size() ||
-                                tri.v2 >= src_mesh.vertices.size()) continue;
-                            const auto& v0 = src_mesh.vertices[tri.v0];
-                            const auto& v1 = src_mesh.vertices[tri.v1];
-                            const auto& v2 = src_mesh.vertices[tri.v2];
-                            // LH Y-up → RH Y-up conversion
-                            Vector3 p0 = { v0.position.x, v0.position.y, -v0.position.z };
-                            Vector3 p1 = { v1.position.x, v1.position.y, -v1.position.z };
-                            Vector3 p2 = { v2.position.x, v2.position.y, -v2.position.z };
-                            // Resolve color from ColorBank
-                            auto resolve_color = [&](uint32_t color_index) -> Color {
-                                if (color_index == 0) {
-                                    return mesh_is_textured ? Color{255,255,255,255}
-                                                            : Color{180,180,180,255};
-                                }
-                                if (color_index < 4096) {
-                                    uint32_t rgba = cb.rgba_at(static_cast<int>(color_index));
-                                    if (rgba != 0) {
-                                        return Color{
-                                            static_cast<unsigned char>((rgba >> 24) & 0xFF),
-                                            static_cast<unsigned char>((rgba >> 16) & 0xFF),
-                                            static_cast<unsigned char>((rgba >> 8)  & 0xFF),
-                                            static_cast<unsigned char>(rgba & 0xFF)
-                                        };
-                                    }
-                                }
-                                return Color{180, 180, 180, 255};
-                            };
-                            Color c = resolve_color(v0.color);
-                            DrawTriangle3D(p0, p1, p2, c);
-                        }
+            // Disable backface culling. FreeFalcon's models were authored
+            // without consistent winding — many polygons have CCW winding
+            // (opposite to the plane normal) and would be culled as back-
+            // facing, leaving holes or hiding the model entirely. The
+            // f4-models-viewer does the same (see canvas3d.cpp).
+            rlDisableBackfaceCulling();
+
+            // Draw each cached mesh with its material (textured or default).
+            // We use the full ::Mesh and ::Material structs from the cache
+            // (not reconstructed-from-id stand-ins) because DrawMesh reads
+            // vaoId/vboId from the Mesh and maps/shader from the Material.
+            //
+            // Draw opaque meshes first, then alpha ones. FreeFalcon's .TEX
+            // chroma-key textures have alpha=0 on transparent pixels; the
+            // lit shader's `discard` handles them, but drawing opaque first
+            // is a belt-and-suspenders safety net for any unlit fallback.
+            std::vector<std::size_t> opaque_order, alpha_order;
+            opaque_order.reserve(cache_it->second.meshes.size());
+            alpha_order.reserve(cache_it->second.meshes.size());
+            for (std::size_t i = 0; i < cache_it->second.meshes.size(); ++i) {
+                const auto& me = cache_it->second.meshes[i];
+                bool has_alpha = false;
+                if (me.tex_id >= 0) {
+                    auto tex_it = preview_cache_->texture_cache.find(me.tex_id);
+                    if (tex_it != preview_cache_->texture_cache.end() &&
+                        tex_it->second.uploaded) {
+                        // We didn't track has_alpha in PreviewCache::TexCacheEntry;
+                        // assume any texture with an alpha channel might use
+                        // chroma-key transparency. This is the safe default
+                        // for FreeFalcon .TEX files.
+                        has_alpha = true;
                     }
                 }
+                if (has_alpha) alpha_order.push_back(i);
+                else           opaque_order.push_back(i);
             }
+
+            auto draw_one = [&](std::size_t idx) {
+                const auto& me = cache_it->second.meshes[idx];
+                if (me.mesh.vaoId == 0 && me.mesh.vboId[0] == 0) return;
+                if (me.mesh.triangleCount <= 0) return;
+
+                const Material* matToUse = &preview_cache_->default_mat;
+                if (me.tex_id >= 0) {
+                    auto tex_it = preview_cache_->texture_cache.find(me.tex_id);
+                    if (tex_it != preview_cache_->texture_cache.end() &&
+                        tex_it->second.uploaded) {
+                        matToUse = &tex_it->second.material;
+                    }
+                    // else: texture not yet uploaded — fall through to
+                    // default material (mesh renders with vertex colors).
+                }
+                DrawMesh(me.mesh, *matToUse, MatrixIdentity());
+            };
+
+            BeginBlendMode(BLEND_ALPHA);
+            std::size_t drawn = 0;
+            for (auto idx : opaque_order) { draw_one(idx); ++drawn; }
+            for (auto idx : alpha_order)  { draw_one(idx); ++drawn; }
+            EndBlendMode();
+
+            rlEnableBackfaceCulling();  // restore default for any subsequent 3D draws
+            last_preview_drew_meshes_ = (drawn > 0);
         EndMode3D();
     EndTextureMode();
 
-    // Display the rendered texture via rlImGui
-    ImGui::Image((ImTextureID)(uintptr_t)preview_tex_id_,
-                 ImVec2(static_cast<float>(preview_w),
-                        static_cast<float>(preview_h)));
+    // Display the rendered texture via rlImGui. rlImGuiImageSize takes
+    // a Texture2D* and a width/height; we reconstruct from the cached id.
+    Texture2D display_tex = { preview_tex_id_,
+                               preview_rt_w_, preview_rt_h_, 1,
+                               PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 };
+    rlImGuiImageSize(&display_tex, preview_w, preview_h);
 
-    // Orbit camera controls via drag
+    // Status line below the preview.
+    {
+        std::size_t n_meshes = cache_it->second.meshes.size();
+        std::size_t n_tris   = cache_it->second.tri_count;
+        int n_textured = 0;
+        for (const auto& me : cache_it->second.meshes) if (me.tex_id >= 0) ++n_textured;
+        ImGui::TextDisabled("%zu meshes | %zu tris | %d textured | r=%.1f | LODs=%d",
+                             n_meshes, n_tris, n_textured,
+                             model->radius, model->n_lods);
+    }
+
+    // Orbit camera controls via drag on the image.
     if (ImGui::IsItemActive()) {
         ImVec2 delta = ImGui::GetIO().MouseDelta;
         cam_azimuth_ += delta.x * 0.01f;
         cam_elevation_ -= delta.y * 0.01f;
         cam_elevation_ = std::clamp(cam_elevation_, -1.5f, 1.5f);
     }
-    // Zoom via scroll
+    // Zoom via scroll on the image.
     if (ImGui::IsItemHovered()) {
         float wheel = ImGui::GetIO().MouseWheel;
         if (wheel != 0) {
             cam_distance_ *= (1.0f - wheel * 0.1f);
-            cam_distance_ = std::clamp(cam_distance_, 1.0f, 500.0f);
+            cam_distance_ = std::clamp(cam_distance_, 0.1f, 5000.0f);
         }
+    }
+    // Reset-camera button (refit to current model).
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Fit")) {
+        fit_camera_to_model(vis_type_idx);
     }
 }
 
@@ -631,36 +1238,91 @@ void ClassTableBrowser::draw_detail_panel() {
                 domain_name(entry->domain),
                 vu_class_name(entry->cls));
 
-    // VisType slots
+    // VisType selection — a proper dropdown (replaces the previous row of
+    // tiny unlabeled buttons that appeared as "little blue rectangles").
+    //
+    // We list every non-zero visType slot for this entry. The user picks
+    // one; the 3D preview on the left updates immediately. We also show
+    // a compact inline summary so the user can see all available visTypes
+    // at a glance without opening the dropdown.
     ImGui::Text("VisType:");
+    ImGui::SameLine();
+
+    // Build the list of available (slot, vis_type) pairs.
+    // selected_vis_slot_ may point at a slot that has vis_type==0 (e.g.
+    // after switching entries); if so, auto-advance to the first non-zero
+    // slot so the preview always shows something.
+    int first_nonzero_slot = -1;
     for (int s = 0; s < 7; ++s) {
         if (entry->vis_type[s] > 0) {
-            ImGui::SameLine();
-            bool is_sel = (selected_vis_slot_ == s);
-            if (is_sel) ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.4f, 0.8f, 1.0f, 1.0f));
-            ImGui::Text("[%d]=%d", s, entry->vis_type[s]);
-            if (is_sel) ImGui::PopStyleColor();
-            ImGui::SameLine();
-            char btn_label[32];
-            std::snprintf(btn_label, sizeof(btn_label), "##vis%d", s);
-            if (ImGui::SmallButton(btn_label)) {
-                selected_vis_slot_ = s;
-            }
+            if (first_nonzero_slot < 0) first_nonzero_slot = s;
         }
     }
-    ImGui::NewLine();
+    if (first_nonzero_slot < 0) {
+        // No visType at all — nothing to preview.
+        ImGui::TextDisabled("(none — this entity has no 3D model)");
+        ImGui::NewLine();
+    } else {
+        // Clamp selected_vis_slot_ to a valid non-zero slot.
+        if (selected_vis_slot_ < 0 || selected_vis_slot_ >= 7 ||
+            entry->vis_type[selected_vis_slot_] <= 0) {
+            selected_vis_slot_ = first_nonzero_slot;
+        }
+
+        // Dropdown preview label: "[slot] vis_type_id"
+        char preview_label[64];
+        std::snprintf(preview_label, sizeof(preview_label), "[%d] %d",
+                      selected_vis_slot_,
+                      entry->vis_type[selected_vis_slot_]);
+
+        ImGui::SetNextItemWidth(160);
+        if (ImGui::BeginCombo("##vistype_combo", preview_label)) {
+            for (int s = 0; s < 7; ++s) {
+                if (entry->vis_type[s] <= 0) continue;
+                char item_label[64];
+                std::snprintf(item_label, sizeof(item_label), "[%d] %d",
+                              s, entry->vis_type[s]);
+                const bool is_sel = (selected_vis_slot_ == s);
+                if (ImGui::Selectable(item_label, is_sel)) {
+                    selected_vis_slot_ = s;
+                }
+                if (is_sel) ImGui::SetItemDefaultFocus();
+            }
+            ImGui::EndCombo();
+        }
+
+        // Compact inline summary of all visType slots (read-only).
+        ImGui::SameLine();
+        ImGui::TextDisabled("(");
+        for (int s = 0; s < 7; ++s) {
+            if (entry->vis_type[s] > 0) {
+                ImGui::SameLine(0, 0);
+                if (s == selected_vis_slot_) {
+                    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.4f, 0.8f, 1.0f, 1.0f));
+                    ImGui::Text(" %d", entry->vis_type[s]);
+                    ImGui::PopStyleColor();
+                } else {
+                    ImGui::TextDisabled(" %d", entry->vis_type[s]);
+                }
+            }
+        }
+        ImGui::SameLine(0, 0);
+        ImGui::TextDisabled(" )");
+        ImGui::NewLine();
+    }
 
     // Two-column layout: 3D preview on left, data detail on right
     float panel_width = ImGui::GetContentRegionAvail().x;
-    float preview_width = 290.0f;
+    float preview_width = 320.0f;
     float detail_width = panel_width - preview_width - 20.0f;
     if (detail_width < 200.0f) detail_width = 200.0f;
 
     // Left column: 3D model preview
-    int16_t active_vis = entry->vis_type[selected_vis_slot_];
-    if (active_vis > 0 && model_db_) {
+    int16_t active_vis = (selected_vis_slot_ >= 0 && selected_vis_slot_ < 7)
+                            ? entry->vis_type[selected_vis_slot_] : 0;
+    if (active_vis > 0) {
         ImGui::BeginGroup();
-        const auto* model = model_db_->model(active_vis);
+        const auto* model = model_db_ ? model_db_->model(active_vis) : nullptr;
         if (model) {
             ImGui::Text("Model[%d]: r=%.1f  LODs=%d  slots=%d  class=%s",
                         active_vis,
@@ -668,10 +1330,16 @@ void ClassTableBrowser::draw_detail_panel() {
                         model->n_lods,
                         model->n_slots,
                         std::string(model->visual_class()).c_str());
-            draw_model_preview(active_vis);
-        } else {
+        } else if (model_db_) {
             ImGui::TextDisabled("Model[%d] not found in database", active_vis);
+        } else {
+            ImGui::TextDisabled("Model database not loaded");
         }
+        // Always call draw_model_preview — it handles the "no model_db"
+        // and "model not found" cases gracefully with a status message,
+        // and it keeps the preview pane at a stable size so the layout
+        // doesn't jump when the user switches entries.
+        draw_model_preview(active_vis);
         ImGui::EndGroup();
         ImGui::SameLine();
     }

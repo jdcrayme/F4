@@ -742,8 +742,16 @@ void ViewerApp::draw_imgui() {
 
     // --- Class Table Browser panel (Tools > Class Table Browser) ---
     // Provide the installation and model database for cross-referencing.
+    // The model DB is lazy-loaded by draw_ground_layout_3d(); if the user
+    // opens the Class Table Browser WITHOUT first opening the 3D ground
+    // layout panel, model_db_3d would be std::nullopt and the browser's
+    // 3D preview would silently no-op. Force-load it here when the
+    // browser is open so visType previews always work.
     impl_->class_table_browser.set_install(
         impl_->install.has_value() ? &*impl_->install : nullptr);
+    if (impl_->class_table_browser.is_open()) {
+        impl_->ensure_models_3d_loaded();
+    }
     impl_->class_table_browser.set_model_db(
         impl_->model_db_3d.has_value() ? &*impl_->model_db_3d : nullptr);
     impl_->class_table_browser.draw();
