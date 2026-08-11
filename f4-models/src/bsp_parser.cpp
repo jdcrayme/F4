@@ -16,11 +16,25 @@
 // relative to the START of nodeTreeData (NOT the LOD record start).
 //
 // Nodes are at ARBITRARY positions within nodeTreeData. The tag list
-// gives the TYPE of each node in tree-walk order, but byte positions
-// come from the stored offset values in each node's fields.
+// gives the TYPE of each node in tree-walk order — specifically, the
+// SIBLING-FIRST depth-first order that FreeFalcon's RestorePointers
+// produces by having the BNode base-class constructor walk the sibling
+// BEFORE the BSubTree derived-class body walks the subtree:
 //
-// We walk the tree starting at offset 0 (root), consuming tags as we
-// go, and build a flat node array indexed by discovery order.
+//     BNode::BNode(base, tagListPtr) {           // base ctor runs FIRST
+//         if (sibling >= 0)
+//             sibling = RestorePointers(base, sibling, tagListPtr);
+//     }
+//     BSubTree::BSubTree(base, tagListPtr)
+//       : BNode(base, tagListPtr) {              // derived body runs AFTER
+//         subTree = RestorePointers(base, subTree, tagListPtr);
+//     }
+//
+// So for each node N: tag[N+1] is N's SIBLING's tag (and the sibling's
+// whole subtree follows in the same sibling-first order), and only
+// AFTER the sibling chain is exhausted does tag[N+k] give N's subtree
+// (child) tag. We mirror this by walking sibling BEFORE subtree
+// (see the SIBLING-FIRST WALK block in walk_node below).
 //
 // References:
 //   FreeFalcon: src/graphics/texture/objectlod.cpp (LoaderCallBack)
@@ -157,6 +171,26 @@ NodeIdx walk_node(WalkCtx& ctx, int32_t offset) {
     // Read sibling offset (common to all nodes)
     int32_t sibling_off = -1;
     if (!r.read(sibling_off)) { ctx.err = "sibling truncated"; return idx; }
+
+    // ── SIBLING-FIRST WALK (matches FreeFalcon's RestorePointers) ──────
+    //
+    // FreeFalcon's BNode base-class constructor runs BEFORE the BSubTree
+    // derived-class body. The base ctor walks the sibling; the derived
+    // body walks the subtree/children. So the tag-list order is:
+    //   tag[i]   = THIS node
+    //   tag[i+1] = sibling's tag (and recursively the sibling's whole
+    //              subtree, sibling-first as well)
+    //   tag[i+k] = subtree/child's tag (after the sibling chain is done)
+    //
+    // Walking the sibling HERE (before the switch that walks subtree/
+    // children) is what makes our tag consumption match FreeFalcon's
+    // expected tag-list order. Doing it the other way around consumes
+    // the wrong tag for any node that has BOTH a sibling AND a subtree,
+    // which cascades into a flood of mis-typed garbage nodes and the
+    // "orphan prim" symptom that requires a rescue pass.
+    if (sibling_off >= 0) {
+        node.sibling = walk_node(ctx, sibling_off);
+    }
 
     // Parse type-specific fields and walk children
     switch (tag) {
@@ -349,11 +383,55 @@ NodeIdx walk_node(WalkCtx& ctx, int32_t offset) {
         if (!r.read(children_off)) goto trunc;
         node.switch_children_offset = children_off;
 
+        // LAYER-B FIX: Validate fields to reject garbage BSwitchNodes.
+        //
+        // The tag-driven recovery pass has validators that reject
+        // candidates with switch_number > 64 or n_children > 64. But
+        // the MAIN walk has no such validation — it trusts whatever
+        // bytes happen to be at the offset. When the main walk missteps
+        // into a coordinate or float-data region that happens to start
+        // with a vtable-pattern (0x00465000..0x004651FF), it creates a
+        // garbage BSwitchNode with switch_number like 100816 or
+        // 1048996681 (float-bit-patterns). These garbage nodes consume
+        // real tags and create unreachable subtrees, hiding geometry.
+        //
+        // We now apply the SAME validation as the tag-driven recovery
+        // (lines ~862-877): switch_number ∈ [-1, 64], n_children ∈
+        // [0, 64], children_off either -1 or in-range. If the fields
+        // don't validate, we treat this as a misstep and DON'T walk
+        // the (garbage) children — we still keep the node in
+        // tree.nodes so it's accounted for, but we mark it as
+        // "untrusted" by setting n_children=0.
+        bool switch_valid = (node.switch_number >= -1 && node.switch_number <= 64) &&
+                            (node.n_children >= 0 && node.n_children <= 64);
+        if (switch_valid && node.n_children > 0) {
+            if (children_off < 0) {
+                switch_valid = false;
+            } else {
+                std::size_t need = static_cast<std::size_t>(children_off)
+                                 + static_cast<std::size_t>(node.n_children) * sizeof(int32_t);
+                if (need > ctx.base_size) switch_valid = false;
+            }
+        }
+
         // DIAGNOSTIC: log every BSwitchNode, especially n_children==0
         if (diag_enabled()) {
             std::fprintf(stderr,
-                "[DIAG] BSwitchNode @ off=%d switch_number=%d n_children=%d children_off=%d\n",
-                offset, node.switch_number, node.n_children, children_off);
+                "[DIAG] BSwitchNode @ off=%d switch_number=%d n_children=%d children_off=%d valid=%d\n",
+                offset, node.switch_number, node.n_children, children_off,
+                (int)switch_valid);
+        }
+
+        if (!switch_valid) {
+            // Garbage BSwitchNode — don't walk children, mark as untrusted.
+            if (diag_enabled()) {
+                std::fprintf(stderr,
+                    "[DIAG]   ^-- REJECT: garbage fields (switch_number=%d n_children=%d); zeroing n_children\n",
+                    node.switch_number, node.n_children);
+            }
+            node.n_children = 0;
+            node.switch_children_offset = -1;
+            break;
         }
 
         // Walk each child NOW so they end up in tree.nodes and offset_map.
@@ -395,10 +473,37 @@ NodeIdx walk_node(WalkCtx& ctx, int32_t offset) {
         if (!r.read(children_off)) goto trunc;
         node.switch_children_offset = children_off;
 
+        // LAYER-B FIX: same validation as BSwitchNode, plus flags check
+        // (only bit 0 is defined; garbage float patterns usually have
+        // many bits set).
+        bool xswitch_valid = (node.switch_number >= -1 && node.switch_number <= 64) &&
+                             (node.n_children >= 0 && node.n_children <= 64) &&
+                             (node.switch_flags >= 0 && node.switch_flags <= 0xFFFF);
+        if (xswitch_valid && node.n_children > 0) {
+            if (children_off < 0) {
+                xswitch_valid = false;
+            } else {
+                std::size_t need = static_cast<std::size_t>(children_off)
+                                 + static_cast<std::size_t>(node.n_children) * sizeof(int32_t);
+                if (need > ctx.base_size) xswitch_valid = false;
+            }
+        }
+
         if (diag_enabled()) {
             std::fprintf(stderr,
-                "[DIAG] BXSwitchNode @ off=%d switch_number=%d flags=%d n_children=%d children_off=%d\n",
-                offset, node.switch_number, node.switch_flags, node.n_children, children_off);
+                "[DIAG] BXSwitchNode @ off=%d switch_number=%d flags=%d n_children=%d children_off=%d valid=%d\n",
+                offset, node.switch_number, node.switch_flags, node.n_children, children_off,
+                (int)xswitch_valid);
+        }
+
+        if (!xswitch_valid) {
+            if (diag_enabled()) {
+                std::fprintf(stderr,
+                    "[DIAG]   ^-- REJECT: garbage fields; zeroing n_children\n");
+            }
+            node.n_children = 0;
+            node.switch_children_offset = -1;
+            break;
         }
 
         if (children_off >= 0 && node.n_children > 0 && node.n_children < 64) {
@@ -483,10 +588,9 @@ NodeIdx walk_node(WalkCtx& ctx, int32_t offset) {
         break;
     }
 
-    // Convert sibling offset to index by walking
-    if (sibling_off >= 0) {
-        node.sibling = walk_node(ctx, sibling_off);
-    }
+    // (Sibling walk now happens BEFORE the switch — see comment above.
+    //  FreeFalcon's BNode base-class ctor walks sibling before the
+    //  BSubTree derived body walks subtree/children.)
 
     return idx;
 
