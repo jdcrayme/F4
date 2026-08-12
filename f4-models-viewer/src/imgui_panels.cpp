@@ -631,7 +631,7 @@ static void draw_texture_thumbnails_panel(ViewerApp::Impl& impl) {
             ImGui::TextDisabled("Use File > Load TEX... or load HDR/LOD/TEX trio.");
         } else {
             ImGui::Text("Textures: %zu  |  Cached: %zu",
-                        tex_entries.size(), impl.texture_cache.size());
+                        tex_entries.size(), impl.texture_cache.map().size());
             ImGui::Separator();
 
             const int thumb_px = 64;
@@ -641,8 +641,8 @@ static void draw_texture_thumbnails_panel(ViewerApp::Impl& impl) {
             int shown = 0;
             for (std::size_t i = 0; i < tex_entries.size(); ++i) {
                 const auto& entry = tex_entries[i];
-                auto it = impl.texture_cache.find(static_cast<int>(i));
-                if (it == impl.texture_cache.end() || !it->second.uploaded) {
+                auto* ce = impl.texture_cache.lookup(static_cast<int>(i));
+                if (!ce || !ce->uploaded) {
                     // Skip textures that aren't decoded yet. The user can
                     // populate the cache by selecting models that use them.
                     continue;
@@ -654,7 +654,7 @@ static void draw_texture_thumbnails_panel(ViewerApp::Impl& impl) {
                 ImGui::PushID(static_cast<int>(i));
 
                 // Render the cached Texture2D via rlImGuiImage
-                const Texture2D& tex = it->second.texture;
+                const Texture2D& tex = ce->texture;
                 rlImGuiImageButtonSize("##tex", &tex,
                                         Vector2(thumb_px, thumb_px));
 
@@ -662,7 +662,7 @@ static void draw_texture_thumbnails_panel(ViewerApp::Impl& impl) {
                     ImGui::SetTooltip(
                         "tex %zu\ndim=%u\npal=%d\nsize=%u bytes\nalpha=%s",
                         i, entry.dimension, entry.palette_id, entry.file_size,
-                        it->second.has_alpha ? "yes" : "no");
+                        ce->has_alpha ? "yes" : "no");
                 }
                 ImGui::PopID();
             }
@@ -811,7 +811,7 @@ static void draw_texture_panel(ViewerApp::Impl& impl) {
         } else {
             ImGui::Text("Textures: %d", static_cast<int>(tex_entries.size()));
             ImGui::Text("Palettes: %d", static_cast<int>(palettes.size()));
-            ImGui::Text("Cached: %d", static_cast<int>(impl.texture_cache.size()));
+            ImGui::Text("Cached: %d", static_cast<int>(impl.texture_cache.map().size()));
 
             // Texture set selector
             const auto* rec = impl.db.model(impl.selected_parent);
@@ -845,8 +845,8 @@ static void draw_texture_panel(ViewerApp::Impl& impl) {
                                         entry.palette_id, entry.file_size);
 
                             // Show if texture is cached/decoded
-                            auto it = impl.texture_cache.find(tex_id);
-                            if (it != impl.texture_cache.end() && it->second.uploaded) {
+                            auto* ce2 = impl.texture_cache.lookup(tex_id);
+                            if (ce2 && ce2->uploaded) {
                                 ImGui::SameLine();
                                 ImGui::TextColored({0.5f, 1.0f, 0.5f, 1.0f}, "OK");
                             } else {

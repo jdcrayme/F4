@@ -27,7 +27,7 @@ namespace f4::scenario_player {
 
 // ── ctor ───────────────────────────────────────────────────────────────────
 PlayerApp::PlayerApp() : impl_(std::make_unique<Impl>()) {
-    impl_->update_camera_from_orbit();
+    impl_->orbit_cam.update_from_orbit();
 }
 
 // ── dtor ───────────────────────────────────────────────────────────────────
@@ -36,10 +36,7 @@ PlayerApp::~PlayerApp() {
         if (impl_->meshes_built) {
             impl_->unload_meshes();
         }
-        if (impl_->lit_shader.id != 0) {
-            UnloadShader(impl_->lit_shader);
-            impl_->lit_shader = {};
-        }
+        // LitShader destructor handles UnloadShader automatically.
     }
 }
 
@@ -194,11 +191,7 @@ void PlayerApp::run() {
 
     rlImGuiShutdown();
     impl_->unload_meshes();
-    if (impl_->lit_shader.id != 0) {
-        UnloadShader(impl_->lit_shader);
-        impl_->lit_shader = {};
-        impl_->lit_shader_loaded = false;
-    }
+    // LitShader destructor handles UnloadShader automatically.
     CloseWindow();
 
     // Write the flight recording if the scenario enabled it.

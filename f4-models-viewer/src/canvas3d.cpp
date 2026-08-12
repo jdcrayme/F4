@@ -13,6 +13,8 @@
 #include "viewer_state.hpp"
 #include "canvas3d.hpp"
 
+#include <f4/renderer/draw_3d.hpp>
+
 #include <raylib.h>
 #include <raymath.h>
 #include <rlgl.h>
@@ -35,24 +37,9 @@ static constexpr Color BSphere_COLOR  = {255, 200, 60, 80};    // bounding spher
 static constexpr Color AABB_COLOR     = {60, 200, 255, 80};    // AABB
 static constexpr Color LIGHT_GIZMO_COLOR = {255, 230, 120, 255};
 
-// ── draw_grid ──────────────────────────────────────────────────────────────
-// Draw a subtle XZ-plane grid centered at the origin.
-static void draw_grid(float extent, float step) {
-    for (float i = -extent; i <= extent; i += step) {
-        // Lines parallel to Z
-        DrawLine3D({i, 0, -extent}, {i, 0, extent}, GRID_COLOR);
-        // Lines parallel to X
-        DrawLine3D({-extent, 0, i}, {extent, 0, i}, GRID_COLOR);
-    }
-}
-
-// ── draw_axes ──────────────────────────────────────────────────────────────
-// Draw RGB coordinate axes at the origin.
-static void draw_axes(float length) {
-    DrawLine3D({0, 0, 0}, {length, 0, 0}, AXIS_X_COLOR);  // X = Red
-    DrawLine3D({0, 0, 0}, {0, length, 0}, AXIS_Y_COLOR);  // Y = Green
-    DrawLine3D({0, 0, 0}, {0, 0, length}, AXIS_Z_COLOR);  // Z = Blue
-}
+// ── draw_grid / draw_axes ────────────────────────────────────────────────
+// Now provided by f4::renderer::draw_grid() and f4::renderer::draw_axes().
+// The local implementations have been removed.
 
 // ── draw_bounding_volumes ──────────────────────────────────────────────────
 // Draw bounding sphere and/or AABB for the selected model.
@@ -91,87 +78,9 @@ void ViewerApp::Impl::draw_bounding_volumes() {
     }
 }
 
-// ── Lit shader (Lambertian diffuse + ambient) ──────────────────────────────
-// Loaded lazily on first draw_canvas() call when lighting_enabled is true.
-// Implements basic per-pixel directional lighting using the mesh's vertex
-// normals. Falls back gracefully to Raylib's default unlit shader on
-// compilation failure (id == 0).
-//
-// Vertex shader: standard Raylib vertex pipeline + pass fragNormal in
-// world space.
-//
-// We use `vertexNormal` directly (no mat3(modelView) transform) because:
-//   1. Raylib's DrawMesh() does NOT upload a `modelView` uniform (there
-//      is no SHADER_LOC_MATRIX_MODELVIEW in rlgl.h). The uniform would
-//      default to a zero matrix, zeroing all normals and making the
-//      directional light component disappear — leaving only ambient.
-//   2. The viewer calls DrawMesh with an identity model matrix, so
-//      model-space normals are already in world space. The `lightDir`
-//      uniform is uploaded in world space, so dot(N, L) is correct.
-//
-// Fragment shader: tex * colDiffuse * fragColor * (ambient + lightColor * NdotL)
-
-static const char* kLitShaderVS =
-    "#version 330\n"
-    "in vec3 vertexPosition;\n"
-    "in vec2 vertexTexCoord;\n"
-    "in vec4 vertexColor;\n"
-    "in vec3 vertexNormal;\n"
-    "uniform mat4 mvp;\n"
-    "out vec2 fragTexCoord;\n"
-    "out vec4 fragColor;\n"
-    "out vec3 fragNormal;\n"
-    "void main() {\n"
-    "    fragTexCoord = vertexTexCoord;\n"
-    "    fragColor = vertexColor;\n"
-    "    fragNormal = normalize(vertexNormal);\n"
-    "    gl_Position = mvp * vec4(vertexPosition, 1.0);\n"
-    "}\n";
-
-static const char* kLitShaderFS =
-    "#version 330\n"
-    "in vec2 fragTexCoord;\n"
-    "in vec4 fragColor;\n"
-    "in vec3 fragNormal;\n"
-    "uniform sampler2D texture0;\n"
-    "uniform vec4 colDiffuse;\n"
-    "uniform vec3 lightDir;\n"
-    "uniform vec4 lightColor;\n"
-    "uniform vec4 ambient;\n"
-    "out vec4 finalColor;\n"
-    "void main() {\n"
-    "    vec4 tex = texture(texture0, fragTexCoord);\n"
-    "    // Chroma-key transparency: FreeFalcon's .TEX textures mark\n"
-    "    // transparent pixels with alpha=0 (set in tex_reader.cpp when\n"
-    "    // the palette-resolved color matches the TexBankEntry chroma key).\n"
-    "    // discard prevents both color AND depth writes, so transparent\n"
-    "    // pixels don't occlude geometry behind them.\n"
-    "    if (tex.a < 0.5) discard;\n"
-    "    vec3 N = normalize(fragNormal);\n"
-    "    vec3 L = normalize(lightDir);\n"
-    "    float NdotL = max(dot(N, L), 0.0);\n"
-    "    vec4 light = ambient + lightColor * NdotL;\n"
-    "    finalColor = tex * colDiffuse * fragColor * light;\n"
-    "}\n";
-
-/// Lazily load the lit shader if not already loaded. Returns true if the
-/// shader is available (id != 0).
-static bool ensure_lit_shader(ViewerApp::Impl& impl) {
-    if (impl.lit_shader_loaded) {
-        return impl.lit_shader.id != 0;
-    }
-    impl.lit_shader = LoadShaderFromMemory(kLitShaderVS, kLitShaderFS);
-    impl.lit_shader_loaded = true;
-    if (impl.lit_shader.id == 0) {
-        // Shader compile failed — log to status_msg once
-        impl.status_msg = "warning: lit shader failed to compile (falling back to unlit)";
-        return false;
-    }
-    impl.lit_shader_dir_loc     = GetShaderLocation(impl.lit_shader, "lightDir");
-    impl.lit_shader_color_loc   = GetShaderLocation(impl.lit_shader, "lightColor");
-    impl.lit_shader_ambient_loc = GetShaderLocation(impl.lit_shader, "ambient");
-    return true;
-}
+// ── Lit shader ────────────────────────────────────────────────────────────
+// Now provided by f4::renderer::LitShader. The duplicated GLSL source
+// strings and ensure_lit_shader() function have been removed.
 
 // ── draw_canvas ────────────────────────────────────────────────────────────
 void ViewerApp::Impl::draw_canvas() {
@@ -185,158 +94,34 @@ void ViewerApp::Impl::draw_canvas() {
         rebuild_meshes();
     }
 
-    BeginMode3D(camera);
+    BeginMode3D(orbit_cam.camera());
 
     // Grid
     if (show_grid) {
-        draw_grid(500.0f, 10.0f);
+        f4::renderer::draw_grid(500.0f, 10.0f);
     }
 
     // Axes
     if (show_axes) {
-        draw_axes(50.0f);
+        f4::renderer::draw_axes(50.0f);
     }
 
-    // Draw meshes with per-mesh materials. Textured meshes use the material
-    // from the texture cache (which has the decoded TEX bound as diffuse).
-    // Untextured meshes (tex_id < 0) use the default white material so
-    // vertex colors (resolved through ColorBank) pass through unchanged.
-    const Matrix identity = MatrixIdentity();
-    Material default_mat = LoadMaterialDefault();
-    default_mat.maps[MATERIAL_MAP_DIFFUSE].color = WHITE;
-
-    // Lighting setup: if enabled, swap in the lit shader on both the
-    // default material and any textured material that uses the default
-    // shader. Set the light uniforms once per frame (cheap).
-    bool lighting_active = false;
-    Vector3 light_dir = light_direction;
-    const float dlen = std::sqrt(light_dir.x*light_dir.x +
-                                  light_dir.y*light_dir.y +
-                                  light_dir.z*light_dir.z);
-    if (dlen > 0.0001f) {
-        light_dir.x /= dlen; light_dir.y /= dlen; light_dir.z /= dlen;
-    } else {
-        light_dir = {0.5f, -1.0f, 0.3f};
+    // Lighting setup via LitShader RAII wrapper
+    if (lighting_enabled && lit_shader.ensure(&status_msg)) {
+        lit_shader.set_lighting(light_direction, light_color, light_intensity, ambient_color);
     }
 
-    if (lighting_enabled && ensure_lit_shader(*this)) {
-        default_mat.shader = lit_shader;
-        lighting_active = true;
-
-        if (lit_shader_dir_loc >= 0) {
-            // lightDir is the direction FROM the surface TO the light
-            // (i.e., the direction a surface should face to be fully lit).
-            // Our convention: light_direction points from scene toward
-            // the sun, which is exactly this. Pass as-is.
-            const float dir[3] = { light_dir.x, light_dir.y, light_dir.z };
-            SetShaderValue(lit_shader, lit_shader_dir_loc, dir, SHADER_UNIFORM_VEC3);
-        }
-        if (lit_shader_color_loc >= 0) {
-            const float col[4] = {
-                light_color.r / 255.0f * light_intensity,
-                light_color.g / 255.0f * light_intensity,
-                light_color.b / 255.0f * light_intensity,
-                light_color.a / 255.0f
-            };
-            SetShaderValue(lit_shader, lit_shader_color_loc, col, SHADER_UNIFORM_VEC4);
-        }
-        if (lit_shader_ambient_loc >= 0) {
-            const float amb[4] = {
-                ambient_color.r / 255.0f,
-                ambient_color.g / 255.0f,
-                ambient_color.b / 255.0f,
-                ambient_color.a / 255.0f
-            };
-            SetShaderValue(lit_shader, lit_shader_ambient_loc, amb, SHADER_UNIFORM_VEC4);
-        }
-    }
-
-    // CRITICAL: Disable backface culling. FreeFalcon's models were designed
-    // to render WITHOUT backface culling — many polygons have CCW winding
-    // (opposite to the plane normal) and would be invisible if culled.
-    // The diagnostic showed 7.7% of triangles are back-facing; without
-    // this disable, those triangles (and the surfaces they belong to)
-    // would appear as holes in the model.
-    rlDisableBackfaceCulling();
-
-    if (show_wireframe) {
-        rlEnableWireMode();
-    }
-
-    // Draw opaque meshes first, then alpha meshes. FreeFalcon's .TEX
-    // chroma-key textures have alpha=0 on transparent pixels. Without
-    // depth-sorted transparency, drawing alpha meshes before opaque
-    // ones causes transparent pixels to write depth and occlude the
-    // opaque geometry behind them. Drawing opaque first, then alpha,
-    // ensures transparent pixels are blended correctly.
-    //
-    // The lit shader also has `if (tex.a < 0.5) discard;` which
-    // prevents transparent pixels from writing color OR depth — so
-    // even without perfect depth sorting, chroma-key cutouts render
-    // correctly. This sort is a belt-and-suspenders safety net for
-    // the unlit path (Raylib's default shader doesn't discard).
-    std::vector<std::size_t> opaque_order;
-    std::vector<std::size_t> alpha_order;
-    opaque_order.reserve(mesh_entries.size());
-    alpha_order.reserve(mesh_entries.size());
-    for (std::size_t i = 0; i < mesh_entries.size(); ++i) {
-        const auto& entry = mesh_entries[i];
-        bool has_alpha = false;
-        if (entry.tex_id >= 0) {
-            auto it = texture_cache.find(entry.tex_id);
-            if (it != texture_cache.end() && it->second.uploaded) {
-                has_alpha = it->second.has_alpha;
-            }
-        }
-        if (has_alpha) {
-            alpha_order.push_back(i);
-        } else {
-            opaque_order.push_back(i);
-        }
-    }
-
-    // Enable alpha blending for the whole mesh pass. Opaque pixels
-    // (alpha=255) are unaffected; transparent pixels (alpha=0) blend
-    // to the background. This is required for the unlit path; the lit
-    // shader's discard handles it more efficiently but blend mode is
-    // still safe to leave on.
-    BeginBlendMode(BLEND_ALPHA);
-
-    auto draw_entry = [&](std::size_t idx) {
-        const auto& entry = mesh_entries[idx];
-        const auto& mesh = entry.mesh;
-        if (mesh.triangleCount <= 0) return;
-
-        Material* mat_to_use = &default_mat;
-        if (entry.tex_id >= 0) {
-            auto it = texture_cache.find(entry.tex_id);
-            if (it != texture_cache.end() && it->second.uploaded) {
-                mat_to_use = &it->second.material;
-                if (lighting_active) {
-                    mat_to_use->shader = lit_shader;
-                }
-            }
-        }
-        DrawMesh(mesh, *mat_to_use, identity);
-        ++stats_draw_calls;
-        ++stats_meshes_drawn;
-        stats_vertices_drawn += static_cast<std::size_t>(mesh.vertexCount);
-    };
-
-    // Opaque first
-    for (auto idx : opaque_order) draw_entry(idx);
-    // Alpha last
-    for (auto idx : alpha_order) draw_entry(idx);
-
-    EndBlendMode();
-
-    if (show_wireframe) {
-        rlDisableWireMode();
-    }
-
-    // Re-enable backface culling for subsequent draws (grid, axes, etc.
-    // don't need it, but it's good practice to restore default state).
-    rlEnableBackfaceCulling();
+    // Draw all meshes using f4::renderer::draw_meshes() which handles:
+    // - opaque-before-alpha sort
+    // - backface culling disable (FreeFalcon winding convention)
+    // - lit shader application
+    // - alpha blend mode
+    f4::renderer::DrawStats draw_stats;
+    f4::renderer::draw_meshes(mesh_entries, texture_cache, lit_shader,
+                              lighting_enabled, show_wireframe, &draw_stats);
+    stats_draw_calls    = draw_stats.draw_calls;
+    stats_meshes_drawn  = draw_stats.meshes_drawn;
+    stats_vertices_drawn = draw_stats.vertices_drawn;
 
     // Draw line primitives (LineF) — Raylib's DrawMesh only handles triangle
     // lists, so we draw each line segment via DrawLine3D.
@@ -364,8 +149,6 @@ void ViewerApp::Impl::draw_canvas() {
         draw_stats_overlay();
     }
 
-    // UnloadMaterial on the default material would leak; LoadMaterialDefault()
-    // returns a shared singleton that must NOT be UnloadMaterial'd. Leave it.
     // Individual texture materials in texture_cache are cleaned up in unload_textures().
 }
 
@@ -381,15 +164,16 @@ void ViewerApp::Impl::draw_light_gizmo() {
     // Place the gizmo 30 world units from the camera target, in the
     // direction TOWARD the light (so the arrow points from sun → scene).
     const float offset = 30.0f;
+    const Vector3 cam_tgt = orbit_cam.target();
     const Vector3 sun_pos = {
-        cam_target.x - dir.x * offset,
-        cam_target.y - dir.y * offset,
-        cam_target.z - dir.z * offset
+        cam_tgt.x - dir.x * offset,
+        cam_tgt.y - dir.y * offset,
+        cam_tgt.z - dir.z * offset
     };
     const Vector3 arrow_tip = {
-        cam_target.x - dir.x * (offset - 8.0f),
-        cam_target.y - dir.y * (offset - 8.0f),
-        cam_target.z - dir.z * (offset - 8.0f)
+        cam_tgt.x - dir.x * (offset - 8.0f),
+        cam_tgt.y - dir.y * (offset - 8.0f),
+        cam_tgt.z - dir.z * (offset - 8.0f)
     };
 
     DrawSphere(sun_pos, 3.0f, LIGHT_GIZMO_COLOR);

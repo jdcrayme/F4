@@ -1,32 +1,19 @@
 // f4-models-viewer/src/scene.hpp
 //
 // ModelGeometry → Raylib ::Mesh conversion.
-// Converts the engine-agnostic f4::models geometry into GPU-ready
-// Raylib meshes, applying the LH Y-up → RH Y-up coordinate transform.
+// Now delegates to f4::renderer::build_raylib_meshes() and
+// f4::renderer::build_mesh_entries() from f4-renderer.
+// This header is kept for backward compatibility; the free
+// functions are no longer defined locally.
 
 #pragma once
 
-#include <raylib.h>
-
-#include <vector>
-
-namespace f4::models {
-struct ModelGeometry;
-class  ColorBank;
-}  // namespace f4::models
-
 namespace f4::models_viewer {
 
-/// Build Raylib meshes from extracted model geometry.
-/// Each f4::models::Mesh becomes one Raylib ::Mesh (uploaded to GPU).
-/// Applies LH Y-up → RH Y-up coordinate conversion and resolves
-/// vertex color indices through the ColorBank (Prim.rgba is an int index
-/// into the ColorBank, NOT packed ABGR — see f4-models ColorBank docs).
-std::vector<::Mesh> build_raylib_meshes(
-    const f4::models::ModelGeometry& geom,
-    const f4::models::ColorBank& color_bank);
-
-/// Unload (free GPU memory for) a vector of Raylib meshes.
-void unload_meshes(std::vector<::Mesh>& meshes);
+// The local build_raylib_meshes() and unload_meshes() have been
+// removed. Callers should use:
+//   f4::renderer::build_raylib_meshes(geom, color_bank)
+//   f4::renderer::build_mesh_entries(geom, raylib_meshes)
+//   f4::renderer::unload_meshes(raylib_meshes)
 
 } // namespace f4::models_viewer

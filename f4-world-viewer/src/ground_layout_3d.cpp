@@ -64,146 +64,29 @@ namespace {
 constexpr int RT_W = 800;
 constexpr int RT_H = 600;
 
-constexpr float MIN_PITCH = -1.55f;   // ~-89°
-constexpr float MAX_PITCH =  1.55f;   // ~+89°
-constexpr float MIN_DISTANCE = 50.0f;
-constexpr float MAX_DISTANCE = 50000.0f;
-
-constexpr float ORBIT_YAW_SPEED   = 0.005f;   // rad/px
-constexpr float ORBIT_PITCH_SPEED = 0.005f;   // rad/px
-constexpr float ZOOM_SPEED       = 0.001f;    // log-scale per scroll unit
-
 // Background + grid colors.
 constexpr Color BG_COLOR     = { 22,  24,  30, 255};
 constexpr Color GRID_COLOR   = { 50,  54,  62, 255};
 constexpr Color ORIGIN_COLOR = {255, 255,   0, 200};
 
 // ---------------------------------------------------------------------------
-// ENU feet → Raylib Vector3
+// Coordinate helpers — thin wrappers around f4::renderer functions
 // ---------------------------------------------------------------------------
+// f4::renderer::enu_to_raylib / model_vertex_to_raylib return Float3;
+// Raylib draw calls need Vector3. These wrappers convert for convenience.
 
 inline Vector3 enu_to_rl(float enu_x, float enu_y, float enu_z) {
-    return { enu_x, enu_z, -enu_y };
+    auto f = f4::renderer::enu_to_raylib(enu_x, enu_y, enu_z);
+    return { f.x, f.y, f.z };
 }
 
-// ---------------------------------------------------------------------------
-// FreeFalcon BSP model-space → Raylib RH Y-up
-// ---------------------------------------------------------------------------
-//
-// KoreaObj .LOD mesh vertices are stored in FreeFalcon's model-local
-// frame. The conversion to Raylib RH Y-up is (x, -z, y) — verified
-// against the f4-scenario-player renderer (which renders aircraft and
-// airfield features correctly with this transform). Ported from
-// f4-scenario-player/include/f4/scenario_player/coordinate_transform.hpp
-// ::model_vertex_to_raylib.
 inline Vector3 model_vertex_to_rl(float x, float y, float z) {
-    return { x, -z, y };
+    auto f = f4::renderer::model_vertex_to_raylib(x, y, z);
+    return { f.x, f.y, f.z };
 }
 
-// ---------------------------------------------------------------------------
-// Resolve a FreeFalcon vertex color index → Raylib Color
-// ---------------------------------------------------------------------------
-//
-// FreeFalcon's `Prim.rgba` is an INT index into the ColorBank (NOT packed
-// ABGR). Indices < 4096 look up the ColorBank; index 0 is a sentinel
-// ("no color") that we map to white for textured meshes or grey for
-// untextured. Out-of-range indices fall back to treating the value as
-// packed ABGR (rare; some legacy models).
-//
-// Ported from f4-scenario-player/src/renderer.cpp:resolve_vertex_color.
-Color resolve_vertex_color(uint32_t color_index,
-                            const f4::models::ColorBank& color_bank,
-                            bool mesh_is_textured) noexcept {
-    if (color_index == 0) {
-        return mesh_is_textured ? Color{255, 255, 255, 255}
-                                : Color{180, 180, 180, 255};
-    }
-    if (color_index < 4096) {
-        const int idx = static_cast<int>(color_index);
-        const uint32_t rgba = color_bank.rgba_at(idx);
-        if (rgba != 0) {
-            return Color{
-                static_cast<unsigned char>((rgba >> 24) & 0xFF),
-                static_cast<unsigned char>((rgba >> 16) & 0xFF),
-                static_cast<unsigned char>((rgba >> 8)  & 0xFF),
-                static_cast<unsigned char>(rgba & 0xFF)
-            };
-        }
-    }
-    return Color{
-        static_cast<unsigned char>(color_index & 0xFF),
-        static_cast<unsigned char>((color_index >> 8) & 0xFF),
-        static_cast<unsigned char>((color_index >> 16) & 0xFF),
-        static_cast<unsigned char>((color_index >> 24) & 0xFF)
-    };
-}
-
-// ---------------------------------------------------------------------------
-// Lit shader source (mirrors f4-models-viewer's canvas3d.cpp + the
-// CTB-BLACK-RENDER-FIX-2 patch applied to class_table_browser.cpp)
-// ---------------------------------------------------------------------------
-//
-// Forward-declared here so we can lazily compile it on first draw. The
-// shader adds a single directional light + ambient term to Raylib's
-// default mesh pipeline. If compilation fails (e.g. headless GL stub
-// with no shader support), we fall back to LoadMaterialDefault() —
-// features still render, just unlit.
-//
-// CRITICAL (bug fix — same root cause as CTB-BLACK-RENDER-FIX-2):
-//   1. Use `matModel` (which Raylib's DrawMesh DOES upload via
-//      SHADER_LOC_MATRIX_MODEL) — NOT `modelView` (which Raylib does
-//      NOT upload, leaving the uniform as a zero matrix and zeroing
-//      every normal → NdotL collapses to 0 → only ambient survives).
-//      This matters MORE here than in the class browser because our
-//      per-feature model matrix is Translate * RotateY(facing); without
-//      matModel, the rotation never reaches the normals, so the sun
-//      hits every feature as if facing=0.
-//   2. Do NOT negate lightDir. FreeFalcon's BSP vertex normals are
-//      INWARD-pointing; the "wrong" sign convention in canvas3d
-//      (treating lightDir as the direction light travels, not the
-//      direction from surface to sun) and the inward normals cancel.
-//      Negating lightDir un-cancels them, making every surface receive
-//      NdotL=0. Verified by the test_match_model_viewer regression
-//      harness under Xvfb (models 109/119/1052 all render correctly
-//      with the no-negation form).
-const char* const kLitShaderVS_3d =
-    "#version 330\n"
-    "in vec3 vertexPosition;\n"
-    "in vec2 vertexTexCoord;\n"
-    "in vec4 vertexColor;\n"
-    "in vec3 vertexNormal;\n"
-    "uniform mat4 mvp;\n"
-    "uniform mat4 matModel;\n"
-    "out vec2 fragTexCoord;\n"
-    "out vec4 fragColor;\n"
-    "out vec3 fragNormal;\n"
-    "void main() {\n"
-    "    fragTexCoord = vertexTexCoord;\n"
-    "    fragColor = vertexColor;\n"
-    "    fragNormal = normalize(mat3(matModel) * vertexNormal);\n"
-    "    gl_Position = mvp * vec4(vertexPosition, 1.0);\n"
-    "}\n";
-
-const char* const kLitShaderFS_3d =
-    "#version 330\n"
-    "in vec2 fragTexCoord;\n"
-    "in vec4 fragColor;\n"
-    "in vec3 fragNormal;\n"
-    "uniform sampler2D texture0;\n"
-    "uniform vec4 colDiffuse;\n"
-    "uniform vec3 lightDir;\n"
-    "uniform vec4 lightColor;\n"
-    "uniform vec4 ambient;\n"
-    "out vec4 finalColor;\n"
-    "void main() {\n"
-    "    vec4 tex = texture(texture0, fragTexCoord);\n"
-    "    if (tex.a < 0.5) discard;\n"
-    "    vec3 N = normalize(fragNormal);\n"
-    "    vec3 L = normalize(lightDir);\n"
-    "    float NdotL = max(dot(N, L), 0.0);\n"
-    "    vec4 light = ambient + lightColor * NdotL;\n"
-    "    finalColor = tex * colDiffuse * fragColor * light;\n"
-    "}\n";
+// resolve_vertex_color and lit shader source are now provided by
+// f4::renderer (mesh_builder.hpp + lit_shader.hpp). No local duplicates.
 
 // ---------------------------------------------------------------------------
 // Drawing — flat ground quads (runway surface, taxiway strip, threshold
@@ -417,20 +300,12 @@ bool ViewerApp::Impl::ensure_models_3d_loaded() {
     return true;
 }
 
-bool ViewerApp::Impl::ensure_lit_shader_3d() {
-    if (lit_shader_3d_loaded) return lit_shader_3d.id != 0;
-    lit_shader_3d_loaded = true;
-    lit_shader_3d = LoadShaderFromMemory(kLitShaderVS_3d, kLitShaderFS_3d);
-    if (lit_shader_3d.id == 0) return false;
-    lit_shader_3d_dir_loc     = GetShaderLocation(lit_shader_3d, "lightDir");
-    lit_shader_3d_color_loc   = GetShaderLocation(lit_shader_3d, "lightColor");
-    lit_shader_3d_ambient_loc = GetShaderLocation(lit_shader_3d, "ambient");
-    return true;
-}
-
 bool ViewerApp::Impl::ensure_default_material_3d() {
     // Idempotent — once valid, stay valid (until unload_meshes_3d()).
     if (default_mat_3d_valid) return true;
+
+    // Ensure the lit shader is compiled (via f4::renderer::LitShader).
+    lit_shader_3d.ensure();
 
     // 1) Create the 1x1 opaque-white fallback texture.
     if (!fallback_white_tex_3d_valid) {
@@ -457,8 +332,8 @@ bool ViewerApp::Impl::ensure_default_material_3d() {
     default_mat_3d = LoadMaterialDefault();
     default_mat_3d.maps[MATERIAL_MAP_DIFFUSE].texture = fallback_white_tex_3d;
     default_mat_3d.maps[MATERIAL_MAP_DIFFUSE].color = WHITE;
-    if (lit_shader_3d.id != 0) {
-        default_mat_3d.shader = lit_shader_3d;
+    if (lit_shader_3d.is_loaded()) {
+        default_mat_3d.shader = lit_shader_3d.shader();
     }
     default_mat_3d_valid = true;
     return true;
@@ -500,145 +375,29 @@ void ViewerApp::Impl::build_mesh_3d(int parent_index) {
         return;
     }
 
-    const auto& cb = db.color_bank();
+    // Use f4::renderer to build Raylib meshes + mesh entries.
+    auto raylib_meshes = f4::renderer::build_raylib_meshes(
+        geom, db.color_bank(), f4::renderer::model_vertex_to_raylib);
+    auto entries = f4::renderer::build_mesh_entries(geom, raylib_meshes);
 
-    MeshCacheEntry3D entry;
-    entry.meshes.reserve(geom.meshes.size());
-    for (const auto& src : geom.meshes) {
-        if (src.vertices.empty()) continue;
-        if (src.kind == f4::models::PrimitiveKind::Triangles && src.triangles.empty()) continue;
+    Gl3dMeshCacheEntry cache_entry;
+    cache_entry.meshes = std::move(entries);
+    cache_entry.built = true;
+    mesh_cache_3d[parent_index] = std::move(cache_entry);
 
-        const bool mesh_is_textured = (src.tex_id >= 0);
-        const int vert_count = static_cast<int>(src.vertices.size());
-        const int tri_count = static_cast<int>(src.triangles.size());
-
-        ::Mesh rm = {};
-        rm.vertexCount = vert_count;
-        rm.triangleCount = tri_count;
-        rm.vertices = static_cast<float*>(RL_MALLOC(vert_count * 3 * sizeof(float)));
-        rm.normals  = static_cast<float*>(RL_MALLOC(vert_count * 3 * sizeof(float)));
-        rm.texcoords = static_cast<float*>(RL_MALLOC(vert_count * 2 * sizeof(float)));
-        rm.colors   = static_cast<unsigned char*>(RL_MALLOC(vert_count * 4 * sizeof(unsigned char)));
-        if (tri_count > 0) {
-            rm.indices = static_cast<unsigned short*>(RL_MALLOC(tri_count * 3 * sizeof(unsigned short)));
-        }
-
-        for (int i = 0; i < vert_count; ++i) {
-            const auto& v = src.vertices[static_cast<std::size_t>(i)];
-            const Vector3 pos = model_vertex_to_rl(v.position.x, v.position.y, v.position.z);
-            rm.vertices[i*3+0] = pos.x;
-            rm.vertices[i*3+1] = pos.y;
-            rm.vertices[i*3+2] = pos.z;
-            const Vector3 nrm = model_vertex_to_rl(v.normal.x, v.normal.y, v.normal.z);
-            rm.normals[i*3+0] = nrm.x;
-            rm.normals[i*3+1] = nrm.y;
-            rm.normals[i*3+2] = nrm.z;
-            rm.texcoords[i*2+0] = v.uv.u;
-            rm.texcoords[i*2+1] = v.uv.v;
-            const Color c = resolve_vertex_color(v.color, cb, mesh_is_textured);
-            rm.colors[i*4+0] = c.r;
-            rm.colors[i*4+1] = c.g;
-            rm.colors[i*4+2] = c.b;
-            rm.colors[i*4+3] = c.a;
-        }
-        if (tri_count > 0) {
-            for (int i = 0; i < tri_count; ++i) {
-                const auto& tri = src.triangles[static_cast<std::size_t>(i)];
-                rm.indices[i*3+0] = static_cast<unsigned short>(tri.v0);
-                rm.indices[i*3+1] = static_cast<unsigned short>(tri.v1);
-                rm.indices[i*3+2] = static_cast<unsigned short>(tri.v2);
-            }
-        }
-        UploadMesh(&rm, false);
-
-        MeshEntry3D me;
-        me.mesh = rm;
-        me.tex_id = src.tex_id;
-        entry.meshes.push_back(me);
+    // Upload any new textures via f4::renderer::TextureCache.
+    std::vector<int> tex_ids;
+    for (const auto& me : mesh_cache_3d[parent_index].meshes) {
+        if (me.tex_id >= 0) tex_ids.push_back(me.tex_id);
     }
-
-    entry.built = true;
-    mesh_cache_3d[parent_index] = std::move(entry);
-
-    // Upload any new textures referenced by this model's meshes.
-    upload_textures_3d();
-}
-
-void ViewerApp::Impl::upload_textures_3d() {
-    if (!model_db_3d.has_value()) return;
-    auto& db = *model_db_3d;
-
-    for (auto& [parent_idx, cache_entry] : mesh_cache_3d) {
-        for (auto& me : cache_entry.meshes) {
-            if (me.tex_id < 0) continue;
-            if (texture_cache_3d.count(me.tex_id)) continue;
-
-            const auto* decoded = db.fetch_texture(me.tex_id);
-            if (!decoded || !decoded->valid()) {
-                TexCacheEntry3D ce; ce.uploaded = false;
-                texture_cache_3d[me.tex_id] = ce;
-                continue;
-            }
-
-            Image img = {};
-            img.data = RL_MALLOC(decoded->width * decoded->height * 4);
-            if (!img.data) {
-                TexCacheEntry3D ce; ce.uploaded = false;
-                texture_cache_3d[me.tex_id] = ce;
-                continue;
-            }
-            std::memcpy(img.data, decoded->rgba.data(),
-                        static_cast<std::size_t>(decoded->width * decoded->height * 4));
-            img.width = decoded->width;
-            img.height = decoded->height;
-            img.mipmaps = 1;
-            img.format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8;
-
-            Texture2D tex = LoadTextureFromImage(img);
-            Material mat = LoadMaterialDefault();
-            mat.maps[MATERIAL_MAP_DIFFUSE].texture = tex;
-            mat.maps[MATERIAL_MAP_DIFFUSE].color = WHITE;
-            // Assign the lit shader if it has been compiled. This is
-            // normally the case because ensure_lit_shader_3d() is called
-            // BEFORE the first build_mesh_3d() in the render loop. If
-            // the shader isn't loaded yet (e.g. it failed to compile),
-            // the material falls back to Raylib's default shader, which
-            // still renders the mesh (just without directional lighting).
-            if (lit_shader_3d.id != 0) {
-                mat.shader = lit_shader_3d;
-            }
-
-            TexCacheEntry3D ce;
-            ce.texture = tex;
-            ce.material = mat;
-            ce.uploaded = true;
-            texture_cache_3d[me.tex_id] = ce;
-            UnloadImage(img);
-        }
-    }
-
-    // If the lit shader was compiled AFTER some texture materials were
-    // already cached (e.g. shader compilation succeeded on a later frame
-    // than the first texture upload), walk the cache and assign the
-    // shader retroactively. Idempotent.
-    if (lit_shader_3d.id != 0) {
-        for (auto& [id, ce] : texture_cache_3d) {
-            if (ce.uploaded && ce.material.shader.id != lit_shader_3d.id) {
-                ce.material.shader = lit_shader_3d;
-            }
-        }
+    if (!tex_ids.empty()) {
+        texture_cache_3d.upload(db, tex_ids);
     }
 }
 
 void ViewerApp::Impl::unload_meshes_3d() {
-    // Free textures first (meshes don't reference textures, but materials do).
-    for (auto& [id, ce] : texture_cache_3d) {
-        if (ce.uploaded) {
-            UnloadTexture(ce.texture);
-            ce.material.maps[MATERIAL_MAP_DIFFUSE].texture = {};
-        }
-    }
-    texture_cache_3d.clear();
+    // Free textures via f4::renderer::TextureCache.
+    texture_cache_3d.unload_all();
 
     // Free meshes.
     for (auto& [parent_idx, cache_entry] : mesh_cache_3d) {
@@ -666,15 +425,9 @@ void ViewerApp::Impl::unload_meshes_3d() {
         fallback_white_tex_3d_valid = false;
     }
 
-    // Unload the lit shader.
-    if (lit_shader_3d.id != 0) {
-        UnloadShader(lit_shader_3d);
-        lit_shader_3d = {};
-        lit_shader_3d_loaded = false;
-        lit_shader_3d_dir_loc = -1;
-        lit_shader_3d_color_loc = -1;
-        lit_shader_3d_ambient_loc = -1;
-    }
+    // LitShader handles its own cleanup via RAII, but we can release it
+    // explicitly here if needed. The LitShader destructor will unload
+    // the shader from GPU when the Impl struct is destroyed.
 }
 
 // ---------------------------------------------------------------------------
@@ -708,29 +461,7 @@ void ViewerApp::draw_ground_layout_3d() {
                               impl_->model_db_3d.has_value() &&
                               impl_->class_table_3d.loaded();
 
-    // Local lambdas that close over impl_ — keeps Impl private while
-    // still letting us structure the camera + geometry logic into
-    // small, named helpers.
-    auto update_camera_orbit = [&]() {
-        const float cy = std::cos(impl_->ground_layout_3d_yaw);
-        const float sy = std::sin(impl_->ground_layout_3d_yaw);
-        const float cp = std::cos(impl_->ground_layout_3d_pitch);
-        const float sp = std::sin(impl_->ground_layout_3d_pitch);
-        const float d  = impl_->ground_layout_3d_distance;
-        const float cx = impl_->ground_layout_3d_center_x;
-        const float cy_g = impl_->ground_layout_3d_center_y;
-        const Vector3 target = enu_to_rl(cx, cy_g, 0.0f);
-        impl_->ground_layout_3d_camera.position = {
-            target.x + d * cp * sy,
-            target.y + d * sp,
-            target.z + d * cp * cy
-        };
-        impl_->ground_layout_3d_camera.target = target;
-        impl_->ground_layout_3d_camera.up = {0.0f, -1.0f, 0.0f};
-        impl_->ground_layout_3d_camera.fovy = 45.0f;
-        impl_->ground_layout_3d_camera.projection = CAMERA_PERSPECTIVE;
-    };
-
+    // Local lambda for fitting orbit camera to bbox.
     auto default_orbit_for_bbox = [&](const AirfieldGeometry3D& g) {
         if (g.empty) return;
         const float cx = (g.min_x + g.max_x) * 0.5f;
@@ -740,10 +471,10 @@ void ViewerApp::draw_ground_layout_3d() {
         const float diag = std::sqrt(w * w + h * h);
         impl_->ground_layout_3d_center_x = cx;
         impl_->ground_layout_3d_center_y = cy;
-        // Default: 35° pitch, ~30° yaw, distance = 1.5x diagonal.
-        impl_->ground_layout_3d_pitch    = 0.6f;
-        impl_->ground_layout_3d_yaw       = 0.5f;
-        impl_->ground_layout_3d_distance  = std::max(diag * 1.5f, 500.0f);
+        // Use OrbitCamera.fit_to_bbox to set camera position.
+        const Vector3 center = enu_to_rl(cx, cy, 0.0f);
+        const float radius = diag * 0.5f;
+        impl_->gl3d_orbit_cam.fit_to_bbox(center, std::max(radius, 250.0f), 3.0f);
     };
 
     // Rebuild the geometry when the selection changes. We compare by
@@ -769,15 +500,8 @@ void ViewerApp::draw_ground_layout_3d() {
     const auto& g = impl_->ground_layout_3d_geometry;
     if (g.empty) return;  // nothing to render
 
-    // Update the camera from orbit parameters BEFORE the render pass.
-    // Without this, the first frame after a selection change would
-    // render with a stale/default-constructed camera (all zeros),
-    // producing a blank panel. The original code called update_camera_orbit()
-    // at the END of the function — which meant the FIRST frame of every
-    // selection always rendered nothing, and only subsequent frames
-    // showed the geometry. Moving it here makes the very first frame
-    // correct.
-    update_camera_orbit();
+    // Update the orbit camera BEFORE the render pass.
+    impl_->gl3d_orbit_cam.update_from_orbit();
 
     // ImGui window setup.
     ImGui::SetNextWindowPos(ImVec2(660, 80), ImGuiCond_FirstUseEver);
@@ -834,7 +558,7 @@ void ViewerApp::draw_ground_layout_3d() {
             ImGui::TextDisabled("[3D models: %s]", err);
         } else {
             const int cached = static_cast<int>(impl_->mesh_cache_3d.size());
-            const int textures = static_cast<int>(impl_->texture_cache_3d.size());
+            const int textures = static_cast<int>(impl_->texture_cache_3d.map().size());
             ImGui::TextDisabled("[3D models: %d cached, %d textures]",
                                 cached, textures);
             // Per-frame diagnostic — shows where features are being
@@ -876,7 +600,7 @@ void ViewerApp::draw_ground_layout_3d() {
     BeginTextureMode(impl_->ground_layout_3d_target);
     {
         ClearBackground(BG_COLOR);
-        BeginMode3D(impl_->ground_layout_3d_camera);
+        BeginMode3D(impl_->gl3d_orbit_cam.camera());
         {
             // CRITICAL: disable backface culling. Our ground quads have
             // arbitrary winding (the layout data doesn't guarantee CCW),
@@ -977,48 +701,15 @@ void ViewerApp::draw_ground_layout_3d() {
             impl_->diag_3d_triangles_drawn = 0;
 
             if (impl_->ground_layout_3d_show_models && models_ready && fs) {
-                // Compile the lit shader on first use (idempotent).
-                const bool lighting_active = impl_->ensure_lit_shader_3d();
+                // Compile the lit shader on first use (via f4::renderer::LitShader).
+                const bool lighting_active = impl_->lit_shader_3d.ensure();
                 if (lighting_active) {
                     // Set shader uniforms once for this draw batch.
-                    Vector3 light_dir = impl_->light_3d_direction;
-                    const float dlen = std::sqrt(
-                        light_dir.x * light_dir.x +
-                        light_dir.y * light_dir.y +
-                        light_dir.z * light_dir.z);
-                    if (dlen > 0.0001f) {
-                        light_dir.x /= dlen; light_dir.y /= dlen; light_dir.z /= dlen;
-                    } else {
-                        light_dir = {0.5f, -1.0f, 0.3f};
-                    }
-                    if (impl_->lit_shader_3d_dir_loc >= 0) {
-                        const float dir[3] = { light_dir.x, light_dir.y, light_dir.z };
-                        SetShaderValue(impl_->lit_shader_3d,
-                                        impl_->lit_shader_3d_dir_loc,
-                                        dir, SHADER_UNIFORM_VEC3);
-                    }
-                    if (impl_->lit_shader_3d_color_loc >= 0) {
-                        const float col[4] = {
-                            impl_->light_3d_color.r / 255.0f * impl_->light_3d_intensity,
-                            impl_->light_3d_color.g / 255.0f * impl_->light_3d_intensity,
-                            impl_->light_3d_color.b / 255.0f * impl_->light_3d_intensity,
-                            impl_->light_3d_color.a / 255.0f
-                        };
-                        SetShaderValue(impl_->lit_shader_3d,
-                                        impl_->lit_shader_3d_color_loc,
-                                        col, SHADER_UNIFORM_VEC4);
-                    }
-                    if (impl_->lit_shader_3d_ambient_loc >= 0) {
-                        const float amb[4] = {
-                            impl_->ambient_3d_color.r / 255.0f,
-                            impl_->ambient_3d_color.g / 255.0f,
-                            impl_->ambient_3d_color.b / 255.0f,
-                            impl_->ambient_3d_color.a / 255.0f
-                        };
-                        SetShaderValue(impl_->lit_shader_3d,
-                                        impl_->lit_shader_3d_ambient_loc,
-                                        amb, SHADER_UNIFORM_VEC4);
-                    }
+                    impl_->lit_shader_3d.set_lighting(
+                        impl_->light_3d_direction,
+                        impl_->light_3d_color,
+                        impl_->light_3d_intensity,
+                        impl_->ambient_3d_color);
                 }
 
                 // Cached default material — created ONCE (not every frame).
@@ -1165,10 +856,9 @@ void ViewerApp::draw_ground_layout_3d() {
                             if (me.mesh.triangleCount <= 0) continue;
                             const Material* mat_to_use = &impl_->default_mat_3d;
                             if (me.tex_id >= 0) {
-                                auto tex_it = impl_->texture_cache_3d.find(me.tex_id);
-                                if (tex_it != impl_->texture_cache_3d.end() &&
-                                    tex_it->second.uploaded) {
-                                    mat_to_use = &tex_it->second.material;
+                                auto* ce = impl_->texture_cache_3d.lookup(me.tex_id);
+                                if (ce && ce->uploaded) {
+                                    mat_to_use = &ce->material;
                                 }
                             }
                             DrawMesh(me.mesh, *mat_to_use, model_matrix);
@@ -1194,7 +884,7 @@ void ViewerApp::draw_ground_layout_3d() {
         if (impl_->ground_layout_3d_show_labels) {
             std::vector<Label2D> labels;
             labels.reserve(64);
-            collect_labels(impl_->ground_layout_3d_camera, g,
+            collect_labels(impl_->gl3d_orbit_cam.camera(), g,
                            impl_->ground_layout_3d_show_parking, labels);
             draw_labels(labels);
         }
@@ -1211,18 +901,18 @@ void ViewerApp::draw_ground_layout_3d() {
     // --- Mouse input (orbit + zoom) — only when the image is hovered ------
     //
     // We use ImGui::IsItemHovered() to detect hover on the last-drawn
-    // image (rlImGuiImageSize acts like ImGui::Image). Once the user
-    // starts dragging, we keep the drag active even if the cursor
-    // briefly leaves the image bounds.
+    // image. The orbit camera input is handled manually (updating yaw/pitch/
+    // distance via accessors) rather than via OrbitCamera::handle_input()
+    // because we need to restrict input to when the 3D panel image is hovered.
     const bool img_hovered = ImGui::IsItemHovered();
     if (img_hovered) {
         const Vector2 wheel = GetMouseWheelMoveV();
         if (wheel.y != 0.0f) {
             // Log-scale zoom.
-            const float factor = std::exp(-wheel.y * ZOOM_SPEED * 30.0f);
-            impl_->ground_layout_3d_distance =
-                std::clamp(impl_->ground_layout_3d_distance * factor,
-                           MIN_DISTANCE, MAX_DISTANCE);
+            const float factor = std::exp(-wheel.y * 0.03f);
+            impl_->gl3d_orbit_cam.set_distance(
+                std::clamp(impl_->gl3d_orbit_cam.distance() * factor,
+                           50.0f, 50000.0f));
         }
     }
     static bool s_dragging_3d = false;
@@ -1234,27 +924,24 @@ void ViewerApp::draw_ground_layout_3d() {
     }
     if (s_dragging_3d) {
         const ImVec2 delta = ImGui::GetIO().MouseDelta;
-        impl_->ground_layout_3d_yaw   += delta.x * ORBIT_YAW_SPEED;
-        impl_->ground_layout_3d_pitch -= delta.y * ORBIT_PITCH_SPEED;
-        impl_->ground_layout_3d_pitch =
-            std::clamp(impl_->ground_layout_3d_pitch, MIN_PITCH, MAX_PITCH);
+        // OrbitCamera stores yaw/pitch in degrees; convert pixel delta.
+        const float deg_per_px = 0.2865f;  // ~0.005 rad/px
+        impl_->gl3d_orbit_cam.set_yaw(
+            impl_->gl3d_orbit_cam.yaw() + delta.x * deg_per_px);
+        impl_->gl3d_orbit_cam.set_pitch(
+            std::clamp(impl_->gl3d_orbit_cam.pitch() - delta.y * deg_per_px,
+                       -89.0f, 89.0f));
     }
 
-    // Note: update_camera_orbit() is now called at the TOP of the
-    // function (before BeginTextureMode) so the very first frame after
-    // a selection change renders correctly. We re-run it here so any
-    // drag that happened during this frame is reflected immediately —
-    // but the actual visible render happens on the NEXT frame using
-    // these updated values. (Same one-frame latency as before for
-    // interactive drag, but the initial render is now correct.)
-    update_camera_orbit();
+    // Re-update orbit camera so drag this frame is reflected next frame.
+    impl_->gl3d_orbit_cam.update_from_orbit();
 
     // Footer — bbox + camera info.
     ImGui::TextDisabled("bbox: %.0f x %.0f ft   yaw: %.0f°   pitch: %.0f°   d: %.0f ft",
                         g.max_x - g.min_x, g.max_y - g.min_y,
-                        impl_->ground_layout_3d_yaw   * 57.29578f,
-                        impl_->ground_layout_3d_pitch * 57.29578f,
-                        impl_->ground_layout_3d_distance);
+                        impl_->gl3d_orbit_cam.yaw(),
+                        impl_->gl3d_orbit_cam.pitch(),
+                        impl_->gl3d_orbit_cam.distance());
     ImGui::TextDisabled("drag = orbit, scroll = zoom   (close window to free GPU texture)");
 
     ImGui::End();

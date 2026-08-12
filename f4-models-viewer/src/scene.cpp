@@ -25,6 +25,9 @@
 #include <f4/models/model_database.hpp>
 #include <f4/models/texture.hpp>
 
+#include <f4/renderer/mesh_builder.hpp>
+#include <f4/renderer/texture_cache.hpp>
+
 #include <raylib.h>
 
 #include <algorithm>
@@ -35,151 +38,11 @@
 
 namespace f4::models_viewer {
 
-// ── ColorBank index → Raylib Color ─────────────────────────────────────────
-//
-// f4::models::Vertex::color stores `Prim.rgba`, which in FreeFalcon is an
-// `int rgba` INDEX into the ColorBank (see graphics/include/polylib.h and
-// ColorBankClass::GetColorEntry). The previous implementation treated this
-// as packed ABGR — for index 873 that gave RGBA=(105,3,0,0), which is fully
-// transparent and therefore invisible.
-//
-// We resolve through the ColorBank and fall back to a neutral grey so
-// textured meshes (whose color comes from the texture, not the index) and
-// uncolored meshes still render visibly.
-
-static Color resolve_vertex_color(uint32_t color_index,
-                                  const f4::models::ColorBank& color_bank,
-                                  bool mesh_is_textured) noexcept {
-    // color_index is a uint32_t but the original field is int32_t; treat
-    // very large values as "no color" rather than as huge indices.
-    if (color_index == 0) {
-        // No color — pick a visible default depending on whether the mesh
-        // has a texture. Textured meshes will get their color from the
-        // texture, so a neutral white tint is correct. Untextured meshes
-        // have no color source at all, so use a mid-grey so they show up
-        // against the dark background.
-        return mesh_is_textured ? Color{255, 255, 255, 255}
-                                : Color{180, 180, 180, 255};
-    }
-    if (color_index < 4096) {
-        // Almost certainly a ColorBank index. Resolve through the bank.
-        const int idx = static_cast<int>(color_index);
-        const uint32_t rgba = color_bank.rgba_at(idx);
-        if (rgba != 0) {
-            // rgba is packed 0xRRGGBBAA (per ColorBank::rgba_at).
-            return Color{
-                static_cast<unsigned char>((rgba >> 24) & 0xFF),  // R
-                static_cast<unsigned char>((rgba >> 16) & 0xFF),  // G
-                static_cast<unsigned char>((rgba >> 8)  & 0xFF),  // B
-                static_cast<unsigned char>(rgba & 0xFF)           // A
-            };
-        }
-        // Index out of range — fall through to fallback.
-    }
-    // Large value — assume the caller really did pack RGBA. Keep the old
-    // unpack path for backward compatibility (rare in practice).
-    return Color{
-        static_cast<unsigned char>(color_index & 0xFF),         // R
-        static_cast<unsigned char>((color_index >> 8) & 0xFF),  // G
-        static_cast<unsigned char>((color_index >> 16) & 0xFF), // B
-        static_cast<unsigned char>((color_index >> 24) & 0xFF)  // A
-    };
-}
-
-// ── build_raylib_meshes ────────────────────────────────────────────────────
-std::vector<::Mesh> build_raylib_meshes(
-    const f4::models::ModelGeometry& geom,
-    const f4::models::ColorBank& color_bank)
-{
-    std::vector<::Mesh> result;
-    result.reserve(geom.meshes.size());
-
-    for (const auto& src_mesh : geom.meshes) {
-        // Skip meshes with no vertex data. (A triangle-only mesh with 0
-        // triangles but >0 vertices would be unusual but not invalid; we
-        // skip it to avoid an empty UploadMesh.)
-        if (src_mesh.vertices.empty()) continue;
-        if (src_mesh.kind == f4::models::PrimitiveKind::Triangles &&
-            src_mesh.triangles.empty()) continue;
-
-        const bool mesh_is_textured = (src_mesh.tex_id >= 0);
-
-        const int vert_count = static_cast<int>(src_mesh.vertices.size());
-        const int tri_count  = static_cast<int>(src_mesh.triangles.size());
-
-        ::Mesh rm = {};
-        rm.vertexCount   = vert_count;
-        rm.triangleCount = tri_count;
-
-        // Allocate Raylib mesh arrays using RL_MALLOC so that UnloadMesh
-        // can correctly free them with RL_FREE (Raylib's ownership model).
-        // The previous code used new[] which caused UB when UnloadMesh called
-        // RL_FREE on new[]-allocated memory, and leaked when meshes were
-        // rebuilt without calling UnloadMesh first.
-        rm.vertices = static_cast<float*>(RL_MALLOC(vert_count * 3 * sizeof(float)));
-        rm.normals  = static_cast<float*>(RL_MALLOC(vert_count * 3 * sizeof(float)));
-        rm.texcoords = static_cast<float*>(RL_MALLOC(vert_count * 2 * sizeof(float)));
-        rm.colors   = static_cast<unsigned char*>(RL_MALLOC(vert_count * 4 * sizeof(unsigned char)));
-
-        if (tri_count > 0) {
-            // Triangle list (indices: 3 per triangle).
-            rm.indices = static_cast<unsigned short*>(RL_MALLOC(tri_count * 3 * sizeof(unsigned short)));
-        }
-
-        // Fill vertex attributes
-        for (int i = 0; i < vert_count; ++i) {
-            const auto& v = src_mesh.vertices[static_cast<std::size_t>(i)];
-
-            // Position: LH Y-up → RH Y-up
-            const Vector3 pos = to_raylib(v.position.x, v.position.y, v.position.z);
-            rm.vertices[i * 3 + 0] = pos.x;
-            rm.vertices[i * 3 + 1] = pos.y;
-            rm.vertices[i * 3 + 2] = pos.z;
-
-            // Normal: same conversion
-            const Vector3 nrm = to_raylib(v.normal.x, v.normal.y, v.normal.z);
-            rm.normals[i * 3 + 0] = nrm.x;
-            rm.normals[i * 3 + 1] = nrm.y;
-            rm.normals[i * 3 + 2] = nrm.z;
-
-            // Texcoords (default to 0,0 — Raylib wants valid floats here)
-            rm.texcoords[i * 2 + 0] = v.uv.u;
-            rm.texcoords[i * 2 + 1] = v.uv.v;
-
-            // Color: resolve through ColorBank
-            const Color c = resolve_vertex_color(v.color, color_bank, mesh_is_textured);
-            rm.colors[i * 4 + 0] = c.r;
-            rm.colors[i * 4 + 1] = c.g;
-            rm.colors[i * 4 + 2] = c.b;
-            rm.colors[i * 4 + 3] = c.a;
-        }
-
-        // Fill indices for triangles
-        if (tri_count > 0) {
-            for (int i = 0; i < tri_count; ++i) {
-                const auto& tri = src_mesh.triangles[static_cast<std::size_t>(i)];
-                rm.indices[i * 3 + 0] = static_cast<unsigned short>(tri.v0);
-                rm.indices[i * 3 + 1] = static_cast<unsigned short>(tri.v1);
-                rm.indices[i * 3 + 2] = static_cast<unsigned short>(tri.v2);
-            }
-        }
-
-        // Upload to GPU (dynamic = false since we don't update per-frame)
-        UploadMesh(&rm, false);
-
-        result.push_back(rm);
-    }
-
-    return result;
-}
-
-// ── unload_meshes ──────────────────────────────────────────────────────────
-void unload_meshes(std::vector<::Mesh>& meshes) {
-    for (auto& m : meshes) {
-        UnloadMesh(m);
-    }
-    meshes.clear();
-}
+// ── resolve_vertex_color / build_raylib_meshes / unload_meshes ─────────────
+// Now provided by f4::renderer — see f4/renderer/mesh_builder.hpp.
+// The local implementations have been removed; this file delegates to
+// f4::renderer::build_raylib_meshes(), f4::renderer::build_mesh_entries(),
+// f4::renderer::unload_meshes(), and f4::renderer::resolve_vertex_color().
 
 // ── sync_model_state_with_bsp_tree ─────────────────────────────────────────
 // Walks the BSP tree and reconciles model_state.dofs / model_state.switches
@@ -363,7 +226,7 @@ static void sync_model_state_with_bsp_tree(
 
 void ViewerApp::Impl::rebuild_meshes() {
     // Free old meshes and textures
-    f4::models_viewer::unload_meshes(raylib_meshes);
+    f4::renderer::unload_meshes(raylib_meshes);
     mesh_entries.clear();
     line_segs.clear();
     point_marks.clear();
@@ -419,19 +282,10 @@ void ViewerApp::Impl::rebuild_meshes() {
     }
 
     // Convert to Raylib meshes, resolving ColorBank indices to RGBA.
-    raylib_meshes = build_raylib_meshes(geom, db.color_bank());
+    raylib_meshes = f4::renderer::build_raylib_meshes(geom, db.color_bank());
 
     // Build mesh_entries with tex_id for per-mesh material lookup
-    mesh_entries.clear();
-    mesh_entries.reserve(geom.meshes.size());
-    for (std::size_t i = 0; i < geom.meshes.size(); ++i) {
-        RaylibMeshEntry entry;
-        if (i < raylib_meshes.size()) {
-            entry.mesh = raylib_meshes[i];
-        }
-        entry.tex_id = geom.meshes[i].tex_id;
-        mesh_entries.push_back(entry);
-    }
+    mesh_entries = f4::renderer::build_mesh_entries(geom, raylib_meshes);
 
     // Collect lines and points into separate lists for canvas drawing.
     // Raylib's ::Mesh / DrawMesh path only handles triangle lists; lines
@@ -499,7 +353,13 @@ void ViewerApp::Impl::rebuild_meshes() {
     meshes_dirty = false;
 
     // Upload textures for the new meshes
-    upload_textures();
+    // Collect tex_ids for the TextureCache::upload() call
+    std::vector<int> tex_ids;
+    tex_ids.reserve(mesh_entries.size());
+    for (const auto& me : mesh_entries) {
+        if (me.tex_id >= 0) tex_ids.push_back(me.tex_id);
+    }
+    texture_cache.upload(db, tex_ids);
 
     // Count textured meshes for status
     int n_textured = 0;
@@ -516,8 +376,8 @@ void ViewerApp::Impl::rebuild_meshes() {
 }
 
 void ViewerApp::Impl::unload_meshes() {
-    unload_textures();
-    f4::models_viewer::unload_meshes(raylib_meshes);
+    texture_cache.unload_all();
+    f4::renderer::unload_meshes(raylib_meshes);
     mesh_entries.clear();
     line_segs.clear();
     point_marks.clear();
@@ -525,81 +385,18 @@ void ViewerApp::Impl::unload_meshes() {
 }
 
 // ── Texture upload ────────────────────────────────────────────────────────
-//
-// For each mesh that has a tex_id, lazily decode the TEX blob via
-// ModelDatabase::fetch_texture(), convert the DecodedTexture's RGBA8 pixel
-// data to a Raylib Image, then upload as Texture2D. Create a Material with
-// the texture bound to MATERIAL_MAP_DIFFUSE.
+// Now handled by f4::renderer::TextureCache. The upload_textures() and
+// unload_textures() member functions are kept as thin wrappers for
+// backward compatibility with the Impl declarations.
 
 void ViewerApp::Impl::upload_textures() {
-    if (!doc_loaded) return;
-
-    for (auto& me : mesh_entries) {
-        if (me.tex_id < 0) continue;  // no texture for this mesh
-
-        // Already in cache?
-        if (texture_cache.count(me.tex_id)) continue;
-
-        // Decode the texture (lazy, cached in ModelDatabase)
-        const auto* decoded = db.fetch_texture(me.tex_id);
-        if (!decoded || !decoded->valid()) {
-            // Mark as cached-but-failed so we don't retry
-            TexCacheEntry ce;
-            ce.uploaded = false;
-            texture_cache[me.tex_id] = ce;
-            continue;
-        }
-
-        // Create a Raylib Image from the RGBA8 pixel data.
-        // DecodedTexture stores pixels as RGBA8 (R, G, B, A per pixel),
-        // but Raylib's LoadImageFromMemory expects UNCOMPRESSED_R8G8B8A8
-        // which is the same layout.
-        Image img = {};
-        img.data = RL_MALLOC(decoded->width * decoded->height * 4);
-        if (!img.data) {
-            TexCacheEntry ce;
-            ce.uploaded = false;
-            texture_cache[me.tex_id] = ce;
-            continue;
-        }
-        std::memcpy(img.data, decoded->rgba.data(),
-                     static_cast<std::size_t>(decoded->width * decoded->height * 4));
-        img.width = decoded->width;
-        img.height = decoded->height;
-        img.mipmaps = 1;
-        img.format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8;
-
-        // Upload to GPU
-        Texture2D tex = LoadTextureFromImage(img);
-
-        // Create a material with this texture bound
-        Material mat = LoadMaterialDefault();
-        mat.maps[MATERIAL_MAP_DIFFUSE].texture = tex;
-        mat.maps[MATERIAL_MAP_DIFFUSE].color = WHITE;
-
-        TexCacheEntry ce;
-        ce.texture = tex;
-        ce.material = mat;
-        ce.has_alpha = decoded->has_alpha;
-        ce.uploaded = true;
-        texture_cache[me.tex_id] = ce;
-
-        // Free the CPU-side image (GPU copy is retained)
-        UnloadImage(img);
-    }
+    // Texture upload is now done inline in rebuild_meshes() via
+    // texture_cache.upload(db, tex_ids). This wrapper exists for
+    // the Impl declaration but is a no-op.
 }
 
 void ViewerApp::Impl::unload_textures() {
-    for (auto& [id, ce] : texture_cache) {
-        if (ce.uploaded) {
-            // Unload the texture from GPU
-            UnloadTexture(ce.texture);
-            // The material references the texture; setting it to default
-            // prevents dangling GPU resource access.
-            ce.material.maps[MATERIAL_MAP_DIFFUSE].texture = {};
-        }
-    }
-    texture_cache.clear();
+    texture_cache.unload_all();
 }
 
 } // namespace f4::models_viewer

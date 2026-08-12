@@ -104,6 +104,7 @@ target_include_directories(f4_models_viewer
 )
 target_link_libraries(f4_models_viewer PUBLIC
     f4-models
+    f4-renderer
     f4-install
     f4-json
 )

@@ -13,12 +13,17 @@
 #include <f4/models/texture.hpp>
 #include <f4/install/installation.hpp>
 
+#include <f4/renderer/coord_transform.hpp>
+#include <f4/renderer/lit_shader.hpp>
+#include <f4/renderer/mesh_builder.hpp>
+#include <f4/renderer/orbit_camera.hpp>
+#include <f4/renderer/texture_cache.hpp>
+
 #include <raylib.h>
 
 #include <filesystem>
 #include <optional>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 namespace f4::models_viewer {
@@ -42,7 +47,8 @@ namespace f4::models_viewer {
 // local Z → parent Y for rotors, which only makes sense in Y-up).
 
 inline Vector3 to_raylib(float x, float y, float z) {
-    return {x, -z, y};
+    const auto v = f4::renderer::model_vertex_to_raylib(x, y, z);
+    return {v.x, v.y, v.z};
 }
 
 // ── ViewerApp::Impl ───────────────────────────────────────────────────────
@@ -57,17 +63,9 @@ struct ViewerApp::Impl {
     bool should_exit = false;
 
     // ── Orbit Camera ──────────────────────────────────────────────────
-    Camera3D camera = {};
-    float cam_yaw = 45.0f;          // degrees, horizontal orbit
-    float cam_pitch = 30.0f;        // degrees, vertical orbit (clamped)
-    float cam_distance = 100.0f;    // distance from target
-    Vector3 cam_target = {0, 0, 0}; // point the camera orbits around
-    bool orbit_dragging = false;    // left-drag in progress
-    bool pan_dragging = false;      // right-drag in progress
-    Vector2 drag_start = {0, 0};    // mouse position at drag start
-    float drag_yaw0 = 0;            // yaw at drag start
-    float drag_pitch0 = 0;          // pitch at drag start
-    Vector3 drag_target0 = {};      // target at drag start
+    f4::renderer::OrbitCamera orbit_cam;
+    // Keep individual fields as aliases for gradual migration;
+    // these delegate to orbit_cam accessors.
     bool initial_camera_set = false;
 
     // ── Data ──────────────────────────────────────────────────────────
@@ -84,21 +82,11 @@ struct ViewerApp::Impl {
 
     // ── Texture cache ─────────────────────────────────────────────────
     // Each mesh entry tracks its tex_id for per-mesh material lookup.
-    struct RaylibMeshEntry {
-        ::Mesh mesh = {};
-        int tex_id = -1;              ///< texture bank index for this mesh
-    };
-    std::vector<RaylibMeshEntry> mesh_entries;
+    std::vector<f4::renderer::MeshEntry> mesh_entries;
 
     // GPU texture cache: tex_id → uploaded Texture2D.
     // Populated lazily in upload_textures() when a mesh needs a texture.
-    struct TexCacheEntry {
-        ::Texture2D texture = {};
-        ::Material material = {};
-        bool has_alpha = false;
-        bool uploaded = false;        ///< true once texture is on GPU
-    };
-    std::unordered_map<int, TexCacheEntry> texture_cache;
+    f4::renderer::TextureCache texture_cache;
 
     // ── Texture set selection ─────────────────────────────────────────
     int selected_texture_set = 0;     ///< 0=summer, 1=winter, 2=desert
@@ -140,11 +128,7 @@ struct ViewerApp::Impl {
     float  light_intensity  = 1.0f;
     Color  ambient_color    = { 60, 60, 70, 255 };
     Color  light_color      = { 255, 250, 235, 255 };
-    Shader lit_shader       = {};
-    bool   lit_shader_loaded = false;  ///< true once we've tried (id may still be 0 on failure)
-    int    lit_shader_dir_loc       = -1;
-    int    lit_shader_color_loc     = -1;
-    int    lit_shader_ambient_loc   = -1;
+    f4::renderer::LitShader lit_shader;
 
     // ── Animation ─────────────────────────────────────────────────────
     // Per-DOF auto-animation. Lets the user click "Auto" on a DOF slider

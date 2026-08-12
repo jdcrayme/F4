@@ -68,18 +68,11 @@ struct f4::viewer::PreviewCache {
     };
     std::unordered_map<int, MeshCacheEntry> mesh_cache;
 
-    struct TexCacheEntry {
-        ::Texture2D texture = {};
-        ::Material material = {};
-        bool uploaded = false;
-    };
-    std::unordered_map<int, TexCacheEntry> texture_cache;
+    // f4::renderer::TextureCache replaces the manual texture cache map.
+    f4::renderer::TextureCache texture_cache;
 
-    ::Shader lit_shader = {};
-    bool lit_shader_built = false;
-    int lit_shader_dir_loc = -1;
-    int lit_shader_color_loc = -1;
-    int lit_shader_ambient_loc = -1;
+    // f4::renderer::LitShader replaces the manual shader + uniform locs.
+    f4::renderer::LitShader lit_shader_ensure;
 
     ::Texture2D fallback_white_tex = {};
     ::Material default_mat = {};
@@ -189,25 +182,8 @@ void ClassTableBrowser::cleanup_preview() {
     }
     preview_cache_->mesh_cache.clear();
 
-    // Free cached textures + materials. Must come AFTER UnloadMesh
-    // (meshes don't reference textures, but materials do — unloading a
-    // material that still has a GPU texture bound can leave dangling
-    // state on some drivers). Order: unload material first (which
-    // detaches the texture), then unload the texture.
-    for (auto& [tex_id, ce] : preview_cache_->texture_cache) {
-        if (ce.uploaded) {
-            // Detach the texture from the material's diffuse map before
-            // unloading the material, so UnloadMaterial doesn't try to
-            // free a texture it doesn't own.
-            ce.material.maps[MATERIAL_MAP_DIFFUSE].texture = {};
-            UnloadMaterial(ce.material);
-            ce.material = {};
-            UnloadTexture(ce.texture);
-            ce.texture = {};
-            ce.uploaded = false;
-        }
-    }
-    preview_cache_->texture_cache.clear();
+    // Free cached textures via f4::renderer::TextureCache.
+    preview_cache_->texture_cache.unload_all();
 
     // Free the default material + fallback white texture + lit shader.
     // These are built once per browser-open cycle; freeing them here lets
@@ -224,14 +200,8 @@ void ClassTableBrowser::cleanup_preview() {
         UnloadTexture(preview_cache_->fallback_white_tex);
         preview_cache_->fallback_white_tex = {};
     }
-    if (preview_cache_->lit_shader_built && preview_cache_->lit_shader.id != 0) {
-        UnloadShader(preview_cache_->lit_shader);
-        preview_cache_->lit_shader = {};
-        preview_cache_->lit_shader_built = false;
-        preview_cache_->lit_shader_dir_loc = -1;
-        preview_cache_->lit_shader_color_loc = -1;
-        preview_cache_->lit_shader_ambient_loc = -1;
-    }
+    // LitShader handles its own cleanup via RAII destructor.
+    // No need to manually UnloadShader.
 
     // Reset selection tracking so the next preview refits the camera.
     last_previewed_vis_type_ = -1;
@@ -659,101 +629,11 @@ void ClassTableBrowser::draw_table() {
 //  actual working code. Models rendered sideways / upside-down.)
 // ---------------------------------------------------------------------------
 
-// LH Y-up (FreeFalcon model space) → RH Y-up (Raylib).
-static inline Vector3 model_vertex_to_rl(float x, float y, float z) noexcept {
-    return { x, -z, y };
-}
+// f4::renderer provides model_vertex_to_raylib and resolve_vertex_color.
+// No local duplicates needed.
 
-// FreeFalcon's `Prim.rgba` is an INT index into the ColorBank (NOT packed
-// ABGR). Indices < 4096 look up the ColorBank; index 0 is a sentinel
-// ("no color") that we map to white for textured meshes or grey for
-// untextured. Out-of-range indices fall back to treating the value as
-// packed ABGR (rare; some legacy models).
-static Color resolve_vertex_color(uint32_t color_index,
-                                   const f4::models::ColorBank& color_bank,
-                                   bool mesh_is_textured) noexcept {
-    if (color_index == 0) {
-        return mesh_is_textured ? Color{255, 255, 255, 255}
-                                : Color{180, 180, 180, 255};
-    }
-    if (color_index < 4096) {
-        const int idx = static_cast<int>(color_index);
-        const uint32_t rgba = color_bank.rgba_at(idx);
-        if (rgba != 0) {
-            return Color{
-                static_cast<unsigned char>((rgba >> 24) & 0xFF),
-                static_cast<unsigned char>((rgba >> 16) & 0xFF),
-                static_cast<unsigned char>((rgba >> 8)  & 0xFF),
-                static_cast<unsigned char>(rgba & 0xFF)
-            };
-        }
-    }
-    return Color{
-        static_cast<unsigned char>(color_index & 0xFF),
-        static_cast<unsigned char>((color_index >> 8) & 0xFF),
-        static_cast<unsigned char>((color_index >> 16) & 0xFF),
-        static_cast<unsigned char>((color_index >> 24) & 0xFF)
-    };
-}
-
-// Lit shader source (same as ground_layout_3d.cpp's kLitShaderVS_3d/FS_3d
-// and f4-scenario-player's renderer.cpp). Single directional light +
-// ambient term on top of Raylib's default mesh pipeline.
-static const char* const kPreviewLitShaderVS =
-    "#version 330\n"
-    "in vec3 vertexPosition;\n"
-    "in vec2 vertexTexCoord;\n"
-    "in vec4 vertexColor;\n"
-    "in vec3 vertexNormal;\n"
-    "uniform mat4 mvp;\n"
-    "out vec2 fragTexCoord;\n"
-    "out vec4 fragColor;\n"
-    "out vec3 fragNormal;\n"
-    "void main() {\n"
-    "    fragTexCoord = vertexTexCoord;\n"
-    "    fragColor = vertexColor;\n"
-    "    // Use vertexNormal directly (no mat3(modelView) transform) because\n"
-    "    // Raylib's DrawMesh() does NOT upload a `modelView` uniform. The\n"
-    "    // uniform would default to a zero matrix, zeroing all normals and\n"
-    "    // making the directional light component disappear (leaving only\n"
-    "    // ambient). We call DrawMesh with an identity model matrix, so\n"
-    "    // model-space normals are already in world space.\n"
-    "    fragNormal = normalize(vertexNormal);\n"
-    "    gl_Position = mvp * vec4(vertexPosition, 1.0);\n"
-    "}\n";
-
-static const char* const kPreviewLitShaderFS =
-    "#version 330\n"
-    "in vec2 fragTexCoord;\n"
-    "in vec4 fragColor;\n"
-    "in vec3 fragNormal;\n"
-    "uniform sampler2D texture0;\n"
-    "uniform vec4 colDiffuse;\n"
-    "uniform vec3 lightDir;\n"
-    "uniform vec4 lightColor;\n"
-    "uniform vec4 ambient;\n"
-    "out vec4 finalColor;\n"
-    "void main() {\n"
-    "    vec4 tex = texture(texture0, fragTexCoord);\n"
-    "    if (tex.a < 0.5) discard;\n"
-    "    vec3 N = normalize(fragNormal);\n"
-    "    // lightDir uniform is the direction LIGHT TRAVELS (from sun toward\n"
-    "    // scene), e.g. (0.65, -1.0, 0.35) = sun above-and-to-the-side.\n"
-    "    // For diffuse we need L = direction from surface TO light, which is\n"
-    "    // -lightDir. BUT FreeFalcon's BSP vertex normals are INWARD-pointing\n"
-    "    // (the visible top face has normal pointing DOWN/IN), so the\n"
-    "    // inward-N and the un-negated L happen to produce the correct\n"
-    "    // sign on NdotL. Using -lightDir here flips the sign and makes\n"
-    "    // every visible surface dark (NdotL clamped to 0, only ambient).\n"
-    "    //\n"
-    "    // Verified against f4-models-viewer/src/canvas3d.cpp which uses\n"
-    "    // `L = normalize(lightDir)` (no negation) and renders correctly.\n"
-    "    // DO NOT re-add the negation — it makes the model invisible.\n"
-    "    vec3 L = normalize(lightDir);\n"
-    "    float NdotL = max(dot(N, L), 0.0);\n"
-    "    vec4 light = ambient + lightColor * NdotL;\n"
-    "    finalColor = tex * colDiffuse * fragColor * light;\n"
-    "}\n";
+// Lit shader is now provided by f4::renderer::LitShader.
+// No local shader source strings needed.
 
 void ClassTableBrowser::ensure_preview_target(int w, int h) {
     if (preview_rt_valid_ && preview_rt_w_ == w && preview_rt_h_ == h) return;
@@ -771,20 +651,8 @@ bool ClassTableBrowser::ensure_lit_shader() {
     // it in the constructor because the GL context doesn't exist yet
     // (ViewerApp constructs ClassTableBrowser before run() → InitWindow).
     if (!preview_cache_) preview_cache_ = std::make_unique<PreviewCache>();
-    if (preview_cache_->lit_shader_built) {
-        return preview_cache_->lit_shader.id != 0;
-    }
-    preview_cache_->lit_shader_built = true;
-    preview_cache_->lit_shader =
-        LoadShaderFromMemory(kPreviewLitShaderVS, kPreviewLitShaderFS);
-    if (preview_cache_->lit_shader.id == 0) return false;
-    preview_cache_->lit_shader_dir_loc =
-        GetShaderLocation(preview_cache_->lit_shader, "lightDir");
-    preview_cache_->lit_shader_color_loc =
-        GetShaderLocation(preview_cache_->lit_shader, "lightColor");
-    preview_cache_->lit_shader_ambient_loc =
-        GetShaderLocation(preview_cache_->lit_shader, "ambient");
-    return true;
+    // Use f4::renderer::LitShader instead of manual shader compilation.
+    return preview_cache_->lit_shader_ensure.ensure();
 }
 
 bool ClassTableBrowser::ensure_default_material() {
@@ -818,8 +686,8 @@ bool ClassTableBrowser::ensure_default_material() {
     preview_cache_->default_mat.maps[MATERIAL_MAP_DIFFUSE].texture =
         preview_cache_->fallback_white_tex;
     preview_cache_->default_mat.maps[MATERIAL_MAP_DIFFUSE].color = WHITE;
-    if (preview_cache_->lit_shader.id != 0) {
-        preview_cache_->default_mat.shader = preview_cache_->lit_shader;
+    if (preview_cache_->lit_shader_ensure.is_loaded()) {
+        preview_cache_->default_mat.shader = preview_cache_->lit_shader_ensure.shader();
     }
     preview_cache_->default_mat_built = true;
     return true;
@@ -866,67 +734,30 @@ void ClassTableBrowser::build_preview_meshes(int16_t vis_type_idx) {
 
     const auto& cb = model_db_->color_bank();
 
+    // Use f4::renderer to build Raylib meshes + mesh entries.
+    auto raylib_meshes = f4::renderer::build_raylib_meshes(
+        geom, cb, f4::renderer::model_vertex_to_raylib);
+    // Filter to triangles only (skip lines/points for preview).
+    std::vector<::Mesh> tri_meshes;
+    std::vector<int> tri_tex_ids;
+    for (std::size_t i = 0; i < geom.meshes.size(); ++i) {
+        if (geom.meshes[i].kind == f4::models::PrimitiveKind::Triangles &&
+            !geom.meshes[i].triangles.empty() && !geom.meshes[i].vertices.empty()) {
+            tri_meshes.push_back(std::move(raylib_meshes[i]));
+            tri_tex_ids.push_back(geom.meshes[i].tex_id);
+        }
+    }
+
     PreviewCache::MeshCacheEntry entry;
-    entry.meshes.reserve(geom.meshes.size());
+    entry.meshes.reserve(tri_meshes.size());
     std::size_t total_tris = 0;
 
-    for (const auto& src : geom.meshes) {
-        if (src.vertices.empty()) continue;
-        if (src.kind == f4::models::PrimitiveKind::Triangles && src.triangles.empty()) continue;
-        // Skip lines/points for the preview — they're rare and Raylib's
-        // DrawMesh only handles triangle lists. (f4-models-viewer draws
-        // them separately via DrawLine3D; we don't bother in the small
-        // preview pane.)
-        if (src.kind != f4::models::PrimitiveKind::Triangles) continue;
-
-        const bool mesh_is_textured = (src.tex_id >= 0);
-        const int vert_count = static_cast<int>(src.vertices.size());
-        const int tri_count  = static_cast<int>(src.triangles.size());
-
-        ::Mesh rm = {};
-        rm.vertexCount = vert_count;
-        rm.triangleCount = tri_count;
-        rm.vertices  = static_cast<float*>(RL_MALLOC(vert_count * 3 * sizeof(float)));
-        rm.normals   = static_cast<float*>(RL_MALLOC(vert_count * 3 * sizeof(float)));
-        rm.texcoords = static_cast<float*>(RL_MALLOC(vert_count * 2 * sizeof(float)));
-        rm.colors    = static_cast<unsigned char*>(RL_MALLOC(vert_count * 4 * sizeof(unsigned char)));
-        if (tri_count > 0) {
-            rm.indices = static_cast<unsigned short*>(RL_MALLOC(tri_count * 3 * sizeof(unsigned short)));
-        }
-
-        for (int i = 0; i < vert_count; ++i) {
-            const auto& v = src.vertices[static_cast<std::size_t>(i)];
-            const Vector3 pos = model_vertex_to_rl(v.position.x, v.position.y, v.position.z);
-            rm.vertices[i*3+0] = pos.x;
-            rm.vertices[i*3+1] = pos.y;
-            rm.vertices[i*3+2] = pos.z;
-            const Vector3 nrm = model_vertex_to_rl(v.normal.x, v.normal.y, v.normal.z);
-            rm.normals[i*3+0] = nrm.x;
-            rm.normals[i*3+1] = nrm.y;
-            rm.normals[i*3+2] = nrm.z;
-            rm.texcoords[i*2+0] = v.uv.u;
-            rm.texcoords[i*2+1] = v.uv.v;
-            const Color c = resolve_vertex_color(v.color, cb, mesh_is_textured);
-            rm.colors[i*4+0] = c.r;
-            rm.colors[i*4+1] = c.g;
-            rm.colors[i*4+2] = c.b;
-            rm.colors[i*4+3] = c.a;
-        }
-        if (tri_count > 0) {
-            for (int i = 0; i < tri_count; ++i) {
-                const auto& tri = src.triangles[static_cast<std::size_t>(i)];
-                rm.indices[i*3+0] = static_cast<unsigned short>(tri.v0);
-                rm.indices[i*3+1] = static_cast<unsigned short>(tri.v1);
-                rm.indices[i*3+2] = static_cast<unsigned short>(tri.v2);
-            }
-        }
-        UploadMesh(&rm, false);
-
+    for (std::size_t i = 0; i < tri_meshes.size(); ++i) {
         PreviewCache::MeshEntry me;
-        me.mesh = rm;  // full struct — needed for UnloadMesh later
-        me.tex_id = src.tex_id;
-        entry.meshes.push_back(me);
-        total_tris += static_cast<std::size_t>(tri_count);
+        me.mesh = tri_meshes[i];
+        me.tex_id = tri_tex_ids[i];
+        entry.meshes.push_back(std::move(me));
+        total_tris += static_cast<std::size_t>(tri_meshes[i].triangleCount);
     }
 
     entry.built = true;
@@ -934,74 +765,18 @@ void ClassTableBrowser::build_preview_meshes(int16_t vis_type_idx) {
     entry.tri_count = total_tris;
     preview_cache_->mesh_cache[vis_type_idx] = std::move(entry);
 
-    upload_preview_textures();
-}
-
-void ClassTableBrowser::upload_preview_textures() {
-    if (!model_db_ || !preview_cache_) return;
-
-    for (auto& [vis_idx, cache_entry] : preview_cache_->mesh_cache) {
-        for (auto& me : cache_entry.meshes) {
-            if (me.tex_id < 0) continue;
-            if (preview_cache_->texture_cache.count(me.tex_id)) continue;
-
-            const auto* decoded = model_db_->fetch_texture(me.tex_id);
-            if (!decoded || !decoded->valid()) {
-                PreviewCache::TexCacheEntry ce; ce.uploaded = false;
-                preview_cache_->texture_cache[me.tex_id] = ce;
-                continue;
-            }
-
-            Image img = {};
-            img.data = RL_MALLOC(static_cast<std::size_t>(decoded->width)
-                                  * decoded->height * 4);
-            if (!img.data) {
-                PreviewCache::TexCacheEntry ce; ce.uploaded = false;
-                preview_cache_->texture_cache[me.tex_id] = ce;
-                continue;
-            }
-            std::memcpy(img.data, decoded->rgba.data(),
-                        static_cast<std::size_t>(decoded->width)
-                          * decoded->height * 4);
-            img.width = decoded->width;
-            img.height = decoded->height;
-            img.mipmaps = 1;
-            img.format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8;
-
-            Texture2D tex = LoadTextureFromImage(img);
-            Material mat = LoadMaterialDefault();
-            mat.maps[MATERIAL_MAP_DIFFUSE].texture = tex;
-            mat.maps[MATERIAL_MAP_DIFFUSE].color = WHITE;
-            if (preview_cache_->lit_shader.id != 0) {
-                mat.shader = preview_cache_->lit_shader;
-            }
-
-            PreviewCache::TexCacheEntry ce;
-            ce.texture = tex;
-            ce.material = mat;
-            ce.uploaded = true;
-            preview_cache_->texture_cache[me.tex_id] = ce;
-            UnloadImage(img);
-        }
+    // Upload textures via f4::renderer::TextureCache.
+    std::vector<int> tex_ids;
+    for (const auto& me : entry.meshes) {
+        if (me.tex_id >= 0) tex_ids.push_back(me.tex_id);
     }
-
-    // Retroactively assign the lit shader to materials cached before the
-    // shader finished compiling. Since we now store the full Material
-    // struct, we CAN mutate the shader field directly (unlike the old
-    // id-only approach).
-    if (preview_cache_->lit_shader.id != 0) {
-        for (auto& [id, ce] : preview_cache_->texture_cache) {
-            if (ce.uploaded && ce.material.shader.id != preview_cache_->lit_shader.id) {
-                ce.material.shader = preview_cache_->lit_shader;
-            }
-        }
-        // Also update the default material if it was built before the shader.
-        if (preview_cache_->default_mat_built &&
-            preview_cache_->default_mat.shader.id != preview_cache_->lit_shader.id) {
-            preview_cache_->default_mat.shader = preview_cache_->lit_shader;
-        }
+    if (!tex_ids.empty() && model_db_) {
+        preview_cache_->texture_cache.upload(*model_db_, tex_ids);
     }
 }
+
+// upload_preview_textures() is no longer needed — textures are uploaded
+// via f4::renderer::TextureCache in build_preview_meshes().
 
 void ClassTableBrowser::fit_camera_to_model(int16_t vis_type_idx) {
     if (!model_db_ || vis_type_idx <= 0) return;
@@ -1009,8 +784,9 @@ void ClassTableBrowser::fit_camera_to_model(int16_t vis_type_idx) {
     if (!rec) return;
 
     // Bbox center is in LH Y-up model space; convert to Raylib RH Y-up.
-    const Vector3 center = model_vertex_to_rl(
+    const auto center_f3 = f4::renderer::model_vertex_to_raylib(
         rec->bbox.center_x(), rec->bbox.center_y(), rec->bbox.center_z());
+    const Vector3 center = {center_f3.x, center_f3.y, center_f3.z};
     cam_target_x_ = center.x;
     cam_target_y_ = center.y;
     cam_target_z_ = center.z;
@@ -1124,25 +900,13 @@ void ClassTableBrowser::draw_model_preview(int16_t vis_type_idx) {
             // model's extent even if the mesh itself is sparse.
             //DrawSphereWires(target, model->radius, 12, 12, { 80, 80, 100, 255 });
 
-            // Push shader uniforms (direction + color + ambient) BEFORE
-            // drawing meshes — Raylib's DrawMesh uses the material's
-            // shader, and our lit shader needs these uniforms set.
-            if (preview_cache_->lit_shader.id != 0) {
-                const Vector3 light_dir = { 0.65f, -1.0f, 0.35f };
-                const Vector4 light_col = { 1.0f, 0.98f, 0.92f, 1.0f };
-                const Vector4 ambient   = { 0.30f, 0.30f, 0.34f, 1.0f };
-                if (preview_cache_->lit_shader_dir_loc >= 0)
-                    SetShaderValue(preview_cache_->lit_shader,
-                                   preview_cache_->lit_shader_dir_loc,
-                                   &light_dir, SHADER_UNIFORM_VEC3);
-                if (preview_cache_->lit_shader_color_loc >= 0)
-                    SetShaderValue(preview_cache_->lit_shader,
-                                   preview_cache_->lit_shader_color_loc,
-                                   &light_col, SHADER_UNIFORM_VEC4);
-                if (preview_cache_->lit_shader_ambient_loc >= 0)
-                    SetShaderValue(preview_cache_->lit_shader,
-                                   preview_cache_->lit_shader_ambient_loc,
-                                   &ambient, SHADER_UNIFORM_VEC4);
+            // Push shader uniforms via f4::renderer::LitShader.
+            if (preview_cache_->lit_shader_ensure.is_loaded()) {
+                preview_cache_->lit_shader_ensure.set_lighting(
+                    { 0.65f, -1.0f, 0.35f },     // light_dir
+                    { 255, 250, 235, 255 },         // light_color
+                    1.0f,                            // intensity
+                    { 80, 80, 90, 255 });            // ambient
             }
 
             // Draw each cached mesh with its material (textured or default).
@@ -1161,14 +925,9 @@ void ClassTableBrowser::draw_model_preview(int16_t vis_type_idx) {
                 const auto& me = cache_it->second.meshes[i];
                 bool has_alpha = false;
                 if (me.tex_id >= 0) {
-                    auto tex_it = preview_cache_->texture_cache.find(me.tex_id);
-                    if (tex_it != preview_cache_->texture_cache.end() &&
-                        tex_it->second.uploaded) {
-                        // We didn't track has_alpha in PreviewCache::TexCacheEntry;
-                        // assume any texture with an alpha channel might use
-                        // chroma-key transparency. This is the safe default
-                        // for FreeFalcon .TEX files.
-                        has_alpha = true;
+                    auto* ce = preview_cache_->texture_cache.lookup(me.tex_id);
+                    if (ce && ce->uploaded) {
+                        has_alpha = ce->has_alpha;
                     }
                 }
                 if (has_alpha) alpha_order.push_back(i);
@@ -1182,10 +941,9 @@ void ClassTableBrowser::draw_model_preview(int16_t vis_type_idx) {
 
                 const Material* matToUse = &preview_cache_->default_mat;
                 if (me.tex_id >= 0) {
-                    auto tex_it = preview_cache_->texture_cache.find(me.tex_id);
-                    if (tex_it != preview_cache_->texture_cache.end() &&
-                        tex_it->second.uploaded) {
-                        matToUse = &tex_it->second.material;
+                    auto* ce = preview_cache_->texture_cache.lookup(me.tex_id);
+                    if (ce && ce->uploaded) {
+                        matToUse = &ce->material;
                     }
                     // else: texture not yet uploaded — fall through to
                     // default material (mesh renders with vertex colors).

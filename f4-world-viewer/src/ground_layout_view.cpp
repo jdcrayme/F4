@@ -37,9 +37,9 @@ LayoutColors colors_for_list_type(uint8_t type) {
         case 15: return { IM_COL32(220, 180,  60, 200), IM_COL32(220, 180,  60, 200), 1.0f, 3.0f, false };
         case 16: return { IM_COL32( 60, 120, 220, 255), IM_COL32( 60, 120, 220, 255), 1.0f, 4.0f, false };
         case 17: return { IM_COL32(140, 100,  60, 220), IM_COL32(140, 100,  60, 220), 2.0f, 2.0f, false };
-        case 4:  return { IM_COL32(220,  60,  60, 255), IM_COL32(220,  60,  60, 255), 1.0f, 5.0f, false };
-        case 5:  return { IM_COL32(220, 140,  40, 255), IM_COL32(220, 140,  40, 255), 1.0f, 5.0f, false };
-        case 6:  return { IM_COL32(220, 200,  40, 255), IM_COL32(220, 200,  40, 255), 1.0f, 4.0f, false };
+        case 4:  return { IM_COL32(220,  60,  60, 255), IM_COL32(220,  60,  60, 255), 0.0f, 5.0f, false };
+        case 5:  return { IM_COL32(220, 140,  40, 255), IM_COL32(220, 140,  40, 255), 0.0f, 5.0f, false };
+        case 6:  return { IM_COL32(220, 200,  40, 255), IM_COL32(220, 200,  40, 255), 0.0f, 4.0f, false };
         case 10: return { IM_COL32(180,  60, 220, 255), IM_COL32(180,  60, 220, 255), 1.0f, 5.0f, false };
         default: return { IM_COL32(160, 160, 160, 180), IM_COL32(160, 160, 160, 180), 1.0f, 2.0f, false };
     }
@@ -188,21 +188,23 @@ void ViewerApp::draw_ground_layout_view() {
             const std::size_t n = layout.points.size();
             if (n == 0) continue;
             if (n >= 2) {
-                if (lc.is_dashed) {
-                    for (std::size_t i = 0; i + 1 < n; i += 2) {
-                        dl->AddLine(
-                            ImVec2(wx(layout.points[i].x), wy(layout.points[i].y)),
-                            ImVec2(wx(layout.points[i + 1].x), wy(layout.points[i + 1].y)),
-                            lc.stroke, lc.line_width);
+                if (lc.line_width > 0)
+                    if (lc.is_dashed) {
+                        for (std::size_t i = 0; i + 1 < n; i += 2) {
+                            dl->AddLine(
+                                ImVec2(wx(layout.points[i].x), wy(layout.points[i].y)),
+                                ImVec2(wx(layout.points[i + 1].x), wy(layout.points[i + 1].y)),
+                                lc.stroke, lc.line_width);
+                        }
                     }
-                } else {
-                    for (std::size_t i = 0; i + 1 < n; ++i) {
-                        dl->AddLine(
-                            ImVec2(wx(layout.points[i].x), wy(layout.points[i].y)),
-                            ImVec2(wx(layout.points[i + 1].x), wy(layout.points[i + 1].y)),
-                            lc.stroke, lc.line_width);
+                    else {
+                        for (std::size_t i = 0; i + 1 < n; ++i) {
+                            dl->AddLine(
+                                ImVec2(wx(layout.points[i].x), wy(layout.points[i].y)),
+                                ImVec2(wx(layout.points[i + 1].x), wy(layout.points[i + 1].y)),
+                                lc.stroke, lc.line_width);
+                        }
                     }
-                }
             }
             for (std::size_t i = 0; i < n; ++i) {
                 const float px = wx(layout.points[i].x);

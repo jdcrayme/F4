@@ -40,9 +40,9 @@ ViewerApp::~ViewerApp() {
         if (impl_->colorbank_texture.id != 0) {
             impl_->unload_colorbank_texture();
         }
-        if (impl_->lit_shader.id != 0) {
-            UnloadShader(impl_->lit_shader);
-            impl_->lit_shader = {};
+        if (impl_->lit_shader.is_loaded()) {
+            // LitShader is RAII; it will be cleaned up automatically.
+            // No need to manually UnloadShader — the destructor handles it.
         }
     }
 }
@@ -123,11 +123,7 @@ void ViewerApp::run() {
     if (impl_->colorbank_texture.id != 0) {
         impl_->unload_colorbank_texture();
     }
-    if (impl_->lit_shader.id != 0) {
-        UnloadShader(impl_->lit_shader);
-        impl_->lit_shader = {};
-        impl_->lit_shader_loaded = false;
-    }
+    // LitShader destructor handles GPU cleanup automatically.
     CloseWindow();
 }
 
@@ -282,12 +278,28 @@ void ViewerApp::select_lod(int lod_index) {
 
 // ── set_initial_camera ─────────────────────────────────────────────────────
 void ViewerApp::set_initial_camera(const float eye[3], const float target[3]) {
-    impl_->camera.position = {eye[0], eye[1], eye[2]};
-    impl_->camera.target = {target[0], target[1], target[2]};
-    impl_->camera.up = {0, 1, 0};
-    impl_->camera.fovy = 45.0f;
-    impl_->camera.projection = CAMERA_PERSPECTIVE;
-    impl_->cam_target = impl_->camera.target;
+    const Vector3 tgt = {target[0], target[1], target[2]};
+    const Vector3 eye_v = {eye[0], eye[1], eye[2]};
+    impl_->orbit_cam.set_target(tgt);
+
+    // Compute orbit parameters (yaw, pitch, distance) from eye position.
+    // OrbitCamera convention:
+    //   position = target + distance * (cos(pitch)*sin(yaw),
+    //                                    sin(pitch),
+    //                                    cos(pitch)*cos(yaw))
+    const Vector3 diff = {eye_v.x - tgt.x, eye_v.y - tgt.y, eye_v.z - tgt.z};
+    const float dist = std::sqrt(diff.x*diff.x + diff.y*diff.y + diff.z*diff.z);
+    impl_->orbit_cam.set_distance(dist > 0.001f ? dist : 100.0f);
+
+    if (dist > 0.001f) {
+        static constexpr float kRad2Deg = 180.0f / 3.14159265358979323846f;
+        const float pitch_rad = std::asin(std::max(-1.0f, std::min(1.0f, diff.y / dist)));
+        const float yaw_rad = std::atan2(diff.x, diff.z);
+        impl_->orbit_cam.set_yaw(yaw_rad * kRad2Deg);
+        impl_->orbit_cam.set_pitch(pitch_rad * kRad2Deg);
+    }
+
+    impl_->orbit_cam.update_from_orbit();
     impl_->initial_camera_set = true;
 }
 

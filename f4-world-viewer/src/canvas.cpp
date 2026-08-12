@@ -299,7 +299,7 @@ void ViewerApp::draw_canvas() {
                 static_cast<unsigned char>(c.g * 0.4f),
                 static_cast<unsigned char>(c.b * 0.4f),
                 255};
-            impl_->draw_symbol(kind, p.x, p.y, base_size, c, outline);
+            f4::renderer::draw_symbol(kind, p.x, p.y, base_size, c, outline);
             if (pri && pri->priority >= 40) {
                 const float ring_r = base_size * 0.5f + 3.0f;
                 const Color ring = (pri->priority >= 70)
@@ -373,7 +373,7 @@ void ViewerApp::draw_canvas() {
                 static_cast<unsigned char>(c.g * 0.4f),
                 static_cast<unsigned char>(c.b * 0.4f),
                 255};
-            impl_->draw_symbol(kind, p.x, p.y, s, c, outline);
+            f4::renderer::draw_symbol(kind, p.x, p.y, s, c, outline);
 
             // Destination line — reads from MovementOrdersComponent (promoted
             // from PropertyBag in Phase 5 cleanup).
@@ -523,6 +523,7 @@ void ViewerApp::draw_canvas() {
         auto h = impl_->handle(impl_->sel_entity);
         auto* tr = h.get<f4::entities::TransformComponent>();
         auto* gl = h.get<f4::entities::GroundLayoutComponent>();
+        auto* fe = h.get <f4::entities::FeatureSetComponent>();
         if (tr && gl && !gl->layouts.empty()) {
             constexpr float FT_PER_GRID = 1024.0f;
             const float ox = impl_->grid_x(tr), oy = impl_->grid_y(tr);
@@ -551,9 +552,9 @@ void ViewerApp::draw_canvas() {
                         case 14: stroke = Color{ 80, 200, 220, 230}; line_w = 1.0f; break;
                         case 16: stroke = Color{ 60, 120, 220, 230}; line_w = 1.0f; break;
                         case 17: stroke = Color{140, 100,  60, 220}; line_w = 1.0f; break;
-                        case 4:  stroke = Color{220,  60,  60, 230}; line_w = 1.0f; break;
-                        case 5:  stroke = Color{220, 140,  40, 230}; line_w = 1.0f; break;
-                        case 6:  stroke = Color{220, 200,  40, 230}; line_w = 1.0f; break;
+                        case 4:  stroke = Color{220,  60,  60, 230}; line_w = 0.0f; break;
+                        case 5:  stroke = Color{220, 140,  40, 230}; line_w = 0.0f; break;
+                        case 6:  stroke = Color{220, 200,  40, 230}; line_w = 0.0f; break;
                         case 10: stroke = Color{180,  60, 220, 230}; line_w = 1.0f; break;
                         default: stroke = Color{160, 160, 160, 180}; line_w = 1.0f; break;
                     }
@@ -566,19 +567,39 @@ void ViewerApp::draw_canvas() {
                         }
                         continue;
                     }
-                    for (std::size_t i = 0; i + 1 < n; ++i) {
-                        const float x0 = origin.x + layout.points[i].x * px_per_ft;
-                        const float y0 = origin.y - layout.points[i].y * px_per_ft;
-                        const float x1 = origin.x + layout.points[i + 1].x * px_per_ft;
-                        const float y1 = origin.y - layout.points[i + 1].y * px_per_ft;
-                        DrawLineEx({x0, y0}, {x1, y1}, line_w, stroke);
-                    }
+                    if(line_w>0)
+                        for (std::size_t i = 0; i + 1 < n; ++i) {
+                            const float x0 = origin.x + layout.points[i].x * px_per_ft;
+                            const float y0 = origin.y - layout.points[i].y * px_per_ft;
+                            const float x1 = origin.x + layout.points[i + 1].x * px_per_ft;
+                            const float y1 = origin.y - layout.points[i + 1].y * px_per_ft;
+                            DrawLineEx({ x0, y0 }, { x1, y1 }, line_w, stroke);
+                        }
                     for (const auto& pt : layout.points) {
                         const float px = origin.x + pt.x * px_per_ft;
                         const float py = origin.y - pt.y * px_per_ft;
                         DrawCircleV({px, py}, 2.0f, stroke);
                     }
                 }
+            }
+        }
+
+        if (tr && fe && !fe->features.empty())
+        {
+            constexpr float FT_PER_GRID = 1024.0f;
+            const float ox = impl_->grid_x(tr), oy = impl_->grid_y(tr);
+            const Vector2 origin = impl_->world_to_screen(ox, oy);
+            const float px_per_ft = impl_->cam_zoom / FT_PER_GRID;
+            bool worth_drawing = false;
+            for (const auto& feature : fe->features) {
+                Color stroke; 
+                stroke = Color{ 180,  180, 220, 230 };
+                const float px = origin.x + feature.offset_x * px_per_ft;
+                const float py = origin.y - feature.offset_y * px_per_ft;
+                DrawCircleV({ px, py }, 3.0f, stroke);
+
+                //<Draw feature mesh here>
+
             }
         }
     }

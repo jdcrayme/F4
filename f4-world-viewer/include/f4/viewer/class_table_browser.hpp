@@ -203,9 +203,8 @@ private:
     /// even on failure (so we don't retry every frame).
     void build_preview_meshes(int16_t vis_type_idx);
 
-    /// Upload any new textures referenced by built preview meshes but
-    /// not yet in preview_cache_->texture_cache. Called after build_preview_meshes().
-    void upload_preview_textures();
+    /// Upload textures is now handled by f4::renderer::TextureCache
+    /// in build_preview_meshes(). No separate method needed.
 
     /// Fit the orbit camera to the model's bounding box so the model
     /// fills a reasonable portion of the preview viewport. Called once

@@ -101,6 +101,7 @@ target_include_directories(f4_scenario_player_lib
 target_link_libraries(f4_scenario_player_lib PUBLIC
     f4-simulation
     f4-world
+    f4-renderer
 )
 target_link_libraries(f4_scenario_player_lib PRIVATE raylib)
 add_library(F4::ScenarioPlayer ALIAS f4_scenario_player_lib)

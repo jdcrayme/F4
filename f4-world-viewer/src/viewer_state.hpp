@@ -52,6 +52,17 @@
 #include <f4/models/texture.hpp>
 #include <f4/world_convert/class_table.hpp>
 
+// f4-renderer — consolidated 3D rendering components (orbit camera,
+// lit shader, mesh builder, texture cache, draw helpers, symbols).
+// Replaces duplicated code that was previously inline in
+// ground_layout_3d.cpp and class_table_browser.cpp.
+#include <f4/renderer/orbit_camera.hpp>
+#include <f4/renderer/lit_shader.hpp>
+#include <f4/renderer/mesh_builder.hpp>
+#include <f4/renderer/texture_cache.hpp>
+#include <f4/renderer/draw_3d.hpp>
+#include <f4/renderer/coord_transform.hpp>
+
 #include <raylib.h>
 
 #include <cstdint>
@@ -62,7 +73,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include "symbols.hpp"  // SymbolKind, symbol_for_*, draw_symbol_imgui
+#include "symbols.hpp"  // Backward-compat aliases → f4::renderer::SymbolKind etc.
 #include "ground_layout_models.hpp"  // AirfieldGeometry3D + builder
 
 namespace f4::viewer {
@@ -74,7 +85,9 @@ namespace f4::viewer {
 // tile rendering, objective icon tinting, unit fill colors) and
 // imgui_panels.cpp (the legend panel swatches).
 // ---------------------------------------------------------------------------
-struct RlColor { unsigned char r, g, b, a; };
+// RlColor now comes from f4::renderer::RlColor via the using alias
+// in symbols.hpp. The struct layout is identical:
+//   struct RlColor { unsigned char r, g, b, a; };
 
 inline RlColor color_for_owner(uint8_t owner) {
     switch (owner) {
@@ -359,22 +372,13 @@ struct ViewerApp::Impl {
     // VU_ID.num → EntityId lookups are now in pop.objective_id_map and
     // pop.unit_id_map (populated by populate_world). No separate rebuild needed.
 
-    // --- Procedural symbols (replaces the old PNG-icon system) ---
+    // --- Procedural symbols ---
     //
-    // Every objective and unit on the canvas is drawn by draw_symbol() from
-    // raylib primitives — no texture assets, no PNG loading. The SymbolKind
-    // enum + symbol_for_* helpers live in symbols.hpp; the rendering code
-    // lives in symbols.cpp. See symbols.hpp for the full vocabulary.
-    //
-    // draw_symbol renders a symbol centered at (sx, sy) with extent
-    // size_px (width = height). The fill color is typically the team
-    // color; the outline is a contrasting color (usually a darkened
-    // version of fill, or pure black for max contrast at small sizes).
-    // Set filled=false for outline-only rendering (used for hover/
-    // selection state). Defined in symbols.cpp.
-    void draw_symbol(SymbolKind kind, float sx, float sy, float size_px,
-                     const RlColor& fill, const RlColor& outline,
-                     bool filled = true);
+    // Symbol drawing is now provided by f4::renderer::draw_symbol()
+    // (raylib direct) and f4::renderer::draw_symbol_imgui() (ImGui draw
+    // list). Call sites in canvas.cpp use f4::renderer::draw_symbol()
+    // directly; imgui_panels.cpp uses draw_symbol_imgui() via the
+    // f4::viewer::draw_symbol_imgui using alias from symbols.hpp.
 
     // --- Camera transforms (defined in camera.cpp) ---
 
@@ -413,13 +417,23 @@ struct ViewerApp::Impl {
     bool ground_layout_3d_target_valid = false;
     int  ground_layout_3d_target_w = 0;
     int  ground_layout_3d_target_h = 0;
-    Camera3D ground_layout_3d_camera = {};
-    bool ground_layout_3d_camera_inited = false;
-    // Orbit parameters (spherical). position is recomputed each frame
-    // from these + the airfield center.
-    float ground_layout_3d_yaw = 0.6f;        // radians, around +Z (up)
-    float ground_layout_3d_pitch = 0.5f;      // radians, from horizon
-    float ground_layout_3d_distance = 4000.0f; // feet, from center
+
+    // Orbit camera — f4::renderer::OrbitCamera replaces the previous
+    // manual yaw/pitch/distance + Camera3D fields. Configured with
+    // ground-layout-appropriate limits (MIN_DISTANCE=50, MAX_DISTANCE=50000).
+    // The camera is updated via update_from_orbit() and accessed via
+    // camera() for BeginMode3D.
+    f4::renderer::OrbitCamera gl3d_orbit_cam{
+        f4::renderer::OrbitCameraConfig{
+            .min_distance     = 50.0f,
+            .max_distance     = 50000.0f,
+            .initial_yaw      = 34.377f,    // 0.6 rad → ~34°
+            .initial_pitch    = 28.648f,    // 0.5 rad → ~29°
+            .initial_distance = 4000.0f,
+            .orbit_sensitivity = 0.2865f,   // 0.005 rad/px → ~0.29°/px
+            .zoom_speed       = 0.1f
+        }
+    };
     // Airfield center in objective-local ENU feet (set when geometry is built).
     float ground_layout_3d_center_x = 0.0f;
     float ground_layout_3d_center_y = 0.0f;
@@ -462,67 +476,34 @@ struct ViewerApp::Impl {
 
     // --- Mesh cache (one Raylib Mesh per unique KoreaObj parent_index) ---
     //
-    // Mirrors the scenario-player's MeshCacheEntry structure. Built lazily
-    // from draw_ground_layout_3d() the first time a feature with a
-    // previously-unseen vis_type is encountered. Multiple features
-    // sharing the same vis_type (e.g. three hangars of type 169) reuse
-    // one GPU upload.
+    // Uses f4::renderer::MeshEntry (replaces the local MeshEntry3D).
+    // Multiple features sharing the same vis_type (e.g. three hangars
+    // of type 169) reuse one GPU upload.
     //
-    // All entries MUST be unloaded (UnloadMesh / UnloadTexture) before
-    // the GL context goes away — handled by unload_meshes_3d() called
-    // from ~ViewerApp() and run()'s shutdown path.
-    struct MeshEntry3D {
-        ::Mesh mesh = {};
-        int tex_id = -1;  // -1 = untextured, use vertex colors
-    };
-    struct MeshCacheEntry3D {
-        std::vector<MeshEntry3D> meshes;
+    // All entries MUST be unloaded before the GL context goes away —
+    // handled by unload_meshes_3d().
+    struct Gl3dMeshCacheEntry {
+        std::vector<f4::renderer::MeshEntry> meshes;
         bool built = false;
     };
-    std::unordered_map<int, MeshCacheEntry3D> mesh_cache_3d;
+    std::unordered_map<int, Gl3dMeshCacheEntry> mesh_cache_3d;
 
     // --- Texture cache (lazy, shared across meshes by tex_id) -----------
-    struct TexCacheEntry3D {
-        ::Texture2D texture = {};
-        ::Material material = {};
-        bool uploaded = false;
-    };
-    std::unordered_map<int, TexCacheEntry3D> texture_cache_3d;
+    // f4::renderer::TextureCache replaces the local TexCacheEntry3D map.
+    f4::renderer::TextureCache texture_cache_3d;
 
     // --- Lit shader (single directional sun + ambient) -----------------
-    //
-    // Same source as f4-scenario-player's renderer.cpp and f4-models-viewer's
-    // canvas3d.cpp. Compiled lazily on first draw call. If compilation
-    // fails (e.g. headless GL stub), we fall back to the unlit default
-    // material — features still render, just without directional shading.
-    Shader lit_shader_3d = {};
-    bool lit_shader_3d_loaded = false;
-    int lit_shader_3d_dir_loc = -1;
-    int lit_shader_3d_color_loc = -1;
-    int lit_shader_3d_ambient_loc = -1;
+    // f4::renderer::LitShader replaces the manual shader + uniform locs.
+    f4::renderer::LitShader lit_shader_3d;
 
     // --- Cached default material + 1x1 white fallback texture ----------
     //
-    // The lit shader has `if (tex.a < 0.5) discard;` which kills fragments
-    // when the sampled texture alpha is below 0.5. For UTEXTURED meshes
-    // (tex_id < 0), the default material has NO texture bound to
-    // MATERIAL_MAP_DIFFUSE — the GLSL sampler then returns undefined data
-    // (most drivers return (0,0,0,0)), causing the discard to trigger and
-    // the entire mesh to disappear.
-    //
-    // Fix: create a 1x1 opaque-white RGBA texture once, bind it to the
-    // default material's diffuse map. Now `texture0` always samples
-    // (1,1,1,1) for untextured meshes → discard doesn't trigger → the
-    // mesh renders with vertex colors * lighting.
-    //
-    // Textured meshes use the per-tex_id material from texture_cache_3d
-    // (which already has the real texture bound), so they sample the
-    // actual texture as before.
-    //
-    // The default material is also cached (not recreated every frame).
-    // The previous code called LoadMaterialDefault() INSIDE the per-frame
-    // render loop, which leaks GPU memory (Material.maps is RL_CALLOC'd
-    // and never freed without UnloadMaterial).
+    // These are still needed because the per-feature draw loop draws
+    // individual meshes with per-feature model matrices (can't use
+    // f4::renderer::draw_meshes which draws all entries as a batch).
+    // The default material ensures untextured meshes sample (1,1,1,1)
+    // instead of undefined data, which would trigger the lit shader's
+    // `if (tex.a < 0.5) discard;` and hide the mesh.
     Texture2D fallback_white_tex_3d = {};
     bool fallback_white_tex_3d_valid = false;
     Material default_mat_3d = {};
@@ -559,10 +540,6 @@ struct ViewerApp::Impl {
     /// returns false and sets models_3d_error (further calls are no-ops
     /// until models_3d_load_attempted is reset).
     bool ensure_models_3d_loaded();
-    /// Compile the lit shader on first use. Returns true on success.
-    /// Idempotent. Returns false if the shader fails to compile (caller
-    /// should fall back to LoadMaterialDefault()).
-    bool ensure_lit_shader_3d();
     /// Lazily create the 1x1 opaque-white fallback texture + the cached
     /// default material that binds it. Idempotent. The default material
     /// also gets the lit shader assigned (if compiled). Required so that
@@ -571,16 +548,12 @@ struct ViewerApp::Impl {
     /// kills every fragment of every untextured mesh.
     bool ensure_default_material_3d();
     /// Build (or skip if cached) Raylib Mesh objects for one KoreaObj
-    /// model. Requires the GL context. No-op if parent_index < 0 or
-    /// already cached. Sets mesh_cache_3d[parent_index].built = true
-    /// even on failure (so we don't retry every frame).
+    /// model. Uses f4::renderer::build_raylib_meshes + build_mesh_entries.
+    /// No-op if parent_index < 0 or already cached.
     void build_mesh_3d(int parent_index);
-    /// Upload any new textures referenced by built meshes but not yet
-    /// in texture_cache_3d. Called after every build_mesh_3d() batch.
-    void upload_textures_3d();
     /// Free all cached meshes + textures. MUST be called before the GL
     /// context goes away (i.e. before CloseWindow()). Safe to call when
-    /// nothing is cached (no-op). Also clears the lit shader.
+    /// nothing is cached (no-op). Also clears the lit shader + texture cache.
     void unload_meshes_3d();
 };
 

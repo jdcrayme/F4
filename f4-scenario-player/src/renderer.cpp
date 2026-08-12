@@ -19,6 +19,8 @@
 #include <f4/flight/flight_model_component.hpp>
 #include <f4/flight/angle.hpp>
 #include <f4/models/model_database.hpp>
+#include <f4/renderer/draw_3d.hpp>
+#include <f4/renderer/mesh_builder.hpp>
 
 // Now safe to include Raylib (PI macro won't break the flight headers).
 #include <imgui.h>
@@ -29,38 +31,17 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
-#include <cstring>
 #include <string>
 #include <vector>
 
 namespace f4::scenario_player {
 
 // ── Constants ──────────────────────────────────────────────────────────────
-static constexpr float MY_DEG2RAD = 3.14159265358979323846f / 180.0f;
-static constexpr float MIN_PITCH = -89.0f;
-static constexpr float MAX_PITCH =  89.0f;
-static constexpr float MIN_DISTANCE = 1.0f;
-static constexpr float PAN_SPEED = 0.003f;
-
 // Colors
-static constexpr Color GRID_COLOR = {60, 60, 60, 255};
 static constexpr Color SKY_COLOR  = {135, 175, 220, 255};  // sky blue
 static constexpr Color GROUND_COLOR = {50, 70, 35, 255};   // green grass
 
-// ── Camera ─────────────────────────────────────────────────────────────────
-
-void PlayerApp::Impl::update_camera_from_orbit() {
-    const float yaw_rad = cam_yaw * MY_DEG2RAD;
-    const float pitch_rad = cam_pitch * MY_DEG2RAD;
-    const float cx = cam_distance * std::cos(pitch_rad) * std::sin(yaw_rad);
-    const float cy = cam_distance * std::sin(pitch_rad);
-    const float cz = cam_distance * std::cos(pitch_rad) * std::cos(yaw_rad);
-    camera.position = {cam_target.x + cx, cam_target.y + cy, cam_target.z + cz};
-    camera.target = cam_target;
-    camera.up = {0, 1, 0};
-    camera.fovy = 45.0f;
-    camera.projection = CAMERA_PERSPECTIVE;
-}
+// ── Camera (delegated to f4::renderer::OrbitCamera) ────────────────────────
 
 void PlayerApp::Impl::handle_camera_input() {
     const ImGuiIO& io = ImGui::GetIO();
@@ -72,69 +53,8 @@ void PlayerApp::Impl::handle_camera_input() {
             status_msg = paused ? "Paused" : "Running";
         }
     }
-    if (io.WantCaptureMouse) return;
-
-    const Vector2 mouse = GetMousePosition();
-
-    if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
-        if (!orbit_dragging) {
-            orbit_dragging = true;
-            drag_start = mouse;
-            drag_yaw0 = cam_yaw;
-            drag_pitch0 = cam_pitch;
-        } else {
-            const float dx = mouse.x - drag_start.x;
-            const float dy = mouse.y - drag_start.y;
-            cam_yaw = drag_yaw0 - dx * 0.3f;
-            cam_pitch = drag_pitch0 + dy * 0.3f;
-            if (cam_pitch < MIN_PITCH) cam_pitch = MIN_PITCH;
-            if (cam_pitch > MAX_PITCH) cam_pitch = MAX_PITCH;
-            update_camera_from_orbit();
-        }
-    } else {
-        orbit_dragging = false;
-    }
-
-    if (IsMouseButtonDown(MOUSE_BUTTON_RIGHT)) {
-        if (!pan_dragging) {
-            pan_dragging = true;
-            drag_start = mouse;
-            drag_target0 = cam_target;
-        } else {
-            const float dx = mouse.x - drag_start.x;
-            const float dy = mouse.y - drag_start.y;
-            const Vector3 delta = {camera.target.x - camera.position.x,
-                                     camera.target.y - camera.position.y,
-                                     camera.target.z - camera.position.z};
-            const float len = std::sqrt(delta.x*delta.x + delta.y*delta.y + delta.z*delta.z);
-            const Vector3 fwd = {delta.x/len, delta.y/len, delta.z/len};
-            const Vector3 world_up = {0, 1, 0};
-            const Vector3 r = {fwd.y*world_up.z - fwd.z*world_up.y,
-                               fwd.z*world_up.x - fwd.x*world_up.z,
-                               fwd.x*world_up.y - fwd.y*world_up.x};
-            const float rlen = std::sqrt(r.x*r.x + r.y*r.y + r.z*r.z);
-            const Vector3 right = {r.x/rlen, r.y/rlen, r.z/rlen};
-            const Vector3 u = {right.y*fwd.z - right.z*fwd.y,
-                               right.z*fwd.x - right.x*fwd.z,
-                               right.x*fwd.y - right.y*fwd.x};
-            const float ulen = std::sqrt(u.x*u.x + u.y*u.y + u.z*u.z);
-            const Vector3 up = {u.x/ulen, u.y/ulen, u.z/ulen};
-            const float pan_scale = cam_distance * PAN_SPEED;
-            cam_target.x = drag_target0.x - right.x * dx * pan_scale + up.x * dy * pan_scale;
-            cam_target.y = drag_target0.y - right.y * dx * pan_scale + up.y * dy * pan_scale;
-            cam_target.z = drag_target0.z - right.z * dx * pan_scale + up.z * dy * pan_scale;
-            update_camera_from_orbit();
-        }
-    } else {
-        pan_dragging = false;
-    }
-
-    const float wheel = GetMouseWheelMove();
-    if (wheel != 0.0f) {
-        cam_distance *= (1.0f - wheel * 0.1f);
-        if (cam_distance < MIN_DISTANCE) cam_distance = MIN_DISTANCE;
-        update_camera_from_orbit();
-    }
+    // Delegate orbit/pan/zoom to OrbitCamera (guards ImGui::WantCaptureMouse internally).
+    orbit_cam.handle_input();
 }
 
 void PlayerApp::Impl::fit_to_aircraft() {
@@ -142,112 +62,30 @@ void PlayerApp::Impl::fit_to_aircraft() {
     auto h = f4::entities::EntityHandle(sim->aircraft_entity(), &sim->world());
     auto* tf = h.get<f4::entities::TransformComponent>();
     if (!tf) return;
-    cam_target = enu_to_raylib_v3(tf->position.x, tf->position.y, tf->position.z);
-    cam_distance = 80.0f;  // close enough to see the F-16 in detail
-    update_camera_from_orbit();
+    const Vector3 target = enu_to_raylib_v3(tf->position.x, tf->position.y, tf->position.z);
+    orbit_cam.set_target(target);
+    orbit_cam.set_distance(80.0f);  // close enough to see the F-16 in detail
+    orbit_cam.update_from_orbit();
 }
 
 void PlayerApp::Impl::reset_camera() {
-    cam_yaw = 45.0f;
-    cam_pitch = 25.0f;
+    orbit_cam.reset();
     // Default target: the parking spot (scenario aircraft's spawn position).
     if (sim_initialized && !scenario.aircraft.empty()) {
         const auto& p = scenario.aircraft.front().parking_spot;
-        cam_target = enu_to_raylib_v3(p.x, p.y, p.z);
-    } else {
-        cam_target = {0, 0, 0};
+        orbit_cam.set_target(enu_to_raylib_v3(p.x, p.y, p.z));
     }
-    cam_distance = 250.0f;
-    update_camera_from_orbit();
+    orbit_cam.update_from_orbit();
 }
 
-// ── Lit shader (same source as f4-models-viewer's canvas3d.cpp) ────────────
-// Forward-declared here so we can lazily compile it on first draw_scene().
+// ── Lit shader (delegated to f4::renderer::LitShader) ────────────────────
+// No more inline GLSL source or manual LoadShaderFromMemory here.
+// LitShader::ensure() compiles lazily on first call; set_lighting() sets
+// uniforms per-frame.
 
-static const char* kLitShaderVS =
-    "#version 330\n"
-    "in vec3 vertexPosition;\n"
-    "in vec2 vertexTexCoord;\n"
-    "in vec4 vertexColor;\n"
-    "in vec3 vertexNormal;\n"
-    "uniform mat4 mvp;\n"
-    "uniform mat4 matModel;\n"
-    "out vec2 fragTexCoord;\n"
-    "out vec4 fragColor;\n"
-    "out vec3 fragNormal;\n"
-    "void main() {\n"
-    "    fragTexCoord = vertexTexCoord;\n"
-    "    fragColor = vertexColor;\n"
-    "    fragNormal = normalize(mat3(matModel) * vertexNormal);\n"
-    "    gl_Position = mvp * vec4(vertexPosition, 1.0);\n"
-    "}\n";
-
-static const char* kLitShaderFS =
-    "#version 330\n"
-    "in vec2 fragTexCoord;\n"
-    "in vec4 fragColor;\n"
-    "in vec3 fragNormal;\n"
-    "uniform sampler2D texture0;\n"
-    "uniform vec4 colDiffuse;\n"
-    "uniform vec3 lightDir;\n"
-    "uniform vec4 lightColor;\n"
-    "uniform vec4 ambient;\n"
-    "out vec4 finalColor;\n"
-    "void main() {\n"
-    "    vec4 tex = texture(texture0, fragTexCoord);\n"
-    "    if (tex.a < 0.5) discard;\n"
-    "    vec3 N = normalize(fragNormal);\n"
-    "    vec3 L = normalize(lightDir);\n"
-    "    float NdotL = max(dot(N, L), 0.0);\n"
-    "    vec4 light = ambient + lightColor * NdotL;\n"
-    "    finalColor = tex * colDiffuse * fragColor * light;\n"
-    "}\n";
-
-bool PlayerApp::Impl::ensure_lit_shader() {
-    if (lit_shader_loaded) return lit_shader.id != 0;
-    lit_shader = LoadShaderFromMemory(kLitShaderVS, kLitShaderFS);
-    lit_shader_loaded = true;
-    if (lit_shader.id == 0) {
-        status_msg = "warning: lit shader failed to compile (falling back to unlit)";
-        return false;
-    }
-    lit_shader_dir_loc     = GetShaderLocation(lit_shader, "lightDir");
-    lit_shader_color_loc   = GetShaderLocation(lit_shader, "lightColor");
-    lit_shader_ambient_loc = GetShaderLocation(lit_shader, "ambient");
-    return true;
-}
-
-// ── Mesh building ──────────────────────────────────────────────────────────
-// Reuses f4-models-viewer's scene.cpp logic in simplified form: convert
-// each f4::models::Mesh to a Raylib ::Mesh, resolving vertex colors
-// through the ColorBank (Prim.rgba is an index, NOT packed ABGR).
-
-static Color resolve_vertex_color(uint32_t color_index,
-                                  const f4::models::ColorBank& color_bank,
-                                  bool mesh_is_textured) noexcept {
-    if (color_index == 0) {
-        return mesh_is_textured ? Color{255, 255, 255, 255}
-                                : Color{180, 180, 180, 255};
-    }
-    if (color_index < 4096) {
-        const int idx = static_cast<int>(color_index);
-        const uint32_t rgba = color_bank.rgba_at(idx);
-        if (rgba != 0) {
-            return Color{
-                static_cast<unsigned char>((rgba >> 24) & 0xFF),
-                static_cast<unsigned char>((rgba >> 16) & 0xFF),
-                static_cast<unsigned char>((rgba >> 8)  & 0xFF),
-                static_cast<unsigned char>(rgba & 0xFF)
-            };
-        }
-    }
-    return Color{
-        static_cast<unsigned char>(color_index & 0xFF),
-        static_cast<unsigned char>((color_index >> 8) & 0xFF),
-        static_cast<unsigned char>((color_index >> 16) & 0xFF),
-        static_cast<unsigned char>((color_index >> 24) & 0xFF)
-    };
-}
+// ── Mesh building (delegated to f4::renderer::build_raylib_meshes) ────────
+// The manual per-vertex conversion loop and resolve_vertex_color() have
+// been consolidated into f4-renderer's mesh_builder.cpp.
 
 void PlayerApp::Impl::build_aircraft_meshes() {
     // Phase 2A: this is now a thin wrapper that ensures the aircraft's
@@ -329,61 +167,12 @@ void PlayerApp::Impl::build_mesh_for_model(int parent_index) {
 
     const auto& cb = db.color_bank();
 
+    // Delegate mesh construction to f4-renderer.
+    auto raylib_meshes = f4::renderer::build_raylib_meshes(geom, cb);
+    auto mesh_entries = f4::renderer::build_mesh_entries(geom, raylib_meshes);
+
     MeshCacheEntry entry;
-    entry.meshes.reserve(geom.meshes.size());
-    for (const auto& src : geom.meshes) {
-        if (src.vertices.empty()) continue;
-        if (src.kind == f4::models::PrimitiveKind::Triangles && src.triangles.empty()) continue;
-
-        const bool mesh_is_textured = (src.tex_id >= 0);
-        const int vert_count = static_cast<int>(src.vertices.size());
-        const int tri_count = static_cast<int>(src.triangles.size());
-
-        ::Mesh rm = {};
-        rm.vertexCount = vert_count;
-        rm.triangleCount = tri_count;
-        rm.vertices = static_cast<float*>(RL_MALLOC(vert_count * 3 * sizeof(float)));
-        rm.normals  = static_cast<float*>(RL_MALLOC(vert_count * 3 * sizeof(float)));
-        rm.texcoords = static_cast<float*>(RL_MALLOC(vert_count * 2 * sizeof(float)));
-        rm.colors   = static_cast<unsigned char*>(RL_MALLOC(vert_count * 4 * sizeof(unsigned char)));
-        if (tri_count > 0) {
-            rm.indices = static_cast<unsigned short*>(RL_MALLOC(tri_count * 3 * sizeof(unsigned short)));
-        }
-
-        for (int i = 0; i < vert_count; ++i) {
-            const auto& v = src.vertices[static_cast<std::size_t>(i)];
-            const Vector3 pos = model_vertex_to_raylib_v3(v.position.x, v.position.y, v.position.z);
-            rm.vertices[i*3+0] = pos.x;
-            rm.vertices[i*3+1] = pos.y;
-            rm.vertices[i*3+2] = pos.z;
-            const Vector3 nrm = model_vertex_to_raylib_v3(v.normal.x, v.normal.y, v.normal.z);
-            rm.normals[i*3+0] = nrm.x;
-            rm.normals[i*3+1] = nrm.y;
-            rm.normals[i*3+2] = nrm.z;
-            rm.texcoords[i*2+0] = v.uv.u;
-            rm.texcoords[i*2+1] = v.uv.v;
-            const Color c = resolve_vertex_color(v.color, cb, mesh_is_textured);
-            rm.colors[i*4+0] = c.r;
-            rm.colors[i*4+1] = c.g;
-            rm.colors[i*4+2] = c.b;
-            rm.colors[i*4+3] = c.a;
-        }
-        if (tri_count > 0) {
-            for (int i = 0; i < tri_count; ++i) {
-                const auto& tri = src.triangles[static_cast<std::size_t>(i)];
-                rm.indices[i*3+0] = static_cast<unsigned short>(tri.v0);
-                rm.indices[i*3+1] = static_cast<unsigned short>(tri.v1);
-                rm.indices[i*3+2] = static_cast<unsigned short>(tri.v2);
-            }
-        }
-        UploadMesh(&rm, false);
-
-        MeshEntry me;
-        me.mesh = rm;
-        me.tex_id = src.tex_id;
-        entry.meshes.push_back(me);
-    }
-
+    entry.meshes = std::move(mesh_entries);
     entry.built = true;
     mesh_cache[parent_index] = std::move(entry);
 
@@ -395,68 +184,28 @@ void PlayerApp::Impl::upload_textures() {
     if (!sim_initialized) return;
     auto& db = const_cast<f4::models::ModelDatabase&>(sim->model_db());
 
-    // Phase 2A: walk every cached mesh entry across all models. The
-    // texture_cache keys by tex_id, so shared textures across models are
-    // only uploaded once.
-    for (auto& [parent_idx, cache_entry] : mesh_cache) {
-        for (auto& me : cache_entry.meshes) {
-            if (me.tex_id < 0) continue;
-            if (texture_cache.count(me.tex_id)) continue;
-
-            const auto* decoded = db.fetch_texture(me.tex_id);
-            if (!decoded || !decoded->valid()) {
-                TexCacheEntry ce; ce.uploaded = false;
-                texture_cache[me.tex_id] = ce;
-                continue;
-            }
-
-            Image img = {};
-            img.data = RL_MALLOC(decoded->width * decoded->height * 4);
-            if (!img.data) {
-                TexCacheEntry ce; ce.uploaded = false;
-                texture_cache[me.tex_id] = ce;
-                continue;
-            }
-            std::memcpy(img.data, decoded->rgba.data(),
-                        static_cast<std::size_t>(decoded->width * decoded->height * 4));
-            img.width = decoded->width;
-            img.height = decoded->height;
-            img.mipmaps = 1;
-            img.format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8;
-
-            Texture2D tex = LoadTextureFromImage(img);
-            Material mat = LoadMaterialDefault();
-            mat.maps[MATERIAL_MAP_DIFFUSE].texture = tex;
-            mat.maps[MATERIAL_MAP_DIFFUSE].color = WHITE;
-
-            TexCacheEntry ce;
-            ce.texture = tex;
-            ce.material = mat;
-            ce.has_alpha = decoded->has_alpha;
-            ce.uploaded = true;
-            texture_cache[me.tex_id] = ce;
-            UnloadImage(img);
+    // Collect all tex_ids from every cached mesh entry.
+    std::vector<int> tex_ids;
+    for (const auto& [parent_idx, cache_entry] : mesh_cache) {
+        for (const auto& me : cache_entry.meshes) {
+            if (me.tex_id >= 0) tex_ids.push_back(me.tex_id);
         }
     }
-}
 
-void PlayerApp::Impl::unload_textures() {
-    for (auto& [id, ce] : texture_cache) {
-        if (ce.uploaded) {
-            UnloadTexture(ce.texture);
-            ce.material.maps[MATERIAL_MAP_DIFFUSE].texture = {};
-        }
-    }
-    texture_cache.clear();
+    // Delegate to f4-renderer's TextureCache.
+    texture_cache.upload(db, tex_ids);
 }
 
 void PlayerApp::Impl::unload_meshes() {
-    unload_textures();
+    texture_cache.unload_all();
     // Phase 2A: walk every model in the mesh cache.
     for (auto& [parent_idx, cache_entry] : mesh_cache) {
+        std::vector<::Mesh> meshes;
+        meshes.reserve(cache_entry.meshes.size());
         for (auto& me : cache_entry.meshes) {
-            UnloadMesh(me.mesh);
+            meshes.push_back(me.mesh);
         }
+        f4::renderer::unload_meshes(meshes);
         cache_entry.meshes.clear();
         cache_entry.built = false;
     }
@@ -465,14 +214,8 @@ void PlayerApp::Impl::unload_meshes() {
 }
 
 // ── draw_scene ─────────────────────────────────────────────────────────────
-
-static void draw_grid_enu(float extent, float step) {
-    // Grid on the Y=0 plane (Raylib up). Each line is one row/col of the grid.
-    for (float i = -extent; i <= extent; i += step) {
-        DrawLine3D({i, 0, -extent}, {i, 0, extent}, GRID_COLOR);
-        DrawLine3D({-extent, 0, i}, {extent, 0, i}, GRID_COLOR);
-    }
-}
+// Grid and axes drawing delegated to f4::renderer::draw_grid() and
+// f4::renderer::draw_axes().
 
 // Helper: convert an ENU WorldPosition to a Raylib Vector3.
 static inline Vector3 to_rh(const f4::geo::WorldPosition& p) {
@@ -578,40 +321,9 @@ void PlayerApp::Impl::draw_visual_entities() {
 
     // Set up lighting once per frame (shared across all entities).
     bool lighting_active = false;
-    Vector3 light_dir = light_direction;
-    const float dlen = std::sqrt(light_dir.x*light_dir.x +
-                                  light_dir.y*light_dir.y +
-                                  light_dir.z*light_dir.z);
-    if (dlen > 0.0001f) {
-        light_dir.x /= dlen; light_dir.y /= dlen; light_dir.z /= dlen;
-    } else {
-        light_dir = {0.5f, -1.0f, 0.3f};
-    }
-
-    if (ensure_lit_shader()) {
+    if (lit_shader.ensure(&status_msg)) {
         lighting_active = true;
-        if (lit_shader_dir_loc >= 0) {
-            const float dir[3] = { light_dir.x, light_dir.y, light_dir.z };
-            SetShaderValue(lit_shader, lit_shader_dir_loc, dir, SHADER_UNIFORM_VEC3);
-        }
-        if (lit_shader_color_loc >= 0) {
-            const float col[4] = {
-                light_color.r / 255.0f * light_intensity,
-                light_color.g / 255.0f * light_intensity,
-                light_color.b / 255.0f * light_intensity,
-                light_color.a / 255.0f
-            };
-            SetShaderValue(lit_shader, lit_shader_color_loc, col, SHADER_UNIFORM_VEC4);
-        }
-        if (lit_shader_ambient_loc >= 0) {
-            const float amb[4] = {
-                ambient_color.r / 255.0f,
-                ambient_color.g / 255.0f,
-                ambient_color.b / 255.0f,
-                ambient_color.a / 255.0f
-            };
-            SetShaderValue(lit_shader, lit_shader_ambient_loc, amb, SHADER_UNIFORM_VEC4);
-        }
+        lit_shader.set_lighting(light_direction, light_color, light_intensity, ambient_color);
     }
 
     // CRITICAL: Disable backface culling (same as f4-models-viewer).
@@ -621,7 +333,7 @@ void PlayerApp::Impl::draw_visual_entities() {
 
     Material default_mat = LoadMaterialDefault();
     default_mat.maps[MATERIAL_MAP_DIFFUSE].color = WHITE;
-    if (lighting_active) default_mat.shader = lit_shader;
+    if (lighting_active) default_mat.shader = lit_shader.shader();
 
     // Determine which entity is the "primary aircraft" so we can apply the
     // show_aircraft toggle only to it (features are gated by show_airport).
@@ -685,11 +397,11 @@ void PlayerApp::Impl::draw_visual_entities() {
             if (me.mesh.triangleCount <= 0) continue;
             const Material* mat_to_use = &default_mat;
             if (me.tex_id >= 0) {
-                auto tex_it = texture_cache.find(me.tex_id);
-                if (tex_it != texture_cache.end() && tex_it->second.uploaded) {
-                    mat_to_use = &tex_it->second.material;
+                auto* tex_entry = texture_cache.lookup(me.tex_id);
+                if (tex_entry && tex_entry->uploaded) {
+                    mat_to_use = &tex_entry->material;
                     if (lighting_active) {
-                        const_cast<Material*>(mat_to_use)->shader = lit_shader;
+                        const_cast<Material*>(mat_to_use)->shader = lit_shader.shader();
                     }
                 }
             }
@@ -782,13 +494,13 @@ void PlayerApp::Impl::draw_scene() {
     // Background sky + ground
     ClearBackground(SKY_COLOR);
 
-    BeginMode3D(camera);
+    BeginMode3D(orbit_cam.camera());
 
     // Ground plane (a big green quad at Y=0)
     DrawPlane({0, 0, 0}, {8000, 8000}, GROUND_COLOR);
 
     if (show_grid) {
-        draw_grid_enu(2000.0f, 100.0f);
+        f4::renderer::draw_grid(2000.0f, 100.0f);
     }
 
     if (show_axes) {
@@ -798,6 +510,9 @@ void PlayerApp::Impl::draw_scene() {
             const auto& p = scenario.aircraft.front().parking_spot;
             origin = enu_to_raylib_v3(p.x, p.y, p.z);
         }
+        // Draw translated axes: move to origin, draw, then move back.
+        // f4::renderer::draw_axes() draws at the world origin, so we
+        // use DrawLine3D with offset for now (preserving original behavior).
         DrawLine3D(origin, {origin.x + 50, origin.y, origin.z}, RED);
         DrawLine3D(origin, {origin.x, origin.y + 50, origin.z}, GREEN);
         DrawLine3D(origin, {origin.x, origin.y, origin.z + 50}, BLUE);

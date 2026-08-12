@@ -158,7 +158,6 @@ set(TINYFILEDIALOGS_SOURCES
 # ============================================================================
 add_library(f4_world_viewer STATIC
     src/viewer_app.cpp
-    src/symbols.cpp
     src/camera.cpp
     src/file_ops.cpp
     src/install_flow.cpp
@@ -201,6 +200,7 @@ target_link_libraries(f4_world_viewer PUBLIC
     f4-install
     f4-models
     f4-json
+    f4-renderer
 )
 target_link_libraries(f4_world_viewer PRIVATE raylib)
 # tinyfiledialogs needs to be compiled as C (it's a .c file). Set the

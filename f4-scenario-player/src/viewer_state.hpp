@@ -8,7 +8,11 @@
 
 #include "f4/scenario_player/player_app.hpp"
 #include "f4/scenario_player/airport_geometry.hpp"
-#include "f4/scenario_player/coordinate_transform.hpp"  // Float3, enu_to_raylib, model_vertex_to_raylib
+#include <f4/renderer/coord_transform.hpp>       // Float3, enu_to_raylib, model_vertex_to_raylib
+#include <f4/renderer/orbit_camera.hpp>          // OrbitCamera
+#include <f4/renderer/lit_shader.hpp>            // LitShader
+#include <f4/renderer/mesh_builder.hpp>          // MeshEntry
+#include <f4/renderer/texture_cache.hpp>         // TextureCache
 
 #include <f4/simulation/simulation.hpp>
 #include <f4/simulation/scenario.hpp>
@@ -33,17 +37,17 @@
 namespace f4::scenario_player {
 
 // ── Coordinate conversion (Raylib-typed wrappers) ─────────────────────────
-// These wrap the engine-agnostic functions from coordinate_transform.hpp
-// to return Raylib's Vector3 type. The math is in the public header so
+// These wrap the engine-agnostic functions from f4::renderer::coord_transform
+// to return Raylib's Vector3 type. The math is in the f4-renderer header so
 // unit tests can verify it without depending on Raylib.
 
 inline Vector3 enu_to_raylib_v3(double east_ft, double north_ft, double up_ft) noexcept {
-    const auto v = enu_to_raylib(east_ft, north_ft, up_ft);
+    const auto v = f4::renderer::enu_to_raylib(east_ft, north_ft, up_ft);
     return Vector3{v.x, v.y, v.z};
 }
 
 inline Vector3 model_vertex_to_raylib_v3(float x, float y, float z) noexcept {
-    const auto v = model_vertex_to_raylib(x, y, z);
+    const auto v = f4::renderer::model_vertex_to_raylib(x, y, z);
     return Vector3{v.x, v.y, v.z};
 }
 
@@ -64,18 +68,19 @@ struct PlayerApp::Impl {
     AirportGeometry airport;
     bool airport_built = false;
 
-    // ── Orbit camera (ENU feet) ───────────────────────────────────────
-    Camera3D camera = {};
-    float cam_yaw = 45.0f;          // degrees
-    float cam_pitch = 25.0f;        // degrees
-    float cam_distance = 250.0f;    // feet (larger than model viewer — we have a runway)
-    Vector3 cam_target = {0, 0, 0}; // Raylib coords
-    bool orbit_dragging = false;
-    bool pan_dragging = false;
-    Vector2 drag_start = {0, 0};
-    float drag_yaw0 = 0;
-    float drag_pitch0 = 0;
-    Vector3 drag_target0 = {};
+    // ── Orbit camera (delegated to f4::renderer::OrbitCamera) ────────
+    f4::renderer::OrbitCamera orbit_cam{
+        f4::renderer::OrbitCameraConfig{
+            .min_distance     = 1.0f,
+            .max_distance     = 100000.f,
+            .initial_yaw      = 45.0f,
+            .initial_pitch    = 25.0f,
+            .initial_distance = 250.0f,  // feet (larger than model viewer — we have a runway)
+            .orbit_sensitivity = 0.3f,
+            .pan_speed        = 0.003f,
+            .zoom_speed       = 0.1f,
+        }
+    };
     bool initial_camera_set = false;
 
     // ── Visual-entity mesh cache (Phase 2A) ───────────────────────────
@@ -86,12 +91,9 @@ struct PlayerApp::Impl {
     // Built lazily from draw_visual_entities() the first time an entity
     // with a previously-unseen parent_index is encountered. Requires the
     // GL context (UploadMesh), so the first build happens inside run().
-    struct MeshEntry {
-        ::Mesh mesh = {};
-        int tex_id = -1;  // -1 = no texture, use vertex colors
-    };
+    // Uses f4::renderer::MeshEntry from f4-renderer.
     struct MeshCacheEntry {
-        std::vector<MeshEntry> meshes;
+        std::vector<f4::renderer::MeshEntry> meshes;
         bool built = false;
     };
     std::unordered_map<int, MeshCacheEntry> mesh_cache;  // key = parent_index
@@ -101,21 +103,11 @@ struct PlayerApp::Impl {
     /// mesh_cache entry for the aircraft's vis_type_index (built lazily).
     bool meshes_built = false;
 
-    // ── Texture cache (lazy, like f4-models-viewer) ───────────────────
-    struct TexCacheEntry {
-        ::Texture2D texture = {};
-        ::Material material = {};
-        bool has_alpha = false;
-        bool uploaded = false;
-    };
-    std::unordered_map<int, TexCacheEntry> texture_cache;
+    // ── Texture cache (delegated to f4::renderer::TextureCache) ──────
+    f4::renderer::TextureCache texture_cache;
 
-    // ── Lit shader (same source as f4-models-viewer) ──────────────────
-    Shader lit_shader = {};
-    bool lit_shader_loaded = false;
-    int lit_shader_dir_loc = -1;
-    int lit_shader_color_loc = -1;
-    int lit_shader_ambient_loc = -1;
+    // ── Lit shader (delegated to f4::renderer::LitShader) ────────────
+    f4::renderer::LitShader lit_shader;
 
     // ── Lighting (single directional sun + ambient) ───────────────────
     Vector3 light_direction = { 0.65f, -1.0f, 0.35f };  // points from scene toward sun
@@ -139,7 +131,6 @@ struct PlayerApp::Impl {
     std::filesystem::path screenshot_path;
 
     // ── Functions (defined in other .cpp files) ───────────────────────
-    void update_camera_from_orbit();
     void handle_camera_input();
     void fit_to_aircraft();
     void reset_camera();
@@ -148,8 +139,6 @@ struct PlayerApp::Impl {
     void build_mesh_for_model(int parent_index);  // Phase 2A: lazy mesh build
     void upload_textures();
     void unload_meshes();
-    void unload_textures();
-    bool ensure_lit_shader();
 
     void draw_scene();
     void draw_airport();
