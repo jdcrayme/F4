@@ -591,15 +591,148 @@ void ViewerApp::draw_canvas() {
             const Vector2 origin = impl_->world_to_screen(ox, oy);
             const float px_per_ft = impl_->cam_zoom / FT_PER_GRID;
             bool worth_drawing = false;
+
+            // --- Feature 3D mesh overlay (selected objective only) ------
+            //
+            // Renders real KoreaObj BSP models at each feature's offset,
+            // using a top-down orthographic Camera3D that exactly matches
+            // the 2D world_to_screen transform so the 3D meshes land on
+            // the same screen pixels as the 2D dots above.
+            //
+            // The mesh cache + texture cache + lit shader + default
+            // material are shared with the 3D Ground Layout panel — a
+            // feature rendered once in either view is cached for the other.
+            //
+            // Camera math:
+            //   - 2D world_to_screen: screen_x = W/2 + (grid_x - cam_x) * zoom
+            //                        screen_y = H/2 - (grid_y - cam_y) * zoom
+            //     where grid = feet/1024.
+            //   - For the 3D mesh to land at the same pixel, we need an
+            //     orthographic Camera3D looking straight down with:
+            //       * position = raylib(cam_east_ft, ALT_FT, -cam_north_ft)
+            //         where cam_east_ft = cam_x * 1024, cam_north_ft = cam_y * 1024,
+            //         and ALT_FT is high enough to clear any reasonable feature
+            //         but well under the 100,000-ft far clip patched in
+            //         f4-world-viewer/CMakeLists.txt (see GLV3D-DIAG-2 worklog).
+            //       * target = raylib(cam_east_ft, 0, -cam_north_ft)  [ground]
+            //       * up = (0, 0, -1)  so screen-up = world -Z = ENU +Y (north)
+            //       * fovy = visible_height_ft = (window_h / cam_zoom) * 1024
+            //         (Raylib's ortho uses fovy as the vertical world extent)
+            //       * projection = CAMERA_ORTHOGRAPHIC
+            //   - Then an ENU point (east, north, alt) → raylib (east, alt, -north)
+            //     → projects to screen (W/2 + (east/1024 - cam_x)*zoom,
+            //                            H/2 - (north/1024 - cam_y)*zoom),
+            //     which exactly matches the 2D dot position. ✓
+            //
+            // We only render models when the user has explicitly toggled
+            // them on (show_feature_meshes) AND the KoreaObj model DB +
+            // FALCON4.ct class table are loaded. Otherwise the 2D dots
+            // above still serve as a feature placement indicator.
+            const bool draw_meshes = impl_->show_feature_meshes &&
+                impl_->models_3d_loaded &&
+                impl_->model_db_3d.has_value() &&
+                impl_->class_table_3d.loaded() &&
+                impl_->ensure_default_material_3d();
+            if (draw_meshes) {
+                // Build the top-down ortho camera matching the 2D canvas.
+                const float cam_east_ft  = impl_->cam_x * FT_PER_GRID;
+                const float cam_north_ft = impl_->cam_y * FT_PER_GRID;
+                // Visible world height in feet = (visible grid height) * 1024.
+                // Visible grid height = window_h / cam_zoom.
+                const float visible_h_ft =
+                    (static_cast<float>(impl_->window_h) / impl_->cam_zoom) * FT_PER_GRID;
+                // Camera altitude: pick a value that comfortably clears any
+                // realistic feature (tallest KoreaObj features are < 200 ft)
+                // while staying well within the 100,000-ft far clip. We use
+                // a fixed 5000 ft so the camera frustum's depth range
+                // (5000-ε .. 5000+ε for a flat ground plane at y=0) sits
+                // safely inside near=0.01..far=100000.
+                constexpr float CAM_ALT_FT = 5000.0f;
+
+                Camera3D cam3d = {};
+                cam3d.position   = { cam_east_ft,  CAM_ALT_FT, -cam_north_ft };
+                cam3d.target     = { cam_east_ft,         0.0f, -cam_north_ft };
+                cam3d.up         = { 0.0f, 0.0f, -1.0f };
+                cam3d.fovy       = visible_h_ft;
+                cam3d.projection = CAMERA_ORTHOGRAPHIC;
+
+                BeginMode3D(cam3d);
+                {
+                    // Build the resource bundle once for the whole feature loop.
+                    // Pointer-aliases into Impl's lazy-loaded state — same
+                    // objects reused by draw_ground_layout_3d() so the mesh
+                    // cache + texture cache are shared.
+                    f4::renderer::FeatureMeshResources res{};
+                    res.model_db         = &*impl_->model_db_3d;
+                    res.class_table      = &impl_->class_table_3d;
+                    res.texture_cache    = &impl_->texture_cache_3d;
+                    res.lit_shader       = &impl_->lit_shader_3d;
+                    res.mesh_cache       = &impl_->mesh_cache_3d;
+                    res.default_material = &impl_->default_mat_3d;
+                    res.light_direction  = impl_->light_3d_direction;
+                    res.light_color      = impl_->light_3d_color;
+                    res.light_intensity  = impl_->light_3d_intensity;
+                    res.ambient_color    = impl_->ambient_3d_color;
+
+                    // Objective world position (ENU feet). Feature offsets
+                    // are RELATIVE to this — we add them per-feature below.
+                    const float obj_east_ft  = static_cast<float>(tr->position.x);
+                    const float obj_north_ft = static_cast<float>(tr->position.y);
+
+                    // FeatureEntryState.index is a 0-based descriptionIndex
+                    // into the class table. ClassTable::vis_type_for() takes
+                    // entity_type = descriptionIndex + VU_LAST_ENTITY_TYPE (=100).
+                    // See ground_layout_3d.cpp's feature loop and
+                    // f4-renderer/src/feature_mesh.cpp for the historical
+                    // "rendered as B-52" bug this convention avoided.
+                    constexpr uint16_t VU_LAST_ENTITY_TYPE = 100;
+
+                    for (const auto& feature : fe->features) {
+                        // Skip empty placeholder features (the bridge emits
+                        // these when the FED entry is unused).
+                        if (feature.index == 0 &&
+                            feature.offset_x == 0.0f &&
+                            feature.offset_y == 0.0f) {
+                            continue;
+                        }
+
+                        const uint16_t entity_type = static_cast<uint16_t>(
+                            VU_LAST_ENTITY_TYPE +
+                            static_cast<uint16_t>(feature.index));
+
+                        // Feature world position = objective world + feature
+                        // offset (FeatureEntryState.offset_{x,y,z} are in
+                        // feet relative to the objective center).
+                        const float feat_east_ft  =
+                            obj_east_ft  + feature.offset_x;
+                        const float feat_north_ft =
+                            obj_north_ft + feature.offset_y;
+                        const float feat_up_ft    = feature.offset_z;
+
+                        f4::renderer::draw_feature_mesh(
+                            res, entity_type,
+                            feat_east_ft, feat_north_ft, feat_up_ft,
+                            static_cast<float>(feature.facing));
+                    }
+                }
+                EndMode3D();
+            }
+
+            const int font_size = 10;
+            const Color shadow = { 0, 0, 0, 200 };
+            const Color text = { 235, 235, 235, 230 };
+            auto draw_text = [&](const char* buf, float px, float py, Color c) {
+                DrawText(buf, px + 1, py + 1, font_size, shadow);
+                DrawText(buf, px, py, font_size, c);
+                };
+
             for (const auto& feature : fe->features) {
-                Color stroke; 
+                Color stroke;
                 stroke = Color{ 180,  180, 220, 230 };
                 const float px = origin.x + feature.offset_x * px_per_ft;
                 const float py = origin.y - feature.offset_y * px_per_ft;
                 DrawCircleV({ px, py }, 3.0f, stroke);
-
-                //<Draw feature mesh here>
-
+                draw_text(feature.name.c_str(), px, py, text);
             }
         }
     }

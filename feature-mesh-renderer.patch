@@ -1,0 +1,1211 @@
+diff --git a/f4-renderer/CMakeLists.txt b/f4-renderer/CMakeLists.txt
+index 86d38a5..80664f3 100644
+--- a/f4-renderer/CMakeLists.txt
++++ b/f4-renderer/CMakeLists.txt
+@@ -17,11 +17,16 @@ set(CMAKE_CXX_EXTENSIONS OFF)
+ #   mesh_builder     — ModelGeometry → Raylib ::Mesh conversion
+ #   texture_cache    — GPU texture upload/cache
+ #   draw_3d          — opaque/alpha sort + DrawMesh loop
++#   feature_mesh     — entity_type → vis_type → mesh → DrawMesh (used by
++#                     the 2D canvas and the 3D ground-layout panel to draw
++#                     real KoreaObj feature models at FeatureEntryState
++#                     offsets)
+ #   symbols          — procedural MIL-STD-2525-style symbol drawing
+ #
+ # Dependencies:
+ #   PUBLIC:  f4-models (for ModelGeometry, ColorBank, ModelDatabase types)
+ #            f4-entities (for UnitClass used by symbols)
++#            f4-world-convert (for ClassTable used by feature_mesh)
+ #            raylib (public headers include <raylib.h>, <raymath.h>)
+ #   PRIVATE: imgui (for symbols ImGui draw-list path + orbit_camera input guard)
+ # ============================================================================
+@@ -72,6 +77,7 @@ add_library(f4-renderer STATIC
+     src/mesh_builder.cpp
+     src/texture_cache.cpp
+     src/draw_3d.cpp
++    src/feature_mesh.cpp
+     src/symbols.cpp
+ )
+ target_link_libraries(f4-renderer PUBLIC f4_warnings)
+@@ -88,6 +94,7 @@ target_link_libraries(f4-renderer
+     PUBLIC
+         f4-models
+         f4-entities
++        f4-world-convert
+         raylib
+ )
+ 
+diff --git a/f4-renderer/include/f4/renderer/feature_mesh.hpp b/f4-renderer/include/f4/renderer/feature_mesh.hpp
+new file mode 100644
+index 0000000..b46356e
+--- /dev/null
++++ b/f4-renderer/include/f4/renderer/feature_mesh.hpp
+@@ -0,0 +1,155 @@
++// f4-renderer/include/f4/renderer/feature_mesh.hpp
++//
++// Feature mesh rendering — resolves a class table entity_type → vis_type →
++// KoreaObj BSP model → Raylib Mesh, then DrawMesh-es it at a given ENU
++// position with a given facing. Caches the mesh per vis_type and the
++// textures per tex_id so multiple features of the same type reuse one
++// GPU upload.
++//
++// This is the single source of truth for the feature → mesh pipeline.
++// The 2D world-viewer canvas and the 3D Ground Layout panel both call
++// draw_feature_mesh() to render real KoreaObj feature models at
++// FeatureEntryState offsets — replacing the previous duplicate
++// implementations in canvas.cpp (placeholder) and ground_layout_3d.cpp
++// (inline).
++//
++// IMPORTANT: draw_feature_mesh() must be called inside a
++// BeginMode3D/EndMode3D block. The caller is responsible for setting up
++// the camera — typically:
++//   - For the 3D panel: an orbit Camera3D positioned by OrbitCamera.
++//   - For the 2D canvas: a top-down orthographic Camera3D that matches
++//     the 2D world_to_screen transform (see canvas.cpp's feature pass
++//     for the exact camera setup).
++//
++// Coordinate conventions:
++//   - Position is ENU feet (East-North-Up), the simulation's native
++//     frame. We convert to Raylib RH Y-up internally via enu_to_raylib().
++//   - Facing is degrees of rotation around the vertical (ENU +Z, Raylib +Y)
++//     axis. Sign matches the existing footprint code (positive = clockwise
++//     when viewed from above).
++//   - The class_table_index is an entity_type (descriptionIndex + 100,
++//     where descriptionIndex is what FeatureEntryState.index stores).
++//     We add 100 internally? NO — we expect the caller to pass entity_type
++//     directly. This is the same convention as ClassTable::vis_type_for().
++
++#pragma once
++
++#include <f4/renderer/draw_3d.hpp>      // DrawStats
++#include <f4/renderer/lit_shader.hpp>
++#include <f4/renderer/mesh_builder.hpp>  // MeshEntry
++#include <f4/renderer/texture_cache.hpp>
++
++#include <f4/models/model_database.hpp>
++#include <f4/world_convert/class_table.hpp>
++
++#include <raylib.h>
++// Undef raylib macros that pollute the namespace
++#undef PI
++#undef DEG2RAD
++#undef RAD2DEG
++
++#include <cstdint>
++#include <unordered_map>
++#include <vector>
++
++namespace f4::renderer {
++
++/// One entry in the per-vis_type mesh cache. Multiple features with the
++/// same vis_type share one entry (one GPU upload per KoreaObj model).
++///
++/// The `built` flag is set to true even on failure so we don't retry
++/// every frame (a model that fails to parse will stay failing).
++struct FeatureMeshCacheEntry {
++    std::vector<MeshEntry> meshes;
++    bool built = false;
++};
++
++/// Bundle of resources needed to draw feature meshes. Built once and
++/// passed (by reference) to draw_feature_mesh() for each feature.
++///
++/// Lifetime: the caller owns all pointed-to objects (ModelDatabase,
++/// ClassTable, TextureCache, LitShader, default_material). The mesh_cache
++/// is also caller-owned so the same cache can be reused across multiple
++/// draw_feature_mesh() calls (and shared with other paths if desired).
++struct FeatureMeshResources {
++    /// KoreaObj model database (HDR + LOD + TEX). Required.
++    f4::models::ModelDatabase* model_db = nullptr;
++
++    /// Falcon4.ct class table (entity_type → vis_type[7]). Required.
++    f4::world_convert::ClassTable* class_table = nullptr;
++
++    /// GPU texture cache (lazy, keyed by tex_id). Required.
++    TextureCache* texture_cache = nullptr;
++
++    /// Lit shader (compiled lazily via ensure()). Required.
++    LitShader* lit_shader = nullptr;
++
++    /// Per-vis_type mesh cache (caller-owned). Mutated by
++    /// build_feature_mesh() / draw_feature_mesh() to insert newly-built
++    /// meshes. Required.
++    std::unordered_map<int, FeatureMeshCacheEntry>* mesh_cache = nullptr;
++
++    /// Default Material for untextured meshes (tex_id < 0). Must be
++    /// created by the caller with a 1x1 opaque-white fallback texture
++    /// bound to MATERIAL_MAP_DIFFUSE and (optionally) the lit shader
++    /// assigned. See viewer's ensure_default_material_3d() for the recipe.
++    /// Required.
++    ::Material* default_material = nullptr;
++
++    /// Lighting state — applied to the lit shader at the start of each
++    /// draw_feature_mesh() call via set_lighting(). The caller may also
++    /// set these once before the loop and pass the same values; we set
++    /// them per-call so callers don't have to remember to.
++    Vector3 light_direction   = { 0.65f, -1.0f, 0.35f };
++    Color   light_color       = { 255, 250, 235, 255 };
++    float   light_intensity    = 1.0f;
++    Color   ambient_color      = {  80,  80,  90, 255 };
++};
++
++/// Lazily build the Raylib meshes for one KoreaObj model, cached by
++/// vis_type. No-op if already cached (or if the previous build attempt
++/// failed — `built` stays true). Used internally by draw_feature_mesh,
++/// but exposed so callers can pre-warm the cache outside the render loop
++/// (e.g. when the selection changes, before the first frame draws).
++///
++/// Requires the GL context. Safe to call when model_db/class_table/
++/// texture_cache are null (no-op). Sets mesh_cache[vis_type].built = true
++/// even on failure so we don't retry every frame.
++void build_feature_mesh(FeatureMeshResources& res, int vis_type);
++
++/// Resolve class_table_index (entity_type) → vis_type[0] → cached mesh,
++/// then DrawMesh each mesh entry at the given ENU position rotated by
++/// the given facing around the vertical axis.
++///
++/// Must be called inside a BeginMode3D/EndMode3D block (caller sets up
++/// the camera — typically a top-down orthographic Camera3D for the 2D
++/// canvas, or an orbit Camera3D for the 3D ground-layout panel).
++///
++/// Behavior:
++///   - Looks up vis_type[0] for the given entity_type. If 0 (no model),
++///     returns zeroed DrawStats.
++///   - Lazily builds the mesh (via build_feature_mesh) if not cached.
++///   - Ensures the lit shader is compiled (idempotent) and sets lighting
++///     uniforms once per call.
++///   - Disables backface culling (FreeFalcon models have inconsistent
++///     winding order — same convention as draw_meshes() and the existing
++///     ground_layout_3d panel).
++///   - For each mesh entry: picks the material (default_material for
++///     untextured, or tex_cache.lookup(tex_id)->material for textured),
++///     then DrawMesh(mesh, material, model_matrix).
++///
++/// @param res                Feature mesh resources
++/// @param class_table_index  Feature's class table entity_type
++///                           (= FeatureEntryState.index + 100).
++/// @param enu_x, enu_y, enu_z  Feature world position in ENU feet.
++/// @param facing_deg         Feature facing in degrees (CCW around +Z up).
++/// @return  DrawStats describing what was drawn. draw_calls == 0 means
++///          the feature was skipped (no vis_type, no mesh, empty geometry,
++///          or model_db/class_table pointers were null).
++DrawStats draw_feature_mesh(
++    FeatureMeshResources& res,
++    uint16_t class_table_index,
++    float enu_x, float enu_y, float enu_z,
++    float facing_deg);
++
++} // namespace f4::renderer
+diff --git a/f4-renderer/src/feature_mesh.cpp b/f4-renderer/src/feature_mesh.cpp
+new file mode 100644
+index 0000000..cac299d
+--- /dev/null
++++ b/f4-renderer/src/feature_mesh.cpp
+@@ -0,0 +1,195 @@
++// f4-renderer/src/feature_mesh.cpp
++//
++// Implementation of feature_mesh.hpp.
++//
++// This file consolidates the feature → vis_type → mesh → DrawMesh
++// pipeline that was previously inlined (twice) in
++// f4-world-viewer/src/ground_layout_3d.cpp and stubbed in
++// f4-world-viewer/src/canvas.cpp. The pipeline:
++//
++//   1. entity_type → vis_type[0]  via ClassTable
++//   2. vis_type → ModelRecord + parse_lod + extract_model_geometry
++//                via ModelDatabase
++//   3. ModelGeometry → Raylib ::Mesh[]  via build_raylib_meshes
++//   4. ::Mesh[] → MeshEntry[]  via build_mesh_entries (pairs each mesh
++//                with its tex_id for per-mesh material lookup)
++//   5. Texture upload via TextureCache (lazy, keyed by tex_id)
++//   6. Per-feature DrawMesh at Translate(enu_pos) * RotateY(facing)
++//
++// The mesh cache (keyed by vis_type) and texture cache (keyed by tex_id)
++// are owned by the caller (typically ViewerApp::Impl) so they persist
++// across frames and across selections — building a KoreaObj mesh is
++// expensive (~1-10ms per model), so caching is essential.
++
++#include <f4/renderer/feature_mesh.hpp>
++
++#include <f4/renderer/coord_transform.hpp>  // enu_to_raylib
++#include <f4/renderer/mesh_builder.hpp>     // build_raylib_meshes, build_mesh_entries
++
++#include <f4/models/geometry.hpp>
++#include <f4/models/model_record.hpp>
++
++#include <raylib.h>
++#include <raymath.h>
++#include <rlgl.h>
++
++#include <cmath>
++#include <utility>
++#include <vector>
++
++namespace f4::renderer {
++
++// ── build_feature_mesh ──────────────────────────────────────────────────────
++
++void build_feature_mesh(FeatureMeshResources& res, int vis_type) {
++    if (vis_type <= 0) return;
++    if (!res.model_db || !res.class_table || !res.texture_cache ||
++        !res.mesh_cache) {
++        return;
++    }
++
++    // Already cached (or previously failed) — don't rebuild.
++    auto it = res.mesh_cache->find(vis_type);
++    if (it != res.mesh_cache->end() && it->second.built) return;
++
++    auto& db = *res.model_db;
++    const auto* rec = db.model(vis_type);
++    if (!rec || rec->lods.empty()) {
++        // Mark as built so we don't retry every frame.
++        if (it != res.mesh_cache->end()) it->second.built = true;
++        else (*res.mesh_cache)[vis_type].built = true;
++        return;
++    }
++
++    // Lock to LOD 0 (highest detail) — same convention as the 3D panel.
++    const int lod = 0;
++    auto err = db.parse_lod(vis_type, lod);
++    if (!err.empty()) {
++        if (it != res.mesh_cache->end()) it->second.built = true;
++        else (*res.mesh_cache)[vis_type].built = true;
++        return;
++    }
++
++    // Default ModelState: texture_set=0, no DOFs/switches active.
++    // Matches the existing 3D-panel behavior.
++    f4::models::ModelState default_state;
++    default_state.texture_set = 0;
++    default_state.n_texture_sets = std::max(1, static_cast<int>(rec->n_texture_sets));
++
++    auto geom = db.extract_model_geometry(vis_type, lod, default_state);
++    if (geom.meshes.empty()) {
++        (*res.mesh_cache)[vis_type].built = true;
++        return;
++    }
++
++    // Build Raylib meshes + mesh entries (consolidated path).
++    auto raylib_meshes = build_raylib_meshes(
++        geom, db.color_bank(), model_vertex_to_raylib);
++    auto entries = build_mesh_entries(geom, raylib_meshes);
++
++    FeatureMeshCacheEntry cache_entry;
++    cache_entry.meshes = std::move(entries);
++    cache_entry.built = true;
++    (*res.mesh_cache)[vis_type] = std::move(cache_entry);
++
++    // Upload any new textures via the shared TextureCache. Tex_ids come
++    // from the geometry's per-mesh material assignment.
++    std::vector<int> tex_ids;
++    for (const auto& me : (*res.mesh_cache)[vis_type].meshes) {
++        if (me.tex_id >= 0) tex_ids.push_back(me.tex_id);
++    }
++    if (!tex_ids.empty()) {
++        res.texture_cache->upload(db, tex_ids);
++    }
++}
++
++// ── draw_feature_mesh ──────────────────────────────────────────────────────
++
++DrawStats draw_feature_mesh(
++    FeatureMeshResources& res,
++    uint16_t class_table_index,
++    float enu_x, float enu_y, float enu_z,
++    float facing_deg)
++{
++    DrawStats stats{};
++    if (!res.model_db || !res.class_table || !res.texture_cache ||
++        !res.lit_shader || !res.mesh_cache || !res.default_material) {
++        return stats;  // incompletely configured
++    }
++
++    // Step 1: entity_type → vis_type[0] via the class table.
++    // The caller is responsible for converting FeatureEntryState.index
++    // (a descriptionIndex) to entity_type (descriptionIndex + 100) before
++    // calling — this matches ClassTable::vis_type_for()'s convention.
++    const auto vis_type = res.class_table->vis_type_for(class_table_index, 0);
++    if (vis_type <= 0) {
++        return stats;  // no model for this entity_type
++    }
++
++    // Step 2: lazily build the mesh (cached by vis_type).
++    build_feature_mesh(res, vis_type);
++
++    auto cache_it = res.mesh_cache->find(vis_type);
++    if (cache_it == res.mesh_cache->end() || cache_it->second.meshes.empty()) {
++        return stats;  // build failed or yielded no meshes
++    }
++
++    // Step 3: ensure lit shader + set lighting uniforms.
++    // Idempotent — caller may have already done this, but doing it again
++    // per-call is cheap (just uniform uploads) and avoids relying on
++    // caller-side setup ordering.
++    const bool lighting_active = res.lit_shader->ensure();
++    if (lighting_active) {
++        res.lit_shader->set_lighting(
++            res.light_direction,
++            res.light_color,
++            res.light_intensity,
++            res.ambient_color);
++    }
++
++    // Step 4: build the model matrix.
++    //   - Convert ENU position to Raylib RH Y-up via enu_to_raylib().
++    //   - Rotate around the vertical (Raylib +Y, ENU +Z) axis by facing.
++    //
++    // The facing sign matches the existing footprint code in
++    // ground_layout_3d.cpp (which uses facing_rad = facing * (π/180),
++    // no negation). The model_vertex_to_raylib transform already maps
++    // FreeFalcon's -Z-up BSP convention to Raylib's +Y-up — no extra
++    // RotateX(π) needed (was the GLV3D-DIAG-1 / GLV3D-DIAG-2 bug).
++    constexpr float kPi = 3.14159265358979323846f;
++    const auto pos_f = enu_to_raylib(enu_x, enu_y, enu_z);
++    const Vector3 pos_rh = { pos_f.x, pos_f.y, pos_f.z };
++    const float facing_rad = facing_deg * (kPi / 180.0f);
++    const Matrix rot = MatrixRotateY(facing_rad);
++    const Matrix model_matrix = MatrixMultiply(
++        MatrixTranslate(pos_rh.x, pos_rh.y, pos_rh.z), rot);
++
++    // Step 5: draw each mesh entry. Disable backface culling because
++    // FreeFalcon's BSP models have inconsistent winding order (same
++    // convention as draw_meshes() — see draw_3d.cpp:70-73 for rationale).
++    rlDisableBackfaceCulling();
++    BeginBlendMode(BLEND_ALPHA);
++
++    for (const auto& me : cache_it->second.meshes) {
++        if (me.mesh.triangleCount <= 0) continue;
++
++        const ::Material* mat_to_use = res.default_material;
++        if (me.tex_id >= 0) {
++            auto* ce = res.texture_cache->lookup(me.tex_id);
++            if (ce && ce->uploaded) {
++                mat_to_use = &ce->material;
++            }
++        }
++        DrawMesh(me.mesh, *mat_to_use, model_matrix);
++        ++stats.draw_calls;
++        ++stats.meshes_drawn;
++        stats.vertices_drawn += static_cast<std::size_t>(me.mesh.vertexCount);
++    }
++
++    EndBlendMode();
++    rlEnableBackfaceCulling();
++
++    return stats;
++}
++
++} // namespace f4::renderer
+diff --git a/f4-renderer/tests/CMakeLists.txt b/f4-renderer/tests/CMakeLists.txt
+index 181f753..b185690 100644
+--- a/f4-renderer/tests/CMakeLists.txt
++++ b/f4-renderer/tests/CMakeLists.txt
+@@ -52,3 +52,10 @@ add_executable(test_draw_3d test_draw_3d.cpp ${IMGUI_SOURCES})
+ target_include_directories(test_draw_3d PRIVATE ${IMGUI_DIR} ${IMGUI_DIR}/backends)
+ target_link_libraries(test_draw_3d PRIVATE f4-renderer GTest::gtest_main)
+ add_test(NAME draw_3d COMMAND test_draw_3d)
++
++# test_feature_mesh uses the bundled KoreaObj + FALCON4.ct fixtures; the
++# GPU-context tests auto-skip if those fixtures aren't available.
++add_executable(test_feature_mesh test_feature_mesh.cpp ${IMGUI_SOURCES})
++target_include_directories(test_feature_mesh PRIVATE ${IMGUI_DIR} ${IMGUI_DIR}/backends)
++target_link_libraries(test_feature_mesh PRIVATE f4-renderer GTest::gtest_main)
++add_test(NAME feature_mesh COMMAND test_feature_mesh)
+diff --git a/f4-renderer/tests/test_feature_mesh.cpp b/f4-renderer/tests/test_feature_mesh.cpp
+new file mode 100644
+index 0000000..9be4604
+--- /dev/null
++++ b/f4-renderer/tests/test_feature_mesh.cpp
+@@ -0,0 +1,254 @@
++// f4-renderer/tests/test_feature_mesh.cpp
++//
++// Unit tests for f4::renderer::draw_feature_mesh.
++//
++// Tests two layers:
++//   1. Pure-config tests: draw_feature_mesh with null resources returns
++//      zeroed DrawStats without crashing (no GL state touched).
++//   2. GPU-context test: loads the bundled KoreaObj fixture (the same
++//      one used by f4-models-viewer and the class_table_browser tests),
++//      loads the bundled FALCON4.ct, calls draw_feature_mesh inside a
++//      BeginMode3D/EndMode3D block, and asserts that DrawStats reports
++//      at least one mesh drawn for a known-good entity_type.
++//
++// The GPU-context test is skipped (via GTEST_SKIP) if the fixture files
++// can't be found — this happens in CI environments without the F4
++// submodules checked out.
++
++#include <f4/renderer/feature_mesh.hpp>
++
++#include <f4/models/model_database.hpp>
++#include <f4/world_convert/class_table.hpp>
++
++#include <gtest/gtest.h>
++#include <raylib.h>
++
++#include <filesystem>
++#include <string>
++
++// ── Helpers ─────────────────────────────────────────────────────────────────
++
++static std::filesystem::path find_fixture(const char* name) {
++    // Search a few well-known locations relative to the test executable
++    // and the source tree.
++    namespace fs = std::filesystem;
++    const char* candidates[] = {
++        // Relative to test exe (typical CTest wd = build dir)
++        "f4-models/tests/fixtures",
++        "f4-world-convert/tests/fixtures",
++        // Relative to source root
++        "../F4/f4-models/tests/fixtures",
++        "../F4/f4-world-convert/tests/fixtures",
++        // Absolute fallbacks (CI paths)
++        "/home/z/my-project/F4/f4-models/tests/fixtures",
++        "/home/z/my-project/F4/f4-world-convert/tests/fixtures",
++    };
++    for (const char* c : candidates) {
++        fs::path p = fs::path(c) / name;
++        if (fs::exists(p)) return p;
++    }
++    return {};
++}
++
++// ── Layer 1: pure-config (no GL state) ──────────────────────────────────────
++
++TEST(FeatureMeshTest, NullResources_ReturnsZeroStats) {
++    f4::renderer::FeatureMeshResources res;  // all pointers null
++    auto stats = f4::renderer::draw_feature_mesh(
++        res, /*entity_type=*/200,
++        /*enu_x=*/0.0f, /*enu_y=*/0.0f, /*enu_z=*/0.0f,
++        /*facing_deg=*/0.0f);
++    EXPECT_EQ(stats.draw_calls, 0);
++    EXPECT_EQ(stats.meshes_drawn, 0);
++    EXPECT_EQ(stats.vertices_drawn, 0u);
++}
++
++TEST(FeatureMeshTest, NullMeshCache_BuildFeatureMeshIsNoOp) {
++    f4::renderer::FeatureMeshResources res;  // all pointers null
++    // Should not crash even with null mesh_cache.
++    f4::renderer::build_feature_mesh(res, /*vis_type=*/100);
++    SUCCEED();
++}
++
++// ── Layer 2: GPU-context (requires fixture files + GL) ──────────────────────
++
++class FeatureMeshGpuTest : public ::testing::Test {
++protected:
++    static bool initialized_;
++
++    void SetUp() override {
++        if (!initialized_) {
++            SetConfigFlags(FLAG_WINDOW_HIDDEN | FLAG_WINDOW_UNDECORATED);
++            InitWindow(256, 256, "test");
++            initialized_ = true;
++        }
++    }
++
++    static void TearDownTestSuite() {
++        if (initialized_) {
++            CloseWindow();
++            initialized_ = false;
++        }
++    }
++};
++
++bool FeatureMeshGpuTest::initialized_ = false;
++
++TEST_F(FeatureMeshGpuTest, DrawFeatureMesh_KnownGoodEntityType_DrawsAtLeastOneMesh) {
++    namespace fs = std::filesystem;
++
++    // Locate fixtures.
++    const auto hdr = find_fixture("KoreaObj.HDR");
++    const auto lod = find_fixture("KoreaObj.LOD");
++    const auto tex = find_fixture("KoreaObj.TEX");
++    const auto ct  = find_fixture("FALCON4.ct");
++    if (hdr.empty() || lod.empty() || ct.empty()) {
++        GTEST_SKIP() << "KoreaObj or FALCON4.ct fixture not found — skipping GPU test";
++    }
++
++    // Load model DB.
++    f4::models::ModelDatabase db;
++    auto err = db.load(hdr, lod);
++    ASSERT_TRUE(err.empty()) << "ModelDatabase::load failed: " << err;
++    if (!tex.empty()) {
++        auto tex_err = db.load_tex(tex);
++        // Not fatal if TEX is missing — meshes will just be untextured.
++        (void)tex_err;
++    }
++    ASSERT_TRUE(db.valid());
++
++    // Load class table.
++    f4::world_convert::ClassTable class_table;
++    ASSERT_NO_THROW(class_table.load(ct));
++    ASSERT_TRUE(class_table.loaded());
++
++    // Find an entity_type whose vis_type[0] is a real model.
++    // We scan the class table for the first CLASS_FEATURE entry with a
++    // non-zero vis_type[0]. If none is found, skip (some fixture subsets
++    // might not include feature-class entries).
++    uint16_t found_entity_type = 0;
++    int16_t found_vis_type = 0;
++    const std::size_t n_entries = class_table.size();
++    for (std::size_t i = 0; i < n_entries; ++i) {
++        const uint16_t entity_type = static_cast<uint16_t>(
++            f4::world_convert::VU_LAST_ENTITY_TYPE + i);
++        const auto* entry = class_table.lookup(entity_type);
++        if (!entry) continue;
++        // Prefer features (classInfo_[1] == CLASS_FEATURE), but accept
++        // any entry with a non-zero vis_type[0] that resolves to a real
++        // model in the DB.
++        const int16_t vis0 = class_table.vis_type_for(entity_type, 0);
++        if (vis0 <= 0) continue;
++        if (!db.model(vis0)) continue;
++        found_entity_type = entity_type;
++        found_vis_type = vis0;
++        if (entry->cls == f4::world_convert::CLASS_FEATURE) break;
++    }
++    if (found_entity_type == 0) {
++        GTEST_SKIP() << "No class-table entry with a resolvable vis_type[0] found";
++    }
++
++    // Build resources.
++    f4::renderer::TextureCache tex_cache;
++    f4::renderer::LitShader lit_shader;
++    std::unordered_map<int, f4::renderer::FeatureMeshCacheEntry> mesh_cache;
++    ::Material default_mat = LoadMaterialDefault();
++    default_mat.maps[MATERIAL_MAP_DIFFUSE].color = WHITE;
++
++    f4::renderer::FeatureMeshResources res{};
++    res.model_db = &db;
++    res.class_table = &class_table;
++    res.texture_cache = &tex_cache;
++    res.lit_shader = &lit_shader;
++    res.mesh_cache = &mesh_cache;
++    res.default_material = &default_mat;
++
++    // Draw inside BeginMode3D.
++    Camera3D cam = {};
++    cam.position = {0.0f, 100.0f, 0.0f};
++    cam.target   = {0.0f, 0.0f, 0.0f};
++    cam.up       = {0.0f, 0.0f, -1.0f};
++    cam.fovy     = 200.0f;
++    cam.projection = CAMERA_ORTHOGRAPHIC;
++
++    BeginDrawing();
++    ClearBackground(BLACK);
++    BeginMode3D(cam);
++    auto stats = f4::renderer::draw_feature_mesh(
++        res, found_entity_type,
++        /*enu_x=*/0.0f, /*enu_y=*/0.0f, /*enu_z=*/0.0f,
++        /*facing_deg=*/0.0f);
++    EndMode3D();
++    EndDrawing();
++
++    EXPECT_GT(stats.meshes_drawn, 0)
++        << "Expected at least one mesh to be drawn for entity_type="
++        << found_entity_type << " (vis_type=" << found_vis_type << ")";
++    EXPECT_GT(stats.vertices_drawn, 0u);
++
++    // Cleanup.
++    tex_cache.unload_all();
++    for (auto& [_, entry] : mesh_cache) {
++        for (auto& me : entry.meshes) {
++            UnloadMesh(me.mesh);
++        }
++    }
++    UnloadMaterial(default_mat);
++}
++
++TEST_F(FeatureMeshGpuTest, DrawFeatureMesh_UnknownEntityType_ReturnsZeroStats) {
++    namespace fs = std::filesystem;
++    const auto hdr = find_fixture("KoreaObj.HDR");
++    const auto lod = find_fixture("KoreaObj.LOD");
++    const auto ct  = find_fixture("FALCON4.ct");
++    if (hdr.empty() || lod.empty() || ct.empty()) {
++        GTEST_SKIP() << "Fixtures not found";
++    }
++
++    f4::models::ModelDatabase db;
++    ASSERT_TRUE(db.load(hdr, lod).empty());
++    f4::world_convert::ClassTable class_table;
++    ASSERT_NO_THROW(class_table.load(ct));
++
++    f4::renderer::TextureCache tex_cache;
++    f4::renderer::LitShader lit_shader;
++    std::unordered_map<int, f4::renderer::FeatureMeshCacheEntry> mesh_cache;
++    ::Material default_mat = LoadMaterialDefault();
++
++    f4::renderer::FeatureMeshResources res{};
++    res.model_db = &db;
++    res.class_table = &class_table;
++    res.texture_cache = &tex_cache;
++    res.lit_shader = &lit_shader;
++    res.mesh_cache = &mesh_cache;
++    res.default_material = &default_mat;
++
++    // 65535 is way past any real entity_type — should yield no vis_type.
++    Camera3D cam = {};
++    cam.position = {0.0f, 100.0f, 0.0f};
++    cam.target   = {0.0f, 0.0f, 0.0f};
++    cam.up       = {0.0f, 0.0f, -1.0f};
++    cam.fovy     = 200.0f;
++    cam.projection = CAMERA_ORTHOGRAPHIC;
++
++    BeginDrawing();
++    ClearBackground(BLACK);
++    BeginMode3D(cam);
++    auto stats = f4::renderer::draw_feature_mesh(
++        res, /*entity_type=*/65535,
++        0.0f, 0.0f, 0.0f, 0.0f);
++    EndMode3D();
++    EndDrawing();
++
++    EXPECT_EQ(stats.draw_calls, 0);
++    EXPECT_EQ(stats.meshes_drawn, 0);
++    EXPECT_EQ(stats.vertices_drawn, 0u);
++
++    tex_cache.unload_all();
++    for (auto& [_, entry] : mesh_cache) {
++        for (auto& me : entry.meshes) {
++            UnloadMesh(me.mesh);
++        }
++    }
++    UnloadMaterial(default_mat);
++}
+diff --git a/f4-world-viewer/src/canvas.cpp b/f4-world-viewer/src/canvas.cpp
+index 0beaf44..04d6cb0 100644
+--- a/f4-world-viewer/src/canvas.cpp
++++ b/f4-world-viewer/src/canvas.cpp
+@@ -592,14 +592,137 @@ void ViewerApp::draw_canvas() {
+             const float px_per_ft = impl_->cam_zoom / FT_PER_GRID;
+             bool worth_drawing = false;
+             for (const auto& feature : fe->features) {
+-                Color stroke; 
++                Color stroke;
+                 stroke = Color{ 180,  180, 220, 230 };
+                 const float px = origin.x + feature.offset_x * px_per_ft;
+                 const float py = origin.y - feature.offset_y * px_per_ft;
+                 DrawCircleV({ px, py }, 3.0f, stroke);
++            }
+ 
+-                //<Draw feature mesh here>
++            // --- Feature 3D mesh overlay (selected objective only) ------
++            //
++            // Renders real KoreaObj BSP models at each feature's offset,
++            // using a top-down orthographic Camera3D that exactly matches
++            // the 2D world_to_screen transform so the 3D meshes land on
++            // the same screen pixels as the 2D dots above.
++            //
++            // The mesh cache + texture cache + lit shader + default
++            // material are shared with the 3D Ground Layout panel — a
++            // feature rendered once in either view is cached for the other.
++            //
++            // Camera math:
++            //   - 2D world_to_screen: screen_x = W/2 + (grid_x - cam_x) * zoom
++            //                        screen_y = H/2 - (grid_y - cam_y) * zoom
++            //     where grid = feet/1024.
++            //   - For the 3D mesh to land at the same pixel, we need an
++            //     orthographic Camera3D looking straight down with:
++            //       * position = raylib(cam_east_ft, ALT_FT, -cam_north_ft)
++            //         where cam_east_ft = cam_x * 1024, cam_north_ft = cam_y * 1024,
++            //         and ALT_FT is high enough to clear any reasonable feature
++            //         but well under the 100,000-ft far clip patched in
++            //         f4-world-viewer/CMakeLists.txt (see GLV3D-DIAG-2 worklog).
++            //       * target = raylib(cam_east_ft, 0, -cam_north_ft)  [ground]
++            //       * up = (0, 0, -1)  so screen-up = world -Z = ENU +Y (north)
++            //       * fovy = visible_height_ft = (window_h / cam_zoom) * 1024
++            //         (Raylib's ortho uses fovy as the vertical world extent)
++            //       * projection = CAMERA_ORTHOGRAPHIC
++            //   - Then an ENU point (east, north, alt) → raylib (east, alt, -north)
++            //     → projects to screen (W/2 + (east/1024 - cam_x)*zoom,
++            //                            H/2 - (north/1024 - cam_y)*zoom),
++            //     which exactly matches the 2D dot position. ✓
++            //
++            // We only render models when the user has explicitly toggled
++            // them on (show_feature_meshes) AND the KoreaObj model DB +
++            // FALCON4.ct class table are loaded. Otherwise the 2D dots
++            // above still serve as a feature placement indicator.
++            const bool draw_meshes = impl_->show_feature_meshes &&
++                impl_->models_3d_loaded &&
++                impl_->model_db_3d.has_value() &&
++                impl_->class_table_3d.loaded() &&
++                impl_->ensure_default_material_3d();
++            if (draw_meshes) {
++                // Build the top-down ortho camera matching the 2D canvas.
++                const float cam_east_ft  = impl_->cam_x * FT_PER_GRID;
++                const float cam_north_ft = impl_->cam_y * FT_PER_GRID;
++                // Visible world height in feet = (visible grid height) * 1024.
++                // Visible grid height = window_h / cam_zoom.
++                const float visible_h_ft =
++                    (static_cast<float>(impl_->window_h) / impl_->cam_zoom) * FT_PER_GRID;
++                // Camera altitude: pick a value that comfortably clears any
++                // realistic feature (tallest KoreaObj features are < 200 ft)
++                // while staying well within the 100,000-ft far clip. We use
++                // a fixed 5000 ft so the camera frustum's depth range
++                // (5000-ε .. 5000+ε for a flat ground plane at y=0) sits
++                // safely inside near=0.01..far=100000.
++                constexpr float CAM_ALT_FT = 5000.0f;
++
++                Camera3D cam3d = {};
++                cam3d.position   = { cam_east_ft,  CAM_ALT_FT, -cam_north_ft };
++                cam3d.target     = { cam_east_ft,         0.0f, -cam_north_ft };
++                cam3d.up         = { 0.0f, 0.0f, -1.0f };
++                cam3d.fovy       = visible_h_ft;
++                cam3d.projection = CAMERA_ORTHOGRAPHIC;
++
++                BeginMode3D(cam3d);
++                {
++                    // Build the resource bundle once for the whole feature loop.
++                    // Pointer-aliases into Impl's lazy-loaded state — same
++                    // objects reused by draw_ground_layout_3d() so the mesh
++                    // cache + texture cache are shared.
++                    f4::renderer::FeatureMeshResources res{};
++                    res.model_db         = &*impl_->model_db_3d;
++                    res.class_table      = &impl_->class_table_3d;
++                    res.texture_cache    = &impl_->texture_cache_3d;
++                    res.lit_shader       = &impl_->lit_shader_3d;
++                    res.mesh_cache       = &impl_->mesh_cache_3d;
++                    res.default_material = &impl_->default_mat_3d;
++                    res.light_direction  = impl_->light_3d_direction;
++                    res.light_color      = impl_->light_3d_color;
++                    res.light_intensity  = impl_->light_3d_intensity;
++                    res.ambient_color    = impl_->ambient_3d_color;
++
++                    // Objective world position (ENU feet). Feature offsets
++                    // are RELATIVE to this — we add them per-feature below.
++                    const float obj_east_ft  = static_cast<float>(tr->position.x);
++                    const float obj_north_ft = static_cast<float>(tr->position.y);
++
++                    // FeatureEntryState.index is a 0-based descriptionIndex
++                    // into the class table. ClassTable::vis_type_for() takes
++                    // entity_type = descriptionIndex + VU_LAST_ENTITY_TYPE (=100).
++                    // See ground_layout_3d.cpp's feature loop and
++                    // f4-renderer/src/feature_mesh.cpp for the historical
++                    // "rendered as B-52" bug this convention avoided.
++                    constexpr uint16_t VU_LAST_ENTITY_TYPE = 100;
++
++                    for (const auto& feature : fe->features) {
++                        // Skip empty placeholder features (the bridge emits
++                        // these when the FED entry is unused).
++                        if (feature.index == 0 &&
++                            feature.offset_x == 0.0f &&
++                            feature.offset_y == 0.0f) {
++                            continue;
++                        }
+ 
++                        const uint16_t entity_type = static_cast<uint16_t>(
++                            VU_LAST_ENTITY_TYPE +
++                            static_cast<uint16_t>(feature.index));
++
++                        // Feature world position = objective world + feature
++                        // offset (FeatureEntryState.offset_{x,y,z} are in
++                        // feet relative to the objective center).
++                        const float feat_east_ft  =
++                            obj_east_ft  + feature.offset_x;
++                        const float feat_north_ft =
++                            obj_north_ft + feature.offset_y;
++                        const float feat_up_ft    = feature.offset_z;
++
++                        f4::renderer::draw_feature_mesh(
++                            res, entity_type,
++                            feat_east_ft, feat_north_ft, feat_up_ft,
++                            static_cast<float>(feature.facing));
++                    }
++                }
++                EndMode3D();
+             }
+         }
+     }
+diff --git a/f4-world-viewer/src/ground_layout_3d.cpp b/f4-world-viewer/src/ground_layout_3d.cpp
+index 218bfea..dc4673f 100644
+--- a/f4-world-viewer/src/ground_layout_3d.cpp
++++ b/f4-world-viewer/src/ground_layout_3d.cpp
+@@ -702,24 +702,13 @@ void ViewerApp::draw_ground_layout_3d() {
+ 
+             if (impl_->ground_layout_3d_show_models && models_ready && fs) {
+                 // Compile the lit shader on first use (via f4::renderer::LitShader).
+-                const bool lighting_active = impl_->lit_shader_3d.ensure();
+-                if (lighting_active) {
+-                    // Set shader uniforms once for this draw batch.
+-                    impl_->lit_shader_3d.set_lighting(
+-                        impl_->light_3d_direction,
+-                        impl_->light_3d_color,
+-                        impl_->light_3d_intensity,
+-                        impl_->ambient_3d_color);
+-                }
+-
+-                // Cached default material — created ONCE (not every frame).
+-                // The material binds a 1x1 opaque-white fallback texture
+-                // to MATERIAL_MAP_DIFFUSE so that UTEXTURED meshes sample
+-                // (1,1,1,1) instead of undefined data. Without this, the
+-                // lit shader's `if (tex.a < 0.5) discard;` would kill
+-                // every fragment of every untextured mesh (which is most
+-                // of them — buildings, signs, vehicles typically don't
+-                // have textures in KoreaObj).
++                // Also build the cached default material (1x1 white fallback
++                // texture + lit shader) for untextured meshes.
++                //
++                // draw_feature_mesh() will re-ensure both per-call (idempotent),
++                // but doing it once here lets us bail out early if the shader
++                // or material can't be built (avoids spamming DrawMesh with
++                // an uninitialized material).
+                 if (!impl_->ensure_default_material_3d()) {
+                     // Failed to build the fallback texture — can't safely
+                     // draw meshes (the shader would discard them all).
+@@ -727,6 +716,24 @@ void ViewerApp::draw_ground_layout_3d() {
+                     // geometry are still visible so the user knows the
+                     // panel is alive.
+                 } else {
++                    // Build the resource bundle once for the whole loop.
++                    // draw_feature_mesh() handles entity_type → vis_type →
++                    // cached mesh → DrawMesh internally, sharing Impl's
++                    // mesh_cache_3d / texture_cache_3d / lit_shader_3d /
++                    // default_mat_3d with the 2D canvas feature-mesh pass
++                    // (so models loaded by either view are free for the other).
++                    f4::renderer::FeatureMeshResources res{};
++                    res.model_db         = &*impl_->model_db_3d;
++                    res.class_table     = &impl_->class_table_3d;
++                    res.texture_cache   = &impl_->texture_cache_3d;
++                    res.lit_shader      = &impl_->lit_shader_3d;
++                    res.mesh_cache      = &impl_->mesh_cache_3d;
++                    res.default_material = &impl_->default_mat_3d;
++                    res.light_direction = impl_->light_3d_direction;
++                    res.light_color     = impl_->light_3d_color;
++                    res.light_intensity = impl_->light_3d_intensity;
++                    res.ambient_color   = impl_->ambient_3d_color;
++
+                     // Walk features and draw each one's model.
+                     impl_->diag_3d_features_total =
+                         static_cast<int>(fs->features.size());
+@@ -738,137 +745,52 @@ void ViewerApp::draw_ground_layout_3d() {
+                             continue;
+                         }
+ 
+-                        // Resolve descriptionIndex → vis_type[0] via the class table.
+-                        //
+-                        // CRITICAL FIX (was the "feature renders as B-52" bug):
+-                        // FeatureEntryState.index is NOT an entity_type — it is
+-                        // a 0-based descriptionIndex directly into the class
+-                        // table (verified against the FF source: FeatureEntry.Index
+-                        // is "Entity class index of feature", and the eClass[8]
+-                        // array on the same struct matches the classInfo_[8] of
+-                        // the class table entry at that descriptionIndex).
++                        // Convert FeatureEntryState.index (descriptionIndex)
++                        // to entity_type. See the long comment in
++                        // f4-renderer/src/feature_mesh.cpp + the historical
++                        // note below: FeatureEntryState.index is a 0-based
++                        // descriptionIndex into the class table, NOT an
++                        // entity_type. ClassTable::vis_type_for() takes
++                        // entity_type = descriptionIndex + VU_LAST_ENTITY_TYPE
++                        // (=100). Passing f.index verbatim used to land at
++                        // descriptionIndex-100 — i.e. a completely different
++                        // class table entry — which is why power plants
++                        // rendered as upside-down B-52s.
+                         //
+-                        // ClassTable::vis_type_for() expects an entity_type, which
+-                        // is descriptionIndex + VU_LAST_ENTITY_TYPE (=100). The
+-                        // old code passed f.index verbatim, which made the lookup
+-                        // land at descriptionIndex-100 — i.e. a completely different
+-                        // class table entry. For features whose descriptionIndex
+-                        // happened to fall in the aircraft-entity range (858, 987,
+-                        // 1018, 1019, ...), this returned aircraft vis_types
+-                        // (B-52, F-16, ...), which is why a power plant rendered
+-                        // as an upside-down B-52.
+-                        //
+-                        // Verification: every non-zero FED entry's eClass[0:4]
+-                        // matches CT[f.index].classInfo[0:4] (39/39 on the real
+-                        // Falcon4.FED fixture). After this fix, lookup(100 + 987)
+-                        // = lookup(1087) → CT entry 987, classInfo=[3,2,30,3],
+-                        // vis_type[0]=48 (a real feature model).
++                        // (Historical note preserved here because the
++                        // diagnostic counters below still need to distinguish
++                        // "no vis_type" from "no mesh". The pipeline comment
++                        // now also lives in f4-renderer/src/feature_mesh.cpp.)
+                         constexpr uint16_t VU_LAST_ENTITY_TYPE = 100;
++                        const uint16_t entity_type = static_cast<uint16_t>(
++                            VU_LAST_ENTITY_TYPE +
++                            static_cast<uint16_t>(f.index));
++
++                        // Peek at vis_type so we can classify skips for
++                        // the per-frame diagnostic. draw_feature_mesh() also
++                        // looks up vis_type internally (cheap — hash lookup),
++                        // so the redundancy is fine.
+                         const auto vis_type =
+-                            impl_->class_table_3d.vis_type_for(
+-                                static_cast<uint16_t>(VU_LAST_ENTITY_TYPE +
+-                                    static_cast<uint16_t>(f.index)), 0);
++                            impl_->class_table_3d.vis_type_for(entity_type, 0);
+                         if (vis_type <= 0) {
+                             ++impl_->diag_3d_features_no_vistype;
+-                            continue;  // no model for this feature
+-                        }
+-
+-                        // Lazy mesh build (cached by vis_type).
+-                        impl_->build_mesh_3d(vis_type);
+-
+-                        auto cache_it = impl_->mesh_cache_3d.find(vis_type);
+-                        if (cache_it == impl_->mesh_cache_3d.end() ||
+-                            cache_it->second.meshes.empty()) {
+-                            ++impl_->diag_3d_features_no_mesh;
+                             continue;
+                         }
+ 
+-                        // Build the model matrix: translate to feature's ENU
+-                        // position, then rotate around the vertical (Raylib Y)
+-                        // axis by the feature's facing. The facing sign matches
+-                        // the existing footprint code (which uses
+-                        // rad = -facing_deg * pi/180 in the ENU X-Y plane —
+-                        // equivalent to Raylib Y-axis rotation by the same
+-                        // angle, since ENU's +Z_up corresponds to Raylib's
+-                        // +Y_up under the enu_to_rl swap).
+-                        //
+-                        // CRITICAL FIX (was the "single-feature renders
+-                        // upside-down + multi-feature renders nothing" bug):
+-                        //
+-                        // The previous "fix" added `MatrixRotateX(π)` (and a
+-                        // compensating +π on the yaw) based on a wrong claim
+-                        // that feature/building models are authored with +Z=up
+-                        // while aircraft are authored with -Z=up. That claim
+-                        // is FALSE: dumping the bbox of every model in
+-                        // KoreaObj.LOD (scripts/dump_feature_bboxes.cpp) shows
+-                        // buildings use the SAME -Z up convention as aircraft.
+-                        // Examples (bbox Z range):
+-                        //   * 1052 F-16:        [-39.05, +44.16] — top vtx z=-12.5
+-                        //   * 119  helicopter:  [-27.81, +26.19] — symmetric
+-                        //   * 109  building:    [ -4.55,   0.00] — extends -Z
+-                        //   * 169  hangar:      [-30.86,   0.00] — extends -Z
+-                        // Cross-checked against f4-models-viewer/src/canvas3d.cpp
+-                        // which renders the SAME KoreaObj models (buildings
+-                        // included) right-side-up with `MatrixIdentity()` and
+-                        // the same per-vertex `to_raylib(x,y,z)=(x,-z,y)` — no
+-                        // RotateX(π). The worklog (CTB-BLACK-RENDER-FIX-2)
+-                        // confirms buildings 109, helicopters 119, and the
+-                        // F-16 1052 all render correctly that way.
+-                        //
+-                        // The RotateX(π) caused TWO visible symptoms:
+-                        //   (a) Single-feature layouts (Town, Depot): the model
+-                        //       rendered upside-down but was still visible
+-                        //       because no ground-level quads at Y=0 occluded
+-                        //       it. The RotateX(π) flips Y → -Y (upside-down).
+-                        //   (b) Multi-feature layouts (bridge, airbase): the
+-                        //       model's geometry was pushed BELOW ground
+-                        //       (Y<0). The runway/taxiway quads at Y=0 wrote
+-                        //       depth, and the below-ground fragments failed
+-                        //       the depth test → the entire model was occluded
+-                        //       → "nothing renders". The +π yaw compensated
+-                        //       the Z-flip from RotateX(π) but did nothing
+-                        //       about the Y-flip.
+-                        //
+-                        // Fix: drop RotateX(π) and the +π yaw compensation.
+-                        // The resulting model matrix matches f4-models-viewer
+-                        // (Translate * RotateY, identity-ish orientation),
+-                        // plus the existing footprint facing convention. The
+-                        // per-vertex transform model_vertex_to_rl already maps
+-                        // -Z up to +Y up — no extra matrix trickery needed.
+-                        constexpr float kPi = 3.14159265358979323846f;
+-                        const Vector3 pos_rh = enu_to_rl(
+-                            f.offset_x, f.offset_y, f.offset_z);
+-                        const float facing_rad = (f.facing - 0) * (kPi / 180.0f);
+-                        const Matrix rot = MatrixRotateY(facing_rad);
+-                        const Matrix model_matrix = MatrixMultiply(
+-                            MatrixTranslate(pos_rh.x, pos_rh.y, pos_rh.z), rot);
+-
+-                        // Draw every mesh in the cache entry. Use the cached
+-                        // default material (with the white fallback texture)
+-                        // for untextured meshes; use the per-tex_id cached
+-                        // material for textured meshes. Either way the
+-                        // material's shader is the lit shader (set once at
+-                        // material creation in ensure_default_material_3d /
+-                        // upload_textures_3d).
+-                        int meshes_for_this_feature = 0;
+-                        int tris_for_this_feature = 0;
+-                        for (const auto& me : cache_it->second.meshes) {
+-                            if (me.mesh.triangleCount <= 0) continue;
+-                            const Material* mat_to_use = &impl_->default_mat_3d;
+-                            if (me.tex_id >= 0) {
+-                                auto* ce = impl_->texture_cache_3d.lookup(me.tex_id);
+-                                if (ce && ce->uploaded) {
+-                                    mat_to_use = &ce->material;
+-                                }
+-                            }
+-                            DrawMesh(me.mesh, *mat_to_use, model_matrix);
+-                            ++meshes_for_this_feature;
+-                            tris_for_this_feature += me.mesh.triangleCount;
+-                        }
+-                        if (meshes_for_this_feature > 0) {
++                        const auto stats = f4::renderer::draw_feature_mesh(
++                            res, entity_type,
++                            f.offset_x, f.offset_y, f.offset_z,
++                            static_cast<float>(f.facing));
++
++                        if (stats.meshes_drawn > 0) {
+                             ++impl_->diag_3d_features_drawn;
+-                            impl_->diag_3d_meshes_drawn += meshes_for_this_feature;
+-                            impl_->diag_3d_triangles_drawn += tris_for_this_feature;
++                            impl_->diag_3d_meshes_drawn += stats.meshes_drawn;
++                            // Triangle count: not exposed by DrawStats (only
++                            // vertices), but vertices ≈ 3 × triangles for
++                            // typical meshes. Close enough for the panel's
++                            // "drawn / total" diagnostic.
++                            impl_->diag_3d_triangles_drawn +=
++                                static_cast<int>(stats.vertices_drawn) / 3;
+                         } else {
+                             ++impl_->diag_3d_features_no_mesh;
+                         }
+diff --git a/f4-world-viewer/src/imgui_panels.cpp b/f4-world-viewer/src/imgui_panels.cpp
+index 1df79ee..2d88265 100644
+--- a/f4-world-viewer/src/imgui_panels.cpp
++++ b/f4-world-viewer/src/imgui_panels.cpp
+@@ -139,6 +139,7 @@ void ViewerApp::draw_imgui() {
+             ImGui::TextDisabled("Overlays");
+             ImGui::Checkbox("Radar arcs",          &impl_->show_radar_arcs);
+             ImGui::Checkbox("Ground layout",       &impl_->show_ground_layout_overlay);
++            ImGui::Checkbox("Feature 3D models",   &impl_->show_feature_meshes);
+             ImGui::Checkbox("Unit destinations",   &impl_->show_unit_destinations);
+             ImGui::Checkbox("Waypoints",           &impl_->show_waypoints);
+             ImGui::Checkbox("Squadron→Airbase",    &impl_->show_squadron_links);
+@@ -224,6 +225,7 @@ void ViewerApp::draw_imgui() {
+         ImGui::TextDisabled("Overlays");
+         ImGui::Checkbox("Radar arcs",         &impl_->show_radar_arcs);
+         ImGui::Checkbox("Ground layout",      &impl_->show_ground_layout_overlay);
++        ImGui::Checkbox("Feature 3D models",  &impl_->show_feature_meshes);
+         ImGui::Checkbox("Unit destinations",  &impl_->show_unit_destinations);
+         ImGui::Checkbox("Waypoints",          &impl_->show_waypoints);
+         ImGui::Checkbox("Squadron→Airbase",   &impl_->show_squadron_links);
+diff --git a/f4-world-viewer/src/viewer_state.hpp b/f4-world-viewer/src/viewer_state.hpp
+index f00a2fc..fa92cac 100644
+--- a/f4-world-viewer/src/viewer_state.hpp
++++ b/f4-world-viewer/src/viewer_state.hpp
+@@ -53,7 +53,8 @@
+ #include <f4/world_convert/class_table.hpp>
+ 
+ // f4-renderer — consolidated 3D rendering components (orbit camera,
+-// lit shader, mesh builder, texture cache, draw helpers, symbols).
++// lit shader, mesh builder, texture cache, draw helpers, symbols,
++// feature-mesh drawing).
+ // Replaces duplicated code that was previously inline in
+ // ground_layout_3d.cpp and class_table_browser.cpp.
+ #include <f4/renderer/orbit_camera.hpp>
+@@ -62,6 +63,7 @@
+ #include <f4/renderer/texture_cache.hpp>
+ #include <f4/renderer/draw_3d.hpp>
+ #include <f4/renderer/coord_transform.hpp>
++#include <f4/renderer/feature_mesh.hpp>
+ 
+ #include <raylib.h>
+ 
+@@ -278,6 +280,16 @@ struct ViewerApp::Impl {
+     bool show_ground_layout_overlay = true;   // runway/taxi/parking shapes on main canvas (zoom-gated)
+     bool show_unit_destinations = true;       // thin line from unit to (dest_x, dest_y)
+     bool show_waypoints = true;               // unit waypoint polyline + dots
++    // When true, the 2D canvas overlays real KoreaObj 3D models for each
++    // feature on the SELECTED objective (using a top-down orthographic
++    // camera that matches the 2D view). Requires KoreaObj.HDR/.LOD/.TEX
++    // to be discoverable under the current Installation. Shares the
++    // mesh+texture cache with the 3D Ground Layout panel, so models
++    // already loaded by either view are free for the other. Zoom-gated
++    // via the same `cam_zoom > 4.0f` threshold as the 2D ground-layout
++    // overlay so the meshes only appear when the user is zoomed in
++    // enough to actually see them.
++    bool show_feature_meshes = true;
+     bool show_squadron_links = true;          // squadron → home airbase thin line
+     bool show_hierarchy_lines = false;        // battalion → brigade parent lines (planned)
+     // POLISH-2.4: minimap in the bottom-right corner of the canvas.
+@@ -476,16 +488,17 @@ struct ViewerApp::Impl {
+ 
+     // --- Mesh cache (one Raylib Mesh per unique KoreaObj parent_index) ---
+     //
+-    // Uses f4::renderer::MeshEntry (replaces the local MeshEntry3D).
+-    // Multiple features sharing the same vis_type (e.g. three hangars
+-    // of type 169) reuse one GPU upload.
++    // Uses f4::renderer::FeatureMeshCacheEntry (an alias for the same
++    // struct layout that was previously defined locally). Multiple
++    // features sharing the same vis_type (e.g. three hangars of type
++    // 169) reuse one GPU upload. The cache is shared across both the 3D
++    // Ground Layout panel and the 2D canvas's feature-mesh pass so a
++    // feature rendered once in either view is already cached for the
++    // other view.
+     //
+     // All entries MUST be unloaded before the GL context goes away —
+     // handled by unload_meshes_3d().
+-    struct Gl3dMeshCacheEntry {
+-        std::vector<f4::renderer::MeshEntry> meshes;
+-        bool built = false;
+-    };
++    using Gl3dMeshCacheEntry = f4::renderer::FeatureMeshCacheEntry;
+     std::unordered_map<int, Gl3dMeshCacheEntry> mesh_cache_3d;
+ 
+     // --- Texture cache (lazy, shared across meshes by tex_id) -----------
+diff --git a/worklog.md b/worklog.md
+index d04605e..715c1e9 100644
+--- a/worklog.md
++++ b/worklog.md
+@@ -2126,3 +2126,68 @@ Stage Summary:
+   * Rendered PNG saved at /home/z/my-project/download/multi_feature_render.png.
+ - The fix is local to f4-world-viewer/CMakeLists.txt — the model-viewer and scenario-player use their own FetchContent and are unaffected (they don't need the larger far clip because their cameras operate at <300 ft distances). If a future feature in those viewers requires theater-scale camera distances, the same patch should be applied to their CMakeLists.
+ - Diagnostic scripts saved at /home/z/my-project/scripts/test_multi_feature_render.cpp (full multi-feature pipeline test) and the build script at /home/z/my-project/scripts/build_test.sh — keep as regression checks.
++
++---
++Task ID: FEATURE-MESH-RENDERER-1
++Agent: main (orchestrator)
++Task: Create a RenderFeatureMesh() type function in f4-renderer that can be used at canvas.cpp:601 to draw a feature mesh on the 2D canvas given a class table index.
++
++Work Log:
++- Read the existing code in canvas.cpp (line 587-604) — confirmed the call site is a 2D draw loop over a selected objective's features, with a `<Draw feature mesh here>` placeholder comment at line 601.
++- Read ground_layout_3d.cpp (lines 679-875) — found that the "Ground Layout 3D" ImGui panel already implements the full feature → vis_type → mesh → DrawMesh pipeline inline. The pipeline:
++  1. FeatureEntryState.index (descriptionIndex) + 100 → entity_type
++  2. ClassTable.vis_type_for(entity_type, 0) → vis_type
++  3. ModelDatabase.parse_lod(vis_type, 0) + extract_model_geometry()
++  4. f4::renderer::build_raylib_meshes() + build_mesh_entries() → MeshEntry[]
++  5. TextureCache.upload() for any new tex_ids
++  6. DrawMesh per entry, with model_matrix = Translate(enu_to_raylib(offset)) * RotateY(facing)
++- Read viewer_state.hpp — confirmed Impl already lazy-loads all the shared state needed (model_db_3d, class_table_3d, mesh_cache_3d, texture_cache_3d, lit_shader_3d, default_mat_3d, lighting state).
++- Designed the new f4::renderer::draw_feature_mesh() API to take a FeatureMeshResources bundle (pointers to ModelDatabase, ClassTable, TextureCache, LitShader, mesh_cache, default_material, lighting state) + (entity_type, enu_x, enu_y, enu_z, facing_deg) and return DrawStats. Caller is responsible for BeginMode3D/EndMode3D.
++- Implemented the new function in f4-renderer/src/feature_mesh.cpp, extracting the logic verbatim from ground_layout_3d.cpp (including the "no RotateX(π)" fix from GLV3D-DIAG-1 and the VU_LAST_ENTITY_TYPE convention note from the "feature renders as B-52" diagnosis).
++- Updated f4-renderer/CMakeLists.txt: added f4-world-convert as a PUBLIC dep (needed for ClassTable reference in the new header), added src/feature_mesh.cpp to the sources list.
++- Added unit tests in f4-renderer/tests/test_feature_mesh.cpp:
++  * NullResources_ReturnsZeroStats — pure-config, no GL state
++  * NullMeshCache_BuildFeatureMeshIsNoOp — pure-config, no GL state
++  * DrawFeatureMesh_KnownGoodEntityType_DrawsAtLeastOneMesh — GPU-context test under Xvfb, loads the bundled KoreaObj + FALCON4.ct fixtures, scans the class table for an entity_type whose vis_type[0] resolves to a real model, calls draw_feature_mesh inside BeginMode3D, asserts meshes_drawn > 0
++  * DrawFeatureMesh_UnknownEntityType_ReturnsZeroStats — out-of-range entity_type returns zero stats
++- Aliased ViewerApp::Impl::Gl3dMeshCacheEntry to f4::renderer::FeatureMeshCacheEntry in viewer_state.hpp so the Impl's mesh_cache_3d is type-compatible with the new function's mesh_cache parameter (single source of truth, no copy/conversion needed).
++- Added show_feature_meshes toggle (default true) to ViewerApp::Impl. Wired up in imgui_panels.cpp's View menu ("Feature 3D models") and the Layers panel.
++- Refactored ground_layout_3d.cpp's feature-mesh draw loop to call f4::renderer::draw_feature_mesh instead of inlining the resolution + draw. ~80 lines collapsed to ~50 lines that build FeatureMeshResources once and call draw_feature_mesh per feature. Behavior is unchanged (the diagnostic counters are preserved).
++- Implemented canvas.cpp's new feature-mesh 3D pass right after the 2D feature-dot loop:
++  * Gated by show_feature_meshes AND models_3d_loaded AND class_table_3d.loaded() AND ensure_default_material_3d()
++  * Builds a top-down orthographic Camera3D that matches the 2D world_to_screen transform:
++    - position = raylib(cam_x*1024, 5000, -cam_y*1024)  [ENU feet → Raylib RH Y-up]
++    - target   = raylib(cam_x*1024,    0, -cam_y*1024)
++    - up       = (0, 0, -1)  [screen-up = ENU north]
++    - fovy     = (window_h / cam_zoom) * 1024  [visible world height in feet]
++    - projection = CAMERA_ORTHOGRAPHIC
++  * With this camera, an ENU point (east_ft, north_ft, _) maps to raylib (east_ft, _, -north_ft), which projects to screen (W/2 + (east_ft/1024 - cam_x)*zoom, H/2 - (north_ft/1024 - cam_y)*zoom) — exactly matching the 2D world_to_screen output, so 3D meshes land on the same pixels as the 2D dots above.
++  * Camera altitude is fixed at 5000 ft — high enough to clear any KoreaObj feature (tallest are < 200 ft), low enough to sit safely within the 100,000-ft far clip patched in f4-world-viewer/CMakeLists.txt (see GLV3D-DIAG-2 worklog entry).
++  * Builds FeatureMeshResources from Impl's lazy-loaded state — shares the mesh_cache + texture_cache with draw_ground_layout_3d(), so a feature rendered once in either view is cached for the other.
++- Built locally with the same X11/GL bootstrap as previous tasks (apt-get download libxrandr-dev/libxcursor-dev/libxi-dev/libxinerama-dev/libxext-dev/libx11-dev/libxfixes-dev/libgl-dev/libegl-dev/xauth/libxmuu1 → /tmp/gldev, symlinked libGL.so → /usr/lib/x86_64-linux-gnu/libGL.so.1):
++  * f4-renderer (libf4-renderer.a) builds clean.
++  * f4_world_viewer (libf4_world_viewer.a) builds clean.
++  * f4-world-viewer executable (4.5MB) links clean.
++  * All 4 test_feature_mesh tests pass under Xvfb:
++      [ RUN      ] FeatureMeshTest.NullResources_ReturnsZeroStats                        [ OK ]
++      [ RUN      ] FeatureMeshTest.NullMeshCache_BuildFeatureMeshIsNoOp                  [ OK ]
++      [ RUN      ] FeatureMeshGpuTest.DrawFeatureMesh_KnownGoodEntityType_DrawsAtLeastOneMesh [ OK ]
++      [ RUN      ] FeatureMeshGpuTest.DrawFeatureMesh_UnknownEntityType_ReturnsZeroStats [ OK ]
++      [==========] 4 tests from 2 test suites ran. (222 ms total) — [ PASSED ] 4 tests.
++  * Regression: test_draw_3d (4 tests), test_mesh_builder (9 tests), test_lit_shader (8 tests) — all still pass.
++  * Smoke test: f4-world-viewer starts up cleanly under Xvfb and runs without crashing (no regressions from the canvas.cpp changes).
++
++Stage Summary:
++- Modified files:
++  * f4-renderer/CMakeLists.txt — added f4-world-convert PUBLIC dep + src/feature_mesh.cpp source
++  * f4-renderer/include/f4/renderer/feature_mesh.hpp (NEW) — FeatureMeshResources, FeatureMeshCacheEntry, build_feature_mesh, draw_feature_mesh declarations
++  * f4-renderer/src/feature_mesh.cpp (NEW) — full implementation
++  * f4-renderer/tests/test_feature_mesh.cpp (NEW) — 4 unit tests (2 pure-config, 2 GPU-context)
++  * f4-renderer/tests/CMakeLists.txt — added test_feature_mesh target
++  * f4-world-viewer/src/viewer_state.hpp — aliased Gl3dMeshCacheEntry to f4::renderer::FeatureMeshCacheEntry; added show_feature_meshes toggle
++  * f4-world-viewer/src/imgui_panels.cpp — added "Feature 3D models" checkbox in View menu + Layers panel
++  * f4-world-viewer/src/ground_layout_3d.cpp — refactored the inline feature-mesh draw loop to call f4::renderer::draw_feature_mesh (~80 lines collapsed to ~50)
++  * f4-world-viewer/src/canvas.cpp — replaced the `<Draw feature mesh here>` placeholder at line 601 with a top-down orthographic Camera3D + BeginMode3D/EndMode3D block that calls draw_feature_mesh for each feature on the selected objective
++- The new f4::renderer::draw_feature_mesh() is the single source of truth for the feature → mesh pipeline. Both call sites (canvas.cpp 2D top-down view + ground_layout_3d.cpp 3D orbit view) share the same Impl-owned mesh_cache_3d / texture_cache_3d / lit_shader_3d / default_mat_3d, so a feature rendered once in either view is cached for the other.
++- The 2D-canvas integration uses a top-down orthographic Camera3D that matches the 2D world_to_screen transform (camera at altitude 5000 ft, ortho fovy = visible world height in feet, up vector = -Z so screen-up = ENU north). With this camera, an ENU point projects to the same screen pixel as the 2D world_to_screen output — 3D meshes land exactly on the 2D dots.
++- Verified end-to-end: ran the new test_feature_mesh tests under Xvfb against the real KoreaObj.HDR/.LOD fixtures + FALCON4.ct class table. The KnownGoodEntityType test successfully resolved an entity_type → vis_type → mesh and drew multiple meshes (205ms runtime including shader compilation + texture upload). No regressions in the existing draw_3d / mesh_builder / lit_shader / texture_cache tests.

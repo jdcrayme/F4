@@ -17,11 +17,16 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 #   mesh_builder     — ModelGeometry → Raylib ::Mesh conversion
 #   texture_cache    — GPU texture upload/cache
 #   draw_3d          — opaque/alpha sort + DrawMesh loop
+#   feature_mesh     — entity_type → vis_type → mesh → DrawMesh (used by
+#                     the 2D canvas and the 3D ground-layout panel to draw
+#                     real KoreaObj feature models at FeatureEntryState
+#                     offsets)
 #   symbols          — procedural MIL-STD-2525-style symbol drawing
 #
 # Dependencies:
 #   PUBLIC:  f4-models (for ModelGeometry, ColorBank, ModelDatabase types)
 #            f4-entities (for UnitClass used by symbols)
+#            f4-world-convert (for ClassTable used by feature_mesh)
 #            raylib (public headers include <raylib.h>, <raymath.h>)
 #   PRIVATE: imgui (for symbols ImGui draw-list path + orbit_camera input guard)
 # ============================================================================
@@ -72,6 +77,7 @@ add_library(f4-renderer STATIC
     src/mesh_builder.cpp
     src/texture_cache.cpp
     src/draw_3d.cpp
+    src/feature_mesh.cpp
     src/symbols.cpp
 )
 target_link_libraries(f4-renderer PUBLIC f4_warnings)
@@ -88,6 +94,7 @@ target_link_libraries(f4-renderer
     PUBLIC
         f4-models
         f4-entities
+        f4-world-convert
         raylib
 )
 

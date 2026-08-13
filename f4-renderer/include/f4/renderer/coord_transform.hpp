@@ -28,7 +28,7 @@ struct Float3 {
 /// negating Z flips the handedness from LH to RH, and Y swaps with Z to
 /// convert from Y-up to the target Y-up orientation.
 inline Float3 model_vertex_to_raylib(float x, float y, float z) noexcept {
-    return Float3{x, -z, y};
+    return Float3{y, z, -x};
 }
 
 /// Convert an ENU position (feet) to RH Y-up coordinates.

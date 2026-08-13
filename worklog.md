@@ -2126,3 +2126,68 @@ Stage Summary:
   * Rendered PNG saved at /home/z/my-project/download/multi_feature_render.png.
 - The fix is local to f4-world-viewer/CMakeLists.txt — the model-viewer and scenario-player use their own FetchContent and are unaffected (they don't need the larger far clip because their cameras operate at <300 ft distances). If a future feature in those viewers requires theater-scale camera distances, the same patch should be applied to their CMakeLists.
 - Diagnostic scripts saved at /home/z/my-project/scripts/test_multi_feature_render.cpp (full multi-feature pipeline test) and the build script at /home/z/my-project/scripts/build_test.sh — keep as regression checks.
+
+---
+Task ID: FEATURE-MESH-RENDERER-1
+Agent: main (orchestrator)
+Task: Create a RenderFeatureMesh() type function in f4-renderer that can be used at canvas.cpp:601 to draw a feature mesh on the 2D canvas given a class table index.
+
+Work Log:
+- Read the existing code in canvas.cpp (line 587-604) — confirmed the call site is a 2D draw loop over a selected objective's features, with a `<Draw feature mesh here>` placeholder comment at line 601.
+- Read ground_layout_3d.cpp (lines 679-875) — found that the "Ground Layout 3D" ImGui panel already implements the full feature → vis_type → mesh → DrawMesh pipeline inline. The pipeline:
+  1. FeatureEntryState.index (descriptionIndex) + 100 → entity_type
+  2. ClassTable.vis_type_for(entity_type, 0) → vis_type
+  3. ModelDatabase.parse_lod(vis_type, 0) + extract_model_geometry()
+  4. f4::renderer::build_raylib_meshes() + build_mesh_entries() → MeshEntry[]
+  5. TextureCache.upload() for any new tex_ids
+  6. DrawMesh per entry, with model_matrix = Translate(enu_to_raylib(offset)) * RotateY(facing)
+- Read viewer_state.hpp — confirmed Impl already lazy-loads all the shared state needed (model_db_3d, class_table_3d, mesh_cache_3d, texture_cache_3d, lit_shader_3d, default_mat_3d, lighting state).
+- Designed the new f4::renderer::draw_feature_mesh() API to take a FeatureMeshResources bundle (pointers to ModelDatabase, ClassTable, TextureCache, LitShader, mesh_cache, default_material, lighting state) + (entity_type, enu_x, enu_y, enu_z, facing_deg) and return DrawStats. Caller is responsible for BeginMode3D/EndMode3D.
+- Implemented the new function in f4-renderer/src/feature_mesh.cpp, extracting the logic verbatim from ground_layout_3d.cpp (including the "no RotateX(π)" fix from GLV3D-DIAG-1 and the VU_LAST_ENTITY_TYPE convention note from the "feature renders as B-52" diagnosis).
+- Updated f4-renderer/CMakeLists.txt: added f4-world-convert as a PUBLIC dep (needed for ClassTable reference in the new header), added src/feature_mesh.cpp to the sources list.
+- Added unit tests in f4-renderer/tests/test_feature_mesh.cpp:
+  * NullResources_ReturnsZeroStats — pure-config, no GL state
+  * NullMeshCache_BuildFeatureMeshIsNoOp — pure-config, no GL state
+  * DrawFeatureMesh_KnownGoodEntityType_DrawsAtLeastOneMesh — GPU-context test under Xvfb, loads the bundled KoreaObj + FALCON4.ct fixtures, scans the class table for an entity_type whose vis_type[0] resolves to a real model, calls draw_feature_mesh inside BeginMode3D, asserts meshes_drawn > 0
+  * DrawFeatureMesh_UnknownEntityType_ReturnsZeroStats — out-of-range entity_type returns zero stats
+- Aliased ViewerApp::Impl::Gl3dMeshCacheEntry to f4::renderer::FeatureMeshCacheEntry in viewer_state.hpp so the Impl's mesh_cache_3d is type-compatible with the new function's mesh_cache parameter (single source of truth, no copy/conversion needed).
+- Added show_feature_meshes toggle (default true) to ViewerApp::Impl. Wired up in imgui_panels.cpp's View menu ("Feature 3D models") and the Layers panel.
+- Refactored ground_layout_3d.cpp's feature-mesh draw loop to call f4::renderer::draw_feature_mesh instead of inlining the resolution + draw. ~80 lines collapsed to ~50 lines that build FeatureMeshResources once and call draw_feature_mesh per feature. Behavior is unchanged (the diagnostic counters are preserved).
+- Implemented canvas.cpp's new feature-mesh 3D pass right after the 2D feature-dot loop:
+  * Gated by show_feature_meshes AND models_3d_loaded AND class_table_3d.loaded() AND ensure_default_material_3d()
+  * Builds a top-down orthographic Camera3D that matches the 2D world_to_screen transform:
+    - position = raylib(cam_x*1024, 5000, -cam_y*1024)  [ENU feet → Raylib RH Y-up]
+    - target   = raylib(cam_x*1024,    0, -cam_y*1024)
+    - up       = (0, 0, -1)  [screen-up = ENU north]
+    - fovy     = (window_h / cam_zoom) * 1024  [visible world height in feet]
+    - projection = CAMERA_ORTHOGRAPHIC
+  * With this camera, an ENU point (east_ft, north_ft, _) maps to raylib (east_ft, _, -north_ft), which projects to screen (W/2 + (east_ft/1024 - cam_x)*zoom, H/2 - (north_ft/1024 - cam_y)*zoom) — exactly matching the 2D world_to_screen output, so 3D meshes land on the same pixels as the 2D dots above.
+  * Camera altitude is fixed at 5000 ft — high enough to clear any KoreaObj feature (tallest are < 200 ft), low enough to sit safely within the 100,000-ft far clip patched in f4-world-viewer/CMakeLists.txt (see GLV3D-DIAG-2 worklog entry).
+  * Builds FeatureMeshResources from Impl's lazy-loaded state — shares the mesh_cache + texture_cache with draw_ground_layout_3d(), so a feature rendered once in either view is cached for the other.
+- Built locally with the same X11/GL bootstrap as previous tasks (apt-get download libxrandr-dev/libxcursor-dev/libxi-dev/libxinerama-dev/libxext-dev/libx11-dev/libxfixes-dev/libgl-dev/libegl-dev/xauth/libxmuu1 → /tmp/gldev, symlinked libGL.so → /usr/lib/x86_64-linux-gnu/libGL.so.1):
+  * f4-renderer (libf4-renderer.a) builds clean.
+  * f4_world_viewer (libf4_world_viewer.a) builds clean.
+  * f4-world-viewer executable (4.5MB) links clean.
+  * All 4 test_feature_mesh tests pass under Xvfb:
+      [ RUN      ] FeatureMeshTest.NullResources_ReturnsZeroStats                        [ OK ]
+      [ RUN      ] FeatureMeshTest.NullMeshCache_BuildFeatureMeshIsNoOp                  [ OK ]
+      [ RUN      ] FeatureMeshGpuTest.DrawFeatureMesh_KnownGoodEntityType_DrawsAtLeastOneMesh [ OK ]
+      [ RUN      ] FeatureMeshGpuTest.DrawFeatureMesh_UnknownEntityType_ReturnsZeroStats [ OK ]
+      [==========] 4 tests from 2 test suites ran. (222 ms total) — [ PASSED ] 4 tests.
+  * Regression: test_draw_3d (4 tests), test_mesh_builder (9 tests), test_lit_shader (8 tests) — all still pass.
+  * Smoke test: f4-world-viewer starts up cleanly under Xvfb and runs without crashing (no regressions from the canvas.cpp changes).
+
+Stage Summary:
+- Modified files:
+  * f4-renderer/CMakeLists.txt — added f4-world-convert PUBLIC dep + src/feature_mesh.cpp source
+  * f4-renderer/include/f4/renderer/feature_mesh.hpp (NEW) — FeatureMeshResources, FeatureMeshCacheEntry, build_feature_mesh, draw_feature_mesh declarations
+  * f4-renderer/src/feature_mesh.cpp (NEW) — full implementation
+  * f4-renderer/tests/test_feature_mesh.cpp (NEW) — 4 unit tests (2 pure-config, 2 GPU-context)
+  * f4-renderer/tests/CMakeLists.txt — added test_feature_mesh target
+  * f4-world-viewer/src/viewer_state.hpp — aliased Gl3dMeshCacheEntry to f4::renderer::FeatureMeshCacheEntry; added show_feature_meshes toggle
+  * f4-world-viewer/src/imgui_panels.cpp — added "Feature 3D models" checkbox in View menu + Layers panel
+  * f4-world-viewer/src/ground_layout_3d.cpp — refactored the inline feature-mesh draw loop to call f4::renderer::draw_feature_mesh (~80 lines collapsed to ~50)
+  * f4-world-viewer/src/canvas.cpp — replaced the `<Draw feature mesh here>` placeholder at line 601 with a top-down orthographic Camera3D + BeginMode3D/EndMode3D block that calls draw_feature_mesh for each feature on the selected objective
+- The new f4::renderer::draw_feature_mesh() is the single source of truth for the feature → mesh pipeline. Both call sites (canvas.cpp 2D top-down view + ground_layout_3d.cpp 3D orbit view) share the same Impl-owned mesh_cache_3d / texture_cache_3d / lit_shader_3d / default_mat_3d, so a feature rendered once in either view is cached for the other.
+- The 2D-canvas integration uses a top-down orthographic Camera3D that matches the 2D world_to_screen transform (camera at altitude 5000 ft, ortho fovy = visible world height in feet, up vector = -Z so screen-up = ENU north). With this camera, an ENU point projects to the same screen pixel as the 2D world_to_screen output — 3D meshes land exactly on the 2D dots.
+- Verified end-to-end: ran the new test_feature_mesh tests under Xvfb against the real KoreaObj.HDR/.LOD fixtures + FALCON4.ct class table. The KnownGoodEntityType test successfully resolved an entity_type → vis_type → mesh and drew multiple meshes (205ms runtime including shader compilation + texture upload). No regressions in the existing draw_3d / mesh_builder / lit_shader / texture_cache tests.

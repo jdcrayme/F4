@@ -702,24 +702,13 @@ void ViewerApp::draw_ground_layout_3d() {
 
             if (impl_->ground_layout_3d_show_models && models_ready && fs) {
                 // Compile the lit shader on first use (via f4::renderer::LitShader).
-                const bool lighting_active = impl_->lit_shader_3d.ensure();
-                if (lighting_active) {
-                    // Set shader uniforms once for this draw batch.
-                    impl_->lit_shader_3d.set_lighting(
-                        impl_->light_3d_direction,
-                        impl_->light_3d_color,
-                        impl_->light_3d_intensity,
-                        impl_->ambient_3d_color);
-                }
-
-                // Cached default material — created ONCE (not every frame).
-                // The material binds a 1x1 opaque-white fallback texture
-                // to MATERIAL_MAP_DIFFUSE so that UTEXTURED meshes sample
-                // (1,1,1,1) instead of undefined data. Without this, the
-                // lit shader's `if (tex.a < 0.5) discard;` would kill
-                // every fragment of every untextured mesh (which is most
-                // of them — buildings, signs, vehicles typically don't
-                // have textures in KoreaObj).
+                // Also build the cached default material (1x1 white fallback
+                // texture + lit shader) for untextured meshes.
+                //
+                // draw_feature_mesh() will re-ensure both per-call (idempotent),
+                // but doing it once here lets us bail out early if the shader
+                // or material can't be built (avoids spamming DrawMesh with
+                // an uninitialized material).
                 if (!impl_->ensure_default_material_3d()) {
                     // Failed to build the fallback texture — can't safely
                     // draw meshes (the shader would discard them all).
@@ -727,6 +716,24 @@ void ViewerApp::draw_ground_layout_3d() {
                     // geometry are still visible so the user knows the
                     // panel is alive.
                 } else {
+                    // Build the resource bundle once for the whole loop.
+                    // draw_feature_mesh() handles entity_type → vis_type →
+                    // cached mesh → DrawMesh internally, sharing Impl's
+                    // mesh_cache_3d / texture_cache_3d / lit_shader_3d /
+                    // default_mat_3d with the 2D canvas feature-mesh pass
+                    // (so models loaded by either view are free for the other).
+                    f4::renderer::FeatureMeshResources res{};
+                    res.model_db         = &*impl_->model_db_3d;
+                    res.class_table     = &impl_->class_table_3d;
+                    res.texture_cache   = &impl_->texture_cache_3d;
+                    res.lit_shader      = &impl_->lit_shader_3d;
+                    res.mesh_cache      = &impl_->mesh_cache_3d;
+                    res.default_material = &impl_->default_mat_3d;
+                    res.light_direction = impl_->light_3d_direction;
+                    res.light_color     = impl_->light_3d_color;
+                    res.light_intensity = impl_->light_3d_intensity;
+                    res.ambient_color   = impl_->ambient_3d_color;
+
                     // Walk features and draw each one's model.
                     impl_->diag_3d_features_total =
                         static_cast<int>(fs->features.size());
@@ -738,137 +745,52 @@ void ViewerApp::draw_ground_layout_3d() {
                             continue;
                         }
 
-                        // Resolve descriptionIndex → vis_type[0] via the class table.
+                        // Convert FeatureEntryState.index (descriptionIndex)
+                        // to entity_type. See the long comment in
+                        // f4-renderer/src/feature_mesh.cpp + the historical
+                        // note below: FeatureEntryState.index is a 0-based
+                        // descriptionIndex into the class table, NOT an
+                        // entity_type. ClassTable::vis_type_for() takes
+                        // entity_type = descriptionIndex + VU_LAST_ENTITY_TYPE
+                        // (=100). Passing f.index verbatim used to land at
+                        // descriptionIndex-100 — i.e. a completely different
+                        // class table entry — which is why power plants
+                        // rendered as upside-down B-52s.
                         //
-                        // CRITICAL FIX (was the "feature renders as B-52" bug):
-                        // FeatureEntryState.index is NOT an entity_type — it is
-                        // a 0-based descriptionIndex directly into the class
-                        // table (verified against the FF source: FeatureEntry.Index
-                        // is "Entity class index of feature", and the eClass[8]
-                        // array on the same struct matches the classInfo_[8] of
-                        // the class table entry at that descriptionIndex).
-                        //
-                        // ClassTable::vis_type_for() expects an entity_type, which
-                        // is descriptionIndex + VU_LAST_ENTITY_TYPE (=100). The
-                        // old code passed f.index verbatim, which made the lookup
-                        // land at descriptionIndex-100 — i.e. a completely different
-                        // class table entry. For features whose descriptionIndex
-                        // happened to fall in the aircraft-entity range (858, 987,
-                        // 1018, 1019, ...), this returned aircraft vis_types
-                        // (B-52, F-16, ...), which is why a power plant rendered
-                        // as an upside-down B-52.
-                        //
-                        // Verification: every non-zero FED entry's eClass[0:4]
-                        // matches CT[f.index].classInfo[0:4] (39/39 on the real
-                        // Falcon4.FED fixture). After this fix, lookup(100 + 987)
-                        // = lookup(1087) → CT entry 987, classInfo=[3,2,30,3],
-                        // vis_type[0]=48 (a real feature model).
+                        // (Historical note preserved here because the
+                        // diagnostic counters below still need to distinguish
+                        // "no vis_type" from "no mesh". The pipeline comment
+                        // now also lives in f4-renderer/src/feature_mesh.cpp.)
                         constexpr uint16_t VU_LAST_ENTITY_TYPE = 100;
+                        const uint16_t entity_type = static_cast<uint16_t>(
+                            VU_LAST_ENTITY_TYPE +
+                            static_cast<uint16_t>(f.index));
+
+                        // Peek at vis_type so we can classify skips for
+                        // the per-frame diagnostic. draw_feature_mesh() also
+                        // looks up vis_type internally (cheap — hash lookup),
+                        // so the redundancy is fine.
                         const auto vis_type =
-                            impl_->class_table_3d.vis_type_for(
-                                static_cast<uint16_t>(VU_LAST_ENTITY_TYPE +
-                                    static_cast<uint16_t>(f.index)), 0);
+                            impl_->class_table_3d.vis_type_for(entity_type, 0);
                         if (vis_type <= 0) {
                             ++impl_->diag_3d_features_no_vistype;
-                            continue;  // no model for this feature
-                        }
-
-                        // Lazy mesh build (cached by vis_type).
-                        impl_->build_mesh_3d(vis_type);
-
-                        auto cache_it = impl_->mesh_cache_3d.find(vis_type);
-                        if (cache_it == impl_->mesh_cache_3d.end() ||
-                            cache_it->second.meshes.empty()) {
-                            ++impl_->diag_3d_features_no_mesh;
                             continue;
                         }
 
-                        // Build the model matrix: translate to feature's ENU
-                        // position, then rotate around the vertical (Raylib Y)
-                        // axis by the feature's facing. The facing sign matches
-                        // the existing footprint code (which uses
-                        // rad = -facing_deg * pi/180 in the ENU X-Y plane —
-                        // equivalent to Raylib Y-axis rotation by the same
-                        // angle, since ENU's +Z_up corresponds to Raylib's
-                        // +Y_up under the enu_to_rl swap).
-                        //
-                        // CRITICAL FIX (was the "single-feature renders
-                        // upside-down + multi-feature renders nothing" bug):
-                        //
-                        // The previous "fix" added `MatrixRotateX(π)` (and a
-                        // compensating +π on the yaw) based on a wrong claim
-                        // that feature/building models are authored with +Z=up
-                        // while aircraft are authored with -Z=up. That claim
-                        // is FALSE: dumping the bbox of every model in
-                        // KoreaObj.LOD (scripts/dump_feature_bboxes.cpp) shows
-                        // buildings use the SAME -Z up convention as aircraft.
-                        // Examples (bbox Z range):
-                        //   * 1052 F-16:        [-39.05, +44.16] — top vtx z=-12.5
-                        //   * 119  helicopter:  [-27.81, +26.19] — symmetric
-                        //   * 109  building:    [ -4.55,   0.00] — extends -Z
-                        //   * 169  hangar:      [-30.86,   0.00] — extends -Z
-                        // Cross-checked against f4-models-viewer/src/canvas3d.cpp
-                        // which renders the SAME KoreaObj models (buildings
-                        // included) right-side-up with `MatrixIdentity()` and
-                        // the same per-vertex `to_raylib(x,y,z)=(x,-z,y)` — no
-                        // RotateX(π). The worklog (CTB-BLACK-RENDER-FIX-2)
-                        // confirms buildings 109, helicopters 119, and the
-                        // F-16 1052 all render correctly that way.
-                        //
-                        // The RotateX(π) caused TWO visible symptoms:
-                        //   (a) Single-feature layouts (Town, Depot): the model
-                        //       rendered upside-down but was still visible
-                        //       because no ground-level quads at Y=0 occluded
-                        //       it. The RotateX(π) flips Y → -Y (upside-down).
-                        //   (b) Multi-feature layouts (bridge, airbase): the
-                        //       model's geometry was pushed BELOW ground
-                        //       (Y<0). The runway/taxiway quads at Y=0 wrote
-                        //       depth, and the below-ground fragments failed
-                        //       the depth test → the entire model was occluded
-                        //       → "nothing renders". The +π yaw compensated
-                        //       the Z-flip from RotateX(π) but did nothing
-                        //       about the Y-flip.
-                        //
-                        // Fix: drop RotateX(π) and the +π yaw compensation.
-                        // The resulting model matrix matches f4-models-viewer
-                        // (Translate * RotateY, identity-ish orientation),
-                        // plus the existing footprint facing convention. The
-                        // per-vertex transform model_vertex_to_rl already maps
-                        // -Z up to +Y up — no extra matrix trickery needed.
-                        constexpr float kPi = 3.14159265358979323846f;
-                        const Vector3 pos_rh = enu_to_rl(
-                            f.offset_x, f.offset_y, f.offset_z);
-                        const float facing_rad = (f.facing - 0) * (kPi / 180.0f);
-                        const Matrix rot = MatrixRotateY(facing_rad);
-                        const Matrix model_matrix = MatrixMultiply(
-                            MatrixTranslate(pos_rh.x, pos_rh.y, pos_rh.z), rot);
+                        const auto stats = f4::renderer::draw_feature_mesh(
+                            res, entity_type,
+                            f.offset_x, f.offset_y, f.offset_z,
+                            static_cast<float>(f.facing));
 
-                        // Draw every mesh in the cache entry. Use the cached
-                        // default material (with the white fallback texture)
-                        // for untextured meshes; use the per-tex_id cached
-                        // material for textured meshes. Either way the
-                        // material's shader is the lit shader (set once at
-                        // material creation in ensure_default_material_3d /
-                        // upload_textures_3d).
-                        int meshes_for_this_feature = 0;
-                        int tris_for_this_feature = 0;
-                        for (const auto& me : cache_it->second.meshes) {
-                            if (me.mesh.triangleCount <= 0) continue;
-                            const Material* mat_to_use = &impl_->default_mat_3d;
-                            if (me.tex_id >= 0) {
-                                auto* ce = impl_->texture_cache_3d.lookup(me.tex_id);
-                                if (ce && ce->uploaded) {
-                                    mat_to_use = &ce->material;
-                                }
-                            }
-                            DrawMesh(me.mesh, *mat_to_use, model_matrix);
-                            ++meshes_for_this_feature;
-                            tris_for_this_feature += me.mesh.triangleCount;
-                        }
-                        if (meshes_for_this_feature > 0) {
+                        if (stats.meshes_drawn > 0) {
                             ++impl_->diag_3d_features_drawn;
-                            impl_->diag_3d_meshes_drawn += meshes_for_this_feature;
-                            impl_->diag_3d_triangles_drawn += tris_for_this_feature;
+                            impl_->diag_3d_meshes_drawn += stats.meshes_drawn;
+                            // Triangle count: not exposed by DrawStats (only
+                            // vertices), but vertices ≈ 3 × triangles for
+                            // typical meshes. Close enough for the panel's
+                            // "drawn / total" diagnostic.
+                            impl_->diag_3d_triangles_drawn +=
+                                static_cast<int>(stats.vertices_drawn) / 3;
                         } else {
                             ++impl_->diag_3d_features_no_mesh;
                         }

@@ -53,7 +53,8 @@
 #include <f4/world_convert/class_table.hpp>
 
 // f4-renderer — consolidated 3D rendering components (orbit camera,
-// lit shader, mesh builder, texture cache, draw helpers, symbols).
+// lit shader, mesh builder, texture cache, draw helpers, symbols,
+// feature-mesh drawing).
 // Replaces duplicated code that was previously inline in
 // ground_layout_3d.cpp and class_table_browser.cpp.
 #include <f4/renderer/orbit_camera.hpp>
@@ -62,6 +63,7 @@
 #include <f4/renderer/texture_cache.hpp>
 #include <f4/renderer/draw_3d.hpp>
 #include <f4/renderer/coord_transform.hpp>
+#include <f4/renderer/feature_mesh.hpp>
 
 #include <raylib.h>
 
@@ -278,6 +280,16 @@ struct ViewerApp::Impl {
     bool show_ground_layout_overlay = true;   // runway/taxi/parking shapes on main canvas (zoom-gated)
     bool show_unit_destinations = true;       // thin line from unit to (dest_x, dest_y)
     bool show_waypoints = true;               // unit waypoint polyline + dots
+    // When true, the 2D canvas overlays real KoreaObj 3D models for each
+    // feature on the SELECTED objective (using a top-down orthographic
+    // camera that matches the 2D view). Requires KoreaObj.HDR/.LOD/.TEX
+    // to be discoverable under the current Installation. Shares the
+    // mesh+texture cache with the 3D Ground Layout panel, so models
+    // already loaded by either view are free for the other. Zoom-gated
+    // via the same `cam_zoom > 4.0f` threshold as the 2D ground-layout
+    // overlay so the meshes only appear when the user is zoomed in
+    // enough to actually see them.
+    bool show_feature_meshes = true;
     bool show_squadron_links = true;          // squadron → home airbase thin line
     bool show_hierarchy_lines = false;        // battalion → brigade parent lines (planned)
     // POLISH-2.4: minimap in the bottom-right corner of the canvas.
@@ -428,7 +440,7 @@ struct ViewerApp::Impl {
             .min_distance     = 50.0f,
             .max_distance     = 50000.0f,
             .initial_yaw      = 34.377f,    // 0.6 rad → ~34°
-            .initial_pitch    = 28.648f,    // 0.5 rad → ~29°
+            .initial_pitch    = -28.648f,    // 0.5 rad → ~29°
             .initial_distance = 4000.0f,
             .orbit_sensitivity = 0.2865f,   // 0.005 rad/px → ~0.29°/px
             .zoom_speed       = 0.1f
@@ -476,16 +488,17 @@ struct ViewerApp::Impl {
 
     // --- Mesh cache (one Raylib Mesh per unique KoreaObj parent_index) ---
     //
-    // Uses f4::renderer::MeshEntry (replaces the local MeshEntry3D).
-    // Multiple features sharing the same vis_type (e.g. three hangars
-    // of type 169) reuse one GPU upload.
+    // Uses f4::renderer::FeatureMeshCacheEntry (an alias for the same
+    // struct layout that was previously defined locally). Multiple
+    // features sharing the same vis_type (e.g. three hangars of type
+    // 169) reuse one GPU upload. The cache is shared across both the 3D
+    // Ground Layout panel and the 2D canvas's feature-mesh pass so a
+    // feature rendered once in either view is already cached for the
+    // other view.
     //
     // All entries MUST be unloaded before the GL context goes away —
     // handled by unload_meshes_3d().
-    struct Gl3dMeshCacheEntry {
-        std::vector<f4::renderer::MeshEntry> meshes;
-        bool built = false;
-    };
+    using Gl3dMeshCacheEntry = f4::renderer::FeatureMeshCacheEntry;
     std::unordered_map<int, Gl3dMeshCacheEntry> mesh_cache_3d;
 
     // --- Texture cache (lazy, shared across meshes by tex_id) -----------

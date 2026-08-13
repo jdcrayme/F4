@@ -139,6 +139,7 @@ void ViewerApp::draw_imgui() {
             ImGui::TextDisabled("Overlays");
             ImGui::Checkbox("Radar arcs",          &impl_->show_radar_arcs);
             ImGui::Checkbox("Ground layout",       &impl_->show_ground_layout_overlay);
+            ImGui::Checkbox("Feature 3D models",   &impl_->show_feature_meshes);
             ImGui::Checkbox("Unit destinations",   &impl_->show_unit_destinations);
             ImGui::Checkbox("Waypoints",           &impl_->show_waypoints);
             ImGui::Checkbox("Squadron→Airbase",    &impl_->show_squadron_links);
@@ -224,6 +225,7 @@ void ViewerApp::draw_imgui() {
         ImGui::TextDisabled("Overlays");
         ImGui::Checkbox("Radar arcs",         &impl_->show_radar_arcs);
         ImGui::Checkbox("Ground layout",      &impl_->show_ground_layout_overlay);
+        ImGui::Checkbox("Feature 3D models",  &impl_->show_feature_meshes);
         ImGui::Checkbox("Unit destinations",  &impl_->show_unit_destinations);
         ImGui::Checkbox("Waypoints",          &impl_->show_waypoints);
         ImGui::Checkbox("Squadron→Airbase",   &impl_->show_squadron_links);
