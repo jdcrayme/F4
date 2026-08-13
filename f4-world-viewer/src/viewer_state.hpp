@@ -64,6 +64,7 @@
 #include <f4/renderer/draw_3d.hpp>
 #include <f4/renderer/coord_transform.hpp>
 #include <f4/renderer/feature_mesh.hpp>
+#include <f4/renderer/entity_render.hpp>
 
 #include <raylib.h>
 

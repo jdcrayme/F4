@@ -59,3 +59,11 @@ add_executable(test_feature_mesh test_feature_mesh.cpp ${IMGUI_SOURCES})
 target_include_directories(test_feature_mesh PRIVATE ${IMGUI_DIR} ${IMGUI_DIR}/backends)
 target_link_libraries(test_feature_mesh PRIVATE f4-renderer GTest::gtest_main)
 add_test(NAME feature_mesh COMMAND test_feature_mesh)
+
+# test_entity_render — entity-level rendering: entity_icon_info(), RenderEntity()
+# Pure tests (no GPU) for component-inspection logic; RenderEntity with
+# null resources is safe to call without a GPU context.
+add_executable(test_entity_render test_entity_render.cpp ${IMGUI_SOURCES})
+target_include_directories(test_entity_render PRIVATE ${IMGUI_DIR} ${IMGUI_DIR}/backends)
+target_link_libraries(test_entity_render PRIVATE f4-renderer GTest::gtest_main)
+add_test(NAME entity_render COMMAND test_entity_render)

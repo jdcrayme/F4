@@ -292,14 +292,12 @@ void ViewerApp::draw_canvas() {
                 c.a = static_cast<unsigned char>(c.a * 0.3f);
             }
 
-            const uint8_t obj_type = impl_->obj_type_from_pb(pb);
-            const SymbolKind kind = symbol_for_objective_type(obj_type);
             const RlColor outline = {
                 static_cast<unsigned char>(c.r * 0.4f),
                 static_cast<unsigned char>(c.g * 0.4f),
                 static_cast<unsigned char>(c.b * 0.4f),
                 255};
-            f4::renderer::draw_symbol(kind, p.x, p.y, base_size, c, outline);
+            f4::renderer::RenderEntityIcon(h, p.x, p.y, base_size, c, outline);
             if (pri && pri->priority >= 40) {
                 const float ring_r = base_size * 0.5f + 3.0f;
                 const Color ring = (pri->priority >= 70)
@@ -314,7 +312,7 @@ void ViewerApp::draw_canvas() {
                     label = ot->class_name;
                 } else {
                     label = f4::world_convert::objective_type_name(
-                        static_cast<int16_t>(obj_type));
+                        static_cast<int16_t>(impl_->obj_type_from_pb(pb)));
                 }
                 if (!label.empty() && label != "Unknown") {
                     const float lx = p.x + base_size * 0.6f + 4;
@@ -367,13 +365,12 @@ void ViewerApp::draw_canvas() {
                 c.b = static_cast<unsigned char>(c.b * 0.3f);
                 c.a = static_cast<unsigned char>(c.a * 0.3f);
             }
-            const SymbolKind kind = symbol_for_unit(uc->unit_class, uc->unit_subtype);
             const RlColor outline = {
                 static_cast<unsigned char>(c.r * 0.4f),
                 static_cast<unsigned char>(c.g * 0.4f),
                 static_cast<unsigned char>(c.b * 0.4f),
                 255};
-            f4::renderer::draw_symbol(kind, p.x, p.y, s, c, outline);
+            f4::renderer::RenderEntityIcon(h, p.x, p.y, s, c, outline);
 
             // Destination line — reads from MovementOrdersComponent (promoted
             // from PropertyBag in Phase 5 cleanup).
@@ -658,11 +655,11 @@ void ViewerApp::draw_canvas() {
 
                 BeginMode3D(cam3d);
                 {
-                    // Build the resource bundle once for the whole feature loop.
+                    // Build the EntityRenderResources bundle.
                     // Pointer-aliases into Impl's lazy-loaded state — same
                     // objects reused by draw_ground_layout_3d() so the mesh
                     // cache + texture cache are shared.
-                    f4::renderer::FeatureMeshResources res{};
+                    f4::renderer::EntityRenderResources res{};
                     res.model_db         = &*impl_->model_db_3d;
                     res.class_table      = &impl_->class_table_3d;
                     res.texture_cache    = &impl_->texture_cache_3d;
@@ -674,46 +671,11 @@ void ViewerApp::draw_canvas() {
                     res.light_intensity  = impl_->light_3d_intensity;
                     res.ambient_color    = impl_->ambient_3d_color;
 
-                    // Objective world position (ENU feet). Feature offsets
-                    // are RELATIVE to this — we add them per-feature below.
-                    const float obj_east_ft  = static_cast<float>(tr->position.x);
-                    const float obj_north_ft = static_cast<float>(tr->position.y);
-
-                    // FeatureEntryState.index is a 0-based descriptionIndex
-                    // into the class table. ClassTable::vis_type_for() takes
-                    // entity_type = descriptionIndex + VU_LAST_ENTITY_TYPE (=100).
-                    // See ground_layout_3d.cpp's feature loop and
-                    // f4-renderer/src/feature_mesh.cpp for the historical
-                    // "rendered as B-52" bug this convention avoided.
-                    constexpr uint16_t VU_LAST_ENTITY_TYPE = 100;
-
-                    for (const auto& feature : fe->features) {
-                        // Skip empty placeholder features (the bridge emits
-                        // these when the FED entry is unused).
-                        if (feature.index == 0 &&
-                            feature.offset_x == 0.0f &&
-                            feature.offset_y == 0.0f) {
-                            continue;
-                        }
-
-                        const uint16_t entity_type = static_cast<uint16_t>(
-                            VU_LAST_ENTITY_TYPE +
-                            static_cast<uint16_t>(feature.index));
-
-                        // Feature world position = objective world + feature
-                        // offset (FeatureEntryState.offset_{x,y,z} are in
-                        // feet relative to the objective center).
-                        const float feat_east_ft  =
-                            obj_east_ft  + feature.offset_x;
-                        const float feat_north_ft =
-                            obj_north_ft + feature.offset_y;
-                        const float feat_up_ft    = feature.offset_z;
-
-                        f4::renderer::draw_feature_mesh(
-                            res, entity_type,
-                            feat_east_ft, feat_north_ft, feat_up_ft,
-                            static_cast<float>(feature.facing));
-                    }
+                    // RenderEntity() inspects the entity's components
+                    // (TransformComponent + FeatureSetComponent) and
+                    // dispatches to draw_feature_mesh() for each feature —
+                    // replacing the manual feature loop that was here before.
+                    f4::renderer::RenderEntity(res, h);
                 }
                 EndMode3D();
             }

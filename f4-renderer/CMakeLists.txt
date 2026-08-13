@@ -22,6 +22,9 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 #                     real KoreaObj feature models at FeatureEntryState
 #                     offsets)
 #   symbols          — procedural MIL-STD-2525-style symbol drawing
+#   entity_render    — entity-level rendering: RenderEntity() inspects
+#                     components and dispatches to feature_mesh, symbols,
+#                     etc. RenderEntityIcon() renders 2D map symbols
 #
 # Dependencies:
 #   PUBLIC:  f4-models (for ModelGeometry, ColorBank, ModelDatabase types)
@@ -79,6 +82,7 @@ add_library(f4-renderer STATIC
     src/draw_3d.cpp
     src/feature_mesh.cpp
     src/symbols.cpp
+    src/entity_render.cpp
 )
 target_link_libraries(f4-renderer PUBLIC f4_warnings)
 target_include_directories(f4-renderer

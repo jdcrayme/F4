@@ -2191,3 +2191,32 @@ Stage Summary:
 - The new f4::renderer::draw_feature_mesh() is the single source of truth for the feature → mesh pipeline. Both call sites (canvas.cpp 2D top-down view + ground_layout_3d.cpp 3D orbit view) share the same Impl-owned mesh_cache_3d / texture_cache_3d / lit_shader_3d / default_mat_3d, so a feature rendered once in either view is cached for the other.
 - The 2D-canvas integration uses a top-down orthographic Camera3D that matches the 2D world_to_screen transform (camera at altitude 5000 ft, ortho fovy = visible world height in feet, up vector = -Z so screen-up = ENU north). With this camera, an ENU point projects to the same screen pixel as the 2D world_to_screen output — 3D meshes land exactly on the 2D dots.
 - Verified end-to-end: ran the new test_feature_mesh tests under Xvfb against the real KoreaObj.HDR/.LOD fixtures + FALCON4.ct class table. The KnownGoodEntityType test successfully resolved an entity_type → vis_type → mesh and drew multiple meshes (205ms runtime including shader compilation + texture upload). No regressions in the existing draw_3d / mesh_builder / lit_shader / texture_cache tests.
+
+---
+Task ID: ENTITY-RENDER-1
+Agent: main
+Task: Add RenderEntity() and RenderEntityIcon() functions to f4-renderer
+
+Work Log:
+- Analyzed the existing rendering patterns across f4-world-viewer (canvas.cpp), f4-scenario-player (renderer.cpp), and f4-renderer (feature_mesh.cpp, symbols.cpp)
+- Designed the entity_render.hpp API: EntityRenderResources, RenderEntity(), entity_icon_info(), RenderEntityIcon()
+- RenderEntity() dispatches on FeatureSetComponent + TransformComponent → draw_feature_mesh() per feature (encapsulates canvas.cpp lines 587-719 pattern)
+- entity_icon_info() dispatches on ObjectiveTypeComponent → symbol_for_objective_type() and UnitCoreComponent → symbol_for_unit(), with PropertyBag fallback for objective_type resolution
+- RenderEntityIcon() wraps entity_icon_info() + draw_symbol() for convenience
+- EntityRenderResources inherits from FeatureMeshResources (same cache/shader/texture sharing pattern), adds show_features, vu_last_entity_type, skip_destroyed_features toggles
+- Added damage_state filtering: skip_destroyed_features=true skips damage_state>=3 features
+- Wrote 20 unit tests covering entity_icon_info logic (objective type resolution, unit class mapping, PropertyBag precedence, invalid/empty entities), EntityRenderResources defaults, and RenderEntity null-resource safety
+- Fixed test patterns: EntityWorld::create() returns EntityHandle directly (not EntityId + manual construction)
+- Fixed fighter subtype: STYPE_AIR_FIGHTER=8 (not 1); added bomber test (subtype 6)
+- Added #include <cstdint> to header for uint16_t self-sufficiency
+- Updated CMakeLists.txt: added src/entity_render.cpp to static library, added test_entity_render target
+
+Stage Summary:
+- New header: f4-renderer/include/f4/renderer/entity_render.hpp
+- New source: f4-renderer/src/entity_render.cpp
+- New tests: f4-renderer/tests/test_entity_render.cpp (20 test cases)
+- Modified: f4-renderer/CMakeLists.txt (added entity_render.cpp)
+- Modified: f4-renderer/tests/CMakeLists.txt (added test_entity_render target)
+- RenderEntity() is the reusable component-driven 3D render dispatch function
+- RenderEntityIcon() is the reusable component-driven 2D map symbol function
+- entity_icon_info() is the pure-query variant for legends/tooltips
