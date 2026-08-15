@@ -16,6 +16,8 @@
 
 #include <f4/renderer/symbols.hpp>
 
+#include <f4/math/constants.hpp>
+
 #include <imgui.h>
 #include <raylib.h>
 
@@ -504,7 +506,7 @@ void draw_symbol(SymbolKind kind, float sx, float sy,
             DrawCircleLines(static_cast<int>(sx), static_cast<int>(sy),
                             static_cast<int>(r * 0.7f), oc);
             for (int i = 0; i < 3; ++i) {
-                const float angle = (-90.0f + i * 120.0f) * 3.14159265f / 180.0f;
+                const float angle = (-90.0f + i * 120.0f) * static_cast<float>(f4::math::DEG_TO_RAD);
                 const float x1 = sx + std::cos(angle) * r * 0.3f;
                 const float y1 = sy + std::sin(angle) * r * 0.3f;
                 const float x2 = sx + std::cos(angle) * r * 0.65f;
@@ -560,8 +562,8 @@ void draw_symbol(SymbolKind kind, float sx, float sy,
                 // Arc from -90 to 0 degrees (upper-right quadrant)
                 const int segments = 12;
                 for (int s = 0; s < segments; ++s) {
-                    const float a0 = (-90.0f + s * (90.0f / segments)) * 3.14159265f / 180.0f;
-                    const float a1 = (-90.0f + (s + 1) * (90.0f / segments)) * 3.14159265f / 180.0f;
+                    const float a0 = (-90.0f + s * (90.0f / segments)) * static_cast<float>(f4::math::DEG_TO_RAD);
+                    const float a1 = (-90.0f + (s + 1) * (90.0f / segments)) * static_cast<float>(f4::math::DEG_TO_RAD);
                     DrawLineEx({sx + std::cos(a0) * rad, sy + std::sin(a0) * rad},
                                {sx + std::cos(a1) * rad, sy + std::sin(a1) * rad},
                                1.5f, fc);
@@ -1020,7 +1022,7 @@ void draw_symbol_imgui(ImDrawList* dl, SymbolKind kind, ImVec2 center,
             dl->AddCircleFilled({sx, sy}, r * 0.25f, fill_col, 12);
             dl->AddCircle({sx, sy}, r * 0.7f, oc, 24, thickness);
             for (int i = 0; i < 3; ++i) {
-                const float angle = (-90.0f + i * 120.0f) * 3.14159265f / 180.0f;
+                const float angle = (-90.0f + i * 120.0f) * static_cast<float>(f4::math::DEG_TO_RAD);
                 const float x1 = sx + std::cos(angle) * r * 0.3f;
                 const float y1 = sy + std::sin(angle) * r * 0.3f;
                 const float x2 = sx + std::cos(angle) * r * 0.65f;
@@ -1076,8 +1078,8 @@ void draw_symbol_imgui(ImDrawList* dl, SymbolKind kind, ImVec2 center,
                 const float rad = r * (0.35f + i * 0.25f);
                 const int segments = 12;
                 for (int s = 0; s < segments; ++s) {
-                    const float a0 = (-90.0f + s * (90.0f / segments)) * 3.14159265f / 180.0f;
-                    const float a1 = (-90.0f + (s + 1) * (90.0f / segments)) * 3.14159265f / 180.0f;
+                    const float a0 = (-90.0f + s * (90.0f / segments)) * static_cast<float>(f4::math::DEG_TO_RAD);
+                    const float a1 = (-90.0f + (s + 1) * (90.0f / segments)) * static_cast<float>(f4::math::DEG_TO_RAD);
                     dl->AddLine({sx + std::cos(a0) * rad, sy + std::sin(a0) * rad},
                                 {sx + std::cos(a1) * rad, sy + std::sin(a1) * rad},
                                 fill_col, 1.5f);

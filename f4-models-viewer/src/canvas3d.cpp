@@ -14,6 +14,7 @@
 #include "canvas3d.hpp"
 
 #include <f4/renderer/draw_3d.hpp>
+#include <f4/math/vec3.hpp>
 
 #include <raylib.h>
 #include <raymath.h>
@@ -157,9 +158,12 @@ void ViewerApp::Impl::draw_canvas() {
 // Positioned at the camera target so it stays in view as the user orbits.
 void ViewerApp::Impl::draw_light_gizmo() {
     Vector3 dir = light_direction;
-    const float dlen = std::sqrt(dir.x*dir.x + dir.y*dir.y + dir.z*dir.z);
-    if (dlen < 0.0001f) return;
-    dir.x /= dlen; dir.y /= dlen; dir.z /= dlen;
+    {
+        const f4::math::Vec3f d{dir.x, dir.y, dir.z};
+        if (d.length() < 0.0001f) return;
+        const f4::math::Vec3f n = d.normalized();
+        dir = {n.x, n.y, n.z};
+    }
 
     // Place the gizmo 30 world units from the camera target, in the
     // direction TOWARD the light (so the arrow points from sun → scene).

@@ -27,6 +27,7 @@
 #include "ground_layout_models.hpp"
 
 #include <f4/entities/types.hpp>
+#include <f4/math/vec2.hpp>
 
 #include <algorithm>
 #include <array>
@@ -106,27 +107,18 @@ inline void set_marker_color(LayoutMarker& m, const uint8_t c[4]) {
 }
 
 // ---------------------------------------------------------------------------
-// Small vector helpers (2D, ENU feet)
+// Small vector helpers (2D, ENU feet) — now using f4::math::Vec2f
 // ---------------------------------------------------------------------------
 
-struct Vec2f { float x, y; };
-
-inline Vec2f sub(Vec2f a, Vec2f b) { return {a.x - b.x, a.y - b.y}; }
-inline Vec2f add(Vec2f a, Vec2f b) { return {a.x + b.x, a.y + b.y}; }
-inline Vec2f mul(Vec2f v, float s) { return {v.x * s, v.y * s}; }
-inline float  dot(Vec2f a, Vec2f b) { return a.x * b.x + a.y * b.y; }
-inline float  len(Vec2f v) { return std::sqrt(v.x * v.x + v.y * v.y); }
-
-/// Perpendicular (rotate 90° CCW in the XY plane).
-inline Vec2f perp_ccw(Vec2f v) { return {-v.y, v.x}; }
+using Vec2f = f4::math::Vec2f;
 
 /// Unit perpendicular (rotate 90° CCW) of the segment a→b.
 /// Returns {0,0} if the segment is degenerate.
 inline Vec2f unit_perp_ccw(Vec2f a, Vec2f b) {
-    const Vec2f d = sub(b, a);
-    const float L = len(d);
+    const Vec2f d = b - a;
+    const float L = d.length();
     if (L < 1e-6f) return {0.0f, 0.0f};
-    return {-d.y / L, d.x / L};
+    return d.perp_ccw().normalized();
 }
 
 // ---------------------------------------------------------------------------
@@ -221,10 +213,10 @@ void build_runway_surface(const RunwayGroup& g,
             const auto& p0 = cl->points.front();
             const auto& p1 = cl->points.back();
             const Vec2f perp = unit_perp_ccw({p0.x, p0.y}, {p1.x, p1.y});
-            if (len(perp) >= 0.5f) {
+            if (perp.length() >= 0.5f) {
                 // Default half-width = 50 ft (100 ft runway — typical fighter base).
                 constexpr float DEFAULT_HALF = 50.0f;
-                const Vec2f off = mul(perp, DEFAULT_HALF);
+                const Vec2f off = perp * DEFAULT_HALF;
                 // Corner order: left@start, right@start, right@end, left@end
                 // (matches the L+R edge convention used above).
                 LayoutQuad q;
@@ -256,21 +248,21 @@ void build_threshold_bars(const RunwayGroup& g,
     const auto& rp0 = g.rt->points.front();
     const Vec2f lt0{lp0.x, lp0.y};
     const Vec2f rt0{rp0.x, rp0.y};
-    const Vec2f across = sub(rt0, lt0);
-    const float  width = len(across);
+    const Vec2f across = rt0 - lt0;
+    const float  width = across.length();
     if (width < 10.0f) return;
 
     // Along-runway direction (LT[1] - LT[0]). Fall back to RT[1] - RT[0]
     // if LT has only 1 point.
     Vec2f along{0.0f, 0.0f};
     if (g.lt->points.size() >= 2) {
-        along = sub({g.lt->points[1].x, g.lt->points[1].y}, lt0);
+        along = Vec2f{g.lt->points[1].x, g.lt->points[1].y} - lt0;
     } else if (g.rt->points.size() >= 2) {
-        along = sub({g.rt->points[1].x, g.rt->points[1].y}, rt0);
+        along = Vec2f{g.rt->points[1].x, g.rt->points[1].y} - rt0;
     }
-    const float along_len = len(along);
+    const float along_len = along.length();
     if (along_len < 1.0f) return;
-    const Vec2f fwd = mul(along, 1.0f / along_len);
+    const Vec2f fwd = along * (1.0f / along_len);
 
     // Bars span 90% of the runway width with small gaps between.
     const float usable = width * 0.9f;
@@ -286,16 +278,15 @@ void build_threshold_bars(const RunwayGroup& g,
                             (RUNWAY_THRESHOLD_BAR_WIDTH_FT + gap) +
                             RUNWAY_THRESHOLD_BAR_WIDTH_FT * 0.5f;
         // Center of this bar (in ENU feet, relative to objective center).
-        const Vec2f center_dir_lt_to_rt = mul(across, 1.0f / width);
+        const Vec2f center_dir_lt_to_rt = across * (1.0f / width);
         const Vec2f mid{lt0.x + across.x * 0.5f,
                         lt0.y + across.y * 0.5f};
-        const Vec2f c = add(add(mid, mul(center_dir_lt_to_rt, cross)),
-                            mul(fwd, start_off));
+        const Vec2f c = mid + center_dir_lt_to_rt * cross + fwd * start_off;
 
         const float hl = RUNWAY_THRESHOLD_BAR_LENGTH_FT * 0.5f;
         const float hw = RUNWAY_THRESHOLD_BAR_WIDTH_FT * 0.5f;
-        const Vec2f fwd_hl  = mul(fwd, hl);
-        const Vec2f side_hw = mul(center_dir_lt_to_rt, hw);
+        const Vec2f fwd_hl  = fwd * hl;
+        const Vec2f side_hw = center_dir_lt_to_rt * hw;
 
         LayoutQuad q;
         q.x[0] = c.x - fwd_hl.x - side_hw.x; q.y[0] = c.y - fwd_hl.y - side_hw.y;
@@ -339,12 +330,12 @@ void build_centerline_dashes(const RunwayGroup& g,
     }
     if (!have_pts) return;
 
-    const Vec2f d = sub(end, thr);
-    const float L = len(d);
+    const Vec2f d = end - thr;
+    const float L = d.length();
     if (L < RUNWAY_DASH_LENGTH_FT + RUNWAY_DASH_GAP_FT) return;
 
-    const Vec2f fwd = mul(d, 1.0f / L);
-    const Vec2f side = perp_ccw(fwd);  // already unit length
+    const Vec2f fwd = d * (1.0f / L);
+    const Vec2f side = fwd.perp_ccw();  // already unit length
 
     const float start = RUNWAY_DASH_START_MARGIN_FT;
     const float stop  = L - RUNWAY_DASH_START_MARGIN_FT;
@@ -353,7 +344,7 @@ void build_centerline_dashes(const RunwayGroup& g,
     for (float s = start; s + RUNWAY_DASH_LENGTH_FT <= stop;
          s += RUNWAY_DASH_LENGTH_FT + RUNWAY_DASH_GAP_FT) {
         const float s_mid = s + RUNWAY_DASH_LENGTH_FT * 0.5f;
-        const Vec2f c = add(thr, mul(fwd, s_mid));
+        const Vec2f c = thr + fwd * s_mid;
         const float hl = RUNWAY_DASH_LENGTH_FT * 0.5f;
 
         LayoutQuad q;
@@ -458,8 +449,8 @@ void build_taxiway_strip(const f4::entities::GroundLayoutList& list,
         const Vec2f a{p0.x, p0.y};
         const Vec2f b{p1.x, p1.y};
         const Vec2f side = unit_perp_ccw(a, b);
-        if (len(side) < 0.5f) continue;
-        const Vec2f off = mul(side, half_w);
+        if (side.length() < 0.5f) continue;
+        const Vec2f off = side * half_w;
         // Corner order: left@start, right@start, right@end, left@end
         // (matches build_runway_surface — CCW from above with +Z up).
         LayoutQuad q;

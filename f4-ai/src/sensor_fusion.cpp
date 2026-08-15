@@ -16,6 +16,8 @@
 
 #include "f4/ai/sensor_fusion.hpp"
 
+#include <f4/math/vec3.hpp>
+
 #include <algorithm>
 #include <cmath>
 #include <utility>
@@ -82,7 +84,7 @@ inline double velocity_heading_rad(const WorldPosition& v) noexcept {
 }
 
 inline double speed_fps(const WorldPosition& v) noexcept {
-    return std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+    return f4::math::Vec3d{v.x, v.y, v.z}.length();
 }
 
 // FreeFalcon combat_class heuristic (sfusion.cpp:504):
@@ -218,7 +220,7 @@ void SensorFusion::rebuild_target_list() {
             ownship_tf = h.get<TransformComponent>();
             if (ownship_tf) {
                 ownship_pos = ownship_tf->position;
-                ownship_vel = WorldPosition(ownship_tf->vx, ownship_tf->vy, ownship_tf->vz);
+                ownship_vel = ownship_tf->velocity();
             }
             break;
         }
@@ -236,7 +238,7 @@ void SensorFusion::rebuild_target_list() {
         TargetInfo t;
         t.entity_id = eid.value;
         t.position  = tf->position;
-        t.velocity  = WorldPosition(tf->vx, tf->vy, tf->vz);
+        t.velocity  = tf->velocity();
 
         // Hostility check via team tag. Simple rule: team="red" => hostile.
         // (Future: real team comparison via campaign team-stance data —

@@ -12,10 +12,14 @@
 #pragma once
 
 #include <raylib.h>
-// Undef raylib macros that pollute the namespace
+// Undef raylib macros that pollute the namespace BEFORE including
+// f4::math constants (raylib's #define PI would corrupt the
+// inline constexpr double PI declaration otherwise).
 #undef PI
 #undef DEG2RAD
 #undef RAD2DEG
+
+#include <f4/math/constants.hpp>
 
 namespace f4::renderer {
 
@@ -92,7 +96,7 @@ private:
     float drag_pitch0_ = 0;
     Vector3 drag_target0_ = {};
 
-    static constexpr float kDeg2Rad = 3.14159265358979323846f / 180.0f;
+    static constexpr float kDeg2Rad = static_cast<float>(f4::math::DEG_TO_RAD);
     static constexpr float MIN_PITCH = -89.0f;
     static constexpr float MAX_PITCH =  89.0f;
 };

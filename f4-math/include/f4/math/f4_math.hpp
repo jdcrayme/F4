@@ -13,6 +13,8 @@
 #include "f4/math/table.hpp"
 #include "f4/math/integration.hpp"
 #include "f4/math/filters.hpp"
+#include "f4/math/vec2.hpp"
 #include "f4/math/vec3.hpp"
+#include "f4/math/mat3.hpp"
 #include "f4/math/quat.hpp"
 #include "f4/math/solver.hpp"

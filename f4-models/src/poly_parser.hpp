@@ -9,6 +9,7 @@
 
 #pragma once
 
+#include <f4/math/mat3.hpp>
 #include <f4/models/bsp_node.hpp>
 #include <f4/models/geometry.hpp>
 
@@ -70,64 +71,11 @@ struct DecodedPrim {
 /// Affine transform: v' = rotation * v + translation.
 /// Used to accumulate DOF/translate/scale transforms during tree walk.
 /// nullptr means identity (no transform).
-struct AffineTransform {
-    Mat3x3 rotation;    // default = identity
-    Vec3   translation; // default = zero
-
-    AffineTransform() {
-        // Identity transform
-        rotation.m[0][0] = 1; rotation.m[0][1] = 0; rotation.m[0][2] = 0;
-        rotation.m[1][0] = 0; rotation.m[1][1] = 1; rotation.m[1][2] = 0;
-        rotation.m[2][0] = 0; rotation.m[2][1] = 0; rotation.m[2][2] = 1;
-        translation = {0, 0, 0};
-    }
-
-    /// Apply to a point: rotation * p + translation
-    Vec3 apply_point(const Vec3& p) const {
-        return {
-            rotation.m[0][0]*p.x + rotation.m[0][1]*p.y + rotation.m[0][2]*p.z + translation.x,
-            rotation.m[1][0]*p.x + rotation.m[1][1]*p.y + rotation.m[1][2]*p.z + translation.y,
-            rotation.m[2][0]*p.x + rotation.m[2][1]*p.y + rotation.m[2][2]*p.z + translation.z
-        };
-    }
-
-    /// Apply rotation only to a direction (normal): rotation * n
-    Vec3 apply_direction(const Vec3& n) const {
-        return {
-            rotation.m[0][0]*n.x + rotation.m[0][1]*n.y + rotation.m[0][2]*n.z,
-            rotation.m[1][0]*n.x + rotation.m[1][1]*n.y + rotation.m[1][2]*n.z,
-            rotation.m[2][0]*n.x + rotation.m[2][1]*n.y + rotation.m[2][2]*n.z
-        };
-    }
-
-    /// Check if this is approximately the identity transform.
-    bool is_identity() const {
-        return rotation.m[0][0] == 1.f && rotation.m[0][1] == 0.f && rotation.m[0][2] == 0.f &&
-               rotation.m[1][0] == 0.f && rotation.m[1][1] == 1.f && rotation.m[1][2] == 0.f &&
-               rotation.m[2][0] == 0.f && rotation.m[2][1] == 0.f && rotation.m[2][2] == 1.f &&
-               translation.x == 0.f && translation.y == 0.f && translation.z == 0.f;
-    }
-
-    /// Compose two transforms: result = a ∘ b  (apply b first, then a)
-    /// result.rotation    = a.rotation * b.rotation
-    /// result.translation = a.rotation * b.translation + a.translation
-    static AffineTransform compose(const AffineTransform& a,
-                                   const AffineTransform& b) {
-        AffineTransform result;
-        // Matrix multiply: a.rotation * b.rotation
-        for (int i = 0; i < 3; ++i) {
-            for (int j = 0; j < 3; ++j) {
-                result.rotation.m[i][j] = 0;
-                for (int k = 0; k < 3; ++k) {
-                    result.rotation.m[i][j] += a.rotation.m[i][k] * b.rotation.m[k][j];
-                }
-            }
-        }
-        // Translation: a.rotation * b.translation + a.translation
-        result.translation = a.apply_direction(b.translation) + a.translation;
-        return result;
-    }
-};
+///
+/// Promoted to f4::math::AffineTransform<float> in the 2026 cleanup pass.
+/// Consumers get compose(), apply_point(), apply_direction(), is_identity(),
+/// and the static rotation/translate/scale factories from f4-math.
+using AffineTransform = f4::math::AffineTransformf;
 
 /// Convert a decoded Prim + BSP tree data into renderable vertices/triangles.
 /// The resulting triangles are appended to `mesh`.

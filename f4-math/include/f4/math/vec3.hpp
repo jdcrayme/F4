@@ -17,6 +17,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cmath>
 #include <concepts>
 #include <type_traits>
@@ -105,6 +106,52 @@ struct Vec3 {
     // per-axis factors (e.g. moment-of-inertia tensor application).
     [[nodiscard]] constexpr Vec3 hadamard(const Vec3& o) const noexcept {
         return {x * o.x, y * o.y, z * o.z};
+    }
+
+    // --- Static factories ---
+    [[nodiscard]] static constexpr Vec3 zero() noexcept { return {T{0}, T{0}, T{0}}; }
+
+    // --- Geometric helpers ---
+
+    /// Euclidean distance to another point.
+    [[nodiscard]] T distance_to(const Vec3& o) const noexcept {
+        return (*this - o).length();
+    }
+
+    /// Linear interpolation toward o at parameter t.
+    [[nodiscard]] constexpr Vec3 lerp(const Vec3& o, T t) const noexcept {
+        return *this + (o - *this) * t;
+    }
+
+    /// Reflect this vector about a surface with the given unit normal.
+    /// Assumes n is normalized. Result = v - 2*(v·n)*n.
+    [[nodiscard]] constexpr Vec3 reflect(const Vec3& n) const noexcept {
+        return *this - n * (T{2} * dot(n));
+    }
+
+    /// Project this vector onto the direction of o.
+    [[nodiscard]] constexpr Vec3 project(const Vec3& o) const noexcept {
+        T denom = o.dot(o);
+        if (denom < T{1e-20}) return zero();
+        return o * (dot(o) / denom);
+    }
+
+    /// Component-wise absolute value.
+    [[nodiscard]] Vec3 abs() const noexcept {
+        using std::abs;
+        return {abs(x), abs(y), abs(z)};
+    }
+
+    /// Component-wise min.
+    [[nodiscard]] static constexpr Vec3 min(const Vec3& a, const Vec3& b) noexcept {
+        using std::min;
+        return {min(a.x, b.x), min(a.y, b.y), min(a.z, b.z)};
+    }
+
+    /// Component-wise max.
+    [[nodiscard]] static constexpr Vec3 max(const Vec3& a, const Vec3& b) noexcept {
+        using std::max;
+        return {max(a.x, b.x), max(a.y, b.y), max(a.z, b.z)};
     }
 };
 

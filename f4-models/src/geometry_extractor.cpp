@@ -62,47 +62,21 @@ static bool diag_enabled() {
 // AffineTransform is defined in poly_parser.hpp (shared between
 // poly_parser.cpp and geometry_extractor.cpp). The anonymous-namespace
 // duplicate was removed to fix C2027/C2664 type-mismatch errors.
+// It is now an alias for f4::math::AffineTransformf.
 
 /// Build a rotation-about-Z matrix for a given angle in radians.
-/// Rz(θ) = [cos θ  -sin θ  0]
-///         [sin θ   cos θ  0]
-///         [  0       0    1]
 AffineTransform make_rotation_z(float angle_rad) {
-    AffineTransform t;
-    const float c = std::cos(angle_rad);
-    const float s = std::sin(angle_rad);
-    t.rotation.m[0][0] = c;  t.rotation.m[0][1] = -s; t.rotation.m[0][2] = 0;
-    t.rotation.m[1][0] = s;  t.rotation.m[1][1] = c;  t.rotation.m[1][2] = 0;
-    t.rotation.m[2][0] = 0;  t.rotation.m[2][1] = 0;  t.rotation.m[2][2] = 1;
-    return t;
+    return AffineTransform::rotation_z(angle_rad);
 }
 
 /// Build a rotation-about-X matrix for a given angle in radians.
-/// Rx(θ) = [1    0       0   ]
-///         [0  cos θ  -sin θ ]
-///         [0  sin θ   cos θ ]
 AffineTransform make_rotation_x(float angle_rad) {
-    AffineTransform t;
-    const float c = std::cos(angle_rad);
-    const float s = std::sin(angle_rad);
-    t.rotation.m[0][0] = 1; t.rotation.m[0][1] = 0;  t.rotation.m[0][2] = 0;
-    t.rotation.m[1][0] = 0; t.rotation.m[1][1] = c;  t.rotation.m[1][2] = -s;
-    t.rotation.m[2][0] = 0; t.rotation.m[2][1] = s;  t.rotation.m[2][2] = c;
-    return t;
+    return AffineTransform::rotation_x(angle_rad);
 }
 
 /// Build a rotation-about-Y matrix for a given angle in radians.
-/// Ry(θ) = [ cos θ  0  sin θ]
-///         [   0    1    0  ]
-///         [-sin θ  0  cos θ]
 AffineTransform make_rotation_y(float angle_rad) {
-    AffineTransform t;
-    const float c = std::cos(angle_rad);
-    const float s = std::sin(angle_rad);
-    t.rotation.m[0][0] = c;  t.rotation.m[0][1] = 0; t.rotation.m[0][2] = s;
-    t.rotation.m[1][0] = 0;  t.rotation.m[1][1] = 1; t.rotation.m[1][2] = 0;
-    t.rotation.m[2][0] = -s; t.rotation.m[2][1] = 0; t.rotation.m[2][2] = c;
-    return t;
+    return AffineTransform::rotation_y(angle_rad);
 }
 
 /// Look up the current value of a DOF from the ModelState.

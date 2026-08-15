@@ -21,6 +21,7 @@
 #include <f4/models/model_database.hpp>
 #include <f4/renderer/draw_3d.hpp>
 #include <f4/renderer/mesh_builder.hpp>
+#include <f4/renderer/coord_transform.hpp>
 
 // Now safe to include Raylib (PI macro won't break the flight headers).
 #include <imgui.h>
@@ -367,26 +368,15 @@ void PlayerApp::Impl::draw_visual_entities() {
         const Vector3 pos_rh = enu_to_raylib_v3(tf->position.x, tf->position.y, tf->position.z);
 
         // Convert ENU quaternion to Raylib RH Y-up quaternion.
-        // The TransformComponent's quaternion (qw, qx, qy, qz) is body→world
-        // in ENU (x=east, y=north, z=up). The basis change ENU → RH Y-up is
-        // (x, y, z)_enu → (x, z, -y)_rh, which gives the Hamilton-form rule
-        //   q_rh (Hamilton w,x,y,z) = (qw, qx, qz, -qy)
-        //
-        // IMPORTANT: Raylib's Quaternion struct is {x, y, z, w} — NOT {w,x,y,z}.
-        // The previous code initialized it as {qw, qx, qz, -qy} which put the
-        // scalar `qw` into the x field and produced a 180° X-rotation for an
-        // identity input. The correct initialization puts each Hamilton
-        // component into the matching Raylib field.
+        // Uses the shared enu_quat_to_raylib() from f4-renderer/coord_transform.hpp.
+        const auto q_rh_components = f4::renderer::enu_quat_to_raylib(
+            tf->qw, tf->qx, tf->qy, tf->qz);
         Quaternion q_rh = {
-            static_cast<float>(tf->qx),    // q.x  (was tf->qw — the bug)
-            static_cast<float>(tf->qz),    // q.y  (was tf->qx)
-            static_cast<float>(-tf->qy),   // q.z  (was tf->qz)
-            static_cast<float>(tf->qw)     // q.w  (was -tf->qy)
+            q_rh_components.x,
+            q_rh_components.y,
+            q_rh_components.z,
+            q_rh_components.w
         };
-        const float qlen = std::sqrt(q_rh.x*q_rh.x + q_rh.y*q_rh.y + q_rh.z*q_rh.z + q_rh.w*q_rh.w);
-        if (qlen > 0.0001f) {
-            q_rh.x /= qlen; q_rh.y /= qlen; q_rh.z /= qlen; q_rh.w /= qlen;
-        }
 
         const Matrix model_matrix = MatrixMultiply(
             MatrixTranslate(pos_rh.x, pos_rh.y, pos_rh.z),

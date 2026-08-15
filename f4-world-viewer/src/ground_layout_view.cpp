@@ -15,6 +15,7 @@
 #include "viewer_state.hpp"
 #include <f4/viewer/enum_text.hpp>
 #include <f4/world_convert/theater_data.hpp>
+#include <f4/math/constants.hpp>
 
 #include <imgui.h>
 #include <algorithm>
@@ -237,7 +238,7 @@ void ViewerApp::draw_ground_layout_view() {
             }
 
             const float half = 4.0f;
-            const float rad = -f.facing * 3.14159265f / 180.0f;
+            const float rad = -f.facing * static_cast<float>(f4::math::DEG_TO_RAD);
             const float cos_r = std::cos(rad);
             const float sin_r = std::sin(rad);
             auto rot = [&](float dx, float dy) -> ImVec2 {

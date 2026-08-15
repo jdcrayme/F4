@@ -25,6 +25,7 @@
 
 #include <f4/renderer/coord_transform.hpp>  // enu_to_raylib
 #include <f4/renderer/mesh_builder.hpp>     // build_raylib_meshes, build_mesh_entries
+#include <f4/math/constants.hpp>
 
 #include <f4/models/geometry.hpp>
 #include <f4/models/model_record.hpp>
@@ -156,11 +157,9 @@ DrawStats draw_feature_mesh(
     // no negation). The model_vertex_to_raylib transform already maps
     // FreeFalcon's -Z-up BSP convention to Raylib's +Y-up — no extra
     // RotateX(π) needed (was the GLV3D-DIAG-1 / GLV3D-DIAG-2 bug).
-    constexpr float kPi = 3.14159265358979323846f;
     const auto pos_f = enu_to_raylib(enu_x, enu_y, enu_z);
     const Vector3 pos_rh = { pos_f.x, pos_f.y, pos_f.z };
-    const float facing_rad = (-facing_deg) * (kPi / 180.0f);
-    //const Matrix trn = MatrixTranslate(pos_rh.x, pos_rh.y, pos_rh.z);
+    const float facing_rad = (-facing_deg) * static_cast<float>(f4::math::DEG_TO_RAD);
     const Matrix rot = MatrixRotateY(facing_rad);
     const Matrix model_matrix = MatrixMultiply(rot,
         MatrixTranslate(pos_rh.x, pos_rh.y, pos_rh.z) );

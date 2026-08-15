@@ -4,6 +4,8 @@
 
 #include <f4/renderer/lit_shader.hpp>
 
+#include <f4/math/vec3.hpp>
+
 #include <raylib.h>
 
 #include <cmath>
@@ -131,15 +133,10 @@ bool LitShader::ensure(std::string* status_msg) {
 void LitShader::set_lighting(Vector3 light_dir, Color light_color, float intensity,
                              Color ambient_color) const {
     // Normalize light direction
-    const float dlen = std::sqrt(light_dir.x*light_dir.x +
-                                  light_dir.y*light_dir.y +
-                                  light_dir.z*light_dir.z);
-    if (dlen > 0.0001f) {
-        light_dir.x /= dlen;
-        light_dir.y /= dlen;
-        light_dir.z /= dlen;
-    } else {
-        light_dir = {0.5f, -1.0f, 0.3f};
+    {
+        const f4::math::Vec3f dir{light_dir.x, light_dir.y, light_dir.z};
+        const f4::math::Vec3f n = (dir.length() > 0.0001f) ? dir.normalized() : f4::math::Vec3f{0.5f, -1.0f, 0.3f};
+        light_dir = {n.x, n.y, n.z};
     }
 
     if (dir_loc_ >= 0) {

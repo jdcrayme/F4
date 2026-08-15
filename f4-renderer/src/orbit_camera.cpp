@@ -5,6 +5,8 @@
 
 #include <f4/renderer/orbit_camera.hpp>
 
+#include <f4/math/vec3.hpp>
+
 #include <imgui.h>
 #include <raylib.h>
 
@@ -89,24 +91,15 @@ bool OrbitCamera::handle_input() {
             const float dy = mouse.y - drag_start_.y;
 
             // Compute right and up vectors in world space from the camera
-            const Vector3 delta = {camera_.target.x - camera_.position.x,
-                                    camera_.target.y - camera_.position.y,
-                                    camera_.target.z - camera_.position.z};
-            const float len = std::sqrt(delta.x*delta.x + delta.y*delta.y + delta.z*delta.z);
-            const Vector3 fwd = {delta.x/len, delta.y/len, delta.z/len};
-            const Vector3 world_up = {0, 1, 0};
-            // right = fwd x world_up
-            const Vector3 r = {fwd.y*world_up.z - fwd.z*world_up.y,
-                               fwd.z*world_up.x - fwd.x*world_up.z,
-                               fwd.x*world_up.y - fwd.y*world_up.x};
-            const float rlen = std::sqrt(r.x*r.x + r.y*r.y + r.z*r.z);
-            const Vector3 right = {r.x/rlen, r.y/rlen, r.z/rlen};
-            // up = right x fwd
-            const Vector3 u = {right.y*fwd.z - right.z*fwd.y,
-                               right.z*fwd.x - right.x*fwd.z,
-                               right.x*fwd.y - right.y*fwd.x};
-            const float ulen = std::sqrt(u.x*u.x + u.y*u.y + u.z*u.z);
-            const Vector3 up = {u.x/ulen, u.y/ulen, u.z/ulen};
+            const f4::math::Vec3f delta{
+                camera_.target.x - camera_.position.x,
+                camera_.target.y - camera_.position.y,
+                camera_.target.z - camera_.position.z
+            };
+            const f4::math::Vec3f fwd = delta.normalized();
+            const f4::math::Vec3f world_up{0, 1, 0};
+            const f4::math::Vec3f right = fwd.cross(world_up).normalized();
+            const f4::math::Vec3f up   = right.cross(fwd).normalized();
 
             const float pan_scale = cam_distance_ * config_.pan_speed;
             cam_target_.x = drag_target0_.x - right.x * dx * pan_scale + up.x * dy * pan_scale;

@@ -7,30 +7,9 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 # ============================================================================
 # Third-party dependencies (Raylib + Dear ImGui + rlImGui bindings).
-# Fetched at configure time via FetchContent. On Windows this Just Works
-# with Visual Studio 17 2022 generator; no vcpkg or manual install needed.
+# Consolidated into a shared cmake module in the 2026 cleanup pass.
 # ============================================================================
-include(FetchContent)
-
-# Raylib — turn off everything we don't need to keep build times reasonable.
-set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
-set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-set(BUILD_GAMES    OFF CACHE BOOL "" FORCE)
-set(MACOS_FATLIBRARY OFF CACHE BOOL "" FORCE)
-set(USE_AUDIO OFF CACHE BOOL "" FORCE)
-# PLATFORM_DESKTOP is the default; we don't need PLATFORM_WEB / PLATFORM_ANDROID.
-set(USE_WAYLAND OFF CACHE BOOL "" FORCE)
-# Raylib 5.0's CMakeLists requires CMake 3.5+, but its top-level
-# cmake_minimum_required() predates the policy CMake 4.x enforces. Override
-# the policy version so the subproject configures cleanly.
-set(CMAKE_POLICY_VERSION_MINIMUM 3.5 CACHE STRING "" FORCE)
-FetchContent_Declare(
-    raylib
-    GIT_REPOSITORY https://github.com/raysan5/raylib.git
-    GIT_TAG        5.0
-    GIT_SHALLOW    TRUE
-)
-FetchContent_MakeAvailable(raylib)
+include(f4_raylib_deps)
 
 # CRITICAL FIX (was the "multi-feature layouts render nothing" bug):
 # Raylib's default RL_CULL_DISTANCE_FAR is 1000.0, which is fine for tiny
@@ -56,37 +35,6 @@ string(REPLACE
     "#define RL_CULL_DISTANCE_FAR          100000.0"
     _raylib_config "${_raylib_config}")
 file(WRITE "${raylib_SOURCE_DIR}/src/config.h" "${_raylib_config}")
-
-# Dear ImGui — core + Raylib backend bindings from raylib-extras.
-# Pin ImGui to v1.91.5 (last release before the 1.92 font/texture system
-# rewrite). rlImGui must be pinned to a commit that predates the 1.92
-# migration — see commit dc7479b on rlImGui main.
-set(IMGUI_DISABLE_OBSOLETE_FUNCTIONS OFF CACHE BOOL "" FORCE)
-FetchContent_GetProperties(imgui)
-if(NOT imgui_POPULATED)
-    FetchContent_Declare(
-        imgui
-        GIT_REPOSITORY https://github.com/ocornut/imgui.git
-        GIT_TAG        v1.91.5
-        GIT_SHALLOW    TRUE
-    )
-    FetchContent_MakeAvailable(imgui)
-endif()
-set(IMGUI_DIR ${imgui_SOURCE_DIR})
-
-# rlImGui — pinned to commit 9acdbbf (uses ImTextureID, compatible with
-# ImGui 1.91.x). The 1.92 migration that introduced ImTextureData landed
-# in commit dc7479b.
-FetchContent_GetProperties(rlimgui)
-if(NOT rlimgui_POPULATED)
-    FetchContent_Declare(
-        rlimgui
-        GIT_REPOSITORY https://github.com/raylib-extras/rlImGui.git
-        GIT_TAG        9acdbbf
-    )
-    FetchContent_MakeAvailable(rlimgui)
-endif()
-set(RLIMGUI_DIR ${rlimgui_SOURCE_DIR})
 
 # tinyfiledialogs — native OS file/folder pickers on Windows, macOS, Linux.
 # Replaces the ad-hoc ImGui text-input modal we shipped originally. Single

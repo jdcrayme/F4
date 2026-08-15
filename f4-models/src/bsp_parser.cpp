@@ -419,7 +419,7 @@ NodeIdx walk_node(WalkCtx& ctx, int32_t offset) {
             std::fprintf(stderr,
                 "[DIAG] BSwitchNode @ off=%d switch_number=%d n_children=%d children_off=%d valid=%d\n",
                 offset, node.switch_number, node.n_children, children_off,
-                (int)switch_valid);
+                static_cast<int>(switch_valid));
         }
 
         if (!switch_valid) {
@@ -493,7 +493,7 @@ NodeIdx walk_node(WalkCtx& ctx, int32_t offset) {
             std::fprintf(stderr,
                 "[DIAG] BXSwitchNode @ off=%d switch_number=%d flags=%d n_children=%d children_off=%d valid=%d\n",
                 offset, node.switch_number, node.switch_flags, node.n_children, children_off,
-                (int)xswitch_valid);
+                static_cast<int>(xswitch_valid));
         }
 
         if (!xswitch_valid) {

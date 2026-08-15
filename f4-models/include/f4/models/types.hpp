@@ -12,6 +12,7 @@
 
 #include <cstdint>
 
+#include <f4/math/mat3.hpp>
 #include <f4/math/vec3.hpp>
 
 namespace f4::models {
@@ -119,10 +120,15 @@ enum class PolyType : uint8_t {
 // arrays of Vec3 directly from disk) is unchanged.
 using Vec3 = f4::math::Vec3<float>;
 
-struct Mat3x3 {
-    // Row-major: m[row][col]
-    float m[3][3] = {{1,0,0},{0,1,0},{0,0,1}};
-};
+// Mat3x3 is an alias for f4::math::Mat3<float> — the previous bare struct
+// { float m[3][3] } was promoted to f4-math in the 2026 cleanup pass.
+// Consumers get the full Mat3 operator set (multiply, transpose, determinant,
+// axis rotation factories, etc.) from f4-math, instead of the bare struct
+// that had no operations.
+//
+// Layout: 9 contiguous floats, 36 bytes, no padding — identical to the
+// previous struct, so sizeof(Mat3x3) in the binary parsers is unchanged.
+using Mat3x3 = f4::math::Mat3f;
 
 struct Plane {
     // Plane equation: a*x + b*y + c*z + d > 0

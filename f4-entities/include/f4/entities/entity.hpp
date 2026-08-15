@@ -353,6 +353,14 @@ namespace f4::entities {
         // World-frame velocity (ft/s) and body-frame rates (rad/s).
         double vx = 0.0, vy = 0.0, vz = 0.0;
         double p = 0.0, q = 0.0, r = 0.0;
+
+        /// Convenience: world-frame velocity as a WorldPosition.
+        /// Semantically velocity is not position (different physical dimension),
+        /// but both share the ENU frame and the same struct layout.
+        /// This accessor makes the intent explicit at call sites.
+        [[nodiscard]] f4::geo::WorldPosition velocity() const noexcept {
+            return f4::geo::WorldPosition(vx, vy, vz);
+        }
     };
 
     /// Links a sim entity to its campaign-level identity.

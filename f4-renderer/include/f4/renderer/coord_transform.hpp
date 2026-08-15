@@ -10,13 +10,16 @@
 
 #pragma once
 
+#include <cmath>
+#include <f4/math/vec3.hpp>
+
 namespace f4::renderer {
 
-/// A simple 3-float vector. Defined here (not using Raylib's Vector3) so
-/// the conversion functions can be tested without linking Raylib.
-struct Float3 {
-    float x, y, z;
-};
+/// Float3 is an alias for f4::math::Vec3f. Previously a bare struct
+/// {float x,y,z}, now provides length(), normalized(), dot(), cross(),
+/// etc. from f4-math. Kept as a short alias because it's used in
+/// function-pointer signatures (mesh_builder.hpp).
+using Float3 = f4::math::Vec3f;
 
 /// Convert a model-space vertex (LH Y-up, FreeFalcon BSP convention) to
 /// RH Y-up coordinates.
@@ -27,8 +30,8 @@ struct Float3 {
 /// Conversion: (x, y, z) -> (x, -z, y). The X and Y axes stay the same;
 /// negating Z flips the handedness from LH to RH, and Y swaps with Z to
 /// convert from Y-up to the target Y-up orientation.
-inline Float3 model_vertex_to_raylib(float x, float y, float z) noexcept {
-    return Float3{y, z, -x};
+inline f4::math::Vec3f model_vertex_to_raylib(float x, float y, float z) noexcept {
+    return f4::math::Vec3f{y, z, -x};
 }
 
 /// Convert an ENU position (feet) to RH Y-up coordinates.
@@ -37,12 +40,40 @@ inline Float3 model_vertex_to_raylib(float x, float y, float z) noexcept {
 /// RH Y-up: x=right, y=up, z=toward viewer (-north)
 ///
 /// So a point 100 ft east, 200 ft north, 50 ft up maps to (100, 50, -200).
-inline Float3 enu_to_raylib(double east_ft, double north_ft, double up_ft) noexcept {
-    return Float3{
+inline f4::math::Vec3f enu_to_raylib(double east_ft, double north_ft, double up_ft) noexcept {
+    return f4::math::Vec3f{
         static_cast<float>(east_ft),
         static_cast<float>(up_ft),
         static_cast<float>(-north_ft)
     };
+}
+
+/// Convert an ENU quaternion (Hamilton convention, body-to-world) to
+/// Raylib RH Y-up quaternion components.
+///
+/// The basis change ENU → RH Y-up is (x,y,z)_enu → (x,z,-y)_rh,
+/// which gives the Hamilton-form rule:
+///   q_rh (Hamilton w,x,y,z) = (qw, qx, qz, -qy)
+///
+/// Returns {x, y, z, w} in Raylib's Quaternion struct order.
+/// The result is normalized to unit length.
+struct ENUToRHQuat {
+    float x, y, z, w;  // Raylib Quaternion order
+};
+inline ENUToRHQuat enu_quat_to_raylib(double qw, double qx, double qy, double qz) noexcept {
+    ENUToRHQuat q_rh{
+        static_cast<float>(qx),    // q.x  (Hamilton i)
+        static_cast<float>(qz),    // q.y  (Hamilton k)
+        static_cast<float>(-qy),   // q.z  (Hamilton -j)
+        static_cast<float>(qw)     // q.w  (Hamilton scalar)
+    };
+    // Normalize to unit length (guard against drift).
+    const float qlen = std::sqrt(q_rh.x*q_rh.x + q_rh.y*q_rh.y +
+                                  q_rh.z*q_rh.z + q_rh.w*q_rh.w);
+    if (qlen > 0.0001f) {
+        q_rh.x /= qlen; q_rh.y /= qlen; q_rh.z /= qlen; q_rh.w /= qlen;
+    }
+    return q_rh;
 }
 
 } // namespace f4::renderer

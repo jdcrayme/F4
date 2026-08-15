@@ -13,6 +13,8 @@
 #include "scene.hpp"
 
 #include <f4/install/installation.hpp>
+#include <f4/math/constants.hpp>
+#include <f4/math/vec3.hpp>
 #include <rlImGui.h>
 #include <raylib.h>
 
@@ -288,11 +290,11 @@ void ViewerApp::set_initial_camera(const float eye[3], const float target[3]) {
     //                                    sin(pitch),
     //                                    cos(pitch)*cos(yaw))
     const Vector3 diff = {eye_v.x - tgt.x, eye_v.y - tgt.y, eye_v.z - tgt.z};
-    const float dist = std::sqrt(diff.x*diff.x + diff.y*diff.y + diff.z*diff.z);
+    const float dist = f4::math::Vec3f{diff.x, diff.y, diff.z}.length();
     impl_->orbit_cam.set_distance(dist > 0.001f ? dist : 100.0f);
 
     if (dist > 0.001f) {
-        static constexpr float kRad2Deg = 180.0f / 3.14159265358979323846f;
+        static constexpr float kRad2Deg = static_cast<float>(f4::math::RAD_TO_DEG);
         const float pitch_rad = std::asin(std::max(-1.0f, std::min(1.0f, diff.y / dist)));
         const float yaw_rad = std::atan2(diff.x, diff.z);
         impl_->orbit_cam.set_yaw(yaw_rad * kRad2Deg);
