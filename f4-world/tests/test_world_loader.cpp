@@ -38,6 +38,7 @@ WorldState make_objective_world() {
     o1.owner = 2; o1.first_owner = 2; o1.priority = 5; o1.nameid = 10;
     o1.id_creator = 1; o1.id_num = 1001; o1.camp_id = 50;
     o1.obj_flags = 0x00FF; o1.parent_id = 0;
+    o1.objective_type = 1;  // TYPE_AIRBASE
     o1.supply = 80; o1.fuel = 60; o1.losses = 10; o1.last_repair = 5000;
     o1.has_radar = true;
     for (int i = 0; i < 8; ++i) o1.detect_ratio[i] = 0.1f * i;
@@ -56,6 +57,7 @@ WorldState make_objective_world() {
     o2.type = 200; o2.entity_type = 200; o2.x = 600; o2.y = 500; o2.z = 0.0f;
     o2.owner = 1; o2.first_owner = 1; o2.priority = 3; o2.nameid = 20;
     o2.id_creator = 1; o2.id_num = 1002; o2.camp_id = 51;
+    o2.objective_type = 6;  // TYPE_BRIDGE
     o2.class_name = "Highway Bridge";
 
     // Objective 3: city with supply but no radar, with fstatus
@@ -63,6 +65,7 @@ WorldState make_objective_world() {
     o3.type = 300; o3.entity_type = 300; o3.x = 700; o3.y = 600; o3.z = 50.0f;
     o3.owner = 2; o3.first_owner = 1; o3.priority = 7; o3.nameid = 30;
     o3.id_creator = 2; o3.id_num = 1003; o3.camp_id = 52;
+    o3.objective_type = 8;  // TYPE_CITY
     o3.supply = 40; o3.fuel = 30; o3.losses = 5; o3.last_repair = 3000;
     o3.fstatus = {0, 1, 2, 3};
     o3.class_name = "Seoul";
@@ -170,6 +173,11 @@ TEST(WorldLoader, TeamEntitiesHaveCorrectTagsAndIdentity) {
     EXPECT_TRUE(h.has_tag(tags::ALIVE));
     EXPECT_TRUE(h.has_tag(tags::ROLE));
     EXPECT_EQ(*h.get_tag(tags::ROLE)->as_string(), "team");
+
+    // Phase A: NAME tag — promotes the team callsign so consumers can
+    // display/filter team names without querying CampaignIdentityComponent.
+    ASSERT_TRUE(h.has_tag(tags::NAME));
+    EXPECT_EQ(*h.get_tag(tags::NAME)->as_string(), "ROK");
 }
 
 TEST(WorldLoader, TeamComponentCarriesTeaEnrichment) {
@@ -281,6 +289,9 @@ TEST(PopulateCampaign, HasCorrectTags) {
     EXPECT_TRUE(h.has_tag(tags::ROLE));
     EXPECT_EQ(*h.get_tag(tags::ROLE)->as_string(), "campaign");
     EXPECT_TRUE(h.has_tag(tags::ALIVE));
+    // Phase A: NAME tag — campaign is a singleton, so a stable literal.
+    ASSERT_TRUE(h.has_tag(tags::NAME));
+    EXPECT_EQ(*h.get_tag(tags::NAME)->as_string(), "Campaign");
 }
 
 // ============================================================================
@@ -472,6 +483,37 @@ TEST(PopulateObjectives, TagsAreCorrect) {
     EXPECT_TRUE(h1.has_tag(tags::ALIVE));
     // Owner 2 → team tag is int 2
     EXPECT_EQ(*h1.get_tag(tags::TEAM)->as_int(), 2);
+}
+
+// Phase A: NAME / CLASS / ICON tag enrichment for objectives.
+TEST(PopulateObjectives, PhaseA_NameClassIconTags) {
+    EntityWorld ew;
+    WorldState ws = make_objective_world();
+    std::unordered_map<uint32_t, EntityId> obj_id_map;
+    auto ids = populate_objectives(ew, ws, obj_id_map);
+
+    // o1: "02_20 Airbase 2", objective_type=1 (AIRBASE)
+    EntityHandle h1(ids[0], &ew);
+    ASSERT_TRUE(h1.has_tag(tags::NAME));
+    EXPECT_EQ(*h1.get_tag(tags::NAME)->as_string(), "02_20 Airbase 2");
+    ASSERT_TRUE(h1.has_tag(tags::CLASS));
+    EXPECT_EQ(*h1.get_tag(tags::CLASS)->as_int(), 1);
+    ASSERT_TRUE(h1.has_tag(tags::ICON));
+    EXPECT_EQ(*h1.get_tag(tags::ICON)->as_int(), 1);
+
+    // o2: "Highway Bridge", objective_type=6 (BRIDGE)
+    EntityHandle h2(ids[1], &ew);
+    ASSERT_TRUE(h2.has_tag(tags::NAME));
+    EXPECT_EQ(*h2.get_tag(tags::NAME)->as_string(), "Highway Bridge");
+    EXPECT_EQ(*h2.get_tag(tags::CLASS)->as_int(), 6);
+    EXPECT_EQ(*h2.get_tag(tags::ICON)->as_int(), 6);
+
+    // o3: "Seoul", objective_type=8 (CITY)
+    EntityHandle h3(ids[2], &ew);
+    ASSERT_TRUE(h3.has_tag(tags::NAME));
+    EXPECT_EQ(*h3.get_tag(tags::NAME)->as_string(), "Seoul");
+    EXPECT_EQ(*h3.get_tag(tags::CLASS)->as_int(), 8);
+    EXPECT_EQ(*h3.get_tag(tags::ICON)->as_int(), 8);
 }
 
 // ============================================================================
@@ -698,6 +740,48 @@ TEST(PopulateUnits, RoleTags) {
     EXPECT_EQ(*h_pk.get_tag(tags::ROLE)->as_string(), "package");
 }
 
+// Phase A: NAME / CLASS / ICON tag enrichment for units.
+TEST(PopulateUnits, PhaseA_NameClassIconTags) {
+    EntityWorld ew;
+    WorldState ws = make_unit_world();
+    std::unordered_map<uint32_t, EntityId> obj_id_map;
+    std::unordered_map<uint32_t, EntityId> unit_id_map;
+    auto ids = populate_units(ew, ws, obj_id_map, unit_id_map);
+
+    // u1: Battalion, unit_class=1, unit_subtype=1
+    //   NAME  = "Armor Battalion"
+    //   CLASS = 1 (unit_subtype)
+    //   ICON  = (1 << 8) | 1 = 0x101 = 257
+    EntityHandle h_bat(ids[0], &ew);
+    ASSERT_TRUE(h_bat.has_tag(tags::NAME));
+    EXPECT_EQ(*h_bat.get_tag(tags::NAME)->as_string(), "Armor Battalion");
+    ASSERT_TRUE(h_bat.has_tag(tags::CLASS));
+    EXPECT_EQ(*h_bat.get_tag(tags::CLASS)->as_int(), 1);
+    ASSERT_TRUE(h_bat.has_tag(tags::ICON));
+    EXPECT_EQ(*h_bat.get_tag(tags::ICON)->as_int(),
+              static_cast<int64_t>((1u << 8) | 1u));
+
+    // u3: Squadron, unit_class=3, unit_subtype=3
+    //   NAME  = "18th Fighter Squadron"
+    //   CLASS = 3
+    //   ICON  = (3 << 8) | 3 = 0x303 = 771
+    EntityHandle h_sq(ids[2], &ew);
+    ASSERT_TRUE(h_sq.has_tag(tags::NAME));
+    EXPECT_EQ(*h_sq.get_tag(tags::NAME)->as_string(), "18th Fighter Squadron");
+    EXPECT_EQ(*h_sq.get_tag(tags::CLASS)->as_int(), 3);
+    EXPECT_EQ(*h_sq.get_tag(tags::ICON)->as_int(),
+              static_cast<int64_t>((3u << 8) | 3u));
+
+    // u5: Package, unit_class=6, unit_subtype=5
+    //   ICON  = (6 << 8) | 5 = 0x605 = 1541
+    EntityHandle h_pk(ids[4], &ew);
+    ASSERT_TRUE(h_pk.has_tag(tags::NAME));
+    EXPECT_EQ(*h_pk.get_tag(tags::NAME)->as_string(), "Strike Package");
+    EXPECT_EQ(*h_pk.get_tag(tags::CLASS)->as_int(), 5);
+    EXPECT_EQ(*h_pk.get_tag(tags::ICON)->as_int(),
+              static_cast<int64_t>((6u << 8) | 5u));
+}
+
 TEST(PopulateUnits, IdMapBuilt) {
     EntityWorld ew;
     WorldState ws = make_unit_world();
@@ -725,17 +809,31 @@ TEST(PopulateWorld, CreatesAllEntityKinds) {
 
     auto pw = populate_world(ew, ws);
 
+    // Phase B: the per-kind EntityId vectors are no longer stored on
+    // PopulatedWorld — derive them from tags instead. This is the same
+    // pattern the world viewer uses (snapshot once at load time).
+    auto camp_ids  = ew.with_tag(tags::ROLE, TagValue::from(std::string("campaign")));
+    auto team_ids  = ew.with_tag(tags::ROLE, TagValue::from(std::string("team")));
+    auto obj_ids   = ew.with_tag(tags::ROLE, TagValue::from(std::string("objective")));
+    // Units have one of six ROLE values; query by OPDOMAIN instead.
+    std::vector<EntityId> unit_ids;
+    for (const char* d : {"air", "ground", "naval", "unknown"}) {
+        auto ids = ew.with_tag(tags::OPDOMAIN, TagValue::from(std::string(d)));
+        unit_ids.insert(unit_ids.end(), ids.begin(), ids.end());
+    }
+
     // Campaign: 1 entity
-    EXPECT_TRUE(pw.campaign.valid());
+    ASSERT_EQ(camp_ids.size(), 1u);
+    EXPECT_TRUE(camp_ids[0].valid());
 
     // Teams: 3 non-empty teams
-    EXPECT_EQ(pw.teams.size(), 3u);
+    EXPECT_EQ(team_ids.size(), 3u);
 
     // Objectives: 3
-    EXPECT_EQ(pw.objectives.size(), 3u);
+    EXPECT_EQ(obj_ids.size(), 3u);
 
     // Units: 5
-    EXPECT_EQ(pw.units.size(), 5u);
+    EXPECT_EQ(unit_ids.size(), 5u);
 
     // Total entities: 1 + 3 + 3 + 5 = 12
     EXPECT_EQ(ew.size(), 12u);
@@ -804,9 +902,12 @@ TEST(PopulateWorld, RealFixture) {
     EntityWorld ew;
     auto pw = populate_world(ew, ws);
 
-    // Campaign entity
-    EXPECT_TRUE(pw.campaign.valid());
-    EntityHandle camp_h(pw.campaign, &ew);
+    // Phase B: derive per-kind lists from tags (PopulatedWorld no longer
+    // carries the per-kind EntityId vectors).
+    auto camp_ids = ew.with_tag(tags::ROLE, TagValue::from(std::string("campaign")));
+    ASSERT_EQ(camp_ids.size(), 1u);
+    EXPECT_TRUE(camp_ids[0].valid());
+    EntityHandle camp_h(camp_ids[0], &ew);
     EXPECT_TRUE(camp_h.has<CampaignStateComponent>());
 
     // Team entities: some slots may be empty, so count via component
@@ -815,12 +916,13 @@ TEST(PopulateWorld, RealFixture) {
     EXPECT_LE(team_entities.size(), 8u);
 
     // Objective entities: one per WorldState objective
-    EXPECT_EQ(pw.objectives.size(), 2659u);
+    auto obj_ids = ew.with_tag(tags::ROLE, TagValue::from(std::string("objective")));
+    EXPECT_EQ(obj_ids.size(), 2659u);
     auto obj_with_transform = ew.with_component<ObjectiveTypeComponent>();
     EXPECT_EQ(obj_with_transform.size(), 2659u);
 
     // Every objective has TransformComponent, OwnershipComponent, PropertyBag
-    for (auto id : pw.objectives) {
+    for (auto id : obj_ids) {
         EntityHandle h(id, &ew);
         ASSERT_TRUE(h.has<TransformComponent>());
         ASSERT_TRUE(h.has<OwnershipComponent>());
@@ -828,12 +930,17 @@ TEST(PopulateWorld, RealFixture) {
     }
 
     // Unit entities: one per WorldState unit
-    EXPECT_EQ(pw.units.size(), 683u);
+    std::vector<EntityId> unit_ids;
+    for (const char* d : {"air", "ground", "naval", "unknown"}) {
+        auto ids = ew.with_tag(tags::OPDOMAIN, TagValue::from(std::string(d)));
+        unit_ids.insert(unit_ids.end(), ids.begin(), ids.end());
+    }
+    EXPECT_EQ(unit_ids.size(), 683u);
     auto unit_with_core = ew.with_component<UnitCoreComponent>();
     EXPECT_EQ(unit_with_core.size(), 683u);
 
     // Every unit has TransformComponent, UnitCoreComponent, PropertyBag
-    for (auto id : pw.units) {
+    for (auto id : unit_ids) {
         EntityHandle h(id, &ew);
         ASSERT_TRUE(h.has<TransformComponent>());
         ASSERT_TRUE(h.has<UnitCoreComponent>());
@@ -862,10 +969,10 @@ TEST(PopulateWorld, RealFixture) {
     // Verify the structural payoff: we can query entities by component
     // type, not by indexing into WorldState vectors.
     auto all_transforms = ew.with_component<TransformComponent>();
-    EXPECT_EQ(all_transforms.size(), pw.objectives.size() + pw.units.size());
+    EXPECT_EQ(all_transforms.size(), obj_ids.size() + unit_ids.size());
 
     auto all_ownership = ew.with_component<OwnershipComponent>();
-    EXPECT_EQ(all_ownership.size(), pw.objectives.size());
+    EXPECT_EQ(all_ownership.size(), obj_ids.size());
 }
 
 // ============================================================================
@@ -912,18 +1019,19 @@ TEST(ConvenienceAPI, LoadFromString) {
     EntityWorld ew;
     auto pw = load_from_string(json, ew);
 
-    // Campaign entity
-    EXPECT_TRUE(pw.campaign.valid());
+    // Phase B: campaign is now derived from tags, not stored on PopulatedWorld.
     auto camp_entities = ew.with_component<CampaignStateComponent>();
     EXPECT_EQ(camp_entities.size(), 1u);
+    EXPECT_TRUE(camp_entities[0].valid());
     EntityHandle camp_h(camp_entities[0], &ew);
     auto* cs = camp_h.get<CampaignStateComponent>();
     ASSERT_NE(cs, nullptr);
     EXPECT_EQ(cs->current_time, 1000);
     EXPECT_EQ(cs->te_victory_points, 42);
 
-    // Team entity
-    EXPECT_EQ(pw.teams.size(), 1u);
+    // Team entity (derived from tags)
+    auto team_ids = ew.with_tag(tags::ROLE, TagValue::from(std::string("team")));
+    EXPECT_EQ(team_ids.size(), 1u);
     auto team_entities = ew.with_component<TeamComponent>();
     EXPECT_EQ(team_entities.size(), 1u);
 }
@@ -936,10 +1044,20 @@ TEST(ConvenienceAPI, LoadRealFixture) {
     auto pw = load(path, ew);
 
     // Same results as the manual WorldState → populate_world pipeline
-    EXPECT_TRUE(pw.campaign.valid());
-    EXPECT_GE(pw.teams.size(), 4u);
-    EXPECT_EQ(pw.objectives.size(), 2659u);
-    EXPECT_EQ(pw.units.size(), 683u);
+    // (Phase B: counts derived from tags, not stored on PopulatedWorld)
+    auto camp_ids = ew.with_tag(tags::ROLE, TagValue::from(std::string("campaign")));
+    EXPECT_EQ(camp_ids.size(), 1u);
+    EXPECT_TRUE(camp_ids[0].valid());
+    auto team_ids = ew.with_tag(tags::ROLE, TagValue::from(std::string("team")));
+    EXPECT_GE(team_ids.size(), 4u);
+    auto obj_ids = ew.with_tag(tags::ROLE, TagValue::from(std::string("objective")));
+    EXPECT_EQ(obj_ids.size(), 2659u);
+    std::vector<EntityId> unit_ids;
+    for (const char* d : {"air", "ground", "naval", "unknown"}) {
+        auto ids = ew.with_tag(tags::OPDOMAIN, TagValue::from(std::string(d)));
+        unit_ids.insert(unit_ids.end(), ids.begin(), ids.end());
+    }
+    EXPECT_EQ(unit_ids.size(), 683u);
 
     // Can query by components
     auto radar = ew.with_component<RadarComponent>();

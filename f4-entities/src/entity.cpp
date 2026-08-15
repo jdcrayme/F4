@@ -37,7 +37,7 @@ EntityHandle EntityWorld::create() {
         auto& rec = entities_[index];
         ++rec.generation;           // bump generation so stale handles fail
         rec.alive = true;
-        rec.tags.clear();
+        rec.tags.clear();           // Phase D: index maintenance happens via set_tag()
         rec.components.clear();
     } else {
         index = static_cast<uint32_t>(entities_.size());
@@ -52,6 +52,13 @@ EntityHandle EntityWorld::create() {
 void EntityWorld::destroy(EntityId id) {
     auto* rec = find(id);
     if (!rec || !rec->alive) return;
+    // Phase D: remove this entity from every tag bucket it's in, so the
+    // index stays consistent and with_tag_ref() never returns a destroyed
+    // EntityId. We walk rec->tags (the per-entity tag map) and remove id
+    // from the corresponding (key, value) bucket in tag_index_.
+    for (const auto& [key, value] : rec->tags) {
+        index_tag_remove(key, value, id);
+    }
     rec->alive = false;
     rec->tags.clear();
     rec->components.clear();
@@ -77,16 +84,21 @@ EntityWorld::EntityRecord* EntityWorld::find(EntityId id) noexcept {
 }
 
 std::vector<EntityId> EntityWorld::with_tag(const TagKey& key, const TagValue& value) const {
-    std::vector<EntityId> out;
-    for (uint32_t i = 0; i < entities_.size(); ++i) {
-        const auto& rec = entities_[i];
-        if (!rec.alive) continue;
-        auto it = rec.tags.find(key);
-        if (it != rec.tags.end() && it->second == value) {
-            out.push_back(EntityId::make(i, rec.generation));
-        }
-    }
-    return out;
+    // Phase D: delegate to the O(1) index lookup and copy the result.
+    // The old O(N) linear scan is gone; this now costs one outer hash lookup
+    // + one inner hash lookup + one vector copy. For hot-path callers that
+    // don't need a copy, use with_tag_ref() directly.
+    return with_tag_ref(key, value);
+}
+
+const std::vector<EntityId>& EntityWorld::with_tag_ref(const TagKey& key, const TagValue& value) const {
+    // O(1) lookup: two hash finds. If either level misses, return a stable
+    // empty vector so the caller can iterate without a null check.
+    auto kit = tag_index_.find(key);
+    if (kit == tag_index_.end()) return empty_buckets_;
+    auto vit = kit->second.find(value);
+    if (vit == kit->second.end()) return empty_buckets_;
+    return vit->second;
 }
 
 std::vector<EntityId> EntityWorld::query(std::function<bool(const TagSet&)> pred) const {
@@ -186,7 +198,29 @@ void EntityHandle::set_tag(const TagKey& key, TagValue value) {
     if (!world_) throw std::runtime_error("EntityHandle::set_tag: no world");
     auto* rec = world_->find(id_);
     if (!rec) throw std::runtime_error("EntityHandle::set_tag: invalid entity");
-    rec->tags[key] = std::move(value);
+
+    // Phase D: maintain the tag index. If this entity already has a value
+    // for this key, we're overwriting it — remove the entity from the old
+    // bucket first, then add to the new bucket. The TagValue is moved into
+    // the per-entity tag map; the index gets its own copy (it needs its own
+    // key for lookup).
+    auto existing = rec->tags.find(key);
+    if (existing != rec->tags.end() && existing->second == value) {
+        // Same value — no index change needed, just update the tag map
+        // (which is a no-op assignment, but keeps the code path uniform).
+        existing->second = std::move(value);
+        return;
+    }
+    if (existing != rec->tags.end()) {
+        // Overwrite: remove from old bucket, fall through to add to new.
+        world_->index_tag_remove(key, existing->second, id_);
+        existing->second = std::move(value);
+    } else {
+        rec->tags[key] = std::move(value);
+    }
+    // Re-read the value we just stored (it was moved from) and add to index.
+    // We use the value now stored in rec->tags as the source of truth.
+    world_->index_tag_add(key, rec->tags.at(key), id_);
 }
 
 std::optional<TagValue> EntityHandle::get_tag(const TagKey& key) const {
@@ -200,6 +234,51 @@ std::optional<TagValue> EntityHandle::get_tag(const TagKey& key) const {
 
 bool EntityHandle::has_tag(const TagKey& key) const {
     return get_tag(key).has_value();
+}
+
+// ============================================================================
+// Phase D: tag index maintenance helpers.
+//
+// These are called by set_tag() (add + remove-on-overwrite) and destroy()
+// (remove for every tag on the entity). They maintain the invariant that
+// tag_index_[K][V] contains exactly the live entities with tag K=V.
+//
+// Both are O(1) amortized for the hash lookups; the vector append/erase is
+// O(1) amortized (append) or O(n) (erase by value, where n is the bucket
+// size). Tag mutations are rare (set at load, destroyed basically never in
+// the viewer), so the erase cost is acceptable.
+// ============================================================================
+
+void EntityWorld::index_tag_add(const TagKey& key, const TagValue& value, EntityId id) {
+    // operator[] default-constructs the inner map and/or vector if absent.
+    tag_index_[key][value].push_back(id);
+}
+
+void EntityWorld::index_tag_remove(const TagKey& key, const TagValue& value, EntityId id) {
+    auto kit = tag_index_.find(key);
+    if (kit == tag_index_.end()) return;
+    auto vit = kit->second.find(value);
+    if (vit == kit->second.end()) return;
+    auto& bucket = vit->second;
+    // Linear scan for the EntityId. EntityId is a 64-bit value (index |
+    // generation), so == is a single comparison. The bucket is typically
+    // small (e.g. 2659 objectives, ~5 unit classes, ~8 teams).
+    for (auto it = bucket.begin(); it != bucket.end(); ++it) {
+        if (*it == id) {
+            bucket.erase(it);
+            break;
+        }
+    }
+    // Optional cleanup: if the bucket is now empty, erase it from the inner
+    // map to keep the index compact. This also lets with_tag_ref() return
+    // the shared empty_buckets_ vector for this (key, value) pair.
+    if (bucket.empty()) {
+        kit->second.erase(vit);
+        // And if the inner map is now empty, erase it from the outer map.
+        if (kit->second.empty()) {
+            tag_index_.erase(kit);
+        }
+    }
 }
 
 // ============================================================================

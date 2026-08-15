@@ -180,6 +180,63 @@ struct ViewerApp::Impl {
     /// is loaded so we can resolve owner slot → team entity quickly.
     std::vector<f4::entities::EntityId> team_by_slot;
 
+    // Phase C/D: the per-kind EntityId caches from Phase B have been
+    // removed. with_tag_ref() is now O(1) (Phase D added a per-tag-value
+    // index to EntityWorld), so the render loops call it directly each
+    // frame — zero allocation, zero copy, and no stale-cache risk.
+    //
+    // The convenience helpers below (campaign_entity(), teams(), objectives(),
+    // units()) wrap the verbose with_tag_ref() calls so the render loops
+    // stay readable. Each returns a const-ref to the internal index vector
+    // (or a single EntityId for campaign), valid until the next world
+    // mutation that touches that bucket.
+    //
+    // Campaign is a singleton (at most one entity with role="campaign"),
+    // so we return the first match or a null EntityId if none exists.
+
+    /// The campaign entity (role="campaign"), or a null EntityId if no
+    /// world is loaded. O(1) tag-index lookup.
+    [[nodiscard]] f4::entities::EntityId campaign_entity() const {
+        const auto& ids = eworld.with_tag_ref(
+            f4::entities::tags::ROLE,
+            f4::entities::TagValue::from(std::string("campaign")));
+        return ids.empty() ? f4::entities::EntityId{} : ids[0];
+    }
+    /// All team entities (role="team"), as a const-ref into the tag index.
+    /// O(1) lookup. Valid until the next set_tag/destroy that touches the
+    /// "team" bucket.
+    [[nodiscard]] const std::vector<f4::entities::EntityId>& teams() const {
+        return eworld.with_tag_ref(
+            f4::entities::tags::ROLE,
+            f4::entities::TagValue::from(std::string("team")));
+    }
+    /// All objective entities (role="objective"). O(1) lookup.
+    [[nodiscard]] const std::vector<f4::entities::EntityId>& objectives() const {
+        return eworld.with_tag_ref(
+            f4::entities::tags::ROLE,
+            f4::entities::TagValue::from(std::string("objective")));
+    }
+    /// All unit entities. Units have one of six ROLE values (battalion/
+    /// brigade/squadron/taskforce/flight/package), so we query by
+    /// OPDOMAIN instead — every unit has a domain tag (air/ground/naval/
+    /// unknown), while teams and objectives don't. Returns a const-ref
+    /// to a static-per-world composite vector.
+    /// NOTE: unlike teams()/objectives(), this one cannot return a single
+    /// const-ref into the index because units are spread across 4 domain
+    /// buckets. We build a composite on each call. This is O(total_units)
+    /// per call — acceptable for the render loops (called ~4x per frame),
+    /// but if it becomes hot, add a "category=unit" tag in the loader.
+    [[nodiscard]] std::vector<f4::entities::EntityId> units() const {
+        std::vector<f4::entities::EntityId> out;
+        for (const char* d : {"air", "ground", "naval", "unknown"}) {
+            const auto& ids = eworld.with_tag_ref(
+                f4::entities::tags::OPDOMAIN,
+                f4::entities::TagValue::from(std::string(d)));
+            out.insert(out.end(), ids.begin(), ids.end());
+        }
+        return out;
+    }
+
     // POLISH-2.1: RenderTexture terrain cache. The naive draw loop called
     // DrawRectangleRec once per terrain cell — 128×128 = 16,384 calls per
     // frame just for terrain, which dominated the frame time on large

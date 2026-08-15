@@ -257,10 +257,20 @@ TEST(InterfaceBridge, PopulatesWorldFromMockSources) {
 
     PopulatedWorld pop = populate_world(ew, camp, teams, objs, units);
 
-    EXPECT_TRUE(pop.campaign.valid());
-    EXPECT_EQ(pop.teams.size(), 1u);
-    EXPECT_EQ(pop.objectives.size(), 1u);
-    EXPECT_EQ(pop.units.size(), 1u);
+    // Phase B: per-kind counts are now derived from tags, not stored on
+    // PopulatedWorld (which only carries the two VU_ID maps now).
+    auto camp_ids = ew.with_tag(tags::ROLE, TagValue::from(std::string("campaign")));
+    ASSERT_EQ(camp_ids.size(), 1u);
+    EXPECT_TRUE(camp_ids[0].valid());
+    EXPECT_EQ(ew.with_tag(tags::ROLE, TagValue::from(std::string("team"))).size(), 1u);
+    EXPECT_EQ(ew.with_tag(tags::ROLE, TagValue::from(std::string("objective"))).size(), 1u);
+    // Units have one of six ROLE values; query by OPDOMAIN instead.
+    std::vector<EntityId> unit_ids;
+    for (const char* d : {"air", "ground", "naval", "unknown"}) {
+        auto ids = ew.with_tag(tags::OPDOMAIN, TagValue::from(std::string(d)));
+        unit_ids.insert(unit_ids.end(), ids.begin(), ids.end());
+    }
+    EXPECT_EQ(unit_ids.size(), 1u);
 }
 
 TEST(InterfaceBridge, CampaignEntityHasCorrectComponent) {
@@ -272,7 +282,10 @@ TEST(InterfaceBridge, CampaignEntityHasCorrectComponent) {
 
     PopulatedWorld pop = populate_world(ew, camp, teams, objs, units);
 
-    EntityHandle h(pop.campaign, &ew);
+    // Phase B: campaign entity derived from tags.
+    auto camp_ids = ew.with_tag(tags::ROLE, TagValue::from(std::string("campaign")));
+    ASSERT_EQ(camp_ids.size(), 1u);
+    EntityHandle h(camp_ids[0], &ew);
     ASSERT_TRUE(h.has<CampaignStateComponent>());
     auto* cs = h.get<CampaignStateComponent>();
     EXPECT_EQ(cs->current_time, 12345);
@@ -288,7 +301,10 @@ TEST(InterfaceBridge, TeamEntityHasIdentityAndTeamComponents) {
 
     PopulatedWorld pop = populate_world(ew, camp, teams, objs, units);
 
-    EntityHandle h(pop.teams[0], &ew);
+    // Phase B: team entity derived from tags.
+    auto team_ids = ew.with_tag(tags::ROLE, TagValue::from(std::string("team")));
+    ASSERT_EQ(team_ids.size(), 1u);
+    EntityHandle h(team_ids[0], &ew);
     ASSERT_TRUE(h.has<CampaignIdentityComponent>());
     ASSERT_TRUE(h.has<TeamComponent>());
     auto* cid = h.get<CampaignIdentityComponent>();
@@ -308,7 +324,10 @@ TEST(InterfaceBridge, ObjectiveEntityHasTransformAndType) {
 
     PopulatedWorld pop = populate_world(ew, camp, teams, objs, units);
 
-    EntityHandle h(pop.objectives[0], &ew);
+    // Phase B: objective entity derived from tags.
+    auto obj_ids = ew.with_tag(tags::ROLE, TagValue::from(std::string("objective")));
+    ASSERT_EQ(obj_ids.size(), 1u);
+    EntityHandle h(obj_ids[0], &ew);
     ASSERT_TRUE(h.has<TransformComponent>());
     ASSERT_TRUE(h.has<ObjectiveTypeComponent>());
     ASSERT_TRUE(h.has<OwnershipComponent>());
@@ -332,7 +351,15 @@ TEST(InterfaceBridge, GroundUnitHasGroundTacticalComponent) {
 
     PopulatedWorld pop = populate_world(ew, camp, teams, objs, units);
 
-    EntityHandle h(pop.units[0], &ew);
+    // Phase B: unit entity derived from tags (units have one of six
+    // ROLE values, so query by OPDOMAIN).
+    std::vector<EntityId> unit_ids;
+    for (const char* d : {"air", "ground", "naval", "unknown"}) {
+        auto ids = ew.with_tag(tags::OPDOMAIN, TagValue::from(std::string(d)));
+        unit_ids.insert(unit_ids.end(), ids.begin(), ids.end());
+    }
+    ASSERT_EQ(unit_ids.size(), 1u);
+    EntityHandle h(unit_ids[0], &ew);
     ASSERT_TRUE(h.has<UnitCoreComponent>());
     ASSERT_TRUE(h.has<GroundTacticalComponent>());
 
@@ -357,7 +384,15 @@ TEST(InterfaceBridge, UnitIdMapPopulated) {
     // The mock unit has id_num = 2001. The bridge should have mapped it.
     auto it = pop.unit_id_map.find(2001);
     ASSERT_NE(it, pop.unit_id_map.end());
-    EXPECT_EQ(it->second, pop.units[0]);
+    // Phase B: cross-check against the tag-derived unit list (was
+    // previously pop.units[0]).
+    std::vector<EntityId> unit_ids;
+    for (const char* d : {"air", "ground", "naval", "unknown"}) {
+        auto ids = ew.with_tag(tags::OPDOMAIN, TagValue::from(std::string(d)));
+        unit_ids.insert(unit_ids.end(), ids.begin(), ids.end());
+    }
+    ASSERT_EQ(unit_ids.size(), 1u);
+    EXPECT_EQ(it->second, unit_ids[0]);
 }
 
 TEST(InterfaceBridge, ObjectiveIdMapPopulated) {
@@ -371,5 +406,9 @@ TEST(InterfaceBridge, ObjectiveIdMapPopulated) {
 
     auto it = pop.objective_id_map.find(1001);
     ASSERT_NE(it, pop.objective_id_map.end());
-    EXPECT_EQ(it->second, pop.objectives[0]);
+    // Phase B: cross-check against the tag-derived objective list (was
+    // previously pop.objectives[0]).
+    auto obj_ids = ew.with_tag(tags::ROLE, TagValue::from(std::string("objective")));
+    ASSERT_EQ(obj_ids.size(), 1u);
+    EXPECT_EQ(it->second, obj_ids[0]);
 }

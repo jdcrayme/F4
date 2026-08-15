@@ -322,8 +322,8 @@ void ViewerApp::draw_imgui() {
                 ImGui::TextUnformatted("##");
                 ImGui::PopStyleColor();
                 ImGui::SameLine();
-                if (impl_->world_loaded && i < static_cast<int>(impl_->pop.teams.size())) {
-                    auto h = impl_->handle(impl_->pop.teams[i]);
+                if (impl_->world_loaded && i < static_cast<int>(impl_->teams().size())) {
+                    auto h = impl_->handle(impl_->teams()[i]);
                     auto* cid = h.get<f4::entities::CampaignIdentityComponent>();
                     auto* tc = h.get<f4::entities::TeamComponent>();
                     const auto& t_name = cid ? cid->callsign : std::string();
@@ -467,8 +467,8 @@ void ViewerApp::draw_imgui() {
         if (impl_->world_loaded) {
             ImGui::SameLine();
             ImGui::TextDisabled("|  %d objectives  %d units",
-                                impl_->pop.objectives.size(),
-                                impl_->pop.units.size());
+                                impl_->objectives().size(),
+                                impl_->units().size());
         }
     }
     ImGui::End();

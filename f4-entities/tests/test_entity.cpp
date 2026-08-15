@@ -129,6 +129,52 @@ TEST(Tags, DestroyedEntityDoesNotAppearInTagQueries) {
     EXPECT_EQ(w.with_tag(tags::TEAM, TagValue::from(std::string("red"))).size(), 0u);
 }
 
+// Phase A: the new tag constants are distinct, non-empty, and usable as
+// TagKey. This is a compile-time-flavored smoke test — it catches typos
+// and accidental name collisions early.
+TEST(Tags, PhaseA_NewConstantsAreDistinctAndUsable) {
+    EXPECT_STREQ(tags::NAME,  "name");
+    EXPECT_STREQ(tags::CLASS, "class");
+    EXPECT_STREQ(tags::ICON,  "icon");
+    // All five pre-existing + three new constants are pairwise distinct.
+    EXPECT_STRNE(tags::NAME,  tags::ROLE);
+    EXPECT_STRNE(tags::NAME,  tags::TEAM);
+    EXPECT_STRNE(tags::NAME,  tags::CLASS);
+    EXPECT_STRNE(tags::NAME,  tags::ICON);
+    EXPECT_STRNE(tags::CLASS, tags::ICON);
+    EXPECT_STRNE(tags::CLASS, tags::ROLE);
+    EXPECT_STRNE(tags::ICON,  tags::ROLE);
+}
+
+TEST(Tags, PhaseA_NewTagsRoundTripThroughHandle) {
+    EntityWorld w;
+    EntityHandle h = w.create();
+    h.set_tag(tags::NAME,  TagValue::from(std::string("02_20 Airbase 2")));
+    h.set_tag(tags::CLASS, TagValue::from(static_cast<int64_t>(1)));
+    h.set_tag(tags::ICON,  TagValue::from(static_cast<int64_t>(257)));
+    EXPECT_TRUE(h.has_tag(tags::NAME));
+    EXPECT_TRUE(h.has_tag(tags::CLASS));
+    EXPECT_TRUE(h.has_tag(tags::ICON));
+    EXPECT_EQ(*h.get_tag(tags::NAME)->as_string(), "02_20 Airbase 2");
+    EXPECT_EQ(*h.get_tag(tags::CLASS)->as_int(),   1);
+    EXPECT_EQ(*h.get_tag(tags::ICON)->as_int(),    257);
+}
+
+TEST(Tags, PhaseA_WithTagFiltersByNewKeys) {
+    EntityWorld w;
+    auto a = w.create(); a.set_tag(tags::NAME, TagValue::from(std::string("Seoul")));
+    auto b = w.create(); b.set_tag(tags::NAME, TagValue::from(std::string("Kunsan")));
+    auto c = w.create(); c.set_tag(tags::NAME, TagValue::from(std::string("Seoul")));
+    auto seouls = w.with_tag(tags::NAME, TagValue::from(std::string("Seoul")));
+    ASSERT_EQ(seouls.size(), 2u);
+    // ICON filtering: simulate two unit entities with packed (class<<8|sub).
+    auto u1 = w.create(); u1.set_tag(tags::ICON, TagValue::from(static_cast<int64_t>((1u<<8)|1u)));
+    auto u2 = w.create(); u2.set_tag(tags::ICON, TagValue::from(static_cast<int64_t>((3u<<8)|3u)));
+    auto u3 = w.create(); u3.set_tag(tags::ICON, TagValue::from(static_cast<int64_t>((1u<<8)|1u)));
+    auto armor = w.with_tag(tags::ICON, TagValue::from(static_cast<int64_t>((1u<<8)|1u)));
+    EXPECT_EQ(armor.size(), 2u);
+}
+
 // ============================================================================
 // TransformComponent uses the strong-typed WorldPosition
 // ============================================================================
@@ -171,6 +217,215 @@ TEST(WithinRadius, FindsEntitiesInsideAndExcludesOutside) {
     auto c = w.create(); c.add<TransformComponent>().position = WorldPosition{10000, 0, 0};
     auto ids = w.within_radius(0, 0, 0, 500.0);
     ASSERT_EQ(ids.size(), 2u);   // a and b are within 500 ft; c is not
+}
+
+// ============================================================================
+// Phase D: per-tag-value index (with_tag_ref / with_tag O(1) fast path)
+// ============================================================================
+//
+// These tests verify the tag index invariants documented in entity.hpp:
+//   1. set_tag adds the entity to the (key, value) bucket.
+//   2. destroy removes the entity from every bucket it was in.
+//   3. Overwriting a tag moves the entity from the old bucket to the new.
+//   4. with_tag_ref returns a const-ref to the internal vector (no copy).
+//   5. Misses return a stable empty vector.
+//   6. The index survives entity slot recycling (generation bumps).
+//   7. The index survives EntityWorld move ctor/assign.
+// ============================================================================
+
+TEST(TagsIndex, WithTagRefReturnsMatchingEntities) {
+    EntityWorld w;
+    auto a = w.create(); a.set_tag(tags::TEAM, TagValue::from(std::string("red")));
+    auto b = w.create(); b.set_tag(tags::TEAM, TagValue::from(std::string("blue")));
+    auto c = w.create(); c.set_tag(tags::TEAM, TagValue::from(std::string("red")));
+
+    const auto& reds = w.with_tag_ref(tags::TEAM, TagValue::from(std::string("red")));
+    ASSERT_EQ(reds.size(), 2u);
+    // Both red entities should be present (order is insertion order).
+    EXPECT_TRUE(reds[0] == a.id() || reds[1] == a.id());
+    EXPECT_TRUE(reds[0] == c.id() || reds[1] == c.id());
+
+    const auto& blues = w.with_tag_ref(tags::TEAM, TagValue::from(std::string("blue")));
+    ASSERT_EQ(blues.size(), 1u);
+    EXPECT_EQ(blues[0], b.id());
+}
+
+TEST(TagsIndex, WithTagReturnsCopyEqualToRef) {
+    // with_tag() (copy) and with_tag_ref() (const-ref) must agree.
+    EntityWorld w;
+    auto a = w.create(); a.set_tag(tags::ROLE, TagValue::from(std::string("fighter")));
+    auto b = w.create(); b.set_tag(tags::ROLE, TagValue::from(std::string("fighter")));
+
+    auto copy = w.with_tag(tags::ROLE, TagValue::from(std::string("fighter")));
+    const auto& ref = w.with_tag_ref(tags::ROLE, TagValue::from(std::string("fighter")));
+    EXPECT_EQ(copy.size(), ref.size());
+    for (size_t i = 0; i < copy.size(); ++i) {
+        EXPECT_EQ(copy[i], ref[i]);
+    }
+}
+
+TEST(TagsIndex, MissReturnsStableEmptyVector) {
+    EntityWorld w;
+    // No entities with any tags yet.
+    const auto& empty1 = w.with_tag_ref(tags::TEAM, TagValue::from(std::string("red")));
+    EXPECT_TRUE(empty1.empty());
+
+    auto a = w.create(); a.set_tag(tags::TEAM, TagValue::from(std::string("blue")));
+    // Now there's a TEAM bucket, but no "red" value in it.
+    const auto& empty2 = w.with_tag_ref(tags::TEAM, TagValue::from(std::string("red")));
+    EXPECT_TRUE(empty2.empty());
+
+    // A different key entirely.
+    const auto& empty3 = w.with_tag_ref(tags::ROLE, TagValue::from(std::string("fighter")));
+    EXPECT_TRUE(empty3.empty());
+
+    // All empty-miss refs should be the same stable empty vector (so callers
+    // can rely on pointer/reference equality if they want, though that's an
+    // implementation detail).
+    EXPECT_EQ(&empty1, &empty2);
+    EXPECT_EQ(&empty1, &empty3);
+}
+
+TEST(TagsIndex, DestroyRemovesFromAllBuckets) {
+    EntityWorld w;
+    auto a = w.create();
+    a.set_tag(tags::ROLE, TagValue::from(std::string("fighter")));
+    a.set_tag(tags::TEAM, TagValue::from(std::string("red")));
+    a.set_tag(tags::OPDOMAIN, TagValue::from(std::string("air")));
+
+    EXPECT_EQ(w.with_tag_ref(tags::ROLE, TagValue::from(std::string("fighter"))).size(), 1u);
+    EXPECT_EQ(w.with_tag_ref(tags::TEAM, TagValue::from(std::string("red"))).size(), 1u);
+    EXPECT_EQ(w.with_tag_ref(tags::OPDOMAIN, TagValue::from(std::string("air"))).size(), 1u);
+
+    w.destroy(a.id());
+
+    EXPECT_EQ(w.with_tag_ref(tags::ROLE, TagValue::from(std::string("fighter"))).size(), 0u);
+    EXPECT_EQ(w.with_tag_ref(tags::TEAM, TagValue::from(std::string("red"))).size(), 0u);
+    EXPECT_EQ(w.with_tag_ref(tags::OPDOMAIN, TagValue::from(std::string("air"))).size(), 0u);
+}
+
+TEST(TagsIndex, OverwriteTagMovesBetweenBuckets) {
+    EntityWorld w;
+    auto a = w.create();
+    a.set_tag(tags::TEAM, TagValue::from(std::string("red")));
+
+    EXPECT_EQ(w.with_tag_ref(tags::TEAM, TagValue::from(std::string("red"))).size(), 1u);
+    EXPECT_EQ(w.with_tag_ref(tags::TEAM, TagValue::from(std::string("blue"))).size(), 0u);
+
+    // Overwrite: red -> blue
+    a.set_tag(tags::TEAM, TagValue::from(std::string("blue")));
+
+    EXPECT_EQ(w.with_tag_ref(tags::TEAM, TagValue::from(std::string("red"))).size(), 0u);
+    EXPECT_EQ(w.with_tag_ref(tags::TEAM, TagValue::from(std::string("blue"))).size(), 1u);
+    EXPECT_EQ(w.with_tag_ref(tags::TEAM, TagValue::from(std::string("blue")))[0], a.id());
+}
+
+TEST(TagsIndex, OverwriteWithSameValueIsNoOp) {
+    EntityWorld w;
+    auto a = w.create();
+    a.set_tag(tags::TEAM, TagValue::from(std::string("red")));
+    auto b = w.create();
+    b.set_tag(tags::TEAM, TagValue::from(std::string("red")));
+
+    // Setting the same value again should not duplicate the entry.
+    a.set_tag(tags::TEAM, TagValue::from(std::string("red")));
+    const auto& reds = w.with_tag_ref(tags::TEAM, TagValue::from(std::string("red")));
+    ASSERT_EQ(reds.size(), 2u);
+}
+
+TEST(TagsIndex, SurvivesSlotRecycling) {
+    EntityWorld w;
+    auto a = w.create();
+    a.set_tag(tags::TEAM, TagValue::from(std::string("red")));
+
+    const auto a_id = a.id();
+    w.destroy(a_id);
+
+    // The slot is recycled. The new entity must NOT appear in the "red" bucket
+    // just because the old entity with the same slot index was there.
+    auto b = w.create();
+    b.set_tag(tags::TEAM, TagValue::from(std::string("blue")));
+
+    // Same slot index, different generation.
+    EXPECT_EQ(b.id().index(), a_id.index());
+    EXPECT_NE(b.id().generation(), a_id.generation());
+
+    // The "red" bucket must be empty (the destroyed entity was removed).
+    EXPECT_EQ(w.with_tag_ref(tags::TEAM, TagValue::from(std::string("red"))).size(), 0u);
+    // The "blue" bucket must contain only b (not a stale entry from the
+    // recycled slot).
+    const auto& blues = w.with_tag_ref(tags::TEAM, TagValue::from(std::string("blue")));
+    ASSERT_EQ(blues.size(), 1u);
+    EXPECT_EQ(blues[0], b.id());
+}
+
+TEST(TagsIndex, SurvivesEntityWorldMove) {
+    EntityWorld w1;
+    auto a = w1.create();
+    a.set_tag(tags::TEAM, TagValue::from(std::string("red")));
+    auto b = w1.create();
+    b.set_tag(tags::TEAM, TagValue::from(std::string("blue")));
+
+    // Move-construct w2 from w1. The tag index must come along intact.
+    EntityWorld w2 = std::move(w1);
+
+    EXPECT_EQ(w2.with_tag_ref(tags::TEAM, TagValue::from(std::string("red"))).size(), 1u);
+    EXPECT_EQ(w2.with_tag_ref(tags::TEAM, TagValue::from(std::string("blue"))).size(), 1u);
+
+    // Move-assign w2 into w3.
+    EntityWorld w3;
+    w3 = std::move(w2);
+
+    EXPECT_EQ(w3.with_tag_ref(tags::TEAM, TagValue::from(std::string("red"))).size(), 1u);
+    EXPECT_EQ(w3.with_tag_ref(tags::TEAM, TagValue::from(std::string("blue"))).size(), 1u);
+}
+
+TEST(TagsIndex, MultipleKeysAndValuesCoexist) {
+    EntityWorld w;
+    // Simulate a small campaign: 2 teams, 3 objectives, 2 units.
+    auto t1 = w.create(); t1.set_tag(tags::ROLE, TagValue::from(std::string("team")));
+    auto t2 = w.create(); t2.set_tag(tags::ROLE, TagValue::from(std::string("team")));
+    auto o1 = w.create(); o1.set_tag(tags::ROLE, TagValue::from(std::string("objective")));
+    auto o2 = w.create(); o2.set_tag(tags::ROLE, TagValue::from(std::string("objective")));
+    auto o3 = w.create(); o3.set_tag(tags::ROLE, TagValue::from(std::string("objective")));
+    auto u1 = w.create(); u1.set_tag(tags::ROLE, TagValue::from(std::string("battalion")));
+    u1.set_tag(tags::OPDOMAIN, TagValue::from(std::string("ground")));
+    auto u2 = w.create(); u2.set_tag(tags::ROLE, TagValue::from(std::string("squadron")));
+    u2.set_tag(tags::OPDOMAIN, TagValue::from(std::string("air")));
+
+    EXPECT_EQ(w.with_tag_ref(tags::ROLE, TagValue::from(std::string("team"))).size(), 2u);
+    EXPECT_EQ(w.with_tag_ref(tags::ROLE, TagValue::from(std::string("objective"))).size(), 3u);
+    EXPECT_EQ(w.with_tag_ref(tags::ROLE, TagValue::from(std::string("battalion"))).size(), 1u);
+    EXPECT_EQ(w.with_tag_ref(tags::ROLE, TagValue::from(std::string("squadron"))).size(), 1u);
+    EXPECT_EQ(w.with_tag_ref(tags::OPDOMAIN, TagValue::from(std::string("ground"))).size(), 1u);
+    EXPECT_EQ(w.with_tag_ref(tags::OPDOMAIN, TagValue::from(std::string("air"))).size(), 1u);
+
+    // Total entity count matches (no entities lost or duplicated in the index).
+    EXPECT_EQ(w.size(), 7u);
+}
+
+TEST(TagsIndex, IntValuesAreIndexedCorrectly) {
+    // Phase A tags::TEAM on objectives/units is an int (owner slot), not a
+    // string. Make sure the index handles both types in the same key.
+    EntityWorld w;
+    auto a = w.create(); a.set_tag(tags::TEAM, TagValue::from(static_cast<int64_t>(2)));
+    auto b = w.create(); b.set_tag(tags::TEAM, TagValue::from(static_cast<int64_t>(2)));
+    auto c = w.create(); c.set_tag(tags::TEAM, TagValue::from(static_cast<int64_t>(1)));
+
+    const auto& team2 = w.with_tag_ref(tags::TEAM, TagValue::from(static_cast<int64_t>(2)));
+    ASSERT_EQ(team2.size(), 2u);
+    const auto& team1 = w.with_tag_ref(tags::TEAM, TagValue::from(static_cast<int64_t>(1)));
+    ASSERT_EQ(team1.size(), 1u);
+    EXPECT_EQ(team1[0], c.id());
+
+    // int 2 and string "2" are different TagValues (different variant types)
+    // and must NOT collide in the index.
+    auto d = w.create(); d.set_tag(tags::TEAM, TagValue::from(std::string("2")));
+    const auto& str2 = w.with_tag_ref(tags::TEAM, TagValue::from(std::string("2")));
+    ASSERT_EQ(str2.size(), 1u);
+    EXPECT_EQ(str2[0], d.id());
+    // The int bucket is unchanged.
+    EXPECT_EQ(w.with_tag_ref(tags::TEAM, TagValue::from(static_cast<int64_t>(2))).size(), 2u);
 }
 
 // ============================================================================

@@ -45,8 +45,9 @@ void ViewerApp::draw_campaign_and_teams_view() {
                             ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize(ImVec2(330, 360), ImGuiCond_FirstUseEver);
     if (ImGui::Begin("Campaign", nullptr, ImGuiWindowFlags_NoCollapse)) {
-        // Access campaign entity
-        auto camp_h = impl_->handle(impl_->pop.campaign);
+        // Access campaign entity (Phase C/D: O(1) tag-index lookup via
+        // campaign_entity() helper, which calls with_tag_ref(ROLE="campaign")).
+        auto camp_h = impl_->handle(impl_->campaign_entity());
         auto* cs = camp_h.get<f4::entities::CampaignStateComponent>();
 
         if (!impl_->theater_name.empty()) {
@@ -80,12 +81,12 @@ void ViewerApp::draw_campaign_and_teams_view() {
             ImGui::Text("  slot  name         aircraft  pts");
             const std::size_t n_teams = std::max<std::size_t>(
                 std::max(cs->te_number_aircraft.size(), cs->te_team_pts.size()),
-                impl_->pop.teams.size());
+                impl_->teams().size());
             for (std::size_t i = 0; i < n_teams; ++i) {
                 const char* name = "?";
                 std::string team_name_buf;
-                if (i < impl_->pop.teams.size()) {
-                    auto h = impl_->handle(impl_->pop.teams[i]);
+                if (i < impl_->teams().size()) {
+                    auto h = impl_->handle(impl_->teams()[i]);
                     auto* cid = h.get<f4::entities::CampaignIdentityComponent>();
                     if (cid) {
                         team_name_buf = cid->callsign;
@@ -108,7 +109,7 @@ void ViewerApp::draw_campaign_and_teams_view() {
                             ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize(ImVec2(330, 440), ImGuiCond_FirstUseEver);
     if (ImGui::Begin("Teams", nullptr, ImGuiWindowFlags_NoCollapse)) {
-        if (impl_->pop.teams.empty()) {
+        if (impl_->teams().empty()) {
             ImGui::TextDisabled("(no teams loaded)");
             ImGui::End();
             return;
@@ -119,8 +120,8 @@ void ViewerApp::draw_campaign_and_teams_view() {
                             "Stance Matrix (row → col)")) {
             ImGui::TextUnformatted("        ");
             for (int col = 0; col < 8; ++col) {
-                if (col < static_cast<int>(impl_->pop.teams.size())) {
-                    auto h = impl_->handle(impl_->pop.teams[col]);
+                if (col < static_cast<int>(impl_->teams().size())) {
+                    auto h = impl_->handle(impl_->teams()[col]);
                     auto* cid = h.get<f4::entities::CampaignIdentityComponent>();
                     if (cid && !cid->callsign.empty()) {
                         char hdr[5] = "????";
@@ -137,8 +138,8 @@ void ViewerApp::draw_campaign_and_teams_view() {
             ImGui::TextUnformatted("");
 
             for (int row = 0; row < 8; ++row) {
-                if (row < static_cast<int>(impl_->pop.teams.size())) {
-                    auto h = impl_->handle(impl_->pop.teams[row]);
+                if (row < static_cast<int>(impl_->teams().size())) {
+                    auto h = impl_->handle(impl_->teams()[row]);
                     auto* cid = h.get<f4::entities::CampaignIdentityComponent>();
                     char row_label[24];
                     std::snprintf(row_label, sizeof(row_label), "%-5d %-12s",
@@ -152,8 +153,8 @@ void ViewerApp::draw_campaign_and_teams_view() {
                 for (int col = 0; col < 8; ++col) {
                     int16_t s = 0;
                     bool have = false;
-                    if (row < static_cast<int>(impl_->pop.teams.size())) {
-                        auto h = impl_->handle(impl_->pop.teams[row]);
+                    if (row < static_cast<int>(impl_->teams().size())) {
+                        auto h = impl_->handle(impl_->teams()[row]);
                         auto* tc = h.get<f4::entities::TeamComponent>();
                         if (tc && col < static_cast<int>(tc->stance.size())) {
                             s = tc->stance[col];
@@ -192,8 +193,8 @@ void ViewerApp::draw_campaign_and_teams_view() {
         ImGui::Separator();
 
         // Per-team detail tree.
-        for (std::size_t i = 0; i < impl_->pop.teams.size(); ++i) {
-            auto h = impl_->handle(impl_->pop.teams[i]);
+        for (std::size_t i = 0; i < impl_->teams().size(); ++i) {
+            auto h = impl_->handle(impl_->teams()[i]);
             auto* cid = h.get<f4::entities::CampaignIdentityComponent>();
             auto* tc = h.get<f4::entities::TeamComponent>();
             const auto& t_name = cid ? cid->callsign : std::string();

@@ -161,12 +161,86 @@ namespace f4::entities {
 
     using TagSet = std::unordered_map<TagKey, TagValue, TagKeyHash>;
 
+    // Custom hasher for TagValue — needed so we can use TagValue as a key
+    // in the Phase D tag_index_ (std::unordered_map<TagValue, std::vector<EntityId>>).
+    // std::hash is not defined for std::variant by default, so we hash the
+    // variant by combining the type index with the hash of the held value.
+    // This is the same approach std::pair's std::hash specialization uses.
+    //
+    // Defined here (before EntityWorld uses it in a std::unordered_map) so
+    // the type is complete when the hash is instantiated.
+    struct TagValueHash {
+        std::size_t operator()(const TagValue& v) const noexcept {
+            // Hash = type_index ^ hash_of_held_value (FNV-style combine).
+            // The type index disambiguates e.g. int 0 from bool false from
+            // empty string, which all compare unequal as TagValues but would
+            // otherwise hash to similar values.
+            const auto idx = v.value.index();
+            std::size_t h = idx;
+            std::visit([&h](const auto& held) {
+                using T = std::decay_t<decltype(held)>;
+                if constexpr (std::is_same_v<T, std::string>) {
+                    h ^= std::hash<std::string>{}(held) + 0x9e3779b9u + (h << 6) + (h >> 2);
+                } else if constexpr (std::is_same_v<T, int64_t>) {
+                    h ^= std::hash<int64_t>{}(held) + 0x9e3779b9u + (h << 6) + (h >> 2);
+                } else if constexpr (std::is_same_v<T, double>) {
+                    h ^= std::hash<double>{}(held) + 0x9e3779b9u + (h << 6) + (h >> 2);
+                } else if constexpr (std::is_same_v<T, bool>) {
+                    h ^= std::hash<bool>{}(held) + 0x9e3779b9u + (h << 6) + (h >> 2);
+                }
+            }, v.value);
+            return h;
+        }
+    };
+
     namespace tags {
         inline constexpr const char* ROLE = "role";    // "fighter","bomber","tanker","awacs",...
         inline constexpr const char* TEAM = "team";    // "red","blue"
         inline constexpr const char* OPDOMAIN = "domain";  // "air","ground","naval"
         inline constexpr const char* ALIVE = "alive";   // bool
         inline constexpr const char* STEALTH = "stealth"; // bool
+
+        // --- Phase A tag enrichment (see ECS refactoring plan) ---------------
+        // These tags promote commonly-queried per-entity fields out of
+        // components and into the tag store, so that non-selected entities
+        // (the bulk of what the world viewer iterates each frame) can be
+        // rendered/filtered without a component lookup (type_index hash +
+        // pointer chase). They are set once by the loader at populate time
+        // and never mutated.
+        //
+        // NAME  — string. The display name of the entity:
+        //         teams     → callsign ("ROK", "Japan", ...)
+        //         objectives→ ObjectiveTypeComponent::class_name
+        //                     ("02_20 Airbase 2", "Highway Strip NS", ...)
+        //         units     → UnitCoreComponent::class_name
+        //                     ("Armor Battalion", "Patrol", ...)
+        //         campaign  → "Campaign"
+        //
+        // CLASS — int64_t. The fine-grained classification number (the raw
+        //         input to the category-name lookup, NOT the display string).
+        //         Storing the raw int avoids duplicating the name tables that
+        //         already live in f4-world-convert (objective_type_name,
+        //         unit_subtype_name). Consumers that need a display string
+        //         call those functions with the tag value. Encoding:
+        //         objectives→ objective_type (1..39)
+        //         units     → unit_subtype (STYPE_UNIT_*; domain is already
+        //                     available via tags::OPDOMAIN)
+        //         teams/campaign → tag absent
+        //
+        // ICON  — int64_t. The raw input to the renderer's symbol-dispatch
+        //         function, precomputed at load time so consumers can call
+        //         symbol_for_objective_type(tag) or symbol_for_unit(tag)
+        //         without querying ObjectiveTypeComponent/UnitCoreComponent.
+        //         Storing the *input* (not the SymbolKind enum value) keeps
+        //         f4-world independent of f4-renderer — the dispatch still
+        //         happens at the consumer, but the component fetch is
+        //         eliminated. The encoding is:
+        //         objectives→ objective_type (1..39), stored as-is
+        //         units     → (unit_class << 8) | unit_subtype
+        //         teams/campaign → tag absent (no map icon)
+        inline constexpr const char* NAME  = "name";
+        inline constexpr const char* CLASS = "class";
+        inline constexpr const char* ICON  = "icon";
     }
 
     // detail::next_world_cookie — internal helper used by EntityWorld's
@@ -562,6 +636,7 @@ namespace f4::entities {
         EntityWorld(EntityWorld&& other) noexcept
             : entities_(std::move(other.entities_))
             , free_list_(std::move(other.free_list_))
+            , tag_index_(std::move(other.tag_index_))
             , cookie_(detail::next_world_cookie())
         {}
 
@@ -570,9 +645,10 @@ namespace f4::entities {
         // validate against the new contents.
         EntityWorld& operator=(EntityWorld&& other) noexcept {
             if (this != &other) {
-                entities_  = std::move(other.entities_);
-                free_list_ = std::move(other.free_list_);
-                cookie_    = detail::next_world_cookie();
+                entities_   = std::move(other.entities_);
+                free_list_  = std::move(other.free_list_);
+                tag_index_  = std::move(other.tag_index_);
+                cookie_     = detail::next_world_cookie();
             }
             return *this;
         }
@@ -583,7 +659,27 @@ namespace f4::entities {
         [[nodiscard]] bool alive(EntityId id) const noexcept;
 
         // --- Tag queries ---
+        // with_tag() returns a COPY of the matching entity IDs. Use this when
+        // you need to iterate without holding a reference into the world, or
+        // when you might mutate the world during iteration (the copy is a
+        // snapshot).
         [[nodiscard]] std::vector<EntityId> with_tag(const TagKey& key, const TagValue& value) const;
+
+        // with_tag_ref() returns a CONST REFERENCE to the internal vector of
+        // matching entity IDs — O(1) lookup, zero allocation, zero copy.
+        //
+        // Phase D: this is the fast path that the per-frame render loops
+        // should use. The reference is valid only until the next mutation
+        // that touches this (key, value) bucket — i.e. the next set_tag()
+        // that adds or removes an entity from this bucket, or the next
+        // destroy() of an entity in this bucket. Callers that need a
+        // stable snapshot across a mutation should use with_tag() (copy)
+        // instead.
+        //
+        // If no entities match, returns a reference to a stable empty vector
+        // (so the caller can always iterate without a null check).
+        [[nodiscard]] const std::vector<EntityId>& with_tag_ref(const TagKey& key, const TagValue& value) const;
+
         [[nodiscard]] std::vector<EntityId> query(std::function<bool(const TagSet&)> pred) const;
 
         // --- Component queries ---
@@ -637,6 +733,39 @@ namespace f4::entities {
         std::vector<EntityRecord> entities_;
         std::vector<uint32_t> free_list_;   // indices of dead slots, LIFO
 
+        // ── Phase D: per-tag-value index ──────────────────────────────────
+        //
+        // Maps (TagKey → TagValue → vector<EntityId>). Maintained incrementally
+        // by set_tag() and destroy(). Lets with_tag_ref() return a const-ref
+        // to the matching vector in O(1) (two hash lookups) instead of the
+        // O(N) linear scan the old with_tag() did.
+        //
+        // The vectors store EntityId (a 64-bit value: index | generation).
+        // Removal is O(n) in the bucket size, but tag mutations are rare
+        // (set once at load time, destroyed basically never in the viewer),
+        // so this is a deliberate trade: cheap queries, slightly more
+        // expensive mutations.
+        //
+        // Invariants:
+        //   1. If entity E has tag K=V, then tag_index_[K][V] contains E's
+        //      EntityId exactly once.
+        //   2. If entity E does NOT have tag K=V, then E's EntityId is NOT
+        //      in tag_index_[K][V].
+        //   3. Destroyed entities are removed from every bucket they were in.
+        //   4. When set_tag() overwrites K=V_old with K=V_new on entity E,
+        //      E is removed from tag_index_[K][V_old] and added to
+        //      tag_index_[K][V_new].
+        //
+        // The empty_buckets_ vector is a stable home for empty result vectors
+        // returned by with_tag_ref() when no entities match — so the caller
+        // can always iterate without a null check. (We can't return a reference
+        // to a temporary, and creating a static empty vector per call would
+        // be a small but real allocation. One shared empty vector per world
+        // is the cheapest correct answer.)
+        using TagValueIndex = std::unordered_map<TagValue, std::vector<EntityId>, TagValueHash>;
+        std::unordered_map<TagKey, TagValueIndex, TagKeyHash> tag_index_;
+        std::vector<EntityId> empty_buckets_;  // stable empty vector for misses
+
         // World cookie: a random 64-bit value generated at EntityWorld construction.
         // EntityHandle captures this cookie at creation. If the EntityWorld is
         // destroyed and a new one happens to be allocated at the same address,
@@ -647,6 +776,13 @@ namespace f4::entities {
 
         [[nodiscard]] const EntityRecord* find(EntityId id) const noexcept;
         [[nodiscard]] EntityRecord* find(EntityId id) noexcept;
+
+        // --- Tag index maintenance (called by set_tag / destroy) ---
+        // Add id to the (key, value) bucket. Called after a tag is set.
+        void index_tag_add(const TagKey& key, const TagValue& value, EntityId id);
+        // Remove id from the (key, value) bucket. Called before a tag is
+        // overwritten or when an entity is destroyed.
+        void index_tag_remove(const TagKey& key, const TagValue& value, EntityId id);
     };
 
     // ============================================================================

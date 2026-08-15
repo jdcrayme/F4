@@ -71,7 +71,7 @@ void ViewerApp::handle_input() {
         if (impl_->show_objectives && impl_->world_loaded) {
             f4::entities::EntityId best_id;
             float best_d2 = tol * tol;
-            for (const auto& eid : impl_->pop.objectives) {
+            for (const auto& eid : impl_->objectives()) {
                 auto h = impl_->handle(eid);
                 auto* tr = h.get<f4::entities::TransformComponent>();
                 if (!tr) continue;
@@ -90,7 +90,7 @@ void ViewerApp::handle_input() {
         if (impl_->show_units && impl_->world_loaded) {
             f4::entities::EntityId best_id;
             float best_d2 = tol * tol;
-            for (const auto& eid : impl_->pop.units) {
+            for (const auto& eid : impl_->units()) {
                 auto h = impl_->handle(eid);
                 auto* tr = h.get<f4::entities::TransformComponent>();
                 if (!tr) continue;
@@ -209,8 +209,12 @@ void ViewerApp::draw_canvas() {
         const Color road_color = {180, 160, 120, 140};
         const Color rail_color = {100, 100, 110, 160};
         const Color sel_color  = {255, 255, 100, 220};
-        for (std::size_t i = 0; i < impl_->pop.objectives.size(); ++i) {
-            const auto eid = impl_->pop.objectives[i];
+        // Hoist the objectives list once — with_tag_ref() is O(1) but the
+        // link-drawing loop below calls .size() and indexes into it many
+        // times per frame, so we bind a const-ref once at the top.
+        const auto& objectives = impl_->objectives();
+        for (std::size_t i = 0; i < objectives.size(); ++i) {
+            const auto eid = objectives[i];
             auto h = impl_->handle(eid);
             auto* tr = h.get<f4::entities::TransformComponent>();
             auto* nl = h.get<f4::entities::NetworkLinksComponent>();
@@ -225,10 +229,10 @@ void ViewerApp::draw_canvas() {
                 if (!n_tr) continue;
                 const Vector2 q = impl_->world_to_screen(impl_->grid_x(n_tr), impl_->grid_y(n_tr));
                 // Draw each link once (only when i < neighbor_index).
-                // Find the neighbor's index in pop.objectives.
+                // Find the neighbor's index in the objectives list.
                 std::size_t n_idx = 0;
-                for (; n_idx < impl_->pop.objectives.size(); ++n_idx) {
-                    if (impl_->pop.objectives[n_idx] == it->second) break;
+                for (; n_idx < objectives.size(); ++n_idx) {
+                    if (objectives[n_idx] == it->second) break;
                 }
                 if (i >= n_idx) continue;
                 const Color c = link.is_rail ? rail_color : road_color;
@@ -252,26 +256,44 @@ void ViewerApp::draw_canvas() {
         const float sy_min = -cull_margin;
         const float sy_max = static_cast<float>(impl_->window_h) + cull_margin;
 
-        for (const auto& eid : impl_->pop.objectives) {
+        for (const auto& eid : impl_->objectives()) {
             auto h = impl_->handle(eid);
             auto* tr = h.get<f4::entities::TransformComponent>();
-            auto* own = h.get<f4::entities::OwnershipComponent>();
             auto* ot = h.get<f4::entities::ObjectiveTypeComponent>();
             auto* pri = h.get<f4::entities::ObjectivePriorityComponent>();
             auto* pb = h.get<f4::entities::PropertyBag>();
-            if (!tr || !own || !ot) continue;
+            if (!tr || !ot) continue;
 
             const float ox = impl_->grid_x(tr), oy = impl_->grid_y(tr);
             const Vector2 p = impl_->world_to_screen(ox, oy);
             if (p.x < sx_min || p.x > sx_max || p.y < sy_min || p.y > sy_max) continue;
 
+            // Phase A: read NAME + TEAM from tags (no component query for
+            // non-selected objectives). The units loop already used this
+            // pattern; the objectives loop was still querying
+            // OwnershipComponent just for the team byte. We keep the
+            // ObjectiveTypeComponent query for now because the search
+            // filter below needs ot->class_name as a fallback when the
+            // NAME tag is absent (e.g. objectives loaded from a JSON
+            // produced before this tag existed). A future Phase B can
+            // drop the ot query once the tag is guaranteed present.
+            auto name_tag = h.get_tag(f4::entities::tags::NAME);
+            const std::string* name_str =
+                (name_tag && name_tag->as_string()) ? name_tag->as_string() : nullptr;
+
             // Search filter
             if (impl_->objective_search_lower[0] != '\0') {
-                if (!ot->class_name.empty()) {
+                const std::string* search_hay = name_str;
+                std::string fallback;
+                if (!search_hay && !ot->class_name.empty()) {
+                    fallback = ot->class_name;
+                    search_hay = &fallback;
+                }
+                if (search_hay && !search_hay->empty()) {
                     char haystack_buf[256];
-                    const std::size_t hn = std::min<std::size_t>(ot->class_name.size(), 255);
+                    const std::size_t hn = std::min<std::size_t>(search_hay->size(), 255);
                     for (std::size_t k = 0; k < hn; ++k) {
-                        char c = ot->class_name[k];
+                        char c = search_hay->at(k);
                         if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
                         haystack_buf[k] = c;
                     }
@@ -283,9 +305,17 @@ void ViewerApp::draw_canvas() {
                     continue;
                 }
             }
+
+            // Owner from tag (Phase A: matches the units loop pattern).
+            uint8_t owner = 0;
+            auto team_tag = h.get_tag(f4::entities::tags::TEAM);
+            if (team_tag && team_tag->as_int()) {
+                owner = static_cast<uint8_t>(*team_tag->as_int());
+            }
+
             // Team filter
-            RlColor c = color_for_owner(own->team);
-            if (impl_->team_filter != 0xFF && own->team != impl_->team_filter) {
+            RlColor c = color_for_owner(owner);
+            if (impl_->team_filter != 0xFF && owner != impl_->team_filter) {
                 c.r = static_cast<unsigned char>(c.r * 0.3f);
                 c.g = static_cast<unsigned char>(c.g * 0.3f);
                 c.b = static_cast<unsigned char>(c.b * 0.3f);
@@ -308,7 +338,9 @@ void ViewerApp::draw_canvas() {
             }
             if (draw_labels) {
                 std::string label;
-                if (!ot->class_name.empty()) {
+                if (name_str && !name_str->empty()) {
+                    label = *name_str;
+                } else if (!ot->class_name.empty()) {
                     label = ot->class_name;
                 } else {
                     label = f4::world_convert::objective_type_name(
@@ -344,7 +376,7 @@ void ViewerApp::draw_canvas() {
         const float sx_max = static_cast<float>(impl_->window_w) + cull_margin;
         const float sy_min = -cull_margin;
         const float sy_max = static_cast<float>(impl_->window_h) + cull_margin;
-        for (const auto& eid : impl_->pop.units) {
+        for (const auto& eid : impl_->units()) {
             auto h = impl_->handle(eid);
             auto* tr = h.get<f4::entities::TransformComponent>();
             auto* uc = h.get<f4::entities::UnitCoreComponent>();
@@ -466,7 +498,7 @@ void ViewerApp::draw_canvas() {
         impl_->show_radar_arcs) {
         const float fallback_radius_grid = 32.0f;
         constexpr float KM_TO_GRID = 1.0f / 0.312f;
-        for (const auto& eid : impl_->pop.objectives) {
+        for (const auto& eid : impl_->objectives()) {
             auto h = impl_->handle(eid);
             auto* tr = h.get<f4::entities::TransformComponent>();
             auto* own = h.get<f4::entities::OwnershipComponent>();
@@ -735,9 +767,9 @@ void ViewerApp::draw_canvas() {
             draw_text(buf, accent);
 
             snprintf(buf, sizeof(buf), "Objectives %zu   Units %zu   Teams %zu",
-                     impl_->pop.objectives.size(),
-                     impl_->pop.units.size(),
-                     impl_->pop.teams.size());
+                     impl_->objectives().size(),
+                     impl_->units().size(),
+                     impl_->teams().size());
             draw_text(buf, text);
 
             snprintf(buf, sizeof(buf), "Cam  (%.1f, %.1f)  zoom %.2fx",
@@ -786,7 +818,7 @@ void ViewerApp::draw_canvas() {
             impl_->screen_to_world(mouse.x, mouse.y, &gx, &gy);
             f4::entities::EntityId best_id;
             float best_dist_sq = 100.0f;  // 10px radius squared
-            for (const auto& eid : impl_->pop.objectives) {
+            for (const auto& eid : impl_->objectives()) {
                 auto h = impl_->handle(eid);
                 auto* tr = h.get<f4::entities::TransformComponent>();
                 if (!tr) continue;
@@ -854,7 +886,7 @@ void ViewerApp::draw_canvas() {
         }
 
         if (impl_->show_objectives) {
-            for (const auto& eid : impl_->pop.objectives) {
+            for (const auto& eid : impl_->objectives()) {
                 auto h = impl_->handle(eid);
                 auto* tr = h.get<f4::entities::TransformComponent>();
                 auto* own = h.get<f4::entities::OwnershipComponent>();
@@ -872,7 +904,7 @@ void ViewerApp::draw_canvas() {
         }
 
         if (impl_->show_units) {
-            for (const auto& eid : impl_->pop.units) {
+            for (const auto& eid : impl_->units()) {
                 auto h = impl_->handle(eid);
                 auto* tr = h.get<f4::entities::TransformComponent>();
                 if (!tr) continue;

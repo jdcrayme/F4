@@ -61,10 +61,19 @@ void ViewerApp::load_world_json(const std::filesystem::path& path) {
     impl_->eworld = f4::entities::EntityWorld();  // clear previous
     impl_->pop = f4::world::populate_world(impl_->eworld, ws);
 
+    // Phase C/D: no per-kind caches to populate. The render loops call
+    // impl_->objectives() / units() / teams() / campaign_entity() directly,
+    // which delegate to EntityWorld::with_tag_ref() — now O(1) thanks to
+    // the per-tag-value index added in Phase D. This eliminates the
+    // "snapshot on load" pattern and the stale-cache risk that came with it.
+
     // Build team_by_slot mapping: slot index → team EntityId.
+    // This is the only per-kind lookup that still needs a pre-pass, because
+    // it's a slot-indexed array (not a tag query). We walk the team entities
+    // once and index them by CampaignIdentityComponent::team_id.
     impl_->team_by_slot.clear();
     impl_->team_by_slot.resize(8);  // 8 team slots max
-    for (const auto& tid : impl_->pop.teams) {
+    for (const auto& tid : impl_->teams()) {
         auto h = f4::entities::EntityHandle(tid, &impl_->eworld);
         auto* cid = h.get<f4::entities::CampaignIdentityComponent>();
         if (cid && cid->team_id >= 0 && cid->team_id < 8) {
@@ -76,8 +85,8 @@ void ViewerApp::load_world_json(const std::filesystem::path& path) {
     impl_->world_path_display = path.string();
     impl_->last_world_json_path = path;
     impl_->status_msg = "Loaded world: " + path.string() +
-        "  (" + std::to_string(impl_->pop.objectives.size()) + " objectives, " +
-        std::to_string(impl_->pop.units.size()) + " units)";
+        "  (" + std::to_string(impl_->objectives().size()) + " objectives, " +
+        std::to_string(impl_->units().size()) + " units)";
 
     // Try to auto-load the referenced terrain file — but only if terrain
     // isn't already loaded. This prevents a spurious "auto-load failed"

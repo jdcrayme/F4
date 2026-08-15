@@ -198,6 +198,14 @@ void SensorFusion::rebuild_target_list() {
     // that has a transform — we filter by id. (No direct EntityId lookup API
     // exists; the linear scan is acceptable because this runs at most once
     // per skill-dependent update interval, not per minor frame.)
+    //
+    // Phase D note: we intentionally do NOT use with_tag(TEAM, "red") here
+    // even though it's now O(1). Radar detects ALL contacts within range
+    // (friendly and hostile) — geometry is computed for every transform
+    // entity, and the team tag is only consulted later to classify
+    // hostility. Switching to a team-filtered query would silently drop
+    // friendly contacts from the target list, breaking RWR/situational
+    // awareness.
     auto candidates = world_->with_component<TransformComponent>();
 
     const TransformComponent* ownship_tf = nullptr;

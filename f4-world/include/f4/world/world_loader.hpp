@@ -41,15 +41,36 @@ namespace f4::world {
 struct WorldState;
 
 // ============================================================================
-// PopulatedWorld — result of populate_world(), giving the caller access to
-// all created entity IDs grouped by kind.
+// PopulatedWorld — result of populate_world().
+//
+// Phase B slim-down: the four per-kind EntityId vectors (campaign, teams,
+// objectives, units) have been removed. They were tag-derivable from
+// EntityWorld via with_tag(tags::ROLE, ...) at any time, so storing them
+// in a parallel struct was redundant cache that could drift from the
+// EntityWorld's actual contents. Consumers now derive the lists they
+// need directly:
+//
+//   • The world viewer snapshots them once at load time into per-kind
+//     caches (see ViewerApp::Impl::{campaign,teams,objectives,units}_cache
+//     in viewer_state.hpp), so the per-frame render loops don't pay the
+//     O(N) with_tag() cost.
+//   • Tests call with_tag() directly when they need to count or iterate
+//     entities of a specific kind, which is both more honest (the test
+//     is exercising the tag system) and removes a parallel source of
+//     truth that could mask bridge bugs.
+//
+// What remains here are the two VU_ID.num → EntityId maps, which are NOT
+// tag-derivable (VU_IDs are external identifiers from the binary .cam
+// format, not ECS tags). They're kept in PopulatedWorld because:
+//   1. The bridge needs them internally during populate_units' second
+//      pass to resolve unit→unit and unit→objective cross-references.
+//   2. Downstream consumers (the world viewer's inspector) need them to
+//      resolve raw VU_IDs that survive in format-residue fields like
+//      ObjectivePriorityComponent::parent_id (objective→objective
+//      hierarchy isn't modeled in the bridge, so the raw ID leaks
+//      through and must be looked up here).
 // ============================================================================
 struct PopulatedWorld {
-    f4::entities::EntityId campaign;
-    std::vector<f4::entities::EntityId> teams;
-    std::vector<f4::entities::EntityId> objectives;
-    std::vector<f4::entities::EntityId> units;
-
     /// VU_ID.num → EntityId maps for cross-reference resolution.
     /// Kept in PopulatedWorld (not just internal to the bridge) because
     /// downstream consumers (e.g. the world viewer's inspector) need them

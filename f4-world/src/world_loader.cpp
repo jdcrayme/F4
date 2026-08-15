@@ -310,6 +310,11 @@ EntityId populate_campaign(EntityWorld& world, const ICampaignSource& src) {
     h.set_tag(tags::ROLE, TagValue::from(std::string("campaign")));
     h.set_tag(tags::ALIVE, TagValue::from(true));
 
+    // Phase A: NAME tag — campaign is a singleton, so a stable literal
+    // is the most useful display value (the inspector and any future
+    // entity-tree view can show "Campaign" without a component query).
+    h.set_tag(tags::NAME, TagValue::from(std::string("Campaign")));
+
     auto& cs = h.add<CampaignStateComponent>();
     cs.current_time       = src.current_time();
     cs.te_start_time      = src.te_start_time();
@@ -346,6 +351,11 @@ std::vector<EntityId> populate_teams(EntityWorld& world, const ITeamSource& src)
         h.set_tag(tags::ROLE, TagValue::from(std::string("team")));
         h.set_tag(tags::TEAM, TagValue::from(src.name(i)));
         h.set_tag(tags::ALIVE, TagValue::from(true));
+
+        // Phase A: NAME tag — promote the team callsign (e.g. "ROK",
+        // "Japan", "PRC") so consumers can display/filter team names
+        // without querying CampaignIdentityComponent.
+        h.set_tag(tags::NAME, TagValue::from(std::string(src.name(i))));
 
         // Narrowed CampaignIdentityComponent — only team_id + callsign.
         auto& cid = h.add<CampaignIdentityComponent>();
@@ -401,6 +411,31 @@ std::vector<EntityId> populate_objectives(
         h.set_tag(tags::ROLE, TagValue::from(std::string("objective")));
         h.set_tag(tags::TEAM, TagValue::from(static_cast<int64_t>(src.owner(i))));
         h.set_tag(tags::ALIVE, TagValue::from(true));
+
+        // Phase A: NAME + CLASS + ICON tags.
+        //
+        // NAME  ← ObjectiveTypeComponent::class_name (the per-instance label,
+        //         e.g. "02_20 Airbase 2"). Promoted here so the canvas search
+        //         filter and inspector can read it without a component query.
+        //
+        // CLASS ← objective_type (1..39). The raw input to
+        //         f4::world_convert::objective_type_name(). Stored as int to
+        //         avoid duplicating the name table (which lives in
+        //         f4-world-convert, not depended on by f4-world).
+        //
+        // ICON  ← same objective_type value — it IS the dispatch input for
+        //         f4::renderer::symbol_for_objective_type(). Storing it here
+        //         lets the renderer skip the ObjectiveTypeComponent +
+        //         PropertyBag lookup in the per-frame canvas loop.
+        const std::string& obj_name = src.class_name(i);
+        const int64_t obj_type = static_cast<int64_t>(src.objective_type(i));
+        if (!obj_name.empty()) {
+            h.set_tag(tags::NAME, TagValue::from(std::string(obj_name)));
+        }
+        if (obj_type > 0) {
+            h.set_tag(tags::CLASS, TagValue::from(obj_type));
+            h.set_tag(tags::ICON,  TagValue::from(obj_type));
+        }
 
         // --- Transform (grid → feet) ---
         auto& tf = h.add<TransformComponent>();
@@ -529,6 +564,34 @@ std::vector<EntityId> populate_units(
         h.set_tag(tags::TEAM, TagValue::from(static_cast<int64_t>(src.owner(i))));
         h.set_tag(tags::OPDOMAIN, TagValue::from(std::string(domain_name(src.domain(i)))));
         h.set_tag(tags::ALIVE, TagValue::from(true));
+
+        // Phase A: NAME + CLASS + ICON tags.
+        //
+        // NAME  ← UnitCoreComponent::class_name (e.g. "Armor Battalion",
+        //         "Patrol", "52 TFS PAK"). Promoted so the canvas label
+        //         pass and inspector can read it without querying
+        //         UnitCoreComponent for non-selected entities.
+        //
+        // CLASS ← unit_subtype (STYPE_UNIT_*). The raw input to
+        //         f4::world_convert::unit_subtype_name(domain, subtype).
+        //         domain is already available via tags::OPDOMAIN, so the
+        //         consumer has everything needed to produce the display
+        //         string ("Fighter", "Armor", "Infantry", ...).
+        //
+        // ICON  ← (unit_class << 8) | unit_subtype — the packed dispatch
+        //         input for f4::renderer::symbol_for_unit(). The consumer
+        //         unpacks: cls = (icon >> 8) & 0xFF, sub = icon & 0xFF,
+        //         then calls symbol_for_unit(cls, sub). This eliminates the
+        //         UnitCoreComponent query in the per-frame canvas loop.
+        const std::string& unit_name = src.class_name(i);
+        const uint8_t u_class = static_cast<uint8_t>(src.unit_class(i));
+        const uint8_t u_subtype = src.unit_subtype(i);
+        if (!unit_name.empty()) {
+            h.set_tag(tags::NAME, TagValue::from(std::string(unit_name)));
+        }
+        h.set_tag(tags::CLASS, TagValue::from(static_cast<int64_t>(u_subtype)));
+        h.set_tag(tags::ICON,  TagValue::from(
+            static_cast<int64_t>((static_cast<uint16_t>(u_class) << 8) | u_subtype)));
 
         // --- Transform (grid → feet) ---
         auto& tf = h.add<TransformComponent>();
@@ -817,10 +880,19 @@ PopulatedWorld populate_world(EntityWorld& world,
 {
     PopulatedWorld pw;
 
-    pw.campaign   = populate_campaign(world, camp_src);
-    pw.teams      = populate_teams(world, team_src);
-    pw.objectives = populate_objectives(world, obj_src, pw.objective_id_map);
-    pw.units      = populate_units(world, unit_src, pw.objective_id_map, pw.unit_id_map);
+    // Phase B: the per-kind EntityId vectors are no longer stored on
+    // PopulatedWorld — they're tag-derivable from EntityWorld via
+    // with_tag(tags::ROLE, ...) at any time. We still call the four
+    // populate_* functions (they create the entities and set tags), we
+    // just discard their return values. The two VU_ID maps ARE stored
+    // on PopulatedWorld because they're not tag-derivable (VU_IDs are
+    // external binary-format identifiers, not ECS tags) and downstream
+    // consumers (inspector) need them to resolve raw VU_IDs in
+    // format-residue fields like ObjectivePriorityComponent::parent_id.
+    (void)populate_campaign  (world, camp_src);
+    (void)populate_teams     (world, team_src);
+    (void)populate_objectives(world, obj_src,  pw.objective_id_map);
+    (void)populate_units     (world, unit_src, pw.objective_id_map, pw.unit_id_map);
 
     return pw;
 }
