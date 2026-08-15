@@ -130,7 +130,6 @@ void ViewerApp::draw_imgui() {
         if (ImGui::BeginMenu("View")) {
             ImGui::TextDisabled("Base layers");
             ImGui::Checkbox("Terrain",     &impl_->show_terrain);
-            ImGui::Checkbox("Routes",      &impl_->show_routes);
             ImGui::Checkbox("Objectives",  &impl_->show_objectives);
             ImGui::Checkbox("Units",       &impl_->show_units);
             ImGui::Checkbox("Grid",        &impl_->show_grid);
@@ -216,7 +215,6 @@ void ViewerApp::draw_imgui() {
                      ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_AlwaysAutoResize)) {
         ImGui::TextDisabled("Base");
         ImGui::Checkbox("Terrain",     &impl_->show_terrain);
-        ImGui::Checkbox("Routes",      &impl_->show_routes);
         ImGui::Checkbox("Objectives",  &impl_->show_objectives);
         ImGui::Checkbox("Units",       &impl_->show_units);
         ImGui::Checkbox("Grid",        &impl_->show_grid);

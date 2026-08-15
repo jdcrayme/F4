@@ -204,47 +204,6 @@ void ViewerApp::draw_canvas() {
         }
     }
 
-    // --- Routes (road/rail network from objective link_data) ---
-    if (impl_->show_routes && impl_->world_loaded) {
-        const Color road_color = {180, 160, 120, 140};
-        const Color rail_color = {100, 100, 110, 160};
-        const Color sel_color  = {255, 255, 100, 220};
-        // Hoist the objectives list once — with_tag_ref() is O(1) but the
-        // link-drawing loop below calls .size() and indexes into it many
-        // times per frame, so we bind a const-ref once at the top.
-        const auto& objectives = impl_->objectives();
-        for (std::size_t i = 0; i < objectives.size(); ++i) {
-            const auto eid = objectives[i];
-            auto h = impl_->handle(eid);
-            auto* tr = h.get<f4::entities::TransformComponent>();
-            auto* nl = h.get<f4::entities::NetworkLinksComponent>();
-            if (!tr || !nl) continue;
-            const float ox = impl_->grid_x(tr), oy = impl_->grid_y(tr);
-            const Vector2 p = impl_->world_to_screen(ox, oy);
-            for (const auto& link : nl->links) {
-                auto it = impl_->pop.objective_id_map.find(link.neighbor_num);
-                if (it == impl_->pop.objective_id_map.end()) continue;
-                auto nh = impl_->handle(it->second);
-                auto* n_tr = nh.get<f4::entities::TransformComponent>();
-                if (!n_tr) continue;
-                const Vector2 q = impl_->world_to_screen(impl_->grid_x(n_tr), impl_->grid_y(n_tr));
-                // Draw each link once (only when i < neighbor_index).
-                // Find the neighbor's index in the objectives list.
-                std::size_t n_idx = 0;
-                for (; n_idx < objectives.size(); ++n_idx) {
-                    if (objectives[n_idx] == it->second) break;
-                }
-                if (i >= n_idx) continue;
-                const Color c = link.is_rail ? rail_color : road_color;
-                DrawLineEx(p, q, 1.0f, c);
-                if (impl_->sel_kind == Impl::SelectionKind::Objective &&
-                    impl_->sel_entity == eid) {
-                    DrawLineEx(p, q, 2.0f, sel_color);
-                }
-            }
-        }
-    }
-
     // --- Objectives ---
     if (impl_->show_objectives && impl_->world_loaded) {
         const float base_size = std::clamp(6.0f + impl_->cam_zoom * 2.0f, 12.0f, 40.0f);
@@ -405,7 +364,7 @@ void ViewerApp::draw_canvas() {
 
             // Destination line — reads from MovementOrdersComponent (promoted
             // from PropertyBag in Phase 5 cleanup).
-            if (impl_->show_unit_destinations) {
+            /*if (impl_->show_unit_destinations) {
                 auto* mo = h.get<f4::entities::MovementOrdersComponent>();
                 if (mo) {
                     const int16_t dest_x = mo->dest_x;
@@ -415,7 +374,7 @@ void ViewerApp::draw_canvas() {
                         DrawLineEx(p, d, 1.0f, Color{c.r, c.g, c.b, 160});
                     }
                 }
-            }
+            }*/
 
             // Waypoint polyline
             if (impl_->show_waypoints) {
@@ -431,7 +390,7 @@ void ViewerApp::draw_canvas() {
                     }
                 }
             }
-
+            /*
             // Squadron → home airbase link line
             if (impl_->show_squadron_links &&
                 uc->unit_class == f4::entities::UnitClass::Squadron) {
@@ -447,7 +406,7 @@ void ViewerApp::draw_canvas() {
                     }
                 }
             }
-
+            
             // Battalion → Brigade hierarchy lines
             if (impl_->show_hierarchy_lines &&
                 uc->unit_class == f4::entities::UnitClass::Battalion) {
@@ -480,7 +439,7 @@ void ViewerApp::draw_canvas() {
                         }
                     }
                 }
-            }
+            }*/
 
             // Selection outline
             if (impl_->sel_kind == Impl::SelectionKind::Unit &&

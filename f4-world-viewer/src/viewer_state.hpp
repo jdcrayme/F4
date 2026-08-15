@@ -342,7 +342,6 @@ struct ViewerApp::Impl {
     bool show_units = true;
     bool show_grid = false;
     bool show_legend = true;
-    bool show_routes = true;       // road/rail network from objective link_data
     // Visualization overlays — toggled off by default to reduce clutter
     // when the user just wants to see the strategic picture. Enable
     // individually to inspect specific layers.

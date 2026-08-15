@@ -378,14 +378,47 @@ void draw_symbol(SymbolKind kind, float sx, float sy,
     // --- Objective symbols ---
     switch (kind) {
         case SymbolKind::ObjAirbase: {  // runway — long horizontal bar + centerline
-            // Centerline dash
-            DrawLineEx({sx - r * 0.7f, sy}, {sx + r * 0.7f, sy}, 1.0f, oc);
+            const float radius = r * 0.75f;
+
+            // Draw the aerodrome circle boundary and optional fill
+            if (filled) {
+                DrawCircle((int)sx, (int)sy, radius, fc_blend);
+            }
+            DrawRing({ sx, sy }, radius - 1.0f, radius, 0.0f, 360.0f, 16, oc);
+
+            // Draw intersecting runway lines pattern inside the circle
+            // Runway 1 (Main diagonal/vertical-ish)
+            const Vector2 r1_p1 = { sx - radius * 0.5f, sy - radius * 0.5f };
+            const Vector2 r1_p2 = { sx + radius * 0.5f, sy + radius * 0.5f };
+
+            // Runway 2 (Cross/horizontal-ish)
+            const Vector2 r2_p1 = { sx - radius * 0.6f, sy + radius * 0.2f };
+            const Vector2 r2_p2 = { sx + radius * 0.6f, sy - radius * 0.2f }; // balanced
+
+            DrawLineEx(r1_p1, r1_p2, 2.0f, oc);
             break;
         }
-        case SymbolKind::ObjAirstrip: {  // short runway
-            const float rw = r * 0.6f;
-            const float rh = r * 0.2f;
-            DrawLineEx({ sx - rw * 0.7f, sy }, { sx + rw * 0.7f, sy }, 1.0f, oc);
+        case SymbolKind::ObjAirstrip: {  // Circle with intersecting runways
+            const float radius = r * 0.75f;
+
+            // Draw the aerodrome circle boundary and optional fill
+            if (filled) {
+                DrawCircle((int)sx, (int)sy, radius, fc_blend);
+            }
+            DrawRing({ sx, sy }, radius - 1.0f, radius, 0.0f, 360.0f, 16, oc);
+
+            // Draw intersecting runway lines pattern inside the circle
+            // Runway 1 (Main diagonal/vertical-ish)
+            const Vector2 r1_p1 = { sx - radius * 0.5f, sy - radius * 0.5f };
+            const Vector2 r1_p2 = { sx + radius * 0.5f, sy + radius * 0.5f };
+
+            // Runway 2 (Cross/horizontal-ish)
+            const Vector2 r2_p1 = { sx - radius * 0.6f, sy + radius * 0.2f };
+            const Vector2 r2_p2 = { sx + radius * 0.6f, sy - radius * 0.2f }; // balanced
+
+            DrawLineEx(r1_p1, r1_p2, 2.0f, oc);
+            DrawLineEx({ sx - radius * 0.5f, sy + radius * 0.4f },
+                { sx + radius * 0.5f, sy - radius * 0.4f }, 2.0f, oc);
             break;
         }
         case SymbolKind::ObjArmyBase: {  // flag — vertical line + triangle
@@ -418,15 +451,34 @@ void draw_symbol(SymbolKind kind, float sx, float sy,
             break;
         }
         case SymbolKind::ObjBridge: {  // two horizontal bars + 2 verticals
-            const float w = r * 0.85f;
-            const float h = r * 0.15f;
-            const float gap = r * 0.35f;
+
+            const float d = r * 0.75f / 4;
+
+            const Vector2 t0 = { sx - d * 4, sy - d * 2 };
+            const Vector2 t1 = { sx - d * 3, sy - d };
+            const Vector2 t2 = { sx + d * 3, sy - d };
+            const Vector2 t3 = { sx + d * 4, sy - d * 2 };
+
+            const Vector2 b0 = { sx - d * 4, sy + d * 2 };
+            const Vector2 b1 = { sx - d * 3, sy + d };
+            const Vector2 b2 = { sx + d * 3, sy + d };
+            const Vector2 b3 = { sx + d * 4, sy + d * 2 };
             if (filled) {
-                DrawRectangleRec({sx - w, sy - gap - h, w * 2, h}, fc_blend);
-                DrawRectangleRec({sx - w, sy + gap, w * 2, h}, fc_blend);
+                DrawTriangle(t0, b0, b1, fc_blend);
+                DrawTriangle(t0, b1, t1, fc_blend);
+                DrawTriangle(t1, b1, b2, fc_blend);
+                DrawTriangle(t1, b2, t2, fc_blend);
+                DrawTriangle(t2, b2, b3, fc_blend);
+                DrawTriangle(t2, b3, t3, fc_blend);
             }
-            DrawLineEx({sx - w, sy - gap}, {sx - w, sy + gap}, 1.5f, oc);
-            DrawLineEx({sx + w, sy - gap}, {sx + w, sy + gap}, 1.5f, oc);
+
+            DrawLineEx(t0, t1, 1.5f, oc);
+            DrawLineEx(t1, t2, 1.5f, oc);
+            DrawLineEx(t2, t3, 1.5f, oc);
+
+            DrawLineEx(b0, b1, 1.5f, oc);
+            DrawLineEx(b1, b2, 1.5f, oc);
+            DrawLineEx(b2, b3, 1.5f, oc);
             break;
         }
         case SymbolKind::ObjChemical: {  // diamond + X
