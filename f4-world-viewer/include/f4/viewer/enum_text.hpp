@@ -26,6 +26,7 @@
 
 #pragma once
 
+#include <f4/world_convert/class_table.hpp>  // DataType enum (DTYPE_*)
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -87,21 +88,21 @@ namespace f4::viewer {
 // entry's dataPtr points into. Critical for navigating from a class-table
 // entry to its corresponding OCD/UCD/VCD/FCD record.
 //
-// These values were verified against real Falcon4.ct data (Phase 1 fix).
-// The previous mapping (1=Objective, 2=Unit, 3=Vehicle, 4=Weapon,
-// 5=Feature, 6=SquadStores) was wrong — it was the original Falcon4
-// documentation, but the on-disk values differ.
+// Delegates to the verified DataType enum in class_table.hpp rather than
+// duplicating the mapping here. The enum values were verified against real
+// Falcon4.ct data (Phase 1 fix).
 // ---------------------------------------------------------------------------
 [[nodiscard]] inline const char* data_type_name(uint8_t dt) noexcept {
-    switch (dt) {
-        case 0: return "Nothing";
-        case 1: return "Feature";     // -> Falcon4.FCD
-        case 3: return "Objective";   // -> Falcon4.OCD
-        case 4: return "Unit";        // -> Falcon4.UCD
-        case 5: return "Vehicle";     // -> Falcon4.VCD
-        case 6: return "Weapon";      // -> Falcon4.WCD
-        case 7: return "SquadStores"; // -> Falcon4.SSD
-        default: return "Unknown";
+    using f4::world_convert::DataType;
+    switch (static_cast<DataType>(dt)) {
+        case DataType::DTYPE_NOTHING:       return "Nothing";
+        case DataType::DTYPE_FEATURE:       return "Feature";      // -> Falcon4.FCD
+        case DataType::DTYPE_OBJECTIVE:     return "Objective";    // -> Falcon4.OCD
+        case DataType::DTYPE_UNIT:          return "Unit";         // -> Falcon4.UCD
+        case DataType::DTYPE_VEHICLE:       return "Vehicle";      // -> Falcon4.VCD
+        case DataType::DTYPE_WEAPON:        return "Weapon";       // -> Falcon4.WCD
+        case DataType::DTYPE_SQUAD_STORES:  return "SquadStores";  // -> Falcon4.SSD
+        default:                            return "Unknown";
     }
 }
 
@@ -267,47 +268,6 @@ inline void obj_flags_text(uint32_t flags, char* buf, std::size_t buf_size) noex
     if (flags & 0x00010000u) append("AI_INVIS");
     // Catch-all for any remaining bits
     const uint32_t decoded_mask = 0x00010703u;
-    const uint32_t leftover = flags & ~decoded_mask;
-    if (leftover) {
-        char tail[16];
-        std::snprintf(tail, sizeof(tail), "0x%08x", leftover);
-        append(tail);
-    }
-    std::snprintf(buf, buf_size, "%s", local);
-}
-
-// ---------------------------------------------------------------------------
-// UnitState "flags" / "base_flags" / "unit_flags" bitmaps. The FreeFalcon
-// source (CampBaseClass, UnitClass) defines many F_ / UF_ / U_ bits but
-// only a handful are commonly set in fresh campaign saves. Best-effort
-// decoder for the most visible bits; the rest are hex-tailed.
-// ---------------------------------------------------------------------------
-inline void unit_flags_text(uint32_t flags, char* buf, std::size_t buf_size) noexcept {
-    if (buf_size == 0) return;
-    if (flags == 0) {
-        std::snprintf(buf, buf_size, "0");
-        return;
-    }
-    char local[128];
-    char* p = local;
-    std::size_t remaining = sizeof(local);
-    bool add_sep = false;
-
-    auto append = [&](const char* label) {
-        if (remaining < std::strlen(label) + 2) return;
-        int n = std::snprintf(p, remaining, "%s%s", add_sep ? "|" : "", label);
-        if (n > 0) { p += n; remaining -= static_cast<std::size_t>(n); add_sep = true; }
-    };
-
-    if (flags & 0x00000001u) append("ACTIVE");
-    if (flags & 0x00000002u) append("DETECTED");
-    if (flags & 0x00000004u) append("ENGAGED");
-    if (flags & 0x00000008u) append("TARGETED");
-    if (flags & 0x00000010u) append("RETREATING");
-    if (flags & 0x00000020u) append("REINFORCEMENT");
-    if (flags & 0x00000040u) append("OVERRUN");
-    if (flags & 0x00000080u) append("CARGO");
-    const uint32_t decoded_mask = 0x000000FFu;
     const uint32_t leftover = flags & ~decoded_mask;
     if (leftover) {
         char tail[16];

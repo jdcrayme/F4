@@ -175,7 +175,7 @@ void ViewerApp::draw_imgui() {
                 open_install_diagnostics();
             }
             ImGui::Separator();
-            // Snapshot Install Files — TEMPORARY diagnostic tool for the
+            // Snapshot Install Files — diagnostic tool for ground-truthing
             // static-data parsing milestone. Walks the install, dumps the
             // first 8 KB of every interesting Falcon4 data file (PHD/PD/
             // OCD/UCD/VCD/FED/FCD/AII/ct) as hex+ASCII to a single text
@@ -378,57 +378,6 @@ void ViewerApp::draw_imgui() {
     // already finalized (the ID stack is empty, GetID() dereferences
     // an empty ImVector).
     //
-    // BUG FIX: The popup ID in OpenPopup() MUST match the name passed to
-    // BeginPopupModal(). Previously we used "FilePicker" in OpenPopup but
-    // the title string in BeginPopupModal — the IDs didn't match so the
-    // popup never opened. Now both use the title string as the ID.
-    if (impl_->pending_dialog_open && !impl_->pending_dialog_title.empty()) {
-        const char* popup_id = impl_->pending_dialog_title.c_str();
-        if (!ImGui::IsPopupOpen(popup_id)) {
-            ImGui::OpenPopup(popup_id);
-        }
-        ImGui::SetNextWindowSize(ImVec2(500, 160), ImGuiCond_FirstUseEver);
-        if (ImGui::BeginPopupModal(popup_id,
-                                    &impl_->pending_dialog_open,
-                                    ImGuiWindowFlags_NoResize)) {
-            ImGui::TextUnformatted("Path:");
-            ImGui::SameLine();
-            ImGui::PushItemWidth(-120);
-            ImGui::InputText("##path", impl_->pending_dialog_path,
-                             sizeof(impl_->pending_dialog_path));
-            ImGui::PopItemWidth();
-            ImGui::SameLine();
-            if (ImGui::Button("OK")) {
-                std::string p = impl_->pending_dialog_path;
-                if (!p.empty()) {
-                    auto cb = std::move(impl_->pending_dialog_callback);
-                    impl_->pending_dialog_callback = nullptr;
-                    impl_->pending_dialog_open = false;
-                    impl_->pending_dialog_title.clear();
-                    try {
-                        cb(p);
-                    } catch (const std::exception& e) {
-                        impl_->last_error = e.what();
-                    }
-                }
-                ImGui::CloseCurrentPopup();
-            }
-            ImGui::SameLine();
-            if (ImGui::Button("Cancel")) {
-                impl_->pending_dialog_open = false;
-                impl_->pending_dialog_title.clear();
-                impl_->pending_dialog_callback = nullptr;
-                ImGui::CloseCurrentPopup();
-            }
-            if (!impl_->last_world_json_path.empty()) {
-                ImGui::Separator();
-                ImGui::TextDisabled("Last world JSON: %s",
-                                    impl_->last_world_json_path.string().c_str());
-            }
-            ImGui::EndPopup();
-        }
-    }
-
     // --- Install summary modal (shown after Set Install Path succeeds) ---
     if (impl_->install_summary_open) {
         if (!ImGui::IsPopupOpen("Install Summary")) {
@@ -665,28 +614,6 @@ void ViewerApp::draw_imgui() {
     draw_campaign_and_teams_view();
 
     rlImGuiEnd();
-}
-
-// ---------------------------------------------------------------------------
-// File dialog helper — Raylib doesn't ship a native picker, so we use a
-// simple ImGui text-input modal. The user can paste a path or type one in.
-// A real file browser will replace this in a future pass — likely via
-// tinyfiledialogs (which uses the OS native dialog on Windows/macOS/Linux).
-// ---------------------------------------------------------------------------
-void ViewerApp::open_file_dialog(const char* title, const char* filters,
-                                  std::function<void(const std::string&)> on_ok) {
-    impl_->pending_dialog_title = title;
-    impl_->pending_dialog_filters = filters ? filters : "";
-    impl_->pending_dialog_callback = std::move(on_ok);
-    // Pre-fill with the last world JSON path if available — saves typing.
-    if (!impl_->last_world_json_path.empty()) {
-        std::string s = impl_->last_world_json_path.string();
-        std::snprintf(impl_->pending_dialog_path, sizeof(impl_->pending_dialog_path),
-                      "%s", s.c_str());
-    } else {
-        impl_->pending_dialog_path[0] = '\0';
-    }
-    impl_->pending_dialog_open = true;
 }
 
 } // namespace f4::viewer

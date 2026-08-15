@@ -76,8 +76,7 @@ int main(int argc, char** argv) {
     bool print_diagnostics = false;
 
     // --snapshot <path> — write install snapshot (hex dumps of every
-    // interesting data file) to <path> and exit. TEMPORARY diagnostic
-    // tool for the static-data parsing milestone. See snapshot.hpp.
+    // interesting data file) to <path> and exit. See snapshot.hpp.
     std::string snapshot_path;
     bool have_snapshot = false;
 
@@ -169,8 +168,7 @@ int main(int argc, char** argv) {
         return 0;
     }
 
-    // Write an install snapshot to disk + exit (no GUI). TEMPORARY
-    // diagnostic tool for the static-data parsing milestone — dumps
+    // Write an install snapshot to disk + exit (no GUI). Dumps
     // the first 8 KB of every interesting Falcon4 data file as a hex
     // dump, so the dev team can ground-truth binary struct layouts.
     // The user runs: f4-world-viewer --install /path --snapshot out.txt

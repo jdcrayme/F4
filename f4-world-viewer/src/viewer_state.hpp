@@ -434,17 +434,6 @@ struct ViewerApp::Impl {
     // Class Table Browser panel — owned by the viewer, opened via Tools menu.
     ClassTableBrowser class_table_browser;
 
-    // Pending file dialog (legacy fallback — used by File > Advanced >
-    // ... menu items when tinyfiledialogs is unavailable or for ad-hoc
-    // path entry. We keep it around because the native picker doesn't
-    // support filter overrides the way the old modal did, and it's
-    // useful as a back door.)
-    bool pending_dialog_open = false;
-    char pending_dialog_path[1024] = {0};
-    std::string pending_dialog_title;
-    std::string pending_dialog_filters;
-    std::function<void(const std::string&)> pending_dialog_callback;
-
     // Scheduled screenshot (for headless smoke tests)
     bool screenshot_pending = false;
     double screenshot_at = 0.0;    // GetTime() value

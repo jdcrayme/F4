@@ -55,7 +55,6 @@ set(IMGUI_SOURCES
     ${IMGUI_DIR}/imgui_draw.cpp
     ${IMGUI_DIR}/imgui_tables.cpp
     ${IMGUI_DIR}/imgui_widgets.cpp
-    ${IMGUI_DIR}/imgui_demo.cpp
 )
 set(RLIMGUI_SOURCES
     ${RLIMGUI_DIR}/rlImGui.cpp
@@ -85,11 +84,8 @@ set(TINYFILEDIALOGS_SOURCES
 #                         / open_snapshot_dialog / snapshot_install_files
 #   diagnostics.cpp     — build_install_diagnostics / build_campaign_load_error
 #   snapshot.cpp        — build_install_snapshot / write_install_snapshot
-#                         (TEMPORARY diagnostic tool for the static-data
-#                          parsing milestone; see snapshot.hpp)
 #   canvas.cpp          — handle_input / draw_canvas (Raylib 2D render)
 #   imgui_panels.cpp    — draw_imgui (menus, layers, legend, inspector, modals)
-#                         + open_file_dialog (legacy text-input modal)
 #   ground_layout_view.cpp   — 2D ImGui "Ground Layout" panel (top-down
 #                               line+dot rendering, per-list type colors).
 #   ground_layout_models.cpp — pure layout→geometry converter (no Raylib,

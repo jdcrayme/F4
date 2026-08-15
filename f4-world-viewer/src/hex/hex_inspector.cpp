@@ -3,6 +3,8 @@
 #include <f4/viewer/hex_inspector.hpp>
 #include <f4/viewer/file_dialog.hpp>
 
+#include "hex_utils.hpp"
+
 #include <imgui.h>
 #include <rlImGui.h>
 
@@ -18,20 +20,13 @@ namespace f4::viewer {
 
 namespace {
 
+using hex::hex_byte;
+
 /// Format an offset as an 8-digit hex address (e.g. "00001A2B").
 std::string offset_hex(std::size_t off) {
     std::ostringstream ss;
     ss << std::hex << std::setfill('0') << std::setw(8) << off;
     return ss.str();
-}
-
-/// Format a byte as two hex digits.
-std::string hex_byte(uint8_t b) {
-    static const char* digits = "0123456789ABCDEF";
-    std::string s(2, '0');
-    s[0] = digits[b >> 4];
-    s[1] = digits[b & 0x0F];
-    return s;
 }
 
 /// Color for an annotation category. Returns an ImVec4 suitable for

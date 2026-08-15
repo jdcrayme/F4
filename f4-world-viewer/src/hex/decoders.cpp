@@ -6,6 +6,8 @@
 #include <f4/world_convert/cam_archive.hpp>
 #include <f4/world_convert/class_table.hpp>   // unit_subtype_name, DOMAIN_*
 
+#include "hex_utils.hpp"
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -19,6 +21,10 @@ namespace f4::viewer {
 
 namespace {
 
+using hex::hex_byte;
+using hex::hex_dump;
+using hex::ascii_preview;
+
 /// Format an integer as hex with 0x prefix. width=0 means no padding.
 std::string hex_str(uint64_t v, int width = 0) {
     std::ostringstream ss;
@@ -26,37 +32,6 @@ std::string hex_str(uint64_t v, int width = 0) {
     if (width > 0) ss << std::setfill('0') << std::setw(width);
     ss << v;
     return ss.str();
-}
-
-/// Format a byte as two hex digits.
-std::string hex_byte(uint8_t b) {
-    static const char* digits = "0123456789ABCDEF";
-    std::string s(2, '0');
-    s[0] = digits[b >> 4];
-    s[1] = digits[b & 0x0F];
-    return s;
-}
-
-/// Format a byte slice as a hex string (space-separated).
-std::string hex_dump(const uint8_t* data, std::size_t n) {
-    std::string s;
-    s.reserve(n * 3);
-    for (std::size_t i = 0; i < n; ++i) {
-        if (i > 0) s += ' ';
-        s += hex_byte(data[i]);
-    }
-    return s;
-}
-
-/// Format a byte slice as an ASCII preview (non-printable → '.').
-std::string ascii_preview(const uint8_t* data, std::size_t n) {
-    std::string s;
-    s.reserve(n);
-    for (std::size_t i = 0; i < n; ++i) {
-        const uint8_t b = data[i];
-        s.push_back((b >= 0x20 && b < 0x7F) ? static_cast<char>(b) : '.');
-    }
-    return s;
 }
 
 } // namespace

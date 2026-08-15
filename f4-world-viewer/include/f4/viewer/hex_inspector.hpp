@@ -103,10 +103,6 @@ private:
     /// Open a native save dialog and write the current selection to the
     /// chosen file.
     void save_selection_as();
-
-    /// Compute the byte offset at the given ImGui mouse position within
-    /// the hex dump. Returns false if the position is not over a byte.
-    bool byte_at_position(float mouse_x, float mouse_y, std::size_t* out) const;
 };
 
 } // namespace f4::viewer

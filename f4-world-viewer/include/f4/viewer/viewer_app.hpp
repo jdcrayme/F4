@@ -175,8 +175,6 @@ private:
     /// Content-only — caller owns the window + tab item.
     void draw_ground_layout_3d();
     void draw_campaign_and_teams_view();
-    void open_file_dialog(const char* title, const char* filters,
-                          std::function<void(const std::string&)> on_ok);
 };
 
 } // namespace f4::viewer
