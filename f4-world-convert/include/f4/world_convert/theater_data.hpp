@@ -175,7 +175,7 @@ struct PtData {
 struct UnitClassData {
     int16_t  index = 0;
     std::array<int32_t, TD_VEHICLE_GROUPS_PER_UNIT> num_elements{};  // per-group vehicle count
-    std::array<int16_t, TD_VEHICLE_GROUPS_PER_UNIT> vehicle_type{};  // class-table index per group
+    std::array<int16_t, TD_VEHICLE_GROUPS_PER_UNIT> vehicle_type{};  // 0-based entries[] index (entity_type = this + 100)
     std::array<std::array<uint8_t, 8>, TD_VEHICLE_GROUPS_PER_UNIT> vehicle_class{};  // 8-byte class descriptors
     uint16_t flags = 0;             // VEH_ capability flags
     std::string name;               // 20-byte char array, e.g. "Armor", "Infantry"

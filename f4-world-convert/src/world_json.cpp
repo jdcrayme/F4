@@ -489,25 +489,27 @@ std::string to_world_json(const CamArchive& cam, const WorldJsonOptions& opts) {
                                     first_grp = false;
                                     // Decode live count from roster (2 bits/group)
                                     const int live = (u.roster >> (g * 2)) & 0x03;
+                                    // The vehicle_type field in UCD is a 0-based
+                                    // index into the class table entries[] array,
+                                    // NOT an entity_type. Convert to entity_type by
+                                    // adding VU_LAST_ENTITY_TYPE (100) before resolving
+                                    // through the class table.
+                                    const uint16_t vt_et = static_cast<uint16_t>(
+                                        vt + VU_LAST_ENTITY_TYPE);
                                     o << "{\"group\": " << g
-                                      << ", \"vehicle_type\": " << vt
+                                      << ", \"vehicle_type\": " << vt_et
                                       << ", \"count\": " << n_elements
                                       << ", \"live_count\": " << live;
-                                    // Look up vehicle name from VCD via the class table.
-                                    // The vehicle_type field is an entity_type (e.g. 273
-                                    // for F-16C), NOT a VCD table index. We must
-                                    // resolve it through the class table to get the
-                                    // correct dataPtr (VCD index). Using entity_type -
-                                    // 100 as a VCD index was wrong — VCD entries are
-                                    // not stored in entity_type order.
+                                    // Look up vehicle name from VCD via the class
+                                    // table. entity_type → ClassTable.data_ptr_for()
+                                    // → DTYPE_VEHICLE check → VCD index → VCD name.
                                     if (opts.theater_db->vehicles.loaded()) {
                                        const VehicleClassData* vcd = nullptr;
                                         if (opts.class_table) {
                                             uint8_t vcd_dt = 0;
                                             uint32_t vcd_idx = 0;
                                             if (opts.class_table->data_ptr_for(
-                                                    static_cast<uint16_t>(vt),
-                                                    vcd_dt, vcd_idx)
+                                                    vt_et, vcd_dt, vcd_idx)
                                                 && vcd_dt == DTYPE_VEHICLE) {
                                                 vcd = opts.theater_db->vehicles.at(
                                                     static_cast<std::size_t>(vcd_idx));

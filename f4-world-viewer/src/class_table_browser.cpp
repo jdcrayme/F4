@@ -1209,16 +1209,19 @@ void ClassTableBrowser::draw_detail_panel() {
                 if (ImGui::TreeNode("Vehicle Groups (16 slots)")) {
                     for (int i = 0; i < 16; ++i) {
                         if (ucd->num_elements[i] > 0) {
-                            // Resolve vehicle_type (entity_type) through
-                            // the class table to get a human-readable VCD name.
+                            // vehicle_type in UCD is a 0-based class table
+                            // entries[] index, NOT an entity_type. Convert to
+                            // entity_type by adding VU_LAST_ENTITY_TYPE (100)
+                            // before resolving through the class table.
                             const int16_t vt = ucd->vehicle_type[i];
+                            const uint16_t vt_et = static_cast<uint16_t>(
+                                vt + f4::world_convert::VU_LAST_ENTITY_TYPE);
                             const char* vname = nullptr;
                             if (class_table_.loaded() && theater_db_.vehicles.loaded()) {
                                 uint8_t vcd_dt = 0;
                                 uint32_t vcd_idx = 0;
                                 if (class_table_.data_ptr_for(
-                                        static_cast<uint16_t>(vt),
-                                        vcd_dt, vcd_idx)
+                                        vt_et, vcd_dt, vcd_idx)
                                     && vcd_dt == f4::world_convert::DTYPE_VEHICLE) {
                                     const auto* vcd = theater_db_.vehicles.at(
                                         static_cast<std::size_t>(vcd_idx));
@@ -1227,10 +1230,10 @@ void ClassTableBrowser::draw_detail_panel() {
                             }
                             if (vname) {
                                 ImGui::Text("  Group[%2d]: %d vehicles of type %d (%s)",
-                                            i, ucd->num_elements[i], vt, vname);
+                                            i, ucd->num_elements[i], vt_et, vname);
                             } else {
                                 ImGui::Text("  Group[%2d]: %d vehicles of type %d",
-                                            i, ucd->num_elements[i], vt);
+                                            i, ucd->num_elements[i], vt_et);
                             }
                         }
                     }
