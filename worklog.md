@@ -2220,3 +2220,71 @@ Stage Summary:
 - RenderEntity() is the reusable component-driven 3D render dispatch function
 - RenderEntityIcon() is the reusable component-driven 2D map symbol function
 - entity_icon_info() is the pure-query variant for legends/tooltips
+
+---
+Task ID: INSPECTOR-TABS-1
+Agent: main (orchestrator)
+Task: Combine the Ground Layout and Ground Layout 3D windows into the Inspector window as tabs. Goal: 1 window with tabs to select Inspect, Ground Layout, and 3D views. Also recommend other cleanup and optimization opportunities.
+
+Work Log:
+- Cloned F4 repo to /home/z/my-project/F4. Read the three target functions:
+  * f4-world-viewer/src/inspector_panel.cpp::draw_inspector() — opens its own ImGui::Begin("Inspector") (lines 30-32) AND is called from inside another Begin("Inspector") wrapper in imgui_panels.cpp:449-452. Discovered the duplicate Begin/End was a leftover from the POLISH-2.6 extraction — the outer wrapper in imgui_panels.cpp was the active one; the inner Begin/End in inspector_panel.cpp was effectively a no-op (ImGui silently ignores the second Begin with the same window name).
+  * f4-world-viewer/src/ground_layout_view.cpp::draw_ground_layout_view() — opens its own "Ground Layout" window at (10, window_h-520), size 640x480. Early-returns when no objective is selected OR when window is collapsed.
+  * f4-world-viewer/src/ground_layout_3d.cpp::draw_ground_layout_3d() — opens its own "Ground Layout 3D" window at (660, 80), size 700x540. Early-returns when no applicable objective.
+- Verified tests (f4-world-viewer/tests/) only exercise the pure data functions (test_ground_layout_models.cpp, test_settings.cpp, test_hex_model.cpp) — none of them depend on the ImGui window structure, so the refactor is test-safe.
+- Refactored draw_inspector() in inspector_panel.cpp to be content-only: removed the inner ImGui::Begin/End wrapper (was a no-op duplicate of the outer one in imgui_panels.cpp). Function now just draws its content (selected entity detail, Ground Layout tree node, Vehicle Groups tree node, Waypoints tree node) into whatever ImGui window+tab item the caller has open.
+- Refactored draw_ground_layout_view() in ground_layout_view.cpp to be content-only: removed the ImGui::Begin("Ground Layout")/End wrapper. Replaced the early-return-when-no-selection with a placeholder ImGui::TextDisabled("Select an objective to view its ground layout.") so the tab stays stable (doesn't disappear when the user changes selection). Same treatment for the "no layout/features" case and the "no points in any list" case.
+- Refactored draw_ground_layout_3d() in ground_layout_3d.cpp to be content-only: removed the ImGui::Begin("Ground Layout 3D")/End wrapper and the SetNextWindowPos/SetNextWindowSize. Replaced early-returns with placeholder TextDisabled messages. Updated the footer hint text from "(close window to free GPU texture)" to "drag = orbit, scroll = zoom" — the RenderTexture2D lifetime is now tied to the Inspector window's lifetime, not the per-tab visibility.
+- Added new field ViewerApp::Impl::inspector_active_tab (int, default 0) to viewer_state.hpp. Tracks which tab is currently active (0=Inspect, 1=Ground Layout, 2=3D). Updated by draw_inspector_window() when each BeginTabItem returns true.
+- Added new method ViewerApp::draw_inspector_window() declared in viewer_app.hpp and defined in inspector_panel.cpp. The function:
+  * Opens ONE ImGui::Begin("Inspector") window at (window_w - 520, 250), size 500x540 — wider than the old 310-wide Inspector to comfortably hold the 2D canvas and 3D viewport.
+  * Draws a selection summary header (entity class name + kind) above the tab bar so the user has context regardless of which tab is active.
+  * Uses ImGui::BeginTabBar("##inspector_tabs") with three BeginTabItem entries: "Inspect", "Ground Layout", "3D". Each calls the corresponding content-only function (draw_inspector, draw_ground_layout_view, draw_ground_layout_3d).
+  * Properly handles collapsed window (early-exit with ImGui::End after the failed Begin).
+- Updated imgui_panels.cpp::draw_imgui() to call draw_inspector_window() INSTEAD of the previous three separate calls (the explicit "Inspector" Begin/End block at lines 447-452 AND the two draw_ground_layout_view() / draw_ground_layout_3d() calls near the bottom of the function).
+- Verified brace balance of all modified files using Python with strings/comments stripped: all balanced (inspector_panel.cpp 86/86, ground_layout_view.cpp 80/80, ground_layout_3d.cpp 121/121, viewer_state.hpp 41/41, imgui_panels.cpp 108/108).
+- Verified no remaining ImGui::Begin calls in the content-only functions (grep shows only the draw_inspector_window's own Begin, plus comments). Verified no leftover ImGui::End calls in content-only functions (grep shows only the comment "No ImGui::End() here — caller owns the window.").
+
+Stage Summary:
+- Modified files:
+  * f4-world-viewer/include/f4/viewer/viewer_app.hpp — added draw_inspector_window() declaration; updated comments on draw_inspector / draw_ground_layout_view / draw_ground_layout_3d to note they are content-only.
+  * f4-world-viewer/src/viewer_state.hpp — added inspector_active_tab field to Impl (default 0).
+  * f4-world-viewer/src/inspector_panel.cpp — added draw_inspector_window() definition (combined window + tab bar); refactored draw_inspector() to be content-only (removed duplicate Begin/End).
+  * f4-world-viewer/src/ground_layout_view.cpp — refactored draw_ground_layout_view() to be content-only (no Begin/End; shows placeholder TextDisabled when no applicable selection).
+  * f4-world-viewer/src/ground_layout_3d.cpp — refactored draw_ground_layout_3d() to be content-only (no Begin/End; shows placeholder TextDisabled when no applicable selection; updated footer hint text).
+  * f4-world-viewer/src/imgui_panels.cpp — replaced the three separate panel calls (Inspector Begin/End + draw_ground_layout_view + draw_ground_layout_3d) with one call to draw_inspector_window().
+- USER-VISIBLE CHANGE: the three previously-separate windows (Inspector + Ground Layout + Ground Layout 3D) are now ONE window with three tabs. The window is anchored to the right side of the screen, larger than the old Inspector (500x540 vs 310x380) to accommodate the 2D/3D viewports. Tabs are stable across selection changes — when a tab's content doesn't apply (e.g. selecting a unit while on Ground Layout tab), a placeholder message is shown instead of the tab disappearing.
+- The selection summary header at the top of the combined window shows the current entity's class name + kind, providing context regardless of which tab the user is on.
+- RECOMMENDED NEXT CLEANUP (separate task): imgui_panels.cpp is still 794 LoC — could be split into per-concern files (menu_bar.cpp, layers_panel.cpp, legend_panel.cpp, modals.cpp). The Layers panel + View menu have duplicated checkbox state for the same fields — should be deduplicated. The Campaign + Teams view still opens two separate windows and could be combined into a single "World" window with tabs. See the message body for the full recommendation list.
+
+---
+Task ID: INSPECTOR-TABS-2
+Agent: main (orchestrator)
+Task: Verify the INSPECTOR-TABS-1 changes build cleanly and ship a downloadable .patch file for the user to test.
+
+Work Log:
+- Set up the build environment on a fresh container (no cmake, no GL dev headers pre-installed):
+  * pip install --break-system-packages cmake (cmake 4.4.2 installed at /home/z/.local/bin/cmake)
+  * apt-get download (without sudo) of: libgl-dev, libgl1-mesa-dev, libegl-dev, libgles-dev, libx11-dev, libxext-dev, libxfixes-dev, libxrender-dev, libxi-dev, libxinerama-dev, libxrandr-dev, libxcursor-dev + runtime libs (libegl1, libglvnd0, libgles1, libgles2, libxrandr2). Extracted all to /home/z/gldev via dpkg-deb -x.
+  * Symlinked libGL.so -> /usr/lib/x86_64-linux-gnu/libGL.so.1 in /home/z/gldev.
+  * Set env vars: CPLUS_INCLUDE_PATH=/home/z/gldev/usr/include, LIBRARY_PATH=/home/z/gldev/usr/lib/x86_64-linux-gnu, LD_LIBRARY_PATH=/home/z/gldev/usr/lib/x86_64-linux-gnu, CMAKE_PREFIX_PATH=/home/z/gldev/usr.
+- Pre-cloned all FetchContent deps with --depth 1 to speed up configure (raylib, imgui v1.91.5, googletest v1.14.0, nlohmann_json v3.11.3). For rlImGui the CMakeLists.txt pins commit 9acdbbf (predates the 1.92 ImTextureData migration) — had to git fetch --unshallow + git checkout 9acdbbf since that commit isn't on a tag.
+- Configured cmake from /home/z/my-project/F4/build with -DFETCHCONTENT_SOURCE_DIR_* flags pointing at the pre-cloned sources, plus -DCMAKE_FIND_ROOT_PATH=/home/z/gldev so the raylib/glfw3 subconfigure finds the X11 dev headers.
+- Built `f4_world_viewer` (static library) — succeeded with only pre-existing warnings (unused variables in hex_inspector.cpp, format-string sign-compare in imgui_panels.cpp). No new warnings or errors introduced by the INSPECTOR-TABS-1 changes.
+- Built `f4-world-viewer` (executable) — linked cleanly against raylib + ImGui + rlImGui + all f4-* static libraries.
+- Built and ran the three f4-world-viewer unit tests:
+  * test_ground_layout_models: 21/21 tests PASSED
+  * test_settings: 14/14 tests PASSED
+  * test_hex_model: 30/30 tests PASSED (9 test suites)
+- Smoke-tested the viewer binary under Xvfb with the save1.world.json + korea.terrain.json fixtures + --screenshot flag. The viewer:
+  * Initialized raylib + ImGui successfully under Xvfb :99 with Mesa llvmpipe (OpenGL 4.5 Core Profile).
+  * Loaded the world + terrain JSON.
+  * Rendered frames for 4 seconds without crashing.
+  * Took a screenshot and exited cleanly with "Screenshot saved ... exiting." message.
+  * Screenshot (252KB PNG) saved at /home/z/my-project/download/inspector_tabs_smoke.png.
+- Generated the .patch file via `git diff > /home/z/my-project/download/inspector-tabs-combined.patch` (447 lines, 25KB). Verified it applies cleanly to a fresh `git clone https://github.com/jdcrayme/F4.git` via `git apply --check` (exit code 0) and `git apply` (exit code 0). The patch modifies 7 files: viewer_app.hpp, viewer_state.hpp, inspector_panel.cpp, ground_layout_view.cpp, ground_layout_3d.cpp, imgui_panels.cpp, worklog.md (207 insertions, 62 deletions).
+
+Stage Summary:
+- BUILD VERIFICATION: complete. f4_world_viewer library + f4-world-viewer executable both build clean (no new warnings/errors). All 65 unit tests pass. Viewer runs under Xvfb without crash.
+- DELIVERABLE: /home/z/my-project/download/inspector-tabs-combined.patch — applies cleanly to a fresh clone of https://github.com/jdcrayme/F4.git.
+- Also saved: /home/z/my-project/download/inspector_tabs_smoke.png — screenshot of the viewer running with the Korea fixture loaded, post-refactor.

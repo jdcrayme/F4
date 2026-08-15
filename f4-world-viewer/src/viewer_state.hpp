@@ -216,6 +216,18 @@ struct ViewerApp::Impl {
     SelectionKind sel_kind = SelectionKind::None;
     f4::entities::EntityId sel_entity;  // valid when sel_kind != None
 
+    // INSPECTOR-TABS-1: which tab of the combined Inspector window is
+    // active. Persisted across frames so the user's choice survives
+    // selection changes. ImGui's BeginTabItem returns the open/close
+    // state; we write back to this field via SetTabItemInScope (in
+    // draw_inspector_window) so the next frame knows which tab to draw.
+    //
+    // The values match the tab order in draw_inspector_window():
+    //   0 = Inspect (entity detail)
+    //   1 = Ground Layout (2D top-down)
+    //   2 = 3D (orbit camera)
+    int inspector_active_tab = 0;
+
     // --- ECS access helpers (inline) ---
     /// Create an EntityHandle for a given EntityId in our EntityWorld.
     f4::entities::EntityHandle handle(f4::entities::EntityId id) const {

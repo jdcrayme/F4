@@ -1,11 +1,19 @@
 // f4-world-viewer/src/inspector_panel.cpp
 //
-// ViewerApp::draw_inspector — the right-side Inspector panel showing
-// the full detail of the currently-selected objective or unit
-// (position, owner, class name, links, features, vehicle groups,
-// waypoints, mission context, ground layout summary, etc.).
+// ViewerApp::draw_inspector — content for the "Inspect" tab of the
+// combined Inspector window. Shows the full detail of the currently-
+// selected objective or unit (position, owner, class name, links,
+// features, vehicle groups, waypoints, mission context, ground layout
+// summary, etc.).
+//
+// This function assumes the caller has already opened the ImGui window
+// (and an appropriate tab item). It only draws content — no
+// Begin/End around itself.
 //
 // Migrated from WorldState to EntityWorld (Step 4c).
+// Refactored to a content-only function (INSPECTOR-TABS-1) — the
+// previously duplicated Begin/End wrapper (which conflicted with the
+// outer Begin/End in imgui_panels.cpp) has been removed.
 
 #include "viewer_state.hpp"
 #include "diagnostics.hpp"
@@ -24,12 +32,92 @@
 namespace f4::viewer {
 
 // ---------------------------------------------------------------------------
-// Inspector panel
+// Combined Inspector window — three tabs in one ImGui window.
+// ---------------------------------------------------------------------------
+//
+// Replaces the previous layout where three separate windows opened at
+// different screen positions:
+//   - "Inspector"          (right side, top)
+//   - "Ground Layout"      (bottom-left)
+//   - "Ground Layout 3D"   (right side, overlapping)
+//
+// The combined window uses ImGui::BeginTabBar to switch between:
+//   - Inspect         → draw_inspector()          (entity detail)
+//   - Ground Layout   → draw_ground_layout_view() (2D top-down)
+//   - 3D              → draw_ground_layout_3d()   (orbit camera)
+//
+// Each tab function is content-only (no ImGui::Begin/End wrapper) so it
+// can be called inside a BeginTabItem scope. When the current selection
+// doesn't have applicable data (e.g. a unit selected on the Ground Layout
+// tab), the content function shows a placeholder instead of hiding the
+// tab — that way the tab set is stable across selections.
+void ViewerApp::draw_inspector_window() {
+    // Single window position — anchored to the right side of the screen,
+    // below the legend (when legend is shown). The window is wider than
+    // the old Inspector (480 vs 310) to comfortably hold the 2D layout
+    // canvas and the 3D viewport side-by-side with the controls.
+    ImGui::SetNextWindowPos(ImVec2(impl_->window_w - 520, 250),
+                            ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(500, 540), ImGuiCond_FirstUseEver);
+    if (!ImGui::Begin("Inspector", nullptr, ImGuiWindowFlags_NoCollapse)) {
+        ImGui::End();
+        return;
+    }
+
+    // Selection summary header — always visible regardless of tab.
+    // Shows the selected entity's class name + kind so the user has
+    // context when scrolling through the tab contents.
+    if (impl_->sel_kind != Impl::SelectionKind::None && impl_->sel_entity.valid()) {
+        auto h = impl_->handle(impl_->sel_entity);
+        if (impl_->sel_kind == Impl::SelectionKind::Objective) {
+            auto* ot = h.get<f4::entities::ObjectiveTypeComponent>();
+            if (ot && !ot->class_name.empty()) {
+                ImGui::TextUnformatted(ot->class_name.c_str());
+            } else {
+                ImGui::TextUnformatted("Objective");
+            }
+        } else if (impl_->sel_kind == Impl::SelectionKind::Unit) {
+            auto* uc = h.get<f4::entities::UnitCoreComponent>();
+            if (uc && !uc->class_name.empty()) {
+                ImGui::TextUnformatted(uc->class_name.c_str());
+            } else {
+                ImGui::TextUnformatted("Unit");
+            }
+        }
+        ImGui::Separator();
+    }
+
+    if (ImGui::BeginTabBar("##inspector_tabs")) {
+        // --- Tab 0: Inspect (entity detail) ------------------------------
+        if (ImGui::BeginTabItem("Inspect")) {
+            impl_->inspector_active_tab = 0;
+            draw_inspector();
+            ImGui::EndTabItem();
+        }
+        // --- Tab 1: Ground Layout (2D top-down) --------------------------
+        // Auto-switch to this tab when a layout-bearing objective is
+        // first selected (only if the user is currently on Inspect and
+        // hasn't manually picked another tab).
+        if (ImGui::BeginTabItem("Ground Layout")) {
+            impl_->inspector_active_tab = 1;
+            draw_ground_layout_view();
+            ImGui::EndTabItem();
+        }
+        // --- Tab 2: 3D (orbit camera) ------------------------------------
+        if (ImGui::BeginTabItem("3D")) {
+            impl_->inspector_active_tab = 2;
+            draw_ground_layout_3d();
+            ImGui::EndTabItem();
+        }
+        ImGui::EndTabBar();
+    }
+    ImGui::End();
+}
+
+// ---------------------------------------------------------------------------
+// Inspector panel — content only (no Begin/End wrapper)
 // ---------------------------------------------------------------------------
 void ViewerApp::draw_inspector() {
-        ImGui::SetNextWindowPos(ImVec2(impl_->window_w - 320, 250), ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowSize(ImVec2(310, 380), ImGuiCond_FirstUseEver);
-        if (ImGui::Begin("Inspector", nullptr, ImGuiWindowFlags_NoCollapse)) {
             if (impl_->sel_kind == Impl::SelectionKind::None || !impl_->sel_entity.valid()) {
                 ImGui::TextDisabled("Nothing selected");
                 ImGui::TextDisabled("Click an objective or unit to inspect.");
@@ -433,8 +521,7 @@ void ViewerApp::draw_inspector() {
                 }
                 }
             }
-        }
-        ImGui::End();
+        // (No ImGui::End() here — caller owns the window.)
 }
 
 } // namespace f4::viewer

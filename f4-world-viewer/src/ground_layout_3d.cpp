@@ -1,9 +1,19 @@
 // f4-world-viewer/src/ground_layout_3d.cpp
 //
-// "Ground Layout 3D" ImGui window — a 3D top-down/perspective view of
+// "Ground Layout 3D" tab content — a 3D top-down/perspective view of
 // the selected objective's airfield geometry, rendered into an offscreen
 // RenderTexture2D via Raylib's BeginMode3D and displayed inside the
 // ImGui window via rlImGuiImageSize.
+//
+// Content-only: the caller (draw_inspector_window) owns the ImGui window
+// and tab item. This function draws the 3D viewport (or a placeholder if
+// no applicable objective is selected).
+//
+// Refactored to content-only (INSPECTOR-TABS-1) — no longer opens its
+// own ImGui::Begin/End. The lazy model/texture loading and orbit-camera
+// update logic now run unconditionally when this tab is selected so the
+// 3D state stays consistent with the 2D canvas's feature-mesh pass
+// (they share Impl::mesh_cache_3d / texture_cache_3d).
 //
 // The geometry is built by ground_layout_models.cpp (pure function) and
 // cached on Impl::ground_layout_3d_geometry. We rebuild only when the
@@ -435,9 +445,12 @@ void ViewerApp::Impl::unload_meshes_3d() {
 // ---------------------------------------------------------------------------
 
 void ViewerApp::draw_ground_layout_3d() {
-    // Only show when an objective with ground_layout OR features is selected.
+    // Only meaningful when an objective with ground_layout OR features is
+    // selected. When the user is on this tab without an applicable selection,
+    // show a placeholder so the tab stays stable (doesn't disappear).
     if (impl_->sel_kind != Impl::SelectionKind::Objective ||
         !impl_->sel_entity.valid()) {
+        ImGui::TextDisabled("Select an objective to view its 3D layout.");
         return;
     }
     auto h = impl_->handle(impl_->sel_entity);
@@ -446,7 +459,10 @@ void ViewerApp::draw_ground_layout_3d() {
     auto* ot = h.get<f4::entities::ObjectiveTypeComponent>();
     const bool has_layout = gl && !gl->layouts.empty();
     const bool has_features = fs && !fs->features.empty();
-    if (!has_layout && !has_features) return;
+    if (!has_layout && !has_features) {
+        ImGui::TextDisabled("Selected objective has no ground layout or features.");
+        return;
+    }
 
     // Lazily load KoreaObj models + FALCON4.ct the first time we have a
     // feature-bearing objective selected. The load is ~50-150ms; once
@@ -498,19 +514,13 @@ void ViewerApp::draw_ground_layout_3d() {
         impl_->ground_layout_3d_cached_entity = impl_->sel_entity;
     }
     const auto& g = impl_->ground_layout_3d_geometry;
-    if (g.empty) return;  // nothing to render
+    if (g.empty) {
+        ImGui::TextDisabled("(no geometry built from this objective's layout)");
+        return;  // nothing to render
+    }
 
     // Update the orbit camera BEFORE the render pass.
     impl_->gl3d_orbit_cam.update_from_orbit();
-
-    // ImGui window setup.
-    ImGui::SetNextWindowPos(ImVec2(660, 80), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(700, 540), ImGuiCond_FirstUseEver);
-    if (!ImGui::Begin("Ground Layout 3D", nullptr, ImGuiWindowFlags_NoCollapse)) {
-        ImGui::End();
-        return;
-    }
-
     // Header — class name + counts.
     if (ot && !ot->class_name.empty()) {
         ImGui::TextUnformatted(ot->class_name.c_str());
@@ -864,9 +874,8 @@ void ViewerApp::draw_ground_layout_3d() {
                         impl_->gl3d_orbit_cam.yaw(),
                         impl_->gl3d_orbit_cam.pitch(),
                         impl_->gl3d_orbit_cam.distance());
-    ImGui::TextDisabled("drag = orbit, scroll = zoom   (close window to free GPU texture)");
-
-    ImGui::End();
+    ImGui::TextDisabled("drag = orbit, scroll = zoom");
+    // (No ImGui::End() here — caller owns the window.)
 }
 
 } // namespace f4::viewer

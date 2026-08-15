@@ -441,15 +441,16 @@ void ViewerApp::draw_imgui() {
         ImGui::End();
     }
 
-    // --- Inspector (right side, below legend) ---
-    // POLISH-2.6: extracted to inspector_panel.cpp::draw_inspector()
-    // to keep this file focused on menu/layer/legend/modal plumbing.
-    ImGui::SetNextWindowPos(ImVec2(impl_->window_w - 320, 250), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(310, 380), ImGuiCond_FirstUseEver);
-    if (ImGui::Begin("Inspector", nullptr, ImGuiWindowFlags_NoCollapse)) {
-        draw_inspector();
-    }
-    ImGui::End();
+    // --- Inspector window (right side, below legend) ---
+    // INSPECTOR-TABS-1: replaces three separate windows (Inspector,
+    // Ground Layout, Ground Layout 3D) with a single window that hosts
+    // all three views as tabs. See inspector_panel.cpp::
+    // draw_inspector_window() for the tabbed layout. The content
+    // functions (draw_inspector, draw_ground_layout_view,
+    // draw_ground_layout_3d) are now content-only — they no longer
+    // open their own ImGui::Begin/End; they draw into whatever tab
+    // item is currently active.
+    draw_inspector_window();
 
     // --- Status bar (bottom) ---
     ImGui::SetNextWindowPos(ImVec2(0, impl_->window_h - 24));
@@ -757,17 +758,6 @@ void ViewerApp::draw_imgui() {
     impl_->class_table_browser.set_model_db(
         impl_->model_db_3d.has_value() ? &*impl_->model_db_3d : nullptr);
     impl_->class_table_browser.draw();
-
-    // --- Ground Layout view (auto-opens when an objective with
-    // ground_layout is selected — shows runway/taxiway/parking/SAM-site
-    // geometry in a dedicated 2D window).
-    draw_ground_layout_view();
-
-    // --- Ground Layout 3D panel (auto-opens when an objective with
-    // ground_layout is selected — renders the airfield as filled
-    // runway/taxiway/parking geometry in an embedded Raylib BeginMode3D
-    // viewport, with orbit/zoom camera).
-    draw_ground_layout_3d();
 
     // --- Campaign + Teams panels (auto-open when a world is loaded —
     // show CampaignState fields and the .tea-enriched team roster

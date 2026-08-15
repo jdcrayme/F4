@@ -158,10 +158,21 @@ private:
     void handle_input();
     void draw_canvas();
     void draw_imgui();
-    /// Inspector panel (selected objective/unit detail).
+    /// Combined Inspector window — single ImGui window with three tabs:
+    /// Inspect, Ground Layout (2D), and Ground Layout 3D. Replaces the
+    /// three separate windows that previously opened at different screen
+    /// positions (INSPECTOR-TABS-1).
+    void draw_inspector_window();
+    /// Inspector tab content (selected objective/unit detail).
+    /// Content-only — caller owns the window + tab item.
     /// POLISH-2.6: extracted from draw_imgui() for readability.
+    /// INSPECTOR-TABS-1: refactored to content-only (no Begin/End).
     void draw_inspector();
+    /// Ground Layout 2D tab content.
+    /// Content-only — caller owns the window + tab item.
     void draw_ground_layout_view();
+    /// Ground Layout 3D tab content.
+    /// Content-only — caller owns the window + tab item.
     void draw_ground_layout_3d();
     void draw_campaign_and_teams_view();
     void open_file_dialog(const char* title, const char* filters,

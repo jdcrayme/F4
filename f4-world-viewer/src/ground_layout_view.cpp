@@ -1,9 +1,16 @@
 // f4-world-viewer/src/ground_layout_view.cpp
 //
-// "Ground Layout" ImGui window — a dedicated 2D top-down view of the
+// "Ground Layout" tab content — a dedicated 2D top-down view of the
 // selected objective's PHD/PD ground-layout data.
 //
+// Content-only: the caller (draw_inspector_window) owns the ImGui window
+// and tab item. This function draws the layout (or a placeholder if no
+// applicable objective is selected).
+//
 // Migrated from WorldState to EntityWorld (Step 4c).
+// Refactored to content-only (INSPECTOR-TABS-1) — the function no longer
+// opens its own ImGui::Begin/End; it draws into whatever tab item is
+// currently active.
 
 #include "viewer_state.hpp"
 #include <f4/viewer/enum_text.hpp>
@@ -48,9 +55,12 @@ LayoutColors colors_for_list_type(uint8_t type) {
 } // namespace
 
 void ViewerApp::draw_ground_layout_view() {
-    // Only show when an objective with ground_layout OR features is selected.
+    // Only meaningful when an objective with ground_layout OR features is
+    // selected. When the user is on this tab without an applicable selection,
+    // show a placeholder so the tab stays stable (doesn't disappear).
     if (impl_->sel_kind != Impl::SelectionKind::Objective ||
         !impl_->sel_entity.valid()) {
+        ImGui::TextDisabled("Select an objective to view its ground layout.");
         return;
     }
     auto h = impl_->handle(impl_->sel_entity);
@@ -59,17 +69,10 @@ void ViewerApp::draw_ground_layout_view() {
     auto* ot = h.get<f4::entities::ObjectiveTypeComponent>();
     const bool has_layout = gl && !gl->layouts.empty();
     const bool has_features = fs && !fs->features.empty();
-    if (!has_layout && !has_features) return;
-
-    ImGui::SetNextWindowPos(ImVec2(10, impl_->window_h - 520),
-                            ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(640, 480), ImGuiCond_FirstUseEver);
-    if (!ImGui::Begin("Ground Layout", nullptr,
-                      ImGuiWindowFlags_NoCollapse)) {
-        ImGui::End();
+    if (!has_layout && !has_features) {
+        ImGui::TextDisabled("Selected objective has no ground layout or features.");
         return;
     }
-
     // Header
     if (ot && !ot->class_name.empty()) {
         ImGui::TextUnformatted(ot->class_name.c_str());
@@ -119,7 +122,6 @@ void ViewerApp::draw_ground_layout_view() {
     }
     if (!any) {
         ImGui::TextDisabled("(no points in any list)");
-        ImGui::End();
         return;
     }
     min_x = std::min(min_x, 0.0f);
@@ -139,7 +141,6 @@ void ViewerApp::draw_ground_layout_view() {
     canvas_size.y = std::max(canvas_size.y - footer_h, 60.0f);
     if (canvas_size.x < 50.0f || canvas_size.y < 50.0f) {
         ImGui::TextDisabled("(window too small)");
-        ImGui::End();
         return;
     }
 
@@ -359,8 +360,7 @@ void ViewerApp::draw_ground_layout_view() {
             }
         }
     }
-
-    ImGui::End();
+    // (No ImGui::End() here — caller owns the window.)
 }
 
 } // namespace f4::viewer
