@@ -1209,8 +1209,29 @@ void ClassTableBrowser::draw_detail_panel() {
                 if (ImGui::TreeNode("Vehicle Groups (16 slots)")) {
                     for (int i = 0; i < 16; ++i) {
                         if (ucd->num_elements[i] > 0) {
-                            ImGui::Text("  Group[%2d]: %d vehicles of type %d",
-                                        i, ucd->num_elements[i], ucd->vehicle_type[i]);
+                            // Resolve vehicle_type (entity_type) through
+                            // the class table to get a human-readable VCD name.
+                            const int16_t vt = ucd->vehicle_type[i];
+                            const char* vname = nullptr;
+                            if (class_table_.loaded() && theater_db_.vehicles.loaded()) {
+                                uint8_t vcd_dt = 0;
+                                uint32_t vcd_idx = 0;
+                                if (class_table_.data_ptr_for(
+                                        static_cast<uint16_t>(vt),
+                                        vcd_dt, vcd_idx)
+                                    && vcd_dt == f4::world_convert::DTYPE_VEHICLE) {
+                                    const auto* vcd = theater_db_.vehicles.at(
+                                        static_cast<std::size_t>(vcd_idx));
+                                    if (vcd) vname = vcd->name.c_str();
+                                }
+                            }
+                            if (vname) {
+                                ImGui::Text("  Group[%2d]: %d vehicles of type %d (%s)",
+                                            i, ucd->num_elements[i], vt, vname);
+                            } else {
+                                ImGui::Text("  Group[%2d]: %d vehicles of type %d",
+                                            i, ucd->num_elements[i], vt);
+                            }
                         }
                     }
                     ImGui::TreePop();

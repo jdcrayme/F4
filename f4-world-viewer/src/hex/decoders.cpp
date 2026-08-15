@@ -336,7 +336,7 @@ std::vector<Annotation> decode_falcon4_ct(const HexModel& m) {
                 std::to_string(static_cast<int>(dt)) + " (" +
                     f4::viewer::data_type_name(dt) + ")",
                 "DataType enum: tells which theater-data table dataPtr "
-                "indexes into (1=OCD, 2=UCD, 3=VCD, 5=FCD).",
+                "indexes into (1=FCD, 3=OCD, 4=UCD, 5=VCD, 6=WCD, 7=SSD).",
                 "field"
             });
             out.push_back({

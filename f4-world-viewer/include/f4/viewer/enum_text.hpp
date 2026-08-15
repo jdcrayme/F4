@@ -86,16 +86,21 @@ namespace f4::viewer {
 // DataType (classtbl.h) — tells which theater-data table a class-table
 // entry's dataPtr points into. Critical for navigating from a class-table
 // entry to its corresponding OCD/UCD/VCD/FCD record.
+//
+// These values were verified against real Falcon4.ct data (Phase 1 fix).
+// The previous mapping (1=Objective, 2=Unit, 3=Vehicle, 4=Weapon,
+// 5=Feature, 6=SquadStores) was wrong — it was the original Falcon4
+// documentation, but the on-disk values differ.
 // ---------------------------------------------------------------------------
 [[nodiscard]] inline const char* data_type_name(uint8_t dt) noexcept {
     switch (dt) {
         case 0: return "Nothing";
-        case 1: return "Objective";   // -> Falcon4.OCD
-        case 2: return "Unit";        // -> Falcon4.UCD
-        case 3: return "Vehicle";     // -> Falcon4.VCD
-        case 4: return "Weapon";
-        case 5: return "Feature";     // -> Falcon4.FCD
-        case 6: return "SquadStores";
+        case 1: return "Feature";     // -> Falcon4.FCD
+        case 3: return "Objective";   // -> Falcon4.OCD
+        case 4: return "Unit";        // -> Falcon4.UCD
+        case 5: return "Vehicle";     // -> Falcon4.VCD
+        case 6: return "Weapon";      // -> Falcon4.WCD
+        case 7: return "SquadStores"; // -> Falcon4.SSD
         default: return "Unknown";
     }
 }

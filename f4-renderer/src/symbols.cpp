@@ -144,6 +144,35 @@ static SymbolKind unit_frame_for(SymbolKind k) {
     }
 }
 
+#include "rlgl.h"       // OpenGL abstraction layer to OpenGL 1.1, 2.1, 3.3+ or ES2
+
+// Draw filled upward-facing arc (Dome / Semi-ellipse)
+void DrawAirArc(int centerX, int centerY, float radiusH, float radiusV, Color color)
+{
+    rlBegin(RL_TRIANGLES);
+    for (int i = 180; i < 360; i += 10)
+    {
+        rlColor4ub(color.r, color.g, color.b, color.a);
+        rlVertex2f((float)centerX, (float)centerY);
+        rlVertex2f((float)centerX + cosf(DEG2RAD * (i + 10)) * radiusH, (float)centerY + sinf(DEG2RAD * (i + 10)) * radiusV);
+        rlVertex2f((float)centerX + cosf(DEG2RAD * i) * radiusH, (float)centerY + sinf(DEG2RAD * i) * radiusV);
+    }
+    rlEnd();
+}
+
+// Draw upward-facing arc outline (Open arch)
+void DrawAirArcLines(int centerX, int centerY, float radiusH, float radiusV, Color color)
+{
+    rlBegin(RL_LINES);
+    for (int i = 180; i < 360; i += 10)
+    {
+        rlColor4ub(color.r, color.g, color.b, color.a);
+        rlVertex2f(centerX + cosf(DEG2RAD * (i + 10)) * radiusH, centerY + sinf(DEG2RAD * (i + 10)) * radiusV);
+        rlVertex2f(centerX + cosf(DEG2RAD * i) * radiusH, centerY + sinf(DEG2RAD * i) * radiusV);
+    }
+    rlEnd();
+}
+
 // ===========================================================================
 // RAYLIB RENDER PATH
 // ===========================================================================
@@ -173,42 +202,52 @@ void draw_symbol(SymbolKind kind, float sx, float sy,
         switch (frame) {
             case SymbolKind::UnitBattalion: {  // rectangle
                 const float d = r * 0.75f;
-                const Rectangle rec = {sx - d, sy - d, d * 2, d * 2};
+
+                const Rectangle rec = {sx - r, sy - d, r * 2, d * 2};
                 if (filled) DrawRectangleRec(rec, fc_blend);
                 DrawRectangleLinesEx(rec, 1.0f, oc);
-                break;
-            }
-            case SymbolKind::UnitBrigade: {  // diamond
-                const float d = r * 0.85f;
-                const Vector2 p0 = {sx, sy - d};
-                const Vector2 p1 = {sx + d, sy};
-                const Vector2 p2 = {sx, sy + d};
-                const Vector2 p3 = {sx - d, sy};
-                if (filled) {
-                    DrawTriangle(p0, p1, p2, fc_blend);
-                    DrawTriangle(p0, p2, p3, fc_blend);
-                }
+
+				// battalion marker: vertical line above rectangle
+                const Vector2 p0 = { sx, sy - r - r/2 };
+                const Vector2 p1 = { sx, sy - r };
                 DrawLineEx(p0, p1, 1.0f, oc);
-                DrawLineEx(p1, p2, 1.0f, oc);
-                DrawLineEx(p2, p3, 1.0f, oc);
-                DrawLineEx(p3, p0, 1.0f, oc);
+
                 break;
             }
-            case SymbolKind::UnitSquadron: {  // circle
-                if (filled) DrawCircleV({sx, sy}, r * 0.8f, fc_blend);
-                DrawCircleLines(static_cast<int>(sx), static_cast<int>(sy),
-                                static_cast<int>(r * 0.8f), oc);
+            case SymbolKind::UnitBrigade: {  // rectangle
+
+                const float d = r * 0.75f;
+                const Rectangle rec = { sx - r, sy - d, r * 2, d * 2 };
+                if (filled) DrawRectangleRec(rec, fc_blend);
+                DrawRectangleLinesEx(rec, 1.0f, oc);
+
+                // brigade marker: X above rectangle                
+                const Vector2 p0 = { sx - r / 4, sy - r - r / 2 };
+                const Vector2 p1 = { sx + r / 4, sy - r };
+                const Vector2 p2 = { sx + r / 4, sy - r - r / 2 };
+                const Vector2 p3 = { sx - r / 4, sy - r };
+
+                DrawLineEx(p0, p1, 1.0f, oc);
+                DrawLineEx(p2, p3, 1.0f, oc);
+                break;
+            }
+            case SymbolKind::UnitSquadron: {  // arc
+				const float w = r * 0.5f;
+				const float h = r;
+                if (filled) DrawAirArc(static_cast<int>(sx), static_cast<int>(sy), w, h, fc_blend);
+                DrawAirArcLines(static_cast<int>(sx), static_cast<int>(sy), w, h, oc);
+
+                // battalion marker: vertical line above rectangle
+                const Vector2 p0 = { sx, sy - r - r / 2 };
+                const Vector2 p1 = { sx, sy - r };
+                DrawLineEx(p0, p1, 1.0f, oc);
+
                 break;
             }
             case SymbolKind::UnitTaskForce: {  // triangle (point up)
-                const float d = r * 0.9f;
-                const Vector2 p0 = {sx, sy - d};
-                const Vector2 p1 = {sx + d * 0.866f, sy + d * 0.5f};
-                const Vector2 p2 = {sx - d * 0.866f, sy + d * 0.5f};
-                if (filled) DrawTriangle(p0, p1, p2, fc_blend);
-                DrawLineEx(p0, p1, 1.0f, oc);
-                DrawLineEx(p1, p2, 1.0f, oc);
-                DrawLineEx(p2, p0, 1.0f, oc);
+                const float d = r * 0.75f;
+                if (filled) DrawCircle(static_cast<int>(sx), static_cast<int>(sy), d, fc_blend);
+                DrawCircleLines(static_cast<int>(sx), static_cast<int>(sy), d, oc);
                 break;
             }
             case SymbolKind::UnitFlight: {  // small circle outline only
@@ -240,20 +279,22 @@ void draw_symbol(SymbolKind kind, float sx, float sy,
         const Color gc = oc;
         switch (kind) {
             case SymbolKind::UnitArmor: {  // tank: turret circle + barrel
-                DrawCircleV({sx, sy}, r * 0.22f, gc);
-                DrawLineEx({sx, sy}, {sx + r * 0.55f, sy}, 1.5f, gc);
+
+				const float radiusH = r * 0.6f;
+				const float radiusV = r * 0.2f;
+                
+                const Rectangle rec = { sx - radiusH, sy - radiusV, radiusH * 2, radiusV * 2 };
+                DrawRectangleRoundedLines(rec, radiusV, 18, 1.5f, gc);
                 break;
             }
-            case SymbolKind::UnitArtillery: {  // gun: dot + barrel
-                DrawCircleV({sx - r * 0.1f, sy}, r * 0.15f, gc);
-                DrawLineEx({sx - r * 0.1f, sy}, {sx + r * 0.5f, sy - r * 0.3f},
-                           1.5f, gc);
+            case SymbolKind::UnitArtillery: {  // gun: dot
+                DrawCircleV({sx, sy}, r * 0.25f, gc);
                 break;
             }
             case SymbolKind::UnitInfantry: {  // X
-                const float d = r * 0.35f;
-                DrawLineEx({sx - d, sy - d}, {sx + d, sy + d}, 1.5f, gc);
-                DrawLineEx({sx + d, sy - d}, {sx - d, sy + d}, 1.5f, gc);
+                const float d = r * 0.75f;
+                DrawLineEx({ sx - r + 2, sy - d + 2 }, { sx + r - 2, sy + d - 2 }, 1.5f, gc);
+                DrawLineEx({ sx + r - 2, sy - d + 2 }, { sx - r + 2, sy + d - 2 }, 1.5f, gc);
                 break;
             }
             case SymbolKind::UnitEngineer: {  // E shape — 3 horizontal bars
@@ -337,21 +378,14 @@ void draw_symbol(SymbolKind kind, float sx, float sy,
     // --- Objective symbols ---
     switch (kind) {
         case SymbolKind::ObjAirbase: {  // runway — long horizontal bar + centerline
-            const float rw = r * 0.95f;
-            const float rh = r * 0.22f;
-            const Rectangle rec = {sx - rw, sy - rh * 0.5f, rw * 2, rh};
-            if (filled) DrawRectangleRec(rec, fc_blend);
-            DrawRectangleLinesEx(rec, 1.0f, oc);
             // Centerline dash
-            DrawLineEx({sx - rw * 0.7f, sy}, {sx + rw * 0.7f, sy}, 1.0f, oc);
+            DrawLineEx({sx - r * 0.7f, sy}, {sx + r * 0.7f, sy}, 1.0f, oc);
             break;
         }
         case SymbolKind::ObjAirstrip: {  // short runway
             const float rw = r * 0.6f;
             const float rh = r * 0.2f;
-            const Rectangle rec = {sx - rw, sy - rh * 0.5f, rw * 2, rh};
-            if (filled) DrawRectangleRec(rec, fc_blend);
-            DrawRectangleLinesEx(rec, 1.0f, oc);
+            DrawLineEx({ sx - rw * 0.7f, sy }, { sx + rw * 0.7f, sy }, 1.0f, oc);
             break;
         }
         case SymbolKind::ObjArmyBase: {  // flag — vertical line + triangle
@@ -416,13 +450,12 @@ void draw_symbol(SymbolKind kind, float sx, float sy,
             break;
         }
         case SymbolKind::ObjCity: {  // 3 small squares
-            const float s = r * 0.28f;
-            const float off = r * 0.4f;
-            for (int i = 0; i < 3; ++i) {
-                const float cx = sx - off + i * off;
-                const Rectangle rec = {cx - s, sy - s, s * 2, s * 2};
-                if (filled) DrawRectangleRec(rec, fc_blend);
-                DrawRectangleLinesEx(rec, 1.0f, oc);
+
+            const float vSize = r * 0.5f;
+            for (auto i : { Vector3(-1.0f,0.1f, 1.4f), Vector3(1.1f,-0.2f,1.5f), Vector3(0.0f,-0.7f,2.3f) }) {
+                const Rectangle vRec = { sx - vSize / 2.0f + i.x * vSize / 2, sy - vSize / 4.0f + i.y * vSize, vSize, vSize * i.z };
+                if (filled) DrawRectangleRec(vRec, fc_blend);
+                DrawRectangleLinesEx(vRec, 1.0f, oc);
             }
             break;
         }
@@ -644,21 +677,37 @@ void draw_symbol(SymbolKind kind, float sx, float sy,
             break;
         }
         case SymbolKind::ObjTown: {  // 2 squares
-            const float s = r * 0.3f;
-            const float off = r * 0.4f;
-            for (int i = 0; i < 2; ++i) {
-                const float cx = sx - off * 0.5f + i * off;
-                const Rectangle rec = {cx - s, sy - s, s * 2, s * 2};
-                if (filled) DrawRectangleRec(rec, fc_blend);
-                DrawRectangleLinesEx(rec, 1.0f, oc);
+
+            const float vSize = r * 0.5f;
+            for (auto i : { Vector2(-1.0f,0.1f), Vector2(1.0f,-0.2f), Vector2(0.0f,0.5f) }) {
+                const Rectangle vRec = { sx - vSize / 2.0f + i.x * vSize / 2, sy - vSize / 4.0f + i.y * vSize, vSize, vSize * 0.75f };
+                if (filled) DrawRectangleRec(vRec, fc_blend);
+                DrawRectangleLinesEx(vRec, 1.0f, oc);
+
+                // Roof (Triangle on top of the building)
+                const Vector2 v1 = { sx - vSize / 2.0f - 1.0f + i.x * vSize / 2, sy - vSize / 4.0f + i.y * vSize };
+                const Vector2 v2 = { sx + vSize / 2.0f + 1.0f + i.x * vSize / 2, sy - vSize / 4.0f + i.y * vSize };
+                const Vector2 v3 = { sx + i.x * vSize / 2, sy - vSize / 4.0f - vSize * 0.4f + i.y * vSize };
+                if (filled) DrawTriangle(v1, v2, v3, fc_blend);
+                DrawTriangleLines(v1, v2, v3, oc);
             }
-            break;
+
         }
-        case SymbolKind::ObjVillage: {  // 1 square
-            const float s = r * 0.4f;
-            const Rectangle rec = {sx - s, sy - s, s * 2, s * 2};
-            if (filled) DrawRectangleRec(rec, fc_blend);
-            DrawRectangleLinesEx(rec, 1.0f, oc);
+        case SymbolKind::ObjVillage: {
+
+            const float vSize = r * 0.5f;
+            for (auto i : { Vector2(0.0f,0.5f) }) {
+                const Rectangle vRec = { sx - vSize / 2.0f + i.x * vSize / 2, sy - vSize / 4.0f + i.y * vSize, vSize, vSize * 0.75f };
+                if (filled) DrawRectangleRec(vRec, fc_blend);
+                DrawRectangleLinesEx(vRec, 1.0f, oc);
+
+                // Roof (Triangle on top of the building)
+                const Vector2 v1 = { sx - vSize / 2.0f - 1.0f + i.x * vSize / 2, sy - vSize / 4.0f + i.y * vSize };
+                const Vector2 v2 = { sx + vSize / 2.0f + 1.0f + i.x * vSize / 2, sy - vSize / 4.0f + i.y * vSize };
+                const Vector2 v3 = { sx + i.x * vSize / 2, sy - vSize / 4.0f - vSize * 0.4f + i.y * vSize };
+                if (filled) DrawTriangle(v1, v2, v3, fc_blend);
+                DrawTriangleLines(v1, v2, v3, oc);
+            }
             break;
         }
         case SymbolKind::ObjHarts: {  // concentric circles
@@ -692,504 +741,6 @@ void draw_symbol(SymbolKind kind, float sx, float sy,
             if (filled) DrawCircleV({sx, sy}, r * 0.6f, fc_blend);
             DrawCircleLines(static_cast<int>(sx), static_cast<int>(sy),
                             static_cast<int>(r * 0.6f), oc);
-            break;
-        }
-    }
-}
-
-// ===========================================================================
-// IMGUI RENDER PATH
-// ===========================================================================
-//
-// draw_symbol_imgui — same vocabulary as Impl::draw_symbol but renders into
-// an ImGui draw list. Used by the Legend panel and any other widget that
-// wants a live symbol preview alongside text labels.
-//
-// Geometry mirrors the raylib path; see the file header for the rationale
-// on duplication.
-// ===========================================================================
-
-void draw_symbol_imgui(ImDrawList* dl, SymbolKind kind, ImVec2 center,
-                       float size_px, unsigned int fill_col,
-                       unsigned int outline_col, bool filled) {
-    if (!dl) return;
-    const float sx = center.x;
-    const float sy = center.y;
-    const float r = size_px * 0.5f;
-    // ImGui packing helper
-    auto blend = [](unsigned int col, float alpha) {
-        const float a = ((col >> 24) & 0xFF) * alpha;
-        return (col & 0x00FFFFFFu) | (static_cast<unsigned int>(a) << 24);
-    };
-    const unsigned int fc = filled ? blend(fill_col, 0.85f) : 0;
-    const unsigned int oc = outline_col;
-    const float thickness = 1.0f;
-
-    // --- Unit frame + glyph ---
-    if (kind >= SymbolKind::UnitBattalion) {
-        const SymbolKind frame = unit_frame_for(kind);
-        switch (frame) {
-            case SymbolKind::UnitBattalion: {
-                const float d = r * 0.75f;
-                if (filled) dl->AddRectFilled({sx - d, sy - d}, {sx + d, sy + d}, fc);
-                dl->AddRect({sx - d, sy - d}, {sx + d, sy + d}, oc, 0.0f, 0, thickness);
-                break;
-            }
-            case SymbolKind::UnitBrigade: {
-                const float d = r * 0.85f;
-                if (filled) {
-                    dl->AddQuadFilled({sx, sy - d}, {sx + d, sy},
-                                      {sx, sy + d}, {sx - d, sy}, fc);
-                }
-                dl->AddQuad({sx, sy - d}, {sx + d, sy},
-                            {sx, sy + d}, {sx - d, sy}, oc, thickness);
-                break;
-            }
-            case SymbolKind::UnitSquadron: {
-                if (filled) dl->AddCircleFilled({sx, sy}, r * 0.8f, fc, 16);
-                dl->AddCircle({sx, sy}, r * 0.8f, oc, 16, thickness);
-                break;
-            }
-            case SymbolKind::UnitTaskForce: {
-                const float d = r * 0.9f;
-                if (filled) dl->AddTriangleFilled(
-                    {sx, sy - d}, {sx + d * 0.866f, sy + d * 0.5f},
-                    {sx - d * 0.866f, sy + d * 0.5f}, fc);
-                dl->AddTriangle({sx, sy - d}, {sx + d * 0.866f, sy + d * 0.5f},
-                                {sx - d * 0.866f, sy + d * 0.5f}, oc, thickness);
-                break;
-            }
-            case SymbolKind::UnitFlight: {
-                dl->AddCircle({sx, sy}, r * 0.55f, fill_col, 12, thickness);
-                break;
-            }
-            case SymbolKind::UnitPackage: {
-                const float w = r * 0.25f;
-                const float h = r * 0.7f;
-                if (filled) {
-                    dl->AddRectFilled({sx - w, sy - h}, {sx + w, sy + h}, fc);
-                    dl->AddRectFilled({sx - h, sy - w}, {sx + h, sy + w}, fc);
-                }
-                dl->AddRect({sx - w, sy - h}, {sx + w, sy + h}, oc, 0, 0, thickness);
-                dl->AddRect({sx - h, sy - w}, {sx + h, sy + w}, oc, 0, 0, thickness);
-                break;
-            }
-            default: break;
-        }
-        // Glyph on top.
-        switch (kind) {
-            case SymbolKind::UnitArmor:
-                dl->AddCircleFilled({sx, sy}, r * 0.22f, oc, 8);
-                dl->AddLine({sx, sy}, {sx + r * 0.55f, sy}, oc, 1.5f);
-                break;
-            case SymbolKind::UnitArtillery:
-                dl->AddCircleFilled({sx - r * 0.1f, sy}, r * 0.15f, oc, 8);
-                dl->AddLine({sx - r * 0.1f, sy},
-                            {sx + r * 0.5f, sy - r * 0.3f}, oc, 1.5f);
-                break;
-            case SymbolKind::UnitInfantry: {
-                const float d = r * 0.35f;
-                dl->AddLine({sx - d, sy - d}, {sx + d, sy + d}, oc, 1.5f);
-                dl->AddLine({sx + d, sy - d}, {sx - d, sy + d}, oc, 1.5f);
-                break;
-            }
-            case SymbolKind::UnitEngineer: {
-                const float d = r * 0.35f;
-                dl->AddLine({sx - d, sy - d}, {sx - d, sy + d}, oc, 1.5f);
-                dl->AddLine({sx - d, sy - d}, {sx + d * 0.5f, sy - d}, oc, 1.5f);
-                dl->AddLine({sx - d, sy}, {sx + d * 0.3f, sy}, oc, 1.5f);
-                dl->AddLine({sx - d, sy + d}, {sx + d * 0.5f, sy + d}, oc, 1.5f);
-                break;
-            }
-            case SymbolKind::UnitSupply: {
-                const float d = r * 0.3f;
-                dl->AddRect({sx - d, sy - d}, {sx + d, sy + d}, oc, 0, 0, 1.0f);
-                dl->AddLine({sx, sy - d * 0.7f}, {sx, sy + d * 0.7f}, oc, 1.0f);
-                dl->AddLine({sx - d * 0.7f, sy}, {sx + d * 0.7f, sy}, oc, 1.0f);
-                break;
-            }
-            case SymbolKind::UnitFighter: {
-                const float fw = r * 0.12f;
-                const float fh = r * 0.85f;
-                dl->AddRectFilled({sx - fw, sy - fh * 0.5f}, {sx + fw, sy + fh * 0.5f}, oc);
-                dl->AddRectFilled({sx - r * 0.6f, sy - fw}, {sx + r * 0.6f, sy + fw}, oc);
-                dl->AddTriangleFilled({sx - r * 0.15f, sy + fh * 0.5f},
-                                      {sx + r * 0.15f, sy + fh * 0.5f},
-                                      {sx, sy + fh * 0.85f}, oc);
-                break;
-            }
-            case SymbolKind::UnitBomber: {
-                const float fw = r * 0.14f;
-                const float fh = r * 0.7f;
-                dl->AddRectFilled({sx - fw, sy - fh * 0.5f}, {sx + fw, sy + fh * 0.5f}, oc);
-                dl->AddRectFilled({sx - r * 0.75f, sy - fw}, {sx + r * 0.75f, sy + fw}, oc);
-                dl->AddTriangleFilled({sx - r * 0.25f, sy + fh * 0.5f},
-                                      {sx + r * 0.25f, sy + fh * 0.5f},
-                                      {sx, sy + fh * 0.85f}, oc);
-                break;
-            }
-            case SymbolKind::UnitTransport: {
-                const float fw = r * 0.1f;
-                const float fh = r * 0.9f;
-                dl->AddRectFilled({sx - fw, sy - fh * 0.5f}, {sx + fw, sy + fh * 0.5f}, oc);
-                dl->AddRectFilled({sx - r * 0.5f, sy - fw}, {sx + r * 0.5f, sy + fw}, oc);
-                dl->AddTriangleFilled({sx - r * 0.15f, sy + fh * 0.5f},
-                                      {sx + r * 0.15f, sy + fh * 0.5f},
-                                      {sx, sy + fh * 0.85f}, oc);
-                break;
-            }
-            case SymbolKind::UnitHelicopter:
-                dl->AddCircleFilled({sx, sy + r * 0.1f}, r * 0.25f, oc, 10);
-                dl->AddLine({sx - r * 0.55f, sy - r * 0.35f},
-                            {sx + r * 0.55f, sy - r * 0.35f}, oc, 1.5f);
-                dl->AddLine({sx, sy - r * 0.35f}, {sx, sy - r * 0.1f}, oc, 1.0f);
-                dl->AddLine({sx, sy + r * 0.35f}, {sx + r * 0.4f, sy + r * 0.5f}, oc, 1.0f);
-                break;
-            case SymbolKind::UnitCarrier: {
-                const float hw = r * 0.7f;
-                const float hh = r * 0.18f;
-                dl->AddRectFilled({sx - hw, sy - hh}, {sx + hw, sy + hh}, oc);
-                dl->AddRectFilled({sx + hw * 0.4f, sy - hh * 1.6f},
-                                  {sx + hw * 0.6f, sy - hh * 0.8f}, oc);
-                break;
-            }
-            case SymbolKind::UnitNavalSurface: {
-                const float hw = r * 0.55f;
-                const float hh = r * 0.16f;
-                dl->AddRectFilled({sx - hw, sy - hh}, {sx + hw, sy + hh}, oc);
-                dl->AddRectFilled({sx - hw * 0.15f, sy - hh * 1.8f},
-                                  {sx + hw * 0.15f, sy - hh * 0.9f}, oc);
-                break;
-            }
-            default: break;
-        }
-        return;
-    }
-
-    // --- Objective symbols ---
-    switch (kind) {
-        case SymbolKind::ObjAirbase: {
-            const float rw = r * 0.95f;
-            const float rh = r * 0.22f;
-            if (filled) dl->AddRectFilled({sx - rw, sy - rh * 0.5f},
-                                          {sx + rw, sy + rh * 0.5f}, fc);
-            dl->AddRect({sx - rw, sy - rh * 0.5f}, {sx + rw, sy + rh * 0.5f},
-                        oc, 0, 0, thickness);
-            dl->AddLine({sx - rw * 0.7f, sy}, {sx + rw * 0.7f, sy}, oc, 1.0f);
-            break;
-        }
-        case SymbolKind::ObjAirstrip: {
-            const float rw = r * 0.6f;
-            const float rh = r * 0.2f;
-            if (filled) dl->AddRectFilled({sx - rw, sy - rh * 0.5f},
-                                          {sx + rw, sy + rh * 0.5f}, fc);
-            dl->AddRect({sx - rw, sy - rh * 0.5f}, {sx + rw, sy + rh * 0.5f},
-                        oc, 0, 0, thickness);
-            break;
-        }
-        case SymbolKind::ObjArmyBase: {
-            const float d = r * 0.7f;
-            dl->AddLine({sx - d * 0.5f, sy - d}, {sx - d * 0.5f, sy + d}, oc, 2.0f);
-            if (filled) dl->AddTriangleFilled(
-                {sx - d * 0.5f, sy - d}, {sx + d, sy - d * 0.6f},
-                {sx - d * 0.5f, sy - d * 0.2f}, fc);
-            dl->AddLine({sx - d * 0.5f, sy - d}, {sx + d, sy - d * 0.6f}, oc, thickness);
-            dl->AddLine({sx + d, sy - d * 0.6f}, {sx - d * 0.5f, sy - d * 0.2f}, oc, thickness);
-            break;
-        }
-        case SymbolKind::ObjBeach: {
-            const float dx = r * 0.75f;
-            for (int i = 0; i < 3; ++i) {
-                const float y = sy - r * 0.4f + i * r * 0.4f;
-                dl->AddLine({sx - dx, y}, {sx - dx * 0.3f, y - 1.5f}, fill_col, 1.5f);
-                dl->AddLine({sx - dx * 0.3f, y - 1.5f}, {sx + dx * 0.3f, y + 1.5f}, fill_col, 1.5f);
-                dl->AddLine({sx + dx * 0.3f, y + 1.5f}, {sx + dx, y}, fill_col, 1.5f);
-            }
-            break;
-        }
-        case SymbolKind::ObjBorder: {
-            const float dy = r * 0.9f;
-            for (int i = 0; i < 4; ++i) {
-                const float y0 = sy - dy + i * (dy * 0.5f);
-                dl->AddLine({sx, y0}, {sx, y0 + dy * 0.3f}, fill_col, 2.0f);
-            }
-            break;
-        }
-        case SymbolKind::ObjBridge: {
-            const float w = r * 0.85f;
-            const float h = r * 0.15f;
-            const float gap = r * 0.35f;
-            if (filled) {
-                dl->AddRectFilled({sx - w, sy - gap - h}, {sx + w, sy - gap}, fc);
-                dl->AddRectFilled({sx - w, sy + gap}, {sx + w, sy + gap + h}, fc);
-            }
-            dl->AddLine({sx - w, sy - gap}, {sx - w, sy + gap}, oc, 1.5f);
-            dl->AddLine({sx + w, sy - gap}, {sx + w, sy + gap}, oc, 1.5f);
-            break;
-        }
-        case SymbolKind::ObjChemical: {
-            const float d = r * 0.75f;
-            if (filled) dl->AddQuadFilled({sx, sy - d}, {sx + d, sy},
-                                          {sx, sy + d}, {sx - d, sy}, fc);
-            dl->AddQuad({sx, sy - d}, {sx + d, sy}, {sx, sy + d}, {sx - d, sy}, oc, thickness);
-            const float e = d * 0.5f;
-            dl->AddLine({sx - e, sy - e}, {sx + e, sy + e}, oc, 1.0f);
-            dl->AddLine({sx + e, sy - e}, {sx - e, sy + e}, oc, 1.0f);
-            break;
-        }
-        case SymbolKind::ObjCity: {
-            const float s = r * 0.28f;
-            const float off = r * 0.4f;
-            for (int i = 0; i < 3; ++i) {
-                const float cx = sx - off + i * off;
-                if (filled) dl->AddRectFilled({cx - s, sy - s}, {cx + s, sy + s}, fc);
-                dl->AddRect({cx - s, sy - s}, {cx + s, sy + s}, oc, 0, 0, thickness);
-            }
-            break;
-        }
-        case SymbolKind::ObjComControl: {
-            const float d = r * 0.5f;
-            if (filled) dl->AddRectFilled({sx - d, sy - d}, {sx + d, sy + d}, fc);
-            dl->AddRect({sx - d, sy - d}, {sx + d, sy + d}, oc, 0, 0, thickness);
-            dl->AddLine({sx - d * 0.5f, sy - d}, {sx - d * 0.5f, sy - r}, oc, 1.0f);
-            dl->AddLine({sx + d * 0.5f, sy - d}, {sx + d * 0.5f, sy - r}, oc, 1.0f);
-            dl->AddCircleFilled({sx - d * 0.5f, sy - r}, 1.5f, oc, 6);
-            dl->AddCircleFilled({sx + d * 0.5f, sy - r}, 1.5f, oc, 6);
-            break;
-        }
-        case SymbolKind::ObjDepot: {
-            const float d = r * 0.7f;
-            if (filled) dl->AddRectFilled({sx - d, sy - d}, {sx + d, sy + d}, fc);
-            dl->AddRect({sx - d, sy - d}, {sx + d, sy + d}, oc, 0, 0, thickness);
-            dl->AddLine({sx - d, sy - d}, {sx + d, sy + d}, oc, 1.0f);
-            dl->AddLine({sx + d, sy - d}, {sx - d, sy + d}, oc, 1.0f);
-            break;
-        }
-        case SymbolKind::ObjFactory: {
-            const float d = r * 0.6f;
-            if (filled) dl->AddRectFilled({sx - d, sy - d * 0.5f}, {sx + d, sy + d * 0.5f}, fc);
-            dl->AddRect({sx - d, sy - d * 0.5f}, {sx + d, sy + d * 0.5f}, oc, 0, 0, thickness);
-            const float cw = d * 0.2f;
-            const float ch = d * 0.6f;
-            if (filled) {
-                dl->AddRectFilled({sx - d * 0.5f, sy - d * 0.5f - ch},
-                                  {sx - d * 0.5f + cw, sy - d * 0.5f}, fc);
-                dl->AddRectFilled({sx + d * 0.3f, sy - d * 0.5f - ch},
-                                  {sx + d * 0.3f + cw, sy - d * 0.5f}, fc);
-            }
-            dl->AddRect({sx - d * 0.5f, sy - d * 0.5f - ch},
-                        {sx - d * 0.5f + cw, sy - d * 0.5f}, oc, 0, 0, thickness);
-            dl->AddRect({sx + d * 0.3f, sy - d * 0.5f - ch},
-                        {sx + d * 0.3f + cw, sy - d * 0.5f}, oc, 0, 0, thickness);
-            break;
-        }
-        case SymbolKind::ObjFord: {
-            const float d = r * 0.7f;
-            if (filled) dl->AddRectFilled({sx - d, sy - d}, {sx + d, sy + d}, fc);
-            dl->AddRect({sx - d, sy - d}, {sx + d, sy + d}, oc, 0, 0, thickness);
-            dl->AddLine({sx - d, sy - d * 0.3f}, {sx + d, sy - d * 0.3f}, oc, 1.0f);
-            dl->AddLine({sx - d, sy + d * 0.3f}, {sx + d, sy + d * 0.3f}, oc, 1.0f);
-            break;
-        }
-        case SymbolKind::ObjFortification: {
-            const float d = r * 0.75f;
-            dl->AddLine({sx - d, sy + d * 0.5f}, {sx, sy - d * 0.6f}, fill_col, 2.5f);
-            dl->AddLine({sx, sy - d * 0.6f}, {sx + d, sy + d * 0.5f}, fill_col, 2.5f);
-            break;
-        }
-        case SymbolKind::ObjHillTop: {
-            const float d = r * 0.75f;
-            if (filled) dl->AddTriangleFilled({sx, sy - d},
-                                              {sx - d, sy + d * 0.7f},
-                                              {sx + d, sy + d * 0.7f}, fc);
-            dl->AddTriangle({sx, sy - d}, {sx - d, sy + d * 0.7f},
-                            {sx + d, sy + d * 0.7f}, oc, thickness);
-            dl->AddCircleFilled({sx, sy - d * 0.15f}, 1.5f, oc, 6);
-            break;
-        }
-        case SymbolKind::ObjIntersection: {
-            const float w = r * 0.25f;
-            const float h = r * 0.85f;
-            if (filled) {
-                dl->AddRectFilled({sx - w, sy - h}, {sx + w, sy + h}, fc);
-                dl->AddRectFilled({sx - h, sy - w}, {sx + h, sy + w}, fc);
-            }
-            dl->AddRect({sx - w, sy - h}, {sx + w, sy + h}, oc, 0, 0, thickness);
-            dl->AddRect({sx - h, sy - w}, {sx + h, sy + w}, oc, 0, 0, thickness);
-            break;
-        }
-        case SymbolKind::ObjNuclear: {
-            dl->AddCircleFilled({sx, sy}, r * 0.25f, fill_col, 12);
-            dl->AddCircle({sx, sy}, r * 0.7f, oc, 24, thickness);
-            for (int i = 0; i < 3; ++i) {
-                const float angle = (-90.0f + i * 120.0f) * static_cast<float>(f4::math::DEG_TO_RAD);
-                const float x1 = sx + std::cos(angle) * r * 0.3f;
-                const float y1 = sy + std::sin(angle) * r * 0.3f;
-                const float x2 = sx + std::cos(angle) * r * 0.65f;
-                const float y2 = sy + std::sin(angle) * r * 0.65f;
-                dl->AddLine({x1, y1}, {x2, y2}, fill_col, 2.5f);
-            }
-            break;
-        }
-        case SymbolKind::ObjPass: {
-            const float d = r * 0.6f;
-            if (filled) {
-                dl->AddTriangleFilled({sx - d * 1.3f, sy + d * 0.5f},
-                                      {sx - d * 0.3f, sy - d},
-                                      {sx + d * 0.2f, sy + d * 0.5f}, fc);
-                dl->AddTriangleFilled({sx - d * 0.2f, sy + d * 0.5f},
-                                      {sx + d * 0.3f, sy - d},
-                                      {sx + d * 1.3f, sy + d * 0.5f}, fc);
-            }
-            dl->AddTriangle({sx - d * 1.3f, sy + d * 0.5f}, {sx - d * 0.3f, sy - d},
-                            {sx + d * 0.2f, sy + d * 0.5f}, oc, thickness);
-            dl->AddTriangle({sx - d * 0.2f, sy + d * 0.5f}, {sx + d * 0.3f, sy - d},
-                            {sx + d * 1.3f, sy + d * 0.5f}, oc, thickness);
-            break;
-        }
-        case SymbolKind::ObjPort: {
-            dl->AddCircle({sx, sy - r * 0.55f}, r * 0.18f, fill_col, 10, 1.5f);
-            dl->AddLine({sx, sy - r * 0.35f}, {sx, sy + r * 0.55f}, fill_col, 2.0f);
-            dl->AddLine({sx - r * 0.4f, sy + r * 0.35f}, {sx + r * 0.4f, sy + r * 0.35f},
-                        fill_col, 2.0f);
-            break;
-        }
-        case SymbolKind::ObjPowerPlant: {
-            const float d = r * 0.7f;
-            const ImVec2 p0 = {sx + d * 0.3f, sy - d};
-            const ImVec2 p1 = {sx - d * 0.3f, sy - d * 0.1f};
-            const ImVec2 p2 = {sx + d * 0.1f, sy + d * 0.1f};
-            const ImVec2 p3 = {sx - d * 0.3f, sy + d};
-            const ImVec2 p4 = {sx + d * 0.3f, sy + d * 0.1f};
-            const ImVec2 p5 = {sx - d * 0.1f, sy - d * 0.1f};
-            if (filled) {
-                dl->AddTriangleFilled(p0, p1, p2, fill_col);
-                dl->AddTriangleFilled(p3, p4, p5, fill_col);
-            }
-            dl->AddLine(p0, p1, oc, thickness);
-            dl->AddLine(p1, p2, oc, thickness);
-            dl->AddLine(p2, p5, oc, thickness);
-            dl->AddLine(p5, p4, oc, thickness);
-            dl->AddLine(p4, p3, oc, thickness);
-            break;
-        }
-        case SymbolKind::ObjRadar: {
-            for (int i = 0; i < 3; ++i) {
-                const float rad = r * (0.35f + i * 0.25f);
-                const int segments = 12;
-                for (int s = 0; s < segments; ++s) {
-                    const float a0 = (-90.0f + s * (90.0f / segments)) * static_cast<float>(f4::math::DEG_TO_RAD);
-                    const float a1 = (-90.0f + (s + 1) * (90.0f / segments)) * static_cast<float>(f4::math::DEG_TO_RAD);
-                    dl->AddLine({sx + std::cos(a0) * rad, sy + std::sin(a0) * rad},
-                                {sx + std::cos(a1) * rad, sy + std::sin(a1) * rad},
-                                fill_col, 1.5f);
-                }
-            }
-            dl->AddCircleFilled({sx, sy}, 1.5f, fill_col, 6);
-            break;
-        }
-        case SymbolKind::ObjRadioTower: {
-            const float d = r * 0.45f;
-            if (filled) dl->AddTriangleFilled({sx - d, sy + r * 0.9f},
-                                              {sx + d, sy + r * 0.9f},
-                                              {sx, sy - d * 0.5f}, fc);
-            dl->AddTriangle({sx - d, sy + r * 0.9f}, {sx + d, sy + r * 0.9f},
-                            {sx, sy - d * 0.5f}, oc, thickness);
-            dl->AddCircleFilled({sx, sy - r * 0.7f}, 2.0f, fill_col, 8);
-            dl->AddCircle({sx, sy - r * 0.7f}, r * 0.3f, oc, 12, thickness);
-            break;
-        }
-        case SymbolKind::ObjRailTerminal: {
-            const float bw = r * 0.7f;
-            const float bh = r * 0.35f;
-            if (filled) dl->AddRectFilled({sx - bw, sy - bh * 0.5f}, {sx + bw, sy + bh * 0.5f}, fc);
-            dl->AddRect({sx - bw, sy - bh * 0.5f}, {sx + bw, sy + bh * 0.5f}, oc, 0, 0, thickness);
-            dl->AddCircleFilled({sx - bw * 0.55f, sy + bh * 0.5f + r * 0.1f}, r * 0.12f, fill_col, 8);
-            dl->AddCircleFilled({sx + bw * 0.55f, sy + bh * 0.5f + r * 0.1f}, r * 0.12f, fill_col, 8);
-            break;
-        }
-        case SymbolKind::ObjRailroad: {
-            const float w = r * 0.85f;
-            dl->AddLine({sx - w, sy - r * 0.12f}, {sx + w, sy - r * 0.12f}, fill_col, 1.5f);
-            dl->AddLine({sx - w, sy + r * 0.12f}, {sx + w, sy + r * 0.12f}, fill_col, 1.5f);
-            for (int i = -2; i <= 2; ++i) {
-                const float x = sx + i * w * 0.4f;
-                dl->AddLine({x, sy - r * 0.25f}, {x, sy + r * 0.25f}, fill_col, 1.0f);
-            }
-            break;
-        }
-        case SymbolKind::ObjRefinery: {
-            const float d = r * 0.4f;
-            if (filled) {
-                dl->AddTriangleFilled({sx - d * 1.5f, sy + d}, {sx - d * 0.5f, sy + d},
-                                      {sx - d, sy - d}, fc);
-                dl->AddTriangleFilled({sx - d * 0.5f, sy + d}, {sx + d * 0.5f, sy + d},
-                                      {sx, sy - d * 1.5f}, fc);
-                dl->AddTriangleFilled({sx + d * 0.5f, sy + d}, {sx + d * 1.5f, sy + d},
-                                      {sx + d, sy - d * 0.5f}, fc);
-            }
-            dl->AddLine({sx - d * 1.5f, sy + d}, {sx - d, sy - d}, oc, thickness);
-            dl->AddLine({sx - d, sy - d}, {sx - d * 0.5f, sy + d}, oc, thickness);
-            dl->AddLine({sx - d * 0.5f, sy + d}, {sx, sy - d * 1.5f}, oc, thickness);
-            dl->AddLine({sx, sy - d * 1.5f}, {sx + d * 0.5f, sy + d}, oc, thickness);
-            dl->AddLine({sx + d * 0.5f, sy + d}, {sx + d, sy - d * 0.5f}, oc, thickness);
-            dl->AddLine({sx + d, sy - d * 0.5f}, {sx + d * 1.5f, sy + d}, oc, thickness);
-            break;
-        }
-        case SymbolKind::ObjRoad:
-            dl->AddLine({sx - r * 0.85f, sy}, {sx + r * 0.85f, sy}, fill_col, 2.5f);
-            break;
-        case SymbolKind::ObjSamSite: {
-            const float d = r * 0.75f;
-            if (filled) dl->AddTriangleFilled({sx, sy - d},
-                                              {sx - d, sy + d * 0.7f},
-                                              {sx + d, sy + d * 0.7f}, fc);
-            dl->AddTriangle({sx, sy - d}, {sx - d, sy + d * 0.7f},
-                            {sx + d, sy + d * 0.7f}, oc, thickness);
-            dl->AddLine({sx, sy - d * 0.4f}, {sx, sy + d * 0.5f}, oc, 1.5f);
-            dl->AddLine({sx, sy - d * 0.4f}, {sx - r * 0.15f, sy - d * 0.15f}, oc, 1.0f);
-            dl->AddLine({sx, sy - d * 0.4f}, {sx + r * 0.15f, sy - d * 0.15f}, oc, 1.0f);
-            break;
-        }
-        case SymbolKind::ObjTown: {
-            const float s = r * 0.3f;
-            const float off = r * 0.4f;
-            for (int i = 0; i < 2; ++i) {
-                const float cx = sx - off * 0.5f + i * off;
-                if (filled) dl->AddRectFilled({cx - s, sy - s}, {cx + s, sy + s}, fc);
-                dl->AddRect({cx - s, sy - s}, {cx + s, sy + s}, oc, 0, 0, thickness);
-            }
-            break;
-        }
-        case SymbolKind::ObjVillage: {
-            const float s = r * 0.4f;
-            if (filled) dl->AddRectFilled({sx - s, sy - s}, {sx + s, sy + s}, fc);
-            dl->AddRect({sx - s, sy - s}, {sx + s, sy + s}, oc, 0, 0, thickness);
-            break;
-        }
-        case SymbolKind::ObjHarts: {
-            if (filled) dl->AddCircleFilled({sx, sy}, r * 0.7f, fc, 20);
-            dl->AddCircle({sx, sy}, r * 0.7f, oc, 24, thickness);
-            dl->AddCircle({sx, sy}, r * 0.4f, oc, 20, thickness);
-            dl->AddCircleFilled({sx, sy}, r * 0.12f, oc, 8);
-            break;
-        }
-        case SymbolKind::ObjAirTerminal: {
-            const float fw = r * 0.14f;
-            const float fh = r * 1.2f;
-            if (filled) {
-                dl->AddRectFilled({sx - fw, sy - fh * 0.5f}, {sx + fw, sy + fh * 0.5f}, fill_col);
-                dl->AddRectFilled({sx - r * 0.8f, sy - r * 0.08f},
-                                  {sx + r * 0.8f, sy + r * 0.08f}, fill_col);
-                dl->AddRectFilled({sx - r * 0.35f, sy + fh * 0.35f},
-                                  {sx + r * 0.35f, sy + fh * 0.35f + r * 0.11f}, fill_col);
-            }
-            break;
-        }
-        case SymbolKind::ObjUnknown:
-        default: {
-            if (filled) dl->AddCircleFilled({sx, sy}, r * 0.6f, fc, 16);
-            dl->AddCircle({sx, sy}, r * 0.6f, oc, 20, thickness);
             break;
         }
     }

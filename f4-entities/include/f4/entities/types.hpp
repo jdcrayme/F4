@@ -157,7 +157,7 @@ struct PilotState {
 /// One vehicle group in a unit's composition.
 struct VehicleGroup {
     uint8_t  group = 0;           // group index (0-15)
-    int16_t  vehicle_type = 0;    // VCD index
+    int16_t  vehicle_type = 0;    // entity_type (not a VCD index; resolve via ClassTable::data_ptr_for)
     int32_t  count = 0;           // nominal vehicle count for this group
     int32_t  live_count = 0;      // live count from roster (0-3)
     std::string vehicle_name;     // from VCD (e.g. "M-1A1", "F-16C")

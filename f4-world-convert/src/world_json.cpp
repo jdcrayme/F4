@@ -493,10 +493,26 @@ std::string to_world_json(const CamArchive& cam, const WorldJsonOptions& opts) {
                                       << ", \"vehicle_type\": " << vt
                                       << ", \"count\": " << n_elements
                                       << ", \"live_count\": " << live;
-                                    // Look up vehicle name from VCD
+                                    // Look up vehicle name from VCD via the class table.
+                                    // The vehicle_type field is an entity_type (e.g. 273
+                                    // for F-16C), NOT a VCD table index. We must
+                                    // resolve it through the class table to get the
+                                    // correct dataPtr (VCD index). Using entity_type -
+                                    // 100 as a VCD index was wrong — VCD entries are
+                                    // not stored in entity_type order.
                                     if (opts.theater_db->vehicles.loaded()) {
-                                        const auto* vcd = opts.theater_db->vehicles.at(
-                                            static_cast<std::size_t>(vt) - VU_LAST_ENTITY_TYPE);
+                                       const VehicleClassData* vcd = nullptr;
+                                        if (opts.class_table) {
+                                            uint8_t vcd_dt = 0;
+                                            uint32_t vcd_idx = 0;
+                                            if (opts.class_table->data_ptr_for(
+                                                    static_cast<uint16_t>(vt),
+                                                    vcd_dt, vcd_idx)
+                                                && vcd_dt == DTYPE_VEHICLE) {
+                                                vcd = opts.theater_db->vehicles.at(
+                                                    static_cast<std::size_t>(vcd_idx));
+                                            }
+                                        }
                                         if (vcd) {
                                             o << ", \"vehicle_name\": \"" << escape_string(vcd->name) << "\""
                                               << ", \"vehicle_nctr\": \"" << escape_string(vcd->nctr) << "\""

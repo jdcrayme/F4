@@ -247,8 +247,7 @@ void ViewerApp::draw_canvas() {
 
     // --- Objectives ---
     if (impl_->show_objectives && impl_->world_loaded) {
-        const float base_size = std::clamp(8.0f + impl_->cam_zoom * 0.6f,
-                                           10.0f, 24.0f);
+        const float base_size = std::clamp(6.0f + impl_->cam_zoom * 2.0f, 12.0f, 40.0f);
         const bool draw_labels = impl_->cam_zoom > 8.0f;
         const float cull_margin = base_size + (draw_labels ? 80.0f : 0.0f);
         const float sx_min = -cull_margin;
@@ -370,7 +369,7 @@ void ViewerApp::draw_canvas() {
 
     // --- Units ---
     if (impl_->show_units && impl_->world_loaded) {
-        const float s = std::clamp(6.0f + impl_->cam_zoom * 0.5f, 8.0f, 20.0f);
+        const float s = std::clamp(6.0f + impl_->cam_zoom * 2.0f, 12.0f, 40.0f);
         const float cull_margin = s + 4.0f;
         const float sx_min = -cull_margin;
         const float sx_max = static_cast<float>(impl_->window_w) + cull_margin;

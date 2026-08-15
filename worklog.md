@@ -2288,3 +2288,27 @@ Stage Summary:
 - BUILD VERIFICATION: complete. f4_world_viewer library + f4-world-viewer executable both build clean (no new warnings/errors). All 65 unit tests pass. Viewer runs under Xvfb without crash.
 - DELIVERABLE: /home/z/my-project/download/inspector-tabs-combined.patch — applies cleanly to a fresh clone of https://github.com/jdcrayme/F4.git.
 - Also saved: /home/z/my-project/download/inspector_tabs_smoke.png — screenshot of the viewer running with the Korea fixture loaded, post-refactor.
+
+---
+Task ID: 1
+Agent: main
+Task: Fix incorrect vehicle lists in world viewer (unknown vehicle types, SR-71s on mechanized infantry)
+
+Work Log:
+- Explored F4 repo docs, world viewer, world-convert, and entities modules
+- Identified BUG 1 (CRITICAL): world_json.cpp used entity_type - 100 as VCD index instead of class table data_ptr_for()
+- Identified BUG 2: enum_text.hpp data_type_name() had stale DataType mapping (1=Obj, 2=Unit, 3=Veh) vs correct (1=FCD, 3=OCD, 4=UCD, 5=VCD)
+- Identified BUG 3: class_table_browser.cpp showed raw vehicle_type numbers without VCD name resolution
+- Fixed BUG 1: world_json.cpp now resolves vehicle_type through ClassTable::data_ptr_for() → DTYPE_VEHICLE guard → VCD.at(dataPtr)
+- Fixed BUG 2: Updated data_type_name() to match verified DTYPE_* enum values from class_table.hpp
+- Fixed BUG 2b: Updated stale comment in decoders.cpp (1=OCD,2=UCD,3=VCD → 1=FCD,3=OCD,4=UCD,5=VCD,6=WCD,7=SSD)
+- Fixed BUG 3: class_table_browser.cpp vehicle groups now show VCD name (e.g. "type 578 (Patrol Boat)")
+- Fixed misleading comment in types.hpp: vehicle_type is entity_type, not VCD index
+- Audited entire codebase for remaining entity_type - 100 → VCD bugs, data_type_name call sites — none remaining
+- Static verification: all fixes are internally consistent and correct
+
+Stage Summary:
+- Root cause: VCD lookup in world_json.cpp used entity_type - 100 as VCD index; VCD entries are NOT in entity_type order
+- Fix pattern: resolve entity_type → ClassTable::data_ptr_for() → check DTYPE_VEHICLE → use dataPtr as VCD index
+- All 4 VCD-lookup call sites now use the correct data_ptr_for() pattern
+- DataType mapping in enum_text.hpp now matches the authoritative DTYPE_* enum in class_table.hpp
