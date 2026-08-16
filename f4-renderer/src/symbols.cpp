@@ -73,10 +73,18 @@ SymbolKind symbol_for_unit(f4::entities::UnitClass cls, uint8_t subtype) noexcep
             // battalion (rect frame) and brigade (diamond frame). The
             // caller (draw_symbol) picks the frame based on cls.
             switch (subtype) {
+                case 1:  return SymbolKind::UnitAirDefense;  // STYPE_LAND_AIR_DEFENSE
+                case 2:  return SymbolKind::UnitAirmobile;   // STYPE_LAND_AIRMOBILE
                 case 3:  return SymbolKind::UnitArmor;       // STYPE_LAND_ARMOR
+                case 4:  return SymbolKind::UnitArmoredCav;  // STYPE_LAND_ARMORED_CAV
                 case 5:  return SymbolKind::UnitEngineer;    // STYPE_LAND_ENGINEER
+                case 6:  return SymbolKind::UnitHQ;          // STYPE_LAND_HQ
                 case 7:  return SymbolKind::UnitInfantry;    // STYPE_LAND_INFANTRY
+                case 8:  return SymbolKind::UnitMarine;      // STYPE_LAND_MARINE
+                case 9:  return SymbolKind::UnitMechanized;  // STYPE_LAND_MECHANIZED
+                case 10: return SymbolKind::UnitRocket;      // STYPE_LAND_ROCKET
                 case 11: return SymbolKind::UnitArtillery;   // STYPE_LAND_SP_ARTILLERY
+                case 12: return SymbolKind::UnitSAMissile;   // STYPE_LAND_SS_MISSILE
                 case 13: return SymbolKind::UnitSupply;      // STYPE_LAND_SUPPLY
                 case 14: return SymbolKind::UnitArtillery;   // STYPE_LAND_TOWED_ARTILLERY
                 default: break;
@@ -120,9 +128,17 @@ SymbolKind symbol_for_unit(f4::entities::UnitClass cls, uint8_t subtype) noexcep
 static SymbolKind unit_frame_for(SymbolKind k) {
     switch (k) {
         case SymbolKind::UnitArmor:
+        case SymbolKind::UnitAirDefense:
+        case SymbolKind::UnitAirmobile:
+        case SymbolKind::UnitArmoredCav:
         case SymbolKind::UnitArtillery:
+        case SymbolKind::UnitHQ:
         case SymbolKind::UnitInfantry:
         case SymbolKind::UnitEngineer:
+        case SymbolKind::UnitMarine:
+        case SymbolKind::UnitMechanized:
+        case SymbolKind::UnitRocket:
+        case SymbolKind::UnitSAMissile:
         case SymbolKind::UnitSupply:
         case SymbolKind::UnitBattalion:
             return SymbolKind::UnitBattalion;
@@ -207,7 +223,7 @@ void draw_symbol(SymbolKind kind, float sx, float sy,
                 if (filled) DrawRectangleRec(rec, fc_blend);
                 DrawRectangleLinesEx(rec, 1.0f, oc);
 
-				// battalion marker: vertical line above rectangle
+                                // battalion marker: vertical line above rectangle
                 const Vector2 p0 = { sx, sy - r - r/2 };
                 const Vector2 p1 = { sx, sy - r };
                 DrawLineEx(p0, p1, 1.0f, oc);
@@ -232,8 +248,8 @@ void draw_symbol(SymbolKind kind, float sx, float sy,
                 break;
             }
             case SymbolKind::UnitSquadron: {  // arc
-				const float w = r * 0.5f;
-				const float h = r;
+                                const float w = r * 0.5f;
+                                const float h = r;
                 if (filled) DrawAirArc(static_cast<int>(sx), static_cast<int>(sy), w, h, fc_blend);
                 DrawAirArcLines(static_cast<int>(sx), static_cast<int>(sy), w, h, oc);
 
@@ -278,16 +294,37 @@ void draw_symbol(SymbolKind kind, float sx, float sy,
         // Glyph color is the outline color so it contrasts with the team fill.
         const Color gc = oc;
         switch (kind) {
-            case SymbolKind::UnitArmor: {  // tank: turret circle + barrel
-
-				const float radiusH = r * 0.6f;
-				const float radiusV = r * 0.2f;
-                
+            case SymbolKind::UnitArmor: {  // horizontal ellipse (tank turret barrel)
+                const float radiusH = r * 0.6f;
+                const float radiusV = r * 0.2f;
                 const Rectangle rec = { sx - radiusH, sy - radiusV, radiusH * 2, radiusV * 2 };
                 DrawRectangleRoundedLines(rec, radiusV, 18, 1.5f, gc);
                 break;
             }
-            case SymbolKind::UnitArtillery: {  // gun: dot
+            case SymbolKind::UnitAirDefense: {  // upward arc (dome — SAM / AAA)
+                DrawAirArc((int)sx, (int)sy, r * 0.55f, r * 0.45f, gc);
+                // Small tick at top center (antenna / launcher)
+                DrawLineEx({sx, sy - r * 0.45f}, {sx, sy - r * 0.7f}, 1.5f, gc);
+                break;
+            }
+            case SymbolKind::UnitAirmobile: {  // helicopter silhouette
+                DrawCircleV({sx, sy + r * 0.1f}, r * 0.2f, gc);
+                DrawLineEx({sx - r * 0.45f, sy - r * 0.3f},
+                           {sx + r * 0.45f, sy - r * 0.3f}, 1.5f, gc);
+                DrawLineEx({sx, sy - r * 0.3f}, {sx, sy - r * 0.05f}, 1.0f, gc);
+                // Tail boom
+                DrawLineEx({sx, sy + r * 0.3f}, {sx + r * 0.3f, sy + r * 0.45f}, 1.0f, gc);
+                break;
+            }
+            case SymbolKind::UnitArmoredCav: {  // diagonal slash (crossed sabers)
+                const float d = r * 0.6f;
+                DrawLineEx({sx - d, sy - d}, {sx + d, sy + d}, 1.5f, gc);
+                DrawLineEx({sx + d, sy - d}, {sx - d, sy + d}, 1.5f, gc);
+                // Small circle at center (unit dot)
+                DrawCircleV({sx, sy}, r * 0.1f, gc);
+                break;
+            }
+            case SymbolKind::UnitArtillery: {  // dot (gun)
                 DrawCircleV({sx, sy}, r * 0.25f, gc);
                 break;
             }
@@ -303,6 +340,57 @@ void draw_symbol(SymbolKind kind, float sx, float sy,
                 DrawLineEx({sx - d, sy - d}, {sx + d * 0.5f, sy - d}, 1.5f, gc);
                 DrawLineEx({sx - d, sy},      {sx + d * 0.3f, sy},      1.5f, gc);
                 DrawLineEx({sx - d, sy + d}, {sx + d * 0.5f, sy + d}, 1.5f, gc);
+                break;
+            }
+            case SymbolKind::UnitHQ: {  // 6-pointed star (headquarters)
+                const float d = r * 0.6f;
+                // Two overlapping triangles form a Star of David
+                DrawTriangle({sx, sy - d},
+                             {sx - d * 0.87f, sy + d * 0.5f},
+                             {sx + d * 0.87f, sy + d * 0.5f}, gc);
+                DrawTriangle({sx, sy + d},
+                             {sx - d * 0.87f, sy - d * 0.5f},
+                             {sx + d * 0.87f, sy - d * 0.5f}, gc);
+                break;
+            }
+            case SymbolKind::UnitMarine: {  // anchor cross — vertical + horizontal + bottom arc
+                const float d = r * 0.55f;
+                DrawLineEx({sx, sy - d}, {sx, sy + d * 0.5f}, 1.5f, gc);
+                DrawLineEx({sx - d * 0.6f, sy - d * 0.3f}, {sx + d * 0.6f, sy - d * 0.3f}, 1.5f, gc);
+                // Bottom hook (curved via short segments)
+                DrawLineEx({sx - d * 0.35f, sy + d * 0.5f}, {sx + d * 0.35f, sy + d * 0.5f}, 1.5f, gc);
+                DrawLineEx({sx + d * 0.35f, sy + d * 0.5f}, {sx + d * 0.35f, sy + d * 0.2f}, 1.0f, gc);
+                DrawLineEx({sx - d * 0.35f, sy + d * 0.5f}, {sx - d * 0.35f, sy + d * 0.2f}, 1.0f, gc);
+                break;
+            }
+            case SymbolKind::UnitMechanized: {  // two parallel horizontal bars (tracked undercarriage)
+                const float d = r * 0.65f;
+                const float gap = r * 0.25f;
+                DrawLineEx({sx - d, sy - gap}, {sx + d, sy - gap}, 1.5f, gc);
+                DrawLineEx({sx - d, sy + gap}, {sx + d, sy + gap}, 1.5f, gc);
+                // Connecting bar (hull)
+                DrawLineEx({sx - d * 0.3f, sy - gap}, {sx - d * 0.3f, sy + gap}, 1.0f, gc);
+                DrawLineEx({sx + d * 0.3f, sy - gap}, {sx + d * 0.3f, sy + gap}, 1.0f, gc);
+                break;
+            }
+            case SymbolKind::UnitRocket: {  // upward chevron (missile in flight)
+                const float d = r * 0.6f;
+                DrawLineEx({sx - d, sy + d * 0.4f}, {sx, sy - d * 0.6f}, 1.5f, gc);
+                DrawLineEx({sx + d, sy + d * 0.4f}, {sx, sy - d * 0.6f}, 1.5f, gc);
+                // Small dot at base (exhaust)
+                DrawCircleV({sx, sy + d * 0.5f}, r * 0.08f, gc);
+                break;
+            }
+            case SymbolKind::UnitSAMissile: {  // small diamond (surface-to-surface missile)
+                const float d = r * 0.55f;
+                const Vector2 p0 = {sx, sy - d};
+                const Vector2 p1 = {sx + d * 0.65f, sy};
+                const Vector2 p2 = {sx, sy + d};
+                const Vector2 p3 = {sx - d * 0.65f, sy};
+                DrawLineEx(p0, p1, 1.5f, gc);
+                DrawLineEx(p1, p2, 1.5f, gc);
+                DrawLineEx(p2, p3, 1.5f, gc);
+                DrawLineEx(p3, p0, 1.5f, gc);
                 break;
             }
             case SymbolKind::UnitSupply: {  // box with +

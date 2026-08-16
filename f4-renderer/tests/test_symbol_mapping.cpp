@@ -144,6 +144,79 @@ TEST(SymbolMapping, UnitClass_Unknown) {
     EXPECT_EQ(SymbolKind::UnitUnknown, symbol_for_unit(UC::Unknown, 0));
 }
 
+// ── Ground unit subtype mapping (Battalion) ───────────────────────────────────
+
+TEST(SymbolMapping, Battalion_AirDefense) {
+    EXPECT_EQ(SymbolKind::UnitAirDefense, symbol_for_unit(UC::Battalion, 1));
+}
+
+TEST(SymbolMapping, Battalion_Airmobile) {
+    EXPECT_EQ(SymbolKind::UnitAirmobile, symbol_for_unit(UC::Battalion, 2));
+}
+
+TEST(SymbolMapping, Battalion_Armor) {
+    EXPECT_EQ(SymbolKind::UnitArmor, symbol_for_unit(UC::Battalion, 3));
+}
+
+TEST(SymbolMapping, Battalion_ArmoredCav) {
+    EXPECT_EQ(SymbolKind::UnitArmoredCav, symbol_for_unit(UC::Battalion, 4));
+}
+
+TEST(SymbolMapping, Battalion_Engineer) {
+    EXPECT_EQ(SymbolKind::UnitEngineer, symbol_for_unit(UC::Battalion, 5));
+}
+
+TEST(SymbolMapping, Battalion_HQ) {
+    EXPECT_EQ(SymbolKind::UnitHQ, symbol_for_unit(UC::Battalion, 6));
+}
+
+TEST(SymbolMapping, Battalion_Infantry) {
+    EXPECT_EQ(SymbolKind::UnitInfantry, symbol_for_unit(UC::Battalion, 7));
+}
+
+TEST(SymbolMapping, Battalion_Marine) {
+    EXPECT_EQ(SymbolKind::UnitMarine, symbol_for_unit(UC::Battalion, 8));
+}
+
+TEST(SymbolMapping, Battalion_Mechanized) {
+    EXPECT_EQ(SymbolKind::UnitMechanized, symbol_for_unit(UC::Battalion, 9));
+}
+
+TEST(SymbolMapping, Battalion_Rocket) {
+    EXPECT_EQ(SymbolKind::UnitRocket, symbol_for_unit(UC::Battalion, 10));
+}
+
+TEST(SymbolMapping, Battalion_SPArtillery) {
+    EXPECT_EQ(SymbolKind::UnitArtillery, symbol_for_unit(UC::Battalion, 11));
+}
+
+TEST(SymbolMapping, Battalion_SAMissile) {
+    EXPECT_EQ(SymbolKind::UnitSAMissile, symbol_for_unit(UC::Battalion, 12));
+}
+
+TEST(SymbolMapping, Battalion_Supply) {
+    EXPECT_EQ(SymbolKind::UnitSupply, symbol_for_unit(UC::Battalion, 13));
+}
+
+TEST(SymbolMapping, Battalion_TowedArtillery) {
+    EXPECT_EQ(SymbolKind::UnitArtillery, symbol_for_unit(UC::Battalion, 14));
+}
+
+// ── Ground unit subtype mapping (Brigade) — same glyphs, diamond frame ─────────
+
+TEST(SymbolMapping, Brigade_AirDefense) {
+    EXPECT_EQ(SymbolKind::UnitAirDefense, symbol_for_unit(UC::Brigade, 1));
+}
+
+TEST(SymbolMapping, Brigade_Mechanized) {
+    EXPECT_EQ(SymbolKind::UnitMechanized, symbol_for_unit(UC::Brigade, 9));
+}
+
+TEST(SymbolMapping, Brigade_UnknownSubtype) {
+    // Subtype 99 is not a valid land subtype — should fall back to bare brigade
+    EXPECT_EQ(SymbolKind::UnitBrigade, symbol_for_unit(UC::Brigade, 99));
+}
+
 // ── SymbolKind enum properties ────────────────────────────────────────────────
 
 TEST(SymbolKindEnum, CountIsPositive) {
@@ -192,7 +265,7 @@ TEST(SymbolMapping, ObjectiveType_Deterministic) {
 
 TEST(SymbolMapping, UnitClass_Deterministic) {
     for (int cls = 0; cls <= 6; ++cls) {
-        for (int sub = 0; sub <= 5; ++sub) {
+        for (int sub = 0; sub <= 14; ++sub) {
             auto a = symbol_for_unit(static_cast<UC>(cls), static_cast<uint8_t>(sub));
             auto b = symbol_for_unit(static_cast<UC>(cls), static_cast<uint8_t>(sub));
             EXPECT_EQ(a, b);

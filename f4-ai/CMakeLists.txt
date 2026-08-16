@@ -26,6 +26,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 add_library(f4-ai STATIC
     src/sensor_fusion.cpp
     src/takeoff_module.cpp
+    src/ground_steering.cpp
 )
 target_link_libraries(f4-ai PUBLIC f4_warnings)
 
