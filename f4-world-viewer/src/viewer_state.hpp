@@ -31,6 +31,7 @@
 #include <f4/viewer/viewer_app.hpp>
 #include <f4/viewer/hex_inspector.hpp>
 #include <f4/viewer/class_table_browser.hpp>
+#include <f4/viewer/symbol_creator.hpp>
 #include <f4/viewer/settings.hpp>
 
 #include <f4/entities/entity.hpp>
@@ -433,6 +434,14 @@ struct ViewerApp::Impl {
 
     // Class Table Browser panel — owned by the viewer, opened via Tools menu.
     ClassTableBrowser class_table_browser;
+
+    // Symbol Creator panel — owned by the viewer, opened via Tools menu.
+    // Interactive editor for the data-driven symbol library (see
+    // f4/renderer/symbol_library.hpp). Lets the user build symbol
+    // definitions by dragging points on a 2D canvas, then save/load
+    // the resulting library to JSON. The eventual refactor of
+    // symbols.cpp will consume the same library data model.
+    SymbolCreator symbol_creator;
 
     // Scheduled screenshot (for headless smoke tests)
     bool screenshot_pending = false;

@@ -26,6 +26,14 @@ target_include_directories(test_symbol_mapping PRIVATE ${IMGUI_DIR} ${IMGUI_DIR}
 target_link_libraries(test_symbol_mapping PRIVATE f4-renderer GTest::gtest_main)
 add_test(NAME symbol_mapping COMMAND test_symbol_mapping)
 
+# test_symbol_library — pure data-model + JSON I/O tests for the new
+# data-driven symbol library. No GPU context required (the render helpers
+# are exercised at runtime by the Symbol Creator tool in f4-world-viewer).
+add_executable(test_symbol_library test_symbol_library.cpp ${IMGUI_SOURCES})
+target_include_directories(test_symbol_library PRIVATE ${IMGUI_DIR} ${IMGUI_DIR}/backends)
+target_link_libraries(test_symbol_library PRIVATE f4-renderer GTest::gtest_main)
+add_test(NAME symbol_library COMMAND test_symbol_library)
+
 add_executable(test_mesh_builder test_mesh_builder.cpp ${IMGUI_SOURCES})
 target_include_directories(test_mesh_builder PRIVATE ${IMGUI_DIR} ${IMGUI_DIR}/backends)
 target_link_libraries(test_mesh_builder PRIVATE f4-renderer GTest::gtest_main)

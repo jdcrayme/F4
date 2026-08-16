@@ -22,6 +22,11 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 #                     real KoreaObj feature models at FeatureEntryState
 #                     offsets)
 #   symbols          — procedural MIL-STD-2525-style symbol drawing
+#   symbol_library   — data-driven symbol vocabulary (lines + polygons
+#                     as point lists, persisted to JSON via f4-json).
+#                     The eventual refactor of symbols.cpp will load
+#                     this library into a dictionary and render via
+#                     draw_library_symbol() for a given key.
 #   entity_render    — entity-level rendering: RenderEntity() inspects
 #                     components and dispatches to feature_mesh, symbols,
 #                     etc. RenderEntityIcon() renders 2D map symbols
@@ -32,6 +37,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 #            f4-world-convert (for ClassTable used by feature_mesh)
 #            raylib (public headers include <raylib.h>, <raymath.h>)
 #   PRIVATE: imgui (for symbols ImGui draw-list path + orbit_camera input guard)
+#            f4-json (for symbol_library JSON I/O — Reader/Writer only)
 # ============================================================================
 
 # ── Third-party deps (Raylib + Dear ImGui) ────────────────────────────────────
@@ -50,6 +56,7 @@ add_library(f4-renderer STATIC
     src/draw_3d.cpp
     src/feature_mesh.cpp
     src/symbols.cpp
+    src/symbol_library.cpp
     src/entity_render.cpp
 )
 target_link_libraries(f4-renderer PUBLIC f4_warnings)
@@ -68,6 +75,8 @@ target_link_libraries(f4-renderer
         f4-entities
         f4-world-convert
         raylib
+    PRIVATE
+        f4-json
 )
 
 add_library(F4::Renderer ALIAS f4-renderer)
