@@ -6,11 +6,6 @@
 // the other .cpp files.
 
 #include "viewer_state.hpp"
-#include "camera3d.hpp"
-#include "canvas3d.hpp"
-#include "file_ops.hpp"
-#include "imgui_panels.hpp"
-#include "scene.hpp"
 
 #include <f4/install/installation.hpp>
 #include <f4/math/constants.hpp>
@@ -18,11 +13,9 @@
 #include <rlImGui.h>
 #include <raylib.h>
 
-#include <chrono>
+#include <algorithm>
 #include <cmath>
-#include <cstdio>
-#include <cstdlib>
-#include <thread>
+#include <filesystem>
 
 namespace f4::models_viewer {
 
@@ -39,13 +32,7 @@ ViewerApp::~ViewerApp() {
         if (!impl_->raylib_meshes.empty()) {
             impl_->unload_meshes();
         }
-        if (impl_->colorbank_texture.id != 0) {
-            impl_->unload_colorbank_texture();
-        }
-        if (impl_->lit_shader.is_loaded()) {
-            // LitShader is RAII; it will be cleaned up automatically.
-            // No need to manually UnloadShader — the destructor handles it.
-        }
+        // LitShader is RAII; its destructor handles GPU cleanup.
     }
 }
 
@@ -87,18 +74,23 @@ void ViewerApp::run() {
         // Input
         impl_->handle_camera_input();
 
-        // F2 = screenshot
+        // F2 = screenshot (default filename)
         if (IsKeyPressed(KEY_F2)) {
-            const std::string path = "f4_model_viewer_screenshot.png";
-            TakeScreenshot(path.c_str());
-            impl_->status_msg = "Saved: " + path;
+            impl_->take_screenshot("f4_model_viewer_screenshot.png");
         }
 
-        // Scheduled screenshot
+        // Scheduled screenshot (set via --screenshot CLI flag or
+        // Save Screenshot... menu item). Fires once, then optionally
+        // exits the run loop if screenshot_exit_after is set (used by
+        // the --screenshot smoke-test path, which used to rely on a
+        // detached std::thread calling std::exit(0) — fragile and
+        // skipped ViewerApp dtor).
         if (impl_->screenshot_pending && GetTime() >= impl_->screenshot_at) {
-            TakeScreenshot(impl_->screenshot_path.string().c_str());
-            impl_->status_msg = "Saved: " + impl_->screenshot_path.string();
+            impl_->take_screenshot(impl_->screenshot_path);
             impl_->screenshot_pending = false;
+            if (impl_->screenshot_exit_after) {
+                impl_->should_exit = true;
+            }
         }
 
         // Animation tick: advances enabled DOF tracks and marks the
@@ -122,9 +114,6 @@ void ViewerApp::run() {
 
     rlImGuiShutdown();
     impl_->unload_meshes();
-    if (impl_->colorbank_texture.id != 0) {
-        impl_->unload_colorbank_texture();
-    }
     // LitShader destructor handles GPU cleanup automatically.
     CloseWindow();
 }
@@ -196,6 +185,82 @@ void ViewerApp::Impl::reset_animations() {
     meshes_dirty = true;
 }
 
+// ── take_screenshot ────────────────────────────────────────────────────────
+// Single screenshot implementation used by both the F2 hotkey and the
+// scheduled-screenshot path. Writes the PNG via Raylib's TakeScreenshot
+// and surfaces the result in status_msg.
+void ViewerApp::Impl::take_screenshot(const std::filesystem::path& path) {
+    TakeScreenshot(path.string().c_str());
+    status_msg = "Saved: " + path.string();
+}
+
+// ── select_parent_internal ─────────────────────────────────────────────────
+// Shared implementation for the three sites that select a parent model:
+//   - ViewerApp::select_parent()      (public API, called from CLI/tests)
+//   - Impl::load_model_files()         (auto-select first model after load)
+//   - draw_model_browser() Selectable  (user click in the model list)
+//
+// Initializes model_state from the model record's effective_dofs() and
+// effective_switches() with conservative defaults (DOF range [0, 2π],
+// switches default to "Show All" with n_children=2). The BSP-tree sync
+// in scene.cpp::sync_model_state_with_bsp_tree() refines these on the
+// next rebuild — removing unused DOFs/switches, fixing n_children, and
+// clamping active_child.
+//
+// Also rebuilds the animations vector with one track per DOF. By
+// convention DOF 0 is auto-enabled at 8 Hz (typical helicopter rotor);
+// the user can disable/adjust in the Animation panel.
+void ViewerApp::Impl::select_parent_internal(int index) {
+    selected_parent = index;
+    selected_lod = 0;
+    meshes_dirty = true;
+
+    if (!doc_loaded || index < 0) {
+        animations.clear();
+        return;
+    }
+
+    const auto* rec = db.model(index);
+    if (!rec) {
+        animations.clear();
+        return;
+    }
+
+    model_state = {};
+    for (int d = 0; d < rec->effective_dofs(); ++d) {
+        f4::models::DofState ds;
+        ds.dof_number = d;
+        ds.value = 0;
+        ds.min = 0;
+        ds.max = 6.28318530718f;  // 2π
+        model_state.dofs.push_back(ds);
+    }
+    for (int s = 0; s < rec->effective_switches(); ++s) {
+        f4::models::SwitchState ss;
+        ss.switch_number = s;
+        // Default to "Show All" — a model viewer should display all
+        // geometry by default. sync_model_state_with_bsp_tree() in
+        // scene.cpp will refine n_children once the BSP tree is parsed.
+        ss.active_child = -1;
+        ss.n_children = 2;
+        model_state.switches.push_back(ss);
+    }
+
+    animations.clear();
+    animations.reserve(rec->effective_dofs());
+    for (int d = 0; d < rec->effective_dofs(); ++d) {
+        AnimationTrack t;
+        t.dof_number = d;
+        t.enabled = (d == 0);
+        t.speed = (d == 0) ? 8.0f : 1.0f;
+        t.phase = 0.0f;
+        t.wrap_2pi = true;
+        animations.push_back(t);
+    }
+
+    fit_to_model();
+}
+
 // ── set_install_path ───────────────────────────────────────────────────────
 bool ViewerApp::set_install_path(const std::filesystem::path& path) {
     auto inst = f4::install::Installation::detect(path);
@@ -221,55 +286,7 @@ void ViewerApp::load_model(const std::filesystem::path& hdr_path,
 
 // ── select_parent ──────────────────────────────────────────────────────────
 void ViewerApp::select_parent(int index) {
-    impl_->selected_parent = index;
-    impl_->selected_lod = 0;
-    impl_->meshes_dirty = true;
-    impl_->model_list_scroll_to = index;
-
-    if (impl_->doc_loaded && index >= 0) {
-        const auto* rec = impl_->db.model(index);
-        if (rec) {
-            impl_->model_state = {};
-            for (int d = 0; d < rec->effective_dofs(); ++d) {
-                f4::models::DofState ds;
-                ds.dof_number = d;
-                ds.value = 0;
-                ds.min = 0;
-                ds.max = 6.28318530718f;
-                impl_->model_state.dofs.push_back(ds);
-            }
-            for (int s = 0; s < rec->effective_switches(); ++s) {
-                f4::models::SwitchState ss;
-                ss.switch_number = s;
-                // Default to "Show All" — a model viewer should display
-                // all geometry by default. The sync_model_state_with_bsp_tree
-                // helper in scene.cpp will refine this once the BSP tree
-                // is parsed (setting correct n_children, removing switches
-                // not present in the tree).
-                ss.active_child = -1;  // "Show All"
-                ss.n_children = 2;
-                impl_->model_state.switches.push_back(ss);
-            }
-            // Build a matching animation track vector. By convention the
-            // first DOF is usually the rotor for aircraft, so default its
-            // speed to 8 Hz (typical helicopter rotor RPM range) — the user
-            // can disable or adjust it in the Animation panel.
-            impl_->animations.clear();
-            impl_->animations.reserve(rec->effective_dofs());
-            for (int d = 0; d < rec->effective_dofs(); ++d) {
-                Impl::AnimationTrack t;
-                t.dof_number = d;
-                t.enabled = (d == 0) && (rec->effective_dofs() >= 1);
-                t.speed = (d == 0) ? 8.0f : 1.0f;
-                t.phase = 0.0f;
-                t.wrap_2pi = true;
-                impl_->animations.push_back(t);
-            }
-        }
-        impl_->fit_to_model();
-    } else {
-        impl_->animations.clear();
-    }
+    impl_->select_parent_internal(index);
 }
 
 // ── select_lod ─────────────────────────────────────────────────────────────
@@ -307,10 +324,12 @@ void ViewerApp::set_initial_camera(const float eye[3], const float target[3]) {
 
 // ── schedule_screenshot ────────────────────────────────────────────────────
 void ViewerApp::schedule_screenshot(float delay_sec,
-                                     const std::filesystem::path& path) {
+                                     const std::filesystem::path& path,
+                                     bool exit_after) {
     impl_->screenshot_pending = true;
     impl_->screenshot_at = GetTime() + delay_sec;
     impl_->screenshot_path = path;
+    impl_->screenshot_exit_after = exit_after;
 }
 
 } // namespace f4::models_viewer

@@ -13,13 +13,13 @@
 //   - Call UploadMesh(&mesh, true) to upload to GPU
 //
 // Texture upload:
-//   - After meshes are built, each RaylibMeshEntry has a tex_id.
-//   - upload_textures() lazily decodes TEX blobs via ModelDatabase::fetch_texture
-//     and uploads the RGBA8 data to GPU as Texture2D + Material.
+//   - After meshes are built, each MeshEntry has a tex_id.
+//   - rebuild_meshes() calls texture_cache.upload(db, tex_ids), which
+//     lazily decodes TEX blobs via ModelDatabase::fetch_texture and
+//     uploads the RGBA8 data to GPU as Texture2D + Material.
 //   - canvas3d.cpp uses the per-mesh material for DrawMesh.
 
 #include "viewer_state.hpp"
-#include "scene.hpp"
 
 #include <f4/models/geometry.hpp>
 #include <f4/models/model_database.hpp>
@@ -221,6 +221,26 @@ static void sync_model_state_with_bsp_tree(
     animations = std::move(new_animations);
 }
 
+// ── resolve_color_index ─────────────────────────────────────────────────────
+// Resolve a vertex color index (Prim.rgba) to a Raylib Color via the
+// ColorBank. Falls back to `fallback` if the index is out of range or
+// the ColorBank entry is empty. Used for LineF/PointF primitives which
+// can't go through the triangle-mesh build_raylib_meshes() path.
+static Color resolve_color_index(uint32_t ci,
+                                  const f4::models::ColorBank& cb,
+                                  Color fallback) noexcept
+{
+    if (ci == 0 || ci >= 4096) return fallback;
+    const uint32_t rgba = cb.rgba_at(static_cast<int>(ci));
+    if (rgba == 0) return fallback;
+    return Color{
+        static_cast<unsigned char>((rgba >> 24) & 0xFF),
+        static_cast<unsigned char>((rgba >> 16) & 0xFF),
+        static_cast<unsigned char>((rgba >> 8) & 0xFF),
+        static_cast<unsigned char>(rgba & 0xFF)
+    };
+}
+
 // ── Impl wrappers ─────────────────────────────────────────────────────────
 // These are called from the main loop via Impl.
 
@@ -289,7 +309,10 @@ void ViewerApp::Impl::rebuild_meshes() {
 
     // Collect lines and points into separate lists for canvas drawing.
     // Raylib's ::Mesh / DrawMesh path only handles triangle lists; lines
-    // and points need DrawLine3D / DrawCube.
+    // and points need DrawLine3D / DrawCube. Color resolution goes through
+    // the shared resolve_color_index() helper above.
+    static constexpr Color LINE_FALLBACK = {200, 200, 200, 255};
+    static constexpr Color POINT_FALLBACK = {255, 255, 100, 255};
     for (const auto& m : geom.meshes) {
         if (m.kind == f4::models::PrimitiveKind::Lines) {
             for (const auto& ln : m.lines) {
@@ -299,25 +322,7 @@ void ViewerApp::Impl::rebuild_meshes() {
                 LineSeg seg;
                 seg.a = to_raylib(va.position.x, va.position.y, va.position.z);
                 seg.b = to_raylib(vb.position.x, vb.position.y, vb.position.z);
-                // Use the first vertex's color as the line color. The
-                // mesh_is_textured flag isn't really meaningful for LineF
-                // (lines have no texture), so always resolve through CB.
-                const uint32_t ci = va.color;
-                if (ci != 0 && ci < 4096) {
-                    const uint32_t rgba = db.color_bank().rgba_at(static_cast<int>(ci));
-                    if (rgba != 0) {
-                        seg.color = Color{
-                            static_cast<unsigned char>((rgba >> 24) & 0xFF),
-                            static_cast<unsigned char>((rgba >> 16) & 0xFF),
-                            static_cast<unsigned char>((rgba >> 8) & 0xFF),
-                            static_cast<unsigned char>(rgba & 0xFF)
-                        };
-                    } else {
-                        seg.color = Color{200, 200, 200, 255};
-                    }
-                } else {
-                    seg.color = Color{200, 200, 200, 255};
-                }
+                seg.color = resolve_color_index(va.color, db.color_bank(), LINE_FALLBACK);
                 line_segs.push_back(seg);
             }
         } else if (m.kind == f4::models::PrimitiveKind::Points) {
@@ -327,22 +332,7 @@ void ViewerApp::Impl::rebuild_meshes() {
                 PointMark pm;
                 pm.p = to_raylib(va.position.x, va.position.y, va.position.z);
                 pm.size = 1.0f;
-                const uint32_t ci = va.color;
-                if (ci != 0 && ci < 4096) {
-                    const uint32_t rgba = db.color_bank().rgba_at(static_cast<int>(ci));
-                    if (rgba != 0) {
-                        pm.color = Color{
-                            static_cast<unsigned char>((rgba >> 24) & 0xFF),
-                            static_cast<unsigned char>((rgba >> 16) & 0xFF),
-                            static_cast<unsigned char>((rgba >> 8) & 0xFF),
-                            static_cast<unsigned char>(rgba & 0xFF)
-                        };
-                    } else {
-                        pm.color = Color{255, 255, 100, 255};
-                    }
-                } else {
-                    pm.color = Color{255, 255, 100, 255};
-                }
+                pm.color = resolve_color_index(va.color, db.color_bank(), POINT_FALLBACK);
                 point_marks.push_back(pm);
             }
         } else {
@@ -382,21 +372,6 @@ void ViewerApp::Impl::unload_meshes() {
     line_segs.clear();
     point_marks.clear();
     total_tri_count = 0;
-}
-
-// ── Texture upload ────────────────────────────────────────────────────────
-// Now handled by f4::renderer::TextureCache. The upload_textures() and
-// unload_textures() member functions are kept as thin wrappers for
-// backward compatibility with the Impl declarations.
-
-void ViewerApp::Impl::upload_textures() {
-    // Texture upload is now done inline in rebuild_meshes() via
-    // texture_cache.upload(db, tex_ids). This wrapper exists for
-    // the Impl declaration but is a no-op.
-}
-
-void ViewerApp::Impl::unload_textures() {
-    texture_cache.unload_all();
 }
 
 } // namespace f4::models_viewer

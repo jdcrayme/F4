@@ -85,7 +85,7 @@ struct ViewerApp::Impl {
     std::vector<f4::renderer::MeshEntry> mesh_entries;
 
     // GPU texture cache: tex_id → uploaded Texture2D.
-    // Populated lazily in upload_textures() when a mesh needs a texture.
+    // Populated lazily in rebuild_meshes() when a mesh needs a texture.
     f4::renderer::TextureCache texture_cache;
 
     // ── Texture set selection ─────────────────────────────────────────
@@ -149,29 +149,32 @@ struct ViewerApp::Impl {
     int   stats_meshes_drawn = 0;
     std::size_t stats_vertices_drawn = 0;
 
-    // ── ColorBank thumbnail cache ─────────────────────────────────────
-    // A single RGBA8 Image (Texture2D on the GPU) holding a horizontal
-    // strip of every ColorBank entry, rebuilt lazily when the bank changes.
-    // Used by the Materials panel to render clickable swatches.
-    Texture2D colorbank_texture = {};
-    bool      colorbank_dirty   = true;
-    int       colorbank_cols    = 32;  ///< swatches per row
-
     // ── Status bar ────────────────────────────────────────────────────
     std::string status_msg;
 
     // ── Screenshot ────────────────────────────────────────────────────
-    bool screenshot_pending = false;
+    bool screenshot_pending = false;          ///< scheduled screenshot waiting to fire
+    bool screenshot_exit_after = false;       ///< exit run() loop after taking scheduled screenshot
     double screenshot_at = 0.0;
     std::filesystem::path screenshot_path;
 
     // ── Install ───────────────────────────────────────────────────────
     std::optional<f4::install::Installation> install;
 
-    // ── Model list scroll ─────────────────────────────────────────────
-    int model_list_scroll_to = -1;  // set by select_parent to auto-scroll
-
     // ── Functions defined in other .cpp files ─────────────────────────
+
+    // viewer_app.cpp — shared selection logic used by select_parent(),
+    // load_model_files(), and the model browser Selectable handler.
+    // Initializes model_state (DofState/SwitchState) and animations
+    // from the model record's effective_dofs()/effective_switches(),
+    // then calls fit_to_model(). The BSP-tree sync in scene.cpp
+    // refines n_children and removes unused DOFs/switches on rebuild.
+    void select_parent_internal(int index);
+
+    // viewer_app.cpp — take a screenshot to `path` and update status_msg.
+    // Single implementation used by both the F2 hotkey and the scheduled
+    // screenshot path. Safe to call from inside the run() loop.
+    void take_screenshot(const std::filesystem::path& path);
 
     // camera3d.cpp
     void update_camera_from_orbit();
@@ -182,8 +185,6 @@ struct ViewerApp::Impl {
     // scene.cpp
     void rebuild_meshes();
     void unload_meshes();
-    void upload_textures();
-    void unload_textures();
 
     // canvas3d.cpp
     void draw_canvas();
@@ -199,10 +200,6 @@ struct ViewerApp::Impl {
     // animation.cpp logic (lives in viewer_app.cpp for now — small)
     void tick_animation(float dt);
     void reset_animations();
-
-    // colorbank.cpp logic (lives in imgui_panels.cpp for now)
-    void rebuild_colorbank_texture();
-    void unload_colorbank_texture();
 
     // imgui_panels.cpp
     void draw_imgui();

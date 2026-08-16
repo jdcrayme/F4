@@ -57,8 +57,24 @@ void draw_meshes(
     DrawStats* stats)
 {
     const Matrix identity = MatrixIdentity();
-    Material default_mat = LoadMaterialDefault();
-    default_mat.maps[MATERIAL_MAP_DIFFUSE].color = WHITE;
+
+    // Cache the default material across frames. LoadMaterialDefault()
+    // heap-allocates a MaterialMap array and a Shader.locs array each call,
+    // neither of which is freed — calling it per-frame leaks ~200 bytes
+    // of GPU-side state per frame (~43 MB/hour at 60 fps). The function-
+    // local static below ensures we pay that cost exactly once per
+    // process. Trade-off: the cached material is never UnloadMaterial()'d
+    // and its shader/texture handles become stale if the GL context is
+    // destroyed and recreated. That doesn't happen in this viewer (the
+    // window is created once in run() and destroyed in dtor), but if a
+    // future caller needs GL reinit support they should switch to an
+    // explicit RAII wrapper passed in by the caller.
+    static const Material kDefaultMat = []() {
+        Material m = LoadMaterialDefault();
+        m.maps[MATERIAL_MAP_DIFFUSE].color = WHITE;
+        return m;
+    }();
+    Material default_mat = kDefaultMat;
 
     // Apply lit shader to default material if lighting is active
     bool lighting_active = false;

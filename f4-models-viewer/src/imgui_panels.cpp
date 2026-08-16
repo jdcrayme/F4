@@ -11,8 +11,6 @@
 //   - Status bar (model count, selected model, triangle count, FPS)
 
 #include "viewer_state.hpp"
-#include "imgui_panels.hpp"
-#include "file_ops.hpp"
 
 #include <f4/models/model_database.hpp>
 #include <f4/models/model_record.hpp>
@@ -207,56 +205,13 @@ static void draw_model_browser(ViewerApp::Impl& impl) {
                             m.n_slots, m.effective_dofs());
 
                         if (ImGui::Selectable(label, is_selected)) {
-                            impl.selected_parent = i;
-                            impl.selected_lod = 0;
-                            impl.meshes_dirty = true;
-                            impl.model_list_scroll_to = i;
-
-                            // Initialize model state for the new selection
-                            impl.model_state = {};
-                            for (int d = 0; d < m.effective_dofs(); ++d) {
-                                f4::models::DofState ds;
-                                ds.dof_number = d;
-                                ds.value = 0;
-                                ds.min = 0;
-                                ds.max = 6.28318530718f;
-                                impl.model_state.dofs.push_back(ds);
-                            }
-                            for (int s = 0; s < m.effective_switches(); ++s) {
-                                f4::models::SwitchState ss;
-                                ss.switch_number = s;
-                                ss.active_child = -1;  // "Show All" default
-                                ss.n_children = 2;
-                                impl.model_state.switches.push_back(ss);
-                            }
-
-                            // Rebuild animation tracks for the new model.
-                            // DOF 0 is auto-enabled by convention (typically
-                            // the rotor for aircraft).
-                            impl.animations.clear();
-                            impl.animations.reserve(m.effective_dofs());
-                            for (int d = 0; d < m.effective_dofs(); ++d) {
-                                ViewerApp::Impl::AnimationTrack t;
-                                t.dof_number = d;
-                                t.enabled = (d == 0);
-                                t.speed = (d == 0) ? 8.0f : 1.0f;
-                                t.phase = 0.0f;
-                                t.wrap_2pi = true;
-                                impl.animations.push_back(t);
-                            }
-
-                            impl.fit_to_model();
+                            impl.select_parent_internal(i);
                         }
                         ImGui::PopID();
                     }
                 }
             }
             ImGui::EndChild();
-
-            // Auto-scroll if requested
-            if (impl.model_list_scroll_to >= 0) {
-                impl.model_list_scroll_to = -1;
-            }
         }
     }
     ImGui::End();
@@ -564,16 +519,11 @@ static void draw_materials_panel(ViewerApp::Impl& impl) {
                         cb.size(), cb.n_darkened);
             ImGui::Separator();
 
-            // Lazy-rebuild the swatch texture if it's stale or missing.
-            if (impl.colorbank_dirty || impl.colorbank_texture.id == 0) {
-                impl.rebuild_colorbank_texture();
-            }
-
-            // Render the texture as a grid of swatches using ImageButton.
-            // Each swatch is 16x16 in the panel; the underlying texture is
-            // one pixel per swatch scaled up viaImageButton.
+            // Render swatches as individual ColorButtons. Simpler and more
+            // portable than uploading a strip texture, and works regardless
+            // of GL context state.
             const int swatch_px = 16;
-            const int cols = impl.colorbank_cols;
+            constexpr int cols = 32;
             const int total = static_cast<int>(cb.size());
             const int rows = (total + cols - 1) / cols;
 
@@ -621,7 +571,7 @@ static void draw_materials_panel(ViewerApp::Impl& impl) {
 // Shows a scrollable grid of decoded RGBA thumbnails. Uses the same
 // texture_cache that the canvas populates lazily — to view a thumbnail,
 // the user must first select a model whose meshes reference it (which
-// triggers fetch_texture() in scene.cpp's upload_textures()).
+// triggers fetch_texture() in scene.cpp's rebuild_meshes()).
 static void draw_texture_thumbnails_panel(ViewerApp::Impl& impl) {
     ImGui::SetNextWindowSize({420, 360}, ImGuiCond_FirstUseEver);
     if (ImGui::Begin("Texture Thumbnails")) {
@@ -921,61 +871,6 @@ void ViewerApp::Impl::draw_imgui() {
     draw_texture_thumbnails_panel(*this);
     draw_status_bar(*this);
     rlImGuiEnd();
-}
-
-// ── ColorBank texture builders ─────────────────────────────────────────────
-// A small 1-row RGBA8 image (one pixel per ColorBank entry) is uploaded
-// to the GPU lazily and used by the Materials panel. The texture itself
-// isn't currently used for rendering (the panel uses ImGui ColorButton
-// instead because it's more portable), but having it on the GPU lets a
-// future debug overlay show the bank inline without round-tripping through
-// ImGui. Kept small (32 cols x ceil(n/32) rows) so the upload is cheap.
-
-void ViewerApp::Impl::rebuild_colorbank_texture() {
-    if (colorbank_texture.id != 0) {
-        UnloadTexture(colorbank_texture);
-        colorbank_texture = {};
-    }
-    colorbank_dirty = false;
-
-    const auto& cb = db.color_bank();
-    if (cb.empty()) return;
-
-    const int cols = colorbank_cols;
-    const int total = static_cast<int>(cb.size());
-    const int rows = (total + cols - 1) / cols;
-    const int w = cols;
-    const int h = rows;
-
-    std::vector<uint8_t> pixels(static_cast<std::size_t>(w * h) * 4, 0);
-    for (int i = 0; i < total; ++i) {
-        const uint32_t rgba = cb.rgba_at(i);
-        const int x = i % cols;
-        const int y = i / cols;
-        uint8_t* p = &pixels[(static_cast<std::size_t>(y) * w + x) * 4];
-        p[0] = static_cast<uint8_t>((rgba >> 24) & 0xFF);  // R
-        p[1] = static_cast<uint8_t>((rgba >> 16) & 0xFF);  // G
-        p[2] = static_cast<uint8_t>((rgba >> 8) & 0xFF);   // B
-        p[3] = static_cast<uint8_t>(rgba & 0xFF);          // A
-    }
-
-    Image img = {};
-    img.data = pixels.data();
-    img.width = w;
-    img.height = h;
-    img.mipmaps = 1;
-    img.format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8;
-    // LoadTextureFromImage copies the pixel data, so it's safe for the
-    // local `pixels` vector to go out of scope after this call.
-    colorbank_texture = LoadTextureFromImage(img);
-}
-
-void ViewerApp::Impl::unload_colorbank_texture() {
-    if (colorbank_texture.id != 0) {
-        UnloadTexture(colorbank_texture);
-        colorbank_texture = {};
-    }
-    colorbank_dirty = true;
 }
 
 } // namespace f4::models_viewer

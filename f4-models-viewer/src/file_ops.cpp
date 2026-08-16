@@ -5,19 +5,12 @@
 // loaded, automatically attempts to load the TEX file for textures.
 
 #include "viewer_state.hpp"
-#include "file_ops.hpp"
 
 #include <f4/models/model_database.hpp>
 
 #include <utility>
 
 namespace f4::models_viewer {
-
-// ── find_koreaobj_files ────────────────────────────────────────────────────
-std::pair<std::filesystem::path, std::filesystem::path>
-find_koreaobj_files(const std::filesystem::path& install_root) {
-    return f4::models::ModelDatabase::find_koreaobj_files(install_root);
-}
 
 // ── Impl::load_model_files ─────────────────────────────────────────────────
 void ViewerApp::Impl::load_model_files(
@@ -33,9 +26,6 @@ void ViewerApp::Impl::load_model_files(
     model_state = {};
     animations.clear();
     meshes_dirty = true;
-    // ColorBank may change between loads — invalidate the GPU thumbnail
-    // so the Materials panel rebuilds it lazily.
-    colorbank_dirty = true;
 
     // Load the database
     std::string err = db.load(hdr_path, lod_path);
@@ -62,46 +52,7 @@ void ViewerApp::Impl::load_model_files(
 
     // Auto-select first model if available
     if (db.n_models() > 0) {
-        selected_parent = 0;
-        selected_lod = 0;
-        meshes_dirty = true;
-
-        // Initialize model state from the first model's DOFs/switches
-        const auto* rec = db.model(0);
-        if (rec) {
-            model_state = {};
-            for (int i = 0; i < rec->effective_dofs(); ++i) {
-                f4::models::DofState ds;
-                ds.dof_number = i;
-                ds.value = 0;
-                ds.min = 0;
-                ds.max = 6.28318530718f;  // 2π
-                model_state.dofs.push_back(ds);
-            }
-            for (int i = 0; i < rec->effective_switches(); ++i) {
-                f4::models::SwitchState ss;
-                ss.switch_number = i;
-                ss.active_child = -1;  // "Show All" default
-                ss.n_children = 2;  // default assumption
-                model_state.switches.push_back(ss);
-            }
-            // Build a matching animation track vector (DOF 0 auto-enabled
-            // by default — typical rotor convention for aircraft models).
-            animations.clear();
-            animations.reserve(rec->effective_dofs());
-            for (int i = 0; i < rec->effective_dofs(); ++i) {
-                AnimationTrack t;
-                t.dof_number = i;
-                t.enabled = (i == 0);
-                t.speed = (i == 0) ? 8.0f : 1.0f;
-                t.phase = 0.0f;
-                t.wrap_2pi = true;
-                animations.push_back(t);
-            }
-        }
-
-        // Fit camera to first model
-        fit_to_model();
+        select_parent_internal(0);
     }
 }
 
@@ -109,7 +60,7 @@ void ViewerApp::Impl::load_model_files(
 void ViewerApp::Impl::load_from_install() {
     if (!install.has_value()) return;
 
-    auto [hdr, lod] = find_koreaobj_files(install->root());
+    auto [hdr, lod] = f4::models::ModelDatabase::find_koreaobj_files(install->root());
     if (hdr.empty() || lod.empty()) {
         status_msg = "KoreaObj.HDR/LOD not found in install";
         return;

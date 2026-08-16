@@ -11,7 +11,6 @@
 // intensity, ambient, and sun color.
 
 #include "viewer_state.hpp"
-#include "canvas3d.hpp"
 
 #include <f4/renderer/draw_3d.hpp>
 #include <f4/math/vec3.hpp>
@@ -150,7 +149,7 @@ void ViewerApp::Impl::draw_canvas() {
         draw_stats_overlay();
     }
 
-    // Individual texture materials in texture_cache are cleaned up in unload_textures().
+    // Individual texture materials in texture_cache are cleaned up in unload_meshes().
 }
 
 // ── draw_light_gizmo ───────────────────────────────────────────────────────

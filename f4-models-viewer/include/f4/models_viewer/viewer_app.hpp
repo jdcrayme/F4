@@ -55,8 +55,12 @@ public:
     void set_initial_camera(const float eye[3], const float target[3]);
 
     /// Schedule a screenshot after `delay_sec` seconds, saved to `path`.
-    /// Used by headless smoke tests.
-    void schedule_screenshot(float delay_sec, const std::filesystem::path& path);
+    /// If `exit_after` is true, the run() loop exits cleanly after the
+    /// screenshot is taken (used by headless smoke tests; replaces the
+    /// previous detached std::exit(0) thread which skipped the dtor).
+    void schedule_screenshot(float delay_sec,
+                              const std::filesystem::path& path,
+                              bool exit_after = false);
 
     // Impl is defined in the private viewer_state.hpp header.
     // It needs to be accessible by internal .cpp files that include that header.

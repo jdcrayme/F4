@@ -10,13 +10,11 @@
 
 #include <f4/models_viewer/viewer_app.hpp>
 
-#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
 #include <string>
-#include <thread>
 
 int main(int argc, char** argv) {
     f4::models_viewer::ViewerApp app;
@@ -107,17 +105,17 @@ int main(int argc, char** argv) {
         app.select_lod(lod_idx);
     }
 
-    // Schedule screenshot (for headless smoke tests)
+    // Schedule screenshot (for headless smoke tests). The run() loop
+    // fires the screenshot after the configured delay, then exits
+    // cleanly via should_exit — no detached std::exit(0) thread, so
+    // ViewerApp's dtor runs normally and frees GPU resources.
     if (exit_after_screenshot) {
-        app.schedule_screenshot(1.5f, screenshot_path);
-        // Exit after 3 seconds total
-        std::thread([path = screenshot_path]() {
-            std::this_thread::sleep_for(std::chrono::seconds(3));
-            std::cout << "Screenshot saved to " << path << "; exiting.\n";
-            std::exit(0);
-        }).detach();
+        app.schedule_screenshot(1.5f, screenshot_path, /*exit_after=*/true);
     }
 
     app.run();
+    if (exit_after_screenshot) {
+        std::cout << "Screenshot saved to " << screenshot_path << "\n";
+    }
     return 0;
 }

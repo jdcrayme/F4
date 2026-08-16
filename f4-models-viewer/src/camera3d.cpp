@@ -4,7 +4,6 @@
 // f4::renderer::OrbitCamera for the actual math.
 
 #include "viewer_state.hpp"
-#include "camera3d.hpp"
 
 #include <imgui.h>
 #include <raylib.h>
