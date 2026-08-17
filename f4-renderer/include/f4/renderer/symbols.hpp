@@ -105,11 +105,19 @@ enum class SymbolKind : uint16_t {
     UnitTaskForce,     // triangle
     UnitFlight,        // small circle outline
     UnitPackage,       // plus
-    // Subtype glyphs (frame is still class-based, glyph is subtype):
-    UnitArmor,         // rect + tank
-    UnitArtillery,     // rect + gun
+    // Ground subtype glyphs (rect frame for Battalion, diamond for Brigade):
+    UnitArmor,         // rect + horizontal ellipse (tank turret)
+    UnitAirDefense,    // rect + upward arc (air defense / SAM / AAA)
+    UnitAirmobile,     // rect + helicopter silhouette
+    UnitArmoredCav,    // rect + diagonal slash (cavalry cross-sabers)
+    UnitArtillery,     // rect + dot (gun)
+    UnitHQ,            // rect + star (headquarters)
     UnitInfantry,      // rect + X
     UnitEngineer,      // rect + E
+    UnitMarine,        // rect + anchor cross
+    UnitMechanized,    // rect + tracked undercarriage (two parallel bars)
+    UnitRocket,        // rect + chevron (rocket/missile)
+    UnitSAMissile,     // rect + diamond (surface-to-surface missile)
     UnitSupply,        // rect + box
     UnitFighter,       // circle + fighter
     UnitBomber,        // circle + bomber

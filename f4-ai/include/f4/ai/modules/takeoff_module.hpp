@@ -51,6 +51,7 @@
 
 #include "f4/ai/ai_output.hpp"
 #include "f4/ai/atc/messages.hpp"
+#include "f4/ai/ground_steering.hpp"
 
 namespace f4::ai::modules {
 
@@ -144,6 +145,22 @@ public:
     // centerline, it transitions to TakeRunway.
     double centerline_align_tolerance_ft{10.0};
 
+    // Heading alignment tolerance (radians). PrepToTakeRunway additionally
+    // requires the heading to be within this of the runway heading before
+    // taking the runway, and Takeoff/FlyOut hold the runway heading.
+    double heading_align_tolerance_rad{0.15};   // ~8.5 deg
+
+    // How far past the threshold the lineup target sits (feet). PrepToTakeRunway
+    // steers toward this point on the runway centerline, then aligns heading.
+    double lineup_depth_ft{150.0};
+
+    // Heading-hold gain for FlyOut roll commands (roll units per rad of error).
+    double flyout_heading_gain{1.5};
+
+    // Shared ground-steering controller (taxi, lineup, takeoff-roll heading
+    // hold). Public so hosts can tune its gains like the fields above.
+    GroundSteering ground_steering;
+
     // --- Trace ---
     void set_trace(fsm::Trace<TakeoffState, TakeoffEvent>* t) noexcept {
         sm_.set_trace(t);
@@ -185,6 +202,9 @@ private:
     // Cache the current aircraft state fields for use by control methods.
     // Phase 2: reads from IAircraftState instead of AircraftState.
     void cache_aircraft_state(const flight::IAircraftState* state);
+
+    // Build the GroundSteering input from the cached aircraft state.
+    [[nodiscard]] GroundSteering::Input steering_input() const noexcept;
 
     // --- Data members (ordered so sm_ is LAST) ---
     // C++ initializes members in declaration order. The StateMachine

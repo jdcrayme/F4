@@ -280,10 +280,11 @@ AirportGeometry build_airport_geometry(const f4::simulation::Scenario& s) {
     g.parking_spot.size_ft = static_cast<float>(PARKING_MARKER_SIZE_FT);
     set_color(&g.parking_spot.r, GREEN);
 
-    // Hold-short marker (yellow cube just before the threshold — the
-    // last waypoint in the taxi route before the threshold itself).
-    if (s.airfield.taxi_route.size() >= 2) {
-        const auto& last_wp = s.airfield.taxi_route[s.airfield.taxi_route.size() - 2];
+    // Hold-short marker (yellow cube at the end of the taxi route — the
+    // route's last waypoint IS the hold-short point where the aircraft
+    // stops and requests takeoff clearance).
+    if (!s.airfield.taxi_route.empty()) {
+        const auto& last_wp = s.airfield.taxi_route.back();
         g.hold_short.center = last_wp;
         g.hold_short.size_ft = static_cast<float>(HOLD_SHORT_MARKER_SIZE_FT);
         set_color(&g.hold_short.r, YELLOW);

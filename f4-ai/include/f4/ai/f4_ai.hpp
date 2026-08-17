@@ -12,6 +12,7 @@
 //   f4::ai::IAIBrain              — abstract brain interface
 //   f4::ai::TargetInfo            — per-target snapshot
 //   f4::ai::SensorFusion          — target list + threat scoring
+//   f4::ai::GroundSteering        — shared ground steering + speed control
 //   f4::ai::modules::TakeoffModule — takeoff state machine (9 states)
 //   f4::ai::atc::StubATC          — stub ATC for testing/demos
 //   f4::ai::atc::messages         — ATC message types

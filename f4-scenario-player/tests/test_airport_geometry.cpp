@@ -149,21 +149,20 @@ TEST(AirportGeometry, ParkingSpotMarkerIsAtAircraftSpawn) {
     EXPECT_NEAR(g.parking_spot.blue, 0.2f, 0.01f);
 }
 
-TEST(AirportGeometry, HoldShortMarkerIsAtSecondToLastWaypoint) {
+TEST(AirportGeometry, HoldShortMarkerIsAtLastWaypoint) {
     auto s = make_simple_scenario();
-    // taxi_route has 2 waypoints → hold_short is at index 0.
+    // taxi_route has 2 waypoints → hold_short is the last (index 1).
     auto g = build_airport_geometry(s);
 
-    EXPECT_NEAR(g.hold_short.center.x, 0.0, 0.01);
-    EXPECT_NEAR(g.hold_short.center.y, 0.0, 0.01);
-
-    // Now test with 3 waypoints. push_back adds to the end, so the new
-    // last is (50, 4000), and hold_short is at index size-2 = 1 →
-    // the original threshold (100, 8000).
-    s.airfield.taxi_route.push_back(f4::geo::WorldPosition{50.0, 4000.0, 50.0});
-    g = build_airport_geometry(s);
     EXPECT_NEAR(g.hold_short.center.x, 100.0, 0.01);
     EXPECT_NEAR(g.hold_short.center.y, 8000.0, 0.01);
+
+    // Now test with 3 waypoints. The last waypoint is the hold-short
+    // point where the aircraft stops and requests clearance.
+    s.airfield.taxi_route.push_back(f4::geo::WorldPosition{50.0, 4000.0, 50.0});
+    g = build_airport_geometry(s);
+    EXPECT_NEAR(g.hold_short.center.x, 50.0, 0.01);
+    EXPECT_NEAR(g.hold_short.center.y, 4000.0, 0.01);
 }
 
 TEST(AirportGeometry, RunwayEndMarkerIsAtRunwayEnd) {
