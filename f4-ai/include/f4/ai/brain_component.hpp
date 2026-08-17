@@ -1,42 +1,40 @@
 // f4-ai/include/f4/ai/brain_component.hpp
 //
-// BrainComponent — wraps a TakeoffModule as a BehavioralComponent.
+// BrainComponent — the mission sequencer, as a BehavioralComponent.
 //
-// Phase A.2: this is the first behavioral brain component. It runs in
-// pass 1 (priority 100), reads the parent entity's aircraft state
-// through the IAircraftState interface, calls TakeoffModule::update()
-// to get an AIControlOutput, converts it to a PilotInput, and writes
-// it to the IPilotInputSink interface. The flight model component
-// then runs in pass 2 and integrates the FlightModel with that input.
+// Phase DIGI-1: the brain sequences the mission's flight phases through
+// their modules:
 //
-// Phase 2+ (H1): BrainComponent is FULLY DECOUPLED from
-// FlightModelComponent. It resolves the aircraft state and control
-// sink via EntityHandle::get_interface<IAircraftState>() and
-// get_interface<IPilotInputSink>() — interface-based lookup that
-// doesn't require knowing the concrete component type. This means
-// f4-ai no longer depends on f4-flight-model at all; it depends only
-// on f4-flight-api (the lightweight interface library).
+//   Ground   TakeoffModule       (taxi -> lineup -> takeoff -> departure)
+//      |  is_complete() and route non-empty
+//   Enroute  NavigationModule    (fly the scenario route; last wp = entry fix)
+//      |  is_complete()
+//   Approach LandingModule       (approach -> land -> rollout -> taxi-in -> park)
+//      |  is_complete()
+//   Complete (hold brakes)
 //
-// The brain resolves the interfaces LAZILY in update(), not in
-// on_attached(). Why? At on_attached() time, the brain is being
-// added to the entity — but the flight model component may not have
-// been added yet (Gcomponent add order is not guaranteed). Resolving
-// lazily in update() means the brain tolerates being added before OR
-// after the flight model component, as long as both are present by
-// the first tick.
+// With an empty route the mission ends after takeoff (Phase A behavior).
+// This is the sequential-handoff stepping stone toward the documented
+// DigitalBrain (AI_IMPLEMENTATION_PLAN.md §5): later, a LayeredStateMachine
+// DigiMode ladder arbitrates the modules instead of a fixed sequence.
+//
+// The brain runs in pass 1 (priority 100), reads the parent entity's
+// aircraft state through the IAircraftState interface, calls the active
+// module's update() to get an AIControlOutput, converts it to a PilotInput,
+// and writes it to the IPilotInputSink interface. The flight model
+// component then runs in pass 2 and integrates the FlightModel with that
+// input.
+//
+// The brain resolves the interfaces LAZILY in update() and stores the
+// owning EntityHandle BY VALUE (EntityHandle is a cheap value type: id +
+// world pointer + cookie — see the regression note in entity.hpp's
+// on_attached contract).
 //
 // If no IAircraftState or IPilotInputSink is present on the entity,
-// update() is a no-op. This allows a brain to be added to an entity
-// that's temporarily "brain-only" (e.g. a ghost/replay entity)
-// without crashing.
+// update() is a no-op.
 //
-// The AIControlOutput → PilotInput conversion lives here so the brain is
-// self-contained — the sim loop (f4-sim) just calls
-// EntityWorld::update_all(dt, bus) and the brain writes the sink directly.
-//
-// Dependencies: f4-entities (BehavioralComponent, EntityHandle, get_interface),
-// f4-messaging (MessageBus), f4-flight-api (IAircraftState, IPilotInputSink,
-// PilotInput). NOT f4-flight-model. C++20.
+// Dependencies: f4-entities, f4-messaging, f4-flight-api. NOT
+// f4-flight-model. C++20.
 
 #pragma once
 
@@ -46,16 +44,44 @@
 #include <f4/flight/api/i_pilot_input_sink.hpp>
 #include <f4/flight/api/pilot_input.hpp>
 
+#include <f4/geo/position.hpp>
+
 #include "f4/ai/ai_output.hpp"
+#include "f4/ai/modules/landing_module.hpp"
+#include "f4/ai/modules/navigation_module.hpp"
 #include "f4/ai/modules/takeoff_module.hpp"
 
+#include <vector>
+
 namespace f4::ai {
+
+// ============================================================================
+// MissionPlan — what the host (Simulation) injects into the brain at spawn.
+// ============================================================================
+struct MissionPlan {
+    /// Air-phase route. Empty = no enroute/landing phases (takeoff-only
+    /// mission). The LAST waypoint is the approach entry fix handed to
+    /// LandingModule when NavigationModule completes.
+    std::vector<modules::NavigationModule::Waypoint> route;
+
+    /// Taxi-in route after landing rollout (runway exit -> parking).
+    /// Empty = the aircraft parks on the runway.
+    std::vector<geo::WorldPosition> taxi_in_route;
+};
 
 // ============================================================================
 // BrainComponent
 // ============================================================================
 class BrainComponent : public entities::BehavioralComponent<BrainComponent> {
 public:
+    /// Mission phase — which module currently flies the aircraft.
+    enum class Phase {
+        Ground,     // TakeoffModule
+        Enroute,    // NavigationModule
+        Approach,   // LandingModule
+        Complete    // parked / no further control
+    };
+
     BrainComponent() = default;
 
     // --- BehavioralComponent overrides ---
@@ -64,53 +90,128 @@ public:
     }
 
     // Capture the owning EntityHandle so we can look up sibling
-    // components on demand. The handle is stable for the
-    // lifetime of the entity — EntityHandle is a value type that
-    // captures (EntityId, EntityWorld*, cookie) at construction.
+    // components on demand. EntityHandle is a lightweight VALUE type
+    // (id + world pointer + cookie) — we store it BY VALUE. Storing a
+    // pointer to the `self` reference would dangle: `self` aliases the
+    // caller's handle (usually a stack local in spawn code) that dies as
+    // soon as the spawning function returns.
     void on_attached(entities::EntityHandle& self) override {
-        owner_ = &self;
+        owner_ = self;
     }
 
     void update(double dt, messaging::MessageBus& bus) override {
-        if (!owner_) return;  // not attached to any entity — no-op
+        if (!owner_.valid()) return;  // not attached to any entity — no-op
 
-        // Lazily resolve the flight model interfaces. We re-resolve every
-        // tick (one dynamic_cast scan per interface) rather than caching
-        // the pointers, because the flight model component can be removed
-        // and re-added by the host. At Phase A scale (3-5 components per
-        // entity) this is invisible; if it ever shows up in profiles,
-        // cache the pointers and invalidate on remove.
-        auto* state = owner_->get_interface<flight::IAircraftState>();
-        auto* sink  = owner_->get_interface<flight::IPilotInputSink>();
+        // Lazily resolve the flight model interfaces (see entity.hpp for
+        // why resolution is per-tick rather than cached).
+        auto* state = owner_.get_interface<flight::IAircraftState>();
+        auto* sink  = owner_.get_interface<flight::IPilotInputSink>();
         if (!state || !sink) return;  // no flight model on this entity
 
-        // Initialize the TakeoffModule onG first update. We defer to
-        // first update() (rather than on_attached()) because the
-        // MessageBus reference is passed to update() but not to
-        // on_attached(). The module needs the bus to subscribe to ATC
-        // clearances and publish requests.
-        if (!module_initialized_) {
-            auto* world = owner_->world();
-            if (!world) return;  // no world bound — can't initialize
-            module_.initialize(owner_->id().value, *world, bus);
-            module_initialized_ = true;
+        // Initialize the TakeoffModule on first update (it needs the bus
+        // to publish TaxiRequest / subscribe to clearances).
+        if (!takeoff_initialized_) {
+            auto* world = owner_.world();
+            if (!world) return;
+            takeoff_.initialize(owner_.id().value, *world, bus);
+            takeoff_initialized_ = true;
         }
 
-        // Run the brain: produce AIControlOutput from the current state.
-        // The IAircraftState interface presents position in ENU (the AI's
-        // natural frame) and exposes only the fields the AI needs.
-        const auto ai_out = module_.update(dt, state);
+        // Sequence the mission phases.
+        if (phase_ == Phase::Ground && takeoff_.is_complete()) {
+            if (!plan_.route.empty()) {
+                nav_.set_route(plan_.route);
+                phase_ = Phase::Enroute;
+            } else {
+                phase_ = Phase::Complete;
+            }
+        }
+        if (phase_ == Phase::Enroute && nav_.is_complete()) {
+            auto* world = owner_.world();
+            if (world) {
+                // The route's last waypoint is the approach entry fix.
+                const auto& entry_fix = plan_.route.back().position;
+                landing_.configure(entry_fix, plan_.taxi_in_route);
+                landing_.initialize(owner_.id().value, *world, bus);
+                phase_ = Phase::Approach;
+            } else {
+                phase_ = Phase::Complete;
+            }
+        }
+        if (phase_ == Phase::Approach && landing_.is_complete()) {
+            phase_ = Phase::Complete;
+        }
+
+        // Run the active module: produce AIControlOutput from the state.
+        AIControlOutput ai_out;
+        switch (phase_) {
+            case Phase::Ground:
+                ai_out = takeoff_.update(dt, state);
+                break;
+            case Phase::Enroute:
+                ai_out = nav_.update(dt, state);
+                break;
+            case Phase::Approach:
+                ai_out = landing_.update(dt, state);
+                break;
+            case Phase::Complete:
+                ai_out = landing_.hold_complete();  // brakes on, gear down
+                break;
+        }
 
         // Write the AI output to the flight model's pending input slot
         // via the IPilotInputSink interface.
         sink->set_pending_input(map_to_pilot_input(ai_out));
     }
 
-    // --- TakeoffModule access ---
-    // Exposed so the host can configure the module (rotate speed, gear-up
-    // altitude, etc.) and attach a trace.
-    [[nodiscard]] modules::TakeoffModule&       module()       noexcept { return module_; }
-    [[nodiscard]] const modules::TakeoffModule& module() const noexcept { return module_; }
+    // --- Mission plan (set by the host at spawn, before first tick) ---
+    void set_mission_plan(MissionPlan plan) { plan_ = std::move(plan); }
+    [[nodiscard]] const MissionPlan& mission_plan() const noexcept { return plan_; }
+
+    // --- Phase / state reporting (HUD + recorder) ---
+    [[nodiscard]] Phase phase() const noexcept { return phase_; }
+    [[nodiscard]] const char* phase_name() const noexcept {
+        switch (phase_) {
+            case Phase::Ground:   return "Ground";
+            case Phase::Enroute:  return "Enroute";
+            case Phase::Approach: return "Approach";
+            case Phase::Complete: return "Complete";
+        }
+        return "?";
+    }
+    /// Active module's mode name (e.g. "TakeoffMode"); "Complete" at the end.
+    [[nodiscard]] std::string mode_name() const {
+        switch (phase_) {
+            case Phase::Ground:   return takeoff_.mode_name();
+            case Phase::Enroute:  return nav_.mode_name();
+            case Phase::Approach: return landing_.mode_name();
+            case Phase::Complete: return "MissionComplete";
+        }
+        return {};
+    }
+    /// Active module's state name (e.g. "OnFinal"); "Parked" at the end.
+    [[nodiscard]] std::string state_name() const {
+        switch (phase_) {
+            case Phase::Ground:   return takeoff_.state_name();
+            case Phase::Enroute:  return nav_.state_name();
+            case Phase::Approach: return landing_.state_name();
+            case Phase::Complete: return "Parked";
+        }
+        return {};
+    }
+
+    // --- Module access (host configuration + test inspection) ---
+    [[nodiscard]] modules::TakeoffModule&       takeoff()       noexcept { return takeoff_; }
+    [[nodiscard]] const modules::TakeoffModule& takeoff() const noexcept { return takeoff_; }
+    [[nodiscard]] modules::NavigationModule&       navigation()       noexcept { return nav_; }
+    [[nodiscard]] const modules::NavigationModule& navigation() const noexcept { return nav_; }
+    [[nodiscard]] modules::LandingModule&       landing()       noexcept { return landing_; }
+    [[nodiscard]] const modules::LandingModule& landing() const noexcept { return landing_; }
+
+    /// Legacy alias for the Phase A API (tests + hosts configure the
+    /// takeoff module through this).
+    [[nodiscard]] modules::TakeoffModule&       module()       noexcept { return takeoff_; }
+    [[nodiscard]] const modules::TakeoffModule& module() const noexcept { return takeoff_; }
 
 private:
     // Map AIControlOutput to PilotInput. The brain is self-contained —
@@ -130,9 +231,19 @@ private:
         return pi;
     }
 
-    entities::EntityHandle* owner_{nullptr};
-    modules::TakeoffModule  module_;
-    bool                    module_initialized_{false};
+    entities::EntityHandle owner_{};
+
+    // Mission plan + sequencing.
+    MissionPlan plan_;
+    Phase phase_{Phase::Ground};
+
+    // Phase modules. Only the takeoff module initializes up front; the
+    // navigation module takes its route at handoff, and the landing module
+    // initializes (bus subscriptions) at its handoff.
+    modules::TakeoffModule takeoff_;
+    bool takeoff_initialized_{false};
+    modules::NavigationModule nav_;
+    modules::LandingModule landing_;
 };
 
 } // namespace f4::ai

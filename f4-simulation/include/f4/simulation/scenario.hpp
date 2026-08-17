@@ -47,7 +47,19 @@ struct ScenarioAirfield {
     geo::WorldPosition runway_end_position{};    ///< far end of runway (ENU feet)
     double threshold_altitude_ft{0.0};           ///< threshold elevation MSL
     double departure_altitude_ft{2500.0};        ///< climb-to altitude before "Done"
-    std::vector<geo::WorldPosition> taxi_route;  ///< parking -> hold short -> threshold
+    std::vector<geo::WorldPosition> taxi_route;  ///< parking -> hold short (last wp IS the hold-short)
+    /// Taxi-in route after landing: runway exit -> parking. Optional —
+    /// when empty the LandingModule parks on the runway (M3 may require it).
+    std::vector<geo::WorldPosition> taxi_in_route;
+};
+
+/// One waypoint in the scenario's flight plan (air phase). Flown in order
+/// by the NavigationModule after departure. The LAST waypoint is the
+/// approach entry fix handed to the LandingModule.
+struct ScenarioWaypoint {
+    std::string name;                   ///< "WP1", "APCH_FIX" (display + trace)
+    geo::WorldPosition position;        ///< ENU feet; z = target altitude MSL
+    double speed_kts{350.0};            ///< target CAS approaching this waypoint
 };
 
 /// One static feature placement on the airfield — a building, runway section,
@@ -100,6 +112,12 @@ struct Scenario {
 
     std::vector<ScenarioAircraft> aircraft;
     ScenarioAirfield airfield;
+
+    /// Air-phase flight plan (optional). Empty = no route; the mission ends
+    /// when TakeoffModule completes. When present, the NavigationModule
+    /// flies the waypoints in order and hands off to the LandingModule at
+    /// the last one (the approach entry fix).
+    std::vector<ScenarioWaypoint> waypoints;
 
     /// Static feature placements on the airfield — buildings, runway sections,
     /// taxiways, towers, hangars. Spawned as TransformComponent +

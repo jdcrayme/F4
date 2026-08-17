@@ -54,6 +54,67 @@ TEST(AirportGeometry, EmptyScenarioProducesEmptyGeometry) {
     // Runway surface quad is built but degenerate (zero-size).
     // Taxi route lines are empty.
     EXPECT_TRUE(g.taxi_route_lines.empty());
+    EXPECT_TRUE(g.flightplan_lines.empty());
+    EXPECT_TRUE(g.approach_lines.empty());
+}
+
+TEST(AirportGeometry, FlightplanRouteLinesAndDrops) {
+    auto s = make_simple_scenario();
+    s.waypoints = {
+        ScenarioWaypoint{"WP1", f4::geo::WorldPosition{100.0, 20000.0, 5000.0}, 350.0},
+        ScenarioWaypoint{"APCH", f4::geo::WorldPosition{100.0, -15000.0, 2500.0}, 250.0},
+    };
+    auto g = build_airport_geometry(s);
+
+    // 2 waypoints -> 1 route line, 2 drop lines, 2 markers.
+    ASSERT_EQ(g.flightplan_lines.size(), 1u);
+    ASSERT_EQ(g.flightplan_drop_lines.size(), 2u);
+    ASSERT_EQ(g.flightplan_waypoints.size(), 2u);
+
+    // Route line connects the waypoints at their altitudes.
+    EXPECT_NEAR(g.flightplan_lines[0].a.z, 5000.0, 0.01);
+    EXPECT_NEAR(g.flightplan_lines[0].b.z, 2500.0, 0.01);
+
+    // Drop lines run from the waypoint down to the ground (threshold z).
+    EXPECT_NEAR(g.flightplan_drop_lines[0].a.z, 5000.0, 0.01);
+    EXPECT_NEAR(g.flightplan_drop_lines[0].b.z, 51.0, 0.01);
+
+    // Markers at the waypoint positions.
+    EXPECT_NEAR(g.flightplan_waypoints[1].center.y, -15000.0, 0.01);
+}
+
+TEST(AirportGeometry, ApproachReferenceExtendsBeforeThreshold) {
+    auto s = make_simple_scenario();
+    auto g = build_airport_geometry(s);
+
+    // Runway points north (0 rad): the extended centerline extends SOUTH
+    // of the threshold, the glide slope rises along it.
+    ASSERT_EQ(g.approach_lines.size(), 2u);
+
+    const auto& cl = g.approach_lines[0];   // centerline
+    EXPECT_NEAR(cl.a.y, 8000.0, 0.5);       // at the threshold
+    EXPECT_NEAR(cl.a.x, 100.0, 0.5);
+    EXPECT_LT(cl.b.y, 8000.0 - 24000.0);    // ~4 NM (24304 ft) south
+
+    const auto& gs = g.approach_lines[1];   // glide slope
+    EXPECT_NEAR(gs.a.z, 50.0, 0.5);         // starts at the threshold
+    // 3 deg over ~4 NM: rises ~1273 ft.
+    EXPECT_NEAR(gs.b.z, 50.0 + 24304.0 * std::tan(3.0 * 3.14159265358979 / 180.0), 1.0);
+}
+
+TEST(AirportGeometry, TaxiInRouteLines) {
+    auto s = make_simple_scenario();
+    s.airfield.taxi_in_route = {
+        f4::geo::WorldPosition{100.0, 7900.0, 50.0},
+        f4::geo::WorldPosition{0.0, 0.0, 50.0},
+    };
+    auto g = build_airport_geometry(s);
+    ASSERT_EQ(g.taxi_in_route_lines.size(), 1u);
+    EXPECT_NEAR(g.taxi_in_route_lines[0].a.y, 7900.0, 0.01);
+    EXPECT_NEAR(g.taxi_in_route_lines[0].b.y, 0.0, 0.01);
+    EXPECT_NEAR(g.taxi_in_route_lines[0].a.z, 51.0, 0.01);   // lifted 1 ft
+    // Distinct color from the yellow taxi-out route.
+    EXPECT_NEAR(g.taxi_in_route_lines[0].r, 0.75f, 0.01f);   // purple
 }
 
 TEST(AirportGeometry, RunwaySurfaceSpansThresholdToEnd) {
@@ -149,21 +210,20 @@ TEST(AirportGeometry, ParkingSpotMarkerIsAtAircraftSpawn) {
     EXPECT_NEAR(g.parking_spot.blue, 0.2f, 0.01f);
 }
 
-TEST(AirportGeometry, HoldShortMarkerIsAtSecondToLastWaypoint) {
+TEST(AirportGeometry, HoldShortMarkerIsAtLastWaypoint) {
     auto s = make_simple_scenario();
-    // taxi_route has 2 waypoints → hold_short is at index 0.
+    // taxi_route has 2 waypoints → hold_short is the last (index 1).
     auto g = build_airport_geometry(s);
 
-    EXPECT_NEAR(g.hold_short.center.x, 0.0, 0.01);
-    EXPECT_NEAR(g.hold_short.center.y, 0.0, 0.01);
-
-    // Now test with 3 waypoints. push_back adds to the end, so the new
-    // last is (50, 4000), and hold_short is at index size-2 = 1 →
-    // the original threshold (100, 8000).
-    s.airfield.taxi_route.push_back(f4::geo::WorldPosition{50.0, 4000.0, 50.0});
-    g = build_airport_geometry(s);
     EXPECT_NEAR(g.hold_short.center.x, 100.0, 0.01);
     EXPECT_NEAR(g.hold_short.center.y, 8000.0, 0.01);
+
+    // Now test with 3 waypoints. The last waypoint is the hold-short
+    // point where the aircraft stops and requests clearance.
+    s.airfield.taxi_route.push_back(f4::geo::WorldPosition{50.0, 4000.0, 50.0});
+    g = build_airport_geometry(s);
+    EXPECT_NEAR(g.hold_short.center.x, 50.0, 0.01);
+    EXPECT_NEAR(g.hold_short.center.y, 4000.0, 0.01);
 }
 
 TEST(AirportGeometry, RunwayEndMarkerIsAtRunwayEnd) {

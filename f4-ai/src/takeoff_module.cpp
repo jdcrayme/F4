@@ -28,6 +28,7 @@
 
 #include "f4/ai/modules/takeoff_module.hpp"
 
+#include <algorithm>
 #include <cmath>
 
 namespace f4::ai::modules {
@@ -272,7 +273,16 @@ void TakeoffModule::cache_aircraft_state(const flight::IAircraftState* state)
     current_alt_agl_ft_ = state->altitude_agl_ft();
     current_alt_msl_ft_ = state->altitude_msl_ft();
     current_heading_rad_ = state->heading_rad();
+    current_pitch_rad_ = state->pitch_angle_rad();
     on_ground_ = state->on_ground();
+}
+
+GroundSteering::Input TakeoffModule::steering_input() const noexcept {
+    GroundSteering::Input in;
+    in.position = current_position_;
+    in.heading_rad = current_heading_rad_;
+    in.speed_kts = current_vcas_kts_;
+    return in;
 }
 
 // ============================================================================
@@ -320,7 +330,12 @@ void TakeoffModule::check_runway_alignment()
     // Cross product (2D) gives the perpendicular distance.
     const double lateral = std::abs(dx * cy - dy * cx);
 
-    if (lateral < centerline_align_tolerance_ft) {
+    // The aircraft must also be pointed down the runway before it takes it.
+    const double hdg_err = std::abs(GroundSteering::heading_error(
+        runway_heading_rad_, current_heading_rad_));
+
+    if (lateral < centerline_align_tolerance_ft &&
+        hdg_err < heading_align_tolerance_rad) {
         sm_.process(TakeoffEvent::ClearanceGranted);
     }
 }
@@ -357,17 +372,17 @@ AIControlOutput TakeoffModule::controls_for_taxi() const {
     output.gear_handle_down = true;
 
     if (taxi_route_.empty() || taxi_wp_index_ >= taxi_route_.size()) {
-        // Reached end of taxi route — stop.
-        output.throttle_cmd = 0.0;
-        output.wheel_brakes = true;
-    } else {
-        // Taxi toward the next waypoint at low throttle.
-        // A full implementation would compute heading error and use nose
-        // steering. For now, set a slow taxi throttle.
-        output.throttle_cmd = 0.1;
+        // Reached end of taxi route — hold brakes at the hold-short point.
+        return ground_steering.hold();
     }
 
-    return output;
+    // Steer along the taxi route. The last waypoint is the hold-short point:
+    // decelerate to a stop there. Intermediate waypoints are fly-through.
+    const bool last_wp = (taxi_wp_index_ + 1 == taxi_route_.size());
+    return ground_steering.steer_toward(taxi_route_[taxi_wp_index_],
+                                        steering_input(),
+                                        taxi_speed_kts,
+                                        /*stop_at_target=*/last_wp);
 }
 
 AIControlOutput TakeoffModule::controls_for_hold_short() const {
@@ -387,21 +402,34 @@ AIControlOutput TakeoffModule::controls_for_wait() const {
 }
 
 AIControlOutput TakeoffModule::controls_for_prep_to_take_runway() const {
-    AIControlOutput output;
-    output.gear_handle_down = true;
-    // Slow creep forward to taxi onto the centerline.
-    output.throttle_cmd = 0.1;
-    return output;
+    // Line up on the runway centerline. Steer toward a point lineup_depth_ft
+    // past the threshold while still offset from the centerline; once close
+    // to the line, roll forward while aligning heading to the runway heading.
+    // check_runway_alignment() takes over (Taxi -> TakeRunway) when both
+    // lateral and heading tolerances are met.
+    const double fx = std::sin(runway_heading_rad_);
+    const double fy = std::cos(runway_heading_rad_);
+    const geo::WorldPosition lineup_point(
+        threshold_position_.x + fx * lineup_depth_ft,
+        threshold_position_.y + fy * lineup_depth_ft,
+        threshold_position_.z);
+
+    const double dx = current_position_.x - threshold_position_.x;
+    const double dy = current_position_.y - threshold_position_.y;
+    const double lateral = std::abs(dx * fy - dy * fx);
+
+    if (lateral > centerline_align_tolerance_ft) {
+        return ground_steering.steer_toward(lineup_point, steering_input(),
+                                            taxi_speed_kts, /*stop_at_target=*/false);
+    }
+    return ground_steering.align_heading(runway_heading_rad_, steering_input(),
+                                         taxi_speed_kts, /*stop=*/false);
 }
 
 AIControlOutput TakeoffModule::controls_for_take_runway() const {
-    // Holding brakes, waiting for takeoff clearance (already requested
-    // in on_enter(HoldShort)).
-    AIControlOutput output;
-    output.wheel_brakes = true;
-    output.throttle_cmd = 0.0;
-    output.gear_handle_down = true;
-    return output;
+    // Holding brakes on the centerline, clearance already in hand
+    // (requested in on_enter(HoldShort)).
+    return ground_steering.hold();
 }
 
 AIControlOutput TakeoffModule::controls_for_takeoff() const {
@@ -411,9 +439,21 @@ AIControlOutput TakeoffModule::controls_for_takeoff() const {
     // Full throttle for takeoff roll.
     output.throttle_cmd = takeoff_throttle;
 
-    // At Vr, apply back-pressure to rotate.
+    // Hold the runway centerline heading through the roll. Nose-wheel
+    // authority fades with speed inside the EOM (5 deg/s above 150 ft/s),
+    // so full pedal authority here is safe.
+    const double hdg_err = GroundSteering::heading_error(
+        runway_heading_rad_, current_heading_rad_);
+    output.yaw_cmd = std::clamp(-ground_steering.heading_gain * hdg_err, -1.0, 1.0);
+
+    // At Vr, rotate to the target PITCH ATTITUDE (not a fixed stick).
+    // A fixed stick commands G; on the ground the G integrator winds up
+    // against the EOM's attitude clamp and limit-cycles (15deg -> -2deg)
+    // without ever developing a climb.
     if (current_vcas_kts_ >= rotate_speed_kts) {
-        output.pitch_cmd = rotate_pitch_cmd;
+        const double target = rotate_pitch_deg * (3.14159265358979 / 180.0);
+        output.pitch_cmd = std::clamp(rotate_pitch_gain * (target - current_pitch_rad_),
+                                      -0.25, 0.5);
     }
 
     return output;
@@ -422,9 +462,19 @@ AIControlOutput TakeoffModule::controls_for_takeoff() const {
 AIControlOutput TakeoffModule::controls_for_flyout() const {
     AIControlOutput output;
 
-    // Climb at runway heading, pitch for climb.
+    // Climb at runway heading, pitch for the climb attitude (attitude
+    // command, same rationale as the rotation law).
     output.throttle_cmd = takeoff_throttle;
-    output.pitch_cmd = 0.3;
+    const double target = climb_pitch_deg * (3.14159265358979 / 180.0);
+    output.pitch_cmd = std::clamp(climb_pitch_gain * (target - current_pitch_rad_),
+                                  -0.5, 0.5);
+
+    // Gentle heading hold through the climb-out: positive compass error
+    // (need to turn right) banks right. In-air roll is not subject to the
+    // ground steering pedal inversion.
+    const double hdg_err = GroundSteering::heading_error(
+        runway_heading_rad_, current_heading_rad_);
+    output.roll_cmd = std::clamp(flyout_heading_gain * hdg_err, -1.0, 1.0);
 
     // Retract gear above gear_up_alt_ft AGL.
     output.gear_handle_down = (current_alt_agl_ft_ <= gear_up_alt_ft);

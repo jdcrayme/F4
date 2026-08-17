@@ -77,6 +77,12 @@ public:
     [[nodiscard]] entities::EntityWorld&       world()       noexcept { return world_; }
     [[nodiscard]] const entities::EntityWorld& world() const noexcept { return world_; }
 
+    /// The message bus. Hosts use this to observe ATC traffic (e.g. the
+    /// scenario player's radio transcript overlay) by subscribing after
+    /// initialize(). Simulation::tick flushes deferred messages each tick.
+    [[nodiscard]] messaging::MessageBus&       bus()       noexcept { return bus_; }
+    [[nodiscard]] const messaging::MessageBus& bus() const noexcept { return bus_; }
+
     /// The primary (first) aircraft entity. Convenience accessor for hosts
     /// that only care about one aircraft (e.g. the camera focus). Returns
     /// a default-constructed EntityId (value=0) if no aircraft were spawned.

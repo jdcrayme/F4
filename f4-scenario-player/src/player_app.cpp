@@ -61,6 +61,9 @@ void PlayerApp::load_scenario(const std::filesystem::path& json_path) {
     impl_->sim->initialize();
     impl_->sim_initialized = true;
 
+    // Observe the ATC traffic for the radio transcript overlay.
+    impl_->radio_log.attach(*impl_->sim);
+
     // Build the airport geometry from the scenario's airfield block.
     impl_->airport = build_airport_geometry(impl_->scenario);
     impl_->airport_built = true;
@@ -80,6 +83,18 @@ void PlayerApp::schedule_screenshot(float delay_sec,
     // screenshot_at is set in run() once the GL context is alive.
     impl_->screenshot_at = static_cast<double>(delay_sec);
     impl_->screenshot_path = path;
+}
+
+void PlayerApp::set_paused(bool paused) noexcept {
+    impl_->paused = paused;
+}
+
+void PlayerApp::set_time_scale(double scale) noexcept {
+    if (scale > 0.0) impl_->time_scale = scale;
+}
+
+void PlayerApp::set_follow_camera(bool follow) noexcept {
+    impl_->follow_aircraft = follow;
 }
 
 // ── run ────────────────────────────────────────────────────────────────────
@@ -159,6 +174,7 @@ void PlayerApp::run() {
         ImGui::Begin("Scenario Player", nullptr,
                      ImGuiWindowFlags_AlwaysAutoResize);
         ImGui::Text("Scenario: %s", impl_->scenario.name.c_str());
+        ImGui::Separator();
         if (ImGui::Button(impl_->paused ? "Resume (Space)" : "Pause (Space)")) {
             impl_->paused = !impl_->paused;
         }
@@ -166,10 +182,23 @@ void PlayerApp::run() {
         if (ImGui::Button("Reset View (R)")) impl_->reset_camera();
         ImGui::SameLine();
         if (ImGui::Button("Focus Aircraft (F)")) impl_->fit_to_aircraft();
+        ImGui::Checkbox("Follow aircraft (C)", &impl_->follow_aircraft);
+        ImGui::Separator();
+        // Sim speed: the tick scales by this multiplier (0.1x taxi
+        // inspection .. 16x fast-forward through the enroute legs).
+        float speed = static_cast<float>(impl_->time_scale);
+        if (ImGui::SliderFloat("Sim speed", &speed, 0.1f, 16.0f, "%.1fx",
+                               ImGuiSliderFlags_Logarithmic)) {
+            impl_->time_scale = speed;
+        }
         ImGui::Separator();
         ImGui::Checkbox("Show airport", &impl_->show_airport);
         ImGui::Checkbox("Show aircraft", &impl_->show_aircraft);
         ImGui::Checkbox("Show taxi route", &impl_->show_taxi_route);
+        ImGui::Checkbox("Show flight plan", &impl_->show_flightplan);
+        ImGui::Checkbox("Show approach", &impl_->show_approach);
+        ImGui::Checkbox("Show taxi-in route", &impl_->show_taxi_in);
+        ImGui::Checkbox("Show radio log", &impl_->show_radio);
         ImGui::Checkbox("Show compass", &impl_->show_compass);
         ImGui::Checkbox("Show grid", &impl_->show_grid);
         ImGui::Checkbox("Show axes", &impl_->show_axes);

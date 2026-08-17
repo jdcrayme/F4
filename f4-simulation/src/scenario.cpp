@@ -17,7 +17,9 @@
 //     "airfield": { "active_runway_id", "active_runway_name", "runway_heading_rad",
 //                   "threshold_position": {x,y,z}, "runway_end_position": {x,y,z},
 //                   "threshold_altitude_ft", "departure_altitude_ft",
-//                   "taxi_route": [ {x,y,z}, ... ] },
+//                   "taxi_route": [ {x,y,z}, ... ],
+//                   "taxi_in_route": [ {x,y,z}, ... ] (optional) },
+//     "waypoints": [ { "name", "position": {x,y,z}, "speed_kts" } ] (optional),
 //     "sim_dt": 0.0166667, "total_ticks": 600,
 //     "record": true, "record_path": "trace.json"
 //   }
@@ -100,6 +102,23 @@ ScenarioFeature read_feature(f4::json::Reader& r) {
     return f;
 }
 
+ScenarioWaypoint read_waypoint(f4::json::Reader& r) {
+    ScenarioWaypoint w{};
+    r.expect('{');
+    bool first = true;
+    while (!r.consume('}')) {
+        if (!first) r.expect(',');
+        first = false;
+        const auto key = r.read_string();
+        r.expect(':');
+        if (key == "name")            w.name = r.read_string();
+        else if (key == "position")   w.position = read_world_position(r);
+        else if (key == "speed_kts")  w.speed_kts = r.read_number();
+        else                          skip_unknown(r);
+    }
+    return w;
+}
+
 ScenarioAirfield read_airfield(f4::json::Reader& r) {
     ScenarioAirfield af{};
     r.expect('{');
@@ -116,13 +135,14 @@ ScenarioAirfield read_airfield(f4::json::Reader& r) {
         else if (key == "runway_end_position") af.runway_end_position = read_world_position(r);
         else if (key == "threshold_altitude_ft")   af.threshold_altitude_ft = r.read_number();
         else if (key == "departure_altitude_ft")   af.departure_altitude_ft = r.read_number();
-        else if (key == "taxi_route") {
+        else if (key == "taxi_route" || key == "taxi_in_route") {
+            auto& route = (key == "taxi_route") ? af.taxi_route : af.taxi_in_route;
             r.expect('[');
             bool arr_first = true;
             while (!r.consume(']')) {
                 if (!arr_first) r.expect(',');
                 arr_first = false;
-                af.taxi_route.push_back(read_world_position(r));
+                route.push_back(read_world_position(r));
             }
         } else {
             skip_unknown(r);
@@ -168,6 +188,14 @@ Scenario parse_scenario(f4::json::Reader& r) {
             }
         } else if (key == "airfield") {
             s.airfield = read_airfield(r);
+        } else if (key == "waypoints") {
+            r.expect('[');
+            bool arr_first = true;
+            while (!r.consume(']')) {
+                if (!arr_first) r.expect(',');
+                arr_first = false;
+                s.waypoints.push_back(read_waypoint(r));
+            }
         } else if (key == "airfield_features") {
             r.expect('[');
             bool arr_first = true;
@@ -196,6 +224,14 @@ void validate(const Scenario& s) {
         if (f.vis_type_index <= 0)
             throw std::runtime_error("scenario: feature '" + f.name +
                 "' has invalid vis_type_index (must be > 0)");
+    }
+
+    // Validate the flight plan (optional, but if present must be flyable).
+    for (std::size_t i = 0; i < s.waypoints.size(); ++i) {
+        const auto& w = s.waypoints[i];
+        if (w.speed_kts <= 0.0)
+            throw std::runtime_error("scenario: waypoint[" + std::to_string(i) +
+                "] ('" + w.name + "') has invalid speed_kts (must be > 0)");
     }
 
     // Spawn-mode-specific validation.

@@ -21,6 +21,16 @@ f4_simulation_add_test(test_visual_model_component test_visual_model_component.c
 f4_simulation_add_test(test_scenario_loader        test_scenario_loader.cpp)
 f4_simulation_add_test(test_campaign_bridge        test_campaign_bridge.cpp)
 f4_simulation_add_test(test_feature_spawning       test_feature_spawning.cpp)
+f4_simulation_add_test(test_frames                 test_frames.cpp)
+f4_simulation_add_test(test_digi_mission           test_digi_mission.cpp)
+
+# The DIGI end-to-end mission test runs the build-configured
+# digi_full_mission.json scenario (paths inside it are absolute).
+target_compile_definitions(test_digi_mission PRIVATE
+    F4_SCENARIOS_DIR="${CMAKE_BINARY_DIR}/scenarios"
+)
+# The scenario must exist before the test runs.
+add_dependencies(test_digi_mission f4_scenario_player_lib)
 
 # Point the scenario loader test at the bundled fixture so it can load a real
 # JSON file without depending on the install layout.

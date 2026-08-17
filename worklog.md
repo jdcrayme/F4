@@ -2312,3 +2312,38 @@ Stage Summary:
 - Fix pattern: resolve entity_type → ClassTable::data_ptr_for() → check DTYPE_VEHICLE → use dataPtr as VCD index
 - All 4 VCD-lookup call sites now use the correct data_ptr_for() pattern
 - DataType mapping in enum_text.hpp now matches the authoritative DTYPE_* enum in class_table.hpp
+
+---
+Task ID: DIGI-1
+Agent: main (orchestrator)
+Task: DIGI AI Phase 1 — full mission loop (taxi -> takeoff -> waypoints -> approach -> land -> taxi-in -> parked), observable in the scenario player.
+
+Work Log:
+- Ground phase (GroundSteering, f4-ai/src/ground_steering.cpp):
+  * Shared ground control law: compass heading error -> nose-wheel pedal (sign centralized: EOM integrates psi_delta = -ypedal*rate*dt with psi a compass angle, so positive pedal turns LEFT; turning right needs negative pedal), P-speed throttle band, sharp-turn slowdown, stop-at-target deceleration (v = sqrt(2*a*d)).
+  * TakeoffModule: taxi now steers waypoints (was a fixed-throttle stub); lineup steers to a point 150 ft past the threshold then aligns heading (alignment check now requires lateral AND heading within tolerance); takeoff roll + flyout hold runway heading; rotation is an ATTITUDE command (fixed stick = G command wound up against the EOM ground clamp and limit-cycled 15deg->-2deg without lifting off).
+- Air phase (AirSteering + NavigationModule):
+  * AirSteering: bank-to-turn heading cascade; altitude via GAMMA-HOLD (target pitch = alpha_est + commanded gamma, zero steady-state error; strong VS feedback is anti-damping at the phugoid frequency since VS lags pitch ~90deg); speed P-band + speed-brake extend.
+  * NavigationModule: waypoint following with abeam (off-nose) capture + dwell-timer guard — pure radius capture orbits waypoints a fast jet cannot out-turn (21k ft radius at 370 kts/30deg bank); the guard prevents insta-skipping the next waypoint after a capture (it can legitimately be >90deg off-nose and inside the window).
+  * IAircraftState extended: pitch_angle_rad(), roll_angle_rad(), vertical_speed_fpm().
+- Landing (LandingModule, straight-in; pattern legs are a future insert between RequestApproach and InterceptFinal):
+  * Chain: RequestApproach(publish LandingRequest) -> ProceedToFix -> InterceptFinal(gear down) -> OnFinal(publish ApproachClearance; StubATC -> ClearedToLand) -> Flare -> Rollout -> TaxiIn -> Parked. GoAround on DH-uncleared or overflight, with Reintercept -> ProceedToFix retry loop.
+  * Final track: damped cascades at cool gains + 8% proportional beam undershoot (geometric convergence to the threshold, like a localizer lead angle) + beam aim point 1500 ft PAST the threshold (real ILS aims inside the runway; aiming at the threshold makes the flare land short). Missed-approach window 4000 ft past threshold so a normal high crossing can flare inside the runway.
+  * Abeam capture + dwell timer on the entry fix (same orbit/insta-skip lessons as navigation).
+- BrainComponent is now a mission sequencer: Ground(TakeoffModule) -> Enroute(NavigationModule) -> Approach(LandingModule) -> Complete; MissionPlan (route + taxi_in_route) injected by Simulation at spawn; phase/mode/state names for HUD + recorder; snapshots record ai_mode/ai_state.
+- Scenario schema: waypoints[] {name, position, speed_kts} (last = approach entry fix) + airfield.taxi_in_route; loader validation + tests.
+- FM convention fix (pre-existing): gear.groundZ_ft consumers mixed NED-down (eom clamp, strut AGL, ground-effect) and MSL-up (IAircraftState AGL, flight_model.hpp docs). Standardized on MSL-up ("terrain altitude"); only agreed at ground == 0 before, so the 50 ft-elevation Kunsan field broke AGL (flare never fired) and ground clamping.
+- ECS bug fix (pre-existing): BrainComponent stored &self from on_attached — self aliases the caller's stack-local handle, so owner_ dangled after spawn (intermittent 0xc0000005 in Simulation::tick; crash location moved between runs). EntityHandle is now stored BY VALUE; regression test BackRefSurvivesSpawningScopeExit; on_attached contract documented in entity.hpp.
+- Visualization (scenario player): AirportGeometry gains flight-plan route (cyan, at waypoint altitudes + drop lines + markers), approach reference (orange extended centerline + 3-deg glide slope from Build), taxi-in route (purple); viewer toggles; HUD shows AI phase/mode/state; ATC radio transcript panel (RadioLog subscribes to the bus; green = tower, white = pilot) — visible proof of the clearance sequence.
+- Fixtures/tests: takeoff_kunsan.json taxi route now ends at a hold-short point offset from the runway (the aircraft STOPS there and requests takeoff; lining up is a separate phase); digi_full_mission.json.in (build-configured) with a <=90-deg-turn route ending on the extended centerline; test_digi_mission.cpp runs the FULL loop headless through the real 6-DOF FM and asserts ATC message ordering, taxi corridor, liftoff in runway bounds, all waypoints captured, final-track lateral, touchdown on/inside the runway, parked at the original spot, stopped.
+- Parallel-run flake fix: feature-spawning tests share a temp scenario file across concurrently-discovered ctest processes -> PID-unique filenames.
+
+Results:
+- DigiMission.FullLoopTaxiTakeoffNavigateApproachLandParks PASSES: taxi clearance -> taxi -> lineup -> takeoff -> 6 waypoints -> approach -> localizer+glide-slope final -> flare -> touchdown -> rollout -> taxi-in -> parked at the origin spot, stopped.
+- Full suite: 1409/1414 pass. The 5 failures (coord_transform x1, CoordinateTransform x4) are pre-existing on HEAD (verified via stash/rebuild/revert) — untouched by this work.
+- Interactive: f4-scenario-player.exe scenarios/digi_full_mission.json — F-16 model taxis the yellow route, takes off, follows the cyan flight plan, intercepts the orange beam, lands, and taxis the purple route back to parking while the radio log shows the clearance sequence.
+
+Next (Phase 2 candidates):
+- Traffic-pattern legs in LandingModule (states slot between RequestApproach and InterceptFinal per DIGI_AI_PHASE2_PLAN §8).
+- Flare law refinement (energy-managed touchdown point control); tighter beam ride via gamma-rate feedback through the FCS.
+- Real ATC (sequencing/holds) behind the same message protocol.

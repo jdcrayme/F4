@@ -15,6 +15,7 @@
 #include "viewer_state.hpp"
 
 #include <f4/simulation/visual_model_component.hpp>
+#include <f4/ai/brain_component.hpp>
 #include <f4/entities/entity.hpp>
 #include <f4/flight/flight_model_component.hpp>
 #include <f4/flight/angle.hpp>
@@ -48,6 +49,7 @@ void PlayerApp::Impl::handle_camera_input() {
     const ImGuiIO& io = ImGui::GetIO();
     if (!io.WantCaptureKeyboard) {
         if (IsKeyPressed(KEY_F)) fit_to_aircraft();
+        if (IsKeyPressed(KEY_C)) { follow_aircraft = !follow_aircraft; status_msg = follow_aircraft ? "Camera: following aircraft" : "Camera: free"; }
         if (IsKeyPressed(KEY_R)) reset_camera();
         if (IsKeyPressed(KEY_SPACE)) {
             paused = !paused;
@@ -56,6 +58,17 @@ void PlayerApp::Impl::handle_camera_input() {
     }
     // Delegate orbit/pan/zoom to OrbitCamera (guards ImGui::WantCaptureMouse internally).
     orbit_cam.handle_input();
+
+    // Follow mode: track the aircraft every frame (position only — the
+    // user keeps orbit control of yaw/pitch/distance around it).
+    if (follow_aircraft && sim_initialized) {
+        auto h = f4::entities::EntityHandle(sim->aircraft_entity(), &sim->world());
+        auto* tf = h.get<f4::entities::TransformComponent>();
+        if (tf) {
+            orbit_cam.set_target(enu_to_raylib_v3(tf->position.x, tf->position.y, tf->position.z));
+            orbit_cam.update_from_orbit();
+        }
+    }
 }
 
 void PlayerApp::Impl::fit_to_aircraft() {
@@ -277,6 +290,42 @@ void PlayerApp::Impl::draw_airport() {
         }
     }
 
+    // Flight-plan route: cyan lines at waypoint altitudes + drop lines +
+    // waypoint markers — the reference the aircraft's position/orientation
+    // is judged against in the air phase.
+    if (show_flightplan) {
+        for (const auto& l : airport.flightplan_drop_lines) {
+            const Color c = to_raylib_color(&l.r);
+            DrawLine3D(to_rh(l.a), to_rh(l.b), c);
+        }
+        for (const auto& l : airport.flightplan_lines) {
+            const Color c = to_raylib_color(&l.r);
+            DrawLine3D(to_rh(l.a), to_rh(l.b), c);
+        }
+        for (const auto& m : airport.flightplan_waypoints) {
+            draw_marker(m);
+        }
+    }
+
+    // Approach reference: extended centerline + 3-deg glide slope.
+    if (show_approach) {
+        for (const auto& l : airport.approach_lines) {
+            const Color c = to_raylib_color(&l.r);
+            DrawLine3D(to_rh(l.a), to_rh(l.b), c);
+        }
+        for (const auto& m : airport.approach_markers) {
+            draw_marker(m);
+        }
+    }
+
+    // Taxi-in route lines (runway exit -> parking).
+    if (show_taxi_in) {
+        for (const auto& l : airport.taxi_in_route_lines) {
+            const Color c = to_raylib_color(&l.r);
+            DrawLine3D(to_rh(l.a), to_rh(l.b), c);
+        }
+    }
+
     // Markers
     draw_marker(airport.parking_spot);
     draw_marker(airport.hold_short);
@@ -445,6 +494,16 @@ void PlayerApp::Impl::draw_hud() {
             lines.emplace_back(buf);
         }
 
+        // AI mission state — which module is flying and where it is in
+        // its state machine (the "what is it doing" line).
+        if (auto* brain = h.get<f4::ai::BrainComponent>(); brain) {
+            std::snprintf(buf, sizeof(buf), "AI: %s | %s | phase %s",
+                          brain->mode_name().c_str(),
+                          brain->state_name().c_str(),
+                          brain->phase_name());
+            lines.emplace_back(buf);
+        }
+
         if (!scenario.aircraft.empty()) {
             std::snprintf(buf, sizeof(buf), "Callsign: %s   (%s)",
                           scenario.aircraft.front().callsign.c_str(),
@@ -514,6 +573,58 @@ void PlayerApp::Impl::draw_scene() {
     EndMode3D();
 
     draw_hud();
+    draw_radio();
+}
+
+// ============================================================================
+// ATC radio transcript — top-right panel
+// ============================================================================
+
+void PlayerApp::Impl::draw_radio() {
+    if (!show_radio || !sim_initialized) return;
+
+    // Show the most recent transmissions (newest at the bottom).
+    constexpr std::size_t MAX_SHOWN = 9;
+    const std::size_t n = radio_log.size();
+    const std::size_t first = n > MAX_SHOWN ? n - MAX_SHOWN : 0;
+
+    // Measure the widest line so the panel fits its content.
+    int max_w = 0;
+    for (std::size_t i = first; i < n; ++i) {
+        const auto* e = radio_log.at(i);
+        if (!e) continue;
+        char line[320];
+        std::snprintf(line, sizeof(line), "T+%06.1f  %s: %s", e->time_s,
+                      e->from_atc ? "TWR" : "EAGLE1", e->text.c_str());
+        const int w = MeasureText(line, 13);
+        if (w > max_w) max_w = w;
+    }
+    if (max_w == 0) return;
+
+    const int pad = 8;
+    const int line_h = 17;
+    const int shown = static_cast<int>(n - first);
+    const int bg_w = max_w + pad * 2;
+    const int bg_h = shown * line_h + pad * 2 + 18;  // + header line
+    const int x = window_w - bg_w - 12;
+    const int y = 12;
+
+    DrawRectangle(x, y, bg_w, bg_h, {0, 0, 0, 170});
+    DrawRectangleLines(x, y, bg_w, bg_h, {255, 255, 255, 70});
+    DrawText("ATC", x + pad, y + pad, 13, {200, 200, 210, 255});
+
+    int line_y = y + pad + 18;
+    for (std::size_t i = first; i < n; ++i) {
+        const auto* e = radio_log.at(i);
+        if (!e) continue;
+        char line[320];
+        std::snprintf(line, sizeof(line), "T+%06.1f  %s: %s", e->time_s,
+                      e->from_atc ? "TWR" : "EAGLE1", e->text.c_str());
+        DrawText(line, x + pad, line_y, 13,
+                 e->from_atc ? Color{140, 230, 140, 255}   // tower = green
+                             : Color{235, 235, 235, 255}); // pilot = white
+        line_y += line_h;
+    }
 }
 
 } // namespace f4::scenario_player

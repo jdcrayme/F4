@@ -67,20 +67,25 @@ struct FakePhysics : BehavioralComponent<FakePhysics> {
 // A behavioral component that captures its owner EntityHandle in
 // on_attached() and uses it to look up a sibling during update().
 // This is the brain -> flight-model pattern A.2 will need.
+//
+// The handle is stored BY VALUE: `self` aliases the caller's EntityHandle
+// (usually a stack local in spawn code), so storing &self would dangle
+// once the spawning scope returns. EntityHandle is a cheap value type
+// (id + world pointer + cookie) — copy it.
 struct BrainWithBackRef : BehavioralComponent<BrainWithBackRef> {
-    EntityHandle* owner{nullptr};
+    EntityHandle owner{};
     FakePhysics* sibling_seen{nullptr};
     std::atomic<int> attached_count{0};
 
     int priority() const noexcept override { return update_phase::BRAIN_PRIORITY; }
 
     void on_attached(EntityHandle& self) override {
-        owner = &self;
+        owner = self;
         ++attached_count;
     }
 
     void update(double /*dt*/, MessageBus& /*bus*/) override {
-        if (owner) sibling_seen = owner->get<FakePhysics>();
+        if (owner.valid()) sibling_seen = owner.get<FakePhysics>();
     }
 };
 
@@ -313,7 +318,7 @@ TEST(OnAttached, CalledOnceOnAdd) {
     auto& brain = h.add<BrainWithBackRef>();
 
     EXPECT_EQ(brain.attached_count.load(), 1);
-    EXPECT_NE(brain.owner, nullptr);
+    EXPECT_TRUE(brain.owner.valid());
 }
 
 TEST(OnAttached, NotCalledForPassiveComponent) {
@@ -364,9 +369,33 @@ TEST(OnAttached, BackRefSurvivesAcrossTicks) {
 
     for (int i = 0; i < 10; ++i) {
         w.update_all(0.1, bus);
-        ASSERT_NE(brain.owner, nullptr);
         ASSERT_NE(brain.sibling_seen, nullptr);
     }
+}
+
+TEST(OnAttached, BackRefSurvivesSpawningScopeExit) {
+    // REGRESSION: spawn the entity in an INNER SCOPE (as real spawn code
+    // does — e.g. Simulation::spawn_from_scenario_list), then update after
+    // that scope has returned. The component's stored handle is a VALUE
+    // copy, so it must still resolve the sibling. (When the component
+    // stored &self — a pointer to the spawn scope's stack handle — this
+    // was a use-after-free that crashed intermittently depending on stack
+    // reuse.)
+    EntityWorld w;
+    MessageBus bus;
+    BrainWithBackRef* brain = nullptr;
+    {
+        auto h = w.create();
+        h.add<FakePhysics>();
+        brain = &h.add<BrainWithBackRef>();
+    }
+    // The spawning handle is dead here; scrub some stack to make stale
+    // reads obvious, then update.
+    volatile double scrub[64] = {};
+    for (auto& v : scrub) v = -1.0;
+
+    w.update_all(0.1, bus);
+    EXPECT_NE(brain->sibling_seen, nullptr);
 }
 
 // ============================================================================

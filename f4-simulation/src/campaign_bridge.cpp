@@ -18,6 +18,7 @@
 //                      and friends use this frame.
 
 #include "f4/simulation/campaign_bridge.hpp"
+#include "f4/simulation/frames.hpp"
 
 #include <f4/entities/entity.hpp>
 #include <f4/entities/types.hpp>
@@ -235,7 +236,9 @@ spawn_aircraft_from_flights(f4::entities::EntityWorld& world,
         tf.position = parking_spot;
         const double hdg = airfield.runway_heading_rad;
         const double h2 = hdg * 0.5;
-        tf.qw = std::cos(h2);  tf.qx = 0.0;  tf.qy = 0.0;  tf.qz = std::sin(h2);
+        // Compass heading -> ENU quaternion (negative about +z; see frames.hpp).
+        const auto q0 = f4::simulation::enu_quat_from_compass(hdg);
+        tf.qw = q0.w;  tf.qx = q0.x;  tf.qy = q0.y;  tf.qz = q0.z;
 
         // 2. FlightModelComponent — init from AircraftConfig, on ground.
         auto& fm = h.add<FlightModelComponent>();

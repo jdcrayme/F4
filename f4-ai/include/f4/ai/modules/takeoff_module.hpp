@@ -51,6 +51,7 @@
 
 #include "f4/ai/ai_output.hpp"
 #include "f4/ai/atc/messages.hpp"
+#include "f4/ai/ground_steering.hpp"
 
 namespace f4::ai::modules {
 
@@ -133,7 +134,10 @@ public:
     double departure_alt_ft{2500.0};      // climb to this MSL before Done
     double taxi_speed_kts{15.0};          // max taxi speed
     double takeoff_throttle{1.0};         // throttle during takeoff roll (1.0 = MIL)
-    double rotate_pitch_cmd{0.5};         // pitch stick input at Vr
+    double rotate_pitch_deg{13.0};        // target pitch attitude at Vr
+    double rotate_pitch_gain{3.0};        // stick per rad of pitch error (rotation)
+    double climb_pitch_deg{10.0};         // target pitch attitude in FlyOut
+    double climb_pitch_gain{2.0};         // stick per rad of pitch error (climb)
 
     // Waypoint capture radius (feet). When the aircraft is within this
     // distance of a taxi waypoint, it advances to the next one.
@@ -143,6 +147,22 @@ public:
     // PrepToTakeRunway is within this lateral distance of the runway
     // centerline, it transitions to TakeRunway.
     double centerline_align_tolerance_ft{10.0};
+
+    // Heading alignment tolerance (radians). PrepToTakeRunway additionally
+    // requires the heading to be within this of the runway heading before
+    // taking the runway, and Takeoff/FlyOut hold the runway heading.
+    double heading_align_tolerance_rad{0.15};   // ~8.5 deg
+
+    // How far past the threshold the lineup target sits (feet). PrepToTakeRunway
+    // steers toward this point on the runway centerline, then aligns heading.
+    double lineup_depth_ft{150.0};
+
+    // Heading-hold gain for FlyOut roll commands (roll units per rad of error).
+    double flyout_heading_gain{1.5};
+
+    // Shared ground-steering controller (taxi, lineup, takeoff-roll heading
+    // hold). Public so hosts can tune its gains like the fields above.
+    GroundSteering ground_steering;
 
     // --- Trace ---
     void set_trace(fsm::Trace<TakeoffState, TakeoffEvent>* t) noexcept {
@@ -186,6 +206,9 @@ private:
     // Phase 2: reads from IAircraftState instead of AircraftState.
     void cache_aircraft_state(const flight::IAircraftState* state);
 
+    // Build the GroundSteering input from the cached aircraft state.
+    [[nodiscard]] GroundSteering::Input steering_input() const noexcept;
+
     // --- Data members (ordered so sm_ is LAST) ---
     // C++ initializes members in declaration order. The StateMachine
     // constructor fires the initial state's entry action, which accesses
@@ -216,6 +239,7 @@ private:
     double current_alt_agl_ft_{0.0};
     double current_alt_msl_ft_{0.0};
     double current_heading_rad_{0.0};
+    double current_pitch_rad_{0.0};
     bool on_ground_{true};
 
     // State machine (MUST be last — its ctor fires entry actions that
