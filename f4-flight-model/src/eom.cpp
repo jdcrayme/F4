@@ -75,7 +75,9 @@ void EquationsOfMotion::update(double dt, const PilotInput& input,
     // Step 3: ground attitude clamp + nose-wheel steering
     // When on ground and close to the terrain, clamp roll to 0 and limit
     // pitch. Apply nose-wheel steering from the rudder pedals.
-    if (!g.inAir && (g.groundZ_ft - k.z) < (g.minHeight_ft + MIN_HEIGHT_MARGIN)) {
+    // groundZ_ft is the terrain altitude (MSL, positive up); the body's
+    // AGL is (-k.z) - groundZ_ft.
+    if (!g.inAir && ((-k.z) - g.groundZ_ft) < (g.minHeight_ft + MIN_HEIGHT_MARGIN)) {
         // Zero roll and yaw rates (but NOT pitch — needed for rotation damping)
         k.p = 0.0;
         k.r = 0.0;
@@ -379,11 +381,12 @@ void EquationsOfMotion::integratePosition(double dt, double cosgam, double singa
     k.z += k.zdot * dt;
 
     // Ground clamp: prevent the aircraft from sinking through the terrain.
-    // The clamp target is groundZ - minHeight (the body should sit minHeight
-    // ABOVE the terrain, where minHeight is the gear strut extended length).
+    // The clamp target in NED z is -(groundZ + minHeight): the body sits
+    // minHeight ABOVE the terrain, and groundZ is the terrain's MSL
+    // altitude (positive up), so its NED z is -groundZ.
     // Only clamp when descending (zdot > 0 in NED = moving down), so the
     // clamp doesn't trigger on aircraft spawned on the ground.
-    const double clampZ = g.groundZ_ft - g.minHeight_ft;
+    const double clampZ = -(g.groundZ_ft + g.minHeight_ft);
     if (k.z > clampZ && k.zdot > 0.0) {
         k.z = clampZ;
         k.zdot = 0.0;

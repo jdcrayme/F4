@@ -134,7 +134,10 @@ public:
     double departure_alt_ft{2500.0};      // climb to this MSL before Done
     double taxi_speed_kts{15.0};          // max taxi speed
     double takeoff_throttle{1.0};         // throttle during takeoff roll (1.0 = MIL)
-    double rotate_pitch_cmd{0.5};         // pitch stick input at Vr
+    double rotate_pitch_deg{13.0};        // target pitch attitude at Vr
+    double rotate_pitch_gain{3.0};        // stick per rad of pitch error (rotation)
+    double climb_pitch_deg{10.0};         // target pitch attitude in FlyOut
+    double climb_pitch_gain{2.0};         // stick per rad of pitch error (climb)
 
     // Waypoint capture radius (feet). When the aircraft is within this
     // distance of a taxi waypoint, it advances to the next one.
@@ -236,6 +239,7 @@ private:
     double current_alt_agl_ft_{0.0};
     double current_alt_msl_ft_{0.0};
     double current_heading_rad_{0.0};
+    double current_pitch_rad_{0.0};
     bool on_ground_{true};
 
     // State machine (MUST be last — its ctor fires entry actions that

@@ -42,6 +42,7 @@ add_library(f4_scenario_player_lib STATIC
     src/player_app.cpp
     src/renderer.cpp
     src/airport_geometry.cpp
+    src/radio_log.cpp
     ${IMGUI_SOURCES}
     ${RLIMGUI_SOURCES}
 )
@@ -77,6 +78,11 @@ set_target_properties(f4-scenario-player PROPERTIES
 configure_file(
     ${CMAKE_CURRENT_SOURCE_DIR}/scenarios/kunsan_parking.json.in
     ${CMAKE_BINARY_DIR}/scenarios/kunsan_parking.json
+    @ONLY
+)
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/scenarios/digi_full_mission.json.in
+    ${CMAKE_BINARY_DIR}/scenarios/digi_full_mission.json
     @ONLY
 )
 

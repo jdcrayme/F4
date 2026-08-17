@@ -168,8 +168,9 @@ void Aerodynamics::update(const AeroInputs& in, AeroState& aero) const {
     // --- Ground effect ---
     // Within 0.2*span of the ground: CL *= 1.13 (ground cushion).
     // Between 0.2 and 1.0 span: fades linearly back to 1.0.
+    // groundZ_ft is terrain altitude (MSL, positive up); z is NED.
     const double span = geom_->span.value();
-    const double agl_ft = std::fabs(groundZ_ft - z_ft);
+    const double agl_ft = std::fabs(-z_ft - groundZ_ft);
     if (agl_ft < span * 0.2) {
         // Close to ground: full ground effect
         const double g = GROUND_EFFECT_CL_MULT;

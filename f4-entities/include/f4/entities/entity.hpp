@@ -907,13 +907,14 @@ namespace f4::entities {
         auto comp = std::make_unique<T>(std::forward<Args>(args)...);
         T& ref = *comp;
         // For behavioral components, fire on_attached() BEFORE we move the
-        // unique_ptr into the components map. This gives the component a
-        // stable back-reference to its owning EntityHandle (via `*this`)
-        // so it can look up sibling components (e.g. brain -> flight model)
-        // during subsequent update() calls. The component is still owned
-        // by the local unique_ptr at this point, so a throw from
-        // on_attached() will cleanly destroy it without leaving a half-
-        // registered entry in the map.
+        // unique_ptr into the components map. `self` ALIASES THE CALLER'S
+        // EntityHandle (usually a stack local in spawn code) — components
+        // that want a back-reference must COPY it (EntityHandle is a cheap
+        // value type: id + world pointer + cookie). Storing &self would
+        // dangle as soon as the spawning function returns. The component is
+        // still owned by the local unique_ptr at this point, so a throw
+        // from on_attached() will cleanly destroy it without leaving a
+        // half-registered entry in the map.
         if constexpr (std::is_base_of_v<BehavioralComponentBase, T>) {
             comp->on_attached(*this);
         }

@@ -44,6 +44,16 @@ public:
     void schedule_screenshot(float delay_sec,
                              const std::filesystem::path& path);
 
+    /// Start the sim RUNNING (default start is paused at parking).
+    /// Must be called before run().
+    void set_paused(bool paused) noexcept;
+
+    /// Sim speed multiplier (1.0 = real time). Must be called before run().
+    void set_time_scale(double scale) noexcept;
+
+    /// Camera follows the aircraft each frame (the C toggle). Before run().
+    void set_follow_camera(bool follow) noexcept;
+
     /// Run the render + sim loop until window close. Blocks.
     void run();
 

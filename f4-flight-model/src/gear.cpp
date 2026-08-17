@@ -91,7 +91,9 @@ void GearModel::updateStrutCompression(GearState& gear,
 
     if (!geom_) return;
 
-    const double agl_ft = std::fabs(groundZ_ft - z_ft);
+    // groundZ_ft is the terrain altitude (MSL, positive up); z_ft is NED
+    // (down positive). AGL = (-z) - groundZ.
+    const double agl_ft = std::fabs(-z_ft - groundZ_ft);
 
     for (std::size_t i = 0; i < gear.wheels.size() && i < geom_->gear.size(); ++i) {
         const double strutMax = geom_->gear[i].z.value();  // extended length (positive down)

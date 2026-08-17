@@ -280,7 +280,7 @@ struct GearState {
     std::vector<Wheel> wheels;                    // sized to config.gear.size()
     bool   inAir{true};                           // true = airborne
     bool   planted{false};                        // stationary on ground
-    double groundZ_ft{0.0};                       // terrain altitude (NED Z-down)
+    double groundZ_ft{0.0};                       // terrain altitude (MSL, positive up)
     math::Vec3d groundNormal{0.0, 0.0, -1.0};     // terrain up vector (NED: -Z is up)
     double muFric{0.04};                          // current friction coefficient
     double minHeight_ft{0.0};                     // minimum body clearance

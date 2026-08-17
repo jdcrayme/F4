@@ -23,6 +23,7 @@
 #include "f4/simulation/simulation.hpp"
 #include "f4/simulation/visual_model_component.hpp"
 #include "f4/simulation/campaign_bridge.hpp"
+#include "f4/simulation/frames.hpp"
 
 #include <f4/ai/brain_component.hpp>
 #include <f4/ai/atc/stub_atc.hpp>
@@ -134,7 +135,9 @@ void Simulation::spawn_from_scenario_list() {
         tf.position = sc.parking_spot;            // WorldPosition (ENU feet)
         const double hdg = sc.heading_rad;
         const double h2 = hdg * 0.5;
-        tf.qw = std::cos(h2);  tf.qx = 0.0;  tf.qy = 0.0;  tf.qz = std::sin(h2);
+        // Compass heading -> ENU quaternion (negative about +z; see frames.hpp).
+        const auto q0 = f4::simulation::enu_quat_from_compass(h2 * 2.0);
+        tf.qw = q0.w;  tf.qx = q0.x;  tf.qy = q0.y;  tf.qz = q0.z;
 
         // 2. FlightModelComponent — initialized from AircraftConfig.
         //    Implements IAircraftState + IPilotInputSink. The brain will find
@@ -145,8 +148,12 @@ void Simulation::spawn_from_scenario_list() {
                 /*vt_ftps=*/0.0,
                 /*hdg_rad=*/hdg,
                 /*inAir=*/false);
-        // Set the ground plane at the parking spot's altitude so the FM sits on
-        // the ground instead of falling. NED frame: up = (0, 0, -1).
+        // Set the ground plane at the parking spot's altitude so the FM sits
+        // on the ground instead of falling. set_ground takes the terrain's
+        // MSL altitude (positive up) — the EOM/gear internally convert to
+        // NED. (The FM's groundZ consumers were standardized on MSL-up;
+        // they previously mixed NED and MSL conventions, which only agreed
+        // for ground at exactly 0 ft.)
         fm.set_ground(sc.parking_spot.z, f4::math::Vec3d{0.0, 0.0, -1.0});
 
         // 3. VisualModelComponent — the renderable handle (DrawableBSP* equivalent).
@@ -166,15 +173,25 @@ void Simulation::spawn_from_scenario_list() {
         gear_switch.active_child  = 0;  // 0 = gear down
         vis.model_state.switches.push_back(gear_switch);
 
-        // 4. BrainComponent — wraps TakeoffModule, runs in pass 1 (priority 100).
-        //    Already implements taxi waypoint following via check_taxi_progress().
-        //    We just configure its thresholds; the taxi route comes from the
-        //    StubATC's TaxiClearance message (wire_atc() populates it from scenario_).
+        // 4. BrainComponent — the mission sequencer (takeoff -> navigation
+        //    -> landing), runs in pass 1 (priority 100). The taxi route
+        //    comes from the StubATC's TaxiClearance message (wire_atc()
+        //    populates it from scenario_); the air route + taxi-in route
+        //    are injected here as the mission plan.
         auto& brain = h.add<BrainComponent>();
-        brain.module().rotate_speed_kts = 140.0;
-        brain.module().gear_up_alt_ft = 200.0;
-        brain.module().departure_alt_ft = scenario_.airfield.departure_altitude_ft;
-        brain.module().taxi_speed_kts = 15.0;
+        brain.takeoff().rotate_speed_kts = 140.0;
+        brain.takeoff().gear_up_alt_ft = 200.0;
+        brain.takeoff().departure_alt_ft = scenario_.airfield.departure_altitude_ft;
+        brain.takeoff().taxi_speed_kts = 15.0;
+
+        MissionPlan plan;
+        plan.route.reserve(scenario_.waypoints.size());
+        for (const auto& wp : scenario_.waypoints) {
+            plan.route.push_back(modules::NavigationModule::Waypoint{
+                wp.name, wp.position, wp.speed_kts});
+        }
+        plan.taxi_in_route = scenario_.airfield.taxi_in_route;
+        brain.set_mission_plan(std::move(plan));
 
         aircraft_entities_.push_back(h.id());
     }
@@ -269,7 +286,9 @@ void Simulation::spawn_airfield_features() {
         auto& tf = h.add<TransformComponent>();
         tf.position = sf.position;
         const double h2 = sf.heading_rad * 0.5;
-        tf.qw = std::cos(h2);  tf.qx = 0.0;  tf.qy = 0.0;  tf.qz = std::sin(h2);
+        // Compass heading -> ENU quaternion (negative about +z; see frames.hpp).
+        const auto q0 = f4::simulation::enu_quat_from_compass(h2 * 2.0);
+        tf.qw = q0.w;  tf.qx = q0.x;  tf.qy = q0.y;  tf.qz = q0.z;
 
         // VisualModelComponent — the renderable handle. Same component type
         // as the aircraft's, resolved the same way (model_record pointer from
@@ -327,19 +346,19 @@ void Simulation::tick(double dt) {
         // NED -> ENU: enu.x = ned.y (east), enu.y = ned.x (north), enu.z = -ned.z (up)
         tf->position = f4::geo::WorldPosition(s.kin.y, s.kin.x, -s.kin.z);
 
-        // Euler (psi=yaw, theta=pitch, phi=roll) -> quaternion (ZYX, Hamilton, body-to-world)
-        const double psi   = f4::flight::to_radians(s.kin.psi);
-        const double theta = f4::flight::to_radians(s.kin.theta);
-        const double phi   = f4::flight::to_radians(s.kin.phi);
-        const double hp = psi * 0.5, ht = theta * 0.5, hr = phi * 0.5;
-        const double cpsi = std::cos(hp), spsi = std::sin(hp);
-        const double cth  = std::cos(ht), sth  = std::sin(ht);
-        const double cph  = std::cos(hr), sph  = std::sin(hr);
-        // q = q_Z(psi) * q_Y(theta) * q_X(phi)
-        tf->qw = cph * cth * cpsi + sph * sth * spsi;
-        tf->qx = sph * cth * cpsi - cph * sth * spsi;
-        tf->qy = cph * sth * cpsi + sph * cth * spsi;
-        tf->qz = cph * cth * spsi - sph * sth * cpsi;
+        // NED -> ENU orientation. The FM's quaternion is NED body-to-world
+        // (compass yaw positive about z=DOWN); ENU wants compass as a
+        // NEGATIVE rotation about z=UP. The basis change is a 180-deg
+        // rotation about the NE bisector, so the quaternion conjugates as
+        // (w,x,y,z) -> (w,y,x,-z). Storing the NED quaternion raw mirrors
+        // heading and scrambles pitch/roll — the "model flying upside
+        // down" artifact. See f4/simulation/frames.hpp + test_frames.cpp.
+        const f4::simulation::QuatD q_enu = f4::simulation::ned_quat_to_enu(
+            {s.kin.quat.w, s.kin.quat.x, s.kin.quat.y, s.kin.quat.z});
+        tf->qw = q_enu.w;
+        tf->qx = q_enu.x;
+        tf->qy = q_enu.y;
+        tf->qz = q_enu.z;
 
         // Sync VisualModelComponent gear switch from FM gear position.
         // F-16 gear is switch #10 (per f4-models-viewer comment); 0=down, 1=up.
@@ -388,6 +407,13 @@ void Simulation::record_snapshot() {
             snap.heading_rad = f4::flight::to_radians(s.kin.psi);
             snap.pitch_rad   = f4::flight::to_radians(s.kin.theta);
             snap.roll_rad    = f4::flight::to_radians(s.kin.phi);
+        }
+
+        // AI mode/state from the mission sequencer (which module + state
+        // is flying the aircraft this tick).
+        if (auto* brain = h.get<f4::ai::BrainComponent>(); brain) {
+            snap.ai_mode = brain->mode_name();
+            snap.ai_state = brain->state_name();
         }
 
         recorder_->record(snap);

@@ -69,6 +69,22 @@ struct AirportGeometry {
     /// Taxi route line strip (yellow segments connecting waypoints).
     std::vector<GeoLine> taxi_route_lines;
 
+    /// Flight-plan route line strip (cyan) through the scenario's
+    /// waypoints AT their altitudes, plus vertical drop lines (dim cyan)
+    /// from each waypoint down to the airfield ground level.
+    std::vector<GeoLine> flightplan_lines;
+    std::vector<GeoLine> flightplan_drop_lines;
+    std::vector<GeoMarker> flightplan_waypoints;
+
+    /// Approach reference (orange): the runway's extended centerline
+    /// (~4 NM before the threshold) and the 3-deg glide-slope line rising
+    /// from the threshold along it.
+    std::vector<GeoLine> approach_lines;
+    std::vector<GeoMarker> approach_markers;
+
+    /// Taxi-in route line strip (purple): runway exit back to parking.
+    std::vector<GeoLine> taxi_in_route_lines;
+
     /// Parking-spot marker (small green cube at the spawn position).
     GeoMarker parking_spot{};
 

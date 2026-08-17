@@ -40,6 +40,14 @@ constexpr float GREEN[4]  = {0.2f, 0.9f, 0.2f, 1.0f};
 constexpr float RED[4]    = {0.9f, 0.2f, 0.2f, 1.0f};
 constexpr float GREY[4]   = {0.20f, 0.20f, 0.22f, 1.0f};  // runway surface
 constexpr float NWAY[4]   = {0.7f, 0.7f, 0.75f, 1.0f};    // compass rose
+constexpr float CYAN[4]   = {0.15f, 0.85f, 0.9f, 1.0f};   // flight-plan route
+constexpr float DIMCYAN[4]= {0.15f, 0.45f, 0.5f, 0.6f};   // waypoint drop lines
+constexpr float ORANGE[4] = {1.0f, 0.55f, 0.1f, 1.0f};    // approach reference
+constexpr float PURPLE[4] = {0.75f, 0.4f, 0.95f, 1.0f};   // taxi-in route
+
+// Approach reference extent: how far before the threshold the extended
+// centerline + glide-slope lines extend (4 NM in feet).
+constexpr double APPROACH_EXTENT_FT = 4.0 * 6076.12;
 
 void set_color(float out[4], const float in[4]) {
     out[0] = in[0]; out[1] = in[1]; out[2] = in[2]; out[3] = in[3];
@@ -202,6 +210,97 @@ std::vector<GeoLine> build_taxi_route(const std::vector<f4::geo::WorldPosition>&
     return out;
 }
 
+// Build the flight-plan reference: cyan route lines at waypoint altitudes,
+// dim vertical drop lines to the ground, and a marker at each waypoint.
+void build_flightplan(const std::vector<f4::simulation::ScenarioWaypoint>& wps,
+                      double ground_z,
+                      AirportGeometry& g) {
+    if (wps.empty()) return;
+    for (std::size_t i = 0; i < wps.size(); ++i) {
+        const auto& p = wps[i].position;
+
+        // Drop line to the ground so the waypoint's altitude is readable
+        // in the 3D view from any angle.
+        GeoLine drop;
+        drop.a = p;
+        drop.b = f4::geo::WorldPosition(p.x, p.y, ground_z + 1.0);
+        set_color(&drop.r, DIMCYAN);
+        g.flightplan_drop_lines.push_back(drop);
+
+        GeoMarker m;
+        m.center = p;
+        m.size_ft = 25.0f;
+        set_color(&m.r, CYAN);
+        g.flightplan_waypoints.push_back(m);
+
+        if (i + 1 < wps.size()) {
+            GeoLine l;
+            l.a = p;
+            l.b = wps[i + 1].position;
+            set_color(&l.r, CYAN);
+            g.flightplan_lines.push_back(l);
+        }
+    }
+}
+
+// Build the approach reference: extended centerline ~4 NM before the
+// threshold plus the 3-deg glide-slope line rising along it.
+void build_approach(const f4::geo::WorldPosition& threshold,
+                    const f4::geo::WorldPosition& end,
+                    AirportGeometry& g) {
+    const double dx = end.x - threshold.x;
+    const double dy = end.y - threshold.y;
+    const double len = std::sqrt(dx * dx + dy * dy);
+    if (len < 1.0) return;
+    const double fx = dx / len, fy = dy / len;   // along-runway direction
+
+    const f4::geo::WorldPosition far_end(
+        threshold.x - fx * APPROACH_EXTENT_FT,
+        threshold.y - fy * APPROACH_EXTENT_FT,
+        threshold.z);
+
+    // Extended centerline (flat on the ground).
+    GeoLine centerline;
+    centerline.a = f4::geo::WorldPosition(threshold.x, threshold.y, threshold.z + 1.0);
+    centerline.b = f4::geo::WorldPosition(far_end.x, far_end.y, far_end.z + 1.0);
+    set_color(&centerline.r, ORANGE);
+    g.approach_lines.push_back(centerline);
+
+    // Glide slope: 3 deg rising from the threshold along the same course.
+    const double slope = std::tan(3.0 * 3.14159265358979 / 180.0);
+    GeoLine gs;
+    gs.a = threshold;
+    gs.b = f4::geo::WorldPosition(far_end.x, far_end.y,
+                                  threshold.z + APPROACH_EXTENT_FT * slope);
+    set_color(&gs.r, ORANGE);
+    g.approach_lines.push_back(gs);
+
+    // Marker at the far end (the outer approach reference point).
+    GeoMarker m;
+    m.center = far_end;
+    m.size_ft = 20.0f;
+    set_color(&m.r, ORANGE);
+    g.approach_markers.push_back(m);
+}
+
+// Build a taxi-in route line strip (same shape as the taxi-out builder,
+// distinct color).
+std::vector<GeoLine> build_taxi_in_route(const std::vector<f4::geo::WorldPosition>& route) {
+    std::vector<GeoLine> out;
+    if (route.size() < 2) return out;
+    out.reserve(route.size() - 1);
+    for (std::size_t i = 0; i + 1 < route.size(); ++i) {
+        GeoLine l;
+        l.a = route[i];
+        l.b = route[i + 1];
+        l.a.z += 1.0;
+        l.b.z += 1.0;
+        set_color(&l.r, PURPLE);
+        out.push_back(l);
+    }
+    return out;
+}
+
 // Build a compass rose centered on the parking spot — 4 line segments
 // pointing N/E/S/W with the cardinal direction extending further.
 std::vector<GeoLine> build_compass_rose(const f4::geo::WorldPosition& center,
@@ -274,6 +373,16 @@ AirportGeometry build_airport_geometry(const f4::simulation::Scenario& s) {
 
     // Taxi route line strip.
     g.taxi_route_lines = build_taxi_route(s.airfield.taxi_route);
+
+    // Flight-plan route + drops + markers (empty when the scenario has
+    // no waypoints — a takeoff-only demo).
+    build_flightplan(s.waypoints, threshold.z, g);
+
+    // Approach reference (extended centerline + glide slope).
+    build_approach(threshold, end, g);
+
+    // Taxi-in route line strip.
+    g.taxi_in_route_lines = build_taxi_in_route(s.airfield.taxi_in_route);
 
     // Parking-spot marker (green cube at the aircraft spawn position).
     g.parking_spot.center = parking;

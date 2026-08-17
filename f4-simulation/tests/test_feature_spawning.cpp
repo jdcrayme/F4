@@ -33,6 +33,12 @@
 #include <sstream>
 #include <string>
 
+#ifdef _WIN32
+#include <process.h>
+#else
+#include <unistd.h>
+#endif
+
 using namespace f4::simulation;
 using namespace f4::entities;
 
@@ -110,8 +116,18 @@ std::string build_scenario_json(const std::string& features_json_array,
 }
 
 // Write a temp scenario JSON file and return its path.
+// The filename includes the PID: gtest_discover_tests() registers each
+// TEST as a separate ctest entry, so `ctest -j N` runs this exe multiple
+// times CONCURRENTLY — a fixed filename made the processes clobber each
+// other's scenario file.
 std::string write_temp_scenario(const std::string& json) {
-    const auto path = std::filesystem::path(scenario_dir()) / "temp_feature_scenario.json";
+#ifdef _WIN32
+    const long pid = _getpid();
+#else
+    const long pid = static_cast<long>(getpid());
+#endif
+    const auto path = std::filesystem::path(scenario_dir())
+        / ("temp_feature_scenario_" + std::to_string(pid) + ".json");
     std::ofstream f(path);
     f << json;
     return path.string();

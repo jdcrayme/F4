@@ -172,6 +172,19 @@ public:
         return to_radians(fm_.state().kin.psi);
     }
 
+    double pitch_angle_rad() const override {
+        return to_radians(fm_.state().kin.theta);
+    }
+
+    double roll_angle_rad() const override {
+        return to_radians(fm_.state().kin.phi);
+    }
+
+    double vertical_speed_fpm() const override {
+        // NED z is down and zdot is in ft/s: climbing = negative zdot.
+        return -fm_.state().kin.zdot * 60.0;
+    }
+
     bool on_ground() const override {
         return !fm_.state().gear.inAir;
     }

@@ -72,6 +72,23 @@ public:
     /// This is the yaw angle ψ projected onto the horizontal plane.
     virtual double heading_rad() const = 0;
 
+    /// Pitch angle θ (radians, positive = nose up).
+    /// Needed for attitude-based control laws (takeoff rotation, flare,
+    /// glide-slope tracking) — commanding a fixed stick commands G, which
+    /// winds up against the EOM's ground attitude clamp.
+    virtual double pitch_angle_rad() const = 0;
+
+    /// Roll angle φ (radians, positive = right wing down).
+    /// Needed for bank-to-turn heading control damping.
+    virtual double roll_angle_rad() const = 0;
+
+    // --- Vertical speed ---
+
+    /// Vertical speed (feet per minute, positive = climbing).
+    /// Needed for altitude capture/hold (target-VS cascades) and glide-
+    /// slope tracking.
+    virtual double vertical_speed_fpm() const = 0;
+
     // --- Ground state ---
 
     /// True if any gear is in contact with the ground.

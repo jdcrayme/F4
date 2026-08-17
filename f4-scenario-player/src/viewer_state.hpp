@@ -8,6 +8,7 @@
 
 #include "f4/scenario_player/player_app.hpp"
 #include "f4/scenario_player/airport_geometry.hpp"
+#include "radio_log.hpp"
 #include <f4/renderer/coord_transform.hpp>       // Float3, enu_to_raylib, model_vertex_to_raylib
 #include <f4/renderer/orbit_camera.hpp>          // OrbitCamera
 #include <f4/renderer/lit_shader.hpp>            // LitShader
@@ -123,6 +124,14 @@ struct PlayerApp::Impl {
     bool show_aircraft = true;
     bool show_taxi_route = true;
     bool show_compass = true;
+    bool show_flightplan = true;   // cyan waypoint route at altitude
+    bool show_approach = true;     // orange extended centerline + glide slope
+    bool show_taxi_in = true;      // purple runway-exit -> parking route
+    bool show_radio = true;        // ATC transcript panel
+    bool follow_aircraft = false;  // camera tracks the aircraft (C)
+
+    // ── ATC radio transcript (observes the bus) ───────────────────────
+    RadioLog radio_log;
 
     // ── Status / screenshot ───────────────────────────────────────────
     std::string status_msg;
@@ -145,6 +154,7 @@ struct PlayerApp::Impl {
     void draw_aircraft();               // legacy: draws only the primary aircraft
     void draw_visual_entities();        // Phase 2A: walks all VMC-bearing entities
     void draw_hud();
+    void draw_radio();                  // ATC transcript panel (top-right)
 };
 
 } // namespace f4::scenario_player

@@ -273,6 +273,7 @@ void TakeoffModule::cache_aircraft_state(const flight::IAircraftState* state)
     current_alt_agl_ft_ = state->altitude_agl_ft();
     current_alt_msl_ft_ = state->altitude_msl_ft();
     current_heading_rad_ = state->heading_rad();
+    current_pitch_rad_ = state->pitch_angle_rad();
     on_ground_ = state->on_ground();
 }
 
@@ -445,9 +446,14 @@ AIControlOutput TakeoffModule::controls_for_takeoff() const {
         runway_heading_rad_, current_heading_rad_);
     output.yaw_cmd = std::clamp(-ground_steering.heading_gain * hdg_err, -1.0, 1.0);
 
-    // At Vr, apply back-pressure to rotate.
+    // At Vr, rotate to the target PITCH ATTITUDE (not a fixed stick).
+    // A fixed stick commands G; on the ground the G integrator winds up
+    // against the EOM's attitude clamp and limit-cycles (15deg -> -2deg)
+    // without ever developing a climb.
     if (current_vcas_kts_ >= rotate_speed_kts) {
-        output.pitch_cmd = rotate_pitch_cmd;
+        const double target = rotate_pitch_deg * (3.14159265358979 / 180.0);
+        output.pitch_cmd = std::clamp(rotate_pitch_gain * (target - current_pitch_rad_),
+                                      -0.25, 0.5);
     }
 
     return output;
@@ -456,9 +462,12 @@ AIControlOutput TakeoffModule::controls_for_takeoff() const {
 AIControlOutput TakeoffModule::controls_for_flyout() const {
     AIControlOutput output;
 
-    // Climb at runway heading, pitch for climb.
+    // Climb at runway heading, pitch for the climb attitude (attitude
+    // command, same rationale as the rotation law).
     output.throttle_cmd = takeoff_throttle;
-    output.pitch_cmd = 0.3;
+    const double target = climb_pitch_deg * (3.14159265358979 / 180.0);
+    output.pitch_cmd = std::clamp(climb_pitch_gain * (target - current_pitch_rad_),
+                                  -0.5, 0.5);
 
     // Gentle heading hold through the climb-out: positive compass error
     // (need to turn right) banks right. In-air roll is not subject to the

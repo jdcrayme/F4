@@ -40,26 +40,32 @@ GroundSteering::Input make_input(double east_ft, double north_ft,
 // ============================================================================
 
 TEST(GroundSteeringGeometry, BearingDueNorth) {
-    EXPECT_NEAR(GroundSteering::bearing_to({0, 0, 0}, {0, 1000, 0}), 0.0, 1e-9);
+    EXPECT_NEAR(GroundSteering::bearing_to(geo::WorldPosition(0, 0, 0),
+                                           geo::WorldPosition(0, 1000, 0)),
+                0.0, 1e-9);
 }
 
 TEST(GroundSteeringGeometry, BearingDueEast) {
-    EXPECT_NEAR(GroundSteering::bearing_to({0, 0, 0}, {1000, 0, 0}), PI / 2, 1e-9);
+    EXPECT_NEAR(GroundSteering::bearing_to(geo::WorldPosition(0, 0, 0),
+                                           geo::WorldPosition(1000, 0, 0)),
+                PI / 2, 1e-9);
 }
 
 TEST(GroundSteeringGeometry, BearingSouthWest) {
     // Southwest = -135 deg = -3pi/4
-    EXPECT_NEAR(GroundSteering::bearing_to({0, 0, 0}, {-1000, -1000, 0}),
+    EXPECT_NEAR(GroundSteering::bearing_to(geo::WorldPosition(0, 0, 0),
+                                           geo::WorldPosition(-1000, -1000, 0)),
                 -3.0 * PI / 4.0, 1e-9);
 }
 
 TEST(GroundSteeringGeometry, HeadingErrorWrapsAroundPi) {
-    // Desired 170 deg, current -170 deg: shortest way is +20 deg (right).
+    // Desired 170 deg, current -170 deg (= 190 deg): the shortest way from
+    // 190 to 170 is -20 deg (counterclockwise/left).
     EXPECT_NEAR(GroundSteering::heading_error(170.0 * PI / 180, -170.0 * PI / 180),
-                20.0 * PI / 180, 1e-9);
-    // Desired -170 deg, current 170 deg: shortest way is -20 deg (left).
-    EXPECT_NEAR(GroundSteering::heading_error(-170.0 * PI / 180, 170.0 * PI / 180),
                 -20.0 * PI / 180, 1e-9);
+    // Desired -170 deg (= 190 deg), current 170 deg: shortest way is +20 deg.
+    EXPECT_NEAR(GroundSteering::heading_error(-170.0 * PI / 180, 170.0 * PI / 180),
+                20.0 * PI / 180, 1e-9);
 }
 
 // ============================================================================
@@ -71,7 +77,8 @@ TEST(GroundSteeringPedal, RightTurnNeedsNegativePedal) {
     // error). The EOM's nose-wheel law (psi_delta = -ypedal * rate * dt,
     // psi compass) means positive pedal turns left, so yaw_cmd < 0.
     GroundSteering gs;
-    const auto out = gs.steer_toward({1000, 0, 0}, make_input(0, 0, 0.0, 5.0),
+    const auto out = gs.steer_toward(geo::WorldPosition(1000, 0, 0),
+                                     make_input(0, 0, 0.0, 5.0),
                                      15.0, /*stop_at_target=*/false);
     EXPECT_NEAR(out.yaw_cmd, -1.0, 1e-6)  // 90 deg error saturates the clamp
         << "turning right (compass +) requires negative pedal";
@@ -80,7 +87,8 @@ TEST(GroundSteeringPedal, RightTurnNeedsNegativePedal) {
 TEST(GroundSteeringPedal, LeftTurnNeedsPositivePedal) {
     // Aircraft heading north, target due west: must turn left (-90 deg).
     GroundSteering gs;
-    const auto out = gs.steer_toward({-1000, 0, 0}, make_input(0, 0, 0.0, 5.0),
+    const auto out = gs.steer_toward(geo::WorldPosition(-1000, 0, 0),
+                                     make_input(0, 0, 0.0, 5.0),
                                      15.0, /*stop_at_target=*/false);
     EXPECT_NEAR(out.yaw_cmd, 1.0, 1e-6)
         << "turning left (compass -) requires positive pedal";
@@ -107,7 +115,8 @@ TEST(GroundSteeringPedal, AlignHeadingHoldsHeading) {
 
 TEST(GroundSteeringSpeed, BelowTargetAppliesThrottle) {
     GroundSteering gs;
-    const auto out = gs.steer_toward({0, 1000, 0}, make_input(0, 0, 0.0, 3.0),
+    const auto out = gs.steer_toward(geo::WorldPosition(0, 1000, 0),
+                                     make_input(0, 0, 0.0, 3.0),
                                      15.0, /*stop_at_target=*/false);
     EXPECT_GT(out.throttle_cmd, 0.0);
     EXPECT_LE(out.throttle_cmd, gs.max_throttle);
@@ -117,7 +126,8 @@ TEST(GroundSteeringSpeed, BelowTargetAppliesThrottle) {
 TEST(GroundSteeringSpeed, AboveTargetPlusMarginBrakes) {
     GroundSteering gs;
     gs.brake_margin_kts = 4.0;
-    const auto out = gs.steer_toward({0, 1000, 0}, make_input(0, 0, 0.0, 25.0),
+    const auto out = gs.steer_toward(geo::WorldPosition(0, 1000, 0),
+                                     make_input(0, 0, 0.0, 25.0),
                                      15.0, /*stop_at_target=*/false);
     EXPECT_TRUE(out.wheel_brakes);
     EXPECT_NEAR(out.throttle_cmd, 0.0, 1e-9);
@@ -129,7 +139,8 @@ TEST(GroundSteeringSpeed, SharpTurnReducesTargetSpeed) {
     // no brakes, but throttle should be at the floor (no creep surplus).
     GroundSteering gs;
     gs.sharp_turn_speed_kts = 8.0;
-    const auto out = gs.steer_toward({1000, 0, 0}, make_input(0, 0, 0.0, 10.0),
+    const auto out = gs.steer_toward(geo::WorldPosition(1000, 0, 0),
+                                     make_input(0, 0, 0.0, 10.0),
                                      15.0, /*stop_at_target=*/false);
     EXPECT_FALSE(out.wheel_brakes);
     EXPECT_NEAR(out.throttle_cmd, 0.0, 1e-6);
@@ -139,14 +150,16 @@ TEST(GroundSteeringSpeed, StopAtTargetDeceleratesNearTarget) {
     // 20 ft from the stop point with 3 ft/s^2 decel: v_limit = sqrt(2*3*5)
     // ~= 5.5 fps ~= 3.2 kts. Current 10 kts is above target + margin -> brakes.
     GroundSteering gs;
-    const auto out = gs.steer_toward({0, 20, 0}, make_input(0, 0, 0.0, 10.0),
+    const auto out = gs.steer_toward(geo::WorldPosition(0, 20, 0),
+                                     make_input(0, 0, 0.0, 10.0),
                                      15.0, /*stop_at_target=*/true);
     EXPECT_TRUE(out.wheel_brakes);
 }
 
 TEST(GroundSteeringSpeed, StopAtTargetFullSpeedFarAway) {
     GroundSteering gs;
-    const auto out = gs.steer_toward({0, 5000, 0}, make_input(0, 0, 0.0, 0.0),
+    const auto out = gs.steer_toward(geo::WorldPosition(0, 5000, 0),
+                                     make_input(0, 0, 0.0, 0.0),
                                      15.0, /*stop_at_target=*/true);
     EXPECT_GT(out.throttle_cmd, 0.0);
     EXPECT_FALSE(out.wheel_brakes);
@@ -155,7 +168,8 @@ TEST(GroundSteeringSpeed, StopAtTargetFullSpeedFarAway) {
 TEST(GroundSteeringSpeed, StoppedTargetHoldsBrakes) {
     // Inside the stop radius the target speed collapses to 0.
     GroundSteering gs;
-    const auto out = gs.steer_toward({0, 5, 0}, make_input(0, 0, 0.0, 0.0),
+    const auto out = gs.steer_toward(geo::WorldPosition(0, 5, 0),
+                                     make_input(0, 0, 0.0, 0.0),
                                      15.0, /*stop_at_target=*/true);
     EXPECT_TRUE(out.wheel_brakes);
     EXPECT_NEAR(out.throttle_cmd, 0.0, 1e-9);
@@ -180,7 +194,8 @@ TEST(GroundSteeringHold, HoldBrakesIdleGearDown) {
 
 TEST(GroundSteeringOutput, GearDownInAllGroundModes) {
     GroundSteering gs;
-    EXPECT_TRUE(gs.steer_toward({0, 100, 0}, make_input(0, 0, 0, 5), 15, false)
+    EXPECT_TRUE(gs.steer_toward(geo::WorldPosition(0, 100, 0),
+                                make_input(0, 0, 0, 5), 15, false)
                     .gear_handle_down);
     EXPECT_TRUE(gs.align_heading(0.0, make_input(0, 0, 0, 5), 15, false)
                     .gear_handle_down);

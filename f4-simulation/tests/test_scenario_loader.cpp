@@ -90,13 +90,123 @@ TEST(ScenarioLoader, LoadsValidScenarioWithAllFields) {
     // Taxi route
     ASSERT_EQ(s.airfield.taxi_route.size(), 5u);
     EXPECT_DOUBLE_EQ(s.airfield.taxi_route.front().x, 0.0);    // parking
-    EXPECT_DOUBLE_EQ(s.airfield.taxi_route.back().x, 500.0);   // threshold
-    EXPECT_DOUBLE_EQ(s.airfield.taxi_route.back().y, 8000.0);
+    // The route ENDS at the hold-short point (offset west of the runway
+    // centerline, short of the threshold) — the aircraft stops here and
+    // requests takeoff clearance before lining up.
+    EXPECT_DOUBLE_EQ(s.airfield.taxi_route.back().x, 330.0);   // hold-short
+    EXPECT_DOUBLE_EQ(s.airfield.taxi_route.back().y, 7600.0);
 }
 
 TEST(ScenarioLoader, MissingFileThrows) {
     const std::filesystem::path nope = "/tmp/this_scenario_does_not_exist.json";
     EXPECT_THROW(load_scenario(nope), std::runtime_error);
+}
+
+// ============================================================================
+// Flight-plan waypoints + taxi-in route
+// ============================================================================
+
+namespace {
+
+// Minimal valid scenario body with the given JSON fragment spliced in
+// (kept in the style of the fixture: aircraft + airfield).
+std::string with_extra_block(const std::string& extra) {
+    return R"({
+        "name": "wp_test",
+        "aircraft": [
+            {"callsign":"EAGLE1","aircraft_config_path":"f16.json",
+             "aircraft_name":"F-16C_50","vis_type_index":1052,
+             "parking_spot":{"x":0,"y":0,"z":50},"heading_rad":0,"initial_fuel_lbs":6500}
+        ],
+        "airfield": {
+            "active_runway_id": 36,
+            "active_runway_name": "Rwy 36L",
+            "runway_heading_rad": 0.0,
+            "threshold_position": {"x":500,"y":8000,"z":50},
+            "runway_end_position": {"x":500,"y":13000,"z":50},
+            "taxi_route": [
+                {"x":0,"y":0,"z":50},
+                {"x":330,"y":7600,"z":50}
+            ]
+        },
+        )" + extra + R"(
+    })";
+}
+
+} // namespace
+
+TEST(ScenarioLoader, WaypointsAreParsedInOrder) {
+    const auto json = with_extra_block(R"(
+        "waypoints": [
+            {"name":"WP1","position":{"x":0,"y":40000,"z":10000},"speed_kts":400},
+            {"name":"APCH_FIX","position":{"x":500,"y":-25000,"z":3000},"speed_kts":250}
+        ]
+    )");
+    auto s = load_scenario_from_string(json);
+    ASSERT_EQ(s.waypoints.size(), 2u);
+    EXPECT_EQ(s.waypoints[0].name, "WP1");
+    EXPECT_DOUBLE_EQ(s.waypoints[0].position.y, 40000.0);
+    EXPECT_DOUBLE_EQ(s.waypoints[0].position.z, 10000.0);
+    EXPECT_DOUBLE_EQ(s.waypoints[0].speed_kts, 400.0);
+    EXPECT_EQ(s.waypoints[1].name, "APCH_FIX");
+    EXPECT_DOUBLE_EQ(s.waypoints[1].position.x, 500.0);
+    EXPECT_DOUBLE_EQ(s.waypoints[1].speed_kts, 250.0);
+}
+
+TEST(ScenarioLoader, WaypointSpeedDefaultsTo350) {
+    const auto json = with_extra_block(R"(
+        "waypoints": [ {"name":"W","position":{"x":0,"y":10000,"z":5000}} ]
+    )");
+    auto s = load_scenario_from_string(json);
+    ASSERT_EQ(s.waypoints.size(), 1u);
+    EXPECT_DOUBLE_EQ(s.waypoints[0].speed_kts, 350.0);
+}
+
+TEST(ScenarioLoader, WaypointsAreOptional) {
+    auto s = load_scenario_from_string(with_extra_block(R"("record": false)"));
+    EXPECT_TRUE(s.waypoints.empty());
+    EXPECT_TRUE(s.airfield.taxi_in_route.empty());
+}
+
+TEST(ScenarioLoader, WaypointWithNonPositiveSpeedThrows) {
+    const auto json = with_extra_block(R"(
+        "waypoints": [ {"name":"BAD","position":{"x":0,"y":10000,"z":5000},"speed_kts":0} ]
+    )");
+    EXPECT_THROW(load_scenario_from_string(json), std::runtime_error);
+}
+
+TEST(ScenarioLoader, TaxiInRouteIsParsed) {
+    // taxi_in_route lives inside the airfield block — splice a full airfield.
+    const auto with_route = R"({
+        "name": "taxi_in_test",
+        "aircraft": [
+            {"callsign":"EAGLE1","aircraft_config_path":"f16.json",
+             "aircraft_name":"F-16C_50","vis_type_index":1052,
+             "parking_spot":{"x":0,"y":0,"z":50},"heading_rad":0,"initial_fuel_lbs":6500}
+        ],
+        "airfield": {
+            "active_runway_id": 36,
+            "active_runway_name": "Rwy 36L",
+            "runway_heading_rad": 0.0,
+            "threshold_position": {"x":500,"y":8000,"z":50},
+            "runway_end_position": {"x":500,"y":13000,"z":50},
+            "taxi_route": [
+                {"x":0,"y":0,"z":50},
+                {"x":330,"y":7600,"z":50}
+            ],
+            "taxi_in_route": [
+                {"x":330,"y":7900,"z":50},
+                {"x":300,"y":5000,"z":50},
+                {"x":0,"y":0,"z":50}
+            ]
+        }
+    })";
+    auto s = load_scenario_from_string(with_route);
+    ASSERT_EQ(s.airfield.taxi_in_route.size(), 3u);
+    EXPECT_DOUBLE_EQ(s.airfield.taxi_in_route.back().x, 0.0);
+    EXPECT_DOUBLE_EQ(s.airfield.taxi_in_route.back().y, 0.0);
+    // taxi_route unchanged
+    ASSERT_EQ(s.airfield.taxi_route.size(), 2u);
 }
 
 TEST(ScenarioLoader, EmptyScenarioThrows) {

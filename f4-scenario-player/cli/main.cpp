@@ -2,6 +2,7 @@
 //
 //   f4-scenario-player <scenario.json>
 //   f4-scenario-player <scenario.json> --screenshot out.png
+//   f4-scenario-player <scenario.json> --run --speed 4 --shot-at 30 --screenshot out.png
 //   f4-scenario-player <scenario.json> --width 1920 --height 1080
 //
 // Loads the scenario, initializes the simulation (spawns aircraft, loads
@@ -22,6 +23,10 @@ int main(int argc, char** argv) {
     std::string scenario_path;
     std::string screenshot_path;
     bool exit_after_screenshot = false;
+    bool start_running = false;
+    bool start_follow = false;
+    double speed = 1.0;
+    double shot_at_sec = 1.5;
     int window_w = 1600;
     int window_h = 900;
 
@@ -30,6 +35,14 @@ int main(int argc, char** argv) {
         if (a == "--screenshot" && i + 1 < argc) {
             screenshot_path = argv[++i];
             exit_after_screenshot = true;
+        } else if (a == "--run") {
+            start_running = true;
+        } else if (a == "--follow") {
+            start_follow = true;
+        } else if (a == "--speed" && i + 1 < argc) {
+            speed = std::atof(argv[++i]);
+        } else if (a == "--shot-at" && i + 1 < argc) {
+            shot_at_sec = std::atof(argv[++i]);
         } else if (a == "--width" && i + 1 < argc) {
             window_w = std::atoi(argv[++i]);
         } else if (a == "--height" && i + 1 < argc) {
@@ -76,8 +89,12 @@ int main(int argc, char** argv) {
         return 2;
     }
 
+    app.set_time_scale(speed);
+    if (start_running) app.set_paused(false);
+    if (start_follow) app.set_follow_camera(true);
+
     if (exit_after_screenshot) {
-        app.schedule_screenshot(1.5f, screenshot_path);
+        app.schedule_screenshot(static_cast<float>(shot_at_sec), screenshot_path);
     }
 
     app.run();
