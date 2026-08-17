@@ -182,7 +182,7 @@ void PlayerApp::Impl::build_mesh_for_model(int parent_index) {
     const auto& cb = db.color_bank();
 
     // Delegate mesh construction to f4-renderer.
-    auto raylib_meshes = f4::renderer::build_raylib_meshes(geom, cb);
+    auto raylib_meshes = f4::renderer::build_raylib_meshes(geom, cb, f4::renderer::model_vertex_to_raylib);
     auto mesh_entries = f4::renderer::build_mesh_entries(geom, raylib_meshes);
 
     MeshCacheEntry entry;
@@ -428,8 +428,8 @@ void PlayerApp::Impl::draw_visual_entities() {
         };
 
         const Matrix model_matrix = MatrixMultiply(
-            MatrixTranslate(pos_rh.x, pos_rh.y, pos_rh.z),
-            QuaternionToMatrix(q_rh)
+            QuaternionToMatrix(q_rh),
+            MatrixTranslate(pos_rh.x, pos_rh.y, pos_rh.z)
         );
 
         for (const auto& me : cache_it->second.meshes) {

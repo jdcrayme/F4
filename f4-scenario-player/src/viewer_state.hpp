@@ -47,10 +47,6 @@ inline Vector3 enu_to_raylib_v3(double east_ft, double north_ft, double up_ft) n
     return Vector3{v.x, v.y, v.z};
 }
 
-inline Vector3 model_vertex_to_raylib_v3(float x, float y, float z) noexcept {
-    const auto v = f4::renderer::model_vertex_to_raylib(x, y, z);
-    return Vector3{v.x, v.y, v.z};
-}
 
 struct PlayerApp::Impl {
     // ── Window ────────────────────────────────────────────────────────
