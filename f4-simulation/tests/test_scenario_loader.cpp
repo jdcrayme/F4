@@ -458,3 +458,62 @@ TEST(ScenarioLoader, FeatureWithNonZeroHeadingParses) {
     EXPECT_DOUBLE_EQ(s.airfield_features[0].heading_rad, 1.5707963267948966);
     EXPECT_DOUBLE_EQ(s.airfield_features[0].position.x, 100.0);
 }
+
+// ============================================================================
+// airbase_source block
+// ============================================================================
+
+TEST(ScenarioLoader, AirbaseSourceIsParsed) {
+    const auto json = R"({
+        "name": "src_test",
+        "aircraft": [
+            {"callsign":"EAGLE1","aircraft_config_path":"f16.json",
+             "aircraft_name":"F-16C_50","vis_type_index":1052,
+             "parking":"auto","parking_index":2,
+             "parking_spot":{"x":0,"y":0,"z":0},"heading_rad":0,"initial_fuel_lbs":6500}
+        ],
+        "airbase_source": {
+            "world_json": "korea.world.json",
+            "grid_x": 626, "grid_y": 475,
+            "active_heading_deg": 20
+        }
+    })";
+    auto s = load_scenario_from_string(json);
+    EXPECT_TRUE(s.has_airbase_source);
+    EXPECT_EQ(s.airbase_source.grid_x, 626);
+    EXPECT_EQ(s.airbase_source.grid_y, 475);
+    EXPECT_EQ(s.airbase_source.active_heading_deg, 20);
+    EXPECT_EQ(s.airbase_source.world_json_path, "korea.world.json");
+    ASSERT_EQ(s.aircraft.size(), 1u);
+    EXPECT_TRUE(s.aircraft[0].parking_auto);
+    EXPECT_EQ(s.aircraft[0].parking_index, 2);
+}
+
+TEST(ScenarioLoader, AirbaseSourceWithoutWorldJsonThrows) {
+    const auto json = R"({
+        "name": "bad_src",
+        "aircraft": [
+            {"callsign":"E1","aircraft_config_path":"f16.json",
+             "aircraft_name":"F-16","vis_type_index":1052,
+             "parking_spot":{"x":0,"y":0,"z":0},"heading_rad":0,"initial_fuel_lbs":1}
+        ],
+        "airbase_source": { "grid_x": 1, "grid_y": 2 }
+    })";
+    EXPECT_THROW(load_scenario_from_string(json), std::runtime_error);
+}
+
+TEST(ScenarioLoader, AirbaseSourceRelaxesTaxiRouteRequirement) {
+    // With airbase_source, a scenario may omit the hand-authored airfield
+    // entirely (runway/taxi come from the world JSON at sim init).
+    const auto json = R"({
+        "name": "derived_only",
+        "aircraft": [
+            {"callsign":"E1","aircraft_config_path":"f16.json",
+             "aircraft_name":"F-16","vis_type_index":1052,
+             "parking":"auto","parking_spot":{"x":0,"y":0,"z":0},"heading_rad":0,"initial_fuel_lbs":1}
+        ],
+        "airbase_source": { "world_json": "w.json" }
+    })";
+    auto s = load_scenario_from_string(json);
+    EXPECT_TRUE(s.airfield.taxi_route.empty());   // derived later, at sim init
+}

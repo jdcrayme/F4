@@ -54,6 +54,9 @@ public:
     /// Camera follows the aircraft each frame (the C toggle). Before run().
     void set_follow_camera(bool follow) noexcept;
 
+    /// Override the initial orbit distance (feet). Before run().
+    void set_camera_distance(double dist_ft) noexcept;
+
     /// Run the render + sim loop until window close. Blocks.
     void run();
 

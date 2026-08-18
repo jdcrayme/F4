@@ -1,4 +1,4 @@
-// f4-world-viewer/src/ground_layout_models.cpp
+// f4-renderer/src/ground_layout_models.cpp
 //
 // Pure layout-to-geometry conversion. See ground_layout_models.hpp for the
 // full rationale + coordinate convention.
@@ -24,7 +24,7 @@
 // (ground_layout_3d.cpp) consumes it and renders each primitive via
 // Raylib's BeginMode3D + DrawPlane/DrawCube/DrawLine3D.
 
-#include "ground_layout_models.hpp"
+#include <f4/renderer/ground_layout_models.hpp>
 
 #include <f4/entities/types.hpp>
 #include <f4/math/vec2.hpp>
@@ -38,7 +38,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace f4::viewer {
+namespace f4::renderer {
 
 namespace {
 
@@ -720,4 +720,4 @@ AirfieldGeometry3D build_airfield_geometry_3d(
     return out;
 }
 
-} // namespace f4::viewer
+} // namespace f4::renderer

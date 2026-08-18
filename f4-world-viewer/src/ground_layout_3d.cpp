@@ -36,6 +36,7 @@
 
 #include <f4/entities/entity.hpp>
 #include <f4/viewer/enum_text.hpp>
+#include <f4/renderer/layout_draw.hpp>
 
 // f4-models + f4-world-convert headers MUST come before raylib.h because
 // Raylib defines `PI` as a preprocessor macro that would otherwise collide
@@ -61,6 +62,13 @@
 #include <vector>
 
 namespace f4::viewer {
+// The geometry builder + draw primitives moved to f4-renderer; keep the
+// short names used throughout this file.
+using f4::renderer::AirfieldGeometry3D;
+using f4::renderer::build_airfield_geometry_3d;
+using f4::renderer::draw_layout_quad;
+using f4::renderer::draw_layout_line;
+using f4::renderer::draw_layout_marker;
 
 namespace {
 
@@ -103,56 +111,16 @@ inline Vector3 model_vertex_to_rl(float x, float y, float z) {
 // bars, building footprints). Corners are CCW from above with +Z up.
 // ---------------------------------------------------------------------------
 
-void draw_ground_quad(const LayoutQuad& q) {
-    const Vector3 v0 = enu_to_rl(q.x[0], q.y[0], q.z);
-    const Vector3 v1 = enu_to_rl(q.x[1], q.y[1], q.z);
-    const Vector3 v2 = enu_to_rl(q.x[2], q.y[2], q.z);
-    const Vector3 v3 = enu_to_rl(q.x[3], q.y[3], q.z);
-    const Color c = {q.r, q.g, q.b, q.a};
-    // Two triangles (CCW from above). Raylib's DrawTriangle3D expects
-    // CCW winding for front-facing triangles (with default culling),
-    // but we disabled backface culling below so winding doesn't matter.
-    DrawTriangle3D(v0, v1, v2, c);
-    DrawTriangle3D(v0, v2, v3, c);
-}
 
 // ---------------------------------------------------------------------------
 // Drawing — line segments (centerline dashes, taxiway centerlines)
 // ---------------------------------------------------------------------------
 
-void draw_layout_line(const LayoutLine& l) {
-    const Vector3 a = enu_to_rl(l.x0, l.y0, l.z);
-    const Vector3 b = enu_to_rl(l.x1, l.y1, l.z);
-    const Color c = {l.r, l.g, l.b, l.a};
-    DrawLine3D(a, b, c);
-}
 
 // ---------------------------------------------------------------------------
 // Drawing — labeled markers
 // ---------------------------------------------------------------------------
 
-void draw_layout_marker(const LayoutMarker& m) {
-    const Vector3 center = enu_to_rl(m.x, m.y, m.z);
-    const Color c = {m.r, m.g, m.b, m.a};
-    const float s = m.size_ft;
-    if (m.shape == 1) {
-        // Cylinder — helipad.
-        const Vector3 top = {center.x, center.y + s * 0.5f, center.z};
-        const Vector3 bot = {center.x, center.y - s * 0.05f, center.z};
-        DrawCylinderEx(bot, top, s, s, 16, c);
-        DrawCylinderWiresEx(bot, top, s, s, 16, Color{20, 20, 20, 220});
-    } else if (m.shape == 2) {
-        // Cone — placement marker (SAM, AAA, etc.).
-        const Vector3 tip = {center.x, center.y + s * 1.5f, center.z};
-        const Vector3 bot = center;
-        DrawCylinderEx(bot, tip, s, 0.0f, 12, c);
-    } else {
-        // Cube — parking spot / runway end.
-        const Vector3 size = {s * 2, s * 2, s * 2};
-        DrawCubeV(center, size, c);
-        DrawCubeWiresV(center, size, Color{20, 20, 20, 220});
-    }
-}
 
 // ---------------------------------------------------------------------------
 // Drawing — ground grid for orientation reference
@@ -183,42 +151,7 @@ void draw_ground_grid(float center_x, float center_y,
 // in the overlay pass after EndMode3D)
 // ---------------------------------------------------------------------------
 
-struct Label2D {
-    int   x, y;          // screen pixel position
-    bool  visible;
-    char  text[64];
-    Color color;
-};
 
-void collect_labels(const Camera3D& cam,
-                    const AirfieldGeometry3D& g,
-                    bool show_parking,
-                    std::vector<Label2D>& out) {
-    const auto add = [&](const LayoutMarker& m) {
-        Label2D lbl{};
-        const Vector3 rl = enu_to_rl(m.x, m.y, m.z + m.size_ft * 1.5f);
-        const Vector2 s = GetWorldToScreen(rl, cam);
-        lbl.x = static_cast<int>(s.x);
-        lbl.y = static_cast<int>(s.y);
-        lbl.visible = (s.x >= 0 && s.x < RT_W && s.y >= 0 && s.y < RT_H);
-        std::snprintf(lbl.text, sizeof(lbl.text), "%s", m.label.c_str());
-        lbl.color = Color{255, 255, 255, 220};
-        out.push_back(lbl);
-    };
-    if (show_parking) {
-        for (const auto& m : g.parking_spots) add(m);
-    }
-    for (const auto& m : g.helipads) add(m);
-    for (const auto& m : g.runway_ends) add(m);
-}
-
-void draw_labels(const std::vector<Label2D>& labels) {
-    for (const auto& lbl : labels) {
-        if (!lbl.visible) continue;
-        DrawText(lbl.text, lbl.x + 1, lbl.y + 1, 12, Color{0, 0, 0, 220});
-        DrawText(lbl.text, lbl.x, lbl.y, 12, lbl.color);
-    }
-}
 
 } // anonymous namespace
 
@@ -657,15 +590,15 @@ void ViewerApp::draw_ground_layout_3d() {
 
             // Runway surfaces + threshold bars + centerline dashes + end markers.
             if (impl_->ground_layout_3d_show_runway) {
-                for (const auto& q : g.runway_surfaces) draw_ground_quad(q);
-                for (const auto& q : g.threshold_bars) draw_ground_quad(q);
-                for (const auto& q : g.centerline_dashes) draw_ground_quad(q);
+                for (const auto& q : g.runway_surfaces) draw_layout_quad(q);
+                for (const auto& q : g.threshold_bars) draw_layout_quad(q);
+                for (const auto& q : g.centerline_dashes) draw_layout_quad(q);
                 for (const auto& m : g.runway_ends) draw_layout_marker(m);
             }
 
             // Taxiway strips + centerlines.
             if (impl_->ground_layout_3d_show_taxiways) {
-                for (const auto& q : g.taxiway_strips)      draw_ground_quad(q);
+                for (const auto& q : g.taxiway_strips)      draw_layout_quad(q);
                 for (const auto& l : g.taxiway_centerlines) draw_layout_line(l);
             }
 
@@ -683,7 +616,7 @@ void ViewerApp::draw_ground_layout_3d() {
                 !impl_->ground_layout_3d_show_models ||
                 !models_ready;
             if (draw_footprints) {
-                for (const auto& q : g.feature_footprints) draw_ground_quad(q);
+                for (const auto& q : g.feature_footprints) draw_layout_quad(q);
             }
 
             // --- Real KoreaObj 3D feature models ------------------------
@@ -814,11 +747,11 @@ void ViewerApp::draw_ground_layout_3d() {
 
         // 2D overlay — labels projected from 3D positions.
         if (impl_->ground_layout_3d_show_labels) {
-            std::vector<Label2D> labels;
-            labels.reserve(64);
-            collect_labels(impl_->gl3d_orbit_cam.camera(), g,
-                           impl_->ground_layout_3d_show_parking, labels);
-            draw_labels(labels);
+            std::vector<f4::renderer::LayoutLabel2D> labels;
+            f4::renderer::collect_layout_labels(impl_->gl3d_orbit_cam.camera(), g,
+                           impl_->ground_layout_3d_show_parking,
+                           RT_W, RT_H, 0.0f, 0.0f, 0.0f, labels);
+            f4::renderer::draw_layout_labels(labels);
         }
     }
     EndTextureMode();

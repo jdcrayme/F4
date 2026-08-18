@@ -58,6 +58,7 @@ add_library(f4-renderer STATIC
     src/symbols.cpp
     src/symbol_library.cpp
     src/entity_render.cpp
+    src/ground_layout_models.cpp
 )
 target_link_libraries(f4-renderer PUBLIC f4_warnings)
 target_include_directories(f4-renderer

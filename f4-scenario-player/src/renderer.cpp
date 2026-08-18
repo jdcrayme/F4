@@ -21,6 +21,7 @@
 #include <f4/flight/angle.hpp>
 #include <f4/models/model_database.hpp>
 #include <f4/renderer/draw_3d.hpp>
+#include <f4/renderer/layout_draw.hpp>
 #include <f4/renderer/mesh_builder.hpp>
 #include <f4/renderer/coord_transform.hpp>
 
@@ -269,17 +270,44 @@ static void draw_marker(const GeoMarker& m) {
 void PlayerApp::Impl::draw_airport() {
     if (!airport_built || !show_airport) return;
 
-    // Runway surface
-    draw_quad_3d(airport.runway_surface);
+    if (airport.has_real_layout) {
+        // Real campaign layout: draw the shared f4-renderer geometry,
+        // translated from objective-local to world ENU. (Culling was
+        // disabled by draw_visual_entities for the BSP models; enable it
+        // around these authored CCW quads is unnecessary — winding-agnostic
+        // under the disabled state.)
+        const float ox = static_cast<float>(airport.layout_origin_x);
+        const float oy = static_cast<float>(airport.layout_origin_y);
+        const float oz = static_cast<float>(airport.layout_origin_z);
+        const auto& rl = airport.real_layout;
+        for (const auto& q : rl.runway_surfaces)
+            f4::renderer::draw_layout_quad(q, ox, oy, oz);
+        for (const auto& q : rl.threshold_bars)
+            f4::renderer::draw_layout_quad(q, ox, oy, oz);
+        for (const auto& q : rl.centerline_dashes)
+            f4::renderer::draw_layout_quad(q, ox, oy, oz);
+        for (const auto& q : rl.taxiway_strips)
+            f4::renderer::draw_layout_quad(q, ox, oy, oz);
+        for (const auto& l : rl.taxiway_centerlines)
+            f4::renderer::draw_layout_line(l, ox, oy, oz);
+        for (const auto& m : rl.runway_ends)
+            f4::renderer::draw_layout_marker(m, ox, oy, oz);
+        for (const auto& m : rl.parking_spots)
+            f4::renderer::draw_layout_marker(m, ox, oy, oz);
+    } else {
+        // Synthetic airfield (hand-authored scenario).
+        // Runway surface
+        draw_quad_3d(airport.runway_surface);
 
-    // Threshold bars
-    for (const auto& b : airport.threshold_bars) {
-        draw_quad_3d(b);
-    }
+        // Threshold bars
+        for (const auto& b : airport.threshold_bars) {
+            draw_quad_3d(b);
+        }
 
-    // Centerline dashes
-    for (const auto& d : airport.centerline_dashes) {
-        draw_quad_3d(d);
+        // Centerline dashes
+        for (const auto& d : airport.centerline_dashes) {
+            draw_quad_3d(d);
+        }
     }
 
     // Taxi route lines
@@ -544,6 +572,9 @@ void PlayerApp::Impl::draw_scene() {
     ClearBackground(SKY_COLOR);
 
     BeginMode3D(orbit_cam.camera());
+    // Theater-scale scene (feet): the default 1000-unit far plane clips
+    // the airfield layout at any wide camera distance.
+    f4::renderer::extend_far_plane(orbit_cam.camera(), 1.0f, 250000.0f);
 
     // Ground plane (a big green quad at Y=0)
     DrawPlane({0, 0, 0}, {8000, 8000}, GROUND_COLOR);

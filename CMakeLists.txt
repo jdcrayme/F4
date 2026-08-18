@@ -95,6 +95,26 @@ if(NOT EXISTS "${F4_TERRAIN_DIR}/THEATER.MEA")
     set(F4_TERRAIN_DIR "${CMAKE_CURRENT_SOURCE_DIR}/f4-terrain/tests/fixtures")
 endif()
 
+# ── Real Falcon install (optional) ─────────────────────────────────────────
+# -DF4_INSTALL="D:/SteamLibrary/steamapps/common/Falcon 4.0" enables
+# regeneration of korea_real.world.json from the install's save1.cam +
+# the REAL theater object DB (FALCON4.PHD/PD -> true airbase ground
+# layouts: runways 02/20, taxi polylines, dims). Without it the bundled
+# fixture theater DB is used (highway-strip layouts — same structure).
+set(F4_INSTALL "" CACHE PATH "Path to a Falcon 4.0 install (for real campaign/theater data)")
+if(F4_INSTALL AND EXISTS "${F4_INSTALL}/terrdata/objects")
+    set(F4_REAL_WORLD_JSON "${CMAKE_BINARY_DIR}/korea_real.world.json")
+    add_custom_target(korea-real-world-json
+        COMMAND $<TARGET_FILE:cam2json>
+                "${F4_INSTALL}/campaign/SAVE/save1.cam"
+                "${F4_REAL_WORLD_JSON}"
+                --theater-data "${F4_INSTALL}/terrdata/objects"
+        DEPENDS cam2json
+        COMMENT "Converting install save1.cam + real theater DB -> korea_real.world.json"
+        VERBATIM
+    )
+endif()
+
 # .cam -> JSON
 if(TARGET cam2json)
 add_custom_target(json

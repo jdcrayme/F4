@@ -64,8 +64,10 @@ void PlayerApp::load_scenario(const std::filesystem::path& json_path) {
     // Observe the ATC traffic for the radio transcript overlay.
     impl_->radio_log.attach(*impl_->sim);
 
-    // Build the airport geometry from the scenario's airfield block.
-    impl_->airport = build_airport_geometry(impl_->scenario);
+    // Build the airport geometry from the SIMULATION's scenario — after
+    // initialize() this is the DERIVED copy (real airfield from
+    // airbase_source: true runway/taxi/parking layout, resolved parking).
+    impl_->airport = build_airport_geometry(impl_->sim->scenario());
     impl_->airport_built = true;
 
     // Set the initial camera target to the parking spot so the user
@@ -97,6 +99,10 @@ void PlayerApp::set_follow_camera(bool follow) noexcept {
     impl_->follow_aircraft = follow;
 }
 
+void PlayerApp::set_camera_distance(double dist_ft) noexcept {
+    impl_->camera_distance_override = dist_ft;
+}
+
 // ── run ────────────────────────────────────────────────────────────────────
 void PlayerApp::run() {
     if (!impl_->sim_initialized) {
@@ -116,6 +122,11 @@ void PlayerApp::run() {
     // Reset the camera to look at the parking spot.
     if (!impl_->initial_camera_set) {
         impl_->reset_camera();
+    }
+    if (impl_->camera_distance_override > 0.0) {
+        impl_->orbit_cam.set_distance(
+            static_cast<float>(impl_->camera_distance_override));
+        impl_->orbit_cam.update_from_orbit();
     }
 
     // Re-base the screenshot time to window time.

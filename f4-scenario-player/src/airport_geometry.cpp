@@ -360,16 +360,32 @@ AirportGeometry build_airport_geometry(const f4::simulation::Scenario& s) {
         ? f4::geo::WorldPosition{}
         : s.aircraft.front().parking_spot;
 
-    // Runway surface (one big dark-grey quad).
-    g.runway_surface = build_runway_surface(threshold, end, RUNWAY_WIDTH_FT);
+    // REAL layout path: the scenario derived from a campaign objective.
+    // The shared f4-renderer builder produces the true runway/taxiway/
+    // parking geometry; the synthetic runway shapes below are skipped
+    // (they would z-fight the real ones anyway).
+    if (!s.layout_lists.empty()) {
+        g.has_real_layout = true;
+        g.real_layout = f4::renderer::build_airfield_geometry_3d(s.layout_lists);
+        g.layout_origin_x = s.layout_center.x;
+        g.layout_origin_y = s.layout_center.y;
+        g.layout_origin_z = s.layout_center.z;
+    } else {
+        // Runway surface (one big dark-grey quad). Width from the layout
+        // when the hand-authored scenario somehow carries dims, else the
+        // fighter-base default.
+        const double width = s.airfield.runway_width_ft > 0.0
+                               ? s.airfield.runway_width_ft : RUNWAY_WIDTH_FT;
+        g.runway_surface = build_runway_surface(threshold, end, width);
 
-    // Threshold bars at the threshold end.
-    g.threshold_bars = build_threshold_bars(threshold, end, RUNWAY_WIDTH_FT,
-                                             N_THRESHOLD_BARS);
+        // Threshold bars at the threshold end.
+        g.threshold_bars = build_threshold_bars(threshold, end, RUNWAY_WIDTH_FT,
+                                                N_THRESHOLD_BARS);
 
-    // Centerline dashes along the runway.
-    g.centerline_dashes = build_centerline_dashes(threshold, end,
-                                                   DASH_LENGTH_FT, DASH_GAP_FT);
+        // Centerline dashes along the runway.
+        g.centerline_dashes = build_centerline_dashes(threshold, end,
+                                                      DASH_LENGTH_FT, DASH_GAP_FT);
+    }
 
     // Taxi route line strip.
     g.taxi_route_lines = build_taxi_route(s.airfield.taxi_route);

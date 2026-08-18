@@ -24,6 +24,7 @@
 
 #include <f4/simulation/scenario.hpp>
 #include <f4/geo/position.hpp>
+#include <f4/renderer/ground_layout_models.hpp>
 
 #include <vector>
 
@@ -97,6 +98,16 @@ struct AirportGeometry {
     /// Compass rose — N/E/S/W line segments centered on the scenario's
     /// parking spot. Helps the user orient themselves in the orbit view.
     std::vector<GeoLine> compass_rose;
+
+    /// REAL airbase layout (from airbase_source): objective-local
+    /// geometry from the shared f4-renderer builder + its ENU origin.
+    /// Drawn INSTEAD of the synthetic runway/taxi shapes when non-empty.
+    /// `real_layout` is empty iff the scenario had no layout_lists.
+    bool has_real_layout = false;
+    f4::renderer::AirfieldGeometry3D real_layout;
+    double layout_origin_x = 0.0;   ///< ENU feet
+    double layout_origin_y = 0.0;
+    double layout_origin_z = 0.0;
 };
 
 /// Build an AirportGeometry from a Scenario. The scenario's airfield

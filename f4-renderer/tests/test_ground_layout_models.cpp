@@ -21,7 +21,7 @@
 
 #include <gtest/gtest.h>
 
-#include "../src/ground_layout_models.hpp"
+#include <f4/renderer/ground_layout_models.hpp>
 
 #include <f4/entities/types.hpp>
 
@@ -32,12 +32,12 @@
 using f4::entities::GroundLayoutList;
 using f4::entities::GroundLayoutPoint;
 using f4::entities::FeatureEntryState;
-using f4::viewer::AirfieldGeometry3D;
-using f4::viewer::build_airfield_geometry_3d;
-using f4::viewer::is_runway_centerline_type;
-using f4::viewer::is_runway_edge_type;
-using f4::viewer::is_parking_type;
-using f4::viewer::is_taxiway_list_type;
+using f4::renderer::AirfieldGeometry3D;
+using f4::renderer::build_airfield_geometry_3d;
+using f4::renderer::is_runway_centerline_type;
+using f4::renderer::is_runway_edge_type;
+using f4::renderer::is_parking_type;
+using f4::renderer::is_taxiway_list_type;
 
 namespace {
 

@@ -79,6 +79,13 @@ ScenarioAircraft read_aircraft(f4::json::Reader& r) {
         else if (key == "parking_spot")      a.parking_spot = read_world_position(r);
         else if (key == "heading_rad")       a.heading_rad = r.read_number();
         else if (key == "initial_fuel_lbs")  a.initial_fuel_lbs = r.read_number();
+        else if (key == "parking") {         // "auto": derived spot at sim init
+            const auto mode = r.read_string();
+            if (mode == "auto") a.parking_auto = true;
+            else throw std::runtime_error("scenario: aircraft '" + a.callsign +
+                "' has unknown parking mode '" + mode + "'");
+        }
+        else if (key == "parking_index")     a.parking_index = static_cast<int>(r.read_int());
         else                                 skip_unknown(r);
     }
     return a;
@@ -134,7 +141,10 @@ ScenarioAirfield read_airfield(f4::json::Reader& r) {
         else if (key == "threshold_position")  af.threshold_position = read_world_position(r);
         else if (key == "runway_end_position") af.runway_end_position = read_world_position(r);
         else if (key == "threshold_altitude_ft")   af.threshold_altitude_ft = r.read_number();
-        else if (key == "departure_altitude_ft")   af.departure_altitude_ft = r.read_number();
+        else if (key == "departure_altitude_ft") {
+            af.departure_altitude_ft = r.read_number();
+            af.departure_overridden = true;
+        }
         else if (key == "taxi_route" || key == "taxi_in_route") {
             auto& route = (key == "taxi_route") ? af.taxi_route : af.taxi_in_route;
             r.expect('[');
@@ -188,6 +198,23 @@ Scenario parse_scenario(f4::json::Reader& r) {
             }
         } else if (key == "airfield") {
             s.airfield = read_airfield(r);
+        } else if (key == "airbase_source") {
+            s.has_airbase_source = true;
+            r.expect('{');
+            bool firstk = true;
+            while (!r.consume('}')) {
+                if (!firstk) r.expect(',');
+                firstk = false;
+                const auto k = r.read_string();
+                r.expect(':');
+                if (k == "world_json")          s.airbase_source.world_json_path = r.read_string();
+                else if (k == "grid_x")         s.airbase_source.grid_x = static_cast<int>(r.read_int());
+                else if (k == "grid_y")         s.airbase_source.grid_y = static_cast<int>(r.read_int());
+                else if (k == "name")           s.airbase_source.name = r.read_string();
+                else if (k == "active_heading_deg")
+                    s.airbase_source.active_heading_deg = static_cast<int>(r.read_int());
+                else                            skip_unknown(r);
+            }
         } else if (key == "waypoints") {
             r.expect('[');
             bool arr_first = true;
@@ -196,6 +223,11 @@ Scenario parse_scenario(f4::json::Reader& r) {
                 arr_first = false;
                 s.waypoints.push_back(read_waypoint(r));
             }
+        } else if (key == "waypoints_frame") {
+            const auto f = r.read_string();
+            if (f == "runway")       s.waypoints_runway_frame = true;
+            else if (f == "enu")     s.waypoints_runway_frame = false;
+            else throw std::runtime_error("scenario: unknown waypoints_frame '" + f + "'");
         } else if (key == "airfield_features") {
             r.expect('[');
             bool arr_first = true;
@@ -226,6 +258,10 @@ void validate(const Scenario& s) {
                 "' has invalid vis_type_index (must be > 0)");
     }
 
+    if (s.has_airbase_source && s.airbase_source.world_json_path.empty()) {
+        throw std::runtime_error("scenario: airbase_source requires 'world_json'");
+    }
+
     // Validate the flight plan (optional, but if present must be flyable).
     for (std::size_t i = 0; i < s.waypoints.size(); ++i) {
         const auto& w = s.waypoints[i];
@@ -246,7 +282,9 @@ void validate(const Scenario& s) {
             if (a.vis_type_index <= 0)
                 throw std::runtime_error("scenario: aircraft '" + a.callsign + "' has invalid vis_type_index");
         }
-        if (s.airfield.taxi_route.size() < 2)
+        // taxi_route minimum applies only to hand-authored airfields —
+        // when airbase_source is set the route is derived at sim init.
+        if (s.airfield.taxi_route.size() < 2 && !s.has_airbase_source)
             throw std::runtime_error("scenario: taxi_route must have at least 2 waypoints (start + threshold)");
     } else if (s.spawn_mode == SpawnMode::CampaignFlights) {
         if (s.world_json_path.empty())
@@ -291,6 +329,7 @@ Scenario load_scenario(const std::filesystem::path& json_path) {
     s.models_lod_path   = resolve(base_dir, s.models_lod_path);
     s.models_tex_path   = resolve(base_dir, s.models_tex_path);
     s.world_json_path   = resolve(base_dir, s.world_json_path);
+    s.airbase_source.world_json_path = resolve(base_dir, s.airbase_source.world_json_path);
     s.class_table_path  = resolve(base_dir, s.class_table_path);
     s.record_path       = resolve(base_dir, s.record_path);
 

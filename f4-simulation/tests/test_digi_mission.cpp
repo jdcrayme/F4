@@ -77,10 +77,22 @@ TEST(DigiMission, FullLoopTaxiTakeoffNavigateApproachLandParks) {
 
     auto scenario = load_scenario(scenario_path);
     ASSERT_GE(scenario.waypoints.size(), 2u);
-    ASSERT_FALSE(scenario.airfield.taxi_in_route.empty());
+    // (airfield fields are DERIVED at sim initialize from airbase_source)
 
     Simulation sim(scenario, scenario_path.parent_path());
     sim.initialize();
+
+    // After initialize() the scenario inside the sim carries the DERIVED
+    // airfield (from airbase_source): real runway, taxi routes, parking.
+    // Re-read it for the assertions below.
+    const auto& dscenario = sim.scenario();
+    ASSERT_TRUE(dscenario.has_airbase_source);
+    ASSERT_GT(dscenario.airfield.taxi_route.size(), 2u)
+        << "derived taxi route missing";
+    ASSERT_FALSE(dscenario.airfield.parking_spots.empty())
+        << "synthesized parking spots missing";
+    ASSERT_GT(dscenario.airfield.runway_length_ft, 3000.0)
+        << "real runway dims missing";
 
     // --- Tap the ATC protocol (subscribed before the first tick) ---
     std::vector<std::string> atc;
@@ -105,18 +117,28 @@ TEST(DigiMission, FullLoopTaxiTakeoffNavigateApproachLandParks) {
     ASSERT_NE(fm, nullptr);
     ASSERT_NE(tf, nullptr);
 
-    // Runway geometry for the bounds checks (Rwy 36 along x=500).
-    const double rwx = scenario.airfield.threshold_position.x;
-    const double thr_y = scenario.airfield.threshold_position.y;
-    const double end_y = scenario.airfield.runway_end_position.y;
+    // Runway geometry for the bounds checks (derived, ANY heading):
+    // project onto the runway's along/cross axes.
+    const auto& thr = dscenario.airfield.threshold_position;
+    const double hdg = dscenario.airfield.runway_heading_rad;
+    const double ux = std::sin(hdg), uy = std::cos(hdg);   // along axis
+    const double cx = std::cos(hdg), cy = -std::sin(hdg);  // cross axis
+    const double rwy_len = std::hypot(
+        dscenario.airfield.runway_end_position.x - thr.x,
+        dscenario.airfield.runway_end_position.y - thr.y);
+    auto along_of = [&](const f4::geo::WorldPosition& p) {
+        return (p.x - thr.x) * ux + (p.y - thr.y) * uy;
+    };
+    auto cross_of = [&](const f4::geo::WorldPosition& p) {
+        return (p.x - thr.x) * cx + (p.y - thr.y) * cy;
+    };
 
-    // Taxi corridor legs: spawn -> taxi_route... (the route's first wp IS
-    // the spawn in this scenario, but include the spawn explicitly).
+    // Taxi corridor legs: spawn -> derived taxi_route waypoints.
     std::vector<std::pair<std::pair<double,double>, std::pair<double,double>>> legs;
     {
-        auto prev = std::pair<double,double>{scenario.aircraft.front().parking_spot.x,
-                                             scenario.aircraft.front().parking_spot.y};
-        for (const auto& wp : scenario.airfield.taxi_route) {
+        auto prev = std::pair<double,double>{dscenario.aircraft.front().parking_spot.x,
+                                             dscenario.aircraft.front().parking_spot.y};
+        for (const auto& wp : dscenario.airfield.taxi_route) {
             legs.push_back({prev, {wp.x, wp.y}});
             prev = {wp.x, wp.y};
         }
@@ -176,10 +198,9 @@ TEST(DigiMission, FullLoopTaxiTakeoffNavigateApproachLandParks) {
                 touchdown_pos = pos;
             }
             if (brain->landing().state() == LandingState::OnFinal) {
-                const double dist_to_thr = thr_y - pos.y;
-                if (dist_to_thr > 3000.0) {  // tracking segment, not the flare
+                if (along_of(pos) < -3000.0) {  // tracking segment, not the flare
                     max_final_lateral_ft = std::max(max_final_lateral_ft,
-                                                    std::abs(pos.x - rwx));
+                                                    std::abs(cross_of(pos)));
                 }
             }
         } else if (brain->phase() == BrainComponent::Phase::Complete) {
@@ -215,18 +236,16 @@ TEST(DigiMission, FullLoopTaxiTakeoffNavigateApproachLandParks) {
 
     // --- Takeoff ---
     ASSERT_TRUE(saw_liftoff) << "never lifted off";
-    EXPECT_NEAR(liftoff_pos.x, rwx, 100.0)
-        << "liftoff off-centerline: x=" << liftoff_pos.x;
-    EXPECT_GE(liftoff_pos.y, thr_y - 100.0);
-    EXPECT_LE(liftoff_pos.y, end_y + 300.0)
-        << "liftoff beyond the runway end: y=" << liftoff_pos.y;
+    EXPECT_LT(std::abs(cross_of(liftoff_pos)), 150.0)
+        << "liftoff off-centerline: cross=" << cross_of(liftoff_pos);
+    EXPECT_GE(along_of(liftoff_pos), -400.0);   // past the threshold
+    EXPECT_LE(along_of(liftoff_pos), rwy_len + 300.0)
+        << "liftoff beyond the runway end: along=" << along_of(liftoff_pos);
 
     // --- Enroute: every waypoint captured ---
-    // (The index reaches size() after the final capture — i.e. it must at
-    // least have REACHED the last waypoint index, size-1.)
-    EXPECT_GE(max_wp_index, scenario.waypoints.size() - 1)
+    EXPECT_GE(max_wp_index, dscenario.waypoints.size() - 1)
         << "did not reach the last flight-plan waypoint (index "
-        << max_wp_index << " of " << scenario.waypoints.size() - 1 << ")";
+        << max_wp_index << " of " << dscenario.waypoints.size() - 1 << ")";
 
     // --- Approach: tracks the extended centerline ---
     // Tolerance note: at ~250 kts with a 20-deg bank limit the jet's turn
@@ -237,18 +256,18 @@ TEST(DigiMission, FullLoopTaxiTakeoffNavigateApproachLandParks) {
 
     // --- Landing ---
     ASSERT_TRUE(saw_touchdown) << "never touched down";
-    EXPECT_NEAR(touchdown_pos.x, rwx, 500.0)
-        << "touchdown off-centerline: x=" << touchdown_pos.x;
-    EXPECT_GE(touchdown_pos.y, thr_y - 2500.0)
-        << "touched down far short of the runway: y=" << touchdown_pos.y;
-    EXPECT_LE(touchdown_pos.y, end_y + 800.0)
-        << "touched down beyond the runway: y=" << touchdown_pos.y;
+    EXPECT_LT(std::abs(cross_of(touchdown_pos)), 800.0)
+        << "touchdown off-centerline: cross=" << cross_of(touchdown_pos);
+    EXPECT_GE(along_of(touchdown_pos), -2500.0)
+        << "touched down far short of the runway: along=" << along_of(touchdown_pos);
+    EXPECT_LE(along_of(touchdown_pos), rwy_len + 800.0)
+        << "touched down beyond the runway: along=" << along_of(touchdown_pos);
 
     // --- End state: parked at the original spot, stopped ---
     ASSERT_TRUE(completed) << "mission did not complete (final phase "
                            << brain->phase_name() << ", state "
                            << brain->state_name() << ")";
-    const auto& parking = scenario.aircraft.front().parking_spot;
+    const auto& parking = dscenario.aircraft.front().parking_spot;
     const auto& end_pos = tf->position;
     EXPECT_NEAR(end_pos.x, parking.x, 120.0) << "not at the parking spot";
     EXPECT_NEAR(end_pos.y, parking.y, 120.0) << "not at the parking spot";

@@ -75,3 +75,11 @@ add_executable(test_entity_render test_entity_render.cpp ${IMGUI_SOURCES})
 target_include_directories(test_entity_render PRIVATE ${IMGUI_DIR} ${IMGUI_DIR}/backends)
 target_link_libraries(test_entity_render PRIVATE f4-renderer GTest::gtest_main)
 add_test(NAME entity_render COMMAND test_entity_render)
+
+# ── Ground-layout geometry builder (moved from f4-world-viewer) ─────────────
+# Pure data-model tests: no GL context, but the executable still needs the
+# ImGui sources because f4-renderer.a references ImGui symbols.
+add_executable(test_ground_layout_models test_ground_layout_models.cpp ${IMGUI_SOURCES})
+target_include_directories(test_ground_layout_models PRIVATE ${IMGUI_DIR} ${IMGUI_DIR}/backends)
+target_link_libraries(test_ground_layout_models PRIVATE f4-renderer GTest::gtest_main)
+add_test(NAME ground_layout_models COMMAND test_ground_layout_models)

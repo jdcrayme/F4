@@ -78,7 +78,8 @@
 #include <vector>
 
 #include "symbols.hpp"  // Backward-compat aliases → f4::renderer::SymbolKind etc.
-#include "ground_layout_models.hpp"  // AirfieldGeometry3D + builder
+#include <f4/renderer/ground_layout_models.hpp>  // AirfieldGeometry3D + builder (shared)
+using f4::renderer::AirfieldGeometry3D;
 
 namespace f4::viewer {
 

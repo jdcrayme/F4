@@ -22,6 +22,7 @@ f4_simulation_add_test(test_scenario_loader        test_scenario_loader.cpp)
 f4_simulation_add_test(test_campaign_bridge        test_campaign_bridge.cpp)
 f4_simulation_add_test(test_feature_spawning       test_feature_spawning.cpp)
 f4_simulation_add_test(test_frames                 test_frames.cpp)
+f4_simulation_add_test(test_real_layout_derivation test_real_layout_derivation.cpp)
 f4_simulation_add_test(test_digi_mission           test_digi_mission.cpp)
 
 # The DIGI end-to-end mission test runs the build-configured

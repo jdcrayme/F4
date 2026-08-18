@@ -51,6 +51,13 @@ Simulation::Simulation(Scenario scenario, std::filesystem::path asset_dir)
 Simulation::~Simulation() = default;
 
 void Simulation::initialize() {
+    // Real-airbase derivation runs FIRST: it rewrites scenario_.airfield
+    // (runway, taxi routes, parking) and resolves aircraft parking:auto
+    // spawns before any entity is created.
+    if (scenario_.has_airbase_source) {
+        derive_real_airbase();
+    }
+
     // Order matters: ATC must be subscribed BEFORE the brain's first update()
     // tick (which publishes a TaxiRequest). The brain's initialize() runs
     // lazily on first update(), so we just need StubATC alive before tick().
@@ -147,7 +154,9 @@ void Simulation::spawn_from_scenario_list() {
                 /*alt_ft=*/sc.parking_spot.z,
                 /*vt_ftps=*/0.0,
                 /*hdg_rad=*/hdg,
-                /*inAir=*/false);
+                /*inAir=*/false,
+                /*north_ft=*/sc.parking_spot.y,
+                /*east_ft=*/sc.parking_spot.x);
         // Set the ground plane at the parking spot's altitude so the FM sits
         // on the ground instead of falling. set_ground takes the terrain's
         // MSL altitude (positive up) — the EOM/gear internally convert to
@@ -300,6 +309,93 @@ void Simulation::spawn_airfield_features() {
         vis.active_lod = 0;
 
         feature_entities_.push_back(h.id());
+    }
+}
+
+void Simulation::derive_real_airbase() {
+    // Load the referenced world JSON and find the selected objective.
+    f4::world::WorldState ws;
+    ws.load(scenario_.airbase_source.world_json_path);
+
+    const f4::world::ObjectiveState* obj = nullptr;
+    for (const auto& o : ws.objectives) {
+        if (o.x == scenario_.airbase_source.grid_x &&
+            o.y == scenario_.airbase_source.grid_y) {
+            obj = &o;
+            break;
+        }
+    }
+    if (!obj && !scenario_.airbase_source.name.empty()) {
+        // Objectives carry nameid, not display names; treat the selector
+        // as a numeric nameid first, then give up with a precise error.
+        char* end = nullptr;
+        const long nid = std::strtol(scenario_.airbase_source.name.c_str(), &end, 10);
+        if (end && *end == 0) {
+            for (const auto& o : ws.objectives) {
+                if (o.nameid == static_cast<int16_t>(nid) && !o.ground_layout.empty()) {
+                    obj = &o;
+                    break;
+                }
+            }
+        }
+    }
+    if (!obj) {
+        throw std::runtime_error(
+            "Simulation::derive_real_airbase: objective not found in '" +
+            scenario_.airbase_source.world_json_path.string() + "'");
+    }
+
+    const int runway_id = scenario_.airbase_source.active_heading_deg / 10;
+    auto derived = derive_airfield_from_objective(*obj, runway_id);
+    if (!derived) {
+        throw std::runtime_error(
+            "Simulation::derive_real_airbase: selected objective has no usable "
+            "runway ground layout");
+    }
+
+    // Keep hand-authored settings the layout cannot provide (e.g. a custom
+    // departure altitude), then take the derived airfield.
+    if (scenario_.airfield.departure_overridden) {
+        derived->departure_altitude_ft = scenario_.airfield.departure_altitude_ft;
+    }
+    scenario_.airfield = std::move(*derived);
+
+    // Stash the raw layout for the renderer (objective-local lists + the
+    // objective's ENU position).
+    scenario_.layout_lists = obj->ground_layout;
+    constexpr double FT_PER_GRID = 1024.0;
+    scenario_.layout_center = f4::geo::WorldPosition(
+        static_cast<double>(obj->x) * FT_PER_GRID,
+        static_cast<double>(obj->y) * FT_PER_GRID,
+        static_cast<double>(obj->z));
+
+    // Rotate runway-frame waypoints into ENU about the derived threshold.
+    if (scenario_.waypoints_runway_frame) {
+        const double hs = scenario_.airfield.runway_heading_rad;
+        const double sh = std::sin(hs), ch = std::cos(hs);
+        const auto& thr = scenario_.airfield.threshold_position;
+        for (auto& wp : scenario_.waypoints) {
+            const double rx = wp.position.x;   // right of heading
+            const double ry = wp.position.y;   // downrange
+            wp.position.x = thr.x + rx * ch + ry * sh;
+            wp.position.y = thr.y - rx * sh + ry * ch;
+            // z (MSL) authored absolute — unchanged.
+        }
+        scenario_.waypoints_runway_frame = false;   // normalized
+    }
+
+    // Resolve parking:auto aircraft to the synthesized spots.
+    for (auto& ac : scenario_.aircraft) {
+        if (!ac.parking_auto) continue;
+        if (scenario_.airfield.parking_spots.empty()) {
+            throw std::runtime_error(
+                "Simulation::derive_real_airbase: aircraft '" + ac.callsign +
+                "' requests parking:auto but the layout yielded no spots");
+        }
+        const auto idx = static_cast<std::size_t>(ac.parking_index) %
+                         scenario_.airfield.parking_spots.size();
+        ac.parking_spot = scenario_.airfield.parking_spots[idx].position;
+        ac.heading_rad = scenario_.airfield.parking_spots[idx].heading_rad;
     }
 }
 

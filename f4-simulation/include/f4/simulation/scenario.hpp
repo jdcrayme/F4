@@ -19,6 +19,7 @@
 #pragma once
 
 #include <f4/geo/position.hpp>
+#include <f4/entities/types.hpp>   // GroundLayoutList (real-airbase rendering)
 
 #include <cstdint>
 #include <filesystem>
@@ -36,6 +37,18 @@ struct ScenarioAircraft {
     geo::WorldPosition parking_spot{};  ///< ENU feet, relative to theater datum
     double      heading_rad{0.0};       ///< initial magnetic heading
     double      initial_fuel_lbs{0.0};
+    /// "auto": take parking_spot + heading from the derived airfield's
+    /// synthesized spots (ignored when airbase_source is absent).
+    bool parking_auto{false};
+    int parking_index{0};               ///< which derived spot (0-based)
+};
+
+/// One parking spot on the airfield (derived from the ground layout —
+/// real PHD data where available, synthesized at the ramp end of the taxi
+/// polyline when the theater DB has no parking lists).
+struct ScenarioParkingSpot {
+    geo::WorldPosition position;        ///< ENU feet
+    double heading_rad{0.0};            ///< facing (compass, ready to taxi out)
 };
 
 /// The active airfield for the scenario.
@@ -47,10 +60,19 @@ struct ScenarioAirfield {
     geo::WorldPosition runway_end_position{};    ///< far end of runway (ENU feet)
     double threshold_altitude_ft{0.0};           ///< threshold elevation MSL
     double departure_altitude_ft{2500.0};        ///< climb-to altitude before "Done"
+    bool departure_overridden{false};            ///< JSON carried an explicit value
     std::vector<geo::WorldPosition> taxi_route;  ///< parking -> hold short (last wp IS the hold-short)
     /// Taxi-in route after landing: runway exit -> parking. Optional —
     /// when empty the LandingModule parks on the runway (M3 may require it).
     std::vector<geo::WorldPosition> taxi_in_route;
+
+    /// Runway dimensions from PLT_RUNWAY_DIM (0 = unknown; renderers fall
+    /// back to a default width and threshold->end length).
+    double runway_length_ft{0.0};
+    double runway_width_ft{0.0};
+
+    /// Parking spots (derived; empty for hand-authored scenarios).
+    std::vector<ScenarioParkingSpot> parking_spots;
 };
 
 /// One waypoint in the scenario's flight plan (air phase). Flown in order
@@ -89,6 +111,20 @@ enum class SpawnMode {
     CampaignFlights,
 };
 
+/// Where a scenario's airfield comes from: a real campaign world JSON.
+/// The Simulation loads the referenced objective's ground layout at
+/// initialize() and DERIVES the airfield (runway, taxi routes, parking)
+/// from it, overriding any hand-authored airfield block.
+struct ScenarioAirbaseSource {
+    std::filesystem::path world_json_path;  ///< world JSON (cam2json output)
+    /// Objective selection: grid coordinates (exact match preferred) or a
+    /// name substring fallback ("Kunsan").
+    int grid_x{-1};
+    int grid_y{-1};
+    std::string name;                       ///< substring match fallback
+    int active_heading_deg{20};             ///< desired runway direction (020)
+};
+
 /// A complete scenario.
 struct Scenario {
     std::string name;                   ///< "takeoff_kunsan"
@@ -113,11 +149,31 @@ struct Scenario {
     std::vector<ScenarioAircraft> aircraft;
     ScenarioAirfield airfield;
 
+    /// Real-airbase source (optional). When set, Simulation::initialize
+    /// derives scenario_.airfield from the referenced objective's ground
+    /// layout (see campaign_bridge) and populates layout_lists/layout_center
+    /// below for the renderer.
+    ScenarioAirbaseSource airbase_source;
+    bool has_airbase_source{false};
+
+    /// The real ground layout (objective-local lists) when derived from
+    /// airbase_source — for the renderer (shared f4-renderer builder).
+    /// layout_center is the objective's ENU position; list points are
+    /// feet offsets from it.
+    std::vector<f4::entities::GroundLayoutList> layout_lists;
+    geo::WorldPosition layout_center{};
+
     /// Air-phase flight plan (optional). Empty = no route; the mission ends
     /// when TakeoffModule completes. When present, the NavigationModule
     /// flies the waypoints in order and hands off to the LandingModule at
     /// the last one (the approach entry fix).
     std::vector<ScenarioWaypoint> waypoints;
+
+    /// Waypoint frame: false (default) = ENU absolute. true = runway frame:
+    /// x = right of the runway heading, y = downrange from the threshold
+    /// (feet); z stays MSL. Rotated into ENU by derive_real_airbase().
+    /// Lets one template scenario fly any runway direction.
+    bool waypoints_runway_frame{false};
 
     /// Static feature placements on the airfield — buildings, runway sections,
     /// taxiways, towers, hangars. Spawned as TransformComponent +

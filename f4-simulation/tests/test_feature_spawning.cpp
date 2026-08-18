@@ -276,8 +276,10 @@ TEST(FeatureSpawning, EmptyFeaturesArraySpawnsNothing) {
 // === Test 7: Feature transform's heading_rad is encoded as a Z-up quaternion ===
 TEST(FeatureSpawning, FeatureHeadingIsEncodedAsZUpQuaternion) {
     // A feature with heading_rad = pi/2 (90 degrees, pointing east).
-    // The TransformComponent's quaternion should encode a 90-degree rotation
-    // about the Z-up axis: q = (cos(pi/4), 0, 0, sin(pi/4)) ≈ (0.707, 0, 0, 0.707).
+    // COMPASS convention (see f4/simulation/frames.hpp): headings are
+    // clockwise from north, which in ENU is a NEGATIVE rotation about
+    // +Z-up: q = (cos(pi/4), 0, 0, -sin(pi/4)). (The old positive-sign
+    // expectation encoded the mirrored-heading rendering bug.)
     const std::string features = R"([
         {"name":"Rotated","vis_type_index":143,"position":{"x":0,"y":0,"z":0},"heading_rad":1.5707963267948966}
     ])";
@@ -292,11 +294,11 @@ TEST(FeatureSpawning, FeatureHeadingIsEncodedAsZUpQuaternion) {
     auto* tf = h.get<TransformComponent>();
     ASSERT_NE(tf, nullptr);
 
-    // q = (cos(h/2), 0, 0, sin(h/2)) for heading h about Z-up.
+    // q = (cos(h/2), 0, 0, -sin(h/2)) for compass heading h.
     EXPECT_NEAR(tf->qw, 0.7071067811865476, 1e-9);
     EXPECT_NEAR(tf->qx, 0.0, 1e-9);
     EXPECT_NEAR(tf->qy, 0.0, 1e-9);
-    EXPECT_NEAR(tf->qz, 0.7071067811865476, 1e-9);
+    EXPECT_NEAR(tf->qz, -0.7071067811865476, 1e-9);
 
     std::filesystem::remove(path);
 }

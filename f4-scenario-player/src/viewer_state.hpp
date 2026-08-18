@@ -125,6 +125,7 @@ struct PlayerApp::Impl {
     bool show_taxi_in = true;      // purple runway-exit -> parking route
     bool show_radio = true;        // ATC transcript panel
     bool follow_aircraft = false;  // camera tracks the aircraft (C)
+    double camera_distance_override = -1.0;  // CLI --camera-distance (ft)
 
     // ── ATC radio transcript (observes the bus) ───────────────────────
     RadioLog radio_log;

@@ -27,6 +27,7 @@ int main(int argc, char** argv) {
     bool start_follow = false;
     double speed = 1.0;
     double shot_at_sec = 1.5;
+    double camera_distance = -1.0;   // <0 = scenario default
     int window_w = 1600;
     int window_h = 900;
 
@@ -43,6 +44,8 @@ int main(int argc, char** argv) {
             speed = std::atof(argv[++i]);
         } else if (a == "--shot-at" && i + 1 < argc) {
             shot_at_sec = std::atof(argv[++i]);
+        } else if (a == "--camera-distance" && i + 1 < argc) {
+            camera_distance = std::atof(argv[++i]);
         } else if (a == "--width" && i + 1 < argc) {
             window_w = std::atoi(argv[++i]);
         } else if (a == "--height" && i + 1 < argc) {
@@ -92,6 +95,7 @@ int main(int argc, char** argv) {
     app.set_time_scale(speed);
     if (start_running) app.set_paused(false);
     if (start_follow) app.set_follow_camera(true);
+    if (camera_distance > 0.0) app.set_camera_distance(camera_distance);
 
     if (exit_after_screenshot) {
         app.schedule_screenshot(static_cast<float>(shot_at_sec), screenshot_path);

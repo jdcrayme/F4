@@ -85,6 +85,11 @@ configure_file(
     ${CMAKE_BINARY_DIR}/scenarios/digi_full_mission.json
     @ONLY
 )
+# The DIGI mission scenario needs the real world JSON (generated from the
+# Falcon install when F4_INSTALL is set).
+if(TARGET korea-real-world-json)
+    add_dependencies(f4_scenario_player_lib korea-real-world-json)
+endif()
 
 # ── Tests ──────────────────────────────────────────────────────────────────
 option(F4_SCENARIO_PLAYER_BUILD_TESTS "Build f4-scenario-player unit tests" ON)

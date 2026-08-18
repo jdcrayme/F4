@@ -107,8 +107,16 @@ public:
               double initialAltitude_ft,
               double initialVt_ftps,
               double initialHeading_rad,
-              bool inAir) {
+              bool inAir,
+              double initialNorth_ft = 0.0,
+              double initialEast_ft = 0.0) {
         fm_.init(cfg, initialAltitude_ft, initialVt_ftps, initialHeading_rad, inAir);
+        // World placement: the FM integrates from (0,0) by default; hosts
+        // with an absolute ENU spawn (e.g. a campaign airfield at grid
+        // (234,655)) must seed the NED position or every AI reads the
+        // aircraft at the theater origin.
+        fm_.state().kin.x = initialNorth_ft;
+        fm_.state().kin.y = initialEast_ft;
         initialized_ = true;
     }
 

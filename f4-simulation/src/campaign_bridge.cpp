@@ -75,6 +75,29 @@ find_layout(const f4::world::ObjectiveState& obj, uint8_t type) {
 
 } // namespace
 
+namespace {
+
+// Compass heading (rad) of a 2D ENU direction vector (0 = north, CW +).
+double compass_heading(double dx, double dy) {
+    return std::atan2(dx, dy);
+}
+
+double wrap_2pi(double a) {
+    constexpr double TAU = 6.283185307179586476925;
+    while (a < 0.0) a += TAU;
+    while (a >= TAU) a -= TAU;
+    return a;
+}
+
+double heading_diff_deg(double a, double b) {
+    constexpr double D2R = 0.017453292519943295;
+    constexpr double R2D = 57.29577951308232;
+    const double d = std::abs(wrap_2pi(a * D2R) - wrap_2pi(b * D2R)) * R2D;
+    return std::min(d, 360.0 - d);
+}
+
+} // namespace
+
 std::optional<ScenarioAirfield>
 derive_airfield_from_objective(const f4::world::ObjectiveState& obj,
                                 int active_runway_id) {
@@ -89,68 +112,206 @@ derive_airfield_from_objective(const f4::world::ObjectiveState& obj,
 
     ScenarioAirfield af;
     af.active_runway_id = active_runway_id;
-    af.active_runway_name = "Rwy " + std::to_string(active_runway_id);
 
-    // The runway list's heading_deg comes from the on-disk sin/cos pair
-    // (see theater_data.cpp:PtHeaderData). Convert to radians.
     constexpr double DEG_TO_RAD = 0.017453292519943295;
-    af.runway_heading_rad = runway_list->heading_deg * DEG_TO_RAD;
 
-    // Objective center → ENU feet. The runway points are offsets from
+    // Objective center -> ENU feet. The runway points are offsets from
     // this center.
     const auto obj_center = grid_to_enu(obj.x, obj.y, obj.z);
 
-    // First runway point = threshold; last = far end. The on-disk format
-    // stores them in order from threshold to rollout end.
+    // --- Real-PHD structure (verified against the Korea theater DB) -----
+    //
+    // A PLT_RUNWAY list mixes point kinds in a fixed order:
+    //   [0] PT_RUNWAY      far-end marker for the list's heading
+    //   [1] PT_TAKEOFF     takeoff position (~305 ft behind the painted
+    //                       threshold; the reciprocal list's PT_RUNWAY
+    //                       marker sits essentially on it)
+    //   [2] PT_TAKE_RUNWAY hold-short / runway access point
+    //   [3..] PT_TAXI      an ORDERED taxi polyline, stored RUNWAY->RAMP
+    //
+    // PLT_RUNWAY_DIM carries the runway rectangle as 4 corner points
+    // (its own heading_deg is garbage — use the quad geometry).
+    //
+    // The old code assumed points were ordered [threshold .. rollout end]
+    // — provably wrong on real data (it read the far-end marker as the
+    // threshold and a mid-field taxi node as the runway end).
+    const auto* chosen = runway_list;
+    {
+        // Pick the runway-direction list closest to the requested active
+        // runway (id 02 <-> heading 020 deg). Falls back to the first.
+        const double want = static_cast<double>(active_runway_id) * 10.0;
+        const auto* best = runway_list;
+        double best_d = 1e9;
+        for (const auto& l : obj.ground_layout) {
+            if (l.type != f4::world_convert::PLT_RUNWAY) continue;
+            const double d = heading_diff_deg(l.heading_deg, want);
+            if (d < best_d) { best_d = d; best = &l; }
+        }
+        chosen = best;
+    }
+
+    const f4::entities::GroundLayoutPoint* far_end = nullptr;
+    const f4::entities::GroundLayoutPoint* takeoff = nullptr;
+    const f4::entities::GroundLayoutPoint* access = nullptr;
+    std::vector<const f4::entities::GroundLayoutPoint*> taxi;
+    for (const auto& p : chosen->points) {
+        switch (p.type) {
+            case f4::world_convert::PT_RUNWAY:      if (!far_end) far_end = &p; break;
+            case f4::world_convert::PT_TAKEOFF:     if (!takeoff) takeoff = &p; break;
+            case f4::world_convert::PT_TAKE_RUNWAY: if (!access) access = &p; break;
+            case f4::world_convert::PT_TAXI:        taxi.push_back(&p); break;
+            default: break;
+        }
+    }
+
+    af.runway_heading_rad = chosen->heading_deg * DEG_TO_RAD;
+    {
+        // "Rwy 02" from heading 020 deg.
+        const int num = static_cast<int>(std::lround(chosen->heading_deg / 10.0)) % 36;
+        af.active_runway_name = "Rwy " + std::string(num < 10 ? "0" : "") + std::to_string(num);
+    }
+
+    if (takeoff && far_end) {
+        // Real structure: derive everything from the decoded points.
+        const double hs = af.runway_heading_rad;
+        const double hx = std::sin(hs), hy = std::cos(hs);
+
+        // Threshold: nearest OTHER list's PT_RUNWAY marker (the reciprocal
+        // end sits ~305 ft ahead of the takeoff position); fallback is a
+        // 300-ft projection along the heading.
+        f4::geo::WorldPosition threshold =
+            add_offset(obj_center, takeoff->x + 300.0f * static_cast<float>(hx),
+                                   takeoff->y + 300.0f * static_cast<float>(hy));
+        double best_d = 1e9;
+        for (const auto& l : obj.ground_layout) {
+            if (l.type != f4::world_convert::PLT_RUNWAY || &l == chosen) continue;
+            for (const auto& p : l.points) {
+                if (p.type != f4::world_convert::PT_RUNWAY) continue;
+                const double d = std::hypot(p.x - takeoff->x, p.y - takeoff->y);
+                if (d < best_d && d < 1200.0) {
+                    best_d = d;
+                    threshold = add_offset(obj_center, p.x, p.y);
+                }
+            }
+        }
+
+        af.threshold_position = threshold;
+        af.runway_end_position = add_offset(obj_center, far_end->x, far_end->y);
+        af.threshold_altitude_ft = obj_center.z;
+        af.departure_altitude_ft = af.threshold_altitude_ft + 2500.0;
+
+        // Dimensions from the same runway_num's PLT_RUNWAY_DIM quad.
+        for (const auto& l : obj.ground_layout) {
+            if (l.type != f4::world_convert::PLT_RUNWAY_DIM) continue;
+            if (l.runway_num != chosen->runway_num || l.points.size() != 4) continue;
+            const double len0 = std::hypot(l.points[0].x - l.points[3].x,
+                                           l.points[0].y - l.points[3].y);
+            const double len1 = std::hypot(l.points[1].x - l.points[2].x,
+                                           l.points[1].y - l.points[2].y);
+            const double wid0 = std::hypot(l.points[0].x - l.points[1].x,
+                                           l.points[0].y - l.points[1].y);
+            const double wid1 = std::hypot(l.points[3].x - l.points[2].x,
+                                           l.points[3].y - l.points[2].y);
+            af.runway_length_ft = (len0 + len1) * 0.5;
+            af.runway_width_ft  = (wid0 + wid1) * 0.5;
+            break;
+        }
+
+        if (taxi.size() >= 2) {
+            // Taxi polyline is stored runway->ramp; reverse for the
+            // outbound (ramp->runway) route and end at the hold-short
+            // takeoff position.
+            std::vector<f4::geo::WorldPosition> route;
+            route.reserve(taxi.size() + 2);
+            for (auto it = taxi.rbegin(); it != taxi.rend(); ++it) {
+                route.push_back(add_offset(obj_center, (*it)->x, (*it)->y));
+            }
+            if (access) {
+                route.push_back(add_offset(obj_center, access->x, access->y));
+            }
+            route.push_back(add_offset(obj_center, takeoff->x, takeoff->y));
+            af.taxi_route = std::move(route);
+
+            // Taxi-in: runway side back to the ramp (stored order).
+            std::vector<f4::geo::WorldPosition> in;
+            in.reserve(taxi.size() + 2);
+            in.push_back(add_offset(obj_center, takeoff->x, takeoff->y));
+            if (access) {
+                in.push_back(add_offset(obj_center, access->x, access->y));
+            }
+            for (const auto* p : taxi) {
+                in.push_back(add_offset(obj_center, p->x, p->y));
+            }
+            af.taxi_in_route = std::move(in);
+
+            // Parking: this Korea PD has no PLT_PARK lists anywhere —
+            // synthesize spots at the ramp end of the polyline, offset
+            // AWAY from the runway (the +cross side of the runway axis),
+            // spaced along the ramp, facing back down the taxi-out
+            // direction so the aircraft rolls straight out.
+            const auto& t0 = *taxi[taxi.size() - 1];   // terminal (ramp end)
+            const auto& t1 = *taxi[taxi.size() - 2];
+            const double ddx = t0.x - t1.x, ddy = t0.y - t1.y;
+            const double dlen = std::max(1.0, std::hypot(ddx, ddy));
+            const double dx = ddx / dlen, dy = ddy / dlen;      // ramp->out dir
+            // +cross side of the runway axis (away from the runway):
+            const double side = hx * (t0.y - takeoff->y) - hy * (t0.x - takeoff->x);
+            const double sgn = side >= 0.0 ? 1.0 : -1.0;
+            const double px = -hy * sgn, py = hx * sgn;         // perp unit
+            const double face = compass_heading(-dx, -dy);      // taxi-out heading
+            constexpr int N_SPOTS = 8;
+            constexpr double OFF = 90.0;      // perpendicular distance (ft)
+            constexpr double SPACING = 80.0;  // along-ramp spacing (ft)
+            for (int i = 0; i < N_SPOTS; ++i) {
+                ScenarioParkingSpot spot;
+                spot.position = f4::geo::WorldPosition(
+                    obj_center.x + t0.x + px * OFF - dx * (i * SPACING),
+                    obj_center.y + t0.y + py * OFF - dy * (i * SPACING),
+                    obj_center.z);
+                spot.heading_rad = face;
+                af.parking_spots.push_back(spot);
+            }
+        } else {
+            // Real runway but no taxi polyline: straight from threshold.
+            af.taxi_route = {af.threshold_position, af.runway_end_position};
+        }
+        return af;
+    }
+
+    // --- Fallback: legacy synthetic shape (tests, hand-built layouts) ---
+    // Lists whose points are plain [threshold, far end] PT_RUNWAY pairs
+    // plus optional PLT_PARK / PLT_FOLLOW_ME lists.
+    af.active_runway_name = "Rwy " + std::to_string(active_runway_id);
     af.threshold_position = add_offset(obj_center,
-                                        runway_list->points.front().x,
-                                        runway_list->points.front().y);
+                                        chosen->points.front().x,
+                                        chosen->points.front().y);
     af.runway_end_position = add_offset(obj_center,
-                                         runway_list->points.back().x,
-                                         runway_list->points.back().y);
+                                         chosen->points.back().x,
+                                         chosen->points.back().y);
     af.threshold_altitude_ft = obj_center.z;
     af.departure_altitude_ft = af.threshold_altitude_ft + 2500.0;
 
-    // Build a taxi route. For Phase 2 we use a simple heuristic:
-    //   1. Start at the first parking spot (PLT_PARK) if any.
-    //   2. If a PLT_FOLLOW_ME list exists, splice its points in (these are
-    //      the taxiway centerline points the follow-me truck drives).
-    //   3. End at the runway threshold.
-    // If no parking list exists, start directly at the threshold (degenerate
-    // but valid — the scenario is still playable, the aircraft just starts
-    // on the runway).
     std::vector<f4::geo::WorldPosition> route;
-
     const auto* park_list = find_layout(obj, f4::world_convert::PLT_PARK);
     if (park_list && !park_list->points.empty()) {
         route.push_back(add_offset(obj_center,
                                     park_list->points.front().x,
                                     park_list->points.front().y));
     }
-
     const auto* follow_list = find_layout(obj, f4::world_convert::PLT_FOLLOW_ME);
     if (follow_list) {
         for (const auto& p : follow_list->points) {
             route.push_back(add_offset(obj_center, p.x, p.y));
         }
     }
-
-    // Always end at the threshold. If the last point is already very close
-    // to the threshold, skip the duplicate.
     if (route.empty() ||
         std::hypot(route.back().x - af.threshold_position.x,
                    route.back().y - af.threshold_position.y) > 50.0) {
         route.push_back(af.threshold_position);
     }
-
-    // The validate() in scenario.cpp requires taxi_route.size() >= 2. If
-    // we ended up with a 1-point route (e.g. no parking + no follow-me +
-    // already at threshold), pad with the runway_end so the route has a
-    // threshold + far-end pair.
     if (route.size() < 2) {
         route.push_back(af.runway_end_position);
     }
-
     af.taxi_route = std::move(route);
     return af;
 }

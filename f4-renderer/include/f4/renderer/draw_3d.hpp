@@ -8,6 +8,19 @@
 
 #pragma once
 
+// (declared in header; defined in draw_3d.cpp)
+// Replaces the projection built by BeginMode3D, whose far plane is the
+// rlgl default (1000 units) — far too small for theater-scale scenes in
+// feet (a single airfield spans ~9000 ft). Call immediately after
+// BeginMode3D. Depth precision stays sane: near 1 ft / far 200,000 ft.
+#include <raylib.h>
+
+namespace f4::renderer {
+/// Extend the active 3D-mode projection's far plane to `far_ft`.
+void extend_far_plane(const Camera3D& camera, float near_ft, float far_ft);
+} // namespace f4::renderer
+
+
 #include <f4/renderer/lit_shader.hpp>
 #include <f4/renderer/mesh_builder.hpp>
 #include <f4/renderer/texture_cache.hpp>

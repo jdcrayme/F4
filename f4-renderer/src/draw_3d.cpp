@@ -146,4 +146,19 @@ void draw_meshes(
     rlEnableBackfaceCulling();
 }
 
+// ── Far-plane extension ─────────────────────────────────────────────────────
+
+void extend_far_plane(const Camera3D& camera, float near_ft, float far_ft) {
+    const double aspect =
+        static_cast<double>(GetScreenWidth()) /
+        std::max(1, GetScreenHeight());
+    const Matrix proj = MatrixPerspective(
+        camera.fovy * DEG2RAD, aspect,
+        static_cast<double>(near_ft), static_cast<double>(far_ft));
+    rlSetMatrixProjection(proj);
+}
+
 } // namespace f4::renderer
+
+// ── Far-plane extension ─────────────────────────────────────────────────────
+

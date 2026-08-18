@@ -1,6 +1,6 @@
-// f4-world-viewer/src/ground_layout_models.hpp
+// f4-renderer/include/f4/renderer/ground_layout_models.hpp
 //
-// PRIVATE HEADER — internal to the f4-world-viewer library.
+// Shared airfield-layout geometry builder (moved from f4-world-viewer so
 //
 // Pure layout-to-geometry conversion: takes a selected objective's
 // GroundLayoutComponent.layouts (+ optional FeatureSetComponent.features)
@@ -32,7 +32,7 @@ struct GroundLayoutList;       // forward-decl — full def in f4/entities/types
 struct FeatureEntryState;
 } // namespace f4::entities
 
-namespace f4::viewer {
+namespace f4::renderer {
 
 // ---------------------------------------------------------------------------
 // Output primitives
@@ -202,4 +202,4 @@ struct AirfieldGeometry3D {
     const std::vector<f4::entities::GroundLayoutList>& layouts,
     const std::vector<f4::entities::FeatureEntryState>* features = nullptr);
 
-} // namespace f4::viewer
+} // namespace f4::renderer

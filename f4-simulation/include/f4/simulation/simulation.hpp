@@ -120,11 +120,13 @@ private:
     void spawn_from_scenario_list();        // Phase 1: hand-authored aircraft[]
     void spawn_from_campaign_flights();     // Phase 2: campaign-derived roster
     void spawn_airfield_features();         // Phase 2A: static features → VMC entities
+    void derive_real_airbase();   // airbase_source -> real ground layout
     void wire_atc();              // StubATC + AirfieldConfig from scenario
     void record_snapshot();
 
     // --- Owned state ---
     Scenario scenario_;
+    bool has_departure_override{false};  // hand-authored departure alt wins
     std::filesystem::path asset_dir_;
 
     entities::EntityWorld world_;
