@@ -86,7 +86,7 @@ constexpr Color ORIGIN_COLOR = {255, 255,   0, 200};
 // Raylib draw calls need Vector3. These wrappers convert for convenience.
 
 inline Vector3 enu_to_rl(float enu_x, float enu_y, float enu_z) {
-    auto f = f4::renderer::enu_to_raylib(enu_x, enu_y, enu_z);
+    auto f = f4::renderer::enu_to_raylib(enu_x, enu_y, enu_z-10);
     return { f.x, f.y, f.z };
 }
 

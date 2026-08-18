@@ -208,10 +208,24 @@ void build_runway_surface(const RunwayGroup& g,
         // has NO LT/RT lists — every runway is described by 1+ CL lists,
         // one per threshold. We use the FIRST CL list for the surface;
         // additional CL lists each get their own runway-end marker.
+        //
+        // IMPORTANT — real CL list shape (verified against 02_20 Airbase 2):
+        //   pts[0]      (PT_RUNWAY,     type=1)  — this threshold
+        //   pts[1]      (PT_TAKEOFF,    type=2)  — OPPOSITE threshold (~runway
+        //                                          length away, not a hold-short)
+        //   pts[2]      (PT_TAKE_RUNWAY,type=15) — runway access point (just
+        //                                          off the opposite threshold)
+        //   pts[3..N-1] (PT_TAXI,       type=3)  — taxiway exit path back to
+        //                                          the apron
+        // The runway's two endpoints are pts[0] and pts[1]. pts[2..N-1] is
+        // the embedded taxiway exit, handled separately by the third pass
+        // (see build_airfield_geometry_3d). Using points.back() here would
+        // place the surface's far end at the LAST taxiway node — in the
+        // middle of the airbase, not at the runway end.
         const auto* cl = g.cl_lists.front();
         if (cl && cl->points.size() >= 2) {
-            const auto& p0 = cl->points.front();
-            const auto& p1 = cl->points.back();
+            const auto& p0 = cl->points[0];   // this threshold
+            const auto& p1 = cl->points[1];   // opposite threshold
             const Vec2f perp = unit_perp_ccw({p0.x, p0.y}, {p1.x, p1.y});
             if (perp.length() >= 0.5f) {
                 // Default half-width = 50 ft (100 ft runway — typical fighter base).
@@ -312,9 +326,13 @@ void build_centerline_dashes(const RunwayGroup& g,
     bool have_pts = false;
 
     if (!g.cl_lists.empty() && g.cl_lists.front()->points.size() >= 2) {
+        // Runway endpoints are pts[0] (this threshold) and pts[1] (opposite
+        // threshold). See build_runway_surface for the full CL-list shape
+        // comment. Using points.back() would draw the dashes all the way
+        // down the embedded taxiway exit, not along the runway.
         const auto* cl = g.cl_lists.front();
-        thr = {cl->points.front().x, cl->points.front().y};
-        end = {cl->points.back().x,  cl->points.back().y};
+        thr = {cl->points[0].x, cl->points[0].y};
+        end = {cl->points[1].x, cl->points[1].y};
         have_pts = true;
     } else if (g.lt && g.lt->points.size() >= 2) {
         // Fall back to the midpoint of LT[0]→RT[0] and LT[1]→RT[1].
@@ -372,10 +390,16 @@ void build_runway_end_marker(const RunwayGroup& g,
                              AirfieldGeometry3D& out,
                              Bbox2& bbox) {
     // Prefer CL lists (one marker per CL list — covers both thresholds).
+    // Marker is placed at pts[1] — the OPPOSITE threshold from the CL's own
+    // heading. See build_runway_surface for the full CL-list shape comment.
+    // Using points.back() here would place the marker at the end of the
+    // embedded taxiway exit (in the middle of the airbase), causing all
+    // four markers of a two-runway airbase to cluster at the centroid and
+    // look like "converging runways".
     if (!g.cl_lists.empty()) {
         for (const auto* cl : g.cl_lists) {
             if (!cl || cl->points.size() < 2) continue;
-            const auto& end_pt = cl->points.back();
+            const auto& end_pt = cl->points[1];
             LayoutMarker m;
             m.x = end_pt.x; m.y = end_pt.y; m.z = Z_BIAS_MARKER;
             m.size_ft = RUNWAY_END_MARKER_SIZE_FT;
@@ -627,9 +651,13 @@ AirfieldGeometry3D build_airfield_geometry_3d(
             }
             auto& g = runway_groups[static_cast<int>(list.runway_num)];
             g.runway_num = static_cast<int>(list.runway_num);
-            // Heading: prefer the centerline list's heading, fall back to
-            // whatever list set it last (they should all agree).
-            if (list.heading_deg != 0.0f) g.heading_deg = list.heading_deg;
+            // Heading: only trust the centerline list's heading (PLT_RUNWAY,
+            // type=1). Other runway-related lists (PLT_RUNWAY_DIM type=8,
+            // PLT_RUNWAY_LT/RT type=12/13) carry type-specific `data` values
+            // that are NOT runway headings — letting them overwrite
+            // g.heading_deg would silently corrupt the LT-only fallback
+            // path in build_runway_end_marker.
+            if (t == 1 && list.heading_deg != 0.0f) g.heading_deg = list.heading_deg;
             if (t == 12)      g.lt  = &list;
             else if (t == 13) g.rt  = &list;
             else if (t == 1)  g.cl_lists.push_back(&list);
@@ -644,10 +672,38 @@ AirfieldGeometry3D build_airfield_geometry_3d(
     }
 
     // Third pass: build taxiway strips + placement-point markers.
+    //
+    // IMPORTANT — real PLT_RUNWAY (type=1) lists are HYBRID: they contain
+    // the runway endpoints (pts[0], pts[1]) AND an embedded taxiway exit
+    // path (pts[2..N-1], the PT_TAXI nodes leading from the runway access
+    // point back to the apron). The runway portion is consumed in pass 1
+    // via the runway_groups; the taxiway portion must be extracted here
+    // and fed to build_taxiway_strip, otherwise the entire taxiway network
+    // connected to runway exits is silently dropped (Bug: "no taxiways
+    // displayed"). See build_runway_surface for the full CL-list shape.
     for (const auto& list : layouts) {
         const uint8_t t = list.type;
-        if (is_runway_edge_type(t) || is_runway_centerline_type(t) || is_runway_dim_type(t)) {
-            // Already handled above (runway group).
+        if (is_runway_edge_type(t) || is_runway_dim_type(t)) {
+            // Already handled above (runway group). No embedded taxiway
+            // portion to extract for LT/RT or DIM lists.
+            continue;
+        }
+        if (is_runway_centerline_type(t)) {
+            // CL list — runway portion (pts[0], pts[1]) was consumed in
+            // pass 1. Extract the embedded taxiway exit (pts[2..N-1]) and
+            // render it as a taxiway strip. Skip if the list is too short
+            // to have a taxiway portion (e.g. the synthetic 2-point test
+            // shape used by RealPhdShapeRunwayNumZeroIsAccepted).
+            if (list.points.size() >= 3) {
+                f4::entities::GroundLayoutList taxi;
+                taxi.type       = 17;     // PLT_TRACK — generic path
+                taxi.runway_num = 255;    // not a runway
+                taxi.heading_deg = 0.0f;
+                taxi.ltrt       = 0;
+                taxi.count      = static_cast<uint8_t>(list.points.size() - 2);
+                taxi.points.assign(list.points.begin() + 2, list.points.end());
+                build_taxiway_strip(taxi, out, bbox);
+            }
             continue;
         }
         if (is_parking_type(t)) {

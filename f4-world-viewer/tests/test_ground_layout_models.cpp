@@ -566,6 +566,103 @@ TEST(GroundLayoutModels, RealPhdShapeRunwayNumZeroIsAccepted) {
     EXPECT_GE(g.max_y, 8000.0f);
 }
 
+// Real PHD CL lists are HYBRID: pts[0] = threshold, pts[1] = OPPOSITE
+// threshold (~runway length away), pts[2] = runway access point,
+// pts[3..N-1] = embedded taxiway exit back to the apron. The runway's
+// two endpoints are pts[0] and pts[1] — NOT pts[0] and pts.back().
+//
+// This test uses a real-shape 12-point CL list (matching the structure
+// observed in 02_20 Airbase 2's PHD chain) and verifies that:
+//   1. The runway surface spans pts[0]→pts[1] (not pts[0]→pts.back()).
+//   2. The end marker sits at pts[1] (the opposite threshold), not at
+//      pts.back() (the last taxiway node, which would land in the
+//      middle of the airbase and make multiple runways look
+//      "converging").
+//   3. The embedded taxiway exit (pts[2..N-1]) is rendered as a
+//      taxiway strip — otherwise the entire taxiway network connected
+//      to runway exits would be silently dropped.
+//   4. The centerline dashes run along pts[0]→pts[1] (along the
+//      runway), not along the taxiway exit.
+//
+// Coordinates mimic 02_20 Airbase 2's runway 0 / CL list 1 (heading 20°)
+// but scaled down to fit in a small synthetic test footprint.
+TEST(GroundLayoutModels, RealPhdShapeHybridClListUsesPts0AndPts1AsRunwayEnds) {
+    std::vector<GroundLayoutList> layouts;
+
+    // CL list — 12 points matching the real PHD shape:
+    //   pts[0]      PT_RUNWAY      threshold at (0, 0)
+    //   pts[1]      PT_TAKEOFF     opposite threshold at (0, 6000)  (~6000 ft away)
+    //   pts[2]      PT_TAKE_RUNWAY access point at (50, 6100)       (just off far end)
+    //   pts[3..11]  PT_TAXI        taxiway exit path zigzagging back to (200, 500)
+    GroundLayoutList cl = mk_list(1 /*PLT_RUNWAY*/, /*runway_num=*/0,
+                                  /*heading_deg=*/20.0f, /*ltrt=*/-1);
+    cl.points.push_back(mk_pt(   0.0f,    0.0f));  // pts[0] threshold
+    cl.points.push_back(mk_pt(   0.0f, 6000.0f));  // pts[1] opposite threshold
+    cl.points.push_back(mk_pt(  50.0f, 6100.0f));  // pts[2] access point
+    cl.points.push_back(mk_pt( 100.0f, 5500.0f));  // pts[3] taxi node
+    cl.points.push_back(mk_pt( 150.0f, 4500.0f));  // pts[4]
+    cl.points.push_back(mk_pt( 180.0f, 3500.0f));  // pts[5]
+    cl.points.push_back(mk_pt( 200.0f, 2500.0f));  // pts[6]
+    cl.points.push_back(mk_pt( 220.0f, 1500.0f));  // pts[7]
+    cl.points.push_back(mk_pt( 200.0f,  500.0f));  // pts[8..11] — back at apron
+    cl.points.push_back(mk_pt( 180.0f,  300.0f));
+    cl.points.push_back(mk_pt( 150.0f,  200.0f));
+    cl.points.push_back(mk_pt( 100.0f,  100.0f));
+    layouts.push_back(cl);
+
+    auto g = build_airfield_geometry_3d(layouts);
+
+    // ---- (1) Runway surface: 1 surface spanning pts[0]→pts[1] ----
+    ASSERT_EQ(g.runway_surfaces.size(), 1u);
+    const auto& surf = g.runway_surfaces[0];
+    // The quad corners are p0 ± perp*half_width and p1 ± perp*half_width.
+    // pts[0]=(0,0) and pts[1]=(0,6000) — so the surface's X range must
+    // straddle 0 (the perp offset) and Y range must span 0..6000.
+    // Critically: Y MUST reach ~6000 (the opposite threshold), NOT just
+    // ~500 (the last taxiway node — that would be the old buggy behavior).
+    EXPECT_LE(surf.y[0], 50.0f);     // near pts[0] (with perp offset)
+    EXPECT_GE(surf.y[2], 5950.0f);   // near pts[1] (with perp offset)
+    // And the surface must NOT extend down to the taxiway end at Y=100.
+    // (Old buggy code would have produced a surface from pts[0]=(0,0) to
+    // pts[11]=(100,100), making the surface only ~100 ft long.)
+    EXPECT_GT(surf.y[2], 5000.0f) << "surface far end must be at opposite threshold, "
+                                    << "not at the last taxiway node";
+
+    // ---- (2) Runway-end marker at pts[1] (opposite threshold), not pts.back() ----
+    ASSERT_EQ(g.runway_ends.size(), 1u);
+    const auto& m = g.runway_ends[0];
+    // pts[1] = (0, 6000). Marker must be at (0, 6000), NOT at pts[11] = (100, 100).
+    EXPECT_NEAR(m.x, 0.0f, 5.0f)    << "marker X must be near pts[1].x=0";
+    EXPECT_NEAR(m.y, 6000.0f, 5.0f) << "marker Y must be near pts[1].y=6000 (opposite "
+                                      << "threshold), not pts.back()=(100,100)";
+    EXPECT_EQ(m.label, "RWY 02") << "heading 20° → round(20/10)=2 → 'RWY 02'";
+
+    // ---- (3) Embedded taxiway exit rendered as a taxiway strip ----
+    // The taxiway portion (pts[2..11] = 10 points → 9 segments) must be
+    // rendered as taxiway strips. Without Fix B, this would be 0 strips
+    // (the third pass used to `continue` past CL lists).
+    EXPECT_EQ(g.taxiway_strips.size(), 9u)
+        << "embedded taxiway exit (pts[2..N-1]) must be rendered as strips";
+    EXPECT_EQ(g.taxiway_centerlines.size(), 9u)
+        << "taxiway centerlines must accompany the strips";
+
+    // ---- (4) Centerline dashes run along pts[0]→pts[1], not along taxiway ----
+    // Length of pts[0]→pts[1] = 6000 ft. With 80ft margins at each end and
+    // 120ft dash + 80ft gap pattern, we expect (6000-160)/(120+80) ≈ 29 dashes.
+    // Critically: if the old buggy code drew dashes from pts[0]=(0,0) to
+    // pts[11]=(100,100), the path length would only be ~141 ft — well below
+    // the (dash+gap)=200ft minimum, so NO dashes would be emitted.
+    EXPECT_GE(g.centerline_dashes.size(), 20u)
+        << "centerline dashes must run along the runway (pts[0]→pts[1], ~6000ft), "
+        << "not be skipped because the path was too short";
+
+    // Bbox must span the runway (Y up to ~6000) AND the taxiway (down to ~100).
+    EXPECT_LE(g.min_y, 0.0f);
+    EXPECT_GE(g.max_y, 6000.0f);
+    EXPECT_LE(g.min_x, 0.0f);
+    EXPECT_GE(g.max_x, 220.0f);  // taxiway extends to X=220
+}
+
 // Real PHD data also includes placement-point lists (SAM/AAA/etc.) with
 // runway_num = 255 (= int8_t -1, the "not a runway" sentinel). Those
 // lists must NOT be mis-grouped into a runway group keyed on 255.
