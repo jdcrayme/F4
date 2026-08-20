@@ -70,12 +70,12 @@ long index_of(const std::vector<std::string>& seq, const std::string& msg) {
 
 } // anonymous namespace
 
-TEST(DigiMission, FullLoopTaxiTakeoffNavigateApproachLandParks) {
-    if (!std::filesystem::exists(scenario_path)) {
-        GTEST_SKIP() << "digi_full_mission.json not configured (run CMake configure)";
-    }
-
-    auto scenario = load_scenario(scenario_path);
+// Runs one full mission (taxi -> takeoff -> route -> approach -> landing
+// -> parked) through the real 6-DOF FM and asserts the whole battery of
+// mission-structure, corridor, and end-state checks. `require_pattern`
+// also asserts the approach flew the traffic-pattern states (and, when
+// false, that it did NOT).
+void run_full_mission(Scenario scenario, bool require_pattern) {
     ASSERT_GE(scenario.waypoints.size(), 2u);
     // (airfield fields are DERIVED at sim initialize from airbase_source)
 
@@ -149,6 +149,8 @@ TEST(DigiMission, FullLoopTaxiTakeoffNavigateApproachLandParks) {
     geo::WorldPosition liftoff_pos{};
     bool saw_touchdown = false;
     geo::WorldPosition touchdown_pos{};
+    bool saw_pattern_downwind = false;
+    bool saw_pattern_base = false;
     double max_taxi_dev_ft = 0.0;
     double max_final_lateral_ft = 0.0;
     std::size_t max_wp_index = 0;
@@ -162,6 +164,17 @@ TEST(DigiMission, FullLoopTaxiTakeoffNavigateApproachLandParks) {
 
         if (dbg && i % 600 == 0) {
             const auto& s = fm->state();
+            if (i == 0) {
+                std::printf("DERIVED thr=(%.0f,%.0f,%.0f) hdg=%.1f len=%.0f end=(%.0f,%.0f) pattern=%d\n",
+                            dscenario.airfield.threshold_position.x,
+                            dscenario.airfield.threshold_position.y,
+                            dscenario.airfield.threshold_position.z,
+                            dscenario.airfield.runway_heading_rad * 57.2957795,
+                            dscenario.airfield.runway_length_ft,
+                            dscenario.airfield.runway_end_position.x,
+                            dscenario.airfield.runway_end_position.y,
+                            dscenario.approach_is_pattern() ? 1 : 0);
+            }
             std::printf("t=%6.1f ph=%-8s st=%-12s pos=(%7.0f,%7.0f,%6.0f) vcas=%5.1f "
                         "psi=%6.1f theta=%5.1f phi=%6.1f wp=%zu\n",
                         i / 60.0, brain->phase_name(), brain->state_name().c_str(),
@@ -192,6 +205,9 @@ TEST(DigiMission, FullLoopTaxiTakeoffNavigateApproachLandParks) {
             max_wp_index = std::max(max_wp_index,
                                     brain->navigation().current_waypoint_index());
         } else if (brain->phase() == BrainComponent::Phase::Approach) {
+            const auto lst = brain->landing().state();
+            if (lst == LandingState::PatternDownwind) saw_pattern_downwind = true;
+            if (lst == LandingState::PatternBase)     saw_pattern_base = true;
             if (!saw_touchdown &&
                 brain->landing().state() == LandingState::Rollout) {
                 saw_touchdown = true;
@@ -272,4 +288,34 @@ TEST(DigiMission, FullLoopTaxiTakeoffNavigateApproachLandParks) {
     EXPECT_NEAR(end_pos.x, parking.x, 120.0) << "not at the parking spot";
     EXPECT_NEAR(end_pos.y, parking.y, 120.0) << "not at the parking spot";
     EXPECT_LT(fm->state().kin.vt, 5.0) << "still moving at mission end";
+
+    // --- Approach style actually flown ---
+    if (require_pattern) {
+        EXPECT_TRUE(saw_pattern_downwind)
+            << "pattern approach never flew the downwind leg";
+        EXPECT_TRUE(saw_pattern_base)
+            << "pattern approach never flew the base leg";
+    } else {
+        EXPECT_FALSE(saw_pattern_downwind || saw_pattern_base)
+            << "straight-in approach flew pattern states unexpectedly";
+    }
+}
+
+TEST(DigiMission, FullLoopTaxiTakeoffNavigateApproachLandParks) {
+    if (!std::filesystem::exists(scenario_path)) {
+        GTEST_SKIP() << "digi_full_mission.json not configured (run CMake configure)";
+    }
+    // The scenario file flies the traffic pattern; force the straight-in
+    // variant here so both approach styles stay covered by E2E.
+    auto scenario = load_scenario(scenario_path);
+    scenario.approach_mode = "straight_in";
+    run_full_mission(std::move(scenario), /*require_pattern=*/false);
+}
+
+TEST(DigiMission, FullLoopTrafficPattern) {
+    if (!std::filesystem::exists(scenario_path)) {
+        GTEST_SKIP() << "digi_full_mission.json not configured (run CMake configure)";
+    }
+    // As configured in digi_full_mission.json: "approach": "pattern".
+    run_full_mission(load_scenario(scenario_path), /*require_pattern=*/true);
 }

@@ -67,6 +67,10 @@ struct MissionPlan {
     /// Taxi-in route after landing rollout (runway exit -> parking).
     /// Empty = the aircraft parks on the runway.
     std::vector<geo::WorldPosition> taxi_in_route;
+
+    /// Approach style at the end of the route: false = straight-in final
+    /// (default), true = full traffic pattern (downwind/base/final).
+    bool fly_traffic_pattern{false};
 };
 
 // ============================================================================
@@ -132,6 +136,7 @@ public:
                 // The route's last waypoint is the approach entry fix.
                 const auto& entry_fix = plan_.route.back().position;
                 landing_.configure(entry_fix, plan_.taxi_in_route);
+                landing_.fly_traffic_pattern = plan_.fly_traffic_pattern;
                 landing_.initialize(owner_.id().value, *world, bus);
                 phase_ = Phase::Approach;
             } else {

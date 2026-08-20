@@ -200,6 +200,7 @@ void Simulation::spawn_from_scenario_list() {
                 wp.name, wp.position, wp.speed_kts});
         }
         plan.taxi_in_route = scenario_.airfield.taxi_in_route;
+        plan.fly_traffic_pattern = scenario_.approach_is_pattern();
         brain.set_mission_plan(std::move(plan));
 
         aircraft_entities_.push_back(h.id());
@@ -368,6 +369,31 @@ void Simulation::derive_real_airbase() {
         static_cast<double>(obj->x) * FT_PER_GRID,
         static_cast<double>(obj->y) * FT_PER_GRID,
         static_cast<double>(obj->z));
+
+    // Real 3D feature models (buildings, runway/taxiway sections, towers):
+    // FALCON4.ct maps FeatureEntryState.index (a descriptionIndex; the
+    // entity_type is index + 100) -> KoreaObj vis_type[0]. Features with
+    // no model (lights, trucks) or the (0,0,0) placeholder are skipped.
+    if (!scenario_.airbase_source.class_table_path.empty()) {
+        f4::world_convert::ClassTable ct;
+        ct.load(scenario_.airbase_source.class_table_path);
+        int skipped_no_vistype = 0;
+        for (const auto& f : obj->features) {
+            if (f.index == 0 && f.offset_x == 0 && f.offset_y == 0) continue;
+            const auto entity_type = static_cast<std::uint16_t>(100 + f.index);
+            const auto vis_type = ct.vis_type_for(entity_type, 0);
+            if (vis_type <= 0) { ++skipped_no_vistype; continue; }
+            ScenarioFeature sf;
+            sf.name = f.name;
+            sf.vis_type_index = vis_type;
+            sf.position = f4::geo::WorldPosition(
+                scenario_.layout_center.x + f.offset_x,
+                scenario_.layout_center.y + f.offset_y,
+                scenario_.layout_center.z + f.offset_z);
+            sf.heading_rad = static_cast<double>(f.facing) * 0.017453292519943295;
+            scenario_.airfield_features.push_back(std::move(sf));
+        }
+    }
 
     // Rotate runway-frame waypoints into ENU about the derived threshold.
     if (scenario_.waypoints_runway_frame) {

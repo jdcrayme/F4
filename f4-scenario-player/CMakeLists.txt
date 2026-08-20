@@ -75,6 +75,17 @@ set_target_properties(f4-scenario-player PROPERTIES
 # Substitutes @F4_SOURCE_DIR@ and @F4_BINARY_DIR@ so the scenario can
 # reference KoreaObj.HDR/.LOD/.TEX (in temp/) and f16.json (in
 # build/generated_fixtures/) without hardcoding absolute paths.
+
+# Class table for the DIGI mission's feature models: the install's real
+# FALCON4.ct when available, else the bundled fixture (fewer rows -> more
+# features skipped, but the scenario still runs). Must be set BEFORE the
+# configure_file calls below substitute @F4_DIGI_CLASS_TABLE@.
+if(F4_INSTALL AND EXISTS "${F4_INSTALL}/terrdata/objects/FALCON4.ct")
+    set(F4_DIGI_CLASS_TABLE "${F4_INSTALL}/terrdata/objects/FALCON4.ct")
+else()
+    set(F4_DIGI_CLASS_TABLE "${CMAKE_SOURCE_DIR}/f4-world-convert/tests/fixtures/FALCON4.ct")
+endif()
+
 configure_file(
     ${CMAKE_CURRENT_SOURCE_DIR}/scenarios/kunsan_parking.json.in
     ${CMAKE_BINARY_DIR}/scenarios/kunsan_parking.json

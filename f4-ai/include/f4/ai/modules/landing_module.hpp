@@ -7,16 +7,26 @@
 // The module takes over from NavigationModule at the approach entry fix
 // (the mission route's last waypoint) and flies:
 //
-//   RequestApproach -> ProceedToFix -> InterceptFinal -> OnFinal
-//     -> Flare -> Rollout -> TaxiIn -> Parked
-//   OnFinal -> GoAround (not cleared below DH, or threshold overflown)
+//   STRAIGHT-IN (fly_traffic_pattern = false, default):
+//     RequestApproach -> ProceedToFix -> InterceptFinal -> OnFinal
+//       -> Flare -> Rollout -> TaxiIn -> Parked
 //
-// Phase 1 flies a STRAIGHT-IN final: the entry fix sits on the runway's
-// extended centerline, so "intercept" is the turn from the entry bearing
-// onto the final course. The traffic-pattern legs of the full design
-// (Docs/DIGI_AI_PHASE2_PLAN.md §8: Ingressing/Holding/FirstLeg/ToBase/
-// ToBase/ToFinal) slot in later as additional states between
-// RequestApproach and InterceptFinal.
+//   TRAFFIC PATTERN (fly_traffic_pattern = true, standard left-hand):
+//     RequestApproach -> ProceedToFix -> PatternDownwind -> PatternBase
+//       -> InterceptFinal -> OnFinal -> ... (same landing chain)
+//
+//     PatternDownwind flies the overhead join at pattern altitude:
+//     overfly the field upwind, cross the far-corner plane, turn (in the
+//     pattern sense) through crosswind onto downwind, and fly downwind
+//     past the threshold plane. Leg captures are plane crossings on the
+//     runway along/lateral axes — immune to the turn-radius bulges of a
+//     fast jet. PatternBase descends toward the extended-centerline aim
+//     point, gear down; the base->final turn is the existing
+//     InterceptFinal.
+//
+//   OnFinal -> GoAround (not cleared below DH, or threshold overflown);
+//   GoAround -> ProceedToFix (climbed back to pattern altitude: re-fly
+//   the approach, pattern or straight-in per the mode flag).
 //
 // ATC protocol:
 //   on_enter(RequestApproach): publishes LandingRequest
@@ -65,6 +75,8 @@ namespace f4::ai::modules {
 enum class LandingState {
     RequestApproach,   // publishing LandingRequest, waiting for clearance
     ProceedToFix,      // flying to the approach entry fix at pattern altitude
+    PatternDownwind,   // traffic pattern: entry onto + along the downwind leg
+    PatternBase,       // traffic pattern: base leg, descending
     InterceptFinal,    // turning onto the final course, gear down
     OnFinal,           // tracking localizer + glide slope to the flare
     Flare,             // idle throttle, flare attitude, closing the last feet
@@ -76,7 +88,10 @@ enum class LandingState {
 
 enum class LandingEvent {
     ApproachGranted,   // LandingClearance received
-    FixReached,        // at/abeam the entry fix
+    FixReached,        // at/abeam the entry fix (straight-in mode)
+    PatternEntry,      // at/abeam the entry fix (traffic-pattern mode)
+    DownwindComplete,  // downwind leg flown — turn base
+    BaseComplete,      // base leg reached the extended centerline — turn final
     Established,       // heading + localizer within tolerance
     Flare,             // below flare height AGL
     Touchdown,         // wheels on
@@ -130,6 +145,65 @@ public:
     double fix_radius_ft{2500.0};       // "reached" radius for the entry fix
     double fix_abeam_ft{15000.0};       // off-nose capture distance window
     double fix_abeam_bearing_rad{1.4};  // ~80 deg off the nose = "passed it"
+
+    // --- Traffic pattern (visual approach; standard left-hand unless
+    // pattern_left_traffic is false). Geometry is derived from the
+    // clearance's threshold + runway heading; distances in ft. The join
+    // is the classic overhead arrival: overfly the field on the UPWIND
+    // heading, pass the far end, then consecutive 90-deg turns through
+    // crosswind onto downwind — every turn is in the pattern sense, so
+    // the join never needs a >90-deg reversal (a fast jet cannot out-turn
+    // its ~13,000 ft radius, and the old far-end join bulged 20k ft off
+    // the field). ---
+    bool fly_traffic_pattern{false};    // false = straight-in (phase 1)
+    bool pattern_left_traffic{true};    // left-hand pattern (standard)
+    double pattern_speed_kts{200.0};    // downwind/base CAS — slow enough
+                                        // that the ~35-deg bank turns fit
+                                        // the pattern (~5,000 ft radius;
+                                        // at 250 kts it is ~13,000 ft and
+                                        // the legs stop existing)
+    double pattern_offset_ft{15000.0};  // lateral distance of the downwind
+                                        // leg from the runway centerline
+    double upwind_along_ft{14000.0};    // upwind/crosswind corner this far
+                                        // past the threshold (runway end
+                                        // + ~5,500 ft on a 8400 ft runway)
+    double pattern_join_offset_ft{4000.0}; // slight lateral offset while
+                                        // overflying on the upwind heading
+    double base_turn_along_ft{14000.0}; // begin the base turn this far
+                                        // BEFORE the threshold — far
+                                        // enough out that the base arc +
+                                        // final turn complete ~2 nm before
+                                        // the threshold, leaving a real
+                                        // final approach (at 8,000 the
+                                        // aircraft established 6,000 ft
+                                        // out and immediately overflew
+                                        // the missed-approach plane)
+    double base_aim_along_ft{22000.0};  // base leg aims at the extended
+                                        // centerline this far out
+    double base_alt_agl_ft{900.0};      // base-leg altitude over the field
+                                        // — near the intercept floor, so
+                                        // the final turn ends CLOSE to the
+                                        // beam (1500 AGL left the aircraft
+                                        // 1000+ ft high at establish and
+                                        // the dive-to-beam burned the
+                                        // whole final approach)
+    double base_capture_lateral_ft{11500.0}; // base -> final turn when this
+                                        // close to the extended centerline
+                                        // — sized to ~one turn radius at
+                                        // approach speed PLUS the settle
+                                        // distance: the 90-deg turn and
+                                        // roll-out then complete ~2-3 nm
+                                        // BEFORE the threshold, leaving a
+                                        // real final approach. At 8,500 ft
+                                        // the aircraft established right
+                                        // at the threshold and instantly
+                                        // hit the missed-approach plane.
+    double intercept_floor_agl_ft{600.0}; // never descend below this AGL
+                                        // while still intercepting (the
+                                        // beam is meaningless laterally
+                                        // far off; chasing it low+slow
+                                        // away from the runway = dirt)
+
     double beam_aim_offset_ft{1500.0};  // beam zero-point PAST the threshold
                                         // (real ILS aims ~1000-1500 ft in;
                                         // aiming at the threshold itself
@@ -151,7 +225,11 @@ public:
                                         // runway first)
 
     // Shared control laws. Public so hosts can tune gains.
+    // pattern_steering is the same cascade with a steeper bank cap — the
+    // pattern corners are real turns, while the final track deliberately
+    // stays shallow (25 deg) for a smooth beam.
     AirSteering air_steering;
+    AirSteering pattern_steering;
     GroundSteering ground_steering;
 
     // --- Trace ---
@@ -173,6 +251,8 @@ private:
 
     // Transition checks (called from update()).
     void check_fix_reached();
+    void check_pattern_downwind();
+    void check_pattern_base();
     void check_established();
     void check_flare_or_goaround();
     void check_touchdown();
@@ -182,8 +262,11 @@ private:
     // Per-state control logic (pure).
     [[nodiscard]] AIControlOutput controls_for_request_approach() const;
     [[nodiscard]] AIControlOutput controls_for_proceed_to_fix() const;
+    [[nodiscard]] AIControlOutput controls_for_pattern_downwind() const;
+    [[nodiscard]] AIControlOutput controls_for_pattern_base() const;
     [[nodiscard]] AIControlOutput track_final(double target_alt_ft,
-                                              double target_speed_kts) const;
+                                              double target_speed_kts,
+                                              bool pattern_turn = false) const;
     [[nodiscard]] AIControlOutput controls_for_flare() const;
     [[nodiscard]] AIControlOutput controls_for_rollout() const;
     [[nodiscard]] AIControlOutput controls_for_taxi_in() const;
@@ -195,6 +278,27 @@ private:
     [[nodiscard]] double course_lateral_ft() const;  // >0 right of course
     [[nodiscard]] double glide_slope_alt_ft() const; // target MSL on the beam
     [[nodiscard]] double localizer_heading_rad() const; // corrected desired hdg
+
+    // Traffic-pattern geometry (from the clearance; valid once granted).
+    // Lateral convention matches course_lateral_ft(): negative = LEFT of
+    // the final course. A left-hand pattern flies its legs on the left
+    // side (negative lateral for a positive pattern_offset_ft).
+    [[nodiscard]] double pattern_lateral_sign() const noexcept {
+        return pattern_left_traffic ? -1.0 : 1.0;
+    }
+    [[nodiscard]] geo::WorldPosition pattern_point(double along_ft,
+                                                   double lateral_ft) const;
+    [[nodiscard]] geo::WorldPosition pattern_leg_target() const;
+    [[nodiscard]] geo::WorldPosition base_aim_point() const;
+    [[nodiscard]] double base_target_alt_ft() const;
+
+    /// Waypoint capture with the radius + timed abeam guard shared by the
+    /// entry fix and the pattern legs (see check_fix_reached for why the
+    /// dwell timer is load-bearing).
+    [[nodiscard]] bool waypoint_captured(const geo::WorldPosition& target,
+                                         double dwell_s,
+                                         double radius_ft,
+                                         double abeam_window_ft) const;
 
     [[nodiscard]] AirSteering::Input air_input() const noexcept;
     [[nodiscard]] GroundSteering::Input ground_input() const noexcept;
@@ -218,6 +322,10 @@ private:
     double pattern_altitude_ft_{2500.0};
     bool cleared_to_land_{false};
     double fix_timer_{0.0};     ///< seconds in ProceedToFix (abeam guard)
+    double pattern_timer_{0.0}; ///< seconds in the current pattern state
+    int pattern_leg_{0};        ///< 0 = upwind overfly -> far corner,
+                                ///< 1 = crosswind turn (corner -> offset),
+                                ///< 2 = downwind leg to the base turn
 
     // Cached aircraft state (refreshed each update()).
     geo::WorldPosition current_position_;

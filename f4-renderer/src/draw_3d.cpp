@@ -27,6 +27,15 @@ void draw_grid(float extent, float step) {
     }
 }
 
+void draw_grid_at(float extent, float step, float ox, float oy, float oz) {
+    // ENU (ox=east, oy=north, oz=up) → Raylib RH Y-up (x, y=up, z=-north).
+    const Vector3 c{ox, oz, -oy};
+    for (float i = -extent; i <= extent; i += step) {
+        DrawLine3D({c.x + i, c.y, c.z - extent}, {c.x + i, c.y, c.z + extent}, GRID_COLOR);
+        DrawLine3D({c.x - extent, c.y, c.z + i}, {c.x + extent, c.y, c.z + i}, GRID_COLOR);
+    }
+}
+
 // ── draw_axes ─────────────────────────────────────────────────────────────────
 
 void draw_axes(float length) {
@@ -159,6 +168,4 @@ void extend_far_plane(const Camera3D& camera, float near_ft, float far_ft) {
 }
 
 } // namespace f4::renderer
-
-// ── Far-plane extension ─────────────────────────────────────────────────────
 

@@ -117,6 +117,10 @@ enum class SpawnMode {
 /// from it, overriding any hand-authored airfield block.
 struct ScenarioAirbaseSource {
     std::filesystem::path world_json_path;  ///< world JSON (cam2json output)
+    /// FALCON4.ct — resolves FeatureEntryState.index -> KoreaObj vis_type
+    /// for real 3D building models at the airbase. Optional: without it
+    /// the layout geometry renders but no feature models spawn.
+    std::filesystem::path class_table_path;
     /// Objective selection: grid coordinates (exact match preferred) or a
     /// name substring fallback ("Kunsan").
     int grid_x{-1};
@@ -174,6 +178,15 @@ struct Scenario {
     /// (feet); z stays MSL. Rotated into ENU by derive_real_airbase().
     /// Lets one template scenario fly any runway direction.
     bool waypoints_runway_frame{false};
+
+    /// Approach style flown after the last waypoint: "straight_in"
+    /// (default — the entry fix sits on the extended centerline and the
+    /// module intercepts the final course directly) or "pattern" (full
+    /// left-hand traffic pattern: downwind, base, final).
+    std::string approach_mode{"straight_in"};
+    [[nodiscard]] bool approach_is_pattern() const noexcept {
+        return approach_mode == "pattern";
+    }
 
     /// Static feature placements on the airfield — buildings, runway sections,
     /// taxiways, towers, hangars. Spawned as TransformComponent +

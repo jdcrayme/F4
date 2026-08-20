@@ -208,6 +208,7 @@ Scenario parse_scenario(f4::json::Reader& r) {
                 const auto k = r.read_string();
                 r.expect(':');
                 if (k == "world_json")          s.airbase_source.world_json_path = r.read_string();
+                else if (k == "class_table")     s.airbase_source.class_table_path = r.read_string();
                 else if (k == "grid_x")         s.airbase_source.grid_x = static_cast<int>(r.read_int());
                 else if (k == "grid_y")         s.airbase_source.grid_y = static_cast<int>(r.read_int());
                 else if (k == "name")           s.airbase_source.name = r.read_string();
@@ -228,6 +229,11 @@ Scenario parse_scenario(f4::json::Reader& r) {
             if (f == "runway")       s.waypoints_runway_frame = true;
             else if (f == "enu")     s.waypoints_runway_frame = false;
             else throw std::runtime_error("scenario: unknown waypoints_frame '" + f + "'");
+        } else if (key == "approach") {
+            const auto f = r.read_string();
+            if (f == "pattern")          s.approach_mode = "pattern";
+            else if (f == "straight_in") s.approach_mode = "straight_in";
+            else throw std::runtime_error("scenario: unknown approach '" + f + "'");
         } else if (key == "airfield_features") {
             r.expect('[');
             bool arr_first = true;
@@ -330,6 +336,7 @@ Scenario load_scenario(const std::filesystem::path& json_path) {
     s.models_tex_path   = resolve(base_dir, s.models_tex_path);
     s.world_json_path   = resolve(base_dir, s.world_json_path);
     s.airbase_source.world_json_path = resolve(base_dir, s.airbase_source.world_json_path);
+    s.airbase_source.class_table_path = resolve(base_dir, s.airbase_source.class_table_path);
     s.class_table_path  = resolve(base_dir, s.class_table_path);
     s.record_path       = resolve(base_dir, s.record_path);
 

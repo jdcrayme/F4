@@ -61,6 +61,14 @@ void PlayerApp::load_scenario(const std::filesystem::path& json_path) {
     impl_->sim->initialize();
     impl_->sim_initialized = true;
 
+    // Adopt the DERIVED scenario (initialize() resolves airbase_source:
+    // real runway/taxi/parking layout, runway-frame waypoints rotated to
+    // world, parking:"auto" assigned a real spot). The player's pre-init
+    // copy still has the unresolved authoring values — e.g. parking:"auto"
+    // reads as the origin, which would point the camera ~700k ft away
+    // from a grid-referenced airbase.
+    impl_->scenario = impl_->sim->scenario();
+
     // Observe the ATC traffic for the radio transcript overlay.
     impl_->radio_log.attach(*impl_->sim);
 

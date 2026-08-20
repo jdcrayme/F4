@@ -576,11 +576,28 @@ void PlayerApp::Impl::draw_scene() {
     // the airfield layout at any wide camera distance.
     f4::renderer::extend_far_plane(orbit_cam.camera(), 1.0f, 250000.0f);
 
-    // Ground plane (a big green quad at Y=0)
-    DrawPlane({0, 0, 0}, {8000, 8000}, GROUND_COLOR);
+    // Scene anchor: a grid-referenced airbase lives at its objective
+    // center (grid×1024 ft, hundreds of thousands of ft from origin) —
+    // the ground plane and grid must follow it, not the world origin.
+    float cx = 0.0f, cy = 0.0f, cz = 0.0f;  // ENU feet
+    if (scenario.has_airbase_source) {
+        cx = static_cast<float>(scenario.layout_center.x);
+        cy = static_cast<float>(scenario.layout_center.y);
+        cz = static_cast<float>(scenario.layout_center.z);
+    } else if (!scenario.aircraft.empty()) {
+        const auto& p = scenario.aircraft.front().parking_spot;
+        cx = static_cast<float>(p.x);
+        cy = static_cast<float>(p.y);
+        cz = static_cast<float>(p.z);
+    }
+    const Vector3 anchor = enu_to_raylib_v3(cx, cy, cz);
+
+    // Ground plane + grid sit 2/1 ft below the layout plane so they never
+    // z-fight with the runway/taxiway surfaces drawn at the same elevation.
+    DrawPlane({anchor.x, anchor.y - 2.0f, anchor.z}, {20000, 20000}, GROUND_COLOR);
 
     if (show_grid) {
-        f4::renderer::draw_grid(2000.0f, 100.0f);
+        f4::renderer::draw_grid_at(10000.0f, 1000.0f, cx, cy, cz - 1.0f);
     }
 
     if (show_axes) {

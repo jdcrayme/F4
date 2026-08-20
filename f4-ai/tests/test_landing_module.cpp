@@ -414,3 +414,171 @@ TEST(LandingModuleMisc, EmptyTaxiInRouteParksOnRunway) {
     EXPECT_EQ(mod.state(), LandingState::Parked);
     EXPECT_TRUE(mod.is_complete());
 }
+
+// ============================================================================
+// ============================================================================
+// Traffic pattern (visual approach: upwind join -> crosswind -> downwind
+// -> base -> final)
+// ============================================================================
+//
+// Geometry under test (Rwy 36, threshold (0,5000), left traffic):
+//   leg captures are plane crossings (lead 1500 ft):
+//     leg 0 (upwind overfly):  along > 12500  -> north > 17500
+//     leg 1 (crosswind widen): east  < -10500
+//     leg 2 (downwind):        along < -4500  -> north < 500
+//   base aim = (0, -7000); base capture |east| < 3000.
+
+namespace {
+
+/// Position helper: absolute ENU placement (not final-course relative).
+std::unique_ptr<TestAircraftState> at_pos(double east, double north,
+                                          double alt_ft, double hdg = 0.0,
+                                          double vcas = 250.0) {
+    auto s = std::make_unique<TestAircraftState>();
+    s->east_ft = east;
+    s->north_ft = north;
+    s->alt_agl_ft_ = alt_ft;
+    s->alt_msl_ft = alt_ft;
+    s->heading_rad_ = hdg;
+    s->vcas_kts_ = vcas;
+    return s;
+}
+
+struct PatternTestFixture : ::testing::Test {
+    messaging::MessageBus bus;
+    entities::EntityWorld world;
+    StubATC atc{bus};
+    LandingModule mod;
+
+    void SetUp() override {
+        atc.set_airfield(make_landing_config());
+        std::vector<geo::WorldPosition> taxi_in = {
+            geo::WorldPosition(100.0, 4800.0, 0.0),
+            geo::WorldPosition(0.0, 0.0, 0.0),
+        };
+        mod.configure(geo::WorldPosition(0.0, -15000.0, 0.0),
+                      std::move(taxi_in));
+        mod.fly_traffic_pattern = true;
+        mod.initialize(1, world, bus);
+    }
+};
+
+} // anonymous namespace
+
+TEST_F(PatternTestFixture, FixReachedEntersPatternNotIntercept) {
+    // Near the entry fix, pattern mode: expect PatternDownwind (not the
+    // straight-in InterceptFinal).
+    auto s = at_pos(0.0, -14500.0, 2500.0);   // ~500 ft from the fix
+    mod.update(0.1, s.get());
+    EXPECT_EQ(mod.state(), LandingState::PatternDownwind);
+}
+
+TEST_F(PatternTestFixture, PatternWalksUpwindCrosswindDownwindBaseFinal) {
+    bool cleared = false;
+    bus.subscribe<ClearedToLand>([&](const ClearedToLand&) { cleared = true; });
+
+    // Enter the pattern from the fix (south, inbound heading).
+    auto s = at_pos(0.0, -14500.0, 2500.0);
+    mod.update(0.1, s.get());
+    ASSERT_EQ(mod.state(), LandingState::PatternDownwind);
+
+    // Leg 0 (upwind overfly): before the far-corner plane -> holds.
+    s = at_pos(-3000.0, 12000.0, 2500.0);   // along = 7000 < 12500
+    mod.update(0.1, s.get());
+    ASSERT_EQ(mod.state(), LandingState::PatternDownwind);
+
+    // Past the far-corner plane: leg 0 -> 1 (crosswind).
+    s = at_pos(-3000.0, 18000.0, 2500.0);   // along = 13000 > 12500
+    mod.update(0.1, s.get());
+    ASSERT_EQ(mod.state(), LandingState::PatternDownwind);
+
+    // Leg 1 (crosswind widen): WEST of -10500 ft captures (left traffic).
+    s = at_pos(-11000.0, 18000.0, 2500.0);
+    mod.update(0.1, s.get());
+    ASSERT_EQ(mod.state(), LandingState::PatternDownwind);
+
+    // Leg 2 (downwind): before the base plane -> holds.
+    s = at_pos(-12000.0, 8000.0, 2500.0);   // along = 3000 > -4500
+    mod.update(0.1, s.get());
+    ASSERT_EQ(mod.state(), LandingState::PatternDownwind);
+
+    // Past the base-turn plane: turn base.
+    s = at_pos(-12000.0, 0.0, 2000.0, PI);   // along = -5000, heading south
+    mod.update(0.1, s.get());
+    ASSERT_EQ(mod.state(), LandingState::PatternBase);
+
+    // Still outside the base-capture window (12000 ft lateral): hold base.
+    s = at_pos(-12000.0, -2000.0, 1200.0, PI / 2);   // heading east (base)
+    mod.update(0.1, s.get());
+    ASSERT_EQ(mod.state(), LandingState::PatternBase);
+
+    // Within 3000 ft of the centerline: base -> final.
+    s = at_pos(-2000.0, -3000.0, 1000.0, PI / 2);
+    mod.update(0.1, s.get());
+    ASSERT_EQ(mod.state(), LandingState::InterceptFinal);
+
+    // Established inbound on the centerline: OnFinal + landing request.
+    s = at_pos(-300.0, -4000.0, 900.0, 0.2);
+    mod.update(0.1, s.get());
+    EXPECT_EQ(mod.state(), LandingState::OnFinal);
+    EXPECT_TRUE(cleared);
+}
+
+TEST_F(PatternTestFixture, BasePastThresholdGoesAround) {
+    // Enter + walk to base quickly via direct placements.
+    auto s = at_pos(0.0, -14500.0, 2500.0);
+    mod.update(0.1, s.get());
+    s = at_pos(-3000.0, 18000.0, 2500.0);
+    mod.update(0.1, s.get());
+    s = at_pos(-11000.0, 18000.0, 2500.0);
+    mod.update(0.1, s.get());
+    s = at_pos(-12000.0, 0.0, 2000.0, PI);
+    mod.update(0.1, s.get());
+    ASSERT_EQ(mod.state(), LandingState::PatternBase);
+
+    // On base but already past the threshold (north of it): missed.
+    bool went_around = false;
+    bus.subscribe<GoAroundMessage>([&](const GoAroundMessage& msg) {
+        if (msg.aircraft_id == 1u) went_around = true;
+    });
+    s = at_pos(-4000.0, 6000.0, 1500.0, PI / 2);   // along = +1000 ft
+    mod.update(0.1, s.get());
+    EXPECT_EQ(mod.state(), LandingState::GoAround);
+    EXPECT_TRUE(went_around);
+}
+
+TEST_F(PatternTestFixture, RightTrafficMirrorsToTheEastSide) {
+    mod.pattern_left_traffic = false;
+
+    auto s = at_pos(0.0, -14500.0, 2500.0);
+    mod.update(0.1, s.get());
+    ASSERT_EQ(mod.state(), LandingState::PatternDownwind);
+
+    // Far-corner plane is side-independent.
+    s = at_pos(3000.0, 18000.0, 2500.0);
+    mod.update(0.1, s.get());
+    ASSERT_EQ(mod.state(), LandingState::PatternDownwind);   // leg 0 -> 1
+
+    // Crosswind capture mirrors: EAST of +10500 ft.
+    s = at_pos(11000.0, 18000.0, 2500.0);
+    mod.update(0.1, s.get());
+    ASSERT_EQ(mod.state(), LandingState::PatternDownwind);   // leg 1 -> 2
+
+    // Downwind plane: same along axis, mirrored side.
+    s = at_pos(12000.0, 0.0, 2000.0, 0.0);
+    mod.update(0.1, s.get());
+    EXPECT_EQ(mod.state(), LandingState::PatternBase);
+}
+
+TEST_F(PatternTestFixture, PatternBaseCommandsGearDown) {
+    auto s = at_pos(0.0, -14500.0, 2500.0);
+    mod.update(0.1, s.get());
+    s = at_pos(-3000.0, 18000.0, 2500.0);
+    mod.update(0.1, s.get());
+    s = at_pos(-11000.0, 18000.0, 2500.0);
+    mod.update(0.1, s.get());
+    s = at_pos(-12000.0, 0.0, 2000.0, PI);
+    const auto out = mod.update(0.1, s.get());
+    ASSERT_EQ(mod.state(), LandingState::PatternBase);
+    EXPECT_TRUE(out.gear_handle_down);
+}

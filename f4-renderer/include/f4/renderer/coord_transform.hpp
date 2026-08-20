@@ -27,11 +27,9 @@ using Float3 = f4::math::Vec3f;
 /// LH Y-up: x=right, y=up, z=forward (into screen)
 /// RH Y-up: x=right, y=up, z=toward viewer (out of screen)
 ///
-/// Conversion: (x, y, z) -> (x, -z, y). The X and Y axes stay the same;
-/// negating Z flips the handedness from LH to RH, and Y swaps with Z to
-/// convert from Y-up to the target Y-up orientation.
+/// Conversion: (x, y, z) -> (y, -z, -x).
 inline f4::math::Vec3f model_vertex_to_raylib(float x, float y, float z) noexcept {
-    return f4::math::Vec3f{y, z, -x};
+    return f4::math::Vec3f{y, -z, -x};
 }
 
 /// Convert an ENU position (feet) to RH Y-up coordinates.

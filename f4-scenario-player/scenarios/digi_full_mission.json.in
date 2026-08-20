@@ -7,6 +7,7 @@
   "models_tex_path": "@F4_SOURCE_DIR@/temp/KoreaObj.TEX",
   "airbase_source": {
     "world_json": "@F4_BINARY_DIR@/korea_real.world.json",
+    "class_table": "@F4_DIGI_CLASS_TABLE@",
     "grid_x": 234,
     "grid_y": 655,
     "active_heading_deg": 20
@@ -33,6 +34,7 @@
     { "name": "BASE_FIX",  "position": { "x": 0.0,     "y": -65000.0, "z": 1600.0 },  "speed_kts": 220.0 },
     { "name": "APCH_FIX",  "position": { "x": 0.0,     "y": -55000.0, "z": 1400.0 },  "speed_kts": 200.0 }
   ],
+  "approach": "pattern",
   "sim_dt": 0.016666666666666666,
   "total_ticks": 120000,
   "record": false,

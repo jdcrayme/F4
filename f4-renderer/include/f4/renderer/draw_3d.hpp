@@ -71,6 +71,11 @@ void draw_single_mesh(const ::Mesh& mesh, const ::Material& material,
 /// Draw a grid on the XZ plane.
 void draw_grid(float extent, float step);
 
+/// Draw a grid on the XZ plane, offset to an ENU origin (ox=east,
+/// oy=north, oz=up in feet) — for scenes whose content is not centered
+/// on the world origin (e.g. a grid-referenced airbase).
+void draw_grid_at(float extent, float step, float ox, float oy, float oz);
+
 /// Draw RGB coordinate axes at the origin.
 void draw_axes(float length);
 
