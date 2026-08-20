@@ -37,13 +37,17 @@
 #pragma once
 
 #include <f4/renderer/feature_mesh.hpp>   // FeatureMeshResources, DrawStats
+#include <f4/renderer/ground_layout_models.hpp>  // AirfieldGeometry3D, AirfieldDrawToggles
 #include <f4/renderer/symbols.hpp>         // SymbolKind, RlColor, draw_symbol
 
 #include <f4/entities/entity.hpp>          // EntityHandle, components
 
 #include <cstdint>
+#include <unordered_map>
 
 namespace f4::renderer {
+
+class RenderResources;
 
 // ---------------------------------------------------------------------------
 // EntityRenderResources
@@ -78,7 +82,33 @@ struct EntityRenderResources : FeatureMeshResources {
     /// When true, features at maximum damage are not rendered (they've
     /// been destroyed and should not appear in the scene).
     bool skip_destroyed_features = true;
+
+    /// Whether to render GroundLayoutComponent airfield geometry.
+    /// Disable when the caller draws the same objective's geometry via a
+    /// standalone SceneDescription::airfield (double draw) or wants only
+    /// feature models.
+    bool show_ground_layout = true;
+
+    /// Per-layer toggles for the GroundLayoutComponent dispatch.
+    AirfieldDrawToggles airfield_toggles;
+
+    /// Airfield geometry cache (EntityId.value → pre-built
+    /// AirfieldGeometry3D), so RenderEntity() doesn't rebuild geometry
+    /// every frame. Typically points at RenderResources::airfield_cache.
+    std::unordered_map<uint64_t, AirfieldGeometry3D>* airfield_cache =
+        nullptr;
 };
+
+/// Build an EntityRenderResources bundle from a RenderResources instance
+/// (shader/texture/mesh caches, default material, lighting) plus the
+/// feature-path database + class table. This replaces the per-viewer
+/// pointer wiring that each app used to duplicate. If the class table or
+/// model db is null (or the default material can't be created), the
+/// affected paths degrade to no-ops rather than crashing.
+EntityRenderResources make_entity_render_resources(
+    RenderResources& res,
+    f4::models::ModelDatabase* db,
+    f4::world_convert::ClassTable* ct);
 
 // ---------------------------------------------------------------------------
 // RenderEntity
@@ -93,7 +123,12 @@ struct EntityRenderResources : FeatureMeshResources {
 //   - For the 3D panel: an orbit Camera3D positioned by OrbitCamera.
 //
 // Component dispatch order:
-//   1. FeatureSetComponent + TransformComponent:
+//   1. GroundLayoutComponent + TransformComponent:
+//      Renders the airfield geometry (runway surfaces, threshold bars,
+//      centerline dashes, taxiways, parking/helipad/runway-end markers)
+//      via draw_airfield_geometry(), built once and cached in
+//      res.airfield_cache (when non-null) keyed by EntityId.
+//   2. FeatureSetComponent + TransformComponent:
 //      Renders KoreaObj 3D models at each FeatureEntryState offset,
 //      using the existing draw_feature_mesh() pipeline. This handles
 //      the buildings, structures, and other features that sit on
@@ -101,9 +136,8 @@ struct EntityRenderResources : FeatureMeshResources {
 //
 // Future extensions (not yet implemented):
 //   - VisualModelComponent: 3D mesh for aircraft/vehicles
-//     (currently handled by scenario-player's draw_visual_entities())
-//   - GroundLayoutComponent: 3D airfield geometry
-//     (currently handled by ground_layout_3d.cpp)
+//     (currently the app extracts these into EntityMeshDraw /
+//     draw_entity_meshes())
 //   - RadarComponent: radar detection arcs
 //
 // @param res     Entity render resources (model DB, caches, toggles)

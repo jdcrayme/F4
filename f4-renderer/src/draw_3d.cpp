@@ -158,9 +158,17 @@ void draw_meshes(
 // ── Far-plane extension ─────────────────────────────────────────────────────
 
 void extend_far_plane(const Camera3D& camera, float near_ft, float far_ft) {
+    // Orthographic projections are built against the active viewport by
+    // BeginMode3D already; replacing them with a perspective matrix here
+    // would break them. Their far plane is rlgl's RL_CULL_DISTANCE_FAR.
+    if (camera.projection != CAMERA_PERSPECTIVE) return;
+
+    // GetRenderWidth/Height follow the ACTIVE render target — inside a
+    // BeginTextureMode they report the texture size, so offscreen frames
+    // (e.g. the world-viewer's 3D layout tab) get the right aspect.
     const double aspect =
-        static_cast<double>(GetScreenWidth()) /
-        std::max(1, GetScreenHeight());
+        static_cast<double>(GetRenderWidth()) /
+        std::max(1, GetRenderHeight());
     const Matrix proj = MatrixPerspective(
         camera.fovy * DEG2RAD, aspect,
         static_cast<double>(near_ft), static_cast<double>(far_ft));

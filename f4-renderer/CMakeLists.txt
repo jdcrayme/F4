@@ -30,6 +30,16 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 #   entity_render    — entity-level rendering: RenderEntity() inspects
 #                     components and dispatches to feature_mesh, symbols,
 #                     etc. RenderEntityIcon() renders 2D map symbols
+#   render_resources — RenderResources: owns the per-viewer GPU caches
+#                     (lit shader, textures, meshes, default material,
+#                     airfield geometry) + lazy mesh building
+#   scene_draw       — scene composition: draw_ground (flat plane/grid),
+#                     draw_entity_meshes (VisualModelComponent path),
+#                     draw_airfield_geometry
+#   world_renderer   — render_world(): the single entry point that renders
+#                     a chunk of the world from a SceneDescription camera
+#   world_camera     — world-space camera helpers: make_perspective_camera,
+#                     make_topdown_ortho_camera, FreeCamera controller
 #
 # Dependencies:
 #   PUBLIC:  f4-models (for ModelGeometry, ColorBank, ModelDatabase types)
@@ -59,6 +69,10 @@ add_library(f4-renderer STATIC
     src/symbol_library.cpp
     src/entity_render.cpp
     src/ground_layout_models.cpp
+    src/render_resources.cpp
+    src/scene_draw.cpp
+    src/world_renderer.cpp
+    src/world_camera.cpp
 )
 target_link_libraries(f4-renderer PUBLIC f4_warnings)
 target_include_directories(f4-renderer

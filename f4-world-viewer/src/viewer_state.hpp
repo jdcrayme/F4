@@ -66,6 +66,9 @@
 #include <f4/renderer/coord_transform.hpp>
 #include <f4/renderer/feature_mesh.hpp>
 #include <f4/renderer/entity_render.hpp>
+#include <f4/renderer/render_resources.hpp>
+#include <f4/renderer/world_renderer.hpp>
+#include <f4/renderer/world_camera.hpp>
 
 #include <raylib.h>
 
@@ -554,47 +557,19 @@ struct ViewerApp::Impl {
     bool models_3d_loaded = false;
     std::string models_3d_error;  // empty if loaded successfully
 
-    // --- Mesh cache (one Raylib Mesh per unique KoreaObj parent_index) ---
+    // --- Shared GPU resources (f4::renderer::RenderResources) ------------
     //
-    // Uses f4::renderer::FeatureMeshCacheEntry (an alias for the same
-    // struct layout that was previously defined locally). Multiple
-    // features sharing the same vis_type (e.g. three hangars of type
-    // 169) reuse one GPU upload. The cache is shared across both the 3D
-    // Ground Layout panel and the 2D canvas's feature-mesh pass so a
-    // feature rendered once in either view is already cached for the
-    // other view.
+    // Owns the mesh cache (one Raylib Mesh per unique KoreaObj
+    // parent_index — features sharing a vis_type share one GPU upload),
+    // the texture cache, the lit shader, the default material, lighting
+    // state, and the airfield geometry cache. Shared across the 3D
+    // Ground Layout panel, the 2D canvas's feature-mesh pass, and the
+    // 3D world mode — a feature rendered once in any view is cached for
+    // all the others.
     //
-    // All entries MUST be unloaded before the GL context goes away —
-    // handled by unload_meshes_3d().
-    using Gl3dMeshCacheEntry = f4::renderer::FeatureMeshCacheEntry;
-    std::unordered_map<int, Gl3dMeshCacheEntry> mesh_cache_3d;
-
-    // --- Texture cache (lazy, shared across meshes by tex_id) -----------
-    // f4::renderer::TextureCache replaces the local TexCacheEntry3D map.
-    f4::renderer::TextureCache texture_cache_3d;
-
-    // --- Lit shader (single directional sun + ambient) -----------------
-    // f4::renderer::LitShader replaces the manual shader + uniform locs.
-    f4::renderer::LitShader lit_shader_3d;
-
-    // --- Cached default material + 1x1 white fallback texture ----------
-    //
-    // These are still needed because the per-feature draw loop draws
-    // individual meshes with per-feature model matrices (can't use
-    // f4::renderer::draw_meshes which draws all entries as a batch).
-    // The default material ensures untextured meshes sample (1,1,1,1)
-    // instead of undefined data, which would trigger the lit shader's
-    // `if (tex.a < 0.5) discard;` and hide the mesh.
-    Texture2D fallback_white_tex_3d = {};
-    bool fallback_white_tex_3d_valid = false;
-    Material default_mat_3d = {};
-    bool default_mat_3d_valid = false;
-
-    // --- Lighting state (matches scenario-player defaults) -------------
-    Vector3 light_3d_direction = { 0.65f, -1.0f, 0.35f };
-    float   light_3d_intensity = 1.0f;
-    Color   ambient_3d_color = { 80, 80, 90, 255 };
-    Color   light_3d_color   = { 255, 250, 235, 255 };
+    // Must be unloaded before the GL context goes away —
+    // render_res_3d.unload_all() (called from run()'s shutdown path).
+    f4::renderer::RenderResources render_res_3d;
 
     // --- Per-frame diagnostic counters for the 3D Models path -----------
     //
@@ -621,21 +596,6 @@ struct ViewerApp::Impl {
     /// returns false and sets models_3d_error (further calls are no-ops
     /// until models_3d_load_attempted is reset).
     bool ensure_models_3d_loaded();
-    /// Lazily create the 1x1 opaque-white fallback texture + the cached
-    /// default material that binds it. Idempotent. The default material
-    /// also gets the lit shader assigned (if compiled). Required so that
-    /// UTEXTURED meshes (tex_id < 0) sample (1,1,1,1) instead of undefined
-    /// data — without this, the lit shader's `if (tex.a < 0.5) discard;`
-    /// kills every fragment of every untextured mesh.
-    bool ensure_default_material_3d();
-    /// Build (or skip if cached) Raylib Mesh objects for one KoreaObj
-    /// model. Uses f4::renderer::build_raylib_meshes + build_mesh_entries.
-    /// No-op if parent_index < 0 or already cached.
-    void build_mesh_3d(int parent_index);
-    /// Free all cached meshes + textures. MUST be called before the GL
-    /// context goes away (i.e. before CloseWindow()). Safe to call when
-    /// nothing is cached (no-op). Also clears the lit shader + texture cache.
-    void unload_meshes_3d();
 };
 
 } // namespace f4::viewer

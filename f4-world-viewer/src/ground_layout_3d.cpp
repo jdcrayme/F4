@@ -156,18 +156,13 @@ void draw_ground_grid(float center_x, float center_y,
 } // anonymous namespace
 
 // ---------------------------------------------------------------------------
-// Impl method definitions — KoreaObj model loading + mesh building
+// Impl method definitions — KoreaObj model loading
 // ---------------------------------------------------------------------------
 //
-// These mirror the f4-scenario-player's PlayerApp::Impl methods of the
-// same name (build_mesh_for_model, upload_textures, unload_textures,
-// unload_meshes), but adapted to live inside the world-viewer's Impl
-// struct. The mesh + texture cache is shared across all selected
-// objectives — switching selection does NOT invalidate the cache (the
-// models are keyed by KoreaObj parent_index, not by entity).
-//
-// All methods require the GL context (rlImGuiSetup has been called).
-// No-op when no Installation is configured.
+// Only ensure_models_3d_loaded() (asset discovery) remains app-specific.
+// The mesh/texture caches, default material, and cleanup are owned by
+// f4::renderer::RenderResources (Impl::render_res_3d), shared with the
+// 2D canvas feature-mesh pass and the 3D world mode.
 
 bool ViewerApp::Impl::ensure_models_3d_loaded() {
     if (models_3d_load_attempted) return models_3d_loaded;
@@ -241,136 +236,6 @@ bool ViewerApp::Impl::ensure_models_3d_loaded() {
 
     models_3d_loaded = true;
     return true;
-}
-
-bool ViewerApp::Impl::ensure_default_material_3d() {
-    // Idempotent — once valid, stay valid (until unload_meshes_3d()).
-    if (default_mat_3d_valid) return true;
-
-    // Ensure the lit shader is compiled (via f4::renderer::LitShader).
-    lit_shader_3d.ensure();
-
-    // 1) Create the 1x1 opaque-white fallback texture.
-    if (!fallback_white_tex_3d_valid) {
-        Image img = {};
-        img.data = RL_MALLOC(4);  // 1 pixel * 4 bytes (RGBA8)
-        if (!img.data) return false;
-        unsigned char* px = static_cast<unsigned char*>(img.data);
-        px[0] = 255; px[1] = 255; px[2] = 255; px[3] = 255;
-        img.width = 1;
-        img.height = 1;
-        img.mipmaps = 1;
-        img.format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8;
-        fallback_white_tex_3d = LoadTextureFromImage(img);
-        UnloadImage(img);
-        fallback_white_tex_3d_valid = (fallback_white_tex_3d.id != 0);
-        if (!fallback_white_tex_3d_valid) return false;
-    }
-
-    // 2) Create the cached default material, bind the white texture to
-    //    its diffuse map so the lit shader samples (1,1,1,1) instead of
-    //    undefined data. Also assign the lit shader (if it compiled —
-    //    otherwise we fall back to Raylib's default shader, which still
-    //    works without lighting).
-    default_mat_3d = LoadMaterialDefault();
-    default_mat_3d.maps[MATERIAL_MAP_DIFFUSE].texture = fallback_white_tex_3d;
-    default_mat_3d.maps[MATERIAL_MAP_DIFFUSE].color = WHITE;
-    if (lit_shader_3d.is_loaded()) {
-        default_mat_3d.shader = lit_shader_3d.shader();
-    }
-    default_mat_3d_valid = true;
-    return true;
-}
-
-void ViewerApp::Impl::build_mesh_3d(int parent_index) {
-    if (parent_index < 0) return;
-    auto it = mesh_cache_3d.find(parent_index);
-    if (it != mesh_cache_3d.end() && it->second.built) return;  // already cached
-
-    if (!model_db_3d.has_value()) {
-        if (it != mesh_cache_3d.end()) it->second.built = true;
-        else mesh_cache_3d[parent_index].built = true;
-        return;
-    }
-    auto& db = *model_db_3d;
-    const auto* rec = db.model(parent_index);
-    if (!rec || rec->lods.empty()) {
-        if (it != mesh_cache_3d.end()) it->second.built = true;
-        else mesh_cache_3d[parent_index].built = true;
-        return;
-    }
-    const int lod = 0;  // lock to LOD 0 (highest detail)
-    auto err = db.parse_lod(parent_index, lod);
-    if (!err.empty()) {
-        if (it != mesh_cache_3d.end()) it->second.built = true;
-        else mesh_cache_3d[parent_index].built = true;
-        return;
-    }
-
-    // Default ModelState: texture_set=0, no DOFs/switches active.
-    f4::models::ModelState default_state;
-    default_state.texture_set = 0;
-    default_state.n_texture_sets = std::max(1, static_cast<int>(rec->n_texture_sets));
-
-    auto geom = db.extract_model_geometry(parent_index, lod, default_state);
-    if (geom.meshes.empty()) {
-        mesh_cache_3d[parent_index].built = true;
-        return;
-    }
-
-    // Use f4::renderer to build Raylib meshes + mesh entries.
-    auto raylib_meshes = f4::renderer::build_raylib_meshes(
-        geom, db.color_bank(), f4::renderer::model_vertex_to_raylib);
-    auto entries = f4::renderer::build_mesh_entries(geom, raylib_meshes);
-
-    Gl3dMeshCacheEntry cache_entry;
-    cache_entry.meshes = std::move(entries);
-    cache_entry.built = true;
-    mesh_cache_3d[parent_index] = std::move(cache_entry);
-
-    // Upload any new textures via f4::renderer::TextureCache.
-    std::vector<int> tex_ids;
-    for (const auto& me : mesh_cache_3d[parent_index].meshes) {
-        if (me.tex_id >= 0) tex_ids.push_back(me.tex_id);
-    }
-    if (!tex_ids.empty()) {
-        texture_cache_3d.upload(db, tex_ids);
-    }
-}
-
-void ViewerApp::Impl::unload_meshes_3d() {
-    // Free textures via f4::renderer::TextureCache.
-    texture_cache_3d.unload_all();
-
-    // Free meshes.
-    for (auto& [parent_idx, cache_entry] : mesh_cache_3d) {
-        for (auto& me : cache_entry.meshes) {
-            UnloadMesh(me.mesh);
-        }
-        cache_entry.meshes.clear();
-        cache_entry.built = false;
-    }
-    mesh_cache_3d.clear();
-
-    // Free the cached default material + 1x1 fallback texture. We must
-    // unset the texture reference on the material BEFORE unloading the
-    // texture, otherwise UnloadMaterial may try to free a texture that's
-    // about to be freed separately.
-    if (default_mat_3d_valid) {
-        default_mat_3d.maps[MATERIAL_MAP_DIFFUSE].texture = {};
-        UnloadMaterial(default_mat_3d);
-        default_mat_3d = {};
-        default_mat_3d_valid = false;
-    }
-    if (fallback_white_tex_3d_valid) {
-        UnloadTexture(fallback_white_tex_3d);
-        fallback_white_tex_3d = {};
-        fallback_white_tex_3d_valid = false;
-    }
-
-    // LitShader handles its own cleanup via RAII, but we can release it
-    // explicitly here if needed. The LitShader destructor will unload
-    // the shader from GPU when the Impl struct is destroyed.
 }
 
 // ---------------------------------------------------------------------------

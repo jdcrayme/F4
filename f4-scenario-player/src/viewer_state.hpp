@@ -11,9 +11,9 @@
 #include "radio_log.hpp"
 #include <f4/renderer/coord_transform.hpp>       // Float3, enu_to_raylib, model_vertex_to_raylib
 #include <f4/renderer/orbit_camera.hpp>          // OrbitCamera
-#include <f4/renderer/lit_shader.hpp>            // LitShader
-#include <f4/renderer/mesh_builder.hpp>          // MeshEntry
-#include <f4/renderer/texture_cache.hpp>         // TextureCache
+#include <f4/renderer/render_resources.hpp>      // RenderResources (owns all GPU caches)
+#include <f4/renderer/world_renderer.hpp>        // SceneDescription, render_world()
+#include <f4/renderer/world_camera.hpp>
 
 #include <f4/simulation/simulation.hpp>
 #include <f4/simulation/scenario.hpp>
@@ -80,37 +80,17 @@ struct PlayerApp::Impl {
     };
     bool initial_camera_set = false;
 
-    // ── Visual-entity mesh cache (Phase 2A) ───────────────────────────
-    // One entry per unique model_record (keyed by parent_index). Multiple
-    // entities sharing the same vis_type reuse one mesh cache entry —
-    // e.g. three hangars of the same type upload their geometry only once.
-    //
-    // Built lazily from draw_visual_entities() the first time an entity
-    // with a previously-unseen parent_index is encountered. Requires the
-    // GL context (UploadMesh), so the first build happens inside run().
-    // Uses f4::renderer::MeshEntry from f4-renderer.
-    struct MeshCacheEntry {
-        std::vector<f4::renderer::MeshEntry> meshes;
-        bool built = false;
-    };
-    std::unordered_map<int, MeshCacheEntry> mesh_cache;  // key = parent_index
+    // ── Shared GPU resources (f4::renderer::RenderResources) ────────
+    // Owns the lit shader, texture cache, KoreaObj mesh cache, default
+    // material, lighting state, and airfield geometry cache. Replaces the
+    // per-app mesh_cache / texture_cache / lit_shader / lighting fields
+    // that used to live here (identical caches also lived in the
+    // world-viewer — one implementation now serves both).
+    f4::renderer::RenderResources render_res;
 
-    /// Legacy alias — the aircraft's mesh list, used by code paths that
-    /// haven't been refactored to walk the world yet. Points at the
-    /// mesh_cache entry for the aircraft's vis_type_index (built lazily).
+    /// True once the primary aircraft's mesh has been ensured in the
+    /// cache (build_aircraft_meshes ran after GL context creation).
     bool meshes_built = false;
-
-    // ── Texture cache (delegated to f4::renderer::TextureCache) ──────
-    f4::renderer::TextureCache texture_cache;
-
-    // ── Lit shader (delegated to f4::renderer::LitShader) ────────────
-    f4::renderer::LitShader lit_shader;
-
-    // ── Lighting (single directional sun + ambient) ───────────────────
-    Vector3 light_direction = { 0.65f, -1.0f, 0.35f };  // points from scene toward sun
-    float  light_intensity = 1.0f;
-    Color  ambient_color = { 80, 80, 90, 255 };
-    Color  light_color   = { 255, 250, 235, 255 };
 
     // ── HUD ───────────────────────────────────────────────────────────
     bool show_hud = true;
@@ -141,15 +121,11 @@ struct PlayerApp::Impl {
     void fit_to_aircraft();
     void reset_camera();
 
-    void build_aircraft_meshes();       // legacy: ensures aircraft's mesh is cached
-    void build_mesh_for_model(int parent_index);  // Phase 2A: lazy mesh build
-    void upload_textures();
-    void unload_meshes();
+    void build_aircraft_meshes();       // ensures aircraft's mesh is cached
+    void unload_meshes();               // render_res.unload_all() wrapper
 
-    void draw_scene();
-    void draw_airport();
-    void draw_aircraft();               // legacy: draws only the primary aircraft
-    void draw_visual_entities();        // Phase 2A: walks all VMC-bearing entities
+    void draw_scene();                  // render_world() + HUD + radio
+    void draw_airport();                // scenario-specific 3D overlays
     void draw_hud();
     void draw_radio();                  // ATC transcript panel (top-right)
 };

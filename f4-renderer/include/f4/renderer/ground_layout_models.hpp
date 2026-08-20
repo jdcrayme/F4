@@ -111,6 +111,29 @@ struct AirfieldGeometry3D {
 };
 
 // ---------------------------------------------------------------------------
+// AirfieldDrawToggles
+// ---------------------------------------------------------------------------
+
+/// Per-layer toggles for airfield geometry rendering. Each viewer
+/// constructs one from its UI state and passes it to
+/// draw_airfield_geometry() (scene_draw.hpp) or via EntityRenderResources
+/// (entity_render.hpp) for the GroundLayoutComponent dispatch path.
+///
+/// Pure data (no Raylib types) so it lives here next to the geometry it
+/// gates, testable without a GL context.
+struct AirfieldDrawToggles {
+    bool runway   = true;  ///< runway surfaces, threshold bars, centerline dashes
+    bool markers  = true;  ///< runway-end markers (red cubes)
+    bool taxiways = true;  ///< taxiway strips + centerlines
+    bool parking  = true;  ///< parking-spot markers
+    bool helipads = true;  ///< helipad cylinders
+    /// Flat feature footprints — fallback when 3D KoreaObj models are
+    /// disabled/unavailable. Set false when models are drawn (they would
+    /// z-fight and clutter).
+    bool features = true;
+};
+
+// ---------------------------------------------------------------------------
 // Layout-type predicates
 // ---------------------------------------------------------------------------
 //

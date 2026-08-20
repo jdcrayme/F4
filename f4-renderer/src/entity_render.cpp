@@ -19,8 +19,34 @@
 #include <f4/renderer/entity_render.hpp>
 
 #include <f4/renderer/feature_mesh.hpp>     // build_feature_mesh, draw_feature_mesh
+#include <f4/renderer/render_resources.hpp>
+#include <f4/renderer/scene_draw.hpp>       // draw_airfield_geometry
 
 namespace f4::renderer {
+
+// ── make_entity_render_resources ──────────────────────────────────────────
+
+EntityRenderResources make_entity_render_resources(
+    RenderResources& res,
+    f4::models::ModelDatabase* db,
+    f4::world_convert::ClassTable* ct)
+{
+    EntityRenderResources eres{};
+    eres.model_db       = db;
+    eres.class_table    = ct;
+    eres.texture_cache  = &res.texture_cache;
+    eres.lit_shader     = &res.lit_shader;
+    eres.mesh_cache     = &res.mesh_cache;
+    eres.light_direction = res.light_direction;
+    eres.light_color     = res.light_color;
+    eres.light_intensity = res.light_intensity;
+    eres.ambient_color   = res.ambient_color;
+    eres.airfield_cache  = &res.airfield_cache;
+    if (res.default_material_valid() || res.ensure_default_material()) {
+        eres.default_material = &res.default_material();
+    }
+    return eres;
+}
 
 // ── RenderEntity ──────────────────────────────────────────────────────────
 
@@ -30,6 +56,46 @@ DrawStats RenderEntity(EntityRenderResources& res,
     DrawStats total{};
 
     if (!entity.valid()) return total;
+
+    // ── GroundLayoutComponent + TransformComponent ────────────────────
+    //
+    // Build (or fetch cached) AirfieldGeometry3D from the objective's
+    // layout lists, then draw it at the objective's world position.
+    // Geometry is pure campaign data — build once, cache by EntityId.
+    if (res.show_ground_layout) {
+        auto* tf = entity.get<f4::entities::TransformComponent>();
+        auto* gl = entity.get<f4::entities::GroundLayoutComponent>();
+        if (tf && gl && !gl->layouts.empty()) {
+            auto* fs = entity.get<f4::entities::FeatureSetComponent>();
+            const uint64_t key = entity.id().value;
+
+            AirfieldGeometry3D* geom = nullptr;
+            if (res.airfield_cache) {
+                auto it = res.airfield_cache->find(key);
+                if (it == res.airfield_cache->end()) {
+                    it = res.airfield_cache->emplace(key, build_airfield_geometry_3d(
+                        gl->layouts, fs ? &fs->features : nullptr)).first;
+                }
+                geom = &it->second;
+            } else {
+                // No cache available — build per call (viewers that
+                // render entities through render_world() always have one).
+                static thread_local AirfieldGeometry3D scratch;
+                scratch = build_airfield_geometry_3d(
+                    gl->layouts, fs ? &fs->features : nullptr);
+                geom = &scratch;
+            }
+
+            const auto st = draw_airfield_geometry(
+                *geom, res.airfield_toggles,
+                static_cast<float>(tf->position.x),
+                static_cast<float>(tf->position.y),
+                static_cast<float>(tf->position.z));
+            total.draw_calls     += st.draw_calls;
+            total.meshes_drawn   += st.meshes_drawn;
+            total.vertices_drawn += st.vertices_drawn;
+        }
+    }
 
     // ── FeatureSetComponent + TransformComponent ──────────────────────
     //
@@ -110,16 +176,9 @@ DrawStats RenderEntity(EntityRenderResources& res,
     // ── Future dispatch points ────────────────────────────────────────
     //
     // VisualModelComponent (from f4-simulation):
-    //   Currently handled by scenario-player's draw_visual_entities().
-    //   To add here, f4-renderer would need to depend on f4-simulation,
-    //   which is architecturally wrong (renderer is lower than sim).
-    //   Instead, a future render-pass registration system could allow
-    //   f4-simulation to register a VisualModelComponent renderer without
-    //   creating a dependency cycle.
-    //
-    // GroundLayoutComponent:
-    //   Currently handled by ground_layout_3d.cpp. Could be added here
-    //   once the ground layout rendering is consolidated into f4-renderer.
+    //   Rendered via draw_entity_meshes() — the app extracts the
+    //   component data into EntityMeshDraw because f4-renderer must not
+    //   depend on f4-simulation (renderer is lower than sim).
     //
     // RadarComponent:
     //   Radar arc rendering (DrawCircleSector) is straightforward but

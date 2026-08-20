@@ -1,9 +1,16 @@
 // f4-scenario-player/src/renderer.cpp
 //
-// Camera + scene drawing for the scenario player. Mirrors the structure
-// of f4-models-viewer's camera3d.cpp + canvas3d.cpp, but adapted for the
-// larger-scale world (camera distances in hundreds of feet, not tens)
-// and the ENU coordinate frame.
+// Camera + scene drawing for the scenario player.
+//
+// The rendering itself is delegated to f4::renderer::render_world() —
+// the single world-rendering entry point shared with the world-viewer.
+// This file only:
+//   1. Owns the orbit camera + keyboard bindings
+//   2. Builds the SceneDescription (ground anchor, airfield, entities)
+//   3. Extracts VisualModelComponent entities into plain EntityMeshDraw
+//      records (f4-renderer must not depend on f4-simulation)
+//   4. Draws scenario-specific overlays (taxi route, flight plan,
+//      approach, compass rose, HUD, ATC radio) via the overlay hook
 //
 // CRITICAL: Raylib defines `PI` as a preprocessor macro (raylib.h:110),
 // which collides with `f4::math::PI` brought in by f4-flight-model's
@@ -22,7 +29,8 @@
 #include <f4/models/model_database.hpp>
 #include <f4/renderer/draw_3d.hpp>
 #include <f4/renderer/layout_draw.hpp>
-#include <f4/renderer/mesh_builder.hpp>
+#include <f4/renderer/scene_draw.hpp>
+#include <f4/renderer/world_renderer.hpp>
 #include <f4/renderer/coord_transform.hpp>
 
 // Now safe to include Raylib (PI macro won't break the flight headers).
@@ -40,9 +48,7 @@
 namespace f4::scenario_player {
 
 // ── Constants ──────────────────────────────────────────────────────────────
-// Colors
 static constexpr Color SKY_COLOR  = {135, 175, 220, 255};  // sky blue
-static constexpr Color GROUND_COLOR = {50, 70, 35, 255};   // green grass
 
 // ── Camera (delegated to f4::renderer::OrbitCamera) ────────────────────────
 
@@ -93,19 +99,14 @@ void PlayerApp::Impl::reset_camera() {
     orbit_cam.update_from_orbit();
 }
 
-// ── Lit shader (delegated to f4::renderer::LitShader) ────────────────────
-// No more inline GLSL source or manual LoadShaderFromMemory here.
-// LitShader::ensure() compiles lazily on first call; set_lighting() sets
-// uniforms per-frame.
-
-// ── Mesh building (delegated to f4::renderer::build_raylib_meshes) ────────
-// The manual per-vertex conversion loop and resolve_vertex_color() have
-// been consolidated into f4-renderer's mesh_builder.cpp.
+// ── Mesh building (delegated to f4::renderer::RenderResources) ────────────
+// build_mesh_for_model / upload_textures / the mesh + texture + shader
+// caches all live in RenderResources now (shared implementation with the
+// world-viewer).
 
 void PlayerApp::Impl::build_aircraft_meshes() {
-    // Phase 2A: this is now a thin wrapper that ensures the aircraft's
-    // mesh is in the cache. The actual mesh-building logic lives in
-    // build_mesh_for_model(), shared between aircraft and airfield features.
+    // Thin wrapper: ensure the aircraft's mesh is in the cache after GL
+    // context creation (draw_entity_meshes builds the rest lazily).
     if (!sim_initialized) { meshes_built = true; return; }
 
     auto h = f4::entities::EntityHandle(sim->aircraft_entity(), &sim->world());
@@ -125,11 +126,11 @@ void PlayerApp::Impl::build_aircraft_meshes() {
         return;
     }
 
-    build_mesh_for_model(parent_index);
+    render_res.build_mesh_for_model(db, parent_index);
 
     meshes_built = true;
-    auto it = mesh_cache.find(parent_index);
-    if (it != mesh_cache.end()) {
+    auto it = render_res.mesh_cache.find(parent_index);
+    if (it != render_res.mesh_cache.end()) {
         int n_textured = 0;
         for (const auto& me : it->second.meshes) if (me.tex_id >= 0) ++n_textured;
         status_msg = "F-16 loaded: " + std::to_string(it->second.meshes.size()) +
@@ -137,100 +138,13 @@ void PlayerApp::Impl::build_aircraft_meshes() {
     }
 }
 
-void PlayerApp::Impl::build_mesh_for_model(int parent_index) {
-    // Phase 2A: build (or skip if already cached) the Raylib Mesh objects
-    // for one KoreaObj model. The result is stored in mesh_cache[parent_index]
-    // so multiple entities sharing the same vis_type reuse one upload.
-    //
-    // Requires the GL context (UploadMesh). Called lazily from
-    // draw_visual_entities() the first time an entity with a previously-
-    // unseen parent_index is encountered, and eagerly from
-    // build_aircraft_meshes() at startup for the primary aircraft.
-    if (parent_index < 0) return;
-    auto it = mesh_cache.find(parent_index);
-    if (it != mesh_cache.end() && it->second.built) return;  // already cached
-
-    auto& db = const_cast<f4::models::ModelDatabase&>(sim->model_db());
-    const auto* rec = db.model(parent_index);
-    if (!rec || rec->lods.empty()) {
-        if (it != mesh_cache.end()) it->second.built = true;
-        else mesh_cache[parent_index].built = true;
-        return;
-    }
-    const int lod = 0;  // lock to LOD 0 (highest detail) for now
-    auto err = db.parse_lod(parent_index, lod);
-    if (!err.empty()) {
-        if (it != mesh_cache.end()) it->second.built = true;
-        else mesh_cache[parent_index].built = true;
-        return;
-    }
-
-    // Use a default ModelState (texture_set=0, no switches). The aircraft's
-    // per-instance gear switch is baked into the extracted geometry at
-    // build time, so a future phase that needs to animate the gear will
-    // need to invalidate and rebuild the cache entry. For Phase 2A we
-    // accept static gear (already down at spawn, stays down during taxi).
-    f4::models::ModelState default_state;
-    default_state.texture_set = 0;
-    default_state.n_texture_sets = std::max(1, static_cast<int>(rec->n_texture_sets));
-
-    auto geom = db.extract_model_geometry(parent_index, lod, default_state);
-    if (geom.meshes.empty()) {
-        mesh_cache[parent_index].built = true;
-        return;
-    }
-
-    const auto& cb = db.color_bank();
-
-    // Delegate mesh construction to f4-renderer.
-    auto raylib_meshes = f4::renderer::build_raylib_meshes(geom, cb, f4::renderer::model_vertex_to_raylib);
-    auto mesh_entries = f4::renderer::build_mesh_entries(geom, raylib_meshes);
-
-    MeshCacheEntry entry;
-    entry.meshes = std::move(mesh_entries);
-    entry.built = true;
-    mesh_cache[parent_index] = std::move(entry);
-
-    // Upload any new textures referenced by this model's meshes.
-    upload_textures();
-}
-
-void PlayerApp::Impl::upload_textures() {
-    if (!sim_initialized) return;
-    auto& db = const_cast<f4::models::ModelDatabase&>(sim->model_db());
-
-    // Collect all tex_ids from every cached mesh entry.
-    std::vector<int> tex_ids;
-    for (const auto& [parent_idx, cache_entry] : mesh_cache) {
-        for (const auto& me : cache_entry.meshes) {
-            if (me.tex_id >= 0) tex_ids.push_back(me.tex_id);
-        }
-    }
-
-    // Delegate to f4-renderer's TextureCache.
-    texture_cache.upload(db, tex_ids);
-}
-
 void PlayerApp::Impl::unload_meshes() {
-    texture_cache.unload_all();
-    // Phase 2A: walk every model in the mesh cache.
-    for (auto& [parent_idx, cache_entry] : mesh_cache) {
-        std::vector<::Mesh> meshes;
-        meshes.reserve(cache_entry.meshes.size());
-        for (auto& me : cache_entry.meshes) {
-            meshes.push_back(me.mesh);
-        }
-        f4::renderer::unload_meshes(meshes);
-        cache_entry.meshes.clear();
-        cache_entry.built = false;
-    }
-    mesh_cache.clear();
+    render_res.unload_all();
     meshes_built = false;
 }
 
 // ── draw_scene ─────────────────────────────────────────────────────────────
-// Grid and axes drawing delegated to f4::renderer::draw_grid() and
-// f4::renderer::draw_axes().
+// Delegates to f4::renderer::render_world() — see viewer_state.hpp.
 
 // Helper: convert an ENU WorldPosition to a Raylib Vector3.
 static inline Vector3 to_rh(const f4::geo::WorldPosition& p) {
@@ -268,33 +182,13 @@ static void draw_marker(const GeoMarker& m) {
 }
 
 void PlayerApp::Impl::draw_airport() {
+    // Scenario-specific overlays only. The real campaign airfield layout
+    // (when the scenario has one) is rendered by render_world() via
+    // SceneDescription::airfield; the synthetic runway shapes below are
+    // the fallback for hand-authored scenarios.
     if (!airport_built || !show_airport) return;
 
-    if (airport.has_real_layout) {
-        // Real campaign layout: draw the shared f4-renderer geometry,
-        // translated from objective-local to world ENU. (Culling was
-        // disabled by draw_visual_entities for the BSP models; enable it
-        // around these authored CCW quads is unnecessary — winding-agnostic
-        // under the disabled state.)
-        const float ox = static_cast<float>(airport.layout_origin_x);
-        const float oy = static_cast<float>(airport.layout_origin_y);
-        const float oz = static_cast<float>(airport.layout_origin_z);
-        const auto& rl = airport.real_layout;
-        for (const auto& q : rl.runway_surfaces)
-            f4::renderer::draw_layout_quad(q, ox, oy, oz);
-        for (const auto& q : rl.threshold_bars)
-            f4::renderer::draw_layout_quad(q, ox, oy, oz);
-        for (const auto& q : rl.centerline_dashes)
-            f4::renderer::draw_layout_quad(q, ox, oy, oz);
-        for (const auto& q : rl.taxiway_strips)
-            f4::renderer::draw_layout_quad(q, ox, oy, oz);
-        for (const auto& l : rl.taxiway_centerlines)
-            f4::renderer::draw_layout_line(l, ox, oy, oz);
-        for (const auto& m : rl.runway_ends)
-            f4::renderer::draw_layout_marker(m, ox, oy, oz);
-        for (const auto& m : rl.parking_spots)
-            f4::renderer::draw_layout_marker(m, ox, oy, oz);
-    } else {
+    if (!airport.has_real_layout) {
         // Synthetic airfield (hand-authored scenario).
         // Runway surface
         draw_quad_3d(airport.runway_surface);
@@ -368,116 +262,88 @@ void PlayerApp::Impl::draw_airport() {
     }
 }
 
-void PlayerApp::Impl::draw_aircraft() {
-    // Phase 2A: legacy entry point — draws only the primary aircraft.
-    // Kept for compatibility; the real work now happens in draw_visual_entities().
-    if (!show_aircraft || !sim_initialized) return;
-    draw_visual_entities();
-}
+void PlayerApp::Impl::draw_scene() {
+    f4::renderer::SceneDescription scene;
+    scene.camera = orbit_cam.camera();
+    scene.sky_color = SKY_COLOR;
 
-void PlayerApp::Impl::draw_visual_entities() {
-    // Phase 2A: walk every entity that has a VisualModelComponent and draw
-    // it. This unifies the aircraft and airfield-feature draw paths — both
-    // are just entities with a TransformComponent + VisualModelComponent,
-    // and the renderer doesn't care whether they also have a FlightModelComponent.
-    //
-    // The mesh cache is keyed by parent_index (the KoreaObj model number),
-    // so multiple entities sharing the same vis_type reuse one GPU upload.
-    // The cache is built lazily here — the first time we see a new
-    // parent_index, build_mesh_for_model() uploads it.
-    if (!sim_initialized) return;
-    if (!show_aircraft && !show_airport) return;  // both toggles off → skip
-
-    // Collect all VMC-bearing entities. with_component<>() returns a fresh
-    // vector each call (O(N) walk over the world), so we do it once per
-    // frame, not once per mesh.
-    const auto entities = sim->world().with_component<f4::simulation::VisualModelComponent>();
-    if (entities.empty()) return;
-
-    auto& db = const_cast<f4::models::ModelDatabase&>(sim->model_db());
-    const auto* base = db.model(0);
-
-    // Set up lighting once per frame (shared across all entities).
-    bool lighting_active = false;
-    if (lit_shader.ensure(&status_msg)) {
-        lighting_active = true;
-        lit_shader.set_lighting(light_direction, light_color, light_intensity, ambient_color);
+    // Scene anchor: a grid-referenced airbase lives at its objective
+    // center (grid×1024 ft, hundreds of thousands of ft from origin) —
+    // the ground plane, grid, and axes follow it, not the world origin.
+    if (scenario.has_airbase_source) {
+        scene.ground.origin_enu_x = static_cast<float>(scenario.layout_center.x);
+        scene.ground.origin_enu_y = static_cast<float>(scenario.layout_center.y);
+        scene.ground.origin_enu_z = static_cast<float>(scenario.layout_center.z);
+    } else if (!scenario.aircraft.empty()) {
+        const auto& p = scenario.aircraft.front().parking_spot;
+        scene.ground.origin_enu_x = static_cast<float>(p.x);
+        scene.ground.origin_enu_y = static_cast<float>(p.y);
+        scene.ground.origin_enu_z = static_cast<float>(p.z);
     }
+    scene.ground.grid = show_grid;
+    scene.ground.axes = show_axes;
 
-    // CRITICAL: Disable backface culling (same as f4-models-viewer).
-    // FreeFalcon's models were authored without consistent winding.
-    rlDisableBackfaceCulling();
-    BeginBlendMode(BLEND_ALPHA);
+    // ── VisualModelComponent entities → plain EntityMeshDraw records ──
+    //
+    // VisualModelComponent lives in f4-simulation, which f4-renderer
+    // must not depend on — so we extract position + quaternion +
+    // KoreaObj model index here. Meshes build lazily inside
+    // draw_entity_meshes() the first time a model appears.
+    if (sim_initialized && (show_aircraft || show_airport)) {
+        const auto entities =
+            sim->world().with_component<f4::simulation::VisualModelComponent>();
+        const auto primary_aircraft_id = sim->aircraft_entity();
 
-    Material default_mat = LoadMaterialDefault();
-    default_mat.maps[MATERIAL_MAP_DIFFUSE].color = WHITE;
-    if (lighting_active) default_mat.shader = lit_shader.shader();
+        auto& db = const_cast<f4::models::ModelDatabase&>(sim->model_db());
+        const auto* base = db.model(0);
+        scene.model_db = &db;
 
-    // Determine which entity is the "primary aircraft" so we can apply the
-    // show_aircraft toggle only to it (features are gated by show_airport).
-    const auto primary_aircraft_id = sim->aircraft_entity();
+        for (const auto eid : entities) {
+            auto h = f4::entities::EntityHandle(eid, &sim->world());
+            auto* vis = h.get<f4::simulation::VisualModelComponent>();
+            auto* tf  = h.get<f4::entities::TransformComponent>();
+            if (!vis || !vis->model_record || !tf) continue;
 
-    for (const auto eid : entities) {
-        auto h = f4::entities::EntityHandle(eid, &sim->world());
-        auto* vis = h.get<f4::simulation::VisualModelComponent>();
-        auto* tf  = h.get<f4::entities::TransformComponent>();
-        if (!vis || !vis->model_record || !tf) continue;
+            // Toggle gating: aircraft ↔ show_aircraft, features ↔
+            // show_airport (everything that isn't the primary aircraft).
+            const bool is_aircraft = (eid.value == primary_aircraft_id.value);
+            if (is_aircraft && !show_aircraft) continue;
+            if (!is_aircraft && !show_airport) continue;
 
-        // Toggle gating: aircraft ↔ show_aircraft, features ↔ show_airport.
-        // The primary aircraft's entity ID matches aircraft_entity(); all
-        // other VMC-bearing entities are features.
-        const bool is_aircraft = (eid.value == primary_aircraft_id.value);
-        if (is_aircraft && !show_aircraft) continue;
-        if (!is_aircraft && !show_airport) continue;
+            const int parent_index = base
+                ? static_cast<int>(vis->model_record - base) : -1;
+            if (parent_index < 0) continue;
 
-        // Resolve parent_index from the model_record pointer.
-        const int parent_index = base ? static_cast<int>(vis->model_record - base) : -1;
-        if (parent_index < 0) continue;
-
-        // Lazy mesh build: if this model isn't cached yet, build it now.
-        // This handles features that weren't pre-built at startup.
-        build_mesh_for_model(parent_index);
-
-        auto cache_it = mesh_cache.find(parent_index);
-        if (cache_it == mesh_cache.end() || cache_it->second.meshes.empty()) continue;
-
-        // Convert ENU position to Raylib RH Y-up.
-        const Vector3 pos_rh = enu_to_raylib_v3(tf->position.x, tf->position.y, tf->position.z);
-
-        // Convert ENU quaternion to Raylib RH Y-up quaternion.
-        // Uses the shared enu_quat_to_raylib() from f4-renderer/coord_transform.hpp.
-        const auto q_rh_components = f4::renderer::enu_quat_to_raylib(
-            tf->qw, tf->qx, tf->qy, tf->qz);
-        Quaternion q_rh = {
-            q_rh_components.x,
-            q_rh_components.y,
-            q_rh_components.z,
-            q_rh_components.w
-        };
-
-        const Matrix model_matrix = MatrixMultiply(
-            QuaternionToMatrix(q_rh),
-            MatrixTranslate(pos_rh.x, pos_rh.y, pos_rh.z)
-        );
-
-        for (const auto& me : cache_it->second.meshes) {
-            if (me.mesh.triangleCount <= 0) continue;
-            const Material* mat_to_use = &default_mat;
-            if (me.tex_id >= 0) {
-                auto* tex_entry = texture_cache.lookup(me.tex_id);
-                if (tex_entry && tex_entry->uploaded) {
-                    mat_to_use = &tex_entry->material;
-                    if (lighting_active) {
-                        const_cast<Material*>(mat_to_use)->shader = lit_shader.shader();
-                    }
-                }
-            }
-            DrawMesh(me.mesh, *mat_to_use, model_matrix);
+            f4::renderer::EntityMeshDraw emd;
+            emd.enu_x = static_cast<float>(tf->position.x);
+            emd.enu_y = static_cast<float>(tf->position.y);
+            emd.enu_z = static_cast<float>(tf->position.z);
+            emd.qw = static_cast<float>(tf->qw);
+            emd.qx = static_cast<float>(tf->qx);
+            emd.qy = static_cast<float>(tf->qy);
+            emd.qz = static_cast<float>(tf->qz);
+            emd.parent_index = parent_index;
+            scene.entity_meshes.push_back(emd);
         }
     }
 
-    EndBlendMode();
-    rlEnableBackfaceCulling();
+    // ── Real campaign airfield layout ─────────────────────────────────
+    if (airport_built && show_airport && airport.has_real_layout) {
+        scene.airfield = &airport.real_layout;
+        scene.airfield_origin_enu[0] = static_cast<float>(airport.layout_origin_x);
+        scene.airfield_origin_enu[1] = static_cast<float>(airport.layout_origin_y);
+        scene.airfield_origin_enu[2] = static_cast<float>(airport.layout_origin_z);
+    }
+
+    // ── Scenario-specific 3D overlays (inside the 3D mode) ────────────
+    // Synthetic runway shapes, taxi route, flight-plan route, approach
+    // reference, taxi-in route, markers, compass rose.
+    scene.overlay_3d = [this](const Camera3D&) { draw_airport(); };
+
+    f4::renderer::render_world(render_res, scene);
+
+    draw_hud();
+    draw_radio();
 }
 
 void PlayerApp::Impl::draw_hud() {
@@ -565,63 +431,6 @@ void PlayerApp::Impl::draw_hud() {
         DrawText(line.c_str(), x + pad, line_y, 14, RAYWHITE);
         line_y += line_h;
     }
-}
-
-void PlayerApp::Impl::draw_scene() {
-    // Background sky + ground
-    ClearBackground(SKY_COLOR);
-
-    BeginMode3D(orbit_cam.camera());
-    // Theater-scale scene (feet): the default 1000-unit far plane clips
-    // the airfield layout at any wide camera distance.
-    f4::renderer::extend_far_plane(orbit_cam.camera(), 1.0f, 250000.0f);
-
-    // Scene anchor: a grid-referenced airbase lives at its objective
-    // center (grid×1024 ft, hundreds of thousands of ft from origin) —
-    // the ground plane and grid must follow it, not the world origin.
-    float cx = 0.0f, cy = 0.0f, cz = 0.0f;  // ENU feet
-    if (scenario.has_airbase_source) {
-        cx = static_cast<float>(scenario.layout_center.x);
-        cy = static_cast<float>(scenario.layout_center.y);
-        cz = static_cast<float>(scenario.layout_center.z);
-    } else if (!scenario.aircraft.empty()) {
-        const auto& p = scenario.aircraft.front().parking_spot;
-        cx = static_cast<float>(p.x);
-        cy = static_cast<float>(p.y);
-        cz = static_cast<float>(p.z);
-    }
-    const Vector3 anchor = enu_to_raylib_v3(cx, cy, cz);
-
-    // Ground plane + grid sit 2/1 ft below the layout plane so they never
-    // z-fight with the runway/taxiway surfaces drawn at the same elevation.
-    DrawPlane({anchor.x, anchor.y - 2.0f, anchor.z}, {20000, 20000}, GROUND_COLOR);
-
-    if (show_grid) {
-        f4::renderer::draw_grid_at(10000.0f, 1000.0f, cx, cy, cz - 1.0f);
-    }
-
-    if (show_axes) {
-        // RGB axes at the parking spot (or origin)
-        Vector3 origin = {0, 0, 0};
-        if (sim_initialized && !scenario.aircraft.empty()) {
-            const auto& p = scenario.aircraft.front().parking_spot;
-            origin = enu_to_raylib_v3(p.x, p.y, p.z);
-        }
-        // Draw translated axes: move to origin, draw, then move back.
-        // f4::renderer::draw_axes() draws at the world origin, so we
-        // use DrawLine3D with offset for now (preserving original behavior).
-        DrawLine3D(origin, {origin.x + 50, origin.y, origin.z}, RED);
-        DrawLine3D(origin, {origin.x, origin.y + 50, origin.z}, GREEN);
-        DrawLine3D(origin, {origin.x, origin.y, origin.z + 50}, BLUE);
-    }
-
-    draw_airport();
-    draw_visual_entities();
-
-    EndMode3D();
-
-    draw_hud();
-    draw_radio();
 }
 
 // ============================================================================

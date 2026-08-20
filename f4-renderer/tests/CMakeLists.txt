@@ -83,3 +83,15 @@ add_executable(test_ground_layout_models test_ground_layout_models.cpp ${IMGUI_S
 target_include_directories(test_ground_layout_models PRIVATE ${IMGUI_DIR} ${IMGUI_DIR}/backends)
 target_link_libraries(test_ground_layout_models PRIVATE f4-renderer GTest::gtest_main)
 add_test(NAME ground_layout_models COMMAND test_ground_layout_models)
+
+# ── World camera (pure math: heading vectors, camera construction) ─────────
+add_executable(test_world_camera test_world_camera.cpp ${IMGUI_SOURCES})
+target_include_directories(test_world_camera PRIVATE ${IMGUI_DIR} ${IMGUI_DIR}/backends)
+target_link_libraries(test_world_camera PRIVATE f4-renderer GTest::gtest_main)
+add_test(NAME world_camera COMMAND test_world_camera)
+
+# ── World renderer (SceneDescription defaults, entity dispatch, GPU smoke) ─
+add_executable(test_world_renderer test_world_renderer.cpp ${IMGUI_SOURCES})
+target_include_directories(test_world_renderer PRIVATE ${IMGUI_DIR} ${IMGUI_DIR}/backends)
+target_link_libraries(test_world_renderer PRIVATE f4-renderer GTest::gtest_main f4-entities)
+add_test(NAME world_renderer COMMAND test_world_renderer)
