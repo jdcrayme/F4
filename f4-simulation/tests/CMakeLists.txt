@@ -31,7 +31,11 @@ target_compile_definitions(test_digi_mission PRIVATE
     F4_SCENARIOS_DIR="${CMAKE_BINARY_DIR}/scenarios"
 )
 # The scenario must exist before the test runs.
-add_dependencies(test_digi_mission f4_scenario_player_lib)
+# Only wire the dependency when the scenario player is actually built
+# (it is skipped when F4_BUILD_SCENARIO_PLAYER=OFF — e.g. in headless CI).
+if(TARGET f4_scenario_player_lib)
+    add_dependencies(test_digi_mission f4_scenario_player_lib)
+endif()
 
 # Point the scenario loader test at the bundled fixture so it can load a real
 # JSON file without depending on the install layout.

@@ -8,9 +8,9 @@
 // (canvas.cpp, renderer.cpp, ground_layout_3d.cpp).
 //
 // Current dispatch:
-//   FeatureSetComponent + TransformComponent → draw_feature_mesh() per feature
-//   ObjectiveTypeComponent                   → (future: objective 3D model)
-//   UnitCoreComponent                        → (future: unit 3D model)
+//   GroundLayoutComponent + TransformComponent → draw_airfield_geometry()
+//   FeatureSetComponent + TransformComponent    → draw_feature_mesh() per feature
+//   UnitCoreComponent + TransformComponent      → draw_feature_mesh() for the unit
 //
 // entity_icon_info() and RenderEntityIcon() handle the 2D symbol case:
 //   ObjectiveTypeComponent → symbol_for_objective_type()
@@ -170,6 +170,63 @@ DrawStats RenderEntity(EntityRenderResources& res,
                 total.meshes_drawn += stats.meshes_drawn;
                 total.vertices_drawn += stats.vertices_drawn;
             }
+        }
+    }
+
+    // ── UnitCoreComponent + TransformComponent ────────────────────────
+    //
+    // Render one KoreaObj 3D model for a campaign unit at its position.
+    // This is the Mode A (campaign-view) unit render: one model per unit,
+    // not per individual vehicle in its roster. Mode B (deaggregated
+    // vehicles) is a future f4-simulation responsibility that will ride
+    // the VisualModelComponent / draw_entity_meshes() path, not here.
+    //
+    // The pipeline reuses draw_feature_mesh() — the same function the
+    // FeatureSetComponent branch above uses for features. The lookup is
+    // identical: ClassTable::vis_type_for(class_table_index, 0) returns
+    // the KoreaObj model index, regardless of whether class_table_index
+    // came from an objective's feature (100..149) or a unit (150+).
+    //
+    // This mirrors the inline code that previously lived in
+    // f4-world-viewer/src/canvas.cpp (lifted here so any render_world()
+    // caller — including the scenario-player and any future 3D world
+    // mode — gets campaign units for free, instead of each viewer
+    // re-implementing the unit draw loop).
+    //
+    // Heading resolution:
+    //   - Ground units (Battalion/Brigade/TaskForce) carry
+    //     GroundTacticalComponent::heading, a uint8 in 0..255 where
+    //     each unit = 1.4 deg (256 * 1.4 = 358.4 ≈ 360). This matches
+    //     the canvas.cpp convention at line 759.
+    //   - Air units (Squadron/Flight/Package) and naval units without
+    //     a GroundTacticalComponent default to facing 0 (north). The
+    //     TransformComponent quaternion is currently left identity by
+    //     the world bridge for units — when that changes (e.g. aircraft
+    //     taxiing), we should prefer the quaternion here.
+    if (res.show_units) {
+        auto* tf = entity.get<f4::entities::TransformComponent>();
+        auto* uc = entity.get<f4::entities::UnitCoreComponent>();
+        if (tf && uc && uc->class_table_index >= 100) {
+            const uint16_t entity_type =
+                static_cast<uint16_t>(uc->class_table_index);
+
+            // Resolve facing from GroundTacticalComponent when present.
+            // 0..255 → 0..358 deg (matches canvas.cpp:759).
+            float facing_deg = 0.0f;
+            if (auto* gt = entity.get<f4::entities::GroundTacticalComponent>()) {
+                facing_deg = static_cast<float>(gt->heading) * 1.4f;
+            }
+
+            const auto stats = draw_feature_mesh(
+                res, entity_type,
+                static_cast<float>(tf->position.x),
+                static_cast<float>(tf->position.y),
+                static_cast<float>(tf->position.z),
+                facing_deg);
+
+            total.draw_calls     += stats.draw_calls;
+            total.meshes_drawn   += stats.meshes_drawn;
+            total.vertices_drawn += stats.vertices_drawn;
         }
     }
 

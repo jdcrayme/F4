@@ -511,7 +511,7 @@ struct ViewerApp::Impl {
             .min_distance     = 50.0f,
             .max_distance     = 50000.0f,
             .initial_yaw      = 34.377f,    // 0.6 rad → ~34°
-            .initial_pitch    = -28.648f,    // 0.5 rad → ~29°
+            .initial_pitch    = 28.648f,    // 0.5 rad → ~29°
             .initial_distance = 4000.0f,
             .orbit_sensitivity = 0.2865f,   // 0.005 rad/px → ~0.29°/px
             .zoom_speed       = 0.1f

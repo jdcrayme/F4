@@ -609,7 +609,10 @@ void ViewerApp::draw_ground_layout_3d() {
     // rlImGuiImageSize takes a Texture* (not RenderTexture*) and a width/
     // height. We pass the RenderTexture's .texture field and the
     // content-region size so the image scales to fit the window.
-    rlImGuiImageSize(&impl_->ground_layout_3d_target.texture, img_w, img_h);
+    rlImGuiImageRect(&impl_->ground_layout_3d_target.texture, img_w, img_h,
+        Rectangle{ 0, 0,
+                   (float)impl_->ground_layout_3d_target.texture.width,
+                  -(float)impl_->ground_layout_3d_target.texture.height });
 
     // --- Mouse input (orbit + zoom) — only when the image is hovered ------
     //
@@ -640,10 +643,10 @@ void ViewerApp::draw_ground_layout_3d() {
         // OrbitCamera stores yaw/pitch in degrees; convert pixel delta.
         const float deg_per_px = 0.2865f;  // ~0.005 rad/px
         impl_->gl3d_orbit_cam.set_yaw(
-            impl_->gl3d_orbit_cam.yaw() + delta.x * deg_per_px);
+            impl_->gl3d_orbit_cam.yaw() - delta.x * deg_per_px);
         impl_->gl3d_orbit_cam.set_pitch(
-            std::clamp(impl_->gl3d_orbit_cam.pitch() - delta.y * deg_per_px,
-                       -89.0f, 89.0f));
+            std::clamp(impl_->gl3d_orbit_cam.pitch() + delta.y * deg_per_px,
+                -89.0f, 89.0f));
     }
 
     // Re-update orbit camera so drag this frame is reflected next frame.

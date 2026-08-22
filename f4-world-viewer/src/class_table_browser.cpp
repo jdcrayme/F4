@@ -1000,8 +1000,8 @@ void ClassTableBrowser::draw_model_preview(int16_t vis_type_idx) {
     // Orbit camera controls via drag on the image.
     if (ImGui::IsItemActive()) {
         ImVec2 delta = ImGui::GetIO().MouseDelta;
-        cam_azimuth_ += delta.x * 0.01f;
-        cam_elevation_ -= delta.y * 0.01f;
+        cam_azimuth_ -= delta.x * 0.01f;
+        cam_elevation_ += delta.y * 0.01f;
         cam_elevation_ = std::clamp(cam_elevation_, -1.5f, 1.5f);
     }
     // Zoom via scroll on the image.

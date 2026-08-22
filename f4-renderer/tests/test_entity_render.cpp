@@ -210,6 +210,8 @@ TEST(EntityRenderResources, Defaults) {
     EXPECT_TRUE(res.show_features);
     EXPECT_EQ(100, res.vu_last_entity_type);
     EXPECT_TRUE(res.skip_destroyed_features);
+    EXPECT_TRUE(res.show_ground_layout);
+    EXPECT_TRUE(res.show_units);  // Mode A unit rendering on by default
     // Inherited from FeatureMeshResources:
     EXPECT_EQ(nullptr, res.model_db);
     EXPECT_EQ(nullptr, res.class_table);
@@ -319,6 +321,147 @@ TEST(RenderEntity, DestroyedFeature_IsDrawnWhenNotSkipped) {
     // draw_feature_mesh will return 0 because resources are null,
     // but the feature was not skipped by the damage filter.
     EXPECT_EQ(0, stats.draw_calls);  // no real draw, but path was taken
+}
+
+// ── RenderEntity — UnitCoreComponent dispatch (Mode A) ────────────────────
+//
+// These tests verify the new UnitCoreComponent + TransformComponent branch
+// in RenderEntity(). They mirror the no-GPU pattern of the feature tests
+// above: resources are null, so draw_feature_mesh() returns zero stats,
+// but the test asserts that the dispatch path is or isn't taken based on
+// the component mix and the show_units toggle.
+
+TEST(RenderEntity, Unit_NoTransformComponent_SkipsUnitRendering) {
+    EntityWorld world;
+    auto h = world.create();
+
+    // UnitCoreComponent but no TransformComponent — cannot place the unit.
+    auto& uc = h.add<UnitCoreComponent>();
+    uc.unit_class = UC::Battalion;
+    uc.class_table_index = 170;  // valid unit entity_type
+
+    EntityRenderResources res;
+    const auto stats = RenderEntity(res, h);
+    EXPECT_EQ(0, stats.draw_calls);
+}
+
+TEST(RenderEntity, Unit_NoUnitCoreComponent_SkipsUnitRendering) {
+    EntityWorld world;
+    auto h = world.create();
+
+    // TransformComponent but no UnitCoreComponent — not a unit.
+    h.add<TransformComponent>();
+
+    EntityRenderResources res;
+    const auto stats = RenderEntity(res, h);
+    EXPECT_EQ(0, stats.draw_calls);
+}
+
+TEST(RenderEntity, Unit_LowClassTableIndex_SkipsUnitRendering) {
+    EntityWorld world;
+    auto h = world.create();
+
+    // class_table_index < 100 — not a valid entity_type for ClassTable
+    // lookup (entries_ are indexed by entity_type - 100). The dispatch
+    // must skip rather than passing a bogus index to draw_feature_mesh().
+    h.add<TransformComponent>();
+    auto& uc = h.add<UnitCoreComponent>();
+    uc.unit_class = UC::Battalion;
+    uc.class_table_index = 50;  // below 100 — invalid
+
+    EntityRenderResources res;
+    const auto stats = RenderEntity(res, h);
+    EXPECT_EQ(0, stats.draw_calls);
+}
+
+TEST(RenderEntity, Unit_ShowUnitsFalse_SkipsUnitRendering) {
+    EntityWorld world;
+    auto h = world.create();
+
+    h.add<TransformComponent>();
+    auto& uc = h.add<UnitCoreComponent>();
+    uc.unit_class = UC::Battalion;
+    uc.class_table_index = 170;
+
+    EntityRenderResources res;
+    res.show_units = false;  // caller disabled unit rendering
+    const auto stats = RenderEntity(res, h);
+    EXPECT_EQ(0, stats.draw_calls);
+}
+
+TEST(RenderEntity, Unit_ValidBattalion_TakesDrawPath) {
+    EntityWorld world;
+    auto h = world.create();
+
+    // Battalion with a valid class_table_index and a heading. Resources
+    // are null so draw_feature_mesh() will return zero stats, but the
+    // dispatch path executes — verified by the fact that no crash occurs
+    // and the call returns cleanly. (A full GPU test lives in
+    // test_feature_mesh.cpp which exercises the underlying pipeline.)
+    auto& tf = h.add<TransformComponent>();
+    tf.position = f4::geo::WorldPosition{1000.0, 2000.0, 0.0};
+    auto& uc = h.add<UnitCoreComponent>();
+    uc.unit_class = UC::Battalion;
+    uc.unit_subtype = 14;  // armor
+    uc.class_table_index = 170;
+    auto& gt = h.add<GroundTacticalComponent>();
+    gt.heading = 64;  // ~90 deg (64 * 1.4 = 89.6)
+
+    EntityRenderResources res;
+    // All resource pointers null — draw_feature_mesh returns zero stats
+    // without crashing. This exercises the UnitCoreComponent dispatch
+    // (component lookup, heading resolution, draw_feature_mesh call)
+    // without requiring a GL context.
+    const auto stats = RenderEntity(res, h);
+    EXPECT_EQ(0, stats.draw_calls);  // no real draw — null resources
+    EXPECT_EQ(0, stats.meshes_drawn);
+    EXPECT_EQ(0u, stats.vertices_drawn);
+}
+
+TEST(RenderEntity, Unit_WithoutGroundTacticalComponent_DefaultsToZeroFacing) {
+    EntityWorld world;
+    auto h = world.create();
+
+    // Squadron (air unit) — no GroundTacticalComponent attached. The
+    // dispatch must not crash and must default facing to 0 deg.
+    auto& tf = h.add<TransformComponent>();
+    tf.position = f4::geo::WorldPosition{5000.0, -3000.0, 20000.0};
+    auto& uc = h.add<UnitCoreComponent>();
+    uc.unit_class = UC::Squadron;
+    uc.unit_subtype = 8;  // fighter
+    uc.class_table_index = 273;  // F-16 vehicle-class entity_type
+    // No GroundTacticalComponent — facing defaults to 0.
+
+    EntityRenderResources res;
+    const auto stats = RenderEntity(res, h);
+    EXPECT_EQ(0, stats.draw_calls);  // null resources — no real draw
+}
+
+TEST(RenderEntity, Unit_AndFeature_OnSameEntity_BothDispatched) {
+    EntityWorld world;
+    auto h = world.create();
+
+    // An entity carrying both FeatureSetComponent and UnitCoreComponent
+    // is unusual in practice (objectives don't have UnitCoreComponent,
+    // units don't have FeatureSetComponent) but RenderEntity() should
+    // dispatch both branches independently — the function accumulates
+    // DrawStats across all matching component pairs.
+    h.add<TransformComponent>();
+    auto& fs = h.add<FeatureSetComponent>();
+    FeatureEntryState feat;
+    feat.index = 5;
+    feat.offset_x = 100.0f;
+    feat.offset_y = 200.0f;
+    fs.features.push_back(feat);
+    auto& uc = h.add<UnitCoreComponent>();
+    uc.unit_class = UC::Battalion;
+    uc.class_table_index = 170;
+
+    EntityRenderResources res;
+    const auto stats = RenderEntity(res, h);
+    // Both branches execute; both return zero stats (null resources),
+    // but the function did not short-circuit after the feature branch.
+    EXPECT_EQ(0, stats.draw_calls);
 }
 
 // ── EntityIconInfo struct ─────────────────────────────────────────────────

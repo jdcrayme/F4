@@ -14,7 +14,18 @@
 //     → renders KoreaObj 3D models at each FeatureEntryState offset
 //       (the pattern from canvas.cpp's feature 3D mesh overlay, now
 //       reusable by any viewer)
-//   - Future: VisualModelComponent, GroundLayoutComponent, etc.
+//   - GroundLayoutComponent + TransformComponent
+//     → renders airfield geometry (runways, taxiways, parking, etc.)
+//   - UnitCoreComponent + TransformComponent
+//     → renders a KoreaObj 3D model for the unit at its campaign
+//       position, oriented by GroundTacticalComponent::heading. This
+//       is the campaign-view (low-fidelity) path: one model per unit,
+//       not per individual vehicle. See "Mode A" in the unit-rendering
+//       design notes. Deaggregated vehicle rendering (Mode B) is a
+//       future f4-simulation responsibility and will ride the existing
+//       VisualModelComponent / draw_entity_meshes() path.
+//   - Future: VisualModelComponent (draw_entity_meshes already covers
+//     this for callers that pre-resolve ModelRecord* into EntityMeshDraw).
 //
 // RenderEntityIcon() handles 2D map symbol representation:
 //   - ObjectiveTypeComponent → objective symbol (shape encodes type)
@@ -89,6 +100,17 @@ struct EntityRenderResources : FeatureMeshResources {
     /// feature models.
     bool show_ground_layout = true;
 
+    /// Whether to render UnitCoreComponent 3D models for campaign units.
+    /// When true, each unit entity with a TransformComponent and a
+    /// class_table_index >= 100 is rendered via draw_feature_mesh() at
+    /// its campaign position, oriented by GroundTacticalComponent::heading
+    /// (when present). This is the Mode A (single-icon-per-unit) path —
+    /// see file header for the Mode A vs Mode B distinction. Disable
+    /// when the caller already draws units via VisualModelComponent /
+    /// draw_entity_meshes() (Mode B / aircraft path), or when only 2D
+    /// unit symbols are wanted.
+    bool show_units = true;
+
     /// Per-layer toggles for the GroundLayoutComponent dispatch.
     AirfieldDrawToggles airfield_toggles;
 
@@ -133,11 +155,27 @@ EntityRenderResources make_entity_render_resources(
 //      using the existing draw_feature_mesh() pipeline. This handles
 //      the buildings, structures, and other features that sit on
 //      objectives (airbases, cities, etc.).
+//   3. UnitCoreComponent + TransformComponent:
+//      Renders one KoreaObj 3D model for the unit at its campaign
+//      position (TransformComponent.position, ENU feet), oriented by
+//      GroundTacticalComponent::heading when present. The model is
+//      resolved through the same ClassTable::vis_type_for() →
+//      ModelDatabase pipeline as features — the class_table_index is
+//      the unit's entity_type from the campaign (150+ for unit classes).
+//
+//      This is the Mode A (campaign-view) unit render: one model per
+//      unit, not per vehicle. It mirrors the inline code that lived in
+//      f4-world-viewer/src/canvas.cpp (now lifted here so any
+//      render_world() caller gets units for free).
+//
+//      Mode B (deaggregated vehicles, one mesh per tank/aircraft in
+//      the unit's roster) is a future f4-simulation responsibility —
+//      it will populate VisualModelComponent per spawned vehicle and
+//      ride the existing draw_entity_meshes() path, not this branch.
 //
 // Future extensions (not yet implemented):
-//   - VisualModelComponent: 3D mesh for aircraft/vehicles
-//     (currently the app extracts these into EntityMeshDraw /
-//     draw_entity_meshes())
+//   - VisualModelComponent: direct dispatch (currently the app extracts
+//     these into EntityMeshDraw / draw_entity_meshes()).
 //   - RadarComponent: radar detection arcs
 //
 // @param res     Entity render resources (model DB, caches, toggles)
