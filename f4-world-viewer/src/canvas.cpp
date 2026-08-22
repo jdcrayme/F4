@@ -571,115 +571,247 @@ void ViewerApp::draw_canvas() {
                 }
             }
         }
+    }
 
-        if (tr && fe && !fe->features.empty())
-        {
-            constexpr float FT_PER_GRID = 1024.0f;
-            const float ox = impl_->grid_x(tr), oy = impl_->grid_y(tr);
-            const Vector2 origin = impl_->world_to_screen(ox, oy);
-            const float px_per_ft = impl_->cam_zoom / FT_PER_GRID;
-            bool worth_drawing = false;
+    // --- Feature + entity 3D model overlay (ALL objectives + units, zoom-gated) --
+    //
+    // Draws 2D feature dots AND optional 3D KoreaObj models for every
+    // objective and unit in view, not just the selected objective. This
+    // is the user-facing "show me the world" view — without it, the only
+    // way to see features was to click an objective first, which made the
+    // map look empty.
+    //
+    // Three model sources, all sharing one BeginMode3D block:
+    //
+    //   1. Objective feature models (FeatureSetComponent)
+    //      Airbases/airstrips carry a FeatureSetComponent with 39 features
+    //      each (hangars, towers, runway sections, etc.). RenderEntity()
+    //      dispatches on FeatureSetComponent → draw_feature_mesh per
+    //      feature, offset by the feature's offset_xyz from the objective
+    //      center.
+    //
+    //   2. Objective entity models (ObjectiveTypeComponent::type)
+    //      Every objective entity_type (100+) maps to a vis_type[0] in
+    //      FALCON4.ct — bridges, factories, cities, radars, ports, depots,
+    //      power plants, etc. all have a single 3D model. We resolve
+    //      entity_type → vis_type[0] → draw_feature_mesh at the objective's
+    //      world position. This is what makes bridges look like bridges and
+    //      factories look like factories on the map.
+    //
+    //   3. Unit entity models (UnitCoreComponent::class_table_index)
+    //      Every unit entity_type (150+) maps to a vis_type[0] — tanks,
+    //      ships, aircraft, SAM launchers, etc. We resolve and draw the
+    //      same way, at the unit's world position.
+    //
+    // Zoom-gating: requires zoom > 4. At lower zoom the models would be
+    // sub-pixel and the 2D dots would overlap and clutter the view.
+    //
+    // View culling: each entity's center is projected to screen and
+    // skipped if outside the viewport + a margin (features can extend
+    // ~3000 ft = ~3 grid units from the center).
+    //
+    // 3D models: when show_feature_meshes + models_3d_loaded + class_table
+    // are all set, we wrap the whole pass in a single BeginMode3D/EndMode3D
+    // block with a top-down ortho camera matching the 2D world_to_screen
+    // transform so 3D meshes land on the same screen pixels as the 2D
+    // dots.
+    if (impl_->world_loaded &&
+        impl_->show_feature_meshes &&
+        impl_->cam_zoom > 6.0f) {
 
-            // --- Feature 3D mesh overlay (selected objective only) ------
-            //
-            // Renders real KoreaObj BSP models at each feature's offset,
-            // using a top-down orthographic Camera3D that exactly matches
-            // the 2D world_to_screen transform so the 3D meshes land on
-            // the same screen pixels as the 2D dots above.
-            //
-            // The mesh cache + texture cache + lit shader + default
-            // material are shared with the 3D Ground Layout panel — a
-            // feature rendered once in either view is cached for the other.
-            //
-            // Camera math:
-            //   - 2D world_to_screen: screen_x = W/2 + (grid_x - cam_x) * zoom
-            //                        screen_y = H/2 - (grid_y - cam_y) * zoom
-            //     where grid = feet/1024.
-            //   - For the 3D mesh to land at the same pixel, we need an
-            //     orthographic Camera3D looking straight down with:
-            //       * position = raylib(cam_east_ft, ALT_FT, -cam_north_ft)
-            //         where cam_east_ft = cam_x * 1024, cam_north_ft = cam_y * 1024,
-            //         and ALT_FT is high enough to clear any reasonable feature
-            //         but well under the 100,000-ft far clip patched in
-            //         f4-world-viewer/CMakeLists.txt (see GLV3D-DIAG-2 worklog).
-            //       * target = raylib(cam_east_ft, 0, -cam_north_ft)  [ground]
-            //       * up = (0, 0, -1)  so screen-up = world -Z = ENU +Y (north)
-            //       * fovy = visible_height_ft = (window_h / cam_zoom) * 1024
-            //         (Raylib's ortho uses fovy as the vertical world extent)
-            //       * projection = CAMERA_ORTHOGRAPHIC
-            //   - Then an ENU point (east, north, alt) → raylib (east, alt, -north)
-            //     → projects to screen (W/2 + (east/1024 - cam_x)*zoom,
-            //                            H/2 - (north/1024 - cam_y)*zoom),
-            //     which exactly matches the 2D dot position. ✓
-            //
-            // We only render models when the user has explicitly toggled
-            // them on (show_feature_meshes) AND the KoreaObj model DB +
-            // FALCON4.ct class table are loaded. Otherwise the 2D dots
-            // above still serve as a feature placement indicator.
-            const bool draw_meshes = impl_->show_feature_meshes &&
-                impl_->models_3d_loaded &&
-                impl_->model_db_3d.has_value() &&
-                impl_->class_table_3d.loaded() &&
-                impl_->render_res_3d.ensure_default_material();
-            if (draw_meshes) {
-                // Build the top-down ortho camera matching the 2D canvas.
-                const float cam_east_ft  = impl_->cam_x * FT_PER_GRID;
-                const float cam_north_ft = impl_->cam_y * FT_PER_GRID;
-                // Visible world height in feet = (visible grid height) * 1024.
-                // Visible grid height = window_h / cam_zoom.
-                const float visible_h_ft =
-                    (static_cast<float>(impl_->window_h) / impl_->cam_zoom) * FT_PER_GRID;
-                // Camera altitude: pick a value that comfortably clears any
-                // realistic feature (tallest KoreaObj features are < 200 ft)
-                // while staying well within the 100,000-ft far clip. We use
-                // a fixed 5000 ft so the camera frustum's depth range
-                // (5000-ε .. 5000+ε for a flat ground plane at y=0) sits
-                // safely inside near=0.01..far=100000.
-                constexpr float CAM_ALT_FT = 5000.0f;
+        // Lazily load KoreaObj models + FALCON4.ct the first time we have
+        // an entity in view. The load is ~50-150ms; once loaded, subsequent
+        // calls are no-ops. On failure, we silently fall back to 2D-dots-
+        // only (the 3D pass below checks models_ready).
+        if (!impl_->models_3d_load_attempted) {
+            impl_->ensure_models_3d_loaded();
+        }
+        const bool models_ready = impl_->models_3d_loaded &&
+                                  impl_->model_db_3d.has_value() &&
+                                  impl_->class_table_3d.loaded();
 
-                Camera3D cam3d = {};
-                cam3d.position   = { cam_east_ft,  CAM_ALT_FT, -cam_north_ft };
-                cam3d.target     = { cam_east_ft,         0.0f, -cam_north_ft };
-                cam3d.up         = { 0.0f, 0.0f, -1.0f };
-                cam3d.fovy       = visible_h_ft;
-                cam3d.projection = CAMERA_ORTHOGRAPHIC;
+        constexpr float FT_PER_GRID = 1024.0f;
+        const float px_per_ft = impl_->cam_zoom / FT_PER_GRID;
 
-                BeginMode3D(cam3d);
-                {
-                    // Build the EntityRenderResources bundle from the
-                    // shared RenderResources instance (mesh/texture/lit
-                    // caches + lighting all live there now, shared with
-                    // the 3D Ground Layout panel).
-                    f4::renderer::EntityRenderResources res =
-                        f4::renderer::make_entity_render_resources(
-                            impl_->render_res_3d,
-                            &*impl_->model_db_3d,
-                            &impl_->class_table_3d);
+        // View-cull margin: features can extend ~3000 ft (~3 grid units)
+        // from an objective's center. Convert to pixels.
+        const float cull_margin_px = 3000.0f * px_per_ft;
+        const float sx_min = -cull_margin_px;
+        const float sx_max = static_cast<float>(impl_->window_w) + cull_margin_px;
+        const float sy_min = -cull_margin_px;
+        const float sy_max = static_cast<float>(impl_->window_h) + cull_margin_px;
 
-                    // RenderEntity() inspects the entity's components
-                    // (TransformComponent + FeatureSetComponent) and
-                    // dispatches to draw_feature_mesh() for each feature —
-                    // replacing the manual feature loop that was here before.
+        // --- 3D KoreaObj model pass (one BeginMode3D for all entities) ---
+        if (models_ready && impl_->render_res_3d.ensure_default_material()) {
+            const float cam_east_ft  = impl_->cam_x * FT_PER_GRID;
+            const float cam_north_ft = impl_->cam_y * FT_PER_GRID;
+            const float visible_h_ft =
+                (static_cast<float>(impl_->window_h) / impl_->cam_zoom) * FT_PER_GRID;
+            constexpr float CAM_ALT_FT = 5000.0f;
+
+            Camera3D cam3d = {};
+            cam3d.position   = { cam_east_ft,  CAM_ALT_FT, -cam_north_ft };
+            cam3d.target     = { cam_east_ft,         0.0f, -cam_north_ft };
+            cam3d.up         = { 0.0f, 0.0f, -1.0f };
+            cam3d.fovy       = visible_h_ft;
+            cam3d.projection = CAMERA_ORTHOGRAPHIC;
+
+            BeginMode3D(cam3d);
+            {
+                f4::renderer::EntityRenderResources res =
+                    f4::renderer::make_entity_render_resources(
+                        impl_->render_res_3d,
+                        &*impl_->model_db_3d,
+                        &impl_->class_table_3d);
+                // Don't draw the GroundLayoutComponent airfield geometry
+                // here — that's the selected-objective overlay above.
+                res.show_ground_layout = false;
+
+                // (1) Objective feature models — RenderEntity dispatches
+                // on FeatureSetComponent and draws each feature's model
+                // at its offset from the objective center. Only objectives
+                // with non-empty FeatureSetComponent produce draws here
+                // (airbases/airstrips with 39 features each).
+                for (const auto& eid : impl_->objectives()) {
+                    auto h = impl_->handle(eid);
+                    auto* tr = h.get<f4::entities::TransformComponent>();
+                    auto* fe = h.get<f4::entities::FeatureSetComponent>();
+                    if (!tr || !fe || fe->features.empty()) continue;
+
+                    // View cull (objective center).
+                    const float ox = impl_->grid_x(tr), oy = impl_->grid_y(tr);
+                    const Vector2 origin = impl_->world_to_screen(ox, oy);
+                    if (origin.x < sx_min || origin.x > sx_max ||
+                        origin.y < sy_min || origin.y > sy_max) continue;
+
                     f4::renderer::RenderEntity(res, h);
                 }
-                EndMode3D();
-            }
 
-            const int font_size = 10;
-            const Color shadow = { 0, 0, 0, 200 };
-            const Color text = { 235, 235, 235, 230 };
-            auto draw_text = [&](const char* buf, float px, float py, Color c) {
-                DrawText(buf, px + 1, py + 1, font_size, shadow);
-                DrawText(buf, px, py, font_size, c);
-                };
+                // (2) Objective entity models — every objective (bridge,
+                // factory, city, radar, port, etc.) has a vis_type[0]
+                // from FALCON4.ct. Draw the model at the objective's
+                // world position. Skips objectives already covered by (1)
+                // (airbases with features) — they'd double-draw.
+                for (const auto& eid : impl_->objectives()) {
+                    auto h = impl_->handle(eid);
+                    auto* tr = h.get<f4::entities::TransformComponent>();
+                    auto* ot = h.get<f4::entities::ObjectiveTypeComponent>();
+                    auto* fe = h.get<f4::entities::FeatureSetComponent>();
+                    if (!tr || !ot) continue;
+                    // Skip if this objective has features — already drawn
+                    // by pass (1) via RenderEntity (and the feature models
+                    // are more detailed than the single entity model).
+                    if (fe && !fe->features.empty()) continue;
+                    // entity_type 0 or < 100 means no class table entry.
+                    if (ot->type < 100) continue;
+
+                    // View cull.
+                    const float ox = impl_->grid_x(tr), oy = impl_->grid_y(tr);
+                    const Vector2 origin = impl_->world_to_screen(ox, oy);
+                    if (origin.x < sx_min || origin.x > sx_max ||
+                        origin.y < sy_min || origin.y > sy_max) continue;
+
+                    // Resolve entity_type → vis_type[0] and draw.
+                    const uint16_t entity_type =
+                        static_cast<uint16_t>(ot->type);
+                    const float pos_east_ft  = ox * FT_PER_GRID;
+                    const float pos_north_ft = oy * FT_PER_GRID;
+                    const float pos_up_ft    = static_cast<float>(tr->position.z);
+                    f4::renderer::draw_feature_mesh(
+                        res, entity_type,
+                        pos_east_ft, pos_north_ft, pos_up_ft,
+                        0.0f);  // facing — objectives don't carry one
+                }
+
+                // (3) Unit entity models — every unit (tank, ship, aircraft,
+                // SAM launcher, etc.) has a vis_type[0]. Draw at the unit's
+                // world position, rotated by the unit's heading.
+                //
+                // Units don't carry a quaternion in TransformComponent
+                // (the world bridge leaves it identity). Ground units store
+                // heading in GroundTacticalComponent::heading (0-255, scaled
+                // by 1.4 deg/unit → 0-358 deg). Air/naval units may not have
+                // a GroundTacticalComponent — they default to facing 0.
+                for (const auto& eid : impl_->units()) {
+                    auto h = impl_->handle(eid);
+                    auto* tr = h.get<f4::entities::TransformComponent>();
+                    auto* uc = h.get<f4::entities::UnitCoreComponent>();
+                    if (!tr || !uc) continue;
+                    // class_table_index is the entity_type (150+ for units).
+                    if (uc->class_table_index < 100) continue;
+
+                    // View cull.
+                    const float ux = impl_->grid_x(tr), uy = impl_->grid_y(tr);
+                    const Vector2 origin = impl_->world_to_screen(ux, uy);
+                    if (origin.x < sx_min || origin.x > sx_max ||
+                        origin.y < sy_min || origin.y > sy_max) continue;
+
+                    const uint16_t entity_type =
+                        static_cast<uint16_t>(uc->class_table_index);
+                    const float pos_east_ft  = ux * FT_PER_GRID;
+                    const float pos_north_ft = uy * FT_PER_GRID;
+                    const float pos_up_ft    = static_cast<float>(tr->position.z);
+                    // Resolve heading: GroundTacticalComponent::heading is
+                    // 0-255 with 1.4 deg/unit (0 → 0 deg, 255 → 357 deg).
+                    // Default to 0 (north-facing) when absent.
+                    float facing_deg = 0.0f;
+                    if (auto* gt = h.get<f4::entities::GroundTacticalComponent>()) {
+                        facing_deg = static_cast<float>(gt->heading) * 1.4f;
+                    }
+                    f4::renderer::draw_feature_mesh(
+                        res, entity_type,
+                        pos_east_ft, pos_north_ft, pos_up_ft,
+                        facing_deg);
+                }
+            }
+            EndMode3D();
+        }
+
+        // --- 2D feature dots + labels (over the 3D pass) ----------------
+        // Only for objectives with FeatureSetComponent — objectives
+        // without features (bridges, factories, etc.) are represented by
+        // their 3D model alone (no 2D dots to draw).
+        const int font_size = 10;
+        const Color shadow = { 0, 0, 0, 200 };
+        const Color text = { 235, 235, 235, 230 };
+        auto draw_text = [&](const char* buf, float px, float py, Color c) {
+            DrawText(buf, px + 1, py + 1, font_size, shadow);
+            DrawText(buf, px, py, font_size, c);
+        };
+
+        // Only draw labels when zoomed in enough to read them.
+        const bool draw_labels = impl_->cam_zoom > 8.0f;
+
+        for (const auto& eid : impl_->objectives()) {
+            auto h = impl_->handle(eid);
+            auto* tr = h.get<f4::entities::TransformComponent>();
+            auto* fe = h.get<f4::entities::FeatureSetComponent>();
+            if (!tr || !fe || fe->features.empty()) continue;
+
+            const float ox = impl_->grid_x(tr), oy = impl_->grid_y(tr);
+            const Vector2 origin = impl_->world_to_screen(ox, oy);
+            if (origin.x < sx_min || origin.x > sx_max ||
+                origin.y < sy_min || origin.y > sy_max) continue;
+
+            const bool is_selected =
+                (impl_->sel_kind == Impl::SelectionKind::Objective &&
+                 impl_->sel_entity == eid);
+            // Selected objective's features get a brighter dot.
+            const Color stroke = is_selected
+                ? Color{ 255, 255, 180, 255 }
+                : Color{ 180, 180, 220, 230 };
 
             for (const auto& feature : fe->features) {
-                Color stroke;
-                stroke = Color{ 180,  180, 220, 230 };
                 const float px = origin.x + feature.offset_x * px_per_ft;
                 const float py = origin.y - feature.offset_y * px_per_ft;
+                // Skip features outside the viewport (per-feature cull
+                // so we don't spend time drawing dots the user can't see).
+                if (px < -10.0f || px > impl_->window_w + 10.0f ||
+                    py < -10.0f || py > impl_->window_h + 10.0f) continue;
                 DrawCircleV({ px, py }, 3.0f, stroke);
-                draw_text(feature.name.c_str(), px, py, text);
+                if (draw_labels && !feature.name.empty()) {
+                    draw_text(feature.name.c_str(), px, py, text);
+                }
             }
         }
     }

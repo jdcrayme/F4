@@ -47,6 +47,10 @@ ViewerApp::ViewerApp()  : impl_(std::make_unique<Impl>()) {
             auto inst = f4::install::Installation::detect(impl_->settings.install_path);
             if (inst.valid()) {
                 impl_->install = std::move(inst);
+                // Surface the restored install path in the status bar so
+                // the user can see it's loaded (matches the --install flow
+                // which sets status_msg in set_install_path()).
+                impl_->status_msg = "Install: " + impl_->settings.install_path.string();
             }
         } catch (const std::exception&) {
             // Settings file may point at a path that no longer exists.
