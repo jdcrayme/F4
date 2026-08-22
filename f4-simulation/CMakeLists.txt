@@ -36,6 +36,7 @@ add_library(f4-simulation STATIC
     src/scenario.cpp
     src/simulation.cpp
     src/campaign_bridge.cpp
+    src/bubble_manager.cpp
 )
 target_link_libraries(f4-simulation PUBLIC f4_warnings)
 

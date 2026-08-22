@@ -23,6 +23,7 @@
 #include "f4/simulation/simulation.hpp"
 #include "f4/simulation/visual_model_component.hpp"
 #include "f4/simulation/campaign_bridge.hpp"
+#include "f4/simulation/bubble_manager.hpp"
 #include "f4/simulation/frames.hpp"
 
 #include <f4/ai/brain_component.hpp>
@@ -66,6 +67,18 @@ void Simulation::initialize() {
     load_aircraft_config();
     spawn_aircraft();
     spawn_airfield_features();  // Phase 2A: features spawn after aircraft
+
+    // Mode B: spawn parked aircraft from Squadrons (after the airfield is
+    // derived, so parking spots are available). Squadrons don't move, so
+    // these are spawned once at initialize() — no per-tick re-deaggregation.
+    spawn_squadron_aircraft();
+
+    // Mode B: initialize the BubbleManager for ground/naval units. The
+    // manager is only constructed when the world contains campaign units
+    // (i.e. spawn_mode == CampaignFlights). For the scenario-list spawn
+    // path, the world has no VehicleCompositionComponent entities, so the
+    // BubbleManager would be a no-op — we skip it to avoid the overhead.
+    init_bubble_manager();
 
     // Set up the recorder if the scenario enables it.
     if (scenario_.record) {
@@ -495,6 +508,11 @@ void Simulation::tick(double dt) {
     sim_time_s_ += scaled_dt;
     ++tick_;
 
+    // Mode B: per-tick bubble update. Deaggregates ground/naval units
+    // entering the player's bubble, reaggregates those leaving it. No-op
+    // when bubble_manager_ is null (scenario-list spawn mode).
+    update_bubble();
+
     if (recorder_) record_snapshot();
 }
 
@@ -545,6 +563,74 @@ void Simulation::record_snapshot() {
 void Simulation::write_recording() {
     if (!recorder_ || scenario_.record_path.empty()) return;
     recorder_->write_json(scenario_.record_path, scenario_.name);
+}
+
+// ============================================================================
+// Mode B: Unit Deaggregation
+// ============================================================================
+
+void Simulation::spawn_squadron_aircraft() {
+    // Spawn parked aircraft for Squadron units (one per un-tasked pilot slot).
+    // No-op when there are no Squadron entities (e.g. scenario-list spawn mode
+    // has no campaign units). The Squadron→airbase resolution was fixed by
+    // the positional fallback in world_loader.cpp, so this now works for
+    // save1.cam where all 72 squadrons have airbase_id=0 in the binary tail.
+    //
+    // The airfield + template aircraft are required for parking-spot lookup
+    // and aircraft-config init. We use the scenario's first aircraft entry
+    // as the template (same convention as spawn_from_campaign_flights).
+    if (scenario_.aircraft.empty()) return;
+
+    // Load the class table (shared with spawn_from_campaign_flights — would
+    // be hoisted to a Simulation member in a future refactor).
+    f4::world_convert::ClassTable ct;
+    if (!scenario_.class_table_path.empty()) {
+        ct.load(scenario_.class_table_path);
+    }
+
+    const auto& template_ac = scenario_.aircraft.front();
+    squadron_aircraft_entities_ = spawn_aircraft_from_squadrons(
+        world_, ct, *model_db_, aircraft_cfg_,
+        scenario_.airfield, template_ac);
+}
+
+void Simulation::init_bubble_manager() {
+    // Only construct the BubbleManager when the world contains campaign
+    // units (Battalion/Brigade/TaskForce with VehicleCompositionComponent).
+    // For the scenario-list spawn path (no campaign units), the manager
+    // would be a no-op — we skip it to avoid the per-tick overhead of
+    // with_component<VehicleCompositionComponent>() returning empty.
+    const auto unit_ids = world_.with_component<entities::VehicleCompositionComponent>();
+    if (unit_ids.empty()) return;
+
+    // Load the class table (same note as spawn_squadron_aircraft — would
+    // be hoisted in a future refactor). When the path is empty (no
+    // class_table_path in the scenario), the BubbleManager is still
+    // constructed — spawn_vehicles_from_unit handles an empty CT
+    // gracefully (returns no vehicles, marks the unit as "tried, no model").
+    f4::world_convert::ClassTable ct;
+    if (!scenario_.class_table_path.empty()) {
+        ct.load(scenario_.class_table_path);
+    }
+
+    bubble_manager_ = std::make_unique<BubbleManager>(
+        world_, ct, *model_db_);
+}
+
+void Simulation::update_bubble() {
+    if (!bubble_manager_) return;
+    if (aircraft_entities_.empty()) return;
+
+    // Use the first (primary) aircraft's position as the bubble center.
+    // Phase 2 has N aircraft, but the bubble follows the camera focus —
+    // which is the first aircraft (per aircraft_entity() accessor).
+    // A future multi-player / multi-camera scenario would need a different
+    // bubble center (or multiple BubbleManagers).
+    entities::EntityHandle ownship(aircraft_entities_.front(), &world_);
+    const auto* tf = ownship.get<entities::TransformComponent>();
+    if (!tf) return;
+
+    bubble_manager_->update(tf->position);
 }
 
 } // namespace f4::simulation

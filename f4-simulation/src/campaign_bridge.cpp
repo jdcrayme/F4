@@ -30,6 +30,7 @@
 #include <f4/math/vec3.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <stdexcept>
 #include <string>
@@ -430,6 +431,358 @@ spawn_aircraft_from_flights(f4::entities::EntityWorld& world,
 
         spawned.push_back(h.id());
         ++flight_index;
+    }
+
+    return spawned;
+}
+
+// ============================================================================
+// Mode B: Unit Deaggregation
+// ============================================================================
+
+namespace {
+
+// --- SYNTHETIC FORMATION LAYOUTS -------------------------------------------
+//
+// FreeFalcon's ground-vehicle formation tables (SquadFormations /
+// PlatoonFormations / CompanyFormations, defined in gndai.cpp:110-282 of
+// the original source) are NOT ported into this tree. They are flagged as
+// future work in worklog.md:857. Until they are ported, we use a small
+// set of synthetic layouts:
+//
+//   • wedge4  — 4-vehicle wedge (lead + 2 wingmen + trail). Used for any
+//                unit with ≤4 live vehicles (most battalions: 4 groups ×
+//                1-3 live vehicles collapses to ≤4 after aggregation).
+//   • grid    — N>4 vehicles arranged in a 4-wide grid, 50 ft spacing.
+//                Used for larger aggregations (brigades deaggregated to
+//                their component vehicles).
+//
+// Both layouts are rotated by the unit's heading (from
+// GroundTacticalComponent::heading, uint8_t 0-255 × 1.4°/step) before
+// being added to the unit's TransformComponent::position.
+//
+// All offsets are in FEET, ENU frame, relative to the unit center.
+//   +x = east, +y = north. The unit's heading 0 = facing north (+y);
+//   heading π/2 = facing east (+x). Rotation: standard 2D CCW rotation
+//   of the offset by the heading angle.
+//
+// When the real FreeFalcon formation tables are ported, replace
+// `formation_offset()` with a lookup into the ported tables. The
+// spawn_vehicles_from_unit() contract (offset is in unit-local feet,
+// rotated by unit heading) doesn't change.
+
+constexpr double WEDGE_SPACING_FT = 30.0;  // ~tank length, plausible wedge spacing
+
+/// 4-vehicle wedge offsets (unit-local, unrotated):
+///   slot 0: lead     at ( 0, +30)
+///   slot 1: wing-L   at (-30,  0)
+///   slot 2: wing-R   at (+30,  0)
+///   slot 3: trail    at ( 0, -30)
+/// Lead faces forward (+y); wingmen trail by 30 ft; trail brings up the rear.
+struct Offset { double dx; double dy; };
+constexpr std::array<Offset, 4> WEDGE4{{
+    {  0.0,  30.0 },
+    { -30.0,  0.0 },
+    {  30.0,  0.0 },
+    {  0.0, -30.0 },
+}};
+
+constexpr double GRID_SPACING_FT = 50.0;
+constexpr int    GRID_COLS       = 4;
+
+/// Compute the (dx, dy) offset for the i-th vehicle in a synthetic
+/// formation. Wedge for i < 4, grid for i >= 4.
+/// (When real FreeFalcon formation tables are ported, replace this body
+/// with `return ported_table[unit_class][i]` or similar.)
+Offset formation_offset(int vehicle_index) {
+    if (vehicle_index < 4) {
+        return WEDGE4[static_cast<std::size_t>(vehicle_index)];
+    }
+    // Grid extension: rows of 4, indexed from vehicle_index=4 onward.
+    const int grid_i = vehicle_index - 4;
+    const int row = grid_i / GRID_COLS;
+    const int col = grid_i % GRID_COLS;
+    // Center the grid: col 0..3 → dx -75..+75 (4 * 50 / 2 = 100, half = 50, center -25).
+    // Push rows behind the wedge (negative y).
+    const double dx = (col - (GRID_COLS - 1) * 0.5) * GRID_SPACING_FT;
+    const double dy = -90.0 - static_cast<double>(row) * GRID_SPACING_FT;
+    return { dx, dy };
+}
+
+/// Rotate a unit-local (dx, dy) offset by a compass heading (radians,
+/// 0 = +y / north, CW positive) into world ENU.
+///
+/// Compass heading θ rotates the +y axis (north) toward +x (east). So a
+/// unit-local offset (dx, dy) becomes world offset:
+///   world_dx =  dx · cos θ + dy · sin θ
+///   world_dy = -dx · sin θ + dy · cos θ
+Offset rotate_offset(Offset local, double heading_rad) {
+    const double ch = std::cos(heading_rad);
+    const double sh = std::sin(heading_rad);
+    return { local.dx * ch + local.dy * sh,
+            -local.dx * sh + local.dy * ch };
+}
+
+/// Resolve a VEHICLE entity_type → ModelRecord* via the ClassTable.
+/// Returns nullptr if the lookup fails at any stage (entity_type out of
+/// range, visType[0] == 0, model DB has no record for the vis_type).
+const f4::models::ModelRecord*
+resolve_vehicle_model(const f4::world_convert::ClassTable& ct,
+                       const f4::models::ModelDatabase& db,
+                       int16_t vehicle_entity_type) {
+    if (vehicle_entity_type < 100) return nullptr;  // not a valid entity_type
+    const auto vis_type = ct.vis_type_for(
+        static_cast<uint16_t>(vehicle_entity_type), 0);
+    if (vis_type <= 0) return nullptr;
+    if (!db.valid()) return nullptr;
+    return db.model(vis_type);
+}
+
+} // namespace
+
+std::vector<f4::entities::EntityId>
+spawn_vehicles_from_unit(f4::entities::EntityWorld& world,
+                          const f4::world_convert::ClassTable& ct,
+                          const f4::models::ModelDatabase& db,
+                          f4::entities::EntityId unit_id) {
+    using namespace f4::entities;
+    using namespace f4::simulation;
+
+    std::vector<EntityId> spawned;
+
+    EntityHandle unit_h(unit_id, &world);
+    if (!unit_h.valid()) return spawned;
+
+    const auto* vc = unit_h.get<VehicleCompositionComponent>();
+    const auto* tf = unit_h.get<TransformComponent>();
+    if (!vc || !tf) return spawned;
+
+    // Unit heading: GroundTacticalComponent::heading is uint8_t 0-255,
+    // ×1.4° per step (entity.hpp:483). Falls back to 0 (north-facing) when
+    // the unit has no GroundTacticalComponent (e.g. TaskForce whose GT
+    // component is populated with zeros, or Squadron which doesn't have one).
+    double heading_rad = 0.0;
+    if (const auto* gt = unit_h.get<GroundTacticalComponent>()) {
+        heading_rad = static_cast<double>(gt->heading) * (360.0 / 256.0)
+                    * 0.017453292519943295;  // DEG_TO_RAD
+    }
+    const auto q0 = f4::simulation::enu_quat_from_compass(heading_rad);
+
+    // Spawn one entity per live vehicle per group.
+    // vehicle_index increments across ALL groups so the formation is
+    // contiguous (the wedge is filled by group 0's vehicles, then group
+    // 1's, etc.).
+    int vehicle_index = 0;
+    for (const auto& g : vc->groups) {
+        if (g.live_count <= 0) continue;
+
+        // Resolve the vehicle model once per group (all vehicles in a
+        // group share the same vehicle_type → same ModelRecord).
+        const auto* model_rec = resolve_vehicle_model(ct, db, g.vehicle_type);
+        if (!model_rec) {
+            // No model for this vehicle_type — skip the whole group.
+            // We still advance vehicle_index so subsequent groups land in
+            // distinct formation slots (otherwise two groups could overlap).
+            vehicle_index += g.live_count;
+            continue;
+        }
+
+        for (int i = 0; i < g.live_count; ++i) {
+            const Offset local = formation_offset(vehicle_index);
+            const Offset world_off = rotate_offset(local, heading_rad);
+
+            auto h = world.create();
+
+            // 1. TransformComponent — position = unit center + formation offset.
+            auto& vtf = h.add<TransformComponent>();
+            vtf.position = f4::geo::WorldPosition(
+                tf->position.x + world_off.dx,
+                tf->position.y + world_off.dy,
+                tf->position.z);
+            // All vehicles in the formation face the unit's heading.
+            vtf.qw = q0.w;  vtf.qx = q0.x;  vtf.qy = q0.y;  vtf.qz = q0.z;
+
+            // 2. VisualModelComponent — the renderable handle. No FM, no
+            // brain — vehicles are static for now. Ground AI (DigitalBrain
+            // for vehicles) is a separate porting task.
+            auto& vis = h.add<VisualModelComponent>();
+            vis.model_record = model_rec;
+            vis.active_lod = 0;
+            // model_state defaults — the renderer's draw_entity_meshes()
+            // doesn't consult switches/DOFs today.
+
+            spawned.push_back(h.id());
+            ++vehicle_index;
+        }
+    }
+
+    return spawned;
+}
+
+std::vector<f4::entities::EntityId>
+spawn_vehicles_from_units(f4::entities::EntityWorld& world,
+                           const f4::world_convert::ClassTable& ct,
+                           const f4::models::ModelDatabase& db) {
+    using namespace f4::entities;
+
+    const auto unit_ids = world.with_component<VehicleCompositionComponent>();
+    std::vector<EntityId> spawned;
+    for (const auto unit_id : unit_ids) {
+        auto batch = spawn_vehicles_from_unit(world, ct, db, unit_id);
+        spawned.insert(spawned.end(), batch.begin(), batch.end());
+    }
+    return spawned;
+}
+
+// --- Squadron → parked-aircraft deaggregation ------------------------------
+//
+// For each Squadron entity:
+//   1. Resolve home airbase via SquadronComponent::airbase (now works thanks
+//      to the positional fallback in world_loader.cpp).
+//   2. Count active Flights (FlightPlanComponent::squadron == this squadron).
+//      The active flights produce their own aircraft via
+//      spawn_aircraft_from_flights(); we only spawn the remainder so we
+//      don't duplicate them.
+//   3. Pick parking spots from the airbase's ScenarioAirfield.parking_spots
+//      (built by derive_airfield_from_objective; either real PLT_PARK or
+//      the synthesized 8-spot row). Cycle through spots if more aircraft
+//      than spots — multiple aircraft per spot is wrong but better than
+//      dropping them silently (and the airfield's parking-spots list will
+//      grow when real PHD data is loaded).
+//   4. Compose each parked aircraft: Transform + FM + VMC + Brain (same
+//      shape as spawn_aircraft_from_flights, but the brain is dormant).
+
+namespace {
+
+/// Count Flights whose FlightPlanComponent::squadron points at the given
+/// Squadron EntityId. Used to suppress parked-aircraft duplicates.
+int count_active_flights_for_squadron(const f4::entities::EntityWorld& world,
+                                        f4::entities::EntityId squadron_id) {
+    using namespace f4::entities;
+    int count = 0;
+    const auto flight_ids = world.with_component<FlightPlanComponent>();
+    for (const auto fid : flight_ids) {
+        EntityHandle fh(fid, const_cast<EntityWorld*>(&world));
+        const auto* fp = fh.get<FlightPlanComponent>();
+        if (fp && fp->squadron.value == squadron_id.value) ++count;
+    }
+    return count;
+}
+
+/// Pick the i-th parking spot, cycling through the available spots if i
+/// exceeds the spot count. (Multiple aircraft per spot is wrong but
+/// better than dropping aircraft — and the spot list will grow when real
+/// PHD parking data is loaded for non-Korea theaters.)
+const ScenarioParkingSpot*
+pick_parking_spot(const std::vector<ScenarioParkingSpot>& spots, int i) {
+    if (spots.empty()) return nullptr;
+    const auto idx = static_cast<std::size_t>(i) % spots.size();
+    return &spots[idx];
+}
+
+} // namespace
+
+std::vector<f4::entities::EntityId>
+spawn_aircraft_from_squadrons(f4::entities::EntityWorld& world,
+                                const f4::world_convert::ClassTable& ct,
+                                const f4::models::ModelDatabase& db,
+                                const f4::data::AircraftConfig& cfg,
+                                const ScenarioAirfield& airfield,
+                                const ScenarioAircraft& scenario_aircraft) {
+    using namespace f4::entities;
+    using namespace f4::flight;
+    using namespace f4::ai;
+    using namespace f4::simulation;
+
+    const auto squadron_ids = world.with_component<SquadronComponent>();
+    if (squadron_ids.empty()) return {};
+
+    std::vector<EntityId> spawned;
+
+    for (const auto squadron_id : squadron_ids) {
+        EntityHandle sq_h(squadron_id, &world);
+        const auto* sq = sq_h.get<SquadronComponent>();
+        const auto* sq_uc = sq_h.get<UnitCoreComponent>();
+        if (!sq || !sq_uc) continue;
+
+        // 1. Resolve the aircraft visType from the squadron's class_table_index.
+        //    This is the aircraft type the squadron flies (e.g. F-16 entity_type
+        //    273 → visType 1052 → F-16 ModelRecord).
+        int16_t vis_type_index = ct.vis_type_for(
+            static_cast<uint16_t>(sq_uc->class_table_index), 0);
+        if (vis_type_index <= 0) {
+            vis_type_index = scenario_aircraft.vis_type_index;
+        }
+        const auto* model_rec = db.valid() ? db.model(vis_type_index) : nullptr;
+
+        // 2. Count active Flights — only spawn the un-tasked remainder.
+        const int active_flights = count_active_flights_for_squadron(world, squadron_id);
+        const int n_pilots = static_cast<int>(sq->pilots.size());
+        int n_to_spawn = n_pilots - active_flights;
+        if (n_to_spawn <= 0) continue;
+
+        // 3. Pick parking spots from the airbase. When the airbase has
+        //    parking spots (real PLT_PARK or the synthesized 8-spot row),
+        //    use them. Otherwise fall back to the airfield threshold (the
+        //    same fallback spawn_aircraft_from_flights uses).
+        const auto& spots = airfield.parking_spots;
+        const bool has_spots = !spots.empty();
+
+        for (int i = 0; i < n_to_spawn; ++i) {
+            f4::geo::WorldPosition parking_pos = airfield.threshold_position;
+            double heading_rad = airfield.runway_heading_rad;
+
+            if (has_spots) {
+                const auto* spot = pick_parking_spot(spots, i);
+                if (spot) {
+                    parking_pos = spot->position;
+                    heading_rad = spot->heading_rad;
+                }
+            } else {
+                // No parking spots: fall back to a per-aircraft lateral
+                // offset from the threshold (same pattern as
+                // spawn_aircraft_from_flights, but per-squadron not per-flight).
+                constexpr double OFFSET_STEP_FT = 80.0;
+                const double offset = (i % 2 == 0 ? 1.0 : -1.0)
+                                    * (static_cast<double>(i / 2) + 1.0)
+                                    * OFFSET_STEP_FT;
+                parking_pos.x += offset;
+            }
+
+            // 4. Compose the parked aircraft: Transform + FM + VMC + Brain.
+            //    Same shape as spawn_aircraft_from_flights, but the brain
+            //    is dormant (no active mission — the aircraft is parked).
+            auto h = world.create();
+
+            auto& tf = h.add<TransformComponent>();
+            tf.position = parking_pos;
+            const auto q0 = f4::simulation::enu_quat_from_compass(heading_rad);
+            tf.qw = q0.w;  tf.qx = q0.x;  tf.qy = q0.y;  tf.qz = q0.z;
+
+            auto& fm = h.add<FlightModelComponent>();
+            fm.init(cfg,
+                    /*alt_ft=*/parking_pos.z,
+                    /*vt_ftps=*/0.0,
+                    /*hdg_rad=*/heading_rad,
+                    /*inAir=*/false);
+            fm.set_ground(parking_pos.z, f4::math::Vec3d{0.0, 0.0, -1.0});
+
+            auto& vis = h.add<VisualModelComponent>();
+            vis.model_record = model_rec;
+            vis.active_lod = 0;
+            f4::models::SwitchState gear_switch;
+            gear_switch.switch_number = 10;
+            gear_switch.active_child  = 0;  // gear down
+            vis.model_state.switches.push_back(gear_switch);
+
+            auto& brain = h.add<BrainComponent>();
+            brain.module().rotate_speed_kts = 140.0;
+            brain.module().gear_up_alt_ft = 200.0;
+            brain.module().departure_alt_ft = airfield.departure_altitude_ft;
+            brain.module().taxi_speed_kts = 15.0;
+
+            spawned.push_back(h.id());
+        }
     }
 
     return spawned;

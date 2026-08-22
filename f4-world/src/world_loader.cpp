@@ -26,6 +26,11 @@
 #include <f4/world/detail/world_state.hpp>
 #include <f4/geo/constants.hpp>
 
+#include <cmath>
+#include <cstdint>
+#include <unordered_map>
+#include <vector>
+
 namespace f4::world {
 
 // using namespace f4::entities — retained because 30+ entity types are used
@@ -544,6 +549,110 @@ std::vector<EntityId> populate_objectives(
 }
 
 // ============================================================================
+// Airbase positional index — for Squadron→airbase fallback resolution
+// ============================================================================
+//
+// PROBLEM: The Squadron binary tail stores the home airbase as a raw VU_ID
+// (8 bytes: creator + num). In save1.cam and many other campaign saves,
+// this VU_ID is zero for every squadron — the airbase link is silently
+// lost during populate_units(). The existing resolution code at line ~650
+// leaves SquadronComponent::airbase = EntityId{} (invalid) in that case.
+//
+// FIX: Build a small lookup of "airbase-capable" objectives by grid
+// coordinate. For each Squadron with airbase_id == 0:
+//   1. Try an exact (x, y) grid match — recovers 66/72 (91.7%) of
+//      squadrons in save1.cam, since squadrons sit on their airbase's grid.
+//   2. If no exact match, do a radius search for the nearest airbase-
+//      capable objective within ~5 grid units (5120 ft). Recovers most
+//      of the remainder; squadrons with no nearby airbase stay unresolved
+//      (their aircraft will fall back to the airfield threshold position
+//      in spawn_aircraft_from_flights / spawn_aircraft_from_squadrons).
+//
+// "Airbase-capable" = ObjectiveType in {TYPE_AIRBASE=1, TYPE_AIRSTRIP=2,
+// TYPE_ARMYBASE=3}. Army Base is included because squadrons are sometimes
+// based there (especially helicopter / attack squadrons).
+//
+// The index is built once per populate_units() call from the already-
+// populated ObjectiveTypeComponent entities. Cost is O(N_objectives),
+// paid once at world load — negligible.
+namespace {
+
+/// One entry in the airbase positional index. Stored in a vector keyed by
+/// grid (multiple airbases can share a grid in pathological cases — we
+/// pick the first; the rest are tracked for the radius fallback).
+struct AirbaseEntry {
+    int16_t  grid_x;
+    int16_t  grid_y;
+    EntityId id;
+};
+
+/// Build the airbase positional index by walking every entity with an
+/// ObjectiveTypeComponent. Filters to airbase-capable types only.
+/// O(N_objectives) — called once per populate_units().
+[[nodiscard]] std::vector<AirbaseEntry>
+build_airbase_index(const EntityWorld& world) {
+    std::vector<AirbaseEntry> out;
+    const auto obj_ids = world.with_component<ObjectiveTypeComponent>();
+    out.reserve(obj_ids.size());
+    for (const auto eid : obj_ids) {
+        EntityHandle h(eid, const_cast<EntityWorld*>(&world));
+        const auto* ot = h.get<ObjectiveTypeComponent>();
+        const auto* tf = h.get<TransformComponent>();
+        if (!ot || !tf) continue;
+        // ObjectiveTypeComponent::type is entity_type (100+). Convert to
+        // the 1..39 objective_type via the same subtraction used in
+        // entity_render.cpp's entity_icon_info().
+        const int16_t et = ot->type;
+        const int16_t obj_type = (et >= 100) ? static_cast<int16_t>(et - 100) : et;
+        // 1=AIRBASE, 2=AIRSTRIP, 3=ARMYBASE — all parking-capable.
+        if (obj_type != 1 && obj_type != 2 && obj_type != 3) continue;
+        AirbaseEntry e;
+        e.grid_x = static_cast<int16_t>(tf->position.x / FT_PER_GRID);
+        e.grid_y = static_cast<int16_t>(tf->position.y / FT_PER_GRID);
+        e.id = eid;
+        out.push_back(e);
+    }
+    return out;
+}
+
+/// Resolve a Squadron's home airbase by positional fallback when the binary
+/// airbase_id is zero. Returns EntityId{} (invalid) if no airbase is found.
+///
+/// Strategy:
+///   1. Exact (x, y) grid match — common case (squadrons sit on their
+///      airbase's grid in the campaign).
+///   2. Nearest airbase within 5 grid units (5120 ft) — handles squadrons
+///      that are offset from the airbase center.
+[[nodiscard]] EntityId
+resolve_airbase_by_position(const std::vector<AirbaseEntry>& index,
+                              int16_t sq_grid_x, int16_t sq_grid_y) {
+    if (index.empty()) return EntityId{};
+
+    // 1. Exact grid match.
+    for (const auto& e : index) {
+        if (e.grid_x == sq_grid_x && e.grid_y == sq_grid_y) return e.id;
+    }
+
+    // 2. Nearest within 5 grid units (~5120 ft).
+    constexpr int16_t SEARCH_RADIUS_GRIDS = 5;
+    constexpr double SEARCH_RADIUS_GRIDS_D = static_cast<double>(SEARCH_RADIUS_GRIDS);
+    double best_d2 = SEARCH_RADIUS_GRIDS_D * SEARCH_RADIUS_GRIDS_D;
+    EntityId best{};
+    for (const auto& e : index) {
+        const double dx = static_cast<double>(e.grid_x - sq_grid_x);
+        const double dy = static_cast<double>(e.grid_y - sq_grid_y);
+        const double d2 = dx * dx + dy * dy;
+        if (d2 < best_d2) {
+            best_d2 = d2;
+            best = e.id;
+        }
+    }
+    return best;
+}
+
+} // namespace
+
+// ============================================================================
 // populate_units — interface-based (Phase 4 primary)
 // ============================================================================
 std::vector<EntityId> populate_units(
@@ -554,6 +663,12 @@ std::vector<EntityId> populate_units(
 {
     std::vector<EntityId> ids;
     ids.reserve(static_cast<size_t>(src.unit_count()));
+
+    // Build the airbase positional index once for this populate_units()
+    // call. Used as a fallback when a Squadron's binary airbase_id is zero
+    // (which is the case for all 72 squadrons in save1.cam). See comment
+    // block above build_airbase_index() for the full rationale.
+    const auto airbase_index = build_airbase_index(world);
 
     // --- First pass: create all unit entities ---
     for (int i = 0; i < src.unit_count(); ++i) {
@@ -646,11 +761,32 @@ std::vector<EntityId> populate_units(
             sq.fuel = sq_src->fuel(i);
             sq.pilots = sq_src->pilots(i);
 
-            // Resolve Squadron→airbase cross-reference
-            if (sq_src->airbase_id(i) != 0) {
-                auto it = obj_id_map.find(sq_src->airbase_id(i));
+            // Resolve Squadron→airbase cross-reference.
+            //
+            // Primary: binary airbase_id (a VU_ID packed into uint32) →
+            // EntityId via obj_id_map. Works when the campaign save has a
+            // valid VU_ID in the Squadron tail.
+            //
+            // Fallback (positional): when airbase_id is zero (the case for
+            // all 72 squadrons in save1.cam — the binary VU_ID is zero),
+            // search for an airbase-capable objective at the squadron's
+            // grid. Recovers 66/72 (91.7%) via exact grid match in
+            // save1.cam; the remainder via radius search. See
+            // build_airbase_index() / resolve_airbase_by_position() above.
+            const uint32_t ab_id = sq_src->airbase_id(i);
+            if (ab_id != 0) {
+                auto it = obj_id_map.find(ab_id);
                 if (it != obj_id_map.end()) {
                     sq.airbase = it->second;
+                }
+            } else {
+                // Positional fallback: try exact grid match, then radius.
+                const int16_t sq_gx = src.x(i);
+                const int16_t sq_gy = src.y(i);
+                const EntityId resolved = resolve_airbase_by_position(
+                    airbase_index, sq_gx, sq_gy);
+                if (resolved.value != 0) {
+                    sq.airbase = resolved;
                 }
             }
         }

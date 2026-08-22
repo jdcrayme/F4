@@ -21,6 +21,8 @@ f4_simulation_add_test(test_visual_model_component test_visual_model_component.c
 f4_simulation_add_test(test_scenario_loader        test_scenario_loader.cpp)
 f4_simulation_add_test(test_campaign_bridge        test_campaign_bridge.cpp)
 f4_simulation_add_test(test_feature_spawning       test_feature_spawning.cpp)
+f4_simulation_add_test(test_vehicle_spawning       test_vehicle_spawning.cpp)
+f4_simulation_add_test(test_bubble_manager         test_bubble_manager.cpp)
 f4_simulation_add_test(test_frames                 test_frames.cpp)
 f4_simulation_add_test(test_real_layout_derivation test_real_layout_derivation.cpp)
 f4_simulation_add_test(test_digi_mission           test_digi_mission.cpp)
@@ -55,5 +57,12 @@ target_compile_definitions(test_campaign_bridge PRIVATE
 # and the generated F-16 aircraft config fixture (for AircraftConfig).
 target_compile_definitions(test_feature_spawning PRIVATE
     F4_MODELS_DIR="${CMAKE_SOURCE_DIR}/f4-models/tests/fixtures"
+    F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}"
+)
+
+# The vehicle-spawning test uses the F-16 aircraft config for
+# spawn_aircraft_from_squadrons() (FlightModelComponent::init requires
+# valid aero tables — empty config would throw).
+target_compile_definitions(test_vehicle_spawning PRIVATE
     F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}"
 )

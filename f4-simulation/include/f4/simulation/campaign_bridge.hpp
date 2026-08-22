@@ -11,31 +11,20 @@
 // its GroundLayoutList (runway/taxiway/parking), and spawn one aircraft
 // entity per Flight-class unit in the campaign.
 //
-// Two functions:
+// Mode B extension (unit deaggregation):
+//   spawn_vehicles_from_unit / spawn_vehicles_from_units
+//     → walks VehicleCompositionComponent on Battalion/Brigade/TaskForce
+//       entities, spawns one TransformComponent+VisualModelComponent entity
+//       per live vehicle in each group. Uses SYNTHETIC formations (wedge/
+//       column) until FreeFalcon's SquadFormations/PlatoonFormations/
+//       CompanyFormations tables are ported from gndai.cpp:110-282.
 //
-//   derive_airfield_from_objective(obj, active_runway_id)
-//     → std::optional<ScenarioAirfield>
-//
-//     Pure conversion: takes a campaign objective (already loaded into a
-//     WorldState by f4-world) and produces a ScenarioAirfield. Returns
-//     nullopt if the objective isn't an airbase (no runway list).
-//
-//   spawn_aircraft_from_flights(world, ct, db, cfg, airfield, scenario_aircraft)
-//     → std::vector<EntityId>
-//
-//     Side-effectful: walks the EntityWorld (already populated by
-//     f4-world::populate_world), finds every entity with a FlightPlanComponent,
-//     and spawns a child aircraft entity for each. Each child carries
-//     TransformComponent + FlightModelComponent + VisualModelComponent +
-//     BrainComponent (the four-component "aircraft" composition — see
-//     AIRCRAFT_BINDING_DESIGN.md §5).
-//
-// Both functions live in f4-simulation because they depend on f4-world
-// (for WorldState / ObjectiveState), f4-world-convert (for ClassTable),
-// f4-models (for ModelDatabase), and the simulation library's own
-// VisualModelComponent. They are the ONLY new entry points in Phase 2;
-// the Simulation class and the renderer are unchanged in shape (Simulation
-// just iterates a vector of EntityIds instead of one).
+//   spawn_aircraft_from_squadrons
+//     → walks Squadron entities, spawns parked aircraft at the squadron's
+//       airbase using the airfield's parking-spot list (PLT_PARK) or the
+//       synthesized 8-spot row from derive_airfield_from_objective().
+//       Suppresses aircraft whose pilot slot is already covered by an
+//       active Flight (avoids duplication when both paths run).
 //
 // Dependencies: f4-entities, f4-world, f4-world-convert, f4-models, f4-data,
 // f4-flight-model, f4-ai, f4-geo, f4-math. C++20.
@@ -125,5 +114,114 @@ spawn_aircraft_from_flights(f4::entities::EntityWorld& world,
                              const f4::data::AircraftConfig& cfg,
                              const ScenarioAirfield& airfield,
                              const ScenarioAircraft& scenario_aircraft);
+
+// ============================================================================
+// Mode B: Unit Deaggregation
+// ============================================================================
+//
+// FreeFalcon's campaign entities (Battalion, Brigade, TaskForce, Squadron)
+// carry no 3D model at the unit level — visType[0] is 0 for every UNIT-
+// class entity_type in FALCON4.ct. The 3D models live at the VEHICLE-class
+// entity_types referenced by the unit's UCD record (VehicleType[16]).
+//
+// Deaggregation = walk the unit's VehicleCompositionComponent.groups (each
+// group already carries the resolved VEHICLE entity_type + live_count from
+// the roster bitmap), look up each vehicle's visType[0] → ModelRecord,
+// and spawn one TransformComponent + VisualModelComponent entity per live
+// vehicle. The result is a formation of individual vehicles around the
+// unit's campaign position, ready for draw_entity_meshes() to render.
+//
+// Two flavors:
+//
+//   • Ground/naval (Battalion/Brigade/TaskForce): synthetic formation
+//     layout (wedge for ≤4 vehicles, grid for larger counts). Clearly
+//     marked SYNTHETIC — replace with ported SquadFormations tables from
+//     FreeFalcon's gndai.cpp:110-282 when the source is available.
+//
+//   • Air (Squadron): real parking spots from the airbase's
+//     GroundLayoutComponent (PLT_PARK lists), or the synthesized 8-spot
+//     row from derive_airfield_from_objective(). No formation tables
+//     needed — parking spots ARE the layout.
+
+/// Spawn deaggregated vehicle entities for a single unit.
+///
+/// Walks the unit's VehicleCompositionComponent.groups. For each group,
+/// spawns `group.live_count` vehicle entities (one per live vehicle per
+/// the roster bitmap, already decoded into live_count by f4-world-convert).
+/// Each vehicle gets:
+///   - TransformComponent (position = unit center + formation offset,
+///     rotated by unit heading; heading from GroundTacticalComponent)
+///   - VisualModelComponent (ModelRecord resolved via
+///     ClassTable::vis_type_for(group.vehicle_type, 0))
+///
+/// Formation layout is SYNTHETIC (wedge for ≤4 vehicles, 4-wide grid for
+/// larger counts). Marked clearly so the real FreeFalcon formation tables
+/// can be dropped in later without touching the spawn contract.
+///
+/// \param world    The EntityWorld (mutated — new entities created).
+/// \param ct       ClassTable for entity_type → vis_type resolution.
+/// \param db       ModelDatabase for vis_type → ModelRecord.
+/// \param unit_id  The unit entity to deaggregate. Must have
+///                 VehicleCompositionComponent + TransformComponent.
+///                 GroundTacticalComponent is optional (heading defaults
+///                 to 0 — north-facing — when absent, e.g. naval units).
+/// \returns The spawned vehicle EntityIds. Empty if the unit has no
+///          VehicleCompositionComponent, no TransformComponent, or no
+///          live vehicles in any group.
+[[nodiscard]] std::vector<f4::entities::EntityId>
+spawn_vehicles_from_unit(f4::entities::EntityWorld& world,
+                          const f4::world_convert::ClassTable& ct,
+                          const f4::models::ModelDatabase& db,
+                          f4::entities::EntityId unit_id);
+
+/// Bulk wrapper: deaggregate every unit with a VehicleCompositionComponent.
+///
+/// Convenience function for "deaggregate everything in the world" — calls
+/// spawn_vehicles_from_unit() for each entity returned by
+/// `world.with_component<VehicleCompositionComponent>()`. The BubbleManager
+/// uses the single-unit overload instead (per-tick, scoped to the bubble),
+/// but this bulk form is useful for tests and headless scenarios.
+///
+/// \returns The combined vector of all spawned vehicle EntityIds.
+[[nodiscard]] std::vector<f4::entities::EntityId>
+spawn_vehicles_from_units(f4::entities::EntityWorld& world,
+                           const f4::world_convert::ClassTable& ct,
+                           const f4::models::ModelDatabase& db);
+
+/// Spawn parked aircraft for Squadron units that have no active Flights.
+///
+/// Walks every entity with a SquadronComponent. For each squadron:
+///
+///   1. Resolve the home airbase via SquadronComponent::airbase (an
+///      EntityId pointing at an ObjectiveTypeComponent entity). The
+///      airbase's GroundLayoutComponent (PLT_PARK lists) provides parking
+///      spots. When PLT_PARK is absent (Korea theater), fall back to
+///      derive_airfield_from_objective()'s synthesized 8-spot row.
+///
+///   2. Count active Flights whose FlightPlanComponent::squadron points
+///      at this Squadron. Spawn `max(0, N_pilots - active_flights)`
+///      parked aircraft — the active flights produce their own aircraft
+///      via spawn_aircraft_from_flights(), so we don't duplicate them.
+///
+///   3. Each parked aircraft gets TransformComponent + VisualModelComponent
+///      + FlightModelComponent (on ground, gear down) + BrainComponent
+///      (TakeoffModule, but idle — they're parked, not taxiing).
+///      The visType comes from the squadron's class_table_index (the
+///      aircraft type the squadron flies).
+///
+/// Parked aircraft are static — they don't taxi or take off. Their FM
+/// is initialized on the ground with zero velocity. The brain is wired
+/// but dormant (no active mission); a future ATC/taxi dispatcher could
+/// activate them.
+///
+/// \returns The spawned parked-aircraft EntityIds. Empty if no Squadrons
+///          or all squadrons are fully covered by active Flights.
+[[nodiscard]] std::vector<f4::entities::EntityId>
+spawn_aircraft_from_squadrons(f4::entities::EntityWorld& world,
+                                const f4::world_convert::ClassTable& ct,
+                                const f4::models::ModelDatabase& db,
+                                const f4::data::AircraftConfig& cfg,
+                                const ScenarioAirfield& airfield,
+                                const ScenarioAircraft& scenario_aircraft);
 
 } // namespace f4::simulation

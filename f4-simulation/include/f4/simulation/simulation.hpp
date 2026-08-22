@@ -48,6 +48,8 @@ namespace f4::recorder { class FlightRecorder; }
 
 namespace f4::simulation {
 
+class BubbleManager;  // forward declaration — defined in bubble_manager.hpp
+
 /// Simulation owns the EntityWorld + MessageBus + ModelDatabase + AircraftConfig
 /// registry and runs the tick loop. NO rendering — that's the executable's job.
 class Simulation {
@@ -105,6 +107,23 @@ public:
         return feature_entities_;
     }
 
+    /// All parked-aircraft entities spawned from Squadron deaggregation.
+    /// Each has the same component shape as a Flight-spawned aircraft
+    /// (Transform + FM + VMC + Brain), but the brain is dormant (parked,
+    /// not taxiing). These are spawned once at initialize() (Squadrons
+    /// don't move, so no per-tick re-deaggregation is needed).
+    [[nodiscard]] const std::vector<entities::EntityId>& squadron_aircraft_entities() const noexcept {
+        return squadron_aircraft_entities_;
+    }
+
+    /// The BubbleManager (Mode B). Null when the sim is not in campaign-flights
+    /// mode (BubbleManager only makes sense when the EntityWorld contains
+    /// campaign units with VehicleCompositionComponent). Hosts can call
+    /// force_deaggregate / force_reaggregate on it for scenario overrides.
+    [[nodiscard]] BubbleManager* bubble_manager() const noexcept {
+        return bubble_manager_.get();
+    }
+
     [[nodiscard]] const f4::models::ModelDatabase& model_db() const noexcept { return *model_db_; }
     [[nodiscard]] const Scenario& scenario() const noexcept { return scenario_; }
     [[nodiscard]] double sim_time_s() const noexcept { return sim_time_s_; }
@@ -120,6 +139,9 @@ private:
     void spawn_from_scenario_list();        // Phase 1: hand-authored aircraft[]
     void spawn_from_campaign_flights();     // Phase 2: campaign-derived roster
     void spawn_airfield_features();         // Phase 2A: static features → VMC entities
+    void spawn_squadron_aircraft();         // Mode B: parked aircraft from Squadrons
+    void init_bubble_manager();             // Mode B: BubbleManager for ground/naval units
+    void update_bubble();                   // Mode B: per-tick bubble update (in tick())
     void derive_real_airbase();   // airbase_source -> real ground layout
     void wire_atc();              // StubATC + AirfieldConfig from scenario
     void record_snapshot();
@@ -146,6 +168,16 @@ private:
     // VisualModelComponent. Tracked separately from aircraft so tick() doesn't
     // try to sync them from a flight model (they have none).
     std::vector<entities::EntityId> feature_entities_;
+
+    // Mode B: parked aircraft from Squadron deaggregation. Spawned once at
+    // initialize() (Squadrons don't move). Distinct from aircraft_entities_
+    // (which holds Flight-spawned aircraft that DO taxi/takeoff).
+    std::vector<entities::EntityId> squadron_aircraft_entities_;
+
+    // Mode B: per-tick deagg/reagg manager for ground/naval units. Null
+    // when not in campaign-flights mode (no BubbleManager needed for the
+    // scenario-list spawn path, which has no campaign units).
+    std::unique_ptr<BubbleManager> bubble_manager_;
 
     double sim_time_s_{0.0};
     std::uint64_t tick_{0};
