@@ -36,7 +36,9 @@
 
 #include <f4/entities/entity.hpp>
 #include <f4/viewer/enum_text.hpp>
+#include <f4/renderer/entity_render.hpp>     // EntityRenderResources, make_entity_render_resources
 #include <f4/renderer/layout_draw.hpp>
+#include <f4/renderer/scene_draw.hpp>            // draw_airfield_geometry
 
 // f4-models + f4-world-convert headers MUST come before raylib.h because
 // Raylib defines `PI` as a preprocessor macro that would otherwise collide
@@ -365,8 +367,8 @@ void ViewerApp::draw_ground_layout_3d() {
                 ? "(loading…)" : impl_->models_3d_error.c_str();
             ImGui::TextDisabled("[3D models: %s]", err);
         } else {
-            const int cached = static_cast<int>(impl_->mesh_cache_3d.size());
-            const int textures = static_cast<int>(impl_->texture_cache_3d.map().size());
+            const int cached = static_cast<int>(impl_->render_res_3d.mesh_cache.size());
+            const int textures = static_cast<int>(impl_->render_res_3d.texture_cache.map().size());
             ImGui::TextDisabled("[3D models: %d cached, %d textures]",
                                 cached, textures);
             // Per-frame diagnostic — shows where features are being
@@ -453,35 +455,22 @@ void ViewerApp::draw_ground_layout_3d() {
                                  ext, step);
             }
 
-            // Runway surfaces + threshold bars + centerline dashes + end markers.
-            if (impl_->ground_layout_3d_show_runway) {
-                for (const auto& q : g.runway_surfaces) draw_layout_quad(q);
-                for (const auto& q : g.threshold_bars) draw_layout_quad(q);
-                for (const auto& q : g.centerline_dashes) draw_layout_quad(q);
-                for (const auto& m : g.runway_ends) draw_layout_marker(m);
-            }
-
-            // Taxiway strips + centerlines.
-            if (impl_->ground_layout_3d_show_taxiways) {
-                for (const auto& q : g.taxiway_strips)      draw_layout_quad(q);
-                for (const auto& l : g.taxiway_centerlines) draw_layout_line(l);
-            }
-
-            // Parking markers + helipads.
-            if (impl_->ground_layout_3d_show_parking) {
-                for (const auto& m : g.parking_spots) draw_layout_marker(m);
-            }
-            for (const auto& m : g.helipads) draw_layout_marker(m);
-
-            // Feature footprints — used as a fallback when 3D models are
-            // disabled or unavailable. When 3D models ARE active and
-            // loaded, we skip the footprints (they would z-fight with the
-            // models and add visual clutter).
-            const bool draw_footprints = !has_features ||
-                !impl_->ground_layout_3d_show_models ||
-                !models_ready;
-            if (draw_footprints) {
-                for (const auto& q : g.feature_footprints) draw_layout_quad(q);
+            // Airfield geometry — drawn via the shared f4::renderer function
+            // (scene_draw.cpp). The per-layer toggles mirror the View-menu
+            // checkboxes: runway + markers, taxiways, parking, helipads.
+            // Feature footprints are drawn only when 3D models are off (or
+            // unavailable); otherwise the KoreaObj meshes draw below.
+            {
+                f4::renderer::AirfieldDrawToggles toggles;
+                toggles.runway   = impl_->ground_layout_3d_show_runway;
+                toggles.markers  = impl_->ground_layout_3d_show_runway;
+                toggles.taxiways = impl_->ground_layout_3d_show_taxiways;
+                toggles.parking  = impl_->ground_layout_3d_show_parking;
+                toggles.helipads = true;
+                toggles.features = !has_features ||
+                                    !impl_->ground_layout_3d_show_models ||
+                                    !models_ready;
+                f4::renderer::draw_airfield_geometry(g, toggles);
             }
 
             // --- Real KoreaObj 3D feature models ------------------------
@@ -517,30 +506,24 @@ void ViewerApp::draw_ground_layout_3d() {
                 // but doing it once here lets us bail out early if the shader
                 // or material can't be built (avoids spamming DrawMesh with
                 // an uninitialized material).
-                if (!impl_->ensure_default_material_3d()) {
+                if (!impl_->render_res_3d.ensure_default_material()) {
                     // Failed to build the fallback texture — can't safely
                     // draw meshes (the shader would discard them all).
                     // Skip the model pass; the grid + axis triad + flat
                     // geometry are still visible so the user knows the
                     // panel is alive.
                 } else {
-                    // Build the resource bundle once for the whole loop.
-                    // draw_feature_mesh() handles entity_type → vis_type →
-                    // cached mesh → DrawMesh internally, sharing Impl's
-                    // mesh_cache_3d / texture_cache_3d / lit_shader_3d /
-                    // default_mat_3d with the 2D canvas feature-mesh pass
-                    // (so models loaded by either view are free for the other).
-                    f4::renderer::FeatureMeshResources res{};
-                    res.model_db         = &*impl_->model_db_3d;
-                    res.class_table     = &impl_->class_table_3d;
-                    res.texture_cache   = &impl_->texture_cache_3d;
-                    res.lit_shader      = &impl_->lit_shader_3d;
-                    res.mesh_cache      = &impl_->mesh_cache_3d;
-                    res.default_material = &impl_->default_mat_3d;
-                    res.light_direction = impl_->light_3d_direction;
-                    res.light_color     = impl_->light_3d_color;
-                    res.light_intensity = impl_->light_3d_intensity;
-                    res.ambient_color   = impl_->ambient_3d_color;
+                    // Build the resource bundle once for the whole loop
+                    // from the shared RenderResources instance. The mesh
+                    // cache, texture cache, lit shader, default material,
+                    // and lighting state all live on render_res_3d and
+                    // are shared with the 2D canvas feature-mesh pass —
+                    // so models loaded by either view are free for the other.
+                    f4::renderer::EntityRenderResources res =
+                        f4::renderer::make_entity_render_resources(
+                            impl_->render_res_3d,
+                            &*impl_->model_db_3d,
+                            &impl_->class_table_3d);
 
                     // Walk features and draw each one's model.
                     impl_->diag_3d_features_total =

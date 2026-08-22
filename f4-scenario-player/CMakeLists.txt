@@ -41,7 +41,7 @@ set(RLIMGUI_SOURCES
 add_library(f4_scenario_player_lib STATIC
     src/player_app.cpp
     src/renderer.cpp
-    src/airport_geometry.cpp
+    src/airfield_overlays.cpp
     src/radio_log.cpp
     ${IMGUI_SOURCES}
     ${RLIMGUI_SOURCES}

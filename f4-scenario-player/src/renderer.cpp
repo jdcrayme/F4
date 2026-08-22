@@ -145,70 +145,30 @@ void PlayerApp::Impl::unload_meshes() {
 
 // ── draw_scene ─────────────────────────────────────────────────────────────
 // Delegates to f4::renderer::render_world() — see viewer_state.hpp.
-
-// Helper: convert an ENU WorldPosition to a Raylib Vector3.
-static inline Vector3 to_rh(const f4::geo::WorldPosition& p) {
-    return enu_to_raylib_v3(p.x, p.y, p.z);
-}
-
-// Helper: convert a Raylib Color from float RGBA (0..1) to ::Color.
-// Reads r, g, blue, a_ (the struct uses `blue` instead of `b` to avoid
-// collision with GeoLine::b which is the segment endpoint).
-static inline Color to_raylib_color(const float c[4]) {
-    return Color{
-        static_cast<unsigned char>(c[0] * 255.0f),  // r
-        static_cast<unsigned char>(c[1] * 255.0f),  // g
-        static_cast<unsigned char>(c[2] * 255.0f),  // blue
-        static_cast<unsigned char>(c[3] * 255.0f)   // a_
-    };
-}
-
-// Draw a flat quad (assumed coplanar) on the ground. Raylib has no
-// DrawQuad3D, so we draw it as two triangles via rlgl primitives.
-static void draw_quad_3d(const GeoQuad& q) {
-    const Color c = to_raylib_color(&q.r);
-    // Two triangles: (p0,p1,p2) and (p0,p2,p3)
-    DrawTriangle3D(to_rh(q.p[0]), to_rh(q.p[1]), to_rh(q.p[2]), c);
-    DrawTriangle3D(to_rh(q.p[0]), to_rh(q.p[2]), to_rh(q.p[3]), c);
-}
-
-// Draw a small cube at a marker position.
-static void draw_marker(const GeoMarker& m) {
-    const Vector3 c = to_rh(m.center);
-    const float s = m.size_ft;
-    const Color col = to_raylib_color(&m.r);
-    DrawCube(c, s, s, s, col);
-    DrawCubeWires(c, s, s, s, BLACK);
-}
+//
+// The scenario-player's renderer now uses the shared f4::renderer pipeline
+// exclusively:
+//   - draw_ground(), draw_airfield_geometry(), draw_entity_meshes() all
+//     live in f4-renderer and are composed by render_world()
+//   - scenario-specific overlays (taxi route, flight plan, approach,
+//     taxi-in, compass, markers) use the shared draw_layout_line /
+//     draw_layout_marker primitives from layout_draw.hpp
+//
+// No per-app draw helpers remain — every primitive goes through the
+// shared code path so changes to lighting, alpha blending, etc. apply
+// uniformly across all viewer apps.
 
 void PlayerApp::Impl::draw_airport() {
-    // Scenario-specific overlays only. The real campaign airfield layout
-    // (when the scenario has one) is rendered by render_world() via
-    // SceneDescription::airfield; the synthetic runway shapes below are
-    // the fallback for hand-authored scenarios.
+    // Scenario-specific overlays only. The runway / taxiway / parking
+    // geometry (real OR synthetic) is rendered by render_world() via
+    // SceneDescription::airfield — the shared builder runs in both
+    // cases. This function draws the navigation aids + scenario markers.
     if (!airport_built || !show_airport) return;
 
-    if (!airport.has_real_layout) {
-        // Synthetic airfield (hand-authored scenario).
-        // Runway surface
-        draw_quad_3d(airport.runway_surface);
-
-        // Threshold bars
-        for (const auto& b : airport.threshold_bars) {
-            draw_quad_3d(b);
-        }
-
-        // Centerline dashes
-        for (const auto& d : airport.centerline_dashes) {
-            draw_quad_3d(d);
-        }
-    }
-
-    // Taxi route lines
+    // Taxi route lines (yellow line strip).
     if (show_taxi_route) {
-        for (const auto& l : airport.taxi_route_lines) {
-            const Color c = to_raylib_color(&l.r);
-            DrawLine3D(to_rh(l.a), to_rh(l.b), c);
+        for (const auto& l : airfield.taxi_route_lines) {
+            f4::renderer::draw_layout_line(l);
         }
     }
 
@@ -216,48 +176,47 @@ void PlayerApp::Impl::draw_airport() {
     // waypoint markers — the reference the aircraft's position/orientation
     // is judged against in the air phase.
     if (show_flightplan) {
-        for (const auto& l : airport.flightplan_drop_lines) {
-            const Color c = to_raylib_color(&l.r);
-            DrawLine3D(to_rh(l.a), to_rh(l.b), c);
+        for (const auto& l : airfield.flightplan_drop_lines) {
+            f4::renderer::draw_layout_line(l);
         }
-        for (const auto& l : airport.flightplan_lines) {
-            const Color c = to_raylib_color(&l.r);
-            DrawLine3D(to_rh(l.a), to_rh(l.b), c);
+        for (const auto& l : airfield.flightplan_lines) {
+            f4::renderer::draw_layout_line(l);
         }
-        for (const auto& m : airport.flightplan_waypoints) {
-            draw_marker(m);
+        for (const auto& m : airfield.flightplan_waypoints) {
+            f4::renderer::draw_layout_marker(m);
         }
     }
 
     // Approach reference: extended centerline + 3-deg glide slope.
     if (show_approach) {
-        for (const auto& l : airport.approach_lines) {
-            const Color c = to_raylib_color(&l.r);
-            DrawLine3D(to_rh(l.a), to_rh(l.b), c);
+        for (const auto& l : airfield.approach_lines) {
+            f4::renderer::draw_layout_line(l);
         }
-        for (const auto& m : airport.approach_markers) {
-            draw_marker(m);
+        for (const auto& m : airfield.approach_markers) {
+            f4::renderer::draw_layout_marker(m);
         }
     }
 
     // Taxi-in route lines (runway exit -> parking).
     if (show_taxi_in) {
-        for (const auto& l : airport.taxi_in_route_lines) {
-            const Color c = to_raylib_color(&l.r);
-            DrawLine3D(to_rh(l.a), to_rh(l.b), c);
+        for (const auto& l : airfield.taxi_in_route_lines) {
+            f4::renderer::draw_layout_line(l);
         }
     }
 
-    // Markers
-    draw_marker(airport.parking_spot);
-    draw_marker(airport.hold_short);
-    draw_marker(airport.runway_end);
+    // Scenario markers (parking-spot / hold-short / runway-end). The
+    // shared builder also emits a parking marker (green cube) and a
+    // runway-end marker (red cube) from the synthesized GroundLayoutLists;
+    // the markers below are larger, distinct-color cubes that the user
+    // actually sees as the scenario's reference points.
+    f4::renderer::draw_layout_marker(airfield.parking_spot);
+    f4::renderer::draw_layout_marker(airfield.hold_short);
+    f4::renderer::draw_layout_marker(airfield.runway_end);
 
-    // Compass rose
+    // Compass rose.
     if (show_compass) {
-        for (const auto& l : airport.compass_rose) {
-            const Color c = to_raylib_color(&l.r);
-            DrawLine3D(to_rh(l.a), to_rh(l.b), c);
+        for (const auto& l : airfield.compass_rose) {
+            f4::renderer::draw_layout_line(l);
         }
     }
 }
@@ -327,17 +286,22 @@ void PlayerApp::Impl::draw_scene() {
         }
     }
 
-    // ── Real campaign airfield layout ─────────────────────────────────
-    if (airport_built && show_airport && airport.has_real_layout) {
-        scene.airfield = &airport.real_layout;
-        scene.airfield_origin_enu[0] = static_cast<float>(airport.layout_origin_x);
-        scene.airfield_origin_enu[1] = static_cast<float>(airport.layout_origin_y);
-        scene.airfield_origin_enu[2] = static_cast<float>(airport.layout_origin_z);
+    // ── Airfield geometry (real OR synthetic — both built via the shared
+    //    f4::renderer::build_airfield_geometry_3d()). render_world() draws
+    //    it via SceneDescription::airfield, offset by airfield.origin_enu_*.
+    //    This unifies the synthetic and real-layout paths through one
+    //    draw_airfield_geometry() call.
+    if (airport_built && show_airport && !airfield.geometry.empty) {
+        scene.airfield = &airfield.geometry;
+        scene.airfield_origin_enu[0] = airfield.origin_enu_x;
+        scene.airfield_origin_enu[1] = airfield.origin_enu_y;
+        scene.airfield_origin_enu[2] = airfield.origin_enu_z;
     }
 
     // ── Scenario-specific 3D overlays (inside the 3D mode) ────────────
-    // Synthetic runway shapes, taxi route, flight-plan route, approach
-    // reference, taxi-in route, markers, compass rose.
+    // Taxi route, flight-plan route, approach reference, taxi-in route,
+    // markers, compass rose. All drawn via shared draw_layout_line /
+    // draw_layout_marker primitives.
     scene.overlay_3d = [this](const Camera3D&) { draw_airport(); };
 
     f4::renderer::render_world(render_res, scene);

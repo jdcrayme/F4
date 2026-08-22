@@ -7,7 +7,7 @@
 #pragma once
 
 #include "f4/scenario_player/player_app.hpp"
-#include "f4/scenario_player/airport_geometry.hpp"
+#include "f4/scenario_player/airfield_overlays.hpp"
 #include "radio_log.hpp"
 #include <f4/renderer/coord_transform.hpp>       // Float3, enu_to_raylib, model_vertex_to_raylib
 #include <f4/renderer/orbit_camera.hpp>          // OrbitCamera
@@ -61,8 +61,8 @@ struct PlayerApp::Impl {
     bool paused = true;  // start paused so the aircraft sits at parking
     double time_scale = 1.0;
 
-    // ── Airport geometry (derived from scenario) ──────────────────────
-    AirportGeometry airport;
+    // ── Airfield geometry (shared f4-renderer builder + scenario overlays) ──
+    AirfieldOverlays airfield;
     bool airport_built = false;
 
     // ── Orbit camera (delegated to f4::renderer::OrbitCamera) ────────

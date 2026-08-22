@@ -79,11 +79,12 @@ ViewerApp::~ViewerApp() {
     // Free the KoreaObj mesh + texture caches used by the 3D panel.
     // Same GL-context constraint — only safe if IsWindowReady() is true
     // (i.e. run() has not yet returned). When run() does return, it
-    // calls unload_meshes_3d() BEFORE CloseWindow() in its shutdown
-    // path; this dtor call is a safety net for the case where the
-    // viewer is destroyed without run() ever being called (CLI-only usage).
+    // calls render_res_3d.unload_all() BEFORE CloseWindow() in its
+    // shutdown path; this dtor call is a safety net for the case where
+    // the viewer is destroyed without run() ever being called (CLI-only
+    // usage). All caches now live on the shared RenderResources instance.
     if (IsWindowReady()) {
-        impl_->unload_meshes_3d();
+        impl_->render_res_3d.unload_all();
     }
 }
 
@@ -167,7 +168,8 @@ void ViewerApp::run() {
     // UnloadShader all need the GL context. After this call, the cache
     // is empty; subsequent selections won't re-render models until the
     // user re-runs the viewer (which is fine — we're shutting down).
-    impl_->unload_meshes_3d();
+    // All caches now live on the shared RenderResources instance.
+    impl_->render_res_3d.unload_all();
     // Free the Class Table Browser's preview GPU resources (RenderTexture,
     // cached meshes, textures, lit shader, default material). The browser
     // owns its own cache (separate from impl_->mesh_cache_3d) so we must

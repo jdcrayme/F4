@@ -72,10 +72,10 @@ void PlayerApp::load_scenario(const std::filesystem::path& json_path) {
     // Observe the ATC traffic for the radio transcript overlay.
     impl_->radio_log.attach(*impl_->sim);
 
-    // Build the airport geometry from the SIMULATION's scenario — after
+    // Build the airfield geometry from the SIMULATION's scenario — after
     // initialize() this is the DERIVED copy (real airfield from
     // airbase_source: true runway/taxi/parking layout, resolved parking).
-    impl_->airport = build_airport_geometry(impl_->sim->scenario());
+    impl_->airfield = build_airfield_overlays(impl_->sim->scenario());
     impl_->airport_built = true;
 
     // Set the initial camera target to the parking spot so the user

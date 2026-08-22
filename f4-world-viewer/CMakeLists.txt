@@ -88,15 +88,13 @@ set(TINYFILEDIALOGS_SOURCES
 #   imgui_panels.cpp    — draw_imgui (menus, layers, legend, inspector, modals)
 #   ground_layout_view.cpp   — 2D ImGui "Ground Layout" panel (top-down
 #                               line+dot rendering, per-list type colors).
-#   ground_layout_models.cpp — pure layout→geometry converter (no Raylib,
-#                               no ImGui). Builds AirfieldGeometry3D from
-#                               GroundLayoutComponent + FeatureSetComponent.
-#                               Unit-tested by tests/test_ground_layout_models.cpp.
 #   ground_layout_3d.cpp     — "Ground Layout 3D" ImGui panel: renders the
 #                               AirfieldGeometry3D into an offscreen
 #                               RenderTexture2D via BeginMode3D, displays
 #                               via rlImGuiImageSize, captures mouse input
-#                               for orbit/zoom.
+#                               for orbit/zoom. The geometry builder +
+#                               per-layer draw live in f4-renderer
+#                               (ground_layout_models.cpp + scene_draw.cpp).
 # Plus the pre-existing hex/ (Hex Inspector) + file_dialog.cpp (tinyfiledialogs
 # wrapper) + settings.cpp (persisted settings JSON).
 # ============================================================================

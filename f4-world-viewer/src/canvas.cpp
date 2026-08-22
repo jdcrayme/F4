@@ -11,6 +11,7 @@
 
 #include <f4/terrain/terrain_data.hpp>
 #include <f4/world_convert/objective_decoder.hpp>  // objective_type_name()
+#include <f4/renderer/entity_render.hpp>  // EntityRenderResources, make_entity_render_resources
 
 #include <imgui.h>
 
@@ -619,7 +620,7 @@ void ViewerApp::draw_canvas() {
                 impl_->models_3d_loaded &&
                 impl_->model_db_3d.has_value() &&
                 impl_->class_table_3d.loaded() &&
-                impl_->ensure_default_material_3d();
+                impl_->render_res_3d.ensure_default_material();
             if (draw_meshes) {
                 // Build the top-down ortho camera matching the 2D canvas.
                 const float cam_east_ft  = impl_->cam_x * FT_PER_GRID;
@@ -645,21 +646,15 @@ void ViewerApp::draw_canvas() {
 
                 BeginMode3D(cam3d);
                 {
-                    // Build the EntityRenderResources bundle.
-                    // Pointer-aliases into Impl's lazy-loaded state — same
-                    // objects reused by draw_ground_layout_3d() so the mesh
-                    // cache + texture cache are shared.
-                    f4::renderer::EntityRenderResources res{};
-                    res.model_db         = &*impl_->model_db_3d;
-                    res.class_table      = &impl_->class_table_3d;
-                    res.texture_cache    = &impl_->texture_cache_3d;
-                    res.lit_shader       = &impl_->lit_shader_3d;
-                    res.mesh_cache       = &impl_->mesh_cache_3d;
-                    res.default_material = &impl_->default_mat_3d;
-                    res.light_direction  = impl_->light_3d_direction;
-                    res.light_color      = impl_->light_3d_color;
-                    res.light_intensity  = impl_->light_3d_intensity;
-                    res.ambient_color    = impl_->ambient_3d_color;
+                    // Build the EntityRenderResources bundle from the
+                    // shared RenderResources instance (mesh/texture/lit
+                    // caches + lighting all live there now, shared with
+                    // the 3D Ground Layout panel).
+                    f4::renderer::EntityRenderResources res =
+                        f4::renderer::make_entity_render_resources(
+                            impl_->render_res_3d,
+                            &*impl_->model_db_3d,
+                            &impl_->class_table_3d);
 
                     // RenderEntity() inspects the entity's components
                     // (TransformComponent + FeatureSetComponent) and
