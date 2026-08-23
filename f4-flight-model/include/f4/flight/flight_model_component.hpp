@@ -188,6 +188,16 @@ public:
         return to_radians(fm_.state().kin.phi);
     }
 
+    double roll_rate_radps() const override {
+        // kin.p is body-axis roll rate (rad/s, + = rolling right).
+        return fm_.state().kin.p;
+    }
+
+    double pitch_rate_radps() const override {
+        // kin.q is body-axis pitch rate (rad/s, + = pitching up).
+        return fm_.state().kin.q;
+    }
+
     double vertical_speed_fpm() const override {
         // NED z is down and zdot is in ft/s: climbing = negative zdot.
         return -fm_.state().kin.zdot * 60.0;

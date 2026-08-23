@@ -38,10 +38,16 @@ AIControlOutput AirSteering::steer(double desired_heading_rad,
     // from bank error. Positive heading error (turn right) commands right
     // roll; the FCS roll channel is not subject to the ground pedal
     // inversion (that lives in GroundSteering for nose-wheel steering).
+    //
+    // The roll_damp term (-Kd * p) is critical: without it, the bank
+    // cascade + FCS roll-rate lag can phase-shift into a sustained
+    // limit cycle (the documented "roll flutter" symptom). The damping
+    // term adds explicit derivative feedback that kills the cycle.
     const double hdg_err = heading_error(desired_heading_rad, in.heading_rad);
     const double bank_target = std::clamp(bank_gain * hdg_err,
                                           -max_bank_rad, max_bank_rad);
-    out.roll_cmd = std::clamp(roll_gain * (bank_target - in.roll_rad),
+    const double bank_err = bank_target - in.roll_rad;
+    out.roll_cmd = std::clamp(roll_gain * bank_err - roll_damp * in.roll_rate_radps,
                               -1.0, 1.0);
 
     // --- Altitude: gamma-hold ---
@@ -64,12 +70,31 @@ AIControlOutput AirSteering::steer(double desired_heading_rad,
         alpha_est + gamma_ff + gamma_corr
             - speed_damp_rad_per_kt * (in.vcas_kts - target_speed_kts),
         min_path_rad, max_path_rad);
-    out.pitch_cmd = std::clamp(attitude_gain * (theta_target - in.pitch_rad),
+    // Pitch-rate damping: subtract Kd*q from the stick command. Same
+    // rationale as the roll-rate damping — kills the phugoid by adding
+    // explicit derivative feedback that the FCS pitch-rate lag alone
+    // cannot provide at high attitude_gain.
+    out.pitch_cmd = std::clamp(attitude_gain * (theta_target - in.pitch_rad)
+                                - pitch_rate_damp * in.pitch_rate_radps,
                                pitch_min, pitch_max);
 
-    // --- Speed: P around a mid throttle setting + speed brake ---
+    // --- Speed: PI around a mid throttle setting + speed brake ---
+    // The integral eliminates steady-state speed error, which previously
+    // forced the LandingModule to reduce speed_damp (the "nose-down bias
+    // when fast" workaround at landing_module.cpp:32-36). With the integral,
+    // the throttle finds the right setting for any target speed and the
+    // speed_damp term can stay at full strength, killing the phugoid.
+    const double speed_err = target_speed_kts - in.vcas_kts;
+    // Leaky integral: approximates dt=1/60 integration with a 10-second
+    // time constant. The leak prevents windup when the target changes.
+    // (Uses a fixed dt assumption since steer() has no dt parameter; the
+    //  60 Hz major frame is the design point and the test harness matches.)
+    speed_integral_ = speed_integral_ * (1.0 - 1.0 / 600.0)
+                   + throttle_integral_gain * speed_err;
+    speed_integral_ = std::clamp(speed_integral_, -throttle_integral_max,
+                                                  throttle_integral_max);
     out.throttle_cmd = std::clamp(
-        throttle_mid + throttle_gain * (target_speed_kts - in.vcas_kts),
+        throttle_mid + throttle_gain * speed_err + speed_integral_,
         throttle_min, throttle_max);
     out.speed_brake_cmd = (in.vcas_kts > target_speed_kts + 15.0) ? 0.8 : -1.0;
 

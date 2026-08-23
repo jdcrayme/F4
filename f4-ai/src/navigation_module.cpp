@@ -91,6 +91,8 @@ void NavigationModule::cache_aircraft_state(const flight::IAircraftState* state)
     current_heading_rad_ = state->heading_rad();
     current_pitch_rad_ = state->pitch_angle_rad();
     current_roll_rad_ = state->roll_angle_rad();
+    current_roll_rate_radps_ = state->roll_rate_radps();
+    current_pitch_rate_radps_ = state->pitch_rate_radps();
     current_vs_fpm_ = state->vertical_speed_fpm();
 }
 
@@ -167,6 +169,8 @@ AirSteering::Input NavigationModule::steering_input() const noexcept
     in.heading_rad = current_heading_rad_;
     in.pitch_rad = current_pitch_rad_;
     in.roll_rad = current_roll_rad_;
+    in.roll_rate_radps = current_roll_rate_radps_;
+    in.pitch_rate_radps = current_pitch_rate_radps_;
     in.vs_fpm = current_vs_fpm_;
     in.vcas_kts = current_vcas_kts_;
     in.alt_msl_ft = current_alt_msl_ft_;

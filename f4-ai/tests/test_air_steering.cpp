@@ -157,7 +157,12 @@ TEST(AirSteeringSpeed, SlowAddsThrottle) {
     const auto slow = as.steer(0, 5000, 300, make_input(0, 5000, 0, 280));
     const auto on_speed = as.steer(0, 5000, 300, make_input(0, 5000, 0, 300));
     EXPECT_GT(slow.throttle_cmd, on_speed.throttle_cmd);
-    EXPECT_NEAR(on_speed.throttle_cmd, as.throttle_mid, 1e-9);
+    // On-speed throttle is near throttle_mid. The exact equality no longer
+    // holds because the speed channel has an integral term: the slow call
+    // accumulates a small positive integral that leaks into the on_speed
+    // call (one tick at 60 Hz, leak rate 1/600). The on_speed throttle
+    // is therefore within ~0.01 of throttle_mid, not exactly equal.
+    EXPECT_NEAR(on_speed.throttle_cmd, as.throttle_mid, 0.02);
 }
 
 TEST(AirSteeringSpeed, FastReducesThrottle) {

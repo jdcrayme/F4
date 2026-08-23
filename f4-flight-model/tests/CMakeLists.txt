@@ -24,6 +24,16 @@ f4_fm_add_test(test_fcs                  test_fcs.cpp)
 f4_fm_add_test(test_eom                  test_eom.cpp)
 f4_fm_add_test(test_angle                test_angle.cpp)
 
+# Closed-loop control tests — wire AirSteering (AI cascade) into the full
+# FlightModel (FCS + EOM + aero) and assert closed-loop convergence +
+# stability. Tests are DISABLED_ until the corresponding fixes in
+# FLIGHT_CONTROL_STABILITY_PLAN.md land.
+f4_fm_add_test(test_control_loops        test_control_loops.cpp)
+target_link_libraries(test_control_loops PRIVATE f4-ai)
+target_compile_definitions(test_control_loops PRIVATE
+    F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}")
+add_dependencies(test_control_loops convert_golden_fixtures)
+
 target_compile_definitions(test_flight_model PRIVATE
     F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}")
 target_compile_definitions(test_flight_model_component PRIVATE

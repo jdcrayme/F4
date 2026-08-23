@@ -29,11 +29,13 @@ LandingModule::LandingModule()
     // limit cycle through the FCS lag. Low gain + small bounded gamma
     // corrections converge without ringing.
     //
-    // speed_damp is deliberately tiny here: it is a phugoid damper, but
-    // with a big value it acts as a constant nose-down bias whenever the
-    // aircraft is faster than target — on final that cancelled the
-    // climb-back-to-beam command and the aircraft settled BELOW the beam
-    // all the way to a short touchdown.
+    // speed_damp_rad_per_kt is kept at the default 0.002 now that the
+    // speed channel has an integral term (AirSteering::throttle_integral_gain).
+    // Previously it was reduced to 0.0008 to mask the persistent
+    // "nose-down bias when fast" caused by steady-state speed error from
+    // the P-only throttle law — but that reduction weakened the phugoid
+    // damper and contributed to altitude oscillation on final.
+    // See FLIGHT_CONTROL_STABILITY_PLAN.md §4.2 RC-3.
     air_steering.bank_gain = 1.2;
     air_steering.max_bank_rad = 0.44;    // ~25 deg: enough to close lateral S-turns
     air_steering.roll_gain = 3.0;
@@ -42,7 +44,7 @@ LandingModule::LandingModule()
     air_steering.path_gain = 0.00008;
     air_steering.gamma_corr_limit = 0.07;
     air_steering.attitude_gain = 1.2;
-    air_steering.speed_damp_rad_per_kt = 0.0008;
+    // speed_damp_rad_per_kt = 0.002 (default, no longer overridden)
     air_steering.throttle_min = 0.15;
 
     // Pattern tune: same cascade, steeper bank + more gamma authority.
@@ -327,6 +329,8 @@ void LandingModule::cache_aircraft_state(const flight::IAircraftState* state)
     current_heading_rad_ = state->heading_rad();
     current_pitch_rad_ = state->pitch_angle_rad();
     current_roll_rad_ = state->roll_angle_rad();
+    current_roll_rate_radps_ = state->roll_rate_radps();
+    current_pitch_rate_radps_ = state->pitch_rate_radps();
     current_vs_fpm_ = state->vertical_speed_fpm();
     on_ground_ = state->on_ground();
 }
@@ -712,6 +716,8 @@ AirSteering::Input LandingModule::air_input() const noexcept {
     in.heading_rad = current_heading_rad_;
     in.pitch_rad = current_pitch_rad_;
     in.roll_rad = current_roll_rad_;
+    in.roll_rate_radps = current_roll_rate_radps_;
+    in.pitch_rate_radps = current_pitch_rate_radps_;
     in.vs_fpm = current_vs_fpm_;
     in.vcas_kts = current_vcas_kts_;
     in.alt_msl_ft = current_alt_msl_ft_;

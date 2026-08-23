@@ -274,6 +274,10 @@ void TakeoffModule::cache_aircraft_state(const flight::IAircraftState* state)
     current_alt_msl_ft_ = state->altitude_msl_ft();
     current_heading_rad_ = state->heading_rad();
     current_pitch_rad_ = state->pitch_angle_rad();
+    current_roll_rad_ = state->roll_angle_rad();
+    current_roll_rate_radps_ = state->roll_rate_radps();
+    current_pitch_rate_radps_ = state->pitch_rate_radps();
+    current_vs_fpm_ = state->vertical_speed_fpm();
     on_ground_ = state->on_ground();
 }
 
@@ -446,6 +450,15 @@ AIControlOutput TakeoffModule::controls_for_takeoff() const {
         runway_heading_rad_, current_heading_rad_);
     output.yaw_cmd = std::clamp(-ground_steering.heading_gain * hdg_err, -1.0, 1.0);
 
+    // Phase 1c: ZERO roll command during the takeoff roll. Previously this
+    // was left at the default (0), but the FCS's `pstab` could pick up
+    // transients from any tiny non-zero stick input and the EOM's ground
+    // clamp step-released k.p at liftoff — a step input to the roll axis
+    // at the moment of liftoff when airspeed was lowest and roll authority
+    // most limited. Explicitly zeroing roll_cmd here, plus the rotation
+    // law only firing at Vr, ensures pstab is 0 at liftoff.
+    output.roll_cmd = 0.0;
+
     // At Vr, rotate to the target PITCH ATTITUDE (not a fixed stick).
     // A fixed stick commands G; on the ground the G integrator winds up
     // against the EOM's attitude clamp and limit-cycles (15deg -> -2deg)
@@ -462,19 +475,37 @@ AIControlOutput TakeoffModule::controls_for_takeoff() const {
 AIControlOutput TakeoffModule::controls_for_flyout() const {
     AIControlOutput output;
 
-    // Climb at runway heading, pitch for the climb attitude (attitude
-    // command, same rationale as the rotation law).
-    output.throttle_cmd = takeoff_throttle;
+    // Phase 1b: FlyOut now uses the AirSteering bank cascade (with roll-rate
+    // damping) instead of the bare proportional heading hold that limit-cycled.
+    // The cascade commands a target bank from heading error (clamped to
+    // max_bank_rad), then commands roll rate from the bank error with explicit
+    // roll-rate damping — the same cascade NavigationModule uses. This kills
+    // the "roll flutter during turns" symptom.
+    //
+    // Pitch is still an attitude command (climb_pitch_deg) since FlyOut is
+    // a climb phase, not an altitude-capture phase — the air_steering
+    // altitude cascade would fight the climb until departure_alt is reached.
+    AirSteering::Input in;
+    in.position = current_position_;
+    in.heading_rad = current_heading_rad_;
+    in.pitch_rad = current_pitch_rad_;
+    in.roll_rad = current_roll_rad_;
+    in.roll_rate_radps = current_roll_rate_radps_;
+    in.pitch_rate_radps = current_pitch_rate_radps_;
+    in.vs_fpm = current_vs_fpm_;
+    in.vcas_kts = current_vcas_kts_;
+    in.alt_msl_ft = current_alt_msl_ft_;
+    output = air_steering.steer(runway_heading_rad_, departure_alt_ft,
+                                flyout_speed_kts, in);
+
+    // Override pitch with the climb attitude command (the cascade's altitude
+    // capture is for level flight; FlyOut is a sustained climb to departure
+    // altitude).
     const double target = climb_pitch_deg * (3.14159265358979 / 180.0);
     output.pitch_cmd = std::clamp(climb_pitch_gain * (target - current_pitch_rad_),
                                   -0.5, 0.5);
-
-    // Gentle heading hold through the climb-out: positive compass error
-    // (need to turn right) banks right. In-air roll is not subject to the
-    // ground steering pedal inversion.
-    const double hdg_err = GroundSteering::heading_error(
-        runway_heading_rad_, current_heading_rad_);
-    output.roll_cmd = std::clamp(flyout_heading_gain * hdg_err, -1.0, 1.0);
+    // Throttle stays at MIL for the climb.
+    output.throttle_cmd = takeoff_throttle;
 
     // Retract gear above gear_up_alt_ft AGL.
     output.gear_handle_down = (current_alt_agl_ft_ <= gear_up_alt_ft);

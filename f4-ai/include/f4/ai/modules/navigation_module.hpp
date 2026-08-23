@@ -136,6 +136,8 @@ private:
     double current_heading_rad_{0.0};
     double current_pitch_rad_{0.0};
     double current_roll_rad_{0.0};
+    double current_roll_rate_radps_{0.0};
+    double current_pitch_rate_radps_{0.0};
     double current_vs_fpm_{0.0};
 
     // State machine (MUST be last — its ctor fires entry actions).

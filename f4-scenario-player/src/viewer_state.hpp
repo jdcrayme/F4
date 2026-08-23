@@ -111,6 +111,7 @@ struct PlayerApp::Impl {
 
     // ── HUD ───────────────────────────────────────────────────────────
     bool show_hud = true;
+    bool show_fcs_hud = false;  // FCS internals column (F3 toggle)
     bool show_grid = true;
     bool show_axes = true;
     bool show_airport = true;
@@ -144,6 +145,7 @@ struct PlayerApp::Impl {
     void draw_scene();                  // render_world() + HUD + radio
     void draw_airport();                // scenario-specific 3D overlays
     void draw_hud();
+    void draw_fcs_hud();                // FCS-internals column (F3 toggle)
     void draw_radio();                  // ATC transcript panel (top-right)
 };
 

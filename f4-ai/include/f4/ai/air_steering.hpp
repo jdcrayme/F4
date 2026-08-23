@@ -43,6 +43,8 @@ public:
         double heading_rad{0.0};       ///< compass heading (0 = north, CW +)
         double pitch_rad{0.0};         ///< pitch attitude
         double roll_rad{0.0};          ///< roll attitude (+ = right wing down)
+        double roll_rate_radps{0.0};   ///< body-axis roll rate p (rad/s, + = rolling right)
+        double pitch_rate_radps{0.0};  ///< body-axis pitch rate q (rad/s, + = pitching up)
         double vs_fpm{0.0};            ///< vertical speed (ft/min, + = climbing)
         double vcas_kts{0.0};          ///< calibrated airspeed
         double alt_msl_ft{0.0};        ///< altitude MSL
@@ -54,6 +56,12 @@ public:
     double bank_gain{2.0};             ///< target bank rad per rad of heading error
     double max_bank_rad{0.52};         ///< ~30 deg bank limit for nav comfort
     double roll_gain{6.0};             ///< roll rate command per rad of bank error
+    double roll_damp{1.5};             ///< roll-rate damping (rad/s of stick per rad/s of roll rate).
+                                       ///< Kills the bank-cascade limit cycle by adding -Kd*p
+                                       ///< to the roll command. Without this term a high roll_gain
+                                       ///< plus the FCS roll-rate lag can phase-shift into a
+                                       ///< sustained ±15-deg roll oscillation (the "roll flutter"
+                                       ///< symptom in FLIGHT_CONTROL_STABILITY_PLAN.md §4.1).
 
     // Altitude channel (gamma-hold: vertical-speed -> flight-path-angle
     // -> pitch attitude). The target pitch is alpha_est + commanded gamma,
@@ -71,10 +79,25 @@ public:
     double attitude_gain{4.0};         ///< stick per rad of pitch-attitude error
     double pitch_min{-0.35};           ///< stick clamps
     double pitch_max{0.5};
+    double pitch_rate_damp{0.15};      ///< pitch-rate damping (stick per rad/s of
+                                       ///< body-axis pitch rate q). Same rationale
+                                       ///< as roll_damp: the FCS's pitch-rate lag
+                                       ///< can phase-shift into a low-frequency
+                                       ///< pitch oscillation (phugoid) at high
+                                       ///< attitude_gain. The damping term kills it.
 
     // Speed channel
     double throttle_mid{0.6};          ///< throttle at on-target speed
     double throttle_gain{0.008};       ///< throttle per kt of underspeed
+    double throttle_integral_gain{0.0005}; ///< integral on speed error —
+                                            ///< eliminates steady-state speed
+                                            ///< error (the cause of the
+                                            ///< persistent "nose-down bias
+                                            ///< when fast" that forced the
+                                            ///< LandingModule to reduce
+                                            ///< speed_damp — see
+                                            ///< FLIGHT_CONTROL_STABILITY_PLAN.md §4.2 RC-3).
+    double throttle_integral_max{0.3}; ///< anti-windup clamp on the integral
     double throttle_min{0.25};
     double throttle_max{1.0};          ///< MIL (nav never selects AB)
 
@@ -92,6 +115,17 @@ public:
                                         double target_alt_ft,
                                         double target_speed_kts,
                                         const Input& in) const;
+
+    /// Reset the integral accumulators (call on mode transition, e.g.
+    /// when NavigationModule hands off to LandingModule with a different
+    /// target speed — otherwise the integral carries a stale offset).
+    void reset_integrators() noexcept { speed_integral_ = 0.0; }
+
+private:
+    /// Speed-channel integral accumulator (mutable so the public steer()
+    /// can remain const — the integral is closed-loop state, not config).
+    /// Persists across steer() calls within a single module instance.
+    mutable double speed_integral_{0.0};
 };
 
 } // namespace f4::ai

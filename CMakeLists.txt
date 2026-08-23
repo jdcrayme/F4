@@ -51,7 +51,10 @@ add_subdirectory(f4-terrain)       # theater terrain (elevation/palette/overlay)
 add_subdirectory(f4-terrain-convert) # THEATER.* -> korea.terrain.json (CLI)
 add_subdirectory(f4-lzss)           # LZSS decompression (TEX blobs, CAM archives)
 add_subdirectory(f4-models)        # KoreaObj.HDR/LOD 3D model database parser
-add_subdirectory(f4-renderer)       # Shared Raylib rendering library (orbit camera, lit shader, mesh builder, texture cache, symbols)
+option(F4_BUILD_RENDERER "Build the f4-renderer Raylib library (requires X11 + OpenGL dev headers)" ON)
+if(F4_BUILD_RENDERER)
+    add_subdirectory(f4-renderer)       # Shared Raylib rendering library (orbit camera, lit shader, mesh builder, texture cache, symbols)
+endif()
 option(F4_BUILD_MODEL_VIEWER "Build the 3D model viewer (requires X11 + OpenGL dev headers)" ON)
 if(F4_BUILD_MODEL_VIEWER)
     add_subdirectory(f4-models-viewer)  # Raylib + Dear ImGui 3D model viewer

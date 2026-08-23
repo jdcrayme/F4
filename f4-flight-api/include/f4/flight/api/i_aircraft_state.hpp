@@ -82,6 +82,19 @@ public:
     /// Needed for bank-to-turn heading control damping.
     virtual double roll_angle_rad() const = 0;
 
+    /// Body-axis roll rate p (radians per second, positive = rolling right).
+    /// Needed for roll-rate damping in the bank-to-turn cascade — without
+    /// explicit derivative feedback the cascade + FCS roll-rate lag can
+    /// phase-shift into a sustained roll limit cycle (the "roll flutter"
+    /// symptom in FLIGHT_CONTROL_STABILITY_PLAN.md §4.1).
+    virtual double roll_rate_radps() const = 0;
+
+    /// Body-axis pitch rate q (radians per second, positive = pitching up).
+    /// Needed for pitch-rate damping in the altitude cascade — same rationale
+    /// as roll_rate_radps: kills the phugoid by adding -Kd*q to the pitch
+    /// command (FLIGHT_CONTROL_STABILITY_PLAN.md §4.2).
+    virtual double pitch_rate_radps() const = 0;
+
     // --- Vertical speed ---
 
     /// Vertical speed (feet per minute, positive = climbing).

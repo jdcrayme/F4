@@ -50,6 +50,7 @@
 #include <f4/flight/api/i_aircraft_state.hpp>
 
 #include "f4/ai/ai_output.hpp"
+#include "f4/ai/air_steering.hpp"
 #include "f4/ai/atc/messages.hpp"
 #include "f4/ai/ground_steering.hpp"
 
@@ -158,7 +159,23 @@ public:
     double lineup_depth_ft{150.0};
 
     // Heading-hold gain for FlyOut roll commands (roll units per rad of error).
+    // DEPRECATED — kept for back-compat but unused now that FlyOut routes
+    // through air_steering's bank cascade. The cascade gives both bank-target
+    // limiting AND roll-rate damping, which the bare proportional law lacked
+    // (it limit-cycled: any heading error > ~6° commanded full stick, the
+    // FCS over-banked, the heading reversed, the stick reversed — the
+    // documented "roll flutter during turns" symptom in
+    // FLIGHT_CONTROL_STABILITY_PLAN.md §4.1 RC-2).
     double flyout_heading_gain{1.5};
+
+    // Speed target during FlyOut (kts). Default 250 kts is a conservative
+    // climb speed for the F-16; hosts can override via AircraftConfig.
+    double flyout_speed_kts{250.0};
+
+    // Shared air-steering controller for the FlyOut phase. Public so hosts
+    // can tune its gains. Uses the same bank cascade + roll-rate damping
+    // as NavigationModule, killing the FlyOut roll limit cycle.
+    AirSteering air_steering;
 
     // Shared ground-steering controller (taxi, lineup, takeoff-roll heading
     // hold). Public so hosts can tune its gains like the fields above.
@@ -240,6 +257,10 @@ private:
     double current_alt_msl_ft_{0.0};
     double current_heading_rad_{0.0};
     double current_pitch_rad_{0.0};
+    double current_roll_rad_{0.0};
+    double current_roll_rate_radps_{0.0};
+    double current_pitch_rate_radps_{0.0};
+    double current_vs_fpm_{0.0};
     bool on_ground_{true};
 
     // State machine (MUST be last — its ctor fires entry actions that

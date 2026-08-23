@@ -51,6 +51,7 @@
 #include "f4/ai/modules/navigation_module.hpp"
 #include "f4/ai/modules/takeoff_module.hpp"
 
+#include <optional>
 #include <vector>
 
 namespace f4::ai {
@@ -164,9 +165,35 @@ public:
                 break;
         }
 
+        // Watchdog (Phase 5a): if the AI produced an empty output (no
+        // module set anything), hold the last known good PilotInput
+        // rather than letting the FM fly idle for that tick. The default
+        // PilotInput{} has throttle=0 and gear=down — safe on the ground,
+        // catastrophic in flight (a 1-tick idle transient at low altitude
+        // is enough to drop the aircraft into the ground).
+        //
+        // An output is "empty" if NONE of the meaningful control fields
+        // were set. The Complete phase sets brakes+gear explicitly, so
+        // it's not affected. Empty outputs happen during phase transitions
+        // (e.g. NavigationModule Done before BrainComponent sequences to
+        // Approach) or if a module returns {} by mistake.
+        const bool empty = (ai_out.pitch_cmd == 0.0 &&
+                            ai_out.roll_cmd == 0.0 &&
+                            ai_out.yaw_cmd == 0.0 &&
+                            ai_out.throttle_cmd == 0.0 &&
+                            !ai_out.gear_handle_down &&
+                            !ai_out.wheel_brakes &&
+                            !ai_out.parking_brake);
+        if (empty && last_pilot_input_.has_value() && phase_ != Phase::Complete) {
+            sink->set_pending_input(*last_pilot_input_);
+            return;
+        }
+
         // Write the AI output to the flight model's pending input slot
-        // via the IPilotInputSink interface.
-        sink->set_pending_input(map_to_pilot_input(ai_out));
+        // via the IPilotInputSink interface, and cache it for the watchdog.
+        const flight::PilotInput pi = map_to_pilot_input(ai_out);
+        last_pilot_input_ = pi;
+        sink->set_pending_input(pi);
     }
 
     // --- Mission plan (set by the host at spawn, before first tick) ---
@@ -249,6 +276,12 @@ private:
     bool takeoff_initialized_{false};
     modules::NavigationModule nav_;
     modules::LandingModule landing_;
+
+    // Watchdog cache: the last non-empty PilotInput the brain produced.
+    // Held for one tick if a module returns an empty AIControlOutput
+    // (e.g. during a phase transition) so the FM doesn't see a 1-tick
+    // idle transient. See update() for the rationale.
+    std::optional<flight::PilotInput> last_pilot_input_;
 };
 
 } // namespace f4::ai

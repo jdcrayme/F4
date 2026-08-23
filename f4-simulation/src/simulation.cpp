@@ -471,6 +471,26 @@ void Simulation::tick(double dt) {
     // then walks the spawned aircraft_entities_ list to pull their per-instance
     // state out of the FM and into the renderer-facing TransformComponent +
     // VisualModelComponent.
+    //
+    // IMPORTANT: the ground-elevation query happens BEFORE world_.update_all()
+    // so the brain and the FM see the SAME groundZ on the same tick. Previously
+    // the query ran AFTER update_all(), which meant the brain's altitude-AGL
+    // read was based on the previous tick's terrain — at high time_scale this
+    // produced a "terrain phugoid" where the brain commanded climb against a
+    // stale ground reference while the FM's ground clamp fired on the current
+    // reference. See FLIGHT_CONTROL_STABILITY_PLAN.md §4.2 RC-2.
+    for (const auto eid : aircraft_entities_) {
+        auto h = entities::EntityHandle(eid, &world_);
+        auto* fm = h.get<f4::flight::FlightModelComponent>();
+        if (!fm) continue;
+        const auto& s_cur = fm->state();
+        const double east_ft  = s_cur.kin.y;   // NED east = ENU east
+        const double north_ft = s_cur.kin.x;   // NED north = ENU north
+        f4::terrain::TerrainSource* ts = terrain_source_ ? terrain_source_ : &default_terrain_;
+        const double ground_z = ts->elevation_at_ft(east_ft, north_ft);
+        fm->set_ground(ground_z, f4::math::Vec3d{0.0, 0.0, -1.0});
+    }
+
     world_.update_all(scaled_dt, bus_);
     bus_.flush_pending();  // drain deferred ATC messages (TaxiClearance, etc.)
 
@@ -480,21 +500,6 @@ void Simulation::tick(double dt) {
         auto* tf = h.get<entities::TransformComponent>();
         auto* fm = h.get<f4::flight::FlightModelComponent>();
         if (!tf || !fm) continue;
-
-        // Update the ground plane from the terrain source. The sim queries
-        // the terrain at the aircraft's CURRENT ENU position and feeds the
-        // elevation to the FM's ground clamp. When no real terrain is
-        // loaded (terrain_source_ is null), default_terrain_ provides a
-        // flat plane at the parking spot's altitude — the pre-terrain
-        // behavior. Path B1: real Korea elevation now drives the ground.
-        //
-        // NED → ENU: kin.x = NED north = ENU north; kin.y = NED east = ENU east.
-        const auto& s_cur = fm->state();
-        const double east_ft  = s_cur.kin.y;
-        const double north_ft = s_cur.kin.x;
-        f4::terrain::TerrainSource* ts = terrain_source_ ? terrain_source_ : &default_terrain_;
-        const double ground_z = ts->elevation_at_ft(east_ft, north_ft);
-        fm->set_ground(ground_z, f4::math::Vec3d{0.0, 0.0, -1.0});
 
         const auto& s = fm->state();
         // NED -> ENU: enu.x = ned.y (east), enu.y = ned.x (north), enu.z = -ned.z (up)

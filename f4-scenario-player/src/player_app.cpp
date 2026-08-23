@@ -19,6 +19,7 @@
 #include <raylib.h>
 #include <imgui.h>
 
+#include <algorithm>
 #include <chrono>
 #include <stdexcept>
 #include <thread>
@@ -120,7 +121,12 @@ void PlayerApp::set_paused(bool paused) noexcept {
 }
 
 void PlayerApp::set_time_scale(double scale) noexcept {
-    if (scale > 0.0) impl_->time_scale = scale;
+    // Clamp to [0.1, 4.0]: see the comment at the slider below for the
+    // FCS-stability rationale. Values above 4x drive the FM's minor-frame
+    // step past the discrete-filter stability margin.
+    if (scale > 0.0) {
+        impl_->time_scale = std::clamp(scale, 0.1, 4.0);
+    }
 }
 
 void PlayerApp::set_follow_camera(bool follow) noexcept {
@@ -213,6 +219,15 @@ void PlayerApp::run() {
             impl_->status_msg = "Saved: " + path;
         }
 
+        // F3 = toggle FCS-internals HUD column (Phase 0a observability).
+        // Shows pstick/rstick/ypedal/throttle/speedBrake + FCS intermediates
+        // (aoacmd, pscmd, pstab, pitchIntegral, nzcgs, body rates p/q/r).
+        // Critical for diagnosing roll flutter and altitude phugoid live,
+        // without having to instrument and rerun.
+        if (IsKeyPressed(KEY_F3)) {
+            impl_->show_fcs_hud = !impl_->show_fcs_hud;
+        }
+
         // Scheduled screenshot
         if (impl_->screenshot_pending && GetTime() >= impl_->screenshot_at) {
             TakeScreenshot(impl_->screenshot_path.string().c_str());
@@ -246,9 +261,16 @@ void PlayerApp::run() {
         ImGui::Checkbox("Follow aircraft (C)", &impl_->follow_aircraft);
         ImGui::Separator();
         // Sim speed: the tick scales by this multiplier (0.1x taxi
-        // inspection .. 16x fast-forward through the enroute legs).
+        // inspection .. 4x fast-forward through the enroute legs).
+        //
+        // Capped at 4x: the FCS PI + lead-lag filters were tuned for a
+        // 1/360 s minor step (6 sub-steps of 1/60 s major). At 16x the
+        // minor step is effectively 1/22.5 s, past the stability margin
+        // of the FCS's discrete filters — the closed loop develops a
+        // high-frequency oscillation that the integrator cannot damp.
+        // See FLIGHT_CONTROL_STABILITY_PLAN.md §4.2 RC-2.
         float speed = static_cast<float>(impl_->time_scale);
-        if (ImGui::SliderFloat("Sim speed", &speed, 0.1f, 16.0f, "%.1fx",
+        if (ImGui::SliderFloat("Sim speed", &speed, 0.1f, 4.0f, "%.1fx",
                                ImGuiSliderFlags_Logarithmic)) {
             impl_->time_scale = speed;
         }

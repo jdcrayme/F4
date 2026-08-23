@@ -53,6 +53,8 @@ public:
     double heading_rad_{0.0};
     double pitch_rad_{0.0};
     double roll_rad_{0.0};
+    double roll_rate_radps_{0.0};
+    double pitch_rate_radps_{0.0};
     double vs_fpm_{0.0};
     bool on_ground_{true};
 
@@ -65,6 +67,8 @@ public:
     double heading_rad()       const override { return heading_rad_; }
     double pitch_angle_rad()   const override { return pitch_rad_; }
     double roll_angle_rad()    const override { return roll_rad_; }
+    double roll_rate_radps()   const override { return roll_rate_radps_; }
+    double pitch_rate_radps()  const override { return pitch_rate_radps_; }
     double vertical_speed_fpm() const override { return vs_fpm_; }
     bool   on_ground()         const override { return on_ground_; }
 };

@@ -404,7 +404,7 @@ void PlayerApp::Impl::draw_hud() {
 
     // Controls hint
     lines.emplace_back("");
-    lines.emplace_back("Space: pause/resume   F: focus aircraft   R: reset view");
+    lines.emplace_back("Space: pause/resume   F: focus aircraft   R: reset view   F3: FCS HUD");
 
     int max_w = 0;
     for (const auto& line : lines) {
@@ -420,6 +420,103 @@ void PlayerApp::Impl::draw_hud() {
     int line_y = y + pad;
     for (const auto& line : lines) {
         DrawText(line.c_str(), x + pad, line_y, 14, RAYWHITE);
+        line_y += line_h;
+    }
+
+    // ── FCS-internals HUD column (Phase 0a observability) ────────────
+    // Toggle with F3. Shows the AI's stick/throttle/pedal commands plus
+    // the FCS intermediates (aoacmd, pscmd, pstab, pitchIntegral, nzcgs)
+    // and the EOM body rates (p, q, r). Critical for diagnosing roll
+    // flutter and altitude phugoid live — without this you can't tell
+    // whether the AI is commanding the wrong stick or the FCS is mis-
+    // shaping a correct input.
+    if (show_fcs_hud && sim_initialized) {
+        draw_fcs_hud();
+    }
+}
+
+void PlayerApp::Impl::draw_fcs_hud() {
+    auto h = f4::entities::EntityHandle(sim->aircraft_entity(), &sim->world());
+    auto* fm = h.get<f4::flight::FlightModelComponent>();
+    if (!fm) return;
+
+    const auto& s = fm->state();
+    const auto& fcs = s.fcs;
+    const auto& kin = s.kin;
+    const auto& aero = s.aero;
+
+    // Place the FCS HUD on the right side of the main HUD, below the
+    // radio panel.
+    const int x = 12;
+    int y = 380;
+    const int line_h = 16;
+    const int pad = 8;
+    const int font_size = 13;
+
+    std::vector<std::string> lines;
+    char buf[256];
+
+    lines.emplace_back("─── FCS State (F3 to hide) ───");
+
+    // AI control surface commands (what the brain asked for)
+    std::snprintf(buf, sizeof(buf), "pstick: %+0.3f   rstick: %+0.3f",
+                  fcs.pshape > 0 ? std::sqrt(fcs.pshape) : -std::sqrt(-fcs.pshape),
+                  fcs.rshape > 0 ? std::sqrt(fcs.rshape) : -std::sqrt(-fcs.rshape));
+    lines.emplace_back(buf);
+
+    std::snprintf(buf, sizeof(buf), "throttle: %0.3f   speedBrake: %+0.2f",
+                  s.engine.rpm > 0.01 ? s.engine.rpm : 0.0,
+                  aero.dbrake);
+    lines.emplace_back(buf);
+
+    // FCS intermediates
+    std::snprintf(buf, sizeof(buf), "aoacmd: %5.2f\u00B0   ptcmd: %+5.2f G",
+                  f4::flight::to_degrees(fcs.aoacmd),
+                  fcs.ptcmd);
+    lines.emplace_back(buf);
+
+    std::snprintf(buf, sizeof(buf), "pscmd: %+6.1f\u00B0/s   pstab: %+6.1f\u00B0/s",
+                  fcs.pscmd * 180.0 / 3.14159265358979,
+                  fcs.pstab * 180.0 / 3.14159265358979);
+    lines.emplace_back(buf);
+
+    std::snprintf(buf, sizeof(buf), "pitchIntegral: %+6.2f",
+                  fcs.pitchIntegral.output());
+    lines.emplace_back(buf);
+
+    // Aero + loads
+    std::snprintf(buf, sizeof(buf), "alpha: %5.2f\u00B0   beta: %5.2f\u00B0   nzcgs: %+5.2f G",
+                  f4::flight::to_degrees(aero.alpha),
+                  f4::flight::to_degrees(aero.beta),
+                  s.loads.nzcgs);
+    lines.emplace_back(buf);
+
+    // Body rates (rad/s → deg/s for readability)
+    std::snprintf(buf, sizeof(buf), "p: %+6.1f  q: %+6.1f  r: %+6.1f  (\u00B0/s)",
+                  kin.p * 180.0 / 3.14159265358979,
+                  kin.q * 180.0 / 3.14159265358979,
+                  kin.r * 180.0 / 3.14159265358979);
+    lines.emplace_back(buf);
+
+    std::snprintf(buf, sizeof(buf), "vs: %+6.0f fpm   qbar: %5.0f",
+                  -kin.zdot * 60.0, s.qbar);
+    lines.emplace_back(buf);
+
+    int max_w = 0;
+    for (const auto& line : lines) {
+        const int w = MeasureText(line.c_str(), font_size);
+        if (w > max_w) max_w = w;
+    }
+    const int bg_h = static_cast<int>(lines.size()) * line_h + pad * 2;
+    const int bg_w = max_w + pad * 2;
+
+    DrawRectangle(x, y, bg_w, bg_h, { 0, 0, 0, 180 });
+    DrawRectangleLines(x, y, bg_w, bg_h, { 100, 200, 255, 120 });
+
+    int line_y = y + pad;
+    for (std::size_t i = 0; i < lines.size(); ++i) {
+        const Color c = (i == 0) ? Color{120, 200, 255, 255} : RAYWHITE;
+        DrawText(lines[i].c_str(), x + pad, line_y, font_size, c);
         line_y += line_h;
     }
 }

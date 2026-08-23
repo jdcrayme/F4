@@ -410,21 +410,27 @@ void FlightControlSystem::runPitch(double dt, double qbar, double qsom,
     // --- PI controller ---
     const double eprop = fcs.kp02 * error;
     const double eintg1 = fcs.kp03 * error;
-    double eintg = fcs.pitchIntegral.step(eintg1, dt);
 
-    // --- Anti-windup ---
-    // When the integrator saturates at the alpha limits, zero the
-    // proportional term AND clear the integrator history (y_prev, u_prev,
-    // u_now) to prevent limit cycles. Clearing only y_prev is insufficient —
-    // the Adams-Bashforth 2nd-order filter uses u_prev and u_now, and leaving
-    // them non-zero causes the integrator to "wind down" slowly.
-    if (eintg > aoamax) {
-        eintg = aoamax;
-        fcs.pitchIntegral.reset(eintg);  // clears y_prev, u_prev, u_now
-    } else if (eintg < aoamin) {
-        eintg = aoamin;
-        fcs.pitchIntegral.reset(eintg);
+    // --- Conditional integration anti-windup ---
+    // Standard anti-windup: STOP integrating when the integrator is at a
+    // limit AND the new error would push it further into saturation. This
+    // is in contrast to the earlier "reset the integrator to the limit
+    // value" approach, which produced step changes in aoacmd every time
+    // the saturation released — those steps propagated through the
+    // lead-lag and the EOM into a low-frequency pitch oscillation (the
+    // "altitude phugoid" symptom in FLIGHT_CONTROL_STABILITY_PLAN.md
+    // §4.2 RC-1). Conditional integration preserves the integrator's
+    // value across saturation and lets it unwind smoothly when the error
+    // reverses.
+    double eintg = fcs.pitchIntegral.output();  // last integrated value
+    const bool at_upper = (eintg >= aoamax && eintg1 > 0.0);
+    const bool at_lower = (eintg <= aoamin && eintg1 < 0.0);
+    if (!at_upper && !at_lower) {
+        eintg = fcs.pitchIntegral.step(eintg1, dt);
     }
+    // Clamp to the limit range (the step may overshoot by one frame's worth).
+    if (eintg > aoamax) eintg = aoamax;
+    else if (eintg < aoamin) eintg = aoamin;
 
     // --- Alpha command ---
     double aoacmd = std::clamp((eprop + eintg) * fcs.plsdamp, aoamin, aoamax);
