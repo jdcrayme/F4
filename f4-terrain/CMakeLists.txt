@@ -7,6 +7,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 add_library(f4-terrain STATIC
     src/terrain_data.cpp
+    src/terrain_adapter.cpp
 )
 target_link_libraries(f4-terrain PUBLIC f4_warnings)
 

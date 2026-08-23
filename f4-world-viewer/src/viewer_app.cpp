@@ -211,6 +211,11 @@ void ViewerApp::run() {
     // user re-runs the viewer (which is fine — we're shutting down).
     // All caches now live on the shared RenderResources instance.
     impl_->render_res_3d.unload_all();
+    // Free the 3D terrain mesh (Path B1) — needs the GL context.
+    if (impl_->terrain_mesh_3d_built) {
+        f4::renderer::unload_terrain_mesh(impl_->terrain_mesh_3d);
+        impl_->terrain_mesh_3d_built = false;
+    }
     // Free the Class Table Browser's preview GPU resources (RenderTexture,
     // cached meshes, textures, lit shader, default material). The browser
     // owns its own cache (separate from impl_->mesh_cache_3d) so we must

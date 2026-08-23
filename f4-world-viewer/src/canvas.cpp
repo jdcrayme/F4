@@ -118,6 +118,15 @@ void ViewerApp::handle_input() {
 
 void ViewerApp::Impl::invalidate_terrain_cache() {
     terrain_cache_valid = false;
+    // Also invalidate the 3D terrain mesh — it was built from the old
+    // terrain data and would show stale elevations if reused.
+    if (terrain_mesh_3d_built) {
+        // Don't call unload_terrain_mesh here — it needs the GL context.
+        // Just mark it for rebuild; the next draw_ground_layout_3d()
+        // will unload + rebuild it.
+        terrain_mesh_3d_built = false;
+        terrain_mesh_3d_cached_entity = f4::entities::EntityId{};
+    }
 }
 
 void ViewerApp::Impl::ensure_terrain_cache() {

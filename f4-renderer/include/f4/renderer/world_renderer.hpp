@@ -31,6 +31,7 @@
 #include <f4/renderer/feature_mesh.hpp>
 #include <f4/renderer/draw_3d.hpp>           // DrawStats
 #include <f4/renderer/ground_layout_models.hpp>
+#include <f4/renderer/terrain_mesh.hpp>      // TerrainMesh (Path B1)
 
 #include <f4/entities/entity.hpp>
 
@@ -72,6 +73,13 @@ struct SceneDescription {
     // ── Sky / ground ───────────────────────────────────────────────────
     Color sky_color = {135, 175, 220, 255};
     GroundConfig ground;
+
+    /// Terrain heightmap mesh (Path B1). When non-null and valid, the
+    /// terrain mesh is drawn AFTER the flat ground plane (if enabled)
+    /// and BEFORE entities + airfield. The ground plane is typically
+    /// suppressed (scene.ground.plane=false) when terrain is present
+    /// to avoid z-fighting. Shared by both apps via render_world().
+    const TerrainMesh* terrain_mesh = nullptr;
 
     // ── Offscreen target ───────────────────────────────────────────────
     /// When non-null, render_world() wraps the frame in

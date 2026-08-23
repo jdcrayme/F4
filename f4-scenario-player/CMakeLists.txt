@@ -102,6 +102,15 @@ if(TARGET korea-real-world-json)
     add_dependencies(f4_scenario_player_lib korea-real-world-json)
 endif()
 
+# Path B1: both scenarios reference korea.terrain.json in the build dir.
+# The terrain-json target (defined in the root CMakeLists.txt) generates
+# it from THEATER.* binary files via terrain2json. Without this dependency,
+# the terrain JSON doesn't exist at runtime and the scenario player silently
+# falls back to flat ground (no terrain mesh, no elevation sampling).
+if(TARGET terrain-json)
+    add_dependencies(f4_scenario_player_lib terrain-json)
+endif()
+
 # ── Tests ──────────────────────────────────────────────────────────────────
 option(F4_SCENARIO_PLAYER_BUILD_TESTS "Build f4-scenario-player unit tests" ON)
 if(F4_SCENARIO_PLAYER_BUILD_TESTS)

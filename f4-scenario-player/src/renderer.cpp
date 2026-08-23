@@ -239,7 +239,18 @@ void PlayerApp::Impl::draw_scene() {
         scene.ground.origin_enu_y = static_cast<float>(p.y);
         scene.ground.origin_enu_z = static_cast<float>(p.z);
     }
-    scene.ground.grid = show_grid;
+
+    // When real terrain is loaded, SUPPRESS the flat green ground plane
+    // + grid to prevent z-fighting with the terrain mesh. The terrain
+    // mesh replaces both — it has its own elevation + the tile-type
+    // colors provide visual reference. The axes are kept (they're
+    // useful for orientation and don't z-fight with terrain).
+    if (terrain_loaded && terrain_mesh_built && terrain_mesh.valid) {
+        scene.ground.plane = false;
+        scene.ground.grid  = false;
+    } else {
+        scene.ground.grid = show_grid;
+    }
     scene.ground.axes = show_axes;
 
     // ── VisualModelComponent entities → plain EntityMeshDraw records ──
@@ -298,10 +309,18 @@ void PlayerApp::Impl::draw_scene() {
         scene.airfield_origin_enu[2] = airfield.origin_enu_z;
     }
 
+    // ── Terrain mesh (Path B1) ────────────────────────────────────────
+    // Passed to render_world() via SceneDescription.terrain_mesh so it's
+    // drawn at the right point in the pipeline (after ground, before
+    // entities). When terrain is loaded, the flat ground plane is
+    // suppressed (scene.ground.plane=false) to avoid z-fighting.
+    if (terrain_loaded && terrain_mesh_built && terrain_mesh.valid) {
+        scene.terrain_mesh = &terrain_mesh;
+    }
+
     // ── Scenario-specific 3D overlays (inside the 3D mode) ────────────
-    // Taxi route, flight-plan route, approach reference, taxi-in route,
-    // markers, compass rose. All drawn via shared draw_layout_line /
-    // draw_layout_marker primitives.
+    // Taxi route + flight plan + approach + taxi-in + markers + compass.
+    // All drawn via shared draw_layout_line / draw_layout_marker primitives.
     scene.overlay_3d = [this](const Camera3D&) { draw_airport(); };
 
     f4::renderer::render_world(render_res, scene);
@@ -350,6 +369,14 @@ void PlayerApp::Impl::draw_hud() {
                           s.aero.gearPos > 0.5 ? "DOWN" : "UP",
                           !s.gear.inAir ? "yes" : "no");
             lines.emplace_back(buf);
+        }
+
+        // Terrain status (Path B1) — shows whether real terrain is loaded
+        // and driving the ground clamp, or if the sim is on flat ground.
+        if (terrain_loaded) {
+            lines.emplace_back("Terrain: LOADED (real elevation)");
+        } else {
+            lines.emplace_back("Terrain: none (flat ground)");
         }
 
         // AI mission state — which module is flying and where it is in

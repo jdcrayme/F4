@@ -177,6 +177,10 @@ void Simulation::spawn_from_scenario_list() {
         // they previously mixed NED and MSL conventions, which only agreed
         // for ground at exactly 0 ft.)
         fm.set_ground(sc.parking_spot.z, f4::math::Vec3d{0.0, 0.0, -1.0});
+        // Also set the default flat terrain source to the parking altitude,
+        // so when no real TerrainSource is provided, tick() keeps the
+        // ground at the parking altitude (preserves pre-terrain behavior).
+        default_terrain_ = f4::terrain::FlatTerrainSource(sc.parking_spot.z);
 
         // 3. VisualModelComponent — the renderable handle (DrawableBSP* equivalent).
         //    This is the ONLY new component type. The renderer reads it to draw
@@ -476,6 +480,21 @@ void Simulation::tick(double dt) {
         auto* tf = h.get<entities::TransformComponent>();
         auto* fm = h.get<f4::flight::FlightModelComponent>();
         if (!tf || !fm) continue;
+
+        // Update the ground plane from the terrain source. The sim queries
+        // the terrain at the aircraft's CURRENT ENU position and feeds the
+        // elevation to the FM's ground clamp. When no real terrain is
+        // loaded (terrain_source_ is null), default_terrain_ provides a
+        // flat plane at the parking spot's altitude — the pre-terrain
+        // behavior. Path B1: real Korea elevation now drives the ground.
+        //
+        // NED → ENU: kin.x = NED north = ENU north; kin.y = NED east = ENU east.
+        const auto& s_cur = fm->state();
+        const double east_ft  = s_cur.kin.y;
+        const double north_ft = s_cur.kin.x;
+        f4::terrain::TerrainSource* ts = terrain_source_ ? terrain_source_ : &default_terrain_;
+        const double ground_z = ts->elevation_at_ft(east_ft, north_ft);
+        fm->set_ground(ground_z, f4::math::Vec3d{0.0, 0.0, -1.0});
 
         const auto& s = fm->state();
         // NED -> ENU: enu.x = ned.y (east), enu.y = ned.x (north), enu.z = -ned.z (up)

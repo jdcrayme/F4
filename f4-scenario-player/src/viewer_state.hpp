@@ -14,6 +14,9 @@
 #include <f4/renderer/render_resources.hpp>      // RenderResources (owns all GPU caches)
 #include <f4/renderer/world_renderer.hpp>        // SceneDescription, render_world()
 #include <f4/renderer/world_camera.hpp>
+#include <f4/renderer/terrain_mesh.hpp>          // TerrainMesh (Path B1)
+#include <f4/terrain/terrain_data.hpp>           // TerrainData (Path B1)
+#include <f4/terrain/terrain_adapter.hpp>        // TerrainDataAdapter (Path B1)
 
 #include <f4/simulation/simulation.hpp>
 #include <f4/simulation/scenario.hpp>
@@ -64,6 +67,20 @@ struct PlayerApp::Impl {
     // ── Airfield geometry (shared f4-renderer builder + scenario overlays) ──
     AirfieldOverlays airfield;
     bool airport_built = false;
+
+    // ── Terrain (Path B1) ─────────────────────────────────────────────
+    // Loaded from scenario.terrain_json_path in load_scenario(). The
+    // TerrainDataAdapter wraps it for the sim (TerrainSource interface);
+    // the TerrainMesh is built for the renderer (heightmap mesh around
+    // the airfield center). Both are empty/invalid when no terrain JSON
+    // is configured — the sim falls back to FlatTerrainSource and the
+    // renderer falls back to the flat green ground plane.
+    f4::terrain::TerrainData terrain;
+    bool terrain_loaded = false;
+    f4::terrain::TerrainDataAdapter terrain_adapter{terrain};
+    f4::renderer::TerrainMesh terrain_mesh;
+    bool terrain_mesh_built = false;
+    bool show_terrain = true;
 
     // ── Orbit camera (delegated to f4::renderer::OrbitCamera) ────────
     f4::renderer::OrbitCamera orbit_cam{

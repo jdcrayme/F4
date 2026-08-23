@@ -278,17 +278,22 @@ void ViewerApp::draw_ground_layout_3d() {
                               impl_->class_table_3d.loaded();
 
     // Local lambda for fitting orbit camera to bbox.
+    // Uses the OBJECTIVE'S WORLD ENU position as the camera target (not
+    // the local bbox center) so the camera looks at the right spot in
+    // the world. The bbox diagonal still determines the distance.
     auto default_orbit_for_bbox = [&](const AirfieldGeometry3D& g) {
         if (g.empty) return;
-        const float cx = (g.min_x + g.max_x) * 0.5f;
-        const float cy = (g.min_y + g.max_y) * 0.5f;
+        // Get the objective's world position for the camera target.
+        auto* tf_cam = h.get<f4::entities::TransformComponent>();
+        const float world_x = tf_cam ? static_cast<float>(tf_cam->position.x) : 0.0f;
+        const float world_y = tf_cam ? static_cast<float>(tf_cam->position.y) : 0.0f;
+        impl_->ground_layout_3d_center_x = world_x;
+        impl_->ground_layout_3d_center_y = world_y;
         const float w = g.max_x - g.min_x;
-        const float h = g.max_y - g.min_y;
-        const float diag = std::sqrt(w * w + h * h);
-        impl_->ground_layout_3d_center_x = cx;
-        impl_->ground_layout_3d_center_y = cy;
-        // Use OrbitCamera.fit_to_bbox to set camera position.
-        const Vector3 center = enu_to_rl(cx, cy, 0.0f);
+        const float hgt = g.max_y - g.min_y;
+        const float diag = std::sqrt(w * w + hgt * hgt);
+        // Camera target at the objective's world position.
+        const Vector3 center = enu_to_rl(world_x, world_y, 0.0f);
         const float radius = diag * 0.5f;
         impl_->gl3d_orbit_cam.fit_to_bbox(center, std::max(radius, 250.0f), 3.0f);
     };
@@ -319,6 +324,47 @@ void ViewerApp::draw_ground_layout_3d() {
         return;  // nothing to render
     }
 
+    // ── World-space positioning (Path B1 fix) ──────────────────────────
+    //
+    // The airfield geometry is in OBJECTIVE-LOCAL coordinates (feet
+    // relative to the objective center). The terrain mesh is in WORLD
+    // ENU coordinates. To make them align, we need the objective's world
+    // ENU position from its TransformComponent — that's the origin we
+    // pass to draw_airfield_geometry() AND the center for the terrain mesh.
+    //
+    // Without this, the terrain was always centered at world (0,0) (the
+    // SW corner of the theater — coast/ocean) while the airfield geometry
+    // floated at local (0,0), giving the "always on the coast" bug.
+    auto* tf = h.get<f4::entities::TransformComponent>();
+    const float obj_world_x = tf ? static_cast<float>(tf->position.x) : 0.0f;
+    const float obj_world_y = tf ? static_cast<float>(tf->position.y) : 0.0f;
+    // Terrain elevation at the objective's world position — used to lift
+    // the airfield geometry so it sits ON the terrain, not under it.
+    float terrain_elev_at_obj = 0.0f;
+    if (impl_->terrain_loaded && !impl_->terrain.elevation.empty()) {
+        // Bilinear sample the terrain at the objective's ENU position.
+        // Use the TerrainDataAdapter if available, otherwise inline.
+        const double theater_size_ft = 1024.0 * 1024.0;
+        const double w = static_cast<double>(
+            impl_->terrain.header.width > 0 ? impl_->terrain.header.width : 128);
+        const double ft_per_cell = theater_size_ft / w;
+        const double fx = obj_world_x / ft_per_cell;
+        const double fy = obj_world_y / ft_per_cell;
+        const uint32_t cx = std::min(static_cast<uint32_t>(std::max(fx, 0.0)),
+                                      impl_->terrain.header.width - 1);
+        const uint32_t cy_raw = std::min(static_cast<uint32_t>(std::max(fy, 0.0)),
+                                          impl_->terrain.header.height - 1);
+        const uint32_t cy = impl_->terrain.header.height - 1 - cy_raw;
+        terrain_elev_at_obj = static_cast<float>(impl_->terrain.elevation_at(cx, cy));
+    }
+    // The airfield geometry's Z origin: the objective's MSL altitude
+    // (tf->position.z) OR the terrain elevation, whichever is higher.
+    // This prevents the airfield from sinking underground when the terrain
+    // is above sea level.
+    const float obj_world_z = tf
+        ? std::max(static_cast<float>(tf->position.z), terrain_elev_at_obj)
+        : terrain_elev_at_obj;
+
     // Update the orbit camera BEFORE the render pass.
     impl_->gl3d_orbit_cam.update_from_orbit();
     // Header — class name + counts.
@@ -348,6 +394,8 @@ void ViewerApp::draw_ground_layout_3d() {
     ImGui::Checkbox("Labels",   &impl_->ground_layout_3d_show_labels);
     ImGui::SameLine();
     ImGui::Checkbox("Grid",     &impl_->ground_layout_3d_show_grid);
+    ImGui::SameLine();
+    ImGui::Checkbox("Terrain",  &impl_->show_terrain_mesh_3d);
 
     // Reset-view button.
     ImGui::SameLine();
@@ -419,6 +467,46 @@ void ViewerApp::draw_ground_layout_3d() {
             rlDisableBackfaceCulling();
             rlSetBlendMode(BLEND_ALPHA);
 
+            // --- Terrain heightmap mesh (Path B1) -------------------------
+            //
+            // When terrain is loaded, draw a heightmap mesh centered on
+            // the selected objective's WORLD ENU position (not the
+            // objective-local bbox center). The mesh is rebuilt when the
+            // selection changes. Uses the same f4::renderer functions as
+            // the scenario player — shared rendering path.
+            if (impl_->show_terrain_mesh_3d && impl_->terrain_loaded) {
+                // Rebuild if selection changed or not built yet.
+                const bool need_rebuild =
+                    !impl_->terrain_mesh_3d_built ||
+                    impl_->terrain_mesh_3d_cached_entity.value !=
+                        impl_->sel_entity.value;
+                if (need_rebuild) {
+                    if (impl_->terrain_mesh_3d_built) {
+                        f4::renderer::unload_terrain_mesh(impl_->terrain_mesh_3d);
+                        impl_->terrain_mesh_3d_built = false;
+                    }
+                    f4::renderer::TerrainMeshConfig tc;
+                    // CENTER ON THE OBJECTIVE'S WORLD ENU POSITION, not the
+                    // local bbox center. This was the "always on coast" bug —
+                    // the terrain was centered at local (0,0) which is the
+                    // world origin (SW corner = ocean).
+                    tc.center_east_ft = obj_world_x;
+                    tc.center_north_ft = obj_world_y;
+                    tc.extent_ft = 50000.0f;  // ~9.5 nm half-extent
+                    tc.resolution = 96;
+                    tc.vertical_scale = 1.0f;
+                    tc.z_offset_ft = -5.0f;  // sink below airfield to avoid z-fight
+                    tc.color_by_tile_type = true;
+                    impl_->terrain_mesh_3d = f4::renderer::build_terrain_mesh(
+                        impl_->terrain, tc);
+                    impl_->terrain_mesh_3d_built = true;
+                    impl_->terrain_mesh_3d_cached_entity = impl_->sel_entity;
+                }
+                if (impl_->terrain_mesh_3d.valid) {
+                    f4::renderer::draw_terrain_mesh(impl_->terrain_mesh_3d);
+                }
+            }
+
             // --- Diagnostic: origin axis triad (always drawn) ---------------
             //
             // Draw a small RGB axis triad at the camera target so the user
@@ -460,6 +548,11 @@ void ViewerApp::draw_ground_layout_3d() {
             // checkboxes: runway + markers, taxiways, parking, helipads.
             // Feature footprints are drawn only when 3D models are off (or
             // unavailable); otherwise the KoreaObj meshes draw below.
+            //
+            // CRITICAL: the geometry is in OBJECTIVE-LOCAL coordinates.
+            // We pass the objective's WORLD ENU position as the origin so
+            // the geometry is translated to its correct world location,
+            // sitting ON the terrain (obj_world_z = max(objective Z, terrain elev)).
             {
                 f4::renderer::AirfieldDrawToggles toggles;
                 toggles.runway   = impl_->ground_layout_3d_show_runway;
@@ -470,7 +563,90 @@ void ViewerApp::draw_ground_layout_3d() {
                 toggles.features = !has_features ||
                                     !impl_->ground_layout_3d_show_models ||
                                     !models_ready;
-                f4::renderer::draw_airfield_geometry(g, toggles);
+                f4::renderer::draw_airfield_geometry(g, toggles,
+                    obj_world_x, obj_world_y, obj_world_z);
+            }
+
+            // --- Neighboring objectives within a radius (Path B1 fix) ------
+            //
+            // The user reported that only the selected objective's features
+            // were visible — neighboring objectives (towns, power plants,
+            // etc.) were not rendered. We now query all objectives within
+            // a radius of the selected one and draw their airfield geometry
+            // too, so the 3D view shows the surrounding area.
+            //
+            // TODO: also draw neighbor feature meshes (3D models). The
+            // selected objective's feature loop below handles that for the
+            // primary; neighbors currently get airfield geometry only.
+            if (impl_->ground_layout_3d_show_models && models_ready) {
+                // Search radius: ~2x the terrain mesh extent so neighbors
+                // at the edge of the terrain are included.
+                const float search_radius_ft = 50000.0f;
+                const auto& nearby = impl_->objectives_within_radius(
+                    obj_world_x, obj_world_y, search_radius_ft);
+                for (const auto nid : nearby) {
+                    if (nid.value == impl_->sel_entity.value) continue;  // already drawn
+                    auto nh = impl_->handle(nid);
+                    auto* ntf = nh.get<f4::entities::TransformComponent>();
+                    if (!ntf) continue;
+
+                    // Neighbor's world position + terrain elevation
+                    const float nx = static_cast<float>(ntf->position.x);
+                    const float ny = static_cast<float>(ntf->position.y);
+                    float nterrain_elev = 0.0f;
+                    if (impl_->terrain_loaded && !impl_->terrain.elevation.empty()) {
+                        const double theater_size_ft = 1024.0 * 1024.0;
+                        const double w = static_cast<double>(
+                            impl_->terrain.header.width > 0 ? impl_->terrain.header.width : 128);
+                        const double ft_per_cell = theater_size_ft / w;
+                        const uint32_t ncx = std::min(static_cast<uint32_t>(std::max(nx / ft_per_cell, 0.0)),
+                                                      impl_->terrain.header.width - 1);
+                        const uint32_t ncy_raw = std::min(static_cast<uint32_t>(std::max(ny / ft_per_cell, 0.0)),
+                                                          impl_->terrain.header.height - 1);
+                        const uint32_t ncy = impl_->terrain.header.height - 1 - ncy_raw;
+                        nterrain_elev = static_cast<float>(impl_->terrain.elevation_at(ncx, ncy));
+                    }
+                    const float nz = std::max(static_cast<float>(ntf->position.z), nterrain_elev);
+
+                    // Draw the neighbor's airfield geometry (if any) at
+                    // its world position so runways/taxiways show up.
+                    auto* ngl = nh.get<f4::entities::GroundLayoutComponent>();
+                    if (ngl && !ngl->layouts.empty()) {
+                        auto ng = f4::renderer::build_airfield_geometry_3d(
+                            ngl->layouts, nullptr);
+                        if (!ng.empty) {
+                            f4::renderer::AirfieldDrawToggles nt;
+                            nt.runway = true; nt.markers = false;
+                            nt.taxiways = true; nt.parking = false;
+                            nt.helipads = false; nt.features = false;
+                            f4::renderer::draw_airfield_geometry(ng, nt, nx, ny, nz);
+                        }
+                    }
+
+                    // Draw the neighbor's feature models (3D buildings)
+                    // at their world position. Uses the same mesh cache
+                    // as the selected objective — no extra GPU uploads.
+                    auto* nfs = nh.get<f4::entities::FeatureSetComponent>();
+                    if (nfs && !nfs->features.empty()) {
+                        f4::renderer::EntityRenderResources nres =
+                            f4::renderer::make_entity_render_resources(
+                                impl_->render_res_3d,
+                                &*impl_->model_db_3d,
+                                &impl_->class_table_3d);
+                        constexpr uint16_t VU_LAST_ENTITY_TYPE = 100;
+                        for (const auto& nf : nfs->features) {
+                            if (nf.index == 0 && nf.offset_x == 0.0f && nf.offset_y == 0.0f) continue;
+                            const uint16_t entity_type = static_cast<uint16_t>(
+                                VU_LAST_ENTITY_TYPE + static_cast<uint16_t>(nf.index));
+                            f4::renderer::draw_feature_mesh(
+                                nres, entity_type,
+                                nf.offset_x + nx,
+                                nf.offset_y + ny,
+                                nf.offset_z + nz,
+                                static_cast<float>(nf.facing));
+                        }
+                    }
+                }
             }
 
             // --- Real KoreaObj 3D feature models ------------------------
@@ -570,7 +746,9 @@ void ViewerApp::draw_ground_layout_3d() {
 
                         const auto stats = f4::renderer::draw_feature_mesh(
                             res, entity_type,
-                            f.offset_x, f.offset_y, f.offset_z,
+                            f.offset_x + obj_world_x,   // local + world offset
+                            f.offset_y + obj_world_y,
+                            f.offset_z + obj_world_z,   // lift to terrain
                             static_cast<float>(f.facing));
 
                         if (stats.meshes_drawn > 0) {
@@ -594,11 +772,16 @@ void ViewerApp::draw_ground_layout_3d() {
         EndMode3D();
 
         // 2D overlay — labels projected from 3D positions.
+        // Pass the objective's world position as the origin so labels
+        // appear at the correct screen position (the geometry was drawn
+        // at world coordinates, not local).
         if (impl_->ground_layout_3d_show_labels) {
             std::vector<f4::renderer::LayoutLabel2D> labels;
             f4::renderer::collect_layout_labels(impl_->gl3d_orbit_cam.camera(), g,
                            impl_->ground_layout_3d_show_parking,
-                           RT_W, RT_H, 0.0f, 0.0f, 0.0f, labels);
+                           RT_W, RT_H,
+                           obj_world_x, obj_world_y, obj_world_z,
+                           labels);
             f4::renderer::draw_layout_labels(labels);
         }
     }

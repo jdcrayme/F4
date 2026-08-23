@@ -73,6 +73,7 @@ add_library(f4-renderer STATIC
     src/scene_draw.cpp
     src/world_renderer.cpp
     src/world_camera.cpp
+    src/terrain_mesh.cpp
 )
 target_link_libraries(f4-renderer PUBLIC f4_warnings)
 target_include_directories(f4-renderer
@@ -89,6 +90,7 @@ target_link_libraries(f4-renderer
         f4-models
         f4-entities
         f4-world-convert
+        f4-terrain          # Path B1: terrain_mesh.hpp includes f4/terrain/terrain_data.hpp
         raylib
     PRIVATE
         f4-json

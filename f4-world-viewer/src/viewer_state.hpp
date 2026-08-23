@@ -70,6 +70,7 @@
 #include <f4/renderer/render_resources.hpp>
 #include <f4/renderer/world_renderer.hpp>
 #include <f4/renderer/world_camera.hpp>
+#include <f4/renderer/terrain_mesh.hpp>      // TerrainMesh (Path B1)
 
 #include <raylib.h>
 
@@ -221,6 +222,26 @@ struct ViewerApp::Impl {
         return eworld.with_tag_ref(
             f4::entities::tags::ROLE,
             f4::entities::TagValue::from(std::string("objective")));
+    }
+
+    /// Objectives within `radius_ft` of (east_ft, north_ft). Used by the
+    /// 3D panel to render neighboring objectives (towns, power plants,
+    /// etc.) alongside the selected one. O(n_objectives) per call —
+    /// acceptable for the 3D panel (called once per frame when terrain
+    /// + models are both on).
+    [[nodiscard]] std::vector<f4::entities::EntityId>
+    objectives_within_radius(float east_ft, float north_ft, float radius_ft) const {
+        std::vector<f4::entities::EntityId> out;
+        const float r2 = radius_ft * radius_ft;
+        for (const auto& eid : objectives()) {
+            auto h = handle(eid);
+            auto* tf = h.get<f4::entities::TransformComponent>();
+            if (!tf) continue;
+            const float dx = static_cast<float>(tf->position.x) - east_ft;
+            const float dy = static_cast<float>(tf->position.y) - north_ft;
+            if (dx * dx + dy * dy <= r2) out.push_back(eid);
+        }
+        return out;
     }
     /// All unit entities. Units have one of six ROLE values (battalion/
     /// brigade/squadron/taskforce/flight/package), so we query by
@@ -597,6 +618,21 @@ struct ViewerApp::Impl {
     /// returns false and sets models_3d_error (further calls are no-ops
     /// until models_3d_load_attempted is reset).
     bool ensure_models_3d_loaded();
+
+    // -----------------------------------------------------------------------
+    // 3D terrain mesh (Path B1 — shared with scenario player)
+    // -----------------------------------------------------------------------
+    //
+    // When terrain is loaded (load_terrain_json or import_terrain_binary),
+    // we build a TerrainMesh centered on the selected objective for the
+    // 3D panel. The mesh is rebuilt when the selection changes (the
+    // center moves) or when the terrain changes. Passed to render_world()
+    // via SceneDescription.terrain_mesh — the same path the scenario
+    // player uses, so both apps share the terrain rendering code.
+    f4::renderer::TerrainMesh terrain_mesh_3d;
+    bool terrain_mesh_3d_built = false;
+    f4::entities::EntityId terrain_mesh_3d_cached_entity;  // rebuild on selection change
+    bool show_terrain_mesh_3d = true;  // toggle in the 3D panel
 
     // -----------------------------------------------------------------------
     // Replay mode state (Path B2 — trace playback)

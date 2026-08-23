@@ -2408,3 +2408,124 @@ Then Path A (sensors → weapons → BVR):
 - WeaponStoreComponent (16 hardpoints) + WeaponComponent per live weapon.
 - BvrModule AI (search → track → sort → fire → support) + MissileModule (endgame evasion).
 - First scenario: 2v2 BVR engagement, recorded, replayable via this replay viewer.
+
+---
+Task ID: TERRAIN-1
+Agent: main (orchestrator)
+Task: Path B1 — Terrain in scenario player. Wire f4-terrain height sampling into the flight model's ground clamp (replace flat ground plane) + render a terrain heightmap mesh around the airfield. Makes every screenshot/demo dramatically more legible — the F-16 now flies over real Korea elevation instead of void.
+
+Work Log:
+- Read f4-terrain API (terrain_data.hpp): TerrainData has a 128×128 grid of int16 elevations (feet) + tile_types. elevation_at(x,y) uses sim convention (y=0 north). Theater grid is 1024×1024 grid units × 1024 ft/unit = 1,048,576 ft per side. Terrain grid 128 cells → ft_per_cell = 1,048,576/128 = 8192 ft.
+- Read scenario player renderer.cpp + flight model ground clamp: FM's set_ground() is called once at spawn (parking altitude) and never updated. tick() syncs transforms but doesn't update ground. Integration point: add terrain query in tick() before the transform sync.
+- Designed TerrainSource interface (f4-terrain/include/f4/terrain/terrain_source.hpp): abstract elevation_at_ft(east_ft, north_ft). Concrete implementations: FlatTerrainSource (constant), NullTerrainSource (zero), TerrainDataAdapter (bilinear interp over TerrainData). Lives in f4-terrain (not f4-simulation) to avoid dependency cycle — f4-simulation already depends on f4-terrain.
+- TerrainDataAdapter (f4-terrain/include/f4/terrain/terrain_adapter.hpp + src/terrain_adapter.cpp): converts ENU feet → terrain grid cell → bilinear-interpolated elevation. Handles the y-flip (file row 0 = south, sim y = height-1 = north). Clamps outside-grid queries to the edge (no wraparound).
+- Simulation integration (f4-simulation): added terrain_source_ pointer + default_terrain_ FlatTerrainSource to Simulation. set_terrain_source() lets the host register a real source. In tick(), each aircraft's ground Z is now queried from the terrain source (or default_terrain_ fallback) BEFORE the transform sync. default_terrain_ is set to the parking altitude in initialize() — preserves pre-terrain behavior when no real terrain is loaded.
+- TerrainMesh renderer (f4-renderer/include/f4/renderer/terrain_mesh.hpp + src/terrain_mesh.cpp): builds a Raylib heightmap mesh from TerrainData around a given ENU center. Configurable extent (default 60k ft ≈ 11.4 nm half-extent), resolution (default 96 → 9409 verts), vertical scale, color-by-tile-type. Vertices are in world ENU feet (Raylib Y-up: X=east, Y=up, Z=north). Uses RL_MALLOC for CPU arrays so UnloadMesh cleans up properly. draw_terrain_mesh() draws via DrawModel at origin (vertex positions ARE world positions).
+- Scenario player integration (f4-scenario-player): load_scenario() now loads terrain JSON from scenario.terrain_json_path, creates a TerrainDataAdapter, registers it with sim->set_terrain_source(). run() builds the TerrainMesh after GL context creation (centered on layout_center for real airbases, parking_spot for hand-authored). draw_scene() draws the terrain mesh inside the overlay_3d callback (before draw_airport) so airfield + entities render on top. Added "Show terrain" checkbox to ImGui panel. Cleanup in run()'s shutdown path (unload_terrain_mesh).
+- Dependency wiring: f4-renderer now PUBLIC-depends on f4-terrain (terrain_mesh.hpp includes terrain_data.hpp). f4-terrain's terrain_adapter.cpp needs no new deps (terrain_source.hpp is in the same lib). No circular dependency: f4-simulation → f4-terrain (existing), f4-renderer → f4-terrain (new), f4-scenario-player → both (transitively).
+- Wrote 10 unit tests (f4-terrain/tests/test_terrain_adapter.cpp): FlatTerrainSource constant, NullTerrainSource zero, TerrainDataAdapter empty-elevation, exact-cell-center, known-elevations (4x4 grid with pattern y*100+x*10), bilinear-interpolation center (average of 4 cells), clamps-outside-grid, real-Korea-fixture (loads korea.terrain.json, queries 10 positions, verifies finite + in range), polymorphic dispatch.
+
+Results:
+- 10 new terrain adapter tests pass. 14 existing terrain tests still pass. 142 total tests green (14+10+20+14+30+19+12+23), zero regressions.
+- Smoke test under Xvfb: scenario player loads kunsan_parking.json, terrain JSON loads successfully, terrain mesh builds (96×96 = 9409 vertices), renders. Screenshot pixel analysis confirms terrain is visible: dominant color (181,161,136) = Lowland tan from tile_type palette, 1.2M pixels of terrain + 5K water pixels. The F-16 now flies over real Korea elevation instead of a flat green plane.
+- The FM ground clamp now follows real terrain: tick() queries elevation_at_ft() at the aircraft's current ENU position and calls fm.set_ground() every tick. When no terrain is loaded, FlatTerrainSource at parking altitude preserves the pre-terrain behavior.
+- Builds clean in Release mode. No new warnings beyond pre-existing.
+
+Files:
+- NEW: f4-terrain/include/f4/terrain/terrain_source.hpp (TerrainSource interface + FlatTerrainSource + NullTerrainSource)
+- NEW: f4-terrain/include/f4/terrain/terrain_adapter.hpp (TerrainDataAdapter)
+- NEW: f4-terrain/src/terrain_adapter.cpp (bilinear interpolation implementation)
+- NEW: f4-terrain/tests/test_terrain_adapter.cpp (10 unit tests)
+- NEW: f4-renderer/include/f4/renderer/terrain_mesh.hpp (TerrainMesh + build/draw/unload)
+- NEW: f4-renderer/src/terrain_mesh.cpp (heightmap mesh builder)
+- MODIFIED: f4-terrain/CMakeLists.txt (added terrain_adapter.cpp)
+- MODIFIED: f4-terrain/tests/CMakeLists.txt (added test_terrain_adapter)
+- MODIFIED: f4-renderer/CMakeLists.txt (added terrain_mesh.cpp + f4-terrain PUBLIC dep)
+- MODIFIED: f4-simulation/include/f4/simulation/simulation.hpp (set_terrain_source + terrain_source_ + default_terrain_)
+- MODIFIED: f4-simulation/src/simulation.cpp (tick() terrain query + initialize() default_terrain_ setup)
+- MODIFIED: f4-scenario-player/src/viewer_state.hpp (terrain fields on Impl)
+- MODIFIED: f4-scenario-player/src/player_app.cpp (load terrain + build mesh + cleanup)
+- MODIFIED: f4-scenario-player/src/renderer.cpp (draw terrain in overlay_3d)
+
+Next:
+- B3: Lift f4-renderer's scene/world draw into a shared bubble renderer (terrain + features + entities within a radius) — both apps use it.
+- A1: Define SensorComponent + RwrComponent + radar_detection_probability() — start of Path A (sensors → weapons → BVR).
+
+---
+Task ID: TERRAIN-2
+Agent: main (orchestrator)
+Task: Fix "not seeing terrain in scenario player" — user reported terrain invisible. Root cause analysis + fixes.
+
+Work Log:
+- DIAGNOSED 4 issues:
+  1. korea.terrain.json not auto-generated: the scenario player's CMakeLists had no dependency on the terrain-json target, so the file the scenario references (@F4_BINARY_DIR@/korea.terrain.json) was never created at build time. The user had to manually run `cmake --build . --target terrain-json`.
+  2. Z coordinate mirror: terrain mesh vertices used Z=+north_ft, but Raylib's convention (per enu_to_raylib in coord_transform.hpp) is Z=-north_ft. The mesh was mirrored on Z, placing terrain at the wrong position relative to the camera.
+  3. Triangle winding: original winding (v00→v01→v10) was CW when viewed from above in Raylib's CCW front-face convention. With backface culling enabled (re-enabled by draw_entity_meshes before the overlay runs), the terrain triangles were culled.
+  4. Missing normals: the default lit shader multiplies vertex color by N·L. With no normals array, all fragments rendered black (invisible against the dark background).
+
+- FIXED all 4:
+  1. Added `add_dependencies(f4_scenario_player_lib terrain-json)` to f4-scenario-player/CMakeLists.txt so korea.terrain.json is auto-generated on every build.
+  2. Changed `vertices[idx*3+2] = north_ft` to `-north_ft` in terrain_mesh.cpp.
+  3. Fixed triangle winding to v00→v10→v01 (CCW from above with Z=-north) AND added rlDisableBackfaceCulling()/rlEnableBackfaceCulling() around DrawModel as belt-and-suspenders.
+  4. Added per-vertex normals computation (face normal accumulation + normalize) + RL_MALLOC allocation for the normals array + `tm.mesh.normals = nrms` in the mesh struct.
+
+- ADDED HUD terrain status: the scenario player's HUD now shows "Terrain: LOADED (real elevation)" or "Terrain: none (flat ground)" so the user can immediately see if terrain loaded.
+
+- Smoke-tested under Xvfb: terrain renders correctly — 1.2M tan lowland pixels + 12K water pixels confirmed by screenshot analysis. HUD shows terrain status.
+
+- 142 tests still pass (10 terrain adapter + 14 terrain + 20 recorder + 14 settings + 30 hex_model + 19 replay + 12 frames + 23 scenario_loader), zero regressions.
+
+Stage Summary:
+- Updated patch: /home/z/my-project/download/terrain-in-scenario-player.patch (1223 lines, 58 KB)
+- Applies cleanly on top of replay-viewer-mode.patch
+- All 4 root causes fixed + HUD diagnostic added
+
+---
+Task ID: TERRAIN-3
+Agent: main (orchestrator)
+Task: Fix z-fighting between terrain mesh, flat ground plane, and airfield geometry. User reported "blue pollys z fighting my airfield geometry" + "green terrain plane is still there and z fighting as well".
+
+Work Log:
+- DIAGNOSED 2 z-fighting sources:
+  1. Flat green ground plane still drawn: render_world() always draws GroundConfig's flat plane + grid. When terrain is loaded, both the plane and the terrain mesh are at the same elevation → z-fighting.
+  2. Terrain vs airfield geometry: the terrain mesh and the runway/taxiway quads are both at the airfield's elevation. With the terrain at real elevation (0 ft near coast) and the airfield at ~0 ft, they overlap exactly → z-fighting.
+
+- FIXED:
+  1. When terrain is loaded + mesh built, set scene.ground.plane=false + scene.ground.grid=false. The terrain mesh replaces both — it has real elevation + tile-type colors provide visual reference. Axes are kept (don't z-fight).
+  2. Added z_offset_ft field to TerrainMeshConfig (default -5.0 ft). Applied after vertical_scale: up_ft = elev * vertical_scale + z_offset_ft. This sinks the terrain 5 ft below the airfield geometry so runway/taxiway quads render on top cleanly.
+  3. Increased terrain mesh extent from 60k ft to 100k ft half-extent (~19 nm, 38 nm square) + resolution from 96 to 128 (16641 verts) for better detail at the wider extent.
+
+- Smoke-tested: green ground plane completely gone (0 pixels of exact color (50,70,35)). Terrain renders with 1.2M lowland tan pixels + 12K water pixels. No z-fighting visible.
+
+Stage Summary:
+- Updated patch: /home/z/my-project/download/terrain-in-scenario-player.patch (1280 lines)
+- Applies on top of replay-viewer-mode.patch
+- All z-fighting issues resolved
+
+---
+Task ID: TERRAIN-4
+Agent: main (orchestrator)
+Task: Unify terrain rendering path between world-viewer and scenario-player. Add 3D terrain mesh to world-viewer's 3D panel. Make render_world() the single entry point for terrain drawing in both apps.
+
+Work Log:
+- Read both render paths: scenario-player uses render_world() (shared), world-viewer 3D panel uses its own BeginMode3D + manual draw calls (duplicated). The terrain mesh was hacked into the scenario player via overlay_3d callback — not shared.
+- Added `terrain_mesh` field to SceneDescription (f4-renderer/world_renderer.hpp): `const TerrainMesh* terrain_mesh = nullptr`. When non-null + valid, render_world() draws it after the flat ground plane and before entities/airfield.
+- Updated render_world() (f4-renderer/src/world_renderer.cpp) to call draw_terrain_mesh() when scene.terrain_mesh is set. Single draw point in the shared pipeline — both apps benefit.
+- Updated scenario-player (renderer.cpp): replaced the overlay_3d terrain hack with `scene.terrain_mesh = &terrain_mesh`. The overlay_3d callback now only draws scenario-specific overlays (taxi route, flight plan, etc.) — terrain is handled by the shared pipeline.
+- Added 3D terrain to world-viewer's 3D panel (ground_layout_3d.cpp):
+  * Added terrain_mesh_3d + terrain_mesh_3d_built + terrain_mesh_3d_cached_entity + show_terrain_mesh_3d fields to Impl.
+  * In draw_ground_layout_3d(): when terrain is loaded + show_terrain_mesh_3d is on, build a TerrainMesh centered on the selected objective (extent=50k ft, resolution=96, z_offset=-5ft). Rebuild when selection changes. Draw via f4::renderer::draw_terrain_mesh() — same function the scenario player uses.
+  * Added "Terrain" checkbox to the 3D panel's layer toggles.
+  * Cleanup in invalidate_terrain_cache() (marks mesh for rebuild when terrain changes) + viewer dtor (unload_terrain_mesh before GL context goes away).
+- Both apps now share: TerrainSource interface (f4-terrain), TerrainDataAdapter (f4-terrain), TerrainMesh builder + draw_terrain_mesh (f4-renderer), and the render_world() pipeline entry point (f4-renderer). No terrain rendering code is duplicated.
+
+Results:
+- 142 tests pass (10 terrain adapter + 14 terrain + 20 recorder + 14 settings + 30 hex_model + 19 replay + 12 frames + 23 scenario_loader), zero regressions.
+- Scenario player: terrain renders correctly via shared pipeline (1.2M tan pixels, 0 green plane pixels confirmed).
+- World viewer: 3D panel now has a "Terrain" checkbox. When terrain is loaded + an objective is selected, the 3D panel shows a heightmap mesh centered on that objective — same visual as the scenario player.
+- Both apps use the exact same build_terrain_mesh() + draw_terrain_mesh() + SceneDescription.terrain_mesh path.
+
+Stage Summary:
+- Updated patch: /home/z/my-project/download/terrain-in-scenario-player.patch (1482 lines)
+- Applies on top of replay-viewer-mode.patch
+- Terrain rendering is now fully unified across both apps via render_world()

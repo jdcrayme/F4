@@ -4,6 +4,7 @@
 
 #include <f4/renderer/world_renderer.hpp>
 
+#include <f4/renderer/terrain_mesh.hpp>  // draw_terrain_mesh (Path B1)
 #include <f4/models/model_database.hpp>
 
 #include <raylib.h>
@@ -25,6 +26,15 @@ FrameStats render_world(RenderResources& res, const SceneDescription& s) {
     extend_far_plane(s.camera, s.near_plane, s.far_plane);
 
     draw_ground(s.ground);
+
+    // ── Terrain heightmap mesh (Path B1) ─────────────────────────────
+    // Drawn after the flat ground plane (which is typically suppressed
+    // when terrain is present) and before entities/airfield. The mesh
+    // vertices are in world ENU feet (Raylib Y-up), so no transform is
+    // needed — draw_terrain_mesh handles positioning + backface culling.
+    if (s.terrain_mesh && s.terrain_mesh->valid) {
+        draw_terrain_mesh(*s.terrain_mesh);
+    }
 
     // Cull center: the camera position, expressed in ENU feet
     // (raylib → ENU is (x, -z, y)).

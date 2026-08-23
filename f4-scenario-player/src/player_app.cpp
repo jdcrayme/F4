@@ -72,6 +72,26 @@ void PlayerApp::load_scenario(const std::filesystem::path& json_path) {
     // Observe the ATC traffic for the radio transcript overlay.
     impl_->radio_log.attach(*impl_->sim);
 
+    // Load terrain (Path B1). The scenario's terrain_json_path points at
+    // a korea.terrain.json (produced by f4-terrain-convert). When present,
+    // we load it, register a TerrainDataAdapter with the sim (so the FM's
+    // ground clamp follows real Korea elevation), and flag for mesh
+    // building (deferred to run() when the GL context exists). When
+    // absent, the sim falls back to FlatTerrainSource (pre-terrain behavior).
+    if (!impl_->scenario.terrain_json_path.empty()) {
+        try {
+            impl_->terrain.load_terrain_json(impl_->scenario.terrain_json_path);
+            impl_->terrain_loaded = true;
+            impl_->sim->set_terrain_source(&impl_->terrain_adapter);
+            impl_->status_msg = "Terrain loaded: " +
+                std::to_string(impl_->terrain.header.width) + "x" +
+                std::to_string(impl_->terrain.header.height) + " grid";
+        } catch (const std::exception& e) {
+            // Non-fatal — the sim works without terrain (flat ground).
+            impl_->status_msg = std::string("Terrain load failed: ") + e.what();
+        }
+    }
+
     // Build the airfield geometry from the SIMULATION's scenario — after
     // initialize() this is the DERIVED copy (real airfield from
     // airbase_source: true runway/taxi/parking layout, resolved parking).
@@ -126,6 +146,28 @@ void PlayerApp::run() {
     // Build the aircraft meshes now that we have a GL context (UploadMesh
     // requires it). If we built them in load_scenario, they'd fail.
     impl_->build_aircraft_meshes();
+
+    // Build the terrain mesh (Path B1). Deferred from load_scenario()
+    // because UploadMesh requires the GL context. The mesh is centered on
+    // the airfield (layout_center for real airbases, parking spot for
+    // hand-authored scenarios) and spans 2*extent_ft in each direction.
+    if (impl_->terrain_loaded && !impl_->terrain_mesh_built) {
+        f4::renderer::TerrainMeshConfig tc;
+        if (impl_->scenario.has_airbase_source) {
+            tc.center_east_ft = static_cast<float>(impl_->scenario.layout_center.x);
+            tc.center_north_ft = static_cast<float>(impl_->scenario.layout_center.y);
+        } else if (!impl_->scenario.aircraft.empty()) {
+            tc.center_east_ft = static_cast<float>(impl_->scenario.aircraft.front().parking_spot.x);
+            tc.center_north_ft = static_cast<float>(impl_->scenario.aircraft.front().parking_spot.y);
+        }
+        tc.extent_ft = 100000.0f;  // ~19 nm half-extent (38 nm square)
+        tc.resolution = 128;       // 16641 vertices, 16384 triangles
+        tc.vertical_scale = 1.0f;
+        tc.z_offset_ft = -5.0f;    // sink below airfield geometry to avoid z-fight
+        tc.color_by_tile_type = true;
+        impl_->terrain_mesh = f4::renderer::build_terrain_mesh(impl_->terrain, tc);
+        impl_->terrain_mesh_built = true;
+    }
 
     // Reset the camera to look at the parking spot.
     if (!impl_->initial_camera_set) {
@@ -213,6 +255,9 @@ void PlayerApp::run() {
         ImGui::Separator();
         ImGui::Checkbox("Show airport", &impl_->show_airport);
         ImGui::Checkbox("Show aircraft", &impl_->show_aircraft);
+        if (impl_->terrain_loaded) {
+            ImGui::Checkbox("Show terrain", &impl_->show_terrain);
+        }
         ImGui::Checkbox("Show taxi route", &impl_->show_taxi_route);
         ImGui::Checkbox("Show flight plan", &impl_->show_flightplan);
         ImGui::Checkbox("Show approach", &impl_->show_approach);
@@ -239,6 +284,11 @@ void PlayerApp::run() {
 
     rlImGuiShutdown();
     impl_->unload_meshes();
+    // Free the terrain mesh GPU resources (Path B1).
+    if (impl_->terrain_mesh_built) {
+        f4::renderer::unload_terrain_mesh(impl_->terrain_mesh);
+        impl_->terrain_mesh_built = false;
+    }
     // LitShader destructor handles UnloadShader automatically.
     CloseWindow();
 

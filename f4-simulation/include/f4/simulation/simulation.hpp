@@ -43,6 +43,8 @@
 
 #include "f4/simulation/scenario.hpp"
 
+#include <f4/terrain/terrain_source.hpp>  // TerrainSource (Path B1)
+
 namespace f4::ai::atc { class StubATC; }
 namespace f4::recorder { class FlightRecorder; }
 
@@ -124,6 +126,25 @@ public:
         return bubble_manager_.get();
     }
 
+    /// Set the terrain elevation source. The sim queries it each tick
+    /// for each aircraft to set the flight model's ground plane. When
+    /// null (the default), the sim uses a FlatTerrainSource at the
+    /// parking spot's altitude (pre-terrain behavior — ground is flat).
+    ///
+    /// The host typically wraps f4::terrain::TerrainData in a
+    /// TerrainDataAdapter and registers it here after initialize().
+    /// Must be called BEFORE the first tick() for the terrain to take
+    /// effect from the start. The sim does NOT take ownership of the
+    /// raw pointer — the host must keep the source alive for the sim's
+    /// lifetime (or until set_terrain_source is called again).
+    void set_terrain_source(f4::terrain::TerrainSource* source) noexcept {
+        terrain_source_ = source;
+    }
+
+    [[nodiscard]] f4::terrain::TerrainSource* terrain_source() const noexcept {
+        return terrain_source_;
+    }
+
     [[nodiscard]] const f4::models::ModelDatabase& model_db() const noexcept { return *model_db_; }
     [[nodiscard]] const Scenario& scenario() const noexcept { return scenario_; }
     [[nodiscard]] double sim_time_s() const noexcept { return sim_time_s_; }
@@ -178,6 +199,13 @@ private:
     // when not in campaign-flights mode (no BubbleManager needed for the
     // scenario-list spawn path, which has no campaign units).
     std::unique_ptr<BubbleManager> bubble_manager_;
+
+    // Terrain elevation source. When null, tick() uses default_terrain_
+    // (a FlatTerrainSource at the parking spot's altitude). The host
+    // provides a real source via set_terrain_source() — typically a
+    // TerrainDataAdapter wrapping f4::terrain::TerrainData.
+    f4::terrain::TerrainSource* terrain_source_{nullptr};
+    f4::terrain::FlatTerrainSource default_terrain_{0.0};  // updated to parking alt in initialize()
 
     double sim_time_s_{0.0};
     std::uint64_t tick_{0};
