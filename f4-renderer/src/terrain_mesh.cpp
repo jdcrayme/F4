@@ -45,6 +45,28 @@ static double theater_ft_per_cell(const f4::terrain::TerrainData& td) {
     return theater_size_ft / w;
 }
 
+/// Convert a world ENU feet coordinate to a clamped terrain cell index.
+///
+/// CRITICAL: this is the ONLY correct way to convert feet → cell index.
+/// Both the elevation sampler and the tile-type color sampler must use
+/// this helper. The previous color sampler called
+/// `static_cast<uint32_t>(east_ft / ft_per_cell)` without clamping,
+/// which is undefined behavior when east_ft < 0 (mesh vertices west of
+/// the theater) — it wraps to ~4 billion, std::min clamps to width-1
+/// (the EASTERNMOST cell), and coastal objectives showed land instead
+/// of water on the mesh edge.
+///
+/// @param world_ft   ENU coordinate (east_ft or north_ft), may be negative
+/// @param grid_size  terrain.header.width or .height
+/// @return cell index in [0, grid_size-1]
+static uint32_t world_to_cell_clamped(double world_ft, double ft_per_cell,
+                                       uint32_t grid_size) {
+    if (grid_size == 0) return 0;
+    const double f = world_ft / ft_per_cell;
+    const double clamped = std::clamp(f, 0.0, static_cast<double>(grid_size - 1));
+    return static_cast<uint32_t>(clamped);
+}
+
 static double bilinear_elevation(const f4::terrain::TerrainData& td,
                                   double east_ft, double north_ft) {
     if (td.elevation.empty()) return 0.0;
@@ -52,21 +74,21 @@ static double bilinear_elevation(const f4::terrain::TerrainData& td,
     const double ft_per_cell = theater_ft_per_cell(td);
     if (ft_per_cell <= 0.0) return 0.0;
 
-    const double fx = east_ft / ft_per_cell;
-    const double fy = north_ft / ft_per_cell;
+    // Use the shared clamped converter so out-of-bounds queries
+    // (mesh vertices beyond the theater edge) sample the edge cell
+    // instead of wrapping. Consistent with the color sampler below.
+    const double fx = std::clamp(east_ft / ft_per_cell, 0.0,
+                                  static_cast<double>(td.header.width - 1));
+    const double fy = std::clamp(north_ft / ft_per_cell, 0.0,
+                                  static_cast<double>(td.header.height - 1));
 
-    const double max_x = static_cast<double>(td.header.width - 1);
-    const double max_y = static_cast<double>(td.header.height - 1);
-    const double cx = std::clamp(fx, 0.0, max_x);
-    const double cy = std::clamp(fy, 0.0, max_y);
-
-    const uint32_t x0 = static_cast<uint32_t>(cx);
-    const uint32_t y0 = static_cast<uint32_t>(cy);
+    const uint32_t x0 = static_cast<uint32_t>(fx);
+    const uint32_t y0 = static_cast<uint32_t>(fy);
     const uint32_t x1 = std::min(x0 + 1, td.header.width - 1);
     const uint32_t y1 = std::min(y0 + 1, td.header.height - 1);
 
-    const double tx = cx - static_cast<double>(x0);
-    const double ty = cy - static_cast<double>(y0);
+    const double tx = fx - static_cast<double>(x0);
+    const double ty = fy - static_cast<double>(y0);
 
     // Flip y: file row 0 = south, sim y = height-1 (north). Our fy has
     // y=0 at south (ENU), so flip to match TerrainData's sim convention.
@@ -163,13 +185,17 @@ TerrainMesh build_terrain_mesh(const f4::terrain::TerrainData& terrain,
             Color c;
             if (config.color_by_tile_type) {
                 // Sample the terrain tile type at this position.
-                // theater_ft_per_cell() handles the (currently hardcoded)
-                // theater-size → cell-size conversion.
+                // Use the shared world_to_cell_clamped() helper so the
+                // clamp convention is identical to the elevation sampler
+                // above. Without this, mesh vertices outside the theater
+                // boundary (negative east_ft/north_ft) would hit UB in
+                // the uint32_t cast and sample the wrong terrain cell —
+                // see the helper's doc comment for the full bug analysis.
                 const double ft_per_cell = theater_ft_per_cell(terrain);
-                const uint32_t cx = std::min(static_cast<uint32_t>(east_ft / ft_per_cell),
-                                              terrain.header.width - 1);
-                const uint32_t cy_raw = std::min(static_cast<uint32_t>(north_ft / ft_per_cell),
-                                                  terrain.header.height - 1);
+                const uint32_t cx = world_to_cell_clamped(
+                    east_ft, ft_per_cell, terrain.header.width);
+                const uint32_t cy_raw = world_to_cell_clamped(
+                    north_ft, ft_per_cell, terrain.header.height);
                 const uint32_t cy = terrain.header.height - 1 - cy_raw;  // flip to sim
                 const auto tt = terrain.tile_type_at(cx, cy);
                 const auto c4 = f4::terrain::TerrainData::color_for_tile_type(tt);

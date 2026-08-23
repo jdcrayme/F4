@@ -127,6 +127,13 @@ void ViewerApp::Impl::invalidate_terrain_cache() {
         terrain_mesh_3d_built = false;
         terrain_mesh_3d_cached_entity = f4::entities::EntityId{};
     }
+    // Same for the chunk set (the chunk path is the default — see
+    // use_terrain_chunks). Both stay invalidated together so toggling
+    // between them gives consistent results.
+    if (terrain_chunk_set_3d_built) {
+        terrain_chunk_set_3d_built = false;
+        terrain_chunk_set_3d_cached_entity = f4::entities::EntityId{};
+    }
 }
 
 void ViewerApp::Impl::ensure_terrain_cache() {

@@ -32,7 +32,18 @@ FrameStats render_world(RenderResources& res, const SceneDescription& s) {
     // when terrain is present) and before entities/airfield. The mesh
     // vertices are in world ENU feet (Raylib Y-up), so no transform is
     // needed — draw_terrain_mesh handles positioning + backface culling.
-    if (s.terrain_mesh && s.terrain_mesh->valid) {
+    //
+    // The chunk set takes precedence over the single mesh — if both
+    // are set, only the chunk set is drawn (avoids double-drawing the
+    // same terrain). The chunk set does its own frustum culling per
+    // chunk; the single mesh draws everything.
+    if (s.terrain_chunk_set && s.terrain_chunk_set->valid) {
+        // draw_terrain_chunk_set mutates chunks_visible for diagnostics;
+        // cast away const since the mutation is observational only.
+        draw_terrain_chunk_set(
+            const_cast<TerrainChunkSet&>(*s.terrain_chunk_set),
+            s.camera);
+    } else if (s.terrain_mesh && s.terrain_mesh->valid) {
         draw_terrain_mesh(*s.terrain_mesh);
     }
 

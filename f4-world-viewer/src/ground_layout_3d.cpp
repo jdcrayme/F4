@@ -36,7 +36,7 @@
 
 #include <f4/entities/entity.hpp>
 #include <f4/viewer/enum_text.hpp>
-#include <f4/renderer/draw_3d.hpp>          // extend_far_plane
+#include <f4/renderer/draw_3d.hpp>          // (transitively via world_renderer.hpp; kept for clarity)
 #include <f4/renderer/entity_render.hpp>    // EntityRenderResources, make_entity_render_resources
 #include <f4/renderer/layout_draw.hpp>
 #include <f4/renderer/scene_draw.hpp>            // draw_airfield_geometry
@@ -129,6 +129,10 @@ inline Vector3 model_vertex_to_rl(float x, float y, float z) {
 // Drawing — ground grid for orientation reference
 // ---------------------------------------------------------------------------
 
+// Kept for reference / debugging — the 3D tab now uses render_world()'s
+// GroundConfig.grid instead of this inline draw. Could be removed once
+// the migration is confirmed stable.
+[[maybe_unused]]
 void draw_ground_grid(float center_x, float center_y,
                       float extent_ft, float step_ft) {
     for (float gx = std::ceil((-extent_ft + center_x) / step_ft) * step_ft;
@@ -397,6 +401,21 @@ void ViewerApp::draw_ground_layout_3d() {
     ImGui::Checkbox("Grid",     &impl_->ground_layout_3d_show_grid);
     ImGui::SameLine();
     ImGui::Checkbox("Terrain",  &impl_->show_terrain_mesh_3d);
+    ImGui::SameLine();
+    // Chunk-set toggle: when ON (default), terrain renders as a grid of
+    // small chunks with per-chunk frustum culling. When OFF, falls back
+    // to the single-mesh path (legacy). The chunk path is faster for
+    // theater-scale views and lifts the unsigned-short vertex cap.
+    ImGui::Checkbox("Chunks",   &impl_->use_terrain_chunks);
+    // Show the per-frame culling stats when the chunk path is active —
+    // useful for verifying culling is working.
+    if (impl_->use_terrain_chunks && impl_->terrain_chunk_set_3d_built &&
+        impl_->terrain_chunk_set_3d.valid) {
+        ImGui::SameLine();
+        ImGui::TextDisabled("[%d/%d chunks]",
+            impl_->terrain_chunk_set_3d.chunks_visible,
+            impl_->terrain_chunk_set_3d.chunks_total);
+    }
 
     // Reset-view button.
     ImGui::SameLine();
@@ -455,354 +474,311 @@ void ViewerApp::draw_ground_layout_3d() {
         impl_->ground_layout_3d_target_valid = true;
     }
 
-    // --- Render the 3D scene into the RenderTexture2D --------------------
-    BeginTextureMode(impl_->ground_layout_3d_target);
+    // --- Build the terrain mesh / chunk set (if terrain loaded) -----------
+    //
+    // Done BEFORE the render pass so the SceneDescription can reference
+    // the built mesh. Two paths, toggled by impl_->use_terrain_chunks:
+    //   - Chunk set (default): per-chunk frustum culling, lifts the
+    //     unsigned-short index cap, future per-chunk LOD.
+    //   - Single mesh (legacy): simpler, kept as a fallback toggle.
+    //
+    // Both center on the objective's WORLD ENU position (not local) —
+    // this was the "always on coast" bug fix from Path B1.
+    if (impl_->show_terrain_mesh_3d && impl_->terrain_loaded) {
+        if (impl_->use_terrain_chunks) {
+            // ── Chunk set path ──
+            const bool need_rebuild =
+                !impl_->terrain_chunk_set_3d_built ||
+                impl_->terrain_chunk_set_3d_cached_entity.value !=
+                    impl_->sel_entity.value;
+            if (need_rebuild) {
+                if (impl_->terrain_chunk_set_3d_built) {
+                    f4::renderer::unload_terrain_chunk_set(
+                        impl_->terrain_chunk_set_3d);
+                    impl_->terrain_chunk_set_3d_built = false;
+                }
+                f4::renderer::TerrainChunkSetConfig tcc;
+                tcc.center_east_ft  = obj_world_x;
+                tcc.center_north_ft = obj_world_y;
+                tcc.extent_ft       = 50000.0f;   // ~9.5 nm half-extent
+                tcc.chunks_per_side = 8;          // 64 chunks
+                tcc.chunk_resolution = 32;        // 1089 verts/chunk
+                tcc.vertical_scale   = 1.0f;
+                tcc.z_offset_ft      = -5.0f;
+                tcc.color_by_tile_type = true;
+                // Far-plane override: render_world() already extends via
+                // scene.far_plane=250000, but set this too so direct
+                // draw_terrain_chunk_set() callers (e.g. future previews)
+                // get the same self-healing behavior.
+                tcc.far_plane_ft    = 250000.0f;
+                tcc.near_plane_ft   = 1.0f;
+                tcc.camera_fovy_deg = 45.0f;
+                impl_->terrain_chunk_set_3d = f4::renderer::build_terrain_chunk_set(
+                    impl_->terrain, tcc);
+                impl_->terrain_chunk_set_3d_built = true;
+                impl_->terrain_chunk_set_3d_cached_entity = impl_->sel_entity;
+            }
+        } else {
+            // ── Single mesh path (legacy) ──
+            const bool need_rebuild =
+                !impl_->terrain_mesh_3d_built ||
+                impl_->terrain_mesh_3d_cached_entity.value !=
+                    impl_->sel_entity.value;
+            if (need_rebuild) {
+                if (impl_->terrain_mesh_3d_built) {
+                    f4::renderer::unload_terrain_mesh(impl_->terrain_mesh_3d);
+                    impl_->terrain_mesh_3d_built = false;
+                }
+                f4::renderer::TerrainMeshConfig tc;
+                tc.center_east_ft = obj_world_x;
+                tc.center_north_ft = obj_world_y;
+                tc.extent_ft = 50000.0f;
+                tc.resolution = 96;
+                tc.vertical_scale = 1.0f;
+                tc.z_offset_ft = -5.0f;
+                tc.color_by_tile_type = true;
+                impl_->terrain_mesh_3d = f4::renderer::build_terrain_mesh(
+                    impl_->terrain, tc);
+                impl_->terrain_mesh_3d_built = true;
+                impl_->terrain_mesh_3d_cached_entity = impl_->sel_entity;
+            }
+        }
+    }
+
+    // --- Reset per-frame diagnostic counters (always, even when we
+    // won't draw models — so the panel shows 0/0/0 instead of stale
+    // values from a previous selection).
+    impl_->diag_3d_features_total = 0;
+    impl_->diag_3d_features_skipped_placeholder = 0;
+    impl_->diag_3d_features_no_vistype = 0;
+    impl_->diag_3d_features_no_mesh = 0;
+    impl_->diag_3d_features_drawn = 0;
+    impl_->diag_3d_meshes_drawn = 0;
+    impl_->diag_3d_triangles_drawn = 0;
+
+    // --- Build the SceneDescription and render via render_world() --------
+    //
+    // Migrating from the manual BeginMode3D block to render_world():
+    //   - Inherits extend_far_plane() (no need for the explicit call)
+    //   - Inherits BeginTextureMode/EndTextureMode via scene.target
+    //   - Inherits the entity-mesh + airfield-draw pipeline
+    //   - The world-viewer-specific bits (axis triad, ground grid,
+    //     neighbor objectives, feature models) move into the overlay_3d
+    //     callback, invoked inside BeginMode3D after entities are drawn.
+    //
+    // This eliminates the duplication that caused the original
+    // "missing extend_far_plane" bug — both apps now share the same
+    // render pipeline.
+    f4::renderer::SceneDescription scene;
+    scene.camera = impl_->gl3d_orbit_cam.camera();
+    scene.sky_color = BG_COLOR;
+    scene.near_plane = 1.0f;
+    scene.far_plane = 250000.0f;   // matches the prior explicit extend_far_plane
+    scene.target = &impl_->ground_layout_3d_target;
+
+    // Ground config: suppress the flat plane when terrain is active
+    // (z-fighting), keep the grid as an orientation reference, and
+    // anchor everything at the objective's world position.
+    scene.ground.plane = !(impl_->show_terrain_mesh_3d && impl_->terrain_loaded);
+    scene.ground.grid  = impl_->ground_layout_3d_show_grid &&
+                         !(impl_->show_terrain_mesh_3d && impl_->terrain_loaded);
+    scene.ground.axes  = false;  // we draw our own axis triad in overlay_3d
+    scene.ground.origin_enu_x = obj_world_x;
+    scene.ground.origin_enu_y = obj_world_y;
+    scene.ground.origin_enu_z = obj_world_z;
+    // Size the grid to the airfield bbox (same logic as the old inline
+    // draw_ground_grid call).
     {
-        ClearBackground(BG_COLOR);
-        BeginMode3D(impl_->gl3d_orbit_cam.camera());
+        const float ext = std::max(
+            (g.max_x - g.min_x) * 0.6f,
+            (g.max_y - g.min_y) * 0.6f);
+        scene.ground.grid_extent = ext;
+        scene.ground.grid_step = ext > 4000.0f ? 1000.0f :
+                                 ext > 1000.0f ?  500.0f : 100.0f;
+        scene.ground.grid_color = GRID_COLOR;
+        scene.ground.plane_color = BG_COLOR;
+    }
 
-        // CRITICAL: extend the projection's far plane beyond Raylib's
-        // RL_CULL_DISTANCE_FAR default. The world-viewer's CMakeLists
-        // patches RL_CULL_DISTANCE_FAR to 100000 ft (see worklog GEO/3D-fix),
-        // but that's still too small for theater-scale terrain: a 50000-ft
-        // half-extent terrain mesh centered on an objective + a 20000-ft
-        // orbit distance puts the far edge ~70000+ ft from the camera, and
-        // a steep viewing angle pushes it past 100000 ft → triangles clip
-        // out as the camera orbits. Matching the scenario-player's
-        // render_world() pipeline (which uses near=1, far=250000) makes
-        // both apps behave identically and gives 1:250000 depth precision
-        // (vs the default 0.01:100000 = 1:10M, which shimmers badly).
-        f4::renderer::extend_far_plane(
-            impl_->gl3d_orbit_cam.camera(),
-            /*near_ft=*/1.0f,
-            /*far_ft=*/250000.0f);
+    // Terrain mesh / chunk set — chunk set takes precedence.
+    if (impl_->show_terrain_mesh_3d && impl_->terrain_loaded) {
+        if (impl_->use_terrain_chunks && impl_->terrain_chunk_set_3d_built &&
+            impl_->terrain_chunk_set_3d.valid) {
+            scene.terrain_chunk_set = &impl_->terrain_chunk_set_3d;
+        } else if (impl_->terrain_mesh_3d_built && impl_->terrain_mesh_3d.valid) {
+            scene.terrain_mesh = &impl_->terrain_mesh_3d;
+        }
+    }
+
+    // Airfield geometry — drawn via the shared draw_airfield_geometry()
+    // inside render_world(). The per-layer toggles mirror the View-menu
+    // checkboxes.
+    if (!g.empty) {
+        f4::renderer::AirfieldDrawToggles toggles;
+        toggles.runway   = impl_->ground_layout_3d_show_runway;
+        toggles.markers  = impl_->ground_layout_3d_show_runway;
+        toggles.taxiways = impl_->ground_layout_3d_show_taxiways;
+        toggles.parking  = impl_->ground_layout_3d_show_parking;
+        toggles.helipads = true;
+        toggles.features = !has_features ||
+                            !impl_->ground_layout_3d_show_models ||
+                            !models_ready;
+        scene.airfield_toggles = toggles;
+        scene.airfield = &g;
+        scene.airfield_origin_enu[0] = obj_world_x;
+        scene.airfield_origin_enu[1] = obj_world_y;
+        scene.airfield_origin_enu[2] = obj_world_z;
+        scene.airfield_labels = impl_->ground_layout_3d_show_labels;
+    }
+
+    // ── overlay_3d callback ────────────────────────────────────────────
+    // Invoked by render_world() inside BeginMode3D, after entities +
+    // airfield are drawn. Holds the world-viewer-specific bits that
+    // don't fit cleanly into SceneDescription's fields:
+    //   - axis triad (diagnostic)
+    //   - neighbor objectives (within radius)
+    //   - real KoreaObj feature models (3D buildings)
+    // The callback captures by reference so it can update the
+    // diagnostic counters on Impl.
+    scene.overlay_3d = [this, &g, &obj_world_x, &obj_world_y, &obj_world_z,
+                       &has_features, &models_ready, &fs]
+                      (const Camera3D& /*cam*/) {
+        rlDisableBackfaceCulling();
+        rlSetBlendMode(BLEND_ALPHA);
+
+        // --- Diagnostic: origin axis triad (always drawn) ----------------
+        // +X = red (East), +Y = green (Up), +Z = blue (-North).
         {
-            // CRITICAL: disable backface culling. Our ground quads have
-            // arbitrary winding (the layout data doesn't guarantee CCW),
-            // and we draw both sides anyway. Mirrors the f4-models-viewer
-            // approach for FreeFalcon's .LOD meshes.
-            rlDisableBackfaceCulling();
-            rlSetBlendMode(BLEND_ALPHA);
+            const float axis_len = std::max(
+                (g.max_x - g.min_x) * 0.05f,
+                (g.max_y - g.min_y) * 0.05f);
+            const float al = std::max(axis_len, 50.0f);
+            const Vector3 o = enu_to_rl(
+                impl_->ground_layout_3d_center_x,
+                impl_->ground_layout_3d_center_y, 0.0f);
+            DrawLine3D(o, {o.x + al, o.y, o.z}, Color{220, 60, 60, 255});
+            DrawLine3D(o, {o.x, o.y + al, o.z}, Color{60, 220, 60, 255});
+            DrawLine3D(o, {o.x, o.y, o.z + al}, Color{60, 100, 220, 255});
+        }
 
-            // --- Terrain heightmap mesh (Path B1) -------------------------
-            //
-            // When terrain is loaded, draw a heightmap mesh centered on
-            // the selected objective's WORLD ENU position (not the
-            // objective-local bbox center). The mesh is rebuilt when the
-            // selection changes. Uses the same f4::renderer functions as
-            // the scenario player — shared rendering path.
-            if (impl_->show_terrain_mesh_3d && impl_->terrain_loaded) {
-                // Rebuild if selection changed or not built yet.
-                const bool need_rebuild =
-                    !impl_->terrain_mesh_3d_built ||
-                    impl_->terrain_mesh_3d_cached_entity.value !=
-                        impl_->sel_entity.value;
-                if (need_rebuild) {
-                    if (impl_->terrain_mesh_3d_built) {
-                        f4::renderer::unload_terrain_mesh(impl_->terrain_mesh_3d);
-                        impl_->terrain_mesh_3d_built = false;
-                    }
-                    f4::renderer::TerrainMeshConfig tc;
-                    // CENTER ON THE OBJECTIVE'S WORLD ENU POSITION, not the
-                    // local bbox center. This was the "always on coast" bug —
-                    // the terrain was centered at local (0,0) which is the
-                    // world origin (SW corner = ocean).
-                    tc.center_east_ft = obj_world_x;
-                    tc.center_north_ft = obj_world_y;
-                    tc.extent_ft = 50000.0f;  // ~9.5 nm half-extent
-                    tc.resolution = 96;
-                    tc.vertical_scale = 1.0f;
-                    tc.z_offset_ft = -5.0f;  // sink below airfield to avoid z-fight
-                    tc.color_by_tile_type = true;
-                    impl_->terrain_mesh_3d = f4::renderer::build_terrain_mesh(
-                        impl_->terrain, tc);
-                    impl_->terrain_mesh_3d_built = true;
-                    impl_->terrain_mesh_3d_cached_entity = impl_->sel_entity;
+        // --- Neighboring objectives within a radius (Path B1 fix) ------
+        // Draw airfield geometry + feature models for nearby objectives
+        // so the 3D view shows the surrounding area, not just the
+        // selected objective.
+        if (impl_->ground_layout_3d_show_models && models_ready) {
+            const float search_radius_ft = 50000.0f;
+            const auto& nearby = impl_->objectives_within_radius(
+                obj_world_x, obj_world_y, search_radius_ft);
+            for (const auto nid : nearby) {
+                if (nid.value == impl_->sel_entity.value) continue;
+                auto nh = impl_->handle(nid);
+                auto* ntf = nh.get<f4::entities::TransformComponent>();
+                if (!ntf) continue;
+
+                const float nx = static_cast<float>(ntf->position.x);
+                const float ny = static_cast<float>(ntf->position.y);
+                float nterrain_elev = 0.0f;
+                if (impl_->terrain_loaded && !impl_->terrain.elevation.empty()) {
+                    const double theater_size_ft = 1024.0 * 1024.0;
+                    const double w = static_cast<double>(
+                        impl_->terrain.header.width > 0 ? impl_->terrain.header.width : 128);
+                    const double ft_per_cell = theater_size_ft / w;
+                    const uint32_t ncx = std::min(static_cast<uint32_t>(std::max(nx / ft_per_cell, 0.0)),
+                                                  impl_->terrain.header.width - 1);
+                    const uint32_t ncy_raw = std::min(static_cast<uint32_t>(std::max(ny / ft_per_cell, 0.0)),
+                                                      impl_->terrain.header.height - 1);
+                    const uint32_t ncy = impl_->terrain.header.height - 1 - ncy_raw;
+                    nterrain_elev = static_cast<float>(impl_->terrain.elevation_at(ncx, ncy));
                 }
-                if (impl_->terrain_mesh_3d.valid) {
-                    f4::renderer::draw_terrain_mesh(impl_->terrain_mesh_3d);
-                }
-            }
+                const float nz = std::max(static_cast<float>(ntf->position.z), nterrain_elev);
 
-            // --- Diagnostic: origin axis triad (always drawn) ---------------
-            //
-            // Draw a small RGB axis triad at the camera target so the user
-            // can ALWAYS see SOMETHING in the viewport — even if no
-            // features/runways render. If the triad is invisible, the bug
-            // is in the camera/projection (BeginMode3D not setting up
-            // matrices correctly). If the triad is visible but nothing
-            // else is, the bug is in the feature/mesh pipeline.
-            //
-            // +X = red (East in ENU), +Y = green (Up), +Z = blue (-North).
-            // Length scales with bbox size so it stays proportional.
-            {
-                const float axis_len = std::max(
-                    (g.max_x - g.min_x) * 0.05f,
-                    (g.max_y - g.min_y) * 0.05f);
-                const float al = std::max(axis_len, 50.0f);
-                const Vector3 o = enu_to_rl(
-                    impl_->ground_layout_3d_center_x,
-                    impl_->ground_layout_3d_center_y, 0.0f);
-                DrawLine3D(o, {o.x + al, o.y, o.z}, Color{220, 60, 60, 255});
-                DrawLine3D(o, {o.x, o.y + al, o.z}, Color{60, 220, 60, 255});
-                DrawLine3D(o, {o.x, o.y, o.z + al}, Color{60, 100, 220, 255});
-            }
-
-            // Ground grid (orientation reference).
-            if (impl_->ground_layout_3d_show_grid) {
-                const float ext = std::max(
-                    (g.max_x - g.min_x) * 0.6f,
-                    (g.max_y - g.min_y) * 0.6f);
-                const float step = ext > 4000.0f ? 1000.0f :
-                                   ext > 1000.0f ?  500.0f : 100.0f;
-                draw_ground_grid(impl_->ground_layout_3d_center_x,
-                                 impl_->ground_layout_3d_center_y,
-                                 ext, step);
-            }
-
-            // Airfield geometry — drawn via the shared f4::renderer function
-            // (scene_draw.cpp). The per-layer toggles mirror the View-menu
-            // checkboxes: runway + markers, taxiways, parking, helipads.
-            // Feature footprints are drawn only when 3D models are off (or
-            // unavailable); otherwise the KoreaObj meshes draw below.
-            //
-            // CRITICAL: the geometry is in OBJECTIVE-LOCAL coordinates.
-            // We pass the objective's WORLD ENU position as the origin so
-            // the geometry is translated to its correct world location,
-            // sitting ON the terrain (obj_world_z = max(objective Z, terrain elev)).
-            {
-                f4::renderer::AirfieldDrawToggles toggles;
-                toggles.runway   = impl_->ground_layout_3d_show_runway;
-                toggles.markers  = impl_->ground_layout_3d_show_runway;
-                toggles.taxiways = impl_->ground_layout_3d_show_taxiways;
-                toggles.parking  = impl_->ground_layout_3d_show_parking;
-                toggles.helipads = true;
-                toggles.features = !has_features ||
-                                    !impl_->ground_layout_3d_show_models ||
-                                    !models_ready;
-                f4::renderer::draw_airfield_geometry(g, toggles,
-                    obj_world_x, obj_world_y, obj_world_z);
-            }
-
-            // --- Neighboring objectives within a radius (Path B1 fix) ------
-            //
-            // The user reported that only the selected objective's features
-            // were visible — neighboring objectives (towns, power plants,
-            // etc.) were not rendered. We now query all objectives within
-            // a radius of the selected one and draw their airfield geometry
-            // too, so the 3D view shows the surrounding area.
-            //
-            // TODO: also draw neighbor feature meshes (3D models). The
-            // selected objective's feature loop below handles that for the
-            // primary; neighbors currently get airfield geometry only.
-            if (impl_->ground_layout_3d_show_models && models_ready) {
-                // Search radius: ~2x the terrain mesh extent so neighbors
-                // at the edge of the terrain are included.
-                const float search_radius_ft = 50000.0f;
-                const auto& nearby = impl_->objectives_within_radius(
-                    obj_world_x, obj_world_y, search_radius_ft);
-                for (const auto nid : nearby) {
-                    if (nid.value == impl_->sel_entity.value) continue;  // already drawn
-                    auto nh = impl_->handle(nid);
-                    auto* ntf = nh.get<f4::entities::TransformComponent>();
-                    if (!ntf) continue;
-
-                    // Neighbor's world position + terrain elevation
-                    const float nx = static_cast<float>(ntf->position.x);
-                    const float ny = static_cast<float>(ntf->position.y);
-                    float nterrain_elev = 0.0f;
-                    if (impl_->terrain_loaded && !impl_->terrain.elevation.empty()) {
-                        const double theater_size_ft = 1024.0 * 1024.0;
-                        const double w = static_cast<double>(
-                            impl_->terrain.header.width > 0 ? impl_->terrain.header.width : 128);
-                        const double ft_per_cell = theater_size_ft / w;
-                        const uint32_t ncx = std::min(static_cast<uint32_t>(std::max(nx / ft_per_cell, 0.0)),
-                                                      impl_->terrain.header.width - 1);
-                        const uint32_t ncy_raw = std::min(static_cast<uint32_t>(std::max(ny / ft_per_cell, 0.0)),
-                                                          impl_->terrain.header.height - 1);
-                        const uint32_t ncy = impl_->terrain.header.height - 1 - ncy_raw;
-                        nterrain_elev = static_cast<float>(impl_->terrain.elevation_at(ncx, ncy));
-                    }
-                    const float nz = std::max(static_cast<float>(ntf->position.z), nterrain_elev);
-
-                    // Draw the neighbor's airfield geometry (if any) at
-                    // its world position so runways/taxiways show up.
-                    auto* ngl = nh.get<f4::entities::GroundLayoutComponent>();
-                    if (ngl && !ngl->layouts.empty()) {
-                        auto ng = f4::renderer::build_airfield_geometry_3d(
-                            ngl->layouts, nullptr);
-                        if (!ng.empty) {
-                            f4::renderer::AirfieldDrawToggles nt;
-                            nt.runway = true; nt.markers = false;
-                            nt.taxiways = true; nt.parking = false;
-                            nt.helipads = false; nt.features = false;
-                            f4::renderer::draw_airfield_geometry(ng, nt, nx, ny, nz);
-                        }
-                    }
-
-                    // Draw the neighbor's feature models (3D buildings)
-                    // at their world position. Uses the same mesh cache
-                    // as the selected objective — no extra GPU uploads.
-                    auto* nfs = nh.get<f4::entities::FeatureSetComponent>();
-                    if (nfs && !nfs->features.empty()) {
-                        f4::renderer::EntityRenderResources nres =
-                            f4::renderer::make_entity_render_resources(
-                                impl_->render_res_3d,
-                                &*impl_->model_db_3d,
-                                &impl_->class_table_3d);
-                        constexpr uint16_t VU_LAST_ENTITY_TYPE = 100;
-                        for (const auto& nf : nfs->features) {
-                            if (nf.index == 0 && nf.offset_x == 0.0f && nf.offset_y == 0.0f) continue;
-                            const uint16_t entity_type = static_cast<uint16_t>(
-                                VU_LAST_ENTITY_TYPE + static_cast<uint16_t>(nf.index));
-                            f4::renderer::draw_feature_mesh(
-                                nres, entity_type,
-                                nf.offset_x + nx,
-                                nf.offset_y + ny,
-                                nf.offset_z + nz,
-                                static_cast<float>(nf.facing));
-                        }
+                auto* ngl = nh.get<f4::entities::GroundLayoutComponent>();
+                if (ngl && !ngl->layouts.empty()) {
+                    auto ng = f4::renderer::build_airfield_geometry_3d(
+                        ngl->layouts, nullptr);
+                    if (!ng.empty) {
+                        f4::renderer::AirfieldDrawToggles nt;
+                        nt.runway = true; nt.markers = false;
+                        nt.taxiways = true; nt.parking = false;
+                        nt.helipads = false; nt.features = false;
+                        f4::renderer::draw_airfield_geometry(ng, nt, nx, ny, nz);
                     }
                 }
-            }
 
-            // --- Real KoreaObj 3D feature models ------------------------
-            //
-            // For each FeatureEntryState on the selected objective, resolve
-            // its vis_type via FALCON4.ct (entity_type → vis_type[0]),
-            // build the Raylib Mesh for that KoreaObj parent_index (cached),
-            // and DrawMesh it at the feature's offset_xyz rotated by
-            // facing degrees around the vertical axis.
-            //
-            // The mesh cache is keyed by vis_type, so multiple features
-            // of the same type (e.g. three hangars of type 169) share
-            // one GPU upload. Textures are cached by tex_id across all
-            // meshes — shared across features and across selections.
-
-            // Reset per-frame diagnostic counters (always, even when we
-            // won't draw models — so the panel shows 0/0/0 instead of
-            // stale values from a previous selection).
-            impl_->diag_3d_features_total = 0;
-            impl_->diag_3d_features_skipped_placeholder = 0;
-            impl_->diag_3d_features_no_vistype = 0;
-            impl_->diag_3d_features_no_mesh = 0;
-            impl_->diag_3d_features_drawn = 0;
-            impl_->diag_3d_meshes_drawn = 0;
-            impl_->diag_3d_triangles_drawn = 0;
-
-            if (impl_->ground_layout_3d_show_models && models_ready && fs) {
-                // Compile the lit shader on first use (via f4::renderer::LitShader).
-                // Also build the cached default material (1x1 white fallback
-                // texture + lit shader) for untextured meshes.
-                //
-                // draw_feature_mesh() will re-ensure both per-call (idempotent),
-                // but doing it once here lets us bail out early if the shader
-                // or material can't be built (avoids spamming DrawMesh with
-                // an uninitialized material).
-                if (!impl_->render_res_3d.ensure_default_material()) {
-                    // Failed to build the fallback texture — can't safely
-                    // draw meshes (the shader would discard them all).
-                    // Skip the model pass; the grid + axis triad + flat
-                    // geometry are still visible so the user knows the
-                    // panel is alive.
-                } else {
-                    // Build the resource bundle once for the whole loop
-                    // from the shared RenderResources instance. The mesh
-                    // cache, texture cache, lit shader, default material,
-                    // and lighting state all live on render_res_3d and
-                    // are shared with the 2D canvas feature-mesh pass —
-                    // so models loaded by either view are free for the other.
-                    f4::renderer::EntityRenderResources res =
+                auto* nfs = nh.get<f4::entities::FeatureSetComponent>();
+                if (nfs && !nfs->features.empty()) {
+                    f4::renderer::EntityRenderResources nres =
                         f4::renderer::make_entity_render_resources(
                             impl_->render_res_3d,
                             &*impl_->model_db_3d,
                             &impl_->class_table_3d);
-
-                    // Walk features and draw each one's model.
-                    impl_->diag_3d_features_total =
-                        static_cast<int>(fs->features.size());
-                    for (const auto& f : fs->features) {
-                        // Skip empty placeholder features (the bridge emits
-                        // these when the FED entry is unused).
-                        if (f.index == 0 && f.offset_x == 0.0f && f.offset_y == 0.0f) {
-                            ++impl_->diag_3d_features_skipped_placeholder;
-                            continue;
-                        }
-
-                        // Convert FeatureEntryState.index (descriptionIndex)
-                        // to entity_type. See the long comment in
-                        // f4-renderer/src/feature_mesh.cpp + the historical
-                        // note below: FeatureEntryState.index is a 0-based
-                        // descriptionIndex into the class table, NOT an
-                        // entity_type. ClassTable::vis_type_for() takes
-                        // entity_type = descriptionIndex + VU_LAST_ENTITY_TYPE
-                        // (=100). Passing f.index verbatim used to land at
-                        // descriptionIndex-100 — i.e. a completely different
-                        // class table entry — which is why power plants
-                        // rendered as upside-down B-52s.
-                        //
-                        // (Historical note preserved here because the
-                        // diagnostic counters below still need to distinguish
-                        // "no vis_type" from "no mesh". The pipeline comment
-                        // now also lives in f4-renderer/src/feature_mesh.cpp.)
-                        constexpr uint16_t VU_LAST_ENTITY_TYPE = 100;
+                    constexpr uint16_t VU_LAST_ENTITY_TYPE = 100;
+                    for (const auto& nf : nfs->features) {
+                        if (nf.index == 0 && nf.offset_x == 0.0f && nf.offset_y == 0.0f) continue;
                         const uint16_t entity_type = static_cast<uint16_t>(
-                            VU_LAST_ENTITY_TYPE +
-                            static_cast<uint16_t>(f.index));
-
-                        // Peek at vis_type so we can classify skips for
-                        // the per-frame diagnostic. draw_feature_mesh() also
-                        // looks up vis_type internally (cheap — hash lookup),
-                        // so the redundancy is fine.
-                        const auto vis_type =
-                            impl_->class_table_3d.vis_type_for(entity_type, 0);
-                        if (vis_type <= 0) {
-                            ++impl_->diag_3d_features_no_vistype;
-                            continue;
-                        }
-
-                        const auto stats = f4::renderer::draw_feature_mesh(
-                            res, entity_type,
-                            f.offset_x + obj_world_x,   // local + world offset
-                            f.offset_y + obj_world_y,
-                            f.offset_z + obj_world_z,   // lift to terrain
-                            static_cast<float>(f.facing));
-
-                        if (stats.meshes_drawn > 0) {
-                            ++impl_->diag_3d_features_drawn;
-                            impl_->diag_3d_meshes_drawn += stats.meshes_drawn;
-                            // Triangle count: not exposed by DrawStats (only
-                            // vertices), but vertices ≈ 3 × triangles for
-                            // typical meshes. Close enough for the panel's
-                            // "drawn / total" diagnostic.
-                            impl_->diag_3d_triangles_drawn +=
-                                static_cast<int>(stats.vertices_drawn) / 3;
-                        } else {
-                            ++impl_->diag_3d_features_no_mesh;
-                        }
+                            VU_LAST_ENTITY_TYPE + static_cast<uint16_t>(nf.index));
+                        f4::renderer::draw_feature_mesh(
+                            nres, entity_type,
+                            nf.offset_x + nx,
+                            nf.offset_y + ny,
+                            nf.offset_z + nz,
+                            static_cast<float>(nf.facing));
                     }
                 }
             }
-
-            rlEnableBackfaceCulling();
         }
-        EndMode3D();
 
-        // 2D overlay — labels projected from 3D positions.
-        // Pass the objective's world position as the origin so labels
-        // appear at the correct screen position (the geometry was drawn
-        // at world coordinates, not local).
-        if (impl_->ground_layout_3d_show_labels) {
-            std::vector<f4::renderer::LayoutLabel2D> labels;
-            f4::renderer::collect_layout_labels(impl_->gl3d_orbit_cam.camera(), g,
-                           impl_->ground_layout_3d_show_parking,
-                           RT_W, RT_H,
-                           obj_world_x, obj_world_y, obj_world_z,
-                           labels);
-            f4::renderer::draw_layout_labels(labels);
+        // --- Real KoreaObj 3D feature models for the SELECTED objective -
+        //
+        // For each FeatureEntryState, resolve vis_type via FALCON4.ct,
+        // build the cached Raylib Mesh, and DrawMesh it at the feature's
+        // offset_xyz rotated by facing degrees.
+        if (impl_->ground_layout_3d_show_models && models_ready && fs) {
+            if (impl_->render_res_3d.ensure_default_material()) {
+                f4::renderer::EntityRenderResources res =
+                    f4::renderer::make_entity_render_resources(
+                        impl_->render_res_3d,
+                        &*impl_->model_db_3d,
+                        &impl_->class_table_3d);
+
+                impl_->diag_3d_features_total =
+                    static_cast<int>(fs->features.size());
+                for (const auto& f : fs->features) {
+                    if (f.index == 0 && f.offset_x == 0.0f && f.offset_y == 0.0f) {
+                        ++impl_->diag_3d_features_skipped_placeholder;
+                        continue;
+                    }
+                    constexpr uint16_t VU_LAST_ENTITY_TYPE = 100;
+                    const uint16_t entity_type = static_cast<uint16_t>(
+                        VU_LAST_ENTITY_TYPE + static_cast<uint16_t>(f.index));
+                    const auto vis_type =
+                        impl_->class_table_3d.vis_type_for(entity_type, 0);
+                    if (vis_type <= 0) {
+                        ++impl_->diag_3d_features_no_vistype;
+                        continue;
+                    }
+                    const auto stats = f4::renderer::draw_feature_mesh(
+                        res, entity_type,
+                        f.offset_x + obj_world_x,
+                        f.offset_y + obj_world_y,
+                        f.offset_z + obj_world_z,
+                        static_cast<float>(f.facing));
+                    if (stats.meshes_drawn > 0) {
+                        ++impl_->diag_3d_features_drawn;
+                        impl_->diag_3d_meshes_drawn += stats.meshes_drawn;
+                        impl_->diag_3d_triangles_drawn +=
+                            static_cast<int>(stats.vertices_drawn) / 3;
+                    } else {
+                        ++impl_->diag_3d_features_no_mesh;
+                    }
+                }
+            }
         }
-    }
-    EndTextureMode();
+
+        rlEnableBackfaceCulling();
+    };
+
+    // Render the frame via the shared pipeline.
+    f4::renderer::render_world(impl_->render_res_3d, scene);
 
     // --- Display the rendered texture in the ImGui window -----------------
     //

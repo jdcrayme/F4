@@ -216,6 +216,15 @@ void ViewerApp::run() {
         f4::renderer::unload_terrain_mesh(impl_->terrain_mesh_3d);
         impl_->terrain_mesh_3d_built = false;
     }
+    // Free the 3D terrain chunk set (Path B1 chunked) — same GL-context
+    // requirement. Both paths are mutually exclusive at runtime (the
+    // toggle use_terrain_chunks picks one), but both may have been
+    // built if the user toggled during the session — free both to be
+    // safe. unload_terrain_chunk_set is a no-op when valid is false.
+    if (impl_->terrain_chunk_set_3d_built) {
+        f4::renderer::unload_terrain_chunk_set(impl_->terrain_chunk_set_3d);
+        impl_->terrain_chunk_set_3d_built = false;
+    }
     // Free the Class Table Browser's preview GPU resources (RenderTexture,
     // cached meshes, textures, lit shader, default material). The browser
     // owns its own cache (separate from impl_->mesh_cache_3d) so we must

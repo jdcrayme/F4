@@ -71,6 +71,7 @@
 #include <f4/renderer/world_renderer.hpp>
 #include <f4/renderer/world_camera.hpp>
 #include <f4/renderer/terrain_mesh.hpp>      // TerrainMesh (Path B1)
+#include <f4/renderer/terrain_chunks.hpp>    // TerrainChunkSet (Path B1 chunked)
 
 #include <raylib.h>
 
@@ -633,6 +634,27 @@ struct ViewerApp::Impl {
     bool terrain_mesh_3d_built = false;
     f4::entities::EntityId terrain_mesh_3d_cached_entity;  // rebuild on selection change
     bool show_terrain_mesh_3d = true;  // toggle in the 3D panel
+
+    // -----------------------------------------------------------------------
+    // 3D terrain chunk set (Path B1 chunked — frustum-culled)
+    // -----------------------------------------------------------------------
+    //
+    // Alternative to terrain_mesh_3d for callers that want per-chunk
+    // frustum culling. When use_terrain_chunks is true (default), the
+    // 3D panel builds a TerrainChunkSet instead of a single TerrainMesh.
+    // Each chunk is independently frustum-culled, so for a typical
+    // orbit camera ~50% of chunks are skipped, halving draw calls.
+    // The chunk set also lifts the unsigned-short index cap, allowing
+    // higher total vertex counts (each chunk is small).
+    //
+    // When use_terrain_chunks is false, the panel falls back to the
+    // single TerrainMesh above (legacy path). This is kept as a toggle
+    // so any regression in the chunk path can be worked around without
+    // a code change.
+    f4::renderer::TerrainChunkSet terrain_chunk_set_3d;
+    bool terrain_chunk_set_3d_built = false;
+    f4::entities::EntityId terrain_chunk_set_3d_cached_entity;
+    bool use_terrain_chunks = true;   // toggle: chunk set vs single mesh
 
     // -----------------------------------------------------------------------
     // Replay mode state (Path B2 — trace playback)

@@ -74,6 +74,7 @@ add_library(f4-renderer STATIC
     src/world_renderer.cpp
     src/world_camera.cpp
     src/terrain_mesh.cpp
+    src/terrain_chunks.cpp
 )
 target_link_libraries(f4-renderer PUBLIC f4_warnings)
 target_include_directories(f4-renderer

@@ -32,6 +32,7 @@
 #include <f4/renderer/draw_3d.hpp>           // DrawStats
 #include <f4/renderer/ground_layout_models.hpp>
 #include <f4/renderer/terrain_mesh.hpp>      // TerrainMesh (Path B1)
+#include <f4/renderer/terrain_chunks.hpp>   // TerrainChunkSet (Path B1 chunked)
 
 #include <f4/entities/entity.hpp>
 
@@ -80,6 +81,13 @@ struct SceneDescription {
     /// suppressed (scene.ground.plane=false) when terrain is present
     /// to avoid z-fighting. Shared by both apps via render_world().
     const TerrainMesh* terrain_mesh = nullptr;
+
+    /// Terrain chunk set (Path B1 chunked). Alternative to terrain_mesh
+    /// for callers that want per-chunk frustum culling and higher total
+    /// vertex count. When non-null and valid, drawn after the flat
+    /// ground plane and before entities + airfield. Takes precedence
+    /// over terrain_mesh (both set → chunk set wins).
+    const TerrainChunkSet* terrain_chunk_set = nullptr;
 
     // ── Offscreen target ───────────────────────────────────────────────
     /// When non-null, render_world() wraps the frame in
