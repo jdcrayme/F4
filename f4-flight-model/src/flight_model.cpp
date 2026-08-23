@@ -193,15 +193,14 @@ void FlightModel::initTrimAndAtmosphere(double initialAltitude_ft) {
     state_.engine.rpmLag.reset(1.0);
 
     // --- FCS filter initialization ---
-    // Initialize the pitch lead-lag filter to the trim alpha so the first
-    // frame doesn't produce a transient. ALSO seed the pitch integrator
-    // to the trim alpha — without this, the integrator starts at 0 and
-    // the FCS drives alpha toward 0 on the first frame (the "altitude
-    // phugoid" symptom — FLIGHT_CONTROL_STABILITY_PLAN.md §4.2 RC-1).
+    // With the alpha_bias feedforward added AFTER the lead-lag filter
+    // (fcs.cpp runPitch), the lead-lag now shapes ONLY the PI correction,
+    // not the full alpha. So the lead-lag and integrator are seeded to 0
+    // (no PI correction at trim) — the bias handles trim by construction.
     // trim() re-seeds with the converged value if called.
-    state_.fcs.pitchAlphaLag.reset(to_degrees(state_.aero.alpha));
+    state_.fcs.pitchAlphaLag.reset(0.0);
     state_.fcs.pitchRateLag.reset(0.0);
-    state_.fcs.pitchIntegral.reset(to_degrees(state_.aero.alpha));
+    state_.fcs.pitchIntegral.reset(0.0);
     state_.fcs.aoacmd = state_.aero.alpha;
 
     // --- Set theta so gamma = theta - alpha = 0 (level flight) ---
@@ -472,6 +471,23 @@ void FlightModel::update(double dt, const PilotInput& input,
 //   - axial acceleration = 0 (constant speed)
 // ---------------------------------------------------------------------------
 bool FlightModel::trim() {
+    // Ground trim guard: at 0 speed (qsom < QSOM_FLOOR), the aero model
+    // can't produce lift regardless of alpha, so the 1-G iteration can't
+    // converge and saturates alpha at aoamax. On the ground this is
+    // harmless (alpha doesn't matter at 0 speed — the EOM ground clamp
+    // controls attitude), but the saturated alpha (35°) produces a bad
+    // first-frame transient when the FCS starts. Return early with alpha=0
+    // and let the alpha_bias feedforward handle trim once the aircraft
+    // starts moving and qsom becomes non-trivial.
+    if (state_.qsom <= QSOM_FLOOR) {
+        state_.aero.alpha = zero_angle();
+        state_.fcs.pitchAlphaLag.reset(0.0);
+        state_.fcs.pitchIntegral.reset(0.0);
+        state_.fcs.aoacmd = zero_angle();
+        state_.trimming = false;
+        return true;  // "converged" trivially — 0 alpha at 0 speed
+    }
+
     const int kMaxIter = 80;
     const double kTolNz = 0.05;    // G tolerance
     const double kTolAx = 0.5;     // ft/s^2 tolerance
@@ -519,22 +535,13 @@ bool FlightModel::trim() {
             state_.aero.zsaero += zsprop;
             state_.aero.xwaero += xsprop * state_.kin.cosbet;
             accelerometers();
-            // Seed the FCS pitch integrator from the trim alpha so the
-            // first frame after trim doesn't dive. The FCS pitch law is:
-            //   aoacmd = (eprop + eintg) * plsdamp
-            // At trim, error = 0 so eprop = 0, and we want aoacmd to equal
-            // the trim alpha (in degrees). Seeding eintg to the trim alpha
-            // makes the FCS hold trim when pstick=0 instead of driving
-            // alpha toward 0 (the documented "altitude phugoid" symptom —
-            // see FLIGHT_CONTROL_STABILITY_PLAN.md §4.2 RC-1).
-            //
-            // The exact value depends on plsdamp (which varies per frame
-            // with qbar), but seeding to the trim alpha in degrees is the
-            // right first-order approximation: the closed loop corrects
-            // any small residual within a few frames.
-            const double trim_alpha_deg = to_degrees(state_.aero.alpha);
-            state_.fcs.pitchIntegral.reset(trim_alpha_deg);
-            state_.fcs.pitchAlphaLag.reset(trim_alpha_deg);
+            // With the alpha_bias feedforward added AFTER the lead-lag
+            // filter (fcs.cpp runPitch), the FCS holds trim by construction
+            // when pstick=0: the bias provides the 1-G trim alpha, and the
+            // PI loop (lead-lag + integrator) starts at 0. No seeding needed
+            // — the bias handles trim, the PI loop handles corrections.
+            state_.fcs.pitchAlphaLag.reset(0.0);
+            state_.fcs.pitchIntegral.reset(0.0);
             state_.fcs.aoacmd = state_.aero.alpha;
             state_.trimming = false;
             return true;

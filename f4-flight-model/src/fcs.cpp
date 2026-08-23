@@ -360,6 +360,47 @@ void FlightControlSystem::runPitch(double dt, double qbar, double qsom,
     (void)cnalpha;  // reserved for future yaw-damping coupling
     (void)input;    // pitch channel reads fcs.pshape, not raw pilot input
 
+    // --- Alpha bias (1-G trim feedforward) ---
+    // FreeFalcon's gain.cpp computes an alpha bias that represents the
+    // alpha needed for 1-G level flight at the current flight conditions:
+    //   α_bias = [g·cos(γ)·cos(μ) / q_som + 0.1·gear − CL₀·TEF_factor] / CL_α,0
+    //            − tefFactor + lefFactor
+    //
+    // KEY DESIGN DECISION: the bias is added AFTER the lead-lag filter,
+    // not before. The previous attempt (worklog ALT-2) fed
+    // `aoacmd = bias + PI_output` through the lead-lag, but the filter's
+    // lead term (tau1=0.2s) amplified frame-to-frame bias changes,
+    // producing alpha overshoot that the AI cascade then over-corrected.
+    // By adding the bias after the filter, the lead-lag only shapes the
+    // PI correction — the bias goes directly to alpha without filter
+    // dynamics. Result: altitude range dropped from 593 ft to 166 ft.
+    //
+    // NOTE: clalph0 is per-DEGREE (not per-radian) — see its use in
+    // computeGains (gsAvail = aoaMax_deg * clalph0 * qsom / g). So
+    // cl_needed / clalph0 is already in degrees — do NOT multiply by RTD.
+    //
+    // See Docs/FreeFalcon_Core_Systems_Reference.html §4.2 (AOA Bias).
+    // See worklog ALT-2 through ALT-5 for the investigation history.
+    const double tefFactor = aero.tefPos;
+    const double lefFactor = aero.lefPos;
+    const double clift0 = aero.clift0;
+    double alpha_bias_deg = 0.0;
+    // The bias formula cl_needed = g/qsom blows up at low qsom (g/qsom → ∞).
+    // Only compute the bias when qsom is high enough to produce a reasonable
+    // alpha — below this, the aircraft is on the ground or at very low speed
+    // and the bias should be 0 (the EOM ground clamp controls attitude).
+    // The threshold of 5.0 corresponds to roughly 50 kts for the F-16
+    // (qsom = q*S/m ≈ 5 at 50 kts sea level). Below this, no meaningful
+    // 1-G trim alpha can be computed.
+    if (std::fabs(clalph0) > QSOM_FLOOR && qsom > 5.0) {
+        const double cl_needed = GRAVITY * cosgam * std::max(0.0, cosmu) / qsom
+                               + 0.1 * aero.gearPos
+                               - clift0 * tefFactor * aux_->CLtefFactor;
+        // clalph0 is per-degree, so cl_needed / clalph0 is in degrees.
+        alpha_bias_deg = cl_needed / clalph0 - tefFactor + lefFactor;
+        alpha_bias_deg = std::clamp(alpha_bias_deg, aoamin, aoamax);
+    }
+
     // --- Commanded G ---
     double ptcmd = fcs.pshape * fcs.kp01;
 
@@ -405,7 +446,16 @@ void FlightControlSystem::runPitch(double dt, double qbar, double qsom,
     // the gravity component that the FCS must cancel.
     const double cosmu_lim = std::max(0.0, cosmu);
     const double gearGravityTerm = 0.1 * aero.gearPos * qsom / GRAVITY;
-    const double error = (ptcmd - (nzcgs - cosmu_lim * cosgam - gearGravityTerm)) * fcs.kp05;
+    // Ground guard: on the ground (gear down) at low speed, the aero model
+    // can't produce enough lift for 1-G, so nzcgs < 1. The FCS interprets
+    // this as a 1-G error and drives alpha to aoamax. But on the ground
+    // alpha doesn't matter — the EOM ground clamp controls attitude. Zero
+    // the error when gear is down AND qsom is low (ground roll / taxi).
+    // The alpha_bias is already 0 in this regime (the qsom guard above),
+    // so the FCS produces alpha=0 on the ground.
+    const bool ground_guard = (aero.gearPos > 0.5 && qsom < 5.0);
+    const double error = ground_guard ? 0.0
+                        : (ptcmd - (nzcgs - cosmu_lim * cosgam - gearGravityTerm)) * fcs.kp05;
 
     // --- PI controller ---
     const double eprop = fcs.kp02 * error;
@@ -432,18 +482,26 @@ void FlightControlSystem::runPitch(double dt, double qbar, double qsom,
     if (eintg > aoamax) eintg = aoamax;
     else if (eintg < aoamin) eintg = aoamin;
 
-    // --- Alpha command ---
+    // --- Alpha command (PI output only — bias is added after the filter) ---
+    // The lead-lag filter shapes ONLY the PI correction, not the bias.
+    // This prevents the filter's lead term from amplifying frame-to-frame
+    // bias changes (the regression documented in worklog ALT-2).
     double aoacmd = std::clamp((eprop + eintg) * fcs.plsdamp, aoamin, aoamax);
     fcs.aoacmd = angle_from_degrees(aoacmd);
 
     // --- Lead-lag filter (F7Tust) ---
-    // Shapes the alpha command to produce the final alpha.
+    // Shapes the PI correction to produce the filtered alpha delta.
     // Time constants are scaled by pitchMomentum (aircraft inertia multiplier).
     const double tau1 = fcs.tp01 * aux_->pitchMomentum;
     const double tau2 = fcs.tp02 * aux_->pitchMomentum;
     const double tau3 = fcs.tp03 * aux_->pitchMomentum;
-    double new_alpha = fcs.pitchAlphaLag.step(aoacmd, tau1, tau2, tau3, dt);
-    new_alpha = std::clamp(new_alpha, aoamin, aoamax);
+    double filtered_pi = fcs.pitchAlphaLag.step(aoacmd, tau1, tau2, tau3, dt);
+
+    // --- Final alpha = bias + filtered PI correction ---
+    // The bias provides the 1-G trim feedforward (no filter dynamics).
+    // The filtered PI provides the correction on top of the bias.
+    // Together: pstick=0 → PI output ≈ 0 → alpha ≈ bias (trim by construction).
+    double new_alpha = std::clamp(alpha_bias_deg + filtered_pi, aoamin, aoamax);
 
     // --- Alpha rate (for the EOM) ---
     // Compute alpha_dot from the change in alpha across this frame.

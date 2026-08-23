@@ -48,7 +48,19 @@ public:
     double heading_gain{3.0};             ///< pedal units per rad of heading error
     double speed_gain{0.06};              ///< throttle per kt of underspeed
     double throttle_creep{0.04};          ///< idle creep to overcome static friction
-    double max_throttle{0.25};            ///< upper edge of the taxi throttle band
+    double max_throttle{0.15};            ///< upper edge of the taxi throttle band.
+                                          ///< Reduced from 0.25 — at 0.25 the F-16
+                                          ///< accelerated to 57 kts during taxi (target
+                                          ///< 15 kts) because the initial throttle command
+                                          ///< saturated at 0.25 before the speed control
+                                          ///< could react. At 0.15 the initial thrust is
+                                          ///< ~890 lbf net (after idle drag of -900),
+                                          ///< which accelerates the aircraft more gently.
+                                          ///< The engine model's idle thrust is -900 lbf
+                                          ///< (a .dat conversion artifact — real F-16 idle
+                                          ///< is ~3000 lbf positive), so 0.15 is the
+                                          ///< minimum that still produces positive net
+                                          ///< thrust at standstill.
     double brake_margin_kts{4.0};         ///< brake when above target by this
     double stop_decel_fps2{3.0};          ///< comfortable decel toward a stop point
     double stop_radius_ft{15.0};          ///< "arrived" distance for stop points

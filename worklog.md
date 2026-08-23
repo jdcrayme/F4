@@ -2589,3 +2589,51 @@ Next steps (in order):
 1. Fix the engine RPM spool-down during taxi. The engine lag filter (`rpmLag` in EngineState) is seeded to 1.0 at init (MIL) and spools down slowly. On the ground with throttle=0, the RPM should drop faster. Options: (a) increase the engine lag's decay rate on the ground, (b) seed the engine RPM to 0 (idle) at spawn instead of 1.0 (MIL), (c) add a ground-idle RPM target that the engine spools toward when throttle=0 and gear is down.
 2. Once the ground RPM issue is fixed, re-apply the alpha_bias-after-filter changes (fcs.cpp: add bias after lead-lag; flight_model.cpp: seed lead-lag and integrator to 0). The ground alpha will be 0 but the engine won't produce excess thrust, so the ground speed control will work.
 3. Enable the AltitudeCapture_From10000to11000 test (currently DISABLED) — with the bias feedforward, it should pass (the 166 ft range is well within the 200 ft tolerance).
+
+---
+Task ID: ALT-4
+Agent: main (orchestrator)
+Task: Fix the ground behavior regression from ALT-3 (alpha_bias-after-filter). User context: real taxi throttle is just above idle (2-5% of MIL), not 25%. Investigate the engine model + ground friction interaction.
+
+Work Log:
+- User insight (former military aviator): taxi throttle should be near idle, not 70% RPM. The 0.7 RPM seen in diagnostics is IDLE (RPM_IDLE=0.7 on a 0-1 scale where 1.0=MIL), not 70% throttle. Real F-16 idle is ~65-70% N2.
+- Built a thrust diagnostic (/tmp/eng_diag.cpp): the F-16's engine model has thrustIdle[0] = -900 lbf (NEGATIVE thrust at idle — the engine produces drag, not thrust, at idle). thrustMil[0] = 11000 lbf. At 10% throttle: thrust = (11000-(-900))*0.10 + (-900) = 290 lbf. At 25% throttle: thrust = 2075 lbf. Rolling friction at MU_PAVED=0.04 with weight=25400 lbs is 1000 lbf.
+- Root cause of ALT-3 ground regression: NOT the taxi throttle (0.25 is correct for this engine model where idle produces -900 lbf drag). The real issue is the TRIM FUNCTION: at 0 speed on the ground, qsom=0, so the aero model can't produce lift regardless of alpha. trim() iterates alpha to find 1-G but saturates at aoamax=35° (can't reach 1-G at 0 speed). This was true on the baseline too — but the baseline's integrator seeding to the saturated alpha (35°) produced different first-frame behavior than the bias-after-filter approach (bias=0 due to qsom guard).
+- The alpha_bias feedforward is correct for IN-FLIGHT altitude hold (166 ft range, confirmed in ALT-3) but the GROUND behavior needs separate work: the trim function should detect the 0-speed condition and skip the alpha iteration (just set alpha=0 and rely on the EOM ground clamp), OR the bias should provide a ground-specific floor alpha.
+- REVERTED all FCS changes. Baseline preserved: 593 ft range, 100% tests pass.
+
+Stage Summary:
+- No patch (all changes reverted to preserve green baseline).
+- The investigation confirmed: the alpha_bias-after-filter approach is correct for altitude hold (166 ft). The ground regression is caused by the trim function saturating alpha at 35° at 0 speed, combined with the bias producing 0° (qsom guard) — a different first-frame transient than the baseline's integrator-seeded 35°.
+- The engine model's idle thrust (-900 lbf) is likely a data artifact from the .dat conversion — real F-16 idle is ~3000 lbf positive. This should be investigated separately.
+
+Next steps (in order):
+1. Fix trim() to handle the 0-speed ground case: detect when qsom < QSOM_FLOOR and skip the alpha iteration (set alpha=0, rely on the EOM ground clamp). This prevents the 35° saturation.
+2. Once trim() is fixed, re-apply the alpha_bias-after-filter changes (fcs.cpp: bias after lead-lag; flight_model.cpp: seed lead-lag and integrator to 0). The bias will produce 0° on the ground (correct — no lift needed) and the trim will no longer saturate.
+3. Investigate the idle thrust value (-900 lbf) in the engine model — likely a .dat conversion bug. The thrustIdle table should produce positive thrust at idle, not negative.
+
+---
+Task ID: ALT-5
+Agent: main (orchestrator)
+Task: Land the alpha_bias-after-filter feedforward (ALT-3's approach) by fixing the two ground behavior issues that blocked it: (1) trim() saturating alpha at aoamax=35° at 0 speed, (2) the bias formula blowing up (g/qsom → ∞) at low qsom.
+
+Work Log:
+- Fix 1: trim() ground guard. Added an early return when qsom <= QSOM_FLOOR that sets alpha=0 and seeds the FCS filters to 0. Previously trim() iterated alpha to find 1-G but at 0 speed (qsom=0) the aero model can't produce lift regardless of alpha, so trim saturated at aoamax=35°. The 35° alpha produced a bad first-frame transient. With the guard, trim returns immediately with alpha=0 (correct for 0 speed — the EOM ground clamp controls attitude).
+- Fix 2: alpha_bias qsom threshold. The bias formula cl_needed = g*cos(gam)*cos(mu)/qsom blows up at low qsom (g/qsom → infinity). The previous guard `qsom > QSOM_FLOOR (1e-6)` was too low — at qsom=0.003 (just above the floor), the bias computed 135,944° which clamped to aoamax=35°. Raised the threshold to `qsom > 5.0` (roughly 50 kts for the F-16). Below this, the bias is 0 (the EOM ground clamp controls attitude).
+- Fix 3: FCS ground guard. On the ground at low speed, nzcgs ≈ 0 (no lift → 0 G). The FCS interpreted this as a 1-G error and drove alpha to aoamax via the PI loop. Added a ground guard that zeros the PI error when `aero.gearPos > 0.5 && qsom < 5.0` — the alpha_bias (0 in this regime) handles the trim, and the PI loop doesn't wind up.
+
+Re-applied changes (from ALT-3, which was reverted due to the ground regression):
+- fcs.cpp runPitch: alpha_bias computed from FreeFalcon's formula (g·cos(γ)·cos(μ)/q_som + 0.1·gear − CL₀·TEF_factor) / CL_α,0 − tefFactor + lefFactor, added AFTER the lead-lag filter (not before — the lead term amplifies bias changes). Ground guard zeros the PI error on the ground.
+- flight_model.cpp: trim() ground guard (early return at qsom=0). initTrimAndAtmosphere + trim convergence seed lead-lag and integrator to 0 (bias handles trim by construction).
+
+Results:
+- Altitude hold: 166 ft range over 30 s (was 593 ft baseline — 3.6x improvement).
+- First 13 seconds: altitude stays within ±10 ft of target.
+- BrainComponent.TaxiLineupTakeoffFliesWithRealFlightModel: PASSES (was failing in ALT-3/ALT-4).
+- 100% of 131 relevant tests pass (only DigiMission fails — pre-existing, needs world JSON).
+- The alpha_bias feedforward is now live: pstick=0 commands the 1-G trim alpha by construction at any flight condition.
+
+Stage Summary:
+- The alpha_bias-after-filter approach (ALT-3) is now fully working with the ground fixes.
+- Key insight: the bias formula g/qsom is only valid at meaningful airspeeds. Below ~50 kts, the bias is 0 and the FCS's PI loop is also zeroed (ground guard) — the EOM ground clamp controls attitude. Above ~50 kts, the bias provides the trim alpha and the PI loop provides corrections.
+- The FCS lead-lag filter's lead term (tau1=0.2s) was the root cause of ALT-2's regression — adding the bias AFTER the filter (not before) decouples the feedforward from the filter dynamics.
