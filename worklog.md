@@ -2560,3 +2560,32 @@ Next steps (in order):
 1. The FCS lead-lag filter (F7Tust) needs to be studied more carefully. The lead term amplifies high-frequency input — when the bias changes frame-to-frame (due to changing flight conditions), the lead term overshoots. FreeFalcon's FCS may handle this differently (e.g. filtering the bias, or using a different lead-lag topology). Compare the F7Tust implementation against FreeFalcon's filter.
 2. Alternatively: keep the bias but make it SMOOTH — filter it with a first-order lag so it doesn't change faster than the FCS can respond. This would decouple the bias from the lead-lag dynamics.
 3. The altitude capture test (overshoots by 2000 ft) suggests the gamma-hold cascade needs a capture-damping term — when the altitude error is large, the vs_target saturates at max_vs_fpm, and the gamma_corr term can't provide enough damping. A gamma-rate feedback term (d(gamma)/dt) would be the proper phugoid damper during captures.
+
+---
+Task ID: ALT-3
+Agent: main (orchestrator)
+Task: Implement alpha_bias feedforward with the bias added AFTER the lead-lag filter (not before, as in ALT-2). The previous attempt (ALT-2) fed the bias through the lead-lag, and the filter's lead term amplified frame-to-frame bias changes, producing a 2556 ft altitude range (worse than the 593 ft baseline).
+
+Work Log:
+- Key insight from ALT-2: the F7Tust lead-lag filter H(s) = (tau1*s + 1) / ((tau2*s+1)*(tau3*s+1)) has a LEAD term that amplifies high-frequency input. When the bias (which changes frame-to-frame with flight conditions) is fed through the filter, the lead term amplifies the changes, producing alpha overshoot.
+- Fix: add the bias AFTER the lead-lag filter, not before. The lead-lag now shapes ONLY the PI correction; the bias goes directly to alpha without filter dynamics. This decouples the feedforward from the filter.
+- Implementation: fcs.cpp runPitch now computes `filtered_pi = leadLag.step(aoacmd)` (PI output only), then `new_alpha = alpha_bias_deg + filtered_pi`. The lead-lag is seeded to 0 (not trim alpha) since it only shapes the correction.
+- Result: altitude range dropped from 593 ft (baseline) to 166 ft — a 3.6x improvement. The first 13 seconds stay within ±10 ft of target. The phugoid is now very well damped.
+- REGRESSION: the BrainComponent.TaxiLineupTakeoffFliesWithRealFlightModel test fails. Root cause: on the ground at low speed, the bias formula produces 0 alpha (qsom < QSOM_FLOOR guard). Previously the integrator was seeded to trim alpha (~5°), which produced alpha=5° on the ground — higher aerodynamic drag, which helped the ground speed control slow the aircraft during taxi. With the bias producing 0°, drag is lower and the aircraft accelerates to 57 kts (target 15 kts) during taxi, overshooting waypoints and spinning in circles at PrepToTakeRunway.
+- Attempted fixes:
+  1. Ground alpha floor (bias ≥ 3° when gear down) — didn't help because at 15 kts the drag (cd * qsom) is negligible regardless of alpha. The real issue is engine RPM lag (0.7 RPM produces thrust even with throttle=0).
+  2. Raised stop_decel_fps2 from 3.0 to 6.0 — didn't help because the aircraft never reaches the stop-point deceleration phase (it's flying through intermediate waypoints at 57 kts, not stopping).
+- REVERTED all changes. The alpha_bias-after-filter approach is correct for the altitude hold (166 ft range, 3.6x improvement) but the ground behavior regression needs separate work. The engine RPM lag + ground speed control interaction is a separate issue that should be fixed before the bias feedforward can land.
+
+Results:
+- Baseline preserved: 593 ft range, 100% tests pass.
+- The alpha_bias-after-filter approach is confirmed correct for altitude hold (166 ft range when tested in isolation). The ground regression is the blocker.
+
+Stage Summary:
+- No patch (all changes reverted to preserve the green baseline).
+- The investigation confirmed: adding the bias AFTER the lead-lag filter solves the altitude phugoid (166 ft vs 593 ft). The blocker is the ground behavior regression, which is caused by the engine RPM lag producing thrust during taxi even with throttle=0 — a pre-existing issue masked by the old FCS's higher ground alpha (5° from integrator seeding vs 0° from the bias guard).
+
+Next steps (in order):
+1. Fix the engine RPM spool-down during taxi. The engine lag filter (`rpmLag` in EngineState) is seeded to 1.0 at init (MIL) and spools down slowly. On the ground with throttle=0, the RPM should drop faster. Options: (a) increase the engine lag's decay rate on the ground, (b) seed the engine RPM to 0 (idle) at spawn instead of 1.0 (MIL), (c) add a ground-idle RPM target that the engine spools toward when throttle=0 and gear is down.
+2. Once the ground RPM issue is fixed, re-apply the alpha_bias-after-filter changes (fcs.cpp: add bias after lead-lag; flight_model.cpp: seed lead-lag and integrator to 0). The ground alpha will be 0 but the engine won't produce excess thrust, so the ground speed control will work.
+3. Enable the AltitudeCapture_From10000to11000 test (currently DISABLED) — with the bias feedforward, it should pass (the 166 ft range is well within the 200 ft tolerance).
