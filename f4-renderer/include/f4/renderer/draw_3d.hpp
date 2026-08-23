@@ -17,7 +17,20 @@
 
 namespace f4::renderer {
 /// Extend the active 3D-mode projection's far plane to `far_ft`.
+///
+/// Reads `camera.projection` (to skip orthographic cameras, which
+/// BeginMode3D builds against the viewport) and `camera.fovy` for the
+/// field of view. The aspect ratio is derived from the active render
+/// target — correct inside both BeginTextureMode and the backbuffer.
 void extend_far_plane(const Camera3D& camera, float near_ft, float far_ft);
+
+/// Same as above but takes the FOV (degrees) directly — useful when the
+/// caller doesn't have a Camera3D in scope (e.g. draw_terrain_mesh, which
+/// only has the mesh + config). Skips if `projection_is_ortho` is true,
+/// which the caller can detect by querying the active camera's projection.
+/// For the common case (perspective scene), pass false.
+void extend_far_plane(float fovy_deg, bool projection_is_ortho,
+                      float near_ft, float far_ft);
 } // namespace f4::renderer
 
 

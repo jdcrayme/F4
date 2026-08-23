@@ -48,6 +48,13 @@ struct TerrainMeshConfig {
     /// Number of grid cells per side. The mesh has (resolution+1)²
     /// vertices. Default 64 → 4225 vertices, 4096 triangles — cheap.
     /// Bump to 128 for closer shots, down to 32 for far overview.
+    ///
+    /// HARD CAP: resolution must satisfy (resolution+1)² ≤ 65534, since
+    /// Raylib's Mesh.indices is unsigned short. build_terrain_mesh()
+    /// clamps resolution to 254 (255² = 65025 verts, max idx 65024) and
+    /// logs a warning if the requested value exceeded the cap. Values of
+    /// 256 or higher would silently wrap indices and produce "triangles
+    /// stretching across the entire terrain" artifacts.
     int resolution = 64;
 
     /// Vertical exaggeration factor. 1.0 = real elevations. 2.0 = doubled
@@ -64,6 +71,26 @@ struct TerrainMeshConfig {
     ///   true  → per-vertex color from tile_type palette (water=blue, etc.)
     ///   false → single color (grass green) for all vertices
     bool color_by_tile_type = true;
+
+    /// Optional far-plane override (feet). When >0, draw_terrain_mesh()
+    /// calls extend_far_plane() with this value before drawing, so the
+    /// terrain is never clipped by Raylib's default RL_CULL_DISTANCE_FAR.
+    /// Default 250000 ft covers a 100000-ft terrain extent plus a
+    /// 20000-ft camera distance with margin to spare. Set to 0 to
+    /// disable the override (use whatever projection the caller set up).
+    /// Must be greater than near_plane_ft when nonzero.
+    float far_plane_ft = 250000.0f;
+
+    /// Near plane paired with far_plane_ft. Only used when far_plane_ft > 0.
+    /// Default 1.0 ft keeps depth precision sane (1:250000 ratio) without
+    /// clipping the cockpit/close terrain in front of the camera.
+    float near_plane_ft = 1.0f;
+
+    /// Field of view (degrees) used by draw_terrain_mesh() when it
+    /// applies the far_plane_ft override. Default 45° matches the
+    /// OrbitCamera/FreeCamera default. Set this to your scene camera's
+    /// actual fovy to keep the projection consistent.
+    float camera_fovy_deg = 45.0f;
 };
 
 /// A built terrain mesh + its placement. The mesh is owned by the caller

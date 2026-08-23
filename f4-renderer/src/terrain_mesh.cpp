@@ -13,12 +13,14 @@
 
 #include <f4/renderer/terrain_mesh.hpp>
 #include <f4/renderer/coord_transform.hpp>  // enu_to_raylib
+#include <f4/renderer/draw_3d.hpp>        // extend_far_plane
 
 #include <raylib.h>
 #include <rlgl.h>              // rlDisableBackfaceCulling, rlEnableBackfaceCulling
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <vector>
 
 namespace f4::renderer {
@@ -28,15 +30,26 @@ namespace f4::renderer {
 // avoid the f4-terrain → f4-renderer dependency (f4-renderer already
 // depends on f4-terrain transitively via f4-world, but keeping the
 // interpolation local makes this file self-contained).
+//
+// Theater size in feet: hardcoded to 1024 × 1024 ft = 1,048,576 ft per
+// side, matching TerrainDataAdapter::ft_per_cell() in f4-terrain. This
+// is correct for Korea (the only theater currently supported). The
+// THEATER.MAP header's `ft_to_mea_cell` field would in principle give
+// a per-theater value, but its semantics are unclear (the Korea fixture
+// reads 941611082, which doesn't match any obvious feet/cell ratio),
+// so we keep the hardcoded constant until the field is reverse-engineered.
+// See f4-terrain/include/f4/terrain/terrain_data.hpp for the field layout.
+static double theater_ft_per_cell(const f4::terrain::TerrainData& td) {
+    const double theater_size_ft = 1024.0 * 1024.0;
+    const double w = static_cast<double>(td.header.width > 0 ? td.header.width : 128);
+    return theater_size_ft / w;
+}
+
 static double bilinear_elevation(const f4::terrain::TerrainData& td,
                                   double east_ft, double north_ft) {
     if (td.elevation.empty()) return 0.0;
 
-    // Theater: 1024 grid units × 1024 ft/unit = 1,048,576 ft per side.
-    // Terrain: 128 cells (typical). ft_per_cell = 1048576 / 128 = 8192.
-    const double theater_size_ft = 1024.0 * 1024.0;
-    const double w = static_cast<double>(td.header.width > 0 ? td.header.width : 128);
-    const double ft_per_cell = theater_size_ft / w;
+    const double ft_per_cell = theater_ft_per_cell(td);
     if (ft_per_cell <= 0.0) return 0.0;
 
     const double fx = east_ft / ft_per_cell;
@@ -81,7 +94,25 @@ TerrainMesh build_terrain_mesh(const f4::terrain::TerrainData& terrain,
         return tm;
     }
 
-    const int res = std::max(2, config.resolution);
+    // ── Index type cap ───────────────────────────────────────────────────
+    // Raylib's Mesh.indices is `unsigned short*`, so vertex indices must
+    // fit in 65535. With (res+1)² vertices, the max vertex index is
+    // (res+1)² - 1. Cap res at 254 (→ 65025 verts, max idx 65024) and
+    // warn if the caller asked for more — a higher value would silently
+    // wrap indices and produce "triangles stretching across the entire
+    // terrain" artifacts.
+    static constexpr int kMaxResolution = 254;  // (254+1)² - 1 = 65024
+    int req_res = config.resolution;
+    if (req_res > kMaxResolution) {
+        std::fprintf(stderr,
+            "terrain_mesh: resolution=%d exceeds unsigned-short index cap "
+            "(max %d); clamping. Reduce resolution to avoid this warning.\n",
+            req_res, kMaxResolution);
+        req_res = kMaxResolution;
+    }
+    tm.config.resolution = req_res;
+
+    const int res = std::max(2, req_res);
     const int vert_count = (res + 1) * (res + 1);
     const int tri_count = res * res * 2;
 
@@ -132,9 +163,9 @@ TerrainMesh build_terrain_mesh(const f4::terrain::TerrainData& terrain,
             Color c;
             if (config.color_by_tile_type) {
                 // Sample the terrain tile type at this position.
-                const double theater_size_ft = 1024.0 * 1024.0;
-                const double w = static_cast<double>(terrain.header.width > 0 ? terrain.header.width : 128);
-                const double ft_per_cell = theater_size_ft / w;
+                // theater_ft_per_cell() handles the (currently hardcoded)
+                // theater-size → cell-size conversion.
+                const double ft_per_cell = theater_ft_per_cell(terrain);
                 const uint32_t cx = std::min(static_cast<uint32_t>(east_ft / ft_per_cell),
                                               terrain.header.width - 1);
                 const uint32_t cy_raw = std::min(static_cast<uint32_t>(north_ft / ft_per_cell),
@@ -304,6 +335,35 @@ TerrainMesh build_terrain_mesh(const f4::terrain::TerrainData& terrain,
 
 void draw_terrain_mesh(const TerrainMesh& tm) {
     if (!tm.valid) return;
+
+    // ── Defensive far-plane extension ───────────────────────────────────
+    // Raylib's BeginMode3D uses RL_CULL_DISTANCE_FAR (patched to 100000 ft
+    // in the world-viewer, default 1000 ft elsewhere) as the projection
+    // far plane. For theater-scale terrain, this is too small: a 50000-ft
+    // half-extent mesh + a 20000-ft camera distance can put far-edge
+    // vertices past the far plane, causing triangles to clip out at
+    // certain camera angles (the "triangles disappearing at certain
+    // angles" symptom) and producing visual stretches when a triangle
+    // straddles the clip plane.
+    //
+    // When the caller sets TerrainMeshConfig::far_plane_ft > 0 (default
+    // 250000 ft), we override the projection here so terrain rendering
+    // is correct regardless of whether the caller remembered to call
+    // extend_far_plane() themselves. This makes draw_terrain_mesh()
+    // self-healing — the scenario-player already extends via
+    // render_world(), and the world-viewer extends explicitly, but any
+    // future caller gets the right behavior for free.
+    //
+    // The override preserves the camera's FOV (from the config) and the
+    // active render target's aspect ratio (read inside extend_far_plane).
+    if (tm.config.far_plane_ft > 0.0f &&
+        tm.config.far_plane_ft > tm.config.near_plane_ft) {
+        extend_far_plane(tm.config.camera_fovy_deg,
+                         /*projection_is_ortho=*/false,
+                         tm.config.near_plane_ft,
+                         tm.config.far_plane_ft);
+    }
+
     // Disable backface culling — the terrain mesh should be visible from
     // both above and below (e.g. when the camera dips below a ridge line).
     // Also protects against any winding-convention mismatch.

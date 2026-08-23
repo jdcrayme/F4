@@ -36,7 +36,8 @@
 
 #include <f4/entities/entity.hpp>
 #include <f4/viewer/enum_text.hpp>
-#include <f4/renderer/entity_render.hpp>     // EntityRenderResources, make_entity_render_resources
+#include <f4/renderer/draw_3d.hpp>          // extend_far_plane
+#include <f4/renderer/entity_render.hpp>    // EntityRenderResources, make_entity_render_resources
 #include <f4/renderer/layout_draw.hpp>
 #include <f4/renderer/scene_draw.hpp>            // draw_airfield_geometry
 
@@ -459,6 +460,22 @@ void ViewerApp::draw_ground_layout_3d() {
     {
         ClearBackground(BG_COLOR);
         BeginMode3D(impl_->gl3d_orbit_cam.camera());
+
+        // CRITICAL: extend the projection's far plane beyond Raylib's
+        // RL_CULL_DISTANCE_FAR default. The world-viewer's CMakeLists
+        // patches RL_CULL_DISTANCE_FAR to 100000 ft (see worklog GEO/3D-fix),
+        // but that's still too small for theater-scale terrain: a 50000-ft
+        // half-extent terrain mesh centered on an objective + a 20000-ft
+        // orbit distance puts the far edge ~70000+ ft from the camera, and
+        // a steep viewing angle pushes it past 100000 ft → triangles clip
+        // out as the camera orbits. Matching the scenario-player's
+        // render_world() pipeline (which uses near=1, far=250000) makes
+        // both apps behave identically and gives 1:250000 depth precision
+        // (vs the default 0.01:100000 = 1:10M, which shimmers badly).
+        f4::renderer::extend_far_plane(
+            impl_->gl3d_orbit_cam.camera(),
+            /*near_ft=*/1.0f,
+            /*far_ft=*/250000.0f);
         {
             // CRITICAL: disable backface culling. Our ground quads have
             // arbitrary winding (the layout data doesn't guarantee CCW),
