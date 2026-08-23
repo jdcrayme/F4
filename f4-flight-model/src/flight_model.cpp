@@ -194,9 +194,14 @@ void FlightModel::initTrimAndAtmosphere(double initialAltitude_ft) {
 
     // --- FCS filter initialization ---
     // Initialize the pitch lead-lag filter to the trim alpha so the first
-    // frame doesn't produce a transient.
+    // frame doesn't produce a transient. ALSO seed the pitch integrator
+    // to the trim alpha — without this, the integrator starts at 0 and
+    // the FCS drives alpha toward 0 on the first frame (the "altitude
+    // phugoid" symptom — FLIGHT_CONTROL_STABILITY_PLAN.md §4.2 RC-1).
+    // trim() re-seeds with the converged value if called.
     state_.fcs.pitchAlphaLag.reset(to_degrees(state_.aero.alpha));
     state_.fcs.pitchRateLag.reset(0.0);
+    state_.fcs.pitchIntegral.reset(to_degrees(state_.aero.alpha));
     state_.fcs.aoacmd = state_.aero.alpha;
 
     // --- Set theta so gamma = theta - alpha = 0 (level flight) ---
@@ -514,6 +519,23 @@ bool FlightModel::trim() {
             state_.aero.zsaero += zsprop;
             state_.aero.xwaero += xsprop * state_.kin.cosbet;
             accelerometers();
+            // Seed the FCS pitch integrator from the trim alpha so the
+            // first frame after trim doesn't dive. The FCS pitch law is:
+            //   aoacmd = (eprop + eintg) * plsdamp
+            // At trim, error = 0 so eprop = 0, and we want aoacmd to equal
+            // the trim alpha (in degrees). Seeding eintg to the trim alpha
+            // makes the FCS hold trim when pstick=0 instead of driving
+            // alpha toward 0 (the documented "altitude phugoid" symptom —
+            // see FLIGHT_CONTROL_STABILITY_PLAN.md §4.2 RC-1).
+            //
+            // The exact value depends on plsdamp (which varies per frame
+            // with qbar), but seeding to the trim alpha in degrees is the
+            // right first-order approximation: the closed loop corrects
+            // any small residual within a few frames.
+            const double trim_alpha_deg = to_degrees(state_.aero.alpha);
+            state_.fcs.pitchIntegral.reset(trim_alpha_deg);
+            state_.fcs.pitchAlphaLag.reset(trim_alpha_deg);
+            state_.fcs.aoacmd = state_.aero.alpha;
             state_.trimming = false;
             return true;
         }

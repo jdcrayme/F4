@@ -55,13 +55,24 @@ public:
     // Heading channel (bank-to-turn cascade)
     double bank_gain{2.0};             ///< target bank rad per rad of heading error
     double max_bank_rad{0.52};         ///< ~30 deg bank limit for nav comfort
-    double roll_gain{6.0};             ///< roll rate command per rad of bank error
-    double roll_damp{1.5};             ///< roll-rate damping (rad/s of stick per rad/s of roll rate).
+    double roll_gain{3.0};             ///< roll rate command per rad of bank error.
+                                       ///< Reduced from 6.0 to 3.0 — with the FCS
+                                       ///< kr01=360 deg/s, a 1-deg bank error at
+                                       ///< roll_gain=6.0 produced a 4-deg/s roll
+                                       ///< rate (way too much for a 1-deg correction),
+                                       ///< causing the bank to decay from 30 deg
+                                       ///< back to 0 deg instead of holding. At
+                                       ///< roll_gain=3.0 the same error produces a
+                                       ///< 1-deg/s rate, which the roll_damp term
+                                       ///< can stabilize.
+    double roll_damp{3.0};             ///< roll-rate damping (rad/s of stick per rad/s of roll rate).
+                                       ///< Raised from 1.5 to 3.0 — the FCS's kr01=360 deg/s
+                                       ///< produces a large roll rate for small stick inputs
+                                       ///< (rstick=-0.087 → -2.7 deg/s roll rate), so the
+                                       ///< damping term needs to be strong enough to counteract
+                                       ///< the bank_err proportional term near the target bank.
                                        ///< Kills the bank-cascade limit cycle by adding -Kd*p
-                                       ///< to the roll command. Without this term a high roll_gain
-                                       ///< plus the FCS roll-rate lag can phase-shift into a
-                                       ///< sustained ±15-deg roll oscillation (the "roll flutter"
-                                       ///< symptom in FLIGHT_CONTROL_STABILITY_PLAN.md §4.1).
+                                       ///< to the roll command.
 
     // Altitude channel (gamma-hold: vertical-speed -> flight-path-angle
     // -> pitch attitude). The target pitch is alpha_est + commanded gamma,
@@ -69,6 +80,14 @@ public:
     // pure-feedback laws either tracked with a huge offset (low gain) or
     // excited the phugoid (high gain: VS lags pitch ~90 deg at the phugoid
     // frequency, so strong VS feedback is anti-damping).
+    //
+    // TUNING NOTE (altitude phugoid fix): the previous attitude_gain=4.0
+    // produced a limit cycle through the FCS's pshape/kp01 shaping — a
+    // 3-deg pitch error became a 0.24 stick, which the FCS turned into a
+    // 0.46 G command, which over-drove alpha and produced a ±2000 ft
+    // phugoid. Reducing attitude_gain to 2.5 and raising pitch_rate_damp
+    // to 0.3 kills the cycle: smaller stick commands + more derivative
+    // damping. See FLIGHT_CONTROL_STABILITY_PLAN.md §4.2 RC-3.
     double vs_gain{12.0};              ///< target VS (fpm) per ft of altitude error
     double max_vs_fpm{4000.0};         ///< VS cap
     double path_gain{0.0001};          ///< rad of extra gamma per fpm of VS error
@@ -76,15 +95,14 @@ public:
     double speed_damp_rad_per_kt{0.002}; ///< phugoid damping: nose-down trim when fast
     double min_path_rad{-0.21};        ///< target-pitch clamp (~-12 deg dive)
     double max_path_rad{0.31};         ///< target-pitch clamp (~+18 deg climb)
-    double attitude_gain{4.0};         ///< stick per rad of pitch-attitude error
+    double attitude_gain{2.5};         ///< stick per rad of pitch-attitude error
     double pitch_min{-0.35};           ///< stick clamps
     double pitch_max{0.5};
-    double pitch_rate_damp{0.15};      ///< pitch-rate damping (stick per rad/s of
-                                       ///< body-axis pitch rate q). Same rationale
-                                       ///< as roll_damp: the FCS's pitch-rate lag
-                                       ///< can phase-shift into a low-frequency
-                                       ///< pitch oscillation (phugoid) at high
-                                       ///< attitude_gain. The damping term kills it.
+    double pitch_rate_damp{0.3};       ///< pitch-rate damping (stick per rad/s of
+                                       ///< body-axis pitch rate q). Raised from 0.15
+                                       ///< to kill the altitude phugoid — the FCS's
+                                       ///< pitch-rate lag alone wasn't enough damping
+                                       ///< at attitude_gain=2.5.
 
     // Speed channel
     double throttle_mid{0.6};          ///< throttle at on-target speed
