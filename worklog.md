@@ -2529,3 +2529,34 @@ Stage Summary:
 - Updated patch: /home/z/my-project/download/terrain-in-scenario-player.patch (1482 lines)
 - Applies on top of replay-viewer-mode.patch
 - Terrain rendering is now fully unified across both apps via render_world()
+
+---
+Task ID: ALT-2
+Agent: main (orchestrator)
+Task: Implement alpha_bias feedforward in the FCS pitch channel (FreeFalcon's α_bias = [g·cos(γ)·cos(μ) / q_som + 0.1·gear − CL₀·TEF_factor] / CL_α,0 − tefFactor + lefFactor) to make pstick=0 command the 1-G trim alpha by construction, eliminating the need for the integrator-seeding hack.
+
+Work Log:
+- Built a standalone diagnostic (/tmp/alt_diag.cpp) that prints a per-second time-series of the closed loop (alt, vs, pitch, alpha, pstick, throttle, ptcmd, nzcgs). This was the key tool — the per-second data made the phugoid visible and measurable.
+- Implemented the alpha_bias feedforward in fcs.cpp runPitch: computed α_bias from the current flight conditions (qsom, cosgam, cosmu, gearPos, clift0, clalph0, tefFactor, lefFactor) and added it to aoacmd: `aoacmd = alpha_bias_deg + (eprop + eintg) * plsdamp`.
+- Hit two bugs in the formula:
+  1. First attempt used `0.1 * gearPos * qsom / GRAVITY` for the gear term — wrong. The FreeFalcon formula is `0.1·gear` (a small dimensionless correction, NOT scaled by qsom/g). The `0.1·gear·qsom/g` version produced a huge bias that saturated alpha at aoamax=35° and the aircraft dove from 10000 ft to 3281 ft in 30 s.
+  2. Second attempt multiplied by RTD (radians-to-degrees) — wrong. clalph0 is per-DEGREE (not per-radian), as confirmed by its use in computeGains line 215 (gsAvail = aoaMax_deg * clalph0 * qsom / g). So cl_needed / clalph0 is already in degrees. Multiplying by RTD produced a 280° bias (same saturation + dive).
+- After fixing both bugs, the bias correctly produced ~4.89° at trim (trim alpha = 4.96°). But the closed loop was WORSE than the integrator-seeding baseline: 2556 ft range (vs 593 ft baseline). The aircraft climbed to 12535 ft and was still climbing at t=30s.
+- Root cause of the regression: the alpha_bias feedforward changes the FCS dynamics. The bias varies with flight conditions (cos(gamma), cos(mu), qsom all change during a climb), and the FCS lead-lag filter's LEAD term amplifies these changes — producing alpha overshoot that the AI cascade then over-corrects. The AI gains (attitude_gain=2.5, pitch_rate_damp=0.3) were tuned for the OLD FCS (no bias, integrator seeded); with the bias, the FCS is more responsive and the AI needs lower gains.
+- Attempted to retune: reduced attitude_gain from 2.5 to 1.5, reduced path_gain from 0.0001 to 0.00002, raised speed_damp from 0.002 to 0.004. Still 2445 ft range — the bias + lead-lag interaction is the fundamental issue, not just the gains.
+- REVERTED the alpha_bias changes (git checkout) and returned to the committed baseline (integrator seeding, no bias, 593 ft range).
+- Enabled the AltitudeCapture_From10000to11000 test to measure the capture transient: it overshoots by 2026 ft (final alt 13026, target 11000) and VS stdev is 1221 fpm in the last 5 s. Re-disabled it with a detailed comment explaining the failure mode and next steps.
+
+Results:
+- The alpha_bias feedforward is architecturally correct but needs deeper FCS work before it can replace the integrator-seeding hack. The FCS lead-lag filter's lead term amplifies bias changes, and the AI cascade gains need retuning for the new FCS dynamics.
+- Baseline (committed integrator seeding) is preserved: 593 ft range over 30 s level hold, 100% of 98 tests pass.
+- The altitude capture test is enabled as DISABLED with the measured failure (2026 ft overshoot, 1221 fpm VS stdev) — it's the verification target for the next attempt.
+
+Stage Summary:
+- Patch: /home/z/my-project/download/alpha-bias-investigation.patch (45 lines — just the test update + comment)
+- The alpha_bias implementation was reverted but the investigation is documented for the next attempt.
+
+Next steps (in order):
+1. The FCS lead-lag filter (F7Tust) needs to be studied more carefully. The lead term amplifies high-frequency input — when the bias changes frame-to-frame (due to changing flight conditions), the lead term overshoots. FreeFalcon's FCS may handle this differently (e.g. filtering the bias, or using a different lead-lag topology). Compare the F7Tust implementation against FreeFalcon's filter.
+2. Alternatively: keep the bias but make it SMOOTH — filter it with a first-order lag so it doesn't change faster than the FCS can respond. This would decouple the bias from the lead-lag dynamics.
+3. The altitude capture test (overshoots by 2000 ft) suggests the gamma-hold cascade needs a capture-damping term — when the altitude error is large, the vs_target saturates at max_vs_fpm, and the gamma_corr term can't provide enough damping. A gamma-rate feedback term (d(gamma)/dt) would be the proper phugoid damper during captures.
