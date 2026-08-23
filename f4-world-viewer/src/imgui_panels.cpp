@@ -117,6 +117,25 @@ void ViewerApp::draw_imgui() {
                 ImGui::EndMenu();
             }
             ImGui::Separator();
+            // Path B2: open a FlightRecorder trace JSON for replay.
+            // Uses the same pick_open_file pattern as the other Open
+            // menu items. On success, switches the viewer to replay
+            // mode (run() will dispatch to draw_replay_canvas +
+            // draw_replay_panel).
+            if (ImGui::MenuItem("Open Replay...", "Ctrl+R")) {
+                auto path = pick_open_file(
+                    "Open Flight Recording (trace.json)",
+                    "Flight Recording JSON (*.json)|All files (*.*)",
+                    {});
+                if (!path.empty()) {
+                    std::string err;
+                    if (!load_replay(path, &err)) {
+                        impl_->last_error = err;
+                        impl_->status_msg = "Replay load failed: " + err;
+                    }
+                }
+            }
+            ImGui::Separator();
             if (ImGui::MenuItem("Exit", "Alt+F4")) {
                 // Phase 2 fix: was a no-op (the comment admitted it).
                 // Now sets the should_exit flag, which run() checks each

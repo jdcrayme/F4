@@ -113,6 +113,8 @@ add_library(f4_world_viewer STATIC
     src/campaign_and_teams_view.cpp
     src/file_dialog.cpp
     src/settings.cpp
+    src/replay_mode.cpp
+    src/replay_view.cpp
     src/hex/hex_model.cpp
     src/hex/decoders.cpp
     src/hex/hex_inspector.cpp
@@ -143,6 +145,7 @@ target_link_libraries(f4_world_viewer PUBLIC
     f4-models
     f4-json
     f4-renderer
+    f4-recorder
 )
 target_link_libraries(f4_world_viewer PRIVATE raylib)
 # tinyfiledialogs needs to be compiled as C (it's a .c file). Set the

@@ -24,6 +24,7 @@
 
 #include <f4/install/installation.hpp>
 #include <f4/viewer/settings.hpp>
+#include <f4/viewer/replay_mode.hpp>
 #include <rlImGui.h>
 #include <raylib.h>
 #include <imgui.h>
@@ -105,6 +106,19 @@ void ViewerApp::run() {
         impl_->fit_to_world();
     }
 
+    // If a replay was loaded before run() (via --replay CLI flag or
+    // load_replay() called programmatically), fit the replay camera
+    // to the trail now that the window dimensions are known.
+    if (impl_->replay_needs_fit && impl_->replay.active()) {
+        fit_replay_camera(impl_->replay,
+                          static_cast<float>(impl_->window_w),
+                          static_cast<float>(impl_->window_h),
+                          impl_->replay_cam_x,
+                          impl_->replay_cam_y,
+                          impl_->replay_cam_zoom);
+        impl_->replay_needs_fit = false;
+    }
+
     while (!WindowShouldClose() && !impl_->should_exit) {
         // Handle window resize
         const int new_w = GetScreenWidth();
@@ -114,7 +128,14 @@ void ViewerApp::run() {
             impl_->window_h = new_h;
         }
 
-        handle_input();
+        // Dispatch input handling. Replay mode has its own input path
+        // (arrow keys for stepping, etc.); the normal canvas path
+        // handles pan/zoom/select.
+        if (impl_->replay.active()) {
+            handle_replay_input();
+        } else {
+            handle_input();
+        }
 
         // F2 = screenshot (useful for headless smoke tests)
         if (IsKeyPressed(KEY_F2)) {
@@ -131,21 +152,37 @@ void ViewerApp::run() {
         }
 
         // Phase 2: keyboard shortcuts.
-        //   F = fit to world
-        //   Esc = clear selection
+        //   F = fit to world (or fit to trail in replay mode)
+        //   Esc = clear selection (normal mode only — replay ignores)
         //   / = focus search box (handled in Layers panel via ImGui)
         if (IsKeyPressed(KEY_F) && !ImGui::GetIO().WantCaptureKeyboard) {
-            impl_->fit_to_world();
+            if (!impl_->replay.active()) {
+                impl_->fit_to_world();
+            }
+            // In replay mode, F is handled by handle_replay_input()
+            // (fit_replay_to_trail) — don't double-dispatch.
         }
         if (IsKeyPressed(KEY_ESCAPE) && !ImGui::GetIO().WantCaptureKeyboard) {
-            impl_->sel_kind = Impl::SelectionKind::None;
-            impl_->sel_entity = f4::entities::EntityId{};
+            if (!impl_->replay.active()) {
+                impl_->sel_kind = Impl::SelectionKind::None;
+                impl_->sel_entity = f4::entities::EntityId{};
+            }
         }
 
         BeginDrawing();
         ClearBackground(Color{20, 22, 28, 255});
-        draw_canvas();
-        draw_imgui();
+        if (impl_->replay.active()) {
+            draw_replay_canvas();
+            // The replay panel uses ImGui, so it must be wrapped in
+            // rlImGuiBegin/End — same as the normal draw_imgui() path.
+            // Without this, ImGui::Begin() asserts (g.WithinFrameScope).
+            rlImGuiBegin();
+            draw_replay_panel();
+            rlImGuiEnd();
+        } else {
+            draw_canvas();
+            draw_imgui();
+        }
         EndDrawing();
     }
 
@@ -196,6 +233,36 @@ void ViewerApp::set_initial_camera(float center_x, float center_y, float zoom) {
     impl_->cam_y = center_y;
     impl_->cam_zoom = zoom;
     impl_->initial_camera_set = true;
+}
+
+// ---------------------------------------------------------------------------
+// Replay mode (Path B2)
+// ---------------------------------------------------------------------------
+
+bool ViewerApp::load_replay(const std::filesystem::path& trace_json,
+                             std::string* err_out) {
+    std::string err;
+    const bool ok = f4::viewer::load_replay(impl_->replay, trace_json, &err);
+    if (!ok) {
+        if (err_out) *err_out = err;
+        impl_->last_error = err;
+        return false;
+    }
+    // Fit the replay camera to the trail so the whole flight is visible.
+    // Done lazily on the first draw_replay_canvas() call (camera fit
+    // needs window dimensions, which aren't set until run()).
+    impl_->replay_cam_x = 0.0f;
+    impl_->replay_cam_y = 0.0f;
+    impl_->replay_cam_zoom = 0.5f;
+    impl_->replay_needs_fit = true;
+    impl_->status_msg = "Replay loaded: " + trace_json.string() +
+                         " (" + std::to_string(impl_->replay.recording->size()) +
+                         " snapshots)";
+    return true;
+}
+
+bool ViewerApp::replay_active() const noexcept {
+    return impl_->replay.active();
 }
 
 } // namespace f4::viewer

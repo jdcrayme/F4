@@ -39,3 +39,23 @@ target_compile_definitions(test_hex_model PRIVATE
 )
 gtest_discover_tests(test_hex_model)
 
+# --- Replay mode tests (Path B2) ---
+# Exercises the ReplayState data model + load_replay + fit_replay_camera.
+# Pure data-layer tests — no raylib/imgui dep. The full render path is
+# exercised by the screenshot smoke test (cli/main.cpp --replay ...).
+# We compile replay_mode.cpp directly into the test target (rather than
+# linking against f4_world_viewer) because the viewer library pulls in
+# raylib + imgui, which we don't want in a unit test.
+add_executable(test_replay_mode
+    test_replay_mode.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/replay_mode.cpp
+)
+target_include_directories(test_replay_mode PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include
+)
+target_link_libraries(test_replay_mode PRIVATE
+    GTest::gtest_main
+    f4-recorder
+)
+gtest_discover_tests(test_replay_mode)
+

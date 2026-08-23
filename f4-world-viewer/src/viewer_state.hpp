@@ -33,6 +33,7 @@
 #include <f4/viewer/class_table_browser.hpp>
 #include <f4/viewer/symbol_creator.hpp>
 #include <f4/viewer/settings.hpp>
+#include <f4/viewer/replay_mode.hpp>   // ReplayState (Path B2 — trace playback)
 
 #include <f4/entities/entity.hpp>
 #include <f4/install/installation.hpp>
@@ -596,6 +597,46 @@ struct ViewerApp::Impl {
     /// returns false and sets models_3d_error (further calls are no-ops
     /// until models_3d_load_attempted is reset).
     bool ensure_models_3d_loaded();
+
+    // -----------------------------------------------------------------------
+    // Replay mode state (Path B2 — trace playback)
+    // -----------------------------------------------------------------------
+    //
+    // When a trace JSON is loaded via load_replay(), the viewer enters
+    // replay mode: run() dispatches to handle_replay_input() +
+    // draw_replay_canvas() + draw_replay_panel() instead of the normal
+    // canvas path. The replay has its OWN camera (separate from the
+    // campaign cam_x/cam_y/cam_zoom) because the trail lives in feet
+    // (not grid units) and is self-contained (no campaign world data
+    // needed).
+    //
+    // See replay_mode.hpp + replay_mode.cpp for the implementation.
+    ReplayState replay;
+
+    // Replay camera (feet-space, separate from campaign camera)
+    float replay_cam_x = 0.0f;          // ENU feet, centered on trail
+    float replay_cam_y = 0.0f;
+    float replay_cam_zoom = 0.5f;        // pixels per foot
+    bool replay_dragging = false;
+    Vector2 replay_drag_start = {0, 0};
+    float replay_drag_cam_x0 = 0.0f;
+    float replay_drag_cam_y0 = 0.0f;
+    /// Set by load_replay() when a trace is loaded; consumed once by
+    /// run() right after InitWindow to fit the replay camera to the
+    /// trail (camera fit needs window dimensions).
+    bool replay_needs_fit = false;
+
+    /// Replay camera world→screen transform (ENU feet → pixels).
+    /// Inline because it's used by the per-frame draw loop in
+    /// replay_mode.cpp and needs to be fast.
+    [[nodiscard]] Vector2 replay_world_to_screen(double ex_ft, double ey_ft) const {
+        const float cx = static_cast<float>(window_w) * 0.5f;
+        const float cy = static_cast<float>(window_h) * 0.5f;
+        return {
+            cx + (static_cast<float>(ex_ft) - replay_cam_x) * replay_cam_zoom,
+            cy - (static_cast<float>(ey_ft) - replay_cam_y) * replay_cam_zoom
+        };
+    }
 };
 
 } // namespace f4::viewer

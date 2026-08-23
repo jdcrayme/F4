@@ -146,6 +146,22 @@ public:
     /// launching the viewer focused on a region of interest.
     void set_initial_camera(float center_x, float center_y, float zoom);
 
+    // --- Replay mode (Path B2) -------------------------------------------
+    //
+    // Load a FlightRecorder trace JSON and switch the viewer to replay
+    // mode: the canvas shows the aircraft trail + current snapshot,
+    // and an ImGui panel exposes the per-tick state. See
+    // replay_mode.hpp for the data model.
+    //
+    // Returns true on success. On failure, sets err_out (if non-null)
+    // and returns false — the viewer stays in normal mode.
+    bool load_replay(const std::filesystem::path& trace_json,
+                     std::string* err_out = nullptr);
+
+    /// True when the viewer is in replay mode (a trace is loaded and
+    /// the run() loop will dispatch to the replay render path).
+    [[nodiscard]] bool replay_active() const noexcept;
+
     /// Test/smoke-test helper: schedule a screenshot to be taken after `delay_sec`
     /// seconds. Useful for headless verification on CI / Linux dev boxes.
     void schedule_screenshot(float delay_sec, const std::string& path);
@@ -175,6 +191,16 @@ private:
     /// Content-only — caller owns the window + tab item.
     void draw_ground_layout_3d();
     void draw_campaign_and_teams_view();
+
+    // --- Replay mode private draw path (Path B2) -------------------------
+    //
+    // Dispatched from run() when impl_->replay.active() is true, INSTEAD
+    // of handle_input + draw_canvas. The ImGui panel is drawn via
+    // draw_replay_panel() (replacing the normal draw_imgui content
+    // while a replay is loaded). See replay_mode.cpp.
+    void handle_replay_input();
+    void draw_replay_canvas();
+    void draw_replay_panel();
 };
 
 } // namespace f4::viewer

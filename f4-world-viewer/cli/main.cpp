@@ -8,6 +8,12 @@
 //   f4-world-viewer --install /path --campaign korea save1
 //                                                         -> set install + load
 //                                                            campaign in-process
+//   f4-world-viewer --replay trace.json                   -> open in REPLAY MODE
+//                                                            (Path B2 — steps
+//                                                            through a recorded
+//                                                            flight trace; see
+//                                                            Docs/DIGI_AI_PHASE2_PLAN.md
+//                                                            §7)
 //   f4-world-viewer --hex-inspect /path/to/file           -> open the Hex Inspector
 //                                                            panel with file loaded
 //   f4-world-viewer --install /path/to/falcon4 --diagnostics
@@ -88,6 +94,15 @@ int main(int argc, char** argv) {
     std::string list_files_path;
     bool have_list_files = false;
 
+    // --replay <path> — open a FlightRecorder trace JSON and switch
+    // the viewer to REPLAY MODE. See replay_mode.hpp. The viewer will
+    // render the trail + current snapshot + AI state panel instead of
+    // the normal campaign canvas. Useful for debugging AI scenarios
+    // after the fact — the trace is self-contained (no campaign data
+    // needed).
+    std::string replay_path;
+    bool have_replay = false;
+
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
         if (a == "--screenshot" && i + 1 < argc) {
@@ -125,6 +140,9 @@ int main(int argc, char** argv) {
         } else if (a == "--list-files" && i + 1 < argc) {
             list_files_path = argv[++i];
             have_list_files = true;
+        } else if (a == "--replay" && i + 1 < argc) {
+            replay_path = argv[++i];
+            have_replay = true;
         } else if (positional == 0) {
             try { app.load_world_json(a); }
             catch (const std::exception& e) { std::cerr << "world load: " << e.what() << "\n"; }
@@ -203,6 +221,19 @@ int main(int argc, char** argv) {
 
     if (have_initial_camera) {
         app.set_initial_camera(init_cx, init_cy, init_zoom);
+    }
+
+    // Apply --replay: load the trace JSON and switch to replay mode.
+    // This MUST happen after any --install / --campaign loading so the
+    // replay render path is the one that takes over when run() starts.
+    // (Replay mode is mutually exclusive with the campaign canvas —
+    // the viewer renders either one or the other.)
+    if (have_replay) {
+        std::string err;
+        if (!app.load_replay(replay_path, &err)) {
+            std::cerr << "replay load failed: " << err << "\n";
+            return 1;
+        }
     }
 
     if (exit_after_screenshot) {
