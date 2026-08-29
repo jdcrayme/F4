@@ -86,6 +86,8 @@ ScenarioAircraft read_aircraft(f4::json::Reader& r) {
                 "' has unknown parking mode '" + mode + "'");
         }
         else if (key == "parking_index")     a.parking_index = static_cast<int>(r.read_int());
+        else if (key == "initial_vt_fps")   a.initial_vt_fps = r.read_number();
+        else if (key == "spawn_in_air")     a.spawn_in_air = r.read_bool();
         else                                 skip_unknown(r);
     }
     return a;
@@ -188,6 +190,8 @@ Scenario parse_scenario(f4::json::Reader& r) {
         else if (key == "total_ticks")     s.total_ticks = static_cast<int>(r.read_int());
         else if (key == "record")          s.record = r.read_bool();
         else if (key == "record_path")     s.record_path = r.read_string();
+        else if (key == "fcs_trace_path")  s.fcs_trace_path = r.read_string();
+        else if (key == "start_in_approach") s.start_in_approach = r.read_bool();
         else if (key == "aircraft") {
             r.expect('[');
             bool arr_first = true;
@@ -339,6 +343,7 @@ Scenario load_scenario(const std::filesystem::path& json_path) {
     s.airbase_source.class_table_path = resolve(base_dir, s.airbase_source.class_table_path);
     s.class_table_path  = resolve(base_dir, s.class_table_path);
     s.record_path       = resolve(base_dir, s.record_path);
+    s.fcs_trace_path    = resolve(base_dir, s.fcs_trace_path);
 
     // Resolve aircraft config paths too.
     for (auto& a : s.aircraft) {

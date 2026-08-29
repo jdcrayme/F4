@@ -68,6 +68,39 @@ add_subdirectory(f4-flight-model)
 add_subdirectory(f4-recorder)        # Flight recording, replay, and LLM-friendly data export
 add_subdirectory(f4-ai)             # AI brain: SensorFusion + tactic modules (composed)
 add_subdirectory(f4-simulation)     # Orchestration: EntityWorld + MessageBus + ModelDatabase + tick loop (no rendering)
+
+# ── Configure the scenario JSON templates at build time ────────────────────
+# This block runs regardless of whether f4-scenario-player is built (the
+# scenarios are pure JSON consumed by f4-simulation tests + the player).
+# Substitutes @F4_SOURCE_DIR@, @F4_BINARY_DIR@, @F4_DIGI_CLASS_TABLE@ so the
+# scenarios can reference KoreaObj.HDR/.LOD/.TEX (in temp/), the generated
+# f16.json (in build/generated_fixtures/), and FALCON4.ct (from the install
+# when available, else the bundled fixture).
+#
+# Phase 0c (FLIGHT_CONTROL_NEXT_STEPS.md §3.2): the takeoff_only and
+# landing_only scenarios are isolated diagnostic scenarios. Each emits a
+# per-tick CSV trace via fcs_trace_path for offline plotting.
+if(F4_INSTALL AND EXISTS "${F4_INSTALL}/terrdata/objects/FALCON4.ct")
+    set(F4_DIGI_CLASS_TABLE "${F4_INSTALL}/terrdata/objects/FALCON4.ct")
+else()
+    set(F4_DIGI_CLASS_TABLE "${CMAKE_SOURCE_DIR}/f4-world-convert/tests/fixtures/FALCON4.ct")
+endif()
+
+set(F4_SCENARIO_TEMPLATES
+    f4-scenario-player/scenarios/kunsan_parking.json.in
+    f4-scenario-player/scenarios/digi_full_mission.json.in
+    f4-scenario-player/scenarios/takeoff_only.json.in
+    f4-scenario-player/scenarios/landing_only.json.in
+)
+foreach(template ${F4_SCENARIO_TEMPLATES})
+    get_filename_component(scenario_name ${template} NAME_WE)
+    configure_file(
+        ${CMAKE_SOURCE_DIR}/${template}
+        ${CMAKE_BINARY_DIR}/scenarios/${scenario_name}.json
+        @ONLY
+    )
+endforeach()
+
 option(F4_BUILD_SCENARIO_PLAYER "Build the f4-scenario-player (requires X11 + OpenGL dev headers)" ON)
 if(F4_BUILD_SCENARIO_PLAYER)
     add_subdirectory(f4-scenario-player)  # Host executable: loads a scenario, runs the sim, renders with Raylib

@@ -85,17 +85,6 @@ if(F4_INSTALL AND EXISTS "${F4_INSTALL}/terrdata/objects/FALCON4.ct")
 else()
     set(F4_DIGI_CLASS_TABLE "${CMAKE_SOURCE_DIR}/f4-world-convert/tests/fixtures/FALCON4.ct")
 endif()
-
-configure_file(
-    ${CMAKE_CURRENT_SOURCE_DIR}/scenarios/kunsan_parking.json.in
-    ${CMAKE_BINARY_DIR}/scenarios/kunsan_parking.json
-    @ONLY
-)
-configure_file(
-    ${CMAKE_CURRENT_SOURCE_DIR}/scenarios/digi_full_mission.json.in
-    ${CMAKE_BINARY_DIR}/scenarios/digi_full_mission.json
-    @ONLY
-)
 # The DIGI mission scenario needs the real world JSON (generated from the
 # Falcon install when F4_INSTALL is set).
 if(TARGET korea-real-world-json)

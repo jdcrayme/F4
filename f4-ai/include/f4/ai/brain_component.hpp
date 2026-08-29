@@ -72,6 +72,16 @@ struct MissionPlan {
     /// Approach style at the end of the route: false = straight-in final
     /// (default), true = full traffic pattern (downwind/base/final).
     bool fly_traffic_pattern{false};
+
+    /// Starting mission phase. Default Ground (taxi -> takeoff -> ...).
+    /// Set to Approach to skip directly to the landing module — used by
+    /// the isolated `landing_only` diagnostic scenario which spawns the
+    /// aircraft already on final (see FLIGHT_CONTROL_NEXT_STEPS.md §3.2).
+    /// When set to Approach, the host MUST also set the route's last
+    /// waypoint at the approach entry fix — the brain uses that position
+    /// to configure the LandingModule.
+    enum class StartPhase { Ground, Approach };
+    StartPhase start_phase{StartPhase::Ground};
 };
 
 // ============================================================================
@@ -120,6 +130,27 @@ public:
             if (!world) return;
             takeoff_.initialize(owner_.id().value, *world, bus);
             takeoff_initialized_ = true;
+        }
+
+        // Phase 0c (isolated scenarios): if the mission plan says to start
+        // in Approach, skip the takeoff/navigation phases entirely. The
+        // host spawns the aircraft airborne on final, and the brain hands
+        // off directly to the LandingModule (configured with the route's
+        // last waypoint as the approach entry fix). Used by the
+        // `landing_only` diagnostic scenario.
+        if (phase_ == Phase::Ground &&
+            plan_.start_phase == MissionPlan::StartPhase::Approach &&
+            !plan_.route.empty()) {
+            auto* world = owner_.world();
+            if (world) {
+                const auto& entry_fix = plan_.route.back().position;
+                landing_.configure(entry_fix, plan_.taxi_in_route);
+                landing_.fly_traffic_pattern = plan_.fly_traffic_pattern;
+                landing_.initialize(owner_.id().value, *world, bus);
+                phase_ = Phase::Approach;
+            } else {
+                phase_ = Phase::Complete;
+            }
         }
 
         // Sequence the mission phases.
@@ -258,6 +289,13 @@ private:
         pi.gearHandle = ai_out.gear_handle_down ? 1.0 : -1.0;
         pi.wheelBrakes = ai_out.wheel_brakes;
         pi.parkingBrake = ai_out.parking_brake;
+        // Phase C1: forward flap commands to the FM. The FM already actuates
+        // tefPos/lefPos from these fields (flight_model.cpp:453-454); before
+        // this wiring the AI never set them so the aircraft always flew with
+        // flaps retracted — causing 60+ kt excess approach speed and
+        // doubling the landing roll distance.
+        pi.tefCmd = ai_out.tef_cmd;
+        pi.lefCmd = ai_out.lef_cmd;
         pi.noseSteerOn = true;  // always on for AI
         pi.validate();
         return pi;

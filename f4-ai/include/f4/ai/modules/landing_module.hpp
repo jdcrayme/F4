@@ -141,7 +141,15 @@ public:
     [[nodiscard]] AIControlOutput hold_complete() const;
 
     // --- Configuration (public doubles, f4-ai module convention) ---
-    double approach_speed_kts{210.0};   // final approach CAS
+    double approach_speed_kts{160.0};   // final approach CAS (Phase C3: lowered
+                                        // from 210 to 160 — flaps extended on
+                                        // final (Phase C2) drop the stall speed
+                                        // ~30 kts, allowing a slower approach.
+                                        // 160 kts is realistic for an F-16 in
+                                        // landing configuration; the prior 210
+                                        // was "clean" approach speed and was the
+                                        // single biggest contributor to long
+                                        // landings).
     double fix_radius_ft{2500.0};       // "reached" radius for the entry fix
     double fix_abeam_ft{15000.0};       // off-nose capture distance window
     double fix_abeam_bearing_rad{1.4};  // ~80 deg off the nose = "passed it"
@@ -211,15 +219,51 @@ public:
     double establish_hdg_tol_rad{0.26}; // ~15 deg on-course for Established
     double establish_lateral_ft{500.0}; // localizer capture tolerance
     double localizer_gain{0.0015};      // heading correction per ft of xtrack
-    double max_localizer_corr_rad{0.5}; // ~30 deg correction clamp
+    // Phase B1 (FLIGHT_CONTROL_NEXT_STEPS.md §4 Phase B1): raised from 0.5
+    // rad (~30 deg) to 0.87 rad (~50 deg). At 0.5 rad the correction
+    // saturated at 333 ft cross-track (0.5 / 0.0015), so beyond 333 ft off
+    // centerline the aircraft turned at max 30-deg bank — too shallow to
+    // close a 1000+ ft intercept offset. At 0.87 rad the saturation point
+    // is ~580 ft, allowing the aircraft to point more aggressively at the
+    // centerline during intercept. The actual intercept geometry (Phase B2)
+    // takes over beyond 1000 ft and aims at a point ahead on the centerline.
+    double max_localizer_corr_rad{0.87}; // ~50 deg correction clamp
+    /// Phase B2 (FLIGHT_CONTROL_NEXT_STEPS.md §4 Phase B2): beyond this
+    /// cross-track (feet), the localizer correction is replaced by a direct
+    /// intercept heading aimed at a point `intercept_lead_ft` ahead on the
+    /// centerline. Standard ILS intercept geometry — at large offset the
+    /// proportional localizer law saturates and can't close the gap fast
+    /// enough; aiming at a point ahead closes it geometrically.
+    double intercept_offset_ft{1000.0};
+    /// Phase B2: how far ahead of the current position the intercept aims
+    /// (feet along the centerline). 1500 ft at 200 kts gives a ~25-deg
+    /// intercept angle, which is the standard ILS intercept geometry.
+    double intercept_lead_ft{1500.0};
     double flare_agl_ft{60.0};          // begin the flare below this AGL
     double flare_pitch_deg{8.0};        // flare target pitch attitude
     double flare_pitch_gain{3.0};       // stick per rad of pitch error
+    // Phase C2 (FLIGHT_CONTROL_NEXT_STEPS.md §4 Phase C2): flap settings
+    // commanded on OnFinal entry (and held through touchdown). The FM
+    // already actuates tefPos/lefPos from PilotInput.tefCmd/lefCmd
+    // (flight_model.cpp:453-454); these fields are what gets copied into
+    // the AIControlOutput every tick during OnFinal + Flare. Real F-16
+    // landing config is TEF full down (1.0) + LEF ~60% (0.6); the exact
+    // values may need per-aircraft tuning via the .dat aero tables.
+    double landing_tef_cmd{1.0};        // TEF (trailing-edge flap) on final
+    double landing_lef_cmd{0.6};        // LEF (leading-edge flap) on final
     double rollout_exit_speed_kts{10.0};// slow to this before taxiing off
     double taxi_speed_kts{15.0};        // taxi-in speed
     double taxi_wp_capture_radius_ft{40.0};
     double dh_goaround_agl_ft{200.0};   // DH: below this uncleared = go around
-    double missed_along_ft{4000.0};     // past-threshold airborne distance -> go
+    // Phase C5 (FLIGHT_CONTROL_NEXT_STEPS.md §4 Phase C5): tightened from
+    // 4000 ft to 2500 ft. With the energy-managed flare (Phase C4) the
+    // aircraft should touch down within ±500 ft of the aim point, so a
+    // 4000 ft past-threshold go-around window was far too generous —
+    // it let unstable approaches continue past the point where they
+    // could be salvaged. 2500 ft is still well within a typical 5000-8500 ft
+    // runway but tight enough to force a go-around when the predicted
+    // touchdown is genuinely bad.
+    double missed_along_ft{2500.0};     // past-threshold airborne distance -> go
                                         // around (far enough in that a normal
                                         // high crossing can flare inside the
                                         // runway first)
@@ -243,6 +287,19 @@ public:
     // --- Human-readable names ---
     [[nodiscard]] std::string state_name() const;
     [[nodiscard]] std::string mode_name() const { return "LandingMode"; }
+
+    // --- Final-course geometry (from the cached state + clearance) ---
+    // Exposed for the FCS trace exporter and for hosts that need to read
+    // the active approach's beam geometry.
+    [[nodiscard]] double course_along_ft() const;    // <0 before threshold
+    [[nodiscard]] double course_lateral_ft() const;  // >0 right of course
+    [[nodiscard]] double glide_slope_alt_ft() const; // target MSL on the beam
+    [[nodiscard]] double localizer_heading_rad() const; // corrected desired hdg
+    /// Runway heading (rad, compass). Exposed for the FCS trace exporter
+    /// and for hosts that need to read the cleared final approach course.
+    [[nodiscard]] double runway_heading_rad() const noexcept {
+        return runway_heading_rad_;
+    }
 
 private:
     [[nodiscard]] fsm::StateMachine<LandingState, LandingEvent> build_sm();
@@ -272,12 +329,6 @@ private:
     [[nodiscard]] AIControlOutput controls_for_taxi_in() const;
     [[nodiscard]] AIControlOutput controls_for_parked() const;
     [[nodiscard]] AIControlOutput controls_for_go_around() const;
-
-    // Final-course geometry from the cached state + clearance.
-    [[nodiscard]] double course_along_ft() const;    // <0 before threshold
-    [[nodiscard]] double course_lateral_ft() const;  // >0 right of course
-    [[nodiscard]] double glide_slope_alt_ft() const; // target MSL on the beam
-    [[nodiscard]] double localizer_heading_rad() const; // corrected desired hdg
 
     // Traffic-pattern geometry (from the clearance; valid once granted).
     // Lateral convention matches course_lateral_ft(): negative = LEFT of

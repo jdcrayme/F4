@@ -185,6 +185,40 @@ TEST_F(LandingTestFixture, LocalizerCorrectionSteersLeftWhenRightOfCourse) {
     EXPECT_TRUE(out.gear_handle_down);
 }
 
+TEST_F(LandingTestFixture, LocalizerInterceptLeadForLargeOffset) {
+    // Phase B2 (FLIGHT_CONTROL_NEXT_STEPS.md §4 Phase B2): when far from the
+    // centerline (|xtrack| > intercept_offset_ft, default 1000 ft), the
+    // localizer uses a direct intercept heading (aiming at a point
+    // intercept_lead_ft ahead on the centerline) instead of the saturated
+    // proportional correction. The aircraft should still steer toward the
+    // centerline, but the heading command is computed differently.
+    drive_to_on_final();
+    ASSERT_EQ(mod.state(), LandingState::OnFinal);
+
+    // 3000 ft right of the centerline — well into the intercept-lead regime.
+    auto s = on_final(3000.0, 30000.0, 800.0, 0.0);
+    const auto out = mod.update(0.1, s.get());
+    EXPECT_LT(out.roll_cmd, 0.0)
+        << "right of centerline must steer left, even at large offset";
+}
+
+TEST_F(LandingTestFixture, LocalizerInterceptSignFlipsWithOffsetSide) {
+    // The intercept lead angle sign must match the offset side: right of
+    // centerline -> steer left (negative roll); left of centerline -> steer
+    // right (positive roll). Both at 3000 ft offset (well into the intercept
+    // regime).
+    drive_to_on_final();
+    ASSERT_EQ(mod.state(), LandingState::OnFinal);
+
+    auto s_right = on_final(3000.0, 30000.0, 800.0, 0.0);
+    const auto out_right = mod.update(0.1, s_right.get());
+    EXPECT_LT(out_right.roll_cmd, 0.0) << "right of centerline -> steer left";
+
+    auto s_left = on_final(-3000.0, 30000.0, 800.0, 0.0);
+    const auto out_left = mod.update(0.1, s_left.get());
+    EXPECT_GT(out_left.roll_cmd, 0.0) << "left of centerline -> steer right";
+}
+
 // ============================================================================
 // Flare / touchdown / rollout / taxi-in / parked
 // ============================================================================
@@ -195,11 +229,90 @@ TEST_F(LandingTestFixture, FlareBelowFlareHeight) {
     mod.update(0.1, s.get());
     ASSERT_EQ(mod.state(), LandingState::OnFinal);
 
-    s = on_final(0.0, 200.0, 25.0, 0.0);   // below 30 ft AGL
+    // Phase C4: the flare law now predicts the touchdown point. Use a
+    // realistic approach sink rate (-700 fpm) so the predicted touchdown
+    // lands within the runway bounds (otherwise the new energy-managed
+    // flare correctly triggers a go-around). At 25 ft AGL, 200 ft before
+    // threshold, 160 kts, -700 fpm: time_to_ground=2.14s, td_distance=577 ft,
+    // td_along=-200+577=377 ft, well within missed_along_ft (2500).
+    s = on_final(0.0, 200.0, 25.0, 0.0);
+    s->vs_fpm_ = -700.0;
     const auto out = mod.update(0.1, s.get());
     EXPECT_EQ(mod.state(), LandingState::Flare);
     EXPECT_NEAR(out.throttle_cmd, 0.0, 1e-9);
     EXPECT_GT(out.pitch_cmd, 0.0);          // pitch up to the flare attitude
+}
+
+TEST_F(LandingTestFixture, OnFinalExtendsFlaps) {
+    // Phase C2 (FLIGHT_CONTROL_NEXT_STEPS.md §4 Phase C2): OnFinal commands
+    // landing-flap configuration (TEF + LEF) every tick. The FM actuates
+    // the actual surfaces from PilotInput.tefCmd/lefCmd.
+    drive_to_on_final();
+    ASSERT_EQ(mod.state(), LandingState::OnFinal);
+
+    auto s = on_final(0.0, 5000.0, 1500.0, 0.0);
+    const auto out = mod.update(0.1, s.get());
+    EXPECT_GT(out.tef_cmd, 0.0) << "OnFinal should command TEF extension";
+    EXPECT_GT(out.lef_cmd, 0.0) << "OnFinal should command LEF extension";
+}
+
+TEST_F(LandingTestFixture, FlareHoldsFlapsExtended) {
+    // Phase C2: flaps stay extended through the flare (don't retract until
+    // rollout slows the aircraft).
+    drive_to_on_final();
+    auto s = on_final(0.0, 500.0, 800.0, 0.0);
+    mod.update(0.1, s.get());
+    s = on_final(0.0, 200.0, 25.0, 0.0);  // below flare height
+    const auto out = mod.update(0.1, s.get());
+    ASSERT_EQ(mod.state(), LandingState::Flare);
+    EXPECT_GT(out.tef_cmd, 0.0) << "Flare should keep TEF extended";
+    EXPECT_GT(out.lef_cmd, 0.0) << "Flare should keep LEF extended";
+}
+
+TEST_F(LandingTestFixture, EnergyManagedFlareModulatesPitchOnLongPrediction) {
+    // Phase C4 (FLIGHT_CONTROL_NEXT_STEPS.md §4 Phase C4): the flare law
+    // predicts the touchdown point and modulates pitch to manage energy.
+    // When the aircraft is fast (will land long), the flare should command
+    // MORE pitch (to bleed energy); when slow (will land short), LESS pitch.
+    //
+    // Test setup: aircraft approaches the threshold, descends through the
+    // flare height (60 ft AGL) at two different approach speeds. The
+    // high-energy case (250 kts) commands more pitch than the baseline
+    // (160 kts) because the predicted touchdown is farther past the aim.
+
+    // Step 1: drive to OnFinal. The on_enter(OnFinal) action publishes
+    // ApproachClearance; the StubATC responds with ClearedToLand. Match
+    // the existing FlareBelowFlareHeight test pattern: 1 tick above DH
+    // (200 ft) is sufficient for the clearance to propagate.
+    drive_to_on_final();
+    auto s_high_cruise = on_final(0.0, 800.0, 500.0, 0.0, 250.0);
+    s_high_cruise->vs_fpm_ = -500.0;
+    mod.update(0.1, s_high_cruise.get());
+
+    // Step 2: descend to flare height (50 ft AGL). The flare transition fires.
+    // on_final signature: on_final(east, dist_south, alt_agl, hdg, vcas)
+    auto s_high = on_final(0.0, 500.0, 50.0, 0.0, 250.0);
+    s_high->vs_fpm_ = -500.0;
+    const auto out_high = mod.update(0.1, s_high.get());
+    ASSERT_EQ(mod.state(), LandingState::Flare)
+        << "expected flare transition at 50 ft AGL; got state="
+        << static_cast<int>(mod.state());
+
+    // Reset and run the baseline case at 160 kts.
+    SetUp();
+    drive_to_on_final();
+    auto s_base_cruise = on_final(0.0, 800.0, 500.0, 0.0, 160.0);
+    s_base_cruise->vs_fpm_ = -500.0;
+    mod.update(0.1, s_base_cruise.get());
+
+    auto s_base = on_final(0.0, 500.0, 50.0, 0.0, 160.0);
+    s_base->vs_fpm_ = -500.0;
+    const auto out_base = mod.update(0.1, s_base.get());
+    ASSERT_EQ(mod.state(), LandingState::Flare);
+
+    EXPECT_GT(out_high.pitch_cmd, out_base.pitch_cmd)
+        << "high-energy flare should command MORE pitch to bleed energy "
+        << "(high=" << out_high.pitch_cmd << ", base=" << out_base.pitch_cmd << ")";
 }
 
 TEST_F(LandingTestFixture, TouchdownTransitionsToRolloutWithBrakes) {

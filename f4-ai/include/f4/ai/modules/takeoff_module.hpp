@@ -147,12 +147,21 @@ public:
     // Centerline alignment tolerance (feet). When the aircraft in
     // PrepToTakeRunway is within this lateral distance of the runway
     // centerline, it transitions to TakeRunway.
-    double centerline_align_tolerance_ft{10.0};
+    // Phase A3 (FLIGHT_CONTROL_NEXT_STEPS.md §4 Phase A3): tightened from
+    // 10 ft to 5 ft so the aircraft enters the takeoff roll with minimal
+    // lateral offset. Above 89 kts (150 ft/s) the EOM fades nose-wheel
+    // steering to 5 deg/s and the (now un-stubbed) FCS yaw damper takes
+    // over — but at low qbar the damper's authority is limited, so any
+    // lateral error at lineup compounds during the high-speed roll.
+    double centerline_align_tolerance_ft{5.0};
 
     // Heading alignment tolerance (radians). PrepToTakeRunway additionally
     // requires the heading to be within this of the runway heading before
     // taking the runway, and Takeoff/FlyOut hold the runway heading.
-    double heading_align_tolerance_rad{0.15};   // ~8.5 deg
+    // Phase A3: tightened from 0.15 rad (8.5 deg) to 0.009 rad (0.5 deg)
+    // for the same reason — even a small heading error at the start of the
+    // roll compounds above 89 kts.
+    double heading_align_tolerance_rad{0.009};   // ~0.5 deg
 
     // How far past the threshold the lineup target sits (feet). PrepToTakeRunway
     // steers toward this point on the runway centerline, then aligns heading.
@@ -192,6 +201,12 @@ public:
     // --- Human-readable names ---
     [[nodiscard]] std::string state_name() const;
     [[nodiscard]] std::string mode_name() const { return "TakeoffMode"; }
+
+    /// Runway heading (rad, compass). Set by the host at scenario load.
+    /// Exposed for the FCS trace exporter.
+    [[nodiscard]] double runway_heading_rad() const noexcept {
+        return runway_heading_rad_;
+    }
 
 private:
     // Build the state machine transition table.

@@ -20,6 +20,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # ---------------------------------------------------------------------------
 add_library(f4-recorder STATIC
     src/flight_recorder.cpp
+    src/fcs_trace.cpp
     src/path_geometry.cpp
 )
 target_link_libraries(f4-recorder PUBLIC f4_warnings)

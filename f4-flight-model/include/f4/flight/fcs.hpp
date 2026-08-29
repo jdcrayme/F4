@@ -6,8 +6,11 @@
 // and roll rate. It uses a closed-loop control system with:
 //   - Pitch: G-command PI controller with anti-windup, lead-lag filter
 //   - Roll: Rate command with alpha-based rate limiting
-//   - Yaw: Beta-command PI controller (mostly stubbed — the EOM has no
-//     rudder-to-yaw dynamics, so beta is forced to 0)
+//   - Yaw: Beta-command PI controller driving aero.beta directly; the EOM
+//     computes yaw rate `r` from the resulting side force. With the correct
+//     sign of ky05 this forms a NEGATIVE feedback loop (yaw damper) that
+//     damps sideslip during banked flight. Ground guard holds beta at 0
+//     during the takeoff roll. See FLIGHT_CONTROL_STABILITY_PLAN.md §4.1 RC-1.
 //
 // Ported from F4Flight's fcs.cpp, which is a port of FreeFalcon's
 // fcs.cpp, gain.cpp, pitch.cpp, roll.cpp, yaw.cpp.

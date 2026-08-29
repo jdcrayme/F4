@@ -395,7 +395,10 @@ TEST_F(TakeoffTestFixture, DefaultConfiguration) {
     EXPECT_NEAR(mod.gear_up_alt_ft, 200.0, 1e-6);
     EXPECT_NEAR(mod.takeoff_throttle, 1.0, 1e-6);
     EXPECT_NEAR(mod.taxi_wp_capture_radius_ft, 50.0, 1e-6);
-    EXPECT_NEAR(mod.centerline_align_tolerance_ft, 10.0, 1e-6);
+    // Phase A3: tightened from 10 ft to 5 ft.
+    EXPECT_NEAR(mod.centerline_align_tolerance_ft, 5.0, 1e-6);
+    // Phase A3: tightened from 0.15 rad (8.5 deg) to 0.009 rad (0.5 deg).
+    EXPECT_NEAR(mod.heading_align_tolerance_rad, 0.009, 1e-9);
 }
 
 // ============================================================================

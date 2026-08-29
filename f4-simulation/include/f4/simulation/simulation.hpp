@@ -46,7 +46,7 @@
 #include <f4/terrain/terrain_source.hpp>  // TerrainSource (Path B1)
 
 namespace f4::ai::atc { class StubATC; }
-namespace f4::recorder { class FlightRecorder; }
+namespace f4::recorder { class FlightRecorder; class FcsTraceWriter; }
 
 namespace f4::simulation {
 
@@ -76,6 +76,10 @@ public:
 
     /// Write the flight recording to disk (if recording was enabled).
     void write_recording();
+
+    /// Write the FCS/AI/EOM CSV trace to disk (if fcs_trace_path was set).
+    /// Called by the host at the end of a run, alongside write_recording().
+    void write_fcs_trace();
 
     // --- Accessors for the renderer / host ---
     [[nodiscard]] entities::EntityWorld&       world()       noexcept { return world_; }
@@ -166,6 +170,7 @@ private:
     void derive_real_airbase();   // airbase_source -> real ground layout
     void wire_atc();              // StubATC + AirfieldConfig from scenario
     void record_snapshot();
+    void record_fcs_trace_sample();
 
     // --- Owned state ---
     Scenario scenario_;
@@ -177,6 +182,7 @@ private:
     std::unique_ptr<f4::models::ModelDatabase> model_db_;
     std::unique_ptr<f4::ai::atc::StubATC> atc_;
     std::unique_ptr<f4::recorder::FlightRecorder> recorder_;
+    std::unique_ptr<f4::recorder::FcsTraceWriter> fcs_trace_;
     f4::data::AircraftConfig aircraft_cfg_;
 
     // Phase 2: replaced the single `aircraft_entity_` with a vector. The

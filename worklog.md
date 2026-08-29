@@ -2637,3 +2637,79 @@ Stage Summary:
 - The alpha_bias-after-filter approach (ALT-3) is now fully working with the ground fixes.
 - Key insight: the bias formula g/qsom is only valid at meaningful airspeeds. Below ~50 kts, the bias is 0 and the FCS's PI loop is also zeroed (ground guard) — the EOM ground clamp controls attitude. Above ~50 kts, the bias provides the trim alpha and the PI loop provides corrections.
 - The FCS lead-lag filter's lead term (tau1=0.2s) was the root cause of ALT-2's regression — adding the bias AFTER the filter (not before) decouples the feedforward from the filter dynamics.
+
+---
+Task ID: STAB-0abcd
+Agent: main (orchestrator)
+Task: Implement Phase 0 + Phase A + Phase B + Phase C + Phase D of FLIGHT_CONTROL_NEXT_STEPS.md (flight-control stability fixes for takeoff/landing oscillation, ground-track drift, runway overflight).
+
+Work Log:
+- Phase 0b — CSV trace exporter (f4-recorder):
+  * Added f4/recorder/fcs_trace.hpp + fcs_trace.cpp with FcsTraceSample (53 columns covering AI commands, FCS intermediates, body rates, kinematics, navigation intent, ground/engine state) and FcsTraceWriter (CSV serialization with header row + per-tick data rows, comma escaping for AI state names with embedded commas, file I/O with throw-on-failure).
+  * Wired into Simulation via FcsTraceWriter member, record_fcs_trace_sample() called per tick, write_fcs_trace() called at end of run. Scenario gains an "fcs_trace_path" JSON field to enable.
+  * 10 unit tests in test_fcs_trace.cpp (header column count, one/multiple samples, numeric formatting, boolean fields, comma escaping, file I/O round-trip, clear, throw-on-bad-path).
+- Phase 0c — Isolated diagnostic scenarios:
+  * Added scenarios/takeoff_only.json.in (taxi → lineup → takeoff roll → rotate → FlyOut, 5400 ticks, no nav/landing, CSV trace enabled).
+  * Added scenarios/landing_only.json.in (spawn airborne on final at 5 nm, brain starts in Approach phase, 7200 ticks, CSV trace enabled).
+  * Added MissionPlan::StartPhase enum and brain hand-off logic so the brain can skip takeoff/navigation and start directly in Approach (for the landing_only scenario).
+  * Moved scenario JSON configure_file() calls from f4-scenario-player/CMakeLists.txt to the root CMakeLists.txt so scenarios are generated even when the scenario player is built without X11 (the prior layout made DigiMission tests SKIP when F4_BUILD_SCENARIO_PLAYER=OFF).
+  * 3 end-to-end pipeline tests in test_fcs_trace_pipeline.cpp (takeoff trace, landing trace, Phase 0d trim-init).
+- Phase 0d — Trim-init at spawn:
+  * Added ScenarioAircraft::initial_vt_fps and spawn_in_air fields (parsed from JSON).
+  * Simulation::spawn_from_scenario_list() now overrides vt=0 to 5 ft/s for ground spawns (avoids the qsom=0 ground-guard transient on the first FCS tick).
+- Phase A1 — Un-stub yaw channel:
+  * Removed `aero.beta = zero_angle()` and `aero.beta_dot = zero_angular_rate()` from fcs.cpp runYaw. The PI controller's betcmd now drives aero.beta directly. The EOM already computes yaw rate `r` from the side force `nycgw`, which is derived from beta by the aero module (yaero = cy * qsom * (beta - ...)). With the correct sign of ky05 (preserved in computeGains at fcs.cpp:333-336), this forms a NEGATIVE feedback loop (yaw damper).
+  * Added ground guard: when gearPos > 0.5 AND qsom < 5.0, beta is held at 0 to avoid spurious transients during the takeoff roll (the EOM's nose-wheel steering controls heading directly in that regime).
+  * Updated the misleading header comment ("EOM has no rudder dynamics") to reflect the actual control loop.
+  * 4 new tests in test_fcs.cpp (PedalInputDoesNotCrash, UnstubbedChannelDrivesAeroBetaInFlight, GroundGuardHoldsBetaAtZeroDuringTakeoffRoll, NoGroundGuardWhenGearDownButQsomHigh).
+- Phase A2 — Coordinated-turn feedforward:
+  * Added coord_turn_scale and coord_turn_max_bank_rad config fields to AirSteering.
+  * In AirSteering::steer(), added `pedal_ff = tan(bank_target) * v / g` mapped to [-1, +1] via coord_turn_scale, clamped to coord_turn_max_bank_rad. Eliminates steady-state sideslip in turns and reduces the load on the FCS yaw damper from A1.
+  * 6 new tests in test_air_steering.cpp (RightBankCommandsRightRudder, LeftBankCommandsLeftRudder, WingsLevelZeroPedal, PedalMagnitudeScalesWithBank, PedalClampedAtHighBank, ZeroScaleDisablesFeedforward).
+- Phase A3 — Tighten takeoff lineup tolerance:
+  * TakeoffModule::centerline_align_tolerance_ft: 10 → 5 ft.
+  * TakeoffModule::heading_align_tolerance_rad: 0.15 (8.5°) → 0.009 (0.5°).
+  * Updated DefaultConfiguration test to assert the new defaults.
+- Phase B1 — Raise localizer correction clamp:
+  * LandingModule::max_localizer_corr_rad: 0.5 (30°) → 0.87 (50°). Saturation point moves from 333 ft to ~580 ft cross-track, allowing more aggressive centerline intercept.
+- Phase B2 — Add beam-intercept lead angle:
+  * Added intercept_offset_ft (1000) and intercept_lead_ft (1500) config fields.
+  * Rewrote LandingModule::localizer_heading_rad() to use a direct intercept heading (atan2(-xtrack, intercept_lead_ft)) when |xtrack| > intercept_offset_ft, reverting to the proportional localizer correction near the centerline. Standard ILS intercept geometry.
+  * 2 new tests (LocalizerInterceptLeadForLargeOffset, LocalizerInterceptSignFlipsWithOffsetSide).
+- Phase B3 — Drop the 8% beam undershoot bias:
+  * Removed the `0.92 * (beam - threshold_alt)` undershoot in OnFinal. The aircraft now rides the beam exactly. The bias was a workaround for slow localizer convergence (fixed by B1+B2) and was itself the cause of "lands short" symptoms.
+- Phase C1 — Wire flaps through AIControlOutput:
+  * Added tef_cmd and lef_cmd fields to AIControlOutput.
+  * BrainComponent::map_to_pilot_input() now forwards ai_out.tef_cmd/lef_cmd to pi.tefCmd/lefCmd. The FM already actuates tefPos/lefPos from these (flight_model.cpp:453-454).
+- Phase C2 — Set flaps on OnFinal:
+  * Added landing_tef_cmd (1.0) and landing_lef_cmd (0.6) config fields to LandingModule.
+  * track_final() now sets out.tef_cmd = landing_tef_cmd and out.lef_cmd = landing_lef_cmd every tick during OnFinal.
+  * controls_for_flare() also keeps flaps extended through the flare.
+  * 2 new tests (OnFinalExtendsFlaps, FlareHoldsFlapsExtended).
+- Phase C3 — Lower approach_speed_kts:
+  * LandingModule::approach_speed_kts: 210 → 160 kts. Realistic for an F-16 in landing configuration. Relies on C2 (flaps extended) to avoid stall.
+- Phase C4 — Energy-managed flare law:
+  * Rewrote LandingModule::controls_for_flare() to predict the touchdown point from current state (alt_agl, vs_fpm, vcas_kts) and modulate flare pitch by predicted-vs-aim error. Goes around (MIL throttle + climb) if predicted touchdown is outside [−500, missed_along_ft].
+  * 1 new test (EnergyManagedFlareModulatesPitchOnLongPrediction).
+  * Updated existing FlareBelowFlareHeight test to use a realistic -700 fpm sink rate (the prior 0 fpm sink was causing the new energy-managed flare to correctly trigger a go-around).
+- Phase C5 — Tighten missed_along_ft:
+  * LandingModule::missed_along_ft: 4000 → 2500 ft. With the energy-managed flare (C4) the aircraft should touch down within ±500 ft of the aim point; 4000 ft was too generous.
+- Phase D1 — Watchdog hold-last PilotInput: already implemented in BrainComponent::update() (lines 168-190 of brain_component.hpp). Verified by reading the code; no changes needed.
+- Also: extended TakeoffModule and LandingModule with public runway_heading_rad() accessors, NavigationModule with current_heading_rad() accessor, so the FCS trace exporter can read per-tick navigation intent without re-deriving it from position deltas.
+
+Results:
+- 22 new unit tests added (10 FcsTrace + 6 AirSteeringCoordTurn + 4 FcsYaw + 2 TakeoffModule config + 2 LandingModule localizer + 3 LandingModule flare/flaps + 3 FcsTracePipeline).
+- 0 new test failures. Baseline was 10 pre-existing failures (PilotInput validation asserts, EngineModel default-constructed, PatternTestFixture 4 tests); after all changes, still 10 pre-existing failures.
+- All Phase 0/A/B/C/D code compiles cleanly with -Wall -Wextra -Wpedantic.
+- Scenario JSON files (takeoff_only.json, landing_only.json) are generated at build time in build/scenarios/ for both the scenario player and the headless test pipeline.
+- DigiMission tests now correctly SKIP (instead of FAIL) when korea_real.world.json is missing — added an explicit skip check for the airbase_source world JSON.
+
+Stage Summary:
+- Patch: /home/z/my-project/download/flight-control-stability.patch (single-file patch against the F4 repo).
+- All four user-visible symptoms have a code-level fix landing in this patch:
+  1. Altitude oscillation: FCS yaw un-stub (A1) + coordinated-turn feedforward (A2) prevent beta-induced lift-vector tilt in turns. ALT-5's alpha-bias feedforward remains the primary altitude-hold fix.
+  2. Ground-track drift: tightened takeoff lineup (A3) + FCS yaw un-stub (A1) gives the rudder real authority above 89 kts.
+  3. Flies overhead offset on approach: raised localizer clamp (B1) + ILS intercept lead (B2) + dropped 8% undershoot bias (B3) close large cross-track offsets geometrically.
+  4. Lands outside runway: flaps wired (C1+C2) + approach speed lowered 210→160 (C3) + energy-managed flare predicts touchdown point and modulates pitch (C4) + tightened missed-approach window (C5).
+- Diagnostic infrastructure: CSV trace exporter (0b) + isolated scenarios (0c) + trim-init (0d) are in place so future fixes can be validated with before/after traces.
+- Acceptance criteria (FLIGHT_CONTROL_NEXT_STEPS.md §5) NOT yet verified — they require a runtime trace from the actual digi_full_mission scenario, which depends on F4_INSTALL being set to a Falcon 4.0 install (not available in this environment). The user should run the isolated scenarios (takeoff_only, landing_only) and the full mission with the patch applied to verify the criteria.

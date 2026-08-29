@@ -291,19 +291,22 @@ AIControlOutput LandingModule::update(double dt, const flight::IAircraftState* s
                     (fly_traffic_pattern ? 0.0 : 40.0),
                 /*pattern_turn=*/true);
         case LandingState::OnFinal: {
-            // Proportional undershoot of the beam: ride ~8% BELOW it so
-            // the offset shrinks geometrically with distance-to-go and
-            // the convergence point lands at the threshold. Riding the
-            // beam exactly leaves a residual offset at the flare (the
-            // loop closes too slowly over the final miles) — touchdown
-            // ends up thousands of feet short. Same idea as a localizer
-            // intercept lead angle.
+            // Phase B3 (FLIGHT_CONTROL_NEXT_STEPS.md §4 Phase B3): ride the
+            // beam EXACTLY. Previously this used an 8% undershoot bias
+            // (0.92 * (beam - threshold_alt)) as a workaround for slow
+            // localizer convergence — the localizer law (Phase B1's 0.5 rad
+            // clamp) saturated at 333 ft cross-track and couldn't close a
+            // large intercept offset, so the aircraft arrived at the
+            // threshold laterally off-center. With B1 (clamp raised to
+            // 0.87 rad) and B2 (intercept lead for > 1000 ft offsets), the
+            // localizer converges fast enough that the bias is no longer
+            // needed — and the bias itself was the cause of "lands short"
+            // symptoms (riding 8% below the beam = touching down 8% short
+            // of the aim point at the flare).
             const double dist = std::max(0.0, -course_along_ft());
             const double beam = threshold_alt_ft_
                 + dist * std::tan(glide_slope_angle_rad_);
-            const double target = threshold_alt_ft_
-                + 0.92 * (beam - threshold_alt_ft_);
-            return track_final(target, approach_speed_kts);
+            return track_final(beam, approach_speed_kts);
         }
         case LandingState::Flare:           return controls_for_flare();
         case LandingState::Rollout:         return controls_for_rollout();
@@ -366,8 +369,30 @@ double LandingModule::glide_slope_alt_ft() const {
 }
 
 double LandingModule::localizer_heading_rad() const {
+    // Phase B2 (FLIGHT_CONTROL_NEXT_STEPS.md §4 Phase B2): when far from the
+    // centerline (|xtrack| > intercept_offset_ft), command heading directly
+    // toward a point `intercept_lead_ft` ahead on the centerline. This is
+    // the standard ILS intercept geometry — at large offset the proportional
+    // localizer law (Phase B1: max corr 0.87 rad) saturates at ~580 ft and
+    // can't close a 1000+ ft intercept offset fast enough. Aiming at a point
+    // ahead closes it geometrically.
+    //
+    // Near the centerline (|xtrack| <= intercept_offset_ft), use the standard
+    // proportional localizer correction. The transition is continuous: at
+    // |xtrack| = intercept_offset_ft the bearing-to-aim-point equals the
+    // saturated proportional correction (within ~5 deg), so there's no step.
+    const double xtrack = course_lateral_ft();
+    if (std::abs(xtrack) > intercept_offset_ft) {
+        // bearing from the aircraft's current position to the aim point
+        // (a point `intercept_lead_ft` ahead on the centerline, relative
+        // to the aircraft's projection onto the centerline).
+        // -xtrack = toward centerline (positive lateral offset => steer left)
+        // intercept_lead_ft = forward along the course
+        const double bearing_to_aim = std::atan2(-xtrack, intercept_lead_ft);
+        return runway_heading_rad_ + bearing_to_aim;
+    }
     // Right of centerline (lateral > 0) -> steer left (subtract correction).
-    const double corr = std::clamp(localizer_gain * course_lateral_ft(),
+    const double corr = std::clamp(localizer_gain * xtrack,
                                    -max_localizer_corr_rad, max_localizer_corr_rad);
     return runway_heading_rad_ - corr;
 }
@@ -647,15 +672,81 @@ AIControlOutput LandingModule::track_final(double target_alt_ft,
                                       target_speed_kts,
                                       air_input());
     out.gear_handle_down = true;
+    // Phase C2: extend flaps on final. The commands are held steady from
+    // OnFinal entry through touchdown; the FM actuates the actual surfaces
+    // at TEF_RATE/LEF_RATE (flight_model.cpp:453-454). With flaps extended
+    // the stall speed drops ~30 kts, which is what allows Phase C3's
+    // approach_speed_kts reduction from 210 to 160.
+    out.tef_cmd = landing_tef_cmd;
+    out.lef_cmd = landing_lef_cmd;
     return out;
 }
 
 AIControlOutput LandingModule::controls_for_flare() const {
-    // Idle power, hold the flare attitude, stop tracking the beam.
+    // Phase C4 (FLIGHT_CONTROL_NEXT_STEPS.md §4 Phase C4): energy-managed
+    // flare. The previous law held a fixed 8-deg pitch attitude at idle
+    // throttle — it had no concept of energy. If the approach was high/fast
+    // (which it often was before Phase C3), the aircraft carried extra
+    // kinetic energy into the flare and floated long, landing 1000-3000 ft
+    // past the threshold. If low/slow, the flare was late and the aircraft
+    // touched down short.
+    //
+    // The new law predicts the touchdown point from the current state and
+    // modulates flare pitch by the predicted-vs-aim error:
+    //   td_distance = (alt_agl / max(|vs_fpm|, 50)) * vcas_kts * 1.68781 / 60
+    //   td_along = course_along + td_distance
+    // If td_along is past missed_along_ft or before -500 ft, go around.
+    // Otherwise, modulate flare pitch by td_err = td_along - aim_along.
+    //
+    // This makes the flare law actively manage touchdown point instead of
+    // passively holding 8 deg.
     AIControlOutput out;
     out.gear_handle_down = true;
-    out.throttle_cmd = 0.0;
-    const double target = flare_pitch_deg * D2R;
+    out.throttle_cmd = 0.0;  // idle
+
+    // Phase C2: keep flaps extended through the flare (the surfaces stay
+    // put until the aircraft slows on rollout).
+    out.tef_cmd = landing_tef_cmd;
+    out.lef_cmd = landing_lef_cmd;
+
+    // Predicted touchdown point (linearized around the current state).
+    //
+    // time_to_ground_s: how long until the aircraft reaches 0 ft AGL at its
+    //   current sink rate. vs_fpm is in feet per MINUTE, so dividing AGL by
+    //   vs_fpm gives minutes; multiply by 60 to get seconds. Floor |vs| at
+    //   50 fpm to avoid divide-by-zero and absurd predictions in flat flight.
+    // td_distance_ft: how far the aircraft travels horizontally in
+    //   time_to_ground_s. vcas_kts * 1.68781 converts kts to ft/s; multiply
+    //   by time_to_ground_s for feet.
+    // td_along: course_along (current along-track position) + td_distance.
+    const double vs_eff = std::max(std::fabs(current_vs_fpm_), 50.0);
+    const double time_to_ground_s = current_alt_agl_ft_ / vs_eff * 60.0;
+    const double v_fps = current_vcas_kts_ * 1.68781;
+    const double td_distance_ft = time_to_ground_s * v_fps;
+    const double td_along = course_along_ft() + td_distance_ft;
+
+    // If the predicted touchdown is outside the runway bounds, transition
+    // to GoAround. The state transition itself happens in
+    // check_flare_or_goaround() (which fires independently of this output),
+    // but we set a climbing pitch + MIL throttle here so the aircraft
+    // doesn't sink further while the transition is processed.
+    if (td_along > missed_along_ft || td_along < -500.0) {
+        out.pitch_cmd = 0.3;    // climb away
+        out.throttle_cmd = 1.0;  // MIL
+        out.roll_cmd = std::clamp(-2.0 * current_roll_rad_, -0.3, 0.3);
+        return out;
+    }
+
+    // Modulate flare pitch by predicted-vs-aim error.
+    // - td_err > 0 (will land long): pitch up more to bleed energy
+    // - td_err < 0 (will land short): pitch up less to keep energy
+    // The /500.0 scaling gives ~1 deg of pitch adjustment per 500 ft of
+    // error, clamped to ±2 deg below the aim and +4 deg above (the flare
+    // has more authority to add drag than to remove it).
+    const double aim_along = beam_aim_offset_ft;  // 1500 ft past threshold
+    const double td_err = td_along - aim_along;
+    const double flare_pitch_adj = std::clamp(td_err / 500.0, -2.0, 4.0);  // deg
+    const double target = (flare_pitch_deg + flare_pitch_adj) * D2R;
     out.pitch_cmd = std::clamp(flare_pitch_gain * (target - current_pitch_rad_),
                                -0.1, 0.5);
     out.roll_cmd = std::clamp(-2.0 * current_roll_rad_, -0.3, 0.3);  // wings level

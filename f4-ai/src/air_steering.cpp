@@ -50,6 +50,29 @@ AIControlOutput AirSteering::steer(double desired_heading_rad,
     out.roll_cmd = std::clamp(roll_gain * bank_err - roll_damp * in.roll_rate_radps,
                               -1.0, 1.0);
 
+    // --- Coordinated-turn feedforward (Phase A2) ---
+    //
+    // Rudder-for-bank: pedal_ff = tan(bank_target) * v / g, mapped to the
+    // normalized [-1, +1] command space via coord_turn_scale. Eliminates
+    // steady-state sideslip in turns and reduces the load on the FCS yaw
+    // damper (Phase A1). Without this, a banked turn produces beta drift
+    // through the kinematics of banked flight; the damper then has to
+    // react and correct, which excites the roll cascade (beta → side force
+    // → rolling moment → phi drift → bank cascade corrects → repeat).
+    // The feedforward kills the cycle at the source by anticipating the
+    // rudder needed for a coordinated turn.
+    //
+    // Clamp the bank used in the formula to coord_turn_max_bank_rad so
+    // tan() doesn't blow up at high bank angles; the FCS yaw damper
+    // handles the residual at high bank.
+    constexpr double GRAVITY_FPS2 = 32.174;
+    const double bank_for_ff = std::clamp(bank_target,
+                                          -coord_turn_max_bank_rad,
+                                          coord_turn_max_bank_rad);
+    const double v_fps_ff = std::max(100.0, in.vcas_kts * 1.68781);
+    const double pedal_ff = std::tan(bank_for_ff) * v_fps_ff / GRAVITY_FPS2;
+    out.yaw_cmd = std::clamp(pedal_ff * coord_turn_scale, -1.0, 1.0);
+
     // --- Altitude: gamma-hold ---
     // Target VS from the altitude error, convert to a commanded
     // flight-path angle, and add the CURRENT estimated alpha so the

@@ -39,6 +39,14 @@ struct AIControlOutput {
     bool   wheel_brakes{false};
     bool   parking_brake{false};
 
+    // --- Flap commands (Phase C1 — FLIGHT_CONTROL_NEXT_STEPS.md §4 Phase C1) ---
+    // The FM already actuates tefPos/lefPos from PilotInput.tefCmd/lefCmd
+    // (flight_model.cpp:453-454). These fields carry the AI's intent through
+    // BrainComponent::map_to_pilot_input() so the LandingModule can extend
+    // flaps on final approach.
+    double tef_cmd{0.0};           // [0, 1] trailing-edge flap (0=retracted, 1=full)
+    double lef_cmd{0.0};           // [0, 1] leading-edge flap (0=retracted, 1=full)
+
     // --- Weapon system intent ---
     bool   trigger_down{false};     // gun trigger held
     bool   weapon_release{false};   // release current weapon (bomb/missile)

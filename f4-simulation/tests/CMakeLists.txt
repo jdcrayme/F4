@@ -26,11 +26,22 @@ f4_simulation_add_test(test_bubble_manager         test_bubble_manager.cpp)
 f4_simulation_add_test(test_frames                 test_frames.cpp)
 f4_simulation_add_test(test_real_layout_derivation test_real_layout_derivation.cpp)
 f4_simulation_add_test(test_digi_mission           test_digi_mission.cpp)
+f4_simulation_add_test(test_fcs_trace_pipeline     test_fcs_trace_pipeline.cpp)
 
 # The DIGI end-to-end mission test runs the build-configured
 # digi_full_mission.json scenario (paths inside it are absolute).
 target_compile_definitions(test_digi_mission PRIVATE
     F4_SCENARIOS_DIR="${CMAKE_BINARY_DIR}/scenarios"
+)
+
+# The FCS trace pipeline test runs the isolated `takeoff_only` and
+# `landing_only` scenarios headlessly for a few hundred ticks and asserts
+# the CSV trace is produced with the expected structure. Uses the same
+# build-configured scenario dir as test_digi_mission.
+target_compile_definitions(test_fcs_trace_pipeline PRIVATE
+    F4_SCENARIOS_DIR="${CMAKE_BINARY_DIR}/scenarios"
+    F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}"
+    F4_MODELS_DIR="${CMAKE_SOURCE_DIR}/f4-models/tests/fixtures"
 )
 # The scenario must exist before the test runs.
 # Only wire the dependency when the scenario player is actually built

@@ -576,12 +576,17 @@ void FlightControlSystem::runRoll(double dt, double qbar, double vcas_kts,
 }
 
 // ---------------------------------------------------------------------------
-// runYaw: beta-command PI controller (mostly stubbed).
+// runYaw: beta-command PI controller (yaw damper + coordinated-turn beta
+// compensation). The PI output drives aero.beta directly; the EOM computes
+// yaw rate `r` from the resulting side force `nycgw`. With the correct sign
+// of fcs.ky05 (preserved in computeGains) this is a NEGATIVE feedback loop
+// that damps sideslip — the coordinated-turn damping the aircraft needs
+// during banked flight. See FLIGHT_CONTROL_STABILITY_PLAN.md §4.1 RC-1.
 //
-// The EOM has no rudder-to-yaw dynamics, so driving beta directly would
-// create a positive feedback loop (the yaw damper would amplify any beta
-// error instead of correcting it). To avoid this, beta is forced to 0.
-// This matches FreeFalcon behavior.
+// Ground guard: when gear is down AND qsom is low (taxi / takeoff roll),
+// beta is held at 0 — the EOM's nose-wheel steering controls heading
+// directly, and the aero model can't produce meaningful side force at
+// low qbar anyway.
 // ---------------------------------------------------------------------------
 void FlightControlSystem::runYaw(double dt, double qbar, double qsom,
                                   double vt, double vcas_kts,
@@ -589,8 +594,10 @@ void FlightControlSystem::runYaw(double dt, double qbar, double qsom,
                                   double betmin, double betmax,
                                   const PilotInput& input,
                                   FcsState& fcs, AeroState& aero) const {
-    (void)qbar; (void)qsom; (void)vt; (void)vcas_kts;
-    (void)beta; (void)betmin; (void)betmax; (void)nycgw;
+    // qbar/vt/vcas_kts are unused (the yaw loop is dimensionless in G/Beta
+    // space); beta/nycgw/betmin/betmax drive the PI controller. The (void)
+    // casts are retained for qbar/vt/vcas_kts only.
+    (void)qbar; (void)vt; (void)vcas_kts;
 
     // --- Shaped pedal input ---
     double yshape = input.ypedal * input.ypedal;
@@ -613,10 +620,35 @@ void FlightControlSystem::runYaw(double dt, double qbar, double qsom,
     double betcmd = std::clamp((eprop + eintg) * fcs.ylsdamp, betmin, betmax);
     fcs.betcmd = angle_from_degrees(betcmd);
 
-    // Force beta to 0 — the EOM has no rudder dynamics, so any non-zero
-    // beta would create positive feedback.
-    aero.beta = zero_angle();
-    aero.beta_dot = zero_angular_rate();
+    // --- Apply commanded beta to the aero state (Phase A1) ---
+    //
+    // Previously this was stubbed (`aero.beta = 0`) because the EOM has no
+    // rudder actuator lag — driving beta directly was thought to create
+    // positive feedback. In reality the EOM computes yaw rate `r` from
+    // `nycgw`, and `nycgw` is computed by the aero module from `beta`
+    // (yaero = cy * qsom * (beta - ...)). With the correct sign of `ky05`
+    // (preserved at line 333-336 above), this forms a NEGATIVE feedback
+    // loop (a yaw damper): if beta drifts positive, the PI controller
+    // commands a negative beta correction, which produces a restoring
+    // yaw rate that brings beta back to zero. This is exactly the
+    // coordinated-turn damping the aircraft was missing (see
+    // FLIGHT_CONTROL_STABILITY_PLAN.md §4.1 RC-1).
+    //
+    // Ground guard: on the ground at low speed, the gear clamp controls
+    // heading directly via nose-wheel steering, and the aero model can't
+    // produce meaningful side force. Hold beta at 0 in that regime to
+    // avoid spurious transients during the takeoff roll.
+    if (aero.gearPos > 0.5 && qsom < 5.0) {
+        aero.beta = zero_angle();
+        aero.beta_dot = zero_angular_rate();
+    } else {
+        aero.beta = fcs.betcmd;
+        // beta_dot: finite-difference from the previous frame's beta.
+        // (Mirrors the alpha_dot computation in runPitch.)
+        const double old_beta_deg = to_degrees(beta);
+        aero.beta_dot = angular_rate_from_degrees_per_second(
+            (betcmd - old_beta_deg) / std::max(dt, QSOM_FLOOR));
+    }
 }
 
 }  // namespace f4::flight

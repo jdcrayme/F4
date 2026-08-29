@@ -177,3 +177,63 @@ TEST(AirSteeringSpeed, ThrottleNeverExceedsMIL) {
     const auto very_slow = as.steer(0, 5000, 300, make_input(0, 5000, 0, 100));
     EXPECT_LE(very_slow.throttle_cmd, 1.0) << "nav never selects afterburner";
 }
+
+// ============================================================================
+// Coordinated-turn feedforward (Phase A2)
+// ============================================================================
+//
+// rudder-for-bank: pedal_ff = tan(bank_target) * v / g, mapped to the
+// normalized [-1, +1] command space via coord_turn_scale. Eliminates
+// steady-state sideslip in turns. See FLIGHT_CONTROL_NEXT_STEPS.md Phase A2.
+
+TEST(AirSteeringCoordTurn, RightBankCommandsRightRudder) {
+    // Right turn (positive heading error) -> positive target bank -> the
+    // feedforward commands POSITIVE pedal (right rudder), which the EOM
+    // interprets as a turn-toward-bank (positive ypedal = right turn per
+    // the sign convention documented in air_steering.cpp).
+    AirSteering as;
+    const auto out = as.steer(0.5, 5000, 300, make_input(0, 5000, 0, 300));
+    EXPECT_GT(out.yaw_cmd, 0.0)
+        << "right bank should command right rudder (positive pedal)";
+}
+
+TEST(AirSteeringCoordTurn, LeftBankCommandsLeftRudder) {
+    AirSteering as;
+    const auto out = as.steer(-0.5, 5000, 300, make_input(0, 5000, 0, 300));
+    EXPECT_LT(out.yaw_cmd, 0.0)
+        << "left bank should command left rudder (negative pedal)";
+}
+
+TEST(AirSteeringCoordTurn, WingsLevelZeroPedal) {
+    // On-heading, wings level: bank_target is zero, feedforward is zero.
+    AirSteering as;
+    const auto out = as.steer(1.2, 5000, 300, make_input(1.2, 5000, 0, 300, 0.0));
+    EXPECT_NEAR(out.yaw_cmd, 0.0, 1e-9);
+}
+
+TEST(AirSteeringCoordTurn, PedalMagnitudeScalesWithBank) {
+    // Larger bank -> larger pedal command.
+    AirSteering as;
+    const auto small = as.steer(0.1, 5000, 300, make_input(0, 5000, 0, 300));
+    const auto large = as.steer(0.5, 5000, 300, make_input(0, 5000, 0, 300));
+    EXPECT_GT(std::fabs(large.yaw_cmd), std::fabs(small.yaw_cmd));
+}
+
+TEST(AirSteeringCoordTurn, PedalClampedAtHighBank) {
+    // A 90-deg heading error commands max_bank (30 deg). The feedforward
+    // uses the clamped bank (not 90 deg), so the pedal stays finite.
+    AirSteering as;
+    const auto out = as.steer(90 * D2R, 5000, 300, make_input(0, 5000, 0, 300));
+    EXPECT_LE(std::fabs(out.yaw_cmd), 1.0)
+        << "pedal must stay within [-1, +1] even at max bank";
+}
+
+TEST(AirSteeringCoordTurn, ZeroScaleDisablesFeedforward) {
+    // When coord_turn_scale is 0, the feedforward is disabled (the FCS yaw
+    // damper alone handles coordination). Allows easy A/B comparison in
+    // diagnostic runs.
+    AirSteering as;
+    as.coord_turn_scale = 0.0;
+    const auto out = as.steer(0.5, 5000, 300, make_input(0, 5000, 0, 300));
+    EXPECT_NEAR(out.yaw_cmd, 0.0, 1e-9);
+}

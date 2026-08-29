@@ -41,6 +41,17 @@ struct ScenarioAircraft {
     /// synthesized spots (ignored when airbase_source is absent).
     bool parking_auto{false};
     int parking_index{0};               ///< which derived spot (0-based)
+    /// Initial true airspeed at spawn (ft/s). Default 0 = parked. Set to a
+    /// small positive value (~5 ft/s) for ground spawns to avoid the
+    /// first-tick transient where qsom=0 forces the FCS into the ground
+    /// guard (FLIGHT_CONTROL_NEXT_STEPS.md §3.3 Phase 0d).
+    double initial_vt_fps{0.0};
+    /// Spawn in air (true) or on the ground (false). When true, the FM
+    /// is initialized with inAir=true and the gear extended; the brain
+    /// still starts in Phase::Ground (the host must arrange for the
+    /// mission to sequence to the desired phase). Used by the isolated
+    /// `landing_only` scenario to skip the taxi/takeoff roll.
+    bool spawn_in_air{false};
 };
 
 /// One parking spot on the airfield (derived from the ground layout —
@@ -188,6 +199,14 @@ struct Scenario {
         return approach_mode == "pattern";
     }
 
+    /// Skip the takeoff/navigation phases and start the brain in Approach.
+    /// Used by the isolated `landing_only` scenario which spawns the aircraft
+    /// airborne on final. See FLIGHT_CONTROL_NEXT_STEPS.md §3.2.
+    /// When true, the first aircraft's spawn_in_air flag should also be true
+    /// (the brain will hand off to the LandingModule immediately on the first
+    /// tick; the FM needs to be airborne to fly).
+    bool start_in_approach{false};
+
     /// Static feature placements on the airfield — buildings, runway sections,
     /// taxiways, towers, hangars. Spawned as TransformComponent +
     /// VisualModelComponent entities (no FM, no brain). The renderer iterates
@@ -199,6 +218,11 @@ struct Scenario {
     int    total_ticks{600};            ///< 60 * 600 = 10 min default
     bool   record{true};                ///< write trace.json on exit
     std::filesystem::path record_path;  ///< "trace.json"
+    /// Optional per-tick FCS/AI/EOM CSV trace path (for control-loop diagnosis).
+    /// When non-empty, Simulation writes a CSV with one row per tick per
+    /// aircraft containing AI commands, FCS intermediates, body rates,
+    /// kinematics, and navigation intent. See f4/recorder/fcs_trace.hpp.
+    std::filesystem::path fcs_trace_path;
 };
 
 /// Load a scenario from a JSON file. Resolves asset paths relative to the

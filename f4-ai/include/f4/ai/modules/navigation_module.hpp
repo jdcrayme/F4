@@ -90,6 +90,12 @@ public:
     [[nodiscard]] const Waypoint* current_waypoint() const noexcept {
         return wp_index_ < route_.size() ? &route_[wp_index_] : nullptr;
     }
+    /// Last cached aircraft heading (rad). Updated each update() call.
+    /// Exposed for the FCS trace exporter so it can plot target-vs-actual
+    /// heading without re-deriving from position deltas.
+    [[nodiscard]] double current_heading_rad() const noexcept {
+        return current_heading_rad_;
+    }
 
     // --- Configuration ---
     double capture_radius_ft{3000.0};  ///< waypoint capture radius

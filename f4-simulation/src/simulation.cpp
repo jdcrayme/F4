@@ -28,10 +28,14 @@
 
 #include <f4/ai/brain_component.hpp>
 #include <f4/ai/atc/stub_atc.hpp>
+#include <f4/ai/modules/takeoff_module.hpp>
+#include <f4/ai/modules/navigation_module.hpp>
+#include <f4/ai/modules/landing_module.hpp>
 #include <f4/data/config_loader.hpp>
 #include <f4/flight/flight_model_component.hpp>
 #include <f4/flight/angle.hpp>
 #include <f4/recorder/flight_recorder.hpp>
+#include <f4/recorder/fcs_trace.hpp>
 #include <f4/recorder/snapshot.hpp>
 #include <f4/world_convert/class_table.hpp>
 #include <f4/world/world_loader.hpp>
@@ -84,6 +88,13 @@ void Simulation::initialize() {
     if (scenario_.record) {
         recorder_ = std::make_unique<f4::recorder::FlightRecorder>();
         recorder_->set_scenario_name(scenario_.name);
+    }
+
+    // Set up the FCS/AI/EOM CSV trace writer if the scenario enables it.
+    // Independent of `record`: a scenario may want the lightweight CSV trace
+    // without the full replay JSON, or vice versa.
+    if (!scenario_.fcs_trace_path.empty()) {
+        fcs_trace_ = std::make_unique<f4::recorder::FcsTraceWriter>();
     }
 }
 
@@ -162,12 +173,21 @@ void Simulation::spawn_from_scenario_list() {
         // 2. FlightModelComponent — initialized from AircraftConfig.
         //    Implements IAircraftState + IPilotInputSink. The brain will find
         //    it via interface-based lookup (get_interface<IAircraftState>()).
+        //    Phase 0d: spawn at a small non-zero vt (5 ft/s) when on the
+        //    ground to avoid the first-tick transient where qsom=0 forces
+        //    the FCS into the ground guard (see FLIGHT_CONTROL_NEXT_STEPS.md
+        //    §3.3). When the scenario explicitly requests spawn_in_air, the
+        //    FM is initialized with inAir=true and the scenario's initial_vt_fps.
         auto& fm = h.add<FlightModelComponent>();
+        const bool spawn_airborne = sc.spawn_in_air;
+        const double spawn_vt = spawn_airborne
+            ? std::max(sc.initial_vt_fps, 100.0)  // need meaningful qsom to fly
+            : (sc.initial_vt_fps > 0.0 ? sc.initial_vt_fps : 5.0);
         fm.init(aircraft_cfg_,
                 /*alt_ft=*/sc.parking_spot.z,
-                /*vt_ftps=*/0.0,
+                /*vt_ftps=*/spawn_vt,
                 /*hdg_rad=*/hdg,
-                /*inAir=*/false,
+                /*inAir=*/spawn_airborne,
                 /*north_ft=*/sc.parking_spot.y,
                 /*east_ft=*/sc.parking_spot.x);
         // Set the ground plane at the parking spot's altitude so the FM sits
@@ -218,6 +238,9 @@ void Simulation::spawn_from_scenario_list() {
         }
         plan.taxi_in_route = scenario_.airfield.taxi_in_route;
         plan.fly_traffic_pattern = scenario_.approach_is_pattern();
+        if (scenario_.start_in_approach) {
+            plan.start_phase = MissionPlan::StartPhase::Approach;
+        }
         brain.set_mission_plan(std::move(plan));
 
         aircraft_entities_.push_back(h.id());
@@ -538,6 +561,7 @@ void Simulation::tick(double dt) {
     update_bubble();
 
     if (recorder_) record_snapshot();
+    if (fcs_trace_) record_fcs_trace_sample();
 }
 
 void Simulation::record_snapshot() {
@@ -587,6 +611,134 @@ void Simulation::record_snapshot() {
 void Simulation::write_recording() {
     if (!recorder_ || scenario_.record_path.empty()) return;
     recorder_->write_json(scenario_.record_path, scenario_.name);
+}
+
+void Simulation::write_fcs_trace() {
+    if (!fcs_trace_ || scenario_.fcs_trace_path.empty()) return;
+    fcs_trace_->write_csv(scenario_.fcs_trace_path.string());
+}
+
+void Simulation::record_fcs_trace_sample() {
+    // One row per aircraft per tick. The trace's purpose is control-loop
+    // diagnosis (see FLIGHT_CONTROL_NEXT_STEPS.md §3.1), so it captures the
+    // AI's commands, the FCS's intermediates, the EOM's body rates, and
+    // the navigation intent (target alt/speed/heading + cross-track).
+    //
+    // Fields not relevant to a given phase are left at their default
+    // (0.0 / "") — e.g. course_lateral_ft is only meaningful during the
+    // landing phase; outside it, it stays 0.0 and the column is empty
+    // in plots.
+    for (const auto eid : aircraft_entities_) {
+        auto h = entities::EntityHandle(eid, &world_);
+        auto* fm = h.get<f4::flight::FlightModelComponent>();
+        if (!fm) continue;
+
+        const auto& s = fm->state();
+        f4::recorder::FcsTraceSample sample;
+        sample.tick       = tick_;
+        sample.sim_time_s = sim_time_s_;
+        sample.time_scale = time_scale_;
+
+        // --- AI state ---
+        if (auto* brain = h.get<f4::ai::BrainComponent>(); brain) {
+            sample.ai_mode  = brain->mode_name();
+            sample.ai_state = brain->state_name();
+        }
+
+        // --- AI commands (from the last PilotInput the brain wrote) ---
+        // The pending input was just consumed by the FM this tick; we read
+        // the brain's cached last_pilot_input via the FM's pending slot
+        // (which still holds the value — the FM clears it next tick).
+        const auto& pi = fm->pending_input();
+        sample.pitch_cmd       = pi.pstick;
+        sample.roll_cmd        = pi.rstick;
+        sample.yaw_cmd         = pi.ypedal;
+        sample.throttle_cmd    = pi.throttle;
+        sample.speed_brake_cmd = pi.speedBrake;
+        sample.tef_cmd         = pi.tefCmd;
+        sample.lef_cmd         = pi.lefCmd;
+        sample.gear_down       = (pi.gearHandle > 0.0);
+        sample.wheel_brakes    = pi.wheelBrakes;
+        sample.parking_brake   = pi.parkingBrake;
+
+        // --- FCS intermediates (FcsState is a member of AircraftState) ---
+        const auto& fcs = s.fcs;
+        sample.aoacmd_deg      = f4::flight::to_degrees(fcs.aoacmd);
+        sample.pscmd           = fcs.pscmd;
+        sample.pstab           = fcs.pstab;
+        sample.ptcmd           = fcs.ptcmd;
+        sample.nzcgs           = s.loads.nzcgs;
+        sample.pitch_integral  = fcs.pitchIntegral.output();
+        sample.betcmd_deg      = f4::flight::to_degrees(fcs.betcmd);
+        sample.alpha_deg       = f4::flight::to_degrees(s.aero.alpha);
+        sample.beta_deg        = f4::flight::to_degrees(s.aero.beta);
+        sample.yshape          = fcs.yshape;
+        sample.pshape          = fcs.pshape;
+        sample.rshape          = fcs.rshape;
+
+        // --- Body rates (rad/s -> deg/s for readability) ---
+        constexpr double R2D = 180.0 / 3.14159265358979323846;
+        sample.p_dps = s.kin.p * R2D;
+        sample.q_dps = s.kin.q * R2D;
+        sample.r_dps = s.kin.r * R2D;
+
+        // --- Kinematics ---
+        sample.vcas_kts    = s.vcas;
+        sample.vt_fps      = s.kin.vt;
+        sample.alt_msl_ft  = -s.kin.z;                       // NED z-down
+        sample.alt_agl_ft  = -s.kin.z - s.gear.groundZ_ft;
+        sample.vs_fpm      = -s.kin.zdot * 60.0;
+        sample.heading_deg = f4::flight::to_degrees(s.kin.psi);
+        sample.pitch_deg   = f4::flight::to_degrees(s.kin.theta);
+        sample.roll_deg    = f4::flight::to_degrees(s.kin.phi);
+        sample.x_ft        = s.kin.y;                          // NED y = ENU east
+        sample.y_ft        = s.kin.x;                          // NED x = ENU north
+        sample.mach       = s.mach;
+
+        // --- Navigation intent (only populated when the relevant module
+        // is active; 0.0 otherwise so the column plots as flat-zero outside
+        // its phase rather than carrying stale state) ---
+        if (auto* brain = h.get<f4::ai::BrainComponent>(); brain) {
+            using Phase = f4::ai::BrainComponent::Phase;
+            const auto phase = brain->phase();
+            if (phase == Phase::Ground) {
+                const auto& t = brain->takeoff();
+                sample.target_alt_ft     = t.departure_alt_ft;
+                sample.target_speed_kts  = t.flyout_speed_kts;
+                sample.target_heading_deg = f4::flight::to_degrees(
+                    f4::flight::angle_from_radians(t.runway_heading_rad()));
+            } else if (phase == Phase::Enroute) {
+                const auto& n = brain->navigation();
+                const auto* wp = n.current_waypoint();
+                if (wp) {
+                    sample.target_alt_ft    = wp->position.z;
+                    sample.target_speed_kts = wp->speed_kts;
+                }
+                sample.target_heading_deg = f4::flight::to_degrees(
+                    f4::flight::angle_from_radians(n.current_heading_rad()));
+            } else if (phase == Phase::Approach) {
+                const auto& l = brain->landing();
+                sample.target_alt_ft     = l.glide_slope_alt_ft();
+                sample.target_speed_kts  = l.approach_speed_kts;
+                sample.target_heading_deg = f4::flight::to_degrees(
+                    f4::flight::angle_from_radians(l.localizer_heading_rad()));
+                sample.course_lateral_ft    = l.course_lateral_ft();
+                sample.course_along_ft       = l.course_along_ft();
+                sample.localizer_heading_deg = f4::flight::to_degrees(
+                    f4::flight::angle_from_radians(l.localizer_heading_rad()));
+            }
+        }
+
+        // --- Ground / engine ---
+        sample.on_ground   = !s.gear.inAir;
+        sample.gear_pos    = s.aero.gearPos;
+        sample.engine_rpm  = s.engine.rpm;
+        sample.fuel_lbs    = s.fuel.fuel_lbs;
+        sample.nz         = s.loads.nzcgs;
+        sample.nx         = s.loads.nxcgs;
+
+        fcs_trace_->record(sample);
+    }
 }
 
 // ============================================================================
