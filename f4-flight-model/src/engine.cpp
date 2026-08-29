@@ -144,8 +144,9 @@ void EngineModel::update(double dt,
         thrtb1 = 0.0;
     } else if (state.rpm <= 1.0) {
         // MIL or below: interpolate between idle and MIL thrust
-        const double th1 = thrustIdle_(alt_ft, mach);
         const double th2 = thrustMil_(alt_ft, mach);
+        const double idle_floor = 0.10 * th2;
+        const double th1 = std::max(idle_floor, thrustIdle_(alt_ft, mach));
         thrtb1 = ((th2 - th1) * pwrlev + th1) / mass_slugs;
         // RPM command: idle (0.7) to 1.0+ (MIL). Allow exceeding 1.0 so
         // the AB branch engages on the next frame when throttle > 1.0.

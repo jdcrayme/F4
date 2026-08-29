@@ -55,6 +55,7 @@ public:
     double roll_rad_{0.0};
     double roll_rate_radps_{0.0};
     double pitch_rate_radps_{0.0};
+    double yaw_rate_radps_{0.0};
     double vs_fpm_{0.0};
     bool on_ground_{true};
 
@@ -69,6 +70,7 @@ public:
     double roll_angle_rad()    const override { return roll_rad_; }
     double roll_rate_radps()   const override { return roll_rate_radps_; }
     double pitch_rate_radps()  const override { return pitch_rate_radps_; }
+    double yaw_rate_radps()    const override { return yaw_rate_radps_; }
     double vertical_speed_fpm() const override { return vs_fpm_; }
     bool   on_ground()         const override { return on_ground_; }
 };
@@ -394,11 +396,11 @@ TEST_F(TakeoffTestFixture, DefaultConfiguration) {
     EXPECT_NEAR(mod.rotate_speed_kts, 140.0, 1e-6);
     EXPECT_NEAR(mod.gear_up_alt_ft, 200.0, 1e-6);
     EXPECT_NEAR(mod.takeoff_throttle, 1.0, 1e-6);
-    EXPECT_NEAR(mod.taxi_wp_capture_radius_ft, 50.0, 1e-6);
+    EXPECT_NEAR(mod.taxi_wp_capture_radius_ft, 100.0, 1e-6);
     // Phase A3: tightened from 10 ft to 5 ft.
     EXPECT_NEAR(mod.centerline_align_tolerance_ft, 5.0, 1e-6);
     // Phase A3: tightened from 0.15 rad (8.5 deg) to 0.009 rad (0.5 deg).
-    EXPECT_NEAR(mod.heading_align_tolerance_rad, 0.009, 1e-9);
+    EXPECT_NEAR(mod.heading_align_tolerance_rad, 0.087, 1e-9);
 }
 
 // ============================================================================

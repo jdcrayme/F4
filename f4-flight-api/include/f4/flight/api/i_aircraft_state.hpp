@@ -95,6 +95,8 @@ public:
     /// command (FLIGHT_CONTROL_STABILITY_PLAN.md §4.2).
     virtual double pitch_rate_radps() const = 0;
 
+    virtual double yaw_rate_radps() const = 0;
+
     // --- Vertical speed ---
 
     /// Vertical speed (feet per minute, positive = climbing).

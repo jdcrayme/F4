@@ -44,8 +44,13 @@ LandingModule::LandingModule()
     air_steering.path_gain = 0.00008;
     air_steering.gamma_corr_limit = 0.07;
     air_steering.attitude_gain = 1.2;
-    // speed_damp_rad_per_kt = 0.002 (default, no longer overridden)
-    air_steering.throttle_min = 0.15;
+    // speed_damp reduced from 0.002 (default) to 0.0005 — at 0.002, a 70 kt
+    // speed error (aircraft at 230 kts, target 160) produced 8° of nose-down
+    // trim, overwhelming the altitude cascade's climb command and driving
+    // the aircraft into the ground during ProceedToFix. At 0.0005, the same
+    // error produces 2° — a gentle nose-down trim.
+    air_steering.speed_damp_rad_per_kt = 0.0005;
+    air_steering.throttle_min = 0.0;
 
     // Pattern tune: same cascade, steeper bank + more gamma authority.
     // At 200 kts a 35-deg bank turns with ~5,000 ft radius — the pattern
@@ -754,13 +759,12 @@ AIControlOutput LandingModule::controls_for_flare() const {
 }
 
 AIControlOutput LandingModule::controls_for_rollout() const {
-    // Brakes on, nose-wheel hold of the runway heading. Full pedal
-    // authority is safe: the EOM fades steer rate with speed.
     AIControlOutput out = ground_steering.align_heading(
         runway_heading_rad_, ground_input(), 0.0, /*stop=*/false);
     out.throttle_cmd = 0.0;
     out.wheel_brakes = true;
     out.gear_handle_down = true;
+    out.pitch_cmd = -0.3;  // nose-down: unwind the flare's pitch integrator
     return out;
 }
 

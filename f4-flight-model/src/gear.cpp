@@ -102,7 +102,7 @@ void GearModel::updateStrutCompression(GearState& gear,
 
         auto& w = gear.wheels[i];
         w.strutCompression_ft = compression;
-        w.onGround = (compression > 0.0);
+        w.onGround = (compression >= 0.0 && agl_ft <= strutMax + 0.5);
 
         // Wheel spin (visual only)
         const double wheelRadius = std::max(0.5, strutMax * 0.3);

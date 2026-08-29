@@ -42,10 +42,13 @@ public:
         geo::WorldPosition position;   ///< ENU feet
         double heading_rad{0.0};       ///< compass heading (0 = north, CW +)
         double speed_kts{0.0};         ///< ground speed proxy (vcas)
+        double heading_rate_radps{0.0}; ///< heading rate for damping
     };
 
     // --- Configuration (public doubles, f4-ai module convention) ---
-    double heading_gain{3.0};             ///< pedal units per rad of heading error
+    double heading_gain{3.0};
+    double align_heading_gain{0.5};
+    double heading_rate_damp{5.0};             ///< pedal units per rad of heading error
     double speed_gain{0.06};              ///< throttle per kt of underspeed
     double throttle_creep{0.04};          ///< idle creep to overcome static friction
     double max_throttle{0.15};            ///< upper edge of the taxi throttle band.

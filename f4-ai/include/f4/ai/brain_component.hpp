@@ -146,6 +146,8 @@ public:
                 const auto& entry_fix = plan_.route.back().position;
                 landing_.configure(entry_fix, plan_.taxi_in_route);
                 landing_.fly_traffic_pattern = plan_.fly_traffic_pattern;
+                landing_.air_steering.reset_integrators();
+                landing_.pattern_steering.reset_integrators();
                 landing_.initialize(owner_.id().value, *world, bus);
                 phase_ = Phase::Approach;
             } else {
@@ -157,6 +159,7 @@ public:
         if (phase_ == Phase::Ground && takeoff_.is_complete()) {
             if (!plan_.route.empty()) {
                 nav_.set_route(plan_.route);
+                nav_.air_steering.reset_integrators();
                 phase_ = Phase::Enroute;
             } else {
                 phase_ = Phase::Complete;
@@ -169,6 +172,14 @@ public:
                 const auto& entry_fix = plan_.route.back().position;
                 landing_.configure(entry_fix, plan_.taxi_in_route);
                 landing_.fly_traffic_pattern = plan_.fly_traffic_pattern;
+                // Reset the LandingModule's air_steering integrators BEFORE
+                // initialize() — the NavigationModule's air_steering has
+                // accumulated VS-rate state that, if carried into the
+                // LandingModule, produces a massive transient on the first
+                // tick (prev_vs_fpm_ = 0, actual VS = 4000+ → huge damping
+                // spike that drives the aircraft into the ground).
+                landing_.air_steering.reset_integrators();
+                landing_.pattern_steering.reset_integrators();
                 landing_.initialize(owner_.id().value, *world, bus);
                 phase_ = Phase::Approach;
             } else {

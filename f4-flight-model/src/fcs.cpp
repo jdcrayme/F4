@@ -393,7 +393,14 @@ void FlightControlSystem::runPitch(double dt, double qbar, double qsom,
     // (qsom = q*S/m ≈ 5 at 50 kts sea level). Below this, no meaningful
     // 1-G trim alpha can be computed.
     if (std::fabs(clalph0) > QSOM_FLOOR && qsom > 5.0) {
-        const double cl_needed = GRAVITY * cosgam * std::max(0.0, cosmu) / qsom
+        // Flare-mode G reduction: when gear down + idle throttle + not in
+        // ground effect (nzcgs < 1.05), target 0.92G instead of 1.0G.
+        // This produces a gentle descent during the flare.
+        double flare_g_factor = 1.0;
+        if (aero.gearPos > 0.5 && input.throttle < 0.05 && nzcgs < 1.05) {
+            flare_g_factor = 0.92;
+        }
+        const double cl_needed = flare_g_factor * GRAVITY * cosgam * std::max(0.0, cosmu) / qsom
                                + 0.1 * aero.gearPos
                                - clift0 * tefFactor * aux_->CLtefFactor;
         // clalph0 is per-degree, so cl_needed / clalph0 is in degrees.
@@ -453,13 +460,20 @@ void FlightControlSystem::runPitch(double dt, double qbar, double qsom,
     // the error when gear is down AND qsom is low (ground roll / taxi).
     // The alpha_bias is already 0 in this regime (the qsom guard above),
     // so the FCS produces alpha=0 on the ground.
-    const bool ground_guard = (aero.gearPos > 0.5 && qsom < 5.0);
+    const bool on_ground = (aero.gearPos > 0.5 && nzcgs < 0.8);
+    const bool ground_guard = (aero.gearPos > 0.5 && qsom < 5.0) || on_ground;
     const double error = ground_guard ? 0.0
                         : (ptcmd - (nzcgs - cosmu_lim * cosgam - gearGravityTerm)) * fcs.kp05;
 
     // --- PI controller ---
     const double eprop = fcs.kp02 * error;
     const double eintg1 = fcs.kp03 * error;
+
+    // On-ground: reset pitch integrator + lead-lag filter to kill wound-up state.
+    if (ground_guard) {
+        fcs.pitchIntegral.reset(0.0);
+        fcs.pitchAlphaLag.reset(0.0);
+    }
 
     // --- Conditional integration anti-windup ---
     // Standard anti-windup: STOP integrating when the integrator is at a
@@ -502,6 +516,11 @@ void FlightControlSystem::runPitch(double dt, double qbar, double qsom,
     // The filtered PI provides the correction on top of the bias.
     // Together: pstick=0 → PI output ≈ 0 → alpha ≈ bias (trim by construction).
     double new_alpha = std::clamp(alpha_bias_deg + filtered_pi, aoamin, aoamax);
+
+    // Ground alpha clamp: on the ground with no pitch command, force alpha=0.
+    if (ground_guard && ptcmd <= 0.0) {
+        new_alpha = 0.0;
+    }
 
     // --- Alpha rate (for the EOM) ---
     // Compute alpha_dot from the change in alpha across this frame.
@@ -638,7 +657,7 @@ void FlightControlSystem::runYaw(double dt, double qbar, double qsom,
     // heading directly via nose-wheel steering, and the aero model can't
     // produce meaningful side force. Hold beta at 0 in that regime to
     // avoid spurious transients during the takeoff roll.
-    if (aero.gearPos > 0.5 && qsom < 5.0) {
+    if (aero.gearPos > 0.5) {
         aero.beta = zero_angle();
         aero.beta_dot = zero_angular_rate();
     } else {

@@ -39,7 +39,10 @@ namespace f4::ai::modules {
 
 TakeoffModule::TakeoffModule()
     : sm_(build_sm())
-{}
+{
+    air_steering.max_bank_rad = 0.26;
+    air_steering.bank_gain = 1.0;
+}
 
 fsm::StateMachine<TakeoffState, TakeoffEvent>
 TakeoffModule::build_sm()
@@ -286,6 +289,7 @@ GroundSteering::Input TakeoffModule::steering_input() const noexcept {
     in.position = current_position_;
     in.heading_rad = current_heading_rad_;
     in.speed_kts = current_vcas_kts_;
+    in.heading_rate_radps = current_yaw_rate_radps_;
     return in;
 }
 
@@ -422,12 +426,12 @@ AIControlOutput TakeoffModule::controls_for_prep_to_take_runway() const {
     const double dy = current_position_.y - threshold_position_.y;
     const double lateral = std::abs(dx * fy - dy * fx);
 
-    if (lateral > centerline_align_tolerance_ft) {
-        return ground_steering.steer_toward(lineup_point, steering_input(),
-                                            taxi_speed_kts, /*stop_at_target=*/false);
-    }
-    return ground_steering.align_heading(runway_heading_rad_, steering_input(),
-                                         taxi_speed_kts, /*stop=*/false);
+    const geo::WorldPosition lineup_point_far(
+        threshold_position_.x + fx * (lineup_depth_ft + 1000.0),
+        threshold_position_.y + fy * (lineup_depth_ft + 1000.0),
+        threshold_position_.z);
+    return ground_steering.steer_toward(lineup_point_far, steering_input(),
+                                        taxi_speed_kts, /*stop_at_target=*/false);
 }
 
 AIControlOutput TakeoffModule::controls_for_take_runway() const {

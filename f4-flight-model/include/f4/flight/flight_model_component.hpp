@@ -91,6 +91,7 @@ public:
         // from idle. A brain that wants to keep controlling must write
         // every tick.
         fm_.update(dt, pending_input_, ground_z_ft_, ground_normal_);
+        last_consumed_input_ = pending_input_;
         pending_input_ = PilotInput{};
 
         // Forward the bus to the FlightModel so it can publish stall
@@ -137,6 +138,8 @@ public:
     // component's update() in pass 2.
     [[nodiscard]] PilotInput&       pending_input()       noexcept { return pending_input_; }
     [[nodiscard]] const PilotInput& pending_input() const noexcept { return pending_input_; }
+
+    [[nodiscard]] const PilotInput& last_consumed_input() const noexcept { return last_consumed_input_; }
 
     // --- Ground state slots (host or terrain system writes here) ---
     void set_ground(double z_ft, const math::Vec3d& normal) noexcept {
@@ -198,6 +201,10 @@ public:
         return fm_.state().kin.q;
     }
 
+    double yaw_rate_radps() const override {
+        return fm_.state().kin.r;
+    }
+
     double vertical_speed_fpm() const override {
         // NED z is down and zdot is in ft/s: climbing = negative zdot.
         return -fm_.state().kin.zdot * 60.0;
@@ -222,6 +229,8 @@ private:
     // The brain's output for this tick. Default-constructed = idle controls.
     // Written by BrainComponent in pass 1, consumed and cleared in pass 2.
     PilotInput pending_input_{};
+
+    PilotInput last_consumed_input_{};
 
     // Ground state. Defaults: flat ground at z=0, normal pointing up
     // (NED frame: -Z is up, so up = (0, 0, -1)).

@@ -91,6 +91,10 @@ set(F4_SCENARIO_TEMPLATES
     f4-scenario-player/scenarios/digi_full_mission.json.in
     f4-scenario-player/scenarios/takeoff_only.json.in
     f4-scenario-player/scenarios/landing_only.json.in
+    f4-scenario-player/scenarios/intercept_final.json.in
+    f4-scenario-player/scenarios/on_glideslope.json.in
+    f4-scenario-player/scenarios/climbout_to_cruise.json.in
+    f4-scenario-player/scenarios/closed_traffic.json.in
 )
 foreach(template ${F4_SCENARIO_TEMPLATES})
     get_filename_component(scenario_name ${template} NAME_WE)

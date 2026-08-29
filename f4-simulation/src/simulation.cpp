@@ -196,11 +196,12 @@ void Simulation::spawn_from_scenario_list() {
         // NED. (The FM's groundZ consumers were standardized on MSL-up;
         // they previously mixed NED and MSL conventions, which only agreed
         // for ground at exactly 0 ft.)
-        fm.set_ground(sc.parking_spot.z, f4::math::Vec3d{0.0, 0.0, -1.0});
+        const double spawn_ground_z = spawn_airborne ? 0.0 : sc.parking_spot.z;
+        fm.set_ground(spawn_ground_z, f4::math::Vec3d{0.0, 0.0, -1.0});
         // Also set the default flat terrain source to the parking altitude,
         // so when no real TerrainSource is provided, tick() keeps the
         // ground at the parking altitude (preserves pre-terrain behavior).
-        default_terrain_ = f4::terrain::FlatTerrainSource(sc.parking_spot.z);
+        default_terrain_ = f4::terrain::FlatTerrainSource(spawn_ground_z);
 
         // 3. VisualModelComponent — the renderable handle (DrawableBSP* equivalent).
         //    This is the ONLY new component type. The renderer reads it to draw
@@ -474,6 +475,8 @@ void Simulation::wire_atc() {
     af.threshold_position = scenario_.airfield.threshold_position;
     af.threshold_altitude_ft = scenario_.airfield.threshold_altitude_ft;
     af.departure_altitude_ft = scenario_.airfield.departure_altitude_ft;
+    // Pattern altitude: 1500 ft above the threshold (typical radar pattern).
+    af.pattern_altitude_ft = scenario_.airfield.threshold_altitude_ft + 1500.0;
     af.taxi_route = scenario_.airfield.taxi_route;
     af.runway_end_position = scenario_.airfield.runway_end_position;
     atc_->set_airfield(af);
@@ -649,7 +652,7 @@ void Simulation::record_fcs_trace_sample() {
         // The pending input was just consumed by the FM this tick; we read
         // the brain's cached last_pilot_input via the FM's pending slot
         // (which still holds the value — the FM clears it next tick).
-        const auto& pi = fm->pending_input();
+        const auto& pi = fm->last_consumed_input();
         sample.pitch_cmd       = pi.pstick;
         sample.roll_cmd        = pi.rstick;
         sample.yaw_cmd         = pi.ypedal;

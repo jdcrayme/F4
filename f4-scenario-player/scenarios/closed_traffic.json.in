@@ -1,0 +1,56 @@
+{
+  "name": "closed_traffic",
+  "theater": "korea",
+  "terrain_json_path": "@F4_BINARY_DIR@/korea.terrain.json",
+  "models_hdr_path": "@F4_SOURCE_DIR@/temp/KoreaObj.HDR",
+  "models_lod_path": "@F4_SOURCE_DIR@/temp/KoreaObj.LOD",
+  "models_tex_path": "@F4_SOURCE_DIR@/temp/KoreaObj.TEX",
+  "aircraft": [
+    {
+      "callsign": "EAGLE1",
+      "aircraft_config_path": "@F4_BINARY_DIR@/generated_fixtures/f16.json",
+      "aircraft_name": "F-16C_50",
+      "vis_type_index": 1052,
+      "parking_spot": { "x": 0.0, "y": 0.0, "z": 50.0 },
+      "heading_rad": 0.0,
+      "initial_fuel_lbs": 6500.0
+    }
+  ],
+  "airfield": {
+    "active_runway_id": 36,
+    "active_runway_name": "Rwy 36",
+    "runway_heading_rad": 0.0,
+    "threshold_position": { "x": 500.0, "y": 8000.0, "z": 50.0 },
+    "runway_end_position": { "x": 500.0, "y": 13000.0, "z": 50.0 },
+    "threshold_altitude_ft": 50.0,
+    "departure_altitude_ft": 1500.0,
+    "taxi_route": [
+      { "x": 0.0,    "y": 0.0,    "z": 50.0 },
+      { "x": 100.0,  "y": 200.0,  "z": 50.0 },
+      { "x": 200.0,  "y": 2000.0, "z": 50.0 },
+      { "x": 400.0,  "y": 5000.0, "z": 50.0 },
+      { "x": 500.0,  "y": 8000.0, "z": 50.0 }
+    ],
+    "taxi_in_route": [
+      { "x": 500.0, "y": 8500.0, "z": 50.0 },
+      { "x": 0.0,   "y": 0.0,    "z": 50.0 }
+    ]
+  },
+  "airfield_features": [
+    { "name": "Runway Section 1", "vis_type_index": 121, "position": { "x": 500.0, "y":  8500.0, "z": 50.0 }, "heading_rad": 0.0 },
+    { "name": "Runway Section 2", "vis_type_index": 121, "position": { "x": 500.0, "y": 10500.0, "z": 50.0 }, "heading_rad": 0.0 },
+    { "name": "Runway Section 3", "vis_type_index": 121, "position": { "x": 500.0, "y": 12500.0, "z": 50.0 }, "heading_rad": 0.0 }
+  ],
+  "waypoints_frame": "runway",
+  "waypoints": [
+    { "name": "DEPART",   "position": { "x": 0.0, "y": 30000.0, "z": 1500.0 }, "speed_kts": 300.0 },
+    { "name": "DOWNWIND", "position": { "x": 0.0, "y": 50000.0, "z": 1500.0 }, "speed_kts": 250.0 },
+    { "name": "TURN_BACK", "position": { "x": 0.0, "y": 50000.0, "z": 1500.0 }, "speed_kts": 250.0 },
+    { "name": "FINAL_FIX", "position": { "x": 0.0, "y": -30000.0, "z": 1623.0 }, "speed_kts": 200.0 }
+  ],
+  "approach": "straight_in",
+  "sim_dt": 0.016666666666666666,
+  "total_ticks": 80000,
+  "record": false,
+  "fcs_trace_path": "@F4_BINARY_DIR@/closed_traffic_trace.csv"
+}

@@ -158,7 +158,9 @@ AIControlOutput NavigationModule::controls_for_waypoint() const
         speed = std::min(speed, turn_speed_kts);
     }
 
-    return air_steering.steer(desired_hdg, wp.position.z, speed,
+    constexpr double TERRAIN_CLEARANCE_FLOOR_MSL = 3000.0;
+    double target_alt = std::max(wp.position.z, TERRAIN_CLEARANCE_FLOOR_MSL);
+    return air_steering.steer(desired_hdg, target_alt, speed,
                               steering_input());
 }
 

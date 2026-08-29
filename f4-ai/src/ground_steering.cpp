@@ -75,7 +75,9 @@ AIControlOutput GroundSteering::align_heading(double desired_heading_rad,
     out.gear_handle_down = true;
 
     const double hdg_err = heading_error(desired_heading_rad, in.heading_rad);
-    out.yaw_cmd = pedal_for_heading_error(hdg_err);
+    out.yaw_cmd = std::clamp(
+        -align_heading_gain * hdg_err + heading_rate_damp * in.heading_rate_radps,
+        -1.0, 1.0);
 
     if (stop) {
         out.throttle_cmd = 0.0;

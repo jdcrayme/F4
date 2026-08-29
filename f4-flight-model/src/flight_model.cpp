@@ -264,7 +264,7 @@ void FlightModel::updateGear(double dt) {
     GearState& g = state_.gear;
 
     // Actuate gear toward handle position
-    const double gearHandle = g.inAir ? -1.0 : 1.0;
+    const double gearHandle = lastInput_.gearHandle;
     a.gearPos = gear_.updateGearPos(a.gearPos, gearHandle, dt);
 
     // Update strut compression

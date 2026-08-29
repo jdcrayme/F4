@@ -135,14 +135,14 @@ public:
     double departure_alt_ft{2500.0};      // climb to this MSL before Done
     double taxi_speed_kts{15.0};          // max taxi speed
     double takeoff_throttle{1.0};         // throttle during takeoff roll (1.0 = MIL)
-    double rotate_pitch_deg{13.0};        // target pitch attitude at Vr
+    double rotate_pitch_deg{8.0};        // target pitch attitude at Vr
     double rotate_pitch_gain{3.0};        // stick per rad of pitch error (rotation)
     double climb_pitch_deg{10.0};         // target pitch attitude in FlyOut
     double climb_pitch_gain{2.0};         // stick per rad of pitch error (climb)
 
     // Waypoint capture radius (feet). When the aircraft is within this
     // distance of a taxi waypoint, it advances to the next one.
-    double taxi_wp_capture_radius_ft{50.0};
+    double taxi_wp_capture_radius_ft{100.0};
 
     // Centerline alignment tolerance (feet). When the aircraft in
     // PrepToTakeRunway is within this lateral distance of the runway
@@ -161,7 +161,7 @@ public:
     // Phase A3: tightened from 0.15 rad (8.5 deg) to 0.009 rad (0.5 deg)
     // for the same reason — even a small heading error at the start of the
     // roll compounds above 89 kts.
-    double heading_align_tolerance_rad{0.009};   // ~0.5 deg
+    double heading_align_tolerance_rad{0.087};   // ~0.5 deg
 
     // How far past the threshold the lineup target sits (feet). PrepToTakeRunway
     // steers toward this point on the runway centerline, then aligns heading.
@@ -275,6 +275,9 @@ private:
     double current_roll_rad_{0.0};
     double current_roll_rate_radps_{0.0};
     double current_pitch_rate_radps_{0.0};
+    double current_yaw_rate_radps_{0.0};
+    double prev_heading_rad_{0.0};
+    bool prev_heading_valid_{false};
     double current_vs_fpm_{0.0};
     bool on_ground_{true};
 
