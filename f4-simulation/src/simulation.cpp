@@ -515,7 +515,18 @@ void Simulation::wire_atc() {
 
 void Simulation::tick(double dt) {
     if (paused_) return;
-    const double scaled_dt = dt * time_scale_;
+    // dt is AUTHORITATIVE and FIXED: hosts call tick() once per unit of
+    // owed sim time, always with the same dt (the scenario's sim_dt;
+    // the player drains a wall-clock accumulator in whole sim_dt
+    // ticks). The flight model subdivides it into 6 minor steps (1/360 s
+    // at the default 1/60 s sim_dt) — the operating point the FCS's
+    // discrete PI/lead-lag filters were tuned for. Scaling dt here
+    // would silently move every integrator and filter off its tuned
+    // discretization (the old internal time_scale_ multiplication did
+    // exactly that, forcing the player's 4x slider cap — see
+    // FLIGHT_CONTROL_STABILITY_PLAN.md §4.2 RC-2; it has been removed,
+    // pacing belongs to the host, and set_trace_time_scale() carries
+    // the CSV metadata that used to ride on it).
 
     // Two-pass: brains (pass 1, priority >= 75) then physics (pass 2, < 75).
     // BrainComponent runs first, reads IAircraftState, writes IPilotInputSink.
@@ -548,7 +559,7 @@ void Simulation::tick(double dt) {
         fm->set_ground(ground_z, f4::math::Vec3d{0.0, 0.0, -1.0});
     }
 
-    world_.update_all(scaled_dt, bus_);
+    world_.update_all(dt, bus_);
     bus_.flush_pending();  // drain deferred ATC messages (TaxiClearance, etc.)
 
     // Per-aircraft sync: pull FM state → TransformComponent + VisualModelComponent.
@@ -586,7 +597,7 @@ void Simulation::tick(double dt) {
         }
     }
 
-    sim_time_s_ += scaled_dt;
+    sim_time_s_ += dt;
     ++tick_;
 
     // Mode B: per-tick bubble update. Deaggregates ground/naval units
@@ -671,7 +682,7 @@ void Simulation::record_fcs_trace_sample() {
         f4::recorder::FcsTraceSample sample;
         sample.tick       = tick_;
         sample.sim_time_s = sim_time_s_;
-        sample.time_scale = time_scale_;
+        sample.time_scale = trace_time_scale_;
 
         // --- AI state ---
         if (auto* brain = h.get<f4::ai::BrainComponent>(); brain) {

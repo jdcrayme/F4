@@ -121,11 +121,17 @@ void PlayerApp::set_paused(bool paused) noexcept {
 }
 
 void PlayerApp::set_time_scale(double scale) noexcept {
-    // Clamp to [0.1, 4.0]: see the comment at the slider below for the
-    // FCS-stability rationale. Values above 4x drive the FM's minor-frame
-    // step past the discrete-filter stability margin.
+    // Clamp to [0.1, 10.0]. The slider scales the WALL-CLOCK time fed
+    // into the fixed-timestep accumulator — never the per-tick dt — so
+    // FCS filter stability no longer depends on it. (The old 4x cap
+    // existed because the slider used to inflate dt directly, pushing
+    // the FM's minor step past the discrete filters' stability margin;
+    // see FLIGHT_CONTROL_STABILITY_PLAN.md §4.2 RC-2.) The practical
+    // limit now is CPU: at 10x/60 FPS the loop runs 10 sim ticks per
+    // frame, each with the FM's tuned 1/360 s minor step, bounded by
+    // kMaxSimStepsPerFrame in run().
     if (scale > 0.0) {
-        impl_->time_scale = std::clamp(scale, 0.1, 4.0);
+        impl_->time_scale = std::clamp(scale, 0.1, 10.0);
     }
 }
 
@@ -236,9 +242,45 @@ void PlayerApp::run() {
             exit_after_screenshot = true;
         }
 
-        // Tick the simulation if not paused.
+        // Fixed-timestep tick loop ("Fix Your Timestep" accumulator).
+        //
+        // The accumulator collects WALL-CLOCK seconds scaled by the
+        // speed slider and is drained in whole scenario.sim_dt ticks —
+        // dt is ALWAYS scenario.sim_dt, so the flight model's minor
+        // step stays at its tuned 1/360 s (6 sub-steps of the 1/60 s
+        // major) and the FCS's discrete filters run at their designed
+        // operating point at every speed. The old code ticked ONCE per
+        // frame with sim_dt*time_scale, which (a) moved every discrete
+        // filter off its tuned discretization as the slider moved (the
+        // reason for the old 4x cap — FLIGHT_CONTROL_STABILITY_PLAN.md
+        // §4.2 RC-2), (b) made real-time pacing depend on the frame
+        // rate ("1.0x = real time" silently required 60 FPS), and (c)
+        // changed the trajectory itself with the slider, so recorded
+        // traces were never comparable across speeds.
+        //
+        // Now the tick sequence — hence the trajectory, the flight
+        // recording, and the FCS CSV trace — is identical at any slider
+        // setting and matches the headless harnesses (sim.tick(1/60)
+        // loops), and 1.0x is true real time at any frame rate.
         if (!impl_->paused && dt > 0.0) {
-            impl_->sim->tick(impl_->scenario.sim_dt * impl_->time_scale);
+            impl_->sim_accumulator += dt * impl_->time_scale;
+
+            // Spiral-of-death guard: after a stall (window drag,
+            // breakpoint) the clamped 1/15 s frame dt at 10x asks for
+            // up to 40 ticks in one frame; cap the burst and drop the
+            // remainder rather than freezing the render loop. 30 steps
+            // covers 10x at 30 FPS (20 ticks) with headroom.
+            constexpr int kMaxSimStepsPerFrame = 30;
+            int steps = 0;
+            while (impl_->sim_accumulator >= impl_->scenario.sim_dt &&
+                   steps < kMaxSimStepsPerFrame) {
+                impl_->sim->tick(impl_->scenario.sim_dt);
+                impl_->sim_accumulator -= impl_->scenario.sim_dt;
+                ++steps;
+            }
+            if (steps == kMaxSimStepsPerFrame) {
+                impl_->sim_accumulator = 0.0;  // drop the debt, stay live
+            }
         }
 
         // Draw
@@ -260,19 +302,23 @@ void PlayerApp::run() {
         if (ImGui::Button("Focus Aircraft (F)")) impl_->fit_to_aircraft();
         ImGui::Checkbox("Follow aircraft (C)", &impl_->follow_aircraft);
         ImGui::Separator();
-        // Sim speed: the tick scales by this multiplier (0.1x taxi
-        // inspection .. 4x fast-forward through the enroute legs).
-        //
-        // Capped at 4x: the FCS PI + lead-lag filters were tuned for a
-        // 1/360 s minor step (6 sub-steps of 1/60 s major). At 16x the
-        // minor step is effectively 1/22.5 s, past the stability margin
-        // of the FCS's discrete filters — the closed loop develops a
-        // high-frequency oscillation that the integrator cannot damp.
-        // See FLIGHT_CONTROL_STABILITY_PLAN.md §4.2 RC-2.
+        // Sim speed: scales the WALL-CLOCK time fed into the
+        // fixed-timestep accumulator (0.1x taxi inspection .. 10x
+        // fast-forward). The tick dt is always scenario.sim_dt, so the
+        // FM's minor step stays at its tuned 1/360 s and the FCS PI +
+        // lead-lag filters run at their designed operating point at
+        // every speed — no stability cap needed. (The old 4x cap
+        // existed because the slider used to inflate dt directly,
+        // pushing the minor step past the filters' stability margin;
+        // see FLIGHT_CONTROL_STABILITY_PLAN.md §4.2 RC-2.) The limit
+        // now is CPU: 10x = 10 ticks x 6 minor steps per frame at
+        // 60 FPS, bounded by kMaxSimStepsPerFrame above.
         float speed = static_cast<float>(impl_->time_scale);
-        if (ImGui::SliderFloat("Sim speed", &speed, 0.1f, 4.0f, "%.1fx",
+        if (ImGui::SliderFloat("Sim speed", &speed, 0.1f, 10.0f, "%.1fx",
                                ImGuiSliderFlags_Logarithmic)) {
             impl_->time_scale = speed;
+            // Trace metadata only (see Simulation::set_trace_time_scale).
+            if (impl_->sim) impl_->sim->set_trace_time_scale(speed);
         }
         ImGui::Separator();
         ImGui::Checkbox("Show airport", &impl_->show_airport);

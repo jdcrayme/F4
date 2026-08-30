@@ -155,7 +155,18 @@ public:
     [[nodiscard]] std::uint64_t tick_count() const noexcept { return tick_; }
     [[nodiscard]] bool paused() const noexcept { return paused_; }
     void set_paused(bool p) noexcept { paused_ = p; }
-    void set_time_scale(double s) noexcept { time_scale_ = s; }
+    /// Trace metadata ONLY — does NOT affect tick(). tick(dt) is
+    /// authoritative: hosts pace the sim by calling tick() with a FIXED
+    /// dt (the scenario's sim_dt) once per unit of owed sim time (the
+    /// scenario player drains a wall-clock accumulator in whole sim_dt
+    /// ticks). This value is merely recorded in the FCS CSV trace's
+    /// time_scale column so baseline runs (e.g. 1x vs 10x wall-clock
+    /// pacing) stay identifiable after the fact. Replaces the old
+    /// behavioral set_time_scale()/time_scale_ scaling, which silently
+    /// moved the FM's minor step off its tuned 1/360 s and forced the
+    /// player's 4x slider cap (FLIGHT_CONTROL_STABILITY_PLAN.md §4.2
+    /// RC-2).
+    void set_trace_time_scale(double s) noexcept { trace_time_scale_ = s; }
 
 private:
     void load_models();           // KoreaObj.HDR/.LOD/.TEX -> ModelDatabase
@@ -221,7 +232,9 @@ private:
     double sim_time_s_{0.0};
     std::uint64_t tick_{0};
     bool paused_{false};
-    double time_scale_{1.0};
+    // Trace metadata only — see set_trace_time_scale(). Never used to
+    // scale tick dt.
+    double trace_time_scale_{1.0};
 };
 
 } // namespace f4::simulation

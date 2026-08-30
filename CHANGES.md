@@ -949,3 +949,87 @@ aircraft and features share the same draw path.
   throttle.
 - Render the aircraft actually moving across the real airfield meshes.
 
+## Fixed-Timestep Player Loop (speed slider rework)
+
+**Goal:** Make the simulation trajectory independent of the speed slider
+and the frame rate, and raise the slider max from 4x to 10x.
+
+### The problem
+
+The scenario player ticked the sim ONCE per rendered frame with an
+INFLATED dt (`player_app.cpp:241` before this change):
+
+    sim->tick(scenario.sim_dt * time_scale);
+
+so the flight model's FCS/EOM minor step (dt/6) slid between 1/3600 s
+(0.1x) and 1/90 s (4x). The FCS PI + lead-lag filters are discrete and
+dt-dependent — past their tuned operating point (1/360 s minor step)
+the pitch loop destabilizes, which is why the slider was clamped to 4x
+(FLIGHT_CONTROL_STABILITY_PLAN.md §4.2 RC-2 — a symptom patch). Two
+more defects fell out of the same line:
+
+1. Real-time pacing depended on the FRAME RATE: the sim advanced
+   `sim_dt*time_scale` per FRAME, so "1.0x = real time" only held at
+   exactly 60 FPS (a 144 Hz vsync display ran the sim ~2.4x too fast).
+2. The trajectory itself changed with the slider (different dt =
+   different integration path), so interactive runs, headless CI runs,
+   and recorded traces were never directly comparable.
+3. `Simulation::tick` ALSO multiplied by its own `time_scale_` member
+   (default 1.0, never set by any caller) — a latent double-scaling
+   trap for future hosts.
+
+### The fix
+
+Fixed-timestep accumulator in the player (the classic "Fix Your
+Timestep" pattern):
+
+    accumulator += frame_dt * time_scale;      // slider scales WALL TIME
+    while (accumulator >= scenario.sim_dt) {   // dt is ALWAYS sim_dt
+        sim->tick(scenario.sim_dt);
+        accumulator -= scenario.sim_dt;
+    }
+
+- dt is now always `scenario.sim_dt`, so the FM minor step stays at its
+  tuned 1/360 s at every speed; filter behavior is speed-independent.
+- The slider scales wall-clock time, not dt: 1.0x is true real time at
+  any frame rate, and slow-mo carries fractional remainders across
+  frames smoothly.
+- The tick sequence — hence the trajectory, the flight recording, and
+  the FCS CSV trace — is identical across slider settings and matches
+  the headless harnesses (`sim.tick(1.0/60.0)` loops), so interactive
+  and CI traces are directly comparable again.
+- The 4x stability cap is replaced by a CPU-bounded guard
+  (`kMaxSimStepsPerFrame = 30` — covers 10x at 30 FPS; drops the
+  remainder after a stall instead of freezing the render loop), and
+  the slider max is raised to 10x (10x/60 FPS = 10 ticks x 6 minor
+  steps per frame).
+- `Simulation::set_time_scale()`/`time_scale_` (behavioral scaling) are
+  REMOVED. The FCS CSV trace's `time_scale` column is kept and now
+  records pure host metadata via `Simulation::set_trace_time_scale()`
+  (default 1.0) — baselines stay identifiable, but no host can
+  accidentally double-scale dt.
+
+### Files changed
+
+| File | Change |
+|------|--------|
+| `f4-scenario-player/src/player_app.cpp` | Accumulator tick loop with `kMaxSimStepsPerFrame = 30` guard; slider + `set_time_scale` clamp raised to [0.1, 10.0]; comments updated |
+| `f4-scenario-player/src/viewer_state.hpp` | `sim_accumulator` member |
+| `f4-scenario-player/include/f4/scenario_player/player_app.hpp` | `set_time_scale` doc (real time at any frame rate, [0.1, 10.0]) |
+| `f4-simulation/include/f4/simulation/simulation.hpp` | `set_time_scale`/`time_scale_` removed; `set_trace_time_scale`/`trace_time_scale_` added (metadata only) |
+| `f4-simulation/src/simulation.cpp` | `tick(dt)` no longer scales dt (dt is authoritative); FCS trace sample records `trace_time_scale_` |
+| `Docs/FLIGHT_CONTROL_NEXT_STEPS.md` | Phase 2b row marked Superseded |
+| `CHANGES.md` | This entry |
+
+### Testing
+
+- Full non-renderer test suite passes (all f4-* libraries; renderer/
+  viewer executables excluded from CI here only because the container
+  lacks GL dev headers — no renderer code was touched).
+- The scenario-player translation unit compiles clean against raylib
+  5.0 / imgui v1.91.5 / rlImGui @ 9acdbbf headers.
+- Manual: run `takeoff_only` at 0.1x / 1x / 10x — the FCS CSV traces
+  must be identical modulo the `time_scale` column; at 10x the run
+  completes ~10x faster with no pitch oscillation.
+- Manual: resize/drag the window mid-run at 10x — the render loop must
+  stay live (guard drops catch-up debt) and sim time must not jump.

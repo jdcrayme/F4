@@ -63,6 +63,12 @@ struct PlayerApp::Impl {
     bool sim_initialized = false;
     bool paused = true;  // start paused so the aircraft sits at parking
     double time_scale = 1.0;
+    // Fixed-timestep accumulator (seconds of SIM time owed). The render
+    // loop fills it with wall-clock dt * time_scale and drains it in
+    // whole scenario.sim_dt ticks, so every tick the flight model sees
+    // is exactly sim_dt wide — regardless of the speed slider or the
+    // frame rate. See player_app.cpp's tick loop for the rationale.
+    double sim_accumulator = 0.0;
 
     // ── Airfield geometry (shared f4-renderer builder + scenario overlays) ──
     AirfieldOverlays airfield;

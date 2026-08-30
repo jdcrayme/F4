@@ -48,7 +48,12 @@ public:
     /// Must be called before run().
     void set_paused(bool paused) noexcept;
 
-    /// Sim speed multiplier (1.0 = real time). Must be called before run().
+    /// Sim speed multiplier. 1.0 is true real time at ANY frame rate:
+    /// the value scales the WALL-CLOCK time fed into the run loop's
+    /// fixed-timestep accumulator — never the per-tick dt — so every
+    /// tick the sim sees is exactly scenario.sim_dt wide and the FCS
+    /// filters stay at their tuned operating point. Clamped to
+    /// [0.1, 10.0]. Must be called before run().
     void set_time_scale(double scale) noexcept;
 
     /// Camera follows the aircraft each frame (the C toggle). Before run().

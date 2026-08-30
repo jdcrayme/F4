@@ -32,7 +32,7 @@ Verified by reading current source, not by trusting the plan:
 | Phase 1c — Zero roll_cmd during takeoff roll | ✅ Done | `takeoff_module.cpp:460` explicit zero |
 | Phase 1d — Coordinated-turn feedforward | ❌ Not done | `air_steering.cpp` has no `tan(bank)·v·g` term |
 | Phase 2a — Terrain query before `update_all` | ✅ Done | `simulation.cpp:482–492` moved before `world_.update_all` |
-| Phase 2b — time_scale clamp to 4× | ✅ Done | `player_app.cpp:128` clamps to [0.1, 4.0] |
+| Phase 2b — time_scale clamp to 4× | ✅ Superseded | Replaced by the fixed-timestep accumulator (`player_app.cpp`): dt is always `sim_dt`, the slider scales wall-clock time (now up to 10×), so filter stability no longer depends on the slider. See CHANGES.md. |
 | Phase 2c — Conditional-integration anti-windup | ✅ Done | `fcs.cpp:475–483` sign-matched halt |
 | Phase 2d — Speed integral in AirSteering | ✅ Done | `air_steering.cpp:92` leaky integral |
 | Phase 2e — `speed_damp_rad_per_kt = 0.002` restored | ✅ Done | `landing_module.cpp:47` comment confirms |
