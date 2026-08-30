@@ -86,6 +86,16 @@ else()
     set(F4_DIGI_CLASS_TABLE "${CMAKE_SOURCE_DIR}/f4-world-convert/tests/fixtures/FALCON4.ct")
 endif()
 
+# Textured-terrain data for the scenario player: when a real install is
+# configured, point the scenarios at its korea theater (raw THEATER.L*/
+# O* post files + TEXTURE.BIN/texture.zip/FArtILES tile art). Substituted
+# into the scenario templates as @F4_SCENARIO_THEATER_DIR@; empty (the
+# default without F4_INSTALL) degrades to the untextured terrain path.
+set(F4_SCENARIO_THEATER_DIR "")
+if(F4_INSTALL AND EXISTS "${F4_INSTALL}/terrdata/korea/texture/TEXTURE.BIN")
+    set(F4_SCENARIO_THEATER_DIR "${F4_INSTALL}/terrdata/korea")
+endif()
+
 set(F4_SCENARIO_TEMPLATES
     f4-scenario-player/scenarios/kunsan_parking.json.in
     f4-scenario-player/scenarios/digi_full_mission.json.in

@@ -166,6 +166,13 @@ public:
     /// seconds. Useful for headless verification on CI / Linux dev boxes.
     void schedule_screenshot(float delay_sec, const std::string& path);
 
+    /// Select the first entity whose display name (icon label) contains
+    /// `substring` — programmatic equivalent of clicking it on the map.
+    /// Call after a world is loaded, before run(). Returns true when a
+    /// match was selected. Used by the --select CLI flag for headless
+    /// validation of the 3D Ground Layout panel.
+    bool select_by_name(const std::string& substring);
+
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;

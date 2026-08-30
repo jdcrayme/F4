@@ -75,6 +75,9 @@ add_library(f4-renderer STATIC
     src/world_camera.cpp
     src/terrain_mesh.cpp
     src/terrain_chunks.cpp
+    src/terrain_tile_cache.cpp
+    src/terrain_shader.cpp
+    src/world_view.cpp
 )
 target_link_libraries(f4-renderer PUBLIC f4_warnings)
 target_include_directories(f4-renderer
@@ -107,3 +110,7 @@ if(F4_RENDERER_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
 endif()
+
+# Developer tool: average-color probe for debugging screenshots.
+add_executable(png_probe tools/png_probe.cpp)
+target_link_libraries(png_probe PRIVATE f4_warnings raylib)

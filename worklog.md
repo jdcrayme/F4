@@ -1,5 +1,100 @@
 
 ---
+Task ID: TERRAIN-TEX-1
+Agent: main
+Task: Render textured terrain in the world-viewer and scenario-player, and unify world load + view rendering behind one shared path (WorldView).
+
+Work Log:
+- Ground-truthed the FreeFalcon terrain pipeline against the real install
+  (D:/SteamLibrary/.../terrdata/korea) and the vendored raylib 5.0 sources.
+  Key format facts verified on disk:
+  * THEATER.O<N> = u32 block-offset tables (dedup'd blocks share storage);
+    THEATER.L<N> = raw 7-byte TdiskPost records {u16 texID, i16 z, u8 color,
+    u8 theta, u8 phi}; block = 16x16 posts, row-major from SW corner.
+    File sizes validate exactly (L0=256x256 blocks ... L5=8x8=128x128 posts).
+  * L5 posts map 1:1 onto the 128x128 MEA grid — the calibration anchor
+    that ties the post system onto the existing ENU convention.
+  * Near LODs L0-L2 carry set/tile/res-packed texIDs (res nibble selects
+    H/M/L art: 128/64/32 px PCX); far LODs L3-L5 carry direct far-tile
+    indices into FArtILES.RAW (53,399 tiles x 32x32 x 8-bit + shared
+    256-entry palette in FArtILES.PAL).
+  * TEXTURE.BIN: numSets=110, totalTiles=1051; per tile name[20] +
+    nAreas/nPaths counts (16/24-byte records skipped in v1); stride math
+    verified byte-for-byte. Art lives in texture.zip — a real PKZIP with
+    ALL-STORED entries (no inflate needed) containing 4,448 PCX files
+    (1,109 each H/M/L/T families).
+- Phase 1 (f4-terrain + f4-io decoders, 22 new unit tests):
+  * TheaterGeometry — single source of truth for ENU<->post<->block<->cell
+    conversion; documents the 1,048,576 ft repo convention vs the true
+    3,358,720 ft Korea scale (one constant to change when reconciled).
+  * PostLevel — THEATER.O/L decoder (whole-file load, dedup'd block
+    indexing, per-post access, bilinear elevation + SW-post texID
+    samplers in ENU feet). Missing files => false (graceful degradation);
+    malformed => throw.
+  * FarTileDB — FArtILES.PAL/RAW (case-insensitive lookup for the quirky
+    "FArtILES" spelling), lazy RGBA decode.
+  * NearTileDB — TEXTURE.BIN catalog + lazy art loading from texture.zip
+    or loose files; res-variant resolution by first-char rewrite
+    (FreeFalcon's rule); memoized.
+  * ZipReader (f4-io) — minimal EOCD/central-directory zip reader,
+    STORED entries only; ZipReader tests build real zips byte-by-byte.
+  * PCX decoder (f4-terrain internal) — 8-bit single-plane RLE + 769-byte
+    trailing palette.
+  * tools/dump-terrain-textures — validates every decoder against the
+    install; revealed the H/M/L<->128/64/32px mapping and cross-LOD
+    elevation agreement (551 ft at theater center from every level).
+- Phase 2 (f4-renderer textured terrain):
+  * TerrainTileCache — four lazily-grown GL_TEXTURE_2D_ARRAYs (far 32,
+    near 32/64/128) through rlgl/glad; growth re-uploads retained CPU
+    copies; layer keys: far index / near texID.
+  * TerrainShader — GLSL 330, four sampler2DArray bindings on units 1-4
+    (raylib only ever touches unit 0), tile family selected via
+    vertexTexCoord2 = (layer, kind) — raylib binds that attribute at
+    location 5 and DrawMesh uploads mesh.texcoords2 (verified in the
+    vendored sources). Lambert + ambient lighting, linear distance fog,
+    and an untextured branch (vertex palette color) for quads whose tile
+    can't resolve.
+  * Chunk builder v2 (terrain_chunks.cpp): textured path emits
+    post-aligned quads (4 verts/quad, tile UVs ported verbatim from
+    FreeFalcon DiskblockToMemblock incl. the tile-spans-4-posts math and
+    the full-tile step at the last near LOD), 16x16-quad chunks; near
+    region inside near_extent_ft + far ring to extent_ft with a z bias
+    at the seam (full ring/connector LODs out of scope, documented).
+  * Raylib caveat discovered: RenderResources.light_direction's default
+    (0.65,-1,0.35) points below the horizon in the Y-up frame — flat
+    terrain needs its own sun vector (WorldView.sun_direction).
+- Phase 3 (WorldView — the single load-a-world/render-a-view path):
+  * f4::renderer::WorldView owns the whole lifecycle both apps used to
+    hand-roll: load_theater() (CPU) -> ensure_gpu() -> set_view(center)
+    -> update_frame(sky) -> chunk_set() feeds SceneDescription ->
+    unload() before GL teardown. Everything degrades to the untextured
+    TerrainData mesh path when tile data is absent.
+  * scenario-player migrated (10 hand-rolled fields -> one WorldView);
+    scenario JSON gains optional theater_dir (CMake substitutes the
+    install's korea theater via @F4_SCENARIO_THEATER_DIR@).
+  * world-viewer migrated: the install flow loads theater binaries; the
+    3D Ground Layout tab renders through WorldView (selection-centered
+    rebuild); new --select CLI flag + forced 3D tab for headless
+    validation screenshots.
+- Phase 4:
+  * 2D strategic map now paints REAL far-tile art (one 16x16 thumbnail
+    per MEA cell via the L5 level, 2048x2048 texture) instead of the
+    six-color elevation bands; falls back per-cell when a tile is
+    missing. The map cache became a plain Texture2D (CPU Image + one
+    upload) instead of a 128x128 RenderTexture.
+  * 3D panel diagnostics: chunk counts + tile layer count.
+- Cleanup: the triplicated theater_ft_per_cell/world_to_cell_clamped/
+  bilinear_elevation helpers extracted to f4-renderer/src/terrain_internal.hpp.
+- Validation: 22 new unit tests green; full suite 1519 tests with only
+  the 9 pre-existing failures (coord_transform, PilotInput clamps x5,
+  EngineModel — verified failing on the clean tree). Visual validation
+  against real geography: Kunsan coastline + offshore islands, west-
+  coast farmland tile art, 6,507 ft max elevation matches Korea;
+  scenario at hand-authored (0,0) correctly renders open ocean.
+Screenshots: temp/tt_real_far.png (scenario-player, real Kunsan),
+temp/final_wv3d.png (world-viewer 3D tab), temp/wv_map.png (2D map art).
+
+---
 Task ID: GEO-1
 Agent: main (orchestrator)
 Task: Answer the design question "Should world location be a strong type?" and build the decision into working code as the f4-geo library, then scaffold f4-entities on top of it.

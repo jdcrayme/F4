@@ -52,6 +52,10 @@ ViewerApp::ViewerApp()  : impl_(std::make_unique<Impl>()) {
                 // the user can see it's loaded (matches the --install flow
                 // which sets status_msg in set_install_path()).
                 impl_->status_msg = "Install: " + impl_->settings.install_path.string();
+                // If a world was restored from the command line before
+                // this ran, its theater tiles couldn't load without the
+                // install — pick them up now.
+                impl_->try_load_theater_tiles();
             }
         } catch (const std::exception&) {
             // Settings file may point at a path that no longer exists.
@@ -71,7 +75,7 @@ ViewerApp::~ViewerApp() {
     // IsWindowReady() — the latter returns true only between InitWindow
     // and CloseWindow.
     if (impl_->terrain_cache.id != 0 && IsWindowReady()) {
-        UnloadRenderTexture(impl_->terrain_cache);
+        UnloadTexture(impl_->terrain_cache);
         impl_->terrain_cache = {0};
     }
     // Free the Ground Layout 3D panel's RenderTexture (same GL-context
@@ -187,14 +191,14 @@ void ViewerApp::run() {
     }
 
     rlImGuiShutdown();
-    // POLISH-2.1: free the cached terrain RenderTexture BEFORE
-    // CloseWindow — once the GL context is gone, UnloadRenderTexture
+    // POLISH-2.1: free the cached terrain map texture BEFORE
+    // CloseWindow — once the GL context is gone, UnloadTexture
     // can't free GPU memory and may crash on some drivers. The dtor
     // also checks IsWindowReady() as a safety net for the case where
     // run() never got called (CLI-only usage).
     if (impl_->terrain_cache.id != 0) {
-        UnloadRenderTexture(impl_->terrain_cache);
-        impl_->terrain_cache = {0};
+        UnloadTexture(impl_->terrain_cache);
+        impl_->terrain_cache = {};
         impl_->terrain_cache_valid = false;
     }
     // Free the Ground Layout 3D panel's RenderTexture before the GL
@@ -225,6 +229,9 @@ void ViewerApp::run() {
         f4::renderer::unload_terrain_chunk_set(impl_->terrain_chunk_set_3d);
         impl_->terrain_chunk_set_3d_built = false;
     }
+    // Free the textured-theater GPU resources (WorldView: chunk meshes,
+    // tile arrays, terrain shader) — same GL-context requirement.
+    impl_->world.unload();
     // Free the Class Table Browser's preview GPU resources (RenderTexture,
     // cached meshes, textures, lit shader, default material). The browser
     // owns its own cache (separate from impl_->mesh_cache_3d) so we must
@@ -247,6 +254,46 @@ void ViewerApp::set_initial_camera(float center_x, float center_y, float zoom) {
     impl_->cam_y = center_y;
     impl_->cam_zoom = zoom;
     impl_->initial_camera_set = true;
+}
+
+bool ViewerApp::select_by_name(const std::string& substring) {
+    auto entities =
+        impl_->eworld.with_component<f4::entities::ObjectiveTypeComponent>();
+    // Two passes: prefer an objective that has ground-layout content
+    // (the 3D panel has something to show), then fall back to any match.
+    // Objectives are identified by their NAME tag when present (campaign
+    // worlds: "Kunsan AB", ...) and by the objective-type class name
+    // otherwise (fixture worlds: "Highway", ...).
+    for (int pass = 0; pass < 2; ++pass) {
+        for (const auto eid : entities) {
+            auto h = f4::entities::EntityHandle(eid, &impl_->eworld);
+            if (!h.valid()) continue;
+            const auto name_tag = h.get_tag(f4::entities::tags::NAME);
+            const std::string* name =
+                name_tag ? name_tag->as_string() : nullptr;
+            bool matched = name && name->find(substring) != std::string::npos;
+            if (!matched) {
+                auto* ot = h.get<f4::entities::ObjectiveTypeComponent>();
+                matched = ot && ot->class_name.find(substring) !=
+                                 std::string::npos;
+            }
+            if (!matched) continue;
+            if (pass == 0) {
+                auto* gl = h.get<f4::entities::GroundLayoutComponent>();
+                auto* fs = h.get<f4::entities::FeatureSetComponent>();
+                const bool has_content =
+                    (gl && !gl->layouts.empty()) ||
+                    (fs && !fs->features.empty());
+                if (!has_content) continue;
+            }
+            impl_->sel_kind = Impl::SelectionKind::Objective;
+            impl_->sel_entity = eid;
+            impl_->fit_to_selection_layout();
+            impl_->inspector_force_3d_tab = true;
+            return true;
+        }
+    }
+    return false;
 }
 
 // ---------------------------------------------------------------------------

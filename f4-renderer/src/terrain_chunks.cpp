@@ -13,8 +13,12 @@
 // UnloadMesh can free them. UploadMesh() pushes the data to the GPU.
 
 #include <f4/renderer/terrain_chunks.hpp>
+#include <f4/renderer/terrain_shader.hpp>
+#include <f4/renderer/terrain_tile_cache.hpp>
 #include <f4/renderer/coord_transform.hpp>  // enu_to_raylib
 #include <f4/renderer/draw_3d.hpp>          // extend_far_plane
+
+#include "terrain_internal.hpp"
 
 #include <raylib.h>
 #include <rlgl.h>              // rlDisableBackfaceCulling, rlEnableBackfaceCulling
@@ -27,62 +31,12 @@
 namespace f4::renderer {
 
 // ── Helpers shared with terrain_mesh.cpp ─────────────────────────────────────
-//
-// These three helpers (theater_ft_per_cell, world_to_cell_clamped,
-// bilinear_elevation) are DUPLICATED from terrain_mesh.cpp. The
-// alternative — exposing them in a shared internal header — would
-// couple the two files more tightly than the duplication does. If a
-// third consumer appears, extract them to a terrain_internal.hpp.
-//
-// Keep these in sync with terrain_mesh.cpp — same conventions, same
-// hardcoded 1024*1024 ft theater size, same clamp behavior.
+// theater_ft_per_cell / world_to_cell_clamped / bilinear_elevation live in
+// terrain_internal.hpp (extracted once WorldView became the third consumer).
 
-static double theater_ft_per_cell(const f4::terrain::TerrainData& td) {
-    const double theater_size_ft = 1024.0 * 1024.0;
-    const double w = static_cast<double>(td.header.width > 0 ? td.header.width : 128);
-    return theater_size_ft / w;
-}
-
-static uint32_t world_to_cell_clamped(double world_ft, double ft_per_cell,
-                                       uint32_t grid_size) {
-    if (grid_size == 0) return 0;
-    const double f = world_ft / ft_per_cell;
-    const double clamped = std::clamp(f, 0.0, static_cast<double>(grid_size - 1));
-    return static_cast<uint32_t>(clamped);
-}
-
-static double bilinear_elevation(const f4::terrain::TerrainData& td,
-                                  double east_ft, double north_ft) {
-    if (td.elevation.empty()) return 0.0;
-
-    const double ft_per_cell = theater_ft_per_cell(td);
-    if (ft_per_cell <= 0.0) return 0.0;
-
-    const double fx = std::clamp(east_ft / ft_per_cell, 0.0,
-                                  static_cast<double>(td.header.width - 1));
-    const double fy = std::clamp(north_ft / ft_per_cell, 0.0,
-                                  static_cast<double>(td.header.height - 1));
-
-    const uint32_t x0 = static_cast<uint32_t>(fx);
-    const uint32_t y0 = static_cast<uint32_t>(fy);
-    const uint32_t x1 = std::min(x0 + 1, td.header.width - 1);
-    const uint32_t y1 = std::min(y0 + 1, td.header.height - 1);
-
-    const double tx = fx - static_cast<double>(x0);
-    const double ty = fy - static_cast<double>(y0);
-
-    const uint32_t sim_y0 = td.header.height - 1 - y0;
-    const uint32_t sim_y1 = td.header.height - 1 - y1;
-
-    const double e00 = td.elevation_at(x0, sim_y0);
-    const double e10 = td.elevation_at(x1, sim_y0);
-    const double e01 = td.elevation_at(x0, sim_y1);
-    const double e11 = td.elevation_at(x1, sim_y1);
-
-    const double e0 = e00 + (e10 - e00) * tx;
-    const double e1 = e01 + (e11 - e01) * tx;
-    return e0 + (e1 - e0) * ty;
-}
+using f4::renderer::detail::theater_ft_per_cell;
+using f4::renderer::detail::world_to_cell_clamped;
+using f4::renderer::detail::bilinear_elevation;
 
 // ── Per-chunk build ────────────────────────────────────────────────────────
 //
@@ -258,6 +212,226 @@ static TerrainChunk build_one_chunk(
     return ch;
 }
 
+// ── Textured path (Phase 2) ─────────────────────────────────────────────────
+//
+// Emits post-aligned quads: one quad per PostLevel cell, four dedicated
+// vertices each (no sharing — neighboring quads can reference different
+// tile layers). texcoords carry the tile UV; texcoords2 carries
+// (array layer, sampler family) consumed by TerrainShader. Chunks are
+// 16x16 quads — the natural TdiskPost block granularity.
+//
+// Near-region UVs port FreeFalcon's DiskblockToMemblock math verbatim:
+// a tile spans 4 posts at LOD 0, 2 at LOD 1, and 1 (a full tile) at
+// LOD 2+, with the tile origin advancing per block-local post index.
+
+namespace {
+
+// FreeFalcon UV constants (tdskpost.cpp).
+constexpr float kUvStart = 0.00001f;
+constexpr float kUvStop  = 1.0f - kUvStart;
+constexpr float kUvMinStep = (kUvStop - kUvStart) * 0.25f;
+constexpr int   kLastNearTexturedLod = 2;    // stock theaters
+constexpr int   kQuadsPerChunkSide = 16;     // == POSTS_ACROSS_BLOCK
+
+struct TexturedRegion {
+    const f4::terrain::PostLevel* level = nullptr;
+    double ft_per_post = 0.0;
+    int qmin_col = 0, qmax_col = 0;   // quad range [qmin, qmax) in posts
+    int qmin_row = 0, qmax_row = 0;
+    float z_bias = 0.0f;              // extra offset (far ring)
+    bool near_region = false;
+};
+
+/// Build one 16x16-quad chunk from a region. `qc0`/`qr0` are the chunk's
+/// quad origin in level post space.
+TerrainChunk build_one_textured_chunk(
+    const f4::terrain::TerrainData& terrain,
+    const TerrainTileSource& tiles,
+    TerrainTileCache& cache,
+    const TerrainChunkSetConfig& cfg,
+    const TexturedRegion& reg,
+    int qc0, int qr0) {
+
+    const int ncols = std::min(kQuadsPerChunkSide, reg.qmax_col - qc0);
+    const int nrows = std::min(kQuadsPerChunkSide, reg.qmax_row - qr0);
+    TerrainChunk ch;
+    ch.textured = true;
+    if (ncols <= 0 || nrows <= 0) return ch;
+
+    const int level = reg.level->level();
+    const float uv_d = (level < kLastNearTexturedLod)
+                           ? static_cast<float>((1 << level)) * kUvMinStep
+                           : kUvStop;
+    const float z_off = cfg.z_offset_ft + reg.z_bias;
+
+    const int quads = ncols * nrows;
+    const int vert_count = quads * 4;
+    const int tri_count = quads * 2;
+
+    std::vector<float> vertices(static_cast<std::size_t>(vert_count) * 3);
+    std::vector<float> texcoords(static_cast<std::size_t>(vert_count) * 2);
+    std::vector<float> texcoords2(static_cast<std::size_t>(vert_count) * 2);
+    std::vector<float> normals(static_cast<std::size_t>(vert_count) * 3, 0.0f);
+    std::vector<unsigned char> colors(static_cast<std::size_t>(vert_count) * 4, 255);
+    std::vector<unsigned short> indices(static_cast<std::size_t>(tri_count) * 3);
+
+    float min_up = 1e30f, max_up = -1e30f;
+    int untextured = 0;
+    int v = 0;
+
+    for (int qr = 0; qr < nrows; ++qr) {
+        for (int qc = 0; qc < ncols; ++qc) {
+            const int col = qc0 + qc;
+            const int row = qr0 + qr;
+            const auto sw = reg.level->post(static_cast<uint32_t>(std::max(col, 0)),
+                                            static_cast<uint32_t>(std::max(row, 0)));
+            const auto se = reg.level->post(static_cast<uint32_t>(std::max(col + 1, 0)),
+                                            static_cast<uint32_t>(std::max(row, 0)));
+            const auto ne = reg.level->post(static_cast<uint32_t>(std::max(col + 1, 0)),
+                                            static_cast<uint32_t>(std::max(row + 1, 0)));
+            const auto nw = reg.level->post(static_cast<uint32_t>(std::max(col, 0)),
+                                            static_cast<uint32_t>(std::max(row + 1, 0)));
+
+            // Resolve the tile (SW post supplies the texture — FreeFalcon
+            // DrawTerrainSquare convention).
+            int layer = -1;
+            float kind = -1.0f;   // untextured until resolved
+            if (!sw.has_no_tile()) {
+                if (reg.near_region) {
+                    int tile_size = 0;
+                    layer = cache.near_layer(*tiles.near_tiles, sw.tex_id, &tile_size);
+                    if (layer >= 0) kind = static_cast<float>(tile_size);
+                } else {
+                    layer = cache.far_layer(*tiles.far_tiles, sw.tex_id);
+                    if (layer >= 0) kind = 0.0f;
+                }
+            }
+
+            // UVs: near port of DiskblockToMemblock; far = full tile.
+            float u0 = kUvStart, v0 = kUvStop, du = kUvStop - kUvStart;
+            if (reg.near_region) {
+                u0 = kUvStart + static_cast<float>(((col & 0xF) << level) & 0x3) * kUvMinStep;
+                v0 = kUvStop  - static_cast<float>(((row & 0xF) << level) & 0x3) * kUvMinStep;
+                du = uv_d;
+            }
+
+            // Corner heights (posts clamped at the theater edge).
+            const float e = static_cast<float>(reg.ft_per_post);
+            const float x0 = static_cast<float>(col) * e;
+            const float x1 = x0 + e;
+            const float n0 = static_cast<float>(row) * e;
+            const float n1 = n0 + e;
+            const float ysw = sw.elevation_ft * cfg.vertical_scale + z_off;
+            const float yse = se.elevation_ft * cfg.vertical_scale + z_off;
+            const float yne = ne.elevation_ft * cfg.vertical_scale + z_off;
+            const float ynw = nw.elevation_ft * cfg.vertical_scale + z_off;
+
+            // Per-quad normal: cross(SE-SW, NW-SW) — +Y up on flat ground.
+            const float ax = (x1 - x0), ay = (yse - ysw), az = 0.0f;
+            const float bx = 0.0f, by = (ynw - ysw), bz = -(n1 - n0);
+            float nx = ay * bz - az * by;
+            float ny = az * bx - ax * bz;
+            float nz = ax * by - ay * bx;
+            const float nl = std::sqrt(nx * nx + ny * ny + nz * nz);
+            if (nl > 1e-10f) { nx /= nl; ny /= nl; nz /= nl; }
+            else             { nx = 0.0f; ny = 1.0f; nz = 0.0f; }
+
+            // Fallback color for untextured quads: the post's palette
+            // index into THEATER.MAP (FreeFalcon's gouraud path).
+            unsigned char r = 255, g = 255, b = 255;
+            if (layer < 0) {
+                ++untextured;
+                const auto pal = sw.color;
+                if (pal < terrain.palette.size()) {
+                    const auto& pc = terrain.palette[pal];
+                    r = pc.r; g = pc.g; b = pc.b;
+                }
+            }
+
+            // Four vertices: SW, SE, NE, NW. Raylib Y-up: Z = -north.
+            const float* xs[4] = {&x0, &x1, &x1, &x0};
+            const float* ns[4] = {&n0, &n0, &n1, &n1};
+            const float* ys[4] = {&ysw, &yse, &yne, &ynw};
+            const float us[4] = {u0, u0 + du, u0 + du, u0};
+            const float vs[4] = {v0, v0, v0 - du, v0 - du};
+            for (int c = 0; c < 4; ++c) {
+                const std::size_t at = static_cast<std::size_t>(v) * 3;
+                vertices[at + 0] = *xs[c];
+                vertices[at + 1] = *ys[c];
+                vertices[at + 2] = -*ns[c];
+                normals[at + 0] = nx;
+                normals[at + 1] = ny;
+                normals[at + 2] = nz;
+                const std::size_t t2 = static_cast<std::size_t>(v) * 2;
+                texcoords[t2 + 0] = us[c];
+                texcoords[t2 + 1] = vs[c];
+                texcoords2[t2 + 0] = static_cast<float>(layer >= 0 ? layer : 0);
+                texcoords2[t2 + 1] = kind;
+                const std::size_t c4 = static_cast<std::size_t>(v) * 4;
+                colors[c4 + 0] = r; colors[c4 + 1] = g;
+                colors[c4 + 2] = b; colors[c4 + 3] = 255;
+                min_up = std::min(min_up, *ys[c]);
+                max_up = std::max(max_up, *ys[c]);
+                ++v;
+            }
+        }
+    }
+
+    // Indices (filled separately for clarity).
+    for (int q = 0; q < quads; ++q) {
+        const unsigned short b = static_cast<unsigned short>(q * 4);
+        indices[static_cast<std::size_t>(q) * 6 + 0] = b + 0;
+        indices[static_cast<std::size_t>(q) * 6 + 1] = b + 1;
+        indices[static_cast<std::size_t>(q) * 6 + 2] = b + 2;
+        indices[static_cast<std::size_t>(q) * 6 + 3] = b + 0;
+        indices[static_cast<std::size_t>(q) * 6 + 4] = b + 2;
+        indices[static_cast<std::size_t>(q) * 6 + 5] = b + 3;
+    }
+
+    // Bounding box.
+    ch.min_east = static_cast<float>(qc0) * static_cast<float>(reg.ft_per_post);
+    ch.max_east = static_cast<float>(qc0 + ncols) * static_cast<float>(reg.ft_per_post);
+    ch.min_north = static_cast<float>(qr0) * static_cast<float>(reg.ft_per_post);
+    ch.max_north = static_cast<float>(qr0 + nrows) * static_cast<float>(reg.ft_per_post);
+    ch.min_up = min_up;
+    ch.max_up = max_up;
+
+    // Upload.
+    float* verts = static_cast<float*>(RL_MALLOC(sizeof(float) * vert_count * 3));
+    float* tcs   = static_cast<float*>(RL_MALLOC(sizeof(float) * vert_count * 2));
+    float* tc2s  = static_cast<float*>(RL_MALLOC(sizeof(float) * vert_count * 2));
+    float* nrms  = static_cast<float*>(RL_MALLOC(sizeof(float) * vert_count * 3));
+    unsigned char* cols = static_cast<unsigned char*>(
+        RL_MALLOC(sizeof(unsigned char) * vert_count * 4));
+    unsigned short* idx = static_cast<unsigned short*>(
+        RL_MALLOC(sizeof(unsigned short) * tri_count * 3));
+    std::copy(vertices.begin(), vertices.end(), verts);
+    std::copy(texcoords.begin(), texcoords.end(), tcs);
+    std::copy(texcoords2.begin(), texcoords2.end(), tc2s);
+    std::copy(normals.begin(), normals.end(), nrms);
+    std::copy(colors.begin(), colors.end(), cols);
+    std::copy(indices.begin(), indices.end(), idx);
+
+    ch.mesh.vertexCount = vert_count;
+    ch.mesh.triangleCount = tri_count;
+    ch.mesh.vertices = verts;
+    ch.mesh.texcoords = tcs;
+    ch.mesh.texcoords2 = tc2s;
+    ch.mesh.normals = nrms;
+    ch.mesh.colors = cols;
+    ch.mesh.indices = idx;
+
+    UploadMesh(&ch.mesh, false);
+    ch.model = LoadModelFromMesh(ch.mesh);
+    ch.model.materials[0].maps[MATERIAL_MAP_ALBEDO].color = WHITE;
+    ch.model.materials[0].shader = cfg.terrain_shader->shader();
+    ch.valid = true;
+    ch.untextured_quads = untextured;
+    return ch;
+}
+
+} // namespace
+
 // ── build_terrain_chunk_set ────────────────────────────────────────────────
 
 TerrainChunkSet build_terrain_chunk_set(
@@ -272,6 +446,116 @@ TerrainChunkSet build_terrain_chunk_set(
         return tcs;
     }
 
+    // ── Textured path ─────────────────────────────────────────────────
+    if (config.tiles && config.tiles->usable() && config.tile_cache &&
+        config.terrain_shader && config.terrain_shader->is_loaded()) {
+        const TerrainTileSource& tiles = *config.tiles;
+        const auto& geom = *tiles.geometry;
+
+        // Near region: quad range of the near level inside
+        // [center - near_extent, center + near_extent].
+        const double nftpp = geom.ft_per_post(tiles.near_level->level());
+        const int nc0 = static_cast<int>(std::floor(
+            (config.center_east_ft - config.near_extent_ft) / nftpp));
+        const int nc1 = static_cast<int>(std::ceil(
+            (config.center_east_ft + config.near_extent_ft) / nftpp));
+        const int nr0 = static_cast<int>(std::floor(
+            (config.center_north_ft - config.near_extent_ft) / nftpp));
+        const int nr1 = static_cast<int>(std::ceil(
+            (config.center_north_ft + config.near_extent_ft) / nftpp));
+
+        // Far region: quad range of the far level inside the full
+        // extent, inflated by one far post around the near rect so the
+        // ring starts slightly under the near region's edge.
+        const double fftpp = geom.ft_per_post(tiles.far_level->level());
+        const int fc0 = static_cast<int>(std::floor(
+            (config.center_east_ft - config.extent_ft) / fftpp));
+        const int fc1 = static_cast<int>(std::ceil(
+            (config.center_east_ft + config.extent_ft) / fftpp));
+        const int fr0 = static_cast<int>(std::floor(
+            (config.center_north_ft - config.extent_ft) / fftpp));
+        const int fr1 = static_cast<int>(std::ceil(
+            (config.center_north_ft + config.extent_ft) / fftpp));
+
+        // Chunk-aligned (16 quads) iteration helpers.
+        auto for_chunks = [&](int q0, int q1, auto&& emit) {
+            for (int q = q0 - ((q0 % kQuadsPerChunkSide) + kQuadsPerChunkSide)
+                              % kQuadsPerChunkSide; q < q1; q += kQuadsPerChunkSide)
+                emit(q);
+        };
+
+        auto add_region_chunks = [&](const TexturedRegion& reg) {
+            int cy = 0;
+            for_chunks(reg.qmin_row, reg.qmax_row, [&](int qr0) {
+                int cx = 0;
+                for_chunks(reg.qmin_col, reg.qmax_col, [&](int qc0) {
+                    // Far ring: skip chunks that lie ENTIRELY inside the
+                    // near rect — the near region covers them. Edge chunks
+                    // overlap and are hidden by the far z bias instead of
+                    // being skipped (skipping partials would leave holes).
+                    if (!reg.near_region) {
+                        const float e = static_cast<float>(reg.ft_per_post);
+                        const bool fully_inside =
+                            qc0 * e >= config.center_east_ft - config.near_extent_ft &&
+                            (qc0 + kQuadsPerChunkSide) * e <= config.center_east_ft + config.near_extent_ft &&
+                            qr0 * e >= config.center_north_ft - config.near_extent_ft &&
+                            (qr0 + kQuadsPerChunkSide) * e <= config.center_north_ft + config.near_extent_ft;
+                        if (fully_inside) {
+                            ++cx;
+                            return;
+                        }
+                    }
+                    TerrainChunk ch = build_one_textured_chunk(
+                        terrain, tiles, *config.tile_cache, config, reg, qc0, qr0);
+                    if (!ch.valid) { ++cx; return; }
+                    ch.chunk_x = cx;
+                    ch.chunk_y = cy;
+                    tcs.min_up = std::min(tcs.min_up, ch.min_up);
+                    tcs.max_up = std::max(tcs.max_up, ch.max_up);
+                    tcs.quads_untextured += ch.untextured_quads;
+                    const int quads = ch.mesh.triangleCount / 2;
+                    if (reg.near_region) tcs.near_quads += quads;
+                    else                 tcs.far_quads  += quads;
+                    tcs.chunks.push_back(std::move(ch));
+                    ++cx;
+                });
+                ++cy;
+            });
+        };
+
+        tcs.min_east = config.center_east_ft - config.extent_ft;
+        tcs.max_east = config.center_east_ft + config.extent_ft;
+        tcs.min_north = config.center_north_ft - config.extent_ft;
+        tcs.max_north = config.center_north_ft + config.extent_ft;
+        tcs.min_up = 1e30f;
+        tcs.max_up = -1e30f;
+
+        TexturedRegion near_reg;
+        near_reg.level = tiles.near_level;
+        near_reg.ft_per_post = nftpp;
+        near_reg.qmin_col = nc0; near_reg.qmax_col = nc1;
+        near_reg.qmin_row = nr0; near_reg.qmax_row = nr1;
+        near_reg.z_bias = 0.0f;
+        near_reg.near_region = true;
+        add_region_chunks(near_reg);
+
+        TexturedRegion far_reg;
+        far_reg.level = tiles.far_level;
+        far_reg.ft_per_post = fftpp;
+        far_reg.qmin_col = fc0; far_reg.qmax_col = fc1;
+        far_reg.qmin_row = fr0; far_reg.qmax_row = fr1;
+        far_reg.z_bias = config.far_z_bias_ft;
+        far_reg.near_region = false;
+        add_region_chunks(far_reg);
+
+        tcs.textured = true;
+        tcs.valid = !tcs.chunks.empty();
+        tcs.chunks_total = static_cast<int>(tcs.chunks.size());
+        tcs.chunks_visible = 0;
+        return tcs;
+    }
+
+    // ── Legacy vertex-color path ──────────────────────────────────────
     const int n = std::max(1, config.chunks_per_side);
     const float total_extent = config.extent_ft * 2.0f;  // full side
     const float chunk_size_ft = total_extent / static_cast<float>(n);
@@ -369,6 +653,13 @@ void draw_terrain_chunk_set(TerrainChunkSet& tcs, const Camera3D& camera) {
                          /*projection_is_ortho=*/false,
                          tcs.config.near_plane_ft,
                          tcs.config.far_plane_ft);
+    }
+
+    // Textured sets: point the terrain shader's samplers at the tile
+    // arrays (texture-unit bindings are global GL state; rebind per
+    // frame since other draw paths touch unit 0).
+    if (tcs.textured && tcs.config.terrain_shader) {
+        tcs.config.terrain_shader->bind_tile_samplers(*tcs.config.tile_cache);
     }
 
     rlDisableBackfaceCulling();

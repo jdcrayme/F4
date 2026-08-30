@@ -8,6 +8,10 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 add_library(f4-terrain STATIC
     src/terrain_data.cpp
     src/terrain_adapter.cpp
+    src/post_level.cpp
+    src/far_tile_db.cpp
+    src/near_tile_db.cpp
+    src/pcx_reader.cpp
 )
 target_link_libraries(f4-terrain PUBLIC f4_warnings)
 
@@ -27,3 +31,8 @@ if(F4_TERRAIN_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
 endif()
+
+# Developer tools compiled against the library (run manually against a
+# real install to sanity-check format decoders).
+add_executable(dump-terrain-textures tools/dump_terrain_textures.cpp)
+target_link_libraries(dump-terrain-textures PRIVATE f4-terrain f4_warnings)

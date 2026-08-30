@@ -175,6 +175,7 @@ Scenario parse_scenario(f4::json::Reader& r) {
         if (key == "name")                s.name = r.read_string();
         else if (key == "theater")        s.theater = r.read_string();
         else if (key == "terrain_json_path") s.terrain_json_path = r.read_string();
+        else if (key == "theater_dir")       s.theater_dir = r.read_string();
         else if (key == "models_hdr_path")   s.models_hdr_path = r.read_string();
         else if (key == "models_lod_path")   s.models_lod_path = r.read_string();
         else if (key == "models_tex_path")   s.models_tex_path = r.read_string();
@@ -336,6 +337,7 @@ Scenario load_scenario(const std::filesystem::path& json_path) {
     // Resolve asset paths relative to the scenario file's parent directory.
     const auto base_dir = json_path.parent_path();
     s.terrain_json_path = resolve(base_dir, s.terrain_json_path);
+    s.theater_dir       = resolve(base_dir, s.theater_dir);
     s.models_hdr_path   = resolve(base_dir, s.models_hdr_path);
     s.models_lod_path   = resolve(base_dir, s.models_lod_path);
     s.models_tex_path   = resolve(base_dir, s.models_tex_path);

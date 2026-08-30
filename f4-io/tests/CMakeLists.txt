@@ -10,3 +10,4 @@ endfunction()
 
 f4_add_test(test_io_cursor     test_cursor.cpp)
 f4_add_test(test_io_read_file  test_read_file.cpp)
+f4_add_test(test_io_zip_reader test_zip_reader.cpp)

@@ -2,6 +2,7 @@
   "name": "takeoff_only",
   "theater": "korea",
   "terrain_json_path": "@F4_BINARY_DIR@/korea.terrain.json",
+  "theater_dir": "@F4_SCENARIO_THEATER_DIR@",
   "models_hdr_path": "@F4_SOURCE_DIR@/temp/KoreaObj.HDR",
   "models_lod_path": "@F4_SOURCE_DIR@/temp/KoreaObj.LOD",
   "models_tex_path": "@F4_SOURCE_DIR@/temp/KoreaObj.TEX",

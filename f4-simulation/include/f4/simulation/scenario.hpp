@@ -151,6 +151,14 @@ struct Scenario {
     std::filesystem::path models_lod_path;   ///< KoreaObj.LOD
     std::filesystem::path models_tex_path;   ///< KoreaObj.TEX
 
+    /// Optional: the theater directory (e.g. <install>/terrdata/korea)
+    /// with raw binary terrain + texture data (terrain/THEATER.L*,
+    /// texture/TEXTURE.BIN + texture.zip). When present, viewers load
+    /// the post levels + tile databases and render TEXTURED terrain;
+    /// when absent they fall back to the terrain JSON (vertex colors).
+    /// Empty string in authored scenarios = not configured.
+    std::filesystem::path theater_dir;
+
     // Phase 2: campaign-derivation inputs. Used only when spawn_mode ==
     // CampaignFlights. The world_json_path points at a world JSON produced
     // by f4-world-convert's cam2json (it carries objectives + units + the

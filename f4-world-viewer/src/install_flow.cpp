@@ -77,6 +77,11 @@ bool ViewerApp::set_install_path(const std::filesystem::path& path) {
         impl_->models_3d_load_attempted = false;
         impl_->models_3d_error.clear();
 
+        // If a world was already loaded (naming a theater) but the
+        // theater binaries couldn't load for lack of an install, retry
+        // now — the 2D map + 3D panel pick up tile art next frame.
+        impl_->try_load_theater_tiles();
+
         // Build a summary for the confirmation modal.
         std::ostringstream ss;
         ss << "Install detected successfully.\n\n";
@@ -231,6 +236,27 @@ void ViewerApp::load_campaign_from_install(const std::string& theater_key,
     impl_->status_msg = "Terrain: " + theater_key + " (" +
         std::to_string(impl_->terrain.header.width) + "x" +
         std::to_string(impl_->terrain.header.height) + ")";
+
+    // Also load the raw theater binaries through the shared WorldView
+    // (post levels + tile art) for TEXTURED terrain in the 3D panel.
+    // Non-fatal when the theater lacks tile data — the panel falls back
+    // to the terrain-JSON vertex-color path. (try_load_theater_tiles may
+    // already have loaded this theater from an earlier world JSON —
+    // skip the multi-second reload then.)
+    const bool tiles_already = impl_->theater_tiles_loaded &&
+        impl_->current_theater_dir == theater->dir;
+    impl_->current_theater_dir = theater->dir;
+    if (!tiles_already) {
+        try {
+            impl_->theater_tiles_loaded = impl_->world.load_theater(theater->dir);
+            if (!impl_->theater_tiles_loaded) {
+                impl_->status_msg += " [no tile art — untextured]";
+            }
+        } catch (const std::exception& e) {
+            impl_->theater_tiles_loaded = false;
+            impl_->status_msg += std::string(" [tile load failed: ") + e.what() + "]";
+        }
+    }
 
     // Step 2: convert .cam → world JSON using the install's class table.
     // Use the install-aware resolver — finds FALCON4.ct automatically.

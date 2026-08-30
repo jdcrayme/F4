@@ -22,3 +22,14 @@ target_compile_definitions(test_terrain_adapter PRIVATE
     FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../f4-world-convert/tests/fixtures/"
 )
 gtest_discover_tests(test_terrain_adapter)
+
+# Theater post/tile decoders (Phase 1 of the textured-terrain effort).
+add_executable(test_post_level test_post_level.cpp)
+target_link_libraries(test_post_level PRIVATE GTest::gtest_main f4-terrain)
+target_compile_definitions(test_post_level PRIVATE
+    TERRAIN_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/")
+gtest_discover_tests(test_post_level)
+
+add_executable(test_tile_db test_tile_db.cpp)
+target_link_libraries(test_tile_db PRIVATE GTest::gtest_main f4-terrain)
+gtest_discover_tests(test_tile_db)

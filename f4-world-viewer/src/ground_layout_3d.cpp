@@ -408,13 +408,24 @@ void ViewerApp::draw_ground_layout_3d() {
     // theater-scale views and lifts the unsigned-short vertex cap.
     ImGui::Checkbox("Chunks",   &impl_->use_terrain_chunks);
     // Show the per-frame culling stats when the chunk path is active —
-    // useful for verifying culling is working.
-    if (impl_->use_terrain_chunks && impl_->terrain_chunk_set_3d_built &&
+    // useful for verifying culling is working. The textured WorldView
+    // path is also chunk-based; prefer its stats when active.
+    const auto* stats_cs = impl_->world.chunk_set();
+    if (!stats_cs && impl_->use_terrain_chunks &&
+        impl_->terrain_chunk_set_3d_built &&
         impl_->terrain_chunk_set_3d.valid) {
+        stats_cs = &impl_->terrain_chunk_set_3d;
+    }
+    if (stats_cs) {
         ImGui::SameLine();
-        ImGui::TextDisabled("[%d/%d chunks]",
-            impl_->terrain_chunk_set_3d.chunks_visible,
-            impl_->terrain_chunk_set_3d.chunks_total);
+        if (stats_cs->textured) {
+            ImGui::TextDisabled("[%d/%d chunks, %d tile layers]",
+                stats_cs->chunks_visible, stats_cs->chunks_total,
+                impl_->world.tile_cache().total_layers());
+        } else {
+            ImGui::TextDisabled("[%d/%d chunks]",
+                stats_cs->chunks_visible, stats_cs->chunks_total);
+        }
     }
 
     // Reset-view button.
@@ -477,15 +488,32 @@ void ViewerApp::draw_ground_layout_3d() {
     // --- Build the terrain mesh / chunk set (if terrain loaded) -----------
     //
     // Done BEFORE the render pass so the SceneDescription can reference
-    // the built mesh. Two paths, toggled by impl_->use_terrain_chunks:
-    //   - Chunk set (default): per-chunk frustum culling, lifts the
-    //     unsigned-short index cap, future per-chunk LOD.
-    //   - Single mesh (legacy): simpler, kept as a fallback toggle.
+    // the built mesh. Three paths, in priority order:
+    //   - WorldView (default when the theater binaries loaded): the
+    //     shared textured-terrain path — post levels + tile art centered
+    //     on the objective.
+    //   - Chunk set (JSON-only terrain): per-chunk frustum culling.
+    //   - Single mesh (legacy toggle): simpler fallback.
     //
-    // Both center on the objective's WORLD ENU position (not local) —
+    // All center on the objective's WORLD ENU position (not local) —
     // this was the "always on coast" bug fix from Path B1.
     if (impl_->show_terrain_mesh_3d && impl_->terrain_loaded) {
-        if (impl_->use_terrain_chunks) {
+        // ── WorldView textured path ──
+        if (impl_->theater_tiles_loaded && impl_->world.ensure_gpu()) {
+            const bool need_rebuild =
+                impl_->world.chunk_set() == nullptr ||
+                impl_->world_view_cached_entity.value != impl_->sel_entity.value;
+            if (need_rebuild) {
+                impl_->world.set_view(
+                    impl_->terrain, obj_world_x, obj_world_y,
+                    /*extent_ft=*/250000.0f,     // far ring reaches the horizon
+                    /*near_extent_ft=*/50000.0f, // near tiles around the objective
+                    /*z_offset_ft=*/-5.0f);      // sink below airfield geometry
+                impl_->world_view_cached_entity = impl_->sel_entity;
+            }
+        }
+
+        if (impl_->world.chunk_set() == nullptr && impl_->use_terrain_chunks) {
             // ── Chunk set path ──
             const bool need_rebuild =
                 !impl_->terrain_chunk_set_3d_built ||
@@ -556,6 +584,13 @@ void ViewerApp::draw_ground_layout_3d() {
     impl_->diag_3d_meshes_drawn = 0;
     impl_->diag_3d_triangles_drawn = 0;
 
+    // Textured WorldView terrain: per-frame shader uniforms (sun, fog
+    // toward the panel's sky color). draw_terrain_chunk_set() rebinds
+    // the tile arrays itself inside render_world().
+    if (impl_->world.chunk_set() != nullptr) {
+        impl_->world.update_frame(BG_COLOR);
+    }
+
     // --- Build the SceneDescription and render via render_world() --------
     //
     // Migrating from the manual BeginMode3D block to render_world():
@@ -601,8 +636,10 @@ void ViewerApp::draw_ground_layout_3d() {
 
     // Terrain mesh / chunk set — chunk set takes precedence.
     if (impl_->show_terrain_mesh_3d && impl_->terrain_loaded) {
-        if (impl_->use_terrain_chunks && impl_->terrain_chunk_set_3d_built &&
-            impl_->terrain_chunk_set_3d.valid) {
+        if (impl_->world.chunk_set() != nullptr) {
+            scene.terrain_chunk_set = impl_->world.chunk_set();
+        } else if (impl_->use_terrain_chunks && impl_->terrain_chunk_set_3d_built &&
+                   impl_->terrain_chunk_set_3d.valid) {
             scene.terrain_chunk_set = &impl_->terrain_chunk_set_3d;
         } else if (impl_->terrain_mesh_3d_built && impl_->terrain_mesh_3d.valid) {
             scene.terrain_mesh = &impl_->terrain_mesh_3d;

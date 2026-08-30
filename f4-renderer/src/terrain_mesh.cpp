@@ -15,6 +15,8 @@
 #include <f4/renderer/coord_transform.hpp>  // enu_to_raylib
 #include <f4/renderer/draw_3d.hpp>        // extend_far_plane
 
+#include "terrain_internal.hpp"   // theater_ft_per_cell, bilinear_elevation
+
 #include <raylib.h>
 #include <rlgl.h>              // rlDisableBackfaceCulling, rlEnableBackfaceCulling
 
@@ -25,85 +27,14 @@
 
 namespace f4::renderer {
 
-// Forward declaration — the bilinear interpolation is in TerrainDataAdapter
-// (f4-terrain), but we need it here too. We re-implement it locally to
-// avoid the f4-terrain → f4-renderer dependency (f4-renderer already
-// depends on f4-terrain transitively via f4-world, but keeping the
-// interpolation local makes this file self-contained).
-//
-// Theater size in feet: hardcoded to 1024 × 1024 ft = 1,048,576 ft per
-// side, matching TerrainDataAdapter::ft_per_cell() in f4-terrain. This
-// is correct for Korea (the only theater currently supported). The
-// THEATER.MAP header's `ft_to_mea_cell` field would in principle give
-// a per-theater value, but its semantics are unclear (the Korea fixture
-// reads 941611082, which doesn't match any obvious feet/cell ratio),
-// so we keep the hardcoded constant until the field is reverse-engineered.
-// See f4-terrain/include/f4/terrain/terrain_data.hpp for the field layout.
-static double theater_ft_per_cell(const f4::terrain::TerrainData& td) {
-    const double theater_size_ft = 1024.0 * 1024.0;
-    const double w = static_cast<double>(td.header.width > 0 ? td.header.width : 128);
-    return theater_size_ft / w;
-}
-
-/// Convert a world ENU feet coordinate to a clamped terrain cell index.
-///
-/// CRITICAL: this is the ONLY correct way to convert feet → cell index.
-/// Both the elevation sampler and the tile-type color sampler must use
-/// this helper. The previous color sampler called
-/// `static_cast<uint32_t>(east_ft / ft_per_cell)` without clamping,
-/// which is undefined behavior when east_ft < 0 (mesh vertices west of
-/// the theater) — it wraps to ~4 billion, std::min clamps to width-1
-/// (the EASTERNMOST cell), and coastal objectives showed land instead
-/// of water on the mesh edge.
-///
-/// @param world_ft   ENU coordinate (east_ft or north_ft), may be negative
-/// @param grid_size  terrain.header.width or .height
-/// @return cell index in [0, grid_size-1]
-static uint32_t world_to_cell_clamped(double world_ft, double ft_per_cell,
-                                       uint32_t grid_size) {
-    if (grid_size == 0) return 0;
-    const double f = world_ft / ft_per_cell;
-    const double clamped = std::clamp(f, 0.0, static_cast<double>(grid_size - 1));
-    return static_cast<uint32_t>(clamped);
-}
-
-static double bilinear_elevation(const f4::terrain::TerrainData& td,
-                                  double east_ft, double north_ft) {
-    if (td.elevation.empty()) return 0.0;
-
-    const double ft_per_cell = theater_ft_per_cell(td);
-    if (ft_per_cell <= 0.0) return 0.0;
-
-    // Use the shared clamped converter so out-of-bounds queries
-    // (mesh vertices beyond the theater edge) sample the edge cell
-    // instead of wrapping. Consistent with the color sampler below.
-    const double fx = std::clamp(east_ft / ft_per_cell, 0.0,
-                                  static_cast<double>(td.header.width - 1));
-    const double fy = std::clamp(north_ft / ft_per_cell, 0.0,
-                                  static_cast<double>(td.header.height - 1));
-
-    const uint32_t x0 = static_cast<uint32_t>(fx);
-    const uint32_t y0 = static_cast<uint32_t>(fy);
-    const uint32_t x1 = std::min(x0 + 1, td.header.width - 1);
-    const uint32_t y1 = std::min(y0 + 1, td.header.height - 1);
-
-    const double tx = fx - static_cast<double>(x0);
-    const double ty = fy - static_cast<double>(y0);
-
-    // Flip y: file row 0 = south, sim y = height-1 (north). Our fy has
-    // y=0 at south (ENU), so flip to match TerrainData's sim convention.
-    const uint32_t sim_y0 = td.header.height - 1 - y0;
-    const uint32_t sim_y1 = td.header.height - 1 - y1;
-
-    const double e00 = td.elevation_at(x0, sim_y0);
-    const double e10 = td.elevation_at(x1, sim_y0);
-    const double e01 = td.elevation_at(x0, sim_y1);
-    const double e11 = td.elevation_at(x1, sim_y1);
-
-    const double e0 = e00 + (e10 - e00) * tx;
-    const double e1 = e01 + (e11 - e01) * tx;
-    return e0 + (e1 - e0) * ty;
-}
+// The elevation/color samplers below use the shared helpers from
+// terrain_internal.hpp — extracted from this file + terrain_chunks.cpp
+// once WorldView became the third consumer. Theater size in feet is
+// hardcoded to 1024 × 1024 ft = 1,048,576 ft per side (Korea; see
+// TheaterGeometry's header for the scale-reconciliation note).
+using detail::theater_ft_per_cell;
+using detail::world_to_cell_clamped;
+using detail::bilinear_elevation;
 
 TerrainMesh build_terrain_mesh(const f4::terrain::TerrainData& terrain,
                                 const TerrainMeshConfig& config) {

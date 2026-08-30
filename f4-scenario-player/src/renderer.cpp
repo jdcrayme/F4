@@ -245,7 +245,12 @@ void PlayerApp::Impl::draw_scene() {
     // mesh replaces both — it has its own elevation + the tile-type
     // colors provide visual reference. The axes are kept (they're
     // useful for orientation and don't z-fight with terrain).
-    if (terrain_loaded && terrain_mesh_built && terrain_mesh.valid) {
+    const bool have_chunk_terrain =
+        theater_tiles_loaded && world.chunk_set() != nullptr && show_terrain;
+    if (have_chunk_terrain) {
+        scene.ground.plane = false;
+        scene.ground.grid  = false;
+    } else if (terrain_loaded && terrain_mesh_built && terrain_mesh.valid) {
         scene.ground.plane = false;
         scene.ground.grid  = false;
     } else {
@@ -309,12 +314,15 @@ void PlayerApp::Impl::draw_scene() {
         scene.airfield_origin_enu[2] = airfield.origin_enu_z;
     }
 
-    // ── Terrain mesh (Path B1) ────────────────────────────────────────
-    // Passed to render_world() via SceneDescription.terrain_mesh so it's
-    // drawn at the right point in the pipeline (after ground, before
-    // entities). When terrain is loaded, the flat ground plane is
-    // suppressed (scene.ground.plane=false) to avoid z-fighting.
-    if (terrain_loaded && terrain_mesh_built && terrain_mesh.valid) {
+    // ── Terrain (textured path + untextured fallback) ────────────────
+    // The shared WorldView owns the textured chunk set; a single
+    // update_frame() sets its lighting + fog uniforms (fog toward the
+    // sky color so the far ring melts into the horizon). The single MEA
+    // mesh is the fallback for JSON-only terrain.
+    if (have_chunk_terrain) {
+        world.update_frame(SKY_COLOR);
+        scene.terrain_chunk_set = world.chunk_set();
+    } else if (terrain_loaded && terrain_mesh_built && terrain_mesh.valid) {
         scene.terrain_mesh = &terrain_mesh;
     }
 

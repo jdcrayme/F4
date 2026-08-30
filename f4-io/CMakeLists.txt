@@ -21,6 +21,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # for the layering analysis.
 add_library(f4-io STATIC
     src/read_file.cpp
+    src/zip_reader.cpp
 )
 target_link_libraries(f4-io PUBLIC f4_warnings)
 

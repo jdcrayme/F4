@@ -1,5 +1,21 @@
 # F4 Cleanup Pass — Changes Summary
 
+## Textured Terrain + Unified WorldView (TERRAIN-TEX-1)
+
+**Both viewers now render real Falcon 4 terrain tile art, through one
+shared code path.** Validated against real geography at Kunsan.
+
+| Area | Change |
+|------|--------|
+| `f4-terrain` | New decoders: `TheaterGeometry` (ENU↔post↔block conversion, one documented place for the theater-scale convention), `PostLevel` (THEATER.O\*/L\* 7-byte TdiskPost records, dedup'd block offsets), `FarTileDB` (FArtILES.PAL/.RAW), `NearTileDB` (TEXTURE.BIN + texture.zip PCX art with H/M/L variant resolution), internal PCX reader. `tools/dump-terrain-textures` validates everything against a real install. |
+| `f4-io` | `ZipReader` — minimal STORED-entry PKZIP reader (Falcon's texture.zip needs no inflate). |
+| `f4-renderer` | Textured terrain: `TerrainTileCache` (lazily-grown GL_TEXTURE_2D_ARRAYs), `TerrainShader` (GLSL 330, 4 tile arrays via `vertexTexCoord2`, lighting + distance fog), textured path in the chunk builder (post-aligned quads, UVs ported from FreeFalcon's `DiskblockToMemblock`, near region + far ring). **`WorldView`**: one class owning load-theater → ensure-GPU → set-view-center → per-frame uniforms → teardown; both apps call it instead of hand-rolling the lifecycle. Sampler helpers deduplicated into `src/terrain_internal.hpp`. |
+| `f4-scenario-player` | Terrain lifecycle now one `WorldView` member; scenario JSON accepts optional `theater_dir` (substituted from `F4_INSTALL` at configure time); falls back to the untextured MEA mesh without it. |
+| `f4-world-viewer` | Install flow loads theater binaries into `WorldView`; the 3D Ground Layout tab renders textured terrain centered on the selection; **the 2D strategic map now paints real far-tile art** (2048×2048) instead of elevation-band colors; new `--select <name>` CLI flag + auto 3D-tab for headless screenshots. |
+| Tests | 22 new unit tests (zip reader, post level vs real L2 fixture, tile DBs with synthetic theaters, geometry). Full suite: 1519 tests, only the 9 pre-existing failures (coord_transform, PilotInput clamps ×5, EngineModel — fail on the clean tree too). |
+
+---
+
 This document summarizes the cleanup pass applied to the F4 codebase.
 **All 998 unit tests pass on a clean build.** (Up from 988 — added 10 new
 tests covering the fixes.)

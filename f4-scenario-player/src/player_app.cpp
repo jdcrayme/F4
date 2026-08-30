@@ -93,6 +93,24 @@ void PlayerApp::load_scenario(const std::filesystem::path& json_path) {
         }
     }
 
+    // Textured theater data (Phase 2): the shared WorldView loads the
+    // raw post levels + tile databases from scenario.theater_dir.
+    // Non-fatal on any failure — the viewer falls back to the
+    // terrain-JSON mesh (vertex colors).
+    if (!impl_->scenario.theater_dir.empty()) {
+        try {
+            impl_->theater_tiles_loaded =
+                impl_->world.load_theater(impl_->scenario.theater_dir);
+            if (!impl_->theater_tiles_loaded) {
+                impl_->status_msg =
+                    "Theater tiles incomplete — using untextured terrain";
+            }
+        } catch (const std::exception& e) {
+            impl_->theater_tiles_loaded = false;
+            impl_->status_msg = std::string("Theater tile load failed: ") + e.what();
+        }
+    }
+
     // Build the airfield geometry from the SIMULATION's scenario — after
     // initialize() this is the DERIVED copy (real airfield from
     // airbase_source: true runway/taxi/parking layout, resolved parking).
@@ -159,26 +177,51 @@ void PlayerApp::run() {
     // requires it). If we built them in load_scenario, they'd fail.
     impl_->build_aircraft_meshes();
 
-    // Build the terrain mesh (Path B1). Deferred from load_scenario()
-    // because UploadMesh requires the GL context. The mesh is centered on
-    // the airfield (layout_center for real airbases, parking spot for
-    // hand-authored scenarios) and spans 2*extent_ft in each direction.
+    // Terrain (Path B1 + Phase 2 textured path). Deferred from
+    // load_scenario() because UploadMesh requires the GL context. The
+    // shared WorldView builds the textured chunk set (post levels +
+    // tile art) when the theater data is usable; the MEA heightmap mesh
+    // remains the fallback for JSON-only terrain.
     if (impl_->terrain_loaded && !impl_->terrain_mesh_built) {
-        f4::renderer::TerrainMeshConfig tc;
+        float center_e = 0.0f, center_n = 0.0f;
         if (impl_->scenario.has_airbase_source) {
-            tc.center_east_ft = static_cast<float>(impl_->scenario.layout_center.x);
-            tc.center_north_ft = static_cast<float>(impl_->scenario.layout_center.y);
+            center_e = static_cast<float>(impl_->scenario.layout_center.x);
+            center_n = static_cast<float>(impl_->scenario.layout_center.y);
         } else if (!impl_->scenario.aircraft.empty()) {
-            tc.center_east_ft = static_cast<float>(impl_->scenario.aircraft.front().parking_spot.x);
-            tc.center_north_ft = static_cast<float>(impl_->scenario.aircraft.front().parking_spot.y);
+            center_e = static_cast<float>(impl_->scenario.aircraft.front().parking_spot.x);
+            center_n = static_cast<float>(impl_->scenario.aircraft.front().parking_spot.y);
         }
-        tc.extent_ft = 100000.0f;  // ~19 nm half-extent (38 nm square)
-        tc.resolution = 128;       // 16641 vertices, 16384 triangles
-        tc.vertical_scale = 1.0f;
-        tc.z_offset_ft = -5.0f;    // sink below airfield geometry to avoid z-fight
-        tc.color_by_tile_type = true;
-        impl_->terrain_mesh = f4::renderer::build_terrain_mesh(impl_->terrain, tc);
-        impl_->terrain_mesh_built = true;
+
+        bool built_textured = false;
+        if (impl_->theater_tiles_loaded && impl_->world.ensure_gpu()) {
+            built_textured = impl_->world.set_view(
+                impl_->terrain, center_e, center_n,
+                /*extent_ft=*/250000.0f,      // far ring reaches the horizon
+                /*near_extent_ft=*/60000.0f,  // near tiles around the airbase
+                /*z_offset_ft=*/-5.0f);       // sink below airfield geometry
+            if (const auto* cs = impl_->world.chunk_set()) {
+                std::fprintf(stderr,
+                    "terrain: textured chunks n=%d near_quads=%d far_quads=%d "
+                    "untextured=%d tile_layers=%d\n",
+                    cs->chunks_total, cs->near_quads, cs->far_quads,
+                    cs->quads_untextured,
+                    impl_->world.tile_cache().total_layers());
+            }
+        }
+        impl_->terrain_mesh_built = true;   // either path — suppress re-entry
+
+        if (!built_textured) {
+            // Legacy Path B1 single mesh (vertex colors).
+            f4::renderer::TerrainMeshConfig tc;
+            tc.center_east_ft = center_e;
+            tc.center_north_ft = center_n;
+            tc.extent_ft = 100000.0f;  // ~19 nm half-extent (38 nm square)
+            tc.resolution = 128;       // 16641 vertices, 16384 triangles
+            tc.vertical_scale = 1.0f;
+            tc.z_offset_ft = -5.0f;    // sink below airfield geometry to avoid z-fight
+            tc.color_by_tile_type = true;
+            impl_->terrain_mesh = f4::renderer::build_terrain_mesh(impl_->terrain, tc);
+        }
     }
 
     // Reset the camera to look at the parking spot.
@@ -357,6 +400,9 @@ void PlayerApp::run() {
         f4::renderer::unload_terrain_mesh(impl_->terrain_mesh);
         impl_->terrain_mesh_built = false;
     }
+    // Free the textured-theater GPU resources (chunk meshes, tile
+    // arrays, terrain shader) — one call for the whole shared path.
+    impl_->world.unload();
     // LitShader destructor handles UnloadShader automatically.
     CloseWindow();
 

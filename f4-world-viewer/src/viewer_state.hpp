@@ -72,6 +72,7 @@
 #include <f4/renderer/world_camera.hpp>
 #include <f4/renderer/terrain_mesh.hpp>      // TerrainMesh (Path B1)
 #include <f4/renderer/terrain_chunks.hpp>    // TerrainChunkSet (Path B1 chunked)
+#include <f4/renderer/world_view.hpp>        // WorldView (textured theater path)
 
 #include <raylib.h>
 
@@ -279,11 +280,15 @@ struct ViewerApp::Impl {
     // invariant — we never need to re-render it unless the terrain
     // data itself changes (load_terrain_json / unload).
     //
-    // NOTE: The RenderTexture is allocated on the GPU via Raylib —
-    // we MUST UnloadRenderTexture() before re-allocating and on
-    // viewer shutdown. The destructor handles shutdown; ensure_terrain_cache()
-    // handles re-allocation.
-    RenderTexture2D terrain_cache = {0};
+    // NOTE: The texture is allocated on the GPU via Raylib — we MUST
+    // UnloadTexture() before re-allocating and on viewer shutdown. The
+    // destructor handles shutdown; ensure_terrain_cache() handles
+    // re-allocation.
+    //
+    // Textured mode: when the theater binaries loaded (WorldView), the
+    // cache is one far-tile thumbnail per MEA cell (L5 posts map 1:1
+    // onto the grid) — real tile art instead of elevation-band colors.
+    Texture2D terrain_cache = {};
     bool terrain_cache_valid = false;  // true once terrain_cache holds the current terrain
     /// (Re)render the terrain into terrain_cache. No-op if the cache
     /// is already valid. Allocates the RenderTexture on first call,
@@ -295,6 +300,12 @@ struct ViewerApp::Impl {
     /// is loaded (file_ops.cpp::load_terrain_json) so the next
     /// draw_canvas() re-renders it.
     void invalidate_terrain_cache();
+    /// Best-effort load of the theater binaries (post levels + tile art)
+    /// through WorldView whenever we know enough to find them: an install
+    /// is configured and the loaded world names a theater. Non-fatal —
+    /// on any failure the viewer stays on the untextured fallback.
+    /// Defined in file_ops.cpp (next to the load paths that call it).
+    void try_load_theater_tiles();
 
     // Selection — now uses EntityId instead of (kind, index)
     enum class SelectionKind { None, Objective, Unit };
@@ -312,6 +323,12 @@ struct ViewerApp::Impl {
     //   1 = Ground Layout (2D top-down)
     //   2 = 3D (orbit camera)
     int inspector_active_tab = 0;
+
+    /// Force the "3D" tab selected on the next inspector draw — set by
+    /// select_by_name() (the --select CLI flag) so headless screenshots
+    /// capture the 3D textured-terrain view without clicking the tab.
+    /// Consumed (cleared) by draw_inspector_window().
+    bool inspector_force_3d_tab = false;
 
     // --- ECS access helpers (inline) ---
     /// Create an EntityHandle for a given EntityId in our EntityWorld.
@@ -655,6 +672,21 @@ struct ViewerApp::Impl {
     bool terrain_chunk_set_3d_built = false;
     f4::entities::EntityId terrain_chunk_set_3d_cached_entity;
     bool use_terrain_chunks = true;   // toggle: chunk set vs single mesh
+
+    // -----------------------------------------------------------------------
+    // Textured theater — the ONE shared load-a-world path
+    // -----------------------------------------------------------------------
+    //
+    // When a campaign is loaded from a real install (or a theater dir is
+    // otherwise known), WorldView loads the raw theater binaries
+    // (THEATER.L*/O* posts + TEXTURE.BIN/texture.zip/FArtILES tile art)
+    // and builds the TEXTURED chunk set for the 3D panel — replacing the
+    // vertex-color path above. Without theater binaries (JSON-only
+    // terrain loads) the panel keeps the untextured chunk/mesh paths.
+    f4::renderer::WorldView world;
+    std::filesystem::path current_theater_dir;   // set by the install flow
+    bool theater_tiles_loaded = false;           // world.theater_loaded()
+    f4::entities::EntityId world_view_cached_entity;  // rebuild on selection change
 
     // -----------------------------------------------------------------------
     // Replay mode state (Path B2 — trace playback)

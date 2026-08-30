@@ -104,8 +104,14 @@ void ViewerApp::draw_inspector_window() {
             ImGui::EndTabItem();
         }
         // --- Tab 2: 3D (orbit camera) ------------------------------------
-        if (ImGui::BeginTabItem("3D")) {
+        // SetSelected forces the tab active — used by the --select CLI
+        // flag so headless screenshots capture the 3D (textured terrain)
+        // view without clicking the tab.
+        const ImGuiTabItemFlags flags3d =
+            impl_->inspector_force_3d_tab ? ImGuiTabItemFlags_SetSelected : 0;
+        if (ImGui::BeginTabItem("3D", nullptr, flags3d)) {
             impl_->inspector_active_tab = 2;
+            impl_->inspector_force_3d_tab = false;
             draw_ground_layout_3d();
             ImGui::EndTabItem();
         }

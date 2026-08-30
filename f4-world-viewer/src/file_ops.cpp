@@ -24,10 +24,34 @@
 
 #include <filesystem>
 #include <fstream>
+#include <cstdio>
 #include <stdexcept>
 #include <string>
 
 namespace f4::viewer {
+
+void ViewerApp::Impl::try_load_theater_tiles() {
+    // The install flow (load_campaign_from_install) does this inline with
+    // status reporting; this helper covers the paths that learn the
+    // theater indirectly — load_world_json, import_cam_archive (which
+    // routes through load_world_json), and set_install_path.
+    if (theater_tiles_loaded) return;   // already have tiles
+    if (!install || theater_name.empty()) return;
+    const auto* theater = install->find_theater(theater_name);
+    if (!theater || !theater->complete()) return;
+    current_theater_dir = theater->dir;
+    try {
+        theater_tiles_loaded = world.load_theater(theater->dir);
+    } catch (const std::exception&) {
+        // Malformed tile data shouldn't take down an otherwise-good
+        // world load — fall back to untextured terrain.
+        theater_tiles_loaded = false;
+    }
+    if (theater_tiles_loaded) {
+        // Repaint the 2D map with real far-tile art next frame.
+        invalidate_terrain_cache();
+    }
+}
 
 void ViewerApp::load_terrain_json(const std::filesystem::path& path) {
     impl_->terrain.load_terrain_json(path);
@@ -104,6 +128,12 @@ void ViewerApp::load_world_json(const std::filesystem::path& path) {
             impl_->last_error = "Auto-load terrain failed: " + std::string(e.what());
         }
     }
+    // The world names a theater ("korea") — if an install is configured,
+    // pull the theater binaries (post levels + tile art) so the 2D map
+    // and the 3D panel render textured terrain. No-op without an install
+    // or when tiles are already loaded.
+    impl_->try_load_theater_tiles();
+
     impl_->fit_to_world();
 }
 

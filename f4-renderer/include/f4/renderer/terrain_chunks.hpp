@@ -34,6 +34,7 @@
 #pragma once
 
 #include <f4/terrain/terrain_data.hpp>
+#include <f4/renderer/terrain_tile_source.hpp>
 
 #include <raylib.h>
 // Undef raylib macros that pollute the namespace
@@ -45,6 +46,9 @@
 #include <vector>
 
 namespace f4::renderer {
+
+class TerrainTileCache;
+class TerrainShader;
 
 /// Configuration for build_terrain_chunk_set(). Controls the overall
 /// extent, the chunk grid resolution, and per-chunk mesh resolution.
@@ -60,16 +64,13 @@ struct TerrainChunkSetConfig {
     /// half-extent (19 nm square), matching the world-viewer's 3D tab.
     float extent_ft = 50000.0f;
 
-    /// Number of chunk cells per side. The set has chunks_per_side²
-    /// chunks total. Default 8 → 64 chunks, each covering
-    /// (2*extent/8)² ft. Bump to 16 for finer culling, down to 4 for
-    /// coarse. Each chunk is independent so this mainly affects the
-    /// culling granularity, not the total vertex count.
+    /// Number of chunk cells per side (LEGACY vertex-color path only —
+    /// the textured path derives its chunk grid from post blocks).
+    /// The set has chunks_per_side² chunks total. Default 8 → 64 chunks.
     int chunks_per_side = 8;
 
-    /// Vertices per chunk side. Each chunk has (chunk_resolution+1)²
-    /// vertices. Default 32 → 1089 verts, 2048 triangles per chunk —
-    /// cheap. The total vertex count is chunks_per_side² × this.
+    /// Vertices per chunk side (LEGACY vertex-color path only).
+    /// Each chunk has (chunk_resolution+1)² vertices. Default 32.
     /// HARD CAP: chunk_resolution ≤ 254 (unsigned-short index cap).
     int chunk_resolution = 32;
 
@@ -91,6 +92,35 @@ struct TerrainChunkSetConfig {
     float far_plane_ft = 250000.0f;
     float near_plane_ft = 1.0f;
     float camera_fovy_deg = 45.0f;
+
+    // ── Textured-terrain path (Phase 2) ────────────────────────────────
+    //
+    // When tiles + tile_cache + terrain_shader are all set (and the
+    // tile source is usable), the builder switches to the textured
+    // path: the region within near_extent_ft of the center is emitted
+    // as post-aligned near-tile quads (per-quad vertices carrying tile
+    // UVs + array layer in texcoords2), and the rest of the extent is
+    // covered at the far level with far-tile quads. Elevation comes
+    // from the respective PostLevel instead of the MEA grid.
+
+    /// Decoded theater post/tile data. null → legacy vertex-color path.
+    const TerrainTileSource* tiles = nullptr;
+
+    /// GPU tile cache for layer allocation (non-owning; must outlive
+    /// the chunk set and be unloaded before the GL context goes away).
+    TerrainTileCache* tile_cache = nullptr;
+
+    /// Textured-terrain shader (non-owning; must outlive the chunk set).
+    TerrainShader* terrain_shader = nullptr;
+
+    /// Half-extent (feet) of the near-textured region around the
+    /// center. Beyond it, out to extent_ft, the far level is drawn.
+    float near_extent_ft = 60000.0f;
+
+    /// Extra z bias (feet, negative = lower) for far-region quads so
+    /// the near region wins depth tests where the two overlap (the
+    /// levels sample elevation differently at the seam).
+    float far_z_bias_ft = -20.0f;
 };
 
 /// One chunk's GPU resources + bounding box. Owned by TerrainChunkSet.
@@ -98,6 +128,7 @@ struct TerrainChunk {
     Mesh mesh = {};              ///< Raylib mesh (vertices, colors, triangles)
     Model model = {};            ///< Raylib model (mesh + default material)
     bool valid = false;          ///< true after a successful build
+    bool textured = false;       ///< built by the textured path (arrays+shader)
 
     /// ENU bounding box (feet) — used for frustum culling.
     float min_east = 0.0f, max_east = 0.0f;
@@ -108,6 +139,10 @@ struct TerrainChunk {
     /// chunk (cx, cy) where cx,cy ∈ [0, chunks_per_side).
     int chunk_x = 0;
     int chunk_y = 0;
+
+    /// Textured path: quads that fell back to palette vertex color
+    /// because their tile couldn't be resolved (diagnostics).
+    int untextured_quads = 0;
 };
 
 /// A built set of terrain chunks + the config they were built with.
@@ -116,6 +151,7 @@ struct TerrainChunk {
 struct TerrainChunkSet {
     std::vector<TerrainChunk> chunks;  ///< chunks_per_side² entries
     bool valid = false;                ///< true after a successful build
+    bool textured = false;             ///< true when built by the textured path
 
     TerrainChunkSetConfig config;
 
@@ -128,6 +164,13 @@ struct TerrainChunkSet {
     /// the HUD's diagnostic counter.
     int chunks_total = 0;       ///< total chunks in the set
     int chunks_visible = 0;    ///< chunks drawn this frame (after culling)
+
+    /// Build stats for the textured path (diagnostics): quads emitted
+    /// per region and quads that fell back to vertex color because a
+    /// tile couldn't be resolved.
+    int near_quads = 0;
+    int far_quads = 0;
+    int quads_untextured = 0;
 };
 
 /// Build a chunked terrain mesh from TerrainData around the given config center.

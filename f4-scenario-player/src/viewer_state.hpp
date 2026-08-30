@@ -14,9 +14,10 @@
 #include <f4/renderer/render_resources.hpp>      // RenderResources (owns all GPU caches)
 #include <f4/renderer/world_renderer.hpp>        // SceneDescription, render_world()
 #include <f4/renderer/world_camera.hpp>
-#include <f4/renderer/terrain_mesh.hpp>          // TerrainMesh (Path B1)
-#include <f4/terrain/terrain_data.hpp>           // TerrainData (Path B1)
-#include <f4/terrain/terrain_adapter.hpp>        // TerrainDataAdapter (Path B1)
+#include <f4/renderer/terrain_mesh.hpp>          // TerrainMesh (untextured fallback)
+#include <f4/renderer/world_view.hpp>            // WorldView (textured theater path)
+#include <f4/terrain/terrain_data.hpp>           // TerrainData
+#include <f4/terrain/terrain_adapter.hpp>        // TerrainDataAdapter (sim ground clamp)
 
 #include <f4/simulation/simulation.hpp>
 #include <f4/simulation/scenario.hpp>
@@ -87,6 +88,16 @@ struct PlayerApp::Impl {
     f4::renderer::TerrainMesh terrain_mesh;
     bool terrain_mesh_built = false;
     bool show_terrain = true;
+
+    // ── Textured theater — the ONE shared load-a-world path ──────────
+    // f4::renderer::WorldView owns the theater post levels + tile
+    // databases (CPU) and the terrain shader + tile arrays + chunk set
+    // (GPU), replacing the per-app terrain lifecycle this file used to
+    // hand-roll. Loaded from scenario.theater_dir's raw binaries; when
+    // the theater lacks tile data (JSON-only terrain) the viewer keeps
+    // the untextured TerrainMesh fallback above.
+    f4::renderer::WorldView world;
+    bool theater_tiles_loaded = false;        // world.theater_loaded()
 
     // ── Orbit camera (delegated to f4::renderer::OrbitCamera) ────────
     f4::renderer::OrbitCamera orbit_cam{

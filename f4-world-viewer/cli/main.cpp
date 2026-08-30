@@ -102,6 +102,7 @@ int main(int argc, char** argv) {
     // needed).
     std::string replay_path;
     bool have_replay = false;
+    std::string select_name;              // --select <substring>
 
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
@@ -143,6 +144,8 @@ int main(int argc, char** argv) {
         } else if (a == "--replay" && i + 1 < argc) {
             replay_path = argv[++i];
             have_replay = true;
+        } else if (a == "--select" && i + 1 < argc) {
+            select_name = argv[++i];
         } else if (positional == 0) {
             try { app.load_world_json(a); }
             catch (const std::exception& e) { std::cerr << "world load: " << e.what() << "\n"; }
@@ -176,6 +179,16 @@ int main(int argc, char** argv) {
     // Apply --hex-inspect: open the Hex Inspector panel with a file loaded.
     if (have_hex_inspect) {
         app.open_hex_inspector_with_file(hex_inspect_path);
+    }
+
+    // Apply --select: pick the first objective whose name contains the
+    // substring (programmatic map click — lights up the 3D Ground
+    // Layout panel for headless screenshot validation).
+    if (!select_name.empty()) {
+        if (!app.select_by_name(select_name)) {
+            std::cerr << "warning: no objective name matches '" << select_name
+                      << "'\n";
+        }
     }
 
     // Print install diagnostics to stderr + exit (no GUI). Useful for

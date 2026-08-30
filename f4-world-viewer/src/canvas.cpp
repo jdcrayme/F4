@@ -145,28 +145,128 @@ void ViewerApp::Impl::ensure_terrain_cache() {
     if (gw == 0 || gh == 0) return;
 
     if (terrain_cache.id != 0) {
-        UnloadRenderTexture(terrain_cache);
-        terrain_cache = {0};
+        UnloadTexture(terrain_cache);
+        terrain_cache = {};
     }
-    terrain_cache = LoadRenderTexture(static_cast<int>(gw),
-                                       static_cast<int>(gh));
-    if (terrain_cache.id == 0) {
-        return;
-    }
-    SetTextureFilter(terrain_cache.texture, TEXTURE_FILTER_POINT);
 
-    BeginTextureMode(terrain_cache);
-    ClearBackground(Color{0, 0, 0, 255});
-    for (uint32_t y = 0; y < gh; ++y) {
-        for (uint32_t x = 0; x < gw; ++x) {
-            const auto t = td.tile_type_at(x, gh-y-1);
-            const auto c = f4::terrain::TerrainData::color_for_tile_type(t);
-            DrawRectangle(static_cast<int>(x), static_cast<int>(y),
-                          1, 1, Color{c.r, c.g, c.b, c.a});
+    // --- Textured map: one far-tile thumbnail per MEA cell ------------
+    //
+    // The coarsest post level (L5, 128 posts for Korea) maps 1:1 onto
+    // the MEA grid, and each L5 post carries a far-tile index — so the
+    // whole-theater map can be painted with real tile art. Each 32x32
+    // tile is box-filtered down to kPx x kPx on the CPU and the result
+    // is uploaded once (2048x2048 RGBA for a 128-cell grid).
+    if (theater_tiles_loaded && !current_theater_dir.empty()) {
+        f4::terrain::PostLevel l5;
+        bool ok = false;
+        try {
+            ok = l5.load(world.terrain_dir(),
+                         world.geometry().last_level, world.geometry());
+        } catch (const std::exception&) {
+            ok = false;
+        }
+        if (ok && l5.posts_wide() == gw && l5.posts_wide() == gh) {
+            constexpr int kPx = 16;
+            Image img = GenImageColor(static_cast<int>(gw) * kPx,
+                                      static_cast<int>(gh) * kPx, BLACK);
+            std::vector<uint8_t> tile;
+            std::vector<uint8_t> cell(static_cast<std::size_t>(kPx) * kPx * 4);
+            for (uint32_t r = 0; r < gh; ++r) {
+                for (uint32_t c = 0; c < gw; ++c) {
+                    const auto p = l5.post(c, r);
+                    bool have_art = !p.has_no_tile() &&
+                        world.far_tiles().tile_rgba(p.tex_id, tile);
+                    if (have_art) {
+                        // 32x32 -> kPx box filter (2x2 blocks for kPx=16).
+                        constexpr int S =
+                            static_cast<int>(f4::terrain::FarTileDB::TILE_SIZE) / kPx;
+                        for (int y = 0; y < kPx; ++y) {
+                            for (int x = 0; x < kPx; ++x) {
+                                int sr = 0, sg = 0, sb = 0;
+                                for (int dy = 0; dy < S; ++dy)
+                                for (int dx = 0; dx < S; ++dx) {
+                                    const std::size_t src_px =
+                                        (static_cast<std::size_t>(y * S + dy) * 32 +
+                                         (x * S + dx)) * 4;
+                                    sr += tile[src_px + 0];
+                                    sg += tile[src_px + 1];
+                                    sb += tile[src_px + 2];
+                                }
+                                const std::size_t n = static_cast<std::size_t>(S) * S;
+                                const std::size_t dst_px =
+                                    (static_cast<std::size_t>(y) * kPx + x) * 4;
+                                cell[dst_px + 0] = static_cast<uint8_t>(sr / n);
+                                cell[dst_px + 1] = static_cast<uint8_t>(sg / n);
+                                cell[dst_px + 2] = static_cast<uint8_t>(sb / n);
+                                cell[dst_px + 3] = 255;
+                            }
+                        }
+                    } else {
+                        // Fallback: the elevation-band color (what the
+                        // untextured map shows). Post row 0 = south, and
+                        // tile_type_at y=0 is south too — same index.
+                        const auto t = td.tile_type_at(c, r);
+                        const auto col = f4::terrain::TerrainData::color_for_tile_type(t);
+                        for (std::size_t i = 0; i < cell.size(); i += 4) {
+                            cell[i + 0] = col.r;
+                            cell[i + 1] = col.g;
+                            cell[i + 2] = col.b;
+                            cell[i + 3] = 255;
+                        }
+                    }
+                    // Image row 0 = SOUTH (post row 0). The canvas draws
+                    // this texture with a negative source-height
+                    // DrawTexturePro, which puts image row 0 at the dst
+                    // BOTTOM — the south edge of the map.
+                    auto* dst = static_cast<uint8_t*>(img.data) +
+                        ((static_cast<std::size_t>(r) * kPx *
+                          (static_cast<std::size_t>(gw) * kPx)) +
+                         static_cast<std::size_t>(c) * kPx) * 4;
+                    // Cell row 0 holds the tile's TOP row = the north
+                    // side of the tile, so write cell rows back-to-front
+                    // (higher image row = further north).
+                    for (int y = 0; y < kPx; ++y) {
+                        std::memcpy(dst + static_cast<std::size_t>(y) *
+                                            static_cast<std::size_t>(gw) * kPx * 4,
+                                    cell.data() + static_cast<std::size_t>(kPx - 1 - y) * kPx * 4,
+                                    static_cast<std::size_t>(kPx) * 4);
+                    }
+                }
+            }
+            terrain_cache = LoadTextureFromImage(img);
+            UnloadImage(img);
+            if (terrain_cache.id != 0) {
+                SetTextureFilter(terrain_cache, TEXTURE_FILTER_POINT);
+                terrain_cache_valid = true;
+                return;
+            }
         }
     }
-    EndTextureMode();
-    terrain_cache_valid = true;
+
+    // --- Untextured map: one elevation-band color pixel per cell ------
+    // Image row 0 = SOUTH: tile_type_at's y=0 is the southernmost row,
+    // and the -height DrawTexturePro in draw_canvas() places image row 0
+    // at the dst bottom (the map's south edge).
+    Image img = GenImageColor(static_cast<int>(gw), static_cast<int>(gh), BLACK);
+    for (uint32_t y = 0; y < gh; ++y) {
+        for (uint32_t x = 0; x < gw; ++x) {
+            const auto t = td.tile_type_at(x, y);
+            const auto c = f4::terrain::TerrainData::color_for_tile_type(t);
+            const std::size_t px =
+                (static_cast<std::size_t>(y) * gw + x) * 4;
+            auto* data = static_cast<uint8_t*>(img.data);
+            data[px + 0] = c.r;
+            data[px + 1] = c.g;
+            data[px + 2] = c.b;
+            data[px + 3] = 255;
+        }
+    }
+    terrain_cache = LoadTextureFromImage(img);
+    UnloadImage(img);
+    if (terrain_cache.id != 0) {
+        SetTextureFilter(terrain_cache, TEXTURE_FILTER_POINT);
+        terrain_cache_valid = true;
+    }
 }
 
 void ViewerApp::draw_canvas() {
@@ -177,12 +277,12 @@ void ViewerApp::draw_canvas() {
             const Vector2 p0 = impl_->world_to_screen(0.0f, 0.0f);
             const Vector2 p1 = impl_->world_to_screen(1024.0f, 1024.0f);
             const Rectangle src = {0, 0,
-                static_cast<float>(impl_->terrain_cache.texture.width),
-                -static_cast<float>(impl_->terrain_cache.texture.height)};
+                static_cast<float>(impl_->terrain_cache.width),
+                -static_cast<float>(impl_->terrain_cache.height)};
             const Rectangle dst = {p0.x, p1.y,
                 p1.x - p0.x, p0.y - p1.y};
             const Vector2 origin = {0, 0};
-            DrawTexturePro(impl_->terrain_cache.texture, src, dst, origin,
+            DrawTexturePro(impl_->terrain_cache, src, dst, origin,
                            0.0f, Color{255, 255, 255, 255});
         } else {
             const auto& td = impl_->terrain;
@@ -973,13 +1073,13 @@ void ViewerApp::draw_canvas() {
 
         if (impl_->terrain_cache_valid && impl_->terrain_cache.id != 0) {
             const Rectangle src = {0, 0,
-                static_cast<float>(impl_->terrain_cache.texture.width),
-                -static_cast<float>(impl_->terrain_cache.texture.height)};
+                static_cast<float>(impl_->terrain_cache.width),
+                -static_cast<float>(impl_->terrain_cache.height)};
             const Rectangle dst = {static_cast<float>(mm_x),
                                     static_cast<float>(mm_y),
                                     static_cast<float>(mm_size),
                                     static_cast<float>(mm_size)};
-            DrawTexturePro(impl_->terrain_cache.texture, src, dst,
+            DrawTexturePro(impl_->terrain_cache, src, dst,
                            {0, 0}, 0.0f, Color{255, 255, 255, 200});
         } else {
             DrawRectangle(mm_x, mm_y, mm_size, mm_size,
