@@ -163,7 +163,16 @@ void TakeoffModule::initialize(
             taxi_route_ = msg.taxi_route;
             runway_id_ = msg.runway_id;
             taxi_wp_index_ = 0;
-            sm_.process(TakeoffEvent::ClearanceGranted);
+            // STAB-E9: latch the event instead of processing it inline.
+            // StubATC answers SYNCHRONOUSLY inside publish(); when that
+            // publish originates from this module's own entry action
+            // (initialize() -> sm_.reset() -> on_enter(RequestTaxi) ->
+            // publish(TaxiRequest) -> TaxiClearance -> HERE), calling
+            // sm_.process() now re-enters the state machine while it is
+            // still inside reset() — undefined behavior (observed segfault
+            // in trace_runner at first tick). update() drains the latch
+            // on the owning tick instead.
+            deferred_event_ = TakeoffEvent::ClearanceGranted;
         }
     });
 
@@ -176,7 +185,7 @@ void TakeoffModule::initialize(
             // in on_enter(HoldShort)). It means "cleared for takeoff."
             if (sm_.current() == TakeoffState::HoldShort ||
                 sm_.current() == TakeoffState::Wait) {
-                sm_.process(TakeoffEvent::TakeoffCommand);
+                deferred_event_ = TakeoffEvent::TakeoffCommand;
             }
         }
     });
@@ -186,6 +195,18 @@ void TakeoffModule::initialize(
     // the entry action once, but bus_ was null at that point so it was
     // a no-op. reset() fires it again with bus_ valid.
     sm_.reset();
+
+    // STAB-E9: StubATC answers the TaxiRequest synchronously inside the
+    // publish chain above; the clearance handler latched the event rather
+    // than processing it (re-entrancy safety — an inline sm_.process()
+    // there re-entered the SM mid-reset and segfaulted). reset() has now
+    // returned; we are outside any SM frame, so drain the latch here to
+    // reach Taxi within initialize() (the documented contract).
+    if (deferred_event_) {
+        const auto ev = *deferred_event_;
+        deferred_event_.reset();
+        sm_.process(ev);
+    }
 }
 
 // ============================================================================
@@ -196,6 +217,15 @@ AIControlOutput TakeoffModule::update(double dt, const flight::IAircraftState* s
 {
     // Cache aircraft state for control methods.
     cache_aircraft_state(state);
+
+    // STAB-E9: drain any clearance event latched by a subscription handler
+    // (see initialize). Processing it here — on the owning tick, outside
+    // any sm_.reset()/process() frame — is re-entrancy safe.
+    if (deferred_event_) {
+        const auto ev = *deferred_event_;
+        deferred_event_.reset();
+        sm_.process(ev);
+    }
 
     // Fire any pending transitions based on the current state and aircraft
     // state. We loop up to a small bound because some transitions chain
@@ -415,17 +445,43 @@ AIControlOutput TakeoffModule::controls_for_prep_to_take_runway() const {
     // to the line, roll forward while aligning heading to the runway heading.
     // check_runway_alignment() takes over (Taxi -> TakeRunway) when both
     // lateral and heading tolerances are met.
+    //
+    // STAB-E16: the "once close to the line, roll forward while aligning"
+    // half of the design was previously NOT implemented — the law always
+    // chased lineup_point_far, so the final alignment depended on the phase
+    // of the approach orbit around the point. Combined with the A3-tight
+    // gate (5 ft / 0.5 deg) the convergence was a coin flip (the
+    // BrainComponent.TaxiLineupTakeoff test flipped to failing when the
+    // deferred-clearance timing shifted the orbit phase by one tick).
+    // Implement the described two-phase law: chase the point while laterally
+    // offset; inside lineup_capture_ft roll forward down the runway and
+    // align heading directly — deterministic convergence.
     const double fx = std::sin(runway_heading_rad_);
     const double fy = std::cos(runway_heading_rad_);
-    const geo::WorldPosition lineup_point(
-        threshold_position_.x + fx * lineup_depth_ft,
-        threshold_position_.y + fy * lineup_depth_ft,
-        threshold_position_.z);
 
     const double dx = current_position_.x - threshold_position_.x;
     const double dy = current_position_.y - threshold_position_.y;
     const double lateral = std::abs(dx * fy - dy * fx);
 
+    if (lateral < lineup_capture_ft) {
+        // On/near the centerline: aim at a point ON the centerline 800 ft
+        // ahead of the current along-track position. As the lateral closes,
+        // the bearing converges to the runway heading — this closes BOTH
+        // the offset and the heading error (a pure heading-align rolls a
+        // parallel track at whatever lateral remained at capture, observed
+        // stuck at 65 ft).
+        const double along = dx * fx + dy * fy;
+        const geo::WorldPosition ahead_on_line(
+            threshold_position_.x + fx * (along + 800.0),
+            threshold_position_.y + fy * (along + 800.0),
+            threshold_position_.z);
+        return ground_steering.steer_toward(ahead_on_line, steering_input(),
+                                            taxi_speed_kts,
+                                            /*stop_at_target=*/false);
+    }
+
+    // Laterally offset: steer toward a point lineup_depth_ft (+ lead) past
+    // the threshold to cut toward the centerline.
     const geo::WorldPosition lineup_point_far(
         threshold_position_.x + fx * (lineup_depth_ft + 1000.0),
         threshold_position_.y + fy * (lineup_depth_ft + 1000.0),

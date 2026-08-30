@@ -52,6 +52,7 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -141,15 +142,24 @@ public:
     [[nodiscard]] AIControlOutput hold_complete() const;
 
     // --- Configuration (public doubles, f4-ai module convention) ---
-    double approach_speed_kts{160.0};   // final approach CAS (Phase C3: lowered
-                                        // from 210 to 160 — flaps extended on
-                                        // final (Phase C2) drop the stall speed
-                                        // ~30 kts, allowing a slower approach.
-                                        // 160 kts is realistic for an F-16 in
-                                        // landing configuration; the prior 210
-                                        // was "clean" approach speed and was the
-                                        // single biggest contributor to long
-                                        // landings).
+    double approach_speed_kts{185.0};   // final approach CAS.
+                                        // STAB-E5: raised from 160 (Phase
+                                        // C3). Trace-driven correction:
+                                        // at landing weight (W/S ~84 lb/ft2,
+                                        // fuel 6500 + stores) the aero
+                                        // model's stall speed on final is
+                                        // ~166 kts (17.16*sqrt(84/0.89) with
+                                        // CL=0.89 at alpha 12, TEF 1.0) —
+                                        // 160 kts is BELOW stall and the
+                                        // aircraft literally cannot hold
+                                        // 1 G there (observed: on_glideslope
+                                        // spawn at 165 kts fell with
+                                        // lift=0, stalled latch on, until
+                                        // it accelerated past 171 kts).
+                                        // 185 kts restores ~20 kt stall
+                                        // margin; the energy-managed flare
+                                        // (C4) bleeds the excess over the
+                                        // threshold.
     double fix_radius_ft{2500.0};       // "reached" radius for the entry fix
     double fix_abeam_ft{15000.0};       // off-nose capture distance window
     double fix_abeam_bearing_rad{1.4};  // ~80 deg off the nose = "passed it"
@@ -165,29 +175,40 @@ public:
     // the field). ---
     bool fly_traffic_pattern{false};    // false = straight-in (phase 1)
     bool pattern_left_traffic{true};    // left-hand pattern (standard)
-    double pattern_speed_kts{200.0};    // downwind/base CAS — slow enough
+    double pattern_speed_kts{195.0};    // downwind/base CAS — slow enough
                                         // that the ~35-deg bank turns fit
                                         // the pattern (~5,000 ft radius;
                                         // at 250 kts it is ~13,000 ft and
                                         // the legs stop existing)
-    double pattern_offset_ft{15000.0};  // lateral distance of the downwind
-                                        // leg from the runway centerline
-    double upwind_along_ft{14000.0};    // upwind/crosswind corner this far
-                                        // past the threshold (runway end
-                                        // + ~5,500 ft on a 8400 ft runway)
+    double pattern_offset_ft{12000.0};  // lateral distance of the downwind
+                                        // leg from the runway centerline.
+                                        // STAB-E49: 15,000 -> 12,000 with
+                                        // the 23-deg bank cap — a tighter
+                                        // pattern that the slower turns can
+                                        // still fly without the legs
+                                        // degenerating
+    double upwind_along_ft{16000.0};    // upwind/crosswind corner this far
+                                        // past the threshold (STAB-E49:
+                                        // 14,000 -> 16,000 — the 23-deg
+                                        // crosswind turn's ~8,700 ft radius
+                                        // needs the extra room)
     double pattern_join_offset_ft{4000.0}; // slight lateral offset while
                                         // overflying on the upwind heading
-    double base_turn_along_ft{14000.0}; // begin the base turn this far
-                                        // BEFORE the threshold — far
-                                        // enough out that the base arc +
-                                        // final turn complete ~2 nm before
-                                        // the threshold, leaving a real
-                                        // final approach (at 8,000 the
-                                        // aircraft established 6,000 ft
-                                        // out and immediately overflew
-                                        // the missed-approach plane)
-    double base_aim_along_ft{22000.0};  // base leg aims at the extended
-                                        // centerline this far out
+    double base_turn_along_ft{28000.0}; // begin the base turn this far
+                                        // BEFORE the threshold. STAB-E49:
+                                        // 24,000 -> 28,000 — the final turn
+                                        // at the 23-deg bank cap (~8,700 ft
+                                        // radius at 195 kts) spans ~110 deg
+                                        // + overshoot + realign and needs
+                                        // ~19,000 ft of along-track after the
+                                        // capture; 28,000 + the 14,000
+                                        // capture lateral leaves the
+                                        // establish floor (5,000 ft) intact.
+    double base_aim_along_ft{18000.0};  // base leg aims at the extended
+                                        // centerline this far out (kept
+                                        // close so the base leg does not
+                                        // angle away from the field and
+                                        // steepen the final turn)
     double base_alt_agl_ft{900.0};      // base-leg altitude over the field
                                         // — near the intercept floor, so
                                         // the final turn ends CLOSE to the
@@ -195,22 +216,27 @@ public:
                                         // 1000+ ft high at establish and
                                         // the dive-to-beam burned the
                                         // whole final approach)
-    double base_capture_lateral_ft{11500.0}; // base -> final turn when this
+    double base_capture_lateral_ft{9000.0}; // base -> final turn when this
                                         // close to the extended centerline
-                                        // — sized to ~one turn radius at
-                                        // approach speed PLUS the settle
-                                        // distance: the 90-deg turn and
-                                        // roll-out then complete ~2-3 nm
-                                        // BEFORE the threshold, leaving a
-                                        // real final approach. At 8,500 ft
-                                        // the aircraft established right
-                                        // at the threshold and instantly
-                                        // hit the missed-approach plane.
-    double intercept_floor_agl_ft{600.0}; // never descend below this AGL
+                                        // — MUST sit INSIDE the pattern
+                                        // offset (E52: an earlier 14,000
+                                        // against a 12,000 offset made the
+                                        // capture fire at the downwind->base
+                                        // handoff itself, the base leg was
+                                        // skipped, and the intercept started
+                                        // from a 138-deg-off downwind
+                                        // heading — a 16,000-ft lateral S
+                                        // that never stabilized). 9,000 with
+                                        // the 23-deg bank cap's ~8,700 ft
+                                        // final-turn radius completes
+                                        // outside the establish floor.
+    double intercept_floor_agl_ft{700.0}; // never descend below this AGL
                                         // while still intercepting (the
                                         // beam is meaningless laterally
                                         // far off; chasing it low+slow
-                                        // away from the runway = dirt)
+                                        // away from the runway = dirt).
+                                        // STAB-E27: 600 -> 700 for one
+                                        // more turn-sink margin
 
     double beam_aim_offset_ft{1500.0};  // beam zero-point PAST the threshold
                                         // (real ILS aims ~1000-1500 ft in;
@@ -218,7 +244,16 @@ public:
                                         // makes the flare land short)
     double establish_hdg_tol_rad{0.26}; // ~15 deg on-course for Established
     double establish_lateral_ft{500.0}; // localizer capture tolerance
-    double localizer_gain{0.0015};      // heading correction per ft of xtrack
+    double localizer_gain{0.0005};      // heading correction per ft of xtrack
+                                        // STAB-E20/E53: softened from 0.0009
+                                        // (and originally 0.0015) — at 200
+                                        // kts the 23-deg bank cap turns with
+                                        // an ~8,700 ft radius, and commands
+                                        // steeper than ~1 deg per 40 ft of
+                                        // offset cannot reverse before
+                                        // crossing the course: the final
+                                        // hunted ±900 ft around the centerline
+                                        // all the way down (fix29 t=1197-1213)
     // Phase B1 (FLIGHT_CONTROL_NEXT_STEPS.md §4 Phase B1): raised from 0.5
     // rad (~30 deg) to 0.87 rad (~50 deg). At 0.5 rad the correction
     // saturated at 333 ft cross-track (0.5 / 0.0015), so beyond 333 ft off
@@ -234,11 +269,42 @@ public:
     /// centerline. Standard ILS intercept geometry — at large offset the
     /// proportional localizer law saturates and can't close the gap fast
     /// enough; aiming at a point ahead closes it geometrically.
-    double intercept_offset_ft{1000.0};
-    /// Phase B2: how far ahead of the current position the intercept aims
-    /// (feet along the centerline). 1500 ft at 200 kts gives a ~25-deg
-    /// intercept angle, which is the standard ILS intercept geometry.
-    double intercept_lead_ft{1500.0};
+    double intercept_offset_ft{600.0};  // STAB-E20/E53: narrowed band edge —
+                                        // the proportional law only flies
+                                        // the last few hundred feet near the
+                                        // course; 0.0005 x 600 = 17 deg,
+                                        // continuous with the scaled-lead
+                                        // cut at the boundary (18.4 deg)
+    double intercept_lead_ft{1500.0};   // floor on the intercept lead
+                                        // distance (ft along the course).
+                                        // Keeps small offsets from cutting
+                                        // near-perpendicular to the course.
+    double intercept_lead_ratio{3.0};   // STAB-E20/E53: the lead SCALES with
+                                        // the cross-track at this ratio —
+                                        // 3.0 bounds the intercept cut at
+                                        // atan(1/3) = 18.4 deg for ANY
+                                        // offset. 2.0 (26.6 deg cuts) still
+                                        // hunted at the 23-deg bank cap's
+                                        // turn radius (fix29)
+    double establish_beam_tol_ft{400.0};// STAB-E23: Established also
+                                        // requires being this close to the
+                                        // glide beam — refuses to hand
+                                        // OnFinal an approach it cannot
+                                        // stabilize (observed: +3,500 ft
+                                        // high at handoff, threshold
+                                        // overflown at 1,905 ft AGL)
+    double establish_floor_ft{4000.0};  // STAB-E21/E50: not established by
+                                        // 4,000 ft out = intercept not
+                                        // converging; go around cleanly
+                                        // instead of dragging a crosser
+                                        // through the missed-approach
+                                        // plane. 5,000 -> 4,000: the final
+                                        // turn at the 23-deg bank cap
+                                        // reliably closes to ~1,000 ft
+                                        // lateral by ~4,500 ft out but not
+                                        // by 5,000 (fix25: gates otherwise
+                                        // ALL green at along -5,729 with
+                                        // lat -1,052, floor fired first).
     double flare_agl_ft{60.0};          // begin the flare below this AGL
     double flare_pitch_deg{8.0};        // flare target pitch attitude
     double flare_pitch_gain{3.0};       // stick per rad of pitch error
@@ -267,6 +333,13 @@ public:
                                         // around (far enough in that a normal
                                         // high crossing can flare inside the
                                         // runway first)
+    double flare_overrun_ft{3500.0};    // STAB-E55: EXTRA along-track the
+                                        // FLARE state may float past the
+                                        // missed plane before its overflight
+                                        // valve fires (a flare begun at
+                                        // ~+2,300 still has pavement; the
+                                        // bare +2,500 plane insta-aborted
+                                        // legitimate late flares)
 
     // Shared control laws. Public so hosts can tune gains.
     // pattern_steering is the same cascade with a steeper bank cap — the
@@ -353,9 +426,15 @@ private:
 
     [[nodiscard]] AirSteering::Input air_input() const noexcept;
     [[nodiscard]] GroundSteering::Input ground_input() const noexcept;
+    /// STAB-E34: air_input() + the glide beam's own descent rate as the
+    /// VS feedforward — used by every beam-parallel pattern state.
+    [[nodiscard]] AirSteering::Input beam_input() const noexcept;
 
     // --- External references (set by initialize) ---
     std::uint64_t ownship_id_{0};
+    /// STAB-E9: clearance event latched by a bus subscription handler,
+    /// drained at the top of update() (re-entrancy safe — see initialize).
+    std::optional<LandingEvent> deferred_event_{};
     entities::EntityWorld* world_{nullptr};
     messaging::MessageBus* bus_{nullptr};
 
@@ -374,6 +453,7 @@ private:
     bool cleared_to_land_{false};
     double fix_timer_{0.0};     ///< seconds in ProceedToFix (abeam guard)
     double pattern_timer_{0.0}; ///< seconds in the current pattern state
+    double flare_timer_{0.0};   ///< seconds in Flare (timeout safety valve, STAB-E3)
     int pattern_leg_{0};        ///< 0 = upwind overfly -> far corner,
                                 ///< 1 = crosswind turn (corner -> offset),
                                 ///< 2 = downwind leg to the base turn

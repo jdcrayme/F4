@@ -147,12 +147,15 @@ TEST(NavigationModule, SteersTowardCurrentWaypoint) {
     EXPECT_GT(out.throttle_cmd, mod.air_steering.throttle_mid);
 
     // Turning case: waypoint due east (90 deg off-nose) slows the target
-    // to turn_speed_kts; at 300 kts current the throttle sits at the floor.
+    // to turn_speed_kts; at 300 kts current the throttle pulls below mid
+    // toward the floor (exact value depends on the default throttle_gain,
+    // lowered 0.008 -> 0.005 by STAB-E1).
     mod.set_route({make_wp("EAST", 100000, 0, 10000, 400)});
     s = make_state(0, 0, 10000, /*hdg=*/0.0, /*vcas=*/300.0);
     const auto turn_out = mod.update(0.1, s.get());
     EXPECT_GT(turn_out.roll_cmd, 0.0);
-    EXPECT_NEAR(turn_out.throttle_cmd, mod.air_steering.throttle_min, 1e-9);
+    EXPECT_LT(turn_out.throttle_cmd, mod.air_steering.throttle_mid);
+    EXPECT_GE(turn_out.throttle_cmd, mod.air_steering.throttle_min);
 }
 
 TEST(NavigationModule, NullStateIsSafeNoOp) {

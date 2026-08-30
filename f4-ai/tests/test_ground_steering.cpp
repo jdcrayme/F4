@@ -96,10 +96,12 @@ TEST(GroundSteeringPedal, LeftTurnNeedsPositivePedal) {
 
 TEST(GroundSteeringPedal, SmallErrorProportionalNoClamp) {
     GroundSteering gs;
-    gs.heading_gain = 3.0;
-    // Target slightly right of heading: +0.1 rad error -> -0.3 pedal.
+    // The align_heading law (rewritten in 4dfef9f): pedal =
+    // -align_heading_gain * error + rate damping. Small error, no rate ->
+    // proportional, unclamped: +0.1 rad error x 0.5 gain = -0.05 pedal.
+    gs.align_heading_gain = 0.5;
     const auto out = gs.align_heading(0.1, make_input(0, 0, 0.0, 5.0), 15.0, false);
-    EXPECT_NEAR(out.yaw_cmd, -0.3, 1e-9);
+    EXPECT_NEAR(out.yaw_cmd, -0.05, 1e-9);
 }
 
 TEST(GroundSteeringPedal, AlignHeadingHoldsHeading) {

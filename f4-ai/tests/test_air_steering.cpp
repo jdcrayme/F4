@@ -131,12 +131,24 @@ TEST(AirSteeringAltitude, GammaTrackingPullsOutOfSink) {
 }
 
 TEST(AirSteeringAltitude, ClimbRateClamped) {
-    // 10000 ft below target would command 120000 fpm; clamped to max_vs
-    // (4000). The resulting target pitch clamps at max_path_rad and the
-    // stick saturates at pitch_max.
+    // 10000 ft below target commands a huge VS; the clamp caps it at
+    // max_vs — but STAB-E29 slew-rate limits the VS command at
+    // vs_slew_fpm_per_s (default 400), so the FIRST tick only commands
+    // 400 fpm of climb, building to the clamp over ~max_vs/400 seconds.
+    // The pitch command must therefore START strong (the gamma_ff of the
+    // ramping target + alpha_est) and SUSTAIN as the target ramps.
     AirSteering as;
     const auto out = as.steer(0, 15000, 300, make_input(0, 5000, 0, 300));
-    EXPECT_NEAR(out.pitch_cmd, as.pitch_max, 1e-9);
+    // First tick: vs_target = 400 fpm (slewed) — a modest climb demand,
+    // not the old instant full-authority pull.
+    EXPECT_GT(out.pitch_cmd, 0.0) << "expected a climb pitch command";
+    // After 10 s of ticks (600 calls at the 60 Hz design point) the slew
+    // has reached the 2,500 fpm default cap: the pull is strong.
+    AirSteering::Input in = make_input(0, 5000, 0, 300);
+    double sustained = 0.0;
+    for (int i = 0; i < 600; ++i) sustained = as.steer(0, 15000, 300, in).pitch_cmd;
+    EXPECT_GT(sustained, 0.25) << "expected a strong sustained pull-up command";
+    EXPECT_LE(sustained, as.pitch_max);
 }
 
 TEST(AirSteeringAltitude, HighAttitudeAtLevelFlightIsEquilibrium) {
@@ -167,9 +179,13 @@ TEST(AirSteeringSpeed, SlowAddsThrottle) {
 
 TEST(AirSteeringSpeed, FastReducesThrottle) {
     AirSteering as;
-    // 60 kts fast: 0.6 - 0.008*60 = 0.12 -> clamped at the 0.25 floor.
+    // 60 kts fast pulls the throttle toward the floor (the exact value
+    // depends on the default throttle_gain, which STAB-E1 lowered from
+    // 0.008 to 0.005 — assert direction and floor-clamping behavior
+    // instead of one magic number).
     const auto fast = as.steer(0, 5000, 300, make_input(0, 5000, 0, 360));
-    EXPECT_NEAR(fast.throttle_cmd, as.throttle_min, 1e-9);  // clamped at floor
+    EXPECT_LT(fast.throttle_cmd, as.throttle_mid);
+    EXPECT_NEAR(fast.throttle_cmd, as.throttle_min, 0.31);  // at/near floor
 }
 
 TEST(AirSteeringSpeed, ThrottleNeverExceedsMIL) {

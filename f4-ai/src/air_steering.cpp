@@ -30,7 +30,8 @@ double AirSteering::heading_error(double desired_rad,
 AIControlOutput AirSteering::steer(double desired_heading_rad,
                                    double target_alt_ft,
                                    double target_speed_kts,
-                                   const Input& in) const {
+                                   const Input& in,
+                                   double throttle_floor) const {
     AIControlOutput out;
 
     // --- Heading: bank-to-turn cascade ---
@@ -79,13 +80,65 @@ AIControlOutput AirSteering::steer(double desired_heading_rad,
     // pitch-attitude command is in equilibrium by construction (zero
     // steady-state VS error). The VS-error term only trims gamma; the
     // speed term damps the phugoid.
+    //
+    // STAB-E6: vs_ff_fpm (the target path's own vertical rate) is added
+    // BEFORE the clamp, so zero altitude error commands the path's own
+    // rate — the aircraft RIDES a descending beam instead of leveling
+    // at each crossing and diving to re-catch it (the ±250 ft / ±3,000
+    // fpm corner-chase observed in the on_glideslope trace t=40-75).
     const double alt_err = target_alt_ft - in.alt_msl_ft;
-    const double vs_target = std::clamp(vs_gain * alt_err,
-                                        -max_vs_fpm, max_vs_fpm);
+    // STAB-E7: leaky integral on altitude error (10 s time constant, same
+    // leak model as the speed integral). Eliminates the P-only steady-state
+    // beam offset. Clamped to alt_integral_max so transients can't wind it
+    // to the VS cap.
+    alt_integral_ = alt_integral_ * (1.0 - 1.0 / 600.0)
+                  + alt_integral_gain * alt_err * (1.0 / 60.0);
+    alt_integral_ = std::clamp(alt_integral_, -alt_integral_max, alt_integral_max);
+    double vs_corr = vs_gain * alt_err + alt_integral_;
+    // STAB-E10: when enabled, clamp the CORRECTION around the path
+    // feedforward with an error-scaled window: tight near the path (smooth
+    // beam ride), full authority far from it (from-below capture). The
+    // window is always clamped by max_vs_fpm regardless.
+    if (vs_corr_max_fpm >= 0.0) {
+        const double window = std::clamp(vs_corr_max_fpm + 1.5 * std::fabs(alt_err),
+                                          0.0, max_vs_fpm);
+        vs_corr = std::clamp(vs_corr, -window, window);
+    }
+    const double vs_target_raw = std::clamp(in.vs_ff_fpm + vs_corr,
+                                            -max_vs_fpm, max_vs_fpm);
+    // STAB-E29: slew-rate limit the VS command. steer() has no dt
+    // parameter; the leaky integrals above use the same fixed 1/60 s
+    // major-frame assumption, so the limiter does too (design point 60
+    // Hz; the test harness matches). At vs_slew_fpm_per_s = 400 a
+    // full-authority change ramps over ~4 s — comparable to the FCS
+    // G-lag, so the airframe can actually follow the command instead
+    // of ringing through it. See the header comment for the trace
+    // evidence.
+    double vs_target = vs_target_raw;
+    if (vs_slew_fpm_per_s > 0.0) {
+        const double step = vs_slew_fpm_per_s / 60.0;
+        vs_target = vs_target_ + std::clamp(vs_target_raw - vs_target_,
+                                             -step, step);
+    }
+    vs_target_ = vs_target;
     const double v_fps = std::max(100.0, in.vcas_kts * 1.68781);
     const double gamma_now = std::asin(std::clamp((in.vs_fpm / 60.0) / v_fps,
                                                   -0.7, 0.7));
-    const double alpha_est = in.pitch_rad - gamma_now;   // lift trim
+    // STAB-E17: clamp the alpha estimate to a physically-sane band. The
+    // raw difference (pitch - gamma) explodes during transients: at pitch
+    // +20 deg while still sinking at -4,000 fpm (gamma -10.6 deg) it
+    // reports alpha = 30.6 deg — a value at which the aircraft would be
+    // stalled at these speeds. Feeding that into theta_target pins the
+    // pitch target at its +clamp through the ENTIRE descent (the estimate
+    // says "you need 30 deg of pitch to hold this"), so the aircraft
+    // zooms, the sink reverses, the estimate collapses, and the loop
+    // repeats — the ±7,000 fpm / ±25 deg porpoise observed through every
+    // pattern phase of the digi_full_mission trace (t=730-1040) and the
+    // enroute dip to 105 ft AGL against a 3,000 ft floor (t=660-720).
+    // The true trim alpha in these regimes is 2-12 deg; the clamp turns
+    // the positive feedback back into a bounded feedforward.
+    const double alpha_est = std::clamp(in.pitch_rad - gamma_now,
+                                        alpha_min_rad, alpha_max_rad);
     const double gamma_ff = std::clamp((vs_target / 60.0) / v_fps, -0.35, 0.35);
     const double gamma_corr = std::clamp(path_gain * (vs_target - in.vs_fpm),
                                          -gamma_corr_limit, gamma_corr_limit);
@@ -118,8 +171,31 @@ AIControlOutput AirSteering::steer(double desired_heading_rad,
                                                   throttle_integral_max);
     out.throttle_cmd = std::clamp(
         throttle_mid + throttle_gain * speed_err + speed_integral_,
-        throttle_min, throttle_max);
+        std::max(throttle_min, throttle_floor), throttle_max);
     out.speed_brake_cmd = (in.vcas_kts > target_speed_kts + 15.0) ? 0.8 : -1.0;
+
+    // --- STAB-E46: anti-balloon energy damper ---
+    // The phugoid's climb half-cycle cannot be arrested through the pitch
+    // channel: full nose-down stick is consumed by the FCS pitch
+    // integrator's unwind time (observed: +4,600 fpm zoom at 20 deg pitch
+    // AGAINST ptcmd -0.53 for 10+ s, fix18 t=1174-1183). Throttle and
+    // speed brake respond in under a second and act on the CURRENT state
+    // (no lag): when the actual vertical speed overshoots the commanded
+    // by 1,200+ fpm, starve the zoom — chop the throttle and dump the
+    // board. Phase-correct damping of the energy oscillation; the
+    // counterpart of the landing module's sink guardians for the dive
+    // half-cycle. (Fires ONLY on genuine balloons: vs > +800 AND fast
+    // enough to give the power away. Lower guards straddle the level beam
+    // ride's ±200 fpm band and chop the engine at 155-165 kts, where the
+    // trim alpha (~13 deg) equals the pitch attitude and the aircraft
+    // CANNOT descend — it floated 880 ft over the threshold at alpha 13,
+    // fix22 t=1215-1245.)
+    if (in.vs_fpm > balloon_guard_fpm &&
+        in.vcas_kts > target_speed_kts - 5.0 &&
+        in.vs_fpm - vs_target > 1200.0) {
+        out.throttle_cmd = std::min(out.throttle_cmd, 0.08);
+        out.speed_brake_cmd = 1.0;   // full board
+    }
 
     return out;
 }

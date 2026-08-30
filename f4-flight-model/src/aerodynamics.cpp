@@ -205,8 +205,26 @@ void Aerodynamics::update(const AeroInputs& in, AeroState& aero) const {
         if (std::fabs(cl) > 1e-3) {
             stallSpeed = K_STALL * std::sqrt(ws / std::fabs(cl));
         }
-        if (vcas_kts < stallSpeed || alpha_deg > aux_->criticalAOA.to<f4::Degrees>().value()) {
-            stalled = true;
+        // STAB-E2: hysteresis on the stall boundary. The previous hard
+        // comparison (vcas < stallSpeed || alpha > criticalAOA) chattered
+        // at the boundary: an alpha oscillation riding criticalAOA flipped
+        // lift between full CL and <=0 EVERY FRAME (observed as nz snapping
+        // 1.2 -> 0.01 with alpha 13.8 -> 0.0 in one tick in the
+        // digi_full_mission trace — the "ballistic arc" that amplified the
+        // altitude phugoid). Enter the stall with a margin above the
+        // boundary; leave it only with a margin below. This matches the
+        // physical reality that flow separation/reattachment lags the
+        // boundary crossing.
+        const double crit_deg = aux_->criticalAOA.to<f4::Degrees>().value();
+        const double aoa_enter = crit_deg + 1.0;
+        const double aoa_exit  = crit_deg - 3.0;
+        const double spd_enter = stallSpeed;               // enter below stall speed
+        const double spd_exit  = stallSpeed + 5.0;         // exit only with margin
+        if (aero.stalled) {
+            // Latched: stay stalled until BOTH conditions clear with margin.
+            stalled = !(alpha_deg < aoa_exit && vcas_kts > spd_exit);
+        } else {
+            stalled = (vcas_kts < spd_enter || alpha_deg > aoa_enter);
         }
     }
 

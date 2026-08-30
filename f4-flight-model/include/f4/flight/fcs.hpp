@@ -117,12 +117,13 @@ private:
                       FcsState& fcs) const;
 
     /// Run the pitch channel: G-command PI controller with anti-windup.
+    /// `inAir` (STAB-E14) gates the nzcgs-based ground guard — see fcs.cpp.
     void runPitch(double dt, double qbar, double qsom, double vt, double vcas_kts,
                   Angle alpha, double cosmu, double cosgam, double singam,
                   double nzcgs, double cl, double clalpha, double clalph0,
                   double cnalpha, double aoamin, double aoamax, double maxGs,
                   const PilotInput& input,
-                  FcsState& fcs, AeroState& aero) const;
+                  FcsState& fcs, AeroState& aero, bool inAir) const;
 
     /// Run the roll channel: rate command with alpha-based rate limiting.
     void runRoll(double dt, double qbar, double vcas_kts, Angle alpha,

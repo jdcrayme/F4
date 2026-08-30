@@ -269,8 +269,11 @@ TEST_F(TakeoffTestFixture, FullTakeoffFlowReachesTakeoff) {
     mod.update(0.1, state.get());
 
     // After reaching hold-short, TakeoffRequest -> TakeoffClearance ->
-    // PrepToTakeRunway -> (aligned) -> TakeRunway -> (auto) -> Takeoff
-    // The StubATC immediately grants clearance, so we should be past HoldShort.
+    // PrepToTakeRunway -> (aligned) -> TakeRunway -> (auto) -> Takeoff.
+    // STAB-E9: the clearance is latched by the subscription handler and
+    // processed on the NEXT update (re-entrancy safety), so one extra
+    // tick is required to consume it.
+    mod.update(0.1, state.get());
     EXPECT_NE(mod.state(), TakeoffState::HoldShort);
     EXPECT_NE(mod.state(), TakeoffState::Taxi);
 }

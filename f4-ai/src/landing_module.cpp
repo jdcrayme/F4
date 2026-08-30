@@ -39,18 +39,84 @@ LandingModule::LandingModule()
     air_steering.bank_gain = 1.2;
     air_steering.max_bank_rad = 0.44;    // ~25 deg: enough to close lateral S-turns
     air_steering.roll_gain = 3.0;
-    air_steering.vs_gain = 5.0;
+    // STAB-E43: vs_gain 4.0 -> 1.5 (the calm treatment that fixed the
+    // pattern and enroute loops). The 4.0 tune was validated on
+    // landing_only, which spawns SETTLED on the beam — the E2E final
+    // hands over mid-oscillation and 4.0 (200 ft of beam error = 800
+    // fpm of command through the ~10 s effective FCS+airframe lag)
+    // GREW the cycle: ±3,500 fpm around the beam, threshold crossed
+    // 1,540 ft high (fix15 t=1144-1203). With the STAB-E6 beam ff
+    // carrying the descent rate, the loop only needs to trim residuals.
+    air_steering.vs_gain = 1.5;
+    // STAB-E18: 900 -> 1400. The beam feedforward alone is -980 fpm at
+    // 185 kts on a 3-deg beam; with the VS cap at 900 the law could never
+    // command even the beam's own rate, so a correctly-tracked final
+    // drifted slowly high with no authority to correct (the ride floats
+    // until the alt error grows the E10 window past the cap). The cap
+    // must exceed |beam ff| + the correction window: -980 - 300 = -1280.
     air_steering.max_vs_fpm = 1400.0;
-    air_steering.path_gain = 0.00008;
-    air_steering.gamma_corr_limit = 0.07;
+    // STAB-E10: base correction window ±300 fpm around the beam
+    // feedforward, scaling up with altitude error (see air_steering.cpp).
+    // Tight near the beam (smooth ride), full ±900 authority for a
+    // from-below capture.
+    air_steering.vs_corr_max_fpm = 300.0;
+    // STAB-E1: path_gain raised from 0.00008 to 0.0004 (5x) — the VS-error
+    // damping term is what arrests the phugoid. At 0.00008 a 2,000 fpm VS
+    // error produced 0.016 rad (~0.9 deg) of correction: nothing. The
+    // on_glideslope trace showed the aircraft crossing the beam with
+    // +2,811 fpm and the law unable to flatten it — it sailed 466 ft
+    // high, reversed, and dove at -6,200 fpm into the flare.
+    air_steering.path_gain = 0.0006;
+    air_steering.gamma_corr_limit = 0.10;
+    // STAB-E1: attitude_gain lowered 1.2 -> 0.9 and pitch_rate_damp raised
+    // 0.3 (class default) -> 0.5. The final tune's 1.2 with the FCS G-lag
+    // injected more energy per cycle than the damping removed: the zoom
+    // reached +10,441 fpm / 43 deg pitch at 150 kts (alpha 14-18, riding
+    // the stall cliff). Slower stick + more rate damping settles the beam.
+    // STAB-E12: raised 0.9 -> 1.3 after E10 tamed the VS commands — with
+    // bounded corrections the loop can afford firmer pitch authority,
+    // which it needs to arrest -2,400 fpm dive transients (at 0.9 a 13-deg
+    // pitch error produced only 0.2 stick ≈ +0.3 G — too weak to flatten
+    // a beam-crossing overshoot before the next one).
+    // STAB-E39/E47: pitch-tracking authority. With the E29 slew, E34 beam
+    // ff, E44 phase-lead damper and E46 energy damper all in place the
+    // loop is stable in its linear band, but at attitude_gain 0.8 the
+    // pitch TRACKS poorly: the beam ride floated 150-350 ft high because
+    // an 11-deg pitch error produced only 0.16 stick — not enough push
+    // to unwind the FCS pitch integrator (fix20 t=1204-1216: command
+    // -1,400 fpm, actual -200, pitch stuck at +7.6 deg). 1.2 restores
+            // tracking; the dampers (not this gain) carry the stability.
     air_steering.attitude_gain = 1.2;
-    // speed_damp reduced from 0.002 (default) to 0.0005 — at 0.002, a 70 kt
-    // speed error (aircraft at 230 kts, target 160) produced 8° of nose-down
-    // trim, overwhelming the altitude cascade's climb command and driving
-    // the aircraft into the ground during ProceedToFix. At 0.0005, the same
-    // error produces 2° — a gentle nose-down trim.
-    air_steering.speed_damp_rad_per_kt = 0.0005;
-    air_steering.throttle_min = 0.0;
+    air_steering.pitch_rate_damp = 0.8;
+    // STAB-E1: speed_damp restored from 0.0005 toward the class default.
+    // The 0.0005 reduction was a workaround for the P-only throttle law's
+    // steady-state error; with the throttle integral (Phase 2d) that error
+    // is gone, and 0.0005 removed the phugoid damping this channel
+    // provides. 0.0012 keeps a gentle trim while damping.
+    // STAB-E44: 0.0012 -> 0.0030. In the phugoid the speed LEADS the
+    // vertical speed by ~90 deg, so a pitch trim proportional to speed
+    // error is a true phase-LEAD damper — the one actuator in this
+    // architecture whose phugoid-frequency response is not consumed by
+    // the ~10 s effective FCS+airframe delay that turns every VS-error
+    // correction into a pump (fix16: the final rode a growing ±5,300 fpm
+    // cycle at the natural ~42 s period and ballooned to 2,000 ft over
+    // the threshold). At ±25 kt phugoid swings this gives ±5.6 deg of
+    // anti-phase trim. The throttle PI holds the mean speed, so the
+    // channel only ever sees the oscillation.
+    air_steering.speed_damp_rad_per_kt = 0.0030;
+    // STAB-E1: softer speed loop on final — the default P gain swung the
+    // throttle 0.04 -> 1.00 rail-to-rail on the phugoid's ±40 kt speed
+    // swings, pumping the oscillation. Softer P + tighter integral clamp.
+    air_steering.throttle_gain = 0.004;
+    air_steering.throttle_integral_max = 0.2;
+    // STAB-E31: throttle_mid for the final tune: 0.55. The beam descent
+    // at 185 kts in the drag bucket trims ~0.5; the earlier 0.78 (level
+    // flight trim) plus the 0.2 integral range floored the throttle at
+    // 0.58 — the jet stayed fast and high, and the E46 damper's chops
+    // banged the engine 0.08 <-> 1.00 (fix19 t=1208-1240). 0.55 centers
+    // the PI on the actual beam-ride trim.
+    air_steering.throttle_mid = 0.55;
+    air_steering.throttle_min = 0.0;   // per-call floors (STAB-E36) govern
 
     // Pattern tune: same cascade, steeper bank + more gamma authority.
     // At 200 kts a 35-deg bank turns with ~5,000 ft radius — the pattern
@@ -60,11 +126,62 @@ LandingModule::LandingModule()
     // gamma_corr_limit matters too: in a 35-deg bank only ~82% of the
     // lift holds the vertical — the 0.07 rad final-approach cap cannot
     // cover that and the turns sank 2,000+ ft.
+    //
+    // STAB-E19: calm pattern tune (the STAB-E15 treatment that fixed the
+    // enroute phugoid). The previous overrides kept the final tune's
+    // attitude_gain 1.3 + vs_gain 4.0 with max_vs 2000 and only
+    // path_gain 0.0002 of VS-error damping — the exact gain combination
+    // STAB-E15 identified as the bang-bang limit cycle driver. The
+    // pattern trace showed it: downwind commanded ±2,000 fpm through a
+    // ~2 s FCS lag with 0.0002 of damping, porpoising ±25 deg pitch /
+    // ±7,000 fpm around a 1,500 ft target for the whole leg (t=730-1040),
+    // arriving at the base turn 3,500 ft high — which then blew every
+    // intercept. Same cure as enroute: slow the authority, strengthen
+    // the damping.
     pattern_steering = air_steering;
-    pattern_steering.max_bank_rad = 0.62;        // ~35.5 deg
-    pattern_steering.gamma_corr_limit = 0.25;
-    pattern_steering.path_gain = 0.0002;
-    pattern_steering.max_vs_fpm = 2000.0;        // jet pattern descents
+    pattern_steering.max_bank_rad = 0.40;        // ~23 deg — STAB-E49:
+                                        // the fix40-48 series proved this
+                                        // airframe's slow alpha response
+                                        // cannot hold gamma in sustained
+                                        // 30+ deg banks (vertical nz =
+                                        // nz*cos(phi) goes marginal, the
+                                        // pitch loop cannot arrest the
+                                        // sink through the FCS integrator
+                                        // lag, and every deep-banked turn
+                                        // ends in a −5,000..−11,000 fpm
+                                        // spiral-dive half-cycle). 23 deg
+                                        // needs only 1.09 G — inside
+                                        // authority with margin, and the
+                                        // pattern's PLANE-crossing captures
+                                        // absorb the wider turn radius by
+                                        // design (base_turn/capture/upwind
+                                        // geometry widened to match).
+    // STAB-E28: gamma_corr_limit 0.25 -> 0.10 (the final tune's value).
+    // The 0.25 override turned the VS-error damper into a ±14-deg
+    // gamma RELAY: it saturated at any VS error over ~420 fpm (which is
+    // always, during any capture) and the bang-bang through the ~2-3 s
+    // FCS G-lag sustained a ±4,000-8,000 fpm limit cycle through the
+    // whole pattern (fix2 trace: base dive -8,448 then zoom +3,969;
+    // downwind riding 1,200 ft above target). A saturating damper is
+    // WORSE than a small linear one — the calm enroute tune never
+    // widened this limit and it is the one loop that tracks cleanly.
+    pattern_steering.gamma_corr_limit = 0.10;
+    pattern_steering.attitude_gain = 0.8;
+    pattern_steering.pitch_rate_damp = 0.8;
+    pattern_steering.vs_gain = 2.0;
+    pattern_steering.path_gain = 0.0006;
+    pattern_steering.max_vs_fpm = 1500.0;        // calm jet pattern descents
+    // STAB-E31: pattern mid covers the flap-1/2 downwind through the
+    // gear+full-flap base/intercept; the integral covers the rest.
+    pattern_steering.throttle_mid = 0.65;
+    pattern_steering.throttle_integral_max = 0.25;
+    pattern_steering.throttle_min = 0.0;  // per-call floors (STAB-E36) govern
+    // STAB-E44: phase-lead phugoid damper (see the final-tune comment).
+    pattern_steering.speed_damp_rad_per_kt = 0.0025;
+    // STAB-E48: aggressive balloon guard for the pattern legs — chopping
+    // their zooms early is what keeps the ±5,000-11,000 fpm swings down
+    // (fix23's base leg after the guard was raised for the final).
+    pattern_steering.balloon_guard_fpm = 200.0;
 }
 
 fsm::StateMachine<LandingState, LandingEvent>
@@ -121,12 +238,40 @@ LandingModule::build_sm()
         .on(LandingState::InterceptFinal, LandingState::OnFinal,
             LandingEvent::Established,
             nullptr, nullptr, "established_on_final")
+        // STAB-E21: the establish-floor safety valve. Without this
+        // transition the GoAround event fired by check_established() had
+        // no matching edge and the aircraft flew 53 miles away in
+        // InterceptFinal (fix1 trace t>1110).
+        .on(LandingState::InterceptFinal, LandingState::GoAround,
+            LandingEvent::GoAround,
+            nullptr, nullptr, "intercept_not_established_in_time")
         .on(LandingState::OnFinal, LandingState::Flare,
             LandingEvent::Flare,
             nullptr, nullptr, "flare_height")
         .on(LandingState::OnFinal, LandingState::GoAround,
             LandingEvent::GoAround,
             nullptr, nullptr, "missed_approach")
+        // STAB-E3: the Flare state previously had NO exit except Touchdown
+        // (on_ground_). The Phase C4 energy-managed flare law can command a
+        // climb-away when the predicted touchdown is outside the runway —
+        // but without this transition the aircraft climbed away FOREVER,
+        // still in Flare, never touching down and never going around
+        // (observed: 200k ticks stuck in Flare). A missed prediction during
+        // the flare must re-fly the approach, not hover.
+        .on(LandingState::Flare, LandingState::GoAround,
+            LandingEvent::GoAround,
+            nullptr, nullptr, "flare_missed_prediction")
+        // STAB-E24: after a go-around, a pattern-mode aircraft re-enters
+        // the pattern LOCALLY (crosswind corner -> downwind -> base ->
+        // final) instead of hauling 55,000 ft back to the far entry fix.
+        // The old GoAround->ProceedToFix cycle burned 3+ minutes per
+        // re-attempt (observed: 6+ cycles in the E2E trace, none of which
+        // converged). Straight-in mode keeps the entry-fix re-fly.
+        .on(LandingState::GoAround, LandingState::PatternDownwind,
+            LandingEvent::Reintercept,
+            nullptr,
+            [this]() { return fly_traffic_pattern; },
+            "climbed_to_pattern_altitude_reenter_downwind")
         .on(LandingState::GoAround, LandingState::ProceedToFix,
             LandingEvent::Reintercept,
             nullptr, nullptr, "climbed_to_pattern_altitude")
@@ -155,9 +300,15 @@ LandingModule::build_sm()
             // capture — see check_fix_reached).
             fix_timer_ = 0.0;
         })
-        .on_enter(LandingState::PatternDownwind, [this](const LandingEvent&) {
+        .on_enter(LandingState::PatternDownwind, [this](const LandingEvent& ev) {
             pattern_timer_ = 0.0;
-            pattern_leg_ = 0;  // upwind overfly first
+            // Fresh pattern entry (PatternEntry) starts the overhead join
+            // at the upwind leg. A local RE-ENTRY after a go-around
+            // (Reintercept) starts at the crosswind corner: the aircraft
+            // is already low over the field having just gone around, and
+            // re-flying the upwind overfly would drag it 14,000 ft past
+            // the far end first. STAB-E24.
+            pattern_leg_ = (ev == LandingEvent::Reintercept) ? 1 : 0;
         })
         .on_enter(LandingState::PatternBase, [this](const LandingEvent&) {
             pattern_timer_ = 0.0;
@@ -170,6 +321,29 @@ LandingModule::build_sm()
                 req.runway_id = runway_id_;
                 req.approach_type = "VISUAL";
                 bus_->publish(req);
+            }
+        })
+        .on_enter(LandingState::Flare, [this](const LandingEvent&) {
+            // STAB-E3: start the flare timeout clock (see check_touchdown).
+            flare_timer_ = 0.0;
+        })
+        .on_enter(LandingState::TaxiIn, [this](const LandingEvent&) {
+            // STAB-E25: skip taxi-in waypoints that are already BEHIND the
+            // aircraft. The derived taxi-in route starts at the threshold
+            // (the takeoff position), but the rollout typically ends
+            // 2,000-5,000 ft PAST it — following route[0] would command a
+            // 180-degree turn on the runway and a back-taxi to the far
+            // end before heading to parking. Instead, advance to the first
+            // waypoint ahead of the nose so the aircraft exits forward.
+            // (Always keeps at least the final waypoint: the parking spot.)
+            const double hx = std::sin(current_heading_rad_);
+            const double hy = std::cos(current_heading_rad_);
+            while (taxi_wp_index_ + 1 < taxi_in_route_.size()) {
+                const auto& wp = taxi_in_route_[taxi_wp_index_];
+                const double ahead = (wp.x - current_position_.x) * hx
+                                  + (wp.y - current_position_.y) * hy;
+                if (ahead >= 0.0) break;
+                ++taxi_wp_index_;
             }
         })
         .on_enter(LandingState::GoAround, [this](const LandingEvent&) {
@@ -211,8 +385,12 @@ void LandingModule::initialize(std::uint64_t ownship_id,
         threshold_alt_ft_ = msg.threshold_altitude_ft;
         glide_slope_angle_rad_ = msg.glide_slope_angle_rad;
         pattern_altitude_ft_ = msg.pattern_altitude_ft;
+        // STAB-E9: latch instead of inline sm_.process() — the StubATC
+        // answers synchronously inside publish(), which can originate
+        // from our own sm_.reset() entry action (RequestApproach), making
+        // an inline process() re-entrant (UB). Drained at update() top.
         if (sm_.current() == LandingState::RequestApproach) {
-            sm_.process(LandingEvent::ApproachGranted);
+            deferred_event_ = LandingEvent::ApproachGranted;
         }
     });
 
@@ -224,6 +402,15 @@ void LandingModule::initialize(std::uint64_t ownship_id,
 
     // Re-fire the RequestApproach entry action now that bus_ is set.
     sm_.reset();
+
+    // STAB-E9: same deferred-clearance drain as TakeoffModule — the
+    // StubATC answers inside the publish chain; process the latched
+    // event now that reset() has returned (outside any SM frame).
+    if (deferred_event_) {
+        const auto ev = *deferred_event_;
+        deferred_event_.reset();
+        sm_.process(ev);
+    }
 }
 
 // ============================================================================
@@ -233,8 +420,19 @@ void LandingModule::initialize(std::uint64_t ownship_id,
 AIControlOutput LandingModule::update(double dt, const flight::IAircraftState* state)
 {
     cache_aircraft_state(state);
+    // STAB-E9: drain any clearance event latched by a subscription handler
+    // (see initialize). Safe here — outside any sm_ frame.
+    if (deferred_event_) {
+        const auto ev = *deferred_event_;
+        deferred_event_.reset();
+        sm_.process(ev);
+    }
     fix_timer_ += dt;
     pattern_timer_ += dt;
+    // STAB-E3: flare timeout clock (see check_touchdown).
+    if (sm_.current() == LandingState::Flare) {
+        flare_timer_ += dt;
+    }
 
     for (int iter = 0; iter < 8; ++iter) {
         const auto before = sm_.current();
@@ -299,19 +497,16 @@ AIControlOutput LandingModule::update(double dt, const flight::IAircraftState* s
             // Phase B3 (FLIGHT_CONTROL_NEXT_STEPS.md §4 Phase B3): ride the
             // beam EXACTLY. Previously this used an 8% undershoot bias
             // (0.92 * (beam - threshold_alt)) as a workaround for slow
-            // localizer convergence — the localizer law (Phase B1's 0.5 rad
-            // clamp) saturated at 333 ft cross-track and couldn't close a
-            // large intercept offset, so the aircraft arrived at the
-            // threshold laterally off-center. With B1 (clamp raised to
-            // 0.87 rad) and B2 (intercept lead for > 1000 ft offsets), the
-            // localizer converges fast enough that the bias is no longer
-            // needed — and the bias itself was the cause of "lands short"
-            // symptoms (riding 8% below the beam = touching down 8% short
-            // of the aim point at the flare).
-            const double dist = std::max(0.0, -course_along_ft());
-            const double beam = threshold_alt_ft_
-                + dist * std::tan(glide_slope_angle_rad_);
-            return track_final(beam, approach_speed_kts);
+            // localizer convergence.
+            //
+            // STAB-E6b: use glide_slope_alt_ft() (which zeros at the aim
+            // point beam_aim_offset_ft PAST the threshold), NOT the inline
+            // threshold-referenced beam. The inline version put 0 ft AGL at
+            // the threshold itself, steering the flare INTO the pavement
+            // edge — a direct contributor to "lands short". The aim-point
+            // beam puts ~130 ft of crossing height over the threshold,
+            // like a real ILS.
+            return track_final(glide_slope_alt_ft(), approach_speed_kts);
         }
         case LandingState::Flare:           return controls_for_flare();
         case LandingState::Rollout:         return controls_for_rollout();
@@ -376,27 +571,39 @@ double LandingModule::glide_slope_alt_ft() const {
 double LandingModule::localizer_heading_rad() const {
     // Phase B2 (FLIGHT_CONTROL_NEXT_STEPS.md §4 Phase B2): when far from the
     // centerline (|xtrack| > intercept_offset_ft), command heading directly
-    // toward a point `intercept_lead_ft` ahead on the centerline. This is
-    // the standard ILS intercept geometry — at large offset the proportional
-    // localizer law (Phase B1: max corr 0.87 rad) saturates at ~580 ft and
-    // can't close a 1000+ ft intercept offset fast enough. Aiming at a point
-    // ahead closes it geometrically.
+    // toward a point ahead on the centerline. Standard ILS intercept
+    // geometry — at large offset the proportional localizer law saturates
+    // and can't close the gap.
     //
-    // Near the centerline (|xtrack| <= intercept_offset_ft), use the standard
-    // proportional localizer correction. The transition is continuous: at
-    // |xtrack| = intercept_offset_ft the bearing-to-aim-point equals the
-    // saturated proportional correction (within ~5 deg), so there's no step.
+    // STAB-E20: the lead distance now SCALES with the cross-track
+    // (lead = max(intercept_lead_ft, intercept_lead_ratio * |xtrack|)),
+    // bounding the intercept cut at ~27 deg for any offset. The previous
+    // fixed 1,500 ft lead commanded atan2(3279/1500) = 65 deg cuts — the
+    // base->final handoff at 3,279 ft dove across the localizer at 65
+    // deg, overshot to +5,000 ft, and S-turned the whole final away
+    // (digi_full_mission t=1087-1150). A 27-deg cut closes the same
+    // offset in ~6,700 ft of track and rolls out NEAR the course instead
+    // of across it. The floor keeps small offsets from commanding
+    // near-perpendicular cuts (at 400 ft: atan2(400/1500) = 15 deg,
+    // continuous with the proportional law just below).
     const double xtrack = course_lateral_ft();
     if (std::abs(xtrack) > intercept_offset_ft) {
         // bearing from the aircraft's current position to the aim point
-        // (a point `intercept_lead_ft` ahead on the centerline, relative
-        // to the aircraft's projection onto the centerline).
+        // (a point ahead on the centerline, relative to the aircraft's
+        // projection onto the centerline).
         // -xtrack = toward centerline (positive lateral offset => steer left)
-        // intercept_lead_ft = forward along the course
-        const double bearing_to_aim = std::atan2(-xtrack, intercept_lead_ft);
+        // lead = forward along the course
+        const double lead = std::max(intercept_lead_ft,
+                                     intercept_lead_ratio * std::abs(xtrack));
+        const double bearing_to_aim = std::atan2(-xtrack, lead);
         return runway_heading_rad_ + bearing_to_aim;
     }
     // Right of centerline (lateral > 0) -> steer left (subtract correction).
+    // STAB-E20: gain softened 0.0015 -> 0.0009 so the near-course law's
+    // command at the intercept_offset boundary (400 ft: 0.36 rad = 21 deg)
+    // is continuous with the scaled-lead law's cut there (~15 deg) — the
+    // old 0.0015 gain produced a 34-deg command at the boundary, a bank
+    // step UP right where the intercept should be relaxing.
     const double corr = std::clamp(localizer_gain * xtrack,
                                    -max_localizer_corr_rad, max_localizer_corr_rad);
     return runway_heading_rad_ - corr;
@@ -477,6 +684,15 @@ void LandingModule::check_fix_reached() {
 }
 
 void LandingModule::check_pattern_downwind() {
+    // STAB-E33: ground-contact recovery — if the aircraft is DRIVING on
+    // the ground at speed (a botched turn sank it onto the deck and the
+    // EOM ground clamp can hold a low-alpha jet pinned at 200+ kts),
+    // transition to GoAround: its fixed climb-out law commands rotation
+    // like a takeoff and flies it off.
+    if (on_ground_ && current_vcas_kts_ > 80.0) {
+        sm_.process(LandingEvent::GoAround);
+        return;
+    }
     // Three-leg walker with PLANE-CROSSING captures on the runway
     // along/lateral axes. A fast jet at 250 kts turns with a ~13,000 ft
     // radius, so the corners are arcs that bulge well past the corner
@@ -517,6 +733,21 @@ void LandingModule::check_pattern_base() {
         sm_.process(LandingEvent::GoAround);
         return;
     }
+    // STAB-E33: same ground-contact recovery as the downwind walker.
+    if (on_ground_ && current_vcas_kts_ > 80.0) {
+        sm_.process(LandingEvent::GoAround);
+        return;
+    }
+    // STAB-E42: base->final HEALTH gate — only start the final turn when
+    // the aircraft is energy-stable. The capture fired mid-recovery in
+    // fix14 (lat -12,016 crossed while sinking -7,400 at 820 ft after a
+    // guardian zoom) and handed the intercept an 820 ft/282 kt mess it
+    // could not save. Unstable = keep flying the base leg (safe, it
+    // points away from the threshold) until settled; the along > 0
+    // valve above still bounds the leg.
+    if (std::abs(current_vs_fpm_) > 2500.0 || current_alt_agl_ft_ < 700.0) {
+        return;
+    }
     // Base -> final turn when close enough to the extended centerline.
     if (std::abs(course_lateral_ft()) < base_capture_lateral_ft) {
         sm_.process(LandingEvent::BaseComplete);
@@ -534,21 +765,43 @@ void LandingModule::check_established() {
         sm_.process(LandingEvent::GoAround);
         return;
     }
+    // STAB-E21: not established by this close-in floor = the intercept is
+    // not converging — go around cleanly instead of dragging a 90-deg
+    // crosser through the missed-approach plane (observed: OnFinal entry
+    // at 82 deg heading 15.8k out, threshold overflown at 1,905 ft AGL,
+    // 1,285 ft off centerline).
+    if (course_along_ft() > -establish_floor_ft) {
+        sm_.process(LandingEvent::GoAround);
+        return;
+    }
+    // STAB-E22: the heading gate now references the RUNWAY heading, not
+    // localizer_heading_rad(). The old check compared the aircraft's
+    // heading to the INTERCEPT heading — which itself contains up to 65
+    // deg of lead — so an aircraft still 3,279 ft off-course diving at
+    // the localizer at a 65-deg cut was "established" (65-deg cut vs
+    // 65-deg command = 0 error). Established must mean ROLLED OUT on the
+    // course: heading within tolerance of the runway heading.
     const double hdg_err = std::abs(AirSteering::heading_error(
-        localizer_heading_rad(), current_heading_rad_));
-    // Pattern mode engages the final earlier (wider tolerances): the
-    // localizer + beam law is damped and flies the straight-in's LONG
-    // final rock-solid, so giving it the last of the intercept S-turn
-    // leaves plenty of track to settle. With the tight straight-in gate
-    // the pattern established only 6-10k ft out, still high and
-    // oscillating.
-    const double hdg_tol = fly_traffic_pattern
-                               ? std::max(establish_hdg_tol_rad, 0.35)
-                               : establish_hdg_tol_rad;
+        runway_heading_rad_, current_heading_rad_));
+    // Pattern mode still gets a wider lateral tolerance (the base->final
+    // turn hands over on a converging cut, not a centered track), but the
+    // heading gate is the same: aligned is aligned.
     const double lat_tol = fly_traffic_pattern
-                               ? std::max(establish_lateral_ft, 1500.0)
+                               ? std::max(establish_lateral_ft, 1000.0)
                                : establish_lateral_ft;
-    if (hdg_err < hdg_tol && std::abs(course_lateral_ft()) < lat_tol) {
+    // STAB-E23: vertical gate — established means on the BEAM too, and
+    // (STAB-E45) SETTLED: |vs| < 900. The old gate handed OnFinal a
+    // +280 ft / +1,800 fpm climbing transient at 15k ft out (fix17);
+    // the calm final needs ~30 s to damp such a transient and 15,000 ft
+    // of track is only ~45 s — the balloon peaked +1,500 ft above the
+    // beam and the threshold was crossed at 1,300 ft. Refusing unsettled
+    // handoffs keeps the ride in its linear band from the first second.
+    const double beam_err = std::abs(current_alt_msl_ft_ - glide_slope_alt_ft());
+    const double settle_err = std::abs(current_vs_fpm_ + 0.0);
+    if (hdg_err < establish_hdg_tol_rad &&
+        std::abs(course_lateral_ft()) < lat_tol &&
+        beam_err < 300.0 &&
+        settle_err < 900.0) {
         sm_.process(LandingEvent::Established);
     }
 }
@@ -564,12 +817,51 @@ void LandingModule::check_flare_or_goaround() {
         sm_.process(LandingEvent::GoAround);
         return;
     }
+    // STAB-E11: stable-approach gate. Flare entry requires being within
+    // the near-runway environment: reaching flare HEIGHT this far out
+    // means the approach is unstable (observed: crossing 60 ft AGL at
+    // 9,500 ft short while still 200 ft below the beam — the flare law
+    // cannot salvage that and touchdown would be far short of the
+    // pavement). Go around and re-fly instead of flaring at the grass.
     if (current_alt_agl_ft_ < flare_agl_ft) {
-        sm_.process(LandingEvent::Flare);
+        if (course_along_ft() > -missed_along_ft) {
+            sm_.process(LandingEvent::Flare);
+        } else {
+            sm_.process(LandingEvent::GoAround);
+        }
     }
 }
 
 void LandingModule::check_touchdown() {
+    // STAB-E3: safety valve — if we somehow gained altitude back during the
+    // flare (balloon) or the sink is unrecoverable and the predicted
+    // touchdown has left the runway, go around and re-fly. Without this the
+    // Flare state had no exit except wheels-on (see the SM transition note).
+    if (current_alt_agl_ft_ > flare_agl_ft * 2.0 && current_vs_fpm_ > 0.0) {
+        sm_.process(LandingEvent::GoAround);
+        return;
+    }
+    // Overflew the threshold airborne during the flare (long-float
+    // case): go around rather than touching down halfway down the runway.
+    // STAB-E55: the flare-state bound is missed_along + flare_overrun_ft
+    // (NOT the bare missed plane): a legitimate flare can begin as late
+    // as ~+2,300 along (60 ft AGL happens near the aim point when riding
+    // slightly high) and still touch down with thousands of feet of
+    // pavement remaining — the bare +2,500 plane insta-aborted those
+    // 0.6 s after flare entry (straight-in fix30). OnFinal's own
+    // threshold-overflight check (check_flare_or_goaround) still uses
+    // the bare missed plane: airborne at +2,500 ABOVE flare height is a
+    // genuine missed approach.
+    if (course_along_ft() > missed_along_ft + flare_overrun_ft) {
+        sm_.process(LandingEvent::GoAround);
+        return;
+    }
+    // Flare timeout: still airborne well below flare height for >15 s means
+    // the flare law is holding the aircraft off — go around.
+    if (flare_timer_ > 15.0) {
+        sm_.process(LandingEvent::GoAround);
+        return;
+    }
     if (on_ground_) {
         sm_.process(LandingEvent::Touchdown);
     }
@@ -616,37 +908,109 @@ AIControlOutput LandingModule::controls_for_proceed_to_fix() const {
     // after a go-around — the VS cascade descends from above or climbs
     // back up from below; do not pin the target to the current altitude,
     // a low aircraft could never climb away).
-    return air_steering.steer(desired, pattern_altitude_ft_,
-                              approach_speed_kts, air_input());
+    // STAB-E19: flown with the CALM pattern tune, not the final tune —
+    // the final's attitude_gain 1.3 + the ±300 beam-ride correction
+    // window is tuned for riding a 3-deg beam, not for a 10,000+ ft
+    // re-positioning leg; with it this state still rang ±3,000 fpm
+    // (t=1860-1990 of the baseline trace).
+    return pattern_steering.steer(desired, pattern_altitude_ft_,
+                                  approach_speed_kts, air_input());
 }
 
 AIControlOutput LandingModule::controls_for_pattern_downwind() const {
     // Fly the current pattern leg. Gear stays up until the base turn.
-    // On the downwind leg (2) begin the pattern descent — the base leg
-    // alone is too short (~20 s) to lose both the altitude and the
-    // speed; arriving high and fast at the base->final turn is what
-    // blew every intercept radius estimate so far.
-    const double target_alt = (pattern_leg_ == 2)
-                                  ? base_target_alt_ft() + 600.0
-                                  : pattern_altitude_ft_;
+    //
+    // STAB-E32: the descent is one CONTINUOUS beam-parallel slope, not
+    // stepped altitudes. The old law stepped the target 1,500 (pattern)
+    // -> 900 (base, fixed AGL) -> beam (intercept): each step was a VS
+    // transient the phugoid-prone cascade amplified, and the base->beam
+    // step arrived while already low and turning (the deck dives).
+    // Riding beam+offset from the downwind on, every leg's target moves
+    // at the SAME -3 deg slope the final will fly — the loop stays near
+    // trim the whole way down.
+    //
+    // STAB-E26: MANEUVERING FLAPS from the downwind leg (leg 2) onward.
+    // The pattern turns at 200-230 kts CLEAN ride the model's clean
+    // stall boundary in a 35-deg bank (~200 kts effective) — half TEF
+    // + some LEF drops the stall ~25 kts and makes the turns
+    // comfortable; full landing flaps come on the base leg.
+    // STAB-E32/E38: the pattern holds the PATTERN ALTITUDE from the join
+    // through the base leg; the DESCENT to the beam happens entirely on
+    // the intercept (its target already follows the beam down from the
+    // pattern altitude — at 28,000 ft out the 3-deg beam IS ~1,500 ft,
+    // so the handoff is seamless). The earlier beam-parallel downwind
+    // (beam+600) dragged the target to ~600 ft AGL over the field —
+    // 19,000 ft from the threshold on the wrong side of the aim point,
+    // where the beam reference is meaningless — and the residual phugoid
+    // flew it to 7 ft AGL (fix11 trace t=1004-1016).
+    //
+    // STAB-E26/E33: maneuvering flaps from the CROSSWIND turn (leg 1) on.
     const double desired = AirSteering::bearing_to(current_position_,
                                                    pattern_leg_target());
-    return pattern_steering.steer(desired, target_alt,
-                                  pattern_speed_kts, air_input());
+    // STAB-E36 throttle floors (recalibrated E41 after reading the engine
+    // model: throttle maps 0..1 = idle..MIL, so the drag-bucket trim at
+    // approach speed is ~0.15-0.25, NOT the 0.35-0.5 first guessed —
+    // those floors held the aircraft at 250-280 kts through the whole
+    // pattern and final): 0.10 through the join (bleed the arrival
+    // speed), 0.15 downwind, 0.20 in the landing configuration (mild
+    // energy insurance; the sink guardian catches the terminal case).
+    const double thr_floor = (pattern_leg_ == 0) ? 0.10
+                           : (pattern_leg_ == 1) ? 0.15 : 0.15;
+    AIControlOutput out = pattern_steering.steer(desired, pattern_altitude_ft_,
+                                  pattern_speed_kts, air_input(),
+                                  thr_floor);
+    // The crosswind corner enters a 34-deg bank at 215+ kts CLEAN —
+    // nz available at the trim alpha is ~0.85 vs the 1.2 the turn needs,
+    // and the aircraft fell out of the turn at -8,900 fpm onto the deck
+    // (fix6 trace t=916-935: tef 0.00, nzcgs 0.79, phi -34). Half flaps
+    // + LEF restores the margin for EVERY pattern turn after the join.
+    if (pattern_leg_ >= 1) {
+        out.tef_cmd = 0.5;   // maneuvering flaps
+        out.lef_cmd = 0.3;
+    }
+    // STAB-E33: GPWS-style sink guardian — the turn-entry sink developed
+    // -8,900 fpm from 1,700 ft and no state logic noticed. Low + sinking
+    // hard = unconditional max climb (wings level, MIL) until the sink
+    // breaks. A target-altitude law cannot arrest a dynamic sink; this
+    // can. (fix9: -2,257 fpm at 600 ft slipped past a -2,500 threshold
+    // and rode it to 39 ft — tightened to -1,800.)
+    if (current_alt_agl_ft_ < 1400.0 && current_vs_fpm_ < -1800.0) {
+        out.pitch_cmd = std::clamp(2.5 * (0.21 - current_pitch_rad_), -0.1, 0.5);
+        out.roll_cmd = std::clamp(-2.0 * current_roll_rad_, -0.3, 0.3);
+        out.throttle_cmd = 1.0;
+    }
+    return out;
 }
 
 AIControlOutput LandingModule::controls_for_pattern_base() const {
-    // Base leg: steer toward the extended-centerline aim point while
-    // descending to the base altitude; gear down for the landing. Fly it
-    // SLOWER than the pattern legs — the base->final turn radius must
-    // fit the capture geometry, and at 250 kts it is ~11,000 ft vs the
-    // ~7,600 ft at approach speed.
+    // Base leg: steer toward the extended-centerline aim point, gear +
+    // full flaps down for the landing.
+    // STAB-E32: base rides BEAM+200 (the same continuous slope the
+    // downwind started), not a fixed AGL — no target step into the
+    // base->final turn (see the downwind comment).
+    // STAB-E31: base flies at APPROACH speed, not pattern-25: with gear +
+    // full flaps the drag bucket needs the speed for pull authority.
     const double desired = AirSteering::bearing_to(current_position_,
                                                    base_aim_point());
-    AIControlOutput out = pattern_steering.steer(desired, base_target_alt_ft(),
-                                                 pattern_speed_kts - 25.0,
-                                                 air_input());
+    // STAB-E38: base holds the PATTERN ALTITUDE (min with beam+100 for
+    // the rare shallow-beam case) — the descent to the beam belongs to
+    // the intercept alone (see the downwind comment). No beam ff here:
+    // the target is level.
+    AIControlOutput out = pattern_steering.steer(desired,
+                                                 std::min(pattern_altitude_ft_,
+                                                          glide_slope_alt_ft() + 100.0),
+                                                 approach_speed_kts,
+                                                 air_input(),
+                                                 /*throttle_floor=*/0.20);
     out.gear_handle_down = true;
+    out.tef_cmd = landing_tef_cmd;
+    out.lef_cmd = landing_lef_cmd;
+    // STAB-E33: same sink guardian as the downwind legs.
+    if (current_alt_agl_ft_ < 1400.0 && current_vs_fpm_ < -1800.0) {
+        out.pitch_cmd = std::clamp(2.5 * (0.21 - current_pitch_rad_), -0.1, 0.5);
+        out.roll_cmd = std::clamp(-2.0 * current_roll_rad_, -0.3, 0.3);
+        out.throttle_cmd = 1.0;
+    }
     return out;
 }
 
@@ -654,34 +1018,66 @@ AIControlOutput LandingModule::track_final(double target_alt_ft,
                                            double target_speed_kts,
                                            bool pattern_turn) const {
     // Final-track control: the shared AirSteering cascades with the cool
-    // landing tune (see the constructor). Two iterations of note:
-    //   1. The default hot cascade phugoided on final (FCS G-lag phase).
-    //   2. A pure proportional beam law (feedforward trim + beam error)
-    //      tracked but overshot BELOW the beam with no damping — the
-    //      aircraft touched down short of the runway.
-    // The damped VS cascade with cool gains + a tight VS cap is the
-    // steady hand: it flew the enroute descents cleanly.
+    // landing tune (see the constructor).
     //
-    // The INTERCEPT TURN in pattern mode is flown with the steeper
-    // pattern steering — the final's 25-deg cap turns an ~11,000 ft
-    // radius at 210+ kts and swept 8,000 ft past the centerline; the
-    // 35-deg pattern tune fits the capture geometry (~7,000 ft). But
-    // ONLY the turn: the pattern tune's 2,000 fpm cap and wide gamma
-    // authority phugoid badly on the beam itself, so OnFinal always
-    // uses the cool final tune.
+    // STAB-E6: when tracking the BEAM (OnFinal), the altitude feedforward
+    // is the beam's own descent rate at the current groundspeed. Without
+    // it, zero altitude error commanded LEVEL flight while the beam kept
+    // descending ~1,000 fpm — the aircraft floated above, then dove to
+    // re-catch, arriving at flare height with -3,000+ fpm (the
+    // on_glideslope trace). Intercept turns (pattern_turn) chase a FLOOR
+    // or pattern altitude, not the beam — feedforward 0 there.
+    AirSteering::Input in = air_input();
+    if (!pattern_turn) {
+        const double v_fps = std::max(100.0, current_vcas_kts_ * 1.68781);
+        in.vs_ff_fpm = -std::tan(glide_slope_angle_rad_) * v_fps * 60.0;
+    } else {
+        // STAB-E34: the pattern intercept rides the beam-floored target —
+        // feed the beam rate forward whenever the target is on the beam
+        // SEGMENT (not when clamped at the pattern altitude or the
+        // intercept floor, whose slope is zero).
+        const double floor_alt = threshold_alt_ft_ + intercept_floor_agl_ft;
+        const bool beam_limited = glide_slope_alt_ft() > floor_alt &&
+                                  glide_slope_alt_ft() < pattern_altitude_ft_;
+        if (beam_limited) {
+            const double v_fps = std::max(100.0, current_vcas_kts_ * 1.68781);
+            in.vs_ff_fpm = -std::tan(glide_slope_angle_rad_) * v_fps * 60.0;
+        }
+    }
     const AirSteering& steer = (pattern_turn && fly_traffic_pattern)
                                    ? pattern_steering
                                    : air_steering;
+    // STAB-E35/E36: landing-configuration floor — 0.35: enough energy to
+    // hold the beam at approach speed without diving, while still
+    // allowing the drag bucket to BLEED the pattern's arrival speed
+    // (a 0.5 floor held the aircraft at 250+ kts the whole final and it
+    // crossed the threshold 650 ft hot — fix12).
     AIControlOutput out = steer.steer(localizer_heading_rad(),
                                       target_alt_ft,
                                       target_speed_kts,
-                                      air_input());
+                                      in,
+                                      /*throttle_floor=*/0.20);
     out.gear_handle_down = true;
+    // STAB-E33/E35/E40: the sink guardian, SOFTER on the final track —
+    // no MIL (the max-climb/MIL version pumps the beam oscillation:
+    // fix12's guardian zoom carried the aircraft over the threshold 650
+    // ft high), but a REAL arrest: WINGS LEVEL (in a bank the pitch loop
+    // cannot raise the nose — the lift vector points sideways; fix13's
+    // spiral dive sank −5,200 with 1.4 G on), pitch to 12 deg, 0.7 power.
+    // (fix14: the previous +4-deg arrest was too weak for −5,000 fpm.)
+    if (current_alt_agl_ft_ < 1400.0 && current_vs_fpm_ < -2500.0) {
+        out.pitch_cmd = std::clamp(2.5 * (0.21 - current_pitch_rad_), -0.1, 0.5);
+        out.roll_cmd = std::clamp(-2.0 * current_roll_rad_, -0.3, 0.3);
+        out.throttle_cmd = std::max(out.throttle_cmd, 0.7);
+    }
     // Phase C2: extend flaps on final. The commands are held steady from
     // OnFinal entry through touchdown; the FM actuates the actual surfaces
     // at TEF_RATE/LEF_RATE (flight_model.cpp:453-454). With flaps extended
     // the stall speed drops ~30 kts, which is what allows Phase C3's
     // approach_speed_kts reduction from 210 to 160.
+    // STAB-E26: also on the INTERCEPT turn (pattern_turn) — the final turn
+    // at approach speed is on the clean stall boundary (see the downwind
+    // comment); the surfaces are already scheduled from base anyway.
     out.tef_cmd = landing_tef_cmd;
     out.lef_cmd = landing_lef_cmd;
     return out;
@@ -716,16 +1112,14 @@ AIControlOutput LandingModule::controls_for_flare() const {
 
     // Predicted touchdown point (linearized around the current state).
     //
-    // time_to_ground_s: how long until the aircraft reaches 0 ft AGL at its
-    //   current sink rate. vs_fpm is in feet per MINUTE, so dividing AGL by
-    //   vs_fpm gives minutes; multiply by 60 to get seconds. Floor |vs| at
-    //   50 fpm to avoid divide-by-zero and absurd predictions in flat flight.
-    // td_distance_ft: how far the aircraft travels horizontally in
-    //   time_to_ground_s. vcas_kts * 1.68781 converts kts to ft/s; multiply
-    //   by time_to_ground_s for feet.
-    // td_along: course_along (current along-track position) + td_distance.
-    const double vs_eff = std::max(std::fabs(current_vs_fpm_), 50.0);
-    const double time_to_ground_s = current_alt_agl_ft_ / vs_eff * 60.0;
+    // STAB-E4: use the SINK RATE (-vs_fpm), not |vs_fpm|. The previous
+    // |vs| formulation treated a CLIMB as a descent: at +50 fpm (floored)
+    // from 59 ft AGL it predicted a touchdown 19,000 ft downrange and
+    // commanded a climb-away — from a flare the aircraft had already
+    // begun. Only sink closes the distance to the ground; a climbing
+    // aircraft is not about to touch down anywhere.
+    const double sink_fpm = std::max(-current_vs_fpm_, 50.0);
+    const double time_to_ground_s = current_alt_agl_ft_ / sink_fpm * 60.0;
     const double v_fps = current_vcas_kts_ * 1.68781;
     const double td_distance_ft = time_to_ground_s * v_fps;
     const double td_along = course_along_ft() + td_distance_ft;
@@ -735,22 +1129,42 @@ AIControlOutput LandingModule::controls_for_flare() const {
     // check_flare_or_goaround() (which fires independently of this output),
     // but we set a climbing pitch + MIL throttle here so the aircraft
     // doesn't sink further while the transition is processed.
-    if (td_along > missed_along_ft || td_along < -500.0) {
+    // STAB-E54: 3-second GRACE at flare entry — the prediction at entry
+    // still reflects the beam ride's sink (-1,500 or worse) and can insta-
+    // abort a recoverable flare (straight-in fix30 run: Flare -> GoAround
+    // 0.6 s after entry with a marginally-long prediction). The flare law
+    // needs a moment to establish its own sink before the arbiter speaks.
+    // The balloon/overflight/timeout valves in check_touchdown() remain
+    // active from the first tick.
+    if (flare_timer_ > 3.0 &&
+        (td_along > missed_along_ft || td_along < -500.0)) {
         out.pitch_cmd = 0.3;    // climb away
         out.throttle_cmd = 1.0;  // MIL
         out.roll_cmd = std::clamp(-2.0 * current_roll_rad_, -0.3, 0.3);
         return out;
     }
 
-    // Modulate flare pitch by predicted-vs-aim error.
-    // - td_err > 0 (will land long): pitch up more to bleed energy
-    // - td_err < 0 (will land short): pitch up less to keep energy
-    // The /500.0 scaling gives ~1 deg of pitch adjustment per 500 ft of
-    // error, clamped to ±2 deg below the aim and +4 deg above (the flare
-    // has more authority to add drag than to remove it).
-    const double aim_along = beam_aim_offset_ft;  // 1500 ft past threshold
-    const double td_err = td_along - aim_along;
-    const double flare_pitch_adj = std::clamp(td_err / 500.0, -2.0, 4.0);  // deg
+    // Modulate the flare by SINK RATE (STAB-E8), not by the touchdown
+    // prediction. The prediction's time-to-ground diverges at small sink
+    // (floored at 50 fpm it predicted touchdowns 18,000 ft downrange from
+    // 59 ft AGL, commanding a MIL climb-away from a flare already begun —
+    // the balloon + go-around in the on_glideslope trace). A real flare
+    // targets a touchdown SINK RATE (~250 fpm) and modulates pitch to
+    // achieve it; the touchdown-point prediction above remains the
+    // go-around ARBITER only.
+    //
+    //   sink_err = target_sink - current_sink   (positive = sinking too fast)
+    //   pitch_target = flare_pitch_deg + clamp(sink_err / 300, -3, +5) deg
+    const double target_sink_fpm = -400.0;
+    // Positive sink_err = sinking faster than the target → pitch up more.
+    const double sink_err = target_sink_fpm - current_vs_fpm_;
+    double flare_pitch_adj = std::clamp(sink_err / 300.0, -3.0, 5.0);  // deg
+    // STAB-E13: small bounded trim from the touchdown-point prediction
+    // (the C4 energy idea, demoted from driver to trim). Keeps the float
+    // near the aim point: landing long → pitch up a touch more; short →
+    // relax. Bounded to ±2 deg so it can never dominate the sink law.
+    flare_pitch_adj += std::clamp((td_along - beam_aim_offset_ft) / 1000.0,
+                                  -2.0, 2.0);
     const double target = (flare_pitch_deg + flare_pitch_adj) * D2R;
     out.pitch_cmd = std::clamp(flare_pitch_gain * (target - current_pitch_rad_),
                                -0.1, 0.5);
@@ -786,14 +1200,41 @@ AIControlOutput LandingModule::controls_for_parked() const {
 }
 
 AIControlOutput LandingModule::controls_for_go_around() const {
-    // Climb away wings-level at MIL. Phase 1 treats this as terminal (no
-    // re-attempt); the sequencer keeps the module's output.
-    AIControlOutput out;
-    const double target = 12.0 * D2R;
-    out.pitch_cmd = std::clamp(2.5 * (target - current_pitch_rad_), -0.3, 0.5);
-    out.roll_cmd = std::clamp(-2.0 * current_roll_rad_, -0.3, 0.3);
-    out.throttle_cmd = 1.0;
-    out.gear_handle_down = (current_alt_agl_ft_ < 200.0);
+    // Go-around: climb straight ahead on the RUNWAY heading to just above
+    // the pattern altitude; Reintercept then hands the geometry to
+    // PatternDownwind (pattern mode, STAB-E24) or ProceedToFix.
+    //
+    // STAB-E28: the previous version (a) pinned MIL throttle while the
+    // pitch law trimmed against the resulting speed error — the aircraft
+    // accelerated to 440 kts and the speed-damp term (-16 deg of nose-down
+    // trim at 200 kts fast) dove it ±6,700 fpm at 200-500 ft AGL — and
+    // (b) steered by pure pursuit of the crosswind corner point, which
+    // at 330+ kts orbits (turn radius ≈ distance to the corner).
+    // Straight-ahead heading-hold + the speed PI is stable at any speed,
+    // and the pattern legs' PLANE-crossing captures handle the turn back.
+    //
+    // STAB-E30: below 400 ft AGL fly a FIXED max-climb law — no cascade.
+    // A go-around initiated low (deck-scrape intercept, fix3 trace: 13 ft
+    // AGL, -2,100 fpm) needs unconditional pitch-up + MIL; the cascade's
+    // damping terms (nose-down when fast / when VS exceeds command)
+    // actively fought the climb-out from 50 ft and settled the aircraft
+    // back onto the ground at 250 kts, ground-clamped forever.
+    if (current_alt_agl_ft_ < 400.0) {
+        AIControlOutput out;
+        const double target = 12.0 * D2R;
+        out.pitch_cmd = std::clamp(2.5 * (target - current_pitch_rad_), -0.3, 0.5);
+        out.roll_cmd = std::clamp(-2.0 * current_roll_rad_, -0.3, 0.3);
+        out.throttle_cmd = 1.0;
+        out.gear_handle_down = (current_alt_agl_ft_ < 100.0);
+        return out;
+    }
+    AIControlOutput out = pattern_steering.steer(
+        runway_heading_rad_, pattern_altitude_ft_ + 800.0,
+        pattern_speed_kts, air_input());
+    // Zoom-climb aid while slow only: MIL below 250 kts helps the
+    // climb-out without run-away above it.
+    if (current_vcas_kts_ < 250.0) out.throttle_cmd = 1.0;
+    out.gear_handle_down = false;
     return out;
 }
 
@@ -816,6 +1257,23 @@ AirSteering::Input LandingModule::air_input() const noexcept {
     in.vs_fpm = current_vs_fpm_;
     in.vcas_kts = current_vcas_kts_;
     in.alt_msl_ft = current_alt_msl_ft_;
+    return in;
+}
+
+AirSteering::Input LandingModule::beam_input() const noexcept {
+    // STAB-E34: air_input() + the glide beam's own descent rate as the
+    // VS feedforward. The beam-parallel pattern legs (downwind leg 2,
+    // base, intercept) ride targets that descend at the beam's own rate
+    // (~-1,000 fpm at 200 kts) — without the feedforward the loop sees a
+    // perpetually fresh altitude error, commands VS in steps, and the
+    // delay through the FCS turns every step into a phugoid half-cycle
+    // (fix7 trace: intercept VS +3,400 -> -5,400 around a beam+0 target,
+    // ending at 21 ft AGL). With the ff the command is the beam rate by
+    // construction and the loop only trims residuals — the same fix
+    // STAB-E6 applied to OnFinal.
+    AirSteering::Input in = air_input();
+    const double v_fps = std::max(100.0, current_vcas_kts_ * 1.68781);
+    in.vs_ff_fpm = -std::tan(glide_slope_angle_rad_) * v_fps * 60.0;
     return in;
 }
 

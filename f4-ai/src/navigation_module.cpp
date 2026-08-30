@@ -20,10 +20,18 @@ NavigationModule::NavigationModule()
     // oscillation) against the FCS G-command lag and never settles on the
     // route altitude — which then hands the approach off far above the
     // beam. Same lesson as the landing tune.
-    air_steering.attitude_gain = 1.5;
-    air_steering.path_gain = 0.0001;
-    air_steering.vs_gain = 5.0;
-    air_steering.max_vs_fpm = 3000.0;
+    // STAB-E15: calm enroute tune. The previous values (attitude_gain 1.5,
+    // path_gain 0.0001, vs_gain 5.0, max_vs 3000) overrode the STAB-E1
+    // defaults and sustained a bang-bang limit cycle through the whole
+    // route (digi_full_mission t=640-722: ptcmd saturating +2.0 G then
+    // -0.6 G alternately, pitch +-25 deg at ~40 s period, VS +-9,000 fpm).
+    // The cascade saturated because the gains demanded more authority than
+    // the FCS G-lag (~2-3 s) could deliver without overshoot. Slower
+    // authority + strong VS-error damping:
+    air_steering.attitude_gain = 1.0;
+    air_steering.path_gain = 0.0005;
+    air_steering.vs_gain = 2.5;
+    air_steering.max_vs_fpm = 1500.0;
     air_steering.roll_gain = 4.0;
 }
 

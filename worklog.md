@@ -2713,3 +2713,83 @@ Stage Summary:
   4. Lands outside runway: flaps wired (C1+C2) + approach speed lowered 210→160 (C3) + energy-managed flare predicts touchdown point and modulates pitch (C4) + tightened missed-approach window (C5).
 - Diagnostic infrastructure: CSV trace exporter (0b) + isolated scenarios (0c) + trim-init (0d) are in place so future fixes can be validated with before/after traces.
 - Acceptance criteria (FLIGHT_CONTROL_NEXT_STEPS.md §5) NOT yet verified — they require a runtime trace from the actual digi_full_mission scenario, which depends on F4_INSTALL being set to a Falcon 4.0 install (not available in this environment). The user should run the isolated scenarios (takeoff_only, landing_only) and the full mission with the patch applied to verify the criteria.
+
+---
+Task ID: STAB-TRACE1
+Agent: main (orchestrator)
+Task: Execute step 1 of the next-phase recommendation: generate FCS CSV traces for the isolated scenarios and the full E2E mission, verify they show what they are supposed to (FLIGHT_CONTROL_NEXT_STEPS.md §3.5 signatures), and diagnose why the end-to-end scenario was not landing.
+
+Work Log:
+- Built the project headless (F4_BUILD_*=OFF) after installing cmake via pip; generated korea_real.world.json from the bundled save1.cam + fixture theater DB (the airbase at grid 234,655 exists in the fixture campaign, so the E2E mission runs headlessly without F4_INSTALL).
+- Added scripts/trace_runner.cpp (now a CMake target `trace_runner` in f4-simulation): headless scenario runner printing state transitions, go-around reasons (bus tap on GoAroundMessage), touchdown metrics, and writing the FCS CSV trace. Added scripts/analyze_trace.py for §5-style per-state metrics. Added scripts/fm_spawn_repro.cpp for isolated FM spawn debugging.
+- Reproduced the E2E failure: DigiMission.FullLoop... fails with touchdown 10,960 ft SHORT of the threshold, 2,362 ft off centerline (the user's "not landing").
+- Root causes found from the traces (each with tick-level evidence):
+  * STAB-E1: sustained phugoid limit cycle in ALL airborne phases (VS ±9,500 enroute, ±10,400 on final; pitch ±45 deg; throttle railing 0.04->1.00). AirSteering/Navigation gains too hot for the FCS G-lag.
+  * STAB-E5: approach_speed_kts=160 (Phase C3) is BELOW the model's stall speed (~166 kts at W/S 84, CL 0.89): the aircraft cannot hold 1 G on final; falls with lift=0 until it accelerates past ~171 kts. C3's plan note said to verify this; it had never been verified. Raised to 185.
+  * STAB-E2: stall boundary had no hysteresis: alpha riding criticalAOA flipped lift between full CL and <=0 every frame (nz 1.2 -> 0.01 in one tick) — the "ballistic arcs" that amplified the phugoid. Added enter/exit margins (+1 deg / -3 deg, +5 kts).
+  * STAB-E14: FCS ground guard `gearPos>0.5 && nzcgs<0.8` latched MID-FLIGHT after any transient low-G tick with gear down: forced alpha=0 -> zero lift -> nzcgs stayed low -> self-reinforcing zero-lift fall from 3,000 ft. Now requires !inAir.
+  * STAB-E9: real segfault: StubATC answers synchronously inside publish(); the modules' clearance handlers called sm_.process() re-entrantly during their own sm_.reset() (UB, observed crash at first tick). Clearance events are now latched and drained outside any SM frame (end of initialize() + top of update()).
+  * STAB-E3: Flare state had no exit except on_ground_ — the C4 climb-away left the aircraft stuck in Flare forever (200k ticks observed). Added Flare->GoAround + balloon/overflight/timeout valves.
+  * STAB-E4: flare td-prediction used |vs| (treated climbs as descents) -> 19,000 ft predictions -> MIL climb-aways from 15 ft. Uses sink rate now.
+  * STAB-E6: OnFinal commanded LEVEL flight at zero beam error while the beam descends ~1,000 fpm (corner-chase). Added beam-sink feedforward (Input::vs_ff_fpm) + aim-point beam (was threshold-referenced, steering the flare into the pavement edge).
+  * STAB-E7/E10: P-only steady-state beam offset (rode 280 ft low the whole final) -> leaky altitude integral; error-scaled VS correction window.
+  * STAB-E8/E13: flare law now targets touchdown SINK (~-400 fpm) with the td-prediction demoted to a bounded trim; was a distance-prediction law that ballooned.
+  * STAB-E15: NavigationModule overrode the shared tune with path_gain 0.0001 (weak phugoid damping) — the enroute bang-bang cycle (ptcmd saturating +2.0/-0.6 G alternately). Calm enroute tune.
+  * STAB-E16: PrepToTakeRunway lineup only chased the lineup point (comment described align-on-lineup but it was unimplemented) -> alignment convergence was orbit-phase luck vs the A3 5 ft/0.5 deg gate. Two-phase lineup law (chase point when offset; aim at a point ON the centerline 800 ft ahead when inside 150 ft).
+  * Scenario data: digi_full_mission waypoints put BASE_FIX farther out than APCH_FIX (doubled-back leg) and delivered the handoff 1,500 ft below the beam; route now steps onto the beam. on_glideslope spawned at-stall (280 fps).
+- Test suite: 1402/1409 pass. Fixed 11 tests my changes legitimately updated (deferred-clearance timing costs one tick; gain-pinning tests made tuning-agnostic). Remaining 7: GroundSteeringPedal (pre-existing — 4dfef9f rewrote the pedal law without updating the test), PatternTestFixture x4 (pre-existing, documented), DigiMission x2 (the mission itself — still failing, see below).
+- Build hygiene note: manually-linked binaries against the static libs segfault (ODR) whenever AirSteering/TakeoffModule header layouts change unless EVERYTHING is rebuilt; trace_runner is now a CMake target to avoid this.
+
+Results (isolated scenarios, the landing phase):
+- on_glideslope: was grass impact 8,495-20,236 ft short; now touchdown along -1,679 ft / cross -89 ft (approaching bounds; flare-entry energy still arrives low).
+- landing_only: was no landing / 8.5 NM low; now along -401 ft (101 ft outside the -500 bound), cross +253 ft.
+- E2E digi_full_mission (straight-in): taxi/takeoff/route/approach flown cleanly, but every final ends in a proper GO-AROUND (no more grass landings) — 6+ cycles of ProceedToFix -> InterceptFinal -> OnFinal -> GoAround(threshold_overflown).
+
+Stage Summary:
+- The trace pipeline (0b/0c) works and does exactly what §3.5 promised: every symptom mapped to a tick-level signature and a root cause. 16 documented fixes (STAB-E1..E16) committed to the working tree, uncommitted on purpose for review.
+- The mission still does not LAND. The remaining defect is NOT control loops anymore — it is approach GEOMETRY at speed: the go-around/re-intercept path swings ±14,000 ft laterally at 220-240 kts (turn radius ~7,000 ft at 25 deg bank), so each InterceptFinal overshoots the localizer and the final never stabilizes inside the missed-approach plane. Next steps: (1) slow the intercept (approach_speed well below 230 on the intercept leg; 30-45 deg cut angles instead of B2's near-perpendicular lead), (2) on go-around, re-enter the pattern at base-leg geometry rather than flying 55k ft back to the entry fix, (3) consider widening the establish gate with a lead-in distance scaled to turn radius.
+- Deliverables: /home/z/my-project/download/F4-traces/ (before/after CSVs + analyze_trace.py), scripts/trace_runner.cpp + scripts/analyze_trace.py + scripts/fm_spawn_repro.cpp in the repo.
+
+---
+Task ID: STAB-LAND1
+Agent: main (orchestrator)
+Task: Make digi_full_mission land and taxi back to parking (user: "Modify the digi_full_mission to see if you can get a good landing and taxi back. Once you have something for me to test, provide a downloadable patch file.")
+
+Work Log:
+- Reproduced the E2E failure from the STAB-TRACE1 state: every approach ended in a go-around or ground impact; the isolated scenarios landed near the runway but the full pattern mission never stabilized.
+- Ran 30 trace-driven fix iterations (fix1..fix30, each mapped to tick-level CSV evidence), implementing STAB-E17..E55 on top of the uncommitted E1..E16 working tree:
+  * E17 alpha_est clamp in AirSteering (±[-3.4,+16] deg) — killed the porpoise positive feedback through the pitch feedforward.
+  * E18 final max_vs 1400 (beam ff -980 needs headroom over the cap).
+  * E19 calm pattern tune (the STAB-E15 treatment) + ProceedToFix on pattern_steering.
+  * E20 scaled intercept lead (cut <= ~26 deg) + softened localizer gain; E53 final: gain 0.0005, ratio 3.0, band 600 (18-deg cuts at the 23-deg bank cap's turn radius).
+  * E21 establish floor 4,000 ft + InterceptFinal->GoAround transition (the event previously had no edge).
+  * E22 establish gate vs RUNWAY heading (was vs intercept heading — certified 65-deg cutters as "established").
+  * E23/E45 vertical + settle gates at establish (|beam err| < 300, |vs| < 900).
+  * E24 pattern-mode local re-entry after go-around (GoAround -> PatternDownwind leg 1) instead of the 55k ft entry-fix oval.
+  * E25 taxi-in skip-behind waypoints on TaxiIn entry (exit forward, no 180 back-taxi).
+  * E26/E33 maneuvering flaps from the crosswind leg; full landing flaps from base; GPWS-style sink guardians (hard in the pattern, wings-level arrest on final); on-ground-at-speed recovery to GoAround.
+  * E28 calm go-around (straight-ahead climb; MIL only slow/low; the MIL-pinned version hit 440 kts and porpoised into the deck).
+  * E29 VS-command slew limiter (400 fpm/s) — step VS commands were the phugoid's fuel.
+  * E30/E38 pattern altitude architecture: pattern holds PATTERN altitude; the descent to the beam belongs to the intercept alone (beam+600 downwind attempts flew 600 ft AGL over the field).
+  * E31/E36/E41 per-state throttle floors via steer()'s new throttle_floor parameter (recalibrated after reading the engine model: 0..1 = idle..MIL; the first 0.35-0.5 floors held 250-280 kts the whole approach).
+  * E34 beam-rate feedforward for every beam-parallel state (beam_input()).
+  * E40 pattern bank cap 0.55 -> 0.40 rad — this airframe cannot hold gamma in sustained 30+ deg banks (spiral dives).
+  * E42 base->final HEALTH gate (|vs| < 2,500, agl > 700) — refuses mid-recovery handoffs.
+  * E44 phase-lead phugoid damper: speed_damp 0.003/0.0025 (speed leads VS by ~90 deg in the phugoid; the one actuator not consumed by the ~10 s effective FCS+airframe delay).
+  * E46/E48 anti-balloon energy damper (throttle chop + full speed brake) with a per-tune VS guard (200 pattern / 800 final) — fired only on genuine balloons.
+  * E47/E49/E52/E53 pattern geometry: offset 12,000; upwind corner 16,000; base turn 28,000; base capture 9,000 (must sit INSIDE the offset); final/intercept tune retuned (vs_gain 1.5, attitude 1.2).
+  * E51 FCS pitch-integrator shedding under STRONG failed opposition only (broad shedding pinned the aircraft at the 1-G bias trim — a -900 fpm enroute descent ignoring a +1,700 ft error).
+  * E54/E55 flare 3-s prediction grace + flare_overrun_ft 3,500 (late flares at +2,300 along had pavement; the bare +2,500 plane insta-aborted them).
+- Scenario: digi_full_mission.json.in gains fcs_trace_path (CSV always produced).
+- Updated 9 tests to the new contracts (slew behavior, beam-consistent establish fixtures, E49/E52 pattern geometry, align_heading pedal law) and fixed the pre-existing GroundSteeringPedal stale pin.
+
+Results (all headless via trace_runner, deterministic across repeat runs):
+- digi_full_mission (pattern, as shipped): taxi -> takeoff -> 4-waypoint route -> overhead pattern join -> downwind -> base -> intercept -> established at ~9,700 ft out -> flare at 60 ft -> touchdown +2,012 ft / +212 ft at 204 kts -> rollout (204 -> 30 kts) -> taxi-in -> Parked at t=1,417 s. ZERO go-arounds.
+- digi_full_mission (straight-in, test variant): lands +3,037 ft / -98 ft, taxis back, Parked at t=1,075 s. ZERO go-arounds.
+- Isolated scenarios: landing_only touchdown +1,024/+45; on_glideslope -664/-72 (lands, rolls out, parks).
+- Test suite: 1409/1409 PASS (was 1,402/1,409 with 7 pre-existing failures).
+
+Stage Summary:
+- Deliverables: /home/z/my-project/download/digi_full_mission_landing_fix.patch (applies cleanly to a pristine HEAD checkout; 22 files) and /home/z/my-project/download/F4-landing-traces/ (before/after run logs + the two full FCS CSV traces gzipped + analysis scripts).
+- Both DigiMission E2E tests pass; the mission lands and taxis back to parking in both approach styles with zero go-arounds.
+- Known residuals for future work: touchdown lands ~200 ft right of centerline (inside test tolerances; the near-course localizer still carries ±200 ft); on_glideslope lands 664 ft short of the aim point; flare does not bleed much speed (204 kts touchdown); the go-around-at-high-speed oscillation path (only reachable by forced failures now) is unrefined.

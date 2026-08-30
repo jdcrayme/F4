@@ -48,6 +48,14 @@ public:
         double vs_fpm{0.0};            ///< vertical speed (ft/min, + = climbing)
         double vcas_kts{0.0};          ///< calibrated airspeed
         double alt_msl_ft{0.0};        ///< altitude MSL
+        double vs_ff_fpm{0.0};         ///< STAB-E6: feedforward VS (fpm) — the
+                                       ///< TARGET PATH's own climb/descent rate
+                                       ///< (e.g. the glide beam's -1,000 fpm at
+                                       ///< 3 deg / 190 kts). Added to the
+                                       ///< altitude-error term so that at zero
+                                       ///< error the aircraft RIDES the path
+                                       ///< instead of commanding level flight
+                                       ///< and then diving to re-catch it.
     };
 
     // --- Configuration (public doubles, f4-ai module convention) ---
@@ -88,25 +96,130 @@ public:
     // phugoid. Reducing attitude_gain to 2.5 and raising pitch_rate_damp
     // to 0.3 kills the cycle: smaller stick commands + more derivative
     // damping. See FLIGHT_CONTROL_STABILITY_PLAN.md §4.2 RC-3.
-    double vs_gain{12.0};              ///< target VS (fpm) per ft of altitude error
-    double max_vs_fpm{4000.0};         ///< VS cap
-    double path_gain{0.0001};          ///< rad of extra gamma per fpm of VS error
+    double vs_gain{6.0};              ///< target VS (fpm) per ft of altitude error.
+                                       ///< Lowered from 12.0 (STAB-E1): at 12 fpm/ft
+                                       ///< a 300-ft altitude error commanded a
+                                       ///< 3,600 fpm climb, and through the FCS
+                                       ///< G-lag (~2 s) + the aircraft's own phugoid
+                                       ///< dynamics at 200-250 kts (~30-50 s period)
+                                       ///< the loop over-shot each beam crossing and
+                                       ///< sustained a ±8-10,000 fpm limit cycle
+                                       ///< through the whole enroute phase (observed
+                                       ///< in digi_full_mission trace t=200-670).
+                                       ///< 6.0 halves the demand and lets the
+                                       ///< path_gain damping dominate.
+    double alt_integral_gain{1.2};     ///< STAB-E7: leaky integral on altitude
+                                       ///< error (fpm of extra VS command per
+                                       ///< ft of sustained error, per second).
+                                       ///< Kills the P-only steady-state beam
+                                       ///< offset (observed: riding 280 ft below
+                                       ///< the glide beam for the entire final
+                                       ///< because the proportional cascade
+                                       ///< undershoots and nothing integrates
+                                       ///< the residual out).
+    double alt_integral_max{500.0};    ///< STAB-E7: clamp on the altitude integral
+                                       ///< (fpm). Bounds the correction so a
+                                       ///< transient can't wind it to the VS cap.
+    double max_vs_fpm{2500.0};         ///< VS cap. Lowered from 4000 (STAB-E1) —
+                                       ///< a 4,000 fpm command through a 2 s FCS
+                                       ///< lag is 130+ ft of overshoot before the
+                                       ///< aircraft can respond; 2,500 still covers
+                                       ///< jet departures/descents.
+    double vs_slew_fpm_per_s{400.0};   ///< STAB-E29: slew-rate limit on the
+                                       ///< VS command (fpm per second). The
+                                       ///< altitude loop's vs_target used to
+                                       ///< STEP to the cap on any target
+                                       ///< change; the airframe (through the
+                                       ///< ~2-3 s FCS G-lag + its own phugoid
+                                       ///< dynamics) cannot follow a step —
+                                       ///< every capture overshot by
+                                       ///< 2,000-3,500 fpm (base leg dive
+                                       ///< -5,000 fpm against a -324 fpm
+                                       ///< command, fix3 trace t=1055-1080),
+                                       ///< and the saturated gamma damper
+                                       ///< could not arrest it. Ramping the
+                                       ///< command at 400 fpm/s excites
+                                       ///< nothing: a full-authority change
+                                       ///< takes ~4 s, about the FCS lag.
+                                       ///< Negative disables the limiter.
+    double balloon_guard_fpm{800.0};   ///< STAB-E46/E48: the anti-balloon
+                                       ///< energy damper's VS guard (fpm):
+                                       ///< the damper (throttle chop + full
+                                       ///< speed brake) fires when the
+                                       ///< actual VS exceeds the commanded
+                                       ///< by 1,200+ fpm AND vs is above
+                                       ///< this guard AND the aircraft is
+                                       ///< not slow. PER-TUNE: the pattern
+                                       ///< legs want it LOW (~200 — chopping
+                                       ///< their zooms is what keeps the
+                                       ///< ±5,000-11,000 fpm swings down,
+                                       ///< fix23) while the final's ride
+                                       ///< band sits at ±200 fpm and a low
+                                       ///< guard straddles it, chopping the
+                                       ///< approach engine at 155 kts into
+                                       ///< a stall-float (fix21/22) — the
+                                       ///< final wants ~800.
+    double vs_corr_max_fpm{-1.0};      ///< STAB-E10: BASE cap on the VS
+                                       ///< CORRECTION around the path
+                                       ///< feedforward (fpm). Negative = disabled
+                                       ///< (corrections clamp to max_vs_fpm
+                                       ///< absolute). The effective window
+                                       ///< SCALES with the altitude error
+                                       ///< (window = base + 1.5*|err|, clamped
+                                       ///< to max_vs_fpm) so close-in beam rides
+                                       ///< get a tight ±300-450 fpm while a
+                                       ///< from-below capture keeps full
+                                       ///< authority — a fixed window either
+                                       ///< corner-chased (wide) or could never
+                                       ///< catch a 500+ ft from-below entry
+                                       ///< (narrow, observed at on_glideslope).
+    double path_gain{0.0004};          ///< rad of extra gamma per fpm of VS error.
+                                       ///< Raised from 0.0001 (STAB-E1): the VS-error
+                                       ///< damping term is what kills the phugoid;
+                                       ///< at 0.0001 a 2,000 fpm VS error corrected
+                                       ///< only 0.03 rad (~1.7 deg) — too weak to
+                                       ///< arrest the zoom/dive cycle. 0.0004 gives
+                                       ///< 0.08 rad (~4.6 deg) at the same error.
     double gamma_corr_limit{0.09};     ///< clamp on the VS-error gamma correction
+    double alpha_min_rad{-0.06};       ///< STAB-E17: clamp on the alpha estimate
+                                       ///< (pitch - gamma) used as the pitch
+                                       ///< feedforward trim. ~-3.4 deg: a real
+                                       ///< jet never trims below slightly
+                                       ///< negative-alpha; the raw difference
+                                       ///< during transients (nose-up while
+                                       ///< still sinking hard) reports 25-35
+                                       ///< deg and pins theta_target at its
+                                       ///< clamp — the porpoise driver.
+    double alpha_max_rad{0.28};        ///< ~+16 deg: covers the low-speed
+                                       ///< high-alpha regimes (approach
+                                       ///< config ~12 deg) without
+                                       ///< letting a transient estimate drive
+                                       ///< the target into the stall region.
     double speed_damp_rad_per_kt{0.002}; ///< phugoid damping: nose-down trim when fast
     double min_path_rad{-0.21};        ///< target-pitch clamp (~-12 deg dive)
     double max_path_rad{0.31};         ///< target-pitch clamp (~+18 deg climb)
-    double attitude_gain{2.5};         ///< stick per rad of pitch-attitude error
+    double attitude_gain{1.8};         ///< stick per rad of pitch-attitude error.
+                                       ///< Lowered from 2.5 (STAB-E1) — see the
+                                       ///< phugoid note above; slower stick = less
+                                       ///< energy injected per cycle.
     double pitch_min{-0.35};           ///< stick clamps
     double pitch_max{0.5};
-    double pitch_rate_damp{0.3};       ///< pitch-rate damping (stick per rad/s of
-                                       ///< body-axis pitch rate q). Raised from 0.15
-                                       ///< to kill the altitude phugoid — the FCS's
-                                       ///< pitch-rate lag alone wasn't enough damping
-                                       ///< at attitude_gain=2.5.
+    double pitch_rate_damp{0.5};       ///< pitch-rate damping (stick per rad/s of
+                                       ///< body-axis pitch rate q). Raised from 0.3
+                                       ///< (STAB-E1) — more derivative feedback to
+                                       ///< damp the altitude phugoid through the
+                                       ///< FCS pitch-rate lag.
 
     // Speed channel
     double throttle_mid{0.6};          ///< throttle at on-target speed
-    double throttle_gain{0.008};       ///< throttle per kt of underspeed
+    double throttle_gain{0.005};       ///< throttle per kt of underspeed. Lowered
+                                       ///< from 0.008 (STAB-E1): with a ±40 kt phugoid
+                                       ///< speed swing, 0.008 slammed the throttle
+                                       ///< rail-to-rail (0.04 to 1.00 observed on
+                                       ///< final) in anti-phase with the phugoid,
+                                       ///< PUMPING the energy oscillation instead of
+                                       ///< damping it. 0.005 keeps the speed loop
+                                       ///  slower than the phugoid.
     double throttle_integral_gain{0.0005}; ///< integral on speed error —
                                             ///< eliminates steady-state speed
                                             ///< error (the cause of the
@@ -149,21 +262,37 @@ public:
 
     /// Fly the specified heading/altitude/speed. This is the whole air
     /// control law; callers compose it with their own target selection.
+    /// throttle_floor (STAB-E36, optional): per-call minimum for the
+    /// speed PI — the landing-configuration states (gear + full flaps)
+    /// must never allow idle (the drag bucket converts it into an
+    /// unstoppable dive) while the clean/flap-1/2 states need idle
+    /// authority to BLEED speed. The effective floor is
+    /// max(throttle_min, throttle_floor); negative disables the override.
     [[nodiscard]] AIControlOutput steer(double desired_heading_rad,
                                         double target_alt_ft,
                                         double target_speed_kts,
-                                        const Input& in) const;
+                                        const Input& in,
+                                        double throttle_floor = -1.0) const;
 
     /// Reset the integral accumulators (call on mode transition, e.g.
     /// when NavigationModule hands off to LandingModule with a different
     /// target speed — otherwise the integral carries a stale offset).
-    void reset_integrators() noexcept { speed_integral_ = 0.0; }
+    /// Also resets the STAB-E29 VS-command slew state.
+    void reset_integrators() noexcept {
+        speed_integral_ = 0.0;
+        alt_integral_ = 0.0;
+        vs_target_ = 0.0;
+    }
 
 private:
     /// Speed-channel integral accumulator (mutable so the public steer()
     /// can remain const — the integral is closed-loop state, not config).
     /// Persists across steer() calls within a single module instance.
     mutable double speed_integral_{0.0};
+    /// STAB-E7: altitude-channel integral accumulator (fpm of VS command).
+    mutable double alt_integral_{0.0};
+    /// STAB-E29: last VS command (fpm) — the slew-rate limiter's state.
+    mutable double vs_target_{0.0};
 };
 
 } // namespace f4::ai

@@ -113,10 +113,14 @@ struct LandingTestFixture : ::testing::Test {
     }
 
     // Drive ProceedToFix -> InterceptFinal -> OnFinal through the chain.
+    // STAB-E23/E45: the establish gate now requires being within 300 ft
+    // of the glide BEAM and settled (|vs| < 900) — spawn ON the beam:
+    // at 19,000 ft out the aim-point beam is (19000+1500)*tan(3 deg)
+    // ≈ 1,077 ft; at 15,000 it is ≈ 866 ft.
     void drive_to_on_final() {
-        auto s = on_final(0.0, 19000.0, 2000.0);   // near fix
+        auto s = on_final(0.0, 19000.0, 1100.0);   // near fix, on the beam
         mod.update(0.1, s.get());
-        s = on_final(0.0, 15000.0, 1000.0, 0.0);   // established on centerline
+        s = on_final(0.0, 15000.0, 900.0, 0.0);    // established on centerline+beam
         mod.update(0.1, s.get());
     }
 };
@@ -149,8 +153,10 @@ TEST_F(LandingTestFixture, EstablishedOnFinalRequestsLanding) {
 
     // One tick near the fix while already on the centerline heading north:
     // the chained transitions carry the module FixReached -> InterceptFinal
-    // -> Established -> OnFinal in a single update.
-    auto s = on_final(0.0, 19000.0, 2000.0);
+    // -> Established -> OnFinal in a single update. STAB-E23/E45: the state
+    // must be ON the beam (~1,077 ft at 19,000 ft out) and settled — the
+    // gate refuses high/unsettled handoffs.
+    auto s = on_final(0.0, 19000.0, 1100.0);
     mod.update(0.1, s.get());
     EXPECT_EQ(mod.state(), LandingState::OnFinal);
     EXPECT_TRUE(cleared);            // StubATC auto-granted via ApproachClearance
@@ -165,14 +171,20 @@ TEST_F(LandingTestFixture, GlideSlopeTrackingCommands) {
     drive_to_on_final();
     ASSERT_EQ(mod.state(), LandingState::OnFinal);
 
-    // The final law feeds the level-trim attitude forward and trims
-    // toward the beam: 10,000 ft out the beam is ~524 ft. A big error
-    // above the beam (1500 ft) commands nose-down; well below it (200 ft)
-    // commands nose-up. Small errors ride the feedforward.
+    // The final law feeds the beam rate (STAB-E6) and trims toward the
+    // beam: 10,000 ft out the aim-point beam is (10000+1500)*tan(3 deg)
+    // ≈ 603 ft. A big error above the beam (1500 ft) commands nose-down;
+    // well below it (200 ft) commands nose-up. The VS command SLEWS
+    // (STAB-E29), so give each state ~2 s (120 ticks) for the command
+    // to reflect the error before asserting the stick direction.
     auto s = on_final(0.0, 10000.0, 1500.0, 0.0);
-    EXPECT_LT(mod.update(0.1, s.get()).pitch_cmd, 0.0);
+    double high_cmd = 0.0;
+    for (int i = 0; i < 120; ++i) high_cmd = mod.update(0.1, s.get()).pitch_cmd;
+    EXPECT_LT(high_cmd, 0.0) << "high on the beam must command nose-down";
     s = on_final(0.0, 10000.0, 200.0, 0.0);
-    EXPECT_GT(mod.update(0.1, s.get()).pitch_cmd, 0.0);
+    double low_cmd = 0.0;
+    for (int i = 0; i < 120; ++i) low_cmd = mod.update(0.1, s.get()).pitch_cmd;
+    EXPECT_GT(low_cmd, 0.0) << "low on the beam must command nose-up";
 }
 
 TEST_F(LandingTestFixture, LocalizerCorrectionSteersLeftWhenRightOfCourse) {
@@ -540,12 +552,15 @@ TEST(LandingModuleMisc, EmptyTaxiInRouteParksOnRunway) {
 // -> base -> final)
 // ============================================================================
 //
-// Geometry under test (Rwy 36, threshold (0,5000), left traffic):
-//   leg captures are plane crossings (lead 1500 ft):
-//     leg 0 (upwind overfly):  along > 12500  -> north > 17500
-//     leg 1 (crosswind widen): east  < -10500
-//     leg 2 (downwind):        along < -4500  -> north < 500
-//   base aim = (0, -7000); base capture |east| < 3000.
+// Geometry under test (Rwy 36, threshold (0,5000), left traffic) —
+// STAB-E49/E52 constants: pattern_offset 12000, upwind_along 16000,
+// base_turn_along 28000, base_capture 9000. Leg captures are plane
+// crossings (lead 1500 ft):
+//   leg 0 (upwind overfly):  along > 14500  -> north > 19500
+//   leg 1 (crosswind widen): east  < -10500
+//   leg 2 (downwind):        along < -26500 -> north < -21500
+// base capture |east| < 9000 (plus the E42 health gate: settled + agl
+// > 700).
 
 namespace {
 
@@ -602,42 +617,43 @@ TEST_F(PatternTestFixture, PatternWalksUpwindCrosswindDownwindBaseFinal) {
     ASSERT_EQ(mod.state(), LandingState::PatternDownwind);
 
     // Leg 0 (upwind overfly): before the far-corner plane -> holds.
-    s = at_pos(-3000.0, 12000.0, 2500.0);   // along = 7000 < 12500
+    s = at_pos(-3000.0, 12000.0, 2500.0);   // along = 7000 < 14500
     mod.update(0.1, s.get());
     ASSERT_EQ(mod.state(), LandingState::PatternDownwind);
 
     // Past the far-corner plane: leg 0 -> 1 (crosswind).
-    s = at_pos(-3000.0, 18000.0, 2500.0);   // along = 13000 > 12500
+    s = at_pos(-3000.0, 20000.0, 2500.0);   // along = 15000 > 14500
     mod.update(0.1, s.get());
     ASSERT_EQ(mod.state(), LandingState::PatternDownwind);
 
     // Leg 1 (crosswind widen): WEST of -10500 ft captures (left traffic).
-    s = at_pos(-11000.0, 18000.0, 2500.0);
+    s = at_pos(-11000.0, 20000.0, 2500.0);
     mod.update(0.1, s.get());
     ASSERT_EQ(mod.state(), LandingState::PatternDownwind);
 
     // Leg 2 (downwind): before the base plane -> holds.
-    s = at_pos(-12000.0, 8000.0, 2500.0);   // along = 3000 > -4500
+    s = at_pos(-12000.0, 0.0, 2500.0);      // along = -5000 > -26500
     mod.update(0.1, s.get());
     ASSERT_EQ(mod.state(), LandingState::PatternDownwind);
 
     // Past the base-turn plane: turn base.
-    s = at_pos(-12000.0, 0.0, 2000.0, PI);   // along = -5000, heading south
+    s = at_pos(-12000.0, -22000.0, 2000.0, PI);   // along = -27000, south
     mod.update(0.1, s.get());
     ASSERT_EQ(mod.state(), LandingState::PatternBase);
 
     // Still outside the base-capture window (12000 ft lateral): hold base.
-    s = at_pos(-12000.0, -2000.0, 1200.0, PI / 2);   // heading east (base)
+    s = at_pos(-12000.0, -24000.0, 1200.0, PI / 2);   // heading east (base)
     mod.update(0.1, s.get());
     ASSERT_EQ(mod.state(), LandingState::PatternBase);
 
-    // Within 3000 ft of the centerline: base -> final.
-    s = at_pos(-2000.0, -3000.0, 1000.0, PI / 2);
+    // Within 9000 ft of the centerline (and healthy per E42): base -> final.
+    s = at_pos(-8000.0, -26000.0, 1000.0, PI / 2);
     mod.update(0.1, s.get());
     ASSERT_EQ(mod.state(), LandingState::InterceptFinal);
 
-    // Established inbound on the centerline: OnFinal + landing request.
-    s = at_pos(-300.0, -4000.0, 900.0, 0.2);
+    // Established inbound on the centerline, ON the beam and settled
+    // (STAB-E23/E45: 4000 ft out the beam is ~288 ft): OnFinal + request.
+    s = at_pos(-300.0, 1000.0, 300.0, 0.2);   // along = -4000, beam ~288
     mod.update(0.1, s.get());
     EXPECT_EQ(mod.state(), LandingState::OnFinal);
     EXPECT_TRUE(cleared);
@@ -647,11 +663,11 @@ TEST_F(PatternTestFixture, BasePastThresholdGoesAround) {
     // Enter + walk to base quickly via direct placements.
     auto s = at_pos(0.0, -14500.0, 2500.0);
     mod.update(0.1, s.get());
-    s = at_pos(-3000.0, 18000.0, 2500.0);
+    s = at_pos(-3000.0, 20000.0, 2500.0);
     mod.update(0.1, s.get());
-    s = at_pos(-11000.0, 18000.0, 2500.0);
+    s = at_pos(-11000.0, 20000.0, 2500.0);
     mod.update(0.1, s.get());
-    s = at_pos(-12000.0, 0.0, 2000.0, PI);
+    s = at_pos(-12000.0, -22000.0, 2000.0, PI);
     mod.update(0.1, s.get());
     ASSERT_EQ(mod.state(), LandingState::PatternBase);
 
@@ -674,17 +690,17 @@ TEST_F(PatternTestFixture, RightTrafficMirrorsToTheEastSide) {
     ASSERT_EQ(mod.state(), LandingState::PatternDownwind);
 
     // Far-corner plane is side-independent.
-    s = at_pos(3000.0, 18000.0, 2500.0);
+    s = at_pos(3000.0, 20000.0, 2500.0);
     mod.update(0.1, s.get());
     ASSERT_EQ(mod.state(), LandingState::PatternDownwind);   // leg 0 -> 1
 
     // Crosswind capture mirrors: EAST of +10500 ft.
-    s = at_pos(11000.0, 18000.0, 2500.0);
+    s = at_pos(11000.0, 20000.0, 2500.0);
     mod.update(0.1, s.get());
     ASSERT_EQ(mod.state(), LandingState::PatternDownwind);   // leg 1 -> 2
 
     // Downwind plane: same along axis, mirrored side.
-    s = at_pos(12000.0, 0.0, 2000.0, 0.0);
+    s = at_pos(12000.0, -22000.0, 2000.0, 0.0);
     mod.update(0.1, s.get());
     EXPECT_EQ(mod.state(), LandingState::PatternBase);
 }
@@ -692,11 +708,11 @@ TEST_F(PatternTestFixture, RightTrafficMirrorsToTheEastSide) {
 TEST_F(PatternTestFixture, PatternBaseCommandsGearDown) {
     auto s = at_pos(0.0, -14500.0, 2500.0);
     mod.update(0.1, s.get());
-    s = at_pos(-3000.0, 18000.0, 2500.0);
+    s = at_pos(-3000.0, 20000.0, 2500.0);
     mod.update(0.1, s.get());
-    s = at_pos(-11000.0, 18000.0, 2500.0);
+    s = at_pos(-11000.0, 20000.0, 2500.0);
     mod.update(0.1, s.get());
-    s = at_pos(-12000.0, 0.0, 2000.0, PI);
+    s = at_pos(-12000.0, -22000.0, 2000.0, PI);
     const auto out = mod.update(0.1, s.get());
     ASSERT_EQ(mod.state(), LandingState::PatternBase);
     EXPECT_TRUE(out.gear_handle_down);

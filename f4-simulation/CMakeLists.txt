@@ -74,3 +74,17 @@ if(F4_SIMULATION_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
 endif()
+
+# ============================================================================
+# trace_runner — headless scenario runner + CSV trace + landing summary
+# (STAB tooling). Not a test: it runs any scenario JSON to mission
+# completion (or a tick budget), prints state transitions / go-around
+# reasons / touchdown metrics, and writes the FCS CSV trace.
+# ============================================================================
+add_executable(trace_runner ${CMAKE_SOURCE_DIR}/scripts/trace_runner.cpp)
+target_link_libraries(trace_runner PRIVATE f4-simulation)
+target_compile_features(trace_runner PRIVATE cxx_std_20)
+
+# The go-around reason tap needs the ATC message types (f4-ai, pulled in
+# transitively via f4-simulation). Install alongside the other tools so a
+# headless CI can generate §5 acceptance traces in one command.

@@ -40,6 +40,7 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <string>
 
 #include <f4/entities/entity.hpp>
@@ -166,6 +167,12 @@ public:
     // How far past the threshold the lineup target sits (feet). PrepToTakeRunway
     // steers toward this point on the runway centerline, then aligns heading.
     double lineup_depth_ft{150.0};
+    /// STAB-E16: inside this lateral distance of the runway centerline the
+    /// PrepToTakeRunway law stops chasing the lineup point and rolls
+    /// forward while aligning heading directly (deterministic alignment vs
+    /// the previous point-orbit, whose phase decided whether the tight
+    /// 5 ft / 0.5 deg gate was ever met).
+    double lineup_capture_ft{150.0};
 
     // Heading-hold gain for FlyOut roll commands (roll units per rad of error).
     // DEPRECATED — kept for back-compat but unused now that FlyOut routes
@@ -252,6 +259,9 @@ private:
 
     // External references (set by initialize).
     std::uint64_t ownship_id_{0};
+    /// STAB-E9: clearance event latched by a bus subscription handler,
+    /// drained at the top of update() (re-entrancy safe — see initialize).
+    std::optional<TakeoffEvent> deferred_event_{};
     entities::EntityWorld* world_{nullptr};
     messaging::MessageBus* bus_{nullptr};
 

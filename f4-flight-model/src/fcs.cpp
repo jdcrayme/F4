@@ -165,7 +165,7 @@ void FlightControlSystem::update(const PilotInput& pilot,
              alpha, cosmu, cosgam, singam,
              nzcgs, aero.cl, aero.clalpha, aero.clalph0,
              aero.cnalpha, aoamin, aoamax, maxGs,
-             pilot, fcs, aero);
+             pilot, fcs, aero, inAir);
 
     runRoll(dt, qbar, vcas_kts, alpha,
             aero.gearPos, phi,
@@ -353,7 +353,8 @@ void FlightControlSystem::runPitch(double dt, double qbar, double qsom,
                                     double clalph0, double cnalpha,
                                     double aoamin, double aoamax, double maxGs,
                                     const PilotInput& input,
-                                    FcsState& fcs, AeroState& aero) const {
+                                    FcsState& fcs, AeroState& aero,
+                                    bool inAir) const {
     (void)qbar; (void)vt; (void)vcas_kts;
     (void)alpha;  // pitch channel writes aero.alpha; current value unused
     (void)cl; (void)clalpha; (void)singam;
@@ -460,7 +461,15 @@ void FlightControlSystem::runPitch(double dt, double qbar, double qsom,
     // the error when gear is down AND qsom is low (ground roll / taxi).
     // The alpha_bias is already 0 in this regime (the qsom guard above),
     // so the FCS produces alpha=0 on the ground.
-    const bool on_ground = (aero.gearPos > 0.5 && nzcgs < 0.8);
+    //
+    // STAB-E14: require !inAir for the nzcgs<0.8 "on ground" arm.
+    // Previously gear-down + ANY transient nzcgs<0.8 tick (e.g. stall
+    // boundary chatter on final) latched the ground guard MID-FLIGHT: it
+    // forced alpha=0, zeroing lift, which kept nzcgs<0.8 — a self-
+    // reinforcing zero-lift fall (observed at digi_full_mission t=740:
+    // alpha 0.0, nz 0.01, VS -5,053, gear down at 3,000 ft AGL). The
+    // FM's inAir flag is authoritative ground contact.
+    const bool on_ground = (!inAir && aero.gearPos > 0.5 && nzcgs < 0.8);
     const bool ground_guard = (aero.gearPos > 0.5 && qsom < 5.0) || on_ground;
     const double error = ground_guard ? 0.0
                         : (ptcmd - (nzcgs - cosmu_lim * cosgam - gearGravityTerm)) * fcs.kp05;
@@ -495,6 +504,27 @@ void FlightControlSystem::runPitch(double dt, double qbar, double qsom,
     // Clamp to the limit range (the step may overshoot by one frame's worth).
     if (eintg > aoamax) eintg = aoamax;
     else if (eintg < aoamin) eintg = aoamin;
+
+    // --- STAB-E51: integrator shedding under strong opposition ---
+    // The conditional-integration anti-windup above stops further winding
+    // but does not speed the UNWIND: with the integrator holding alpha at
+    // its clamp, a sustained opposing stick command (the AI's beam-ride
+    // balloon: +1,100 fpm climb against ptcmd -0.35 for 14 s, digi trace
+    // fix26 t=1245-1258) is consumed by the integrator's own time
+    // constant first. Shed a fraction of the integrator toward zero each
+    // frame — but ONLY when a strong stick deflection is failing to move
+    // the achieved G in its direction (the observed stuck-trim states).
+    // A broad "integrator opposes error" rule also drains the integrator
+    // during LEGITIMATE trim-building and pins the aircraft at the 1-G
+    // bias trim (fix27: a steady -900 fpm enroute descent that ignored a
+    // +1,700 ft altitude error for 90 s).
+    const bool strong_push_fails = (ptcmd < -0.15 && nzcgs > 1.05);
+    const bool strong_pull_fails = (ptcmd >  0.15 && nzcgs < 0.95);
+    if ((strong_push_fails && eintg > 0.0) ||
+        (strong_pull_fails && eintg < 0.0)) {
+        eintg *= std::max(0.0, 1.0 - 1.5 * dt);
+        fcs.pitchIntegral.reset(eintg);
+    }
 
     // --- Alpha command (PI output only — bias is added after the filter) ---
     // The lead-lag filter shapes ONLY the PI correction, not the bias.
