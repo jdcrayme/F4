@@ -51,28 +51,37 @@ AIControlOutput AirSteering::steer(double desired_heading_rad,
     out.roll_cmd = std::clamp(roll_gain * bank_err - roll_damp * in.roll_rate_radps,
                               -1.0, 1.0);
 
-    // --- Coordinated-turn feedforward (Phase A2) ---
+    // --- Rudder: centered in sustained flight (NAV-A) ---
     //
-    // Rudder-for-bank: pedal_ff = tan(bank_target) * v / g, mapped to the
-    // normalized [-1, +1] command space via coord_turn_scale. Eliminates
-    // steady-state sideslip in turns and reduces the load on the FCS yaw
-    // damper (Phase A1). Without this, a banked turn produces beta drift
-    // through the kinematics of banked flight; the damper then has to
-    // react and correct, which excites the roll cascade (beta → side force
-    // → rolling moment → phi drift → bank cascade corrects → repeat).
-    // The feedforward kills the cycle at the source by anticipating the
-    // rudder needed for a coordinated turn.
+    // The AI commands ZERO steady-state pedal. The Phase A2
+    // "coordinated-turn feedforward" that used to live here
+    // (pedal_ff = tan(bank_target) * v / g, scaled by coord_turn_scale)
+    // was wrong twice over:
     //
-    // Clamp the bank used in the formula to coord_turn_max_bank_rad so
-    // tan() doesn't blow up at high bank angles; the FCS yaw damper
-    // handles the residual at high bank.
-    constexpr double GRAVITY_FPS2 = 32.174;
-    const double bank_for_ff = std::clamp(bank_target,
-                                          -coord_turn_max_bank_rad,
-                                          coord_turn_max_bank_rad);
-    const double v_fps_ff = std::max(100.0, in.vcas_kts * 1.68781);
-    const double pedal_ff = std::tan(bank_for_ff) * v_fps_ff / GRAVITY_FPS2;
-    out.yaw_cmd = std::clamp(pedal_ff * coord_turn_scale, -1.0, 1.0);
+    //   1. Dimensionally inverted. The turn-rate law is w = g*tan(phi)/v;
+    //      the code computed tan(phi)*v/g — the reciprocal, ~250x too big
+    //      at cruise. At 300 kts / 25 deg bank it produced ~0.73 of FULL
+    //      rudder held in every banked turn.
+    //   2. Conceptually wrong for this FCS. The yaw channel (fcs.cpp
+    //      runYaw) is a beta-command PI loop: any nonzero pedal commands
+    //      steady SIDE FORCE (nycmd = yshape*2), and aero.beta is driven
+    //      directly to whatever produces it. Coordinated flight means
+    //      ZERO lateral acceleration — so any nonzero "coordination"
+    //      pedal is anti-coordination. The A2 law pinned |beta| at the
+    //      15-deg aero clamp through every turn of the course_intercept /
+    //      standard_rate_turn baselines (NAV-D1 traces): the aircraft
+    //      flew 100+ ft/s sideways with its nose off the velocity vector.
+    //      That was the reported "slipping a lot", the "nose points at
+    //      the waypoint", and much of the in-turn altitude loss (a
+    //      tilted lift vector reads as missing pitch authority).
+    //
+    // Coordination is the yaw damper's job (Phase A1 holds beta ~ 0 with
+    // the pedals centered). A steady turn needs no steady rudder; turn
+    // entry/exit adverse yaw is a roll-rate effect, and if this EOM ever
+    // grows adverse-yaw coefficients the right home for the compensation
+    // is a roll-rate-proportional term there — not a bank-proportional
+    // steady pedal here.
+    out.yaw_cmd = 0.0;
 
     // --- Altitude: gamma-hold ---
     // Target VS from the altitude error, convert to a commanded
@@ -142,16 +151,40 @@ AIControlOutput AirSteering::steer(double desired_heading_rad,
     const double gamma_ff = std::clamp((vs_target / 60.0) / v_fps, -0.35, 0.35);
     const double gamma_corr = std::clamp(path_gain * (vs_target - in.vs_fpm),
                                          -gamma_corr_limit, gamma_corr_limit);
+    // NAV-D: bank-compensated alpha feedforward. A level turn needs
+    // nz = 1/cos(phi): at 30 deg bank the wing must carry 15.5% more
+    // lift, i.e. roughly 15.5% more alpha at the same speed. The alpha
+    // estimate alone (pitch - gamma) only discovers that AFTER the
+    // aircraft has already sagged — measured in the course_intercept
+    // trace: 853 ft lost in the first intercept turn while the VS loop
+    // played catch-up through the FCS G-lag (and the FCS's own 1-G bias
+    // scales by cos(phi), i.e. the WRONG way for turn compensation).
+    // Multiplying the alpha term by 1/cos(phi) supplies the extra pitch
+    // up front; wings level it is exactly 1.0 (no behavior change).
+    // Clamped at 40 deg bank (x1.30) to stay in the linear regime.
+    const double phi_for_lift = std::clamp(std::fabs(in.roll_rad), 0.0, 0.7);
+    const double lift_comp = 1.0 / std::max(0.3, std::cos(phi_for_lift));
     const double theta_target = std::clamp(
-        alpha_est + gamma_ff + gamma_corr
+        alpha_est * lift_comp + gamma_ff + gamma_corr
             - speed_damp_rad_per_kt * (in.vcas_kts - target_speed_kts),
         min_path_rad, max_path_rad);
     // Pitch-rate damping: subtract Kd*q from the stick command. Same
     // rationale as the roll-rate damping — kills the phugoid by adding
     // explicit derivative feedback that the FCS pitch-rate lag alone
     // cannot provide at high attitude_gain.
+    // NAV-D2: bank G-feedforward on the stick. The theta loop above is
+    // deliberately soft (low attitude_gain, the anti-phugoid tune), so a
+    // roll-in transient sags ~800 ft before the loop discovers the extra
+    // alpha needed (course_intercept t=6-21: pitch decayed to -1.5 deg,
+    // VS -3,242, nz only recovering through the ~3 s FCS G-lag). The
+    // stick feedforward supplies the 1/cos(phi) - 1 load increment
+    // immediately: +0.155 stick at 30 deg bank, zero wings level. Bounded
+    // by the pitch stick clamp; does not affect steady-state trim (the
+    // lift_comp alpha term owns that).
+    const double bank_g_ff = bank_g_ff_gain * (lift_comp - 1.0);
     out.pitch_cmd = std::clamp(attitude_gain * (theta_target - in.pitch_rad)
-                                - pitch_rate_damp * in.pitch_rate_radps,
+                                - pitch_rate_damp * in.pitch_rate_radps
+                                + bank_g_ff,
                                pitch_min, pitch_max);
 
     // --- Speed: PI around a mid throttle setting + speed brake ---
@@ -172,7 +205,19 @@ AIControlOutput AirSteering::steer(double desired_heading_rad,
     out.throttle_cmd = std::clamp(
         throttle_mid + throttle_gain * speed_err + speed_integral_,
         std::max(throttle_min, throttle_floor), throttle_max);
-    out.speed_brake_cmd = (in.vcas_kts > target_speed_kts + 15.0) ? 0.8 : -1.0;
+    // NAV-E: proportional speed brake. The old law was a relay
+    // (full board above target+15, slam retracted below) — with the
+    // airframe's multi-second energy lag that is a textbook limit-cycle
+    // oscillator: standard_rate_turn t=112-200 showed the board bang-bang
+    // +0.80/-1.00, the throttle square-waving 0.08-0.93 in anti-phase,
+    // speed square-waving 245-265 kts, and the altitude sawtoothing
+    // +-450 ft at 9,500-10,400 (the reported "losing altitude enroute").
+    // Proportional over a 15-kt band starting at target+5: brake grows
+    // with the actual overspeed, releases gradually as it bleeds, no
+    // relay chatter for the phugoid to feed on. Command space is
+    // [-1 = retracted, +1 = full]; scale to 0.85 max extension (nav use).
+    const double over_speed = in.vcas_kts - (target_speed_kts + 5.0);
+    out.speed_brake_cmd = -1.0 + 1.85 * std::clamp(over_speed / 15.0, 0.0, 1.0);
 
     // --- STAB-E46: anti-balloon energy damper ---
     // The phugoid's climb half-cycle cannot be arrested through the pitch

@@ -11,7 +11,7 @@
       "aircraft_config_path": "@F4_BINARY_DIR@/generated_fixtures/f16.json",
       "aircraft_name": "F-16C_50",
       "vis_type_index": 1052,
-      "parking_spot": { "x": 500.0, "y": -30000.0, "z": 2500.0 },
+      "parking_spot": { "x": 500.0, "y": -22000.0, "z": 2500.0 },
       "heading_rad": 0.0,
       "initial_fuel_lbs": 6500.0,
       "initial_vt_fps": 350.0,

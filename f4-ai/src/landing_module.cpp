@@ -478,7 +478,7 @@ AIControlOutput LandingModule::update(double dt, const flight::IAircraftState* s
         case LandingState::ProceedToFix:    return controls_for_proceed_to_fix();
         case LandingState::PatternDownwind: return controls_for_pattern_downwind();
         case LandingState::PatternBase:     return controls_for_pattern_base();
-        case LandingState::InterceptFinal:
+        case LandingState::InterceptFinal: {
             // Pattern mode delivers the aircraft close in and ~90 deg
             // off; the intercept turn is short and tight, so fly it at
             // approach speed (the +40 was for the long straight-in
@@ -486,13 +486,43 @@ AIControlOutput LandingModule::update(double dt, const flight::IAircraftState* s
             // The descent is floored: laterally far off course the beam
             // altitude is meaningless, and chasing it down there put the
             // aircraft on the ground short of the runway.
-            return track_final(
-                std::min(pattern_altitude_ft_,
-                         std::max(glide_slope_alt_ft(),
-                                  threshold_alt_ft_ + intercept_floor_agl_ft)),
+            // NAV-F: never CLIMB to the beam on the intercept. When the
+            // beam is above us (base leg handed off at 900 AGL while the
+            // 3-deg beam at 30k out is ~1,700), the old law commanded a
+            // +1,000+ fpm climb to it; through the FCS G-lag the aircraft
+            // ballooned 900 ft OVER the beam and arrived at the establish
+            // gates diving at -2,500 fpm — GA every cycle (digi pattern
+            // E2E: 5 consecutive not_cleared go-arounds). Standard
+            // procedure flies the intercept LEVEL at a safe altitude and
+            // lets the descending beam arrive from above: hold (do-not-
+            // climb) until the beam is within 200 ft, then ride it down.
+            // From-above intercepts (straight-in at pattern altitude) are
+            // unaffected: the beam is already below.
+            const double beam_now = glide_slope_alt_ft();
+            double intercept_alt = std::min(pattern_altitude_ft_,
+                                            std::max(beam_now,
+                                                     threshold_alt_ft_ + intercept_floor_agl_ft));
+            // Guard 1 — pattern mode only: the straight-in arrives at
+            // pattern altitude ABOVE the beam and can never be "below" it
+            // by design; applying the hold there fought the from-above
+            // descent (energetic swings 275-990 AGL, balloon-guard relay,
+            // threshold overflown at 160 ft). Guard 2: once LATERALLY
+            // established (within 1,500 ft of the localizer), riding the
+            // beam is legitimate even if it means climbing back after a
+            // transient dip — the hold-low law is for the intercept TURN
+            // phase, not the final itself.
+            if (fly_traffic_pattern &&
+                beam_now > current_alt_msl_ft_ + 200.0 &&
+                std::abs(course_lateral_ft()) > 1500.0) {
+                intercept_alt = std::min(intercept_alt,
+                                         std::max(threshold_alt_ft_ + intercept_floor_agl_ft,
+                                                  current_alt_msl_ft_));
+            }
+            return track_final(intercept_alt,
                 approach_speed_kts +
                     (fly_traffic_pattern ? 0.0 : 40.0),
                 /*pattern_turn=*/true);
+        }
         case LandingState::OnFinal: {
             // Phase B3 (FLIGHT_CONTROL_NEXT_STEPS.md §4 Phase B3): ride the
             // beam EXACTLY. Previously this used an 8% undershoot bias

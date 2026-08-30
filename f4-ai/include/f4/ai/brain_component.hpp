@@ -80,7 +80,12 @@ struct MissionPlan {
     /// When set to Approach, the host MUST also set the route's last
     /// waypoint at the approach entry fix — the brain uses that position
     /// to configure the LandingModule.
-    enum class StartPhase { Ground, Approach };
+    /// Set to Enroute to skip taxi/takeoff and hand the route straight to
+    /// the NavigationModule — used by the `course_intercept` and
+    /// `standard_rate_turn` LNAV diagnostic scenarios which spawn the
+    /// aircraft airborne, trimmed, and (for course_intercept) offset from
+    /// the course to test intercept geometry (NAV-D1).
+    enum class StartPhase { Ground, Approach, Enroute };
     StartPhase start_phase{StartPhase::Ground};
 };
 
@@ -153,6 +158,17 @@ public:
             } else {
                 phase_ = Phase::Complete;
             }
+        }
+
+        // NAV-D1: airborne-spawn Enroute start — hand the route straight
+        // to the NavigationModule without waiting for a takeoff that
+        // already "happened" before the scenario begins.
+        if (phase_ == Phase::Ground &&
+            plan_.start_phase == MissionPlan::StartPhase::Enroute &&
+            !plan_.route.empty()) {
+            nav_.set_route(plan_.route);
+            nav_.air_steering.reset_integrators();
+            phase_ = Phase::Enroute;
         }
 
         // Sequence the mission phases.

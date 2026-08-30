@@ -160,6 +160,11 @@ public:
 private:
     void load_models();           // KoreaObj.HDR/.LOD/.TEX -> ModelDatabase
     void load_aircraft_config();  // f16.json -> AircraftConfig
+    /// NAV-D2: rotate runway-frame waypoints into ENU about the threshold.
+    /// Runs from spawn_aircraft() (idempotent) so synthetic-airfield
+    /// scenarios get the same normalization the real-airbase path had.
+    void normalize_waypoint_frame();
+
     void spawn_aircraft();        // spawn_mode dispatch (scenario_list | campaign_flights)
     void spawn_from_scenario_list();        // Phase 1: hand-authored aircraft[]
     void spawn_from_campaign_flights();     // Phase 2: campaign-derived roster

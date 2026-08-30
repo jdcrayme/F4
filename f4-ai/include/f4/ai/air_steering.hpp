@@ -209,6 +209,15 @@ public:
                                        ///< (STAB-E1) — more derivative feedback to
                                        ///< damp the altitude phugoid through the
                                        ///< FCS pitch-rate lag.
+    double bank_g_ff_gain{1.0};        ///< NAV-D2: stick feedforward for the
+                                       ///< 1/cos(phi)-1 load increment in banked
+                                       ///< flight. 1.0 maps the +15.5% lift need
+                                       ///< at 30 deg bank to +0.155 stick,
+                                       ///< immediately (the soft theta loop takes
+                                       ///< 10+ s to find the same G through the
+                                       ///< FCS lag — the in-turn altitude sag).
+                                       ///< Zero wings-level; bounded by the stick
+                                       ///< clamps.
 
     // Speed channel
     double throttle_mid{0.6};          ///< throttle at on-target speed
@@ -232,25 +241,15 @@ public:
     double throttle_min{0.25};
     double throttle_max{1.0};          ///< MIL (nav never selects AB)
 
-    // Coordinated-turn feedforward (Phase A2 — see FLIGHT_CONTROL_STABILITY_PLAN.md
-    // §4.1 RC-1 Phase B). The standard "rudder-for-bank" coordination law:
-    //   pedal_ff = tan(bank_target) * v / g
-    // converted to normalized [-1, +1] pedal command via coord_turn_scale.
-    // Eliminates steady-state sideslip in turns and reduces the load on the
-    // FCS yaw damper (Phase A1). When the FCS yaw channel was stubbed this
-    // would have had no effect; with A1 un-stubbed it gives the damper a
-    // head start so it doesn't have to react to beta drift.
-    //
-    // coord_turn_scale: maps the physical pedal deflection (ft/s² in G-units)
-    // to the normalized [-1, +1] command space. The default 0.1 was
-    // calibrated against the EOM's pedal authority at eom.cpp:102 — at 250 kts
-    // and 30 deg bank, the feedforward produces ~0.15 pedal, well within the
-    // FCS's authority. Tune down for less-aggressive coordination, up for more.
-    double coord_turn_scale{0.1};
-    /// Max bank angle (rad) above which the feedforward saturates. Beyond this
-    /// the standard tan(bank) law produces excessive pedal authority; we clamp
-    /// to keep the FCS in its linear regime.
-    double coord_turn_max_bank_rad{0.7};  // ~40 deg
+    // --- Rudder (NAV-A) ---
+    // There are no rudder gains here on purpose: the AI commands
+    // yaw_cmd = 0 in sustained flight and the FCS yaw damper (fcs.cpp
+    // runYaw, Phase A1) holds beta ~ 0. The old Phase A2
+    // "rudder-for-bank" feedforward (tan(bank)*v/g, dimensionally
+    // inverted ~250x) pinned |beta| at the aero clamp in every turn —
+    // see air_steering.cpp for the full post-mortem. If adverse-yaw
+    // compensation is ever needed it belongs in the FCS as a
+    // roll-rate-proportional term, not a steady bank-proportional pedal.
 
     // --- Geometry helpers ---
     [[nodiscard]] static double bearing_to(const geo::WorldPosition& from,

@@ -198,58 +198,82 @@ TEST(AirSteeringSpeed, ThrottleNeverExceedsMIL) {
 // Coordinated-turn feedforward (Phase A2)
 // ============================================================================
 //
-// rudder-for-bank: pedal_ff = tan(bank_target) * v / g, mapped to the
-// normalized [-1, +1] command space via coord_turn_scale. Eliminates
-// steady-state sideslip in turns. See FLIGHT_CONTROL_NEXT_STEPS.md Phase A2.
+// NAV-A: the AI never commands steady-state rudder. The Phase A2
+// bank-proportional pedal feedforward was dimensionally inverted (~250x
+// too big) and pinned |beta| at the aero clamp in every turn — the
+// course_intercept/standard_rate_turn baselines measured a constant
+// 15 deg of sideslip. Coordination is the FCS yaw damper's job with the
+// pedals centered; these tests now pin that contract.
 
-TEST(AirSteeringCoordTurn, RightBankCommandsRightRudder) {
-    // Right turn (positive heading error) -> positive target bank -> the
-    // feedforward commands POSITIVE pedal (right rudder), which the EOM
-    // interprets as a turn-toward-bank (positive ypedal = right turn per
-    // the sign convention documented in air_steering.cpp).
+TEST(AirSteeringCoordTurn, RightBankCommandsZeroPedal) {
+    // A sustained right turn needs no steady rudder: the yaw damper holds
+    // beta ~ 0 with pedals centered. Any bank-proportional pedal here is
+    // the (removed) inverted feedforward creeping back.
     AirSteering as;
     const auto out = as.steer(0.5, 5000, 300, make_input(0, 5000, 0, 300));
-    EXPECT_GT(out.yaw_cmd, 0.0)
-        << "right bank should command right rudder (positive pedal)";
+    EXPECT_NEAR(out.yaw_cmd, 0.0, 1e-9)
+        << "sustained right bank must not command steady rudder";
 }
 
-TEST(AirSteeringCoordTurn, LeftBankCommandsLeftRudder) {
+TEST(AirSteeringCoordTurn, LeftBankCommandsZeroPedal) {
     AirSteering as;
     const auto out = as.steer(-0.5, 5000, 300, make_input(0, 5000, 0, 300));
-    EXPECT_LT(out.yaw_cmd, 0.0)
-        << "left bank should command left rudder (negative pedal)";
+    EXPECT_NEAR(out.yaw_cmd, 0.0, 1e-9)
+        << "sustained left bank must not command steady rudder";
 }
 
 TEST(AirSteeringCoordTurn, WingsLevelZeroPedal) {
-    // On-heading, wings level: bank_target is zero, feedforward is zero.
+    // On-heading, wings level: pedals centered.
     AirSteering as;
     const auto out = as.steer(1.2, 5000, 300, make_input(1.2, 5000, 0, 300, 0.0));
     EXPECT_NEAR(out.yaw_cmd, 0.0, 1e-9);
 }
 
-TEST(AirSteeringCoordTurn, PedalMagnitudeScalesWithBank) {
-    // Larger bank -> larger pedal command.
+TEST(AirSteeringCoordTurn, PedalStaysCenteredAcrossBanksAndSpeeds) {
+    // Sample the whole envelope: no bank/speed combination may produce a
+    // steady pedal command.
     AirSteering as;
-    const auto small = as.steer(0.1, 5000, 300, make_input(0, 5000, 0, 300));
-    const auto large = as.steer(0.5, 5000, 300, make_input(0, 5000, 0, 300));
-    EXPECT_GT(std::fabs(large.yaw_cmd), std::fabs(small.yaw_cmd));
+    for (double hdg_err : {-1.5, -0.5, -0.1, 0.1, 0.5, 1.5}) {
+        for (double vcas : {150.0, 250.0, 350.0, 450.0}) {
+            const auto out = as.steer(hdg_err, 5000, 300,
+                                      make_input(0, 5000, 0, vcas));
+            EXPECT_NEAR(out.yaw_cmd, 0.0, 1e-9)
+                << "hdg_err=" << hdg_err << " vcas=" << vcas;
+        }
+    }
 }
 
-TEST(AirSteeringCoordTurn, PedalClampedAtHighBank) {
-    // A 90-deg heading error commands max_bank (30 deg). The feedforward
-    // uses the clamped bank (not 90 deg), so the pedal stays finite.
+TEST(AirSteeringCoordTurn, RollStillCommandsDuringTurns) {
+    // The heading channel still banks: with a heading error the roll
+    // command is nonzero (right error -> right roll), even though the
+    // rudder stays centered. Guards against someone "fixing" the slip by
+    // zeroing the whole lateral channel.
     AirSteering as;
-    const auto out = as.steer(90 * D2R, 5000, 300, make_input(0, 5000, 0, 300));
-    EXPECT_LE(std::fabs(out.yaw_cmd), 1.0)
-        << "pedal must stay within [-1, +1] even at max bank";
-}
-
-TEST(AirSteeringCoordTurn, ZeroScaleDisablesFeedforward) {
-    // When coord_turn_scale is 0, the feedforward is disabled (the FCS yaw
-    // damper alone handles coordination). Allows easy A/B comparison in
-    // diagnostic runs.
-    AirSteering as;
-    as.coord_turn_scale = 0.0;
     const auto out = as.steer(0.5, 5000, 300, make_input(0, 5000, 0, 300));
-    EXPECT_NEAR(out.yaw_cmd, 0.0, 1e-9);
+    EXPECT_GT(out.roll_cmd, 0.0) << "right heading error must still roll right";
+}
+
+// ============================================================================
+// NAV-D: bank-compensated alpha feedforward
+// ============================================================================
+
+TEST(AirSteeringAltitude, BankedTurnCommandsMorePitchThanWingsLevel) {
+    // Same state except 30 deg of bank: holding altitude needs
+    // 1/cos(30) = 1.155x the alpha, so the pitch command must rise. This
+    // pins the in-turn altitude-hold feedforward (the "no pitch authority
+    // while banking" symptom from the course_intercept trace).
+    AirSteering as;
+    const auto level = as.steer(0.0, 5000, 300, make_input(0, 5000, 0, 300, 0.0, 0.05));
+    const auto banked = as.steer(0.0, 5000, 300,
+                                 make_input(0, 5000, 0, 300, 30.0 * D2R, 0.05));
+    EXPECT_GT(banked.pitch_cmd, level.pitch_cmd)
+        << "banked flight must command more pitch for the same altitude error";
+}
+
+TEST(AirSteeringAltitude, WingsLevelLiftCompensationIsUnity) {
+    // At zero bank the compensation is exactly 1.0: the legacy equilibrium
+    // tests (zero VS, zero error -> zero-ish stick) must still hold.
+    AirSteering as;
+    const auto out = as.steer(0.0, 5000, 300, make_input(0, 5000, 0, 300, 0.0, 0.05));
+    EXPECT_NEAR(out.pitch_cmd, 0.0, 1e-6);
 }

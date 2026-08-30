@@ -192,6 +192,7 @@ Scenario parse_scenario(f4::json::Reader& r) {
         else if (key == "record_path")     s.record_path = r.read_string();
         else if (key == "fcs_trace_path")  s.fcs_trace_path = r.read_string();
         else if (key == "start_in_approach") s.start_in_approach = r.read_bool();
+        else if (key == "start_enroute")     s.start_enroute = r.read_bool();
         else if (key == "aircraft") {
             r.expect('[');
             bool arr_first = true;

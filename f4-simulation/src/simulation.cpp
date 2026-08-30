@@ -133,12 +133,40 @@ void Simulation::load_aircraft_config() {
     aircraft_cfg_ = std::move(result.config);
 }
 
+void Simulation::normalize_waypoint_frame() {
+    // NAV-D2: rotate runway-frame waypoints into ENU about the airfield
+    // threshold. The rotation used to live ONLY at the end of
+    // derive_real_airbase() — so scenarios with a hand-authored (synthetic)
+    // airfield, which never call derive_real_airbase, handed the AI
+    // RUNWAY-FRAME waypoint coordinates while the aircraft flies in ENU.
+    // With the runway threshold 500 ft east of the frame origin the AI then
+    // flew a parallel course 500 ft off (course_intercept trace: perfect
+    // LNAV tracking of the WRONG line, xte pinned at -492 ft while the
+    // correction read 0). The same 500 ft shift leaks into the isolated
+    // landing scenarios' localizer geometry (the stubborn ~200-500 ft
+    // cross-track residual). Idempotent: the flag clears after rotation.
+    if (!scenario_.waypoints_runway_frame) return;
+    const double hs = scenario_.airfield.runway_heading_rad;
+    const double sh = std::sin(hs), ch = std::cos(hs);
+    const auto& thr = scenario_.airfield.threshold_position;
+    for (auto& wp : scenario_.waypoints) {
+        const double rx = wp.position.x;   // right of heading
+        const double ry = wp.position.y;   // downrange
+        wp.position.x = thr.x + rx * ch + ry * sh;
+        wp.position.y = thr.y - rx * sh + ry * ch;
+        // z (MSL) authored absolute — unchanged.
+    }
+    scenario_.waypoints_runway_frame = false;
+}
+
 void Simulation::spawn_aircraft() {
     // Dispatcher: pick the spawn path based on the scenario's spawn_mode.
     //   - ScenarioList (Phase 1): one entity per ScenarioAircraft entry,
     //     hand-authored parking spots + headings. Backward-compatible.
     //   - CampaignFlights (Phase 2): load world JSON + class table, find
     //     every Flight-class unit, spawn a child aircraft entity per flight.
+    normalize_waypoint_frame();  // NAV-D2 (idempotent; also done late in
+                                 // derive_real_airbase on the real path)
     if (scenario_.spawn_mode == SpawnMode::CampaignFlights) {
         spawn_from_campaign_flights();
     } else {
@@ -241,6 +269,9 @@ void Simulation::spawn_from_scenario_list() {
         plan.fly_traffic_pattern = scenario_.approach_is_pattern();
         if (scenario_.start_in_approach) {
             plan.start_phase = MissionPlan::StartPhase::Approach;
+        }
+        if (scenario_.start_enroute) {
+            plan.start_phase = MissionPlan::StartPhase::Enroute;
         }
         brain.set_mission_plan(std::move(plan));
 

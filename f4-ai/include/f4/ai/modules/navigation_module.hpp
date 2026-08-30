@@ -7,9 +7,23 @@
 // The module flies a sequence of waypoints (name, ENU position with target
 // altitude, target speed). Each tick it:
 //   1. Caches the aircraft state from IAircraftState.
-//   2. Advances to the next waypoint when within the capture radius.
+//   2. Advances to the next waypoint when within the turn-anticipation
+//      lead of the NEXT leg's course change (or the legacy abeam/capture
+//      rules as a fallback).
 //   3. Produces AIControlOutput via the shared AirSteering cascades,
-//      steering toward the current waypoint's bearing/altitude/speed.
+//      steering along the CURRENT LEG's course with a cross-track
+//      correction — not a bearing to the waypoint (NAV-B).
+//
+// NAV-B — leg tracking, not homing. The original law aimed at the waypoint
+// every tick (pure pursuit). That produces the classic pursuit signatures:
+// a bow-shaped intercept that never establishes on a course, the nose
+// slewing to keep pointing at the waypoint as it passes abeam, S-turning
+// between legs, and capture geometry that depends on closure rate. The
+// replacement is standard LNAV: steer the leg FROM the previous waypoint
+// TO the active one, with desired heading = leg course + a cross-track
+// correction angle (atan2(-xte, xte_gain_ft), clamped to a max intercept
+// angle), and sequence waypoints EARLY by the turn radius so the aircraft
+// rolls out of the corner established on the next leg.
 //
 // When the LAST waypoint is captured the module is Done. In the mission
 // sequence the last waypoint is the approach entry fix: BrainComponent
@@ -97,13 +111,65 @@ public:
         return current_heading_rad_;
     }
 
+    /// NAV-B: the LNAV desired heading for the ACTIVE leg — leg course +
+    /// cross-track correction (see controls_for_waypoint). Pure function
+    /// of the cached state; call after update(). Exposed for unit tests
+    /// and the FCS trace exporter.
+    [[nodiscard]] double nav_heading_rad() const;
+
+    /// NAV-B: signed cross-track distance from the ACTIVE leg's course
+    /// (+ = right of course). Exposed for the establishment gate and tests.
+    [[nodiscard]] double cross_track_ft() const;
+
     // --- Configuration ---
-    double capture_radius_ft{3000.0};  ///< waypoint capture radius
+    double capture_radius_ft{3000.0};  ///< waypoint capture radius (last wp)
     double abeam_capture_ft{15000.0};  ///< off-nose capture distance window
     double abeam_bearing_rad{1.4};     ///< ~80 deg off the nose = "passed it"
     double min_wp_dwell_s{30.0};       ///< min time on a wp before abeam capture
     double turn_speed_kts{250.0};      ///< slow to this for large heading changes
     double turn_slow_hdg_rad{0.8};     ///< ~45 deg heading error = "in a turn"
+
+    // --- NAV-B: leg tracking (cross-track LNAV) ---
+    /// Cross-track correction gain (ft). The correction angle is
+    /// atan2(-xte, xte_gain_ft): at xte_gain_ft of offset the correction
+    /// is 45 deg (before the max-intercept clamp). 4,000 ft converges a
+    /// post-corner 600-1,000 ft residual in one smooth cut (a 678 ft
+    /// error rides ~9.6 deg, closing in ~8 s) where 8,000 left the E/S
+    /// square legs "established-never" — still converging when the next
+    /// corner arrived. Smooth far-field: big offsets just clamp to the
+    /// 30-deg max intercept anyway.
+    double xte_gain_ft{5000.0};
+    /// NAV-B2: cross-track RATE damping (rad per rad of closing track
+    /// angle). 0.6: a 20-deg closing angle eases the intercept by ~13.6
+    /// deg — cancels the heading-loop lag that overshot each zero-crossing
+    /// by ~600 ft. Zero effect once settled on course.
+    double xte_damp_gain{0.6};
+    /// Maximum intercept angle off the leg course (rad). Deliberately
+    /// BELOW the 30-deg bank cap: at a 30-deg intercept the heading loop
+    /// flies at max bank just to hold the intercept angle, leaving no
+    /// authority to shape the convergence — the aircraft snakes through
+    /// the course without ever settling (standard_rate_turn E/S legs:
+    /// min|xte| reached 0 but |hdg-course| stayed >5 deg at every
+    /// crossing). 20 deg keeps the chase inside the bank envelope and
+    /// the convergence damped.
+    double max_intercept_rad{0.35};   // ~20 deg
+    /// Turn anticipation: lead = R*tan(dtheta/2) + turn_lead_lag_s * v,
+    /// with R = v^2/(g*tan(max_bank)). The geometric term is the textbook
+    /// symmetric-tangent construction (scale 1.0 EXACT — a 1.15 trial put
+    /// a systematic ~2,100 ft OUTSIDE overshoot on every 90-deg corner;
+    /// scale 1.0 alone UNDERSHOT ~1,100 ft inside because the FCS takes
+    /// ~2 s to roll into max bank, during which the aircraft flies
+    /// straight through the ideal arc start). The additive lag term
+    /// compensates exactly that: v feet per second of roll-in lag.
+    /// turn_lead_lag_s = 3.0 s matches the EFFECTIVE roll-in lag
+    /// (traces: ~2 s bank build + the FCS roll-rate filter lag; the
+    /// standard_rate_turn corners flew ~24 deg of arc behind nominal
+    /// with a 2 s allowance).
+    double turn_lead_lag_s{3.0};
+    /// Clamp on the computed lead distance (ft). The geometric lead for a
+    /// 180-deg reversal at 350+ kts exceeds 20k ft; beyond this the module
+    /// just sequences at the clamp and lets the cross-track law re-center.
+    double turn_lead_max_ft{22000.0};
 
     // Shared air control laws (heading/altitude/speed cascades). Public so
     // hosts can tune gains like the fields above.
@@ -128,6 +194,20 @@ private:
     void check_waypoint_capture();
     [[nodiscard]] AIControlOutput controls_for_waypoint() const;
     [[nodiscard]] AirSteering::Input steering_input() const noexcept;
+
+    /// NAV-B: the leg's anchor — the position the current leg started from
+    /// (the previous waypoint, or the aircraft position when the route was
+    /// set). The desired course is bearing(leg_from_ -> active wp).
+    geo::WorldPosition leg_from_{};
+
+    /// NAV-B: turn anticipation lead distance for the CURRENT waypoint
+    /// (ft). R*tan(|dtheta|/2) where dtheta is the course change onto the
+    /// NEXT leg; recomputed on each waypoint switch.
+    double turn_lead_ft_{0.0};
+
+    /// NAV-B: true once leg_from_ has been anchored to a real position
+    /// (set on the first update() after set_route()).
+    bool leg_initialized_{false};
 
     // Route + progress. wp_timer_ tracks seconds on the CURRENT waypoint
     // (guards the abeam capture — see check_waypoint_capture).

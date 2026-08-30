@@ -207,6 +207,12 @@ struct Scenario {
     /// tick; the FM needs to be airborne to fly).
     bool start_in_approach{false};
 
+    /// NAV-D1: when true, spawn airborne and hand the route directly to the
+    /// NavigationModule (skips taxi/takeoff). Used by the LNAV diagnostic
+    /// scenarios (course_intercept, standard_rate_turn). Requires the first
+    /// aircraft's spawn_in_air to be true and a non-empty waypoint route.
+    bool start_enroute{false};
+
     /// Static feature placements on the airfield — buildings, runway sections,
     /// taxiways, towers, hangars. Spawned as TransformComponent +
     /// VisualModelComponent entities (no FM, no brain). The renderer iterates

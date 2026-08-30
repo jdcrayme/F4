@@ -1,5 +1,5 @@
 {
-  "name": "on_glideslope",
+  "name": "standard_rate_turn",
   "theater": "korea",
   "terrain_json_path": "@F4_BINARY_DIR@/korea.terrain.json",
   "models_hdr_path": "@F4_SOURCE_DIR@/temp/KoreaObj.HDR",
@@ -11,10 +11,10 @@
       "aircraft_config_path": "@F4_BINARY_DIR@/generated_fixtures/f16.json",
       "aircraft_name": "F-16C_50",
       "vis_type_index": 1052,
-      "parking_spot": { "x": 500.0, "y": -7000.0, "z": 794.0 },
+      "parking_spot": { "x": 500.0, "y": 28000.0, "z": 10000.0 },
       "heading_rad": 0.0,
       "initial_fuel_lbs": 6500.0,
-      "initial_vt_fps": 340.0,
+      "initial_vt_fps": 506.0,
       "spawn_in_air": true
     }
   ],
@@ -25,7 +25,7 @@
     "threshold_position": { "x": 500.0, "y": 8000.0, "z": 50.0 },
     "runway_end_position": { "x": 500.0, "y": 13000.0, "z": 50.0 },
     "threshold_altitude_ft": 50.0,
-    "departure_altitude_ft": 3000.0,
+    "departure_altitude_ft": 10000.0,
     "taxi_route": [{ "x": 0.0, "y": 0.0, "z": 50.0 }, { "x": 500.0, "y": 8000.0, "z": 50.0 }],
     "taxi_in_route": [{ "x": 500.0, "y": 8500.0, "z": 50.0 }, { "x": 0.0, "y": 0.0, "z": 50.0 }]
   },
@@ -35,11 +35,16 @@
     { "name": "Runway Section 3", "vis_type_index": 121, "position": { "x": 500.0, "y": 12500.0, "z": 50.0 }, "heading_rad": 0.0 }
   ],
   "waypoints_frame": "runway",
-  "waypoints": [{ "name": "FINAL_FIX", "position": { "x": 0.0, "y": -15000.0, "z": 794.0 }, "speed_kts": 160.0 }],
+  "waypoints": [
+    { "name": "N1", "position": { "x": 0.0, "y": 60000.0, "z": 10000.0 }, "speed_kts": 300.0 },
+    { "name": "E1", "position": { "x": 50000.0, "y": 60000.0, "z": 10000.0 }, "speed_kts": 300.0 },
+    { "name": "S1", "position": { "x": 50000.0, "y": 10000.0, "z": 10000.0 }, "speed_kts": 300.0 },
+    { "name": "W1", "position": { "x": 0.0, "y": 10000.0, "z": 10000.0 }, "speed_kts": 300.0 }
+  ],
   "approach": "straight_in",
-  "start_in_approach": true,
-  "sim_dt": 0.016666666666666666,
-  "total_ticks": 12000,
+  "start_enroute": true,
+  "sim_dt": 0.016666666666666,
+  "total_ticks": 26000,
   "record": false,
-  "fcs_trace_path": "@F4_BINARY_DIR@/on_glideslope_trace.csv"
+  "fcs_trace_path": "@F4_BINARY_DIR@/standard_rate_turn_trace.csv"
 }

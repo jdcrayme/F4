@@ -669,20 +669,35 @@ void FlightControlSystem::runYaw(double dt, double qbar, double qsom,
     double betcmd = std::clamp((eprop + eintg) * fcs.ylsdamp, betmin, betmax);
     fcs.betcmd = angle_from_degrees(betcmd);
 
-    // --- Apply commanded beta to the aero state (Phase A1) ---
+    // --- Apply commanded beta to the aero state (Phase A1, revised NAV-C) ---
     //
-    // Previously this was stubbed (`aero.beta = 0`) because the EOM has no
-    // rudder actuator lag — driving beta directly was thought to create
-    // positive feedback. In reality the EOM computes yaw rate `r` from
-    // `nycgw`, and `nycgw` is computed by the aero module from `beta`
-    // (yaero = cy * qsom * (beta - ...)). With the correct sign of `ky05`
-    // (preserved at line 333-336 above), this forms a NEGATIVE feedback
-    // loop (a yaw damper): if beta drifts positive, the PI controller
-    // commands a negative beta correction, which produces a restoring
-    // yaw rate that brings beta back to zero. This is exactly the
-    // coordinated-turn damping the aircraft was missing (see
-    // FLIGHT_CONTROL_STABILITY_PLAN.md §4.1 RC-1).
+    // Previously this was stubbed (`aero.beta = 0`). Phase A1 un-stubbed it
+    // as an nycgw-regulating "damper", but the regulation target is wrong:
+    // nycgw = ywaero/g includes the wind-axes bookkeeping term
+    // -xsaero*sin(beta) = +drag*sin(beta) (aerodynamics.cpp:290) — the
+    // rotation of DRAG into the wind axes, not a physical side force to be
+    // nulled. Regulating ywaero -> 0 with beta as the actuator is positive
+    // feedback through that term: the trace shows betcmd railing from the
+    // first tick and pinning |beta| at the 15-deg aero clamp for the ENTIRE
+    // flight (course_intercept t=0-260: beta 15.00 constant, wings level
+    // or banked, zero pedal) — a permanent ~50 ft/s lateral drift.
     //
+    // In this EOM the FCS sets aero.beta DIRECTLY (there is no rudder
+    // actuator): with the pedals centered the commanded sideslip IS zero —
+    // that is the definition of coordinated flight in this model (beta=0
+    // => ywaero=0 => yaw rate comes purely from the bank-kinematics term
+    // in eom.cpp:195). So: pedal centered -> beta = 0, integrator reset.
+    // The PI shaper below remains only for deliberate pilot sideslip
+    // commands (nothing in the AI commands airborne pedal; ground steering
+    // is nosewheel-authority and gated off by the gear guard below).
+    constexpr double PEDAL_DEADBAND = 1e-6;
+    if (std::fabs(input.ypedal) < PEDAL_DEADBAND) {
+        fcs.yawIntegral.reset(0.0);
+        fcs.betcmd = zero_angle();
+    } else {
+        fcs.betcmd = angle_from_degrees(betcmd);
+    }
+
     // Ground guard: on the ground at low speed, the gear clamp controls
     // heading directly via nose-wheel steering, and the aero model can't
     // produce meaningful side force. Hold beta at 0 in that regime to
@@ -696,7 +711,7 @@ void FlightControlSystem::runYaw(double dt, double qbar, double qsom,
         // (Mirrors the alpha_dot computation in runPitch.)
         const double old_beta_deg = to_degrees(beta);
         aero.beta_dot = angular_rate_from_degrees_per_second(
-            (betcmd - old_beta_deg) / std::max(dt, QSOM_FLOOR));
+            (to_degrees(fcs.betcmd) - old_beta_deg) / std::max(dt, QSOM_FLOOR));
     }
 }
 

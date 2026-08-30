@@ -483,4 +483,37 @@ TEST(FcsYaw, NoGroundGuardWhenGearDownButQsomHigh) {
     EXPECT_NO_FATAL_FAILURE();
 }
 
+TEST(FcsYaw, CenteredPedalsHoldBetaAtZeroInFlight) {
+    // NAV-C: with the pedals centered, airborne, at meaningful qsom, the
+    // commanded sideslip is EXACTLY zero — coordinated flight. The old
+    // nycgw-regulating "damper" railed betcmd to the ±15-deg aero clamp
+    // from the first tick and pinned it there for entire flights (the
+    // permanent-sideslip bug: ~50 ft/s lateral drift with wings level).
+    // The regulation target was wrong: nycgw includes the wind-axes
+    // bookkeeping term -xsaero*sin(beta) = +drag*sin(beta), so driving
+    // ywaero -> 0 via beta is positive feedback.
+    SyntheticFcs sf;
+    FlightControlSystem fcs(&sf.cfg, &sf.geom, &sf.aux);
+
+    FcsState fcs_state;
+    AeroState aero;
+    aero.gearPos = 0.0;  // gear up — airborne
+    PilotInput input = makeInput();
+    input.ypedal = 0.0;  // feet off the pedals
+
+    fcs.update(input, makeFc(/*qbar=*/100.0, /*qsom=*/10.0),
+               fcs_state, aero, /*dt=*/0.01);
+
+    EXPECT_NEAR(to_degrees(aero.beta), 0.0, 1e-9)
+        << "centered pedals must command zero sideslip (coordinated flight)";
+
+    // And it STAYS zero: run a burst of updates with some nonzero nycgw
+    // feed-through (the PI must not wind up and re-introduce beta later).
+    for (int i = 0; i < 300; ++i) {
+        fcs.update(input, makeFc(100.0, 10.0), fcs_state, aero, 1.0 / 60.0);
+    }
+    EXPECT_NEAR(to_degrees(aero.beta), 0.0, 1e-9)
+        << "beta must stay at zero with pedals centered (no integrator windup)";
+}
+
 }  // namespace f4::flight

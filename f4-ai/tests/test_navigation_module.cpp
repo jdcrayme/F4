@@ -180,3 +180,153 @@ TEST(NavigationModule, AcceptsTrace) {
     mod.set_trace(&trace);
     EXPECT_NE(mod.trace(), nullptr);
 }
+
+// ============================================================================
+// NAV-B: leg tracking (cross-track LNAV) + turn anticipation
+// ============================================================================
+
+TEST(NavigationLnav, EstablishedOnCourseCommandsCourse) {
+    // Mid-leg, on the centerline: the commanded heading IS the leg course
+    // (0 = due north). The old pursuit law also gave 0 here only because
+    // the aircraft happened to be exactly on the bearing line — this pins
+    // the LNAV math (right-vector xte must be exactly 0 on the line).
+    NavigationModule mod;
+    mod.set_route({make_wp("WP1", 0, 100000, 10000)});
+    auto s = make_state(0, 50000, 10000, /*hdg=*/0.0);
+    mod.update(0.1, s.get());
+    EXPECT_NEAR(mod.nav_heading_rad(), 0.0, 1e-9);
+}
+
+TEST(NavigationLnav, RightOfCourseSteersLeftOfCourse) {
+    // 5,000 ft right of a due-north LEG (anchored at BACK 20,000 ft behind
+    // the aircraft — route activation skips BACK and flies the BACK->WP1
+    // leg): the raw correction atan2(-5000, 5000) = -45 deg clamps to the
+    // 20-deg max intercept (kept below the bank cap so the convergence is
+    // damped, not rate-limited). The old pursuit law commanded only -3.6
+    // deg (bearing to the wp) — this is the homing-vs-intercept
+    // distinction.
+    NavigationModule mod;
+    mod.set_route({make_wp("BACK", 0, 0, 10000),
+                   make_wp("WP1", 0, 100000, 10000)});
+    auto s = make_state(5000, 20000, 10000, /*hdg=*/0.0);
+    mod.update(0.1, s.get());
+    EXPECT_EQ(mod.current_waypoint_index(), 1u);
+    EXPECT_NEAR(mod.nav_heading_rad(), -mod.max_intercept_rad, 0.02);
+}
+
+TEST(NavigationLnav, LeftOfCourseSteersRight) {
+    // Mirror case: 2,000 ft left -> raw +21.8 deg clamps to +20 (with
+    // wings-level heading the track-rate damping term is zero).
+    NavigationModule mod;
+    mod.set_route({make_wp("BACK", 0, 0, 10000),
+                   make_wp("WP1", 0, 100000, 10000)});
+    auto s = make_state(-2000, 20000, 10000, /*hdg=*/0.0);
+    mod.update(0.1, s.get());
+    EXPECT_NEAR(mod.nav_heading_rad(), mod.max_intercept_rad, 0.02);
+}
+
+TEST(NavigationLnav, InterceptAngleSaturates) {
+    // 14,000 ft right (inside the abeam window so leg 1 is active):
+    // raw correction atan2(-14k, 8k) = -60 deg clamps at
+    // max_intercept_rad, never more — an aircraft bank-limited to 30 deg
+    // cannot fly a steeper stable intercept anyway. (50k ft off would NOT
+    // reach leg 1 — the abeam-window rule sends it to wp0 first, which is
+    // the correct consolidation behavior.)
+    NavigationModule mod;
+    mod.set_route({make_wp("BACK", 0, 0, 10000),
+                   make_wp("WP1", 0, 100000, 10000)});
+    auto s = make_state(14000, 20000, 10000, /*hdg=*/0.0);
+    mod.update(0.1, s.get());
+    EXPECT_EQ(mod.current_waypoint_index(), 1u);
+    EXPECT_NEAR(mod.nav_heading_rad(), -mod.max_intercept_rad, 1e-9);
+}
+
+TEST(NavigationLnav, PastAbeamStillFlysTheCourse) {
+    // 2,000 ft right and 4,000 ft BEYOND the active waypoint (4,472 ft
+    // total — outside the 3,000 ft capture radius): pursuit guidance
+    // reverses (bearing to wp = -117 deg, the "nose slews to point at the
+    // waypoint as it passes" symptom). LNAV keeps flying the course with
+    // a bounded correction (-14 deg) — capture sequencing handles the
+    // waypoint, not the steering law.
+    NavigationModule mod;
+    mod.set_route({make_wp("PREV", 0, -100000, 10000),
+                   make_wp("WP_LAST", 0, 100000, 10000)});
+    auto s = make_state(2000, 104000, 10000, /*hdg=*/0.0);
+    mod.update(0.1, s.get());
+    EXPECT_EQ(mod.current_waypoint_index(), 1u);  // on the last leg, not captured
+    const double hdg = mod.nav_heading_rad();
+    EXPECT_NEAR(hdg, -mod.max_intercept_rad, 0.02)
+        << "past-abeam must not reverse toward the waypoint";
+    EXPECT_GT(hdg, -1.0) << "must stay within 57 deg of course (no pursuit reversal)";
+}
+
+TEST(NavigationLnav, TurnAnticipationSequencesEarly) {
+    // 10,000 ft from WP1 with a 90-deg turn onto leg 2 at 300 kts:
+    // R = v^2/(g*tan(30deg)) ~ 13,900 ft, lead = 1.15*R*tan(45) ~ 16,000
+    // ft. The module must sequence NOW (dist < lead) so the turn rolls
+    // out established on the next leg — the pursuit code stayed on WP1
+    // until the 3,000 ft capture radius (by then: guaranteed overshoot).
+    NavigationModule mod;
+    mod.set_route({make_wp("WP1", 0, 100000, 10000),
+                   make_wp("WP2", 100000, 100000, 10000)});
+    auto s = make_state(0, 90000, 10000, /*hdg=*/0.0, /*vcas=*/300.0);
+    mod.update(0.1, s.get());
+    EXPECT_EQ(mod.current_waypoint_index(), 1u)
+        << "must sequence to WP2 early (turn anticipation)";
+}
+
+TEST(NavigationLnav, LastWaypointStillCapturesByRadius) {
+    // No next leg -> no turn anticipation: the last waypoint uses the
+    // plain capture radius (nothing to establish on afterwards).
+    NavigationModule mod;
+    mod.set_route({make_wp("WP1", 0, 100000, 10000)});
+    auto s = make_state(0, 96000, 10000, /*hdg=*/0.0);  // 4,000 ft out
+    mod.update(0.1, s.get());
+    EXPECT_EQ(mod.current_waypoint_index(), 0u)
+        << "4,000 ft from the LAST waypoint: no early sequencing";
+    s = make_state(0, 98000, 10000, /*hdg=*/0.0);       // 2,000 ft out
+    mod.update(0.1, s.get());
+    EXPECT_TRUE(mod.is_complete()) << "inside capture radius: Done";
+}
+
+TEST(NavigationLnav, StraightThroughRouteUsesNoLead) {
+    // Collinear legs (dtheta = 0): lead = 0, sequencing behaves like the
+    // old capture-radius rule.
+    NavigationModule mod;
+    mod.set_route({make_wp("WP1", 0, 100000, 10000),
+                   make_wp("WP2", 0, 200000, 10000)});
+    auto s = make_state(0, 90000, 10000, /*hdg=*/0.0, /*vcas=*/300.0);
+    mod.update(0.1, s.get());
+    EXPECT_EQ(mod.current_waypoint_index(), 0u)
+        << "straight-through course change: no early sequencing";
+    s = make_state(0, 99000, 10000, /*hdg=*/0.0);
+    mod.update(0.1, s.get());
+    EXPECT_EQ(mod.current_waypoint_index(), 1u);
+}
+
+TEST(NavigationLnav, SpawnEstablishedOnFirstLegSkipsToSecond) {
+    // Aircraft 40,000 ft past wp0, 5,000 ft right of the wp0->wp1 course
+    // (route activation over an existing leg): the module must anchor on
+    // wp0 and fly leg 1 with a cross-track correction — NOT fly a course
+    // through itself at wp1 (homing).
+    NavigationModule mod;
+    mod.set_route({make_wp("WP0", 0, 0, 10000),
+                   make_wp("WP1", 0, 100000, 10000)});
+    auto s = make_state(5000, 40000, 10000, /*hdg=*/0.0);
+    mod.update(0.1, s.get());
+    EXPECT_EQ(mod.current_waypoint_index(), 1u)
+        << "spawn past WP0 within the abeam window: fly leg 1";
+    EXPECT_NEAR(mod.nav_heading_rad(), -mod.max_intercept_rad, 0.02)
+        << "5,000 ft right of the leg: clamped left intercept";
+}
+
+TEST(NavigationLnav, SpawnFarFromFirstLegFliesToWaypointZero) {
+    // 50,000 ft off the wp0->wp1 line (outside the abeam window): wp0 is
+    // a real first waypoint — anchor at the aircraft and fly to wp0.
+    NavigationModule mod;
+    mod.set_route({make_wp("WP0", 0, 0, 10000),
+                   make_wp("WP1", 0, 100000, 10000)});
+    auto s = make_state(50000, 40000, 10000, /*hdg=*/0.0);
+    mod.update(0.1, s.get());
+    EXPECT_EQ(mod.current_waypoint_index(), 0u);
+}
