@@ -259,12 +259,23 @@ void SensorFusion::rebuild_target_list() {
         compute_threat_score(t);
 
         // Detection sources (after geometry, so we can range-gate).
-        // GCI (Ground Controlled Intercept / AWACS net) sees everything
-        // within the theater by definition.
-        t.detected_by_gci    = true;
-        t.detected_by_radar  = (t.range_nm <= cfg_.max_radar_range_nm)  && t.is_hostile;
-        t.detected_by_rwr    = (t.range_nm <= cfg_.max_rwr_range_nm)    && t.is_hostile;
-        t.detected_by_visual = (t.range_nm <= cfg_.max_visual_range_nm);
+        // M2: a DetectionPolicy override replaces the built-in rules (the
+        // f4-sensors-backed adapter arrives at M3). Without one, the legacy
+        // rules apply: GCI sees everything within the theater by
+        // definition; radar/RWR are range-gated and hostile-filtered;
+        // visual is range-only.
+        if (policy_ != nullptr) {
+            const auto v = policy_->classify(t);
+            t.detected_by_radar  = v.radar;
+            t.detected_by_rwr    = v.rwr;
+            t.detected_by_visual = v.visual;
+            t.detected_by_gci    = v.gci;
+        } else {
+            t.detected_by_gci    = true;
+            t.detected_by_radar  = (t.range_nm <= cfg_.max_radar_range_nm)  && t.is_hostile;
+            t.detected_by_rwr    = (t.range_nm <= cfg_.max_rwr_range_nm)    && t.is_hostile;
+            t.detected_by_visual = (t.range_nm <= cfg_.max_visual_range_nm);
+        }
 
         // EWMA smoothing — find the previous snapshot for this entity.
         const TargetInfo* prev = nullptr;

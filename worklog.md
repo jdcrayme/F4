@@ -2918,3 +2918,98 @@ Stage Summary:
 - Deliverables: /home/z/my-project/download/F4-nav-fixes.patch (applies on d48d0fd) + /home/z/my-project/download/F4-nav-traces/ (before/after run logs + CSV traces + nav_metrics.py).
 - All four user-reported symptoms have trace-verified fixes: slip (NAV-A+C), takeoff jump (NAV-A + gear-guard release no longer steps beta), homing (NAV-B LNAV), altitude loss in turns/enroute (NAV-D + NAV-E).
 - Known residuals: E/S square-leg 5-deg settle interrupted by corner anticipation; ~110 ft touchdown cross error (same class as baseline's 212); touchdown speed still ~200 kts (flare bleeds little speed).
+
+---
+Task ID: WEAPONS-1
+Agent: main (orchestrator)
+Task: Draft the combat-chain plan (Docs/COMBAT_CHAIN_PLAN.md) and implement Milestone M1 (f4-weapons core) per user request: "Draft the plan and begin implementation. When you have something ready for test, provide a downloadable patch file."
+
+Work Log:
+- Audited the repo for combat capability: no radar detection model (SensorFusion is geometry + GCI-omniscience), no weapons inventory, no missile flyout, no aircraft-level damage model. The layered FSM has 2 consumers (ATC, stall). Conclusion recorded in COMBAT_CHAIN_PLAN.md section 1.
+- Wrote Docs/COMBAT_CHAIN_PLAN.md: 4 milestones (M1 weapons/effects core -> M2 f4-sensors -> M3 combat AI modules = AI_IMPLEMENTATION_PLAN Steps 6-12 -> M4 combat E2E scenario), design decisions, work breakdown, acceptance criteria. M1 is this patch.
+- New library f4-weapons (STATIC; deps f4-geo, f4-math, f4-entities, f4-messaging; deliberately NOT f4-flight-model or f4-ai):
+  * weapon_types.hpp + weapon_class_table.cpp — WeaponClassRecord data cards + registry; built-in placeholder set (M61A1, AIM-9M, AIM-7M, AIM-120C, MK-82) with flyout invariants; FALCON4.WST import deferred (M2+).
+  * damage.cpp — apply_damage(): warhead power vs target hit points, LINEAR range falloff inside lethal radius, spread factor [0.75,1.25] drawn by the CALLER (pure math, deterministic); kill = HP exhausted. Note: an initial squared-falloff design made proximity-fuze detonations do ~3% of warhead power (nothing ever dies) — replaced with linear, documented in damage.hpp.
+  * missile.cpp — pure 3-DOF point-mass flyout: thrust + linear mass depletion, exponential atmosphere drag (documented 10-line local duplicate; f4-flight-model NOT linked), gravity, speed cap applied AFTER gravity (envelope on final state), TRUE PN in vector form a = N' * Vc * (omega x v_hat) with max-G clamp, seeker cone/range loss -> Ballistic, fuze at fuze_radius OR closest-approach (min_range tracked, grows 2 ticks, inside 8x lethal), self-destruct at TOF. No RNG anywhere.
+  * weapon_store.cpp — WeaponStoreComponent (passive): stations/rounds/selection, expend never negative, select_next_loaded skips dry, find_with_category, standard_fighter() loadout builder.
+  * missile_battery.cpp — missiles as ECS ENTITIES (FreeFalcon VuEntity model): MissileComponent (state + damage-potential snapshot so detonation never needs the table) + MissileSimComponent (BehavioralComponent, priority 40 = physics pass; ticks flyout, mirrors state into TransformComponent, runs fuze, applies damage, publishes terminal messages); launch_missile() is the only sanctioned creation path (validates category, debits store BEFORE creating anything, muzzle offset 15 ft along shooter velocity, copies team tag + CampaignIdentityComponent for IFF); sweep_spent_missiles() destroys terminal entities BETWEEN ticks (never inside update_all); count_live_missiles().
+  * gun.cpp — GunStream: tracers are NOT entities (6,000 rpm would flood the ECS); rate-based emission with fractional carry, seeded std::mt19937 disc-uniform dispersion on a perpendicular basis, semi-implicit Euler integration (gravity then move with updated velocity — tests pin this ordering), proximity hits vs TransformComponent-bearing entities (shooter immune), kGunHitRadiusFt == per-round lethal radius so every detected hit lands inside the falloff cone; optional MessageBus (FlightModel pattern).
+  * messages.hpp — MissileLaunchedMessage, MissileDetonatedMessage (+MissileEndCause), DamageAppliedMessage, EntityKilledMessage, GunFiredMessage — plain structs, one per event, per the flight-model bus convention.
+- f4-entities: added DamageStateComponent (hit_points, max_hit_points, killed, killed_by, killed_at_tick) next to the unit components — the entity-level counterpart of the objective-feature DamageBitmapComponent; f4-world will populate from VCD hit_points later. "Killed" is a component transition + message, NOT an entity destroy (death semantics belong to higher layers).
+- Root CMakeLists.txt: add_subdirectory(f4-weapons) after f4-io. README.md: f4-weapons section (API example + module list).
+- Tests (6 executables, 54 cases, all green): test_damage (13), test_missile (14: burnout mass profile, PN nulls LOS rate on lead + unled crossing targets, max-G clamp measured with gravity stripped from delta-v, seeker cone loss, fuze radius, closest-approach, TOF expiry, drag deceleration, speed cap, from_record deg->rad), test_weapon_store (7), test_weapon_table (4 incl. built-in flyout invariants), test_gun (7: rate-based emission, tracer lifetime, semi-implicit Euler gravity ordering, proximity damage, shooter immunity, bare-target round consumption, dispersion cone measured on a straight-DOWN shot so gravity adds no lateral component, burst announcement on bus), test_engagement (4 E2E).
+
+Results:
+- Headless build (F4_BUILD_*=OFF, GCC 14.2, CMake 4.4.3): f4-weapons + all test targets compile clean under -Wall -Wextra -Wpedantic, zero warnings.
+- f4-weapons test suites: 54/54 PASS, including Engagement.FullAirToAirChainFromLaunchToKill — shooter + crossing target 10 NM out in a bare EntityWorld; launch_missile debits the store (8->7); world.update_all() ticks the MissileSimComponent; PN converges the intercept; fuze detonates at TargetHit with miss_distance < 200 ft; DamageApplied + EntityKilled messages fire exactly once; DamageStateComponent.killed=true with killed_by attribution; sweep removes the missile entity; idempotent.
+- Full suite: 1,497 tests, 1,491 pass, 6 fail — the SAME 6 (PilotInputTest.ValidateClamps* x5, EngineModel.DefaultConstructedHasNoTables) verified failing at PRISTINE c694444 via git stash (pre-existing environment issues, not from this patch). DigiMission x2 SKIP without korea_real.world.json (documented behavior).
+- Design decisions recorded for the next agent: (1) missiles are entities, gun tracers are not; (2) the missile sim does not depend on f4-flight-model; (3) guidance reads the target TransformComponent directly at M1 — M2's sensor model swaps in the seeker source; (4) M1 has no datalink midcourse, so employment beyond seeker range coasts ballistic (the built-in AIM-120C seeker range is 15 NM vs 40 NM Rmax on purpose); (5) damage spread RNG lives at the call site, not in the math.
+
+Stage Summary:
+- Patch: /home/z/my-project/download/f4-combat-m1-weapons-core.patch (applies cleanly to c694444; git apply). 22 files: new f4-weapons library (8 headers, 6 sources, 6 test files, 2 CMakeLists), Docs/COMBAT_CHAIN_PLAN.md, DamageStateComponent in f4-entities, root CMakeLists + README updates, this worklog entry.
+- The combat chain now has its bottom layer: stores -> launch -> guided flyout -> fuze -> damage -> kill events, fully ECS-native and bus-integrated. M3's BVRModule can fire through this exact path (test_engagement.cpp is the worked example).
+- Next: M2 f4-sensors (radar detection + track files + RWR) so SensorFusion stops being GCI-omniscient; then M3 tactic modules. Known M1 simplifications (documented in COMBAT_CHAIN_PLAN.md section 5): no WST parsing, no countermeasures, no A-G flyout profiles, no datalink target updates.
+
+---
+Task ID: WEAPONS-1b
+Agent: main (orchestrator, fresh session)
+Task: Re-verify the staged WEAPONS-1 deliverable end to end in a new session and reissue the downloadable patch.
+
+Work Log:
+- Patch integrity: git worktree at pristine c694444 + `git apply --check` passes; applied with --index and diffed against the staged set -> byte-identical (28 files, 3,331 insertions). Temp worktree removed afterwards.
+- Rebuild from the existing headless build dir (GCC 14.2, CMake 4.4.3, renderer/viewer/scenario-player/model-viewer OFF): `cmake --build . -j` completes, 100% targets built, f4-weapons + test targets compile clean.
+- Full ctest re-run: same result as WEAPONS-1 — 6 failures out of 1,497 run, and all 6 are the pre-existing set (PilotInputTest.ValidateClamps* x5, EngineModel.DefaultConstructedHasNoTables). Spot-checked PilotInputTest.ValidateClampsPstick directly: deterministic assertion inside f4-flight-api/src/pilot_input.cpp:21, a file this patch never touches (fails identically at pristine c694444 per WEAPONS-1's git-stash check).
+- f4-weapons suites re-run in isolation: 54/54 PASS, including Engagement.FullAirToAirChainFromLaunchToKill.
+- Reviewed the README f4-weapons section and the patch header for user-facing coherence (API example matches launch_missile/WeaponStoreComponent::standard_fighter signatures).
+- Appended this entry, staged it, regenerated the patch from the staged set, re-verified apply --check on pristine c694444.
+
+Stage Summary:
+- Deliverable re-confirmed: /home/z/my-project/download/f4-combat-m1-weapons-core.patch (now includes this worklog entry; applies cleanly to c694444 with git apply).
+- Verification matrix: patch==staged set; build clean; 54/54 weapons tests; full suite green except 6 pre-existing environment failures unrelated to the patch.
+- Next milestone unchanged: M2 f4-sensors (radar detection model + track files + RWR, replacing SensorFusion's GCI-omniscience).
+
+---
+Task ID: WEAPONS-2 (M2)
+Agent: main (orchestrator)
+Task: Implement COMBAT_CHAIN_PLAN.md Milestone M2 — f4-sensors (radar detection model, track files, RWR) plus the two integration hooks (missile seeker_source, SensorFusion detection policy). User instruction: "Proceed as recommended."
+
+Work Log:
+- New library f4-sensors (STATIC; deps f4-geo, f4-math, f4-entities, f4-messaging; deliberately NOT f4-ai or f4-weapons):
+  * detection.cpp — PURE model: aspect_lobe_factor (piecewise-linear fighter lobe: nose 1.0, beam 0.30, tail 0.65, documented placeholder until Falcon4.RCD import), detection_range_nm (fourth-root RCS scaling x closure factor clamped to +-25% at 2000 fps), detection_probability (1.0 inside 0.75*R_det knee, linear ramp to 0 at R_det). No RNG, no state — sampling is the caller's job (same discipline as apply_damage).
+  * radar_types.hpp — RadarParameters (40 NM vs 5 m^2 reference card, shaped for a future RCD loader), ScanVolume (bar center/half-width, elevation limits, range scale; shortest-arc containment so a north-centered bar wraps 350<->010), RadarMode (Search/Track), TargetSignature.
+  * track_store.cpp — PURE track files: quality += 0.34 per detection, exp decay tau=8 s when coasting, stale timeout 20 s; state ladder Tentative -> Established -> Coasting -> Dropped (Established = quality >= 0.6 AND detected this pass); IFF hostile_by_iff = (team != own_team); NCTR string carried (policy stays with the caller); std::map keyed by entity_id for deterministic iteration; decay_untracked() returns exactly the ids that dropped THIS call.
+  * radar_component.cpp — RadarSimComponent (behavioral, priority 45: after flight models 50 so scans see this tick's positions, before missile sims 40): scan_interval carry via fmod, candidate set = all other TransformComponent entities (Phase D rule: radar detects ALL contacts, IFF classifies afterwards) or the locked target in Track mode; per-candidate geometry (to_bra bearing, atan2 elevation, LOS closure, aspect off target's nose from velocity heading, RCS from SignatureComponent else reference); seeded mt19937 detection rolls; on_detection -> track acquired message once per entity; decay_untracked -> dropped message exactly once; Track mode auto-reverts to Search when the locked target vanishes or its track drops; config fields (own_team, track_config, rng_seed) baked lazily on first update so spawn code can set them after add<>().
+  * rwr.cpp — RwrModel PURE classification (missile > lock > search per emitter, range-gated, sorted Launch/Lock/Search then by id) + update_rwr() world sweep: gathers emitters from RadarSimComponents (Track on victim = LOCK; search beam covering victim = SEARCH strobe) and ROLE="missile" entities in range (= LAUNCH; geometry-based, no f4-weapons dependency), diffs against the previous picture, publishes RwrWarningMessage on NEW lock/launch only (search strobes are component state — per-scan publishes would flood the bus); RwrComponent caches warnings + lock/launch activity + new_lock/new_launch transition flags for brains.
+  * signature.hpp — SignatureComponent (rcs_m2, default 5) in f4-sensors, not f4-entities: observability is a sensor concept.
+  * messages.hpp — RadarTrackAcquiredMessage / RadarTrackDroppedMessage (transition-only publishing).
+- f4-weapons (M2 hooks): MissileComponent gains seeker_source (std::function returning TargetSnapshot; empty = M1 direct transform read) — the point where track quality / jamming enter the flyout; Missile::tick gains seeker re-acquisition (Ballistic -> Guided when the seeker sees the target again — the behavior M1 explicitly deferred to the sensor model); test_engagement SeekerSourceOverrideControlsGuidance proves blind -> Ballistic -> re-acquire.
+- f4-ai (M2 hook): SensorFusion::DetectionPolicy (pure virtual, non-owning) — when set, replaces the legacy range-gated detection rules per candidate; nullptr = legacy GCI behavior. The f4-sensors-backed adapter lives at host/M3 (f4-ai must not link f4-sensors); SensorFusion.DetectionPolicyOverridesLegacySources proves the hook with a stand-in track-only policy. The DEFAULT FLIP to sensor-backed detection is deferred to M3 deliberately: flipping now would blind every AI (no tactics exist to replace the GCI picture).
+- Root CMakeLists: add_subdirectory(f4-sensors) after f4-weapons. README: f4-sensors section (API example + module list). COMBAT_CHAIN_PLAN.md: M2 marked *(landed)* with the included set + documented simplifications (RCD placeholder envelope, SensorFusion default flip deferred).
+
+Results:
+- Headless build (F4_BUILD_*=OFF, GCC 14.2, CMake 4.4.3): f4-sensors + all targets compile clean under -Wall -Wextra -Wpedantic, zero warnings.
+- f4-sensors suites: 40/40 PASS — test_detection (13: lobe shape, 4th-root scaling, closure cap, Pd ramp + knee, volume containment incl. north seam), test_track_store (12: build-up, coast/drop/stale, re-detection, IFF, NCTR, deterministic ordering, purge), test_rwr (10: pure classification + sorting + bearing, lock transition publishes exactly once, search strobe state-only, missile launch + range exit), test_radar_component (9: acquire/establish, out-of-volume reject, beyond-range reject, drop-on-departure with message, lock requires track + tracks outside the bar, auto break-lock, NCTR resolution, same-seed determinism, radar->RWR coupling through update_rwr).
+- Cross-library: test_engagement 5/5 (incl. new SeekerSourceOverrideControlsGuidance), SensorFusion policy test 1/1.
+- Full suite: 1,539 tests, 1,533 pass, 6 fail — the SAME 6 pre-existing environment failures (PilotInputTest.ValidateClamps* x5, EngineModel.DefaultConstructedHasNoTables), unchanged since pristine c694444.
+
+Stage Summary:
+- Patch: /home/z/my-project/download/f4-combat-m2-sensors.patch — CUMULATIVE M1+M2 (M1 was never committed upstream, so M2's f4-weapons edits ride on it): applies cleanly to c694444 with git apply; 49 files, ~5,700 insertions. M2-specific delta: 22 files (new f4-sensors library: 7 headers, 4 sources, 4 test files, 2 CMakeLists; f4-ai DetectionPolicy + test; f4-weapons seeker hook + re-acquisition + test; root CMakeLists + README + plan doc + this worklog).
+- The AI now has a replaceable "eyes" layer: detection -> track -> lock -> RWR warning, ECS-native, bus-integrated, deterministic per seed. M3's BVRModule can fire through launch_missile() on Established tracks and react through RwrComponent.new_launch/new_lock.
+- Next: M3 combat AI modules (AI_IMPLEMENTATION_PLAN Steps 6-12) — the SensorFusion policy adapter wiring f4-sensors tracks into the AI picture lands here, then BVRModule/MissileModule/WVRModule/WingmanModule over the layered FSM. Known M2 simplifications (COMBAT_CHAIN_PLAN.md M2 section): detection envelope is a placeholder until RCD import; no jamming/ECM; no datalink; corpses still paint.
+
+---
+Task ID: WEAPONS-2b
+Agent: main (orchestrator, fresh session)
+Task: Re-verify the staged WEAPONS-2 (M2 f4-sensors) deliverable end to end in a new session and reissue the downloadable patch.
+
+Work Log:
+- Patch integrity: git worktree at pristine c694444 + `git apply --check` passes; applied with --index and diffed against the staged set -> byte-identical (49 files, 5,678 insertions; sha256 of both full diffs: 65743747feddf41de4fa8d042964dd97fc7e9c5726fab6a1569425f134f8438e). Temp worktree removed afterwards.
+- Rebuild from the existing headless build dir (GCC 14.2, CMake 4.4.3, renderer/viewer/scenario-player/model-viewer OFF): `cmake --build . -j` completes, 100% targets built.
+- Full ctest re-run: 1,539 tests, 99% passed, 6 failed — the SAME 6 pre-existing environment failures (PilotInputTest.ValidateClamps* x5, EngineModel.DefaultConstructedHasNoTables), unchanged since pristine c694444 and untouched by this patch.
+- New-library suites re-run directly from their gtest binaries: f4-sensors 40/40 (test_detection 11, test_track_store 12, test_rwr 7, test_radar_component 10); f4-weapons 55/55 (test_missile 16, test_damage 14, test_weapon_store 8, test_gun 8, test_engagement 5 incl. SeekerSourceOverrideControlsGuidance, test_weapon_table 4). SensorFusion.DetectionPolicyOverridesLegacySources passes in the isolated ctest run.
+- README coherence: the f4-sensors section's API example was cross-checked symbol-by-symbol against the headers — TrackState::Established / TrackStore::find / RadarSimComponent::command_track / priority 45 / own_team / update_rwr / RwrWarningMessage / MissileComponent::seeker_source (SeekerSourceFn) / SensorFusion::set_detection_policy all match their definitions.
+
+Stage Summary:
+- Deliverable re-confirmed: /home/z/my-project/download/f4-combat-m2-sensors.patch (CUMULATIVE M1+M2, applies cleanly to c694444 with git apply; already includes this worklog entry after regeneration).
+- Verification matrix: patch==staged set; build clean; f4-sensors 40/40; f4-weapons 55/55; full suite green except the 6 pre-existing environment failures.
+- Next milestone unchanged: M3 combat AI modules (AI_IMPLEMENTATION_PLAN Steps 6-12) — SensorFusion policy adapter on top of f4-sensors tracks, then BVRModule / MissileModule / WVRModule / WingmanModule over the layered FSM.

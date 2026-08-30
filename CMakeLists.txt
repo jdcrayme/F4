@@ -43,6 +43,8 @@ add_subdirectory(f4-entities)     # component-based entity system (uses f4-geo)
 add_subdirectory(f4-messaging)    # type-safe message bus with cross-thread queuing
 add_subdirectory(f4-data)
 add_subdirectory(f4-io)           # shared binary I/O primitives (Cursor + read_file) — consumed by f4-world-convert and f4-terrain
+add_subdirectory(f4-weapons)      # weapons & effects core (missile flyout, gun, damage, stores) — see Docs/COMBAT_CHAIN_PLAN.md
+add_subdirectory(f4-sensors)      # sensor model (radar detection, track files, RWR) — see Docs/COMBAT_CHAIN_PLAN.md
 add_subdirectory(f4-convert)
 add_subdirectory(f4-install)      # locates Falcon 4.0 install layout (FALCON4.ct, terrdata/, campaign/)
 add_subdirectory(f4-world-convert) # .cam campaign archive -> JSON (keystone)

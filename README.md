@@ -547,6 +547,104 @@ MissileModule, WingmanModule, DigitalBrain orchestrator.
 **Dependencies**: f4-flight-model, f4-entities, f4-messaging, f4-state-machine,
 f4-geo, f4-data, f4-math.
 
+### f4-weapons — Weapons & effects core
+
+Static library implementing the bottom of the combat chain
+(`Docs/COMBAT_CHAIN_PLAN.md`, Milestone M1): weapon class data, loadout
+stores, a 3-DOF guided-missile flyout (proportional navigation, seeker
+cone/range limits, proximity fuze, time-of-flight self-destruct), a
+ballistic gun model, and the warhead-vs-strength damage model. Missiles are
+ECS entities (FreeFalcon's VuEntity model); gun tracers are not. Combat
+events cross the MessageBus as plain structs.
+
+```cpp
+#include <f4/weapons/f4_weapons.hpp>
+using namespace f4::weapons;
+
+WeaponClassTable table = WeaponClassTable::with_builtins();
+const auto amraam = table.find_by_name("AIM-120C");
+
+// What the jet carries (passive ECS component)
+auto& store = shooter.add<WeaponStoreComponent>(
+    WeaponStoreComponent::standard_fighter(table));
+
+// Fire: validates + debits the store, spawns the missile entity,
+// publishes MissileLaunchedMessage
+auto missile = launch_missile(world, bus, shooter, target, table, amraam, sim_time);
+
+// Per tick (inside the sim loop): world.update_all() ticks every
+// MissileSimComponent (physics pass). When a fuze fires, damage lands on
+// the target's DamageStateComponent and the bus carries the events.
+sweep_spent_missiles(world);   // between ticks
+```
+
+**Modules**:
+- `weapon_types.hpp` / `weapon_class_table.hpp` — weapon data cards
+  (categories, guidance kinds, flyout envelopes; built-in placeholder set,
+  FALCON4.WST import deferred)
+- `weapon_store.hpp` — `WeaponStoreComponent` (stations, rounds, selection)
+- `missile.hpp` — pure 3-DOF point-mass flyout + PN guidance + fuze
+- `missile_battery.hpp` — missile-as-entity ECS binding (`MissileComponent`
+  + `MissileSimComponent`), `launch_missile()`, `sweep_spent_missiles()`
+- `gun.hpp` — `GunStream` ballistic tracers, dispersion, proximity hits
+- `damage.hpp` — `apply_damage()` (power vs hit points, range falloff)
+- `messages.hpp` — launch/detonate/fire/damage/killed bus events
+
+**Dependencies**: f4-geo, f4-math, f4-entities, f4-messaging. Deliberately
+NOT dependent on f4-flight-model or f4-ai.
+
+### f4-sensors — Sensor model (radar, tracks, RWR)
+
+Static library implementing the "eyes" of the combat chain
+(`Docs/COMBAT_CHAIN_PLAN.md`, Milestone M2): an airborne radar with scan
+volumes and a probability-of-detection model (fourth-root RCS scaling,
+aspect lobes, closure effect), track files with quality build-up and
+exponential decay (Tentative → Established → Coasting → Dropped), IFF by
+team tag, NCTR identity strings, and a radar warning receiver (search
+strobe / lock / launch warnings). Detections are sampled against a seeded
+mt19937 per radar — same seed, same scenario, same detection timeline.
+
+```cpp
+#include <f4/sensors/f4_sensors.hpp>
+using namespace f4::sensors;
+
+// Add to a radar-equipped aircraft (configure before the sim loop starts;
+// config is baked lazily on the first update).
+auto& radar = jet.add<RadarSimComponent>();
+radar.own_team = "blue";
+radar.params.reference_range_nm = 40.0;
+
+// Per tick: world.update_all() runs the scan (priority 45 — physics pass).
+// Tracks accumulate in radar.tracks(); command_track() STT-locks.
+const TrackFile* t = radar.tracks().find(target_id);
+if (t != nullptr && t->state == TrackState::Established) {
+    radar.command_track(target_id);
+}
+
+// Between ticks: refresh every RWR in the world from the radar picture.
+update_rwr(world, bus, sim_time);   // publishes RwrWarningMessage on
+                                    // new lock/launch only
+```
+
+Missiles consume the sensor picture through
+`MissileComponent::seeker_source` (f4-weapons); the AI consumes it through
+`SensorFusion::set_detection_policy` (f4-ai) — both hooks are wired by the
+host, so f4-sensors stays a leaf library with no AI/weapons dependency.
+
+**Modules**:
+- `radar_types.hpp` — `RadarParameters`, `ScanVolume`, `RadarMode`,
+  `TargetSignature`
+- `detection.hpp` — pure detection model (range + probability, no RNG)
+- `track_store.hpp` — `TrackFile` / `TrackStore` (quality, decay, IFF, NCTR)
+- `signature.hpp` — `SignatureComponent` (target RCS; default 5 m²)
+- `radar_component.hpp` — `RadarSimComponent` (ECS behavioral, priority 45)
+- `rwr.hpp` — `RwrModel`, `RwrComponent`, `update_rwr()`, `RwrWarningMessage`
+- `messages.hpp` — radar track acquired/dropped bus events
+
+**Dependencies**: f4-geo, f4-math, f4-entities, f4-messaging. Deliberately
+NOT dependent on f4-ai or f4-weapons (the integration hooks are std::function
+/ pure-virtual interfaces the host wires).
+
 ## Building
 
 ```bash

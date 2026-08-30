@@ -568,3 +568,66 @@ TEST(SensorFusion, ForceRefreshIgnoresTimer) {
     EXPECT_NEAR(sf.time_until_refresh(), 5.0, 1e-9);  // reset
     EXPECT_EQ(sf.target_count(), 1u);  // target now visible
 }
+
+// ============================================================================
+// M2 integration point: DetectionPolicy override
+// ============================================================================
+
+namespace {
+
+// A policy that sees ONLY what the "radar track store" says — stands in for
+// the f4-sensors-backed adapter that M3 wires in.
+class TrackOnlyPolicy final : public SensorFusion::DetectionPolicy {
+public:
+    explicit TrackOnlyPolicy(std::uint64_t tracked_id) : tracked_id_(tracked_id) {}
+
+    Verdict classify(const TargetInfo& t) override {
+        Verdict v;
+        v.radar = (t.entity_id == tracked_id_);  // only the tracked contact
+        return v;  // no GCI omniscience, no RWR, no visual
+    }
+
+private:
+    std::uint64_t tracked_id_;
+};
+
+} // namespace
+
+TEST(SensorFusion, DetectionPolicyOverridesLegacySources) {
+    EntityWorld world;
+    MessageBus bus;
+    OwnshipSpec os;
+    const auto own_id = add_entity(world, {os.pos, os.vel, "blue", "fighter"});
+    const auto enemy_id = add_entity(world, {WorldPosition{0.0, 20.0 * FT_PER_NM, 20000.0},
+                                             {}, "red", "fighter"});
+
+    // --- Without a policy: legacy rules (GCI sees everything) ---------------
+    SensorFusion legacy;
+    legacy.initialize(own_id, world, bus, SkillLevel::Veteran);
+    legacy.update(1.0);
+    ASSERT_EQ(legacy.target_count(), 1u);
+    EXPECT_TRUE(SensorFusion::detected_by_gci(legacy.targets()[0]));
+    EXPECT_TRUE(SensorFusion::can_see(legacy.targets()[0]));
+
+    // --- With a policy: only the tracked contact is visible -----------------
+    TrackOnlyPolicy policy(enemy_id);
+    SensorFusion sf;
+    sf.initialize(own_id, world, bus, SkillLevel::Veteran);
+    sf.set_detection_policy(&policy);
+    ASSERT_NE(sf.detection_policy(), nullptr);
+    sf.update(1.0);
+    ASSERT_EQ(sf.target_count(), 1u);
+    const auto& t = sf.targets()[0];
+    EXPECT_EQ(t.entity_id, enemy_id);
+    EXPECT_TRUE(SensorFusion::detected_by_radar(t));
+    EXPECT_FALSE(SensorFusion::detected_by_gci(t));
+    EXPECT_FALSE(SensorFusion::detected_by_rwr(t));
+    EXPECT_FALSE(SensorFusion::detected_by_visual(t));
+    EXPECT_TRUE(SensorFusion::can_see(t));  // radar alone is enough
+
+    // --- Clearing the policy restores legacy behavior ------------------------
+    sf.set_detection_policy(nullptr);
+    sf.force_refresh();
+    ASSERT_EQ(sf.target_count(), 1u);
+    EXPECT_TRUE(SensorFusion::detected_by_gci(sf.targets()[0]));
+}

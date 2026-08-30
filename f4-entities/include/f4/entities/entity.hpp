@@ -570,6 +570,29 @@ namespace f4::entities {
         std::array<uint8_t, 16> scores{};
     };
 
+    // --- Damage / vitality (combat chain, see Docs/COMBAT_CHAIN_PLAN.md) ----
+
+    /// Hit-point state for any damageable entity (aircraft, vehicle, ship).
+    ///
+    /// Objective FEATURES use the 2-bit-per-feature DamageBitmapComponent
+    /// (the .obj fstatus array); THIS component is the entity-level
+    /// counterpart for units/aircraft — the thing a missile or gun round
+    /// actually damages.
+    ///
+    /// f4-weapons writes it (apply_damage -> killed transition +
+    /// EntityKilledMessage); f4-world will populate hit_points from the VCD
+    /// per-vehicle hit_points field. "Killed" is a component transition, not
+    /// an entity destroy: what death means (wreckage, removal, campaign
+    /// attrition) belongs to higher layers.
+    struct DamageStateComponent : Component<DamageStateComponent> {
+        double   hit_points    = 0.0;
+        double   max_hit_points = 0.0;   // nominal (VCD hit_points) value
+        bool     killed       = false;
+        uint64_t killed_by    = 0;       // EntityId::value of the shooter (0 = unknown)
+        uint64_t killed_at_tick = 0;     // killer-system-local tick of the killing blow
+                                         // (f4-weapons stores the missile's flown ticks)
+    };
+
     /// Movement orders for ground units (Battalion / Brigade / TaskForce).
     ///
     /// Promoted from PropertyBag residue (Phase 5 cleanup). Previously these

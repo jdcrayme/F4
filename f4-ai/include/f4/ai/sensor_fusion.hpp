@@ -70,6 +70,36 @@ class SensorFusion {
 public:
     using Config = SensorFusionConfig;
 
+    // ========================================================================
+    // DetectionPolicy — M2 integration point (COMBAT_CHAIN_PLAN.md M2).
+    //
+    // Optional, NON-OWNING hook that replaces the built-in detection-source
+    // rules. When set, SensorFusion::rebuild_target_list() asks the policy
+    // for every candidate's radar/rwr/visual/gci flags instead of using the
+    // legacy range-gated defaults (radar/RWR = hostile + range, GCI =
+    // always true).
+    //
+    // This is how f4-sensors' track store / RWR state will feed the AI at
+    // M3: an adapter implements classify() by querying the ownship's
+    // RadarSimComponent tracks and RwrComponent warnings. The adapter itself
+    // lives at the host/M3 layer — f4-ai must not link f4-sensors (tactics
+    // consume sensors, never the reverse), so the interface travels as a
+    // pure virtual and the wiring is the host's job.
+    //
+    // Lifetime: the caller owns the policy and must keep it alive for the
+    // SensorFusion's lifetime (or until replaced). nullptr = legacy rules.
+    // ========================================================================
+    struct DetectionPolicy {
+        struct Verdict {
+            bool radar{false};
+            bool rwr{false};
+            bool visual{false};
+            bool gci{false};
+        };
+        virtual ~DetectionPolicy() = default;
+        [[nodiscard]] virtual Verdict classify(const TargetInfo& t) = 0;
+    };
+
     SensorFusion() = default;
 
     // Non-copyable (holds pointers to EntityWorld / MessageBus).
@@ -134,6 +164,11 @@ public:
                t.detected_by_visual || t.detected_by_gci;
     }
 
+    // --- Detection policy (M2 hook; see DetectionPolicy above) --------------
+    /// Set (or clear, with nullptr) the detection-source override. Non-owning.
+    void set_detection_policy(DetectionPolicy* policy) noexcept { policy_ = policy; }
+    [[nodiscard]] DetectionPolicy* detection_policy() noexcept { return policy_; }
+
     // --- Skill parameters (per AI_IMPLEMENTATION_PLAN §9) ---
 
     [[nodiscard]] static double update_interval_sec(SkillLevel s) noexcept;
@@ -156,6 +191,7 @@ private:
     messaging::MessageBus* bus_{nullptr};
     SkillLevel skill_{SkillLevel::Rookie};
     Config cfg_{};
+    DetectionPolicy* policy_{nullptr};
 
     double update_timer_{0.0};
     std::vector<TargetInfo> targets_;
