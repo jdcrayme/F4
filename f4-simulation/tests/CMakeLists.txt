@@ -27,6 +27,15 @@ f4_simulation_add_test(test_frames                 test_frames.cpp)
 f4_simulation_add_test(test_real_layout_derivation test_real_layout_derivation.cpp)
 f4_simulation_add_test(test_digi_mission           test_digi_mission.cpp)
 f4_simulation_add_test(test_fcs_trace_pipeline     test_fcs_trace_pipeline.cpp)
+f4_simulation_add_test(test_combat_integration     test_combat_integration.cpp)
+
+# The combat integration test drives the full M3 chain (radar detect ->
+# track -> lock -> RWR -> launch -> kill -> sweep) through Simulation. It
+# needs the generated F-16 aircraft config (FlightModelComponent::init
+# requires real aero tables) exactly like the campaign-bridge test.
+target_compile_definitions(test_combat_integration PRIVATE
+    F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}"
+)
 
 # The DIGI end-to-end mission test runs the build-configured
 # digi_full_mission.json scenario (paths inside it are absolute).

@@ -36,6 +36,7 @@ add_library(f4-simulation STATIC
     src/scenario.cpp
     src/simulation.cpp
     src/campaign_bridge.cpp
+    src/combat_bridge.cpp
     src/bubble_manager.cpp
 )
 target_link_libraries(f4-simulation PUBLIC f4_warnings)
@@ -64,6 +65,8 @@ target_link_libraries(f4-simulation PUBLIC
     f4-world           # Phase 2: WorldState, populate_world for spawn_from_campaign_flights
     f4-world-convert   # Phase 2: ClassTable for entity_type → vis_type resolution
     f4-terrain         # Phase 2: transitively required by f4-world/detail/world_state.hpp (TerrainData)
+    f4-weapons         # M3 combat chain (COMBAT_CHAIN_PLAN.md): stores, launch, sweep
+    f4-sensors         # M3 combat chain: radar, tracks, RWR
 )
 
 add_library(F4::Simulation ALIAS f4-simulation)

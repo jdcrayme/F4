@@ -28,7 +28,8 @@
 //
 // Dependencies: f4-entities, f4-messaging, f4-flight-model, f4-flight-api,
 // f4-ai, f4-data, f4-geo, f4-math, f4-units, f4-state-machine, f4-models,
-// f4-recorder, f4-json, f4-io. C++20.
+// f4-recorder, f4-json, f4-io, f4-world, f4-terrain, f4-weapons, f4-sensors
+// (the last two drive the combat chain — COMBAT_CHAIN_PLAN.md M3). C++20.
 
 #pragma once
 
@@ -36,6 +37,7 @@
 #include <f4/messaging/bus.hpp>
 #include <f4/models/model_database.hpp>
 #include <f4/data/aircraft_config.hpp>
+#include <f4/weapons/weapon_class_table.hpp>
 
 #include <cstdint>
 #include <filesystem>
@@ -155,6 +157,16 @@ public:
     [[nodiscard]] std::uint64_t tick_count() const noexcept { return tick_; }
     [[nodiscard]] bool paused() const noexcept { return paused_; }
     void set_paused(bool p) noexcept { paused_ = p; }
+
+    // --- Combat chain (M3 integration; see combat_bridge.hpp) -----------------
+    /// The weapon class data the sim runs with (built-in placeholder set —
+    /// the FALCON4.WST import replaces the card contents later without
+    /// touching call sites). Hosts launch through THIS table:
+    ///   weapons::launch_missile(sim.world(), sim.bus(), shooter_handle,
+    ///                           target_id, sim.weapon_table(), handle, t);
+    [[nodiscard]] const f4::weapons::WeaponClassTable& weapon_table() const noexcept {
+        return weapon_table_;
+    }
     /// Trace metadata ONLY — does NOT affect tick(). tick(dt) is
     /// authoritative: hosts pace the sim by calling tick() with a FIXED
     /// dt (the scenario's sim_dt) once per unit of owed sim time (the
@@ -200,6 +212,10 @@ private:
     std::unique_ptr<f4::recorder::FlightRecorder> recorder_;
     std::unique_ptr<f4::recorder::FcsTraceWriter> fcs_trace_;
     f4::data::AircraftConfig aircraft_cfg_;
+
+    // Combat chain (M3): weapon class data for launch_missile + the
+    // component attachment at spawn. Built-in table; WST import later.
+    f4::weapons::WeaponClassTable weapon_table_{};
 
     // Phase 2: replaced the single `aircraft_entity_` with a vector. The
     // Phase 1 spawn path (scenario_list) pushes one entry; the Phase 2 path

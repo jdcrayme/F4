@@ -645,6 +645,53 @@ host, so f4-sensors stays a leaf library with no AI/weapons dependency.
 NOT dependent on f4-ai or f4-weapons (the integration hooks are std::function
 / pure-virtual interfaces the host wires).
 
+### f4-simulation — Orchestration + the combat chain host
+
+The tick-loop owner: EntityWorld + MessageBus + ModelDatabase +
+AircraftConfig, aircraft spawning (scenario list or campaign-derived),
+two-pass ECS update (brains ≥ 75, physics < 75), FM→Transform sync, flight
+recording. With M3 integration it is also the layer that *drives* the
+combat chain: scenario `"combat": {"enabled": true}` attaches the combat
+component set to every scenario aircraft (weapon store, signature, radar,
+RWR, damage state) and the tick runs the sensor/weapon sweeps the ECS
+can't run itself (sim-time stamping, `update_rwr`, `sweep_spent_missiles`).
+
+```cpp
+#include "f4/simulation/simulation.hpp"
+#include "f4/simulation/combat_bridge.hpp"
+
+f4::simulation::Simulation sim(scenario, scenario_dir);
+sim.initialize();                 // combat components attach here
+
+// ... ticks drive radar scans, track files, RWR warnings, missile flyouts ...
+for (int i = 0; i < n; ++i) sim.tick(scenario.sim_dt);
+
+// A host (or, at M3, BVRModule) fires through the sim's own table:
+const auto amraam = sim.weapon_table().find_by_name("AIM-120C");
+f4::weapons::launch_missile(sim.world(), sim.bus(), shooter_handle,
+                            bandit_id, sim.weapon_table(), amraam,
+                            sim.sim_time_s());
+
+// The AI's "eyes" flip from GCI-omniscience to radar truth through the
+// host-side policy adapter (f4-ai stays a pure interface):
+f4::simulation::RadarBackedDetectionPolicy policy(sim.world(),
+                                                  shooter_id.value);
+sensor_fusion.set_detection_policy(&policy);
+```
+
+**Combat-relevant pieces**: `scenario.hpp` (`CombatConfig`, per-aircraft
+`team`), `combat_bridge.hpp` (`attach_combat_loadout`,
+`RadarBackedDetectionPolicy`), `simulation.hpp` (`weapon_table()`),
+`simulation.cpp` (tick integration — all gated on `combat.enabled`, so a
+non-combat world is unchanged). Combat-disabled scenarios carry none of
+the combat components.
+
+**Dependencies**: f4-entities, f4-messaging, f4-flight-model, f4-flight-api,
+f4-ai, f4-data, f4-geo, f4-math, f4-units, f4-state-machine, f4-models,
+f4-recorder, f4-json, f4-io, f4-world, f4-world-convert, f4-terrain,
+f4-weapons, f4-sensors. See `Docs/COMBAT_CHAIN_PLAN.md` (M3) and
+`Docs/AIRCRAFT_BINDING_DESIGN.md`.
+
 ## Building
 
 ```bash

@@ -1,0 +1,77 @@
+# Continuous integration — headless build + full test suite.
+#
+# Mirrors the local verification workflow used throughout the worklog
+# (e.g. WEAPONS-2b): configure with all GUI/viewer targets OFF, build every
+# library + test target, run the complete ctest suite. This is the same
+# command sequence that produced the "1,539/1,539 green" STEP-0 baseline.
+#
+# Notes:
+# - Debug build: the suite's value is precisely in the assertions and
+#   contract checks that only fire there (the STEP-0 fixes exist because
+#   Debug asserts contradicted tested contracts).
+# - GCC 14 to match the development toolchain (GCC 14.2 locally).
+# - FetchContent (GoogleTest v1.14.0, nlohmann/json v3.11.3) needs network
+#   access, which GitHub-hosted runners provide.
+# - DigiMission.FullLoop* and the F4_INSTALL-dependent tests skip
+#   gracefully without a game install (GTEST_SKIP) — that is expected on
+#   CI, same as on a clean local checkout.
+#
+# Extending later (deliberately out of scope for STEP-0):
+# - A Release + -O2 job (add to the build-type matrix).
+# - A renderer job (needs X11/OpenGL dev packages: libx11-dev,
+#   libxcursor-dev, libxrandr-dev, libxi-dev, libgl1-mesa-dev, and a
+#   headless GL context for --screenshot smoke tests).
+# - ccache for build-time caching.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel superseded runs on the same branch — direct pushes to main are
+# the norm in this repo, so this mainly saves PR minutes.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  headless:
+    name: Headless build + test (GCC 14, Debug)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    env:
+      CC: gcc-14
+      CXX: g++-14
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install toolchain (g++-14)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends g++-14
+
+      - name: Report toolchain
+        run: |
+          echo "cmake: $(cmake --version | head -1)"
+          echo "g++:   $(g++-14 --version | head -1)"
+
+      - name: Configure (headless — all X11/OpenGL targets OFF)
+        run: >
+          cmake -B build
+          -DCMAKE_BUILD_TYPE=Debug
+          -DF4_BUILD_RENDERER=OFF
+          -DF4_BUILD_MODEL_VIEWER=OFF
+          -DF4_BUILD_VIEWER=OFF
+          -DF4_BUILD_SCENARIO_PLAYER=OFF
+
+      - name: Build
+        run: cmake --build build -j"$(nproc)"
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure -j"$(nproc)"

@@ -1,5 +1,6 @@
 Build/
 build/
+build*/
 cmake-build-*/
 .vs/
 *.user
@@ -12,3 +13,29 @@ cmake_install.cmake
 *_discovery.cmake
 *_include.cmake
 CMakeFiles/
+
+# ── Runtime / local state (STEP-0) ──────────────────────────────────────────
+# Dear ImGui window layout: rewritten by every viewer run, never shared.
+imgui.ini
+
+# CTest run artifacts (Testing/Temporary/* written when ctest runs from the
+# source root instead of the build dir).
+Testing/
+
+# temp/ is a scratch dir for reference dumps, screenshots, and validation
+# output. Only the load-bearing KoreaObj model archive stays tracked: every
+# f4-scenario-player/scenarios/*.json.in references it via
+# @F4_SOURCE_DIR@/temp/KoreaObj.*, and the f4-simulation scenario tests
+# consume those configured scenarios. Its removal — along with the other
+# committed game-derived fixtures — is deferred to the asset pipeline's
+# Stage 3 (glTF export) and Stage 0 synthetic-fixture work
+# (ASSET_PIPELINE_SPEC.md §12), which replaces it with generated Data/
+# assets. Until then: no new junk in temp/.
+temp/*
+!temp/KoreaObj.HDR
+!temp/KoreaObj.LOD
+!temp/KoreaObj.TEX
+
+# Asset pipeline target tree (ASSET_PIPELINE_SPEC.md §4: Data/ is generated
+# by f4import from a game install, never committed).
+Data/

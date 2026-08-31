@@ -13,7 +13,7 @@
 //     "models_tex_path": "KoreaObj.TEX",
 //     "aircraft": [ { "callsign", "aircraft_config_path", "aircraft_name",
 //                     "vis_type_index", "parking_spot": {x,y,z}, "heading_rad",
-//                     "initial_fuel_lbs" } ],
+//                     "initial_fuel_lbs", "team": "blue|red" } ],
 //     "airfield": { "active_runway_id", "active_runway_name", "runway_heading_rad",
 //                   "threshold_position": {x,y,z}, "runway_end_position": {x,y,z},
 //                   "threshold_altitude_ft", "departure_altitude_ft",
@@ -88,6 +88,12 @@ ScenarioAircraft read_aircraft(f4::json::Reader& r) {
         else if (key == "parking_index")     a.parking_index = static_cast<int>(r.read_int());
         else if (key == "initial_vt_fps")   a.initial_vt_fps = r.read_number();
         else if (key == "spawn_in_air")     a.spawn_in_air = r.read_bool();
+        else if (key == "team") {
+            a.team = r.read_string();
+            if (a.team != "blue" && a.team != "red")
+                throw std::runtime_error("scenario: aircraft '" + a.callsign +
+                    "' has unknown team '" + a.team + "' (blue|red)");
+        }
         else                                 skip_unknown(r);
     }
     return a;
@@ -240,6 +246,20 @@ Scenario parse_scenario(f4::json::Reader& r) {
             if (f == "pattern")          s.approach_mode = "pattern";
             else if (f == "straight_in") s.approach_mode = "straight_in";
             else throw std::runtime_error("scenario: unknown approach '" + f + "'");
+        } else if (key == "combat") {
+            r.expect('{');
+            bool cfirst = true;
+            while (!r.consume('}')) {
+                if (!cfirst) r.expect(',');
+                cfirst = false;
+                const auto k = r.read_string();
+                r.expect(':');
+                if (k == "enabled")            s.combat.enabled = r.read_bool();
+                else if (k == "radar_rng_seed") s.combat.radar_rng_seed =
+                    static_cast<std::uint32_t>(r.read_int());
+                else if (k == "fighter_hit_points") s.combat.fighter_hit_points = r.read_number();
+                else                            skip_unknown(r);
+            }
         } else if (key == "airfield_features") {
             r.expect('[');
             bool arr_first = true;

@@ -397,7 +397,6 @@ spawn_aircraft_from_flights(f4::entities::EntityWorld& world,
         auto& tf = h.add<TransformComponent>();
         tf.position = parking_spot;
         const double hdg = airfield.runway_heading_rad;
-        const double h2 = hdg * 0.5;
         // Compass heading -> ENU quaternion (negative about +z; see frames.hpp).
         const auto q0 = f4::simulation::enu_quat_from_compass(hdg);
         tf.qw = q0.w;  tf.qx = q0.x;  tf.qy = q0.y;  tf.qz = q0.z;

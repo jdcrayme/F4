@@ -96,10 +96,14 @@ void EngineModel::update(double dt,
                          double ethrst,
                          bool   simplified,
                          EngineState& state) {
-    assert(table_ != nullptr && "EngineModel: table must not be null");
-    assert(aux_   != nullptr && "EngineModel: aux must not be null");
-
-    // Guard: no table or zero mass
+    // Guard: no table (default-constructed model) or zero mass — the engine
+    // produces nothing. This is the documented, TESTED contract
+    // (EngineModel.DefaultConstructedHasNoTables), not an error: a scenario
+    // may spawn an aircraft whose engine tables haven't been loaded yet, and
+    // the flight model must integrate a zero-thrust state instead of
+    // aborting. The asserts that used to live here contradicted the guard
+    // three lines below and made the test impossible to pass in Debug
+    // builds.
     if (!table_ || !aux_ || mass_slugs <= MASS_FLOOR) {
         state.thrust = 0.0;
         state.fuelFlow = 0.0;

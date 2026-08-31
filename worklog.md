@@ -3066,3 +3066,159 @@ Stage Summary:
 - Deliverable re-confirmed: /home/z/my-project/download/f4-combat-m2-sensors.patch (CUMULATIVE M1+M2, applies cleanly to c694444 with git apply; already includes this worklog entry after regeneration).
 - Verification matrix: patch==staged set; build clean; f4-sensors 40/40; f4-weapons 55/55; full suite green except the 6 pre-existing environment failures.
 - Next milestone unchanged: M3 combat AI modules (AI_IMPLEMENTATION_PLAN Steps 6-12) — SensorFusion policy adapter on top of f4-sensors tracks, then BVRModule / MissileModule / WVRModule / WingmanModule over the layered FSM.
+---
+Task ID: STEP-0
+Agent: main (fresh session; F4-ADVICE-1 audit → recommended sequence)
+Task: Step 0 of the recommended next-phase sequence — fix the 6 "pre-existing
+environment failures" (they were real Debug-build bugs), add CI, and clean
+the tracked tree of dead weight. Deliverable: one patch applying cleanly to
+86adc8c.
+
+Work Log:
+- Audited HEAD (86adc8c) first: headless build 100%, ctest 1,533/1,539 with
+  6 failures — the same set every worklog entry since WEAPONS-1 called
+  "pre-existing environment failures". Diagnosed them as assert-vs-contract
+  bugs, not environment issues:
+  * PilotInputTest.ValidateClamps* x5: f4-flight-api/src/pilot_input.cpp
+    asserted every input in range BEFORE clamping, so a Debug build aborted
+    inside the very call the tests make to exercise the clamps. The clamps
+    below the asserts implement the documented contract.
+  * EngineModel.DefaultConstructedHasNoTables: f4-flight-model/src/
+    engine.cpp:99 asserted table_ non-null, directly above the existing
+    "Guard: no table or zero mass" early-return that implements the tested
+    contract.
+- Fixes: deleted the nine pilot_input asserts (validate() is a sanitizer,
+  not a checker — callers may legitimately send out-of-range values
+  mid-transition) + the two engine.cpp update() asserts (default-constructed
+  EngineModel producing zero thrust is a scenario-valid state). Constructor
+  asserts for the table-taking ctor stay: null there IS API misuse. Unused
+  <cassert> include dropped from pilot_input.cpp.
+- Repo hygiene: git rm temp/mapcheck.png (4.3 MB), temp/mapcheck2.png
+  (5.7 MB), temp/dump_full.txt, the FreeFalcon reference source dumps
+  temp/ff_cmap/ff_campmap/ff_fartex(+.h)/ff_otwdraw/ff_tdskpost.cpp, the
+  already-landed f4-combat-m2-sensors.patch (6,038 lines of duplicate
+  history), imgui.ini (viewer window layout, rewritten every run), and
+  Testing/Temporary/CTestCostData.txt. Verified nothing in any CMakeLists,
+  cmake/*.cmake, or *.runsettings references the removed files. temp/
+  KoreaObj.{HDR,LOD,TEX} STAY: all 10 scenario templates reference them via
+  @F4_SOURCE_DIR@/temp/* and the f4-simulation scenario tests consume those
+  configured scenarios — their removal is asset-pipeline Stage 3 work
+  (glTF export replaces them with Data/ assets).
+- .gitignore: added imgui.ini, Testing/, Data/ (ASSET_PIPELINE_SPEC §4 —
+  generated, never committed), build*/ (covers build-headless-style dirs),
+  and temp/* with !temp/KoreaObj.{HDR,LOD,TEX} re-includes so future
+  screenshots/dumps can't be committed by accident. Verified with
+  git check-ignore: KoreaObj still tracked, mapcheck.png would be ignored.
+- CI: new .github/workflows/ci.yml — ubuntu-24.04, apt g++-14, headless
+  configure (F4_BUILD_RENDERER/MODEL_VIEWER/VIEWER/SCENARIO_PLAYER=OFF),
+  cmake --build -j$(nproc), ctest --output-on-failure -j$(nproc), on push
+  and PR to main, 30-min timeout, concurrency-cancel. YAML parsed clean.
+  Notes in-file: Debug on purpose (assertion value), FetchContent needs
+  runner network, DigiMission/F4_INSTALL tests skip gracefully (expected).
+- Verification: rebuilt headless (GCC 14.2, CMake 4.4.3) — zero warnings
+  under -Wall -Wextra -Wpedantic; full ctest: 1,539/1,539 PASS (100%).
+  The 4 ControlLoop* DISABLED_ tests and the 8 skips (2 locale, 2 DigiMission
+  scenario, 4 more) are unchanged and expected. First fully green run in
+  repo history (every prior entry carried 6-13 failures).
+
+Stage Summary:
+- Deliverable: f4-step0-green-ci-hygiene.patch — applies cleanly to 86adc8c
+  (git apply), staged diff verified byte-identical against a pristine
+  worktree application.
+- The suite is green and STAYS green: CI runs the same headless configure
+  + build + ctest sequence on every push.
+- Next: Step 1 — M3 integration-first. Wire f4-weapons + f4-sensors into
+  f4-simulation (RadarSimComponent + missile sweep + update_rwr in the tick,
+  WeaponStore/Signature on spawned aircraft, SensorFusion policy adapter at
+  the host layer, combat events in f4-recorder), then the M3 tactic modules
+  (BVR → Missile-defeat → WVR → Wingman → DigitalBrain arbiter).
+---
+Task ID: COMBAT-INT-1
+Agent: main (same session as STEP-0; sequenced on the step0 branch)
+Task: M3 integration-first (COMBAT_CHAIN_PLAN.md) — wire f4-weapons +
+f4-sensors into f4-simulation so the combat chain moves end to end through
+the Simulation, per the F4-ADVICE-1 Step 1 recommendation. Deliverable: one
+patch applying on top of STEP-0.
+
+Work Log:
+- Verified the starting state first: f4-simulation linked 14 libraries but
+  NOT f4-weapons/f4-sensors (zero consumers since M1/M2); the only M2 hooks
+  were MissileComponent::seeker_source + SensorFusion::set_detection_policy
+  (tested with stand-ins). RadarSimComponent (priority 45) and
+  MissileSimComponent (priority 40) are BehavioralComponents, so they tick
+  automatically inside EntityWorld::update_all once an entity HAS them —
+  the host's job is sim-time stamping (static clocks, both), update_rwr,
+  and sweep_spent_missiles (both "between ticks, never inside update_all").
+- Scenario surface: ScenarioAircraft gains "team" (blue|red, validated);
+  Scenario gains CombatConfig {enabled, radar_rng_seed, fighter_hit_points};
+  scenario.cpp parses both (schema doc comment updated). Defaults leave
+  every existing scenario unchanged.
+- New combat_bridge.{hpp,cpp}: attach_combat_loadout() (WeaponStore
+  standard_fighter + Signature + RadarSim with per-aircraft derived seeds +
+  Rwr + DamageState(25 hp) + TEAM tag + CampaignIdentity for NCTR) and
+  RadarBackedDetectionPolicy (SensorFusion::DetectionPolicy impl: radar =
+  live non-Dropped track in ownship's store; rwr = any warning from that
+  emitter; visual/gci = FALSE — the GCI-off flip, delivered as the adapter
+  BVRModule installs at M3; the actual default flip stays deferred until a
+  consumer exists, exactly per the M2 notes).
+- Simulation: links f4-weapons + f4-sensors PUBLIC; weapon_table_ member +
+  accessor (built-in table; WST import replaces contents later);
+  spawn_from_scenario_list sets the TEAM tag on every aircraft and calls
+  attach_combat_loadout when combat.enabled; tick() stamps
+  RadarSimComponent::set_sim_time + MissileSimComponent::set_sim_time
+  before update_all, runs sensors::update_rwr + weapons::
+  sweep_spent_missiles after bus flush — everything gated on combat.enabled
+  so a non-combat world never touches the static clocks.
+- REAL BUG FOUND AND FIXED by the E2E test (this is why integration-first):
+  Simulation::tick's FM->Transform sync wrote position + quaternion but
+  NEVER velocity — tf->vx/vy/vz stayed 0 forever. Consequences: missiles
+  launched with 0 ft/s inherited velocity (fell ballistic; seeker cone lost
+  instantly at 90 deg off-boresight), radar aspect off target velocity was
+  degenerate, RWR closure wrong. Fix: sync NED xdot/ydot/zdot with the same
+  axis swap as position (vx=ydot east, vy=xdot north, vz=-zdot up). The
+  instrumented run before the fix showed the missile frozen at the muzzle
+  falling straight down (mvel 0,0); after: guided the whole way, kill at
+  ~37 s.
+- Also fixed: pre-existing -Wunused-variable 'h2' in campaign_bridge.cpp:400
+  (only surfaced on full-target rebuilds; dead local, deleted).
+- Deliberately deferred (documented in CHANGES + the header): combat
+  attachment on the campaign_flights spawn path (needs campaign team
+  resolution — belongs with the M3 tactics that consume it), recorder
+  combat-event schema (M4 per COMBAT_CHAIN_PLAN), a rendered bvr_intercept
+  scenario template (nothing to SEE yet — lands with BVRModule).
+- Tests (new f4-simulation/tests/test_combat_integration.cpp, 5 cases):
+  component attach + IFF teams + seed derivation + store loadout;
+  nothing-when-disabled (10 ticks invent no combat state); the E2E chain
+  through Simulation::tick — 13 NM stern chase at 10,000 ft (both inside
+  the default north bar; range inside the 0.75*R_det knee so Pd=1
+  deterministic), detect -> Established track -> command_track ->
+  bandit RWR lock + RwrWarningMessage -> launch_missile through
+  sim.weapon_table() -> store debited 8->7 -> PN flyout -> TargetHit
+  detonation -> exactly one EntityKilledMessage -> DamageState killed +
+  killed_by -> missile swept by the tick (world.alive false) -> corpse
+  stays flying (documented M2 simplification); the policy adapter test
+  (target list carries candidates but can_see false before scans, radar=
+  true/gci=false after, legacy fusion still GCI); JSON parsing/validation
+  (defaults, round-trip, unknown team rejected).
+- Two test-side fixes along the way (test bugs, not code): SensorFusion's
+  target list includes ALL candidates (visibility is flag-based via
+  can_see — assert flags, not target_count); the "defaults" check needs a
+  JSON with no combat block at all (the generator always emitted the seed).
+- Verification: full headless rebuild clean (zero warnings, GCC 14.2,
+  -Wall -Wextra -Wpedantic); FULL SUITE 1,544/1,544 — 100% (1,539 + 5 new),
+  zero regressions from the velocity-sync fix (digi/frames/scenario/trace
+  suites all green).
+
+Stage Summary:
+- Deliverable: f4-step1-combat-integration.patch — applies on top of
+  STEP-0 (generate as diff step0 -> step1 branch; byte-identity verified
+  against a pristine worktree application).
+- The combat chain now MOVES through the simulation; the M1/M2 APIs are
+  proven against real consumers, and the first real integration bug
+  (missing velocity sync) is fixed instead of lurking until M4.
+- Next: M3 tactic modules (AI_IMPLEMENTATION_PLAN Steps 6-12) — BVRModule
+  first (installs RadarBackedDetectionPolicy on its SensorFusion, reads
+  WeaponClassTable envelopes, fires through sim.weapon_table(); add the
+  rendered bvr_intercept scenario + recorder combat events when it lands),
+  then MissileModule defeat tactics off RwrComponent transitions, WVR,
+  Wingman, DigitalBrain 26-mode arbiter.

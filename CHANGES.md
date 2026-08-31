@@ -1,5 +1,35 @@
 # F4 Cleanup Pass — Changes Summary
 
+## Combat Chain Integration — M3 Step 1 (COMBAT-INT-1)
+
+**f4-weapons and f4-sensors are no longer unconsumed leaf libraries: the
+Simulation ticks the whole combat chain end to end — radar detect → track →
+STT lock → RWR warning → AMRAAM launch → flyout → kill — proven by a single
+E2E test. The integration also flushed out (and fixed) a real bug: the
+FM→Transform sync never wrote velocity.**
+
+| Area | Change |
+|------|--------|
+| `f4-simulation` | Links `f4-weapons` + `f4-sensors` (PUBLIC). Scenario JSON gains `"combat": {"enabled", "radar_rng_seed", "fighter_hit_points"}` and per-aircraft `"team"` (blue/red, validated). When enabled, spawned aircraft carry `WeaponStoreComponent` + `SignatureComponent` + `RadarSimComponent` + `RwrComponent` + `DamageStateComponent` + `CampaignIdentityComponent`; `Simulation::weapon_table()` exposes the built-in `WeaponClassTable` every launch goes through. `tick()` stamps the radar/missile sim clocks before `update_all` and runs `update_rwr` + `sweep_spent_missiles` after it — all gated, so combat-disabled worlds are byte-identical to before. |
+| `combat_bridge` (new) | `attach_combat_loadout()` — one call adding the whole combat component set (per-aircraft radar seeds derived from the scenario seed). `RadarBackedDetectionPolicy` — the M2 `SensorFusion::DetectionPolicy` hook made real at the host layer (f4-ai stays interface-pure): radar = live track in the ownship's track store, RWR = warning from that emitter, visual/GCI = **false** — the flip off GCI-omniscience, ready for BVRModule to install. |
+| FM sync fix | `Simulation::tick`'s FM→Transform sync now writes `vx/vy/vz` (NED→ENU, same axis swap as position). Before, every combat consumer reading the transform saw a *parked* aircraft: `launch_missile` gave the missile 0 ft/s inherited velocity (it fell ballistic and lost the seeker cone instantly) and radar aspect was degenerate. Found by the E2E test, not by reading code. |
+| `campaign_bridge` | Dropped a dead local (`h2`, unused-variable warning under `-Wall`). Combat attachment for the campaign-flights spawn path is deliberately deferred: it needs team resolution from campaign data, which belongs with the M3 tactics that consume it. |
+| Tests | 5 new cases in `f4-simulation/tests/test_combat_integration.cpp`: component attach (incl. IFF teams, seeds, store loadout), nothing-when-disabled, the full E2E chain through `Simulation::tick` (deterministic Pd=1 knee geometry: 13 NM stern chase), the policy adapter (invisible before scans, radar-not-GCI after), and JSON parsing/validation. Full suite: **1,544/1,544 — 100%**. |
+
+## Green Suite + CI + Repo Hygiene (STEP-0)
+
+**The full suite is 1,539/1,539 green for the first time; every push now
+builds and tests itself on GitHub Actions; ~11 MB of dead weight and
+runtime state left the tree.**
+
+| Area | Change |
+|------|--------|
+| `f4-flight-api` | `PilotInput::validate()`: deleted the nine debug asserts that fired *before* the clamps — they contradicted the clamping contract pinned by `PilotInputTest.ValidateClamps*` and made those 5 tests impossible to pass in Debug builds. `validate()` is a sanitizer, not a checker. |
+| `f4-flight-model` | `EngineModel::update()`: deleted the two asserts that contradicted the null-table guard three lines below them — `EngineModel.DefaultConstructedHasNoTables` tests exactly that contract (default-constructed engine → zero thrust/fuel flow, no abort). |
+| CI | New `.github/workflows/ci.yml`: headless configure (all X11/OpenGL targets OFF) → build → full `ctest`, GCC 14 / Debug, on every push and PR to main. Same command sequence as the local verification workflow. |
+| repo hygiene | Untracked: `temp/mapcheck*.png`, `temp/dump_full.txt`, the FreeFalcon source dumps `temp/ff_*.{cpp,h}`, the already-landed `f4-combat-m2-sensors.patch`, `imgui.ini`, `Testing/`. `.gitignore` gains `imgui.ini`, `Testing/`, `Data/` (asset-pipeline §4), `build*/`, and `temp/*` with the load-bearing `KoreaObj.{HDR,LOD,TEX}` re-included — their removal is deferred to the asset pipeline's Stage 3 glTF export, which replaces them with generated `Data/` assets. |
+| Tests | 1,539/1,539 pass (was 1,533 + 6 "pre-existing environment failures" that were actually Debug-build assert-vs-contract bugs, not environment issues). The 4 `ControlLoop*` tests remain `DISABLED_` and the `F4_INSTALL`-dependent tests skip gracefully, unchanged. |
+
 ## Viewer Terrain Fixes (TERRAIN-TEX-2)
 
 **Fixes five user-reported world-viewer bugs; textures now load in every

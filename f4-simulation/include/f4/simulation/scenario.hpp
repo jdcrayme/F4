@@ -52,6 +52,12 @@ struct ScenarioAircraft {
     /// mission to sequence to the desired phase). Used by the isolated
     /// `landing_only` scenario to skip the taxi/takeoff roll.
     bool spawn_in_air{false};
+    /// Team affiliation ("blue"/"red"), written to the entity's TEAM tag
+    /// and consumed by IFF (TrackStore), RWR role checks, and missile
+    /// team-copying. Default "blue". Added with the combat integration
+    /// (COMBAT_CHAIN_PLAN.md M3) — harmless before it: nothing read the
+    /// tag for scenario-list aircraft.
+    std::string team{"blue"};
 };
 
 /// One parking spot on the airfield (derived from the ground layout —
@@ -93,6 +99,25 @@ struct ScenarioWaypoint {
     std::string name;                   ///< "WP1", "APCH_FIX" (display + trace)
     geo::WorldPosition position;        ///< ENU feet; z = target altitude MSL
     double speed_kts{350.0};            ///< target CAS approaching this waypoint
+};
+
+/// Combat configuration (COMBAT_CHAIN_PLAN.md M3 integration).
+/// When enabled, spawned scenario-list aircraft carry the combat component
+/// set (WeaponStoreComponent + SignatureComponent + RadarSimComponent +
+/// RwrComponent + DamageStateComponent — see combat_bridge.hpp) and the
+/// Simulation tick drives the sensor/weapon sweeps (sim-time stamping,
+/// update_rwr, sweep_spent_missiles). When disabled (the default), the
+/// world is exactly what it was before the combat chain existed.
+struct CombatConfig {
+    bool enabled{false};
+    /// Seed for every spawned RadarSimComponent's detection RNG. Same seed
+    /// + same scenario => same detection sequence (the reproducibility
+    /// discipline the whole sim runs on). Per-aircraft seeds are derived
+    /// from this base so radars don't roll identical sequences.
+    std::uint32_t radar_rng_seed{0x46344u};
+    /// Hit points given to spawned aircraft's DamageStateComponent (the
+    /// light-fighter strength the M1 engagement tests calibrated against).
+    double fighter_hit_points{25.0};
 };
 
 /// One static feature placement on the airfield — a building, runway section,
@@ -237,6 +262,9 @@ struct Scenario {
     /// aircraft containing AI commands, FCS intermediates, body rates,
     /// kinematics, and navigation intent. See f4/recorder/fcs_trace.hpp.
     std::filesystem::path fcs_trace_path;
+
+    /// Combat configuration (M3 integration). Default: disabled.
+    CombatConfig combat;
 };
 
 /// Load a scenario from a JSON file. Resolves asset paths relative to the

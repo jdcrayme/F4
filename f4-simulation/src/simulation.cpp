@@ -23,6 +23,7 @@
 #include "f4/simulation/simulation.hpp"
 #include "f4/simulation/visual_model_component.hpp"
 #include "f4/simulation/campaign_bridge.hpp"
+#include "f4/simulation/combat_bridge.hpp"
 #include "f4/simulation/bubble_manager.hpp"
 #include "f4/simulation/frames.hpp"
 
@@ -37,6 +38,9 @@
 #include <f4/recorder/flight_recorder.hpp>
 #include <f4/recorder/fcs_trace.hpp>
 #include <f4/recorder/snapshot.hpp>
+#include <f4/weapons/missile_battery.hpp>
+#include <f4/weapons/f4_weapons.hpp>
+#include <f4/sensors/f4_sensors.hpp>
 #include <f4/world_convert/class_table.hpp>
 #include <f4/world/world_loader.hpp>
 #include <f4/world/detail/world_state.hpp>
@@ -184,7 +188,15 @@ void Simulation::spawn_from_scenario_list() {
         throw std::runtime_error("Simulation::spawn_aircraft: scenario has no aircraft");
     }
 
-    for (const auto& sc : scenario_.aircraft) {
+    // Combat chain (M3): the weapon class table every launch goes through.
+    // Built-in placeholder set for now; the FALCON4.WST import replaces the
+    // card contents without touching call sites (COMBAT_CHAIN_PLAN.md §5).
+    if (scenario_.combat.enabled) {
+        weapon_table_ = weapons::WeaponClassTable::with_builtins();
+    }
+
+    for (std::size_t ac_index = 0; ac_index < scenario_.aircraft.size(); ++ac_index) {
+        const auto& sc = scenario_.aircraft[ac_index];
         auto h = world_.create();
 
         // 1. TransformComponent — initial pose at the parking spot.
@@ -274,6 +286,24 @@ void Simulation::spawn_from_scenario_list() {
             plan.start_phase = MissionPlan::StartPhase::Enroute;
         }
         brain.set_mission_plan(std::move(plan));
+
+        // 5. Team identity — the TEAM tag ("blue"/"red") rides on EVERY
+        //    aircraft, combat or not: SensorFusion's hostility rule, the
+        //    radar's IFF classification, RWR emitter roles, and missile
+        //    team-copying all read it. Before the combat chain nothing
+        //    consumed it for scenario-list aircraft, so this is additive.
+        h.set_tag(entities::tags::TEAM, entities::TagValue::from(sc.team));
+
+        // 6. Combat component set (M3 integration): stores, signature,
+        //    radar, RWR, damage state + identity. When the scenario leaves
+        //    combat disabled (the default) NONE of this exists and the
+        //    world is bit-for-bit what it was before the combat chain.
+        if (scenario_.combat.enabled) {
+            attach_combat_loadout(h, weapon_table_, sc,
+                                  scenario_.combat.radar_rng_seed,
+                                  ac_index,
+                                  scenario_.combat.fighter_hit_points);
+        }
 
         aircraft_entities_.push_back(h.id());
     }
@@ -559,8 +589,36 @@ void Simulation::tick(double dt) {
         fm->set_ground(ground_z, f4::math::Vec3d{0.0, 0.0, -1.0});
     }
 
+    // Combat chain (M3): stamp the sim clock the sensor/weapon components
+    // read (message stamps + scan-interval carry). Both use static clocks
+    // by design — the host owns time (documented in radar_component.hpp /
+    // missile_battery.hpp). Stamped BEFORE update_all so this tick's
+    // messages carry the time at which they occur. Gated: worlds without
+    // combat never touch the static clocks at all.
+    const bool combat_on = scenario_.combat.enabled;
+    const double t_now = sim_time_s_ + dt;
+    if (combat_on) {
+        sensors::RadarSimComponent::set_sim_time(t_now);
+        weapons::MissileSimComponent::set_sim_time(t_now);
+    }
+
     world_.update_all(dt, bus_);
     bus_.flush_pending();  // drain deferred ATC messages (TaxiClearance, etc.)
+
+    // Combat chain (M3): the two world-level sweeps the ECS tick can't run
+    // itself (both mutate/iterate the world between ticks, never inside
+    // update_all):
+    //   update_rwr          — rebuild every RwrComponent's warning picture
+    //                         from the radars + missiles that paint them
+    //                         (publishes RwrWarningMessage on new lock/
+    //                         launch transitions).
+    //   sweep_spent_missiles— destroy terminal missile entities (Detonated/
+    //                         Expired). The kill message already flowed; the
+    //                         corpse sweep belongs to the host.
+    if (combat_on) {
+        sensors::update_rwr(world_, bus_, t_now);
+        weapons::sweep_spent_missiles(world_);
+    }
 
     // Per-aircraft sync: pull FM state → TransformComponent + VisualModelComponent.
     for (const auto eid : aircraft_entities_) {
@@ -572,6 +630,16 @@ void Simulation::tick(double dt) {
         const auto& s = fm->state();
         // NED -> ENU: enu.x = ned.y (east), enu.y = ned.x (north), enu.z = -ned.z (up)
         tf->position = f4::geo::WorldPosition(s.kin.y, s.kin.x, -s.kin.z);
+
+        // Velocity, same axis swap (found by the M3 combat integration: the
+        // sync used to write position + orientation but NEVER velocity, so
+        // every combat consumer reading the transform — missile launch
+        // (initial velocity + seeker boresight), radar aspect, RWR closure —
+        // saw a parked aircraft. The missile launched with 0 ft/s inherited,
+        // fell ballistically, and lost the seeker cone immediately.)
+        tf->vx = s.kin.ydot;   // east
+        tf->vy = s.kin.xdot;   // north
+        tf->vz = -s.kin.zdot;  // up
 
         // NED -> ENU orientation. The FM's quaternion is NED body-to-world
         // (compass yaw positive about z=DOWN); ENU wants compass as a
