@@ -1,5 +1,17 @@
 # F4 Cleanup Pass — Changes Summary
 
+## Viewer Terrain Fixes (TERRAIN-TEX-2)
+
+**Fixes five user-reported world-viewer bugs; textures now load in every
+flow, the map is north-up, and 3D objectives sit on the terrain.**
+
+| Area | Change |
+|------|--------|
+| `f4-renderer` | `WorldView::load_theater` accepts both the theater root and the terrain subdir (f4-install's `Theater.dir` is the subdir — every install-flow load silently failed before); `terrain_dir()` exposes the resolved dir. Far-ring z bias −20 → −400 ft so the coarser L4 ring can't poke through the near L2 surface (black z-fight blobs). |
+| `f4-world-viewer` map | North-up fix: the cache became a plain `Texture2D` in TEX-1 but the canvas still draws with negative source height (row 0 renders at the *bottom*); both paint paths now write row 0 = south with tile art mirrored per cell. Theater binaries also load via world-JSON/import/install-set paths (`try_load_theater_tiles`), not just the campaign dialog. |
+| `f4-world-viewer` 3D | Geometry (selected + neighboring objectives) samples the near post level — the same elevation the textured terrain renders — instead of the 128×128 MEA summary; the orbit camera targets the terrain elevation instead of sea level. `--select` sets the selection kind, also matches class names, prefers objectives with layout/features, and no longer zooms the map to a corner. |
+| tools | `png_probe` takes an optional region `[x y w h]` and prints per-cell luminance variance. |
+
 ## Textured Terrain + Unified WorldView (TERRAIN-TEX-1)
 
 **Both viewers now render real Falcon 4 terrain tile art, through one

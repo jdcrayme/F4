@@ -1,5 +1,58 @@
 
 ---
+Task ID: TERRAIN-TEX-2
+Agent: main
+Task: Fix user-reported world-viewer bugs: upside-down 2D map, missing
+terrain textures outside the install flow, features underground/floating,
+black terrain blobs, and the map zooming to a corner on --select.
+
+Work Log:
+- Upside-down 2D map: the map cache moved RenderTexture2D ->
+  Texture2D in TERRAIN-TEX-1, which flips display semantics — the canvas
+  draws with a negative source-height DrawTexturePro (row 0 lands at the
+  dst BOTTOM), verified against the vendored raylib DrawTexturePro source.
+  Both paint paths in canvas.cpp now write image row 0 = SOUTH (post row
+  0; tile art rows mirrored within each cell so art-north faces north).
+  Validated by pixel probe: tan land north, ocean south, Sea of Japan
+  east.
+- Missing textures in the world-viewer (root cause): f4-install's
+  Theater.dir points at the TERRAIN SUBDIR (terrdata/korea/terrain), but
+  WorldView::load_theater appended terrain/ + texture/ itself, so every
+  load from the install found .../terrain/terrain/THEATER.L2 and failed
+  silently -> color-band map + untextured 3D everywhere. load_theater now
+  accepts both conventions (tries root first, then subdir with a sibling
+  texture/), remembers the resolved dir in terrain_dir() for the 2D map's
+  L5 load.
+- Theater binaries now also load on the non-install paths: new
+  Impl::try_load_theater_tiles() called from load_world_json (covers
+  import_cam_archive), set_install_path, and the startup settings
+  restore. load_campaign_from_install skips the reload when the same
+  theater is already loaded.
+- select_by_name fixes: set sel_kind (the 3D panel gated on it and never
+  drew); match ObjectiveTypeComponent::class_name too (fixture objectives
+  have no NAME tag); prefer objectives that actually have layout/features;
+  no longer re-fits the map camera (the canvas keeps the whole-theater
+  view; F / "Zoom to Layout" zoom on demand).
+- Features underground/in the sky: the 3D panel placed geometry at the
+  128x128 MEA bilinear elevation (and max'd with the campaign MSL), while
+  the textured terrain renders L2 posts — hundreds of feet of mismatch in
+  mountains. Both placement sites now sample world.near_level()
+  (the same post level the terrain renders) when tiles are loaded. The
+  orbit camera target was at sea level (enu_to_rl(x, y, 0)) — inside any
+  mountain objective; it now targets the terrain elevation.
+- Black blobs (far ring z-fighting): far_z_bias_ft -20 -> -400. The far
+  ring (L4, 2048-ft posts) can run hundreds of feet above the near ring
+  (L2, 256-ft posts) where they overlap; a shallow bias let it poke
+  through as black flicker against the void beneath.
+- Validation: fixture-world and install-campaign CLI flows both give a
+  whole-theater textured map + textured 3D panel (set_view ok, chunk set
+  valid, viewport probe shows textured terrain + fog gradient, no void
+  cells); scenario-player regression green (152 chunks, 0 untextured);
+  terrain/zip test suites green; full suite = 13 failures, all
+  pre-existing or the unrelated f4-sensors M_PI build break (user WIP).
+- png_probe tool: added [x y w h] region args + per-cell luminance
+  variance (texture-vs-void discriminator).
+---
 Task ID: TERRAIN-TEX-1
 Agent: main
 Task: Render textured terrain in the world-viewer and scenario-player, and unify world load + view rendering behind one shared path (WorldView).

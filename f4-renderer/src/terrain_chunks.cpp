@@ -265,8 +265,8 @@ TerrainChunk build_one_textured_chunk(
     const float z_off = cfg.z_offset_ft + reg.z_bias;
 
     const int quads = ncols * nrows;
-    const int vert_count = quads * 4;
-    const int tri_count = quads * 2;
+    int vert_count = quads * 4;
+    int tri_count = quads * 2;
 
     std::vector<float> vertices(static_cast<std::size_t>(vert_count) * 3);
     std::vector<float> texcoords(static_cast<std::size_t>(vert_count) * 2);
@@ -278,6 +278,95 @@ TerrainChunk build_one_textured_chunk(
     float min_up = 1e30f, max_up = -1e30f;
     int untextured = 0;
     int v = 0;
+
+    // Skirt: near-region boundary quads get a vertical wall dropping
+    // below the far ring, so the seam against the deeply biased far
+    // surface can't open a see-through gap (the L2/L4 elevation
+    // disagreement reaches ~3,100 ft in Korea's mountains).
+    struct SkirtQuad {
+        float x[4], y[4], z[4];       // 4 corners, CCW seen from outside
+        float u[4], vv[4];
+        float layer, kind;
+        unsigned char r, g, b;
+        float nx, ny, nz;
+    };
+    std::vector<SkirtQuad> skirts;
+    if (reg.near_region) {
+        constexpr float kSkirtDepth = 3600.0f;
+        for (int qr = 0; qr < nrows; ++qr) {
+            for (int qc = 0; qc < ncols; ++qc) {
+                // (Re-sampling the posts is cheap; keeps this pass
+                // independent of the main loop below.)
+                const int col = qc0 + qc;
+                const int row = qr0 + qr;
+                const auto post_at = [&](int c, int r) {
+                    return reg.level->post(
+                        static_cast<uint32_t>(std::max(c, 0)),
+                        static_cast<uint32_t>(std::max(r, 0)));
+                };
+                const float e = static_cast<float>(reg.ft_per_post);
+                const float x0 = static_cast<float>(col) * e;
+                const float x1 = x0 + e;
+                const float n0 = static_cast<float>(row) * e;
+                const float n1 = n0 + e;
+                auto add_skirt = [&](float ax, float az, float ay0,
+                                     float ay1, float bx, float bz) {
+                    SkirtQuad s{};
+                    s.x[0] = ax; s.y[0] = ay0;          s.z[0] = az;
+                    s.x[1] = bx; s.y[1] = ay1;          s.z[1] = bz;
+                    s.x[2] = bx; s.y[2] = ay1 - kSkirtDepth; s.z[2] = bz;
+                    s.x[3] = ax; s.y[3] = ay0 - kSkirtDepth; s.z[3] = az;
+                    // Untextured branch (kind -1) with a neutral ground
+                    // tone and an up normal — the wall is hidden geometry
+                    // that just must not read as a black void.
+                    s.layer = 0.0f; s.kind = -1.0f;
+                    s.r = 110; s.g = 105; s.b = 95;
+                    s.nx = 0.0f; s.ny = 1.0f; s.nz = 0.0f;
+                    skirts.push_back(s);
+                };
+                if (row == reg.qmin_row) {   // south edge
+                    add_skirt(x0, -n0, post_at(col, row).elevation_ft + z_off,
+                              post_at(col + 1, row).elevation_ft + z_off,
+                              x1, -n0);
+                }
+                if (row == reg.qmax_row - 1) {   // north edge
+                    add_skirt(x1, -n1, post_at(col + 1, row + 1).elevation_ft + z_off,
+                              post_at(col, row + 1).elevation_ft + z_off,
+                              x0, -n1);
+                }
+                if (col == reg.qmin_col) {   // west edge
+                    add_skirt(x0, -n1, post_at(col, row + 1).elevation_ft + z_off,
+                              post_at(col, row).elevation_ft + z_off,
+                              x0, -n0);
+                }
+                if (col == reg.qmax_col - 1) {   // east edge
+                    add_skirt(x1, -n0, post_at(col + 1, row).elevation_ft + z_off,
+                              post_at(col + 1, row + 1).elevation_ft + z_off,
+                              x1, -n1);
+                }
+            }
+        }
+    }
+    // Append skirt geometry.
+    for (const auto& s : skirts) {
+        const unsigned short b = static_cast<unsigned short>(vertices.size() / 3);
+        for (int c = 0; c < 4; ++c) {
+            vertices.push_back(s.x[c]); vertices.push_back(s.y[c]);
+            vertices.push_back(s.z[c]);
+            texcoords.push_back(s.u[c]); texcoords.push_back(s.vv[c]);
+            texcoords2.push_back(s.layer); texcoords2.push_back(s.kind);
+            normals.push_back(s.nx); normals.push_back(s.ny);
+            normals.push_back(s.nz);
+            colors.push_back(s.r); colors.push_back(s.g);
+            colors.push_back(s.b); colors.push_back(255);
+            min_up = std::min(min_up, s.y[c]);
+            max_up = std::max(max_up, s.y[c]);
+        }
+        indices.push_back(b + 0); indices.push_back(b + 1); indices.push_back(b + 2);
+        indices.push_back(b + 0); indices.push_back(b + 2); indices.push_back(b + 3);
+    }
+    vert_count = static_cast<int>(vertices.size() / 3);
+    tri_count = static_cast<int>(indices.size() / 3);
 
     for (int qr = 0; qr < nrows; ++qr) {
         for (int qc = 0; qc < ncols; ++qc) {

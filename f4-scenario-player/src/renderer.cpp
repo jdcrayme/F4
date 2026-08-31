@@ -311,7 +311,15 @@ void PlayerApp::Impl::draw_scene() {
         scene.airfield = &airfield.geometry;
         scene.airfield_origin_enu[0] = airfield.origin_enu_x;
         scene.airfield_origin_enu[1] = airfield.origin_enu_y;
-        scene.airfield_origin_enu[2] = airfield.origin_enu_z;
+        // When the textured theater is loaded, sit the airfield on the
+        // SAME surface the terrain renders (the near post level) — the
+        // scenario JSON's z can be stale/coarse vs the L2 posts, which
+        // buried the base.
+        scene.airfield_origin_enu[2] =
+            (theater_tiles_loaded && world.theater_loaded())
+                ? static_cast<float>(world.near_level().elevation_at_ft(
+                      airfield.origin_enu_x, airfield.origin_enu_y))
+                : airfield.origin_enu_z;
     }
 
     // ── Terrain (textured path + untextured fallback) ────────────────

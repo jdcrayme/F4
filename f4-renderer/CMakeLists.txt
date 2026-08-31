@@ -114,3 +114,8 @@ endif()
 # Developer tool: average-color probe for debugging screenshots.
 add_executable(png_probe tools/png_probe.cpp)
 target_link_libraries(png_probe PRIVATE f4_warnings raylib)
+
+# Paint the 2D map art (L5 posts -> far tiles) + the MEA color map to a
+# PNG for visual comparison against real geography.
+add_executable(paint-map-check tools/paint_map_check.cpp)
+target_link_libraries(paint-map-check PRIVATE f4-terrain f4_warnings raylib)

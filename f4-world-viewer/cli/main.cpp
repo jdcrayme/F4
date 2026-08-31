@@ -250,13 +250,17 @@ int main(int argc, char** argv) {
     }
 
     if (exit_after_screenshot) {
-        // Take a screenshot after 1.5 seconds (enough for first frame to render).
-        app.schedule_screenshot(1.5f, screenshot_path);
-        // Run for 3 seconds total, then exit.
-        // The simplest way: spawn a thread that calls exit() after 3s.
+        // Take a screenshot after 4 seconds — enough for the first frames
+        // INCLUDING one-time work that happens on frame 1 (the 2D map's
+        // far-tile paint can take a second or two on a real theater; the
+        // capture must land on a frame AFTER the first swap, or it reads
+        // an undefined back buffer and comes out black).
+        app.schedule_screenshot(4.0f, screenshot_path);
+        // Run for 6 seconds total, then exit.
+        // The simplest way: spawn a thread that calls exit() after 6s.
         // (We use a portable approach via std::thread + std::exit.)
         std::thread([path = screenshot_path]() {
-            std::this_thread::sleep_for(std::chrono::seconds(3));
+            std::this_thread::sleep_for(std::chrono::seconds(6));
             std::cout << "Screenshot saved to " << path << "; exiting.\n";
             std::exit(0);
         }).detach();

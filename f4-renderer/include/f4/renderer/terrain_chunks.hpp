@@ -118,9 +118,15 @@ struct TerrainChunkSetConfig {
     float near_extent_ft = 60000.0f;
 
     /// Extra z bias (feet, negative = lower) for far-region quads so
-    /// the near region wins depth tests where the two overlap (the
-    /// levels sample elevation differently at the seam).
-    float far_z_bias_ft = -20.0f;
+    /// the near region wins depth tests where the two overlap. The two
+    /// levels sample elevation at very different resolutions (near L2:
+    /// 256-ft posts; far L4: 2048-ft posts), and the far bilinear
+    /// surface can run thousands of feet ABOVE the near surface on
+    /// sharp ridges — measured worst case on Korea: 3,096 ft. The bias
+    /// must clear that or the far ring pokes through as black blotches.
+    /// The visible step at the near/far seam is sealed by the skirt the
+    /// builder drops around the near region (see build_one_textured_chunk).
+    float far_z_bias_ft = -3200.0f;
 };
 
 /// One chunk's GPU resources + bounding box. Owned by TerrainChunkSet.

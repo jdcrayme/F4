@@ -282,23 +282,72 @@ void ViewerApp::draw_ground_layout_3d() {
                               impl_->model_db_3d.has_value() &&
                               impl_->class_table_3d.loaded();
 
+    // ── World-space positioning (Path B1 fix) ──────────────────────────
+    //
+    // The airfield geometry is in OBJECTIVE-LOCAL coordinates (feet
+    // relative to the objective center). The terrain mesh is in WORLD
+    // ENU coordinates. To make them align, we need the objective's world
+    // ENU position from its TransformComponent — that's the origin we
+    // pass to draw_airfield_geometry() AND the center for the terrain mesh.
+    //
+    // Without this, the terrain was always centered at world (0,0) (the
+    // SW corner of the theater — coast/ocean) while the airfield geometry
+    // floated at local (0,0), giving the "always on the coast" bug.
+    auto* tf = h.get<f4::entities::TransformComponent>();
+    const float obj_world_x = tf ? static_cast<float>(tf->position.x) : 0.0f;
+    const float obj_world_y = tf ? static_cast<float>(tf->position.y) : 0.0f;
+    // Terrain elevation at the objective's world position — used to lift
+    // the airfield geometry (and the orbit camera target) so they sit ON
+    // the terrain, not under it.
+    //
+    // When the theater binaries are loaded, sample the SAME post level
+    // the textured terrain renders (near = L2). The 128x128 MEA summary
+    // can be hundreds of feet off in mountains, which buried some
+    // objectives and floated others.
+    float terrain_elev_at_obj = 0.0f;
+    if (impl_->theater_tiles_loaded) {
+        terrain_elev_at_obj = static_cast<float>(
+            impl_->world.near_level().elevation_at_ft(obj_world_x,
+                                                      obj_world_y));
+    } else if (impl_->terrain_loaded && !impl_->terrain.elevation.empty()) {
+        // Bilinear sample the terrain at the objective's ENU position.
+        // Use the TerrainDataAdapter if available, otherwise inline.
+        const double theater_size_ft = 1024.0 * 1024.0;
+        const double w = static_cast<double>(
+            impl_->terrain.header.width > 0 ? impl_->terrain.header.width : 128);
+        const double ft_per_cell = theater_size_ft / w;
+        const double fx = obj_world_x / ft_per_cell;
+        const double fy = obj_world_y / ft_per_cell;
+        const uint32_t cx = std::min(static_cast<uint32_t>(std::max(fx, 0.0)),
+                                      impl_->terrain.header.width - 1);
+        const uint32_t cy_raw = std::min(static_cast<uint32_t>(std::max(fy, 0.0)),
+                                          impl_->terrain.header.height - 1);
+        const uint32_t cy = impl_->terrain.header.height - 1 - cy_raw;
+        terrain_elev_at_obj = static_cast<float>(impl_->terrain.elevation_at(cx, cy));
+    }
+    // The airfield geometry's Z origin: the terrain elevation the
+    // rendered surface actually has (the terrain mesh is sunk 5 ft by
+    // z_offset, so the plates sit just above it). The objective's own
+    // MSL altitude is NOT used — the geometry must match the surface
+    // the eye sees, not the survey datum.
+    const float obj_world_z = terrain_elev_at_obj;
+
     // Local lambda for fitting orbit camera to bbox.
     // Uses the OBJECTIVE'S WORLD ENU position as the camera target (not
     // the local bbox center) so the camera looks at the right spot in
-    // the world. The bbox diagonal still determines the distance.
+    // the world. The bbox diagonal still determines the distance. The
+    // target sits at the terrain elevation — targeting sea level put the
+    // camera inside mountains, showing mostly void.
     auto default_orbit_for_bbox = [&](const AirfieldGeometry3D& g) {
         if (g.empty) return;
-        // Get the objective's world position for the camera target.
-        auto* tf_cam = h.get<f4::entities::TransformComponent>();
-        const float world_x = tf_cam ? static_cast<float>(tf_cam->position.x) : 0.0f;
-        const float world_y = tf_cam ? static_cast<float>(tf_cam->position.y) : 0.0f;
-        impl_->ground_layout_3d_center_x = world_x;
-        impl_->ground_layout_3d_center_y = world_y;
+        impl_->ground_layout_3d_center_x = obj_world_x;
+        impl_->ground_layout_3d_center_y = obj_world_y;
         const float w = g.max_x - g.min_x;
         const float hgt = g.max_y - g.min_y;
         const float diag = std::sqrt(w * w + hgt * hgt);
         // Camera target at the objective's world position.
-        const Vector3 center = enu_to_rl(world_x, world_y, 0.0f);
+        const Vector3 center = enu_to_rl(obj_world_x, obj_world_y,
+                                         obj_world_z);
         const float radius = diag * 0.5f;
         impl_->gl3d_orbit_cam.fit_to_bbox(center, std::max(radius, 250.0f), 3.0f);
     };
@@ -329,46 +378,8 @@ void ViewerApp::draw_ground_layout_3d() {
         return;  // nothing to render
     }
 
-    // ── World-space positioning (Path B1 fix) ──────────────────────────
-    //
-    // The airfield geometry is in OBJECTIVE-LOCAL coordinates (feet
-    // relative to the objective center). The terrain mesh is in WORLD
-    // ENU coordinates. To make them align, we need the objective's world
-    // ENU position from its TransformComponent — that's the origin we
-    // pass to draw_airfield_geometry() AND the center for the terrain mesh.
-    //
-    // Without this, the terrain was always centered at world (0,0) (the
-    // SW corner of the theater — coast/ocean) while the airfield geometry
-    // floated at local (0,0), giving the "always on the coast" bug.
-    auto* tf = h.get<f4::entities::TransformComponent>();
-    const float obj_world_x = tf ? static_cast<float>(tf->position.x) : 0.0f;
-    const float obj_world_y = tf ? static_cast<float>(tf->position.y) : 0.0f;
-    // Terrain elevation at the objective's world position — used to lift
-    // the airfield geometry so it sits ON the terrain, not under it.
-    float terrain_elev_at_obj = 0.0f;
-    if (impl_->terrain_loaded && !impl_->terrain.elevation.empty()) {
-        // Bilinear sample the terrain at the objective's ENU position.
-        // Use the TerrainDataAdapter if available, otherwise inline.
-        const double theater_size_ft = 1024.0 * 1024.0;
-        const double w = static_cast<double>(
-            impl_->terrain.header.width > 0 ? impl_->terrain.header.width : 128);
-        const double ft_per_cell = theater_size_ft / w;
-        const double fx = obj_world_x / ft_per_cell;
-        const double fy = obj_world_y / ft_per_cell;
-        const uint32_t cx = std::min(static_cast<uint32_t>(std::max(fx, 0.0)),
-                                      impl_->terrain.header.width - 1);
-        const uint32_t cy_raw = std::min(static_cast<uint32_t>(std::max(fy, 0.0)),
-                                          impl_->terrain.header.height - 1);
-        const uint32_t cy = impl_->terrain.header.height - 1 - cy_raw;
-        terrain_elev_at_obj = static_cast<float>(impl_->terrain.elevation_at(cx, cy));
-    }
-    // The airfield geometry's Z origin: the objective's MSL altitude
-    // (tf->position.z) OR the terrain elevation, whichever is higher.
-    // This prevents the airfield from sinking underground when the terrain
-    // is above sea level.
-    const float obj_world_z = tf
-        ? std::max(static_cast<float>(tf->position.z), terrain_elev_at_obj)
-        : terrain_elev_at_obj;
+    // (obj_world_x/y/z + terrain_elev_at_obj were computed above, before
+    // the camera-fit lambda that needs them.)
 
     // Update the orbit camera BEFORE the render pass.
     impl_->gl3d_orbit_cam.update_from_orbit();
@@ -713,8 +724,16 @@ void ViewerApp::draw_ground_layout_3d() {
 
                 const float nx = static_cast<float>(ntf->position.x);
                 const float ny = static_cast<float>(ntf->position.y);
+                // Same elevation source as the selected objective: the
+                // near post level when the theater binaries are loaded
+                // (must match the rendered terrain), MEA summary as the
+                // JSON-only fallback.
                 float nterrain_elev = 0.0f;
-                if (impl_->terrain_loaded && !impl_->terrain.elevation.empty()) {
+                if (impl_->theater_tiles_loaded) {
+                    nterrain_elev = static_cast<float>(
+                        impl_->world.near_level().elevation_at_ft(nx, ny));
+                } else if (impl_->terrain_loaded &&
+                           !impl_->terrain.elevation.empty()) {
                     const double theater_size_ft = 1024.0 * 1024.0;
                     const double w = static_cast<double>(
                         impl_->terrain.header.width > 0 ? impl_->terrain.header.width : 128);
@@ -726,7 +745,7 @@ void ViewerApp::draw_ground_layout_3d() {
                     const uint32_t ncy = impl_->terrain.header.height - 1 - ncy_raw;
                     nterrain_elev = static_cast<float>(impl_->terrain.elevation_at(ncx, ncy));
                 }
-                const float nz = std::max(static_cast<float>(ntf->position.z), nterrain_elev);
+                const float nz = nterrain_elev;
 
                 auto* ngl = nh.get<f4::entities::GroundLayoutComponent>();
                 if (ngl && !ngl->layouts.empty()) {

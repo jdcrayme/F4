@@ -20,6 +20,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <map>
 #include <string>
 
 namespace f4::viewer {
@@ -149,57 +150,86 @@ void ViewerApp::Impl::ensure_terrain_cache() {
         terrain_cache = {};
     }
 
-    // --- Textured map: one far-tile thumbnail per MEA cell ------------
+    // --- Textured map: far-tile thumbnails per MEA cell -----------------
     //
-    // The coarsest post level (L5, 128 posts for Korea) maps 1:1 onto
-    // the MEA grid, and each L5 post carries a far-tile index — so the
-    // whole-theater map can be painted with real tile art. Each 32x32
-    // tile is box-filtered down to kPx x kPx on the CPU and the result
-    // is uploaded once (2048x2048 RGBA for a 128-cell grid).
-    if (theater_tiles_loaded && !current_theater_dir.empty()) {
-        f4::terrain::PostLevel l5;
-        bool ok = false;
-        try {
-            ok = l5.load(world.terrain_dir(),
-                         world.geometry().last_level, world.geometry());
-        } catch (const std::exception&) {
-            ok = false;
-        }
-        if (ok && l5.posts_wide() == gw && l5.posts_wide() == gh) {
+    // Painted from the FAR post level loaded in WorldView (L4 for Korea:
+    // 256 posts = 2x2 per MEA cell — each cell averages its posts' far
+    // tiles, 32x32 art box-filtered to kPx x kPx). NOTE: the coarsest
+    // level (L5, 1:1 with the MEA grid) is NOT used — its tex_ids don't
+    // line up with the tile DB (water-correlation vs the MEA grid is
+    // 0.21 for L5 vs 0.68 for L4), while L4 matches geography cleanly.
+    if (theater_tiles_loaded && world.theater_loaded()) {
+        const auto& lvl = world.far_level();
+        const uint32_t pw = lvl.posts_wide();
+        if (pw >= gw && pw >= gh) {
+            const uint32_t spp = pw / gw;   // far posts per cell side (2)
             constexpr int kPx = 16;
+            // Pre-decode every DISTINCT far tile to a kPx box-filtered
+            // thumbnail once (Korea L4 has ~28k distinct ids over 65k
+            // posts — decoding per post stalls the first frame for
+            // seconds). Decode + filter in one pass over the raw
+            // palette indices.
+            std::map<uint16_t, std::vector<uint8_t>> thumb;
+            const uint8_t* pal = world.far_tiles().palette_rgba();
+            auto thumbnail = [&](uint16_t tex_id) -> const std::vector<uint8_t>* {
+                const auto it = thumb.find(tex_id);
+                if (it != thumb.end()) return &it->second;
+                const uint8_t* idx = world.far_tiles().tile_indices(tex_id);
+                std::vector<uint8_t> t;
+                if (idx) {
+                    t.resize(static_cast<std::size_t>(kPx) * kPx * 4);
+                    constexpr int S =
+                        static_cast<int>(f4::terrain::FarTileDB::TILE_SIZE) / kPx;
+                    const uint32_t n = static_cast<uint32_t>(S) * S;
+                    for (int y = 0; y < kPx; ++y) {
+                        for (int x = 0; x < kPx; ++x) {
+                            uint32_t sr = 0, sg = 0, sb = 0;
+                            for (int dy = 0; dy < S; ++dy)
+                            for (int dx = 0; dx < S; ++dx) {
+                                const uint8_t* p = pal +
+                                    idx[(y * S + dy) * 32 + (x * S + dx)] * 4;
+                                sr += p[0]; sg += p[1]; sb += p[2];
+                            }
+                            const std::size_t dst_px =
+                                (static_cast<std::size_t>(y) * kPx + x) * 4;
+                            t[dst_px + 0] = static_cast<uint8_t>(sr / n);
+                            t[dst_px + 1] = static_cast<uint8_t>(sg / n);
+                            t[dst_px + 2] = static_cast<uint8_t>(sb / n);
+                            t[dst_px + 3] = 255;
+                        }
+                    }
+                }
+                const auto [ins, _] = thumb.emplace(tex_id, std::move(t));
+                return &ins->second;
+            };
+
             Image img = GenImageColor(static_cast<int>(gw) * kPx,
                                       static_cast<int>(gh) * kPx, BLACK);
-            std::vector<uint8_t> tile;
+            std::vector<uint32_t> acc(static_cast<std::size_t>(kPx) * kPx * 4);
             std::vector<uint8_t> cell(static_cast<std::size_t>(kPx) * kPx * 4);
             for (uint32_t r = 0; r < gh; ++r) {
                 for (uint32_t c = 0; c < gw; ++c) {
-                    const auto p = l5.post(c, r);
-                    bool have_art = !p.has_no_tile() &&
-                        world.far_tiles().tile_rgba(p.tex_id, tile);
-                    if (have_art) {
-                        // 32x32 -> kPx box filter (2x2 blocks for kPx=16).
-                        constexpr int S =
-                            static_cast<int>(f4::terrain::FarTileDB::TILE_SIZE) / kPx;
-                        for (int y = 0; y < kPx; ++y) {
-                            for (int x = 0; x < kPx; ++x) {
-                                int sr = 0, sg = 0, sb = 0;
-                                for (int dy = 0; dy < S; ++dy)
-                                for (int dx = 0; dx < S; ++dx) {
-                                    const std::size_t src_px =
-                                        (static_cast<std::size_t>(y * S + dy) * 32 +
-                                         (x * S + dx)) * 4;
-                                    sr += tile[src_px + 0];
-                                    sg += tile[src_px + 1];
-                                    sb += tile[src_px + 2];
-                                }
-                                const std::size_t n = static_cast<std::size_t>(S) * S;
-                                const std::size_t dst_px =
-                                    (static_cast<std::size_t>(y) * kPx + x) * 4;
-                                cell[dst_px + 0] = static_cast<uint8_t>(sr / n);
-                                cell[dst_px + 1] = static_cast<uint8_t>(sg / n);
-                                cell[dst_px + 2] = static_cast<uint8_t>(sb / n);
-                                cell[dst_px + 3] = 255;
+                    // Average the spp x spp far posts' tiles for the cell.
+                    uint32_t contributions = 0;
+                    std::fill(acc.begin(), acc.end(), 0u);
+                    for (uint32_t py = 0; py < spp; ++py) {
+                        for (uint32_t px = 0; px < spp; ++px) {
+                            const auto p = lvl.post(c * spp + px, r * spp + py);
+                            if (p.has_no_tile()) continue;
+                            const std::vector<uint8_t>* t = thumbnail(p.tex_id);
+                            if (!t || t->empty()) continue;
+                            ++contributions;
+                            for (std::size_t i = 0; i < acc.size(); ++i) {
+                                acc[i] += (*t)[i];
                             }
+                        }
+                    }
+                    if (contributions > 0) {
+                        for (std::size_t i = 0; i < cell.size(); i += 4) {
+                            cell[i + 0] = static_cast<uint8_t>(acc[i + 0] / contributions);
+                            cell[i + 1] = static_cast<uint8_t>(acc[i + 1] / contributions);
+                            cell[i + 2] = static_cast<uint8_t>(acc[i + 2] / contributions);
+                            cell[i + 3] = 255;
                         }
                     } else {
                         // Fallback: the elevation-band color (what the

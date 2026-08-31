@@ -14,6 +14,7 @@
 #include <f4/terrain/theater_geometry.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <filesystem>
 #include <set>
@@ -147,6 +148,133 @@ int main(int argc, char* argv[]) {
         if (!td.elevation.empty()) {
             const double e = pl.elevation_at_ft(524288.0, 524288.0);
             std::printf("  elevation_at_ft(theater center) = %.1f\n", e);
+        }
+    }
+
+    // --- Near-vs-far surface disagreement (sizes the far z bias) --------
+    {
+        f4::terrain::PostLevel l2, l4;
+        if (l2.load(terrain_dir, 2, geom) && l4.load(terrain_dir, 4, geom)) {
+            double max_d = 0.0, sum_d = 0.0;
+            long n = 0, over400 = 0;
+            const double ft = geom.theater_size_ft;
+            for (double e = 0; e <= ft; e += ft / 256.0) {
+                for (double nn = 0; nn <= ft; nn += ft / 256.0) {
+                    const double d = l2.elevation_at_ft(e, nn) -
+                                     l4.elevation_at_ft(e, nn);
+                    const double ad = std::abs(d);
+                    max_d = std::max(max_d, ad);
+                    sum_d += ad;
+                    if (ad > 400.0) ++over400;
+                    ++n;
+                }
+            }
+            std::printf("\n|L2-L4| elevation over the theater: max=%.0f ft, mean=%.0f ft, %ld/%ld samples > 400 ft\n",
+                        max_d, sum_d / n, over400, n);
+        }
+    }
+
+    // --- Map-art cross-check: far-tile art vs MEA water/land ----------
+    // Prints ASCII maps ('W'=water/blue art, '.'=land, '?'=no tile) for
+    // each far post level — the MEA one is known-correct geography; a
+    // level whose art doesn't reproduce the same coastline is broken.
+    if (far_ok && !td.elevation.empty()) {
+        std::vector<uint8_t> px;
+        auto water_art = [&](uint16_t tex_id, bool& have) {
+            have = false;
+            if (tex_id == 0xFFFF) return false;
+            if (!far_db.tile_rgba(tex_id, px)) return false;
+            long r = 0, g = 0, b = 0, n = 0;
+            for (std::size_t i = 0; i + 3 < px.size(); i += 4) {
+                r += px[i]; g += px[i + 1]; b += px[i + 2]; ++n;
+            }
+            if (n == 0) return false;
+            have = true;
+            r /= n; g /= n; b /= n;
+            return b > r + 8;   // ocean art is blue-dominant
+        };
+        const uint32_t gw = td.header.width, gh = td.header.height;
+        const uint32_t step = std::max<uint32_t>(1, gw / 48);
+        std::printf("\nMEA water/land ('W'=water, '.'=land), north at top:\n");
+        for (uint32_t y = gh; y-- > 0;) {
+            for (uint32_t x = 0; x < gw; x += step) {
+                const auto c = f4::terrain::TerrainData::color_for_tile_type(
+                    td.tile_type_at(x, y));
+                std::putchar((c.b > c.r + 15 && c.b > c.g + 5) ? 'W' : '.');
+            }
+            std::putchar('\n');
+        }
+        for (int level = 3; level <= static_cast<int>(geom.last_level); ++level) {
+            f4::terrain::PostLevel pl;
+            if (!pl.load(terrain_dir, level, geom)) continue;
+            // Correlation of per-cell art water-fraction vs MEA water,
+            // under 4 orientations — the true orientation wins clearly.
+            // (Also printed as ASCII for eyeballing.)
+            const double scale = static_cast<double>(pl.posts_wide()) /
+                                 static_cast<double>(gw);
+            std::vector<double> art_w(gh * gw, 0.0);
+            std::vector<double> mea_w(gh * gw, 0.0);
+            std::vector<uint8_t> px;
+            for (uint32_t y = 0; y < gh; ++y) {
+                for (uint32_t x = 0; x < gw; ++x) {
+                    const auto mc = f4::terrain::TerrainData::color_for_tile_type(
+                        td.tile_type_at(x, y));
+                    mea_w[y * gw + x] =
+                        (mc.b > mc.r + 15 && mc.b > mc.g + 5) ? 1.0 : 0.0;
+                    const uint32_t pc = static_cast<uint32_t>((x + 0.5) * scale);
+                    const uint32_t pr = static_cast<uint32_t>((y + 0.5) * scale);
+                    const auto p = pl.post(std::min(pc, pl.posts_wide() - 1),
+                                           std::min(pr, pl.posts_wide() - 1));
+                    double w = 0.0;
+                    if (p.tex_id != 0xFFFF && far_db.tile_rgba(p.tex_id, px)) {
+                        long r = 0, g = 0, b = 0; long n = 0, wb = 0;
+                        for (std::size_t i = 0; i + 3 < px.size(); i += 4) {
+                            r = px[i]; g = px[i + 1]; b = px[i + 2];
+                            if (b > r + 8) ++wb;
+                            ++n;
+                        }
+                        w = n ? static_cast<double>(wb) / n : 0.0;
+                    }
+                    art_w[y * gw + x] = w;
+                }
+            }
+            auto corr = [&](int fy, int fx) {
+                // fy/fx: +1 = same direction, -1 = flipped
+                double sa = 0, sb = 0, saa = 0, sbb = 0, sab = 0;
+                long n = 0;
+                for (uint32_t y = 0; y < gh; ++y)
+                for (uint32_t x = 0; x < gw; ++x) {
+                    const uint32_t ay = fy > 0 ? y : gh - 1 - y;
+                    const uint32_t ax = fx > 0 ? x : gw - 1 - x;
+                    const double a = art_w[ay * gw + ax];
+                    const double b = mea_w[y * gw + x];
+                    sa += a; sb += b; saa += a * a; sbb += b * b; sab += a * b;
+                    ++n;
+                }
+                const double cov = sab / n - (sa / n) * (sb / n);
+                const double va = saa / n - (sa / n) * (sa / n);
+                const double vb = sbb / n - (sb / n) * (sb / n);
+                return va > 0 && vb > 0 ? cov / std::sqrt(va * vb) : 0.0;
+            };
+            std::printf("\nL%d art-vs-MEA water correlation: identity=%.3f flipNS=%.3f flipEW=%.3f rot180=%.3f\n",
+                        level, corr(1, 1), corr(-1, 1), corr(1, -1), corr(-1, -1));
+            std::printf("L%d far-tile art ('W'=blue art, '.'=land art, '?'=no tile), north at top:\n",
+                        level);
+            for (uint32_t y = gh; y-- > 0;) {
+                for (uint32_t x = 0; x < gw; x += step) {
+                    const uint32_t pc = static_cast<uint32_t>((x + 0.5) * scale);
+                    const uint32_t pr = static_cast<uint32_t>((y + 0.5) * scale);
+                    bool have = false;
+                    const auto p = pl.post(std::min(pc, pl.posts_wide() - 1),
+                                           std::min(pr, pl.posts_wide() - 1));
+                    if (p.tex_id != 0xFFFF) {
+                        if (far_db.tile_rgba(p.tex_id, px)) have = true;
+                    }
+                    const bool w = have && art_w[y * gw + x] > 0.5;
+                    std::putchar(!have ? '?' : (w ? 'W' : '.'));
+                }
+                std::putchar('\n');
+            }
         }
     }
     return 0;

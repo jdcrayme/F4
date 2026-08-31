@@ -56,6 +56,14 @@ public:
     /// back to untextured color).
     [[nodiscard]] bool tile_rgba(uint32_t index, std::vector<uint8_t>& out) const;
 
+    /// The tile's raw 32x32 palette indices (TILE_PIXELS bytes), or null
+    /// when index is out of range. Callers doing their own filtering read
+    /// these + palette_rgba() without materializing full RGBA tiles.
+    [[nodiscard]] const uint8_t* tile_indices(uint32_t index) const noexcept {
+        if (index >= tile_count()) return nullptr;
+        return raw_.data() + static_cast<std::size_t>(index) * TILE_PIXELS;
+    }
+
     /// The shared 256-entry palette as RGBA bytes (1024 bytes).
     [[nodiscard]] const uint8_t* palette_rgba() const noexcept { return palette_; }
 

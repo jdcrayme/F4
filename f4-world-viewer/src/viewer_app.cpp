@@ -288,7 +288,9 @@ bool ViewerApp::select_by_name(const std::string& substring) {
             }
             impl_->sel_kind = Impl::SelectionKind::Objective;
             impl_->sel_entity = eid;
-            impl_->fit_to_selection_layout();
+            // NOTE: deliberately NOT calling fit_to_selection_layout() —
+            // the map keeps showing the whole theater (F / double-click
+            // zooms to a selection on demand).
             impl_->inspector_force_3d_tab = true;
             return true;
         }
