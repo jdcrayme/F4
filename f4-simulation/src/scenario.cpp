@@ -95,6 +95,7 @@ ScenarioAircraft read_aircraft(f4::json::Reader& r) {
                     "' has unknown team '" + a.team + "' (blue|red)");
         }
         else if (key == "hold_fire")       a.hold_fire = r.read_bool();
+        else if (key == "lead_callsign")    a.lead_callsign = r.read_string();
         else                                 skip_unknown(r);
     }
     return a;

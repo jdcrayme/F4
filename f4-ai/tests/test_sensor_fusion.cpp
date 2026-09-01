@@ -736,3 +736,141 @@ TEST(SensorFusion, MissileThreatIgnoresSameTeamMissiles) {
         }
     }
 }
+
+// ============================================================================
+// M3 tactics, Step 11 (2-ship): threat_target never returns friendlies; the
+// wingman's sorted_threat_target implements the FreeFalcon wing sort.
+// ============================================================================
+
+TEST(SensorFusion, ThreatTargetNeverReturnsAFriendly) {
+    // The 2-ship discipline fix: before it, a visible friendly fighter won
+    // threat_target() by default whenever no hostile was visible — the
+    // wingman's own LEAD was its "threat", and the BVR rung engaged a
+    // friendly. Friendlies stay in the list (situational awareness) but
+    // never arm a combat rung.
+    EntityWorld world;
+    MessageBus bus;
+    OwnshipSpec os;
+    const auto own_id = add_entity(world, {os.pos, os.vel, "blue", "fighter"});
+
+    // The wingman's own lead: 2 NM ahead, same team, a fighter.
+    add_entity(world, {WorldPosition{0.0, 2.0 * FT_PER_NM, 20000.0},
+                       WorldPosition{0.0, 600.0 * FPS_PER_KT, 0.0},
+                       "blue", "fighter"});
+
+    SensorFusion sf;
+    sf.initialize(own_id, world, bus, SkillLevel::Ace);
+    sf.update(1.0);
+    ASSERT_EQ(sf.target_count(), 1u);
+    EXPECT_TRUE(sf.targets()[0].combat_class >= 2);   // it IS a fighter...
+    EXPECT_FALSE(sf.targets()[0].is_hostile);         // ...but not a hostile
+    EXPECT_EQ(sf.threat_target(), nullptr);           // ...so never a threat
+}
+
+TEST(SensorFusion, ThreatTargetPrefersHostileOverFriendlyFighter) {
+    // With one of each visible, the hostile wins even when the friendly
+    // is nearer: the near friendly lead must not outrank the far bandit.
+    EntityWorld world;
+    MessageBus bus;
+    OwnshipSpec os;
+    const auto own_id = add_entity(world, {os.pos, os.vel, "blue", "fighter"});
+
+    add_entity(world, {WorldPosition{0.0, 2.0 * FT_PER_NM, 20000.0},
+                       WorldPosition{0.0, 600.0 * FPS_PER_KT, 0.0},
+                       "blue", "fighter"});   // near friendly lead
+    const auto bandit = add_entity(world,
+        {WorldPosition{0.0, 12.0 * FT_PER_NM, 20000.0},
+         WorldPosition{0.0, -600.0 * FPS_PER_KT, 0.0},
+         "red", "fighter"});                 // far hostile, nose-on
+
+    SensorFusion sf;
+    sf.initialize(own_id, world, bus, SkillLevel::Ace);
+    sf.update(1.0);
+
+    const auto* t = sf.threat_target();
+    ASSERT_NE(t, nullptr);
+    EXPECT_EQ(t->entity_id, bandit);
+}
+
+TEST(SensorFusion, SortedThreatTargetTakesTheFreeBandit) {
+    // The wingman's sort: with two visible hostiles, the wingman engages
+    // the one the LEAD has NOT taken — even when the lead's target scores
+    // higher. This is what keeps a 2-ship from doubling up.
+    EntityWorld world;
+    MessageBus bus;
+    OwnshipSpec os;
+    const auto own_id = add_entity(world, {os.pos, os.vel, "blue", "fighter"});
+
+    // The lead's target: nose-on hostile fighter (score 150) at 6 NM.
+    const auto lead_target = add_entity(world,
+        {WorldPosition{0.0, 6.0 * FT_PER_NM, 20000.0},
+         WorldPosition{0.0, -600.0 * FPS_PER_KT, 0.0},
+         "red", "fighter"});
+    // The free bandit: pointed away (score 75) at 8 NM — lower score.
+    const auto free_bandit = add_entity(world,
+        {WorldPosition{0.0, 8.0 * FT_PER_NM, 20000.0},
+         WorldPosition{0.0, 600.0 * FPS_PER_KT, 0.0},
+         "red", "fighter"});
+
+    SensorFusion sf;
+    sf.initialize(own_id, world, bus, SkillLevel::Ace);
+    sf.update(1.0);
+
+    // Plain query: the nose-on one wins on score.
+    const auto* plain = sf.threat_target();
+    ASSERT_NE(plain, nullptr);
+    EXPECT_EQ(plain->entity_id, lead_target);
+
+    // Sorted query: the free bandit outranks the lead's engagement even
+    // at a lower score — that is the point of the sort.
+    const auto* sorted = sf.sorted_threat_target(lead_target);
+    ASSERT_NE(sorted, nullptr);
+    EXPECT_EQ(sorted->entity_id, free_bandit);
+}
+
+TEST(SensorFusion, SortedThreatTargetSupportsLeadWhenOnlyTarget) {
+    // Only the lead's target is visible: the wingman doubles up (support
+    // the kill) rather than idling.
+    EntityWorld world;
+    MessageBus bus;
+    OwnshipSpec os;
+    const auto own_id = add_entity(world, {os.pos, os.vel, "blue", "fighter"});
+
+    const auto lead_target = add_entity(world,
+        {WorldPosition{0.0, 6.0 * FT_PER_NM, 20000.0},
+         WorldPosition{0.0, -600.0 * FPS_PER_KT, 0.0},
+         "red", "fighter"});
+
+    SensorFusion sf;
+    sf.initialize(own_id, world, bus, SkillLevel::Ace);
+    sf.update(1.0);
+
+    const auto* sorted = sf.sorted_threat_target(lead_target);
+    ASSERT_NE(sorted, nullptr);
+    EXPECT_EQ(sorted->entity_id, lead_target);
+}
+
+TEST(SensorFusion, SortedThreatTargetDegeneratesWithoutLeadEngagement) {
+    // lead_engaged_id == 0 (lead not fighting, or not a wingman): the
+    // sorted query behaves exactly like the plain one.
+    EntityWorld world;
+    MessageBus bus;
+    OwnshipSpec os;
+    const auto own_id = add_entity(world, {os.pos, os.vel, "blue", "fighter"});
+
+    const auto a = add_entity(world,
+        {WorldPosition{0.0, 6.0 * FT_PER_NM, 20000.0},
+         WorldPosition{0.0, -600.0 * FPS_PER_KT, 0.0},
+         "red", "fighter"});
+    add_entity(world, {WorldPosition{0.0, 8.0 * FT_PER_NM, 20000.0},
+                       WorldPosition{0.0, 600.0 * FPS_PER_KT, 0.0},
+                       "red", "fighter"});
+
+    SensorFusion sf;
+    sf.initialize(own_id, world, bus, SkillLevel::Ace);
+    sf.update(1.0);
+
+    const auto* sorted = sf.sorted_threat_target(0);
+    ASSERT_NE(sorted, nullptr);
+    EXPECT_EQ(sorted->entity_id, a);   // the higher-scoring nose-on one
+}

@@ -3547,3 +3547,70 @@ Stage Summary:
 - Next session: WingmanModule (2v2 formation fight — the last M3 module
   before the DigitalBrain arbiter cut), then guns, then asset pipeline
   Stage 1.
+
+---
+## M3-TACTICS-3: the 2-ship — WingmanModule, the sort, the rejoin
+
+User pushed M4-RECORDER-1 (squashed as 746c894 "combat events
+recorder"). Pulled; `git diff e7ecc8f origin/main` empty — remote tree
+byte-identical to the tested branch. Baseline rebuild + ctest
+1,610/1,610 green. Branched m3-tactics-3.
+
+- WingmanModule (new, f4-ai, engine-agnostic): the Step 11 module.
+  Host pushes a LeadPicture per tick (before update_all), module
+  answers with steering — same contract as every other module,
+  mirrored. FSM None/Following/Rejoining; 5 two-ship formations
+  (FightingWing default) from FreeFalcon formdata.
+- Steering: lateral = pursuit far out, lead-heading + clamped
+  proportional lateral correction near (forms instead of orbiting or
+  freezing an offset). Longitudinal = station-frame PD in Following
+  (the D term brakes the join), RANGE-TO-LEAD law in Rejoining —
+  rotation-free on purpose: during the lead's post-fight 180 the
+  station frame rotates under the wingman, along-rate reads as frame
+  rotation not closure, and the station-frame law phugoided 36 kft
+  (measured in the E2E timeline). Capture back into Following fires on
+  LEAD range < 5,000 ft (station-distance capture kept missing the
+  flyby — the slot sweeps 3,200 ft around a turning lead).
+- REAL BUG found en route: SensorFusion::threat_target() never
+  filtered hostiles — in a 2-ship the wingman's own LEAD won the query
+  pre-detection and BVR engaged a friendly. Fixed (friendlies stay in
+  the list, never arm a rung). Plus sorted_threat_target(): the wing
+  sort — the free bandit outranks the lead's target even at lower
+  score; support the kill when solo; degenerate to plain when the lead
+  isn't fighting.
+- BrainComponent: Formation rung (Defensive > WVR > BVR > Formation >
+  mission; runs with combat off too). Host API: set_flight_lead /
+  update_lead_picture / set_lead_engagement in; combat_engagement_id
+  out (the sort hint's source).
+- f4-simulation: scenario "lead_callsign" (validated: unknown lead,
+  self-lead, cross-team all throw at initialize()); resolve_wingman_
+  refs() after all spawns; push_wingman_lead_pictures() every tick
+  before update_all (lead transform/FM/damage/brain -> picture +
+  engagement). No-op when nothing declares a lead.
+- Scenarios: two_ship.json.in shipped — EAGLE1+EAGLE2 (wingman) vs two
+  hold-fire bandits, 13 NM stern chase; the #2 forms, sorts, kills,
+  rejoins. Records like the other combat scenarios.
+- Tests +22 (suite 1,632/1,632 = 100%, zero warnings): 14 wingman
+  units, 5 sensor-fusion units, 1 schema (3 rejection cases),
+  AiVersusAiTwoShipBvrFight E2E (formation pre-detect, sort separation,
+  2 kills by blues only, both blues alive, wing reformed < 4,000 ft
+  3D station distance) + the shipped-file twin. The E2E's rejoin
+  failure message carries a 5 s timeline — the phugoid was found with
+  exactly that instrumentation, it stays.
+- Three test-calibration rounds (fixed rejoin speed -> dead zone in
+  the hysteresis bands -> rotating-frame phugoid -> the range-law
+  split). One latent geometry bug fixed (FightingWing multiplier).
+- Player TUs syntax-checked clean against the new brain header
+  (raystub; no player source changed).
+
+Stage Summary:
+- The 2-ship is real: two AI jets fly as a FLIGHT — formation, sort,
+  kill, rejoin — and the E2E + the shipped scenario prove it.
+- Deliberately deferred (documented): 4-ship formations (Finger4,
+  Fluid Four, ...), wingman radio brevity (the recorder captures state
+  changes; wingradio vocabulary arrives with the transcript layer),
+  skill-parameterized tolerance, wingman-specific BVR support doctrine
+  (the wingman flies the same BVR tactics as the lead today), guns.
+- Next session: guns employment (the last unflown weapon), then the
+  DigitalBrain arbiter (the ladder already IS it — Step 12 collapses
+  into wiring the remaining rungs), then asset pipeline Stage 1.

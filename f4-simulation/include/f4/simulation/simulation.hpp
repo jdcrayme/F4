@@ -207,6 +207,19 @@ private:
     void spawn_from_campaign_flights();     // Phase 2: campaign-derived roster
     void spawn_airfield_features();         // Phase 2A: static features → VMC entities
     void spawn_squadron_aircraft();         // Mode B: parked aircraft from Squadrons
+    /// Step 11: resolve every scenario aircraft's "lead_callsign" to the
+    /// lead entity, validate (exists + same team), mark the wingman brains
+    /// (set_flight_lead), and record the (wingman, lead) pairs the tick
+    /// loop feeds pictures through. Throws on an unresolvable or
+    /// cross-team lead — a wingman of a hostile is a scenario-authoring
+    /// bug, not a runtime condition.
+    void resolve_wingman_refs();
+    /// Step 11: push each wingman's lead picture + the lead's engagement
+    /// id, every tick BEFORE world update (the wingman module is
+    /// engine-agnostic — the host is its eyes). Reads the lead's transform
+    /// (one tick old at push time — exactly what every other brain sees)
+    /// and the lead brain's combat_engagement_id() for the sort.
+    void push_wingman_lead_pictures();
     void init_bubble_manager();             // Mode B: BubbleManager for ground/naval units
     void update_bubble();                   // Mode B: per-tick bubble update (in tick())
     void derive_real_airbase();   // airbase_source -> real ground layout
@@ -236,6 +249,16 @@ private:
     // Simulation owns them for the world's lifetime (the policy contract
     // is non-owning — see SensorFusion::set_detection_policy).
     std::vector<std::unique_ptr<RadarBackedDetectionPolicy>> combat_policies_{};
+
+    // Step 11 (wingman/2-ship): resolved (wingman, lead) entity pairs —
+    // scenario order matches aircraft_entities_ order for the
+    // scenario-list spawn path. Empty when no aircraft declares a
+    // lead_callsign (the pre-Step-11 world: no per-tick picture push).
+    struct WingmanPair {
+        entities::EntityId wingman;
+        entities::EntityId lead;
+    };
+    std::vector<WingmanPair> wingman_pairs_{};
 
     // Phase 2: replaced the single `aircraft_entity_` with a vector. The
     // Phase 1 spawn path (scenario_list) pushes one entry; the Phase 2 path

@@ -58,6 +58,7 @@
 #include "f4/ai/modules/bvr_module.hpp"
 #include "f4/ai/modules/missile_module.hpp"
 #include "f4/ai/modules/wvr_module.hpp"
+#include "f4/ai/modules/wingman_module.hpp"
 #include "f4/ai/sensor_fusion.hpp"
 
 #include <optional>
@@ -133,18 +134,21 @@ public:
 
     /// Combat mode — the first rungs of the DigitalBrain priority ladder
     /// (AI_IMPLEMENTATION_PLAN.md §5 Step 12):
-    ///   Defensive > WVR > BVR > mission module (navigation).
+    ///   Defensive > WVR > BVR > Wingman-formation > mission module.
     /// The BVR/WVR split is the plan's range-band rule (Step 9): inside
     /// the WVR entry band (3 NM) WVRModule owns the fight; past the WVR
     /// exit ring (wvr config, 4.5 NM hysteresis) BVRModule takes it
-    /// back. Collision/ground avoid rungs arrive with their modules;
-    /// every rung only ever PREEMPTS, never replaces, the mission
-    /// sequence below it.
+    /// back. The Formation rung (Step 11) fills the None slot for
+    /// wingmen with a live lead picture — it runs with combat OFF too
+    /// (a wingman follows its lead regardless of ROE). Collision/
+    /// ground-avoid rungs arrive with their modules; every rung only
+    /// ever PREEMPTS, never replaces, the mission sequence below it.
     enum class CombatMode {
         None,        // combat off, or nothing visible — mission module flies
         BVR,         // BVRModule engaged (Entering/Employing/Separating)
         WVR,         // WVRModule engaged (Merge/Offensive/Defensive/BugOut)
-        Defensive    // MissileModule beaming an incoming hostile missile
+        Defensive,   // MissileModule beaming an incoming hostile missile
+        Formation    // WingmanModule keeping formation on the flight lead
     };
 
     BrainComponent() = default;
@@ -286,7 +290,15 @@ public:
                     combat_mode_ = CombatMode::Defensive;
                     ai_out = missile_defense_.update(dt, state, incoming);
                 } else {
-                    const auto* tgt = sensors_.threat_target();
+                    // WINGMAN SORT (Step 11): a wingman engages through
+                    // sorted_threat_target — prefer the bandit the LEAD has
+                    // NOT taken; support the lead's kill when there is no
+                    // free bandit. Non-wingmen keep the plain query. The
+                    // lead's engagement arrives via set_lead_engagement()
+                    // (the host reads the lead brain each tick).
+                    const auto* tgt = is_wingman_
+                        ? sensors_.sorted_threat_target(lead_engaged_id_)
+                        : sensors_.threat_target();
                     // --- BVR <-> WVR band handoff (plan Step 9) ----------
                     // Entry is BVRModule's band constant (the range
                     // taxonomy lives there); exit is WVRModule's (the
@@ -337,13 +349,33 @@ public:
                     }
                 }
             }
-            if (combat_mode_ == CombatMode::None && combat_was_active_) {
-                // Falling off the ladder: BVR separated / target lost.
-                // Navigation resumes with clean integrators.
-                nav_.air_steering.reset_integrators();
-            }
-            combat_was_active_ = combat_mode_ != CombatMode::None;
         }
+
+        // =================================================================
+        // Formation rung (Step 11): the wingman's slot in the ladder —
+        // BELOW every combat rung (a fighting wingman stops forming and
+        // fights: BVR/WVR/Defensive preempt the module), ABOVE the mission
+        // modules (a wingman with a live lead picture never flies its own
+        // route). Runs with combat disabled too — formation keeping is
+        // not a combat behavior. When the picture drops (lead dead /
+        // landed / unresolvable), the rung empties and the mission module
+        // takes over: the wingman becomes a single-ship.
+        // =================================================================
+        if (combat_mode_ == CombatMode::None && is_wingman_ &&
+            phase_ == Phase::Enroute && wingman_.has_live_picture()) {
+            combat_mode_ = CombatMode::Formation;
+            ai_out = wingman_.update(dt, state);
+        }
+
+        // Ladder bookkeeping (single source, combat rungs + formation):
+        // falling to None from ANY active rung — BVR separated, target
+        // lost, lead gone — hands the route back to the navigation module
+        // with clean steering integrators (the same transient guard the
+        // phase handoffs use; combat/formation state is not nav state).
+        if (combat_mode_ == CombatMode::None && combat_was_active_) {
+            nav_.air_steering.reset_integrators();
+        }
+        combat_was_active_ = combat_mode_ != CombatMode::None;
 
         // Run the active module: produce AIControlOutput from the state.
         // (Skipped whenever a combat rung produced an output this tick —
@@ -413,12 +445,13 @@ public:
     }
     /// Active module's mode name (e.g. "TakeoffMode"); "Complete" at the end.
     /// While a combat rung is active the COMBAT mode is reported instead
-    /// ("BVREngage" / "WVREngage" / "MissileDefeat") — the mission module
-    /// is dormant.
+    /// ("BVREngage" / "WVREngage" / "MissileDefeat" / "WingmanFormation")
+    /// — the mission module is dormant.
     [[nodiscard]] std::string mode_name() const {
         if (combat_mode_ == CombatMode::BVR)         return "BVREngage";
         if (combat_mode_ == CombatMode::WVR)         return "WVREngage";
         if (combat_mode_ == CombatMode::Defensive)   return "MissileDefeat";
+        if (combat_mode_ == CombatMode::Formation)   return "WingmanFormation";
         switch (phase_) {
             case Phase::Ground:   return takeoff_.mode_name();
             case Phase::Enroute:  return nav_.mode_name();
@@ -428,11 +461,13 @@ public:
         return {};
     }
     /// Active module's state name (e.g. "OnFinal"); "Parked" at the end.
-    /// While fighting: the BVR/WVR state / "Defending".
+    /// While fighting: the BVR/WVR state / "Defending"; in formation:
+    /// the wingman state ("Following" / "Rejoining").
     [[nodiscard]] std::string state_name() const {
         if (combat_mode_ == CombatMode::BVR)         return bvr_.state_name();
         if (combat_mode_ == CombatMode::WVR)         return wvr_.state_name();
         if (combat_mode_ == CombatMode::Defensive)   return "Defending";
+        if (combat_mode_ == CombatMode::Formation)   return wingman_.state_name();
         switch (phase_) {
             case Phase::Ground:   return takeoff_.state_name();
             case Phase::Enroute:  return nav_.state_name();
@@ -455,8 +490,19 @@ public:
             case CombatMode::BVR:       return "BVREngage";
             case CombatMode::WVR:       return "WVREngage";
             case CombatMode::Defensive: return "MissileDefeat";
+            case CombatMode::Formation: return "WingmanFormation";
         }
         return "?";
+    }
+    /// EntityId::value of the hostile this brain's combat ladder is
+    /// CURRENTLY engaging (the target BVR/WVR is steering against), 0 when
+    /// not fighting. Read by the host each tick to build WINGMAN sort
+    /// hints (the #2 engages the bandit the lead has not taken — see
+    /// SensorFusion::sorted_threat_target).
+    [[nodiscard]] std::uint64_t combat_engagement_id() const noexcept {
+        if (combat_mode_ == CombatMode::BVR) return bvr_.lock_target_id();
+        if (combat_mode_ == CombatMode::WVR) return wvr_.lock_target_id();
+        return 0;
     }
     /// ROE: weapons hold (all rungs — the aircraft fights geometry only,
     /// never releases). The scenario's per-aircraft "hold_fire".
@@ -490,6 +536,35 @@ public:
     [[nodiscard]] const modules::WVRModule& wvr() const noexcept { return wvr_; }
     [[nodiscard]] modules::MissileModule&       missile_defense()       noexcept { return missile_defense_; }
     [[nodiscard]] const modules::MissileModule& missile_defense() const noexcept { return missile_defense_; }
+
+    // --- Wingman role (Step 11; the host drives this at spawn + per tick) ---
+    /// Make this brain a WINGMAN of the flight lead `lead_entity_id`
+    /// (0 clears the role). Marks the aircraft: the ladder gains the
+    /// Formation rung and the combat rungs pick targets through the SORT
+    /// (sorted_threat_target) instead of the plain threat query.
+    void set_flight_lead(std::uint64_t lead_entity_id) noexcept {
+        is_wingman_ = lead_entity_id != 0;
+        lead_id_ = lead_entity_id;
+        if (!is_wingman_) wingman_.reset();
+    }
+    [[nodiscard]] bool is_wingman() const noexcept { return is_wingman_; }
+    [[nodiscard]] std::uint64_t flight_lead_id() const noexcept { return lead_id_; }
+    /// Push the lead's kinematic picture for THIS tick (the host calls it
+    /// every tick BEFORE world update: the module is engine-agnostic, it
+    /// cannot read the lead's transform itself). An invalid picture
+    /// (dead / landed lead) drops the Formation rung for that tick.
+    void update_lead_picture(
+        const modules::WingmanModule::LeadPicture& p) {
+        wingman_.set_lead_picture(p);
+    }
+    /// Push the lead's current combat engagement target (the host reads
+    /// the LEAD brain's combat_engagement_id() each tick). Feeds the sort:
+    /// the wingman prefers the bandit the lead has NOT taken.
+    void set_lead_engagement(std::uint64_t engaged_id) noexcept {
+        lead_engaged_id_ = engaged_id;
+    }
+    [[nodiscard]] modules::WingmanModule&       wingman()       noexcept { return wingman_; }
+    [[nodiscard]] const modules::WingmanModule& wingman() const noexcept { return wingman_; }
 
     /// Legacy alias for the Phase A API (tests + hosts configure the
     /// takeoff module through this).
@@ -554,6 +629,16 @@ private:
     modules::BVRModule bvr_{};
     modules::WVRModule wvr_{};
     modules::MissileModule missile_defense_{};
+
+    // Wingman role (Step 11): the formation module + the lead linkage the
+    // host feeds (is_wingman_/lead_id_ at spawn; the lead picture + the
+    // lead's engagement id per tick). lead_engaged_id_ is 0 whenever the
+    // lead is not fighting — the sort then degenerates to the plain
+    // threat query.
+    bool is_wingman_{false};
+    std::uint64_t lead_id_{0};
+    std::uint64_t lead_engaged_id_{0};
+    modules::WingmanModule wingman_{};
 
     // Watchdog cache: the last non-empty PilotInput the brain produced.
     // Held for one tick if a module returns an empty AIControlOutput

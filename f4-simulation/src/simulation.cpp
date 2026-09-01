@@ -45,7 +45,9 @@
 #include <f4/world/world_loader.hpp>
 #include <f4/world/detail/world_state.hpp>
 
+#include <algorithm>
 #include <cmath>
+#include <map>
 #include <stdexcept>
 
 namespace f4::simulation {
@@ -74,6 +76,10 @@ void Simulation::initialize() {
     load_models();
     load_aircraft_config();
     spawn_aircraft();
+    // Step 11: wingman refs resolve AFTER all aircraft exist (a lead may
+    // sit anywhere in the list). Marks the wingman brains + records the
+    // (wingman, lead) pairs the tick loop feeds pictures through.
+    resolve_wingman_refs();
     spawn_airfield_features();  // Phase 2A: features spawn after aircraft
 
     // Mode B: spawn parked aircraft from Squadrons (after the airfield is
@@ -329,6 +335,120 @@ void Simulation::spawn_from_scenario_list() {
         }
 
         aircraft_entities_.push_back(h.id());
+    }
+}
+
+void Simulation::resolve_wingman_refs() {
+    // Step 11 (wingman/2-ship): after ALL aircraft spawned (a lead may sit
+    // anywhere in the list), resolve each "lead_callsign" to an entity.
+    // scenario_.aircraft and aircraft_entities_ are index-aligned on the
+    // scenario-list path; the campaign path has no wingman refs (its
+    // roster is flight-derived, not hand-authored) — resolve against the
+    // scenario list only, which is where the field can appear at all.
+    if (wingman_pairs_.empty() &&
+        std::none_of(scenario_.aircraft.begin(), scenario_.aircraft.end(),
+                     [](const ScenarioAircraft& a) {
+                         return !a.lead_callsign.empty();
+                     })) {
+        return;  // nothing to do — the pre-Step-11 world, byte-for-byte
+    }
+    if (scenario_.spawn_mode != SpawnMode::ScenarioList ||
+        scenario_.aircraft.size() != aircraft_entities_.size()) {
+        throw std::runtime_error(
+            "Simulation::resolve_wingman_refs: wingman refs are only "
+            "supported on the scenario-list spawn path");
+    }
+
+    // callsign -> aircraft index (first wins; duplicate callsigns are a
+    // scenario authoring error — the scenario format's existing
+    // convention, same as the unknown-callsign check below).
+    std::map<std::string, std::size_t> index_by_callsign;
+    for (std::size_t i = 0; i < scenario_.aircraft.size(); ++i) {
+        index_by_callsign[scenario_.aircraft[i].callsign] = i;
+    }
+
+    for (std::size_t i = 0; i < scenario_.aircraft.size(); ++i) {
+        const auto& sc = scenario_.aircraft[i];
+        if (sc.lead_callsign.empty()) continue;
+
+        if (sc.lead_callsign == sc.callsign) {
+            throw std::runtime_error(
+                "Simulation::resolve_wingman_refs: aircraft '" +
+                sc.callsign + "' lists itself as flight lead");
+        }
+        const auto it = index_by_callsign.find(sc.lead_callsign);
+        if (it == index_by_callsign.end()) {
+            throw std::runtime_error(
+                "Simulation::resolve_wingman_refs: aircraft '" +
+                sc.callsign + "' references unknown flight lead '" +
+                sc.lead_callsign + "'");
+        }
+
+        // Same team, or the wingman's missiles would IFF off its own lead.
+        const auto& lead_sc = scenario_.aircraft[it->second];
+        if (lead_sc.team != sc.team) {
+            throw std::runtime_error(
+                "Simulation::resolve_wingman_refs: wingman '" +
+                sc.callsign + "' (team " + sc.team +
+                ") cannot follow lead '" + sc.lead_callsign +
+                "' (team " + lead_sc.team + ")");
+        }
+
+        entities::EntityHandle wing(aircraft_entities_[i], &world_);
+        auto* brain = wing.get<f4::ai::BrainComponent>();
+        if (brain == nullptr) continue;  // no brain — nothing to mark
+        brain->set_flight_lead(aircraft_entities_[it->second].value);
+
+        wingman_pairs_.push_back(
+            WingmanPair{aircraft_entities_[i],
+                        aircraft_entities_[it->second]});
+    }
+}
+
+void Simulation::push_wingman_lead_pictures() {
+    // Step 11: the wingman module's eyes. Per tick, BEFORE update_all:
+    // read the lead's transform (position/velocity — synced at the END of
+    // the last tick, so one tick old, the same data every other brain
+    // sees), its FM state (CAS + airborne), its damage state (alive),
+    // and its brain's engagement target (the SORT hint). A lead that is
+    // dead, missing, or on the ground pushes an INVALID picture — the
+    // wingman's Formation rung empties and it flies as a single-ship.
+    for (const auto& pair : wingman_pairs_) {
+        entities::EntityHandle wing(pair.wingman, &world_);
+        auto* brain = wing.get<f4::ai::BrainComponent>();
+        if (brain == nullptr) continue;
+
+        f4::ai::modules::WingmanModule::LeadPicture p{};
+        p.entity_id = pair.lead.value;
+
+        entities::EntityHandle lead(pair.lead, &world_);
+        const auto* tf = lead.get<entities::TransformComponent>();
+        const auto* fm = lead.get<f4::flight::FlightModelComponent>();
+        const auto* dmg = lead.get<entities::DamageStateComponent>();
+        const auto* lead_brain = lead.get<f4::ai::BrainComponent>();
+
+        const bool alive = (dmg == nullptr) || !dmg->killed;
+        if (tf != nullptr && fm != nullptr && alive &&
+            fm->state().gear.inAir) {
+            p.valid = true;
+            p.position = tf->position;
+            p.velocity = tf->velocity();
+            // Velocity heading (atan2(east, north)): at formation
+            // distances the lead's nose IS its velocity vector to well
+            // inside the station tolerance.
+            if (p.velocity.x != 0.0 || p.velocity.y != 0.0) {
+                p.heading_rad = std::atan2(p.velocity.x, p.velocity.y);
+            }
+            p.vcas_kts = fm->state().vcas;
+            p.alt_msl_ft = tf->position.z;   // ENU z = MSL
+        }
+        brain->update_lead_picture(p);
+
+        // The sort hint: the lead's CURRENT engagement (0 when the lead
+        // is not fighting — the wingman then picks its own best target).
+        brain->set_lead_engagement(
+            lead_brain != nullptr ? lead_brain->combat_engagement_id()
+                                  : 0u);
     }
 }
 
@@ -623,6 +743,14 @@ void Simulation::tick(double dt) {
     if (combat_on) {
         sensors::RadarSimComponent::set_sim_time(t_now);
         weapons::MissileSimComponent::set_sim_time(t_now);
+    }
+
+    // Step 11 (wingman/2-ship): push each wingman's lead picture + sort
+    // hint BEFORE the brains run — the wingman module is engine-agnostic,
+    // the host is its eyes. Runs with combat on or off (formation is not
+    // a combat behavior); no-op when no aircraft declared a lead_callsign.
+    if (!wingman_pairs_.empty()) {
+        push_wingman_lead_pictures();
     }
 
     world_.update_all(dt, bus_);

@@ -154,11 +154,37 @@ const TargetInfo* SensorFusion::threat_target() const noexcept {
     for (const auto& t : targets_) {
         if (!can_see(t)) continue;
         if (t.combat_class < 2) continue;  // only fighters / maneuvering
+        if (!t.is_hostile) continue;       // 2-ship: never fight a friendly
         if (!best || t.threat_score > best->threat_score) {
             best = &t;
         }
     }
     return best;
+}
+
+const TargetInfo* SensorFusion::sorted_threat_target(
+    std::uint64_t lead_engaged_id) const noexcept {
+    // Two passes over the same filtered set as threat_target(): first the
+    // hostiles the LEAD has not taken (the free bandits), then — only if
+    // that pass found nothing — the lead's own target (support the kill).
+    // A free bandit with a LOWER score outranks the lead's engaged target
+    // with the highest score: that is the point of the sort.
+    const TargetInfo* best_free = nullptr;
+    const TargetInfo* lead_target = nullptr;
+    for (const auto& t : targets_) {
+        if (!can_see(t)) continue;
+        if (t.combat_class < 2) continue;
+        if (!t.is_hostile) continue;
+        if (t.entity_id == lead_engaged_id) {
+            lead_target = &t;
+            continue;
+        }
+        if (best_free == nullptr || t.threat_score > best_free->threat_score) {
+            best_free = &t;
+        }
+    }
+    if (best_free != nullptr) return best_free;
+    return lead_target;  // nullptr when the lead isn't fighting either
 }
 
 const TargetInfo* SensorFusion::missile_threat() const noexcept {

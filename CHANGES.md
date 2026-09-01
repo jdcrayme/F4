@@ -1,5 +1,36 @@
 # F4 Cleanup Pass — Changes Summary
 
+## The 2-Ship: WingmanModule — Formation, the Sort, the Rejoin (M3-TACTICS-3)
+
+**The AI flies in formation now. A #2 with a `lead_callsign` holds its
+FightingWing station through the cruise, follows the lead into the BVR
+fight, SORTS onto the bandit the lead has not taken (a genuine 2v2, not
+two 1v1s sharing a map), kills it, and rejoins the lead's wing after the
+fight — all autonomous, all regression-tested. The 2v2 E2E proves the
+full wingman contract end to end: formation before the fight, split
+targets during, both bandits dead, both blues alive, wing reformed
+after. The shipped `two_ship` scenario puts the whole thing in the
+scenario-player to watch. The suite is now 1,632/1,632.**
+
+| Area | Change |
+|------|--------|
+| `f4-ai` — WingmanModule (new) | Step 11 of AI_IMPLEMENTATION_PLAN: the formation-keeping + engagement-discipline module. Engine-agnostic per the house rule — the host pushes a `LeadPicture` (position/velocity/heading/speed/altitude + validity) every tick before the brains run, the module answers with steering; it never touches the world or the bus. FSM: `None` (no live lead — empty output, brain flies the mission) / `Following` / `Rejoining` (with lead-range capture — see below). Five 2-ship formations from FreeFalcon's formdata (FightingWing default, Echelon L/R, Trail, LineAbreast) via `command_formation()`; the 4-ship types stay deferred to a 4-ship roster. |
+| `f4-ai` — the steering laws | Two channels, two regimes each. LATERAL: far out, pure pursuit of the station slot; inside 3× tolerance, the formation law — the LEAD's heading plus a clamped proportional correction toward the slot's lateral offset (pure pursuit at zero error would orbit a co-moving slot; a fixed lead-heading would freeze the offset in place; the blend does neither — it forms). LONGITUDINAL: Following uses a station-frame PD law (lead speed ± P on the along-track error, minus D on closure — the D term is what keeps a 150-kt join from sailing through the slot); Rejoining uses a RANGE-TO-LEAD law, deliberately rotation-free: during the lead's post-fight turn the station frame rotates under the wingman and the along-rate becomes frame rotation, not closure — the station-frame law phugoided 36 kft around the flight before the split. Capture back into Following fires on lead range < 5,000 ft (the slot sweeps ~3,200 ft around a turning lead; station-distance capture kept missing the flyby). |
+| `f4-ai` — SensorFusion: the sort + a friendly-leak fix | `sorted_threat_target(lead_engaged_id)`: the wingman's target pick — the highest-scoring hostile that is NOT the lead's engaged target (the free bandit outranks the lead's target even at lower score — that is the point of the sort); with only the lead's target visible it doubles up (support the kill); with the lead not fighting it degenerates to the plain query. REAL BUG fixed alongside: `threat_target()` never filtered hostiles, so in a 2-ship the wingman's own LEAD won the query pre-detection and the BVR rung engaged a friendly — 2v2 was structurally impossible until this. Friendlies stay in the target list (situational awareness); they just never arm a combat rung. |
+| `f4-ai` — BrainComponent: the Formation rung | The ladder is now Defensive > WVR > BVR > **Formation** > mission module: a wingman with a live lead picture flies formation instead of its own route (with combat disabled too — formation is not a combat behavior); a fighting wingman stops forming and fights (the combat rungs preempt the module); a dead/landed lead empties the rung and the wingman becomes a single-ship. New API: `set_flight_lead()` / `update_lead_picture()` / `set_lead_engagement()` (host-fed) and `combat_engagement_id()` (host-read, feeds the sort). Mode names: `WingmanFormation` / `Following` / `Rejoining` ride the recorder + HUD for free. |
+| `f4-simulation` — the host half | Scenario schema gains per-aircraft `"lead_callsign"` (empty = single-ship, as everything was). `resolve_wingman_refs()` runs after all aircraft spawn (a lead may sit anywhere in the list): resolves the callsign, validates same-team (a red wingman of a blue lead is an authoring bug — initialize() throws, like the team check), marks the brain. `push_wingman_lead_pictures()` runs every tick BEFORE `update_all`: reads the lead's transform/FM/damage/brain and pushes the picture + the lead's current engagement id. No-op when no aircraft declares a lead — the pre-Step-11 world is untouched. |
+| Scenarios | `two_ship.json.in` (shipped, scenario-player): EAGLE1 + EAGLE2 (lead_callsign, spawned on station) vs BANDIT1 + BANDIT2 (hold-fire drones, 13 NM stern chase — the fight resolves with both blues alive, deterministically). Watch the #2 form, sort onto the free bandit, shoot, and rejoin. Records like the other combat scenarios (`two_ship_trace.json`). |
+| Tests | +22 (suite **1,632/1,632 — 100%**, zero warnings): 14× WingmanModule units (station geometry per formation incl. lead-heading rotation, vertical offset, no-lead/lead-lost → None, speed up behind / slow down ahead / hold on station, steer toward the slot, blowout → Rejoining → Following hysteresis, a point-mass convergence test over 120 s, names, reset), 5× SensorFusion units (threat_target never returns a friendly; prefers hostile over near friendly; the sort takes the free bandit, supports the lead's kill when solo, degenerates without a lead engagement), 1× schema (lead_callsign round-trip + the three rejections: unknown lead, self-lead, cross-team), and **AiVersusAiTwoShipBvrFight** — the 2v2 E2E: formation rung pre-detection, sort separation while both fight, both bandits killed by blues only, both blues alive, zero live missiles, and the wing reformed (3D station distance < 4,000 ft, state Following) — plus the shipped-file twin, `TwoShipScenarioFilePlaysOut`. The rejoin assertion's failure message carries a 5 s timeline (mode/state/distance/kills) — a rejoin regression without it is undebuggable. |
+
+**Watch the 2v2** (player build needs X11/OpenGL):
+
+```
+f4-scenario-player <build>/scenarios/two_ship.json --run --follow
+```
+
+EAGLE2 (the #2) is the one to watch: `WingmanFormation/Following` on the
+HUD through the cruise, then the BVR crank on the bandit EAGLE1 did not
+take, and the rejoin after the splash. Tab to it to see its picture.
 ## Combat Events in the Recorder — Fights Replay Headless (M4-RECORDER-1)
 
 **A recorded fight is now the whole fight: FlightRecorder captures the

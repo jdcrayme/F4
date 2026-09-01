@@ -133,9 +133,26 @@ public:
     /// a non-fighter). Returns nullptr if no targets are visible.
     [[nodiscard]] const TargetInfo* primary_target() const noexcept;
 
-    /// Highest threat_score among targets with combat_class >= 2 (fighters
-    /// and maneuvering aircraft). Returns nullptr if none.
+    /// Highest threat_score among visible HOSTILE fighters and
+    /// maneuvering aircraft (combat_class >= 2). Returns nullptr if none.
+    ///
+    /// HOSTILES ONLY (M3 tactics, 2-ship discipline): before the filter a
+    /// visible friendly with no hostile in the picture won the query by
+    /// default — in a 2v2 the wingman's own LEAD was its "threat target"
+    /// pre-detection, and the BVR rung engaged a friendly. Friendlies stay
+    /// in the target list (situational awareness); they just never arm a
+    /// combat rung.
     [[nodiscard]] const TargetInfo* threat_target() const noexcept;
+
+    /// The wingman's SORT (FreeFalcon winglogic): the highest-scoring
+    /// visible hostile fighter that is NOT `lead_engaged_id` — the "free"
+    /// bandit. When the ONLY visible hostile is the lead's target, return
+    /// it (support the kill — a doubled-up 2v1 beats an idle wingman).
+    /// `lead_engaged_id` == 0 (lead not fighting / not a wingman)
+    /// degenerates to threat_target(). Engine-agnostic: the host reads the
+    /// lead's engagement and passes the id; nothing here touches the world.
+    [[nodiscard]] const TargetInfo* sorted_threat_target(
+        std::uint64_t lead_engaged_id) const noexcept;
 
     /// Nearest visible HOSTILE incoming missile. Returns nullptr if none
     /// (or if the only missiles in flight are same-team — your own shot

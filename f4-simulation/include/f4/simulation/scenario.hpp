@@ -64,6 +64,13 @@ struct ScenarioAircraft {
     /// "hold_fire" field — the difference between a live opponent and
     /// a maneuvering target drone for the WVR merge demos.
     bool hold_fire{false};
+    /// WINGMAN ROLE (Step 11): the callsign of this aircraft's FLIGHT
+    /// LEAD (empty = independent single-ship). The simulation resolves
+    /// the callsign to the lead entity after spawn, marks this brain a
+    /// wingman (formation rung + the engagement sort), and pushes the
+    /// lead's picture each tick. The lead must exist and be on the SAME
+    /// team — anything else fails initialize() loudly.
+    std::string lead_callsign;
 };
 
 /// One parking spot on the airfield (derived from the ground layout —

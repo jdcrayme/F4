@@ -34,8 +34,10 @@
 #include <f4/ai/brain_component.hpp>
 #include <f4/ai/modules/bvr_module.hpp>
 #include <f4/ai/modules/wvr_module.hpp>
+#include <f4/ai/modules/wingman_module.hpp>
 #include <f4/ai/sensor_fusion.hpp>
 #include <f4/entities/entity.hpp>
+#include <f4/flight/flight_model_component.hpp>
 #include <f4/messaging/bus.hpp>
 #include <f4/recorder/flight_recorder.hpp>
 #include <f4/sensors/f4_sensors.hpp>
@@ -1075,4 +1077,373 @@ TEST(CombatIntegration, CombatRecordingReplaysTheFight) {
     EXPECT_NE(summary.find("\"end_cause\":\"target_hit\""), std::string::npos);
 
     std::filesystem::remove(trace_path);  // tidy: the round-trip is proven
+}
+
+// ============================================================================
+// 9. M3 tactics Step 11 — the 2-SHIP. Schema: "lead_callsign" resolves,
+//    validates (unknown / cross-team / self all rejected loudly), and the
+//    spawn path marks the wingman brain.
+// ============================================================================
+TEST(CombatIntegration, LeadCallsignSchemaRoundTripsAndValidates) {
+    const auto f16 = f16_config_path();
+    if (f16.empty()) GTEST_SKIP() << "f16.json fixture not generated";
+
+    // Round-trip: EAGLE2 follows EAGLE1; parse + validate at initialize().
+    const std::string base = R"({
+  "name": "two_ship_schema", "theater": "korea",
+  "aircraft": [
+    { "callsign": "EAGLE1", "aircraft_config_path": ")" + f16 + R"(",
+      "aircraft_name": "F-16C_50", "vis_type_index": 1052,
+      "parking_spot": { "x": 0.0, "y": 0.0, "z": 15000.0 },
+      "heading_rad": 0.0, "initial_fuel_lbs": 6500.0,
+      "initial_vt_fps": 506.0, "spawn_in_air": true, "team": "blue" },
+    { "callsign": "EAGLE2", "aircraft_config_path": ")" + f16 + R"(",
+      "aircraft_name": "F-16C_50", "vis_type_index": 1052,
+      "parking_spot": { "x": 2000.0, "y": -2500.0, "z": 15000.0 },
+      "heading_rad": 0.0, "initial_fuel_lbs": 6500.0,
+      "initial_vt_fps": 506.0, "spawn_in_air": true, "team": "blue",
+      "lead_callsign": "EAGLE1" }
+  ],
+  "airfield": {
+    "active_runway_id": 36, "active_runway_name": "Rwy 36",
+    "runway_heading_rad": 0.0,
+    "threshold_position": { "x": 0.0, "y": -5000.0, "z": 0.0 },
+    "runway_end_position":  { "x": 0.0, "y": 5000.0, "z": 0.0 },
+    "threshold_altitude_ft": 0.0, "departure_altitude_ft": 15000.0,
+    "taxi_route": [ { "x": 0.0, "y": -5000.0, "z": 0.0 },
+                    { "x": 0.0, "y": 0.0, "z": 0.0 } ] },
+  "waypoints": [ { "name": "N", "position": { "x": 0.0, "y": 500000.0, "z": 15000.0 },
+                   "speed_kts": 420.0 } ],
+  "start_enroute": true, "sim_dt": 0.016666666666666,
+  "total_ticks": 600, "record": false
+})";
+
+    auto scenario = load_scenario_from_string(base);
+    ASSERT_EQ(scenario.aircraft.size(), 2u);
+    EXPECT_EQ(scenario.aircraft[0].lead_callsign, "");
+    EXPECT_EQ(scenario.aircraft[1].lead_callsign, "EAGLE1");
+
+    Simulation sim(std::move(scenario), std::filesystem::path("."));
+    sim.initialize();
+
+    auto* lead_brain = entities::EntityHandle(sim.aircraft_entities()[0],
+                                              &sim.world())
+        .get<f4::ai::BrainComponent>();
+    auto* wing_brain = entities::EntityHandle(sim.aircraft_entities()[1],
+                                              &sim.world())
+        .get<f4::ai::BrainComponent>();
+    ASSERT_NE(lead_brain, nullptr);
+    ASSERT_NE(wing_brain, nullptr);
+    EXPECT_FALSE(lead_brain->is_wingman());
+    EXPECT_TRUE(wing_brain->is_wingman());
+    EXPECT_EQ(wing_brain->flight_lead_id(),
+              sim.aircraft_entities()[0].value);
+
+    // Unknown lead callsign -> initialize() fails loudly.
+    {
+        std::string bad = base;
+        bad.replace(bad.find("\"lead_callsign\": \"EAGLE1\""),
+                    sizeof("\"lead_callsign\": \"EAGLE1\"") - 1,
+                    "\"lead_callsign\": \"NOBODY\"");
+        Simulation sim_bad(load_scenario_from_string(bad),
+                           std::filesystem::path("."));
+        EXPECT_THROW(sim_bad.initialize(), std::runtime_error);
+    }
+    // Self-lead -> rejected.
+    {
+        std::string bad = base;
+        bad.replace(bad.find("\"lead_callsign\": \"EAGLE1\""),
+                    sizeof("\"lead_callsign\": \"EAGLE1\"") - 1,
+                    "\"lead_callsign\": \"EAGLE2\"");
+        Simulation sim_bad(load_scenario_from_string(bad),
+                           std::filesystem::path("."));
+        EXPECT_THROW(sim_bad.initialize(), std::runtime_error);
+    }
+    // Cross-team lead -> rejected (a red wingman of a blue lead).
+    {
+        std::string bad = base;
+        bad.replace(bad.find("\"team\": \"blue\",\n      \"lead_callsign\""),
+                    sizeof("\"team\": \"blue\",\n      \"lead_callsign\"") - 1,
+                    "\"team\": \"red\",\n      \"lead_callsign\"");
+        Simulation sim_bad(load_scenario_from_string(bad),
+                           std::filesystem::path("."));
+        EXPECT_THROW(sim_bad.initialize(), std::runtime_error);
+    }
+}
+
+// ============================================================================
+// 10. M3 tactics Step 11 E2E: the 2v2. Two blues in formation (EAGLE1 lead,
+//     EAGLE2 wingman on its FightingWing station) stern-chase two red
+//     bandits 13 NM north (hold_fire drones — the fight resolves with the
+//     blues alive, deterministically). The full wingman contract:
+//       a. formation: EAGLE2 flies the FORMATION rung pre-detection
+//          (WingmanFormation / Following, on station);
+//       b. the SORT: once the lead engages, EAGLE2 engages the OTHER
+//          bandit (sorted_threat_target);
+//       c. both bandits die, both blues survive;
+//       d. rejoin: after the fight EAGLE2 returns to the lead's wing
+//          (Formation / Following, station error converging).
+// ============================================================================
+TEST(CombatIntegration, AiVersusAiTwoShipBvrFight) {
+    const auto f16 = f16_config_path();
+    if (f16.empty()) GTEST_SKIP() << "f16.json fixture not generated";
+
+    const std::string json = R"({
+  "name": "two_ship_integration", "theater": "korea",
+  "aircraft": [
+    { "callsign": "EAGLE1", "aircraft_config_path": ")" + f16 + R"(",
+      "aircraft_name": "F-16C_50", "vis_type_index": 1052,
+      "parking_spot": { "x": 0.0, "y": 0.0, "z": 15000.0 },
+      "heading_rad": 0.0, "initial_fuel_lbs": 6500.0,
+      "initial_vt_fps": 506.0, "spawn_in_air": true, "team": "blue" },
+    { "callsign": "EAGLE2", "aircraft_config_path": ")" + f16 + R"(",
+      "aircraft_name": "F-16C_50", "vis_type_index": 1052,
+      "parking_spot": { "x": 2000.0, "y": -2500.0, "z": 15000.0 },
+      "heading_rad": 0.0, "initial_fuel_lbs": 6500.0,
+      "initial_vt_fps": 506.0, "spawn_in_air": true, "team": "blue",
+      "lead_callsign": "EAGLE1" },
+    { "callsign": "BANDIT1", "aircraft_config_path": ")" + f16 + R"(",
+      "aircraft_name": "F-16C_50", "vis_type_index": 1052,
+      "parking_spot": { "x": 0.0, "y": 79000.0, "z": 15000.0 },
+      "heading_rad": 0.0, "initial_fuel_lbs": 6500.0,
+      "initial_vt_fps": 460.0, "spawn_in_air": true, "team": "red",
+      "hold_fire": true },
+    { "callsign": "BANDIT2", "aircraft_config_path": ")" + f16 + R"(",
+      "aircraft_name": "F-16C_50", "vis_type_index": 1052,
+      "parking_spot": { "x": 5000.0, "y": 79000.0, "z": 15000.0 },
+      "heading_rad": 0.0, "initial_fuel_lbs": 6500.0,
+      "initial_vt_fps": 460.0, "spawn_in_air": true, "team": "red",
+      "hold_fire": true }
+  ],
+  "airfield": {
+    "active_runway_id": 36, "active_runway_name": "Rwy 36",
+    "runway_heading_rad": 0.0,
+    "threshold_position": { "x": 0.0, "y": -5000.0, "z": 0.0 },
+    "runway_end_position":  { "x": 0.0, "y": 5000.0, "z": 0.0 },
+    "threshold_altitude_ft": 0.0, "departure_altitude_ft": 15000.0,
+    "taxi_route": [ { "x": 0.0, "y": -5000.0, "z": 0.0 },
+                    { "x": 0.0, "y": 0.0, "z": 0.0 } ] },
+  "waypoints": [ { "name": "FAR_NORTH",
+                   "position": { "x": 0.0, "y": 500000.0, "z": 15000.0 },
+                   "speed_kts": 420.0 } ],
+  "start_enroute": true, "sim_dt": 0.016666666666666,
+  "total_ticks": 30000, "record": false,
+  "combat": { "enabled": true, "radar_rng_seed": 777,
+              "fighter_hit_points": 20 }
+})";
+    auto scenario = load_scenario_from_string(json);
+    Simulation sim(std::move(scenario), std::filesystem::path("."));
+    sim.initialize();
+
+    CombatEventLog log;
+    log.attach(sim.bus());
+
+    const auto lead_id  = sim.aircraft_entities()[0];  // EAGLE1
+    const auto wing_id  = sim.aircraft_entities()[1];  // EAGLE2
+    const auto bandit1  = sim.aircraft_entities()[2];
+    const auto bandit2  = sim.aircraft_entities()[3];
+    entities::EntityHandle lead(lead_id, &sim.world());
+    entities::EntityHandle wing(wing_id, &sim.world());
+    entities::EntityHandle b1(bandit1, &sim.world());
+    entities::EntityHandle b2(bandit2, &sim.world());
+
+    auto* lead_brain = lead.get<f4::ai::BrainComponent>();
+    auto* wing_brain = wing.get<f4::ai::BrainComponent>();
+    auto* fm_wing = wing.get<f4::flight::FlightModelComponent>();
+    ASSERT_NE(lead_brain, nullptr);
+    ASSERT_NE(wing_brain, nullptr);
+    ASSERT_NE(fm_wing, nullptr);
+    ASSERT_TRUE(wing_brain->is_wingman());
+
+    bool formation_before_fight = false;
+    bool sort_separation_seen = false;
+    int kills = 0;
+    int last_kill_tick = -1;
+    bool rejoin_following = false;
+    double rejoin_station_dist_ft = 1.0e9;
+    std::string diag;   // failure diagnostics: a 5 s timeline
+
+    // True 3D distance wingman -> formation station (the along-track
+    // error alone reads wildly during the lead's post-fight turn — the
+    // station frame rotates under the wingman).
+    const auto station_dist = [&]() {
+        const auto st = wing_brain->wingman().formation_position();
+        const double ddx = fm_wing->position_east_ft() - st.x;
+        const double ddy = fm_wing->position_north_ft() - st.y;
+        return std::sqrt(ddx * ddx + ddy * ddy);
+    };
+
+    const int max_ticks = static_cast<int>(300.0 / kDt);
+    for (int i = 0; i < max_ticks; ++i) {
+        sim.tick(kDt);
+
+        // 5 s timeline, appended to the failure message below (a rejoin
+        // regression without the timeline is undebuggable).
+        if (i % (5 * 60) == 0) {
+            diag += "\n t=" + std::to_string(i / 60) +
+                "s lead=" + lead_brain->combat_mode_name() +
+                " wing=" + wing_brain->combat_mode_name() +
+                "/" + wing_brain->wingman().state_name() +
+                " dist=" + std::to_string(station_dist()) +
+                " kills=" + std::to_string(kills);
+        }
+
+        // (a) pre-detection: the wingman flies the formation rung.
+        const bool any_fight =
+            lead_brain->combat_mode() != f4::ai::BrainComponent::CombatMode::None
+            && lead_brain->combat_mode() !=
+                   f4::ai::BrainComponent::CombatMode::Formation;
+        if (!any_fight && log.acquired.empty() &&
+            wing_brain->combat_mode() ==
+                f4::ai::BrainComponent::CombatMode::Formation &&
+            wing_brain->wingman().state() ==
+                f4::ai::modules::WingState::Following) {
+            if (station_dist() < 2500.0) formation_before_fight = true;
+        }
+
+        // (b) the sort: while BOTH fight, different bandits.
+        const auto lead_tgt = lead_brain->combat_engagement_id();
+        const auto wing_tgt = wing_brain->combat_engagement_id();
+        if (lead_tgt != 0 && wing_tgt != 0 && lead_tgt != wing_tgt) {
+            sort_separation_seen = true;
+        }
+
+        // (c) kills.
+        if (kills < 2) {
+            kills = 0;
+            for (const auto eid : {bandit1, bandit2}) {
+                const auto* dmg = entities::EntityHandle(eid, &sim.world())
+                    .get<entities::DamageStateComponent>();
+                if (dmg != nullptr && dmg->killed) ++kills;
+            }
+            if (kills == 2 && last_kill_tick < 0) last_kill_tick = i;
+        }
+
+        // (d) rejoin: after the fight, back on the wing.
+        if (kills == 2 && last_kill_tick >= 0 &&
+            i > last_kill_tick + static_cast<int>(5.0 / kDt) &&
+            wing_brain->combat_mode() ==
+                f4::ai::BrainComponent::CombatMode::Formation &&
+            wing_brain->wingman().state() ==
+                f4::ai::modules::WingState::Following) {
+            const double dist = station_dist();
+            rejoin_station_dist_ft = std::min(rejoin_station_dist_ft, dist);
+            if (dist < 4000.0) rejoin_following = true;
+        }
+
+        if (kills == 2 && rejoin_following &&
+            weapons::count_live_missiles(sim.world()) == 0u) {
+            break;  // the fight resolved AND the wing reformed — done
+        }
+    }
+
+    // --- (a) formation flew before the fight --------------------------------
+    EXPECT_TRUE(formation_before_fight)
+        << "the wingman never flew the formation rung pre-detection";
+
+    // --- (b) the sort split the flight --------------------------------------
+    ASSERT_TRUE(sort_separation_seen)
+        << "lead and wingman never engaged different bandits (sort broken)";
+
+    // --- (c) the fight resolved ---------------------------------------------
+    ASSERT_EQ(kills, 2) << "the two-ship never killed both bandits";
+    for (const auto& k : log.killed) {
+        EXPECT_TRUE(k.target_id == bandit1.value || k.target_id == bandit2.value)
+            << "a non-bandit died";
+        EXPECT_TRUE(k.shooter_id == lead_id.value || k.shooter_id == wing_id.value)
+            << "a hold_fire bandit scored a kill";
+    }
+    EXPECT_EQ(log.killed.size(), 2u);
+    const auto* lead_dmg = lead.get<entities::DamageStateComponent>();
+    const auto* wing_dmg = wing.get<entities::DamageStateComponent>();
+    ASSERT_NE(lead_dmg, nullptr);
+    ASSERT_NE(wing_dmg, nullptr);
+    EXPECT_FALSE(lead_dmg->killed) << "the lead died to a hold_fire drone";
+    EXPECT_FALSE(wing_dmg->killed) << "the wingman died to a hold_fire drone";
+    EXPECT_EQ(weapons::count_live_missiles(sim.world()), 0u)
+        << "live missiles left after the fight";
+
+    // --- (d) the wing reformed ----------------------------------------------
+    ASSERT_TRUE(rejoin_following)
+        << "the wingman never rejoined formation after the fight" << diag;
+    EXPECT_LT(rejoin_station_dist_ft, 4000.0);
+}
+
+// ============================================================================
+// 11. The SHIPPED two_ship scenario plays out: same fight, through the
+//     file the scenario-player loads (build/scenarios/two_ship.json).
+// ============================================================================
+TEST(CombatIntegration, TwoShipScenarioFilePlaysOut) {
+#ifdef F4_SCENARIOS_DIR
+    const std::filesystem::path file =
+        std::filesystem::path(F4_SCENARIOS_DIR) / "two_ship.json";
+    if (!std::filesystem::exists(file)) GTEST_SKIP()
+        << "two_ship.json not configured (build it first)";
+
+    const auto scenario = load_scenario(file);
+
+    // The shipped file must be the 2-ship: lead + wingman + two bandits.
+    ASSERT_TRUE(scenario.combat.enabled);
+    ASSERT_EQ(scenario.aircraft.size(), 4u);
+    EXPECT_EQ(scenario.aircraft[0].lead_callsign, "");
+    EXPECT_EQ(scenario.aircraft[1].lead_callsign, "EAGLE1");
+    EXPECT_EQ(scenario.aircraft[0].team, "blue");
+    EXPECT_EQ(scenario.aircraft[1].team, "blue");
+    EXPECT_EQ(scenario.aircraft[2].team, "red");
+    EXPECT_EQ(scenario.aircraft[3].team, "red");
+    EXPECT_TRUE(scenario.aircraft[2].hold_fire);
+    EXPECT_TRUE(scenario.aircraft[3].hold_fire);
+
+    Simulation sim(scenario, file.parent_path());
+    sim.initialize();
+
+    CombatEventLog log;
+    log.attach(sim.bus());
+
+    const auto wing_id = sim.aircraft_entities()[1];
+    const auto bandit1 = sim.aircraft_entities()[2];
+    const auto bandit2 = sim.aircraft_entities()[3];
+    auto* wing_brain = entities::EntityHandle(wing_id, &sim.world())
+        .get<f4::ai::BrainComponent>();
+    ASSERT_NE(wing_brain, nullptr);
+    ASSERT_TRUE(wing_brain->is_wingman());
+
+    bool formation_seen = false;
+    int kills = 0;
+    bool rejoin_seen = false;
+    const int max_ticks = static_cast<int>(300.0 / kDt);
+    for (int i = 0; i < max_ticks; ++i) {
+        sim.tick(kDt);
+
+        if (wing_brain->combat_mode() ==
+            f4::ai::BrainComponent::CombatMode::Formation) {
+            formation_seen = true;
+        }
+
+        kills = 0;
+        for (const auto eid : {bandit1, bandit2}) {
+            const auto* dmg = entities::EntityHandle(eid, &sim.world())
+                .get<entities::DamageStateComponent>();
+            if (dmg != nullptr && dmg->killed) ++kills;
+        }
+        if (kills == 2 &&
+            wing_brain->combat_mode() ==
+                f4::ai::BrainComponent::CombatMode::Formation &&
+            wing_brain->wingman().state() ==
+                f4::ai::modules::WingState::Following) {
+            rejoin_seen = true;
+        }
+        if (kills == 2 && rejoin_seen &&
+            weapons::count_live_missiles(sim.world()) == 0u) {
+            break;
+        }
+    }
+
+    ASSERT_TRUE(formation_seen) << "the wingman never flew formation";
+    ASSERT_EQ(kills, 2) << "the shipped two_ship scenario never resolved";
+    ASSERT_TRUE(rejoin_seen) << "the wingman never rejoined";
+    EXPECT_EQ(weapons::count_live_missiles(sim.world()), 0u);
+#else
+    GTEST_SKIP() << "F4_SCENARIOS_DIR not defined for this target";
+#endif
 }
