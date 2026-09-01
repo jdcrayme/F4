@@ -138,6 +138,21 @@ struct CombatConfig {
     /// scenario to hand the fight to the merge without the AMRAAM
     /// exchange ending it early.
     bool bvr_hold{false};
+    /// ROE: ALL A/A MISSILES tight for every spawned aircraft (radar +
+    /// IR) while the guns stay free — "missiles tight, guns free", the
+    /// classic guns-dogfight doctrine. Scenario-level "missiles_hold".
+    /// Default false. Subsumes bvr_hold when set. Used by the
+    /// guns_merge scenario to force the fight all the way to the
+    /// trigger.
+    bool missiles_hold{false};
+    /// ROE: GUNS tight for every spawned aircraft. Default TRUE — the
+    /// no-surprise default: guns are the newest weapon, and every
+    /// scenario authored before they existed (bvr_intercept, wvr_merge,
+    /// two_ship ...) must fly exactly the same fight after the gun
+    /// wiring lands as before it. A guns scenario opts IN:
+    /// "guns_hold": false arms the trigger (per-aircraft hold_fire
+    /// still disarms everything — a drone is a drone).
+    bool guns_hold{true};
 };
 
 /// One static feature placement on the airfield — a building, runway section,

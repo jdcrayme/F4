@@ -12,11 +12,22 @@ namespace f4::weapons {
 
 namespace {
 
-[[nodiscard]] double distance(const f4::geo::WorldPosition& a,
-                              const f4::geo::WorldPosition& b) noexcept {
-    const double dx = a.x - b.x;
-    const double dy = a.y - b.y;
-    const double dz = a.z - b.z;
+/// Closest approach of the segment [p0, p0 + step] to point c.
+/// Pure math, no allocation — the per-tick inner loop of gun hit
+/// detection (segment check: at 3,400 ft/s a tracer covers more than
+/// its own hit radius per 1/60 s tick, so point checks tunnel).
+[[nodiscard]] double segment_distance(const f4::geo::WorldPosition& p0,
+                                      const f4::math::Vec3<double>& step,
+                                      const f4::geo::WorldPosition& c) noexcept {
+    const f4::math::Vec3<double> rel{c.x - p0.x, c.y - p0.y, c.z - p0.z};
+    const double len2 = step.dot(step);
+    double t = 0.0;
+    if (len2 > 0.0) {
+        t = std::clamp(rel.dot(step) / len2, 0.0, 1.0);
+    }
+    const double dx = rel.x - step.x * t;
+    const double dy = rel.y - step.y * t;
+    const double dz = rel.z - step.z * t;
     return std::sqrt(dx * dx + dy * dy + dz * dz);
 }
 
@@ -25,9 +36,10 @@ namespace {
 GunStream::GunStream(GunConfig config, std::uint32_t seed)
     : cfg_(config), rng_(seed) {}
 
-void GunStream::start_burst(int rounds) {
+void GunStream::start_burst(int rounds, std::uint64_t aim_target_id) {
     burst_remaining_ = static_cast<double>(std::max(0, rounds));
     burst_size_ = std::max(0, rounds);
+    burst_aim_id_ = aim_target_id;
     emit_carry_ = 0.0;
     burst_announced_ = false;
 }
@@ -80,8 +92,8 @@ std::vector<GunHit> GunStream::tick(double dt,
             if (!burst_announced_ && bus_ != nullptr) {
                 burst_announced_ = true;
                 bus_->publish(GunFiredMessage{
-                    shooter_id, /*target_id=*/0, burst_size_, muzzle,
-                    /*sim_time_s=*/0.0});
+                    shooter_id, burst_aim_id_, burst_size_, weapon_handle_,
+                    muzzle, sim_time_s_});
             }
         }
         if (burst_remaining_ < 1.0) {
@@ -98,10 +110,20 @@ std::vector<GunHit> GunStream::tick(double dt,
         t.age_s += dt;
     }
 
-    // --- Hit detection -----------------------------------------------------------
+    // --- Hit detection (segment sweep) -----------------------------------------
+    // Each tracer checks entities that carry a TransformComponent against
+    // the SEGMENT it swept this tick. The pre-move position is derivable
+    // exactly from the semi-implicit Euler update above (p_new = p_old +
+    // v_new*dt => p_old = p_new - v_new*dt), so no extra state is stored.
     // with_component() returns a snapshot id list per call; tracers are
     // removed after processing, never the world.
     for (auto it = tracers_.begin(); it != tracers_.end(); /* manual */) {
+        const f4::math::Vec3<double> step{
+            it->velocity.x * dt, it->velocity.y * dt, it->velocity.z * dt};
+        const f4::geo::WorldPosition p0{
+            it->position.x - step.x,
+            it->position.y - step.y,
+            it->position.z - step.z};
         bool consumed = false;
         for (const auto target_id : world.with_component<entities::TransformComponent>()) {
             if (target_id.value == shooter_id) {
@@ -112,7 +134,7 @@ std::vector<GunHit> GunStream::tick(double dt,
             if (tc == nullptr) {
                 continue;
             }
-            const double d = distance(it->position, tc->position);
+            const double d = segment_distance(p0, step, tc->position);
             if (d > kGunHitRadiusFt) {
                 continue;
             }
@@ -137,11 +159,11 @@ std::vector<GunHit> GunStream::tick(double dt,
                     bus_->publish(DamageAppliedMessage{
                         target_id.value, shooter_id, /*missile_id=*/0,
                         out.damage_applied, out.hit_points_after, out.killed,
-                        /*sim_time_s=*/0.0});
+                        sim_time_s_});
                 }
                 if (bus_ != nullptr && out.killed) {
                     bus_->publish(EntityKilledMessage{target_id.value, shooter_id,
-                                                      /*sim_time_s=*/0.0});
+                                                      sim_time_s_});
                 }
             }
             hits.push_back(hit);

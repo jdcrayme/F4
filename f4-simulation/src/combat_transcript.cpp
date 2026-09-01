@@ -200,9 +200,15 @@ void CombatTranscript::attach(Simulation& sim) {
                  Severity::Kill);
         });
 
-    // GunFiredMessage deliberately NOT subscribed: the M3 brain never
-    // fires guns (BVR doctrine), and a gun-fight transcript belongs with
-    // the WVR module that will actually produce the bursts.
+    // ── Weapons: the guns (Steps 11-12) ─────────────────────────────
+    // One call per burst (the stream announces the first round, not each
+    // round) — the classic three-word trigger call. The victim knows.
+    bus.subscribe<weapons::GunFiredMessage>(
+        [this](const weapons::GunFiredMessage& m) {
+            push(m.sim_time_s, callsign_of(m.shooter_id),
+                 "Guns, guns, guns on " + callsign_of(m.target_id) + ".",
+                 Severity::Warning);
+        });
 }
 
 } // namespace f4::simulation

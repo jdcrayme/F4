@@ -128,6 +128,7 @@ struct CombatEventLog {
     std::vector<weapons::MissileDetonatedMessage> detonated;
     std::vector<weapons::DamageAppliedMessage> damage;
     std::vector<weapons::EntityKilledMessage> killed;
+    std::vector<weapons::GunFiredMessage> gun_fired;
 
     void attach(messaging::MessageBus& bus) {
         bus.subscribe<sensors::RadarTrackAcquiredMessage>(
@@ -142,6 +143,8 @@ struct CombatEventLog {
             [this](const weapons::DamageAppliedMessage& m) { damage.push_back(m); });
         bus.subscribe<weapons::EntityKilledMessage>(
             [this](const weapons::EntityKilledMessage& m) { killed.push_back(m); });
+        bus.subscribe<weapons::GunFiredMessage>(
+            [this](const weapons::GunFiredMessage& m) { gun_fired.push_back(m); });
     }
 };
 
@@ -163,6 +166,7 @@ TEST(CombatIntegration, CombatComponentsAttachWhenEnabled) {
     for (const auto eid : sim.aircraft_entities()) {
         entities::EntityHandle h(eid, &sim.world());
         EXPECT_NE(h.get<weapons::WeaponStoreComponent>(), nullptr);
+        EXPECT_NE(h.get<weapons::GunComponent>(), nullptr);
         EXPECT_NE(h.get<sensors::SignatureComponent>(), nullptr);
         EXPECT_NE(h.get<sensors::RadarSimComponent>(), nullptr);
         EXPECT_NE(h.get<sensors::RwrComponent>(), nullptr);
@@ -1443,6 +1447,310 @@ TEST(CombatIntegration, TwoShipScenarioFilePlaysOut) {
     ASSERT_EQ(kills, 2) << "the shipped two_ship scenario never resolved";
     ASSERT_TRUE(rejoin_seen) << "the wingman never rejoined";
     EXPECT_EQ(weapons::count_live_missiles(sim.world()), 0u);
+#else
+    GTEST_SKIP() << "F4_SCENARIOS_DIR not defined for this target";
+#endif
+}
+
+// ============================================================================
+// 9. GUNS (Steps 11-12) — the last unflown weapon.
+//
+//    ROE wiring (the no-surprise default: guns TIGHT unless a scenario
+//    arms them), then the AI-vs-AI guns merge: missiles tight, guns free,
+//    a drone bandit — the fight resolves at the trigger.
+// ============================================================================
+
+TEST(CombatIntegration, GunsRoeDefaultsAndWiring) {
+    const auto f16 = f16_config_path();
+    if (f16.empty()) GTEST_SKIP() << "f16.json fixture not generated";
+
+    // The DEFAULT combat block (no gun fields): guns tight, everything
+    // else as it was — the pre-gun scenarios fly unchanged.
+    auto scenario =
+        load_scenario_from_string(combat_scenario_json(f16, true));
+    Simulation sim(std::move(scenario), std::filesystem::path("."));
+    sim.initialize();
+
+    const auto eagle = entities::EntityHandle(sim.aircraft_entities()[0],
+                                              &sim.world());
+    auto* brain = eagle.get<f4::ai::BrainComponent>();
+    ASSERT_NE(brain, nullptr);
+    EXPECT_TRUE(brain->wvr().guns().config().hold_fire)
+        << "guns must default TIGHT (no-surprise for pre-gun scenarios)";
+    EXPECT_FALSE(brain->wvr().fire().config().hold_fire);
+    EXPECT_FALSE(brain->bvr().fire().config().hold_fire);
+
+    // The GunComponent attached with the M61A1's card: handle, muzzle
+    // velocity, lethal radius.
+    auto* gun = eagle.get<weapons::GunComponent>();
+    ASSERT_NE(gun, nullptr);
+    const auto m61 = sim.weapon_table().find_by_name("M61A1");
+    ASSERT_NE(m61, weapons::kInvalidWeapon);
+    EXPECT_EQ(gun->weapon_handle, m61);
+    EXPECT_TRUE(gun->stream.tracers().empty());   // idle at spawn
+
+    // The gun fire control configured from the card + the store's drum,
+    // capped at the employment doctrine: envelope [~0.08, 0.35] NM,
+    // 3400 ft/s, 511 rounds.
+    EXPECT_NEAR(brain->wvr().guns().config().max_range_nm, 0.35, 0.01);
+    EXPECT_NEAR(brain->wvr().guns().config().muzzle_velocity_fps,
+                3400.0, 1.0);
+    EXPECT_EQ(brain->wvr().guns().rounds_remaining(), 511);
+}
+
+TEST(CombatIntegration, GunsRoeMissilesTightGunsFree) {
+    const auto f16 = f16_config_path();
+    if (f16.empty()) GTEST_SKIP() << "f16.json fixture not generated";
+
+    // missiles_hold + guns armed: BVR + IR fire controls tight, the
+    // trigger free. Subsumes bvr_hold.
+    const std::string json = R"({
+  "name": "guns_roe",
+  "theater": "korea",
+  "aircraft": [
+    { "callsign": "EAGLE1", "aircraft_config_path": ")" + f16 + R"(",
+      "aircraft_name": "F-16C_50", "vis_type_index": 1052,
+      "parking_spot": { "x": 0.0, "y": 0.0, "z": 15000.0 },
+      "heading_rad": 0.0, "initial_fuel_lbs": 6500.0,
+      "initial_vt_fps": 760.0, "spawn_in_air": true, "team": "blue" }
+  ],
+  "airfield": {
+    "active_runway_id": 36, "active_runway_name": "Rwy 36",
+    "runway_heading_rad": 0.0,
+    "threshold_position": { "x": 0.0, "y": -5000.0, "z": 0.0 },
+    "runway_end_position":  { "x": 0.0, "y": 5000.0, "z": 0.0 },
+    "threshold_altitude_ft": 0.0, "departure_altitude_ft": 15000.0,
+    "taxi_route": [ { "x": 0.0, "y": -5000.0, "z": 0.0 },
+                    { "x": 0.0, "y": 0.0, "z": 0.0 } ]
+  },
+  "sim_dt": 0.016666666666666,
+  "total_ticks": 600,
+  "record": false,
+  "combat": { "enabled": true, "missiles_hold": true,
+              "guns_hold": false }
+})";
+    auto scenario = load_scenario_from_string(json);
+    Simulation sim(std::move(scenario), std::filesystem::path("."));
+    sim.initialize();
+
+    auto* brain = entities::EntityHandle(sim.aircraft_entities()[0],
+                                         &sim.world())
+                      .get<f4::ai::BrainComponent>();
+    ASSERT_NE(brain, nullptr);
+    EXPECT_TRUE(brain->bvr().fire().config().hold_fire);
+    EXPECT_TRUE(brain->wvr().fire().config().hold_fire);
+    EXPECT_FALSE(brain->wvr().guns().config().hold_fire);
+    EXPECT_TRUE(brain->bvr_hold());   // missiles_hold subsumes it
+}
+
+TEST(CombatIntegration, AiVersusAiGunsMergeFight) {
+    const auto f16 = f16_config_path();
+    if (f16.empty()) GTEST_SKIP() << "f16.json fixture not generated";
+
+    // The guns fight: head-on at 15,000 ft, 2.8 NM apart — INSIDE the
+    // WVR band from the first tick (both nose-on at spawn: no BVR crank
+    // transient to fly through before the gun envelope opens). EAGLE1:
+    // missiles tight, guns FREE (the only armed weapon). BANDIT1: a
+    // full drone (hold_fire — fights geometry, jinks, never shoots).
+    // Hit points 1: the drone's light hull — one burst of 20 mm HEI
+    // (measured ~50 hits at the falloff edge ≈ 1.6 damage on this seed)
+    // finishes it. The hp is a SCENARIO calibration like the heater
+    // E2E's 10-for-one-shot; a missile-calibrated fighter hull (25) is
+    // a missile exchange, not a gun fight.
+    const std::string json = R"({
+  "name": "guns_merge_integration",
+  "theater": "korea",
+  "aircraft": [
+    { "callsign": "EAGLE1", "aircraft_config_path": ")" + f16 + R"(",
+      "aircraft_name": "F-16C_50", "vis_type_index": 1052,
+      "parking_spot": { "x": 0.0, "y": 0.0, "z": 15000.0 },
+      "heading_rad": 0.0, "initial_fuel_lbs": 6500.0,
+      "initial_vt_fps": 760.0, "spawn_in_air": true, "team": "blue" },
+    { "callsign": "BANDIT1", "aircraft_config_path": ")" + f16 + R"(",
+      "aircraft_name": "F-16C_50", "vis_type_index": 1052,
+      "parking_spot": { "x": 0.0, "y": 17013.0, "z": 15000.0 },
+      "heading_rad": 3.14159265358979, "initial_fuel_lbs": 6500.0,
+      "initial_vt_fps": 720.0, "spawn_in_air": true, "team": "red",
+      "hold_fire": true }
+  ],
+  "airfield": {
+    "active_runway_id": 36, "active_runway_name": "Rwy 36",
+    "runway_heading_rad": 0.0,
+    "threshold_position": { "x": 0.0, "y": -5000.0, "z": 0.0 },
+    "runway_end_position":  { "x": 0.0, "y": 5000.0, "z": 0.0 },
+    "threshold_altitude_ft": 0.0, "departure_altitude_ft": 15000.0,
+    "taxi_route": [ { "x": 0.0, "y": -5000.0, "z": 0.0 },
+                    { "x": 0.0, "y": 0.0, "z": 0.0 } ]
+  },
+  "waypoints": [
+    { "name": "MERGE", "position": { "x": 0.0, "y": 8500.0, "z": 15000.0 },
+      "speed_kts": 420.0 }
+  ],
+  "start_enroute": true,
+  "sim_dt": 0.016666666666666,
+  "total_ticks": 30000,
+  "record": false,
+  "combat": { "enabled": true, "radar_rng_seed": 999,
+              "fighter_hit_points": 1,
+              "missiles_hold": true, "guns_hold": false }
+})";
+    auto scenario = load_scenario_from_string(json);
+    Simulation sim(std::move(scenario), std::filesystem::path("."));
+    sim.initialize();
+
+    CombatEventLog log;
+    log.attach(sim.bus());
+
+    const auto eagle_id  = sim.aircraft_entities()[0];  // EAGLE1 (blue)
+    const auto bandit_id = sim.aircraft_entities()[1];  // BANDIT1 (red)
+    entities::EntityHandle eagle(eagle_id, &sim.world());
+    entities::EntityHandle bandit(bandit_id, &sim.world());
+
+    auto* eagle_brain  = eagle.get<f4::ai::BrainComponent>();
+    auto* bandit_brain = bandit.get<f4::ai::BrainComponent>();
+    ASSERT_NE(eagle_brain, nullptr);
+    ASSERT_NE(bandit_brain, nullptr);
+
+    // The ROE: the eagle's guns are the only free weapon on the field.
+    EXPECT_FALSE(eagle_brain->wvr().guns().config().hold_fire);
+    EXPECT_TRUE(eagle_brain->wvr().fire().config().hold_fire);
+    EXPECT_TRUE(eagle_brain->bvr().fire().config().hold_fire);
+    EXPECT_TRUE(bandit_brain->wvr().guns().config().hold_fire);
+
+    // Fly the guns fight: detection ~3 s, closure to the gun envelope
+    // ~28 s, merges with snapshot bursts, re-attacks, kill, disengage.
+    // Budget 180 s.
+    bool eagle_wvr_seen = false;
+    bool disengaged_after_kill = false;
+    int kill_tick = -1;
+    const int max_ticks = static_cast<int>(180.0 / kDt);
+    for (int i = 0; i < max_ticks; ++i) {
+        sim.tick(kDt);
+
+        if (eagle_brain->combat_mode() ==
+            f4::ai::BrainComponent::CombatMode::WVR) {
+            eagle_wvr_seen = true;
+        }
+        if (kill_tick < 0 && !log.killed.empty()) kill_tick = i;
+        if (kill_tick >= 0 && i > kill_tick + static_cast<int>(10.0 / kDt)) {
+            if (eagle_brain->combat_mode() ==
+                f4::ai::BrainComponent::CombatMode::None) {
+                disengaged_after_kill = true;
+            }
+        }
+        if (kill_tick >= 0 &&
+            i > kill_tick + static_cast<int>(5.0 / kDt) &&
+            disengaged_after_kill &&
+            log.gun_fired.size() >= 1u) {
+            break;
+        }
+    }
+
+    // --- The fight ran through the WVR band ------------------------------
+    ASSERT_TRUE(eagle_wvr_seen)
+        << "EAGLE1 never entered the WVR rung (no guns fight possible)";
+
+    // --- Missiles never left the rail (missiles_hold) ---------------------
+    ASSERT_TRUE(log.launched.empty())
+        << "a missile launched despite missiles_hold";
+    const auto* eagle_store = eagle.get<weapons::WeaponStoreComponent>();
+    ASSERT_NE(eagle_store, nullptr);
+    const auto amraam = sim.weapon_table().find_by_name("AIM-120C");
+    const auto heater = sim.weapon_table().find_by_name("AIM-9M");
+    const auto m61 = sim.weapon_table().find_by_name("M61A1");
+    ASSERT_NE(amraam, weapons::kInvalidWeapon);
+    ASSERT_NE(heater, weapons::kInvalidWeapon);
+    ASSERT_NE(m61, weapons::kInvalidWeapon);
+    EXPECT_EQ(eagle_store->count_for(amraam), 8);
+    EXPECT_EQ(eagle_store->count_for(heater), 2);
+
+    // --- The guns fired, by the eagle only, and the drum ran down --------
+    ASSERT_GE(log.gun_fired.size(), 1u) << "the guns never fired";
+    int rounds_expended = 0;
+    for (const auto& g : log.gun_fired) {
+        EXPECT_EQ(g.shooter_id, eagle_id.value)
+            << "the hold_fire drone must never fire guns";
+        EXPECT_EQ(g.target_id, bandit_id.value)
+            << "bursts must carry the aim hint";
+        const auto* rec = sim.weapon_table().get(g.weapon_handle);
+        ASSERT_NE(rec, nullptr);
+        EXPECT_EQ(rec->name, "M61A1");
+        rounds_expended += g.rounds;
+    }
+    EXPECT_GT(rounds_expended, 0);
+    EXPECT_LT(eagle_store->count_for(m61), 511)
+        << "no gun rounds were expended from the store";
+    EXPECT_EQ(eagle_store->count_for(m61), 511 - rounds_expended)
+        << "the store debit must match the rounds that left the muzzle";
+
+    // --- The outcome: a GUN kill (damage with missile_id == 0) ----------
+    ASSERT_NE(kill_tick, -1) << "the guns never killed the bandit";
+    bool gun_kill = false;
+    for (const auto& d : log.damage) {
+        if (d.target_id == bandit_id.value && d.missile_id == 0) {
+            gun_kill = true;
+        }
+    }
+    ASSERT_TRUE(gun_kill) << "the kill was not by gun damage";
+    for (const auto& k : log.killed) {
+        EXPECT_EQ(k.target_id, bandit_id.value);
+        EXPECT_EQ(k.shooter_id, eagle_id.value);
+    }
+    const auto* bandit_dmg = bandit.get<entities::DamageStateComponent>();
+    ASSERT_NE(bandit_dmg, nullptr);
+    EXPECT_TRUE(bandit_dmg->killed);
+
+    const auto* eagle_dmg = eagle.get<entities::DamageStateComponent>();
+    ASSERT_NE(eagle_dmg, nullptr);
+    EXPECT_FALSE(eagle_dmg->killed);
+    EXPECT_TRUE(disengaged_after_kill)
+        << "EAGLE1 never disengaged after the gun kill";
+}
+
+// 10. The SHIPPED scenario file plays out: the player's guns_merge.json —
+//     same fight as the in-memory E2E, keeping the file the
+//     scenario-player actually reads honest.
+TEST(CombatIntegration, GunsMergeScenarioFilePlaysOut) {
+#ifdef F4_SCENARIOS_DIR
+    const auto path =
+        std::filesystem::path(F4_SCENARIOS_DIR) / "guns_merge.json";
+    ASSERT_TRUE(std::filesystem::exists(path))
+        << "guns_merge.json not configured (build it first)";
+
+    auto scenario = load_scenario(path);
+    ASSERT_EQ(scenario.aircraft.size(), 2u);
+    EXPECT_TRUE(scenario.combat.missiles_hold);
+    EXPECT_FALSE(scenario.combat.guns_hold);
+
+    Simulation sim(std::move(scenario), std::filesystem::path("."));
+    sim.initialize();
+
+    CombatEventLog log;
+    log.attach(sim.bus());
+
+    const auto eagle_id  = sim.aircraft_entities()[0];
+    const auto bandit_id = sim.aircraft_entities()[1];
+    auto* eagle_brain = entities::EntityHandle(eagle_id, &sim.world())
+                            .get<f4::ai::BrainComponent>();
+    ASSERT_NE(eagle_brain, nullptr);
+    EXPECT_FALSE(eagle_brain->wvr().guns().config().hold_fire);
+
+    int kill_tick = -1;
+    const int max_ticks = static_cast<int>(180.0 / kDt);
+    for (int i = 0; i < max_ticks; ++i) {
+        sim.tick(kDt);
+        if (kill_tick < 0 && !log.killed.empty()) kill_tick = i;
+        if (kill_tick >= 0 && i > kill_tick + static_cast<int>(5.0 / kDt)) {
+            break;
+        }
+    }
+    ASSERT_NE(kill_tick, -1) << "the shipped guns scenario never resolved";
+    ASSERT_GE(log.gun_fired.size(), 1u);
+    EXPECT_TRUE(log.launched.empty());   // a pure guns fight
+    for (const auto& k : log.killed) {
+        EXPECT_EQ(k.target_id, bandit_id.value);
+        EXPECT_EQ(k.shooter_id, eagle_id.value);
+    }
 #else
     GTEST_SKIP() << "F4_SCENARIOS_DIR not defined for this target";
 #endif

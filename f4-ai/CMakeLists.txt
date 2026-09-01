@@ -34,6 +34,7 @@ add_library(f4-ai STATIC
     src/bvr_module.cpp
     src/wvr_module.cpp
     src/wingman_module.cpp
+    src/gun_module.cpp
 )
 target_link_libraries(f4-ai PUBLIC f4_warnings)
 

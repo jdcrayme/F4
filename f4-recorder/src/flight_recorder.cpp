@@ -206,8 +206,17 @@ std::string FlightRecorder::to_json(const std::string& scenario_name) const {
                     w.number(e.speed_ft_s);
             }
 
+            if (e.kind == CombatEventKind::GunFired) {
+                next_field(); w.string("weapon_name"); w.raw(":");
+                    w.string(e.weapon_name);
+                next_field(); w.string("rounds"); w.raw(":");
+                    w.number(static_cast<std::uint64_t>(
+                        e.rounds < 0 ? 0 : e.rounds));
+            }
+
             if (e.kind == CombatEventKind::MissileLaunched ||
-                e.kind == CombatEventKind::MissileDetonated) {
+                e.kind == CombatEventKind::MissileDetonated ||
+                e.kind == CombatEventKind::GunFired) {
                 next_field(); w.string("position"); w.raw(": { ");
                 w.string("x"); w.raw(":"); w.number(e.position.x); w.raw(", ");
                 w.string("y"); w.raw(":"); w.number(e.position.y); w.raw(", ");
@@ -455,6 +464,34 @@ std::string FlightRecorder::to_summary_json(
         if (!first_launch) w.raw("\n");
         w.raw("  ],\n");
 
+        // Gun bursts (Steps 11-12): one line per burst — the guns fight
+        // in the same summary the missile exchange gets. (Damage/kill
+        // attribution for gun hits is in the kills array: a gun kill's
+        // fatal DamageApplied carries missile_id == 0, resolved to the
+        // killer's most recent burst below.)
+        w.raw("  "); w.string("gun_bursts"); w.raw(": [\n");
+        bool first_burst = true;
+        for (const auto& burst : combat_events_) {
+            if (burst.kind != CombatEventKind::GunFired) continue;
+            if (!first_burst) w.raw(",\n");
+            w.raw("    {\n");
+            w.raw("      "); w.string("time_s"); w.raw(":");
+                w.number(burst.sim_time_s); w.raw(",\n");
+            w.raw("      "); w.string("shooter_id"); w.raw(":");
+                w.number(burst.subject_id); w.raw(",\n");
+            w.raw("      "); w.string("target_id"); w.raw(":");
+                w.number(burst.object_id); w.raw(",\n");
+            w.raw("      "); w.string("weapon"); w.raw(":");
+                w.string(burst.weapon_name); w.raw(",\n");
+            w.raw("      "); w.string("rounds"); w.raw(":");
+                w.number(static_cast<std::uint64_t>(
+                    burst.rounds < 0 ? 0 : burst.rounds)); w.raw("\n");
+            w.raw("    }");
+            first_burst = false;
+        }
+        if (!first_burst) w.raw("\n");
+        w.raw("  ],\n");
+
         // Kills
         w.raw("  "); w.string("kills"); w.raw(": [\n");
         bool first_kill = true;
@@ -476,6 +513,16 @@ std::string FlightRecorder::to_summary_json(
                     if (launch.kind == CombatEventKind::MissileLaunched &&
                         launch.missile_id == fatal->missile_id) {
                         weapon = launch.weapon_name;
+                    }
+                }
+            } else if (fatal != nullptr && fatal->missile_id == 0) {
+                // Gun kill (missile_id == 0 is the gun-hit marker): the
+                // killer's most recent burst before the fatal damage.
+                for (const auto& burst : combat_events_) {
+                    if (burst.kind == CombatEventKind::GunFired &&
+                        burst.subject_id == kill.object_id &&
+                        burst.sim_time_s <= kill.sim_time_s) {
+                        weapon = burst.weapon_name;
                     }
                 }
             }
@@ -622,7 +669,7 @@ CombatEvent parse_combat_event(json::Reader& r) {
             const auto name = r.read_string();
             // Kind names are the stable wire strings; unknown names (a
             // newer writer added a kind) keep the default but still parse.
-            for (std::uint8_t k = 0; k <= 7; ++k) {
+            for (std::uint8_t k = 0; k <= 8; ++k) {
                 const auto kk = static_cast<CombatEventKind>(k);
                 if (name == combat_event_kind_name(kk)) {
                     e.kind = kk;
@@ -638,6 +685,7 @@ CombatEvent parse_combat_event(json::Reader& r) {
         else if (key == "weapon_name")   { e.weapon_name = r.read_string(); }
         else if (key == "speed_ft_s")    { e.speed_ft_s  = r.read_number(); }
         else if (key == "position")      { e.position    = parse_vec3(r); }
+        else if (key == "rounds")        { e.rounds      = static_cast<int>(r.read_int()); }
 
         // Detonation payload
         else if (key == "end_cause")      { e.end_cause = r.read_string(); }

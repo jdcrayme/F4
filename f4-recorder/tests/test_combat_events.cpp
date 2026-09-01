@@ -123,6 +123,8 @@ TEST(CombatEvents, KindNamesAreStableWireStrings) {
                  "damage_applied");
     EXPECT_STREQ(combat_event_kind_name(CombatEventKind::EntityKilled),
                  "entity_killed");
+    EXPECT_STREQ(combat_event_kind_name(CombatEventKind::GunFired),
+                 "gun_fired");
 }
 
 // ============================================================================
@@ -168,10 +170,20 @@ TEST(CombatEvents, JsonRoundTripEveryKind) {
 
     rec.record(make_kill(42, 40.1, 4, 3));
 
+    CombatEvent guns;
+    guns.tick = 15; guns.sim_time_s = 1.5;
+    guns.kind = CombatEventKind::GunFired;
+    guns.subject_id = 3; guns.object_id = 4;
+    guns.weapon_handle = 0;
+    guns.weapon_name = "M61A1";
+    guns.position = f4::geo::WorldPosition(111.0, 222.0, 9999.0);
+    guns.rounds = 40;
+    rec.record(guns);
+
     const auto json = rec.to_json("roundtrip");
     const auto loaded = FlightRecorder::from_json(json);
 
-    ASSERT_EQ(loaded.combat_event_count(), 6u);
+    ASSERT_EQ(loaded.combat_event_count(), 7u);
     const auto& events = loaded.combat_events();
 
     // Track acquired
@@ -213,6 +225,16 @@ TEST(CombatEvents, JsonRoundTripEveryKind) {
     EXPECT_EQ(events[5].kind, CombatEventKind::EntityKilled);
     EXPECT_EQ(events[5].subject_id, 4u);
     EXPECT_EQ(events[5].object_id, 3u);
+
+    // Gun burst
+    EXPECT_EQ(events[6].kind, CombatEventKind::GunFired);
+    EXPECT_EQ(events[6].subject_id, 3u);
+    EXPECT_EQ(events[6].object_id, 4u);
+    EXPECT_EQ(events[6].weapon_name, "M61A1");
+    EXPECT_EQ(events[6].rounds, 40);
+    EXPECT_DOUBLE_EQ(events[6].position.x, 111.0);
+    EXPECT_DOUBLE_EQ(events[6].position.y, 222.0);
+    EXPECT_DOUBLE_EQ(events[6].position.z, 9999.0);
 }
 
 TEST(CombatEvents, UnknownKindNameStillParses) {
@@ -356,6 +378,49 @@ TEST(CombatEvents, SummaryWithoutCombatHasNoCombatSection) {
     rec.record(make_aircraft(0, 0.0, 3));
     const auto summary = rec.to_summary_json();
     EXPECT_EQ(summary.find("\"combat\""), std::string::npos);
+}
+
+TEST(CombatEvents, SummaryCarriesGunBurstsAndGunKillAttribution) {
+    FlightRecorder rec;
+    rec.record(make_aircraft(0, 0.0, 3));
+    rec.record(make_aircraft(0, 0.0, 4));
+
+    // The guns fight: two bursts by shooter 3, gun damage (missile_id 0
+    // — the gun-hit marker), a gun kill.
+    CombatEvent burst1;
+    burst1.tick = 600; burst1.sim_time_s = 10.0;
+    burst1.kind = CombatEventKind::GunFired;
+    burst1.subject_id = 3; burst1.object_id = 4;
+    burst1.weapon_name = "M61A1";
+    burst1.rounds = 40;
+    rec.record(burst1);
+
+    CombatEvent burst2 = burst1;
+    burst2.tick = 780; burst2.sim_time_s = 13.0;
+    rec.record(burst2);
+
+    CombatEvent gdmg;
+    gdmg.tick = 785; gdmg.sim_time_s = 13.05;
+    gdmg.kind = CombatEventKind::DamageApplied;
+    gdmg.subject_id = 4; gdmg.object_id = 3;
+    gdmg.missile_id = 0;             // gun hit
+    gdmg.damage = 9.5; gdmg.hit_points_after = 0.0; gdmg.killed = true;
+    rec.record(gdmg);
+
+    rec.record(make_kill(786, 13.1, 4, 3));
+
+    const auto summary = rec.to_summary_json("gunfight");
+
+    // The gun_bursts array exists with both bursts.
+    EXPECT_NE(summary.find("\"gun_bursts\""), std::string::npos);
+    EXPECT_NE(summary.find("\"rounds\":40"), std::string::npos);
+
+    // The kill attributes to the gun (not "unknown") via the killer's
+    // most recent burst.
+    EXPECT_NE(summary.find("\"weapon\":\"M61A1\""), std::string::npos);
+    EXPECT_NE(summary.find("\"killer_id\":3"), std::string::npos);
+    EXPECT_NE(summary.find("\"target_id\":4"), std::string::npos);
+    EXPECT_EQ(summary.find("\"weapon\":\"unknown\""), std::string::npos);
 }
 
 TEST(CombatEvents, SummaryExcludesMissilesFromAircraftSection) {

@@ -112,6 +112,7 @@ set(F4_SCENARIO_TEMPLATES
     f4-scenario-player/scenarios/bvr_intercept.json.in
     f4-scenario-player/scenarios/wvr_merge.json.in
     f4-scenario-player/scenarios/two_ship.json.in
+    f4-scenario-player/scenarios/guns_merge.json.in
 )
 foreach(template ${F4_SCENARIO_TEMPLATES})
     get_filename_component(scenario_name ${template} NAME_WE)

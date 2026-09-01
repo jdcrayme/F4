@@ -49,6 +49,7 @@ enum class CombatEventKind : std::uint8_t {
     MissileDetonated=5,  // a missile reached a terminal state (weapons)
     DamageApplied  = 6,  // hit points were deducted        (weapons)
     EntityKilled   = 7,  // live -> killed transition       (weapons)
+    GunFired       = 8,  // a gun burst's first round       (weapons)
 };
 
 /// Stable wire names ("track_acquired", ...). Emitted as the JSON "kind"
@@ -63,6 +64,7 @@ enum class CombatEventKind : std::uint8_t {
         case CombatEventKind::MissileDetonated:return "missile_detonated";
         case CombatEventKind::DamageApplied:   return "damage_applied";
         case CombatEventKind::EntityKilled:    return "entity_killed";
+        case CombatEventKind::GunFired:        return "gun_fired";
     }
     return "unknown";
 }
@@ -91,6 +93,9 @@ struct CombatEvent {
     std::string weapon_name;                   // resolved at capture time
     geo::WorldPosition position{};             // launch / burst point (ENU ft)
     double speed_ft_s{0.0};                    // missile speed at launch
+
+    // --- Gun burst payload (GunFired) ---
+    int rounds{0};                             // rounds in the burst
 
     // --- Detonation payload (MissileDetonated) ---
     std::string end_cause;                     // "target_hit", "closest_approach",

@@ -75,6 +75,15 @@ struct TargetInfo {
     // --- Cached target state (snapshot at last refresh) ---
     f4::geo::WorldPosition position{};
     f4::geo::WorldPosition velocity{};  // world-frame velocity (ft/s)
+
+    /// Seconds since the fusion rebuilt this entry (0 = fresh). The
+    /// fusion refreshes at the SKILL interval (1-10 s), not per tick —
+    /// a track file, not a live feed. Consumers that need NOW-geometry
+    /// at tick rate (the gun predictor) dead-reckon:
+    ///     now_position = position + velocity * age_s.
+    /// Missile envelopes absorb staleness by design; age 0 (the default
+    /// every hand-built TargetInfo carries) means the snapshot IS now.
+    double age_s{0.0};
 };
 
 } // namespace f4::ai

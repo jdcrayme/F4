@@ -117,6 +117,13 @@ struct CombatIntent {
     /// Release the selected weapon this tick (one-tick pulse).
     bool   weapon_release{false};
     std::uint64_t release_target_id{0};
+    /// GUNS: begin a burst at the aim target this tick (one-tick pulse —
+    /// the rising edge of the trigger; the host driver converts it into
+    /// GunStream::start_burst + a gun-station debit). The trigger is
+    /// held through the burst's flight time by the GunModule's state
+    /// machine — this pulse is the host's only required signal.
+    bool   gun_trigger{false};
+    std::uint64_t gun_target_id{0};
 };
 
 // ============================================================================
@@ -330,6 +337,16 @@ public:
                             wvr_.release_pulse() && !hold_fire_;
                         combat_intent_.release_target_id =
                             wvr_.release_target_id();
+                        // Guns (Steps 11-12): the burst edge rides the
+                        // same intent surface. hold_fire disarms it at the
+                        // brain gate; the guns-tight doctrine (scenario
+                        // guns_hold) is enforced down in the module's
+                        // fire control, where it can also gate
+                        // should_fire() and burn no phantom budget.
+                        combat_intent_.gun_trigger =
+                            wvr_.gun_pulse() && !hold_fire_;
+                        combat_intent_.gun_target_id =
+                            wvr_.gun_target_id();
                     } else if (tgt != nullptr) {
                         combat_mode_ = CombatMode::BVR;
                         ai_out = bvr_.update(dt, state, tgt);

@@ -3614,3 +3614,97 @@ Stage Summary:
 - Next session: guns employment (the last unflown weapon), then the
   DigitalBrain arbiter (the ladder already IS it — Step 12 collapses
   into wiring the remaining rungs), then asset pipeline Stage 1.
+
+---
+## M3-TACTICS-4: guns employment — the last unflown weapon
+
+User pushed M3-TACTICS-3 (squashed as d06c79e "2Ship"). Workspace had
+been reset, so: fresh clone, cmake reinstalled via uv, headless rebuild
++ ctest baseline 1,632/1,632 green (0 warnings) before any edit.
+
+- GunStream hardening (f4-weapons, in place since M1): SEGMENT hit
+  detection (point checks tunnel: 3,400 ft/s covers 57 ft/tick vs the
+  40-ft radius, and coarse host steps jump straight through); host-
+  stamped sim_time on every message (was 0.0); weapon handle + aim
+  hint carried on GunFiredMessage.
+- GunComponent + update_guns world sweep (new, f4-weapons): the cannon
+  as a passive component (the RwrComponent pattern — host-driven: hit
+  detection mutates the world; a firing jet emits from its FRESH muzzle
+  pose, so the sweep runs after the FM->Transform sync, outside
+  update_all). Boresight = velocity unit vector; muzzle 15 ft ahead
+  (launch_missile's clearance rule).
+- GunModule (new, f4-ai, engine-agnostic): the predictor + the trigger.
+  Everything starts from the TRACK-FILE PREDICTION — TargetInfo gained
+  age_s (the fusion ages its list between skill-interval rebuilds; a
+  track file, not a live feed: at merge closure 5 stale seconds IS the
+  gun envelope). Lead point = predicted position + velocity*tof PLUS
+  SUPERELEVATION (0.5*g*tof^2 above the kinematic lead — the gravity
+  drop every real fire computer compensates). Trigger: a RANGE-SCALED
+  hit-quality cone (atan2(hit_radius, range), capped ~5 deg) — a fixed
+  cone cannot survive the FCS's own ~1.5-deg tracking lag (44 ft at
+  5,000 ft, a hit at 1,500 ft); burst 100 rounds + 1 s cooldown; drum
+  budget; ROE at the module level.
+- WVRModule: wvr().guns() composed like fire(). Merge: the snapshot
+  (steering swaps to the gun lead while armed + in envelope — aiming IS
+  steering; integrators RESET at the reference change, windup carried
+  across the swap held the trigger closed a whole window). Offensive:
+  the sustained swap (OverB still overrides on hard closure —
+  overshoot control trumps gunnery). Boresight estimate = consecutive
+  positions/dt with a 2-tick warmup (stale history dropped at engage).
+  Guns tight => the merge flies EXACTLY as before.
+- Host half: CombatIntent += gun_trigger/gun_target_id (the burst
+  edge); configure_brain_combat's ROE matrix += missiles_hold (all A/A
+  missiles tight, guns free) and guns_hold (DEFAULT TRUE — the
+  no-surprise rule for every pre-gun scenario; a guns scenario opts in
+  with false). execute_brain_combat_intents: the edge -> start_burst,
+  clipped to the drum, store debited by what left the muzzle.
+- Recorder: CombatEventKind::GunFired ("gun_fired", 9th kind) with
+  rounds + weapon + muzzle; gun damage rides DamageApplied with
+  missile_id == 0 (the documented gun-hit marker); the LLM summary
+  gains gun_bursts + gun-kill attribution; the transcript learns
+  "Guns, guns, guns."
+- Scenario guns_merge.json.in: single MERGE waypoint (the nav's
+  spawn-on-leg consolidation SKIPS a waypoint the aircraft is past, and
+  turn-anticipation swallows a merge point near a corner — the merge
+  must be the LAST waypoint), both spawned nose-on at FIGHT SPEED
+  (spawn-at-cruise leaves the whole merge as an AB acceleration
+  transient that balloons both aircraft ~5,000 fpm), missiles tight,
+  guns free, drone hull calibrated to one burst. Tracer streaks in the
+  player's combat view.
+- E2E calibration history (the honest ledger): the first trigger fired
+  ~5,000 ft where a 2-deg FCS error is a 150-ft miss — the employment
+  doctrine capped the envelope at 0.35 NM; the vertical channel
+  (mutual altitude chase through stale snapshots + the merge energy
+  balloon + integrator windup) held the gate closed ~0.2 deg for a
+  full window — fixed by the reference-change reset; the measured
+  burst (25-50 hits at the falloff edge, ~1.1 damage) set the drone
+  hull. A two_ship regression traced to a batch sed that mangled
+  OTHER E2Es' initial_vt fixtures — restored; the library changes were
+  innocent (the WVR pursuit prediction and the merge altitude-hold
+  experimented during the hunt were REVERTED to keep the diff
+  minimal: the ghost-chase and the mutual-climb phugoid are documented
+  behavior for a future session).
+- Tests +29 (suite 1,661/1,661 = 100%, zero warnings): 15 GunModule
+  units, 3 GunStream units (incl. the tunneling regression), 6 WVR gun
+  intents, recorder gun events, GunsRoe wiring x2, the guns E2E (zero
+  missiles despite BVR Employing, bursts eagle-only with aim hints,
+  store debit == rounds fired, gun kill via missile_id 0, disengage)
+  + the shipped-file twin. Player TU changes syntax-checked against
+  stub headers (draw_gun_tracers uses only patterns already compiling
+  in that TU).
+
+Stage Summary:
+- The gun is real: predict, steer the solution, superelevate, gate on
+  the hit footprint, burst, damage, record, replay, and WATCH it.
+- Deliberately deferred (documented): WVR gun SNAPSHOTS against
+  jinking defenders (the 5-s fusion cadence vs a 3-s jink period —
+  needs a faster STT refresh rate), A-G gunnery, countermeasure
+  consumption, the gun-kill HUD callout.
+- Known behavior left for a future session: the merge's mutual
+  altitude chase (two fighters ratcheting up through stale mutual
+  references — measured +600 ft in 5 s) and the pursuit's ghost-chase
+  (steering at the last scan's position). Both are absorbed by missile
+  envelopes today; both matter for precision gunnery.
+- Next session: the DigitalBrain arbiter (the ladder already IS it —
+  Step 12 collapses into wiring the remaining rungs), then asset
+  pipeline Stage 1.

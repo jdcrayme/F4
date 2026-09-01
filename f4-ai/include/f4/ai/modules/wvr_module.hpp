@@ -46,10 +46,13 @@
 // touches the world, the bus, f4-weapons, or f4-sensors. Its real-world
 // effects leave as INTENTS: wants_lock() (the host driver feeds
 // RadarSimComponent::command_track — the STT keeps the weapons-grade
-// picture the IR fire control gates on) and release_pulse() (true for
+// picture the IR fire control gates on), release_pulse() (true for
 // EXACTLY ONE tick per shot; the host driver converts it into
 // launch_missile() through the simulation's weapon table, preferring
-// the IR-guided stations).
+// the IR-guided stations), and gun_pulse() (the guns fire control's
+// one-tick edge — the host driver converts it into
+// GunStream::start_burst + a gun-station debit through the
+// GunComponent the combat bridge attached).
 //
 // FreeFalcon validation hooks (plan §5 Step 9 table) covered by tests:
 //   BVR->WVR transition at 3 NM (BVRModule::band_for — the band tests
@@ -58,6 +61,8 @@
 //   WVR tactic selection by geometry (advantage/threat/neutral)
 //   merge / overshoot / jink behavior
 //   IR employment inside the close-in envelope
+//   Guns employment: the merge snapshot + the sustained Offensive
+//   solution (AI_IMPLEMENTATION_PLAN Steps 11-12, "Guns Engage")
 //
 // Dependencies: f4-state-machine, f4-geo, f4-flight-api (IAircraftState),
 // f4-ai (AirSteering, AIControlOutput, TargetInfo, MissileModule). C++20.
@@ -71,10 +76,12 @@
 #include <f4/fsm/trace.hpp>
 #include <f4/flight/api/i_aircraft_state.hpp>
 #include <f4/geo/position.hpp>
+#include <f4/math/vec3.hpp>
 
 #include "f4/ai/ai_output.hpp"
 #include "f4/ai/air_steering.hpp"
 #include "f4/ai/target_info.hpp"
+#include "f4/ai/modules/gun_module.hpp"
 #include "f4/ai/modules/missile_module.hpp"
 
 namespace f4::ai::modules {
@@ -197,6 +204,15 @@ public:
         return release_pulse_ ? engagement_target_id_ : 0u;
     }
 
+    // --- Guns intents (Steps 11-12; read by the host's combat driver) ---
+    /// True for EXACTLY ONE update() per gun burst (the rising edge the
+    /// host driver turns into GunStream::start_burst + a store debit).
+    [[nodiscard]] bool gun_pulse() const noexcept { return gun_pulse_; }
+    /// EntityId::value of the burst's aim target (0 when no pulse).
+    [[nodiscard]] std::uint64_t gun_target_id() const noexcept {
+        return gun_pulse_ ? engagement_target_id_ : 0u;
+    }
+
     // --- State reporting --------------------------------------------------
     [[nodiscard]] WVRState state() const noexcept { return sm_.current(); }
     [[nodiscard]] WVRTactic tactic() const noexcept { return tactic_; }
@@ -213,6 +229,12 @@ public:
     /// weapon table's IR-guided A/A class (AIM-9M) at configure time.
     [[nodiscard]] MissileModule& fire() noexcept { return fire_; }
     [[nodiscard]] const MissileModule& fire() const noexcept { return fire_; }
+    /// The embedded GUNS fire control (the predictor + trigger state
+    /// machine). The host sets the envelope/muzzle/budget from the
+    /// Gun-category class card (M61A1) + the store's gun station at
+    /// configure time.
+    [[nodiscard]] GunModule& guns() noexcept { return guns_; }
+    [[nodiscard]] const GunModule& guns() const noexcept { return guns_; }
     [[nodiscard]] Config& config() noexcept { return cfg_; }
     [[nodiscard]] const Config& config() const noexcept { return cfg_; }
 
@@ -266,16 +288,27 @@ private:
     AirSteering air_steering_{};
 
     MissileModule fire_{};             // IR fire control only
+    GunModule   guns_{};               // the cannon (Steps 11-12)
 
     std::uint64_t engagement_target_id_{0};
     bool wants_lock_{false};
     bool release_pulse_{false};
+    bool gun_pulse_{false};
+
+    // Ownship velocity estimate (ft/s, world frame): consecutive cached
+    // positions / dt. The guns solution error is measured against the
+    // velocity (the boresight a gun actually fires along); the first
+    // update has no history -> zero -> the guns cannot fire (safe).
+    f4::math::Vec3<double> velocity_estimate_{};
+    geo::WorldPosition prev_position_{};
+    bool has_prev_position_{false};
 
     // Timers (seconds; updated by update's dt).
     double dwell_timer_{0.0};          // time in the current geometry state
     double defensive_timer_{0.0};      // sustained-defense accumulator
     double jink_timer_{0.0};           // break-turn reversal phase
     int    jink_side_{+1};             // which side the current break turns
+    bool   gun_steering_active_{false}; // the gun branch owns the steering?
 
     // Engagement targets for steering (captured at engage()).
     double engage_alt_ft_{0.0};

@@ -270,3 +270,135 @@ TEST(GunDispersion, StaysInsideConfiguredCone) {
     // And the practical footprint stays small: ~24 ft lateral at 1 NM.
     EXPECT_LE(std::tan(cfg.dispersion_rad) * 6076.0, 30.0);
 }
+
+// ============================================================================
+// Segment hit detection (the tunneling fix)
+// ============================================================================
+//
+// At 3,400 ft/s a tracer covers ~57 ft per 1/60 s tick — MORE than the
+// 40 ft hit radius. Point-in-sphere checks jump straight through a
+// target between ticks; the segment sweep must catch it.
+
+TEST(GunHits, FastTracerDoesNotTunnelThroughTarget) {
+    entities::EntityWorld world;
+    // A coarse host step (dt = 0.05 s): the tracer advances 170 ft per
+    // tick — MORE than the 80 ft hit sphere. With the target at 1995 ft
+    // the consecutive point positions (1870, 2040) are BOTH outside the
+    // 40 ft radius: a point check jumps straight over. The segment
+    // sweep must catch the crossing (closest approach = 0).
+    const auto target = spawn_target(world, 1995.0, 0.0, 10000.0, 10.0);
+
+    GunConfig cfg = make_gun();
+    cfg.muzzle_velocity_fps = 3400.0;    // the real M61A1 speed
+    GunStream gun(cfg, 1);
+    gun.start_burst(20);
+
+    const auto muzzle = f4::geo::WorldPosition{0.0, 0.0, 10000.0};
+    const auto dir = f4::math::Vec3<double>{1.0, 0.0, 0.0};
+
+    std::size_t hits = 0;
+    for (int i = 0; i < 30; ++i) {
+        hits += gun.tick(0.05, world, 0, muzzle, dir).size();
+    }
+    EXPECT_GE(hits, 1u) << "tracer tunneled through the target (segment "
+                          "hit detection broken)";
+    auto* dmg = entities::EntityHandle(target, &world)
+                    .get<entities::DamageStateComponent>();
+    ASSERT_NE(dmg, nullptr);
+    EXPECT_LT(dmg->hit_points, 10.0);
+}
+
+TEST(GunBus, SimTimeAndAimHintStampMessages) {
+    entities::EntityWorld world;
+    messaging::MessageBus bus;
+
+    double fired_sim_time = -1.0;
+    std::uint64_t aim_id_seen = 999;
+    std::uint32_t handle_seen = 0;
+    bus.subscribe<GunFiredMessage>([&](const GunFiredMessage& msg) {
+        fired_sim_time = msg.sim_time_s;
+        aim_id_seen = msg.target_id;
+        handle_seen = msg.weapon_handle;
+    });
+    double damage_time = -1.0;
+    bus.subscribe<DamageAppliedMessage>(
+        [&](const DamageAppliedMessage& msg) {
+            damage_time = msg.sim_time_s;
+        });
+
+    spawn_target(world, 300.0, 0.0, 10000.0, 0.05);
+
+    GunConfig cfg = make_gun();
+    cfg.muzzle_velocity_fps = 5000.0;
+    GunStream gun(cfg, 1);
+    gun.set_message_bus(&bus);
+    gun.set_sim_time(41.5);          // the host sweep's stamp
+    gun.set_weapon_handle(0u);
+    gun.start_burst(100, /*aim_target_id=*/77);
+
+    const auto muzzle = f4::geo::WorldPosition{0.0, 0.0, 10000.0};
+    const auto dir = f4::math::Vec3<double>{1.0, 0.0, 0.0};
+    for (int i = 0; i < 30; ++i) {
+        gun.tick(0.02, world, 0, muzzle, dir);
+    }
+
+    EXPECT_NEAR(fired_sim_time, 41.5, 1e-9);
+    EXPECT_EQ(aim_id_seen, 77u);
+    EXPECT_EQ(handle_seen, 0u);
+    EXPECT_NEAR(damage_time, 41.5, 1e-9);   // damage carries the same clock
+}
+
+// ============================================================================
+// update_guns — the world sweep (GunComponent-driven)
+// ============================================================================
+
+#include <f4/weapons/gun_component.hpp>
+
+TEST(GunSweep, UpdateGunsFliesStreamsFromFreshMuzzlePose) {
+    entities::EntityWorld world;
+    messaging::MessageBus bus;
+
+    // A shooter entity: transform at the origin moving EAST at 500 ft/s
+    // with a GunComponent.
+    auto shooter = world.create();
+    auto& tf = shooter.add<entities::TransformComponent>();
+    tf.position = f4::geo::WorldPosition{0.0, 0.0, 10000.0};
+    tf.vx = 500.0;
+    tf.vy = 0.0;
+    tf.vz = 0.0;
+    auto& gun = shooter.add<GunComponent>();
+    GunConfig cfg = make_gun();
+    cfg.muzzle_velocity_fps = 5000.0;
+    gun.stream = GunStream(cfg, 3);
+    gun.weapon_handle = 0;
+    gun.muzzle_offset_ft = 15.0;
+
+    // Target 1000 ft east.
+    const auto target = spawn_target(world, 1000.0, 0.0, 10000.0, 0.05);
+
+    // Start a burst (as the combat driver would), then sweep.
+    gun.stream.start_burst(100, target.value);
+
+    int fired_events = 0;
+    bus.subscribe<GunFiredMessage>(
+        [&fired_events](const GunFiredMessage&) { ++fired_events; });
+
+    std::size_t total_hits = 0;
+    for (int i = 0; i < 40; ++i) {
+        // The shooter "moves" between sweeps: the sweep must read the
+        // FRESH pose each call (muzzle + boresight from velocity).
+        tf.position.x += 500.0 * 0.02;
+        total_hits += update_guns(world, bus, 0.02, 1.0 + i * 0.02).size();
+    }
+
+    EXPECT_GE(total_hits, 1u);
+    EXPECT_EQ(fired_events, 1);   // one announcement per burst
+    auto* dmg = entities::EntityHandle(target, &world)
+                    .get<entities::DamageStateComponent>();
+    ASSERT_NE(dmg, nullptr);
+    EXPECT_TRUE(dmg->killed);
+    // The shooter never shot itself despite the muzzle sweeping from its
+    // own origin.
+    auto* sdmg = shooter.get<entities::DamageStateComponent>();
+    EXPECT_EQ(sdmg, nullptr);
+}

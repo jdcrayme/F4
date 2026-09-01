@@ -24,6 +24,11 @@
 //      SensorFusion, it installs one of these per aircraft and the AI
 //      picture becomes radar-truth instead of GCI-omniscience.
 //
+//   3. GunComponent — the aircraft's cannon (Steps 11-12): attach adds
+//      it (config from the Gun-category class card, M61A1), the brain's
+//      gun intent starts bursts, and Simulation::tick's update_guns
+//      sweep flies them from the aircraft's fresh muzzle pose.
+//
 // Dependencies: f4-weapons, f4-sensors, f4-ai (interface only), f4-entities.
 // C++20.
 
@@ -35,6 +40,7 @@
 
 #include <f4/ai/sensor_fusion.hpp>
 #include <f4/entities/entity.hpp>
+#include <f4/weapons/gun_component.hpp>
 #include <f4/weapons/weapon_class_table.hpp>
 #include <f4/sensors/radar_component.hpp>
 #include <f4/sensors/rwr.hpp>
@@ -122,6 +128,16 @@ private:
 ///                       (per DamageStateComponent) never fire — the M2
 ///                       simplification keeps corpses flying, but not
 ///                       fighting.
+///   gun_trigger      -> GunComponent::stream.start_burst() through the
+///                       store's gun station: the burst size is the
+///                       WVRModule's gun doctrine (guns().config()
+///                       .burst_rounds), clipped to the rounds actually
+///                       in the drum; the station is debited by what left
+///                       the muzzle. The burst's tracers fly in the
+///                       update_guns sweep later this tick (fresh muzzle
+///                       pose — a firing aircraft sweeps its gun across
+///                       the sky); GunFiredMessage publishes on the
+///                       burst's first emitted round.
 ///
 /// Returns the number of missiles launched this tick.
 std::size_t execute_brain_combat_intents(entities::EntityWorld& world,
@@ -142,6 +158,22 @@ std::size_t execute_brain_combat_intents(entities::EntityWorld& world,
 ///          [max(arming range, 0.5 NM), 0.8 * max range] — the close-in
 ///          heater shot. When the WST import replaces the table the
 ///          envelope follows the real cards the same way.
+///   GUNS — employment envelope from the Gun-category class (M61A1):
+///          [0.9 * min range, 0.9 * max range] in NM (the card's
+///          effective range IS the gun's envelope — there is no
+///          aerodynamic Rmax to safety-factor), muzzle velocity from the
+///          card's max_speed_fts, and the ammo budget from the store's
+///          gun-station rounds (the caller passes it; the spawn loop
+///          reads it after attach_combat_loadout).
+///
+/// ROE wiring (module-level, so a held weapon produces no pulse, no
+/// phantom count, and no doctrine flip on shots that never happened):
+///   hold_fire     — every fire control tight (BVR + IR + guns).
+///   bvr_hold      — the BVR fire control alone (radar missiles tight).
+///   missiles_hold — BVR + IR tight, guns free (the guns-dogfight ROE;
+///                    subsumes bvr_hold).
+///   guns_hold     — the gun fire control alone (the no-surprise default
+///                    for pre-gun scenarios).
 ///
 /// `hold_fire` (per-aircraft scenario option) suppresses every release
 /// intent — the aircraft fights geometry only; `bvr_hold` (scenario
@@ -152,7 +184,10 @@ std::size_t execute_brain_combat_intents(entities::EntityWorld& world,
 void configure_brain_combat(f4::ai::BrainComponent& brain,
                             const weapons::WeaponClassTable& table,
                             bool hold_fire = false,
-                            bool bvr_hold = false);
+                            bool bvr_hold = false,
+                            bool missiles_hold = false,
+                            bool guns_hold = false,
+                            int gun_rounds = 511);
 
 /// Subscribe the sim's FlightRecorder to every combat bus transition so a
 /// recorded fight carries its event stream alongside the kinematic tracks
@@ -168,8 +203,10 @@ void configure_brain_combat(f4::ai::BrainComponent& brain,
 /// table to interpret a launch).
 ///
 /// No-op when the scenario disabled recording (sim.recorder() == nullptr).
-/// GunFiredMessage is deliberately not captured — the same rationale as
-/// CombatTranscript: nothing produces gun events until a gun module exists.
+/// GunFiredMessage is captured (GunFired: the burst's first round —
+/// subject, aim target, weapon name, muzzle, rounds) now that the WVR
+/// module produces bursts; gun DAMAGE rides the DamageApplied event
+/// stream with missile_id == 0, which the recorder already carried.
 void attach_combat_event_recorder(Simulation& sim);
 
 } // namespace f4::simulation

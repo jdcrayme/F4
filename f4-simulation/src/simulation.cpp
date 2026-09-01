@@ -307,26 +307,43 @@ void Simulation::spawn_from_scenario_list() {
         h.set_tag(entities::tags::TEAM, entities::TagValue::from(sc.team));
 
         // 6. Combat component set (M3 integration): stores, signature,
-        //    radar, RWR, damage state + identity. When the scenario leaves
-        //    combat disabled (the default) NONE of this exists and the
-        //    world is bit-for-bit what it was before the combat chain.
+        //    radar, RWR, damage state, gun + identity. When the scenario
+        //    leaves combat disabled (the default) NONE of this exists and
+        //    the world is bit-for-bit what it was before the combat chain.
         if (scenario_.combat.enabled) {
             attach_combat_loadout(h, weapon_table_, sc,
                                   scenario_.combat.radar_rng_seed,
                                   ac_index,
                                   scenario_.combat.fighter_hit_points);
 
+            // The gun's ammo ledger: the store's gun station (attached
+            // just above; 511 for a standard M61A1 load). The brain's
+            // gun fire control budgets itself against the same number.
+            int gun_rounds = 0;
+            if (const auto* store =
+                    h.get<weapons::WeaponStoreComponent>()) {
+                const auto station = store->find_with_category(
+                    weapon_table_, weapons::WeaponCategory::Gun);
+                if (station != weapons::WeaponStoreComponent::npos) {
+                    gun_rounds = store->station(station)->rounds;
+                }
+            }
+
             // M3 tactics: the brain becomes a fighting brain — the
             // combat ladder (defensive > WVR > BVR > mission) activates
             // and the fire controls get the table-derived envelopes
             // (BVR from the longest-range A/A class, WVR/IR from the
-            // heater class). Per-aircraft hold_fire and the combat
-            // block's bvr_hold (radar missiles tight) ride along. The
+            // heater class, guns from the M61A1 card + the drum count).
+            // Per-aircraft hold_fire and the combat block's ROE flags
+            // (bvr_hold / missiles_hold / guns_hold) ride along. The
             // detection policy (radar-truth instead of GCI-omniscience)
             // is installed on the brain's SensorFusion; the Simulation
             // owns the policy objects for the world's lifetime.
             configure_brain_combat(brain, weapon_table_, sc.hold_fire,
-                                   scenario_.combat.bvr_hold);
+                                   scenario_.combat.bvr_hold,
+                                   scenario_.combat.missiles_hold,
+                                   scenario_.combat.guns_hold,
+                                   gun_rounds);
             combat_policies_.push_back(
                 std::make_unique<RadarBackedDetectionPolicy>(
                     world_, h.id().value));
@@ -826,6 +843,18 @@ void Simulation::tick(double dt) {
         if (vis && !vis->model_state.switches.empty()) {
             vis->model_state.switches[0].active_child = (s.aero.gearPos > 0.5) ? 0 : 1;
         }
+    }
+
+    // Combat chain (Steps 11-12, guns): fly every GunComponent's burst
+    // NOW — after the per-aircraft sync (the tracers emit from the
+    // aircraft's FRESH muzzle pose this tick; the burst itself was
+    // started by execute_brain_combat_intents above) and outside
+    // update_all (hit detection mutates the world: damage + kills).
+    // Tracers in flight keep flying after their shooter dies — the
+    // stream's physics, not the brain's. No GunComponents exist when
+    // combat is off; the sweep is a no-op then.
+    if (combat_on) {
+        weapons::update_guns(world_, bus_, dt, t_now);
     }
 
     sim_time_s_ += dt;

@@ -141,7 +141,7 @@ struct PlayerApp::Impl {
     bool show_approach = true;     // orange extended centerline + glide slope
     bool show_taxi_in = true;      // purple runway-exit -> parking route
     bool show_radio = true;        // ATC transcript panel
-    bool show_combat = true;       // missiles + shot lines + COMBAT panel
+    bool show_combat = true;       // missiles + gun tracers + COMBAT panel
     bool follow_aircraft = false;  // camera tracks the aircraft (C)
     double camera_distance_override = -1.0;  // CLI --camera-distance (ft)
 
@@ -188,6 +188,7 @@ struct PlayerApp::Impl {
     void draw_combat();                 // COMBAT transcript panel (under ATC)
     void draw_missiles();               // 3D missile bodies + trails + lines
     void update_missile_trails();       // sample live missile positions
+    void draw_gun_tracers();            // 3D tracer streaks (gun bursts)
 
     // The entity the HUD/camera watch (Tab cycles). Falls back to the
     // first aircraft when the index outruns the spawn list.

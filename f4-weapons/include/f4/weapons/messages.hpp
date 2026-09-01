@@ -87,6 +87,7 @@ struct GunFiredMessage {
     std::uint64_t shooter_id{0};
     std::uint64_t target_id{0};       // aim hint (0 = none)
     int           rounds{0};          // rounds in this burst
+    std::uint32_t weapon_handle{0};   // Gun-class record (name resolution)
     f4::geo::WorldPosition position{};   // muzzle position
     double        sim_time_s{0.0};
 };

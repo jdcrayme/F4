@@ -460,3 +460,165 @@ TEST(WVRModule, NamesMatchFreeFalconVocabulary) {
     EXPECT_EQ(wvr.state_name(), "None");
     EXPECT_EQ(wvr.tactic_name(), "None");
 }
+
+// ============================================================================
+// GUNS (Steps 11-12) — the trigger intents through the WVR module
+// ============================================================================
+//
+// The gun fire control needs a MOVING ownship (the boresight estimate is
+// consecutive positions / dt — a static test state has no boresight, so
+// the guns can never fire: safe by construction). The gun tests below
+// advance the ownship every tick.
+
+namespace {
+
+/// Advance the ownship one tick north at `fps` (and return the output of
+/// that update) — gives the WVR module a real velocity estimate.
+AIControlOutput advance_and_update(WVRModule& wvr, TestAircraftState* s,
+                                   const TargetInfo* t, double fps) {
+    s->north_ft += fps * DT;
+    return wvr.update(DT, s, t);
+}
+
+} // namespace
+
+TEST(WVRModuleGuns, MergeSnapshotFiresOneBurstPerCycle) {
+    WVRModule wvr;
+    wvr.config().tactic_dwell_sec = 0.0;
+    TestAircraftState s;
+
+    // Head-on target inside the gun envelope (~0.5 NM), closing.
+    auto t = head_on(0.3);
+    t.rangedot = 900.0;
+
+    // TWO-tick boresight warmup: the entry tick's engage() drops the
+    // velocity history (it may be stale from before the fight), so the
+    // estimate exists from the third tick — the first the guns can fire.
+    advance_and_update(wvr, &s, &t, 500.0);   // tick 1: entry
+    EXPECT_EQ(wvr.state(), WVRState::Merge);
+    EXPECT_FALSE(wvr.gun_pulse());
+    advance_and_update(wvr, &s, &t, 500.0);   // tick 2: history builds
+    EXPECT_FALSE(wvr.gun_pulse());
+
+    // Tick 3: the boresight is measured, the solution is dead-on.
+    const auto out = advance_and_update(wvr, &s, &t, 500.0);
+    EXPECT_TRUE(wvr.gun_pulse()) << "the merge snapshot never fired";
+    EXPECT_EQ(wvr.gun_target_id(), 42u);
+    EXPECT_TRUE(out.trigger_down) << "the trigger must read held during "
+                                     "the burst";
+
+    // The gun then cycles: no pulse for burst + cooldown (~1.4 s)...
+    int pulses = 1;
+    for (int i = 0; i < static_cast<int>(1.2 / DT); ++i) {
+        advance_and_update(wvr, &s, &t, 500.0);
+        if (wvr.gun_pulse()) ++pulses;
+    }
+    EXPECT_EQ(pulses, 1) << "gun fired during its own cooldown";
+    EXPECT_EQ(wvr.guns().bursts_fired(), 1);
+
+    // ...and the trigger is ready again after the cycle (burst 2 within
+    // ~3.5 s — trigger discipline, not a one-shot).
+    for (int i = 0; i < static_cast<int>(2.5 / DT) && pulses < 2; ++i) {
+        advance_and_update(wvr, &s, &t, 500.0);
+        if (wvr.gun_pulse()) ++pulses;
+    }
+    EXPECT_EQ(pulses, 2);
+    EXPECT_EQ(wvr.guns().rounds_remaining(), 511 - 200);
+}
+
+TEST(WVRModuleGuns, GunsTightHoldsTheTrigger) {
+    WVRModule wvr;
+    wvr.config().tactic_dwell_sec = 0.0;
+    wvr.guns().config().hold_fire = true;   // the scenario's guns_hold
+    TestAircraftState s;
+    auto t = head_on(0.3);
+    t.rangedot = 900.0;
+
+    for (int i = 0; i < 120; ++i) {
+        advance_and_update(wvr, &s, &t, 500.0);
+        EXPECT_FALSE(wvr.gun_pulse()) << "tick " << i;
+    }
+    EXPECT_EQ(wvr.guns().bursts_fired(), 0);
+    EXPECT_EQ(wvr.guns().rounds_remaining(), 511);
+}
+
+TEST(WVRModuleGuns, OutOfGunEnvelopeNoTrigger) {
+    WVRModule wvr;
+    wvr.config().tactic_dwell_sec = 0.0;
+    TestAircraftState s;
+
+    // Head-on at 2.5 NM: inside the WVR band and the IR envelope, but
+    // far outside the 0.9 NM gun envelope.
+    auto t = head_on(2.5);
+    for (int i = 0; i < 120; ++i) {
+        advance_and_update(wvr, &s, &t, 500.0);
+        EXPECT_FALSE(wvr.gun_pulse()) << "tick " << i;
+    }
+}
+
+TEST(WVRModuleGuns, EmptyDrumNoTrigger) {
+    WVRModule wvr;
+    wvr.config().tactic_dwell_sec = 0.0;
+    wvr.guns().set_rounds_budget(0);
+    TestAircraftState s;
+    auto t = head_on(0.3);
+    t.rangedot = 900.0;
+
+    for (int i = 0; i < 120; ++i) {
+        advance_and_update(wvr, &s, &t, 500.0);
+        EXPECT_FALSE(wvr.gun_pulse()) << "tick " << i;
+    }
+}
+
+TEST(WVRModuleGuns, OffensiveSteeringTracksTheGunSolution) {
+    WVRModule wvr;
+    wvr.config().tactic_dwell_sec = 0.0;
+    TestAircraftState s;
+
+    // A RUNNING target (we hold the angle) at an offset bearing,
+    // inside the gun envelope (~0.3 NM). SLOW closure (rangedot 200 —
+    // under the 300 ft/s overshoot-guard trigger): a tracking gunnery
+    // pass, not a hard-closure overshoot (OverB would rightly own the
+    // steering there).
+    auto t = running(0.3);
+    t.rangedot = 200.0;
+    t.position = f4::geo::WorldPosition(1200.0, 1200.0, 20000.0);
+    t.velocity = f4::geo::WorldPosition(0.0, 420.0 * 1.68781, 0.0);
+
+    // Fly into Offensive with a moving ownship.
+    for (int i = 0; i < 30; ++i) advance_and_update(wvr, &s, &t, 500.0);
+    ASSERT_EQ(wvr.state(), WVRState::Offensive);
+
+    // Inside the gun envelope the steering swaps the missile-grade
+    // pursuit for the gun lead bearing.
+    const double expected = wvr.guns().lead_heading_rad(
+        t, f4::geo::WorldPosition(0.0, s.north_ft, 20000.0));
+    const double pursuit = std::atan2(t.position.x, t.position.y -
+                                                        s.north_ft);
+    EXPECT_NEAR(wvr.desired_heading_rad(), expected, 1e-9);
+    // And the swap is REAL: the pursuit and the gun solution differ at
+    // this geometry (the gun's TOF is a fraction of the pursuit's).
+    EXPECT_GT(std::fabs(expected - pursuit), 0.05)
+        << "test geometry failed to separate the two lead laws";
+}
+
+TEST(WVRModuleGuns, ResetClearsTheGunEngagement) {
+    WVRModule wvr;
+    wvr.config().tactic_dwell_sec = 0.0;
+    TestAircraftState s;
+    auto t = head_on(0.3);
+    t.rangedot = 900.0;
+
+    // The two-tick boresight warmup, then the burst.
+    advance_and_update(wvr, &s, &t, 500.0);
+    advance_and_update(wvr, &s, &t, 500.0);
+    advance_and_update(wvr, &s, &t, 500.0);
+    ASSERT_TRUE(wvr.gun_pulse());
+
+    wvr.reset();
+    EXPECT_FALSE(wvr.gun_pulse());
+    EXPECT_FALSE(wvr.guns().trigger_down());
+    // Ammo and the doctrine counter survive the reset.
+    EXPECT_EQ(wvr.guns().rounds_remaining(), 511 - 100);
+    EXPECT_EQ(wvr.guns().bursts_fired(), 1);
+}

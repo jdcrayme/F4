@@ -19,8 +19,14 @@
 // Seeded std::mt19937 — deterministic per seed for replayable tests.
 //
 // Hit detection: each tick every tracer checks entities that carry a
-// TransformComponent within kGunHitRadiusFt of the tracer point (the tracer
-// travels far less than that per tick at 60-120 Hz), shooter excluded.
+// TransformComponent against the SEGMENT the tracer swept THIS tick
+// ([pre-move position, post-move position], derivable exactly from the
+// semi-implicit Euler update: p_new = p_old + v_new*dt). A round hits
+// when the segment's closest approach to an entity's center is within
+// kGunHitRadiusFt (shooter excluded). The segment check is REQUIRED,
+// not an optimization nicety: at 3,400 ft/s a tracer covers ~57 ft per
+// 1/60 s tick — more than the 40 ft hit radius — so point-in-sphere
+// checks tunnel straight through a target between ticks.
 // A hit applies damage via apply_damage() (round power vs hit points, roll
 // drawn from the stream's RNG) and removes the tracer. Targets without a
 // DamageStateComponent still consume the round (sparks, no damage event).
@@ -28,11 +34,13 @@
 // The bus integration follows the FlightModel pattern: optional MessageBus*
 // (set_message_bus); GunFiredMessage on the first round of a burst,
 // DamageAppliedMessage / EntityKilledMessage on hits. No bus = silent
-// (the math still happens).
+// (the math still happens). Message sim_time_s is stamped by the host
+// sweep (set_sim_time) — the stream owns ballistics, not the clock.
 //
-// OWNERSHIP: a GunStream belongs to a shooter system (a future
-// GunComponent, or a test harness driving it directly). It does NOT attach
-// itself to the ECS.
+// OWNERSHIP: a GunStream belongs to a shooter system — in the sim it
+// lives inside GunComponent (gun_component.hpp) and is driven by the
+// update_guns world sweep; a test harness may drive it directly. It does
+// NOT attach itself to the ECS.
 
 #pragma once
 
@@ -83,9 +91,19 @@ public:
 
     void set_message_bus(messaging::MessageBus* bus) { bus_ = bus; }
 
-    /// Begin a burst of `rounds`. Rounds emit at rounds_per_minute from the
-    /// geometry passed to tick() until the burst is exhausted.
-    void start_burst(int rounds);
+    /// Sim-time stamp for every message this stream publishes (the host
+    /// sweep calls this every tick before tick(); 0.0 until then — the
+    /// same ownership split MissileSimComponent uses for its clock).
+    void set_sim_time(double t) noexcept { sim_time_s_ = t; }
+
+    /// Weapon-class handle carried on GunFiredMessage (name resolution for
+    /// the recorder/transcript). Set once at attach time by the host.
+    void set_weapon_handle(std::uint32_t h) noexcept { weapon_handle_ = h; }
+
+    /// Begin a burst of `rounds` at the aim target `aim_target_id` (the
+    /// GunFiredMessage's hint; 0 = none). Rounds emit at rounds_per_minute
+    /// from the geometry passed to tick() until the burst is exhausted.
+    void start_burst(int rounds, std::uint64_t aim_target_id = 0);
 
     /// Rounds left to emit in the current burst (rounded up).
     [[nodiscard]] int rounds_remaining() const noexcept {
@@ -124,6 +142,9 @@ private:
     double emit_carry_ = 0.0;        // rounds owed but not yet emitted
     int burst_size_ = 0;             // rounds requested for the current burst
     bool burst_announced_ = false;   // GunFiredMessage sent for this burst?
+    std::uint64_t burst_aim_id_ = 0; // aim hint carried on GunFiredMessage
+    std::uint32_t weapon_handle_ = 0;
+    double sim_time_s_ = 0.0;        // host-stamped clock for messages
     messaging::MessageBus* bus_ = nullptr;
 };
 

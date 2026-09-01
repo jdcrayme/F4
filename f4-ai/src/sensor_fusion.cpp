@@ -125,6 +125,11 @@ void SensorFusion::initialize(std::uint64_t ownship_id,
 
 void SensorFusion::update(double dt) {
     if (!world_) return;
+    // Age the track file between rebuilds: the fusion refreshes at the
+    // skill interval, and a snapshot's kinematics are only TRUE at the
+    // rebuild tick. Consumers needing now-geometry at tick rate (the gun
+    // predictor) dead-reckon on age_s; age 0 = fresh.
+    for (auto& t : targets_) t.age_s += dt;
     update_timer_ -= dt;
     if (update_timer_ <= 0.0) {
         rebuild_target_list();

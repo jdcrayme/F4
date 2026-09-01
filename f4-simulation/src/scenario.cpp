@@ -261,6 +261,8 @@ Scenario parse_scenario(f4::json::Reader& r) {
                     static_cast<std::uint32_t>(r.read_int());
                 else if (k == "fighter_hit_points") s.combat.fighter_hit_points = r.read_number();
                 else if (k == "bvr_hold")      s.combat.bvr_hold = r.read_bool();
+                else if (k == "missiles_hold") s.combat.missiles_hold = r.read_bool();
+                else if (k == "guns_hold")     s.combat.guns_hold = r.read_bool();
                 else                            skip_unknown(r);
             }
         } else if (key == "airfield_features") {

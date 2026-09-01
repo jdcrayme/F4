@@ -126,6 +126,9 @@ void WVRModule::reset() {
     jink_side_ = +1;
     desired_heading_rad_ = 0.0;
     desired_alt_ft_ = 0.0;
+    // The guns reset WITH the fight (trigger state), but the velocity
+    // history is the ownship's, not the fight's — it survives so the
+    // next engagement has a boresight estimate from its first tick.
 }
 
 bool WVRModule::own_advantage(const TargetInfo& t) noexcept {
@@ -151,9 +154,12 @@ AIControlOutput WVRModule::update(double dt,
 
     // Intents are single-tick pulses by contract.
     release_pulse_ = false;
+    gun_pulse_ = false;
 
-    // The IR fire-control cooldown burns every tick, fight or not.
+    // The IR fire-control cooldown + the gun trigger cycle burn every
+    // tick, fight or not (physical time, not doctrine time).
     fire_.tick_cooldown(dt);
+    guns_.tick(dt);
 
     if (!state) {
         target_ = nullptr;
@@ -173,6 +179,20 @@ AIControlOutput WVRModule::update(double dt,
     current_position_ = geo::WorldPosition(state->position_east_ft(),
                                            state->position_north_ft(),
                                            state->altitude_msl_ft());
+
+    // Ownship velocity estimate (the guns boresight): consecutive
+    // positions / dt. The first update has no history -> zero -> the
+    // guns hold fire that tick (a solution you cannot measure is not
+    // one you can fire on).
+    velocity_estimate_ = f4::math::Vec3<double>{0.0, 0.0, 0.0};
+    if (has_prev_position_ && dt > 0.0) {
+        velocity_estimate_ = f4::math::Vec3<double>{
+            (current_position_.x - prev_position_.x) / dt,
+            (current_position_.y - prev_position_.y) / dt,
+            (current_position_.z - prev_position_.z) / dt};
+    }
+    prev_position_ = current_position_;
+    has_prev_position_ = true;
 
     // Target validity for THIS tick. Out-of-band (the fight reopened past
     // the exit ring) reads as no fight — the brain is the rung authority
@@ -284,6 +304,31 @@ AIControlOutput WVRModule::update(double dt,
             desired_heading_rad_ = pursuit_heading_rad();
             desired_alt_ft_ = clamp_alt_ft(target_ ? target_->position.z
                                                    : engage_alt_ft_);
+            // GUNS (Steps 11-12) — the merge SNAPSHOT. While the gun is
+            // armed and the target is inside its envelope, the steering
+            // tracks the GUN solution (aiming IS steering there); the
+            // trigger goes down when the nose sits inside the hit-quality
+            // cone. Guns tight: the pursuit flies the merge exactly as
+            // before (a heater fight, untouched).
+            const bool gun_work =
+                fightable && !guns_.config().hold_fire &&
+                guns_.in_envelope(*target, current_position_);
+            if (gun_work && !gun_steering_active_) {
+                // The steering reference CHANGES here (level merge ->
+                // the gun's climbing lead line). Integrators wound on
+                // the old reference are windup on the new one (the
+                // measured ~0.2-deg vertical overshoot that held the
+                // trigger closed through the whole window) — reset, the
+                // same reference-change rule every rung handoff follows.
+                air_steering_.reset_integrators();
+            }
+            gun_steering_active_ = gun_work;
+            if (gun_work) {
+                desired_heading_rad_ = guns_.lead_heading_rad(
+                    *target_, current_position_);
+                desired_alt_ft_ = clamp_alt_ft(
+                    guns_.lead_point(*target_, current_position_).z);
+            }
             // Fire control: the merge head-on IS the IR opportunity shot
             // (all-aspect heater) — but only into the forward cone: a
             // heater at a target on our six has nothing to track.
@@ -292,15 +337,41 @@ AIControlOutput WVRModule::update(double dt,
                 fire_.note_fired();
                 release_pulse_ = true;
             }
+            // The guns' own gate (envelope + hit-quality cone + trigger
+            // state + ROE, all inside should_fire).
+            if (fightable &&
+                guns_.should_fire(*target, current_position_,
+                                  velocity_estimate_)) {
+                guns_.note_burst();
+                gun_pulse_ = true;
+            }
             break;
         }
 
         case WVRState::Offensive: {
             wants_lock_ = true;
             desired_heading_rad_ = pursuit_heading_rad();
+            // GUNS (Steps 11-12) — inside the gun envelope (armed) the
+            // steering tracks the GUN solution, not the missile-grade
+            // pursuit: the bullet's lead point is far short of the
+            // pursuit lead at these ranges, and the gun fires where the
+            // nose points. Steering there IS aiming. (Envelope + lead
+            // both use the track-file PREDICTION — the gun's window is
+            // seconds deep, stale snapshot geometry would miss it
+            // entirely.) Guns tight: the pursuit, as before.
+            const bool gun_work =
+                fightable && !guns_.config().hold_fire &&
+                guns_.in_envelope(*target, current_position_);
+            if (gun_work) {
+                desired_heading_rad_ = guns_.lead_heading_rad(
+                    *target_, current_position_);
+            }
             // Overshoot control (FreeFalcon OverB): inside the overshoot
             // guard with hard closure, offset the pursuit so the pass
-            // leaves the target in front, not behind.
+            // leaves the target in front, not behind. Overrides the gun
+            // steering too — flying THROUGH the target ends the fight
+            // for both sides; the guns pause during the overshoot (the
+            // 45-deg offset fails the solution cone on its own).
             if (fightable && target_->range_nm < cfg_.overshoot_range_nm &&
                 target_->rangedot > 300.0) {
                 tactic_ = WVRTactic::OverB;
@@ -310,12 +381,23 @@ AIControlOutput WVRModule::update(double dt,
             } else {
                 tactic_ = WVRTactic::RandP;
             }
-            desired_alt_ft_ = clamp_alt_ft(target_ ? target_->position.z
-                                                   : engage_alt_ft_);
+            desired_alt_ft_ = clamp_alt_ft(
+                gun_work ? guns_.lead_point(*target_,
+                                            current_position_).z
+                         : (target_ ? target_->position.z
+                                    : engage_alt_ft_));
             if (fightable && target->ata_from_rad < cfg_.fire_cone_rad &&
                 fire_.should_fire(*target)) {
                 fire_.note_fired();
                 release_pulse_ = true;
+            }
+            // GUNS — the sustained solution: the trigger goes down when
+            // the nose (velocity) sits inside the predictor's cone.
+            if (fightable &&
+                guns_.should_fire(*target, current_position_,
+                                  velocity_estimate_)) {
+                guns_.note_burst();
+                gun_pulse_ = true;
             }
             break;
         }
@@ -363,6 +445,7 @@ AIControlOutput WVRModule::update(double dt,
     out = air_steering_.steer(desired_heading_rad_, desired_alt_ft_,
                               speed_kts, steering_input(*state));
     out.weapon_release = release_pulse_;
+    out.trigger_down = guns_.trigger_down();
     return out;
 }
 
@@ -372,6 +455,12 @@ AIControlOutput WVRModule::update(double dt,
 
 double WVRModule::target_bearing_rad() const {
     if (!target_) return current_heading_rad_;
+    // NOTE: the snapshot position (not the track-file prediction). The
+    // pursuit/bearing laws were TUNED on this data (the two_ship rejoin
+    // calibration keyed on the ghost-chase's lag); the GUN branch's
+    // steering predicts independently (GunModule::lead_heading_rad) —
+    // in a co-axial merge the stale along-track error does not rotate
+    // the bearing, so the pursuit does not need it.
     const double dx = target_->position.x - current_position_.x;  // east
     const double dy = target_->position.y - current_position_.y;  // north
     if (dx == 0.0 && dy == 0.0) return current_heading_rad_;
@@ -434,9 +523,16 @@ void WVRModule::engage(const TargetInfo& target) {
     engagement_target_id_ = target.entity_id;
     // Capture the altitude the vertical game weaves around.
     engage_alt_ft_ = current_alt_msl_ft_;
+    // Drop the velocity history: it may be stale from before this fight
+    // (the module only runs while the WVR rung is live), and a stale
+    // delta over a fresh dt is a garbage boresight. The first tick of
+    // the engagement has no estimate -> the guns hold fire; from the
+    // second tick the estimate is exact.
+    has_prev_position_ = false;
     // Reset the IR shot count for the new engagement; the cooldown
     // survives (the shooter's rail cadence).
     fire_.reset_engagement();
+    guns_.reset_engagement();
     dwell_timer_ = 0.0;
     defensive_timer_ = 0.0;
 }
@@ -445,7 +541,9 @@ void WVRModule::clear_engagement() {
     engagement_target_id_ = 0;
     wants_lock_ = false;
     release_pulse_ = false;
+    gun_pulse_ = false;
     fire_.reset_engagement();
+    guns_.reset_engagement();
 }
 
 // ============================================================================

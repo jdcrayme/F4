@@ -26,6 +26,7 @@ add_library(f4-weapons STATIC
     src/weapon_store.cpp
     src/missile_battery.cpp
     src/gun.cpp
+    src/gun_component.cpp
 )
 target_link_libraries(f4-weapons PUBLIC f4_warnings)
 

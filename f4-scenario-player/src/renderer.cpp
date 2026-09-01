@@ -25,6 +25,7 @@
 #include <f4/ai/brain_component.hpp>
 #include <f4/entities/entity.hpp>
 #include <f4/sensors/rwr.hpp>              // RwrComponent (combat HUD line)
+#include <f4/weapons/gun_component.hpp>    // GunComponent (tracer streaks)
 #include <f4/flight/flight_model_component.hpp>
 #include <f4/flight/angle.hpp>
 #include <f4/models/model_database.hpp>
@@ -382,7 +383,7 @@ void PlayerApp::Impl::draw_scene() {
     // + the combat view (missile bodies, contrails, guidance lines).
     // All drawn via shared draw_layout_line / draw_layout_marker primitives
     // (the combat view uses Raylib DrawLine3D/DrawCylinderEx directly).
-    scene.overlay_3d = [this](const Camera3D&) { draw_airport(); draw_missiles(); };
+    scene.overlay_3d = [this](const Camera3D&) { draw_airport(); draw_missiles(); draw_gun_tracers(); };
 
     f4::renderer::render_world(render_res, scene);
 
@@ -751,6 +752,44 @@ void PlayerApp::Impl::draw_missiles() {
 
         // Tactical marker: wire sphere big enough to see at BVR zoom.
         DrawSphereWires(pos, kMissileRingFt, 10, 10, Color{255, 240, 130, 160});
+    }
+}
+
+// ── Gun tracers (Steps 11-12) ──────────────────────────────────────────
+//
+// Every live tracer point in every GunComponent's stream draws as a short
+// bright streak back along its velocity (the classic tracer look — a round
+// at 3,400 ft/s is a point, the STREAK is what the eye sees). Fades with
+// age so a burst reads as a string of rounds, not a solid beam.
+
+void PlayerApp::Impl::draw_gun_tracers() {
+    if (!sim_initialized || !show_combat || !scenario.combat.enabled) return;
+
+    constexpr float kTracerStreakFt = 300.0f;   // visual streak length
+
+    for (const auto eid :
+         sim->world().with_component<f4::weapons::GunComponent>()) {
+        auto h = f4::entities::EntityHandle(eid, &sim->world());
+        auto* gun = h.get<f4::weapons::GunComponent>();
+        if (!gun) continue;
+
+        for (const auto& t : gun->stream.tracers()) {
+            const Vector3 pos =
+                enu_to_raylib_v3(t.position.x, t.position.y, t.position.z);
+            const Vector3 vel =
+                enu_to_raylib_v3(t.velocity.x, t.velocity.y, t.velocity.z);
+            if (Vector3Length(vel) < 1.0f) continue;
+            const Vector3 tail = Vector3Subtract(
+                pos, Vector3Scale(Vector3Normalize(vel), kTracerStreakFt));
+
+            // Fade by age (2 s lifetime): fresh rounds bright amber,
+            // expiring ones fade out.
+            const float life =
+                static_cast<float>(t.age_s) / 2.0f;   // 0 = new
+            const unsigned char alpha = static_cast<unsigned char>(
+                230.0f * (1.0f - life) + 20.0f);
+            DrawLine3D(tail, pos, Color{255, 200, 60, alpha});
+        }
     }
 }
 

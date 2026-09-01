@@ -59,23 +59,42 @@ const weapons::WeaponClassRecord* ir_aa_missile(
     return best;
 }
 
+/// The gun class (M61A1 — the only Gun-category card in the table).
+/// Scopes the gun fire control's envelope + muzzle velocity and the
+/// GunComponent's ballistic config.
+const weapons::WeaponClassRecord* gun_class(
+    const weapons::WeaponClassTable& table) {
+    for (const auto& rec : table.records()) {
+        if (rec.category == weapons::WeaponCategory::Gun) return &rec;
+    }
+    return nullptr;
+}
+
 } // anonymous namespace
 
 void configure_brain_combat(f4::ai::BrainComponent& brain,
                             const weapons::WeaponClassTable& table,
                             bool hold_fire,
-                            bool bvr_hold) {
+                            bool bvr_hold,
+                            bool missiles_hold,
+                            bool guns_hold,
+                            int gun_rounds) {
     brain.set_combat_enabled(true);
     brain.set_hold_fire(hold_fire);
-    brain.set_bvr_hold(bvr_hold);
+    brain.set_bvr_hold(bvr_hold || missiles_hold);
 
     // ROE goes to the FIRE CONTROLS (module level), not just the brain's
     // intent gate: a module-level hold means should_fire() answers no, so
     // no pulse, no phantom shot counted, and no doctrine separation ever
-    // triggers on shots that never left the rail. hold_fire disarms both
-    // modules; bvr_hold disarms the BVR fire control alone (heaters free).
-    brain.bvr().fire().config().hold_fire = hold_fire || bvr_hold;
-    brain.wvr().fire().config().hold_fire = hold_fire;
+    // triggers on shots that never left the rail. hold_fire disarms every
+    // module; bvr_hold disarms the BVR fire control alone (heaters free);
+    // missiles_hold disarms BVR + IR (the guns-dogfight ROE); guns_hold
+    // disarms the trigger alone (the no-surprise default for pre-gun
+    // scenarios).
+    const bool missiles_tight = hold_fire || missiles_hold;
+    brain.bvr().fire().config().hold_fire = missiles_tight || bvr_hold;
+    brain.wvr().fire().config().hold_fire = missiles_tight;
+    brain.wvr().guns().config().hold_fire = hold_fire || guns_hold;
 
     // Employment envelope from the BVR weapon class. The 0.5 factor turns
     // the AIM-120C's 40 NM aerodynamic boundary into a ~20 NM
@@ -100,6 +119,29 @@ void configure_brain_combat(f4::ai::BrainComponent& brain,
         const double max_nm = 0.8 * ir->max_range_ft / FEET_PER_NM;
         brain.wvr().fire().set_envelope_nm(min_nm, max_nm);
     }
+
+    // GUNS (Steps 11-12): envelope + muzzle velocity from the Gun class
+    // card, ammo from the store's gun station (the caller read it after
+    // attach). The card's effective range is an aerodynamic statement
+    // about the BULLET; the employment doctrine caps it at ~0.35 NM —
+    // the range where this fire control's boresight tracking error
+    // still projects inside the hit footprint (see GunModule::Config).
+    const auto* gun = gun_class(table);
+    if (gun != nullptr && gun->max_range_ft > 0.0) {
+        constexpr double kGunDoctrineMaxNm = 0.35;
+        const double min_nm =
+            std::max(0.9 * gun->min_range_ft, 0.08 * FEET_PER_NM) /
+            FEET_PER_NM;
+        const double max_nm = std::min(0.9 * gun->max_range_ft / FEET_PER_NM,
+                                       kGunDoctrineMaxNm);
+        brain.wvr().guns().set_envelope_nm(min_nm, max_nm);
+        if (gun->max_speed_fts > 0.0) {
+            brain.wvr().guns().config().muzzle_velocity_fps =
+                gun->max_speed_fts;
+        }
+    }
+    brain.wvr().guns().set_rounds_budget(
+        gun_rounds > 0 ? gun_rounds : 0);
 }
 
 void attach_combat_loadout(entities::EntityHandle& aircraft,
@@ -122,6 +164,27 @@ void attach_combat_loadout(entities::EntityHandle& aircraft,
     // weapon_class_table.cpp for the exact station fill.
     aircraft.add<weapons::WeaponStoreComponent>(
         weapons::WeaponStoreComponent::standard_fighter(table));
+
+    // The cannon (Steps 11-12): ballistic config from the Gun class card
+    // (M61A1), seeded like the radar (base + index: deterministic per
+    // scenario, distinct per shooter — dispersion rolls differ). Rounds
+    // ledger = the store's gun station; the brain's gun fire control is
+    // pointed at the same number by the spawn loop's
+    // configure_brain_combat call.
+    const auto* gun_rec = gun_class(table);
+    if (gun_rec != nullptr) {
+        auto& gun = aircraft.add<weapons::GunComponent>();
+        gun.weapon_handle = gun_rec->id;
+        weapons::GunConfig gcfg{};
+        gcfg.muzzle_velocity_fps =
+            gun_rec->max_speed_fts > 0.0 ? gun_rec->max_speed_fts
+                                         : 3400.0;
+        gcfg.round_power_lb = gun_rec->warhead_power_lb;
+        gcfg.lethal_radius_ft = gun_rec->lethal_radius_ft;
+        gun.stream = weapons::GunStream(
+            gcfg, seed_base +
+                static_cast<std::uint32_t>(0x1000 + aircraft_index));
+    }
 
     // Observability: default fighter RCS.
     aircraft.add<sensors::SignatureComponent>();
@@ -272,6 +335,32 @@ std::size_t execute_brain_combat_intents(entities::EntityWorld& world,
                 }
             }
         }
+
+        // --- Gun intent: start a burst through the gun station. ---------
+        // The burst size is the brain's gun doctrine (the module's
+        // burst_rounds), clipped to the drum; the store debits what
+        // actually left the muzzle. The tracers fly in the update_guns
+        // sweep later this tick — fresh muzzle pose, real ballistics.
+        if (intent.gun_trigger && intent.gun_target_id != 0 && !dead) {
+            auto* gun = shooter.get<weapons::GunComponent>();
+            auto* store = shooter.get<weapons::WeaponStoreComponent>();
+            if (gun != nullptr && store != nullptr) {
+                const std::size_t station =
+                    store->find_with_category(
+                        table, weapons::WeaponCategory::Gun);
+                if (station != weapons::WeaponStoreComponent::npos) {
+                    const int in_drum =
+                        store->station(station)->rounds;
+                    const int burst = std::min(
+                        brain->wvr().guns().config().burst_rounds, in_drum);
+                    if (burst > 0) {
+                        store->expend(station, burst);
+                        gun->stream.start_burst(
+                            burst, intent.gun_target_id);
+                    }
+                }
+            }
+        }
     }
     return launches;
 }
@@ -394,8 +483,27 @@ void attach_combat_event_recorder(Simulation& sim) {
             rec->record(std::move(e));
         });
 
-    // GunFiredMessage deliberately NOT captured — no module fires guns yet
-    // (same rationale as CombatTranscript's subscription set).
+    // GUNS (Steps 11-12): one event per burst (the stream publishes on
+    // the burst's first emitted round — muzzle + rounds + the aim
+    // target). Gun damage/kill events ride the DamageApplied/
+    // EntityKilled subscriptions above with missile_id == 0 ("gun
+    // hits", the message contract documents it).
+    bus.subscribe<weapons::GunFiredMessage>(
+        [rec, event_tick, table](const weapons::GunFiredMessage& m) {
+            recorder::CombatEvent e;
+            e.tick = event_tick();
+            e.sim_time_s = m.sim_time_s;
+            e.kind = recorder::CombatEventKind::GunFired;
+            e.subject_id = m.shooter_id;
+            e.object_id = m.target_id;
+            e.weapon_handle = m.weapon_handle;
+            e.position = m.position;
+            e.rounds = m.rounds;
+            if (const auto* w = table->get(m.weapon_handle)) {
+                e.weapon_name = w->name;
+            }
+            rec->record(std::move(e));
+        });
 }
 
 } // namespace f4::simulation

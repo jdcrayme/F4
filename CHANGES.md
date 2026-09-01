@@ -1,5 +1,41 @@
 # F4 Cleanup Pass — Changes Summary
 
+## Guns Employment — The Last Unflown Weapon Flies (M3-TACTICS-4)
+
+**The AI fires the cannon. An armed jet working a merge tracks the GUN
+solution — steering at where the target will be when the bullet arrives,
+superelevation included — and the trigger goes down when the boresight
+error projects inside the hit footprint at the current range. One
+AI-vs-AI E2E proves the whole chain headless: missiles tight, guns free,
+a drone bandit, and the fight resolves at the trigger — 25-50 rounds of
+20 mm land, the bandit dies, the shooter disengages. The shipped
+`guns_merge` scenario puts the trigger fight in the scenario-player,
+tracer streaks and all. The suite is now 1,661/1,661.**
+
+| Area | Change |
+|------|--------|
+| `f4-weapons` — GunStream (hardening) | SEGMENT hit detection: a tracer checks the segment it swept each tick (`[p_old, p_new]`, derivable exactly from the semi-implicit Euler update — no stored state), not its point position. At 3,400 ft/s a round covers ~57 ft per 1/60 s tick — more than the 40 ft hit radius — and at coarse host steps (dt >= 0.024) point checks jump straight THROUGH a target; the segment sweep closes the tunnel (regression-tested with a constructed jump-over). Plus: `set_sim_time()` (the host sweep stamps the clock — GunFired/Damage/Kill messages previously carried 0.0), `set_weapon_handle()` (name resolution), and `start_burst(rounds, aim_target_id)` (the aim hint on GunFiredMessage, which also gains `weapon_handle`). |
+| `f4-weapons` — GunComponent + update_guns (new) | The per-aircraft cannon as a passive ECS component (the RwrComponent pattern — the host drives it, never update_all: hit detection mutates the world, and a firing jet must emit from its FRESH muzzle pose). `attach_combat_loadout` adds it (GunConfig from the M61A1 card: muzzle 3,400 ft/s, per-round 0.22 lb, lethal 40 ft; seeded like the radar — deterministic per scenario, distinct per shooter). `update_guns(world, bus, dt, t)` is the world-level sweep `Simulation::tick` runs AFTER the FM->Transform sync: boresight = the velocity unit vector, muzzle 15 ft ahead (the same clearance `launch_missile` gives a missile), tracers fly, hits damage, bursts announce on the bus. |
+| `f4-ai` — GunModule (new, engine-agnostic) | The guns fire control, AI_IMPLEMENTATION_PLAN Steps 11-12. ROLE 1 — THE PREDICTOR: a gun is not fired at the target but at the LEAD POINT — where the target will be after the bullet's time of flight (`tof = range_now / (muzzle + closure)`), flown from the TRACK-FILE PREDICTION (the fusion refreshes at the skill interval — seconds — and at merge closure 5 stale seconds is the whole envelope; every quantity starts from `position + velocity * age_s`). The lead includes SUPERELEVATION: the aim point sits above the kinematic lead by `0.5*g*tof^2` — the gravity drop every real fire computer compensates (16 ft at 1 s). ROLE 2 — THE TRIGGER: a RANGE-SCALED hit-quality cone (`error <= atan2(hit_radius, range)`, capped ~5 deg) — a fixed cone cannot work, the FCS's own ~1.5-deg tracking lag is a 44 ft miss at 5,000 ft and a hit at 1,500 ft; 40 ft = the weapons model's hit radius. Burst discipline: 100 rounds (~1 s of trigger at 6,000 rpm) then 1 s cooldown; a 511-round drum budget; ROE hold_fire at the module level (no pulse, no phantom budget). |
+| `f4-ai` — WVRModule integration | `wvr().guns()` — the fire control composed like the heater's `fire()`. MERGE: the snapshot — while the gun is armed and the target is inside its envelope, the steering swaps the missile-grade pursuit for the GUN lead (aiming IS steering there; the integrators reset at the reference change — windup carried across reference swaps held the trigger closed through a whole window in testing) and the trigger gate runs. OFFENSIVE: the same swap for the sustained tracking solution (OverB still overrides below 0.35 NM with hard closure — overshoot control trumps gunnery; a slow-closure stern chase is the gun shot). The module's ownship boresight estimate: consecutive positions / dt (the exact quantity the host sweep fires along); a two-tick warmup on engagement (stale history is dropped — a solution you cannot measure is not one you fire on). Guns tight: the merge flies EXACTLY as before — every pre-gun scenario is untouched. |
+| `f4-ai` — TargetInfo/SensorFusion | `TargetInfo.age_s`: seconds since the fusion rebuilt the entry (0 = fresh). The fusion ages its track file every `update()` between rebuilds — a track file, not a live feed; consumers needing now-geometry dead-reckon. Missile modules ignore it (their envelopes absorb staleness); the gun predictor needs it. |
+| Brain + bridge (the host half) | `CombatIntent` += `gun_trigger`/`gun_target_id` (the one-tick burst edge, the same intent surface as `weapon_release`; hold_fire gates it at the brain). `configure_brain_combat` configures the gun from the M61A1 card (envelope, muzzle) + the store's gun-station drum, with the full ROE matrix: `hold_fire` (all tight) / `bvr_hold` (radar missiles) / `missiles_hold` (NEW — all A/A missiles tight, guns free: the guns-dogfight doctrine, subsumes bvr_hold) / `guns_hold` (NEW — guns tight, **default TRUE**: the no-surprise rule — guns are the newest weapon and every pre-gun scenario must fly the identical fight after the wiring lands). `execute_brain_combat_intents` turns the edge into `GunStream::start_burst` (burst = the module's doctrine clipped to the drum; the store debits what left the muzzle). |
+| `f4-recorder` + transcript | `CombatEventKind::GunFired` (wire name `"gun_fired"`, 9th kind): subject/object/weapon/rounds/muzzle position, captured by the bridge's recorder subscription; gun DAMAGE rides the existing DamageApplied stream (`missile_id == 0` = gun hit, the message contract's documented marker). JSON round-trip both directions; the LLM summary gains a `gun_bursts` array and gun-kill weapon attribution (the killer's most recent burst). The transcript learns the trigger call: **"Guns, guns, guns."** |
+| Scenarios | `guns_merge.json.in` (shipped, scenario-player): EAGLE1 vs BANDIT1 (a hold-fire drone that fights geometry but never shoots) — both spawned nose-on at fight speed flying a shared MERGE waypoint dead ahead (a single-waypoint route: the nav's spawn-on-leg consolidation skips waypoints an aircraft is past, and turn-anticipation swallows a merge point near a corner — the merge must be the LAST waypoint), missiles tight, guns armed, a drone hull calibrated to one burst. Tracer streaks (fading amber lines back along each round's velocity) in the player's combat view. |
+| Tests | +29 (suite **1,661/1,661 — 100%**, zero warnings): 15 GunModule units (TOF/lead/superelevation math, the track-file prediction, the range-scaled cone, the burst state machine, budget, ROE, reset semantics), 3 GunStream units (the tunneling regression, sim-time/aim stamps, the update_guns sweep from a moving muzzle), 6 WVR gun-intent units (the two-tick warmup, burst cycle, guns-tight hold, envelope, the Offensive steering swap vs the pursuit, reset), 1 recorder unit (gun_bursts summary + gun-kill attribution) + the extended every-kind round-trip, and the E2Es: GunsRoeDefaultsAndWiring, GunsRoeMissilesTightGunsFree, **AiVersusAiGunsMergeFight** (head-on at fight speed, WVR band entered, zero missiles launched despite BVR engaging, bursts by the eagle only carrying the aim hint, the store debit matching the rounds fired, a GUN kill (damage with missile_id == 0), the shooter alive and disengaged after) + the shipped-file twin. |
+
+**Watch the trigger fight** (player build needs X11/OpenGL):
+
+```
+f4-scenario-player <build>/scenarios/guns_merge.json --run --follow
+```
+
+EAGLE1 closes head-on, the HUD flips to WVR/Merge, and inside half a mile
+the amber tracer streaks reach out ahead of the nose — the lead-point
+solution, drop-compensated. The drone jinks when the angle sorts; watch
+the snapshot bursts at each pass. The trace records the bursts
+(`gun_fired` events in guns_merge_trace.json).
+
 ## The 2-Ship: WingmanModule — Formation, the Sort, the Rejoin (M3-TACTICS-3)
 
 **The AI flies in formation now. A #2 with a `lead_callsign` holds its
