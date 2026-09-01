@@ -15,8 +15,12 @@
 //
 // With an empty route the mission ends after takeoff (Phase A behavior).
 // This is the sequential-handoff stepping stone toward the documented
-// DigitalBrain (AI_IMPLEMENTATION_PLAN.md §5): later, a LayeredStateMachine
-// DigiMode ladder arbitrates the modules instead of a fixed sequence.
+// DigitalBrain (AI_IMPLEMENTATION_PLAN.md §5): a priority ladder
+// arbitrates the modules instead of a fixed sequence. The M3 tactics
+// landing adds the ladder's first rungs on top of the sequence —
+// while Enroute, a visible incoming missile (MissileModule defeat)
+// preempts a visible hostile fighter (BVRModule), which preempts the
+// navigation module. The mission sequence underneath is untouched.
 //
 // The brain runs in pass 1 (priority 100), reads the parent entity's
 // aircraft state through the IAircraftState interface, calls the active
@@ -50,6 +54,9 @@
 #include "f4/ai/modules/landing_module.hpp"
 #include "f4/ai/modules/navigation_module.hpp"
 #include "f4/ai/modules/takeoff_module.hpp"
+#include "f4/ai/modules/bvr_module.hpp"
+#include "f4/ai/modules/missile_module.hpp"
+#include "f4/ai/sensor_fusion.hpp"
 
 #include <optional>
 #include <vector>
@@ -90,6 +97,26 @@ struct MissionPlan {
 };
 
 // ============================================================================
+// CombatIntent — what the brain wants done to the real combat hardware
+// this tick (read by the host's combat driver; see combat_bridge.hpp).
+//
+// The brain's tactic modules are engine-agnostic: they cannot lock a radar
+// or drop a missile off a rail (those are f4-sensors / f4-weapons calls,
+// which f4-ai must never link). Instead the modules set INTENTS, the brain
+// collects them here, and the HOST layer converts them into
+// RadarSimComponent::command_track() / weapons::launch_missile() through
+// the simulation's own weapon table.
+// ============================================================================
+struct CombatIntent {
+    /// Hold STT on this target (EntityId::value; 0 = no lock wanted).
+    bool   radar_lock{false};
+    std::uint64_t lock_target_id{0};
+    /// Release the selected weapon this tick (one-tick pulse).
+    bool   weapon_release{false};
+    std::uint64_t release_target_id{0};
+};
+
+// ============================================================================
 // BrainComponent
 // ============================================================================
 class BrainComponent : public entities::BehavioralComponent<BrainComponent> {
@@ -97,9 +124,21 @@ public:
     /// Mission phase — which module currently flies the aircraft.
     enum class Phase {
         Ground,     // TakeoffModule
-        Enroute,    // NavigationModule
+        Enroute,    // NavigationModule (or the combat ladder, see below)
         Approach,   // LandingModule
         Complete    // parked / no further control
+    };
+
+    /// Combat mode — the first rungs of the DigitalBrain priority ladder
+    /// (AI_IMPLEMENTATION_PLAN.md §5 Step 12):
+    ///   Defensive  > BVR > mission module (navigation).
+    /// Collision/ground avoid rungs arrive with their modules; the ladder
+    /// lives in update() and every rung only ever PREEMPTS, never replaces,
+    /// the mission sequence below it.
+    enum class CombatMode {
+        None,        // combat off, or nothing visible — mission module flies
+        BVR,         // BVRModule engaged (Entering/Employing/Separating)
+        Defensive    // MissileModule beaming an incoming hostile missile
     };
 
     BrainComponent() = default;
@@ -206,21 +245,78 @@ public:
             phase_ = Phase::Complete;
         }
 
+        // =====================================================================
+        // Combat ladder (M3 tactics — the DigitalBrain priority ladder's
+        // first rungs; preempts the mission module, never replaces it):
+        //   Defensive > BVR > mission module.
+        // Runs only while Enroute: Ground aircraft do not fight, and an
+        // aircraft on Approach has already disengaged. When combat ends
+        // (target dead / lost) the navigation module resumes — with its
+        // steering integrators reset, the same transient guard the phase
+        // handoffs use (BVR's throttle/VS state is not nav state).
+        // =====================================================================
+        AIControlOutput ai_out{};
+        combat_intent_ = CombatIntent{};
+        combat_mode_ = CombatMode::None;
+        if (combat_enabled_ && phase_ == Phase::Enroute) {
+            auto* world = owner_.world();
+            if (world) {
+                if (!combat_initialized_) {
+                    sensors_.initialize(owner_.id().value, *world, bus,
+                                        SkillLevel::Veteran);
+                    combat_initialized_ = true;
+                }
+                // Per the skill interval (Veteran = 5 s)...
+                sensors_.update(dt);
+                // ...but a beam fight needs a fresh picture: while an
+                // incoming hostile missile is visible, refresh every tick
+                // (the stale entry itself keeps the refresh armed — see
+                // MissileModule's defeat-linger note for the tail end).
+                if (sensors_.missile_threat() != nullptr) {
+                    sensors_.force_refresh();
+                }
+
+                if (const auto* incoming = sensors_.missile_threat()) {
+                    combat_mode_ = CombatMode::Defensive;
+                    ai_out = missile_defense_.update(dt, state, incoming);
+                } else if (const auto* tgt = sensors_.threat_target()) {
+                    combat_mode_ = CombatMode::BVR;
+                    ai_out = bvr_.update(dt, state, tgt);
+                    // Intents out: the host driver executes these against
+                    // the real radar / weapon store after update_all.
+                    combat_intent_.radar_lock = bvr_.wants_lock();
+                    combat_intent_.lock_target_id = bvr_.lock_target_id();
+                    combat_intent_.weapon_release = bvr_.release_pulse();
+                    combat_intent_.release_target_id =
+                        bvr_.release_target_id();
+                }
+            }
+            if (combat_mode_ == CombatMode::None && combat_was_active_) {
+                // Falling off the ladder: BVR separated / target lost.
+                // Navigation resumes with clean integrators.
+                nav_.air_steering.reset_integrators();
+            }
+            combat_was_active_ = combat_mode_ != CombatMode::None;
+        }
+
         // Run the active module: produce AIControlOutput from the state.
-        AIControlOutput ai_out;
-        switch (phase_) {
-            case Phase::Ground:
-                ai_out = takeoff_.update(dt, state);
-                break;
-            case Phase::Enroute:
-                ai_out = nav_.update(dt, state);
-                break;
-            case Phase::Approach:
-                ai_out = landing_.update(dt, state);
-                break;
-            case Phase::Complete:
-                ai_out = landing_.hold_complete();  // brakes on, gear down
-                break;
+        // (Skipped whenever a combat rung produced an output this tick —
+        // including the Defensive override, which preempts everything.)
+        if (combat_mode_ == CombatMode::None) {
+            switch (phase_) {
+                case Phase::Ground:
+                    ai_out = takeoff_.update(dt, state);
+                    break;
+                case Phase::Enroute:
+                    ai_out = nav_.update(dt, state);
+                    break;
+                case Phase::Approach:
+                    ai_out = landing_.update(dt, state);
+                    break;
+                case Phase::Complete:
+                    ai_out = landing_.hold_complete();  // brakes on, gear down
+                    break;
+            }
         }
 
         // Watchdog (Phase 5a): if the AI produced an empty output (no
@@ -270,7 +366,11 @@ public:
         return "?";
     }
     /// Active module's mode name (e.g. "TakeoffMode"); "Complete" at the end.
+    /// While a combat rung is active the COMBAT mode is reported instead
+    /// ("BVREngage" / "MissileDefeat") — the mission module is dormant.
     [[nodiscard]] std::string mode_name() const {
+        if (combat_mode_ == CombatMode::BVR)         return "BVREngage";
+        if (combat_mode_ == CombatMode::Defensive)   return "MissileDefeat";
         switch (phase_) {
             case Phase::Ground:   return takeoff_.mode_name();
             case Phase::Enroute:  return nav_.mode_name();
@@ -280,7 +380,10 @@ public:
         return {};
     }
     /// Active module's state name (e.g. "OnFinal"); "Parked" at the end.
+    /// While fighting: the BVR state / "Defending".
     [[nodiscard]] std::string state_name() const {
+        if (combat_mode_ == CombatMode::BVR)         return bvr_.state_name();
+        if (combat_mode_ == CombatMode::Defensive)   return "Defending";
         switch (phase_) {
             case Phase::Ground:   return takeoff_.state_name();
             case Phase::Enroute:  return nav_.state_name();
@@ -290,6 +393,27 @@ public:
         return {};
     }
 
+    // --- Combat chain (M3 tactics; see CombatIntent above) ----------------
+    /// Enable the combat ladder. The host sets this at spawn when the
+    /// scenario's combat block is on, then installs a detection policy
+    /// on sensors() (the radar-backed adapter lives in f4-simulation).
+    void set_combat_enabled(bool on) noexcept { combat_enabled_ = on; }
+    [[nodiscard]] bool combat_enabled() const noexcept { return combat_enabled_; }
+    [[nodiscard]] CombatMode combat_mode() const noexcept { return combat_mode_; }
+    [[nodiscard]] const char* combat_mode_name() const noexcept {
+        switch (combat_mode_) {
+            case CombatMode::None:      return "None";
+            case CombatMode::BVR:       return "BVREngage";
+            case CombatMode::Defensive: return "MissileDefeat";
+        }
+        return "?";
+    }
+    /// This tick's combat intents (lock + weapon release) — the host's
+    /// combat driver reads this AFTER world.update_all() each tick.
+    [[nodiscard]] const CombatIntent& combat_intent() const noexcept {
+        return combat_intent_;
+    }
+
     // --- Module access (host configuration + test inspection) ---
     [[nodiscard]] modules::TakeoffModule&       takeoff()       noexcept { return takeoff_; }
     [[nodiscard]] const modules::TakeoffModule& takeoff() const noexcept { return takeoff_; }
@@ -297,6 +421,14 @@ public:
     [[nodiscard]] const modules::NavigationModule& navigation() const noexcept { return nav_; }
     [[nodiscard]] modules::LandingModule&       landing()       noexcept { return landing_; }
     [[nodiscard]] const modules::LandingModule& landing() const noexcept { return landing_; }
+
+    // --- Combat module access (host configuration + test inspection) ---
+    [[nodiscard]] SensorFusion&       sensors()       noexcept { return sensors_; }
+    [[nodiscard]] const SensorFusion& sensors() const noexcept { return sensors_; }
+    [[nodiscard]] modules::BVRModule&       bvr()       noexcept { return bvr_; }
+    [[nodiscard]] const modules::BVRModule& bvr() const noexcept { return bvr_; }
+    [[nodiscard]] modules::MissileModule&       missile_defense()       noexcept { return missile_defense_; }
+    [[nodiscard]] const modules::MissileModule& missile_defense() const noexcept { return missile_defense_; }
 
     /// Legacy alias for the Phase A API (tests + hosts configure the
     /// takeoff module through this).
@@ -341,6 +473,19 @@ private:
     bool takeoff_initialized_{false};
     modules::NavigationModule nav_;
     modules::LandingModule landing_;
+
+    // Combat ladder (M3 tactics): SensorFusion (the eyes — the host
+    // installs the detection policy), the BVR engagement module, and the
+    // defensive MissileModule. SensorFusion initializes lazily on the
+    // first Enroute update (it needs the world + bus).
+    bool combat_enabled_{false};
+    bool combat_initialized_{false};
+    bool combat_was_active_{false};
+    CombatMode combat_mode_{CombatMode::None};
+    CombatIntent combat_intent_{};
+    SensorFusion sensors_{};
+    modules::BVRModule bvr_{};
+    modules::MissileModule missile_defense_{};
 
     // Watchdog cache: the last non-empty PilotInput the brain produced.
     // Held for one tick if a module returns an empty AIControlOutput

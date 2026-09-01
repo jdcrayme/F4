@@ -26,3 +26,5 @@ target_link_libraries(test_brain_component PRIVATE f4-flight-model)
 target_compile_definitions(test_brain_component PRIVATE
     F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}")
 add_dependencies(test_brain_component convert_golden_fixtures)
+f4_ai_add_test(test_missile_module test_missile_module.cpp)
+f4_ai_add_test(test_bvr_module      test_bvr_module.cpp)

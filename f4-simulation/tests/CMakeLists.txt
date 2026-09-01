@@ -28,12 +28,22 @@ f4_simulation_add_test(test_real_layout_derivation test_real_layout_derivation.c
 f4_simulation_add_test(test_digi_mission           test_digi_mission.cpp)
 f4_simulation_add_test(test_fcs_trace_pipeline     test_fcs_trace_pipeline.cpp)
 f4_simulation_add_test(test_combat_integration     test_combat_integration.cpp)
+f4_simulation_add_test(test_combat_transcript      test_combat_transcript.cpp)
 
 # The combat integration test drives the full M3 chain (radar detect ->
 # track -> lock -> RWR -> launch -> kill -> sweep) through Simulation. It
 # needs the generated F-16 aircraft config (FlightModelComponent::init
 # requires real aero tables) exactly like the campaign-bridge test.
+# It also plays the SHIPPED <build>/scenarios/bvr_intercept.json, so it
+# needs the configured scenario dir too.
 target_compile_definitions(test_combat_integration PRIVATE
+    F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}"
+    F4_SCENARIOS_DIR="${CMAKE_BINARY_DIR}/scenarios"
+)
+
+# The combat transcript test runs the same AI-vs-AI fight to verify the
+# brevity narration (FOX 3 / spike / splash calls).
+target_compile_definitions(test_combat_transcript PRIVATE
     F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}"
 )
 

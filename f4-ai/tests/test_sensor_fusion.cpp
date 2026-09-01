@@ -631,3 +631,108 @@ TEST(SensorFusion, DetectionPolicyOverridesLegacySources) {
     ASSERT_EQ(sf.target_count(), 1u);
     EXPECT_TRUE(SensorFusion::detected_by_gci(sf.targets()[0]));
 }
+
+// ============================================================================
+// M3 tactics: own-relative hostility + hostile-only missile threats
+// ============================================================================
+
+TEST(SensorFusion, HostilityIsOwnRelativeForRedTeamOwnship) {
+    // A RED ownship must see BLUE fighters as hostile — the M3 two-sided
+    // combat prerequisite. The old blue-perspective rule (team "red" =>
+    // hostile) left the red bandit blind to the blue shooter, so red-side
+    // AI could never engage or defend.
+    EntityWorld world;
+    MessageBus bus;
+
+    const auto red_id =
+        add_entity(world, {WorldPosition{0.0, 0.0, 20000.0},
+                           WorldPosition{0.0, 500.0 * FPS_PER_KT, 0.0},
+                           "red", "fighter"});
+    const auto blue_id =
+        add_entity(world, {WorldPosition{0.0, 40.0 * FT_PER_NM, 20000.0},
+                           WorldPosition{0.0, 500.0 * FPS_PER_KT, 0.0},
+                           "blue", "fighter"});   // the enemy
+    const auto wingman_id =
+        add_entity(world, {WorldPosition{0.0, 30.0 * FT_PER_NM, 20000.0},
+                           WorldPosition{0.0, 500.0 * FPS_PER_KT, 0.0},
+                           "red", "fighter"});    // a wingman
+
+    SensorFusion sf;
+    sf.initialize(red_id, world, bus, SkillLevel::Veteran);
+    sf.update(1.0);
+    ASSERT_EQ(sf.target_count(), 2u);
+
+    bool saw_blue = false, saw_red_wingman = false;
+    for (const auto& t : sf.targets()) {
+        if (t.entity_id == blue_id) saw_blue = t.is_hostile;
+        if (t.entity_id == wingman_id) saw_red_wingman = !t.is_hostile;
+    }
+    EXPECT_TRUE(saw_blue)     << "red ownship: blue target must be hostile";
+    EXPECT_TRUE(saw_red_wingman) << "red ownship: red wingman must be friendly";
+}
+
+TEST(SensorFusion, HostilityLegacyRuleWhenOwnshipHasNoTeam) {
+    // Ownships without a team tag (legacy single-ship tests) keep the
+    // blue-perspective rule: red => hostile, everything else friendly.
+    EntityWorld world;
+    MessageBus bus;
+    OwnshipSpec os;
+    const auto own_id = add_entity(world, {os.pos, os.vel});  // NO team tag
+
+    const auto enemy_id = add_entity(
+        world, {WorldPosition{0.0, 10.0 * FT_PER_NM, 20000.0}, {}, "red", nullptr});
+    add_entity(world, {WorldPosition{0.0, 9.0 * FT_PER_NM, 20000.0},
+                       WorldPosition{0.0, 400.0 * FPS_PER_KT, 0.0},
+                       "blue", nullptr});
+
+    SensorFusion sf;
+    sf.initialize(own_id, world, bus, SkillLevel::Veteran);
+    sf.update(1.0);
+    ASSERT_EQ(sf.target_count(), 2u);
+
+    bool red_is_hostile = false, blue_is_hostile = true;
+    for (const auto& t : sf.targets()) {
+        if (t.entity_id == enemy_id) red_is_hostile = t.is_hostile;
+        else                          blue_is_hostile = t.is_hostile;
+    }
+    EXPECT_TRUE(red_is_hostile);
+    EXPECT_FALSE(blue_is_hostile);
+}
+
+TEST(SensorFusion, MissileThreatIgnoresSameTeamMissiles) {
+    // Your own missile (team copied from you at launch) must NOT read as
+    // an incoming threat — otherwise the shooter starts defending against
+    // its own weapon the tick after release. Only HOSTILE missiles are
+    // threats; hostile missiles also outrank friendly ones in scoring.
+    EntityWorld world;
+    MessageBus bus;
+    OwnshipSpec os;
+    const auto own_id = add_entity(world, {os.pos, os.vel, "blue", "fighter"});
+
+    // Own (blue) missile, 2 NM — nearest by far, but not a threat.
+    add_entity(world, {WorldPosition{0.0, 2.0 * FT_PER_NM, 20000.0}, {},
+                       "blue", "missile"});
+    // Hostile (red) missile, 8 NM — the one to defend against.
+    add_entity(world, {WorldPosition{0.0, 8.0 * FT_PER_NM, 20000.0}, {},
+                       "red", "missile"});
+
+    SensorFusion sf;
+    sf.initialize(own_id, world, bus, SkillLevel::Ace);
+    sf.update(1.0);
+    ASSERT_EQ(sf.target_count(), 2u);
+
+    const auto* m = sf.missile_threat();
+    ASSERT_NE(m, nullptr);
+    EXPECT_NEAR(m->range_nm, 8.0, 0.01);   // the HOSTILE one, not the nearer own
+    EXPECT_TRUE(m->is_hostile);
+    EXPECT_NEAR(m->threat_score, 200.0, 0.01);
+
+    // The same-team missile scores below the hostile one (no 200 override).
+    for (const auto& t : sf.targets()) {
+        if (t.range_nm < 3.0) {
+            EXPECT_TRUE(t.is_missile);
+            EXPECT_FALSE(t.is_hostile);
+            EXPECT_LT(t.threat_score, 200.0);
+        }
+    }
+}

@@ -21,11 +21,13 @@
 
 #include <f4/simulation/simulation.hpp>
 #include <f4/simulation/scenario.hpp>
+#include <f4/simulation/combat_transcript.hpp>
 #include <f4/simulation/visual_model_component.hpp>
 #include <f4/models/model_database.hpp>
 #include <f4/models/geometry.hpp>
 #include <f4/models/texture.hpp>
 #include <f4/entities/entity.hpp>
+#include <f4/weapons/missile_battery.hpp>   // MissileComponent (combat view)
 #include <f4/flight/flight_model_component.hpp>  // must come BEFORE raylib.h
                                                  // (Raylib's PI macro breaks
                                                  // `using f4::math::PI;` in
@@ -139,8 +141,27 @@ struct PlayerApp::Impl {
     bool show_approach = true;     // orange extended centerline + glide slope
     bool show_taxi_in = true;      // purple runway-exit -> parking route
     bool show_radio = true;        // ATC transcript panel
+    bool show_combat = true;       // missiles + shot lines + COMBAT panel
     bool follow_aircraft = false;  // camera tracks the aircraft (C)
     double camera_distance_override = -1.0;  // CLI --camera-distance (ft)
+
+    // ── Combat view (bvr_intercept scenarios) ──────────────────────────
+    // Which aircraft the HUD + follow camera + F-focus track (Tab cycles).
+    // The scenario may spawn TWO+ fighters (bvr_intercept: EAGLE1 blue +
+    // BANDIT1 red); everything that used aircraft_entity() (the first)
+    // now goes through watched_entity().
+    std::size_t watched_index = 0;
+    // The brevity narration (M4 observability) — engine-agnostic ring
+    // buffer maintained by f4-simulation; the player only draws it.
+    f4::simulation::CombatTranscript combat_log;
+    // Anchors the COMBAT panel under the ATC panel (set by draw_radio).
+    int last_radio_h = 0;
+    // Per-missile contrail: entity id -> recent ENU positions (one per
+    // rendered frame, newest last). Entries vanish with the missile.
+    struct MissileTrail {
+        std::vector<Vector3> points;
+    };
+    std::unordered_map<std::uint64_t, MissileTrail> missile_trails;
 
     // ── ATC radio transcript (observes the bus) ───────────────────────
     RadioLog radio_log;
@@ -164,6 +185,14 @@ struct PlayerApp::Impl {
     void draw_hud();
     void draw_fcs_hud();                // FCS-internals column (F3 toggle)
     void draw_radio();                  // ATC transcript panel (top-right)
+    void draw_combat();                 // COMBAT transcript panel (under ATC)
+    void draw_missiles();               // 3D missile bodies + trails + lines
+    void update_missile_trails();       // sample live missile positions
+
+    // The entity the HUD/camera watch (Tab cycles). Falls back to the
+    // first aircraft when the index outruns the spawn list.
+    [[nodiscard]] f4::entities::EntityId watched_entity() const noexcept;
+    void cycle_watched();
 };
 
 } // namespace f4::scenario_player

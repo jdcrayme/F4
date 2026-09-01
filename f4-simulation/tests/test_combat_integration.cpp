@@ -31,6 +31,8 @@
 #include "f4/simulation/simulation.hpp"
 #include "f4/simulation/combat_bridge.hpp"
 
+#include <f4/ai/brain_component.hpp>
+#include <f4/ai/modules/bvr_module.hpp>
 #include <f4/ai/sensor_fusion.hpp>
 #include <f4/entities/entity.hpp>
 #include <f4/messaging/bus.hpp>
@@ -408,4 +410,192 @@ TEST(CombatIntegration, CombatBlockParsingAndValidation) {
       "airfield": { "taxi_route": [ {"x":0,"y":0,"z":0}, {"x":0,"y":1,"z":0} ] }
     })";
     EXPECT_THROW(load_scenario_from_string(bad), std::runtime_error);
+}
+
+// ============================================================================
+// 5. M3 tactics E2E: the AI fights the war. NO test-driven lock or launch —
+//    the two brains see each other through the radar-backed policy, the
+//    shooter's BVRModule locks (intent -> driver) and fires (intent ->
+//    launch_missile through the sim's weapon table), the bandit's
+//    MissileModule beams against the incoming AMRAAM off its RWR launch
+//    warning, and the DamageState ends the fight. This is the
+//    COMBAT_CHAIN_PLAN M3 acceptance scenario: two formations detect,
+//    engage, and kill — with only tick() called.
+// ============================================================================
+TEST(CombatIntegration, AiVersusAiBvrEngagement) {
+    const auto f16 = f16_config_path();
+    if (f16.empty()) GTEST_SKIP() << "f16.json fixture not generated";
+
+    auto scenario =
+        load_scenario_from_string(combat_scenario_json(f16, true));
+    Simulation sim(std::move(scenario), std::filesystem::path("."));
+    sim.initialize();
+
+    CombatEventLog log;
+    log.attach(sim.bus());
+
+    const auto shooter_id = sim.aircraft_entities()[0];   // EAGLE1 (blue)
+    const auto bandit_id  = sim.aircraft_entities()[1];   // BANDIT1 (red)
+    entities::EntityHandle shooter(shooter_id, &sim.world());
+    entities::EntityHandle bandit(bandit_id, &sim.world());
+
+    // The M3 wiring the spawn path did: combat brains + radar policies +
+    // table-derived envelopes. Verify it before flying.
+    auto* shooter_brain = shooter.get<f4::ai::BrainComponent>();
+    auto* bandit_brain  = bandit.get<f4::ai::BrainComponent>();
+    ASSERT_NE(shooter_brain, nullptr);
+    ASSERT_NE(bandit_brain, nullptr);
+    EXPECT_TRUE(shooter_brain->combat_enabled());
+    EXPECT_TRUE(bandit_brain->combat_enabled());
+    EXPECT_NE(shooter_brain->sensors().detection_policy(), nullptr)
+        << "radar-backed policy not installed on the shooter brain";
+    EXPECT_NE(bandit_brain->sensors().detection_policy(), nullptr)
+        << "radar-backed policy not installed on the bandit brain";
+    // AIM-120C: max 40 NM boundary -> 20 NM doctrine envelope, ~0.5 NM min.
+    EXPECT_NEAR(shooter_brain->bvr().fire().config().max_pk_range_nm,
+                20.0, 0.01);
+    EXPECT_NEAR(shooter_brain->bvr().fire().config().min_pk_range_nm,
+                0.5, 0.01);
+
+    // Fly the fight. Budget 150 s (detect ~5 s, launch ~6 s, flyout ~35 s).
+    bool shooter_bvr_seen = false;
+    bool shooter_employing_seen = false;
+    bool bandit_defense_seen = false;
+    bool disengaged_after_kill = false;
+    int kill_tick = -1;
+    const int max_ticks = static_cast<int>(150.0 / kDt);
+    for (int i = 0; i < max_ticks; ++i) {
+        sim.tick(kDt);
+
+        if (shooter_brain->combat_mode() ==
+            f4::ai::BrainComponent::CombatMode::BVR) {
+            shooter_bvr_seen = true;
+            if (shooter_brain->bvr().state() ==
+                f4::ai::modules::BVRState::Employing) {
+                shooter_employing_seen = true;
+            }
+        }
+        if (bandit_brain->combat_mode() ==
+            f4::ai::BrainComponent::CombatMode::Defensive) {
+            bandit_defense_seen = true;
+        }
+
+        if (kill_tick < 0 && !log.killed.empty()) kill_tick = i;
+
+        // After the kill: the corpse stops painting (the policy's corpse
+        // filter), the shooter's BVR sees LostTarget, and the brain falls
+        // off the ladder back to navigation.
+        if (kill_tick >= 0 && i > kill_tick + static_cast<int>(10.0 / kDt)) {
+            if (shooter_brain->combat_mode() ==
+                f4::ai::BrainComponent::CombatMode::None) {
+                disengaged_after_kill = true;
+            }
+        }
+    }
+
+    // --- The OODA loop ran on its own --------------------------------------
+    ASSERT_GE(log.launched.size(), 1u) << "the AI never fired";
+    for (const auto& m : log.launched) {
+        EXPECT_EQ(m.shooter_id, shooter_id.value)
+            << "only the radar-tracked shooter may launch (RWR-only "
+               "pictures must not fire)";
+    }
+    EXPECT_LE(log.launched.size(), 2u);  // shoot-shoot doctrine
+    ASSERT_TRUE(shooter_bvr_seen) << "shooter brain never entered BVR";
+    ASSERT_TRUE(shooter_employing_seen)
+        << "shooter never reached the employment state";
+    ASSERT_TRUE(bandit_defense_seen)
+        << "bandit never defended against the incoming AMRAAM";
+
+    // The victim's RWR saw the launch (the defeat trigger).
+    bool bandit_saw_launch = false;
+    for (const auto& w : log.rwr) {
+        if (w.type == sensors::RwrWarningType::Launch &&
+            w.victim_id == bandit_id.value) {
+            bandit_saw_launch = true;
+        }
+    }
+    EXPECT_TRUE(bandit_saw_launch) << "victim RWR never saw the launch";
+
+    // --- The outcome --------------------------------------------------------
+    ASSERT_NE(kill_tick, -1) << "the AI's missile never killed the bandit";
+    ASSERT_GE(log.killed.size(), 1u);
+    for (const auto& k : log.killed) {
+        EXPECT_EQ(k.target_id, bandit_id.value);
+        EXPECT_EQ(k.shooter_id, shooter_id.value);
+    }
+    const auto* dmg = bandit.get<entities::DamageStateComponent>();
+    ASSERT_NE(dmg, nullptr);
+    EXPECT_TRUE(dmg->killed);
+
+    // The shooter survives, holds its damage state, and went home.
+    const auto* shooter_dmg = shooter.get<entities::DamageStateComponent>();
+    ASSERT_NE(shooter_dmg, nullptr);
+    EXPECT_FALSE(shooter_dmg->killed);
+    EXPECT_TRUE(disengaged_after_kill)
+        << "shooter never disengaged after the kill (corpse filter / "
+           "LostTarget not working)";
+
+    // Every missile the AI fired was swept (no live rounds left flying).
+    EXPECT_EQ(weapons::count_live_missiles(sim.world()), 0u);
+}
+
+// ============================================================================
+// 6. The SHIPPED scenario file plays out: the player's bvr_intercept.json
+//    (configured into <build>/scenarios by the root CMakeLists) must load
+//    and produce the same AI-vs-AI engagement the in-memory E2E proved.
+//    This keeps the file the scenario-player actually reads honest — a
+//    typo in the JSON can't hide behind the in-memory test's copy.
+// ============================================================================
+TEST(CombatIntegration, BvrInterceptScenarioFilePlaysOut) {
+#ifdef F4_SCENARIOS_DIR
+    const std::filesystem::path file =
+        std::filesystem::path(F4_SCENARIOS_DIR) / "bvr_intercept.json";
+    if (!std::filesystem::exists(file)) GTEST_SKIP()
+        << "bvr_intercept.json not configured (build it first)";
+
+    const auto scenario = load_scenario(file);
+
+    // The shipped file must ask for the fight.
+    ASSERT_TRUE(scenario.combat.enabled);
+    ASSERT_EQ(scenario.aircraft.size(), 2u);
+    EXPECT_EQ(scenario.aircraft[0].team, "blue");
+    EXPECT_EQ(scenario.aircraft[1].team, "red");
+    EXPECT_EQ(scenario.aircraft[0].callsign, "EAGLE1");
+    EXPECT_EQ(scenario.aircraft[1].callsign, "BANDIT1");
+
+    Simulation sim(scenario, file.parent_path());
+    sim.initialize();
+
+    CombatEventLog log;
+    log.attach(sim.bus());
+
+    const auto shooter_id = sim.aircraft_entities()[0];
+    const auto bandit_id = sim.aircraft_entities()[1];
+
+    // Fly the fight (the in-memory twin resolves in ~60 s; 150 s budget).
+    // After the kill keep flying until the shoot-shoot follow-up missile
+    // is swept too — the in-memory twin asserts the same at 150 s.
+    int kill_tick = -1;
+    const int max_ticks = static_cast<int>(150.0 / kDt);
+    for (int i = 0; i < max_ticks; ++i) {
+        sim.tick(kDt);
+        if (!log.killed.empty() && kill_tick < 0) kill_tick = i;
+        if (kill_tick >= 0 && weapons::count_live_missiles(sim.world()) == 0u) {
+            break;
+        }
+    }
+    ASSERT_NE(kill_tick, -1) << "the shipped scenario's AI never scored a kill";
+    ASSERT_GE(log.launched.size(), 1u);
+    for (const auto& m : log.launched) {
+        EXPECT_EQ(m.shooter_id, shooter_id.value);
+    }
+    for (const auto& k : log.killed) {
+        EXPECT_EQ(k.target_id, bandit_id.value);
+        EXPECT_EQ(k.shooter_id, shooter_id.value);
+    }
+    EXPECT_EQ(weapons::count_live_missiles(sim.world()), 0u);
+#else
+    GTEST_SKIP() << "F4_SCENARIOS_DIR not defined for this target";
+#endif
 }

@@ -303,6 +303,19 @@ void Simulation::spawn_from_scenario_list() {
                                   scenario_.combat.radar_rng_seed,
                                   ac_index,
                                   scenario_.combat.fighter_hit_points);
+
+            // M3 tactics: the brain becomes a fighting brain — the
+            // combat ladder (defensive > BVR > mission) activates and the
+            // BVR fire control gets the table-derived envelope. The
+            // detection policy (radar-truth instead of GCI-omniscience)
+            // is installed on the brain's SensorFusion; the Simulation
+            // owns the policy objects for the world's lifetime.
+            configure_brain_combat(brain, weapon_table_);
+            combat_policies_.push_back(
+                std::make_unique<RadarBackedDetectionPolicy>(
+                    world_, h.id().value));
+            brain.sensors().set_detection_policy(
+                combat_policies_.back().get());
         }
 
         aircraft_entities_.push_back(h.id());
@@ -604,6 +617,18 @@ void Simulation::tick(double dt) {
 
     world_.update_all(dt, bus_);
     bus_.flush_pending();  // drain deferred ATC messages (TaxiClearance, etc.)
+
+    // Combat chain (M3 tactics): execute the combat brains' intents
+    // (radar locks + weapon releases) NOW — after update_all (the brains
+    // produced the intents in pass 1) but before update_rwr, so the
+    // victim's RWR sees the launch warning THIS tick and the defense
+    // starts one tick earlier. launch_missile creates entities outside
+    // update_all (the same rule sweep_spent_missiles follows: never
+    // mutate the world mid-iteration). Commanding STT here takes effect
+    // on the next tick's scan.
+    if (combat_on) {
+        execute_brain_combat_intents(world_, bus_, weapon_table_, t_now);
+    }
 
     // Combat chain (M3): the two world-level sweeps the ECS tick can't run
     // itself (both mutate/iterate the world between ticks, never inside

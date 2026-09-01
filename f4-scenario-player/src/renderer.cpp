@@ -24,6 +24,7 @@
 #include <f4/simulation/visual_model_component.hpp>
 #include <f4/ai/brain_component.hpp>
 #include <f4/entities/entity.hpp>
+#include <f4/sensors/rwr.hpp>              // RwrComponent (combat HUD line)
 #include <f4/flight/flight_model_component.hpp>
 #include <f4/flight/angle.hpp>
 #include <f4/models/model_database.hpp>
@@ -50,6 +51,35 @@ namespace f4::scenario_player {
 // ── Constants ──────────────────────────────────────────────────────────────
 static constexpr Color SKY_COLOR  = {135, 175, 220, 255};  // sky blue
 
+// Combat-view tuning (bvr_intercept):
+//   Missile contrail: one point per rendered frame, newest kept, capped.
+//   900 points ~ 15 s of flight at 60 FPS — the AMRAAM flyout is ~35 s, so
+//   the trail covers the terminal half where the PN pursuit bends.
+//   Missile body: 60-ft cylinder along velocity + 500-ft wire sphere as
+//   the tactical marker (true-scale alone is sub-pixel at 10 NM zoom).
+static constexpr std::size_t kMaxTrailPoints = 900;
+static constexpr float kMissileBodyFt = 60.0f;
+static constexpr float kMissileRingFt = 500.0f;
+
+// ── Watched aircraft (Tab cycles; bvr_intercept has two fighters) ──────────
+
+f4::entities::EntityId PlayerApp::Impl::watched_entity() const noexcept {
+    if (!sim_initialized) return f4::entities::EntityId{};
+    const auto& ids = sim->aircraft_entities();
+    if (ids.empty()) return f4::entities::EntityId{};
+    const std::size_t i = watched_index < ids.size() ? watched_index : ids.size() - 1;
+    return ids[i];
+}
+
+void PlayerApp::Impl::cycle_watched() {
+    if (!sim_initialized) return;
+    const auto n = sim->aircraft_entities().size();
+    if (n < 2) return;  // one (or zero) aircraft — nothing to cycle
+    watched_index = (watched_index + 1) % n;
+    status_msg = "Watching: " + scenario.aircraft[std::min(watched_index,
+        scenario.aircraft.size() - 1)].callsign;
+}
+
 // ── Camera (delegated to f4::renderer::OrbitCamera) ────────────────────────
 
 void PlayerApp::Impl::handle_camera_input() {
@@ -58,6 +88,7 @@ void PlayerApp::Impl::handle_camera_input() {
         if (IsKeyPressed(KEY_F)) fit_to_aircraft();
         if (IsKeyPressed(KEY_C)) { follow_aircraft = !follow_aircraft; status_msg = follow_aircraft ? "Camera: following aircraft" : "Camera: free"; }
         if (IsKeyPressed(KEY_R)) reset_camera();
+        if (IsKeyPressed(KEY_TAB)) cycle_watched();
         if (IsKeyPressed(KEY_SPACE)) {
             paused = !paused;
             status_msg = paused ? "Paused" : "Running";
@@ -66,10 +97,10 @@ void PlayerApp::Impl::handle_camera_input() {
     // Delegate orbit/pan/zoom to OrbitCamera (guards ImGui::WantCaptureMouse internally).
     orbit_cam.handle_input();
 
-    // Follow mode: track the aircraft every frame (position only — the
-    // user keeps orbit control of yaw/pitch/distance around it).
+    // Follow mode: track the WATCHED aircraft every frame (position only —
+    // the user keeps orbit control of yaw/pitch/distance around it).
     if (follow_aircraft && sim_initialized) {
-        auto h = f4::entities::EntityHandle(sim->aircraft_entity(), &sim->world());
+        auto h = f4::entities::EntityHandle(watched_entity(), &sim->world());
         auto* tf = h.get<f4::entities::TransformComponent>();
         if (tf) {
             orbit_cam.set_target(enu_to_raylib_v3(tf->position.x, tf->position.y, tf->position.z));
@@ -80,7 +111,7 @@ void PlayerApp::Impl::handle_camera_input() {
 
 void PlayerApp::Impl::fit_to_aircraft() {
     if (!sim_initialized) return;
-    auto h = f4::entities::EntityHandle(sim->aircraft_entity(), &sim->world());
+    auto h = f4::entities::EntityHandle(watched_entity(), &sim->world());
     auto* tf = h.get<f4::entities::TransformComponent>();
     if (!tf) return;
     const Vector3 target = enu_to_raylib_v3(tf->position.x, tf->position.y, tf->position.z);
@@ -267,7 +298,16 @@ void PlayerApp::Impl::draw_scene() {
     if (sim_initialized && (show_aircraft || show_airport)) {
         const auto entities =
             sim->world().with_component<f4::simulation::VisualModelComponent>();
-        const auto primary_aircraft_id = sim->aircraft_entity();
+        // Toggle gating: SCENARIO AIRCRAFT ↔ show_aircraft (any of them —
+        // bvr_intercept flies two fighters), static features ↔ show_airport.
+        // (Previously "aircraft" meant only the FIRST spawned entity, so
+        // toggling "Show airport" hid the bandit — the wrong toggle.)
+        const auto& aircraft_ids = sim->aircraft_entities();
+        const auto is_scenario_aircraft =
+            [&aircraft_ids](f4::entities::EntityId id) {
+                return std::find(aircraft_ids.begin(), aircraft_ids.end(), id)
+                    != aircraft_ids.end();
+            };
 
         auto& db = const_cast<f4::models::ModelDatabase&>(sim->model_db());
         const auto* base = db.model(0);
@@ -279,9 +319,7 @@ void PlayerApp::Impl::draw_scene() {
             auto* tf  = h.get<f4::entities::TransformComponent>();
             if (!vis || !vis->model_record || !tf) continue;
 
-            // Toggle gating: aircraft ↔ show_aircraft, features ↔
-            // show_airport (everything that isn't the primary aircraft).
-            const bool is_aircraft = (eid.value == primary_aircraft_id.value);
+            const bool is_aircraft = is_scenario_aircraft(eid);
             if (is_aircraft && !show_aircraft) continue;
             if (!is_aircraft && !show_airport) continue;
 
@@ -334,15 +372,23 @@ void PlayerApp::Impl::draw_scene() {
         scene.terrain_mesh = &terrain_mesh;
     }
 
+    // ── Combat view: sample the live missiles' positions (contrails) —
+    // BEFORE render so the trails, bodies, and shot lines drawn inside
+    // the overlay below use this frame's positions.
+    update_missile_trails();
+
     // ── Scenario-specific 3D overlays (inside the 3D mode) ────────────
-    // Taxi route + flight plan + approach + taxi-in + markers + compass.
-    // All drawn via shared draw_layout_line / draw_layout_marker primitives.
-    scene.overlay_3d = [this](const Camera3D&) { draw_airport(); };
+    // Taxi route + flight plan + approach + taxi-in + markers + compass
+    // + the combat view (missile bodies, contrails, guidance lines).
+    // All drawn via shared draw_layout_line / draw_layout_marker primitives
+    // (the combat view uses Raylib DrawLine3D/DrawCylinderEx directly).
+    scene.overlay_3d = [this](const Camera3D&) { draw_airport(); draw_missiles(); };
 
     f4::renderer::render_world(render_res, scene);
 
     draw_hud();
     draw_radio();
+    draw_combat();
 }
 
 void PlayerApp::Impl::draw_hud() {
@@ -368,8 +414,8 @@ void PlayerApp::Impl::draw_hud() {
                       paused ? "PAUSED" : "RUNNING", GetFPS());
         lines.emplace_back(buf);
 
-        // Aircraft state
-        auto h = f4::entities::EntityHandle(sim->aircraft_entity(), &sim->world());
+        // Aircraft state — the WATCHED aircraft (Tab cycles).
+        auto h = f4::entities::EntityHandle(watched_entity(), &sim->world());
         auto* fm = h.get<f4::flight::FlightModelComponent>();
         if (fm) {
             const auto& s = fm->state();
@@ -405,10 +451,27 @@ void PlayerApp::Impl::draw_hud() {
             lines.emplace_back(buf);
         }
 
+        // Combat picture of the watched jet (bvr_intercept): RWR state
+        // + the live-missile count. "MISSILE LAUNCH" is the RWR's active
+        // launch flag — the same trigger the MissileModule defends on.
+        if (scenario.combat.enabled) {
+            const auto* rwr = h.get<f4::sensors::RwrComponent>();
+            const char* rwr_state = "clear";
+            if (rwr && rwr->launch_active)      rwr_state = "MISSILE LAUNCH!";
+            else if (rwr && rwr->lock_active)   rwr_state = "SPIKE (locked)";
+            std::snprintf(buf, sizeof(buf), "RWR: %s   Live missiles: %zu",
+                          rwr_state,
+                          f4::weapons::count_live_missiles(sim->world()));
+            lines.emplace_back(buf);
+        }
+
         if (!scenario.aircraft.empty()) {
-            std::snprintf(buf, sizeof(buf), "Callsign: %s   (%s)",
-                          scenario.aircraft.front().callsign.c_str(),
-                          scenario.aircraft.front().aircraft_name.c_str());
+            const std::size_t wi =
+                watched_index < scenario.aircraft.size() ? watched_index : 0;
+            std::snprintf(buf, sizeof(buf), "Callsign: %s   (%s)%s",
+                          scenario.aircraft[wi].callsign.c_str(),
+                          scenario.aircraft[wi].aircraft_name.c_str(),
+                          scenario.aircraft.size() > 1 ? "   [Tab: cycle]" : "");
             lines.emplace_back(buf);
         }
     }
@@ -420,7 +483,7 @@ void PlayerApp::Impl::draw_hud() {
 
     // Controls hint
     lines.emplace_back("");
-    lines.emplace_back("Space: pause/resume   F: focus aircraft   R: reset view   F3: FCS HUD");
+    lines.emplace_back("Space: pause/resume   F: focus aircraft   R: reset view   Tab: watched   F3: FCS HUD");
 
     int max_w = 0;
     for (const auto& line : lines) {
@@ -452,7 +515,7 @@ void PlayerApp::Impl::draw_hud() {
 }
 
 void PlayerApp::Impl::draw_fcs_hud() {
-    auto h = f4::entities::EntityHandle(sim->aircraft_entity(), &sim->world());
+    auto h = f4::entities::EntityHandle(watched_entity(), &sim->world());
     auto* fm = h.get<f4::flight::FlightModelComponent>();
     if (!fm) return;
 
@@ -542,7 +605,7 @@ void PlayerApp::Impl::draw_fcs_hud() {
 // ============================================================================
 
 void PlayerApp::Impl::draw_radio() {
-    if (!show_radio || !sim_initialized) return;
+    if (!show_radio || !sim_initialized) { last_radio_h = 0; return; }
 
     // Show the most recent transmissions (newest at the bottom).
     constexpr std::size_t MAX_SHOWN = 9;
@@ -560,7 +623,7 @@ void PlayerApp::Impl::draw_radio() {
         const int w = MeasureText(line, 13);
         if (w > max_w) max_w = w;
     }
-    if (max_w == 0) return;
+    if (max_w == 0) { last_radio_h = 0; return; }
 
     const int pad = 8;
     const int line_h = 17;
@@ -569,6 +632,7 @@ void PlayerApp::Impl::draw_radio() {
     const int bg_h = shown * line_h + pad * 2 + 18;  // + header line
     const int x = window_w - bg_w - 12;
     const int y = 12;
+    last_radio_h = bg_h;   // anchors the COMBAT panel below this one
 
     DrawRectangle(x, y, bg_w, bg_h, {0, 0, 0, 170});
     DrawRectangleLines(x, y, bg_w, bg_h, {255, 255, 255, 70});
@@ -584,6 +648,170 @@ void PlayerApp::Impl::draw_radio() {
         DrawText(line, x + pad, line_y, 13,
                  e->from_atc ? Color{140, 230, 140, 255}   // tower = green
                              : Color{235, 235, 235, 255}); // pilot = white
+        line_y += line_h;
+    }
+}
+
+// ============================================================================
+// Combat view (bvr_intercept) — contrails, missile bodies, guidance lines
+// ============================================================================
+//
+// Missiles are ECS entities like the jets, but they carry no
+// VisualModelComponent (no KoreaObj record is bound at launch) — so they
+// are NOT drawn by render_world()'s mesh path. They get a procedural
+// draw here instead: a small bright cylinder body along the velocity
+// vector + a wire-sphere tactical marker + the contrail sampled by
+// update_missile_trails() + a thin red line to the assigned target that
+// makes the proportional-navigation pursuit visible.
+
+void PlayerApp::Impl::update_missile_trails() {
+    if (!sim_initialized) { missile_trails.clear(); return; }
+
+    // Sample the live missiles' positions (one point per rendered frame —
+    // cosmetic, so speed > 1x stretches the sampled spacing, which reads
+    // naturally as "faster"). Skipped while paused (no movement —
+    // appending would pile duplicate points).
+    std::vector<std::uint64_t> live;
+    if (scenario.combat.enabled && show_combat && !paused) {
+        for (const auto eid :
+             sim->world().with_component<f4::weapons::MissileComponent>()) {
+            auto h = f4::entities::EntityHandle(eid, &sim->world());
+            auto* tf = h.get<f4::entities::TransformComponent>();
+            if (!tf) continue;
+            live.push_back(eid.value);
+            auto& trail = missile_trails[eid.value];
+            trail.points.push_back(
+                enu_to_raylib_v3(tf->position.x, tf->position.y, tf->position.z));
+            if (trail.points.size() > kMaxTrailPoints) {
+                trail.points.erase(trail.points.begin());
+            }
+        }
+    }
+
+    // Drop the trails of missiles that are gone (swept after
+    // detonation/expiry) — also clears everything when combat is toggled
+    // off, since `live` is empty then.
+    for (auto it = missile_trails.begin(); it != missile_trails.end();) {
+        if (std::find(live.begin(), live.end(), it->first) == live.end()) {
+            it = missile_trails.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+void PlayerApp::Impl::draw_missiles() {
+    if (!sim_initialized || !show_combat || !scenario.combat.enabled) return;
+
+    for (const auto eid :
+         sim->world().with_component<f4::weapons::MissileComponent>()) {
+        auto h = f4::entities::EntityHandle(eid, &sim->world());
+        auto* tf = h.get<f4::entities::TransformComponent>();
+        auto* mc = h.get<f4::weapons::MissileComponent>();
+        if (!tf || !mc) continue;
+
+        const Vector3 pos =
+            enu_to_raylib_v3(tf->position.x, tf->position.y, tf->position.z);
+
+        // Guidance line to the assigned target — the PN pursuit made
+        // visible (fades as the seeker closes: shorter line, tighter bend).
+        if (mc->target_id != 0) {
+            auto tgt = f4::entities::EntityHandle(
+                f4::entities::EntityId{mc->target_id}, &sim->world());
+            if (const auto* ttf = tgt.get<f4::entities::TransformComponent>()) {
+                const Vector3 tpos = enu_to_raylib_v3(
+                    ttf->position.x, ttf->position.y, ttf->position.z);
+                DrawLine3D(pos, tpos, Color{255, 70, 70, 70});
+            }
+        }
+
+        // Contrail (fading white — newest segments bright, oldest faint).
+        if (const auto it = missile_trails.find(eid.value);
+            it != missile_trails.end()) {
+            const auto& pts = it->second.points;
+            for (std::size_t i = 1; i < pts.size(); ++i) {
+                const float age =
+                    static_cast<float>(pts.size() - i) /
+                    static_cast<float>(pts.size());  // 0 = new, 1 = old
+                const unsigned char alpha =
+                    static_cast<unsigned char>(200 * (1.0f - age) + 25);
+                DrawLine3D(pts[i - 1], pts[i],
+                           Color{235, 235, 235, alpha});
+            }
+        }
+
+        // Body: thin bright cylinder along the velocity vector (true-ish
+        // scale — visible once you zoom in on the merge).
+        const Vector3 vel = enu_to_raylib_v3(tf->vx, tf->vy, tf->vz);
+        if (Vector3Length(vel) > 1.0f) {
+            const Vector3 tail = Vector3Subtract(
+                pos, Vector3Scale(Vector3Normalize(vel), kMissileBodyFt));
+            DrawCylinderEx(tail, pos, 3.0f, 1.0f, 8, Color{255, 235, 120, 220});
+        }
+
+        // Tactical marker: wire sphere big enough to see at BVR zoom.
+        DrawSphereWires(pos, kMissileRingFt, 10, 10, Color{255, 240, 130, 160});
+    }
+}
+
+// ============================================================================
+// COMBAT transcript — brevity panel under the ATC radio (top-right)
+// ============================================================================
+//
+// Draws the CombatTranscript ring (the M4 observability piece maintained
+// by f4-simulation): radar contacts, spikes, FOX calls, splash. Severity
+// drives the color: Info = white, Warning = amber, Kill = red.
+
+void PlayerApp::Impl::draw_combat() {
+    if (!show_combat || !sim_initialized) return;
+
+    constexpr std::size_t MAX_SHOWN = 10;
+    const std::size_t n = combat_log.size();
+    if (n == 0) return;
+    const std::size_t first = n > MAX_SHOWN ? n - MAX_SHOWN : 0;
+
+    // Measure the widest line so the panel fits its content.
+    int max_w = 0;
+    for (std::size_t i = first; i < n; ++i) {
+        const auto* e = combat_log.at(i);
+        if (!e) continue;
+        char line[320];
+        std::snprintf(line, sizeof(line), "T+%06.1f  %s: %s", e->time_s,
+                      e->speaker.c_str(), e->text.c_str());
+        const int w = MeasureText(line, 13);
+        if (w > max_w) max_w = w;
+    }
+    if (max_w == 0) return;
+
+    const int pad = 8;
+    const int line_h = 17;
+    const int shown = static_cast<int>(n - first);
+    const int bg_w = max_w + pad * 2;
+    const int bg_h = shown * line_h + pad * 2 + 18;  // + header line
+    // Anchor under the ATC panel when it's visible; top-right otherwise.
+    const int x = window_w - bg_w - 12;
+    const int y = 12 + last_radio_h + 8;
+
+    DrawRectangle(x, y, bg_w, bg_h, {10, 0, 0, 175});
+    DrawRectangleLines(x, y, bg_w, bg_h, {255, 90, 90, 90});
+    DrawText("COMBAT", x + pad, y + pad, 13, {255, 120, 120, 255});
+
+    int line_y = y + pad + 18;
+    for (std::size_t i = first; i < n; ++i) {
+        const auto* e = combat_log.at(i);
+        if (!e) continue;
+        char line[320];
+        std::snprintf(line, sizeof(line), "T+%06.1f  %s: %s", e->time_s,
+                      e->speaker.c_str(), e->text.c_str());
+        Color c = {235, 235, 235, 255};                      // Info = white
+        if (e->severity ==
+            f4::simulation::CombatTranscript::Severity::Warning) {
+            c = Color{255, 205, 90, 255};                    // Warning = amber
+        } else if (e->severity ==
+                   f4::simulation::CombatTranscript::Severity::Kill) {
+            c = Color{255, 95, 95, 255};                     // Kill = red
+        }
+        DrawText(line, x + pad, line_y, 13, c);
         line_y += line_h;
     }
 }

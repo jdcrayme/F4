@@ -109,6 +109,7 @@ set(F4_SCENARIO_TEMPLATES
     f4-scenario-player/scenarios/closed_traffic.json.in
     f4-scenario-player/scenarios/course_intercept.json.in
     f4-scenario-player/scenarios/standard_rate_turn.json.in
+    f4-scenario-player/scenarios/bvr_intercept.json.in
 )
 foreach(template ${F4_SCENARIO_TEMPLATES})
     get_filename_component(scenario_name ${template} NAME_WE)

@@ -42,6 +42,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <vector>
 
 #include "f4/simulation/scenario.hpp"
 
@@ -52,7 +53,8 @@ namespace f4::recorder { class FlightRecorder; class FcsTraceWriter; }
 
 namespace f4::simulation {
 
-class BubbleManager;  // forward declaration — defined in bubble_manager.hpp
+class BubbleManager;   // forward declaration — defined in bubble_manager.hpp
+class RadarBackedDetectionPolicy;  // combat_policies_ storage (combat_bridge.hpp)
 
 /// Simulation owns the EntityWorld + MessageBus + ModelDatabase + AircraftConfig
 /// registry and runs the tick loop. NO rendering — that's the executable's job.
@@ -216,6 +218,12 @@ private:
     // Combat chain (M3): weapon class data for launch_missile + the
     // component attachment at spawn. Built-in table; WST import later.
     f4::weapons::WeaponClassTable weapon_table_{};
+
+    // M3 tactics: one detection policy per spawned combat aircraft,
+    // installed on that aircraft brain's SensorFusion at spawn. The
+    // Simulation owns them for the world's lifetime (the policy contract
+    // is non-owning — see SensorFusion::set_detection_policy).
+    std::vector<std::unique_ptr<RadarBackedDetectionPolicy>> combat_policies_{};
 
     // Phase 2: replaced the single `aircraft_entity_` with a vector. The
     // Phase 1 spawn path (scenario_list) pushes one entry; the Phase 2 path

@@ -1,0 +1,1384 @@
+diff --git a/CHANGES.md b/CHANGES.md
+index 8b987b1..9a1d5bf 100644
+--- a/CHANGES.md
++++ b/CHANGES.md
+@@ -1,5 +1,36 @@
+ # F4 Cleanup Pass — Changes Summary
+ 
++## BVR Intercept Scenario — The Fight You Can Watch (M4-SCENARIO-1)
++
++**The AI-vs-AI BVR engagement is now a scenario you can fly as a spectator:
++`scenarios/bvr_intercept.json` spawns EAGLE1 (blue) vs BANDIT1 (red), both
++brains fight autonomously through the M3 chain, and the scenario-player
++renders the whole thing — missiles with contrails and pursuit lines, a
++brevity COMBAT transcript (FOX 3 / spike / splash), the watched aircraft's
++RWR picture, and a Tab key to switch which jet you ride with. The engine
++side of the observability is a new engine-agnostic `CombatTranscript` in
++f4-simulation (headless-tested), so the narration exists with or without a
++window.**
++
++| Area | Change |
++|------|--------|
++| `f4-simulation` — CombatTranscript (new) | Subscribes to the combat bus transitions (radar acquire/drop, RWR lock/launch, missile launch/detonate, damage, kill) and formats them as brevity radio calls into a ring buffer: `"EAGLE1: FOX 3, AIM-120C away on BANDIT1."`, `"BANDIT1: Spike from EAGLE1, 13 NM."`, `"C2: Splash BANDIT1!"`. Callsigns resolve via the `aircraft_entities()` ↔ `scenario().aircraft` index map; launch brevity follows the weapon's guidance kind (`missile_brevity_word()`: ActiveRadar→FOX 3, SemiActiveRadar→FOX 1, Ir→FOX 2). Severity (Info/Warning/Kill) ships on every entry for hosts to color-code. Engine-agnostic: no renderer, no window — tested headless. |
++| `f4-scenario-player` — scenario | New `scenarios/bvr_intercept.json.in` (registered in the root CMake template list): two spawn-in-air F-16s, blue 506 kt 13 NM behind red 420 kt, both northbound — the same deterministic stern-chase geometry the M3 E2E test proves (detection inside the Pd=1 knee, AMRAAM flyout, kill, disengage). `combat: {enabled: true, radar_rng_seed: 777}`. 10-minute tick budget; the fight resolves in ~1-2. |
++| `f4-scenario-player` — combat view | Missiles render procedurally (they carry no KoreaObj visual record): a bright cylinder body along the velocity vector, a 500-ft wire-sphere tactical marker (visible at BVR zoom), a fading contrail sampled once per frame (900 points ≈ 15 s), and a thin red line to the assigned target that makes the proportional-navigation pursuit visible. A **COMBAT** panel under the ATC transcript draws the CombatTranscript entries color-coded by severity (white/amber/red). |
++| `f4-scenario-player` — watched aircraft | The HUD, follow camera (C), focus (F), and FCS panel (F3) now track the **watched** aircraft instead of always the first: **Tab** cycles (bvr_intercept: EAGLE1 ↔ BANDIT1), an ImGui "Watched" combo does the same. The HUD gains an RWR line (`clear` / `SPIKE (locked)` / `MISSILE LAUNCH!` — the same flag the MissileModule defends on) and a live-missile count for combat scenarios. Also fixed: non-primary *scenario aircraft* were gated by the "Show airport" toggle (the bandit disappeared with the runway); aircraft-vs-feature gating now uses the `aircraft_entities()` list. |
++| Tests | 4 new (suite **1,577/1,577 — 100%**): 3× CombatTranscript (brevity-word mapping, ring-buffer + callsign fallback + capacity/clear semantics, and a full E2E narration of the AI-vs-AI fight — every link from radar contact to splash asserted on the transcript), plus **BvrInterceptScenarioFilePlaysOut**: loads the *shipped, build-configured* `scenarios/bvr_intercept.json` (not an in-memory copy), flies it, and asserts launch → kill → attribution → missile sweep, so a typo in the file the player actually reads can never hide behind the in-memory test. |
++
++**How to watch the fight** (needs a build with the scenario player on —
++X11/OpenGL, unlike the headless CI):
++
++```
++f4-scenario-player <build>/scenarios/bvr_intercept.json --run --follow --camera-distance 12000
++```
++
++Space pauses, Tab flips between EAGLE1 and BANDIT1, the speed slider
++fast-forwards the boring transit, and the COMBAT panel (top-right) narrates.
++The scenario starts PAUSED without `--run`.
++
+ ## M3 Tactics — The AI Fights (M3-TACTICS-1)
+ 
+ **The brains now fight the war themselves: BVRModule engages, MissileModule
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 6c064d1..9bea9bb 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -109,6 +109,7 @@ set(F4_SCENARIO_TEMPLATES
+     f4-scenario-player/scenarios/closed_traffic.json.in
+     f4-scenario-player/scenarios/course_intercept.json.in
+     f4-scenario-player/scenarios/standard_rate_turn.json.in
++    f4-scenario-player/scenarios/bvr_intercept.json.in
+ )
+ foreach(template ${F4_SCENARIO_TEMPLATES})
+     get_filename_component(scenario_name ${template} NAME_WE)
+diff --git a/f4-scenario-player/cli/main.cpp b/f4-scenario-player/cli/main.cpp
+index 3886fdf..69e3b0f 100644
+--- a/f4-scenario-player/cli/main.cpp
++++ b/f4-scenario-player/cli/main.cpp
+@@ -66,7 +66,8 @@ int main(int argc, char** argv) {
+                 "Controls:\n"
+                 "  Left-drag: orbit     Right-drag: pan     Scroll: zoom\n"
+                 "  Space: pause/resume  F: focus aircraft   R: reset view\n"
+-                "  F2: screenshot\n";
++                "  Tab: cycle watched aircraft (bvr_intercept: EAGLE1/BANDIT1)\n"
++                "  C: follow watched aircraft   F2: screenshot\n";
+             return 0;
+         } else if (scenario_path.empty()) {
+             scenario_path = a;
+diff --git a/f4-scenario-player/scenarios/bvr_intercept.json.in b/f4-scenario-player/scenarios/bvr_intercept.json.in
+new file mode 100644
+index 0000000..9448d6e
+--- /dev/null
++++ b/f4-scenario-player/scenarios/bvr_intercept.json.in
+@@ -0,0 +1,55 @@
++{
++  "name": "bvr_intercept",
++  "theater": "korea",
++  "terrain_json_path": "@F4_BINARY_DIR@/korea.terrain.json",
++  "theater_dir": "@F4_SCENARIO_THEATER_DIR@",
++  "models_hdr_path": "@F4_SOURCE_DIR@/temp/KoreaObj.HDR",
++  "models_lod_path": "@F4_SOURCE_DIR@/temp/KoreaObj.LOD",
++  "models_tex_path": "@F4_SOURCE_DIR@/temp/KoreaObj.TEX",
++  "aircraft": [
++    {
++      "callsign": "EAGLE1",
++      "aircraft_config_path": "@F4_BINARY_DIR@/generated_fixtures/f16.json",
++      "aircraft_name": "F-16C_50",
++      "vis_type_index": 1052,
++      "parking_spot": { "x": 0.0, "y": 0.0, "z": 10000.0 },
++      "heading_rad": 0.0,
++      "initial_fuel_lbs": 6500.0,
++      "initial_vt_fps": 506.0,
++      "spawn_in_air": true,
++      "team": "blue"
++    },
++    {
++      "callsign": "BANDIT1",
++      "aircraft_config_path": "@F4_BINARY_DIR@/generated_fixtures/f16.json",
++      "aircraft_name": "F-16C_50",
++      "vis_type_index": 1052,
++      "parking_spot": { "x": 0.0, "y": 80000.0, "z": 10000.0 },
++      "heading_rad": 0.0,
++      "initial_fuel_lbs": 6500.0,
++      "initial_vt_fps": 420.0,
++      "spawn_in_air": true,
++      "team": "red"
++    }
++  ],
++  "airfield": {
++    "active_runway_id": 36,
++    "active_runway_name": "Rwy 36",
++    "runway_heading_rad": 0.0,
++    "threshold_position": { "x": 0.0, "y": -5000.0, "z": 0.0 },
++    "runway_end_position":  { "x": 0.0, "y": 5000.0, "z": 0.0 },
++    "threshold_altitude_ft": 0.0,
++    "departure_altitude_ft": 10000.0,
++    "taxi_route": [ { "x": 0.0, "y": -5000.0, "z": 0.0 },
++                    { "x": 0.0, "y": 0.0, "z": 0.0 } ]
++  },
++  "waypoints": [
++    { "name": "FAR_NORTH", "position": { "x": 0.0, "y": 500000.0, "z": 10000.0 },
++      "speed_kts": 420.0 }
++  ],
++  "start_enroute": true,
++  "sim_dt": 0.016666666666666,
++  "total_ticks": 36000,
++  "record": false,
++  "combat": { "enabled": true, "radar_rng_seed": 777 }
++}
+diff --git a/f4-scenario-player/src/player_app.cpp b/f4-scenario-player/src/player_app.cpp
+index e46f563..fe5c425 100644
+--- a/f4-scenario-player/src/player_app.cpp
++++ b/f4-scenario-player/src/player_app.cpp
+@@ -73,6 +73,12 @@ void PlayerApp::load_scenario(const std::filesystem::path& json_path) {
+     // Observe the ATC traffic for the radio transcript overlay.
+     impl_->radio_log.attach(*impl_->sim);
+ 
++    // Observe the combat traffic for the COMBAT brevity panel (M4
++    // observability). Attach runs for every scenario — the callsign map
++    // is useful even without combat, and the bus stays silent when
++    // combat is disabled.
++    impl_->combat_log.attach(*impl_->sim);
++
+     // Load terrain (Path B1). The scenario's terrain_json_path points at
+     // a korea.terrain.json (produced by f4-terrain-convert). When present,
+     // we load it, register a TerrainDataAdapter with the sim (so the FM's
+@@ -345,6 +351,27 @@ void PlayerApp::run() {
+         if (ImGui::Button("Focus Aircraft (F)")) impl_->fit_to_aircraft();
+         ImGui::Checkbox("Follow aircraft (C)", &impl_->follow_aircraft);
+         ImGui::Separator();
++        // Watched aircraft — which jet the HUD / follow camera / F-focus
++        // track. bvr_intercept flies two fighters; Tab cycles.
++        if (impl_->scenario.aircraft.size() > 1) {
++            const std::size_t wi = impl_->watched_index <
++                impl_->scenario.aircraft.size() ? impl_->watched_index : 0;
++            if (ImGui::BeginCombo("Watched",
++                    impl_->scenario.aircraft[wi].callsign.c_str())) {
++                for (std::size_t i = 0;
++                     i < impl_->scenario.aircraft.size(); ++i) {
++                    const bool selected = (i == impl_->watched_index);
++                    if (ImGui::Selectable(
++                            impl_->scenario.aircraft[i].callsign.c_str(),
++                            selected)) {
++                        impl_->watched_index = i;
++                    }
++                    if (selected) ImGui::SetItemDefaultFocus();
++                }
++                ImGui::EndCombo();
++            }
++        }
++        ImGui::Separator();
+         // Sim speed: scales the WALL-CLOCK time fed into the
+         // fixed-timestep accumulator (0.1x taxi inspection .. 10x
+         // fast-forward). The tick dt is always scenario.sim_dt, so the
+@@ -374,6 +401,9 @@ void PlayerApp::run() {
+         ImGui::Checkbox("Show approach", &impl_->show_approach);
+         ImGui::Checkbox("Show taxi-in route", &impl_->show_taxi_in);
+         ImGui::Checkbox("Show radio log", &impl_->show_radio);
++        if (impl_->scenario.combat.enabled) {
++            ImGui::Checkbox("Show combat view", &impl_->show_combat);
++        }
+         ImGui::Checkbox("Show compass", &impl_->show_compass);
+         ImGui::Checkbox("Show grid", &impl_->show_grid);
+         ImGui::Checkbox("Show axes", &impl_->show_axes);
+diff --git a/f4-scenario-player/src/renderer.cpp b/f4-scenario-player/src/renderer.cpp
+index e2fb8cc..be4c565 100644
+--- a/f4-scenario-player/src/renderer.cpp
++++ b/f4-scenario-player/src/renderer.cpp
+@@ -24,6 +24,7 @@
+ #include <f4/simulation/visual_model_component.hpp>
+ #include <f4/ai/brain_component.hpp>
+ #include <f4/entities/entity.hpp>
++#include <f4/sensors/rwr.hpp>              // RwrComponent (combat HUD line)
+ #include <f4/flight/flight_model_component.hpp>
+ #include <f4/flight/angle.hpp>
+ #include <f4/models/model_database.hpp>
+@@ -50,6 +51,35 @@ namespace f4::scenario_player {
+ // ── Constants ──────────────────────────────────────────────────────────────
+ static constexpr Color SKY_COLOR  = {135, 175, 220, 255};  // sky blue
+ 
++// Combat-view tuning (bvr_intercept):
++//   Missile contrail: one point per rendered frame, newest kept, capped.
++//   900 points ~ 15 s of flight at 60 FPS — the AMRAAM flyout is ~35 s, so
++//   the trail covers the terminal half where the PN pursuit bends.
++//   Missile body: 60-ft cylinder along velocity + 500-ft wire sphere as
++//   the tactical marker (true-scale alone is sub-pixel at 10 NM zoom).
++static constexpr std::size_t kMaxTrailPoints = 900;
++static constexpr float kMissileBodyFt = 60.0f;
++static constexpr float kMissileRingFt = 500.0f;
++
++// ── Watched aircraft (Tab cycles; bvr_intercept has two fighters) ──────────
++
++f4::entities::EntityId PlayerApp::Impl::watched_entity() const noexcept {
++    if (!sim_initialized) return f4::entities::EntityId{};
++    const auto& ids = sim->aircraft_entities();
++    if (ids.empty()) return f4::entities::EntityId{};
++    const std::size_t i = watched_index < ids.size() ? watched_index : ids.size() - 1;
++    return ids[i];
++}
++
++void PlayerApp::Impl::cycle_watched() {
++    if (!sim_initialized) return;
++    const auto n = sim->aircraft_entities().size();
++    if (n < 2) return;  // one (or zero) aircraft — nothing to cycle
++    watched_index = (watched_index + 1) % n;
++    status_msg = "Watching: " + scenario.aircraft[std::min(watched_index,
++        scenario.aircraft.size() - 1)].callsign;
++}
++
+ // ── Camera (delegated to f4::renderer::OrbitCamera) ────────────────────────
+ 
+ void PlayerApp::Impl::handle_camera_input() {
+@@ -58,6 +88,7 @@ void PlayerApp::Impl::handle_camera_input() {
+         if (IsKeyPressed(KEY_F)) fit_to_aircraft();
+         if (IsKeyPressed(KEY_C)) { follow_aircraft = !follow_aircraft; status_msg = follow_aircraft ? "Camera: following aircraft" : "Camera: free"; }
+         if (IsKeyPressed(KEY_R)) reset_camera();
++        if (IsKeyPressed(KEY_TAB)) cycle_watched();
+         if (IsKeyPressed(KEY_SPACE)) {
+             paused = !paused;
+             status_msg = paused ? "Paused" : "Running";
+@@ -66,10 +97,10 @@ void PlayerApp::Impl::handle_camera_input() {
+     // Delegate orbit/pan/zoom to OrbitCamera (guards ImGui::WantCaptureMouse internally).
+     orbit_cam.handle_input();
+ 
+-    // Follow mode: track the aircraft every frame (position only — the
+-    // user keeps orbit control of yaw/pitch/distance around it).
++    // Follow mode: track the WATCHED aircraft every frame (position only —
++    // the user keeps orbit control of yaw/pitch/distance around it).
+     if (follow_aircraft && sim_initialized) {
+-        auto h = f4::entities::EntityHandle(sim->aircraft_entity(), &sim->world());
++        auto h = f4::entities::EntityHandle(watched_entity(), &sim->world());
+         auto* tf = h.get<f4::entities::TransformComponent>();
+         if (tf) {
+             orbit_cam.set_target(enu_to_raylib_v3(tf->position.x, tf->position.y, tf->position.z));
+@@ -80,7 +111,7 @@ void PlayerApp::Impl::handle_camera_input() {
+ 
+ void PlayerApp::Impl::fit_to_aircraft() {
+     if (!sim_initialized) return;
+-    auto h = f4::entities::EntityHandle(sim->aircraft_entity(), &sim->world());
++    auto h = f4::entities::EntityHandle(watched_entity(), &sim->world());
+     auto* tf = h.get<f4::entities::TransformComponent>();
+     if (!tf) return;
+     const Vector3 target = enu_to_raylib_v3(tf->position.x, tf->position.y, tf->position.z);
+@@ -267,7 +298,16 @@ void PlayerApp::Impl::draw_scene() {
+     if (sim_initialized && (show_aircraft || show_airport)) {
+         const auto entities =
+             sim->world().with_component<f4::simulation::VisualModelComponent>();
+-        const auto primary_aircraft_id = sim->aircraft_entity();
++        // Toggle gating: SCENARIO AIRCRAFT ↔ show_aircraft (any of them —
++        // bvr_intercept flies two fighters), static features ↔ show_airport.
++        // (Previously "aircraft" meant only the FIRST spawned entity, so
++        // toggling "Show airport" hid the bandit — the wrong toggle.)
++        const auto& aircraft_ids = sim->aircraft_entities();
++        const auto is_scenario_aircraft =
++            [&aircraft_ids](f4::entities::EntityId id) {
++                return std::find(aircraft_ids.begin(), aircraft_ids.end(), id)
++                    != aircraft_ids.end();
++            };
+ 
+         auto& db = const_cast<f4::models::ModelDatabase&>(sim->model_db());
+         const auto* base = db.model(0);
+@@ -279,9 +319,7 @@ void PlayerApp::Impl::draw_scene() {
+             auto* tf  = h.get<f4::entities::TransformComponent>();
+             if (!vis || !vis->model_record || !tf) continue;
+ 
+-            // Toggle gating: aircraft ↔ show_aircraft, features ↔
+-            // show_airport (everything that isn't the primary aircraft).
+-            const bool is_aircraft = (eid.value == primary_aircraft_id.value);
++            const bool is_aircraft = is_scenario_aircraft(eid);
+             if (is_aircraft && !show_aircraft) continue;
+             if (!is_aircraft && !show_airport) continue;
+ 
+@@ -334,15 +372,23 @@ void PlayerApp::Impl::draw_scene() {
+         scene.terrain_mesh = &terrain_mesh;
+     }
+ 
++    // ── Combat view: sample the live missiles' positions (contrails) —
++    // BEFORE render so the trails, bodies, and shot lines drawn inside
++    // the overlay below use this frame's positions.
++    update_missile_trails();
++
+     // ── Scenario-specific 3D overlays (inside the 3D mode) ────────────
+-    // Taxi route + flight plan + approach + taxi-in + markers + compass.
+-    // All drawn via shared draw_layout_line / draw_layout_marker primitives.
+-    scene.overlay_3d = [this](const Camera3D&) { draw_airport(); };
++    // Taxi route + flight plan + approach + taxi-in + markers + compass
++    // + the combat view (missile bodies, contrails, guidance lines).
++    // All drawn via shared draw_layout_line / draw_layout_marker primitives
++    // (the combat view uses Raylib DrawLine3D/DrawCylinderEx directly).
++    scene.overlay_3d = [this](const Camera3D&) { draw_airport(); draw_missiles(); };
+ 
+     f4::renderer::render_world(render_res, scene);
+ 
+     draw_hud();
+     draw_radio();
++    draw_combat();
+ }
+ 
+ void PlayerApp::Impl::draw_hud() {
+@@ -368,8 +414,8 @@ void PlayerApp::Impl::draw_hud() {
+                       paused ? "PAUSED" : "RUNNING", GetFPS());
+         lines.emplace_back(buf);
+ 
+-        // Aircraft state
+-        auto h = f4::entities::EntityHandle(sim->aircraft_entity(), &sim->world());
++        // Aircraft state — the WATCHED aircraft (Tab cycles).
++        auto h = f4::entities::EntityHandle(watched_entity(), &sim->world());
+         auto* fm = h.get<f4::flight::FlightModelComponent>();
+         if (fm) {
+             const auto& s = fm->state();
+@@ -405,10 +451,27 @@ void PlayerApp::Impl::draw_hud() {
+             lines.emplace_back(buf);
+         }
+ 
++        // Combat picture of the watched jet (bvr_intercept): RWR state
++        // + the live-missile count. "MISSILE LAUNCH" is the RWR's active
++        // launch flag — the same trigger the MissileModule defends on.
++        if (scenario.combat.enabled) {
++            const auto* rwr = h.get<f4::sensors::RwrComponent>();
++            const char* rwr_state = "clear";
++            if (rwr && rwr->launch_active)      rwr_state = "MISSILE LAUNCH!";
++            else if (rwr && rwr->lock_active)   rwr_state = "SPIKE (locked)";
++            std::snprintf(buf, sizeof(buf), "RWR: %s   Live missiles: %zu",
++                          rwr_state,
++                          f4::weapons::count_live_missiles(sim->world()));
++            lines.emplace_back(buf);
++        }
++
+         if (!scenario.aircraft.empty()) {
+-            std::snprintf(buf, sizeof(buf), "Callsign: %s   (%s)",
+-                          scenario.aircraft.front().callsign.c_str(),
+-                          scenario.aircraft.front().aircraft_name.c_str());
++            const std::size_t wi =
++                watched_index < scenario.aircraft.size() ? watched_index : 0;
++            std::snprintf(buf, sizeof(buf), "Callsign: %s   (%s)%s",
++                          scenario.aircraft[wi].callsign.c_str(),
++                          scenario.aircraft[wi].aircraft_name.c_str(),
++                          scenario.aircraft.size() > 1 ? "   [Tab: cycle]" : "");
+             lines.emplace_back(buf);
+         }
+     }
+@@ -420,7 +483,7 @@ void PlayerApp::Impl::draw_hud() {
+ 
+     // Controls hint
+     lines.emplace_back("");
+-    lines.emplace_back("Space: pause/resume   F: focus aircraft   R: reset view   F3: FCS HUD");
++    lines.emplace_back("Space: pause/resume   F: focus aircraft   R: reset view   Tab: watched   F3: FCS HUD");
+ 
+     int max_w = 0;
+     for (const auto& line : lines) {
+@@ -452,7 +515,7 @@ void PlayerApp::Impl::draw_hud() {
+ }
+ 
+ void PlayerApp::Impl::draw_fcs_hud() {
+-    auto h = f4::entities::EntityHandle(sim->aircraft_entity(), &sim->world());
++    auto h = f4::entities::EntityHandle(watched_entity(), &sim->world());
+     auto* fm = h.get<f4::flight::FlightModelComponent>();
+     if (!fm) return;
+ 
+@@ -542,7 +605,7 @@ void PlayerApp::Impl::draw_fcs_hud() {
+ // ============================================================================
+ 
+ void PlayerApp::Impl::draw_radio() {
+-    if (!show_radio || !sim_initialized) return;
++    if (!show_radio || !sim_initialized) { last_radio_h = 0; return; }
+ 
+     // Show the most recent transmissions (newest at the bottom).
+     constexpr std::size_t MAX_SHOWN = 9;
+@@ -560,7 +623,7 @@ void PlayerApp::Impl::draw_radio() {
+         const int w = MeasureText(line, 13);
+         if (w > max_w) max_w = w;
+     }
+-    if (max_w == 0) return;
++    if (max_w == 0) { last_radio_h = 0; return; }
+ 
+     const int pad = 8;
+     const int line_h = 17;
+@@ -569,6 +632,7 @@ void PlayerApp::Impl::draw_radio() {
+     const int bg_h = shown * line_h + pad * 2 + 18;  // + header line
+     const int x = window_w - bg_w - 12;
+     const int y = 12;
++    last_radio_h = bg_h;   // anchors the COMBAT panel below this one
+ 
+     DrawRectangle(x, y, bg_w, bg_h, {0, 0, 0, 170});
+     DrawRectangleLines(x, y, bg_w, bg_h, {255, 255, 255, 70});
+@@ -588,4 +652,168 @@ void PlayerApp::Impl::draw_radio() {
+     }
+ }
+ 
++// ============================================================================
++// Combat view (bvr_intercept) — contrails, missile bodies, guidance lines
++// ============================================================================
++//
++// Missiles are ECS entities like the jets, but they carry no
++// VisualModelComponent (no KoreaObj record is bound at launch) — so they
++// are NOT drawn by render_world()'s mesh path. They get a procedural
++// draw here instead: a small bright cylinder body along the velocity
++// vector + a wire-sphere tactical marker + the contrail sampled by
++// update_missile_trails() + a thin red line to the assigned target that
++// makes the proportional-navigation pursuit visible.
++
++void PlayerApp::Impl::update_missile_trails() {
++    if (!sim_initialized) { missile_trails.clear(); return; }
++
++    // Sample the live missiles' positions (one point per rendered frame —
++    // cosmetic, so speed > 1x stretches the sampled spacing, which reads
++    // naturally as "faster"). Skipped while paused (no movement —
++    // appending would pile duplicate points).
++    std::vector<std::uint64_t> live;
++    if (scenario.combat.enabled && show_combat && !paused) {
++        for (const auto eid :
++             sim->world().with_component<f4::weapons::MissileComponent>()) {
++            auto h = f4::entities::EntityHandle(eid, &sim->world());
++            auto* tf = h.get<f4::entities::TransformComponent>();
++            if (!tf) continue;
++            live.push_back(eid.value);
++            auto& trail = missile_trails[eid.value];
++            trail.points.push_back(
++                enu_to_raylib_v3(tf->position.x, tf->position.y, tf->position.z));
++            if (trail.points.size() > kMaxTrailPoints) {
++                trail.points.erase(trail.points.begin());
++            }
++        }
++    }
++
++    // Drop the trails of missiles that are gone (swept after
++    // detonation/expiry) — also clears everything when combat is toggled
++    // off, since `live` is empty then.
++    for (auto it = missile_trails.begin(); it != missile_trails.end();) {
++        if (std::find(live.begin(), live.end(), it->first) == live.end()) {
++            it = missile_trails.erase(it);
++        } else {
++            ++it;
++        }
++    }
++}
++
++void PlayerApp::Impl::draw_missiles() {
++    if (!sim_initialized || !show_combat || !scenario.combat.enabled) return;
++
++    for (const auto eid :
++         sim->world().with_component<f4::weapons::MissileComponent>()) {
++        auto h = f4::entities::EntityHandle(eid, &sim->world());
++        auto* tf = h.get<f4::entities::TransformComponent>();
++        auto* mc = h.get<f4::weapons::MissileComponent>();
++        if (!tf || !mc) continue;
++
++        const Vector3 pos =
++            enu_to_raylib_v3(tf->position.x, tf->position.y, tf->position.z);
++
++        // Guidance line to the assigned target — the PN pursuit made
++        // visible (fades as the seeker closes: shorter line, tighter bend).
++        if (mc->target_id != 0) {
++            auto tgt = f4::entities::EntityHandle(
++                f4::entities::EntityId{mc->target_id}, &sim->world());
++            if (const auto* ttf = tgt.get<f4::entities::TransformComponent>()) {
++                const Vector3 tpos = enu_to_raylib_v3(
++                    ttf->position.x, ttf->position.y, ttf->position.z);
++                DrawLine3D(pos, tpos, Color{255, 70, 70, 70});
++            }
++        }
++
++        // Contrail (fading white — newest segments bright, oldest faint).
++        if (const auto it = missile_trails.find(eid.value);
++            it != missile_trails.end()) {
++            const auto& pts = it->second.points;
++            for (std::size_t i = 1; i < pts.size(); ++i) {
++                const float age =
++                    static_cast<float>(pts.size() - i) /
++                    static_cast<float>(pts.size());  // 0 = new, 1 = old
++                const unsigned char alpha =
++                    static_cast<unsigned char>(200 * (1.0f - age) + 25);
++                DrawLine3D(pts[i - 1], pts[i],
++                           Color{235, 235, 235, alpha});
++            }
++        }
++
++        // Body: thin bright cylinder along the velocity vector (true-ish
++        // scale — visible once you zoom in on the merge).
++        const Vector3 vel = enu_to_raylib_v3(tf->vx, tf->vy, tf->vz);
++        if (Vector3Length(vel) > 1.0f) {
++            const Vector3 tail = Vector3Subtract(
++                pos, Vector3Scale(Vector3Normalize(vel), kMissileBodyFt));
++            DrawCylinderEx(tail, pos, 3.0f, 1.0f, 8, Color{255, 235, 120, 220});
++        }
++
++        // Tactical marker: wire sphere big enough to see at BVR zoom.
++        DrawSphereWires(pos, kMissileRingFt, 10, 10, Color{255, 240, 130, 160});
++    }
++}
++
++// ============================================================================
++// COMBAT transcript — brevity panel under the ATC radio (top-right)
++// ============================================================================
++//
++// Draws the CombatTranscript ring (the M4 observability piece maintained
++// by f4-simulation): radar contacts, spikes, FOX calls, splash. Severity
++// drives the color: Info = white, Warning = amber, Kill = red.
++
++void PlayerApp::Impl::draw_combat() {
++    if (!show_combat || !sim_initialized) return;
++
++    constexpr std::size_t MAX_SHOWN = 10;
++    const std::size_t n = combat_log.size();
++    if (n == 0) return;
++    const std::size_t first = n > MAX_SHOWN ? n - MAX_SHOWN : 0;
++
++    // Measure the widest line so the panel fits its content.
++    int max_w = 0;
++    for (std::size_t i = first; i < n; ++i) {
++        const auto* e = combat_log.at(i);
++        if (!e) continue;
++        char line[320];
++        std::snprintf(line, sizeof(line), "T+%06.1f  %s: %s", e->time_s,
++                      e->speaker.c_str(), e->text.c_str());
++        const int w = MeasureText(line, 13);
++        if (w > max_w) max_w = w;
++    }
++    if (max_w == 0) return;
++
++    const int pad = 8;
++    const int line_h = 17;
++    const int shown = static_cast<int>(n - first);
++    const int bg_w = max_w + pad * 2;
++    const int bg_h = shown * line_h + pad * 2 + 18;  // + header line
++    // Anchor under the ATC panel when it's visible; top-right otherwise.
++    const int x = window_w - bg_w - 12;
++    const int y = 12 + last_radio_h + 8;
++
++    DrawRectangle(x, y, bg_w, bg_h, {10, 0, 0, 175});
++    DrawRectangleLines(x, y, bg_w, bg_h, {255, 90, 90, 90});
++    DrawText("COMBAT", x + pad, y + pad, 13, {255, 120, 120, 255});
++
++    int line_y = y + pad + 18;
++    for (std::size_t i = first; i < n; ++i) {
++        const auto* e = combat_log.at(i);
++        if (!e) continue;
++        char line[320];
++        std::snprintf(line, sizeof(line), "T+%06.1f  %s: %s", e->time_s,
++                      e->speaker.c_str(), e->text.c_str());
++        Color c = {235, 235, 235, 255};                      // Info = white
++        if (e->severity ==
++            f4::simulation::CombatTranscript::Severity::Warning) {
++            c = Color{255, 205, 90, 255};                    // Warning = amber
++        } else if (e->severity ==
++                   f4::simulation::CombatTranscript::Severity::Kill) {
++            c = Color{255, 95, 95, 255};                     // Kill = red
++        }
++        DrawText(line, x + pad, line_y, 13, c);
++        line_y += line_h;
++    }
++}
++
+ } // namespace f4::scenario_player
+diff --git a/f4-scenario-player/src/viewer_state.hpp b/f4-scenario-player/src/viewer_state.hpp
+index 09aa2d7..fe010d4 100644
+--- a/f4-scenario-player/src/viewer_state.hpp
++++ b/f4-scenario-player/src/viewer_state.hpp
+@@ -21,11 +21,13 @@
+ 
+ #include <f4/simulation/simulation.hpp>
+ #include <f4/simulation/scenario.hpp>
++#include <f4/simulation/combat_transcript.hpp>
+ #include <f4/simulation/visual_model_component.hpp>
+ #include <f4/models/model_database.hpp>
+ #include <f4/models/geometry.hpp>
+ #include <f4/models/texture.hpp>
+ #include <f4/entities/entity.hpp>
++#include <f4/weapons/missile_battery.hpp>   // MissileComponent (combat view)
+ #include <f4/flight/flight_model_component.hpp>  // must come BEFORE raylib.h
+                                                  // (Raylib's PI macro breaks
+                                                  // `using f4::math::PI;` in
+@@ -139,9 +141,28 @@ struct PlayerApp::Impl {
+     bool show_approach = true;     // orange extended centerline + glide slope
+     bool show_taxi_in = true;      // purple runway-exit -> parking route
+     bool show_radio = true;        // ATC transcript panel
++    bool show_combat = true;       // missiles + shot lines + COMBAT panel
+     bool follow_aircraft = false;  // camera tracks the aircraft (C)
+     double camera_distance_override = -1.0;  // CLI --camera-distance (ft)
+ 
++    // ── Combat view (bvr_intercept scenarios) ──────────────────────────
++    // Which aircraft the HUD + follow camera + F-focus track (Tab cycles).
++    // The scenario may spawn TWO+ fighters (bvr_intercept: EAGLE1 blue +
++    // BANDIT1 red); everything that used aircraft_entity() (the first)
++    // now goes through watched_entity().
++    std::size_t watched_index = 0;
++    // The brevity narration (M4 observability) — engine-agnostic ring
++    // buffer maintained by f4-simulation; the player only draws it.
++    f4::simulation::CombatTranscript combat_log;
++    // Anchors the COMBAT panel under the ATC panel (set by draw_radio).
++    int last_radio_h = 0;
++    // Per-missile contrail: entity id -> recent ENU positions (one per
++    // rendered frame, newest last). Entries vanish with the missile.
++    struct MissileTrail {
++        std::vector<Vector3> points;
++    };
++    std::unordered_map<std::uint64_t, MissileTrail> missile_trails;
++
+     // ── ATC radio transcript (observes the bus) ───────────────────────
+     RadioLog radio_log;
+ 
+@@ -164,6 +185,14 @@ struct PlayerApp::Impl {
+     void draw_hud();
+     void draw_fcs_hud();                // FCS-internals column (F3 toggle)
+     void draw_radio();                  // ATC transcript panel (top-right)
++    void draw_combat();                 // COMBAT transcript panel (under ATC)
++    void draw_missiles();               // 3D missile bodies + trails + lines
++    void update_missile_trails();       // sample live missile positions
++
++    // The entity the HUD/camera watch (Tab cycles). Falls back to the
++    // first aircraft when the index outruns the spawn list.
++    [[nodiscard]] f4::entities::EntityId watched_entity() const noexcept;
++    void cycle_watched();
+ };
+ 
+ } // namespace f4::scenario_player
+diff --git a/f4-simulation/CMakeLists.txt b/f4-simulation/CMakeLists.txt
+index 14b5b63..9ee79ca 100644
+--- a/f4-simulation/CMakeLists.txt
++++ b/f4-simulation/CMakeLists.txt
+@@ -37,6 +37,7 @@ add_library(f4-simulation STATIC
+     src/simulation.cpp
+     src/campaign_bridge.cpp
+     src/combat_bridge.cpp
++    src/combat_transcript.cpp
+     src/bubble_manager.cpp
+ )
+ target_link_libraries(f4-simulation PUBLIC f4_warnings)
+diff --git a/f4-simulation/include/f4/simulation/combat_transcript.hpp b/f4-simulation/include/f4/simulation/combat_transcript.hpp
+new file mode 100644
+index 0000000..03db90f
+--- /dev/null
++++ b/f4-simulation/include/f4/simulation/combat_transcript.hpp
+@@ -0,0 +1,93 @@
++// f4-simulation/include/f4/simulation/combat_transcript.hpp
++//
++// CombatTranscript — observes the sim MessageBus and formats combat events
++// as human-readable brevity radio calls (the "fight narration").
++//
++// Engine-agnostic by design: no renderer, no window, no Raylib. The
++// scenario player polls the ring buffer to draw its COMBAT panel; tests
++// assert the calls directly. This is the M4 "combat observability" half of
++// the deferred recorder work (Docs/COMBAT_CHAIN_PLAN.md M4) — the events
++// were already on the bus since M1/M2, nothing formatted them for humans.
++//
++// Subscribed events (state TRANSITIONS only — the bus never carries
++// per-frame telemetry, per the project bus convention):
++//   sensors::RadarTrackAcquiredMessage  -> "Radar contact, <target>."
++//   sensors::RadarTrackDroppedMessage   -> "Lost the picture on <target>."
++//   sensors::RwrWarningMessage (Lock)   -> "Spike from <emitter>, <nm> NM."
++//   sensors::RwrWarningMessage (Launch) -> "Missile launch, <emitter>! Break."
++//   weapons::MissileLaunchedMessage     -> "<FOX n>, <weapon> away on <target>."
++//   weapons::MissileDetonatedMessage    -> "<C2> Missile impact on <target> — <cause>."
++//   weapons::DamageAppliedMessage       -> "<C2> <target> is hit — <dmg> damage, <hp> HP left."
++//   weapons::EntityKilledMessage        -> "<C2> Splash <target>! Shot down by <shooter>."
++//
++// Callsigns resolve through the aircraft_entities() <-> scenario().aircraft
++// index alignment (entity id -> callsign, "#<hex>" fallback for missiles
++// and other non-scenario entities). A/A launch brevity follows the
++// weapon's guidance kind: ActiveRadar=FOX 3, SemiActiveRadar=FOX 1,
++// Ir=FOX 2 (missile_brevity_word(), exposed for tests).
++
++#pragma once
++
++#include <cstddef>
++#include <cstdint>
++#include <string>
++#include <utility>
++#include <vector>
++
++namespace f4::simulation {
++
++class Simulation;
++
++class CombatTranscript {
++public:
++    /// How loud the line is — hosts color-code their panels off this.
++    enum class Severity : std::uint8_t {
++        Info = 0,     // radar contacts, track drops, impacts
++        Warning = 1,  // spikes, launches, damage
++        Kill = 2,     // splash calls
++    };
++
++    struct Entry {
++        double time_s = 0.0;
++        std::string speaker;                 // callsign or "C2"
++        std::string text;                    // brevity line (no speaker prefix)
++        Severity severity = Severity::Info;
++    };
++
++    /// Subscribe to the sim's bus + build the callsign map. The transcript
++    /// keeps only the bus pointer handed out by the bus subscribe() calls —
++    /// it never dereferences the Simulation after attach returns (the
++    /// weapon-table pointer is captured for launch-name resolution).
++    void attach(Simulation& sim);
++
++    // ── Ring buffer (oldest-first absolute indices, RadioLog's API shape)
++    [[nodiscard]] std::size_t size() const noexcept { return size_; }
++    [[nodiscard]] const Entry* at(std::size_t i) const noexcept;
++    void clear() noexcept;
++    /// Ring capacity (default 64). Shrinking keeps the newest entries.
++    void set_capacity(std::size_t entries) noexcept;
++    [[nodiscard]] std::size_t capacity() const noexcept { return ring_.size(); }
++
++    /// Entity id -> callsign ("#<hex>" fallback). Exposed so hosts can
++    /// label markers with the same strings the transcript uses.
++    [[nodiscard]] std::string callsign_of(std::uint64_t entity_id) const;
++
++private:
++    void push(double time_s, std::string speaker, std::string text,
++              Severity severity);
++
++    // Callsign map: scenario aircraft are few (2-4), linear scan is free
++    // and keeps attach() allocation-simple.
++    std::vector<std::pair<std::uint64_t, std::string>> callsigns_;
++
++    std::vector<Entry> ring_{};
++    std::size_t begin_ = 0;
++    std::size_t size_ = 0;
++};
++
++/// The A/A launch brevity word for a missile's guidance kind
++/// (ActiveRadar -> "FOX 3", SemiActiveRadar -> "FOX 1", Ir -> "FOX 2",
++/// anything else -> "missile"). Free function: unit-testable without a sim.
++[[nodiscard]] std::string missile_brevity_word(int guidance_kind);
++
++} // namespace f4::simulation
+diff --git a/f4-simulation/src/combat_transcript.cpp b/f4-simulation/src/combat_transcript.cpp
+new file mode 100644
+index 0000000..ff978ba
+--- /dev/null
++++ b/f4-simulation/src/combat_transcript.cpp
+@@ -0,0 +1,214 @@
++// f4-simulation/src/combat_transcript.cpp
++//
++// CombatTranscript implementation — see combat_transcript.hpp for the
++// design notes. Every event subscribed here is a bus TRANSITION (the bus
++// convention: no per-frame telemetry), so the transcript's volume is
++// bounded by the fight itself, not the tick rate.
++
++#include "f4/simulation/combat_transcript.hpp"
++
++#include "f4/simulation/simulation.hpp"
++
++#include <f4/sensors/messages.hpp>
++#include <f4/sensors/rwr.hpp>
++#include <f4/weapons/messages.hpp>
++#include <f4/weapons/weapon_types.hpp>
++
++#include <algorithm>
++#include <cmath>
++#include <cstdio>
++#include <string>
++
++namespace f4::simulation {
++
++namespace {
++
++constexpr double kFeetPerNm = 6076.11548;
++
++/// "77.4" — one decimal, no trailing ".0" noise beyond it.
++std::string fmt1(double v) {
++    char buf[32];
++    std::snprintf(buf, sizeof(buf), "%.1f", v);
++    return buf;
++}
++
++std::string fmt0(double v) {
++    char buf[32];
++    std::snprintf(buf, sizeof(buf), "%.0f", v);
++    return buf;
++}
++
++} // namespace
++
++// ── brevity word ───────────────────────────────────────────────────────────
++
++std::string missile_brevity_word(int guidance_kind) {
++    using GK = f4::weapons::GuidanceKind;
++    switch (static_cast<GK>(guidance_kind)) {
++        case GK::ActiveRadar:    return "FOX 3";
++        case GK::SemiActiveRadar: return "FOX 1";
++        case GK::Ir:             return "FOX 2";
++        case GK::None:           break;
++    }
++    return "missile";
++}
++
++// ── ring buffer ────────────────────────────────────────────────────────────
++
++const CombatTranscript::Entry* CombatTranscript::at(std::size_t i) const noexcept {
++    if (i >= size_) return nullptr;
++    return &ring_[(begin_ + i) % ring_.size()];
++}
++
++void CombatTranscript::clear() noexcept {
++    begin_ = 0;
++    size_ = 0;
++}
++
++void CombatTranscript::set_capacity(std::size_t entries) noexcept {
++    if (entries == 0) entries = 1;
++
++    // Collect the newest `entries` items (oldest-first), then rebuild.
++    std::vector<Entry> keep;
++    keep.reserve(std::min(entries, size_));
++    const std::size_t first = size_ > entries ? size_ - entries : 0;
++    for (std::size_t i = first; i < size_; ++i) keep.push_back(*at(i));
++
++    ring_.assign(entries, Entry{});
++    begin_ = 0;
++    size_ = keep.size();
++    for (std::size_t i = 0; i < keep.size(); ++i) ring_[i] = std::move(keep[i]);
++}
++
++void CombatTranscript::push(double time_s, std::string speaker,
++                            std::string text, Severity severity) {
++    if (ring_.empty()) ring_.assign(64, Entry{});
++
++    Entry& slot = ring_[(begin_ + size_) % ring_.size()];
++    if (size_ == ring_.size()) {
++        // Full: overwrite the oldest (begin_ advances).
++        begin_ = (begin_ + 1) % ring_.size();
++    } else {
++        ++size_;
++    }
++    slot.time_s = time_s;
++    slot.speaker = std::move(speaker);
++    slot.text = std::move(text);
++    slot.severity = severity;
++}
++
++// ── callsigns ──────────────────────────────────────────────────────────────
++
++std::string CombatTranscript::callsign_of(std::uint64_t entity_id) const {
++    for (const auto& [id, name] : callsigns_) {
++        if (id == entity_id) return name;
++    }
++    char fallback[24];
++    std::snprintf(fallback, sizeof(fallback), "#%llx",
++                  static_cast<unsigned long long>(entity_id));
++    return fallback;
++}
++
++// ── attach ─────────────────────────────────────────────────────────────────
++
++void CombatTranscript::attach(Simulation& sim) {
++    callsigns_.clear();
++    clear();
++
++    // The callsign map: scenario().aircraft[i] spawned as
++    // aircraft_entities()[i] (the spawn loop's documented order —
++    // test_combat_integration relies on the same alignment).
++    const auto& ids = sim.aircraft_entities();
++    const auto& defs = sim.scenario().aircraft;
++    const std::size_t n = std::min(ids.size(), defs.size());
++    callsigns_.reserve(n);
++    for (std::size_t i = 0; i < n; ++i) {
++        callsigns_.emplace_back(ids[i].value, defs[i].callsign);
++    }
++
++    // Weapon-class lookup for launch calls (the table is a Simulation
++    // member and outlives the transcript's use within the sim run).
++    const auto* weapons = &sim.weapon_table();
++
++    auto& bus = sim.bus();
++
++    // ── Sensors: track picture ─────────────────────────────────────────
++    bus.subscribe<sensors::RadarTrackAcquiredMessage>(
++        [this](const sensors::RadarTrackAcquiredMessage& m) {
++            push(m.time_s, callsign_of(m.radar_entity_id),
++                 "Radar contact, " + callsign_of(m.target_entity_id) + ".",
++                 Severity::Info);
++        });
++
++    bus.subscribe<sensors::RadarTrackDroppedMessage>(
++        [this](const sensors::RadarTrackDroppedMessage& m) {
++            push(m.time_s, callsign_of(m.radar_entity_id),
++                 "Lost the picture on " + callsign_of(m.target_entity_id) + ".",
++                 Severity::Info);
++        });
++
++    // ── Sensors: RWR transitions (victim speaks) ───────────────────────
++    bus.subscribe<sensors::RwrWarningMessage>(
++        [this](const sensors::RwrWarningMessage& m) {
++            const std::string emitter = callsign_of(m.emitter_id);
++            if (m.type == sensors::RwrWarningType::Lock) {
++                push(m.time_s, callsign_of(m.victim_id),
++                     "Spike from " + emitter + ", " +
++                         fmt0(m.range_ft / kFeetPerNm) + " NM.",
++                     Severity::Warning);
++            } else if (m.type == sensors::RwrWarningType::Launch) {
++                push(m.time_s, callsign_of(m.victim_id),
++                     "Missile launch, " + emitter + "! Break, break.",
++                     Severity::Warning);
++            }
++            // Search strobes are component state, never bus traffic.
++        });
++
++    // ── Weapons: the engagement ────────────────────────────────────────
++    bus.subscribe<weapons::MissileLaunchedMessage>(
++        [this, weapons](const weapons::MissileLaunchedMessage& m) {
++            std::string weapon_name = "missile";
++            std::string word = "missile";
++            if (const auto* rec = weapons->get(m.weapon_handle)) {
++                weapon_name = rec->name;
++                word = missile_brevity_word(
++                    static_cast<int>(rec->guidance));
++            }
++            push(m.sim_time_s, callsign_of(m.shooter_id),
++                 word + ", " + weapon_name + " away on " +
++                     callsign_of(m.target_id) + ".",
++                 Severity::Warning);
++        });
++
++    bus.subscribe<weapons::MissileDetonatedMessage>(
++        [this](const weapons::MissileDetonatedMessage& m) {
++            const bool hit = m.cause == weapons::MissileEndCause::TargetHit;
++            push(m.sim_time_s, "C2",
++                 std::string(hit ? "Missile impact on " : "Missile end on ") +
++                     callsign_of(m.target_id) + " — " +
++                     weapons::missile_end_cause_name(m.cause) + ".",
++                 Severity::Info);
++        });
++
++    bus.subscribe<weapons::DamageAppliedMessage>(
++        [this](const weapons::DamageAppliedMessage& m) {
++            push(m.sim_time_s, "C2",
++                 callsign_of(m.target_id) + " is hit — " + fmt0(m.damage) +
++                     " damage, " + fmt0(m.hit_points_after) + " HP left.",
++                 m.killed ? Severity::Kill : Severity::Info);
++        });
++
++    bus.subscribe<weapons::EntityKilledMessage>(
++        [this](const weapons::EntityKilledMessage& m) {
++            push(m.sim_time_s, "C2",
++                 "Splash " + callsign_of(m.target_id) + "! Shot down by " +
++                     callsign_of(m.shooter_id) + ".",
++                 Severity::Kill);
++        });
++
++    // GunFiredMessage deliberately NOT subscribed: the M3 brain never
++    // fires guns (BVR doctrine), and a gun-fight transcript belongs with
++    // the WVR module that will actually produce the bursts.
++}
++
++} // namespace f4::simulation
+diff --git a/f4-simulation/tests/CMakeLists.txt b/f4-simulation/tests/CMakeLists.txt
+index 8ca13bd..5d499d9 100644
+--- a/f4-simulation/tests/CMakeLists.txt
++++ b/f4-simulation/tests/CMakeLists.txt
+@@ -28,13 +28,23 @@ f4_simulation_add_test(test_real_layout_derivation test_real_layout_derivation.c
+ f4_simulation_add_test(test_digi_mission           test_digi_mission.cpp)
+ f4_simulation_add_test(test_fcs_trace_pipeline     test_fcs_trace_pipeline.cpp)
+ f4_simulation_add_test(test_combat_integration     test_combat_integration.cpp)
++f4_simulation_add_test(test_combat_transcript      test_combat_transcript.cpp)
+ 
+ # The combat integration test drives the full M3 chain (radar detect ->
+ # track -> lock -> RWR -> launch -> kill -> sweep) through Simulation. It
+ # needs the generated F-16 aircraft config (FlightModelComponent::init
+ # requires real aero tables) exactly like the campaign-bridge test.
++# It also plays the SHIPPED <build>/scenarios/bvr_intercept.json, so it
++# needs the configured scenario dir too.
+ target_compile_definitions(test_combat_integration PRIVATE
+     F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}"
++    F4_SCENARIOS_DIR="${CMAKE_BINARY_DIR}/scenarios"
++)
++
++# The combat transcript test runs the same AI-vs-AI fight to verify the
++# brevity narration (FOX 3 / spike / splash calls).
++target_compile_definitions(test_combat_transcript PRIVATE
++    F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}"
+ )
+ 
+ # The DIGI end-to-end mission test runs the build-configured
+diff --git a/f4-simulation/tests/test_combat_integration.cpp b/f4-simulation/tests/test_combat_integration.cpp
+index 4bed261..1e65c0e 100644
+--- a/f4-simulation/tests/test_combat_integration.cpp
++++ b/f4-simulation/tests/test_combat_integration.cpp
+@@ -539,3 +539,63 @@ TEST(CombatIntegration, AiVersusAiBvrEngagement) {
+     // Every missile the AI fired was swept (no live rounds left flying).
+     EXPECT_EQ(weapons::count_live_missiles(sim.world()), 0u);
+ }
++
++// ============================================================================
++// 6. The SHIPPED scenario file plays out: the player's bvr_intercept.json
++//    (configured into <build>/scenarios by the root CMakeLists) must load
++//    and produce the same AI-vs-AI engagement the in-memory E2E proved.
++//    This keeps the file the scenario-player actually reads honest — a
++//    typo in the JSON can't hide behind the in-memory test's copy.
++// ============================================================================
++TEST(CombatIntegration, BvrInterceptScenarioFilePlaysOut) {
++#ifdef F4_SCENARIOS_DIR
++    const std::filesystem::path file =
++        std::filesystem::path(F4_SCENARIOS_DIR) / "bvr_intercept.json";
++    if (!std::filesystem::exists(file)) GTEST_SKIP()
++        << "bvr_intercept.json not configured (build it first)";
++
++    const auto scenario = load_scenario(file);
++
++    // The shipped file must ask for the fight.
++    ASSERT_TRUE(scenario.combat.enabled);
++    ASSERT_EQ(scenario.aircraft.size(), 2u);
++    EXPECT_EQ(scenario.aircraft[0].team, "blue");
++    EXPECT_EQ(scenario.aircraft[1].team, "red");
++    EXPECT_EQ(scenario.aircraft[0].callsign, "EAGLE1");
++    EXPECT_EQ(scenario.aircraft[1].callsign, "BANDIT1");
++
++    Simulation sim(scenario, file.parent_path());
++    sim.initialize();
++
++    CombatEventLog log;
++    log.attach(sim.bus());
++
++    const auto shooter_id = sim.aircraft_entities()[0];
++    const auto bandit_id = sim.aircraft_entities()[1];
++
++    // Fly the fight (the in-memory twin resolves in ~60 s; 150 s budget).
++    // After the kill keep flying until the shoot-shoot follow-up missile
++    // is swept too — the in-memory twin asserts the same at 150 s.
++    int kill_tick = -1;
++    const int max_ticks = static_cast<int>(150.0 / kDt);
++    for (int i = 0; i < max_ticks; ++i) {
++        sim.tick(kDt);
++        if (!log.killed.empty() && kill_tick < 0) kill_tick = i;
++        if (kill_tick >= 0 && weapons::count_live_missiles(sim.world()) == 0u) {
++            break;
++        }
++    }
++    ASSERT_NE(kill_tick, -1) << "the shipped scenario's AI never scored a kill";
++    ASSERT_GE(log.launched.size(), 1u);
++    for (const auto& m : log.launched) {
++        EXPECT_EQ(m.shooter_id, shooter_id.value);
++    }
++    for (const auto& k : log.killed) {
++        EXPECT_EQ(k.target_id, bandit_id.value);
++        EXPECT_EQ(k.shooter_id, shooter_id.value);
++    }
++    EXPECT_EQ(weapons::count_live_missiles(sim.world()), 0u);
++#else
++    GTEST_SKIP() << "F4_SCENARIOS_DIR not defined for this target";
++#endif
++}
+diff --git a/f4-simulation/tests/test_combat_transcript.cpp b/f4-simulation/tests/test_combat_transcript.cpp
+new file mode 100644
+index 0000000..c379e2c
+--- /dev/null
++++ b/f4-simulation/tests/test_combat_transcript.cpp
+@@ -0,0 +1,233 @@
++// test_combat_transcript.cpp — CombatTranscript unit + E2E tests.
++//
++// The transcript is the M4 observability piece: it formats bus combat
++// transitions as brevity radio calls. Tested here:
++//   1. missile_brevity_word: guidance kind -> FOX 1/2/3 (pure function)
++//   2. callsign map + "#<hex>" fallback
++//   3. ring buffer: clear(), set_capacity() keeps the newest entries,
++//      at() bounds
++//   4. E2E: the AiVersusAi fight narrated — every link of the chain
++//      (contact -> spike -> FOX 3 -> launch warning -> impact -> splash)
++//      appears, timestamps non-decreasing, EAGLE1 is the speaker of the
++//      launch, BANDIT1 the speaker of the defense calls.
++
++#include <gtest/gtest.h>
++
++#include "f4/simulation/combat_transcript.hpp"
++#include "f4/simulation/simulation.hpp"
++
++#include <f4/entities/entity.hpp>
++#include <f4/weapons/weapon_types.hpp>
++
++#include <algorithm>
++#include <cstdlib>
++#include <filesystem>
++#include <string>
++
++using namespace f4::simulation;
++namespace weapons = f4::weapons;
++
++namespace {
++
++// Same locator as test_combat_integration.cpp.
++std::string f16_config_path() {
++    const char* env = std::getenv("F4_GENERATED_FIXTURES_DIR");
++    std::string dir = env ? env : "";
++#ifdef F4_GENERATED_FIXTURES_DIR
++    if (dir.empty()) dir = F4_GENERATED_FIXTURES_DIR;
++#endif
++    if (dir.empty()) return "";
++    const auto path = std::filesystem::path(dir) / "f16.json";
++    return std::filesystem::exists(path) ? path.string() : "";
++}
++
++constexpr double kDt = 1.0 / 60.0;
++
++std::string combat_scenario_json(const std::string& f16_path) {
++    return R"({
++  "name": "combat_transcript_e2e",
++  "theater": "korea",
++  "aircraft": [
++    { "callsign": "EAGLE1", "aircraft_config_path": ")" + f16_path + R"(",
++      "aircraft_name": "F-16C_50", "vis_type_index": 1052,
++      "parking_spot": { "x": 0.0, "y": 0.0, "z": 10000.0 },
++      "heading_rad": 0.0, "initial_fuel_lbs": 6500.0,
++      "initial_vt_fps": 506.0, "spawn_in_air": true, "team": "blue" },
++    { "callsign": "BANDIT1", "aircraft_config_path": ")" + f16_path + R"(",
++      "aircraft_name": "F-16C_50", "vis_type_index": 1052,
++      "parking_spot": { "x": 0.0, "y": 80000.0, "z": 10000.0 },
++      "heading_rad": 0.0, "initial_fuel_lbs": 6500.0,
++      "initial_vt_fps": 420.0, "spawn_in_air": true, "team": "red" }
++  ],
++  "airfield": {
++    "active_runway_id": 36, "active_runway_name": "Rwy 36",
++    "runway_heading_rad": 0.0,
++    "threshold_position": { "x": 0.0, "y": -5000.0, "z": 0.0 },
++    "runway_end_position":  { "x": 0.0, "y": 5000.0, "z": 0.0 },
++    "threshold_altitude_ft": 0.0, "departure_altitude_ft": 10000.0,
++    "taxi_route": [ { "x": 0.0, "y": -5000.0, "z": 0.0 },
++                    { "x": 0.0, "y": 0.0, "z": 0.0 } ]
++  },
++  "waypoints": [
++    { "name": "FAR_NORTH", "position": { "x": 0.0, "y": 500000.0, "z": 10000.0 },
++      "speed_kts": 420.0 }
++  ],
++  "start_enroute": true,
++  "sim_dt": 0.016666666666666,
++  "total_ticks": 30000,
++  "record": false,
++  "combat": { "enabled": true, "radar_rng_seed": 777 }
++})";
++}
++
++} // namespace
++
++// ============================================================================
++// 1. Pure function: guidance kind -> brevity word.
++// ============================================================================
++TEST(CombatTranscript, BrevityWordByGuidanceKind) {
++    using GK = weapons::GuidanceKind;
++    EXPECT_EQ(missile_brevity_word(static_cast<int>(GK::ActiveRadar)), "FOX 3");
++    EXPECT_EQ(missile_brevity_word(static_cast<int>(GK::SemiActiveRadar)), "FOX 1");
++    EXPECT_EQ(missile_brevity_word(static_cast<int>(GK::Ir)), "FOX 2");
++    EXPECT_EQ(missile_brevity_word(static_cast<int>(GK::None)), "missile");
++}
++
++// ============================================================================
++// 2. Ring buffer semantics (no sim needed — but attach requires one for the
++//    callsign map, so use the E2E scenario).
++// ============================================================================
++TEST(CombatTranscript, RingBufferAndCallsigns) {
++    const auto f16 = f16_config_path();
++    if (f16.empty()) GTEST_SKIP() << "f16.json fixture not generated";
++
++    auto scenario = load_scenario_from_string(combat_scenario_json(f16));
++    Simulation sim(std::move(scenario), std::filesystem::path("."));
++    sim.initialize();
++
++    CombatTranscript log;
++    log.set_capacity(8);
++    EXPECT_EQ(log.capacity(), 8u);
++    log.attach(sim);
++
++    // Callsign map: index-aligned with the scenario.
++    const auto shooter = sim.aircraft_entities()[0].value;
++    const auto bandit = sim.aircraft_entities()[1].value;
++    EXPECT_EQ(log.callsign_of(shooter), "EAGLE1");
++    EXPECT_EQ(log.callsign_of(bandit), "BANDIT1");
++    // Unknown id -> "#<hex>" fallback (never empty, never throws).
++    EXPECT_EQ(log.callsign_of(9999), "#270f");
++
++    // Empty ring: at() out of bounds is nullptr.
++    EXPECT_EQ(log.size(), 0u);
++    EXPECT_EQ(log.at(0), nullptr);
++
++    // Run the fight to the kill so every transition has landed (acquire,
++    // spike, FOX 3, launch warning, impact, splash). Bus events are
++    // TRANSITIONS only: re-ticking without new state changes adds nothing.
++    const auto bandit_handle =
++        f4::entities::EntityHandle(sim.aircraft_entities()[1], &sim.world());
++    for (int i = 0; i < 150 * 60; ++i) {
++        sim.tick(kDt);
++        const auto* dmg = bandit_handle.get<f4::entities::DamageStateComponent>();
++        if (dmg && dmg->killed) break;
++    }
++    EXPECT_GT(log.size(), 2u);
++    EXPECT_LE(log.size(), 8u);
++    for (std::size_t i = 1; i < log.size(); ++i) {
++        ASSERT_NE(log.at(i - 1), nullptr);
++        ASSERT_NE(log.at(i), nullptr);
++        EXPECT_GE(log.at(i)->time_s, log.at(i - 1)->time_s)
++            << "entries not in chronological order";
++    }
++
++    // set_capacity shrink keeps the NEWEST entries; clear() empties.
++    ASSERT_GT(log.size(), 2u);
++    const auto newest_text = log.at(log.size() - 1)->text;
++    log.set_capacity(2);
++    EXPECT_EQ(log.size(), 2u);
++    ASSERT_NE(log.at(1), nullptr);
++    EXPECT_EQ(log.at(1)->text, newest_text);
++
++    log.clear();
++    EXPECT_EQ(log.size(), 0u);
++    EXPECT_EQ(log.at(0), nullptr);
++}
++
++// ============================================================================
++// 3. E2E: the fight narrated, link by link.
++// ============================================================================
++TEST(CombatTranscript, NarratesTheAiVersusAiFight) {
++    const auto f16 = f16_config_path();
++    if (f16.empty()) GTEST_SKIP() << "f16.json fixture not generated";
++
++    auto scenario = load_scenario_from_string(combat_scenario_json(f16));
++    Simulation sim(std::move(scenario), std::filesystem::path("."));
++    sim.initialize();
++
++    CombatTranscript log;
++    log.attach(sim);
++
++    const auto bandit = sim.aircraft_entities()[1];
++    bool killed = false;
++    const int max_ticks = static_cast<int>(150.0 / kDt);
++    for (int i = 0; i < max_ticks && !killed; ++i) {
++        sim.tick(kDt);
++        auto h = f4::entities::EntityHandle(bandit, &sim.world());
++        if (const auto* dmg = h.get<f4::entities::DamageStateComponent>()) {
++            killed = dmg->killed;
++        }
++    }
++    ASSERT_TRUE(killed) << "the fight never resolved (upstream failure — "
++                          "see test_combat_integration E2E)";
++
++    // Collect the narration as "SPEAKER|TEXT" strings for substring checks.
++    std::vector<std::string> lines;
++    for (std::size_t i = 0; i < log.size(); ++i) {
++        const auto* e = log.at(i);
++        ASSERT_NE(e, nullptr);
++        lines.push_back(e->speaker + "|" + e->text);
++    }
++    ASSERT_FALSE(lines.empty());
++
++    auto any_line_has = [&](const std::string& needle) {
++        return std::any_of(lines.begin(), lines.end(),
++            [&](const std::string& l) { return l.find(needle) != std::string::npos; });
++    };
++
++    // The OODA loop narrated end-to-end. NOTE: only EAGLE1's radar acquires
++    // — the stern-chase geometry puts EAGLE1 BEHIND BANDIT1's north-facing
++    // scan bar, so the red side never forms a radar picture (it defends on
++    // RWR alone — the M2 policy design).
++    EXPECT_TRUE(any_line_has("EAGLE1|Radar contact, BANDIT1."))
++        << "no acquisition call";
++    EXPECT_TRUE(any_line_has("BANDIT1|Spike from EAGLE1"))
++        << "no RWR spike call when EAGLE1 locked";
++    EXPECT_TRUE(any_line_has("EAGLE1|FOX 3, AIM-120C away on BANDIT1."))
++        << "no AMRAAM launch call";
++    EXPECT_TRUE(any_line_has("BANDIT1|Missile launch"))
++        << "the victim never called the launch warning";
++    EXPECT_TRUE(any_line_has("C2|Splash BANDIT1! Shot down by EAGLE1."))
++        << "no splash call";
++    EXPECT_TRUE(any_line_has("impact on BANDIT1")) << "no impact call";
++
++    // The splash call carries Kill severity (so does the terminal damage
++    // line — both are the kill moment; assert the splash one specifically).
++    bool splash_is_kill = false;
++    for (std::size_t i = 0; i < log.size(); ++i) {
++        const auto* e = log.at(i);
++        ASSERT_NE(e, nullptr);
++        if (e->text.find("Splash BANDIT1") != std::string::npos) {
++            EXPECT_EQ(e->speaker, "C2");
++            if (e->severity == CombatTranscript::Severity::Kill) {
++                splash_is_kill = true;
++            }
++        }
++    }
++    EXPECT_TRUE(splash_is_kill) << "the splash call is not Kill-severity";
++
++    // Chronological order across the whole fight.
++    for (std::size_t i = 1; i < log.size(); ++i) {
++        EXPECT_GE(log.at(i)->time_s, log.at(i - 1)->time_s);
++    }
++}
+diff --git a/worklog.md b/worklog.md
+index 1a4675f..93623ff 100644
+--- a/worklog.md
++++ b/worklog.md
+@@ -3336,3 +3336,78 @@ Stage Summary:
+   formation fight), then the DigitalBrain full ladder
+   (collision/ground-avoid rungs), then M4: recorder combat events + the
+   rendered BVR scenario + campaign-flights combat attachment.
++
++---
++Task ID: M4-SCENARIO-1
++Agent: main (Z)
++Task: The user asked for a scenario to test in the scenario-player. Deliver
++the rendered BVR engagement (the deferred M4 visibility half): a shipped
++bvr_intercept.json + combat observability in the player.
++
++Work Log:
++- Baseline: m3-tactics-1 @ be2d3a6 (patch delivered, not yet pushed —
++  origin/main still 74157e1). Branch m4-scenario-1.
++- f4-simulation CombatTranscript (new): subscribes to the combat bus
++  transitions (RadarTrackAcquired/Dropped, RwrWarning Lock/Launch,
++  MissileLaunched/Detonated, DamageApplied, EntityKilled) and formats
++  brevity radio calls into a ring buffer (RadioLog's API shape: size/at/
++  clear/set_capacity). Callsign map = aircraft_entities() <->
++  scenario().aircraft index alignment; "#<hex>" fallback. Launch brevity
++  from the weapon record's guidance kind via missile_brevity_word()
++  (ActiveRadar=FOX 3 / SemiActiveRadar=FOX 1 / Ir=FOX 2). Severity
++  Info/Warning/Kill per entry. Engine-agnostic (no renderer): the
++  scenario-player only DRAWS it; tests assert it headless.
++- Scenario: f4-scenario-player/scenarios/bvr_intercept.json.in registered
++  in the root F4_SCENARIO_TEMPLATES list. Same deterministic geometry the
++  M3 E2E proves (stern chase: blue 506 fps at {0,0,10000} vs red 420 fps
++  at {0,80000,10000}, both northbound, FAR_NORTH enroute, combat enabled,
++  seed 777). 36,000 ticks (10 min); fight resolves in ~1-2 min.
++- Player combat view: update_missile_trails() samples live MissileComponent
++  transforms once per rendered frame (900-pt cap, paused-skipping, stale
++  entries swept with the missiles); draw_missiles() draws a 60-ft cylinder
++  body along velocity + 500-ft wire-sphere tactical marker + fading
++  contrail + red line missile->target (PN pursuit visible). All 3D drawing
++  through the scene.overlay_3d hook (same 3D mode as the layout overlays),
++  using only Raylib primitives already proven in-repo (DrawLine3D,
++  DrawCylinderEx, DrawSphereWires).
++- COMBAT panel (draw_combat): CombatTranscript entries color-coded by
++  severity (white/amber/red), anchored under the ATC panel (draw_radio
++  records its height). Player attach: combat_log.attach(sim) in
++  load_scenario (unconditional — bus stays silent without combat).
++- Watched aircraft: HUD/FCS/camera-follow/F-focus/Tab cycle + ImGui
++  "Watched" combo over scenario.aircraft. HUD gains an RWR line (clear/
++  SPIKE/MISSILE LAUNCH from RwrComponent flags) + count_live_missiles
++  for combat scenarios. Gating fix: scenario aircraft now gate on
++  "Show aircraft" (membership in aircraft_entities()), not "first entity
++  = aircraft, everything else = airport" (the bandit used to hide with
++  the runway toggle).
++- This container has no GL headers (no sudo) — the player itself cannot
++  link here. Verification: (a) full headless build + suite 1,577/1,577 =
++  100% (4 new tests); (b) all three player translation units pass
++  g++ -fsyntax-only -Wall -Wextra against a stub raylib/raymath/imgui/
++  rlImGui header set with the real f4-*.h include chain (zero warnings
++  in player code; stubs live outside the repo).
++- Tests: test_combat_transcript.cpp (brevity word map; ring + callsign
++  fallback + capacity/clear; E2E narration of the whole fight, including
++  the design note that only EAGLE1's radar acquires — the stern-chase
++  geometry leaves EAGLE1 behind BANDIT1's north-facing scan bar, so red
++  defends on RWR alone). BvrInterceptScenarioFilePlaysOut in
++  test_combat_integration.cpp: loads the SHIPPED build-configured
++  scenarios/bvr_intercept.json (F4_SCENARIOS_DIR compile def), asserts
++  combat wiring, launch -> kill attribution -> missile sweep (ticks past
++  the first kill until the shoot-shoot follow-up is swept).
++
++Stage Summary:
++- Deliverable: f4-m4-scenario-1.patch on top of m3-tactics-1 @ be2d3a6.
++  Apply order for the user: f4-m3-tactics-1.patch, then this.
++- The M3 fight is now watchable: scenarios/bvr_intercept.json --run,
++  Tab between the jets, COMBAT panel narrates, missiles + contrails +
++  pursuit lines render. The narration itself is engine-agnostic and
++  regression-tested headless (CI keeps proving it without a GPU).
++- Deliberately deferred (documented): recorder combat-event schema +
++  combat traces (the M4 record/replay half — next), 2v2 formation
++  geometry (WingmanModule), KoreaObj missile visual record (procedural
++  draw is deliberate: no vis binding at launch), per-missile HUD
++  readouts, RWR bearing arrow on the HUD.
++- Next: WVRModule (the 2 NM merge handoff), then WingmanModule, then the
++  recorder combat events so fights replay headless.

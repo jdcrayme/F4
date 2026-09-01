@@ -30,6 +30,8 @@ add_library(f4-ai STATIC
     src/air_steering.cpp
     src/navigation_module.cpp
     src/landing_module.cpp
+    src/missile_module.cpp
+    src/bvr_module.cpp
 )
 target_link_libraries(f4-ai PUBLIC f4_warnings)
 

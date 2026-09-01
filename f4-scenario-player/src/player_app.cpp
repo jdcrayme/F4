@@ -73,6 +73,12 @@ void PlayerApp::load_scenario(const std::filesystem::path& json_path) {
     // Observe the ATC traffic for the radio transcript overlay.
     impl_->radio_log.attach(*impl_->sim);
 
+    // Observe the combat traffic for the COMBAT brevity panel (M4
+    // observability). Attach runs for every scenario — the callsign map
+    // is useful even without combat, and the bus stays silent when
+    // combat is disabled.
+    impl_->combat_log.attach(*impl_->sim);
+
     // Load terrain (Path B1). The scenario's terrain_json_path points at
     // a korea.terrain.json (produced by f4-terrain-convert). When present,
     // we load it, register a TerrainDataAdapter with the sim (so the FM's
@@ -345,6 +351,27 @@ void PlayerApp::run() {
         if (ImGui::Button("Focus Aircraft (F)")) impl_->fit_to_aircraft();
         ImGui::Checkbox("Follow aircraft (C)", &impl_->follow_aircraft);
         ImGui::Separator();
+        // Watched aircraft — which jet the HUD / follow camera / F-focus
+        // track. bvr_intercept flies two fighters; Tab cycles.
+        if (impl_->scenario.aircraft.size() > 1) {
+            const std::size_t wi = impl_->watched_index <
+                impl_->scenario.aircraft.size() ? impl_->watched_index : 0;
+            if (ImGui::BeginCombo("Watched",
+                    impl_->scenario.aircraft[wi].callsign.c_str())) {
+                for (std::size_t i = 0;
+                     i < impl_->scenario.aircraft.size(); ++i) {
+                    const bool selected = (i == impl_->watched_index);
+                    if (ImGui::Selectable(
+                            impl_->scenario.aircraft[i].callsign.c_str(),
+                            selected)) {
+                        impl_->watched_index = i;
+                    }
+                    if (selected) ImGui::SetItemDefaultFocus();
+                }
+                ImGui::EndCombo();
+            }
+        }
+        ImGui::Separator();
         // Sim speed: scales the WALL-CLOCK time fed into the
         // fixed-timestep accumulator (0.1x taxi inspection .. 10x
         // fast-forward). The tick dt is always scenario.sim_dt, so the
@@ -374,6 +401,9 @@ void PlayerApp::run() {
         ImGui::Checkbox("Show approach", &impl_->show_approach);
         ImGui::Checkbox("Show taxi-in route", &impl_->show_taxi_in);
         ImGui::Checkbox("Show radio log", &impl_->show_radio);
+        if (impl_->scenario.combat.enabled) {
+            ImGui::Checkbox("Show combat view", &impl_->show_combat);
+        }
         ImGui::Checkbox("Show compass", &impl_->show_compass);
         ImGui::Checkbox("Show grid", &impl_->show_grid);
         ImGui::Checkbox("Show axes", &impl_->show_axes);

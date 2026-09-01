@@ -209,6 +209,12 @@ entities::EntityId launch_missile(entities::EntityWorld& world,
         shooter_team.has_value()) {
         missile_handle.set_tag(entities::tags::TEAM, *shooter_team);
     }
+    // ROLE="missile": what makes the missile an EMITTER in the RWR's eyes
+    // (update_rwr's launch detection) and is_missile in SensorFusion's
+    // target list. Without it the victim's RWR never sees the launch and
+    // its AI never defends — the M3 tactics E2E caught exactly that.
+    missile_handle.set_tag(entities::tags::ROLE,
+                           entities::TagValue::from(std::string("missile")));
     if (auto* ident = shooter.get<entities::CampaignIdentityComponent>()) {
         missile_handle.add<entities::CampaignIdentityComponent>(*ident);
     }

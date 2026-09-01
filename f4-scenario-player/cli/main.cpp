@@ -66,7 +66,8 @@ int main(int argc, char** argv) {
                 "Controls:\n"
                 "  Left-drag: orbit     Right-drag: pan     Scroll: zoom\n"
                 "  Space: pause/resume  F: focus aircraft   R: reset view\n"
-                "  F2: screenshot\n";
+                "  Tab: cycle watched aircraft (bvr_intercept: EAGLE1/BANDIT1)\n"
+                "  C: follow watched aircraft   F2: screenshot\n";
             return 0;
         } else if (scenario_path.empty()) {
             scenario_path = a;

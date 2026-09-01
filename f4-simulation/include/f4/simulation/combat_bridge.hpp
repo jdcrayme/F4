@@ -29,6 +29,7 @@
 
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 
@@ -40,6 +41,8 @@
 #include <f4/sensors/signature.hpp>
 
 #include "f4/simulation/scenario.hpp"
+
+namespace f4::ai { class BrainComponent; }  // spawn wiring below
 
 namespace f4::simulation {
 
@@ -96,5 +99,36 @@ private:
     entities::EntityWorld* world_;
     std::uint64_t ownship_id_;
 };
+
+/// Execute every combat brain's intents against the real hardware, one
+/// tick after the brains produced them (the host calls this from tick(),
+/// between world.update_all() and the update_rwr sweep):
+///
+///   radar_lock       -> RadarSimComponent::command_track() on the
+///                       shooter's own radar (refused harmlessly until
+///                       the track store holds a live track on the target).
+///   weapon_release   -> weapons::launch_missile() through the table the
+///                       simulation owns: selects the first loaded
+///                       air-to-air station, debits the store, publishes
+///                       MissileLaunchedMessage. Killed aircraft (per
+///                       DamageStateComponent) never fire — the M2
+///                       simplification keeps corpses flying, but not
+///                       fighting.
+///
+/// Returns the number of missiles launched this tick.
+std::size_t execute_brain_combat_intents(entities::EntityWorld& world,
+                                         messaging::MessageBus& bus,
+                                         const weapons::WeaponClassTable& table,
+                                         double sim_time_s);
+
+/// Turn a spawned brain into a fighting brain: enables the combat ladder
+/// and configures the BVR fire-control envelope from the weapon class
+/// table (employment envelope [min range, 0.5 * max range] in NM — the
+/// AIM-120C's 40 NM aerodynamic boundary becomes a ~20 NM doctrine-safe
+/// R_ne; when the WST import replaces the table the envelope follows the
+/// real cards). The host then installs its detection policy on
+/// brain->sensors() (typically a RadarBackedDetectionPolicy it owns).
+void configure_brain_combat(f4::ai::BrainComponent& brain,
+                            const weapons::WeaponClassTable& table);
 
 } // namespace f4::simulation

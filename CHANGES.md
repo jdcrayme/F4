@@ -1,5 +1,55 @@
 # F4 Cleanup Pass — Changes Summary
 
+## BVR Intercept Scenario — The Fight You Can Watch (M4-SCENARIO-1)
+
+**The AI-vs-AI BVR engagement is now a scenario you can fly as a spectator:
+`scenarios/bvr_intercept.json` spawns EAGLE1 (blue) vs BANDIT1 (red), both
+brains fight autonomously through the M3 chain, and the scenario-player
+renders the whole thing — missiles with contrails and pursuit lines, a
+brevity COMBAT transcript (FOX 3 / spike / splash), the watched aircraft's
+RWR picture, and a Tab key to switch which jet you ride with. The engine
+side of the observability is a new engine-agnostic `CombatTranscript` in
+f4-simulation (headless-tested), so the narration exists with or without a
+window.**
+
+| Area | Change |
+|------|--------|
+| `f4-simulation` — CombatTranscript (new) | Subscribes to the combat bus transitions (radar acquire/drop, RWR lock/launch, missile launch/detonate, damage, kill) and formats them as brevity radio calls into a ring buffer: `"EAGLE1: FOX 3, AIM-120C away on BANDIT1."`, `"BANDIT1: Spike from EAGLE1, 13 NM."`, `"C2: Splash BANDIT1!"`. Callsigns resolve via the `aircraft_entities()` ↔ `scenario().aircraft` index map; launch brevity follows the weapon's guidance kind (`missile_brevity_word()`: ActiveRadar→FOX 3, SemiActiveRadar→FOX 1, Ir→FOX 2). Severity (Info/Warning/Kill) ships on every entry for hosts to color-code. Engine-agnostic: no renderer, no window — tested headless. |
+| `f4-scenario-player` — scenario | New `scenarios/bvr_intercept.json.in` (registered in the root CMake template list): two spawn-in-air F-16s, blue 506 kt 13 NM behind red 420 kt, both northbound — the same deterministic stern-chase geometry the M3 E2E test proves (detection inside the Pd=1 knee, AMRAAM flyout, kill, disengage). `combat: {enabled: true, radar_rng_seed: 777}`. 10-minute tick budget; the fight resolves in ~1-2. |
+| `f4-scenario-player` — combat view | Missiles render procedurally (they carry no KoreaObj visual record): a bright cylinder body along the velocity vector, a 500-ft wire-sphere tactical marker (visible at BVR zoom), a fading contrail sampled once per frame (900 points ≈ 15 s), and a thin red line to the assigned target that makes the proportional-navigation pursuit visible. A **COMBAT** panel under the ATC transcript draws the CombatTranscript entries color-coded by severity (white/amber/red). |
+| `f4-scenario-player` — watched aircraft | The HUD, follow camera (C), focus (F), and FCS panel (F3) now track the **watched** aircraft instead of always the first: **Tab** cycles (bvr_intercept: EAGLE1 ↔ BANDIT1), an ImGui "Watched" combo does the same. The HUD gains an RWR line (`clear` / `SPIKE (locked)` / `MISSILE LAUNCH!` — the same flag the MissileModule defends on) and a live-missile count for combat scenarios. Also fixed: non-primary *scenario aircraft* were gated by the "Show airport" toggle (the bandit disappeared with the runway); aircraft-vs-feature gating now uses the `aircraft_entities()` list. |
+| Tests | 4 new (suite **1,577/1,577 — 100%**): 3× CombatTranscript (brevity-word mapping, ring-buffer + callsign fallback + capacity/clear semantics, and a full E2E narration of the AI-vs-AI fight — every link from radar contact to splash asserted on the transcript), plus **BvrInterceptScenarioFilePlaysOut**: loads the *shipped, build-configured* `scenarios/bvr_intercept.json` (not an in-memory copy), flies it, and asserts launch → kill → attribution → missile sweep, so a typo in the file the player actually reads can never hide behind the in-memory test. |
+
+**How to watch the fight** (needs a build with the scenario player on —
+X11/OpenGL, unlike the headless CI):
+
+```
+f4-scenario-player <build>/scenarios/bvr_intercept.json --run --follow --camera-distance 12000
+```
+
+Space pauses, Tab flips between EAGLE1 and BANDIT1, the speed slider
+fast-forwards the boring transit, and the COMBAT panel (top-right) narrates.
+The scenario starts PAUSED without `--run`.
+
+## M3 Tactics — The AI Fights (M3-TACTICS-1)
+
+**The brains now fight the war themselves: BVRModule engages, MissileModule
+defends, and the E2E test drives two AI flights through a complete
+autonomous kill chain with nothing but `Simulation::tick()`. Two real
+engine bugs surfaced on the way: missiles were invisible to the victim's
+RWR (missing ROLE tag), and red-team brains were blind to blue fighters
+(blue-biased hostility).**
+
+| Area | Change |
+|------|--------|
+| `f4-ai` — BVRModule (new) | The offensive BVR fight (AI_IMPLEMENTATION_PLAN Step 8): `None → Entering → Employing → Separating` state machine, plan range bands (entry ring 1.3×Rne, WVR 3 NM, merge/bugout 2 NM), lead-pursuit steering, 45° crank support window after each shot, cold- turned bug-out with range-reopen hysteresis. Engine-agnostic by contract: it never touches f4-weapons/f4-sensors — the radar lock and weapon release leave as **intents** (`wants_lock()`, one-tick `release_pulse()`) that the host executes. |
+| `f4-ai` — MissileModule (new) | Two roles in one class (Step 10, mengage.cpp + mdefeat.cpp): **fire control** — deterministic Pk model (range × aspect), employment envelope, 4 s cooldown, shoot-shoot allotment, weapons-grade-picture gate (RWR-only contacts never fire); **missile defeat** — beam maneuver (nearest ±90° off the threat bearing), full-AB outrun, `has_override` defensive preempt, chaff/flare intents, and a 2 s defeat-linger so the jink doesn't stop on the detonation tick. |
+| `f4-ai` — BrainComponent | The DigitalBrain priority ladder's first rungs (Step 12): while Enroute, `Defensive > BVR > navigation`. The brain owns a SensorFusion (initialized lazily; the host installs the detection policy) and exposes `CombatIntent` (lock + release) each tick; falling off the ladder resets the nav steering integrators (the same transient guard the phase handoffs use). `mode_name()` reports `BVREngage` / `MissileDefeat`. |
+| `f4-ai` — SensorFusion | Two-sided combat fixes: hostility is now **own-relative** (target team ≠ ownship team; legacy "red ⇒ hostile" only as the no-tag fallback — a red brain was blind to blue fighters before), and `missile_threat()`/missile threat-scoring are **hostile-only** (your own missile must never read as an incoming threat — the shooter would have defended against its own AMRAAM). |
+| `f4-simulation` | `configure_brain_combat()` turns a spawned brain into a fighting brain (ladder on + table-derived envelope: AIM-120C's 40 NM boundary → 20 NM doctrine Rne). `RadarBackedDetectionPolicy` now answers all-false for **killed** entities (corpses don't paint — the M3 host decision radar_component.hpp deferred here), so the shooter's BVR sees `LostTarget` and goes home instead of pumping the shoot-shoot allotment into a still-flying airframe. New `execute_brain_combat_intents()` runs between `update_all` and `update_rwr` each tick: lock intents → `command_track` (idempotent until the track is live), release intents → `launch_missile` through the sim's table (longest-range A/A station first — AMRAAM before Sidewinder; killed aircraft never fire). `Simulation` owns one policy per spawned combat aircraft. |
+| `f4-weapons` | **Bug fix**: `launch_missile` never set the `ROLE="missile"` tag — `update_rwr`'s launch detection and SensorFusion's `is_missile` classification both key on it, so the victim's RWR was blind to every launch and missile defense was impossible. Found by the AI-vs-AI E2E, not by reading code. |
+| Tests | 29 new: 14 BVRModule (range bands, state ladder, fire-control pulses/cooldown/shoot-shoot, crank offset band, bug-out hysteresis, RWR-only hold-fire, corpse reset), 11 MissileModule (Pk monotonicity/bounds, fire gates, beam = 90° off threat bearing, override + AB, chaff/flare conditions, linger, own-team refusal), 3 SensorFusion (own-relative hostility ×2, hostile-only missile threats), 1 E2E: **AiVersusAiBvrEngagement** — two AI flights, zero test-driven steering, the whole OODA loop (detect → lock intent → fire intent → victim RWR launch warning → beam defense → AMRAAM kill → corpse filter → disengage → nav resumes) asserted end to end. Full suite: **1,573/1,573 — 100%**, zero warnings. |
+
 ## Combat Chain Integration — M3 Step 1 (COMBAT-INT-1)
 
 **f4-weapons and f4-sensors are no longer unconsumed leaf libraries: the

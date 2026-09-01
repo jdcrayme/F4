@@ -29,9 +29,11 @@
 //   - EWMA smoothing: per-update delta is computed against the previous
 //     refresh's snapshot, then blended 0.85 (old) / 0.15 (new). The rate is
 //     normalized by the update interval so it's in per-second units.
-//   - Hostility is determined by the entity's "team" tag. The simple rule:
-//     team="red" => hostile. (Future: real team comparison via the campaign
-//     team-stance data.)
+//   - Hostility is determined by the entity's "team" tag, OWN-RELATIVE
+//     since M3 tactics: hostile = (target team != ownship team). An
+//     ownship without a team tag falls back to the legacy blue-perspective
+//     rule (team "red" => hostile). (Future: real team comparison via the
+//     campaign team-stance data.)
 //   - Detection sources are computed AFTER geometry so they can be range-gated.
 //     GCI is always true (it sees everything within the theater by definition).
 //
@@ -41,6 +43,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 #include <vector>
 
 #include <f4/ai/ai_brain.hpp>
@@ -134,7 +137,10 @@ public:
     /// and maneuvering aircraft). Returns nullptr if none.
     [[nodiscard]] const TargetInfo* threat_target() const noexcept;
 
-    /// Nearest visible incoming missile. Returns nullptr if none.
+    /// Nearest visible HOSTILE incoming missile. Returns nullptr if none
+    /// (or if the only missiles in flight are same-team — your own shot
+    /// must never read as a threat to defend against; launch_missile
+    /// copies the shooter's team onto the missile entity).
     [[nodiscard]] const TargetInfo* missile_threat() const noexcept;
 
     /// Time until next scheduled target list refresh (seconds).
@@ -192,6 +198,12 @@ private:
     SkillLevel skill_{SkillLevel::Rookie};
     Config cfg_{};
     DetectionPolicy* policy_{nullptr};
+
+    /// Ownship's TEAM tag, resolved at each rebuild. Own-relative
+    /// hostility (M3 tactics): target.is_hostile = (target team !=
+    /// own_team_). Empty = ownship carries no team tag => the legacy
+    /// blue-perspective rule ("red" => hostile) applies.
+    std::string own_team_{};
 
     double update_timer_{0.0};
     std::vector<TargetInfo> targets_;

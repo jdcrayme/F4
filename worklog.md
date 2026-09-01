@@ -3222,3 +3222,192 @@ Stage Summary:
   rendered bvr_intercept scenario + recorder combat events when it lands),
   then MissileModule defeat tactics off RwrComponent transitions, WVR,
   Wingman, DigitalBrain 26-mode arbiter.
+
+---
+Task ID: M3-TACTICS-1
+Task: M3 tactic modules, first landing — BVRModule + MissileModule + the
+BrainComponent combat ladder + the host-side intent driver (the
+AI_IMPLEMENTATION_PLAN Steps 8/10/12 cut that makes two AI flights fight
+each other through Simulation::tick with no external steering).
+
+Work Log:
+- SensorFusion two-sided fixes (prerequisite — without them red brains
+  cannot fight): hostility became own-relative (target team != ownship
+  team; the legacy "red => hostile" survives only as the no-team-tag
+  fallback so every pre-existing test keeps its behavior), and
+  missile_threat() + the 200-point missile threat score became
+  hostile-only (launch_missile copies the shooter's team onto the
+  missile, so own/wingman shots no longer read as threats to defend
+  against — the shooter would have beamed away from its own AMRAAM).
+- f4-ai BVRModule (modules/bvr_module.{hpp,cpp}): None/Entering/
+  Employing/Separating SM on f4-state-machine with a trace; plan range
+  bands (entry 1.3xRne = 26 NM default, WVR 3 NM, merge 2 NM); lead
+  pursuit (t_go from EWMA rangedot, lead clamped to 40% of range); 45-deg
+  crank window (8 s) after each shot; BugOut cold-turn with reopen
+  hysteresis (1.2x entry ring + 5 s minimum so corpses cannot yo-yo the
+  SM); re-target runs the SM through Lost->Detected->InRange so the trace
+  records the swap. ENGINE-AGNOSTIC CONTRACT: no world/bus/weapons/
+  sensors — lock and release leave as intents (wants_lock(), one-tick
+  release_pulse()).
+- f4-ai MissileModule (modules/missile_module.{hpp,cpp}): fire control
+  (Pk = base * range_factor * aspect_factor, deterministic + monotonic;
+  envelope + 4 s cooldown + shoot-shoot allotment; WEAPONS-GRADE-PICTURE
+  gate: detected_by_radar || detected_by_gci — RWR-only contacts crank
+  and defend but never launch blind) and missile defeat (nearest-beam
+  +/-90-deg turn, defeat altitude captured on entry, AB rail, has_override
+  preempt, chaff intent above 1 NM, flare intent inside the 3 NM IR
+  envelope, 2 s defeat-linger that finishes the jink after the detonation
+  sweep empties the picture). The BVR module composes one instance as its
+  fire control (tick_cooldown burned by BVRModule::update; the brain
+  holds a second instance for defense).
+- BrainComponent: the DigitalBrain priority ladder's first rungs — while
+  Enroute, Defensive (missile_threat) > BVR (threat_target) > mission
+  module. Owns a SensorFusion (lazy init with world+bus; skill Veteran),
+  refreshes every tick while a missile threat is visible (the beam fight
+  needs a fresh picture; the stale entry keeps the refresh armed), and
+  publishes CombatIntent{radar_lock, lock_target_id, weapon_release,
+  release_target_id} each tick. Falling off the ladder resets nav
+  steering integrators (same transient-guard class the phase handoffs
+  use). mode_name()/state_name() report BVREngage/MissileDefeat + the BVR
+  state. Combat only preempts Enroute — Ground aircraft don't fight and
+  Approach aircraft have disengaged.
+- f4-simulation combat_bridge: configure_brain_combat() (ladder on +
+  envelope from the LONGEST-RANGE A/A class — find_by_category returns
+  the AIM-9M first and would scope the whole doctrine to a heat-seeker's
+  10 NM; AIM-120C 40 NM boundary -> 20 NM R_ne, min 0.5 NM);
+  RadarBackedDetectionPolicy::classify answers all-false for killed
+  entities (the corpse decision radar_component.hpp deferred to the host
+  — the shooter's fusion drops the corpse, BVR sees LostTarget, stops
+  engaging, and goes home instead of dumping the shoot-shoot allotment
+  into a still-flying airframe); execute_brain_combat_intents() runs
+  between update_all and update_rwr (lock -> command_track, idempotent
+  until the track store is live; release -> launch_missile through the
+  sim table from the longest-range loaded A/A station; killed aircraft
+  never fire). Simulation stores one policy per combat aircraft
+  (combat_policies_ vector) and installs it on the brain's SensorFusion
+  at spawn.
+- REAL BUG (found by the E2E, invisible to every existing test):
+  launch_missile never set the ROLE="missile" tag. update_rwr's launch
+  detection and SensorFusion's is_missile classification both key on that
+  tag, so no victim's RWR ever saw a launch — missile defense was
+  structurally impossible. Fixed in f4-weapons/src/missile_battery.cpp
+  (set alongside the team copy). The old E2E never noticed because it
+  only asserted the LOCK warning.
+- Tests (+29, total 1,573): test_bvr_module.cpp (14 — bands, state
+  ladder, invisible/friendly/missile refusals, pulse + cooldown +
+  shoot-shoot exactly-2, envelope/Pk hold-fire, RWR-only hold-fire, crank
+  30-60-deg band, cold turn + reopen hysteresis, merge bugout, pursuit
+  lead sanity, bounded output); test_missile_module.cpp (11 — Pk
+  monotonic/bounds/aspect, all fire gates, cooldown burn + engagement
+  reset semantics, empty no-override output, beam = 90-deg off the threat
+  bearing (both sides), AB rail, chaff/flare bands, linger window
+  bounds, own-team refusal, sustained defense); test_sensor_fusion.cpp
+  (+3 — red-ownship sees blue hostile / red wingman friendly, legacy
+  no-tag rule, same-team missiles are not threats); test_combat_
+  integration.cpp (+1 — AiVersusAiBvrEngagement: asserts the spawn-side
+  wiring (policies installed, envelope 20/0.5 NM), BVR + Employing
+  reached, launch by the shooter only (RWR-only pictures cannot fire),
+  <= 2 launches (shoot-shoot), victim RWR Launch warning, bandit
+  Defensive mode, kill attribution, shooter survival, disengagement
+  after the kill (corpse filter -> LostTarget -> ladder off), and zero
+  live missiles left).
+- Verification: full headless rebuild, zero warnings (GCC 14.2, -Wall
+  -Wextra -Wpedantic); FULL SUITE 1,573/1,573 — 100%, zero regressions
+  (digi missions, frames, scenario, trace, ATC, combat-integration all
+  green; the pre-existing 4 ControlLoop* remain DISABLED by design).
+
+Stage Summary:
+- Deliverable: f4-m3-tactics-1.patch on top of origin/main 74157e1
+  ("Cleanup pass" = STEP-0 + COMBAT-INT-1).
+- The combat chain now closes its loop autonomously: sensor picture ->
+  tactics -> intents -> hardware -> damage -> corpse filter -> disengage.
+  The M3 acceptance scenario ("two formations detect, engage, kill") is
+  a regression test, not a demo.
+- Deliberately deferred (documented): WVRModule (merge tactics — BVR
+  bugouts at 2 NM instead), WingmanModule (formation tactics + profiles),
+  Refuel/CollisionAvoid rungs, countermeasure consumption (chaff/flare
+  are intents until a countermeasure model exists in f4-weapons),
+  guidance-class-specific defeat (the RWR Launch warning carries no
+  weapon class — radar-missile default), skill-level parameterization
+  (fixed Veteran), recorder combat events + rendered bvr_intercept
+  scenario (M4).
+- Next: WVRModule (offensive/defensive BFM at the 3 NM merge the BVR
+  module currently hands off), then WingmanModule (2v2 becomes a
+  formation fight), then the DigitalBrain full ladder
+  (collision/ground-avoid rungs), then M4: recorder combat events + the
+  rendered BVR scenario + campaign-flights combat attachment.
+
+---
+Task ID: M4-SCENARIO-1
+Agent: main (Z)
+Task: The user asked for a scenario to test in the scenario-player. Deliver
+the rendered BVR engagement (the deferred M4 visibility half): a shipped
+bvr_intercept.json + combat observability in the player.
+
+Work Log:
+- Baseline: m3-tactics-1 @ be2d3a6 (patch delivered, not yet pushed —
+  origin/main still 74157e1). Branch m4-scenario-1.
+- f4-simulation CombatTranscript (new): subscribes to the combat bus
+  transitions (RadarTrackAcquired/Dropped, RwrWarning Lock/Launch,
+  MissileLaunched/Detonated, DamageApplied, EntityKilled) and formats
+  brevity radio calls into a ring buffer (RadioLog's API shape: size/at/
+  clear/set_capacity). Callsign map = aircraft_entities() <->
+  scenario().aircraft index alignment; "#<hex>" fallback. Launch brevity
+  from the weapon record's guidance kind via missile_brevity_word()
+  (ActiveRadar=FOX 3 / SemiActiveRadar=FOX 1 / Ir=FOX 2). Severity
+  Info/Warning/Kill per entry. Engine-agnostic (no renderer): the
+  scenario-player only DRAWS it; tests assert it headless.
+- Scenario: f4-scenario-player/scenarios/bvr_intercept.json.in registered
+  in the root F4_SCENARIO_TEMPLATES list. Same deterministic geometry the
+  M3 E2E proves (stern chase: blue 506 fps at {0,0,10000} vs red 420 fps
+  at {0,80000,10000}, both northbound, FAR_NORTH enroute, combat enabled,
+  seed 777). 36,000 ticks (10 min); fight resolves in ~1-2 min.
+- Player combat view: update_missile_trails() samples live MissileComponent
+  transforms once per rendered frame (900-pt cap, paused-skipping, stale
+  entries swept with the missiles); draw_missiles() draws a 60-ft cylinder
+  body along velocity + 500-ft wire-sphere tactical marker + fading
+  contrail + red line missile->target (PN pursuit visible). All 3D drawing
+  through the scene.overlay_3d hook (same 3D mode as the layout overlays),
+  using only Raylib primitives already proven in-repo (DrawLine3D,
+  DrawCylinderEx, DrawSphereWires).
+- COMBAT panel (draw_combat): CombatTranscript entries color-coded by
+  severity (white/amber/red), anchored under the ATC panel (draw_radio
+  records its height). Player attach: combat_log.attach(sim) in
+  load_scenario (unconditional — bus stays silent without combat).
+- Watched aircraft: HUD/FCS/camera-follow/F-focus/Tab cycle + ImGui
+  "Watched" combo over scenario.aircraft. HUD gains an RWR line (clear/
+  SPIKE/MISSILE LAUNCH from RwrComponent flags) + count_live_missiles
+  for combat scenarios. Gating fix: scenario aircraft now gate on
+  "Show aircraft" (membership in aircraft_entities()), not "first entity
+  = aircraft, everything else = airport" (the bandit used to hide with
+  the runway toggle).
+- This container has no GL headers (no sudo) — the player itself cannot
+  link here. Verification: (a) full headless build + suite 1,577/1,577 =
+  100% (4 new tests); (b) all three player translation units pass
+  g++ -fsyntax-only -Wall -Wextra against a stub raylib/raymath/imgui/
+  rlImGui header set with the real f4-*.h include chain (zero warnings
+  in player code; stubs live outside the repo).
+- Tests: test_combat_transcript.cpp (brevity word map; ring + callsign
+  fallback + capacity/clear; E2E narration of the whole fight, including
+  the design note that only EAGLE1's radar acquires — the stern-chase
+  geometry leaves EAGLE1 behind BANDIT1's north-facing scan bar, so red
+  defends on RWR alone). BvrInterceptScenarioFilePlaysOut in
+  test_combat_integration.cpp: loads the SHIPPED build-configured
+  scenarios/bvr_intercept.json (F4_SCENARIOS_DIR compile def), asserts
+  combat wiring, launch -> kill attribution -> missile sweep (ticks past
+  the first kill until the shoot-shoot follow-up is swept).
+
+Stage Summary:
+- Deliverable: f4-m4-scenario-1.patch on top of m3-tactics-1 @ be2d3a6.
+  Apply order for the user: f4-m3-tactics-1.patch, then this.
+- The M3 fight is now watchable: scenarios/bvr_intercept.json --run,
+  Tab between the jets, COMBAT panel narrates, missiles + contrails +
+  pursuit lines render. The narration itself is engine-agnostic and
+  regression-tested headless (CI keeps proving it without a GPU).
+- Deliberately deferred (documented): recorder combat-event schema +
+  combat traces (the M4 record/replay half — next), 2v2 formation
+  geometry (WingmanModule), KoreaObj missile visual record (procedural
+  draw is deliberate: no vis binding at launch), per-missile HUD
+  readouts, RWR bearing arrow on the HUD.
+- Next: WVRModule (the 2 NM merge handoff), then WingmanModule, then the
+  recorder combat events so fights replay headless.

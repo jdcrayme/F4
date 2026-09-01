@@ -166,6 +166,12 @@ const TargetInfo* SensorFusion::missile_threat() const noexcept {
     for (const auto& t : targets_) {
         if (!can_see(t)) continue;
         if (!t.is_missile) continue;
+        // HOSTILE missiles only (M3 tactics): your own missile (team copied
+        // from you at launch) or a wingman's missile passing by is not a
+        // threat to defend against — without this filter the shooter's own
+        // AMRAAM became its nearest "incoming" missile the tick after
+        // release and the brain immediately broke off its own engagement.
+        if (!t.is_hostile) continue;
         if (!best || t.range_ft < best->range_ft) {
             best = &t;
         }
@@ -222,6 +228,13 @@ void SensorFusion::rebuild_target_list() {
                 ownship_pos = ownship_tf->position;
                 ownship_vel = ownship_tf->velocity();
             }
+            // Cache the ownship's team for the own-relative hostility rule.
+            // Empty = no tag => legacy blue-perspective rule downstream.
+            if (auto team_tag = h.get_tag(TEAM)) {
+                if (const auto* s = team_tag->as_string()) {
+                    own_team_ = *s;
+                }
+            }
             break;
         }
     }
@@ -240,12 +253,20 @@ void SensorFusion::rebuild_target_list() {
         t.position  = tf->position;
         t.velocity  = tf->velocity();
 
-        // Hostility check via team tag. Simple rule: team="red" => hostile.
-        // (Future: real team comparison via campaign team-stance data —
-        // TeamComponent::stance[other_slot] tells us if two teams are at war.)
+        // Hostility check via team tag — OWN-RELATIVE (M3 tactics): a
+        // target is hostile when its team differs from the OWNSHIP's team.
+        // The old blue-perspective rule (team "red" => hostile) made a
+        // red-team brain blind to blue fighters, so two-sided AI combat
+        // could never work: the red bandit scored the blue shooter at 0,
+        // never saw a threat, never defended. When the ownship itself
+        // carries NO team tag (single-ship legacy tests), the legacy rule
+        // ("red" => hostile) is kept so existing scenarios behave
+        // identically. (Future: campaign team-stance data — TeamComponent
+        // stance[other_slot] — replaces the 2-team assumption.)
         if (auto team_tag = h.get_tag(TEAM)) {
             if (const auto* s = team_tag->as_string()) {
-                t.is_hostile = (*s == "red");
+                t.is_hostile = own_team_.empty() ? (*s == "red")
+                                                 : (*s != own_team_);
             }
         }
         // Missile classification via role tag.
@@ -356,9 +377,13 @@ void SensorFusion::compute_threat_score(TargetInfo& t) {
             score *= 0.5;
         }
     }
-    // Missiles are always max-threat — a missile in flight is the most
-    // urgent thing to deal with regardless of who launched it.
-    if (t.is_missile) {
+    // Missiles are max-threat ONLY when hostile (M3 tactics): a missile
+    // in flight from our own wingman — or the one WE just fired — must
+    // never outrank the enemy fighter we are engaging, or the shooter
+    // would start defending against its own weapon. launch_missile()
+    // copies the shooter's team tag onto the missile, so team comparison
+    // cleanly separates "ours" from "theirs".
+    if (t.is_missile && t.is_hostile) {
         score = 200.0;
     }
     t.threat_score = score;
