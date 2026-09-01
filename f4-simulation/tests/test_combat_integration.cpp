@@ -33,6 +33,7 @@
 
 #include <f4/ai/brain_component.hpp>
 #include <f4/ai/modules/bvr_module.hpp>
+#include <f4/ai/modules/wvr_module.hpp>
 #include <f4/ai/sensor_fusion.hpp>
 #include <f4/entities/entity.hpp>
 #include <f4/messaging/bus.hpp>
@@ -541,6 +542,204 @@ TEST(CombatIntegration, AiVersusAiBvrEngagement) {
 }
 
 // ============================================================================
+// 5b. M3 tactics Step 9 E2E: the MERGE. Two fighters start 5 NM apart,
+//     head-on, with the AMRAAM exchange suppressed (combat block
+//     "bvr_hold": radar missiles tight — SPINS-style). The bandit holds
+//     all fire (per-aircraft "hold_fire": a maneuvering target drone —
+//     RWR-only, it can see EAGLE1 through the lock warning but the
+//     weapons-grade gate must keep it from firing blind). The fight is
+//     decided INSIDE the 3 NM WVR entry band: EAGLE1's brain hands off
+//     from BVR to WVR, the merge geometry classifies neutral, the IR fire
+//     control takes the opportunity shot (FOX 2 off the wingtip — the
+//     driver's WVR station preference), the bandit's RWR sees the launch
+//     and MissileModule defends, and the heater ends it. This is the
+//     plan's "Range band transitions (BVR->WVR at 3NM)" validation, run
+//     through the whole stack.
+// ============================================================================
+TEST(CombatIntegration, AiVersusAiWvrMergeFight) {
+    const auto f16 = f16_config_path();
+    if (f16.empty()) GTEST_SKIP() << "f16.json fixture not generated";
+
+    // Same shape as the BVR scenario, but: head-on (bandit southbound),
+    // 5 NM apart (30,380 ft), 15,000 ft, hit points tuned so a heater
+    // hit (24 lb warhead, ~14 damage at fuze range) ends the fight.
+    const std::string json = R"({
+  "name": "wvr_merge_integration",
+  "theater": "korea",
+  "aircraft": [
+    { "callsign": "EAGLE1", "aircraft_config_path": ")" + f16 + R"(",
+      "aircraft_name": "F-16C_50", "vis_type_index": 1052,
+      "parking_spot": { "x": 0.0, "y": 0.0, "z": 15000.0 },
+      "heading_rad": 0.0, "initial_fuel_lbs": 6500.0,
+      "initial_vt_fps": 506.0, "spawn_in_air": true, "team": "blue" },
+    { "callsign": "BANDIT1", "aircraft_config_path": ")" + f16 + R"(",
+      "aircraft_name": "F-16C_50", "vis_type_index": 1052,
+      "parking_spot": { "x": 0.0, "y": 30380.0, "z": 15000.0 },
+      "heading_rad": 3.14159265358979, "initial_fuel_lbs": 6500.0,
+      "initial_vt_fps": 460.0, "spawn_in_air": true, "team": "red",
+      "hold_fire": true }
+  ],
+  "airfield": {
+    "active_runway_id": 36, "active_runway_name": "Rwy 36",
+    "runway_heading_rad": 0.0,
+    "threshold_position": { "x": 0.0, "y": -5000.0, "z": 0.0 },
+    "runway_end_position":  { "x": 0.0, "y": 5000.0, "z": 0.0 },
+    "threshold_altitude_ft": 0.0, "departure_altitude_ft": 15000.0,
+    "taxi_route": [ { "x": 0.0, "y": -5000.0, "z": 0.0 },
+                    { "x": 0.0, "y": 0.0, "z": 0.0 } ]
+  },
+  "waypoints": [
+    { "name": "FAR_NORTH", "position": { "x": 0.0, "y": 500000.0, "z": 15000.0 },
+      "speed_kts": 420.0 }
+  ],
+  "start_enroute": true,
+  "sim_dt": 0.016666666666666,
+  "total_ticks": 30000,
+  "record": false,
+  "combat": { "enabled": true, "radar_rng_seed": 888,
+              "fighter_hit_points": 10, "bvr_hold": true }
+})";
+    auto scenario = load_scenario_from_string(json);
+    Simulation sim(std::move(scenario), std::filesystem::path("."));
+    sim.initialize();
+
+    CombatEventLog log;
+    log.attach(sim.bus());
+
+    const auto eagle_id  = sim.aircraft_entities()[0];  // EAGLE1 (blue)
+    const auto bandit_id = sim.aircraft_entities()[1];  // BANDIT1 (red)
+    entities::EntityHandle eagle(eagle_id, &sim.world());
+    entities::EntityHandle bandit(bandit_id, &sim.world());
+
+    auto* eagle_brain  = eagle.get<f4::ai::BrainComponent>();
+    auto* bandit_brain = bandit.get<f4::ai::BrainComponent>();
+    ASSERT_NE(eagle_brain, nullptr);
+    ASSERT_NE(bandit_brain, nullptr);
+
+    // The ROE wiring the spawn path did: EAGLE1 BVR-tight but heaters
+    // free; the bandit fully tight (both modules).
+    EXPECT_TRUE(eagle_brain->bvr().fire().config().hold_fire);
+    EXPECT_FALSE(eagle_brain->wvr().fire().config().hold_fire);
+    EXPECT_TRUE(bandit_brain->bvr().fire().config().hold_fire);
+    EXPECT_TRUE(bandit_brain->wvr().fire().config().hold_fire);
+    // The IR envelope came from the AIM-9M class: [0.5, 8] NM.
+    EXPECT_NEAR(eagle_brain->wvr().fire().config().min_pk_range_nm,
+                0.5, 0.01);
+    EXPECT_NEAR(eagle_brain->wvr().fire().config().max_pk_range_nm,
+                8.0, 0.01);
+
+    // Fly the merge. Budget 90 s (detect ~3 s, closure to 3 NM ~30 s,
+    // heater flyout ~5 s, sweep, disengage).
+    bool eagle_wvr_seen = false;
+    bool eagle_merge_seen = false;
+    bool bandit_wvr_seen = false;
+    bool bandit_defense_seen = false;
+    bool disengaged_after_kill = false;
+    int kill_tick = -1;
+    const int max_ticks = static_cast<int>(90.0 / kDt);
+    for (int i = 0; i < max_ticks; ++i) {
+        sim.tick(kDt);
+
+        if (eagle_brain->combat_mode() ==
+            f4::ai::BrainComponent::CombatMode::WVR) {
+            eagle_wvr_seen = true;
+            if (eagle_brain->wvr().state() ==
+                f4::ai::modules::WVRState::Merge) {
+                eagle_merge_seen = true;
+            }
+        }
+        if (bandit_brain->combat_mode() ==
+            f4::ai::BrainComponent::CombatMode::WVR) {
+            bandit_wvr_seen = true;
+        }
+        if (bandit_brain->combat_mode() ==
+            f4::ai::BrainComponent::CombatMode::Defensive) {
+            bandit_defense_seen = true;
+        }
+        if (kill_tick < 0 && !log.killed.empty()) kill_tick = i;
+        if (kill_tick >= 0 && i > kill_tick + static_cast<int>(10.0 / kDt)) {
+            if (eagle_brain->combat_mode() ==
+                f4::ai::BrainComponent::CombatMode::None) {
+                disengaged_after_kill = true;
+            }
+        }
+        // Early exit once the fight is resolved, the sky is clean, AND
+        // the shooter has had its disengage window (kill + 10 s: the
+        // corpse filter drops the target at the next sensor refresh,
+        // the WVR module sees LostTarget, the brain falls to nav).
+        if (kill_tick >= 0 && weapons::count_live_missiles(sim.world()) == 0u
+            && i > kill_tick + static_cast<int>(5.0 / kDt)
+            && disengaged_after_kill) {
+            break;
+        }
+    }
+
+    // --- The band handoff ran on its own -----------------------------------
+    ASSERT_TRUE(eagle_wvr_seen)
+        << "EAGLE1 never entered the WVR rung (BVR->WVR handoff broken)";
+    ASSERT_TRUE(eagle_merge_seen)
+        << "EAGLE1's WVR module never classified the merge";
+    ASSERT_TRUE(bandit_wvr_seen)
+        << "the bandit (RWR-only picture) never entered the WVR rung";
+
+    // --- The IR employment: heaters only, shooter only ----------------------
+    ASSERT_GE(log.launched.size(), 1u) << "the merge never produced a shot";
+    for (const auto& m : log.launched) {
+        EXPECT_EQ(m.shooter_id, eagle_id.value)
+            << "the hold_fire bandit must never launch";
+        const auto* rec = sim.weapon_table().get(m.weapon_handle);
+        ASSERT_NE(rec, nullptr);
+        EXPECT_EQ(rec->guidance, weapons::GuidanceKind::Ir)
+            << "the WVR shot must be a heater (driver station preference)";
+    }
+    EXPECT_LE(log.launched.size(), 2u);  // IR shoot-shoot doctrine
+
+    // The AMRAAMs never left the rails despite BVR Employing (bvr_hold).
+    const auto* eagle_store = eagle.get<weapons::WeaponStoreComponent>();
+    ASSERT_NE(eagle_store, nullptr);
+    const auto amraam_handle =
+        sim.weapon_table().find_by_name("AIM-120C");
+    const auto heater_handle = sim.weapon_table().find_by_name("AIM-9M");
+    ASSERT_NE(amraam_handle, weapons::kInvalidWeapon);
+    ASSERT_NE(heater_handle, weapons::kInvalidWeapon);
+    EXPECT_EQ(eagle_store->count_for(amraam_handle), 8)
+        << "an AMRAAM left the rail despite bvr_hold";
+    EXPECT_LT(eagle_store->count_for(heater_handle), 2)
+        << "no heater was expended";
+
+    // --- The victim's defensive chain --------------------------------------
+    ASSERT_TRUE(bandit_defense_seen)
+        << "the bandit never defended against the heater";
+    bool bandit_saw_launch = false;
+    for (const auto& w : log.rwr) {
+        if (w.type == sensors::RwrWarningType::Launch &&
+            w.victim_id == bandit_id.value) {
+            bandit_saw_launch = true;
+        }
+    }
+    EXPECT_TRUE(bandit_saw_launch)
+        << "the victim's RWR never saw the IR launch";
+
+    // --- The outcome --------------------------------------------------------
+    ASSERT_NE(kill_tick, -1) << "the heater never killed the bandit";
+    for (const auto& k : log.killed) {
+        EXPECT_EQ(k.target_id, bandit_id.value);
+        EXPECT_EQ(k.shooter_id, eagle_id.value);
+    }
+    const auto* bandit_dmg = bandit.get<entities::DamageStateComponent>();
+    ASSERT_NE(bandit_dmg, nullptr);
+    EXPECT_TRUE(bandit_dmg->killed);
+
+    const auto* eagle_dmg = eagle.get<entities::DamageStateComponent>();
+    ASSERT_NE(eagle_dmg, nullptr);
+    EXPECT_FALSE(eagle_dmg->killed);
+    EXPECT_TRUE(disengaged_after_kill)
+        << "EAGLE1 never disengaged after the merge kill";
+
+    EXPECT_EQ(weapons::count_live_missiles(sim.world()), 0u);
+}
+
+// ============================================================================
 // 6. The SHIPPED scenario file plays out: the player's bvr_intercept.json
 //    (configured into <build>/scenarios by the root CMakeLists) must load
 //    and produce the same AI-vs-AI engagement the in-memory E2E proved.
@@ -593,6 +792,89 @@ TEST(CombatIntegration, BvrInterceptScenarioFilePlaysOut) {
     for (const auto& k : log.killed) {
         EXPECT_EQ(k.target_id, bandit_id.value);
         EXPECT_EQ(k.shooter_id, shooter_id.value);
+    }
+    EXPECT_EQ(weapons::count_live_missiles(sim.world()), 0u);
+#else
+    GTEST_SKIP() << "F4_SCENARIOS_DIR not defined for this target";
+#endif
+}
+
+// ============================================================================
+// 7. The SHIPPED scenario file plays out: the player's wvr_merge.json —
+//    the merge the user watches in the scenario-player must be the same
+//    fight the in-memory E2E (5b) proved: BVR-tight closure, WVR handoff
+//    inside 3 NM, FOX 2 off the wingtip, the drone defends, the heater
+//    ends it.
+// ============================================================================
+TEST(CombatIntegration, WvrMergeScenarioFilePlaysOut) {
+#ifdef F4_SCENARIOS_DIR
+    const std::filesystem::path file =
+        std::filesystem::path(F4_SCENARIOS_DIR) / "wvr_merge.json";
+    if (!std::filesystem::exists(file)) GTEST_SKIP()
+        << "wvr_merge.json not configured (build it first)";
+
+    const auto scenario = load_scenario(file);
+
+    // The shipped file must ask for the merge.
+    ASSERT_TRUE(scenario.combat.enabled);
+    ASSERT_TRUE(scenario.combat.bvr_hold);
+    ASSERT_EQ(scenario.aircraft.size(), 2u);
+    EXPECT_EQ(scenario.aircraft[0].callsign, "EAGLE1");
+    EXPECT_EQ(scenario.aircraft[1].callsign, "BANDIT1");
+    EXPECT_FALSE(scenario.aircraft[0].hold_fire);
+    EXPECT_TRUE(scenario.aircraft[1].hold_fire);
+
+    Simulation sim(scenario, file.parent_path());
+    sim.initialize();
+
+    CombatEventLog log;
+    log.attach(sim.bus());
+
+    const auto eagle_id  = sim.aircraft_entities()[0];
+    const auto bandit_id = sim.aircraft_entities()[1];
+
+    bool wvr_seen = false;
+    bool defense_seen = false;
+    int kill_tick = -1;
+    const int max_ticks = static_cast<int>(90.0 / kDt);
+    for (int i = 0; i < max_ticks; ++i) {
+        sim.tick(kDt);
+
+        auto* eagle_brain = entities::EntityHandle(eagle_id, &sim.world())
+            .get<f4::ai::BrainComponent>();
+        if (eagle_brain != nullptr &&
+            eagle_brain->combat_mode() ==
+                f4::ai::BrainComponent::CombatMode::WVR) {
+            wvr_seen = true;
+        }
+        auto* bandit_brain = entities::EntityHandle(bandit_id, &sim.world())
+            .get<f4::ai::BrainComponent>();
+        if (bandit_brain != nullptr &&
+            bandit_brain->combat_mode() ==
+                f4::ai::BrainComponent::CombatMode::Defensive) {
+            defense_seen = true;
+        }
+
+        if (kill_tick < 0 && !log.killed.empty()) kill_tick = i;
+        if (kill_tick >= 0 && i > kill_tick + static_cast<int>(10.0 / kDt)) {
+            if (weapons::count_live_missiles(sim.world()) == 0u) break;
+        }
+    }
+
+    ASSERT_NE(kill_tick, -1) << "the shipped merge scenario never resolved";
+    ASSERT_TRUE(wvr_seen) << "EAGLE1 never reached the WVR rung";
+    ASSERT_TRUE(defense_seen) << "the drone never defended the heater";
+    ASSERT_GE(log.launched.size(), 1u);
+    for (const auto& m : log.launched) {
+        EXPECT_EQ(m.shooter_id, eagle_id.value);
+        const auto* rec = sim.weapon_table().get(m.weapon_handle);
+        ASSERT_NE(rec, nullptr);
+        EXPECT_EQ(rec->guidance, weapons::GuidanceKind::Ir)
+            << "the merge shot must be a heater";
+    }
+    for (const auto& k : log.killed) {
+        EXPECT_EQ(k.target_id, bandit_id.value);
+        EXPECT_EQ(k.shooter_id, eagle_id.value);
     }
     EXPECT_EQ(weapons::count_live_missiles(sim.world()), 0u);
 #else

@@ -1,5 +1,49 @@
 # F4 Cleanup Pass — Changes Summary
 
+## WVR Merge — The AI Fights Inside 3 NM (M3-TACTICS-2)
+
+**The last band of the fight is flown: BVRModule now hands off to a new
+WVRModule inside the plan's 3 NM WVR entry band, and the merge plays out
+autonomously — geometry sorting (Merge/Offensive/Defensive/BugOut),
+lead-pursuit closure, break-turn jinks with reversals, overshoot control,
+and IR employment (FOX 2 off the wingtip before any AMRAAM leaves the
+trench). A new shipped scenario, `scenarios/wvr_merge.json`, gives the
+scenario-player the merge to watch: radar-missile-tight ROE walks two
+fighters head-on from 5 NM into the band, EAGLE1's heater ends it while
+the fire-holding bandit drone defends. The suite is now 1,597/1,597.**
+
+| Area | Change |
+|------|--------|
+| `f4-ai` — WVRModule (new) | The plan §5 Step 9 module (`modules/wvr_module.{hpp,cpp}`, ~600 lines): a 5-state FSM (None/Merge/Offensive/Defensive/BugOut — FreeFalcon wvrengage.cpp's ladder) with dwell-guarded geometry classification from the SensorFusion angles (`ata`/`ata_from`: we hold the angle when the target is in our forward cone and pointed away; they hold it when behind us and nose-on), the plan's 11-value `WVRTactic` enum with the flown subset documented (RandP/Straight at the merge, OverB overshoot control, GunJink defensive break turns, BugOut), and an embedded IR `MissileModule` fire control (opportunity shots inside the forward cone — a heater at a target on our six has nothing to track; 3 s cadence, shoot-shoot 2). Defensive steering is the gunsjink: ±60 deg break turns off the threat bearing reversing every 3 s with an altitude weave, throttle on the rail. Bug-out doctrine requires the IR allotment spent AND a sustained defense (grace timer), then hands the reopened fight back past the 4.5 NM exit ring. |
+| `f4-ai` — BrainComponent ladder | New `CombatMode::WVR` rung between Defensive and BVR: inside `bvr().config().wvr_entry_range_nm` (3 NM, plan constant) the brain resets BVR and hands the fight to WVRModule; past `wvr().config().wvr_exit_range_nm` (4.5 NM hysteresis) it hands back — one source per boundary (entry lives in the BVR band taxonomy, exit in the WVR config). Missile defense still preempts everything; falling off the ladder resets the nav integrators. `mode_name()`/`state_name()`/`combat_mode_name()` report `WVREngage` + the WVR states for HUDs and traces. |
+| `f4-ai` — ROE in the fire control | `MissileModule::Config::hold_fire` (weapons tight) — the gate lives in `should_fire()` itself, NOT only at the brain's intent layer: a module-level hold means no pulse, no phantom shot counted, and no doctrine separation can trigger on a launch that never happened (the intent-only gate would have let BVR count two phantom AMRAAMs under `bvr_hold` and bug out before the merge). Per-aircraft `hold_fire` disarms both fire controls; the combat block's `bvr_hold` disarms the BVR one alone. |
+| `f4-simulation` — combat bridge | `configure_brain_combat()` now configures BOTH envelopes from the weapon class table (BVR from the longest-range A/A class as before; WVR/IR from the IR-guided class — AIM-9M's [0.5, 8] NM doctrine window) and installs the ROE flags at module level. `execute_brain_combat_intents()` gains WVR-aware station doctrine: when the shooter's brain is in the WVR rung, IR-guided stations fire first, then the shortest-range A/A — FOX 2 off the wingtip before an AMRAAM out of the trench. |
+| Scenario schema | Per-aircraft `"hold_fire": true` (that aircraft never releases — it still locks, maneuvers, defends; the difference between a live opponent and a maneuvering target drone) and combat-block `"bvr_hold": true` (SPINS-style radar-missiles-tight for everyone, heaters free). Both parsed, documented on the structs, and asserted in tests. |
+| `f4-scenario-player` — scenario | New `scenarios/wvr_merge.json.in` (registered in the root CMake template list): EAGLE1 (blue, live) and BANDIT1 (red, `hold_fire`, 10 HP) spawn 5 NM apart head-on at 15,000 ft with `bvr_hold` on — the deterministic twin of the E2E test geometry. The user watches from EAGLE1: closure, the WVR handoff at 3 NM (HUD mode flips to `WVREngage/Merge`), FOX 2, the drone's RWR `MISSILE LAUNCH!` and jinking defense (visible as the bandit's break turns), splash. Missiles render with the m4-scenario-1 procedural visuals; the COMBAT panel narrates with the `FOX 2` brevity word (already in the transcript's guidance-kind map). |
+| Hygiene | Removed the landed `f4-m3-tactics-1.patch` / `f4-m4-scenario-1.patch` from the repo root (both applied and pushed as `BVR test` d6a6032 — same discipline as step 0 removing the landed M2 patch). Fixed a latent `-Wunused-function` (`fmt1`) in combat_transcript.cpp. |
+| Tests | +20 (suite **1,597/1,597 — 100%**, zero warnings): 18× WVRModule unit tests (geometry classes, dwell anti-chatter, jink offset + 3 s reversal, OverB guard, IR pulse/cooldown/shoot-shoot, forward-cone + RWR-blind gates, band exit, bug-out doctrine incl. no-bugout-with-heaters-remaining, reset contract) and **AiVersusAiWvrMergeFight** + **WvrMergeScenarioFilePlaysOut** E2Es: BVR-tight closure from 5 NM, both brains reach the WVR rung (the RWR-only drone too — the lock warning is its picture), the merge shot is an IR-class station, zero AMRAAMs expended, the drone's RWR sees the IR launch and MissileModule defends, kill + attribution + disengage + clean sweep. |
+
+**How to watch the merge** (needs a scenario-player build — X11/OpenGL,
+unlike the headless CI):
+
+```
+f4-scenario-player <build>/scenarios/wvr_merge.json --run --follow --camera-distance 8000
+```
+
+The fight resolves in ~40 s of sim time (the 32x speed slider makes it
+ten); set the drone's `hold_fire` to `false` in the JSON for a live
+two-way merge, and remove `"bvr_hold"` to let the AMRAAM exchange back
+in.
+
+**Deferred (documented, deliberate)**: guns employment (GunStream is
+f4-weapons-side; the sim tick has no gun-sweep driver yet), one-circle
+vs two-circle geometry + the reserved WVRTactic values (Roop/Avoid/Beam/
+BeamReturn/RunAway — they need the WingmanModule's formation picture and
+the skill layer), countermeasure consumption (chaff/flare remain intents),
+recorder combat events (the M4 replay half — next session), visual
+detection (the eyeball model behind the WVR "visual" band), and
+skill-parameterized behavior.
+
 ## BVR Intercept Scenario — The Fight You Can Watch (M4-SCENARIO-1)
 
 **The AI-vs-AI BVR engagement is now a scenario you can fly as a spectator:

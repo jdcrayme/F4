@@ -10,6 +10,7 @@
 #include <f4/entities/types.hpp>
 #include <f4/weapons/missile_battery.hpp>
 #include <f4/weapons/weapon_store.hpp>
+#include <f4/weapons/weapon_types.hpp>
 #include <f4/sensors/track_store.hpp>
 
 namespace f4::simulation {
@@ -35,21 +36,65 @@ const weapons::WeaponClassRecord* best_aa_missile(
     return best;
 }
 
+/// The WVR weapon: the IR-guided air-to-air missile class (AIM-9M —
+/// the close-in heater). Scopes the WVR fire-control envelope; the
+/// driver's WVR station preference keys on the same guidance kind.
+const weapons::WeaponClassRecord* ir_aa_missile(
+    const weapons::WeaponClassTable& table) {
+    const weapons::WeaponClassRecord* best = nullptr;
+    for (const auto& rec : table.records()) {
+        if (rec.category != weapons::WeaponCategory::AirToAirMissile)
+            continue;
+        if (rec.guidance != weapons::GuidanceKind::Ir)
+            continue;
+        if (best == nullptr || rec.max_range_ft > best->max_range_ft) {
+            best = &rec;
+        }
+    }
+    return best;
+}
+
 } // anonymous namespace
 
 void configure_brain_combat(f4::ai::BrainComponent& brain,
-                            const weapons::WeaponClassTable& table) {
+                            const weapons::WeaponClassTable& table,
+                            bool hold_fire,
+                            bool bvr_hold) {
     brain.set_combat_enabled(true);
+    brain.set_hold_fire(hold_fire);
+    brain.set_bvr_hold(bvr_hold);
+
+    // ROE goes to the FIRE CONTROLS (module level), not just the brain's
+    // intent gate: a module-level hold means should_fire() answers no, so
+    // no pulse, no phantom shot counted, and no doctrine separation ever
+    // triggers on shots that never left the rail. hold_fire disarms both
+    // modules; bvr_hold disarms the BVR fire control alone (heaters free).
+    brain.bvr().fire().config().hold_fire = hold_fire || bvr_hold;
+    brain.wvr().fire().config().hold_fire = hold_fire;
 
     // Employment envelope from the BVR weapon class. The 0.5 factor turns
     // the AIM-120C's 40 NM aerodynamic boundary into a ~20 NM
     // doctrine-safe R_ne (the plan's default max_pk_range).
     const auto* rec = best_aa_missile(table);
-    if (rec == nullptr || rec->max_range_ft <= 0.0) return;
-    const double min_nm =
-        std::max(rec->min_range_ft, 0.5 * FEET_PER_NM) / FEET_PER_NM;
-    const double max_nm = 0.5 * rec->max_range_ft / FEET_PER_NM;
-    brain.bvr().fire().set_envelope_nm(min_nm, max_nm);
+    if (rec != nullptr && rec->max_range_ft > 0.0) {
+        const double min_nm =
+            std::max(rec->min_range_ft, 0.5 * FEET_PER_NM) / FEET_PER_NM;
+        const double max_nm = 0.5 * rec->max_range_ft / FEET_PER_NM;
+        brain.bvr().fire().set_envelope_nm(min_nm, max_nm);
+    }
+
+    // WVR (Step 9): the IR fire-control envelope from the heater class.
+    // The floor is the max of the class arming distance and 0.5 NM (the
+    // plan's minimum heater employment); the ceiling 0.8x the class
+    // boundary — inside the seeker's real wheelhouse, well short of the
+    // aerodynamic limit.
+    const auto* ir = ir_aa_missile(table);
+    if (ir != nullptr && ir->max_range_ft > 0.0) {
+        const double min_nm =
+            std::max(ir->min_range_ft, 0.5 * FEET_PER_NM) / FEET_PER_NM;
+        const double max_nm = 0.8 * ir->max_range_ft / FEET_PER_NM;
+        brain.wvr().fire().set_envelope_nm(min_nm, max_nm);
+    }
 }
 
 void attach_combat_loadout(entities::EntityHandle& aircraft,
@@ -170,9 +215,17 @@ std::size_t execute_brain_combat_intents(entities::EntityWorld& world,
         if (intent.weapon_release && intent.release_target_id != 0 && !dead) {
             auto* store = shooter.get<weapons::WeaponStoreComponent>();
             if (store) {
-                // BVR doctrine: among the loaded A/A stations, fire the
-                // LONGEST-RANGE weapon first (AMRAAM before Sidewinder —
-                // the same class the envelope was configured from).
+                // Station doctrine. BVR: among the loaded A/A stations,
+                // fire the LONGEST-RANGE weapon first (AMRAAM before
+                // Sidewinder — the class the BVR envelope was configured
+                // from). WVR (the brain's combat mode this tick): the
+                // IR-guided heaters first, then the shortest-range A/A —
+                // a FOX 2 off the wingtip before an AMRAAM out of the
+                // trench, and never a radar missile while a heater
+                // remains when the fight is inside 3 NM.
+                const bool wvr_shot =
+                    brain->combat_mode() ==
+                    f4::ai::BrainComponent::CombatMode::WVR;
                 const auto* bvr_rec = best_aa_missile(table);
                 std::size_t best_station =
                     weapons::WeaponStoreComponent::npos;
@@ -186,11 +239,19 @@ std::size_t execute_brain_combat_intents(entities::EntityWorld& world,
                             weapons::WeaponCategory::AirToAirMissile) {
                         continue;
                     }
-                    // Range first; a +1 ft tie-break prefers the BVR class
-                    // when two stations carry equal-range missiles.
-                    const double score = rec->max_range_ft +
-                        ((bvr_rec != nullptr && rec->id == bvr_rec->id)
-                             ? 1.0 : 0.0);
+                    double score;
+                    if (wvr_shot) {
+                        score = (rec->guidance == weapons::GuidanceKind::Ir)
+                            ? 1.0e12 + rec->max_range_ft  // heaters first
+                            : -rec->max_range_ft;         // then shortest
+                    } else {
+                        // Range first; a +1 ft tie-break prefers the BVR
+                        // class when two stations carry equal-range
+                        // missiles.
+                        score = rec->max_range_ft +
+                            ((bvr_rec != nullptr && rec->id == bvr_rec->id)
+                                 ? 1.0 : 0.0);
+                    }
                     if (score > best_score) {
                         best_score = score;
                         best_station = s;

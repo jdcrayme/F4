@@ -25,13 +25,7 @@ namespace {
 
 constexpr double kFeetPerNm = 6076.11548;
 
-/// "77.4" — one decimal, no trailing ".0" noise beyond it.
-std::string fmt1(double v) {
-    char buf[32];
-    std::snprintf(buf, sizeof(buf), "%.1f", v);
-    return buf;
-}
-
+/// "77" — no trailing decimals.
 std::string fmt0(double v) {
     char buf[32];
     std::snprintf(buf, sizeof(buf), "%.0f", v);

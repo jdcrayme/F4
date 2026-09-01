@@ -3411,3 +3411,82 @@ Stage Summary:
   readouts, RWR bearing arrow on the HUD.
 - Next: WVRModule (the 2 NM merge handoff), then WingmanModule, then the
   recorder combat events so fights replay headless.
+
+---
+Task ID: M3-TACTICS-2
+Agent: main
+Task: User pushed the m3-tactics-1 + m4-scenario-1 patches (squashed
+as "BVR test" d6a6032, plus a Windows M_PI portability fix in
+radar_types.hpp — they built the player on MSVC). Pull, verify the
+baseline, then land the next plan step: WVRModule (AI_IMPLEMENTATION_
+PLAN Step 9, the BVR->WVR handoff at 3 NM) with a scenario the user
+can watch.
+
+Work Log:
+- Pulled d6a6032: tree byte-identical to my m4-scenario-1 + the two
+  committed patch files + the M_PI fix. Rebuild + ctest 1,577/1,577
+  green baseline (GCC no-op on the M_PI define).
+- Branch m3-tactics-2 off d6a6032.
+- WVRModule (f4-ai, new): 5-state FSM None/Merge/Offensive/Defensive/
+  BugOut with dwell-guarded geometry classification from SensorFusion's
+  ata/ata_from (hysteresis margins so head-on/neutral sits between the
+  classes); the plan's 11-value WVRTactic enum (subset flown: RandP,
+  OverB, GunJink, Straight, BugOut; rest reserved for Wingman/skill
+  layers); lead-pursuit closure + vertical chase clamped [3k, 30k];
+  GunJink defensive break turns (+-60 deg off the threat bearing,
+  3 s reversal, 800 ft altitude weave, rail throttle); OverB overshoot
+  guard (0.35 NM + hard closure); bug-out doctrine gated on IR shots
+  spent AND defensive grace (8 s), exit past the 4.5 NM ring.
+- IR fire control: embedded MissileModule tuned for heaters (0.5-8 NM
+  envelope, 3 s cooldown, pk_base 0.9, threshold 0.35) with a NEW
+  forward-cone gate (fire_cone_rad 75 deg — a heater at a target on
+  our six has nothing to track; caught by the unit tests: defensive
+  entry was firing on the Merge tick).
+- BrainComponent: CombatMode::WVR rung between Defensive and BVR; band
+  handoff with hysteresis (entry from bvr().config().wvr_entry_range_
+  nm = 3 NM, exit from wvr().config().wvr_exit_range_nm = 4.5 — one
+  source per boundary); reset+handback keeps traces clean; WVR intents
+  forwarded to CombatIntent; mode/state names "WVREngage"/"Merge...".
+- REAL DESIGN BUG caught mid-build: gating hold_fire at the BRAIN's
+  intent layer lets modules count phantom shots (note_fired without a
+  launch) — under bvr_hold, BVR would burn its shoot-shoot on phantoms
+  and bug out before the merge. Fix: MissileModule::Config::hold_fire
+  gated inside should_fire() (no pulse, no bookkeeping, no doctrine
+  trigger). Scenario-level wiring: per-aircraft "hold_fire" (all
+  rungs) + combat-block "bvr_hold" (BVR only, heaters free).
+- f4-simulation: configure_brain_combat configures the WVR IR envelope
+  from the IR-guided A/A class (AIM-9M) alongside the BVR envelope;
+  execute_brain_combat_intents gains WVR station doctrine (IR stations
+  first, then shortest-range A/A). Scenario schema + parser:
+  hold_fire (per-aircraft), bvr_hold (combat block).
+- Scenario: wvr_merge.json.in — 5 NM head-on at 15,000 ft, EAGLE1 live,
+  BANDIT1 a hold_fire drone (10 HP so a heater hit ends it), bvr_hold
+  on. EAGLE1's radar covers the drone in its north bar; the southbound
+  drone fights on RWR alone (the lock warning IS its picture — the
+  weapons-grade gate keeps it from firing blind, by doctrine).
+- Tests +20 (1,597 total): 18 WVRModule unit tests (geometry classes,
+  dwell anti-chatter, jink offset + reversal, OverB, IR cadence +
+  limits, forward-cone + RWR-blind gates, band exit, bug-out doctrine,
+  reset contract) + AiVersusAiWvrMergeFight E2E (in-memory JSON twin
+  of the scenario: WVR rung reached by BOTH brains, FOX 2 off the
+  wingtip, zero AMRAAMs expended, drone defends on the IR launch
+  warning, kill + attribution + disengage + clean sweep) +
+  WvrMergeScenarioFilePlaysOut (the shipped file).
+- Full rebuild zero warnings; FULL SUITE 1,597/1,597 = 100%, zero
+  regressions (the BVR E2E still passes with the WVR rung installed).
+- Hygiene: git rm the two landed patch files; killed a latent
+  -Wunused-function (fmt1) in combat_transcript.cpp.
+- Docs: CHANGES.md M3-TACTICS-2 section (with the how-to-watch block
+  and the deferred list); this entry.
+
+Stage Summary:
+- The 3 NM handoff is real: the fight now flows BVR -> WVR -> (kill or
+  bug-out) -> back to BVR/nav without a single manual input. The user
+  gets scenarios/wvr_merge.json for the player.
+- Deliberately deferred (documented in CHANGES): guns employment (no
+  sim-side GunStream driver yet), one/two-circle geometry + reserved
+  WVRTactic values (need WingmanModule), countermeasure consumption,
+  recorder combat events (M4 replay half — NEXT), visual detection,
+  skill parameterization.
+- Next session: recorder combat events (the fights become replayable
+  traces), then WingmanModule (2v2), then guns.

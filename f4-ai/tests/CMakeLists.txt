@@ -28,3 +28,4 @@ target_compile_definitions(test_brain_component PRIVATE
 add_dependencies(test_brain_component convert_golden_fixtures)
 f4_ai_add_test(test_missile_module test_missile_module.cpp)
 f4_ai_add_test(test_bvr_module      test_bvr_module.cpp)
+f4_ai_add_test(test_wvr_module      test_wvr_module.cpp)

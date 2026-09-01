@@ -77,7 +77,8 @@ void attach_combat_loadout(entities::EntityHandle& aircraft,
 ///   rwr    -> true when the ownship's RWR picture carries any warning
 ///             whose emitter IS the candidate (lock or search strobe —
 ///             both mean "that emitter is painting me").
-///   visual -> false (no eyeball model yet — arrives with WVR tactics).
+///   visual -> false (no eyeball model yet — arrives with the WVR
+///             skill/visual-detection layer).
 ///   gci    -> false. THE FLIP: unlike the legacy rules, GCI-omniscience
 ///             is OFF under this policy. The AI sees what its radar and
 ///             RWR see, nothing else. Installing this policy on every
@@ -108,10 +109,15 @@ private:
 ///                       shooter's own radar (refused harmlessly until
 ///                       the track store holds a live track on the target).
 ///   weapon_release   -> weapons::launch_missile() through the table the
-///                       simulation owns: selects the first loaded
-///                       air-to-air station, debits the store, publishes
-///                       MissileLaunchedMessage. Killed aircraft (per
-///                       DamageStateComponent) never fire — the M2
+///                       simulation owns: selects a loaded air-to-air
+///                       station — BVR doctrine fires the LONGEST-RANGE
+///                       class first (AMRAAM before Sidewinder), WVR
+///                       doctrine (brain combat mode == WVR) fires the
+///                       IR-guided stations first, then the shortest
+///                       range — a heater off the wingtip before an
+///                       AMRAAM in the trench. Debits the store,
+///                       publishes MissileLaunchedMessage. Killed aircraft
+///                       (per DamageStateComponent) never fire — the M2
 ///                       simplification keeps corpses flying, but not
 ///                       fighting.
 ///
@@ -122,13 +128,28 @@ std::size_t execute_brain_combat_intents(entities::EntityWorld& world,
                                          double sim_time_s);
 
 /// Turn a spawned brain into a fighting brain: enables the combat ladder
-/// and configures the BVR fire-control envelope from the weapon class
-/// table (employment envelope [min range, 0.5 * max range] in NM — the
-/// AIM-120C's 40 NM aerodynamic boundary becomes a ~20 NM doctrine-safe
-/// R_ne; when the WST import replaces the table the envelope follows the
-/// real cards). The host then installs its detection policy on
-/// brain->sensors() (typically a RadarBackedDetectionPolicy it owns).
+/// and configures the fire-control envelopes from the weapon class
+/// table:
+///
+///   BVR  — employment envelope [min range, 0.5 * max range] in NM from
+///          the LONGEST-RANGE A/A class (the AIM-120C's 40 NM
+///          aerodynamic boundary becomes a ~20 NM doctrine-safe R_ne;
+///          when the WST import replaces the table the envelope follows
+///          the real cards).
+///   WVR  — employment envelope from the IR-guided A/A class (AIM-9M):
+///          [max(arming range, 0.5 NM), 0.8 * max range] — the close-in
+///          heater shot. When the WST import replaces the table the
+///          envelope follows the real cards the same way.
+///
+/// `hold_fire` (per-aircraft scenario option) suppresses every release
+/// intent — the aircraft fights geometry only; `bvr_hold` (scenario
+/// combat block) suppresses the BVR release alone — SPINS-style
+/// "radar missiles tight, heaters free". The host then installs its
+/// detection policy on brain->sensors() (typically a
+/// RadarBackedDetectionPolicy it owns).
 void configure_brain_combat(f4::ai::BrainComponent& brain,
-                            const weapons::WeaponClassTable& table);
+                            const weapons::WeaponClassTable& table,
+                            bool hold_fire = false,
+                            bool bvr_hold = false);
 
 } // namespace f4::simulation

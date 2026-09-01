@@ -19,7 +19,8 @@
 // arbitrates the modules instead of a fixed sequence. The M3 tactics
 // landing adds the ladder's first rungs on top of the sequence —
 // while Enroute, a visible incoming missile (MissileModule defeat)
-// preempts a visible hostile fighter (BVRModule), which preempts the
+// preempts a visible hostile fighter (BVRModule, handing off to
+// WVRModule inside the 3 NM WVR entry band), which preempts the
 // navigation module. The mission sequence underneath is untouched.
 //
 // The brain runs in pass 1 (priority 100), reads the parent entity's
@@ -56,6 +57,7 @@
 #include "f4/ai/modules/takeoff_module.hpp"
 #include "f4/ai/modules/bvr_module.hpp"
 #include "f4/ai/modules/missile_module.hpp"
+#include "f4/ai/modules/wvr_module.hpp"
 #include "f4/ai/sensor_fusion.hpp"
 
 #include <optional>
@@ -131,13 +133,17 @@ public:
 
     /// Combat mode — the first rungs of the DigitalBrain priority ladder
     /// (AI_IMPLEMENTATION_PLAN.md §5 Step 12):
-    ///   Defensive  > BVR > mission module (navigation).
-    /// Collision/ground avoid rungs arrive with their modules; the ladder
-    /// lives in update() and every rung only ever PREEMPTS, never replaces,
-    /// the mission sequence below it.
+    ///   Defensive > WVR > BVR > mission module (navigation).
+    /// The BVR/WVR split is the plan's range-band rule (Step 9): inside
+    /// the WVR entry band (3 NM) WVRModule owns the fight; past the WVR
+    /// exit ring (wvr config, 4.5 NM hysteresis) BVRModule takes it
+    /// back. Collision/ground avoid rungs arrive with their modules;
+    /// every rung only ever PREEMPTS, never replaces, the mission
+    /// sequence below it.
     enum class CombatMode {
         None,        // combat off, or nothing visible — mission module flies
         BVR,         // BVRModule engaged (Entering/Employing/Separating)
+        WVR,         // WVRModule engaged (Merge/Offensive/Defensive/BugOut)
         Defensive    // MissileModule beaming an incoming hostile missile
     };
 
@@ -248,7 +254,7 @@ public:
         // =====================================================================
         // Combat ladder (M3 tactics — the DigitalBrain priority ladder's
         // first rungs; preempts the mission module, never replaces it):
-        //   Defensive > BVR > mission module.
+        //   Defensive > WVR > BVR > mission module.
         // Runs only while Enroute: Ground aircraft do not fight, and an
         // aircraft on Approach has already disengaged. When combat ends
         // (target dead / lost) the navigation module resumes — with its
@@ -279,16 +285,56 @@ public:
                 if (const auto* incoming = sensors_.missile_threat()) {
                     combat_mode_ = CombatMode::Defensive;
                     ai_out = missile_defense_.update(dt, state, incoming);
-                } else if (const auto* tgt = sensors_.threat_target()) {
-                    combat_mode_ = CombatMode::BVR;
-                    ai_out = bvr_.update(dt, state, tgt);
-                    // Intents out: the host driver executes these against
-                    // the real radar / weapon store after update_all.
-                    combat_intent_.radar_lock = bvr_.wants_lock();
-                    combat_intent_.lock_target_id = bvr_.lock_target_id();
-                    combat_intent_.weapon_release = bvr_.release_pulse();
-                    combat_intent_.release_target_id =
-                        bvr_.release_target_id();
+                } else {
+                    const auto* tgt = sensors_.threat_target();
+                    // --- BVR <-> WVR band handoff (plan Step 9) ----------
+                    // Entry is BVRModule's band constant (the range
+                    // taxonomy lives there); exit is WVRModule's (the
+                    // hysteresis ring). One source per boundary.
+                    if (tgt != nullptr) {
+                        if (in_wvr_) {
+                            if (tgt->range_nm >
+                                    wvr_.config().wvr_exit_range_nm) {
+                                in_wvr_ = false;
+                                wvr_.reset();  // clean handback to BVR
+                            }
+                        } else if (tgt->range_nm <
+                                       bvr_.config().wvr_entry_range_nm) {
+                            in_wvr_ = true;
+                            bvr_.reset();  // fresh engagement on return
+                        }
+                    } else if (in_wvr_) {
+                        in_wvr_ = false;
+                        wvr_.reset();
+                    }
+
+                    if (tgt != nullptr && in_wvr_) {
+                        combat_mode_ = CombatMode::WVR;
+                        ai_out = wvr_.update(dt, state, tgt);
+                        combat_intent_.radar_lock = wvr_.wants_lock();
+                        combat_intent_.lock_target_id =
+                            wvr_.lock_target_id();
+                        combat_intent_.weapon_release =
+                            wvr_.release_pulse() && !hold_fire_;
+                        combat_intent_.release_target_id =
+                            wvr_.release_target_id();
+                    } else if (tgt != nullptr) {
+                        combat_mode_ = CombatMode::BVR;
+                        ai_out = bvr_.update(dt, state, tgt);
+                        // Intents out: the host driver executes these
+                        // against the real radar / weapon store after
+                        // update_all. BVR release honors the BVR hold
+                        // (SPINS: radar missiles tight) separately from
+                        // the all-weapons hold.
+                        combat_intent_.radar_lock = bvr_.wants_lock();
+                        combat_intent_.lock_target_id =
+                            bvr_.lock_target_id();
+                        combat_intent_.weapon_release =
+                            bvr_.release_pulse() && !hold_fire_ &&
+                            !bvr_hold_;
+                        combat_intent_.release_target_id =
+                            bvr_.release_target_id();
+                    }
                 }
             }
             if (combat_mode_ == CombatMode::None && combat_was_active_) {
@@ -367,9 +413,11 @@ public:
     }
     /// Active module's mode name (e.g. "TakeoffMode"); "Complete" at the end.
     /// While a combat rung is active the COMBAT mode is reported instead
-    /// ("BVREngage" / "MissileDefeat") — the mission module is dormant.
+    /// ("BVREngage" / "WVREngage" / "MissileDefeat") — the mission module
+    /// is dormant.
     [[nodiscard]] std::string mode_name() const {
         if (combat_mode_ == CombatMode::BVR)         return "BVREngage";
+        if (combat_mode_ == CombatMode::WVR)         return "WVREngage";
         if (combat_mode_ == CombatMode::Defensive)   return "MissileDefeat";
         switch (phase_) {
             case Phase::Ground:   return takeoff_.mode_name();
@@ -380,9 +428,10 @@ public:
         return {};
     }
     /// Active module's state name (e.g. "OnFinal"); "Parked" at the end.
-    /// While fighting: the BVR state / "Defending".
+    /// While fighting: the BVR/WVR state / "Defending".
     [[nodiscard]] std::string state_name() const {
         if (combat_mode_ == CombatMode::BVR)         return bvr_.state_name();
+        if (combat_mode_ == CombatMode::WVR)         return wvr_.state_name();
         if (combat_mode_ == CombatMode::Defensive)   return "Defending";
         switch (phase_) {
             case Phase::Ground:   return takeoff_.state_name();
@@ -404,10 +453,20 @@ public:
         switch (combat_mode_) {
             case CombatMode::None:      return "None";
             case CombatMode::BVR:       return "BVREngage";
+            case CombatMode::WVR:       return "WVREngage";
             case CombatMode::Defensive: return "MissileDefeat";
         }
         return "?";
     }
+    /// ROE: weapons hold (all rungs — the aircraft fights geometry only,
+    /// never releases). The scenario's per-aircraft "hold_fire".
+    void set_hold_fire(bool on) noexcept { hold_fire_ = on; }
+    [[nodiscard]] bool hold_fire() const noexcept { return hold_fire_; }
+    /// ROE: radar-missile tight — BVR employment suppressed, WVR heaters
+    /// still employ. The scenario combat block's "bvr_hold" (SPINS-style
+    /// weapons tight for the BVR fight only).
+    void set_bvr_hold(bool on) noexcept { bvr_hold_ = on; }
+    [[nodiscard]] bool bvr_hold() const noexcept { return bvr_hold_; }
     /// This tick's combat intents (lock + weapon release) — the host's
     /// combat driver reads this AFTER world.update_all() each tick.
     [[nodiscard]] const CombatIntent& combat_intent() const noexcept {
@@ -427,6 +486,8 @@ public:
     [[nodiscard]] const SensorFusion& sensors() const noexcept { return sensors_; }
     [[nodiscard]] modules::BVRModule&       bvr()       noexcept { return bvr_; }
     [[nodiscard]] const modules::BVRModule& bvr() const noexcept { return bvr_; }
+    [[nodiscard]] modules::WVRModule&       wvr()       noexcept { return wvr_; }
+    [[nodiscard]] const modules::WVRModule& wvr() const noexcept { return wvr_; }
     [[nodiscard]] modules::MissileModule&       missile_defense()       noexcept { return missile_defense_; }
     [[nodiscard]] const modules::MissileModule& missile_defense() const noexcept { return missile_defense_; }
 
@@ -475,16 +536,23 @@ private:
     modules::LandingModule landing_;
 
     // Combat ladder (M3 tactics): SensorFusion (the eyes — the host
-    // installs the detection policy), the BVR engagement module, and the
-    // defensive MissileModule. SensorFusion initializes lazily on the
-    // first Enroute update (it needs the world + bus).
+    // installs the detection policy), the BVR engagement module, the WVR
+    // merge module (Step 9 — owns the fight inside the 3 NM entry band;
+    // in_wvr_ is the band handoff flag with the wvr config's exit ring as
+    // the hysteresis), and the defensive MissileModule. SensorFusion
+    // initializes lazily on the first Enroute update (it needs the world
+    // + bus).
     bool combat_enabled_{false};
     bool combat_initialized_{false};
     bool combat_was_active_{false};
+    bool hold_fire_{false};
+    bool bvr_hold_{false};
+    bool in_wvr_{false};
     CombatMode combat_mode_{CombatMode::None};
     CombatIntent combat_intent_{};
     SensorFusion sensors_{};
     modules::BVRModule bvr_{};
+    modules::WVRModule wvr_{};
     modules::MissileModule missile_defense_{};
 
     // Watchdog cache: the last non-empty PilotInput the brain produced.

@@ -305,12 +305,16 @@ void Simulation::spawn_from_scenario_list() {
                                   scenario_.combat.fighter_hit_points);
 
             // M3 tactics: the brain becomes a fighting brain — the
-            // combat ladder (defensive > BVR > mission) activates and the
-            // BVR fire control gets the table-derived envelope. The
+            // combat ladder (defensive > WVR > BVR > mission) activates
+            // and the fire controls get the table-derived envelopes
+            // (BVR from the longest-range A/A class, WVR/IR from the
+            // heater class). Per-aircraft hold_fire and the combat
+            // block's bvr_hold (radar missiles tight) ride along. The
             // detection policy (radar-truth instead of GCI-omniscience)
             // is installed on the brain's SensorFusion; the Simulation
             // owns the policy objects for the world's lifetime.
-            configure_brain_combat(brain, weapon_table_);
+            configure_brain_combat(brain, weapon_table_, sc.hold_fire,
+                                   scenario_.combat.bvr_hold);
             combat_policies_.push_back(
                 std::make_unique<RadarBackedDetectionPolicy>(
                     world_, h.id().value));

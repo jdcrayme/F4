@@ -61,6 +61,10 @@ bool MissileModule::should_fire(const TargetInfo& t) const {
     // sets detected_by_radar for a live track; a bandit that only knows it
     // is LOCKED may crank and defend but must not launch blind.
     if (!t.detected_by_radar && !t.detected_by_gci) return false;
+    // ROE: weapons tight — no pulse, no phantom shot bookkeeping (see
+    // Config::hold_fire for why the gate lives HERE and not at the
+    // brain's intent layer).
+    if (cfg_.hold_fire) return false;
     if (cooldown_ > 0.0) return false;
     if (shots_ >= cfg_.shoot_shoot_max_shots) return false;
     return compute_pk(t) >= cfg_.shoot_shoot_threshold;

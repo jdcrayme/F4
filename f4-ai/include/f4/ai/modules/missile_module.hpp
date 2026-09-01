@@ -60,6 +60,15 @@ public:
         int    shoot_shoot_max_shots{2};    // shots per engagement (doctrine)
         /// Pk model base (AMRAAM-class vs non-defending target).
         double pk_base{0.95};
+        /// ROE: weapons tight — should_fire() never releases, so no
+        /// pulse, no phantom shot counted, and no doctrine separation
+        /// can be triggered by shots that never left the rail (the
+        /// module-level gate, NOT the brain's intent gate: gating at
+        /// the intent alone would still count the shot inside the
+        /// module and flip its state machinery on a launch that never
+        /// happened). The host sets this from the scenario (per-aircraft
+        /// hold_fire / the combat block's bvr_hold) at configure time.
+        bool   hold_fire{false};
         /// Defeat: keep beaming this long after the threat stops being
         /// visible (detonation sweeps the missile; the jink must not stop
         /// on the same tick the picture goes empty).

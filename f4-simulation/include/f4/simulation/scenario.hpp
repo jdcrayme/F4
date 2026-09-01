@@ -58,6 +58,12 @@ struct ScenarioAircraft {
     /// (COMBAT_CHAIN_PLAN.md M3) — harmless before it: nothing read the
     /// tag for scenario-list aircraft.
     std::string team{"blue"};
+    /// ROE: this aircraft never releases a weapon (all combat rungs —
+    /// BVR, WVR). It still fights the geometry: locks, maneuvers,
+    /// defends. Default false. Set per-aircraft in the scenario's
+    /// "hold_fire" field — the difference between a live opponent and
+    /// a maneuvering target drone for the WVR merge demos.
+    bool hold_fire{false};
 };
 
 /// One parking spot on the airfield (derived from the ground layout —
@@ -118,6 +124,13 @@ struct CombatConfig {
     /// Hit points given to spawned aircraft's DamageStateComponent (the
     /// light-fighter strength the M1 engagement tests calibrated against).
     double fighter_hit_points{25.0};
+    /// ROE: BVR employment suppressed for EVERY spawned aircraft
+    /// (SPINS-style "radar missiles tight") — the BVR rung locks and
+    /// maneuvers but never releases; the WVR heaters still employ.
+    /// Scenario-level "bvr_hold". Default false. Used by the wvr_merge
+    /// scenario to hand the fight to the merge without the AMRAAM
+    /// exchange ending it early.
+    bool bvr_hold{false};
 };
 
 /// One static feature placement on the airfield — a building, runway section,

@@ -94,6 +94,7 @@ ScenarioAircraft read_aircraft(f4::json::Reader& r) {
                 throw std::runtime_error("scenario: aircraft '" + a.callsign +
                     "' has unknown team '" + a.team + "' (blue|red)");
         }
+        else if (key == "hold_fire")       a.hold_fire = r.read_bool();
         else                                 skip_unknown(r);
     }
     return a;
@@ -258,6 +259,7 @@ Scenario parse_scenario(f4::json::Reader& r) {
                 else if (k == "radar_rng_seed") s.combat.radar_rng_seed =
                     static_cast<std::uint32_t>(r.read_int());
                 else if (k == "fighter_hit_points") s.combat.fighter_hit_points = r.read_number();
+                else if (k == "bvr_hold")      s.combat.bvr_hold = r.read_bool();
                 else                            skip_unknown(r);
             }
         } else if (key == "airfield_features") {
