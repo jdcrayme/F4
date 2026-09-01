@@ -16,6 +16,11 @@
 //     with degree accessor convenience methods.
 //   - Intended path data (target_position, cross_track_error) lets viewers
 //     render "what the AI was aiming for" alongside the actual trajectory.
+//   - M4: `missile` marks a track that is a MISSILE, not an aircraft —
+//     recorded per tick while a live missile flies (position/speed/status;
+//     kinematic + AI fields stay default). Replay hosts draw missile tracks
+//     from the same snapshot stream; the summary/analysis paths filter
+//     missiles out of the per-aircraft sections.
 //
 // Dependencies: f4-geo (WorldPosition). C++20.
 
@@ -39,6 +44,14 @@ struct FlightSnapshot {
     // --- Identity ---
     std::uint64_t entity_id{0};
     std::string callsign;
+
+    // --- Track type (M4) ---------------------------------------------------
+    // False for aircraft (the default and the only kind the format carried
+    // before M4). True for missile tracks: callsign carries the weapon name
+    // ("AIM-120C"), ai_state the flyout status ("guided"/"ballistic"), and
+    // the kinematic fields the missile's. Serialized ONLY when true so
+    // aircraft-only recordings stay byte-identical to the pre-M4 format.
+    bool missile{false};
 
     // --- Kinematic state (from TransformComponent + AircraftState) ---
     geo::WorldPosition position;      // sim-local ENU, feet, z-up

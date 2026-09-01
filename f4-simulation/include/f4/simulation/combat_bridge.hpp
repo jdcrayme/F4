@@ -46,6 +46,8 @@ namespace f4::ai { class BrainComponent; }  // spawn wiring below
 
 namespace f4::simulation {
 
+class Simulation;  // combat event recording (attach_combat_event_recorder)
+
 /// Add the combat component set to a spawned aircraft entity. Idempotent
 /// per component type (EntityWorld::add replaces? No — it appends; callers
 /// must call this exactly once per entity, which the spawn paths do).
@@ -151,5 +153,23 @@ void configure_brain_combat(f4::ai::BrainComponent& brain,
                             const weapons::WeaponClassTable& table,
                             bool hold_fire = false,
                             bool bvr_hold = false);
+
+/// Subscribe the sim's FlightRecorder to every combat bus transition so a
+/// recorded fight carries its event stream alongside the kinematic tracks
+/// (COMBAT_CHAIN_PLAN.md M4 — "every shot/detection/kill is replayable").
+///
+/// Converts each message into a recorder::CombatEvent (the recorder stays
+/// decoupled from f4-weapons/f4-sensors — this bridge is where the message
+/// structs are flattened into plain ids/strings), stamps the event with the
+/// sim tick it belongs to (tick_count()+1: bus events publish mid-tick,
+/// BEFORE Simulation::tick increments its counter, so +1 aligns them with
+/// the FlightSnapshots the same tick() call records), and resolves weapon
+/// names through the sim's table at capture time (a replay never needs the
+/// table to interpret a launch).
+///
+/// No-op when the scenario disabled recording (sim.recorder() == nullptr).
+/// GunFiredMessage is deliberately not captured — the same rationale as
+/// CombatTranscript: nothing produces gun events until a gun module exists.
+void attach_combat_event_recorder(Simulation& sim);
 
 } // namespace f4::simulation

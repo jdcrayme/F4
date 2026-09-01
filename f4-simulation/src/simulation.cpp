@@ -92,6 +92,12 @@ void Simulation::initialize() {
     if (scenario_.record) {
         recorder_ = std::make_unique<f4::recorder::FlightRecorder>();
         recorder_->set_scenario_name(scenario_.name);
+
+        // M4: subscribe the recorder to the combat bus transitions so a
+        // recorded fight carries its event stream alongside the kinematic
+        // tracks. Harmless when combat is disabled (no combat messages
+        // publish); no-op when the recorder exists but nothing fires.
+        attach_combat_event_recorder(*this);
     }
 
     // Set up the FCS/AI/EOM CSV trace writer if the scenario enables it.
@@ -746,6 +752,41 @@ void Simulation::record_snapshot() {
             snap.ai_state = brain->state_name();
         }
 
+        recorder_->record(snap);
+    }
+
+    // M4: missile tracks — one snapshot per LIVE missile per tick, so a
+    // recorded fight replays with the flyouts visible (the world viewer
+    // draws them from the same snapshot stream; entity_id discriminates).
+    // Missiles are swept AFTER they go terminal (sweep_spent_missiles runs
+    // before record_snapshot in tick()), so a missile's last in-flight
+    // position is the tick BEFORE its detonation — the burst point itself
+    // lives in the MissileDetonated combat event, which keeps the replay
+    // endpoint covered.
+    //
+    // with_component() returns a snapshot (by value), so recording here —
+    // after the world settled — is safe. No missiles exist in non-combat
+    // scenarios; the loop is a no-op.
+    for (const auto mid : world_.with_component<weapons::MissileComponent>()) {
+        auto h = entities::EntityHandle(mid, &world_);
+        const auto* mc = h.get<weapons::MissileComponent>();
+        const auto* tf = h.get<entities::TransformComponent>();
+        if (mc == nullptr || tf == nullptr) continue;
+
+        f4::recorder::FlightSnapshot snap;
+        snap.missile = true;
+        snap.sim_time_s = sim_time_s_;
+        snap.tick = tick_;
+        snap.entity_id = mid.value;
+        snap.position = tf->position;
+        snap.altitude_msl_ft = tf->position.z;
+        snap.on_ground = false;
+        snap.vt_fps = mc->missile.velocity().length();
+        snap.ai_mode = "Missile";
+        snap.ai_state = weapons::missile_status_name(mc->missile.status());
+        if (const auto* rec = weapon_table_.get(mc->weapon_handle)) {
+            snap.callsign = rec->name;  // the weapon's name reads as the label
+        }
         recorder_->record(snap);
     }
 }

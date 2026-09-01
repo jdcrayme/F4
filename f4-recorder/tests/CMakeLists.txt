@@ -9,5 +9,6 @@ function(f4_recorder_add_test name source)
 endfunction()
 
 f4_recorder_add_test(test_flight_recorder test_flight_recorder.cpp)
+f4_recorder_add_test(test_combat_events test_combat_events.cpp)
 f4_recorder_add_test(test_fcs_trace test_fcs_trace.cpp)
 f4_recorder_add_test(test_path_geometry test_path_geometry.cpp)

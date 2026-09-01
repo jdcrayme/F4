@@ -50,6 +50,7 @@
   "start_enroute": true,
   "sim_dt": 0.016666666666666,
   "total_ticks": 36000,
-  "record": false,
+  "record": true,
+  "record_path": "@F4_BINARY_DIR@/bvr_intercept_trace.json",
   "combat": { "enabled": true, "radar_rng_seed": 777 }
 }

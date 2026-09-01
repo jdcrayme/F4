@@ -160,6 +160,18 @@ public:
     [[nodiscard]] bool paused() const noexcept { return paused_; }
     void set_paused(bool p) noexcept { paused_ = p; }
 
+    /// The flight recorder (null when the scenario disabled recording).
+    /// M4: hosts may query the live recording (snapshots + combat events)
+    /// during a run, and the combat event bridge subscribes through this
+    /// accessor. The recorder is written by tick() — read-only consumers
+    /// between ticks see a consistent per-tick view.
+    [[nodiscard]] f4::recorder::FlightRecorder* recorder() noexcept {
+        return recorder_.get();
+    }
+    [[nodiscard]] const f4::recorder::FlightRecorder* recorder() const noexcept {
+        return recorder_.get();
+    }
+
     // --- Combat chain (M3 integration; see combat_bridge.hpp) -----------------
     /// The weapon class data the sim runs with (built-in placeholder set —
     /// the FALCON4.WST import replaces the card contents later without

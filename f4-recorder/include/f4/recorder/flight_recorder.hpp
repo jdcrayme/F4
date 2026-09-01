@@ -1,16 +1,27 @@
 // f4-recorder/include/f4/recorder/flight_recorder.hpp
 //
-// FlightRecorder — captures per-tick FlightSnapshots and exports them as JSON.
+// FlightRecorder — captures per-tick FlightSnapshots plus the discrete
+// CombatEvents observed on the sim bus, and exports them as JSON.
 //
 // This is the core recording primitive. A headless simulation loop calls
-// record() each tick; after the run, to_json() produces a self-contained
-// JSON document that the world viewer can load for replay, or an LLM can
-// consume for debugging.
+// record() each tick (snapshots) while its bus subscriptions call
+// record(CombatEvent) on transitions; after the run, to_json() produces a
+// self-contained JSON document that the world viewer can load for replay,
+// or an LLM can consume for debugging. A recording of a FIGHT therefore
+// carries both halves: the kinematic tracks (aircraft AND missiles) and
+// the event stream that narrates them (M4 — "fights replay headless").
 //
 // The JSON format is designed for three consumers:
 //   1. The world viewer replay mode (loads all snapshots, steps through time)
-//   2. LLM debugging (phase-level summaries with anomaly flags)
+//   2. LLM debugging (phase-level summaries with anomaly flags + a combat
+//      debrief section: launches, outcomes, kills)
 //   3. Regression testing (diff against baseline traces)
+//
+// Format evolution: "combat_events" (array) is emitted only when events
+// were recorded, and the per-snapshot "missile" flag only when true —
+// recordings without combat are byte-identical to the pre-M4 format, old
+// readers skip both keys (Reader::skip_value tolerance), and new readers
+// load old documents with empty combat events / no missile tracks.
 //
 // Dependencies: f4-geo, f4-json. C++20.
 
@@ -22,6 +33,7 @@
 #include <filesystem>
 
 #include "f4/recorder/snapshot.hpp"
+#include "f4/recorder/combat_event.hpp"
 
 namespace f4::recorder {
 
@@ -39,9 +51,26 @@ public:
         snapshots_.push_back(std::move(snapshot));
     }
 
+    // --- Recording (combat events; call from bus subscriptions) ---
+    void record(const CombatEvent& event) {
+        combat_events_.push_back(event);
+    }
+
+    void record(CombatEvent&& event) {
+        combat_events_.push_back(std::move(event));
+    }
+
     // --- Access ---
     [[nodiscard]] const std::vector<FlightSnapshot>& snapshots() const noexcept {
         return snapshots_;
+    }
+
+    [[nodiscard]] const std::vector<CombatEvent>& combat_events() const noexcept {
+        return combat_events_;
+    }
+
+    [[nodiscard]] std::size_t combat_event_count() const noexcept {
+        return combat_events_.size();
     }
 
     [[nodiscard]] std::size_t size() const noexcept {
@@ -60,9 +89,16 @@ public:
     [[nodiscard]] std::vector<FlightSnapshot> snapshots_in_range(
         double t0_s, double t1_s) const;
 
+    // Combat events with sim_time_s in [t0_s, t1_s] (same 1 µs tolerance
+    // as snapshots_in_range). Mirrors the snapshot query so replay hosts
+    // can pull "what happened between t0 and t1".
+    [[nodiscard]] std::vector<CombatEvent> combat_events_in_range(
+        double t0_s, double t1_s) const;
+
     // --- JSON export (full trace) ---
-    // Produces a JSON document containing every snapshot. This is the format
-    // the world viewer loads for replay.
+    // Produces a JSON document containing every snapshot (aircraft + missile
+    // tracks) and, when any were recorded, the combat event stream. This is
+    // the format the world viewer loads for replay.
     //
     // Format:
     //   {
@@ -70,7 +106,9 @@ public:
     //     "version": 1,
     //     "scenario": "...",
     //     "snapshot_count": N,
-    //     "snapshots": [ { ... }, ... ]
+    //     "snapshots": [ { ... "missile": true (missiles only) ... }, ... ],
+    //     "combat_event_count": M,          // present only when M > 0
+    //     "combat_events": [ { ... }, ... ]  // present only when M > 0
     //   }
     [[nodiscard]] std::string to_json(
         const std::string& scenario_name = {}) const;
@@ -79,7 +117,12 @@ public:
     // Produces a phase-level summary instead of per-tick data. Each "phase"
     // is a contiguous range of ticks where the AI state is the same.
     // Anomalies are flagged when cross-track error or vertical error
-    // exceeds a tolerance.
+    // exceeds a tolerance. Missile tracks are EXCLUDED from the aircraft,
+    // phase, and state-sequence sections (they are munitions, not flights).
+    //
+    // When combat events were recorded, a "combat" debrief section is
+    // appended: engagement window, per-launch outcomes (shooter, target,
+    // weapon, end cause, miss distance, flight time), and kills.
     //
     // Format:
     //   {
@@ -89,7 +132,9 @@ public:
     //     "aircraft": { ... },
     //     "phases": [ { "name", "tick_range", "duration_s", ... }, ... ],
     //     "anomalies": [ { ... }, ... ],
-    //     "trace_summary": { "state_sequence", ... }
+    //     "trace_summary": { "state_sequence", ... },
+    //     "combat": { "event_count", "first_event_s", "last_event_s",
+    //                "launches": [ ... ], "kills": [ ... ] }   // M > 0 only
     //   }
     [[nodiscard]] std::string to_summary_json(
         const std::string& scenario_name = {},
@@ -116,6 +161,7 @@ public:
 
 private:
     std::vector<FlightSnapshot> snapshots_;
+    std::vector<CombatEvent> combat_events_;
     std::string scenario_name_;
 };
 

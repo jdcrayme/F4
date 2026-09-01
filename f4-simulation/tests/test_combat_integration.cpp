@@ -37,9 +37,11 @@
 #include <f4/ai/sensor_fusion.hpp>
 #include <f4/entities/entity.hpp>
 #include <f4/messaging/bus.hpp>
+#include <f4/recorder/flight_recorder.hpp>
 #include <f4/sensors/f4_sensors.hpp>
 #include <f4/weapons/f4_weapons.hpp>
 
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 #include <string>
@@ -71,8 +73,14 @@ constexpr double kDt = 1.0 / 60.0;
 
 // The scenario: two fighters in a stern chase at 10,000 ft. The bandit is
 // ~13.2 NM (80,000 ft) north of the shooter. Both fly the same north route.
+// `record_path` non-empty flips "record" on and points the trace at it
+// (used by the M4 recording E2E).
 std::string combat_scenario_json(const std::string& f16_path,
-                                 bool combat_enabled) {
+                                 bool combat_enabled,
+                                 const std::string& record_path = {}) {
+    const std::string record_block = record_path.empty()
+        ? "\"record\": false"
+        : "\"record\": true,\n  \"record_path\": \"" + record_path + "\"";
     return R"({
   "name": "combat_integration",
   "theater": "korea",
@@ -104,7 +112,7 @@ std::string combat_scenario_json(const std::string& f16_path,
   "start_enroute": true,
   "sim_dt": 0.016666666666666,
   "total_ticks": 30000,
-  "record": false,
+  )" + record_block + R"(,
   "combat": { "enabled": )" + (combat_enabled ? "true" : "false") + R"(,
               "radar_rng_seed": 777 }
 })";
@@ -880,4 +888,191 @@ TEST(CombatIntegration, WvrMergeScenarioFilePlaysOut) {
 #else
     GTEST_SKIP() << "F4_SCENARIOS_DIR not defined for this target";
 #endif
+}
+
+// ============================================================================
+// 8. M4 — the fight REPLAYS HEADLESS. The same BVR engagement as (5), run
+//    with recording on, written to disk, and re-loaded through the
+//    FlightRecorder JSON round-trip. The recording must carry BOTH halves
+//    of the fight: the kinematic tracks (two aircraft AND the missile
+//    flyout) and the combat event stream (detect -> lock -> launch ->
+//    detonation -> damage -> kill), with events tick-aligned to the
+//    snapshots so a replay host can scrub and narrate coherently.
+// ============================================================================
+TEST(CombatIntegration, CombatRecordingReplaysTheFight) {
+    const auto f16 = f16_config_path();
+    if (f16.empty()) GTEST_SKIP() << "f16.json fixture not generated";
+
+    // Record into a temp file (unique-ish name; removed at the end).
+    const auto trace_path =
+        std::filesystem::temp_directory_path() / "f4_combat_replay_test.json";
+    auto scenario = load_scenario_from_string(
+        combat_scenario_json(f16, true, trace_path.string()));
+    Simulation sim(std::move(scenario), std::filesystem::path("."));
+    sim.initialize();
+
+    // The recorder exists and is queryable live (the M4 accessor).
+    ASSERT_NE(sim.recorder(), nullptr);
+
+    const auto shooter_id = sim.aircraft_entities()[0];   // EAGLE1 (blue)
+    const auto bandit_id  = sim.aircraft_entities()[1];   // BANDIT1 (red)
+
+    // Fly the fight — same shape as (5): budget 150 s, stop once the
+    // follow-up missile is swept.
+    bool killed = false;
+    const int max_ticks = static_cast<int>(150.0 / kDt);
+    for (int i = 0; i < max_ticks; ++i) {
+        sim.tick(kDt);
+        const auto& events = sim.recorder()->combat_events();
+        for (const auto& e : events) {
+            if (e.kind == f4::recorder::CombatEventKind::EntityKilled) {
+                killed = true;
+            }
+        }
+        if (killed && weapons::count_live_missiles(sim.world()) == 0u) break;
+    }
+    ASSERT_TRUE(killed) << "the fight never resolved; nothing to replay";
+
+    // The live recording already carries the chain (the bus bridge worked).
+    const auto live_event_count = sim.recorder()->combat_event_count();
+    ASSERT_GE(live_event_count, 6u)
+        << "expected at least acquire/lock/launch/rwr-launch/detonate/kill";
+
+    // Persist + reload: the file is the deliverable a replay host consumes.
+    ASSERT_NO_THROW(sim.write_recording());
+    ASSERT_TRUE(std::filesystem::exists(trace_path));
+
+    const auto replay = [&trace_path]() {
+        return f4::recorder::FlightRecorder::load_json(trace_path);
+    };
+    const auto loaded = replay();
+    ASSERT_EQ(loaded.combat_event_count(), live_event_count)
+        << "the JSON round-trip lost events";
+
+    // --- Kinematic half: two aircraft tracks + the missile flyout ---------
+    std::vector<std::uint64_t> aircraft_ids;
+    std::vector<std::uint64_t> missile_ids;
+    std::uint64_t max_tick = 0;
+    for (const auto& s : loaded.snapshots()) {
+        max_tick = std::max(max_tick, s.tick);
+        if (s.missile) {
+            if (std::find(missile_ids.begin(), missile_ids.end(),
+                          s.entity_id) == missile_ids.end()) {
+                missile_ids.push_back(s.entity_id);
+            }
+        } else {
+            if (std::find(aircraft_ids.begin(), aircraft_ids.end(),
+                          s.entity_id) == aircraft_ids.end()) {
+                aircraft_ids.push_back(s.entity_id);
+            }
+        }
+    }
+    ASSERT_EQ(aircraft_ids.size(), 2u)
+        << "the recording lost one of the two aircraft tracks";
+    ASSERT_FALSE(missile_ids.empty())
+        << "the missile flyout was never recorded — replays would show "
+           "jets dying to invisible missiles";
+
+    // The missile track reads as a missile: weapon name + status.
+    bool missile_track_ok = false;
+    for (const auto& s : loaded.snapshots()) {
+        if (!s.missile) continue;
+        if (s.callsign == "AIM-120C" && s.ai_mode == "Missile" &&
+            (s.ai_state == "guided" || s.ai_state == "ballistic")) {
+            missile_track_ok = true;
+        }
+    }
+    EXPECT_TRUE(missile_track_ok)
+        << "missile snapshots missing weapon name / flyout status";
+
+    // --- Event half: the full engagement chain, in order -------------------
+    const auto& ev = loaded.combat_events();
+    auto find_event = [&ev](f4::recorder::CombatEventKind kind,
+                            std::uint64_t subject, std::uint64_t object) {
+        for (const auto& e : ev) {
+            if (e.kind == kind && e.subject_id == subject &&
+                e.object_id == object) {
+                return &e;
+            }
+        }
+        return static_cast<const f4::recorder::CombatEvent*>(nullptr);
+    };
+
+    // Detection: EAGLE1's radar acquired BANDIT1.
+    ASSERT_NE(find_event(f4::recorder::CombatEventKind::TrackAcquired,
+                         shooter_id.value, bandit_id.value),
+              nullptr)
+        << "the radar acquisition never made it into the recording";
+
+    // The lock warning on the victim.
+    ASSERT_NE(find_event(f4::recorder::CombatEventKind::RwrLock,
+                         bandit_id.value, shooter_id.value),
+              nullptr)
+        << "the RWR lock warning never made it into the recording";
+
+    // The shot: shooter, target, and the weapon's NAME (resolved at capture
+    // time — a replay must not need the weapon table).
+    const auto* launch = find_event(
+        f4::recorder::CombatEventKind::MissileLaunched,
+        shooter_id.value, bandit_id.value);
+    ASSERT_NE(launch, nullptr) << "the launch event is missing";
+    EXPECT_EQ(launch->weapon_name, "AIM-120C");
+    EXPECT_GT(launch->speed_ft_s, 0.0);
+    EXPECT_NE(launch->missile_id, 0u);
+    // The launched missile has a track in the snapshot stream.
+    EXPECT_TRUE(std::find(missile_ids.begin(), missile_ids.end(),
+                          launch->missile_id) != missile_ids.end())
+        << "the launching missile never produced a recorded track";
+
+    // The victim saw the launch (the defeat trigger).
+    ASSERT_NE(find_event(f4::recorder::CombatEventKind::RwrLaunch,
+                         bandit_id.value, launch->missile_id),
+              nullptr)
+        << "the victim's RWR launch warning never made it into the recording";
+
+    // The terminal events: hit -> damage -> kill, all attributed.
+    const auto* det = find_event(
+        f4::recorder::CombatEventKind::MissileDetonated,
+        shooter_id.value, bandit_id.value);
+    ASSERT_NE(det, nullptr) << "the detonation event is missing";
+    EXPECT_EQ(det->end_cause, "target_hit");
+    EXPECT_EQ(det->missile_id, launch->missile_id);
+    EXPECT_GT(det->flight_time_s, 0.0);
+
+    const auto* dmg = find_event(
+        f4::recorder::CombatEventKind::DamageApplied,
+        bandit_id.value, shooter_id.value);
+    ASSERT_NE(dmg, nullptr) << "the damage event is missing";
+    EXPECT_TRUE(dmg->killed);
+    EXPECT_DOUBLE_EQ(dmg->hit_points_after, 0.0);
+
+    const auto* kill = find_event(
+        f4::recorder::CombatEventKind::EntityKilled,
+        bandit_id.value, shooter_id.value);
+    ASSERT_NE(kill, nullptr) << "the kill event is missing";
+
+    // --- Timing coherence: events align with the snapshot stream ----------
+    double prev_time = -1.0;
+    for (const auto& e : ev) {
+        // Monotonic: bus events arrive in publish order.
+        EXPECT_GE(e.sim_time_s, prev_time);
+        prev_time = e.sim_time_s;
+        // Tick-aligned: every event belongs to a tick the snapshots cover
+        // (the +1 bridge stamping — see attach_combat_event_recorder).
+        EXPECT_GE(e.tick, 1u);
+        EXPECT_LE(e.tick, max_tick);
+    }
+    // Cause precedes effect: launch before detonation; detonation and kill
+    // may share a stamp (the fuze, damage, and kill all publish on the
+    // missile's terminal tick) — the vector ORDER still has det first.
+    EXPECT_LT(launch->sim_time_s, det->sim_time_s);
+    EXPECT_LE(det->sim_time_s, kill->sim_time_s);
+
+    // The combat debrief section: launch outcome + kill attribution in the
+    // LLM-facing summary of the same recording.
+    const auto summary = loaded.to_summary_json();
+    EXPECT_NE(summary.find("\"weapon\":\"AIM-120C\""), std::string::npos);
+    EXPECT_NE(summary.find("\"end_cause\":\"target_hit\""), std::string::npos);
+
+    std::filesystem::remove(trace_path);  // tidy: the round-trip is proven
 }

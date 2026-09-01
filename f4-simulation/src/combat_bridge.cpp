@@ -6,8 +6,13 @@
 
 #include "f4/simulation/combat_bridge.hpp"
 
+#include "f4/simulation/simulation.hpp"
+
 #include <f4/ai/brain_component.hpp>
 #include <f4/entities/types.hpp>
+#include <f4/recorder/flight_recorder.hpp>
+#include <f4/sensors/messages.hpp>
+#include <f4/weapons/messages.hpp>
 #include <f4/weapons/missile_battery.hpp>
 #include <f4/weapons/weapon_store.hpp>
 #include <f4/weapons/weapon_types.hpp>
@@ -269,6 +274,128 @@ std::size_t execute_brain_combat_intents(entities::EntityWorld& world,
         }
     }
     return launches;
+}
+
+// ── combat event recording (M4) ────────────────────────────────────────────
+
+void attach_combat_event_recorder(Simulation& sim) {
+    auto* rec = sim.recorder();
+    if (rec == nullptr) return;  // scenario disabled recording — nothing to do
+
+    // Captured by every handler below: the recorder (owned by the sim,
+    // alive as long as the bus that holds these subscriptions), the weapon
+    // table (for launch-name resolution), and the sim itself (for tick
+    // stamping). All three outlive the bus's subscription list — the bus
+    // and its lambdas are destroyed together with the Simulation.
+    auto& bus = sim.bus();
+    const auto* table = &sim.weapon_table();
+    Simulation* sim_ptr = &sim;
+
+    // Bus events publish mid-tick, BEFORE Simulation::tick() increments
+    // its counter; the snapshots the SAME tick() call records carry the
+    // post-increment tick. +1 aligns the two.
+    const auto event_tick = [sim_ptr]() {
+        return sim_ptr->tick_count() + 1;
+    };
+
+    bus.subscribe<sensors::RadarTrackAcquiredMessage>(
+        [rec, event_tick](const sensors::RadarTrackAcquiredMessage& m) {
+            recorder::CombatEvent e;
+            e.tick = event_tick();
+            e.sim_time_s = m.time_s;
+            e.kind = recorder::CombatEventKind::TrackAcquired;
+            e.subject_id = m.radar_entity_id;
+            e.object_id = m.target_entity_id;
+            rec->record(std::move(e));
+        });
+
+    bus.subscribe<sensors::RadarTrackDroppedMessage>(
+        [rec, event_tick](const sensors::RadarTrackDroppedMessage& m) {
+            recorder::CombatEvent e;
+            e.tick = event_tick();
+            e.sim_time_s = m.time_s;
+            e.kind = recorder::CombatEventKind::TrackDropped;
+            e.subject_id = m.radar_entity_id;
+            e.object_id = m.target_entity_id;
+            rec->record(std::move(e));
+        });
+
+    bus.subscribe<sensors::RwrWarningMessage>(
+        [rec, event_tick](const sensors::RwrWarningMessage& m) {
+            recorder::CombatEvent e;
+            e.tick = event_tick();
+            e.sim_time_s = m.time_s;
+            e.kind = (m.type == sensors::RwrWarningType::Launch)
+                ? recorder::CombatEventKind::RwrLaunch
+                : recorder::CombatEventKind::RwrLock;
+            e.subject_id = m.victim_id;
+            e.object_id = m.emitter_id;
+            e.range_ft = m.range_ft;
+            rec->record(std::move(e));
+        });
+
+    bus.subscribe<weapons::MissileLaunchedMessage>(
+        [rec, event_tick, table](const weapons::MissileLaunchedMessage& m) {
+            recorder::CombatEvent e;
+            e.tick = event_tick();
+            e.sim_time_s = m.sim_time_s;
+            e.kind = recorder::CombatEventKind::MissileLaunched;
+            e.subject_id = m.shooter_id;
+            e.object_id = m.target_id;
+            e.missile_id = m.missile_id;
+            e.weapon_handle = m.weapon_handle;
+            e.position = m.position;
+            e.speed_ft_s = m.speed_fts;
+            if (const auto* w = table->get(m.weapon_handle)) {
+                e.weapon_name = w->name;
+            }
+            rec->record(std::move(e));
+        });
+
+    bus.subscribe<weapons::MissileDetonatedMessage>(
+        [rec, event_tick](const weapons::MissileDetonatedMessage& m) {
+            recorder::CombatEvent e;
+            e.tick = event_tick();
+            e.sim_time_s = m.sim_time_s;
+            e.kind = recorder::CombatEventKind::MissileDetonated;
+            e.subject_id = m.shooter_id;
+            e.object_id = m.target_id;
+            e.missile_id = m.missile_id;
+            e.end_cause = weapons::missile_end_cause_name(m.cause);
+            e.position = m.position;
+            e.miss_distance_ft = m.miss_distance_ft;
+            e.flight_time_s = m.flight_time_s;
+            rec->record(std::move(e));
+        });
+
+    bus.subscribe<weapons::DamageAppliedMessage>(
+        [rec, event_tick](const weapons::DamageAppliedMessage& m) {
+            recorder::CombatEvent e;
+            e.tick = event_tick();
+            e.sim_time_s = m.sim_time_s;
+            e.kind = recorder::CombatEventKind::DamageApplied;
+            e.subject_id = m.target_id;
+            e.object_id = m.shooter_id;
+            e.missile_id = m.missile_id;
+            e.damage = m.damage;
+            e.hit_points_after = m.hit_points_after;
+            e.killed = m.killed;
+            rec->record(std::move(e));
+        });
+
+    bus.subscribe<weapons::EntityKilledMessage>(
+        [rec, event_tick](const weapons::EntityKilledMessage& m) {
+            recorder::CombatEvent e;
+            e.tick = event_tick();
+            e.sim_time_s = m.sim_time_s;
+            e.kind = recorder::CombatEventKind::EntityKilled;
+            e.subject_id = m.target_id;
+            e.object_id = m.shooter_id;
+            rec->record(std::move(e));
+        });
+
+    // GunFiredMessage deliberately NOT captured — no module fires guns yet
+    // (same rationale as CombatTranscript's subscription set).
 }
 
 } // namespace f4::simulation

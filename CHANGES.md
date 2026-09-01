@@ -1,5 +1,46 @@
 # F4 Cleanup Pass — Changes Summary
 
+## Combat Events in the Recorder — Fights Replay Headless (M4-RECORDER-1)
+
+**A recorded fight is now the whole fight: FlightRecorder captures the
+combat bus transitions (detection, spikes, launches, impacts, kills) as a
+`CombatEvent` stream AND the missile flyouts as per-tick track snapshots,
+alongside the existing aircraft snapshots — all in the same trace JSON the
+world viewer replays. Run a fight headless, write the trace, load it back:
+the full engagement chain survives the round-trip with tick-aligned timing,
+and the LLM-facing summary gains a combat debrief (launches with outcomes,
+kills with attribution). The two shipped combat scenarios now record:
+watch `bvr_intercept` or `wvr_merge` in the scenario-player and a
+replayable trace lands in `<build>/*_trace.json` when you close it. The
+suite is now 1,610/1,610.**
+
+| Area | Change |
+|------|--------|
+| `f4-recorder` — CombatEvent (new) | `combat_event.hpp`: the discrete half of a fight recording. One fat value struct with an 8-value kind enum (`track_acquired` / `track_dropped` / `rwr_lock` / `rwr_launch` / `missile_launched` / `missile_detonated` / `damage_applied` / `entity_killed` — stable wire names via `combat_event_kind_name()`), per-kind payload fields (ids, launch/burst positions, weapon name, end cause, miss distance, damage/HP, RWR range), and the same engine-agnostic stance as FlightSnapshot: raw uint64 ids and plain strings, NO f4-weapons/f4-sensors dependency — the bridge that flattens bus messages lives in f4-simulation. `weapon_name` is resolved at capture time so a replay never needs the weapon table. |
+| `f4-recorder` — FlightRecorder | `record(CombatEvent)` + `combat_events()` / `combat_event_count()` / `combat_events_in_range(t0, t1)` (the snapshot query's twin). `to_json()` appends `combat_event_count` + a `combat_events` array **only when events exist**; `from_json()` parses them (unknown kinds and fields skip — the reader's forward-compatibility rule). `to_summary_json()` gains a `combat` debrief: engagement window, per-launch outcomes (shooter/target/weapon, end cause, miss distance, flight time — correlated launch↔detonation by missile_id), and kills (victim/killer/weapon — correlated kill↔damage↔launch). |
+| `f4-recorder` — missile tracks | `FlightSnapshot::missile` marks a track as a munition: callsign carries the weapon name ("AIM-120C"), `ai_state` the flyout status ("guided"/"ballistic"), kinematics the missile's. Serialized **only when true** and the combat arrays **only when present** — aircraft-only recordings stay byte-identical to the pre-M4 format (diff baselines unperturbed), old readers skip the new keys, new readers load old docs clean. The summary's aircraft/phases/state-sequence sections filter missiles out (munitions, not flights). |
+| `f4-simulation` — event bridge | `attach_combat_event_recorder(sim)` (combat_bridge): subscribes the recorder to all seven bus transitions and converts each message to a CombatEvent. Tick stamping is the subtle part: bus events publish mid-tick BEFORE `tick()` increments its counter, so events get `tick_count()+1` — aligned with the FlightSnapshots the SAME `tick()` call records. Wired automatically in `initialize()` whenever the scenario enables recording (harmless with combat off: no messages, no events). |
+| `f4-simulation` — missile track recording | `record_snapshot()` now walks `with_component<MissileComponent>()` each tick and records every live missile's position/speed/status (swept-terminal missiles vanish first — their last position is the tick before detonation; the burst point lives in the detonation event, so replay endpoints stay covered). `Simulation::recorder()` accessor exposes the live recording to hosts. |
+| Scenarios | `bvr_intercept.json` and `wvr_merge.json` flip `record: true` with `<build>/*_trace.json` paths — exit the player after a fight and the trace is ready to load in the world viewer's replay mode (missile trails included). Test runs write nothing (only the player host calls `write_recording()`). |
+| Tests | +13 (suite **1,610/1,610 — 100%**, zero warnings): 12× recorder units (record/queries, every kind's JSON round-trip incl. positions and payloads, unknown-kind forward compat, missile-flag round-trip + aircraft byte-compat, old-format doc load, combat debrief content, missile exclusion from the aircraft summary) and **CombatRecordingReplaysTheFight** E2E: the full BVR engagement flown with recording on, written to disk, re-loaded — asserts both aircraft tracks AND the missile flyout (name/status/motion), the complete event chain in order (acquire → RWR lock → FOX 3 with name → RWR launch → `target_hit` detonation → killing damage → kill attribution), event ticks within the snapshot tick range, cause-before-effect timing, and the debrief section. |
+
+**How to get a replayable fight trace** (player build needs X11/OpenGL):
+
+```
+f4-scenario-player <build>/scenarios/bvr_intercept.json --run --follow
+# ... watch the fight, close the window ...
+# <build>/bvr_intercept_trace.json now holds snapshots + combat events
+```
+
+Headless traces come from any scenario JSON with `record: true` +
+`record_path` (the E2E test does exactly this through the public API).
+
+**Deferred (documented, deliberate)**: world-viewer replay UI for the
+event stream (the viewer already loads the format — a combat timeline
+panel is a viewer-side feature for a session that can build GL),
+countermeasure consumption (chaff/flare remain intents), guns (no gun
+events exist to record), campaign-flights combat attachment.
+
 ## WVR Merge — The AI Fights Inside 3 NM (M3-TACTICS-2)
 
 **The last band of the fight is flown: BVRModule now hands off to a new

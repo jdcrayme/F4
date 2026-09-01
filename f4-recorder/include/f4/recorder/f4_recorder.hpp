@@ -7,7 +7,8 @@
 // for validation.
 //
 // Components:
-//   f4::recorder::FlightSnapshot    — per-tick state snapshot
+//   f4::recorder::FlightSnapshot    — per-tick state snapshot (aircraft/missile)
+//   f4::recorder::CombatEvent       — discrete combat transition (M4)
 //   f4::recorder::FlightRecorder    — accumulator + JSON export
 //   f4::recorder::PathSegment       — intended path geometry
 //   f4::recorder::FlightPath        — intended + actual path for one aircraft

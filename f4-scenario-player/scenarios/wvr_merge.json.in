@@ -51,7 +51,8 @@
   "start_enroute": true,
   "sim_dt": 0.016666666666666,
   "total_ticks": 36000,
-  "record": false,
+  "record": true,
+  "record_path": "@F4_BINARY_DIR@/wvr_merge_trace.json",
   "combat": { "enabled": true, "radar_rng_seed": 888,
               "fighter_hit_points": 10, "bvr_hold": true }
 }

@@ -3490,3 +3490,60 @@ Stage Summary:
   skill parameterization.
 - Next session: recorder combat events (the fights become replayable
   traces), then WingmanModule (2v2), then guns.
+
+---
+
+## M4-RECORDER-1 — combat events land in the recorder; fights replay headless
+
+Pulled origin/main: 11422d9 "wvr combat" — byte-identical to the tested
+m3-tactics-2 tree (diff = 0). Rebuild no-op; baseline 1,597/1,597 green.
+Branched m4-recorder-1.
+
+- f4-recorder: new combat_event.hpp — CombatEvent (8 kinds: track
+  acquired/dropped, RWR lock/launch, missile launched/detonated,
+  damage, kill) with per-kind payloads; engine-agnostic (raw ids,
+  strings for cause/weapon; NO f4-weapons/f4-sensors link — the
+  CMakeLists' documented stance holds). FlightRecorder: record/query
+  (combat_events_in_range), to_json/from_json round-trip ("combat_events"
+  array + count, emitted ONLY when non-empty), to_summary_json combat
+  debrief (launch outcomes correlated by missile_id; kills correlated
+  kill->damage->launch for the weapon name).
+- FlightSnapshot::missile — per-tick missile tracks in the same snapshot
+  stream the world viewer replays (callsign=weapon name, ai_state=flyout
+  status). Emitted only when true; summary filters missiles out of the
+  aircraft/phases/state-sequence sections. Aircraft-only recordings stay
+  byte-identical to the pre-M4 format (verified by test).
+- f4-simulation: attach_combat_event_recorder (combat_bridge) — the bus->
+  CombatEvent bridge; events stamped tick_count()+1 (bus publishes
+  mid-tick, BEFORE tick()'s increment — +1 aligns them with the
+  snapshots the same tick() records). Wired in initialize() whenever
+  recording is on. record_snapshot() walks
+  with_component<MissileComponent>() for the flyout tracks;
+  Simulation::recorder() accessor for hosts.
+- REAL BUG caught by the E2E (segfault at first combat event): the bus
+  handlers captured the stack-local event_tick lambda by REFERENCE —
+  attach() returns immediately, so every handler dereferenced a dangling
+  closure. Fixed by capturing the closure by value.
+- Scenarios: bvr_intercept + wvr_merge flip record: true with
+  <build>/*_trace.json — exit the player after a fight and the trace
+  (snapshots + combat events + missile tracks) is replay-ready.
+- Tests +13 (suite 1,610/1,610 = 100%, zero warnings): 12 recorder
+  units (round-trips per kind, unknown-kind forward compat, old-format
+  doc load, missile byte-compat, debrief content, summary filtering) +
+  CombatRecordingReplaysTheFight E2E — full BVR fight flown, written,
+  re-loaded: both aircraft tracks AND the missile flyout, the complete
+  event chain in order with attribution, tick alignment within the
+  snapshot range, cause-precedes-effect, debrief section.
+- Docs: CHANGES.md M4-RECORDER-1 section; this entry.
+
+Stage Summary:
+- The M4 acceptance ("every shot/detection/kill is replayable") is a
+  passing regression test: a fight's kinematics AND its event stream
+  survive the JSON round-trip together, tick-aligned.
+- Deliberately deferred (documented): world-viewer replay UI for the
+  event stream (viewer-side, needs a GL-capable session), guns (no gun
+  events exist), countermeasure consumption, campaign-flights combat
+  attachment.
+- Next session: WingmanModule (2v2 formation fight — the last M3 module
+  before the DigitalBrain arbiter cut), then guns, then asset pipeline
+  Stage 1.
