@@ -21,10 +21,13 @@ target_include_directories(f4-terrain
         $<INSTALL_INTERFACE:include>
 )
 # f4-terrain uses f4-json for the terrain JSON intermediate format (the
-# load_terrain_json / to_terrain_json pair) and f4-io for binary file reading.
-# Both are PRIVATE: they are implementation details not exposed in public
-# headers. f4-world (which links f4-terrain) declares its own f4-json dep.
-target_link_libraries(f4-terrain PRIVATE f4-json f4-io)
+# load_terrain_json / to_terrain_json pair), f4-io for binary file reading,
+# and f4-install for the case-insensitive file finder (Stage 2 of the
+# asset pipeline folds the duplicated finders into f4-install's public
+# API — see f4/install/file_finder.hpp). All three are PRIVATE: they
+# are implementation details not exposed in public headers. f4-world
+# (which links f4-terrain) declares its own f4-json + f4-assets deps.
+target_link_libraries(f4-terrain PRIVATE f4-json f4-io f4-install)
 
 option(F4_TERRAIN_BUILD_TESTS "Build unit tests" ON)
 if(F4_TERRAIN_BUILD_TESTS)

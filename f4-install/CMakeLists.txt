@@ -17,6 +17,7 @@ add_library(f4-install STATIC
     src/installation.cpp
     src/theater.cpp
     src/campaign.cpp
+    src/file_finder.cpp
 )
 target_link_libraries(f4-install PUBLIC f4_warnings)
 

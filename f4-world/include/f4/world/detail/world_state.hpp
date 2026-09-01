@@ -40,6 +40,13 @@
 #include <f4/entities/types.hpp>
 #include <f4/terrain/terrain_data.hpp>
 
+// Forward declaration — the asset-root overload of load_terrain takes
+// a const ref. We don't want to leak f4-assets into every consumer of
+// f4-world, so we forward-declare here and include the full header in
+// the .cpp only. Consumers that call load_terrain_via_assets() must
+// include <f4/assets/asset_root.hpp> themselves.
+namespace f4::assets { class AssetRoot; }
+
 namespace f4::world {
 
 // ============================================================================
@@ -313,7 +320,21 @@ struct WorldState {
     /// is non-empty, the terrain_file path is resolved relative to it
     /// (typically the directory containing the world JSON). Throws on
     /// I/O or parse error. Sets terrain_loaded = true on success.
+    ///
+    /// If `terrain_file` starts with `@asset:` (the asset-pipeline form
+    /// from ASSET_PIPELINE_SPEC.md §4), the loader requires the manifest
+    /// to resolve the reference — call `load_terrain_via_assets()`
+    /// instead, OR call this with an empty base_dir AND a world_json_dir_
+    /// that contains a `Data/` tree (the legacy bare-filename form
+    /// remains the default).
     void load_terrain(const std::filesystem::path& base_dir = "");
+
+    /// Asset-pipeline overload: resolve `terrain_file` through the
+    /// AssetRoot's manifest when it's in the `@asset:theater:<id>` form.
+    /// Throws if `terrain_file` is NOT in the asset-ref form (call the
+    /// no-arg form for legacy bare filenames). Throws if the asset is
+    /// not in the manifest. Sets terrain_loaded = true on success.
+    void load_terrain_via_assets(const f4::assets::AssetRoot& root);
 
 private:
     // Directory of the world JSON file (set by load()). Used by

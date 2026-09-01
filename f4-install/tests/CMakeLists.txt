@@ -12,3 +12,4 @@ function(f4_add_test name source)
 endfunction()
 
 f4_add_test(test_installation test_installation.cpp)
+f4_add_test(test_file_finder test_file_finder.cpp)

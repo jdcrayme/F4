@@ -357,10 +357,17 @@ void validate(const Scenario& s) {
 }
 
 // Resolve a relative path against the scenario file's parent directory.
-// Absolute paths are returned unchanged.
+// Absolute paths are returned unchanged. Strings starting with
+// `@asset:` are returned unchanged — they're asset-pipeline references
+// (Stage 2, ASSET_PIPELINE_SPEC.md §4) that the consumer resolves
+// through an AssetRoot at runtime, not relative paths.
 std::filesystem::path resolve(const std::filesystem::path& base_dir,
                               const std::filesystem::path& p) {
     if (p.empty()) return p;
+    const std::string s = p.string();
+    if (s.size() >= 7 && s.substr(0, 7) == "@asset:") {
+        return p;  // asset reference — preserved for runtime resolution
+    }
     return p.is_absolute() ? p : (base_dir / p);
 }
 

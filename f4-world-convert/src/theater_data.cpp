@@ -4,6 +4,7 @@
 // See theater_data.hpp for the file-format documentation and struct sizes.
 
 #include <f4/world_convert/theater_data.hpp>
+#include <f4/install/file_finder.hpp>
 
 #include <f4/io/cursor.hpp>
 #include <f4/io/read_file.hpp>
@@ -164,68 +165,20 @@ const char* damage_type_name(int32_t dt) noexcept {
 
 // ============================================================================
 // File finders — case-insensitive fallback for cross-platform
+//
+// Stage 2 (ASSET_PIPELINE_SPEC.md §12): the case-insensitive file finder
+// was duplicated across f4-terrain, f4-world-convert, f4-models, and
+// f4-install. The canonical implementation now lives in
+// f4::install::find_file_by_extension_ci(); this function is a thin
+// delegate so the existing call sites (load_objective_data, etc.) keep
+// their signature and the "theater_data:" diagnostic prefix stays
+// close to the callers that rely on it.
 // ============================================================================
 
 std::filesystem::path
 find_theater_file(const std::filesystem::path& base_path,
                   const std::string& ext) {
-    // 1. base_path + "." + ext
-    {
-        auto p = base_path;
-        p += ".";
-        p += ext;
-        if (std::filesystem::exists(p)) {
-            // On case-insensitive filesystems (NTFS, FAT, default macOS APFS),
-            // std::filesystem::exists() returns true even when the on-disk
-            // filename case differs from the constructed path. The caller
-            // expects the on-disk case (so that subsequent file operations
-            // and the test fixtures match byte-for-byte). weakly_canonical()
-            // resolves the actual on-disk name; fall back to the constructed
-            // path only if canonicalization fails.
-            std::error_code ec;
-            auto real = std::filesystem::weakly_canonical(p, ec);
-            if (!ec) return real;
-            return p;
-        }
-    }
-    // 2. base_path verbatim
-    if (std::filesystem::exists(base_path)) {
-        std::error_code ec;
-        auto real = std::filesystem::weakly_canonical(base_path, ec);
-        if (!ec) return real;
-        return base_path;
-    }
-
-    // 3. Case-insensitive search in base_path's parent directory.
-    //    Look for any file matching "<stem>.<ext>" case-insensitively.
-    //    (On case-sensitive filesystems this is the only path that runs;
-    //    on case-insensitive filesystems step 1 already hit and returned
-    //    the canonicalized path, but we keep this branch for safety in
-    //    case weakly_canonical fails to resolve the case.)
-    const auto parent = base_path.parent_path().empty()
-        ? std::filesystem::current_path()
-        : base_path.parent_path();
-    const auto stem = base_path.filename().string();
-    if (stem.empty()) return {};
-    if (parent.empty() || !std::filesystem::exists(parent)) return {};
-
-    std::string stem_lower = stem;
-    std::string ext_lower = ext;
-    std::transform(stem_lower.begin(), stem_lower.end(), stem_lower.begin(),
-                   [](unsigned char c) { return std::tolower(c); });
-    std::transform(ext_lower.begin(), ext_lower.end(), ext_lower.begin(),
-                   [](unsigned char c) { return std::tolower(c); });
-
-    for (const auto& entry : std::filesystem::directory_iterator(parent)) {
-        if (!entry.is_regular_file()) continue;
-        auto name = entry.path().filename().string();
-        std::transform(name.begin(), name.end(), name.begin(),
-                       [](unsigned char c) { return std::tolower(c); });
-        if (name == stem_lower + "." + ext_lower) {
-            return entry.path();
-        }
-    }
-    return {};
+    return f4::install::find_file_by_extension_ci(base_path, ext);
 }
 
 // ============================================================================

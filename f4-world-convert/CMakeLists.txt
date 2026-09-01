@@ -39,7 +39,7 @@ target_link_libraries(f4-world-convert PRIVATE f4-lzss f4-install f4-io f4-json)
 
 # CLI tool
 add_executable(cam2json cli/cam2json.cpp)
-target_link_libraries(cam2json PRIVATE f4-world-convert)
+target_link_libraries(cam2json PRIVATE f4-world-convert f4-import)
 
 # Copy FALCON4.ct (the class table) next to cam2json so the CLI finds it
 # from CWD when run via `cmake --build build --target world`. The class

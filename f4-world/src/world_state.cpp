@@ -9,6 +9,7 @@
 #include <f4/world/detail/world_state.hpp>
 
 #include <f4/json/reader.hpp>
+#include <f4/assets/asset_root.hpp>  // for load_terrain_via_assets()
 
 #include <fstream>
 #include <sstream>
@@ -620,6 +621,32 @@ void WorldState::load_terrain(const std::filesystem::path& base_dir) {
     }
 
     terrain.load_terrain_json(resolved);
+    terrain_loaded = true;
+}
+
+void WorldState::load_terrain_via_assets(const f4::assets::AssetRoot& root) {
+    if (terrain_file.empty())
+        throw std::runtime_error("WorldState: no terrain_file referenced");
+    if (!f4::assets::is_asset_ref(terrain_file)) {
+        throw std::runtime_error(
+            "WorldState::load_terrain_via_assets: terrain_file is not in "
+            "the @asset: form (call load_terrain() for legacy bare "
+            "filenames): '" + terrain_file + "'");
+    }
+    f4::assets::AssetId id = f4::assets::parse_asset_ref(terrain_file);
+    auto path = root.resolve_existing(id);
+    if (path.empty()) {
+        const auto raw = root.resolve_asset_path(id);
+        if (raw.empty()) {
+            throw std::runtime_error(
+                "WorldState::load_terrain_via_assets: asset " + id.to_string() +
+                " is not in the manifest");
+        }
+        throw std::runtime_error(
+            "WorldState::load_terrain_via_assets: asset " + id.to_string() +
+            " is in the manifest but file missing on disk: " + raw.string());
+    }
+    terrain.load_terrain_json(path);
     terrain_loaded = true;
 }
 

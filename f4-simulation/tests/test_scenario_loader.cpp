@@ -517,3 +517,92 @@ TEST(ScenarioLoader, AirbaseSourceRelaxesTaxiRouteRequirement) {
     auto s = load_scenario_from_string(json);
     EXPECT_TRUE(s.airfield.taxi_route.empty());   // derived later, at sim init
 }
+
+// ============================================================================
+// Stage 2 (ASSET_PIPELINE_SPEC.md §12): @asset: reference preservation
+//
+// A scenario JSON may reference an asset by ID instead of a relative
+// path. The loader preserves the @asset:<id> string verbatim in the
+// path fields — the consumer (Simulation) resolves it through an
+// AssetRoot at runtime. This makes scenarios relocatable: the same
+// scenario JSON works on any machine that has run `f4import` once.
+// ============================================================================
+
+TEST(ScenarioLoader, AssetRefInTerrainJsonPathIsPreserved) {
+    const auto json = R"({
+        "name": "asset_ref_test",
+        "theater": "korea",
+        "terrain_json_path": "@asset:theater:korea",
+        "aircraft": [
+            {"callsign":"E1","aircraft_config_path":"@asset:aircraft:f16",
+             "aircraft_name":"F-16","vis_type_index":1052,
+             "parking_spot":{"x":0,"y":0,"z":0},"heading_rad":0,"initial_fuel_lbs":1}
+        ],
+        "airfield": {
+            "active_runway_id": 36,
+            "threshold_position": {"x":0,"y":0,"z":0},
+            "runway_end_position": {"x":0,"y":1000,"z":0},
+            "taxi_route": [{"x":0,"y":0,"z":0},{"x":0,"y":500,"z":0},{"x":0,"y":1000,"z":0}]
+        }
+    })";
+    auto s = load_scenario_from_string(json);
+    EXPECT_EQ(s.terrain_json_path.string(), "@asset:theater:korea");
+    EXPECT_EQ(s.aircraft[0].aircraft_config_path, "@asset:aircraft:f16");
+}
+
+TEST(ScenarioLoader, AssetRefInModelsPathsIsPreserved) {
+    const auto json = R"({
+        "name": "asset_models_test",
+        "models_hdr_path": "@asset:koreaobj:00001",
+        "models_lod_path": "@asset:koreaobj:00001",
+        "models_tex_path": "@asset:koreaobj:00001",
+        "aircraft": [
+            {"callsign":"E1","aircraft_config_path":"f16.json",
+             "aircraft_name":"F-16","vis_type_index":1052,
+             "parking_spot":{"x":0,"y":0,"z":0},"heading_rad":0,"initial_fuel_lbs":1}
+        ],
+        "airfield": {
+            "active_runway_id": 36,
+            "threshold_position": {"x":0,"y":0,"z":0},
+            "runway_end_position": {"x":0,"y":1000,"z":0},
+            "taxi_route": [{"x":0,"y":0,"z":0},{"x":0,"y":1000,"z":0}]
+        }
+    })";
+    auto s = load_scenario_from_string(json);
+    EXPECT_EQ(s.models_hdr_path.string(), "@asset:koreaobj:00001");
+    EXPECT_EQ(s.models_lod_path.string(), "@asset:koreaobj:00001");
+    EXPECT_EQ(s.models_tex_path.string(), "@asset:koreaobj:00001");
+}
+
+TEST(ScenarioLoader, LoadScenarioFilePreservesAssetRef) {
+    // load_scenario() (the file form) must NOT resolve @asset: refs
+    // against the scenario's parent dir — they're preserved as-is so
+    // the runtime can resolve them through the AssetRoot.
+    namespace fs = std::filesystem;
+    auto tmp = fs::temp_directory_path() / "f4_scenario_asset_ref_test";
+    fs::remove_all(tmp);
+    fs::create_directories(tmp);
+    {
+        std::ofstream f(tmp / "scenario.json");
+        f << R"({
+            "name": "asset_file_test",
+            "theater": "korea",
+            "terrain_json_path": "@asset:theater:korea",
+            "aircraft": [
+                {"callsign":"E1","aircraft_config_path":"@asset:aircraft:f16",
+                 "aircraft_name":"F-16","vis_type_index":1052,
+                 "parking_spot":{"x":0,"y":0,"z":0},"heading_rad":0,"initial_fuel_lbs":1}
+            ],
+            "airfield": {
+                "active_runway_id": 36,
+                "threshold_position": {"x":0,"y":0,"z":0},
+                "runway_end_position": {"x":0,"y":1000,"z":0},
+                "taxi_route": [{"x":0,"y":0,"z":0},{"x":0,"y":1000,"z":0}]
+            }
+        })";
+    }
+    auto s = load_scenario(tmp / "scenario.json");
+    EXPECT_EQ(s.terrain_json_path.string(), "@asset:theater:korea");
+    EXPECT_EQ(s.aircraft[0].aircraft_config_path, "@asset:aircraft:f16");
+    fs::remove_all(tmp);
+}

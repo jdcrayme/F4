@@ -1,0 +1,6 @@
+{
+  "theater": "korea",
+  "terrain_file": "@asset:theater:korea",
+  "version": 63,
+  "campaign": { "teams": [] }
+}

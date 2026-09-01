@@ -5,6 +5,7 @@
 #include <f4/models/model_database.hpp>
 #include <f4/models/model_record.hpp>
 #include <f4/models/geometry.hpp>
+#include <f4/install/file_finder.hpp>
 
 #include "bin_reader.hpp"
 #include "hdr_parser.hpp"
@@ -18,6 +19,7 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <vector>
 
 namespace f4::models {
 
@@ -356,27 +358,21 @@ ModelDatabase::find_koreaobj_files(const std::filesystem::path& install_root)
     namespace fs = std::filesystem;
     fs::path hdr, lod;
 
-    std::array<fs::path, 3> dirs = {
+    // Stage 2 (ASSET_PIPELINE_SPEC.md §12): the candidate-dir list and
+    // the name-variant arrays used to be hand-rolled here; they now
+    // delegate to f4::install::find_file_ci_in_dirs_with_variants so
+    // the case-insensitive matching logic is shared with f4-terrain
+    // and f4-world-convert.
+    std::vector<fs::path> dirs = {
         install_root,
         install_root / "terrdata" / "objects",
         install_root / "terrdata" / "korea" / "objects",
     };
+    std::vector<std::string> hdr_names = {"KoreaObj.HDR", "KoreaObj.DXH"};
+    std::vector<std::string> lod_names = {"KoreaObj.LOD", "KoreaObj.DXL"};
 
-    std::array<std::string, 2> hdr_names = {"KoreaObj.HDR", "KoreaObj.DXH"};
-    std::array<std::string, 2> lod_names = {"KoreaObj.LOD", "KoreaObj.DXL"};
-
-    for (const auto& d : dirs) {
-        if (!fs::exists(d)) continue;
-        for (const auto& n : hdr_names) {
-            auto p = d / n;
-            if (fs::exists(p)) { hdr = p; break; }
-        }
-        for (const auto& n : lod_names) {
-            auto p = d / n;
-            if (fs::exists(p)) { lod = p; break; }
-        }
-        if (!hdr.empty() || !lod.empty()) break;
-    }
+    hdr = f4::install::find_file_ci_in_dirs_with_variants(dirs, hdr_names);
+    lod = f4::install::find_file_ci_in_dirs_with_variants(dirs, lod_names);
 
     return {hdr, lod};
 }
@@ -388,23 +384,13 @@ std::filesystem::path ModelDatabase::find_tex_file(
 {
     namespace fs = std::filesystem;
 
-    std::array<fs::path, 3> dirs = {
+    std::vector<fs::path> dirs = {
         install_root,
         install_root / "terrdata" / "objects",
         install_root / "terrdata" / "korea" / "objects",
     };
-
-    std::array<std::string, 2> tex_names = {"KoreaObj.Tex", "KoreaObj.tex"};
-
-    for (const auto& d : dirs) {
-        if (!fs::exists(d)) continue;
-        for (const auto& n : tex_names) {
-            auto p = d / n;
-            if (fs::exists(p)) return p;
-        }
-    }
-
-    return {};
+    std::vector<std::string> tex_names = {"KoreaObj.Tex", "KoreaObj.tex"};
+    return f4::install::find_file_ci_in_dirs_with_variants(dirs, tex_names);
 }
 
 std::filesystem::path ModelDatabase::find_tex_next_to_hdr() const {
@@ -415,17 +401,13 @@ std::filesystem::path ModelDatabase::find_tex_next_to_hdr() const {
     auto dir = hdr_path_.parent_path();
     auto stem = hdr_path_.stem().string();
 
-    // Try same stem with .Tex extension
-    std::array<std::string, 2> tex_names = {
+    // Try same stem with .Tex extension (case-insensitive — the install
+    // may ship "KoreaObj.Tex" or "KoreaObj.tex").
+    std::vector<std::string> tex_names = {
         stem + ".Tex",
         stem + ".tex",
     };
-    for (const auto& n : tex_names) {
-        auto p = dir / n;
-        if (fs::exists(p)) return p;
-    }
-
-    return {};
+    return f4::install::find_file_ci_with_variants(dir, tex_names);
 }
 
 // ── TEX loading ───────────────────────────────────────────────────────────

@@ -37,6 +37,9 @@ set(F4_GENERATED_FIXTURES_DIR "${CMAKE_BINARY_DIR}/generated_fixtures" CACHE PAT
 add_subdirectory(f4-units)
 add_subdirectory(f4-math)
 add_subdirectory(f4-json)         # minimal dependency-free JSON reader/writer
+add_subdirectory(f4-assets)      # runtime asset root, manifest reader, capability/staleness API (see Docs/ASSET_PIPELINE_SPEC.md)
+add_subdirectory(f4-import)      # importer side: doctor + f4import CLI (see Docs/ASSET_PIPELINE_SPEC.md)
+add_subdirectory(f4-gltf)        # runtime glTF 2.0 loader (Stage 3, replaces f4-models in the runtime link closure)
 add_subdirectory(f4-geo)          # strong-typed coordinate frames & geodesy
 add_subdirectory(f4-state-machine)
 add_subdirectory(f4-entities)     # component-based entity system (uses f4-geo)

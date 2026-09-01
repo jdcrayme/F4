@@ -1,0 +1,38 @@
+{
+  "f4": { "v": 1, "generator": "f4import 0.4.0 (test fixture)" },
+  "data_dir": "Data/",
+  "assets": [
+    {
+      "id": "theater:korea",
+      "path": "Theater/korea/theater.json",
+      "format_version": 1,
+      "capabilities": [
+        { "name": "map", "status": "present" },
+        { "name": "posts", "status": "present", "count": 8 }
+      ],
+      "sources": [
+        { "path": "terrdata/korea/theater/THEATER.MAP", "role": "theater", "sha256": "fake" }
+      ]
+    },
+    {
+      "id": "campaign:save1",
+      "path": "World/save1.world.json",
+      "format_version": 1,
+      "capabilities": [],
+      "sources": [
+        { "path": "campaign/SAVE/save1.cam", "role": "campaign", "sha256": "fake" }
+      ]
+    },
+    {
+      "id": "koreaobj:00002",
+      "path": "Models/koreaobj/00002.gltf",
+      "format_version": 1,
+      "capabilities": [
+        { "name": "dofs", "status": "present", "count": 9 }
+      ],
+      "sources": [
+        { "path": "terrdata/objects/KoreaObj.HDR", "role": "art", "sha256": "fake" }
+      ]
+    }
+  ]
+}

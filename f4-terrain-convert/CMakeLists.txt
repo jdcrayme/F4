@@ -22,4 +22,4 @@ target_link_libraries(f4-terrain-convert PRIVATE f4-terrain)
 
 # CLI tool: terrain2json <terrain_dir> [out.json]
 add_executable(terrain2json cli/terrain2json.cpp)
-target_link_libraries(terrain2json PRIVATE f4-terrain-convert)
+target_link_libraries(terrain2json PRIVATE f4-terrain-convert f4-import)

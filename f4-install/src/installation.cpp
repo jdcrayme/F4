@@ -1,6 +1,7 @@
 // f4-install/src/installation.cpp
 
 #include <f4/install/installation.hpp>
+#include <f4/install/file_finder.hpp>
 
 #include <algorithm>
 #include <cctype>
@@ -15,37 +16,6 @@ std::string to_lower(std::string s) {
     std::transform(s.begin(), s.end(), s.begin(),
                    [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     return s;
-}
-
-bool iequals(const std::string& a, const std::string& b) {
-    return to_lower(a) == to_lower(b);
-}
-
-/// Look for a file named `name` case-insensitively in `dir`. Returns the
-/// path with original on-disk casing, or empty if not found.
-std::filesystem::path find_in_dir(const std::filesystem::path& dir, const std::string& name) {
-    std::error_code ec;
-    if (!std::filesystem::exists(dir, ec)) return {};
-    for (const auto& entry : std::filesystem::directory_iterator(dir, ec)) {
-        if (!entry.is_regular_file()) continue;
-        if (iequals(entry.path().filename().string(), name)) {
-            return entry.path();
-        }
-    }
-    return {};
-}
-
-/// Look for a subdirectory named `name` case-insensitively in `dir`.
-std::filesystem::path find_subdir(const std::filesystem::path& dir, const std::string& name) {
-    std::error_code ec;
-    if (!std::filesystem::exists(dir, ec)) return {};
-    for (const auto& entry : std::filesystem::directory_iterator(dir, ec)) {
-        if (!entry.is_directory()) continue;
-        if (iequals(entry.path().filename().string(), name)) {
-            return entry.path();
-        }
-    }
-    return {};
 }
 
 } // namespace
@@ -99,27 +69,26 @@ Installation Installation::detect(const std::filesystem::path& root) {
     {
         const char* filename = "FALCON4.ct";
         inst.diagnostics_.class_table_searched.push_back(root / filename);
-        inst.class_table_ = find_in_dir(root, filename);
+        inst.class_table_ = find_file_ci(root, filename);
         if (inst.class_table_.empty()) {
-            auto sim = find_subdir(root, "sim");
+            auto sim = find_subdir_ci(root, "sim");
             if (!sim.empty()) {
                 inst.aircraft_dir_ = sim;
                 inst.diagnostics_.class_table_searched.push_back(sim / filename);
-                inst.class_table_ = find_in_dir(sim, filename);
+                inst.class_table_ = find_file_ci(sim, filename);
             }
         }
         if (inst.class_table_.empty()) {
-            auto td = find_subdir(root, "terrdata");
+            auto td = find_subdir_ci(root, "terrdata");
             if (!td.empty()) {
                 inst.diagnostics_.class_table_searched.push_back(td / filename);
-                inst.class_table_ = find_in_dir(td, filename);
+                inst.class_table_ = find_file_ci(td, filename);
 
-                if (inst.class_table_ == "")
-                {
-                    td = find_subdir(td, "objects");
+                if (inst.class_table_.empty()) {
+                    td = find_subdir_ci(td, "objects");
                     if (!td.empty()) {
                         inst.diagnostics_.class_table_searched.push_back(td / filename);
-                        inst.class_table_ = find_in_dir(td, filename);
+                        inst.class_table_ = find_file_ci(td, filename);
                     }
                 }
             }
@@ -129,14 +98,14 @@ Installation Installation::detect(const std::filesystem::path& root) {
     // 2. sim/ — aircraft data (.dat files). We always locate this even
     //    if we already did while probing for FALCON4.ct above.
     if (inst.aircraft_dir_.empty()) {
-        inst.aircraft_dir_ = find_subdir(root, "sim");
+        inst.aircraft_dir_ = find_subdir_ci(root, "sim");
     }
 
     // 3. terrdata/ — theater data. Required for world visualization.
-    inst.terrdata_dir_ = find_subdir(root, "terrdata");
+    inst.terrdata_dir_ = find_subdir_ci(root, "terrdata");
     if (!inst.terrdata_dir_.empty()) {
         // Parse theater.lst for preferred ordering + display names.
-        auto lst = find_in_dir(inst.terrdata_dir_, "theater.lst");
+        auto lst = find_file_ci(inst.terrdata_dir_, "theater.lst");
         std::vector<std::string> preferred;
         if (!lst.empty()) {
             inst.diagnostics_.theater_lst_path = lst;
@@ -157,7 +126,7 @@ Installation Installation::detect(const std::filesystem::path& root) {
 
     // 4. campaign/ — saved campaigns. May be flat (vanilla) or nested
     //    per-theater (FreeFalcon multi-theater).
-    inst.campaign_dir_ = find_subdir(root, "campaign");
+    inst.campaign_dir_ = find_subdir_ci(root, "campaign");
     inst.diagnostics_.campaign_dir_found = !inst.campaign_dir_.empty();
     if (!inst.campaign_dir_.empty()) {
         std::vector<std::string> keys;
@@ -170,11 +139,6 @@ Installation Installation::detect(const std::filesystem::path& root) {
 }
 
 bool Installation::valid() const noexcept {
-    // An install is valid if it has either a class table (vanilla F4 with
-    // saves but no terrain, e.g. a campaign-only install) or a terrdata/
-    // directory (theaters present). This intentionally does NOT require
-    // both — some installs ship terrain without FALCON4.ct (community
-    // repacks) and we want to support them.
     return !class_table_.empty() || !terrdata_dir_.empty();
 }
 
@@ -190,10 +154,6 @@ std::vector<Campaign> Installation::campaigns_for(const std::string& theater_key
     std::vector<Campaign> out;
     const std::string k = to_lower(theater_key);
     for (const auto& c : campaigns_) {
-        // Include campaigns whose theater_key matches, plus any whose
-        // theater_key is empty (flat layout — they belong to whatever
-        // theater the user selected). This matches the viewer's CONOPS
-        // where the user picks a theater first, then a campaign.
         if (c.theater_key == k || c.theater_key.empty()) {
             out.push_back(c);
         }
@@ -203,6 +163,18 @@ std::vector<Campaign> Installation::campaigns_for(const std::string& theater_key
 
 // ---------------------------------------------------------------------------
 // find_class_table — install-aware resolver
+//
+// Stage 2 (ASSET_PIPELINE_SPEC.md §12): the CWD fallback list that
+// used to be step 4 here is DELETED. The install-aware resolver now
+// searches:
+//   1. Same directory as the reference file (typically the .cam)
+//   2. Up a directory or two from the reference file
+//   3. The install's class_table() path (resolved during detect())
+// and returns an empty path if none of those find it. Callers that
+// want the legacy CWD-relative search (cam2json run from the build dir
+// against bundled fixtures) should call the free function
+// find_class_table_cwd_fallback() explicitly — that function still
+// exists, but the install no longer silently falls back to it.
 // ---------------------------------------------------------------------------
 std::filesystem::path Installation::find_class_table(
     const std::filesystem::path& reference_file) const {
@@ -212,18 +184,18 @@ std::filesystem::path Installation::find_class_table(
     if (!reference_file.empty()) {
         auto dir = reference_file.parent_path();
         if (!dir.empty()) {
-            auto p = find_in_dir(dir, filename);
+            auto p = find_file_ci(dir, filename);
             if (!p.empty()) return p;
         }
         // 2. Up a directory or two.
         auto parent = reference_file.parent_path().parent_path();
         if (!parent.empty()) {
-            auto p = find_in_dir(parent, filename);
+            auto p = find_file_ci(parent, filename);
             if (!p.empty()) return p;
         }
         auto grandparent = reference_file.parent_path().parent_path().parent_path();
         if (!grandparent.empty()) {
-            auto p = find_in_dir(grandparent, filename);
+            auto p = find_file_ci(grandparent, filename);
             if (!p.empty()) return p;
         }
     }
@@ -233,16 +205,13 @@ std::filesystem::path Installation::find_class_table(
         return class_table_;
     }
 
-    // 4. CWD-relative fallback (covers running from build dir or source
-    //    fixtures when no install is configured).
-    return find_class_table_cwd_fallback();
+    // (Stage 2: the CWD fallback is no longer called here. Callers that
+    // need it should call f4::install::find_class_table_cwd_fallback()
+    // explicitly — see the free-function documentation.)
+    return {};
 }
 
 std::filesystem::path Installation::resolve(const std::string& relative) const {
-    // Refuse to resolve paths in an invalid install — saves callers from
-    // accidentally constructing paths into a directory that doesn't have
-    // the expected layout. They can still use root() directly if they
-    // really want to build a path into an unvalidated install.
     if (!valid()) return {};
     return root_ / relative;
 }
@@ -258,9 +227,13 @@ std::filesystem::path find_class_table_in_install(
 }
 
 std::filesystem::path find_class_table_cwd_fallback() {
-    // Mirrors the pre-f4-install search paths in
-    // f4-world-convert/src/class_table.cpp so behavior is preserved
-    // when callers adopt the new API.
+    // Legacy CWD-relative search — preserved for the cam2json no-install
+    // workflow (running against bundled test fixtures from the build
+    // dir). Stage 2 removes this from Installation::find_class_table()'s
+    // automatic fallback chain; callers who want this behavior must
+    // call this free function explicitly. The asset-pipeline mode
+    // (cam2json --data-dir) supersedes it — the manifest is the single
+    // source of truth for "where is FALCON4.ct" in that flow.
     const char* candidates[] = {
         "FALCON4.ct",
         "assets/FALCON4.ct",

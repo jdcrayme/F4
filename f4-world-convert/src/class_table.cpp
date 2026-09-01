@@ -123,26 +123,28 @@ std::filesystem::path find_class_table(const std::filesystem::path& reference_fi
     // constructed fresh each call (cheap — detect() is just a directory
     // walk), so this remains a stateless free function.
     //
-    // Search order (preserves the pre-f4-install behavior exactly):
+    // Search order (Stage 2 — ASSET_PIPELINE_SPEC.md §12):
     //   1. Same directory as `reference_file` (typically the .cam).
     //   2. Up one or two directories from `reference_file`.
-    //   3. CWD-relative well-known paths.
+    //   3. (Install-aware: skipped here — this free function uses an
+    //      empty Installation, so the install's class_table() path is
+    //      not set. Callers that want install-aware resolution should
+    //      call f4::install::Installation::find_class_table() directly,
+    //      passing an Installation detected from the user's install.)
+    //   4. CWD-relative well-known paths (the legacy fallback — kept as
+    //      an explicit call here so cam2json's no-install workflow
+    //      against bundled test fixtures continues to work).
     //
-    // The f4-install version adds case-insensitive matching (catches
-    // "falcon4.ct" on Linux when the install ships "FALCON4.ct"). The
-    // legacy CWD fallback is preserved verbatim via
-    // f4::install::find_class_table_cwd_fallback(), so existing call
-    // sites (cam2json CLI run from the build dir, viewer run from
-    // source tree) continue to find the bundled fixture FALCON4.ct
-    // without an install configured.
-    //
-    // Callers that want install-aware resolution should call
-    // f4::install::Installation::find_class_table() directly, passing
-    // an Installation detected from the user's install path. This free
-    // function uses an empty Installation, so the install-aware step is
-    // skipped and behavior is unchanged.
+    // Stage 2 removed the automatic CWD fallback from
+    // Installation::find_class_table(); callers that want it must call
+    // f4::install::find_class_table_cwd_fallback() explicitly. The
+    // asset-pipeline mode (cam2json --data-dir) supersedes this — the
+    // manifest is the single source of truth for "where is FALCON4.ct"
+    // in that flow.
     f4::install::Installation inst;  // empty install — no root set
-    return inst.find_class_table(reference_file);
+    auto p = inst.find_class_table(reference_file);
+    if (!p.empty()) return p;
+    return f4::install::find_class_table_cwd_fallback();
 }
 
 } // namespace f4::world_convert
