@@ -148,6 +148,15 @@ The priority ladder is implemented as a `LayeredStateMachine` (f4-state-machine)
 | 21 | BugoutMode | NavigationModule | `NavState::None` |
 | 22 | WaypointMode | NavigationModule | `NavState::Waypoint` |
 
+> **Implementation status (M3-arbiter)**: this ladder is NOT a
+> `LayeredStateMachine` — `BrainComponent::update()` arbitrates it
+> directly as an if/else priority chain (the same order: safety rungs
+> 1-2 first, then missile defense, then the engagement rungs, then
+> formation, then the mission modules). Rungs 0-2, 4-6, 11-12, 15-16,
+> 20, 22 are live; the refueling/loiter/orders rungs (7, 17-19, 21) are
+> deferred with the campaign. The fuel check (FrameExec step 2) gates
+> the engagement rungs at bingo.
+
 **AddMode() override rules** (dlogic.cpp:729):
 - LandingMode cannot override defensive/engagement modes (except MissileDefeat)
 - BugoutMode is sticky — only MissileDefeat can override it
@@ -1153,6 +1162,40 @@ private:
 ---
 
 ### Step 12: DigitalBrain Integration
+
+> **STATUS: DELIVERED (M3-arbiter, collapsed).** The architecture
+> evolved past this spec's `DigitalBrain` class: `BrainComponent`
+> (f4-ai/include/f4/ai/brain_component.hpp) already IS the FrameExec
+> skeleton — the mission-phase state machine (takeoff → enroute →
+> approach → landing), the sensor fusion, and the combat ladder
+> (BVR/WVR/MissileDefeat/Wingman, M3-TACTICS-1..4) all live in it. What
+> remained of Step 12 was the ladder's missing rungs, delivered as:
+>
+> - **GroundAvoidModule** (rung 1, priority 1 — always armed, Enroute
+>   only): MIN_ALTT 1,500 ft floor, look-ahead terrain picture pushed by
+>   the host each tick, pull-up recovery with hysteresis + hold.
+> - **CollisionAvoidModule** (rung 2, priority 2 — always armed,
+>   friendlies included): digi_cavoid.cpp's CollisionCheck ported 1:1
+>   (hRange 200 ft, reactFact 0.55, GS_LIMIT 9.0), 45°/45° escape point
+>   opposite the target's roll, break-right tiebreak, the committed
+>   gun-pass exemption (the documented midair trade).
+> - **Fuel check** (FrameExec step 2): joker (report-only) / bingo
+>   (engagement stands down; MissileDefeat and formation still run) fed
+>   by `IAircraftState::fuel_lbs()`; scenario `fuel` block.
+> - **Arbiter wiring** in BrainComponent: safety preempts every combat
+>   rung regardless of the combat flag (safety is not a tactic), the
+>   fuel gate before the engagement rungs, RTB reporting, ladder
+>   bookkeeping covering the new rungs.
+> - The safety escapes fly at max performance: the AirSteering
+>   comfort limiters (the anti-phugoid VS slew + energy damper) come OFF
+>   for the seconds an escape lives.
+>
+> The measured character is documented in the module headers + the E2E
+> tests: the reference's late-react doctrine (0.55–0.7 s warning)
+> delivers tens-of-feet worst-case misses on exact head-ons — the same
+> character FreeFalcon's digi has. The mission-scenario deliverable
+> ("60-second sortie with correct mode transitions") is covered by the
+> DigiMission full-loop tests; S5/S6 live in test_combat_integration.cpp.
 
 **FreeFalcon source**: `digimain.cpp` (FrameExec), `dlogic.cpp` (DecisionLogic)
 

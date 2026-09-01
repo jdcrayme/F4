@@ -1,0 +1,59 @@
+{
+  "name": "midair_merge",
+  "theater": "korea",
+  "terrain_json_path": "@F4_BINARY_DIR@/korea.terrain.json",
+  "theater_dir": "@F4_SCENARIO_THEATER_DIR@",
+  "models_hdr_path": "@F4_SOURCE_DIR@/temp/KoreaObj.HDR",
+  "models_lod_path": "@F4_SOURCE_DIR@/temp/KoreaObj.LOD",
+  "models_tex_path": "@F4_SOURCE_DIR@/temp/KoreaObj.TEX",
+  "aircraft": [
+    {
+      "callsign": "EAGLE1",
+      "aircraft_config_path": "@F4_BINARY_DIR@/generated_fixtures/f16.json",
+      "aircraft_name": "F-16C_50",
+      "vis_type_index": 1052,
+      "parking_spot": { "x": 0.0, "y": 0.0, "z": 15000.0 },
+      "heading_rad": 0.0,
+      "initial_fuel_lbs": 6500.0,
+      "initial_vt_fps": 700.0,
+      "spawn_in_air": true,
+      "team": "blue"
+    },
+    {
+      "callsign": "HAWK1",
+      "aircraft_config_path": "@F4_BINARY_DIR@/generated_fixtures/f16.json",
+      "aircraft_name": "F-16C_50",
+      "vis_type_index": 1052,
+      "parking_spot": { "x": 0.0, "y": 17013.0, "z": 15000.0 },
+      "heading_rad": 3.14159265358979,
+      "initial_fuel_lbs": 6500.0,
+      "initial_vt_fps": 660.0,
+      "spawn_in_air": true,
+      "team": "blue"
+    }
+  ],
+  "airfield": {
+    "active_runway_id": 36,
+    "active_runway_name": "Rwy 36",
+    "runway_heading_rad": 0.0,
+    "threshold_position": { "x": 0.0, "y": -5000.0, "z": 0.0 },
+    "runway_end_position":  { "x": 0.0, "y": 5000.0, "z": 0.0 },
+    "threshold_altitude_ft": 0.0,
+    "departure_altitude_ft": 15000.0,
+    "taxi_route": [ { "x": 0.0, "y": -5000.0, "z": 0.0 },
+                    { "x": 0.0, "y": 0.0, "z": 0.0 } ]
+  },
+  "waypoints": [
+    { "name": "MERGE", "position": { "x": 0.0, "y": 8500.0, "z": 15000.0 },
+      "speed_kts": 420.0 },
+    { "name": "FAR_EAST", "position": { "x": 250000.0, "y": 8500.0, "z": 15000.0 },
+      "speed_kts": 420.0 }
+  ],
+  "start_enroute": true,
+  "sim_dt": 0.016666666666666,
+  "total_ticks": 48000,
+  "record": true,
+  "record_path": "@F4_BINARY_DIR@/midair_merge_trace.json",
+  "combat": { "enabled": true, "radar_rng_seed": 999,
+              "missiles_hold": true, "guns_hold": true }
+}

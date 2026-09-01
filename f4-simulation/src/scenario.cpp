@@ -265,6 +265,18 @@ Scenario parse_scenario(f4::json::Reader& r) {
                 else if (k == "guns_hold")     s.combat.guns_hold = r.read_bool();
                 else                            skip_unknown(r);
             }
+        } else if (key == "fuel") {
+            r.expect('{');
+            bool ffirst = true;
+            while (!r.consume('}')) {
+                if (!ffirst) r.expect(',');
+                ffirst = false;
+                const auto k = r.read_string();
+                r.expect(':');
+                if (k == "joker_lbs")      s.fuel.joker_lbs = r.read_number();
+                else if (k == "bingo_lbs") s.fuel.bingo_lbs = r.read_number();
+                else                       skip_unknown(r);
+            }
         } else if (key == "airfield_features") {
             r.expect('[');
             bool arr_first = true;
@@ -306,6 +318,15 @@ void validate(const Scenario& s) {
             throw std::runtime_error("scenario: waypoint[" + std::to_string(i) +
                 "] ('" + w.name + "') has invalid speed_kts (must be > 0)");
     }
+
+    // Fuel policy: negative thresholds make no sense, and a joker BELOW
+    // the bingo would flip both flags on the same pound — loud, early.
+    if (s.fuel.joker_lbs < 0.0 || s.fuel.bingo_lbs < 0.0)
+        throw std::runtime_error("scenario: fuel thresholds must be >= 0");
+    if (s.fuel.joker_lbs > 0.0 && s.fuel.bingo_lbs > 0.0 &&
+        s.fuel.joker_lbs < s.fuel.bingo_lbs)
+        throw std::runtime_error(
+            "scenario: fuel joker_lbs must be >= bingo_lbs (joker fires first)");
 
     // Spawn-mode-specific validation.
     if (s.spawn_mode == SpawnMode::ScenarioList) {

@@ -220,6 +220,17 @@ private:
     /// (one tick old at push time — exactly what every other brain sees)
     /// and the lead brain's combat_engagement_id() for the sort.
     void push_wingman_lead_pictures();
+    /// The arbiter's safety rungs (M3-arbiter): every tick BEFORE world
+    /// update, push each airborne aircraft brain (a) its TERRAIN picture
+    /// — elevation under the jet + the max elevation in the look-ahead
+    /// cone along its ground track, sampled from the SAME TerrainSource
+    /// the FM's ground plane uses (one source of truth), and (b) its
+    /// TRAFFIC picture — every other airborne aircraft within 1 NM
+    /// (friendlies included) with velocity + roll rate, plus the own
+    /// velocity from the same transform snapshot. The ground-avoid and
+    /// collision-avoid modules are engine-agnostic: this push IS their
+    /// entire view of terrain and traffic.
+    void push_safety_pictures();
     void init_bubble_manager();             // Mode B: BubbleManager for ground/naval units
     void update_bubble();                   // Mode B: per-tick bubble update (in tick())
     void derive_real_airbase();   // airbase_source -> real ground layout

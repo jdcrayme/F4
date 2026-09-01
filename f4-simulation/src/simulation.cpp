@@ -255,6 +255,15 @@ void Simulation::spawn_from_scenario_list() {
         // ground at the parking altitude (preserves pre-terrain behavior).
         default_terrain_ = f4::terrain::FlatTerrainSource(spawn_ground_z);
 
+        // The sortie's fuel load: the config's internalFuel is the tank
+        // CAPACITY; the scenario's initial_fuel_lbs is what this jet
+        // actually launched with (the DigitalBrain's fuel check — joker/
+        // bingo — reads this gauge, and a scenario wanting a near-king
+        // jet sets it low). 0/unset keeps the config default (full tanks).
+        if (sc.initial_fuel_lbs > 0.0) {
+            fm.model().set_internal_fuel_lbs(sc.initial_fuel_lbs);
+        }
+
         // 3. VisualModelComponent — the renderable handle (DrawableBSP* equivalent).
         //    This is the ONLY new component type. The renderer reads it to draw
         //    the F-16 mesh; the host syncs its gear switch from the FM each tick.
@@ -298,6 +307,13 @@ void Simulation::spawn_from_scenario_list() {
             plan.start_phase = MissionPlan::StartPhase::Enroute;
         }
         brain.set_mission_plan(std::move(plan));
+
+        // The arbiter's fuel policy (FrameExec step 2): joker/bingo in
+        // pounds of usable fuel, from the scenario's fuel block. Zero
+        // bingo (the default) leaves the brain exactly as fuel-blind as
+        // it was before this rung existed.
+        brain.set_fuel_policy(scenario_.fuel.joker_lbs,
+                              scenario_.fuel.bingo_lbs);
 
         // 5. Team identity — the TEAM tag ("blue"/"red") rides on EVERY
         //    aircraft, combat or not: SensorFusion's hostility rule, the
@@ -466,6 +482,104 @@ void Simulation::push_wingman_lead_pictures() {
         brain->set_lead_engagement(
             lead_brain != nullptr ? lead_brain->combat_engagement_id()
                                   : 0u);
+    }
+}
+
+void Simulation::push_safety_pictures() {
+    // The arbiter's safety rungs are engine-agnostic: the host is their
+    // entire view of terrain and traffic. Per tick, BEFORE update_all:
+    //
+    //   Terrain picture — from the SAME TerrainSource the FM's ground
+    //   plane uses (the set_ground loop right above this call reads the
+    //   same source one statement earlier): elevation under the jet and
+    //   the max elevation in the look-ahead cone along the ground track.
+    //   The probes ride the transform's velocity (one tick old — the
+    //   same staleness every brain sees; a 6-second look-ahead absorbs
+    //   16 ms with room to spare).
+    //
+    //   Traffic picture — every OTHER airborne aircraft within 1 NM of
+    //   this one (friendlies included: the formation mate you are about
+    //   to fly through is exactly the aircraft cavoid exists for), with
+    //   velocity + body roll rate from the same transform snapshot, plus
+    //   the OWN velocity so the module's relative-geometry extrapolation
+    //   runs on one consistent picture.
+    //
+    // O(n^2) over airborne aircraft with n = scenario roster size (<= a
+    // handful) — negligible, and identical to FreeFalcon's CollisionCheck
+    // scan shape.
+
+    struct Airborne {
+        entities::EntityId id;
+        f4::ai::BrainComponent* brain;
+        const entities::TransformComponent* tf;
+    };
+    std::vector<Airborne> airborne;
+    airborne.reserve(aircraft_entities_.size());
+
+    for (const auto eid : aircraft_entities_) {
+        entities::EntityHandle h(eid, &world_);
+        auto* brain = h.get<f4::ai::BrainComponent>();
+        auto* fm = h.get<f4::flight::FlightModelComponent>();
+        const auto* tf = h.get<entities::TransformComponent>();
+        if (brain == nullptr || tf == nullptr || fm == nullptr) continue;
+        if (!fm->state().gear.inAir) continue;  // ground aircraft don't collide
+        // Wrecks don't fly: a killed aircraft's transform freezes (its FM
+        // stops), and a frozen "intruder" inside the extrapolation window
+        // arms every passing jet's break against a corpse (observed: the
+        // gun-kill at 418 ft, the cavoid arm 3 ticks later). The damage
+        // component rides every combat aircraft; non-combat worlds have
+        // none (nullptr = alive by construction).
+        const auto* dmg = h.get<entities::DamageStateComponent>();
+        if (dmg != nullptr && dmg->killed) continue;
+        airborne.push_back({eid, brain, tf});
+    }
+
+    constexpr double kTrafficGateFt = 6076.12;  // 1 NM — everything cavoid can use
+
+    for (const auto& self : airborne) {
+        // --- Terrain picture ---------------------------------------------
+        f4::ai::modules::GroundAvoidModule::TerrainPicture tp;
+        const auto& pos = self.tf->position;
+        f4::terrain::TerrainSource* ts =
+            terrain_source_ ? terrain_source_ : &default_terrain_;
+        tp.valid = true;
+        tp.terrain_here_ft = ts->elevation_at_ft(pos.x, pos.y);
+
+        // Look-ahead probes along the ground track at 1/3, 2/3, 3/3 of
+        // the module's configured horizon (the ground speed comes from
+        // the same transform velocity; a slow jet simply probes less far).
+        const auto& vel = self.tf->velocity();
+        const double ground_speed =
+            std::sqrt(vel.x * vel.x + vel.y * vel.y);
+        const double horizon_ft = ground_speed *
+            self.brain->ground_avoid().config().lookahead_sec;
+        double ahead = tp.terrain_here_ft;
+        for (double frac = 1.0 / 3.0; frac < 1.01; frac += 1.0 / 3.0) {
+            const double d = horizon_ft * frac;
+            const double px = pos.x + (ground_speed > 1.0 ? vel.x / ground_speed * d : 0.0);
+            const double py = pos.y + (ground_speed > 1.0 ? vel.y / ground_speed * d : 0.0);
+            ahead = std::max(ahead, ts->elevation_at_ft(px, py));
+        }
+        tp.terrain_ahead_ft = ahead;
+        self.brain->update_terrain_picture(tp);
+
+        // --- Traffic picture ---------------------------------------------
+        std::vector<f4::ai::modules::CollisionAvoidModule::Intruder> traffic;
+        for (const auto& other : airborne) {
+            if (other.id == self.id) continue;
+            const double dx = other.tf->position.x - pos.x;
+            const double dy = other.tf->position.y - pos.y;
+            const double dz = other.tf->position.z - pos.z;
+            if (std::sqrt(dx * dx + dy * dy + dz * dz) > kTrafficGateFt)
+                continue;
+            f4::ai::modules::CollisionAvoidModule::Intruder intr;
+            intr.entity_id = other.id.value;
+            intr.position = other.tf->position;
+            intr.velocity = other.tf->velocity();
+            intr.roll_rate_radps = other.tf->p;  // body roll rate (droll)
+            traffic.push_back(intr);
+        }
+        self.brain->update_traffic(std::move(traffic), vel);
     }
 }
 
@@ -769,6 +883,12 @@ void Simulation::tick(double dt) {
     if (!wingman_pairs_.empty()) {
         push_wingman_lead_pictures();
     }
+
+    // The arbiter's safety rungs (M3): terrain + traffic pictures BEFORE
+    // the brains run — the ground-avoid and collision-avoid modules are
+    // engine-agnostic, the host is their eyes. Runs with combat on or
+    // off (safety is not a tactic) and for every airborne aircraft.
+    push_safety_pictures();
 
     world_.update_all(dt, bus_);
     bus_.flush_pending();  // drain deferred ATC messages (TaxiClearance, etc.)

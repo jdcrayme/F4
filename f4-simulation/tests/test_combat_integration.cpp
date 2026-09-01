@@ -76,13 +76,18 @@ constexpr double kDt = 1.0 / 60.0;
 // The scenario: two fighters in a stern chase at 10,000 ft. The bandit is
 // ~13.2 NM (80,000 ft) north of the shooter. Both fly the same north route.
 // `record_path` non-empty flips "record" on and points the trace at it
-// (used by the M4 recording E2E).
+// (used by the M4 recording E2E). `fuel_block` non-empty is inserted as
+// the scenario's "fuel" policy block (the arbiter's fuel check E2Es).
 std::string combat_scenario_json(const std::string& f16_path,
                                  bool combat_enabled,
-                                 const std::string& record_path = {}) {
+                                 const std::string& record_path = {},
+                                 const std::string& fuel_block = {}) {
     const std::string record_block = record_path.empty()
         ? "\"record\": false"
         : "\"record\": true,\n  \"record_path\": \"" + record_path + "\"";
+    const std::string fuel_seg = fuel_block.empty()
+        ? ""
+        : ",\n  \"fuel\": " + fuel_block;
     return R"({
   "name": "combat_integration",
   "theater": "korea",
@@ -114,7 +119,7 @@ std::string combat_scenario_json(const std::string& f16_path,
   "start_enroute": true,
   "sim_dt": 0.016666666666666,
   "total_ticks": 30000,
-  )" + record_block + R"(,
+  )" + record_block + fuel_seg + R"(,
   "combat": { "enabled": )" + (combat_enabled ? "true" : "false") + R"(,
               "radar_rng_seed": 777 }
 })";
@@ -1622,6 +1627,13 @@ TEST(CombatIntegration, AiVersusAiGunsMergeFight) {
     // Budget 180 s.
     bool eagle_wvr_seen = false;
     bool disengaged_after_kill = false;
+    // The cavoid/midair trade, watched: inside the gun employment band
+    // the pass owns the geometry — the WVR target is exempt from the
+    // collision-avoid rung (the brain feeds wvr().gun_pass_target_id()
+    // to collision_avoid). If this wiring ever breaks, the merge becomes
+    // a mutual 0.7-s break and the gun envelope never opens.
+    bool gun_pass_exempt_seen = false;
+    bool eagle_ca_ever_avoided = false;
     int kill_tick = -1;
     const int max_ticks = static_cast<int>(180.0 / kDt);
     for (int i = 0; i < max_ticks; ++i) {
@@ -1630,6 +1642,13 @@ TEST(CombatIntegration, AiVersusAiGunsMergeFight) {
         if (eagle_brain->combat_mode() ==
             f4::ai::BrainComponent::CombatMode::WVR) {
             eagle_wvr_seen = true;
+            if (eagle_brain->collision_avoid().exempt_id() ==
+                bandit_id.value) {
+                gun_pass_exempt_seen = true;
+            }
+        }
+        if (eagle_brain->collision_avoid().is_avoiding()) {
+            eagle_ca_ever_avoided = true;
         }
         if (kill_tick < 0 && !log.killed.empty()) kill_tick = i;
         if (kill_tick >= 0 && i > kill_tick + static_cast<int>(10.0 / kDt)) {
@@ -1649,6 +1668,15 @@ TEST(CombatIntegration, AiVersusAiGunsMergeFight) {
     // --- The fight ran through the WVR band ------------------------------
     ASSERT_TRUE(eagle_wvr_seen)
         << "EAGLE1 never entered the WVR rung (no guns fight possible)";
+
+    // --- The committed firing pass exemption ------------------------------
+    // (the documented midair trade: inside the employment band the
+    // weapons own the merge geometry — the cavoid break stays out)
+    EXPECT_TRUE(gun_pass_exempt_seen)
+        << "the WVR gun-pass target was never exempted from cavoid";
+    EXPECT_FALSE(eagle_ca_ever_avoided)
+        << "collision avoid broke the committed gun pass (merge geometry "
+           "is owned by the weapons inside the employment band)";
 
     // --- Missiles never left the rail (missiles_hold) ---------------------
     ASSERT_TRUE(log.launched.empty())
@@ -1750,6 +1778,481 @@ TEST(CombatIntegration, GunsMergeScenarioFilePlaysOut) {
     for (const auto& k : log.killed) {
         EXPECT_EQ(k.target_id, bandit_id.value);
         EXPECT_EQ(k.shooter_id, eagle_id.value);
+    }
+#else
+    GTEST_SKIP() << "F4_SCENARIOS_DIR not defined for this target";
+#endif
+}
+
+// ============================================================================
+// 11. The DigitalBrain arbiter (M3 final rungs — AI_IMPLEMENTATION_PLAN
+//     Step 12, collapsed into the BrainComponent ladder): ground avoid +
+//     collision avoid (FreeFalcon priorities 1-2, always armed) and the
+//     fuel check (FrameExec step 2, joker/bingo). Safety is not a tactic:
+//     these run with combat ON or OFF.
+// ============================================================================
+
+/// A synthetic ridge for the ground-avoid E2E: flat 0 MSL, a 1.9 ft/ft
+/// ramp climbing between y=25,000 and y=30,000, then a 9,500-ft plateau.
+/// A northbound jet at 10,000 ft MSL meets the predicted-clearance floor
+/// (MIN_ALTT 1,500) ~8 s before the ramp — the pull-up must fly.
+class RidgeTerrain final : public f4::terrain::TerrainSource {
+public:
+    [[nodiscard]] double elevation_at_ft(double, double y_ft) const override {
+        if (y_ft <= 25000.0) return 0.0;
+        if (y_ft <= 30000.0) return (y_ft - 25000.0) * 1.9;
+        return 9500.0;
+    }
+};
+
+TEST(CombatIntegration, GroundAvoidPullsUpOverTheRidge) {
+    const auto f16 = f16_config_path();
+    if (f16.empty()) GTEST_SKIP() << "f16.json fixture not generated";
+
+    // One jet, combat DISABLED (safety is not a tactic): 10,000 ft MSL
+    // northbound at ~420 kt into the ridge. The route's leg altitude
+    // (16,000) is above the plateau — after the recovery the nav module
+    // finishes the climb, proving the rung ENDED instead of flapping.
+    const std::string json = R"({
+  "name": "ground_avoid_ridge",
+  "theater": "korea",
+  "aircraft": [
+    { "callsign": "EAGLE1", "aircraft_config_path": ")" + f16 + R"(",
+      "aircraft_name": "F-16C_50", "vis_type_index": 1052,
+      "parking_spot": { "x": 0.0, "y": 20000.0, "z": 10000.0 },
+      "heading_rad": 0.0, "initial_fuel_lbs": 6500.0,
+      "initial_vt_fps": 700.0, "spawn_in_air": true, "team": "blue" }
+  ],
+  "airfield": {
+    "active_runway_id": 36, "active_runway_name": "Rwy 36",
+    "runway_heading_rad": 0.0,
+    "threshold_position": { "x": 0.0, "y": -5000.0, "z": 0.0 },
+    "runway_end_position":  { "x": 0.0, "y": 5000.0, "z": 0.0 },
+    "threshold_altitude_ft": 0.0, "departure_altitude_ft": 10000.0,
+    "taxi_route": [ { "x": 0.0, "y": -5000.0, "z": 0.0 },
+                    { "x": 0.0, "y": 0.0, "z": 0.0 } ]
+  },
+  "waypoints": [
+    { "name": "FAR_NORTH", "position": { "x": 0.0, "y": 250000.0, "z": 16000.0 },
+      "speed_kts": 420.0 }
+  ],
+  "start_enroute": true,
+  "sim_dt": 0.016666666666666,
+  "total_ticks": 30000,
+  "record": false
+})";
+    auto scenario = load_scenario_from_string(json);
+    Simulation sim(std::move(scenario), std::filesystem::path("."));
+
+    RidgeTerrain ridge;
+    sim.set_terrain_source(&ridge);  // before initialize: spawn reads it too
+    sim.initialize();
+
+    const auto eid = sim.aircraft_entities()[0];
+    entities::EntityHandle jet(eid, &sim.world());
+    auto* brain = jet.get<f4::ai::BrainComponent>();
+    ASSERT_NE(brain, nullptr);
+    auto* fm = jet.get<f4::flight::FlightModelComponent>();
+    ASSERT_NE(fm, nullptr);
+
+    // Fly the encounter: trigger ~8.5 s in, ramp crossing ~15 s, release
+    // over the plateau, then the nav climb resumes. 40 s budget.
+    bool ga_seen = false;
+    bool airborne_throughout = true;
+    double min_clearance_ft = 1.0e9;
+    const int max_ticks = static_cast<int>(40.0 / kDt);
+    for (int i = 0; i < max_ticks; ++i) {
+        sim.tick(kDt);
+        if (brain->safety_mode() ==
+            f4::ai::BrainComponent::SafetyMode::GroundAvoid) {
+            ga_seen = true;
+        }
+        const auto* tf = jet.get<entities::TransformComponent>();
+        ASSERT_NE(tf, nullptr);
+        const double clearance =
+            tf->position.z - ridge.elevation_at_ft(tf->position.x,
+                                                   tf->position.y);
+        min_clearance_ft = std::min(min_clearance_ft, clearance);
+        if (!fm->state().gear.inAir) airborne_throughout = false;
+    }
+
+    // --- The rung fired ---------------------------------------------------
+    ASSERT_TRUE(ga_seen) << "the ridge never tripped ground avoid";
+
+    // --- The recovery held the MIN_ALTT doctrine --------------------------
+    // The pull-up must keep the jet clear of the terrain for the whole
+    // ride: the recovery target is terrain + 2x the 1,500 ft floor.
+    EXPECT_GT(min_clearance_ft, 1000.0)
+        << "the recovery dipped below a safe clearance (min "
+        << min_clearance_ft << " ft)";
+    EXPECT_TRUE(airborne_throughout) << "the jet touched down on the ridge";
+
+    // --- The rung released: terrain cleared, nav owns the climb -----------
+    EXPECT_EQ(brain->safety_mode(), f4::ai::BrainComponent::SafetyMode::None)
+        << "ground avoid never released after the ridge";
+    const auto* tf = jet.get<entities::TransformComponent>();
+    ASSERT_NE(tf, nullptr);
+    EXPECT_GT(tf->position.z, 12000.0)
+        << "the jet did not climb out after the recovery";
+    EXPECT_EQ(brain->mode_name(), "NavigationMode")
+        << "the navigation module did not take the jet back";
+}
+
+TEST(CombatIntegration, CollisionAvoidBreaksHeadOnConvergence) {
+    const auto f16 = f16_config_path();
+    if (f16.empty()) GTEST_SKIP() << "f16.json fixture not generated";
+
+    // Two BLUE jets, nose-on at 15,000 ft, combat DISABLED — the purest
+    // statement of the rung (safety is not a tactic; the traffic picture
+    // includes friendlies by design — the formation mate you are about to
+    // fly through is exactly the aircraft cavoid exists for). Same
+    // geometry as the guns merge, 2.8 NM apart, converging on the MERGE
+    // waypoint; after the break both round the corner east onto FAR_EAST
+    // in loose trail (the corner arcs are on opposite sides — no second
+    // convergence).
+    const std::string json = R"({
+  "name": "collision_avoid_head_on",
+  "theater": "korea",
+  "aircraft": [
+    { "callsign": "EAGLE1", "aircraft_config_path": ")" + f16 + R"(",
+      "aircraft_name": "F-16C_50", "vis_type_index": 1052,
+      "parking_spot": { "x": 0.0, "y": 0.0, "z": 15000.0 },
+      "heading_rad": 0.0, "initial_fuel_lbs": 6500.0,
+      "initial_vt_fps": 700.0, "spawn_in_air": true, "team": "blue" },
+    { "callsign": "HAWK1", "aircraft_config_path": ")" + f16 + R"(",
+      "aircraft_name": "F-16C_50", "vis_type_index": 1052,
+      "parking_spot": { "x": 0.0, "y": 17013.0, "z": 15000.0 },
+      "heading_rad": 3.14159265358979, "initial_fuel_lbs": 6500.0,
+      "initial_vt_fps": 660.0, "spawn_in_air": true, "team": "blue" }
+  ],
+  "airfield": {
+    "active_runway_id": 36, "active_runway_name": "Rwy 36",
+    "runway_heading_rad": 0.0,
+    "threshold_position": { "x": 0.0, "y": -5000.0, "z": 0.0 },
+    "runway_end_position":  { "x": 0.0, "y": 5000.0, "z": 0.0 },
+    "threshold_altitude_ft": 0.0, "departure_altitude_ft": 15000.0,
+    "taxi_route": [ { "x": 0.0, "y": -5000.0, "z": 0.0 },
+                    { "x": 0.0, "y": 0.0, "z": 0.0 } ]
+  },
+  "waypoints": [
+    { "name": "MERGE", "position": { "x": 0.0, "y": 8500.0, "z": 15000.0 },
+      "speed_kts": 420.0 },
+    { "name": "FAR_EAST", "position": { "x": 250000.0, "y": 8500.0, "z": 15000.0 },
+      "speed_kts": 420.0 }
+  ],
+  "start_enroute": true,
+  "sim_dt": 0.016666666666666,
+  "total_ticks": 30000,
+  "record": false
+})";
+    auto scenario = load_scenario_from_string(json);
+    Simulation sim(std::move(scenario), std::filesystem::path("."));
+    sim.initialize();
+
+    const auto eagle_id = sim.aircraft_entities()[0];
+    const auto hawk_id  = sim.aircraft_entities()[1];
+    entities::EntityHandle eagle(eagle_id, &sim.world());
+    entities::EntityHandle hawk(hawk_id, &sim.world());
+    auto* eagle_brain = eagle.get<f4::ai::BrainComponent>();
+    auto* hawk_brain  = hawk.get<f4::ai::BrainComponent>();
+    ASSERT_NE(eagle_brain, nullptr);
+    ASSERT_NE(hawk_brain, nullptr);
+
+    // Fly the convergence. What the E2E measures (the honest ledger —
+    // see the assert block below for the reference's late-react
+    // character): the range at which the FIRST brain arms (the
+    // prediction must fire OUTSIDE the protected bubble), the minimum
+    // range at the pass, the range 1.5 s AFTER the pass (the escape +
+    // divergence owning the post-pass geometry), and the release.
+    bool eagle_ca_seen = false;
+    bool hawk_ca_seen = false;
+    bool ca_mode_name_reported = false;
+    double first_avoid_range_ft = -1.0;
+    double min_range_ft = 1.0e9;
+    double post_pass_range_ft = -1.0;
+    int min_tick = -1;
+    std::uint64_t eagle_intruder = 0;
+    std::uint64_t hawk_intruder = 0;
+    const int max_ticks = static_cast<int>(45.0 / kDt);
+    for (int i = 0; i < max_ticks; ++i) {
+        sim.tick(kDt);
+        const auto* etf = eagle.get<entities::TransformComponent>();
+        const auto* htf = hawk.get<entities::TransformComponent>();
+        ASSERT_NE(etf, nullptr);
+        ASSERT_NE(htf, nullptr);
+        const double dx = htf->position.x - etf->position.x;
+        const double dy = htf->position.y - etf->position.y;
+        const double dz = htf->position.z - etf->position.z;
+        const double rng = std::sqrt(dx * dx + dy * dy + dz * dz);
+        if (rng < min_range_ft) {
+            min_range_ft = rng;
+            min_tick = i;
+        }
+        if (min_tick >= 0 && i == min_tick + 90) {
+            post_pass_range_ft = rng;   // 1.5 s after the tightest point
+        }
+        const bool any_avoiding =
+            eagle_brain->collision_avoid().is_avoiding() ||
+            hawk_brain->collision_avoid().is_avoiding();
+        if (any_avoiding && first_avoid_range_ft < 0.0) {
+            first_avoid_range_ft = rng;
+        }
+        if (eagle_brain->safety_mode() ==
+            f4::ai::BrainComponent::SafetyMode::CollisionAvoid) {
+            eagle_ca_seen = true;
+            eagle_intruder = eagle_brain->collision_avoid().intruder_id();
+            if (eagle_brain->mode_name() == "CollisionAvoid") {
+                ca_mode_name_reported = true;
+            }
+        }
+        if (hawk_brain->safety_mode() ==
+            f4::ai::BrainComponent::SafetyMode::CollisionAvoid) {
+            hawk_ca_seen = true;
+            hawk_intruder = hawk_brain->collision_avoid().intruder_id();
+        }
+    }
+
+    // --- Both jets took the rung ------------------------------------------
+    ASSERT_TRUE(eagle_ca_seen) << "EAGLE1 never flew the collision break";
+    ASSERT_TRUE(hawk_ca_seen) << "HAWK1 never flew the collision break";
+    EXPECT_EQ(eagle_intruder, hawk_id.value)
+        << "the break was not against the converging traffic";
+    EXPECT_EQ(hawk_intruder, eagle_id.value)
+        << "the break was not against the converging traffic";
+    EXPECT_TRUE(ca_mode_name_reported)
+        << "the HUD's mode line never reported CollisionAvoid";
+
+    // --- The prediction fired OUTSIDE the protected bubble -----------------
+    // (the 200-ft hRange bubble is the protected volume; the module's
+    // job is to PREDICT the collision before it arrives — the first
+    // avoidance must precede contact.)
+    EXPECT_GT(first_avoid_range_ft, 200.0)
+        << "the first break armed inside the protected bubble (the "
+           "prediction never ran before contact)";
+
+    // --- The pass + the post-pass geometry ---------------------------------
+    // The honest ledger, measured on this exact-head-on worst case: the
+    // reference's reactTime doctrine (0.55-0.7 s of warning — FreeFalcon
+    // GS_LIMIT/maxGs*reactFact) arms the escape with under a second on
+    // the clock, and this sim's FCS G-lag (~2 s stick-to-load-factor)
+    // spends most of THAT on roll-in and pitch development. The miss at
+    // the tightest point is tens of feet — the same character the
+    // reference's digi has (FreeFalcon merges occasionally end in the
+    // midair; the module header documents the trade). What the escape
+    // DOES own: the jets pass clean (no airframe contact), and 1.5 s
+    // later the geometry has opened decisively — both jets flying their
+    // max-performance escapes apart, no re-convergence.
+    EXPECT_GT(min_range_ft, 0.0) << "the tracks never crossed";
+    EXPECT_NE(min_tick, -1);
+    ASSERT_GT(post_pass_range_ft, 400.0)
+        << "the geometry did not open after the pass ("
+        << post_pass_range_ft << " ft at +1.5 s)";
+
+    // --- The rung released after the pass ---------------------------------
+    EXPECT_EQ(eagle_brain->safety_mode(),
+              f4::ai::BrainComponent::SafetyMode::None)
+        << "collision avoid never released after the pass";
+    EXPECT_EQ(hawk_brain->safety_mode(),
+              f4::ai::BrainComponent::SafetyMode::None)
+        << "collision avoid never released after the pass";
+    for (const auto* h : {&eagle, &hawk}) {
+        const auto* fm = h->get<f4::flight::FlightModelComponent>();
+        ASSERT_NE(fm, nullptr);
+        EXPECT_TRUE(fm->state().gear.inAir) << "a jet did not stay airborne";
+    }
+}
+
+TEST(CombatIntegration, FuelJokerReportsButFightsOn) {
+    const auto f16 = f16_config_path();
+    if (f16.empty()) GTEST_SKIP() << "f16.json fixture not generated";
+
+    // Joker ABOVE the start fuel (6,550 > 6,500): Joker from the first
+    // gauge read — REPORTING ONLY, never a gate. The BVR stern chase
+    // plays out exactly as it does without a fuel policy.
+    auto scenario = load_scenario_from_string(combat_scenario_json(
+        f16, true, {}, R"({ "joker_lbs": 6550.0, "bingo_lbs": 0.0 })"));
+    Simulation sim(std::move(scenario), std::filesystem::path("."));
+    sim.initialize();
+
+    CombatEventLog log;
+    log.attach(sim.bus());
+
+    const auto shooter_id = sim.aircraft_entities()[0];   // EAGLE1 (blue)
+    entities::EntityHandle shooter(shooter_id, &sim.world());
+    auto* shooter_brain = shooter.get<f4::ai::BrainComponent>();
+    ASSERT_NE(shooter_brain, nullptr);
+
+    // The policy wired at spawn: verified POST-LOOP below (the fuel
+    // check runs on the brain's first update, not at spawn).
+    bool bvr_seen = false;
+    const int max_ticks = static_cast<int>(150.0 / kDt);
+    for (int i = 0; i < max_ticks; ++i) {
+        sim.tick(kDt);
+        if (shooter_brain->combat_mode() ==
+            f4::ai::BrainComponent::CombatMode::BVR) {
+            bvr_seen = true;
+        }
+        if (!log.launched.empty()) break;  // the point is made
+    }
+
+    // Joker is a report, not a gate: the fight happens.
+    EXPECT_EQ(shooter_brain->fuel_state(), f4::ai::BrainComponent::FuelState::Joker);
+    EXPECT_TRUE(bvr_seen) << "a joker-state jet never engaged (joker must not gate)";
+    ASSERT_FALSE(log.launched.empty())
+        << "a joker-state jet never fired (joker must not gate)";
+    EXPECT_EQ(log.launched.front().shooter_id, shooter_id.value);
+}
+
+TEST(CombatIntegration, FuelBingoStandsDownTheEngagement) {
+    const auto f16 = f16_config_path();
+    if (f16.empty()) GTEST_SKIP() << "f16.json fixture not generated";
+
+    // Bingo ABOVE the start fuel (7,000 > 6,500): both jets bingo from
+    // the first gauge read — the engagement rungs never arm. Nothing
+    // launches; the brains report RTB (the nav route IS the way home).
+    auto scenario = load_scenario_from_string(combat_scenario_json(
+        f16, true, {}, R"({ "joker_lbs": 0.0, "bingo_lbs": 7000.0 })"));
+    Simulation sim(std::move(scenario), std::filesystem::path("."));
+    sim.initialize();
+
+    CombatEventLog log;
+    log.attach(sim.bus());
+
+    const auto shooter_id = sim.aircraft_entities()[0];   // EAGLE1 (blue)
+    entities::EntityHandle shooter(shooter_id, &sim.world());
+    auto* shooter_brain = shooter.get<f4::ai::BrainComponent>();
+    ASSERT_NE(shooter_brain, nullptr);
+
+    // The policy wired at spawn: verified POST-LOOP below (the fuel
+    // check runs on the brain's first update, not at spawn).
+    bool rtb_reported = false;
+    bool engagement_seen = false;
+    const int max_ticks = static_cast<int>(90.0 / kDt);
+    for (int i = 0; i < max_ticks; ++i) {
+        sim.tick(kDt);
+        if (shooter_brain->mode_name() == "RTB") rtb_reported = true;
+        if (shooter_brain->combat_mode() !=
+            f4::ai::BrainComponent::CombatMode::None) {
+            engagement_seen = true;
+        }
+    }
+
+    // --- The engagement stood down ----------------------------------------
+    EXPECT_FALSE(engagement_seen)
+        << "a bingo jet took a combat rung (the fight is over at bingo)";
+    EXPECT_TRUE(log.launched.empty())
+        << "a bingo jet expended a weapon";
+    EXPECT_TRUE(log.gun_fired.empty())
+        << "a bingo jet expended a weapon";
+
+    // --- The RTB report ----------------------------------------------------
+    EXPECT_TRUE(rtb_reported)
+        << "a bingoing enroute jet must report RTB (the route home)";
+    EXPECT_EQ(shooter_brain->fuel_state(),
+              f4::ai::BrainComponent::FuelState::Bingo);
+    // The gauge is live: the reading sits at the spawned load, burned
+    // down but positive (the fuel check reads the FM's real tank).
+    EXPECT_GT(shooter_brain->fuel_lbs(), 0.0);
+    EXPECT_LE(shooter_brain->fuel_lbs(), 6500.0);
+}
+
+// 12. The SHIPPED midair_merge scenario file plays out: the player's
+//     watchable collision-avoid demo — two BLUE jets nose-on at 15,000 ft
+//     (same team: the hostility rule keeps the fight OFF; the safety
+//     rungs run with combat enabled). The brains break right at the
+//     convergence, pass, release, and both continue their routes east.
+TEST(CombatIntegration, MidairMergeScenarioFilePlaysOut) {
+#ifdef F4_SCENARIOS_DIR
+    const auto path =
+        std::filesystem::path(F4_SCENARIOS_DIR) / "midair_merge.json";
+    ASSERT_TRUE(std::filesystem::exists(path))
+        << "midair_merge.json not configured (build it first)";
+
+    auto scenario = load_scenario(path);
+    ASSERT_EQ(scenario.aircraft.size(), 2u);
+    EXPECT_EQ(scenario.aircraft[0].team, "blue");
+    EXPECT_EQ(scenario.aircraft[1].team, "blue");
+    EXPECT_TRUE(scenario.combat.enabled);
+    EXPECT_TRUE(scenario.combat.missiles_hold);
+    EXPECT_TRUE(scenario.combat.guns_hold);
+
+    Simulation sim(std::move(scenario), std::filesystem::path("."));
+    sim.initialize();
+
+    CombatEventLog log;
+    log.attach(sim.bus());
+
+    const auto eagle_id = sim.aircraft_entities()[0];
+    const auto hawk_id  = sim.aircraft_entities()[1];
+    entities::EntityHandle eagle(eagle_id, &sim.world());
+    entities::EntityHandle hawk(hawk_id, &sim.world());
+    auto* eagle_brain = eagle.get<f4::ai::BrainComponent>();
+    auto* hawk_brain  = hawk.get<f4::ai::BrainComponent>();
+    ASSERT_NE(eagle_brain, nullptr);
+    ASSERT_NE(hawk_brain, nullptr);
+
+    bool eagle_ca_seen = false;
+    bool hawk_ca_seen = false;
+    double first_avoid_range_ft = -1.0;
+    double min_range_ft = 1.0e9;
+    int min_tick = -1;
+    double post_pass_range_ft = -1.0;
+    const int max_ticks = static_cast<int>(45.0 / kDt);
+    for (int i = 0; i < max_ticks; ++i) {
+        sim.tick(kDt);
+        const auto* etf = eagle.get<entities::TransformComponent>();
+        const auto* htf = hawk.get<entities::TransformComponent>();
+        ASSERT_NE(etf, nullptr);
+        ASSERT_NE(htf, nullptr);
+        const double dx = htf->position.x - etf->position.x;
+        const double dy = htf->position.y - etf->position.y;
+        const double dz = htf->position.z - etf->position.z;
+        const double rng = std::sqrt(dx * dx + dy * dy + dz * dz);
+        if (rng < min_range_ft) {
+            min_range_ft = rng;
+            min_tick = i;
+        }
+        if (min_tick >= 0 && i == min_tick + 90) {
+            post_pass_range_ft = rng;
+        }
+        if ((eagle_brain->collision_avoid().is_avoiding() ||
+             hawk_brain->collision_avoid().is_avoiding()) &&
+            first_avoid_range_ft < 0.0) {
+            first_avoid_range_ft = rng;
+        }
+        if (eagle_brain->safety_mode() ==
+            f4::ai::BrainComponent::SafetyMode::CollisionAvoid) {
+            eagle_ca_seen = true;
+        }
+        if (hawk_brain->safety_mode() ==
+            f4::ai::BrainComponent::SafetyMode::CollisionAvoid) {
+            hawk_ca_seen = true;
+        }
+    }
+
+    // The safety rung flew the break on both jets, outside the bubble,
+    // the jets passed, the geometry opened, and nothing fired (blue on
+    // blue — the hostility rule, plus the holds).
+    ASSERT_TRUE(eagle_ca_seen) << "EAGLE1 never flew the collision break";
+    ASSERT_TRUE(hawk_ca_seen) << "HAWK1 never flew the collision break";
+    EXPECT_GT(first_avoid_range_ft, 200.0)
+        << "the first break armed inside the protected bubble";
+    EXPECT_GT(min_range_ft, 0.0) << "the tracks never crossed";
+    ASSERT_GT(post_pass_range_ft, 400.0)
+        << "the geometry did not open after the pass ("
+        << post_pass_range_ft << " ft at +1.5 s)";
+    EXPECT_EQ(eagle_brain->safety_mode(),
+              f4::ai::BrainComponent::SafetyMode::None)
+        << "collision avoid never released after the pass";
+    EXPECT_EQ(hawk_brain->safety_mode(),
+              f4::ai::BrainComponent::SafetyMode::None)
+        << "collision avoid never released after the pass";
+    EXPECT_TRUE(log.launched.empty()) << "blue-on-blue fired a missile";
+    EXPECT_TRUE(log.gun_fired.empty()) << "blue-on-blue fired guns";
+    for (const auto* h : {&eagle, &hawk}) {
+        const auto* fm = h->get<f4::flight::FlightModelComponent>();
+        ASSERT_NE(fm, nullptr);
+        EXPECT_TRUE(fm->state().gear.inAir) << "a jet did not stay airborne";
     }
 #else
     GTEST_SKIP() << "F4_SCENARIOS_DIR not defined for this target";

@@ -155,6 +155,18 @@ struct CombatConfig {
     bool guns_hold{true};
 };
 
+/// Fuel policy for every spawned aircraft (the DigitalBrain's fuel check
+/// — FreeFalcon FrameExec step 2). Thresholds are pounds of usable fuel;
+/// 0 disables a threshold. Joker = reported only; bingo = the engagement
+/// rungs stand down (the jet bugs out — it keeps defending missiles and
+/// keeps formation, and the NavigationModule's route continues as the RTB
+/// path). With bingo 0 (default) fuel never gates anything: every
+/// pre-fuel scenario flies exactly as it did before.
+struct FuelConfig {
+    double joker_lbs{0.0};
+    double bingo_lbs{0.0};
+};
+
 /// One static feature placement on the airfield — a building, runway section,
 /// taxiway segment, control tower, hangar, etc. Spawned as an entity with
 /// TransformComponent + VisualModelComponent (no flight model, no brain).
@@ -300,6 +312,9 @@ struct Scenario {
 
     /// Combat configuration (M3 integration). Default: disabled.
     CombatConfig combat;
+
+    /// Fuel policy (the arbiter's fuel check). Default: disabled.
+    FuelConfig fuel;
 };
 
 /// Load a scenario from a JSON file. Resolves asset paths relative to the

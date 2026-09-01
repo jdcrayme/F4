@@ -47,6 +47,7 @@ public:
     double yaw_rate_radps_{0.0};
     double vs_fpm_{0.0};
     bool on_ground_{false};
+    double fuel_lbs_{5000.0};
 
     double position_east_ft()  const override { return east_ft; }
     double position_north_ft() const override { return north_ft; }
@@ -61,6 +62,7 @@ public:
     double yaw_rate_radps()    const override { return yaw_rate_radps_; }
     double vertical_speed_fpm() const override { return vs_fpm_; }
     bool   on_ground()         const override { return on_ground_; }
+    double fuel_lbs()          const override { return fuel_lbs_; }
 };
 
 /// A lead flying north at 420 kts from (0, 10000) at 15000 ft.
@@ -228,16 +230,19 @@ TEST(WingmanModule, OffStationSteersTowardIt) {
     TestAircraftState own;
     wing.set_lead_picture(lead_north());
 
-    // Southwest of the station (station is NE): the desired heading
-    // points northeast — between 30 and 60 deg off north for the
-    // 6000-east/5000-north offset.
+    // Southwest of the station (station is NE): the desired heading is
+    // the INTERCEPT, not the tail chase — the aim point advances along
+    // the northbound lead's velocity by the time-to-go, so the heading
+    // sits NORTH of the pure-pursuit bearing (45 deg for the
+    // 6000-east/5000-north offset) and east of the lead's own track
+    // (0 deg): the rejoin merges onto the formation's flight path.
     own.east_ft = -4000.0;
     own.north_ft = 2500.0;
     wing.update(DT, &own);
 
     const double h = wrap_2pi(wing.desired_heading_rad());
-    EXPECT_GT(h, 0.2 * kPi);       // east of north...
-    EXPECT_LT(h, 0.4 * kPi);       // ...but north of 60 deg off
+    EXPECT_GT(h, 0.05 * kPi);      // east of the lead's track...
+    EXPECT_LT(h, 0.25 * kPi);      // ...north of the pure-pursuit bearing
 }
 
 // ============================================================================

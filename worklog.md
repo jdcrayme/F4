@@ -3708,3 +3708,114 @@ Stage Summary:
 - Next session: the DigitalBrain arbiter (the ladder already IS it —
   Step 12 collapses into wiring the remaining rungs), then asset
   pipeline Stage 1.
+
+## M3-ARBITER-1: the DigitalBrain ladder's last rungs — safety + fuel
+
+Task ID: M3-ARBITER-1 (AI_IMPLEMENTATION_PLAN Step 12, collapsed: the
+BrainComponent ladder already IS the FrameExec skeleton; what remained
+was the ladder's TOP rungs and the fuel check).
+
+**What landed** (34 files, +~2,000/-60):
+
+- **GroundAvoidModule** (rung 1, FreeFalcon priority 1): MIN_ALTT
+  1,500 ft floor, 6-s look-ahead picture (terrain under + max in the
+  forward cone), pull-up recovery (level roll, 10,000 fpm cap, target =
+  terrain_ahead + 2x floor), hysteresis margin + pullupTimer hold.
+  Engine-agnostic: the host pushes the TerrainPicture each tick from
+  the SAME TerrainSource the FM's ground plane uses.
+- **CollisionAvoidModule** (rung 2, priority 2): digi_cavoid.cpp ported
+  1:1 — hRange 200 ft, reactFact 0.55, GS_LIMIT 9.0 (reactTime =
+  (GS/own_max_G) x reactFact = 0.707 s at the 7-G default), linear
+  extrapolation to the react horizon, escape point 45 deg az / 45 deg el
+  at 10,000 ft placed OPPOSITE the target's roll rate, break-RIGHT
+  tiebreak when the target is level (the load-bearing aviation
+  convention: two nose-on jets each breaking right open lateral
+  separation), 1.5-s linger. Friendlies included (formation mates are
+  exactly the traffic cavoid exists for). The committed gun pass is
+  exempt (WVRModule::gun_pass_target_id — inside the employment band
+  the weapons own the merge geometry; the documented midair trade).
+- **Fuel check** (FrameExec step 2): IAircraftState::fuel_lbs() (FM:
+  internal + external), scenario "fuel" {joker_lbs, bingo_lbs} (0 =
+  off, default — pre-fuel scenarios fly exactly as before). Joker is a
+  report (FuelState + mode_name stays live); bingo stands the
+  engagement rungs down — MissileDefeat still outranks RTB (a bingoing
+  jet still dodges the missile chasing it) and formation survives (a
+  wingman on the way home still flies formation). The scenario's
+  initial_fuel_lbs is now actually WIRED (FlightModel::
+  set_internal_fuel_lbs — it was parsed but never applied; every jet
+  flew the config's tank capacity).
+- **Arbiter wiring** (BrainComponent): the safety ladder runs while
+  Enroute REGARDLESS of the combat flag (safety is not a tactic),
+  preempts every combat rung; GA > CA > MissileDefeat > engagement >
+  formation > mission; ladder bookkeeping (integrator resets on rung
+  fall) covers the new rungs; RTB mode reporting; approach/ground
+  phases excluded (the landing module owns the last 1,500 ft —
+  DecisionLogic's "GroundCheck if not LandingMode").
+- **Host wiring**: push_safety_pictures() per tick before update_all —
+  the terrain picture + the 1-NM traffic picture (with velocities +
+  body roll rate from one transform snapshot) are the modules' entire
+  view of the world. Dead aircraft leave the traffic picture (a frozen
+  wreck inside the extrapolation window arms every passing jet's break
+  against a corpse — observed 3 ticks after the gun kill).
+- **The escapes fly at max performance**: the AirSteering comfort
+  limiters come OFF for the seconds an escape lives — STAB-E29's
+  400-fpm/s VS-command slew (a 0.7-s window lets the command reach only
+  ~280 fpm) and STAB-E46's energy damper (it would chop the throttle
+  and dump the board against the escape climb). Boards stay in, AB
+  explicit.
+- **Scenario midair_merge.json.in** + CMake registration: two BLUE jets
+  nose-on at 15,000 ft, combat on + holds (blue on blue never fires) —
+  the watchable cavoid demo. The player's HUD mode line reports
+  "CollisionAvoid | Breaking" live (Tab-cycle the watched jet).
+- Tests +33 (suite 1,661 -> 1,694 = 100%, zero warnings): 15 CA units
+  (detection gating, roll-opposite escapes, right tiebreak, react-time
+  scaling, linger, empty sky, exemption plumbing), 13 GA units (both
+  clearance terms, sink projection, hold, ridge oscillation, gates),
+  5 E2Es (the ridge pull-up with a synthetic RidgeTerrain, the head-on
+  break with combat OFF, fuel joker-fights-on, fuel bingo-stands-down,
+  the shipped midair file twin) + the guns E2E gains the exemption
+  regression assertions.
+
+**The honest ledger** (measured, documented in the tests):
+
+- The reference's late-react doctrine is REAL: reactTime 0.707 s arms
+  the escape with under a second on the clock; this sim's ~2-s FCS
+  G-lag spends most of that on roll-in. The worst-case EXACT head-on
+  passes at tens of feet — the same character FreeFalcon's digi has
+  (its merges occasionally end in the midair; the module header
+  documents the trade). What the escape owns: the prediction fires
+  OUTSIDE the 200-ft bubble, the jets fly max-performance breaks, the
+  post-pass geometry opens decisively (400+ ft at +1.5 s, both jets
+  release, both continue their missions). No airframe-airframe contact
+  model exists, so the pass is clean by construction.
+- The merge's mutual-altitude chase (documented at M3-GUNS) is now
+  absorbed by the CA exemption in a different way: both fighters
+  converge INSIDE the band with the weapons owning the geometry.
+
+**The two-ship regression + the wingman rejoin root cause** (the fuel
+wiring perturbed the fight geometry and exposed a LATENT divergence in
+the rejoin guidance — fixed, not papered over):
+
+1. Pure pursuit of the slot diverges against a crossing lead: at equal
+   speeds the bearing sweeps faster than the 30-deg bank turns, and
+   pointing straight AT the slot can OPEN the range (measured +347
+   ft/s aimed directly at it, 5.6 kft out, stuck in Rejoining for the
+   rest of the run). The FAR law now flies LEAD pursuit — the aim
+   advanced along the lead's velocity by the time-to-go (a stationary
+   lead degrades to pure pursuit, correct for a parked lead). A real
+   rejoin flies the formation's flight path and merges from behind.
+2. The Rejoin speed law had no brake for the wingman AHEAD of the slot:
+   its lead+10 floor and its opening-rate term accelerate the wingman
+   away (a faster wingman that overruns the slot can never slow back).
+   The blow-past guard: P on the excess along-track error (no rate
+   term — the station-frame rate is frame rotation during a lead
+   turn, the phugoid the inertial law exists to avoid), the LEAD
+   closes the range, the capture ring fires, Following's PD finishes.
+   OffStationSteersTowardIt updated to the intercept doctrine (the
+   heading sits north of the pure-pursuit bearing).
+
+Deferred (next session): the direct-G escape channel (the FCS pstick
+IS a G command — a TrackPoint(maxGs, cornerSpeed) port could beat the
+cascade's lag; would widen the worst-case miss), the airframe-airframe
+contact model, refueling/loiter/orders rungs (7, 17-19, 21) with the
+campaign. Next: asset pipeline Stage 1 (ASSET_PIPELINE_SPEC).

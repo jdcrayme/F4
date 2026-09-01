@@ -173,8 +173,8 @@ AIControlOutput WingmanModule::update(double dt,
 
     // --- Lateral: heading law --------------------------------------------
     // Two regimes:
-    //   FAR  (station_dist > 3 * tolerance): the rejoin cone — steer
-    //        straight at the slot (pure pursuit; the speed law closes).
+    //   FAR  (station_dist > 3 * tolerance): the rejoin cone — LEAD
+    //        pursuit of the slot (the intercept; see below).
     //   NEAR (inside): formation keeping — hold the LEAD's heading plus a
     //        proportional correction toward the slot's lateral offset.
     //        Pure pursuit at zero error would orbit the co-moving slot;
@@ -184,9 +184,25 @@ AIControlOutput WingmanModule::update(double dt,
     if (station_dist > 3.0 * cfg_.formation_tolerance_ft) {
         const double sx = station.x - current_position_.x;   // east
         const double sy = station.y - current_position_.y;   // north
-        desired_heading_rad_ = (sx == 0.0 && sy == 0.0)
+        // LEAD PURSUIT, not pure: at equal speeds a tail chase of the
+        // slot diverges against a crossing lead — the bearing sweeps
+        // faster than the bank can turn, and pointing straight AT the
+        // slot can OPEN the range (measured in the 2v2 post-fight
+        // rejoin: 5.6 kft out, 42 deg off the lead's track, +347 ft/s
+        // while aimed directly at the slot, stuck in Rejoining for the
+        // rest of the run). Advance the aim along the lead's velocity
+        // by the time-to-go: a real rejoin flies the formation's flight
+        // path and merges from behind. A stationary lead (velocity ~ 0)
+        // degrades to pure pursuit, which is correct for a parked lead.
+        const double v_fps = std::sqrt(
+            picture_.velocity.x * picture_.velocity.x +
+            picture_.velocity.y * picture_.velocity.y);
+        const double t_go = station_dist / std::max(300.0, 0.7 * v_fps);
+        const double ax = sx + picture_.velocity.x * t_go;
+        const double ay = sy + picture_.velocity.y * t_go;
+        desired_heading_rad_ = (ax == 0.0 && ay == 0.0)
             ? state->heading_rad()
-            : std::atan2(sx, sy);
+            : std::atan2(ax, ay);
     } else {
         const double lat = lateral_error_ft(*state);
         const double corr = std::clamp(
@@ -286,6 +302,29 @@ double WingmanModule::desired_speed_kts(
     if (!picture_.valid) return own.vcas_kts();
 
     if (sm_.current() == WingState::Rejoining) {
+        // The BLOW-PAST GUARD: a wingman AHEAD of the slot (positive
+        // along-track error) is not chasing anything, and the chase law
+        // below is poison there — its lead+10 floor and its
+        // opening-rate term accelerate the wingman away from the
+        // formation (a faster wingman that overruns the slot can never
+        // slow back to it: the range opens, the P term saturates, and
+        // the state machine sits in Rejoining while the jet flies off —
+        // measured twice in the 2v2 post-fight rejoin). Brake instead:
+        // P on the excess along-track error, no rate term (the
+        // station-frame rate is frame rotation during a lead turn — the
+        // phugoid the inertial chase law exists to avoid). The LEAD
+        // then closes the range; the capture ring fires on lead range;
+        // Following's PD finishes the join.
+        const double along = station_error_ft(own);
+        if (along > cfg_.formation_tolerance_ft) {
+            const double brake = std::clamp(
+                cfg_.follow_speed_gain *
+                    (along - cfg_.formation_tolerance_ft),
+                0.0, 0.5 * cfg_.max_lead_speed_delta_kts);
+            return std::clamp(picture_.vcas_kts - brake,
+                              cfg_.min_speed_kts, cfg_.max_speed_kts);
+        }
+
         // REJOIN law — on RANGE TO THE LEAD (rotation-free): during the
         // lead's post-fight turn the station frame rotates under the
         // wingman and the along-track error's rate is frame rotation,

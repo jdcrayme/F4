@@ -21,7 +21,11 @@
 // while Enroute, a visible incoming missile (MissileModule defeat)
 // preempts a visible hostile fighter (BVRModule, handing off to
 // WVRModule inside the 3 NM WVR entry band), which preempts the
-// navigation module. The mission sequence underneath is untouched.
+// navigation module. The arbiter session completes the ladder's TOP:
+// ground avoid and collision avoid preempt everything (FreeFalcon
+// priorities 1-2, always armed — safety is not a tactic), and the
+// fuel check (FrameExec step 2) stands the engagement rungs down at
+// bingo. The mission sequence underneath is untouched.
 //
 // The brain runs in pass 1 (priority 100), reads the parent entity's
 // aircraft state through the IAircraftState interface, calls the active
@@ -59,6 +63,8 @@
 #include "f4/ai/modules/missile_module.hpp"
 #include "f4/ai/modules/wvr_module.hpp"
 #include "f4/ai/modules/wingman_module.hpp"
+#include "f4/ai/modules/ground_avoid_module.hpp"
+#include "f4/ai/modules/collision_avoid_module.hpp"
 #include "f4/ai/sensor_fusion.hpp"
 
 #include <optional>
@@ -158,6 +164,34 @@ public:
         Formation    // WingmanModule keeping formation on the flight lead
     };
 
+    /// Safety mode — the ladder's TOP rungs (FreeFalcon priorities 1-2:
+    /// GroundAvoidMode, CollisionAvoidMode). They run REGARDLESS of the
+    /// combat flag (safety is not a tactic) and preempt every combat
+    /// rung — FreeFalcon's digi puts both above even MissileDefeat. Run
+    /// while Enroute only: a landing aircraft's last 1,500 ft belong to
+    /// the LandingModule (DecisionLogic's "GroundCheck if not
+    /// LandingMode" rule), and Ground aircraft don't fly.
+    enum class SafetyMode {
+        None,
+        GroundAvoid,      // GroundAvoidModule flying the terrain pull-up
+        CollisionAvoid    // CollisionAvoidModule flying the break
+    };
+
+    /// Fuel state — FreeFalcon FrameExec step 2 (FuelCheck): joker =
+    /// "time to start thinking about home" (reporting only), bingo =
+    /// "fight's over, bug out" (the engagement rungs stand down; a
+    /// bingoing jet still DEFENDS an incoming missile — MissileDefeat
+    /// outranks RTB in the FreeFalcon ladder — and it still keeps
+    /// formation). No refueling exists yet, so state only ever moves
+    /// down (fuel monotonically burns); RTB itself is the Navigation
+    /// Module continuing the scenario route (its last waypoints ARE the
+    /// way home — an airbase-divert model arrives with the campaign).
+    enum class FuelState {
+        Normal,   // above joker (or no policy set)
+        Joker,    // below joker — reported, fight continues
+        Bingo     // below bingo — engagement stands down
+    };
+
     BrainComponent() = default;
 
     // --- BehavioralComponent overrides ---
@@ -183,6 +217,9 @@ public:
         auto* state = owner_.get_interface<flight::IAircraftState>();
         auto* sink  = owner_.get_interface<flight::IPilotInputSink>();
         if (!state || !sink) return;  // no flight model on this entity
+
+        // The gauge reading for this tick's fuel check (FrameExec step 2).
+        state_fuel_hint_ = state->fuel_lbs();
 
         // Initialize the TakeoffModule on first update (it needs the bus
         // to publish TaxiRequest / subscribe to clearances).
@@ -263,6 +300,50 @@ public:
         }
 
         // =====================================================================
+        // SAFETY LADDER (the DigitalBrain arbiter's top rungs — FreeFalcon
+        // priorities 1-2): GroundAvoid > CollisionAvoid. They run while
+        // Enroute REGARDLESS of the combat flag (safety is not a tactic)
+        // and preempt every combat rung — FreeFalcon's digi puts both
+        // above even MissileDefeat. Approach-phase aircraft are excluded:
+        // the landing module owns the last 1,500 ft (DecisionLogic's
+        // "GroundCheck if not LandingMode" rule); Ground aircraft don't
+        // fly. Both modules' pictures are pushed by the HOST each tick
+        // (engine-agnostic: the modules cannot scan terrain or traffic).
+        // =====================================================================
+        AIControlOutput ai_out{};
+        combat_intent_ = CombatIntent{};
+        combat_mode_ = CombatMode::None;
+        safety_mode_ = SafetyMode::None;
+
+        // Fuel check (FrameExec step 2): before any rung, so a bingoing
+        // jet's engagement stands down this tick. Enroute only — an
+        // aircraft already on approach is committed, and the parked/
+        // ground phases have no decisions left to gate.
+        update_fuel_state();
+
+        if (phase_ == Phase::Enroute) {
+            const auto ga_out = ground_avoid_.update(dt, state,
+                                                     terrain_picture_);
+            if (ground_avoid_.pulling_up()) {
+                safety_mode_ = SafetyMode::GroundAvoid;
+                ai_out = ga_out;
+            } else {
+                // The committed firing pass: the intruder our WVR gun
+                // fire control is fighting inside the employment band is
+                // exempt (gun_pass_exempt_id_, written by the combat
+                // ladder below — one tick stale; the band develops over
+                // seconds, a tick is noise). See collision_avoid_module
+                // .hpp for the doctrine + the documented midair trade.
+                collision_avoid_.set_exempt_id(gun_pass_exempt_id_);
+                const auto ca_out = collision_avoid_.update(dt, state);
+                if (collision_avoid_.is_avoiding()) {
+                    safety_mode_ = SafetyMode::CollisionAvoid;
+                    ai_out = ca_out;
+                }
+            }
+        }
+
+        // =====================================================================
         // Combat ladder (M3 tactics — the DigitalBrain priority ladder's
         // first rungs; preempts the mission module, never replaces it):
         //   Defensive > WVR > BVR > mission module.
@@ -272,11 +353,13 @@ public:
         // steering integrators reset, the same transient guard the phase
         // handoffs use (BVR's throttle/VS state is not nav state).
         // =====================================================================
-        AIControlOutput ai_out{};
-        combat_intent_ = CombatIntent{};
-        combat_mode_ = CombatMode::None;
-        if (combat_enabled_ && phase_ == Phase::Enroute) {
+        if (safety_mode_ == SafetyMode::None && combat_enabled_ &&
+            phase_ == Phase::Enroute) {
             auto* world = owner_.world();
+            // The firing-pass exemption starts each tick clean; the
+            // engagement branch below may arm it (a WVR target inside
+            // the gun band). A bingo/defending jet carries no exemption.
+            gun_pass_exempt_id_ = 0;
             if (world) {
                 if (!combat_initialized_) {
                     sensors_.initialize(owner_.id().value, *world, bus,
@@ -294,8 +377,24 @@ public:
                 }
 
                 if (const auto* incoming = sensors_.missile_threat()) {
+                    // Missile defense outranks even bingo (FreeFalcon's
+                    // ladder: MissileDefeat(4) > RTB(19)) — a jet bug
+                    // fuel home still dodges the missile chasing it.
                     combat_mode_ = CombatMode::Defensive;
                     ai_out = missile_defense_.update(dt, state, incoming);
+                } else if (fuel_bingo_) {
+                    // BINGO (FrameExec step 2's fight-gating half): the
+                    // engagement rungs stand down — no new target
+                    // selection, no employment. A running fight ends
+                    // cleanly: reset the engagement state so the bvr/wvr
+                    // modules do not resume stale geometry if fuel
+                    // (impossibly) recovers; the nav-resume bookkeeping
+                    // below handles the steering transient.
+                    if (in_wvr_) {
+                        in_wvr_ = false;
+                        wvr_.reset();
+                    }
+                    bvr_.reset();
                 } else {
                     // WINGMAN SORT (Step 11): a wingman engages through
                     // sorted_threat_target — prefer the bandit the LEAD has
@@ -364,6 +463,20 @@ public:
                         combat_intent_.release_target_id =
                             bvr_.release_target_id();
                     }
+
+                    // The committed firing pass exemption source: the
+                    // WVR's gun steering target (FRESH track-file range,
+                    // via gun_pass_target_id — the fusion's range_nm is
+                    // seconds stale at merge closure). Both sides of a
+                    // fight compute it independently (each brain's WVR
+                    // target is the other jet) — so a merge holds its
+                    // geometry while the weapons resolve it, and
+                    // everything OUTSIDE the band keeps full collision
+                    // protection.
+                    gun_pass_exempt_id_ =
+                        (combat_mode_ == CombatMode::WVR)
+                            ? wvr_.gun_pass_target_id()
+                            : 0;
                 }
             }
         }
@@ -374,30 +487,41 @@ public:
         // fights: BVR/WVR/Defensive preempt the module), ABOVE the mission
         // modules (a wingman with a live lead picture never flies its own
         // route). Runs with combat disabled too — formation keeping is
-        // not a combat behavior. When the picture drops (lead dead /
-        // landed / unresolvable), the rung empties and the mission module
-        // takes over: the wingman becomes a single-ship.
+        // not a combat behavior (and survives bingo — a wingman on the
+        // way home still flies formation). When the picture drops (lead
+        // dead / landed / unresolvable), the rung empties and the mission
+        // module takes over: the wingman becomes a single-ship. Safety
+        // rungs preempt it like everything else — you do not form on a
+        // lead through a terrain ridge.
         // =================================================================
-        if (combat_mode_ == CombatMode::None && is_wingman_ &&
+        if (safety_mode_ == SafetyMode::None &&
+            combat_mode_ == CombatMode::None && is_wingman_ &&
             phase_ == Phase::Enroute && wingman_.has_live_picture()) {
             combat_mode_ = CombatMode::Formation;
             ai_out = wingman_.update(dt, state);
         }
 
-        // Ladder bookkeeping (single source, combat rungs + formation):
-        // falling to None from ANY active rung — BVR separated, target
-        // lost, lead gone — hands the route back to the navigation module
-        // with clean steering integrators (the same transient guard the
-        // phase handoffs use; combat/formation state is not nav state).
-        if (combat_mode_ == CombatMode::None && combat_was_active_) {
+        // Ladder bookkeeping (single source, every rung — safety,
+        // combat, formation): falling to None from ANY active rung —
+        // the pull-up flown, the break complete, BVR separated, target
+        // lost, lead gone — hands the route back to the navigation
+        // module with clean steering integrators (the same transient
+        // guard the phase handoffs use; combat/formation/safety state
+        // is not nav state).
+        const bool ladder_active =
+            safety_mode_ != SafetyMode::None ||
+            combat_mode_ != CombatMode::None;
+        if (!ladder_active && combat_was_active_) {
             nav_.air_steering.reset_integrators();
         }
-        combat_was_active_ = combat_mode_ != CombatMode::None;
+        combat_was_active_ = ladder_active;
 
         // Run the active module: produce AIControlOutput from the state.
-        // (Skipped whenever a combat rung produced an output this tick —
-        // including the Defensive override, which preempts everything.)
-        if (combat_mode_ == CombatMode::None) {
+        // (Skipped whenever a combat OR safety rung produced an output
+        // this tick — including the Defensive override and the safety
+        // pull-up/break, which preempt everything.)
+        if (safety_mode_ == SafetyMode::None &&
+            combat_mode_ == CombatMode::None) {
             switch (phase_) {
                 case Phase::Ground:
                     ai_out = takeoff_.update(dt, state);
@@ -461,14 +585,20 @@ public:
         return "?";
     }
     /// Active module's mode name (e.g. "TakeoffMode"); "Complete" at the end.
-    /// While a combat rung is active the COMBAT mode is reported instead
-    /// ("BVREngage" / "WVREngage" / "MissileDefeat" / "WingmanFormation")
-    /// — the mission module is dormant.
+    /// While a safety rung is active its name is reported first (the
+    /// mission module is dormant); then the COMBAT mode ("BVREngage" /
+    /// "WVREngage" / "MissileDefeat" / "WingmanFormation"); a bingoing
+    /// enroute jet with nothing else active reports "RTB".
     [[nodiscard]] std::string mode_name() const {
+        if (safety_mode_ == SafetyMode::GroundAvoid)
+            return "GroundAvoid";
+        if (safety_mode_ == SafetyMode::CollisionAvoid)
+            return "CollisionAvoid";
         if (combat_mode_ == CombatMode::BVR)         return "BVREngage";
         if (combat_mode_ == CombatMode::WVR)         return "WVREngage";
         if (combat_mode_ == CombatMode::Defensive)   return "MissileDefeat";
         if (combat_mode_ == CombatMode::Formation)   return "WingmanFormation";
+        if (fuel_bingo_ && phase_ == Phase::Enroute) return "RTB";
         switch (phase_) {
             case Phase::Ground:   return takeoff_.mode_name();
             case Phase::Enroute:  return nav_.mode_name();
@@ -479,12 +609,18 @@ public:
     }
     /// Active module's state name (e.g. "OnFinal"); "Parked" at the end.
     /// While fighting: the BVR/WVR state / "Defending"; in formation:
-    /// the wingman state ("Following" / "Rejoining").
+    /// the wingman state ("Following" / "Rejoining"); in a safety
+    /// recovery: "PullingUp" / "Breaking"; at bingo: the fuel state.
     [[nodiscard]] std::string state_name() const {
+        if (safety_mode_ == SafetyMode::GroundAvoid)
+            return "PullingUp";
+        if (safety_mode_ == SafetyMode::CollisionAvoid)
+            return "Breaking";
         if (combat_mode_ == CombatMode::BVR)         return bvr_.state_name();
         if (combat_mode_ == CombatMode::WVR)         return wvr_.state_name();
         if (combat_mode_ == CombatMode::Defensive)   return "Defending";
         if (combat_mode_ == CombatMode::Formation)   return wingman_.state_name();
+        if (fuel_bingo_ && phase_ == Phase::Enroute) return fuel_state_name();
         switch (phase_) {
             case Phase::Ground:   return takeoff_.state_name();
             case Phase::Enroute:  return nav_.state_name();
@@ -501,6 +637,15 @@ public:
     void set_combat_enabled(bool on) noexcept { combat_enabled_ = on; }
     [[nodiscard]] bool combat_enabled() const noexcept { return combat_enabled_; }
     [[nodiscard]] CombatMode combat_mode() const noexcept { return combat_mode_; }
+    [[nodiscard]] SafetyMode safety_mode() const noexcept { return safety_mode_; }
+    [[nodiscard]] const char* safety_mode_name() const noexcept {
+        switch (safety_mode_) {
+            case SafetyMode::None:            return "None";
+            case SafetyMode::GroundAvoid:     return "GroundAvoid";
+            case SafetyMode::CollisionAvoid:  return "CollisionAvoid";
+        }
+        return "?";
+    }
     [[nodiscard]] const char* combat_mode_name() const noexcept {
         switch (combat_mode_) {
             case CombatMode::None:      return "None";
@@ -554,6 +699,50 @@ public:
     [[nodiscard]] modules::MissileModule&       missile_defense()       noexcept { return missile_defense_; }
     [[nodiscard]] const modules::MissileModule& missile_defense() const noexcept { return missile_defense_; }
 
+    // --- Safety modules (host picture pushes + test inspection) ---
+    /// Per-tick terrain picture for the ground-avoid rung (the host's
+    /// eyes: elevation under + ahead of the jet, from the same
+    /// TerrainSource the FM's ground plane uses). No push = no picture
+    /// = the rung idles (standalone brains never pull up).
+    void update_terrain_picture(
+        const modules::GroundAvoidModule::TerrainPicture& p) {
+        terrain_picture_ = p;
+    }
+    /// Per-tick traffic picture for the collision-avoid rung: intruders
+    /// within the host's gate (ALL airborne aircraft — friendlies
+    /// included) + the OWN velocity from the same transform snapshot.
+    void update_traffic(
+        std::vector<modules::CollisionAvoidModule::Intruder> traffic,
+        std::optional<geo::WorldPosition> own_velocity) {
+        collision_avoid_.set_traffic(std::move(traffic), own_velocity);
+    }
+    [[nodiscard]] modules::GroundAvoidModule&       ground_avoid()       noexcept { return ground_avoid_; }
+    [[nodiscard]] const modules::GroundAvoidModule& ground_avoid() const noexcept { return ground_avoid_; }
+    [[nodiscard]] modules::CollisionAvoidModule&       collision_avoid()       noexcept { return collision_avoid_; }
+    [[nodiscard]] const modules::CollisionAvoidModule& collision_avoid() const noexcept { return collision_avoid_; }
+
+    // --- Fuel policy (FrameExec step 2; the host sets it at spawn) ---
+    /// Jokers/bingos in pounds of usable fuel (0 = that threshold is
+    /// disabled; a 0 bingo means the brain never gates on fuel). Set
+    /// from the scenario's fuel block by the host.
+    void set_fuel_policy(double joker_lbs, double bingo_lbs) noexcept {
+        fuel_joker_lbs_ = joker_lbs;
+        fuel_bingo_lbs_ = bingo_lbs;
+    }
+    [[nodiscard]] FuelState fuel_state() const noexcept {
+        return fuel_state_;
+    }
+    [[nodiscard]] const char* fuel_state_name() const noexcept {
+        switch (fuel_state_) {
+            case FuelState::Normal: return "Normal";
+            case FuelState::Joker:  return "Joker";
+            case FuelState::Bingo:  return "Bingo";
+        }
+        return "?";
+    }
+    /// The last fuel reading (lbs; negative = never measured).
+    [[nodiscard]] double fuel_lbs() const noexcept { return fuel_lbs_; }
+
     // --- Wingman role (Step 11; the host drives this at spawn + per tick) ---
     /// Make this brain a WINGMAN of the flight lead `lead_entity_id`
     /// (0 clears the role). Marks the aircraft: the ladder gains the
@@ -589,6 +778,19 @@ public:
     [[nodiscard]] const modules::TakeoffModule& module() const noexcept { return takeoff_; }
 
 private:
+    // Fuel check (FrameExec step 2). Pure function of the gauge: compare
+    // the total usable fuel against the policy, worst state wins. Called
+    // from update() every tick; no policy (bingo=0) leaves Normal.
+    void update_fuel_state() {
+        if (phase_ != Phase::Enroute) return;  // committed or parked
+        fuel_lbs_ = state_fuel_hint_;
+        fuel_bingo_ = fuel_bingo_lbs_ > 0.0 && fuel_lbs_ <= fuel_bingo_lbs_;
+        fuel_state_ = fuel_bingo_ ? FuelState::Bingo
+            : (fuel_joker_lbs_ > 0.0 && fuel_lbs_ <= fuel_joker_lbs_)
+                ? FuelState::Joker
+                : FuelState::Normal;
+    }
+
     // Map AIControlOutput to PilotInput. The brain is self-contained —
     // no external runner is needed to translate AI output to pilot input.
     static flight::PilotInput map_to_pilot_input(const AIControlOutput& ai_out) {
@@ -656,6 +858,32 @@ private:
     std::uint64_t lead_id_{0};
     std::uint64_t lead_engaged_id_{0};
     modules::WingmanModule wingman_{};
+
+    // Safety ladder (the arbiter's top rungs): the terrain pull-up + the
+    // mid-air break, and the pictures the host pushes each tick (the
+    // modules are engine-agnostic — they cannot scan terrain or traffic).
+    // No terrain picture ever pushed => GroundAvoid idles; no traffic
+    // push => CollisionAvoid sees an empty sky (a brain the host never
+    // feeds flies exactly as it did before these rungs existed).
+    // gun_pass_exempt_id_: the committed firing pass (see the CA module
+    // header) — the WVR gun target inside the employment band, written
+    // by the combat ladder, read by the CA rung one tick later.
+    SafetyMode safety_mode_{SafetyMode::None};
+    modules::GroundAvoidModule::TerrainPicture terrain_picture_{};
+    modules::GroundAvoidModule ground_avoid_{};
+    modules::CollisionAvoidModule collision_avoid_{};
+    std::uint64_t gun_pass_exempt_id_{0};
+
+    // Fuel policy (FrameExec step 2): thresholds from the scenario (lbs,
+    // 0 = off), the gauge reading each tick, and the derived state.
+    // state_fuel_hint_ is set at the top of update() from the resolved
+    // IAircraftState (kept as a member so the private helper reads it).
+    double fuel_joker_lbs_{0.0};
+    double fuel_bingo_lbs_{0.0};
+    double fuel_lbs_{-1.0};
+    double state_fuel_hint_{1.0e9};
+    bool fuel_bingo_{false};
+    FuelState fuel_state_{FuelState::Normal};
 
     // Watchdog cache: the last non-empty PilotInput the brain produced.
     // Held for one tick if a module returns an empty AIControlOutput

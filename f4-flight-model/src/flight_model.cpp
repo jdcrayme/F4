@@ -458,7 +458,7 @@ void FlightModel::update(double dt, const PilotInput& input,
 
     // Sub-step
     const double minorDt = dt / minorPerMajor_;
-    for (int i = 0; i < minorPerMajor_; ++i) {
+    for (int i = 0; i < static_cast<int>(minorPerMajor_); ++i) {
         minorStep(minorDt, safeInput);
     }
 }

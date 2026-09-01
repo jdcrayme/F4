@@ -42,6 +42,7 @@ public:
     double yaw_rate_radps_{0.0};
     double vs_fpm_{0.0};
     bool on_ground_{false};
+    double fuel_lbs_{5000.0};
 
     double position_east_ft()  const override { return east_ft; }
     double position_north_ft() const override { return north_ft; }
@@ -56,6 +57,7 @@ public:
     double yaw_rate_radps()    const override { return yaw_rate_radps_; }
     double vertical_speed_fpm() const override { return vs_fpm_; }
     bool   on_ground()         const override { return on_ground_; }
+    double fuel_lbs()          const override { return fuel_lbs_; }
 };
 
 /// A hostile incoming missile `range_nm` NORTH of a northbound ownship.

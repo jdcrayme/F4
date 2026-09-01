@@ -108,6 +108,15 @@ public:
 
     /// True if any gear is in contact with the ground.
     virtual bool on_ground() const = 0;
+
+    // --- Fuel state ---
+
+    /// Total usable fuel (pounds): internal + external tanks. This is the
+    /// number the DigitalBrain's fuel check (FreeFalcon FrameExec step 2 —
+    /// FuelCheck; joker/bingo state, RTB divert) compares against the
+    /// mission's joker/bingo policies. The brain never sees the split —
+    /// a fighter's fuel state is one number on the gauge.
+    virtual double fuel_lbs() const = 0;
 };
 
 } // namespace f4::flight

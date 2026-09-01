@@ -212,6 +212,19 @@ public:
     [[nodiscard]] std::uint64_t gun_target_id() const noexcept {
         return gun_pulse_ ? engagement_target_id_ : 0u;
     }
+    /// The COMMITTED MERGE: the entity this module is fighting while
+    /// inside the gun employment band (FRESH track-file range — not the
+    /// stale fusion range_nm), 0 when the merge is not committed. Mutual
+    /// by construction: each side's WVR target is the other jet, and the
+    /// band is symmetric. The brain feeds this to
+    /// CollisionAvoidModule::set_exempt_id: inside the employment band
+    /// the WEAPONS own the merge geometry, not the break (the bullets
+    /// arrive ~2.5x faster than the airframes converge). This side's
+    /// own trigger may be tight (a drone defending the pass holds its
+    /// line — a 0.7-s break spoils nothing but the pass).
+    [[nodiscard]] std::uint64_t gun_pass_target_id() const noexcept {
+        return merge_committed_ ? engagement_target_id_ : 0u;
+    }
 
     // --- State reporting --------------------------------------------------
     [[nodiscard]] WVRState state() const noexcept { return sm_.current(); }
@@ -309,6 +322,7 @@ private:
     double jink_timer_{0.0};           // break-turn reversal phase
     int    jink_side_{+1};             // which side the current break turns
     bool   gun_steering_active_{false}; // the gun branch owns the steering?
+    bool   merge_committed_{false};     // inside the gun band (either side)
 
     // Engagement targets for steering (captured at engage()).
     double engage_alt_ft_{0.0};

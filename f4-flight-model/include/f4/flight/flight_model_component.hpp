@@ -175,6 +175,15 @@ public:
         return -s.kin.z - s.gear.groundZ_ft;
     }
 
+    double fuel_lbs() const override {
+        // Total usable: internal + external. The FM burns from the
+        // internal tank first (flight_model.cpp's burnRate), external
+        // ride-along tanks included here because the AI's joker/bingo
+        // check is about "how long can I stay airborne", not bookkeeping.
+        const auto& f = fm_.state().fuel;
+        return f.fuel_lbs + f.externalFuel_lbs;
+    }
+
     double vcas_kts() const override {
         return fm_.state().vcas;
     }

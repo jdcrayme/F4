@@ -62,6 +62,20 @@ public:
               double initialHeading_rad,
               bool inAir);
 
+    /// Override the internal fuel load after init (the scenario's
+    /// initial_fuel_lbs — the config's internalFuel is the CAPACITY,
+    /// not the load for this sortie). Refreshes the derived weights
+    /// exactly the way the per-tick burn does, so the first update
+    /// starts from a consistent mass state.
+    void set_internal_fuel_lbs(double lbs) {
+        state_.fuel.fuel_lbs = std::max(0.0, lbs);
+        state_.fuel.weight_lbs = state_.fuel.emptyWeight_lbs
+            + state_.fuel.fuel_lbs + state_.fuel.externalFuel_lbs;
+        state_.fuel.mass_slugs = state_.fuel.weight_lbs / GRAVITY;
+        state_.fuel.loadingFraction = state_.fuel.weight_lbs
+            / std::max(1.0, state_.fuel.emptyWeight_lbs);
+    }
+
     /// Run the per-frame update.
     ///
     /// The host calls this once per major frame. The model sub-steps

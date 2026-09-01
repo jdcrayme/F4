@@ -155,6 +155,10 @@ AIControlOutput WVRModule::update(double dt,
     // Intents are single-tick pulses by contract.
     release_pulse_ = false;
     gun_pulse_ = false;
+    // The committed-merge flag starts each tick clean; the
+    // Merge/Offensive steering cases set it (a fight inside the gun
+    // band — either side, trigger armed or not).
+    merge_committed_ = false;
 
     // The IR fire-control cooldown + the gun trigger cycle burn every
     // tick, fight or not (physical time, not doctrine time).
@@ -313,6 +317,16 @@ AIControlOutput WVRModule::update(double dt,
             const bool gun_work =
                 fightable && !guns_.config().hold_fire &&
                 guns_.in_envelope(*target, current_position_);
+            // The committed merge (the cavoid exemption): INSIDE the
+            // gun band the pass owns the geometry for BOTH jets — this
+            // one whether its own trigger is armed (gun_work) or the
+            // opponent holds the angle on us (a drone defending the
+            // pass holds its line; a 0.7-s break spoils nothing but the
+            // pass). FRESH track-file range — the fusion's range_nm is
+            // seconds stale at merge closure.
+            merge_committed_ =
+                fightable &&
+                guns_.in_envelope(*target, current_position_);
             if (gun_work && !gun_steering_active_) {
                 // The steering reference CHANGES here (level merge ->
                 // the gun's climbing lead line). Integrators wound on
@@ -362,6 +376,10 @@ AIControlOutput WVRModule::update(double dt,
             const bool gun_work =
                 fightable && !guns_.config().hold_fire &&
                 guns_.in_envelope(*target, current_position_);
+            merge_committed_ =
+                fightable &&
+                guns_.in_envelope(*target, current_position_);
+            gun_steering_active_ = gun_work;
             if (gun_work) {
                 desired_heading_rad_ = guns_.lead_heading_rad(
                     *target_, current_position_);
@@ -404,6 +422,7 @@ AIControlOutput WVRModule::update(double dt,
 
         case WVRState::Defensive: {
             tactic_ = WVRTactic::GunJink;
+            gun_steering_active_ = false;  // jinking, not aiming
             wants_lock_ = true;   // keep the picture: re-counter needs it
             // Break turn: offset off the THREAT bearing, reversing every
             // jink_period_sec. The reversal is the point — a constant
@@ -425,6 +444,7 @@ AIControlOutput WVRModule::update(double dt,
 
         case WVRState::BugOut:
             tactic_ = WVRTactic::BugOut;
+            gun_steering_active_ = false;  // separating, not aiming
             wants_lock_ = false;  // cold: no lock while separating
             if (fightable) {
                 desired_heading_rad_ = wrap_2pi(target_bearing_rad() + PI);
@@ -542,6 +562,7 @@ void WVRModule::clear_engagement() {
     wants_lock_ = false;
     release_pulse_ = false;
     gun_pulse_ = false;
+    gun_steering_active_ = false;
     fire_.reset_engagement();
     guns_.reset_engagement();
 }
