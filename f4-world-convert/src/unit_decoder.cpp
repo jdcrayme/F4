@@ -261,8 +261,13 @@ void parse_taskforce(Cursor& c, UnitSubclassData& s) {
 // Flight tail. 67 + 32*loadouts bytes at v63; +10 at v>65
 // (old_mission 1, mission_context 1, requester VU_ID 8); +4 at v>=72
 // (refuel uint). LoadoutStruct at v<=72 is 32 bytes (uchar WeaponID[16]
-// + uchar WeaponCount[16]), 48 at v>=72 (short WeaponID[]).
+// + uchar WeaponCount[16]), 48 at v>=73 (short WeaponID[]).
 // Source: flight.cpp:518 (Save) / flight.cpp:263 (Load ctor).
+//
+// The save stores one LoadoutStruct per aircraft slot; every slot of a
+// flight carries the same fill in practice, so we decode entry 0's
+// stations into loadout_stations and skip the rest (the count stays in
+// s.loadouts for the wire-faithful record).
 void parse_flight(Cursor& c, UnitSubclassData& s, int v) {
     s.altitude           = c.f32();   // pos_.z_
     s.fuel_burnt         = c.i32();
@@ -273,7 +278,32 @@ void parse_flight(Cursor& c, UnitSubclassData& s, int v) {
     s.mission_target     = c.i16();
     s.loadouts           = c.u8();
     const std::size_t loadout_bytes = (v <= 72) ? 32 : 48;
-    c.skip(static_cast<std::size_t>(s.loadouts) * loadout_bytes);
+    for (uint8_t li = 0; li < s.loadouts; ++li) {
+        if (li == 0) {
+            // Decode entry 0. The struct is two PARALLEL arrays —
+            // WeaponID[16] then WeaponCount[16] — not interleaved pairs.
+            uint16_t ids[16] = {0};
+            uint16_t cnts[16] = {0};
+            for (int st = 0; st < 16; ++st) {
+                ids[st] = (v <= 72)
+                    ? static_cast<uint16_t>(c.u8())
+                    : static_cast<uint16_t>(c.i16());
+            }
+            for (int st = 0; st < 16; ++st) {
+                cnts[st] = (v <= 72)
+                    ? static_cast<uint16_t>(c.u8())
+                    : static_cast<uint16_t>(c.i16());
+            }
+            for (int st = 0; st < 16; ++st) {
+                if (ids[st] != 0) {
+                    s.loadout_stations.push_back(
+                        LoadoutStationRecord{ids[st], cnts[st]});
+                }
+            }
+        } else {
+            c.skip(loadout_bytes);   // duplicate fill for slot li
+        }
+    }
     s.mission            = c.u8();
     if (v > 65) {
         s.old_mission    = c.u8();    // old_mission — written at v > 65

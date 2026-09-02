@@ -344,6 +344,38 @@ std::string to_world_json(const CamArchive& cam, const WorldJsonOptions& opts) {
         if (!objs && base_obj_path.empty()) {
             base_obj_path = find_base_objectives(cam.path());
         }
+        if (!objs && base_obj_path.empty()) {
+            // FINAL fallback (self-contained): the bundled save1.cam
+            // FIXTURE embeds the stock korea scenario's objective list as
+            // its "obj" sub-file — the same bytes the extracted save1.obj
+            // fixture carried (it was extracted from exactly here). This
+            // makes obd-only saves decode with full objectives on a
+            // pristine clone, with no out-of-repo files and no binaries
+            // that a patch application can drop.
+            const char* cam_candidates[] = {
+                "save1.cam",
+                "f4-world-convert/tests/fixtures/save1.cam",
+                "../f4-world-convert/tests/fixtures/save1.cam",
+                "../../f4-world-convert/tests/fixtures/save1.cam",
+            };
+            for (const char* rel : cam_candidates) {
+                std::error_code ec;
+                if (!std::filesystem::is_regular_file(rel, ec)) continue;
+                try {
+                    CamArchive fixture;
+                    fixture.load(rel);
+                    if (const SubFile* emb = fixture.find("obj")) {
+                        objs = decode_obj(emb->data.data(),
+                                          emb->data.size(),
+                                          opts.base_objectives_version);
+                        objectives_source = "embedded-fixture";
+                        break;
+                    }
+                } catch (const std::exception&) {
+                    // Unreadable — try the next candidate.
+                }
+            }
+        }
         if (!objs && !base_obj_path.empty()) {
             try {
                 auto base_data = f4::io::read_file(
@@ -888,6 +920,35 @@ std::string to_world_json(const CamArchive& cam, const WorldJsonOptions& opts) {
                           << ", \"old_mission\": " << static_cast<int>(u.subclass.old_mission)
                           << ", \"mission_context\": " << static_cast<int>(u.subclass.mission_context)
                           << ", \"requester_id\": " << u.subclass.requester_num;
+                        // A-G slice: the decoded loadout stations (wire
+                        // weapon ids + counts, entry 0 of the save's
+                        // LoadoutStruct[]). Emitted wire-faithful — the
+                        // ENGINE mapping (wire id -> WeaponClassTable
+                        // handle) happens at the campaign bridge, keyed on
+                        // these ids. When theater data carries a WCD, the
+                        // weapon's NAME is attached for human reading.
+                        if (!u.subclass.loadout_stations.empty()) {
+                            o << ", \"loadout_stations\": [";
+                            bool first_station = true;
+                            for (const auto& st : u.subclass.loadout_stations) {
+                                o << (first_station ? "" : ", ")
+                                  << "{\"id\": " << st.weapon_id
+                                  << ", \"count\": " << st.count;
+                                if (opts.theater_db &&
+                                    opts.theater_db->weapons.loaded()) {
+                                    if (const auto* wcd =
+                                            opts.theater_db->weapons.at(
+                                                st.weapon_id)) {
+                                        o << ", \"name\": \""
+                                          << escape_string(wcd->name)
+                                          << "\"";
+                                    }
+                                }
+                                o << "}";
+                                first_station = false;
+                            }
+                            o << "]";
+                        }
                     } else if (u.unit_class == UnitClass::Package) {
                         // Phase 1 fix A.1: previously decoded by unit_decoder.cpp
                         // but never emitted. A Package groups multiple Flights

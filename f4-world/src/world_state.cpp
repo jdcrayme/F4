@@ -221,8 +221,8 @@ ObjectiveState parse_objective(Reader& r) {
                 } else r.consume('}');
                 // Resolve damage_state from the parent objective's fstatus
                 // bitmap (2 bits per feature, indexed by feature position
-                // within the objective's feature list). 0=intact, 1=damaged,
-                // 2=destroyed, 3=heavily destroyed.
+                // within the objective's feature list). FreeFalcon's f4vu.h
+                // VIS states: 0=normal, 1=repaired, 2=damaged, 3=destroyed.
                 const std::size_t fidx = o.features.size();
                 const std::size_t byte_idx = fidx / 4;
                 const std::size_t bit_shift = (fidx % 4) * 2;
@@ -285,6 +285,49 @@ ObjectiveState parse_objective(Reader& r) {
         else                             r.skip_value();
         if (r.consume('}')) break;
         r.expect(',');
+    }
+    // A-G tranche: nominal feature placements when the FED list is
+    // missing. The OCD class data says how MANY features an objective has
+    // (features_count — real data); the fixture FED covers only a subset
+    // of the game's classes, so objectives like TestCamp's Army Bases
+    // carry the count but no placements. Without placements there is no
+    // damage ledger, and bombs on those objectives do nothing — so we
+    // synthesize nominal entries (4-wide grid, 250 ft spacing, centered
+    // on the objective). Same discipline as the synthetic airfields: the
+    // real FED data takes precedence the moment it is present, and the
+    // QC summary says which world it ran against.
+    // Feature count: the OCD class row OR the save's own fstatus bitmap,
+    // whichever is larger — the fixture OCD covers only 12 of the game's
+    // objective classes, and TestCamp's Airbases decode with
+    // features_count 0 while their fstatus bitmaps carry 64-100 real
+    // feature slots (the bitmap is save data, not class data).
+    const int n_features = std::max(
+        static_cast<int>(o.features_count),
+        static_cast<int>(o.fstatus.size() * 4));
+    if (n_features > 0 && o.features.empty()) {
+        constexpr float kSpacingFt = 250.0f;
+        constexpr int kCols = 4;
+        o.features.reserve(n_features);
+        for (int i = 0; i < n_features; ++i) {
+            FeatureEntryState f;
+            const int row = i / kCols;
+            const int col = i % kCols;
+            f.offset_x = (static_cast<float>(col) - 1.5f) * kSpacingFt;
+            f.offset_y = (static_cast<float>(row) -
+                          (o.features_count - 1) / (2.0f * kCols)) * kSpacingFt;
+            // Inherit the save's own damage state for this feature index
+            // (the .obd deltas carry fstatus even when the FED placements
+            // are missing — a mid-campaign objective that already lost
+            // features stays damaged in the ledger).
+            const std::size_t fidx = static_cast<std::size_t>(i);
+            const std::size_t byte_idx = fidx / 4;
+            const std::size_t bit_shift = (fidx % 4) * 2;
+            if (byte_idx < o.fstatus.size()) {
+                f.damage_state = static_cast<uint8_t>(
+                    (o.fstatus[byte_idx] >> bit_shift) & 0x03);
+            }
+            o.features.push_back(f);
+        }
     }
     return o;
 }
@@ -475,6 +518,27 @@ UnitState parse_unit(Reader& r) {
         else if (k == "mission_over_time")  u.mission_over_time  = static_cast<int32_t>(r.read_int());
         else if (k == "mission_target")     u.mission_target     = static_cast<int16_t>(r.read_int());
         else if (k == "loadouts")           u.loadouts           = static_cast<uint8_t>(r.read_int());
+        // A-G tranche: decoded loadout stations (wire weapon ids + counts).
+        else if (k == "loadout_stations") {
+            r.skip_ws(); r.expect('[');
+            if (r.consume(']')) { /* empty */ }
+            else for (;;) {
+                r.skip_ws(); r.expect('{');
+                LoadoutStationState st;
+                if (!r.peek('}')) for (;;) {
+                    std::string sk = r.read_string();
+                    r.expect(':');
+                    if      (sk == "id")    st.weapon_id = static_cast<uint16_t>(r.read_int());
+                    else if (sk == "count") st.count     = static_cast<uint16_t>(r.read_int());
+                    else                    r.skip_value();   // "name" enrichment
+                    if (r.consume('}')) break;
+                    r.expect(',');
+                } else r.consume('}');
+                u.loadout_stations.push_back(st);
+                if (r.consume(']')) break;
+                r.expect(',');
+            }
+        }
         else if (k == "mission")            u.mission            = static_cast<uint8_t>(r.read_int());
         else if (k == "flight_priority")    u.flight_priority    = static_cast<uint8_t>(r.read_int());
         else if (k == "mission_id")         u.mission_id         = static_cast<uint8_t>(r.read_int());

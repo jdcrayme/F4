@@ -25,6 +25,8 @@ add_library(f4-weapons STATIC
     src/missile.cpp
     src/weapon_store.cpp
     src/missile_battery.cpp
+    src/bomb.cpp
+    src/bomb_battery.cpp
     src/gun.cpp
     src/gun_component.cpp
 )

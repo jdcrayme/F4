@@ -91,6 +91,139 @@ TEST(Components, WithComponentFindsOnlyEntitiesThatHaveIt) {
     EXPECT_NE(std::find(ids.begin(), ids.end(), c.id()), ids.end());
 }
 
+// ============================================================================
+// Component-type index (with_component at campaign scale). The index must
+// produce EXACTLY what the uncached scan would — through every mutation
+// path: tail add, remove, destroy, component replace, slot reuse.
+// ============================================================================
+TEST(Components, IndexConsistentThroughAddRemoveDestroy) {
+    EntityWorld w;
+    EntityHandle a = w.create();
+    EntityHandle b = w.create();
+    EntityHandle c = w.create();
+
+    a.add<TransformComponent>();
+    b.add<TransformComponent>();
+    c.add<TransformComponent>();
+
+    // First query builds the bucket.
+    auto ids = w.with_component<TransformComponent>();
+    ASSERT_EQ(ids.size(), 3u);
+    // Entity-index order (the scan's order) is preserved.
+    EXPECT_EQ(ids[0], a.id());
+    EXPECT_EQ(ids[1], b.id());
+    EXPECT_EQ(ids[2], c.id());
+
+    // Remove b's component — the bucket updates.
+    b.remove<TransformComponent>();
+    ids = w.with_component<TransformComponent>();
+    ASSERT_EQ(ids.size(), 2u);
+    EXPECT_EQ(ids[0], a.id());
+    EXPECT_EQ(ids[1], c.id());
+
+    // Destroy a — the bucket drops it (destroy hooks every bucket the
+    // entity's components live in).
+    w.destroy(a.id());
+    ids = w.with_component<TransformComponent>();
+    ASSERT_EQ(ids.size(), 1u);
+    EXPECT_EQ(ids[0], c.id());
+
+    // create() REUSES freed slot 0 (LIFO freelist) — the new entity d sits
+    // at an index BELOW the bucket's tail, so its component insert is
+    // out-of-order: the bucket rebuilds lazily and the query still
+    // returns exact contents in entity-index order.
+    EntityHandle d = w.create();
+    ASSERT_EQ(d.id().index(), a.id().index());  // slot 0, generation bumped
+    d.add<TransformComponent>();
+    ids = w.with_component<TransformComponent>();
+    ASSERT_EQ(ids.size(), 2u);
+    EXPECT_EQ(ids[0], d.id());   // index 0
+    EXPECT_EQ(ids[1], c.id());   // index 2
+}
+
+TEST(Components, IndexReplaceDoesNotDuplicate) {
+    EntityWorld w;
+    EntityHandle a = w.create();
+    EntityHandle b = w.create();
+    a.add<TransformComponent>();
+    b.add<TransformComponent>();
+    (void)w.with_component<TransformComponent>();  // build the bucket
+
+    // Re-adding the SAME component type on the same entity replaces it —
+    // the id must appear exactly once.
+    b.add<TransformComponent>();
+    auto ids = w.with_component<TransformComponent>();
+    ASSERT_EQ(ids.size(), 2u);
+    const size_t count_b = std::count(ids.begin(), ids.end(), b.id());
+    EXPECT_EQ(count_b, 1u);
+}
+
+TEST(Components, IndexSlotReuseRebuildsCorrectly) {
+    EntityWorld w;
+    EntityHandle a = w.create();
+    EntityHandle b = w.create();
+    EntityHandle c = w.create();
+    a.add<TransformComponent>();
+    b.add<TransformComponent>();
+    c.add<TransformComponent>();
+    (void)w.with_component<TransformComponent>();  // build the bucket [a,b,c]
+
+    // Free slot b (index 1, BELOW the tail): a reused slot + a new
+    // component would insert out of entity-index order — the bucket must
+    // rebuild (lazily) and stay exact.
+    w.destroy(b.id());
+    EntityHandle d = w.create();   // reuses slot 1 (generation bumped)
+    ASSERT_EQ(d.id().index(), b.id().index());
+    d.add<TransformComponent>();
+
+    auto ids = w.with_component<TransformComponent>();
+    ASSERT_EQ(ids.size(), 3u);
+    // a (index 0), d (index 1), c (index 2) — entity-index order.
+    EXPECT_EQ(ids[0], a.id());
+    EXPECT_EQ(ids[1], d.id());
+    EXPECT_EQ(ids[2], c.id());
+}
+
+TEST(Components, IndexEmptyBucketThenRefill) {
+    EntityWorld w;
+    EntityHandle a = w.create();
+    a.add<TransformComponent>();
+    (void)w.with_component<TransformComponent>();  // build bucket [a]
+
+    a.remove<TransformComponent>();
+    // Empty buckets are KEPT (a queried-every-tick-but-empty type must not
+    // trigger a full world-walk rebuild per tick) — the query still
+    // returns empty and stays correct.
+    auto ids = w.with_component<TransformComponent>();
+    EXPECT_TRUE(ids.empty());
+
+    // Refill through the kept bucket: append path.
+    EntityHandle b = w.create();
+    b.add<TransformComponent>();
+    ids = w.with_component<TransformComponent>();
+    ASSERT_EQ(ids.size(), 1u);
+    EXPECT_EQ(ids[0], b.id());
+}
+
+TEST(Components, IndexSurvivesWorldMove) {
+    EntityWorld w;
+    EntityHandle a = w.create();
+    a.add<TransformComponent>();
+    (void)w.with_component<TransformComponent>();
+
+    EntityWorld moved = std::move(w);
+    auto ids = moved.with_component<TransformComponent>();
+    ASSERT_EQ(ids.size(), 1u);
+    EXPECT_EQ(ids[0], a.id());
+
+    // New entities in the moved world land in the (moved) index.
+    EntityHandle b = moved.create();
+    b.add<TransformComponent>();
+    ids = moved.with_component<TransformComponent>();
+    ASSERT_EQ(ids.size(), 2u);
+    EXPECT_EQ(ids[1], b.id());
+}
+
 TEST(Components, RequireThrowsWhenMissing) {
     EntityWorld w;
     EntityHandle h = w.create();

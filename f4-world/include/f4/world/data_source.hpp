@@ -244,6 +244,11 @@ struct IFlightSource {
     virtual int32_t mission_over_time(int i) const = 0;
     virtual int16_t mission_target(int i) const = 0;
     virtual uint8_t loadouts(int i) const = 0;
+    /// Decoded loadout stations (wire weapon ids + counts; empty for
+    /// clean-wing flights). The campaign bridge maps these onto the
+    /// engine's WeaponStoreComponent at spawn. (A-G tranche)
+    virtual std::vector<f4::entities::LoadoutStationState>
+    loadout_stations(int i) const = 0;
     virtual uint8_t mission(int i) const = 0;
     virtual uint8_t flight_priority(int i) const = 0;
     virtual uint8_t mission_id(int i) const = 0;

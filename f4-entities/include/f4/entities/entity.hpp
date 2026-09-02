@@ -453,6 +453,16 @@ namespace f4::entities {
         uint16_t pt_data_index = 0;
         std::array<uint8_t, 8> objective_detection{};
         std::vector<FeatureEntryState> features;
+        // A-G employment (M5): the LIVE per-feature hit-point ledger. Empty
+        // = untouched (the common pristine case — nothing initializes it
+        // until the first bomb impact, so worlds without ordnance carry
+        // zero extra state). On first damage, f4-weapons lazily fills it
+        // from each feature's class hit_points (FCD) or a 100-hp default,
+        // then decrements it with each blast. FeatureEntryState::
+        // damage_state + DamageBitmapComponent::fstatus stay in sync as the
+        // wire-visible face of the same ledger (VIS states from f4vu.h:
+        // 0 normal, 1 repaired, 2 damaged, 3 destroyed).
+        std::vector<double> feature_hp;
     };
 
     /// Objective priority and name index.
@@ -555,6 +565,13 @@ namespace f4::entities {
         /// the target VU_ID doesn't resolve. Campaign-QC rendering and the
         /// B.3 spawner's route builder both consume this. (B.3 tranche)
         EntityId target;
+
+    /// Decoded loadout stations (wire weapon ids + counts, entry 0 of the
+    /// save's LoadoutStruct[]). The campaign bridge maps these onto the
+    /// engine's WeaponStoreComponent at spawn: stations with a mapped
+    /// engine class become droppable, the rest ride as bookkeeping with a
+    /// "WPN-<id>" label. (A-G employment tranche)
+    std::vector<LoadoutStationState> loadout_stations;
     };
 
     /// Mission request carried by a Package unit — the ATM's "please build a
@@ -712,6 +729,7 @@ namespace f4::entities {
             : entities_(std::move(other.entities_))
             , free_list_(std::move(other.free_list_))
             , tag_index_(std::move(other.tag_index_))
+            , component_index_(std::move(other.component_index_))
             , cookie_(detail::next_world_cookie())
         {
             // The moved-from world no longer owns the component objects its
@@ -731,6 +749,7 @@ namespace f4::entities {
                 entities_   = std::move(other.entities_);
                 free_list_  = std::move(other.free_list_);
                 tag_index_  = std::move(other.tag_index_);
+                component_index_ = std::move(other.component_index_);
                 cookie_     = detail::next_world_cookie();
                 // Both sides' caches are now stale (this: old components
                 // destroyed; other: nodes transferred here). See move ctor.
@@ -890,6 +909,45 @@ namespace f4::entities {
         void invalidate_behavioral_cache() noexcept { behavioral_cache_dirty_ = true; }
         void rebuild_behavioral_cache();
 
+        // ── Component-type index (with_component at campaign scale) ──────
+        //
+        // Maps type_index → the ids of live entities carrying that
+        // component. Built lazily per type on the first with_component<T>()
+        // query (untouched types never build), then maintained
+        // incrementally:
+        //   * add<T>()     → append when order allows, else drop the bucket
+        //                    for a lazy rebuild (slot reuse can insert out
+        //                    of entity-index order)
+        //   * remove<T>()  → erase the id from the bucket
+        //   * destroy()    → erase the id from EVERY bucket its entity had
+        //                    components in
+        //   * move ops     → moved along with entities_ (ids are values,
+        //                    not pointers — no dangling)
+        //
+        // with_component<T>() collapses from an O(entities × components)
+        // walk (a populated save: ~4,400 entities × ~5 map buckets, six
+        // such queries per Simulation::tick — the profiler measured ~7 of
+        // the ~11.5 ms/tick in the A-G QC run) to one hash lookup plus a
+        // copy of the bucket. The copy preserves the snapshot-by-value
+        // contract callers rely on (sweeps destroy entities while
+        // iterating the returned vector).
+        //
+        // Invariants (mirror the tag index's):
+        //   1. If bucket B for type T exists, B contains exactly the live
+        //      entities carrying T, in entity-index order (the order the
+        //      uncached scan walked).
+        //   2. A bucket is either correct or absent (never stale).
+        //   3. create() adds no components → no maintenance needed.
+        // Threading: same rule as update_all — sim thread only.
+        mutable std::unordered_map<std::type_index, std::vector<EntityId>>
+            component_index_;
+
+        // Index maintenance (called from EntityHandle::add/remove — the
+        // friend declaration covers them — and from destroy()).
+        void component_index_on_add(std::type_index tid, EntityId id,
+                                    bool replacing);
+        void component_index_on_remove(std::type_index tid, EntityId id);
+
         // World cookie: a random 64-bit value generated at EntityWorld construction.
         // EntityHandle captures this cookie at creation. If the EntityWorld is
         // destroyed and a new one happens to be allocated at the same address,
@@ -954,15 +1012,21 @@ namespace f4::entities {
     // ============================================================================
     template<typename T>
     std::vector<EntityId> EntityWorld::with_component() const {
-        std::vector<EntityId> out;
         const auto tid = std::type_index(typeid(T));
-        for (uint32_t i = 0; i < entities_.size(); ++i) {
-            const auto& rec = entities_[i];
-            if (rec.alive && rec.components.count(tid)) {
-                out.push_back(EntityId::make(i, rec.generation));
+        auto it = component_index_.find(tid);
+        if (it == component_index_.end()) {
+            // Lazy per-type build: one walk in entity-index order — the
+            // exact order (and result set) the uncached scan produced.
+            std::vector<EntityId> bucket;
+            for (uint32_t i = 0; i < entities_.size(); ++i) {
+                const auto& rec = entities_[i];
+                if (rec.alive && rec.components.count(tid)) {
+                    bucket.push_back(EntityId::make(i, rec.generation));
+                }
             }
+            it = component_index_.emplace(tid, std::move(bucket)).first;
         }
-        return out;
+        return it->second;  // copy — the snapshot contract the scan offered
     }
 
     template<typename T>
@@ -1022,6 +1086,8 @@ namespace f4::entities {
         if (!rec) throw std::runtime_error("EntityHandle::add: invalid entity");
         auto comp = std::make_unique<T>(std::forward<Args>(args)...);
         T& ref = *comp;
+        const auto tid = std::type_index(typeid(T));
+        const bool replacing = rec->components.count(tid) != 0;
         // For behavioral components, fire on_attached() BEFORE we move the
         // unique_ptr into the components map. `self` ALIASES THE CALLER'S
         // EntityHandle (usually a stack local in spawn code) — components
@@ -1034,12 +1100,15 @@ namespace f4::entities {
         if constexpr (std::is_base_of_v<BehavioralComponentBase, T>) {
             comp->on_attached(*this);
         }
-        rec->components[std::type_index(typeid(T))] = std::move(comp);
+        rec->components[tid] = std::move(comp);
         if constexpr (std::is_base_of_v<BehavioralComponentBase, T>) {
             // New behavioral component entered the world — the cache must
             // be rebuilt before the next update_all() (see cache notes).
             world_->invalidate_behavioral_cache();
         }
+        // Component-type index maintenance (no-op until the type has been
+        // queried once; see the index notes in EntityWorld).
+        world_->component_index_on_add(tid, id_, replacing);
         return ref;
     }
 
@@ -1048,7 +1117,9 @@ namespace f4::entities {
         if (!world_) return;
         auto* rec = world_->find(id_);
         if (!rec) return;
-        rec->components.erase(std::type_index(typeid(T)));
+        const auto tid = std::type_index(typeid(T));
+        rec->components.erase(tid);
+        world_->component_index_on_remove(tid, id_);
         if constexpr (std::is_base_of_v<BehavioralComponentBase, T>) {
             // A behavioral component left the world (its unique_ptr was
             // just destroyed) — the cache's pointer now dangles until

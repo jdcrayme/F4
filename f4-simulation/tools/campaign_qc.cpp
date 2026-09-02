@@ -23,7 +23,9 @@
 //   3. THE SUMMARY (campaign_qc_summary.json): world stats (teams,
 //      objectives, units, flights, mission histogram), b3_loop stats,
 //      sim-run stats (spawned, airborne-at-end, per-flight end position),
-//      plus the scenario JSON path for replay in the f4-scenario-player.
+//      the ORDNANCE ledger (A-G slice: releases, impacts, per-objective
+//      damage), plus the scenario JSON path for replay in the
+//      f4-scenario-player.
 //
 // Usage:
 //   campaign_qc <world.json> [options]
@@ -33,7 +35,8 @@
 //     --team <slot>                (filter: owning team, -1 = any)
 //     --mission <AMIS_*>|<byte>    (filter: mission name or byte)
 //     --max-flights <n>            (filter: cap spawned aircraft)
-//     --ticks <n>                  (sim frames to run; default 18000 = 5 min)
+//     --ticks <n>                  (sim frames; default 54000 = 15 min)
+//     --minutes <m>                (convenience: sets --ticks to m*60*60)
 //     --sim-dt <sec>               (default 1/60)
 //     --out-dir <dir>              (default: beside the world JSON)
 //
@@ -43,7 +46,15 @@
 // got airborne by the last tick — the end-to-end "tasking didn't fly"
 // failure the tool exists to catch (ground-ops stall, broken taxi route,
 // never-ending cross-theater taxi: the exact symptoms the first TestCamp
-// run exposed).
+// run exposed); 4 when strike flights were armed with ordnance but NOT
+// ONE bomb was released — the A-G employment failure (broken strike
+// arming, an envelope that never opens, a store that never debits).
+//
+// The 15-minute default window (was 5): TestCamp's strike flights sit a
+// median 34 NM from their targets — a 5-minute window proved the taxi/
+// takeoff/departure chain but landed every strike flight short of the
+// release point. 15 minutes at ~400 kts covers the max 80 NM leg with
+// margin.
 
 #include <f4/simulation/simulation.hpp>
 #include <f4/simulation/campaign_bridge.hpp>
@@ -55,6 +66,10 @@
 #include <f4/flight/flight_model_component.hpp>
 #include <f4/json/writer.hpp>
 #include <f4/io/read_file.hpp>
+#include <f4/weapons/bomb_battery.hpp>
+#include <f4/weapons/messages.hpp>
+#include <f4/weapons/weapon_store.hpp>
+#include <f4/weapons/weapon_types.hpp>
 #include <f4/world/world_loader.hpp>
 #include <f4/world/world_adapters.hpp>
 #include <f4/world_convert/class_table.hpp>
@@ -86,9 +101,18 @@ struct Args {
     int team = -1;
     int mission = -1;            // byte; -1 = any
     int max_flights = 0;
-    int ticks = 18000;           // 5 min at 60 Hz — taxi + takeoff + climb
+    int ticks = 54000;           // 15 min at 60 Hz — taxi + takeoff +
+                                 // climb + ENROUTE TO THE TARGET (the A-G
+                                 // slice needs the release point reached;
+                                 // strike flights sit a median 34 NM out)
     double sim_dt = 1.0 / 60.0;
     int record_every = 10;       // trace decimation (6 samples/s/aircraft)
+    bool record = true;          // false = --no-record (full-population
+                                 // runs: the recorder + trace JSON are the
+                                 // memory hog — 449 flights x 5,400 samples
+                                 // does not fit small hosts; the QC gates
+                                 // don't need the trace, the viewer replay
+                                 // does)
     std::filesystem::path out_dir;
 };
 
@@ -97,7 +121,9 @@ struct Args {
         "usage: %s <world.json> [--class-table <ct>] [--config <f16.json>]\n"
         "          [--models <KoreaObj.HDR>] [--team <slot>]\n"
         "          [--mission <AMIS_NAME|byte>] [--max-flights <n>]\n"
-        "          [--ticks <n>] [--sim-dt <sec>] [--out-dir <dir>]\n",
+        "          [--ticks <n>|--minutes <m>] [--sim-dt <sec>]\n"
+        "          [--record-every <n>] [--no-record]\n"
+        "          [--out-dir <dir>]\n",
         prog);
     std::exit(1);
 }
@@ -127,8 +153,10 @@ Args parse_args(int argc, char** argv) {
         else if (k == "--team")        a.team = std::atoi(next());
         else if (k == "--max-flights") a.max_flights = std::atoi(next());
         else if (k == "--ticks")       a.ticks = std::atoi(next());
+        else if (k == "--minutes")     a.ticks = static_cast<int>(std::atof(next()) * 3600.0);
         else if (k == "--sim-dt")      a.sim_dt = std::atof(next());
         else if (k == "--record-every") a.record_every = std::max(1, std::atoi(next()));
+        else if (k == "--no-record")   a.record = false;
         else if (k == "--out-dir")     a.out_dir = next();
         else if (k == "--mission") {
             const std::string v = next();
@@ -288,6 +316,13 @@ int main(int argc, char** argv) {
 
     CampaignSimSpawner spawner(b3_world, populated.unit_id_map, ct, db, cfg,
                                airfield, tpl, filter);
+    // A-G tranche: bus-fed spawns get the same strike arming as the bulk
+    // path (objective map resolves waypoint targets; the weapon table
+    // arms the decoded loadout + doctrine fill).
+    const auto builtin_weapons =
+        f4::weapons::WeaponClassTable::with_builtins();
+    spawner.set_objective_id_map(&populated.objective_id_map);
+    spawner.set_weapon_table(&builtin_weapons);
     spawner.attach(bus);
 
     const auto intents = emit_flight_intents(
@@ -334,6 +369,11 @@ int main(int argc, char** argv) {
         out << "\"team\": " << args.team;
         out << ", \"mission\": " << args.mission;
         out << ", \"max_flights\": " << args.max_flights << "},\n";
+        // A-G slice: combat ON drives the weapon sweeps (bomb sim clock,
+        // sweep, the intent execution). The A/A ladder stays dark for
+        // campaign flights (spawn never attaches radar/RWR to them) — only
+        // ordnance employment rides this.
+        out << "  \"combat\": {\"enabled\": true},\n";
         out << "  \"aircraft\": [{\n";
         out << "    \"callsign\": \"CAMPAIGN1\",\n";
         out << "    \"aircraft_config_path\": \""
@@ -346,7 +386,7 @@ int main(int argc, char** argv) {
         out << "  \"sim_dt\": " << args.sim_dt << ",\n";
         out << "  \"total_ticks\": " << args.ticks << ",\n";
         out << "  \"record_every\": " << args.record_every << ",\n";
-        out << "  \"record\": true,\n";
+        out << "  \"record\": " << (args.record ? "true" : "false") << ",\n";
         out << "  \"record_path\": \"trace.json\"\n";
         out << "}\n";
     }
@@ -354,6 +394,31 @@ int main(int argc, char** argv) {
     auto scenario = load_scenario(scenario_path);
     Simulation sim(scenario, args.out_dir);
     sim.initialize();
+
+    // A-G slice: the ordnance ledger — subscribe to the release + impact
+    // events on the SIM's bus before the run, then read the objective
+    // damage state at the end (fstatus is the campaign wire's own damage
+    // bitmap, so the summary reports the save-format face of the damage).
+    struct Ordnance {
+        int released = 0;
+        int impacts = 0;
+        int features_destroyed = 0;
+        double destroyed_pct_max = 0.0;
+        std::vector<f4::weapons::BombImpactMessage> impact_log;
+    } ordnance;
+    sim.bus().subscribe<f4::weapons::BombReleasedMessage>(
+        [&ordnance](const f4::weapons::BombReleasedMessage& m) {
+            (void)m;
+            ++ordnance.released;
+        });
+    sim.bus().subscribe<f4::weapons::BombImpactMessage>(
+        [&ordnance](const f4::weapons::BombImpactMessage& m) {
+            ++ordnance.impacts;
+            ordnance.features_destroyed += m.features_destroyed;
+            ordnance.destroyed_pct_max =
+                std::max(ordnance.destroyed_pct_max, m.destroyed_pct);
+            ordnance.impact_log.push_back(m);
+        });
 
     const auto& sim_spawned = sim.aircraft_entities();
     std::printf("sim_run: aircraft=%zu", sim_spawned.size());
@@ -410,6 +475,37 @@ int main(int argc, char** argv) {
     // the summary + trace (the artifacts are exactly what debugging this
     // needs).
     const bool nothing_airborne = airborne == 0;
+
+    // A-G gate (exit 4): strike flights spawned WITH droppable ordnance
+    // (a loaded Bomb-category station), yet not one bomb left the rack —
+    // the employment chain broke (arming, envelope, store debit, intent
+    // routing). Count armed flights over the SIM world post-run; empty
+    // stores mean the bombs DID fly (the release debited them).
+    int strike_flights_armed = 0;
+    for (const auto eid : sim_spawned) {
+        auto h = f4::entities::EntityHandle(eid, &sim.world());
+        auto* store = h.get<f4::weapons::WeaponStoreComponent>();
+        if (store == nullptr) continue;
+        bool has_bomb_station = false;
+        for (std::size_t s = 0; s < store->station_count(); ++s) {
+            const auto* st = store->station(s);
+            if (st == nullptr || st->rounds <= 0) continue;
+            const auto* rec =
+                sim.weapon_table().get(st->weapon_handle);
+            if (rec != nullptr &&
+                rec->category == f4::weapons::WeaponCategory::Bomb) {
+                has_bomb_station = true;
+                break;
+            }
+        }
+        if (has_bomb_station) ++strike_flights_armed;
+    }
+    const bool nothing_employed =
+        strike_flights_armed > 0 && ordnance.released == 0;
+    std::printf("ordnance: armed=%d released=%d impacts=%d "
+                "features_destroyed=%d max_destroyed_pct=%.1f\n",
+                strike_flights_armed, ordnance.released, ordnance.impacts,
+                ordnance.features_destroyed, ordnance.destroyed_pct_max);
 
     // -----------------------------------------------------------------------
     // 4. Summary JSON
@@ -495,6 +591,81 @@ int main(int argc, char** argv) {
         write_string(w, scenario_path.string());
         w.put(",\n    \"trace\": ");
         write_string(w, (args.out_dir / "trace.json").string());
+        w.put("\n  }");
+
+        // The A-G ordnance ledger (this slice's QC block): releases,
+        // impacts, the damage they did, per-objective state, and the
+        // armed-flight count the exit-4 gate keys on.
+        w.put(",\n  \"ordnance\": {\n    ");
+        w.number_key("strike_flights_armed", strike_flights_armed);
+        w.put(",    ");
+        w.number_key("bombs_released", ordnance.released);
+        w.put(",    ");
+        w.number_key("bombs_impacted", ordnance.impacts);
+        w.put(",    ");
+        w.number_key("features_destroyed", ordnance.features_destroyed);
+        w.put(",    ");
+        w.number_key("max_objective_destroyed_pct",
+                     ordnance.destroyed_pct_max);
+        // Per-impact log (the viewer's impact markers render from THIS —
+        // position + target + damage summary, no trace replay needed).
+        w.put(",\n    \"impacts\": [");
+        {
+            bool first = true;
+            for (const auto& im : ordnance.impact_log) {
+                w.put(first ? "\n      {" : ",\n      {");
+                first = false;
+                char buf[256];
+                std::snprintf(buf, sizeof(buf),
+                              "\"shooter\": %llu, \"target\": %llu, "
+                              "\"east_ft\": %.0f, \"north_ft\": %.0f, "
+                              "\"miss_ft\": %.0f, \"t_of\": %.1f, "
+                              "\"features_destroyed\": %d, "
+                              "\"destroyed_pct\": %.1f",
+                              (unsigned long long)im.shooter_id,
+                              (unsigned long long)im.target_id,
+                              im.position.x, im.position.y,
+                              im.miss_distance_ft, im.flight_time_s,
+                              im.features_destroyed, im.destroyed_pct);
+                w.put(buf);
+                w.put("}");
+            }
+        }
+        w.put(ordnance.impact_log.empty() ? "]" : "\n    ]");
+        // Per-objective damage state for every objective that took hits.
+        // (Aggregated from the impact log's targets — the entities' own
+        // fstatus is the authoritative state; this reads it back.)
+        w.put(",\n    \"objectives_damaged\": [");
+        {
+            std::vector<std::uint64_t> hit_targets;
+            for (const auto& im : ordnance.impact_log) {
+                if (im.target_id != 0 &&
+                    std::find(hit_targets.begin(), hit_targets.end(),
+                              im.target_id) == hit_targets.end()) {
+                    hit_targets.push_back(im.target_id);
+                }
+            }
+            bool first = true;
+            for (const auto tgt : hit_targets) {
+                const auto summary =
+                    f4::weapons::objective_damage_summary(sim.world(), tgt);
+                if (!summary.objective_found) continue;
+                w.put(first ? "\n      {" : ",\n      {");
+                first = false;
+                char buf[160];
+                std::snprintf(buf, sizeof(buf),
+                              "\"target\": %llu, \"features_total\": %d, "
+                              "\"features_destroyed\": %d, "
+                              "\"destroyed_pct\": %.1f",
+                              (unsigned long long)tgt,
+                              summary.features_total,
+                              summary.features_destroyed_total,
+                              summary.destroyed_pct);
+                w.put(buf);
+                w.put("}");
+            }
+        }
+        w.put(ordnance.impact_log.empty() && true ? "]" : "\n    ]");
         w.put("\n  }\n}\n");
 
         std::ofstream out(summary_path);
@@ -511,6 +682,15 @@ int main(int argc, char** argv) {
                      "trace.json ai_state per aircraft.\n",
                      sim_spawned.size(), args.ticks);
         return 3;
+    }
+    if (nothing_employed) {
+        std::fprintf(stderr,
+                     "campaign_qc: QC FAILURE — %d strike flights armed "
+                     "with ordnance, 0 bombs released. The A-G employment "
+                     "chain broke (arming / envelope / store debit / "
+                     "intent routing); inspect trace.json ai_state.\n",
+                     strike_flights_armed);
+        return 4;
     }
     return 0;
 }

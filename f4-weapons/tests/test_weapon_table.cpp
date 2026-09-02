@@ -47,22 +47,24 @@ TEST(WeaponTable, HandlesAreStableIndices) {
 
 TEST(WeaponTable, BuiltinsRegisterTheDocumentedSet) {
     auto table = WeaponClassTable::with_builtins();
-    ASSERT_EQ(table.size(), 5u);
+    ASSERT_EQ(table.size(), 6u);
 
     // Order is a documented contract: 0=M61A1, 1=AIM-9M, 2=AIM-7M,
-    // 3=AIM-120C, 4=Mk-82 (see the header comment).
+    // 3=AIM-120C, 4=Mk-82, 5=GBU-12 (see the table's header comment).
     ASSERT_NE(table.get(0), nullptr);
     EXPECT_STREQ(table.get(0)->name.c_str(), "M61A1");
     EXPECT_STREQ(table.get(1)->name.c_str(), "AIM-9M");
     EXPECT_STREQ(table.get(2)->name.c_str(), "AIM-7M");
     EXPECT_STREQ(table.get(3)->name.c_str(), "AIM-120C");
     EXPECT_STREQ(table.get(4)->name.c_str(), "MK-82");
+    EXPECT_STREQ(table.get(5)->name.c_str(), "GBU-12");
 
     const auto gun    = table.find_by_name("M61A1");
     const auto nine   = table.find_by_name("AIM-9M");
     const auto sparrow= table.find_by_name("AIM-7M");
     const auto amraam = table.find_by_name("AIM-120C");
     const auto mk82   = table.find_by_name("MK-82");
+    const auto gbu12  = table.find_by_name("GBU-12");
 
     EXPECT_EQ(table.get(gun)->category, WeaponCategory::Gun);
     EXPECT_EQ(table.get(gun)->guidance, GuidanceKind::None);
@@ -73,6 +75,11 @@ TEST(WeaponTable, BuiltinsRegisterTheDocumentedSet) {
     EXPECT_EQ(table.get(amraam)->guidance, GuidanceKind::ActiveRadar);
 
     EXPECT_EQ(table.get(mk82)->category, WeaponCategory::Bomb);
+    EXPECT_EQ(table.get(gbu12)->category, WeaponCategory::Bomb);
+    // Ballistic invariants the bomb flyout divides by.
+    EXPECT_GT(table.get(mk82)->launch_mass_lb, 0.0);
+    EXPECT_GT(table.get(gbu12)->launch_mass_lb, 0.0);
+    EXPECT_GT(table.get(gbu12)->lethal_radius_ft, 0.0);
 }
 
 TEST(WeaponTable, BuiltinsHaveFlyoutInvariants) {

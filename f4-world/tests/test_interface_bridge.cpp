@@ -215,6 +215,8 @@ public:
     int32_t mission_over_time(int) const override { return 0; }
     int16_t mission_target(int) const override { return 0; }
     uint8_t loadouts(int) const override { return 0; }
+    std::vector<f4::entities::LoadoutStationState> loadout_stations(
+        int) const override { return {}; }
     uint8_t mission(int) const override { return 0; }
     uint8_t flight_priority(int) const override { return 0; }
     uint8_t mission_id(int) const override { return 0; }

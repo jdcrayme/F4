@@ -39,6 +39,8 @@
 #include <f4/campaign/campaign.hpp>            // MissionIntent
 #include <f4/messaging/bus.hpp>
 
+#include <f4/weapons/weapon_class_table.hpp>
+
 #include <cstdint>
 #include <unordered_map>
 #include <unordered_set>
@@ -88,6 +90,19 @@ public:
                        const ScenarioAircraft& scenario_aircraft,
                        FlightSpawnFilter filter = {});
 
+    /// A-G tranche: the objective VU_ID → EntityId map (waypoint strike
+    /// targets) + the weapon table (loadout arming). Both optional — set
+    /// either/both BEFORE the intents arrive; spawns without them behave
+    /// exactly as before this tranche (unarmed, route-only).
+    void set_objective_id_map(
+        const std::unordered_map<std::uint32_t, f4::entities::EntityId>* m) {
+        objective_id_map_ = m;
+    }
+    void set_weapon_table(
+        const f4::weapons::WeaponClassTable* t) {
+        weapon_table_ = t;
+    }
+
     /// Subscribe to MissionIntent on `bus` (returns the subscription id).
     /// The bus must outlive the spawner unless detach() is called first —
     /// the handler is a raw this-capture.
@@ -117,6 +132,11 @@ private:
     const ScenarioAirfield& airfield_;
     const ScenarioAircraft& tpl_;
     FlightSpawnFilter filter_;
+
+    /// A-G tranche (optional inputs; see the setters).
+    const std::unordered_map<std::uint32_t, f4::entities::EntityId>*
+        objective_id_map_ = nullptr;
+    const f4::weapons::WeaponClassTable* weapon_table_ = nullptr;
 
     /// Per-airbase parking counters — same bookkeeping as the bulk path,
     /// so bus-fed and bulk-fed fleets park identically.

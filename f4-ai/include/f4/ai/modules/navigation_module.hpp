@@ -77,6 +77,16 @@ public:
         std::string name;
         geo::WorldPosition position;   ///< ENU feet; z = target altitude MSL
         double speed_kts{350.0};       ///< target CAS approaching this waypoint
+        /// Wire WP_ACTION of the source waypoint (0 = none). The brain
+        /// keys the A-G release trigger off the delivery actions (17
+        /// STRIKE, 18 BOMB, 14 GNDSTRIKE, 15 NAVSTRIKE, 19 SEAD) — see
+        /// brain_component.hpp's strike wiring. Default 0 keeps every
+        /// hand-authored route non-strike.
+        std::uint8_t action{0};
+        /// The strike target's EntityId::value when `action` is a delivery
+        /// action with a resolvable target (the campaign bridge fills this
+        /// from the saved waypoint's target VU_ID); 0 otherwise.
+        std::uint64_t target_id{0};
     };
 
     NavigationModule();

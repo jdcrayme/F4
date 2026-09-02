@@ -63,6 +63,7 @@
 #include "f4/ai/modules/missile_module.hpp"
 #include "f4/ai/modules/wvr_module.hpp"
 #include "f4/ai/modules/wingman_module.hpp"
+#include "f4/ai/modules/strike_module.hpp"
 #include "f4/ai/modules/ground_avoid_module.hpp"
 #include "f4/ai/modules/collision_avoid_module.hpp"
 #include "f4/ai/sensor_fusion.hpp"
@@ -123,6 +124,14 @@ struct CombatIntent {
     /// Release the selected weapon this tick (one-tick pulse).
     bool   weapon_release{false};
     std::uint64_t release_target_id{0};
+    /// A-G: release one bomb from the strike station this tick (one-tick
+    /// pulse — the StrikeModule's salvo pacer drives the stick, the host
+    /// driver converts the pulse into weapons::release_bomb + a bomb
+    /// station debit). Independent of the A/A release fields: a strike
+    /// pass and an air fight never share a trigger, and a brain can
+    /// pulse both in one tick (fired at by a MiG while dropping).
+    bool   bomb_release{false};
+    std::uint64_t bomb_target_id{0};
     /// GUNS: begin a burst at the aim target this tick (one-tick pulse —
     /// the rising edge of the trigger; the host driver converts it into
     /// GunStream::start_burst + a gun-station debit). The trigger is
@@ -498,6 +507,62 @@ public:
         }
 
         // =================================================================
+        // A-G STRIKE RUNG (M5): the release trigger. This is NOT a flying
+        // rung — the NavigationModule keeps flying the delivery waypoint
+        // underneath (the strike waypoint IS a route waypoint); the
+        // StrikeModule only watches the aim point and pulses the release
+        // intent. It runs while Enroute regardless of the combat flag
+        // (bombing a target is the mission, not a dogfight), gated only
+        // by the Defensive rung (a jet beaming an inbound missile does
+        // not drop) and safety (a pull-up aborts the pass; the trigger
+        // re-arms if the geometry recovers).
+        //
+        // The CURRENT route waypoint's action decides: a delivery action
+        // (WP_STRIKE 17 / WP_BOMB 18 / WP_GNDSTRIKE 14 / WP_NAVSTRIKE 15 /
+        // WP_SEAD 19) with a resolvable target arms the module; every
+        // other waypoint disarms it (the stick state survives a disarm —
+        // a target re-arms fresh only through a NEW waypoint targeting
+        // it, see StrikeModule::set_target).
+        // =================================================================
+        if (phase_ == Phase::Enroute && safety_mode_ == SafetyMode::None &&
+            combat_mode_ != CombatMode::Defensive &&
+            !nav_.is_complete()) {
+            const auto wp_index = nav_.current_waypoint_index();
+            const bool strike_wp =
+                wp_index < plan_.route.size() &&
+                modules::is_ag_delivery_action(
+                    plan_.route[wp_index].action);
+            if (strike_wp && plan_.route[wp_index].target_id != 0 &&
+                !strike_.delivered()) {
+                // Resolve the aim point from the target entity (the brain
+                // is the module's eyes — engine-agnostic module, the
+                // world access lives here).
+                geo::WorldPosition aim{};
+                bool aim_valid = false;
+                if (auto* w = owner_.world()) {
+                    const entities::EntityHandle tgt(
+                        entities::EntityId{plan_.route[wp_index].target_id},
+                        w);
+                    if (const auto* tf =
+                            tgt.get<entities::TransformComponent>()) {
+                        aim = tf->position;
+                        aim_valid = true;
+                    }
+                }
+                strike_.set_target(plan_.route[wp_index].target_id);
+                strike_.update(dt, state, aim, aim_valid);
+                combat_intent_.bomb_release =
+                    strike_.release_pulse() && !hold_fire_;
+                combat_intent_.bomb_target_id =
+                    strike_.release_target_id();
+            } else {
+                strike_.clear_target();
+            }
+        } else {
+            strike_.clear_target();
+        }
+
+        // =================================================================
         // Formation rung (Step 11): the wingman's slot in the ladder —
         // BELOW every combat rung (a fighting wingman stops forming and
         // fights: BVR/WVR/Defensive preempt the module), ABOVE the mission
@@ -715,6 +780,15 @@ public:
     [[nodiscard]] modules::MissileModule&       missile_defense()       noexcept { return missile_defense_; }
     [[nodiscard]] const modules::MissileModule& missile_defense() const noexcept { return missile_defense_; }
 
+    // --- Strike module (A-G release fire control; the mission rung of
+    // the weapon ladder — it never flies the aircraft, it only pulses
+    // CombatIntent::bomb_release while the navigation module flies the
+    // delivery waypoint). The host configures config.drag_factor /
+    // salvo_max / hold_fire at spawn, exactly like the A/A fire
+    // controls' envelopes.
+    [[nodiscard]] modules::StrikeModule&       strike()       noexcept { return strike_; }
+    [[nodiscard]] const modules::StrikeModule& strike() const noexcept { return strike_; }
+
     // --- Safety modules (host picture pushes + test inspection) ---
     /// Per-tick terrain picture for the ground-avoid rung (the host's
     /// eyes: elevation under + ahead of the jet, from the same
@@ -866,6 +940,7 @@ private:
     SensorFusion sensors_{};
     modules::BVRModule bvr_{};
     modules::WVRModule wvr_{};
+    modules::StrikeModule strike_{};   // A-G release fire control (M5)
     modules::MissileModule missile_defense_{};
 
     // Wingman role (Step 11): the formation module + the lead linkage the

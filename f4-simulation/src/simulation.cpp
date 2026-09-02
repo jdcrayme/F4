@@ -40,8 +40,13 @@
 #include <f4/recorder/snapshot.hpp>
 
 #include <f4/weapons/missile_battery.hpp>
+#include <f4/weapons/bomb_battery.hpp>
 #include <f4/weapons/f4_weapons.hpp>
 #include <f4/sensors/f4_sensors.hpp>
+
+#include <chrono>
+#include <cstdio>
+#include <cstdlib>
 #include <f4/world_convert/class_table.hpp>
 #include <f4/world/world_loader.hpp>
 #include <f4/world/detail/world_state.hpp>
@@ -645,9 +650,10 @@ void Simulation::spawn_from_campaign_flights() {
     //    objective + unit entities with their domain components
     //    (TeamComponent, TransformComponent, SquadronComponent,
     //    FlightPlanComponent, ...). Cross-references (Flight→Squadron,
-    //    Squadron→Airbase) are resolved here too.
+    //    Squadron→Airbase) are resolved here too. The populated maps ride
+    //    along: the objective map resolves the saved waypoints' strike
+    //    targets into entities (the A-G tranche's route arming).
     auto populated = f4::world::populate_world(world_, ws);
-    (void)populated;  // not used downstream — the bridge walks the world directly
 
     // 3. Airfield: initialize() normally pre-derived it into
     //    scenario_.airfield (B.3 fix — BEFORE wire_atc). The local
@@ -694,6 +700,13 @@ void Simulation::spawn_from_campaign_flights() {
         }
     }
 
+    // 4b. The weapon class table (A-G tranche): the campaign spawn arms
+    //     every flight's decoded loadout through it (wire stations +
+    //     doctrine MK-82 fill + the strike fire control). NOT gated on
+    //     combat.enabled — ordnance delivery is a mission behavior; only
+    //     the A/A combat sweeps stay combat-gated.
+    weapon_table_ = weapons::WeaponClassTable::with_builtins();
+
     const auto& template_ac = scenario_.aircraft.front();
     FlightSpawnFilter filter;
     filter.team = scenario_.campaign_flight_filter.team;
@@ -702,7 +715,8 @@ void Simulation::spawn_from_campaign_flights() {
     aircraft_entities_ = spawn_aircraft_from_flights(
         world_, ct, *model_db_, aircraft_cfg_,
         derived, template_ac, filter,
-        airbase_airfields_.empty() ? nullptr : &airbase_airfields_);
+        airbase_airfields_.empty() ? nullptr : &airbase_airfields_,
+        &populated.objective_id_map, &weapon_table_);
 
     if (aircraft_entities_.empty()) {
         throw std::runtime_error(
@@ -898,8 +912,21 @@ void Simulation::wire_atc() {
 }
 
 
+namespace {
+// F4_TICK_PROF=1 phase timing (perf triage only; off by default).
+struct TickProf {
+    bool on = std::getenv("F4_TICK_PROF") != nullptr;
+    double t_ground = 0, t_update_all = 0, t_intents = 0, t_sweeps = 0,
+           t_sync = 0, t_guns = 0, t_bubble = 0, t_record = 0, t_total = 0;
+    int n = 0;
+};
+TickProf g_prof{};
+} // namespace
+
 void Simulation::tick(double dt) {
     if (paused_) return;
+    const auto prof_t0 = g_prof.on ? std::chrono::steady_clock::now()
+                                   : std::chrono::steady_clock::time_point{};
     // dt is AUTHORITATIVE and FIXED: hosts call tick() once per unit of
     // owed sim time, always with the same dt (the scenario's sim_dt;
     // the player drains a wall-clock accumulator in whole sim_dt
@@ -932,6 +959,8 @@ void Simulation::tick(double dt) {
     // produced a "terrain phugoid" where the brain commanded climb against a
     // stale ground reference while the FM's ground clamp fired on the current
     // reference. See FLIGHT_CONTROL_STABILITY_PLAN.md §4.2 RC-2.
+    const auto prof_t1 = g_prof.on ? std::chrono::steady_clock::now()
+                                   : std::chrono::steady_clock::time_point{};
     for (const auto eid : aircraft_entities_) {
         auto h = entities::EntityHandle(eid, &world_);
         auto* fm = h.get<f4::flight::FlightModelComponent>();
@@ -943,6 +972,8 @@ void Simulation::tick(double dt) {
         const double ground_z = ts->elevation_at_ft(east_ft, north_ft);
         fm->set_ground(ground_z, f4::math::Vec3d{0.0, 0.0, -1.0});
     }
+    const auto prof_t2 = g_prof.on ? std::chrono::steady_clock::now()
+                                   : std::chrono::steady_clock::time_point{};
     // Combat chain (M3): stamp the sim clock the sensor/weapon components
     // read (message stamps + scan-interval carry). Both use static clocks
     // by design — the host owns time (documented in radar_component.hpp /
@@ -954,6 +985,7 @@ void Simulation::tick(double dt) {
     if (combat_on) {
         sensors::RadarSimComponent::set_sim_time(t_now);
         weapons::MissileSimComponent::set_sim_time(t_now);
+        weapons::BombSimComponent::set_sim_time(t_now);
     }
 
     // Step 11 (wingman/2-ship): push each wingman's lead picture + sort
@@ -972,6 +1004,8 @@ void Simulation::tick(double dt) {
 
     world_.update_all(dt, bus_);
     bus_.flush_pending();  // drain deferred ATC messages (TaxiClearance, etc.)
+    const auto prof_t3 = g_prof.on ? std::chrono::steady_clock::now()
+                                   : std::chrono::steady_clock::time_point{};
 
     // Combat chain (M3 tactics): execute the combat brains' intents
     // (radar locks + weapon releases) NOW — after update_all (the brains
@@ -982,8 +1016,16 @@ void Simulation::tick(double dt) {
     // mutate the world mid-iteration). Commanding STT here takes effect
     // on the next tick's scan.
     if (combat_on) {
-        execute_brain_combat_intents(world_, bus_, weapon_table_, t_now);
+        // Active roster, not the whole brain population: campaign worlds
+        // hold thousands of dormant parked-inventory brains (squadron
+        // deaggregation) — the intents pass must cost the active aircraft,
+        // not the world (FreeFalcon fidelity-tiering: no sim work outside
+        // the simulated set).
+        execute_brain_combat_intents(world_, bus_, weapon_table_, t_now,
+                                     &aircraft_entities_);
     }
+    const auto prof_t4 = g_prof.on ? std::chrono::steady_clock::now()
+                                   : std::chrono::steady_clock::time_point{};
 
     // Combat chain (M3): the two world-level sweeps the ECS tick can't run
     // itself (both mutate/iterate the world between ticks, never inside
@@ -998,7 +1040,10 @@ void Simulation::tick(double dt) {
     if (combat_on) {
         sensors::update_rwr(world_, bus_, t_now);
         weapons::sweep_spent_missiles(world_);
+        weapons::sweep_spent_bombs(world_);
     }
+    const auto prof_t5 = g_prof.on ? std::chrono::steady_clock::now()
+                                   : std::chrono::steady_clock::time_point{};
 
     // Per-aircraft sync: pull FM state → TransformComponent + VisualModelComponent.
     for (const auto eid : aircraft_entities_) {
@@ -1044,6 +1089,8 @@ void Simulation::tick(double dt) {
             vis->model_state.switches[0].active_child = (s.aero.gearPos > 0.5) ? 0 : 1;
         }
     }
+    const auto prof_t6 = g_prof.on ? std::chrono::steady_clock::now()
+                                   : std::chrono::steady_clock::time_point{};
 
     // Combat chain (Steps 11-12, guns): fly every GunComponent's burst
     // NOW — after the per-aircraft sync (the tracers emit from the
@@ -1056,6 +1103,8 @@ void Simulation::tick(double dt) {
     if (combat_on) {
         weapons::update_guns(world_, bus_, dt, t_now);
     }
+    const auto prof_t7 = g_prof.on ? std::chrono::steady_clock::now()
+                                   : std::chrono::steady_clock::time_point{};
 
     sim_time_s_ += dt;
     ++tick_;
@@ -1067,6 +1116,33 @@ void Simulation::tick(double dt) {
 
     if (recorder_) record_snapshot();
     if (fcs_trace_) record_fcs_trace_sample();
+
+    if (g_prof.on) {
+        const auto us = [](std::chrono::steady_clock::time_point a,
+                           std::chrono::steady_clock::time_point b) {
+            return std::chrono::duration<double, std::micro>(b - a).count();
+        };
+        const auto prof_t8 = std::chrono::steady_clock::now();
+        g_prof.t_ground    += us(prof_t1, prof_t2);
+        g_prof.t_update_all += us(prof_t2, prof_t3);
+        g_prof.t_intents   += us(prof_t3, prof_t4);
+        g_prof.t_sweeps    += us(prof_t4, prof_t5);
+        g_prof.t_sync      += us(prof_t5, prof_t6);
+        g_prof.t_guns      += us(prof_t6, prof_t7);
+        g_prof.t_record    += us(prof_t7, prof_t8);
+        g_prof.t_total     += us(prof_t0, prof_t8);
+        ++g_prof.n;
+        if (g_prof.n % 600 == 0) {
+            std::fprintf(stderr,
+                "[tickprof] n=%d total=%.1fms ground=%.2fms update_all=%.2fms "
+                "intents=%.2fms sweeps=%.2fms sync=%.2fms guns=%.2fms "
+                "record=%.2fms\n",
+                g_prof.n, g_prof.t_total / 1000.0, g_prof.t_ground / 1000.0,
+                g_prof.t_update_all / 1000.0, g_prof.t_intents / 1000.0,
+                g_prof.t_sweeps / 1000.0, g_prof.t_sync / 1000.0,
+                g_prof.t_guns / 1000.0, g_prof.t_record / 1000.0);
+        }
+    }
 }
 
 void Simulation::record_snapshot() {
@@ -1150,6 +1226,36 @@ void Simulation::record_snapshot() {
         snap.ai_state = weapons::missile_status_name(mc->missile.status());
         if (const auto* rec = weapon_table_.get(mc->weapon_handle)) {
             snap.callsign = rec->name;  // the weapon's name reads as the label
+        }
+        recorder_->record(snap);
+    }
+
+    // M5 (A-G): bomb tracks — same treatment as missiles, one snapshot per
+    // LIVE bomb per tick, so a recorded strike replays with the falls
+    // visible. The bombs are swept after they go terminal (sweep_spent_
+    // bombs runs before record_snapshot), so a bomb's last in-flight
+    // position is the tick BEFORE its impact — the impact point itself
+    // lives in the BombImpact combat event, which keeps the replay
+    // endpoint covered (same contract the missile track follows).
+    for (const auto bid : world_.with_component<weapons::BombComponent>()) {
+        auto h = entities::EntityHandle(bid, &world_);
+        const auto* bc = h.get<weapons::BombComponent>();
+        const auto* tf = h.get<entities::TransformComponent>();
+        if (bc == nullptr || tf == nullptr) continue;
+
+        f4::recorder::FlightSnapshot snap;
+        snap.missile = true;   // the replay's weapon-track discriminator
+        snap.sim_time_s = sim_time_s_;
+        snap.tick = tick_;
+        snap.entity_id = bid.value;
+        snap.position = tf->position;
+        snap.altitude_msl_ft = tf->position.z;
+        snap.on_ground = false;
+        snap.vt_fps = bc->bomb.velocity().length();
+        snap.ai_mode = "Bomb";
+        snap.ai_state = weapons::bomb_status_name(bc->bomb.status());
+        if (const auto* rec = weapon_table_.get(bc->weapon_handle)) {
+            snap.callsign = rec->name;
         }
         recorder_->record(snap);
     }

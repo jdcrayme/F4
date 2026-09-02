@@ -96,12 +96,17 @@ std::size_t update_rwr(entities::EntityWorld& world,
             radar->mode() == RadarMode::Search,
             radar});
     }
-    for (const auto eid : world.with_component<entities::TransformComponent>()) {
+    // Missile emitters: the ROLE="missile" tag bucket — O(1) through the
+    // Phase-D tag index (with_tag_ref), NOT a walk over every
+    // TransformComponent entity. At campaign scale (a populated save:
+    // ~4,400 entities) the old walk cost a 35 KB id copy + ~4,400 tag
+    // lookups per tick just to find the handful of live missiles; the
+    // bucket holds exactly them. (geometry-based launch detection — the
+    // missile's plume/seeker is the emitter; no f4-weapons dependency.)
+    for (const auto& eid : world.with_tag_ref(
+             entities::tags::ROLE,
+             entities::TagValue::from(std::string("missile")))) {
         entities::EntityHandle h(eid, &world);
-        auto role = h.get_tag(entities::tags::ROLE);
-        if (!role.has_value()) continue;
-        const auto* s = role->as_string();
-        if (s == nullptr || *s != "missile") continue;
         const auto* tf = h.get<entities::TransformComponent>();
         if (tf == nullptr) continue;
         emitters.push_back(EmitterRecord{

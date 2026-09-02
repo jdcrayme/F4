@@ -141,6 +141,15 @@ struct WaypointState {
     int32_t  depart = 0;              // departure time (campaign seconds)
 };
 
+/// One station in a flight's weapon loadout (decoded from the save's
+/// LoadoutStruct: wire weapon id + rounds on the hardpoint). The engine
+/// mapping (wire id -> WeaponClassTable handle) happens at the campaign
+/// bridge; world/world-convert carry the wire ids verbatim.
+struct LoadoutStationState {
+    uint16_t weapon_id = 0;     // campaign WeaponDataTable index (0 = empty)
+    uint16_t count = 0;         // rounds/bombs on the station
+};
+
 /// One pilot in a squadron's roster.
 struct PilotState {
     int16_t  pilot_id = 0;

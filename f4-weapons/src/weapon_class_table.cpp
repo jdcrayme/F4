@@ -106,20 +106,53 @@ WeaponClassTable WeaponClassTable::with_builtins() {
         t.add(m);
     }
 
-    // --- 4: Mk-82 (bomb, unguided — store bookkeeping only in M1) ----------
+    // --- 4: Mk-82 (bomb, unguided — the A-G employment slice's workhorse) --
+    // Ballistic card: mass/area/cd drive the drag ODE in bomb.cpp; the
+    // employment envelope fields stay 0 (the release solution is computed
+    // from the shooter's alt/speed each pass, not a fixed range).
     {
         WeaponClassRecord b;
         b.name = "MK-82";
         b.category = WeaponCategory::Bomb;
         b.guidance = GuidanceKind::None;
-        b.max_range_ft = 0.0;                 // release ballistics: M2+
+        b.max_range_ft = 0.0;
         b.min_range_ft = 0.0;
         b.max_speed_fts = 0.0;
         b.max_g = 0.0;
         b.launch_mass_lb = 500.0;
         b.burnout_mass_lb = 500.0;
-        b.warhead_power_lb = 192.0;           // 192 lb Tritonal
+        b.ref_area_ft2 = 0.55;              // ~13.9 in x 87 in body + fins
+        b.cd = 0.25;                        // subsonic mean for a slick Mk-82
+        b.warhead_power_lb = 192.0;         // 192 lb Tritonal
         b.lethal_radius_ft = 300.0;
+        b.tof_limit_s = 90.0;
+        t.add(b);
+    }
+
+    // --- 5: GBU-12 Paveway II (laser-guided Mk-82) -------------------------
+    // The one wire-mappable campaign bomb today: FreeFalcon's campweap.h
+    // documents GBU-12 as weapon id 68 in the campaign save's loadout
+    // structs (and GBU-22 = 310). The campaign bridge maps those wire IDs
+    // to THIS card. Guidance is modeled at the release solution level for
+    // the M5 slice — the flyout itself stays ballistic (a Paveway released
+    // inside its envelope lands close enough that the blast model can't
+    // tell the difference); a terminal-guidance seeker is future work.
+    {
+        WeaponClassRecord b;
+        b.name = "GBU-12";
+        b.category = WeaponCategory::Bomb;
+        b.guidance = GuidanceKind::None;    // terminal guidance: future slice
+        b.max_range_ft = 0.0;
+        b.min_range_ft = 0.0;
+        b.max_speed_fts = 0.0;
+        b.max_g = 0.0;
+        b.launch_mass_lb = 585.0;           // Mk-82 + Paveway II kit
+        b.burnout_mass_lb = 585.0;
+        b.ref_area_ft2 = 0.60;
+        b.cd = 0.25;
+        b.warhead_power_lb = 192.0;         // same warhead as the Mk-82
+        b.lethal_radius_ft = 300.0;
+        b.tof_limit_s = 90.0;
         t.add(b);
     }
 

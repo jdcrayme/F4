@@ -4,6 +4,8 @@
 
 #include "f4/ai/modules/navigation_module.hpp"
 
+#include <f4/ai/modules/strike_module.hpp>  // is_ag_delivery_action
+
 #include <cmath>
 
 namespace f4::ai::modules {
@@ -179,7 +181,15 @@ void NavigationModule::check_waypoint_capture()
     // tangent ON the next leg's centerline. Only applies when there IS
     // a next leg; the LAST waypoint keeps the plain capture/abeam rules
     // (nothing to establish on afterwards — the sequencer takes over).
-    if (wp_index_ + 1 < route_.size()) {
+    // A-G (M5): a DELIVERY-action waypoint (WP_STRIKE / BOMB / GNDSTRIKE /
+    // NAVSTRIKE / SEAD) is a MUST-FLY point — the release trigger keys on
+    // the path through it, and a corner cut that bends the path wide of
+    // the strike point starves the envelope (the first TestCamp A-G QC
+    // run: the turn lead put the closest approach 7,160 ft wide of the
+    // target with a ~5,700 ft envelope — no release). Zero lead on
+    // delivery waypoints: fly THROUGH the point, turn after.
+    if (wp_index_ + 1 < route_.size() &&
+        !is_ag_delivery_action(route_[wp_index_].action)) {
         constexpr double GRAVITY_FPS2 = 32.174;
         // NAV-B: turn geometry needs TRUE airspeed — the aircraft turns at
         // TAS, but the interface only exposes CAS. At 10,000 ft the ISA

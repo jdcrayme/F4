@@ -563,6 +563,7 @@ std::vector<EntityId> populate_units(
             fp.mission_over_time = fl->mission_over_time(i);
             fp.mission_target = fl->mission_target(i);
             fp.loadouts = fl->loadouts(i);
+            fp.loadout_stations = fl->loadout_stations(i);
             fp.mission = fl->mission(i);
             fp.flight_priority = fl->flight_priority(i);
             fp.mission_id = fl->mission_id(i);

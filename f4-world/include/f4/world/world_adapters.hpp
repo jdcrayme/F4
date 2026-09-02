@@ -234,6 +234,10 @@ struct UnitAdapter : IUnitCoreSource,
     int32_t mission_over_time(int i) const override { return ws_->units[i].mission_over_time; }
     int16_t mission_target(int i) const override { return ws_->units[i].mission_target; }
     uint8_t loadouts(int i) const override { return ws_->units[i].loadouts; }
+    std::vector<f4::entities::LoadoutStationState> loadout_stations(
+        int i) const override {
+        return ws_->units[i].loadout_stations;
+    }
     uint8_t mission(int i) const override { return ws_->units[i].mission; }
     uint8_t flight_priority(int i) const override { return ws_->units[i].flight_priority; }
     uint8_t mission_id(int i) const override { return ws_->units[i].mission_id; }

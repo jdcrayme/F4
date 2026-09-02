@@ -362,6 +362,49 @@ TEST(V71Units, TestCampPackagesCarryMissionRequests) {
     EXPECT_EQ(big, 0);
 }
 
+TEST(V71Units, TestCampFlightsCarryDecodedLoadoutStations) {
+    // The A-G employment slice: flight LoadoutStruct[] decoding. All 439
+    // tasked flights carry 1 loadout entry (one per aircraft slot — the
+    // wire stores the same fill per slot; the decoder keeps entry 0's
+    // 16-station fill as the flight's loadout). Stations with weapon_id 0
+    // are dropped; the rest carry (wire weapon id, count).
+    if (!testcamp_available()) GTEST_SKIP() << "TestCamp.cam not in repo root";
+    auto cam = load_testcamp();
+    ClassTable ct;
+    ct.load(FIXTURE_DIR "FALCON4.ct");
+
+    const SubFile* uni = cam.find("uni");
+    ASSERT_NE(uni, nullptr);
+    UnitDecodeOptions opts;
+    opts.camp_version = 71;
+    opts.class_table = &ct;
+    DecodedUnits units = decode_uni(uni->data.data(), uni->data.size(), opts);
+    ASSERT_EQ(units.units.size(), std::size_t{1715});
+
+    int flights_with_loadouts = 0;
+    int flights_with_stations = 0;
+    int gbu12_stations = 0;   // wire id 68 (campweap.h: GBU-12)
+    int total_stations = 0;
+    int zero_count_stations = 0;  // pods / non-expendable hardpoints
+    for (const auto& u : units.units) {
+        if (u.unit_class != UnitClass::Flight) continue;
+        if (u.subclass.loadouts > 0) ++flights_with_loadouts;
+        if (!u.subclass.loadout_stations.empty()) ++flights_with_stations;
+        for (const auto& st : u.subclass.loadout_stations) {
+            ++total_stations;
+            if (st.weapon_id == 68) ++gbu12_stations;
+            if (st.count == 0) ++zero_count_stations;
+        }
+    }
+    EXPECT_EQ(flights_with_loadouts, 449);  // every flight carries a loadout entry
+    EXPECT_EQ(flights_with_stations, 424);  // 25 flights fly clean wings (all hardpoints empty)
+    EXPECT_GE(total_stations, 1500);       // ~4.5 stations per flight
+    EXPECT_GE(gbu12_stations, 3);          // BAI/SAD flights carry GBU-12s
+    // Zero-count stations exist on the wire (pod-style hardpoints that
+    // expend nothing); they are a minority, not the norm.
+    EXPECT_LT(zero_count_stations, total_stations / 3);
+}
+
 TEST(V71Units, TestCampDecodesWithoutClassTableToo) {
     // No class table: the trial-and-error fallback must also walk the
     // whole stream (the validator's type range stays at the legacy

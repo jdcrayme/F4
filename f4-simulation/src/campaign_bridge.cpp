@@ -25,6 +25,8 @@
 #include <f4/flight/flight_model_component.hpp>
 #include <f4/flight/angle.hpp>
 #include <f4/ai/brain_component.hpp>
+#include <f4/campaign/mission_type.hpp>
+#include <f4/weapons/bomb.hpp>
 #include <f4/world_convert/objective_decoder.hpp>  // ObjectiveType::TYPE_AIRBASE
 #include <f4/world_convert/theater_data.hpp>        // PointListType
 #include <f4/math/vec3.hpp>
@@ -440,7 +442,10 @@ spawn_aircraft_for_flight(f4::entities::EntityWorld& world,
                           const ScenarioAirfield& airfield,
                           const ScenarioAircraft& scenario_aircraft,
                           int parking_slot,
-                          const AirbaseAirfieldMap* airbase_airfields) {
+                          const AirbaseAirfieldMap* airbase_airfields,
+                          const std::unordered_map<std::uint32_t,
+                              f4::entities::EntityId>* objective_id_map,
+                          const weapons::WeaponClassTable* weapon_table) {
     using namespace f4::entities;
     using namespace f4::flight;
     using namespace f4::ai;
@@ -577,8 +582,20 @@ spawn_aircraft_for_flight(f4::entities::EntityWorld& world,
     // TaxiRequest/TakeoffRequest carry it — the multi-airbase ATC answers
     // from the registered per-base airfield.
     brain.module().airbase_id = home_airbase_vu;
-    if (auto plan = build_mission_plan_from_flight(world, flight_entity)) {
+    if (auto plan = build_mission_plan_from_flight(world, flight_entity,
+                                                    objective_id_map)) {
         brain.set_mission_plan(std::move(*plan));
+    }
+
+    // 4b. A-G employment tranche: the flight's decoded loadout becomes a
+    //     WeaponStoreComponent (wire-faithful bookkeeping + mapped
+    //     droppable bombs), and delivery-mission flights get the brain's
+    //     strike fire control armed. Null table = hosts that don't want
+    //     ordnance (single-purpose route tests) spawn unarmed, exactly as
+    //     before this tranche.
+    if (weapon_table != nullptr) {
+        (void)arm_flight_strike(*weapon_table, h, fp->loadout_stations,
+                                fp->mission);
     }
 
     // 5. TEAM tag — the campaign owner slot mapped into the sim's
@@ -603,7 +620,10 @@ spawn_aircraft_from_flights(f4::entities::EntityWorld& world,
                              const ScenarioAirfield& airfield,
                              const ScenarioAircraft& scenario_aircraft,
                              const FlightSpawnFilter& filter,
-                             const AirbaseAirfieldMap* airbase_airfields) {
+                             const AirbaseAirfieldMap* airbase_airfields,
+                             const std::unordered_map<std::uint32_t,
+                                 f4::entities::EntityId>* objective_id_map,
+                             const weapons::WeaponClassTable* weapon_table) {
     using namespace f4::entities;
 
     // Find every entity with a FlightPlanComponent. f4-world::populate_units
@@ -654,12 +674,183 @@ spawn_aircraft_from_flights(f4::entities::EntityWorld& world,
 
         if (auto spawned_id = spawn_aircraft_for_flight(
                 world, flight_id, ct, db, cfg, airfield,
-                scenario_aircraft, slot, airbase_airfields)) {
+                scenario_aircraft, slot, airbase_airfields,
+                objective_id_map, weapon_table)) {
             spawned.push_back(*spawned_id);
         }
     }
 
     return spawned;
+}
+
+// ============================================================================
+// A-G employment tranche — campaign weapon map + strike arming
+// ============================================================================
+
+std::uint32_t campaign_weapon_handle(const weapons::WeaponClassTable& table,
+                                     std::uint16_t wire_id) {
+    for (const auto& e : kCampaignWeaponMap) {
+        if (e.wire_id == wire_id) {
+            return table.find_by_name(e.engine_name);
+        }
+    }
+    return weapons::kInvalidWeapon;
+}
+
+std::string campaign_weapon_label(const weapons::WeaponClassTable& table,
+                                  std::uint16_t wire_id) {
+    const auto handle = campaign_weapon_handle(table, wire_id);
+    if (handle != weapons::kInvalidWeapon) {
+        if (const auto* rec = table.get(handle)) return rec->name;
+    }
+    char buf[24];
+    std::snprintf(buf, sizeof(buf), "WPN-%u",
+                  static_cast<unsigned>(wire_id));
+    return std::string(buf);
+}
+
+namespace {
+
+/// Doctrine MK-82 fill: 2 stations x `kDoctrineRoundsPerStation` bombs.
+/// Mirrors FreeFalcon's LoadWeapons squadron-stores fallback (a strike
+/// flight with unmappable wire stores still delivers ordnance); the QC
+/// summary separates the doctrine count from the wire count.
+constexpr int kDoctrineStations = 2;
+constexpr int kDoctrineRoundsPerStation = 2;
+/// Cap on the release stick (the StrikeModule's salvo_max) — a QC run
+/// wants a representative stick, not the whole wing's worth of iron.
+constexpr int kDoctrineSalvoMax = 4;
+
+/// Compute the vacuum->dragged range scale for the trigger from the bomb
+/// card's own ballistics: fly one release at the doctrine delivery point
+/// (5,000 ft AGL, 675 fps — ~400 kts) with and without drag, ratio them.
+/// One number per weapon class, deterministic, and it tracks the SAME ODE
+/// the bomb entity flies (bomb.cpp), so the trigger and the flyout agree
+/// on where the bomb lands.
+double bomb_drag_factor_for(const weapons::WeaponClassTable& table,
+                            std::uint32_t bomb_handle) {
+    const auto* rec = table.get(bomb_handle);
+    if (rec == nullptr) return 0.85;   // safe default
+
+    constexpr double kAltFt = 5000.0;
+    constexpr double kSpeedFps = 675.0;
+    constexpr double kDt = 0.1;        // coarse: the ratio is smooth
+
+    weapons::Bomb dragged;
+    dragged.release(weapons::BombConfig::from_record(*rec),
+                    f4::geo::WorldPosition{0.0, 0.0, kAltFt},
+                    f4::math::Vec3<double>{kSpeedFps, 0.0, 0.0}, 0.0);
+    weapons::BombConfig vac = weapons::BombConfig::from_record(*rec);
+    vac.cd = 0.0;
+    vac.ref_area_ft2 = 0.0;
+    weapons::Bomb vacuum;
+    vacuum.release(vac,
+                    f4::geo::WorldPosition{0.0, 0.0, kAltFt},
+                    f4::math::Vec3<double>{kSpeedFps, 0.0, 0.0}, 0.0);
+    auto fly = [](weapons::Bomb& b) {
+        double t = 0.0;
+        while (!b.terminal() && t < 120.0) { b.tick(kDt); t += kDt; }
+    };
+    fly(dragged);
+    fly(vacuum);
+    if (dragged.status() != weapons::BombStatus::Impact ||
+        vacuum.status() != weapons::BombStatus::Impact ||
+        vacuum.ground_range_ft() < 1.0) {
+        return 0.85;
+    }
+    const double factor = dragged.ground_range_ft() /
+                          vacuum.ground_range_ft();
+    // Guard pathological cards (drag > vacuum never happens, but a card
+    // with silly fields could invert the ratio).
+    return std::clamp(factor, 0.3, 1.0);
+}
+
+} // namespace
+
+StrikeArmament arm_flight_strike(
+    const weapons::WeaponClassTable& table,
+    f4::entities::EntityHandle& aircraft,
+    const std::vector<f4::entities::LoadoutStationState>& loadout_stations,
+    std::uint8_t mission_byte) {
+    using namespace f4::entities;
+    using f4::campaign::MissionCategory;
+
+    StrikeArmament out;
+
+    // Only delivery-category missions arm the strike trigger. The store
+    // is attached regardless (bookkeeping for every flight — QC renders
+    // what the flight carries).
+    const auto category = f4::campaign::mission_category(mission_byte);
+    const bool delivery_mission =
+        category == MissionCategory::Strike ||
+        category == MissionCategory::SEAD ||
+        category == MissionCategory::CAS;
+
+    // --- The store from the decoded wire loadout ---------------------------
+    auto& store = aircraft.add<weapons::WeaponStoreComponent>();
+    std::uint32_t droppable_handle = weapons::kInvalidWeapon;
+    for (const auto& st : loadout_stations) {
+        const auto handle = campaign_weapon_handle(table, st.weapon_id);
+        const auto* rec = table.get(handle);
+        if (rec != nullptr &&
+            rec->category == weapons::WeaponCategory::Bomb) {
+            // Mapped droppable station.
+            store.add_station(handle, st.count,
+                              campaign_weapon_label(table, st.weapon_id));
+            ++out.wire_stations;
+            ++out.droppable_stations;
+            out.droppable_rounds += st.count;
+            if (droppable_handle == weapons::kInvalidWeapon) {
+                droppable_handle = handle;
+            }
+        } else {
+            // Wire-faithful bookkeeping station: droppable nothing, but
+            // the QC surface can render what the flight carried.
+            store.add_station(handle, st.count,
+                              campaign_weapon_label(table, st.weapon_id));
+            ++out.wire_stations;
+        }
+    }
+
+    // --- Doctrine fill for delivery flights with no droppable wire bombs --
+    if (delivery_mission && out.droppable_stations == 0) {
+        const auto mk82 = table.find_by_name("MK-82");
+        if (mk82 != weapons::kInvalidWeapon) {
+            for (int i = 0; i < kDoctrineStations; ++i) {
+                store.add_station(mk82, kDoctrineRoundsPerStation,
+                                  "MK-82");
+                ++out.doctrine_stations;
+                ++out.droppable_stations;
+                out.droppable_rounds += kDoctrineRoundsPerStation;
+            }
+            droppable_handle = mk82;
+        }
+    }
+
+    // --- The strike fire control --------------------------------------------
+    if (delivery_mission && droppable_handle != weapons::kInvalidWeapon &&
+        aircraft.has<f4::ai::BrainComponent>()) {
+        auto& brain = *aircraft.get<f4::ai::BrainComponent>();
+        auto& strike = brain.strike();
+        strike.config.drag_factor =
+            bomb_drag_factor_for(table, droppable_handle);
+        strike.config.salvo_max = std::min(out.droppable_rounds,
+                                           kDoctrineSalvoMax);
+        if (const auto* rec = table.get(droppable_handle)) {
+            // CCIP tolerance from the weapon's lethal radius (half — the
+            // pipper must sit well inside the blast footprint to start
+            // the stick; the committed stick then walks across the rest).
+            strike.config.impact_tolerance_ft =
+                std::max(50.0, 0.5 * rec->lethal_radius_ft);
+        }
+        // A/G releases ride the intent surface regardless of the A/A
+        // combat flag (the brain's strike rung runs un-gated; the host
+        // driver's bomb path is likewise independent). combat_enabled
+        // stays OFF for campaign flights — the A/A rungs (omniscient-GCI
+        // sensor fusion, BVR maneuvering) would break route-following.
+        out.strike_armed = true;
+    }
+    return out;
 }
 
 // ============================================================================
@@ -714,6 +905,9 @@ constexpr double kDefaultLegSpeedKts = 400.0;
 /// above pattern but below terrain features in most theaters.
 constexpr double kMinWaypointAltFt = 500.0;
 
+/// Altitude floor for A-G delivery waypoints (see the route builder).
+constexpr double kMinDeliveryWaypointAltFt = 1500.0;
+
 /// Waypoint count where a route stops being "the flight's real plan" and
 /// starts being noise: single-waypoint plans (just a takeoff point, the
 /// shape every untasked flight carries in some saves) provide no enroute
@@ -723,8 +917,11 @@ constexpr std::size_t kMinUsableWaypoints = 2;
 } // namespace
 
 std::optional<f4::ai::MissionPlan>
-build_mission_plan_from_flight(const f4::entities::EntityWorld& world,
-                               f4::entities::EntityId flight_entity) {
+build_mission_plan_from_flight(
+    const f4::entities::EntityWorld& world,
+    f4::entities::EntityId flight_entity,
+    const std::unordered_map<std::uint32_t, f4::entities::EntityId>*
+        objective_id_map) {
     using namespace f4::entities;
     using f4::ai::modules::NavigationModule;
 
@@ -750,17 +947,57 @@ build_mission_plan_from_flight(const f4::entities::EntityWorld& world,
         return std::nullopt;
     }
 
+    // A-G tranche: the flight's own resolved target — the fallback for
+    // delivery waypoints whose own target_num resolves nothing (the save
+    // stores the same objective on both the flight and the waypoint).
+    const auto* fp = h.get<FlightPlanComponent>();
+    const std::uint64_t flight_target =
+        (fp != nullptr && fp->target.valid()) ? fp->target.value : 0;
+
     plan.route.reserve(wp->waypoints.size() - first);
     int n = 1;
     for (std::size_t i = first; i < wp->waypoints.size(); ++i) {
         const auto& w = wp->waypoints[i];
         auto pos = grid_to_enu(w.x, w.y, w.z);
-        pos.z = std::max(static_cast<double>(pos.z), kMinWaypointAltFt);
+        // A-G tranche: delivery waypoints floor HIGHER (1,500 ft) than
+        // ordinary legs — the release envelope grows with altitude above
+        // the target, and a 500-ft delivery floor would hand the trigger
+        // a knife-edge dz right at the module's min-release gate. The
+        // saved INTSTRIKE routes carry z=10 at the strike point (the
+        // campaign stores the low-level ingress number, not a release
+        // altitude); the M4.5 per-action profile tranche replaces this
+        // floor with the mission profile's altitude bands.
+        const double floor_ft =
+            f4::ai::modules::is_ag_delivery_action(w.action)
+                ? kMinDeliveryWaypointAltFt
+                : kMinWaypointAltFt;
+        pos.z = std::max(static_cast<double>(pos.z), floor_ft);
         char name[32];
         std::snprintf(name, sizeof(name), "WP%d:%s", n++,
                       wp_action_text(w.action));
-        plan.route.push_back(NavigationModule::Waypoint{
-            name, pos, kDefaultLegSpeedKts});
+
+        // A-G tranche: delivery-action waypoints carry their strike
+        // target's EntityId::value (the brain's StrikeModule arms on
+        // this). Resolution: the waypoint's own target_num through the
+        // objective map, else the flight's resolved target.
+        std::uint64_t target_id = 0;
+        if (f4::ai::modules::is_ag_delivery_action(w.action)) {
+            if (objective_id_map != nullptr && w.target_num != 0) {
+                const auto it = objective_id_map->find(w.target_num);
+                if (it != objective_id_map->end() && it->second.valid()) {
+                    target_id = it->second.value;
+                }
+            }
+            if (target_id == 0) {
+                target_id = flight_target;
+            }
+        }
+
+        NavigationModule::Waypoint route_wp{name, pos,
+                                            kDefaultLegSpeedKts};
+        route_wp.action = w.action;
+        route_wp.target_id = target_id;
+        plan.route.push_back(std::move(route_wp));
     }
 
     // start_phase stays Ground: the campaign flight departs from its

@@ -66,6 +66,20 @@ public:
     /// Calibrated airspeed (knots).
     virtual double vcas_kts() const = 0;
 
+    /// Ground speed over the horizontal plane (feet per second).
+    ///
+    /// A-G release solutions key on this (the bomb's horizontal throw is
+    /// groundspeed x fall time), NOT on vcas — at 5,000 ft the TAS/IAS
+    /// split alone is ~8%, which over a 17 s fall is ~550 ft of impact
+    /// error, well outside a bomb's lethal radius. Implementations backed
+    /// by a full flight model return the true kinematic horizontal speed;
+    /// the default approximates TAS from vcas at low altitude (test mocks
+    /// and stubs that don't model the split).
+    virtual double ground_speed_fps() const {
+        // 1 knot = 1.68781 ft/s; TAS ~ CAS below ~10,000 ft.
+        return vcas_kts() * 1.68781;
+    }
+
     // --- Attitude ---
 
     /// Heading angle (radians, 0 = North, clockwise positive).

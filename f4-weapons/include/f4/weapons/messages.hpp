@@ -92,4 +92,56 @@ struct GunFiredMessage {
     double        sim_time_s{0.0};
 };
 
+// ============================================================================
+// A-G employment (the M5 strike slice). Bombs get their own release and
+// impact events: a gravity weapon's terminal event carries the OBJECTIVE
+// damage summary, not a hit-point delta against an airframe, so it does
+// not ride DamageAppliedMessage.
+// ============================================================================
+
+/// Published by release_bomb() after the store was debited and the bomb
+/// entity was created (the A-G mirror of MissileLaunchedMessage).
+struct BombReleasedMessage {
+    std::uint64_t bomb_id{0};         // EntityId of the new bomb entity
+    std::uint64_t shooter_id{0};
+    std::uint64_t target_id{0};       // the strike target (objective)
+    std::uint32_t weapon_handle{0xFFFFFFFFu};
+    f4::geo::WorldPosition position{};   // release point
+    double        speed_fts{0.0};
+    double        sim_time_s{0.0};
+};
+
+/// Why a bomb stopped flying.
+enum class BombEndCause : std::uint8_t {
+    Impact,       // reached the impact plane
+    Expired,      // time-of-flight limit while still above the plane
+};
+
+[[nodiscard]] inline const char* bomb_end_cause_name(BombEndCause c) noexcept {
+    switch (c) {
+        case BombEndCause::Impact:  return "impact";
+        case BombEndCause::Expired: return "expired";
+    }
+    return "unknown";
+}
+
+/// Published when a bomb reaches a terminal state. One message per bomb.
+/// The damage fields are the OBJECTIVE feature damage summary (see
+/// bomb_battery.hpp) — zero when the impact hit no targeted objective.
+struct BombImpactMessage {
+    std::uint64_t bomb_id{0};
+    std::uint64_t shooter_id{0};
+    std::uint64_t target_id{0};       // the strike target (0 = none assigned)
+    BombEndCause  cause{BombEndCause::Impact};
+    f4::geo::WorldPosition position{};   // impact point
+    double        miss_distance_ft{0.0}; // impact -> aim point (horizontal)
+    double        flight_time_s{0.0};
+    // Objective damage summary (valid when target_id != 0 and it resolved
+    // an objective with features).
+    int           features_damaged{0};
+    int           features_destroyed{0};
+    double        destroyed_pct{0.0};
+    double        sim_time_s{0.0};
+};
+
 } // namespace f4::weapons

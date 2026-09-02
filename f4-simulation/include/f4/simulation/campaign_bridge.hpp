@@ -34,6 +34,8 @@
 #include <f4/ai/brain_component.hpp>  // MissionPlan (B.3 route building)
 #include <f4/simulation/scenario.hpp>
 #include <f4/simulation/visual_model_component.hpp>
+#include <f4/weapons/weapon_class_table.hpp>  // campaign weapon map (A-G)
+#include <f4/weapons/weapon_store.hpp>       // loadout -> stations (A-G)
 
 #include <f4/entities/entity.hpp>
 #include <f4/world/detail/world_state.hpp>
@@ -126,6 +128,14 @@ struct FlightSpawnFilter {
 /// LandingModule — for round-trip routes that is the saved WP_LAND at the
 /// home airbase.
 ///
+/// A-G tranche: each route waypoint carries its wire WP_ACTION, and
+/// delivery-action waypoints (WP_STRIKE/BOMB/GNDSTRIKE/NAVSTRIKE/SEAD)
+/// carry their target's EntityId::value — resolved through
+/// `objective_id_map` (WaypointState::target_num → entity). Waypoints
+/// whose target_num resolves no entity fall back to the FLIGHT's resolved
+/// target (FlightPlanComponent::target). This is what arms the brain's
+/// StrikeModule at the delivery point.
+///
 /// Altitude policy (documented approximation): WaypointState.z is MSL
 /// feet; waypoints below 500 ft (ramp/taxi legs store 0) are floored to
 /// 500 ft so the NavigationModule never commands terrain level. Speed:
@@ -134,8 +144,11 @@ struct FlightSpawnFilter {
 /// Returns std::nullopt when the flight has no (usable) waypoint plan —
 /// callers then spawn takeoff-only aircraft, exactly as before B.3.
 [[nodiscard]] std::optional<f4::ai::MissionPlan>
-build_mission_plan_from_flight(const f4::entities::EntityWorld& world,
-                               f4::entities::EntityId flight_entity);
+build_mission_plan_from_flight(
+    const f4::entities::EntityWorld& world,
+    f4::entities::EntityId flight_entity,
+    const std::unordered_map<std::uint32_t, f4::entities::EntityId>*
+        objective_id_map = nullptr);
 
 /// Map a campaign owner slot to the sim's TEAM-tag string vocabulary.
 ///
@@ -169,6 +182,86 @@ owner_team_string(const f4::entities::EntityWorld& world,
 /// registered with the StubATC so clearances are answered per-base.
 using AirbaseAirfieldMap =
     std::unordered_map<std::uint32_t, ScenarioAirfield>;
+
+// ============================================================================
+// A-G employment tranche — the campaign weapon map + loadout arming
+// ============================================================================
+//
+// The save's flight LoadoutStruct[] carries WEAPON IDs from the campaign's
+// WeaponDataTable (the wire table). The engine's WeaponClassTable is a
+// DIFFERENT table (built-in cards; FALCON4.WST import is future work), so
+// wire ids must be mapped before a station becomes droppable. Only
+// CONFIRMED identities are mapped — every source for the mapping is
+// documented in the table below; unmapped ids ride as bookkeeping stations
+// labeled "WPN-<id>" (honest placeholders, never invented names).
+
+/// One confirmed wire→engine weapon mapping.
+struct CampaignWeaponMapEntry {
+    std::uint16_t wire_id;         // campaign WeaponDataTable index
+    const char* engine_name;       // WeaponClassTable::find_by_name key
+};
+
+/// The confirmed mapping (source: FreeFalcon src/campaign/include/
+/// campweap.h — the WEAP_BAI_LOADOUT comment documents "GBU-12 (wid 68)
+/// and GBU-22 (wid 310)"). Cross-validated: wire id 68 appears in
+/// TestCamp's BAI/SAD flights exactly where the comment says BAI loads
+/// GBU-12s.
+inline constexpr CampaignWeaponMapEntry kCampaignWeaponMap[] = {
+    {68, "GBU-12"},    // GBU-12 Paveway II (the mapped droppable bomb)
+    {310, "GBU-12"},   // GBU-22 (v>=73 saves; closest engine card — the
+                       // 500-lb-class Paveway shares the Mk-82 warhead)
+};
+
+/// Resolve a wire weapon id to an engine weapon handle
+/// (kInvalidWeapon when unmapped).
+[[nodiscard]] std::uint32_t
+campaign_weapon_handle(const weapons::WeaponClassTable& table,
+                       std::uint16_t wire_id);
+
+/// Human label for a wire weapon id: the engine name when mapped, else
+/// "WPN-<id>" (an honest placeholder — never an invented name).
+[[nodiscard]] std::string
+campaign_weapon_label(const weapons::WeaponClassTable& table,
+                      std::uint16_t wire_id);
+
+/// What arming a flight's ordnance produced — the QC summary + tests
+/// read exactly these counters.
+struct StrikeArmament {
+    /// Stations copied from the decoded wire loadout (droppable mapped
+    /// bombs + bookkeeping WPN-<id> stations + pods).
+    int wire_stations = 0;
+    /// Droppable stations among them (mapped to engine weapon cards).
+    int droppable_stations = 0;
+    /// Bombs available across the droppable stations.
+    int droppable_rounds = 0;
+    /// Doctrine MK-82 stations added because the flight's mission is an
+    /// A/G delivery category but no wire station mapped to a bomb
+    /// (mirrors FreeFalcon's LoadWeapons squadron-stores fallback — the
+    /// flight still delivers ordnance, and the QC summary says so).
+    int doctrine_stations = 0;
+    /// True when the brain's strike fire control is armed (droppable
+    /// ordnance exists + the mission is a delivery category).
+    bool strike_armed = false;
+};
+
+/// Arm one spawned campaign aircraft with ordnance + the strike fire
+/// control. Attaches the WeaponStoreComponent built from the flight's
+/// decoded loadout (mapped stations droppable, the rest bookkeeping),
+/// applies the doctrine fill for A/G-mission flights with no droppable
+/// wire station, and configures the brain's StrikeModule (drag factor
+/// from the bomb card's own ballistics, salvo = the droppable rounds,
+/// clipped to the doctrine stick).
+///
+/// Missions in the Strike/SEAD/CAS categories arm; everything else
+/// (CAP/escort/support/recon) keeps the store for bookkeeping only and
+/// the strike trigger stays disarmed — an air-superiority flight never
+/// drops on a target it passes.
+[[nodiscard]] StrikeArmament
+arm_flight_strike(const weapons::WeaponClassTable& table,
+                  f4::entities::EntityHandle& aircraft,
+                  const std::vector<f4::entities::LoadoutStationState>&
+                      loadout_stations,
+                  std::uint8_t mission_byte);
 
 /// Read an airbase entity's VU_ID.num from its PropertyBag (0 when the
 /// entity has no id recorded — hand-built test objectives).
@@ -204,7 +297,10 @@ spawn_aircraft_for_flight(f4::entities::EntityWorld& world,
                           const ScenarioAirfield& airfield,
                           const ScenarioAircraft& scenario_aircraft,
                           int parking_slot,
-                          const AirbaseAirfieldMap* airbase_airfields = nullptr);
+                          const AirbaseAirfieldMap* airbase_airfields = nullptr,
+                          const std::unordered_map<std::uint32_t,
+                              f4::entities::EntityId>* objective_id_map = nullptr,
+                          const weapons::WeaponClassTable* weapon_table = nullptr);
 
 /// Spawn one aircraft entity per Flight-class unit in the EntityWorld.
 ///
@@ -262,7 +358,10 @@ spawn_aircraft_from_flights(f4::entities::EntityWorld& world,
                              const ScenarioAirfield& airfield,
                              const ScenarioAircraft& scenario_aircraft,
                              const FlightSpawnFilter& filter = {},
-                             const AirbaseAirfieldMap* airbase_airfields = nullptr);
+                             const AirbaseAirfieldMap* airbase_airfields = nullptr,
+                             const std::unordered_map<std::uint32_t,
+                                 f4::entities::EntityId>* objective_id_map = nullptr,
+                             const weapons::WeaponClassTable* weapon_table = nullptr);
 
 // ============================================================================
 // Mode B: Unit Deaggregation

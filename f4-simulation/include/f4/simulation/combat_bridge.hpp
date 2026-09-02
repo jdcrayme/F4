@@ -140,10 +140,23 @@ private:
 ///                       burst's first emitted round.
 ///
 /// Returns the number of missiles launched this tick.
-std::size_t execute_brain_combat_intents(entities::EntityWorld& world,
-                                         messaging::MessageBus& bus,
-                                         const weapons::WeaponClassTable& table,
-                                         double sim_time_s);
+///
+/// `active_aircraft` (optional): the host's roster of SIMULATED aircraft
+/// (Simulation::aircraft_entities_). When present, the intents pass
+/// visits exactly that roster — at campaign scale the world also holds
+/// thousands of DORMANT parked-inventory brains (squadron deaggregation)
+/// whose per-entity lookups cost more than the entire intents pass;
+/// the roster is also the honest statement of "who is being simulated"
+/// (FreeFalcon's fidelity-tiering rule: no simulation work outside the
+/// active set). Nullptr walks with_component<BrainComponent>() — the
+/// legacy shape for hand-built test worlds (and dormant brains are
+/// skipped there too).
+std::size_t execute_brain_combat_intents(
+    entities::EntityWorld& world,
+    messaging::MessageBus& bus,
+    const weapons::WeaponClassTable& table,
+    double sim_time_s,
+    const std::vector<entities::EntityId>* active_aircraft = nullptr);
 
 /// Turn a spawned brain into a fighting brain: enables the combat ladder
 /// and configures the fire-control envelopes from the weapon class

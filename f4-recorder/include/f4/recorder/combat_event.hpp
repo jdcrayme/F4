@@ -50,6 +50,8 @@ enum class CombatEventKind : std::uint8_t {
     DamageApplied  = 6,  // hit points were deducted        (weapons)
     EntityKilled   = 7,  // live -> killed transition       (weapons)
     GunFired       = 8,  // a gun burst's first round       (weapons)
+    BombReleased   = 9,  // a gravity weapon left the rack  (weapons)
+    BombImpact     = 10, // a bomb reached the impact plane (weapons)
 };
 
 /// Stable wire names ("track_acquired", ...). Emitted as the JSON "kind"
@@ -65,6 +67,8 @@ enum class CombatEventKind : std::uint8_t {
         case CombatEventKind::DamageApplied:   return "damage_applied";
         case CombatEventKind::EntityKilled:    return "entity_killed";
         case CombatEventKind::GunFired:        return "gun_fired";
+        case CombatEventKind::BombReleased:    return "bomb_released";
+        case CombatEventKind::BombImpact:      return "bomb_impact";
     }
     return "unknown";
 }

@@ -198,6 +198,21 @@ struct MissionRequestRecord {
     int8_t   max_to = 0;                // big branch only
 };
 
+/// One station in a flight's LoadoutStruct (the per-hardpoint fill for
+/// one aircraft of the flight — the save stores one LoadoutStruct per
+/// aircraft slot; every slot of the flight carries the same loadout in
+/// practice, so the decoder keeps entry 0's station list as the flight's
+/// loadout and records how many entries followed).
+///   v<=72: uchar WeaponID[16]  + uchar WeaponCount[16]  (32 bytes)
+///   v>=73: short WeaponID[16]  + short WeaponCount[16]  (48 bytes)
+/// Weapon ids are indices into the campaign's WeaponDataTable (the wire
+/// table — F4 maps them to engine weapon classes at the campaign bridge,
+/// see campaign_bridge.hpp's campaign_weapon_map).
+struct LoadoutStationRecord {
+    uint16_t weapon_id = 0;   ///< 0 = empty hardpoint
+    uint16_t count = 0;       ///< rounds/bombs on the station
+};
+
 /// Subclass-specific tail fields. Only the fields relevant to the
 /// decoded UnitClass are populated; others stay at default values.
 struct UnitSubclassData {
@@ -255,6 +270,10 @@ struct UnitSubclassData {
     int32_t  mission_over_time = 0;
     int16_t  mission_target = 0;
     uint8_t  loadouts = 0;      // count of loadout[] entries
+    /// Flight loadout stations (entry 0 of loadout[]; empty when the
+    /// flight carries no loadout entries). One station per hardpoint,
+    /// weapon_id 0 = empty.
+    std::vector<LoadoutStationRecord> loadout_stations;
     uint8_t  mission = 0;
     uint8_t  old_mission = 0;   // v > 65 only
     uint8_t  priority = 0;

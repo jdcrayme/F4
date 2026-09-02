@@ -62,6 +62,7 @@ using FeatureClassState  = f4::entities::FeatureClassState;
 using WaypointState      = f4::entities::WaypointState;
 using PilotState         = f4::entities::PilotState;
 using VehicleGroup       = f4::entities::VehicleGroup;
+using LoadoutStationState = f4::entities::LoadoutStationState;
 using UnitClass          = f4::entities::UnitClass;
 // unit_class_name() is available as f4::entities::unit_class_name().
 // Code that previously used f4::world::unit_class_name should switch
@@ -263,6 +264,10 @@ struct UnitState {
     int32_t  mission_over_time = 0;           // CampaignTime
     int16_t  mission_target = 0;              // target ID slot
     uint8_t  loadouts = 0;                    // # of loadout entries (one per aircraft)
+    /// Decoded stations of the flight's loadout (entry 0 of the save's
+    /// LoadoutStruct[]): wire weapon id + count per hardpoint, id 0
+    /// dropped. Empty for clean-wing flights. (A-G tranche)
+    std::vector<LoadoutStationState> loadout_stations;
     uint8_t  mission = 0;                     // MissionType enum (BARCAP, INTERCEPT, ...)
     uint8_t  flight_priority = 0;             // mission priority
     uint8_t  mission_id = 0;                  // mission instance ID

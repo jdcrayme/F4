@@ -65,6 +65,12 @@ void EntityWorld::destroy(EntityId id) {
     for (const auto& [key, value] : rec->tags) {
         index_tag_remove(key, value, id);
     }
+    // Component-type index: same treatment for every component bucket the
+    // entity is in (BEFORE the components map is cleared — the walk needs
+    // the types it carries). Unbuilt types are skipped inside.
+    for (const auto& [tid, comp] : rec->components) {
+        component_index_on_remove(tid, id);
+    }
     rec->alive = false;
     rec->tags.clear();
     rec->components.clear();       // behavioral components destroyed — the
@@ -307,6 +313,50 @@ void EntityWorld::index_tag_remove(const TagKey& key, const TagValue& value, Ent
             tag_index_.erase(kit);
         }
     }
+}
+
+// ============================================================================
+// Component-type index maintenance (see the index notes in entity.hpp).
+// Both are no-ops for types never queried (lazy build covers them).
+// ============================================================================
+void EntityWorld::component_index_on_add(std::type_index tid, EntityId id,
+                                         bool replacing) {
+    auto it = component_index_.find(tid);
+    if (it == component_index_.end()) return;  // type never queried yet
+    if (replacing) return;  // component overwritten in place — the entity's
+                            // id is already in the bucket
+    auto& bucket = it->second;
+    if (bucket.empty() || id.index() > bucket.back().index()) {
+        // Tail append preserves entity-index order (the scan's order).
+        // Weapons spawn at the world's tail during a run, so this is the
+        // common case; O(1) amortized.
+        bucket.push_back(id);
+    } else {
+        // Out-of-order insert (component added to a reused slot below the
+        // tail): drop the bucket, rebuild lazily on the next query. Rare.
+        component_index_.erase(it);
+    }
+}
+
+void EntityWorld::component_index_on_remove(std::type_index tid, EntityId id) {
+    auto it = component_index_.find(tid);
+    if (it == component_index_.end()) return;
+    auto& bucket = it->second;
+    for (auto b = bucket.begin(); b != bucket.end(); ++b) {
+        if (*b == id) {
+            bucket.erase(b);
+            break;
+        }
+    }
+    // NOTE: empty buckets are KEPT, not erased. A bucket that is queried
+    // every tick but currently empty (RadarSimComponent/MissileComponent/
+    // BombComponent in a world with no combat traffic) would otherwise be
+    // erased here and REBUILT by the next query — a full O(world) walk per
+    // tick per empty type, the exact cost the index exists to kill. An
+    // empty bucket is correct (invariant 1: exactly the live entities
+    // carrying T — none) and on_add appends into it fine. The map holds at
+    // most one bucket per distinct queried type, so keeping empties is
+    // bounded by the number of types the host actually queries (~15).
 }
 
 // ============================================================================

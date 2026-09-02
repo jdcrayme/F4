@@ -47,6 +47,8 @@
 #include <f4/entities/entity.hpp>
 #include <f4/messaging/bus.hpp>
 
+#include <cmath>
+
 namespace f4::flight {
 
 // ============================================================================
@@ -204,6 +206,13 @@ public:
 
     double vcas_kts() const override {
         return fm_.state().vcas;
+    }
+
+    double ground_speed_fps() const override {
+        // True horizontal kinematic speed (NED x=north, y=east — both in
+        // the horizontal plane). The A-G release trigger keys on this.
+        const auto& k = fm_.state().kin;
+        return std::sqrt(k.xdot * k.xdot + k.ydot * k.ydot);
     }
 
     double heading_rad() const override {

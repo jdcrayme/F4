@@ -103,9 +103,14 @@ void CampaignSimSpawner::handle(const f4::campaign::MissionIntent& intent) {
     const int slot = per_airbase_index_[airbase_id.value]++;
 
     // The shared Milestone-A spawn path: routes attached, TEAM tag mapped,
-    // per-airbase parking — identical to the bulk path's output.
+    // per-airbase parking — identical to the bulk path's output. The A-G
+    // tranche passes the objective id map (waypoint strike-target
+    // resolution) and the built-in weapon table (loadout arming) when the
+    // host supplied them; null table = unarmed spawns (the pre-A-G
+    // behavior for single-purpose route QC).
     auto spawned_id = spawn_aircraft_for_flight(
-        world_, it->second, ct_, db_, cfg_, airfield_, tpl_, slot);
+        world_, it->second, ct_, db_, cfg_, airfield_, tpl_, slot,
+        nullptr, objective_id_map_, weapon_table_);
     if (!spawned_id) {
         // Resolved entity wasn't a flight (corrupt map?). Count it as
         // unknown rather than failing the loop.

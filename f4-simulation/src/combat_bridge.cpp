@@ -12,6 +12,7 @@
 #include <f4/entities/types.hpp>
 #include <f4/recorder/flight_recorder.hpp>
 #include <f4/sensors/messages.hpp>
+#include <f4/weapons/bomb_battery.hpp>
 #include <f4/weapons/messages.hpp>
 #include <f4/weapons/missile_battery.hpp>
 #include <f4/weapons/weapon_store.hpp>
@@ -252,18 +253,38 @@ RadarBackedDetectionPolicy::classify(const f4::ai::TargetInfo& t) {
 // Brain combat-intent driver
 // ============================================================================
 
-std::size_t execute_brain_combat_intents(entities::EntityWorld& world,
-                                         messaging::MessageBus& bus,
-                                         const weapons::WeaponClassTable& table,
-                                         double sim_time_s) {
+std::size_t execute_brain_combat_intents(
+    entities::EntityWorld& world,
+    messaging::MessageBus& bus,
+    const weapons::WeaponClassTable& table,
+    double sim_time_s,
+    const std::vector<entities::EntityId>* active_aircraft) {
     std::size_t launches = 0;
 
-    // Every entity with a combat-enabled brain. (with_component is a
-    // copy of the id list — safe to create entities while iterating.)
-    for (const auto eid : world.with_component<f4::ai::BrainComponent>()) {
+    // The visit set: the host's ACTIVE roster when it provides one (see
+    // combat_bridge.hpp — campaign worlds hold thousands of dormant
+    // parked-inventory brains that must not cost anything here), else the
+    // world's brains (the legacy shape — hand-built test worlds).
+    std::vector<entities::EntityId> visit;
+    if (active_aircraft != nullptr) {
+        visit = *active_aircraft;   // copy: launches mutate the world
+    } else {
+        visit = world.with_component<f4::ai::BrainComponent>();
+    }
+
+    // Every entity with a combat-enabled brain. (the visit list is a
+    // copy of the ids — safe to create entities while iterating.)
+    for (const auto eid : visit) {
         entities::EntityHandle shooter(eid, &world);
         auto* brain = shooter.get<f4::ai::BrainComponent>();
-        if (!brain || !brain->combat_enabled()) continue;
+        if (!brain) continue;
+
+        // Dormant brains (parked squadron inventory — a populated save
+        // spawns ~4,000 of them) hold no intent and fire nothing: skip
+        // before any per-brain work. The dormant flag is the same one
+        // update_all's behavioral cache respects; without this check the
+        // intents pass walked every parked airframe every tick.
+        if (brain->is_dormant()) continue;
 
         const auto& intent = brain->combat_intent();
 
@@ -271,6 +292,40 @@ std::size_t execute_brain_combat_intents(entities::EntityWorld& world,
         // do not fight — see classify above).
         const auto* dmg = shooter.get<entities::DamageStateComponent>();
         const bool dead = dmg != nullptr && dmg->killed;
+
+        // --- A-G release intent (the M5 strike slice). ----------------------
+        // Runs for brains with combat ON or OFF alike — bombing a target
+        // is the mission, not the air fight, and campaign-spawned flights
+        // keep the A/A ladder dark (no radar, omniscient-GCI-free). One
+        // pulse = one bomb off one loaded Bomb-category station; the
+        // StrikeModule's salvo pacer owns the stick spacing.
+        if (intent.bomb_release && intent.bomb_target_id != 0 && !dead) {
+            auto* store = shooter.get<weapons::WeaponStoreComponent>();
+            if (store) {
+                std::uint32_t bomb_handle = weapons::kInvalidWeapon;
+                for (std::size_t s = 0; s < store->station_count(); ++s) {
+                    const auto* st = store->station(s);
+                    if (!st || st->rounds <= 0) continue;
+                    const auto* rec = table.get(st->weapon_handle);
+                    if (rec != nullptr &&
+                        rec->category == weapons::WeaponCategory::Bomb) {
+                        bomb_handle = st->weapon_handle;
+                        break;
+                    }
+                }
+                if (bomb_handle != weapons::kInvalidWeapon) {
+                    const auto bomb = weapons::release_bomb(
+                        world, bus, shooter,
+                        entities::EntityId{intent.bomb_target_id},
+                        table, bomb_handle, sim_time_s);
+                    if (bomb.valid()) ++launches;
+                }
+            }
+        }
+
+        // The A/A intents below require the combat-enabled brain (the
+        // sensor-fusion ladder that produces them runs only when armed).
+        if (!brain->combat_enabled()) continue;
 
         // --- Lock intent: STT through the shooter's own radar. ---------
         if (intent.radar_lock && intent.lock_target_id != 0 && !dead) {
@@ -480,6 +535,49 @@ void attach_combat_event_recorder(Simulation& sim) {
             e.kind = recorder::CombatEventKind::EntityKilled;
             e.subject_id = m.target_id;
             e.object_id = m.shooter_id;
+            rec->record(std::move(e));
+        });
+
+    // A-G (M5 strike slice): the release + impact events. The impact event
+    // carries the OBJECTIVE damage summary in the existing fields — damage
+    // = features destroyed this impact, hit_points_after = the value-
+    // weighted destroyed % (the objective's "hit points" are its features'
+    // operational value; see bomb_battery.hpp). miss_distance = impact to
+    // aim point.
+    bus.subscribe<weapons::BombReleasedMessage>(
+        [rec, event_tick, table](const weapons::BombReleasedMessage& m) {
+            recorder::CombatEvent e;
+            e.tick = event_tick();
+            e.sim_time_s = m.sim_time_s;
+            e.kind = recorder::CombatEventKind::BombReleased;
+            e.subject_id = m.shooter_id;
+            e.object_id = m.target_id;
+            e.missile_id = m.bomb_id;
+            e.weapon_handle = m.weapon_handle;
+            e.position = m.position;
+            e.speed_ft_s = m.speed_fts;
+            if (const auto* w = table->get(m.weapon_handle)) {
+                e.weapon_name = w->name;
+            }
+            rec->record(std::move(e));
+        });
+
+    bus.subscribe<weapons::BombImpactMessage>(
+        [rec, event_tick](const weapons::BombImpactMessage& m) {
+            recorder::CombatEvent e;
+            e.tick = event_tick();
+            e.sim_time_s = m.sim_time_s;
+            e.kind = recorder::CombatEventKind::BombImpact;
+            e.subject_id = m.shooter_id;
+            e.object_id = m.target_id;
+            e.missile_id = m.bomb_id;
+            e.end_cause = weapons::bomb_end_cause_name(m.cause);
+            e.position = m.position;          // the impact point
+            e.miss_distance_ft = m.miss_distance_ft;
+            e.flight_time_s = m.flight_time_s;
+            e.damage = m.features_destroyed;  // features destroyed this hit
+            e.hit_points_after = m.destroyed_pct;  // objective destroyed %
+            e.killed = m.features_destroyed > 0;
             rec->record(std::move(e));
         });
 
