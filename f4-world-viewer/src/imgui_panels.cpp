@@ -165,6 +165,12 @@ void ViewerApp::draw_imgui() {
             // exposed in the UI. Now wired up so users can actually
             // enable battalion→brigade OOB lines.
             ImGui::Checkbox("Hierarchy lines (BN→BDE)", &impl_->show_hierarchy_lines);
+            ImGui::Separator();
+            ImGui::TextDisabled("Campaign QC (B.3)");
+            ImGui::Checkbox("ATO / Tasking window",  &impl_->show_ato);
+            ImGui::Checkbox("Mission→Target links",  &impl_->show_mission_links);
+            ImGui::Checkbox("Package→Element links", &impl_->show_package_links);
+            ImGui::Checkbox("Bullseye",               &impl_->show_bullseye);
             // POLISH-2.4: minimap toggle in View menu.
             ImGui::Checkbox("Minimap", &impl_->show_minimap);
             ImGui::Separator();
@@ -646,6 +652,13 @@ void ViewerApp::draw_imgui() {
     // with stance matrix, country memberships, experience, and command
     // chain).
     draw_campaign_and_teams_view();
+
+    // --- ATO / Tasking window (B.3 campaign QC) ---
+    // The sortable flight table: callsign, mission, team, package, TOT,
+    // target, squadron. Click-to-select + camera focus; shares the
+    // mission/team filters with the canvas overlays. See
+    // campaign_qc_view.cpp.
+    draw_campaign_qc_view();
 
     rlImGuiEnd();
 }

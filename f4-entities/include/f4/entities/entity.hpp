@@ -287,12 +287,17 @@ namespace f4::entities {
     //                        brain's outputs and advances simulation state.
     //
     // The two-pass split guarantees that by the time a flight model updates,
-    // every brain on every entity has already published its commands. This
-    // is the simplest correct ordering; the eventual optimization (campaign
-    // scale, N=1000+) is to cache a priority-sorted vector of behavioral
-    // component pointers per EntityRecord, avoiding the dynamic_cast in
-    // update_all(). At Phase A scale (N=1-4 entities, ~3 components each)
-    // the dynamic_cast is invisible in profiles.
+    // every brain on every entity has already published its commands. The
+    // campaign-scale optimization is DONE: EntityWorld caches a flat vector
+    // of behavioral component pointers (rebuilt lazily when components are
+    // added/removed or entities created/destroyed), so update_all() no
+    // longer dynamic_casts every component of every entity each tick. A
+    // populated campaign world (4,374 entities, ~5 components each) went
+    // from ~36 ms/tick to ~0.2 ms/tick with 4 spawned aircraft. Pass
+    // semantics are unchanged: priorities are re-read every tick (a
+    // component whose priority() changes at runtime still moves between
+    // passes), and within a pass the visit order matches the entity-index /
+    // component-map order the pre-cache implementation walked.
     //
     // on_attached() is called once by EntityHandle::add<T>() after the
     // component is constructed and stored on the entity. Override to
@@ -544,6 +549,32 @@ namespace f4::entities {
         // Cross-references (resolved in bridge second pass)
         EntityId package;                       // resolved EntityId of parent Package
         EntityId squadron;                      // resolved EntityId of owning Squadron
+        /// Resolved EntityId of the mission target — the objective (or, for
+        /// unit-targeted missions like CAS/BAI, the unit) whose VU_ID.num is
+        /// `mission_target`. Invalid (0) when the flight carries no target or
+        /// the target VU_ID doesn't resolve. Campaign-QC rendering and the
+        /// B.3 spawner's route builder both consume this. (B.3 tranche)
+        EntityId target;
+    };
+
+    /// Mission request carried by a Package unit — the ATM's "please build a
+    /// package for this" worklist entry that produced the package. Decoded
+    /// from the package JSON's `mis_request` block (mission, tot, priority,
+    /// action_type, target_num, target_creator, requester_num). Present only
+    /// when the save actually carried a request (v71 saves do; synthetic
+    /// fixtures may not). (B.3 tranche)
+    struct PackageMissionRequest {
+        bool present = false;
+        uint8_t mission = 0;                    // MissionType enum
+        int32_t tot = 0;                        // CampaignTime (absolute)
+        uint8_t priority = 0;
+        uint16_t action_type = 0;
+        uint32_t target_num = 0;                // raw VU_ID.num
+        uint32_t target_creator = 0;            // raw VU_ID.creator
+        uint32_t requester_num = 0;             // raw VU_ID.num
+        // Cross-references (resolved in bridge second pass)
+        EntityId target;                        // resolved from target_num
+        EntityId requester;                     // resolved from requester_num
     };
 
     /// Package-specific state (groups multiple Flights).
@@ -558,6 +589,14 @@ namespace f4::entities {
         EntityId jstar;
         EntityId ecm;
         EntityId tanker;
+        /// The package's element flights, in wire order. Resolved from the
+        /// package unit's element_ids[] VU_ID vector during the bridge second
+        /// pass — same mechanism as Brigade→children, but for air packages.
+        /// The Flights also carry the reverse link (FlightPlanComponent::
+        /// package), so consumers can walk either direction. (B.3 tranche)
+        std::vector<EntityId> elements;
+        /// The ATM mission request that produced this package, when present.
+        PackageMissionRequest request;
     };
 
     /// Vehicle composition for units with vehicle groups.
@@ -635,6 +674,11 @@ namespace f4::entities {
         int32_t te_flags = 0;
         std::vector<int32_t> te_number_aircraft;
         std::vector<int32_t> te_team_pts;
+        /// B.3 QC tranche — the campaign's shared bullseye reference point
+        /// (grid coordinates; the viewer draws it as a crosshair).
+        int32_t bullseye_x = 0;
+        int32_t bullseye_y = 0;
+        int32_t bullseye_name = 0;
     };
 
     // ============================================================================
@@ -669,7 +713,15 @@ namespace f4::entities {
             , free_list_(std::move(other.free_list_))
             , tag_index_(std::move(other.tag_index_))
             , cookie_(detail::next_world_cookie())
-        {}
+        {
+            // The moved-from world no longer owns the component objects its
+            // cache points at — clear it so a stray update_all() on the
+            // source rebuilds (into an empty world) instead of walking
+            // dangling pointers. The destination rebuilds lazily.
+            other.behavioral_cache_.clear();
+            other.behavioral_cache_dirty_ = true;
+            behavioral_cache_dirty_ = true;
+        }
 
         // Move assignment: same reasoning — regenerate the cookie so old
         // handles against `*this` (before the assignment) don't accidentally
@@ -680,6 +732,12 @@ namespace f4::entities {
                 free_list_  = std::move(other.free_list_);
                 tag_index_  = std::move(other.tag_index_);
                 cookie_     = detail::next_world_cookie();
+                // Both sides' caches are now stale (this: old components
+                // destroyed; other: nodes transferred here). See move ctor.
+                behavioral_cache_.clear();
+                behavioral_cache_dirty_ = true;
+                other.behavioral_cache_.clear();
+                other.behavioral_cache_dirty_ = true;
             }
             return *this;
         }
@@ -796,6 +854,41 @@ namespace f4::entities {
         using TagValueIndex = std::unordered_map<TagValue, std::vector<EntityId>, TagValueHash>;
         std::unordered_map<TagKey, TagValueIndex, TagKeyHash> tag_index_;
         std::vector<EntityId> empty_buckets_;  // stable empty vector for misses
+
+        // ── Behavioral-component cache (campaign-scale update_all) ────────
+        //
+        // update_all() used to dynamic_cast every component of every entity
+        // twice per tick. At campaign scale (a populated save: ~4,374
+        // entities, ~5 components each) that was ~52,000 dynamic_casts +
+        // hash-map walks per tick — ~36 ms, dwarfing the actual simulation
+        // work. The cache holds one flat vector of the behavioral components
+        // (visit order = entity index order, then component-map order, the
+        // same order the uncached loop walked), rebuilt lazily:
+        //
+        //   * add<T>() / remove<T>() where T derives from
+        //     BehavioralComponentBase -> invalidate_behavioral_cache()
+        //   * create() / destroy()                    -> invalidate
+        //   * move ctor/assign                         -> clear + invalidate
+        //
+        // Raw pointers are safe because component objects live in heap
+        // nodes owned by each EntityRecord's component map: destroying a
+        // component is only possible through remove<T>()/destroy() (both
+        // invalidate), and growing entities_ moves the records but
+        // transfers the map nodes (element addresses stable).
+        //
+        // THE invariant this relies on (already required by the uncached
+        // implementation): the world is NEVER mutated during update_all()
+        // itself — entity creation/destruction and component mutation
+        // happen between ticks (deferred bus messages are flushed after
+        // update_all returns; missile spawns happen outside the loop; see
+        // Simulation::tick). If that invariant is ever broken, both the
+        // cached and the uncached version are UB; the cache adds no new
+        // requirement.
+        std::vector<BehavioralComponentBase*> behavioral_cache_;
+        bool behavioral_cache_dirty_ = true;
+
+        void invalidate_behavioral_cache() noexcept { behavioral_cache_dirty_ = true; }
+        void rebuild_behavioral_cache();
 
         // World cookie: a random 64-bit value generated at EntityWorld construction.
         // EntityHandle captures this cookie at creation. If the EntityWorld is
@@ -942,6 +1035,11 @@ namespace f4::entities {
             comp->on_attached(*this);
         }
         rec->components[std::type_index(typeid(T))] = std::move(comp);
+        if constexpr (std::is_base_of_v<BehavioralComponentBase, T>) {
+            // New behavioral component entered the world — the cache must
+            // be rebuilt before the next update_all() (see cache notes).
+            world_->invalidate_behavioral_cache();
+        }
         return ref;
     }
 
@@ -951,6 +1049,12 @@ namespace f4::entities {
         auto* rec = world_->find(id_);
         if (!rec) return;
         rec->components.erase(std::type_index(typeid(T)));
+        if constexpr (std::is_base_of_v<BehavioralComponentBase, T>) {
+            // A behavioral component left the world (its unique_ptr was
+            // just destroyed) — the cache's pointer now dangles until
+            // rebuilt, so flag the rebuild now.
+            world_->invalidate_behavioral_cache();
+        }
     }
 
 } // namespace f4::entities

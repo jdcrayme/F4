@@ -111,6 +111,7 @@ add_library(f4_world_viewer STATIC
     src/ground_layout_view.cpp
     src/ground_layout_3d.cpp
     src/campaign_and_teams_view.cpp
+    src/campaign_qc_view.cpp
     src/file_dialog.cpp
     src/settings.cpp
     src/replay_mode.cpp
@@ -146,6 +147,7 @@ target_link_libraries(f4_world_viewer PUBLIC
     f4-json
     f4-renderer
     f4-recorder
+    f4-campaign        # B.3 QC: mission name/category tables for the ATO view
 )
 target_link_libraries(f4_world_viewer PRIVATE raylib)
 # tinyfiledialogs needs to be compiled as C (it's a .c file). Set the

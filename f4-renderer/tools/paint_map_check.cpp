@@ -11,6 +11,7 @@
 #include "raylib.h"
 
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 
 int main(int argc, char* argv[]) {

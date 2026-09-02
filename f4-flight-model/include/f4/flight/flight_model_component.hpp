@@ -81,6 +81,18 @@ public:
         // host has called init()).
         if (!initialized_) return;
 
+        // Dormant: parked inventory that is not simulated. The squadron
+        // spawner marks every un-tasked parked airframe dormant — a
+        // populated campaign save carries ~1,000 of them, and ticking
+        // 1,000 idle FCS/EOM integrations at 60 Hz costs ~25 ms/tick
+        // for state that never changes (a parked jet with brakes on and
+        // idle throttle just sits). The entity is still rendered (the
+        // Transform + VisualModel components are passive and always
+        // current); a dormant airframe only starts simulating when a
+        // future campaign tick launches it (the flight spawner always
+        // creates NON-dormant aircraft).
+        if (dormant_) return;
+
         // Drive the FlightModel one step using the pending input.
         // If no brain wrote to pending_input_ this tick, we use idle
         // controls (the default-constructed PilotInput has throttle=0,
@@ -126,6 +138,12 @@ public:
     void mark_initialized() noexcept { initialized_ = true; }
 
     [[nodiscard]] bool is_initialized() const noexcept { return initialized_; }
+
+    // --- Dormancy (parked inventory) ------------------------------------
+    // See the update() override. Set by the squadron spawner; cleared by
+    // nothing today (a launch creates a fresh non-dormant entity).
+    void set_dormant(bool d) noexcept { dormant_ = d; }
+    [[nodiscard]] bool is_dormant() const noexcept { return dormant_; }
 
     // --- FlightModel access ---
     [[nodiscard]] FlightModel&       model()       noexcept { return fm_; }
@@ -234,6 +252,9 @@ private:
     // Set to true by init() or mark_initialized(). When false, update()
     // is a no-op (the FM's tables are empty; calling update() would crash).
     bool initialized_{false};
+
+    // Dormant: skip update() entirely (parked squadron inventory).
+    bool dormant_{false};
 
     // The brain's output for this tick. Default-constructed = idle controls.
     // Written by BrainComponent in pass 1, consumed and cleared in pass 2.

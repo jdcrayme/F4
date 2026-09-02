@@ -239,6 +239,23 @@ struct Scenario {
     std::filesystem::path world_json_path;
     std::filesystem::path class_table_path;
 
+    /// B.3: restrict which of the world's flights materialize (large saves
+    /// carry 449). JSON block "campaign_flight_filter" with fields
+    /// "team" (int slot), "mission" ("AMIS_BARCAP" name or int byte),
+    /// "max_flights" (int cap). Default = no filter.
+    ///
+    /// NOTE: this mirrors campaign_bridge.hpp's FlightSpawnFilter rather
+    /// than reusing it — scenario.hpp sits BELOW campaign_bridge.hpp in
+    /// the include graph (the bridge includes the scenario), so the
+    /// scenario layer keeps its own aggregate. Simulation::initialize
+    /// converts between the two; the field vocabulary is identical.
+    struct CampaignFlightFilter {
+        int team{-1};        ///< -1 = any team
+        int mission{-1};     ///< -1 = any mission byte
+        int max_flights{0};  ///< 0 = unlimited
+    };
+    CampaignFlightFilter campaign_flight_filter;
+
     /// Optional: Falcon4.AII (terrdata/ai/Falcon4.AII) — the campaign AI
     /// INI whose SIM_BUBBLE_SIZE / GROUND_BUBBLE_SIZE tune the sim-bubble
     /// deaggregation radii (B.0). Empty (the default) or a missing file
@@ -313,6 +330,12 @@ struct Scenario {
     int    total_ticks{600};            ///< 60 * 600 = 10 min default
     bool   record{true};                ///< write trace.json on exit
     std::filesystem::path record_path;  ///< "trace.json"
+    /// B.3/QC: snapshot decimation — record every Nth tick per aircraft
+    /// (1 = every tick, the original behavior). Long multi-aircraft QC
+    /// runs (6 aircraft x 36000 ticks = 216k snapshots, ~100 MB JSON)
+    /// set this to 10-30; the replay timeline keeps 6-2 samples per
+    /// second, which is plenty for route-level QC.
+    int    record_every{1};
     /// Optional per-tick FCS/AI/EOM CSV trace path (for control-loop diagnosis).
     /// When non-empty, Simulation writes a CSV with one row per tick per
     /// aircraft containing AI commands, FCS intermediates, body rates,

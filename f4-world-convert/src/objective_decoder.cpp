@@ -64,7 +64,7 @@ std::string objective_type_name(int16_t type) {
     }
 }
 
-DecodedObjectives decode_obj(const uint8_t* data, std::size_t size) {
+DecodedObjectives decode_obj(const uint8_t* data, std::size_t size, int camp_version) {
     DecodedObjectives out;
     if (size < OBJ_HEADER_BYTES) throw std::runtime_error("obj: sub-file too small for header");
 
@@ -88,10 +88,9 @@ DecodedObjectives decode_obj(const uint8_t* data, std::size_t size) {
     out.inner_size = buf.size();
     out.objectives.reserve(static_cast<std::size_t>(out.count));
 
-    // gCampDataVersion < 70: CampBaseClass::Load skips pos_.z_ (set to 0).
-    // Our fixture is version 63, so z is NOT in the stream. This is the
-    // critical version-conditional that the decoder must respect.
-    const bool has_z = false;   // version 63 < 70
+    // gCampDataVersion < 70: CampBaseClass::Load skips pos_.z_ (set to 0);
+    // >= 70 writes it (campbase.cpp:128). TestCamp.cam (v71) carries z.
+    const bool has_z = camp_version >= 70;
 
     // Decode records until we either finish all `count` or hit a cursor
     // desync (a struct-size assumption that doesn't hold for some record).
@@ -110,8 +109,11 @@ DecodedObjectives decode_obj(const uint8_t* data, std::size_t size) {
         int16_t sentinel = c.i16();
 
         // --- CampBaseClass::Save ---
-        o.id_creator   = c.u32();         // VU_ID.creator
-        o.id_num       = c.u32();         // VU_ID.num
+        // VU_ID on disk: num_ first, creator_ second (vutypes.h:231).
+        // (The pre-v72 decoder read them swapped — harmless for the byte
+        // count, but every reported id_num/id_creator pair was reversed.)
+        o.id_num       = c.u32();
+        o.id_creator   = c.u32();         // VU_ID.num
         o.entity_type  = c.u16();
         o.x            = c.i16();         // GridIndex x
         o.y            = c.i16();         // GridIndex y
@@ -201,6 +203,53 @@ DecodedObjectives decode_obj(const uint8_t* data, std::size_t size) {
     // can report how much was left unconsumed).
     out.bytes_consumed = static_cast<std::size_t>(c.p - buf.data());
 
+    return out;
+}
+
+// ----------------------------------------------------------------------------
+// .obd — objective deltas (mid-campaign state changes).
+// SaveObjectiveDeltas (objectiv.cpp:3130) / DecodeObjectiveDeltas (:3571)
+// / ObjectiveClass::UpdateFromData (:539).
+// ----------------------------------------------------------------------------
+DecodedObjectiveDeltas decode_obd(const uint8_t* data, std::size_t size,
+                                  int camp_version) {
+    (void)camp_version;   // UpdateFromData has no version gates in [63,71]
+    DecodedObjectiveDeltas out;
+    if (size < 10) throw std::runtime_error("obd: sub-file too small");
+
+    Cursor top{data, data + size};
+    (void)top.i32();      // outer encoded size — unused
+    out.count = top.i16();
+    int32_t inner = top.i32();
+    if (out.count < 0) throw std::runtime_error("obd: negative delta count");
+    if (inner <= 0) throw std::runtime_error("obd: invalid inner size");
+
+    const uint8_t* comp = data + 10;
+    auto buf = lzss_expand(comp, size - 10, static_cast<std::size_t>(inner));
+    out.inner_size = buf.size();
+
+    Cursor c{buf.data(), buf.data() + buf.size()};
+    out.deltas.reserve(static_cast<std::size_t>(out.count));
+    for (int16_t i = 0; i < out.count; ++i) {
+        const uint8_t* before = c.p;
+        ObjectiveDelta d;
+        d.id_num     = c.u32();      // VU_ID: num, then creator
+        d.id_creator = c.u32();
+        d.last_repair = c.i32();
+        d.owner      = c.u8();
+        d.supply     = c.u8();
+        d.fuel       = c.u8();
+        d.losses     = c.u8();
+        uint8_t fstatus_len = c.u8();
+        d.fstatus.resize(fstatus_len);
+        if (fstatus_len > 0) c.read(d.fstatus.data(), fstatus_len);
+        if (c.error) {
+            c.p = before;
+            break;
+        }
+        out.deltas.push_back(std::move(d));
+    }
+    out.bytes_consumed = static_cast<std::size_t>(c.p - buf.data());
     return out;
 }
 

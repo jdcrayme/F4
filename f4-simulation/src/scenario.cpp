@@ -28,6 +28,7 @@
 
 #include "f4/simulation/scenario.hpp"
 
+#include <f4/campaign/mission_type.hpp>  // mission_type_byte (B.3 filter)
 #include <f4/json/reader.hpp>
 #include <f4/io/read_file.hpp>
 
@@ -196,9 +197,48 @@ Scenario parse_scenario(f4::json::Reader& r) {
             else if (mode == "campaign_flights") s.spawn_mode = SpawnMode::CampaignFlights;
             else throw std::runtime_error("scenario: unknown spawn_mode '" + mode + "'");
         }
+        // B.3: campaign flight filter — restricts which flights a
+        // campaign_flights scenario materializes. Mission may be given as
+        // a canonical name ("AMIS_BARCAP") or a raw byte.
+        else if (key == "campaign_flight_filter") {
+            r.expect('{');
+            bool firstk = true;
+            while (!r.consume('}')) {
+                if (!firstk) r.expect(',');
+                firstk = false;
+                const auto k = r.read_string();
+                r.expect(':');
+                if (k == "team") {
+                    s.campaign_flight_filter.team =
+                        static_cast<int>(r.read_int());
+                } else if (k == "mission") {
+                    if (r.peek('"')) {
+                        const auto name = r.read_string();
+                        const auto byte =
+                            f4::campaign::mission_type_byte(name);
+                        if (!byte) {
+                            throw std::runtime_error(
+                                "scenario: campaign_flight_filter mission '"
+                                + name + "' is not a mission type");
+                        }
+                        s.campaign_flight_filter.mission =
+                            static_cast<int>(*byte);
+                    } else {
+                        s.campaign_flight_filter.mission =
+                            static_cast<int>(r.read_int());
+                    }
+                } else if (k == "max_flights") {
+                    s.campaign_flight_filter.max_flights =
+                        static_cast<int>(r.read_int());
+                } else {
+                    skip_unknown(r);
+                }
+            }
+        }
         else if (key == "sim_dt")          s.sim_dt = r.read_number();
         else if (key == "total_ticks")     s.total_ticks = static_cast<int>(r.read_int());
         else if (key == "record")          s.record = r.read_bool();
+        else if (key == "record_every")    s.record_every = std::max(1, static_cast<int>(r.read_int()));
         else if (key == "record_path")     s.record_path = r.read_string();
         else if (key == "fcs_trace_path")  s.fcs_trace_path = r.read_string();
         else if (key == "start_in_approach") s.start_in_approach = r.read_bool();

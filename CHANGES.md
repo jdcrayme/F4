@@ -1,5 +1,90 @@
 # F4 Cleanup Pass — Changes Summary
 
+## B.3 — The Campaign→Sim Loop Closes, and the Viewer Becomes the QC Bench (B3-QC-1)
+
+**Live campaign flights now fly. `emit_flight_intents()` turns the 449
+tasked TestCamp flights into MissionIntents on the message bus; the new
+CampaignSimSpawner subscribes, resolves each intent's flight through the
+VU_ID map, and materializes it through the shared spawn path with its
+SAVED ROUTE attached — grid waypoints → ENU feet MissionPlans the digi
+brains actually fly (taxi, departure, enroute). The world viewer renders
+the whole tasking picture as the primary end-to-end QC: an ATO/Tasking
+browser (sortable, filtered, click-to-focus), mission→target and
+package→element link overlays, the bullseye, mission-type filters, and a
+flight/package inspector that walks every cross-reference. Three
+load-bearing bugs found by the loop are fixed (JSON-loaded worlds lost
+EVERY VU_ID — the maps came back empty; campaign aircraft spawned with
+FMs at (0,0) and teleported there on tick 1, and their ATC was wired
+before the airfield was derived so nobody ever got a taxi clearance;
+and the first full `campaign_qc` run showed all 12 spawned aircraft
+taxiing ACROSS THE THEATER at 19 kts, never taking off — the save embeds
+ground layouts only for Airstrips, so every Airbase-based flight fell
+back to the first derivable field's taxi route). The suite is
+1878/1878; `campaign_qc` runs the full loop over any decoded save,
+writes the summary + replay trace, and EXITS 3 when nothing gets
+airborne (the "tasking didn't fly" gate).**
+
+| Area | Change |
+|------|--------|
+| `f4-campaign` — emit_flight_intents | Free function over the world-source interfaces (B.3's "wire MissionIntent generation from live flights"): one intent per tasked flight — flight_id/package_id are the units' real VU_ID.nums, aircraft_count decodes the flight roster's 2-bit group packing (0xA0 = 4 ships), TOT stays the save's absolute CampaignTime, team/squadron names resolve when the sources are passed. Publishes on the bus (synchronous fan-out) and returns the vector. |
+| `f4-campaign` — MissionCategory | The 41 mission bytes collapse to 11 behavioral categories (CAP/Sweep/Intercept/Escort/Strike/SEAD/CAS/Recon/Support/Other/None) — a total, pinned mapping at the granularity the viewer's filters and the spawner's route profiles read. |
+| `f4-entities` — components | FlightPlanComponent gains `target` (resolved mission target EntityId); PackageSupportComponent gains `elements` (the element flights, resolved) + a `PackageMissionRequest` block (the ATM request that produced the package — mission, TOT, priority, action, target/requester, resolved); CampaignStateComponent gains the bullseye. |
+| `f4-world` — **the VU_ID fix** | world_state.cpp NEVER parsed `id_num`/`id_creator` for units OR objectives: every JSON-loaded world built an EMPTY unit_id_map/objective_id_map, so flight→package, flight→squadron, battalion→brigade, and squadron→airbase resolution silently no-oped (squadrons fell back to the positional heuristic; nothing else resolved at all). In-memory WorldStates — the cam2json in-process pipeline — always carried them, which is why only JSON reloads were broken. The loader now also resolves flight mission targets and package elements/requests, and carries the campaign bullseye through ICampaignSource (default-implemented — optional data, the established pattern). New `mis_request` JSON block parse for packages. |
+| `f4-simulation` — route building | `build_mission_plan_from_flight()`: WaypointPlanComponent (grid x/y, MSL z, WP_ACTION bytes) → MissionPlan (ENU feet). Leading WP_TAKEOFF legs drop (the TakeoffModule owns departure); the terminal WP_LAND back at home plate becomes the approach entry fix; z floors at 500 ft so ramp legs never command terrain level; 400 kts default cruise (per-action speeds arrive with the M4.5 route tranche). |
+| `f4-simulation` — spawn path | `spawn_aircraft_for_flight()` extracted as the shared core (bulk + bus paths produce identical aircraft): routes attach when the flight has a usable plan; the TEAM tag maps from the campaign owner slot (player → blue, hostile-to-player → red, else green — documented approximation until the stance-accurate pairwise rule lands); **parking offsets are per-airbase** (the old global counter put flight #400 three miles from its field); **the FM now initializes at the parking position** (the old call left the FM at (0,0) while the TransformComponent held the real spot — tick 1's FM→Transform sync teleported every campaign aircraft to the theater datum). |
+| `f4-simulation` — CampaignSimSpawner | The B.3 loop's sim side: subscribes MissionIntent on the bus (or manual `handle()` for tests/QC), resolves flight_id → entity through a copied unit_id_map, dedupes per flight, counts unknown ids (synthetic-ladder intents) and routes attached, and keeps its own per-airbase parking bookkeeping so bus-fed and bulk-fed fleets park identically. `FlightSpawnFilter` (team/mission/cap) — also the scenario JSON's `campaign_flight_filter` block, so the scenario player and the QC tool share one filter vocabulary. |
+| `f4-simulation` — airfield ordering fix | initialize() now derives the campaign airfield BEFORE wire_atc(): the old order wired StubATC against the empty hand-authored airfield, so taxi clearances could never arrive and every campaign aircraft sat parked forever. `record_every` decimates snapshots for long multi-aircraft runs (1 = original behavior). |
+| `f4-simulation` — **the layout-less-airbase ground-ops fix** | The first end-to-end `campaign_qc` run on TestCamp spawned 12/12 with routes but ended with **0 airborne** — every aircraft taxiing a straight line at 32 fps for the whole 5 minutes. Root cause: the save embeds ground layouts (runway/taxi points) ONLY for Airstrip-class objectives — all 50 real Airbases (Kunsan, Osan, …) decode with an empty `ground_layout` (their geometry lives in theater static data we don't load), so `derive_airfield_from_objective` rejected them, the per-airbase ATC registry never got entries, and every TaxiRequest fell back to the DEFAULT (first derivable) airfield — cross-theater taxi routes (aircraft 1's observed 54.2° heading matched the bearing to the first Airstrip to 0.3°). Fix, two parts: (1) airfield-CLASS objectives with no layout get a SYNTHETIC local field (7000 ft runway on the requested active-runway heading straddling the objective center, 2-waypoint taxi route, 8-spot parking row) — real layouts, when a later tranche loads theater OCD/PHD data, take precedence automatically; (2) flights whose squadron sits at a NON-airfield objective (TestCamp's army-aviation flights at Army Bases) park at the caller's fallback airfield instead of the army base, so they too depart locally and fly their saved route. Verified: 12/12 airborne, full Taxi→Takeoff→FlyOut→Enroute phase sequence, 65–116 NM flown in 5 min. |
+| `f4-simulation` — campaign_qc gate | Exit 3 when the sim ran but nothing got airborne — the end-to-end "tasking didn't fly" failure this tool exists to catch (ground-ops stall, broken taxi route, cross-theater taxi), reported AFTER the summary/trace are written (the artifacts are what debugging it needs). |
+| `f4-simulation` — campaign_qc tool | `tools/campaign_qc.cpp`: one command over any decoded save — the B.3 loop (emit → bus → spawner, stats), a scenario-driven Simulation run (the generated campaign_qc_scenario.json is replayable in the scenario player), and campaign_qc_summary.json (world stats, mission histogram, b3_loop stats, per-aircraft end state). Filters: `--team/--mission/--max-flights`; on TestCamp: 449 intents, filtered BARCAP2 spawns with 6/6 routes, aircraft taxi out and depart from their real squadron airbases. |
+| `f4-world-viewer` — ATO / Tasking window | The QC surface: sortable flight table (callsign, mission, team, package, TOT, target, squadron, waypoints) with live-count mission + team combos, row click selects + focuses, target click jumps to the objective. Rows rebuild only on filter/world change (generation stamp), clipped rendering for the 449-flight case. |
+| `f4-world-viewer` — canvas QC overlays | Mission→target lines (owner-colored, ring at the target, selected double-width), package→element faint links, bullseye crosshair (now plumbed: JSON → WorldState → ICampaignSource → CampaignStateComponent), and mission-filter dimming that shares the canvas/ATO filter pair. View menu gains a "Campaign QC (B.3)" group. |
+| `f4-world-viewer` — inspector | Flight: mission/category, callsign, TOT/MOT (campaign clock format), priority, loadouts, altitude, fuel burnt, and clickable target/package/squadron refs. Package: element flight list (clickable), the ATM mission request block, support assignments. Waypoint table upgraded with arrival times and target VU_IDs. **WP_ACTION table corrected against campwp.h** (the old guess swapped TAKEOFF/LAND — saved routes only make sense with the real mapping). |
+| Tests | +21 (suite **1878/1878 — 100%**): world — package elements/request resolution + mis_request parse; campaign — MissionCategory pins + emit_flight_intents (tasked-only, save-shaped facts, team-name resolution); simulation — route building (grid→ENU, takeoff drop, altitude floor), route/team-tag/filter spawn assertions, the full spawner loop (emit→bus→spawn→dedupe), scenario filter parsing, synthetic-field derivation (layout-less Airbase/Airstrip → local taxi route ending at the threshold; layout-less non-airfield → nullopt), and the per-base-map parking guard (army-based flight relocates to the fallback field; null map keeps legacy base parking); viewer — WP_ACTION anchors + campaign clock formatting. |
+
+**How to QC a campaign end-to-end now:** decode the save
+(`cam2json --objectives ... --theater-data ...`), open the world JSON in
+the viewer (ATO + overlays + inspector = the strategic picture), then run
+`campaign_qc <world.json> --team <slot> --mission <AMIS_*>` and replay the
+emitted trace.json (File > Open Replay) = the execution picture. The gap
+between the two is exactly where campaign-logic bugs live.
+
+## Campaign Saves v71 — Real Mid-Campaign Worlds Decode (VIEWER-V71-1)
+
+**A normal in-campaign save now opens. TestCamp.cam — pushed after half
+a day of fighting — decodes 1715/1715 units (449 flights carrying live
+missions, 371 packages with mission requests, 672 battalions, 94
+squadrons with pilot rosters, 114 brigades, 15 task forces), 2659
+objectives rebuilt from the theater base list plus 14 .obd damage/owner
+deltas, all 8 teams with full .tea state and their air-tasking
+worklists, and the whole .cmp campaign header (events, ratios, bullseye,
+squadron preload). The kunsan fixture that CampaignTick needed is
+regenerated and committed — the suite is 1857/1857.**
+
+| Area | Change |
+|------|--------|
+| `f4-world-convert` — unit_decoder (v71 layouts) | Every gate the v71 format adds: CampBaseClass carries `pos_.z_` at gCampDataVersion >= 70 (owner moves to record+28 in the validator); `current_wp` and `wp_count` become ushorts at v >= 71; squadron `stores[]` grows 200 -> 220 at 69 <= v < 72; flights gain the v > 65 trio (`old_mission`, `mission_context`, requester VU_ID); the Package big branch is implemented (flights/wait_for/8 route corners/takeoff/tp_time/package_flags/caps + ingress & egress routes + the 76-byte MissionRequestClass bulk struct). Branch selection is deterministic from the record itself: small iff `(unit_flags & U_FINAL=0x100000) && wait_cycles == 0` — the same test PackageClass::Save makes at save time. |
+| `f4-world-convert` — unit dispatch | Class-table dispatch first — the same `Falcon4.ct` the game loads: `(classInfo_[VU_DOMAIN], classInfo_[VU_TYPE])` picks the constructor exactly like FreeFalcon's NewUnit (unit.cpp:5890): (AIR,1)=Flight (2)=Package (3)=Squadron, (LAND,1)=Battalion (2)=Brigade, (SEA,1)=TaskForce. The trial-and-error fallback stays for the no-table path, with its type range widened past 2000 (TestCamp carries battalions at type 2022) and a grid-coordinate plausibility gate on the next-record header — without it, one trial order false-positives on v63 saves and the mirror order on v71 (a wrong-length tail that lands exactly on a real record boundary is structurally indistinguishable; the class table is the ground truth). |
+| `f4-world-convert` — team_decoder (full rewrite) | The old decoder read TeamClass as 52 bytes with `who`/`cteam` as shorts — Team is a uchar (cmpglobl.h:87), so every team after the scan-shift was garbled and only 2 of 8 slots ever matched. Now the whole 739-byte record decodes (stance matrix, initiative, supply/fuel/replacements, current & start strength stats, bonus objectives, target/unit/mission priorities, max_vehicle, flag/color/equipment, name, motto, ground action + both air actions) followed structurally by the team's AirTaskingManager — airbase schedule list + the pending mission request list (the ATO worklist: mission, who/vs, TOT, priority, target/requester VU_IDs) — and GTM/NTM. Parity: TestCamp's 11,466-byte .tea consumes exactly; all 8 teams, 6 ATMs with 10 requests each. |
+| `f4-world-convert` — campaign_decoder (full .cmp) | The decode previously stopped after the team block (1904 of 22,080 bytes). Now it walks CampaignClass::Decode end to end: lastMajorEvent/resupply/repair/reinforcement timers, the 7 ratios, theater size, day/active-teams/endgame/situation, bullseye, the 4 x 40-char names, PlayerSquadronID, both UI event queues (20-byte x86 uieventnode + length-prefixed text — the campaign news feed: "Elements of the ROK 25th Armored Division engaged DPRK ground forces..."), the terrain ownership map, the 68-squadron preload list (68-byte SquadUIInfoClass each), tempo, and the creator block. bytes_consumed == decompressed_size on both fixtures. |
+| `f4-world-convert` — objective deltas (.obd) + VU_ID fix | New `decode_obd`: the [outer][count][inner][LZSS] container holding per-objective UpdateFromData deltas (owner/supply/fuel/losses/fstatus) that a normal save writes instead of the full objective list. Objective VU_IDs are now read num-then-creator (vutypes.h declares num_ first — the old decoder swapped every reported pair) and are emitted so flights, packages, and deltas can be correlated with objectives. |
+| `f4-world-convert` — world_json | Normal saves get their objectives the way FreeFalcon does: base list from the scenario's .obj + deltas on top. When the .cam embeds no "obj" subfile, `find_base_objectives` auto-discovers one (any .obj beside the .cam, else the bundled save1.obj fixture — the stock korea scenario's list, extracted and committed); cam2json gains `--objectives <file> [--objectives-version <n>]` to pin it explicitly. New emission: unit and objective `id_num`/`id_creator`, flight `old_mission`/`mission_context`/`requester_id`, package `element_ids` + `mis_request` (mission/TOT/priority/target/requester) + big-branch routes, team `.tea` enrichment (initiative, supply/fuel, current stats, `atm_airbases`, `atm_requests`), and the campaign extension fields + `events`. |
+| `f4-world-viewer` — import path | `import_cam_archive` benefits automatically: the CamArchive now remembers its source path (new `path()` accessor), so the auto-discovery runs in-process and the world viewer opens a mid-campaign save with objectives, flights, and missions — the reason the file "didn't open" was 0/1715 units decoded (v63-only layouts) plus no objective source, both fixed. |
+| `f4-campaign` — kunsan fixture | `f4-simulation/tests/fixtures/kunsan_campaign.world.json` was never committed — the reason main was RED (6 failing CampaignTick tests). Regenerated from save1.cam with documented modifications (scripts/make_kunsan_fixture.py): team names USA/ROK/DPRK, negative war stances per the campaign's ID_HOSTILE sign test, 24-aircraft pools for the three belligerents, and one ARO_CA wing each for USA/DPRK (ROK fields none — the availability-gate test). All 7 CampaignTick tests pass. |
+| Tests | +6 (suite **1857/1857 — 100%**): V71Units.TestCampDecodesAllUnitsWithClassTableDispatch (1715/1715, cursor at exactly 423,065, class distribution pinned), TestCampPackagesCarryMissionRequests (371 packages, all small-branch, elements + branch), TestCampDecodesWithoutClassTableToo (the fallback path, full parity), V63FixtureStillDecodesWithV71Code (regression: v63 parity with and without the table, per-record class agreement), Campaign.FullDecodeConsumesTheEntirePayload (replaces the old remaining-payload contract), plus the obd/objective-id coverage riding the existing suites. |
+
+**Why this matters for the campaign->sim loop (the B.3 milestone):** the
+mission data the sim-side spawner needs is now first-class: each flight
+carries its mission, TOT, target, loadout count, package and squadron
+links, callsign, and full waypoint route; each package carries its
+element flight IDs and the mission request that drove it; each team's
+ATM carries the pending request worklist. A TestCamp-derived world JSON
+is the first fixture where the campaign engine can read REAL tasking
+(not synthetic profiles) — the next milestone wires MissionIntent
+generation from these live flights instead of the profile ladder.
+
+# F4 Cleanup Pass — Changes Summary
+
 ## Guns Employment — The Last Unflown Weapon Flies (M3-TACTICS-4)
 
 **The AI fires the cannon. An armed jet working a merge tracks the GUN

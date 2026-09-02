@@ -59,3 +59,15 @@ target_link_libraries(test_replay_mode PRIVATE
 )
 gtest_discover_tests(test_replay_mode)
 
+
+# --- Enum text tests (B.3 QC tranche) ---
+# enum_text.hpp is header-only: the WP_ACTION anchor pins (campwp.h) and
+# the shared campaign-clock formatter. No library link beyond gtest.
+add_executable(test_enum_text
+    test_enum_text.cpp
+)
+target_include_directories(test_enum_text PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include
+)
+target_link_libraries(test_enum_text PRIVATE GTest::gtest_main f4-world-convert)
+gtest_discover_tests(test_enum_text)

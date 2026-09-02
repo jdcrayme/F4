@@ -209,8 +209,24 @@ public:
         owner_ = self;
     }
 
+    // --- Dormancy (parked inventory) ------------------------------------
+    // Set by the squadron spawner for un-tasked parked airframes. A
+    // dormant brain publishes nothing and flies nothing; the entity is
+    // still rendered (Transform/VisualModel are passive).
+    void set_dormant(bool d) noexcept { dormant_ = d; }
+    [[nodiscard]] bool is_dormant() const noexcept { return dormant_; }
+
     void update(double dt, messaging::MessageBus& bus) override {
         if (!owner_.valid()) return;  // not attached to any entity — no-op
+
+        // Dormant: parked squadron inventory, no mission to fly. The
+        // brain of an un-tasked parked airframe would otherwise run the
+        // full module ladder (interface resolution + module updates)
+        // every tick for ~1,000 airframes in a populated campaign save
+        // — pure waste, since a dormant brain has no taxi request to
+        // publish and no route to follow. See FlightModelComponent's
+        // dormant_ for the matching physics-side skip.
+        if (dormant_) return;
 
         // Lazily resolve the flight model interfaces (see entity.hpp for
         // why resolution is per-tick rather than cached).
@@ -816,6 +832,9 @@ private:
     }
 
     entities::EntityHandle owner_{};
+
+    // Dormant: skip update() entirely (parked squadron inventory).
+    bool dormant_{false};
 
     // Mission plan + sequencing.
     MissionPlan plan_;

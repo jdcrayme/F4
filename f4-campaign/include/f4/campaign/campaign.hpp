@@ -196,4 +196,39 @@ private:
     std::vector<MissionIntent> intents_;
 };
 
+// ============================================================================
+// emit_flight_intents — MissionIntents from LIVE saved flights (B.3 tranche)
+// ============================================================================
+//
+// The M4.7 Campaign::tick generates intents synthetically (profile ladder
+// over squadron availability). Real campaign saves — TestCamp.cam et al. —
+// already carry the output of FreeFalcon's ATM: 449 tasked Flight units
+// with mission bytes, TOTs, targets, packages, squadrons and callsigns.
+// This function turns those live flights into the SAME MissionIntent
+// contract, so B.3's sim-side spawner consumes one message shape whether
+// the tasking source is the synthetic ladder or a decoded save.
+//
+// Semantics (differences from the synthetic path, all deliberate):
+//   * issued_time  — the `now` argument (callers pass the save's
+//                    campaign.current_time; the flights predate it).
+//   * time_on_target — the flight's ABSOLUTE CampaignTime as stored in the
+//                    save (not rebased to campaign-relative). The spawner
+//                    anchors campaign time itself; keeping the save's epoch
+//                    intact preserves round-trip fidelity.
+//   * flight_id / package_id — the flight's and its package's VU_ID.nums
+//                    (the synthetic path's counter ids never appear).
+//   * aircraft_count — the flight's roster, decoded as the same 2-bit
+//                    group packing used for battalions (sum of groups;
+//                    0xA0 = 4 aircraft). 0 when the save carries none.
+//   * squadron_name / team_name — resolved from the unit + team data when
+//                    the respective source pointers are non-null.
+//
+// Determinism: pure function of the sources — no RNG, no state.
+[[nodiscard]] std::vector<MissionIntent>
+emit_flight_intents(const f4::world::IUnitCoreSource& units,
+                    const f4::world::IFlightSource& flights,
+                    f4::messaging::MessageBus& bus,
+                    CampaignTime now,
+                    const f4::world::ITeamSource* teams = nullptr);
+
 } // namespace f4::campaign

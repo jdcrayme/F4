@@ -29,11 +29,22 @@ namespace f4::ai::atc {
 
 struct TaxiRequest {
     std::uint64_t aircraft_id{0};
+    // The airbase the aircraft is parked at (VU_ID.num of the airbase
+    // objective; 0 = unknown — the ATC falls back to its default airfield).
+    // Campaign saves park flights at many different bases; without this
+    // the ATC answers every request with ONE field's taxi route and the
+    // aircraft taxis across the theater toward a runway it will never
+    // reach. (LandingRequest has carried the same field since the
+    // protocol was defined.)
+    std::uint64_t airbase_id{0};
     // Intent: "I want to taxi from my current position to the runway."
 };
 
 struct TaxiClearance {
     std::uint64_t aircraft_id{0};
+    // Echo of the request's airbase (diagnostic only — the route is the
+    // authoritative content).
+    std::uint64_t airbase_id{0};
     // The taxi route: sequence of taxiway waypoints to follow.
     std::vector<geo::WorldPosition> taxi_route;
     // The runway the aircraft is cleared to taxi to.
@@ -43,6 +54,7 @@ struct TaxiClearance {
 
 struct HoldShortRequest {
     std::uint64_t aircraft_id{0};
+    std::uint64_t airbase_id{0};
     int runway_id{0};
 };
 
@@ -59,6 +71,7 @@ struct HoldShortClearance {
 
 struct TakeoffRequest {
     std::uint64_t aircraft_id{0};
+    std::uint64_t airbase_id{0};
     int runway_id{0};
 };
 

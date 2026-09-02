@@ -19,23 +19,8 @@
 
 namespace f4::viewer {
 
-namespace {
-
-void format_campaign_time(int32_t t, char* buf, std::size_t buf_size) {
-    if (t <= 0) {
-        std::snprintf(buf, buf_size, "%d (0d 00:00:00)", t);
-        return;
-    }
-    const int32_t total_sec = t;
-    const int days = total_sec / 86400;
-    const int hours = (total_sec % 86400) / 3600;
-    const int mins = (total_sec % 3600) / 60;
-    const int secs = total_sec % 60;
-    std::snprintf(buf, buf_size, "%d (%dd %02d:%02d:%02d)",
-                  t, days, hours, mins, secs);
-}
-
-} // namespace
+// format_campaign_time lives in enum_text.hpp (shared with the ATO view
+// and the inspector since the B.3 QC tranche).
 
 void ViewerApp::draw_campaign_and_teams_view() {
     if (!impl_->world_loaded) return;

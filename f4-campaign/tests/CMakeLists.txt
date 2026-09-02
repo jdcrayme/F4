@@ -19,6 +19,7 @@ endfunction()
 
 f4_campaign_add_test(test_mission_type      test_mission_type.cpp)
 f4_campaign_add_test(test_mission_profiles  test_mission_profiles.cpp)
+f4_campaign_add_test(test_flight_intents    test_flight_intents.cpp)
 
 # The golden-summary test drives the M4.7 headless tick over the kunsan
 # campaign world fixture (the save1.cam-derived two-team world from

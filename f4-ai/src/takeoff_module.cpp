@@ -127,6 +127,7 @@ TakeoffModule::build_sm()
             if (bus_) {
                 atc::TaxiRequest req;
                 req.aircraft_id = ownship_id_;
+                req.airbase_id = airbase_id;
                 bus_->publish(req);
             }
         })
@@ -136,6 +137,7 @@ TakeoffModule::build_sm()
             if (bus_) {
                 atc::TakeoffRequest req;
                 req.aircraft_id = ownship_id_;
+                req.airbase_id = airbase_id;
                 req.runway_id = runway_id_;
                 bus_->publish(req);
             }

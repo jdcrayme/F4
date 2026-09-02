@@ -21,6 +21,7 @@ std::string SubFile::stem() const {
 void CamArchive::load(const std::filesystem::path& cam_path) {
     subfiles_.clear();
     raw_.clear();
+    path_ = cam_path;
 
     // Read the whole file into memory — .cam files are small (~200 KB).
     // Delegates to the shared f4::io::read_file (label "CamArchive" so the

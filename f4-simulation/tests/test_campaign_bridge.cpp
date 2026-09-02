@@ -207,6 +207,79 @@ TEST(CampaignBridge, ActiveRunwayIdPropagated) {
 }
 
 // =============================================================================
+// B.3+ synthetic airfields for layout-less airfield objectives
+//
+// Real .cam saves embed ground layouts ONLY for Airstrip-class objectives;
+// all 50 TestCamp Airbases decode with an empty ground_layout (their
+// runway geometry lives in theater static data we don't load). These
+// tests pin the synthetic fallback that keeps ground ops LOCAL.
+// =============================================================================
+
+TEST(CampaignBridge, SynthesizesForLayoutlessAirbaseObjective) {
+    ObjectiveState obj;
+    obj.objective_type = 1;  // TYPE_AIRBASE — TestCamp shape: no layout
+    obj.x = 390;
+    obj.y = 455;
+    obj.z = 100.0f;
+    auto af = derive_airfield_from_objective(obj, 36);
+    ASSERT_TRUE(af.has_value());
+
+    // Objective center: (399360, 465920, 100) ft. Synthetic runway 36
+    // (heading 0) straddles the center: threshold 3500 ft south.
+    EXPECT_NEAR(af->threshold_position.x, 399360.0, 1e-6);
+    EXPECT_NEAR(af->threshold_position.y, 465920.0 - 3500.0, 1e-6);
+    EXPECT_NEAR(af->runway_end_position.y, 465920.0 + 3500.0, 1e-6);
+    EXPECT_NEAR(af->runway_heading_rad, 0.0, 1e-9);  // 360 deg wraps to 0
+    EXPECT_NEAR(af->runway_length_ft, 7000.0, 1e-6);
+    EXPECT_NEAR(af->threshold_altitude_ft, 100.0, 1e-6);
+    EXPECT_NEAR(af->departure_altitude_ft, 2600.0, 1e-6);
+
+    // The taxi route is LOCAL: 2+ waypoints, last one is the threshold
+    // (the TakeoffModule's hold-short), and the total route length stays
+    // within a few thousand feet of the objective — never a cross-theater
+    // route to some other airfield.
+    ASSERT_GE(af->taxi_route.size(), 2u);
+    const auto& last = af->taxi_route.back();
+    EXPECT_NEAR(last.x, af->threshold_position.x, 1e-6);
+    EXPECT_NEAR(last.y, af->threshold_position.y, 1e-6);
+    double route_len = 0.0;
+    for (std::size_t i = 1; i < af->taxi_route.size(); ++i) {
+        route_len += std::hypot(af->taxi_route[i].x - af->taxi_route[i - 1].x,
+                                af->taxi_route[i].y - af->taxi_route[i - 1].y);
+    }
+    EXPECT_LT(route_len, 5000.0) << "synthetic taxi route must stay local";
+
+    // Parking row exists (the scenario-list path reads it).
+    EXPECT_EQ(af->parking_spots.size(), 8u);
+}
+
+TEST(CampaignBridge, SynthesizesForLayoutlessAirstripObjective) {
+    ObjectiveState obj;
+    obj.objective_type = 2;  // TYPE_AIRSTRIP, layout stripped by a delta
+    obj.x = 100;
+    obj.y = 200;
+    auto af = derive_airfield_from_objective(obj, 18);
+    ASSERT_TRUE(af.has_value());
+    // Heading 18 -> 180 deg: threshold NORTH of center (approach end).
+    EXPECT_NEAR(af->runway_heading_rad, 3.14159265358979, 1e-9);
+    EXPECT_NEAR(af->threshold_position.y, 200.0 * 1024.0 + 3500.0, 1e-6);
+    EXPECT_EQ(af->active_runway_name, "Rwy 18");
+}
+
+TEST(CampaignBridge, LayoutlessNonAirfieldObjectiveStillNullopt) {
+    // objective_type 3 = TYPE_ARMYBASE — army aviation squadrons sit at
+    // these. They must NOT become synthetic airfields; the SPAWN side
+    // relocates those flights to a real airfield instead (see
+    // test_campaign_spawner.cpp ArmyBaseFlightParksAtFallbackAirfield).
+    ObjectiveState obj;
+    obj.objective_type = 3;
+    obj.x = 392;
+    obj.y = 451;
+    auto af = derive_airfield_from_objective(obj, 36);
+    EXPECT_FALSE(af.has_value());
+}
+
+// =============================================================================
 // spawn_aircraft_from_flights
 // =============================================================================
 

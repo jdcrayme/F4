@@ -6,7 +6,12 @@ function(f4_add_test name source)
     add_executable(${name} ${source})
     target_link_libraries(${name} PRIVATE GTest::gtest_main f4-world-convert)
     target_compile_definitions(${name} PRIVATE
-        FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/")
+        FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/"
+        # REPO_ROOT: the repo root, where the v71 mid-campaign sample
+        # TestCamp.cam lives (pushed as "Temporary data"). Used by the
+        # v71 decoder tests; the file is skipped gracefully when absent
+        # (e.g. shallow exports) via a file-exists guard.
+        REPO_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/../../")
     gtest_discover_tests(${name})
 endfunction()
 

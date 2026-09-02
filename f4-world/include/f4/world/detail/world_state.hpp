@@ -108,6 +108,11 @@ struct CampaignState {
     int32_t te_flags = 0;
     std::vector<int32_t> te_number_aircraft;   // 8
     std::vector<int32_t> te_team_pts;           // 8
+    // Bullseye (B.3 QC tranche): the campaign's shared reference point.
+    // Grid coordinates; bullseye_name is the display name byte (0=none).
+    int32_t bullseye_x = 0;
+    int32_t bullseye_y = 0;
+    int32_t bullseye_name = 0;
 };
 
 /// A campaign objective (airbase, bridge, city, port, ...). Mirrors the
@@ -275,6 +280,19 @@ struct UnitState {
     uint32_t jstar_id = 0;                    // VU_ID.num of JSTARS flight
     uint32_t ecm_id = 0;                      // VU_ID.num of ECM flight
     uint32_t tanker_id = 0;                   // VU_ID.num of tanker flight
+
+    // Package element flights + the ATM mission request that produced the
+    // package (B.3 tranche — TestCamp.cam v71 carries both). element_ids is
+    // shared with the Brigade field above (one wire vector, two meanings by
+    // unit class); the request fields mirror the mis_request JSON block.
+    bool     request_present = false;
+    uint8_t  request_mission = 0;             // MissionType enum
+    int32_t  request_tot = 0;                 // CampaignTime (absolute)
+    uint8_t  request_priority = 0;
+    uint16_t request_action_type = 0;
+    uint32_t request_target_num = 0;          // VU_ID.num of requested target
+    uint32_t request_target_creator = 0;      // VU_ID.creator
+    uint32_t request_requester_num = 0;       // VU_ID.num of requester
 
     // --- Theater static-data enrichment (from Falcon4.UCD/VCD) ---
     // Populated when the world JSON was built with a loaded TheaterObjectDatabase.

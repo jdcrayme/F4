@@ -40,6 +40,9 @@ struct CampaignAdapter : ICampaignSource {
     int32_t te_flags() const override { return ws_->campaign.te_flags; }
     const std::vector<int32_t>& te_number_aircraft() const override { return ws_->campaign.te_number_aircraft; }
     const std::vector<int32_t>& te_team_pts() const override { return ws_->campaign.te_team_pts; }
+    int32_t bullseye_x() const override { return ws_->campaign.bullseye_x; }
+    int32_t bullseye_y() const override { return ws_->campaign.bullseye_y; }
+    int32_t bullseye_name() const override { return ws_->campaign.bullseye_name; }
 
 private:
     const WorldState* ws_;
@@ -247,6 +250,17 @@ struct UnitAdapter : IUnitCoreSource,
     uint32_t jstar_id(int i) const override { return ws_->units[i].jstar_id; }
     uint32_t ecm_id(int i) const override { return ws_->units[i].ecm_id; }
     uint32_t tanker_id(int i) const override { return ws_->units[i].tanker_id; }
+    // NOTE: element_ids(int) is declared once (IGroundUnitSource block
+    // above) — its signature is identical for both base interfaces, so the
+    // single declaration overrides IPackageSource::element_ids as well.
+    bool request_present(int i) const override { return ws_->units[i].request_present; }
+    uint8_t request_mission(int i) const override { return ws_->units[i].request_mission; }
+    int32_t request_tot(int i) const override { return ws_->units[i].request_tot; }
+    uint8_t request_priority(int i) const override { return ws_->units[i].request_priority; }
+    uint16_t request_action_type(int i) const override { return ws_->units[i].request_action_type; }
+    uint32_t request_target_num(int i) const override { return ws_->units[i].request_target_num; }
+    uint32_t request_target_creator(int i) const override { return ws_->units[i].request_target_creator; }
+    uint32_t request_requester_num(int i) const override { return ws_->units[i].request_requester_num; }
 
 private:
     const WorldState* ws_;

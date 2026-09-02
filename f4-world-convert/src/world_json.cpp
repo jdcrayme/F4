@@ -5,8 +5,10 @@
 #include <f4/world_convert/unit_decoder.hpp>
 #include <f4/world_convert/team_decoder.hpp>
 #include <f4/json/writer.hpp>
+#include <f4/io/read_file.hpp>
 
 #include <cmath>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 
@@ -42,6 +44,44 @@ std::string base64_encode(const uint8_t* data, std::size_t len) {
 
 } // namespace
 
+std::filesystem::path find_base_objectives(const std::filesystem::path& cam_path) {
+    namespace fs = std::filesystem;
+    // 1. Any .obj next to the .cam (case-insensitive extension match).
+    if (!cam_path.empty()) {
+        fs::path dir = cam_path.parent_path();
+        std::error_code ec;
+        if (!dir.empty() && fs::is_directory(dir, ec)) {
+            for (const auto& entry : fs::directory_iterator(dir, ec)) {
+                if (!entry.is_regular_file()) continue;
+                const auto ext = entry.path().extension().string();
+                if (ext.size() == 4 &&
+                    std::tolower(static_cast<unsigned char>(ext[1])) == 'o' &&
+                    std::tolower(static_cast<unsigned char>(ext[2])) == 'b' &&
+                    std::tolower(static_cast<unsigned char>(ext[3])) == 'j') {
+                    return entry.path();
+                }
+            }
+        }
+    }
+    // 2. CWD-relative well-known paths (mirrors find_class_table_cwd_
+    //    fallback). save1.obj is the stock korea scenario's base
+    //    objective list extracted from the bundled save1.cam fixture.
+    const char* candidates[] = {
+        "save1.obj",
+        "assets/save1.obj",
+        "temp/save1.obj",
+        "f4-world-convert/tests/fixtures/save1.obj",
+        "../f4-world-convert/tests/fixtures/save1.obj",
+        "../../f4-world-convert/tests/fixtures/save1.obj",
+        "../temp/save1.obj",
+        "../../temp/save1.obj",
+    };
+    for (const char* rel : candidates) {
+        if (fs::exists(rel)) return fs::path(rel);
+    }
+    return {};
+}
+
 std::string to_world_json(const CamArchive& cam, const WorldJsonOptions& opts) {
     std::ostringstream o;
     o << "{\n";
@@ -68,16 +108,22 @@ std::string to_world_json(const CamArchive& cam, const WorldJsonOptions& opts) {
     o << "    ]\n";
     o << "  },\n";
 
-    // --- Version (.ver) ---
+    // --- Version (.ver) --- read first: every sub-file decoder is
+    // version-parameterized (gCampDataVersion gates several on-disk
+    // layouts — pos_.z_ at v70+, ushort current_wp/wp_count at v71+,
+    // squadron stores[220] at v69+, flight v>65 fields, ...).
+    int camp_version = 63;   // the save1.cam fixture default
     const SubFile* ver = cam.find("ver");
     if (ver) {
-        o << "  \"version\": " << read_version(ver->data.data(), ver->data.size()) << ",\n";
+        camp_version = read_version(ver->data.data(), ver->data.size());
+        o << "  \"version\": " << camp_version << ",\n";
     }
 
     // --- Campaign header (.cmp) ---
     const SubFile* cmp = cam.find("cmp");
     if (cmp) {
-        CampaignHeader h = decode_cmp(cmp->data.data(), cmp->data.size());
+        CampaignHeader h = decode_cmp(cmp->data.data(), cmp->data.size(),
+                                      camp_version);
         o << "  \"campaign\": {\n";
         o << "    \"current_time\": " << h.current_time << ",\n";
         o << "    \"te_start_time\": " << h.te_start_time << ",\n";
@@ -107,7 +153,8 @@ std::string to_world_json(const CamArchive& cam, const WorldJsonOptions& opts) {
         const SubFile* tea_sf = cam.find("tea");
         if (tea_sf) {
             try {
-                tea_teams = decode_tea(tea_sf->data.data(), tea_sf->data.size());
+                tea_teams = decode_tea(tea_sf->data.data(), tea_sf->data.size(),
+                                       camp_version);
             } catch (...) {
                 // .tea parse failed — proceed with .cmp-only team data
             }
@@ -123,8 +170,8 @@ std::string to_world_json(const CamArchive& cam, const WorldJsonOptions& opts) {
             // The .tea decoder's TeamRecord.who field is the team index (0..7),
             // matching the .cmp team slot.
             for (const auto& tt : tea_teams.teams) {
-                if (tt.who == static_cast<int16_t>(i)) {
-                    o << ", \"cteam\": " << tt.cteam
+                if (tt.who == i) {
+                    o << ", \"cteam\": " << static_cast<int>(tt.cteam)
                       << ", \"team_flags\": " << tt.flags
                       << ", \"member\": [";
                     for (std::size_t j = 0; j < tt.member.size(); ++j) {
@@ -145,7 +192,53 @@ std::string to_world_json(const CamArchive& cam, const WorldJsonOptions& opts) {
                       << ", \"air_experience\": " << static_cast<int>(tt.air_experience)
                       << ", \"air_defense_experience\": " << static_cast<int>(tt.air_defense_experience)
                       << ", \"ground_experience\": " << static_cast<int>(tt.ground_experience)
-                      << ", \"naval_experience\": " << static_cast<int>(tt.naval_experience);
+                      << ", \"naval_experience\": " << static_cast<int>(tt.naval_experience)
+                      << ", \"initiative\": " << tt.initiative
+                      << ", \"supply_avail\": " << tt.supply_avail
+                      << ", \"fuel_avail\": " << tt.fuel_avail
+                      << ", \"replacements_avail\": " << tt.replacements_avail
+                      << ", \"player_rating\": " << tt.player_rating
+                      << ", \"team_flag\": " << static_cast<int>(tt.team_flag)
+                      << ", \"team_color2\": " << static_cast<int>(tt.team_color)
+                      << ", \"equipment\": " << static_cast<int>(tt.equipment)
+                      << ", \"tea_name\": \"" << escape_string(tt.name) << "\""
+                      << ", \"reinforcement\": " << tt.reinforcement
+                      << ", \"current_stats\": {"
+                      << "\"aircraft\":" << tt.current_aircraft
+                      << ", \"air_defense_vehs\":" << tt.current_air_defense_vehs
+                      << ", \"ground_vehs\":" << tt.current_ground_vehs
+                      << ", \"ships\":" << tt.current_ships
+                      << ", \"supply\":" << tt.current_supply
+                      << ", \"fuel\":" << tt.current_fuel
+                      << ", \"airbases\":" << tt.current_airbases
+                      << ", \"supply_level\":" << static_cast<int>(tt.current_supply_level)
+                      << ", \"fuel_level\":" << static_cast<int>(tt.current_fuel_level)
+                      << "}"
+                      // Team's Air Tasking Manager: airbase schedule list +
+                      // pending mission requests (the ATO worklist).
+                      << ", \"atm_airbases\": [";
+                    for (std::size_t ai = 0; ai < tt.atm.airbases.size(); ++ai) {
+                        if (ai) o << ", ";
+                        o << tt.atm.airbases[ai].id_num;
+                    }
+                    o << "]"
+                      << ", \"atm_requests\": [";
+                    for (std::size_t ri = 0; ri < tt.atm.requests.size(); ++ri) {
+                        const auto& mr = tt.atm.requests[ri];
+                        if (ri) o << ", ";
+                        o << "{\"mission\": " << static_cast<int>(mr.mission)
+                          << ", \"who\": " << static_cast<int>(mr.who)
+                          << ", \"vs\": " << static_cast<int>(mr.vs)
+                          << ", \"tot\": " << mr.tot
+                          << ", \"priority\": " << mr.priority
+                          << ", \"action_type\": " << static_cast<int>(mr.action_type)
+                          << ", \"context\": " << static_cast<int>(mr.context)
+                          << ", \"aircraft\": " << static_cast<int>(mr.aircraft)
+                          << ", \"target_num\": " << mr.target_id_num
+                          << ", \"requester_num\": " << mr.requester_id_num
+                          << "}";
+                    }
+                    o << "]";
                     break;
                 }
             }
@@ -154,23 +247,152 @@ std::string to_world_json(const CamArchive& cam, const WorldJsonOptions& opts) {
             o << "\n";
         }
         o << "    ],\n";
-        o << "    \"decoded_bytes\": " << (h.decompressed_size - static_cast<int>(h.remaining_payload.size())) << ",\n";
-        o << "    \"undecoded_bytes\": " << h.remaining_payload.size() << "\n";
+        o << "    \"decoded_bytes\": " << h.bytes_consumed << ",\n";
+        o << "    \"undecoded_bytes\": " << h.remaining_payload.size() << ",\n";
+        // ---- Extension fields (CampaignClass::Decode, cmpclass.cpp:1404+) ----
+        // Timers, ratios, theater size, day/progress state, bullseye,
+        // names, player squadron. These turn the header into a real
+        // campaign-state snapshot.
+        o << "    \"last_major_event\": " << h.last_major_event << ",\n";
+        o << "    \"last_resupply\": " << h.last_resupply << ",\n";
+        o << "    \"last_repair\": " << h.last_repair << ",\n";
+        o << "    \"last_reinforcement\": " << h.last_reinforcement << ",\n";
+        o << "    \"time_stamp\": " << h.time_stamp << ",\n";
+        o << "    \"group\": " << h.group << ",\n";
+        o << "    \"ground_ratio\": " << h.ground_ratio << ",\n";
+        o << "    \"air_ratio\": " << h.air_ratio << ",\n";
+        o << "    \"air_defense_ratio\": " << h.air_defense_ratio << ",\n";
+        o << "    \"naval_ratio\": " << h.naval_ratio << ",\n";
+        o << "    \"brief\": " << h.brief << ",\n";
+        o << "    \"theater_size_x\": " << h.theater_size_x << ",\n";
+        o << "    \"theater_size_y\": " << h.theater_size_y << ",\n";
+        o << "    \"current_day\": " << static_cast<int>(h.current_day) << ",\n";
+        o << "    \"active_teams\": " << static_cast<int>(h.active_teams) << ",\n";
+        o << "    \"day_zero\": " << static_cast<int>(h.day_zero) << ",\n";
+        o << "    \"endgame_result\": " << static_cast<int>(h.endgame_result) << ",\n";
+        o << "    \"situation\": " << static_cast<int>(h.situation) << ",\n";
+        o << "    \"enemy_air_exp\": " << static_cast<int>(h.enemy_air_exp) << ",\n";
+        o << "    \"enemy_ad_exp\": " << static_cast<int>(h.enemy_ad_exp) << ",\n";
+        o << "    \"bullseye_name\": " << static_cast<int>(h.bullseye_name) << ",\n";
+        o << "    \"bullseye_x\": " << h.bullseye_x << ",\n";
+        o << "    \"bullseye_y\": " << h.bullseye_y << ",\n";
+        o << "    \"theater_name\": \"" << escape_string(h.theater_name) << "\",\n";
+        o << "    \"scenario\": \"" << escape_string(h.scenario) << "\",\n";
+        o << "    \"save_file\": \"" << escape_string(h.save_file) << "\",\n";
+        o << "    \"ui_name\": \"" << escape_string(h.ui_name) << "\",\n";
+        o << "    \"player_squadron_id\": " << h.player_squadron_num << ",\n";
+        o << "    \"player_squadron_creator\": " << h.player_squadron_creator << ",\n";
+        o << "    \"tempo\": " << static_cast<int>(h.tempo) << ",\n";
+        o << "    \"creator_ip\": " << h.creator_ip << ",\n";
+        o << "    \"creation_time\": " << h.creation_time << ",\n";
+        o << "    \"creation_rand\": " << h.creation_rand << ",\n";
+        o << "    \"camp_map_size\": " << h.camp_map_size << ",\n";
+        o << "    \"num_avail_squadrons\": " << h.num_avail_squadrons << ",\n";
+        // UI event queues — the campaign news feed (mid-campaign saves
+        // carry the last ~10 events: kills, captures, missions).
+        o << "    \"events\": [";
+        for (std::size_t ei = 0; ei < h.standard_events.size(); ++ei) {
+            const auto& e = h.standard_events[ei];
+            if (ei) o << ", ";
+            o << "{\"x\": " << e.x << ", \"y\": " << e.y
+              << ", \"time\": " << e.time
+              << ", \"flags\": " << static_cast<int>(e.flags)
+              << ", \"team\": " << static_cast<int>(e.team)
+              << ", \"text\": \"" << escape_string(e.text) << "\"}";
+        }
+        o << "],\n";
+        o << "    \"priority_events\": [";
+        for (std::size_t ei = 0; ei < h.priority_events.size(); ++ei) {
+            const auto& e = h.priority_events[ei];
+            if (ei) o << ", ";
+            o << "{\"x\": " << e.x << ", \"y\": " << e.y
+              << ", \"time\": " << e.time
+              << ", \"flags\": " << static_cast<int>(e.flags)
+              << ", \"team\": " << static_cast<int>(e.team)
+              << ", \"text\": \"" << escape_string(e.text) << "\"}";
+        }
+        o << "]\n";
         o << "  }";
 
-        // --- Objectives (.obj) ---
+        // --- Objectives (.obj, or base .obj + .obd deltas) ---
+        // A CAMP_SAVE_FULL .cam (e.g. save1.cam) embeds its objective
+        // list as an "obj" sub-file. A normal in-campaign save (e.g.
+        // TestCamp.cam) carries only "obd" deltas — the base list lives
+        // in the scenario's .obj (opts.base_objectives_path). Mirror
+        // FreeFalcon's LoadBaseObjectives + LoadObjectiveDeltas: decode
+        // the base list, then apply the deltas on top. The base file's
+        // gCampDataVersion can differ from the save's (FreeFalcon
+        // re-reads the scenario's version for base objectives) — hence
+        // the separate base_objectives_version option.
         const SubFile* obj_sf = cam.find("obj");
+        const SubFile* obd_sf = cam.find("obd");
+        std::optional<DecodedObjectives> objs;
+        std::string objectives_source = "embedded";
         if (obj_sf) {
             try {
-                DecodedObjectives objs = decode_obj(obj_sf->data.data(), obj_sf->data.size());
+                objs = decode_obj(obj_sf->data.data(), obj_sf->data.size(),
+                                  camp_version);
+            } catch (const std::exception&) {
+                // Fall through to the base-objectives path below.
+            }
+        }
+        // No explicit base-objectives path: auto-discover one (any .obj
+        // next to the .cam, else the bundled save1.obj fixture). This
+        // keeps the viewer's Import .cam flow and a bare `cam2json
+        // TestCamp.cam` working for normal saves without extra flags.
+        std::filesystem::path base_obj_path = opts.base_objectives_path;
+        if (!objs && base_obj_path.empty()) {
+            base_obj_path = find_base_objectives(cam.path());
+        }
+        if (!objs && !base_obj_path.empty()) {
+            try {
+                auto base_data = f4::io::read_file(
+                    base_obj_path, "objectives");
+                objs = decode_obj(base_data.data(), base_data.size(),
+                                  opts.base_objectives_version);
+                objectives_source = "auto";
+            } catch (const std::exception&) {
+                // No usable base objectives — the world JSON carries no
+                // objectives section (units still decode).
+            }
+        }
+        std::size_t deltas_applied = 0;
+        if (objs && obd_sf) {
+            try {
+                DecodedObjectiveDeltas deltas = decode_obd(
+                    obd_sf->data.data(), obd_sf->data.size(), camp_version);
+                for (const auto& d : deltas.deltas) {
+                    for (auto& ob : objs->objectives) {
+                        if (ob.id_num == d.id_num &&
+                            ob.id_creator == d.id_creator) {
+                            ob.last_repair = d.last_repair;
+                            ob.owner = d.owner;
+                            ob.supply = d.supply;
+                            ob.fuel = d.fuel;
+                            ob.losses = d.losses;
+                            if (!d.fstatus.empty()) ob.fstatus = d.fstatus;
+                            ++deltas_applied;
+                            break;
+                        }
+                    }
+                }
+            } catch (const std::exception&) {
+                // Delta decode failed — emit the base objectives as-is.
+            }
+        }
+        if (objs) {
+            try {
+                const DecodedObjectives& obj_ref = *objs;
                 o << ",\n  \"objectives\": {\n";
-                o << "    \"count\": " << objs.count << ",\n";
-                o << "    \"decoded\": " << objs.objectives.size() << ",\n";
-                o << "    \"bytes_consumed\": " << objs.bytes_consumed << ",\n";
-                o << "    \"inner_size\": " << objs.inner_size << ",\n";
+                o << "    \"count\": " << obj_ref.count << ",\n";
+                o << "    \"decoded\": " << obj_ref.objectives.size() << ",\n";
+                o << "    \"bytes_consumed\": " << obj_ref.bytes_consumed << ",\n";
+                o << "    \"inner_size\": " << obj_ref.inner_size << ",\n";
+                o << "    \"source\": \"" << objectives_source << "\",\n";
+                o << "    \"deltas_applied\": " << deltas_applied << ",\n";
                 o << "    \"items\": [\n";
-                for (std::size_t i = 0; i < objs.objectives.size(); ++i) {
-                    const auto& ob = objs.objectives[i];
+                for (std::size_t i = 0; i < obj_ref.objectives.size(); ++i) {
+                    const auto& ob = obj_ref.objectives[i];
                     // Resolve objective_type via the class table when available
                     // (1-39). Falls back to 0 = "unknown" if no class table.
                     uint8_t obj_type = 0;
@@ -182,6 +404,8 @@ std::string to_world_json(const CamArchive& cam, const WorldJsonOptions& opts) {
                     // like 1776 — passing it to objective_type_name would
                     // produce "Objective#1776" instead of "Airbase").
                     o << "      {\"type\": " << ob.type
+                      << ", \"id_num\": " << ob.id_num
+                      << ", \"id_creator\": " << ob.id_creator
                       << ", \"type_name\": \"" << escape_string(objective_type_name(static_cast<int16_t>(obj_type))) << "\""
                       << ", \"objective_type\": " << static_cast<int>(obj_type);
                     // Theater-db enrichment (Falcon4.OCD): emit the objective's
@@ -417,7 +641,7 @@ std::string to_world_json(const CamArchive& cam, const WorldJsonOptions& opts) {
                         o << "]}";
                     }
                     o << "]}";
-                    if (i + 1 < objs.objectives.size()) o << ",";
+                    if (i + 1 < obj_ref.objectives.size()) o << ",";
                     o << "\n";
                 }
                 o << "    ]\n";
@@ -428,10 +652,17 @@ std::string to_world_json(const CamArchive& cam, const WorldJsonOptions& opts) {
         }
 
         // --- Units (.uni) ---
+        // Class-table dispatch (the same Falcon4.ct the game loads) makes
+        // subclass identification deterministic; the trial-and-error
+        // validator remains as fallback. Version gates per the header
+        // comment in unit_decoder.hpp.
         const SubFile* uni_sf = cam.find("uni");
         if (uni_sf) {
             try {
-                DecodedUnits units = decode_uni(uni_sf->data.data(), uni_sf->data.size());
+                UnitDecodeOptions uo;
+                uo.camp_version = camp_version;
+                uo.class_table = opts.class_table ? opts.class_table : nullptr;
+                DecodedUnits units = decode_uni(uni_sf->data.data(), uni_sf->data.size(), uo);
                 o << ",\n  \"units\": {\n";
                 o << "    \"count\": " << units.count << ",\n";
                 o << "    \"decoded\": " << units.units.size() << ",\n";
@@ -441,6 +672,8 @@ std::string to_world_json(const CamArchive& cam, const WorldJsonOptions& opts) {
                 for (std::size_t i = 0; i < units.units.size(); ++i) {
                     const auto& u = units.units[i];
                     o << "      {\"type\": " << u.type
+                      << ", \"id_num\": " << u.id_num
+                      << ", \"id_creator\": " << u.id_creator
                       << ", \"unit_class\": \"" << unit_class_name(u.unit_class) << "\"";
                     // unit_subtype: 0 if no class table, else STYPE_UNIT_*.
                     // Emitted unconditionally so the viewer can rely on the
@@ -651,7 +884,10 @@ std::string to_world_json(const CamArchive& cam, const WorldJsonOptions& opts) {
                           << ", \"package_id\": " << u.subclass.package_num
                           << ", \"squadron_id\": " << u.subclass.squadron_num
                           << ", \"callsign_id\": " << static_cast<int>(u.subclass.callsign_id)
-                          << ", \"callsign_num\": " << static_cast<int>(u.subclass.callsign_num);
+                          << ", \"callsign_num\": " << static_cast<int>(u.subclass.callsign_num)
+                          << ", \"old_mission\": " << static_cast<int>(u.subclass.old_mission)
+                          << ", \"mission_context\": " << static_cast<int>(u.subclass.mission_context)
+                          << ", \"requester_id\": " << u.subclass.requester_num;
                     } else if (u.unit_class == UnitClass::Package) {
                         // Phase 1 fix A.1: previously decoded by unit_decoder.cpp
                         // but never emitted. A Package groups multiple Flights
@@ -661,7 +897,59 @@ std::string to_world_json(const CamArchive& cam, const WorldJsonOptions& opts) {
                           << ", \"awacs_id\": " << u.subclass.awacs_num
                           << ", \"jstar_id\": " << u.subclass.jstar_num
                           << ", \"ecm_id\": " << u.subclass.ecm_num
-                          << ", \"tanker_id\": " << u.subclass.tanker_num;
+                          << ", \"tanker_id\": " << u.subclass.tanker_num
+                          << ", \"element_ids\": [";
+                        for (std::size_t j = 0; j < u.subclass.element_ids.size(); j += 2) {
+                            if (j) o << ", ";
+                            o << u.subclass.element_ids[j];
+                        }
+                        o << "]";
+                        // Mission request — either branch. The mis_request
+                        // drives the package (mission, target, TOT).
+                        {
+                            const auto& mr = u.subclass.mis_request;
+                            o << ", \"mis_request\": {"
+                              << "\"mission\": " << static_cast<int>(mr.mission)
+                              << ", \"tot\": " << mr.tot
+                              << ", \"priority\": " << mr.priority
+                              << ", \"action_type\": " << static_cast<int>(mr.action_type)
+                              << ", \"target_num\": " << mr.target_id_num
+                              << ", \"target_creator\": " << mr.target_id_creator
+                              << ", \"requester_num\": " << mr.requester_id_num
+                              << "}";
+                        }
+                        o << ", \"package_branch\": \""
+                          << (u.subclass.package_branch == PackageBranch::Small ? "small"
+                              : u.subclass.package_branch == PackageBranch::Big ? "big" : "none")
+                          << "\"";
+                        if (u.subclass.package_branch == PackageBranch::Big) {
+                            o << ", \"flights\": " << static_cast<int>(u.subclass.flights)
+                              << ", \"wait_for\": " << u.subclass.wait_for
+                              << ", \"takeoff\": " << u.subclass.takeoff
+                              << ", \"tp_time\": " << u.subclass.tp_time
+                              << ", \"package_flags\": " << u.subclass.package_flags
+                              << ", \"caps\": " << u.subclass.caps
+                              << ", \"requests\": " << u.subclass.requests
+                              << ", \"responses\": " << u.subclass.responses;
+                            // Ingress/egress routes (same waypoint shape as
+                            // unit routes).
+                            for (int route = 0; route < 2; ++route) {
+                                const auto& wps = (route == 0)
+                                    ? u.subclass.ingress : u.subclass.egress;
+                                o << ", \"" << (route == 0 ? "ingress" : "egress") << "\": [";
+                                for (std::size_t wi = 0; wi < wps.size(); ++wi) {
+                                    const auto& w = wps[wi];
+                                    if (wi) o << ", ";
+                                    o << "{\"x\": " << w.grid_x
+                                      << ", \"y\": " << w.grid_y
+                                      << ", \"z\": " << w.grid_z
+                                      << ", \"arrive\": " << w.arrive
+                                      << ", \"action\": " << static_cast<int>(w.action)
+                                      << "}";
+                                }
+                                o << "]";
+                            }
+                        }
                     }
                     o << "}";
                     if (i + 1 < units.units.size()) o << ",";

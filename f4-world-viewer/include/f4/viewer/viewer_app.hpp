@@ -198,6 +198,10 @@ private:
     /// Content-only — caller owns the window + tab item.
     void draw_ground_layout_3d();
     void draw_campaign_and_teams_view();
+    /// B.3 QC: the "ATO / Tasking" window — sortable flight table with
+    /// mission/team filters, click-to-select + camera focus. See
+    /// campaign_qc_view.cpp.
+    void draw_campaign_qc_view();
 
     // --- Replay mode private draw path (Path B2) -------------------------
     //

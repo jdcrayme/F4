@@ -45,6 +45,7 @@
 #include <vector>
 
 #include "f4/simulation/scenario.hpp"
+#include <f4/simulation/campaign_bridge.hpp>  // AirbaseAirfieldMap (B.3+)
 
 #include <f4/terrain/terrain_source.hpp>  // TerrainSource (Path B1)
 
@@ -234,6 +235,12 @@ private:
     void init_bubble_manager();             // Mode B: BubbleManager for ground/naval units
     void update_bubble();                   // Mode B: per-tick bubble update (in tick())
     void derive_real_airbase();   // airbase_source -> real ground layout
+    /// B.3: campaign-flights airfield derivation (BEFORE wire_atc, see
+    /// initialize()). Loads the world JSON's objectives, finds the first
+    /// airbase, rewrites scenario_.airfield. No-op when the scenario
+    /// carries a hand-authored airfield (non-empty taxi route) or when no
+    /// airbase objective exists (spawn then fails loudly).
+    void derive_campaign_airfield();
     void wire_atc();              // StubATC + AirfieldConfig from scenario
     void record_snapshot();
     void record_fcs_trace_sample();
@@ -291,6 +298,12 @@ private:
     // when not in campaign-flights mode (no BubbleManager needed for the
     // scenario-list spawn path, which has no campaign units).
     std::unique_ptr<BubbleManager> bubble_manager_;
+
+    // B.3+: per-airbase derived airfields (key: airbase objective VU_ID.num)
+    // from the LAST spawn_from_campaign_flights() run. Kept as a member so
+    // the ATC registration (step 6) and later host-side queries share one
+    // map; rebuilt on every campaign spawn.
+    AirbaseAirfieldMap airbase_airfields_{};
 
     // Terrain elevation source. When null, tick() uses default_terrain_
     // (a FlatTerrainSource at the parking spot's altitude). The host

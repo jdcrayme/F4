@@ -17,7 +17,8 @@
 //   [bytes]  CampBaseClass + ObjectiveClass save data
 //
 // CampBaseClass::Save (campbase.cpp:229) layout:
-//   [VU_ID]     id            (8 bytes: creator uint32 + num uint32)
+//   [VU_ID]     id            (8 bytes: num uint32, then creator uint32 —
+//                             vutypes.h declares num_ before creator_)
 //   [ushort]    entity_type
 //   [GridIndex] x             (int16, grid column)
 //   [GridIndex] y             (int16, grid row)
@@ -198,6 +199,44 @@ struct DecodedObjectives {
 };
 
 /// Decode the .obj sub-file's raw bytes. Throws on malformed input.
-[[nodiscard]] DecodedObjectives decode_obj(const uint8_t* data, std::size_t size);
+/// camp_version selects the CampBaseClass layout (pos_.z_ present at
+/// gCampDataVersion >= 70; earlier files omit the float).
+[[nodiscard]] DecodedObjectives decode_obj(const uint8_t* data, std::size_t size,
+                                           int camp_version = 63);
+
+/// One .obd delta record (ObjectiveClass::UpdateFromData, objectiv.cpp:539):
+/// the objective's VU_ID plus the changed state.
+struct ObjectiveDelta {
+    uint32_t id_num = 0;        // VU_ID of the target objective
+    uint32_t id_creator = 0;
+    int32_t  last_repair = 0;
+    uint8_t  owner = 0;
+    uint8_t  supply = 0;
+    uint8_t  fuel = 0;
+    uint8_t  losses = 0;
+    std::vector<uint8_t> fstatus;   // len-prefixed per-feature damage bits
+};
+
+struct DecodedObjectiveDeltas {
+    int16_t count = 0;
+    std::vector<ObjectiveDelta> deltas;
+    std::size_t bytes_consumed = 0;   // of the decompressed buffer
+    std::size_t inner_size = 0;
+};
+
+/// Decode the .obd sub-file (objective deltas — mid-campaign state
+/// changes applied on top of the base objectives). Format
+/// (SaveObjectiveDeltas / DecodeObjectiveDeltas, objectiv.cpp:3130/3571):
+///   [int32] outer_size   (total encoded size; unused)
+///   [short] count
+///   [int32] inner_size   (uncompressed size of the LZSS payload)
+///   [bytes] lzss_payload
+/// Decompressed: count x { VU_ID + last_repair + owner + supply + fuel +
+/// losses + fstatus_len + fstatus[len] }.
+/// A normal in-campaign save (CAMP_SAVE_NORMAL) carries only .obd; the
+/// base objectives come from the scenario's .obj (see cam2json
+/// --objectives).
+[[nodiscard]] DecodedObjectiveDeltas decode_obd(const uint8_t* data, std::size_t size,
+                                                int camp_version = 63);
 
 } // namespace f4::world_convert

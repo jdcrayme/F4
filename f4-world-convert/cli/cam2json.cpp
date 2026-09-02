@@ -18,8 +18,10 @@
 #include <f4/world_convert/class_table.hpp>
 #include <f4/world_convert/theater_data.hpp>
 #include <f4/import/manifest_writer.hpp>
+#include <f4/io/read_file.hpp>
 
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -34,12 +36,17 @@ int main(int argc, char** argv) {
                      "[--theater <name>] [--terrain <file>] "
                      "[--class-table <FALCON4.ct>] "
                      "[--theater-data <dir>] "
+                     "[--objectives <base.obj> [--objectives-version <n>]] "
                      "[--data-dir <Data>]\n"
                      "  --theater-data: directory containing Falcon4.OCD/.PHD/.PD/"
                      ".UCD/.VCD/.FED/.FCD (typically <install>/terrdata/objects).\n"
                      "                  When provided, the world JSON is enriched with\n"
                      "                  objective class names, airbase ground layouts,\n"
                      "                  unit class names, and per-group vehicle composition.\n"
+                     "  --objectives:  base objectives .obj for normal in-campaign saves\n"
+                     "                  (which carry only .obd deltas — no embedded obj\n"
+                     "                  sub-file). The deltas are applied on top.\n"
+                     "                  --objectives-version defaults to 63.\n"
                      "  --data-dir:    asset-pipeline mode (Stage 1). Writes to\n"
                      "                  <Data>/World/<id>.world.json, records terrain_file\n"
                      "                  as @asset:theater:<id>, updates <Data>/manifest.json.\n";
@@ -58,6 +65,8 @@ int main(int argc, char** argv) {
     fs::path explicit_ct;
     fs::path theater_data_dir;
     fs::path data_dir;
+    fs::path base_objectives;
+    int base_objectives_version = 63;
     bool asset_mode = false;
     for (int i = 2; i < argc; ++i) {
         const std::string a = argv[i];
@@ -72,6 +81,10 @@ int main(int argc, char** argv) {
         } else if (a == "--data-dir" && i + 1 < argc) {
             data_dir = argv[++i];
             asset_mode = true;
+        } else if (a == "--objectives" && i + 1 < argc) {
+            base_objectives = argv[++i];
+        } else if (a == "--objectives-version" && i + 1 < argc) {
+            base_objectives_version = std::atoi(argv[++i]);
         }
     }
 
@@ -86,6 +99,17 @@ int main(int argc, char** argv) {
         out = data_dir / "World" / (campaign_id.local_id + ".world.json");
         if (opts.terrain_file == "korea.terrain.json") {
             opts.terrain_file = "@asset:" + theater_id.to_string();
+        }
+    }
+
+    if (!base_objectives.empty()) {
+        opts.base_objectives_path = base_objectives;
+        opts.base_objectives_version = base_objectives_version;
+        std::error_code ec;
+        if (!fs::exists(base_objectives, ec)) {
+            std::cerr << "cam2json: --objectives: " << base_objectives
+                      << " does not exist — ignoring\n";
+            opts.base_objectives_path.clear();
         }
     }
 

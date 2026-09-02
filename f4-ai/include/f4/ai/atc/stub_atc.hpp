@@ -32,6 +32,7 @@
 
 #include <cstdint>
 #include <string>
+#include <unordered_map>
 
 #include <f4/messaging/bus.hpp>
 #include <f4/geo/position.hpp>
@@ -92,6 +93,24 @@ public:
         airfield_ = config;
     }
 
+    // Configure a PER-AIRBASE airfield (campaign path). Requests carrying
+    // `airbase_id` (the VU_ID.num of the airbase objective the aircraft is
+    // parked at) are answered from THAT airfield; requests with an
+    // unknown/zero id fall back to the default set_airfield() config.
+    // Campaign saves park flights at dozens of different bases — one
+    // global airfield would hand every aircraft the same taxi route and
+    // runway, sending them taxiing across the theater (the B.3 QC
+    // harness caught exactly that). Registering per-base configs keeps
+    // every aircraft's ground ops local to its own field.
+    void set_airbase_airfield(std::uint64_t airbase_id, const AirfieldConfig& config) {
+        airbase_airfields_[airbase_id] = config;
+    }
+
+    // How many per-airbase airfields are registered (test access).
+    [[nodiscard]] std::size_t airbase_airfield_count() const noexcept {
+        return airbase_airfields_.size();
+    }
+
     // Configure a tanker for AR.
     void set_tanker(const TankerConfig& config) {
         tanker_ = config;
@@ -102,51 +121,66 @@ public:
     [[nodiscard]] const TankerConfig& tanker() const noexcept { return tanker_; }
 
 private:
+    // Resolve the airfield to answer a request with: the per-airbase
+    // registration when present, else the default.
+    [[nodiscard]] const AirfieldConfig& resolve_airfield(std::uint64_t airbase_id) const noexcept {
+        const auto it = airbase_airfields_.find(airbase_id);
+        return (it != airbase_airfields_.end()) ? it->second : airfield_;
+    }
+
     void subscribe_all() {
         // --- Ground / Taxi ---
         bus_.subscribe<TaxiRequest>([this](const TaxiRequest& msg) {
+            const AirfieldConfig& af = resolve_airfield(msg.airbase_id);
             TaxiClearance clearance;
             clearance.aircraft_id = msg.aircraft_id;
-            clearance.taxi_route = airfield_.taxi_route;
-            clearance.runway_id = airfield_.active_runway_id;
-            clearance.runway_name = airfield_.active_runway_name;
+            clearance.airbase_id = msg.airbase_id;
+            clearance.taxi_route = af.taxi_route;
+            clearance.runway_id = af.active_runway_id;
+            clearance.runway_name = af.active_runway_name;
             bus_.publish(clearance);
         });
 
         bus_.subscribe<HoldShortRequest>([this](const HoldShortRequest& msg) {
+            const AirfieldConfig& af = resolve_airfield(msg.airbase_id);
             HoldShortClearance clearance;
             clearance.aircraft_id = msg.aircraft_id;
             clearance.runway_id = msg.runway_id;
             // Hold-short position is the last waypoint in the taxi route
-            if (!airfield_.taxi_route.empty()) {
-                clearance.hold_position = airfield_.taxi_route.back();
+            if (!af.taxi_route.empty()) {
+                clearance.hold_position = af.taxi_route.back();
             }
             bus_.publish(clearance);
         });
 
         // --- Takeoff ---
         bus_.subscribe<TakeoffRequest>([this](const TakeoffRequest& msg) {
+            const AirfieldConfig& af = resolve_airfield(msg.airbase_id);
             TakeoffClearance clearance;
             clearance.aircraft_id = msg.aircraft_id;
-            clearance.runway_id = airfield_.active_runway_id;
-            clearance.runway_heading_rad = airfield_.runway_heading_rad;
-            clearance.threshold_position = airfield_.threshold_position;
-            clearance.departure_altitude_ft = airfield_.departure_altitude_ft;
+            clearance.runway_id = af.active_runway_id;
+            clearance.runway_heading_rad = af.runway_heading_rad;
+            clearance.threshold_position = af.threshold_position;
+            clearance.departure_altitude_ft = af.departure_altitude_ft;
             bus_.publish(clearance);
         });
 
         // --- Landing ---
         bus_.subscribe<LandingRequest>([this](const LandingRequest& msg) {
+            // LandingRequest has always carried airbase_id — resolve it
+            // through the same registry (a per-base landing config beats
+            // the default when registered).
+            const AirfieldConfig& af = resolve_airfield(msg.airbase_id);
             LandingClearance clearance;
             clearance.aircraft_id = msg.aircraft_id;
-            clearance.runway_id = airfield_.active_runway_id;
-            clearance.runway_name = airfield_.active_runway_name;
-            clearance.runway_heading_rad = airfield_.runway_heading_rad;
-            clearance.threshold_position = airfield_.threshold_position;
-            clearance.threshold_altitude_ft = airfield_.threshold_altitude_ft;
-            clearance.glide_slope_angle_rad = airfield_.glide_slope_angle_rad;
-            clearance.pattern_altitude_ft = airfield_.pattern_altitude_ft;
-            clearance.decision_height_ft = airfield_.decision_height_ft;
+            clearance.runway_id = af.active_runway_id;
+            clearance.runway_name = af.active_runway_name;
+            clearance.runway_heading_rad = af.runway_heading_rad;
+            clearance.threshold_position = af.threshold_position;
+            clearance.threshold_altitude_ft = af.threshold_altitude_ft;
+            clearance.glide_slope_angle_rad = af.glide_slope_angle_rad;
+            clearance.pattern_altitude_ft = af.pattern_altitude_ft;
+            clearance.decision_height_ft = af.decision_height_ft;
             bus_.publish(clearance);
         });
 
@@ -181,6 +215,10 @@ private:
     messaging::MessageBus& bus_;
     AirfieldConfig airfield_{};
     TankerConfig tanker_{};
+
+    // Per-airbase airfield registry (campaign path — see
+    // set_airbase_airfield). Key: airbase VU_ID.num.
+    std::unordered_map<std::uint64_t, AirfieldConfig> airbase_airfields_;
 };
 
 } // namespace f4::ai::atc

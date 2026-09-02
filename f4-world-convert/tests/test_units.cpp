@@ -246,3 +246,163 @@ TEST(Units, JsonExposesNewFieldsWithClassTable) {
     EXPECT_NE(json.find("\"domain\": 3,"), std::string::npos) << "land domain present";
     EXPECT_NE(json.find("\"domain\": 2,"), std::string::npos) << "air domain present";
 }
+
+// ── v71: TestCamp.cam — a real mid-campaign save ─────────────────────────────
+// TestCamp.cam (repo root, gCampDataVersion 71, ~half a day of fighting)
+// exercises the v71 layout deltas: CampBaseClass pos_.z_ float (v>=70),
+// ushort current_wp / wp_count (v>=71), squadron stores[220] (v69..71),
+// the flight v>65 trio (old_mission/mission_context/requester), and
+// the package small/big branch selected by (unit_flags & U_FINAL).
+// Parity: 1715/1715 units, cursor at exactly 423,065 bytes.
+namespace {
+CamArchive load_testcamp() {
+    CamArchive cam;
+    cam.load(REPO_ROOT "TestCamp.cam");
+    return cam;
+}
+bool testcamp_available() {
+    std::error_code ec;
+    return std::filesystem::exists(REPO_ROOT "TestCamp.cam", ec);
+}
+} // namespace
+
+TEST(V71Units, TestCampDecodesAllUnitsWithClassTableDispatch) {
+    if (!testcamp_available()) GTEST_SKIP() << "TestCamp.cam not in repo root";
+    auto cam = load_testcamp();
+
+    const SubFile* ver = cam.find("ver");
+    ASSERT_NE(ver, nullptr);
+    ASSERT_EQ(read_version(ver->data.data(), ver->data.size()), 71);
+
+    ClassTable ct;
+    ct.load(FIXTURE_DIR "FALCON4.ct");
+
+    const SubFile* uni = cam.find("uni");
+    ASSERT_NE(uni, nullptr);
+    UnitDecodeOptions opts;
+    opts.camp_version = 71;
+    opts.class_table = &ct;
+    DecodedUnits units = decode_uni(uni->data.data(), uni->data.size(), opts);
+
+    // The full mid-campaign roster — every record decodes, cursor exact.
+    ASSERT_EQ(units.count, 1715);
+    EXPECT_EQ(units.units.size(), std::size_t{1715});
+    EXPECT_EQ(units.bytes_consumed, units.inner_size);
+    EXPECT_EQ(units.inner_size, std::size_t{423065});
+
+    // Class distribution: 449 flights, 371 packages, 672 battalions,
+    // 94 squadrons, 114 brigades, 15 task forces (pinned from the file).
+    std::map<UnitClass, std::size_t> by_class;
+    for (const auto& u : units.units) ++by_class[u.unit_class];
+    EXPECT_EQ(by_class[UnitClass::Flight],    std::size_t{449});
+    EXPECT_EQ(by_class[UnitClass::Package],   std::size_t{371});
+    EXPECT_EQ(by_class[UnitClass::Battalion], std::size_t{672});
+    EXPECT_EQ(by_class[UnitClass::Squadron],  std::size_t{94});
+    EXPECT_EQ(by_class[UnitClass::Brigade],   std::size_t{114});
+    EXPECT_EQ(by_class[UnitClass::TaskForce], std::size_t{15});
+    EXPECT_EQ(by_class[UnitClass::Unknown],   std::size_t{0});
+
+    // v71 CampBase carries the z float; ground units sit at z 0, flights
+    // carry real altitudes (feet, positive up to ~40k).
+    int flights_with_alt = 0;
+    for (const auto& u : units.units) {
+        if (u.unit_class != UnitClass::Flight) continue;
+        if (u.subclass.altitude != 0.0f || u.z != 0.0f) ++flights_with_alt;
+    }
+    EXPECT_GE(flights_with_alt, 100);
+
+    // Flights carry missions, loadout counts, package/squadron links.
+    int flights_with_mission = 0;
+    int flights_in_package = 0;
+    for (const auto& u : units.units) {
+        if (u.unit_class != UnitClass::Flight) continue;
+        if (u.subclass.mission != 0) ++flights_with_mission;
+        if (u.subclass.package_num != 0) ++flights_with_mission;  // sanity
+        if (u.subclass.package_num != 0 && u.subclass.package_num != 0xFFFFFFFFu)
+            ++flights_in_package;
+    }
+    EXPECT_GE(flights_with_mission, 200);
+    EXPECT_GE(flights_in_package, 300);
+}
+
+TEST(V71Units, TestCampPackagesCarryMissionRequests) {
+    if (!testcamp_available()) GTEST_SKIP() << "TestCamp.cam not in repo root";
+    auto cam = load_testcamp();
+    ClassTable ct;
+    ct.load(FIXTURE_DIR "FALCON4.ct");
+
+    const SubFile* uni = cam.find("uni");
+    ASSERT_NE(uni, nullptr);
+    UnitDecodeOptions opts;
+    opts.camp_version = 71;
+    opts.class_table = &ct;
+    DecodedUnits units = decode_uni(uni->data.data(), uni->data.size(), opts);
+    ASSERT_EQ(units.units.size(), std::size_t{1715});
+
+    // Packages carry elements (flight VU_IDs) and a mission request.
+    // All 371 packages in this save are finalized (small branch —
+    // Final() && !wait_cycles after half a day of fighting).
+    int pkgs_with_elements = 0;
+    int pkgs_with_branch = 0;
+    int small = 0, big = 0;
+    for (const auto& u : units.units) {
+        if (u.unit_class != UnitClass::Package) continue;
+        if (u.subclass.elements > 0 &&
+            u.subclass.element_ids.size() ==
+                static_cast<std::size_t>(u.subclass.elements) * 2) {
+            ++pkgs_with_elements;
+        }
+        if (u.subclass.package_branch != PackageBranch::None) ++pkgs_with_branch;
+        if (u.subclass.package_branch == PackageBranch::Small) ++small;
+        if (u.subclass.package_branch == PackageBranch::Big) ++big;
+    }
+    EXPECT_EQ(pkgs_with_elements, 371);
+    EXPECT_EQ(pkgs_with_branch, 371);
+    EXPECT_EQ(small, 371);
+    EXPECT_EQ(big, 0);
+}
+
+TEST(V71Units, TestCampDecodesWithoutClassTableToo) {
+    // No class table: the trial-and-error fallback must also walk the
+    // whole stream (the validator's type range stays at the legacy
+    // [100..2000] heuristic — entity types above 2000 are rare enough
+    // that the fallback still lands all records on this file).
+    if (!testcamp_available()) GTEST_SKIP() << "TestCamp.cam not in repo root";
+    auto cam = load_testcamp();
+    const SubFile* uni = cam.find("uni");
+    ASSERT_NE(uni, nullptr);
+    UnitDecodeOptions opts;                    // v63 default; override:
+    opts.camp_version = 71;                    // no class_table
+    DecodedUnits units = decode_uni(uni->data.data(), uni->data.size(), opts);
+    EXPECT_EQ(units.units.size(), std::size_t{1715});
+    EXPECT_EQ(units.bytes_consumed, units.inner_size);
+}
+
+TEST(V71Units, V63FixtureStillDecodesWithV71Code) {
+    // Regression: the version-gated decoder must keep the v63 fixture's
+    // parity (683/683, exact consumption) with and without a class table.
+    auto cam = load_fixture();
+    const SubFile* uni = cam.find("uni");
+    ASSERT_NE(uni, nullptr);
+
+    UnitDecodeOptions v63;
+    v63.camp_version = 63;
+    DecodedUnits a = decode_uni(uni->data.data(), uni->data.size(), v63);
+    EXPECT_EQ(a.units.size(), std::size_t{683});
+    EXPECT_EQ(a.bytes_consumed, a.inner_size);
+
+    ClassTable ct;
+    ct.load(FIXTURE_DIR "FALCON4.ct");
+    UnitDecodeOptions v63ct;
+    v63ct.camp_version = 63;
+    v63ct.class_table = &ct;
+    DecodedUnits b = decode_uni(uni->data.data(), uni->data.size(), v63ct);
+    EXPECT_EQ(b.units.size(), std::size_t{683});
+    EXPECT_EQ(b.bytes_consumed, b.inner_size);
+
+    // Class-table dispatch and trial-and-error agree on every record.
+    for (std::size_t i = 0; i < a.units.size(); ++i) {
+        ASSERT_EQ(a.units[i].unit_class, b.units[i].unit_class)
+            << "record " << i << " type " << a.units[i].type;
+    }
+}

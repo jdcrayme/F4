@@ -91,6 +91,9 @@ EntityId populate_campaign(EntityWorld& world, const ICampaignSource& src) {
     cs.te_flags           = src.te_flags();
     cs.te_number_aircraft = src.te_number_aircraft();
     cs.te_team_pts        = src.te_team_pts();
+    cs.bullseye_x         = src.bullseye_x();
+    cs.bullseye_y         = src.bullseye_y();
+    cs.bullseye_name      = src.bullseye_name();
 
     return h.id();
 }
@@ -573,6 +576,17 @@ std::vector<EntityId> populate_units(
         if (auto* pk = src.as_package(i)) {
             auto& ps = h.add<PackageSupportComponent>();
             ps.wait_cycles = pk->wait_cycles(i);
+            // B.3 tranche — carry the ATM mission request raw fields onto
+            // the component now; the target/requester EntityIds are
+            // resolved in the second pass (both maps must be complete).
+            ps.request.present = pk->request_present(i);
+            ps.request.mission = pk->request_mission(i);
+            ps.request.tot = pk->request_tot(i);
+            ps.request.priority = pk->request_priority(i);
+            ps.request.action_type = pk->request_action_type(i);
+            ps.request.target_num = pk->request_target_num(i);
+            ps.request.target_creator = pk->request_target_creator(i);
+            ps.request.requester_num = pk->request_requester_num(i);
             // Cross-references resolved in second pass.
         }
 
@@ -710,6 +724,28 @@ std::vector<EntityId> populate_units(
                         fp->squadron = it->second;
                     }
                 }
+                // B.3 tranche — resolve the flight's mission target. The
+                // wire value is the target objective's (or, for unit-
+                // targeted missions, the target unit's) VU_ID.num. Objectives
+                // are tried first: the overwhelmingly common case
+                // (strike/SEAD/CAP waypoints reference objectives), and VU
+                // numbering spaces can overlap, so a unit VU_ID that
+                // collides with an objective id would mis-resolve — prefer
+                // the objective reading and only fall back to units when no
+                // objective matches.
+                const uint32_t tgt_num =
+                    static_cast<uint32_t>(fl->mission_target(i));
+                if (tgt_num != 0) {
+                    auto it = obj_id_map.find(tgt_num);
+                    if (it != obj_id_map.end()) {
+                        fp->target = it->second;
+                    } else {
+                        auto uit = unit_id_map.find(tgt_num);
+                        if (uit != unit_id_map.end()) {
+                            fp->target = uit->second;
+                        }
+                    }
+                }
             }
         }
 
@@ -741,6 +777,50 @@ std::vector<EntityId> populate_units(
                 if (tnk_id != 0) {
                     auto it = unit_id_map.find(tnk_id);
                     if (it != unit_id_map.end()) ps->tanker = it->second;
+                }
+
+                // B.3 tranche — package element flights (same resolution
+                // path as Brigade→children, but for air packages).
+                const auto& elems = pk->element_ids(i);
+                if (!elems.empty()) {
+                    ps->elements.clear();
+                    ps->elements.reserve(elems.size());
+                    for (auto eid : elems) {
+                        auto it = unit_id_map.find(eid);
+                        if (it != unit_id_map.end()) {
+                            ps->elements.push_back(it->second);
+                        }
+                    }
+                }
+
+                // B.3 tranche — ATM mission request target + requester.
+                // Targets are usually objectives (the thing to strike);
+                // requesters are usually units (the front-line battalion
+                // that called for CAS) — try both maps both ways, with
+                // the statistically-likely order first.
+                if (ps->request.present) {
+                    if (ps->request.target_num != 0) {
+                        auto it = obj_id_map.find(ps->request.target_num);
+                        if (it != obj_id_map.end()) {
+                            ps->request.target = it->second;
+                        } else {
+                            auto uit = unit_id_map.find(ps->request.target_num);
+                            if (uit != unit_id_map.end()) {
+                                ps->request.target = uit->second;
+                            }
+                        }
+                    }
+                    if (ps->request.requester_num != 0) {
+                        auto it = unit_id_map.find(ps->request.requester_num);
+                        if (it != unit_id_map.end()) {
+                            ps->request.requester = it->second;
+                        } else {
+                            auto oit = obj_id_map.find(ps->request.requester_num);
+                            if (oit != obj_id_map.end()) {
+                                ps->request.requester = oit->second;
+                            }
+                        }
+                    }
                 }
             }
         }

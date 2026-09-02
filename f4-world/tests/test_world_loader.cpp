@@ -1065,3 +1065,128 @@ TEST(ConvenienceAPI, LoadRealFixture) {
     auto ground = ew.with_component<GroundTacticalComponent>();
     EXPECT_GT(ground.size(), 0u);
 }
+
+// ============================================================================
+// B.3 tranche — package elements, ATM mission request, flight target
+// ============================================================================
+
+namespace {
+
+// Small world: objective 1001 (strike target), squadron 4001 at airbase,
+// flight 5001 (mission AMIS_INTSTRIKE=13, target objective 1001, in package
+// 6001), package 6001 with element [5001] + a mission request targeting
+// objective 1001 requested by battalion 2001.
+WorldState make_b3_world() {
+    WorldState ws;
+    ws.version = 71;
+    ws.campaign.current_time = 38574360;
+
+    ObjectiveState tgt;
+    tgt.type = 1337; tgt.entity_type = 1337; tgt.x = 620; tgt.y = 520;
+    tgt.owner = 1; tgt.first_owner = 1; tgt.priority = 30;
+    tgt.id_creator = 0; tgt.id_num = 1001; tgt.camp_id = 51;
+    tgt.objective_type = 6; tgt.class_name = "Strike Target";
+    ws.objectives = {tgt};
+
+    UnitState sq;
+    sq.type = 500; sq.unit_class = UnitClass::Squadron; sq.domain = 2;
+    sq.x = 500; sq.y = 400; sq.owner = 2; sq.id_num = 4001;
+    sq.class_name = "35th Fighter Squadron";
+    sq.airbase_id = 1001;  // same objective: fine for the test
+    UnitState fl;
+    fl.type = 600; fl.unit_class = UnitClass::Flight; fl.domain = 2;
+    fl.x = 510; fl.y = 410; fl.owner = 2; fl.id_num = 5001;
+    fl.class_name = "Strike Flight";
+    fl.mission = 13; fl.mission_target = 1001;
+    fl.time_on_target = 43739352; fl.package_id = 6001; fl.squadron_id = 4001;
+    fl.callsign_id = 125; fl.callsign_num = 1;
+    WaypointState w1; w1.x = 510; w1.y = 410; w1.z = 0;      w1.action = 1;   // WP_TAKEOFF
+    WaypointState w2; w2.x = 560; w2.y = 460; w2.z = 2500;   w2.action = 15;  // WP_NAVSTRIKE
+    WaypointState w3; w3.x = 620; w3.y = 520; w3.z = 2500;   w3.action = 17;  // WP_STRIKE
+    WaypointState w4; w4.x = 510; w4.y = 410; w4.z = 0;      w4.action = 7;   // WP_LAND
+    fl.waypoints = {w1, w2, w3, w4};
+    UnitState pkg;
+    pkg.type = 700; pkg.unit_class = UnitClass::Package; pkg.domain = 2;
+    pkg.x = 505; pkg.y = 405; pkg.owner = 2; pkg.id_num = 6001;
+    pkg.class_name = "Strike Package";
+    pkg.wait_cycles = 2;
+    pkg.element_ids = {5001};
+    pkg.request_present = true;
+    pkg.request_mission = 13;
+    pkg.request_tot = 43739352;
+    pkg.request_priority = 230;
+    pkg.request_action_type = 0;
+    pkg.request_target_num = 1001;
+    pkg.request_requester_num = 1001;
+    UnitState bn;
+    bn.type = 170; bn.unit_class = UnitClass::Battalion; bn.domain = 3;
+    bn.x = 400; bn.y = 300; bn.owner = 2; bn.id_num = 2001;
+    bn.class_name = "Armor Battalion";
+    ws.units = {sq, fl, pkg, bn};
+    return ws;
+}
+
+} // namespace
+
+TEST(PopulateWorldB3, PackageElementsAndRequestResolve) {
+    EntityWorld ew;
+    WorldState ws = make_b3_world();
+    auto pw = populate_world(ew, ws);
+
+    // Package → element flight cross-reference.
+    EntityId pkg_eid = pw.unit_id_map.at(6001);
+    auto pkg_h = EntityHandle(pkg_eid, &ew);
+    auto* ps = pkg_h.get<PackageSupportComponent>();
+    ASSERT_NE(ps, nullptr);
+    ASSERT_EQ(ps->elements.size(), 1u);
+    EXPECT_EQ(ps->elements[0], pw.unit_id_map.at(5001));
+
+    // Flight → package reverse link still resolves.
+    auto fl_h = EntityHandle(pw.unit_id_map.at(5001), &ew);
+    auto* fp = fl_h.get<FlightPlanComponent>();
+    ASSERT_NE(fp, nullptr);
+    EXPECT_EQ(fp->package, pkg_eid);
+
+    // Flight mission target resolves to the objective entity.
+    EXPECT_EQ(fp->target, pw.objective_id_map.at(1001));
+
+    // The mission request carried over and resolved target + requester.
+    EXPECT_TRUE(ps->request.present);
+    EXPECT_EQ(ps->request.mission, 13);
+    EXPECT_EQ(ps->request.tot, 43739352);
+    EXPECT_EQ(ps->request.priority, 230);
+    EXPECT_EQ(ps->request.target, pw.objective_id_map.at(1001));
+}
+
+TEST(WorldStateB3, ParsesMisRequestBlock) {
+    // v71 world JSON carries the package mis_request block — the parser
+    // must decode it into UnitState.request_* (B.3 tranche).
+    WorldState ws;
+    ws.load_from_string(R"({
+        "version": 71,
+        "units": {
+            "count": 1,
+            "items": [{
+                "type": 700, "unit_class": "package", "id_num": 6001,
+                "x": 505, "y": 405, "owner": 2,
+                "wait_cycles": 2, "element_ids": [5001],
+                "mis_request": {
+                    "mission": 13, "tot": 43739352, "priority": 230,
+                    "action_type": 0, "target_num": 1001,
+                    "target_creator": 0, "requester_num": 1001
+                }
+            }]
+        }
+    })");
+    ASSERT_EQ(ws.units.size(), 1u);
+    const auto& u = ws.units[0];
+    EXPECT_TRUE(u.request_present);
+    EXPECT_EQ(u.request_mission, 13);
+    EXPECT_EQ(u.request_tot, 43739352);
+    EXPECT_EQ(u.request_priority, 230);
+    EXPECT_EQ(u.request_action_type, 0);
+    EXPECT_EQ(u.request_target_num, 1001u);
+    EXPECT_EQ(u.request_requester_num, 1001u);
+    ASSERT_EQ(u.element_ids.size(), 1u);
+    EXPECT_EQ(u.element_ids[0], 5001u);
+}

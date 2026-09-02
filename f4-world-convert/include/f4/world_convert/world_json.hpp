@@ -10,6 +10,7 @@
 #include <f4/world_convert/campaign_decoder.hpp>
 #include <f4/world_convert/class_table.hpp>
 #include <f4/world_convert/theater_data.hpp>
+#include <filesystem>
 #include <string>
 
 namespace f4::world_convert {
@@ -46,7 +47,29 @@ struct WorldJsonOptions {
     ///     num_elements[] and vehicle_type[], this fully resolves a unit's
     ///     vehicle roster.
     const TheaterObjectDatabase* theater_db = nullptr;
+    /// Path to a base objectives .obj file (the theater/scenario objective
+    /// list). Used when the .cam is a normal in-campaign save that carries
+    /// only .obd deltas (no embedded "obj" subfile): the base list is
+    /// decoded, then the .obd deltas are applied on top — reproducing
+    /// FreeFalcon's LoadBaseObjectives + LoadObjectiveDeltas flow. The
+    /// path's gCampDataVersion may differ from the save's (FreeFalcon
+    /// re-reads the scenario's version for base objectives).
+    std::filesystem::path base_objectives_path;
+    /// gCampDataVersion of the base objectives file (default 63 — the
+    /// version of the bundled save1.cam-derived .obj fixtures).
+    int base_objectives_version = 63;
 };
+
+/// Locate a base objectives .obj for a .cam that carries none (normal
+/// in-campaign saves). Search order:
+///   1. Any *.obj next to the .cam (a real install keeps the scenario's
+///      .obj in the campaign/save directory).
+///   2. CWD-relative well-known paths — the bundled save1.obj fixture
+///      (the stock korea scenario's objective list; the same theater
+///      the bundled fixtures use) covers the no-install workflow.
+/// Returns an empty path when nothing is found.
+[[nodiscard]] std::filesystem::path find_base_objectives(
+    const std::filesystem::path& cam_path);
 
 /// Build the world JSON document from a loaded .cam archive.
 /// Includes: the container manifest (all sub-files), the decoded .ver

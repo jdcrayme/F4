@@ -406,6 +406,29 @@ struct ViewerApp::Impl {
     bool show_feature_meshes = true;
     bool show_squadron_links = true;          // squadron → home airbase thin line
     bool show_hierarchy_lines = false;        // battalion → brigade parent lines (planned)
+    // --- B.3 campaign-QC layers ------------------------------------------
+    // The tasking picture: flights colored by owner already render via the
+    // base unit pass; these overlays add the RELATIONSHIPS the campaign
+    // logic actually created (target assignments, package composition,
+    // the bullseye reference), and the mission filter isolates one
+    // mission type for end-to-end inspection.
+    bool show_mission_links = true;           // flight → mission target line
+    bool show_package_links = true;           // package → element flights lines
+    bool show_bullseye = true;                // campaign bullseye crosshair
+    /// Mission filter: -1 = all missions. Otherwise only flights whose
+    /// FlightPlanComponent::mission == mission_filter render at full
+    /// strength (others dim to 25%); the ATO table and mission links
+    /// follow the same filter. Shared with team_filter.
+    int mission_filter = -1;
+    /// True when the flight entity passes impl_->mission_filter.
+    [[nodiscard]] bool mission_filter_passes(
+        const f4::entities::FlightPlanComponent* fp) const {
+        return mission_filter < 0 || (fp && fp->mission != 0 &&
+            static_cast<int>(fp->mission) == mission_filter);
+    }
+    /// The "ATO / Tasking" window (draw_campaign_qc_view). ON by default —
+    /// the ATO is the primary QC surface for campaign tasking.
+    bool show_ato = true;
     // POLISH-2.4: minimap in the bottom-right corner of the canvas.
     // Shows the whole 1024×1024 theater at a glance: terrain thumbnail
     // (re-uses the cached terrain texture), objective dots (colored by

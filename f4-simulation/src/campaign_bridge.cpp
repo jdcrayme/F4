@@ -32,8 +32,10 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdio>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 
 namespace f4::simulation {
 
@@ -74,6 +76,89 @@ find_layout(const f4::world::ObjectiveState& obj, uint8_t type) {
     return nullptr;
 }
 
+// ---------------------------------------------------------------------------
+// B.3+ synthetic airfield for layout-less airfield objectives.
+//
+// A .cam save embeds ground layouts (runway/taxi points) only for
+// Airstrip-class objectives. The 50 real Airbases (Kunsan, Osan, ...)
+// carry their runway geometry in the THEATER's static data, which the
+// current world JSON does not include — TestCamp.cam decode leaves all
+// 50 with an empty ground_layout vector. Without this fallback,
+// derive_airfield_from_objective() rejects them, so:
+//   - spawn_from_campaign_flights registers NO per-airbase airfield for
+//     them, every TaxiRequest falls back to the DEFAULT (first) airfield,
+//     and each aircraft taxis ACROSS THE THEATER toward it (observed:
+//     5 minutes of 32 fps straight-line taxi, zero takeoffs — the B.3
+//     QC harness caught exactly this).
+//
+// The synthetic field is centered on the objective with a 7000 ft runway
+// along the requested active runway heading. It is NOT the real runway
+// geometry — the exact threshold/parking positions are approximate. What
+// it guarantees is LOCAL ground ops: park -> short taxi -> depart -> fly
+// the saved campaign route. When a later tranche loads theater airbase
+// layout data (Falcon4.OCD/PHD chain), the real points replace this path
+// automatically (the layout-present branch above runs first).
+// ---------------------------------------------------------------------------
+ScenarioAirfield synthesize_airfield_for_objective(
+    const f4::world::ObjectiveState& obj, int active_runway_id) {
+    ScenarioAirfield af;
+    af.active_runway_id = active_runway_id;
+    af.active_runway_name = "Rwy " + std::to_string(active_runway_id);
+
+    constexpr double DEG_TO_RAD = 0.017453292519943295;
+    // Runway heading from the requested active runway (id 36 -> 360 deg).
+    double hdg_deg = static_cast<double>(active_runway_id) * 10.0;
+    if (hdg_deg >= 360.0) hdg_deg -= 360.0;
+    af.runway_heading_rad = hdg_deg * DEG_TO_RAD;
+
+    const auto center = grid_to_enu(obj.x, obj.y, obj.z);
+    const double hs = af.runway_heading_rad;
+    const double hx = std::sin(hs), hy = std::cos(hs);   // along-runway unit
+
+    // 7000 ft runway straddling the objective center; threshold 3500 ft
+    // back (toward the approach end).
+    constexpr double HALF_LEN_FT = 3500.0;
+    af.threshold_position = f4::geo::WorldPosition(
+        center.x - hx * HALF_LEN_FT, center.y - hy * HALF_LEN_FT, center.z);
+    af.runway_end_position = f4::geo::WorldPosition(
+        center.x + hx * HALF_LEN_FT, center.y + hy * HALF_LEN_FT, center.z);
+    af.runway_length_ft = 2.0 * HALF_LEN_FT;
+    af.runway_width_ft = 150.0;
+    af.threshold_altitude_ft = center.z;
+    af.departure_altitude_ft = center.z + 2500.0;
+
+    // Taxi route: a ramp point 600 ft before the threshold, offset 300 ft
+    // to the right of the centerline, then the threshold itself (hold
+    // short). Two waypoints — enough for the TakeoffModule's steer/capture
+    // loop; campaign flights park at the objective center + lateral
+    // offset, so the first leg is a few hundred feet.
+    const double px = hy, py = -hx;                       // right-of-course unit
+    af.taxi_route = {
+        f4::geo::WorldPosition(
+            af.threshold_position.x + hx * 600.0 + px * 300.0,
+            af.threshold_position.y + hy * 600.0 + py * 300.0,
+            center.z),
+        af.threshold_position,
+    };
+    af.taxi_in_route = af.taxi_route;
+
+    // Parking: a row of 8 spots offset from the center, perpendicular to
+    // the runway — same shape the decoded-layout path synthesizes.
+    constexpr int N_SPOTS = 8;
+    constexpr double OFF_FT = 300.0;       // perpendicular distance (right side)
+    constexpr double SPACING_FT = 80.0;    // along-runway spacing
+    for (int i = 0; i < N_SPOTS; ++i) {
+        ScenarioParkingSpot spot;
+        spot.position = f4::geo::WorldPosition(
+            center.x + px * OFF_FT - hx * (i * SPACING_FT),
+            center.y + py * OFF_FT - hy * (i * SPACING_FT),
+            center.z);
+        spot.heading_rad = std::atan2(-hx, -hy);   // face back down the runway
+        af.parking_spots.push_back(spot);
+    }
+    return af;
+}
+
 } // namespace
 
 namespace {
@@ -106,7 +191,19 @@ derive_airfield_from_objective(const f4::world::ObjectiveState& obj,
     // airbase. We don't strictly require ObjectiveType == TYPE_AIRBASE
     // because some airstrips carry TYPE_AIRSTRIP and still have runway
     // layouts — the presence of a runway list is the authoritative check.
-    if (obj.ground_layout.empty()) return std::nullopt;
+    //
+    // B.3+ exception: airfield-CLASS objectives with no decoded layout
+    // (all 50 TestCamp Airbases — the save never embeds their geometry)
+    // get a SYNTHETIC local field instead of rejection. Rejection fed
+    // every aircraft at those bases a taxi route to the first DERIVABLE
+    // airbase — cross-theater taxi, zero takeoffs (B.3 QC catch).
+    if (obj.ground_layout.empty()) {
+        if (obj.objective_type == f4::world_convert::TYPE_AIRBASE ||
+            obj.objective_type == f4::world_convert::TYPE_AIRSTRIP) {
+            return synthesize_airfield_for_objective(obj, active_runway_id);
+        }
+        return std::nullopt;
+    }
 
     const auto* runway_list = find_layout(obj, f4::world_convert::PLT_RUNWAY);
     if (!runway_list || runway_list->points.size() < 2) return std::nullopt;
@@ -317,17 +414,197 @@ derive_airfield_from_objective(const f4::world::ObjectiveState& obj,
     return af;
 }
 
+// ============================================================================
+// B.3+ per-airbase airfields
+// ============================================================================
+std::uint32_t airbase_vu_id(const f4::entities::EntityWorld& world,
+                            f4::entities::EntityId airbase_entity) {
+    if (!airbase_entity.valid()) return 0;
+    // const_cast: EntityHandle needs a mutable world for lookup, but we
+    // only read components — the entity system has no const-handle view.
+    auto& mut_world = const_cast<f4::entities::EntityWorld&>(world);
+    f4::entities::EntityHandle h(airbase_entity, &mut_world);
+    const auto* pb = h.get<f4::entities::PropertyBag>();
+    if (!pb) return 0;
+    const auto it = pb->ints.find("vu_id_num");
+    return it == pb->ints.end() ? 0
+        : static_cast<std::uint32_t>(it->second);
+}
+
+std::optional<f4::entities::EntityId>
+spawn_aircraft_for_flight(f4::entities::EntityWorld& world,
+                          f4::entities::EntityId flight_entity,
+                          const f4::world_convert::ClassTable& ct,
+                          const f4::models::ModelDatabase& db,
+                          const f4::data::AircraftConfig& cfg,
+                          const ScenarioAirfield& airfield,
+                          const ScenarioAircraft& scenario_aircraft,
+                          int parking_slot,
+                          const AirbaseAirfieldMap* airbase_airfields) {
+    using namespace f4::entities;
+    using namespace f4::flight;
+    using namespace f4::ai;
+    using namespace f4::simulation;
+
+    EntityHandle flight_h(flight_entity, &world);
+    const auto* fp = flight_h.get<FlightPlanComponent>();
+    if (!fp) return std::nullopt;
+
+    // Resolve the flight's squadron → airbase objective → transform.
+    // If any link in the chain is missing, fall back to the airfield's
+    // threshold position (so the aircraft still spawns, just on the
+    // runway — better than dropping it silently).
+    //
+    // B.3+ non-airfield-base guard: the squadron's base objective may NOT
+    // be an airfield at all (TestCamp's army-aviation flights sit at Army
+    // Base objectives — objective_type 3). Parking there with no runway
+    // hands the takeoff AI a TaxiRequest that resolves to the DEFAULT
+    // airfield, and the aircraft taxis cross-theater to it (observed in
+    // the B.3 QC run: one of 12 flights). When the base resolves no
+    // ScenarioAirfield, park at the caller's fallback airfield instead —
+    // synthetic start, but the flight still departs locally and flies its
+    // SAVED campaign route, which is what the QC asserts on.
+    f4::geo::WorldPosition parking_spot = airfield.threshold_position;
+    std::uint64_t home_airbase_vu = 0;
+    const ScenarioAirfield* base_af = nullptr;
+    const auto* sq = fp->squadron.value != 0
+        ? EntityHandle(fp->squadron, &world).get<SquadronComponent>()
+        : nullptr;
+    if (sq && sq->airbase.value != 0) {
+        // B.3+: the flight's HOME base — resolve its airfield data so the
+        // spawn pose, departure altitude and (downstream) the ATC
+        // clearances all reference THIS field, not the first airbase
+        // objective in the save.
+        home_airbase_vu = airbase_vu_id(world, sq->airbase);
+        if (airbase_airfields && home_airbase_vu != 0) {
+            const auto it = airbase_airfields->find(
+                static_cast<std::uint32_t>(home_airbase_vu));
+            if (it != airbase_airfields->end()) {
+                base_af = &it->second;
+            }
+        }
+        // Park at the base objective's position only when it is a real
+        // airfield (the map resolved one). Without the map the caller
+        // keeps the legacy behavior: park at the base objective anyway
+        // (single-airfield worlds/tests where the caller's airfield IS
+        // the base's airfield).
+        auto* tf = EntityHandle(sq->airbase, &world).get<TransformComponent>();
+        if (tf && (base_af || !airbase_airfields)) {
+            parking_spot = tf->position;
+        }
+    }
+    // The airfield driving heading/departure: the per-base one when
+    // resolved, else the fallback the caller passed (scenario airfield).
+    const ScenarioAirfield& field = base_af ? *base_af : airfield;
+
+    // Apply the per-flight lateral offset. Alternate +x / -x so
+    // successive flights park on opposite sides of the airbase center.
+    // 80 ft is roughly one wingspan + clearance, spread along the
+    // airbase's east axis (perpendicular to the runway).
+    constexpr double OFFSET_STEP_FT = 80.0;
+    const double offset = (parking_slot % 2 == 0 ? 1.0 : -1.0)
+                        * (static_cast<double>(parking_slot / 2) + 1.0)
+                        * OFFSET_STEP_FT;
+    parking_spot.x += offset;
+
+    // Look up the flight's squadron entity_type via its UnitCoreComponent
+    // (the squadron is also a unit — it has its own UnitCoreComponent
+    // with class_table_index). Resolve that entity_type → vis_type[0]
+    // → ModelRecord.
+    int16_t vis_type_index = 0;
+    if (sq) {
+        auto* sq_uc = EntityHandle(fp->squadron, &world).get<UnitCoreComponent>();
+        if (sq_uc) {
+            vis_type_index = ct.vis_type_for(
+                static_cast<uint16_t>(sq_uc->class_table_index), 0);
+        }
+    }
+    // Fallback: if the CT lookup fails (or no squadron), use the
+    // scenario's template vis_type_index. This is the F-16 default
+    // for the kunsan scenarios.
+    if (vis_type_index <= 0) {
+        vis_type_index = scenario_aircraft.vis_type_index;
+    }
+
+    // Compose the aircraft entity: Transform + FM + VisualModel + Brain.
+    auto h = world.create();
+
+    // 1. TransformComponent — initial pose at the parking spot.
+    auto& tf = h.add<TransformComponent>();
+    tf.position = parking_spot;
+    const double hdg = field.runway_heading_rad;
+    // Compass heading -> ENU quaternion (negative about +z; see frames.hpp).
+    const auto q0 = f4::simulation::enu_quat_from_compass(hdg);
+    tf.qw = q0.w;  tf.qx = q0.x;  tf.qy = q0.y;  tf.qz = q0.z;
+
+    // 2. FlightModelComponent — init from AircraftConfig, on ground. B.3
+    //    fix: pass the parking position's north/east into the FM — the
+    //    scenario-list path always did (simulation.cpp:238-244), but the
+    //    campaign path left the FM at (0,0) while the TransformComponent
+    //    held the real spot. The first tick's FM→Transform sync then
+    //    teleported every campaign aircraft to the theater datum, and
+    //    they all taxi'd from there in one stacked column.
+    auto& fm = h.add<FlightModelComponent>();
+    fm.init(cfg,
+            /*alt_ft=*/parking_spot.z,
+            /*vt_ftps=*/0.0,
+            /*hdg_rad=*/hdg,
+            /*inAir=*/false,
+            /*north_ft=*/parking_spot.y,
+            /*east_ft=*/parking_spot.x);
+    fm.set_ground(parking_spot.z, f4::math::Vec3d{0.0, 0.0, -1.0});
+
+    // 3. VisualModelComponent — the renderable handle.
+    auto& vis = h.add<VisualModelComponent>();
+    if (db.valid()) {
+        vis.model_record = db.model(vis_type_index);
+    }
+    vis.active_lod = 0;
+    f4::models::SwitchState gear_switch;
+    gear_switch.switch_number = 10;
+    gear_switch.active_child  = 0;  // 0 = gear down
+    vis.model_state.switches.push_back(gear_switch);
+
+    // 4. BrainComponent — wraps TakeoffModule. B.3: when the flight
+    // carries a saved waypoint plan, ALSO attach the derived MissionPlan
+    // — the aircraft taxis, departs, and flies its campaign route.
+    auto& brain = h.add<BrainComponent>();
+    brain.module().rotate_speed_kts = 140.0;
+    brain.module().gear_up_alt_ft = 200.0;
+    brain.module().departure_alt_ft = field.departure_altitude_ft;
+    brain.module().taxi_speed_kts = 15.0;
+    // B.3+: tag the brain's TakeoffModule with the home airbase so its
+    // TaxiRequest/TakeoffRequest carry it — the multi-airbase ATC answers
+    // from the registered per-base airfield.
+    brain.module().airbase_id = home_airbase_vu;
+    if (auto plan = build_mission_plan_from_flight(world, flight_entity)) {
+        brain.set_mission_plan(std::move(*plan));
+    }
+
+    // 5. TEAM tag — the campaign owner slot mapped into the sim's
+    // blue/red/green vocabulary (B.3). Read the flight's owner from
+    // its TEAM tag (set by world_loader as the int owner slot).
+    {
+        const auto team_tag = flight_h.get_tag(tags::TEAM);
+        const uint8_t owner = (team_tag && team_tag->as_int())
+            ? static_cast<uint8_t>(*team_tag->as_int()) : 0;
+        h.set_tag(tags::TEAM,
+                  TagValue::from(owner_team_string(world, owner)));
+    }
+
+    return h.id();
+}
+
 std::vector<f4::entities::EntityId>
 spawn_aircraft_from_flights(f4::entities::EntityWorld& world,
                              const f4::world_convert::ClassTable& ct,
                              const f4::models::ModelDatabase& db,
                              const f4::data::AircraftConfig& cfg,
                              const ScenarioAirfield& airfield,
-                             const ScenarioAircraft& scenario_aircraft) {
+                             const ScenarioAircraft& scenario_aircraft,
+                             const FlightSpawnFilter& filter,
+                             const AirbaseAirfieldMap* airbase_airfields) {
     using namespace f4::entities;
-    using namespace f4::flight;
-    using namespace f4::ai;
-    using namespace f4::simulation;
 
     // Find every entity with a FlightPlanComponent. f4-world::populate_units
     // created these from the campaign's Flight units — each one represents
@@ -336,103 +613,198 @@ spawn_aircraft_from_flights(f4::entities::EntityWorld& world,
     if (flight_ids.empty()) return {};
 
     std::vector<EntityId> spawned;
-    spawned.reserve(flight_ids.size());
 
-    // Per-flight lateral offset so multiple aircraft at the same airbase
-    // don't overlap. 80 ft is roughly one wingspan + clearance. We spread
-    // them along the airbase's east axis (perpendicular to the runway).
-    constexpr double OFFSET_STEP_FT = 80.0;
-    int flight_index = 0;
+    // B.3: per-airbase parking counter. The pre-B.3 code used one global
+    // index, which put flight #400 at 16,000 ft (3 miles) from its field —
+    // on a real save (TestCamp: 449 flights over ~40 fields) that produced
+    // a satellite ring of aircraft around every busy airbase. Counting per
+    // airbase keeps each field's ramp compact.
+    std::unordered_map<uint64_t, int> per_airbase_index;
 
     for (const auto flight_id : flight_ids) {
         EntityHandle flight_h(flight_id, &world);
         const auto* fp = flight_h.get<FlightPlanComponent>();
         if (!fp) continue;
 
-        // Resolve the flight's squadron → airbase objective → transform.
-        // If any link in the chain is missing, fall back to the airfield's
-        // threshold position (so the aircraft still spawns, just on the
-        // runway — better than dropping it silently).
-        f4::geo::WorldPosition parking_spot = airfield.threshold_position;
-        const auto* sq = fp->squadron.value != 0
-            ? EntityHandle(fp->squadron, &world).get<SquadronComponent>()
-            : nullptr;
-        if (sq && sq->airbase.value != 0) {
-            auto* tf = EntityHandle(sq->airbase, &world).get<TransformComponent>();
-            if (tf) {
-                parking_spot = tf->position;
+        // --- B.3 flight filter ---
+        if (filter.team >= 0) {
+            const auto team_tag = flight_h.get_tag(tags::TEAM);
+            const uint8_t owner = (team_tag && team_tag->as_int())
+                ? static_cast<uint8_t>(*team_tag->as_int()) : 0;
+            if (static_cast<int>(owner) != filter.team) continue;
+        }
+        if (filter.mission >= 0 &&
+            static_cast<int>(fp->mission) != filter.mission) {
+            continue;
+        }
+        if (filter.max_flights > 0 &&
+            static_cast<int>(spawned.size()) >= filter.max_flights) {
+            break;
+        }
+
+        // Per-airbase parking slot for this flight.
+        EntityId airbase_id;  // key: 0 = the shared fallback airfield
+        if (fp->squadron.value != 0) {
+            auto* sq = EntityHandle(fp->squadron, &world).get<SquadronComponent>();
+            if (sq && sq->airbase.value != 0) {
+                airbase_id = sq->airbase;
             }
         }
+        const int slot = per_airbase_index[airbase_id.value]++;
 
-        // Apply the per-flight lateral offset. Alternate +x / -x so
-        // successive flights park on opposite sides of the airbase center.
-        const double offset = (flight_index % 2 == 0 ? 1.0 : -1.0)
-                            * (static_cast<double>(flight_index / 2) + 1.0)
-                            * OFFSET_STEP_FT;
-        parking_spot.x += offset;
-
-        // Look up the flight's squadron entity_type via its UnitCoreComponent
-        // (the squadron is also a unit — it has its own UnitCoreComponent
-        // with class_table_index). Resolve that entity_type → vis_type[0]
-        // → ModelRecord.
-        int16_t vis_type_index = 0;
-        if (sq) {
-            auto* sq_uc = EntityHandle(fp->squadron, &world).get<UnitCoreComponent>();
-            if (sq_uc) {
-                vis_type_index = ct.vis_type_for(
-                    static_cast<uint16_t>(sq_uc->class_table_index), 0);
-            }
+        if (auto spawned_id = spawn_aircraft_for_flight(
+                world, flight_id, ct, db, cfg, airfield,
+                scenario_aircraft, slot, airbase_airfields)) {
+            spawned.push_back(*spawned_id);
         }
-        // Fallback: if the CT lookup fails (or no squadron), use the
-        // scenario's template vis_type_index. This is the F-16 default
-        // for the kunsan scenarios.
-        if (vis_type_index <= 0) {
-            vis_type_index = scenario_aircraft.vis_type_index;
-        }
-
-        // Compose the aircraft entity: Transform + FM + VisualModel + Brain.
-        auto h = world.create();
-
-        // 1. TransformComponent — initial pose at the parking spot.
-        auto& tf = h.add<TransformComponent>();
-        tf.position = parking_spot;
-        const double hdg = airfield.runway_heading_rad;
-        // Compass heading -> ENU quaternion (negative about +z; see frames.hpp).
-        const auto q0 = f4::simulation::enu_quat_from_compass(hdg);
-        tf.qw = q0.w;  tf.qx = q0.x;  tf.qy = q0.y;  tf.qz = q0.z;
-
-        // 2. FlightModelComponent — init from AircraftConfig, on ground.
-        auto& fm = h.add<FlightModelComponent>();
-        fm.init(cfg,
-                /*alt_ft=*/parking_spot.z,
-                /*vt_ftps=*/0.0,
-                /*hdg_rad=*/hdg,
-                /*inAir=*/false);
-        fm.set_ground(parking_spot.z, f4::math::Vec3d{0.0, 0.0, -1.0});
-
-        // 3. VisualModelComponent — the renderable handle.
-        auto& vis = h.add<VisualModelComponent>();
-        if (db.valid()) {
-            vis.model_record = db.model(vis_type_index);
-        }
-        vis.active_lod = 0;
-        f4::models::SwitchState gear_switch;
-        gear_switch.switch_number = 10;
-        gear_switch.active_child  = 0;  // 0 = gear down
-        vis.model_state.switches.push_back(gear_switch);
-
-        // 4. BrainComponent — wraps TakeoffModule.
-        auto& brain = h.add<BrainComponent>();
-        brain.module().rotate_speed_kts = 140.0;
-        brain.module().gear_up_alt_ft = 200.0;
-        brain.module().departure_alt_ft = airfield.departure_altitude_ft;
-        brain.module().taxi_speed_kts = 15.0;
-
-        spawned.push_back(h.id());
-        ++flight_index;
     }
 
     return spawned;
+}
+
+// ============================================================================
+// B.3 tranche — route building + team string mapping
+// ============================================================================
+
+namespace {
+
+/// FreeFalcon WP_ACTION names (campwp.h) — used for waypoint display names
+/// in traces and QC summaries. Values > 26 render "ACTION".
+const char* wp_action_text(std::uint8_t action) {
+    switch (action) {
+        case 0:  return "NOTHING";
+        case 1:  return "TAKEOFF";
+        case 2:  return "ASSEMBLE";
+        case 3:  return "POSTASSEMBLE";
+        case 4:  return "REFUEL";
+        case 5:  return "REARM";
+        case 6:  return "PICKUP";
+        case 7:  return "LAND";
+        case 8:  return "TIMING";
+        case 9:  return "CASCP";
+        case 10: return "ESCORT";
+        case 11: return "CA";
+        case 12: return "CAP";
+        case 13: return "INTERCEPT";
+        case 14: return "GNDSTRIKE";
+        case 15: return "NAVSTRIKE";
+        case 16: return "SAD";
+        case 17: return "STRIKE";
+        case 18: return "BOMB";
+        case 19: return "SEAD";
+        case 20: return "ELINT";
+        case 21: return "RECON";
+        case 22: return "RESCUE";
+        case 23: return "ASW";
+        case 24: return "TANKER";
+        case 25: return "AIRDROP";
+        case 26: return "JAM";
+        default: return "ACTION";
+    }
+}
+
+/// Default cruise CAS for derived route legs. The saved plan carries no
+/// per-leg speeds; 400 kts is a representative cruise value for the
+/// fighter-types that dominate a campaign's air tasking. Per-action
+/// speed profiles arrive with the M4.5 route tranche.
+constexpr double kDefaultLegSpeedKts = 400.0;
+
+/// Altitude floor for derived route legs. Ramp/taxi legs store z = 0;
+/// the NavigationModule would command a descent into terrain. 500 ft is
+/// above pattern but below terrain features in most theaters.
+constexpr double kMinWaypointAltFt = 500.0;
+
+/// Waypoint count where a route stops being "the flight's real plan" and
+/// starts being noise: single-waypoint plans (just a takeoff point, the
+/// shape every untasked flight carries in some saves) provide no enroute
+/// legs, so they're not worth attaching.
+constexpr std::size_t kMinUsableWaypoints = 2;
+
+} // namespace
+
+std::optional<f4::ai::MissionPlan>
+build_mission_plan_from_flight(const f4::entities::EntityWorld& world,
+                               f4::entities::EntityId flight_entity) {
+    using namespace f4::entities;
+    using f4::ai::modules::NavigationModule;
+
+    EntityHandle h(flight_entity, const_cast<EntityWorld*>(&world));
+    const auto* wp = h.get<WaypointPlanComponent>();
+    if (!wp || wp->waypoints.size() < kMinUsableWaypoints) return std::nullopt;
+
+    f4::ai::MissionPlan plan;
+
+    // Route: skip leading WP_TAKEOFF waypoints (action 1) — the
+    // TakeoffModule owns departure from the airbase; the NavigationModule
+    // receives the route it should fly AFTER wheels-up. Everything else
+    // (strike points, CAP anchors, the terminal WP_LAND back at home
+    // plate) is kept in wire order.
+    std::size_t first = 0;
+    while (first < wp->waypoints.size() &&
+           wp->waypoints[first].action == 1 /* WP_TAKEOFF */) {
+        ++first;
+    }
+    if (wp->waypoints.size() - first < kMinUsableWaypoints - 1) {
+        // Nothing but a takeoff point (or takeoff + single point that is
+        // itself the ramp) — no usable enroute legs.
+        return std::nullopt;
+    }
+
+    plan.route.reserve(wp->waypoints.size() - first);
+    int n = 1;
+    for (std::size_t i = first; i < wp->waypoints.size(); ++i) {
+        const auto& w = wp->waypoints[i];
+        auto pos = grid_to_enu(w.x, w.y, w.z);
+        pos.z = std::max(static_cast<double>(pos.z), kMinWaypointAltFt);
+        char name[32];
+        std::snprintf(name, sizeof(name), "WP%d:%s", n++,
+                      wp_action_text(w.action));
+        plan.route.push_back(NavigationModule::Waypoint{
+            name, pos, kDefaultLegSpeedKts});
+    }
+
+    // start_phase stays Ground: the campaign flight departs from its
+    // airbase (taxi → takeoff → enroute), which is exactly the brain's
+    // default sequencing.
+    return plan;
+}
+
+std::string owner_team_string(const f4::entities::EntityWorld& world,
+                              std::uint8_t owner) {
+    using namespace f4::entities;
+
+    // Find the campaign singleton (ROLE "campaign") for the player team.
+    int player_slot = -1;
+    const auto camp_ids = world.with_tag(
+        tags::ROLE, TagValue::from(std::string("campaign")));
+    if (!camp_ids.empty()) {
+        EntityHandle h(camp_ids[0], const_cast<EntityWorld*>(&world));
+        if (auto* cs = h.get<CampaignStateComponent>()) {
+            player_slot = cs->te_team;
+        }
+    }
+
+    // No campaign data (synthetic test world): slot 0 is the de-facto
+    // friendly, everything else hostile.
+    if (player_slot < 0) {
+        return owner == 0 ? "blue" : "red";
+    }
+    if (static_cast<int>(owner) == player_slot) return "blue";
+
+    // Look up the owner team's stance toward the player slot.
+    const auto team_ids = world.with_tag(
+        tags::ROLE, TagValue::from(std::string("team")));
+    for (const auto eid : team_ids) {
+        EntityHandle h(eid, const_cast<EntityWorld*>(&world));
+        auto* tc = h.get<TeamComponent>();
+        if (!tc || tc->slot != static_cast<int>(owner)) continue;
+        if (player_slot < static_cast<int>(tc->stance.size()) &&
+            tc->stance[static_cast<std::size_t>(player_slot)] < 0) {
+            return "red";
+        }
+        return "green";
+    }
+    return "green";
 }
 
 // ============================================================================
@@ -779,6 +1151,16 @@ spawn_aircraft_from_squadrons(f4::entities::EntityWorld& world,
             brain.module().gear_up_alt_ft = 200.0;
             brain.module().departure_alt_ft = airfield.departure_altitude_ft;
             brain.module().taxi_speed_kts = 15.0;
+
+            // Dormant: parked inventory, not simulated. A populated save
+            // spawns ~1,000 of these; without the flag each one ticks a
+            // full brain + FCS/EOM every tick (~25 ms/tick at campaign
+            // scale — the QC harness caught this). The airframe renders
+            // (passive Transform/VisualModel) and stays available for a
+            // future launch, which materializes a fresh non-dormant
+            // entity through the flight spawner.
+            brain.set_dormant(true);
+            fm.set_dormant(true);
 
             spawned.push_back(h.id());
         }

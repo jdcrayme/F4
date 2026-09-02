@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <stdexcept>
+#include <unordered_map>
 #include <utility>
 
 namespace f4::campaign {
@@ -312,6 +313,88 @@ std::string Campaign::to_summary_json() const {
     }
     w.put("\n  }\n}\n");
     return w.str();
+}
+
+// ============================================================================
+// emit_flight_intents (B.3 tranche — live saved flights)
+// ============================================================================
+namespace {
+
+/// Decode a Flight roster the way battalions do: 16 groups × 2 bits each.
+/// For flights the packing counts aircraft per element (0xA0 = 4 ships).
+/// 0 is returned when the save carried nothing (roster 0).
+int flight_roster_aircraft(std::uint32_t roster) {
+    if (roster == 0) return 0;
+    int total = 0;
+    for (int g = 0; g < 16; ++g) {
+        total += static_cast<int>((roster >> (g * 2)) & 0x03u);
+    }
+    return total;
+}
+
+} // namespace
+
+std::vector<MissionIntent>
+emit_flight_intents(const f4::world::IUnitCoreSource& units,
+                    const f4::world::IFlightSource& flights,
+                    f4::messaging::MessageBus& bus,
+                    CampaignTime now,
+                    const f4::world::ITeamSource* teams) {
+    using namespace f4::world;
+
+    // id_num → display name, for squadron_name resolution. One pass over
+    // the units; flights reference squadrons by VU_ID.num.
+    std::unordered_map<std::uint32_t, std::string> name_by_id;
+    for (int i = 0; i < units.unit_count(); ++i) {
+        const auto id = units.id_num(i);
+        if (id != 0) {
+            name_by_id.emplace(id, units.class_name(i));
+        }
+    }
+
+    // team slot → name, when the team source is provided.
+    std::unordered_map<int, std::string> team_name_by_slot;
+    if (teams) {
+        for (int t = 0; t < teams->team_count(); ++t) {
+            team_name_by_slot.emplace(teams->slot(t), teams->name(t));
+        }
+    }
+
+    std::vector<MissionIntent> intents;
+    for (int i = 0; i < units.unit_count(); ++i) {
+        if (units.unit_class(i) != f4::entities::UnitClass::Flight) continue;
+
+        // Contract: `flights` is the IFlightSource view of the SAME source
+        // (WorldStateAdapters.units exposes both views on the same indices;
+        // unit_class(i) == Flight implies flights' subclass fields at i are
+        // this unit's). Skip untasked flights — AMIS_NONE means the save
+        // carries no tasking for them.
+        const std::uint8_t mission = flights.mission(i);
+        if (!is_mission_tasked(mission)) continue;
+
+        MissionIntent in;
+        in.issued_time = now;
+        in.time_on_target = flights.time_on_target(i);
+        in.team = units.owner(i);
+        {
+            auto it = team_name_by_slot.find(static_cast<int>(in.team));
+            if (it != team_name_by_slot.end()) in.team_name = it->second;
+        }
+        in.mission_byte = mission;
+        in.mission_name = std::string(mission_type_name(mission));
+        in.aircraft_count = flight_roster_aircraft(units.roster(i));
+        in.squadron_id = flights.squadron_id(i);
+        {
+            auto it = name_by_id.find(in.squadron_id);
+            if (it != name_by_id.end()) in.squadron_name = it->second;
+        }
+        in.package_id = flights.package_id(i);
+        in.flight_id = units.id_num(i);
+
+        bus.publish(in);
+        intents.push_back(std::move(in));
+    }
+    return intents;
 }
 
 } // namespace f4::campaign

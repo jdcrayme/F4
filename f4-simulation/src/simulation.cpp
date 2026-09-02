@@ -38,6 +38,7 @@
 #include <f4/recorder/flight_recorder.hpp>
 #include <f4/recorder/fcs_trace.hpp>
 #include <f4/recorder/snapshot.hpp>
+
 #include <f4/weapons/missile_battery.hpp>
 #include <f4/weapons/f4_weapons.hpp>
 #include <f4/sensors/f4_sensors.hpp>
@@ -67,6 +68,18 @@ void Simulation::initialize() {
     // spawns before any entity is created.
     if (scenario_.has_airbase_source) {
         derive_real_airbase();
+    }
+
+    // B.3 fix: the campaign-flights path derives its airfield from the
+    // world JSON's first airbase objective — but it used to do that INSIDE
+    // spawn_aircraft(), i.e. AFTER wire_atc() had already wired StubATC
+    // against the (empty, hand-authored) scenario airfield. Result: no
+    // taxi route ever reached the ATC, taxi clearances never came back,
+    // and every campaign aircraft sat parked at the ramp forever.
+    // Deriving BEFORE wire_atc() fixes the ordering.
+    if (scenario_.spawn_mode == SpawnMode::CampaignFlights &&
+        scenario_.airfield.taxi_route.empty()) {
+        derive_campaign_airfield();
     }
 
     // Order matters: ATC must be subscribed BEFORE the brain's first update()
@@ -583,6 +596,28 @@ void Simulation::push_safety_pictures() {
     }
 }
 
+void Simulation::derive_campaign_airfield() {
+    // B.3: pre-wire_atc airfield derivation for campaign_flights runs.
+    // Loads the world JSON's objectives (NOT the whole populate path —
+    // spawn_from_campaign_flights does that later), finds the first
+    // airbase-class objective, and rewrites scenario_.airfield so that
+    // wire_atc() hands StubATC the REAL runway + taxi route. Without this,
+    // campaign aircraft wait for a taxi clearance that can never come.
+    // (See the ordering comment in initialize().)
+    if (scenario_.world_json_path.empty()) return;  // spawn fails loudly later
+
+    f4::world::WorldState ws;
+    ws.load(scenario_.world_json_path);
+    for (const auto& obj : ws.objectives) {
+        if (auto af = derive_airfield_from_objective(obj, 36)) {
+            scenario_.airfield = std::move(*af);
+            return;
+        }
+    }
+    // No airbase objective: leave the airfield as-is — spawn fails loudly
+    // with the specific "no airbase objective" message.
+}
+
 void Simulation::spawn_from_campaign_flights() {
     // Phase 2 campaign-derivation path. Loads the world JSON referenced by
     // scenario_.world_json_path, populates the EntityWorld with teams +
@@ -614,11 +649,12 @@ void Simulation::spawn_from_campaign_flights() {
     auto populated = f4::world::populate_world(world_, ws);
     (void)populated;  // not used downstream — the bridge walks the world directly
 
-    // 3. Derive the airfield from the first airbase-class objective. We
-    //    prefer the scenario JSON's hand-authored airfield (if it carries
-    //    one) for the runway heading + taxi route; otherwise we derive from
-    //    the first objective with a GroundLayoutList.
-    ScenarioAirfield derived = scenario_.airfield;  // start with hand-authored
+    // 3. Airfield: initialize() normally pre-derived it into
+    //    scenario_.airfield (B.3 fix — BEFORE wire_atc). The local
+    //    derivation stays as the fallback for hosts that called
+    //    spawn_aircraft() out of order, and overrides only a still-empty
+    //    taxi route (never a hand-authored one).
+    ScenarioAirfield derived = scenario_.airfield;
     if (derived.taxi_route.empty()) {
         for (const auto& obj : ws.objectives) {
             auto maybe_af = derive_airfield_from_objective(obj, 36);
@@ -639,16 +675,60 @@ void Simulation::spawn_from_campaign_flights() {
     f4::world_convert::ClassTable ct;
     ct.load(scenario_.class_table_path);
 
-    // 5. Use the bridge function to spawn one aircraft per Flight unit.
+    // 5. Use the bridge function to spawn one aircraft per Flight unit
+    //    (B.3: with the scenario's campaign_flight_filter applied — team /
+    //    mission / cap — and each spawned aircraft carrying the MissionPlan
+    //    built from its flight's saved waypoints).
+    //
+    //    B.3+ (per-airbase fix): every AIRBASE objective in the save gets
+    //    its ScenarioAirfield derived up front and passed down, so each
+    //    flight's aircraft taxis/departs on ITS OWN squadron's runway —
+    //    the first-airbase-only route the pre-fix code handed to every
+    //    aircraft sent them taxiing across the theater (QC catch).
+    airbase_airfields_.clear();
+    for (const auto& obj : ws.objectives) {
+        if (auto af = derive_airfield_from_objective(obj, 36)) {
+            if (obj.id_num != 0) {
+                airbase_airfields_[obj.id_num] = std::move(*af);
+            }
+        }
+    }
+
     const auto& template_ac = scenario_.aircraft.front();
+    FlightSpawnFilter filter;
+    filter.team = scenario_.campaign_flight_filter.team;
+    filter.mission = scenario_.campaign_flight_filter.mission;
+    filter.max_flights = scenario_.campaign_flight_filter.max_flights;
     aircraft_entities_ = spawn_aircraft_from_flights(
         world_, ct, *model_db_, aircraft_cfg_,
-        derived, template_ac);
+        derived, template_ac, filter,
+        airbase_airfields_.empty() ? nullptr : &airbase_airfields_);
 
     if (aircraft_entities_.empty()) {
         throw std::runtime_error(
             "Simulation::spawn_from_campaign_flights: no Flight-class units "
             "found in the world JSON — cannot spawn any aircraft");
+    }
+
+    // 6. Register every derived airbase with the ATC (B.3+): the StubATC
+    //    answers TaxiRequest/TakeoffRequest per airbase_id, falling back
+    //    to the default airfield wire_atc() configured. Without this, the
+    //    per-flight home-base tag would arrive at an ATC that can't
+    //    resolve it.
+    if (atc_ && !airbase_airfields_.empty()) {
+        for (const auto& [vu, af] : airbase_airfields_) {
+            f4::ai::atc::AirfieldConfig cfg;
+            cfg.active_runway_id = af.active_runway_id;
+            cfg.active_runway_name = af.active_runway_name;
+            cfg.runway_heading_rad = af.runway_heading_rad;
+            cfg.threshold_position = af.threshold_position;
+            cfg.threshold_altitude_ft = af.threshold_altitude_ft;
+            cfg.departure_altitude_ft = af.departure_altitude_ft;
+            cfg.pattern_altitude_ft = af.threshold_altitude_ft + 1500.0;
+            cfg.taxi_route = af.taxi_route;
+            cfg.runway_end_position = af.runway_end_position;
+            atc_->set_airbase_airfield(vu, cfg);
+        }
     }
 }
 
@@ -817,6 +897,7 @@ void Simulation::wire_atc() {
     atc_->set_airfield(af);
 }
 
+
 void Simulation::tick(double dt) {
     if (paused_) return;
     // dt is AUTHORITATIVE and FIXED: hosts call tick() once per unit of
@@ -862,7 +943,6 @@ void Simulation::tick(double dt) {
         const double ground_z = ts->elevation_at_ft(east_ft, north_ft);
         fm->set_ground(ground_z, f4::math::Vec3d{0.0, 0.0, -1.0});
     }
-
     // Combat chain (M3): stamp the sim clock the sensor/weapon components
     // read (message stamps + scan-interval carry). Both use static clocks
     // by design — the host owns time (documented in radar_component.hpp /
@@ -997,6 +1077,13 @@ void Simulation::record_snapshot() {
     // Phase 2: one snapshot per aircraft per tick. The FlightRecorder's
     // FlightSnapshot carries an entity_id discriminator so playback can
     // separate the tracks.
+    //
+    // B.3/QC: scenario.record_every decimates — tick % record_every != 0
+    // records nothing (1 = every tick, the original behavior).
+    if (scenario_.record_every > 1 &&
+        (tick_ % static_cast<std::uint64_t>(scenario_.record_every)) != 0) {
+        return;
+    }
     for (const auto eid : aircraft_entities_) {
         f4::recorder::FlightSnapshot snap;
         snap.sim_time_s = sim_time_s_;

@@ -31,6 +31,7 @@
 
 #pragma once
 
+#include <f4/ai/brain_component.hpp>  // MissionPlan (B.3 route building)
 #include <f4/simulation/scenario.hpp>
 #include <f4/simulation/visual_model_component.hpp>
 
@@ -40,7 +41,10 @@
 #include <f4/models/model_database.hpp>
 #include <f4/data/aircraft_config.hpp>
 
+#include <cstdint>
 #include <optional>
+#include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace f4::simulation {
@@ -72,6 +76,136 @@ namespace f4::simulation {
 derive_airfield_from_objective(const f4::world::ObjectiveState& obj,
                                 int active_runway_id = 36);
 
+// ============================================================================
+// B.3 tranche — campaign-flight spawn filter, route building, team strings
+// ============================================================================
+//
+// The B.3 campaign→sim loop needs three additions to the bridge:
+//
+//   1. FlightSpawnFilter — a real save (TestCamp.cam) carries 449 flights;
+//      a QC run wants a bounded, meaningful subset (one team, one mission
+//      type, a cap). The filter is applied by spawn_aircraft_from_flights
+//      AND by the scenario JSON's campaign_flight_filter block (same
+//      fields), so the scenario player and the QC tool share one filter
+//      vocabulary.
+//
+//   2. build_mission_plan_from_flight() — converts a Flight unit's
+//      WaypointPlanComponent (grid coords, campaign times, WP_ACTION
+//      bytes) into the MissionPlan the digi brain consumes (ENU feet
+//      route). This is the route-planning slice of B.3: campaign flights
+//      fly their SAVED routes instead of idling at the ramp.
+//
+//   3. owner_team_string() — maps a campaign owner slot to the blue/red/
+//      green TEAM-tag vocabulary the sim's hostility model reads.
+
+/// Which campaign flights spawn_aircraft_from_flights() should materialize.
+/// Default-constructed = no filtering (every flight — the original
+/// behavior). The JSON block "campaign_flight_filter" parses into this.
+struct FlightSpawnFilter {
+    /// Restrict to one owning team slot (-1 = any).
+    int team{-1};
+    /// Restrict to one mission byte (-1 = any). Mission names
+    /// ("AMIS_BARCAP") resolve through f4-campaign's mission_type_byte.
+    int mission{-1};
+    /// Hard cap on spawned aircraft (0 = unlimited). Large saves
+    /// (TestCamp: 449 flights) need this to keep QC runs bounded.
+    int max_flights{0};
+
+    /// True when nothing is filtered (every flight passes).
+    [[nodiscard]] bool is_noop() const noexcept {
+        return team < 0 && mission < 0 && max_flights <= 0;
+    }
+};
+
+/// Build the digi MissionPlan for one campaign Flight entity.
+///
+/// Route source: the flight entity's WaypointPlanComponent, converted
+/// grid→ENU feet (1024 ft/grid). Leading WP_TAKEOFF waypoints are dropped
+/// (the TakeoffModule owns departure from the airbase); the LAST waypoint
+/// becomes the approach entry fix the NavigationModule hands to the
+/// LandingModule — for round-trip routes that is the saved WP_LAND at the
+/// home airbase.
+///
+/// Altitude policy (documented approximation): WaypointState.z is MSL
+/// feet; waypoints below 500 ft (ramp/taxi legs store 0) are floored to
+/// 500 ft so the NavigationModule never commands terrain level. Speed:
+/// uniform 400 kts (per-action speeds arrive with the M4.5 route tranche).
+///
+/// Returns std::nullopt when the flight has no (usable) waypoint plan —
+/// callers then spawn takeoff-only aircraft, exactly as before B.3.
+[[nodiscard]] std::optional<f4::ai::MissionPlan>
+build_mission_plan_from_flight(const f4::entities::EntityWorld& world,
+                               f4::entities::EntityId flight_entity);
+
+/// Map a campaign owner slot to the sim's TEAM-tag string vocabulary.
+///
+/// Resolution: the campaign entity (ROLE "campaign") names the PLAYER team
+/// (CampaignStateComponent::te_team). owner == player → "blue"; a team
+/// whose stance toward the player is negative → "red"; anything else →
+/// "green". When the campaign entity is absent (synthetic test worlds),
+/// slot 0 maps "blue" and every other slot "red".
+///
+/// Documented limitation: the sim's hostility rule is own-relative string
+/// comparison (sensor_fusion.cpp — "future: campaign team-stance data
+/// replaces the 2-team assumption"), so two allies-of-convenience both
+/// mapping "red" read as friendly to each other, and blue/green read as
+/// hostile. The stance-accurate pairwise rule lands with the M4.2+ ATM
+/// tranche; QC route-flying doesn't consume hostility at all.
+[[nodiscard]] std::string
+owner_team_string(const f4::entities::EntityWorld& world,
+                  std::uint8_t owner);
+
+// ============================================================================
+// B.3+ per-airbase airfields
+// ============================================================================
+/// Airfield data keyed by airbase VU_ID.num — one entry per airbase-class
+/// objective in the world. Campaign saves park flights at their squadrons'
+/// home bases (TestCamp: ~40 fields); the flight spawner resolves each
+/// flight's base through this map so every aircraft taxis/departs on ITS
+/// OWN runway instead of the first airbase objective's (the B.3 QC run
+/// caught 12 aircraft taxiing at 19 kts toward a runway 200,000 ft away,
+/// never to arrive). Built by the host (Simulation::spawn_from_campaign_
+/// flights / campaign_qc) from the world's ObjectiveState list; also
+/// registered with the StubATC so clearances are answered per-base.
+using AirbaseAirfieldMap =
+    std::unordered_map<std::uint32_t, ScenarioAirfield>;
+
+/// Read an airbase entity's VU_ID.num from its PropertyBag (0 when the
+/// entity has no id recorded — hand-built test objectives).
+[[nodiscard]] std::uint32_t
+airbase_vu_id(const f4::entities::EntityWorld& world,
+              f4::entities::EntityId airbase_entity);
+
+/// Spawn ONE aircraft for ONE campaign Flight entity (the shared core of
+/// the B.3 spawn paths). Composes Transform + FlightModel + VisualModel +
+/// Brain (+ MissionPlan from the flight's saved waypoints, when usable) +
+/// TEAM tag, at the flight's squadron airbase plus the caller-chosen
+/// parking slot offset.
+///
+/// `parking_slot` is the flight's per-airbase index (0, 1, 2, ...) — the
+/// caller owns the per-airbase bookkeeping (the bulk path counts per
+/// airbase; CampaignSimSpawner counts the same way).
+///
+/// `airbase_airfields` (B.3+): when non-null and the flight's home base
+/// resolves to an entry, THAT airfield's runway heading / departure
+/// altitude drive the spawn pose and the brain, and the brain's
+/// TakeoffModule is tagged with the airbase's VU_ID.num (published in the
+/// ATC requests so clearances come back per-base). Null = legacy behavior
+/// (the single fallback `airfield` — scenario-list and single-base tests).
+///
+/// Returns the spawned entity, or std::nullopt when `flight_entity` is not
+/// a Flight (no FlightPlanComponent).
+[[nodiscard]] std::optional<f4::entities::EntityId>
+spawn_aircraft_for_flight(f4::entities::EntityWorld& world,
+                          f4::entities::EntityId flight_entity,
+                          const f4::world_convert::ClassTable& ct,
+                          const f4::models::ModelDatabase& db,
+                          const f4::data::AircraftConfig& cfg,
+                          const ScenarioAirfield& airfield,
+                          const ScenarioAircraft& scenario_aircraft,
+                          int parking_slot,
+                          const AirbaseAirfieldMap* airbase_airfields = nullptr);
+
 /// Spawn one aircraft entity per Flight-class unit in the EntityWorld.
 ///
 /// Walks every entity in `world` that has a FlightPlanComponent (already
@@ -81,9 +215,9 @@ derive_airfield_from_objective(const f4::world::ObjectiveState& obj,
 ///   1. Resolve the flight's squadron via FlightPlanComponent::squadron
 ///      (an EntityId). The squadron's SquadronComponent::airbase gives
 ///      the airbase objective's EntityId. The airbase's TransformComponent
-///      gives the world position. (We don't yet pick a parking spot from
-///      the airbase's GroundLayoutList — Phase 2 uses the airbase center
-///      plus a small per-flight offset so multiple aircraft don't overlap.)
+///      gives the world position. Parking offsets are per-airbase (B.3
+///      fix: the pre-B.3 global counter put flight #400 three miles from
+///      its field), alternating sides, 80 ft steps.
 ///
 ///   2. Look up the squadron's entity_type via UnitCoreComponent::class_table_index,
 ///      then resolve it through ClassTable::vis_type_for(entity_type, 0)
@@ -95,9 +229,16 @@ derive_airfield_from_objective(const f4::world::ObjectiveState& obj,
 ///                               heading = runway heading)
 ///        - FlightModelComponent (init from AircraftConfig, on ground)
 ///        - VisualModelComponent (ModelRecord* + LOD 0 + gear-down switch)
-///        - BrainComponent       (TakeoffModule with taxi/takeoff thresholds)
+///        - BrainComponent       (TakeoffModule with taxi/takeoff thresholds;
+///                               B.3: plus the MissionPlan built from the
+///                               flight's saved waypoints, when present)
+///        - TEAM tag             (B.3: owner_team_string() of the flight's
+///                               owner slot)
 ///
 ///   4. Push the new EntityId into the returned vector.
+///
+/// One aircraft per FLIGHT unit (the flight lead; a 4-ship flight's
+/// elements arrive with the formation tranche).
 ///
 /// \param world       The EntityWorld (already populated by f4-world::populate_world).
 /// \param ct          The ClassTable (loaded from Falcon4.CT) — for entity_type → vis_type.
@@ -106,6 +247,12 @@ derive_airfield_from_objective(const f4::world::ObjectiveState& obj,
 /// \param airfield    The active ScenarioAirfield (used for runway heading + departure alt).
 /// \param scenario_aircraft  Template for callsign + aircraft_config_path + fuel. The
 ///                    callsign is suffixed with the flight's index (EAGLE1, EAGLE2, ...).
+/// \param filter      B.3: restrict which flights spawn (team/mission/cap).
+///                    Default = no filter (backward compatible).
+/// \param airbase_airfields  B.3+: per-base airfield data (see
+///                    AirbaseAirfieldMap). Each flight's home base resolves
+///                    through it; unknown bases fall back to `airfield`.
+///                    Default null = legacy single-airfield behavior.
 /// \returns The vector of spawned aircraft EntityIds. Empty if no flights were found.
 [[nodiscard]] std::vector<f4::entities::EntityId>
 spawn_aircraft_from_flights(f4::entities::EntityWorld& world,
@@ -113,7 +260,9 @@ spawn_aircraft_from_flights(f4::entities::EntityWorld& world,
                              const f4::models::ModelDatabase& db,
                              const f4::data::AircraftConfig& cfg,
                              const ScenarioAirfield& airfield,
-                             const ScenarioAircraft& scenario_aircraft);
+                             const ScenarioAircraft& scenario_aircraft,
+                             const FlightSpawnFilter& filter = {},
+                             const AirbaseAirfieldMap* airbase_airfields = nullptr);
 
 // ============================================================================
 // Mode B: Unit Deaggregation

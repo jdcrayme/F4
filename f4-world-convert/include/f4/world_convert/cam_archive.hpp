@@ -49,9 +49,16 @@ public:
     /// The raw .cam file bytes (available after load()).
     [[nodiscard]] const std::vector<uint8_t>& raw_bytes() const noexcept { return raw_; }
 
+    /// The path this archive was loaded from (empty for a default-
+    /// constructed archive). Consumers use it to locate sibling files —
+    /// e.g. a scenario .obj providing base objectives for a save that
+    /// carries only .obd deltas.
+    [[nodiscard]] const std::filesystem::path& path() const noexcept { return path_; }
+
 private:
     std::vector<uint8_t> raw_;
     std::vector<SubFile> subfiles_;
+    std::filesystem::path path_;
 };
 
 } // namespace f4::world_convert

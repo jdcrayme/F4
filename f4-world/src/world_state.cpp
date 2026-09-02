@@ -87,6 +87,15 @@ ObjectiveState parse_objective(Reader& r) {
         if      (k == "type")            o.type            = static_cast<int16_t>(r.read_int());
         else if (k == "type_name")       r.skip_value();  // display only
         else if (k == "objective_type")  o.objective_type  = static_cast<uint8_t>(r.read_int());
+        // B.3 fix: id_num/id_creator were never parsed — objective_id_map
+        // came back EMPTY for every JSON-loaded world, silently disabling
+        // every VU_ID cross-reference (squadron→airbase fell back to the
+        // positional heuristic; flight targets and ATM requests resolved
+        // to nothing). In-memory WorldStates (the cam2json in-process
+        // pipeline) always carried them, which is why only JSON reloads
+        // were broken.
+        else if (k == "id_num")          o.id_num          = static_cast<uint32_t>(r.read_int());
+        else if (k == "id_creator")      o.id_creator      = static_cast<uint32_t>(r.read_int());
         else if (k == "x")               o.x               = static_cast<int16_t>(r.read_int());
         else if (k == "y")               o.y               = static_cast<int16_t>(r.read_int());
         else if (k == "z")               o.z               = static_cast<float>(r.read_number());
@@ -300,6 +309,12 @@ UnitState parse_unit(Reader& r) {
         }
         else if (k == "unit_subtype")   u.unit_subtype   = static_cast<uint8_t>(r.read_int());
         else if (k == "domain")         u.domain         = static_cast<uint8_t>(r.read_int());
+        // B.3 fix: id_num/id_creator were never parsed — unit_id_map came
+        // back EMPTY for every JSON-loaded world, so Flight→Package /
+        // Flight→Squadron / Battalion→Brigade / Package→element resolution
+        // silently no-oped (see the objective-side comment above).
+        else if (k == "id_num")         u.id_num         = static_cast<uint32_t>(r.read_int());
+        else if (k == "id_creator")     u.id_creator     = static_cast<uint32_t>(r.read_int());
         else if (k == "roster")         u.roster         = static_cast<uint32_t>(r.read_int());
         else if (k == "x")              u.x              = static_cast<int16_t>(r.read_int());
         else if (k == "y")              u.y              = static_cast<int16_t>(r.read_int());
@@ -475,6 +490,28 @@ UnitState parse_unit(Reader& r) {
         else if (k == "jstar_id")           u.jstar_id           = static_cast<uint32_t>(r.read_int());
         else if (k == "ecm_id")             u.ecm_id             = static_cast<uint32_t>(r.read_int());
         else if (k == "tanker_id")          u.tanker_id          = static_cast<uint32_t>(r.read_int());
+        // B.3 tranche: the ATM mission request that produced this package
+        // (v71 saves carry it as a nested mis_request object). Older /
+        // synthetic world JSON without the block simply leaves
+        // request_present false.
+        else if (k == "mis_request") {
+            u.request_present = true;
+            r.skip_ws(); r.expect('{');
+            if (!r.peek('}')) for (;;) {
+                std::string mk = r.read_string();
+                r.expect(':');
+                if      (mk == "mission")        u.request_mission       = static_cast<uint8_t>(r.read_int());
+                else if (mk == "tot")            u.request_tot           = static_cast<int32_t>(r.read_int());
+                else if (mk == "priority")       u.request_priority      = static_cast<uint8_t>(r.read_int());
+                else if (mk == "action_type")    u.request_action_type   = static_cast<uint16_t>(r.read_int());
+                else if (mk == "target_num")     u.request_target_num    = static_cast<uint32_t>(r.read_int());
+                else if (mk == "target_creator") u.request_target_creator= static_cast<uint32_t>(r.read_int());
+                else if (mk == "requester_num")  u.request_requester_num = static_cast<uint32_t>(r.read_int());
+                else                             r.skip_value();
+                if (r.consume('}')) break;
+                r.expect(',');
+            } else r.consume('}');
+        }
         else                            r.skip_value();
         if (r.consume('}')) break;
         r.expect(',');
@@ -491,6 +528,10 @@ void parse_campaign_field(Reader& r, const std::string& key, CampaignState& c) {
     else if (key == "te_number_teams")      c.te_number_teams = static_cast<int32_t>(r.read_int());
     else if (key == "te_team")              c.te_team = static_cast<int32_t>(r.read_int());
     else if (key == "te_flags")             c.te_flags = static_cast<int32_t>(r.read_int());
+    // B.3 QC tranche: the campaign bullseye (shared reference point).
+    else if (key == "bullseye_x")          c.bullseye_x = static_cast<int32_t>(r.read_int());
+    else if (key == "bullseye_y")          c.bullseye_y = static_cast<int32_t>(r.read_int());
+    else if (key == "bullseye_name")       c.bullseye_name = static_cast<int32_t>(r.read_int());
     else if (key == "te_number_aircraft" || key == "te_team_pts") {
         r.skip_ws(); r.expect('[');
         std::vector<int32_t> arr;

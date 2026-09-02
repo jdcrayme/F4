@@ -157,25 +157,42 @@ inline void point_flags_text(uint8_t flags, char* buf, std::size_t buf_size) noe
 }
 
 // ---------------------------------------------------------------------------
-// WP_ACTION (campwp.h) — waypoint action byte. The FreeFalcon reference
-// doc only enumerates a handful (TAKEOFF/LAND/VECTORME/STRIKE/BOMB/CAP);
-// the rest fall through to "Unknown(N)". This is a best-effort decoder
-// pending a full campwp.h port — the values 0..N are mapped to the
-// documented action names in the order they appear in the source.
+// WP_ACTION (campwp.h) — waypoint action byte, AUTHORITATIVE table ported
+// from FreeFalcon's src/campaign/include/campwp.h (verified against the
+// shallow clone during the B.3 tranche). The pre-B.3 table was a guess
+// that swapped TAKEOFF/LAND (it read route action 1 at the departure
+// airbase as "Land" and action 7 back home as "Escort") — the saved
+// TestCamp routes only make sense with the real mapping.
 // ---------------------------------------------------------------------------
 [[nodiscard]] inline const char* wp_action_name(uint8_t action) noexcept {
     switch (action) {
-        case 0:  return "Takeoff";
-        case 1:  return "Land";
-        case 2:  return "VectorMe";
-        case 3:  return "Strike";
-        case 4:  return "Bomb";
-        case 5:  return "CAP";
-        case 6:  return "Intercept";
-        case 7:  return "Escort";
-        case 8:  return "Refuel";
-        case 9:  return "Taxi";
-        case 10: return "Hold";
+        case 0:  return "Nothing";      // WP_NOTHING
+        case 1:  return "Takeoff";      // WP_TAKEOFF
+        case 2:  return "Assemble";     // WP_ASSEMBLE
+        case 3:  return "PostAsm";      // WP_POSTASSEMBLE
+        case 4:  return "Refuel";       // WP_REFUEL
+        case 5:  return "Rearm";        // WP_REARM
+        case 6:  return "Pickup";       // WP_PICKUP
+        case 7:  return "Land";         // WP_LAND
+        case 8:  return "Timing";       // WP_TIMING
+        case 9:  return "CASCP";        // WP_CASCP
+        case 10: return "Escort";       // WP_ESCORT
+        case 11: return "CA";           // WP_CA
+        case 12: return "CAP";          // WP_CAP
+        case 13: return "Intercept";    // WP_INTERCEPT
+        case 14: return "GndStrike";    // WP_GNDSTRIKE
+        case 15: return "NavStrike";    // WP_NAVSTRIKE
+        case 16: return "SAD";          // WP_SAD
+        case 17: return "Strike";       // WP_STRIKE
+        case 18: return "Bomb";         // WP_BOMB
+        case 19: return "SEAD";         // WP_SEAD
+        case 20: return "ELINT";        // WP_ELINT
+        case 21: return "Recon";        // WP_RECON
+        case 22: return "Rescue";       // WP_RESCUE
+        case 23: return "ASW";          // WP_ASW
+        case 24: return "Tanker";       // WP_TANKER
+        case 25: return "Airdrop";      // WP_AIRDROP
+        case 26: return "Jam";          // WP_JAM
         default: return "Unknown";
     }
 }
@@ -275,6 +292,27 @@ inline void obj_flags_text(uint32_t flags, char* buf, std::size_t buf_size) noex
         append(tail);
     }
     std::snprintf(buf, buf_size, "%s", local);
+}
+
+// ---------------------------------------------------------------------------
+// Campaign clock formatting (B.3 QC tranche) — CampaignTime is a second
+// count. Absolute times in saves are large (TestCamp's current_time is
+// 38,574,360 ≈ day 0, 10:42), so the canonical display is "D# HH:MM:SS".
+// Negative values render as-is (relative negatives happen on MOT fields).
+// ---------------------------------------------------------------------------
+[[nodiscard]] inline void format_campaign_time(int32_t t,
+                                               char* buf,
+                                               std::size_t buf_size) noexcept {
+    if (t < 0) {
+        std::snprintf(buf, buf_size, "%d", t);
+        return;
+    }
+    const int32_t days  = t / 86400;
+    const int32_t hours = (t % 86400) / 3600;
+    const int32_t mins  = (t % 3600) / 60;
+    const int32_t secs  = t % 60;
+    std::snprintf(buf, buf_size, "D%d %02d:%02d:%02d",
+                  days, hours, mins, secs);
 }
 
 } // namespace f4::viewer

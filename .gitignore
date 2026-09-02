@@ -39,3 +39,6 @@ temp/*
 # Asset pipeline target tree (ASSET_PIPELINE_SPEC.md §4: Data/ is generated
 # by f4import from a game install, never committed).
 Data/
+
+# Generated from TestCamp.cam by cam2json (regenerable on demand)
+/TestCamp.world.json

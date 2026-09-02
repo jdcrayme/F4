@@ -38,7 +38,9 @@ EntityHandle EntityWorld::create() {
         ++rec.generation;           // bump generation so stale handles fail
         rec.alive = true;
         rec.tags.clear();           // Phase D: index maintenance happens via set_tag()
-        rec.components.clear();
+        rec.components.clear();     // (slot reuse: old components were destroyed
+                                    // by destroy(), which already invalidated
+                                    // the behavioral cache)
     } else {
         index = static_cast<uint32_t>(entities_.size());
         EntityRecord rec;
@@ -46,6 +48,10 @@ EntityHandle EntityWorld::create() {
         rec.alive = true;
         entities_.push_back(std::move(rec));
     }
+    // A fresh entity has no components, so the behavioral set is unchanged;
+    // flag the rebuild anyway — one bool write, and it keeps the cache's
+    // invariants trivially true regardless of future changes here.
+    invalidate_behavioral_cache();
     return EntityHandle(EntityId::make(index, entities_[index].generation), this);
 }
 
@@ -61,7 +67,9 @@ void EntityWorld::destroy(EntityId id) {
     }
     rec->alive = false;
     rec->tags.clear();
-    rec->components.clear();
+    rec->components.clear();       // behavioral components destroyed — the
+                                   // cache's pointers dangle until rebuilt
+    invalidate_behavioral_cache();
     free_list_.push_back(id.index());
 }
 
@@ -140,21 +148,27 @@ std::vector<EntityId> EntityWorld::within_radius(double cx, double cy, double cz
 // ============================================================================
 // EntityWorld::update_all — the sim tick primitive.
 //
-// Two-pass implementation:
+// Two-pass implementation over the BEHAVIORAL-COMPONENT CACHE (see the
+// cache notes in entity.hpp):
 //   Pass 1: every behavioral component with priority >= BRAIN_THRESHOLD
 //           (brains — produces control inputs and publishes ATC requests).
 //   Pass 2: every behavioral component with 0 < priority < BRAIN_THRESHOLD
 //           (physics — consumes the brain's outputs, integrates state).
 //
-// The dynamic_cast to BehavioralComponentBase* is the simplest correct way
-// to filter behavioral components from the type-erased components map. At
-// Phase A scale (N=1-4 entities, ~3 components each) the per-tick cost is
-// trivial (~12 dynamic_casts/tick = ~720/s at 60 Hz). The eventual
-// optimization at campaign scale is to cache a priority-sorted vector of
-// BehavioralComponentBase* on each EntityRecord, populated on add<T>() /
-// remove<T>() and invalidated on entity destroy. That replaces the
-// dynamic_cast with a direct iteration but adds bookkeeping complexity;
-// defer until a profiler says otherwise.
+// The cache is a flat vector of BehavioralComponentBase* in the same visit
+// order the pre-cache implementation walked (entity index order, then
+// component-map order), rebuilt lazily when the behavioral set changes
+// (add/remove of a behavioral component, create/destroy, move). This is the
+// campaign-scale fix: a populated save (4,374 entities, ~5 components each)
+// cost ~52,000 dynamic_casts + hash-map walks per tick (~36 ms) in the old
+// loop; the cache collapses the steady-state tick to the behavioral
+// components themselves (~12 for a 4-ship).
+//
+// Semantics preserved exactly:
+//   * priority() is re-read every tick, in both passes — a component whose
+//     priority changes at runtime still lands in the right pass.
+//   * Pass ordering across entities/components is identical to the old
+//     loop's iteration order for any given world state.
 //
 // Note: bus.flush_pending() is NOT called here. The caller owns the bus
 // lifecycle and is responsible for draining deferred messages after the
@@ -162,28 +176,42 @@ std::vector<EntityId> EntityWorld::within_radius(double cx, double cy, double cz
 // and avoids surprising side effects on the bus.
 // ============================================================================
 void EntityWorld::update_all(double dt, messaging::MessageBus& bus) {
+    if (behavioral_cache_dirty_) rebuild_behavioral_cache();
+
     // Pass 1: brains (priority >= BRAIN_THRESHOLD).
-    for (auto& rec : entities_) {
-        if (!rec.alive) continue;
-        for (auto& [tid, comp] : rec.components) {
-            auto* bc = dynamic_cast<BehavioralComponentBase*>(comp.get());
-            if (bc && bc->priority() >= update_phase::BRAIN_THRESHOLD) {
-                bc->update(dt, bus);
-            }
+    for (auto* bc : behavioral_cache_) {
+        if (bc->priority() >= update_phase::BRAIN_THRESHOLD) {
+            bc->update(dt, bus);
         }
     }
 
     // Pass 2: physics (0 < priority < BRAIN_THRESHOLD).
-    for (auto& rec : entities_) {
+    for (auto* bc : behavioral_cache_) {
+        const int prio = bc->priority();
+        if (prio > 0 && prio < update_phase::BRAIN_THRESHOLD) {
+            bc->update(dt, bus);
+        }
+    }
+}
+
+// Rebuild the behavioral cache: walk entities in index order and components
+// in map order (the uncached loop's exact visit order), dynamic_cast once,
+// and keep every behavioral hit. One walk per mutation batch instead of two
+// per tick. Component object addresses are stable across entities_ vector
+// growth (the map nodes transfer, not the elements), and destruction only
+// happens through paths that invalidate the cache first — so the stored raw
+// pointers stay valid for as long as the cache is clean.
+void EntityWorld::rebuild_behavioral_cache() {
+    behavioral_cache_.clear();
+    for (const auto& rec : entities_) {
         if (!rec.alive) continue;
-        for (auto& [tid, comp] : rec.components) {
-            auto* bc = dynamic_cast<BehavioralComponentBase*>(comp.get());
-            const int prio = bc ? bc->priority() : 0;
-            if (prio > 0 && prio < update_phase::BRAIN_THRESHOLD) {
-                bc->update(dt, bus);
+        for (const auto& [tid, comp] : rec.components) {
+            if (auto* bc = dynamic_cast<BehavioralComponentBase*>(comp.get())) {
+                behavioral_cache_.push_back(bc);
             }
         }
     }
+    behavioral_cache_dirty_ = false;
 }
 
 // ============================================================================

@@ -502,6 +502,17 @@ void ViewerApp::draw_canvas() {
                 c.b = static_cast<unsigned char>(c.b * 0.3f);
                 c.a = static_cast<unsigned char>(c.a * 0.3f);
             }
+            // B.3 QC: the mission filter dims flights of other mission
+            // types (same 30% treatment as the team filter) so a filtered
+            // tasking picture pops against the theater.
+            if (uc->unit_class == f4::entities::UnitClass::Flight &&
+                !impl_->mission_filter_passes(
+                    h.get<f4::entities::FlightPlanComponent>())) {
+                c.r = static_cast<unsigned char>(c.r * 0.3f);
+                c.g = static_cast<unsigned char>(c.g * 0.3f);
+                c.b = static_cast<unsigned char>(c.b * 0.3f);
+                c.a = static_cast<unsigned char>(c.a * 0.3f);
+            }
             const RlColor outline = {
                 static_cast<unsigned char>(c.r * 0.4f),
                 static_cast<unsigned char>(c.g * 0.4f),
@@ -594,6 +605,153 @@ void ViewerApp::draw_canvas() {
                 DrawCircleLines(static_cast<int>(p.x), static_cast<int>(p.y),
                                 static_cast<int>(s * 0.6f + 4),
                                 Color{255, 255, 0, 255});
+            }
+        }
+    }
+
+    // --- B.3 QC overlays: mission links, package links, bullseye -------
+    //
+    // These three passes draw the campaign's tasking RELATIONSHIPS over
+    // the entity layer: which objective each flight is assigned to
+    // (mission links), which flights belong to which package (element
+    // links), and the shared reference point (bullseye). Culling is
+    // viewport-margin based like the entity loops; both filters apply
+    // so the overlays never fight the filters the user set.
+    if (impl_->world_loaded && impl_->show_units) {
+        const float cull = 60.0f;
+        const float sx_min = -cull;
+        const float sx_max = static_cast<float>(impl_->window_w) + cull;
+        const float sy_min = -cull;
+        const float sy_max = static_cast<float>(impl_->window_h) + cull;
+
+        // Mission→target links: a thin owner-colored line from each
+        // (filtered) flight to its mission target, with a ring at the
+        // target end. Selected flight's link renders double-width.
+        if (impl_->show_mission_links) {
+            for (const auto& eid : impl_->units()) {
+                auto h = impl_->handle(eid);
+                auto* uc = h.get<f4::entities::UnitCoreComponent>();
+                auto* fp = h.get<f4::entities::FlightPlanComponent>();
+                auto* tr = h.get<f4::entities::TransformComponent>();
+                if (!uc || !fp || !tr) continue;
+                if (uc->unit_class != f4::entities::UnitClass::Flight) continue;
+                if (!fp->target.valid()) continue;
+                // Filters: both team and mission must pass.
+                auto team_tag = h.get_tag(f4::entities::tags::TEAM);
+                const uint8_t owner = (team_tag && team_tag->as_int())
+                    ? static_cast<uint8_t>(*team_tag->as_int()) : 0;
+                if (impl_->team_filter != 0xFF &&
+                    owner != impl_->team_filter) continue;
+                if (!impl_->mission_filter_passes(fp)) continue;
+
+                auto th = impl_->handle(fp->target);
+                auto* t_tr = th.get<f4::entities::TransformComponent>();
+                if (!t_tr) continue;
+
+                const Vector2 p = impl_->world_to_screen(
+                    impl_->grid_x(tr), impl_->grid_y(tr));
+                const Vector2 q = impl_->world_to_screen(
+                    impl_->grid_x(t_tr), impl_->grid_y(t_tr));
+                if ((p.x < sx_min && q.x < sx_min) ||
+                    (p.x > sx_max && q.x > sx_max) ||
+                    (p.y < sy_min && q.y < sy_min) ||
+                    (p.y > sy_max && q.y > sy_max)) continue;
+
+                const RlColor c = color_for_owner(owner);
+                const bool is_sel =
+                    impl_->sel_kind == Impl::SelectionKind::Unit &&
+                    impl_->sel_entity == eid;
+                const float width = is_sel ? 2.5f : 1.0f;
+                const uint8_t alpha = is_sel ? 235 : 130;
+                DrawLineEx(p, q, width,
+                           Color{c.r, c.g, c.b, alpha});
+                // Target end: open ring (the objective itself draws its
+                // own icon; the ring marks "this is the assigned target").
+                DrawCircleLines(static_cast<int>(q.x), static_cast<int>(q.y),
+                                6, Color{c.r, c.g, c.b, alpha});
+            }
+        }
+
+        // Package→element links: faint white lines from each package unit
+        // to its element flights. The package unit itself renders in the
+        // normal unit pass (its own owner color).
+        if (impl_->show_package_links) {
+            for (const auto& eid : impl_->units()) {
+                auto h = impl_->handle(eid);
+                auto* uc = h.get<f4::entities::UnitCoreComponent>();
+                auto* ps = h.get<f4::entities::PackageSupportComponent>();
+                auto* tr = h.get<f4::entities::TransformComponent>();
+                if (!uc || !ps || !tr) continue;
+                if (uc->unit_class != f4::entities::UnitClass::Package) continue;
+                if (ps->elements.empty()) continue;
+
+                auto team_tag = h.get_tag(f4::entities::tags::TEAM);
+                const uint8_t owner = (team_tag && team_tag->as_int())
+                    ? static_cast<uint8_t>(*team_tag->as_int()) : 0;
+                if (impl_->team_filter != 0xFF &&
+                    owner != impl_->team_filter) continue;
+
+                const Vector2 p = impl_->world_to_screen(
+                    impl_->grid_x(tr), impl_->grid_y(tr));
+                const bool is_sel =
+                    impl_->sel_kind == Impl::SelectionKind::Unit &&
+                    impl_->sel_entity == eid;
+                for (const auto feid : ps->elements) {
+                    if (!feid.valid()) continue;
+                    auto fh = impl_->handle(feid);
+                    auto* f_tr = fh.get<f4::entities::TransformComponent>();
+                    if (!f_tr) continue;
+                    const Vector2 q = impl_->world_to_screen(
+                        impl_->grid_x(f_tr), impl_->grid_y(f_tr));
+                    if ((p.x < sx_min && q.x < sx_min) ||
+                        (p.x > sx_max && q.x > sx_max) ||
+                        (p.y < sy_min && q.y < sy_min) ||
+                        (p.y > sy_max && q.y > sy_max)) continue;
+                    DrawLineEx(p, q, is_sel ? 2.0f : 0.75f,
+                               Color{220, 220, 240,
+                                     (is_sel ? (unsigned char)200 : (unsigned char)100)});
+                }
+            }
+        }
+
+        // Bullseye: the campaign's shared reference point (bullseye_x/y
+        // on CampaignStateComponent), drawn as a dashed-look crosshair.
+        if (impl_->show_bullseye) {
+            auto camp_h = impl_->handle(impl_->campaign_entity());
+            auto* cs =
+                camp_h.get<f4::entities::CampaignStateComponent>();
+            if (cs) {
+                const int bx = (cs->bullseye_x > 0) ? cs->bullseye_x : 0;
+                const int by = (cs->bullseye_y > 0) ? cs->bullseye_y : 0;
+                const Vector2 c =
+                    impl_->world_to_screen(static_cast<float>(bx),
+                                           static_cast<float>(by));
+                if (c.x > sx_min && c.x < sx_max &&
+                    c.y > sy_min && c.y < sy_max) {
+                    const Color col = {255, 200, 40, 220};
+                    const float r = 14.0f;
+                    // Crosshair: four segments with a gap in the middle.
+                    // (0.017453293 = pi/180 — DEG2RAD is undefined at this
+                    // point in the translation unit; raylib defines it as a
+                    // macro but f4-renderer #undefs it defensively.)
+                    constexpr float kDeg2Rad = 0.017453293f;
+                    for (int k = 0; k < 4; ++k) {
+                        const float a = k * 90.0f * kDeg2Rad;
+                        DrawLineEx(
+                            {c.x + std::cos(a) * 4.0f,
+                             c.y + std::sin(a) * 4.0f},
+                            {c.x + std::cos(a) * r,
+                             c.y + std::sin(a) * r},
+                            1.5f, col);
+                    }
+                    DrawCircleLines(static_cast<int>(c.x),
+                                    static_cast<int>(c.y),
+                                    static_cast<int>(r), col);
+                    DrawText("bullseye",
+                            static_cast<int>(c.x) + 18,
+                            static_cast<int>(c.y) - 6, 10,
+                            Color{255, 200, 40, 220});
+                }
             }
         }
     }

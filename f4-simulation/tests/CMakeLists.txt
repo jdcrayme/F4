@@ -20,6 +20,7 @@ endfunction()
 f4_simulation_add_test(test_visual_model_component test_visual_model_component.cpp)
 f4_simulation_add_test(test_scenario_loader        test_scenario_loader.cpp)
 f4_simulation_add_test(test_campaign_bridge        test_campaign_bridge.cpp)
+f4_simulation_add_test(test_campaign_spawner      test_campaign_spawner.cpp)
 f4_simulation_add_test(test_feature_spawning       test_feature_spawning.cpp)
 f4_simulation_add_test(test_vehicle_spawning       test_vehicle_spawning.cpp)
 f4_simulation_add_test(test_bubble_manager         test_bubble_manager.cpp)
@@ -80,6 +81,13 @@ target_compile_definitions(test_scenario_loader PRIVATE
 # The test uses this to construct a valid AircraftConfig for
 # FlightModelComponent::init() — empty aero tables would throw.
 target_compile_definitions(test_campaign_bridge PRIVATE
+    F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}"
+)
+
+# The B.3 campaign spawner test drives the emit_flight_intents → bus →
+# CampaignSimSpawner loop and needs the same generated F-16 config
+# fixture for FlightModelComponent::init.
+target_compile_definitions(test_campaign_spawner PRIVATE
     F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}"
 )
 

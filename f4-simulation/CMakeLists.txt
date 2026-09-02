@@ -36,6 +36,7 @@ add_library(f4-simulation STATIC
     src/scenario.cpp
     src/simulation.cpp
     src/campaign_bridge.cpp
+    src/campaign_spawner.cpp
     src/combat_bridge.cpp
     src/combat_transcript.cpp
     src/bubble_manager.cpp
@@ -68,6 +69,7 @@ target_link_libraries(f4-simulation PUBLIC
     f4-terrain         # Phase 2: transitively required by f4-world/detail/world_state.hpp (TerrainData)
     f4-weapons         # M3 combat chain (COMBAT_CHAIN_PLAN.md): stores, launch, sweep
     f4-sensors         # M3 combat chain: radar, tracks, RWR
+    f4-campaign        # B.3: MissionIntent (emit_flight_intents → CampaignSimSpawner loop)
 )
 
 add_library(F4::Simulation ALIAS f4-simulation)
@@ -92,3 +94,18 @@ target_compile_features(trace_runner PRIVATE cxx_std_20)
 # The go-around reason tap needs the ATC message types (f4-ai, pulled in
 # transitively via f4-simulation). Install alongside the other tools so a
 # headless CI can generate §5 acceptance traces in one command.
+
+# ============================================================================
+# campaign_qc — the B.3 end-to-end QC harness (tools/campaign_qc.cpp).
+# Runs the full campaign→sim loop over a decoded save (TestCamp.cam →
+# world JSON): emit_flight_intents → MessageBus → CampaignSimSpawner →
+# aircraft with saved routes, then a scenario-driven Simulation run that
+# writes the replay trace. See the tool's header comment for the artifact
+# set (summary JSON + trace + generated scenario).
+# ============================================================================
+add_executable(campaign_qc tools/campaign_qc.cpp)
+target_link_libraries(campaign_qc PRIVATE f4-simulation)
+target_compile_features(campaign_qc PRIVATE cxx_std_20)
+target_compile_definitions(campaign_qc PRIVATE
+    F4_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+    F4_BINARY_DIR="${CMAKE_BINARY_DIR}")

@@ -102,6 +102,95 @@ mission_type_byte(std::string_view name);
     return mission_byte != 0;
 }
 
+// ============================================================================
+// Mission categories (B.3 tranche)
+// ============================================================================
+//
+// The 41 wire mission types collapse into a small set of BEHAVIORAL
+// categories — the granularity at which the world viewer renders flights
+// (symbol glyph per category), at which QC filters operate, and at which
+// the B.3 spawner picks a default route profile. The mapping is many-to-
+// one and total: every byte 0..40 lands in exactly one category.
+//
+// Mapping (from FreeFalcon's own mission grouping in mission.h plus the
+// Core Systems Reference counter-air / strike / GA / support tables):
+//   None        0 (AMIS_NONE — untasked)
+//   CAP         1-6 (BARCAP..AMBUSHCAP), 36 (PATROL)
+//   Sweep       7 (SWEEP)
+//   Intercept   8-9 (ALERT, INTERCEPT)
+//   Escort      10-11 (ESCORT, SEADESCORT)
+//   Strike      12-16 (OCASTRIKE..STSTRIKE), 24 (STRATBOMB)
+//   SEAD        17 (SEADSTRIKE)
+//   CAS         18-21 (ONCALLCAS..SAD), 23 (BAI), 31 (FAC)
+//   Recon       22 (INT), 29 (RECON), 30 (BDA)
+//   Support     25-28 (AWACS, JSTAR, TANKER, ECM), 32-35 (SAR..ASHIP),
+//               39-40 (TANK, SEARCH)
+//   Other       37-38 (TRAINING, OTHER)
+
+enum class MissionCategory : std::uint8_t {
+    None = 0,
+    CAP,
+    Sweep,
+    Intercept,
+    Escort,
+    Strike,
+    SEAD,
+    CAS,
+    Recon,
+    Support,
+    Other,
+};
+
+/// Mission byte -> behavioral category. Out-of-range bytes map to Other
+/// (same "render something sane on corrupt data" rule as the name table).
+[[nodiscard]] constexpr MissionCategory
+mission_category(std::uint8_t mission_byte) noexcept {
+    switch (mission_byte) {
+        case 0:  return MissionCategory::None;
+        case 1: case 2: case 3: case 4: case 5: case 6: case 36:
+            return MissionCategory::CAP;
+        case 7:  return MissionCategory::Sweep;
+        case 8: case 9:
+            return MissionCategory::Intercept;
+        case 10: case 11:
+            return MissionCategory::Escort;
+        case 12: case 13: case 14: case 15: case 16: case 24:
+            return MissionCategory::Strike;
+        case 17: return MissionCategory::SEAD;
+        case 18: case 19: case 20: case 21: case 23: case 31:
+            return MissionCategory::CAS;
+        case 22: case 29: case 30:
+            return MissionCategory::Recon;
+        case 25: case 26: case 27: case 28:
+        case 32: case 33: case 34: case 35:
+        case 39: case 40:
+            return MissionCategory::Support;
+        case 37: case 38:
+            return MissionCategory::Other;
+        default: return MissionCategory::Other;
+    }
+}
+
+/// Category -> short display name ("CAP", "Strike", ...). The name is the
+/// stable rendering key for the viewer's symbol table and QC filters.
+[[nodiscard]] constexpr std::string_view
+mission_category_name(MissionCategory cat) noexcept {
+    switch (cat) {
+        case MissionCategory::None:      return "None";
+        case MissionCategory::CAP:       return "CAP";
+        case MissionCategory::Sweep:     return "Sweep";
+        case MissionCategory::Intercept: return "Intercept";
+        case MissionCategory::Escort:    return "Escort";
+        case MissionCategory::Strike:    return "Strike";
+        case MissionCategory::SEAD:      return "SEAD";
+        case MissionCategory::CAS:       return "CAS";
+        case MissionCategory::Recon:     return "Recon";
+        case MissionCategory::Support:   return "Support";
+        case MissionCategory::Other:     return "Other";
+    }
+    return "Other";  // silence pedantic fall-through warnings
+}
+
 /// The Air-Role (ARO) wire table — squadron specialty bytes ↔ names.
 ///
 /// Squadrons carry a `specialty` byte (their primary air role, used for

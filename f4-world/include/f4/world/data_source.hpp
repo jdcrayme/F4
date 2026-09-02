@@ -48,6 +48,12 @@ struct ICampaignSource {
     virtual int32_t te_flags() const = 0;
     virtual const std::vector<int32_t>& te_number_aircraft() const = 0;
     virtual const std::vector<int32_t>& te_team_pts() const = 0;
+    // B.3 QC tranche — the campaign bullseye (shared reference point).
+    // Default-implemented (optional data, same rule as the package
+    // request accessors): sources that predate the tranche keep compiling.
+    virtual int32_t bullseye_x() const { return 0; }
+    virtual int32_t bullseye_y() const { return 0; }
+    virtual int32_t bullseye_name() const { return 0; }
     virtual ~ICampaignSource() = default;
 };
 
@@ -260,6 +266,31 @@ struct IPackageSource {
     virtual uint32_t jstar_id(int i) const = 0;
     virtual uint32_t ecm_id(int i) const = 0;
     virtual uint32_t tanker_id(int i) const = 0;
+
+    // B.3 tranche — package element flights + the ATM mission request.
+    // element_ids: the package's element Flight VU_ID.nums, in wire order
+    // (same vector the Brigade subclass uses for its child battalions —
+    // one field, two class-dependent meanings on the wire). The bridge
+    // resolves these to EntityIds on PackageSupportComponent::elements.
+    //
+    // These are OPTIONAL data with default implementations (unlike the five
+    // pure virtuals above): a request-less / element-less package is a legal
+    // wire state, not an unsupported adapter, so alternative sources that
+    // predate the B.3 tranche keep compiling and simply report "nothing
+    // carried" rather than becoming abstract classes. The WorldState-backed
+    // UnitAdapter overrides every one of them.
+    virtual const std::vector<uint32_t>& element_ids(int) const {
+        static const std::vector<uint32_t> kEmpty;
+        return kEmpty;
+    }
+    virtual bool request_present(int) const { return false; }
+    virtual uint8_t request_mission(int) const { return 0; }
+    virtual int32_t request_tot(int) const { return 0; }
+    virtual uint8_t request_priority(int) const { return 0; }
+    virtual uint16_t request_action_type(int) const { return 0; }
+    virtual uint32_t request_target_num(int) const { return 0; }
+    virtual uint32_t request_target_creator(int) const { return 0; }
+    virtual uint32_t request_requester_num(int) const { return 0; }
 
     virtual ~IPackageSource() = default;
 };

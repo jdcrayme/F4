@@ -18,6 +18,7 @@
 #include "viewer_state.hpp"
 #include "diagnostics.hpp"
 
+#include <f4/campaign/mission_type.hpp>  // mission_type_name (flight QC)
 #include <f4/terrain/terrain_data.hpp>
 #include <f4/viewer/enum_text.hpp>
 #include <f4/world_convert/class_table.hpp>      // unit_subtype_name(), DOMAIN_*
@@ -499,27 +500,207 @@ void ViewerApp::draw_inspector() {
                         }
                         break;
                     }
-                    case f4::entities::UnitClass::Flight:
-                    case f4::entities::UnitClass::Package:
+                    case f4::entities::UnitClass::Flight: {
+                        // B.3 QC — the full tasking record of one flight:
+                        // mission, TOT/MOT, target, package, squadron,
+                        // callsign. Every cross-reference is clickable:
+                        // it selects the referenced entity and pans the
+                        // camera onto it.
+                        auto* fp = h.get<f4::entities::FlightPlanComponent>();
+                        if (fp) {
+                            ImGui::Text("Mission:   %u (%s)",
+                                        static_cast<unsigned>(fp->mission),
+                                        f4::campaign::mission_type_name(
+                                            fp->mission).data());
+                            ImGui::Text("Callsign:  CS%03u-%u",
+                                        static_cast<unsigned>(fp->callsign_id),
+                                        static_cast<unsigned>(fp->callsign_num));
+                            {
+                                char tbuf[24];
+                                f4::viewer::format_campaign_time(
+                                    fp->time_on_target, tbuf, sizeof(tbuf));
+                                ImGui::Text("TOT:      %s", tbuf);
+                                f4::viewer::format_campaign_time(
+                                    fp->mission_over_time, tbuf, sizeof(tbuf));
+                                ImGui::Text("MOT:      %s", tbuf);
+                            }
+                            ImGui::Text("Priority: %u", static_cast<unsigned>(fp->flight_priority));
+                            ImGui::Text("Loadouts: %u", static_cast<unsigned>(fp->loadouts));
+                            if (fp->altitude != 0.0f) {
+                                ImGui::Text("Fpl Alt:   %.0f ft",
+                                            static_cast<double>(fp->altitude));
+                            }
+                            if (fp->fuel_burnt != 0) {
+                                ImGui::Text("Fuel burnt:%d lbs", fp->fuel_burnt);
+                            }
+
+                            // Clickable cross-references: target / package /
+                            // squadron. Each one selects + focuses.
+                            auto draw_ref = [&](const char* label,
+                                                f4::entities::EntityId ref,
+                                                Impl::SelectionKind kind) {
+                                ImGui::TextUnformatted(label);
+                                ImGui::SameLine();
+                                if (!ref.valid()) {
+                                    ImGui::TextDisabled("-");
+                                    return;
+                                }
+                                auto rh = impl_->handle(ref);
+                                std::string name;
+                                if (auto nt = rh.get_tag(
+                                        f4::entities::tags::NAME);
+                                    nt && nt->as_string()) {
+                                    name = *nt->as_string();
+                                }
+                                if (auto* ruc =
+                                        rh.get<f4::entities::UnitCoreComponent>();
+                                    ruc && name.empty()) {
+                                    name = ruc->class_name;
+                                }
+                                if (name.empty()) name = "(entity)";
+                                char btn[192];
+                                std::snprintf(btn, sizeof(btn), "%s##%p",
+                                              name.c_str(),
+                                              static_cast<const void*>(&ref));
+                                if (ImGui::SmallButton(btn)) {
+                                    impl_->sel_kind = kind;
+                                    impl_->sel_entity = ref;
+                                    auto th = impl_->handle(ref);
+                                    if (auto* ttr = th.get<
+                                            f4::entities::TransformComponent>()) {
+                                        impl_->cam_x = impl_->grid_x(ttr);
+                                        impl_->cam_y = impl_->grid_y(ttr);
+                                        impl_->cam_zoom =
+                                            std::max(impl_->cam_zoom, 4.0f);
+                                    }
+                                }
+                            };
+                            ImGui::Separator();
+                            draw_ref("Target:   ", fp->target,
+                                     Impl::SelectionKind::Objective);
+                            draw_ref("Package:  ", fp->package,
+                                     Impl::SelectionKind::Unit);
+                            draw_ref("Squadron: ", fp->squadron,
+                                     Impl::SelectionKind::Unit);
+                        }
+                        break;
+                    }
+                    case f4::entities::UnitClass::Package: {
+                        // B.3 QC — package composition: element flights
+                        // (clickable), the ATM mission request that
+                        // produced the package, and the support-flight
+                        // cross-references.
+                        auto* ps = h.get<f4::entities::PackageSupportComponent>();
+                        if (ps) {
+                            ImGui::Text("Elements:  %zu", ps->elements.size());
+                            ImGui::Text("Wait cyc: %u", static_cast<unsigned>(ps->wait_cycles));
+
+                            if (!ps->elements.empty() &&
+                                ImGui::TreeNode("Element Flights")) {
+                                for (const auto feid : ps->elements) {
+                                    if (!feid.valid()) continue;
+                                    auto fh = impl_->handle(feid);
+                                    auto* fp =
+                                        fh.get<f4::entities::FlightPlanComponent>();
+                                    char label[96];
+                                    if (fp) {
+                                        std::snprintf(
+                                            label, sizeof(label),
+                                            "CS%03u-%u  %s",
+                                            static_cast<unsigned>(fp->callsign_id),
+                                            static_cast<unsigned>(fp->callsign_num),
+                                            f4::campaign::mission_type_name(
+                                                fp->mission).data());
+                                    } else {
+                                        std::snprintf(label, sizeof(label),
+                                                      "flight");
+                                    }
+                                    if (ImGui::Selectable(label)) {
+                                        impl_->sel_kind =
+                                            Impl::SelectionKind::Unit;
+                                        impl_->sel_entity = feid;
+                                        auto th = impl_->handle(feid);
+                                        if (auto* ttr = th.get<
+                                                f4::entities::TransformComponent>()) {
+                                            impl_->cam_x = impl_->grid_x(ttr);
+                                            impl_->cam_y = impl_->grid_y(ttr);
+                                        }
+                                    }
+                                }
+                                ImGui::TreePop();
+                            }
+
+                            if (ps->request.present) {
+                                ImGui::Separator();
+                                ImGui::TextUnformatted("ATM Mission Request");
+                                ImGui::Text("  Mission:  %u (%s)",
+                                            static_cast<unsigned>(ps->request.mission),
+                                            f4::campaign::mission_type_name(
+                                                ps->request.mission).data());
+                                char tbuf[24];
+                                f4::viewer::format_campaign_time(
+                                    ps->request.tot, tbuf, sizeof(tbuf));
+                                ImGui::Text("  TOT:     %s", tbuf);
+                                ImGui::Text("  Priority:%u",
+                                            static_cast<unsigned>(ps->request.priority));
+                                ImGui::Text("  Action:  %u",
+                                            static_cast<unsigned>(ps->request.action_type));
+                                ImGui::Text("  Target:  VU %u%s",
+                                            ps->request.target_num,
+                                            ps->request.target.valid()
+                                                ? " (resolved)"
+                                                : " (unresolved)");
+                                ImGui::Text("  From:    VU %u%s",
+                                            ps->request.requester_num,
+                                            ps->request.requester.valid()
+                                                ? " (resolved)"
+                                                : " (unresolved)");
+                            }
+
+                            auto* uc2 =
+                                h.get<f4::entities::UnitCoreComponent>();
+                            (void)uc2;
+                            // Support flights (interceptor / AWACS / JSTARS
+                            // / ECM / tanker), when resolved.
+                            auto draw_support = [](const char* label,
+                                                   f4::entities::EntityId ref) {
+                                ImGui::Text("%-10s%s", label,
+                                            ref.valid() ? "assigned"
+                                                        : "-");
+                            };
+                            ImGui::Separator();
+                            draw_support("Intcpt", ps->interceptor);
+                            draw_support("AWACS",   ps->awacs);
+                            draw_support("JSTARS",  ps->jstar);
+                            draw_support("ECM",     ps->ecm);
+                            draw_support("Tanker",  ps->tanker);
+                        }
+                        break;
+                    }
                     case f4::entities::UnitClass::Unknown:
                         break;
                 }
-                // Waypoint list
+                // Waypoint list — B.3 QC upgrade: arrival time (campaign
+                // clock format), the target VU_ID, and the authoritative
+                // WP_ACTION names (campwp.h — see enum_text.hpp).
                 {
                     auto* wp = h.get<f4::entities::WaypointPlanComponent>();
                     if (wp && !wp->waypoints.empty()) {
                         ImGui::Separator();
                         if (ImGui::TreeNode("Waypoints", "Waypoints (%d)", static_cast<int>(wp->waypoints.size()))) {
-                            ImGui::Text("idx  x    y    z    action              depart");
+                            ImGui::Text("idx  x    y    alt     action              arrive        target");
                             int wi = 0;
                             for (const auto& w : wp->waypoints) {
                                 char action_buf[40];
                                 std::snprintf(action_buf, sizeof(action_buf),
-                                              "%d (%s)", static_cast<int>(w.action),
+                                              "%u (%s)", static_cast<unsigned>(w.action),
                                               f4::viewer::wp_action_name(w.action));
-                                ImGui::Text("%-4d %-4d %-4d %-4d %-19s %d",
+                                char tbuf[24];
+                                f4::viewer::format_campaign_time(
+                                    w.arrive, tbuf, sizeof(tbuf));
+                                ImGui::Text("%-4d %-4d %-4d %-7u %-19s %-13s %u",
                                             wi++, w.x, w.y, w.z,
-                                            action_buf, w.depart);
+                                            action_buf, tbuf, w.target_num);
                             }
                             ImGui::TreePop();
                         }

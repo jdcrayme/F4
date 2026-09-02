@@ -135,6 +135,15 @@ public:
     double gear_up_alt_ft{200.0};         // retract gear above this AGL
     double departure_alt_ft{2500.0};      // climb to this MSL before Done
     double taxi_speed_kts{15.0};          // max taxi speed
+
+    // The airbase this aircraft is parked at (VU_ID.num of the airbase
+    // objective; 0 = unknown). Published in TaxiRequest / HoldShortRequest /
+    // TakeoffRequest so a multi-airbase ATC answers with THIS field's taxi
+    // route and runway. Set by the campaign flight spawner (the aircraft
+    // parks at its squadron's home base, which may be any of the ~40 fields
+    // in a populated save). Scenario-list scenarios leave it 0 — the ATC's
+    // default airfield is the only one.
+    std::uint64_t airbase_id{0};
     double takeoff_throttle{1.0};         // throttle during takeoff roll (1.0 = MIL)
     double rotate_pitch_deg{8.0};        // target pitch attitude at Vr
     double rotate_pitch_gain{3.0};        // stick per rad of pitch error (rotation)

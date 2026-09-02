@@ -63,12 +63,30 @@ TEST(Campaign, DecodesKnownTeamNames) {
     EXPECT_TRUE(contains("PRC"))   << "team PRC not found";
 }
 
-TEST(Campaign, RemainingPayloadPreservedForFutureDecoders) {
+TEST(Campaign, FullDecodeConsumesTheEntirePayload) {
+    // The decoder now walks the whole CampaignClass::Decode sequence
+    // (timers, ratios, theater size, names, event queues, camp map,
+    // squadron preload list, creator block). The cursor must land
+    // exactly at the payload end — no undecoded bytes, no overrun.
     auto h = decode_fixture_cmp();
-    // We decode through the team block (~1.8KB of the 21KB payload). The
-    // remaining ~19KB (objective/unit references, etc.) is preserved.
-    EXPECT_GT(h.remaining_payload.size(), 15000u);
-    EXPECT_LT(h.remaining_payload.size(), static_cast<std::size_t>(h.decompressed_size));
+    EXPECT_EQ(h.remaining_payload.size(), 0u);
+    EXPECT_EQ(h.bytes_consumed, static_cast<std::size_t>(h.decompressed_size));
+    // And the extension fields carry real fixture values:
+    // korea theater, 1024x1024 grid extents, 8 active team slots.
+    EXPECT_EQ(h.theater_name, "KOREA");   // stored uppercase in the fixture
+    EXPECT_EQ(h.theater_size_x, 1024);
+    EXPECT_EQ(h.theater_size_y, 1024);
+    EXPECT_GT(h.num_avail_squadrons, 0);
+    EXPECT_EQ(static_cast<int>(h.active_teams), 8);
+    // The event queues parse (the fresh-campaign fixture carries a
+    // handful of boot-time events).
+    EXPECT_FALSE(h.standard_events.empty() && h.priority_events.empty());
+    for (const auto& e : h.standard_events) {
+        if (!e.text.empty()) { SUCCEED(); return; }
+    }
+    for (const auto& e : h.priority_events) {
+        if (!e.text.empty()) { SUCCEED(); return; }
+    }
 }
 
 TEST(WorldJson, EmitsValidJsonWithExpectedFields) {
