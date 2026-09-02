@@ -1249,8 +1249,18 @@ void Simulation::init_bubble_manager() {
         ct.load(scenario_.class_table_path);
     }
 
+    // B.0: the deagg radii come from Falcon4.AII when the scenario
+    // carries one (aii_path) — SIM_BUBBLE_SIZE / GROUND_BUBBLE_SIZE in
+    // campaign grid units, converted to feet by bubble_radii_from_aii().
+    // Empty path / missing file → the documented defaults, which convert
+    // to exactly the radii the BubbleManager constructor hardcoded before
+    // the AII parser existed (1024 / 2560 ft), so every pre-B.0 scenario
+    // is byte-identical. A present-but-malformed AII throws (loud).
+    const auto [ground_radius_ft, air_radius_ft] =
+        bubble_radii_from_aii(scenario_.aii_path);
+
     bubble_manager_ = std::make_unique<BubbleManager>(
-        world_, ct, *model_db_);
+        world_, ct, *model_db_, ground_radius_ft, air_radius_ft);
 }
 
 void Simulation::update_bubble() {

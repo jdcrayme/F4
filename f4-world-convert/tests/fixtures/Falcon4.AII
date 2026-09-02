@@ -1,0 +1,27 @@
+; Falcon4.AII — campaign AI INI (terrdata/ai/Falcon4.AII).
+;
+; Fixture for the B.0 parser tests. Mirrors the real file's layout:
+; Windows INI, ';' comments, mixed-key spellings, blank lines. The two
+; deagg bubble keys use the FreeFalcon-source spellings
+; (MinBubbleSize / BubbleRatioToUnitSpan) — the FALCON4_FILE_LAYOUT
+; spellings (SIM_BUBBLE_SIZE / GROUND_BUBBLE_SIZE) are aliases the
+; parser also accepts and are exercised by the hand-written test files.
+;
+; The other keys below are the aiinput.h parameters the FreeFalcon
+; reference documents (MIN_TASK_AIR, AIR_PATH_MAX, ...). The parser
+; keeps them reachable via lookup() without typed fields.
+
+[Sim]
+MinBubbleSize = 2.5          ; air-sim deagg bubble, grid units
+BubbleRatioToUnitSpan = 1.0  ; ground-sim deagg bubble, grid units
+
+[Atc]
+MaxApproachSpacing = 9000    ; ft, final spacing gate
+CarrierBreakInterval = 120   ; sec between carrier recovery launches
+
+[ground]
+; ground campaign timing (minutes / seconds)
+MIN_TASK_GROUND = 30
+MIN_PLAN_GROUND = 20
+GROUND_COMBAT_RATE = 90
+BRIGADE_BREAK_BASE = 60      ; morale breakpoint

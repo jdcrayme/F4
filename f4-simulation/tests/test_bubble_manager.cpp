@@ -26,6 +26,11 @@
 #include <f4/world_convert/class_table.hpp>
 #include <f4/models/model_database.hpp>
 
+#include <filesystem>
+#include <fstream>
+#include <random>
+#include <stdexcept>
+#include <string>
 #include <vector>
 
 using namespace f4::simulation;
@@ -53,6 +58,74 @@ EntityId make_battalion_at(EntityWorld& world, double enu_x, double enu_y) {
 }
 
 } // namespace
+
+// ── B.0: AII-driven radii (bubble_radii_from_aii) ──────────────────────────
+
+namespace {
+
+// Write a small AII to a temp file; remove on destruction.
+struct TempAii {
+    std::filesystem::path path;
+    explicit TempAii(const std::string& text)
+        : path(std::filesystem::temp_directory_path() /
+               ("f4_bubble_aii_" + std::to_string(std::random_device{}()) +
+                ".aII")) {
+        std::ofstream out(path, std::ios::binary);
+        out << text;
+    }
+    ~TempAii() {
+        std::error_code ec;
+        std::filesystem::remove(path, ec);
+    }
+    TempAii(const TempAii&) = delete;
+    TempAii& operator=(const TempAii&) = delete;
+};
+
+} // namespace
+
+// Empty path (the "not configured" case every pre-B.0 scenario exercises)
+// → the documented defaults, byte-identical to the pre-B.0 hardcoded radii.
+TEST(BubbleRadii, EmptyPathGivesDocumentedDefaults) {
+    const auto [ground, air] = bubble_radii_from_aii({});
+    EXPECT_DOUBLE_EQ(ground, 1024.0); // 1.0 grid × 1024 ft
+    EXPECT_DOUBLE_EQ(air, 2560.0);    // 2.5 grid × 1024 ft
+}
+
+// A missing file is the same as no file — defaults preserved.
+TEST(BubbleRadii, MissingFileGivesDocumentedDefaults) {
+    const auto [ground, air] = bubble_radii_from_aii(
+        std::filesystem::temp_directory_path() /
+        "f4_no_such_aii_7q3f.aII");
+    EXPECT_DOUBLE_EQ(ground, 1024.0);
+    EXPECT_DOUBLE_EQ(air, 2560.0);
+}
+
+// A present AII retunes both radii (grid units × 1024 ft).
+TEST(BubbleRadii, AiiFileRetunesRadii) {
+    TempAii aii("[Sim]\n"
+                "SIM_BUBBLE_SIZE = 4.0\n"
+                "GROUND_BUBBLE_SIZE = 0.5\n");
+    const auto [ground, air] = bubble_radii_from_aii(aii.path);
+    EXPECT_DOUBLE_EQ(ground, 512.0);  // 0.5 × 1024
+    EXPECT_DOUBLE_EQ(air, 4096.0);    // 4.0 × 1024
+}
+
+// The FreeFalcon-source spellings (MinBubbleSize / BubbleRatioToUnitSpan)
+// drive the same radii — the shipped fixtures/Falcon4.AII spelling.
+TEST(BubbleRadii, FreeFalconSpellingsDriveRadii) {
+    TempAii aii("[Sim]\n"
+                "MinBubbleSize = 3.0\n"
+                "BubbleRatioToUnitSpan = 1.5\n");
+    const auto [ground, air] = bubble_radii_from_aii(aii.path);
+    EXPECT_DOUBLE_EQ(ground, 1536.0); // 1.5 × 1024
+    EXPECT_DOUBLE_EQ(air, 3072.0);    // 3.0 × 1024
+}
+
+// A malformed AII fails loudly — never a silent default.
+TEST(BubbleRadii, MalformedAiiThrows) {
+    TempAii aii("[Sim]\nSIM_BUBBLE_SIZE = wide\n");
+    EXPECT_THROW(bubble_radii_from_aii(aii.path), std::runtime_error);
+}
 
 // ── Construction & defaults ───────────────────────────────────────────────
 

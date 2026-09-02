@@ -189,6 +189,7 @@ Scenario parse_scenario(f4::json::Reader& r) {
         else if (key == "models_tex_path")   s.models_tex_path = r.read_string();
         else if (key == "world_json_path")   s.world_json_path = r.read_string();
         else if (key == "class_table_path")  s.class_table_path = r.read_string();
+        else if (key == "aii_path")          s.aii_path = r.read_string();
         else if (key == "spawn_mode") {
             const auto mode = r.read_string();
             if (mode == "scenario_list")         s.spawn_mode = SpawnMode::ScenarioList;
@@ -398,6 +399,7 @@ Scenario load_scenario(const std::filesystem::path& json_path) {
     s.airbase_source.world_json_path = resolve(base_dir, s.airbase_source.world_json_path);
     s.airbase_source.class_table_path = resolve(base_dir, s.airbase_source.class_table_path);
     s.class_table_path  = resolve(base_dir, s.class_table_path);
+    s.aii_path          = resolve(base_dir, s.aii_path);
     s.record_path       = resolve(base_dir, s.record_path);
     s.fcs_trace_path    = resolve(base_dir, s.fcs_trace_path);
 

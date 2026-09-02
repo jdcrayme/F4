@@ -16,9 +16,10 @@
 //   • GROUND_BUBBLE_SIZE = 1.0  → 1024 ft (~312 m, ~0.17 NM)
 //   • SIM_BUBBLE_SIZE    = 2.5  → 2560 ft (~780 m, ~0.42 NM)
 //
-// Falcon4.AII is NOT YET PARSED in this tree (see FALCON4_FILE_LAYOUT.md
-// §4). We hardcode the documented defaults; a future AII parser can override
-// them via the BubbleManager constructor.
+// Falcon4.AII IS parsed as of B.0 (f4-world-convert's AiiConfig) — see
+// bubble_radii_from_aii() below. When no AII path is configured (or the
+// file is absent), the documented defaults apply unchanged — the exact
+// radii this class hardcoded before the parser existed.
 //
 // The BubbleManager owns:
 //   • A reference to the EntityWorld (for spawn/destroy).
@@ -58,10 +59,28 @@
 #include <f4/models/model_database.hpp>
 #include <f4/geo/position.hpp>
 
+#include <cstdint>
+#include <filesystem>
+#include <utility>
 #include <unordered_map>
 #include <vector>
 
 namespace f4::simulation {
+
+/// One campaign grid unit in feet — the campaign's grid coordinate scale
+/// (bubble radii are documented in grid units; the BubbleManager speaks
+/// feet). Same conversion the class doc derives: 1.0 grid → 1024 ft.
+inline constexpr double CAMPAIGN_GRID_UNIT_FT = 1024.0;
+
+/// Resolve the BubbleManager radii (feet) from an optional Falcon4.AII
+/// path. Empty path or missing file → the documented defaults
+/// (GROUND_BUBBLE_SIZE 1.0 grid, SIM_BUBBLE_SIZE 2.5 grid → 1024/2560 ft,
+/// byte-identical to the pre-B.0 hardcoded radii). A present file is
+/// parsed by f4-world-convert's AiiConfig (loud on malformed input) and
+/// its bubble sizes convert grid→feet here. Side-effect-free apart from
+/// the optional file read. Returns {ground_radius_ft, air_radius_ft}.
+std::pair<double, double> bubble_radii_from_aii(
+    const std::filesystem::path& aii_path);
 
 /// Per-tick deaggregation/reaggregation manager for ground/naval units.
 ///

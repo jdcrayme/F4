@@ -285,6 +285,42 @@ TEST(ScenarioLoader, ParsesCampaignFlightsSpawnMode) {
     EXPECT_EQ(s.class_table_path, "Falcon4.CT");
 }
 
+TEST(ScenarioLoader, ParsesOptionalAiiPath) {
+    // B.0: the additive aii_path field — Falcon4.AII for the bubble radii.
+    // Absent in JSON → empty (documented defaults downstream).
+    const std::string without = R"({
+        "name": "no_aii",
+        "theater": "korea",
+        "aircraft": [
+            {"callsign":"EAGLE1","aircraft_config_path":"f16.json","vis_type_index":1052,
+             "parking_spot":{"x":0,"y":0,"z":50},"heading_rad":0,"initial_fuel_lbs":6500}
+        ],
+        "airfield": {
+            "active_runway_id": 36,
+            "taxi_route": [{"x":0,"y":0,"z":0}, {"x":0,"y":100,"z":0}]
+        }
+    })";
+    const auto s_without = load_scenario_from_string(without);
+    EXPECT_TRUE(s_without.aii_path.empty());
+
+    // Present → parsed.
+    const std::string with = R"({
+        "name": "with_aii",
+        "theater": "korea",
+        "aii_path": "Falcon4.AII",
+        "aircraft": [
+            {"callsign":"EAGLE1","aircraft_config_path":"f16.json","vis_type_index":1052,
+             "parking_spot":{"x":0,"y":0,"z":50},"heading_rad":0,"initial_fuel_lbs":6500}
+        ],
+        "airfield": {
+            "active_runway_id": 36,
+            "taxi_route": [{"x":0,"y":0,"z":0}, {"x":0,"y":100,"z":0}]
+        }
+    })";
+    const auto s_with = load_scenario_from_string(with);
+    EXPECT_EQ(s_with.aii_path, "Falcon4.AII");
+}
+
 TEST(ScenarioLoader, UnknownSpawnModeThrows) {
     const std::string json = R"({
         "name": "bad_mode",

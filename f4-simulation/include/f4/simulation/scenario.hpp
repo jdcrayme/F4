@@ -239,6 +239,15 @@ struct Scenario {
     std::filesystem::path world_json_path;
     std::filesystem::path class_table_path;
 
+    /// Optional: Falcon4.AII (terrdata/ai/Falcon4.AII) — the campaign AI
+    /// INI whose SIM_BUBBLE_SIZE / GROUND_BUBBLE_SIZE tune the sim-bubble
+    /// deaggregation radii (B.0). Empty (the default) or a missing file
+    /// keeps the documented 1.0 / 2.5 grid-unit defaults; a present file
+    /// is parsed by f4-world-convert's AiiConfig and feeds
+    /// bubble_radii_from_aii(). Malformed content fails initialize()
+    /// loudly — never silently defaults.
+    std::filesystem::path aii_path;
+
     SpawnMode spawn_mode{SpawnMode::ScenarioList};
 
     std::vector<ScenarioAircraft> aircraft;

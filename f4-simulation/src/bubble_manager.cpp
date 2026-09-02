@@ -6,12 +6,23 @@
 #include "f4/simulation/bubble_manager.hpp"
 
 #include <f4/entities/entity.hpp>
+#include <f4/world_convert/aii_config.hpp>
 
 #include <algorithm>
 #include <cmath>
 #include <utility>
 
 namespace f4::simulation {
+
+std::pair<double, double> bubble_radii_from_aii(
+    const std::filesystem::path& aii_path) {
+    // Absent path / missing file → the documented defaults, which convert
+    // to exactly the radii this module hardcoded before B.0:
+    //   1.0 grid × 1024 = 1024 ft, 2.5 grid × 1024 = 2560 ft.
+    const auto aii = f4::world_convert::AiiConfig::load_if_exists(aii_path);
+    return {aii.ground_bubble_size_grid() * CAMPAIGN_GRID_UNIT_FT,
+            aii.sim_bubble_size_grid() * CAMPAIGN_GRID_UNIT_FT};
+}
 
 BubbleManager::BubbleManager(f4::entities::EntityWorld& world,
                               const f4::world_convert::ClassTable& ct,

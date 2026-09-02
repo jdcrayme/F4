@@ -73,6 +73,7 @@ add_subdirectory(f4-flight-model)
 add_subdirectory(f4-recorder)        # Flight recording, replay, and LLM-friendly data export
 add_subdirectory(f4-ai)             # AI brain: SensorFusion + tactic modules (composed)
 add_subdirectory(f4-simulation)     # Orchestration: EntityWorld + MessageBus + ModelDatabase + tick loop (no rendering)
+add_subdirectory(f4-campaign)       # Headless dynamic campaign (mission profiles, tasking tick, attrition) — see Docs/NEXT_PHASE_PLAN.md §B
 
 # ── Configure the scenario JSON templates at build time ────────────────────
 # This block runs regardless of whether f4-scenario-player is built (the
