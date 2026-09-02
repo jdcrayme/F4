@@ -31,7 +31,6 @@ Testing/
 # Stage 3 (glTF export) and Stage 0 synthetic-fixture work
 # (ASSET_PIPELINE_SPEC.md §12), which replaces it with generated Data/
 # assets. Until then: no new junk in temp/.
-temp/*
 !temp/KoreaObj.HDR
 !temp/KoreaObj.LOD
 !temp/KoreaObj.TEX
