@@ -1,0 +1,21 @@
+# AGM45 data file
+#flags
+2
+# Drag
+0.02
+# Weight
+125.0
+# Area
+0.3
+# Ejection velocity
+0.0 0.0 0.0
+# Name
+AG45
+# Class
+7
+# Domain
+2
+# Weapon Type
+3
+# Data Idx
+4

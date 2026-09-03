@@ -1,0 +1,23 @@
+# This file is for an A-10
+# Combat Class
+7
+# Airframe Index
+7
+# Sensor Definition
+#
+# Number of Sensors if Player AC
+4
+# Sensors for player
+# SensorType, Sensor Idx
+# enum SensorType {IRST, Radar, RWR, Visual, NumSensorTypes};
+3 0
+1 0
+0 0
+2 0
+# Number of Sensors if not Player AC
+2
+# Sensors for player
+# SensorType, Sensor Idx
+# enum SensorType {IRST, Radar, RWR, Visual, NumSensorTypes};
+3 0
+2 0

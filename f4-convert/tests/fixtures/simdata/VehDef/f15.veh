@@ -1,0 +1,23 @@
+# This file is for an F-15
+# Combat Class
+3
+# Airframe Index
+3
+# Sensor Definition
+#
+# Number of Sensors if Player AC
+3
+# Sensors for player
+# SensorType, Sensor Idx
+# enum SensorType {IRST, Radar, RWR, Visual, HTS, TargetingPod, RadarHoming, NumSensorTypes}
+3 0
+1 0
+2 0
+# Number of Sensors if not Player AC
+3
+# Sensors for player
+# SensorType, Sensor Idx
+# enum SensorType {IRST, Radar, RWR, Visual, HTS, TargetingPod, RadarHoming, NumSensorTypes}
+3 0
+1 0
+2 0

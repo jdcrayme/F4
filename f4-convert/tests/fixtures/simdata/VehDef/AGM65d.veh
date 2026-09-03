@@ -1,0 +1,21 @@
+# AGM65D data file
+#flags
+2
+# Drag
+0.02
+# Weight
+225.0
+# Area
+0.4
+# Ejection velocity
+0.0 0.0 0.0
+# Name
+AG65D
+# Class
+6
+# Domain
+2
+# Weapon Type
+4
+# Data Idx
+3

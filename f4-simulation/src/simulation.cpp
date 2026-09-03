@@ -58,6 +58,40 @@
 
 namespace f4::simulation {
 
+namespace {
+
+// The default SimData AI data file (brain archetypes + FORMDAT
+// formations): the build tree's generated fixture directory — the same
+// conversion the f4-convert pipeline runs for any Falcon 4.0 SimData.zip.
+// Compile-time injected (f4-simulation/CMakeLists.txt); empty path when
+// the library was built without one, in which case a scenario that wants
+// the data must set brain_data_path /
+// formation_library_path explicitly (apply_simdata_ai_profiles throws
+// with that instruction).
+[[nodiscard]] std::filesystem::path simdata_default_file(
+    const char* leaf) noexcept {
+#ifdef F4_SIMDATA_DEFAULT_DIR
+    return std::filesystem::path(F4_SIMDATA_DEFAULT_DIR) / leaf;
+#else
+    (void)leaf;
+    return {};
+#endif
+}
+
+/// Comma-joined name list for error messages ("Generic, SEAD, Strike, ...")
+/// — keeps an unknown-name failure actionable instead of a bare miss.
+[[nodiscard]] std::string join_names(
+    const std::vector<std::string>& names) {
+    std::string out;
+    for (std::size_t i = 0; i < names.size(); ++i) {
+        if (i != 0) out += ", ";
+        out += names[i];
+    }
+    return out;
+}
+
+} // namespace
+
 Simulation::Simulation(Scenario scenario, std::filesystem::path asset_dir)
     : scenario_(std::move(scenario))
     , asset_dir_(std::move(asset_dir))
@@ -98,6 +132,10 @@ void Simulation::initialize() {
     // sit anywhere in the list). Marks the wingman brains + records the
     // (wingman, lead) pairs the tick loop feeds pictures through.
     resolve_wingman_refs();
+    // SimData AI profiles resolve after the wingman refs — a formation is
+    // injected into a wingman module that already knows it IS a wingman,
+    // and archetype pointers land on brains that already exist.
+    apply_simdata_ai_profiles();
     spawn_airfield_features();  // Phase 2A: features spawn after aircraft
 
     // Mode B: spawn parked aircraft from Squadrons (after the airfield is
@@ -453,6 +491,125 @@ void Simulation::resolve_wingman_refs() {
         wingman_pairs_.push_back(
             WingmanPair{aircraft_entities_[i],
                         aircraft_entities_[it->second]});
+    }
+}
+
+void Simulation::apply_simdata_ai_profiles() {
+    // SimData AI wiring — the scenario JSON's engine-agnostic Data/ side.
+    // Gate 1: does anything reference the data at all? No references =
+    // no loads = no behavior change (the pre-SimData world). This is the
+    // compatibility contract: every scenario authored before SimData
+    // support flies byte-for-byte the same after it.
+    const bool any_brain_profile = std::any_of(
+        scenario_.aircraft.begin(), scenario_.aircraft.end(),
+        [](const ScenarioAircraft& a) { return !a.brain_profile.empty(); });
+    const bool any_formation = std::any_of(
+        scenario_.aircraft.begin(), scenario_.aircraft.end(),
+        [](const ScenarioAircraft& a) { return !a.formation.empty(); });
+    if (!any_brain_profile && !any_formation) return;
+
+    // Same path restriction as resolve_wingman_refs: the fields live on
+    // hand-authored scenario aircraft; the campaign-flights roster has no
+    // per-aircraft authoring to read them from.
+    if (scenario_.spawn_mode != SpawnMode::ScenarioList ||
+        scenario_.aircraft.size() != aircraft_entities_.size()) {
+        throw std::runtime_error(
+            "Simulation::apply_simdata_ai_profiles: brain_profile / "
+            "formation are only supported on the scenario-list spawn "
+            "path");
+    }
+
+    // --- Load the data (lazily, per side) --------------------------------
+    if (any_brain_profile) {
+        auto path = scenario_.brain_data_path;
+        if (path.empty()) path = simdata_default_file("braindata.json");
+        if (path.empty()) {
+            throw std::runtime_error(
+                "Simulation::apply_simdata_ai_profiles: scenario references "
+                "brain_profile but no brain data was configured (no "
+                "brain_data_path and no build-time SimData default — set "
+                "brain_data_path to a brain2json output)");
+        }
+        auto result = f4::data::loadBrainData(path.string());
+        if (!result.ok) {
+            std::string msg =
+                "Simulation::apply_simdata_ai_profiles: failed to load "
+                "brain data '" + path.string() + "':";
+            for (const auto& e : result.errors) msg += "\n  " + e;
+            throw std::runtime_error(msg);
+        }
+        brain_data_ = std::move(result.data);
+        brain_data_loaded_ = true;
+    }
+
+    if (any_formation) {
+        auto path = scenario_.formation_library_path;
+        if (path.empty()) path = simdata_default_file("formdat.json");
+        if (path.empty()) {
+            throw std::runtime_error(
+                "Simulation::apply_simdata_ai_profiles: scenario references "
+                "formation but no formation library was configured (no "
+                "formation_library_path and no build-time SimData default "
+                "— set formation_library_path to a form2json output)");
+        }
+        auto result = f4::data::loadFormationLibrary(path.string());
+        if (!result.ok) {
+            std::string msg =
+                "Simulation::apply_simdata_ai_profiles: failed to load "
+                "formation library '" + path.string() + "':";
+            for (const auto& e : result.errors) msg += "\n  " + e;
+            throw std::runtime_error(msg);
+        }
+        formation_library_ = std::move(result.data);
+        formation_library_loaded_ = true;
+    }
+
+    // --- Resolve names and inject (scenario order == entity order) -------
+    for (std::size_t i = 0; i < scenario_.aircraft.size(); ++i) {
+        const auto& sc = scenario_.aircraft[i];
+        entities::EntityHandle h(aircraft_entities_[i], &world_);
+        auto* brain = h.get<f4::ai::BrainComponent>();
+        if (brain == nullptr) continue;  // no brain — nothing to inject
+
+        if (!sc.brain_profile.empty()) {
+            const auto* archetype =
+                brain_data_.find_archetype(sc.brain_profile);
+            if (archetype == nullptr) {
+                std::vector<std::string> known;
+                known.reserve(brain_data_.archetypes.size());
+                for (const auto& a : brain_data_.archetypes)
+                    known.push_back(a.name);
+                throw std::runtime_error(
+                    "Simulation::apply_simdata_ai_profiles: aircraft '" +
+                    sc.callsign + "' references unknown brain_profile '" +
+                    sc.brain_profile + "' (known: " +
+                    join_names(known) + ")");
+            }
+            // Non-owning pointer into brain_data_ — owned for the
+            // Simulation's lifetime (see the member declaration).
+            brain->set_brain_archetype(archetype);
+        }
+
+        if (!sc.formation.empty()) {
+            const auto* formation =
+                formation_library_.find_by_name(sc.formation);
+            if (formation == nullptr) {
+                std::vector<std::string> known;
+                known.reserve(formation_library_.formations.size());
+                for (const auto& f : formation_library_.formations)
+                    known.push_back(f.name);
+                throw std::runtime_error(
+                    "Simulation::apply_simdata_ai_profiles: aircraft '" +
+                    sc.callsign + "' references unknown formation '" +
+                    sc.formation + "' (known: " + join_names(known) + ")");
+            }
+            // The wingman role was validated (formation requires
+            // lead_callsign; resolve_wingman_refs resolved it) — the
+            // module is flying before the slot lands. Non-owning: the
+            // optional copies the slot VALUES, geometry re-read per
+            // update from formation_slot_.
+            brain->wingman().command_formation_slot(*formation);
+        }
     }
 }
 

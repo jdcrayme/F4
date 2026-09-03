@@ -359,3 +359,217 @@ TEST(WingmanModule, ResetClearsEverything) {
     EXPECT_EQ(wing.state(), WingState::None);
     EXPECT_FALSE(wing.has_live_picture());
 }
+
+// ============================================================================
+// Data-driven formations (FORMDAT.FIL via f4-data — command_formation_slot)
+//
+// The station math is FreeFalcon's own, ported line-for-line from
+// bvrengage.cpp:3367-3379 (ENU form; see wingman_module.hpp's header
+// note). These tests pin the geometry to the shipped FORMDAT.FIL values
+// (spread: relAz -90 deg / 0.5 NM; trail: 180 deg / 2 NM; ladder:
+// 180 deg / 45 deg el / 1.05 NM) and the radio-command modifiers
+// (WMToggleSide, WMKickout, WMCloseup — wingai.cpp).
+// ============================================================================
+
+namespace {
+
+/// The shipped "spread" formation (FORMDAT.FIL row 0): 4-ship slots at
+/// -90/+90/+90 deg; the 2-ship slot inherits slot[0] (num2Slots == 0).
+f4::data::Formation spread_formation() {
+    f4::data::Formation f;
+    f.name = "spread";
+    f.form_num = 0;
+    f.two_ship = f4::data::FormationSlot{-90.0, 0.0, 0.5, 0};
+    f.two_ship_explicit = false;
+    f.slots = {
+        {-90.0, 0.0, 0.5, 0},
+        {90.0, 0.0, 1.0, 0},
+        {90.0, 0.0, 1.5, 0},
+    };
+    return f;
+}
+
+/// The shipped "trail" (row 2): the one 2-ship slot with a DEDICATED
+/// triple (180 deg, 2 NM) — exercises the explicit two-ship path.
+f4::data::Formation trail_formation() {
+    f4::data::Formation f;
+    f.name = "trail";
+    f.form_num = 2;
+    f.two_ship = f4::data::FormationSlot{180.0, 0.0, 2.0, 2};
+    f.two_ship_explicit = true;
+    f.slots = {{180.0, 0.0, 1.0, 2}, {180.0, 0.0, 2.0, 2},
+               {180.0, 0.0, 3.0, 2}};
+    return f;
+}
+
+/// The shipped "ladder" (row 3): relEl 45 deg — exercises the elevated
+/// branch (trackZ += rangeFactor * sin(-relEl)).
+f4::data::Formation ladder_formation() {
+    f4::data::Formation f;
+    f.name = "ladder";
+    f.form_num = 3;
+    f.two_ship = f4::data::FormationSlot{180.0, 45.0, 1.05, 3};
+    f.two_ship_explicit = false;
+    f.slots = {{180.0, 0.0, 1.0, 3}, {180.0, 30.0, 1.0, 3},
+               {180.0, 60.0, 1.0, 3}};
+    return f;
+}
+
+} // anonymous namespace
+
+TEST(WingmanModule, FormdatSpreadStationIsHalfMileLeft) {
+    // bvrengage.cpp:3367-3370 with the lead north (sigma = 0),
+    // mFormSide = +1, spread two-ship slot relAz = -90 deg:
+    //   ENU east  = range * sin(0 + 1*(-90)) = -range (LEFT of the lead)
+    //   ENU north = range * cos(-90)         = 0 (abeam)
+    // 0.5 NM = 3038.1055 ft (formdata.cpp's NM_TO_FT 6076.211).
+    // The flat slot stacks the #2 wingman 100 ft DOWN (flightIdx 1 *
+    // -100.0F, bvrengage.cpp:3378).
+    WingmanModule wing;
+    const auto f = spread_formation();
+    wing.command_formation_slot(f);
+    EXPECT_TRUE(wing.formation_slot_active());
+
+    wing.set_lead_picture(lead_north());
+    const auto st = wing.formation_position();
+
+    const double range_ft = 0.5 * f4::data::kNmToFt;
+    EXPECT_NEAR(st.x, 0.0 - range_ft, 0.5);
+    EXPECT_NEAR(st.y, 10000.0, 0.5);
+    EXPECT_NEAR(st.z, 15000.0 - 100.0, 0.5);
+}
+
+TEST(WingmanModule, FormdatTrailStationIsTwoMileStern) {
+    // relAz 180 deg: directly behind the north-flying lead; the explicit
+    // 2-ship triple (2 NM = 12152.422 ft) — twoposData, not slot[0].
+    WingmanModule wing;
+    const auto f = trail_formation();
+    wing.command_formation_slot(f);
+
+    wing.set_lead_picture(lead_north());
+    const auto st = wing.formation_position();
+
+    const double range_ft = 2.0 * f4::data::kNmToFt;
+    EXPECT_NEAR(st.x, 0.0, 0.5);
+    EXPECT_NEAR(st.y, 10000.0 - range_ft, 0.5);
+    EXPECT_NEAR(st.z, 15000.0 - 100.0, 0.5);
+}
+
+TEST(WingmanModule, FormdatLadderStationIsElevatedStern) {
+    // relEl 45 deg: trackZ += rangeFactor * sin(45 deg) UP (the ENU flip
+    // of the reference's sin(-relEl) under Z-down). 1.05 NM = 6380.0216 ft.
+    WingmanModule wing;
+    const auto f = ladder_formation();
+    wing.command_formation_slot(f);
+
+    wing.set_lead_picture(lead_north());
+    const auto st = wing.formation_position();
+
+    const double range_ft = 1.05 * f4::data::kNmToFt;
+    EXPECT_NEAR(st.x, 0.0, 0.5);
+    EXPECT_NEAR(st.y, 10000.0 - range_ft, 0.5);
+    EXPECT_NEAR(st.z, 15000.0 + range_ft * std::sin(45.0 * kPi / 180.0),
+                0.5);
+}
+
+TEST(WingmanModule, KickoutDoublesFormdatRangeNotStack) {
+    // WMKickout (wingai.cpp:1757): mFormLateralSpaceFactor *= 2 — the
+    // lateral range doubles. The -100 ft stack does NOT scale (the
+    // reference applies flightIdx * -100.0F raw — bvrengage.cpp:3378,
+    // wingai.cpp:2923), which is exactly the kind of asymmetry a
+    // faithful port must preserve.
+    WingmanModule wing;
+    const auto f = spread_formation();
+    wing.command_formation_slot(f);
+    wing.kickout();
+    EXPECT_DOUBLE_EQ(wing.formation_space_factor(), 2.0);
+
+    wing.set_lead_picture(lead_north());
+    const auto st = wing.formation_position();
+
+    const double range_ft = 2.0 * 0.5 * f4::data::kNmToFt;
+    EXPECT_NEAR(st.x, 0.0 - range_ft, 0.5);
+    EXPECT_NEAR(st.y, 10000.0, 0.5);
+    EXPECT_NEAR(st.z, 15000.0 - 100.0, 0.5);
+}
+
+TEST(WingmanModule, CloseupHalvesFormdatRange) {
+    // WMCloseup (wingai.cpp:1794): mFormLateralSpaceFactor *= 0.5.
+    WingmanModule wing;
+    const auto f = trail_formation();
+    wing.command_formation_slot(f);
+    wing.closeup();
+    EXPECT_DOUBLE_EQ(wing.formation_space_factor(), 0.5);
+
+    wing.set_lead_picture(lead_north());
+    const auto st = wing.formation_position();
+
+    const double range_ft = 0.5 * 2.0 * f4::data::kNmToFt;
+    EXPECT_NEAR(st.x, 0.0, 0.5);
+    EXPECT_NEAR(st.y, 10000.0 - range_ft, 0.5);
+}
+
+TEST(WingmanModule, ToggleSideMirrorsFormdatStation) {
+    // WMToggleSide (wingai.cpp:1842-1846): mFormSide -> -1 mirrors the
+    // station to the lead's other side. spread's -90 deg slot flips from
+    // LEFT to RIGHT (+90).
+    WingmanModule wing;
+    const auto f = spread_formation();
+    wing.command_formation_slot(f);
+    wing.set_formation_side(false);   // mirror
+    EXPECT_FALSE(wing.formation_side_right());
+
+    wing.set_lead_picture(lead_north());
+    const auto st = wing.formation_position();
+
+    const double range_ft = 0.5 * f4::data::kNmToFt;
+    EXPECT_NEAR(st.x, 0.0 + range_ft, 0.5);
+    EXPECT_NEAR(st.y, 10000.0, 0.5);
+}
+
+TEST(WingmanModule, FormdatSlotFollowsLeadHeading) {
+    // The station rides the LEAD's heading frame: lead heading east
+    // (atan2(east, north) = +90 deg) puts the -90 deg slot NORTH of the
+    // lead (90 - 90 = 0 deg bearing).
+    WingmanModule wing;
+    const auto f = spread_formation();
+    wing.command_formation_slot(f);
+
+    auto p = lead_north();
+    p.heading_rad = kPi / 2.0;                 // east
+    p.velocity = geo::WorldPosition(420.0 * FT_PER_KT, 0.0, 0.0);
+    wing.set_lead_picture(p);
+
+    const auto st = wing.formation_position();
+    const double range_ft = 0.5 * f4::data::kNmToFt;
+    EXPECT_NEAR(st.x, 0.0, 0.5);
+    EXPECT_NEAR(st.y, 10000.0 + range_ft, 0.5);
+    EXPECT_NEAR(st.z, 15000.0 - 100.0, 0.5);
+}
+
+TEST(WingmanModule, CommandFormationRevertsFormdatSlot) {
+    // A formation radio command (the built-in WingManCmd path) replaces
+    // the FORMDAT slot — one source of station geometry at a time.
+    WingmanModule wing;
+    const auto f = spread_formation();
+    wing.command_formation_slot(f);
+    EXPECT_TRUE(wing.formation_slot_active());
+    EXPECT_EQ(wing.formation_name(), "spread");
+
+    wing.command_formation(FormationType::FightingWing);
+    EXPECT_FALSE(wing.formation_slot_active());
+    EXPECT_EQ(wing.formation_name(), "FightingWing");
+}
+
+TEST(WingmanModule, FormdatSlotWithNoPictureIsEmpty) {
+    // formation_position() with no live picture returns the zero
+    // position regardless of the commanded slot (same contract as the
+    // built-in path — the module never invents a lead).
+    WingmanModule wing;
+    const auto f = spread_formation();
+    wing.command_formation_slot(f);
+    const auto st = wing.formation_position();
+    EXPECT_DOUBLE_EQ(st.x, 0.0);
+    EXPECT_DOUBLE_EQ(st.y, 0.0);
+    EXPECT_DOUBLE_EQ(st.z, 0.0);
+}

@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 #include <f4/entities/entity.hpp>
 #include <f4/geo/relative.hpp>
@@ -28,13 +29,41 @@ inline int warning_rank(RwrWarningType t) noexcept {
 std::vector<RwrWarning> RwrModel::evaluate(
     const std::vector<EmitterReading>& readings,
     const f4::geo::WorldPosition& own_pos,
-    double time_s) const {
+    double time_s,
+    double receiver_heading_rad) const {
     std::vector<RwrWarning> out;
-    const double max_range_ft = cfg_.max_range_nm * kFeetPerNm;
+    // SimData (.RWR) parameters: sensitivity scales the receiver range
+    // (generic 1.0 = unchanged); FOV limits gate emitters (generic
+    // 180/90 = nothing gated).
+    const double max_range_ft =
+        cfg_.max_range_nm * cfg_.sensitivity * kFeetPerNm;
+    const double el_limit_rad = cfg_.el_limit_deg / (180.0 / M_PI);
+    const double az_limit_rad = cfg_.az_limit_deg / (180.0 / M_PI);
+    const bool gate_azimuth = std::isfinite(receiver_heading_rad);
 
     for (const auto& r : readings) {
         const f4::geo::BRA bra = f4::geo::to_bra(own_pos, r.position);
         if (bra.range_ft > max_range_ft) continue;
+
+        // Receiver FOV (elevation is world-frame and always tested;
+        // azimuth needs the receiver's heading — NaN passes through,
+        // which is the generic.rwr omni contract).
+        const double dx = r.position.x - own_pos.x;
+        const double dy = r.position.y - own_pos.y;
+        const double dz = r.position.z - own_pos.z;
+        const double horizontal = std::sqrt(dx * dx + dy * dy);
+        const double emitter_elevation =
+            std::atan2(dz, std::max(horizontal, 1.0));
+        if (emitter_elevation > el_limit_rad ||
+            emitter_elevation < -el_limit_rad) {
+            continue;
+        }
+        if (gate_azimuth) {
+            double rel = bra.bearing_rad - receiver_heading_rad;
+            while (rel > M_PI) rel -= 2.0 * M_PI;
+            while (rel < -M_PI) rel += 2.0 * M_PI;
+            if (std::abs(rel) > az_limit_rad) continue;
+        }
 
         // One emitter reads as its most severe class: missile beats lock
         // beats search (the same radar can be strobing and locked — lock
@@ -151,8 +180,20 @@ std::size_t update_rwr(entities::EntityWorld& world,
             }
         }
 
+        // Receiver heading for the azimuth FOV gate: the victim's
+        // velocity when it is actually moving; NaN (omni) when parked —
+        // a stationary receiver has no nose to gate against, and the
+        // generic.rwr default is omni anyway.
+        double receiver_heading = std::numeric_limits<double>::quiet_NaN();
+        const double speed =
+            std::sqrt(vt->vx * vt->vx + vt->vy * vt->vy + vt->vz * vt->vz);
+        if (speed > 1.0) {
+            receiver_heading = std::atan2(vt->vx, vt->vy);  // CW from north
+        }
+
         const std::vector<RwrWarning> previous = rwr->warnings;
-        rwr->warnings = model.evaluate(readings, vt->position, time_s);
+        rwr->warnings =
+            model.evaluate(readings, vt->position, time_s, receiver_heading);
 
         const bool lock_was = rwr->lock_active;
         const bool launch_was = rwr->launch_active;

@@ -1,0 +1,9 @@
+# This file is for a generic Tank
+# Sensor Definition
+#
+# Number of Sensors
+2
+# SensorType, Sensor Idx
+# enum SensorType {IRST, Radar, RWR, Visual, NumSensorTypes};
+3 0
+1 0

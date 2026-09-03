@@ -1,0 +1,21 @@
+# GBU 12 Bomb data file
+#flags
+1
+# Drag
+0.2
+# Weight
+300.0
+# Area
+1.0
+# Ejection velocity
+0.0 0.0 0.0
+# Name
+GB12
+# Class
+9
+# Domain
+2
+# Weapon Type
+7
+# Data Idx
+0

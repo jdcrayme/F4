@@ -1,0 +1,22 @@
+# This file is for an AN-2
+# Combat Class
+8
+# Airframe Index
+8
+# Sensor Definition
+#
+# Number of Sensors if Player AC
+4
+# Sensors for player
+# SensorType, Sensor Idx
+# enum SensorType {IRST, Radar, RWR, Visual, NumSensorTypes};
+3 0
+1 0
+0 0
+2 0
+# Number of Sensors if not Player AC
+1
+# Sensors for player
+# SensorType, Sensor Idx
+# enum SensorType {IRST, Radar, RWR, Visual, NumSensorTypes};
+3 0

@@ -19,6 +19,7 @@ endfunction()
 
 f4_simulation_add_test(test_visual_model_component test_visual_model_component.cpp)
 f4_simulation_add_test(test_scenario_loader        test_scenario_loader.cpp)
+f4_simulation_add_test(test_simdata_wiring         test_simdata_wiring.cpp)
 f4_simulation_add_test(test_campaign_bridge        test_campaign_bridge.cpp)
 f4_simulation_add_test(test_campaign_spawner      test_campaign_spawner.cpp)
 f4_simulation_add_test(test_feature_spawning       test_feature_spawning.cpp)
@@ -104,3 +105,19 @@ target_compile_definitions(test_feature_spawning PRIVATE
 target_compile_definitions(test_vehicle_spawning PRIVATE
     F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}"
 )
+
+# The SimData wiring test drives the scenario JSON's brain_profile /
+# formation through initialize() into the spawned brains: it needs the
+# generated F-16 config AND the generated SimData JSONs (braindata.json
+# / formdat.json — f4-convert converts the shipped BRAINDAT.brn /
+# FORMDAT.FIL fixtures at build time). The target dependency guarantees
+# those files exist before the test binary runs.
+target_compile_definitions(test_simdata_wiring PRIVATE
+    F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}"
+)
+if(TARGET simdata_golden_fixtures)
+    add_dependencies(test_simdata_wiring simdata_golden_fixtures)
+endif()
+if(TARGET convert_golden_fixtures)
+    add_dependencies(test_simdata_wiring convert_golden_fixtures)
+endif()

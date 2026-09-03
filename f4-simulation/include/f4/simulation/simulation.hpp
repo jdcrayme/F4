@@ -37,6 +37,8 @@
 #include <f4/messaging/bus.hpp>
 #include <f4/models/model_database.hpp>
 #include <f4/data/aircraft_config.hpp>
+#include <f4/data/brain_data.hpp>       // SimData BRAINDAT.brn archetypes
+#include <f4/data/formation_data.hpp>  // SimData FORMDAT.FIL formations
 #include <f4/weapons/weapon_class_table.hpp>
 
 #include <cstdint>
@@ -156,6 +158,24 @@ public:
 
     [[nodiscard]] const f4::models::ModelDatabase& model_db() const noexcept { return *model_db_; }
     [[nodiscard]] const Scenario& scenario() const noexcept { return scenario_; }
+
+    // --- SimData AI data (diagnostics; see apply_simdata_ai_profiles) ---
+    /// True when the brain archetype data actually loaded at initialize()
+    /// (i.e. some aircraft referenced brain_profile). False = the lazy
+    /// contract held: nothing referenced it, nothing loaded, no behavior
+    /// changed. The injected pointers themselves live on the brains
+    /// (BrainComponent::brain_archetype) — these flags only witness the
+    /// load side of the wiring.
+    [[nodiscard]] bool brain_data_loaded() const noexcept {
+        return brain_data_loaded_;
+    }
+    /// True when the FORMDAT formation library actually loaded at
+    /// initialize() (some wingman referenced formation). Same lazy
+    /// contract as brain_data_loaded().
+    [[nodiscard]] bool formation_library_loaded() const noexcept {
+        return formation_library_loaded_;
+    }
+
     [[nodiscard]] double sim_time_s() const noexcept { return sim_time_s_; }
     [[nodiscard]] std::uint64_t tick_count() const noexcept { return tick_; }
     [[nodiscard]] bool paused() const noexcept { return paused_; }
@@ -215,6 +235,21 @@ private:
     /// cross-team lead — a wingman of a hostile is a scenario-authoring
     /// bug, not a runtime condition.
     void resolve_wingman_refs();
+    /// SimData AI wiring (the Data/ side of the f4-convert pipeline):
+    /// after all aircraft exist AND wingman refs are resolved, load the
+    /// scenario's brain data (brain_data_path, else the build tree's
+    /// generated BRAINDAT fixture) and formation library
+    /// (formation_library_path, else the generated FORMDAT fixture) —
+    /// ONLY when at least one aircraft references a brain_profile or
+    /// formation (nothing loads otherwise: the default world is
+    /// byte-for-byte the pre-SimData behavior). Then resolve each
+    /// aircraft's "brain_profile" name to a BrainArchetype (injected via
+    /// BrainComponent::set_brain_archetype — a NON-OWNING pointer into
+    /// brain_data_, which is why the storage lives here) and each
+    /// wingman's "formation" name to a Formation (injected via
+    /// wingman().command_formation_slot — same non-owning rule). Unknown
+    /// names and unloadable files fail initialize() loudly.
+    void apply_simdata_ai_profiles();
     /// Step 11: push each wingman's lead picture + the lead's engagement
     /// id, every tick BEFORE world update (the wingman module is
     /// engine-agnostic — the host is its eyes). Reads the lead's transform
@@ -277,6 +312,19 @@ private:
         entities::EntityId lead;
     };
     std::vector<WingmanPair> wingman_pairs_{};
+
+    // SimData AI data (BRAINDAT.brn + FORMDAT.FIL, converted to canonical
+    // JSON by f4-convert). OWNED HERE because both consumers take
+    // non-owning pointers: BrainComponent::set_brain_archetype and
+    // WingmanModule::command_formation_slot reference rows inside these
+    // objects for the Simulation's lifetime. Loaded lazily at
+    // initialize() (see apply_simdata_ai_profiles) — the flags record
+    // which side actually loaded (diagnostics; the pointers handed out
+    // are the real contract).
+    f4::data::BrainData brain_data_{};
+    bool brain_data_loaded_{false};
+    f4::data::FormationLibrary formation_library_{};
+    bool formation_library_loaded_{false};
 
     // Phase 2: replaced the single `aircraft_entity_` with a vector. The
     // Phase 1 spawn path (scenario_list) pushes one entry; the Phase 2 path

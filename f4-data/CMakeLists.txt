@@ -13,8 +13,14 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # ---------------------------------------------------------------------------
 add_library(f4-data STATIC
     src/aircraft_config.cpp
+    src/brain_data.cpp
     src/config_loader.cpp
     src/engine_rpm_schedule.cpp
+    src/formation_data.cpp
+    src/maneuver_data.cpp
+    src/sensor_data.cpp
+    src/signature_data.cpp
+    src/vehicle_def_data.cpp
 )
 target_link_libraries(f4-data PUBLIC f4_warnings)
 

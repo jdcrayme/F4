@@ -99,11 +99,29 @@ void WingmanModule::set_lead_picture(const LeadPicture& p) {
 }
 
 void WingmanModule::command_formation(FormationType form) {
-    if (form == form_) return;
+    // The no-op guard must NOT fire while a FORMDAT slot is active: a
+    // built-in command with the SAME enum as the resting form_ is a
+    // REVERT, not a no-op ("last command wins" — the radio command
+    // replaces the data-driven slot even when the enum didn't move).
+    if (form == form_ && !formation_slot_) return;
     form_ = form;
     // Crossing to a new slot: if the new station is far, the next update's
     // StationLost fires Rejoining on its own. Nothing else to reset —
     // AirSteering state is position-independent.
+    // Reverting to the built-in table also drops any FORMDAT slot
+    // (command_formation and command_formation_slot are mutually
+    // exclusive — last command wins, FreeFalcon's mFormation semantics).
+    formation_slot_.reset();
+    formation_slot_name_.clear();
+}
+
+void WingmanModule::command_formation_slot(
+    const f4::data::Formation& formation) {
+    // The 2-ship station from the file: formdata.cpp's twoposData —
+    // the formation's dedicated 2-ship triple when it carried one,
+    // else slot[0] (already mirrored by the parser/loader).
+    formation_slot_ = formation.two_ship;
+    formation_slot_name_ = formation.name;
 }
 
 void WingmanModule::reset() {
@@ -249,9 +267,39 @@ WingmanModule::formation_offsets() const noexcept {
 geo::WorldPosition WingmanModule::formation_position() const {
     if (!picture_.valid) return {};
 
+    // --- Data-driven station (FORMDAT.FIL): FreeFalcon's exact math ---
+    // bvrengage.cpp:3354-3362, converted to this repo's ENU (x = east,
+    // y = north, z = MSL altitude UP positive; Falcon's Z-down flips the
+    // relEl sign):
+    //   rangeFactor = slot.range_ft * mFormLateralSpaceFactor
+    //   trackX/Y = lead + rangeFactor * (cos, sin)(relAz * mFormSide +
+    //                                          leadHeading)   [X=north,
+    //                                                          Y=east there]
+    //   trackZ += relEl != 0 ? rangeFactor * sin(relEl)
+    //                        : flightIdx * -100.0F   (NOT space-scaled —
+    //                          bvrengage.cpp:3378 / wingai.cpp:2923 apply
+    //                          the raw -100 even under kickout/closeup)
+    // The #2 wingman's flightIdx is 1 -> the -100 ft stack when the slot
+    // carries no elevation (the 4-ship deconfliction convention).
+    if (formation_slot_) {
+        constexpr double kTwoShipStackFt = -100.0;  // flightIdx (1) * -100.0F
+        const f4::data::FormationSlot& s = *formation_slot_;
+        const double range = s.range_ft() * space_factor_;
+        const double bearing =
+            picture_.heading_rad + side_ * s.az_rad();
+        geo::WorldPosition st;
+        st.x = picture_.position.x + range * std::sin(bearing);
+        st.y = picture_.position.y + range * std::cos(bearing);
+        st.z = picture_.alt_msl_ft +
+               (s.rel_el_deg != 0.0 ? range * std::sin(s.el_rad())
+                                    : kTwoShipStackFt);
+        return st;
+    }
+
     const auto [lat_m, long_m, vert_m] = formation_offsets();
-    const double lateral = lat_m * cfg_.lateral_spacing_ft;
-    const double longitudinal = long_m * cfg_.longitudinal_spacing_ft;
+    const double lateral = lat_m * cfg_.lateral_spacing_ft * space_factor_;
+    const double longitudinal =
+        long_m * cfg_.longitudinal_spacing_ft * space_factor_;
     const double vertical = vert_m * cfg_.lateral_spacing_ft +
                             cfg_.vertical_offset_ft;
 
@@ -262,9 +310,12 @@ geo::WorldPosition WingmanModule::formation_position() const {
     const double right_y = -std::sin(picture_.heading_rad);
 
     geo::WorldPosition st;
-    // AFT = -forward * longitudinal; RIGHT = right * lateral.
-    st.x = picture_.position.x - fwd_x * longitudinal + right_x * lateral;
-    st.y = picture_.position.y - fwd_y * longitudinal + right_y * lateral;
+    // AFT = -forward * longitudinal; RIGHT = right * lateral (mFormSide
+    // mirrors: -1 flips EchelonRight to the left side, WMToggleSide).
+    st.x = picture_.position.x - fwd_x * longitudinal +
+           right_x * lateral * side_;
+    st.y = picture_.position.y - fwd_y * longitudinal +
+           right_y * lateral * side_;
     st.z = picture_.alt_msl_ft - vertical;  // vert + = below the lead
     return st;
 }
@@ -394,6 +445,11 @@ std::string WingmanModule::state_name() const {
 }
 
 std::string WingmanModule::formation_name() const {
+    // A FORMDAT slot (when active) reports the file's own formation name;
+    // the built-ins report the enum.
+    if (formation_slot_active() && !formation_slot_name_.empty()) {
+        return formation_slot_name_;
+    }
     switch (form_) {
         case FormationType::FightingWing: return "FightingWing";
         case FormationType::EchelonRight: return "EchelonRight";

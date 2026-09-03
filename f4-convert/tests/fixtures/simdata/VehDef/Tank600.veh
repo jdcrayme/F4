@@ -1,0 +1,21 @@
+# 600 Lb Tank Bomb data file
+#flags
+0
+# Drag
+0.2
+# Weight
+600.0
+# Area
+1.0
+# Ejection velocity
+0.0 0.0 0.0
+# Name
+TK600
+# Class
+5
+# Domain
+0
+# Weapon Type
+0
+# Data Idx
+0

@@ -1,0 +1,21 @@
+# SA-8 data file
+#flags
+0
+# Drag (unused)
+0.02
+# Weight (unused)
+225.0
+# Area (unused)
+0.4
+# Ejection velocity (unused)
+0.0 0.0 0.0
+# Name
+SA8
+# Class
+8
+# Domain
+1
+# Weapon Type
+8
+# Data Idx
+26

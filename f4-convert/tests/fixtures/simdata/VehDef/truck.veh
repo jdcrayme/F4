@@ -1,0 +1,8 @@
+# This file is for a generic truck
+# Sensor Definition
+#
+# Number of Sensors
+1
+# SensorType, Sensor Idx
+# enum SensorType {IRST, Radar, RWR, Visual, NumSensorTypes};
+3 0

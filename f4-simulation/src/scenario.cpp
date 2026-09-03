@@ -97,6 +97,8 @@ ScenarioAircraft read_aircraft(f4::json::Reader& r) {
         }
         else if (key == "hold_fire")       a.hold_fire = r.read_bool();
         else if (key == "lead_callsign")    a.lead_callsign = r.read_string();
+        else if (key == "brain_profile")    a.brain_profile = r.read_string();
+        else if (key == "formation")        a.formation = r.read_string();
         else                                 skip_unknown(r);
     }
     return a;
@@ -289,6 +291,10 @@ Scenario parse_scenario(f4::json::Reader& r) {
             if (f == "pattern")          s.approach_mode = "pattern";
             else if (f == "straight_in") s.approach_mode = "straight_in";
             else throw std::runtime_error("scenario: unknown approach '" + f + "'");
+        } else if (key == "brain_data_path") {
+            s.brain_data_path = r.read_string();
+        } else if (key == "formation_library_path") {
+            s.formation_library_path = r.read_string();
         } else if (key == "combat") {
             r.expect('{');
             bool cfirst = true;
@@ -350,6 +356,18 @@ void validate(const Scenario& s) {
 
     if (s.has_airbase_source && s.airbase_source.world_json_path.empty()) {
         throw std::runtime_error("scenario: airbase_source requires 'world_json'");
+    }
+
+    // SimData AI fields: a formation without a wingman role has nothing
+    // to fly it (loud + early, before any entity spawns).
+    for (const auto& a : s.aircraft) {
+        if (!a.formation.empty() && a.lead_callsign.empty()) {
+            throw std::runtime_error(
+                "scenario: aircraft '" + a.callsign +
+                "' sets formation '" + a.formation +
+                "' without lead_callsign (formations are flown by "
+                "wingmen)");
+        }
     }
 
     // Validate the flight plan (optional, but if present must be flyable).
@@ -442,6 +460,8 @@ Scenario load_scenario(const std::filesystem::path& json_path) {
     s.aii_path          = resolve(base_dir, s.aii_path);
     s.record_path       = resolve(base_dir, s.record_path);
     s.fcs_trace_path    = resolve(base_dir, s.fcs_trace_path);
+    s.brain_data_path   = resolve(base_dir, s.brain_data_path);
+    s.formation_library_path = resolve(base_dir, s.formation_library_path);
 
     // Resolve aircraft config paths too.
     for (auto& a : s.aircraft) {

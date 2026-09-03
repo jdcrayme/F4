@@ -436,3 +436,45 @@ TEST(BrainComponent, TaxiLineupTakeoffFliesWithRealFlightModel) {
         << "did not climb through departure altitude (final state "
         << bc.module().state_name() << ")";
 }
+
+// ============================================================================
+// BRAINDAT archetype (SimData wiring — set_brain_archetype)
+//
+// The archetype pointer is the brain's mission doctrine: which combat
+// modes are armed (BRAINDAT.brn's per-archetype mode table — SEAD /
+// Strike / Waypointer disarm every engagement mode), and the WVR entry
+// band. The pointer is non-owning (the host — Simulation or a test —
+// owns the BrainData); null = every mode armed, the tuned built-in
+// doctrine (the pre-SimData behavior).
+// ============================================================================
+
+TEST(BrainComponent, ArchetypePointerRoundtrip) {
+    // A minimal SEAD-shaped archetype: engagement modes disarmed, the
+    // defensive modes armed — the shipped BRAINDAT.brn row set.
+    f4::data::BrainArchetype sead;
+    sead.name = "SEAD";
+    auto row = [](const char* label, int enabled) {
+        f4::data::BrainModeRow r;
+        r.label = label;
+        r.enabled = enabled;
+        r.priority = enabled ? 1.0 : 0.0;
+        return r;
+    };
+    sead.modes = {
+        row("GroundAvoidMode", 1), row("MissileDefeatMode", 1),
+        row("GunsEngageMode", 0), row("MissileEngageMode", 0),
+        row("WVREngageMode", 0), row("BVREngageMode", 0),
+        row("WingyMode", 1),
+    };
+
+    BrainComponent bc;
+    EXPECT_EQ(bc.brain_archetype(), nullptr);   // default: built-in doctrine
+
+    bc.set_brain_archetype(&sead);
+    EXPECT_EQ(bc.brain_archetype(), &sead);
+    EXPECT_EQ(bc.brain_archetype()->name, "SEAD");
+
+    // Clearing restores the built-in doctrine (the pointer contract).
+    bc.set_brain_archetype(nullptr);
+    EXPECT_EQ(bc.brain_archetype(), nullptr);
+}

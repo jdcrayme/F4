@@ -1,0 +1,21 @@
+# Generic rocket file
+#flags
+0
+# Drag
+0.02
+# Weight
+0.9
+# Area
+0.3
+# Ejection velocity
+2000.0 0.0 0.0
+# Name
+RCKT
+# Class
+1
+# Domain
+2
+# Weapon Type
+9
+# Data Idx
+7

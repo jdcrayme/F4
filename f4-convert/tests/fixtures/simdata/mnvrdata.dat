@@ -1,0 +1,1163 @@
+A#   enum ACMnverClass {
+#      MnvrClassF4,
+#      MnvrClassF5,
+#      MnvrClassF15,
+#      MnvrClassF16,
+#      MnvrClassMig25,
+#      MnvrClassMig27,
+#      MnvrClassA10,
+#      MnvrClassBomber,
+#      NumMnvrClasses
+#   };
+#
+#   enum ACMnverClassFlags
+#   {
+#      CanLevelTurn    = 0x1,
+#      CanSlice        = 0x2,
+#      CanUseVertical  = 0x4,
+#      CanOneCircle    = 0x10,
+#      CanTwoCircle    = 0x20,
+#      CanJinkSnake    = 0x100,
+#      CanJinkLoaded   = 0x200,
+#      CanJinkUnloaded = 0x400
+#   };
+#
+#   /*------------*/
+#   /* AC Element */
+#   /*------------*/
+#   typedef struct
+#   {
+#      BVRInterceptType*     intercept;
+#      WVRMergeManeuverType* merge;
+#      SpikeReactionType*    spikeReact;
+#      char                  numIntercepts;
+#      char                  numMerges;
+#      char                  numReacts;
+#   } ManeuverChoiceTable;
+#
+#
+# F4 Manuever Class Flags
+0x724
+#
+# F4 v F4
+# Num intercepts
+2
+# Num Merges
+2
+# Num Spike React
+2
+# Intercept Types
+1 2
+# Merges
+2 3
+# Spike Reacts
+2 3
+#
+# F4 v F5
+# Num intercepts
+3
+# Num Merges
+2
+# Num Spike React
+2
+# Intercept Types
+1 2 3
+# Merges
+1 2
+# Spike Reacts
+1 2
+#
+# F4 v F14
+# Num intercepts
+2
+# Num Merges
+2
+# Num Spike React
+2
+# Intercept Types
+1 2
+# Merges
+1 2
+# Spike Reacts
+2 3
+#
+# F4 v F15
+# Num intercepts
+2
+# Num Merges
+2
+# Num Spike React
+2
+# Intercept Types
+1 2
+# Merges
+1 2
+# Spike Reacts
+2 3
+#
+# F4 v F16
+# Num intercepts
+2
+# Num Merges
+2
+# Num Spike React
+2
+# Intercept Types
+1 2
+# Merges
+1 2
+# Spike Reacts
+2 3
+#
+# F4 v Mig25
+# Num intercepts
+1
+# Num Merges
+1
+# Num Spike React
+1
+# Intercept Types
+3
+# Merges
+3
+# Spike Reacts
+3
+#
+# F4 v Mig27
+# Num intercepts
+2
+# Num Merges
+1
+# Num Spike React
+2
+# Intercept Types
+1 2
+# Merges
+3
+# Spike Reacts
+1 2
+#
+# F4 v A10
+# Num intercepts
+1
+# Num Merges
+2
+# Num Spike React
+1
+# Intercept Types
+3
+# Merges
+1 2
+# Spike Reacts
+1
+#
+# F4 v Bomber
+# Num intercepts
+1
+# Num Merges
+2
+# Num Spike React
+1
+# Intercept Types
+3
+# Merges
+1 2
+# Spike Reacts
+1
+#
+# F5 Manuever Class Flags
+0x737
+#
+# F5 v F4
+# Num intercepts
+2
+# Num Merges
+1
+# Num Spike React
+2
+# Intercept Types
+1 2
+# Merges
+3
+# Spike Reacts
+2 3
+#
+# F5 v F5
+# Num intercepts
+2
+# Num Merges
+2
+# Num Spike React
+3
+# Intercept Types
+1 2
+# Merges
+2 3
+# Spike Reacts
+1 2 3
+#
+# F5 v F14
+# Num intercepts
+2
+# Num Merges
+2
+# Num Spike React
+2
+# Intercept Types
+1 2
+# Merges
+1 2
+# Spike Reacts
+2 3
+#
+# F5 v F15
+# Num intercepts
+2
+# Num Merges
+2
+# Num Spike React
+2
+# Intercept Types
+1 2
+# Merges
+1 2
+# Spike Reacts
+2 3
+#
+# F5 v F16
+# Num intercepts
+2
+# Num Merges
+2
+# Num Spike React
+2
+# Intercept Types
+1 2
+# Merges
+1 2
+# Spike Reacts
+2 3
+#
+# F5 v Mig25
+# Num intercepts
+1
+# Num Merges
+1
+# Num Spike React
+1
+# Intercept Types
+3
+# Merges
+3
+# Spike Reacts
+4
+#
+# F5 v Mig27
+# Num intercepts
+2
+# Num Merges
+2
+# Num Spike React
+2
+# Intercept Types
+1 2
+# Merges
+2 3
+# Spike Reacts
+1 2
+#
+# F5 v A10
+# Num intercepts
+1
+# Num Merges
+2
+# Num Spike React
+2
+# Intercept Types
+2
+# Merges
+1 2
+# Spike Reacts
+1 2
+#
+# F5 v Bomber
+# Num intercepts
+1
+# Num Merges
+2
+# Num Spike React
+2
+# Intercept Types
+3
+# Merges
+1 2
+# Spike Reacts
+1 2
+#
+# F14 Manuever Class Flags
+0x727
+#
+# F14 v F4
+# Num intercepts
+2
+# Num Merges
+1
+# Num Spike React
+2
+# Intercept Types
+2 3
+# Merges
+3
+# Spike Reacts
+2 3
+#
+# F14 v F5
+# Num intercepts
+2
+# Num Merges
+2
+# Num Spike React
+2
+# Intercept Types
+2 3
+# Merges
+2 3
+# Spike Reacts
+1 2
+#
+# F14 v F14
+# Num intercepts
+2
+# Num Merges
+2
+# Num Spike React
+2
+# Intercept Types
+2 3
+# Merges
+1 2
+# Spike Reacts
+3 4
+#
+# F14 v F15
+# Num intercepts
+2
+# Num Merges
+2
+# Num Spike React
+2
+# Intercept Types
+2 3
+# Merges
+1 2
+# Spike Reacts
+3 4
+#
+# F14 v F16
+# Num intercepts
+2
+# Num Merges
+2
+# Num Spike React
+2
+# Intercept Types
+2 3
+# Merges
+1 2
+# Spike Reacts
+3 4
+#
+# F14 v Mig25
+# Num intercepts
+1
+# Num Merges
+1
+# Num Spike React
+2
+# Intercept Types
+3
+# Merges
+3
+# Spike Reacts
+3 4
+#
+# F14 v Mig27
+# Num intercepts
+2
+# Num Merges
+1
+# Num Spike React
+2
+# Intercept Types
+2 3
+# Merges
+3
+# Spike Reacts
+1 2
+#
+# F14 v A10
+# Num intercepts
+1
+# Num Merges
+2
+# Num Spike React
+2
+# Intercept Types
+2
+# Merges
+1 2
+# Spike Reacts
+1 2
+#
+# F14 v Bomber
+# Num intercepts
+1
+# Num Merges
+2
+# Num Spike React
+2
+# Intercept Types
+2
+# Merges
+1 2
+# Spike Reacts
+1 2
+#
+# F15 Manuever Class Flags
+0x727
+#
+# F15 v F4
+# Num intercepts
+2
+# Num Merges
+1
+# Num Spike React
+1
+# Intercept Types
+2 3
+# Merges
+3
+# Spike Reacts
+2
+#
+# F15 v F5
+# Num intercepts
+2
+# Num Merges
+1
+# Num Spike React
+1
+# Intercept Types
+2 3
+# Merges
+3
+# Spike Reacts
+2
+#
+# F15 v F14
+# Num intercepts
+2
+# Num Merges
+2
+# Num Spike React
+2
+# Intercept Types
+2 3
+# Merges
+2 3
+# Spike Reacts
+2 3
+#
+# F15 v F15
+# Num intercepts
+2
+# Num Merges
+2
+# Num Spike React
+2
+# Intercept Types
+2 3
+# Merges
+2 3
+# Spike Reacts
+2 3
+#
+# F15 v F16
+# Num intercepts
+2
+# Num Merges
+2
+# Num Spike React
+2
+# Intercept Types
+2 3
+# Merges
+2 3
+# Spike Reacts
+2 3
+#
+# F15 v Mig25
+# Num intercepts
+1
+# Num Merges
+1
+# Num Spike React
+1
+# Intercept Types
+3
+# Merges
+3
+# Spike Reacts
+3
+#
+# F15 v Mig27
+# Num intercepts
+2
+# Num Merges
+1
+# Num Spike React
+1
+# Intercept Types
+2 3
+# Merges
+3
+# Spike Reacts
+2
+#
+# F15 v A10
+# Num intercepts
+1
+# Num Merges
+2
+# Num Spike React
+2
+# Intercept Types
+3
+# Merges
+1 2
+# Spike Reacts
+1 2
+#
+# F15 v Bomber
+# Num intercepts
+1
+# Num Merges
+2
+# Num Spike React
+2
+# Intercept Types
+3
+# Merges
+1 2
+# Spike Reacts
+1 2
+#
+# F16 Manuever Class Flags
+0x737
+#
+# F16 v F4
+# Num intercepts
+2
+# Num Merges
+1
+# Num Spike React
+1
+# Intercept Types
+1 2
+# Merges
+3
+# Spike Reacts
+2
+#
+# F16 v F5
+# Num intercepts
+2
+# Num Merges
+1
+# Num Spike React
+1
+# Intercept Types
+2 3
+# Merges
+3
+# Spike Reacts
+2
+#
+# F16 v F14
+# Num intercepts
+2
+# Num Merges
+2
+# Num Spike React
+2
+# Intercept Types
+1 2
+# Merges
+2 3
+# Spike Reacts
+3 4
+#
+# F16 v F15
+# Num intercepts
+2
+# Num Merges
+2
+# Num Spike React
+2
+# Intercept Types
+1 2
+# Merges
+2 3
+# Spike Reacts
+3 4
+#
+# F16 v F16
+# Num intercepts
+2
+# Num Merges
+2
+# Num Spike React
+2
+# Intercept Types
+1 2
+# Merges
+2 3
+# Spike Reacts
+3 4
+#
+# F16 v Mig25
+# Num intercepts
+1
+# Num Merges
+1
+# Num Spike React
+1
+# Intercept Types
+3
+# Merges
+3
+# Spike Reacts
+3
+#
+# F16 v Mig27
+# Num intercepts
+2
+# Num Merges
+1
+# Num Spike React
+1
+# Intercept Types
+2 3
+# Merges
+3
+# Spike Reacts
+2
+#
+# F16 v A10
+# Num intercepts
+1
+# Num Merges
+2
+# Num Spike React
+2
+# Intercept Types
+3
+# Merges
+1 2
+# Spike Reacts
+1 2
+#
+# F16 v Bomber
+# Num intercepts
+1
+# Num Merges
+2
+# Num Spike React
+2
+# Intercept Types
+3
+# Merges
+1 2
+# Spike Reacts
+1 2
+#
+# Mig 25 Manuever Class Flags
+0x524
+#
+# Mig 25 v F4
+# Num intercepts
+1
+# Num Merges
+1
+# Num Spike React
+2
+# Intercept Types
+3
+# Merges
+1
+# Spike Reacts
+1 2
+#
+# Mig 25 v F5
+# Num intercepts
+1
+# Num Merges
+1
+# Num Spike React
+2
+# Intercept Types
+3
+# Merges
+1
+# Spike Reacts
+1 2
+#
+# Mig 25 v F14
+# Num intercepts
+1
+# Num Merges
+1
+# Num Spike React
+2
+# Intercept Types
+3
+# Merges
+1
+# Spike Reacts
+1 2
+#
+# Mig 25 v F15
+# Num intercepts
+1
+# Num Merges
+1
+# Num Spike React
+2
+# Intercept Types
+3
+# Merges
+1
+# Spike Reacts
+1 2
+#
+# Mig 25 v F16
+# Num intercepts
+1
+# Num Merges
+1
+# Num Spike React
+2
+# Intercept Types
+3
+# Merges
+1
+# Spike Reacts
+1 2
+#
+# Mig 25 v Mig25
+# Num intercepts
+1
+# Num Merges
+1
+# Num Spike React
+2
+# Intercept Types
+3
+# Merges
+1
+# Spike Reacts
+1 2
+#
+# Mig 25 v Mig27
+# Num intercepts
+1
+# Num Merges
+1
+# Num Spike React
+2
+# Intercept Types
+3
+# Merges
+1
+# Spike Reacts
+1 2
+#
+# Mig 25 v A10
+# Num intercepts
+1
+# Num Merges
+1
+# Num Spike React
+2
+# Intercept Types
+3
+# Merges
+1
+# Spike Reacts
+1 2
+#
+# Mig 25 v Bomber
+# Num intercepts
+1
+# Num Merges
+1
+# Num Spike React
+2
+# Intercept Types
+3
+# Merges
+1
+# Spike Reacts
+1 2
+#
+# Mig 25 Manuever Class Flags
+0x524
+#
+# Mig 27 v F4
+# Num intercepts
+1
+# Num Merges
+1
+# Num Spike React
+2
+# Intercept Types
+3
+# Merges
+1
+# Spike Reacts
+3 4
+#
+# Mig 27 v F5
+# Num intercepts
+1
+# Num Merges
+1
+# Num Spike React
+2
+# Intercept Types
+3
+# Merges
+1
+# Spike Reacts
+3 4
+#
+# Mig 27 v F14
+# Num intercepts
+1
+# Num Merges
+1
+# Num Spike React
+2
+# Intercept Types
+3
+# Merges
+1
+# Spike Reacts
+3 4
+#
+# Mig 27 v F15
+# Num intercepts
+1
+# Num Merges
+1
+# Num Spike React
+2
+# Intercept Types
+3
+# Merges
+1
+# Spike Reacts
+3 4
+#
+# Mig 27 v F16
+# Num intercepts
+1
+# Num Merges
+1
+# Num Spike React
+2
+# Intercept Types
+3
+# Merges
+1
+# Spike Reacts
+3 4
+#
+# Mig 27 v Mig25
+# Num intercepts
+1
+# Num Merges
+1
+# Num Spike React
+1
+# Intercept Types
+3
+# Merges
+1
+# Spike Reacts
+4
+#
+# Mig 27 v Mig27
+# Num intercepts
+1
+# Num Merges
+1
+# Num Spike React
+2
+# Intercept Types
+3
+# Merges
+1
+# Spike Reacts
+1 2
+#
+# Mig 27 v A10
+# Num intercepts
+1
+# Num Merges
+1
+# Num Spike React
+2
+# Intercept Types
+3
+# Merges
+1
+# Spike Reacts
+1 2
+#
+# Mig 27 v Bomber
+# Num intercepts
+1
+# Num Merges
+1
+# Num Spike React
+2
+# Intercept Types
+3
+# Merges
+1
+# Spike Reacts
+1 2
+#
+# A10 Manuever Class Flags
+0x337
+#
+# A10 v F4
+# Num intercepts
+1
+# Num Merges
+1
+# Num Spike React
+1
+# Intercept Types
+3
+# Merges
+1
+# Spike Reacts
+4
+#
+# A10 v F5
+# Num intercepts
+1
+# Num Merges
+1
+# Num Spike React
+1
+# Intercept Types
+3
+# Merges
+1
+# Spike Reacts
+4
+#
+# A10 v F14
+# Num intercepts
+1
+# Num Merges
+1
+# Num Spike React
+1
+# Intercept Types
+3
+# Merges
+1
+# Spike Reacts
+4
+#
+# A10 v F15
+# Num intercepts
+1
+# Num Merges
+1
+# Num Spike React
+1
+# Intercept Types
+3
+# Merges
+1
+# Spike Reacts
+4
+#
+# A10 v F16
+# Num intercepts
+1
+# Num Merges
+1
+# Num Spike React
+1
+# Intercept Types
+3
+# Merges
+1
+# Spike Reacts
+4
+#
+# A10 v Mig25
+# Num intercepts
+1
+# Num Merges
+1
+# Num Spike React
+1
+# Intercept Types
+3
+# Merges
+1
+# Spike Reacts
+4
+#
+# A10 v Mig27
+# Num intercepts
+1
+# Num Merges
+1
+# Num Spike React
+2
+# Intercept Types
+3
+# Merges
+1
+# Spike Reacts
+3 4
+#
+# A10 v A10
+# Num intercepts
+1
+# Num Merges
+3
+# Num Spike React
+2
+# Intercept Types
+3
+# Merges
+1 2 3
+# Spike Reacts
+1 2
+#
+# A10 v Bomber
+# Num intercepts
+1
+# Num Merges
+3
+# Num Spike React
+2
+# Intercept Types
+3
+# Merges
+1 2 3
+# Spike Reacts
+1 2
+#
+# Bomber Manuever Class Flags
+0x323
+#
+# Bomber v F4
+# Num intercepts
+0
+# Num Merges
+0
+# Num Spike React
+4
+# Spike Reacts
+1 2 3 4
+#
+# Bomber v F5
+# Num intercepts
+0
+# Num Merges
+0
+# Num Spike React
+4
+# Spike Reacts
+1 2 3 4
+#
+# Bomber v F14
+# Num intercepts
+0
+# Num Merges
+0
+# Num Spike React
+4
+# Spike Reacts
+1 2 3 4
+#
+# Bomber v F15
+# Num intercepts
+0
+# Num Merges
+0
+# Num Spike React
+4
+# Spike Reacts
+1 2 3 4
+#
+# Bomber v F16
+# Num intercepts
+0
+# Num Merges
+0
+# Num Spike React
+4
+# Spike Reacts
+1 2 3 4
+#
+# Bomber v Mig25
+# Num intercepts
+0
+# Num Merges
+0
+# Num Spike React
+4
+# Spike Reacts
+1 2 3 4
+#
+# Bomber v Mig27
+# Num intercepts
+0
+# Num Merges
+0
+# Num Spike React
+4
+# Spike Reacts
+1 2 3 4
+#
+# Bomber v A10
+# Num intercepts
+0
+# Num Merges
+0
+# Num Spike React
+4
+# Spike Reacts
+1 2 3 4
+#
+# Bomber v Bomber
+# Num intercepts
+0
+# Num Merges
+0
+# Num Spike React
+4
+# Spike Reacts
+1 2 3 4
+# EOF

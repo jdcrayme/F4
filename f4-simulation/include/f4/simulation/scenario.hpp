@@ -71,6 +71,24 @@ struct ScenarioAircraft {
     /// lead's picture each tick. The lead must exist and be on the SAME
     /// team — anything else fails initialize() loudly.
     std::string lead_callsign;
+    /// BRAINDAT ARCHETYPE (SimData BRAINDAT.brn, via the f4.braindata
+    /// JSON): the mission set this brain flies — "Generic" (default
+    /// doctrine, everything armed), "SEAD" / "Strike" / "Waypointer"
+    /// (defensive-only: the engagement ladder stands down), "Intercepter"
+    /// / "Air CAP" / "Air Sweep" / "Escort" (full engagement, wider
+    /// gun/missile entry criteria). Empty = no archetype (the tuned
+    /// built-in doctrine — the pre-SimData behavior). Resolved against
+    /// the scenario's brain data (brain_data_path, else the generated
+    /// BRAINDAT fixture); an unknown name fails initialize() loudly.
+    std::string brain_profile;
+    /// FORMDAT.FIL FORMATION (via the f4.formdata JSON) for WINGMEN:
+    /// "spread", "wedge", "trail", "ladder", "stack", "rescell",
+    /// "box", "arrowhead", "fluid" — the game's own formation table
+    /// (two_ship slot, relAz/el/range). Empty = the module's built-in
+    /// table. Requires lead_callsign (validate() enforces); resolved
+    /// against formation_library_path (else the generated FORMDAT
+    /// fixture); an unknown name fails initialize() loudly.
+    std::string formation;
 };
 
 /// One parking spot on the airfield (derived from the ground layout —
@@ -347,6 +365,19 @@ struct Scenario {
 
     /// Fuel policy (the arbiter's fuel check). Default: disabled.
     FuelConfig fuel;
+
+    /// SimData AI data paths (engine-agnostic Data/ side of the
+    /// f4-convert pipeline; scenario-relative when relative). Both
+    /// optional: empty falls back to the build tree's generated
+    /// fixtures (BRAINDAT.brn / FORMDAT.FIL converted at build time),
+    /// and only scenarios that reference archetypes or formations ever
+    /// load them.
+    /// Brain archetypes (f4.braindata JSON, from brain2json) — consumed
+    /// per-aircraft via "brain_profile".
+    std::filesystem::path brain_data_path;
+    /// Formation library (f4.formdata JSON, from form2json) — consumed
+    /// per-wingman via "formation".
+    std::filesystem::path formation_library_path;
 };
 
 /// Load a scenario from a JSON file. Resolves asset paths relative to the

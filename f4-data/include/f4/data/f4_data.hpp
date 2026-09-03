@@ -10,6 +10,12 @@
 #pragma once
 
 #include "f4/data/aircraft_config.hpp"
+#include "f4/data/brain_data.hpp"
 #include "f4/data/config_loader.hpp"
 #include "f4/data/engine_rpm_schedule.hpp"
+#include "f4/data/formation_data.hpp"
+#include "f4/data/maneuver_data.hpp"
+#include "f4/data/sensor_data.hpp"
+#include "f4/data/signature_data.hpp"
 #include "f4/data/table_accessors.hpp"
+#include "f4/data/vehicle_def_data.hpp"

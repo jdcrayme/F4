@@ -33,7 +33,9 @@
 
 #pragma once
 
+#include <cmath>
 #include <cstdint>
+#include <limits>
 #include <vector>
 
 #include <f4/entities/entity.hpp>
@@ -77,19 +79,38 @@ struct EmitterReading {
 
 struct RwrConfig {
     double max_range_nm = 100.0;   // receiver range (missiles + radars)
+
+    // SimData parameters (sim/SENSDATA/RWR/*.RWR via f4-data's
+    // RwrReceiverData; f4-sensors reads them through RwrConfig so the
+    // library needs no f4-data dependency). Defaults = generic.rwr:
+    //   az 180 / el 90 -> nothing gated, sensitivity 1.0 -> range
+    //   unchanged; every pre-SimData caller behaves identically.
+    double az_limit_deg = 180.0;   // receiver azimuth half-cone
+    double el_limit_deg = 90.0;    // receiver elevation half-cone
+    /// generic.rwr's "Rwr Sensitivity": fraction of an emitter's nominal
+    /// range at which it is detected. The model scales the receiver's
+    /// max_range by it (harm.rwr ships 2.0 — the HARM's passive receiver
+    /// hears emitters twice as far).
+    double sensitivity = 1.0;
 };
 
 class RwrModel {
 public:
     explicit RwrModel(RwrConfig cfg = {}) : cfg_(cfg) {}
 
-    /// Classify readings into warnings. Readings beyond RWR range are
-    /// ignored. Sorting: Launch first, then Lock, then Search; ties broken
+    /// Classify readings into warnings. Readings beyond the receiver's
+    /// effective range (max_range_nm * sensitivity) are ignored, as are
+    /// emitters outside the receiver's FOV: elevation is always tested
+    /// (world frame); azimuth is tested against `receiver_heading_rad`
+    /// when it is finite (relative bearing), and skipped for NaN — the
+    /// omni default that matches generic.rwr's 180-degree coverage.
+    /// Sorting: Launch first, then Lock, then Search; ties broken
     /// by emitter id ascending.
     [[nodiscard]] std::vector<RwrWarning> evaluate(
         const std::vector<EmitterReading>& readings,
         const f4::geo::WorldPosition& own_pos,
-        double time_s) const;
+        double time_s,
+        double receiver_heading_rad = std::numeric_limits<double>::quiet_NaN()) const;
 
     [[nodiscard]] const RwrConfig& config() const noexcept { return cfg_; }
 

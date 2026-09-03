@@ -1424,3 +1424,84 @@ Timestep" pattern):
   completes ~10x faster with no pitch oscillation.
 - Manual: resize/drag the window mid-run at 10x — the render loop must
   stay live (guard drops catch-up debt) and sim time must not jump.
+
+## SimData AI — the maneuver table, brain archetypes, and formations fly as data (SIMDATA-AI-1)
+
+**SimData.zip's AI trio is now engine-agnostic data the sim consumes
+end to end. mnvrdata.dat (the 9x9 maneuver selection table + class
+flags), BRAINDAT.brn (8 brain archetypes x ~25 mode rows), and
+FORMDAT.FIL (9 formations) parse through f4-convert into canonical
+JSON (f4.mnvrdata / f4.braindata / f4.formdata v1), load through
+f4-data, and reach two real consumers: WingmanModule flies the game's
+own formation stations (command_formation_slot ports
+bvrengage.cpp:3367-3378 — range x mFormLateralSpaceFactor,
+relAz x mFormSide + lead heading, relEl or the raw flightIdx x -100 ft
+stack; kickout/closeup x2/x0.5, WMToggleSide mirror) and BrainComponent
+flies per-archetype doctrine (set_brain_archetype: SEAD / Strike /
+Waypointer stand down every engagement mode — clean reset, formation
+keeps flying; MissileDefeat stays armed everywhere; the WVR entry band
+comes from the archetype's own WVREngageMode range; MissileEngage /
+GunsEngage gate the release pulses). The scenario JSON drives it:
+"brain_profile" + "formation" per aircraft, brain_data_path /
+formation_library_path per scenario, lazy-loaded (nothing references
+it -> nothing loads -> byte-for-byte the pre-SimData world) with the
+build tree's converted fixtures as the default. The reference's
+quirks are documented, not hidden: the 'A' file marker the original
+engine silently skips, the .brn files NO FreeFalcon reader ever
+loaded (1997 design data consumed as intent), the positional rows
+whose labels predate the DigiMode enum, and SEAD's duplicated
+GroundMnvr section. Suite 1907 -> 1985.**
+
+| Area | Change |
+|------|--------|
+| f4-convert — mnvr_parser | ReadManeuverData's table shape (digimain.cpp:811-913) as data: 9x9 (or NxN) choice grid keyed by relative energy / angle bins, per-class availability flags; accepts the shipped file's 'A' marker the reference engine silently skips on (it reads one byte and expects '#') — warned, never hidden. CLI: mnvr2json. |
+| f4-convert — brain_parser | The .brn format: numBrainTypes, per-type '# <Name>' sections, positional rows (label comment / enabled / priority / range / angle). Rows-to-next-section parsing (SEAD's 26-row duplicated GroundMnvr lands as filler), label-intolerant positionality documented. CLI: brain2json. |
+| f4-convert — formation_parser | formdata.cpp:12-115 verbatim: num4Slots / num2Slots / formNum / <name>, slot triples in the file's units with converted accessors; the num2Slots==0 -> 2-ship-inherits-slot[0] rule; formNum = the WingManCmd enum value FindFormation keys on. CLI: form2json. |
+| f4-data — loaders | maneuver_data / brain_data / formation_data with canonical JSON round-trips, tolerant find_mode (case/space-insensitive + prefix fallback for the tag rows), find_archetype / find_by_name / find_by_form_num, BrainModeKey vocabulary mapping the .brn labels to the consumers' rung set. NM_TO_FT 6076.211 (phyconst.h) is f4::data::kNmToFt. |
+| f4-convert — build fixtures | simdata_golden_fixtures: the three shipped files convert into ${BUILD}/generated_fixtures/simdata/ at build time (same conversion any install's SimData.zip takes); exported as F4_GENERATED_FIXTURES_DIR. The subdir keeps the config-loader's aircraft-fixture walk clean. |
+| f4-ai — WingmanModule | command_formation_slot(Formation): the 2-ship station from FORMDAT.FIL; formation_position()'s data-driven branch (bvrengage.cpp:3367-3378 in ENU); kickout()/closeup() scale the lateral range (WMKickout / WMCloseup) but NOT the -100 ft flightIdx stack (the reference applies it raw — verified bvrengage.cpp:3378 + wingai.cpp:2923); set_formation_side mirrors both geometry paths; command_formation reverts to the built-in table (last command wins — the revert no longer no-ops when the resting enum matches). |
+| f4-ai — BrainComponent | set_brain_archetype(const BrainArchetype*) — non-owning doctrine pointer, null = pre-SimData behavior. archetype_allows() gates MissileDefeat (armed in every shipped archetype: defense is doctrine), the engagement stand-down (BVR+WVR disarmed -> the running fight resets the same clean way bingo ends it), the WVR entry band (the archetype's WVREngageMode range), and the MissileEngage / GunsEngage release pulses under hold_fire. Wingy gates the formation rung. |
+| f4-simulation — scenario | Aircraft "brain_profile" (archetype name) + "formation" (wingman only — validate() rejects a formation without lead_callsign before any spawn); scenario "brain_data_path" / "formation_library_path" (scenario-relative, resolved like every asset path). |
+| f4-simulation — wiring | Simulation::apply_simdata_ai_profiles(): after wingman refs resolve, lazy-loads ONLY the referenced side (scenario path else the compile-time default dir F4_SIMDATA_DEFAULT_DIR -> the build tree's converted fixtures), resolves names (unknown -> initialize() fails with the known-name list; missing file -> fails with the loader errors), and injects: archetype pointers into brains, formation slots into wingman modules. BrainData / FormationLibrary are owned Simulation members — both consumers take non-owning pointers. brain_data_loaded() / formation_library_loaded() witness the lazy contract. |
+| tests | +78 (1907 -> 1985, 100%, zero warnings): 45 parser units, 10 loader units, 9 WingmanModule FORMDAT geometry units (spread's LEFT-side 0.5 NM station, trail's explicit 2-ship triple, ladder's relEl branch, kickout's raw stack, closeup, side mirror, lead-heading frame, revert, no-picture contract), 1 archetype roundtrip, 13 scenario-wiring tests (schema, validation, lazy contract, default + explicit paths, loud failures, and the two behavior E2Es: a SEAD wingman never engages or releases while its archetype-free lead kills the bandit; a spread wingman converges on the file's own station from 11 kft out). |
+
+## SimData Wave 2 — the class table, sensors, and signatures fly as data (SIMDATA-2-1)
+
+**The rest of SimData.zip's combat-relevant data is engine-agnostic now.
+VehDef (Vehicle.lst's 86 class rows + 90 .veh files — which sensors
+every VU class mounts, plus the weapon physical cards), the SENSDATA
+authoring files (.IRS IRST seekers / .RWR receivers / .VSS visual
+sensors + their .LST indexes), and the SIGDATA signature grids
+(.RCS / .IR0-.IR2 / .VIS azimuth-elevation breakpoint tables) parse
+through f4-convert (veh2json / sens2json / sig2json) into canonical
+JSON (f4.vehdef / f4.irstdata / f4.rwrdata / f4.visualdata / f4.sigdata
+v1) and load through f4-data. Two real consumers: the radar detection
+model reads the RCS grids DIRECTLY (SignatureComponent carries a
+non-owning grid pointer like BrainComponent's archetype; the grid IS
+the lobe shape — detection.hpp's documented "when the RCD data lands"
+moment, placeholder lobe retired to the data-free path), and the RWR
+model is parameterized by the .RWR files (RwrConfig's defaults ARE
+generic.rwr: 180/90 omni + sensitivity 1.0 = byte-identical behavior;
+harm.rwr's 2.0 sensitivity doubles the receiver's reach, the 60/60
+cones gate emitters by elevation and — given the receiver's heading —
+azimuth). The reference's quirks are documented, not hidden: Sea rows
+never open their .veh (the shipped "dpthchrg,veh" comma typo is one),
+the SENSDATA/SIGDATA text files have NO reader in the FreeFalcon tree
+(the runtime freads precompiled .ICD/.VSD/.RWD binaries — the text is
+the 1998 authoring source, the same design-data class as BRAINDAT.brn),
+and the shipped ALQxxx.veh's misordered "# Data Idx" block shifts
+every field — the reference's atoi() silently reads the garbage, and
+so does this parser (loudly). Suite 1985 -> 2054.**
+
+| Area | Change |
+|------|--------|
+| f4-convert — veh_parser | vehdef.cpp:29-252 verbatim: Vehicle.lst (count + type/file rows; -1 unused), SimACDefinition (combat class, airframe index, player + AI sensor loadouts), SimHeloDefinition, SimGroundDefinition, SimWpnDefinition (flags/cd/weight/area/ejection/mnemonic/class/domain/type/dataIdx). Case-insensitive .veh resolution for the list's Windows-style mixed-case paths; Sea rows record and never open; atoi()/atof() semantics on non-numeric tokens (warned — the shipped ALQxxx.veh quirk); duplicate stems warn, find() returns the first. CLI: veh2json. |
+| f4-convert — sensor_parser | The 5-value .IRS, 3-value .RWR and .VSS positional formats with the files' own '#' comments as field names; the .LST index (count + names) resolves case-insensitively in the same directory; plausibility bounds (FOV 0-361, flare chance 0-1, sensitivity > 0). CLI: sens2json <irst\|rwr\|visual>. |
+| f4-convert — signature_parser | The grid text format (numAz, numEl, azimuth breakpoints, then one row per elevation breakpoint whose LEADING value IS the elevation breakpoint — there is no separate elevation block): bilinear-interpolation contract from visual.cpp:79-99's Math.TwodInterp comment; ascending-axis validation; per-stem five-family loads (RCSDAT/, IR/ x3, VISUAL/). CLI: sig2json <dir>. |
+| f4-data — loaders | vehicle_def_data (variant per type, SensorSlot pairs, enum name tables for CombatClass / WeaponClass / WeaponType / WeaponDomain / SensorType — the f16.veh comment's own enum), sensor_data (IrstSeekerData / RwrReceiverData / VisualSensorData with nominal_range_nm() = sqrt(gain)/ft-per-NM — the original signal = gain/range^2 model), signature_data (SignatureGrid::value_at: bilinear, azimuth wrap-to-mirror [0,180], elevation clamp; AircraftSignatureData's five grids). |
+| f4-sensors — detection | TargetSignature.rcs_grid + elevation_deg (forward-declared pointer, f4-data stays PRIVATE to f4-sensors): when the grid is set, detection_range_nm(params, sig) uses value_at(aspect, elevation) directly — the grid encodes the lobes, the placeholder lobe factor does NOT stack; data-free callers take the exact pre-SimData path. RadarSimComponent's sweep copies the grid pointer from SignatureComponent and feeds the LOS elevation. |
+| f4-sensors — SignatureComponent | rcs_grid (non-owning, the library lives with the host) + effective_rcs_m2(aspect, elevation): the grid lookup when set, the scalar otherwise. |
+| f4-sensors — RWR | RwrConfig.az_limit_deg / el_limit_deg / sensitivity (defaults = generic.rwr — nothing gated, range unchanged); RwrModel::evaluate scales the receiver range by sensitivity, gates emitters by elevation (always, world frame) and azimuth (when the receiver's heading is known — evaluate()'s new receiver_heading_rad, NaN = omni; update_rwr derives it from the victim's velocity, parked = omni). |
+| f4-convert — build fixtures | simdata_wave2_golden_fixtures: the shipped VehDef/SENSDATA/SIGDATA convert into ${BUILD}/generated_fixtures/simdata/ (vehdef / irstdata / rwrdata / visualdata / sigdata.json) — the same conversion any install's SimData.zip takes; consumers: f4-data loader tests, f4-sensors consumer tests. |
+| fixtures | 112 files extracted from the zip into f4-convert/tests/fixtures/simdata/ (VehDef/ 90, SENSDATA/ 13, SIGDATA/ 8 incl. TACAN/stations.dat held for wave 3). |
+| tests | +69 (1985 -> 2054, 100%): 17 veh units (shipped row counts by type, F-16 player-vs-AI loadouts, SA-6 card, helo/ground rows, Sea/typo/duplicate/backslash-path quirks, ALQxxx shifted read, JSON round-trip, synthetic + error paths), 16 sensor units (aim9l/agm65b values, generic-vs-harm, gain->10NM, round-trips, error paths), 17 signature units (breakpoint/midpoint/bilinear values, clamp/wrap, rear-hot IR rows, JSON round-trip, synthetic + error paths), 10 loader units, 9 f4-sensors consumer units (grid replaces placeholder lobe — beam-on 20 m^2 = sqrt(2)x scalar range; no-grid identical; sensitivity extends range; elevation/azimuth gates; defaults = generic.rwr; world-level heading gate). |

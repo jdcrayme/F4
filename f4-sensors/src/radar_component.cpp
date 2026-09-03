@@ -116,12 +116,20 @@ void RadarSimComponent::perform_scan(messaging::MessageBus& bus) {
 
         // Signature: RCS from SignatureComponent (default = radar reference),
         // aspect off the target's nose, closure along the line of sight.
+        // SimData upgrade: a SignatureComponent carrying an RCS grid
+        // (SIGDATA/RCSDAT) routes the whole lobe shape through the data.
         TargetSignature sig;
         if (const auto* signature = h.get<SignatureComponent>()) {
             sig.rcs_m2 = signature->rcs_m2;
+            sig.rcs_grid = signature->rcs_grid;
         } else {
             sig.rcs_m2 = params.reference_rcs_m2;
         }
+        // Grid elevation: the radar's LOS elevation is the target-
+        // referenced elevation approximation available here (a target
+        // flying level under the radar reads low in the grid — the
+        // generic grids are elevation-flat anyway).
+        sig.elevation_deg = elevation * (180.0 / M_PI);
         const double tgt_speed = tgt_vel.length();
         if (tgt_speed > kStationarySpeedFps) {
             const double tgt_heading = std::atan2(tgt_vel.x, tgt_vel.y);  // CW from north

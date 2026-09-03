@@ -53,6 +53,7 @@
 #include <f4/flight/api/i_pilot_input_sink.hpp>
 #include <f4/flight/api/pilot_input.hpp>
 
+#include <f4/data/brain_data.hpp>
 #include <f4/geo/position.hpp>
 
 #include "f4/ai/ai_output.hpp"
@@ -405,8 +406,15 @@ public:
                     // Missile defense outranks even bingo (FreeFalcon's
                     // ladder: MissileDefeat(4) > RTB(19)) — a jet bug
                     // fuel home still dodges the missile chasing it.
-                    combat_mode_ = CombatMode::Defensive;
-                    ai_out = missile_defense_.update(dt, state, incoming);
+                    // Archetype gate: every shipped .brn archetype keeps
+                    // MissileDefeat armed (defense is doctrine, not
+                    // aggression); a data file that disarms it stands
+                    // this rung down too.
+                    if (archetype_allows(
+                            f4::data::BrainModeKey::MissileDefeat)) {
+                        combat_mode_ = CombatMode::Defensive;
+                        ai_out = missile_defense_.update(dt, state, incoming);
+                    }
                 } else if (fuel_bingo_) {
                     // BINGO (FrameExec step 2's fight-gating half): the
                     // engagement rungs stand down — no new target
@@ -415,6 +423,23 @@ public:
                     // modules do not resume stale geometry if fuel
                     // (impossibly) recovers; the nav-resume bookkeeping
                     // below handles the steering transient.
+                    if (in_wvr_) {
+                        in_wvr_ = false;
+                        wvr_.reset();
+                    }
+                    bvr_.reset();
+                } else if (!archetype_allows(
+                               f4::data::BrainModeKey::BVREngage) &&
+                           !archetype_allows(
+                               f4::data::BrainModeKey::WVREngage)) {
+                    // ARCHETYPE STAND-DOWN (BRAINDAT.brn): the shipped
+                    // SEAD / Strike / Waypointer archetypes disarm every
+                    // engagement mode — defensive, formation-flying
+                    // mission aircraft that never pick a fight. The
+                    // running engagement (if one was live when the
+                    // archetype was installed) ends the same clean way
+                    // bingo ends it; the formation/mission rungs below
+                    // take over.
                     if (in_wvr_) {
                         in_wvr_ = false;
                         wvr_.reset();
@@ -431,18 +456,29 @@ public:
                         ? sensors_.sorted_threat_target(lead_engaged_id_)
                         : sensors_.threat_target();
                     // --- BVR <-> WVR band handoff (plan Step 9) ----------
-                    // Entry is BVRModule's band constant (the range
-                    // taxonomy lives there); exit is WVRModule's (the
-                    // hysteresis ring). One source per boundary.
+                    // Entry is the ACTIVE band source: the archetype's
+                    // WVREngageMode range when one is installed and armed
+                    // (the .brn's mode-activation criteria: 50000 ft
+                    // Generic / 60000 ft Air Sweep), else BVRModule's
+                    // tuned constant (the range taxonomy lives there);
+                    // exit is WVRModule's (the hysteresis ring). One
+                    // source per boundary. A WVR-disarmed archetype never
+                    // enters the band (BVR fights to its own exit);
+                    // a BVR-disarmed one enters directly (WVR from the
+                    // first armed contact).
+                    const bool wvr_armed = archetype_allows(
+                        f4::data::BrainModeKey::WVREngage);
+                    const double wvr_entry_nm = archetype_wvr_entry_nm();
                     if (tgt != nullptr) {
                         if (in_wvr_) {
-                            if (tgt->range_nm >
+                            if (!wvr_armed ||
+                                tgt->range_nm >
                                     wvr_.config().wvr_exit_range_nm) {
                                 in_wvr_ = false;
                                 wvr_.reset();  // clean handback to BVR
                             }
-                        } else if (tgt->range_nm <
-                                       bvr_.config().wvr_entry_range_nm) {
+                        } else if (wvr_armed &&
+                                   tgt->range_nm < wvr_entry_nm) {
                             in_wvr_ = true;
                             bvr_.reset();  // fresh engagement on return
                         }
@@ -457,18 +493,28 @@ public:
                         combat_intent_.radar_lock = wvr_.wants_lock();
                         combat_intent_.lock_target_id =
                             wvr_.lock_target_id();
+                        // MissileEngageMode (the archetype's employment
+                        // ROE) gates the release below hold_fire — an
+                        // archetype can fight the geometry but never
+                        // shoot (the .brn's original intent for the
+                        // defensive-only mission sets).
                         combat_intent_.weapon_release =
-                            wvr_.release_pulse() && !hold_fire_;
+                            wvr_.release_pulse() && !hold_fire_ &&
+                            archetype_allows(
+                                f4::data::BrainModeKey::MissileEngage);
                         combat_intent_.release_target_id =
                             wvr_.release_target_id();
                         // Guns (Steps 11-12): the burst edge rides the
                         // same intent surface. hold_fire disarms it at the
-                        // brain gate; the guns-tight doctrine (scenario
-                        // guns_hold) is enforced down in the module's
-                        // fire control, where it can also gate
+                        // brain gate (GunsEngageMode under it — the
+                        // archetype's gun ROE); the guns-tight doctrine
+                        // (scenario guns_hold) is enforced down in the
+                        // module's fire control, where it can also gate
                         // should_fire() and burn no phantom budget.
                         combat_intent_.gun_trigger =
-                            wvr_.gun_pulse() && !hold_fire_;
+                            wvr_.gun_pulse() && !hold_fire_ &&
+                            archetype_allows(
+                                f4::data::BrainModeKey::GunsEngage);
                         combat_intent_.gun_target_id =
                             wvr_.gun_target_id();
                     } else if (tgt != nullptr) {
@@ -478,13 +524,16 @@ public:
                         // against the real radar / weapon store after
                         // update_all. BVR release honors the BVR hold
                         // (SPINS: radar missiles tight) separately from
-                        // the all-weapons hold.
+                        // the all-weapons hold, and the archetype's
+                        // MissileEngageMode employment ROE.
                         combat_intent_.radar_lock = bvr_.wants_lock();
                         combat_intent_.lock_target_id =
                             bvr_.lock_target_id();
                         combat_intent_.weapon_release =
                             bvr_.release_pulse() && !hold_fire_ &&
-                            !bvr_hold_;
+                            !bvr_hold_ &&
+                            archetype_allows(
+                                f4::data::BrainModeKey::MissileEngage);
                         combat_intent_.release_target_id =
                             bvr_.release_target_id();
                     }
@@ -577,7 +626,11 @@ public:
         // =================================================================
         if (safety_mode_ == SafetyMode::None &&
             combat_mode_ == CombatMode::None && is_wingman_ &&
-            phase_ == Phase::Enroute && wingman_.has_live_picture()) {
+            phase_ == Phase::Enroute && wingman_.has_live_picture() &&
+            // WingyMode (the archetype's formation row — armed in every
+            // shipped .brn archetype; a data file that disarms it turns
+            // the wingman into a single-ship mission jet).
+            archetype_allows(f4::data::BrainModeKey::Wingy)) {
             combat_mode_ = CombatMode::Formation;
             ai_out = wingman_.update(dt, state);
         }
@@ -756,6 +809,36 @@ public:
     /// weapons tight for the BVR fight only).
     void set_bvr_hold(bool on) noexcept { bvr_hold_ = on; }
     [[nodiscard]] bool bvr_hold() const noexcept { return bvr_hold_; }
+
+    // --- BRAINDAT archetype (SimData .brn via f4-data) -------------------
+    /// Install a DigitalBrain archetype (BRAINDAT.brn's per-mission mode
+    /// tables — the original design data: per-mode availability plus
+    /// engagement entry criteria). NON-OWNING: the host owns the
+    /// BrainData (loaded once per scenario) and must outlive the brain.
+    /// The archetype does NOT re-order the ladder (the ordering is
+    /// FreeFalcon's DigiMode enum + AddMode special cases, already
+    /// encoded — and the .brn priorities AGREE with it: defensive modes
+    /// carry small values, mission modes large ones). What it does:
+    ///   - ARMS/DISARMS rungs per the mode rows: the shipped SEAD,
+    ///     Strike and Waypointer archetypes stand the entire engagement
+    ///     ladder down (Guns/Missile/WVR/BVR all disabled) while keeping
+    ///     MissileDefeat, GunsJink and Wingy (formation) live —
+    ///     defensive, formation-flying drones that never pick a fight.
+    ///   - Gates weapon employment on MissileEngageMode (an archetype
+    ///     can fight the geometry but never release — ROE below
+    ///     hold_fire) and the gun trigger on GunsEngageMode.
+    ///   - Carries the WVREngageMode entry range (50000 ft Generic /
+    ///     60000 ft Air Sweep in the shipped data) as the BVR->WVR
+    ///     handoff band when the row is armed; the 3 NM tuned default
+    ///     applies when no archetype is installed.
+    /// Null (default) = every rung armed, tuned bands: the behavior
+    /// before this data existed, byte-for-byte.
+    void set_brain_archetype(
+        const f4::data::BrainArchetype* a) noexcept {
+        archetype_ = a;
+    }
+    [[nodiscard]] const f4::data::BrainArchetype* brain_archetype()
+        const noexcept { return archetype_; }
     /// This tick's combat intents (lock + weapon release) — the host's
     /// combat driver reads this AFTER world.update_all() each tick.
     [[nodiscard]] const CombatIntent& combat_intent() const noexcept {
@@ -935,6 +1018,31 @@ private:
     bool hold_fire_{false};
     bool bvr_hold_{false};
     bool in_wvr_{false};
+
+    // --- BRAINDAT archetype (see set_brain_archetype) --------------------
+    const f4::data::BrainArchetype* archetype_{nullptr};
+
+    /// Mode availability: null archetype = armed (the pre-data behavior).
+    [[nodiscard]] bool archetype_allows(
+        f4::data::BrainModeKey key) const noexcept {
+        return archetype_ == nullptr || archetype_->mode_enabled(key);
+    }
+    /// The BVR->WVR handoff band (NM): the archetype's armed
+    /// WVREngageMode range converted ft -> NM (the .brn's
+    /// mode-activation criteria), else BVRModule's tuned default.
+    /// Uses f4::data::kNmToFt (phyconst.h NM_TO_FT 6076.211 — the same
+    /// conversion the sim-data domain uses everywhere).
+    [[nodiscard]] double archetype_wvr_entry_nm() const noexcept {
+        if (archetype_ != nullptr) {
+            const auto* row =
+                archetype_->find_mode(f4::data::BrainModeKey::WVREngage);
+            if (row != nullptr && row->enabled != 0 && row->range_ft > 0.0) {
+                return row->range_ft / f4::data::kNmToFt;
+            }
+        }
+        return bvr_.config().wvr_entry_range_nm;
+    }
+
     CombatMode combat_mode_{CombatMode::None};
     CombatIntent combat_intent_{};
     SensorFusion sensors_{};

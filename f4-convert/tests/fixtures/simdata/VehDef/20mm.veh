@@ -1,0 +1,21 @@
+# 20mm Cannon data file
+#flags
+0
+# Drag
+0.02
+# Weight
+0.9
+# Area
+0.3
+# Ejection velocity
+3000.0 0.0 0.0
+# Name
+20MM
+# Class
+3
+# Domain
+3
+# Weapon Type
+0
+# Data Idx
+0

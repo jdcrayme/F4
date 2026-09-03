@@ -27,6 +27,14 @@
 
 #include <f4/geo/constants.hpp>
 
+// Forward declaration at GLOBAL scope (a nested `namespace f4::data`
+// inside the f4::sensors block would declare a NEW namespace, not
+// reopen this one): the optional SimData RCS grid TargetSignature
+// carries. f4/data/signature_data.hpp has the definition.
+namespace f4::data {
+struct SignatureGrid;
+}
+
 namespace f4::sensors {
 
 // ============================================================================
@@ -111,11 +119,21 @@ struct ScanVolume {
 //                  negative = opening), feet per second. Closing targets
 //                  are detected slightly farther out (doppler + burn-through
 //                  intuition, see detection.hpp).
+//   rcs_grid     — optional SimData upgrade (SIGDATA/RCSDAT): an
+//                  aspect/elevation-dependent RCS table in m^2. When set,
+//                  detection uses grid.value_at(aspect, elevation_deg)
+//                  DIRECTLY (the grid is the lobe shape — the placeholder
+//                  aspect_lobe_factor does not also apply). Forward
+//                  declared above (f4/data/signature_data.hpp).
+//   elevation_deg — target-referenced elevation of the radar line of
+//                  sight (used only by the grid path; default 0).
 // ============================================================================
 struct TargetSignature {
     double rcs_m2      = 5.0;
     double aspect_rad  = 0.0;
     double closure_fps = 0.0;
+    const f4::data::SignatureGrid* rcs_grid = nullptr;
+    double elevation_deg = 0.0;
 };
 
 } // namespace f4::sensors

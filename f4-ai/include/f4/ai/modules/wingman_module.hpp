@@ -49,9 +49,20 @@
 // wingman module's state freezes (its update() is simply not called) and
 // the recorder reports the combat mode instead.
 //
-// FORMATIONS (2-ship subset of FreeFalcon's 16+; the 4-ship types —
-// Finger4, Fluid Four, Box, Vic, ... — need a four-ship roster and land
-// with the 4-ship flight model):
+// FORMATIONS (two sources, one steering):
+//   1. BUILT-IN table — the 2-ship subset below (multiples of Config
+//      spacing). The default; zero data required.
+//   2. DATA-DRIVEN — a real FORMDAT.FIL slot injected via
+//      command_formation_slot() (the formation the game's own
+//      formdata.cpp loads; range/az/el in the file's units). The station
+//      math ports FreeFalcon bvrengage.cpp:3354-3362 exactly (ENU form);
+//      the same steering cascades fly it (formation_position() is the
+//      single source of station geometry — station/lateral error and
+//      the speed laws all retarget automatically).
+// Both paths honor the formation radio commands: set_formation_side()
+// (WMToggleSide, mFormSide mirror), kickout()/closeup() (WMKickout /
+// WMCloseup, mFormLateralSpaceFactor x2 / x0.5 — wingai.cpp:1757,
+// 1794).
 //   FightingWing — right side, ~40 deg aft of the beam, 2.5 kft: the
 //                  default BVR spread (stays in the lead's radar sweep,
 //                  survives one missile).
@@ -74,8 +85,10 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <string>
 
+#include <f4/data/formation_data.hpp>
 #include <f4/fsm/state_machine.hpp>
 #include <f4/fsm/trace.hpp>
 #include <f4/flight/api/i_aircraft_state.hpp>
@@ -196,6 +209,31 @@ public:
     /// Change formation. Takes effect next update; station error carries
     /// over so the wingman crosses to the new slot (Rejoining if far).
     void command_formation(FormationType form);
+
+    // --- Data-driven formations (FORMDAT.FIL via f4-data) ---------------
+    /// Fly the 2-ship station from a REAL FORMDAT.FIL formation
+    /// (formation.two_ship: relAz deg / relEl deg / range NM in the
+    /// lead's heading frame). Ports bvrengage.cpp:3354-3362 (see header
+    /// note). command_formation() reverts to the built-in table.
+    void command_formation_slot(const f4::data::Formation& formation);
+    /// True while a FORMDAT slot drives the station.
+    [[nodiscard]] bool formation_slot_active() const noexcept {
+        return formation_slot_.has_value();
+    }
+    /// WMToggleSide: +1 (right, the file's own signs) / -1 (mirrored).
+    /// Applies to BOTH formation paths' lateral geometry.
+    void set_formation_side(bool right) noexcept { side_ = right ? 1.0 : -1.0; }
+    [[nodiscard]] bool formation_side_right() const noexcept {
+        return side_ > 0.0;
+    }
+    /// WMKickout (wingai.cpp:1757): mFormLateralSpaceFactor x 2.
+    void kickout() noexcept { space_factor_ *= 2.0; }
+    /// WMCloseup (wingai.cpp:1794): mFormLateralSpaceFactor x 0.5.
+    void closeup() noexcept { space_factor_ *= 0.5; }
+    /// The current spacing factor (1.0 default; kickout/closeup scale).
+    [[nodiscard]] double formation_space_factor() const noexcept {
+        return space_factor_;
+    }
     /// Clear the lead + reset (host re-task / lead changed).
     void reset();
 
@@ -261,6 +299,11 @@ private:
     fsm::StateMachine<WingState, WingEvent> sm_;
     Config cfg_{};
     FormationType form_{FormationType::FightingWing};
+    /// Real FORMDAT.FIL slot (nullopt = built-in table). See header note.
+    std::optional<f4::data::FormationSlot> formation_slot_{};
+    std::string formation_slot_name_{};      ///< diagnostics (the formation's name)
+    double space_factor_{1.0};               ///< mFormLateralSpaceFactor
+    double side_{1.0};                       ///< mFormSide (+1 / -1)
     AirSteering air_steering_{};
 
     LeadPicture picture_{};

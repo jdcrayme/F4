@@ -1,0 +1,24 @@
+# This file is for an C 130
+#Combat Class
+8
+# Airframe Index
+10
+# Sensor Definition
+#
+# Number of Sensors if Player AC
+4
+# Sensors for player
+# SensorType, Sensor Idx
+# enum SensorType {IRST, Radar, RWR, Visual, NumSensorTypes};
+3 0
+1 0
+0 0
+2 0
+# Number of Sensors if not Player AC
+2
+# Sensors for player
+# SensorType, Sensor Idx
+# enum SensorType {IRST, Radar, RWR, Visual, NumSensorTypes};
+3 0
+2 0
+

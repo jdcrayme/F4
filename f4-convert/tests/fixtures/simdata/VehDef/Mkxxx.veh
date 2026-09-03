@@ -1,0 +1,21 @@
+# Mk82 Bomb data file
+#flags
+1
+# Drag
+0.2
+# Weight
+500.0
+# Area
+2.0
+# Ejection velocity
+0.0 0.0 0.0
+# Name
+MKXXX
+# Class
+2
+# Domain
+2
+# Weapon Type
+6
+# Data Idx
+0

@@ -14,6 +14,7 @@ f4_data_add_test(test_validation      test_validation.cpp)
 f4_data_add_test(test_config_loader   test_config_loader.cpp)
 f4_data_add_test(test_table_accessors test_table_accessors.cpp)
 f4_data_add_test(test_engine_rpm_schedule test_engine_rpm_schedule.cpp)
+f4_data_add_test(test_simdata_loaders test_simdata_loaders.cpp)
 
 # Pass the path to the generated JSON fixtures (produced by f4-convert at
 # build time) to the test executables that need them.
@@ -21,7 +22,10 @@ target_compile_definitions(test_config_loader PRIVATE
     F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}")
 target_compile_definitions(test_table_accessors PRIVATE
     F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}")
+target_compile_definitions(test_simdata_loaders PRIVATE
+    F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}")
 
 # f4-data tests depend on the generated fixtures being present.
 add_dependencies(test_config_loader  convert_golden_fixtures)
 add_dependencies(test_table_accessors convert_golden_fixtures)
+add_dependencies(test_simdata_loaders convert_golden_fixtures)

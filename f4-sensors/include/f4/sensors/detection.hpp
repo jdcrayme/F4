@@ -25,7 +25,11 @@ namespace f4::sensors {
 /// Aspect lobe factor in [~0.3, 1.0]: how much of the target's nominal RCS is
 /// presented at a given angle off its nose. Piecewise-linear interpolation of
 /// a plausible fighter lobe shape (nose-on strongest, beam-on weakest, tail
-/// between), documented as a placeholder until RCD data lands.
+/// between), documented as a placeholder until RCD data lands. THE DATA HAS
+/// NOW LANDED (SimData.zip SIGDATA/RCSDAT grids -> f4-data's SignatureGrid):
+/// when TargetSignature.rcs_grid is set, detection_range_nm(params, sig)
+/// reads the grid DIRECTLY and this placeholder does not apply. The
+/// lobe_factor stays for data-free callers and tests.
 /// aspect_rad is clamped to [0, pi].
 [[nodiscard]] double aspect_lobe_factor(double aspect_rad) noexcept;
 

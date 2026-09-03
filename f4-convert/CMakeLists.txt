@@ -21,6 +21,12 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # ---------------------------------------------------------------------------
 add_library(f4-convert STATIC
     src/dat_parser.cpp
+    src/brain_parser.cpp
+    src/formation_parser.cpp
+    src/mnvr_parser.cpp
+    src/sensor_parser.cpp
+    src/signature_parser.cpp
+    src/veh_parser.cpp
     src/json_io.cpp
 )
 target_link_libraries(f4-convert PUBLIC f4_warnings)

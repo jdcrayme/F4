@@ -19,12 +19,21 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 #                library never appears in this target's dependency graph)
 #   - f4-weapons (the missile seeker-source hook is a std::function wired by
 #                the host — see COMBAT_CHAIN_PLAN.md M2)
+#
+# f4-data is a PRIVATE dependency: the SimData signature grids
+# (SIGDATA/RCSDAT -> f4::data::SignatureGrid) flow into
+# SignatureComponent/TargetSignature as forward-declared pointers, so
+# the public headers stay data-free; only detection.cpp and
+# signature.cpp need the full grid definition (value_at). Public
+# consumers that set rcs_grid include f4/data/signature_data.hpp and
+# link f4-data themselves.
 # ---------------------------------------------------------------------------
 add_library(f4-sensors STATIC
     src/detection.cpp
     src/track_store.cpp
     src/rwr.cpp
     src/radar_component.cpp
+    src/signature.cpp
 )
 target_link_libraries(f4-sensors PUBLIC f4_warnings)
 
@@ -36,6 +45,9 @@ target_link_libraries(f4-sensors PUBLIC
     f4-math
     f4-entities
     f4-messaging
+)
+target_link_libraries(f4-sensors PRIVATE
+    f4-data
 )
 
 # Tests

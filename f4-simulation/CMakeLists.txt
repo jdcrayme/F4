@@ -96,9 +96,20 @@ target_compile_features(trace_runner PRIVATE cxx_std_20)
 # headless CI can generate §5 acceptance traces in one command.
 
 # ============================================================================
+# Default SimData AI data location (brain archetypes + formations): the
+# build tree's generated fixtures (f4-convert converts the shipped
+# BRAINDAT.brn / FORMDAT.FIL at build time — the same conversion any
+# Falcon 4.0\Zips\SimData.zip takes). Scenario JSON can override via
+# brain_data_path / formation_library_path; this default makes
+# "brain_profile" / "formation" work in any scenario without path
+# configuration. Only consulted when a scenario actually references
+# archetypes/formations (nothing loads otherwise).
+# ============================================================================
+target_compile_definitions(f4-simulation PRIVATE
+    F4_SIMDATA_DEFAULT_DIR="${F4_GENERATED_FIXTURES_DIR}/simdata")
+
+# ============================================================================
 # campaign_qc — the B.3 end-to-end QC harness (tools/campaign_qc.cpp).
-# Runs the full campaign→sim loop over a decoded save (TestCamp.cam →
-# world JSON): emit_flight_intents → MessageBus → CampaignSimSpawner →
 # aircraft with saved routes, then a scenario-driven Simulation run that
 # writes the replay trace. See the tool's header comment for the artifact
 # set (summary JSON + trace + generated scenario).
