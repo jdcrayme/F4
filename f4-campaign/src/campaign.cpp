@@ -8,6 +8,8 @@
 
 #include <f4/json/f4_json.hpp>
 
+#include "squadron_snapshot.hpp"
+
 #include <algorithm>
 #include <stdexcept>
 #include <unordered_map>
@@ -45,64 +47,31 @@ Campaign::Campaign(const f4::world::ICampaignSource& camp,
             std::to_string(cfg_.air_task_cycle_sec) + ")");
     }
 
-    // Snapshot the squadron roster once: the campaign tasking reads
-    // squadron identity/ownership/specialty and tracks each squadron's
-    // available aircraft. Snapshotting keeps tick() off the source
-    // (the sources are read here and never mutate).
-    pool_.assign(8, 0);
-    const int n = units_.unit_count();
-    for (int i = 0; i < n; ++i) {
-        if (units_.unit_class(i) != f4::entities::UnitClass::Squadron) continue;
-        const auto* sq = units_.as_squadron(i);
-        if (!sq) continue;   // inconsistent source; skip defensively
+    // C2: the reinforcement cadence's absolute-time base. The tick's
+    // clock is campaign-RELATIVE; the .cmp timers are ABSOLUTE in the
+    // save's epoch — epoch_ bridges the two (now = epoch_ + clock_).
+    epoch_ = camp_.current_time();
+    last_reinforce_ = camp_.last_reinforcement();
 
+    // Snapshot the squadron force ONCE through the shared helper
+    // (src/squadron_snapshot.hpp): the roster DECODED from the wire's
+    // 2-bit group packing (the C2 fix — the raw u32 is 1.4 billion for
+    // a 24-ship wing on any real v71 save), squadrons without a roster
+    // sharing the team's te_number_aircraft pool, and the wire's own
+    // reinforcement budget per squadron. The result ledger snapshots
+    // through the SAME function — one rule, two consumers, zero drift
+    // (the numbers agree by construction).
+    const auto force = detail::snapshot_squadron_force(camp_, teams_, units_);
+    pool_.assign(force.team_pool.begin(), force.team_pool.end());
+    squadrons_.reserve(force.squadrons.size());
+    for (const auto& s : force.squadrons) {
         SquadronRef ref;
-        ref.id_num = units_.id_num(i);
-        ref.owner = units_.owner(i);
-        ref.specialty = sq->specialty(i);
-        ref.name = units_.class_name(i);
-        // Availability: the squadron's own roster when the unit data
-        // carries one; otherwise the campaign source's per-team pool is
-        // shared across the team's squadrons at construction (each
-        // squadron gets its draw immediately — deterministic because
-        // the unit order is the wire order).
-        const auto roster = units_.roster(i);
-        ref.available = roster > 0 ? static_cast<int>(roster) : 0;
+        ref.id_num = s.vu;
+        ref.owner = s.owner;
+        ref.specialty = s.specialty;
+        ref.name = s.name;
+        ref.available = s.available;
         squadrons_.push_back(std::move(ref));
-    }
-
-    // Seed the per-team pools from the campaign source (te_number_aircraft
-    // is the TE block's per-team aircraft total; slot-indexed).
-    const auto& team_pools = camp_.te_number_aircraft();
-    for (int t = 0; t < teams_.team_count() && t < 8; ++t) {
-        const int slot = teams_.slot(t);
-        if (slot < 0 || slot >= 8) continue;
-        if (static_cast<std::size_t>(slot) < team_pools.size()) {
-            pool_[static_cast<std::size_t>(slot)] =
-                team_pools[static_cast<std::size_t>(slot)];
-        }
-    }
-
-    // Squadrons with their own roster (available > 0) keep it. Squadrons
-    // without one share their team's pool evenly; the remainder stays in
-    // the team pool (visible via team_aircraft_pool()).
-    for (int t = 0; t < teams_.team_count() && t < 8; ++t) {
-        const int slot = teams_.slot(t);
-        if (slot < 0 || slot >= 8) continue;
-        std::vector<SquadronRef*> shared_squadrons;
-        for (auto& sq : squadrons_) {
-            if (sq.owner == static_cast<std::uint8_t>(slot) && sq.available == 0) {
-                shared_squadrons.push_back(&sq);
-            }
-        }
-        if (shared_squadrons.empty()) continue;
-        const int shared = pool_[static_cast<std::size_t>(slot)] /
-                           static_cast<int>(shared_squadrons.size());
-        for (auto* sq : shared_squadrons) {
-            sq->available = shared;
-        }
-        pool_[static_cast<std::size_t>(slot)] -=
-            shared * static_cast<int>(shared_squadrons.size());
     }
 }
 
@@ -154,10 +123,56 @@ void Campaign::tick(CampaignTime delta_sec) {
         ++cycles_fired_;
         run_tasking_cycle_();
     }
+
+    // C2: the reinforcement cadence rides the same tick (after the
+    // tasking fires — a boundary that lands mid-tick sees the depleted
+    // pools first, FreeFalcon's own ordering).
+    fire_reinforcements_();
+}
+
+void Campaign::fire_reinforcements_() {
+    if (cfg_.reinforcement_period_sec <= 0) return;
+    if (result_ledger_ == nullptr) return;   // legacy mode: pure B.3
+
+    // Absolute-time gate: now > anchor + period (FreeFalcon's own
+    // shape). On fire the anchor JUMPS to now — a stale save timer
+    // (TestCamp carries 0 against a 38.5M-second epoch) fires exactly
+    // ONCE, not the years it is behind.
+    while (epoch_ + clock_ >
+           last_reinforce_ + cfg_.reinforcement_period_sec) {
+        last_reinforce_ = std::max(epoch_ + clock_,
+                                   last_reinforce_ +
+                                       cfg_.reinforcement_period_sec);
+        ++reinforcement_fires_;
+        // The delivery: deficits refilled from the wire's per-squadron
+        // budgets, into the ledger (the write model — write-back and
+        // artifacts see it). Campaign-relative seconds in the log.
+        (void)result_ledger_->apply_reinforcements(
+            static_cast<double>(clock_));
+    }
 }
 
 void Campaign::run_tasking_cycle_() {
     const auto war_teams = belligerent_teams();
+
+    // Availability — ONE pool (C2):
+    //   * Ledger attached: the LEDGER's tasking view (snapshot − draws
+    //     − non-drawn losses + reinforcements). The Campaign's own
+    //     counters are NOT touched in this mode; each generated
+    //     mission debits the ledger (apply_mission_draw) so cycles,
+    //     combat, and resupply deplete/refill the same numbers the
+    //     write-back and the artifacts carry.
+    //   * No ledger (legacy): the Campaign's own per-squadron counter,
+    //     drawn down by each mission — B.3's shape, byte-identical
+    //     goldens. A fresh ledger reports exactly these numbers (the
+    //     shared force snapshot), so the two modes agree until events
+    //     land — the golden identity.
+    const auto effective_available = [&](const SquadronRef* sq) {
+        if (result_ledger_ != nullptr) {
+            return result_ledger_->squadron_tasking_available(sq->id_num);
+        }
+        return sq->available;
+    };
 
     for (const int slot : war_teams) {
         // The team's squadrons, wire order (deterministic).
@@ -183,16 +198,19 @@ void Campaign::run_tasking_cycle_() {
             SquadronRef* lead = nullptr;
             for (auto* sq : team_squadrons) {
                 if (aro_name(sq->specialty) != profile.aro) continue;
-                // Pick the squadron with the most available aircraft;
+                // Pick the squadron with the most effectively-available
+                // aircraft (post-loss when the ledger is attached);
                 // tie -> wire-order-first (strictly greater keeps the
                 // earlier one, which is the deterministic tie-break).
-                if (!lead || sq->available > lead->available) lead = sq;
+                if (!lead || effective_available(sq) > effective_available(lead))
+                    lead = sq;
             }
             if (!lead) continue;
 
             // Aircraft gate: the profile's default package size must be
-            // coverable by the squadron's available aircraft.
-            const int count = std::min(profile.str, lead->available);
+            // coverable by the squadron's effectively-available aircraft.
+            const int count = std::min(profile.str,
+                                       effective_available(lead));
             if (count <= 0) continue;
 
             MissionIntent intent;
@@ -215,8 +233,17 @@ void Campaign::run_tasking_cycle_() {
                                 static_cast<std::uint32_t>(intents_.size());
             intent.flight_id = intent.package_id;
 
-            // Draw the aircraft down (the attrition ledger B.3 builds on).
-            lead->available -= count;
+            // Draw the aircraft down — ONE pool: the ledger when
+            // attached (apply_mission_draw books the tasking debit
+            // where combat losses and reinforcement already live),
+            // else the Campaign's own counter (the B.3 legacy).
+            if (result_ledger_ != nullptr) {
+                result_ledger_->apply_mission_draw(
+                    static_cast<double>(clock_),
+                    static_cast<std::uint8_t>(slot), lead->id_num, count);
+            } else {
+                lead->available -= count;
+            }
 
             // Publish + record (the campaign's only outward coupling).
             bus_.publish(intent);
@@ -236,6 +263,23 @@ std::string Campaign::to_summary_json() const {
     w.number(cycles_fired_);
     w.put(",\n  \"task_cycle_sec\": ");
     w.number(cfg_.air_task_cycle_sec);
+
+    // C2: the reinforcement cadence's own summary block — ONLY when it
+    // fired. Legacy runs (no ledger / disabled cadence) never see it,
+    // so their goldens stay byte-identical; the FreshLedger identity
+    // test's horizon never reaches the first fire.
+    if (reinforcement_fires_ > 0) {
+        w.put(",\n  \"reinforcement\": {\n    ");
+        w.number_key("period_sec", cfg_.reinforcement_period_sec);
+        w.put(",\n    ");
+        w.number_key("fires", reinforcement_fires_);
+        w.put(",\n    ");
+        w.number_key("aircraft_delivered",
+                     result_ledger_ != nullptr
+                         ? result_ledger_->aircraft_reinforced()
+                         : 0);
+        w.put("\n  }");
+    }
 
     w.put(",\n  \"belligerent_teams\": [");
     {
@@ -320,16 +364,11 @@ std::string Campaign::to_summary_json() const {
 // ============================================================================
 namespace {
 
-/// Decode a Flight roster the way battalions do: 16 groups × 2 bits each.
-/// For flights the packing counts aircraft per element (0xA0 = 4 ships).
-/// 0 is returned when the save carried nothing (roster 0).
+/// Flight roster: the same 16-group 2-bit packing every roster on the
+/// wire uses (shared decode in src/squadron_snapshot.hpp — 0xA0 = 4
+/// aircraft). 0 is returned when the save carried nothing.
 int flight_roster_aircraft(std::uint32_t roster) {
-    if (roster == 0) return 0;
-    int total = 0;
-    for (int g = 0; g < 16; ++g) {
-        total += static_cast<int>((roster >> (g * 2)) & 0x03u);
-    }
-    return total;
+    return detail::roster_group_aircraft(roster);
 }
 
 } // namespace

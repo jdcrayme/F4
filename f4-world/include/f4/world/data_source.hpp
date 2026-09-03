@@ -54,6 +54,15 @@ struct ICampaignSource {
     virtual int32_t bullseye_x() const { return 0; }
     virtual int32_t bullseye_y() const { return 0; }
     virtual int32_t bullseye_name() const { return 0; }
+    // C2 (war-loop tasking) — the .cmp header's maintenance timers
+    // (absolute campaign times, v>=19 block). last_reinforcement anchors
+    // the aircraft-replacement cadence f4-campaign's tasking consumes;
+    // last_resupply/last_repair belong to the ground-supply and objective
+    // repair tranches (carried now so those consumers need no interface
+    // churn later). Default-implemented for the same reason as bullseye.
+    virtual int32_t last_resupply() const { return 0; }
+    virtual int32_t last_repair() const { return 0; }
+    virtual int32_t last_reinforcement() const { return 0; }
     virtual ~ICampaignSource() = default;
 };
 
@@ -81,6 +90,12 @@ struct ITeamSource {
     virtual int16_t first_commander(int i) const = 0;
     virtual int16_t first_wingman(int i) const = 0;
     virtual int16_t last_wingman(int i) const = 0;
+
+    // C2 (war-loop tasking) — the .cmp team block's aircraft-replacement
+    // stock (ushort at team offset 56, v>53; 0 when the team carries
+    // none — a legal wire state). Default-implemented: alternative
+    // sources that predate the tranche keep compiling.
+    virtual uint16_t replacements_avail(int i) const { return 0; }
 
     virtual ~ITeamSource() = default;
 };

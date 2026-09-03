@@ -29,3 +29,10 @@ f4_campaign_add_test(test_campaign_tick      test_campaign_tick.cpp)
 target_link_libraries(test_campaign_tick PRIVATE f4-json)
 target_compile_definitions(test_campaign_tick PRIVATE
     F4_SIMULATION_TEST_FIXTURES_DIR="${CMAKE_SOURCE_DIR}/f4-simulation/tests/fixtures")
+
+# C1 — the result ledger (write model, war-loop feedback, write-back).
+# Links f4-json explicitly (to_json round-trip, same as the tick test).
+f4_campaign_add_test(test_result_ledger   test_result_ledger.cpp)
+target_link_libraries(test_result_ledger PRIVATE f4-json)
+target_compile_definitions(test_result_ledger PRIVATE
+    F4_SIMULATION_TEST_FIXTURES_DIR="${CMAKE_SOURCE_DIR}/f4-simulation/tests/fixtures")

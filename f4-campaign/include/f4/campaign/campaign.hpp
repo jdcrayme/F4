@@ -57,6 +57,7 @@
 
 #include <f4/campaign/mission_profile.hpp>
 #include <f4/campaign/mission_type.hpp>
+#include <f4/campaign/result_ledger.hpp>
 
 #include <f4/messaging/bus.hpp>
 #include <f4/world/data_source.hpp>
@@ -111,6 +112,18 @@ struct CampaignConfig {
     CampaignTime air_task_cycle_sec{1800};
     /// First synthetic package id (deterministic counter start).
     std::uint32_t first_package_id{1};
+    /// C2: the reinforcement cadence — FreeFalcon's gate is
+    /// `CurrentTime > LastReinforcement + Rate`, and the rate is a
+    /// RUNTIME DIFFICULTY SETTING in the reference (campaign ratios,
+    /// not wire data), so it lives here as a tunable. The anchor IS
+    /// wire data (the .cmp header's last_reinforcement, exposed via
+    /// ICampaignSource). The default is DISABLED (0): a fresh ledger
+    /// attached to a default-configured Campaign must change nothing
+    /// (the C1 golden identity — a stale .cmp anchor would otherwise
+    /// fire the cadence the moment a ledger lands). Hosts opt in
+    /// (campaign_qc's --tasking arms 12 h unless overridden); 0 stays
+    /// the pre-C2 depletion-only behavior.
+    CampaignTime reinforcement_period_sec{0};
 };
 
 class Campaign {
@@ -142,9 +155,39 @@ public:
     /// Tasking cycles fired so far.
     [[nodiscard]] int cycles_fired() const noexcept { return cycles_fired_; }
 
+    /// Reinforcement ticks fired so far (C2 — the cadence fires when
+    /// campaign time passes the .cmp anchor + period; see
+    /// CampaignConfig::reinforcement_period_sec). Requires a ledger
+    /// (the refill lands in the write model); the legacy no-ledger
+    /// mode never fires.
+    [[nodiscard]] int reinforcement_fires() const noexcept {
+        return reinforcement_fires_;
+    }
+
     /// Every intent published since construction, in publish order.
     [[nodiscard]] const std::vector<MissionIntent>& intents() const noexcept {
         return intents_;
+    }
+
+    /// Attach the C1 result ledger — the war-loop feedback. While
+    /// attached, the LEDGER IS THE TASKING POOL (C2): the cycle's
+    /// availability gates read the ledger's one-pool numbers
+    /// (squadron_tasking_available: snapshot − draws − non-drawn
+    /// losses + reinforcements) and every generated mission debits it
+    /// (apply_mission_draw) — cycles and combat deplete ONE pool, and
+    /// the reinforcement cadence refills it in place. The Campaign's
+    /// own pool_/available counters are UNTOUCHED in this mode (the
+    /// no-ledger path keeps them — B.3's behavior, byte-identical
+    /// goldens).
+    ///
+    /// The ledger is BORROWED and MUTABLE (the set_brain_archetype /
+    /// set_weapon_table pattern; C1 read it, C2 also writes draws and
+    /// fires reinforcement into it): null detaches, and a ledger
+    /// whose slots carry no events reports the same numbers the
+    /// Campaign's own pool would — attaching a fresh ledger changes
+    /// nothing until draws or losses land in it (the golden identity).
+    void set_result_ledger(CampaignResultLedger* ledger) noexcept {
+        result_ledger_ = ledger;
     }
 
     /// Slots of the teams currently at war (lowest slot first) — the
@@ -161,6 +204,15 @@ private:
     /// One tasking cycle: per belligerent team, evaluate profiles and
     /// publish intents. Returns the intents generated THIS cycle.
     void run_tasking_cycle_();
+
+    /// C2: the reinforcement cadence — fire while now (epoch + clock)
+    /// has passed last_reinforce_ + period. Each fire delivers into
+    /// the ledger (deficits refilled from the wire's per-squadron
+    /// budgets) and advances the anchor to now (catch-up-once — a
+    /// stale .cmp timer fires ONE tick, not the months it is behind).
+    /// No-op without a ledger (the refill is write-model state) or
+    /// with reinforcement disabled.
+    void fire_reinforcements_();
 
     /// Aircraft pool snapshot for one team (roster-backed when nonzero,
     /// else the campaign source's per-team count).
@@ -179,7 +231,26 @@ private:
 
     /// Live aircraft pool per team slot, deducted by each generated
     /// mission (the attrition ledger B.3 builds on). Index = slot.
+    /// NOT touched while a result ledger is attached (the ledger owns
+    /// the tasking pool then — one pool, not two).
     std::vector<int> pool_;
+
+    /// C2 reinforcement cadence state (absolute campaign times — the
+    /// save's own epoch, bridged through ICampaignSource):
+    ///   epoch_            — current_time at construction (the anchor's
+    ///                       time base; the relative clock + epoch = now)
+    ///   last_reinforce_  — the anchor from the .cmp header
+    ///                       (last_reinforcement), advanced to "now" on
+    ///                       each fire (FreeFalcon's catch-up-once shape
+    ///                       — a stale anchor fires once, not N times).
+    CampaignTime epoch_{0};
+    CampaignTime last_reinforce_{0};
+    int reinforcement_fires_{0};
+
+    /// C1/C2 result ledger (optional, non-owning, MUTABLE — tasking
+    /// writes draws into it) — when set, it IS the tasking pool. See
+    /// set_result_ledger().
+    CampaignResultLedger* result_ledger_ = nullptr;
 
     /// Aircraft available per squadron (parallel to squadrons_), updated
     /// as missions draw aircraft down.

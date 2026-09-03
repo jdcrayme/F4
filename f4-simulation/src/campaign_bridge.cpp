@@ -20,6 +20,8 @@
 #include "f4/simulation/campaign_bridge.hpp"
 #include "f4/simulation/frames.hpp"
 
+#include <f4/simulation/campaign_origin.hpp>
+
 #include <f4/entities/entity.hpp>
 #include <f4/entities/types.hpp>
 #include <f4/flight/flight_model_component.hpp>
@@ -433,6 +435,14 @@ std::uint32_t airbase_vu_id(const f4::entities::EntityWorld& world,
         : static_cast<std::uint32_t>(it->second);
 }
 
+/// Any unit/objective entity's VU_ID.num from its PropertyBag residue
+/// (the C1 origin stamp's generic lookup — airbase_vu_id's rule,
+/// un-specialized).
+std::uint32_t entity_vu_id(const f4::entities::EntityWorld& world,
+                           f4::entities::EntityId entity) {
+    return airbase_vu_id(world, entity);
+}
+
 std::optional<f4::entities::EntityId>
 spawn_aircraft_for_flight(f4::entities::EntityWorld& world,
                           f4::entities::EntityId flight_entity,
@@ -607,6 +617,22 @@ spawn_aircraft_for_flight(f4::entities::EntityWorld& world,
             ? static_cast<uint8_t>(*team_tag->as_int()) : 0;
         h.set_tag(tags::TEAM,
                   TagValue::from(owner_team_string(world, owner)));
+
+        // 6. C1 origin stamp — the campaign identity this aircraft
+        //    flies under, as DATA. The result sink reads it to
+        //    attribute kills (EntityId -> which squadron lost / which
+        //    one scored). All three VUs come from the entities' own
+        //    PropertyBag residue; the team slot is the flight's owner
+        //    (the CAMPAIGN vocabulary — the sim's blue/red/green string
+        //    above is a different thing entirely).
+        auto& origin = h.add<CampaignOriginComponent>();
+        origin.flight_vu = entity_vu_id(world, flight_entity);
+        origin.squadron_vu = (fp->squadron.value != 0)
+            ? entity_vu_id(world, fp->squadron) : 0;
+        origin.home_airbase_vu = home_airbase_vu;
+        origin.team_slot = owner;
+        origin.callsign_id = fp->callsign_id;
+        origin.callsign_num = fp->callsign_num;
     }
 
     return h.id();

@@ -17,6 +17,8 @@ add_library(f4-campaign STATIC
     src/mission_type.cpp
     src/mission_profile.cpp
     src/campaign.cpp
+    src/result_ledger.cpp
+    src/world_writeback.cpp
 )
 target_link_libraries(f4-campaign PUBLIC f4_warnings)
 

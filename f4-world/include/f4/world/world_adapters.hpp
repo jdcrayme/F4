@@ -43,6 +43,10 @@ struct CampaignAdapter : ICampaignSource {
     int32_t bullseye_x() const override { return ws_->campaign.bullseye_x; }
     int32_t bullseye_y() const override { return ws_->campaign.bullseye_y; }
     int32_t bullseye_name() const override { return ws_->campaign.bullseye_name; }
+    // C2 — the maintenance-timer anchors (see ICampaignSource).
+    int32_t last_resupply() const override { return ws_->campaign.last_resupply; }
+    int32_t last_repair() const override { return ws_->campaign.last_repair; }
+    int32_t last_reinforcement() const override { return ws_->campaign.last_reinforcement; }
 
 private:
     const WorldState* ws_;
@@ -68,6 +72,8 @@ struct TeamAdapter : ITeamSource {
     int16_t first_commander(int i) const override { return ws_->teams[i].first_commander; }
     int16_t first_wingman(int i) const override { return ws_->teams[i].first_wingman; }
     int16_t last_wingman(int i) const override { return ws_->teams[i].last_wingman; }
+    // C2 — the .cmp team block's replacement stock.
+    uint16_t replacements_avail(int i) const override { return ws_->teams[i].replacements_avail; }
 
 private:
     const WorldState* ws_;

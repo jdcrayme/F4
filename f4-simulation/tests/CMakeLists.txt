@@ -22,6 +22,7 @@ f4_simulation_add_test(test_scenario_loader        test_scenario_loader.cpp)
 f4_simulation_add_test(test_simdata_wiring         test_simdata_wiring.cpp)
 f4_simulation_add_test(test_campaign_bridge        test_campaign_bridge.cpp)
 f4_simulation_add_test(test_campaign_spawner      test_campaign_spawner.cpp)
+f4_simulation_add_test(test_campaign_result_sink  test_campaign_result_sink.cpp)
 f4_simulation_add_test(test_feature_spawning       test_feature_spawning.cpp)
 f4_simulation_add_test(test_vehicle_spawning       test_vehicle_spawning.cpp)
 f4_simulation_add_test(test_bubble_manager         test_bubble_manager.cpp)
@@ -121,3 +122,8 @@ endif()
 if(TARGET convert_golden_fixtures)
     add_dependencies(test_simdata_wiring convert_golden_fixtures)
 endif()
+
+# The C1 result-sink test needs the generated f16.json fixture (the
+# spawn-path origin-stamp case) — same define as the combat tests.
+target_compile_definitions(test_campaign_result_sink PRIVATE
+    F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}")

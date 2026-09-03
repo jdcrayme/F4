@@ -24,8 +24,33 @@
 //      objectives, units, flights, mission histogram), b3_loop stats,
 //      sim-run stats (spawned, airborne-at-end, per-flight end position),
 //      the ORDNANCE ledger (A-G slice: releases, impacts, per-objective
-//      damage), plus the scenario JSON path for replay in the
-//      f4-scenario-player.
+//      damage), the RESULT ledger (C1: the campaign write-back — air
+//      losses, kill credit, objective damage, post-loss pools), plus
+//      the scenario JSON path for replay in the f4-scenario-player.
+//
+//   4. THE RESULT LEDGER (C1 — the war loop's return leg): the
+//      CampaignResultLedger is snapshotted from the world's own team
+//      pools + squadron counters, fed by the CampaignResultSink (kill
+//      + impact events on the sim bus, resolved back to campaign
+//      identity), synced with the objectives' final damage state, and
+//      written as campaign_result.json (byte-stable). The in-memory
+//      write-back into the WorldState runs too (apply_to) — the counts
+//      land in the summary's "results" block. Exit 5 fires when combat
+//      happened but the ledger stayed empty: outcomes that never wrote
+//      back, the exact class of silent loss this tranche exists to kill.
+//
+//   5. THE TASKING LADDER (C2 — one pool, multi-cycle): --tasking <m>
+//      runs the synthetic M4.7 Campaign (profile ladder over squadron
+//      availability, THE LEDGER ATTACHED — every generated mission
+//      debits it, the reinforcement cadence refills it from the wire's
+//      per-squadron budgets on the .cmp anchor's schedule) for m
+//      minutes of campaign time BEFORE the saved-flight sim run. The
+//      tasking draws and the combat losses then land in the SAME
+//      ledger — the first true multi-cycle loop: tasking depletes,
+//      combat attrites, resupply refills, the next cycle sees all
+//      three. Reported as the summary's "tasking" block; exit 6 fires
+//      when the ladder drew NOT ONE aircraft despite belligerents
+//      with aircraft available (the tasking-broke gate).
 //
 // Usage:
 //   campaign_qc <world.json> [options]
@@ -38,6 +63,12 @@
 //     --ticks <n>                  (sim frames; default 54000 = 15 min)
 //     --minutes <m>                (convenience: sets --ticks to m*60*60)
 //     --sim-dt <sec>               (default 1/60)
+//     --tasking <m>                (C2: synthetic tasking minutes; 0 = off)
+//     --tasking-cycle <sec>        (C2: ladder cycle period; default 1800)
+//     --reinforce-period <sec>     (C2: reinforcement cadence; 0 = off,
+//                                   default 43200 = 12 h)
+//     --profiles <json>            (default: <bin>/generated_campaign/MissionProfiles.json)
+//     --record-every <n> / --no-record
 //     --out-dir <dir>              (default: beside the world JSON)
 //
 // Exit code: 0 when the loop produced at least one aircraft AND the sim
@@ -48,7 +79,15 @@
 // never-ending cross-theater taxi: the exact symptoms the first TestCamp
 // run exposed); 4 when strike flights were armed with ordnance but NOT
 // ONE bomb was released — the A-G employment failure (broken strike
-// arming, an envelope that never opens, a store that never debits).
+// arming, an envelope that never opens, a store that never debits);
+// 5 when combat outcomes occurred (kills and/or bomb impacts) but the
+// result ledger recorded NOTHING — the write-back failure (a sink that
+// never fired, an origin stamp that never landed, a classification that
+// dropped every event);
+// 6 when --tasking ran the synthetic ladder and it drew NOT ONE
+// aircraft despite belligerent teams with aircraft available — the
+// tasking-broke failure (a profile table that didn't load, availability
+// gates that read zero, a force snapshot that misdecoded the roster).
 //
 // The 15-minute default window (was 5): TestCamp's strike flights sit a
 // median 34 NM from their targets — a 5-minute window proved the taxi/
@@ -59,8 +98,11 @@
 #include <f4/simulation/simulation.hpp>
 #include <f4/simulation/campaign_bridge.hpp>
 #include <f4/simulation/campaign_spawner.hpp>
+#include <f4/simulation/campaign_result_sink.hpp>
 #include <f4/campaign/campaign.hpp>
 #include <f4/campaign/mission_type.hpp>
+#include <f4/campaign/result_ledger.hpp>
+#include <f4/campaign/world_writeback.hpp>
 #include <f4/entities/entity.hpp>
 #include <f4/ai/brain_component.hpp>
 #include <f4/flight/flight_model_component.hpp>
@@ -113,6 +155,11 @@ struct Args {
                                  // does not fit small hosts; the QC gates
                                  // don't need the trace, the viewer replay
                                  // does)
+    // C2 — the synthetic tasking ladder (see the header's item 5).
+    int tasking_minutes = 0;      // 0 = off
+    int tasking_cycle_sec = 1800; // the ladder's cycle period
+    int reinforce_period_sec = -1; // -1 = engine default (43200); 0 = off
+    std::filesystem::path profiles_json;
     std::filesystem::path out_dir;
 };
 
@@ -122,6 +169,8 @@ struct Args {
         "          [--models <KoreaObj.HDR>] [--team <slot>]\n"
         "          [--mission <AMIS_NAME|byte>] [--max-flights <n>]\n"
         "          [--ticks <n>|--minutes <m>] [--sim-dt <sec>]\n"
+        "          [--tasking <minutes>] [--tasking-cycle <sec>]\n"
+        "          [--reinforce-period <sec>] [--profiles <json>]\n"
         "          [--record-every <n>] [--no-record]\n"
         "          [--out-dir <dir>]\n",
         prog);
@@ -141,6 +190,9 @@ Args parse_args(int argc, char** argv) {
     a.config = std::filesystem::path(F4_BINARY_DIR) /
                "generated_fixtures/f16.json";
 #endif
+#ifdef F4_MISSION_PROFILES_JSON
+    a.profiles_json = F4_MISSION_PROFILES_JSON;
+#endif
     for (int i = 2; i < argc; ++i) {
         const std::string k = argv[i];
         auto next = [&]() -> const char* {
@@ -150,11 +202,15 @@ Args parse_args(int argc, char** argv) {
         if (k == "--class-table")      a.class_table = next();
         else if (k == "--config")      a.config = next();
         else if (k == "--models")      a.models_hdr = next();
+        else if (k == "--profiles")    a.profiles_json = next();
         else if (k == "--team")        a.team = std::atoi(next());
         else if (k == "--max-flights") a.max_flights = std::atoi(next());
         else if (k == "--ticks")       a.ticks = std::atoi(next());
         else if (k == "--minutes")     a.ticks = static_cast<int>(std::atof(next()) * 3600.0);
         else if (k == "--sim-dt")      a.sim_dt = std::atof(next());
+        else if (k == "--tasking")     a.tasking_minutes = std::atoi(next());
+        else if (k == "--tasking-cycle") a.tasking_cycle_sec = std::atoi(next());
+        else if (k == "--reinforce-period") a.reinforce_period_sec = std::atoi(next());
         else if (k == "--record-every") a.record_every = std::max(1, std::atoi(next()));
         else if (k == "--no-record")   a.record = false;
         else if (k == "--out-dir")     a.out_dir = next();
@@ -248,6 +304,81 @@ int main(int argc, char** argv) {
     auto populated = f4::world::populate_world(b3_world, ws);
     f4::world::WorldStateAdapters adapters(ws);
     f4::messaging::MessageBus bus;
+
+    // C1: the result ledger — the campaign's write model, snapshotted
+    // from the SAME sources the sim's world was populated from. Zero
+    // events in → numbers identical to the save's own (the round-trip
+    // contract the ledger's tests pin).
+    CampaignResultLedger result_ledger(
+        static_cast<const f4::world::ICampaignSource&>(adapters.campaign),
+        static_cast<const f4::world::ITeamSource&>(adapters.teams),
+        static_cast<const f4::world::IUnitCoreSource&>(adapters.units));
+
+    // -----------------------------------------------------------------------
+    // 2b. THE C2 TASKING LADDER — the synthetic M4.7 Campaign over the
+    // SAME ledger (ONE pool: tasking draws book now, the sim's combat
+    // losses book later, the reinforcement cadence refills in between
+    // — the first true multi-cycle loop). Runs BEFORE the spawner
+    // attaches: its intents publish to the bus while nobody listens
+    // (synthetic flights carry no saved routes; the saved-flight loop
+    // below is the one that spawns — generation-to-spawn wiring is the
+    // C3/C4 route-builder tranche).
+    // -----------------------------------------------------------------------
+    bool tasking_ran = false;
+    bool tasking_had_air = false;   // belligerents had aircraft available
+    int tasking_cycles = 0;
+    int tasking_intents = 0;
+    if (args.tasking_minutes > 0) {
+        if (args.profiles_json.empty() ||
+            !std::filesystem::exists(args.profiles_json)) {
+            std::fprintf(stderr,
+                         "campaign_qc: mission profiles not found (%s) — "
+                         "--tasking needs the generated table\n",
+                         args.profiles_json.string().c_str());
+            return 1;
+        }
+        const auto profiles = MissionProfileTable::load(args.profiles_json);
+        CampaignConfig ladder_cfg;
+        ladder_cfg.air_task_cycle_sec = args.tasking_cycle_sec;
+        // -1 = the tool's own default (12 h — the engine's default is
+        // disabled: a fresh ledger must change nothing until the host
+        // arms the cadence). 0 = explicitly off.
+        ladder_cfg.reinforcement_period_sec =
+            args.reinforce_period_sec < 0 ? 43200
+                                          : args.reinforce_period_sec;
+        Campaign ladder(
+            static_cast<const f4::world::ICampaignSource&>(adapters.campaign),
+            static_cast<const f4::world::ITeamSource&>(adapters.teams),
+            static_cast<const f4::world::IUnitCoreSource&>(adapters.units),
+            profiles, bus, ladder_cfg);
+        ladder.set_result_ledger(&result_ledger);
+
+        // The exit-6 precondition: belligerents actually had aircraft.
+        const auto war_teams = ladder.belligerent_teams();
+        for (const auto& s : result_ledger.squadrons()) {
+            if (s.availability <= 0) continue;
+            if (std::find(war_teams.begin(), war_teams.end(),
+                          static_cast<int>(s.owner)) != war_teams.end()) {
+                tasking_had_air = true;
+                break;
+            }
+        }
+
+        // One big tick: every due cycle fires in order, the
+        // reinforcement cadence rides the same clock (a stale .cmp
+        // anchor fires once — FreeFalcon's catch-up shape).
+        ladder.tick(static_cast<CampaignTime>(args.tasking_minutes) * 60);
+        tasking_ran = true;
+        tasking_cycles = ladder.cycles_fired();
+        tasking_intents = static_cast<int>(ladder.intents().size());
+
+        std::printf("tasking: minutes=%d cycles=%d intents=%d drawn=%d "
+                    "reinforce_fires=%d reinforced=%d\n",
+                    args.tasking_minutes, tasking_cycles, tasking_intents,
+                    result_ledger.mission_draw_aircraft(),
+                    result_ledger.reinforcement_fires(),
+                    result_ledger.aircraft_reinforced());
+    }
 
     // Class table + model db + config for spawning.
     f4::world_convert::ClassTable ct;
@@ -395,6 +526,14 @@ int main(int argc, char** argv) {
     Simulation sim(scenario, args.out_dir);
     sim.initialize();
 
+    // C1: the result sink — BEFORE the first tick (the objective damage
+    // snapshot must catch the save-time state, so a mid-campaign save's
+    // prior damage is initial, not this run's). Kills and bomb impacts
+    // resolve back to campaign identity through the spawned aircraft's
+    // CampaignOriginComponent and the objectives' own VU residue.
+    CampaignResultSink result_sink(result_ledger, sim.world());
+    result_sink.attach(sim.bus());
+
     // A-G slice: the ordnance ledger — subscribe to the release + impact
     // events on the SIM's bus before the run, then read the objective
     // damage state at the end (fstatus is the campaign wire's own damage
@@ -436,6 +575,12 @@ int main(int argc, char** argv) {
         sim.tick(args.sim_dt);
     }
     sim.write_recording();
+
+    // C1: close the loop — the objectives' final damage state lands in
+    // the ledger (event counters came in during the run; this is the
+    // authoritative state sync).
+    result_sink.sync_objective_damage();
+    result_sink.detach(sim.bus());
 
     // End-of-run state per aircraft: airborne? where?
     int airborne = 0;
@@ -508,7 +653,47 @@ int main(int argc, char** argv) {
                 ordnance.features_destroyed, ordnance.destroyed_pct_max);
 
     // -----------------------------------------------------------------------
-    // 4. Summary JSON
+    // 4. THE RESULT LEDGER — write-back + artifacts + the C1 gate
+    // -----------------------------------------------------------------------
+    // In-memory write-back into the WorldState the run started from
+    // (team pools, squadron counters, objective fstatus). The counts
+    // report below; unmatched VUs are LOUD (a fixture without the unit,
+    // a stale world — never a silent drop).
+    const auto writeback = f4::campaign::apply_to(result_ledger, ws);
+
+    const auto result_path = args.out_dir / "campaign_result.json";
+    {
+        std::ofstream out(result_path);
+        out << result_ledger.to_json();
+    }
+
+    const auto& sink_stats = result_sink.stats();
+    std::printf("results: kills=%d air_losses=%d attributed=%d ag=%d "
+                "unclassified=%d impacts=%d objectives_synced=%d "
+                "writeback=(pools=%d sq=%d obj=%d "
+                "unmatched_sq=%zu unmatched_obj=%zu)\n",
+                sink_stats.kills_seen, result_ledger.air_losses(),
+                result_ledger.air_kills_attributed(),
+                sink_stats.ag_kills_recorded,
+                sink_stats.kills_unclassified,
+                result_ledger.bomb_impacts(),
+                sink_stats.objectives_synced,
+                writeback.team_pools_written, writeback.squadrons_written,
+                writeback.objectives_written,
+                writeback.unmatched_squadrons.size(),
+                writeback.unmatched_objectives.size());
+
+    // C1 gate (exit 5): combat outcomes occurred — kills and/or bomb
+    // impacts — but the ledger recorded NOTHING. Every outcome died on
+    // the bus: a sink that never fired, an origin stamp that never
+    // landed, a classification that dropped every event. The exact
+    // silent-loss class this tranche exists to kill.
+    const bool outcomes_happened =
+        sink_stats.kills_seen > 0 || sink_stats.bomb_impacts_seen > 0;
+    const bool results_lost = outcomes_happened && result_ledger.empty();
+
+    // -----------------------------------------------------------------------
+    // 5. Summary JSON
     // -----------------------------------------------------------------------
     const auto summary_path = args.out_dir / "campaign_qc_summary.json";
     {
@@ -544,6 +729,57 @@ int main(int argc, char** argv) {
         }
         w.put("\n    }");
         w.put("\n  }");
+
+        // C2 — the tasking ladder's own block (ONLY when it ran): the
+        // multi-cycle loop as numbers — cycles, draws, reinforcement,
+        // and per-team pool trajectory (the ledger's one-pool view).
+        if (tasking_ran) {
+            w.put(",\n  \"tasking\": {\n    ");
+            w.number_key("minutes", args.tasking_minutes);
+            w.put(",    ");
+            w.number_key("cycle_sec", args.tasking_cycle_sec);
+            w.put(",    ");
+            w.number_key("cycles_fired", tasking_cycles);
+            w.put(",    ");
+            w.number_key("intents", tasking_intents);
+            w.put(",    ");
+            w.number_key("drawn_aircraft",
+                         result_ledger.mission_draw_aircraft());
+            w.put(",    ");
+            w.number_key("reinforce_fires",
+                         result_ledger.reinforcement_fires());
+            w.put(",    ");
+            w.number_key("reinforced_aircraft",
+                         result_ledger.aircraft_reinforced());
+            w.put(",    ");
+            w.number_key("draws_unmatched",
+                         result_ledger.draws_unmatched());
+            w.put(",\n    \"teams\": [");
+            bool first_team = true;
+            for (const auto& t : result_ledger.teams()) {
+                // Skip never-seen slots entirely (deterministic output:
+                // only the snapshot's own team entries appear).
+                w.put(first_team ? "\n      {" : ",\n      {");
+                first_team = false;
+                w.number_key("slot", t.slot);
+                w.put(", \"name\": ");
+                write_string(w, t.name);
+                w.put(", ");
+                w.number_key("aircraft_initial", t.aircraft_initial);
+                w.put(", ");
+                w.number_key("aircraft_drawn", t.drawn);
+                w.put(", ");
+                w.number_key("air_reinforced", t.reinforced);
+                w.put(", ");
+                w.number_key("air_losses", t.losses);
+                w.put(", ");
+                w.number_key("aircraft_tasking",
+                             result_ledger.team_aircraft_tasking(t.slot));
+                w.put("}");
+            }
+            w.put(result_ledger.teams().empty() ? "]" : "\n    ]");
+            w.put("\n  }");
+        }
 
         w.put(",\n  \"b3_loop\": {\n    ");
         w.number_key("intents_emitted", intents.size());
@@ -666,7 +902,50 @@ int main(int argc, char** argv) {
             }
         }
         w.put(ordnance.impact_log.empty() && true ? "]" : "\n    ]");
-        w.put("\n  }\n}\n");
+
+        // Close the ordnance object, then the C1 result ledger block: the
+        // war loop's return leg, as numbers. campaign_result.json carries
+        // the full document (events, per-squadron state, fstatus bitmaps).
+        w.put("\n  }");
+        w.put(",\n  \"results\": {\n    ");
+        w.number_key("kills_seen", sink_stats.kills_seen);
+        w.put(",\n    ");
+        w.number_key("air_losses", result_ledger.air_losses());
+        w.put(",\n    ");
+        w.number_key("air_kills_attributed",
+                     result_ledger.air_kills_attributed());
+        w.put(",\n    ");
+        w.number_key("ag_kills", sink_stats.ag_kills_recorded);
+        w.put(",\n    ");
+        w.number_key("kills_unclassified",
+                     sink_stats.kills_unclassified);
+        w.put(",\n    ");
+        w.number_key("bomb_impacts", result_ledger.bomb_impacts());
+        w.put(",\n    ");
+        w.number_key("objectives_damaged",
+                     static_cast<std::int64_t>(
+                         result_ledger.objective_damage().size()));
+        w.put(",\n    ");
+        w.number_key("features_destroyed",
+                     result_ledger.features_destroyed());
+        w.put(",\n    ");
+        w.number_key("writeback_team_pools",
+                     writeback.team_pools_written);
+        w.put(",\n    ");
+        w.number_key("writeback_squadrons",
+                     writeback.squadrons_written);
+        w.put(",\n    ");
+        w.number_key("writeback_objectives",
+                     writeback.objectives_written);
+        w.put(",\n    ");
+        w.number_key("writeback_unmatched",
+                     static_cast<std::int64_t>(
+                         writeback.unmatched_squadrons.size() +
+                         writeback.unmatched_objectives.size()));
+        w.put(",\n    \"result_json\": ");
+        write_string(w, result_path.string());
+        w.put("\n  }");
+        w.put("\n}\n");
 
         std::ofstream out(summary_path);
         out << w.str();
@@ -675,6 +954,7 @@ int main(int argc, char** argv) {
     std::printf("wrote: %s\n", summary_path.string().c_str());
     std::printf("wrote: %s\n", (args.out_dir / "trace.json").string().c_str());
     std::printf("wrote: %s\n", scenario_path.string().c_str());
+    std::printf("wrote: %s\n", result_path.string().c_str());
     if (nothing_airborne) {
         std::fprintf(stderr,
                      "campaign_qc: QC FAILURE — %zu aircraft spawned, 0 "
@@ -691,6 +971,32 @@ int main(int argc, char** argv) {
                      "intent routing); inspect trace.json ai_state.\n",
                      strike_flights_armed);
         return 4;
+    }
+    if (results_lost) {
+        std::fprintf(stderr,
+                     "campaign_qc: QC FAILURE — combat outcomes occurred "
+                     "(kills=%d impacts=%d) but the result ledger recorded "
+                     "NOTHING. The write-back chain broke (sink never "
+                     "fired / origin stamp missing / classification "
+                     "dropped every event); inspect campaign_result.json.\n",
+                     sink_stats.kills_seen, sink_stats.bomb_impacts_seen);
+        return 5;
+    }
+    // C2 gate (exit 6): the tasking ladder ran over belligerents that
+    // HAD aircraft, yet drew not one — the generation side broke (the
+    // profile table, the availability gates, the force snapshot's
+    // roster decode). The one-pool ledger is exactly where that shows
+    // up first: no draws means nothing can ever deplete.
+    if (tasking_ran && tasking_had_air &&
+        result_ledger.mission_draw_aircraft() == 0) {
+        std::fprintf(stderr,
+                     "campaign_qc: QC FAILURE — the tasking ladder ran %d "
+                     "cycles over %d minutes with belligerent aircraft "
+                     "available and drew NOTHING. The generation chain "
+                     "broke (profiles / availability gates / roster "
+                     "decode); inspect campaign_qc_summary.json tasking.\n",
+                     tasking_cycles, args.tasking_minutes);
+        return 6;
     }
     return 0;
 }

@@ -1,5 +1,93 @@
 # F4 Cleanup Pass — Changes Summary
 
+## C2 — One Pool: Tasking Draws, Combat Losses, and Resupply Deplete the Same Ledger (C2-ONEPOOL-1)
+
+**The war loop's forward leg joins the return leg. C1 made sim outcomes
+write back; C2 makes tasking draws, combat losses, and reinforcement
+refills flow through ONE pool — the CampaignResultLedger. While a ledger
+is attached, the Campaign's availability gate reads the ledger's
+squadron_tasking_available() (snapshot − draws − non-drawn losses +
+reinforcements) and every generated mission books its draw with
+apply_mission_draw() where combat losses already lived; the Campaign's
+own pool/available counters are untouched in that mode (the no-ledger
+path keeps B.3's behavior, byte-identical goldens — a fresh ledger
+reports exactly the same numbers, pinned across THREE cycles of draws).
+Draw/loss netting: a drawn aircraft's death consumes its draw — the pool
+debits once, the existence counters count every death; a non-drawn death
+(parked, scenario) debits the pool directly, C1's behavior when no draws
+exist. The reinforcement cadence fires FreeFalcon's own gate (now >
+last_reinforcement + period) against the .cmp header's decoded anchor: a
+stale anchor (TestCamp: 0 vs a 38.5M-second epoch) fires exactly ONCE,
+each fire refills squadron deficits toward their run-start snapshot
+consuming the WIRE's per-squadron reinforcement budgets (TestCamp: 26
+squadrons carry 24..168), team existence pools gain deliveries capped at
+initial. The period is a config tunable, default DISABLED — attaching a
+fresh ledger to a default-configured Campaign still changes nothing (the
+C1 golden identity). campaign_qc --tasking <minutes> runs the first true
+multi-cycle loop — the ladder draws, the saved-flight sim fight attrites,
+the cadence refills, ONE ledger carries all three; exit 6 (tasking-broke)
+and a tasking summary block (per-team pool trajectory) gate it. Verified
+on TestCamp: 4-hour tasking + 20-minute INTSTRIKE — 8 cycles, 438
+intents, 957 drawn, 1 fire delivering 232 aircraft to 22 squadrons, 88
+bombs / 20 damaged objectives / fstatus written back, all gates green.
+Suite 2077 → 2091 (+14, 100%, zero warnings).**
+
+| Area | Change |
+|------|--------|
+| `f4-campaign` — ledger tasking side | SquadronLedger gains availability (the run-start snapshot), reinforce_pending (the wire budget), run_draws / run_reinforced / drawn_deaths; TeamLedger gains drawn / reinforced / drawn_deaths. apply_mission_draw(t, team, vu, count): tasking debit, existence untouched (drawn aircraft fly), unknown VUs loud (draws_unmatched — never silent). apply_reinforcements(t): per-squadron deficit refill min(deficit, budget), budget consumed, team existence capped at initial, one ReinforcementRecord per delivery. apply_air_loss gains the netting (drawn death consumes a draw slot; team drawn_deaths tracks it). Queries: squadron_tasking_available(), team_aircraft_tasking() (floored, netted). to_json v2: mission_draws + reinforcements event logs, per-team drawn/reinforced/aircraft_tasking, per-squadron aircraft_available/aircraft_tasking/run_draws/run_reinforced/reinforce_budget — byte-stable, strictly valid, no floats. |
+| `f4-campaign` — shared force snapshot | src/squadron_snapshot.hpp (internal, shared by campaign.cpp + result_ledger.cpp — the two consumers can never drift): the squadron roster DECODED from the wire's 2-bit-per-group packing (0x5555aaaa = 24 ships; the pre-C2 Campaign read the RAW u32 — 1.4 billion available aircraft on any real v71 save — kunsan never noticed because its rosters are 0), roster-less squadrons sharing the team pool as before, and the per-squadron reinforcement budget from IUnitCoreSource. |
+| `f4-campaign` — Campaign | set_result_ledger(CampaignResultLedger*) — MUTABLE now (the ledger IS the pool while attached: tasking writes draws into it, the C1 read side unchanged). run_tasking_cycle_: ledger-mode availability via squadron_tasking_available(), draws via apply_mission_draw, own counters untouched in that mode. tick() fires the reinforcement cadence after the tasking cycles (a boundary landing mid-tick sees the depleted pools first): epoch from ICampaignSource::current_time(), anchor from last_reinforcement(), catch-up-once (anchor JUMPS to now). CampaignConfig::reinforcement_period_sec (tunable — FreeFalcon's rate is a runtime difficulty setting, not wire data; default 0 = disabled, hosts opt in). to_summary_json gains a "reinforcement" block ONLY when it fired (legacy goldens stay byte-identical). |
+| `f4-world` — the C2 data path | CampaignState + last_resupply / last_repair / last_reinforcement (the .cmp header's maintenance timers, absolute campaign times — decoded by f4-world-convert since v71, now LOADED); TeamState + replacements_avail (the team block's replacement stock). ICampaignSource/ITeamSource default-implemented accessors (the bullseye pattern — alternative sources keep compiling); WorldStateAdapters override both. The last_resupply/last_repair timers are carried for the ground-supply and repair tranches (their consumers land later); replacements_avail is exposed but not yet consumed (the squadron-level wire budgets are the operative C2 source). |
+| `f4-simulation` — campaign_qc | --tasking <minutes> (the synthetic ladder, ledger attached, BEFORE the spawner subscribes — its intents publish to nobody; synthetic flights carry no saved routes, generation-to-spawn is the C3/C4 route-builder tranche), --tasking-cycle <sec>, --reinforce-period <sec> (default 12 h when --tasking is on), --profiles <json> (default: the generated MissionProfiles.json — CMake now orders f4-campaign BEFORE f4-simulation so the fixture target + cache var exist at configure time). The summary gains a "tasking" block (cycles, intents, drawn, fires, delivered, unmatched, per-team initial/drawn/reinforced/losses/tasking). NEW GATE exit 6: the ladder ran over belligerents that HAD aircraft and drew nothing — the generation side broke (profiles / availability gates / roster decode). |
+| Tests | +14 (suite 2077 → 2091, 100%, zero warnings): f4-campaign test_result_ledger (12) — the roster packing decode (24/20/team-share); draws debit tasking not existence (empty() and apply_to still no-ops on a draw-only run); drawn-death netting (24−4 with 2 dead, history 2, existence 8); non-drawn deaths debit (draws-exhausted surplus); unknown draw squadron loud and counted; reinforcement refill from budget (deficit 4, budget 3, budget spent, second fire quiet, team existence 9); cap at snapshot (huge budget refills only the deficit; pristine squadrons get nothing); to_json v2 byte-stable + strict + greps; the THREE-cycle ledger-mode golden identity (own-pool vs one-pool byte-identical); THE acceptance — draws deplete (cycle 2 tasks nothing) → the fire refills → cycle 4 flies again; the stale-anchor catch-up fires exactly once; disabled cadence matches legacy. f4-world test_world_state (2) — the maintenance timers + replacement stock parse (values, absent-key defaults) and the adapters' exposure through the I*Source boundary. |
+| Docs | CAMPAIGN_LOOP_PLAN.md C2 section → LANDED (semantics, the catch-up rule, the known gaps — replacements_avail unconsumed, drawn aircraft never return this slice, resupply/repair timers carried for their tranches); README f4-campaign section (the one-pool contract + the reinforcement example). |
+
+**The loop, now multi-cycle (what a TestCamp run proves): tasking draws
+957 aircraft from the ledger's pool over 8 cycles; the reinforcement
+cadence refills 232 of them from the save's own budgets; the sim's 88
+bombs damage 20 objectives whose fstatus lands back in the WorldState —
+every number the next cycle reads already reflects every number the last
+cycle spent.**
+
+## C1 — The War Loop Closes: Sim Outcomes Write Back into Campaign State (C1-LEDGER-1)
+
+**The campaign's return leg exists now. The CampaignResultLedger (f4-campaign)
+is the write model — snapshotted from the same sources the run started from,
+fed by the CampaignResultSink (f4-simulation), which resolves EntityKilled /
+BombImpact bus events back to campaign identity through the new
+CampaignOriginComponent (the sim entity's flight/squadron VUs + team slot,
+stamped at spawn). Air kills decrement the victim team's pool, book the
+victim squadron's total_losses (uchar-saturating), credit the killer's
+aa_kills when it resolves (unattributed when it doesn't); ag kills book
+credit; objective damage is final-state sync (the sink snapshots each
+objective's damage at construction so a mid-campaign save's prior damage is
+initial, not this run's). apply_to(WorldState) writes it all back into the
+typed world — pools, squadron counters, the fstatus bitmaps — and
+campaign_qc runs the whole loop on TestCamp: a 20-minute INTSTRIKE run drops
+4 bombs, damages 1 objective (5/64 features, 7.8%), the write-back lands,
+and exit 5 fires when combat happened but the ledger stayed empty. The
+Campaign gains set_result_ledger(): tasking availability consults post-loss
+numbers — 22 of 24 losses shrink packages, 24 stop generation, a FRESH
+ledger changes nothing (golden-identity pinned). Suite 2054 → 2077 (+23,
+100%, zero warnings).**
+
+| Area | Change |
+|------|--------|
+| `f4-campaign` — CampaignResultLedger | The write model (result_ledger.hpp/.cpp): constructor snapshots team pools (te_number_aircraft — the same seed Campaign reads) + the squadron roster WITH its save history (a mid-campaign save starts non-zero; run deltas are tracked separately so "activity" never means the save's own numbers); apply_air_loss / apply_ag_kill / apply_objective_damage / apply_bomb_impact; to_json() — "f4-campaign-result" v1, byte-stable, strictly valid JSON, NO floats (miss distances whole feet, destroyed percentages integer, times whole milliseconds). Saturating wire limits: total_losses 255 (uchar), aa/ag kills 32767 (int16), pools floor at 0. |
+| `f4-campaign` — world_writeback | apply_to(ledger, WorldState) — the opt-in header (world_adapters.hpp's pattern: the detail WorldState include stays OUT of the core ledger header). Writes team pools, squadron counters (absolutes — seed + run deltas), objective fstatus bitmaps; activity means non-zero RUN delta (zero-event ledger = identity, pinned); unmatched VUs (stale world, missing unit) are counted and returned, never dropped. |
+| `f4-campaign` — Campaign injection | set_result_ledger(const*) — the C2 hook, non-owning (the set_weapon_table / set_brain_archetype pattern). While attached, the tasking cycle's squadron availability is snapshot − THIS-RUN run_losses, floored at 0; the role gate picks by effective availability; the aircraft gate caps at it. Null or fresh ledger = pre-C1 behavior, byte-identical (the golden identity test). |
+| `f4-entities`→`f4-simulation` — CampaignOriginComponent | The restored sim→campaign link as DATA (FreeFalcon never needed it: a sim entity IS a campaign entity there; the engine-agnostic split severs that identity, which is exactly why nothing could flow back). campaign_origin.hpp: flight_vu / squadron_vu / home_airbase_vu / team_slot (the CAMPAIGN owner vocabulary, not the sim's blue/red/green strings) / wire-faithful callsign bytes. Stamped in spawn_aircraft_for_flight — the shared core of the bus, bulk, and scenario-driven spawn paths. Scenario-list aircraft carry none (compatibility contract). |
+| `f4-simulation` — CampaignResultSink | campaign_result_sink.hpp/.cpp: subscribes EntityKilled + BombImpact on the sim bus (attach/detach, the spawner's pattern; handle_* for bus-less hosts). Kill classification: origin-ful victim → air loss; origin-less victim + origin-ful shooter → ag credit; neither → unclassified (counted, unbooked — the loud boundary). sync_objective_damage(): walks every feature-bearing objective, diffs against the construction snapshot (fstatus bytes + weighted destroyed state), hands CHANGED objectives' final states to the ledger. Stats: kills_seen / air_losses_recorded / kills_attributed / ag_kills_recorded / kills_unclassified / bomb_impacts_seen / objectives_synced. |
+| `f4-simulation` — campaign_qc | The C1 loop section: ledger constructed from the world's own sources; sink attached before the first tick (damage snapshot = save-time state); sync after the last; apply_to + campaign_result.json written beside the summary; the summary gains a "results" block (totals, write-back counts, artifact path); NEW GATE exit 5 — combat outcomes occurred (kills and/or impacts) but the ledger stayed empty: the write-back chain broke (sink never fired / origin stamp missing / classification dropped every event). |
+| Tests | +23 (suite 2054 → 2077, 100%, zero warnings): f4-campaign test_result_ledger (17) — snapshot seeds pools + squadron HISTORY with zero run deltas; air-loss bookings (pool, saturation at the uchar limit with run deltas still counting, floor at zero, unattributed, unknown-squadron team-only loss); ag credit without pool effect; objective damage last-write-wins with delta-corrected totals; impact log whole-feet rounding; to_json byte-stability + strict Reader round-trip + no-floats; the golden identity (fresh ledger changes nothing); 24/24 losses stop tasking; 22/24 shrink packages and cap aircraft_count; apply_to writes pools/counters/fstatus; zero-event identity; stale-world unmatched loud. f4-simulation test_campaign_result_sink (6) — origin stamping through the REAL spawn path (flight/squadron VUs, team slot, per-flight specificity); kill classification all three branches; THE E2E MISSILE KILL (launch → flyout → fuze → EntityKilled on the bus → sink → ledger: pool −1, squadron loss, aa credit); byte-identical documents across two runs; bomb impact + objective damage sync + apply_to + repopulate round-trip (DamageBitmapComponent carries the damage); pristine damage syncs nothing. |
+| Docs | Docs/CAMPAIGN_LOOP_PLAN.md (new — the Phase C plan: C1 landed, C2 reinforcement + full tasking consumption, C3 threat map + A* + routes, C4 ATM, C5 the 24-hour war); README f4-campaign section (the library had none — tasking side AND result side, with the loop-shaped example). |
+
+**The loop, closed (what a TestCamp run proves now):** decode → spawn from
+tasking → fly saved routes → bomb the targets (f4-weapons' own feature
+ledger) → the sink reads the damage back → the ledger books it → apply_to
+puts it in the WorldState → the next campaign cycle tasks a weakened force.
+The middle word — attrite — is no longer missing.
+
 ## A-G Employment — Strike Missions Deliver Ordnance (M5-AG-1)
 
 **Campaign strike flights now bomb their targets. The save's per-flight

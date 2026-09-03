@@ -37,6 +37,7 @@ add_library(f4-simulation STATIC
     src/simulation.cpp
     src/campaign_bridge.cpp
     src/campaign_spawner.cpp
+    src/campaign_result_sink.cpp
     src/combat_bridge.cpp
     src/combat_transcript.cpp
     src/bubble_manager.cpp
@@ -120,3 +121,8 @@ target_compile_features(campaign_qc PRIVATE cxx_std_20)
 target_compile_definitions(campaign_qc PRIVATE
     F4_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
     F4_BINARY_DIR="${CMAKE_BINARY_DIR}")
+# C2 — the synthetic tasking ladder needs the generated mission-profile
+# table (f4-campaign's build-time fixture; the cache var is global).
+target_compile_definitions(campaign_qc PRIVATE
+    F4_MISSION_PROFILES_JSON="${F4_MISSION_PROFILES_JSON}")
+add_dependencies(campaign_qc mission_profiles_fixture)

@@ -35,6 +35,10 @@ TeamState parse_team(Reader& r) {
         else if (k == "colour")  t.colour  = static_cast<uint8_t>(r.read_int());
         else if (k == "name")    t.name    = r.read_string();
         else if (k == "motto")   t.motto   = r.read_string();
+        // C2: the .cmp team block's replacement stock (aircraft the
+        // team can hand to squadrons as reinforcements).
+        else if (k == "replacements_avail")
+            t.replacements_avail = static_cast<uint16_t>(r.read_int());
         // --- .tea enrichment fields (emitted by world_json when .tea
         // was successfully decoded). Each team slot may or may not have
         // these — the .tea decoder finds them by `who` field match.
@@ -596,6 +600,12 @@ void parse_campaign_field(Reader& r, const std::string& key, CampaignState& c) {
     else if (key == "bullseye_x")          c.bullseye_x = static_cast<int32_t>(r.read_int());
     else if (key == "bullseye_y")          c.bullseye_y = static_cast<int32_t>(r.read_int());
     else if (key == "bullseye_name")       c.bullseye_name = static_cast<int32_t>(r.read_int());
+    // C2 (war-loop tasking): the maintenance timers that anchor the
+    // resupply/repair/reinforcement cadences (absolute campaign times,
+    // v>=19 block). Emitted by world_json since the v71 tranche.
+    else if (key == "last_resupply")       c.last_resupply = static_cast<int32_t>(r.read_int());
+    else if (key == "last_repair")         c.last_repair = static_cast<int32_t>(r.read_int());
+    else if (key == "last_reinforcement")  c.last_reinforcement = static_cast<int32_t>(r.read_int());
     else if (key == "te_number_aircraft" || key == "te_team_pts") {
         r.skip_ws(); r.expect('[');
         std::vector<int32_t> arr;

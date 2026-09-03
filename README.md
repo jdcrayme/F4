@@ -692,6 +692,82 @@ f4-recorder, f4-json, f4-io, f4-world, f4-world-convert, f4-terrain,
 f4-weapons, f4-sensors. See `Docs/COMBAT_CHAIN_PLAN.md` (M3) and
 `Docs/AIRCRAFT_BINDING_DESIGN.md`.
 
+### f4-campaign — headless dynamic campaign + the result ledger (the war loop)
+
+Static library implementing the campaign layer two ways. The tasking
+side (`Campaign` + `MissionProfileTable`): a headless tick that fires
+per-team air-tasking cycles, gates mission generation on role /
+capability / aircraft availability, and publishes `MissionIntent` on
+the bus — the same message shape whether the source is the profile
+ladder or a decoded save (`emit_flight_intents` turns live saved
+flights into intents, B.3). The result side (C1): the
+`CampaignResultLedger` — the campaign's write model, closing the
+return leg of the loop. C2 makes the ledger THE tasking pool: mission
+draws debit it (apply_mission_draw), combat losses net against the
+draws, and the reinforcement cadence (the .cmp header's
+last_reinforcement anchor, the wire's per-squadron budgets) refills it
+— cycles, combat, and resupply deplete ONE pool.
+
+```cpp
+#include <f4/campaign/result_ledger.hpp>
+#include <f4/simulation/campaign_result_sink.hpp>
+
+// The write model, snapshotted from the same sources the run started
+// from (pools + squadron history; a mid-campaign save seeds non-zero).
+CampaignResultLedger ledger(adapters.campaign, adapters.teams,
+                            adapters.units);
+
+// The sink resolves sim outcomes back to campaign identity (kills,
+// bomb impacts → team/squadron/objective) and feeds the ledger.
+CampaignResultSink sink(ledger, sim.world());
+sink.attach(sim.bus());
+// ... run the fight ...
+sink.sync_objective_damage();   // objectives' final damage state
+
+// Tasking reacts — and draws from the SAME pool (C2): attach the
+// ledger and the availability gates read the one-pool numbers
+// (snapshot − draws − non-drawn losses + reinforcements); every
+// generated mission debits the ledger where combat losses and
+// resupply already live. A fresh ledger changes nothing — pinned.
+campaign.set_result_ledger(&ledger);
+
+// The reinforcement cadence (C2, opt-in): anchored on the save's own
+// last_reinforcement, refilling deficits from the wire's per-squadron
+// budgets. A stale anchor (TestCamp carries 0 against a 38.5M-second
+// epoch) fires exactly ONCE — FreeFalcon's catch-up shape.
+f4::campaign::CampaignConfig cfg;
+cfg.reinforcement_period_sec = 12 * 3600;
+f4::campaign::Campaign ladder(adapters.campaign, adapters.teams,
+                              adapters.units, profiles, bus, cfg);
+ladder.set_result_ledger(&ledger);
+ladder.tick(24 * 3600);   // cycles fire, draws deplete, resupply refills
+
+// The write-back: pools, squadron counters, objective fstatus into
+// the typed WorldState — decode → run → fight → apply → reload.
+auto written = f4::campaign::apply_to(ledger, ws);
+// written.objectives_written / unmatched_* are LOUD, never silent.
+
+// The artifact: strictly valid JSON, byte-stable, no floats.
+std::ofstream out("campaign_result.json") << ledger.to_json();
+```
+
+Attribution rides `CampaignOriginComponent` — the sim entity's campaign
+identity (flight/squadron/home-airbase VUs + team slot), stamped at
+spawn by the campaign bridge (the shared core of every campaign spawn
+path). Air kills: victim pool −1, squadron loss, killer aa credit
+(unattributed when the killer isn't a campaign aircraft). AG kills
+book credit only. Objective damage is final-state sync — f4-weapons
+owns the live per-feature ledger; the sink snapshots initial damage at
+construction and hands back what changed. All saturating at the wire's
+own field limits; no RNG anywhere. Draw/loss NETTING (C2): a drawn
+aircraft's death consumes its draw — the pool debits once, the debrief
+counts the loss; a parked aircraft's death debits the pool directly.
+
+**Dependencies**: f4-world (IDataSource ONLY — never EntityWorld
+components; the ECS resolution lives in f4-simulation's sink),
+f4-messaging, f4-json (PRIVATE), f4-io. See
+`Docs/CAMPAIGN_LOOP_PLAN.md` (C1 + C2 landed, C3–C5 the roadmap).
+
 ## Building
 
 ```bash

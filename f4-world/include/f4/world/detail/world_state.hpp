@@ -76,6 +76,12 @@ struct TeamState {
     std::string name;           // e.g. "ROK", "Japan", "PRC"
     std::string motto;
 
+    // --- C2 (war-loop tasking): the .cmp team block's replacement
+    // stock. Emitted by world_json (TeamEntry.replacements_avail —
+    // ushort at team offset 56, v>53); a team without replacement data
+    // keeps the default (a legal wire state, not a missing adapter).
+    uint16_t replacements_avail = 0;  // aircraft-replacement stock
+
     // --- Enrichment from .tea (TeamRecord) ---
     // These fields are emitted by f4-world-convert's world_json when a
     // .tea sub-file was successfully decoded. They're optional — fresh
@@ -114,6 +120,18 @@ struct CampaignState {
     int32_t bullseye_x = 0;
     int32_t bullseye_y = 0;
     int32_t bullseye_name = 0;
+    // --- C2 (war-loop tasking): the .cmp header's maintenance timers,
+    // absolute campaign times (v>=19 block — decoded by the campaign
+    // decoder and emitted by world_json since the v71 tranche). They
+    // anchor the campaign's resupply/repair/reinforcement cadences:
+    // FreeFalcon fires each when CurrentTime > Last<Verb> + Rate.
+    //     last_reinforcement — the aircraft-replacement cadence anchor
+    //                         (consumed by f4-campaign's C2 tasking)
+    //     last_resupply      — ground supply (ground-war tranche's)
+    //     last_repair        — objective feature repair (repair tranche)
+    int32_t last_resupply = 0;
+    int32_t last_repair = 0;
+    int32_t last_reinforcement = 0;
 };
 
 /// A campaign objective (airbase, bridge, city, port, ...). Mirrors the

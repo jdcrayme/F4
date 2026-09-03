@@ -4040,3 +4040,166 @@ Stage Summary:
   stations, VehDef → scenario "veh_profile" wiring (spawn sensors
   from the class table), IRST sensor component (the .IRS consumer the
   AI's flare logic wants).
+---
+Task ID: 12
+Agent: main (Super Z)
+Task: Phase C1 — close the war loop: sim outcomes write back into campaign state (user: "Proceed as recommended" per the C1-ledger recommendation)
+
+Work Log:
+- Read the full repo state first (Docs/, worklog, CHANGES, the actual
+  sources — Campaign's read-only binding, campaign_qc's ordnance
+  ledger, the spawner's identity map) and verified the one-way-war
+  diagnosis in code: `tick()` is documented pure-with-respect-to-the-
+  sources, nothing consumes EntityKilled/BombImpact for campaign state.
+- Baseline on this host (headless configure, viewers OFF): 2054/2054
+  green (one first-run ctest flake re-run clean), zero warnings.
+- f4-campaign CampaignResultLedger: the write model. Constructor
+  snapshots team pools (te_number_aircraft — the same seed Campaign
+  reads) + squadron roster WITH save history (TestCamp seeds non-zero
+  aa_kills/total_losses — the ledger builds on the save, it does not
+  zero it; run deltas tracked separately so "activity" means THIS run).
+  apply_air_loss (pool floor-0, uchar-saturating losses, int16-
+  saturating aa credit, unattributed counting), apply_ag_kill,
+  apply_objective_damage (last-write-wins, delta-corrected totals),
+  apply_bomb_impact (whole-feet miss). to_json: "f4-campaign-result"
+  v1, byte-stable, strictly valid JSON, NO floats (ms times, integer
+  percents, hex fstatus). 23 tests.
+- world_writeback (opt-in header, the world_adapters pattern):
+  apply_to(ledger, WorldState) — pools, squadron absolutes, fstatus
+  bitmaps; zero-event identity; unmatched VUs loud (stale-world test).
+- Campaign::set_result_ledger (non-owning, the set_weapon_table
+  pattern): effective availability = snapshot − run_losses, floored;
+  fresh ledger = byte-identical golden identity; 24/24 losses stop
+  tasking; 22/24 shrink packages and cap aircraft_count.
+- CampaignOriginComponent (f4-simulation): flight/squadron/home-airbase
+  VUs + team slot + wire callsign bytes, stamped in
+  spawn_aircraft_for_flight (all three campaign spawn paths go through
+  it). FreeFalcon never needed this (sim entity IS campaign entity
+  there); the split severs it, C1 restores it as data.
+- CampaignResultSink (f4-simulation): subscribes EntityKilled +
+  BombImpact (attach/detach + manual handle_*); classification by
+  origin presence (air loss / ag credit / unclassified-counted);
+  sync_objective_damage diffs every feature objective against the
+  construction snapshot (a mid-campaign save's prior damage is initial
+  — pristine-damage test pins it) and hands CHANGED finals to the
+  ledger.
+- campaign_qc: ledger + sink wired around the sim run, apply_to +
+  campaign_result.json artifacts, summary "results" block, exit 5
+  (outcomes happened, ledger empty — the write-back-broke gate).
+- Two real-data smoke loops found four bugs the tests then pinned:
+  (1) apply_to treated seed kill history as activity — TestCamp's 26
+  squadrons all "wrote" — fixed with run-deltas; (2) a %u/%zu printf
+  mismatch; (3) a brace-balancing bug in the summary's new results
+  block (the ordnance object never closed — both artifacts now
+  strictly valid JSON, python-verified); (4) a 10x percent-conversion
+  bug (7.8% reported as 78).
+- The E2E missile-kill test initially never killed: the target sat 10
+  NM EAST while the shooter flew NORTH — a 90° beam shot, outside the
+  seeker cone at launch, ballistic forever. A pure-model harness
+  isolated it in minutes; geometry fixed, kill in ~19 s.
+- Suite 2054 → 2077 (+23: 17 ledger + 6 sink), 100%, zero warnings.
+  TestCamp verification: 20-min INTSTRIKE run — 4 bombs, 1 objective
+  damaged (5/64 features, 7.8%), fstatus written back, gates green.
+- Docs: CAMPAIGN_LOOP_PLAN.md (the Phase C plan, C1 marked LANDED);
+  README's f4-campaign section (the library had none); CHANGES entry.
+
+Stage Summary:
+- The war loop is closed END TO END on real data: decode → spawn from
+  tasking → fly → bomb → sink reads damage back → ledger books it →
+  apply_to lands it in the WorldState → the next cycle tasks a weaker
+  force. The C2 hooks (set_result_ledger, run deltas) are live and
+  pinned.
+- Deliberately deferred (documented in CAMPAIGN_LOOP_PLAN §5): ground
+  losses book credit only (battalion rosters = ground-war tranche),
+  gun-damaged-not-destroyed features on non-impacted objectives, and
+  WorldState→JSON re-emission + the .cam save-side encoder (neither
+  exists for any subsystem yet).
+- Next per the plan: C2 (mission-draw debits the ledger + reinforcement
+  timers), then C3 (threat map + A* + route builder — M4.3–M4.5).
+
+---
+Task ID: 13
+Agent: main (Super Z)
+Task: Phase C2 — one pool: mission draws, combat losses, and resupply
+deplete the same ledger (user: "Proceed" after the C1 delivery)
+
+Work Log:
+- Re-verified the C1 state first (commit ef01e57, suite 2077/2077,
+  patch applies clean onto the parent) and re-read the plan's C2
+  scope: "mission draw also debits the ledger, so cycles and combat
+  deplete one pool" + "reinforcement timers refill it".
+- Data recon on REAL saves before designing: decoded TestCamp.cam and
+  found (a) te_number_aircraft ALL ZERO (the TE-block heuristic is
+  empty; the real force lives in squadron rosters), (b) 26 of 94
+  squadrons carry `reinforcement` 24..168 (aircraft on order — the
+  wire's own replacement budget), (c) teams carry replacements_avail
+  (DPRK 1006), (d) the campaign header's last_resupply/repair/
+  reinforcement are decoded but NOT loaded by f4-world, (e) the squad-
+  ron `roster` u32 is the 2-bit-per-group packing (0x5555aaaa = 24
+  ships; 47 of TestCamp's 94 decode to 20) — the pre-C2 Campaign read
+  the RAW u32 (1.4 billion available aircraft; kunsan never noticed,
+  its rosters are 0 and route to the team-pool share).
+- f4-world data path: CampaignState + the three maintenance timers,
+  TeamState + replacements_avail, ICampaignSource/ITeamSource default-
+  implemented accessors (the bullseye pattern), adapters override,
+  world_state.cpp parses (cam2json already EMITTED all of it — the
+  fields were decoded and dropped on load).
+- src/squadron_snapshot.hpp (internal, shared): the force snapshot
+  both the Campaign and the ledger construct from — roster decoded,
+  team-pool share for roster-less squadrons, reinforcement budget.
+  One rule, two consumers, zero drift.
+- Ledger C2: apply_mission_draw (tasking debit; existence untouched —
+  drawn aircraft fly; unknown VUs loud via draws_unmatched),
+  apply_reinforcements (deficit refill min(deficit, wire budget),
+  budget consumed, team existence capped at initial, one record per
+  delivery), apply_air_loss netting (a drawn aircraft's death consumes
+  its draw — the pool debits once, the existence counters count every
+  death), squadron_tasking_available / team_aircraft_tasking queries,
+  to_json v2 (draw + reinforcement event logs, per-team/per-squadron
+  tasking counters; byte-stable, strict, no floats).
+- Campaign C2: set_result_ledger now takes a MUTABLE ledger (the
+  ledger IS the pool while attached — C1 read it, C2 also writes
+  draws + fires reinforcement into it); ledger-mode tasking reads the
+  one-pool numbers and books draws, own counters untouched (the
+  no-ledger path keeps B.3 behavior — byte-identical goldens); tick()
+  fires the reinforcement cadence after the tasking cycles, anchored
+  on epoch (current_time) + last_reinforcement with FreeFalcon's
+  catch-up-once (the anchor JUMPS to now: TestCamp's 0 anchor fires
+  once, not the ~7,500 boundaries it is 375 days behind).
+- Design correction mid-flight: the first draft defaulted the cadence
+  ON (12 h) — the stale anchor then fired the moment a fresh ledger
+  attached, breaking the C1 golden identity (caught by the C1 test
+  itself). Fix: default DISABLED (period 0 — a difficulty setting in
+  the reference, opt-in here); campaign_qc arms 12 h for --tasking.
+  Second catch from the same test run: team `reinforced` must track
+  the DELIVERED total (tasking view), not the existence-capped count.
+- campaign_qc --tasking: the synthetic ladder over the SAME ledger
+  before the spawner subscribes (its intents publish to nobody —
+  generation-to-spawn is the C3/C4 route tranche), --tasking-cycle /
+  --reinforce-period / --profiles flags (CMake: f4-campaign now
+  configures BEFORE f4-simulation so the profiles fixture exists),
+  a tasking summary block, and exit 6 (tasking-broke: belligerents
+  had aircraft, the ladder drew nothing).
+- Suite 2077 → 2091 (+14: 12 ledger + 2 world-state), 100%, zero
+  warnings. TestCamp E2E (4-h tasking + 20-min INTSTRIKE): 8 cycles,
+  438 intents, 957 drawn, 1 fire delivering 232 to 22 squadrons,
+  88 bombs / 20 damaged objectives / fstatus written back — one
+  ledger, all gates green (exit 0).
+- Docs: CAMPAIGN_LOOP_PLAN C2 → LANDED (semantics + the deferred
+  list: replacements_avail unconsumed, drawn aircraft never return
+  this slice, resupply/repair timers carried for their tranches),
+  CHANGES C2 entry, README f4-campaign section, this log.
+
+Stage Summary:
+- The loop is now MULTI-CYCLE on real data: every number the next
+  tasking cycle reads (squadron availability) already reflects every
+  draw, every loss, and every replacement the previous cycles booked —
+  one pool, one write model, one artifact.
+- The roster-decode fix (2-bit group packing, shared snapshot) makes
+  the synthetic ladder usable on REAL v71 saves for the first time —
+  pre-C2 it read 1.4 billion available aircraft.
+- Deliberately deferred (documented in the plan §6): team replacement
+  stock → squadron budget replenishment, drawn-aircraft mission
+  recovery, ground resupply + objective feature repair timers.
+- Next per the plan: C3 (ScoreThreatFast threat map → A* → route
+  builder, M4.3–M4.5), then C4 ATM, then C5 the 24-hour war.

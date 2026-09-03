@@ -6,6 +6,7 @@
 #include <gtest/gtest.h>
 #include <f4/world/f4_world.hpp>
 #include <f4/world/detail/world_state.hpp>
+#include <f4/world/world_adapters.hpp>
 #include <f4/entities/types.hpp>
 
 #include <algorithm>
@@ -609,4 +610,71 @@ TEST(WorldStatePhase3, RadarFieldsDefaultWhenAbsent) {
     EXPECT_FLOAT_EQ(ws.objectives[0].radar_range_km, 0.0f);
     EXPECT_TRUE(ws.objectives[0].radar_name.empty());
     EXPECT_EQ(ws.objectives[0].radar_type_idx, -1);
+}
+
+TEST(WorldStateC2, ParsesMaintenanceTimersAndReplacementStock) {
+    // C2 (war-loop tasking): the .cmp header's maintenance timers
+    // (last_resupply/last_repair/last_reinforcement — absolute campaign
+    // times) and the team block's replacement stock
+    // (replacements_avail) are load-bearing for the campaign's tasking
+    // pool; previously decoded by f4-world-convert but dropped on
+    // parse.
+    WorldState ws;
+    ws.load_from_string(R"({
+        "version": 71,
+        "campaign": {
+            "current_time": 38574360,
+            "last_resupply": 38500000,
+            "last_repair": 38510000,
+            "last_reinforcement": 38520000,
+            "teams": [
+                {"slot": 1, "name": "U.S.", "replacements_avail": 12},
+                {"slot": 6, "name": "DPRK", "replacements_avail": 1006}
+            ]
+        },
+        "raw_subfiles": {}
+    })");
+    EXPECT_EQ(ws.campaign.current_time, 38574360);
+    EXPECT_EQ(ws.campaign.last_resupply, 38500000);
+    EXPECT_EQ(ws.campaign.last_repair, 38510000);
+    EXPECT_EQ(ws.campaign.last_reinforcement, 38520000);
+    ASSERT_EQ(ws.teams.size(), 2u);
+    EXPECT_EQ(ws.teams[0].replacements_avail, 12u);
+    EXPECT_EQ(ws.teams[1].replacements_avail, 1006u);
+    // Absent keys keep the defaults (a legal wire state).
+    WorldState bare;
+    bare.load_from_string(R"({
+        "version": 71,
+        "campaign": {"current_time": 1, "teams": [{"slot": 1, "name": "X"}]},
+        "raw_subfiles": {}
+    })");
+    EXPECT_EQ(bare.campaign.last_reinforcement, 0);
+    EXPECT_EQ(bare.teams[0].replacements_avail, 0u);
+}
+
+TEST(WorldStateC2, AdaptersExposeTimersAndReplacementStock) {
+    // The C2 data path END TO END through the I*Source boundary the
+    // campaign consumes: CampaignAdapter hands the maintenance timers,
+    // TeamAdapter hands the replacement stock.
+    WorldState ws;
+    ws.load_from_string(R"({
+        "version": 71,
+        "campaign": {
+            "current_time": 38574360,
+            "last_reinforcement": 38520000,
+            "teams": [
+                {"slot": 1, "name": "U.S.", "replacements_avail": 12}
+            ]
+        },
+        "raw_subfiles": {}
+    })");
+    WorldStateAdapters adapters(ws);
+    const auto& camp =
+        static_cast<const f4::world::ICampaignSource&>(adapters.campaign);
+    const auto& teams = static_cast<const f4::world::ITeamSource&>(adapters.teams);
+    EXPECT_EQ(camp.current_time(), 38574360);
+    EXPECT_EQ(camp.last_reinforcement(), 38520000);
+    EXPECT_EQ(camp.last_resupply(), 0);   // default when the save has none
+    ASSERT_EQ(teams.team_count(), 1);
+    EXPECT_EQ(teams.replacements_avail(0), 12u);
 }
