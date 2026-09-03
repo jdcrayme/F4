@@ -39,6 +39,7 @@
 
 #include <f4/entities/types.hpp>
 #include <f4/terrain/terrain_data.hpp>
+#include <f4/world/data_source.hpp>   // AtmAirbaseState/AtmRequestState
 
 // Forward declaration — the asset-root overload of load_terrain takes
 // a const ref. We don't want to leak f4-assets into every consumer of
@@ -75,6 +76,24 @@ struct TeamState {
     uint8_t colour = 0;
     std::string name;           // e.g. "ROK", "Japan", "PRC"
     std::string motto;
+
+    // --- C4 (ATM pipeline): the team's own tasking priorities, decoded
+    // from the .tea team block (TeamRecord mission_priority[41] /
+    // objtype_priority[36] — GetPriority's inputs). mission_priority is
+    // indexed by mission byte (a 0 entry = the team never requests
+    // that mission type); objtype_priority by objective type. Empty
+    // when the save carried no .tea enrichment (a legal wire state).
+    std::vector<uint8_t> mission_priority;   // 41/42 entries when present
+    std::vector<uint8_t> objtype_priority;   // 36 entries when present
+
+    // --- C4 (ATM pipeline): the team's Air Tasking Manager state, as
+    // decoded from the .tea ATM block (AirTaskingManagerClass — the
+    // campaign's own sortie schedule + pending request worklist).
+    // atm_airbases carries the 32-block takeoff bitmasks behind the
+    // id list (FindTakeoffSlot's substrate); atm_requests is the ATO
+    // backlog the reference's ATM::Task would still have to fill.
+    std::vector<AtmAirbaseState> atm_airbases;
+    std::vector<AtmRequestState> atm_requests;
 
     // --- C2 (war-loop tasking): the .cmp team block's replacement
     // stock. Emitted by world_json (TeamEntry.replacements_avail —

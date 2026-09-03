@@ -200,6 +200,59 @@ void CampaignResultLedger::apply_mission_draw(
     draws_.push_back(rec);
 }
 
+void CampaignResultLedger::apply_mission_recovery(
+        double t_s, std::uint8_t team, std::uint32_t squadron_vu,
+        std::uint32_t flight_vu, int count) {
+    if (count <= 0) return;
+
+    // The release: survivors of a completing flight. Clamped at the
+    // squadron's outstanding draws — an over-report (a caller that
+    // never saw the draws) books what the pool can actually return,
+    // never a negative draw count.
+    int released = count;
+    SquadronLedger* sq = find_squadron_(squadron_vu);
+    if (sq != nullptr) {
+        released = std::min(count, sq->run_draws);
+        sq->run_draws -= released;
+        sq->run_recoveries += released;
+    } else {
+        released = 0;
+        ++recoveries_unmatched_;   // loud, never a silent drop
+    }
+    if (auto* tl = find_team_(team)) {
+        tl->drawn -= released;
+        if (tl->drawn < 0) tl->drawn = 0;
+        tl->recovered += released;
+    }
+
+    MissionRecoveryRecord rec;
+    rec.t_s = t_s;
+    rec.team = team;
+    rec.squadron = squadron_vu;
+    rec.flight = flight_vu;
+    rec.released = released;
+
+    ++mission_recoveries_;
+    aircraft_recovered_ += released;
+    recoveries_.push_back(rec);
+}
+
+int CampaignResultLedger::flight_air_losses(
+        std::uint32_t flight_vu, std::uint32_t squadron_vu) const {
+    // The air-loss log IS the per-flight loss record — the sink booked
+    // every kill with its victim flight id; counting matching entries
+    // is the whole query (arrival order, linear scan: the log is small
+    // and this is called once per completing package).
+    int n = 0;
+    for (const auto& l : losses_) {
+        if (l.victim_flight == flight_vu &&
+            l.victim_squadron == squadron_vu) {
+            ++n;
+        }
+    }
+    return n;
+}
+
 int CampaignResultLedger::apply_reinforcements(double t_s) {
     ++reinforcement_fires_;
 
@@ -317,10 +370,14 @@ int CampaignResultLedger::squadron_tasking_available(
     if (sq == nullptr) return 0;
     // One pool: snapshot − draws − NON-DRAWN losses + reinforcements.
     // A death netted against a draw (drawn_deaths) does not debit —
-    // the draw already removed that aircraft. Floored at zero (a
-    // source can over-report losses relative to availability).
+    // the draw already removed that aircraft. C4: recovery DECREMENTS
+    // run_draws, so the released aircraft rejoin the pool through the
+    // same subtraction — no extra term. drawn_deaths is clamped to
+    // run_losses (a recovery that released a dead-drawn aircraft would
+    // otherwise double-credit through a negative loss term).
     int avail = sq->availability - sq->run_draws
-                - (sq->run_losses - sq->drawn_deaths)
+                - (sq->run_losses -
+                   std::min(sq->run_losses, sq->drawn_deaths))
                 + sq->run_reinforced;
     return avail < 0 ? 0 : avail;
 }
@@ -332,9 +389,13 @@ int CampaignResultLedger::team_aircraft_tasking(int slot) const {
     if (it == teams_.end()) return 0;
     // The team-level view of the same netting: initial − draws −
     // non-drawn losses + reinforcements (existence view adjusted by
-    // the tasking-side counters). Floored at zero.
+    // the tasking-side counters; C4 recovery decrements drawn the same
+    // way). Floored at zero; drawn_deaths clamped (same defensive rule
+    // as the squadron view).
     int avail = it->aircraft_initial - it->drawn
-                - (it->losses - it->drawn_deaths) + it->reinforced;
+                - (it->losses -
+                   std::min(it->losses, it->drawn_deaths)) +
+                it->reinforced;
     return avail < 0 ? 0 : avail;
 }
 
@@ -384,6 +445,14 @@ std::string CampaignResultLedger::to_json() const {
     w.number_key("reinforcement_fires", reinforcement_fires_);
     w.put(",\n    ");
     w.number_key("aircraft_reinforced", aircraft_reinforced_);
+    w.put(",\n    ");
+    // C4 — mission recovery (drawn aircraft that completed and
+    // returned). Emitted ALWAYS (the C2 keys above are): a 0 is the
+    // honest "no ATM pipeline / no completions yet" answer, and the
+    // QC's recovery gate reads the totals block.
+    w.number_key("mission_recoveries", mission_recoveries_);
+    w.put(",\n    ");
+    w.number_key("aircraft_recovered", aircraft_recovered_);
     w.put("\n  }");
 
     // Teams: slot order (the snapshot's order), initial + remaining +
@@ -424,7 +493,7 @@ std::string CampaignResultLedger::to_json() const {
             // run, not the save's own history.
             if (s.run_aa_kills != 0 || s.run_ag_kills != 0 ||
                 s.run_losses != 0 || s.run_draws != 0 ||
-                s.run_reinforced != 0) {
+                s.run_reinforced != 0 || s.run_recoveries != 0) {
                 active.push_back(&s);
             }
         }
@@ -457,6 +526,10 @@ std::string CampaignResultLedger::to_json() const {
             w.put(", ");
             w.number_key("run_draws", s.run_draws);
             w.put(", ");
+            if (s.run_recoveries != 0) {
+                w.number_key("run_recoveries", s.run_recoveries);
+                w.put(", ");
+            }
             w.number_key("run_reinforced", s.run_reinforced);
             w.put(", ");
             w.number_key("reinforce_budget", s.reinforce_pending);
@@ -481,6 +554,28 @@ std::string CampaignResultLedger::to_json() const {
         w.put("}");
     }
     w.put(draws_.empty() ? "]" : "\n  ]");
+
+    // C4 — mission recoveries: arrival order (the draw's mirror log).
+    // Only present when one exists — legacy runs stay byte-identical.
+    if (!recoveries_.empty()) {
+        w.put(",\n  \"mission_recoveries\": [");
+        for (std::size_t i = 0; i < recoveries_.size(); ++i) {
+            const auto& rc = recoveries_[i];
+            w.put(i ? ",\n    " : "\n    ");
+            w.put("{\"t_ms\": ");
+            w.put(time_ms(rc.t_s));
+            w.put(", ");
+            w.number_key("team", rc.team);
+            w.put(", ");
+            w.number_key("squadron", rc.squadron);
+            w.put(", ");
+            w.number_key("flight", rc.flight);
+            w.put(", ");
+            w.number_key("released", rc.released);
+            w.put("}");
+        }
+        w.put("\n  ]");
+    }
 
     // Reinforcement deliveries: arrival order, one record per
     // receiving squadron per fire.

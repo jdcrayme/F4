@@ -127,3 +127,10 @@ target_compile_definitions(campaign_qc PRIVATE
 target_compile_definitions(campaign_qc PRIVATE
     F4_MISSION_PROFILES_JSON="${F4_MISSION_PROFILES_JSON}")
 add_dependencies(campaign_qc mission_profiles_fixture)
+# The QC's default --config is <bin>/generated_fixtures/f16.json — a
+# build artifact (convert_golden_fixtures, f4-convert). Building ONLY the
+# campaign_qc target must produce it too (same single-target gap the
+# viewer's V-CAMP fix addresses); CLI-gated target, hence the guard.
+if(TARGET convert_golden_fixtures)
+    add_dependencies(campaign_qc convert_golden_fixtures)
+endif()

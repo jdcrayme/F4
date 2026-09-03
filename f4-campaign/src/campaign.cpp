@@ -74,6 +74,17 @@ Campaign::Campaign(const f4::world::ICampaignSource& camp,
         ref.airbase = s.airbase;
         squadrons_.push_back(std::move(ref));
     }
+
+    // C4: construct the ATM pipeline when armed (the legacy ladder
+    // otherwise — the goldens-pinned path). The id base matches the
+    // Campaign's own package counter so intent ids stay in one
+    // monotonic namespace either mode.
+    if (cfg_.atm_pipeline) {
+        atm_ = std::make_unique<AirTaskingManager>(
+            profiles_, camp_, teams_, units_, nullptr, cfg_.atm);
+        atm_->set_id_base(cfg_.first_package_id);
+    }
+    next_flight_id_ = cfg_.first_package_id;
 }
 
 std::vector<int> Campaign::belligerent_teams() const {
@@ -123,9 +134,14 @@ void Campaign::tick(CampaignTime delta_sec) {
     }
     clock_ += delta_sec;
 
-    // Fire every cycle that has come due, in order. A delta spanning
-    // several cycles fires them all — the same behavior as one big tick
-    // and N small ones (asserted by the golden test).
+    // Fire every cycle that has come due, in order — each at its OWN
+    // due time (next_cycle_, already advanced to this cycle's slot):
+    // a delta spanning several cycles fires them all in order, and a
+    // big tick now produces EXACTLY what N small ticks produce (the
+    // pre-C4 code fired them all at the advanced clock — equivalent
+    // only for single-cycle horizons, and C4's slot scheduling needs
+    // the true cycle time: takeoff estimates past the 160-minute
+    // schedule horizon can never slot).
     while (next_cycle_ + cfg_.air_task_cycle_sec <= clock_) {
         next_cycle_ += cfg_.air_task_cycle_sec;
         ++cycles_fired_;
@@ -134,8 +150,26 @@ void Campaign::tick(CampaignTime delta_sec) {
 
     // C2: the reinforcement cadence rides the same tick (after the
     // tasking fires — a boundary that lands mid-tick sees the depleted
-    // pools first, FreeFalcon's own ordering).
+    // pools first, FreeFalcon's own ordering). C4: mission recovery
+    // rides with it — completed flights' survivors return BEFORE the
+    // next cycle's draws (the same order the reference's squadron
+    // schedule bookkeeping produces).
+    recover_missions_();
     fire_reinforcements_();
+}
+
+void Campaign::recover_missions_() {
+    if (atm_ == nullptr) return;
+    const auto releases = atm_->recover_completed(clock_);
+    for (const auto& rel : releases) {
+        if (result_ledger_ != nullptr) {
+            result_ledger_->apply_mission_recovery(
+                static_cast<double>(clock_), rel.team, rel.squadron_vu,
+                rel.flight_id, rel.survivors);
+        }
+        // No-ledger mode: the ATM refilled its own counters (the
+        // releases are telemetry only).
+    }
 }
 
 void Campaign::fire_reinforcements_() {
@@ -209,6 +243,19 @@ std::uint32_t Campaign::select_target_(std::uint8_t team) const {
 }
 
 void Campaign::run_tasking_cycle_() {
+    if (atm_ != nullptr) {
+        run_tasking_cycle_atm_();
+    } else {
+        run_tasking_cycle_legacy_();
+    }
+}
+
+void Campaign::run_tasking_cycle_legacy_() {
+    // The cycle's own due time (next_cycle_ — see tick(): a big tick
+    // fires each cycle at ITS slot, not the advanced clock; the
+    // single-cycle goldens have clock_ == next_cycle_ and are
+    // byte-identical).
+    const CampaignTime now = next_cycle_;
     const auto war_teams = belligerent_teams();
 
     // Availability — ONE pool (C2):
@@ -287,9 +334,9 @@ void Campaign::run_tasking_cycle_() {
             if (count <= 0) continue;
 
             MissionIntent intent;
-            intent.issued_time = clock_;
+            intent.issued_time = now;
             intent.time_on_target =
-                midpoint_tot(clock_, profile.min_time, profile.max_time);
+                midpoint_tot(now, profile.min_time, profile.max_time);
             intent.team = static_cast<std::uint8_t>(slot);
             for (int t = 0; t < teams_.team_count(); ++t) {
                 if (teams_.slot(t) == slot) {
@@ -312,7 +359,7 @@ void Campaign::run_tasking_cycle_() {
             // else the Campaign's own counter (the B.3 legacy).
             if (result_ledger_ != nullptr) {
                 result_ledger_->apply_mission_draw(
-                    static_cast<double>(clock_),
+                    static_cast<double>(now),
                     static_cast<std::uint8_t>(slot), lead->id_num, count);
             } else {
                 lead->available -= count;
@@ -359,6 +406,109 @@ void Campaign::run_tasking_cycle_() {
     }
 }
 
+void Campaign::run_tasking_cycle_atm_() {
+    // C4 — the ATM pipeline's campaign half: phases 1-5 run inside the
+    // ATM; THIS function owns phase 6 (route planning — the RouteBuilder
+    // attachment, package-shared) and phase 7 (slot scheduling via
+    // atm_->schedule_takeoff), then publishes one intent per flight.
+    // The cycle's own due time (see tick()).
+    const CampaignTime now = next_cycle_;
+    const auto war_teams = belligerent_teams();
+
+    for (const int slot : war_teams) {
+        const auto team = static_cast<std::uint8_t>(slot);
+
+        // Phases 1-5: request generation, prioritization,
+        // deconfliction, package building (FindBestAir), support
+        // assignment (escort pairing) — composed in the reference's
+        // order.
+        auto requests = atm_->generate_requests(team, now);
+        requests = atm_->prioritize(std::move(requests));
+        requests = atm_->deconflict(std::move(requests));
+        auto flights = atm_->compose_packages(requests, team, now);
+
+        // The package's route: the MAIN flight's build, shared by the
+        // package's escorts (package-shared ingress — the C3 deferral
+        // this tranche closes). Main flights come first in compose
+        // order, so a simple by-package cache suffices.
+        std::unordered_map<std::uint32_t, std::vector<RouteWaypoint>>
+            package_routes;
+
+        for (auto& ft : flights) {
+            const auto& profile = profiles_.for_mission(ft.mission);
+
+            // PHASE 6 — the route (the C3 builder, now package-aware):
+            // the MAIN flight's build is the package's route — the
+            // escorts share it (package-shared ingress, the C3
+            // deferral this tranche closes; TOTs differ by the
+            // separation). Main flights come first in compose order.
+            if (route_planner_ != nullptr && ft.role == FlightRole::Main &&
+                ft.airbase_vu != 0 && ft.target_vu != 0 &&
+                profile_flies_delivery_route(profile)) {
+                const auto rb = route_planner_->build(
+                    team, profile, ft.airbase_vu, ft.target_vu);
+                if (rb.waypoints.size() >= 2) {
+                    package_routes[ft.package_id] = rb.waypoints;
+                    ++routes_built_;
+                    if (rb.safe_path_searched) ++route_safe_searches_;
+                    if (rb.direct_fallback) ++route_fallbacks_;
+                } else {
+                    ++routes_failed_;
+                }
+            }
+
+            // PHASE 7 — the takeoff slot snap (also the recovery
+            // booking — schedule_takeoff is the commit point).
+            (void)atm_->schedule_takeoff(ft);
+
+            // The intent — one per flight, the spawner's contract.
+            MissionIntent intent;
+            intent.issued_time = now;
+            intent.time_on_target = ft.tot;   // post-snap
+            intent.team = team;
+            for (int t = 0; t < teams_.team_count(); ++t) {
+                if (teams_.slot(t) == slot) {
+                    intent.team_name = teams_.name(t);
+                    break;
+                }
+            }
+            intent.mission_byte = ft.mission;
+            intent.mission_name = std::string(mission_type_name(ft.mission));
+            intent.aircraft_count = ft.aircraft;
+            intent.squadron_id = ft.squadron_vu;
+            intent.squadron_name = ft.squadron_name;
+            intent.package_id = ft.package_id;
+            intent.flight_id = ft.flight_id;
+            intent.target_objective_id = ft.target_vu;
+            intent.flight_role = static_cast<std::uint8_t>(ft.role);
+            intent.escorted_flight_id = ft.escorted_flight_id;
+
+            // The route: the package's copy (main built it; escorts
+            // carry the same shape with their own TOT).
+            if (route_planner_ != nullptr) {
+                const auto it = package_routes.find(ft.package_id);
+                if (it != package_routes.end()) {
+                    intent.route = it->second;
+                    intent.synthetic = true;
+                }
+            }
+
+            // Draw the aircraft — ONE pool (the ledger when attached;
+            // the ATM's own counters otherwise — its draw_ already
+            // handled the no-ledger bookkeeping at compose time).
+            if (result_ledger_ != nullptr) {
+                result_ledger_->apply_mission_draw(
+                    static_cast<double>(now), team, ft.squadron_vu,
+                    ft.aircraft);
+            }
+
+            // Publish + record (the campaign's only outward coupling).
+            bus_.publish(intent);
+            intents_.push_back(std::move(intent));
+        }
+    }
+}
+
 std::string Campaign::to_summary_json() const {
     // Deterministic JSON: fixed key order, slot-ordered teams,
     // publish-ordered intents. No floats (everything integral).
@@ -400,6 +550,38 @@ std::string Campaign::to_summary_json() const {
         w.number_key("safe_path_searches", route_safe_searches_);
         w.put(",\n    ");
         w.number_key("direct_fallbacks", route_fallbacks_);
+        w.put("\n  }");
+    }
+
+    // C4: the ATM pipeline's own summary block — only when armed
+    // (legacy runs keep byte-identical goldens; the mode switch IS an
+    // opt-in).
+    if (atm_ != nullptr) {
+        const auto& a = atm_->stats();
+        w.put(",\n  \"atm\": {\n    ");
+        w.number_key("requests_generated", a.requests_generated);
+        w.put(",\n    ");
+        w.number_key("requests_seeded", a.requests_seeded);
+        w.put(",\n    ");
+        w.number_key("requests_timed_out", a.requests_timed_out);
+        w.put(",\n    ");
+        w.number_key("requests_budget_dropped", a.requests_budget_dropped);
+        w.put(",\n    ");
+        w.number_key("requests_deconflicted", a.requests_deconflicted);
+        w.put(",\n    ");
+        w.number_key("requests_unfilled", a.requests_unfilled);
+        w.put(",\n    ");
+        w.number_key("packages_built", a.packages_built);
+        w.put(",\n    ");
+        w.number_key("escorts_built", a.escorts_built);
+        w.put(",\n    ");
+        w.number_key("slot_snaps", a.slot_snaps);
+        w.put(",\n    ");
+        w.number_key("slot_shifts_sec", a.slot_shifts_sec);
+        w.put(",\n    ");
+        w.number_key("recoveries", a.recoveries);
+        w.put(",\n    ");
+        w.number_key("aircraft_recovered", a.aircraft_recovered);
         w.put("\n  }");
     }
 
@@ -449,6 +631,14 @@ std::string Campaign::to_summary_json() const {
             w.number(in.target_objective_id);
             w.put(", \"route_wps\": ");
             w.number(in.route.size());
+        }
+        // C4: the package composition (support flights only — legacy
+        // intents and mains keep the byte-identical shape).
+        if (in.flight_role != 0) {
+            w.put(", \"flight_role\": ");
+            w.number(in.flight_role);
+            w.put(", \"escorts\": ");
+            w.number(in.escorted_flight_id);
         }
         w.put("}");
     }

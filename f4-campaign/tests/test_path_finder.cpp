@@ -40,9 +40,9 @@ f4::world::WorldState make_world() {
     ws.version = 71;
 
     ws.teams.resize(8);
-    ws.teams[1] = TeamState{1, 1, 1, "USA", "", 0, 0, {}};
-    ws.teams[3] = TeamState{3, 0, 3, "UN", "", 0, 0, {}};
-    ws.teams[6] = TeamState{6, 6, 6, "DPRK", "", 0, 0, {}};
+    ws.teams[1] = TeamState{1, 1, 1, "USA", ""};
+    ws.teams[3] = TeamState{3, 0, 3, "UN", ""};
+    ws.teams[6] = TeamState{6, 6, 6, "DPRK", ""};
     ws.teams[1].stance = {0, 0, 0, 0, 0, 0, 5, 0};
     ws.teams[6].stance = {0, 5, 0, 0, 0, 0, 0, 0};
 

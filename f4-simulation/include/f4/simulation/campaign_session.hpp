@@ -102,10 +102,16 @@ struct CampaignSessionOptions {
     int tasking_cycle_sec = 1800;
     /// Reinforcement cadence; 43200 = the QC's armed 12 h.
     int reinforce_period_sec = 43200;
-    /// C3's role-fallback bridge (campaign_qc arms it; C4's FindBestAir
-    /// replaces it). On by default — belligerents fielding all-counter-
-    /// air wings would otherwise never generate a delivery mission.
-    bool role_fallback = true;
+    /// C4: the ATM pipeline — the reference's actual tasking (FindBestAir
+    /// scoring, escort pairing, TOT slotting, mission recovery) — ON by
+    /// default: the session is the C4/C5 development surface. The
+    /// C3 role-fallback bridge it replaces was the session's old
+    /// default; the legacy ladder remains the library default.
+    bool atm_pipeline = true;
+    /// C4: the ATM's threat threshold for SEAD pairing (see the QC's
+    /// host-side 25 — the fixture theater's single-ring band scores
+    /// sit under the reference default of 40).
+    int atm_seadescort_threat = 25;
 
     /// Fixed sim tick (the FM's operating point; never scaled).
     double sim_dt = 1.0 / 60.0;
@@ -137,6 +143,10 @@ public:
         int live_aircraft = 0;        ///< sim roster size
         int airborne = 0;             ///< FM gear.inAir
         double sim_time_s = 0.0;      ///< sim clock
+        // --- C4 (ATM pipeline) ------------------------------------------
+        int packages = 0;             ///< ATM: packages built
+        int escorts = 0;              ///< ATM: support flights paired
+        int recovered = 0;            ///< ledger: aircraft recovered
     };
 
     /// Build the whole graph. Returns nullptr and fills `error` on any

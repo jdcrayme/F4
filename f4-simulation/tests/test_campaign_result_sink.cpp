@@ -98,8 +98,8 @@ WorldState make_flight_world() {
     ws.campaign.te_number_aircraft = {0, 0, 12, 0, 0, 0, 12, 0};
 
     ws.teams.resize(8);
-    ws.teams[2] = TeamState{2, 2, 2, "ROK", "", 0, 0, {}};
-    ws.teams[6] = TeamState{6, 6, 6, "DPRK", "", 0, 0, {}};
+    ws.teams[2] = TeamState{2, 2, 2, "ROK", ""};
+    ws.teams[6] = TeamState{6, 6, 6, "DPRK", ""};
     ws.teams[2].stance = {0, 0, 0, 0, 0, 0, 5, 0};
     ws.teams[6].stance = {0, 0, 5, 0, 0, 0, 0, 0};
 

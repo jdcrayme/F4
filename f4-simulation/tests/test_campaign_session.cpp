@@ -79,15 +79,15 @@ CampaignSessionOptions make_opts(const std::filesystem::path& world) {
     o.tasking_cycle_sec = 5;
     o.reinforce_period_sec = 0;   // off: draws only, no deliveries
     o.max_flights = 8;
-    // STRICT role gate: the routed fixture's USA wing IS an ARO_S
-    // squadron (the patch), so the exact match exists — and the 24-
-    // aircraft pool cannot survive the fallback's counter-air family
-    // (bytes 1-11 draw ~2-4 ships each) BEFORE the delivery family
-    // (byte 12+) is reached. The fallback is for all-counter-air
-    // saves like TestCamp, where the pools are deep enough to feed
-    // both families; over this single-wing fixture it starves the
-    // routed family this test exists to exercise.
-    o.role_fallback = false;
+    // The legacy ladder for THIS rig (atm_pipeline off): the routed
+    // fixture's USA wing is a single 24-aircraft pool, and the test's
+    // purpose is the routed generation-to-spawn chain — the ATM has
+    // its own test below (the fixture's specialty-1 wing — ARO_S in
+    // the repo's legacy vocabulary — is SQUADRON_SPECIALTY_AA in the
+    // reference's, so FindBestAir rates it 30 for strike and the CA
+    // family wins the pool; both readings are honest, the fixtures
+    // were built for the legacy one).
+    o.atm_pipeline = false;
     return o;
 }
 
@@ -221,4 +221,50 @@ TEST(CampaignSession, PauseStopsTheDrainAndFreshChangesNothing) {
     ASSERT_NE(fresh, nullptr) << err;
     fresh->advance(1.0);
     EXPECT_TRUE(fresh->ledger().empty());
+}
+
+// ── 5. The ATM pipeline (C4) — packages with recovery, deterministically ────
+TEST(CampaignSession, AtmPipelineBuildsPackagesAndRecoversAircraft) {
+    if (!std::filesystem::exists(f16_config())) {
+        GTEST_SKIP() << "f16.json fixture not generated";
+    }
+    // The session's own default (atm_pipeline on): a long-enough
+    // advance crosses cycles whose flights COMPLETE (mission-over
+    // deadlines pass) — the survivors return to the pool and the next
+    // cycle draws them again.
+    CampaignSessionOptions o = make_opts(kunsan_world());
+    o.atm_pipeline = true;
+    o.tasking_cycle_sec = 5;         // a cycle every 5 sim seconds
+    o.max_flights = 8;
+
+    std::string err;
+    auto a = CampaignSession::create(o, &err);
+    ASSERT_NE(a, nullptr) << "create failed: " << err;
+    a->set_paused(false);
+    // 60 sim-seconds in 1-second frames (the tick cap drops debt past
+    // 240 ticks per advance — the same frame-loop shape the other
+    // tests use): 12 cycles; mission-over deadlines (travel + loiter
+    // + reserve) are minutes at the reference scale, so no recovery
+    // fires THIS horizon — the packages themselves are the pin.
+    // (Recovery over a long horizon is campaign_qc's --tasking
+    // acceptance, not a 60-second UI-scale advance.)
+    for (int frame = 0; frame < 60; ++frame) {
+        a->advance(1.0);
+    }
+
+    EXPECT_GT(a->stats().cycles, 0);
+    EXPECT_GT(a->stats().intents, 0);
+    EXPECT_GT(a->stats().packages, 0);
+    EXPECT_GT(a->stats().drawn_aircraft, 0);
+    // Determinism: a second session, identically driven, lands on the
+    // same bytes (the C1/C2/C3 discipline, ATM edition).
+    auto b = CampaignSession::create(o, &err);
+    ASSERT_NE(b, nullptr) << err;
+    b->set_paused(false);
+    for (int frame = 0; frame < 60; ++frame) {
+        b->advance(1.0);
+    }
+    EXPECT_EQ(a->campaign().to_summary_json(),
+              b->campaign().to_summary_json());
+    EXPECT_EQ(a->ledger_json(), b->ledger_json());
 }

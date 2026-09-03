@@ -139,7 +139,13 @@ json_diff old.json new.json --threshold 1e-9
 tests, dat→json→re-parse integration tests, real-aircraft tests against 24
 genuine FreeFalcon `.dat` files). Build-time fixture generation via CMake
 custom command produces 25 JSONs in `${BUILD_DIR}/generated_fixtures/` for
-`f4-data` tests to consume.
+`f4-data` tests to consume. The generation lives at the LIBRARY level
+(`f4-convert/CMakeLists.txt`, not under `tests/`): those JSONs are RUNTIME
+inputs for the interactive apps — the world viewer's campaign session
+(`f16.json`), the scenario player (every scenario template's
+`aircraft_config_path`), and `campaign_qc` — so the app targets declare
+`add_dependencies(convert_golden_fixtures)` and a single-target build of any
+app generates its own data. No manual tool runs, no full-build-first.
 
 ### f4-data — Aircraft configuration loading, validation, and table access
 
@@ -688,14 +694,17 @@ the combat components.
 
 **V-CAMP**: `campaign_session.hpp` — the live campaign loop as ONE
 frame-driven object (the `campaign_qc` wiring, composed for hosts):
-C1 ledger + C2 one-pool tasking + C3 routed generation over the
+C1 ledger + C2 one-pool tasking + C3 routed generation + **C4's ATM
+pipeline** (FindBestAir scoring, escort pairing, TOT slotting against
+the decoded airbase schedules, mission recovery) over the
 simulation's own world and bus, with the spawner's generated missions
 REGISTERED into the tick roster through `Simulation::register_aircraft()`
 (the one-world closure — "materialized" means FLYING, not counted).
 One clock: fixed `sim_dt` ticks; the campaign ladder and the damage
 sync advance in whole campaign seconds off the same ticks. The world
 viewer drives it (play/pause, 1x–240x wall-clock presets, the campaign
-clock, war status, live aircraft + routes + the threat overlay).
+clock, war status, live aircraft + routes + the threat overlay, the
+generated-missions table with each flight's package role).
 
 ```cpp
 f4::simulation::CampaignSessionOptions opts;
@@ -712,6 +721,14 @@ while (running) {
 const std::string result_json = session->ledger_json();  // byte-stable
 ```
 
+Both fixtures are BUILD artifacts: `f16.json` comes from
+`convert_golden_fixtures` (f4-convert), `MissionProfiles.json` from
+`mission_profiles_fixture` (f4-campaign), and building the world viewer
+(or scenario player, or `campaign_qc`) target generates them as part of
+the build — no preparation tools to run by hand. The viewer's
+"Start Session" verifies both exist up front and reports the rebuild
+command rather than a bare path when a stale build tree loses them.
+
 **Dependencies**: f4-entities, f4-messaging, f4-flight-model, f4-flight-api,
 f4-ai, f4-data, f4-geo, f4-math, f4-units, f4-state-machine, f4-models,
 f4-recorder, f4-json, f4-io, f4-world, f4-world-convert, f4-terrain,
@@ -721,27 +738,41 @@ f4-weapons, f4-sensors, f4-campaign. See `Docs/COMBAT_CHAIN_PLAN.md` (M3),
 ### f4-campaign — headless dynamic campaign + the result ledger (the war loop)
 
 Static library implementing the campaign layer two ways. The tasking
-side (`Campaign` + `MissionProfileTable`): a headless tick that fires
-per-team air-tasking cycles, gates mission generation on role /
-capability / aircraft availability, and publishes `MissionIntent` on
-the bus — the same message shape whether the source is the profile
-ladder or a decoded save (`emit_flight_intents` turns live saved
-flights into intents, B.3). The result side (C1): the
-`CampaignResultLedger` — the campaign's write model, closing the
+side (`Campaign` + `MissionProfileTable` + **`AirTaskingManager`**):
+a headless tick that fires per-team air-tasking cycles and publishes
+`MissionIntent` on the bus — the same message shape whether the
+source is the decoded save (`emit_flight_intents`, B.3), the legacy
+profile ladder, or C4's ATM pipeline (`CampaignConfig::atm_pipeline`):
+the 7-phase reference tasking — request generation (profile ladder +
+the decoded ATO backlog, GetPriority's team tables gating) →
+prioritization (stable sort + tempo budget) → deconfliction →
+package building with **FindBestAir** (the reference's SCORED
+squadron selection: UCD ratings when the theater DB resolves the
+type, specialty bonuses, availability, package-reuse bonuses — a
+counter-air wing is taskable for strike, never role-gated) →
+support assignment (ADDSEAD + a defended target pairs a SEADESCORT
+flight; ADDESCORT pairs a fighter escort, TOTs staggered by the
+separation) → route planning (the package-shared C3 route) → TOT
+slot scheduling (FindTakeoffSlot/ScheduleAircraft over the decoded
+`atm_schedules` bitmasks) — plus MISSION RECOVERY: completed flights
+release their survivors back into the one pool. The result side (C1):
+the `CampaignResultLedger` — the campaign's write model, closing the
 return leg of the loop. C2 makes the ledger THE tasking pool: mission
 draws debit it (apply_mission_draw), combat losses net against the
-draws, and the reinforcement cadence (the .cmp header's
-last_reinforcement anchor, the wire's per-squadron budgets) refills it
-— cycles, combat, and resupply deplete ONE pool. C3 gives the forward
-leg its brain: `ThreatMap` (ScoreThreatFast's per-cell ownership +
-2-bit AD density rings), `AirPathFinder` (the reference's grid A* —
-2000-node pool, partial-path fallback, every constant), and
-`RouteBuilder` (BuildPathToTarget: ingress corners around SAM rings,
-IP, target, turn point, egress, waypoint elimination) — generated
-missions fly THEIR OWN routes, airbase → target → airbase, and the
-spawner materializes them as they publish (generation-to-spawn).
-V-CAMP composes all of it into the live, frame-driven session the
-world viewer runs (f4-simulation's `campaign_session.hpp`).
+draws, mission recoveries credit it (apply_mission_recovery — drawn
+aircraft that survive return), and the reinforcement cadence (the
+.cmp header's last_reinforcement anchor, the wire's per-squadron
+budgets) refills it — cycles, combat, recovery, and resupply deplete
+and refill ONE pool. C3 gives the forward leg its brain: `ThreatMap`
+(ScoreThreatFast's per-cell ownership + 2-bit AD density rings),
+`AirPathFinder` (the reference's grid A* — 2000-node pool,
+partial-path fallback, every constant), and `RouteBuilder`
+(BuildPathToTarget: ingress corners around SAM rings, IP, target,
+turn point, egress, waypoint elimination) — generated missions fly
+THEIR OWN routes, airbase → target → airbase, and the spawner
+materializes them as they publish (generation-to-spawn). V-CAMP
+composes all of it into the live, frame-driven session the world
+viewer runs (f4-simulation's `campaign_session.hpp`).
 
 ```cpp
 #include <f4/campaign/result_ledger.hpp>

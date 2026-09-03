@@ -282,7 +282,7 @@ SigParseResult loadSignatureDataDir(const std::string& dir) {
         };
         for (const auto& spec : specs) {
             const fs::path file = resolveInDir(
-                fs::path(dir) / spec.subdir, stem + spec.suffix);
+                (fs::path(dir) / spec.subdir).string(), stem + spec.suffix);
             if (file.empty()) {
                 result.errors.push_back(
                     std::string("cannot find ") + spec.suffix + " for '" +

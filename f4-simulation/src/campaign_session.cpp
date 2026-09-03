@@ -329,11 +329,13 @@ CampaignSession::create(const CampaignSessionOptions& opts,
         airbase_airfields.empty() ? nullptr : &airbase_airfields);
     session->spawner_->attach(session->sim_->bus());
 
-    // 11. The ladder (C2's one-pool tasking) over the SAME bus.
+    // 11. The ladder (C2's one-pool tasking + C4's ATM pipeline) over
+    //     the SAME bus.
     f4::campaign::CampaignConfig ladder_cfg;
     ladder_cfg.air_task_cycle_sec = opts.tasking_cycle_sec;
     ladder_cfg.reinforcement_period_sec = opts.reinforce_period_sec;
-    ladder_cfg.tasking_role_fallback = opts.role_fallback;
+    ladder_cfg.atm_pipeline = opts.atm_pipeline;
+    ladder_cfg.atm.min_seadescort_threat = opts.atm_seadescort_threat;
     session->ladder_ = std::make_unique<f4::campaign::Campaign>(
         static_cast<const f4::world::ICampaignSource&>(
             session->adapters_->campaign),
@@ -469,6 +471,12 @@ void CampaignSession::refresh_stats_() {
     stats_.air_losses = ledger_->air_losses();
     stats_.reinforce_fires = ledger_->reinforcement_fires();
     stats_.reinforced = ledger_->aircraft_reinforced();
+    // C4: the ATM pipeline's own numbers (packages/escorts/recovery).
+    if (const auto* atm = ladder_->atm_stats(); atm != nullptr) {
+        stats_.packages = atm->packages_built;
+        stats_.escorts = atm->escorts_built;
+    }
+    stats_.recovered = ledger_->aircraft_recovered();
     stats_.synthetic_spawned = spawner_->stats().synthetic_spawned;
     stats_.live_aircraft = static_cast<int>(sim_->aircraft_entities().size());
     for (const auto eid : sim_->aircraft_entities()) {

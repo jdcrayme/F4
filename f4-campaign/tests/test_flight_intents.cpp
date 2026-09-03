@@ -45,8 +45,8 @@ f4::world::WorldState make_flight_world() {
     ws.campaign.current_time = 38574360;  // ~half a day into the war
 
     ws.teams.resize(8);
-    ws.teams[1] = TeamState{1, 1, 1, "USA", "", 0, 0, {}};
-    ws.teams[6] = TeamState{6, 6, 6, "DPRK", "", 0, 0, {}};
+    ws.teams[1] = TeamState{1, 1, 1, "USA", ""};
+    ws.teams[6] = TeamState{6, 6, 6, "DPRK", ""};
     // War stance: USA hostile to DPRK and back.
     ws.teams[1].stance = {0, 0, 0, 0, 0, 0, 5, 0};
     ws.teams[6].stance = {0, 5, 0, 0, 0, 0, 0, 0};

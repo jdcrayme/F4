@@ -55,6 +55,7 @@
 
 #pragma once
 
+#include <f4/campaign/atm.hpp>
 #include <f4/campaign/mission_profile.hpp>
 #include <f4/campaign/mission_type.hpp>
 #include <f4/campaign/result_ledger.hpp>
@@ -64,6 +65,7 @@
 #include <f4/world/data_source.hpp>
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -74,6 +76,8 @@ namespace f4::campaign {
 /// FreeFalcon's CampaignTime is likewise a second count; the world's
 /// absolute epoch (campaign.current_time) is intentionally NOT folded in —
 /// the tick advances a relative clock and the sources carry the epoch.
+/// (Defined in mission_type.hpp since the C4 ATM pipeline; re-exported
+/// here.)
 using CampaignTime = std::int64_t;
 
 /// One generated mission — the campaign's contract with the outside
@@ -120,6 +124,17 @@ struct MissionIntent {
     /// its duplicate guard keys on the pair).
     bool synthetic{false};
 
+    // --- C4 (ATM pipeline): package composition -------------------------
+    // Multi-flight packages: one intent per FLIGHT (the spawner's
+    // contract unchanged — each intent materializes one formation),
+    // all flights of a package sharing package_id. The role marks the
+    // support flights (SEADESCORT/ESCORT pairs), each carrying its own
+    // mission byte and TOT (main TOT + the support profile's
+    // separation); escorted_flight_id links the pair (the viewer's
+    // package view reads it).
+    std::uint8_t flight_role{0};   ///< FlightRole (0 = main)
+    std::uint32_t escorted_flight_id{0};  ///< the main flight (0 = main)
+
     /// Element-wise equality (tests assert bus content == recorded intents).
     bool operator==(const MissionIntent&) const = default;
 };
@@ -159,6 +174,22 @@ struct CampaignConfig {
     /// reveals) field all-counter-air squadrons, so delivery-family
     /// missions never generate under the strict gate.
     bool tasking_role_fallback{false};
+
+    /// C4: the ATM pipeline — the 7-phase tasking engine (request
+    /// generation → prioritization → deconfliction → package building
+    /// with FindBestAir → escort pairing → route planning → TOT slot
+    /// scheduling, plus mission recovery: drawn aircraft that survive
+    /// their mission RETURN to the pool). DEFAULT OFF: the legacy
+    /// ladder (B.3/C2/C3 shape, role gate + optional fallback) is the
+    /// goldens-pinned behavior; hosts wanting the reference's actual
+    /// tasking (campaign_qc, the campaign session) arm it. While
+    /// armed, `tasking_role_fallback` is inert — FindBestAir SCORES
+    /// role/capability and REPLACES the fallback bridge.
+    bool atm_pipeline{false};
+
+    /// C4: the ATM's own tunables (aiinput.dat's [ATM] section as
+    /// config — the RouteBuilderConfig pattern).
+    AtmConfig atm{};
 };
 
 class Campaign {
@@ -226,6 +257,20 @@ public:
         return route_fallbacks_;
     }
 
+    /// C4: the ATM pipeline's telemetry (requests, packages, escorts,
+    /// slot snaps, recoveries) — null when the pipeline is not armed
+    /// (the legacy ladder's own counters above stand in).
+    [[nodiscard]] const AtmStats* atm_stats() const noexcept {
+        return atm_ ? &atm_->stats() : nullptr;
+    }
+
+    /// C4: the flights the ATM has booked (in-flight, awaiting
+    /// recovery) — null when the pipeline is not armed.
+    [[nodiscard]] const std::vector<FlightTasking>* atm_booked_flights()
+        const noexcept {
+        return atm_ ? &atm_->booked_flights() : nullptr;
+    }
+
     /// Attach the C1 result ledger — the war-loop feedback. While
     /// attached, the LEDGER IS THE TASKING POOL (C2): the cycle's
     /// availability gates read the ledger's one-pool numbers
@@ -245,6 +290,7 @@ public:
     /// nothing until draws or losses land in it (the golden identity).
     void set_result_ledger(CampaignResultLedger* ledger) noexcept {
         result_ledger_ = ledger;
+        if (atm_) atm_->set_ledger(ledger);   // C4: keep the ATM current
     }
 
     /// Attach the C3 route planner — generation-to-spawn. While
@@ -263,6 +309,11 @@ public:
                            noexcept {
         route_planner_ = planner;
         objectives_ = objectives;
+        if (atm_) {   // C4: keep the ATM's threat/target view current
+            atm_->set_threat_map(planner ? &planner->threat_map()
+                                         : nullptr);
+            atm_->set_objectives(objectives);
+        }
     }
 
     /// Slots of the teams currently at war (lowest slot first) — the
@@ -279,6 +330,20 @@ private:
     /// One tasking cycle: per belligerent team, evaluate profiles and
     /// publish intents. Returns the intents generated THIS cycle.
     void run_tasking_cycle_();
+
+    /// The legacy ladder (B.3/C2/C3's own walk — role gate, optional
+    /// fallback, one flight per package). Kept verbatim: the
+    /// goldens-pinned path when cfg_.atm_pipeline is off.
+    void run_tasking_cycle_legacy_();
+
+    /// C4: the ATM cycle — phases 1-5 via the ATM, route planning (6)
+    /// and slot scheduling (7) here, one intent per flight.
+    void run_tasking_cycle_atm_();
+
+    /// C4: mission recovery — every completed flight's survivors
+    /// return to the ledger's tasking pool (rides the tick, after the
+    /// cycles — same position as the reinforcement cadence).
+    void recover_missions_();
 
     /// C2: the reinforcement cadence — fire while now (epoch + clock)
     /// has passed last_reinforce_ + period. Each fire delivers into
@@ -349,11 +414,21 @@ private:
     const RouteBuilder* route_planner_ = nullptr;
     const f4::world::IObjectiveSource* objectives_ = nullptr;
 
+    /// C4: the ATM pipeline (constructed when cfg_.atm_pipeline — the
+    /// set_result_ledger/set_route_planner attachments below keep its
+    /// ledger/threat pointers current).
+    std::unique_ptr<AirTaskingManager> atm_;
+
     /// Route QC counters (the summary block reads these).
     int routes_built_ = 0;
     int routes_failed_ = 0;
     int route_safe_searches_ = 0;
     int route_fallbacks_ = 0;
+
+    /// C4: the flight-id counter (distinct from the package counter —
+    /// multi-flight packages share package_id; flight ids stay unique
+    /// for the spawner's duplicate guard).
+    std::uint32_t next_flight_id_ = 0;
 
     /// All intents in publish order (mirrors what the bus saw).
     std::vector<MissionIntent> intents_;

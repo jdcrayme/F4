@@ -193,6 +193,26 @@ set_target_properties(f4-world-viewer PROPERTIES
     VS_DEBUGGER_COMMAND_ARGUMENTS "save1.world.json korea.terrain.json"
 )
 
+# ── V-CAMP: runtime fixtures ARE build outputs ─────────────────────────────
+# The Campaign Session's runtime inputs are BUILD artifacts, and building
+# THIS target must produce them — "Start Session" must never demand manual
+# tool runs or a full-build-first:
+#   * generated_fixtures/f16.json  — convert_golden_fixtures (f4-convert):
+#     the F-16 aircraft config every session aircraft flies. Missing =
+#     "aircraft config not found" (the single-target gap this fixes: a
+#     build of ONLY f4-world-viewer — or F5 on the viewer project in
+#     Visual Studio — skips ALL custom targets, which is where the
+#     fixture generation used to hide).
+#   * MissionProfiles.json         — mission_profiles_fixture (f4-campaign):
+#     the C2 tasking table the session cannot task without.
+# mission_profiles_fixture is defined unconditionally by f4-campaign
+# (configured before this directory — the root ordering rule);
+# convert_golden_fixtures is CLI-gated in f4-convert, hence the guard.
+add_dependencies(f4-world-viewer mission_profiles_fixture)
+if(TARGET convert_golden_fixtures)
+    add_dependencies(f4-world-viewer convert_golden_fixtures)
+endif()
+
 # NOTE: The viewer no longer ships or loads any PNG icon assets. Every
 # objective and unit is drawn procedurally from raylib primitives — see
 # src/symbols.cpp. The assets/icons/ directory is kept in the source tree

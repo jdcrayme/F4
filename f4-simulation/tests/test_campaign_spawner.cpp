@@ -78,8 +78,8 @@ f4::world::WorldState make_flight_world() {
     ws.campaign.te_team = 2;  // player
 
     ws.teams.resize(8);
-    ws.teams[2] = TeamState{2, 2, 2, "ROK", "", 0, 0, {}};
-    ws.teams[6] = TeamState{6, 6, 6, "DPRK", "", 0, 0, {}};
+    ws.teams[2] = TeamState{2, 2, 2, "ROK", ""};
+    ws.teams[6] = TeamState{6, 6, 6, "DPRK", ""};
     // Stance is indexed by team slot: ROK[6] = -1 and DPRK[2] = -1 (war
     // between slots 2 and 6 — the PLAYER is team 2).
     ws.teams[2].stance = {0, 0, 0, 0, 0, 0, 5, 0};
@@ -385,7 +385,7 @@ f4::world::WorldState make_army_base_world() {
     ws.campaign.current_time = 38574360;
     ws.campaign.te_team = 2;
     ws.teams.resize(8);
-    ws.teams[2] = TeamState{2, 2, 2, "ROK", "", 0, 0, {}};
+    ws.teams[2] = TeamState{2, 2, 2, "ROK", ""};
 
     ObjectiveState ab;                      // real airbase (layout-less)
     ab.objective_type = 1;                  // TYPE_AIRBASE

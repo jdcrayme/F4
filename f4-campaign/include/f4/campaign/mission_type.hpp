@@ -36,6 +36,11 @@
 
 namespace f4::campaign {
 
+/// Campaign clock in seconds (C4: defined here — the vocabulary header
+/// — so the ATM pipeline can use it without the Campaign class;
+/// campaign.hpp re-exports the same alias).
+using CampaignTime = std::int64_t;
+
 /// Count of wire mission types including AMIS_NONE (bytes 0..40).
 inline constexpr std::size_t kMissionTypeCount = 41;
 

@@ -100,6 +100,18 @@ if(TARGET terrain-json)
     add_dependencies(f4_scenario_player_lib terrain-json)
 endif()
 
+# ── Runtime fixtures ARE build outputs ──────────────────────────────────────
+# Every scenario template's aircraft_config_path points at
+# @F4_BINARY_DIR@/generated_fixtures/f16.json — a build artifact, not a
+# checked-in file. A single-target build of just the player (or F5 on its
+# project in Visual Studio) must generate it: same single-target gap the
+# world viewer's V-CAMP fix addresses (the generation used to hide in
+# f4-convert's TESTS directory, skipped by any non-test single-target
+# build). convert_golden_fixtures is CLI-gated in f4-convert — guarded.
+if(TARGET convert_golden_fixtures)
+    add_dependencies(f4-scenario-player convert_golden_fixtures)
+endif()
+
 # ── Tests ──────────────────────────────────────────────────────────────────
 option(F4_SCENARIO_PLAYER_BUILD_TESTS "Build f4-scenario-player unit tests" ON)
 if(F4_SCENARIO_PLAYER_BUILD_TESTS)

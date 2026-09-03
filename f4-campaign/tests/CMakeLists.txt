@@ -42,3 +42,13 @@ target_compile_definitions(test_result_ledger PRIVATE
 f4_campaign_add_test(test_threat_map      test_threat_map.cpp)
 f4_campaign_add_test(test_path_finder     test_path_finder.cpp)
 f4_campaign_add_test(test_route_builder   test_route_builder.cpp)
+
+# C4 — the ATM pipeline: the 7 phases (each independently testable —
+# M4.2's deliverable), FindBestAir scoring (M4.6), takeoff slot
+# scheduling, mission recovery, and the Campaign mode switch. Links
+# f4-messaging explicitly (the bus-backed CampaignRig) and carries the
+# kunsan fixture path (the mode-switch tests).
+f4_campaign_add_test(test_atm             test_atm.cpp)
+target_link_libraries(test_atm PRIVATE f4-messaging)
+target_compile_definitions(test_atm PRIVATE
+    F4_SIMULATION_TEST_FIXTURES_DIR="${CMAKE_SOURCE_DIR}/f4-simulation/tests/fixtures")

@@ -99,6 +99,41 @@ enum class Relation : int16_t {
     return static_cast<Relation>(v);
 }
 
+// ============================================================================
+// C4 (ATM pipeline) — the team's Air Tasking Manager state
+// ============================================================================
+//
+// FreeFalcon's AirTaskingManagerClass (atm.cpp) is a per-team campaign
+// entity carrying the sortie SCHEDULE (one ATMAirbaseClass per airbase
+// the team's squadrons fly from: a 32-block bitmask, each block
+// MIN_PLAN_AIR minutes of 1-minute takeoff slots) and the pending
+// REQUEST worklist (the ATO backlog the strategy layer filed and the
+// ATM has not filled yet). Both decode with the team block (.tea);
+// f4-world-convert emits them (atm_schedules / atm_requests), and the
+// C4 ATM pipeline consumes them: takeoff slotting slots against the
+// schedules, and the backlog seeds the first tasking cycle.
+
+/// One airbase's takeoff schedule: ATM_MAX_CYCLES (32) blocks of
+/// 1-minute slot bits. block = minute / MIN_PLAN_AIR, slot = the low
+/// bits — the reference's own indexing (FindTakeoffSlot).
+struct AtmAirbaseState {
+    uint32_t id_num = 0;   ///< airbase objective VU_ID.num
+    std::array<uint8_t, 32> schedule{};  ///< per-block slot bitmasks
+};
+
+/// One pending mission request (MissionRequestClass as decoded data —
+/// the fields the C4 pipeline consumes; the rest of the wire record is
+/// display/residue, skipped at emission).
+struct AtmRequestState {
+    uint8_t mission = 0;      ///< mission wire byte
+    uint8_t who = 0;          ///< flying team slot
+    uint8_t aircraft = 0;     ///< requested count (0 = fill from profile)
+    int32_t tot = 0;          ///< time on target, ABSOLUTE campaign time
+    int32_t priority = 0;     ///< the strategy layer's own score
+    uint32_t target_num = 0;  ///< target entity VU_ID.num (0 = location)
+    uint32_t requester_num = 0;  ///< requesting entity VU_ID.num
+};
+
 struct ITeamSource {
     virtual int team_count() const = 0;
 
@@ -126,6 +161,30 @@ struct ITeamSource {
     // none — a legal wire state). Default-implemented: alternative
     // sources that predate the tranche keep compiling.
     virtual uint16_t replacements_avail(int i) const { return 0; }
+
+    // C4 (ATM pipeline) — the team's own tasking priorities (TeamRecord
+    // mission_priority[]/objtype_priority[], GetPriority's inputs) and
+    // its ATM state (airbase schedules + pending request worklist).
+    // All default-implemented (empty/zero): a source without .tea
+    // enrichment carries none of it — a legal wire state, and the ATM's
+    // generated-request path does not need any of it.
+    /// Priority bonus by mission byte (0..100; 0 = the team never
+    /// requests that mission type — GetPriority's "player specified 0"
+    /// drop rule).
+    virtual int mission_priority(int, uint8_t) const { return 0; }
+    /// Priority bonus by objective type (0..100; the target-side
+    /// component of GetPriority).
+    virtual int objtype_priority(int, int) const { return 0; }
+    /// The team's airbase takeoff schedules (atm_schedules emission).
+    virtual const std::vector<AtmAirbaseState>& atm_airbases(int) const {
+        static const std::vector<AtmAirbaseState> kEmpty;
+        return kEmpty;
+    }
+    /// The team's pending mission requests (the ATO backlog).
+    virtual const std::vector<AtmRequestState>& atm_requests(int) const {
+        static const std::vector<AtmRequestState> kEmpty;
+        return kEmpty;
+    }
 
     virtual ~ITeamSource() = default;
 };

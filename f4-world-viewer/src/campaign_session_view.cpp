@@ -113,12 +113,52 @@ void ViewerApp::start_campaign_session() {
     opts.mission_profiles = std::filesystem::path(F4_MISSION_PROFILES_JSON);
 #endif
 
+    // The fixture pre-check: the session's runtime inputs are BUILD
+    // artifacts — building this app's target generates them (the V-CAMP
+    // add_dependencies block in f4-world-viewer/CMakeLists.txt). One
+    // missing means a stale, partial, or relocated build tree; say how
+    // to fix it, not just what is missing (a bare "aircraft config not
+    // found" reads like a manual preparation step exists — it doesn't;
+    // the rebuild IS the step).
+    {
+        const std::filesystem::path missing_fixtures[2] = {
+            opts.aircraft_config,
+            opts.mission_profiles,
+        };
+        const char* missing_names[2] = {
+            "F-16 aircraft config",
+            "mission-profile table",
+        };
+        for (int i = 0; i < 2; ++i) {
+            if (!missing_fixtures[i].empty() &&
+                std::filesystem::exists(missing_fixtures[i])) {
+                continue;
+            }
+#ifdef F4_BINARY_DIR
+            const std::string hint = "rebuild this app's target: cmake "
+                                     "--build " +
+                                     std::string(F4_BINARY_DIR) +
+                                     " --target f4-world-viewer";
+#else
+            const std::string hint = "rebuild this app's target";
+#endif
+            std::snprintf(impl_->campaign_error,
+                          sizeof(impl_->campaign_error),
+                          "%s missing: %s (%s)", missing_names[i],
+                          missing_fixtures[i].string().c_str(),
+                          hint.c_str());
+            impl_->status_msg = "Campaign session failed to start";
+            return;
+        }
+    }
+
     opts.team = impl_->campaign_start_team;
     opts.mission = -1;              // the whole tasking picture
     opts.max_flights = impl_->campaign_start_max_flights;
     opts.tasking_cycle_sec = 1800;  // FreeFalcon's own ATM cadence
     opts.reinforce_period_sec = 43200;  // the QC's armed 12 h
-    opts.role_fallback = true;      // the QC's bridge to C4 FindBestAir
+    // C4: the ATM pipeline (FindBestAir replaces the C3 fallback
+    // bridge this line used to arm).
 
     std::string err;
     impl_->session = f4::simulation::CampaignSession::create(opts, &err);
@@ -259,6 +299,11 @@ void ViewerApp::draw_campaign_session_view() {
     ImGui::Text("drawn %d   losses %d   reinforced %d (fires %d)",
                 st.drawn_aircraft, st.air_losses, st.reinforced,
                 st.reinforce_fires);
+    // C4: the ATM pipeline's own line (the session's default tasking).
+    if (st.packages > 0 || st.recovered > 0) {
+        ImGui::Text("packages %d (escorts %d)   recovered %d",
+                    st.packages, st.escorts, st.recovered);
+    }
     ImGui::Text("live aircraft %d (%d airborne)   synthetic %d   sim %.0fs",
                 st.live_aircraft, st.airborne, st.synthetic_spawned,
                 st.sim_time_s);
@@ -267,15 +312,17 @@ void ViewerApp::draw_campaign_session_view() {
 
     // --- Generated missions table ---------------------------------------
     const auto& intents = impl_->session->intents();
-    ImGui::TextUnformatted("Generated missions (tasking ladder):");
+    ImGui::TextUnformatted("Generated missions (ATM packages):");
     const ImGuiTableFlags table_flags =
         ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersOuterH |
         ImGuiTableFlags_Resizable | ImGuiTableFlags_ScrollY;
-    if (ImGui::BeginTable("session_missions", 6, table_flags,
+    if (ImGui::BeginTable("session_missions", 7, table_flags,
                           ImVec2(0.0f, 0.0f))) {
         ImGui::TableSetupScrollFreeze(0, 1);
         ImGui::TableSetupColumn("mission", ImGuiTableColumnFlags_WidthFixed,
                                 130.0f, 0);
+        ImGui::TableSetupColumn("role", ImGuiTableColumnFlags_WidthFixed,
+                                54.0f, 6);
         ImGui::TableSetupColumn("team", ImGuiTableColumnFlags_WidthFixed,
                                 56.0f, 1);
         ImGui::TableSetupColumn("TOT", ImGuiTableColumnFlags_WidthFixed,
@@ -298,6 +345,20 @@ void ViewerApp::draw_campaign_session_view() {
                 ImGui::TableNextRow();
                 ImGui::TableNextColumn();
                 ImGui::TextUnformatted(in.mission_name.c_str());
+                ImGui::TableNextColumn();
+                // C4: the flight's package role (main / +SEAD escort /
+                // fighter escort) — the pairing the ATM composed.
+                switch (in.flight_role) {
+                    case 1:
+                        ImGui::TextDisabled("+sead");
+                        break;
+                    case 2:
+                        ImGui::TextDisabled("+esc");
+                        break;
+                    default:
+                        ImGui::TextDisabled("main");
+                        break;
+                }
                 ImGui::TableNextColumn();
                 ImGui::TextUnformatted(
                     in.team_name.empty() ? "(?)"

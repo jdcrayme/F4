@@ -2,9 +2,11 @@
 
 > **Status**: Active plan. **C1 (the result ledger + sink + write-back),
 > C2 (one pool — draws, netting, reinforcement), C3 (threat map +
-> A* + route builder, generation-to-spawn), and V-CAMP (the live
-> campaign session — the viewer runs the war) are LANDED** — the
-> rest of this document is the roadmap they opened.
+> A* + route builder, generation-to-spawn), V-CAMP (the live
+> campaign session — the viewer runs the war), and C4 (the ATM
+> pipeline — 7-phase tasking, FindBestAir, escort pairing, TOT
+> slots, mission recovery) are LANDED** — the rest of this document
+> is the roadmap they opened.
 > **Prerequisite**: B.3 landed (campaign→sim loop: intents → spawner →
 > aircraft fly saved routes; `campaign_qc` gates the loop end to end).
 > **Companion**: [Next Phase Plan](NEXT_PHASE_PLAN.md) (§B — the campaign
@@ -253,21 +255,76 @@ Deterministic by construction (byte-identical ledgers pinned by
 test). The 24-hour RUN remains a headless harness (C5); the viewer is
 where it gets WATCHED.
 
-### C4 — the ATM pipeline (M4.2) + squadron selection (M4.6)
+### C4 — the ATM pipeline (M4.2) + squadron selection (M4.6) (LANDED)
 The 7 composable tasking phases with budget awareness, package
-composition from profile hints (escort pairing, TOT slotting against
-the decoded `atm_airbases` schedules), `FindBestAir` scoring — which
+composition from profile hints, and `FindBestAir` scoring — which
 REPLACES the C3 role-fallback bridge with the reference's actual
-capability-scored selection.
+capability-scored selection. What shipped:
+
+- **`AirTaskingManager`** (f4-campaign, atm.hpp/cpp): the phases as
+  public, independently-testable methods — 1. request generation (the
+  profile ladder + the decoded ATO backlog seed, past-TOT requests on
+  the reference's 30-minute delay pushes capped at 8; GetPriority's
+  deterministic subset scores each request from the team's own
+  mission_priority/objtype_priority tables, both now decoded and
+  emitted), 2. prioritization (stable priority sort + the
+  missions_per_cycle tempo budget), 3. deconfliction
+  (mindistance/mintime vs booked flights), 4. package building
+  (ScoreThreatFast at the profile's target altitudes → NEED_SEAD,
+  then FindBestAir), 5. support assignment (ADDSEAD + NEED_SEAD pairs
+  a SEADESCORT flight, ADDESCORT pairs a fighter escort — each with
+  its own FindBestAir pick and TOT staggered by the support profile's
+  separation), 6. route planning (Campaign-side: the C3 builder, the
+  main flight's route shared package-wide), 7. TOT slot scheduling
+  (FindTakeoffSlot/ScheduleAircraft ports over the decoded
+  `atm_schedules` bitmasks — the save's own planned sorties are
+  already-consumed slots our flights deconflict against; the snapped
+  TOT shifts by the snap delta and the flight is booked for
+  recovery).
+- **FindBestAir** (atm.cpp:1534's port): rating (UCD Scores[ref-ARO]
+  when the theater DB resolves the squadron, else the
+  specialty-derived fallback), ±5 specialty, the lowestScore gate,
+  capability/availability/schedule-full skips, −5 one-short, +3
+  within-package squadron reuse, +2 same airbase, +2 half range, +2
+  quickest arrival with the reference's previous-best rebalancing.
+  A counter-air wing IS taskable for strike at a reduced rating —
+  scored, never gated.
+- **Mission recovery**: the C2 "drawn = committed" simplification
+  closes — when a flight's mission-over deadline passes, its
+  SURVIVORS (drawn − the ledger's per-flight booked losses) return to
+  the tasking pool (ledger: apply_mission_recovery, the draw's
+  mirror). Only deaths keep a draw spent.
+- **The data surface**: world_json emits `atm_schedules` (the 32-block
+  takeoff bitmasks behind the id list) + the team priority tables;
+  WorldState parses them; ITeamSource carries the accessors. The
+  boundary discipline unchanged.
+- **The Campaign mode switch** (`CampaignConfig::atm_pipeline`,
+  default OFF — the legacy ladder's goldens stay byte-identical,
+  pinned by test): campaign_qc and the campaign session arm it (the
+  session's new default). One cycle-time fix rides along: every due
+  cycle now fires at its OWN due time (a big tick == N small ticks
+  exactly; the pre-C4 code fired all cycles at the advanced clock —
+  equivalent only for single-cycle horizons, and slot scheduling
+  exposed it).
+- Verified on TestCamp (QC acceptance): 4 h tasking + 20 min
+  INTSTRIKE — 8 cycles, 523 packages with 180 escorts, 143 slot
+  snaps, 406 aircraft recovered, 240 routes / 1,157 wps, 88 bombs /
+  66 features destroyed / 20 objectives written back, exit 0,
+  campaign_result.json byte-identical across runs.
+
+The C3 role-fallback bridge is retired at its armed sites (the QC
+and the session now run the pipeline; the config flag stays for
+hosts that want the legacy shape).
 
 ### C5 — the 24-hour war (the acceptance)
 `campaign_qc` grows a long-horizon mode: both sides generate, fly,
 fight, attrite, adapt — hours of sim time, headless, deterministic
 (byte-stable summary at the end). The C1 ledger + the C2 one-pool
-tasking + the C3 routed generation make this run MEANINGFUL: every
-hour's draws, losses, and resupply reshape the next hour's force.
-That run's artifacts (summary + result + trace) are the "core game
-functionality replicated" certificate.
+tasking + the C3 routed generation + the C4 ATM pipeline make this
+run MEANINGFUL: every hour's packages, draws, losses, recoveries, and
+resupply reshape the next hour's force. That run's artifacts (summary
++ result + trace) are the "core game functionality replicated"
+certificate.
 
 ## 6. What does NOT change
 
@@ -306,29 +363,41 @@ functionality replicated" certificate.
   this slice; the stock-to-budget replenishment flow (and the
   `last_resupply`/`last_repair` timers for ground supply and objective
   feature repair) land with their consumers (the ground-war and
-  repair tranches). Drawn aircraft that survive their mission never
-  RETURN to the pool in this slice (mission recovery is the C4 ATM
-  tranche's job — the accounting models "drawn = committed", the
-  same simplification B.3 made, now visible in one place).
+  repair tranches). (Drawn aircraft surviving their mission now
+  RETURN via C4 mission recovery — apply_mission_recovery; the
+  remainder of this entry is the resupply-depth story.)
 - **RoE overflight walls** (C3): the stance vocabulary now carries
   Neutral/Hostile (the two denying classes), but score() still SCORES
   rather than walls — the 32000 lethal denial (and the A*'s >120
   impassable test, already ported) arms with the RoE refinement
   tranche.
+- **ATM scope** (C4): the pipeline composes MAIN + ESCORT flights —
+  the reference's multi-strike feature analysis (BestTargetFeature
+  loops vs feature HP) and its support-flight SHARING (FindSupport
+  Flights: AWACS/tanker/JSTAR/ECM racetracks) need the feature-damage
+  loop and loiter-racetrack routes respectively (the weapons and
+  loiter tranches). GetPriority's PO/package/distance/random terms
+  need strategy-layer data (the request's context vocabulary decodes;
+  the ACTION system that files contextual requests is the strategy
+  tranche). Enemy-requested BARCAP/SWEEP (ADDBARCAP/ADDSWEEP →
+  RequestEnemyMission) — the ladder already generates both sides'
+  defensive CAP every cycle; the requester-driven path lands with the
+  strategy layer.
 - **Threat-map coverage** (C3): only AD battalions whose entity
   types resolve into the theater DB's UCD paint — the fixture UCD is
   an 8-entry sample (3 of 247 AD battalions on TestCamp); the full
   theater's UCD (game data) paints the rest with no code change.
-- **Package-shared ingress/breakpoints, TOT timing, per-action
-  altitude shaping, loiter racetracks, tanker waypoints** (C3): each
-  lands with its consumer (C4 package composition, the loiter and
-  fuel tranches) — documented in route_builder.hpp.
+- **Per-action altitude shaping, loiter racetracks, tanker waypoints**
+  (C3): each lands with its consumer (the loiter and fuel tranches) —
+  documented in route_builder.hpp. (Package-shared ingress and TOT
+  slotting landed with C4's package composition — escorts share the
+  main flight's route; takeoffs snap to the airbase schedules.)
 
 ## 8. Implementation order (C4 onward)
 
-1. C4 ATM phases + FindBestAir (replacing the C3 role-fallback
-   bridge).
-2. C5 the long run.
+1. ~~C4 ATM phases + FindBestAir (replacing the C3 role-fallback
+   bridge)~~ — LANDED.
+2. C5 the long run (the 24-hour war, now over the ATM pipeline).
 
 ---
 

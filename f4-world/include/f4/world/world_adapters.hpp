@@ -74,6 +74,23 @@ struct TeamAdapter : ITeamSource {
     int16_t last_wingman(int i) const override { return ws_->teams[i].last_wingman; }
     // C2 — the .cmp team block's replacement stock.
     uint16_t replacements_avail(int i) const override { return ws_->teams[i].replacements_avail; }
+    // C4 (ATM pipeline) — tasking priorities + ATM schedules/backlog.
+    int mission_priority(int i, uint8_t mission) const override {
+        const auto& mp = ws_->teams[i].mission_priority;
+        if (mission >= mp.size()) return 0;
+        return mp[mission];
+    }
+    int objtype_priority(int i, int obj_type) const override {
+        const auto& op = ws_->teams[i].objtype_priority;
+        if (obj_type < 0 || static_cast<std::size_t>(obj_type) >= op.size()) return 0;
+        return op[static_cast<std::size_t>(obj_type)];
+    }
+    const std::vector<AtmAirbaseState>& atm_airbases(int i) const override {
+        return ws_->teams[i].atm_airbases;
+    }
+    const std::vector<AtmRequestState>& atm_requests(int i) const override {
+        return ws_->teams[i].atm_requests;
+    }
 
 private:
     const WorldState* ws_;

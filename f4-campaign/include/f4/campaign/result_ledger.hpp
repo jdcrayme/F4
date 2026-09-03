@@ -132,6 +132,9 @@ struct TeamLedger {
     int losses = 0;                 // air losses booked this run
     int drawn = 0;                  // aircraft drawn into missions (C2)
     int reinforced = 0;             // aircraft delivered by resupply (C2)
+    /// Aircraft recovered from completed missions (C4) — the team
+    /// mirror of the squadrons' run_recoveries sum.
+    int recovered = 0;              // aircraft returned to the pool (C4)
     /// Deaths already netted against draws (internal; the tasking view
     /// subtracts them from `losses` — those aircraft left the pool when
     /// they were drawn).
@@ -169,10 +172,27 @@ struct SquadronLedger {
     /// Aircraft delivered by reinforcement ticks THIS RUN (tasking
     /// credit, capped at `availability`).
     int run_reinforced = 0;
+    /// Aircraft released back to the tasking pool THIS RUN when
+    /// their mission completed (C4 mission recovery — the draw's
+    /// mirror). run_draws is DECREMENTED by each release, so the
+    /// outstanding-draw subtraction in squadron_tasking_available()
+    /// needs no extra term: recovered aircraft are simply available
+    /// again.
+    int run_recoveries = 0;
     /// Deaths netted against draws (internal netting counter — a drawn
     /// aircraft's death consumes the draw, it does not debit the pool
     /// twice; the existence counters still count it).
     int drawn_deaths = 0;
+};
+
+/// One mission-recovery event (C4: a mission completed and its
+/// surviving drawn aircraft returned to the tasking pool).
+struct MissionRecoveryRecord {
+    double t_s = 0.0;
+    std::uint8_t team = 0;
+    std::uint32_t squadron = 0;
+    std::uint32_t flight = 0;       ///< the completing flight (VU id)
+    int released = 0;               ///< survivors actually released
 };
 
 /// One mission-draw event (the tasking side of the ledger — a package
@@ -244,6 +264,22 @@ public:
                             std::uint32_t squadron_vu,
                             int count);
 
+    /// A mission COMPLETED and its surviving aircraft returned to the
+    /// tasking pool — the draw's mirror (C4 mission recovery: drawn
+    /// aircraft survive their mission, land, and fly again; only
+    /// deaths keep a draw spent). `count` is the SURVIVORS the caller
+    /// computed (drawn minus the flight's booked losses); the ledger
+    /// clamps the release at the squadron's outstanding draws (an
+    /// over-report books what it can, never a negative). Unknown
+    /// squadron → counted unmatched, same loudness rule as draws.
+    /// Team `drawn` decreases by the release (recovered — a separate
+    /// counter, since drawn goes down while recoveries go up).
+    void apply_mission_recovery(double t_s,
+                                std::uint8_t team,
+                                std::uint32_t squadron_vu,
+                                std::uint32_t flight_vu,
+                                int count);
+
     /// The reinforcement tick: every squadron whose tasking availability
     /// dropped below its snapshot refills toward the snapshot, drawing
     /// on its wire reinforcement budget (min(deficit, budget)); the
@@ -297,6 +333,31 @@ public:
     /// ledger reports the snapshot itself (identical to the un-attached
     /// Campaign — the golden identity). Unknown VU → 0.
     [[nodiscard]] int squadron_tasking_available(std::uint32_t vu) const;
+
+    /// Air losses booked THIS RUN against one FLIGHT VU id (0 when
+    /// none) — the C4 recovery arithmetic: a completing package
+    /// releases drawn − losses, and the losses are per flight. Counts
+    /// only losses whose victim resolved to `squadron_vu` (0 pairs the
+    /// flight id alone, for origins the ledger never saw).
+    [[nodiscard]] int flight_air_losses(std::uint32_t flight_vu,
+                                        std::uint32_t squadron_vu) const;
+
+    /// Aircraft released back to the tasking pool by mission recovery
+    /// this run, all teams (the mirror of mission_draw_aircraft).
+    [[nodiscard]] int aircraft_recovered() const noexcept {
+        return aircraft_recovered_;
+    }
+
+    /// Mission-recovery events booked this run (flights completed).
+    [[nodiscard]] int mission_recoveries() const noexcept {
+        return mission_recoveries_;
+    }
+
+    /// The recovery event log (arrival order).
+    [[nodiscard]] const std::vector<MissionRecoveryRecord>&
+    mission_recovery_log() const noexcept {
+        return recoveries_;
+    }
 
     /// Total air losses applied (all teams).
     [[nodiscard]] int air_losses() const noexcept { return air_losses_; }
@@ -426,6 +487,7 @@ private:
     std::vector<AirLossRecord> losses_;
     std::vector<BombImpactRecord> impacts_;
     std::vector<MissionDrawRecord> draws_;
+    std::vector<MissionRecoveryRecord> recoveries_;
     std::vector<ReinforcementRecord> reinforcements_;
     /// Sync order with VU keys — to_json() sorts for output stability.
     std::vector<ObjectiveDamageRecord> objective_damage_;
@@ -440,7 +502,10 @@ private:
     // --- C2 tasking-side totals ---
     int mission_draws_ = 0;          // draw EVENTS (packages)
     int mission_draw_aircraft_ = 0;  // aircraft committed
+    int mission_recoveries_ = 0;     // recovery EVENTS (flights, C4)
+    int aircraft_recovered_ = 0;     // aircraft released (C4)
     int draws_unmatched_ = 0;        // draws against unknown squadrons
+    int recoveries_unmatched_ = 0;   // recoveries vs unknown squadrons (C4)
     int reinforcement_fires_ = 0;    // cadence fires (delivered or not)
     int aircraft_reinforced_ = 0;    // aircraft delivered
 };

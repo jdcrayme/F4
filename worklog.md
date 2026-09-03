@@ -4466,3 +4466,225 @@ Stage Summary:
 - Next per the plan: C4 (ATM 7-phase pipeline + FindBestAir replacing
   the role-fallback bridge), then C5 the 24-hour war — both now
   developed against a viewer that can watch them.
+
+---
+Task ID: 16
+Agent: main (Super Z)
+Task: User bug report: "Patch is committed and pushed, but pressing
+'Start Session' results in an 'aircraft config not found: ...' error.
+We shouldn't have to run any other command-line tools in preparation
+for the test apps." Session resumed against the user's pushed V-CAMP
+tranche (2b02c72 "Campaign work." — local hard-reset onto origin/main;
+the local tree was content-identical except 7 never-pushed trivial
+line deletions, discarded).
+
+Work Log:
+- Root cause (code-verified, not a path bug): the Start Session
+  runtime inputs are BUILD artifacts — generated_fixtures/f16.json
+  (convert_golden_fixtures, which lived in f4-convert/TESTS/
+  CMakeLists.txt) and generated_campaign/MissionProfiles.json
+  (mission_profiles_fixture, f4-campaign). The f4-world-viewer app
+  target declared NO dependency on either. A single-target build of
+  the app (cmake --build --target f4-world-viewer, or F5 on the
+  viewer project in Visual Studio) builds only the target's
+  dependency closure and skips ALL custom targets — exactly where the
+  generation hid. The app then launched fine and failed at the button.
+  Same latent gap: campaign_qc (profiles dep only, no f16.json dep)
+  and f4-scenario-player (scenario templates all point at f16.json).
+- Fix, structural: (1) the whole golden-fixture generation block
+  HOISTED from f4-convert/tests/CMakeLists.txt to the library
+  f4-convert/CMakeLists.txt, after add_subdirectory(cli) (the
+  converters are the generators; gated on F4_CONVERT_BUILD_CLI,
+  default ON — the same coupling the tests/ block always had). Target
+  names (convert_golden_fixtures / simdata_golden_fixtures /
+  simdata_wave2_golden_fixtures), output paths, and commands are
+  byte-identical; every existing add_dependencies consumer (f4-data,
+  f4-flight-model, f4-ai, f4-simulation tests) unchanged. Also kills
+  the latent -DF4_CONVERT_BUILD_TESTS=OFF configure breakage of those
+  consumers and drops the redundant trailing F4_GENERATED_FIXTURES_DIR
+  re-set (the ROOT CMakeLists owns that cache var). (2)
+  add_dependencies on the app targets: f4-world-viewer
+  (mission_profiles_fixture + guarded convert_golden_fixtures),
+  f4-scenario-player (guarded), campaign_qc (guarded). Building the
+  app IS the preparation — the user's requirement, verbatim.
+- Viewer UX guard: start_campaign_session() pre-checks the two
+  required fixtures and reports what is missing + its path + the
+  exact rebuild command (cmake --build <build> --target
+  f4-world-viewer) — a bare "aircraft config not found" reads like a
+  manual preparation step exists; it doesn't, the rebuild IS the step.
+- THE ENVIRONMENT WALL, BREACHED: this container previously could not
+  build ANY GUI target (glfw hard-requires libxrandr-dev; no root to
+  apt-get install). This session extracted the X11/OpenGL dev packages
+  locally WITHOUT root (apt-get download as user + dpkg-deb -x into
+  /tmp/x11dev, CPATH + CMAKE_PREFIX_PATH for configure, a
+  merged-lib dir with absolute symlinks to the system runtime .so's +
+  LIBRARY_PATH for the final links). Consequence: the FIRST full
+  in-container build of f4-renderer + f4-world-viewer +
+  f4-scenario-player + f4-models-viewer, the FIRST in-container run
+  of their test dirs, AND the first in-container launch of the world
+  viewer itself (under Xvfb :99, --screenshot smoke path: world +
+  terrain loaded, rendered, screenshot written, clean exit).
+- Start Session verified end-to-end WITHOUT the UI (the button's
+  exact code path): a one-off harness (scripts/session_start_repro
+  .cpp, NOT in the patch — verification only) calls
+  CampaignSession::create with the viewer's exact options over the
+  real save1.world.json. Before/after proof: fixtures deleted →
+  "START SESSION FAILED: aircraft config not found: <path>" (the
+  user's exact error); rebuild ONLY the f4-world-viewer target →
+  fixtures regenerate → "session created, advanced 90 s, writeback
+  applied, START SESSION OK".
+- Regression: campaign_qc over TestCamp (60-min tasking + 2-min run)
+  vs the PRE-CHANGE binary — same exit code, same loop numbers,
+  campaign_result.json byte-IDENTICAL (the summary differs only in
+  its recorded artifact paths, different out-dirs). The full C3
+  acceptance command reproduced exactly: 4 h tasking + 20-min
+  AMIS_INTSTRIKE → 8 cycles, 411 intents, 1,013 drawn, 81 routes /
+  383 wps / 22 searched, 8 synthetic + 49 saved (57), 88 bombs /
+  66 features / 20 objectives written back, exit 0.
+- Suite: 2,206/2,206 (100%). The count jumped 2,128 → 2,206 because
+  the renderer/viewer/scenario-player test dirs now build in-container
+  (see the wall breach above); 6 GL-context tests needed Xvfb
+  (DISPLAY=:99), all pass. One genuine find from the first-time
+  enablement: f4-renderer's test_coord_transform has been red at HEAD
+  all along — its ModelVertexToRaylib_Axes/_General expectations
+  ((x,y,z)→(x,−z,y)) match NO implementation that ever shipped (the
+  function was (y,z,−x) at introduction, (y,−z,−x) since the
+  model-viewer-era update — the mapping every shipped rendering
+  surface uses: model viewer, Ground Layout 3D, class table browser,
+  mesh_builder default). Pinned the test to the documented current
+  conversion with the history in-comment; test-only change, zero
+  runtime code.
+- Docs: CHANGES V-CAMP.1 entry, README (f4-convert fixture-generation
+  note + the CampaignSession section's fixtures-are-build-artifacts
+  note), this log.
+
+Stage Summary:
+- Start Session (and the scenario player, and campaign_qc) now work
+  from a single-target build: the apps' runtime data is generated by
+  building the app target itself. No preparation tools, no
+  full-build-first, no manual anything — the user's requirement,
+  implemented at the CMake graph level.
+- The dev container can now build and run EVERYTHING (GUI included,
+  via the user-prefix X11 dev headers + Xvfb) — every future viewer
+  tranche gets real in-container verification instead of
+  syntax-only checks and user-side trust.
+- Touched files (7): f4-convert/CMakeLists.txt,
+  f4-convert/tests/CMakeLists.txt, f4-world-viewer/CMakeLists.txt,
+  f4-world-viewer/src/campaign_session_view.cpp,
+  f4-scenario-player/CMakeLists.txt, f4-simulation/CMakeLists.txt,
+  f4-renderer/tests/test_coord_transform.cpp (+CHANGES/README/worklog).
+- Next per the plan: C4 (ATM 7-phase pipeline + FindBestAir replacing
+  the role-fallback bridge), then C5 the 24-hour war — both now
+  developed against a viewer this container can actually run.
+
+---
+Task ID: 17
+Agent: main (Super Z)
+Task: C4 as planned — the ATM pipeline (M4.2's 7 composable phases
+with budget awareness + M4.6's FindBestAir scoring), replacing the C3
+role-fallback bridge: package composition from profile hints (escort
+pairing, TOT slotting against the decoded atm_airbases schedules),
+mission recovery (the C2 "drawn = committed" simplification closes).
+
+Work Log:
+- Reference study: atm.cpp Task (the 200ms-budgeted request loop),
+  BuildPackage's numbered stages (1 target analysis/NEED_SEAD, 2
+  strikes, 3 required requests = SEAD/escort blocks, 4 conditional
+  requests), FlightClass::BuildMission (route/timing/scheduling/loadout),
+  FindBestAir (atm.cpp:1534 — the full scoring: rating/5, ±5
+  specialty, lowestScore gate, availability, +3 SetAssigned, +2
+  same-airbase, +2 half-range, +2 quickest with previous-best
+  rebalancing), FindTakeoffSlot/ScheduleAircraft (the 32-block
+  1-minute slot bitmasks, block = MIN_PLAN_AIR=5, ATM_CYCLE_FULL
+  0x1F, fudge-block fill, large-flight double slot), GetPriority's
+  deterministic terms, mission.h's real ARO enum (1..16 — the UCD
+  Scores index per role), and the request delay rule (30-min pushes,
+  cap 8). Design notes in atm.hpp's header.
+- Data layer (f4-world-convert + f4-world): world_json now emits
+  atm_schedules (the 32-block bitmasks behind the id list — decoded
+  since the team_decoder, never emitted) and the team priority tables
+  mission_priority[41]/objtype_priority[36] (GetPriority's own
+  inputs). WorldState parses all three; ITeamSource grows
+  default-implemented accessors (mission_priority/objtype_priority/
+  atm_airbases/atm_requests + the AtmAirbaseState/AtmRequestState
+  structs); TeamAdapter overrides. Boundary discipline unchanged.
+- f4-campaign: NEW AirTaskingManager (atm.hpp/cpp) — the 7 phases as
+  public, independently-testable methods: generate_requests (ladder +
+  the ATO backlog seed with the reference's delay pushes/cap),
+  prioritize (stable sort + missions_per_cycle budget), deconflict
+  (mindistance/mintime vs booked), compose_packages (threat analysis
+  → NEED_SEAD; FindBestAir; escort pairing via build_support_flight_),
+  schedule_takeoff (the slot snap + fill + the recovery booking — the
+  commit point), recover_completed (survivors = drawn − per-flight
+  booked losses). FindBestAir ported with every term the sources
+  express; the player-squadron bonuses (no engine-agnostic data)
+  documented as skipped. AtmConfig = aiinput's [ATM] keys as config.
+- Ledger: apply_mission_recovery (releases clamped at outstanding
+  draws; run_draws DECREMENTED — the pool math needs no new term),
+  flight_air_losses (the per-flight loss count off the air-loss log),
+  MissionRecoveryRecord + aircraft_recovered()/mission_recoveries()/
+  mission_recovery_log(); to_json gains the totals keys + the
+  mission_recoveries array (absent when empty — legacy shape kept).
+- Campaign: CampaignConfig::atm_pipeline (default OFF — the legacy
+  ladder's goldens byte-identical, pinned by test) + the ATM cycle
+  (phases 1-5 in the ATM, phase 6 routes package-shared, phase 7 the
+  snap, one intent per flight with flight_role/escorted_flight_id,
+  ledger draws booked at publish, recovery riding the tick). THE
+  CYCLE-TIME FIX: every due cycle now fires at its OWN due time —
+  the pre-C4 code fired all cycles of a big tick at the advanced
+  clock (equivalent only for single-cycle horizons; slot scheduling
+  exposed it when every takeoff estimate landed past the 160-minute
+  horizon — the first QC ATM run showed slots=0). Summary gains the
+  opt-in "atm" block.
+- Harness: campaign_qc arms the pipeline (min_seadescort_threat 25,
+  the fixture-theater host override), prints the atm telemetry line,
+  carries the counters in the summary's tasking block, and gates
+  EXIT 8 (drew aircraft, built no packages). CampaignSession:
+  atm_pipeline ON by default (replaces the role_fallback option —
+  FindBestAir IS the bridge now); Stats +packages/+escorts/
+  +recovered. The viewer's session panel: the packages/escorts/
+  recovered line + the missions table's role column (main/+sead/
+  +esc).
+- Tests: NEW test_atm.cpp (30 units — AirbaseSchedule semantics,
+  generation/priority-table/backlog-timeout, prioritization/budget,
+  deconfliction, FindBestAir role scoring + the counter-air-wing-
+  flies-strike pin + availability gate, escort pairing (defended→
+  SEAD+escort; undefended→escort-only; lead-squadron preference),
+  slot snap + seeded-schedule + fill-shifts, recovery with/without
+  ledger losses, ledger netting + JSON block, the Campaign mode
+  switch: determinism, legacy-off byte-identity, drawn-return,
+  multi-flight package contracts); world_state: the team ATM fields
+  + adapter boundary; session: the ATM session test (packages build,
+  two sessions byte-identical). Fixtures: kunsan_campaign.world.json
+  regenerated (real ROK/DPRK schedules + backlogs + priority tables).
+- The TeamState aggregate-initializer fixups in five test files
+  (new vector fields shifted the brace-init order — trimmed to the
+  named-field prefix).
+- Acceptance (TestCamp, QC): 4h tasking + 20m INTSTRIKE — 8 cycles,
+  703 intents, 523 packages + 180 escorts, 143 slot snaps (240 s of
+  TOT shifts), 406 aircraft recovered, 240 routes / 1,157 wps / 0
+  failures, 88 bombs / 66 features / 20 objectives written back,
+  exit 0, campaign_result.json byte-identical across runs.
+- Suite: 2,238/2,238 (100%) — build2 (the GUI-enabled tree) with
+  DISPLAY=:99; the non-GUI build's core 2,160 also green. Docs:
+  CHANGES (C4-ATM-1), README (the ATM in the f4-campaign + session
+  sections), CAMPAIGN_LOOP_PLAN (C4 LANDED, the known-gaps and order
+  sections updated), this log.
+
+Stage Summary:
+- The tasking is the reference's shape: requests (ladder + decoded
+  backlog) → priority → packages (FindBestAir-scored) → escorts
+  (paired by threat + profile flags) → routes (package-shared) →
+  TOTs (slotted against the save's own airbase schedules) →
+  recovery (survivors fly again). One pool: draws, losses,
+  recoveries, resupply.
+- The role-fallback bridge is retired at its armed sites; the
+  legacy ladder remains the library default (goldens pinned).
+- Deliberately deferred (documented in the plan's known-gaps):
+  multi-strike feature analysis, support-flight SHARING (AWACS/
+  tanker/JSTAR racetracks — the loiter tranche), GetPriority's
+  strategy-layer terms, enemy-requested BARCAP/SWEEP.
+- Next per the plan: C5 the 24-hour war — the long-horizon QC run
+  over the ATM pipeline (both sides generate, fly, fight, attrite,
+  recover, adapt), the "core game functionality replicated"
+  certificate.

@@ -17,6 +17,7 @@ add_library(f4-campaign STATIC
     src/mission_type.cpp
     src/mission_profile.cpp
     src/campaign.cpp
+    src/atm.cpp
     src/result_ledger.cpp
     src/world_writeback.cpp
     src/threat_map.cpp

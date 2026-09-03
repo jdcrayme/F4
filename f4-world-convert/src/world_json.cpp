@@ -214,12 +214,45 @@ std::string to_world_json(const CamArchive& cam, const WorldJsonOptions& opts) {
                       << ", \"supply_level\":" << static_cast<int>(tt.current_supply_level)
                       << ", \"fuel_level\":" << static_cast<int>(tt.current_fuel_level)
                       << "}"
+                      // C4 (ATM pipeline): the team's own tasking
+                      // priorities — GetPriority's inputs. mission_
+                      // priority is "bonus by mission type" (0..100,
+                      // 0 = the team never requests that mission);
+                      // objtype_priority is "bonus by target type"
+                      // (0..100). Emitted indexed by wire byte / type.
+                      << ", \"mission_priority\": [";
+                    for (std::size_t pi = 0; pi < tt.mission_priority.size(); ++pi) {
+                        if (pi) o << ", ";
+                        o << static_cast<int>(tt.mission_priority[pi]);
+                    }
+                    o << "]"
+                      << ", \"objtype_priority\": [";
+                    for (std::size_t pi = 0; pi < tt.objtype_priority.size(); ++pi) {
+                        if (pi) o << ", ";
+                        o << static_cast<int>(tt.objtype_priority[pi]);
+                    }
+                    o << "]"
                       // Team's Air Tasking Manager: airbase schedule list +
                       // pending mission requests (the ATO worklist).
+                      // C4 adds atm_schedules — the 32-block takeoff
+                      // bitmasks behind the id list (ATMAirbaseClass::
+                      // schedule; FindTakeoffSlot's substrate).
                       << ", \"atm_airbases\": [";
                     for (std::size_t ai = 0; ai < tt.atm.airbases.size(); ++ai) {
                         if (ai) o << ", ";
                         o << tt.atm.airbases[ai].id_num;
+                    }
+                    o << "]"
+                      << ", \"atm_schedules\": [";
+                    for (std::size_t ai = 0; ai < tt.atm.airbases.size(); ++ai) {
+                        if (ai) o << ", ";
+                        o << "{\"id\": " << tt.atm.airbases[ai].id_num
+                          << ", \"schedule\": [";
+                        for (int bi = 0; bi < 32; ++bi) {
+                            if (bi) o << ", ";
+                            o << static_cast<int>(tt.atm.airbases[ai].schedule[bi]);
+                        }
+                        o << "]}";
                     }
                     o << "]"
                       << ", \"atm_requests\": [";

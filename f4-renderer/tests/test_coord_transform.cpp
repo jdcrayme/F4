@@ -18,19 +18,29 @@ TEST(CoordTransform, ModelVertexToRaylib_Identity) {
 }
 
 TEST(CoordTransform, ModelVertexToRaylib_Axes) {
-    // X axis is unchanged
+    // Conversion: (x, y, z) -> (y, -z, -x) — the mapping the 3D model
+    // viewer, the world viewer's Ground Layout 3D, the class table
+    // browser, and mesh_builder's default all render FreeFalcon BSP
+    // models upright with (visually verified across those tranches).
+    // NOTE: this test's PREVIOUS expectations ("X unchanged, Y becomes
+    // Z, Z becomes -Y", i.e. (x, -z, y)) matched no implementation
+    // that ever shipped — neither the original (y, z, -x) nor the
+    // current (y, -z, -x) — so it had been red since the renderer
+    // targets were first enabled in CI; pinned to the shipped
+    // conversion here.
+    // X axis -> -Z (LH x-right becomes RH -z, away from the viewer)
     const auto x = model_vertex_to_raylib(1, 0, 0);
-    EXPECT_FLOAT_EQ(x.x, 1);
+    EXPECT_FLOAT_EQ(x.x, 0);
     EXPECT_FLOAT_EQ(x.y, 0);
-    EXPECT_FLOAT_EQ(x.z, 0);
+    EXPECT_FLOAT_EQ(x.z, -1);
 
-    // Y axis becomes Z (LH Y-up -> RH Y-up: Y swaps with Z)
+    // Y axis -> X (LH y-up becomes RH x-right)
     const auto y = model_vertex_to_raylib(0, 1, 0);
-    EXPECT_FLOAT_EQ(y.x, 0);
+    EXPECT_FLOAT_EQ(y.x, 1);
     EXPECT_FLOAT_EQ(y.y, 0);
-    EXPECT_FLOAT_EQ(y.z, 1);
+    EXPECT_FLOAT_EQ(y.z, 0);
 
-    // Z axis becomes -Y (negating Z flips handedness)
+    // Z axis -> -Y (LH z-forward becomes RH -y, down)
     const auto z = model_vertex_to_raylib(0, 0, 1);
     EXPECT_FLOAT_EQ(z.x, 0);
     EXPECT_FLOAT_EQ(z.y, -1);
@@ -38,11 +48,11 @@ TEST(CoordTransform, ModelVertexToRaylib_Axes) {
 }
 
 TEST(CoordTransform, ModelVertexToRaylib_General) {
-    // (3, 5, 7) -> (3, -7, 5)
+    // (3, 5, 7) -> (5, -7, -3)  [(x, y, z) -> (y, -z, -x)]
     const auto v = model_vertex_to_raylib(3, 5, 7);
-    EXPECT_FLOAT_EQ(v.x, 3);
+    EXPECT_FLOAT_EQ(v.x, 5);
     EXPECT_FLOAT_EQ(v.y, -7);
-    EXPECT_FLOAT_EQ(v.z, 5);
+    EXPECT_FLOAT_EQ(v.z, -3);
 }
 
 TEST(CoordTransform, EnuToRaylib_Axes) {

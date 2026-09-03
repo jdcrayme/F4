@@ -74,6 +74,95 @@ TeamState parse_team(Reader& r) {
             }
             t.tea_loaded = true;
         }
+        // --- C4 (ATM pipeline): the team's tasking priorities + ATM
+        // state (all emitted only when .tea enrichment decoded — the
+        // skip_value default keeps non-enriched saves unchanged).
+        else if (k == "mission_priority") {
+            r.skip_ws(); r.expect('[');
+            if (r.consume(']')) { /* empty */ }
+            else for (;;) {
+                t.mission_priority.push_back(static_cast<uint8_t>(r.read_int()));
+                if (r.consume(']')) break;
+                r.expect(',');
+            }
+            t.tea_loaded = true;
+        }
+        else if (k == "objtype_priority") {
+            r.skip_ws(); r.expect('[');
+            if (r.consume(']')) { /* empty */ }
+            else for (;;) {
+                t.objtype_priority.push_back(static_cast<uint8_t>(r.read_int()));
+                if (r.consume(']')) break;
+                r.expect(',');
+            }
+            t.tea_loaded = true;
+        }
+        else if (k == "atm_schedules") {
+            // Array of {"id": N, "schedule": [32 block bitmasks]}.
+            r.skip_ws(); r.expect('[');
+            if (r.consume(']')) { /* empty */ }
+            else for (;;) {
+                AtmAirbaseState ab;
+                r.skip_ws(); r.expect('{');
+                for (;;) {
+                    std::string ak = r.read_string();
+                    r.expect(':');
+                    if (ak == "id") {
+                        ab.id_num = static_cast<uint32_t>(r.read_int());
+                    } else if (ak == "schedule") {
+                        // Up to 32 block bitmasks (the emission writes
+                        // exactly 32; shorter arrays zero-fill — a
+                        // hand-written world is a legal input).
+                        r.skip_ws(); r.expect('[');
+                        if (r.consume(']')) { /* empty */ }
+                        else for (int bi = 0; bi < 32; ++bi) {
+                            ab.schedule[static_cast<std::size_t>(bi)] =
+                                static_cast<uint8_t>(r.read_int());
+                            if (r.consume(']')) break;
+                            r.expect(',');
+                        }
+                    } else {
+                        r.skip_value();
+                    }
+                    if (r.consume('}')) break;
+                    r.expect(',');
+                }
+                t.atm_airbases.push_back(std::move(ab));
+                if (r.consume(']')) break;
+                r.expect(',');
+            }
+            t.tea_loaded = true;
+        }
+        else if (k == "atm_requests") {
+            // Array of the ATO backlog records (the emission's field set).
+            r.skip_ws(); r.expect('[');
+            if (r.consume(']')) { /* empty */ }
+            else for (;;) {
+                AtmRequestState rq;
+                r.skip_ws(); r.expect('{');
+                for (;;) {
+                    std::string rk = r.read_string();
+                    r.expect(':');
+                    if      (rk == "mission")      rq.mission      = static_cast<uint8_t>(r.read_int());
+                    else if (rk == "who")          rq.who          = static_cast<uint8_t>(r.read_int());
+                    else if (rk == "vs")           r.skip_value();
+                    else if (rk == "tot")          rq.tot          = static_cast<int32_t>(r.read_int());
+                    else if (rk == "priority")     rq.priority     = static_cast<int32_t>(r.read_int());
+                    else if (rk == "action_type")  r.skip_value();
+                    else if (rk == "context")      r.skip_value();
+                    else if (rk == "aircraft")     rq.aircraft     = static_cast<uint8_t>(r.read_int());
+                    else if (rk == "target_num")   rq.target_num   = static_cast<uint32_t>(r.read_int());
+                    else if (rk == "requester_num") rq.requester_num = static_cast<uint32_t>(r.read_int());
+                    else                           r.skip_value();
+                    if (r.consume('}')) break;
+                    r.expect(',');
+                }
+                t.atm_requests.push_back(std::move(rq));
+                if (r.consume(']')) break;
+                r.expect(',');
+            }
+            t.tea_loaded = true;
+        }
         else                     r.skip_value();
         if (r.consume('}')) break;
         r.expect(',');

@@ -78,6 +78,76 @@ TEST(WorldState, LoadsTeamSlots) {
     EXPECT_EQ(ws.teams[2].flags, 2);
 }
 
+// C4 (ATM pipeline): the team's tasking priorities and ATM state —
+// mission_priority/objtype_priority arrays, the airbase takeoff
+// schedules, and the pending request backlog.
+TEST(WorldState, LoadsTeamAtmPrioritiesSchedulesAndBacklog) {
+    WorldState ws;
+    ws.load_from_string(R"({
+        "version": 71,
+        "campaign": {
+            "current_time": 1000,
+            "teams": [
+                {"slot": 0, "flags": 0, "colour": 0, "name": "XX", "motto": ""},
+                {"slot": 1, "flags": 1, "colour": 1, "name": "U.S.", "motto": "",
+                 "mission_priority": [0, 10, 0, 20, 0, 0, 0, 40],
+                 "objtype_priority": [0, 40, 10, 100],
+                 "atm_schedules": [
+                     {"id": 4281, "schedule": [3, 0, 31]}
+                 ],
+                 "atm_requests": [
+                     {"mission": 9, "who": 1, "vs": 6, "tot": 900,
+                      "priority": 97, "action_type": 0, "context": 0,
+                      "aircraft": 2, "target_num": 1234,
+                      "requester_num": 555}
+                 ]}
+            ]
+        }
+    })");
+    ASSERT_EQ(ws.teams.size(), 2u);
+    const auto& t = ws.teams[1];
+
+    // Priorities: indexed arrays as emitted (short rows are legal).
+    ASSERT_EQ(t.mission_priority.size(), 8u);
+    EXPECT_EQ(t.mission_priority[0], 0);
+    EXPECT_EQ(t.mission_priority[1], 10);
+    EXPECT_EQ(t.mission_priority[7], 40);
+    ASSERT_EQ(t.objtype_priority.size(), 4u);
+    EXPECT_EQ(t.objtype_priority[3], 100);
+
+    // The airbase schedule: 32-block bitmask as decoded.
+    ASSERT_EQ(t.atm_airbases.size(), 1u);
+    EXPECT_EQ(t.atm_airbases[0].id_num, 4281u);
+    EXPECT_EQ(t.atm_airbases[0].schedule[0], 3);
+    EXPECT_EQ(t.atm_airbases[0].schedule[1], 0);
+    EXPECT_EQ(t.atm_airbases[0].schedule[2], 31);
+    EXPECT_EQ(t.atm_airbases[0].schedule[31], 0);   // rest zero-filled
+
+    // The backlog record.
+    ASSERT_EQ(t.atm_requests.size(), 1u);
+    EXPECT_EQ(t.atm_requests[0].mission, 9);
+    EXPECT_EQ(t.atm_requests[0].who, 1);
+    EXPECT_EQ(t.atm_requests[0].tot, 1000 - 100);   // 900
+    EXPECT_EQ(t.atm_requests[0].priority, 97);
+    EXPECT_EQ(t.atm_requests[0].aircraft, 2);
+    EXPECT_EQ(t.atm_requests[0].target_num, 1234u);
+
+    // The adapters expose all of it (the C4 boundary).
+    WorldStateAdapters adapters(ws);
+    EXPECT_EQ(adapters.teams.mission_priority(1, 1), 10);
+    EXPECT_EQ(adapters.teams.mission_priority(1, 99), 0);   // bounds
+    EXPECT_EQ(adapters.teams.objtype_priority(1, 3), 100);
+    EXPECT_EQ(adapters.teams.objtype_priority(1, 99), 0);
+    ASSERT_EQ(adapters.teams.atm_airbases(1).size(), 1u);
+    EXPECT_EQ(adapters.teams.atm_airbases(1)[0].id_num, 4281u);
+    ASSERT_EQ(adapters.teams.atm_requests(1).size(), 1u);
+    EXPECT_EQ(adapters.teams.atm_requests(1)[0].tot, 900);
+    // Absent team (slot 0): the legal empty state.
+    EXPECT_TRUE(adapters.teams.atm_airbases(0).empty());
+    EXPECT_TRUE(adapters.teams.atm_requests(0).empty());
+    EXPECT_EQ(adapters.teams.mission_priority(0, 1), 0);
+}
+
 TEST(WorldState, RealCamJsonLoadsAllEightTeamSlots) {
     // Requires cam2json to have been run on the real fixture. The test
     // CMakeLists generates the JSON at build time into this path.

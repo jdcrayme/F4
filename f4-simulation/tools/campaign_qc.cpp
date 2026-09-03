@@ -439,6 +439,12 @@ int main(int argc, char** argv) {
     int tasking_route_fallbacks = 0; // direct-line fallback legs
     int threat_ad_units = 0;         // the map's painted AD battalions
     int threat_cells = 0;            // cells carrying any viewer threat
+    // C4: the ATM pipeline's counters (the summary's atm block + the
+    // exit-8 gate read these).
+    int atm_packages = 0;
+    int atm_escorts = 0;
+    int atm_seeded = 0;
+    int atm_unfilled = 0;
     if (args.tasking_minutes > 0) {
         if (args.profiles_json.empty() ||
             !std::filesystem::exists(args.profiles_json)) {
@@ -457,16 +463,18 @@ int main(int argc, char** argv) {
         ladder_cfg.reinforcement_period_sec =
             args.reinforce_period_sec < 0 ? 43200
                                           : args.reinforce_period_sec;
-        // C3: arm the role fallback — the QC exercises the generation-
-        // to-spawn chain, and TestCamp's belligerents (the ROK-DPRK
-        // war the corrected RelType decode reveals) field all-counter-
-        // air squadrons: the strict role gate would never generate a
-        // delivery mission, so the routed war could not be exercised
-        // at all. The reference's own selection SCORES role vs
-        // capability (FindBestAir, the C4 tranche); the fallback is
-        // the honest bridge to that. Default-off in the library —
-        // B.3/C2 goldens stay byte-identical.
-        ladder_cfg.tasking_role_fallback = true;
+        // C4: the ATM pipeline — FindBestAir scoring (replaces the C3
+        // role-fallback bridge), escort pairing, TOT slotting against
+        // the decoded airbase schedules, and mission recovery (drawn
+        // aircraft that survive their mission return to the pool).
+        // The QC exercises the reference's actual tasking shape; the
+        // legacy ladder stays the library default (goldens-pinned).
+        // The threat threshold mirrors the route config's host-side 25
+        // (aiinput's value is game data): the fixture theater's single
+        // AD ring scores 30-33 — the default 40 would never pair a
+        // SEAD escort on the sample data.
+        ladder_cfg.atm_pipeline = true;
+        ladder_cfg.atm.min_seadescort_threat = 25;
         Campaign ladder(
             static_cast<const f4::world::ICampaignSource&>(adapters.campaign),
             static_cast<const f4::world::ITeamSource&>(adapters.teams),
@@ -556,6 +564,22 @@ int main(int argc, char** argv) {
                     spawner.stats().synthetic_spawned,
                     result_ledger.reinforcement_fires(),
                     result_ledger.aircraft_reinforced());
+        // C4: the ATM pipeline's own telemetry — the request → package
+        // → escort → slot → recovery chain, visible in one line.
+        if (const auto* atm = ladder.atm_stats(); atm != nullptr) {
+            atm_packages = atm->packages_built;
+            atm_escorts = atm->escorts_built;
+            atm_seeded = atm->requests_seeded;
+            atm_unfilled = atm->requests_unfilled;
+            std::printf("atm: requests=%d+%d (timeout=%d, unfilled=%d) "
+                        "packages=%d escorts=%d slots=%d shifts=%ds "
+                        "recovered=%d\n",
+                        atm->requests_generated, atm->requests_seeded,
+                        atm->requests_timed_out, atm->requests_unfilled,
+                        atm->packages_built, atm->escorts_built,
+                        atm->slot_snaps, atm->slot_shifts_sec,
+                        atm->aircraft_recovered);
+        }
         std::printf("threat_map: ad_units=%d threatened_cells=%d\n",
                     threat_ad_units, threat_cells);
     }
@@ -886,6 +910,21 @@ int main(int argc, char** argv) {
             w.put(",    ");
             w.number_key("synthetic_failed",
                          spawner.stats().synthetic_failed);
+            // C4: the ATM pipeline's counters — the reference's actual
+            // tasking shape (packages with escorts, TOT-slot snaps,
+            // mission recovery), as numbers next to the routes they
+            // share.
+            w.put(",    ");
+            w.number_key("atm_packages", atm_packages);
+            w.put(",    ");
+            w.number_key("atm_escorts", atm_escorts);
+            w.put(",    ");
+            w.number_key("atm_seeded_requests", atm_seeded);
+            w.put(",    ");
+            w.number_key("atm_unfilled_requests", atm_unfilled);
+            w.put(",    ");
+            w.number_key("aircraft_recovered",
+                         result_ledger.aircraft_recovered());
             w.put(",\n    \"teams\": [");
             bool first_team = true;
             for (const auto& t : result_ledger.teams()) {
@@ -1151,6 +1190,23 @@ int main(int argc, char** argv) {
                      tasking_routes_failed,
                      spawner.stats().synthetic_spawned);
         return 7;
+    }
+    // C4 gate (exit 8): the ATM pipeline ran cycles with belligerent
+    // aircraft available and drew aircraft — but built no packages
+    // (the phase chain broke somewhere between requests and
+    // FindBestAir). escorts/recoveries carry no gate: a short run can
+    // legitimately produce none (no defended targets / no completed
+    // missions) — the counters are telemetry, not thresholds.
+    if (tasking_ran && tasking_had_air &&
+        result_ledger.mission_draw_aircraft() > 0 && atm_packages == 0) {
+        std::fprintf(stderr,
+                     "campaign_qc: QC FAILURE — the ATM pipeline drew %d "
+                     "aircraft over %d cycles but built no packages. "
+                     "The 7-phase chain broke (request generation / "
+                     "FindBestAir / availability); inspect the atm "
+                     "block in campaign_qc_summary.json.\n",
+                     result_ledger.mission_draw_aircraft(), tasking_cycles);
+        return 8;
     }
     return 0;
 }
