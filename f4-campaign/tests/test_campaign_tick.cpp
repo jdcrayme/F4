@@ -234,3 +234,110 @@ TEST(CampaignTick, NonPositiveCycleConfigThrows) {
     bad.air_task_cycle_sec = 0;
     EXPECT_THROW(Rig::make(bad), std::runtime_error);
 }
+
+// ── C3: the route planner attachment ─────────────────────────────────────────
+//
+// set_route_planner() arms generation-to-spawn: every generated
+// OBJECTIVE-target mission carries a real enemy objective and a
+// threat-aware route (airbase → target → airbase). The no-planner
+// goldens above stay byte-identical (the attachment adds fields ONLY
+// when attached — the B.3 intents published nothing extra).
+
+TEST(CampaignTick, RoutePlannerArmsIntentsWithTargetsAndRoutes) {
+    // Manual rig: the squadron patch must land BEFORE the Campaign
+    // constructor snapshots the force (Rig::make builds everything at
+    // once). The kunsan TE save's squadrons are counter-air wings at a
+    // base the wire leaves empty (airbase 0) — patch the USA wing into
+    // a STRIKE squadron (ARO_S, specialty 1) at a real objective so
+    // the delivery family generates and the route builder has
+    // endpoints. (Test-scoped: the C2 --tasking ladder on the full
+    // TestCamp save exercises the unpatched path — its squadrons carry
+    // real bases.)
+    Rig rig;
+    rig.ws = std::make_unique<f4::world::WorldState>();
+    rig.ws->load(kunsan_world());
+    for (auto& u : rig.ws->units) {
+        if (u.unit_class == f4::entities::UnitClass::Squadron &&
+            u.owner == 1) {
+            u.specialty = 1;      // ARO_S — strike
+            u.airbase_id = 2659;  // a real objective VU from the save
+        }
+    }
+    rig.adapters =
+        std::make_unique<f4::world::WorldStateAdapters>(*rig.ws);
+    rig.profiles = MissionProfileTable::load(F4_MISSION_PROFILES_JSON);
+    rig.bus = std::make_unique<f4::messaging::MessageBus>();
+    rig.campaign = std::make_unique<Campaign>(
+        rig.adapters->campaign, rig.adapters->teams,
+        rig.adapters->units, rig.profiles, *rig.bus, CampaignConfig{});
+    Collector collector(*rig.bus);
+
+    // The threat map + route builder over the SAME sources the campaign
+    // reads (viewer = the save's own team slot, the kunsan campaign's
+    // te_team).
+    const RouteBuilder builder(rig.adapters->objectives,
+                               rig.adapters->units, rig.adapters->teams,
+                               static_cast<std::uint8_t>(
+                                   rig.ws->campaign.te_team));
+    rig.campaign->set_route_planner(&builder, &rig.adapters->objectives);
+
+    rig.campaign->tick(1800);
+    EXPECT_EQ(rig.campaign->cycles_fired(), 1);
+    ASSERT_FALSE(rig.campaign->intents().empty());
+
+    // Every intent whose profile targets objectives carries a route
+    // (the kunsan roster's fighter squadrons generate the strike
+    // family); every routed intent is synthetic and carries a target.
+    int routed = 0;
+    for (const auto& in : rig.campaign->intents()) {
+        const auto& profile = rig.profiles.for_mission(in.mission_byte);
+        if (profile_flies_delivery_route(profile)) {
+            EXPECT_FALSE(in.route.empty())
+                << in.mission_name << " generated without a route";
+            EXPECT_NE(in.target_objective_id, 0u);
+            EXPECT_TRUE(in.synthetic);
+            // Route shape: takeoff first, landing last.
+            ASSERT_GE(in.route.size(), 2u);
+            EXPECT_EQ(in.route.front().action,
+                      f4::campaign::kWpTakeoff);
+            EXPECT_EQ(in.route.back().action, f4::campaign::kWpLand);
+            ++routed;
+        } else {
+            EXPECT_TRUE(in.route.empty());
+        }
+    }
+    EXPECT_GT(routed, 0);
+
+    // The summary carries the routes block.
+    const auto summary = rig.campaign->to_summary_json();
+    EXPECT_NE(summary.find("\"routes\""), std::string::npos);
+    EXPECT_NE(summary.find("\"built\""), std::string::npos);
+
+    // And the collector saw the same intents (the bus mirrors the
+    // record, route and all).
+    EXPECT_EQ(collector.seen.size(), rig.campaign->intents().size());
+}
+
+TEST(CampaignTick, RoutePlannerDetachmentRestoresTheBareIntents) {
+    auto rig = Rig::make();
+
+    // Attach, tick, detach... then a SECOND rig over the same world
+    // with no planner must generate the B.3 shape (no routes).
+    const RouteBuilder builder(rig->adapters->objectives,
+                               rig->adapters->units, rig->adapters->teams,
+                               static_cast<std::uint8_t>(
+                                   rig->ws->campaign.te_team));
+    rig->campaign->set_route_planner(&builder, &rig->adapters->objectives);
+    rig->campaign->tick(1800);
+
+    auto bare = Rig::make();
+    bare->campaign->tick(1800);
+    for (const auto& in : bare->campaign->intents()) {
+        EXPECT_TRUE(in.route.empty());
+        EXPECT_EQ(in.target_objective_id, 0u);
+        EXPECT_FALSE(in.synthetic);
+    }
+    // No routes block in the bare summary (byte-identity class).
+    EXPECT_EQ(bare->campaign->to_summary_json().find("\"routes\""),
+              std::string::npos);
+}

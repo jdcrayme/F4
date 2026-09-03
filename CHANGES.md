@@ -1,5 +1,61 @@
 # F4 Cleanup Pass — Changes Summary
 
+## C3 — Threat Map, A*, Route Builder: Generated Missions Fly Their Own Routes (C3-ROUTES-1)
+
+**Generation-to-spawn is closed. The campaign now BUILDS the routes it
+tasks: ThreatMap (the ScoreThreatFast data model — per-cell ownership +
+2-bit AD density rings, one byte per cell, both belligerents in the
+viewer bit-halves), AirPathFinder (asearch.cpp's A* with every
+reference constant: 2000-node pool, QuickSearch 12, 5-point threat
+sampling, ×4 heuristic, 96-step cap, best-effort partial paths), and
+RouteBuilder (BuildPathToTarget: CheckSafePath → FindSafePath corners
+→ IP → target → turn point → egress → EliminateExcessWaypoints). The
+threat model's wire face landed too: UCD HitChance[8]/Range[8] indexed
+by MoveType, emitted by cam2json per unit and read through
+IUnitCoreSource. The tranche's biggest fix is a SEMANTIC one: the
+stance vocabulary. The reference's is an ENUM (cmpglobl.h RelType:
+0 NoRelations, 1 Allied, 2 Friendly, 3 Neutral, 4 Hostile, 5 War —
+RoEData is indexed by it), NOT a sign convention; real saves carry
+garbage toward unused slots (TestCamp: -5141 toward the empty Gorn
+slot), so the pre-C3 "< 0 = war" test made the U.S. a belligerent in
+a war it is Neutral to while the actual war (ROK↔DPRK, mutual 5)
+starved target selection of every enemy objective — 0 routes, the
+exit-7 gate. f4/world now owns Relation + relation_from_wire
+(out-of-range → NoRelations) and every consumer tests == War
+(belligerent_teams, select_target_, ThreatMap::war_, the bridge's
+side_color). The role gate gained an honest bridge: FreeFalcon's
+selection SCORES role vs capability (FindBestAir — the C4 tranche);
+CampaignConfig::tasking_role_fallback (default OFF, goldens
+byte-identical) lets a role-less team task its best-available wing —
+campaign_qc arms it, because TestCamp's belligerents field
+all-counter-air squadrons. Verified on TestCamp (4-hour tasking +
+20-minute INTSTRIKE): 8 cycles, 411 intents, 1,013 drawn, 81 routes
+(383 waypoints, 0 build failures, 22 threat-avoidance searches), 8
+synthetic INTSTRIKE aircraft flown alongside the 49 saved flights, 88
+bombs / 20 objectives written back — campaign_result.json
+byte-identical across runs, all gates green (exit 0); the no-tasking
+baseline is unchanged. Suite 2091 → 2122 (+31, 100%, zero warnings).**
+
+| Area | Change |
+|------|--------|
+| `f4-world` — the relations vocabulary | data_source.hpp: `enum class Relation` (RelType port) + `relation_from_wire(int16_t)` — out-of-range wire values (the -5141 garbage toward unused slots) decode as NoRelations. The single source of truth every belligerence/RoE decision reads. |
+| `f4-world` — the C3 threat data path | UnitState + unit_hit_chance[8] / unit_weapon_range[8] (the UCD arrays, MoveType-indexed: LowAir=4, Air=5 are the SAM rings); IUnitCoreSource default-implemented accessors (zeroed — pre-C3 sources keep compiling, a zeroed map has no threats, the same as un-enriched world JSON); WorldStateAdapters override; world_state.cpp parses "hit_chance"/"weapon_range" arrays. |
+| `f4-world-convert` — emission | world_json.cpp: hit_chance + weapon_range arrays per unit, emitted inside the theater-db enrichment branch (the same place scores/vehicle_groups land — class table resolves DTYPE_UNIT → UCD index). TestCamp regeneration verified byte-identical from the tracked TestCamp.cam. |
+| `f4-campaign` — ThreatMap | threat_map.hpp/.cpp: ownership (nearest objective, 10-then-80 radii, 0xF unowned), 2-bit low/high density per cell (MAP_RATIO 6, saturating at 3), viewer bit-half packing (units at war with the viewer → bits 4-7), band formulas (Low 28·low+2·high +10 over war territory; Medium 10·low+23·high; High 30·high; VeryHigh 15·high), alt_band_from_feet (the MinAltAtLevel/MaxAltAtLevel boundaries), score() with off-map = 100, Stats{ad_units, threatened_cells} (implemented now — cells carrying ANY painted density, either half), war_() == RelType::War. |
+| `f4-campaign` — AirPathFinder | path_finder.hpp/.cpp: the reference's algorithm shape with modern plumbing (parent-chain nodes, no bit-packing — positions serve the route builder directly): sorted open list (strict <, ties keep the earlier node), linear tried list with same-position duplicate suppression, snap-to-target (< one step becomes the goal), threat > 120 impassable (armed for the RoE tranche), cost = base×step + threat/2, RETURN_PARTIAL_ON_FAIL best-effort recovery (lowest to_go, open queue then tried list, strict <). |
+| `f4-campaign` — RouteBuilder | route_builder.hpp/.cpp: RouteWaypoint (grid x/y, altitude, WP_ACTION byte, WPF flags, target VU for delivery wps), profile_flies_delivery_route (the A-G family gate — CAP racetracks are the loiter tranche), RouteBuilderConfig (aiinput.dat tunables: MinAvoidThreat 40, BreakpointDist 10, AirPathMax 2000 — hosts override; QC uses 25 for the sample-UCD rings), build() = takeoff → CheckSafePath(ingress) → [FindSafePath corners] → IP → target → turn point (5-candidate lowest-threat scan, ties toward home) → egress in reverse → landing → EliminateExcessWaypoints (two-pass, WP_NOTHING-only, critical flags respected). |
+| `f4-campaign` — Campaign | set_route_planner(const RouteBuilder*, const IObjectiveSource*) (the set_result_ledger pattern); run_tasking_cycle_ builds the route for every delivery-family intent (target = select_target_'s highest-priority enemy-owned objective), stamps intent.synthetic + route + target_objective_id on success, counts routes_built/routes_failed/route_safe_searches/route_fallbacks (new accessors — the QC's exit-7 gate reads THEM: counting route-less intents is blind, the synthetic mark only lands on success); select_target_ + belligerent_teams on RelType::War; CampaignConfig::tasking_role_fallback (default false). |
+| `f4-simulation` — spawner | campaign_spawner: synthetic-intent spawns — the squadron's airbase parking + per-base airfield data (runway heading, departure altitude), stats.synthetic_spawned / synthetic_failed (the QC gate's route-loss counters), the FlightSpawnFilter applied to intents exactly as to saved flights (team / mission / max-flights). |
+| `f4-simulation` — bridge | campaign_bridge: build_mission_plan_from_route (route → MissionPlan: takeoff WP dropped for the TakeoffModule, delivery WPs resolve their target objective through the id map with the flight-level fallback) + spawn_aircraft_for_intent; side_color on RelType::War (the garbage-tolerant decode — phantom slots stay green). |
+| `f4-simulation` — campaign_qc | The route planner attaches to the ladder: viewer = FIRST BELLIGERENT (te_team can be a non-participant — a neutral viewer packs an empty map), RouteBuilderConfig.min_avoid_threat 25 (host override — the fixture UCD's single-ring band scores sit under the reference default 40), tasking_role_fallback armed. The tasking line + summary block gain routes/waypoints/build-failures/safe-searches/direct-fallbacks/threat-ad-units/threat-cells/synthetic-spawn telemetry (coverage is VISIBLE, not silent). exit 7 reads the Campaign's own counters. |
+| Tests | +31 (suite 2091 → 2122, 100%, zero warnings): test_threat_map (8) — ownership nearest/radius, band formulas, the bit-half rule (+ the coverage stats), war-territory +10 low-altitude only, counter saturation at 3, non-AD units paint nothing, band boundaries; test_path_finder (7) — straight-run exactness, threat cost paid (the ×4 heuristic dominates sub-threshold rings — the honest pinned behavior), density tariff, budget partials, EmptyOnFail, determinism; test_route_builder (8) — IP at BreakpointDist, turn-point scan, safe-path threshold + corners, elimination passes, egress symmetry, route-only circuit; test_campaign_tick (+2) — the planner arms intents with targets+routes, detachment restores the bare intents; test_campaign_spawner (+3) — route→MissionPlan conversion (leading takeoff dropped), intent spawn composition (route + origin stamp), synthetic spawn counting; test_world_state (+2) — the threat arrays parse + adapter exposure; test_theater_data (+1) — the arrays emit when the theater DB loads. The five stance-pinning tests + the kunsan fixture moved to War=5 (same belligerents — byte-identical goldens). |
+| Docs | CAMPAIGN_LOOP_PLAN.md C3 → LANDED (the vocabulary correction with its evidence, the role-gate bridge, the QC telemetry, the fixture-UCD coverage limitation + the regeneration command); README f4-campaign section; this entry. |
+
+**The war's forward leg is now THREAT-AWARE and self-contained: the
+campaign picks enemy objectives, builds routes around what the map
+knows, and the spawner flies them — 22 of TestCamp's 81 routes bent
+around SAM rings the same run's ledger later bombed.**
+
 ## C2 — One Pool: Tasking Draws, Combat Losses, and Resupply Deplete the Same Ledger (C2-ONEPOOL-1)
 
 **The war loop's forward leg joins the return leg. C1 made sim outcomes

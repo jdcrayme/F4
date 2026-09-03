@@ -48,8 +48,8 @@ f4::world::WorldState make_flight_world() {
     ws.teams[1] = TeamState{1, 1, 1, "USA", "", 0, 0, {}};
     ws.teams[6] = TeamState{6, 6, 6, "DPRK", "", 0, 0, {}};
     // War stance: USA hostile to DPRK and back.
-    ws.teams[1].stance = {0, 0, 0, 0, 0, 0, -1, 0};
-    ws.teams[6].stance = {0, -1, 0, 0, 0, 0, 0, 0};
+    ws.teams[1].stance = {0, 0, 0, 0, 0, 0, 5, 0};
+    ws.teams[6].stance = {0, 5, 0, 0, 0, 0, 0, 0};
 
     UnitState sq_usa;
     sq_usa.unit_class = UnitClass::Squadron;

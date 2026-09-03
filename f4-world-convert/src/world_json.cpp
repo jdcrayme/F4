@@ -802,6 +802,27 @@ std::string to_world_json(const CamArchive& cam, const WorldJsonOptions& opts) {
                                     o << static_cast<int>(ucd->scores[si]);
                                 }
                                 o << "]";
+                                // C3 (war-loop routing) — the threat-model
+                                // fields. UCD.HitChance[8]/Range[8] indexed
+                                // by MoveType (NoMove=0, Foot=1, Wheeled=2,
+                                // Tracked=3, LowAir=4, Air=5, Naval=6, Rail=7):
+                                // an air-defense battalion's Range[LowAir]/
+                                // Range[Air] are the SAM/AAA engagement rings
+                                // the campaign's threat map paints, and
+                                // HitChance[LowAir]/[Air] gate the ring
+                                // (nonzero at a distance = can hit there —
+                                // the FreeFalcon AddToThreatMap condition).
+                                o << ", \"hit_chance\": [";
+                                for (int mi = 0; mi < TD_MOVEMENT_TYPES; ++mi) {
+                                    if (mi) o << ", ";
+                                    o << static_cast<int>(ucd->hit_chance[mi]);
+                                }
+                                o << "], \"weapon_range\": [";
+                                for (int mi = 0; mi < TD_MOVEMENT_TYPES; ++mi) {
+                                    if (mi) o << ", ";
+                                    o << static_cast<int>(ucd->range[mi]);
+                                }
+                                o << "]";
                             }
                         }
                     }

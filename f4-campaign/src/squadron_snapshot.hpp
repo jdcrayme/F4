@@ -63,6 +63,8 @@ struct SquadronSnapshot {
     std::string name;              ///< class_name (display)
     int available = 0;             ///< roster-decoded, or team-pool share
     int reinforce_pending = 0;     ///< wire reinforcement (aircraft on order)
+    std::uint32_t airbase = 0;     ///< home airbase objective VU_ID.num
+                                    ///< (C3: route endpoints; 0 = none)
 };
 
 /// The team pools after the shared-out distribution (slot-indexed,
@@ -110,6 +112,7 @@ snapshot_squadron_force(const f4::world::ICampaignSource& camp,
         s.name = units.class_name(i);
         s.available = roster_group_aircraft(units.roster(i));
         s.reinforce_pending = units.reinforcement(i);
+        s.airbase = sq->airbase_id(i);
         out.squadrons.push_back(std::move(s));
     }
 

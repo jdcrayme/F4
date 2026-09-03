@@ -58,6 +58,7 @@
 #include <f4/campaign/mission_profile.hpp>
 #include <f4/campaign/mission_type.hpp>
 #include <f4/campaign/result_ledger.hpp>
+#include <f4/campaign/route_builder.hpp>
 
 #include <f4/messaging/bus.hpp>
 #include <f4/world/data_source.hpp>
@@ -100,6 +101,25 @@ struct MissionIntent {
     /// One flight per package in this slice.
     std::uint32_t flight_id{0};
 
+    // --- C3 (route tranche): target + route ---
+    // The synthetic ladder previously tasked against ABSTRACT targets
+    // ("route/target resolution arrives with the M4.3–M4.5 tranche");
+    // with a route planner attached, every generated mission carries a
+    // REAL target objective (enemy-owned, deterministic selection) and
+    // the route to fly: takeoff → threat-avoiding ingress → target →
+    // egress → landing. Saved-flight intents (emit_flight_intents)
+    // leave these empty — their routes live in the save's own waypoint
+    // lists, which the sim-side spawner reads directly.
+    /// Target objective VU_ID.num (0 = none).
+    std::uint32_t target_objective_id{0};
+    /// The planned route (empty = no route; the spawner spawns
+    /// takeoff-only).
+    std::vector<RouteWaypoint> route;
+    /// True when this intent came from the synthetic ladder (the
+    /// spawner's flight-id namespace differs from the save's VU ids;
+    /// its duplicate guard keys on the pair).
+    bool synthetic{false};
+
     /// Element-wise equality (tests assert bus content == recorded intents).
     bool operator==(const MissionIntent&) const = default;
 };
@@ -124,6 +144,21 @@ struct CampaignConfig {
     /// (campaign_qc's --tasking arms 12 h unless overridden); 0 stays
     /// the pre-C2 depletion-only behavior.
     CampaignTime reinforcement_period_sec{0};
+
+    /// C3: tasking role fallback — when NO squadron of the team
+    /// carries a profile's exact ARO role, fall back to the
+    /// best-available squadron regardless of specialty (a step toward
+    /// the reference's own shape: FreeFalcon's squadron selection
+    /// SCORES role match and aircraft capability — a counter-air wing
+    /// of F-16s is taskable for strike — rather than gating on it;
+    /// the full scoring is the C4 FindBestAir tranche). DEFAULT OFF:
+    /// the strict role gate is B.3/C2 behavior and its goldens are
+    /// pinned byte-identical. Hosts exercising the generation-to-
+    /// spawn chain (campaign_qc's --tasking) arm it — TestCamp's
+    /// belligerents (the ROK-DPRK war the corrected RelType decode
+    /// reveals) field all-counter-air squadrons, so delivery-family
+    /// missions never generate under the strict gate.
+    bool tasking_role_fallback{false};
 };
 
 class Campaign {
@@ -169,6 +204,28 @@ public:
         return intents_;
     }
 
+    /// C3 route counters — the generation-to-spawn chain's own
+    /// telemetry (QC's exit-7 gate reads these; counting route-less
+    /// intents from intents() cannot see the failures — an intent
+    /// whose build failed carries no route AND no synthetic mark).
+    /// routes_failed counts every precondition miss (no target
+    /// resolved, build produced < 2 waypoints) while a planner was
+    /// attached.
+    [[nodiscard]] int routes_built() const noexcept {
+        return routes_built_;
+    }
+    [[nodiscard]] int routes_failed() const noexcept {
+        return routes_failed_;
+    }
+    /// FindSafePath invocations over the threshold (ingress/egress).
+    [[nodiscard]] int route_safe_searches() const noexcept {
+        return route_safe_searches_;
+    }
+    /// Legs that fell back to the direct line after 3 partial passes.
+    [[nodiscard]] int route_fallbacks() const noexcept {
+        return route_fallbacks_;
+    }
+
     /// Attach the C1 result ledger — the war-loop feedback. While
     /// attached, the LEDGER IS THE TASKING POOL (C2): the cycle's
     /// availability gates read the ledger's one-pool numbers
@@ -188,6 +245,24 @@ public:
     /// nothing until draws or losses land in it (the golden identity).
     void set_result_ledger(CampaignResultLedger* ledger) noexcept {
         result_ledger_ = ledger;
+    }
+
+    /// Attach the C3 route planner — generation-to-spawn. While
+    /// attached, every generated mission carries a target (the
+    /// enemy-owned objective with the highest priority, ties in wire
+    /// order — deterministic; the strategy layer that feeds
+    /// FreeFalcon's mission requests is the C4 ATM tranche) and the
+    /// route to fly it. The planner owns the threat map built from
+    /// the SAME sources (built once — static dispositions this slice);
+    /// `objectives` resolves targets and airbases. Null detaches.
+    /// Without a planner the cycle generates exactly as before (the
+    /// B.3/C2 goldens — byte-identical; this is an attachment, not a
+    /// mode switch).
+    void set_route_planner(const RouteBuilder* planner,
+                           const f4::world::IObjectiveSource* objectives)
+                           noexcept {
+        route_planner_ = planner;
+        objectives_ = objectives;
     }
 
     /// Slots of the teams currently at war (lowest slot first) — the
@@ -217,6 +292,11 @@ private:
     /// Aircraft pool snapshot for one team (roster-backed when nonzero,
     /// else the campaign source's per-team count).
     [[nodiscard]] int team_aircraft_pool_(int team_slot) const;
+
+    /// C3: select the target objective for `team` — enemy-owned
+    /// (either stance direction hostile), ranked priority-desc then
+    /// wire-order-asc. 0 when no enemy objective exists.
+    [[nodiscard]] std::uint32_t select_target_(std::uint8_t team) const;
 
     const f4::world::ICampaignSource& camp_;
     const f4::world::ITeamSource& teams_;
@@ -260,8 +340,20 @@ private:
         std::uint8_t specialty;
         std::string name;
         int available;             ///< aircraft still available this run
+        std::uint32_t airbase;     ///< home airbase objective VU_ID.num
     };
     std::vector<SquadronRef> squadrons_;
+
+    /// C3 route planner (optional, non-owning — the set_result_ledger
+    /// pattern): when set, generated intents carry target + route.
+    const RouteBuilder* route_planner_ = nullptr;
+    const f4::world::IObjectiveSource* objectives_ = nullptr;
+
+    /// Route QC counters (the summary block reads these).
+    int routes_built_ = 0;
+    int routes_failed_ = 0;
+    int route_safe_searches_ = 0;
+    int route_fallbacks_ = 0;
 
     /// All intents in publish order (mirrors what the bus saw).
     std::vector<MissionIntent> intents_;

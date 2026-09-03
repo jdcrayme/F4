@@ -706,7 +706,14 @@ return leg of the loop. C2 makes the ledger THE tasking pool: mission
 draws debit it (apply_mission_draw), combat losses net against the
 draws, and the reinforcement cadence (the .cmp header's
 last_reinforcement anchor, the wire's per-squadron budgets) refills it
-— cycles, combat, and resupply deplete ONE pool.
+— cycles, combat, and resupply deplete ONE pool. C3 gives the forward
+leg its brain: `ThreatMap` (ScoreThreatFast's per-cell ownership +
+2-bit AD density rings), `AirPathFinder` (the reference's grid A* —
+2000-node pool, partial-path fallback, every constant), and
+`RouteBuilder` (BuildPathToTarget: ingress corners around SAM rings,
+IP, target, turn point, egress, waypoint elimination) — generated
+missions fly THEIR OWN routes, airbase → target → airbase, and the
+spawner materializes them as they publish (generation-to-spawn).
 
 ```cpp
 #include <f4/campaign/result_ledger.hpp>
@@ -740,6 +747,17 @@ cfg.reinforcement_period_sec = 12 * 3600;
 f4::campaign::Campaign ladder(adapters.campaign, adapters.teams,
                               adapters.units, profiles, bus, cfg);
 ladder.set_result_ledger(&ledger);
+
+// C3: the route planner — generated missions fly their own routes.
+// One ThreatMap over the sources (ownership + AD rings, built once —
+// static dispositions this slice), the A* and the builder behind it.
+// select_target picks the enemy objective (RelType::War — the stance
+// vocabulary is an enum, decoded garbage-tolerant); routes shape
+// around threat bands, and intents carry waypoints + target.
+const f4::campaign::RouteBuilder routes(
+    adapters.objectives, adapters.units, adapters.teams,
+    /*viewer=*/my_team);
+ladder.set_route_planner(&routes, &adapters.objectives);
 ladder.tick(24 * 3600);   // cycles fire, draws deplete, resupply refills
 
 // The write-back: pools, squadron counters, objective fstatus into
@@ -766,7 +784,7 @@ counts the loss; a parked aircraft's death debits the pool directly.
 **Dependencies**: f4-world (IDataSource ONLY — never EntityWorld
 components; the ECS resolution lives in f4-simulation's sink),
 f4-messaging, f4-json (PRIVATE), f4-io. See
-`Docs/CAMPAIGN_LOOP_PLAN.md` (C1 + C2 landed, C3–C5 the roadmap).
+`Docs/CAMPAIGN_LOOP_PLAN.md` (C1 + C2 + C3 landed, C4–C5 the roadmap).
 
 ## Building
 

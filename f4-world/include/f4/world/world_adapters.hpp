@@ -168,6 +168,10 @@ struct UnitAdapter : IUnitCoreSource,
     bool has_vehicle_groups(int i) const override { return !ws_->units[i].vehicle_groups.empty(); }
     const std::vector<f4::entities::VehicleGroup>& vehicle_groups(int i) const override { return ws_->units[i].vehicle_groups; }
     const std::array<uint8_t, 16>& unit_class_scores(int i) const override { return ws_->units[i].unit_class_scores; }
+
+    // C3 (war-loop routing): UCD threat-model arrays (MoveType-indexed).
+    const std::array<uint8_t, 8>& unit_hit_chance(int i) const override { return ws_->units[i].unit_hit_chance; }
+    const std::array<uint8_t, 8>& unit_weapon_range(int i) const override { return ws_->units[i].unit_weapon_range; }
     uint32_t id_num(int i) const override { return ws_->units[i].id_num; }
     uint32_t id_creator(int i) const override { return ws_->units[i].id_creator; }
     int16_t camp_id(int i) const override { return ws_->units[i].camp_id; }

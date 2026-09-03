@@ -332,6 +332,16 @@ struct UnitState {
     // Higher score = better suited for that mission role. Populated when
     // theater_db is loaded.
     std::array<uint8_t, 16> unit_class_scores{};
+
+    // --- C3 (war-loop routing): UCD.HitChance[8]/Range[8] ---
+    // Indexed by MoveType (NoMove=0, Foot=1, Wheeled=2, Tracked=3,
+    // LowAir=4, Air=5, Naval=6, Rail=7). An air-defense battalion's
+    // Range[LowAir]/Range[Air] are its SAM/AAA engagement rings (the
+    // campaign threat map paints them), and HitChance[LowAir]/[Air]
+    // gate the ring's outer edge (nonzero = can hit there). Zeroed when
+    // the world JSON carried no theater-db enrichment.
+    std::array<uint8_t, 8> unit_hit_chance{};
+    std::array<uint8_t, 8> unit_weapon_range{};
 };
 
 struct WorldState {

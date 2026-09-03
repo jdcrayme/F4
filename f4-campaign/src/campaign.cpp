@@ -71,6 +71,7 @@ Campaign::Campaign(const f4::world::ICampaignSource& camp,
         ref.specialty = s.specialty;
         ref.name = s.name;
         ref.available = s.available;
+        ref.airbase = s.airbase;
         squadrons_.push_back(std::move(ref));
     }
 }
@@ -90,12 +91,19 @@ std::vector<int> Campaign::belligerent_teams() const {
 
     std::vector<int> out;
     for (const auto& a : named) {
+        // Belligerence: a WAR row toward another named team (RelType 5 —
+        // the vocabulary's own top rung, cmpglobl.h; the pre-C3 sign test
+        // misread the -5141 garbage real saves carry toward unused slots
+        // as war). relation_from_wire maps that garbage to NoRelations,
+        // so phantom slots can never make a team a belligerent.
         const bool belligerent = std::any_of(
             named.begin(), named.end(), [&](const SlotTeam& b) {
                 if (b.slot == a.slot) return false;
                 const auto& st = *a.stance;
                 return b.slot < static_cast<int>(st.size()) &&
-                       st[static_cast<std::size_t>(b.slot)] < 0;
+                       f4::world::relation_from_wire(
+                           st[static_cast<std::size_t>(b.slot)]) ==
+                           f4::world::Relation::War;
             });
         if (belligerent) out.push_back(a.slot);
     }
@@ -152,6 +160,54 @@ void Campaign::fire_reinforcements_() {
     }
 }
 
+std::uint32_t Campaign::select_target_(std::uint8_t team) const {
+    if (objectives_ == nullptr) return 0;
+
+    // Enemy-owned = either direction's relation is WAR (RelType 5 —
+    // the symmetric belligerence rule; hostile-but-not-war (4) is not
+    // a targeting relationship, the RoE table denies strike ROE).
+    // Ranked priority-desc, wire-order-asc — fully deterministic.
+    // (FreeFalcon's targets come from the strategy layer's mission
+    // requests — objective scoring feeds them; that layer is the C4
+    // ATM tranche. Priority + enmity is the honest deterministic
+    // subset.)
+    const auto hostile = [&](std::uint8_t other) {
+        if (other == team) return false;
+        for (int t = 0; t < teams_.team_count(); ++t) {
+            if (teams_.slot(t) != static_cast<int>(other)) continue;
+            const auto& row = teams_.stance(t);
+            const auto idx = static_cast<std::size_t>(team);
+            if (idx < row.size() &&
+                f4::world::relation_from_wire(row[idx]) ==
+                    f4::world::Relation::War)
+                return true;
+        }
+        for (int t = 0; t < teams_.team_count(); ++t) {
+            if (teams_.slot(t) != static_cast<int>(team)) continue;
+            const auto& row = teams_.stance(t);
+            const auto idx = static_cast<std::size_t>(other);
+            if (idx < row.size() &&
+                f4::world::relation_from_wire(row[idx]) ==
+                    f4::world::Relation::War)
+                return true;
+        }
+        return false;
+    };
+
+    std::uint32_t best = 0;
+    int best_priority = -1;
+    for (int i = 0; i < objectives_->objective_count(); ++i) {
+        const std::uint8_t owner = objectives_->owner(i);
+        if (!hostile(owner)) continue;
+        const int priority = objectives_->priority(i);
+        if (priority > best_priority) {
+            best_priority = priority;
+            best = objectives_->id_num(i);
+        }
+    }
+    return best;
+}
+
 void Campaign::run_tasking_cycle_() {
     const auto war_teams = belligerent_teams();
 
@@ -194,7 +250,16 @@ void Campaign::run_tasking_cycle_() {
             // require one don't generate (conservative default).
             if (!profile.caps.empty()) continue;
 
-            // Role gate: some team squadron must fly this role.
+            // Role gate: some team squadron must fly this role. With
+            // the C3 role FALLBACK armed (CampaignConfig — hosts
+            // exercising generation-to-spawn; the reference's own
+            // selection scores rather than gates), a team with no
+            // exact-role squadron tasks its best-available wing
+            // instead (TestCamp's ROK-DPRK war fields all-counter-air
+            // squadrons — the strict gate would never generate a
+            // delivery mission). The fallback preserves the strict
+            // pick when a role match EXISTS (exact role first, the
+            // same most-available tie-break).
             SquadronRef* lead = nullptr;
             for (auto* sq : team_squadrons) {
                 if (aro_name(sq->specialty) != profile.aro) continue;
@@ -202,8 +267,16 @@ void Campaign::run_tasking_cycle_() {
                 // aircraft (post-loss when the ledger is attached);
                 // tie -> wire-order-first (strictly greater keeps the
                 // earlier one, which is the deterministic tie-break).
-                if (!lead || effective_available(sq) > effective_available(lead))
+                if (!lead ||
+                    effective_available(sq) > effective_available(lead))
                     lead = sq;
+            }
+            if (!lead && cfg_.tasking_role_fallback) {
+                for (auto* sq : team_squadrons) {
+                    if (!lead ||
+                        effective_available(sq) > effective_available(lead))
+                        lead = sq;
+                }
             }
             if (!lead) continue;
 
@@ -245,6 +318,40 @@ void Campaign::run_tasking_cycle_() {
                 lead->available -= count;
             }
 
+            // C3: the route — generation-to-spawn. This slice arms the
+            // END-TO-END-meaningful family: the A-G delivery profiles
+            // (STRIKE/BOMB/GNDSTRIKE/NAVSTRIKE/SAD/SEAD over an
+            // OBJECTIVE) get the team's selected enemy objective and
+            // the airbase → target → airbase route through the threat
+            // map. CAP-style profiles also target OBJECTIVE but the
+            // objective is FRIENDLY airspace whose racetrack pattern
+            // is the loiter tranche; UNIT/LOCATION targets wait for
+            // their resolution tranches — both publish route-less,
+            // exactly as before C3. Failures are loud counters, not
+            // dropped missions — the QC gate reads them.
+            if (route_planner_ != nullptr && lead->airbase != 0 &&
+                profile_flies_delivery_route(profile)) {
+                const std::uint32_t target_vu =
+                    select_target_(static_cast<std::uint8_t>(slot));
+                if (target_vu != 0) {
+                    const auto rb = route_planner_->build(
+                        static_cast<std::uint8_t>(slot), profile,
+                        lead->airbase, target_vu);
+                    if (rb.waypoints.size() >= 2) {
+                        intent.target_objective_id = target_vu;
+                        intent.route = rb.waypoints;
+                        intent.synthetic = true;
+                        ++routes_built_;
+                        if (rb.safe_path_searched) ++route_safe_searches_;
+                        if (rb.direct_fallback) ++route_fallbacks_;
+                    } else {
+                        ++routes_failed_;
+                    }
+                } else {
+                    ++routes_failed_;
+                }
+            }
+
             // Publish + record (the campaign's only outward coupling).
             bus_.publish(intent);
             intents_.push_back(intent);
@@ -278,6 +385,21 @@ std::string Campaign::to_summary_json() const {
                      result_ledger_ != nullptr
                          ? result_ledger_->aircraft_reinforced()
                          : 0);
+        w.put("\n  }");
+    }
+
+    // C3: the route tranche's own summary block — only when a planner
+    // was attached and built at least one route (no-planner runs keep
+    // byte-identical goldens — the attachment contract).
+    if (routes_built_ > 0) {
+        w.put(",\n  \"routes\": {\n    ");
+        w.number_key("built", routes_built_);
+        w.put(",\n    ");
+        w.number_key("failed", routes_failed_);
+        w.put(",\n    ");
+        w.number_key("safe_path_searches", route_safe_searches_);
+        w.put(",\n    ");
+        w.number_key("direct_fallbacks", route_fallbacks_);
         w.put("\n  }");
     }
 
@@ -322,6 +444,12 @@ std::string Campaign::to_summary_json() const {
         w.number(in.package_id);
         w.put(", \"flight_id\": ");
         w.number(in.flight_id);
+        if (in.target_objective_id != 0) {
+            w.put(", \"target\": ");
+            w.number(in.target_objective_id);
+            w.put(", \"route_wps\": ");
+            w.number(in.route.size());
+        }
         w.put("}");
     }
     w.put("\n  ]");

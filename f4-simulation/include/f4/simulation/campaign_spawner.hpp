@@ -63,6 +63,13 @@ public:
         int unknown_flight_ids = 0;
         /// Intents for a flight that already spawned (skipped).
         int duplicate_skips = 0;
+        /// C3: aircraft spawned from SYNTHETIC-ladder intents (routes
+        /// the campaign built — generation-to-spawn).
+        int synthetic_spawned = 0;
+        /// C3: synthetic intents that carried a route but spawned no
+        /// aircraft (route unbuildable / unresolvable) — the QC gate's
+        /// route-loss counter.
+        int synthetic_failed = 0;
     };
 
     /// Construct over the SAME EntityWorld the campaign flight units live
@@ -103,6 +110,15 @@ public:
         weapon_table_ = t;
     }
 
+    /// C3: per-airbase airfield data for SYNTHETIC-intent spawns
+    /// (runway heading + departure altitude from the squadron's own
+    /// base; unknown bases fall back to the constructor's airfield).
+    /// The saved-flight bus path keeps its pre-C3 behavior exactly
+    /// (parking at the base objective, fallback airfield for heading).
+    void set_airbase_airfields(const AirbaseAirfieldMap* m) {
+        airbase_airfields_ = m;
+    }
+
     /// Subscribe to MissionIntent on `bus` (returns the subscription id).
     /// The bus must outlive the spawner unless detach() is called first —
     /// the handler is a raw this-capture.
@@ -137,6 +153,10 @@ private:
     const std::unordered_map<std::uint32_t, f4::entities::EntityId>*
         objective_id_map_ = nullptr;
     const f4::weapons::WeaponClassTable* weapon_table_ = nullptr;
+
+    /// C3 (optional input; see the setter) — per-base airfield data
+    /// for synthetic-intent spawns.
+    const AirbaseAirfieldMap* airbase_airfields_ = nullptr;
 
     /// Per-airbase parking counters — same bookkeeping as the bulk path,
     /// so bus-fed and bulk-fed fleets park identically.

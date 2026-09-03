@@ -32,6 +32,7 @@
 #pragma once
 
 #include <f4/ai/brain_component.hpp>  // MissionPlan (B.3 route building)
+#include <f4/campaign/campaign.hpp>   // MissionIntent (C3 synthetic spawns)
 #include <f4/simulation/scenario.hpp>
 #include <f4/simulation/visual_model_component.hpp>
 #include <f4/weapons/weapon_class_table.hpp>  // campaign weapon map (A-G)
@@ -50,6 +51,20 @@
 #include <vector>
 
 namespace f4::simulation {
+
+/// Airfield data keyed by airbase VU_ID.num — one entry per airbase-class
+/// objective in the world. Campaign saves park flights at their squadrons'
+/// home bases (TestCamp: ~40 fields); the flight spawner resolves each
+/// flight's base through this map so every aircraft taxis/departs on ITS
+/// OWN runway instead of the first airbase objective's (the B.3 QC run
+/// caught 12 aircraft taxiing at 19 kts toward a runway 200,000 ft away,
+/// never to arrive). Built by the host (Simulation::spawn_from_campaign_
+/// flights / campaign_qc) from the world's ObjectiveState list; also
+/// registered with the StubATC so clearances are answered per-base.
+/// (Defined early — both the saved-flight and the C3 synthetic spawn
+/// paths consume it.)
+using AirbaseAirfieldMap =
+    std::unordered_map<std::uint32_t, ScenarioAirfield>;
 
 /// Derive a ScenarioAirfield from a real airbase objective's ground layout.
 ///
@@ -150,6 +165,60 @@ build_mission_plan_from_flight(
     const std::unordered_map<std::uint32_t, f4::entities::EntityId>*
         objective_id_map = nullptr);
 
+// ============================================================================
+// C3 route tranche — synthetic-intent missions fly their BUILT routes
+// ============================================================================
+//
+// The synthetic ladder's MissionIntents now carry a route (the C3
+// campaign-side route builder: airbase → threat-avoiding ingress →
+// target → egress → landing). These are the sim-side halves: the
+// route → MissionPlan conversion (grid → ENU, the same altitude
+// flooring and delivery-target resolution the saved-flight path
+// applies), and the aircraft that flies it (the flight-path component
+// composition — parking, model from the SQUADRON's entity type, TEAM
+// tag, the C1 origin stamp keyed on the intent's own identity, and
+// the doctrine ordnance fill for delivery missions).
+
+/// Convert a built route (f4-campaign's RouteWaypoint list) into the
+/// MissionPlan the digi brain consumes. Same contract as
+/// build_mission_plan_from_flight: leading WP_TAKEOFF dropped (the
+/// TakeoffModule owns departure), the LAST waypoint becomes the
+/// approach entry fix, delivery-action waypoints carry their target's
+/// EntityId::value (waypoint target_num → objective map, else the
+/// intent's own target objective).
+[[nodiscard]] std::optional<f4::ai::MissionPlan>
+build_mission_plan_from_route(
+    const std::vector<f4::campaign::RouteWaypoint>& route,
+    std::uint32_t target_objective_vu,
+    const std::unordered_map<std::uint32_t, f4::entities::EntityId>*
+        objective_id_map = nullptr);
+
+/// Spawn ONE aircraft for ONE synthetic-ladder MissionIntent (the
+/// generation-to-spawn leg — the mirror of spawn_aircraft_for_flight
+/// for missions that have no live Flight unit in the save). Resolves
+/// the intent's squadron through `unit_id_map` for the airbase and
+/// model, attaches the MissionPlan built from the intent's route,
+/// stamps the C1 origin component (flight_vu = the intent's synthetic
+/// flight id — kills write back to the tasked squadron), and arms the
+/// doctrine ordnance when the mission is a delivery category.
+/// Returns nullopt when the intent carries no route.
+[[nodiscard]] std::optional<f4::entities::EntityId>
+spawn_aircraft_for_intent(
+    f4::entities::EntityWorld& world,
+    const f4::campaign::MissionIntent& intent,
+    const std::unordered_map<std::uint32_t, f4::entities::EntityId>&
+        unit_id_map,
+    const f4::world_convert::ClassTable& ct,
+    const f4::models::ModelDatabase& db,
+    const f4::data::AircraftConfig& cfg,
+    const ScenarioAirfield& airfield,
+    const ScenarioAircraft& scenario_aircraft,
+    int parking_slot,
+    const AirbaseAirfieldMap* airbase_airfields = nullptr,
+    const std::unordered_map<std::uint32_t, f4::entities::EntityId>*
+        objective_id_map = nullptr,
+    const weapons::WeaponClassTable* weapon_table = nullptr);
+
 /// Map a campaign owner slot to the sim's TEAM-tag string vocabulary.
 ///
 /// Resolution: the campaign entity (ROLE "campaign") names the PLAYER team
@@ -171,17 +240,7 @@ owner_team_string(const f4::entities::EntityWorld& world,
 // ============================================================================
 // B.3+ per-airbase airfields
 // ============================================================================
-/// Airfield data keyed by airbase VU_ID.num — one entry per airbase-class
-/// objective in the world. Campaign saves park flights at their squadrons'
-/// home bases (TestCamp: ~40 fields); the flight spawner resolves each
-/// flight's base through this map so every aircraft taxis/departs on ITS
-/// OWN runway instead of the first airbase objective's (the B.3 QC run
-/// caught 12 aircraft taxiing at 19 kts toward a runway 200,000 ft away,
-/// never to arrive). Built by the host (Simulation::spawn_from_campaign_
-/// flights / campaign_qc) from the world's ObjectiveState list; also
-/// registered with the StubATC so clearances are answered per-base.
-using AirbaseAirfieldMap =
-    std::unordered_map<std::uint32_t, ScenarioAirfield>;
+// (AirbaseAirfieldMap — typedef above, where both spawn paths see it.)
 
 // ============================================================================
 // A-G employment tranche — the campaign weapon map + loadout arming

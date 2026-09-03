@@ -14,6 +14,7 @@
 
 #include <f4/simulation/campaign_bridge.hpp>
 #include <f4/simulation/campaign_spawner.hpp>
+#include <f4/simulation/campaign_origin.hpp>
 #include <f4/simulation/scenario.hpp>
 #include <f4/campaign/campaign.hpp>
 #include <f4/entities/entity.hpp>
@@ -81,8 +82,8 @@ f4::world::WorldState make_flight_world() {
     ws.teams[6] = TeamState{6, 6, 6, "DPRK", "", 0, 0, {}};
     // Stance is indexed by team slot: ROK[6] = -1 and DPRK[2] = -1 (war
     // between slots 2 and 6 — the PLAYER is team 2).
-    ws.teams[2].stance = {0, 0, 0, 0, 0, 0, -1, 0};
-    ws.teams[6].stance = {0, 0, -1, 0, 0, 0, 0, 0};
+    ws.teams[2].stance = {0, 0, 0, 0, 0, 0, 5, 0};
+    ws.teams[6].stance = {0, 0, 5, 0, 0, 0, 0, 0};
 
     ObjectiveState ab;
     ab.type = 100; ab.entity_type = 100; ab.x = 390; ab.y = 455;
@@ -567,4 +568,181 @@ TEST(ScenarioFilter, DefaultsToNoFilter) {
     EXPECT_EQ(s.campaign_flight_filter.team, -1);
     EXPECT_EQ(s.campaign_flight_filter.mission, -1);
     EXPECT_EQ(s.campaign_flight_filter.max_flights, 0);
+}
+
+// ============================================================================
+// C3 — synthetic-intent missions fly their BUILT routes
+// ============================================================================
+//
+// The campaign's route planner arms MissionIntents with a route; these
+// tests cover the sim-side halves: the route → MissionPlan conversion,
+// the aircraft spawn from an intent (no live flight entity), and the
+// spawner's generation-to-spawn path.
+
+TEST(BuildMissionPlanFromRoute, ConvertsAndDropsLeadingTakeoff) {
+    // A built route: takeoff at the airbase, an enroute corner, the
+    // STRIKE target (VU 4101 = the airbase objective here — a route
+    // builder would carry the real target's VU), and landing home.
+    std::vector<f4::campaign::RouteWaypoint> route;
+    f4::campaign::RouteWaypoint w1;
+    w1.x = 390; w1.y = 455; w1.altitude_ft = 0;    w1.action = 1;  // TAKEOFF
+    f4::campaign::RouteWaypoint w2;
+    w2.x = 420; w2.y = 460; w2.altitude_ft = 2500; w2.action = 0;  // filler
+    f4::campaign::RouteWaypoint w3;
+    w3.x = 460; w3.y = 500; w3.altitude_ft = 2000; w3.action = 17; // STRIKE
+    w3.target_num = 4101;
+    f4::campaign::RouteWaypoint w4;
+    w4.x = 390; w4.y = 455; w4.altitude_ft = 0;    w4.action = 7;  // LAND
+    route = {w1, w2, w3, w4};
+
+    auto ws = make_flight_world();
+    EntityWorld ew;
+    auto pw = f4::world::populate_world(ew, ws);
+
+    auto plan = build_mission_plan_from_route(route, 4101,
+                                              &pw.objective_id_map);
+    ASSERT_TRUE(plan.has_value());
+    // Leading TAKEOFF dropped: 4 waypoints → 3 route legs.
+    ASSERT_EQ(plan->route.size(), 3u);
+    EXPECT_NEAR(plan->route[0].position.x, 420.0 * 1024.0, 1e-6);
+    EXPECT_NEAR(plan->route[0].position.z, 2500.0, 1e-6);
+    // The STRIKE leg floors HIGHER (delivery floor 1500 < 2000: keeps
+    // the route altitude) and carries the target's EntityId::value.
+    EXPECT_EQ(plan->route[1].action, 17);
+    EXPECT_NEAR(plan->route[1].position.z, 2000.0, 1e-6);
+    EXPECT_NE(plan->route[1].target_id, 0u);
+    // The terminal leg is the approach entry fix (WP_LAND's position).
+    EXPECT_NEAR(plan->route[2].position.x, 390.0 * 1024.0, 1e-6);
+    EXPECT_NEAR(plan->route[2].position.z, 500.0, 1e-6);
+
+    // Too-short routes build nothing.
+    auto empty = build_mission_plan_from_route({w1}, 0, nullptr);
+    EXPECT_FALSE(empty.has_value());
+}
+
+TEST(SpawnAircraftForIntent, ComposesAircraftWithRouteAndOriginStamp) {
+    f4::data::AircraftConfig cfg;
+    if (!loadF16Config(cfg)) GTEST_SKIP() << "F-16 config fixture missing";
+
+    auto ws = make_flight_world();
+    EntityWorld ew;
+    auto pw = f4::world::populate_world(ew, ws);
+    ScenarioAirfield airfield;
+
+    // A synthetic INTSTRIKE intent from the ROK strike squadron: the
+    // campaign drew from squadron 4281 (airbase 4101), the route runs
+    // airbase → target → airbase.
+    f4::campaign::MissionIntent intent;
+    intent.team = 2;
+    intent.mission_byte = 13;  // AMIS_INTSTRIKE
+    intent.squadron_id = 4281;
+    intent.flight_id = 12345;  // synthetic counter id
+    intent.package_id = 12345;
+    intent.target_objective_id = 4101;
+    intent.synthetic = true;
+    f4::campaign::RouteWaypoint w1;
+    w1.x = 390; w1.y = 455; w1.altitude_ft = 0;    w1.action = 1;
+    f4::campaign::RouteWaypoint w2;
+    w2.x = 460; w2.y = 500; w2.altitude_ft = 2000; w2.action = 17;
+    w2.target_num = 4101;
+    f4::campaign::RouteWaypoint w3;
+    w3.x = 390; w3.y = 455; w3.altitude_ft = 0;    w3.action = 7;
+    intent.route = {w1, w2, w3};
+
+    const auto spawned = spawn_aircraft_for_intent(
+        ew, intent, pw.unit_id_map, f4::world_convert::ClassTable{},
+        f4::models::ModelDatabase{}, cfg, airfield, make_template(), 0);
+    ASSERT_TRUE(spawned.has_value());
+
+    EntityHandle h(*spawned, &ew);
+    // The aircraft parks at the squadron's airbase objective.
+    auto* tf = h.get<TransformComponent>();
+    ASSERT_NE(tf, nullptr);
+    EXPECT_NEAR(tf->position.x, 390.0 * 1024.0, 200.0);
+    EXPECT_NEAR(tf->position.y, 455.0 * 1024.0, 200.0);
+    // The brain carries the MissionPlan built from the intent's route.
+    auto* brain = h.get<f4::ai::BrainComponent>();
+    ASSERT_NE(brain, nullptr);
+    EXPECT_EQ(brain->mission_plan().route.size(), 2u);
+    // The C1 origin stamp: the intent's own identity (kills over the
+    // target write back to the tasked squadron).
+    auto* origin = h.get<f4::simulation::CampaignOriginComponent>();
+    ASSERT_NE(origin, nullptr);
+    EXPECT_EQ(origin->flight_vu, 12345u);
+    EXPECT_EQ(origin->squadron_vu, 4281u);
+    EXPECT_EQ(origin->home_airbase_vu, 4101u);
+    EXPECT_EQ(origin->team_slot, 2);
+    // The TEAM tag maps the campaign owner slot.
+    const auto team_tag = h.get_tag(f4::entities::tags::TEAM);
+    ASSERT_TRUE(team_tag && team_tag->as_string());
+    EXPECT_EQ(*team_tag->as_string(), "blue");  // team 2 = the player
+
+    // An intent with no route spawns nothing.
+    f4::campaign::MissionIntent bare = intent;
+    bare.route.clear();
+    EXPECT_FALSE(spawn_aircraft_for_intent(
+        ew, bare, pw.unit_id_map, f4::world_convert::ClassTable{},
+        f4::models::ModelDatabase{}, cfg, airfield, make_template(), 0)
+        .has_value());
+}
+
+TEST(CampaignSimSpawner, SyntheticIntentSpawnsAndCounts) {
+    f4::data::AircraftConfig cfg;
+    if (!loadF16Config(cfg)) GTEST_SKIP() << "F-16 config fixture missing";
+
+    auto ws = make_flight_world();
+    EntityWorld ew;
+    auto pw = f4::world::populate_world(ew, ws);
+    f4::world::WorldStateAdapters adapters(ws);
+    f4::messaging::MessageBus bus;
+    ScenarioAirfield airfield;
+
+    CampaignSimSpawner spawner(ew, pw.unit_id_map,
+                               f4::world_convert::ClassTable{},
+                               f4::models::ModelDatabase{},
+                               cfg, airfield, make_template());
+    spawner.attach(bus);
+
+    // THE C3 LOOP: the campaign (route planner attached) publishes a
+    // synthetic intent — the spawner materializes it WITHOUT a live
+    // flight entity.
+    f4::campaign::MissionIntent intent;
+    intent.team = 2;
+    intent.mission_byte = 13;
+    intent.squadron_id = 4281;
+    intent.flight_id = 1;  // counter id — resolves no flight entity
+    intent.package_id = 1;
+    intent.target_objective_id = 4101;
+    intent.synthetic = true;
+    f4::campaign::RouteWaypoint w1;
+    w1.x = 390; w1.y = 455; w1.altitude_ft = 0;    w1.action = 1;
+    f4::campaign::RouteWaypoint w2;
+    w2.x = 460; w2.y = 500; w2.altitude_ft = 2000; w2.action = 17;
+    w2.target_num = 4101;
+    f4::campaign::RouteWaypoint w3;
+    w3.x = 390; w3.y = 455; w3.altitude_ft = 0;    w3.action = 7;
+    intent.route = {w1, w2, w3};
+
+    bus.publish(intent);
+
+    EXPECT_EQ(spawner.stats().intents_seen, 1);
+    EXPECT_EQ(spawner.stats().aircraft_spawned, 1);
+    EXPECT_EQ(spawner.stats().synthetic_spawned, 1);
+    EXPECT_EQ(spawner.stats().routes_attached, 1);
+    EXPECT_EQ(spawner.stats().unknown_flight_ids, 0);
+    EXPECT_EQ(spawner.spawned().size(), 1u);
+
+    // Re-publish: duplicate guard (same flight_id).
+    bus.publish(intent);
+    EXPECT_EQ(spawner.stats().duplicate_skips, 1);
+    EXPECT_EQ(spawner.spawned().size(), 1u);
+
+    // A route-less synthetic intent: skipped, counted (not unknown).
+    f4::campaign::MissionIntent routeless = intent;
+    routeless.flight_id = 2;
+    routeless.package_id = 2;
+    routeless.route.clear();
+    bus.publish(routeless);
+    EXPECT_EQ(spawner.stats().unknown_flight_ids, 1);
+    EXPECT_EQ(spawner.spawned().size(), 1u);
 }

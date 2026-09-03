@@ -69,6 +69,36 @@ struct ICampaignSource {
 // ============================================================================
 // ITeamSource — team slot data
 // ============================================================================
+
+/// The campaign relations vocabulary — FreeFalcon cmpglobl.h RelType,
+/// the value domain of every stance entry (.tea AND the .cmp team block;
+/// RoEData[][] is indexed by it):
+///   0 NoRelations, 1 Allied, 2 Friendly, 3 Neutral, 4 Hostile, 5 War.
+/// The wire's i16 stance entries are this enum, NOT a sign convention —
+/// the pre-C3 reading "< 0 = at war" misdecoded the garbage columns real
+/// saves carry toward unused team slots (TestCamp: every team's stance
+/// toward the empty Gorn slot is -5141) as WAR against a phantom side,
+/// which made the U.S. a belligerent in a war it is Neutral to (TestCamp:
+/// the actual war is ROK-DPRK, mutual 5) and starved target selection of
+/// every enemy objective.
+enum class Relation : int16_t {
+    NoRelations = 0,
+    Allied      = 1,
+    Friendly    = 2,
+    Neutral     = 3,
+    Hostile     = 4,
+    War         = 5,
+};
+
+/// Decode one wire stance value. Values outside 0..5 (e.g. the -5141
+/// garbage toward unused slots) decode as NoRelations — the honest
+/// reading of "no team there", and the one the reference's RoE table
+/// gives a 0 column anyway.
+[[nodiscard]] constexpr Relation relation_from_wire(int16_t v) noexcept {
+    if (v < 0 || v > 5) return Relation::NoRelations;
+    return static_cast<Relation>(v);
+}
+
 struct ITeamSource {
     virtual int team_count() const = 0;
 
@@ -366,6 +396,23 @@ struct IUnitCoreSource {
     virtual uint8_t losses(int i) const = 0;
     virtual uint8_t wp_count(int i) const = 0;
     virtual uint8_t elements(int i) const = 0;
+
+    // C3 (war-loop routing) — the UCD threat-model arrays, indexed by
+    // MoveType (NoMove=0, Foot=1, Wheeled=2, Tracked=3, LowAir=4, Air=5,
+    // Naval=6, Rail=7). An air-defense battalion's weapon_range[LowAir]/
+    // [Air] are its SAM/AAA engagement rings and hit_chance[LowAir]/[Air]
+    // gate the ring (nonzero = can hit at range). Default-implemented
+    // (zeros): sources that predate the tranche keep compiling — a
+    // zeroed map simply has no threats, the same as a save whose world
+    // JSON carried no theater-db enrichment.
+    virtual const std::array<uint8_t, 8>& unit_hit_chance(int) const {
+        static const std::array<uint8_t, 8> kZero{};
+        return kZero;
+    }
+    virtual const std::array<uint8_t, 8>& unit_weapon_range(int) const {
+        static const std::array<uint8_t, 8> kZero{};
+        return kZero;
+    }
 
     // --- Subclass accessors ---
     // Return the subclass interface if unit i is of the matching class,

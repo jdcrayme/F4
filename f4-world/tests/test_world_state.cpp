@@ -678,3 +678,63 @@ TEST(WorldStateC2, AdaptersExposeTimersAndReplacementStock) {
     ASSERT_EQ(teams.team_count(), 1);
     EXPECT_EQ(teams.replacements_avail(0), 12u);
 }
+
+TEST(WorldState, ParsesUcdThreatModelArrays) {
+    // C3 (war-loop routing): the world JSON's "hit_chance" /
+    // "weapon_range" arrays (UCD HitChance[8]/Range[8], MoveType-indexed)
+    // parse into the unit state — the campaign threat map's data path.
+    WorldState ws;
+    ws.load_from_string(R"({
+  "version": 71,
+  "theater": "korea",
+  "campaign": {"current_time": 100},
+  "units": {"items": [{
+    "id_num": 7, "type": 100, "unit_class": "battalion",
+    "domain": 3, "unit_subtype": 1,
+    "x": 100, "y": 100, "owner": 6,
+    "hit_chance": [0, 0, 0, 0, 60, 55, 0, 0],
+    "weapon_range": [0, 0, 0, 0, 24, 42, 0, 0]
+  }]}
+})");
+    ASSERT_EQ(ws.units.size(), 1u);
+    const auto& u = ws.units[0];
+    EXPECT_EQ(u.unit_hit_chance[4], 60);   // LowAir
+    EXPECT_EQ(u.unit_hit_chance[5], 55);   // Air
+    EXPECT_EQ(u.unit_weapon_range[4], 24); // LowAir ring
+    EXPECT_EQ(u.unit_weapon_range[5], 42); // Air ring
+    // Absent arrays stay zeroed (worlds without theater-db enrichment).
+    WorldState bare;
+    bare.load_from_string(R"({
+  "version": 71,
+  "theater": "korea",
+  "campaign": {"current_time": 100},
+  "units": {"items": [{"id_num": 8, "type": 100, "unit_class": "battalion",
+             "domain": 3, "unit_subtype": 1, "x": 1, "y": 1, "owner": 2}]}
+})");
+    ASSERT_EQ(bare.units.size(), 1u);
+    for (int i = 0; i < 8; ++i) {
+        EXPECT_EQ(bare.units[0].unit_hit_chance[i], 0);
+        EXPECT_EQ(bare.units[0].unit_weapon_range[i], 0);
+    }
+}
+
+TEST(WorldState, UnitAdapterExposesThreatModelArrays) {
+    // The IUnitCoreSource override: the adapter returns the parsed
+    // arrays (the default-implemented base returns zeros).
+    WorldState ws;
+    ws.load_from_string(R"({
+  "version": 71,
+  "theater": "korea",
+  "campaign": {"current_time": 100},
+  "units": {"items": [{
+    "id_num": 7, "type": 100, "unit_class": "battalion",
+    "domain": 3, "unit_subtype": 1,
+    "x": 100, "y": 100, "owner": 6,
+    "hit_chance": [0, 0, 0, 0, 60, 55, 0, 0],
+    "weapon_range": [0, 0, 0, 0, 24, 42, 0, 0]
+  }]}
+})");
+    WorldStateAdapters adapters(ws);
+    EXPECT_EQ(adapters.units.unit_hit_chance(0)[4], 60);
+    EXPECT_EQ(adapters.units.unit_weapon_range(0)[5], 42);
+}

@@ -514,6 +514,25 @@ UnitState parse_unit(Reader& r) {
             }
             r.expect(']');
         }
+        // C3 (war-loop routing): UCD hit_chance[8]/weapon_range[8], the
+        // threat-model fields indexed by MoveType. Same emission contract
+        // as "scores" — arrays of 8 ints.
+        else if (k == "hit_chance") {
+            r.skip_ws(); r.expect('[');
+            for (int mi = 0; mi < 8; ++mi) {
+                if (mi) r.expect(',');
+                u.unit_hit_chance[mi] = static_cast<uint8_t>(r.read_int());
+            }
+            r.expect(']');
+        }
+        else if (k == "weapon_range") {
+            r.skip_ws(); r.expect('[');
+            for (int mi = 0; mi < 8; ++mi) {
+                if (mi) r.expect(',');
+                u.unit_weapon_range[mi] = static_cast<uint8_t>(r.read_int());
+            }
+            r.expect(']');
+        }
         // Phase 1 fix A.1: Flight subclass fields. Previously decoded by
         // unit_decoder.cpp but never emitted/consumed.
         else if (k == "flight_altitude")    u.flight_altitude    = static_cast<float>(r.read_number());

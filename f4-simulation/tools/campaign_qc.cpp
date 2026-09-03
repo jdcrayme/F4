@@ -87,7 +87,12 @@
 // 6 when --tasking ran the synthetic ladder and it drew NOT ONE
 // aircraft despite belligerent teams with aircraft available — the
 // tasking-broke failure (a profile table that didn't load, availability
-// gates that read zero, a force snapshot that misdecoded the roster).
+// gates that read zero, a force snapshot that misdecoded the roster);
+// 7 when --tasking attached the route planner and drew aircraft but
+// NOT ONE route could be built (or none of the routed intents
+// materialized as aircraft) — the generation-to-spawn failure (a
+// threat map that never painted, an A* that never converges, an
+// airbase that never resolves).
 //
 // The 15-minute default window (was 5): TestCamp's strike flights sit a
 // median 34 NM from their targets — a 5-minute window proved the taxi/
@@ -102,6 +107,7 @@
 #include <f4/campaign/campaign.hpp>
 #include <f4/campaign/mission_type.hpp>
 #include <f4/campaign/result_ledger.hpp>
+#include <f4/campaign/route_builder.hpp>
 #include <f4/campaign/world_writeback.hpp>
 #include <f4/entities/entity.hpp>
 #include <f4/ai/brain_component.hpp>
@@ -315,72 +321,14 @@ int main(int argc, char** argv) {
         static_cast<const f4::world::IUnitCoreSource&>(adapters.units));
 
     // -----------------------------------------------------------------------
-    // 2b. THE C2 TASKING LADDER — the synthetic M4.7 Campaign over the
-    // SAME ledger (ONE pool: tasking draws book now, the sim's combat
-    // losses book later, the reinforcement cadence refills in between
-    // — the first true multi-cycle loop). Runs BEFORE the spawner
-    // attaches: its intents publish to the bus while nobody listens
-    // (synthetic flights carry no saved routes; the saved-flight loop
-    // below is the one that spawns — generation-to-spawn wiring is the
-    // C3/C4 route-builder tranche).
+    // 2b. THE SPAWNER — constructed and subscribed BEFORE the tasking
+    // ladder runs (C3: generation-to-spawn requires the bus to have a
+    // listener while the ladder publishes; the C2 order — ladder first,
+    // spawner later — deliberately published to nobody, which is exactly
+    // what C3 replaces). Class table + models + config + airfield load
+    // here, ahead of the ladder, so both the synthetic and the
+    // saved-flight spawns share one setup.
     // -----------------------------------------------------------------------
-    bool tasking_ran = false;
-    bool tasking_had_air = false;   // belligerents had aircraft available
-    int tasking_cycles = 0;
-    int tasking_intents = 0;
-    if (args.tasking_minutes > 0) {
-        if (args.profiles_json.empty() ||
-            !std::filesystem::exists(args.profiles_json)) {
-            std::fprintf(stderr,
-                         "campaign_qc: mission profiles not found (%s) — "
-                         "--tasking needs the generated table\n",
-                         args.profiles_json.string().c_str());
-            return 1;
-        }
-        const auto profiles = MissionProfileTable::load(args.profiles_json);
-        CampaignConfig ladder_cfg;
-        ladder_cfg.air_task_cycle_sec = args.tasking_cycle_sec;
-        // -1 = the tool's own default (12 h — the engine's default is
-        // disabled: a fresh ledger must change nothing until the host
-        // arms the cadence). 0 = explicitly off.
-        ladder_cfg.reinforcement_period_sec =
-            args.reinforce_period_sec < 0 ? 43200
-                                          : args.reinforce_period_sec;
-        Campaign ladder(
-            static_cast<const f4::world::ICampaignSource&>(adapters.campaign),
-            static_cast<const f4::world::ITeamSource&>(adapters.teams),
-            static_cast<const f4::world::IUnitCoreSource&>(adapters.units),
-            profiles, bus, ladder_cfg);
-        ladder.set_result_ledger(&result_ledger);
-
-        // The exit-6 precondition: belligerents actually had aircraft.
-        const auto war_teams = ladder.belligerent_teams();
-        for (const auto& s : result_ledger.squadrons()) {
-            if (s.availability <= 0) continue;
-            if (std::find(war_teams.begin(), war_teams.end(),
-                          static_cast<int>(s.owner)) != war_teams.end()) {
-                tasking_had_air = true;
-                break;
-            }
-        }
-
-        // One big tick: every due cycle fires in order, the
-        // reinforcement cadence rides the same clock (a stale .cmp
-        // anchor fires once — FreeFalcon's catch-up shape).
-        ladder.tick(static_cast<CampaignTime>(args.tasking_minutes) * 60);
-        tasking_ran = true;
-        tasking_cycles = ladder.cycles_fired();
-        tasking_intents = static_cast<int>(ladder.intents().size());
-
-        std::printf("tasking: minutes=%d cycles=%d intents=%d drawn=%d "
-                    "reinforce_fires=%d reinforced=%d\n",
-                    args.tasking_minutes, tasking_cycles, tasking_intents,
-                    result_ledger.mission_draw_aircraft(),
-                    result_ledger.reinforcement_fires(),
-                    result_ledger.aircraft_reinforced());
-    }
-
-    // Class table + model db + config for spawning.
     f4::world_convert::ClassTable ct;
     if (std::filesystem::exists(args.class_table)) {
         ct.load(args.class_table.string());
@@ -435,6 +383,17 @@ int main(int argc, char** argv) {
                              "cannot derive an airfield\n");
         return 1;
     }
+    // Per-base airfields (the B.3+ rule): every airbase objective gets
+    // its own ScenarioAirfield — synthetic-intent spawns depart from
+    // their own squadron's runway.
+    AirbaseAirfieldMap airbase_airfields;
+    for (const auto& obj : ws.objectives) {
+        if (auto af = derive_airfield_from_objective(obj, 36)) {
+            if (obj.id_num != 0) {
+                airbase_airfields[obj.id_num] = std::move(*af);
+            }
+        }
+    }
     ScenarioAircraft tpl;
     tpl.callsign = "CAMPAIGN";
     tpl.vis_type_index = 1052;  // F-16 default; CT lookup overrides per-flight
@@ -454,7 +413,152 @@ int main(int argc, char** argv) {
         f4::weapons::WeaponClassTable::with_builtins();
     spawner.set_objective_id_map(&populated.objective_id_map);
     spawner.set_weapon_table(&builtin_weapons);
+    spawner.set_airbase_airfields(&airbase_airfields);
     spawner.attach(bus);
+
+    // -----------------------------------------------------------------------
+    // 2c. THE C2 TASKING LADDER + THE C3 ROUTE PLANNER — the synthetic
+    // M4.7 Campaign over the SAME ledger (ONE pool: tasking draws book
+    // now, the sim's combat losses book later, the reinforcement cadence
+    // refills in between — the first true multi-cycle loop), now with a
+    // ROUTE PLANNER attached: every generated strike-family mission
+    // carries a real enemy objective and a threat-avoiding route
+    // airbase → target → airbase, and the spawner (subscribed above)
+    // materializes it the moment it publishes. Generation → route →
+    // spawn, on the bus, in order.
+    // -----------------------------------------------------------------------
+    bool tasking_ran = false;
+    bool tasking_had_air = false;   // belligerents had aircraft available
+    bool tasking_routes_expected = false;  // planner attached to the ladder
+    int tasking_cycles = 0;
+    int tasking_intents = 0;
+    int tasking_routes = 0;
+    int tasking_routes_failed = 0;
+    int tasking_route_wps = 0;
+    int tasking_route_searches = 0;  // FindSafePath invocations
+    int tasking_route_fallbacks = 0; // direct-line fallback legs
+    int threat_ad_units = 0;         // the map's painted AD battalions
+    int threat_cells = 0;            // cells carrying any viewer threat
+    if (args.tasking_minutes > 0) {
+        if (args.profiles_json.empty() ||
+            !std::filesystem::exists(args.profiles_json)) {
+            std::fprintf(stderr,
+                         "campaign_qc: mission profiles not found (%s) — "
+                         "--tasking needs the generated table\n",
+                         args.profiles_json.string().c_str());
+            return 1;
+        }
+        const auto profiles = MissionProfileTable::load(args.profiles_json);
+        CampaignConfig ladder_cfg;
+        ladder_cfg.air_task_cycle_sec = args.tasking_cycle_sec;
+        // -1 = the tool's own default (12 h — the engine's default is
+        // disabled: a fresh ledger must change nothing until the host
+        // arms the cadence). 0 = explicitly off.
+        ladder_cfg.reinforcement_period_sec =
+            args.reinforce_period_sec < 0 ? 43200
+                                          : args.reinforce_period_sec;
+        // C3: arm the role fallback — the QC exercises the generation-
+        // to-spawn chain, and TestCamp's belligerents (the ROK-DPRK
+        // war the corrected RelType decode reveals) field all-counter-
+        // air squadrons: the strict role gate would never generate a
+        // delivery mission, so the routed war could not be exercised
+        // at all. The reference's own selection SCORES role vs
+        // capability (FindBestAir, the C4 tranche); the fallback is
+        // the honest bridge to that. Default-off in the library —
+        // B.3/C2 goldens stay byte-identical.
+        ladder_cfg.tasking_role_fallback = true;
+        Campaign ladder(
+            static_cast<const f4::world::ICampaignSource&>(adapters.campaign),
+            static_cast<const f4::world::ITeamSource&>(adapters.teams),
+            static_cast<const f4::world::IUnitCoreSource&>(adapters.units),
+            profiles, bus, ladder_cfg);
+        ladder.set_result_ledger(&result_ledger);
+
+        // C3: the route planner — the threat map built from the same
+        // sources. FreeFalcon builds the map for the LOCAL SESSION's
+        // team (FalconLocalSession bit offset); the QC's "session" is
+        // the first BELLIGERENT (te_team can be a non-participant —
+        // TestCamp's U.S. is Neutral to the ROK-DPRK war, and a
+        // neutral viewer packs no enemy rings, leaving an empty map).
+        // With no belligerents at all, te_team stands in (the map is
+        // empty either way — nothing is at war).
+        std::uint8_t viewer = static_cast<std::uint8_t>(ws.campaign.te_team);
+        if (const auto war = ladder.belligerent_teams(); !war.empty()) {
+            viewer = static_cast<std::uint8_t>(war.front());
+        }
+        // Host tunables (the reference reads these from aiinput.dat —
+        // game data, not source; hosts override, per route_builder.hpp):
+        // the fixture UCD paints only the AD battalions whose entity
+        // types resolve in the 8-entry sample (3 rings), and a single
+        // ring's band scores (30-33) sit under the reference default
+        // of 40 — MinAvoidThreat 25 lets those rings SHAPE the QC's
+        // routes without changing any library default.
+        RouteBuilderConfig route_cfg;
+        route_cfg.min_avoid_threat = 25;
+        const RouteBuilder route_builder(
+            static_cast<const f4::world::IObjectiveSource&>(
+                adapters.objectives),
+            static_cast<const f4::world::IUnitCoreSource&>(adapters.units),
+            static_cast<const f4::world::ITeamSource&>(adapters.teams),
+            viewer, route_cfg);
+        ladder.set_route_planner(
+            &route_builder,
+            &static_cast<const f4::world::IObjectiveSource&>(
+                adapters.objectives));
+        tasking_routes_expected = true;
+
+        // The exit-6 precondition: belligerents actually had aircraft.
+        const auto war_teams = ladder.belligerent_teams();
+        for (const auto& s : result_ledger.squadrons()) {
+            if (s.availability <= 0) continue;
+            if (std::find(war_teams.begin(), war_teams.end(),
+                          static_cast<int>(s.owner)) != war_teams.end()) {
+                tasking_had_air = true;
+                break;
+            }
+        }
+
+        // One big tick: every due cycle fires in order, the
+        // reinforcement cadence rides the same clock (a stale .cmp
+        // anchor fires once — FreeFalcon's catch-up shape). The
+        // spawner above hears every publish — generated missions
+        // become aircraft WITH ROUTES immediately.
+        ladder.tick(static_cast<CampaignTime>(args.tasking_minutes) * 60);
+        tasking_ran = true;
+        tasking_cycles = ladder.cycles_fired();
+        tasking_intents = static_cast<int>(ladder.intents().size());
+        for (const auto& in : ladder.intents()) {
+            if (!in.route.empty()) {
+                ++tasking_routes;
+                tasking_route_wps += static_cast<int>(in.route.size());
+            }
+        }
+        // The CAMPAIGN's own failure telemetry — a route-less intent
+        // carries no synthetic mark (that is stamped only on success),
+        // so intents() cannot see build failures. routes_failed is
+        // every precondition miss with a planner attached; the search
+        // and fallback counters carry the threat-shaping evidence.
+        tasking_routes_failed = ladder.routes_failed();
+        tasking_route_searches = ladder.route_safe_searches();
+        tasking_route_fallbacks = ladder.route_fallbacks();
+        threat_ad_units = route_builder.threat_map().stats().ad_units;
+        threat_cells =
+            route_builder.threat_map().stats().threatened_cells;
+
+        std::printf("tasking: minutes=%d cycles=%d intents=%d drawn=%d "
+                    "routes=%d (wps=%d, failed=%d, searched=%d, "
+                    "fallbacks=%d) synthetic_spawned=%d "
+                    "reinforce_fires=%d reinforced=%d\n",
+                    args.tasking_minutes, tasking_cycles, tasking_intents,
+                    result_ledger.mission_draw_aircraft(), tasking_routes,
+                    tasking_route_wps, tasking_routes_failed,
+                    tasking_route_searches, tasking_route_fallbacks,
+                    spawner.stats().synthetic_spawned,
+                    result_ledger.reinforcement_fires(),
+                    result_ledger.aircraft_reinforced());
+        std::printf("threat_map: ad_units=%d threatened_cells=%d\n",
+                    threat_ad_units, threat_cells);
+    }
 
     const auto intents = emit_flight_intents(
         static_cast<const f4::world::IUnitCoreSource&>(adapters.units),
@@ -463,11 +567,11 @@ int main(int argc, char** argv) {
         &static_cast<const f4::world::ITeamSource&>(adapters.teams));
 
     const auto& b3_stats = spawner.stats();
-    std::printf("b3_loop: intents=%zu spawned=%d routes=%d unknown=%d "
-                "dups=%d\n",
+    std::printf("b3_loop: intents=%zu spawned=%d routes=%d synthetic=%d "
+                "unknown=%d dups=%d\n",
                 intents.size(), b3_stats.aircraft_spawned,
-                b3_stats.routes_attached, b3_stats.unknown_flight_ids,
-                b3_stats.duplicate_skips);
+                b3_stats.routes_attached, b3_stats.synthetic_spawned,
+                b3_stats.unknown_flight_ids, b3_stats.duplicate_skips);
 
     if (b3_stats.aircraft_spawned == 0) {
         std::fprintf(stderr,
@@ -754,6 +858,34 @@ int main(int argc, char** argv) {
             w.put(",    ");
             w.number_key("draws_unmatched",
                          result_ledger.draws_unmatched());
+            // C3: the route tranche's counters — routes built / failed,
+            // waypoints planned, and the synthetic spawns that flew
+            // them (generation-to-spawn, as numbers) — plus the threat
+            // map's own coverage (painted AD units / threatened cells:
+            // the fixture theater-db enrichment bounds what can be
+            // painted, and the numbers make that visible instead of
+            // silent).
+            w.put(",    ");
+            w.number_key("routes_built", tasking_routes);
+            w.put(",    ");
+            w.number_key("routes_failed", tasking_routes_failed);
+            w.put(",    ");
+            w.number_key("route_waypoints", tasking_route_wps);
+            w.put(",    ");
+            w.number_key("route_safe_searches", tasking_route_searches);
+            w.put(",    ");
+            w.number_key("route_direct_fallbacks",
+                         tasking_route_fallbacks);
+            w.put(",    ");
+            w.number_key("threat_ad_units", threat_ad_units);
+            w.put(",    ");
+            w.number_key("threat_cells", threat_cells);
+            w.put(",    ");
+            w.number_key("synthetic_spawned",
+                         spawner.stats().synthetic_spawned);
+            w.put(",    ");
+            w.number_key("synthetic_failed",
+                         spawner.stats().synthetic_failed);
             w.put(",\n    \"teams\": [");
             bool first_team = true;
             for (const auto& t : result_ledger.teams()) {
@@ -997,6 +1129,28 @@ int main(int argc, char** argv) {
                      "decode); inspect campaign_qc_summary.json tasking.\n",
                      tasking_cycles, args.tasking_minutes);
         return 6;
+    }
+    // C3 gate (exit 7): the ladder drew aircraft with a route planner
+    // attached, but not one route came back buildable — or not one
+    // routed intent materialized an aircraft. The generation-to-spawn
+    // chain broke (threat map empty / A* diverged / airbases
+    // unresolvable); the routed war cannot fly.
+    if (tasking_ran && tasking_routes_expected && tasking_had_air &&
+        result_ledger.mission_draw_aircraft() > 0 &&
+        (tasking_routes == 0 ||
+         spawner.stats().synthetic_spawned == 0)) {
+        std::fprintf(stderr,
+                     "campaign_qc: QC FAILURE — the tasking ladder drew %d "
+                     "aircraft with a route planner attached, but built "
+                     "%d routes (%d build failures) and materialized %d "
+                     "synthetic aircraft. The generation-to-spawn chain "
+                     "broke (threat map / pathfinder / airbase "
+                     "resolution); inspect the tasking routes block in "
+                     "campaign_qc_summary.json.\n",
+                     result_ledger.mission_draw_aircraft(), tasking_routes,
+                     tasking_routes_failed,
+                     spawner.stats().synthetic_spawned);
+        return 7;
     }
     return 0;
 }

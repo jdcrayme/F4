@@ -36,3 +36,9 @@ f4_campaign_add_test(test_result_ledger   test_result_ledger.cpp)
 target_link_libraries(test_result_ledger PRIVATE f4-json)
 target_compile_definitions(test_result_ledger PRIVATE
     F4_SIMULATION_TEST_FIXTURES_DIR="${CMAKE_SOURCE_DIR}/f4-simulation/tests/fixtures")
+
+# C3 — the route tranche: threat map (ScoreThreatFast port), the grid
+# A* (asearch port), and the route builder (BuildPathToTarget port).
+f4_campaign_add_test(test_threat_map      test_threat_map.cpp)
+f4_campaign_add_test(test_path_finder     test_path_finder.cpp)
+f4_campaign_add_test(test_route_builder   test_route_builder.cpp)

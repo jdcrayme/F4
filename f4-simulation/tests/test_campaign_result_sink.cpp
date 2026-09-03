@@ -100,8 +100,8 @@ WorldState make_flight_world() {
     ws.teams.resize(8);
     ws.teams[2] = TeamState{2, 2, 2, "ROK", "", 0, 0, {}};
     ws.teams[6] = TeamState{6, 6, 6, "DPRK", "", 0, 0, {}};
-    ws.teams[2].stance = {0, 0, 0, 0, 0, 0, -1, 0};
-    ws.teams[6].stance = {0, 0, -1, 0, 0, 0, 0, 0};
+    ws.teams[2].stance = {0, 0, 0, 0, 0, 0, 5, 0};
+    ws.teams[6].stance = {0, 0, 5, 0, 0, 0, 0, 0};
 
     ObjectiveState ab;
     ab.type = 100; ab.entity_type = 100; ab.x = 390; ab.y = 455;

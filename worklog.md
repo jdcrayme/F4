@@ -4203,3 +4203,116 @@ Stage Summary:
   recovery, ground resupply + objective feature repair timers.
 - Next per the plan: C3 (ScoreThreatFast threat map → A* → route
   builder, M4.3–M4.5), then C4 ATM, then C5 the 24-hour war.
+
+---
+Task ID: 14
+Agent: main (Super Z)
+Task: Phase C3 — threat map + grid A* + route builder: generated
+missions fly their own routes (user: "Proceed as recommended ... provide
+a downloadable patch file. English only."). Session resumed mid-tranche
+after a freeze (user: "It looks like you froze up. The previous patches
+have been pushed to git. Try to pick up where you left off." — C1+C2
+content-identical on origin, reconciled with git reset; the C3 working
+tree was intact, building, and 2,122/2,122 green, but the E2E
+acceptance failed its own new exit-7 gate).
+
+Work Log:
+- Reconciled local C1/C2 commits against the user's push (141520d
+  "Compaing work": same trees, patch files cleaned up) — mixed reset
+  onto origin/main, working tree preserved.
+- Diagnosed the exit-7 failure with staged debug prints (env-gated,
+  removed after): the route block's preconditions all passed
+  (planner attached, airbase 1314, delivery profile, ARO match), but
+  select_target_ returned 0 for EVERY team — no enemy-owned objective
+  resolved, routes_built=0 AND routes_failed=0 (the block's own
+  counters never moved).
+- ROOT CAUSE 1 — the stance vocabulary: our "< 0 = at war" sign test
+  is wrong against the reference. FreeFalcon cmpglobl.h RelType is an
+  ENUM (NoRelations 0, Allied 1, Friendly 2, Neutral 3, Hostile 4,
+  War 5) and team.cpp indexes RoEData[roe][stance] with it directly.
+  TestCamp's real saves carry -5141 toward the unused Gorn slot for
+  EVERY team — the sign test read phantom WAR, made the (Neutral!)
+  U.S. a belligerent, and starved target selection while the actual
+  war (ROK-DPRK, mutual 5) generated nothing strike-shaped.
+  Fixed: f4/world Relation + relation_from_wire (out-of-range →
+  NoRelations) in data_source.hpp; every consumer now tests ==
+  War: belligerent_teams, select_target_, ThreatMap::war_, the
+  bridge's side_color. Five stance-pinning tests + the kunsan
+  fixture (make_kunsan_fixture.py, regenerated: 4-line diff) moved
+  to 5 — same belligerents, byte-identical goldens. (Also found
+  test_path_finder still on -1 the hard way — 2 A* test failures
+  pointed straight at it.)
+- ROOT CAUSE 2 — the role gate: with the correct belligerents,
+  TestCamp's ROK+DPRK field all-counter-air squadrons (92 of 94
+  squadrons are ARO_CA), so no delivery-family intent ever generated
+  — 0 routes, nothing for exit 7 to count. The reference's own
+  selection SCORES role vs capability (FindBestAir — a counter-air
+  F-16 wing is taskable for strike); our hard ARO gate is the
+  simplification. Fixed: CampaignConfig::tasking_role_fallback
+  (default OFF — B.3/C2 goldens untouched; exact-role match still
+  wins when it exists), campaign_qc arms it as the bridge to C4.
+- QC hardening from the same debugging: the exit-7 gate now reads the
+  Campaign's OWN route counters via new accessors
+  (routes_built/failed, safe searches, fallbacks) — the first draft
+  counted intents() route-less entries, which is structurally blind
+  (the synthetic mark is stamped only on success). Threat-map
+  coverage stats implemented for real (threatened_cells was a
+  declared-but-never-computed stub — counts cells with ANY painted
+  density, either half: the viewer's own side's rings are what the
+  viewer's ENEMIES fly through) and surfaced in the summary. The
+  threat map viewer is the FIRST BELLIGERENT, not te_team (a neutral
+  te_team packs an empty map); min_avoid_threat 25 as the host
+  override (the fixture UCD's single-ring band scores 30-33 sit under
+  the reference's aiinput default of 40).
+- Data-side discovery: the fixture theater DB (Falcon4.UCD) is an
+  8-ENTRY sample — of TestCamp's 247 AD battalions (subtype 1), only
+  3 resolve UCD enrichment (entity type 174 → dataPtr 6 < 8); the
+  other 244 (types 834/831/828/... → dataPtr 220-272) paint nothing
+  with any code change able to fix it (full theater UCD is game
+  data). The 3 that resolve carry real rings (LowAir 29 / Air 86
+  grid units) — 2,088 threatened cells, enough to shape routes.
+  Coverage is now VISIBLE in the QC summary instead of silent.
+- Renamed testcamp.world.json → TestCamp.world.json (the .gitignore's
+  intended /TestCamp.world.json pattern; it was showing as untracked
+  dirt) and pinned the regeneration command (verified BYTE-IDENTICAL
+  output): cam2json TestCamp.cam TestCamp.world.json --theater korea
+  --terrain korea.terrain.json --class-table f4-world-convert/tests/
+  fixtures/FALCON4.ct --theater-data f4-world-convert/tests/fixtures
+  (TestCamp.cam is tracked in-repo since "Temporary data").
+- Suite 2091 → 2122 (+31: 8 threat map + 7 A* + 8 route builder + 2
+  campaign tick planner tests + 3 spawner/bridge route tests + 2
+  world-state threat arrays + 1 theater-data emission), 100%, zero
+  warnings. The kunsan goldens and the B.3/C2 byte-identity pins all
+  held.
+- THE ACCEPTANCE (TestCamp, v71): 4-hour --tasking + 20-minute
+  AMIS_INTSTRIKE — 8 cycles, 411 intents, 1,013 drawn, 81 routes (383
+  waypoints, 0 build failures, 22 threat-avoidance searches), 8
+  synthetic INTSTRIKE aircraft spawned and flown alongside the 49
+  saved flights (57 spawned total), 88 bombs / 66 features destroyed
+  / 20 objectives' fstatus written back — exit 0, all gates green;
+  campaign_result.json byte-identical across two runs; the
+  no-tasking baseline reproduces the C2 numbers exactly (the
+  planner is an attachment, not a mode switch).
+- Docs: CAMPAIGN_LOOP_PLAN C3 → LANDED (vocabulary correction with
+  evidence, role-gate bridge, QC telemetry, UCD-coverage limitation
+  + regen command; sections renumbered, C4/C5 now §5, order §8),
+  CHANGES C3-ROUTES-1 entry, README f4-campaign section (route
+  planner example + C3 in the intro), this log.
+
+Stage Summary:
+- Generation-to-spawn is CLOSED: the campaign picks enemy objectives
+  (RelType-correct), builds threat-aware routes (airbase → ingress
+  corners → IP → target → turn point → egress → airbase), and the
+  spawner materializes them as they publish — 22 of TestCamp's 81
+  routes bent around SAM rings.
+- The stance-vocabulary fix is the tranche's deepest change: every
+  belligerence, targeting, RoE, and side-color decision now reads the
+  reference's actual enum, garbage-tolerant — phantom-slot wars are
+  structurally impossible.
+- Deliberately deferred (plan §7): the 32000 RoE overflight wall
+  (Neutral/Hostile classes now decodable; the >120 impassable test is
+  ported and waiting), package-shared ingress/breakpoints + TOT
+  slotting (C4), loiter racetracks, tanker waypoints, full-UCD threat
+  coverage (data, not code).
+- Next per the plan: C4 (ATM 7-phase pipeline + FindBestAir replacing
+  the role-fallback bridge), then C5 the 24-hour war.

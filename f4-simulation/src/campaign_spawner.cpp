@@ -67,7 +67,54 @@ void CampaignSimSpawner::handle(const f4::campaign::MissionIntent& intent) {
     // ids that never resolve — they're counted, not errors.
     const auto it = unit_id_map_.find(intent.flight_id);
     if (it == unit_id_map_.end() || !it->second.valid()) {
-        ++stats_.unknown_flight_ids;
+        // C3: a SYNTHETIC intent (route built by the campaign's route
+        // planner) spawns through the intent path — generation to spawn.
+        // Route-less synthetic intents stay skips (nothing to fly).
+        if (intent.synthetic && !intent.route.empty()) {
+            // Duplicate guard: one aircraft per flight id — the same
+            // rule the live-flight path applies (a re-published intent
+            // skips).
+            if (spawned_flight_ids_.count(intent.flight_id) != 0) {
+                ++stats_.duplicate_skips;
+                return;
+            }
+            // The parking bookkeeping keys on the intent's target
+            // airbase: resolve the squadron's base when we can, else
+            // the shared fallback (key 0) — same shape as the flight
+            // path's keying.
+            std::uint64_t base_key = 0;
+            const auto sq_it = unit_id_map_.find(intent.squadron_id);
+            if (sq_it != unit_id_map_.end() && sq_it->second.valid()) {
+                auto* sq = f4::entities::EntityHandle(sq_it->second, &world_)
+                               .get<f4::entities::SquadronComponent>();
+                if (sq && sq->airbase.value != 0) {
+                    base_key = sq->airbase.value;
+                }
+            }
+            const int slot = per_airbase_index_[base_key]++;
+            const auto spawned_id = spawn_aircraft_for_intent(
+                world_, intent, unit_id_map_, ct_, db_, cfg_, airfield_,
+                tpl_, slot, airbase_airfields_, objective_id_map_,
+                weapon_table_);
+            if (spawned_id) {
+                ++stats_.aircraft_spawned;
+                ++stats_.synthetic_spawned;
+                // Route bookkeeping (the QC summary reads it).
+                {
+                    f4::entities::EntityHandle h(*spawned_id, &world_);
+                    auto* brain = h.get<f4::ai::BrainComponent>();
+                    if (brain && !brain->mission_plan().route.empty()) {
+                        ++stats_.routes_attached;
+                    }
+                }
+                spawned_flight_ids_.insert(intent.flight_id);
+                spawned_.push_back(*spawned_id);
+            } else {
+                ++stats_.synthetic_failed;
+            }
+        } else {
+            ++stats_.unknown_flight_ids;
+        }
         return;
     }
     {

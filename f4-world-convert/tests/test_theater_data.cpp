@@ -1267,3 +1267,44 @@ TEST(TheaterDataPhase3, LoadAllIncludesRcdWhenPresent) {
     // fixture is present — either is acceptable. We just verify that
     // load_all didn't throw trying to load it.
 }
+
+// C3 (war-loop routing): UCD HitChance[8]/Range[8] — the threat-model
+// arrays, emitted as "hit_chance" and "weapon_range" per unit (same
+// enrichment path as "scores": theater_db + class table resolve the
+// unit's entity_type to DTYPE_UNIT).
+TEST(TheaterDataPhase1, UcdThreatModelArraysEmittedWhenTheaterDbLoaded) {
+    const std::string cam_path = std::string(FIXTURE_DIR) + "save1.cam";
+    ASSERT_TRUE(std::filesystem::exists(cam_path));
+
+    f4::world_convert::CamArchive cam;
+    ASSERT_NO_THROW(cam.load(cam_path));
+
+    f4::world_convert::TheaterObjectDatabase theater_db;
+    EXPECT_NO_THROW(theater_db.load_all(std::string(FIXTURE_DIR)));
+    ASSERT_TRUE(theater_db.units.loaded());
+
+    f4::world_convert::ClassTable class_table;
+    ASSERT_NO_THROW(class_table.load(std::string(FIXTURE_DIR) + "FALCON4.ct"));
+
+    f4::world_convert::WorldJsonOptions opts;
+    opts.class_table = &class_table;
+    opts.theater_db = &theater_db;
+
+    std::string json;
+    ASSERT_NO_THROW(json = f4::world_convert::to_world_json(cam, opts));
+
+    // Both arrays appear on the enriched units (MoveType-indexed: the
+    // LowAir=4 / Air=5 entries feed the campaign threat map).
+    EXPECT_NE(json.find("\"hit_chance\""), std::string::npos);
+    EXPECT_NE(json.find("\"weapon_range\""), std::string::npos);
+
+    // The Air Defense battalion's own record carries real rings: the
+    // UCD entry for "Air Defense" (save1's fixture data) has nonzero
+    // Air/LowAir weapon ranges — find a unit block with class_name
+    // "Air Defense" and check its arrays inline.
+    const auto pos = json.find("\"class_name\": \"Air Defense\"");
+    ASSERT_NE(pos, std::string::npos);
+    const std::string tail = json.substr(pos, 4000);
+    EXPECT_NE(tail.find("\"weapon_range\": ["), std::string::npos);
+    EXPECT_NE(tail.find("\"hit_chance\": ["), std::string::npos);
+}

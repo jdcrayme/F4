@@ -1032,6 +1032,236 @@ build_mission_plan_from_flight(
     return plan;
 }
 
+// ============================================================================
+// C3 route tranche — synthetic-intent missions: route → MissionPlan,
+// and the aircraft that flies it
+// ============================================================================
+
+std::optional<f4::ai::MissionPlan>
+build_mission_plan_from_route(
+        const std::vector<f4::campaign::RouteWaypoint>& route,
+        std::uint32_t target_objective_vu,
+        const std::unordered_map<std::uint32_t, f4::entities::EntityId>*
+            objective_id_map) {
+    using namespace f4::entities;
+    using f4::ai::modules::NavigationModule;
+
+    if (route.size() < 2) return std::nullopt;
+    f4::ai::MissionPlan plan;
+
+    // The route's own takeoff waypoint is dropped (the TakeoffModule
+    // owns departure — the same rule the saved-flight path applies);
+    // everything after it (ingress corners, IP, target, turn point,
+    // egress, the terminal WP_LAND) becomes the brain's route.
+    std::size_t first = 0;
+    while (first < route.size() &&
+           route[first].action == 1 /* WP_TAKEOFF */) {
+        ++first;
+    }
+    if (route.size() - first < 1) return std::nullopt;
+
+    // The strike target: the intent's target objective resolved through
+    // the id map (the fallback for delivery waypoints that carry no
+    // target_num of their own — the builder stamps them, but a stale
+    // map deserves the flight-level fallback too).
+    std::uint64_t flight_target = 0;
+    if (objective_id_map != nullptr && target_objective_vu != 0) {
+        const auto it = objective_id_map->find(target_objective_vu);
+        if (it != objective_id_map->end() && it->second.valid()) {
+            flight_target = it->second.value;
+        }
+    }
+
+    plan.route.reserve(route.size() - first);
+    int n = 1;
+    for (std::size_t i = first; i < route.size(); ++i) {
+        const auto& w = route[i];
+        auto pos = grid_to_enu(w.x, w.y, static_cast<float>(w.altitude_ft));
+        const double floor_ft =
+            f4::ai::modules::is_ag_delivery_action(w.action)
+                ? kMinDeliveryWaypointAltFt
+                : kMinWaypointAltFt;
+        pos.z = std::max(pos.z, floor_ft);
+        char name[32];
+        std::snprintf(name, sizeof(name), "WP%d:%s", n++,
+                      wp_action_text(w.action));
+
+        std::uint64_t target_id = 0;
+        if (f4::ai::modules::is_ag_delivery_action(w.action)) {
+            if (objective_id_map != nullptr && w.target_num != 0) {
+                const auto it = objective_id_map->find(w.target_num);
+                if (it != objective_id_map->end() && it->second.valid()) {
+                    target_id = it->second.value;
+                }
+            }
+            if (target_id == 0) target_id = flight_target;
+        }
+
+        NavigationModule::Waypoint route_wp{name, pos, kDefaultLegSpeedKts};
+        route_wp.action = w.action;
+        route_wp.target_id = target_id;
+        plan.route.push_back(std::move(route_wp));
+    }
+
+    return plan;
+}
+
+std::optional<f4::entities::EntityId>
+spawn_aircraft_for_intent(
+        f4::entities::EntityWorld& world,
+        const f4::campaign::MissionIntent& intent,
+        const std::unordered_map<std::uint32_t, f4::entities::EntityId>&
+            unit_id_map,
+        const f4::world_convert::ClassTable& ct,
+        const f4::models::ModelDatabase& db,
+        const f4::data::AircraftConfig& cfg,
+        const ScenarioAirfield& airfield,
+        const ScenarioAircraft& scenario_aircraft,
+        int parking_slot,
+        const AirbaseAirfieldMap* airbase_airfields,
+        const std::unordered_map<std::uint32_t, f4::entities::EntityId>*
+            objective_id_map,
+        const weapons::WeaponClassTable* weapon_table) {
+    using namespace f4::entities;
+    using namespace f4::flight;
+    using namespace f4::ai;
+    using namespace f4::simulation;
+
+    if (intent.route.empty()) return std::nullopt;
+
+    // Resolve the intent's squadron entity (the roster the campaign
+    // drew from — a real unit in the populated world, keyed by VU num).
+    const auto sq_it = unit_id_map.find(intent.squadron_id);
+    EntityId squadron_entity;
+    const SquadronComponent* sq = nullptr;
+    if (sq_it != unit_id_map.end() && sq_it->second.valid()) {
+        squadron_entity = sq_it->second;
+        sq = EntityHandle(squadron_entity, &world).get<SquadronComponent>();
+    }
+
+    // Parking spot: the squadron's airbase objective when resolvable
+    // (position + per-base airfield data), else the route's takeoff
+    // waypoint (its grid IS the airbase the planner launched from),
+    // else the caller's fallback threshold. Same shape and the same
+    // fallback ladder as the saved-flight spawn path.
+    f4::geo::WorldPosition parking_spot = airfield.threshold_position;
+    std::uint64_t home_airbase_vu = 0;
+    const ScenarioAirfield* base_af = nullptr;
+    EntityId airbase_entity;
+    if (sq && sq->airbase.value != 0) {
+        airbase_entity = sq->airbase;
+        home_airbase_vu = airbase_vu_id(world, sq->airbase);
+        if (airbase_airfields && home_airbase_vu != 0) {
+            const auto it = airbase_airfields->find(
+                static_cast<std::uint32_t>(home_airbase_vu));
+            if (it != airbase_airfields->end()) base_af = &it->second;
+        }
+        auto* tf = EntityHandle(sq->airbase, &world).get<TransformComponent>();
+        if (tf && (base_af || !airbase_airfields)) {
+            parking_spot = tf->position;
+        }
+    }
+    if (parking_spot == airfield.threshold_position && !airbase_entity.valid()) {
+        // Fall back to the route's own takeoff waypoint (grid → ENU).
+        const auto& tw = intent.route.front();
+        if (tw.action == 1 /* WP_TAKEOFF */) {
+            parking_spot = grid_to_enu(tw.x, tw.y, 0.0f);
+        }
+    }
+    const ScenarioAirfield& field = base_af ? *base_af : airfield;
+
+    // Per-flight lateral offset — the same parking spread the flight
+    // path uses (alternate sides, 80 ft steps).
+    constexpr double OFFSET_STEP_FT = 80.0;
+    const double offset = (parking_slot % 2 == 0 ? 1.0 : -1.0)
+                        * (static_cast<double>(parking_slot / 2) + 1.0)
+                        * OFFSET_STEP_FT;
+    parking_spot.x += offset;
+
+    // The model: the SQUADRON's entity_type (the aircraft type the
+    // campaign drew from), the same resolution the flight path uses.
+    int16_t vis_type_index = 0;
+    if (sq) {
+        auto* sq_uc =
+            EntityHandle(squadron_entity, &world).get<UnitCoreComponent>();
+        if (sq_uc) {
+            vis_type_index = ct.vis_type_for(
+                static_cast<uint16_t>(sq_uc->class_table_index), 0);
+        }
+    }
+    if (vis_type_index <= 0) {
+        vis_type_index = scenario_aircraft.vis_type_index;
+    }
+
+    // Compose the aircraft — the same component set the flight path
+    // composes, fed from the intent instead of a flight entity.
+    auto h = world.create();
+
+    auto& tf = h.add<TransformComponent>();
+    tf.position = parking_spot;
+    const double hdg = field.runway_heading_rad;
+    const auto q0 = f4::simulation::enu_quat_from_compass(hdg);
+    tf.qw = q0.w;  tf.qx = q0.x;  tf.qy = q0.y;  tf.qz = q0.z;
+
+    auto& fm = h.add<FlightModelComponent>();
+    fm.init(cfg,
+            /*alt_ft=*/parking_spot.z,
+            /*vt_ftps=*/0.0,
+            /*hdg_rad=*/hdg,
+            /*inAir=*/false,
+            /*north_ft=*/parking_spot.y,
+            /*east_ft=*/parking_spot.x);
+    fm.set_ground(parking_spot.z, f4::math::Vec3d{0.0, 0.0, -1.0});
+
+    auto& vis = h.add<VisualModelComponent>();
+    if (db.valid()) {
+        vis.model_record = db.model(vis_type_index);
+    }
+    vis.active_lod = 0;
+    f4::models::SwitchState gear_switch;
+    gear_switch.switch_number = 10;
+    gear_switch.active_child  = 0;
+    vis.model_state.switches.push_back(gear_switch);
+
+    auto& brain = h.add<BrainComponent>();
+    brain.module().rotate_speed_kts = 140.0;
+    brain.module().gear_up_alt_ft = 200.0;
+    brain.module().departure_alt_ft = field.departure_altitude_ft;
+    brain.module().taxi_speed_kts = 15.0;
+    brain.module().airbase_id = home_airbase_vu;
+    if (auto plan = build_mission_plan_from_route(
+            intent.route, intent.target_objective_id, objective_id_map)) {
+        brain.set_mission_plan(std::move(*plan));
+    }
+
+    // Ordnance: no wire loadout exists for a synthetic draw, so the
+    // doctrine fill arms the delivery-category missions (the same
+    // rule the flight path's fallback uses — MK-82 stations for A/G
+    // missions, bookkeeping-only otherwise).
+    if (weapon_table != nullptr) {
+        (void)arm_flight_strike(*weapon_table, h, {}, intent.mission_byte);
+    }
+
+    // TEAM tag + C1 origin stamp: the campaign identity the aircraft
+    // flies under. The flight_vu is the intent's synthetic flight id
+    // (no live flight entity exists — the identity IS the ledger's
+    // draw record); the squadron/home-airbase VUs and the team slot
+    // come from the intent, so kills over the target write back to
+    // the squadron that was tasked (the C1 loop, closed for
+    // generated missions too).
+    h.set_tag(tags::TEAM,
+              TagValue::from(owner_team_string(world, intent.team)));
+    auto& origin = h.add<CampaignOriginComponent>();
+    origin.flight_vu = intent.flight_id;
+    origin.squadron_vu = intent.squadron_id;
+    origin.home_airbase_vu = static_cast<std::uint32_t>(home_airbase_vu);
+    origin.team_slot = intent.team;
+    origin.callsign_id = 0;
+    origin.callsign_num = 0;
+
+    return h.id();
+}
+
 std::string owner_team_string(const f4::entities::EntityWorld& world,
                               std::uint8_t owner) {
     using namespace f4::entities;
@@ -1054,7 +1284,13 @@ std::string owner_team_string(const f4::entities::EntityWorld& world,
     }
     if (static_cast<int>(owner) == player_slot) return "blue";
 
-    // Look up the owner team's stance toward the player slot.
+    // Look up the owner team's stance toward the player slot. RelType
+    // enum (cmpglobl.h): red = at WAR with the player (5) — the same
+    // rule the campaign's belligerence/target selection uses. The
+    // pre-C3 "< 0" sign test misread the garbage columns real saves
+    // carry toward unused slots (e.g. -5141) as war; the enum decode
+    // maps out-of-range values to NoRelations, so phantom slots stay
+    // green.
     const auto team_ids = world.with_tag(
         tags::ROLE, TagValue::from(std::string("team")));
     for (const auto eid : team_ids) {
@@ -1062,7 +1298,9 @@ std::string owner_team_string(const f4::entities::EntityWorld& world,
         auto* tc = h.get<TeamComponent>();
         if (!tc || tc->slot != static_cast<int>(owner)) continue;
         if (player_slot < static_cast<int>(tc->stance.size()) &&
-            tc->stance[static_cast<std::size_t>(player_slot)] < 0) {
+            f4::world::relation_from_wire(
+                tc->stance[static_cast<std::size_t>(player_slot)]) ==
+                f4::world::Relation::War) {
             return "red";
         }
         return "green";
