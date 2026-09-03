@@ -35,6 +35,19 @@ f4_simulation_add_test(test_combat_transcript      test_combat_transcript.cpp)
 f4_simulation_add_test(test_register_aircraft      test_register_aircraft.cpp)
 f4_simulation_add_test(test_campaign_session       test_campaign_session.cpp)
 
+# REGRESSION (Start Session access violation): the Simulation owns the
+# ClassTable the BubbleManager borrows for its lifetime — the old code
+# handed it a stack local that died at init_bubble_manager() return.
+# Needs FALCON4.ct, the generated F-16 config, and KoreaObj.HDR/LOD for
+# the vehicle models the deagg path resolves.
+f4_simulation_add_test(test_simulation_lifetime  test_simulation_lifetime.cpp)
+target_compile_definitions(test_simulation_lifetime PRIVATE
+    F4_SOURCE_FIXTURES_DIR="${CMAKE_SOURCE_DIR}/f4-world-convert/tests/fixtures"
+    F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}"
+    F4_MODELS_DIR="${CMAKE_SOURCE_DIR}/f4-models/tests/fixtures"
+)
+add_dependencies(test_simulation_lifetime convert_golden_fixtures)
+
 # The register_aircraft test hand-initializes a FlightModelComponent from
 # the generated F-16 config fixture (real aero tables).
 target_compile_definitions(test_register_aircraft PRIVATE

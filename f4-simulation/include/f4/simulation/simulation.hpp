@@ -40,6 +40,7 @@
 #include <f4/data/brain_data.hpp>       // SimData BRAINDAT.brn archetypes
 #include <f4/data/formation_data.hpp>  // SimData FORMDAT.FIL formations
 #include <f4/weapons/weapon_class_table.hpp>
+#include <f4/world_convert/class_table.hpp>  // owned here (see class_table_)
 
 #include <cstdint>
 #include <filesystem>
@@ -97,6 +98,16 @@ public:
     /// initialize(). Simulation::tick flushes deferred messages each tick.
     [[nodiscard]] messaging::MessageBus&       bus()       noexcept { return bus_; }
     [[nodiscard]] const messaging::MessageBus& bus() const noexcept { return bus_; }
+
+    /// The class table (FALCON4.CT) this Simulation loaded at
+    /// initialize() — entity_type → vis_type. Empty when the scenario
+    /// carries no class_table_path (every consumer degrades
+    /// gracefully). Hosts that need their own lookups (renderers,
+    /// inspectors) share this instead of re-loading the file.
+    [[nodiscard]] const f4::world_convert::ClassTable& class_table()
+        const noexcept {
+        return class_table_;
+    }
 
     /// The primary (first) aircraft entity. Convenience accessor for hosts
     /// that only care about one aircraft (e.g. the camera focus). Returns
@@ -305,6 +316,11 @@ private:
     void wire_atc();              // StubATC + AirfieldConfig from scenario
     void record_snapshot();
     void record_fcs_trace_sample();
+    /// Load scenario_.class_table_path into class_table_ ONCE per
+    /// initialize() — every long-lived borrower (the spawn paths, the
+    /// BubbleManager) references this member. No-op on an empty path
+    /// (the table stays empty; every consumer degrades gracefully).
+    void load_class_table();
 
     // --- Owned state ---
     Scenario scenario_;
@@ -318,6 +334,23 @@ private:
     std::unique_ptr<f4::recorder::FlightRecorder> recorder_;
     std::unique_ptr<f4::recorder::FcsTraceWriter> fcs_trace_;
     f4::data::AircraftConfig aircraft_cfg_;
+
+    // The class table (FALCON4.CT) — entity_type → vis_type. OWNED HERE
+    // because long-lived borrowers take non-owning references/pointers:
+    // the BubbleManager holds `const ClassTable&` for the Simulation's
+    // lifetime (per-tick deagg → spawn_vehicles_from_unit), and the
+    // campaign-flights/squadron spawn paths read it too. Loaded once by
+    // load_class_table() (see initialize).
+    //
+    // REGRESSION NOTE: init_bubble_manager() used to construct the
+    // BubbleManager with a STACK-LOCAL ClassTable that died at function
+    // return; the first tick's deagg then read freed stack memory in
+    // ClassTable::vis_type_for() — the viewer's "Start Session →
+    // access violation" crash (the QC never saw it: its fixture world
+    // deaggregates nothing near the bubble center). The member is the
+    // fix; the same discipline brain_data_/formation_library_ already
+    // follow for their non-owning consumers.
+    f4::world_convert::ClassTable class_table_{};
 
     // Combat chain (M3): weapon class data for launch_missile + the
     // component attachment at spawn. Built-in table; WST import later.

@@ -173,6 +173,23 @@ public:
     /// validation of the 3D Ground Layout panel.
     bool select_by_name(const std::string& substring);
 
+    /// V-CAMP: start the live campaign session programmatically (the
+    /// Campaign window's Start Session button, exposed for hosts and
+    /// the --session CLI flag). The create() runs on a worker thread
+    /// (the window stays responsive); run() adopts the result within a
+    /// frame of it finishing. Returns false when no world is loaded or
+    /// a start is already in flight (the reason lands in the Campaign
+    /// window's error line either way).
+    bool request_campaign_session();
+
+    /// True while a session create() is running on the worker (the
+    /// "Starting session…" state the Campaign window shows).
+    [[nodiscard]] bool campaign_session_starting() const noexcept;
+
+    /// True when a live campaign session exists (adopted after the
+    /// async start completed).
+    [[nodiscard]] bool campaign_session_live() const noexcept;
+
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
@@ -216,6 +233,13 @@ private:
     /// the session (a reset = stop + start).
     void start_campaign_session();
     void stop_campaign_session();
+    /// V-CAMP async start, frame half: polls the session-start future
+    /// and adopts the result when create() finishes (join + move the
+    /// session in, or surface the error). Called once per frame from
+    /// run() BEFORE the advance block — the Campaign window and the
+    /// canvas see the new session on the frame it becomes ready.
+    /// Returns true when a start was adopted this frame.
+    bool adopt_session_start();
 
     // --- Replay mode private draw path (Path B2) -------------------------
     //

@@ -283,19 +283,21 @@ CampaignSession::create(const CampaignSessionOptions& opts,
                   session->objective_id_map_);
 
     // 9. The airfield + per-airbase map (spawn parking): derived from
-    //    the session's WorldState, the same rule the QC applies.
-    f4::simulation::ScenarioAirfield airfield;
+    //    the session's WorldState, the same rule the QC applies. Both
+    //    live in MEMBERS (airfield_ / airbase_airfields_) — the spawner
+    //    references them for the session's lifetime; locals would
+    //    dangle at the end of create() (the Start Session crash's
+    //    second leg).
     bool have_airfield = false;
-    f4::simulation::AirbaseAirfieldMap airbase_airfields;
     for (const auto& obj : session->ws_.objectives) {
         if (auto af = f4::simulation::derive_airfield_from_objective(
                 obj, 36)) {
             if (!have_airfield) {
-                airfield = *af;
+                session->airfield_ = *af;
                 have_airfield = true;
             }
             if (obj.id_num != 0) {
-                airbase_airfields[obj.id_num] = std::move(*af);
+                session->airbase_airfields_[obj.id_num] = std::move(*af);
             }
         }
     }
@@ -304,21 +306,21 @@ CampaignSession::create(const CampaignSessionOptions& opts,
         // spawner's own fallback ladder (route takeoff waypoint →
         // template threshold) still parks every generated mission, so
         // the loop runs on worlds the QC would reject.
-        airfield = f4::simulation::ScenarioAirfield{};
+        session->airfield_ = f4::simulation::ScenarioAirfield{};
     }
 
     // 10. The spawner — feeding THE SIM'S WORLD + BUS. Intents the
     //     ladder publishes materialize as aircraft in the same world
-    //     the physics ticks. (The template shares the scenario's.)
-    f4::simulation::ScenarioAircraft tpl;
-    tpl.callsign = "CAMPAIGN";
-    tpl.vis_type_index = 1052;
-    tpl.aircraft_config_path = opts.aircraft_config.string();
+    //     the physics ticks. (The template is the member spawn_tpl_;
+    //     the airfield/map lenders are members too — see step 9.)
+    session->spawn_tpl_.callsign = "CAMPAIGN";
+    session->spawn_tpl_.vis_type_index = 1052;
+    session->spawn_tpl_.aircraft_config_path = opts.aircraft_config.string();
     session->spawner_ =
         std::make_unique<f4::simulation::CampaignSimSpawner>(
             session->sim_->world(), session->unit_id_map_,
-            session->ct_, session->db_, session->cfg_, airfield, tpl,
-            filter);
+            session->ct_, session->db_, session->cfg_, session->airfield_,
+            session->spawn_tpl_, filter);
     // Arming + parking: the builtin weapon table is a MEMBER (the
     // spawner borrows it; a temporary would dangle) — the QC keeps a
     // named local alive for the whole run, the session stores one.
@@ -326,7 +328,9 @@ CampaignSession::create(const CampaignSessionOptions& opts,
     session->spawner_->set_objective_id_map(&session->objective_id_map_);
     session->spawner_->set_weapon_table(&session->weapon_table_);
     session->spawner_->set_airbase_airfields(
-        airbase_airfields.empty() ? nullptr : &airbase_airfields);
+        session->airbase_airfields_.empty()
+            ? nullptr
+            : &session->airbase_airfields_);
     session->spawner_->attach(session->sim_->bus());
 
     // 11. The ladder (C2's one-pool tasking + C4's ATM pipeline) over

@@ -127,6 +127,12 @@ void Simulation::initialize() {
     wire_atc();
     load_models();
     load_aircraft_config();
+    // Load the class table ONCE, before every consumer: the spawn
+    // paths below and the BubbleManager (init_bubble_manager) borrow
+    // this member for the Simulation's lifetime. Used to be loaded
+    // per-path into stack locals — one of which outlived its scope
+    // inside the BubbleManager (the Start Session access violation).
+    load_class_table();
     spawn_aircraft();
     // Step 11: wingman refs resolve AFTER all aircraft exist (a lead may
     // sit anywhere in the list). Marks the wingman brains + records the
@@ -853,9 +859,10 @@ void Simulation::spawn_from_campaign_flights() {
         }
     }
 
-    // 4. Load the class table (Falcon4.CT) — needed for entity_type → vis_type.
-    f4::world_convert::ClassTable ct;
-    ct.load(scenario_.class_table_path);
+    // 4. The class table was loaded by initialize() (load_class_table)
+    //    — the member is the ONE table every spawn path + the
+    //    BubbleManager share. entity_type → vis_type lookups below go
+    //    through class_table_.
 
     // 5. Use the bridge function to spawn one aircraft per Flight unit
     //    (B.3: with the scenario's campaign_flight_filter applied — team /
@@ -889,7 +896,7 @@ void Simulation::spawn_from_campaign_flights() {
     filter.mission = scenario_.campaign_flight_filter.mission;
     filter.max_flights = scenario_.campaign_flight_filter.max_flights;
     aircraft_entities_ = spawn_aircraft_from_flights(
-        world_, ct, *model_db_, aircraft_cfg_,
+        world_, class_table_, *model_db_, aircraft_cfg_,
         derived, template_ac, filter,
         airbase_airfields_.empty() ? nullptr : &airbase_airfields_,
         &populated.objective_id_map, &weapon_table_);
@@ -1574,6 +1581,16 @@ void Simulation::record_fcs_trace_sample() {
 // Mode B: Unit Deaggregation
 // ============================================================================
 
+void Simulation::load_class_table() {
+    // The ONE load for the Simulation's lifetime. Empty path → the
+    // member stays empty and every consumer degrades gracefully
+    // (vis_type_for returns 0, the spawn paths fall back). Malformed
+    // content throws (loud) exactly like the per-path loads used to.
+    if (!scenario_.class_table_path.empty()) {
+        class_table_.load(scenario_.class_table_path);
+    }
+}
+
 void Simulation::spawn_squadron_aircraft() {
     // Spawn parked aircraft for Squadron units (one per un-tasked pilot slot).
     // No-op when there are no Squadron entities (e.g. scenario-list spawn mode
@@ -1586,16 +1603,12 @@ void Simulation::spawn_squadron_aircraft() {
     // as the template (same convention as spawn_from_campaign_flights).
     if (scenario_.aircraft.empty()) return;
 
-    // Load the class table (shared with spawn_from_campaign_flights — would
-    // be hoisted to a Simulation member in a future refactor).
-    f4::world_convert::ClassTable ct;
-    if (!scenario_.class_table_path.empty()) {
-        ct.load(scenario_.class_table_path);
-    }
-
+    // The class table: initialize() already loaded it into class_table_
+    // (the member every spawn path + the BubbleManager share — the
+    // pre-fix code loaded a THIRD copy here into another local).
     const auto& template_ac = scenario_.aircraft.front();
     squadron_aircraft_entities_ = spawn_aircraft_from_squadrons(
-        world_, ct, *model_db_, aircraft_cfg_,
+        world_, class_table_, *model_db_, aircraft_cfg_,
         scenario_.airfield, template_ac);
 }
 
@@ -1608,16 +1621,20 @@ void Simulation::init_bubble_manager() {
     const auto unit_ids = world_.with_component<entities::VehicleCompositionComponent>();
     if (unit_ids.empty()) return;
 
-    // Load the class table (same note as spawn_squadron_aircraft — would
-    // be hoisted in a future refactor). When the path is empty (no
-    // class_table_path in the scenario), the BubbleManager is still
-    // constructed — spawn_vehicles_from_unit handles an empty CT
-    // gracefully (returns no vehicles, marks the unit as "tried, no model").
-    f4::world_convert::ClassTable ct;
-    if (!scenario_.class_table_path.empty()) {
-        ct.load(scenario_.class_table_path);
-    }
-
+    // The class table: initialize() already loaded it into class_table_
+    // — the member the BubbleManager borrows for the Simulation's
+    // LIFETIME. The old code loaded a stack local here and passed THAT:
+    // the local died at function return, leaving bubble_manager_'s ct_
+    // dangling — the first tick's deagg then crashed in
+    // ClassTable::vis_type_for() (access violation, viewer Start
+    // Session). The member outlives the manager; the contract on the
+    // BubbleManager constructor ("ct must outlive the manager") is
+    // finally honored at every construction site. When the path was
+    // empty the old code still constructed the manager over an empty
+    // local — spawn_vehicles_from_unit handles an empty CT gracefully
+    // (returns no vehicles, marks the unit as "tried, no model") — and
+    // an empty member preserves exactly that behavior.
+    //
     // B.0: the deagg radii come from Falcon4.AII when the scenario
     // carries one (aii_path) — SIM_BUBBLE_SIZE / GROUND_BUBBLE_SIZE in
     // campaign grid units, converted to feet by bubble_radii_from_aii().
@@ -1629,7 +1646,7 @@ void Simulation::init_bubble_manager() {
         bubble_radii_from_aii(scenario_.aii_path);
 
     bubble_manager_ = std::make_unique<BubbleManager>(
-        world_, ct, *model_db_, ground_radius_ft, air_radius_ft);
+        world_, class_table_, *model_db_, ground_radius_ft, air_radius_ft);
 }
 
 void Simulation::update_bubble() {

@@ -67,6 +67,15 @@ ViewerApp::ViewerApp()  : impl_(std::make_unique<Impl>()) {
 }
 
 ViewerApp::~ViewerApp() {
+    // V-CAMP: last-resort join for a session-start worker that is still
+    // running (run()'s exit path joins first; this covers destruction
+    // without run() — CLI-only usage). A joinable std::thread dtor would
+    // terminate() the process; the future's shared state is freed by
+    // get()/dtor either way.
+    if (impl_->session_start_thread.joinable()) {
+        impl_->session_start_thread.join();
+        impl_->session_starting = false;
+    }
     // POLISH-2.1: free the cached terrain RenderTexture. Only safe to
     // call UnloadRenderTexture if a GL context still exists — and at
     // dtor time, run() has already returned (which called CloseWindow).
@@ -149,8 +158,12 @@ void ViewerApp::run() {
             impl_->status_msg = "Saved screenshot: " + path;
         }
 
-        // Scheduled screenshot (used by schedule_screenshot — for headless tests)
-        if (impl_->screenshot_pending && GetTime() >= impl_->screenshot_at) {
+        // Scheduled screenshot (used by schedule_screenshot — for headless
+        // tests). HELD while a session start is in flight so a
+        // --session smoke screenshot always captures the adopted state,
+        // however long the (async) create took.
+        if (impl_->screenshot_pending && !impl_->session_starting &&
+            GetTime() >= impl_->screenshot_at) {
             TakeScreenshot(impl_->screenshot_path.c_str());
             impl_->status_msg = "Saved screenshot: " + impl_->screenshot_path;
             impl_->screenshot_pending = false;
@@ -173,6 +186,12 @@ void ViewerApp::run() {
                 impl_->sel_entity = f4::entities::EntityId{};
             }
         }
+
+        // V-CAMP: adopt a finished async session start BEFORE anything
+        // reads impl_->session this frame (the Space toggle below, the
+        // advance block, the canvas live layer, this window). Returns
+        // quickly while the worker is still building.
+        adopt_session_start();
 
         // V-CAMP: Space toggles the live campaign session's clock (the
         // Campaign window's own button mirrors it). Only when a session
@@ -216,6 +235,20 @@ void ViewerApp::run() {
     }
 
     rlImGuiShutdown();
+
+    // A session start still running when the window closes: join it
+    // BEFORE Impl dies (the worker writes only into the future's
+    // shared state, but the thread object itself must be joined and
+    // the std::thread dtor would terminate() on a joinable thread).
+    if (impl_->session_starting) {
+        if (impl_->session_start_thread.joinable()) {
+            impl_->session_start_thread.join();
+        }
+        if (impl_->session_start_future.valid()) {
+            impl_->session_start_future.get();  // discard
+        }
+        impl_->session_starting = false;
+    }
     // POLISH-2.1: free the cached terrain map texture BEFORE
     // CloseWindow — once the GL context is gone, UnloadTexture
     // can't free GPU memory and may crash on some drivers. The dtor

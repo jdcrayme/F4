@@ -46,9 +46,11 @@
 #include <imgui.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <utility>
 
 namespace f4::viewer {
 
@@ -79,6 +81,10 @@ void ViewerApp::start_campaign_session() {
                       "no world loaded — open a campaign first");
         return;
     }
+    // One start at a time: while a create() runs on the worker the
+    // Start button is disabled; a stray call here (menu accelerator)
+    // is ignored rather than queued.
+    if (impl_->session_starting) return;
 
     // The campaign fixtures, campaign_qc's own resolution ladder:
     // install data when configured, else the build-tree fixtures.
@@ -160,26 +166,90 @@ void ViewerApp::start_campaign_session() {
     // C4: the ATM pipeline (FindBestAir replaces the C3 fallback
     // bridge this line used to arm).
 
-    std::string err;
-    impl_->session = f4::simulation::CampaignSession::create(opts, &err);
-    if (impl_->session) {
-        impl_->campaign_error[0] = '\0';
+    // ASYNC START: create() is pure headless (no GL/raylib/ImGui) but
+    // SLOW over a real install world — the world-JSON parse, the world
+    // population, hundreds of flights, thousands of squadron parked
+    // aircraft. The old synchronous call froze the window for the
+    // whole build (the user reported "froze for a long time"); the
+    // worker keeps the UI alive and honest ("Starting session…") and
+    // adopt_session_start() lands the result on the main thread.
+    impl_->session_starting = true;
+    impl_->campaign_error[0] = '\0';
+    impl_->status_msg = "Starting campaign session — building the war "
+                        "(large installs take a while)…";
+    // packaged_task: the future comes from the task (BEFORE the thread
+    // launches — no get_future race), the thread moves the task in.
+    std::packaged_task<Impl::SessionStartResult()> task(
+        [opts = std::move(opts)]() mutable -> Impl::SessionStartResult {
+            Impl::SessionStartResult r;
+            r.session = f4::simulation::CampaignSession::create(
+                opts, &r.error);
+            return r;
+        });
+    impl_->session_start_future = task.get_future();
+    impl_->session_start_thread = std::thread(std::move(task));
+}
+
+bool ViewerApp::adopt_session_start() {
+    if (!impl_->session_starting) return false;
+    if (!impl_->session_start_future.valid()) return false;
+    if (impl_->session_start_future.wait_for(std::chrono::seconds(0)) !=
+        std::future_status::ready) {
+        return false;  // still building — the window shows the spinner text
+    }
+
+    // create() finished: join the worker, take the result, adopt.
+    if (impl_->session_start_thread.joinable()) {
+        impl_->session_start_thread.join();
+    }
+    auto r = impl_->session_start_future.get();
+    impl_->session_starting = false;
+
+    if (r.session) {
+        impl_->session = std::move(r.session);
         // A new session starts PAUSED — the user starts the clock
         // deliberately (the tasking cycle is a 30-minute commitment at
         // 1x; an accidentally-live loop is the worse default).
         impl_->session->set_paused(true);
         impl_->sel_kind = Impl::SelectionKind::None;
         impl_->sel_entity = f4::entities::EntityId{};
-        impl_->status_msg = "Campaign session started (paused) — " +
-                            opts.world_json.string();
-    } else {
-        std::snprintf(impl_->campaign_error,
-                      sizeof(impl_->campaign_error), "%s", err.c_str());
-        impl_->status_msg = "Campaign session failed to start";
+        impl_->status_msg = "Campaign session started (paused)";
+        return true;
     }
+    std::snprintf(impl_->campaign_error, sizeof(impl_->campaign_error),
+                  "%s", r.error.c_str());
+    impl_->status_msg = "Campaign session failed to start";
+    return false;
+}
+
+bool ViewerApp::request_campaign_session() {
+    if (impl_->session_starting) return false;
+    start_campaign_session();
+    return impl_->session_starting;
+}
+
+bool ViewerApp::campaign_session_starting() const noexcept {
+    return impl_->session_starting;
+}
+
+bool ViewerApp::campaign_session_live() const noexcept {
+    return impl_->session != nullptr;
 }
 
 void ViewerApp::stop_campaign_session() {
+    if (impl_->session_starting) {
+        // A start is still building: wait for it (the create is finite;
+        // blocking here is the honest, simple contract) and discard.
+        if (impl_->session_start_thread.joinable()) {
+            impl_->session_start_thread.join();
+        }
+        if (impl_->session_start_future.valid()) {
+            impl_->session_start_future.get();  // discard (dtor frees)
+        }
+        impl_->session_starting = false;
+        impl_->status_msg = "Campaign session start cancelled";
+        return;
+    }
     if (!impl_->session) return;
     impl_->session.reset();
     if (impl_->sel_kind == Impl::SelectionKind::LiveAircraft) {
@@ -208,6 +278,27 @@ void ViewerApp::draw_campaign_session_view() {
 
     // --- No session: the start row --------------------------------------
     if (!impl_->session) {
+        if (impl_->session_starting) {
+            // create() is running on the worker thread: keep the window
+            // alive + honest (the pre-async build froze the whole app
+            // here — "not responding" — for the entire session build).
+            ImGui::TextDisabled(
+                "Starting session — building the war\n"
+                "(world load, flight spawn, airbase wiring;\n"
+                "large installs take tens of seconds)…");
+            ImGui::Separator();
+            if (ImGui::Button("Cancel Start", ImVec2(160, 0))) {
+                stop_campaign_session();
+            }
+            if (impl_->campaign_error[0] != '\0') {
+                ImGui::PushStyleColor(ImGuiCol_Text,
+                                      ImVec4(0.9f, 0.4f, 0.4f, 1));
+                ImGui::TextWrapped("%s", impl_->campaign_error);
+                ImGui::PopStyleColor();
+            }
+            ImGui::End();
+            return;
+        }
         ImGui::TextUnformatted("Live campaign loop over this world:");
         ImGui::BulletText("C2 tasking draws the one pool, C3 routes bend "
                           "around threats, generated flights fly the sim "

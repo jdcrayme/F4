@@ -103,6 +103,7 @@ int main(int argc, char** argv) {
     std::string replay_path;
     bool have_replay = false;
     std::string select_name;              // --select <substring>
+    bool auto_session = false;            // --session: start the campaign loop
 
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
@@ -146,6 +147,12 @@ int main(int argc, char** argv) {
             have_replay = true;
         } else if (a == "--select" && i + 1 < argc) {
             select_name = argv[++i];
+        } else if (a == "--session") {
+            // Start the live campaign session over the loaded world
+            // right after the CLI loads settle (headless smoke tests:
+            // pair with --screenshot; the shot is held until the
+            // async create() lands).
+            auto_session = true;
         } else if (positional == 0) {
             try { app.load_world_json(a); }
             catch (const std::exception& e) { std::cerr << "world load: " << e.what() << "\n"; }
@@ -246,6 +253,19 @@ int main(int argc, char** argv) {
         if (!app.load_replay(replay_path, &err)) {
             std::cerr << "replay load failed: " << err << "\n";
             return 1;
+        }
+    }
+
+    // Apply --session: start the live campaign session over whatever
+    // world the CLI loaded (the Campaign window's Start Session button,
+    // programmatic). Runs AFTER the loads so the world JSON is in; the
+    // async create() then lands during run()'s first frames. Pair with
+    // --screenshot for headless validation (the shot is held while the
+    // start is in flight).
+    if (auto_session) {
+        if (!app.request_campaign_session()) {
+            std::cerr << "warning: --session could not start (no world "
+                         "loaded, or a start is already running)\n";
         }
     }
 

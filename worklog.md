@@ -4688,3 +4688,105 @@ Stage Summary:
   over the ATM pipeline (both sides generate, fly, fight, attrite,
   recover, adapt), the "core game functionality replicated"
   certificate.
+
+---
+Task ID: 18
+Agent: main (Super Z)
+Task: C4-FIX-2 — the user-reported "Start Session" freeze followed by
+an access violation in ClassTable::vis_type_for().
+
+Work Log:
+- Root cause 1 (the crash): Simulation::init_bubble_manager() loaded
+  FALCON4.CT into a STACK-LOCAL ClassTable and passed it to the
+  BubbleManager constructor — whose header contract says "ct must
+  outlive the manager". The local died at function return; the first
+  tick's update_bubble → deaggregate_ → spawn_vehicles_from_unit →
+  ClassTable::vis_type_for() read freed stack memory (a garbage
+  entries_ pointer/size). Every fixture/QC world deaggregates NOTHING
+  near the bubble center, which is why only the user's real campaign
+  (garrison battalions parked on the airbase the first flight spawns
+  at) crashed. The freeze made it worse: the user's queued Play
+  click/Space unpaused the session the moment create() returned,
+  driving tick #1 straight into the dangling reference.
+- Root cause 2 (audit find, same class): CampaignSession::create()
+  handed CampaignSimSpawner three LOCALS it holds by reference/pointer
+  for the session's lifetime — the fallback airfield (airfield_), the
+  per-airbase airfield map (set_airbase_airfields(&local)), and the
+  template aircraft (tpl_). They died at create() return; the first
+  synthetic spawn after a tasking cycle then read freed memory
+  (garbage parking thresholds, freed parking-spot vectors). The
+  session tests passed only because the freed heap wasn't reused in
+  the test's allocation pattern — the interactive app (ImGui/GL churn)
+  reuses it.
+- Root cause 3 (the freeze): CampaignSession::create() over a real
+  install world is tens of seconds (world-JSON parse ×2, world
+  population, 449 flights, thousands of squadron parked aircraft,
+  per-airbase ATC wiring) and ran synchronously inside the ImGui
+  button handler — the window went "not responding".
+- Fix 1: the ClassTable is now a Simulation MEMBER (class_table_),
+  loaded ONCE by load_class_table() in initialize() before every
+  consumer; spawn_from_campaign_flights / spawn_squadron_aircraft /
+  init_bubble_manager all read it (three duplicate per-path loads
+  gone). Public class_table() accessor so hosts share the table.
+- Fix 2: CampaignSession owns the lenders as members — airfield_ /
+  airbase_airfields_ / spawn_tpl_, declared BEFORE spawner_ so
+  reverse-order destruction keeps every borrower dying before its
+  lender; create() fills the members.
+- Fix 3: the viewer starts the session on a WORKER THREAD. Impl gains
+  session_starting / session_start_thread / session_start_future
+  (SessionStartResult = {session, error} rides the future's shared
+  state — the worker touches nothing of Impl's, so there are no data
+  races). start_campaign_session() launches a packaged_task; run()
+  polls adopt_session_start() every frame BEFORE anything reads
+  impl_->session; the Campaign window shows a live "Starting session…"
+  state with a Cancel button (stop_campaign_session joins + discards);
+  the run() exit path and ~ViewerApp join a still-running worker.
+- NEW --session CLI flag (request_campaign_session() public wrapper)
+  pairs with --screenshot for headless smoke coverage; the scheduled
+  screenshot is HELD while a start is in flight.
+- Tests: NEW test_simulation_lifetime.cpp (3 units) over a crafted
+  campaign-flights world (AIRBASE objective + squadron + flight + a
+  garrison battalion with vehicle_groups, against the real FALCON4.ct
+  + KoreaObj models): (a) the member-load contract, (b) THE
+  DETERMINISTIC CRASH REPRO — after initialize() returns, a 256 KB
+  stack-stomping recursion (the render-loop frames the dead ClassTable
+  frame lived under), then force_deaggregate must still resolve all 3
+  vehicles' vis types + model records; REINTRODUCING the old bug makes
+  this test FAIL (verified by temporary revert: 0 vehicles resolve,
+  the vis lookups read the stomped table), (c) the per-tick bubble
+  path: tick #1 deaggregates the co-located battalion; update() with
+  the player far away reaggregates it. +1 session unit
+  (SyntheticSpawnsParkAtFinitePositionsInsideTheTheater — every
+  materialized aircraft's transform finite and inside the theater).
+- Verification: full suite 2,246/2,246 (100%) including the GUI
+  library tests under Xvfb (:99); in-container smoke —
+  f4-world-viewer kunsan.world.json --session --screenshot under
+  Xvfb: clean run, screenshot held until the session landed, exit 0;
+  campaign_qc on TestCamp (--tasking 30 --minutes 20 --no-record):
+  449 flights, 94 intents, 70 packages + 24 escorts, 62 slot snaps,
+  34 synthetic, 140 bombs / 85 features / 29 objectives written back,
+  campaign_result.json byte-identical across two runs, exit 0. (The
+  4-hour tasking scale from C4's acceptance OOMs this 4 GB container
+  with the recorder on — --no-record runs the identical loop; the
+  recorder decimation is a container-memory note, not a regression.)
+- Touched files (11 + 1 new): simulation.hpp/cpp (member + load +
+  accessor), campaign_session.hpp/cpp (lender members),
+  viewer_state.hpp / viewer_app.hpp / viewer_app.cpp /
+  campaign_session_view.cpp (async start + join discipline + starting
+  UI), cli/main.cpp (--session), tests CMakeLists + the new
+  test_simulation_lifetime.cpp + test_campaign_session.cpp (+CHANGES /
+  CAMPAIGN_LOOP_PLAN / this log).
+
+Stage Summary:
+- Start Session is crash-free (both dangling-reference classes dead),
+  never blocks the UI (worker-thread create + live status), and the
+  whole flow has headless smoke coverage (--session + held
+  --screenshot).
+- The lifetime discipline is now explicit and tested: anything a
+  long-lived borrower references (BubbleManager's ct, the spawner's
+  airfield/map/template, the session's weapon table) is owned by the
+  object that outlives the borrower — the QC's "named local alive for
+  the whole run" pattern is no longer load-bearing for the session.
+- Next per the plan: C5 the 24-hour war — the long-horizon QC run
+  over the ATM pipeline, now on a Start Session that survives being
+  clicked.

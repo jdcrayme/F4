@@ -277,6 +277,19 @@ private:
     f4::campaign::MissionProfileTable profiles_;
     f4::weapons::WeaponClassTable weapon_table_;  // arming the spawns
 
+    // Spawner lenders (create() used to hand CampaignSimSpawner three
+    // LOCALS — the fallback airfield, the per-airbase airfield map, and
+    // the template aircraft — that died when create() returned, leaving
+    // the spawner's airfield_/airbase_airfields_/tpl_ dangling; the
+    // first synthetic spawn after a tasking cycle then read freed
+    // memory. The members replace them: the spawner's references stay
+    // valid for the session's lifetime (declared before spawner_, so
+    // they are destroyed after it — reverse-order destruction keeps
+    // every borrower dying before its lender).
+    f4::simulation::ScenarioAirfield airfield_{};
+    f4::simulation::AirbaseAirfieldMap airbase_airfields_{};
+    f4::simulation::ScenarioAircraft spawn_tpl_{};
+
     // The simulation (owns the ONE world + the bus everything uses).
     std::filesystem::path scenario_temp_dir_;
     std::unique_ptr<f4::simulation::Simulation> sim_;

@@ -223,6 +223,58 @@ TEST(CampaignSession, PauseStopsTheDrainAndFreshChangesNothing) {
     EXPECT_TRUE(fresh->ledger().empty());
 }
 
+// ── 4b. Lender ownership: the spawner's inputs outlive create() ────────────
+//
+// REGRESSION (the Start Session crash's second leg): create() used to
+// hand CampaignSimSpawner three LOCALS — the fallback airfield, the
+// per-airbase airfield map, and the template aircraft — that died when
+// create() returned. The spawner holds them by reference/pointer for
+// the session's lifetime; the first synthetic spawn after a tasking
+// cycle then read freed memory (garbage parking positions / freed
+// parking-spot vectors). The members airfield_ / airbase_airfields_ /
+// spawn_tpl_ replace them. This test drives the synthetic path far
+// enough to touch every lender and pins the observable: every
+// materialized aircraft parks at a FINITE position inside the theater.
+TEST(CampaignSession, SyntheticSpawnsParkAtFinitePositionsInsideTheater) {
+    if (!std::filesystem::exists(f16_config())) {
+        GTEST_SKIP() << "f16.json fixture not generated";
+    }
+    CampaignSessionOptions o = make_opts(kunsan_routed_world());
+    o.tasking_cycle_sec = 5;
+    o.max_flights = 8;
+
+    std::string err;
+    auto session = CampaignSession::create(o, &err);
+    ASSERT_NE(session, nullptr) << "create failed: " << err;
+    session->set_paused(false);
+    for (int frame = 0; frame < 20; ++frame) {
+        session->advance(1.0);
+    }
+
+    // The synthetic path actually fired (routes materialized into
+    // aircraft through the spawner's lenders).
+    ASSERT_GT(session->stats().synthetic_spawned, 0);
+
+    // Every rostered aircraft: finite position, inside the theater
+    // (the Korea scale — 3,358,720 ft per side — with generous slack;
+    // a dangling airfield reads garbage doubles, NaNs, or values far
+    // outside any theater).
+    constexpr double THEATER_FT = 3.4e6;
+    int checked = 0;
+    for (const auto eid : session->sim().aircraft_entities()) {
+        auto h = f4::entities::EntityHandle(eid, &session->sim().world());
+        const auto* tf = h.get<f4::entities::TransformComponent>();
+        ASSERT_NE(tf, nullptr);
+        EXPECT_TRUE(std::isfinite(tf->position.x)) << eid.value;
+        EXPECT_TRUE(std::isfinite(tf->position.y)) << eid.value;
+        EXPECT_TRUE(std::isfinite(tf->position.z)) << eid.value;
+        EXPECT_LT(std::abs(tf->position.x), THEATER_FT) << eid.value;
+        EXPECT_LT(std::abs(tf->position.y), THEATER_FT) << eid.value;
+        ++checked;
+    }
+    EXPECT_GT(checked, 0);
+}
+
 // ── 5. The ATM pipeline (C4) — packages with recovery, deterministically ────
 TEST(CampaignSession, AtmPipelineBuildsPackagesAndRecoversAircraft) {
     if (!std::filesystem::exists(f16_config())) {

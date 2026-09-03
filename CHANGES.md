@@ -1,5 +1,60 @@
 # F4 Cleanup Pass — Changes Summary
 
+## C4 — Start Session Crash + Freeze: Lender Lifetimes in the Session Wiring, Async Start (C4-FIX-2)
+
+**"Start Session" froze the viewer for a long time and then died with an
+access violation in `ClassTable::vis_type_for()`. Two lifetime bugs in
+the C4 session wiring and the synchronous create() were the whole
+story. (1) `Simulation::init_bubble_manager()` loaded FALCON4.CT into
+a STACK-LOCAL `ClassTable` and handed the BubbleManager — whose
+constructor contract is "ct must outlive the manager" — a reference to
+it. The local died at function return; the first tick's deagg
+(update_bubble → deaggregate_ → spawn_vehicles_from_unit →
+vis_type_for) read freed stack memory. Every QC/unit-test world
+deaggregates nothing near the bubble center, so only the user's real
+install campaign (garrison battalions parked ON the airbase the first
+flight spawns at) hit it. The ClassTable is now a Simulation MEMBER
+(`class_table_`), loaded once by `load_class_table()` in initialize()
+and shared by every borrower — the spawn paths lose their per-call
+re-loads (one table, three fewer file reads per session), and the
+BubbleManager finally holds a reference that lives as long as it does.
+(2) `CampaignSession::create()` handed CampaignSimSpawner three
+LOCALS — the fallback airfield, the per-airbase airfield map, and the
+template aircraft — that died when create() returned; the spawner
+holds them by reference/pointer for the session's lifetime, so the
+first synthetic spawn after a tasking cycle read freed memory (garbage
+parking positions, freed parking-spot vectors — invisible on the
+fixture worlds only because the freed heap wasn't reused there). The
+session now owns them as members (airfield_ / airbase_airfields_ /
+spawn_tpl_, declared before spawner_ so reverse-order destruction
+keeps every borrower dying before its lender). (3) The freeze itself:
+create() over a real install world is tens of seconds of work (world
+JSON parse + population + 449 flights + thousands of squadron parked
+aircraft), and it ran synchronously inside the ImGui button handler —
+the window went "not responding", the user clicked Play while frozen,
+and the queued keypress unpaused the session straight into the crash.
+create() is pure headless (no GL/raylib/ImGui), so it now runs on a
+worker thread (packaged_task → future); run() polls
+adopt_session_start() every frame, the Campaign window shows a live
+"Starting session…" state with a Cancel button, and the session lands
+paused exactly as before. The window never freezes again — and the new
+`--session` CLI flag (pair with `--screenshot`, which is HELD while a
+start is in flight) gives headless smoke coverage of the whole flow.
+Verified in-container under Xvfb: kunsan world + --session +
+--screenshot runs clean, exit 0. QC acceptance re-run on TestCamp
+(30-min tasking + 20-min INTSTRIKE, --no-record): 449 flights, 94
+intents, 70 packages + 24 escorts, 62 slot snaps, 140 bombs / 85
+features / 29 objectives, campaign_result.json byte-identical across
+two runs, exit 0. Suite: 2,246/2,246 (100%).**
+
+| Area | Change |
+|------|--------|
+| `f4-simulation` — Simulation | NEW member `class_table_` + `load_class_table()` (the ONE load, in initialize(), before every consumer) + public `class_table()` accessor (hosts share the table instead of re-loading the file). spawn_from_campaign_flights / spawn_squadron_aircraft / init_bubble_manager all read the member — the stack locals (one of which dangled inside the BubbleManager) are gone, and the per-path duplicate loads go with them. Empty path → empty member, preserving the documented graceful degradation. |
+| `f4-simulation` — CampaignSession | The spawner's lenders are members: `airfield_` (the fallback airfield), `airbase_airfields_` (the per-airbase map, now `&member` not `&local`), `spawn_tpl_` (the template aircraft). Declaration order keeps them alive past spawner_'s destruction. create() fills the members instead of locals — the wiring is otherwise byte-for-byte the QC's. |
+| `f4-world-viewer` — async start | Impl gains `session_starting` / `session_start_thread` / `session_start_future` (+ `SessionStartResult` — the future carries both the session and the error; the worker touches nothing of Impl's, the future's shared state is the single rendezvous). start_campaign_session() launches a packaged_task; run() calls adopt_session_start() each frame BEFORE anything reads impl_->session (Space toggle, advance block, canvas live layer, the window); the window's start row becomes a live "Starting session…" state with Cancel (stop_campaign_session joins + discards); the run() exit path and ~ViewerApp join a still-running worker (a joinable std::thread dtor would terminate()). The scheduled screenshot is HELD while a start is in flight so `--session --screenshot` always captures the adopted state. |
+| `f4-world-viewer` — CLI | NEW `--session` flag: start the live campaign session over the loaded world right after the CLI loads settle (request_campaign_session() is the public wrapper the Campaign window's button also goes through). |
+| tests | +4 (2,242 → 2,246, 100%): NEW test_simulation_lifetime.cpp (3 units — the member-load contract; the deterministic crash repro: after initialize() returns, a 256 KB stack-stomping recursion corrupts the dead frame exactly the way the user's render loop did, then force_deaggregate() must still resolve all 3 vehicles' vis types + models — reintroducing the old stack-local bug makes this test FAIL, verified; the per-tick bubble path: tick() deaggregates the co-located battalion on tick #1 and reaggregates when the player moves away — a crafted campaign-flights world JSON with an AIRBASE objective, a squadron, a flight, and a garrison battalion carrying vehicle_groups, run against the real FALCON4.ct + KoreaObj models) + 1 session unit (SyntheticSpawnsParkAtFinitePositionsInsideTheater: advance past tasking cycles, every materialized aircraft's transform is finite and inside the theater — the dangling-airfield observable). |
+
 ## C4 — The ATM Pipeline: 7-Phase Tasking, FindBestAir, Escort Pairing, TOT Slots, Mission Recovery (C4-ATM-1)
 
 **The tasking ladder is now FreeFalcon's actual Air Tasking Manager

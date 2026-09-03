@@ -80,8 +80,10 @@
 #include <cstdint>
 #include <filesystem>
 #include <functional>
+#include <future>
 #include <optional>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
@@ -333,6 +335,26 @@ struct ViewerApp::Impl {
     // campaign_session_view.cpp); destroyed by Stop (a reset is just a
     // new session).
     std::unique_ptr<f4::simulation::CampaignSession> session;
+
+    // V-CAMP async start: CampaignSession::create() over a real install
+    // world is SLOW (world-JSON parse + world population + hundreds of
+    // flights + thousands of squadron parked aircraft — tens of seconds
+    // on the big saves). Running it synchronously inside the ImGui
+    // button handler froze the whole window ("not responding") for the
+    // whole build; the user clicked Play while frozen, the queued Space
+    // unpaused the session, and the first tick crashed (the dangling
+    // class table the same tranche fixed). create() is pure headless —
+    // no GL, no raylib, no ImGui — so it runs on a worker thread; the
+    // result rides a future (its shared state is the one rendezvous —
+    // no other data races: the worker touches nothing of Impl's).
+    // run() polls adopt_session_start() every frame.
+    struct SessionStartResult {
+        std::unique_ptr<f4::simulation::CampaignSession> session;
+        std::string error;
+    };
+    bool session_starting = false;
+    std::thread session_start_thread;
+    std::future<SessionStartResult> session_start_future;
     /// Speed preset index into kCampaignSpeeds (campaign_session_view).
     /// 0 = paused-via-zero is NOT used — pause is session->set_paused;
     /// the presets scale the WALL-CLOCK dt fed to advance(), never the

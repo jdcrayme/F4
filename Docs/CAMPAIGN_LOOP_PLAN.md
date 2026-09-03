@@ -396,7 +396,13 @@ certificate.
 ## 8. Implementation order (C4 onward)
 
 1. ~~C4 ATM phases + FindBestAir (replacing the C3 role-fallback
-   bridge)~~ — LANDED.
+   bridge)~~ — LANDED (plus C4-FIX-2: the Start Session crash/freeze
+   tranche — the ClassTable hoisted into a Simulation member the
+   BubbleManager can actually outlive, the session owning the spawner's
+   airfield/map/template lenders, and create() moved to a worker
+   thread so the viewer's Start Session never freezes; the session
+   panel shows a live "Starting session…" state and `--session` gives
+   headless smoke coverage).
 2. C5 the long run (the 24-hour war, now over the ATM pipeline).
 
 ---
