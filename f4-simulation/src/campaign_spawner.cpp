@@ -8,8 +8,6 @@
 #include <f4/entities/entity.hpp>
 #include <f4/ai/brain_component.hpp>
 
-#include <cstdio>
-
 namespace f4::simulation {
 
 CampaignSimSpawner::CampaignSimSpawner(
@@ -118,12 +116,11 @@ void CampaignSimSpawner::handle(const f4::campaign::MissionIntent& intent) {
         return;
     }
     {
-        f4::entities::EntityHandle dbg(it->second, &world_);
-        const auto* dbg_fp = dbg.get<f4::entities::FlightPlanComponent>();
-        if (!dbg_fp) {
-            std::fprintf(stderr, "[dbg] intent flight_id=%u resolved to a "
-                         "non-flight entity\n", intent.flight_id);
-        }
+        // The map resolved an entity that is not a Flight (corrupt map /
+        // stale world). Fall through to the shared spawn path, which
+        // returns nullopt for non-flight entities and books it as an
+        // unknown_flight_id — counted, not printed: the QC stats carry
+        // this failure class, stderr noise would just double-report it.
     }
 
     // Duplicate guard: one aircraft per flight, no matter how often the

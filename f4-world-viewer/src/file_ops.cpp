@@ -70,6 +70,15 @@ void ViewerApp::load_world_json(const std::filesystem::path& path) {
     f4::world::WorldState ws;
     ws.load(path);
 
+    // V-CAMP: a live campaign session is bound to the world it was
+    // created over (its WorldState, its sim world). Loading a different
+    // world under a running session would leave it flying stale data —
+    // stop it here (the user can start a fresh session over the new
+    // world from the Campaign menu).
+    if (impl_->session) {
+        stop_campaign_session();
+    }
+
     // Extract metadata before populating (we need these even if pop fails).
     impl_->theater_name = ws.theater;
     impl_->world_version = ws.version;

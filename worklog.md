@@ -4316,3 +4316,153 @@ Stage Summary:
   coverage (data, not code).
 - Next per the plan: C4 (ATM 7-phase pipeline + FindBestAir replacing
   the role-fallback bridge), then C5 the 24-hour war.
+
+---
+Task ID: 15
+Agent: main (Super Z)
+Task: V-CAMP — the live campaign session in the world viewer (user:
+"Should we add more controls in the world viewer for this campaign
+logic? (Campaign time controls, panels for inspecting flight plans and
+waypoints, etc.) Or are we not yet at that point yet? Proceed as
+recommended."). Session resumed against the user's pushed C3
+(0f42994 "Updates to campaign logic" — content-identical to the local
+tranche; local reset onto origin/main).
+
+Work Log:
+- The recommendation the question asked for: YES, we are at that
+  point — deliberately BEFORE C4/C5. C3 closed generation→route→spawn,
+  and C4 (packages, TOT slotting) + C5 (the 24-hour war) are exactly
+  the tranches that need eyes: debugging a multi-cycle war from text
+  summaries is the failure mode the ATO view was built to avoid. The
+  viewer is also the designated QC surface (the plan doc says the
+  campaign's artifacts are "what the world viewer renders"). Scope
+  discipline: a live SESSION (composition of proven wiring), not new
+  campaign logic.
+- The architectural finding that shaped the tranche: campaign_qc
+  materializes the ladder's synthetic flights into a SIDE EntityWorld
+  (b3_world) that nothing ever ticks — the QC's "8 synthetic aircraft
+  flown" is the loop counting, not physics (verified: sim_run carries
+  only the 49 saved flights; b3_loop's 57 = 49 saved + 8 synthetic in
+  the unticked world). The session closes this properly: the spawner
+  feeds the SIMULATION's world and every late spawn joins the tick
+  roster through a new public API — the one-world closure.
+- f4-simulation: Simulation::register_aircraft(EntityId) — the roster
+  is what the tick loop's ground-elevation pre-pass, combat-intents
+  active set, FM → Transform sync, and recorder all walk; update_all
+  alone ticks a late-comer's brain + FM while its transform parks
+  forever ("materialized but not flying"). Idempotent, validates FM
+  presence, rejects unknown ids. Pinned by test_register_aircraft:
+  a registered late-comer's transform follows its FM within 1 ft
+  while an unregistered twin's stays at spawn — the gap demonstrated
+  as the control, the fix as the assertion.
+- CampaignSession (f4-simulation, campaign_session.hpp/.cpp — PUBLIC
+  header; the composition is library-reusable, the UI is the viewer's
+  thin shell): create() builds the whole graph the QC's main() builds
+  (WorldState + adapters + C1 ledger + C2 ladder + C3 route builder +
+  spawner + sink + Simulation), but on the SIM's OWN bus and into the
+  SIM's OWN world, with unit/objective id maps rebuilt from the sim's
+  population (populate_world's return value never escapes
+  spawn_from_campaign_flights — the scan uses the bridge/sink's own
+  "vu_id_num" PropertyBag rule). advance(real_dt) drains a
+  fixed-timestep accumulator in whole sim_dt ticks; the ladder + the
+  damage sync advance in whole CAMPAIGN seconds accumulated from the
+  same ticks (one clock; one big tick == N small ones is already
+  pinned by the C2 tests, so per-second ladder ticks are exactly the
+  QC's single advance, split). Spiral-of-death guard: 240 ticks per
+  advance, debt dropped, surfaced to the UI as "time dilated".
+  Destruction order detached explicitly (sink, spawner) before the
+  bus owner (the sim) dies.
+- Session start degradation the QC refuses: a world with no Flight
+  units falls back to the scenario-list template + a synthetic
+  airfield (the QC hard-fails both). The kunsan fixture (no flights,
+  no airbase) runs a session this way — the test for the degraded
+  path IS the fixture the sim tests already ship.
+- The session tests found a real interaction: with the role FALLBACK
+  armed, the counter-air family (mission bytes 1-11) generates via
+  fallback and drains the kunsan wing's 24-aircraft pool BEFORE the
+  delivery family (byte 12+) is ever reached — routed intents
+  starve. Deep pools (TestCamp: 94 squadrons) feed both families;
+  a single-wing fixture cannot. Fix: the routed-session fixture
+  (kunsan_session.world.json — kunsan + the USA squadron → ARO_S at
+  airbase 2659, the exact patch test_campaign_tick applies in-memory)
+  with the STRICT role gate; the fallback stays the default for real
+  saves (and the viewer), where it is correct. The interaction is
+  documented in the test and the session options.
+- f4-simulation/tests/test_campaign_session.cpp (4): creation over
+  raw kunsan (the war: USA 1, ROK 2, DPRK 6; threat viewer = 1), the
+  full advance loop over the routed fixture (cycles fire, intents
+  generate, routes build, spawner materializes + registers, every
+  spawned aircraft transform-synced to its FM, ledger books the
+  draws), byte-identical determinism across two sessions (summary +
+  ledger JSON), pause + the fresh-session golden identity. CMake:
+  fixtures + F4_MISSION_PROFILES_JSON + mission_profiles_fixture
+  dependency wired.
+- THE ENVIRONMENT WALL, worked around honestly: this container has
+  X11 + Xvfb but NO libxrandr-dev (glfw hard-requires it) — the GUI
+  targets were OFF in the build cache for every prior session too
+  (the "suite 2122" runs never compiled the viewer; the user compiles
+  + tests it on their machine, as "the patch has been pushed and
+  tested" confirms). Consequence: the session CORE moved to
+  f4-simulation (buildable + testable headless — the right home
+  anyway: it is engine-agnostic orchestration), and the viewer UI
+  files were verified by SYNTAX-ONLY compilation against the exact
+  upstream deps (raylib 5.0, imgui v1.91.5, rlImGui — fetched to /tmp
+  for the check): all seven touched viewer files compile clean under
+  -Wall with zero warnings in viewer-authored code. The viewer files
+  remain user-verified on Windows like every prior viewer tranche.
+- The viewer UI (f4-world-viewer): campaign_session_view.cpp (new) —
+  the Campaign Session window (start row with team filter + saved-
+  flight cap; Start/Stop/Reset; play/pause + 1x/10x/60x/240x presets
+  scaling WALL-CLOCK dt only; campaign clock D# HH:MM:SS at the
+  save's epoch + the ladder clock; war status; generated-missions
+  table with click-to-select-and-pan targets; Write Result JSON +
+  Write Back). A Campaign menu (Start/Play/Pause/Reset/Stop/Write).
+  Space toggles the clock. Sessions start PAUSED. canvas.cpp — the
+  live layer (fighter glyphs in owner colors at the synced
+  transforms, grounded dimmed, MissionPlan route polylines with
+  numbered waypoints), the threat-map overlay (enemy AD density per
+  cell, alpha by density), live picking FIRST (10-px radius — moving
+  targets). inspector_panel.cpp — the LiveAircraft branch (identity
+  from the C1 origin stamp, phase, kinematics, the live flight-plan
+  table). viewer_app.cpp — the per-frame advance (speed-scaled
+  wall-clock dt, fixed tick), the Space keybind, and load_world_json
+  stops a session whose world went away. Root CMake: f4-world-viewer
+  moved AFTER f4-campaign + f4-simulation (it now links f4-simulation
+  and reads the profiles cache var at configure time — the same
+  ordering rule the C2 tranche set for campaign/simulation).
+- The temp-file lesson from the QC, respected: the session's scenario
+  JSON carries ABSOLUTE paths (the QC's relative world_json_path
+  resolves against the scenario's dir — the exact trap that bit the
+  first QC run attempt this session).
+- Regression: campaign_qc over TestCamp byte-matches the pre-change
+  output on a 60-min tasking + 2-min run (156 intents, 32 routes,
+  3 synthetic, 49 sim aircraft) AND the full C3 acceptance command
+  (4 h tasking + 20-min INTSTRIKE): 8 cycles, 411 intents, 1,013
+  drawn, 81 routes / 383 wps / 22 searches, 8 synthetic flown
+  alongside 49 saved (57), 88 bombs / 66 features / 20 objectives
+  written back, exit 0 — all gates green.
+- Suite 2122 → 2128 (+6: 2 register_aircraft + 4 campaign_session),
+  100%, zero warnings. The stray C3 debug fprintf in the spawner
+  (stderr noise duplicating stats.unknown_flight_ids) removed with
+  its cstdio include.
+- Docs: CHANGES V-CAMP entry, README (f4-simulation + viewer
+  sections), CAMPAIGN_LOOP_PLAN §5 (the viewer tranche now exists —
+  C4/C5 develop with eyes), this log.
+
+Stage Summary:
+- The viewer runs the war: time controls, live flights (saved +
+  generated, one world, transform-synced), routes + threat map on the
+  canvas, live flight-plan inspection — the C4/C5 development surface.
+- The one-world closure is the tranche's structural gift to every
+  future host: register_aircraft + the spawner-in-the-sim-world mean
+  "materialized" now means FLYING, not counted.
+- Deliberately deferred (documented): package/TOT panels (C4 — the
+  C4 package composition changes what the table should show), the
+  session trace recording + viewer replay of a session run (the
+  recorder wiring exists; the trace JSON integration is a tranche of
+  its own), 3D live rendering, the .cam save-side re-encoder for the
+  write-back, speed presets beyond 240x (the headless 24-hour war is
+  campaign_qc's C5 job, not the viewer's).
+- Next per the plan: C4 (ATM 7-phase pipeline + FindBestAir replacing
+  the role-fallback bridge), then C5 the 24-hour war — both now
+  developed against a viewer that can watch them.

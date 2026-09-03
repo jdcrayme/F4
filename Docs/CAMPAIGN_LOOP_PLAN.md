@@ -1,8 +1,9 @@
 # Campaign Loop — Closing the War (Phase C)
 
 > **Status**: Active plan. **C1 (the result ledger + sink + write-back),
-> C2 (one pool — draws, netting, reinforcement), and C3 (threat map +
-> A* + route builder, generation-to-spawn) are LANDED** — the
+> C2 (one pool — draws, netting, reinforcement), C3 (threat map +
+> A* + route builder, generation-to-spawn), and V-CAMP (the live
+> campaign session — the viewer runs the war) are LANDED** — the
 > rest of this document is the roadmap they opened.
 > **Prerequisite**: B.3 landed (campaign→sim loop: intents → spawner →
 > aircraft fly saved routes; `campaign_qc` gates the loop end to end).
@@ -231,6 +232,26 @@ cam2json TestCamp.cam TestCamp.world.json --theater korea \
 ```
 
 ## 5. The rest of the loop (C4–C5)
+
+### V-CAMP — the viewer runs the war (LANDED, the C4/C5 development surface)
+C4/C5 need eyes: packages forming, routes bending, the 24-hour war
+adapting. `CampaignSession` (f4-simulation — engine-agnostic
+orchestration, composition only) repackages the QC wiring as ONE
+frame-driven object with the ONE-WORLD closure the QC never had: the
+spawner materializes generated missions into the SIMULATION's world
+and registers them through the new
+`Simulation::register_aircraft()` — update_all alone ticks a
+late-comer's FM while its transform parks forever; the roster is what
+the sync loop walks. One clock: fixed sim_dt ticks, the ladder and
+the damage sync in whole campaign seconds off the same ticks. The
+world viewer drives it (Campaign menu / Session window): play/pause
+(Space), 1x–240x presets (wall-clock scaling — the tick dt never
+changes), the campaign clock at the save's epoch, the war-status
+block, a generated-missions table, live aircraft + routes + the
+threat-map overlay on the canvas, and live flight-plan inspection.
+Deterministic by construction (byte-identical ledgers pinned by
+test). The 24-hour RUN remains a headless harness (C5); the viewer is
+where it gets WATCHED.
 
 ### C4 — the ATM pipeline (M4.2) + squadron selection (M4.6)
 The 7 composable tasking phases with budget awareness, package

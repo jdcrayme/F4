@@ -1,5 +1,48 @@
 # F4 Cleanup Pass — Changes Summary
 
+## V-CAMP — The Live Campaign Session: Time Controls, Flying Flights, Route Inspection in the World Viewer (VCAMP-1)
+
+**The world viewer can now RUN the war, not just display its save.
+CampaignSession (f4-simulation) is the campaign_qc wiring repackaged
+as one frame-driven object: WorldState → adapters → C1 ledger + C2
+one-pool ladder + C3 route builder, all publishing onto the
+SIMULATION's own bus, with the spawner materializing generated
+missions INTO the sim's world and registering them through the new
+Simulation::register_aircraft() — the one-world closure the QC never
+had (its synthetic flights spawned into a side EntityWorld nothing
+ticks: "materialized" there means counted, here it means FLYING).
+The session advances ONE clock in fixed sim_dt ticks (the FM's tuned
+discretization — the scenario player's "Fix Your Timestep" contract);
+the ladder and the damage sync ride whole campaign seconds accumulated
+from the same ticks. The viewer wraps it with the controls this
+tranche exists for: play/pause (Space), 1x/10x/60x/240x speed presets
+(wall-clock scaling — the tick dt never changes), the campaign clock
+as D# HH:MM:SS, a war-status block (cycles, missions, routes,
+draws/losses/reinforcements, live/airborne counts), a generated-
+missions table (click a target to select + pan), a canvas live layer
+(live aircraft symbols in owner colors, their MissionPlan routes as
+polylines with numbered waypoints), a threat-map overlay (the C3 SAM
+rings, painted), live-aircraft picking, and a live flight-plan
+inspector (waypoints, actions, kinematics, phase). The saved-flight
+spawn filter caps the sim at interactive budgets (default 48 of
+TestCamp's 449). Deterministic by construction — two sessions over
+the same world advanced identically produce byte-identical ledger
+JSON (pinned by test). Suite 2122 → 2128 (+6, 100%, zero warnings);
+the campaign_qc E2E reproduces the C3 acceptance exactly (4 h tasking
++ 20 min INTSTRIKE: 8 cycles, 411 intents, 1,013 drawn, 81 routes /
+383 wps, 8 synthetic flown, 88 bombs, 20 objectives back, exit 0).**
+
+| Area | Change |
+|------|--------|
+| `f4-simulation` — the roster API | `Simulation::register_aircraft(EntityId)`: hosts spawning into `sim.world()` after `initialize()` (the campaign-spawner path) join the tick loop's roster — ground-elevation pre-pass, combat-intents roster, FM → Transform sync, recorder. Without it update_all still ticks a late-comer's brain + FM while its transform parks forever: the "materialized but not flying" gap, closed for every host. Idempotent; rejects unknown/non-FM entities. Pinned by test_register_aircraft (registered twin syncs, unregistered twin demonstrably doesn't). |
+| `f4-simulation` — CampaignSession | campaign_session.hpp/.cpp: the full Phase-C loop as ONE headless, frame-driven object (create/advance/set_paused/ledger_json/apply_writeback + Stats snapshot per advance). Composition only — no new campaign or sim logic; f4-campaign still never sees EntityWorld. One world (the sim's), one clock (fixed sim_dt ticks; ladder + damage sync in whole campaign seconds), spiral-of-death guard (tick cap 240/advance, debt dropped, surfaced as "time dilated"). Options mirror campaign_qc (cycle 1800 s, reinforcement 12 h armed, role fallback ON, MinAvoidThreat 25) with interactive differences documented (saved-flight cap 48, flight-less worlds degrade to the template + synthetic airfield instead of the QC's hard fail). |
+| `f4-simulation` — session tests | test_campaign_session.cpp (4): creation over the raw kunsan fixture (the degraded path — no flights, no airbase), the full advance loop over kunsan_session.world.json (the new committed fixture: kunsan + the USA squadron → ARO_S at airbase 2659, the same patch test_campaign_tick applies in-memory) asserting generation → routes → spawn → REGISTRATION (every spawned aircraft transform-synced to its FM) → ledger draws; byte-identical determinism across two sessions; pause + the fresh-session C1 golden identity. |
+| `f4-simulation` — cleanup | campaign_spawner.cpp: the last surviving C3 debug fprintf ("[dbg] intent flight_id=… resolved to a non-flight entity") removed — the failure class already books into stats.unknown_flight_ids, stderr noise only double-reported it. |
+| `f4-world-viewer` — session UI | campaign_session_view.cpp (new): the "Campaign Session" window — start row (team filter + saved-flight cap), Start/Stop/Reset, play/pause + speed presets, campaign clock, war status, generated-missions table (click target → select + pan), Write Result JSON (campaign_result.json, the QC artifact, byte-stable) + Write Back (apply_to the session's WorldState). A "Campaign" menu mirrors the quick paths. A session starts PAUSED (a 30-minute tasking cycle at 1x is a commitment — accidentally-live is the worse default); Space toggles. |
+| `f4-world-viewer` — the live canvas layer | canvas.cpp: live aircraft drawn at their TransformComponents (grid = ENU ft / 1024, the static layer's own convention) as fighter glyphs in owner colors (CampaignOriginComponent::team_slot, the same palette), airborne full-strength / grounded dimmed, each with its MissionPlan route polyline + numbered waypoints (the C3 evidence, visible); a threat-map overlay toggle paints enemy AD density per cell (alpha by density, the SAM-ring picture routes bend around); live picking prioritized above static entities (moving targets get a 10-px radius). |
+| `f4-world-viewer` — the live inspector | inspector_panel.cpp: a LiveAircraft selection branch — callsign (the C1 origin stamp), team, squadron VU, brain phase, position/velocity/altitude, airborne state, and the flight plan table (idx / grid / alt / action from the MissionPlan — the route the aircraft is actually flying). Selection kinds gained LiveAircraft (the id lives in the SESSION's world — a separate id space, the kind discriminates). |
+| `f4-world-viewer` — lifecycle | Loading a different world stops a running session (it is bound to the world it was created over); stopping clears live selections. Viewer build requires the campaign fixtures at configure time → root CMake moves f4-world-viewer AFTER f4-campaign + f4-simulation (the same ordering rule that put f4-campaign before f4-simulation). |
+
 ## C3 — Threat Map, A*, Route Builder: Generated Missions Fly Their Own Routes (C3-ROUTES-1)
 
 **Generation-to-spawn is closed. The campaign now BUILDS the routes it

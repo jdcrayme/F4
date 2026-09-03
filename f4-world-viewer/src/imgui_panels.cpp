@@ -171,10 +171,64 @@ void ViewerApp::draw_imgui() {
             ImGui::Checkbox("Mission→Target links",  &impl_->show_mission_links);
             ImGui::Checkbox("Package→Element links", &impl_->show_package_links);
             ImGui::Checkbox("Bullseye",               &impl_->show_bullseye);
+            ImGui::Separator();
+            ImGui::TextDisabled("Live session (V-CAMP)");
+            ImGui::Checkbox("Campaign Session window", &impl_->show_campaign_window);
+            ImGui::Checkbox("Live aircraft layer",     &impl_->show_live_layer);
+            ImGui::Checkbox("Live routes",             &impl_->show_live_routes);
+            ImGui::Checkbox("Threat map overlay",      &impl_->show_threat_overlay);
             // POLISH-2.4: minimap toggle in View menu.
             ImGui::Checkbox("Minimap", &impl_->show_minimap);
             ImGui::Separator();
             if (ImGui::MenuItem("Fit to World")) impl_->fit_to_world();
+            ImGui::EndMenu();
+        }
+        if (ImGui::BeginMenu("Campaign")) {
+            // V-CAMP: the live campaign loop menu — Start/Stop/Reset
+            // mirror the Campaign Session window's own controls (the
+            // window carries the full filter + speed UI; this is the
+            // quick path).
+            if (!impl_->session) {
+                if (ImGui::MenuItem("Start Session...", nullptr, false,
+                                    impl_->world_loaded)) {
+                    start_campaign_session();
+                    if (impl_->session) impl_->show_campaign_window = true;
+                }
+                if (!impl_->world_loaded) {
+                    ImGui::TextDisabled("(no world loaded)");
+                }
+            } else {
+                if (ImGui::MenuItem(impl_->session->paused()
+                                        ? "Play (Space)"
+                                        : "Pause (Space)")) {
+                    impl_->session->set_paused(
+                        !impl_->session->paused());
+                }
+                if (ImGui::MenuItem("Reset Session")) {
+                    stop_campaign_session();
+                    start_campaign_session();
+                }
+                if (ImGui::MenuItem("Stop Session")) {
+                    stop_campaign_session();
+                }
+                ImGui::Separator();
+                if (ImGui::MenuItem("Write Result JSON")) {
+                    const auto out =
+                        impl_->last_world_json_path.parent_path() /
+                        "campaign_result.json";
+                    FILE* f = std::fopen(out.string().c_str(), "wb");
+                    if (f) {
+                        const std::string json =
+                            impl_->session->ledger_json();
+                        std::fwrite(json.data(), 1, json.size(), f);
+                        std::fclose(f);
+                        impl_->status_msg = "Wrote " + out.string();
+                    } else {
+                        impl_->status_msg =
+                            "Cannot write " + out.string();
+                    }
+                }
+            }
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("Tools")) {
@@ -659,6 +713,10 @@ void ViewerApp::draw_imgui() {
     // mission/team filters with the canvas overlays. See
     // campaign_qc_view.cpp.
     draw_campaign_qc_view();
+
+    // V-CAMP: the live campaign session window (draw last — the
+    // generated-missions table reads the same tick run() just drained).
+    draw_campaign_session_view();
 
     rlImGuiEnd();
 }

@@ -38,6 +38,7 @@ add_library(f4-simulation STATIC
     src/campaign_bridge.cpp
     src/campaign_spawner.cpp
     src/campaign_result_sink.cpp
+    src/campaign_session.cpp
     src/combat_bridge.cpp
     src/combat_transcript.cpp
     src/bubble_manager.cpp

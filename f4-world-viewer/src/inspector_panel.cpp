@@ -24,9 +24,13 @@
 #include <f4/world_convert/class_table.hpp>      // unit_subtype_name(), DOMAIN_*
 #include <f4/world_convert/objective_decoder.hpp> // objective_type_name()
 #include <f4/world_convert/theater_data.hpp>     // point_type_name(), point_list_type_name()
+#include <f4/ai/brain_component.hpp>              // V-CAMP: live MissionPlan
+#include <f4/flight/flight_model_component.hpp>  // V-CAMP: live kinematics
+#include <f4/simulation/campaign_origin.hpp>     // V-CAMP: live identity
 
 #include <imgui.h>
 
+#include <cmath>
 #include <cstdio>
 #include <string>
 
@@ -706,6 +710,82 @@ void ViewerApp::draw_inspector() {
                         }
                     }
                 }
+                }
+            } else if (impl_->sel_kind ==
+                           Impl::SelectionKind::LiveAircraft &&
+                       impl_->session) {
+                // V-CAMP: a LIVE aircraft — an entity in the SESSION's
+                // world (not the static eworld). Identity from the
+                // campaign origin (the C1 stamp), kinematics from the
+                // flight model, and the plan from the digi brain's
+                // MissionPlan (the route the C3 builder laid, or the
+                // save's own waypoints for the flights that flew them).
+                auto h = impl_->session_handle(impl_->sel_entity);
+                auto* tf = h.get<f4::entities::TransformComponent>();
+                auto* fm = h.get<f4::flight::FlightModelComponent>();
+                auto* brain = h.get<f4::ai::BrainComponent>();
+                auto* org = h.get<f4::simulation::CampaignOriginComponent>();
+                if (!tf || !fm) {
+                    ImGui::TextDisabled("Invalid live entity (session "
+                                        "stopped?)");
+                } else {
+                    ImGui::Text("Live Aircraft");
+                    ImGui::Separator();
+                    if (org) {
+                        ImGui::Text("Callsign:  CS%03u-%u",
+                                    static_cast<unsigned>(org->callsign_id),
+                                    static_cast<unsigned>(org->callsign_num));
+                        ImGui::Text("Team:      %d (%s)", org->team_slot,
+                                    impl_->team_name_for_slot(
+                                        org->team_slot));
+                        ImGui::Text("Squadron:  VU #%u",
+                                    static_cast<unsigned>(org->squadron_vu));
+                    } else {
+                        ImGui::TextDisabled("(no campaign origin — scenario "
+                                            "aircraft)");
+                    }
+                    if (brain) {
+                        ImGui::Text("Phase:     %s", brain->phase_name());
+                    }
+                    const float gx = Impl::grid_x(tf), gy = Impl::grid_y(tf);
+                    ImGui::Text("Position:  (%.0f, %.0f) grid  %.0f ft MSL",
+                                gx, gy, tf->position.z);
+                    const auto& kin = fm->model().state().kin;
+                    const double vt =
+                        std::sqrt(static_cast<double>(kin.xdot) * kin.xdot +
+                                  static_cast<double>(kin.ydot) * kin.ydot);
+                    ImGui::Text("Velocity:  %.0f ft/s (%.0f kts)  alt %.0f ft",
+                                vt, vt * 0.592483801, tf->position.z);
+                    ImGui::Text("Airborne:  %s",
+                                fm->model().state().gear.inAir ? "yes" : "no");
+                    // The live plan: the route the brain is flying.
+                    if (brain && !brain->mission_plan().route.empty()) {
+                        ImGui::Separator();
+                        if (ImGui::TreeNode(
+                                "Flight plan",
+                                "Flight plan (%d wps)",
+                                static_cast<int>(
+                                    brain->mission_plan().route.size()))) {
+                            ImGui::Text("idx  x    y    alt     action");
+                            int wi = 0;
+                            for (const auto& w :
+                                 brain->mission_plan().route) {
+                                char action_buf[40];
+                                std::snprintf(action_buf, sizeof(action_buf),
+                                              "%u (%s)",
+                                              static_cast<unsigned>(w.action),
+                                              f4::viewer::wp_action_name(
+                                                  w.action));
+                                ImGui::Text("%-4d %-4.0f %-4.0f %-7.0f %-19s",
+                                            wi++,
+                                            w.position.x / 1024.0,
+                                            w.position.y / 1024.0,
+                                            w.position.z,
+                                            action_buf);
+                            }
+                            ImGui::TreePop();
+                        }
+                    }
                 }
             }
         // (No ImGui::End() here — caller owns the window.)

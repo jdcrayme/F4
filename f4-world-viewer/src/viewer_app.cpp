@@ -29,6 +29,7 @@
 #include <raylib.h>
 #include <imgui.h>
 
+#include <algorithm>
 #include <memory>
 #include <string>
 
@@ -171,6 +172,30 @@ void ViewerApp::run() {
                 impl_->sel_kind = Impl::SelectionKind::None;
                 impl_->sel_entity = f4::entities::EntityId{};
             }
+        }
+
+        // V-CAMP: Space toggles the live campaign session's clock (the
+        // Campaign window's own button mirrors it). Only when a session
+        // runs; the scenario player's Space is a different app.
+        if (IsKeyPressed(KEY_SPACE) && !ImGui::GetIO().WantCaptureKeyboard &&
+            impl_->session) {
+            impl_->session->set_paused(!impl_->session->paused());
+        }
+
+        // V-CAMP: advance the live campaign session. The speed preset
+        // scales WALL-CLOCK time; the session drains its accumulator in
+        // whole fixed sim_dt ticks (the FM's tuned discretization holds
+        // at every speed), advancing the campaign ladder in whole
+        // campaign seconds off the same ticks — one clock. The cap
+        // drops un-payable debt (spiral-of-death guard) and is
+        // surfaced as "time dilated" in the window.
+        if (impl_->session && !impl_->session->paused()) {
+            const int idx = std::clamp(impl_->campaign_speed_index, 0,
+                                       static_cast<int>(
+                                           sizeof(kSessionSpeedTable) /
+                                           sizeof(kSessionSpeedTable[0])) - 1);
+            impl_->campaign_time_dilated = impl_->session->advance(
+                GetFrameTime() * kSessionSpeedTable[idx]);
         }
 
         BeginDrawing();

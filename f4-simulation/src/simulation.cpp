@@ -246,6 +246,25 @@ void Simulation::spawn_aircraft() {
     }
 }
 
+bool Simulation::register_aircraft(entities::EntityId id) {
+    // Unknown entity (never created, or destroyed since): reject loudly
+    // enough to be visible in the return value without throwing — hosts
+    // register from bus-fed spawn paths where a lookup miss is data, not
+    // a program bug.
+    if (!id.valid()) return false;
+    {
+        auto h = entities::EntityHandle(id, &world_);
+        if (h.get<f4::flight::FlightModelComponent>() == nullptr) {
+            return false;
+        }
+    }
+    for (const auto existing : aircraft_entities_) {
+        if (existing == id) return false;  // idempotent
+    }
+    aircraft_entities_.push_back(id);
+    return true;
+}
+
 void Simulation::spawn_from_scenario_list() {
     using namespace f4::entities;
     using namespace f4::flight;

@@ -4,6 +4,7 @@
 #include "f4/ai/modules/strike_module.hpp"
 
 #include <cmath>
+#include <algorithm>
 
 namespace f4::ai::modules {
 

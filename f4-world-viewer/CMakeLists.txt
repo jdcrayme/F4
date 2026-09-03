@@ -112,6 +112,7 @@ add_library(f4_world_viewer STATIC
     src/ground_layout_3d.cpp
     src/campaign_and_teams_view.cpp
     src/campaign_qc_view.cpp
+    src/campaign_session_view.cpp
     src/file_dialog.cpp
     src/settings.cpp
     src/replay_mode.cpp
@@ -148,6 +149,15 @@ target_link_libraries(f4_world_viewer PUBLIC
     f4-renderer
     f4-recorder
     f4-campaign        # B.3 QC: mission name/category tables for the ATO view
+    f4-simulation      # V-CAMP: the live campaign session (CampaignSession)
+)
+# V-CAMP: the session's default fixture paths (world JSON given by the
+# host; class table / aircraft config / mission profiles resolved from
+# the build tree, exactly the campaign_qc defaults).
+target_compile_definitions(f4_world_viewer PRIVATE
+    F4_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+    F4_BINARY_DIR="${CMAKE_BINARY_DIR}"
+    F4_MISSION_PROFILES_JSON="${F4_MISSION_PROFILES_JSON}"
 )
 target_link_libraries(f4_world_viewer PRIVATE raylib)
 # tinyfiledialogs needs to be compiled as C (it's a .c file). Set the

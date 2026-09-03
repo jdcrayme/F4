@@ -64,10 +64,12 @@ option(F4_BUILD_MODEL_VIEWER "Build the 3D model viewer (requires X11 + OpenGL d
 if(F4_BUILD_MODEL_VIEWER)
     add_subdirectory(f4-models-viewer)  # Raylib + Dear ImGui 3D model viewer
 endif()
-option(F4_BUILD_VIEWER "Build the Raylib + Dear ImGui interactive viewer (requires X11 + OpenGL dev headers)" ON)
-if(F4_BUILD_VIEWER)
-    add_subdirectory(f4-world-viewer)  # Raylib + Dear ImGui interactive viewer
-endif()
+# NOTE: f4-world-viewer moved BELOW f4-simulation (the V-CAMP tranche):
+# the viewer's live campaign session links f4-simulation and reads the
+# campaign's F4_MISSION_PROFILES_JSON cache var at configure time — the
+# same ordering rule that put f4-campaign before f4-simulation (the
+# f4-campaign comment below). Raylib/ImGui targets it also needs
+# (f4-renderer, f4-models) are all added above this point.
 add_subdirectory(f4-flight-api)      # Flight model API interfaces (PilotInput, IAircraftState, IPilotInputSink)
 add_subdirectory(f4-flight-model)
 add_subdirectory(f4-recorder)        # Flight recording, replay, and LLM-friendly data export
@@ -77,6 +79,13 @@ add_subdirectory(f4-ai)             # AI brain: SensorFusion + tactic modules (c
 # var + fixture target must exist when f4-simulation is configured).
 add_subdirectory(f4-campaign)       # Headless dynamic campaign (mission profiles, tasking tick, attrition) — see Docs/NEXT_PHASE_PLAN.md §B
 add_subdirectory(f4-simulation)     # Orchestration: EntityWorld + MessageBus + ModelDatabase + tick loop (no rendering)
+# The viewer AFTER f4-campaign + f4-simulation (see the note above its
+# former location): the CampaignSession composes the campaign loop with
+# the Simulation, and its tests consume both fixture surfaces.
+option(F4_BUILD_VIEWER "Build the Raylib + Dear ImGui interactive viewer (requires X11 + OpenGL dev headers)" ON)
+if(F4_BUILD_VIEWER)
+    add_subdirectory(f4-world-viewer)  # Raylib + Dear ImGui interactive viewer
+endif()
 
 # ── Configure the scenario JSON templates at build time ────────────────────
 # This block runs regardless of whether f4-scenario-player is built (the

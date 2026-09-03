@@ -112,6 +112,32 @@ public:
         return aircraft_entities_;
     }
 
+    /// Register an aircraft entity a HOST spawned into world() AFTER
+    /// initialize() — the campaign-spawner path (a MissionIntent
+    /// materializes mid-run through spawn_aircraft_for_intent /
+    /// CampaignSimSpawner). Registered entities join the tick loop's
+    /// roster — the ground-elevation pre-pass, the combat-intents
+    /// active roster, the per-aircraft FM → TransformComponent sync,
+    /// and the recorder — exactly like aircraft the initialize() spawn
+    /// paths created.
+    ///
+    /// Without registration, update_all still advances a late-spawned
+    /// aircraft's brain + flight model, but its TransformComponent
+    /// never moves: the sync loop walks only the roster. That is the
+    /// "materialized but not flying" gap (aircraft park forever on the
+    /// renderer's screen while their FM state flies on) — this call
+    /// closes it for every host.
+    ///
+    /// Requirements: the entity must already exist in world() and carry
+    /// its components (this call only records the id). Idempotent per
+    /// entity — a duplicate registration is a no-op. NOT covered for
+    /// late registrants: wingman-ref resolution and SimData AI profile
+    /// injection (both run once at initialize(); the campaign spawn
+    /// path sets no lead_callsign and no brain_profile, so its aircraft
+    /// need neither). Returns true when the entity was newly added,
+    /// false on duplicate or unknown entity.
+    bool register_aircraft(entities::EntityId id);
+
     /// All spawned airfield-feature entities (Phase 2A). Each carries
     /// TransformComponent + VisualModelComponent (no FM, no brain). The
     /// renderer iterates all VisualModelComponent-bearing entities to draw

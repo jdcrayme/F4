@@ -39,6 +39,7 @@
 #include <f4/install/installation.hpp>
 #include <f4/terrain/terrain_data.hpp>
 #include <f4/world/world_loader.hpp>
+#include <f4/simulation/campaign_session.hpp>  // V-CAMP: the live loop
 
 // KoreaObj model database + Falcon4.ct class table — used by the
 // Ground Layout 3D panel to render real 3D feature models (buildings,
@@ -117,6 +118,20 @@ inline RlColor color_for_owner(uint8_t owner) {
 inline RlColor to_rl(const f4::terrain::Color4& c) {
     return {c.r, c.g, c.b, c.a};
 }
+
+// V-CAMP: the campaign session's speed presets (shared by run()'s
+// advance call and the Campaign window's radio buttons). Scales apply
+// to WALL-CLOCK time; the session's sim tick is fixed (the "Fix Your
+// Timestep" contract — see viewer_app.cpp's advance block). 240x is
+// the practical ceiling: the session's per-frame tick cap (240) × 60
+// FPS. At 60x a 30-minute tasking cycle passes in 30 real seconds; at
+// 240x a full day passes in 6 minutes.
+inline constexpr float kSessionSpeedTable[] = {1.0f, 10.0f, 60.0f, 240.0f};
+inline constexpr const char* kSessionSpeedNames[] = {"1x", "10x", "60x",
+                                                     "240x"};
+inline constexpr int kSessionSpeedCount =
+    static_cast<int>(sizeof(kSessionSpeedTable) /
+                     sizeof(kSessionSpeedTable[0]));
 
 // ---------------------------------------------------------------------------
 // ViewerApp::Impl — all state the render loop touches, in one struct.
@@ -307,8 +322,46 @@ struct ViewerApp::Impl {
     /// Defined in file_ops.cpp (next to the load paths that call it).
     void try_load_theater_tiles();
 
-    // Selection — now uses EntityId instead of (kind, index)
-    enum class SelectionKind { None, Objective, Unit };
+    // --- V-CAMP: the live campaign session --------------------------------
+    //
+    // The Phase-C loop (C1 ledger + C2 one-pool tasking + C3 routed
+    // generation) as ONE object the render loop drives — the full
+    // campaign_qc wiring with the one-world improvement (generated
+    // missions materialize INTO the sim's world and fly; see
+    // f4-simulation's campaign_session.hpp). Created by the Campaign >
+    // Start Session menu item (impl_->start_campaign_session in
+    // campaign_session_view.cpp); destroyed by Stop (a reset is just a
+    // new session).
+    std::unique_ptr<f4::simulation::CampaignSession> session;
+    /// Speed preset index into kCampaignSpeeds (campaign_session_view).
+    /// 0 = paused-via-zero is NOT used — pause is session->set_paused;
+    /// the presets scale the WALL-CLOCK dt fed to advance(), never the
+    /// fixed sim tick (the "Fix Your Timestep" contract).
+    int campaign_speed_index = 1;         // default 10x (tasking on a
+                                          // 30-min cycle is visible)
+    /// The Campaign window (draw_campaign_session_view).
+    bool show_campaign_window = true;
+    /// Canvas live layer: the session's aircraft + their routes.
+    bool show_live_layer = true;
+    /// Canvas: route polylines for live aircraft.
+    bool show_live_routes = true;
+    /// Canvas: the threat-map overlay (enemy AD rings as cells).
+    bool show_threat_overlay = false;
+    /// True when advance() hit the tick cap last frame (time dilated —
+    /// surfaced in the window so the user knows the preset outran CPU).
+    bool campaign_time_dilated = false;
+    /// Session start options (the Campaign window's start row).
+    int campaign_start_team = -1;
+    int campaign_start_max_flights = 48;
+    /// Last session creation failure (shown in the window when set).
+    char campaign_error[256] = {0};
+
+    // --- Selection --------------------------------------------------------
+    // The sel_kind/sel_entity pair; a LiveAircraft selection stores
+    // the entity id in sel_entity too, but the entity lives in the
+    // SESSION's world (a different EntityWorld with its own id space —
+    // id values may collide between worlds, so the kind discriminates).
+    enum class SelectionKind { None, Objective, Unit, LiveAircraft };
     SelectionKind sel_kind = SelectionKind::None;
     f4::entities::EntityId sel_entity;  // valid when sel_kind != None
 
@@ -335,6 +388,20 @@ struct ViewerApp::Impl {
     f4::entities::EntityHandle handle(f4::entities::EntityId id) const {
         return f4::entities::EntityHandle(id,
             const_cast<f4::entities::EntityWorld*>(&eworld));
+    }
+    /// Create an EntityHandle in the SESSION's world (the live campaign
+    /// loop's EntityWorld — a different world from eworld, with its own
+    /// id space). Only valid while a session runs.
+    [[nodiscard]] f4::entities::EntityHandle
+    session_handle(f4::entities::EntityId id) const {
+        return f4::entities::EntityHandle(id,
+            const_cast<f4::entities::EntityWorld*>(&session->sim().world()));
+    }
+    /// The session's live aircraft roster (empty when no session).
+    [[nodiscard]] const std::vector<f4::entities::EntityId>&
+    live_aircraft() const {
+        static const std::vector<f4::entities::EntityId> empty;
+        return session ? session->sim().aircraft_entities() : empty;
     }
     /// Get the grid X coordinate from a TransformComponent (feet → grid).
     static float grid_x(const f4::entities::TransformComponent* tr) {

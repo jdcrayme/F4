@@ -202,6 +202,20 @@ private:
     /// mission/team filters, click-to-select + camera focus. See
     /// campaign_qc_view.cpp.
     void draw_campaign_qc_view();
+    /// V-CAMP: the "Campaign Session" window — start/stop, play/pause,
+    /// speed presets, the campaign clock, the war-status block, and the
+    /// generated-missions table (click a row to select + pan to the
+    /// target). See campaign_session_view.cpp.
+    void draw_campaign_session_view();
+    /// V-CAMP: start/stop the live campaign session over the loaded
+    /// world JSON (impl_->last_world_json_path). Start resolves the
+    /// class table / aircraft config / mission profiles from the
+    /// install when configured, else the build-tree fixtures (the
+    /// campaign_qc defaults); on failure the reason lands in
+    /// impl_->campaign_error and the window shows it. Stop just drops
+    /// the session (a reset = stop + start).
+    void start_campaign_session();
+    void stop_campaign_session();
 
     // --- Replay mode private draw path (Path B2) -------------------------
     //

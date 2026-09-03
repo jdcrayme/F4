@@ -12,6 +12,9 @@
 #include <f4/terrain/terrain_data.hpp>
 #include <f4/world_convert/objective_decoder.hpp>  // objective_type_name()
 #include <f4/renderer/entity_render.hpp>  // EntityRenderResources, make_entity_render_resources
+#include <f4/ai/brain_component.hpp>      // V-CAMP: MissionPlan routes
+#include <f4/flight/flight_model_component.hpp>  // V-CAMP: airborne state
+#include <f4/campaign/threat_map.hpp>     // V-CAMP: kThreatMapRatio overlay
 
 #include <imgui.h>
 
@@ -68,6 +71,30 @@ void ViewerApp::handle_input() {
         float gx, gy;
         impl_->screen_to_world(mouse.x, mouse.y, &gx, &gy);
         const float tol = 8.0f / impl_->cam_zoom;  // 8-pixel pick radius
+
+        // V-CAMP: live aircraft FIRST — they move, they draw on top of
+        // everything, and they're the things worth clicking while the
+        // campaign runs. Slightly larger radius (10 px): hitting a
+        // moving target deserves the help.
+        if (impl_->session && impl_->show_live_layer) {
+            const float ltol = 10.0f / impl_->cam_zoom;
+            f4::entities::EntityId best_id;
+            float best_d2 = ltol * ltol;
+            for (const auto eid : impl_->live_aircraft()) {
+                auto h = impl_->session_handle(eid);
+                auto* tf = h.get<f4::entities::TransformComponent>();
+                if (!tf) continue;
+                const float lx = Impl::grid_x(tf), ly = Impl::grid_y(tf);
+                const float dx = lx - gx, dy = ly - gy;
+                const float d2 = dx * dx + dy * dy;
+                if (d2 < best_d2) { best_d2 = d2; best_id = eid; }
+            }
+            if (best_id.valid()) {
+                impl_->sel_kind = Impl::SelectionKind::LiveAircraft;
+                impl_->sel_entity = best_id;
+                return;
+            }
+        }
 
         // Try objectives first (drawn on top of terrain).
         if (impl_->show_objectives && impl_->world_loaded) {
@@ -473,6 +500,41 @@ void ViewerApp::draw_canvas() {
         }
     }
 
+    // --- V-CAMP: threat-map overlay (the C3 evidence, painted) -----------
+    // The session's route-builder threat map: every cell carrying enemy
+    // air-defense density (the half that threatens the VIEWER team)
+    // shades translucent red. This is what generated routes bend
+    // around — the SAM-ring picture behind the route lines.
+    if (impl_->session && impl_->show_threat_overlay) {
+        const auto& map = impl_->session->route_builder().threat_map();
+        const auto viewer = impl_->session->threat_viewer_team();
+        const float cell = static_cast<float>(f4::campaign::kThreatMapRatio);
+        for (int cy = 0; cy < map.cells_y(); ++cy) {
+            for (int cx = 0; cx < map.cells_x(); ++cx) {
+                const int d = map.high_band_density(cx, cy, viewer) +
+                              map.low_band_density(cx, cy, viewer);
+                if (d <= 0) continue;
+                // Density 1..6 → alpha 24..96 (subtle: it is a
+                // background layer, not the main picture).
+                const unsigned char a = static_cast<unsigned char>(
+                    std::min(24 * d, 96));
+                const Vector2 p0 = impl_->world_to_screen(
+                    static_cast<float>(cx) * cell,
+                    static_cast<float>(cy) * cell);
+                const Vector2 p1 = impl_->world_to_screen(
+                    (static_cast<float>(cx) + 1.0f) * cell,
+                    (static_cast<float>(cy) + 1.0f) * cell);
+                // Cull off-screen cells (the map covers the theater).
+                if (p1.x < 0 || p0.x > static_cast<float>(impl_->window_w) ||
+                    p1.y < 0 || p0.y > static_cast<float>(impl_->window_h)) {
+                    continue;
+                }
+                const Rectangle rect = {p0.x, p0.y, p1.x - p0.x, p1.y - p0.y};
+                DrawRectangleRec(rect, Color{220, 60, 60, a});
+            }
+        }
+    }
+
     // --- Units ---
     if (impl_->show_units && impl_->world_loaded) {
         const float s = std::clamp(6.0f + impl_->cam_zoom * 2.0f, 12.0f, 40.0f);
@@ -603,6 +665,105 @@ void ViewerApp::draw_canvas() {
             if (impl_->sel_kind == Impl::SelectionKind::Unit &&
                 impl_->sel_entity == eid) {
                 DrawCircleLines(static_cast<int>(p.x), static_cast<int>(p.y),
+                                static_cast<int>(s * 0.6f + 4),
+                                Color{255, 255, 0, 255});
+            }
+        }
+    }
+
+    // --- V-CAMP: the live campaign session layer ---------------------------
+    //
+    // The session's aircraft: the save's own flights PLUS the missions
+    // the tasking ladder generated (materialized into the same world —
+    // the one-world closure), all moving as the campaign clock runs.
+    // Each aircraft draws at its TransformComponent (grid = ENU feet /
+    // 1024, the same convention as the static layer), with its
+    // MissionPlan route as a polyline + numbered waypoints — the C3
+    // routes, visible. Owner color from the campaign origin's team
+    // slot (the same palette the static layer uses).
+    if (impl_->session && impl_->show_live_layer) {
+        const float s = std::clamp(8.0f + impl_->cam_zoom * 2.0f, 12.0f, 36.0f);
+        const float cull_margin = s + 8.0f;
+        const float sx_min = -cull_margin;
+        const float sx_max = static_cast<float>(impl_->window_w) + cull_margin;
+        const float sy_min = -cull_margin;
+        const float sy_max = static_cast<float>(impl_->window_h) + cull_margin;
+        const bool draw_wp_labels = impl_->cam_zoom > 3.0f;
+        const bool selected_is_live =
+            impl_->sel_kind == Impl::SelectionKind::LiveAircraft;
+
+        for (const auto eid : impl_->live_aircraft()) {
+            auto h = impl_->session_handle(eid);
+            auto* tf = h.get<f4::entities::TransformComponent>();
+            if (!tf) continue;
+            const float gx = Impl::grid_x(tf), gy = Impl::grid_y(tf);
+            const Vector2 p = impl_->world_to_screen(gx, gy);
+            if (p.x < sx_min || p.x > sx_max ||
+                p.y < sy_min || p.y > sy_max) {
+                continue;
+            }
+
+            // Owner color (campaign origin; gray for unattributed).
+            auto* org = h.get<f4::simulation::CampaignOriginComponent>();
+            const uint8_t owner = org ? org->team_slot : 0;
+            RlColor c = color_for_owner(owner);
+            if (impl_->team_filter != 0xFF && owner != impl_->team_filter) {
+                c.r = static_cast<unsigned char>(c.r * 0.3f);
+                c.g = static_cast<unsigned char>(c.g * 0.3f);
+                c.b = static_cast<unsigned char>(c.b * 0.3f);
+                c.a = static_cast<unsigned char>(c.a * 0.3f);
+            }
+
+            // The route polyline (BELOW the symbol so the symbol sits
+            // on top of its own line start).
+            if (impl_->show_live_routes) {
+                auto* brain = h.get<f4::ai::BrainComponent>();
+                if (brain && !brain->mission_plan().route.empty()) {
+                    Vector2 prev = p;
+                    int idx = 0;
+                    for (const auto& w : brain->mission_plan().route) {
+                        const Vector2 q = impl_->world_to_screen(
+                            static_cast<float>(w.position.x / 1024.0),
+                            static_cast<float>(w.position.y / 1024.0));
+                        DrawLineEx(prev, q, 1.5f,
+                                   Color{c.r, c.g, c.b, 150});
+                        DrawCircleV(q, 2.5f, Color{c.r, c.g, c.b, 200});
+                        if (draw_wp_labels) {
+                            char lbl[8];
+                            std::snprintf(lbl, sizeof(lbl), "%d", idx);
+                            DrawText(lbl,
+                                     static_cast<int>(q.x + 4),
+                                     static_cast<int>(q.y - 6), 9,
+                                     Color{c.r, c.g, c.b, 220});
+                        }
+                        prev = q;
+                        ++idx;
+                    }
+                }
+            }
+
+            // The symbol: fighter glyph, filled owner color, airborne
+            // full-strength / grounded dimmed (the taxiing picture at
+            // campaign speed is mostly ground traffic at the start).
+            const RlColor outline = {
+                static_cast<unsigned char>(c.r * 0.4f),
+                static_cast<unsigned char>(c.g * 0.4f),
+                static_cast<unsigned char>(c.b * 0.4f),
+                255};
+            auto* fm = h.get<f4::flight::FlightModelComponent>();
+            const bool airborne = fm && fm->model().state().gear.inAir;
+            if (!airborne) {
+                c.r = static_cast<unsigned char>(c.r * 0.55f + 64);
+                c.g = static_cast<unsigned char>(c.g * 0.55f + 64);
+                c.b = static_cast<unsigned char>(c.b * 0.55f + 64);
+            }
+            f4::renderer::draw_symbol(
+                f4::renderer::SymbolKind::UnitFighter,
+                p.x, p.y, s, c, outline);
+
+            if (selected_is_live && impl_->sel_entity == eid) {
+                DrawCircleLines(static_cast<int>(p.x),
+                                static_cast<int>(p.y),
                                 static_cast<int>(s * 0.6f + 4),
                                 Color{255, 255, 0, 255});
             }

@@ -686,11 +686,37 @@ sensor_fusion.set_detection_policy(&policy);
 non-combat world is unchanged). Combat-disabled scenarios carry none of
 the combat components.
 
+**V-CAMP**: `campaign_session.hpp` — the live campaign loop as ONE
+frame-driven object (the `campaign_qc` wiring, composed for hosts):
+C1 ledger + C2 one-pool tasking + C3 routed generation over the
+simulation's own world and bus, with the spawner's generated missions
+REGISTERED into the tick roster through `Simulation::register_aircraft()`
+(the one-world closure — "materialized" means FLYING, not counted).
+One clock: fixed `sim_dt` ticks; the campaign ladder and the damage
+sync advance in whole campaign seconds off the same ticks. The world
+viewer drives it (play/pause, 1x–240x wall-clock presets, the campaign
+clock, war status, live aircraft + routes + the threat overlay).
+
+```cpp
+f4::simulation::CampaignSessionOptions opts;
+opts.world_json = "TestCamp.world.json";      // absolute paths
+opts.aircraft_config = "<build>/generated_fixtures/f16.json";
+opts.mission_profiles = "<build>/generated_campaign/MissionProfiles.json";
+opts.max_flights = 48;                        // interactive budget
+
+auto session = f4::simulation::CampaignSession::create(opts, &err);
+session->set_paused(false);
+while (running) {
+    session->advance(frame_dt * speed);       // speed presets scale dt;
+}                                             // the tick dt never changes
+const std::string result_json = session->ledger_json();  // byte-stable
+```
+
 **Dependencies**: f4-entities, f4-messaging, f4-flight-model, f4-flight-api,
 f4-ai, f4-data, f4-geo, f4-math, f4-units, f4-state-machine, f4-models,
 f4-recorder, f4-json, f4-io, f4-world, f4-world-convert, f4-terrain,
-f4-weapons, f4-sensors. See `Docs/COMBAT_CHAIN_PLAN.md` (M3) and
-`Docs/AIRCRAFT_BINDING_DESIGN.md`.
+f4-weapons, f4-sensors, f4-campaign. See `Docs/COMBAT_CHAIN_PLAN.md` (M3),
+`Docs/AIRCRAFT_BINDING_DESIGN.md`, and `Docs/CAMPAIGN_LOOP_PLAN.md` (V-CAMP).
 
 ### f4-campaign — headless dynamic campaign + the result ledger (the war loop)
 
@@ -714,6 +740,8 @@ leg its brain: `ThreatMap` (ScoreThreatFast's per-cell ownership +
 IP, target, turn point, egress, waypoint elimination) — generated
 missions fly THEIR OWN routes, airbase → target → airbase, and the
 spawner materializes them as they publish (generation-to-spawn).
+V-CAMP composes all of it into the live, frame-driven session the
+world viewer runs (f4-simulation's `campaign_session.hpp`).
 
 ```cpp
 #include <f4/campaign/result_ledger.hpp>
@@ -784,7 +812,8 @@ counts the loss; a parked aircraft's death debits the pool directly.
 **Dependencies**: f4-world (IDataSource ONLY — never EntityWorld
 components; the ECS resolution lives in f4-simulation's sink),
 f4-messaging, f4-json (PRIVATE), f4-io. See
-`Docs/CAMPAIGN_LOOP_PLAN.md` (C1 + C2 + C3 landed, C4–C5 the roadmap).
+`Docs/CAMPAIGN_LOOP_PLAN.md` (C1 + C2 + C3 + V-CAMP landed, C4–C5 the
+roadmap).
 
 ## Building
 
@@ -884,7 +913,8 @@ JSON array.
 
 `f4-world-viewer` is a Raylib + Dear ImGui desktop app for inspecting world
 data. It's the primary way to validate what's in the world before developing
-more advanced systems (digi AI, ATO).
+more advanced systems (digi AI, ATO) — and, since V-CAMP, the way to RUN
+the campaign loop interactively (see "The live campaign session" below).
 
 ### Quick start (install-aware flow — recommended)
 
@@ -909,6 +939,43 @@ Then in the app:
 The install path persists across launches — next time, just open the
 viewer and pick a campaign. The last theater + campaign are also
 remembered, so re-launching restores your previous session.
+
+### The live campaign session (V-CAMP)
+
+With a campaign open: **Campaign > Start Session...** (or the Campaign
+Session window's Start button). The session builds the full Phase-C loop
+over the loaded world — the C1 ledger, C2 one-pool tasking, C3 routed
+generation — and the save's own flights fly alongside the missions the
+ladder generates, in one simulation world. Controls:
+
+- **Play/Pause (Space)** + speed presets **1x / 10x / 60x / 240x** —
+  the presets scale wall-clock time; the sim's tick stays at its tuned
+  1/60 s (the flight model's discretization holds at every speed). A
+  30-minute tasking cycle passes in 30 s at 60x.
+- **Campaign clock** (D# HH:MM:SS) — the save's epoch + the loop's own
+  clock: one timeline for tasking, reinforcement, and flight.
+- **War status** — cycles fired, missions generated, routes
+  built/failed, aircraft drawn (the one pool), combat losses,
+  reinforcement fires/deliveries, live/airborne counts.
+- **Generated missions** — one row per tasked mission (mission, team,
+  TOT, target, route waypoints, package size); click a target to
+  select + pan to it.
+- **Canvas live layer** — the aircraft as they fly (owner colors,
+  grounded dimmed), each with its route polyline + numbered waypoints;
+  the threat-map overlay (View > Threat map overlay) paints the enemy
+  air-defense rings the routes bend around; click a live aircraft to
+  inspect it (identity, phase, kinematics, its live flight plan).
+- **Write Result JSON** — the C1 ledger as `campaign_result.json`
+  (byte-stable, the campaign_qc artifact) next to the world JSON;
+  **Write Back** applies the ledger's pools/fstatus into the session's
+  WorldState (in-memory; the .cam re-encoder is a future tranche).
+
+Sessions start **paused** — press Space (or Play) to run the clock.
+Reset = Stop + Start. The saved-flight spawn cap (default 48 of
+TestCamp's 449 flights) keeps the interactive budget; raise it in the
+start row if your machine has headroom. Fixture paths (class table,
+F-16 config, mission profiles) resolve from the install when one is
+configured, else the build tree — the campaign_qc defaults.
 
 ### CLI (for scripts / smoke tests)
 
