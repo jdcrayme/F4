@@ -455,7 +455,9 @@ spawn_aircraft_for_flight(f4::entities::EntityWorld& world,
                           const AirbaseAirfieldMap* airbase_airfields,
                           const std::unordered_map<std::uint32_t,
                               f4::entities::EntityId>* objective_id_map,
-                          const weapons::WeaponClassTable* weapon_table) {
+                          const weapons::WeaponClassTable* weapon_table,
+                          const std::unordered_map<std::uint32_t,
+                              f4::entities::EntityId>* unit_id_map) {
     using namespace f4::entities;
     using namespace f4::flight;
     using namespace f4::ai;
@@ -597,7 +599,8 @@ spawn_aircraft_for_flight(f4::entities::EntityWorld& world,
     // from the registered per-base airfield.
     brain.module().airbase_id = home_airbase_vu;
     if (auto plan = build_mission_plan_from_flight(world, flight_entity,
-                                                    objective_id_map)) {
+                                                    objective_id_map,
+                                                    unit_id_map)) {
         brain.set_mission_plan(std::move(*plan));
     }
 
@@ -637,6 +640,10 @@ spawn_aircraft_for_flight(f4::entities::EntityWorld& world,
         origin.team_slot = owner;
         origin.callsign_id = fp->callsign_id;
         origin.callsign_num = fp->callsign_num;
+        // C6: the mission byte rides the origin — the spawn-time role
+        // the combat arming reads (flight path: the flight's own
+        // FlightPlanComponent::mission).
+        origin.mission_byte = fp->mission;
     }
 
     return h.id();
@@ -653,7 +660,9 @@ spawn_aircraft_from_flights(f4::entities::EntityWorld& world,
                              const AirbaseAirfieldMap* airbase_airfields,
                              const std::unordered_map<std::uint32_t,
                                  f4::entities::EntityId>* objective_id_map,
-                             const weapons::WeaponClassTable* weapon_table) {
+                             const weapons::WeaponClassTable* weapon_table,
+                             const std::unordered_map<std::uint32_t,
+                                 f4::entities::EntityId>* unit_id_map) {
     using namespace f4::entities;
 
     // Find every entity with a FlightPlanComponent. f4-world::populate_units
@@ -705,7 +714,7 @@ spawn_aircraft_from_flights(f4::entities::EntityWorld& world,
         if (auto spawned_id = spawn_aircraft_for_flight(
                 world, flight_id, ct, db, cfg, airfield,
                 scenario_aircraft, slot, airbase_airfields,
-                objective_id_map, weapon_table)) {
+                objective_id_map, weapon_table, unit_id_map)) {
             spawned.push_back(*spawned_id);
         }
     }
@@ -951,7 +960,9 @@ build_mission_plan_from_flight(
     const f4::entities::EntityWorld& world,
     f4::entities::EntityId flight_entity,
     const std::unordered_map<std::uint32_t, f4::entities::EntityId>*
-        objective_id_map) {
+        objective_id_map,
+    const std::unordered_map<std::uint32_t, f4::entities::EntityId>*
+        unit_id_map) {
     using namespace f4::entities;
     using f4::ai::modules::NavigationModule;
 
@@ -1009,12 +1020,22 @@ build_mission_plan_from_flight(
         // A-G tranche: delivery-action waypoints carry their strike
         // target's EntityId::value (the brain's StrikeModule arms on
         // this). Resolution: the waypoint's own target_num through the
-        // objective map, else the flight's resolved target.
+        // objective map, then (G2) the UNIT map — an aggregate
+        // battalion, the CAS family's delivery target, the world
+        // loader's own objectives-first-then-units order — else the
+        // flight's resolved target.
         std::uint64_t target_id = 0;
         if (f4::ai::modules::is_ag_delivery_action(w.action)) {
             if (objective_id_map != nullptr && w.target_num != 0) {
                 const auto it = objective_id_map->find(w.target_num);
                 if (it != objective_id_map->end() && it->second.valid()) {
+                    target_id = it->second.value;
+                }
+            }
+            if (target_id == 0 && unit_id_map != nullptr &&
+                w.target_num != 0) {
+                const auto it = unit_id_map->find(w.target_num);
+                if (it != unit_id_map->end() && it->second.valid()) {
                     target_id = it->second.value;
                 }
             }
@@ -1046,7 +1067,9 @@ build_mission_plan_from_route(
         const std::vector<f4::campaign::RouteWaypoint>& route,
         std::uint32_t target_objective_vu,
         const std::unordered_map<std::uint32_t, f4::entities::EntityId>*
-            objective_id_map) {
+            objective_id_map,
+        const std::unordered_map<std::uint32_t, f4::entities::EntityId>*
+            unit_id_map) {
     using namespace f4::entities;
     using f4::ai::modules::NavigationModule;
 
@@ -1067,12 +1090,22 @@ build_mission_plan_from_route(
     // The strike target: the intent's target objective resolved through
     // the id map (the fallback for delivery waypoints that carry no
     // target_num of their own — the builder stamps them, but a stale
-    // map deserves the flight-level fallback too).
+    // map deserves the flight-level fallback too). G2: the intent's
+    // target may be a UNIT VU (the CAS family) — objectives first,
+    // then the unit map, the loader's own order.
     std::uint64_t flight_target = 0;
-    if (objective_id_map != nullptr && target_objective_vu != 0) {
-        const auto it = objective_id_map->find(target_objective_vu);
-        if (it != objective_id_map->end() && it->second.valid()) {
-            flight_target = it->second.value;
+    if (target_objective_vu != 0) {
+        if (objective_id_map != nullptr) {
+            const auto it = objective_id_map->find(target_objective_vu);
+            if (it != objective_id_map->end() && it->second.valid()) {
+                flight_target = it->second.value;
+            }
+        }
+        if (flight_target == 0 && unit_id_map != nullptr) {
+            const auto it = unit_id_map->find(target_objective_vu);
+            if (it != unit_id_map->end() && it->second.valid()) {
+                flight_target = it->second.value;
+            }
         }
     }
 
@@ -1095,6 +1128,13 @@ build_mission_plan_from_route(
             if (objective_id_map != nullptr && w.target_num != 0) {
                 const auto it = objective_id_map->find(w.target_num);
                 if (it != objective_id_map->end() && it->second.valid()) {
+                    target_id = it->second.value;
+                }
+            }
+            if (target_id == 0 && unit_id_map != nullptr &&
+                w.target_num != 0) {
+                const auto it = unit_id_map->find(w.target_num);
+                if (it != unit_id_map->end() && it->second.valid()) {
                     target_id = it->second.value;
                 }
             }
@@ -1125,7 +1165,9 @@ spawn_aircraft_for_intent(
         const AirbaseAirfieldMap* airbase_airfields,
         const std::unordered_map<std::uint32_t, f4::entities::EntityId>*
             objective_id_map,
-        const weapons::WeaponClassTable* weapon_table) {
+        const weapons::WeaponClassTable* weapon_table,
+        const std::unordered_map<std::uint32_t, f4::entities::EntityId>*
+            target_unit_id_map) {
     using namespace f4::entities;
     using namespace f4::flight;
     using namespace f4::ai;
@@ -1234,8 +1276,16 @@ spawn_aircraft_for_intent(
     brain.module().departure_alt_ft = field.departure_altitude_ft;
     brain.module().taxi_speed_kts = 15.0;
     brain.module().airbase_id = home_airbase_vu;
+    // G2: the unit map resolves UNIT targets (a CAS intent's battalion
+    // VU) — the flight-resolution map doubles as the target map when
+    // the caller provides no dedicated one (the spawner's own map
+    // covers every UnitCore entity, flights and battalions alike).
+    const std::unordered_map<std::uint32_t, f4::entities::EntityId>*
+        effective_unit_map = (target_unit_id_map != nullptr)
+            ? target_unit_id_map : &unit_id_map;
     if (auto plan = build_mission_plan_from_route(
-            intent.route, intent.target_objective_id, objective_id_map)) {
+            intent.route, intent.target_objective_id, objective_id_map,
+            effective_unit_map)) {
         brain.set_mission_plan(std::move(*plan));
     }
 
@@ -1263,6 +1313,8 @@ spawn_aircraft_for_intent(
     origin.team_slot = intent.team;
     origin.callsign_id = 0;
     origin.callsign_num = 0;
+    // C6: the intent's mission byte (the synthetic path's role source).
+    origin.mission_byte = intent.mission_byte;
 
     return h.id();
 }
@@ -1270,6 +1322,7 @@ spawn_aircraft_for_intent(
 std::string owner_team_string(const f4::entities::EntityWorld& world,
                               std::uint8_t owner) {
     using namespace f4::entities;
+    using f4::world::Relation;
 
     // Find the campaign singleton (ROLE "campaign") for the player team.
     int player_slot = -1;
@@ -1282,33 +1335,87 @@ std::string owner_team_string(const f4::entities::EntityWorld& world,
         }
     }
 
+    // Gather the team entities once (slot + stance row each).
+    const auto team_ids = world.with_tag(
+        tags::ROLE, TagValue::from(std::string("team")));
+    struct TeamRow {
+        int slot;
+        const std::vector<std::int16_t>* stance;
+    };
+    std::vector<TeamRow> rows;
+    rows.reserve(team_ids.size());
+    for (const auto eid : team_ids) {
+        EntityHandle h(eid, const_cast<EntityWorld*>(&world));
+        auto* tc = h.get<TeamComponent>();
+        if (tc == nullptr) continue;
+        rows.push_back(TeamRow{tc->slot, &tc->stance});
+    }
+    const auto at_war = [&rows](int a, int b) {
+        if (a < 0 || b < 0) return false;
+        for (const auto& r : rows) {
+            if (r.slot != a || r.stance == nullptr) continue;
+            if (b < static_cast<int>(r.stance->size()) &&
+                f4::world::relation_from_wire(
+                    static_cast<std::int16_t>((*r.stance)[
+                        static_cast<std::size_t>(b)])) == Relation::War) {
+                return true;
+            }
+        }
+        return false;
+    };
+
     // No campaign data (synthetic test world): slot 0 is the de-facto
     // friendly, everything else hostile.
     if (player_slot < 0) {
         return owner == 0 ? "blue" : "red";
     }
-    if (static_cast<int>(owner) == player_slot) return "blue";
 
-    // Look up the owner team's stance toward the player slot. RelType
-    // enum (cmpglobl.h): red = at WAR with the player (5) — the same
-    // rule the campaign's belligerence/target selection uses. The
-    // pre-C3 "< 0" sign test misread the garbage columns real saves
-    // carry toward unused slots (e.g. -5141) as war; the enum decode
-    // maps out-of-range values to NoRelations, so phantom slots stay
-    // green.
-    const auto team_ids = world.with_tag(
-        tags::ROLE, TagValue::from(std::string("team")));
-    for (const auto eid : team_ids) {
-        EntityHandle h(eid, const_cast<EntityWorld*>(&world));
-        auto* tc = h.get<TeamComponent>();
-        if (!tc || tc->slot != static_cast<int>(owner)) continue;
-        if (player_slot < static_cast<int>(tc->stance.size()) &&
-            f4::world::relation_from_wire(
-                tc->stance[static_cast<std::size_t>(player_slot)]) ==
-                f4::world::Relation::War) {
+    // The classic shape: the player slot is a BELLIGERENT — every team
+    // at WAR with the player is red, everyone else green (the B.3 rule,
+    // unchanged — the RelType enum decode maps the garbage columns real
+    // saves carry toward unused slots (e.g. -5141) to NoRelations, so
+    // phantom slots stay green).
+    bool player_at_war = false;
+    for (const auto& r : rows) {
+        if (at_war(r.slot, player_slot) || at_war(player_slot, r.slot)) {
+            player_at_war = true;
+            break;
+        }
+    }
+    if (player_at_war) {
+        if (static_cast<int>(owner) == player_slot) return "blue";
+        if (at_war(static_cast<int>(owner), player_slot) ||
+            at_war(player_slot, static_cast<int>(owner))) {
             return "red";
         }
         return "green";
+    }
+
+    // The TestCamp shape (the C6 finding): the player slot is NEUTRAL
+    // (te_team = a placeholder team at peace with everyone) while the
+    // WAR is between two other slots (ROK vs DPRK). The B.3 rule mapped
+    // every such owner to "green" — a war with no sides: 96 airborne
+    // aircraft, zero hostile pairs, zero fights. Map the war PAIR into
+    // the sim's two-sided vocabulary instead: the first pair in slot
+    // order (deterministic — with_tag's entity order is the populate
+    // order, teams in slot order), lower slot = blue, its enemy = red;
+    // every other slot stays green (the sim picture is two-sided, a
+    // documented simplification).
+    {
+        std::vector<int> slots;
+        slots.reserve(rows.size());
+        for (const auto& r : rows) slots.push_back(r.slot);
+        std::sort(slots.begin(), slots.end());
+        for (std::size_t i = 0; i < slots.size(); ++i) {
+            for (std::size_t j = i + 1; j < slots.size(); ++j) {
+                if (at_war(slots[i], slots[j]) ||
+                    at_war(slots[j], slots[i])) {
+                    if (static_cast<int>(owner) == slots[i]) return "blue";
+                    if (static_cast<int>(owner) == slots[j]) return "red";
+                    return "green";
+                }
+            }
+        }
     }
     return "green";
 }

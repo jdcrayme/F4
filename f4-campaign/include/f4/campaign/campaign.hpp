@@ -64,6 +64,7 @@
 #include <f4/messaging/bus.hpp>
 #include <f4/world/data_source.hpp>
 
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -190,6 +191,17 @@ struct CampaignConfig {
     /// C4: the ATM's own tunables (aiinput.dat's [ATM] section as
     /// config — the RouteBuilderConfig pattern).
     AtmConfig atm{};
+
+    /// G2 — the interdiction arm: UNIT-targeted delivery missions (the
+    /// CAS family) resolve a REAL enemy battalion target — front-line
+    /// ranked (distance to the contested FLOT, wire-order ties,
+    /// rotation-spread), ledger-destroyed skipped — and route to it;
+    /// the bombs those flights drop attrite the line (the sink's
+    /// unit_strike arm books, the engine pulls). DEFAULT OFF: the
+    /// golden identity (UNIT-target profiles stay target-less and
+    /// route-less, exactly the C3-documented deferral). One flag for
+    /// both ladders (the ATM's config inherits it at construction).
+    bool unit_strike{false};
 };
 
 class Campaign {
@@ -363,6 +375,13 @@ private:
     /// wire-order-asc. 0 when no enemy objective exists.
     [[nodiscard]] std::uint32_t select_target_(std::uint8_t team) const;
 
+    /// G2: select the interdiction target for `team` — an enemy
+    /// battalion, front-line ranked (rank_battalion_targets over the
+    /// shared FLOT), rotation-spread by unit_target_cursor_. 0 when
+    /// no ranked target exists (no war pair, no front, no battalions).
+    [[nodiscard]] std::uint32_t select_unit_target_(
+        std::uint8_t team);
+
     const f4::world::ICampaignSource& camp_;
     const f4::world::ITeamSource& teams_;
     const f4::world::IUnitCoreSource& units_;
@@ -413,6 +432,11 @@ private:
     /// pattern): when set, generated intents carry target + route.
     const RouteBuilder* route_planner_ = nullptr;
     const f4::world::IObjectiveSource* objectives_ = nullptr;
+
+    /// G2 — per-team rotation cursor over the ranked enemy BATTALION
+    /// list (the legacy ladder's unit-target spread; the ATM keeps its
+    /// own — the two ladders never share cursors).
+    std::array<int, 8> unit_target_cursor_{};
 
     /// C4: the ATM pipeline (constructed when cfg_.atm_pipeline — the
     /// set_result_ledger/set_route_planner attachments below keep its

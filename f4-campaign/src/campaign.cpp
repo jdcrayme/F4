@@ -5,6 +5,7 @@
 // rule, determinism contract).
 
 #include <f4/campaign/campaign.hpp>
+#include <f4/campaign/ground_war.hpp>   // G2: the shared FLOT + ranking
 
 #include <f4/json/f4_json.hpp>
 
@@ -80,8 +81,12 @@ Campaign::Campaign(const f4::world::ICampaignSource& camp,
     // Campaign's own package counter so intent ids stay in one
     // monotonic namespace either mode.
     if (cfg_.atm_pipeline) {
+        // G2: the ATM inherits the interdiction arm (one source of
+        // truth — CampaignConfig::unit_strike).
+        AtmConfig atm_cfg = cfg_.atm;
+        atm_cfg.unit_strike = cfg_.unit_strike;
         atm_ = std::make_unique<AirTaskingManager>(
-            profiles_, camp_, teams_, units_, nullptr, cfg_.atm);
+            profiles_, camp_, teams_, units_, nullptr, atm_cfg);
         atm_->set_id_base(cfg_.first_package_id);
     }
     next_flight_id_ = cfg_.first_package_id;
@@ -192,6 +197,30 @@ void Campaign::fire_reinforcements_() {
         (void)result_ledger_->apply_reinforcements(
             static_cast<double>(clock_));
     }
+}
+
+std::uint32_t Campaign::select_unit_target_(std::uint8_t team) {
+    // G2 — the interdiction target: the shared FLOT between the
+    // belligerent pair, enemy battalions ranked by front distance
+    // (rank_battalion_targets' own hostility/destroyed/roster rules),
+    // rotation-spread over the ranked list. The tasking-side front is
+    // the SAVE-TIME source view (captures re-shape the engine's front;
+    // mid-run re-targeting lands with the strategy layer that owns
+    // it — documented in INTERDICTION_PLAN §6).
+    if (objectives_ == nullptr) return 0;
+    const auto pair = belligerent_pair(teams_);
+    if (pair.size() != 2) return 0;
+    const auto front = front_columns_from_objectives(
+        front_objective_view(*objectives_), pair[0], pair[1]);
+    const auto ranked = rank_battalion_targets(
+        units_, teams_, front, team, result_ledger_);
+    if (ranked.empty()) return 0;
+    if (team >= unit_target_cursor_.size()) return ranked.front();
+    const int cursor = unit_target_cursor_[team];
+    const auto idx = static_cast<std::size_t>(cursor) % ranked.size();
+    unit_target_cursor_[team] =
+        (cursor + 1) % static_cast<int>(ranked.size());
+    return ranked[idx];
 }
 
 std::uint32_t Campaign::select_target_(std::uint8_t team) const {
@@ -376,6 +405,12 @@ void Campaign::run_tasking_cycle_legacy_() {
             // their resolution tranches — both publish route-less,
             // exactly as before C3. Failures are loud counters, not
             // dropped missions — the QC gate reads them.
+            //
+            // G2 closes the UNIT deferral (opt-in): the CAS family —
+            // profile_flies_unit_delivery_route — resolves a REAL
+            // enemy battalion (front-line ranked) and routes to it
+            // through the same threat-shaped builder. LOCATION
+            // targets stay deferred (the loiter/strategy tranches).
             if (route_planner_ != nullptr && lead->airbase != 0 &&
                 profile_flies_delivery_route(profile)) {
                 const std::uint32_t target_vu =
@@ -397,6 +432,32 @@ void Campaign::run_tasking_cycle_legacy_() {
                 } else {
                     ++routes_failed_;
                 }
+            } else if (route_planner_ != nullptr && lead->airbase != 0 &&
+                       cfg_.unit_strike &&
+                       profile_flies_unit_delivery_route(profile)) {
+                // G2 — the interdiction rung (the legacy ladder's own
+                // shape; the ATM path arms it inside generate_requests).
+                const std::uint32_t unit_vu =
+                    select_unit_target_(static_cast<std::uint8_t>(slot));
+                if (unit_vu != 0) {
+                    const auto rb = route_planner_->build(
+                        static_cast<std::uint8_t>(slot), profile,
+                        lead->airbase, unit_vu);
+                    if (rb.waypoints.size() >= 2) {
+                        intent.target_objective_id = unit_vu;
+                        intent.route = rb.waypoints;
+                        intent.synthetic = true;
+                        ++routes_built_;
+                        if (rb.safe_path_searched) ++route_safe_searches_;
+                        if (rb.direct_fallback) ++route_fallbacks_;
+                    } else {
+                        ++routes_failed_;
+                    }
+                }
+                // No ranked unit target: route-less (the C3 shape) —
+                // NOT a routes_failed_ event (nothing was there to
+                // build; the QC's unit-strike gate reads the agv
+                // column instead).
             }
 
             // Publish + record (the campaign's only outward coupling).
@@ -442,9 +503,14 @@ void Campaign::run_tasking_cycle_atm_() {
             // escorts share it (package-shared ingress, the C3
             // deferral this tranche closes; TOTs differ by the
             // separation). Main flights come first in compose order.
+            // G2: the unit-delivery family (CAS) routes too when the
+            // interdiction arm is on — the builder resolves the
+            // battalion's grid position.
             if (route_planner_ != nullptr && ft.role == FlightRole::Main &&
                 ft.airbase_vu != 0 && ft.target_vu != 0 &&
-                profile_flies_delivery_route(profile)) {
+                (profile_flies_delivery_route(profile) ||
+                 (cfg_.unit_strike &&
+                  profile_flies_unit_delivery_route(profile)))) {
                 const auto rb = route_planner_->build(
                     team, profile, ft.airbase_vu, ft.target_vu);
                 if (rb.waypoints.size() >= 2) {

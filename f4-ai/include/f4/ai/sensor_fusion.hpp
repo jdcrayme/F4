@@ -46,6 +46,7 @@
 #include <string>
 #include <vector>
 
+#include <f4/ai/air_picture.hpp>
 #include <f4/ai/ai_brain.hpp>
 #include <f4/ai/target_info.hpp>
 #include <f4/entities/entity.hpp>
@@ -100,6 +101,17 @@ public:
             bool gci{false};
         };
         virtual ~DetectionPolicy() = default;
+
+        /// Optional per-rebuild hook (PERF-1): called ONCE before the
+        /// per-contact classify() loop of a rebuild, so a policy can
+        /// resolve ownship-side lookups (its radar, its RWR) one time
+        /// instead of per contact. The fusion guarantees no world
+        /// mutation between prepare_batch() and the last classify() of
+        /// the batch (the rebuild never mutates the world; the host
+        /// pushes pictures between ticks). Default: no-op — existing
+        /// policies and test stubs are unaffected.
+        virtual void prepare_batch() {}
+
         [[nodiscard]] virtual Verdict classify(const TargetInfo& t) = 0;
     };
 
@@ -116,13 +128,49 @@ public:
                     Config cfg = Config{});
 
     /// Per-frame update. Decays the update timer; when it hits zero,
-    /// rebuilds the target list from the EntityWorld.
+    /// rebuilds the target list from the EntityWorld (or from the pushed
+    /// air picture when the host set one — see set_air_picture).
     void update(double dt);
 
     /// Force an immediate refresh of the target list (ignores update timer).
     /// Used when an event (RWR spike, missile launch detection) requires an
     /// immediate re-evaluation.
     void force_refresh();
+
+    // --- Shared air picture (PERF-1, PERFORMANCE_PLAN.md §3) -----------------
+    /// Set (or clear, with nullptr) the host-built snapshot the NEXT
+    /// rebuild consumes instead of walking the EntityWorld. Non-owning;
+    /// the host pushes it on ticks where a rebuild will actually happen
+    /// (see will_rebuild_this_tick — the host's demand gate) and clears
+    /// it otherwise. A null picture restores the world-query path — the
+    /// two paths produce byte-identical target lists when the picture
+    /// carries the same entities, in the same order, with the same
+    /// values (the host builds it that way; pinned by test).
+    ///
+    /// This is the campaign-scale fix: the beam-fight rule (every brain
+    /// force-refreshes every tick while a hostile missile is visible)
+    /// made the per-brain world walk — ~4,400 candidates x 96 brains x
+    /// 60 Hz — the merge-phase collapse. With a picture pushed, a
+    /// rebuild iterates only the snapshot's contacts.
+    void set_air_picture(const AirPicture* picture) noexcept {
+        picture_ = picture;
+    }
+    [[nodiscard]] const AirPicture* air_picture() const noexcept {
+        return picture_;
+    }
+
+    /// PERF-1 demand query: will THIS update(dt) rebuild the target
+    /// list? Exactly the update() decision — the skill timer expiring
+    /// (update_timer_ <= dt after decay) OR the beam-fight rule (a
+    /// visible hostile missile force-refreshes every tick). The HOST
+    /// asks this before world update to decide whether building the
+    /// shared air picture this tick is necessary: no consumer, no
+    /// walk. Const, side-effect-free, and exact — the same inputs the
+    /// brain's own update() will see this tick (nothing mutates
+    /// between the host query and the brain's update).
+    [[nodiscard]] bool will_rebuild_this_tick(double dt) const noexcept {
+        return update_timer_ <= dt || missile_threat() != nullptr;
+    }
 
     // --- Accessors ---
 
@@ -202,10 +250,31 @@ public:
 
 private:
     void rebuild_target_list();
+
+    /// The PERF-1 split: both paths (world query, pushed picture) share
+    /// the per-contact build — the fusion's OUTPUT contract lives here,
+    /// so the paths cannot drift apart. Fills t (identity, cached state,
+    /// hostility, missile role), computes geometry + threat score,
+    /// applies the detection rules (policy or legacy), EWMA-blends
+    /// against prev, and appends to targets_.
+    void emplace_target(std::uint64_t entity_id,
+                        const f4::geo::WorldPosition& position,
+                        const f4::geo::WorldPosition& velocity,
+                        const std::string* team,
+                        bool is_missile,
+                        const f4::geo::WorldPosition& ownship_pos,
+                        const f4::geo::WorldPosition& ownship_vel);
+
+    /// Resolve the ownship's transform + team tag (one handle lookup —
+    /// the world path scanned the full candidate list for it; the result
+    /// is the same entity's data either way). Returns false when the
+    /// ownship is not in the world (the rebuild's early-out).
+    bool resolve_ownship(f4::geo::WorldPosition& pos_out,
+                         f4::geo::WorldPosition& vel_out);
+
     void compute_geometry(TargetInfo& t,
                           const f4::geo::WorldPosition& ownship_pos,
-                          const f4::geo::WorldPosition& ownship_vel,
-                          const f4::entities::TransformComponent& target_tf);
+                          const f4::geo::WorldPosition& ownship_vel);
     void compute_threat_score(TargetInfo& t);
     void update_ewma(TargetInfo& t, const TargetInfo* prev, double dt);
 
@@ -225,6 +294,10 @@ private:
     double update_timer_{0.0};
     std::vector<TargetInfo> targets_;
     std::vector<TargetInfo> prev_targets_;  // snapshot for EWMA rate computation
+
+    /// The host's per-tick shared picture (PERF-1). Non-owning; null =
+    /// the legacy world-query rebuild.
+    const AirPicture* picture_{nullptr};
 };
 
 } // namespace f4::ai

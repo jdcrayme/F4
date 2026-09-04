@@ -374,6 +374,33 @@ namespace f4::entities {
         [[nodiscard]] f4::geo::WorldPosition velocity() const noexcept {
             return f4::geo::WorldPosition(vx, vy, vz);
         }
+
+        /// Ground clutter — the C6 campaign-scale air-picture rule.
+        /// True when this entity is stationary AND at a low MSL altitude:
+        /// parked aircraft, vehicles, battalions, objectives, features.
+        /// Air-picture consumers (the radar's candidate walk, the brain's
+        /// sensor-fusion rebuild) skip clutter entities: at campaign scale
+        /// (a populated save: ~4,400 transform-bearing entities) the
+        /// placeholder "every transform entity" walks cost more than the
+        /// entire tick AND flooded the picture with ground units — the
+        /// reference's radar air picture never paints parked vehicles.
+        ///
+        /// The altitude floor (8,000 ft MSL) sits above every Korea-
+        /// theater terrain post, so nothing GENUINELY airborne is ever
+        /// clutter — a stationary entity at altitude (a test rig's
+        /// hovering target, a future aerial refueling anchor) stays in
+        /// the picture. The documented simplification: a helicopter
+        /// hovering below 8,000 ft reads as clutter (none exist in this
+        /// slice; revisit with the terrain-aware check when ground
+        /// units move).
+        [[nodiscard]] bool is_ground_clutter() const noexcept {
+            constexpr double kStationaryFps = 1.0;       // below: parked
+            constexpr double kGroundClutterMaxAltFt = 8000.0;  // > any
+                                                                 // Korea post
+            return (vx * vx + vy * vy + vz * vz) <=
+                       (kStationaryFps * kStationaryFps) &&
+                   position.z < kGroundClutterMaxAltFt;
+        }
     };
 
     /// Links a sim entity to its campaign-level identity.

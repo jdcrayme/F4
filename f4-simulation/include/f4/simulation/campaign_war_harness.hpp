@@ -143,6 +143,20 @@ struct WarHourSample {
     int airborne = 0;
     int retired = 0;                ///< wrecks reaped (cumulative)
     int world_entities = 0;         ///< EntityWorld::size() now
+    // --- C6 (campaign combat) ------------------------------------------
+    int armed_fighters = 0;         ///< fighting roles armed (cumulative)
+    int aa_kills = 0;               ///< ledger: air losses (cumulative)
+    // --- G1 (ground war) -------------------------------------------------
+    int ground_updates = 0;         ///< engine update ticks (cumulative)
+    int ground_battalions = 0;      ///< battalions alive now
+    int ground_mobile = 0;          ///< mobile battalions alive now
+    int ground_losses = 0;          ///< ledger: vehicles lost (cumulative)
+    int ground_destroyed = 0;       ///< ledger: battalions destroyed
+    int ground_captures = 0;        ///< ledger: objectives captured
+    int ground_engaged = 0;         ///< pulse: pairs in the last update
+    int ground_front_columns = 0;   ///< contested front columns now
+    int ground_march_grid = 0;      ///< army distance walked (grid units)
+    int ground_losses_air = 0;      ///< G2: vehicles lost to AIR (cumulative)
 
     // --- this sample's pulse -------------------------------------------
     int hour_spawns = 0;
@@ -222,6 +236,27 @@ struct WarReport {
     int live_aircraft = 0;
     int airborne = 0;
     int samples = 0;
+    // C6: which war ran + the campaign-combat counters. aa_combat is
+    // the provenance flag the summary's war block echoes; the armed
+    // counts and air_losses together are the C6 acceptance story.
+    bool aa_combat = false;         ///< the session's C6 opt-in
+    int armed_aircraft = 0;         ///< campaign aircraft armed (total)
+    int armed_fighters = 0;         ///< fighting roles armed
+    // G1: which ground war ran + its headline counters (the same
+    // provenance-echo pattern; the QC's exit 13 reads these).
+    bool ground_war = false;        ///< the session's G1 opt-in
+    int ground_updates = 0;         ///< engine update ticks fired
+    int ground_battalions = 0;      ///< battalions alive at the end
+    int ground_mobile = 0;          ///< mobile battalions alive
+    int ground_losses = 0;          ///< ledger: vehicles lost
+    int ground_destroyed = 0;       ///< ledger: battalions destroyed
+    int ground_captures = 0;        ///< ledger: objectives captured
+    int ground_front_columns = 0;   ///< contested front columns
+    int ground_march_grid = 0;      ///< army distance walked (grid)
+    // G2: the interdiction link — which arm ran + its headline number
+    // (the QC's exit 14 reads these: air never attrited a unit).
+    bool unit_strike = false;       ///< the session's G2 opt-in
+    int ground_losses_air = 0;      ///< ledger: vehicles lost to air
 
     // Preconditions the inherited gates key on (echoed for the host's
     // exit-code decisions — the QC's tasking_had_air, war edition).

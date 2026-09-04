@@ -261,6 +261,13 @@ struct AtmConfig {
     /// minute (the reference's GetCruiseSpeed is UCD data the fixture
     /// theaters don't resolve for squadrons; ~400 kt ≈ 12).
     int cruise_grid_per_min = 12;
+    /// G2 — the interdiction arm: UNIT-targeted delivery profiles (the
+    /// CAS family) pick a real enemy battalion (front-line ranked,
+    /// rotation-spread) instead of staying target-less. DEFAULT OFF —
+    /// the golden identity (CAS requests stay target-less and
+    /// route-less, exactly the C3-documented shape). The Campaign's
+    /// own unit_strike flag arms it (one source of truth).
+    bool unit_strike = false;
 };
 
 /// The pipeline's own telemetry (the QC gates and the summary read
@@ -513,6 +520,10 @@ private:
     std::array<std::vector<MissionRequest>, 8> backlog_;
     /// Per-team target rotation cursor (enemy objective list index).
     std::array<int, 8> target_cursor_{};
+    /// G2 — per-team rotation cursor over the ranked enemy BATTALION
+    /// list (the unit-target family's own spread, decoupled from the
+    /// objective rotation).
+    std::array<int, 8> unit_target_cursor_{};
     bool backlog_seeded_ = false;
 
     std::uint32_t next_package_id_ = 1;

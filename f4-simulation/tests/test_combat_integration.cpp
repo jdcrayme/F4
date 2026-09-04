@@ -2261,3 +2261,75 @@ TEST(CombatIntegration, MidairMergeScenarioFilePlaysOut) {
     GTEST_SKIP() << "F4_SCENARIOS_DIR not defined for this target";
 #endif
 }
+
+// ============================================================================
+// 7. PERF-1 — RadarBackedDetectionPolicy's batch hook.
+//
+// prepare_batch() resolves the ownship's radar + RWR once per rebuild;
+// classify() then reads the cached pointers. A batch-prepared classify
+// must answer EXACTLY what the per-call-resolving classify answers —
+// and the corpse rule must hold on both paths.
+// ============================================================================
+TEST(CombatIntegration, RadarBackedPolicyBatchMatchesPerCall) {
+    const auto f16 = f16_config_path();
+    if (f16.empty()) GTEST_SKIP() << "f16.json fixture not generated";
+
+    auto scenario =
+        load_scenario_from_string(combat_scenario_json(f16, true));
+    Simulation sim(std::move(scenario), std::filesystem::path("."));
+    sim.initialize();
+
+    const auto shooter_id = sim.aircraft_entities()[0];
+    const auto bandit_id = sim.aircraft_entities()[1];
+
+    // Give the shooter's radar time to hold a live track on the bandit.
+    for (int i = 0; i < 5 * 60; ++i) sim.tick(kDt);
+
+    // One target list, two policies: fresh (per-call resolution — the
+    // pre-PERF-1 behavior) vs batch-prepared (the rebuild path).
+    f4::ai::SensorFusion sf;
+    sf.initialize(shooter_id.value, sim.world(), sim.bus(),
+                  f4::ai::SkillLevel::Veteran);
+    sf.force_refresh();
+    ASSERT_FALSE(sf.targets().empty());
+
+    RadarBackedDetectionPolicy per_call(sim.world(), shooter_id.value);
+    RadarBackedDetectionPolicy batch(sim.world(), shooter_id.value);
+    batch.prepare_batch();
+
+    for (const auto& t : sf.targets()) {
+        const auto a = per_call.classify(t);
+        const auto b = batch.classify(t);
+        EXPECT_EQ(a.radar, b.radar);
+        EXPECT_EQ(a.rwr, b.rwr);
+        EXPECT_EQ(a.visual, b.visual);
+        EXPECT_EQ(a.gci, b.gci);
+        if (t.entity_id == bandit_id.value) {
+            EXPECT_TRUE(b.radar)
+                << "the batch path lost the live track verdict";
+        }
+    }
+
+    // Corpses answer all-false on BOTH paths (the M3 corpse rule).
+    {
+        entities::EntityHandle bandit(bandit_id, &sim.world());
+        auto* dmg = bandit.get<entities::DamageStateComponent>();
+        ASSERT_NE(dmg, nullptr);
+        dmg->killed = true;
+
+        for (const auto& t : sf.targets()) {
+            if (t.entity_id != bandit_id.value) continue;
+            const auto a = per_call.classify(t);
+            const auto b = batch.classify(t);
+            EXPECT_FALSE(a.radar);
+            EXPECT_FALSE(b.radar);
+        }
+    }
+
+    // A rebuild through the fusion drives the hook itself: the fusion
+    // calls prepare_batch() once, then classify() per contact (the
+    // verdict equivalence is already proven above; this proves the
+    // fusion->prepare_batch()->classify() wiring runs clean).
+    sf.set_detection_policy(&batch);
+    sf.force_refresh();
+}

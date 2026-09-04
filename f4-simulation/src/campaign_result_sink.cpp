@@ -7,6 +7,7 @@
 
 #include <f4/simulation/campaign_origin.hpp>
 #include <f4/weapons/bomb_battery.hpp>   // objective_damage_summary
+#include <f4/entities/entity.hpp>        // UnitCoreComponent, PropertyBag
 
 #include <algorithm>
 
@@ -72,6 +73,11 @@ std::size_t CampaignResultSink::attach(f4::messaging::MessageBus& bus) {
         [this](const f4::weapons::BombImpactMessage& m) {
             handle_bomb_impact(m);
         });
+    unit_loss_subscription_ =
+        bus.subscribe<f4::weapons::GroundUnitLossMessage>(
+            [this](const f4::weapons::GroundUnitLossMessage& m) {
+                handle_unit_loss(m);
+            });
     return kill_subscription_;
 }
 
@@ -85,6 +91,11 @@ void CampaignResultSink::detach(f4::messaging::MessageBus& bus) {
         bus.unsubscribe<f4::weapons::BombImpactMessage>(
             impact_subscription_);
         impact_subscription_ = static_cast<std::size_t>(-1);
+    }
+    if (unit_loss_subscription_ != static_cast<std::size_t>(-1)) {
+        bus.unsubscribe<f4::weapons::GroundUnitLossMessage>(
+            unit_loss_subscription_);
+        unit_loss_subscription_ = static_cast<std::size_t>(-1);
     }
 }
 
@@ -122,10 +133,47 @@ void CampaignResultSink::handle_kill(
 
     if (killer != nullptr) {
         // Origin-less victim, origin-ful shooter: air-to-ground credit.
-        // The victim's OWN ledger (battalion rosters, the ground-war
-        // tranche) does not exist yet — the credit side is what the
-        // campaign books today.
+        // G1: when the victim is a BATTALION entity (the campaign's
+        // ground unit — bubble-deaggregated vehicles are separate
+        // entities and stay the deagg-parenting tranche's), the
+        // victim's own ledger books too: one vehicle loss on the
+        // battalion, air-sourced, provenance-carried. The ground war
+        // engine PULLS these events on its next update and thins the
+        // line accordingly — air power shapes the ground fight.
+        // (G2's AGGREGATE blast path rides GroundUnitLossMessage —
+        // handle_unit_loss above; THIS branch is the entity-kill path:
+        // deaggregated vehicles today, missile/gun-vs-battalion later.)
+        std::uint32_t victim_battalion = 0;
+        std::uint8_t victim_team = 0;
+        const EntityId vid{m.target_id};
+        if (vid.valid()) {
+            EntityHandle vh(vid, &world_);
+            const auto* uc = vh.get<f4::entities::UnitCoreComponent>();
+            if (uc != nullptr &&
+                uc->unit_class == f4::entities::UnitClass::Battalion) {
+                const auto* pb = vh.get<f4::entities::PropertyBag>();
+                if (pb != nullptr) {
+                    const auto it = pb->ints.find("vu_id_num");
+                    if (it != pb->ints.end() && it->second > 0) {
+                        victim_battalion =
+                            static_cast<std::uint32_t>(it->second);
+                    }
+                }
+                if (const auto t =
+                        vh.get_tag(f4::entities::tags::TEAM);
+                    t.has_value() && t->as_int() != nullptr) {
+                    victim_team = static_cast<std::uint8_t>(
+                        *t->as_int());
+                }
+            }
+        }
         ledger_.apply_ag_kill(m.sim_time_s, killer->squadron_vu);
+        if (victim_battalion != 0) {
+            ledger_.apply_ground_loss(
+                m.sim_time_s, victim_battalion, victim_team, 0, 0,
+                /*kills=*/1, /*air_source=*/true,
+                killer->squadron_vu);
+        }
         ++stats_.ag_kills_recorded;
         return;
     }
@@ -154,6 +202,63 @@ void CampaignResultSink::handle_bomb_impact(
     }
     ledger_.apply_bomb_impact(m.sim_time_s, objective_vu,
                               m.miss_distance_ft, m.features_destroyed);
+}
+
+void CampaignResultSink::handle_unit_loss(
+        const f4::weapons::GroundUnitLossMessage& m) {
+    ++stats_.unit_losses_seen;
+    if (!book_unit_losses_ || m.vehicles_killed <= 0) return;
+
+    // The victim's campaign keys (vu + team), resolved the same way the
+    // entity-kill branch resolves them; the shooter's squadron for the
+    // credit (an origin-ful aircraft — the release stamped it).
+    std::uint32_t victim_battalion = 0;
+    std::uint8_t victim_team = 0;
+    const EntityId vid{m.target_id};
+    if (vid.valid()) {
+        EntityHandle vh(vid, &world_);
+        if (const auto* uc =
+                vh.get<f4::entities::UnitCoreComponent>();
+            uc != nullptr &&
+            uc->unit_class == f4::entities::UnitClass::Battalion) {
+            const auto* pb = vh.get<PropertyBag>();
+            if (pb != nullptr) {
+                const auto it = pb->ints.find("vu_id_num");
+                if (it != pb->ints.end() && it->second > 0) {
+                    victim_battalion =
+                        static_cast<std::uint32_t>(it->second);
+                }
+            }
+            if (const auto t = vh.get_tag(f4::entities::tags::TEAM);
+                t.has_value() && t->as_int() != nullptr) {
+                victim_team = static_cast<std::uint8_t>(*t->as_int());
+            }
+        }
+    }
+    if (victim_battalion == 0) {
+        // The battalion no longer resolves (a stale target id after the
+        // entity's removal): counted, loud, not booked — the boundary
+        // rule; the engine's pull would drop it anyway.
+        return;
+    }
+
+    const CampaignOriginComponent* killer = origin_of_(
+        EntityId{m.shooter_id});
+    const std::uint32_t killer_squadron =
+        (killer != nullptr) ? killer->squadron_vu : 0;
+
+    // The books: one ground-loss record (air-sourced, provenance-
+    // carried — the engine pulls it on its next update and thins the
+    // line) + per-vehicle ag credit (the reference counts vehicles, and
+    // so does the squadron book).
+    ledger_.apply_ground_loss(
+        m.sim_time_s, victim_battalion, victim_team, 0, 0,
+        m.vehicles_killed, /*air_source=*/true, killer_squadron);
+    for (int i = 0; i < m.vehicles_killed; ++i) {
+        ledger_.apply_ag_kill(m.sim_time_s, killer_squadron);
+    }
+    ++stats_.unit_losses_booked;
+    stats_.unit_vehicles_booked += m.vehicles_killed;
 }
 
 void CampaignResultSink::sync_objective_damage() {

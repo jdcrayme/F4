@@ -5,6 +5,7 @@
 
 #include <f4/simulation/campaign_session.hpp>
 
+#include <f4/campaign/ground_writeback.hpp>
 #include <f4/campaign/mission_profile.hpp>
 #include <f4/campaign/world_writeback.hpp>
 #include <f4/simulation/scenario.hpp>
@@ -12,6 +13,7 @@
 #include <f4/data/config_loader.hpp>
 #include <f4/io/read_file.hpp>
 #include <f4/weapons/messages.hpp>
+#include <f4/world/world_loader.hpp>   // populate_world (G1 mirror)
 
 #include <algorithm>
 #include <fstream>
@@ -59,7 +61,9 @@ std::string session_scenario_json(
         const std::filesystem::path& aircraft_config,
         bool campaign_flights,
         const f4::simulation::FlightSpawnFilter& filter,
-        double sim_dt) {
+        double sim_dt,
+        bool aa_combat,
+        const std::filesystem::path& brain_data) {
     std::ostringstream out;
     out << "{\n";
     out << "  \"name\": \"f4_viewer_campaign_session\",\n";
@@ -92,7 +96,25 @@ std::string session_scenario_json(
                "{\"x\": 0.0, \"y\": 0.0, \"z\": 0.0}]\n";
         out << "  },\n";
     }
-    out << "  \"combat\": {\"enabled\": true},\n";
+    // Combat: the sweeps are always on (the brain-intent driver + RWR
+    // rebuild + missile sweeps — no-ops when no combat components
+    // exist). C6's campaign arming is OPT-IN: aa_combat writes
+    // campaign_armed + the full ROE (bvr/missiles/guns free — the war's
+    // fights resolve to kills, the acceptance the ledger books) + the
+    // doctrine's brain-data path when the caller pinned one. With
+    // aa_combat off the block is EXACTLY the pre-C6 bytes — every
+    // golden pins that shape.
+    if (aa_combat) {
+        out << "  \"combat\": {\"enabled\": true, \"campaign_armed\": true,"
+               " \"bvr_hold\": false, \"missiles_hold\": false,"
+               " \"guns_hold\": false},\n";
+        if (!brain_data.empty()) {
+            out << "  \"brain_data_path\": \""
+                << json_escape(brain_data.string()) << "\",\n";
+        }
+    } else {
+        out << "  \"combat\": {\"enabled\": true},\n";
+    }
     // The template every spawn path shares (callsign prefix, config,
     // vis fallback). In scenario-list mode it is also the one parked
     // aircraft that anchors the FM workload while the ladder generates.
@@ -246,6 +268,10 @@ CampaignSession::create(const CampaignSessionOptions& opts,
         opts.class_table.empty()
             ? std::filesystem::path{}
             : std::filesystem::absolute(opts.class_table);
+    const auto brain_abs =
+        opts.brain_data.empty()
+            ? std::filesystem::path{}
+            : std::filesystem::absolute(opts.brain_data);
     f4::simulation::FlightSpawnFilter filter;
     filter.team = opts.team;
     filter.mission = opts.mission;
@@ -257,7 +283,8 @@ CampaignSession::create(const CampaignSessionOptions& opts,
         std::ofstream out(scenario_path);
         out << session_scenario_json(world_abs, ct_abs,
                                      opts.aircraft_config, have_flights,
-                                     filter, opts.sim_dt);
+                                     filter, opts.sim_dt, opts.aa_combat,
+                                     brain_abs);
         if (!out.good()) {
             return fail("cannot write " + scenario_path.string());
         }
@@ -275,6 +302,23 @@ CampaignSession::create(const CampaignSessionOptions& opts,
         session->sim_->initialize();
     } catch (const std::exception& e) {
         return fail(std::string("simulation init failed: ") + e.what());
+    }
+
+    // 7b. G1 — the ground mirror needs the world POPULATED. The
+    //     campaign_flights spawn mode populates it inside initialize();
+    //     the flight-less scenario-list mode does not (a world with no
+    //     flights never needed battalion entities before the ground
+    //     war). When the ground war is armed on a flight-less world,
+    //     populate here — the SAME call the campaign_flights path
+    //     makes, the same entity shape (teams + objectives + units
+    //     with transforms + tactical components). Ground-quiet
+    //     sessions keep the lean world (the opt-in contract).
+    //     G2: unit_strike needs the battalion entities too (the CAS
+    //     bombs' targets — transforms + UnitCore the blast endpoint
+    //     and the sink resolve), so the populate gate takes either arm.
+    if ((opts.ground_war || opts.unit_strike) && !have_flights) {
+        (void)f4::world::populate_world(session->sim_->world(),
+                                        session->ws_);
     }
 
     // 8. Cross-reference maps over the SIM's world (the spawner's
@@ -341,6 +385,10 @@ CampaignSession::create(const CampaignSessionOptions& opts,
     ladder_cfg.reinforcement_period_sec = opts.reinforce_period_sec;
     ladder_cfg.atm_pipeline = opts.atm_pipeline;
     ladder_cfg.atm.min_seadescort_threat = opts.atm_seadescort_threat;
+    // G2: the interdiction arm — BOTH ladders (legacy + ATM) and the
+    // sink's unit-loss booking ride this one flag (the aa_combat /
+    // ground_war opt-in contract).
+    ladder_cfg.unit_strike = opts.unit_strike;
     session->ladder_ = std::make_unique<f4::campaign::Campaign>(
         static_cast<const f4::world::ICampaignSource&>(
             session->adapters_->campaign),
@@ -350,6 +398,31 @@ CampaignSession::create(const CampaignSessionOptions& opts,
             session->adapters_->units),
         session->profiles_, session->sim_->bus(), ladder_cfg);
     session->ladder_->set_result_ledger(session->ledger_.get());
+
+    // 11b. G1 — the ground war engine, over the same sources and the
+    //      same ledger (one writer, one clock, one certificate). It
+    //      borrows the ledger MUTABLY (the C2 discipline, bound at
+    //      construction because the engine has no ledger-less
+    //      campaign mode). The ADAPTERS outlive it (member order:
+    //      adapters die after ground_).
+    if (opts.ground_war) {
+        f4::campaign::GroundWarConfig gcfg;
+        gcfg.update_sec = opts.ground_update_sec > 0
+            ? opts.ground_update_sec : 60;
+        gcfg.orders_sec = opts.ground_orders_sec > 0
+            ? opts.ground_orders_sec : 1800;
+        gcfg.resupply_period_sec = opts.ground_resupply_sec;
+        session->ground_ = std::make_unique<f4::campaign::GroundWar>(
+            static_cast<const f4::world::ICampaignSource&>(
+                session->adapters_->campaign),
+            static_cast<const f4::world::ITeamSource&>(
+                session->adapters_->teams),
+            static_cast<const f4::world::IObjectiveSource&>(
+                session->adapters_->objectives),
+            static_cast<const f4::world::IUnitCoreSource&>(
+                session->adapters_->units),
+            session->ledger_.get(), gcfg);
+    }
 
     // 12. The route planner (C3) — threat map from the same sources,
     //     viewed from the FIRST BELLIGERENT (te_team can be neutral;
@@ -383,6 +456,9 @@ CampaignSession::create(const CampaignSessionOptions& opts,
     session->sink_ =
         std::make_unique<f4::simulation::CampaignResultSink>(
             *session->ledger_, session->sim_->world());
+    // G2: arm the unit-loss booking BEFORE attach (the first bomb
+    // can land within the first advance).
+    session->sink_->set_book_unit_losses(opts.unit_strike);
     session->sink_->attach(session->sim_->bus());
 
     // 14. C5's wreck policy — subscribe the kill feed when armed. The
@@ -460,6 +536,12 @@ bool CampaignSession::advance(double real_seconds, int max_steps_override) {
             const auto whole = static_cast<int>(campaign_sec_accum_);
             campaign_sec_accum_ -= static_cast<double>(whole);
             ladder_->tick(whole);
+            // G1: the ground war rides the same whole-second cadence
+            // (its own accumulator gates on the update granularity).
+            if (ground_ != nullptr) {
+                ground_sec_accum_ += static_cast<double>(whole);
+                advance_ground_();
+            }
             // The damage sync rides the same cadence: final-state diff
             // of every damaged objective (cheap — the diff walks only
             // objectives with damage components).
@@ -484,10 +566,14 @@ void CampaignSession::adopt_new_spawns_() {
     // The one-world closure: everything the spawner materialized since
     // the last look joins the sim's roster, so the FM → transform sync
     // covers it. Registered idempotently — a spawn already in the
-    // roster is a no-op.
+    // roster is a no-op. C6: registration and ARMING ride the same
+    // cadence — every late spawn becomes a FIGHTING (or defending)
+    // aircraft the same campaign second it joins the roster (the arm
+    // is itself idempotent, so the pairing can never double-attach).
     const auto& spawned = spawner_->spawned();
     while (registered_spawns_ < spawned.size()) {
         sim_->register_aircraft(spawned[registered_spawns_]);
+        sim_->arm_campaign_aircraft(spawned[registered_spawns_]);
         ++registered_spawns_;
     }
 }
@@ -515,6 +601,94 @@ void CampaignSession::retire_due_wrecks_() {
     pending_wrecks_.resize(kept);
 }
 
+// ---------------------------------------------------------------------------
+// G1 — the ground war's cadence + the entity-side mirror
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// One grid unit = 1024 ft (the campaign bridge's own constant; not
+// exported — re-declared here the same way campaign_bridge.cpp does).
+constexpr double kFtPerGrid = 1024.0;
+
+} // namespace
+
+void CampaignSession::advance_ground_() {
+    if (ground_ == nullptr) return;
+
+    // The engine's tick() accumulates on its own clock; feed it the
+    // whole campaign seconds owed. One big tick == N small ones (the
+    // C2 pin — the engine fires updates at fixed update_sec
+    // boundaries).
+    if (ground_sec_accum_ >= 1.0) {
+        const auto whole = static_cast<f4::campaign::CampaignTime>(
+            ground_sec_accum_);
+        ground_sec_accum_ -= static_cast<double>(whole);
+        ground_->tick(whole);
+    }
+
+    // Mirror whenever the engine actually advanced.
+    if (ground_->stats().updates != ground_synced_updates_) {
+        ground_synced_updates_ = ground_->stats().updates;
+        sync_ground_entities_();
+    }
+}
+
+void CampaignSession::sync_ground_entities_() {
+    // The engine's state is campaign truth; the sim's entities are its
+    // mirror (the one-world rule). One full pass per engine update —
+    // only CHANGED values write (read first), so a stalled front
+    // costs nothing. Destroyed battalions flip their ALIVE tag (the
+    // entity stays in the world, the same lifetime a wreck keeps
+    // before the reaper — a ground reaper is a later tranche's).
+    auto& world = sim_->world();
+    for (const auto& g : ground_->units()) {
+        const auto it = unit_id_map_.find(g.vu);
+        if (it == unit_id_map_.end()) continue;
+        f4::entities::EntityHandle h(it->second, &world);
+
+        auto* tf = h.get<f4::entities::TransformComponent>();
+        if (tf != nullptr) {
+            const f4::geo::WorldPosition want{
+                static_cast<double>(g.x) * kFtPerGrid,
+                static_cast<double>(g.y) * kFtPerGrid,
+                tf->position.z   // terrain-following is not modeled; z
+                                 // keeps the populate-time value
+            };
+            if (want.x != tf->position.x || want.y != tf->position.y) {
+                tf->position = want;
+            }
+        }
+
+        auto* gt = h.get<f4::entities::GroundTacticalComponent>();
+        if (gt != nullptr) {
+            gt->supply = g.supply;
+            gt->morale = g.morale;
+            gt->fatigue = g.fatigue;
+            gt->heading = g.heading;
+            gt->last_move = static_cast<std::int32_t>(std::min(
+                static_cast<std::int64_t>(g.last_move),
+                static_cast<std::int64_t>(2147483647)));
+            gt->last_combat = static_cast<std::int32_t>(std::min(
+                static_cast<std::int64_t>(g.last_combat),
+                static_cast<std::int64_t>(2147483647)));
+        }
+
+        auto* uc = h.get<f4::entities::UnitCoreComponent>();
+        if (uc != nullptr && uc->roster != g.roster) {
+            uc->roster = g.roster;
+        }
+
+        if (g.destroyed) {
+            const auto alive = h.get_tag(f4::entities::tags::ALIVE);
+            if (!alive.has_value() || alive->as_bool()) {
+                h.set_tag(f4::entities::tags::ALIVE,
+                          f4::entities::TagValue::from(false));
+            }
+        }
+    }
+}
+
 void CampaignSession::refresh_stats_() {
     stats_ = {};
     if (!sim_) return;
@@ -537,6 +711,29 @@ void CampaignSession::refresh_stats_() {
         stats_.escorts = atm->escorts_built;
     }
     stats_.recovered = ledger_->aircraft_recovered();
+    // C6: the campaign-combat counters (the armed doctrine's shape and
+    // its ledger-side result — the war's A/A story in one place).
+    stats_.armed_aircraft = sim_->campaign_armed_aircraft();
+    stats_.armed_fighters = sim_->campaign_armed_fighters();
+    stats_.armed_defensive = sim_->campaign_armed_defensive();
+    stats_.aa_kills = ledger_->air_losses();
+    // G1: the ground war's one-frame numbers (engine state + ledger
+    // books — the panel's ground row).
+    if (ground_ != nullptr) {
+        const auto& gs = ground_->stats();
+        stats_.ground_updates = gs.updates;
+        stats_.ground_battalions = gs.battalions_alive;
+        stats_.ground_mobile = gs.battalions_mobile;
+        stats_.ground_engaged = gs.update_engaged;
+        stats_.ground_front_columns = gs.front_columns;
+        stats_.ground_losses = ledger_->ground_vehicle_losses();
+        stats_.ground_destroyed = ledger_->ground_battalions_destroyed();
+        stats_.ground_captures = ledger_->ground_objectives_captured();
+    }
+    // G2: the interdiction number reads the ledger directly (it books
+    // with unit_strike on, with or without the engine — air-caused
+    // losses are state even when nobody applies them).
+    stats_.ground_losses_air = ledger_->ground_vehicle_losses_air();
     stats_.synthetic_spawned = spawner_->stats().synthetic_spawned;
     stats_.live_aircraft = static_cast<int>(sim_->aircraft_entities().size());
     stats_.retired = sim_->retired_aircraft();

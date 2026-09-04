@@ -53,6 +53,8 @@
 #pragma once
 
 #include <f4/campaign/campaign.hpp>
+#include <f4/campaign/ground_war.hpp>
+#include <f4/campaign/ground_writeback.hpp>
 #include <f4/campaign/result_ledger.hpp>
 #include <f4/campaign/route_builder.hpp>
 #include <f4/campaign/world_writeback.hpp>
@@ -131,6 +133,56 @@ struct CampaignSessionOptions {
     /// pre-C5 lifetime (wrecks freeze in place; every golden pins it);
     /// the war harness arms 300.
     double wreck_hold_sec = 0.0;
+
+    /// C6: arm the campaign flights for A/A combat — the mission-role
+    /// doctrine (CAP/Sweep/Intercept/Escort fight the full ladder;
+    /// every other category flies defensive-only through its BRAINDAT
+    /// archetype) + the combat component set + radar-backed detection
+    /// (GCI-omniscience goes dark) + the doctrine A/A loadout for
+    /// fighting roles. A/A kills book as air losses in the ledger and
+    /// the reaper finally has wrecks to reap. Default false — the
+    /// session's world is byte-identical to the pre-C6 shape with it
+    /// off (the same contract wreck_hold_sec = 0 keeps). The ROE the
+    /// armed campaign flies: full (bvr/missiles/guns all free — the
+    /// war's acceptance wants fights to resolve).
+    bool aa_combat = false;
+    /// C6: the BRAINDAT archetype table the doctrine's defensive roles
+    /// stand down through. Empty = the sim's build-tree generated
+    /// default (simdata/braindata.json). Only read when aa_combat.
+    std::filesystem::path brain_data;
+
+    /// G1: run the GROUND WAR — battalion movement, the front line,
+    /// engagement attrition, and objective capture, on the campaign
+    /// clock (see f4/campaign/ground_war.hpp). Ground events book in
+    /// the same ledger the air war books (the C5 certificate covers
+    /// both), moved battalions mirror into the sim's entities (the
+    /// 3D world's ground units march), and the write-back gains the
+    /// ground block (apply_ground_writeback). Default false — the
+    /// session is byte-identical to the pre-G1 shape with it off (the
+    /// same contract aa_combat keeps).
+    bool ground_war = false;
+    /// G1: the ground update cadence (campaign seconds; 60 = the
+    /// engine default). Compressed-rig hosts shrink it.
+    int ground_update_sec = 60;
+    /// G1: the GTM orders cadence (campaign seconds; 1800 = the
+    /// engine default).
+    int ground_orders_sec = 1800;
+    /// G1: the ground resupply cadence (campaign seconds; 0 = OFF,
+    /// the engine's golden-identity default — the QC's war arms
+    /// 43200 like the aircraft reinforcement cadence).
+    int ground_resupply_sec = 0;
+
+    /// G2: run the INTERDICTION link — UNIT-targeted delivery missions
+    /// (the CAS family) resolve real enemy battalion targets (front-
+    /// line ranked) and route to them, and the bombs they drop BOOK
+    /// (the sink's unit-loss arm: ground losses air-sourced + per-
+    /// vehicle ag credit; the ground-war engine pulls them and thins
+    /// the line when ground_war is on — see
+    /// Docs/INTERDICTION_PLAN.md). Default false: UNIT-target
+    /// profiles stay target-less/route-less (the C3-documented
+    /// deferral) and unit-loss events count but do not book — the
+    /// session is byte-identical to the pre-G2 shape with it off.
+    bool unit_strike = false;
 };
 
 /// The live campaign session. Create via create(); destroy to reset —
@@ -159,6 +211,23 @@ public:
         int packages = 0;             ///< ATM: packages built
         int escorts = 0;              ///< ATM: support flights paired
         int recovered = 0;            ///< ledger: aircraft recovered
+        // --- C6 (campaign combat) ----------------------------------------
+        int armed_aircraft = 0;       ///< sim: campaign aircraft armed
+        int armed_fighters = 0;       ///< sim: fighting roles armed
+        int armed_defensive = 0;      ///< sim: defensive roles armed
+        int aa_kills = 0;             ///< ledger: air losses (A/A combat)
+        // --- G1 (ground war) -----------------------------------------------
+        int ground_updates = 0;       ///< engine: update ticks fired
+        int ground_battalions = 0;    ///< engine: battalions alive now
+        int ground_mobile = 0;        ///< engine: mobile battalions alive
+        int ground_losses = 0;        ///< ledger: vehicles lost
+        /// G2: the air-sourced share — vehicles removed from battalions
+        /// by air power (the interdiction link's headline number).
+        int ground_losses_air = 0;    ///< ledger: air-caused vehicles
+        int ground_destroyed = 0;     ///< ledger: battalions destroyed
+        int ground_captures = 0;      ///< ledger: objectives captured
+        int ground_engaged = 0;       ///< engine: pairs in last update
+        int ground_front_columns = 0; ///< engine: contested front columns
     };
 
     /// Build the whole graph. Returns nullptr and fills `error` on any
@@ -248,6 +317,24 @@ public:
         return f4::campaign::apply_to(*ledger_, ws_);
     }
 
+    /// G1: write the ground war's state back (battalion positions/
+    /// rosters/state, objective owner flips) — the air write-back's
+    /// ground twin, the same in-memory contract.
+    [[nodiscard]] f4::campaign::GroundWritebackResult
+    apply_ground_writeback() {
+        if (ground_ == nullptr) {
+            return f4::campaign::GroundWritebackResult{};
+        }
+        return f4::campaign::apply_ground_to(*ground_, ws_);
+    }
+
+    /// G1: the ground war engine (null when the session ran without
+    /// ground_war). Read access for the viewer's ground panel.
+    [[nodiscard]] const f4::campaign::GroundWar* ground_war() const
+        noexcept {
+        return ground_.get();
+    }
+
     /// The session's own WorldState (the write-back target; the world
     /// JSON re-read for the session — the host's static layer may hold
     /// its own copy).
@@ -296,6 +383,18 @@ private:
     /// armed when wreck_hold_sec > 0 — a no-op otherwise).
     void retire_due_wrecks_();
 
+    /// G1: fire the ground war's update ticks for every whole
+    /// ground-second owed by the campaign clock (the ladder's own
+    /// per-second cadence, on the ground engine's coarser update
+    /// granularity), then mirror moved battalions into the sim's
+    /// entities (transforms + tactical state + roster decay + the
+    /// ALIVE tag on destruction).
+    void advance_ground_();
+
+    /// G1: the entity-side mirror — one pass over the engine's dirty
+    /// battalions (the write-back's own activity rule).
+    void sync_ground_entities_();
+
     /// Recompute stats_ from the live objects.
     void refresh_stats_();
 
@@ -340,6 +439,7 @@ private:
     std::unique_ptr<f4::campaign::CampaignResultLedger> ledger_;
     std::unique_ptr<f4::campaign::RouteBuilder> route_builder_;
     std::unique_ptr<f4::campaign::Campaign> ladder_;
+    std::unique_ptr<f4::campaign::GroundWar> ground_;
     std::unique_ptr<f4::simulation::CampaignSimSpawner> spawner_;
     std::unique_ptr<f4::simulation::CampaignResultSink> sink_;
 
@@ -368,6 +468,12 @@ private:
         double death_s = 0.0;
     };
     std::vector<PendingWreck> pending_wrecks_;
+
+    // G1: the ground war's own cadence accumulator (campaign seconds
+    // owed to the engine) + the last-synced engine update count (so
+    // the entity mirror only walks when the engine actually advanced).
+    double ground_sec_accum_ = 0.0;
+    int ground_synced_updates_ = 0;
 
     // Display snapshot.
     Stats stats_;

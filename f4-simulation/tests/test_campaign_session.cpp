@@ -320,3 +320,171 @@ TEST(CampaignSession, AtmPipelineBuildsPackagesAndRecoversAircraft) {
               b->campaign().to_summary_json());
     EXPECT_EQ(a->ledger_json(), b->ledger_json());
 }
+
+// ── 6. G1 — the ground war rides the session ──────────────────────────────
+//
+// The engine's unit-level behavior is f4-campaign's own test file; here
+// we pin what the SESSION adds: the cadence (update ticks fire off the
+// campaign clock), the ledger's ground block (the C5 certificate now
+// covers the ground side), the ENTITY MIRROR (battalion transforms
+// follow the engine's grid positions), the ground write-back, and the
+// two contracts that matter to every pre-G1 consumer: ground OFF is
+// byte-identical (the golden identity), ground ON is deterministic.
+TEST(CampaignSession, GroundWarRunsBooksMirrorsAndWritesBack) {
+    if (!std::filesystem::exists(f16_config())) {
+        GTEST_SKIP() << "f16.json fixture not generated";
+    }
+    CampaignSessionOptions o = make_opts(kunsan_world());
+    o.ground_war = true;
+    o.ground_update_sec = 5;     // a fire every 5 campaign seconds
+    o.ground_orders_sec = 5;
+
+    std::string err;
+    auto session = CampaignSession::create(o, &err);
+    ASSERT_NE(session, nullptr) << "create failed: " << err;
+    session->set_paused(false);
+    for (int frame = 0; frame < 20; ++frame) {
+        session->advance(1.0);
+    }
+
+    // The engine fired its updates and sees the army.
+    ASSERT_NE(session->ground_war(), nullptr);
+    EXPECT_GT(session->stats().ground_updates, 0);
+    EXPECT_GT(session->stats().ground_battalions, 0);
+    EXPECT_EQ(session->stats().ground_battalions,
+              static_cast<int>(session->ground_war()->units().size()));
+
+    // The ledger books the ground state (the artifact's ground block —
+    // the battalions marched, so the sync carried them).
+    EXPECT_NE(session->ledger_json().find("\"ground\""),
+              std::string::npos);
+
+    // The entity mirror: a battalion's transform follows the engine's
+    // grid position (1 grid = 1024 ft, the bridge's own conversion).
+    int mirrored = 0;
+    int checked = 0;
+    for (const auto& g : session->ground_war()->units()) {
+        const auto it = session->unit_id_map().find(g.vu);
+        if (it == session->unit_id_map().end()) continue;
+        auto h = f4::entities::EntityHandle(it->second,
+                                            &session->sim().world());
+        const auto* tf = h.get<f4::entities::TransformComponent>();
+        if (tf == nullptr) continue;
+        ++checked;
+        if (std::abs(tf->position.x - g.x * 1024.0) < 0.5 &&
+            std::abs(tf->position.y - g.y * 1024.0) < 0.5) {
+            ++mirrored;
+        }
+        if (checked >= 24) break;   // a bounded sample
+    }
+    ASSERT_GT(checked, 0) << "no battalion entities in the sim world";
+    EXPECT_EQ(mirrored, checked)
+        << "a battalion entity is not at the engine's grid position";
+
+    // The ground write-back lands (positions moved → battalions
+    // written; kunsan's armies march at 12 s of war).
+    const auto res = session->apply_ground_writeback();
+    EXPECT_TRUE(res.unmatched_battalions.empty());
+    EXPECT_TRUE(res.unmatched_objectives.empty());
+}
+
+TEST(CampaignSession, GroundWarOffIsByteIdenticalAndOnIsDeterministic) {
+    if (!std::filesystem::exists(f16_config())) {
+        GTEST_SKIP() << "f16.json fixture not generated";
+    }
+    // OFF: the golden identity — a ground-quiet session's ledger bytes
+    // are exactly the pre-G1 shape (no "ground" key anywhere).
+    std::string err;
+    auto off = CampaignSession::create(make_opts(kunsan_world()), &err);
+    ASSERT_NE(off, nullptr) << err;
+    for (int frame = 0; frame < 6; ++frame) off->advance(1.0);
+    EXPECT_EQ(off->ledger_json().find("\"ground\""), std::string::npos);
+    EXPECT_EQ(off->stats().ground_updates, 0);
+
+    // ON: two identically-driven sessions, identical ledger bytes (the
+    // C5 contract, ground edition).
+    CampaignSessionOptions o = make_opts(kunsan_world());
+    o.ground_war = true;
+    o.ground_update_sec = 5;
+    o.ground_orders_sec = 5;
+    auto a = CampaignSession::create(o, &err);
+    auto b = CampaignSession::create(o, &err);
+    ASSERT_NE(a, nullptr) << err;
+    ASSERT_NE(b, nullptr) << err;
+    for (int frame = 0; frame < 10; ++frame) {
+        a->advance(1.0);
+        b->advance(1.0);
+    }
+    EXPECT_EQ(a->ledger_json(), b->ledger_json());
+    EXPECT_GT(a->stats().ground_updates, 0);
+}
+
+// ── G2 — the interdiction link: CAS tasks against real battalions ──────────
+
+TEST(CampaignSession, UnitStrikeTasksCasAgainstBattalions) {
+    if (!std::filesystem::exists(f16_config())) {
+        GTEST_SKIP() << "f16.json fixture not generated";
+    }
+    CampaignSessionOptions o = make_opts(kunsan_world());
+    // The QC's shape: the ATM pipeline (FindBestAir scores role rather
+    // than gates) + the interdiction arm.
+    o.atm_pipeline = true;
+    o.unit_strike = true;
+
+    std::string err;
+    auto session = CampaignSession::create(o, &err);
+    ASSERT_NE(session, nullptr) << "create failed: " << err;
+    session->set_paused(false);
+    for (int frame = 0; frame < 12; ++frame) {
+        session->advance(1.0);
+    }
+
+    // The ladder tasked at least one CAS-family intent (byte 20) whose
+    // target resolves a BATTALION entity in the unit map — the unit
+    // id map IS the resolution (VU → any UnitCore entity; the mission
+    // plan's builder keys on the same map).
+    int cas_intents = 0;
+    int cas_unit_targeted = 0;
+    int cas_routed = 0;
+    for (const auto& intent : session->intents()) {
+        if (intent.mission_byte != 20 /* AMIS_CAS */) continue;
+        ++cas_intents;
+        const auto it = session->unit_id_map().find(
+            intent.target_objective_id);
+        if (it == session->unit_id_map().end()) continue;
+        auto h = f4::entities::EntityHandle(it->second,
+                                            &session->sim().world());
+        const auto* uc =
+            h.get<f4::entities::UnitCoreComponent>();
+        if (uc != nullptr &&
+            uc->unit_class == f4::entities::UnitClass::Battalion) {
+            ++cas_unit_targeted;
+            if (!intent.route.empty()) ++cas_routed;
+        }
+    }
+    EXPECT_GT(cas_intents, 0) << "no CAS intents over the ATM pipeline";
+    EXPECT_GT(cas_unit_targeted, 0)
+        << "CAS never resolved a battalion target";
+    // Routes: kunsan's wing carries no airbase (the fixture's shape),
+    // so the route observation is honest here but not assertable —
+    // the TestCamp acceptance war (real airbases) proves the CAS
+    // routing end to end. The routed counter stays as coverage:
+    // TestCamp-shaped worlds fire it.
+    (void)cas_routed;
+
+    // The interdiction arm changes the tasking shape: the SAME options
+    // with the arm OFF produce no unit-targeted CAS (the C3 deferral).
+    CampaignSessionOptions off = o;
+    off.unit_strike = false;
+    auto session_off = CampaignSession::create(off, &err);
+    ASSERT_NE(session_off, nullptr) << "create failed: " << err;
+    session_off->set_paused(false);
+    for (int frame = 0; frame < 12; ++frame) {
+        session_off->advance(1.0);
+    }
+    for (const auto& intent : session_off->intents()) {
+        if (intent.mission_byte != 20) continue;
+        EXPECT_EQ(intent.target_objective_id, 0u)
+            << "CAS tasked a unit target with the arm OFF";
+    }
+}

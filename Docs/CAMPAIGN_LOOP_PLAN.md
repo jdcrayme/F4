@@ -5,10 +5,15 @@
 > A* + route builder, generation-to-spawn), V-CAMP (the live
 > campaign session — the viewer runs the war), C4 (the ATM
 > pipeline — 7-phase tasking, FindBestAir, escort pairing, TOT
-> slots, mission recovery), and C5 (the 24-hour war — the
-> long-horizon acceptance harness) are LANDED** — the campaign loop
-> is CLOSED end to end. The rest of this document is the roadmap
-> that got here (the known-gaps §7 is the forward queue).
+> slots, mission recovery), C5 (the 24-hour war — the
+> long-horizon acceptance harness), C6 (arming the campaign
+> flights — A/A goes live), G1 (the ground war — battalion
+> maneuver, the front line, attrition, capture), and G2 (the
+> interdiction link — CAS against real battalions, the bombs
+> booking, the engine pulling) are LANDED** — the campaign loop is
+> CLOSED end to end, both sides of it AND the diagonal between
+> them. The rest of this document is the roadmap that got here
+> (the known-gaps §7 is the forward queue).
 > **Prerequisite**: B.3 landed (campaign→sim loop: intents → spawner →
 > aircraft fly saved routes; `campaign_qc` gates the loop end to end).
 > **Companion**: [Next Phase Plan](NEXT_PHASE_PLAN.md) (§B — the campaign
@@ -393,6 +398,158 @@ COMBAT_CHAIN_PLAN), so war runs book bomb damage and attrition-side
 ledger events but no air kills, and the reaper's churn machinery
 stays quiet until that arming lands (its mechanics are pinned by the
 harness tests regardless: hold → retire-once → roster identity).
+**Closed by C6 below.**
+
+### C6 — arming the campaign flights (A/A goes live) (LANDED)
+
+The C5 limitation was structural, not missing machinery. Every piece
+of the fight already existed and was test-pinned — weapons, radar,
+RWR, track files, BVR/WVR/defeat tactics, the arbiter, the kill→ledger
+flow, the reaper — but none of it was ATTACHED to campaign flights:
+`spawn_aircraft_for_flight` deliberately left `combat_enabled` off
+(campaign_bridge.cpp's own note: the A/A rungs on an
+omniscient-GCI picture would break route-following). C6 is the
+integration tranche that flips that, on three legs:
+
+1. **The components** (C6.1). `Simulation::arm_campaign_aircraft(id)`
+   attaches, per campaign aircraft, the M3 combat set the scenario
+   path already uses — `RadarSimComponent`, `RwrComponent`,
+   `SignatureComponent`, `DamageStateComponent`, the gun, the NCTR
+   identity — plus the one piece the scenario path gets from
+   authoring and the campaign path never had: a
+   `RadarBackedDetectionPolicy` per brain, owned by the Simulation
+   (the same `combat_policies_` store the scenario path uses, so
+   `retire_aircraft` reaps campaign policies exactly like scenario
+   ones). This is the M2 flip COMBAT_CHAIN_PLAN deferred: campaign
+   SensorFusion reads radar truth, GCI-omniscience goes dark.
+   Seeding follows the scenario discipline: per-aircraft
+   `radar_rng_seed + arm_index` (a monotone counter — spawn order is
+   deterministic, so the seeds are too).
+
+2. **The doctrine** (C6.3) — the answer to "would break
+   route-following". Mission ROLE decides who fights:
+   - **Fighting categories** (CAP, Sweep, Intercept, Escort) arm the
+     full ladder — BVR + WVR + guns + release — and get the doctrine
+     A/A loadout (C6.4: AIM-120 + AIM-9 stations when the wire
+     loadout carries none, mirroring `standard_fighter`). Their job
+     is the fight; maneuvering off the route IS the mission.
+   - **Every other category** (Strike, SEAD, CAS, Recon, Support,
+     Other, untasked) fly **defensive-only**: the brain's combat
+     ladder is ON (RWR warning → MissileDefeat reacts, GunsJink
+     maneuvers) but the engagement rungs stand down through
+     FreeFalcon's own mechanism — the BRAINDAT.brn archetype. The
+     shipped `SEAD`/`Strike`/`Waypointer` archetypes disarm
+     BVREngage/WVREngage/MissileEngage/GunsEngage while keeping
+     MissileDefeat armed (verified against the fixture data: every
+     engagement row 0, every defensive row 1). The strike rung is
+     untouched — bombs keep falling exactly as the A-G slice pinned.
+     No new brain API: the archetype gate is the reference's own
+     doctrine vocabulary, already load-bearing for scenario brains.
+   - The role comes from `f4::campaign::mission_category` over the
+     flight's mission byte, stamped on `CampaignOriginComponent` at
+     spawn (both spawn paths) — the campaign identity already carried
+     everything else; the mission byte completes it.
+
+3. **The opt-in** (C6.1b). `CombatConfig::campaign_armed` (scenario
+   JSON `"combat": {"campaign_armed": true}`, default false) gates
+   the whole tranche; `CampaignSessionOptions::aa_combat` (default
+   false) writes it; `campaign_qc --aa-combat` arms the war. Every
+   existing golden, session test, and QC run is byte-identical with
+   the flag off — the same contract `wreck_hold_sec = 0` keeps.
+
+Wiring: the bulk path arms at `initialize()` (spawn loop); the
+spawner path arms in `CampaignSession::adopt_new_spawns_()` (the
+one-world cadence — every late spawn is registered AND armed on the
+same per-campaign-second walk). Brain data loads eagerly at
+`initialize()` when `campaign_armed` (the build-tree
+`simdata/braindata.json` default, or `brain_data_path`), and the
+arm call fails loudly when no disengaged archetype exists — silent
+degradation would hand the doctrine a fighting strike flight
+without anyone noticing.
+
+The kill chain closes with no new code: missile/gun damage →
+`DamageStateComponent::killed` → `EntityKilledMessage` → the C1
+sink books the loss (squadron + team, via `CampaignOriginComponent`)
+→ the reaper retires the wreck → the next cycle tasks a weaker
+force. A/A losses were always LEDGER-side ready (`air_losses`
+since C1); what was missing was an aircraft that could die in the
+air.
+
+Acceptance (C6.5): `campaign_qc --war --aa-combat` on TestCamp —
+air kills booked (both belligerents scoring), the reaper retiring
+wrecks (roster identity holding at every sample), the four C5
+verdicts still green, and the two runs' ledger MD5s still identical
+(combat determinism: the only new randomness is the radar's seeded
+detection rolls — seed-derived per aircraft, spawn-order
+deterministic). The war block gains `aa_combat: true` so the
+artifact records which war ran.
+
+Out of scope, deliberately: WVR guns kills at campaign scale ride
+the existing M4 machinery unchanged (no new doctrine), support
+flights get no self-defense employment beyond MissileDefeat
+(WVR/BVR archetypes stay disarmed — FreeFalcon's own choice for
+tankers/AWACS), and the per-archetype WVR entry bands stay at the
+BVRModule default for fighting roles (fixture .brn ranges are
+authored for the reference's skill model, not ours — tuning is a
+later, data-driven tranche once the WST import lands).
+
+Verification (TestCamp v71, regenerated world JSON, Release build):
+LANDED — a 6-minute armed war (`--war 0.1 --war-sample 60
+--tasking-cycle 60 --aa-combat`, 2 in-process runs): 6 cycles, 556
+intents, 413 ATM packages + 143 escorts, 115 routes (0 failures),
+1,362 drawn (ROK 672 / DPRK 690), 96 live aircraft (48 saved + 48
+synthetic, 80 airborne at the end), 96 armed (33 fighters by role
+doctrine + 63 defensive), **the war loop's first A/A kill** —
+booked with full attribution (killer credit to the shooter's
+squadron, victim team/squadron/flight, t=356.7 s), ledger MD5
+identical across the two runs and equal to `md5sum
+campaign_result.json`, all four C5 verdicts green, exit 0. A
+12-minute observation run shows the fights compounding (12 → 39
+brains engaged, merges at 0 NM); the merge phase was the throughput
+cost (Release: ~480 tps pre-fight, ~37 tps at peak merge over 80
+airborne — the WVR/defensive sweep across the roster; documented in
+the diary, never gated). **Closed by PERF-1** — the shared air-picture
+snapshot (PERFORMANCE_PLAN.md §3): the per-brain sensor-fusion
+database walk collapsed 96× → 1× with the ledger bytes unchanged, and
+the armed wars now sustain a 140–200 tps floor. The reaper: this run's
+kill retires at
+t=656.7 s (hold 300, beyond the 360 s horizon) — the mechanics stay
+pinned by the harness unit tests.
+
+C6 surfaced and closed TWO integration bugs the unarmed war could
+never see (both are real fidelity fixes, not C6 features):
+
+1. **The team mapping had no sides.** TestCamp's player slot is a
+   neutral placeholder (team "XX") while the war is ROK(2) vs
+   DPRK(6) — the B.3 `owner_team_string` mapped EVERY aircraft to
+   "green": 96 airborne, zero hostile pairs, zero fights possible.
+   Now: player-belligerent saves keep the classic mapping; a
+   neutral-player save maps the WAR PAIR (the first at-war pair in
+   slot order, deterministic) to blue/red, everyone else green.
+
+2. **The radar painted the parking ramps.** The M2 placeholder
+   scanned every transform-bearing entity: at campaign scale 48
+   armed radars × ~4,400 entities per sweep detected HALF of all
+   candidates every second (measured: 125k track-creating
+   detections/s in a 36 s war) — ground clutter flooding the track
+   stores, a perf AND fidelity bug (FreeFalcon's air picture never
+   paints parked vehicles). The shared
+   `TransformComponent::is_ground_clutter()` predicate (stationary
+   AND below every Korea terrain post — nothing genuinely airborne
+   is ever clutter; a stationary rig at 20,000 ft stays visible)
+   now skips clutter in the radar scan AND the SensorFusion
+   rebuild. Also: the search bar steers onto the ground track
+   (FreeFalcon's radar is boresighted to the nose; a fixed north
+   bar meant an east-flying fighter never painted the hostile off
+   its nose). North-flying rigs keep the exact bar they were
+   pinned with.
+
+Known limitation, honest by design: the sim's air picture is
+TWO-SIDED (blue/red/green), so a third armed team in a war-pair
+save (the U.S. squadron above) engages whichever side its
+own-relative hostility rule marks hostile. The allied-to-a-side
+mapping (member flags / stance toward BOTH war-pair members) is a
+follow-up refinement, documented here.
 
 ## 6. What does NOT change
 
@@ -413,8 +570,15 @@ harness tests regardless: hold → retire-once → roster identity).
 
 ## 7. Known gaps (deliberate, documented)
 
-- **Ground losses** book only the CREDIT side (ag_kills); battalion
-  roster attrition lands with the ground-war tranche.
+- ~~**Ground losses** book only the CREDIT side (ag_kills); battalion
+  roster attrition lands with the ground-war tranche.~~ — LANDED
+  with **G1** ([GROUND_WAR_PLAN.md](GROUND_WAR_PLAN.md)): the
+  `GroundWar` engine (battalion movement, the front line, contact
+  attrition, objective capture, the last_resupply cadence), the
+  ledger's ground books + write-back, the session's entity mirror,
+  `campaign_qc --ground-war` (exit 13). The two-side war-pair
+  limitation and the first-slice capture doctrine are G1's own
+  documented gaps.
 - **Gun damage to features** without a bomb impact event is picked up
   only when it destroys (the sync diffs destroyed-state; damaged-only
   gun hits on non-impacted objectives ride the fstatus diff — covered
@@ -482,6 +646,29 @@ harness tests regardless: hold → retire-once → roster identity).
    LANDED: `campaign_qc --war` + `CampaignWarHarness` + the wreck
    reaper (see §5's C5 section for the verification numbers and the
    exit-gate table).
+3. ~~C6 arming the campaign flights (A/A goes live)~~ — LANDED:
+   `Simulation::arm_campaign_aircraft` + the mission-role doctrine
+   (BRAINDAT archetypes) + `CampaignSessionOptions::aa_combat` +
+   `campaign_qc --aa-combat` (see §5's C6 section; the war runs book
+   air kills now, and the reaper finally has something to reap).
+4. ~~G1 the ground war (battalion maneuver + the front line)~~ —
+   LANDED: `f4-campaign/ground_war.hpp` (the engine) + the ledger's
+   ground books + `apply_ground_to` + the session's entity mirror +
+   `campaign_qc --ground-war` and exit 13 (see
+   [GROUND_WAR_PLAN.md](GROUND_WAR_PLAN.md) for the verification
+   numbers — the 1-hour war's ledger MD5 is the certificate, the
+   front line moves, and the books balance on both sides of the
+   DMZ).
+5. ~~G2 the interdiction link (CAS against real battalions)~~ —
+   LANDED: the shared FLOT + battalion ranking, the unit-target
+   tasking rung (both ladders, `unit_strike`), the unit-position
+   route resolution, the battalion blast endpoint +
+   `GroundUnitLossMessage`, the sink's booking arm, and
+   `campaign_qc --unit-strike` + exit 14 (see
+   [INTERDICTION_PLAN.md](INTERDICTION_PLAN.md) for the
+   verification numbers — the 0.3 h/1 h wars' MD5s are the
+   certificates, air power thins the line, and the engine's pull
+   decays the roster).
 
 ---
 

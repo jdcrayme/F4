@@ -52,3 +52,10 @@ f4_campaign_add_test(test_atm             test_atm.cpp)
 target_link_libraries(test_atm PRIVATE f4-messaging)
 target_compile_definitions(test_atm PRIVATE
     F4_SIMULATION_TEST_FIXTURES_DIR="${CMAKE_SOURCE_DIR}/f4-simulation/tests/fixtures")
+
+# G1 — the ground war engine: war pair, movement, engagement, capture,
+# resupply, air-loss pullback, determinism, write-back, ledger block.
+# Links f4-json explicitly (the ground-block structural walk).
+f4_campaign_add_test(test_ground_war     test_ground_war.cpp)
+f4_campaign_add_test(test_ground_targeting     test_ground_targeting.cpp)
+target_link_libraries(test_ground_war PRIVATE f4-json)

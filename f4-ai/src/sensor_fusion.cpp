@@ -121,6 +121,8 @@ void SensorFusion::initialize(std::uint64_t ownship_id,
     update_timer_ = 0.0;  // refresh on first update()
     targets_.clear();
     prev_targets_.clear();
+    picture_ = nullptr;  // the host re-pushes per tick; a stale pointer
+                         // from a previous life would read freed memory
 }
 
 void SensorFusion::update(double dt) {
@@ -226,6 +228,27 @@ double SensorFusion::reaction_delay_sec(SkillLevel s) noexcept {
 // Internals
 // ============================================================================
 
+bool SensorFusion::resolve_ownship(
+        f4::geo::WorldPosition& pos_out, f4::geo::WorldPosition& vel_out) {
+    // The world path scanned the full candidate list for the ownship;
+    // ids are unique, so a direct lookup yields the same entity's data
+    // (and the same early-out when it is gone). The team tag is read
+    // ONLY when present — the member intentionally keeps its previous
+    // value otherwise (the original loop never cleared it either;
+    // byte-identity rides on that).
+    entities::EntityHandle own(entities::EntityId{ownship_id_}, world_);
+    if (auto team_tag = own.get_tag(entities::tags::TEAM)) {
+        if (const auto* s = team_tag->as_string()) {
+            own_team_ = *s;
+        }
+    }
+    const auto* tf = own.get<entities::TransformComponent>();
+    if (tf == nullptr) return false;  // ownship not in world
+    pos_out = tf->position;
+    vel_out = tf->velocity();
+    return true;
+}
+
 void SensorFusion::rebuild_target_list() {
     // Snapshot the previous target list for EWMA rate computation.
     prev_targets_ = std::move(targets_);
@@ -233,118 +256,143 @@ void SensorFusion::rebuild_target_list() {
 
     if (!world_ || ownship_id_ == 0) return;
 
-    // Find ownship. with_component<TransformComponent>() returns every entity
-    // that has a transform — we filter by id. (No direct EntityId lookup API
-    // exists; the linear scan is acceptable because this runs at most once
-    // per skill-dependent update interval, not per minor frame.)
-    //
-    // Phase D note: we intentionally do NOT use with_tag(TEAM, "red") here
-    // even though it's now O(1). Radar detects ALL contacts within range
-    // (friendly and hostile) — geometry is computed for every transform
-    // entity, and the team tag is only consulted later to classify
-    // hostility. Switching to a team-filtered query would silently drop
-    // friendly contacts from the target list, breaking RWR/situational
-    // awareness.
-    auto candidates = world_->with_component<TransformComponent>();
-
-    const TransformComponent* ownship_tf = nullptr;
-    WorldPosition ownship_pos{};
-    WorldPosition ownship_vel{};
-
-    for (auto eid : candidates) {
-        if (eid.value == ownship_id_) {
-            EntityHandle h(eid, world_);
-            ownship_tf = h.get<TransformComponent>();
-            if (ownship_tf) {
-                ownship_pos = ownship_tf->position;
-                ownship_vel = ownship_tf->velocity();
-            }
-            // Cache the ownship's team for the own-relative hostility rule.
-            // Empty = no tag => legacy blue-perspective rule downstream.
-            if (auto team_tag = h.get_tag(TEAM)) {
-                if (const auto* s = team_tag->as_string()) {
-                    own_team_ = *s;
-                }
-            }
-            break;
-        }
+    // PERF-1: one batch hook per rebuild — a policy resolves its
+    // ownship-side component pointers here instead of per contact.
+    // No world mutation happens between this call and the last
+    // classify() of the batch (rebuilds never mutate the world).
+    if (policy_ != nullptr) {
+        policy_->prepare_batch();
     }
-    if (!ownship_tf) return;  // ownship not in world (shouldn't happen)
 
-    // Build target list from every OTHER entity with a TransformComponent.
-    for (auto eid : candidates) {
+    f4::geo::WorldPosition ownship_pos{};
+    f4::geo::WorldPosition ownship_vel{};
+    if (!resolve_ownship(ownship_pos, ownship_vel)) {
+        return;  // ownship not in world (shouldn't happen)
+    }
+
+    // --- Path A (PERF-1): the host's shared air picture -----------------
+    // Contacts arrive in entity-index order — the exact order the world
+    // walk below yields (the host builds the picture from the same
+    // bucket with the same clutter rule), carrying the same id /
+    // position / velocity / team / missile-role values the per-candidate
+    // reads below produce. Byte-identical output, one walk per TICK
+    // instead of one walk per BRAIN per rebuild.
+    if (picture_ != nullptr) {
+        for (const auto& c : picture_->contacts) {
+            if (c.entity_id == ownship_id_) continue;
+            emplace_target(c.entity_id, c.position, c.velocity,
+                           picture_->team_name(c.team), c.is_missile,
+                           ownship_pos, ownship_vel);
+        }
+        return;
+    }
+
+    // --- Path B: the world query (self-contained hosts, tests) ---------
+    // We intentionally do NOT use with_tag(TEAM, "red") here even though
+    // it's O(1): radar detects ALL contacts within range (friendly and
+    // hostile) — geometry is computed for every transform entity, and
+    // the team tag is only consulted to classify hostility.
+    for (const auto eid :
+         world_->with_component<entities::TransformComponent>()) {
         if (eid.value == ownship_id_) continue;
 
-        EntityHandle h(eid, world_);
-        auto* tf = h.get<TransformComponent>();
+        entities::EntityHandle h(eid, world_);
+        const auto* tf = h.get<entities::TransformComponent>();
         if (!tf) continue;
 
-        TargetInfo t;
-        t.entity_id = eid.value;
-        t.position  = tf->position;
-        t.velocity  = tf->velocity();
+        // Ground-clutter rejection (the C6 campaign-scale rule — see
+        // TransformComponent::is_ground_clutter): stationary low-
+        // altitude entities (battalions, objectives, features, parked
+        // aircraft — ~4,400 of them in a populated save) are not air
+        // picture. A stationary entity AT ALTITUDE (a test rig's
+        // hovering target, a refueling anchor) stays in the picture.
+        if (tf->is_ground_clutter()) continue;
 
-        // Hostility check via team tag — OWN-RELATIVE (M3 tactics): a
-        // target is hostile when its team differs from the OWNSHIP's team.
-        // The old blue-perspective rule (team "red" => hostile) made a
-        // red-team brain blind to blue fighters, so two-sided AI combat
-        // could never work: the red bandit scored the blue shooter at 0,
-        // never saw a threat, never defended. When the ownship itself
-        // carries NO team tag (single-ship legacy tests), the legacy rule
-        // ("red" => hostile) is kept so existing scenarios behave
-        // identically. (Future: campaign team-stance data — TeamComponent
-        // stance[other_slot] — replaces the 2-team assumption.)
-        if (auto team_tag = h.get_tag(TEAM)) {
+        // The tag value (an optional) dies with its if-scope — copy the
+        // string out (SSO covers every team name; no allocation).
+        std::string team_storage;
+        const std::string* team = nullptr;
+        if (auto team_tag = h.get_tag(entities::tags::TEAM)) {
             if (const auto* s = team_tag->as_string()) {
-                t.is_hostile = own_team_.empty() ? (*s == "red")
-                                                 : (*s != own_team_);
+                team_storage = *s;
+                team = &team_storage;
             }
         }
-        // Missile classification via role tag.
-        if (auto role_tag = h.get_tag(ROLE)) {
+        bool is_missile = false;
+        if (auto role_tag = h.get_tag(entities::tags::ROLE)) {
             if (const auto* s = role_tag->as_string()) {
-                t.is_missile = (*s == "missile");
+                is_missile = (*s == "missile");
             }
         }
 
-        compute_geometry(t, ownship_pos, ownship_vel, *tf);
-        compute_threat_score(t);
-
-        // Detection sources (after geometry, so we can range-gate).
-        // M2: a DetectionPolicy override replaces the built-in rules (the
-        // f4-sensors-backed adapter arrives at M3). Without one, the legacy
-        // rules apply: GCI sees everything within the theater by
-        // definition; radar/RWR are range-gated and hostile-filtered;
-        // visual is range-only.
-        if (policy_ != nullptr) {
-            const auto v = policy_->classify(t);
-            t.detected_by_radar  = v.radar;
-            t.detected_by_rwr    = v.rwr;
-            t.detected_by_visual = v.visual;
-            t.detected_by_gci    = v.gci;
-        } else {
-            t.detected_by_gci    = true;
-            t.detected_by_radar  = (t.range_nm <= cfg_.max_radar_range_nm)  && t.is_hostile;
-            t.detected_by_rwr    = (t.range_nm <= cfg_.max_rwr_range_nm)    && t.is_hostile;
-            t.detected_by_visual = (t.range_nm <= cfg_.max_visual_range_nm);
-        }
-
-        // EWMA smoothing — find the previous snapshot for this entity.
-        const TargetInfo* prev = nullptr;
-        for (const auto& p : prev_targets_) {
-            if (p.entity_id == t.entity_id) { prev = &p; break; }
-        }
-        const double dt = update_interval_sec(skill_);
-        update_ewma(t, prev, dt);
-
-        targets_.push_back(std::move(t));
+        emplace_target(eid.value, tf->position, tf->velocity(), team,
+                       is_missile, ownship_pos, ownship_vel);
     }
+}
+
+void SensorFusion::emplace_target(
+        std::uint64_t entity_id,
+        const f4::geo::WorldPosition& position,
+        const f4::geo::WorldPosition& velocity,
+        const std::string* team,
+        bool is_missile,
+        const f4::geo::WorldPosition& ownship_pos,
+        const f4::geo::WorldPosition& ownship_vel) {
+    // The fusion's per-contact OUTPUT contract, shared by both rebuild
+    // paths (they cannot drift apart — see the header). Field order
+    // follows the original world-path loop exactly.
+    TargetInfo t;
+    t.entity_id = entity_id;
+    t.position  = position;
+    t.velocity  = velocity;
+
+    // Hostility check via team tag — OWN-RELATIVE (M3 tactics): a
+    // target is hostile when its team differs from the OWNSHIP's team.
+    // When the ownship itself carries NO team tag (single-ship legacy
+    // tests), the legacy rule ("red" => hostile) is kept so existing
+    // scenarios behave identically.
+    if (team != nullptr) {
+        t.is_hostile = own_team_.empty() ? (*team == "red")
+                                         : (*team != own_team_);
+    }
+    // Missile classification via role tag.
+    t.is_missile = is_missile;
+
+    compute_geometry(t, ownship_pos, ownship_vel);
+    compute_threat_score(t);
+
+    // Detection sources (after geometry, so we can range-gate).
+    // M2: a DetectionPolicy override replaces the built-in rules (the
+    // f4-sensors-backed adapter). Without one, the legacy rules apply:
+    // GCI sees everything within the theater by definition; radar/RWR
+    // are range-gated and hostile-filtered; visual is range-only.
+    if (policy_ != nullptr) {
+        const auto v = policy_->classify(t);
+        t.detected_by_radar  = v.radar;
+        t.detected_by_rwr    = v.rwr;
+        t.detected_by_visual = v.visual;
+        t.detected_by_gci    = v.gci;
+    } else {
+        t.detected_by_gci    = true;
+        t.detected_by_radar  = (t.range_nm <= cfg_.max_radar_range_nm)  && t.is_hostile;
+        t.detected_by_rwr    = (t.range_nm <= cfg_.max_rwr_range_nm)    && t.is_hostile;
+        t.detected_by_visual = (t.range_nm <= cfg_.max_visual_range_nm);
+    }
+
+    // EWMA smoothing — find the previous snapshot for this entity.
+    const TargetInfo* prev = nullptr;
+    for (const auto& p : prev_targets_) {
+        if (p.entity_id == t.entity_id) { prev = &p; break; }
+    }
+    const double dt = update_interval_sec(skill_);
+    update_ewma(t, prev, dt);
+
+    targets_.push_back(std::move(t));
 }
 
 void SensorFusion::compute_geometry(TargetInfo& t,
                                     const WorldPosition& ownship_pos,
-                                    const WorldPosition& ownship_vel,
-                                    const TransformComponent& /*target_tf*/) {
+                                    const WorldPosition& ownship_vel) {
     // BRA from ownship to target. f4::geo::to_bra returns bearing (CW from
     // north), slant range, and the target's MSL altitude (= position.z in
     // the ENU frame).

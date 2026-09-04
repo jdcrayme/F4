@@ -5,6 +5,7 @@
 // simplifications. This file is the mechanics.
 
 #include <f4/campaign/atm.hpp>
+#include <f4/campaign/ground_war.hpp>    // G2: the shared FLOT + ranking
 #include <f4/campaign/route_builder.hpp>   // profile_flies_delivery_route
 
 #include "squadron_snapshot.hpp"
@@ -67,6 +68,35 @@ int role_specialty_family(const MissionProfile& profile) {
 /// Grid distance — the campaign's native measure (Distance()).
 int grid_distance(int x1, int y1, int x2, int y2) {
     return std::max(std::abs(x1 - x2), std::abs(y1 - y2));
+}
+
+/// G2 — resolve a target VU's grid position: objectives first, then —
+/// only when `allow_units` (the unit_strike arm; keeps the flag-off
+/// walk byte-identical for corner-case target ids that happen to
+/// match a unit VU) — UNITS (an aggregate battalion, the CAS family's
+/// target). The world loader's own resolution order. Returns false
+/// when neither resolves.
+bool resolve_target_xy(const f4::world::IObjectiveSource* objectives,
+                        const f4::world::IUnitCoreSource& units,
+                        bool allow_units,
+                        std::uint32_t vu, int& tx, int& ty) {
+    if (vu == 0) return false;
+    if (objectives != nullptr) {
+        for (int i = 0; i < objectives->objective_count(); ++i) {
+            if (objectives->id_num(i) != vu) continue;
+            tx = objectives->x(i);
+            ty = objectives->y(i);
+            return true;
+        }
+    }
+    if (!allow_units) return false;
+    for (int i = 0; i < units.unit_count(); ++i) {
+        if (units.id_num(i) != vu) continue;
+        tx = units.x(i);
+        ty = units.y(i);
+        return true;
+    }
+    return false;
 }
 
 /// The enemy-of relation (either direction WAR — the symmetric
@@ -329,6 +359,24 @@ AirTaskingManager::generate_requests(std::uint8_t team, CampaignTime now) {
     // target rotation for the delivery family.
     const auto enemy = enemy_objectives_(team);
 
+    // G2 — the interdiction family's target list: enemy battalions
+    // front-line ranked (distance to the contested FLOT between the
+    // belligerent pair), ledger-destroyed skipped. Computed only when
+    // the unit_strike arm is on (the golden identity otherwise — the
+    // ranking walk never runs, the requests never change shape).
+    std::vector<std::uint32_t> unit_targets;
+    if (cfg_.unit_strike && objectives_ != nullptr) {
+        const auto pair = f4::campaign::belligerent_pair(teams_);
+        if (pair.size() == 2) {
+            const auto front =
+                f4::campaign::front_columns_from_objectives(
+                    f4::campaign::front_objective_view(*objectives_),
+                    pair[0], pair[1]);
+            unit_targets = f4::campaign::rank_battalion_targets(
+                units_, teams_, front, team, ledger_);
+        }
+    }
+
     // The mission-priority table's presence: the emission writes the
     // whole row or nothing (world_state parses whole arrays), so ANY
     // nonzero entry in this team's row means the table is real.
@@ -385,6 +433,22 @@ AirTaskingManager::generate_requests(std::uint8_t team, CampaignTime now) {
                                  enemy.size()];
             target_cursor_[team] = (target_cursor_[team] + 1) %
                                    static_cast<int>(enemy.size());
+        }
+
+        // G2 — the interdiction family: UNIT-targeted delivery profiles
+        // (CAS) rotate across the front-line-ranked enemy battalions.
+        // Off (or no ranked targets): target-less, exactly the C3
+        // shape. A separate cursor — the two families' spreads stay
+        // decoupled (one CAS package per cycle walks the line).
+        if (cfg_.unit_strike && profile_flies_unit_delivery_route(profile)
+                && !unit_targets.empty()) {
+            const auto idx = static_cast<std::size_t>(
+                                 unit_target_cursor_[team]) %
+                             unit_targets.size();
+            req.target_id = unit_targets[idx];
+            unit_target_cursor_[team] =
+                (unit_target_cursor_[team] + 1) %
+                static_cast<int>(unit_targets.size());
         }
 
         req.priority = request_priority_(team, profile, req.target_id);
@@ -574,14 +638,18 @@ AirTaskingManager::compose_packages(
         // BuildPackage stage 1): ScoreThreatFast at the profile's
         // min/max target altitudes → NEED_SEAD (the reference: either
         // band above MIN_SEADESCORT_THREAT, or both nonzero at high
-        // priority).
+        // priority). G2: the target position resolves OBJECTIVES then
+        // UNITS (a CAS package's battalion target reads the same
+        // threat map — front-line battalions sit in the AD envelope).
+        // The objectives_ gate keeps the null-source corner identical
+        // to the pre-G2 walk (unit targets only exist with objectives
+        // attached — generate_requests' own gate).
         bool need_sead = false;
         if (threat_ != nullptr && objectives_ != nullptr &&
             req.target_id != 0) {
-            for (int i = 0; i < objectives_->objective_count(); ++i) {
-                if (objectives_->id_num(i) != req.target_id) continue;
-                const int tx = objectives_->x(i);
-                const int ty = objectives_->y(i);
+            int tx = 0, ty = 0;
+            if (resolve_target_xy(objectives_, units_, cfg_.unit_strike,
+                                  req.target_id, tx, ty)) {
                 const int ls = threat_->score(
                     tx, ty, alt_band_from_feet(profile.minalt * 100), team);
                 const int hs = threat_->score(
@@ -593,7 +661,6 @@ AirTaskingManager::compose_packages(
                            hs > 0) {
                     need_sead = true;
                 }
-                break;
             }
         }
 
@@ -758,18 +825,12 @@ AirTaskingManager::find_best_air_(const MissionRequest& req,
     // The target position (grid) for range/arrival estimates; no
     // target → zero travel for everyone (the station-keeping family —
     // the first candidate holds the quickest bonus through ties).
+    // G2: UNIT targets (CAS battalions) resolve through the units
+    // source — objectives first, the loader's own order.
     int tx = 0, ty = 0;
-    bool have_target = false;
-    if (objectives_ != nullptr && req.target_id != 0) {
-        for (int i = 0; i < objectives_->objective_count(); ++i) {
-            if (objectives_->id_num(i) == req.target_id) {
-                tx = objectives_->x(i);
-                ty = objectives_->y(i);
-                have_target = true;
-                break;
-            }
-        }
-    }
+    const bool have_target =
+        resolve_target_xy(objectives_, units_, cfg_.unit_strike,
+                          req.target_id, tx, ty);
 
     const int sc = role_specialty_family(profile);
     const int lowest_score = (255 - req.priority) / 25;

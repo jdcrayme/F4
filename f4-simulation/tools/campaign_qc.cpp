@@ -206,6 +206,25 @@ struct Args {
     double war_sample_sec = 3600.0; // diary + check cadence (1 hour)
     double wreck_hold_sec = 300.0;  // C5's reaper (0 = wrecks persist)
     double war_max_wall_sec = 0.0;  // total wall-clock watchdog (0 = off)
+    // C6 — arming the campaign flights: the war's A/A tranche.
+    // Opt-in (every pre-C6 golden pinned on the unarmed shape);
+    // the acceptance story is air_losses > 0 + the reaper reaping.
+    bool aa_combat = false;
+    // G1 — the ground war (battalion movement + front line +
+    // attrition + capture): opt-in, the same contract aa_combat
+    // keeps. The acceptance story: the army MOVED (the QC's exit 13
+    // fires when an armed ground war produced nothing at all).
+    bool ground_war = false;
+    int ground_update_sec = 60;    // the engine default
+    int ground_orders_sec = 1800;  // the engine default
+    int ground_resupply_sec = 43200; // 12 h (the QC's own choice —
+                                     // same as the air reinforce)
+    // G2 — the interdiction link (CAS against real battalions, the
+    // bombs booking): opt-in, the same contract. The acceptance
+    // story: air attrited the line (exit 14 fires when an armed
+    // unit strike produced nothing — CAS needs its TOT window, so
+    // the 1-hour war is the honest horizon).
+    bool unit_strike = false;
 };
 
 [[noreturn]] void usage(const char* prog) {
@@ -218,8 +237,10 @@ struct Args {
         "          [--reinforce-period <sec>] [--profiles <json>]\n"
         "          [--record-every <n>] [--no-record]\n"
         "          [--war <hours>] [--war-runs <n>] [--war-sample <sec>]\n"
-        "          [--wreck-hold <sec>] [--war-max-wall <sec>]\n"
-        "          [--out-dir <dir>]\n",
+        "          [--wreck-hold <sec>] [--war-max-wall <sec>] [--aa-combat]\n"
+        "          [--ground-war] [--ground-update-sec <sec>]\n"
+        "          [--ground-orders-sec <sec>] [--ground-resupply-sec <sec>]\n"
+        "          [--unit-strike] [--out-dir <dir>]\n",
         prog);
     std::exit(1);
 }
@@ -266,6 +287,15 @@ Args parse_args(int argc, char** argv) {
         else if (k == "--war-sample")  a.war_sample_sec = std::atof(next());
         else if (k == "--wreck-hold")  a.wreck_hold_sec = std::atof(next());
         else if (k == "--war-max-wall") a.war_max_wall_sec = std::atof(next());
+        else if (k == "--aa-combat")   a.aa_combat = true;
+        else if (k == "--ground-war")  a.ground_war = true;
+        else if (k == "--unit-strike") a.unit_strike = true;
+        else if (k == "--ground-update-sec")
+            a.ground_update_sec = std::atoi(next());
+        else if (k == "--ground-orders-sec")
+            a.ground_orders_sec = std::atoi(next());
+        else if (k == "--ground-resupply-sec")
+            a.ground_resupply_sec = std::atoi(next());
         else if (k == "--mission") {
             const std::string v = next();
             if (!v.empty() && v[0] >= '0' && v[0] <= '9') {
@@ -390,6 +420,19 @@ int run_war(const Args& args) {
     hopts.session.atm_pipeline = true;
     hopts.session.atm_seadescort_threat = 25;
     hopts.session.sim_dt = args.sim_dt;
+    // C6: the campaign-combat arming (the mission-role doctrine — CAP/
+    // Sweep/Intercept/Escort fight, everything else defends through its
+    // BRAINDAT archetype). Opt-in: the unarmed war is the pinned shape.
+    hopts.session.aa_combat = args.aa_combat;
+    // G1: the ground war (opt-in, the same contract). The QC arms the
+    // 12 h ground resupply — the long war's supply line matters
+    // exactly like the air reinforcement cadence it mirrors.
+    hopts.session.ground_war = args.ground_war;
+    hopts.session.ground_update_sec = args.ground_update_sec;
+    hopts.session.ground_orders_sec = args.ground_orders_sec;
+    hopts.session.ground_resupply_sec = args.ground_resupply_sec;
+    // G2: the interdiction link (opt-in, the same contract).
+    hopts.session.unit_strike = args.unit_strike;
     hopts.horizon_sec =
         static_cast<std::int64_t>(args.war_hours * 3600.0);
     hopts.sample_sec = args.war_sample_sec;
@@ -398,11 +441,15 @@ int run_war(const Args& args) {
     hopts.max_wall_sec_total = args.war_max_wall_sec;
 
     std::printf("war: horizon=%llds (%.2fh) runs=%d sample=%.0fs "
-                "wreck_hold=%.0fs cycle=%ds reinforce=%ds\n",
+                "wreck_hold=%.0fs cycle=%ds reinforce=%ds aa_combat=%s "
+                "ground=%s unit_strike=%s\n",
                 (long long)hopts.horizon_sec, args.war_hours, hopts.runs,
                 hopts.sample_sec, hopts.wreck_hold_sec,
                 hopts.session.tasking_cycle_sec,
-                hopts.session.reinforce_period_sec);
+                hopts.session.reinforce_period_sec,
+                hopts.session.aa_combat ? "on" : "off",
+                hopts.session.ground_war ? "on" : "off",
+                hopts.session.unit_strike ? "on" : "off");
 
     std::string err;
     auto harness = CampaignWarHarness::create(hopts, &err);
@@ -418,12 +465,29 @@ int run_war(const Args& args) {
                       s.wall_sec, s.ticks_per_sec, s.rss_kb / 1024);
         std::printf("war[h%02d] t=%llds cycles=%d(+%d) drawn=%d(+%d) "
                     "spawned=%d(+%d) live=%d retired=%d air=%d/%d "
-                    "routes=%d lost=%d recov=%d | %s\n",
+                    "routes=%d lost=%d recov=%d",
                     s.sample, (long long)s.sim_time_s, s.cycles,
                     s.hour_cycles, s.drawn, s.hour_draws,
                     s.synthetic_spawned, s.hour_spawns, s.live_aircraft,
                     s.retired, s.airborne, s.live_aircraft,
-                    s.routes_built, s.air_losses, s.recovered, perf);
+                    s.routes_built, s.air_losses, s.recovered);
+        // C6: the air war's pulse - armed fighters fielded + A/A kills
+        // booked (the armed war's own columns; the unarmed war's rows
+        // keep their exact pre-C6 bytes).
+        if (s.armed_fighters > 0 || s.aa_kills > 0) {
+            std::printf(" ftrs=%d aakill=%d", s.armed_fighters,
+                        s.aa_kills);
+        }
+        // G1: the ground war's pulse — battalions alive, vehicles lost,
+        // captures, the front's contested columns, the army's march.
+        // (The ground-quiet war's rows keep their exact pre-G1 bytes.)
+        if (s.ground_updates > 0) {
+            std::printf(" gnd=%d/%d lost=%d cap=%d front=%d march=%d",
+                        s.ground_battalions, s.ground_mobile,
+                        s.ground_losses, s.ground_captures,
+                        s.ground_front_columns, s.ground_march_grid);
+        }
+        std::printf(" | %s\n", perf);
         std::fflush(stdout);
     });
     const std::chrono::duration<double> wall =
@@ -532,6 +596,44 @@ int run_war(const Args& args) {
         w.number_key("airborne", r.airborne);
         w.put(",    ");
         w.number_key("samples", r.samples);
+        w.put(",    ");
+        w.put("\"aa_combat\": ");
+        w.put(r.aa_combat ? "true" : "false");
+        w.put(",    ");
+        w.number_key("armed_aircraft", r.armed_aircraft);
+        w.put(",    ");
+        w.number_key("armed_fighters", r.armed_fighters);
+        // G1: the ground war's provenance + counters (present only when
+        // the ground war ran — the ground-quiet summary keeps its exact
+        // pre-G1 bytes).
+        if (r.ground_war) {
+            w.put(",\n    ");
+            w.put("\"ground_war\": ");
+            w.put("true");
+            w.put(",    ");
+            // G2: the interdiction provenance + its headline (the
+            // air-sourced share of ground_losses).
+            w.put("\"unit_strike\": ");
+            w.put(r.unit_strike ? "true" : "false");
+            w.put(",    ");
+            w.number_key("ground_losses_air", r.ground_losses_air);
+            w.put(",    ");
+            w.number_key("ground_updates", r.ground_updates);
+            w.put(",    ");
+            w.number_key("ground_battalions", r.ground_battalions);
+            w.put(",    ");
+            w.number_key("ground_mobile", r.ground_mobile);
+            w.put(",    ");
+            w.number_key("ground_losses", r.ground_losses);
+            w.put(",    ");
+            w.number_key("ground_destroyed", r.ground_destroyed);
+            w.put(",    ");
+            w.number_key("ground_captures", r.ground_captures);
+            w.put(",    ");
+            w.number_key("ground_front_columns", r.ground_front_columns);
+            w.put(",    ");
+            w.number_key("ground_march_grid", r.ground_march_grid);
+        }
         w.put(",\n    ");
         w.put("\"belligerent_air\": ");
         w.put(r.belligerent_air ? "true" : "false");
@@ -650,6 +752,32 @@ int run_war(const Args& args) {
             w.number_key("retired", s.retired);
             w.put(", ");
             w.number_key("world_entities", s.world_entities);
+            // G1: the ground war's diary columns (the ground-quiet rows
+            // keep their exact pre-G1 bytes — the block is conditional
+            // on the run having armed it).
+            if (r.ground_war) {
+                w.put(", ");
+                w.number_key("ground_updates", s.ground_updates);
+                w.put(", ");
+                w.number_key("ground_battalions", s.ground_battalions);
+                w.put(", ");
+                w.number_key("ground_mobile", s.ground_mobile);
+                w.put(", ");
+                w.number_key("ground_losses", s.ground_losses);
+                w.put(", ");
+                w.number_key("ground_losses_air", s.ground_losses_air);
+                w.put(", ");
+                w.number_key("ground_destroyed", s.ground_destroyed);
+                w.put(", ");
+                w.number_key("ground_captures", s.ground_captures);
+                w.put(", ");
+                w.number_key("ground_engaged", s.ground_engaged);
+                w.put(", ");
+                w.number_key("ground_front_columns",
+                             s.ground_front_columns);
+                w.put(", ");
+                w.number_key("ground_march_grid", s.ground_march_grid);
+            }
             char buf[128];
             std::snprintf(buf, sizeof(buf),
                           ", \"wall_sec\": %.3f, \"ticks_per_sec\": %.1f, "
@@ -699,6 +827,16 @@ int run_war(const Args& args) {
                 r.routes_built, r.routes_failed, r.drawn, r.air_losses,
                 r.recovered, r.reinforced, r.synthetic_spawned, r.retired,
                 r.live_aircraft);
+    if (r.ground_war) {
+        std::printf("war: ground updates=%d battalions=%d/%d mobile "
+                    "losses=%d (air=%d) destroyed=%d captures=%d front=%d "
+                    "march=%d grid\n",
+                    r.ground_updates, r.ground_battalions,
+                    r.ground_mobile, r.ground_losses,
+                    r.ground_losses_air, r.ground_destroyed,
+                    r.ground_captures, r.ground_front_columns,
+                    r.ground_march_grid);
+    }
     std::printf("war: deterministic=%s drift=%s leak=%s alive=%s "
                 "md5=%s\n",
                 r.verdict.deterministic ? "yes" : "NO",
@@ -771,6 +909,42 @@ int run_war(const Args& args) {
                      "generating, or the clock/cycles stopped.\n",
                      r.verdict.war_stall.c_str());
         return 12;
+    }
+    // G1: the ground war's own gate — the exit-5 philosophy, ground
+    // edition. An ARMED ground war that fired no updates, moved no
+    // battalion, booked no losses and captured nothing is a wiring
+    // failure (stance decode, subtype filter, cadence), not a quiet
+    // front: movement alone passes (a 0.1 h smoke war moves, fights
+    // happen at hours scale, captures at days).
+    if (r.ground_war && (r.ground_updates <= 0 ||
+                         (r.ground_losses == 0 && r.ground_captures == 0 &&
+                          r.ground_march_grid == 0 &&
+                          r.ground_destroyed == 0))) {
+        std::fprintf(stderr,
+                     "campaign_qc: QC FAILURE — the ground war was armed "
+                     "and produced NOTHING (updates=%d, march=%d grid, "
+                     "losses=%d, captures=%d) (exit 13). Inspect the "
+                     "war block's ground_* fields and the ledger's "
+                     "ground block in campaign_result.json.\n",
+                     r.ground_updates, r.ground_march_grid,
+                     r.ground_losses, r.ground_captures);
+        return 13;
+    }
+    // G2: the interdiction link's own gate — the exit-5 philosophy,
+    // interdiction edition. An ARMED unit strike whose air power never
+    // attrited a battalion is a wiring failure (target ranking, route
+    // resolution, TOT window), not a quiet front: CAS needs its TOT
+    // window (the profile's own min/max time), so the honest
+    // acceptance horizon is the 1-hour war, not the 0.1 h smoke.
+    if (r.unit_strike && r.ground_losses_air == 0) {
+        std::fprintf(stderr,
+                     "campaign_qc: QC FAILURE — the unit strike was "
+                     "armed and air never attrited a battalion "
+                     "(agv=0) (exit 14). Inspect the war block's "
+                     "ground_losses_air and the ledger's ground-loss "
+                     "rows (air=true) in campaign_result.json; a short "
+                     "horizon (CAS TOT ~15 min) needs --war >= 0.5.\n");
+        return 14;
     }
     return 0;
 }

@@ -306,6 +306,131 @@ void CampaignResultLedger::apply_ag_kill(double /*sim_time_s*/,
     }
 }
 
+// ============================================================================
+// G1 — the ground war's write side
+// ============================================================================
+
+GroundUnitLedger* CampaignResultLedger::find_ground_unit_(
+        std::uint32_t vu) {
+    const auto it = std::find_if(
+        ground_units_.begin(), ground_units_.end(),
+        [vu](const GroundUnitLedger& g) { return g.vu == vu; });
+    return it == ground_units_.end() ? nullptr : &*it;
+}
+
+void CampaignResultLedger::apply_ground_loss(
+        double t_s,
+        std::uint32_t victim_battalion,
+        std::uint8_t victim_team,
+        std::uint32_t attacker_battalion,
+        std::uint8_t attacker_team,
+        int kills,
+        bool air_source,
+        std::uint32_t killer_squadron) {
+    if (victim_battalion == 0 || kills <= 0) return;
+
+    GroundLossRecord rec;
+    rec.t_s = t_s;
+    rec.victim = victim_battalion;
+    rec.victim_team = victim_team;
+    rec.attacker = attacker_battalion;
+    rec.attacker_team = attacker_team;
+    rec.killer_squadron = killer_squadron;
+    rec.kills = kills;
+    rec.air = air_source;
+    ground_losses_.push_back(rec);
+
+    // The battalion's run book (lazily created — a loss arriving before
+    // the engine's first sync is still booked; the sync then fills the
+    // state fields on top).
+    GroundUnitLedger* unit = find_ground_unit_(victim_battalion);
+    if (unit == nullptr) {
+        GroundUnitLedger fresh;
+        fresh.vu = victim_battalion;
+        fresh.owner = victim_team;
+        ground_units_.push_back(fresh);
+        unit = &ground_units_.back();
+    }
+    unit->run_losses += kills;
+    unit->strength = std::max(0, unit->strength - kills);
+
+    // The team's ground book (existence counters only — strength views
+    // are the engine's).
+    if (auto* tl = find_team_(victim_team)) {
+        tl->ground_losses += kills;
+    } else {
+        ++ground_draws_unmatched_;
+    }
+
+    ground_vehicle_losses_ += kills;
+    if (air_source) ground_vehicle_losses_air_ += kills;
+}
+
+void CampaignResultLedger::apply_objective_capture(
+        double t_s,
+        std::uint32_t objective_vu,
+        std::uint8_t from_team,
+        std::uint8_t to_team,
+        std::uint32_t by_battalion) {
+    if (objective_vu == 0 || from_team == to_team) return;
+
+    ObjectiveCaptureRecord rec;
+    rec.t_s = t_s;
+    rec.objective = objective_vu;
+    rec.from_team = from_team;
+    rec.to_team = to_team;
+    rec.by_battalion = by_battalion;
+    captures_.push_back(rec);
+
+    if (auto* tl = find_team_(to_team)) {
+        ++tl->objectives_captured;
+    } else {
+        ++ground_draws_unmatched_;
+    }
+    ++ground_objectives_captured_;
+}
+
+void CampaignResultLedger::sync_ground_unit(
+        const GroundUnitLedger& unit) {
+    if (unit.vu == 0) return;
+    if (auto* existing = find_ground_unit_(unit.vu)) {
+        // Last write wins on the STATE fields; run_losses is
+        // event-derived and monotone (apply_ground_loss owns it) — a
+        // sync never adds to or erases booked kills. Destruction
+        // transitions book once (the false→true edge).
+        const int booked = existing->run_losses;
+        const bool was_destroyed = existing->destroyed;
+        const std::uint32_t vu = existing->vu;
+        *existing = unit;
+        existing->vu = vu;
+        existing->run_losses = booked;
+        if (!was_destroyed && existing->destroyed) {
+            ++ground_battalions_destroyed_;
+            if (auto* tl = find_team_(existing->owner)) {
+                ++tl->battalions_destroyed;
+            }
+        }
+    } else {
+        GroundUnitLedger fresh = unit;
+        fresh.run_losses = 0;   // kills book through events only
+        ground_units_.push_back(fresh);
+        if (fresh.destroyed) {
+            ++ground_battalions_destroyed_;
+            if (auto* tl = find_team_(fresh.owner)) {
+                ++tl->battalions_destroyed;
+            }
+        }
+    }
+}
+
+const GroundUnitLedger*
+CampaignResultLedger::ground_unit(std::uint32_t vu) const {
+    const auto it = std::find_if(
+        ground_units_.begin(), ground_units_.end(),
+        [vu](const GroundUnitLedger& g) { return g.vu == vu; });
+    return it == ground_units_.end() ? nullptr : &*it;
+}
+
 void CampaignResultLedger::apply_objective_damage(
         const ObjectiveDamageRecord& rec) {
     if (rec.objective == 0) return;
@@ -667,6 +792,152 @@ std::string CampaignResultLedger::to_json() const {
             w.put("\"}");
         }
         w.put(sorted.empty() ? "]" : "\n  ]");
+    }
+
+    // G1 — the ground war block. OPTIONAL (the same discipline as
+    // mission_recoveries): a run with no ground activity emits the
+    // byte-identical pre-G1 document; a ground war emits its own books
+    // here (totals, per-team ground rows, VU-sorted battalion final
+    // states, arrival-ordered loss and capture events). No floats:
+    // integer grid positions, whole-byte states, ms times.
+    if (!ground_losses_.empty() || !captures_.empty() ||
+        !ground_units_.empty()) {
+        w.put(",\n  \"ground\": {");
+        w.put("\n    ");
+        w.number_key("vehicle_losses", ground_vehicle_losses_);
+        w.put(",\n    ");
+        w.number_key("battalions_destroyed",
+                     ground_battalions_destroyed_);
+        w.put(",\n    ");
+        w.number_key("objectives_captured", ground_objectives_captured_);
+
+        // Per-team ground rows: only teams with ground activity, slot
+        // order (the snapshot's own order).
+        {
+            bool has_rows = false;
+            for (const auto& t : teams_) {
+                if (t.ground_losses != 0 || t.battalions_destroyed != 0 ||
+                    t.objectives_captured != 0) {
+                    has_rows = true;
+                    break;
+                }
+            }
+            if (has_rows) {
+                w.put(",\n    \"teams\": [");
+                bool first = true;
+                for (const auto& t : teams_) {
+                    if (t.ground_losses == 0 && t.battalions_destroyed == 0 &&
+                        t.objectives_captured == 0) {
+                        continue;
+                    }
+                    w.put(first ? "\n      {" : ",\n      {");
+                    first = false;
+                    w.number_key("slot", t.slot);
+                    w.put(", \"name\": ");
+                    w.string(t.name);
+                    w.put(", ");
+                    w.number_key("vehicle_losses", t.ground_losses);
+                    w.put(", ");
+                    w.number_key("battalions_destroyed",
+                                 t.battalions_destroyed);
+                    w.put(", ");
+                    w.number_key("objectives_captured",
+                                 t.objectives_captured);
+                    w.put("}");
+                }
+                w.put("\n    ]");
+            }
+        }
+
+        // Battalions: VU-sorted final states (movement, attrition, and
+        // the destroyed flag — the ground war's existence picture).
+        {
+            std::vector<const GroundUnitLedger*> sorted;
+            sorted.reserve(ground_units_.size());
+            for (const auto& g : ground_units_) sorted.push_back(&g);
+            std::sort(sorted.begin(), sorted.end(),
+                      [](const GroundUnitLedger* a,
+                         const GroundUnitLedger* b) {
+                          return a->vu < b->vu;
+                      });
+            w.put(",\n    \"units\": [");
+            for (std::size_t i = 0; i < sorted.size(); ++i) {
+                const auto& g = *sorted[i];
+                w.put(i ? ",\n      {" : "\n      {");
+                w.number_key("vu", g.vu);
+                w.put(", ");
+                w.number_key("owner", g.owner);
+                w.put(", ");
+                w.number_key("strength_initial", g.strength_initial);
+                w.put(", ");
+                w.number_key("strength", g.strength);
+                w.put(", ");
+                w.number_key("run_losses", g.run_losses);
+                w.put(", ");
+                w.number_key("x", g.x);
+                w.put(", ");
+                w.number_key("y", g.y);
+                w.put(", ");
+                w.number_key("supply", g.supply);
+                w.put(", ");
+                w.number_key("morale", g.morale);
+                w.put(", ");
+                w.number_key("fatigue", g.fatigue);
+                w.put(g.destroyed ? ", \"destroyed\": true"
+                                  : ", \"destroyed\": false");
+                w.put("}");
+            }
+            w.put(sorted.empty() ? "]" : "\n    ]");
+        }
+
+        // Ground loss events: arrival order (the log).
+        w.put(",\n    \"losses\": [");
+        for (std::size_t i = 0; i < ground_losses_.size(); ++i) {
+            const auto& l = ground_losses_[i];
+            w.put(i ? ",\n      " : "\n      ");
+            w.put("{\"t_ms\": ");
+            w.put(time_ms(l.t_s));
+            w.put(", ");
+            w.number_key("victim", l.victim);
+            w.put(", ");
+            w.number_key("victim_team", l.victim_team);
+            w.put(", ");
+            w.number_key("attacker", l.attacker);
+            if (l.attacker_team != 0) {
+                w.put(", ");
+                w.number_key("attacker_team", l.attacker_team);
+            }
+            if (l.killer_squadron != 0) {
+                w.put(", ");
+                w.number_key("killer_squadron", l.killer_squadron);
+            }
+            w.put(", ");
+            w.number_key("kills", l.kills);
+            w.put(l.air ? ", \"air\": true" : ", \"air\": false");
+            w.put("}");
+        }
+        w.put(ground_losses_.empty() ? "]" : "\n    ]");
+
+        // Captures: arrival order (the territorial log).
+        w.put(",\n    \"captures\": [");
+        for (std::size_t i = 0; i < captures_.size(); ++i) {
+            const auto& c = captures_[i];
+            w.put(i ? ",\n      " : "\n      ");
+            w.put("{\"t_ms\": ");
+            w.put(time_ms(c.t_s));
+            w.put(", ");
+            w.number_key("objective", c.objective);
+            w.put(", ");
+            w.number_key("from_team", c.from_team);
+            w.put(", ");
+            w.number_key("to_team", c.to_team);
+            w.put(", ");
+            w.number_key("by_battalion", c.by_battalion);
+            w.put("}");
+        }
+        w.put(captures_.empty() ? "]" : "\n    ]");
+
+        w.put("\n  }");
     }
 
     w.put("\n}\n");

@@ -274,7 +274,66 @@ TEST(CampaignWarHarness, SingleRunSkipsTheProof) {
     EXPECT_EQ(r.diary.size(), std::size_t{2});
 }
 
-// ── 5. Option validation ───────────────────────────────────────────────────
+// ── 5. G1 — the ground war inside the war harness ──────────────────────────
+//
+// The compressed rig (5 s cadences) runs BOTH wars at once: the air
+// ladder draws and flies while the ground engine marches, attrites,
+// and takes ground. The four C5 verdicts must stay green with the
+// ground side live (the ledger's ground books do not touch the
+// one-pool air identities; the entity mirror creates/destroys
+// nothing), and the determinism certificate covers the ground bytes
+// (the ledger's ground block is inside the MD5'd document).
+TEST(CampaignWarHarness, GroundWarColumnsVerdictsAndDeterminism) {
+    if (!fixtures_ready()) {
+        GTEST_SKIP() << "f16.json fixture not generated";
+    }
+    WarHarnessOptions o = make_war_opts();
+    o.session.ground_war = true;
+    o.session.ground_update_sec = 5;   // the compressed rig's cadence
+    o.session.ground_orders_sec = 5;
+
+    std::string err;
+    auto harness = CampaignWarHarness::create(o, &err);
+    ASSERT_NE(harness, nullptr) << err;
+    harness->execute();
+    const auto& r = harness->report();
+
+    ASSERT_FALSE(r.aborted) << r.abort_reason;
+
+    // The ground war ran: updates fired, the army exists, it marched.
+    EXPECT_TRUE(r.ground_war);
+    EXPECT_GT(r.ground_updates, 0);
+    EXPECT_GT(r.ground_battalions, 0);
+    EXPECT_GT(r.ground_march_grid, 0) << "the army moved";
+    // (The kunsan rig's war pair is USA-DPRK and the USA owns ZERO
+    // objectives, so no column is contested — the front line's
+    // contested-column count is honestly 0 HERE. The front mechanics
+    // themselves are pinned by f4-campaign's rig, where both sides
+    // hold territory; the front COLUMN exists either way.)
+    EXPECT_FALSE(r.diary.empty());
+
+    // The four C5 gates stay green with the ground side live.
+    EXPECT_TRUE(r.verdict.deterministic);
+    EXPECT_TRUE(r.verdict.ledger_consistent) << r.verdict.ledger_drift;
+    EXPECT_TRUE(r.verdict.entities_bounded) << r.verdict.entity_leak;
+    EXPECT_TRUE(r.verdict.war_alive) << r.verdict.war_stall;
+
+    // The certificate covers the ground bytes (the ledger document
+    // carries the ground block, and the two runs agree byte for byte).
+    ASSERT_TRUE(is_hex_32(r.verdict.ledger_md5_run0));
+    ASSERT_TRUE(is_hex_32(r.verdict.ledger_md5_run1));
+    EXPECT_EQ(r.verdict.ledger_md5_run0, r.verdict.ledger_md5_run1);
+    EXPECT_NE(r.ledger_json.find("\"ground\""), std::string::npos);
+
+    // The diary's ground columns flowed (every sample carries them).
+    ASSERT_FALSE(r.diary.empty());
+    for (const auto& s : r.diary) {
+        EXPECT_GT(s.ground_updates, 0) << "sample " << s.sample;
+        EXPECT_GT(s.ground_battalions, 0) << "sample " << s.sample;
+    }
+}
+
+// ── 6. Option validation ───────────────────────────────────────────────────
 TEST(CampaignWarHarness, RejectsInvalidOptions) {
     std::string err;
     {

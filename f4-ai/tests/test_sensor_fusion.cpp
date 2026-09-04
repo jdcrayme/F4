@@ -874,3 +874,273 @@ TEST(SensorFusion, SortedThreatTargetDegeneratesWithoutLeadEngagement) {
     ASSERT_NE(sorted, nullptr);
     EXPECT_EQ(sorted->entity_id, a);   // the higher-scoring nose-on one
 }
+
+// ============================================================================
+// PERF-1 — the shared air picture (PERFORMANCE_PLAN.md §3)
+//
+// The host walks the world once per demand tick and pushes the snapshot
+// to every brain; the fusion's picture-path rebuild must be
+// byte-for-byte the world-query rebuild (same entities, same order,
+// same values) — that equivalence is what lets the armed war's ledger
+// MD5 stay identical while the merge-phase cost collapses.
+// ============================================================================
+
+namespace {
+
+// Host-equivalent picture build (Simulation::push_air_picture_'s shape):
+// walk the transform bucket in entity-index order, clutter filter, tag
+// reads, first-seen team interning. Mirrored here so the test pins the
+// CONTRACT (the fusion consumes any picture built this way), not the
+// host's private code.
+AirPicture build_picture(EntityWorld& w) {
+    AirPicture pic;
+    for (const auto eid : w.with_component<TransformComponent>()) {
+        EntityHandle h(eid, &w);
+        const auto* tf = h.get<TransformComponent>();
+        if (tf == nullptr) continue;
+        if (tf->is_ground_clutter()) continue;
+
+        AirPictureContact c;
+        c.entity_id = eid.value;
+        c.position = tf->position;
+        c.velocity = tf->velocity();
+        if (auto team_tag = h.get_tag(tags::TEAM)) {
+            if (const auto* s = team_tag->as_string()) {
+                std::int16_t idx = -1;
+                for (std::size_t i = 0; i < pic.teams.size(); ++i) {
+                    if (pic.teams[i] == *s) {
+                        idx = static_cast<std::int16_t>(i);
+                        break;
+                    }
+                }
+                if (idx < 0) {
+                    pic.teams.push_back(*s);
+                    idx = static_cast<std::int16_t>(pic.teams.size() - 1);
+                }
+                c.team = idx;
+            }
+        }
+        if (auto role_tag = h.get_tag(tags::ROLE)) {
+            if (const auto* s = role_tag->as_string()) {
+                c.is_missile = (*s == "missile");
+            }
+        }
+        pic.contacts.push_back(c);
+    }
+    return pic;
+}
+
+// A policy with a deterministic verdict + call counters: proves the
+// batch hook fires once per rebuild and the classify loop runs per
+// contact on BOTH paths with identical results.
+class CountingPolicy final : public SensorFusion::DetectionPolicy {
+public:
+    Verdict classify(const TargetInfo& t) override {
+        ++classifies_;
+        Verdict v;
+        v.radar = (t.entity_id % 2u) == 1u;  // deterministic in id parity
+        v.visual = t.range_nm < 4.0;
+        return v;
+    }
+    void prepare_batch() override { ++prepares_; }
+
+    int classifies_ = 0;
+    int prepares_ = 0;
+};
+
+// Field-by-field TargetInfo equality (exact bits: both paths run the
+// same emplace_target arithmetic on the same inputs).
+void expect_same_target(const TargetInfo& a, const TargetInfo& b) {
+    EXPECT_EQ(a.entity_id, b.entity_id);
+    EXPECT_EQ(a.range_ft, b.range_ft);
+    EXPECT_EQ(a.range_nm, b.range_nm);
+    EXPECT_EQ(a.azimuth_rad, b.azimuth_rad);
+    EXPECT_EQ(a.elevation_rad, b.elevation_rad);
+    EXPECT_EQ(a.ata_rad, b.ata_rad);
+    EXPECT_EQ(a.ata_from_rad, b.ata_from_rad);
+    EXPECT_EQ(a.atadot, b.atadot);
+    EXPECT_EQ(a.rangedot, b.rangedot);
+    EXPECT_EQ(a.threat_score, b.threat_score);
+    EXPECT_EQ(a.combat_class, b.combat_class);
+    EXPECT_EQ(a.is_missile, b.is_missile);
+    EXPECT_EQ(a.is_hostile, b.is_hostile);
+    EXPECT_EQ(a.detected_by_radar, b.detected_by_radar);
+    EXPECT_EQ(a.detected_by_rwr, b.detected_by_rwr);
+    EXPECT_EQ(a.detected_by_visual, b.detected_by_visual);
+    EXPECT_EQ(a.detected_by_gci, b.detected_by_gci);
+    EXPECT_EQ(a.position.x, b.position.x);
+    EXPECT_EQ(a.position.y, b.position.y);
+    EXPECT_EQ(a.position.z, b.position.z);
+    EXPECT_EQ(a.velocity.x, b.velocity.x);
+    EXPECT_EQ(a.velocity.y, b.velocity.y);
+    EXPECT_EQ(a.velocity.z, b.velocity.z);
+}
+
+// The PERF-1 fixture world: ownship + a closing hostile (EWMA rates),
+// a friendly, a hostile missile, ground clutter (skipped), a
+// stationary-at-altitude anchor (kept), and an untagged contact.
+struct PictureWorld {
+    EntityWorld world;
+    MessageBus bus;
+    std::uint64_t own = 0;
+
+    PictureWorld() {
+        OwnshipSpec os;
+        own = add_entity(world, {os.pos, os.vel, "blue", "fighter"});
+        add_entity(world,
+            {WorldPosition{0.0, 5.0 * FT_PER_NM, 20000.0},
+             WorldPosition{0.0, -600.0 * FPS_PER_KT, 0.0},
+             "red", "fighter"});
+        add_entity(world,
+            {WorldPosition{3.0 * FT_PER_NM, 0.0, 15000.0},
+             WorldPosition{0.0, 500.0 * FPS_PER_KT, 0.0},
+             "blue", "fighter"});
+        add_entity(world,
+            {WorldPosition{0.0, 2.0 * FT_PER_NM, 20000.0},
+             WorldPosition{0.0, -2400.0, 0.0},
+             "red", "missile"});
+        // Clutter: stationary at 50 ft — excluded by both paths.
+        add_entity(world,
+            {WorldPosition{500.0, 1000.0, 50.0},
+             WorldPosition{0.0, 0.0, 0.0},
+             "red", "battalion"});
+        // Stationary AT ALTITUDE — the carve-out keeps it in the picture.
+        add_entity(world,
+            {WorldPosition{0.0, 6000.0, 20000.0},
+             WorldPosition{0.0, 0.0, 0.0},
+             "green", "tanker"});
+        // Untagged contact: no team, no role.
+        add_entity(world,
+            {WorldPosition{0.0, -4.0 * FT_PER_NM, 12000.0},
+             WorldPosition{0.0, 300.0 * FPS_PER_KT, 0.0}});
+    }
+};
+
+} // anonymous namespace
+
+TEST(SensorFusion, AirPicturePathMatchesWorldQuery) {
+    PictureWorld fixture;
+    const AirPicture pic = build_picture(fixture.world);
+
+    // Clutter excluded, the anchor kept: the picture mirrors the
+    // world-query candidate set — 6 contacts (the ownship included; the
+    // fusion skips its own id during the rebuild, leaving 5 targets).
+    ASSERT_EQ(pic.contacts.size(), 6u);
+
+    SensorFusion world_path;
+    world_path.initialize(fixture.own, fixture.world, fixture.bus,
+                          SkillLevel::Veteran);
+    CountingPolicy world_policy;
+    world_path.set_detection_policy(&world_policy);
+
+    SensorFusion picture_path;
+    picture_path.initialize(fixture.own, fixture.world, fixture.bus,
+                            SkillLevel::Veteran);
+    CountingPolicy picture_policy;
+    picture_path.set_detection_policy(&picture_policy);
+    picture_path.set_air_picture(&pic);
+
+    // Two rebuilds on each path (the second exercises EWMA blending
+    // against the previous snapshot on both paths identically).
+    for (int rebuild = 0; rebuild < 2; ++rebuild) {
+        world_path.update(5.0);
+        picture_path.update(5.0);
+
+        ASSERT_EQ(world_path.targets().size(),
+                  picture_path.targets().size());
+        for (std::size_t i = 0; i < world_path.targets().size(); ++i) {
+            expect_same_target(world_path.targets()[i],
+                               picture_path.targets()[i]);
+        }
+    }
+
+    // Same order, same count, same values — and the batch hook fired
+    // once per rebuild with one classify per contact.
+    EXPECT_EQ(world_policy.classifies_, picture_policy.classifies_);
+    EXPECT_EQ(picture_policy.prepares_, 2);
+    EXPECT_EQ(picture_policy.classifies_, 2 * 5);
+}
+
+TEST(SensorFusion, ClearingAirPictureRestoresWorldQuery) {
+    PictureWorld fixture;
+    const AirPicture pic = build_picture(fixture.world);
+
+    SensorFusion sf;
+    sf.initialize(fixture.own, fixture.world, fixture.bus,
+                  SkillLevel::Veteran);
+    sf.set_air_picture(&pic);
+    sf.update(5.0);                       // picture-path rebuild
+    sf.set_air_picture(nullptr);          // revert
+    sf.force_refresh();                   // world-path rebuild again
+
+    SensorFusion reference;
+    reference.initialize(fixture.own, fixture.world, fixture.bus,
+                         SkillLevel::Veteran);
+    reference.force_refresh();
+
+    ASSERT_EQ(sf.targets().size(), reference.targets().size());
+    for (std::size_t i = 0; i < sf.targets().size(); ++i) {
+        expect_same_target(sf.targets()[i], reference.targets()[i]);
+    }
+}
+
+TEST(SensorFusion, InitializeClearsStaleAirPicture) {
+    PictureWorld fixture;
+    const AirPicture pic = build_picture(fixture.world);
+
+    SensorFusion sf;
+    sf.set_air_picture(&pic);
+    EXPECT_NE(sf.air_picture(), nullptr);
+    sf.initialize(fixture.own, fixture.world, fixture.bus,
+                  SkillLevel::Veteran);
+    EXPECT_EQ(sf.air_picture(), nullptr)
+        << "a stale picture pointer across fusion lives would read "
+           "freed host memory";
+}
+
+TEST(SensorFusion, WillRebuildThisTickMirrorsTimerAndMissileThreat) {
+    // Quiet world: no hostile missile visible. The demand predicate is
+    // the timer alone.
+    {
+        EntityWorld world;
+        MessageBus bus;
+        OwnshipSpec os;
+        const auto own =
+            add_entity(world, {os.pos, os.vel, "blue", "fighter"});
+        add_entity(world,
+            {WorldPosition{0.0, 30.0 * FT_PER_NM, 20000.0},
+             WorldPosition{0.0, -600.0 * FPS_PER_KT, 0.0},
+             "red", "fighter"});
+
+        SensorFusion sf;
+        sf.initialize(own, world, bus, SkillLevel::Veteran);
+        sf.update(1.0);  // first update rebuilds; timer = 5 s
+        EXPECT_FALSE(sf.will_rebuild_this_tick(1.0));
+        for (int i = 0; i < 3; ++i) sf.update(1.0);  // timer = 2 s
+        EXPECT_FALSE(sf.will_rebuild_this_tick(1.0));
+        sf.update(1.0);  // timer = 1 s
+        EXPECT_TRUE(sf.will_rebuild_this_tick(1.0))
+            << "an expiring skill timer must demand the picture";
+    }
+
+    // Beam fight: a visible hostile missile force-refreshes every tick
+    // — the demand predicate must be true regardless of the timer.
+    {
+        EntityWorld world;
+        MessageBus bus;
+        OwnshipSpec os;
+        const auto own =
+            add_entity(world, {os.pos, os.vel, "blue", "fighter"});
+        add_entity(world,
+            {WorldPosition{0.0, 2.0 * FT_PER_NM, 20000.0},
+             WorldPosition{0.0, -2400.0, 0.0},
+             "red", "missile"});
+
+        SensorFusion sf;
+        sf.initialize(own, world, bus, SkillLevel::Veteran);
+        sf.update(1.0);  // rebuild: the missile is in the picture
+        ASSERT_NE(sf.missile_threat(), nullptr);
+        EXPECT_TRUE(sf.will_rebuild_this_tick(1.0 / 60.0))
+            << "the beam-fight rule must demand the picture every tick";
+    }
+}

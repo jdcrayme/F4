@@ -41,6 +41,7 @@
 #include <f4/data/formation_data.hpp>  // SimData FORMDAT.FIL formations
 #include <f4/weapons/weapon_class_table.hpp>
 #include <f4/world_convert/class_table.hpp>  // owned here (see class_table_)
+#include <f4/ai/air_picture.hpp>       // PERF-1: the shared snapshot
 
 #include <cstdint>
 #include <filesystem>
@@ -178,6 +179,43 @@ public:
     /// retired, the identity the C5 harness pins).
     [[nodiscard]] int retired_aircraft() const noexcept {
         return retired_aircraft_;
+    }
+
+    // --- C6: arming the campaign flights (A/A goes live) -----------------
+    /// Arm ONE campaign-spawned aircraft for A/A combat — the combat
+    /// component set (radar, RWR, signature, damage state, the fighter
+    /// gun, the NCTR identity), the fighting brain (envelopes + ROE from
+    /// the scenario's combat block), the doctrine by mission ROLE
+    /// (CampaignOriginComponent::mission_byte → CAP/Sweep/Intercept/
+    /// Escort fight the full ladder; everything else flies defensive-
+    /// only through its BRAINDAT archetype), the doctrine A/A loadout
+    /// for fighting roles, and a RadarBackedDetectionPolicy owned here
+    /// (combat_policies_) and installed on the brain's SensorFusion —
+    /// the M2 flip: campaign brains see radar truth, not
+    /// GCI-omniscience. See combat_bridge.hpp (arm_campaign_combat) and
+    /// CAMPAIGN_LOOP_PLAN.md §5 C6.
+    ///
+    /// Gated on the scenario's combat.campaign_armed (the C6 opt-in —
+    /// default false, every pre-C6 world byte-identical). Call sites:
+    /// the bulk campaign spawn path arms inside
+    /// spawn_from_campaign_flights(); the session arms every late
+    /// spawner materialization in its adopt_new_spawns_() cadence
+    /// (right after register_aircraft). Idempotent per entity (an
+    /// already-fighting brain is a no-op). Returns true when the
+    /// aircraft got armed by THIS call.
+    bool arm_campaign_aircraft(entities::EntityId id);
+
+    /// C6 diagnostics: how many campaign aircraft this Simulation armed
+    /// (total + per doctrine role). The QC summary + the session stats
+    /// read exactly these.
+    [[nodiscard]] int campaign_armed_aircraft() const noexcept {
+        return campaign_armed_total_;
+    }
+    [[nodiscard]] int campaign_armed_fighters() const noexcept {
+        return campaign_armed_fighters_;
+    }
+    [[nodiscard]] int campaign_armed_defensive() const noexcept {
+        return campaign_armed_defensive_;
     }
 
     /// All spawned airfield-feature entities (Phase 2A). Each carries
@@ -369,6 +407,19 @@ private:
     /// collision-avoid modules are engine-agnostic: this push IS their
     /// entire view of terrain and traffic.
     void push_safety_pictures();
+    /// PERF-1 (PERFORMANCE_PLAN.md §3): build the SHARED air picture
+    /// once per tick — one walk over the transform bucket (clutter
+    /// filter, team/role tag reads, team interning) — and hand its
+    /// address to every roster brain's SensorFusion. The brains' combat
+    /// rebuilds (including the beam-fight every-tick refresh) then
+    /// iterate the snapshot's contacts instead of re-walking the entity
+    /// database per brain. Output-identical to the fusion's own world
+    /// query by construction (same entities, same order, same values);
+    /// combat-gated (unarmed worlds never build it), and demand-gated
+    /// (the walk happens only on ticks where at least one brain's
+    /// fusion will actually rebuild — `dt` is the tick's own dt, the
+    /// same value update_all will hand the brains).
+    void push_air_picture_(double dt);
     void init_bubble_manager();             // Mode B: BubbleManager for ground/naval units
     void update_bubble();                   // Mode B: per-tick bubble update (in tick())
     void derive_real_airbase();   // airbase_source -> real ground layout
@@ -386,6 +437,12 @@ private:
     /// BubbleManager) references this member. No-op on an empty path
     /// (the table stays empty; every consumer degrades gracefully).
     void load_class_table();
+    /// C6: resolve + load the BRAINDAT archetype table for the armed
+    /// campaign (called from initialize() when combat.campaign_armed,
+    /// BEFORE any aircraft exists — the arm installs non-owning
+    /// archetype pointers into brain_data_). Throws loudly when no
+    /// data resolves; no-op when already loaded.
+    void ensure_campaign_brain_data();
 
     // --- Owned state ---
     Scenario scenario_;
@@ -458,6 +515,20 @@ private:
     // C5: aircraft removed via retire_aircraft() (the wreck-reaper
     // counter — roster == initial + registered − retired).
     int retired_aircraft_ = 0;
+
+    // C6: the campaign-combat arm bookkeeping — the seed counter (spawn
+    // order is deterministic, so seed_base + index is too) + the
+    // diagnostics counters the QC surface reads.
+    std::size_t campaign_arm_index_ = 0;
+    int campaign_armed_total_ = 0;
+    int campaign_armed_fighters_ = 0;
+    int campaign_armed_defensive_ = 0;
+
+    // PERF-1: the shared air picture, rebuilt in place every combat tick
+    // by push_air_picture_() and handed (non-owning) to every roster
+    // brain. The members are reused tick over tick so the steady state
+    // allocates nothing (contacts/teams clear + repopulate in place).
+    f4::ai::AirPicture air_picture_{};
 
     // Phase 2A: static airfield-feature entities (buildings, runway sections,
     // taxiways, towers, hangars). Each carries TransformComponent +

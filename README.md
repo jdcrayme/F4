@@ -687,10 +687,70 @@ sensor_fusion.set_detection_policy(&policy);
 
 **Combat-relevant pieces**: `scenario.hpp` (`CombatConfig`, per-aircraft
 `team`), `combat_bridge.hpp` (`attach_combat_loadout`,
-`RadarBackedDetectionPolicy`), `simulation.hpp` (`weapon_table()`),
+`RadarBackedDetectionPolicy`, **C6's `arm_campaign_combat`**),
+`simulation.hpp` (`weapon_table()`, `arm_campaign_aircraft()`),
 `simulation.cpp` (tick integration — all gated on `combat.enabled`, so a
 non-combat world is unchanged). Combat-disabled scenarios carry none of
 the combat components.
+
+**C6 — campaign flights fight**: the scenario block above arms
+scenario aircraft; `"combat": {"campaign_armed": true}` (or
+`CampaignSessionOptions::aa_combat`, or `campaign_qc --aa-combat`)
+arms every CAMPAIGN-spawned aircraft with the mission-role doctrine —
+CAP/Sweep/Intercept/Escort fly the full combat ladder with the
+doctrine A/A loadout; every other category flies defensive-only
+through its BRAINDAT archetype (engagement rungs stood down, missile
+defense armed, the strike rung untouched). Campaign brains see radar
+truth (a `RadarBackedDetectionPolicy` per aircraft, owned and reaped
+by the Simulation), and the air picture skips ground clutter
+(`TransformComponent::is_ground_clutter` — stationary + below every
+Korea terrain post). Air kills book to the C1 ledger with full
+attribution; the C5 war gates hold; the runs stay byte-deterministic.
+
+**PERF-1 — the shared air picture**: the brains' sensor-fusion
+rebuilds consume ONE host-built snapshot per tick
+(`Simulation::push_air_picture_` → `BrainComponent::set_air_picture` →
+`SensorFusion::set_air_picture`) instead of each walking the ~4,400-
+entity database — the armed war's merge-phase collapse (~37 tps)
+closed at a 140–200 tps sustained floor with the ledger bytes
+UNCHANGED (`AirPicture` in f4-ai; the walk is demand-gated on the
+fusions' own rebuild decisions). See `Docs/PERFORMANCE_PLAN.md`.
+
+**G1 — the ground war**: `CampaignSessionOptions::ground_war` (or
+`campaign_qc --ground-war`) runs the campaign-side twin of the tasking
+ladder — `f4::campaign::GroundWar` over the same data sources, bound
+to the same result ledger, on the same clock: battalions maneuver
+against the GTM-scored enemy objectives, the front line resolves per
+grid column, contact exchanges attrition at hours-scale tempo, undefended
+objectives flip (capture), the `.cmp` `last_resupply` cadence refills,
+and AG kills against battalion entities thin the line from the air.
+Ground events book in the ledger's optional `"ground"` block (the C5
+determinism MD5 covers both wars), the write-back
+(`apply_ground_writeback()`) lands positions/rosters/owners into the
+WorldState, and the session mirrors the engine's battalions into the
+sim's entities every update — the 3D world's ground units march.
+Ground-off sessions stay byte-identical (the `aa_combat` opt-in
+contract). See `Docs/GROUND_WAR_PLAN.md`.
+
+**G2 — the interdiction link**: `CampaignSessionOptions::unit_strike`
+(or `campaign_qc --unit-strike`) closes the DIAGONAL between the two
+wars — UNIT-targeted delivery missions (the CAS family, data-driven
+off the mission profile's own `target`/`targetwp`) resolve REAL enemy
+battalion targets: front-line ranked (distance to the contested FLOT,
+the same front math the ground-war engine computes — extracted into
+one shared helper), rotation-spread, ledger-destroyed skipped;
+routed through the same threat-shaped builder (the battalion's grid
+position); and the bombs they drop ATTRITE THE LINE — the battalion
+blast endpoint computes an integer vehicle-kill count (one
+`GroundUnitLossMessage` per effective bomb), the sink books the
+ground loss (air-sourced, provenance-carried) plus per-vehicle ag
+credit, and the engine pulls it: the roster decays, the mirror
+syncs, the front fights with what's left. The arm is opt-in at every
+layer (tasking rungs + the sink's booking; flag off, documents
+byte-identical — the C6 and G1 goldens re-verified). The QC's exit 14
+fires when an armed unit strike attrites nothing (CAS needs its TOT
+window — the honest acceptance horizon is `--war >= 0.3`). See
+`Docs/INTERDICTION_PLAN.md`.
 
 **V-CAMP**: `campaign_session.hpp` — the live campaign loop as ONE
 frame-driven object (the `campaign_qc` wiring, composed for hosts):
@@ -712,6 +772,9 @@ opts.world_json = "TestCamp.world.json";      // absolute paths
 opts.aircraft_config = "<build>/generated_fixtures/f16.json";
 opts.mission_profiles = "<build>/generated_campaign/MissionProfiles.json";
 opts.max_flights = 48;                        // interactive budget
+opts.aa_combat = true;                        // C6: campaign A/A live
+opts.ground_war = true;                       // G1: the ground war too
+opts.unit_strike = true;                      // G2: CAS bombs the line
 
 auto session = f4::simulation::CampaignSession::create(opts, &err);
 session->set_paused(false);

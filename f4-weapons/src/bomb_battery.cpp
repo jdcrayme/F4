@@ -51,6 +51,15 @@ void write_fstatus(std::vector<uint8_t>& fstatus, std::size_t i,
         (fstatus[byte_idx] & ~(0x03 << shift)) | (vis << shift));
 }
 
+/// G2 — one vehicle's hit points in the warhead-power scale. 96 lb: a
+/// MK-82's 192-lb warhead removes 2 vehicles at the fuze point. The
+/// reference deaggregates a battalion into individually-damaged vehicles
+/// inside the bubble; at campaign aggregation the per-vehicle dispersion
+/// folds into this one documented constant (the real VCD hit points land
+/// with the real-data import — a one-line change, the same discipline
+/// kDefaultFeatureHp keeps above).
+constexpr double kVehicleHitPointsLb = 96.0;
+
 } // namespace
 
 // ============================================================================
@@ -215,6 +224,87 @@ objective_damage_summary(const entities::EntityWorld& world,
 }
 
 // ============================================================================
+// G2 — battalion (unit) damage, the interdiction endpoint
+// ============================================================================
+
+int roster_vehicle_count(std::uint32_t roster) noexcept {
+    // 2 bits per group, 16 groups — the wire's own packing (the ground
+    // war engine sums the same field when it snapshots a battalion).
+    int vehicles = 0;
+    for (int g = 0; g < 16; ++g) {
+        vehicles += static_cast<int>((roster >> (g * 2)) & 0x03);
+    }
+    return vehicles;
+}
+
+UnitDamageResult
+apply_battalion_damage(const entities::EntityWorld& world,
+                       std::uint64_t target_id,
+                       const f4::geo::WorldPosition& impact_point,
+                       double warhead_power_lb,
+                       double lethal_radius_ft,
+                       double roll01) {
+    using namespace entities;
+
+    UnitDamageResult out;
+    out.unit_id = target_id;
+
+    const EntityId vid{target_id};
+    if (!vid.valid()) return out;
+    const EntityHandle h(vid, const_cast<EntityWorld*>(&world));
+
+    // Only the campaign's aggregate ground unit takes unit damage (the
+    // same marker the C1 sink's G1 branch keys on: UnitCoreComponent
+    // with unit_class == Battalion). Deaggregated bubble vehicles are
+    // separate entities and stay the viewer tranche's.
+    const auto* uc = h.get<UnitCoreComponent>();
+    if (uc == nullptr || uc->unit_class != UnitClass::Battalion) {
+        return out;
+    }
+    out.unit_found = true;
+
+    // The campaign keys (vu + team) — resolved the same way the sink's
+    // battalion branch resolves them, so the booking at the far end
+    // never re-walks a different rule.
+    if (const auto* pb = h.get<PropertyBag>(); pb != nullptr) {
+        const auto it = pb->ints.find("vu_id_num");
+        if (it != pb->ints.end() && it->second > 0) {
+            out.battalion_vu = static_cast<std::uint32_t>(it->second);
+        }
+    }
+    if (const auto t = h.get_tag(tags::TEAM);
+        t.has_value() && t->as_int() != nullptr) {
+        out.victim_team = static_cast<std::uint8_t>(*t->as_int());
+    }
+
+    // The entity's mirrored live strength — the mirror syncs the ENGINE's
+    // roster every ground update (<= update cadence stale; a same-minute
+    // over-kill self-heals on the engine's pull+sync — the engine's
+    // strength floor is the truth, documented in INTERDICTION_PLAN §3).
+    out.strength = roster_vehicle_count(uc->roster);
+
+    // The blast: one burst at the unit's miss distance (a battalion is a
+    // point at campaign scale — the aim WAS its transform; the miss is
+    // the release geometry's own error). damage.hpp's model, one target:
+    //   hp scale  = strength vehicles x kVehicleHitPointsLb each
+    //   kill rule = whole vehicles removed (floor), capped at strength
+    const auto* tf = h.get<TransformComponent>();
+    const f4::geo::WorldPosition center =
+        (tf != nullptr) ? tf->position : f4::geo::WorldPosition{};
+    const double miss = horizontal_distance(impact_point, center);
+
+    const double hp = static_cast<double>(out.strength) * kVehicleHitPointsLb;
+    const auto dmg = apply_damage(hp, hp, warhead_power_lb, miss,
+                                  lethal_radius_ft, roll01);
+    int kills = static_cast<int>(dmg.damage_applied / kVehicleHitPointsLb);
+    if (kills > out.strength) kills = out.strength;
+    if (kills < 0) kills = 0;
+    out.vehicles_killed = kills;
+    out.destroyed = (out.strength > 0 && kills == out.strength);
+    return out;
+}
+
+// ============================================================================
 // BombSimComponent — the fall, the impact, the terminal messages
 // ============================================================================
 
@@ -249,11 +339,16 @@ void BombSimComponent::update(double dt, messaging::MessageBus& bus) {
     // Objective feature damage: the campaign-side endpoint. Only a real
     // impact against a resolvable target applies damage; an Expired bomb
     // (never reached the plane) harmlessly records its end.
+    // NOTE: objective_found is true for ANY transform-carrying target
+    // (the diagnostic "the target exists"); the OBJECTIVE branch keys
+    // on features_total > 0 — a resolved feature set — so unit targets
+    // and stale ids fall through to the unit/stale path below, whose
+    // published bytes are identical to the pre-G2 zeroed summary.
     if (st == BombStatus::Impact && bc->target_id != 0) {
         auto result = apply_objective_feature_damage(
             *world, bc->target_id, impact, bc->warhead_power_lb,
             bc->lethal_radius_ft, /*roll01=*/0.5);
-        if (result.objective_found) {
+        if (result.objective_found && result.features_total > 0) {
             bus.publish(BombImpactMessage{
                 owner_.id().value, bc->shooter_id, bc->target_id, cause,
                 impact, miss, bc->bomb.flight_time_s(),
@@ -261,8 +356,20 @@ void BombSimComponent::update(double dt, messaging::MessageBus& bus) {
                 result.destroyed_pct, sim_time()});
             return;
         }
-        // Target id resolved no objective (a unit target, or stale): the
-        // impact still reports — with the damage summary zeroed.
+        // Target id resolved no objective: a UNIT target, or stale. G2 —
+        // the battalion sibling endpoint: the blast removes vehicles
+        // (computed, never mutated — the ledger books, the engine pulls).
+        // One loss event per bomb that killed at least one vehicle; the
+        // impact message below still reports (with the objective summary
+        // zeroed — the log path resolves the victim's vu itself).
+        auto unit = apply_battalion_damage(
+            *world, bc->target_id, impact, bc->warhead_power_lb,
+            bc->lethal_radius_ft, /*roll01=*/0.5);
+        if (unit.unit_found && unit.vehicles_killed > 0) {
+            bus.publish(GroundUnitLossMessage{
+                bc->target_id, bc->shooter_id, unit.vehicles_killed,
+                sim_time()});
+        }
     }
     bus.publish(BombImpactMessage{
         owner_.id().value, bc->shooter_id, bc->target_id, cause,

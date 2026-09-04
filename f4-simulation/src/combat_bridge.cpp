@@ -9,6 +9,7 @@
 #include "f4/simulation/simulation.hpp"
 
 #include <f4/ai/brain_component.hpp>
+#include <f4/campaign/mission_type.hpp>
 #include <f4/entities/types.hpp>
 #include <f4/recorder/flight_recorder.hpp>
 #include <f4/sensors/messages.hpp>
@@ -18,6 +19,7 @@
 #include <f4/weapons/weapon_store.hpp>
 #include <f4/weapons/weapon_types.hpp>
 #include <f4/sensors/track_store.hpp>
+#include "f4/simulation/campaign_origin.hpp"
 
 namespace f4::simulation {
 
@@ -206,13 +208,15 @@ void attach_combat_loadout(entities::EntityHandle& aircraft,
     dmg.max_hit_points = hit_points;
 }
 
-f4::ai::SensorFusion::DetectionPolicy::Verdict
+void RadarBackedDetectionPolicy::prepare_batch() {
+    entities::EntityHandle ownship(entities::EntityId{ownship_id_}, world_);
+    batch_radar_ = ownship.get<sensors::RadarSimComponent>();
+    batch_rwr_   = ownship.get<sensors::RwrComponent>();
+}
+
+RadarBackedDetectionPolicy::Verdict
 RadarBackedDetectionPolicy::classify(const f4::ai::TargetInfo& t) {
     Verdict v{};
-
-    // The ownship must still exist — a dead AI's policy answers nothing.
-    // (EntityHandle on a dead id yields null component lookups.)
-    entities::EntityHandle ownship(entities::EntityId{ownship_id_}, world_);
 
     // CORPSES DON'T PAINT (the M3 host decision radar_component.hpp
     // defers to this layer): an entity whose DamageStateComponent is
@@ -227,8 +231,22 @@ RadarBackedDetectionPolicy::classify(const f4::ai::TargetInfo& t) {
         if (dmg->killed) return v;
     }
 
+    // PERF-1: ownship-side components come from the batch cache when a
+    // rebuild prepared one (the fusion calls prepare_batch() once per
+    // rebuild); a direct classify() outside any batch resolves per call
+    // — the pre-PERF-1 behavior, kept for tests and standalone hosts.
+    // Pointer safety: the fusion guarantees no world mutation between
+    // prepare_batch() and the last classify() of the batch, and every
+    // rebuild re-prepares — a stale batch pointer is never consumed.
+    const sensors::RadarSimComponent* radar = batch_radar_;
+    if (radar == nullptr) {
+        radar = entities::EntityHandle(entities::EntityId{ownship_id_},
+                                       world_)
+                    .get<sensors::RadarSimComponent>();
+    }
+
     // radar: live track in the ownship's radar?
-    if (const auto* radar = ownship.get<sensors::RadarSimComponent>()) {
+    if (radar != nullptr) {
         const auto* tf = radar->tracks().find(t.entity_id);
         if (tf != nullptr && tf->state != sensors::TrackState::Dropped) {
             v.radar = true;
@@ -236,7 +254,12 @@ RadarBackedDetectionPolicy::classify(const f4::ai::TargetInfo& t) {
     }
 
     // rwr: is the candidate painting US?
-    if (const auto* rwr = ownship.get<sensors::RwrComponent>()) {
+    const sensors::RwrComponent* rwr = batch_rwr_;
+    if (rwr == nullptr) {
+        rwr = entities::EntityHandle(entities::EntityId{ownship_id_}, world_)
+                  .get<sensors::RwrComponent>();
+    }
+    if (rwr != nullptr) {
         for (const auto& w : rwr->warnings) {
             if (w.emitter_id == t.entity_id) {
                 v.rwr = true;
@@ -602,6 +625,269 @@ void attach_combat_event_recorder(Simulation& sim) {
             }
             rec->record(std::move(e));
         });
+}
+
+// ============================================================================
+// C6 — arming the campaign flights
+// ============================================================================
+
+CampaignCombatRole campaign_combat_role(std::uint8_t mission_byte) noexcept {
+    using f4::campaign::MissionCategory;
+    const auto category = f4::campaign::mission_category(mission_byte);
+    switch (category) {
+        case MissionCategory::CAP:
+        case MissionCategory::Sweep:
+        case MissionCategory::Intercept:
+        case MissionCategory::Escort:
+            return CampaignCombatRole::Fighter;
+        default:
+            return CampaignCombatRole::Defensive;
+    }
+}
+
+namespace {
+
+/// Doctrine A/A fill for a fighting role's EXISTING store: the
+/// standard_fighter station set (the M61 drum + 4x AIM-120 + 2x AIM-9
+/// wingtips), added only when the store carries no station of that
+/// category — the campaign wire loadout rarely maps A/A (the
+/// kCampaignWeaponMap is bomb-heavy), and a fighter without missiles is
+/// a target, not a threat. Mirrors standard_fighter's exact fills (the
+/// station doctrine one place, on the existing store).
+int fill_fighter_aa_stations(weapons::WeaponStoreComponent& store,
+                             const weapons::WeaponClassTable& table) {
+    int added = 0;
+    if (store.find_with_category(
+            table, weapons::WeaponCategory::AirToAirMissile) ==
+        weapons::WeaponStoreComponent::npos) {
+        const auto amraam = table.find_by_name("AIM-120C");
+        if (amraam != weapons::kInvalidWeapon) {
+            for (int i = 0; i < 4; ++i) {
+                store.add_station(amraam, 2, "station " +
+                    std::to_string(i + 1));
+                ++added;
+            }
+        }
+        const auto sidewinder = table.find_by_name("AIM-9M");
+        if (sidewinder != weapons::kInvalidWeapon) {
+            store.add_station(sidewinder, 1, "wingtip left");
+            store.add_station(sidewinder, 1, "wingtip right");
+            added += 2;
+        }
+    }
+    // The gun drum: the brain's gun fire control budgets against the
+    // STORE's gun station (configure_brain_combat reads it right after
+    // this fill), so a fighter with a GunComponent but no gun station
+    // would fly a gun it can never fire.
+    if (store.find_with_category(table, weapons::WeaponCategory::Gun) ==
+        weapons::WeaponStoreComponent::npos) {
+        const auto gun = table.find_by_name("M61A1");
+        if (gun != weapons::kInvalidWeapon) {
+            store.add_station(gun, 511, "gun");
+            ++added;
+        }
+    }
+    return added;
+}
+
+/// The disengaged archetype for a defensive role: the mission category's
+/// own .brn shape when the table carries it (SEAD for SEAD, Strike for
+/// the strike family), else the fallback ladder. Returns nullptr when
+/// NO archetype in the table disarms BVREngage — the host surfaces that
+/// as a doctrine failure (a defensive role with no way to stand down
+/// would fight, the exact behavior C6 exists to prevent).
+const f4::data::BrainArchetype* disengaged_archetype(
+    const f4::data::BrainData& data, std::uint8_t mission_byte) {
+    using f4::campaign::MissionCategory;
+    using f4::data::BrainModeKey;
+    const auto disarmed = [&data](const char* name) {
+        const auto* a = data.find_archetype(name);
+        if (a == nullptr) return static_cast<const f4::data::BrainArchetype*>(nullptr);
+        const bool engagement_off =
+            !a->mode_enabled(BrainModeKey::BVREngage) &&
+            !a->mode_enabled(BrainModeKey::WVREngage);
+        const bool defense_on =
+            a->mode_enabled(BrainModeKey::MissileDefeat);
+        return (engagement_off && defense_on) ? a : nullptr;
+    };
+    // Category's own shape first (the .brn authored THAT mission's
+    // doctrine), then the generic fallbacks.
+    switch (f4::campaign::mission_category(mission_byte)) {
+        case MissionCategory::SEAD: {
+            if (const auto* a = disarmed("SEAD")) return a;
+            [[fallthrough]];
+        }
+        case MissionCategory::Strike:
+        case MissionCategory::CAS: {
+            if (const auto* a = disarmed("Strike")) return a;
+            [[fallthrough]];
+        }
+        default: {
+            if (const auto* a = disarmed("Waypointer")) return a;
+            if (const auto* a = disarmed("Strike")) return a;
+            if (const auto* a = disarmed("SEAD")) return a;
+            return nullptr;
+        }
+    }
+}
+
+} // namespace
+
+CampaignCombatArmament arm_campaign_combat(
+    entities::EntityHandle& aircraft,
+    const weapons::WeaponClassTable& table,
+    std::uint32_t seed_base,
+    std::size_t arm_index,
+    double hit_points,
+    bool bvr_hold,
+    bool missiles_hold,
+    bool guns_hold,
+    const f4::data::BrainData* brain_data,
+    std::unique_ptr<RadarBackedDetectionPolicy>* out_policy) {
+    CampaignCombatArmament out;
+
+    // 0. The candidate contract: a campaign aircraft (origin stamped) with
+    //    a brain and a store. Anything else is not ours to arm.
+    auto* origin = aircraft.get<CampaignOriginComponent>();
+    auto* brain = aircraft.get<f4::ai::BrainComponent>();
+    auto* store = aircraft.get<weapons::WeaponStoreComponent>();
+    if (origin == nullptr || brain == nullptr || store == nullptr) {
+        return out;  // armed=false — not a campaign-spawned aircraft
+    }
+    // Idempotence: an already-fighting brain is already armed (the
+    // second arm would double-attach components and re-roll seeds).
+    if (brain->combat_enabled()) {
+        out.role = campaign_combat_role(origin->mission_byte);
+        out.archetype = "<already armed>";
+        return out;
+    }
+
+    out.role = campaign_combat_role(origin->mission_byte);
+    const bool fighter = out.role == CampaignCombatRole::Fighter;
+
+    // 1. The doctrine's data leg FIRST (fail before anything attaches):
+    //    defensive roles need a disengaged archetype, fighters fly the
+    //    default-allowed brain (no archetype — the scenario combat path's
+    //    shape).
+    const f4::data::BrainArchetype* archetype = nullptr;
+    if (!fighter) {
+        if (brain_data == nullptr) {
+            out.archetype = "<no brain data>";
+            return out;  // armed=false — the host surfaces this loudly
+        }
+        archetype = disengaged_archetype(*brain_data, origin->mission_byte);
+        if (archetype == nullptr) {
+            out.archetype = "<no disengaged archetype>";
+            return out;
+        }
+        out.archetype = archetype->name;
+    }
+
+    // 2. The combat component set — the scenario path's
+    //    attach_combat_loadout, adapted: every piece only when missing
+    //    (the campaign store already exists; the TEAM tag already rides
+    //    the entity from the spawn path).
+    if (aircraft.get<entities::CampaignIdentityComponent>() == nullptr) {
+        auto& id = aircraft.add<entities::CampaignIdentityComponent>();
+        id.team_id = origin->team_slot;
+        // NCTR string, deterministic per flight: the flight's VU when it
+        // has one, the entity otherwise. Display resolution is a viewer
+        // concern (the wire callsign pool decodes there); this string is
+        // an IDENTIFIER, not a fidelity claim.
+        id.callsign = origin->flight_vu != 0
+            ? ("F" + std::to_string(origin->flight_vu))
+            : ("E" + std::to_string(aircraft.id().value));
+        out.components_attached = true;
+    }
+
+    // The doctrine gun: fighters only (defensive roles stand WVR down —
+    // the archetype gates GunsEngage off anyway, and a gun station on a
+    // jet that never merges is bookkeeping noise). Config from the Gun
+    // class card (M61A1), seeded like the radar.
+    const auto* gun_rec = gun_class(table);
+    if (fighter && gun_rec != nullptr &&
+        aircraft.get<weapons::GunComponent>() == nullptr) {
+        auto& gun = aircraft.add<weapons::GunComponent>();
+        gun.weapon_handle = gun_rec->id;
+        weapons::GunConfig gcfg{};
+        gcfg.muzzle_velocity_fps =
+            gun_rec->max_speed_fts > 0.0 ? gun_rec->max_speed_fts : 3400.0;
+        gcfg.round_power_lb = gun_rec->warhead_power_lb;
+        gcfg.lethal_radius_ft = gun_rec->lethal_radius_ft;
+        gun.stream = weapons::GunStream(
+            gcfg, seed_base +
+                static_cast<std::uint32_t>(0x1000 + arm_index));
+        out.components_attached = true;
+    }
+
+    if (aircraft.get<sensors::SignatureComponent>() == nullptr) {
+        aircraft.add<sensors::SignatureComponent>();
+        out.components_attached = true;
+    }
+    if (aircraft.get<sensors::RadarSimComponent>() == nullptr) {
+        auto& radar = aircraft.add<sensors::RadarSimComponent>();
+        radar.rng_seed = seed_base + static_cast<std::uint32_t>(arm_index);
+        // The IFF reference team: the entity's own TEAM tag (the campaign
+        // owner-slot mapping the spawn path already resolved).
+        const auto team = aircraft.get_tag(entities::tags::TEAM);
+        radar.own_team = (team && team->as_string())
+            ? *team->as_string() : "blue";
+        out.components_attached = true;
+    }
+    if (aircraft.get<sensors::RwrComponent>() == nullptr) {
+        aircraft.add<sensors::RwrComponent>();
+        out.components_attached = true;
+    }
+    if (aircraft.get<entities::DamageStateComponent>() == nullptr) {
+        auto& d = aircraft.add<entities::DamageStateComponent>();
+        d.hit_points = hit_points;
+        d.max_hit_points = hit_points;
+        out.components_attached = true;
+    }
+    // A DamageState that already exists (a host-driven test attached
+    // one) keeps its strength — the arm never re-tunes what's there.
+
+    // 3. The doctrine loadout: fighters with no A/A stations get the
+    //    standard fill (the strike store keeps its bombs either way).
+    if (fighter) {
+        out.aa_stations = fill_fighter_aa_stations(*store, table);
+    }
+
+    // 4. The gun drum the brain budgets against (the store's station,
+    //    after the doctrine fill; 0 when no gun — the brain's budget
+    //    just stays empty, exactly like a scenario gun-less aircraft).
+    out.gun_rounds = 0;
+    const auto gun_station = store->find_with_category(
+        table, weapons::WeaponCategory::Gun);
+    if (gun_station != weapons::WeaponStoreComponent::npos) {
+        out.gun_rounds = store->station(gun_station)->rounds;
+    }
+
+    // 5. The fighting brain: envelopes + ROE through the scenario path's
+    //    own configurator (one place for the fire-control setup), then
+    //    the doctrine's archetype (defensive roles stand the engagement
+    //    rungs down AFTER the envelopes are in — the archetype gates the
+    //    rungs, not the fire controls, so a later re-arm keeps coherent
+    //    numbers).
+    configure_brain_combat(*brain, table,
+                           /*hold_fire=*/false,
+                           bvr_hold, missiles_hold, guns_hold,
+                           out.gun_rounds);
+    if (archetype != nullptr) {
+        brain->set_brain_archetype(archetype);
+    }
+
+    // 6. The detection policy (C6.2 — the M2 flip): radar truth, not
+    //    GCI-omniscience. The CALLER owns the policy (the Simulation's
+    //    combat_policies_ store) and installs it on the brain's fusion.
+    if (out_policy != nullptr) {
+        *out_policy = std::make_unique<RadarBackedDetectionPolicy>(
+            *aircraft.world(), aircraft.id().value);
+        out.policy_created = true;
+    }
+
+    out.armed = true;
+    return out;
 }
 
 } // namespace f4::simulation

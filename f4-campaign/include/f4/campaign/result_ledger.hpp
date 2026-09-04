@@ -118,12 +118,70 @@ struct BombImpactRecord {
     int features_destroyed = 0;       // per the impact message
 };
 
+/// One ground attrition event — vehicle kills on a battalion, from the
+/// ground war's exchange resolution or from air attack. Arrival order;
+/// campaign-clock seconds (the ground war's relative clock, the same
+/// time base apply_mission_draw uses).
+struct GroundLossRecord {
+    double t_s = 0.0;
+    /// Victim battalion VU_ID.num.
+    std::uint32_t victim = 0;
+    std::uint8_t victim_team = 0;
+    /// Attacking battalion VU_ID.num (0 when air-caused).
+    std::uint32_t attacker = 0;
+    std::uint8_t attacker_team = 0;
+    /// Killer squadron VU_ID.num (air-caused events only; 0 otherwise).
+    /// The CREDIT side of an air-caused loss books separately through
+    /// apply_ag_kill — this field is the provenance trail.
+    std::uint32_t killer_squadron = 0;
+    /// Vehicles destroyed by THIS event (>= 1; fractional attrition
+    /// accumulates in the engine and lands as whole kills here).
+    int kills = 0;
+    /// True when the loss came from the air (AG kill on the battalion
+    /// entity) rather than a ground exchange.
+    bool air = false;
+};
+
+/// One objective ownership flip (the ground war's territorial result —
+/// the front actually MOVING). Arrival order.
+struct ObjectiveCaptureRecord {
+    double t_s = 0.0;
+    /// Objective VU_ID.num.
+    std::uint32_t objective = 0;
+    std::uint8_t from_team = 0;
+    std::uint8_t to_team = 0;
+    /// The capturing battalion VU_ID.num.
+    std::uint32_t by_battalion = 0;
+};
+
+/// Per-battalion write state (G1). Seeded lazily by the ground war's
+/// sync (sync_ground_unit) or on the battalion's first loss event; the
+/// ENGINE owns the live numbers, the ledger carries them for the
+/// artifact and the write-back. strength/run_losses split: run_losses
+/// is event-derived (authoritative, monotone), strength is the last
+/// synced live count (last write wins, the fstatus discipline).
+struct GroundUnitLedger {
+    std::uint32_t vu = 0;           // VU_ID.num (the campaign key)
+    std::uint8_t owner = 0;         // team slot
+    int strength_initial = 0;       // vehicles at snapshot
+    int strength = 0;               // vehicles now (last sync)
+    int run_losses = 0;             // vehicles lost THIS RUN (events)
+    int x = 0;                      // final grid column (last sync)
+    int y = 0;                      // final grid row (last sync)
+    std::uint8_t supply = 0;
+    std::uint8_t morale = 0;
+    std::uint8_t fatigue = 0;
+    bool destroyed = false;         // strength reached zero this run
+};
+
 /// Per-team write state. Seeded from the campaign source at
 /// construction. C2 adds the tasking-side counters: `drawn` (aircraft
 /// committed to missions this run) and `reinforced` (aircraft
 /// delivered by the reinforcement cadence). aircraft_remaining stays
 /// the EXISTENCE view (drawn aircraft still exist — only deaths and
-/// reinforcements move it).
+/// reinforcements move it). G1 adds the ground-war counters (vehicles
+/// lost, battalions destroyed, objectives captured — team books for
+/// the ground side of the war).
 struct TeamLedger {
     int slot = 0;
     std::string name;               // empty when the slot is unnamed
@@ -139,6 +197,14 @@ struct TeamLedger {
     /// subtracts them from `losses` — those aircraft left the pool when
     /// they were drawn).
     int drawn_deaths = 0;
+    // --- G1: the ground-war books -------------------------------------
+    /// Battalion vehicles lost to ground exchange or air attack this
+    /// run (the ground side's `losses`).
+    int ground_losses = 0;
+    /// Battalions destroyed (roster to zero) this run.
+    int battalions_destroyed = 0;
+    /// Enemy objectives captured BY this team this run.
+    int objectives_captured = 0;
 };
 
 /// Per-squadron write state. Seeded from the source at construction,
@@ -295,6 +361,44 @@ public:
     void apply_ag_kill(double sim_time_s,
                        std::uint32_t killer_squadron);
 
+    // --- G1: the ground war's write side -------------------------------
+
+    /// A battalion lost `kills` vehicles — ground exchange or air
+    /// attack. Books the event log, the battalion's run_losses (creating
+    /// the entry when the ground war has not synced it yet — losses are
+    /// never dropped for bookkeeping-order reasons), and the victim
+    /// team's ground book. `destroyed` transitions (strength to zero)
+    /// book battalions_destroyed on the team — the ENGINE decides when
+    /// that happens and reports it through sync_ground_unit; this method
+    /// only counts what the event itself says.
+    void apply_ground_loss(double t_s,
+                           std::uint32_t victim_battalion,
+                           std::uint8_t victim_team,
+                           std::uint32_t attacker_battalion,
+                           std::uint8_t attacker_team,
+                           int kills,
+                           bool air_source = false,
+                           std::uint32_t killer_squadron = 0);
+
+    /// An objective changed hands on the ground (capture). Books the
+    /// capture log, the capturing team's objectives_captured, and the
+    /// losing team's book stays event-derivable (from_team on the
+    /// record). Objective OWNERSHIP state lives in the engine's mirror
+    /// + the write-back — this is the event ledger.
+    void apply_objective_capture(double t_s,
+                                 std::uint32_t objective_vu,
+                                 std::uint8_t from_team,
+                                 std::uint8_t to_team,
+                                 std::uint32_t by_battalion);
+
+    /// Final-state battalion sync (last write wins per unit — the
+    /// fstatus discipline). Creates or updates the battalion's ledger
+    /// entry with the ENGINE's current numbers: strength, position,
+    /// supply/morale/fatigue, destroyed. Only called for battalions
+    /// with activity (moved, attrited, resupplied) — pristine
+    /// battalions never appear in the ledger or the artifact.
+    void sync_ground_unit(const GroundUnitLedger& unit);
+
     /// Final-state objective damage sync (last write wins per
     /// objective). Also updates the objective's destroyed counters.
     void apply_objective_damage(const ObjectiveDamageRecord& rec);
@@ -441,6 +545,55 @@ public:
         return losses_;
     }
 
+    // --- G1: the ground-war queries ------------------------------------
+
+    /// Battalion ledger entry by VU_ID.num (nullptr when never synced
+    /// and never attrited).
+    [[nodiscard]] const GroundUnitLedger*
+    ground_unit(std::uint32_t vu) const;
+
+    /// All battalion entries, creation order (to_json sorts VU-asc for
+    /// output stability).
+    [[nodiscard]] const std::vector<GroundUnitLedger>&
+    ground_units() const noexcept {
+        return ground_units_;
+    }
+
+    /// The ground attrition event log (arrival order).
+    [[nodiscard]] const std::vector<GroundLossRecord>&
+    ground_loss_log() const noexcept {
+        return ground_losses_;
+    }
+
+    /// The objective capture log (arrival order).
+    [[nodiscard]] const std::vector<ObjectiveCaptureRecord>&
+    objective_captures() const noexcept {
+        return captures_;
+    }
+
+    /// Total battalion vehicles lost this run (all teams, ground
+    /// exchange + air-caused).
+    [[nodiscard]] int ground_vehicle_losses() const noexcept {
+        return ground_vehicle_losses_;
+    }
+
+    /// Vehicles removed by AIR POWER this run (the air-sourced share of
+    /// ground_vehicle_losses — G2's interdiction column: bombs thinning
+    /// the line). Books in apply_ground_loss when air_source.
+    [[nodiscard]] int ground_vehicle_losses_air() const noexcept {
+        return ground_vehicle_losses_air_;
+    }
+
+    /// Battalions destroyed this run (roster to zero).
+    [[nodiscard]] int ground_battalions_destroyed() const noexcept {
+        return ground_battalions_destroyed_;
+    }
+
+    /// Objectives captured this run (ownership flips).
+    [[nodiscard]] int ground_objectives_captured() const noexcept {
+        return ground_objectives_captured_;
+    }
+
     /// Full team view, slot order (the write-back and the viewer-side
     /// QC read this; the counters API above is the common path).
     [[nodiscard]] const std::vector<TeamLedger>& teams() const noexcept {
@@ -458,9 +611,15 @@ public:
     /// empty). Draws and reinforcements are TASKING state, not combat
     /// results — a run that only tasked stays "empty" here (its
     /// write-back is correctly a no-op: drawn aircraft still exist).
+    /// G1: ground events are results like any other — a war that moved
+    /// ground units (losses, captures, even plain movement sync) is
+    /// NOT empty; a ground-quiet run changes nothing here (no sync,
+    /// no events → the pre-G1 identity).
     [[nodiscard]] bool empty() const noexcept {
         return losses_.empty() && impacts_.empty() &&
-               objective_damage_.empty() && ag_kills_ == 0;
+               objective_damage_.empty() && ag_kills_ == 0 &&
+               ground_losses_.empty() && captures_.empty() &&
+               ground_units_.empty();
     }
 
     // ------------------------------------------------------------------
@@ -469,8 +628,13 @@ public:
 
     /// The result document — "f4-campaign-result" v2 (C1 was v1; C2
     /// adds the tasking side: mission_draws, reinforcements, and the
-    /// per-team/per-squadron tasking counters). Deterministic: fixed
-    /// key order, slot-ordered teams, VU-sorted squadrons,
+    /// per-team/per-squadron tasking counters). G1 keeps the version
+    /// and adds an OPTIONAL "ground" object — present only when the
+    /// run booked ground activity (events, captures, or battalion
+    /// state syncs), so ground-quiet runs emit byte-identical v2
+    /// documents and v2 readers skip the unknown key by the same rule
+    /// f4-json's Reader already applies. Deterministic: fixed key
+    /// order, slot-ordered teams, VU-sorted squadrons and battalions,
     /// arrival-ordered events, NO floats (ms times, integer percents,
     /// hex fstatus). Byte-stable across identical event sequences
     /// (golden-tested).
@@ -481,6 +645,8 @@ private:
     [[nodiscard]] const SquadronLedger*
     find_squadron_(std::uint32_t vu) const;
     [[nodiscard]] TeamLedger* find_team_(int slot);
+    /// G1: last-write-wins battalion lookup (creation-order vector).
+    [[nodiscard]] GroundUnitLedger* find_ground_unit_(std::uint32_t vu);
 
     std::vector<TeamLedger> teams_;
     std::vector<SquadronLedger> squadrons_;  // wire order (deterministic)
@@ -493,6 +659,20 @@ private:
     std::vector<ObjectiveDamageRecord> objective_damage_;
     /// Duplicated VU set for last-write-wins lookups.
     std::vector<std::uint32_t> objective_vus_;
+
+    // --- G1: the ground-war books --------------------------------------
+    /// Creation order; find_ground_unit_ does the last-write-wins
+    /// lookup (a small vector beats a map at these sizes and keeps
+    /// to_json iteration order deterministic by construction).
+    std::vector<GroundUnitLedger> ground_units_;
+    std::vector<GroundLossRecord> ground_losses_;
+    std::vector<ObjectiveCaptureRecord> captures_;
+    int ground_vehicle_losses_ = 0;
+    /// The air-sourced share (G2: the interdiction counter).
+    int ground_vehicle_losses_air_ = 0;
+    int ground_battalions_destroyed_ = 0;
+    int ground_objectives_captured_ = 0;
+    int ground_draws_unmatched_ = 0;   // ground events vs unknown teams
 
     int air_losses_ = 0;
     int air_kills_attributed_ = 0;

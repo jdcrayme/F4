@@ -26,6 +26,14 @@
 // DamageBitmapComponent's fstatus bits (the wire the campaign save format
 // itself uses). objective_damage_summary() reads the same ledger back out
 // for QC summaries and viewer rendering.
+//
+// G2 — unit damage: apply_battalion_damage() is the battalion sibling of
+// the feature endpoint, at the same terminal site. A battalion entity is
+// an AGGREGATE point target (no FeatureSet, no DamageState): one blast
+// computes an integer vehicle-kill count and PUBLISHES it (the caller
+// emits GroundUnitLossMessage); it MUTATES NOTHING — the ledger books,
+// the ground-war engine pulls and decays the roster, the entity mirror
+// syncs (G1's one-writer discipline, unbroken).
 
 #pragma once
 
@@ -129,6 +137,56 @@ apply_objective_feature_damage(entities::EntityWorld& world,
 [[nodiscard]] ObjectiveDamageResult
 objective_damage_summary(const entities::EntityWorld& world,
                          std::uint64_t objective_id);
+
+// ============================================================================
+// G2 — battalion (unit) damage, the interdiction endpoint
+// ============================================================================
+
+/// What one bomb blast did to one battalion entity.
+struct UnitDamageResult {
+    std::uint64_t unit_id = 0;        // the targeted entity id
+    std::uint32_t battalion_vu = 0;   // PropertyBag "vu_id_num" (the campaign
+                                      // key the sink books against)
+    std::uint8_t  victim_team = 0;    // the entity's TEAM tag (owner slot)
+    int           strength = 0;       // vehicles before the blast (the
+                                      // entity's mirrored live count)
+    int           vehicles_killed = 0;// whole vehicles removed (0 = miss or
+                                      // spent target)
+    bool          unit_found = false; // false: not a battalion entity
+    bool          destroyed = false; // the blast removed the last vehicles
+};
+
+/// Apply one bomb's blast to a battalion target. The target must resolve
+/// an entity carrying a UnitCoreComponent with unit_class == Battalion
+/// (the campaign's ground unit — the world mirror's aggregate). PURE
+/// computation: no entity state is touched (the battalion's roster/ALIVE
+/// stay the ground war engine's, through the ledger — see the file
+/// header).
+///
+/// Kill model (documented approximation, the damage.hpp shape): a
+/// battalion is a point at campaign scale, so the blast is one burst at
+/// the unit's miss distance —
+///   vehicles_killed = floor(power * falloff(miss) / 96) capped at the
+///   entity's roster strength (kVehicleHitPointsLb = 96: a MK-82's
+///   192-lb warhead removes 2 vehicles at the fuze point — the
+///   reference's deagg-level per-vehicle dispersion folded into one
+///   documented constant; the real VCD hit points land with the
+///   real-data import, a one-line change).
+/// `destroyed` means the blast took the last mirrored vehicles (the
+/// ENGINE books the actual destruction on its pull + sync — this flag
+/// is the caller's telemetry, not a state transition).
+[[nodiscard]] UnitDamageResult
+apply_battalion_damage(const entities::EntityWorld& world,
+                       std::uint64_t target_id,
+                       const f4::geo::WorldPosition& impact_point,
+                       double warhead_power_lb,
+                       double lethal_radius_ft,
+                       double roll01 = 0.5);
+
+/// Vehicle count from a packed roster (2 bits/group, 16 groups — the
+/// wire's own packing). Shared by the damage endpoint and hosts reading
+/// a unit's live strength off the entity mirror.
+[[nodiscard]] int roster_vehicle_count(std::uint32_t roster) noexcept;
 
 // ============================================================================
 // Free functions — release / sweep

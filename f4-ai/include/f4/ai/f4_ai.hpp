@@ -11,6 +11,7 @@
 //   f4::ai::SkillLevel            — Recruit/Rookie/Veteran/Ace enum
 //   f4::ai::IAIBrain              — abstract brain interface
 //   f4::ai::TargetInfo            — per-target snapshot
+//   f4::ai::AirPicture            — host-built shared air-picture snapshot (PERF-1)
 //   f4::ai::SensorFusion          — target list + threat scoring
 //   f4::ai::GroundSteering        — shared ground steering + speed control
 //   f4::ai::modules::TakeoffModule — takeoff state machine (9 states)
@@ -36,6 +37,7 @@
 
 #include <f4/ai/ai_brain.hpp>
 #include <f4/ai/ai_output.hpp>
+#include <f4/ai/air_picture.hpp>
 #include <f4/ai/sensor_fusion.hpp>
 #include <f4/ai/target_info.hpp>
 

@@ -146,8 +146,11 @@ struct FlightSpawnFilter {
 /// A-G tranche: each route waypoint carries its wire WP_ACTION, and
 /// delivery-action waypoints (WP_STRIKE/BOMB/GNDSTRIKE/NAVSTRIKE/SEAD)
 /// carry their target's EntityId::value — resolved through
-/// `objective_id_map` (WaypointState::target_num → entity). Waypoints
-/// whose target_num resolves no entity fall back to the FLIGHT's resolved
+/// `objective_id_map` (WaypointState::target_num → entity). G2: when
+/// the objective map misses, `unit_id_map` resolves UNIT targets (an
+/// aggregate battalion — the CAS family's delivery target; the world
+/// loader's own objectives-first-then-units order). Waypoints whose
+/// target_num resolves no entity fall back to the FLIGHT's resolved
 /// target (FlightPlanComponent::target). This is what arms the brain's
 /// StrikeModule at the delivery point.
 ///
@@ -163,7 +166,9 @@ build_mission_plan_from_flight(
     const f4::entities::EntityWorld& world,
     f4::entities::EntityId flight_entity,
     const std::unordered_map<std::uint32_t, f4::entities::EntityId>*
-        objective_id_map = nullptr);
+        objective_id_map = nullptr,
+    const std::unordered_map<std::uint32_t, f4::entities::EntityId>*
+        unit_id_map = nullptr);
 
 // ============================================================================
 // C3 route tranche — synthetic-intent missions fly their BUILT routes
@@ -184,14 +189,17 @@ build_mission_plan_from_flight(
 /// build_mission_plan_from_flight: leading WP_TAKEOFF dropped (the
 /// TakeoffModule owns departure), the LAST waypoint becomes the
 /// approach entry fix, delivery-action waypoints carry their target's
-/// EntityId::value (waypoint target_num → objective map, else the
-/// intent's own target objective).
+/// EntityId::value (waypoint target_num → objective map; G2: unit map
+/// second — a CAS route's battalion target; else the intent's own
+/// target objective).
 [[nodiscard]] std::optional<f4::ai::MissionPlan>
 build_mission_plan_from_route(
     const std::vector<f4::campaign::RouteWaypoint>& route,
     std::uint32_t target_objective_vu,
     const std::unordered_map<std::uint32_t, f4::entities::EntityId>*
-        objective_id_map = nullptr);
+        objective_id_map = nullptr,
+    const std::unordered_map<std::uint32_t, f4::entities::EntityId>*
+        unit_id_map = nullptr);
 
 /// Spawn ONE aircraft for ONE synthetic-ladder MissionIntent (the
 /// generation-to-spawn leg — the mirror of spawn_aircraft_for_flight
@@ -217,7 +225,9 @@ spawn_aircraft_for_intent(
     const AirbaseAirfieldMap* airbase_airfields = nullptr,
     const std::unordered_map<std::uint32_t, f4::entities::EntityId>*
         objective_id_map = nullptr,
-    const weapons::WeaponClassTable* weapon_table = nullptr);
+    const weapons::WeaponClassTable* weapon_table = nullptr,
+    const std::unordered_map<std::uint32_t, f4::entities::EntityId>*
+        target_unit_id_map = nullptr);
 
 /// Map a campaign owner slot to the sim's TEAM-tag string vocabulary.
 ///
@@ -359,7 +369,9 @@ spawn_aircraft_for_flight(f4::entities::EntityWorld& world,
                           const AirbaseAirfieldMap* airbase_airfields = nullptr,
                           const std::unordered_map<std::uint32_t,
                               f4::entities::EntityId>* objective_id_map = nullptr,
-                          const weapons::WeaponClassTable* weapon_table = nullptr);
+                          const weapons::WeaponClassTable* weapon_table = nullptr,
+                          const std::unordered_map<std::uint32_t,
+                              f4::entities::EntityId>* unit_id_map = nullptr);
 
 /// Spawn one aircraft entity per Flight-class unit in the EntityWorld.
 ///
@@ -420,7 +432,9 @@ spawn_aircraft_from_flights(f4::entities::EntityWorld& world,
                              const AirbaseAirfieldMap* airbase_airfields = nullptr,
                              const std::unordered_map<std::uint32_t,
                                  f4::entities::EntityId>* objective_id_map = nullptr,
-                             const weapons::WeaponClassTable* weapon_table = nullptr);
+                             const weapons::WeaponClassTable* weapon_table = nullptr,
+                             const std::unordered_map<std::uint32_t,
+                                 f4::entities::EntityId>* unit_id_map = nullptr);
 
 // ============================================================================
 // Mode B: Unit Deaggregation

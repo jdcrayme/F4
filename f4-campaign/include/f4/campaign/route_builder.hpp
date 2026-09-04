@@ -112,6 +112,21 @@ inline constexpr std::uint8_t kWpLand = 7;
            s == "WP_NAVSTRIKE" || s == "WP_SAD" || s == "WP_SEAD";
 }
 
+/// G2 — does this profile's route deliver ordnance on a UNIT? The
+/// interdiction family: UNIT-targeted attack profiles (the generated
+/// table's own vocabulary — exactly AMIS_CAS in the current table;
+/// data-driven, never a byte switch). These resolve a real enemy
+/// BATTALION target (rank_battalion_targets) when the ladder's
+/// unit_strike arm is on, and their target waypoint carries the
+/// unit's VU through the same route shape as objective strikes
+/// (ingress → IP → target → turn → egress).
+[[nodiscard]] inline bool profile_flies_unit_delivery_route(
+        const MissionProfile& profile) noexcept {
+    if (profile.target != "UNIT") return false;
+    if (profile.target_profile != "TPROF_ATTACK") return false;
+    return profile.targetwp == "WP_CAS";
+}
+
 /// Tunables — FreeFalcon reads these from aiinput.dat ([ATM] section;
 /// aiinput.cpp's GetPrivateProfileInt keys), which is game data, not
 /// source. Defaults are the documented reference values; hosts with a
@@ -178,8 +193,11 @@ public:
     /// \param profile     the mission's profile (altitudes, target
     ///                    action, target profile)
     /// \param airbase_vu  home airbase objective VU_ID.num
-    /// \param target_vu   target objective VU_ID.num (0 = route-only
-    ///                    mission: takeoff → land circuit)
+    /// \param target_vu   target VU_ID.num — an OBJECTIVE, or (G2) a
+    ///                    UNIT: an aggregate battalion's id, resolved
+    ///                    objectives-first (the world loader's own
+    ///                    order; 0 = route-only mission: takeoff →
+    ///                    land circuit)
     [[nodiscard]] RouteBuildResult
     build(std::uint8_t team, const MissionProfile& profile,
           std::uint32_t airbase_vu, std::uint32_t target_vu) const;
@@ -194,6 +212,12 @@ private:
     /// no objective carries the id.
     [[nodiscard]] std::optional<std::pair<int, int>>
     objective_xy_(std::uint32_t vu_num) const;
+
+    /// G2 — resolve a UNIT VU_ID.num (an aggregate battalion) to grid
+    /// coordinates through the unit source. nullopt when no unit
+    /// carries the id.
+    [[nodiscard]] std::optional<std::pair<int, int>>
+    unit_xy_(std::uint32_t vu_num) const;
 
     /// ScoreThreatsOnWPLeg port: the worst (TT_MAX) threat along the
     /// direct (x1,y1)→(x2,y2) leg at `alt`, sampled every MAP_RATIO
@@ -235,6 +259,9 @@ private:
                            int& removed) const;
 
     f4::world::IObjectiveSource const* objectives_ = nullptr;
+    /// G2 — the unit roster (UNIT-target position resolution; the same
+    /// source that feeds the threat map, now kept for the builder too).
+    f4::world::IUnitCoreSource const* units_ = nullptr;
     RouteBuilderConfig cfg_;
     ThreatMap map_;
     AirPathFinder finder_;

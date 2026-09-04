@@ -144,4 +144,22 @@ struct BombImpactMessage {
     double        sim_time_s{0.0};
 };
 
+// ============================================================================
+// G2 — the interdiction link. A campaign battalion is an AGGREGATE point
+// entity (the reference deaggregates it into vehicles inside the bubble;
+// that mapping is the viewer tranche's), so a blast against it is not a
+// hit-point event against one damageable thing — it is an integer count of
+// vehicles the warhead removed. The count rides its own message: NOT N
+// EntityKilledMessages for a unit that is not dead (the battalion's life
+// stays the ground-war engine's — the ledger books the loss, the engine
+// pulls it and decays the roster, the mirror syncs). One message per bomb
+// whose blast killed at least one vehicle.
+// ============================================================================
+struct GroundUnitLossMessage {
+    std::uint64_t target_id{0};       // the battalion entity (EntityId)
+    std::uint64_t shooter_id{0};      // the aircraft that released
+    int           vehicles_killed{0}; // 1..N (capped at remaining strength)
+    double        sim_time_s{0.0};
+};
+
 } // namespace f4::weapons

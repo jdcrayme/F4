@@ -88,6 +88,22 @@ target_compile_definitions(test_campaign_war_harness PRIVATE
 )
 add_dependencies(test_campaign_war_harness mission_profiles_fixture)
 
+# C6 — arming the campaign flights: the arm mechanics (role doctrine,
+# component set, policy handoff, idempotence), the Simulation surface
+# (late-spawn arm + counters), and the ARMED war over the routed kunsan
+# rig (compressed acceptance: verdicts green + determinism + armed).
+# Consumes the same generated fixtures as the war harness test plus
+# the simdata braindata.json the doctrine's defensive roles read.
+f4_simulation_add_test(test_campaign_combat test_campaign_combat.cpp)
+target_compile_definitions(test_campaign_combat PRIVATE
+    F4_SIMULATION_TEST_FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures"
+    F4_SOURCE_FIXTURES_DIR="${CMAKE_SOURCE_DIR}/f4-world-convert/tests/fixtures"
+    F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}"
+    F4_MISSION_PROFILES_JSON="${F4_MISSION_PROFILES_JSON}"
+)
+add_dependencies(test_campaign_combat mission_profiles_fixture
+                                   simdata_golden_fixtures)
+
 # The combat integration test drives the full M3 chain (radar detect ->
 # track -> lock -> RWR -> launch -> kill -> sweep) through Simulation. It
 # needs the generated F-16 aircraft config (FlightModelComponent::init

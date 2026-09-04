@@ -36,9 +36,11 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <string>
 
 #include <f4/ai/sensor_fusion.hpp>
+#include <f4/data/brain_data.hpp>
 #include <f4/entities/entity.hpp>
 #include <f4/weapons/gun_component.hpp>
 #include <f4/weapons/weapon_class_table.hpp>
@@ -104,6 +106,18 @@ public:
 
     Verdict classify(const f4::ai::TargetInfo& t) override;
 
+    /// PERF-1 batch hook: resolve the ownship's radar + RWR components
+    /// ONCE per rebuild (the per-contact classify loop used to resolve
+    /// them per contact — two component-map probes x ~150 contacts x
+    /// 96 brains x 60 Hz under the beam-fight every-tick refresh). The
+    /// pointers live for the batch: the fusion guarantees no world
+    /// mutation between prepare_batch() and the last classify() (a
+    /// rebuild never mutates the world), and every rebuild re-prepares
+    /// before classifying, so a stale batch pointer is never consumed.
+    /// A classify() outside any batch (direct/test use) resolves per
+    /// call exactly as before.
+    void prepare_batch() override;
+
     /// The ownship this policy was built for (C5's reaper matches
     /// retired entities against their policies — the scenario-list path
     /// is the only one that builds them).
@@ -114,6 +128,12 @@ public:
 private:
     entities::EntityWorld* world_;
     std::uint64_t ownship_id_;
+
+    // Batch-cached ownship components (PERF-1; see prepare_batch). Null
+    // until the first prepare_batch() of a rebuild — classify falls back
+    // to per-call resolution then.
+    sensors::RadarSimComponent* batch_radar_{nullptr};
+    sensors::RwrComponent* batch_rwr_{nullptr};
 };
 
 /// Execute every combat brain's intents against the real hardware, one
@@ -228,5 +248,120 @@ void configure_brain_combat(f4::ai::BrainComponent& brain,
 /// module produces bursts; gun DAMAGE rides the DamageApplied event
 /// stream with missile_id == 0, which the recorder already carried.
 void attach_combat_event_recorder(Simulation& sim);
+
+// ============================================================================
+// C6 — arming the campaign flights (CAMPAIGN_LOOP_PLAN.md §5 C6)
+// ============================================================================
+//
+// The scenario path arms at spawn through the two functions above (the
+// scenario JSON authors the aircraft; attach_combat_loadout +
+// configure_brain_combat run in the spawn loop). Campaign flights were
+// never armed: their spawn path (spawn_aircraft_for_flight /
+// spawn_aircraft_for_intent) deliberately left combat off — the A/A rungs
+// on the GCI-omniscient picture would break route-following. C6 arms them
+// with a ROLE doctrine that answers exactly that concern: the flights
+// whose mission IS the fight fight; everyone else defends without
+// engaging.
+//
+// The two mechanisms:
+//   * Mission ROLE from f4::campaign::mission_category (the flight's
+//     mission byte, stamped on CampaignOriginComponent at spawn).
+//   * The BRAINDAT.brn archetype — FreeFalcon's own doctrine vocabulary,
+//     already load-bearing in BrainComponent: an archetype with the
+//     engagement modes disarmed (the shipped SEAD / Strike / Waypointer
+//     shapes) stands the BVR/WVR rungs down while MissileDefeat /
+//     GunsJink stay armed. No new brain API.
+
+/// The C6 mission-role doctrine: who fights, who defends.
+enum class CampaignCombatRole {
+    /// Full combat ladder: BVR + WVR + guns + release. CAP / Sweep /
+    /// Intercept / Escort categories — maneuvering off the route IS the
+    /// mission. No archetype installed (the brain's default: every mode
+    /// allowed, the same shape the scenario combat path flies).
+    Fighter,
+    /// Defensive-only: the combat ladder is ON (RWR warning →
+    /// MissileDefeat reacts, GunsJink maneuvers) but the engagement
+    /// rungs stand down via a disengaged BRAINDAT archetype — the
+    /// aircraft never picks a fight, never releases A/A, and keeps
+    /// flying its route (the strike rung's bomb release is untouched:
+    /// hold_fire stays false). Every non-fighting category.
+    Defensive,
+};
+
+/// Mission wire byte → doctrine role (f4::campaign::mission_category):
+/// CAP(1-6,36)/Sweep(7)/Intercept(8-9)/Escort(10-11) fight; everything
+/// else defends. Out-of-range bytes defend (the corrupt-data rule).
+[[nodiscard]] CampaignCombatRole
+campaign_combat_role(std::uint8_t mission_byte) noexcept;
+
+/// What arm_campaign_combat did — the QC surface + the session's
+/// diagnostics read exactly these fields.
+struct CampaignCombatArmament {
+    /// The doctrine role the mission byte resolved to.
+    CampaignCombatRole role = CampaignCombatRole::Defensive;
+    /// False when the entity was not an arming candidate (no brain, no
+    /// campaign origin, already armed) — nothing was attached.
+    bool armed = false;
+    /// The combat component set was attached (radar/RWR/signature/
+    /// damage/gun/identity — whichever were missing).
+    bool components_attached = false;
+    /// A RadarBackedDetectionPolicy was created for this brain (the
+    /// caller stores it and installs it; see the out-policy parameter).
+    bool policy_created = false;
+    /// Doctrine A/A stations added to the store (fighter roles with no
+    /// air-to-air stations — the wire loadout rarely carries mappable
+    /// ones). 0 for defensive roles (they never release A/A).
+    int aa_stations = 0;
+    /// The gun drum the brain's gun fire control budgets against (the
+    /// store's gun station after the doctrine fill; 0 = no gun station).
+    int gun_rounds = 0;
+    /// The BRAINDAT archetype installed (defensive roles only; "" for
+    /// fighters — they fly the default-allowed brain).
+    std::string archetype;
+};
+
+/// Arm ONE campaign-spawned aircraft with the A/A combat set. The entity
+/// must already carry the campaign spawn composition (Transform + FM +
+/// VisualModel + Brain + CampaignOrigin + the WeaponStoreComponent
+/// arm_flight_strike attached); this adds the combat set the scenario
+/// path gets from attach_combat_loadout, adapted to the campaign shape:
+///
+///   - the store is NOT replaced (the strike store keeps its wire +
+///     doctrine stations; fighter roles get doctrine A/A stations ADDED
+///     when none exist — standard_fighter's fill on the existing store)
+///   - the TEAM tag is NOT set (the campaign spawn path already set it
+///     from the flight's owner; the radar/RWR/IFF chain reads it)
+///   - the NCTR callsign is synthesized from the campaign origin
+///     (deterministic: "F<flight_vu>" / "E<entity>"; display resolution
+///     is a viewer concern — this is an identification string, not a
+///     fidelity claim)
+///   - the doctrine (role → archetype) and the ROE flags ride through
+///     configure_brain_combat, so the envelopes match the scenario path
+///
+/// `out_policy` (optional): receives the created detection policy — the
+/// CALLER owns it (the Simulation's combat_policies_ store on both spawn
+/// paths), installs it on brain->sensors(), and reaps it with the entity.
+/// Nullptr skips policy creation (tests driving combat by hand).
+///
+/// `brain_data` (nullable): the BRAINDAT archetype table. REQUIRED for
+/// defensive roles — a null table with a defensive role returns an
+/// un-armed result with the archetype field carrying the failure
+/// ("<no brain data>"); the host surfaces it loudly (the session fails
+/// create() before any of this can happen — see
+/// Simulation::arm_campaign_aircraft).
+///
+/// Idempotence: every component is attached only when missing, so a
+/// double arm is a no-op that reports armed=false on the second call.
+[[nodiscard]] CampaignCombatArmament arm_campaign_combat(
+    entities::EntityHandle& aircraft,
+    const weapons::WeaponClassTable& table,
+    std::uint32_t seed_base,
+    std::size_t arm_index,
+    double hit_points,
+    bool bvr_hold,
+    bool missiles_hold,
+    bool guns_hold,
+    const f4::data::BrainData* brain_data,
+    std::unique_ptr<RadarBackedDetectionPolicy>* out_policy = nullptr);
 
 } // namespace f4::simulation

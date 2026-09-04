@@ -49,6 +49,13 @@ double grid_distance(int ax, int ay, int bx, int by) {
 // generated table carries, everything else falls back to WP_NOTHING
 // (a nav leg — honest for patrol-style missions whose pattern is a
 // later tranche).
+//
+// G2: WP_CAS (the mission table's own string for the CAS family — the
+// reference's MissionData row, NOT a campwp enum byte) maps to the
+// WP_GNDSTRIKE delivery action: CAS delivers iron on ground units, and
+// the wire action vocabulary has no distinct CAS byte — the target
+// point of a CAS mission IS a ground-strike delivery waypoint, the
+// action the brain's strike rung arms on.
 std::uint8_t target_action_for(const MissionProfile& profile) {
     const std::string& s = profile.targetwp;
     if (s == "WP_STRIKE")   return 17;
@@ -61,6 +68,7 @@ std::uint8_t target_action_for(const MissionProfile& profile) {
     if (s == "WP_INTERCEPT") return 13;
     if (s == "WP_RECON")    return 21;
     if (s == "WP_ELINT")    return 20;
+    if (s == "WP_CAS")      return 14;   // G2: the CAS delivery action
     return kWpNothing;
 }
 
@@ -72,6 +80,7 @@ RouteBuilder::RouteBuilder(const f4::world::IObjectiveSource& objectives,
                            std::uint8_t viewer,
                            RouteBuilderConfig cfg)
     : objectives_(&objectives),
+      units_(&units),
       cfg_(cfg),
       map_(objectives, units, teams, viewer),
       finder_(map_, viewer) {}
@@ -87,6 +96,21 @@ RouteBuilder::objective_xy_(std::uint32_t vu_num) const {
     return std::nullopt;
 }
 
+std::optional<std::pair<int, int>>
+RouteBuilder::unit_xy_(std::uint32_t vu_num) const {
+    // G2 — a UNIT target's grid position: the aggregate battalion's
+    // own coordinates from the unit source (the same source that feeds
+    // the threat map). Wire order; the first id match wins (VU ids are
+    // unique across the campaign's unit space).
+    for (int i = 0; i < units_->unit_count(); ++i) {
+        if (units_->id_num(i) == vu_num) {
+            return std::make_pair(static_cast<int>(units_->x(i)),
+                                  static_cast<int>(units_->y(i)));
+        }
+    }
+    return std::nullopt;
+}
+
 RouteBuildResult RouteBuilder::build(std::uint8_t team,
                                      const MissionProfile& profile,
                                      std::uint32_t airbase_vu,
@@ -95,11 +119,15 @@ RouteBuildResult RouteBuilder::build(std::uint8_t team,
 
     // Resolve both endpoints FIRST — an unresolvable base or target
     // builds nothing (the reference's BuildPathToTarget aborts before
-    // creating any waypoint).
+    // creating any waypoint). G2: the TARGET resolves objectives
+    // first, then UNITS (a CAS mission's target is a battalion VU) —
+    // the world loader's own resolution order for mission targets.
     const auto airbase_xy = objective_xy_(airbase_vu);
     if (!airbase_xy) return result;  // unresolvable base: no route
-    const auto target_xy =
-        target_vu != 0 ? objective_xy_(target_vu) : std::nullopt;
+    const auto target_xy = target_vu != 0
+        ? (objective_xy_(target_vu) ? objective_xy_(target_vu)
+                                    : unit_xy_(target_vu))
+        : std::nullopt;
     if (target_vu != 0 && !target_xy) return result;  // bad target
 
     const int ax = airbase_xy->first;

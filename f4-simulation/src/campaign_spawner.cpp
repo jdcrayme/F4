@@ -90,10 +90,14 @@ void CampaignSimSpawner::handle(const f4::campaign::MissionIntent& intent) {
                 }
             }
             const int slot = per_airbase_index_[base_key]++;
+            // G2: the spawner's own unit map doubles as the TARGET
+            // unit map (it covers every UnitCore entity — battalions
+            // included — keyed by VU; the plan builder resolves the CAS
+            // delivery waypoint's battalion target through it).
             const auto spawned_id = spawn_aircraft_for_intent(
                 world_, intent, unit_id_map_, ct_, db_, cfg_, airfield_,
                 tpl_, slot, airbase_airfields_, objective_id_map_,
-                weapon_table_);
+                weapon_table_, &unit_id_map_);
             if (spawned_id) {
                 ++stats_.aircraft_spawned;
                 ++stats_.synthetic_spawned;
@@ -154,7 +158,7 @@ void CampaignSimSpawner::handle(const f4::campaign::MissionIntent& intent) {
     // behavior for single-purpose route QC).
     auto spawned_id = spawn_aircraft_for_flight(
         world_, it->second, ct_, db_, cfg_, airfield_, tpl_, slot,
-        nullptr, objective_id_map_, weapon_table_);
+        nullptr, objective_id_map_, weapon_table_, &unit_id_map_);
     if (!spawned_id) {
         // Resolved entity wasn't a flight (corrupt map?). Count it as
         // unknown rather than failing the loop.

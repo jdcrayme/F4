@@ -418,6 +418,32 @@ void CampaignWarHarness::run_pass_(int run, const ProgressFn& on_sample) {
         report_.live_aircraft = st.live_aircraft;
         report_.airborne = st.airborne;
         report_.samples = pass_samples_;
+        // C6: the campaign-combat counters — which war ran (armed?) and
+        // what it produced (fighters fielded, A/A kills booked).
+        report_.aa_combat = opts_.session.aa_combat;
+        report_.armed_aircraft = st.armed_aircraft;
+        report_.armed_fighters = st.armed_fighters;
+        // G1: the ground war's headline counters (the QC's exit 13 +
+        // the summary's ground block read these; the LEDGER's ground
+        // block — inside the byte-stable certificate — is the full
+        // story).
+        report_.ground_war = opts_.session.ground_war;
+        // G2: the interdiction arm + its number (the ledger's own
+        // counter — booked with the arm on, engine or not).
+        report_.unit_strike = opts_.session.unit_strike;
+        report_.ground_losses_air =
+            session_->ledger().ground_vehicle_losses_air();
+        report_.ground_updates = st.ground_updates;
+        report_.ground_battalions = st.ground_battalions;
+        report_.ground_mobile = st.ground_mobile;
+        report_.ground_losses = st.ground_losses;
+        report_.ground_destroyed = st.ground_destroyed;
+        report_.ground_captures = st.ground_captures;
+        report_.ground_front_columns = st.ground_front_columns;
+        if (const auto* gw = session_->ground_war(); gw != nullptr) {
+            report_.ground_march_grid = static_cast<int>(
+                gw->stats().army_distance_fp >> 8);
+        }
         report_.ledger_teams.clear();
         for (const auto& t : session_->ledger().teams()) {
             WarHourSample::TeamPool p;
@@ -472,6 +498,25 @@ void CampaignWarHarness::sample_(int run) {
     s.airborne = st.airborne;
     s.retired = st.retired;
     s.world_entities = static_cast<int>(session_->sim().world().size());
+    // C6: the armed doctrine's pulse per sample (fighters fielded so far
+    // + the A/A kill count — the war's air story in the diary).
+    s.armed_fighters = st.armed_fighters;
+    s.aa_kills = ledger.air_losses();
+    // G1: the ground war's pulse per sample (battalions, losses,
+    // captures, the front's shape — the diary's ground columns).
+    s.ground_updates = st.ground_updates;
+    s.ground_battalions = st.ground_battalions;
+    s.ground_mobile = st.ground_mobile;
+    s.ground_losses = st.ground_losses;
+    s.ground_losses_air = st.ground_losses_air;
+    s.ground_destroyed = st.ground_destroyed;
+    s.ground_captures = st.ground_captures;
+    s.ground_engaged = st.ground_engaged;
+    s.ground_front_columns = st.ground_front_columns;
+    if (const auto* gw = session_->ground_war(); gw != nullptr) {
+        s.ground_march_grid = static_cast<int>(
+            gw->stats().army_distance_fp >> 8);
+    }
     s.hour_spawns = s.synthetic_spawned - pass_prev_.synthetic_spawned;
     s.hour_draws = s.drawn - pass_prev_.drawn;
     s.hour_cycles = s.cycles - pass_prev_.cycles;

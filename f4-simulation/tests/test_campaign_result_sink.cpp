@@ -519,3 +519,142 @@ TEST(ResultSink, PristineObjectivesSyncNothing) {
     EXPECT_TRUE(ledger.empty());
     EXPECT_EQ(sink.stats().objectives_synced, 0);
 }
+
+// ── 5. G2 — the interdiction booking (GroundUnitLossMessage) ────────────────
+
+TEST(ResultSink, UnitLossBooksWhenArmed) {
+    auto ws = make_sink_world();
+    EntityWorld ew;
+    auto pw = f4::world::populate_world(ew, ws);
+    (void)pw;
+    WorldStateAdapters adapters(ws);
+    CampaignResultLedger ledger(adapters.campaign, adapters.teams,
+                                adapters.units);
+    CampaignResultSink sink(ledger, ew);
+    sink.set_book_unit_losses(true);   // the session's unit_strike arm
+
+    // A shooter with a campaign origin (squadron 4281) and a battalion
+    // entity — the G1 world-mirror shape.
+    auto shooter = ew.create();
+    shooter.add<TransformComponent>();
+    auto& origin = shooter.add<CampaignOriginComponent>();
+    origin.flight_vu = 5001;
+    origin.squadron_vu = 4281;
+    origin.team_slot = 2;
+
+    auto bn = ew.create();
+    bn.add<TransformComponent>();
+    auto& uc = bn.add<f4::entities::UnitCoreComponent>();
+    uc.unit_class = UnitClass::Battalion;
+    uc.domain = 3;
+    uc.roster = 0xAAA;   // 12 vehicles
+    auto& pb = bn.add<PropertyBag>();
+    pb.ints["vu_id_num"] = 4621;
+    bn.set_tag(f4::entities::tags::TEAM, f4::entities::TagValue::from(
+                   static_cast<std::int64_t>(6)));
+
+    // One bomb blast killed 3 vehicles.
+    f4::weapons::GroundUnitLossMessage m;
+    m.target_id = bn.id().value;
+    m.shooter_id = shooter.id().value;
+    m.vehicles_killed = 3;
+    m.sim_time_s = 45.0;
+    sink.handle_unit_loss(m);
+
+    // The ground book: one air-sourced loss record with the count,
+    // the battalion's run book, the team's ground_losses, the air share.
+    ASSERT_EQ(ledger.ground_loss_log().size(), 1u);
+    const auto& rec = ledger.ground_loss_log().back();
+    EXPECT_EQ(rec.victim, 4621u);
+    EXPECT_EQ(rec.victim_team, 6);
+    EXPECT_EQ(rec.kills, 3);
+    EXPECT_TRUE(rec.air);
+    EXPECT_EQ(rec.killer_squadron, 4281u);
+    const auto* unit = ledger.ground_unit(4621);
+    ASSERT_NE(unit, nullptr);
+    EXPECT_EQ(unit->run_losses, 3);
+    EXPECT_EQ(unit->strength, 0);   // lazily created at 0, decremented
+    EXPECT_EQ(ledger.ground_vehicle_losses(), 3);
+    EXPECT_EQ(ledger.ground_vehicle_losses_air(), 3);
+    // The shooter's squadron: per-vehicle ag credit.
+    EXPECT_EQ(ledger.squadron(4281)->run_ag_kills, 3);
+
+    const auto& stats = sink.stats();
+    EXPECT_EQ(stats.unit_losses_seen, 1);
+    EXPECT_EQ(stats.unit_losses_booked, 1);
+    EXPECT_EQ(stats.unit_vehicles_booked, 3);
+
+    // The entity's state is untouched (the engine owns it — the ledger
+    // booked; the pull + mirror sync land the roster).
+    EXPECT_EQ(bn.get<f4::entities::UnitCoreComponent>()->roster, 0xAAAu);
+}
+
+TEST(ResultSink, UnitLossUnarmedCountsOnly) {
+    // The golden identity: the arm OFF means the event counts and
+    // NOTHING books (documents byte-identical — INTERDICTION_PLAN §3).
+    auto ws = make_sink_world();
+    EntityWorld ew;
+    auto pw = f4::world::populate_world(ew, ws);
+    (void)pw;
+    WorldStateAdapters adapters(ws);
+    CampaignResultLedger ledger(adapters.campaign, adapters.teams,
+                                adapters.units);
+    CampaignResultSink sink(ledger, ew);   // book_unit_losses_ = false
+
+    auto shooter = ew.create();
+    shooter.add<TransformComponent>();
+    auto& origin = shooter.add<CampaignOriginComponent>();
+    origin.squadron_vu = 4281;
+    origin.team_slot = 2;
+    auto bn = ew.create();
+    bn.add<TransformComponent>();
+    auto& uc = bn.add<f4::entities::UnitCoreComponent>();
+    uc.unit_class = UnitClass::Battalion;
+    uc.roster = 0xAAA;
+    auto& pb = bn.add<PropertyBag>();
+    pb.ints["vu_id_num"] = 4621;
+
+    f4::weapons::GroundUnitLossMessage m;
+    m.target_id = bn.id().value;
+    m.shooter_id = shooter.id().value;
+    m.vehicles_killed = 2;
+    m.sim_time_s = 45.0;
+    sink.handle_unit_loss(m);
+
+    EXPECT_TRUE(ledger.ground_loss_log().empty());
+    EXPECT_EQ(ledger.ground_vehicle_losses(), 0);
+    EXPECT_EQ(ledger.ground_vehicle_losses_air(), 0);
+    EXPECT_EQ(ledger.squadron(4281)->run_ag_kills, 0);
+    EXPECT_EQ(sink.stats().unit_losses_seen, 1);
+    EXPECT_EQ(sink.stats().unit_losses_booked, 0);
+}
+
+TEST(ResultSink, UnitLossStaleTargetCountsNotBooks) {
+    // A battalion that no longer resolves: counted, loud, not booked.
+    auto ws = make_sink_world();
+    EntityWorld ew;
+    auto pw = f4::world::populate_world(ew, ws);
+    (void)pw;
+    WorldStateAdapters adapters(ws);
+    CampaignResultLedger ledger(adapters.campaign, adapters.teams,
+                                adapters.units);
+    CampaignResultSink sink(ledger, ew);
+    sink.set_book_unit_losses(true);
+
+    auto shooter = ew.create();
+    shooter.add<TransformComponent>();
+    auto& origin = shooter.add<CampaignOriginComponent>();
+    origin.squadron_vu = 4281;
+    origin.team_slot = 2;
+
+    f4::weapons::GroundUnitLossMessage m;
+    m.target_id = 99'999ull;   // gone
+    m.shooter_id = shooter.id().value;
+    m.vehicles_killed = 2;
+    m.sim_time_s = 45.0;
+    sink.handle_unit_loss(m);
+
+    EXPECT_EQ(sink.stats().unit_losses_seen, 1);
+    EXPECT_EQ(sink.stats().unit_losses_booked, 0);
+    EXPECT_TRUE(ledger.ground_loss_log().empty());
+}

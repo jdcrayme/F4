@@ -746,3 +746,62 @@ TEST(CampaignSimSpawner, SyntheticIntentSpawnsAndCounts) {
     EXPECT_EQ(spawner.stats().unknown_flight_ids, 1);
     EXPECT_EQ(spawner.spawned().size(), 1u);
 }
+
+TEST(BuildMissionPlanFromRoute, ResolvesUnitTargetsThroughTheUnitMap) {
+    // G2 — the interdiction link's plan resolution: a CAS route's
+    // delivery waypoint (the CAS action mapping = WP_GNDSTRIKE 14)
+    // carries a BATTALION VU as target_num; the objective map misses,
+    // the UNIT map resolves the aggregate battalion entity. The
+    // flight-level fallback resolves units too (a CAS intent's target
+    // is the battalion's VU).
+    std::vector<f4::campaign::RouteWaypoint> route;
+    f4::campaign::RouteWaypoint w1;
+    w1.x = 390; w1.y = 455; w1.altitude_ft = 0;    w1.action = 1;  // TAKEOFF
+    f4::campaign::RouteWaypoint w2;
+    w2.x = 460; w2.y = 500; w2.altitude_ft = 2000; w2.action = 14; // GNDSTRIKE
+    w2.target_num = 4621;                                          // battalion
+    f4::campaign::RouteWaypoint w3;
+    w3.x = 390; w3.y = 455; w3.altitude_ft = 0;    w3.action = 7;  // LAND
+    route = {w1, w2, w3};
+
+    auto ws = make_flight_world();
+    EntityWorld ew;
+    auto pw = f4::world::populate_world(ew, ws);
+
+    // A battalion entity in the populated world (the G1 mirror shape).
+    auto bn = ew.create();
+    auto& uc = bn.add<f4::entities::UnitCoreComponent>();
+    uc.unit_class = f4::entities::UnitClass::Battalion;
+    uc.domain = 3;
+    uc.roster = 0xAAA;
+    auto& pb = bn.add<f4::entities::PropertyBag>();
+    pb.ints["vu_id_num"] = 4621;
+    auto& tf = bn.add<f4::entities::TransformComponent>();
+    tf.position = f4::geo::WorldPosition{460.0 * 1024.0, 500.0 * 1024.0,
+                                         0.0};
+    std::unordered_map<std::uint32_t, f4::entities::EntityId> unit_map;
+    unit_map[4621] = bn.id();
+
+    // Waypoint target_num resolves through the unit map.
+    auto plan = build_mission_plan_from_route(
+        route, 4621, &pw.objective_id_map, &unit_map);
+    ASSERT_TRUE(plan.has_value());
+    ASSERT_EQ(plan->route.size(), 2u);
+    EXPECT_EQ(plan->route[0].action, 14);
+    EXPECT_EQ(plan->route[0].target_id, bn.id().value);
+
+    // Flight-level fallback: no waypoint target_num, the intent's own
+    // battalion VU resolves.
+    auto w2b = w2;
+    w2b.target_num = 0;
+    auto plan2 = build_mission_plan_from_route(
+        {w1, w2b, w3}, 4621, &pw.objective_id_map, &unit_map);
+    ASSERT_TRUE(plan2.has_value());
+    EXPECT_EQ(plan2->route[0].target_id, bn.id().value);
+
+    // No maps at all: the target stays unresolved (the pre-G2 shape).
+    auto plan3 = build_mission_plan_from_route({w1, w2b, w3}, 4621,
+                                               nullptr, nullptr);
+    ASSERT_TRUE(plan3.has_value());
+    EXPECT_EQ(plan3->route[0].target_id, 0u);
+}

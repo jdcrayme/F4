@@ -59,6 +59,14 @@ struct CampaignOriginComponent : entities::Component<CampaignOriginComponent> {
     /// fidelity lie.
     std::uint8_t callsign_id = 0;
     std::uint8_t callsign_num = 0;
+    /// C6: the flight's mission wire byte (the AMIS_* vocabulary).
+    /// Stamped by both spawn paths from the entity the aircraft was
+    /// spawned from (the flight's FlightPlanComponent::mission / the
+    /// intent's mission_byte); read by arm_campaign_aircraft to pick
+    /// the mission-role doctrine (fighting vs defensive-only). 0 =
+    /// untasked. Additive: default 0 changes nothing for pre-C6
+    /// consumers.
+    std::uint8_t mission_byte = 0;
 };
 
 } // namespace f4::simulation

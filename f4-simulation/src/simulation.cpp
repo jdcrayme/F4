@@ -133,6 +133,15 @@ void Simulation::initialize() {
     // per-path into stack locals — one of which outlived its scope
     // inside the BubbleManager (the Start Session access violation).
     load_class_table();
+    // C6: the campaign-combat doctrine's data leg, BEFORE any aircraft
+    // exists (the arm installs non-owning archetype pointers into
+    // brain_data_ — it must be loaded exactly once, up front, and
+    // never re-loaded while brains hold pointers into it). Loud on
+    // failure: an armed campaign without its doctrine data is a
+    // misconfiguration, not a degraded mode.
+    if (scenario_.combat.campaign_armed) {
+        ensure_campaign_brain_data();
+    }
     spawn_aircraft();
     // Step 11: wingman refs resolve AFTER all aircraft exist (a lead may
     // sit anywhere in the list). Marks the wingman brains + records the
@@ -293,9 +302,8 @@ bool Simulation::retire_aircraft(entities::EntityId id) {
                        }),
         wingman_pairs_.end());
 
-    // Radar policies are ownship-keyed and only exist on the
-    // scenario-list path (campaign spawns never build one — the scan
-    // is a cheap no-op there).
+    // Radar policies are ownship-keyed; the scenario-list path and the
+    // C6 campaign arm both build them here (retire reaps either kind).
     combat_policies_.erase(
         std::remove_if(combat_policies_.begin(), combat_policies_.end(),
                        [v = id.value](
@@ -305,6 +313,96 @@ bool Simulation::retire_aircraft(entities::EntityId id) {
 
     world_.destroy(id);
     ++retired_aircraft_;
+    return true;
+}
+
+void Simulation::ensure_campaign_brain_data() {
+    // C6's data leg (see initialize's call site): resolve + load the
+    // BRAINDAT archetype table exactly once. Same path discipline as
+    // apply_simdata_ai_profiles — the scenario's explicit path wins,
+    // the build-tree generated fixture is the default — but the failure
+    // is LOUD here (an armed campaign without doctrine data would arm
+    // fighters and leave every defensive role unarmed: a silent
+    // behavior change, exactly what the house rules forbid).
+    if (brain_data_loaded_) return;  // apply_simdata loaded it (scenario)
+    auto path = scenario_.brain_data_path;
+    if (path.empty()) path = simdata_default_file("braindata.json");
+    if (path.empty()) {
+        throw std::runtime_error(
+            "Simulation::ensure_campaign_brain_data: combat.campaign_armed "
+            "but no brain data was configured (no brain_data_path and no "
+            "build-time SimData default — set brain_data_path to a "
+            "brain2json output)");
+    }
+    auto result = f4::data::loadBrainData(path.string());
+    if (!result.ok) {
+        std::string msg =
+            "Simulation::ensure_campaign_brain_data: failed to load "
+            "brain data '" + path.string() + "':";
+        for (const auto& e : result.errors) msg += "\n  " + e;
+        throw std::runtime_error(msg);
+    }
+    brain_data_ = std::move(result.data);
+    brain_data_loaded_ = true;
+}
+
+bool Simulation::arm_campaign_aircraft(entities::EntityId id) {
+    // The C6 opt-in: everything below exists for the armed campaign
+    // only; an unarmed sim answers false without touching the entity
+    // (the pre-C6 world, byte-for-byte).
+    if (!scenario_.combat.campaign_armed) return false;
+    if (!id.valid()) return false;
+
+    entities::EntityHandle h(id, &world_);
+    std::unique_ptr<RadarBackedDetectionPolicy> policy;
+    const auto result = arm_campaign_combat(
+        h, weapon_table_,
+        scenario_.combat.radar_rng_seed,
+        campaign_arm_index_,
+        scenario_.combat.fighter_hit_points,
+        scenario_.combat.bvr_hold,
+        scenario_.combat.missiles_hold,
+        scenario_.combat.guns_hold,
+        brain_data_loaded_ ? &brain_data_ : nullptr,
+        &policy);
+    if (!result.armed) {
+        // Not a candidate (no origin/brain/store) or already armed —
+        // EXCEPT the doctrine-failure shapes, which are misconfigurations
+        // the caller must hear about, not silently fly past: a defensive
+        // role with no disengaged archetype would FIGHT (the exact
+        // behavior C6 exists to prevent), and a missing brain-data leg
+        // means the eager load contract broke. Loud.
+        if (result.archetype == "<no brain data>" ||
+            result.archetype == "<no disengaged archetype>") {
+            throw std::runtime_error(
+                "Simulation::arm_campaign_aircraft: campaign combat "
+                "doctrine failed for entity " +
+                std::to_string(id.value) + ": " + result.archetype);
+        }
+        return false;
+    }
+
+    // The detection policy (C6.2 — the M2 flip): stored with the
+    // scenario path's policies (retire_aircraft reaps by ownship id,
+    // so campaign wrecks clean up exactly like scenario ones) and
+    // installed on the brain's SensorFusion — radar truth, not
+    // GCI-omniscience.
+    if (policy) {
+        auto* brain = h.get<f4::ai::BrainComponent>();
+        combat_policies_.push_back(std::move(policy));
+        if (brain != nullptr) {
+            brain->sensors().set_detection_policy(
+                combat_policies_.back().get());
+        }
+    }
+
+    ++campaign_arm_index_;
+    ++campaign_armed_total_;
+    if (result.role == CampaignCombatRole::Fighter) {
+        ++campaign_armed_fighters_;
+    } else {
+        ++campaign_armed_defensive_;
+    }
     return true;
 }
 
@@ -583,7 +681,12 @@ void Simulation::apply_simdata_ai_profiles() {
     }
 
     // --- Load the data (lazily, per side) --------------------------------
-    if (any_brain_profile) {
+    if (any_brain_profile && !brain_data_loaded_) {
+        // C6 note: campaign arming may have loaded brain_data_ already
+        // (ensure_campaign_brain_data) — the campaign brains hold
+        // non-owning archetype pointers into it, so it is NEVER re-loaded
+        // while they live; the scenario profiles resolve against the same
+        // rows.
         auto path = scenario_.brain_data_path;
         if (path.empty()) path = simdata_default_file("braindata.json");
         if (path.empty()) {
@@ -720,6 +823,108 @@ void Simulation::push_wingman_lead_pictures() {
         brain->set_lead_engagement(
             lead_brain != nullptr ? lead_brain->combat_engagement_id()
                                   : 0u);
+    }
+}
+
+void Simulation::push_air_picture_(double dt) {
+    // PERF-1 (PERFORMANCE_PLAN.md §3): ONE walk over the transform
+    // bucket — but only on ticks where at least one brain's fusion will
+    // actually REBUILD (the demand query mirrors the fusion's own
+    // update() decision exactly; see BrainComponent::wants_air_picture).
+    // Cruise ticks with no expiring skill timer and no visible hostile
+    // missile pay nothing — the pre-flight taxi phase and the quiet
+    // cruise phases keep their baseline cost, and the merge phase (every
+    // brain under a missile threat refreshes every tick) pays the walk
+    // ONCE instead of once per brain.
+    //
+    // The snapshot must reproduce the fusion's own world query EXACTLY —
+    // same entities, same entity-index order, same values, same clutter
+    // rule — so the armed war's ledger bytes stay identical to the
+    // per-brain-walk build (the baseline MD5 is the proof).
+    //
+    // Single pass over the roster: query demand per brain, remember it,
+    // and push the picture pointer (or the null that restores the
+    // fusion's world query) in the same iteration. Brains that rebuild
+    // this tick get a fresh snapshot; brains that don't get nullptr —
+    // inert either way, and no rebuild happens without the demand flag
+    // that built the snapshot.
+    const f4::ai::AirPicture* push = nullptr;
+    bool any_demand = false;
+    for (const auto eid : aircraft_entities_) {
+        entities::EntityHandle h(eid, &world_);
+        auto* brain = h.get<f4::ai::BrainComponent>();
+        if (brain == nullptr) continue;
+        if (!any_demand && brain->wants_air_picture(dt)) {
+            any_demand = true;
+        }
+    }
+
+    if (any_demand) {
+        // Build: bucket copy (the with_component snapshot-by-value
+        // contract), one EntityHandle::get per entity (~4,400 in a
+        // populated save), the shared clutter predicate, and — for the
+        // survivors only (~100-200: airborne aircraft + missiles +
+        // anything stationary at altitude) — the team/role tag reads and
+        // the contact fill. Team strings intern into a first-seen table
+        // so contacts carry an index instead of a copy.
+        air_picture_.contacts.clear();
+        air_picture_.teams.clear();
+
+        for (const auto eid :
+             world_.with_component<entities::TransformComponent>()) {
+            entities::EntityHandle h(eid, &world_);
+            const auto* tf = h.get<entities::TransformComponent>();
+            if (tf == nullptr) continue;
+
+            // The same C6 rule the fusion's world walk applies (and the
+            // radar's candidate walk): stationary low-altitude entities
+            // are ground clutter, not air picture.
+            if (tf->is_ground_clutter()) continue;
+
+            f4::ai::AirPictureContact c;
+            c.entity_id = eid.value;
+            c.position = tf->position;
+            c.velocity = tf->velocity();
+
+            if (auto team_tag = h.get_tag(entities::tags::TEAM)) {
+                if (const auto* s = team_tag->as_string()) {
+                    // Intern (linear scan — a war has a handful of
+                    // teams).
+                    std::int16_t idx = -1;
+                    for (std::size_t i = 0; i < air_picture_.teams.size();
+                         ++i) {
+                        if (air_picture_.teams[i] == *s) {
+                            idx = static_cast<std::int16_t>(i);
+                            break;
+                        }
+                    }
+                    if (idx < 0) {
+                        air_picture_.teams.push_back(*s);
+                        idx = static_cast<std::int16_t>(
+                            air_picture_.teams.size() - 1);
+                    }
+                    c.team = idx;
+                }
+            }
+            if (auto role_tag = h.get_tag(entities::tags::ROLE)) {
+                if (const auto* s = role_tag->as_string()) {
+                    c.is_missile = (*s == "missile");
+                }
+            }
+            air_picture_.contacts.push_back(c);
+        }
+        push = &air_picture_;
+    }
+
+    // Push (or clear) on every roster brain in one pass. A brain that
+    // initializes its fusion AFTER a push (the first combat tick) clears
+    // the pointer in initialize() and rebuilds via the world path that
+    // one tick — output-identical either way.
+    for (const auto eid : aircraft_entities_) {
+        entities::EntityHandle h(eid, &world_);
+        auto* brain = h.get<f4::ai::BrainComponent>();
+        if (brain == nullptr) continue;
+        brain->set_air_picture(push);
     }
 }
 
@@ -937,12 +1142,27 @@ void Simulation::spawn_from_campaign_flights() {
         world_, class_table_, *model_db_, aircraft_cfg_,
         derived, template_ac, filter,
         airbase_airfields_.empty() ? nullptr : &airbase_airfields_,
-        &populated.objective_id_map, &weapon_table_);
+        &populated.objective_id_map, &weapon_table_,
+        // G2: the populated world's unit map resolves UNIT-targeted
+        // delivery waypoints (saved CAS/BAI flights whose strike point
+        // carries a battalion VU).
+        &populated.unit_id_map);
 
     if (aircraft_entities_.empty()) {
         throw std::runtime_error(
             "Simulation::spawn_from_campaign_flights: no Flight-class units "
             "found in the world JSON — cannot spawn any aircraft");
+    }
+
+    // 5b. C6: arm every spawned campaign aircraft (the mission-role
+    //     doctrine — see arm_campaign_aircraft). The scenario's
+    //     campaign_armed flag gates it; the late-spawner path arms
+    //     through the SAME method in the session's adopt cadence, so
+    //     bulk-fed and bus-fed fleets arm identically.
+    if (scenario_.combat.campaign_armed) {
+        for (const auto eid : aircraft_entities_) {
+            arm_campaign_aircraft(eid);
+        }
     }
 
     // 6. Register every derived airbase with the ATC (B.3+): the StubATC
@@ -1195,6 +1415,30 @@ void Simulation::tick(double dt) {
         f4::terrain::TerrainSource* ts = terrain_source_ ? terrain_source_ : &default_terrain_;
         const double ground_z = ts->elevation_at_ft(east_ft, north_ft);
         fm->set_ground(ground_z, f4::math::Vec3d{0.0, 0.0, -1.0});
+
+        // C6: steer the radar's search bar onto the ground track —
+        // FreeFalcon's radar is boresighted to the nose, and a campaign
+        // fighter flying EAST under the M2 placeholder's fixed
+        // north-centered bar never paints the hostile off its nose (the
+        // 9-minute armed war: 96 airborne, 33 fighters, zero detections
+        // that mattered). North-flying rigs (every M2/M3/M4 test and
+        // scenario) keep the exact north bar they were pinned with;
+        // slow/parked aircraft keep their last bar (the clutter rule
+        // keeps their scans cheap).
+        if (auto* radar = h.get<sensors::RadarSimComponent>();
+            radar != nullptr && radar->mode() == sensors::RadarMode::Search) {
+            // NED: kin.xdot = north velocity, kin.ydot = east velocity.
+            const double track_north = s_cur.kin.xdot;
+            const double track_east = s_cur.kin.ydot;
+            constexpr double kTrackMinFps = 100.0;
+            const double track_speed =
+                std::sqrt(track_east * track_east +
+                          track_north * track_north);
+            if (track_speed > kTrackMinFps) {
+                radar->scan.azimuth_center_rad =
+                    std::atan2(track_east, track_north);  // CW from north
+            }
+        }
     }
     const auto prof_t2 = g_prof.on ? std::chrono::steady_clock::now()
                                    : std::chrono::steady_clock::time_point{};
@@ -1225,6 +1469,16 @@ void Simulation::tick(double dt) {
     // engine-agnostic, the host is their eyes. Runs with combat on or
     // off (safety is not a tactic) and for every airborne aircraft.
     push_safety_pictures();
+
+    // PERF-1: the shared air picture — ONE world walk per tick feeding
+    // every combat brain's SensorFusion rebuild (the beam-fight
+    // every-tick refresh made the per-brain walk the merge-phase
+    // collapse; see PERFORMANCE_PLAN.md §1). Combat-gated: unarmed
+    // worlds keep the fusion's own world query (and its goldens).
+    if (combat_on) {
+        push_air_picture_(dt);
+    }
+
 
     world_.update_all(dt, bus_);
     bus_.flush_pending();  // drain deferred ATC messages (TaxiClearance, etc.)

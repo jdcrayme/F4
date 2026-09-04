@@ -171,6 +171,17 @@ struct CombatConfig {
     /// "guns_hold": false arms the trigger (per-aircraft hold_fire
     /// still disarms everything — a drone is a drone).
     bool guns_hold{true};
+    /// C6: arm CAMPAIGN-flights aircraft for A/A combat (the scenario's
+    /// combat block above only reaches the scenario-list spawn path).
+    /// When true, every campaign-spawned aircraft (bulk path at
+    /// initialize() AND late spawner materializations) gets the combat
+    /// component set + the fighting brain, doctrine by mission ROLE:
+    /// CAP/Sweep/Intercept/Escort fight the full ladder, every other
+    /// category flies defensive-only through its BRAINDAT archetype
+    /// (CAMPAIGN_LOOP_PLAN.md §5 C6). Default false — campaign worlds
+    /// are byte-identical to the pre-C6 shape with it off (the same
+    /// contract wreck_hold_sec = 0 keeps).
+    bool campaign_armed{false};
 };
 
 /// Fuel policy for every spawned aircraft (the DigitalBrain's fuel check

@@ -5236,3 +5236,360 @@ Stage Summary:
   re-emission + save-write), the ground war (battalion movement /
   front line), or the real-data imports (FALCON4.WST / full UCD) —
   the known-gaps §7 queue, in whatever order the user picks.
+
+---
+Task ID: 23
+Agent: main (Super Z)
+Task: C6 — arming the campaign flights (A/A goes live): the plan doc,
+the integration tranche (mission-role doctrine + combat component set +
+radar-backed detection for campaign flights), the acceptance run with
+air kills, per CAMPAIGN_LOOP_PLAN §5's C6 spec and the user's
+"proceed with documentation and implementation" instruction.
+
+Work Log:
+- Fresh clone; re-read the C5 spec + worklog tail (Task 22), the combat
+  chain plan, campaign_bridge/spawner/session/simulation/combat_bridge
+  sources, the BrainComponent combat surface, BRAINDAT fixture
+  archetypes (parsed the .brn by hand: Generic/Air CAP/Air Sweep/
+  Escort/Intercepter all-armed; SEAD/Strike/Waypointer engagement-off
+  + MissileDefeat-on — exactly the doctrine vocabulary C6 needed),
+  and the war harness/QC wiring before writing anything.
+- Plan doc: CAMPAIGN_LOOP_PLAN §5 C6 section (three legs: components,
+  doctrine, opt-in; kill chain closes with no new code; acceptance
+  criteria), status header + implementation order updated, C5's
+  "A/A dark" limitation marked closed.
+- Implementation (f4-simulation): CampaignOriginComponent::mission_byte
+  (stamped by both spawn paths); CombatConfig::campaign_armed (scenario
+  JSON); arm_campaign_combat (combat_bridge) — the component set
+  (attach-only-when-missing), configure_brain_combat for envelopes/ROE,
+  the doctrine (CAP/Sweep/Intercept/Escort fight; everyone else
+  defensive-only through a disengaged BRAINDAT archetype; fighters get
+  the doctrine A/A loadout + M61 drum on the EXISTING strike store);
+  Simulation::arm_campaign_aircraft + ensure_campaign_brain_data
+  (eager, loud); bulk-path arm in spawn_from_campaign_flights; the
+  session's adopt_new_spawns_ arms every late spawn (register + arm,
+  same cadence); CampaignSessionOptions::aa_combat writes the scenario
+  block with full ROE; harness report/diary/QC surfaces gain the armed
+  counters + ftrs=/aakill= progress columns + the --aa-combat flag.
+- Tests: test_campaign_combat.cpp (7 units — the 41-byte role map, the
+  fighter arm, the defensive arm, idempotence, non-campaign rejection,
+  the Simulation late-spawn surface, the armed kunsan war) + CMake
+  wiring; the gun-drum expectation caught the first fill bug (the
+  standard_fighter gun station was missing from the doctrine fill).
+- THE ACCEPTANCE RUN THAT FOUGHT NOTHING, AND WHY (three real bugs,
+  each invisible to the unarmed war):
+  1. THROUGHPUT: 81 tps armed vs 320+ unarmed (Debug). Profiling with
+     the built-in F4_TICK_PROF: update_all 95% of the tick; a temporary
+     detection probe measured 2.69M track-creating detections in 21.6
+     sim-seconds — the M2 radar scanned EVERY transform entity and
+     rolled detections on parked battalions: 125k detections/s of
+     ground clutter. Fixed with TransformComponent::is_ground_clutter
+     (stationary AND below every Korea terrain post; a stationary rig
+     at 20,000 ft stays visible so every original golden holds) in the
+     radar scan AND the SensorFusion rebuild, plus a range
+     pre-rejection (pd provably 0 beyond 8x reference range). The
+     first fix attempt (moving-only) broke two RWR rigs that pin
+     stationary victims at 20,000 ft — the shared predicate reconciled
+     both contracts.
+  2. NO DETECTIONS: nose-following scan bar (a fixed north bar meant
+     an east-flying campaign fighter never painted anything off its
+     nose). Simulation::tick now steers the search bar onto the ground
+     track; north-flying rigs keep the exact pinned bar.
+  3. NO SIDES: a per-tick team histogram showed blue=0 red=0 — every
+     aircraft "green". TestCamp's player slot is a neutral placeholder
+     ("XX"); the war is ROK(2) vs DPRK(6). The B.3 owner_team_string
+     mapped everything to green: a war with no hostile pairs.
+     Rewritten: player-belligerent saves keep the classic mapping; a
+     neutral-player save maps the WAR PAIR (first at-war pair in slot
+     order) to blue/red. (The synthetic-world tests pin the classic
+     path — unchanged.)
+- The war went live: 31 blue vs 33 red airborne, 12-39 brains engaged,
+  merges at 0 NM, the first air kill booked.
+- Container plumbing: cmake+ninja via the venv (pip install), headless
+  configure (renderer/viewer/scenario-player OFF), TestCamp.world.json
+  regenerated with cam2json; Release build configured for the
+  acceptance (C5's own doctrine).
+- Verification: full suite 2,183/2,183 in Debug AND Release (the one
+  parallel-run flake from C5's run now passes). Real data (TestCamp
+  v71, Release): the 6-minute armed war (--war 0.1 --aa-combat, 2
+  in-process runs) — 6 cycles, 556 intents, 413 packages + 143
+  escorts, 115 routes (0 failures), 1,362 drawn (ROK 672 / DPRK 690),
+  96 live / 80 airborne, 96 armed (33 fighters), THE FIRST A/A KILL
+  fully attributed (killer credit to squadron 4789, victim DPRK flight
+  10678, t=356.7 s — the ledger's air_losses array, totals, and the
+  squadron books all reconcile; the aa_kills rows carry the save's own
+  seed history by design), MD5 identical across runs and equal to
+  md5sum campaign_result.json (e8496c7819cbb7b64b8f9e0a2fdc7b64),
+  all four verdicts green, exit 0. A 12-minute observation run
+  (killed by the tool timeout mid-run-0, numbers captured) shows the
+  fights compounding; the merge phase costs throughput (Release ~480
+  tps clean, ~37 tps at peak merge over 80 airborne — diary-visible,
+  never gated). The reaper's kill retires at t=656.7 s, past this
+  horizon — mechanics stay pinned by the harness tests.
+- Docs: CAMPAIGN_LOOP_PLAN C6 → LANDED (with the verification numbers
+  and the two integration-bug write-ups), CHANGES.md C6 entry, this
+  worklog entry.
+
+Stage Summary:
+- The campaign loop now FIGHTS: simulate → attrite (air) → retask, the
+  A/A kill chain end to end (radar → track → lock → release → flyout →
+  kill → ledger → one-pool netting), deterministic by proof.
+- The doctrine is data: FreeFalcon's own BRAINDAT archetypes stand the
+  non-fighters down (no new brain API), the mission byte picks the
+  role, and the whole tranche is opt-in (every pre-C6 golden
+  byte-identical with the flag off).
+- C6's real work was the integration bugs the unarmed war could never
+  see: a team mapping with no sides, a radar that painted parking
+  ramps, and a north-fixed antenna. All three closed with
+  fidelity-correct fixes (ground-clutter is not air picture; the war
+  pair maps to blue/red; the bar follows the nose).
+- Known gaps carried forward: the two-sided air picture's
+  allied-to-a-side mapping (a third armed team engages whichever side
+  its own-relative rule marks hostile); the full 24-hour armed
+  acceptance is a Release multi-call run (merge-phase throughput is
+  the honest wall — a fight-phase perf tranche is the natural follow
+  up alongside the known-gaps §7 queue: .cam re-encoder, ground war,
+  real-data imports).
+---
+Task ID: 24 (PERF-1, in progress)
+Agent: main (Super Z)
+Task: The performance phase — make the armed campaign war sustain its
+throughput so the 24-hour acceptance run is practical in Release.
+
+Work Log:
+- Recon: CAMPAIGN_LOOP_PLAN §5 C6 LANDED (commit f862375); C6.5 notes
+  Release ~480 tps pre-fight, ~37 tps at peak merge ("the WVR/defensive
+  sweep across the roster"). C5 notes Debug 330-540 tps; Release is the
+  acceptance medium.
+- Measured a 12-min armed war (Release, F4_TICK_PROF=1):
+  `update_all` = 95-97% of tick time; per-tick cost 4ms -> 88ms as fights
+  start, roster flat (96 live). Cost scales with ENGAGEMENT state, not
+  world size.
+- Root cause found (brain_component.hpp:396-403): while any hostile
+  missile is visible, EVERY brain `force_refresh()`es its SensorFusion
+  picture EVERY tick; each rebuild walks
+  `with_component<TransformComponent>()` (~4,400 entities, 35KB bucket
+  copy + per-candidate EntityHandle::get hash probes + tag lookups) and
+  rebuilds ~150 TargetInfos. 96 brains x 60Hz x ~300us = seconds of CPU
+  per sim-second. Same walk is re-done 96x per tick — the air picture is
+  shared state walked per-brain.
+- Secondary costs measured/estimated: RadarBackedDetectionPolicy::
+  classify re-resolves ownship radar+RWR per CONTACT; EWMA prev-scan
+  O(N^2) small; update_rwr sweep ~2.7%; radar scans bounded (clutter
+  skip + range pre-rejection already landed in C6).
+- Baseline captured BEFORE any change (build == f862375):
+  6-min armed war (campaign_qc TestCamp.world.json --war 0.1
+  --war-sample 60 --tasking-cycle 60 --aa-combat): md5
+  e8496c7819cbb7b64b8f9e0a2fdc7b64, verdicts green, wall 283s, tps
+  441/269/229/213/211/45(merge). Artifacts in
+  /home/z/my-project/perf/baseline/.
+
+Stage Summary (PERF-1 LANDED, Task 24 — complete):
+- Diagnosis: the beam-fight every-tick force_refresh x the per-brain
+  with_component walk (4,400 entities x 96 brains x 60 Hz) was the
+  collapse. update_all 95-97% of tick; 4ms -> 88ms/tick at merge.
+- Fix: f4::ai::AirPicture (host-built shared snapshot, entity-index
+  order, clutter rule, interned teams, missile role) + SensorFusion::
+  set_air_picture (picture path; world path kept) + BrainComponent::
+  set_air_picture + Simulation::push_air_picture_ (demand-gated on
+  will_rebuild_this_tick — the exact fusion rebuild decision) +
+  DetectionPolicy::prepare_batch (RadarBacked caches ownship
+  radar/RWR per rebuild).
+- Byte-identity: 6-min armed war MD5 e8496c7819cbb7b64b8f9e0a2fdc7b64
+  unchanged across 3 post-change runs; all four C5 verdicts green.
+- Perf: 6-min war wall 283s -> 183s, merge 45 -> ~156-177 tps, cruise
+  439 tps (demand gate restored it after the first cut regressed to
+  279); 12-min war (could NOT complete pre-PERF-1 inside 570s) green
+  end to end: 444.8s wall, 12 cycles, 5 losses, first reaper
+  retirement, 140-192 tps floor, RSS flat ~250MB.
+- PERF-2 closed by evidence: post-fix profile update_all 88% (FM
+  physics — pinned territory), sweeps ~10%; no dominant fire; no
+  further room promoted.
+- PERF-3: dev container reaps background processes between calls and
+  caps single calls at 10 min (measured: detached 24h launch died
+  with empty log; canary died identically). Certificate command +
+  ~15h (2-run) / ~7.5h (1-run) projection documented in the plan.
+- Suites: 2,188/2,188 Debug + Release (2,183 + 5 new units: picture
+  equality, demand predicate, stale-pointer reset, path revert,
+  policy batch equivalence). One real refactor bug caught by
+  -Wdangling-pointer (world-path team read) — fixed.
+- Docs: Docs/PERFORMANCE_PLAN.md (new; rooms PERF-1 LANDED /
+  PERF-2 CLOSED / PERF-3 DOCUMENTED), CHANGES.md entry, README
+  PERF-1 note, CAMPAIGN_LOOP_PLAN C6 merge-cost cross-reference,
+  f4_ai.hpp umbrella include. Commit to follow.
+---
+Task ID: 25 (G1, complete)
+Agent: main (Super Z)
+Task: The ground war tranche — battalion-level movement + the front
+line (the user's "Proceed with the ground war tranche"; a downloadable
+patch file when ready for testing).
+
+Work Log:
+- Recon: PERF-1 landed (02f49ef), tree clean. CAMPAIGN_LOOP_PLAN §7's
+  first gap = ground losses book credit-only; §5 C6 documented the
+  sink's AG branch as "the victim's own ledger is the ground-war
+  tranche's".
+- Design per house patterns: GroundWar = the campaign ladder's
+  campaign-side twin (f4-campaign, IDataSource boundary, no
+  EntityWorld), bound to the ONE result ledger, driven by the
+  session's campaign-second cadence; entity mirror in f4-simulation.
+- G1.1 result_ledger: GroundLossRecord / ObjectiveCaptureRecord /
+  GroundUnitLedger + TeamLedger ground counters; apply_ground_loss /
+  apply_objective_capture / sync_ground_unit (destruction booked on
+  the sync transition); to_json optional "ground" block (version
+  stays 2 — ground-quiet runs byte-identical); empty() extended.
+- G1.2 ground_war engine: war pair (belligerent_teams' own rule,
+  first at-war pair); front line per grid column (±3 band, centroid
+  sides); GTM-lite orders (DoCalculations terms, random(5) dropped);
+  movement (wire movement_speed else subtype defaults, 1/256 fixed
+  point, fatigue/supply gates, pinned-when-engaged); engagement
+  (6-grid buckets, power-weighted exchange, hours tempo, roster decay
+  highest-group-first); capture (undefended flip + garrison);
+  resupply (last_resupply anchor, catch-up-once); air-loss pullback
+  (index cursor, applied once).
+- G1.3 ground_writeback: apply_ground_to (battalions + owner flips,
+  activity-gated, unmatched loud, first_owner preserved).
+- G1.4 sink: AG kills against battalion ENTITIES book the victim
+  (air=true, killer provenance).
+- G1.5 session: ground_war/ground_update_sec/ground_orders_sec/
+  ground_resupply_sec options; engine on the whole-second cadence;
+  entity mirror (transform ×1024 ft, GroundTactical, roster, ALIVE);
+  flight-less worlds populated for the mirror; stats ground row.
+- G1.6 harness + QC: ground columns in diary/summary/report;
+  --ground-war flags; exit 13 (armed but nothing happened).
+- G1.7 tests: 14 engine tests (f4-campaign) + session mirror/identity
+  pair + harness ground case = 15-17 new.
+- Bugs found & fixed: (1) orders best_score sentinel -1 vs negative
+  distant pair-scores — no army ever marched (probe over kunsan:
+  targeted 0); sentinel now -1'000'000, "distance ranks, never
+  vetoes" documented. (2) ground block missing comma between totals
+  and team rows — f4-json Reader's walk is delimiter-lenient, found
+  by parsing the artifact with python; fixed + comma shapes pinned
+  in tests. (3) session mirror on flight-less worlds: unit entities
+  never populated in scenario-list mode — populate_world when
+  ground_war && !have_flights.
+- Acceptance (TestCamp, Release): 6-min smoke --war 0.1 --ground-war
+  → exit 0, 4 verdicts green, MD5 identical (3cbd2372...), 67
+  captures / 204 front columns / 364 grid marched. 1-hour --war 1 →
+  exit 0, MD5 8171e8b6a8dfeb8057f747a06d5b173e (md5sum re-derivable),
+  13 vehicle losses (ROK 8/DPRK 5), 1 bn destroyed (run_losses ==
+  roster), 77 captures, front 204→290 columns, 2,520 grid marched,
+  1,085–1,300 tps, RSS flat 244 MB. 2-hour observation: losses
+  compounding 2→99 vehicles. Combined A/A+ground war runs (the 2h
+  pass at ~150 tps merge cost, truncated by the 10-min tool budget —
+  the full-length combined certificate rides PERF-3's documented
+  wall-clock constraint).
+- Suites: 2,205/2,205 Debug + Release (was 2,190; +15 new ground
+  tests).
+- Docs: Docs/GROUND_WAR_PLAN.md (new), CAMPAIGN_LOOP_PLAN §7/§8
+  cross-refs + status, CHANGES.md G1 entry, README G1 note + sample.
+  Commit + downloadable patch to follow.
+
+Stage Summary (G1 LANDED, Task 25 — complete):
+- The battlefield is live: battalions maneuver on GTM-scored orders,
+  the front line resolves and MOVES (captures), contact attrition
+  books on both sides, resupply runs, air-caused losses thin the line.
+- One writer / one certificate: all ground state flows through the
+  ledger's typed methods; the C5 harness MD5 now covers the ground
+  bytes (1-hour war: 8171e8b6a8dfeb8057f747a06d5b173e).
+- Opt-in contract: ground-off sessions byte-identical (pinned).
+- Patch file for user testing: /home/z/my-project/download/
+  ground-war-tranche.patch (git format-patch vs 02f49ef).
+---
+Task ID: 26 (G2, complete)
+Agent: main (Super Z)
+Task: G2 — the interdiction link (the queue's next rung per
+GROUND_WAR_PLAN §8: "Ground-unit targeting for air weapons — the
+sink's air-loss path is already wired to receive it"); the ground-war
+tranche's follow-on under the user's standing patch-file instruction.
+
+Work Log:
+- Recon (Explore agent + direct reads): the G1 booking side fully
+  pre-wired (the sink's battalion branch, apply_ground_loss air=true,
+  the engine's pull_air_losses_ + apply_vehicle_loss_ cap, the mirror
+  sync); the delivery side pre-built (MK-82 doctrine fill, the strike
+  rung, release_bomb's aim capture); the missing middle = (1) the
+  battalion blast endpoint (objective_found swallowed every
+  transform-carrying target — the unit branch never ran), (2) unit
+  targets in the tasking/route/plan chain (UNIT profiles flew
+  target-less since C3), (3) the booking gate (saved CAS/BAI flights
+  ALREADY drop harmless iron on battalions — ungated booking would
+  break every pre-G2 golden).
+- Plan doc: Docs/INTERDICTION_PLAN.md (the chain table, the design
+  decisions, the opt-in contract, the gaps) before any code.
+- G2.1 f4-weapons: apply_battalion_damage (point blast, 96 lb/vehicle,
+  capped at the mirrored roster, pure — never mutates) +
+  GroundUnitLossMessage (the count rides its own message: NOT N
+  EntityKilledMessages for a unit that is not dead) + roster_vehicle_
+  count; terminal wiring with the features_total>0 fix (objective
+  branch keys on a resolved feature set; bytes identical for every
+  pre-G2 case — proven by the goldens).
+- G2.2 the sink: handle_unit_loss (gated by set_book_unit_losses —
+  the session's unit_strike): apply_ground_loss(air=true, kills) +
+  per-vehicle apply_ag_kill credit + stats; ledger gains
+  ground_vehicle_losses_air_.
+- G2.3 f4-campaign: the front-line math EXTRACTED from
+  GroundWar::rebuild_front_ into front_columns_from_objectives +
+  front_objective_view + belligerent_pair (shared, drift-proof; the
+  engine delegates — pure refactor, G1 goldens re-proven identical)
+  + rank_battalion_targets (hostility, land/Battalion/roster,
+  ledger-destroyed skip, front-distance, wire ties).
+- G2.4 route builder: unit_xy_ (objectives-first-then-units) + the
+  WP_CAS→WP_GNDSTRIKE(14) action mapping + profile_flies_unit_
+  delivery_route (data-driven; exactly AMIS_CAS).
+- G2.5 the ladders: CampaignConfig::unit_strike + AtmConfig::
+  unit_strike (one flag, the Campaign passes it through at ATM
+  construction); select_unit_target_ (legacy) + generate_requests'
+  unit rotation (ATM); the ATM's target analysis + FindBestAir
+  resolve unit positions (allow_units gated on the flag — the
+  backlog corner stays byte-identical); phase-6's route gate takes
+  the unit family; the plan builders + spawner thread the unit id
+  map (objectives first, then units, the loader's own order).
+- G2.6 session/QC: CampaignSessionOptions::unit_strike + the sink
+  arm + the populate gate (ground_war || unit_strike — flight-less
+  worlds need the battalion entities); harness report/diary gain
+  unit_strike + ground_losses_air; campaign_qc --unit-strike + the
+  (air=N) column + exit 14 (armed + agv==0, with the TOT guidance).
+- G2.7 tests: 21 new (8 weapons: packing, the blast math, the E2E
+  bomb-at-battalion + the objective regression; 8 campaign: pair,
+  front, ranking; 3 sink: armed/unarmed/stale; 1 session: CAS tasks
+  real battalions + arm-off identity; 1 spawner: unit-map plan
+  resolution). Two test-geometry bugs of my own fixed (the 41-column
+  span; a false tie).
+- Acceptance (TestCamp, Release): C6 6-min golden e8496c78...
+  BYTE-IDENTICAL; G1 1h golden 8171e8b6... BYTE-IDENTICAL (front
+  extraction inert; air=0 column); 0.3h interdiction exit 0, 2-run
+  MD5 4f3300de..., agv=2; 1h interdiction exit 0, f751c748...,
+  losses=15 (air=2), the pull proven in the books (battalion 4121:
+  strength 11→9, run_losses 2); combined 0.3h (all three arms) — the
+  CAS package shot down 23s short of TOT (exit 14 fires honestly;
+  the full-length combined certificate is PERF-3 wall-clock
+  constrained). Suites 2,226/2,226 Debug AND Release.
+- Bugs found & fixed: (1) objective_found true for ANY transform
+  target — the objective branch swallowed battalions, the unit branch
+  dead; fixed by keying the objective branch on features_total > 0.
+  (2) The ATM phase-6 route gate only took the OBJECTIVE delivery
+  family — CAS composed but never routed; extended under the flag.
+  (3) The populate gate only covered ground_war — flight-less
+  unit-strike worlds had no battalion entities to bomb. (4) The
+  kunsan session rig has no airbased squadrons — CAS routing there
+  is honest-but-unobservable; the TestCamp acceptance proves it.
+- Docs: INTERDICTION_PLAN (LANDED + verification), CAMPAIGN_LOOP_PLAN
+  status/§7/§8, GROUND_WAR_PLAN §6/§8, CHANGES.md, README + the
+  sample's unit_strike line.
+
+Stage Summary (G2 LANDED, Task 26 — complete):
+- The loop's diagonal is closed: simulate → attrite (BOTH books) →
+  retask — CAS draws against the front line, the bombs kill
+  vehicles, the ledger books air-sourced ground losses, the engine
+  pulls them, the roster thins, the mirror syncs. Two wars, one war.
+- Opt-in contract held: both pre-G2 goldens byte-identical with the
+  flag off; the front-line extraction is a proven-inert refactor.
+- Known gaps carried forward: sensor-driven CAS acquisition (the
+  tasking picks the target, not the sensors — the strategy layer's),
+  guns/missiles-vs-battalion (the EntityKilledMessage branch still
+  waits), the stale-roster edge (same-minute over-kill self-heals on
+  the engine's sync), the 96-lb vehicle constant (the real VCD lands
+  with the real-data import).
+- Patch file for user testing: /home/z/my-project/download/
+  interdiction-tranche.patch (git format-patch vs G1's 37591e6).

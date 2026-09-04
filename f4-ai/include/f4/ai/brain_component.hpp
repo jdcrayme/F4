@@ -889,6 +889,34 @@ public:
         std::optional<geo::WorldPosition> own_velocity) {
         collision_avoid_.set_traffic(std::move(traffic), own_velocity);
     }
+    /// Per-tick shared air picture (PERF-1, PERFORMANCE_PLAN.md §3):
+    /// the host walks the world ONCE on ticks where any brain's fusion
+    /// will rebuild (see wants_air_picture) and pushes the same
+    /// snapshot to every brain — the combat rungs' SensorFusion
+    /// rebuilds consume it instead of re-walking the entity database
+    /// per brain (the merge-phase collapse). No push (nullptr) = the
+    /// fusion's own world-query path, byte-identical output. Non-owning;
+    /// see wants_air_picture for the demand-gating exactness notes.
+    void set_air_picture(const AirPicture* picture) noexcept {
+        sensors_.set_air_picture(picture);
+    }
+    /// PERF-1 demand query (host side): does THIS brain's combat ladder
+    /// run a SensorFusion rebuild on THIS update(dt)? Exact mirror of
+    /// the update() decision: the ladder runs only while Enroute with
+    /// combat enabled, and the fusion rebuilds when its skill timer
+    /// expires OR the beam-fight rule (visible hostile missile) fires.
+    /// The host asks every roster brain before world update and builds
+    /// the shared picture only when at least one says yes — a tick with
+    /// no rebuild anywhere pays no world walk. Exactness note: a brain
+    /// that transitions Ground -> Enroute INSIDE its update (takeoff
+    /// complete) is combat-uninitialized there — its first rebuild goes
+    /// through the world path (initialize() clears the picture), so the
+    /// one in-tick entry into combat-ladder eligibility is covered.
+    [[nodiscard]] bool wants_air_picture(double dt) const noexcept {
+        return combat_enabled_ && phase_ == Phase::Enroute &&
+               (!combat_initialized_ ||
+                sensors_.will_rebuild_this_tick(dt));
+    }
     [[nodiscard]] modules::GroundAvoidModule&       ground_avoid()       noexcept { return ground_avoid_; }
     [[nodiscard]] const modules::GroundAvoidModule& ground_avoid() const noexcept { return ground_avoid_; }
     [[nodiscard]] modules::CollisionAvoidModule&       collision_avoid()       noexcept { return collision_avoid_; }

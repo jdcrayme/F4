@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 
 #include <f4/geo/relative.hpp>
 
@@ -105,6 +106,48 @@ void RadarSimComponent::perform_scan(messaging::MessageBus& bus) {
 
         const f4::geo::WorldPosition tgt_pos = tf->position;
         const f4::math::Vec3<double> tgt_vel{tf->vx, tf->vy, tf->vz};
+
+        // Ground-clutter rejection (the C6 campaign-scale finding):
+        // the air-to-air radar tracks air picture, not parking ramps.
+        // The M2 placeholder walked every transform-bearing entity,
+        // which at 2-aircraft scenario scale was free — at campaign
+        // scale (48 armed radars x ~4,400 entities per sweep) it
+        // detected HALF of all candidates every second (measured:
+        // 125k track-creating detections/s in a 36-s war), flooding
+        // the track stores with ground clutter at both a perf and a
+        // fidelity cost. The shared TransformComponent::is_ground_
+        // clutter predicate (stationary AND below every Korea terrain
+        // post) is also the reference's shape: FreeFalcon's radar air
+        // picture never paints parked vehicles. A stationary entity at
+        // altitude still tracks.
+        if (tf->is_ground_clutter()) {
+            continue;
+        }
+
+        // Range pre-rejection (the campaign-scale scan walk): the
+        // detection model's maximum range is reference_range x
+        // fourth-root(rcs ratio) x closure. For every real signature
+        // (fighter-scale RCS grids, closure bounded by the model) that
+        // product sits far below 8x the reference range, so a candidate
+        // beyond the cutoff can never roll a detection — skipping it
+        // BEFORE the geometry chain (to_bra, atan2, LOS, volume trig)
+        // is output-identical to the pd==0 path while cutting the
+        // per-candidate cost at campaign scale (a populated save:
+        // ~4,400 transform-bearing entities per radar sweep; most sit
+        // beyond any radar's horizon).
+        {
+            constexpr double kScanCutoffMultiplier = 8.0;
+            constexpr double kNmToFt = 6076.11548;
+            const double cutoff_ft =
+                kScanCutoffMultiplier * params.reference_range_nm * kNmToFt;
+            const double dxr = tgt_pos.x - own_pos.x;
+            const double dyr = tgt_pos.y - own_pos.y;
+            const double dzr = tgt_pos.z - own_pos.z;
+            if (dxr * dxr + dyr * dyr + dzr * dzr >
+                cutoff_ft * cutoff_ft) {
+                continue;
+            }
+        }
 
         // Geometry (ENU: x=east, y=north, z=up).
         const f4::geo::BRA bra = f4::geo::to_bra(own_pos, tgt_pos);

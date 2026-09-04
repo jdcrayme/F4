@@ -310,6 +310,7 @@ Scenario parse_scenario(f4::json::Reader& r) {
                 else if (k == "bvr_hold")      s.combat.bvr_hold = r.read_bool();
                 else if (k == "missiles_hold") s.combat.missiles_hold = r.read_bool();
                 else if (k == "guns_hold")     s.combat.guns_hold = r.read_bool();
+                else if (k == "campaign_armed") s.combat.campaign_armed = r.read_bool();
                 else                            skip_unknown(r);
             }
         } else if (key == "fuel") {
