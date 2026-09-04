@@ -55,8 +55,9 @@
 // Both take the library + key + center + size_px + fill/outline colors,
 // look up the definition, and walk its polylines + polygons. Polylines
 // use DrawLineEx / AddPolyline; filled polygons use DrawTriangleFan /
-// AddConvexPolyFilled; outline polygons use DrawTriangleLines /
-// AddPolyline with closed=true.
+// AddConvexPolyFilled when convex and hole-free, else their earcut
+// triangle cache (AddTriangleFilled / DrawTriangle); outline polygons
+// use AddPolyline with closed=true.
 //
 // FUTURE: the eventual refactor of symbols.cpp will replace the hard-coded
 // switch in draw_symbol() with a lookup into a loaded SymbolLibrary,
@@ -69,6 +70,7 @@
 
 #include <f4/renderer/symbols.hpp>  // for RlColor (POD struct of 4 ubytes)
 
+#include <array>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -94,24 +96,44 @@ struct SymbolPoint {
     float y = 0.0f;
 };
 
+/// Which of the caller's two runtime colors a primitive paints with.
+/// The draw helpers receive (fill, outline) — typically team color and a
+/// contrast color — and every primitive selects one of them, so authored
+/// symbols never carry absolute colors (which would fight the team
+/// palette). Mirrors the color_roles documented in f4_symbols.json.
+enum class SymbolColorRole {
+    Fill,       // the caller's fill color (team color), opaque
+    FillBlend,  // the fill color at 85% alpha — overlapping translucency
+    Outline,    // the caller's outline color (contrast)
+};
+
 /// An open or closed polyline (line strip).
-/// `width` is in pixels at the reference size_px (NOT normalized) so
-/// lines stay visually consistent across symbol sizes. `closed = true`
-/// connects the last point back to the first.
+/// `width` is in pixels at render time (NOT normalized) so lines stay
+/// visually consistent across symbol sizes. `closed = true` connects the
+/// last point back to the first.
 struct SymbolPolyline {
     std::vector<SymbolPoint> points;
     float  width  = 1.0f;
     bool   closed = false;
+    SymbolColorRole color_role = SymbolColorRole::Outline;
 };
 
 /// A filled or outline polygon.
 /// `filled = true` renders as a filled shape; `filled = false` renders
-/// as an outline only. The polygon is assumed convex for filled rendering
-/// (raylib's DrawTriangleFan + ImGui's AddConvexPolyFilled both require
-/// convexity). Outline rendering works for any simple polygon.
+/// as an outline only. Filled rendering has two paths:
+///   - convex, no holes -> fast path (triangle fan / convex fill)
+///   - concave or holed -> the `triangles` cache (earcut triangulation)
+/// `holes` holds interior rings (SVG evenodd subpaths contained in the
+/// outer loop) and renders as cut-outs. `triangles` is DERIVED data —
+/// computed by refresh_fill_caches(), never serialized, and empty when
+/// the fast path applies. Outline rendering works for any simple
+/// polygon.
 struct SymbolPolygon {
     std::vector<SymbolPoint> points;
     bool filled = true;
+    SymbolColorRole color_role = SymbolColorRole::Fill;
+    std::vector<std::vector<SymbolPoint>> holes;
+    std::vector<std::array<SymbolPoint, 3>> triangles;
 };
 
 /// One complete symbol definition.
@@ -195,6 +217,14 @@ void save_symbol_library(const SymbolLibrary& lib,
 /// triangle, diamond). Used by the Symbol Creator tool as the initial
 /// content on first launch, and by unit tests as a known-good fixture.
 [[nodiscard]] SymbolLibrary make_default_symbol_library();
+
+/// Recompute derived fill caches for every filled polygon in `def`:
+/// concave polygons and polygons with holes get an earcut triangulation
+/// into SymbolPolygon::triangles; convex hole-free polygons keep the
+/// fan fast path (empty cache). Called by the JSON loader and the SVG
+/// importer; call it again after mutating points/holes (e.g. in the
+/// Symbol Creator) — rendering trusts the cache.
+void refresh_fill_caches(SymbolDefinition& def);
 
 // ---------------------------------------------------------------------------
 // Rendering — mirrors the existing symbols.hpp API.

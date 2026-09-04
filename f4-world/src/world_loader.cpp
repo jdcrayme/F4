@@ -441,6 +441,11 @@ std::vector<EntityId> populate_units(
         h.set_tag(tags::ROLE, TagValue::from(std::string(unit_class_name(src.unit_class(i)))));
         h.set_tag(tags::TEAM, TagValue::from(static_cast<int64_t>(src.owner(i))));
         h.set_tag(tags::OPDOMAIN, TagValue::from(std::string(domain_name(src.domain(i)))));
+        // Coarse category for O(1) "all units" roster queries (the
+        // viewer's per-frame render loops) — units span all four
+        // OPDOMAIN buckets, so a domain union per query was O(n) with
+        // a fresh vector every call.
+        h.set_tag(tags::CATEGORY, TagValue::from(std::string("unit")));
         h.set_tag(tags::ALIVE, TagValue::from(true));
 
         // Phase A: NAME + CLASS + ICON tags.

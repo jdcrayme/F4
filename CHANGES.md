@@ -1,5 +1,130 @@
 # F4 Cleanup Pass — Changes Summary
 
+## SYMBOL-SVG-1 — f4-xml (vendored pugixml) + SVG Symbol Authoring: Import/Export, Color Roles, Holes, earcut Fills
+
+**The SVG spike from the world-viewer UI audit: SVG becomes the
+AUTHORING format for the SymbolLibrary (editable in Inkscape /
+generatable by AI), while the library stays the RUNTIME format —
+everything flattens once at import; nothing SVG-shaped runs per frame.
+New root library f4-xml (vendored pugixml v1.15, MIT, committed under
+f4-xml/third_party — same convention as tinyfiledialogs; exposed as
+f4::xml) is the project's shared XML parser, chosen because it is
+also the prerequisite for the documented BMS work (FALCON4_CT.XML &
+co — worklog BMS-CT-1 / BMS-DATA-1, Docs/FALCON4_FILE_LAYOUT.md).
+f4-renderer gains svg_import.hpp/.cpp: a STRICT subset importer
+(svg/g/path/rect/circle/ellipse/line/polyline/polygon + title/desc;
+nested translate/scale/rotate/matrix transforms; presentation
+inheritance; full path command set M..Z with curve flattening at
+16/32 segments; currentColor→Fill role, black/white→Outline,
+data-color-role override; evenodd/nonzero subpath classification into
+outer rings + holes) that fails LOUDLY by feature name on
+out-of-subset input (gradients/filters/CSS/text/opacity... — identity
+values editors stamp, like fill-opacity="1", are tolerated), plus the
+inverse exporter (viewBox -1 -1 2 2; holes as subpaths; roles via
+currentColor + data-color-role; stroke widths through a 64px
+reference extent). The model grew to match the corpus's v2 schema:
+SymbolColorRole (fill/fill_blend/outline) on polygons AND polylines,
+polygon holes, and an earcut-triangulated fill cache (vendored
+mapbox/earcut.hpp) rendered per-triangle in both the raylib and ImGui
+draw paths — concave symbols and donuts now render correctly instead
+of relying on the convex-only fan. The JSON loader learned the v2
+sugar primitives the corpus actually uses (rectangles/lines/dots),
+previously SILENTLY DROPPED, normalizing them to canonical
+polygons/polylines (writer emits canonical form only; version bumped
+to 2). refresh_fill_caches() recomputes the derived fills after load,
+import, or editor mutation. Tests: 5 f4-xml smoke tests; 15
+svg_import tests including a full corpus round-trip — every one of
+the 75 f4_symbols.json symbols exports to SVG and re-imports
+geometry-identical (roles, holes, widths, closure) — plus 29
+symbol_library tests (unmodified, all green); world-viewer builds
+clean against the extended model. Next steps (not in this change):
+load f4_symbols.json at startup and prefer library keys in
+RenderEntityIcon with procedural fallback, then delete the
+~850-line hardcoded symbols.cpp vocabulary behind a parity flag;
+thread campaign_icon through world_json → components.**
+
+## QC-PASS-1 — Viewer QC Sweep: Route Clutter, Honest Speed Feedback, 3D for Everything Selected, Mechanical Cleanup
+
+**A full QC pass over the repo against three user reports plus a
+repo-wide sweep. (1) Flight plans no longer cover the map: all three
+route passes (static waypoint polylines, live session routes,
+mission→target / package→element links) draw ONLY for the current
+selection — select a live aircraft and its route shows; select a
+squadron and its flights' waypoints show; select a package and its
+element links show; select an objective and the inbound mission links
+show — with a new "All flight plans" master toggle (View menu +
+Layers panel) restoring the old always-draw behavior. Selected routes
+draw heavier. (2) The speed ratio "does nothing" report diagnosed:
+the wiring was intact end-to-end — the real causes were sessions
+starting PAUSED, the Debug build's ~330-540 ticks/s CPU cap making
+10x/60x/240x deliver an identical effective ~7x with silent
+debt-dropping, and zero rate feedback. `CampaignSessionRunner` now
+measures its effective speed (EMA of sim-advanced per wall-second),
+the session window prints `speed: 60x (effective 6.8x — CPU-limited)`
+when the measured rate falls below 90% of the request, the radios
+read back the runner's ACTUAL speed, speed presets appear pre-start,
+and the keyboard gains `1`-`4` preset pick + `+`/`-` step (guarded by
+WantCaptureKeyboard). Pause flips unified into one
+`set_session_paused()` helper (button + Space + menu all agreed
+before; now they share the code too). (3) Squadrons, ground units,
+and live aircraft get a 3D view: the Inspector 3D tab no longer
+hard-rejects non-objective selections — a new
+`draw_entity_model_3d()` renders a LiveAircraft as its own
+VisualModelComponent model at its transform facing; a Squadron as a
+parked row of its class-table aircraft (gear down, ramp heading);
+a static Flight as an airborne echelon pair; a Battalion/Brigade/
+TaskForce as its VehicleCompositionComponent roster in vehicle groups;
+all reusing the objective view's ground plane, orbit camera, and mesh
+caches. The map's hit-test learns parked aircraft + deaggregated
+vehicles (zoom > 2x, LiveAircraft selection kind) so everything on the
+map is clickable, and the HUD summarizes live selections + hints
+"zoom past 6x for 3D models" when a session runs. (4) Mechanical
+sweep: the three commented-out draw passes re-enabled and truthfully
+toggled (unit destinations, squadron→airbase links, BN→BDE hierarchy
+lines); layer checkboxes single-sourced (one `draw_layer_groups` list
+drives both the View menu and the Layers panel — the panel also gains
+the Campaign-QC + Live-session groups that only the menu had); the
+Campaign-menu auto-open fixed (it checked a null session right after
+an ASYNC start and never fired); "Reset Session" made safe against
+the async-create/deferred-stop race (the pending stop tags its target
+session and a stale stop is dropped); Write-Result-JSON deduplicated
+into one method; dead `draw_ground_grid()` removed; the 10ft/5ft
+Z-sink constants reconciled into one named constant; `Impl::units()`
+now an O(1) tag-index read via a new `tags::CATEGORY` tag set at world
+load (was a 4-bucket union rebuilt ~4x/frame); parking overflow
+(spawn_aircraft_from_squadrons' modulo wrap) offsets each extra pass
+one wingspan to the aircraft's right instead of stacking every parked
+aircraft on one invisible spot.**
+
+| Area | Change |
+|------|--------|
+| `f4-world-viewer` — canvas | Route gating across the three passes: static waypoints draw when the unit is selected, a selected squadron owns the flight (`FlightPlanComponent::squadron`), or show_all_routes; live routes only for the selected aircraft or show_all_routes (selected = 2.5 px / alpha 235); mission links for the selected flight, its package/squadron associations, or — when an objective is selected — the links TARGETING it (inbound traffic view); package links for the selected package or a selected element flight. Hit-test extends to parked_aircraft() + deaggregated_vehicles() as LiveAircraft picks (zoom > 2x, 8 px tolerance). HUD: `[Live]` selection summary line (callsign + team from CampaignOriginComponent) + the zoom hint. Re-enabled destination/airbase/hierarchy draws under their existing toggles. |
+| `f4-world-viewer` — entity_model_3d.cpp (NEW) | `ViewerApp::draw_entity_model_3d()` — the Inspector 3D branch for every non-objective selection. LiveAircraft: own VisualModelComponent model + facing from its quaternion; Squadron: parked row (up to 8) via `class_table.vis_type_for(class_table_index, 0)`, gear down; Flight (static): two-ship echelon; Battalion/Brigade/TaskForce: vehicle groups from VehicleCompositionComponent (up to 8 groups × 3 vehicles). Shares ground_layout_3d's ground plane, orbit camera, RenderTexture path, and mesh caches. inspector_panel.cpp dispatches on sel_kind. |
+| `f4-world-viewer` — session UI | Speed feedback: the window's clock row gained the measured-rate readout (`speed: Nx`, `(paused)`, or `(effective Mx — CPU-limited)` when measured < 90% of requested, plus the short `(time-dilated)` marker unchanged); radios read the live runner; preset radios shown pre-start; Play/Pause + Space + menu all call `set_session_paused()`. Menu auto-open now unconditional (async start means session is always null at that point). Write Result JSON → shared `write_result_json()`. Deferred stop tags its target (`session_stop_target`) and process_session_stop() drops a stale tag (Reset during an in-flight async start could kill the freshly adopted session). Headless `--session --screenshot` smoke: the fixed exit countdown (6/12 s) no longer runs while an async create is in flight — on a slow Debug build it used to exit BEFORE adoption, silently skipping both the held screenshot and the session summary; the timeout thread now waits (bounded 240 s) for `campaign_session_starting()` to clear first, and its exit line reports a MISSING screenshot honestly instead of claiming success unconditionally. |
+| `f4-world-viewer` — imgui_panels | `draw_layer_groups` — one lambda-defined list of four toggle groups (Base, Overlays incl. the new "All flight plans", Campaign QC, Live session) rendered by BOTH the View menu and the Layers panel; the panel's previously no-op checkboxes are gone (their draw passes are re-enabled and real). The stale "Now wired up" comment corrected. |
+| `f4-simulation` — runner | `CampaignSessionRunner::effective_speed()` — atomic EMA (α = 0.25) of sim-seconds-advanced per wall-second, updated per batch (guard wall_sec > 1e-4); parked stores 0.0. Viewer reads it every frame for the CPU-limited readout. |
+| `f4-simulation` — parking | spawn_aircraft_from_squadrons: when pilots exceed parking spots, the modulo-wrapped picks offset laterally one 60-ft wingspan per overflow pass along the aircraft's right vector (compass `h` → right = `(cos h, -sin h)`) — previously every extra aircraft stacked at ONE ENU point, rendering as a single aircraft while the roster counted many. |
+| `f4-world` | world_loader populate_units stamps `tags::CATEGORY = "unit"` (first pass, beside ROLE/TEAM); viewer `Impl::units()` becomes a single `with_tag_ref` read (was: build a 4-bucket OPDOMAIN union + vector copy per call, ~4x/frame). `tags::CATEGORY` added to f4-entities with doc. |
+| `f4-models` | geometry_extractor BSpecialXform: TODO replaced by the triage decision — the billboard/tree transform is viewer-dependent (the node carries only the type tag, no parameters), so there is nothing to bake in a view-independent extractor; the subtree recurses at authored orientation (correct placement, static facing), and making it face the camera is renderer-side work needing per-group TransformType metadata (the same call ASSET_PIPELINE_SPEC makes for far-LOD billboard cards). |
+| `f4-world-viewer` — ground_layout_3d | `GROUND_SINK_FT` constant replaces the inconsistent -10/-5 literals; dead `draw_ground_grid()` + an unused color removed. |
+| Tests | +0 tests, 32 FIXED on Windows: the f4-simulation suites that embed the generated-fixture path into scenario/world JSON documents (SimDataWiring, CombatIntegration, CombatTranscript, RegisterAircraft, SimulationLifetime) used `path.string()` — on Windows that renders backslashes, and the JSON loader decoded the `\f` in `...generated_fixtures\f16.json` into a FORM FEED, so every load failed with `generated_fixtures<FF>16.json`. All embedding sites now use `generic_string()` (forward slashes: valid JSON, valid Windows paths). The Linux container never saw this (no backslashes in paths). One f4-simulation test still fails on Windows only — CombatIntegration.CombatRecordingReplaysTheFight (the recorded TrackAcquired subject/object pair missing; MSVC numerics) — verified failing IDENTICALLY on the unmodified baseline, so pre-existing and out of this pass's scope. |
+| Docs | README: f4-models-viewer section added (the app existed but was undocumented); session controls now document the keyboard presets + the effective-rate readout. This entry + worklog. |
+| Deliberately not changed | `(void)num` at ground_layout_models.cpp:670 stays — it silences an unused STRUCTURED BINDING, whose name cannot be omitted pre-C++26; `(void)` is the idiomatic form. Squadron→parked-aircraft highlight (plan item C2) skipped: static squadrons carry no VU id (CampaignIdentityComponent has team+callsign only; UnitCoreComponent has no VU field), so matching parked aircraft's `CampaignOriginComponent::squadron_vu` to a selected static squadron is not cheaply possible — the parked row in the 3D tab covers the inspect need. |
+
+**Verification:** incremental Debug builds of every touched module
+(f4-entities, f4-world, f4-simulation, f4-models, f4-world-viewer)
+clean — only the pre-existing warning set (C4244/C4100/C4996/C4189).
+Final suites on Windows: f4-entities 83/83, f4-world 77/77,
+f4-models 30/30, f4-renderer 13/13, f4-world-viewer 65/65,
+f4-simulation 191/192 (the 1 failure pre-existing on Windows and
+identical on the unmodified baseline — see the Tests row). Manual QA
+list (TestCamp.cam): select aircraft/squadron/ATO row → only its plan
+draws; "All flight plans" restores; speed presets show the true
+effective rate (Debug: all top presets ≈ 7x, labeled); `1`-`4` and
+`+`/`-` switch presets; 3D tab renders squadrons/units/live aircraft;
+parked aircraft + vehicles click-selectable on the map at zoom > 2x;
+re-enabled destination/airbase/hierarchy layers draw.
+
 ## C5 — The 24-Hour War: The Long-Horizon Acceptance Harness (campaign_qc --war)
 
 **The campaign loop's acceptance run. C1's ledger, C2's one-pool

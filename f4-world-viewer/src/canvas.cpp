@@ -94,6 +94,46 @@ void ViewerApp::handle_input() {
                 impl_->sel_entity = best_id;
                 return;
             }
+
+            // Parked aircraft + deaggregated vehicles: clickable as
+            // LiveAircraft too — but only when they're actually
+            // visible (their dots draw at zoom > 2), so a click in a
+            // dense cluster can't select something invisible.
+            if (impl_->cam_zoom > 2.0f) {
+                const float ptol = 8.0f / impl_->cam_zoom;
+                f4::entities::EntityId parked_best;
+                float parked_d2 = ptol * ptol;
+                for (const auto eid : impl_->parked_aircraft()) {
+                    auto h = impl_->session_handle(eid);
+                    auto* tf = h.get<f4::entities::TransformComponent>();
+                    if (!tf) continue;
+                    const float lx = Impl::grid_x(tf), ly = Impl::grid_y(tf);
+                    const float dx = lx - gx, dy = ly - gy;
+                    const float d2 = dx * dx + dy * dy;
+                    if (d2 < parked_d2) { parked_d2 = d2; parked_best = eid; }
+                }
+                if (parked_best.valid()) {
+                    impl_->sel_kind = Impl::SelectionKind::LiveAircraft;
+                    impl_->sel_entity = parked_best;
+                    return;
+                }
+                f4::entities::EntityId veh_best;
+                float veh_d2 = ptol * ptol;
+                for (const auto eid : impl_->deaggregated_vehicles()) {
+                    auto h = impl_->session_handle(eid);
+                    auto* tf = h.get<f4::entities::TransformComponent>();
+                    if (!tf) continue;
+                    const float lx = Impl::grid_x(tf), ly = Impl::grid_y(tf);
+                    const float dx = lx - gx, dy = ly - gy;
+                    const float d2 = dx * dx + dy * dy;
+                    if (d2 < veh_d2) { veh_d2 = d2; veh_best = eid; }
+                }
+                if (veh_best.valid()) {
+                    impl_->sel_kind = Impl::SelectionKind::LiveAircraft;
+                    impl_->sel_entity = veh_best;
+                    return;
+                }
+            }
         }
 
         // Try objectives first (drawn on top of terrain).
@@ -582,41 +622,53 @@ void ViewerApp::draw_canvas() {
                 255};
             f4::renderer::RenderEntityIcon(h, p.x, p.y, s, c, outline);
 
-            // Destination line — reads from MovementOrdersComponent (promoted
-            // from PropertyBag in Phase 5 cleanup).
-            /*if (impl_->show_unit_destinations) {
+            // Destination line — reads from MovementOrdersComponent.
+            if (impl_->show_unit_destinations) {
                 auto* mo = h.get<f4::entities::MovementOrdersComponent>();
                 if (mo) {
                     const int16_t dest_x = mo->dest_x;
                     const int16_t dest_y = mo->dest_y;
                     if (dest_x != static_cast<int16_t>(ux) || dest_y != static_cast<int16_t>(uy)) {
-                        const Vector2 d = impl_->world_to_screen(dest_x, dest_y);
+                        const Vector2 d = impl_->world_to_screen(
+                            static_cast<float>(dest_x), static_cast<float>(dest_y));
                         DrawLineEx(p, d, 1.0f, Color{c.r, c.g, c.b, 160});
                     }
                 }
-            }*/
+            }
 
-            // Waypoint polyline
-            if (impl_->show_waypoints) {
+            // Waypoint polyline — only for the selected unit, the
+            // selected squadron's flights, or every unit when "all
+            // flight plans" is on (default: selected-only, so the
+            // polylines don't cover the map).
+            const bool unit_selected =
+                impl_->sel_kind == Impl::SelectionKind::Unit &&
+                impl_->sel_entity == eid;
+            bool squadron_selected = false;
+            if (impl_->sel_kind == Impl::SelectionKind::Unit &&
+                impl_->sel_entity.valid() && !unit_selected) {
+                auto* fp = h.get<f4::entities::FlightPlanComponent>();
+                squadron_selected = fp && fp->squadron == impl_->sel_entity;
+            }
+            if (impl_->show_waypoints &&
+                (unit_selected || squadron_selected ||
+                 impl_->show_all_routes)) {
                 auto* wp = h.get<f4::entities::WaypointPlanComponent>();
                 if (wp && !wp->waypoints.empty()) {
                     Vector2 prev = p;
                     for (const auto& w : wp->waypoints) {
                         const Vector2 q = impl_->world_to_screen(
                             static_cast<float>(w.x), static_cast<float>(w.y));
-                        DrawLineEx(prev, q, 1.0f, Color{c.r, c.g, c.b, 200});
+                        DrawLineEx(prev, q, unit_selected ? 2.0f : 1.0f,
+                                   Color{c.r, c.g, c.b, 200});
                         DrawCircleV(q, 2.0f, Color{c.r, c.g, c.b, 220});
                         prev = q;
                     }
                 }
             }
-            /*
             // Squadron → home airbase link line
             if (impl_->show_squadron_links &&
                 uc->unit_class == f4::entities::UnitClass::Squadron) {
                 auto* sq = h.get<f4::entities::SquadronComponent>();
-                // The raw airbase_id VU_ID was removed from SquadronComponent;
-                // use the resolved airbase EntityId directly (no map lookup needed).
                 if (sq && sq->airbase.valid()) {
                     auto ah = impl_->handle(sq->airbase);
                     auto* a_tr = ah.get<f4::entities::TransformComponent>();
@@ -626,12 +678,11 @@ void ViewerApp::draw_canvas() {
                     }
                 }
             }
-            
+
             // Battalion → Brigade hierarchy lines
             if (impl_->show_hierarchy_lines &&
                 uc->unit_class == f4::entities::UnitClass::Battalion) {
                 auto* hier = h.get<f4::entities::HierarchyComponent>();
-                // The raw parent_id VU_ID was removed; use the resolved parent EntityId.
                 if (hier && hier->parent.valid()) {
                     auto ph = impl_->handle(hier->parent);
                     auto* p_tr = ph.get<f4::entities::TransformComponent>();
@@ -646,8 +697,6 @@ void ViewerApp::draw_canvas() {
             if (impl_->show_hierarchy_lines &&
                 uc->unit_class == f4::entities::UnitClass::Brigade) {
                 auto* hier = h.get<f4::entities::HierarchyComponent>();
-                // The raw element_ids VU_ID vector was removed; iterate the
-                // resolved children EntityIds directly.
                 if (hier && !hier->children.empty()) {
                     for (const auto& child_eid : hier->children) {
                         if (!child_eid.valid()) continue;
@@ -659,11 +708,10 @@ void ViewerApp::draw_canvas() {
                         }
                     }
                 }
-            }*/
+            }
 
             // Selection outline
-            if (impl_->sel_kind == Impl::SelectionKind::Unit &&
-                impl_->sel_entity == eid) {
+            if (unit_selected) {
                 DrawCircleLines(static_cast<int>(p.x), static_cast<int>(p.y),
                                 static_cast<int>(s * 0.6f + 4),
                                 Color{255, 255, 0, 255});
@@ -715,8 +763,13 @@ void ViewerApp::draw_canvas() {
             }
 
             // The route polyline (BELOW the symbol so the symbol sits
-            // on top of its own line start).
-            if (impl_->show_live_routes) {
+            // on top of its own line start). Only the selected aircraft's
+            // route is drawn unless "all flight plans" is on — a route
+            // per aircraft covered the whole map.
+            const bool route_selected =
+                selected_is_live && impl_->sel_entity == eid;
+            if (impl_->show_live_routes &&
+                (route_selected || impl_->show_all_routes)) {
                 auto* brain = h.get<f4::ai::BrainComponent>();
                 if (brain && !brain->mission_plan().route.empty()) {
                     Vector2 prev = p;
@@ -725,8 +778,10 @@ void ViewerApp::draw_canvas() {
                         const Vector2 q = impl_->world_to_screen(
                             static_cast<float>(w.position.x / 1024.0),
                             static_cast<float>(w.position.y / 1024.0));
-                        DrawLineEx(prev, q, 1.5f,
-                                   Color{c.r, c.g, c.b, 150});
+                        DrawLineEx(prev, q, route_selected ? 2.5f : 1.5f,
+                                   Color{c.r, c.g, c.b,
+                                         static_cast<unsigned char>(
+                                             route_selected ? 235 : 150)});
                         DrawCircleV(q, 2.5f, Color{c.r, c.g, c.b, 200});
                         if (draw_wp_labels) {
                             char lbl[8];
@@ -1017,7 +1072,10 @@ void ViewerApp::draw_canvas() {
 
         // Mission→target links: a thin owner-colored line from each
         // (filtered) flight to its mission target, with a ring at the
-        // target end. Selected flight's link renders double-width.
+        // target end. Drawn only for the selection's associated flights
+        // (the flight itself, its squadron's/package's flights, links
+        // into a selected objective) unless "all flight plans" is on;
+        // the selected flight's link renders double-width.
         if (impl_->show_mission_links) {
             for (const auto& eid : impl_->units()) {
                 auto h = impl_->handle(eid);
@@ -1035,6 +1093,24 @@ void ViewerApp::draw_canvas() {
                     owner != impl_->team_filter) continue;
                 if (!impl_->mission_filter_passes(fp)) continue;
 
+                const bool is_sel =
+                    impl_->sel_kind == Impl::SelectionKind::Unit &&
+                    impl_->sel_entity == eid;
+                // Selection gate — the flight, its squadron, its package,
+                // or the objective it flies against.
+                const bool associated =
+                    impl_->sel_kind == Impl::SelectionKind::Unit &&
+                    impl_->sel_entity.valid() &&
+                    (fp->squadron == impl_->sel_entity ||
+                     fp->package == impl_->sel_entity);
+                const bool targets_selection =
+                    impl_->sel_kind == Impl::SelectionKind::Objective &&
+                    fp->target == impl_->sel_entity;
+                if (!is_sel && !associated && !targets_selection &&
+                    !impl_->show_all_routes) {
+                    continue;
+                }
+
                 auto th = impl_->handle(fp->target);
                 auto* t_tr = th.get<f4::entities::TransformComponent>();
                 if (!t_tr) continue;
@@ -1049,9 +1125,6 @@ void ViewerApp::draw_canvas() {
                     (p.y > sy_max && q.y > sy_max)) continue;
 
                 const RlColor c = color_for_owner(owner);
-                const bool is_sel =
-                    impl_->sel_kind == Impl::SelectionKind::Unit &&
-                    impl_->sel_entity == eid;
                 const float width = is_sel ? 2.5f : 1.0f;
                 const uint8_t alpha = is_sel ? 235 : 130;
                 DrawLineEx(p, q, width,
@@ -1064,8 +1137,10 @@ void ViewerApp::draw_canvas() {
         }
 
         // Package→element links: faint white lines from each package unit
-        // to its element flights. The package unit itself renders in the
-        // normal unit pass (its own owner color).
+        // to its element flights. Drawn only for the selected package (or
+        // the package of a selected element flight) unless "all flight
+        // plans" is on. The package unit itself renders in the normal
+        // unit pass (its own owner color).
         if (impl_->show_package_links) {
             for (const auto& eid : impl_->units()) {
                 auto h = impl_->handle(eid);
@@ -1082,11 +1157,26 @@ void ViewerApp::draw_canvas() {
                 if (impl_->team_filter != 0xFF &&
                     owner != impl_->team_filter) continue;
 
-                const Vector2 p = impl_->world_to_screen(
-                    impl_->grid_x(tr), impl_->grid_y(tr));
                 const bool is_sel =
                     impl_->sel_kind == Impl::SelectionKind::Unit &&
                     impl_->sel_entity == eid;
+                // Selection gate: the package itself, or the package of
+                // a selected element flight.
+                bool element_selected = false;
+                if (!is_sel && impl_->sel_kind == Impl::SelectionKind::Unit &&
+                    impl_->sel_entity.valid()) {
+                    for (const auto feid : ps->elements) {
+                        if (feid == impl_->sel_entity) {
+                            element_selected = true;
+                            break;
+                        }
+                    }
+                }
+                if (!is_sel && !element_selected && !impl_->show_all_routes)
+                    continue;
+
+                const Vector2 p = impl_->world_to_screen(
+                    impl_->grid_x(tr), impl_->grid_y(tr));
                 for (const auto feid : ps->elements) {
                     if (!feid.valid()) continue;
                     auto fh = impl_->handle(feid);
@@ -1584,9 +1674,27 @@ void ViewerApp::draw_canvas() {
                     snprintf(buf, sizeof(buf), "Sel: [Unit] %s  owner=%u", name, owner);
                     draw_text(buf, accent);
                 }
+            } else if (impl_->sel_kind == Impl::SelectionKind::LiveAircraft &&
+                       impl_->sel_entity.valid()) {
+                auto h = impl_->session_handle(impl_->sel_entity);
+                auto* org = h.get<f4::simulation::CampaignOriginComponent>();
+                snprintf(buf, sizeof(buf),
+                         "Sel: [Live] flight VU %u  team=%u",
+                         org ? org->flight_vu : 0,
+                         org ? org->team_slot : 0);
+                draw_text(buf, accent);
             }
         } else {
             draw_text("No world loaded", warn_color);
+        }
+
+        // 3D-model hint: the session's aircraft/vehicles gain real
+        // models past 6x zoom — point the user at what they're missing.
+        if (impl_->session && impl_->show_live_layer &&
+            impl_->cam_zoom <= 6.0f) {
+            snprintf(buf, sizeof(buf),
+                     "zoom past 6x for 3D models (aircraft, vehicles)");
+            draw_text(buf, text);
         }
 
         // Hovered-entity hint

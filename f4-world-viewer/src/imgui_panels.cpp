@@ -39,9 +39,66 @@
 namespace f4::viewer {
 
 // ---------------------------------------------------------------------------
+// Layer-toggle checkboxes (single source of truth)
+// ---------------------------------------------------------------------------
+
+// The View menu and the Layers panel render the same toggle groups through
+// this helper, so the two lists cannot drift apart again.
+namespace {
+
+struct LayerToggle {
+    const char* label;
+    bool* value;
+};
+
+void draw_layer_group(const char* title, std::initializer_list<LayerToggle> toggles) {
+    ImGui::TextDisabled("%s", title);
+    for (const auto& t : toggles)
+        ImGui::Checkbox(t.label, t.value);
+    ImGui::Separator();
+}
+
+} // namespace
+
+// ---------------------------------------------------------------------------
 // ImGui panels
 // ---------------------------------------------------------------------------
 void ViewerApp::draw_imgui() {
+    // All layer toggles, in display order — rendered identically by the
+    // View menu and the Layers panel so the two lists cannot drift apart.
+    const auto draw_layer_groups = [impl = impl_.get()]() {
+        draw_layer_group("Base layers", {
+            {"Terrain",    &impl->show_terrain},
+            {"Objectives", &impl->show_objectives},
+            {"Units",      &impl->show_units},
+            {"Grid",       &impl->show_grid},
+            {"Legend",     &impl->show_legend},
+        });
+        draw_layer_group("Overlays", {
+            {"Radar arcs",              &impl->show_radar_arcs},
+            {"Ground layout",           &impl->show_ground_layout_overlay},
+            {"Feature 3D models",       &impl->show_feature_meshes},
+            {"Unit destinations",       &impl->show_unit_destinations},
+            {"Waypoints",               &impl->show_waypoints},
+            {"All flight plans",        &impl->show_all_routes},
+            {"Squadron→Airbase",        &impl->show_squadron_links},
+            {"Hierarchy lines (BN→BDE)", &impl->show_hierarchy_lines},
+        });
+        draw_layer_group("Campaign QC (B.3)", {
+            {"ATO / Tasking window",  &impl->show_ato},
+            {"Mission→Target links",  &impl->show_mission_links},
+            {"Package→Element links", &impl->show_package_links},
+            {"Bullseye",              &impl->show_bullseye},
+        });
+        draw_layer_group("Live session (V-CAMP)", {
+            {"Campaign Session window", &impl->show_campaign_window},
+            {"Live aircraft layer",     &impl->show_live_layer},
+            {"Live routes",             &impl->show_live_routes},
+            {"Threat map overlay",      &impl->show_threat_overlay},
+            {"Minimap",                 &impl->show_minimap},
+        });
+    };
+
     rlImGuiBegin();
 
     // --- Menu bar ---
@@ -147,39 +204,7 @@ void ViewerApp::draw_imgui() {
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("View")) {
-            ImGui::TextDisabled("Base layers");
-            ImGui::Checkbox("Terrain",     &impl_->show_terrain);
-            ImGui::Checkbox("Objectives",  &impl_->show_objectives);
-            ImGui::Checkbox("Units",       &impl_->show_units);
-            ImGui::Checkbox("Grid",        &impl_->show_grid);
-            ImGui::Checkbox("Legend",      &impl_->show_legend);
-            ImGui::Separator();
-            ImGui::TextDisabled("Overlays");
-            ImGui::Checkbox("Radar arcs",          &impl_->show_radar_arcs);
-            ImGui::Checkbox("Ground layout",       &impl_->show_ground_layout_overlay);
-            ImGui::Checkbox("Feature 3D models",   &impl_->show_feature_meshes);
-            ImGui::Checkbox("Unit destinations",   &impl_->show_unit_destinations);
-            ImGui::Checkbox("Waypoints",           &impl_->show_waypoints);
-            ImGui::Checkbox("Squadron→Airbase",    &impl_->show_squadron_links);
-            // Phase 2: hierarchy lines toggle — was declared but never
-            // exposed in the UI. Now wired up so users can actually
-            // enable battalion→brigade OOB lines.
-            ImGui::Checkbox("Hierarchy lines (BN→BDE)", &impl_->show_hierarchy_lines);
-            ImGui::Separator();
-            ImGui::TextDisabled("Campaign QC (B.3)");
-            ImGui::Checkbox("ATO / Tasking window",  &impl_->show_ato);
-            ImGui::Checkbox("Mission→Target links",  &impl_->show_mission_links);
-            ImGui::Checkbox("Package→Element links", &impl_->show_package_links);
-            ImGui::Checkbox("Bullseye",               &impl_->show_bullseye);
-            ImGui::Separator();
-            ImGui::TextDisabled("Live session (V-CAMP)");
-            ImGui::Checkbox("Campaign Session window", &impl_->show_campaign_window);
-            ImGui::Checkbox("Live aircraft layer",     &impl_->show_live_layer);
-            ImGui::Checkbox("Live routes",             &impl_->show_live_routes);
-            ImGui::Checkbox("Threat map overlay",      &impl_->show_threat_overlay);
-            // POLISH-2.4: minimap toggle in View menu.
-            ImGui::Checkbox("Minimap", &impl_->show_minimap);
-            ImGui::Separator();
+            draw_layer_groups();
             if (ImGui::MenuItem("Fit to World")) impl_->fit_to_world();
             ImGui::EndMenu();
         }
@@ -191,27 +216,25 @@ void ViewerApp::draw_imgui() {
             if (!impl_->session) {
                 if (ImGui::MenuItem("Start Session...", nullptr, false,
                                     impl_->world_loaded)) {
+                    // The start is ASYNC — impl_->session is still null
+                    // when this returns, so open the window now and let
+                    // it show the "Starting session…" progress row.
+                    impl_->show_campaign_window = true;
                     start_campaign_session();
-                    if (impl_->session) impl_->show_campaign_window = true;
                 }
                 if (!impl_->world_loaded) {
                     ImGui::TextDisabled("(no world loaded)");
                 }
             } else {
-                // V-THREAD: the menu draws inside run()'s frame
-                // session-lock scope — flip the runner's ATOMIC flag
-                // (set_paused() would re-lock the held mutex) AND
-                // mirror the session's own flag directly (consistent:
-                // the worker can't be mid-advance while we hold).
                 const bool menu_paused = impl_->session_runner
                     ? impl_->session_runner->paused()
                     : impl_->session->paused();
                 if (ImGui::MenuItem(menu_paused ? "Play (Space)"
                                                 : "Pause (Space)")) {
-                    if (impl_->session_runner) {
-                        impl_->session_runner->set_paused_flag(!menu_paused);
-                    }
-                    impl_->session->set_paused(!menu_paused);
+                    // The pause contract lives in set_session_paused()
+                    // (we hold the frame lock here, which is what it
+                    // expects).
+                    set_session_paused(!menu_paused);
                 }
                 if (ImGui::MenuItem("Reset Session")) {
                     stop_campaign_session();
@@ -222,20 +245,7 @@ void ViewerApp::draw_imgui() {
                 }
                 ImGui::Separator();
                 if (ImGui::MenuItem("Write Result JSON")) {
-                    const auto out =
-                        impl_->last_world_json_path.parent_path() /
-                        "campaign_result.json";
-                    FILE* f = std::fopen(out.string().c_str(), "wb");
-                    if (f) {
-                        const std::string json =
-                            impl_->session->ledger_json();
-                        std::fwrite(json.data(), 1, json.size(), f);
-                        std::fclose(f);
-                        impl_->status_msg = "Wrote " + out.string();
-                    } else {
-                        impl_->status_msg =
-                            "Cannot write " + out.string();
-                    }
+                    write_result_json();
                 }
             }
             ImGui::EndMenu();
@@ -311,24 +321,8 @@ void ViewerApp::draw_imgui() {
     ImGui::SetNextWindowSize(ImVec2(240, 0), ImGuiCond_FirstUseEver);
     if (ImGui::Begin("Layers", nullptr,
                      ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_AlwaysAutoResize)) {
-        ImGui::TextDisabled("Base");
-        ImGui::Checkbox("Terrain",     &impl_->show_terrain);
-        ImGui::Checkbox("Objectives",  &impl_->show_objectives);
-        ImGui::Checkbox("Units",       &impl_->show_units);
-        ImGui::Checkbox("Grid",        &impl_->show_grid);
-        ImGui::Checkbox("Legend",      &impl_->show_legend);
-        ImGui::Separator();
-        ImGui::TextDisabled("Overlays");
-        ImGui::Checkbox("Radar arcs",         &impl_->show_radar_arcs);
-        ImGui::Checkbox("Ground layout",      &impl_->show_ground_layout_overlay);
-        ImGui::Checkbox("Feature 3D models",  &impl_->show_feature_meshes);
-        ImGui::Checkbox("Unit destinations",  &impl_->show_unit_destinations);
-        ImGui::Checkbox("Waypoints",          &impl_->show_waypoints);
-        ImGui::Checkbox("Squadron→Airbase",   &impl_->show_squadron_links);
-        // Phase 2: hierarchy lines toggle — was declared but never exposed.
-        ImGui::Checkbox("Hierarchy (BN→BDE)", &impl_->show_hierarchy_lines);
-        // POLISH-2.4: minimap toggle in Layers panel too.
-        ImGui::Checkbox("Minimap", &impl_->show_minimap);
+        // Same toggle groups as the View menu (single source of truth).
+        draw_layer_groups();
 
         ImGui::Separator();
         // Phase 2: objective search/filter. Filters objectives by

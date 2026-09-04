@@ -83,6 +83,7 @@
 #include <filesystem>
 #include <functional>
 #include <future>
+#include <atomic>
 #include <optional>
 #include <string>
 #include <thread>
@@ -267,25 +268,15 @@ struct ViewerApp::Impl {
         }
         return out;
     }
-    /// All unit entities. Units have one of six ROLE values (battalion/
-    /// brigade/squadron/taskforce/flight/package), so we query by
-    /// OPDOMAIN instead — every unit has a domain tag (air/ground/naval/
-    /// unknown), while teams and objectives don't. Returns a const-ref
-    /// to a static-per-world composite vector.
-    /// NOTE: unlike teams()/objectives(), this one cannot return a single
-    /// const-ref into the index because units are spread across 4 domain
-    /// buckets. We build a composite on each call. This is O(total_units)
-    /// per call — acceptable for the render loops (called ~4x per frame),
-    /// but if it becomes hot, add a "category=unit" tag in the loader.
-    [[nodiscard]] std::vector<f4::entities::EntityId> units() const {
-        std::vector<f4::entities::EntityId> out;
-        for (const char* d : {"air", "ground", "naval", "unknown"}) {
-            const auto& ids = eworld.with_tag_ref(
-                f4::entities::tags::OPDOMAIN,
-                f4::entities::TagValue::from(std::string(d)));
-            out.insert(out.end(), ids.begin(), ids.end());
-        }
-        return out;
+    /// All unit entities. The loader tags every unit "category=unit"
+    /// (tags::CATEGORY, set in populate_units), so this is a single
+    /// const-ref tag-index read. The old version unioned the four
+    /// OPDOMAIN buckets into a fresh vector on every call — O(total
+    /// units) ~4x per frame in the render loops.
+    [[nodiscard]] const std::vector<f4::entities::EntityId>& units() const {
+        return eworld.with_tag_ref(
+            f4::entities::tags::CATEGORY,
+            f4::entities::TagValue::from(std::string("unit")));
     }
 
     // POLISH-2.1: RenderTexture terrain cache. The naive draw loop called
@@ -375,7 +366,10 @@ struct ViewerApp::Impl {
         std::unique_ptr<f4::simulation::CampaignSession> session;
         std::string error;
     };
-    bool session_starting = false;
+    // atomic: written by the frame thread, polled by the --screenshot
+    // exit-timeout thread (it holds the countdown while a start is in
+    // flight). Plain assignments/reads, sequenced by the atomicity.
+    std::atomic<bool> session_starting{false};
     std::thread session_start_thread;
     std::future<SessionStartResult> session_start_future;
     /// Speed preset index into kCampaignSpeeds (campaign_session_view).
@@ -390,6 +384,10 @@ struct ViewerApp::Impl {
     bool show_live_layer = true;
     /// Canvas: route polylines for live aircraft.
     bool show_live_routes = true;
+    /// Canvas: draw flight plans (static waypoints, live routes, mission
+    /// and package links) for EVERY flight. Default off — the selected
+    /// flight's plan only, so the polylines don't cover the map.
+    bool show_all_routes = false;
     /// Canvas: the threat-map overlay (enemy AD rings as cells).
     bool show_threat_overlay = false;
     /// True when advance() hit the tick cap last frame (time dilated —
@@ -415,6 +413,11 @@ struct ViewerApp::Impl {
     /// frame session-lock scope (a direct runner->stop() there would
     /// self-deadlock); run() processes it right after the scope ends.
     bool session_stop_requested = false;
+    /// The session instance the pending stop targets. process_session_stop
+    /// drops nothing if a different session was adopted in between (the
+    /// menu's Reset flow requests a stop and immediately starts a new
+    /// build — if the create won the race, the fresh session survives).
+    const f4::simulation::CampaignSession* session_stop_target = nullptr;
     /// V-SMOKE (--play): the adopted session starts RUNNING instead of
     /// paused. Set by the CLI (--play) BEFORE request_campaign_session;
     /// adopt_session_start honors it for both the runner and the

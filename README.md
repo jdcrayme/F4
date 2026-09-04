@@ -979,10 +979,14 @@ over the loaded world — the C1 ledger, C2 one-pool tasking, C3 routed
 generation — and the save's own flights fly alongside the missions the
 ladder generates, in one simulation world. Controls:
 
-- **Play/Pause (Space)** + speed presets **1x / 10x / 60x / 240x** —
-  the presets scale wall-clock time; the sim's tick stays at its tuned
-  1/60 s (the flight model's discretization holds at every speed). A
-  30-minute tasking cycle passes in 30 s at 60x.
+- **Play/Pause (Space)** + speed presets **1x / 10x / 60x / 240x**
+  (keys `1`-`4`, `+`/`-` step through them) — the presets scale
+  wall-clock time; the sim's tick stays at its tuned 1/60 s (the flight
+  model's discretization holds at every speed). A 30-minute tasking
+  cycle passes in 30 s at 60x. The session window shows the measured
+  effective rate — on a Debug build the CPU caps the sim around
+  300-500 ticks/s, so the top presets deliver the same effective ~7x;
+  the window says so instead of pretending.
 - **Campaign clock** (D# HH:MM:SS) — the save's epoch + the loop's own
   clock: one timeline for tasking, reinforcement, and flight.
 - **War status** — cycles fired, missions generated, routes
@@ -1120,6 +1124,30 @@ loaded + decoded.
 
 This is the starting point for a future world editor: the same load/render
 pipeline will gain edit/save capabilities as new systems come online.
+
+## Interactive 3D Model Viewer
+
+`f4-models-viewer` is a Raylib + Dear ImGui desktop app for inspecting the
+theater's 3D model database (`KoreaObj.HDR`/`.LOD` + textures) directly —
+the sibling tool to the world viewer: where that one answers "what is on
+the map?", this one answers "what does the asset look like?" It renders
+BSP models with DOF/switch manipulation, LOD selection, an orbit camera,
+and the same lit-shader path the world viewer's 3D panels use.
+
+```bash
+cmake --build build --target f4-models-viewer
+./build/f4-models-viewer/f4-models-viewer
+
+# Scripted: open an install, jump to a parent model + LOD, screenshot
+./build/f4-models-viewer/f4-models-viewer \
+    --install /path/to/falcon4 \
+    --parent 42 --lod 1 --screenshot out.png
+```
+
+Features: File > Open Install... (theater-aware model database loading,
+same install detection as the world viewer), parent/LOD browsing with the
+switch-state tree, texture (TEX) loading, F2 screenshots. The geometry
+extraction behind it is `f4-models` (`geometry_extractor.cpp`).
 
 ## Design Principles
 

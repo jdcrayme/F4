@@ -325,7 +325,38 @@ void ViewerApp::stop_campaign_session() {
     // stop-join-reset one step later, right AFTER the frame scope
     // releases the lock (at most one frame of latency).
     impl_->session_stop_requested = true;
+    impl_->session_stop_target = impl_->session.get();
     impl_->campaign_time_dilated = false;
+}
+
+void ViewerApp::set_session_paused(bool paused) {
+    if (!impl_->session) return;
+    // The frame session-lock scope is held by every caller (window
+    // button, Space shortcut, Campaign menu), so the runner's
+    // ATOMIC-ONLY setter is the safe call (the locking set_paused()
+    // would re-lock the mutex we already hold = self-deadlock) and
+    // mirroring the session's own flag directly is consistent.
+    if (impl_->session_runner) {
+        impl_->session_runner->set_paused_flag(paused);
+    }
+    impl_->session->set_paused(paused);
+}
+
+void ViewerApp::write_result_json() {
+    if (!impl_->session) return;
+    // campaign_result.json next to the world JSON (the QC
+    // artifact's own location convention).
+    const auto out = impl_->last_world_json_path.parent_path() /
+                     "campaign_result.json";
+    FILE* f = std::fopen(out.string().c_str(), "wb");
+    if (f) {
+        const std::string json = impl_->session->ledger_json();
+        std::fwrite(json.data(), 1, json.size(), f);
+        std::fclose(f);
+        impl_->status_msg = "Wrote " + out.string();
+    } else {
+        impl_->status_msg = "Cannot write " + out.string();
+    }
 }
 
 void ViewerApp::process_session_stop() {
@@ -333,6 +364,17 @@ void ViewerApp::process_session_stop() {
     // the safe place to join the worker and drop the session.
     if (!impl_->session_stop_requested) return;
     impl_->session_stop_requested = false;
+
+    // A stop targets the session that was live when it was requested.
+    // If adopt_session_start landed a DIFFERENT session first (the menu's
+    // Reset = stop + start, racing a fast create), the request is stale —
+    // the adopt already stopped the old runner, and the fresh session
+    // must survive.
+    if (impl_->session.get() != impl_->session_stop_target) {
+        impl_->session_stop_target = nullptr;
+        return;
+    }
+    impl_->session_stop_target = nullptr;
 
     if (impl_->session_runner) {
         impl_->session_runner->stop();
@@ -422,6 +464,17 @@ void ViewerApp::draw_campaign_session_view() {
         impl_->campaign_start_max_flights =
             std::clamp(impl_->campaign_start_max_flights, 1, 449);
 
+        // Speed preset (same control as the running view) — applied
+        // when the session's runner is constructed, so the clock rate
+        // is chosen BEFORE the war starts.
+        for (int i = 0; i < kSessionSpeedCount; ++i) {
+            if (i > 0) ImGui::SameLine();
+            if (ImGui::RadioButton(kSessionSpeedNames[i],
+                                   impl_->campaign_speed_index == i)) {
+                impl_->campaign_speed_index = i;
+            }
+        }
+
         ImGui::Separator();
         if (ImGui::Button("Start Session", ImVec2(160, 0))) {
             start_campaign_session();
@@ -453,18 +506,19 @@ void ViewerApp::draw_campaign_session_view() {
     if (ImGui::Button(session_paused ? "Play (Space)"
                                      : "Pause (Space)",
                       ImVec2(110, 0))) {
-        if (impl_->session_runner) {
-            impl_->session_runner->set_paused_flag(!session_paused);
-            impl_->session->set_paused(!session_paused);
-        } else {
-            impl_->session->set_paused(!session_paused);
-        }
+        set_session_paused(!session_paused);
     }
     ImGui::SameLine();
     for (int i = 0; i < kSessionSpeedCount; ++i) {
         if (i > 0) ImGui::SameLine();
-        if (ImGui::RadioButton(kSessionSpeedNames[i],
-                               impl_->campaign_speed_index == i)) {
+        // With a runner live, the ACTIVE radio mirrors the runner's
+        // actual speed (the single source) — not just the last clicked
+        // index — so the UI can't lie if the two ever diverge.
+        const bool active = impl_->session_runner
+            ? impl_->session_runner->speed() ==
+                  static_cast<double>(kSessionSpeedTable[i])
+            : impl_->campaign_speed_index == i;
+        if (ImGui::RadioButton(kSessionSpeedNames[i], active)) {
             impl_->campaign_speed_index = i;
             // V-THREAD: the runner's speed is an atomic — lock-free,
             // no deadlock risk under the frame scope.
@@ -500,9 +554,35 @@ void ViewerApp::draw_campaign_session_view() {
                                  sizeof(tbuf));
         ImGui::Text("campaign time: %s", tbuf);
     }
-    if (impl_->campaign_time_dilated) {
-        ImGui::SameLine();
-        ImGui::TextDisabled("(time-dilated: preset outran CPU)");
+    // Speed: requested vs MEASURED. When the CPU can't sustain the
+    // preset (Debug build, huge world) the excess time is dropped and
+    // every unsustainable preset moves the clock at the same rate —
+    // this readout is what makes the speed control's effect visible.
+    {
+        const int idx = std::clamp(impl_->campaign_speed_index, 0,
+                                   kSessionSpeedCount - 1);
+        const double requested = impl_->session_runner
+            ? impl_->session_runner->speed()
+            : static_cast<double>(kSessionSpeedTable[idx]);
+        const double effective = impl_->session_runner
+            ? impl_->session_runner->effective_speed()
+            : 0.0;
+        char sbuf[96];
+        if (session_paused) {
+            std::snprintf(sbuf, sizeof(sbuf), "speed: %gx (paused)",
+                          requested);
+        } else if (effective < requested * 0.9) {
+            std::snprintf(sbuf, sizeof(sbuf),
+                          "speed: %gx (effective %.1fx — CPU-limited)",
+                          requested, effective);
+        } else {
+            std::snprintf(sbuf, sizeof(sbuf), "speed: %gx", requested);
+        }
+        ImGui::TextUnformatted(sbuf);
+        if (impl_->campaign_time_dilated) {
+            ImGui::SameLine();
+            ImGui::TextDisabled("(time-dilated)");
+        }
     }
 
     ImGui::Separator();
@@ -639,19 +719,7 @@ void ViewerApp::draw_campaign_session_view() {
 
     // --- Artifacts + stop ------------------------------------------------
     if (ImGui::Button("Write Result JSON")) {
-        // campaign_result.json next to the world JSON (the QC
-        // artifact's own location convention).
-        const auto out = impl_->last_world_json_path.parent_path() /
-                         "campaign_result.json";
-        FILE* f = std::fopen(out.string().c_str(), "wb");
-        if (f) {
-            const std::string json = impl_->session->ledger_json();
-            std::fwrite(json.data(), 1, json.size(), f);
-            std::fclose(f);
-            impl_->status_msg = "Wrote " + out.string();
-        } else {
-            impl_->status_msg = "Cannot write " + out.string();
-        }
+        write_result_json();
     }
     ImGui::SameLine();
     if (ImGui::Button("Write Back")) {

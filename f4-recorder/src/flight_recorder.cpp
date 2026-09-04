@@ -318,7 +318,13 @@ std::string FlightRecorder::to_summary_json(
                 ac_snaps[i].ai_mode == ac_snaps[phase_start].ai_mode &&
                 ac_snaps[i].ai_state == ac_snaps[phase_start].ai_state);
 
-            if (!same_phase && phase_start < ac_snaps.size()) {
+            // phase_start < i: a completed range [phase_start, i) needs
+            // at least one snapshot, so i == 0 (the loop's first pass,
+            // where same_phase is always false) emits nothing — without
+            // this guard ac_snaps[i - 1] underflows to ac_snaps[SIZE_MAX]
+            // (libstdc++'s unchecked operator[] silently read garbage
+            // here; MSVC's checked iterator aborts).
+            if (!same_phase && phase_start < i && phase_start < ac_snaps.size()) {
                 // Emit the completed phase
                 const auto& first = ac_snaps[phase_start];
                 const auto& last = ac_snaps[i - 1];

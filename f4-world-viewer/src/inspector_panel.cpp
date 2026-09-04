@@ -111,13 +111,18 @@ void ViewerApp::draw_inspector_window() {
         // --- Tab 2: 3D (orbit camera) ------------------------------------
         // SetSelected forces the tab active — used by the --select CLI
         // flag so headless screenshots capture the 3D (textured terrain)
-        // view without clicking the tab.
+        // view without clicking the tab. Objectives get the ground-layout
+        // view; units + live aircraft get their own model view.
         const ImGuiTabItemFlags flags3d =
             impl_->inspector_force_3d_tab ? ImGuiTabItemFlags_SetSelected : 0;
         if (ImGui::BeginTabItem("3D", nullptr, flags3d)) {
             impl_->inspector_active_tab = 2;
             impl_->inspector_force_3d_tab = false;
-            draw_ground_layout_3d();
+            if (impl_->sel_kind == Impl::SelectionKind::Objective) {
+                draw_ground_layout_3d();
+            } else {
+                draw_entity_model_3d();
+            }
             ImGui::EndTabItem();
         }
         ImGui::EndTabBar();
@@ -661,9 +666,6 @@ void ViewerApp::draw_inspector() {
                                                 : " (unresolved)");
                             }
 
-                            auto* uc2 =
-                                h.get<f4::entities::UnitCoreComponent>();
-                            (void)uc2;
                             // Support flights (interceptor / AWACS / JSTARS
                             // / ECM / tanker), when resolved.
                             auto draw_support = [](const char* label,

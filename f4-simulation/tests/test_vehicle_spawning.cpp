@@ -404,3 +404,70 @@ TEST(SpawnAircraftFromSquadrons, ParkingSpotsUsed_WhenAvailable) {
     EXPECT_DOUBLE_EQ(tf1->position.x, -100.0);
     EXPECT_DOUBLE_EQ(tf1->position.y, 200.0);
 }
+
+TEST(SpawnAircraftFromSquadrons, OversubscribedSpots_WrapInOffsetRows) {
+    // More pilots than spots: the modulo wrap must NOT stack airframes
+    // on one spot (they'd render as one aircraft while the roster counts
+    // many). Each pass past the spot count lands one 60-ft wingspan to
+    // the aircraft's RIGHT — compass h right vector is (cos h, -sin h).
+    // 2 north-facing spots, 5 pilots → #3..#5 park 60 ft east of their
+    // wrapped spot; all five positions finite and pairwise distinct.
+    f4::data::AircraftConfig cfg;
+    if (!loadF16Config(cfg)) GTEST_SKIP() << "F-16 aircraft config fixture not available";
+
+    EntityWorld world;
+    ClassTable ct;
+    f4::models::ModelDatabase db;
+
+    auto ab_h = world.create();
+    ab_h.add<TransformComponent>().position = f4::geo::WorldPosition(0.0, 0.0, 50.0);
+
+    auto sq_h = world.create();
+    auto& sq = sq_h.add<SquadronComponent>();
+    sq.airbase = ab_h.id();
+    sq.pilots.resize(5);
+    sq_h.add<UnitCoreComponent>().class_table_index = 273;
+
+    ScenarioAirfield airfield;
+    airfield.runway_heading_rad = 0.0;
+    airfield.threshold_position = f4::geo::WorldPosition(0.0, 5000.0, 50.0);
+    airfield.departure_altitude_ft = 2550.0;
+    // Two spots facing NORTH (compass 0): right of the aircraft = east.
+    // Deliberately far apart so a stacked duplicate would be obvious.
+    ScenarioParkingSpot s1;
+    s1.position = f4::geo::WorldPosition(0.0, 0.0, 50.0);
+    s1.heading_rad = 0.0;
+    airfield.parking_spots.push_back(s1);
+    ScenarioParkingSpot s2;
+    s2.position = f4::geo::WorldPosition(300.0, 0.0, 50.0);
+    s2.heading_rad = 0.0;
+    airfield.parking_spots.push_back(s2);
+
+    ScenarioAircraft tpl;
+    tpl.vis_type_index = 1052;
+
+    auto spawned = spawn_aircraft_from_squadrons(world, ct, db, cfg, airfield, tpl);
+    ASSERT_EQ(spawned.size(), 5u);
+
+    // Expected positions, in spawn order: the spot itself for i < 2,
+    // then pass k = i / 2 lands k*60 ft east of spot[i % 2] — so #3 is
+    // 60 ft east of s1, #4 60 ft east of s2, #5 120 ft east of s1.
+    const double expect_x[5] = {0.0, 300.0, 60.0, 360.0, 120.0};
+    const double expect_y = 0.0;
+    std::vector<f4::geo::WorldPosition> placed;
+    placed.reserve(spawned.size());
+    for (int i = 0; i < 5; ++i) {
+        EntityHandle h(spawned[static_cast<std::size_t>(i)], &world);
+        const auto* tf = h.get<TransformComponent>();
+        ASSERT_NE(tf, nullptr);
+        EXPECT_TRUE(std::isfinite(tf->position.x) && std::isfinite(tf->position.y))
+            << "aircraft " << i << " parked at a non-finite position";
+        EXPECT_DOUBLE_EQ(tf->position.x, expect_x[i]) << "aircraft " << i;
+        EXPECT_DOUBLE_EQ(tf->position.y, expect_y) << "aircraft " << i;
+        for (const auto& p : placed) {
+            EXPECT_FALSE(p.x == tf->position.x && p.y == tf->position.y)
+                << "aircraft " << i << " stacked on a previously parked one";
+        }
+        placed.push_back(tf->position);
+    }
+}

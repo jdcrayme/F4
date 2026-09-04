@@ -23,10 +23,12 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 #                     offsets)
 #   symbols          — procedural MIL-STD-2525-style symbol drawing
 #   symbol_library   — data-driven symbol vocabulary (lines + polygons
-#                     as point lists, persisted to JSON via f4-json).
-#                     The eventual refactor of symbols.cpp will load
-#                     this library into a dictionary and render via
-#                     draw_library_symbol() for a given key.
+#                     as point lists, persisted to JSON via f4-json,
+#                     rendered via fan/earcut fills + color roles)
+#   svg_import       — SVG (authoring format) <-> SymbolDefinition
+#                     conversion: subset parser via f4-xml (pugixml),
+#                     curve flattening, transforms, evenodd holes;
+#                     exporter round-trips the same subset
 #   entity_render    — entity-level rendering: RenderEntity() inspects
 #                     components and dispatches to feature_mesh, symbols,
 #                     etc. RenderEntityIcon() renders 2D map symbols
@@ -48,6 +50,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 #            raylib (public headers include <raylib.h>, <raymath.h>)
 #   PRIVATE: imgui (for symbols ImGui draw-list path + orbit_camera input guard)
 #            f4-json (for symbol_library JSON I/O — Reader/Writer only)
+#            f4-xml  (for svg_import — vendored pugixml)
 # ============================================================================
 
 # ── Third-party deps (Raylib + Dear ImGui) ────────────────────────────────────
@@ -67,6 +70,7 @@ add_library(f4-renderer STATIC
     src/feature_mesh.cpp
     src/symbols.cpp
     src/symbol_library.cpp
+    src/svg_import.cpp
     src/entity_render.cpp
     src/ground_layout_models.cpp
     src/render_resources.cpp
@@ -86,6 +90,7 @@ target_include_directories(f4-renderer
         $<INSTALL_INTERFACE:include>
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/third_party/earcut
         ${IMGUI_DIR}
         ${IMGUI_DIR}/backends
 )
@@ -98,6 +103,7 @@ target_link_libraries(f4-renderer
         raylib
     PRIVATE
         f4-json
+        f4-xml
 )
 
 add_library(F4::Renderer ALIAS f4-renderer)

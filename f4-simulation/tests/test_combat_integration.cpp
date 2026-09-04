@@ -68,7 +68,10 @@ std::string f16_config_path() {
 #endif
     if (dir.empty()) return "";
     const auto path = std::filesystem::path(dir) / "f16.json";
-    return std::filesystem::exists(path) ? path.string() : "";
+    // generic_string: the path is embedded in scenario JSON documents
+    // (combat_scenario_json) — backslashes would JSON-escape ("\f" =
+    // form feed); forward slashes are valid on Windows filesystems too.
+    return std::filesystem::exists(path) ? path.generic_string() : "";
 }
 
 constexpr double kDt = 1.0 / 60.0;
@@ -918,7 +921,7 @@ TEST(CombatIntegration, CombatRecordingReplaysTheFight) {
     const auto trace_path =
         std::filesystem::temp_directory_path() / "f4_combat_replay_test.json";
     auto scenario = load_scenario_from_string(
-        combat_scenario_json(f16, true, trace_path.string()));
+        combat_scenario_json(f16, true, trace_path.generic_string()));
     Simulation sim(std::move(scenario), std::filesystem::path("."));
     sim.initialize();
 

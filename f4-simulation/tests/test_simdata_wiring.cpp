@@ -65,7 +65,9 @@ std::string fixtures_dir() {
 bool f16_config_path(std::string& out) {
     const auto p = std::filesystem::path(fixtures_dir()) / "f16.json";
     if (!std::filesystem::exists(p)) return false;
-    out = p.string();
+    // generic_string: embedded in scenario JSON (backslash would
+    // JSON-escape); forward slashes work on Windows filesystems too.
+    out = p.generic_string();
     return true;
 }
 
@@ -277,8 +279,10 @@ TEST(SimDataWiring, ExplicitBrainDataPathIsHonored) {
     std::string f16;
     if (!f16_config_path(f16)) GTEST_SKIP() << "fixtures not generated";
 
+    // generic_string: embedded in scenario JSON below (backslash would
+    // JSON-escape); forward slashes work on Windows filesystems too.
     const auto brain_json =
-        (std::filesystem::path(fixtures_dir()) / "simdata" / "braindata.json").string();
+        (std::filesystem::path(fixtures_dir()) / "simdata" / "braindata.json").generic_string();
     ASSERT_TRUE(std::filesystem::exists(brain_json));
 
     // Explicit path (the "Data/" layout a real install would use) +

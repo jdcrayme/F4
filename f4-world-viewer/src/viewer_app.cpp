@@ -276,18 +276,37 @@ void ViewerApp::run() {
             }
 
             // V-CAMP: Space toggles the live campaign session's clock
-            // (the Campaign window's own button mirrors it). We HOLD
-            // the frame lock here, so the runner's ATOMIC-ONLY setter
-            // is the safe call (set_paused() would re-lock the mutex
-            // we already hold = self-deadlock); the session's own flag
-            // is mirrored directly — the worker can't be mid-advance
-            // while we hold the lock, so this is consistent.
+            // (the Campaign window's own button mirrors it). The pause
+            // contract lives in set_session_paused() — we hold the
+            // frame lock here, which is exactly what it expects.
             if (IsKeyPressed(KEY_SPACE) &&
                 !ImGui::GetIO().WantCaptureKeyboard &&
-                impl_->session_runner && impl_->session) {
-                const bool p = !impl_->session_runner->paused();
-                impl_->session_runner->set_paused_flag(p);
-                impl_->session->set_paused(p);
+                impl_->session) {
+                set_session_paused(!impl_->session->paused());
+            }
+
+            // V-CAMP speed presets: 1-4 pick a preset, +/- step through
+            // them (mirrors the replay view's speed keys). The runner's
+            // speed is an atomic — lock-free under the frame scope.
+            if (impl_->session_runner &&
+                !ImGui::GetIO().WantCaptureKeyboard) {
+                auto apply_preset = [&](int idx) {
+                    impl_->campaign_speed_index = std::clamp(
+                        idx, 0, kSessionSpeedCount - 1);
+                    impl_->session_runner->set_speed(
+                        kSessionSpeedTable[impl_->campaign_speed_index]);
+                };
+                if (IsKeyPressed(KEY_ONE)) apply_preset(0);
+                else if (IsKeyPressed(KEY_TWO)) apply_preset(1);
+                else if (IsKeyPressed(KEY_THREE)) apply_preset(2);
+                else if (IsKeyPressed(KEY_FOUR)) apply_preset(3);
+                else if (IsKeyPressed(KEY_KP_ADD) ||
+                         IsKeyPressed(KEY_EQUAL)) {
+                    apply_preset(impl_->campaign_speed_index + 1);
+                } else if (IsKeyPressed(KEY_KP_SUBTRACT) ||
+                           IsKeyPressed(KEY_MINUS)) {
+                    apply_preset(impl_->campaign_speed_index - 1);
+                }
             }
 
             // V-THREAD: mirror the worker's one-frame flags (the worker,

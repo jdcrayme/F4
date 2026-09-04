@@ -1557,9 +1557,10 @@ int count_active_flights_for_squadron(const f4::entities::EntityWorld& world,
 }
 
 /// Pick the i-th parking spot, cycling through the available spots if i
-/// exceeds the spot count. (Multiple aircraft per spot is wrong but
-/// better than dropping aircraft — and the spot list will grow when real
-/// PHD parking data is loaded for non-Korea theaters.)
+/// exceeds the spot count. Wrapped picks are offset laterally by the
+/// caller (see spawn_aircraft_from_squadrons) so extra airframes park in
+/// overflow rows instead of stacking on one spot. (The spot list will
+/// grow when real PHD parking data is loaded for non-Korea theaters.)
 const ScenarioParkingSpot*
 pick_parking_spot(const std::vector<ScenarioParkingSpot>& spots, int i) {
     if (spots.empty()) return nullptr;
@@ -1624,6 +1625,25 @@ spawn_aircraft_from_squadrons(f4::entities::EntityWorld& world,
                 if (spot) {
                     parking_pos = spot->position;
                     heading_rad = spot->heading_rad;
+                    // Over-subscribed spot (more pilots than real
+                    // PLT_PARK data): the pick wraps, so offset each
+                    // extra pass one wingspan to the aircraft's right
+                    // — without this the extra airframes stack at one
+                    // ENU point, render as a single aircraft, and the
+                    // parked roster lies about the ramp picture.
+                    if (i >= static_cast<int>(spots.size())) {
+                        const int pass =
+                            i / static_cast<int>(spots.size());
+                        constexpr double ROW_STEP_FT = 60.0;
+                        // Compass h: (east, north) = (sin h, cos h);
+                        // right of the aircraft = (cos h, -sin h).
+                        parking_pos.x += std::cos(heading_rad) *
+                                         static_cast<double>(pass) *
+                                         ROW_STEP_FT;
+                        parking_pos.y -= std::sin(heading_rad) *
+                                         static_cast<double>(pass) *
+                                         ROW_STEP_FT;
+                    }
                 }
             } else {
                 // No parking spots: fall back to a per-aircraft lateral

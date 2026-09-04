@@ -73,16 +73,22 @@ public:
 
     // Emit an integer (no quotes). Templated to accept any integral type
     // (int, long, uint32_t, uint8_t, size_t, ...) without ambiguity.
-    // Pick the format string based on signedness to avoid sign-extension
-    // surprises on uint64_t values near the top of the range.
+    // Promote to (unsigned) long long before formatting: `long` is
+    // 32-bit on Windows, so a naive cast wraps every 64-bit value
+    // (entity ids are generation<<32 | index — 2^32 became 0) and the
+    // divergence is silent. Values within 32 bits emit identical bytes,
+    // so existing goldens are untouched. Mirrors read_int()'s own
+    // long long contract — the pair round-trips 64-bit everywhere.
     template <typename T>
         requires std::is_integral_v<T>
     void number(T v) {
-        char tmp[24];
+        char tmp[32];
         if constexpr (std::is_signed_v<T>) {
-            std::snprintf(tmp, sizeof(tmp), "%ld", static_cast<long>(v));
+            std::snprintf(tmp, sizeof(tmp), "%lld",
+                          static_cast<long long>(v));
         } else {
-            std::snprintf(tmp, sizeof(tmp), "%lu", static_cast<unsigned long>(v));
+            std::snprintf(tmp, sizeof(tmp), "%llu",
+                          static_cast<unsigned long long>(v));
         }
         put(tmp);
     }

@@ -686,8 +686,24 @@ void walk_node(WalkContext& ctx, NodeIdx node_idx)
         break;
 
     case BspNodeType::BSpecialXform:
-        // Billboard/tree transform — recurse into subtree
-        // TODO: Apply billboard/tree special transform
+        // Billboard/tree special transform (TransformType::Billboard faces
+        // the viewer fully; TransformType::Tree yaws around vertical only,
+        // staying upright). NOT applied here, deliberately:
+        //
+        // 1. The transform is a function of the viewer position at draw
+        //    time — the on-disk node carries only the type tag (see
+        //    bsp_parser.cpp), no parameters, so there is nothing to bake.
+        // 2. Extraction is view-independent by contract (inputs are the
+        //    tree + ModelState switches/DOFs); inventing a camera here
+        //    would bake wrong geometry for every angle except the fake
+        //    one chosen.
+        //
+        // Recursing without a transform preserves the subtree's geometry
+        // at authored orientation — correct placement, static facing.
+        // Making these face the camera is a renderer feature: the mesh
+        // output would need per-group TransformType metadata so the draw
+        // loop can rebuild the facing rotation each frame (same call the
+        // ASSET_PIPELINE_SPEC makes for far-LOD billboard cards).
         if (node.subtree >= 0) walk_node(ctx, node.subtree);
         break;
 

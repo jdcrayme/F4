@@ -200,6 +200,14 @@ namespace f4::entities {
         inline constexpr const char* ALIVE = "alive";   // bool
         inline constexpr const char* STEALTH = "stealth"; // bool
 
+        // CATEGORY — string. Coarse entity category for O(1) roster
+        // queries: "unit" for every entity of the six unit classes
+        // (battalion/brigade/squadron/taskforce/flight/package), set by
+        // the loader alongside OPDOMAIN. Units span four OPDOMAIN
+        // buckets, so consumers had to union the buckets per query;
+        // with this tag a single with_tag_ref() serves the whole roster.
+        inline constexpr const char* CATEGORY = "category";
+
         // --- Phase A tag enrichment (see ECS refactoring plan) ---------------
         // These tags promote commonly-queried per-entity fields out of
         // components and into the tag store, so that non-selected entities

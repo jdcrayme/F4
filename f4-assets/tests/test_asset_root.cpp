@@ -13,6 +13,24 @@ using namespace f4::assets;
 
 namespace {
 
+// POSIX setenv/unsetenv have no MSVC equivalents; _putenv_s(name, "")
+// is the Windows idiom for unsetting. Returns 0 on success (both
+// platforms' semantics) so callers can ASSERT on it.
+int set_env(const char* name, const char* value) {
+#ifdef _WIN32
+    return ::_putenv_s(name, value);
+#else
+    return ::setenv(name, value, 1);
+#endif
+}
+void unset_env(const char* name) {
+#ifdef _WIN32
+    ::_putenv_s(name, "");
+#else
+    ::unsetenv(name);
+#endif
+}
+
 std::filesystem::path make_data_dir(const std::string& suffix) {
     auto base = std::filesystem::temp_directory_path() / "f4_assets_root_test";
     auto p = base / suffix;
@@ -67,10 +85,10 @@ TEST(AssetRoot, DiscoverViaEnvVar) {
     write_file(p / "manifest.json", kMinimalManifest);
     write_file(p / "Theater/korea/theater.json", "{}");
 
-    const int rc = ::setenv("F4_DATA_DIR", p.string().c_str(), 1);
+    const int rc = set_env("F4_DATA_DIR", p.string().c_str());
     ASSERT_EQ(rc, 0);
     auto root = AssetRoot::discover();
-    ::unsetenv("F4_DATA_DIR");
+    unset_env("F4_DATA_DIR");
     ASSERT_TRUE(root.has_value());
     EXPECT_TRUE(root->valid());
     EXPECT_EQ(root->manifest().assets.size(), 1u);

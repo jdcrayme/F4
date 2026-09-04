@@ -38,7 +38,9 @@ std::string f16_config_path() {
 #endif
     if (dir.empty()) return "";
     const auto path = std::filesystem::path(dir) / "f16.json";
-    return std::filesystem::exists(path) ? path.string() : "";
+    // generic_string: embedded in scenario JSON — backslashes would
+    // JSON-escape; forward slashes work on Windows filesystems too.
+    return std::filesystem::exists(path) ? path.generic_string() : "";
 }
 
 constexpr double kDt = 1.0 / 60.0;

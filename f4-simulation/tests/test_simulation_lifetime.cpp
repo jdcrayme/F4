@@ -183,17 +183,20 @@ LiveSim make_initialized_sim(const std::filesystem::path& dir) {
           << "  \"name\": \"lifetime_regression\",\n"
           << "  \"theater\": \"korea\",\n"
           << "  \"spawn_mode\": \"campaign_flights\",\n"
-          << "  \"world_json_path\": \"" << world.string() << "\",\n"
-          << "  \"class_table_path\": \"" << class_table_path().string()
+          // generic_string on every embedded path: Windows backslashes
+          // would JSON-escape ("\f" = form feed); forward slashes work
+          // on Windows filesystems too.
+          << "  \"world_json_path\": \"" << world.generic_string() << "\",\n"
+          << "  \"class_table_path\": \"" << class_table_path().generic_string()
           << "\",\n"
-          << "  \"models_hdr_path\": \"" << models_hdr_path().string()
+          << "  \"models_hdr_path\": \"" << models_hdr_path().generic_string()
           << "\",\n"
-          << "  \"models_lod_path\": \"" << models_lod_path().string()
+          << "  \"models_lod_path\": \"" << models_lod_path().generic_string()
           << "\",\n"
           << "  \"aircraft\": [{\n"
           << "    \"callsign\": \"CAMPAIGN\",\n"
           << "    \"aircraft_config_path\": \""
-          << f16_config_path().string() << "\",\n"
+          << f16_config_path().generic_string() << "\",\n"
           << "    \"aircraft_name\": \"F-16C_50\",\n"
           << "    \"vis_type_index\": 1052,\n"
           << "    \"parking_spot\": {\"x\": 0.0, \"y\": 0.0, \"z\": 0.0},\n"

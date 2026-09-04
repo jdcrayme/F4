@@ -88,7 +88,11 @@ constexpr int RT_H = 600;
 // Background + grid colors.
 constexpr Color BG_COLOR     = { 22,  24,  30, 255};
 constexpr Color GRID_COLOR   = { 50,  54,  62, 255};
-constexpr Color ORIGIN_COLOR = {255, 255,   0, 200};
+
+// Terrain chunks and helper geometry (the axis triad) sink slightly below
+// the airfield quads (drawn at z=0) so they don't z-fight with them —
+// one named constant for every sink site.
+constexpr float GROUND_SINK_FT = -5.0f;
 
 // ---------------------------------------------------------------------------
 // Coordinate helpers — thin wrappers around f4::renderer functions
@@ -97,7 +101,8 @@ constexpr Color ORIGIN_COLOR = {255, 255,   0, 200};
 // Raylib draw calls need Vector3. These wrappers convert for convenience.
 
 inline Vector3 enu_to_rl(float enu_x, float enu_y, float enu_z) {
-    auto f = f4::renderer::enu_to_raylib(enu_x, enu_y, enu_z-10);
+    auto f = f4::renderer::enu_to_raylib(enu_x, enu_y,
+                                         enu_z + GROUND_SINK_FT);
     return { f.x, f.y, f.z };
 }
 
@@ -124,34 +129,6 @@ inline Vector3 model_vertex_to_rl(float x, float y, float z) {
 // Drawing — labeled markers
 // ---------------------------------------------------------------------------
 
-
-// ---------------------------------------------------------------------------
-// Drawing — ground grid for orientation reference
-// ---------------------------------------------------------------------------
-
-// Kept for reference / debugging — the 3D tab now uses render_world()'s
-// GroundConfig.grid instead of this inline draw. Could be removed once
-// the migration is confirmed stable.
-[[maybe_unused]]
-void draw_ground_grid(float center_x, float center_y,
-                      float extent_ft, float step_ft) {
-    for (float gx = std::ceil((-extent_ft + center_x) / step_ft) * step_ft;
-         gx <= extent_ft + center_x; gx += step_ft) {
-        const Vector3 a = enu_to_rl(gx, center_y - extent_ft, 0.0f);
-        const Vector3 b = enu_to_rl(gx, center_y + extent_ft, 0.0f);
-        DrawLine3D(a, b, GRID_COLOR);
-    }
-    for (float gy = std::ceil((-extent_ft + center_y) / step_ft) * step_ft;
-         gy <= extent_ft + center_y; gy += step_ft) {
-        const Vector3 a = enu_to_rl(center_x - extent_ft, gy, 0.0f);
-        const Vector3 b = enu_to_rl(center_x + extent_ft, gy, 0.0f);
-        DrawLine3D(a, b, GRID_COLOR);
-    }
-    // Origin marker (objective center, z=0).
-    const Vector3 o = enu_to_rl(center_x, center_y, 0.0f);
-    DrawLine3D({o.x - 8, o.y, o.z}, {o.x + 8, o.y, o.z}, ORIGIN_COLOR);
-    DrawLine3D({o.x, o.y, o.z - 8}, {o.x, o.y, o.z + 8}, ORIGIN_COLOR);
-}
 
 // ---------------------------------------------------------------------------
 // Drawing — labels (project 3D marker position to 2D screen, draw text
@@ -519,7 +496,7 @@ void ViewerApp::draw_ground_layout_3d() {
                     impl_->terrain, obj_world_x, obj_world_y,
                     /*extent_ft=*/250000.0f,     // far ring reaches the horizon
                     /*near_extent_ft=*/50000.0f, // near tiles around the objective
-                    /*z_offset_ft=*/-5.0f);      // sink below airfield geometry
+                    /*z_offset_ft=*/GROUND_SINK_FT); // sink below airfield geometry
                 impl_->world_view_cached_entity = impl_->sel_entity;
             }
         }
@@ -543,7 +520,7 @@ void ViewerApp::draw_ground_layout_3d() {
                 tcc.chunks_per_side = 8;          // 64 chunks
                 tcc.chunk_resolution = 32;        // 1089 verts/chunk
                 tcc.vertical_scale   = 1.0f;
-                tcc.z_offset_ft      = -5.0f;
+                tcc.z_offset_ft      = GROUND_SINK_FT;
                 tcc.color_by_tile_type = true;
                 // Far-plane override: render_world() already extends via
                 // scene.far_plane=250000, but set this too so direct
@@ -574,7 +551,7 @@ void ViewerApp::draw_ground_layout_3d() {
                 tc.extent_ft = 50000.0f;
                 tc.resolution = 96;
                 tc.vertical_scale = 1.0f;
-                tc.z_offset_ft = -5.0f;
+                tc.z_offset_ft = GROUND_SINK_FT;
                 tc.color_by_tile_type = true;
                 impl_->terrain_mesh_3d = f4::renderer::build_terrain_mesh(
                     impl_->terrain, tc);
@@ -632,8 +609,7 @@ void ViewerApp::draw_ground_layout_3d() {
     scene.ground.origin_enu_x = obj_world_x;
     scene.ground.origin_enu_y = obj_world_y;
     scene.ground.origin_enu_z = obj_world_z;
-    // Size the grid to the airfield bbox (same logic as the old inline
-    // draw_ground_grid call).
+    // Size the grid to the airfield bbox.
     {
         const float ext = std::max(
             (g.max_x - g.min_x) * 0.6f,

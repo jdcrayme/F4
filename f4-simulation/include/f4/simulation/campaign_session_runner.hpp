@@ -124,6 +124,15 @@ public:
         return time_dilated_.load();
     }
 
+    /// Rolling MEASURED rate — sim seconds advanced per wall second
+    /// (EMA over the worker's batches; 0 while paused). The UI compares
+    /// this with speed(): a preset the CPU can't sustain delivers less
+    /// than requested, and without this readout every unsustainable
+    /// preset moves the clock at the same (identical) rate.
+    [[nodiscard]] double effective_speed() const noexcept {
+        return effective_speed_.load();
+    }
+
     /// The session lock — FAIR (FIFO ticket order; see fair_mutex.hpp
     /// for the starvation regression it exists to prevent). The host
     /// takes it (std::unique_lock / std::lock_guard) for its frame
@@ -164,6 +173,7 @@ private:
     std::atomic<double> speed_{1.0};
     std::atomic<bool> time_dilated_{false};
     std::atomic<double> advanced_sim_s_{0.0};
+    std::atomic<double> effective_speed_{0.0};
     std::atomic<int> tick_budget_{4};   // adaptive: 1..session cap
 
     std::thread worker_;

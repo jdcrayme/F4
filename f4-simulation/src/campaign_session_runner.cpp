@@ -76,6 +76,7 @@ void CampaignSessionRunner::worker_loop_() {
             // Parked: don't accrue debt while the clock is off; reset
             // the pacing origin so unpause starts fresh.
             last = clock::now();
+            effective_speed_.store(0.0);
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
             continue;
         }
@@ -102,10 +103,21 @@ void CampaignSessionRunner::worker_loop_() {
                 std::chrono::duration<double, std::milli>(
                     clock::now() - t0).count();
 
-            advanced_sim_s_.store(
-                advanced_sim_s_.load() +
-                (session_.sim().sim_time_s() - sim_before));
+            const double sim_advanced =
+                session_.sim().sim_time_s() - sim_before;
+            advanced_sim_s_.store(advanced_sim_s_.load() + sim_advanced);
             time_dilated_.store(capped);
+
+            // Measured delivery rate — an EMA over the batches (see
+            // effective_speed()). wall_sec is this iteration's wall
+            // budget, so rate is the honest sim-seconds-per-wall-second
+            // actually delivered, cap and CPU included.
+            if (wall_sec > 1e-4) {
+                const double rate = sim_advanced / wall_sec;
+                double cur = effective_speed_.load();
+                cur += 0.25 * (rate - cur);
+                effective_speed_.store(cur);
+            }
 
             // Adaptive budget: keep the next lock hold in the target
             // band. Bounded [1, session cap] — advance() clamps to the

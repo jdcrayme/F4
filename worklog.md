@@ -1,5 +1,195 @@
 
 ---
+Task ID: SYMBOL-SVG-1
+Agent: main
+Task: SVG authoring spike for the SymbolLibrary (world-viewer UI
+audit follow-up): shared f4-xml library (vendored pugixml), strict
+SVG-subset import/export in f4-renderer, v2 model fields (color
+roles, holes, earcut fill caches), corpus round-trip tests.
+
+Work Log:
+- f4-xml (new root library, mirrors f4-json): vendored pugixml v1.15
+  (pugixml.hpp/.cpp/pugiconfig.hpp + LICENSE, committed — same
+  convention as f4-world-viewer/third_party/tinyfiledialogs), exposed
+  under a namespace alias (f4::xml = pugi; NOTE: `namespace f4::xml =
+  pugi;` is ill-formed — a qualified alias name is not allowed, use
+  the nested `namespace f4 { namespace xml = pugi; }`). Registered in
+  the root CMakeLists right after f4-json. 5 smoke tests pin the
+  usage patterns (load_string, attribute queries, child iteration,
+  parse-error offsets, programmatic building for the exporter).
+  Motivation beyond SVG: BMS installs ship all Falcon4.* data tables
+  as XML (FALCON4_CT.XML 5.9 MB etc.) — BMS-CT-1 / BMS-DATA-1 get
+  this parser for free.
+- svg_import.hpp/.cpp (f4-renderer, links f4-xml PRIVATE): subset
+  importer — svg root w/ required viewBox (uniform scale into
+  [-1,1], aspect preserved, y-down kept: the model is screen-like);
+  g nesting w/ composed translate/scale/rotate/matrix; presentation
+  attr inheritance; shapes path/rect(+rx,ry)/circle/ellipse/line/
+  polyline/polygon; full path command grammar incl. relative +
+  implicit repetition (M's repetition is L per spec; bare coords
+  after Z fail instead of looping); bezier/arc flattening at 16
+  segments (W3C F.6.5 endpoint→center arc); circles 32; <title>/
+  <desc> → display_name/description. Paint mapping: currentColor→
+  Fill, black/white/#000/#fff→Outline, none→unfilled; data-color-role
+  attribute overrides (the exporter's role round-trip channel).
+  STRICT failure policy: unsupported elements and rendering-changing
+  attributes throw naming the feature (filter/mask/clip-path/CSS
+  class/style/opacity...); identity values editors stamp by default
+  (fill-opacity="1", display="inline", dasharray="none") tolerated;
+  inert attrs (id, data-*, sodipodi:*) ignored so Inkscape files
+  load. evenodd/nonzero subpaths classify into outer rings + holes
+  (area-desc sort, first-vertex containment, innermost containing
+  outer wins).
+- Exporter: one <path> per polygon (holes as subpaths; filled →
+  fill by role with data-color-role for fill_blend/outline; unfilled
+  → fill="none" stroke #000000 at the 1px-equivalent width) and per
+  polyline (stroke width via kSymbolReferenceSizePx=64 half-extent
+  conversion). Representation note: unfilled polygons round-trip as
+  closed 1px Outline polylines — render-equivalent, and the corpus
+  test asserts exactly that mapping.
+- Model (symbol_library.hpp/.cpp): SymbolColorRole enum
+  (Fill/FillBlend@85%/Outline) on SymbolPolygon AND SymbolPolyline;
+  polygon holes; earcut triangle cache (vendored mapbox/earcut.hpp
+  at f4-renderer/third_party/earcut — note the free function is
+  mapbox::earcut on master, NOT mapbox::util::earcut). Draw paths:
+  fan fast path unchanged for convex hole-free fills; triangles →
+  AddTriangleFilled / DrawTriangle otherwise; polylines now honor
+  their color role. refresh_fill_caches() public — called by the
+  JSON loader, the SVG importer, and after editor mutation.
+- JSON v2: reader parses color_role + holes (writer emits them
+  conditionally, version 2). Found + fixed a REAL pre-existing gap:
+  the corpus uses rectangles/lines/dots sugar arrays that the old
+  reader SILENTLY DROPPED (obj_railroad's rails, com_control's dots,
+  the unit frames' rects were all invisible to the library!) — now
+  normalized at load into canonical polygons/polylines (rect→4pt
+  polygon, line→2pt polyline, dot→filled octagon); writer emits
+  canonical form only.
+- Tests: test_svg_import.cpp (15) — shapes/transforms/flattening/
+  donut triangulation (area check)/disjoint loops/role override/
+  loud failures/viewBox requirement/synthetic round-trip/full
+  corpus round-trip (all 75 f4_symbols.json symbols, env-gated
+  F4_SVG_DEBUG=1 dump on demand)/JSON v2 IO. The corpus test found
+  one bug — in itself (inverted filled/unfilled condition shifted
+  comparisons and read OOB → SEH); the import/export data was
+  correct on first inspection. test_symbol_library (29) unmodified
+  and green; world-viewer builds clean; zero W4 warnings in the new
+  sources.
+- NOT in this change (the wired-up end state): load f4_symbols.json
+  at startup, RenderEntityIcon preferring library keys w/ procedural
+  fallback, parity flag, then delete symbols.cpp's ~850-line
+  vocabulary; campaign_icon through world_json → components; Symbol
+  Creator Import/Export SVG buttons; symbols/ directory scan.
+
+---
+Task ID: QC-PASS-1
+Agent: main
+Task: Full QC pass on the repo — fix the three user-reported viewer
+issues (flight plans covering the map, the speed ratio doing nothing,
+missing 3D views for squadrons/ground units/live aircraft) plus a
+repo-wide cleanup sweep.
+
+Work Log:
+- Flight plans (selected-only + toggle): all three route passes in
+  canvas.cpp now gate on the current selection — static waypoints
+  (unit selected, or a selected squadron's flights via
+  FlightPlanComponent::squadron), live session routes (selected
+  aircraft only), mission→target and package→element links (selected
+  flight / its package / its squadron, and when an OBJECTIVE is
+  selected, the links targeting it — inbound traffic view). New
+  show_all_routes master toggle ("All flight plans", View menu +
+  Layers panel) restores always-draw; selected routes draw heavier
+  (2.0-2.5 px, alpha ~235).
+- Speed control: wiring verified intact end-to-end; the real causes
+  of "does nothing" were (a) sessions start paused, (b) Debug builds
+  cap at ~330-540 ticks/s so 10x/60x/240x all deliver ~7x effective
+  with silent debt-dropping, (c) no rate feedback. Fixes:
+  CampaignSessionRunner::effective_speed() (atomic EMA of
+  sim-advanced/wall-sec per batch), session-window readout
+  "speed: Nx (effective Mx — CPU-limited)" when measured < 90% of
+  requested, radios read back the live runner, preset row shown
+  pre-start, keyboard presets (1-4 pick, +/- step, guarded by
+  WantCaptureKeyboard). Pause flips unified into
+  ViewerApp::set_session_paused() (button + Space + menu).
+- 3D for every selection: new f4-world-viewer/src/entity_model_3d.cpp
+  — Inspector 3D tab renders LiveAircraft (own VisualModelComponent
+  + quaternion facing), Squadron (parked row, up to 8, class-table
+  vis_type, gear down), static Flight (two-ship echelon),
+  Battalion/Brigade/TaskForce (VehicleCompositionComponent vehicle
+  groups), reusing ground_layout_3d's plane/orbit-camera/RenderTexture
+  path and mesh caches. Map hit-test learns parked aircraft +
+  deaggregated vehicles (zoom > 2x → LiveAircraft selection). HUD:
+  [Live] selection line + "zoom past 6x for 3D models" hint.
+- Re-enabled the three commented-out draw passes (unit destinations,
+  squadron→airbase links, BN→BDE hierarchy lines) and made their
+  toggles truthful; single-sourced ALL layer checkboxes into one
+  draw_layer_groups list shared by the View menu and the Layers
+  panel (panel gains the Campaign-QC + Live-session groups).
+- Fixed the Campaign-menu auto-open that could never fire (checked a
+  null session right after an async start — now opens
+  unconditionally); "Reset Session" no longer races an in-flight
+  async start (deferred stop tags its target session; stale tags
+  dropped); Write-Result-JSON deduplicated into one method.
+- units() O(1): new tags::CATEGORY ("unit") stamped in
+  world_loader::populate_units first pass; Impl::units() is now one
+  with_tag_ref read (was a 4-bucket OPDOMAIN union + vector rebuild
+  ~4x/frame).
+- Parking overflow: spawn_aircraft_from_squadrons modulo-wrap now
+  offsets each overflow pass one 60-ft wingspan to the aircraft's
+  right (compass right vector = (cos h, -sin h)) instead of stacking
+  every extra airframe on one invisible spot; pick_parking_spot
+  comment updated.
+- ground_layout_3d: GROUND_SINK_FT replaces the inconsistent -10/-5
+  literals; dead draw_ground_grid() removed.
+- BSpecialXform TODO triage (geometry_extractor.cpp): documented, not
+  implemented — the billboard/tree transform is viewer-DEPENDENT (the
+  node carries only the type tag; no parameters), so a view-
+  independent extractor has nothing to bake; subtree recurses at
+  authored orientation. Renderer-side feature (needs per-group
+  TransformType metadata), consistent with ASSET_PIPELINE_SPEC's
+  far-LOD billboard decision.
+- README: f4-models-viewer section added; session controls doc the
+  keyboard presets + effective-rate readout. CHANGES.md QC-PASS-1
+  entry.
+- Deliberate skips, recorded: (void)num at ground_layout_models.cpp:670
+  stays (unused structured binding — name can't be omitted, (void) is
+  idiomatic); squadron→parked-aircraft map highlight skipped (static
+  squadrons carry no VU id to match CampaignOriginComponent::squadron_vu
+  against; the 3D parked row covers inspection).
+- Fixed a PRE-EXISTING Windows-only test break found during verification:
+  32 f4-simulation tests (SimDataWiring/CombatIntegration/
+  CombatTranscript/RegisterAircraft/SimulationLifetime) embedded the
+  fixture path into scenario JSON via path.string() — backslashes, and
+  the JSON loader turned the "\f" of generated_fixtures\f16.json into a
+  form feed. All embedding sites now use generic_string(). Remaining:
+  CombatIntegration.CombatRecordingReplaysTheFight fails on Windows
+  only (TrackAcquired ids missing from the recording) — verified
+  failing identically on the untouched baseline; MSVC numerics,
+  out of scope.
+- Fixed the headless --session --screenshot smoke: the fixed 6/12 s
+  exit countdown ran during the async session create, so a slow Debug
+  run over the real TestCamp world exited BEFORE adoption — no
+  screenshot, no summary, silent. The timeout thread now waits
+  (bounded 240 s) for campaign_session_starting() to clear, and the
+  exit line reports a missing screenshot honestly. Verified: no-
+  session screenshot smoke over the real install renders textured
+  terrain (png_probe: varied tones + per-cell variance, 475 KB);
+  full --session --play smoke re-run with the fix: adopted, ran,
+  `[session] sim 8.1s campaign 38574368 cycles 0 missions 0 live 48`,
+  screenshot at the exact path, exit 0. Throughput note: 8.1 sim-s in
+  the 12 s window ≈ 0.7x effective at the 10x preset on this 2-core
+  Debug box — machine-bound, not a regression: the same smoke on the
+  UNCHANGED baseline binary prints sim 0.0s (the async create alone
+  exceeds the old fixed 12 s window here; the container baseline
+  finished create + 80 sim-s in 12 s). This is exactly the
+  CPU-limited regime the new effective-rate readout labels.
+- Validation: incremental Debug builds of f4-entities, f4-world,
+  f4-simulation, f4-models, f4-world-viewer all clean (pre-existing
+  warnings only); final suites: f4-entities 83/83, f4-world 77/77,
+  f4-models 30/30, f4-renderer 13/13, f4-world-viewer 65/65,
+  f4-simulation 191/192 (the one pre-existing Windows-only failure
+  above). Full ctest + manual QA (TestCamp.cam) pass recorded in
+  CHANGES.md.
+---
 Task ID: TERRAIN-TEX-2
 Agent: main
 Task: Fix user-reported world-viewer bugs: upside-down 2D map, missing

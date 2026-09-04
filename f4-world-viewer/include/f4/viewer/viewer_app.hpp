@@ -235,6 +235,14 @@ private:
     /// Ground Layout 3D tab content.
     /// Content-only — caller owns the window + tab item.
     void draw_ground_layout_3d();
+    /// The Inspector 3D tab's branch for non-objective selections —
+    /// squadrons (parked row of their aircraft type), flights, ground
+    /// units (vehicle-composition lineup), and live session aircraft
+    /// (their own vis-type model + facing). Shares the RenderTexture,
+    /// orbit camera, and model resources with the objective view; the
+    /// Inspector tab dispatches by selection kind. See
+    /// entity_model_3d.cpp.
+    void draw_entity_model_3d();
     void draw_campaign_and_teams_view();
     /// B.3 QC: the "ATO / Tasking" window — sortable flight table with
     /// mission/team filters, click-to-select + camera focus. See
@@ -254,6 +262,17 @@ private:
     /// the session (a reset = stop + start).
     void start_campaign_session();
     void stop_campaign_session();
+    /// V-CAMP: the ONE pause-flip implementation — the session window's
+    /// Play/Pause button, the Space shortcut, and the Campaign menu all
+    /// call this. Callers run inside run()'s frame session-lock scope,
+    /// so it flips the runner's ATOMIC-ONLY flag and mirrors the
+    /// session's own flag directly (the worker can't be mid-advance
+    /// while the frame holds the lock). No-op without a live session.
+    void set_session_paused(bool paused);
+    /// V-CAMP: write the live session's ledger to campaign_result.json
+    /// next to the world JSON (the QC artifact's location convention).
+    /// Shared by the Campaign menu item and the session window button.
+    void write_result_json();
     /// V-THREAD: the OUT-OF-LOCK half of stop_campaign_session. The
     /// Stop button runs inside run()'s frame session-lock scope;
     /// runner->stop() would join a worker waiting on that lock — so

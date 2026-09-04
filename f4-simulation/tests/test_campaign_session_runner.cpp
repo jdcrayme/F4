@@ -450,3 +450,50 @@ TEST(CampaignSessionRunner, FairMutexServesFifoAndTryLockNeverJumps) {
     for (auto& h : hammers) h.join();
     EXPECT_EQ(shared.load(), 12000);
 }
+
+// ── 8. effective_speed(): the measured-rate EMA the viewer reads ──────────
+// Fresh = 0; parked batches store 0; running batches converge toward the
+// sim-seconds-per-wall-second actually delivered (request here is 10x —
+// the EMA must sit well under the request's neighborhood, well above
+// zero, on any box that advances at all).
+TEST(CampaignSessionRunner, EffectiveSpeedZeroWhenFreshAndWhenParked) {
+    if (!std::filesystem::exists(f16_config_path())) {
+        GTEST_SKIP() << "f16.json fixture not generated";
+    }
+    auto s = make_garrison_session();
+    ASSERT_NE(s.session, nullptr);
+
+    CampaignSessionRunner runner(*s.session, 10.0, /*paused=*/true);
+    EXPECT_EQ(runner.effective_speed(), 0.0);  // fresh, never started
+    runner.start();
+    std::this_thread::sleep_for(std::chrono::milliseconds(250));
+    EXPECT_EQ(runner.effective_speed(), 0.0);  // parked batches store 0
+    runner.stop();
+}
+
+TEST(CampaignSessionRunner, EffectiveSpeedTracksRunningRate) {
+    if (!std::filesystem::exists(f16_config_path())) {
+        GTEST_SKIP() << "f16.json fixture not generated";
+    }
+    auto s = make_garrison_session();
+    ASSERT_NE(s.session, nullptr);
+
+    CampaignSessionRunner runner(*s.session, 10.0, /*paused=*/false);
+    runner.start();
+    std::this_thread::sleep_for(std::chrono::milliseconds(1200));
+    const double eff = runner.effective_speed();
+
+    // α = 0.25 per batch converges within a handful of the ~ms-spaced
+    // batches, so 1.2 s of wall is far past settle time. Bounds are
+    // deliberately wide: any box that advances at all clears the floor
+    // (0.2x), and the requested 10x caps the honest ceiling (the worker
+    // never delivers more than the request; 15x slack covers EMA lag).
+    EXPECT_GT(eff, 0.2) << "measured rate never rose above zero";
+    EXPECT_LT(eff, 15.0) << "measured rate exceeded the requested preset";
+
+    // Pause → the parked branch stores 0 within one 5 ms loop pass.
+    runner.set_paused(true);
+    std::this_thread::sleep_for(std::chrono::milliseconds(150));
+    EXPECT_EQ(runner.effective_speed(), 0.0);
+    runner.stop();
+}

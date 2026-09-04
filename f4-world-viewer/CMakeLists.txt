@@ -110,6 +110,7 @@ add_library(f4_world_viewer STATIC
     src/inspector_panel.cpp
     src/ground_layout_view.cpp
     src/ground_layout_3d.cpp
+    src/entity_model_3d.cpp
     src/campaign_and_teams_view.cpp
     src/campaign_qc_view.cpp
     src/campaign_session_view.cpp

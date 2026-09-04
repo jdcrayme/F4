@@ -58,7 +58,10 @@ std::string f16_config_path() {
 #endif
     if (dir.empty()) return "";
     const auto path = std::filesystem::path(dir) / "f16.json";
-    return std::filesystem::exists(path) ? path.string() : "";
+    // generic_string: the path is embedded in scenario JSON documents
+    // (anchor_scenario_json) — backslashes would JSON-escape ("\f" =
+    // form feed); forward slashes are valid on Windows filesystems too.
+    return std::filesystem::exists(path) ? path.generic_string() : "";
 }
 
 bool load_f16(f4::data::AircraftConfig& cfg) {

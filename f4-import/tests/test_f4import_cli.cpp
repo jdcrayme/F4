@@ -17,6 +17,16 @@ namespace {
 
 std::string f4import_path() { return F4IMPORT_PATH; }
 
+// Windows system()/_pclose return the raw exit code; POSIX shells wrap
+// it in a wait status that WEXITSTATUS unwraps.
+int exit_code_of(int rc) {
+#ifdef _WIN32
+    return rc;
+#else
+    return WEXITSTATUS(rc);
+#endif
+}
+
 struct CmdResult {
     int exit_code = 0;
     std::string out;
@@ -24,22 +34,39 @@ struct CmdResult {
 };
 
 CmdResult run_cmd(const std::vector<std::string>& argv) {
+    // Double quotes are the one quoting style both POSIX sh and Windows
+    // cmd.exe honor, and captures go to the OS temp dir (/tmp is not a
+    // Windows path). The program itself must be native-styled — cmd.exe
+    // cannot exec a quoted forward-slash path ("filename syntax is
+    // incorrect").
+    const auto out_log = fs::temp_directory_path() / "f4i_out.log";
+    const auto err_log = fs::temp_directory_path() / "f4i_err.log";
     std::string cmd;
-    for (const auto& a : argv) {
-        cmd += "'";
-        cmd += a;
-        cmd += "' ";
+    cmd += '"';
+    cmd += fs::path(argv[0]).make_preferred().string();
+    cmd += "\" ";
+    for (size_t i = 1; i < argv.size(); ++i) {
+        cmd += '"';
+        cmd += argv[i];
+        cmd += "\" ";
     }
-    cmd += "> /tmp/f4i_out.log 2> /tmp/f4i_err.log";
-    int rc = std::system(cmd.c_str());
+    cmd += "> \"" + out_log.string() + "\" 2> \"" + err_log.string() + "\"";
+#ifdef _WIN32
+    // cmd /c strips the FIRST and LAST quote of the line whenever the
+    // line holds more than two quotes — which mangles the quoted
+    // program path. Wrapping the whole command in one extra pair makes
+    // the outer strip land on the wrapper (the standard workaround).
+    cmd = "\"" + cmd + "\"";
+#endif
+    const int rc = std::system(cmd.c_str());
     CmdResult r;
-    r.exit_code = WEXITSTATUS(rc);
+    r.exit_code = exit_code_of(rc);
     {
-        std::FILE* f = std::fopen("/tmp/f4i_out.log", "rb");
+        std::FILE* f = std::fopen(out_log.string().c_str(), "rb");
         if (f) { char buf[4096]; size_t n; while ((n = std::fread(buf, 1, sizeof(buf), f)) > 0) r.out.append(buf, n); std::fclose(f); }
     }
     {
-        std::FILE* f = std::fopen("/tmp/f4i_err.log", "rb");
+        std::FILE* f = std::fopen(err_log.string().c_str(), "rb");
         if (f) { char buf[4096]; size_t n; while ((n = std::fread(buf, 1, sizeof(buf), f)) > 0) r.err.append(buf, n); std::fclose(f); }
     }
     return r;

@@ -55,6 +55,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <iostream>
 #include <string>
 #include <thread>
@@ -306,9 +307,25 @@ int main(int argc, char** argv) {
         // resources in order before CloseWindow.
         const int run_seconds = auto_play ? 12 : 6;
         std::thread([&app, path = screenshot_path, run_seconds]() {
+            // The exit countdown must not run while an async session
+            // create is in flight: on a slow (Debug) build the create
+            // can take minutes, and a fixed window exits BEFORE
+            // adoption — no screenshot (it is held for exactly this)
+            // and no session summary to assert on. Wait, bounded, for
+            // the start to settle before starting the countdown.
+            const auto settle_deadline = std::chrono::steady_clock::now()
+                                       + std::chrono::seconds(240);
+            while (app.campaign_session_starting() &&
+                   std::chrono::steady_clock::now() < settle_deadline) {
+                std::this_thread::sleep_for(
+                    std::chrono::milliseconds(200));
+            }
             std::this_thread::sleep_for(
                 std::chrono::seconds(run_seconds));
-            std::cout << "Screenshot saved to " << path << "; exiting.\n";
+            const char* shot = std::filesystem::exists(path)
+                             ? "Screenshot saved to "
+                             : "Screenshot MISSING (capture never fired): ";
+            std::cout << shot << path << "; exiting.\n" << std::flush;
             app.request_exit();
         }).detach();
     }
