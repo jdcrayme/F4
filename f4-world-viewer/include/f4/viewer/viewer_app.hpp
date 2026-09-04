@@ -190,6 +190,27 @@ public:
     /// async start completed).
     [[nodiscard]] bool campaign_session_live() const noexcept;
 
+    /// V-SMOKE (--play): the adopted session starts RUNNING instead of
+    /// paused (the runner + session flags both start unpaused). Set
+    /// BEFORE request_campaign_session(); the default (interactive)
+    /// behavior — a session starts paused until the user presses Play —
+    /// is unchanged. Headless --session --play smokes can then verify
+    /// the campaign clock actually advanced (the starved-worker
+    /// regression measured 0.0).
+    void set_session_auto_play(bool enabled) noexcept;
+
+    /// V-SMOKE: the final one-line session summary run() prints on
+    /// exit when a session was live (sim seconds advanced, campaign
+    /// time, cycle stats) — before the session is torn down. Exposed
+    /// so hosts/tests can assert on it after run() returns.
+    [[nodiscard]] std::string session_exit_summary() const;
+
+    /// V-SMOKE / --screenshot timeout: ask run()'s loop to exit after
+    /// the current frame. Thread-safe (the timeout thread calls it);
+    /// the loop then unwinds through the full epilogue — runner stop +
+    /// join, the session exit summary, the texture unloads, CloseWindow.
+    void request_exit() noexcept;
+
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;

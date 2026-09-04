@@ -16,10 +16,16 @@
 //
 // ONE mutex guards the whole CampaignSession (the sim's EntityWorld,
 // the ladder, the ledger — everything advance() mutates and everything
-// the UI reads). The worker keeps each lock hold SHORT via an adaptive
-// tick budget: it measures how long each advance() batch took and
-// scales the per-call tick cap (1..session cap) to target a ~6-12 ms
-// hold, so the UI thread's frame lock always lands between batches.
+// the UI reads). The lock is a FairMutex (FIFO ticket order): the
+// viewer's frame scope holds it for ~a whole frame and releases for
+// only ~tens of microseconds — under a plain std::mutex that starved
+// the worker COMPLETELY (0 sim-seconds advanced over 3 wall-seconds,
+// the "campaign time doesn't advance" regression); ticket order
+// guarantees the worker is served before the UI's re-lock, every
+// frame. The worker keeps each hold SHORT via an adaptive tick
+// budget: it measures how long each advance() batch took and scales
+// the per-call tick cap (1..session cap) to target a ~6-12 ms hold,
+// so the UI thread's frame lock waits at most one batch.
 //
 // Pause semantics: the runner's paused flag is the UI's clock switch —
 // the worker stops advancing but KEEPS waking (cheap), and the session
@@ -31,10 +37,11 @@
 //     stops + joins the worker before the host may destroy it).
 //   - The worker touches ONLY the session (no GL, no raylib, no ImGui
 //     — campaign_session.cpp stays headless).
-//   - Single mutex, two lock sites (worker advance, host read), no
+//   - Single lock, two lock sites (worker advance, host read), no
 //     nesting: deadlock-free by construction.
 //   - set_paused/set_speed use an atomic + the session lock only to
-//     mirror the flag; they never block on a running advance for long.
+//     mirror the flag; they never block for long (FIFO order means at
+//     most one worker batch — ~6-12 ms — ahead of them).
 //
 // The QC and every unit test still drive advance() directly on their
 // own thread — the runner is a host-side composition (the interactive
@@ -45,6 +52,7 @@
 #pragma once
 
 #include <f4/simulation/campaign_session.hpp>
+#include <f4/simulation/fair_mutex.hpp>
 
 #include <atomic>
 #include <chrono>
@@ -116,17 +124,20 @@ public:
         return time_dilated_.load();
     }
 
-    /// The session lock. The host takes it (std::unique_lock /
-    /// std::lock_guard) for its frame read+draw scope; the worker takes
-    /// it per advance batch. Single mutex, no nesting.
-    [[nodiscard]] std::mutex& mutex() noexcept { return session_mutex_; }
+    /// The session lock — FAIR (FIFO ticket order; see fair_mutex.hpp
+    /// for the starvation regression it exists to prevent). The host
+    /// takes it (std::unique_lock / std::lock_guard) for its frame
+    /// read+draw scope; the worker takes it per advance batch. One
+    /// lock, no nesting — and whatever the host's duty cycle, the
+    /// worker's queued lock is always served before the host's re-lock.
+    [[nodiscard]] FairMutex& mutex() noexcept { return session_mutex_; }
 
     /// Run `fn(session)` under the session lock — the fine-grained read
     /// path for hosts that prefer scoped lambdas over a frame-wide
     /// lock. Returns fn's result.
     template <class F>
     auto read(F&& fn) -> decltype(fn(std::declval<CampaignSession&>())) {
-        std::lock_guard<std::mutex> lock(session_mutex_);
+        std::lock_guard<FairMutex> lock(session_mutex_);
         return fn(session_);
     }
 
@@ -146,7 +157,7 @@ private:
     void worker_loop_();
 
     CampaignSession& session_;
-    std::mutex session_mutex_;
+    FairMutex session_mutex_;   // FIFO — see fair_mutex.hpp
 
     std::atomic<bool> stop_{false};
     std::atomic<bool> paused_;

@@ -164,6 +164,9 @@ struct ViewerApp::Impl {
     // Phase 2 fix: File > Exit was a no-op — the menu item's comment
     // admitted it. We now set this flag and check it in run()'s loop.
     bool should_exit = false;
+    // V-SMOKE: request_exit() is callable from ANY thread (the
+    // --screenshot timeout thread) — atomic, not a plain bool.
+    std::atomic<bool> exit_requested{false};
 
     // Phase 2: Objective search/filter. When non-empty, only objectives
     // whose class_name contains this substring (case-insensitive) are
@@ -412,6 +415,11 @@ struct ViewerApp::Impl {
     /// frame session-lock scope (a direct runner->stop() there would
     /// self-deadlock); run() processes it right after the scope ends.
     bool session_stop_requested = false;
+    /// V-SMOKE (--play): the adopted session starts RUNNING instead of
+    /// paused. Set by the CLI (--play) BEFORE request_campaign_session;
+    /// adopt_session_start honors it for both the runner and the
+    /// session's own flag. Interactive starts stay paused (default).
+    bool session_auto_play = false;
 
     // --- Selection --------------------------------------------------------
     // The sel_kind/sel_entity pair; a LiveAircraft selection stores

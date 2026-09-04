@@ -1,5 +1,79 @@
 # F4 Cleanup Pass — Changes Summary
 
+## C5 — The Starved Worker: Campaign Time Frozen Behind the Frame Lock (C5-FIX-1)
+
+**The user report: "Campaign time doesn't seem to advance any more." It
+froze COMPLETELY, not slowly — measured 0.0 sim-seconds advanced over
+3 wall-seconds with the clock on and the UI perfectly smooth.**
+
+**Root cause — an unfair mutex under a ~99.9% duty cycle.** The C4-FIX-3
+tranche moved `advance()` onto the runner's worker thread and gave the
+render loop a frame-long scope over the SAME mutex. But that scope held
+the lock through `EndDrawing()` — raylib's 60 FPS pace WAIT lives inside
+it — then released it for only ~tens of microseconds (the loop-top
+checks) before re-locking. Under that pattern a plain `std::mutex` is
+not fair: the UI thread's uncontended fast-path re-lock beats the woken
+worker every single time (2-core box: the worker NEVER got the lock).
+Campaign time advanced 0 seconds; a new regression test
+(`ViewerFramePatternDoesNotStarveWorker`) reproduces run()'s exact duty
+cycle and measured exactly 0.0.
+
+**The fix, both halves.**
+
+- **`FairMutex` (f4-simulation, header-only)** — a FIFO ticket-order
+  mutex: tickets are assigned at `lock()` entry in arrival order and
+  served in that order; every queued waiter is served before any
+  newcomer, whatever the host's lock duty cycle. With two users (the
+  worker and the frame) they strictly alternate — the worker is
+  GUARANTEED at least one advance batch per frame, so at 1x the
+  campaign clock tracks wall-clock by construction. Waiters block on a
+  condition variable (no spinning — safe on 1-2 core boxes).
+  `try_lock` never jumps the queue. The runner's session lock is now a
+  `FairMutex` (`mutex()` return type changed; the two lock sites and
+  the viewer's frame scope updated). `set_paused()`'s bounded-wait
+  contract now means "at most one worker batch (~6-12 ms) ahead of
+  you" — FIFO makes that provable instead of probabilistic.
+- **`EndDrawing()` moved OUTSIDE the frame scope** — raylib's buffer
+  swap + pace wait don't read the session; every `Draw*` has already
+  copied its data into raylib's own batch buffers by the time the last
+  draw call returns. The worker now gets the whole pace window (about
+  two-thirds of every frame) for extra batches — high-speed presets
+  (10x/60x/240x) actually reach their multipliers instead of sharing
+  one batch per frame.
+
+**Smoke hardening (the reason this shipped invisible).** The headless
+`--session` smoke never ran the clock — every session starts PAUSED,
+and no smoke ever pressed Play. Now: `--play` (with `--session`) starts
+the adopted session RUNNING; on exit the viewer prints a one-line
+summary a smoke can assert on — `[session] sim 79.8s campaign 38574439
+cycles 0 missions 0 live 48` — before any teardown. The `--screenshot`
+timeout thread now ends the run through `request_exit()` (atomic flag,
+full epilogue: runner stop + join, the summary print, ordered GPU
+unloads, `CloseWindow`) instead of `std::exit(0)` mid-frame, which
+would have skipped all of that with a joinable worker attached. Also
+fixed en passant: raylib's `TakeScreenshot` drops the directory part of
+a path (rcore.c saves basePath + basename only) — the helper
+`take_screenshot_to()` copies the file to the requested location, so
+`--screenshot /tmp/x.png` really writes `/tmp/x.png` (the flag's
+directory was silently ignored before, smokes included).
+
+**Verification.** Full suite 2,249/2,249 (100%) — 2 new tests:
+`ViewerFramePatternDoesNotStarveWorker` (run()'s exact 16 ms-hold /
+50 µs-gap frame pattern; floor: ≥0.25x wall time at 1x; the bug
+measured 0.0) and `FairMutexServesFifoAndTryLockNeverJumps` (queued
+waiter served before a later newcomer, `try_lock` refuses while
+held/queued, 3-thread mutual-exclusion hammer). Runner suite stable
+across 3 consecutive runs. `campaign_qc` over TestCamp
+(`--tasking 30 --minutes 20 --no-record`): 449 aircraft, 140 bombs,
+85 features, 29 objectives, ledger MD5 identical across two runs —
+the QC baseline is untouched (advance() semantics unchanged). Headless
+`--session --play --zoom 12 --center 390,455 --screenshot` over the
+real TestCamp world: 12 s clean run, exit 0, `[session] sim 79.8s`
+(after: ~8 s of runner time at the 10x default preset — the clock
+tracks the preset), screenshot 573 KB at the exact requested path with
+1,767 distinct colors (terrain + live layers). Before the fix the same
+run printed `sim 0.0s`.
+
 ## C4 — The Campaign Thread + Full 3D Coverage: Everything on the Map Renders (C4-FIX-3)
 
 **Two user reports over the live session: "the UI becomes unresponsive

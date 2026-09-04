@@ -36,6 +36,12 @@
 //   f4-world-viewer world.json terrain.json --zoom 8 --center 500,500
 //       Launch focused on a specific area. Useful when you want to inspect
 //       individual objectives/units without manually panning/zooming.
+//   f4-world-viewer world.json terrain.json --session --play --screenshot out.png
+//       Start the live campaign session AND leave it running (normally a
+//       session starts paused until Play). On exit the viewer prints a
+//       one-line summary ("[session] sim <s> campaign <t> ...") — the
+//       headless proof that campaign time actually advanced (the
+//       starved-worker regression shipped invisible without it).
 //
 // On startup, the viewer auto-restores the last install path from
 // settings.json (Linux: ~/.config/f4-viewer/; macOS: ~/Library/Application
@@ -104,6 +110,9 @@ int main(int argc, char** argv) {
     bool have_replay = false;
     std::string select_name;              // --select <substring>
     bool auto_session = false;            // --session: start the campaign loop
+    bool auto_play = false;               // --play: session starts RUNNING
+                                          // (headless smoke: verify time
+                                          // actually advances)
 
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
@@ -153,6 +162,12 @@ int main(int argc, char** argv) {
             // pair with --screenshot; the shot is held until the
             // async create() lands).
             auto_session = true;
+        } else if (a == "--play") {
+            // V-SMOKE: with --session, the adopted session starts
+            // RUNNING (not paused) — a smoke can then verify the
+            // campaign clock advanced (run() prints the one-line
+            // session summary on exit). No effect without --session.
+            auto_play = true;
         } else if (positional == 0) {
             try { app.load_world_json(a); }
             catch (const std::exception& e) { std::cerr << "world load: " << e.what() << "\n"; }
@@ -268,6 +283,11 @@ int main(int argc, char** argv) {
                          "loaded, or a start is already running)\n";
         }
     }
+    // V-SMOKE: --play — must be set BEFORE the session lands (the
+    // adopt path reads it when the async create() completes).
+    if (auto_play) {
+        app.set_session_auto_play(true);
+    }
 
     if (exit_after_screenshot) {
         // Take a screenshot after 4 seconds — enough for the first frames
@@ -276,13 +296,20 @@ int main(int argc, char** argv) {
         // capture must land on a frame AFTER the first swap, or it reads
         // an undefined back buffer and comes out black).
         app.schedule_screenshot(4.0f, screenshot_path);
-        // Run for 6 seconds total, then exit.
-        // The simplest way: spawn a thread that calls exit() after 6s.
-        // (We use a portable approach via std::thread + std::exit.)
-        std::thread([path = screenshot_path]() {
-            std::this_thread::sleep_for(std::chrono::seconds(6));
+        // Run for 6 seconds total, then exit — 12 when --play gave the
+        // session a running clock (the async create can eat half the
+        // window on a real theater; the smoke's assertion is that the
+        // exit summary shows sim time > 0). V-SMOKE: this now asks the
+        // run() loop to exit CLEANLY (request_exit) instead of
+        // std::exit() mid-frame — the epilogue stops + joins the
+        // campaign runner, prints the session summary, and unloads GPU
+        // resources in order before CloseWindow.
+        const int run_seconds = auto_play ? 12 : 6;
+        std::thread([&app, path = screenshot_path, run_seconds]() {
+            std::this_thread::sleep_for(
+                std::chrono::seconds(run_seconds));
             std::cout << "Screenshot saved to " << path << "; exiting.\n";
-            std::exit(0);
+            app.request_exit();
         }).detach();
     }
 

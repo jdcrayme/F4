@@ -4867,3 +4867,63 @@ Stage Summary:
   button-context joins.
 - Next: C5 the 24-hour war (the long-horizon QC acceptance over the ATM
   pipeline) — now on a session that survives being watched.
+
+---
+Task ID: 21
+Agent: main (Super Z)
+Task: C5-FIX-1 — the user's report: "Campaign time doesn't seem to
+advance any more."
+
+Work Log:
+- Synced to ac90b68 ("Campaign update" — the user's push of Task 20's
+  C4-FIX-3; working tree was byte-identical → hard reset, no divergence).
+- REPRODUCED before touching anything: a new gtest mimicking run()'s
+  exact lock duty cycle (16 ms frame hold incl. the pace wait, ~50 us
+  unlocked gap, 3 s) measured the runner worker at EXACTLY 0.0 advanced
+  sim-seconds. Root cause: the frame scope held the session mutex
+  through EndDrawing() (raylib's 60 FPS pace wait) and re-locked ~tens
+  of us later; a plain std::mutex under that ~99.9% duty cycle is not
+  fair — the UI's uncontended fast-path re-lock beat the woken worker
+  every time (2-core box). The campaign clock was frozen while the UI
+  stayed smooth.
+- FairMutex (f4-simulation, header-only): FIFO ticket-order mutex
+  (ticket at lock() entry, served in arrival order, condvar blocking,
+  try_lock never jumps the queue). Runner's session lock is now
+  FairMutex; mutex() return type changed; the 3 lock sites + read()
+  + the viewer frame scope updated. With 2 users they strictly
+  alternate — the worker gets >=1 advance batch per frame, so 1x
+  tracks wall-clock by construction.
+- run(): EndDrawing() moved OUTSIDE the frame session scope (draw
+  calls have copied their data by the time they return; the pace wait
+  doesn't need the lock) — the worker now uses the whole pace window
+  for extra batches (high-speed presets reach their multipliers).
+- Smoke hardening (why it shipped invisible): --play (with --session)
+  starts the adopted session running; run() prints a one-line
+  "[session] sim <s> campaign <t> ..." exit summary after joining the
+  worker; the --screenshot timeout thread ends the run via the new
+  thread-safe request_exit() (atomic) so the full epilogue runs (runner
+  stop+join, summary, GPU unloads, CloseWindow) instead of std::exit(0)
+  mid-frame; take_screenshot_to() fixes raylib's TakeScreenshot
+  dropping the directory part (rcore.c saves basePath+basename) —
+  --screenshot /tmp/x.png now really writes /tmp/x.png.
+- Verification: reproduction test now passes (kept as the permanent
+  regression pin, worst-case pattern on purpose — fairness must hold
+  even without the EndDrawing move); new FairMutex FIFO/try_lock/
+  mutual-exclusion test; runner suite 7/7 stable across 3 runs; full
+  suite 2,249/2,249 (100%) under Xvfb; campaign_qc over TestCamp
+  identical to baseline (449/140/85/29, ledger MD5 equal across two
+  runs); headless --session --play over the real TestCamp world:
+  12 s, exit 0, "[session] sim 79.8s campaign 38574439", screenshot
+  573 KB at the exact requested path (was sim 0.0s before the fix).
+
+Stage Summary:
+- Campaign time advances again — guaranteed by lock FAIRNESS, not by
+  hoping the host's duty cycle stays friendly; the worker and the
+  frame strictly alternate, and the pace window is now shared.
+- The headless smoke finally watches the clock: --play + the exit
+  summary line make "time advanced" an assertable fact, closing the
+  exact test gap that let the starvation ship.
+- QC baseline untouched (advance() semantics unchanged — the fix is
+  entirely host-side composition).
+- Next: C5 proper — the 24-hour war acceptance run (long-horizon QC
+  over the ATM pipeline), now on a campaign whose clock provably runs.

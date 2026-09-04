@@ -222,26 +222,33 @@ bool ViewerApp::adopt_session_start() {
         // A new session starts PAUSED — the user starts the clock
         // deliberately (the tasking cycle is a 30-minute commitment at
         // 1x; an accidentally-live loop is the worse default).
-        impl_->session->set_paused(true);
+        // V-SMOKE: --play opts out (headless smokes must verify the
+        // campaign actually ADVANCES — the starved-worker regression
+        // shipped invisible precisely because no smoke ever ran the
+        // clock).
+        impl_->session->set_paused(!impl_->session_auto_play);
         impl_->sel_kind = Impl::SelectionKind::None;
         impl_->sel_entity = f4::entities::EntityId{};
         // V-THREAD: launch the campaign runner — the worker thread that
         // owns advance() from now on (the frame read scope in run()
         // locks the runner's mutex; the old inline per-frame advance is
-        // gone). Starts PAUSED with the current speed preset; the
-        // worker idles (no debt accrues) until the user presses Play.
+        // gone). Starts with the current speed preset, paused unless
+        // --play; the worker idles (no debt accrues) until Play.
         const int idx = std::clamp(impl_->campaign_speed_index, 0,
                                    kSessionSpeedCount - 1);
         impl_->session_runner =
             std::make_unique<f4::simulation::CampaignSessionRunner>(
-                *impl_->session, kSessionSpeedTable[idx], /*paused=*/true);
+                *impl_->session, kSessionSpeedTable[idx],
+                /*paused=*/!impl_->session_auto_play);
         impl_->session_runner->start();
         // V-3DLIVE: reset the camera-bubble tracking (a fresh session
         // re-points the bubble on the next camera move).
         impl_->last_bubble_zoom = -1.0f;
         impl_->last_bubble_gx = -1.0e9f;
         impl_->last_bubble_gy = -1.0e9f;
-        impl_->status_msg = "Campaign session started (paused)";
+        impl_->status_msg = impl_->session_auto_play
+            ? "Campaign session started (running)"
+            : "Campaign session started (paused)";
         return true;
     }
     std::snprintf(impl_->campaign_error, sizeof(impl_->campaign_error),
@@ -262,6 +269,38 @@ bool ViewerApp::campaign_session_starting() const noexcept {
 
 bool ViewerApp::campaign_session_live() const noexcept {
     return impl_->session != nullptr;
+}
+
+void ViewerApp::set_session_auto_play(bool enabled) noexcept {
+    impl_->session_auto_play = enabled;
+}
+
+void ViewerApp::request_exit() noexcept {
+    // V-SMOKE: thread-safe (the --screenshot timeout thread calls this).
+    // run()'s loop unwinds through the FULL epilogue — runner stop +
+    // join, the session exit summary, the GL-context-safe texture
+    // unloads, CloseWindow — instead of std::exit() mid-frame, which
+    // skipped all of it (and, with the runner now alive, would have
+    // killed the process with a joinable worker thread attached).
+    impl_->exit_requested.store(true);
+}
+
+std::string ViewerApp::session_exit_summary() const {
+    // V-SMOKE: one line a headless --session --play run can assert on.
+    // Safe any time after run() stopped the runner (the worker is
+    // joined; the session is frozen). Reading a live session is ALSO
+    // safe for callers holding the runner's lock — but the intended
+    // callers (run()'s exit, main() after run()) run after the join.
+    if (!impl_->session) return {};
+    const auto& st = impl_->session->stats();
+    char buf[192];
+    std::snprintf(buf, sizeof(buf),
+                  "[session] sim %.1fs  campaign %lld  cycles %d  "
+                  "missions %d  live %d",
+                  impl_->session->sim().sim_time_s(),
+                  static_cast<long long>(impl_->session->campaign_time()),
+                  st.cycles, st.intents, st.live_aircraft);
+    return buf;
 }
 
 void ViewerApp::stop_campaign_session() {

@@ -29,6 +29,7 @@
 #include <f4/simulation/campaign_session_runner.hpp>
 #include <f4/simulation/bubble_manager.hpp>
 #include <f4/simulation/visual_model_component.hpp>
+#include <f4/simulation/fair_mutex.hpp>
 #include <f4/entities/entity.hpp>
 
 #include <gtest/gtest.h>
@@ -40,6 +41,7 @@
 #include <memory>
 #include <string>
 #include <thread>
+#include <vector>
 
 using namespace f4::simulation;
 using f4::entities::EntityHandle;
@@ -331,4 +333,120 @@ TEST(CampaignSessionRunner, DestructorJoinsWithoutExplicitStop) {
     // The session outlived the runner and is still usable.
     EXPECT_GT(s.session->sim().sim_time_s(), 0.0);
     std::filesystem::remove_all(s.dir);
+}
+
+// ── 6. The viewer's REAL frame pattern must not starve the worker ─────────
+//
+// REGRESSION (the "campaign time doesn't advance" report): run()'s frame
+// scope holds the runner's mutex for the WHOLE frame — the draw AND
+// EndDrawing's 60 FPS pace wait live inside the lock — then releases for
+// only ~tens of microseconds (process_session_stop + the loop-top checks)
+// before re-locking. A plain std::mutex under that pattern can starve the
+// worker thread nearly completely: campaign time crawls to a stop while
+// the UI stays smooth. This test reproduces the exact lock duty cycle and
+// pins a floor on how much sim time the worker must still advance.
+TEST(CampaignSessionRunner, ViewerFramePatternDoesNotStarveWorker) {
+    if (!std::filesystem::exists(f16_config_path())) {
+        GTEST_SKIP() << "f16.json fixture not generated";
+    }
+    auto s = make_garrison_session();
+    ASSERT_NE(s.session, nullptr);
+    s.session->set_paused(false);
+
+    CampaignSessionRunner runner(*s.session, 1.0, /*paused=*/false);
+    runner.start();
+
+    // The "UI thread": 60 FPS frames, each holding the session lock for
+    // the full 16.67 ms frame (draw + the vsync wait inside the lock),
+    // then a ~50 us unlocked gap — the OLD run() duty cycle (the fix
+    // ALSO moved EndDrawing out of the scope; this pattern stays the
+    // worst case on purpose — fairness must hold even without that).
+    constexpr int kFrames = 180;  // ~3 s of wall time
+    for (int i = 0; i < kFrames; ++i) {
+        {
+            std::lock_guard frame(runner.mutex());
+            std::this_thread::sleep_for(std::chrono::milliseconds(16));
+        }  // lock released — the worker's only window
+        // run()'s unlocked gap: resize/key checks + adopt + stop
+        // processing — tens of microseconds, no sleeping.
+        volatile int spin = 0;
+        for (int k = 0; k < 500; ++k) spin += k;
+        (void)spin;
+    }
+
+    // 3 s at 1x owes ~3 s of sim time. A healthy worker keeps pace;
+    // even a heavily starved one must make REAL progress — the bug
+    // measured ~0. Floor at a conservative 0.25x of wall time.
+    const double advanced = runner.advanced_sim_seconds();
+    EXPECT_GT(advanced, 0.75)
+        << "worker starved under the viewer frame pattern: only "
+        << advanced << " sim-s advanced in ~3 wall-s";
+    runner.stop();
+    std::filesystem::remove_all(s.dir);
+}
+
+// ── 7. FairMutex itself: FIFO service, no queue jumping, mutual exclusion ─
+//
+// Determinism note: a FairMutex ticket is assigned at the TOP of lock(),
+// BEFORE the waiter parks — so "main holds the lock + the waiter has
+// slept long enough to park" makes the waiter's ticket strictly earlier
+// than anything launched afterwards. That makes the service order
+// (waiter before newcomer) provable, not probabilistic.
+TEST(CampaignSessionRunner, FairMutexServesFifoAndTryLockNeverJumps) {
+    FairMutex m;
+    std::vector<int> order;
+
+    // Phase 1: queued waiter is served BEFORE a later newcomer, and
+    // try_lock never succeeds while held/queued.
+    m.lock();  // main holds ticket 0
+    std::thread waiter([&] {
+        m.lock();               // ticket 1 — parks while main holds
+        order.push_back(1);
+        m.unlock();
+    });
+    // Long enough that the waiter has taken ticket 1 and parked (it
+    // cannot acquire — main holds; parking is the only path).
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+    std::thread newcomer([&] {
+        m.lock();               // ticket 2 — behind the waiter, strictly
+        order.push_back(2);
+        m.unlock();
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+    // Held (and queued waiters ahead) — try_lock must refuse.
+    EXPECT_FALSE(m.try_lock());
+
+    m.unlock();                 // hands off: waiter (ticket 1) first,
+    waiter.join();              // newcomer (ticket 2) second — FIFO
+    newcomer.join();
+
+    ASSERT_EQ(order.size(), 2u);
+    EXPECT_EQ(order[0], 1);     // the queued waiter was NOT jumped
+    EXPECT_EQ(order[1], 2);
+
+    // Phase 2: free lock — try_lock succeeds, balanced by unlock.
+    EXPECT_TRUE(m.try_lock());
+    m.unlock();
+
+    // Phase 3: mutual exclusion hammer — 3 threads x 4000 critical
+    // sections over a plain counter; a missed exclusion loses counts.
+    std::atomic<bool> go{false};
+    std::atomic<int> shared{0};
+    std::vector<std::thread> hammers;
+    for (int t = 0; t < 3; ++t) {
+        hammers.emplace_back([&] {
+            while (!go.load()) std::this_thread::yield();
+            for (int i = 0; i < 4000; ++i) {
+                std::lock_guard lock(m);
+                const int v = shared.load();
+                std::this_thread::yield();  // widen the race window
+                shared.store(v + 1);
+            }
+        });
+    }
+    go.store(true);
+    for (auto& h : hammers) h.join();
+    EXPECT_EQ(shared.load(), 12000);
 }

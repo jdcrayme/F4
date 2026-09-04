@@ -30,10 +30,39 @@
 #include <imgui.h>
 
 #include <algorithm>
+#include <cstdio>
+#include <filesystem>
 #include <memory>
 #include <string>
 
 namespace f4::viewer {
+
+namespace {
+
+// raylib's TakeScreenshot saves to basePath + BASENAME only (rcore.c:
+// "Provided fileName should not contain paths") — the --screenshot
+// CLI flag's directory part was silently dropped (a /tmp/out.png
+// request landed in the CWD). Take the shot, then put the file where
+// the caller actually asked (copy+remove, not rename: /tmp and the
+// working directory are routinely different filesystems).
+bool take_screenshot_to(const std::string& requested) {
+    TakeScreenshot(requested.c_str());
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    const fs::path want = fs::absolute(fs::path{requested}, ec);
+    if (ec || want.empty()) return false;
+    if (fs::exists(want, ec)) return true;  // raylib wrote it in place
+    const fs::path landed = fs::current_path(ec) / want.filename();
+    if (ec) return false;
+    if (!fs::exists(landed, ec)) return false;
+    std::error_code ec2;
+    fs::copy_file(landed, want, fs::copy_options::overwrite_existing, ec2);
+    if (ec2) return false;
+    fs::remove(landed, ec2);
+    return true;
+}
+
+} // namespace
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -141,7 +170,8 @@ void ViewerApp::run() {
         impl_->replay_needs_fit = false;
     }
 
-    while (!WindowShouldClose() && !impl_->should_exit) {
+    while (!WindowShouldClose() && !impl_->should_exit &&
+           !impl_->exit_requested.load()) {
         // Handle window resize
         const int new_w = GetScreenWidth();
         const int new_h = GetScreenHeight();
@@ -153,8 +183,9 @@ void ViewerApp::run() {
         // F2 = screenshot (useful for headless smoke tests)
         if (IsKeyPressed(KEY_F2)) {
             const std::string path = "f4_viewer_screenshot.png";
-            TakeScreenshot(path.c_str());
-            impl_->status_msg = "Saved screenshot: " + path;
+            const bool ok = take_screenshot_to(path);
+            impl_->status_msg = ok ? "Saved screenshot: " + path
+                                   : "Screenshot failed to save: " + path;
         }
 
         // Scheduled screenshot (used by schedule_screenshot — for headless
@@ -163,8 +194,14 @@ void ViewerApp::run() {
         // however long the (async) create took.
         if (impl_->screenshot_pending && !impl_->session_starting &&
             GetTime() >= impl_->screenshot_at) {
-            TakeScreenshot(impl_->screenshot_path.c_str());
-            impl_->status_msg = "Saved screenshot: " + impl_->screenshot_path;
+            // take_screenshot_to: raylib drops the directory part — the
+            // helper restores it, so --screenshot /tmp/x.png REALLY
+            // writes /tmp/x.png (smokes assert on the exact path).
+            const bool ok =
+                take_screenshot_to(impl_->screenshot_path);
+            impl_->status_msg = ok
+                ? "Saved screenshot: " + impl_->screenshot_path
+                : "Screenshot failed to save: " + impl_->screenshot_path;
             impl_->screenshot_pending = false;
         }
 
@@ -196,7 +233,7 @@ void ViewerApp::run() {
 
         // V-THREAD: the frame READ scope. The campaign runner's worker
         // advances the session on its own thread in short mutex-guarded
-        // batches; this scope takes the SAME mutex for the whole
+        // batches; this scope takes the SAME lock for the whole
         // input-read + draw phase, so every existing session read —
         // hit tests, canvas layers, the Campaign window, the inspector,
         // the threat overlay, session_handle() derefs — sees a frozen,
@@ -205,11 +242,25 @@ void ViewerApp::run() {
         // could legally run 240 ticks (seconds) inside the ImGui frame
         // and froze the UI ("not responding"). Gone: the worker owns
         // advance().
+        //
+        // V-THREAD-2 (the "campaign time doesn't advance" fix): the lock
+        // is the runner's FairMutex (FIFO ticket order) — under the old
+        // plain std::mutex this whole-frame scope STARVED the worker
+        // completely (the scope held the lock ~99.9% of wall time:
+        // draw + EndDrawing's pace wait, released for ~tens of µs; the
+        // UI's uncontended fast-path re-lock beat the woken worker every
+        // time — 0.0 sim-seconds over 3 wall-seconds, measured). Ticket
+        // order guarantees the worker's queued lock is served before
+        // this frame's re-lock, every frame. AND EndDrawing() now runs
+        // OUTSIDE the scope below: raylib's 60 FPS pace wait doesn't
+        // need the session lock — releasing it for the wait gives the
+        // worker the whole pace window (multiple batches per frame at
+        // high speed presets) instead of one.
         {
-            std::unique_lock<std::mutex> session_frame_lock;
+            std::unique_lock<f4::simulation::FairMutex> session_frame_lock;
             if (impl_->session_runner) {
                 session_frame_lock =
-                    std::unique_lock<std::mutex>(
+                    std::unique_lock<f4::simulation::FairMutex>(
                         impl_->session_runner->mutex());
             }
 
@@ -320,8 +371,16 @@ void ViewerApp::run() {
                 draw_canvas();
                 draw_imgui();
             }
-            EndDrawing();
+            // V-THREAD-2: scope ends BEFORE EndDrawing() — every raylib
+            // Draw* has already copied its vertices/parameters into
+            // raylib's own batch buffers (and ImGui's render pass is
+            // done), so the session lock is free to release here.
+            // EndDrawing's buffer swap + the 60 FPS pace wait run
+            // UNLOCKED — that's ~two thirds of the frame the worker
+            // can now use for advance batches.
         }  // frame read scope — the worker resumes advancing here
+
+        EndDrawing();
 
         // V-THREAD: the Stop button's deferred stop — processed OUTSIDE
         // the frame lock (the join needs the worker able to finish its
@@ -338,6 +397,14 @@ void ViewerApp::run() {
     if (impl_->session_runner) {
         impl_->session_runner->stop();
         impl_->session_runner.reset();
+    }
+    // V-SMOKE: the session's final state, one line — headless
+    // --session --play runs assert the campaign clock ADVANCED here
+    // (the starved-worker regression printed sim 0.0s while the UI
+    // looked perfectly healthy).
+    if (impl_->session) {
+        const auto line = session_exit_summary();
+        if (!line.empty()) std::fprintf(stderr, "%s\n", line.c_str());
     }
 
     // A session start still running when the window closes: join it

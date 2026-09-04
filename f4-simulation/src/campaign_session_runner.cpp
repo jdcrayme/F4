@@ -57,8 +57,8 @@ void CampaignSessionRunner::set_paused(bool p) {
     // Mirror onto the session itself under the lock — advance() no-ops
     // while paused anyway; this keeps session.paused() honest for hosts
     // that read it (the viewer's canvas layer does). Blocking here is
-    // bounded: the worker's lock holds are ~6-12 ms by design.
-    std::lock_guard<std::mutex> lock(session_mutex_);
+    // bounded: FIFO order puts at most one worker batch (~6-12 ms) ahead.
+    std::lock_guard<FairMutex> lock(session_mutex_);
     session_.set_paused(p);
 }
 
@@ -89,7 +89,7 @@ void CampaignSessionRunner::worker_loop_() {
         const double real_seconds = wall_sec * speed_.load();
 
         {
-            std::lock_guard<std::mutex> lock(session_mutex_);
+            std::lock_guard<FairMutex> lock(session_mutex_);
             // NEVER call advance() while a stop was requested — the
             // joining thread (stop()) must not wait on a fresh batch.
             if (stop_.load(std::memory_order_relaxed)) break;
