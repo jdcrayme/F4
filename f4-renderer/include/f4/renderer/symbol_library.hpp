@@ -1,55 +1,32 @@
 // f4-renderer/include/f4/renderer/symbol_library.hpp
 //
-// PUBLIC HEADER — data-driven symbol vocabulary for F4 rendering.
+// PUBLIC HEADER — the runtime symbol vocabulary for F4 rendering.
 //
 // Design
 // ------
-// The existing f4::renderer::symbols.hpp defines a fixed enum (SymbolKind)
-// with hard-coded procedural drawing in symbols.cpp. That works for the
-// existing objective + unit glyphs but doesn't scale to user-defined
-// symbols or rapid iteration on symbol geometry.
+// Symbols are authored as SVG files in a directory (one symbol per file,
+// filename stem = key — e.g. symbols/obj_airbase.svg). SymbolDirectory
+// parses each file ON DEMAND the first time its key is requested and
+// caches the result; SVG is never touched per frame. The parsed
+// SymbolDefinition is a flat list of polylines + polygons in normalized
+// [-1, +1] coordinates where (0, 0) is the symbol center and ±1 is the
+// half-extent of the symbol's bounding box:
 //
-// This header introduces a data-driven alternative: a SymbolLibrary is a
-// flat collection of SymbolDefinitions keyed by string. Each definition
-// is a list of polylines + polygons expressed in normalized [-1, +1]
-// coordinates where (0, 0) is the symbol center and ±1 is the half-extent
-// of the symbol's bounding box. This matches the existing convention in
-// symbols.cpp where `r = size_px * 0.5f` and every shape is computed as a
-// fraction of r — so a stored point of (0.5, -0.25) renders at
-// (sx + 0.5 * r, sy - 0.25 * r) on screen.
+//   screen_x = sx + px * (size_px * 0.5f)
+//   screen_y = sy + py * (size_px * 0.5f)
 //
-// Persistence
-// -----------
-// Libraries are loaded from / saved to JSON via the existing f4-json
-// library (zero new deps). The schema is intentionally flat and
-// forward-compatible — unknown keys are skipped on read so future
-// extensions (stroke color per primitive, hole polygons, etc.) don't
-// break older builds.
+// Colors are ROLES, not values: every primitive picks one of the two
+// colors the caller supplies (fill = team color, outline = contrast), so
+// authored symbols never fight the team palette. The SVG subset contract
+// (supported elements/attributes, the loud-failure policy) is documented
+// in svg_import.hpp.
 //
-//   {
-//     "version": 1,
-//     "symbols": [
-//       {
-//         "key": "example_square",
-//         "display_name": "Square",
-//         "category": "example",
-//         "description": "A simple filled square",
-//         "polylines": [
-//           { "width": 1.0, "closed": false,
-//             "points": [ {"x": -0.5, "y": -0.5}, {"x": 0.5, "y": 0.5} ] }
-//         ],
-//         "polygons": [
-//           { "filled": true,
-//             "points": [ {"x": -0.5, "y": -0.5}, {"x": 0.5, "y": -0.5},
-//                         {"x": 0.5, "y": 0.5},  {"x": -0.5, "y": 0.5} ] }
-//         ]
-//       }
-//     ]
-//   }
+// A key whose SVG is missing or fails to parse gets the built-in fallback
+// square (make_fallback_square) — the only non-file symbol in the system.
 //
 // Rendering
 // ---------
-// Two render paths mirror the existing symbols.hpp API:
+// Two render paths:
 //   draw_library_symbol(ImDrawList*, ...) — ImGui draw list (panels, legends)
 //   draw_library_symbol(...)              — raylib direct (canvas)
 // Both take the library + key + center + size_px + fill/outline colors,
@@ -58,21 +35,11 @@
 // AddConvexPolyFilled when convex and hole-free, else their earcut
 // triangle cache (AddTriangleFilled / DrawTriangle); outline polygons
 // use AddPolyline with closed=true.
-//
-// FUTURE: the eventual refactor of symbols.cpp will replace the hard-coded
-// switch in draw_symbol() with a lookup into a loaded SymbolLibrary,
-// falling back to the existing procedural shapes when a key isn't found.
-// This header is the seam for that refactor — the data model + render
-// helpers are designed to be consumable directly by symbols.cpp without
-// further changes.
 
 #pragma once
 
-#include <f4/renderer/symbols.hpp>  // for RlColor (POD struct of 4 ubytes)
-
 #include <array>
 #include <filesystem>
-#include <optional>
 #include <string>
 #include <vector>
 
@@ -81,6 +48,10 @@ struct ImVec2;
 
 namespace f4::renderer {
 
+// Forward-declared Raylib Color (POD struct of 4 ubytes) so this header
+// doesn't need raylib.h.
+struct RlColor { unsigned char r, g, b, a; };
+
 // ---------------------------------------------------------------------------
 // Data model — pure value types, no raylib/imgui deps in this header.
 // ---------------------------------------------------------------------------
@@ -88,9 +59,7 @@ namespace f4::renderer {
 /// A single 2D point in normalized symbol space.
 /// (0, 0) = symbol center. ±1 = half-extent of the symbol's bounding box.
 /// Values outside [-1, +1] are permitted (symbols can draw slightly past
-/// their nominal extent — e.g. the existing ObjAirbase draws its
-/// aerodrome circle at radius 0.75 of r, but the Unit* frames draw
-/// markers at -1.5 of r above the frame).
+/// their nominal extent — e.g. glyphs above a unit frame).
 struct SymbolPoint {
     float x = 0.0f;
     float y = 0.0f;
@@ -100,7 +69,7 @@ struct SymbolPoint {
 /// The draw helpers receive (fill, outline) — typically team color and a
 /// contrast color — and every primitive selects one of them, so authored
 /// symbols never carry absolute colors (which would fight the team
-/// palette). Mirrors the color_roles documented in f4_symbols.json.
+/// palette).
 enum class SymbolColorRole {
     Fill,       // the caller's fill color (team color), opaque
     FillBlend,  // the fill color at 85% alpha — overlapping translucency
@@ -137,24 +106,22 @@ struct SymbolPolygon {
 };
 
 /// One complete symbol definition.
-/// `key` is the dictionary lookup string (e.g. "obj_airbase").
-/// `display_name` is the human-readable label shown in the editor.
-/// `category` is an optional grouping ("objective", "unit", "example", ...).
-/// `description` is a free-form note shown in the editor.
+/// `key` is the dictionary lookup string (e.g. "obj_airbase" — the SVG
+/// filename stem). `display_name` and `description` come from the SVG's
+/// <title>/<desc>.
 struct SymbolDefinition {
     std::string key;
     std::string display_name;
-    std::string category;
     std::string description;
     std::vector<SymbolPolyline> polylines;
     std::vector<SymbolPolygon>  polygons;
 };
 
 /// A library of symbol definitions, keyed by `key`.
-/// Maintains insertion order for stable iteration in the editor's
-/// library browser. `find()` returns a pointer into the vector (so
-/// it's stable across non-mutating operations); `add_or_replace()`
-/// preserves order if updating an existing key, appends otherwise.
+/// Maintains insertion order for stable iteration. `find()` returns a
+/// pointer into the vector (so it's stable across non-mutating
+/// operations); `add_or_replace()` preserves order if updating an
+/// existing key, appends otherwise.
 class SymbolLibrary {
 public:
     /// Look up a symbol by key. Returns nullptr if not found.
@@ -167,7 +134,7 @@ public:
     void add_or_replace(SymbolDefinition def);
 
     /// Remove the definition with the given key. Returns true if removed,
-    /// false if the key wasn't present.
+    /// false if the key wasn't found.
     bool erase(const std::string& key) noexcept;
 
     /// Number of definitions.
@@ -177,9 +144,8 @@ public:
     /// Read-only access to the underlying vector (for iteration).
     [[nodiscard]] const std::vector<SymbolDefinition>& symbols() const noexcept { return symbols_; }
 
-    /// Mutable access (for in-place edits by the editor). Use carefully —
-    /// the editor is responsible for keeping `key` unique if it mutates
-    /// definitions directly.
+    /// Mutable access (for in-place edits). Use carefully — the caller
+    /// is responsible for keeping `key` unique.
     [[nodiscard]] std::vector<SymbolDefinition>& mutable_symbols() noexcept { return symbols_; }
 
 private:
@@ -187,47 +153,69 @@ private:
 };
 
 // ---------------------------------------------------------------------------
-// JSON I/O — implemented in symbol_library.cpp using f4-json.
-// Throws std::runtime_error on I/O or parse failure.
+// Fill caches — earcut triangulation for concave / holed fills.
 // ---------------------------------------------------------------------------
-
-/// Load a SymbolLibrary from a JSON file on disk.
-/// Throws std::runtime_error if the file can't be opened, or if the JSON
-/// is malformed. Unknown fields are skipped (forward-compat).
-[[nodiscard]] SymbolLibrary load_symbol_library(const std::filesystem::path& path);
-
-/// Parse a SymbolLibrary from an in-memory JSON string.
-/// Useful for unit tests and for embedding a default library as a literal.
-/// Not marked [[nodiscard]] because EXPECT_THROW macros in tests
-/// intentionally discard the return value when checking error paths.
-SymbolLibrary load_symbol_library_from_string(const std::string& json);
-
-/// Serialize a SymbolLibrary to an in-memory JSON string.
-/// Pretty-printed with 2-space indentation for human readability and
-/// git-friendly diffs.
-[[nodiscard]] std::string symbol_library_to_json(const SymbolLibrary& lib);
-
-/// Save a SymbolLibrary to a JSON file on disk.
-/// Throws std::runtime_error on I/O failure. The file is overwritten if
-/// it already exists.
-void save_symbol_library(const SymbolLibrary& lib,
-                          const std::filesystem::path& path);
-
-/// Return a small library with 3 trivial example symbols (square,
-/// triangle, diamond). Used by the Symbol Creator tool as the initial
-/// content on first launch, and by unit tests as a known-good fixture.
-[[nodiscard]] SymbolLibrary make_default_symbol_library();
 
 /// Recompute derived fill caches for every filled polygon in `def`:
 /// concave polygons and polygons with holes get an earcut triangulation
 /// into SymbolPolygon::triangles; convex hole-free polygons keep the
-/// fan fast path (empty cache). Called by the JSON loader and the SVG
-/// importer; call it again after mutating points/holes (e.g. in the
-/// Symbol Creator) — rendering trusts the cache.
+/// fan fast path (empty cache). Called by the SVG importer; call it
+/// again after mutating points/holes — rendering trusts the cache.
 void refresh_fill_caches(SymbolDefinition& def);
 
 // ---------------------------------------------------------------------------
-// Rendering — mirrors the existing symbols.hpp API.
+// The fallback symbol + the lazy SVG directory.
+// ---------------------------------------------------------------------------
+
+/// The only procedural symbol left: an unfilled square outline drawn
+/// when a requested key has no SVG in the directory. Data-defined and
+/// rendered by the normal library paths — no dedicated drawing code.
+[[nodiscard]] SymbolDefinition make_fallback_square();
+
+/// A directory of SVG symbol files, parsed on demand.
+///
+/// get()/draw() resolve a key by reading <dir>/<key>.svg ONCE; the
+/// parsed definition is cached in the backing SymbolLibrary. A key whose
+/// file is missing or fails the subset parser gets the fallback square
+/// cached under that key (so a missing symbol costs exactly one file
+/// probe for the process lifetime) and is recorded in failed_keys().
+class SymbolDirectory {
+public:
+    /// `dir` may not exist (everything falls back); resolution policy is
+    /// the caller's (the world-viewer probes exe-relative + CWD-relative
+    /// candidates; tests pass explicit paths).
+    explicit SymbolDirectory(std::filesystem::path dir);
+
+    [[nodiscard]] const std::filesystem::path& dir() const noexcept { return dir_; }
+    [[nodiscard]] const SymbolLibrary& library() const noexcept { return lib_; }
+
+    /// Keys that fell back (missing/unparseable SVGs), in request order.
+    /// For diagnostics — e.g. a viewer status line or test assertions.
+    [[nodiscard]] const std::vector<std::string>& failed_keys() const noexcept { return failed_; }
+
+    /// Draw `key` with raylib primitives (loads on first use).
+    /// No-op if the key somehow has no cached definition.
+    void draw(const std::string& key, float center_x, float center_y,
+              float size_px, RlColor fill_color, RlColor outline_color,
+              bool filled = true);
+
+    /// Draw `key` into an ImGui draw list (loads on first use).
+    void draw_imgui(const std::string& key, ImDrawList* dl, ImVec2 center,
+                    float size_px, unsigned int fill_col,
+                    unsigned int outline_col, bool filled = true);
+
+private:
+    /// Parse <dir_>/<key>.svg into lib_ if not present; on any failure,
+    /// cache the fallback square under `key`.
+    void ensure_loaded(const std::string& key);
+
+    std::filesystem::path dir_;
+    SymbolLibrary lib_;
+    std::vector<std::string> failed_;
+};
+
+// ---------------------------------------------------------------------------
+// Rendering — walk a definition and emit primitives.
 // Both paths look up `key` in `lib` and no-op if not found.
 // ---------------------------------------------------------------------------
 

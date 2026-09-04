@@ -1,0 +1,10 @@
+<?xml version="1.0"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-1 -1 2 2">
+  <title>SAM Site</title>
+  <desc>Triangle with notch: missile site</desc>
+  <path d="M 0 -0.75 L -0.75 0.525 L 0.75 0.525 Z" fill="currentColor" data-color-role="fill_blend" />
+  <path d="M 0 -0.75 L -0.75 0.525 L 0.75 0.525 Z" fill="none" stroke="#000000" stroke-width="0.03125" />
+  <path d="M 0 -0.3 L 0 0.375" fill="none" stroke="#000000" stroke-width="0.046875" />
+  <path d="M 0 -0.3 L -0.15 -0.1125" fill="none" stroke="#000000" stroke-width="0.046875" />
+  <path d="M 0 -0.3 L 0.15 -0.1125" fill="none" stroke="#000000" stroke-width="0.046875" />
+</svg>

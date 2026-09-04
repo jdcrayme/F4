@@ -1,0 +1,8 @@
+<?xml version="1.0"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-1 -1 2 2">
+  <title>Hilltop</title>
+  <desc>Triangle with dot: elevated terrain</desc>
+  <path d="M 0 -0.75 L -0.75 0.525 L 0.75 0.525 Z" fill="currentColor" data-color-role="fill_blend" />
+  <path d="M 0.06 -0.1125 L 0.0424264 -0.0700736 L 3.67394e-18 -0.0525 L -0.0424264 -0.0700736 L -0.06 -0.1125 L -0.0424264 -0.154926 L -1.10218e-17 -0.1725 L 0.0424264 -0.154926 Z" fill="#000000" data-color-role="outline" />
+  <path d="M 0 -0.75 L -0.75 0.525 L 0.75 0.525 Z" fill="none" stroke="#000000" stroke-width="0.03125" />
+</svg>

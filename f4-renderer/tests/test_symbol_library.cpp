@@ -1,445 +1,193 @@
 // f4-renderer/tests/test_symbol_library.cpp
 //
-// Unit tests for the data-driven symbol library: data-model operations
-// (find/add_or_replace/erase), JSON round-trip (parse + serialize),
-// default library shape, and error handling for malformed input.
-//
-// No Raylib GPU context or ImGui needed — we test only the pure data
-// model + JSON I/O. The render helpers (draw_library_symbol) are
-// exercised at runtime by the Symbol Creator tool; a GPU-context smoke
-// test would belong in the world-viewer's screenshot path.
+// Unit tests for the runtime symbol system (symbol_library.hpp): the
+// SymbolLibrary data model, earcut fill caches, the fallback square,
+// and the lazy SVG-backed SymbolDirectory. No GPU context required
+// (draw helpers are exercised at runtime by the world-viewer canvas).
 
 #include <f4/renderer/symbol_library.hpp>
+#include <f4/renderer/svg_import.hpp>
 
 #include <gtest/gtest.h>
 
+#include <cmath>
 #include <filesystem>
 #include <fstream>
-#include <sstream>
-#include <string>
-#include <vector>
 
-using namespace f4::renderer;
+namespace {
 
-// ===========================================================================
-// Data model — SymbolLibrary find/add_or_replace/erase
-// ===========================================================================
+using f4::renderer::SymbolColorRole;
+using f4::renderer::SymbolDefinition;
+using f4::renderer::SymbolDirectory;
+using f4::renderer::SymbolLibrary;
+using f4::renderer::make_fallback_square;
+using f4::renderer::refresh_fill_caches;
 
-TEST(SymbolLibraryModel, EmptyLibraryHasZeroSize) {
+double triangle_area_sum(
+    const std::vector<std::array<f4::renderer::SymbolPoint, 3>>& tris) {
+    double total = 0.0;
+    for (const auto& t : tris) {
+        total += std::fabs(
+            static_cast<double>(t[1].x - t[0].x) * (t[2].y - t[0].y) -
+            static_cast<double>(t[2].x - t[0].x) * (t[1].y - t[0].y)) * 0.5;
+    }
+    return total;
+}
+
+} // namespace
+
+// ── SymbolLibrary — dictionary operations ─────────────────────────────────
+
+TEST(SymbolLibrary, FindAddReplaceErase) {
     SymbolLibrary lib;
     EXPECT_TRUE(lib.empty());
-    EXPECT_EQ(lib.size(), 0u);
-    EXPECT_EQ(lib.find("anything"), nullptr);
-}
 
-TEST(SymbolLibraryModel, AddDefinitionAppends) {
-    SymbolLibrary lib;
     SymbolDefinition s;
-    s.key = "test_square";
-    s.display_name = "Square";
-    lib.add_or_replace(std::move(s));
-    ASSERT_EQ(lib.size(), 1u);
-    ASSERT_NE(lib.find("test_square"), nullptr);
-    EXPECT_EQ(lib.find("test_square")->display_name, "Square");
-}
+    s.key = "a";
+    lib.add_or_replace(s);
+    EXPECT_EQ(1u, lib.size());
+    ASSERT_NE(nullptr, lib.find("a"));
+    EXPECT_EQ("a", lib.find("a")->key);
+    EXPECT_EQ(nullptr, lib.find("missing"));
 
-TEST(SymbolLibraryModel, AddOrReplaceExistingKeyPreservesOrder) {
-    SymbolLibrary lib;
-    lib.add_or_replace({.key = "a"});
-    lib.add_or_replace({.key = "b"});
-    lib.add_or_replace({.key = "c"});
+    s.display_name = "updated";
+    lib.add_or_replace(s);  // replace in place
+    EXPECT_EQ(1u, lib.size());
+    EXPECT_EQ("updated", lib.find("a")->display_name);
 
-    // Replace "b" in place — order should stay [a, b, c].
-    SymbolDefinition replacement;
-    replacement.key = "b";
-    replacement.display_name = "B (updated)";
-    lib.add_or_replace(std::move(replacement));
-
-    ASSERT_EQ(lib.size(), 3u);
-    EXPECT_EQ(lib.symbols()[0].key, "a");
-    EXPECT_EQ(lib.symbols()[1].key, "b");
-    EXPECT_EQ(lib.symbols()[1].display_name, "B (updated)");
-    EXPECT_EQ(lib.symbols()[2].key, "c");
-}
-
-TEST(SymbolLibraryModel, AddOrReplaceNewKeyAppends) {
-    SymbolLibrary lib;
-    lib.add_or_replace({.key = "a"});
-    lib.add_or_replace({.key = "b"});
-    lib.add_or_replace({.key = "c"});
-    lib.add_or_replace({.key = "d"});
-
-    ASSERT_EQ(lib.size(), 4u);
-    EXPECT_EQ(lib.symbols()[3].key, "d");
-}
-
-TEST(SymbolLibraryModel, EraseExistingKeyReturnsTrue) {
-    SymbolLibrary lib;
-    lib.add_or_replace({.key = "a"});
-    lib.add_or_replace({.key = "b"});
-    lib.add_or_replace({.key = "c"});
-
-    EXPECT_TRUE(lib.erase("b"));
-    ASSERT_EQ(lib.size(), 2u);
-    EXPECT_EQ(lib.symbols()[0].key, "a");
-    EXPECT_EQ(lib.symbols()[1].key, "c");
-    EXPECT_EQ(lib.find("b"), nullptr);
-}
-
-TEST(SymbolLibraryModel, EraseMissingKeyReturnsFalse) {
-    SymbolLibrary lib;
-    lib.add_or_replace({.key = "a"});
-    EXPECT_FALSE(lib.erase("nonexistent"));
-    EXPECT_EQ(lib.size(), 1u);
-}
-
-TEST(SymbolLibraryModel, MutableSymbolsAllowsInPlaceEdit) {
-    SymbolLibrary lib;
-    lib.add_or_replace({.key = "a", .display_name = "Old"});
-    auto& syms = lib.mutable_symbols();
-    syms[0].display_name = "New";
-    EXPECT_EQ(lib.find("a")->display_name, "New");
-}
-
-// ===========================================================================
-// JSON I/O — round-trip tests
-// ===========================================================================
-
-TEST(SymbolLibraryJson, EmptyLibraryRoundTrips) {
-    SymbolLibrary lib;
-    auto json = symbol_library_to_json(lib);
-    auto lib2 = load_symbol_library_from_string(json);
-    EXPECT_TRUE(lib2.empty());
-    EXPECT_EQ(lib2.size(), 0u);
-}
-
-TEST(SymbolLibraryJson, SingleSymbolWithPolygonRoundTrips) {
-    SymbolLibrary lib;
-    SymbolDefinition s;
-    s.key = "square";
-    s.display_name = "Square";
-    s.category = "example";
-    s.description = "A filled square.";
-    s.polygons.push_back({
-        { {-0.5f, -0.5f}, {0.5f, -0.5f}, {0.5f, 0.5f}, {-0.5f, 0.5f} },
-        true  // filled
-    });
-    lib.add_or_replace(std::move(s));
-
-    auto json = symbol_library_to_json(lib);
-    auto lib2 = load_symbol_library_from_string(json);
-
-    ASSERT_EQ(lib2.size(), 1u);
-    const auto* s2 = lib2.find("square");
-    ASSERT_NE(s2, nullptr);
-    EXPECT_EQ(s2->display_name, "Square");
-    EXPECT_EQ(s2->category, "example");
-    EXPECT_EQ(s2->description, "A filled square.");
-    ASSERT_EQ(s2->polygons.size(), 1u);
-    ASSERT_EQ(s2->polygons[0].points.size(), 4u);
-    EXPECT_FLOAT_EQ(s2->polygons[0].points[0].x, -0.5f);
-    EXPECT_FLOAT_EQ(s2->polygons[0].points[0].y, -0.5f);
-    EXPECT_FLOAT_EQ(s2->polygons[0].points[2].x, 0.5f);
-    EXPECT_FLOAT_EQ(s2->polygons[0].points[2].y, 0.5f);
-    EXPECT_TRUE(s2->polygons[0].filled);
-    EXPECT_TRUE(s2->polylines.empty());
-}
-
-TEST(SymbolLibraryJson, SingleSymbolWithPolylineRoundTrips) {
-    SymbolLibrary lib;
-    SymbolDefinition s;
-    s.key = "line";
-    s.display_name = "Line";
-    s.polylines.push_back({
-        { {-0.7f, 0.0f}, {0.7f, 0.0f} },
-        2.5f,   // width
-        false   // not closed
-    });
-    lib.add_or_replace(std::move(s));
-
-    auto json = symbol_library_to_json(lib);
-    auto lib2 = load_symbol_library_from_string(json);
-
-    ASSERT_EQ(lib2.size(), 1u);
-    const auto* s2 = lib2.find("line");
-    ASSERT_NE(s2, nullptr);
-    ASSERT_EQ(s2->polylines.size(), 1u);
-    ASSERT_EQ(s2->polylines[0].points.size(), 2u);
-    EXPECT_FLOAT_EQ(s2->polylines[0].width, 2.5f);
-    EXPECT_FALSE(s2->polylines[0].closed);
-}
-
-TEST(SymbolLibraryJson, MultipleSymbolsPreserveOrder) {
-    SymbolLibrary lib;
-    lib.add_or_replace({.key = "alpha"});
-    lib.add_or_replace({.key = "beta"});
-    lib.add_or_replace({.key = "gamma"});
-
-    auto json = symbol_library_to_json(lib);
-    auto lib2 = load_symbol_library_from_string(json);
-
-    ASSERT_EQ(lib2.size(), 3u);
-    EXPECT_EQ(lib2.symbols()[0].key, "alpha");
-    EXPECT_EQ(lib2.symbols()[1].key, "beta");
-    EXPECT_EQ(lib2.symbols()[2].key, "gamma");
-}
-
-TEST(SymbolLibraryJson, UnknownKeysAreSkipped) {
-    // Forward-compat: a future schema with extra fields should parse.
-    const std::string json = R"({
-      "version": 1,
-      "future_field": "ignored",
-      "symbols": [
-        {
-          "key": "test",
-          "display_name": "Test",
-          "future_per_symbol_field": 42,
-          "polylines": [],
-          "polygons": []
-        }
-      ]
-    })";
-    auto lib = load_symbol_library_from_string(json);
-    ASSERT_EQ(lib.size(), 1u);
-    EXPECT_EQ(lib.find("test")->display_name, "Test");
-}
-
-TEST(SymbolLibraryJson, MissingOptionalFieldsDefaultToEmpty) {
-    const std::string json = R"({
-      "version": 1,
-      "symbols": [
-        { "key": "minimal" }
-      ]
-    })";
-    auto lib = load_symbol_library_from_string(json);
-    ASSERT_EQ(lib.size(), 1u);
-    const auto* s = lib.find("minimal");
-    ASSERT_NE(s, nullptr);
-    EXPECT_EQ(s->display_name, "");
-    EXPECT_EQ(s->category, "");
-    EXPECT_EQ(s->description, "");
-    EXPECT_TRUE(s->polylines.empty());
-    EXPECT_TRUE(s->polygons.empty());
-}
-
-TEST(SymbolLibraryJson, MissingWidthDefaultsToOne) {
-    const std::string json = R"({
-      "symbols": [
-        {
-          "key": "default_width",
-          "polylines": [
-            { "points": [ {"x": -0.5, "y": 0.0}, {"x": 0.5, "y": 0.0} ] }
-          ]
-        }
-      ]
-    })";
-    auto lib = load_symbol_library_from_string(json);
-    const auto* s = lib.find("default_width");
-    ASSERT_NE(s, nullptr);
-    ASSERT_EQ(s->polylines.size(), 1u);
-    EXPECT_FLOAT_EQ(s->polylines[0].width, 1.0f);
-    EXPECT_FALSE(s->polylines[0].closed);
-}
-
-TEST(SymbolLibraryJson, MissingFilledDefaultsToTrue) {
-    const std::string json = R"({
-      "symbols": [
-        {
-          "key": "default_filled",
-          "polygons": [
-            { "points": [ {"x": -0.5, "y": -0.5}, {"x": 0.5, "y": -0.5}, {"x": 0.0, "y": 0.5} ] }
-          ]
-        }
-      ]
-    })";
-    auto lib = load_symbol_library_from_string(json);
-    const auto* s = lib.find("default_filled");
-    ASSERT_NE(s, nullptr);
-    ASSERT_EQ(s->polygons.size(), 1u);
-    EXPECT_TRUE(s->polygons[0].filled);
-}
-
-TEST(SymbolLibraryJson, NegativeCoordinatesRoundTrip) {
-    SymbolLibrary lib;
-    SymbolDefinition s;
-    s.key = "neg";
-    s.polylines.push_back({
-        { {-1.0f, -1.0f}, {1.0f, 1.0f} },
-        1.0f,
-        false
-    });
-    lib.add_or_replace(std::move(s));
-
-    auto json = symbol_library_to_json(lib);
-    auto lib2 = load_symbol_library_from_string(json);
-
-    const auto* s2 = lib2.find("neg");
-    ASSERT_NE(s2, nullptr);
-    ASSERT_EQ(s2->polylines[0].points.size(), 2u);
-    EXPECT_FLOAT_EQ(s2->polylines[0].points[0].x, -1.0f);
-    EXPECT_FLOAT_EQ(s2->polylines[0].points[0].y, -1.0f);
-    EXPECT_FLOAT_EQ(s2->polylines[0].points[1].x, 1.0f);
-    EXPECT_FLOAT_EQ(s2->polylines[0].points[1].y, 1.0f);
-}
-
-TEST(SymbolLibraryJson, FractionalWidthRoundTrips) {
-    SymbolLibrary lib;
-    SymbolDefinition s;
-    s.key = "frac";
-    s.polylines.push_back({
-        { {-0.5f, 0.0f}, {0.5f, 0.0f} },
-        0.125f,
-        false
-    });
-    lib.add_or_replace(std::move(s));
-
-    auto json = symbol_library_to_json(lib);
-    auto lib2 = load_symbol_library_from_string(json);
-    EXPECT_FLOAT_EQ(lib2.find("frac")->polylines[0].width, 0.125f);
-}
-
-TEST(SymbolLibraryJson, ClosedPolylineFlagRoundTrips) {
-    SymbolLibrary lib;
-    SymbolDefinition s;
-    s.key = "closed";
-    s.polylines.push_back({
-        { {0.0f, -0.5f}, {0.5f, 0.5f}, {-0.5f, 0.5f} },
-        1.0f,
-        true  // closed
-    });
-    lib.add_or_replace(std::move(s));
-
-    auto json = symbol_library_to_json(lib);
-    auto lib2 = load_symbol_library_from_string(json);
-    EXPECT_TRUE(lib2.find("closed")->polylines[0].closed);
-}
-
-TEST(SymbolLibraryJson, RoundTripsFullDefaultLibrary) {
-    auto lib = make_default_symbol_library();
-    ASSERT_EQ(lib.size(), 3u);
-    auto json = symbol_library_to_json(lib);
-    auto lib2 = load_symbol_library_from_string(json);
-    ASSERT_EQ(lib2.size(), 3u);
-
-    // Check the three example symbols survived intact.
-    ASSERT_NE(lib2.find("example_square"), nullptr);
-    ASSERT_NE(lib2.find("example_triangle"), nullptr);
-    ASSERT_NE(lib2.find("example_diamond"), nullptr);
-
-    // example_square: 1 polygon (filled) + 1 polyline.
-    const auto* sq = lib2.find("example_square");
-    EXPECT_EQ(sq->polygons.size(), 1u);
-    EXPECT_TRUE(sq->polygons[0].filled);
-    EXPECT_EQ(sq->polygons[0].points.size(), 4u);
-    EXPECT_EQ(sq->polylines.size(), 1u);
-    EXPECT_EQ(sq->polylines[0].points.size(), 2u);
-
-    // example_triangle: 1 polygon (outline only).
-    const auto* tri = lib2.find("example_triangle");
-    EXPECT_EQ(tri->polygons.size(), 1u);
-    EXPECT_FALSE(tri->polygons[0].filled);
-    EXPECT_EQ(tri->polygons[0].points.size(), 3u);
-
-    // example_diamond: 1 polygon (filled) + 1 polyline.
-    const auto* dia = lib2.find("example_diamond");
-    EXPECT_EQ(dia->polygons.size(), 1u);
-    EXPECT_TRUE(dia->polygons[0].filled);
-    EXPECT_EQ(dia->polygons[0].points.size(), 4u);
-    EXPECT_EQ(dia->polylines.size(), 1u);
-}
-
-// ===========================================================================
-// File I/O — load/save to actual disk paths
-// ===========================================================================
-
-TEST(SymbolLibraryJson, SaveAndLoadFileRoundTrip) {
-    namespace fs = std::filesystem;
-    const auto tmp_dir = fs::temp_directory_path() / "f4_symbol_library_test";
-    fs::create_directories(tmp_dir);
-    const auto tmp_file = tmp_dir / "test_lib.json";
-
-    // Clean up any stale file from a previous run.
-    if (fs::exists(tmp_file)) {
-        fs::remove(tmp_file);
-    }
-
-    SymbolLibrary lib;
-    lib.add_or_replace({.key = "file_test", .display_name = "File Test"});
-
-    ASSERT_NO_THROW(save_symbol_library(lib, tmp_file));
-    ASSERT_TRUE(fs::exists(tmp_file));
-
-    auto lib2 = load_symbol_library(tmp_file);
-    ASSERT_EQ(lib2.size(), 1u);
-    EXPECT_EQ(lib2.find("file_test")->display_name, "File Test");
-
-    // Cleanup.
-    fs::remove(tmp_file);
-    fs::remove(tmp_dir);
-}
-
-TEST(SymbolLibraryJson, LoadNonexistentFileThrows) {
-    namespace fs = std::filesystem;
-    const auto tmp_dir = fs::temp_directory_path() / "f4_symbol_library_nonexistent";
-    const auto nope = tmp_dir / "does_not_exist.json";
-    EXPECT_THROW(load_symbol_library(nope), std::runtime_error);
-}
-
-// ===========================================================================
-// Error handling — malformed JSON should throw with a position-annotated msg
-// ===========================================================================
-
-TEST(SymbolLibraryJson, MalformedJsonThrows) {
-    const std::string malformed = R"({ "symbols": [ { "key":  }] })";
-    // "key": <missing value> — the reader should throw.
-    EXPECT_THROW(load_symbol_library_from_string(malformed), std::runtime_error);
-}
-
-TEST(SymbolLibraryJson, EmptyStringThrows) {
-    EXPECT_THROW(load_symbol_library_from_string(""), std::runtime_error);
-}
-
-TEST(SymbolLibraryJson, EmptyObjectYieldsEmptyLibrary) {
-    auto lib = load_symbol_library_from_string("{}");
+    EXPECT_TRUE(lib.erase("a"));
+    EXPECT_FALSE(lib.erase("a"));
     EXPECT_TRUE(lib.empty());
 }
 
-TEST(SymbolLibraryJson, EmptySymbolsArrayYieldsEmptyLibrary) {
-    const std::string json = R"({ "version": 1, "symbols": [] })";
-    auto lib = load_symbol_library_from_string(json);
-    EXPECT_TRUE(lib.empty());
+// ── refresh_fill_caches — the derived earcut fills ────────────────────────
+
+TEST(RefreshFillCaches, ConvexPolygonKeepsFanFastPath) {
+    SymbolDefinition def;
+    f4::renderer::SymbolPolygon pg;
+    pg.points = {{-0.5f, -0.5f}, {0.5f, -0.5f}, {0.5f, 0.5f}, {-0.5f, 0.5f}};
+    def.polygons.push_back(pg);
+    refresh_fill_caches(def);
+    EXPECT_TRUE(def.polygons[0].triangles.empty());
 }
 
-// ===========================================================================
-// Default library — sanity-check the seed content the editor ships with.
-// ===========================================================================
-
-TEST(DefaultLibrary, HasThreeExamples) {
-    auto lib = make_default_symbol_library();
-    EXPECT_EQ(lib.size(), 3u);
+TEST(RefreshFillCaches, ConcavePolygonTriangulates) {
+    SymbolDefinition def;
+    f4::renderer::SymbolPolygon pg;  // arrowhead — concave
+    pg.points = {{0.0f, -0.8f}, {0.5f, 0.6f}, {0.0f, 0.2f}, {-0.5f, 0.6f}};
+    def.polygons.push_back(pg);
+    refresh_fill_caches(def);
+    EXPECT_FALSE(def.polygons[0].triangles.empty());
+    EXPECT_NEAR(triangle_area_sum(def.polygons[0].triangles), 0.52, 0.03);
 }
 
-TEST(DefaultLibrary, AllKeysAreExamplePrefixed) {
-    auto lib = make_default_symbol_library();
-    for (const auto& s : lib.symbols()) {
-        EXPECT_EQ(s.key.substr(0, 8), "example_")
-            << "key '" << s.key << "' should start with 'example_'";
+TEST(RefreshFillCaches, HoledPolygonTriangulatesAroundTheHole) {
+    SymbolDefinition def;
+    f4::renderer::SymbolPolygon pg;
+    pg.points = {{-0.8f, -0.8f}, {0.8f, -0.8f}, {0.8f, 0.8f}, {-0.8f, 0.8f}};
+    pg.holes.push_back({{-0.2f, -0.2f}, {0.2f, -0.2f}, {0.2f, 0.2f}, {-0.2f, 0.2f}});
+    def.polygons.push_back(pg);
+    refresh_fill_caches(def);
+    EXPECT_FALSE(def.polygons[0].triangles.empty());
+    // Filled area = 2.56 - 0.16 = 2.40.
+    EXPECT_NEAR(triangle_area_sum(def.polygons[0].triangles), 2.40, 0.1);
+}
+
+TEST(RefreshFillCaches, UnfilledPolygonsAreIgnored) {
+    SymbolDefinition def;
+    f4::renderer::SymbolPolygon pg;  // concave but unfilled
+    pg.filled = false;
+    pg.points = {{0.0f, -0.8f}, {0.5f, 0.6f}, {0.0f, 0.2f}, {-0.5f, 0.6f}};
+    def.polygons.push_back(pg);
+    refresh_fill_caches(def);
+    EXPECT_TRUE(def.polygons[0].triangles.empty());
+}
+
+// ── make_fallback_square ──────────────────────────────────────────────────
+
+TEST(FallbackSquare, IsAnUnfilledDataDefinedSquare) {
+    SymbolDefinition fb = make_fallback_square();
+    ASSERT_EQ(1u, fb.polygons.size());
+    EXPECT_FALSE(fb.polygons[0].filled);
+    EXPECT_EQ(4u, fb.polygons[0].points.size());
+    refresh_fill_caches(fb);
+    EXPECT_TRUE(fb.polygons[0].triangles.empty());  // outline only
+}
+
+// ── SymbolDirectory — lazy loading + fallback ─────────────────────────────
+
+class SymbolDirectoryTest : public ::testing::Test {
+protected:
+    void SetUp() override {
+        dir_ = std::filesystem::temp_directory_path() /
+               ("f4_symbols_test_" +
+                std::to_string(::testing::UnitTest::GetInstance()->random_seed()));
+        std::error_code ec;
+        std::filesystem::remove_all(dir_, ec);
+        std::filesystem::create_directories(dir_, ec);
     }
+    void TearDown() override {
+        std::error_code ec;
+        std::filesystem::remove_all(dir_, ec);
+    }
+    std::filesystem::path dir_;
+};
+
+TEST_F(SymbolDirectoryTest, LoadsSvgOnFirstRequest) {
+    SymbolDefinition d;
+    d.key = "probe";
+    d.display_name = "Probe";
+    f4::renderer::SymbolPolygon pg;
+    pg.points = {{-0.5f, -0.5f}, {0.5f, -0.5f}, {0.5f, 0.5f}, {-0.5f, 0.5f}};
+    d.polygons.push_back(pg);
+    f4::renderer::save_symbol_as_svg(d, dir_ / "probe.svg");
+
+    SymbolDirectory symbols(dir_);
+    EXPECT_TRUE(symbols.library().empty());
+    EXPECT_TRUE(symbols.failed_keys().empty());
+
+    // Null ImGui draw list is a safe no-op — but it still triggers the load.
+    symbols.draw_imgui("probe", nullptr, ImVec2{}, 32.0f, 0, 0);
+    ASSERT_NE(nullptr, symbols.library().find("probe"));
+    EXPECT_EQ("Probe", symbols.library().find("probe")->display_name);
+    EXPECT_TRUE(symbols.failed_keys().empty());
 }
 
-TEST(DefaultLibrary, AllExamplesHaveNonEmptyDisplayNames) {
-    auto lib = make_default_symbol_library();
-    for (const auto& s : lib.symbols()) {
-        EXPECT_FALSE(s.display_name.empty())
-            << "key '" << s.key << "' has an empty display_name";
-    }
+TEST_F(SymbolDirectoryTest, MissingKeyFallsBackToSquareAndProbesOnce) {
+    SymbolDirectory symbols(dir_);
+    symbols.draw_imgui("no_such_symbol", nullptr, ImVec2{}, 32.0f, 0, 0);
+
+    const SymbolDefinition* fb = symbols.library().find("no_such_symbol");
+    ASSERT_NE(nullptr, fb);
+    ASSERT_EQ(1u, fb->polygons.size());
+    EXPECT_FALSE(fb->polygons[0].filled);          // the square outline
+    ASSERT_EQ(1u, symbols.failed_keys().size());
+    EXPECT_EQ("no_such_symbol", symbols.failed_keys()[0]);
+
+    // Second request is served from the cache — no duplicate failure.
+    symbols.draw_imgui("no_such_symbol", nullptr, ImVec2{}, 32.0f, 0, 0);
+    EXPECT_EQ(1u, symbols.failed_keys().size());
 }
 
-TEST(DefaultLibrary, AllExamplesHaveAtLeastOnePrimitive) {
-    auto lib = make_default_symbol_library();
-    for (const auto& s : lib.symbols()) {
-        const std::size_t total = s.polylines.size() + s.polygons.size();
-        EXPECT_GE(total, 1u)
-            << "key '" << s.key << "' has no polylines or polygons";
+TEST_F(SymbolDirectoryTest, UnparseableSvgFallsBackToSquare) {
+    // A file that exists but violates the subset must not throw through
+    // the draw path — it degrades to the square and is reported.
+    {
+        std::ofstream out(dir_ / "broken.svg", std::ios::binary);
+        out << "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"-1 -1 2 2\">"
+               "<text>x</text></svg>";
     }
+    SymbolDirectory symbols(dir_);
+    symbols.draw_imgui("broken", nullptr, ImVec2{}, 32.0f, 0, 0);
+    ASSERT_EQ(1u, symbols.failed_keys().size());
+    EXPECT_EQ("broken", symbols.failed_keys()[0]);
+    ASSERT_NE(nullptr, symbols.library().find("broken"));
+    EXPECT_FALSE(symbols.library().find("broken")->polygons.empty());
+}
+
+TEST_F(SymbolDirectoryTest, NonexistentDirectoryAlwaysFallsBack) {
+    SymbolDirectory symbols(dir_ / "does_not_exist");
+    symbols.draw_imgui("anything", nullptr, ImVec2{}, 32.0f, 0, 0);
+    EXPECT_EQ(1u, symbols.failed_keys().size());
+    ASSERT_NE(nullptr, symbols.library().find("anything"));
 }

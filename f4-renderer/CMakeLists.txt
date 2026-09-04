@@ -21,10 +21,10 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 #                     the 2D canvas and the 3D ground-layout panel to draw
 #                     real KoreaObj feature models at FeatureEntryState
 #                     offsets)
-#   symbols          — procedural MIL-STD-2525-style symbol drawing
-#   symbol_library   — data-driven symbol vocabulary (lines + polygons
-#                     as point lists, persisted to JSON via f4-json,
-#                     rendered via fan/earcut fills + color roles)
+#   symbol_library   — the runtime symbol system: SymbolDirectory (lazy
+#                     SVG loading keyed by filename stem, fallback square),
+#                     the SymbolLibrary data model (polylines + polygons,
+#                     color roles, earcut fills), and the draw paths
 #   svg_import       — SVG (authoring format) <-> SymbolDefinition
 #                     conversion: subset parser via f4-xml (pugixml),
 #                     curve flattening, transforms, evenodd holes;
@@ -49,7 +49,6 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 #            f4-world-convert (for ClassTable used by feature_mesh)
 #            raylib (public headers include <raylib.h>, <raymath.h>)
 #   PRIVATE: imgui (for symbols ImGui draw-list path + orbit_camera input guard)
-#            f4-json (for symbol_library JSON I/O — Reader/Writer only)
 #            f4-xml  (for svg_import — vendored pugixml)
 # ============================================================================
 
@@ -68,7 +67,6 @@ add_library(f4-renderer STATIC
     src/texture_cache.cpp
     src/draw_3d.cpp
     src/feature_mesh.cpp
-    src/symbols.cpp
     src/symbol_library.cpp
     src/svg_import.cpp
     src/entity_render.cpp
@@ -102,7 +100,6 @@ target_link_libraries(f4-renderer
         f4-terrain          # Path B1: terrain_mesh.hpp includes f4/terrain/terrain_data.hpp
         raylib
     PRIVATE
-        f4-json
         f4-xml
 )
 

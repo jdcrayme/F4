@@ -31,8 +31,8 @@
 //   - ObjectiveTypeComponent → objective symbol (shape encodes type)
 //   - UnitCoreComponent → unit symbol (frame + glyph)
 //
-// entity_icon_info() is a pure-query variant that returns the SymbolKind
-// without drawing — useful for legends, tooltips, and hover states.
+// entity_icon_info() is a pure-query variant that returns the symbol
+// keys without drawing — useful for legends, tooltips, and hover states.
 //
 // Coordinate conventions
 // ---------------------
@@ -49,7 +49,7 @@
 
 #include <f4/renderer/feature_mesh.hpp>   // FeatureMeshResources, DrawStats
 #include <f4/renderer/ground_layout_models.hpp>  // AirfieldGeometry3D, AirfieldDrawToggles
-#include <f4/renderer/symbols.hpp>         // SymbolKind, RlColor, draw_symbol
+#include <f4/renderer/symbol_library.hpp>    // RlColor, SymbolDirectory, draw_library_symbol
 
 #include <f4/entities/entity.hpp>          // EntityHandle, components
 
@@ -187,20 +187,50 @@ DrawStats RenderEntity(EntityRenderResources& res,
                        f4::entities::EntityHandle& entity);
 
 // ---------------------------------------------------------------------------
+// Symbol-key mapping tables
+// ---------------------------------------------------------------------------
+// Enum → symbol-key (SVG filename stem) resolution, ported 1:1 from the
+// old symbol_for_objective_type()/symbol_for_unit() switches. Pure
+// functions. These are the fallback resolution when an entity carries no
+// explicit icon key; the planned campaign_icon field from the class
+// table will bypass them for classes that carry one.
+
+/// ObjectiveType (1..39 from the class table) → "obj_*" key.
+/// Unmapped types return "obj_unknown".
+[[nodiscard]] const char* key_for_objective_type(uint8_t obj_type) noexcept;
+
+/// UnitClass → "frame_*" key (the symbol frame shape: battalion=rect,
+/// brigade=diamond, squadron=circle, task_force=triangle, flight=small
+/// circle, package=plus). Returns nullptr for unclassifiable units.
+[[nodiscard]] const char* frame_key_for_unit_class(
+    f4::entities::UnitClass cls) noexcept;
+
+/// unit_class + unit_subtype → "glyph_*" key (the frame-agnostic inner
+/// glyph), or nullptr when the subtype has no glyph (frame-only symbol).
+[[nodiscard]] const char* glyph_key_for_unit(
+    f4::entities::UnitClass cls, uint8_t subtype) noexcept;
+
+// ---------------------------------------------------------------------------
 // EntityIconInfo
 // ---------------------------------------------------------------------------
 // Result of inspecting an entity to determine its 2D map icon.
 // ---------------------------------------------------------------------------
 
 /// Information about an entity's 2D map icon, determined by inspecting
-/// its components without performing any drawing.
+/// its components without performing any drawing. Objectives set
+/// symbol_key; units set frame_key (always) and glyph_key (when the
+/// subtype has one). Renderers draw frame first, then the glyph on top.
 struct EntityIconInfo {
-    /// Which symbol to draw. SymbolCount means no icon (entity has no
-    /// renderable icon components — e.g. a Campaign or Team entity).
-    SymbolKind kind = SymbolKind::SymbolCount;
+    /// Objective symbol key ("obj_airbase", ...). Null for units.
+    const char* symbol_key = nullptr;
+    /// Unit frame key ("frame_battalion", ...). Null for objectives.
+    const char* frame_key = nullptr;
+    /// Optional inner glyph key ("glyph_armor", ...). Null when the
+    /// unit's subtype has no glyph.
+    const char* glyph_key = nullptr;
 
-    /// Whether the entity has an icon at all.
-    /// When false, kind is SymbolCount and should not be drawn.
+    /// Whether the entity has an icon at all. When false, every key is
+    /// null and nothing should be drawn (e.g. a Campaign or Team entity).
     bool valid = false;
 };
 
@@ -215,13 +245,10 @@ struct EntityIconInfo {
 //      Uses PropertyBag.ints["objective_type"] if available (the same
 //      lookup as ViewerApp::Impl::obj_type_from_pb()). Falls back to
 //      deriving from ObjectiveTypeComponent.type (type - 100) if the
-//      PropertyBag key is absent.
+//      PropertyBag key is absent. Mapped through key_for_objective_type.
 //   2. UnitCoreComponent:
-//      Uses unit_class + unit_subtype to select a unit symbol.
-//   3. If neither component is present, returns {SymbolCount, false}.
-//
-// @param entity  Entity handle to query
-// @return        EntityIconInfo with the resolved SymbolKind
+//      unit_class → frame key, unit_subtype → glyph key.
+//   3. If neither component is present, returns an invalid info.
 // ---------------------------------------------------------------------------
 
 EntityIconInfo entity_icon_info(f4::entities::EntityHandle& entity);
@@ -229,7 +256,7 @@ EntityIconInfo entity_icon_info(f4::entities::EntityHandle& entity);
 // ---------------------------------------------------------------------------
 // RenderEntityIcon
 // ---------------------------------------------------------------------------
-// Render the 2D map icon/symbol for an entity.
+// Render the 2D map icon/symbol for an entity from `symbols`.
 //
 // Must be called inside BeginDrawing/EndDrawing (uses raylib 2D
 // primitives, not 3D mode). The caller provides screen-space coordinates
@@ -237,14 +264,14 @@ EntityIconInfo entity_icon_info(f4::entities::EntityHandle& entity);
 // and any other projection.
 //
 // Component dispatch:
-//   - ObjectiveTypeComponent → draws an objective symbol (shape encodes
-//     the objective type — airbase, bridge, city, etc.)
-//   - UnitCoreComponent → draws a unit symbol (frame + glyph, where
-//     the frame encodes UnitClass and the glyph encodes unit_subtype)
+//   - ObjectiveTypeComponent → draws the objective's symbol
+//   - UnitCoreComponent → draws the unit's frame, then its glyph
 //
-// This is a convenience wrapper: it calls entity_icon_info() and then
-// draw_symbol(). If the entity has no icon components, this is a no-op.
+// Convenience wrapper: entity_icon_info() + SymbolDirectory::draw().
+// Missing SVGs render as the fallback square; entities with no icon
+// components are a no-op.
 //
+// @param symbols       Lazy SVG symbol directory (loads keys on demand)
 // @param entity        Entity handle to render (must be valid)
 // @param center_x      Screen-space X center of the symbol
 // @param center_y      Screen-space Y center of the symbol
@@ -254,7 +281,8 @@ EntityIconInfo entity_icon_info(f4::entities::EntityHandle& entity);
 // @param filled        If false, draws outline only (for hover/selection)
 // ---------------------------------------------------------------------------
 
-void RenderEntityIcon(f4::entities::EntityHandle& entity,
+void RenderEntityIcon(SymbolDirectory& symbols,
+                      f4::entities::EntityHandle& entity,
                       float center_x, float center_y,
                       float size_px,
                       RlColor fill_color, RlColor outline_color,

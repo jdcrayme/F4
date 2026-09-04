@@ -122,7 +122,6 @@ add_library(f4_world_viewer STATIC
     src/hex/decoders.cpp
     src/hex/hex_inspector.cpp
     src/class_table_browser.cpp
-    src/symbol_creator.cpp
     ${IMGUI_SOURCES}
     ${RLIMGUI_SOURCES}
     ${TINYFILEDIALOGS_SOURCES}
@@ -192,6 +191,17 @@ target_link_libraries(f4-world-viewer PRIVATE f4_world_viewer)
 set_target_properties(f4-world-viewer PROPERTIES
     VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
     VS_DEBUGGER_COMMAND_ARGUMENTS "save1.world.json korea.terrain.json"
+)
+
+# Ship the SVG symbol directory next to the executable — the lazy
+# SymbolDirectory loader probes <exe dir>/symbols first (the repo-root
+# fallback covers running straight from the source tree). Static files,
+# so a copy-on-build is enough; editing an SVG just needs a rebuild.
+add_custom_command(TARGET f4-world-viewer POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+            ${CMAKE_CURRENT_SOURCE_DIR}/../symbols
+            $<TARGET_FILE_DIR:f4-world-viewer>/symbols
+    COMMENT "Copying symbols/ next to f4-world-viewer"
 )
 
 # ── V-CAMP: runtime fixtures ARE build outputs ─────────────────────────────

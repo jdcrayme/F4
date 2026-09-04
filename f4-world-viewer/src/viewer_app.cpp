@@ -31,11 +31,47 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <memory>
 #include <string>
+#include <vector>
+
+#if defined(_WIN32)
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#endif
 
 namespace f4::viewer {
+
+std::filesystem::path resolve_symbols_dir() {
+    namespace fs = std::filesystem;
+    if (const char* env = std::getenv("F4_SYMBOLS_DIR")) {
+        return fs::path(env);
+    }
+    std::vector<fs::path> candidates;
+#if defined(_WIN32)
+    char buf[1024] = {};
+    const DWORD n = GetModuleFileNameA(nullptr, buf, sizeof(buf));
+    const fs::path exe_dir = n > 0 && n < sizeof(buf)
+        ? fs::path(std::string(buf, n)).parent_path()
+        : fs::current_path();
+#else
+    const fs::path exe_dir = fs::current_path();
+#endif
+    const fs::path cwd = fs::current_path();
+    for (const fs::path& base : {exe_dir, cwd}) {
+        candidates.push_back(base / "symbols");
+        candidates.push_back(base / ".." / "symbols");
+        candidates.push_back(base / ".." / ".." / "symbols");
+    }
+    std::error_code ec;
+    for (const auto& c : candidates) {
+        if (fs::exists(c, ec)) return c;
+    }
+    return candidates.front();  // nonexistent → every key falls back
+}
 
 namespace {
 

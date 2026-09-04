@@ -264,16 +264,6 @@ void ViewerApp::draw_imgui() {
             if (ImGui::MenuItem("Class Table Browser...", nullptr, ctb_open)) {
                 if (!ctb_open) impl_->class_table_browser.open();
             }
-            // Symbol Creator — interactive editor for the data-driven
-            // symbol library. Lets the user build symbol definitions
-            // (lists of polylines + polygons) by dragging points on a
-            // 2D canvas, then save/load the library to JSON. The
-            // eventual refactor of symbols.cpp will consume the same
-            // library data model (see f4/renderer/symbol_library.hpp).
-            const bool sc_open = impl_->symbol_creator.is_open();
-            if (ImGui::MenuItem("Symbol Creator...", nullptr, sc_open)) {
-                if (!sc_open) impl_->symbol_creator.open();
-            }
             ImGui::Separator();
             // Install Diagnostics — shows the full diagnostic report
             // (where we looked for FALCON4.ct, every theater dir probed,
@@ -698,11 +688,6 @@ void ViewerApp::draw_imgui() {
     impl_->class_table_browser.set_model_db(
         impl_->model_db_3d.has_value() ? &*impl_->model_db_3d : nullptr);
     impl_->class_table_browser.draw();
-
-    // --- Symbol Creator panel (Tools > Symbol Creator) ---
-    // Interactive editor for the data-driven symbol library. Drawn
-    // after the other Tools panels so it can take focus when opened.
-    impl_->symbol_creator.draw();
 
     // --- Campaign + Teams panels (auto-open when a world is loaded —
     // show CampaignState fields and the .tea-enriched team roster

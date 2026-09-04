@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-1 -1 2 2">
+  <title>Town</title>
+  <desc>3 buildings with peaked roofs</desc>
+  <path d="M -0.5 -0.075 L 0 -0.075 L 0 0.3 L -0.5 0.3 Z" fill="currentColor" data-color-role="fill_blend" />
+  <path d="M -0.5 -0.075 L 0 -0.075 L 0 0.3 L -0.5 0.3 Z" fill="none" stroke="#000000" stroke-width="0.03125" />
+  <path d="M -0.52 -0.075 L 0.02 -0.075 L -0.25 -0.275 Z" fill="currentColor" data-color-role="fill_blend" />
+  <path d="M -0.52 -0.075 L 0.02 -0.075 L -0.25 -0.275 Z" fill="none" stroke="#000000" stroke-width="0.03125" />
+  <path d="M 0 -0.225 L 0.5 -0.225 L 0.5 0.15 L 0 0.15 Z" fill="currentColor" data-color-role="fill_blend" />
+  <path d="M 0 -0.225 L 0.5 -0.225 L 0.5 0.15 L 0 0.15 Z" fill="none" stroke="#000000" stroke-width="0.03125" />
+  <path d="M -0.02 -0.225 L 0.52 -0.225 L 0.25 -0.425 Z" fill="currentColor" data-color-role="fill_blend" />
+  <path d="M -0.02 -0.225 L 0.52 -0.225 L 0.25 -0.425 Z" fill="none" stroke="#000000" stroke-width="0.03125" />
+  <path d="M -0.25 0.125 L 0.25 0.125 L 0.25 0.5 L -0.25 0.5 Z" fill="currentColor" data-color-role="fill_blend" />
+  <path d="M -0.25 0.125 L 0.25 0.125 L 0.25 0.5 L -0.25 0.5 Z" fill="none" stroke="#000000" stroke-width="0.03125" />
+  <path d="M -0.27 0.125 L 0.27 0.125 L 0 -0.075 Z" fill="currentColor" data-color-role="fill_blend" />
+  <path d="M -0.27 0.125 L 0.27 0.125 L 0 -0.075 Z" fill="none" stroke="#000000" stroke-width="0.03125" />
+</svg>

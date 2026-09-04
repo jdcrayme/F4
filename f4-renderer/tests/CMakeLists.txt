@@ -43,7 +43,7 @@ add_test(NAME symbol_library COMMAND test_symbol_library)
 add_executable(test_svg_import test_svg_import.cpp ${IMGUI_SOURCES})
 target_include_directories(test_svg_import PRIVATE ${IMGUI_DIR} ${IMGUI_DIR}/backends)
 target_compile_definitions(test_svg_import PRIVATE
-    F4_SYMBOLS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../../f4_symbols.json")
+    F4_SYMBOLS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../symbols")
 target_link_libraries(test_svg_import PRIVATE f4-renderer f4-xml GTest::gtest_main)
 add_test(NAME svg_import COMMAND test_svg_import)
 

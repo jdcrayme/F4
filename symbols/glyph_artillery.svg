@@ -1,0 +1,6 @@
+<?xml version="1.0"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-1 -1 2 2">
+  <title>Artillery</title>
+  <desc>Single dot</desc>
+  <path d="M 0.25 0 L 0.176777 0.176777 L 1.53081e-17 0.25 L -0.176777 0.176777 L -0.25 3.06162e-17 L -0.176777 -0.176777 L -4.59243e-17 -0.25 L 0.176777 -0.176777 Z" fill="#000000" data-color-role="outline" />
+</svg>

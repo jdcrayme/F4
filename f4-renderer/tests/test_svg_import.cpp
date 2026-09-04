@@ -5,12 +5,13 @@
 //   - geometry: viewBox normalization, curve flattening, evenodd holes
 //   - earcut fill caches (concave + holed polygons triangulate)
 //   - loud failure on out-of-subset elements/attributes
-//   - export/import round-trips, including the full f4_symbols.json corpus
+//   - export/import round-trips over every file in symbols/
+//   - coverage: every key the entity_render tables produce has an SVG
 //
-// Pure data tests — no GPU context (draw helpers are exercised by the
-// Symbol Creator tool).
+// Pure data tests — no GPU context.
 
 #include <f4/renderer/svg_import.hpp>
+#include <f4/renderer/entity_render.hpp>  // key mapping tables (coverage test)
 
 #include <gtest/gtest.h>
 
@@ -331,129 +332,78 @@ TEST(SvgRoundTrip, SyntheticSymbolPreservesGeometry) {
     EXPECT_EQ(back.polylines[2].color_role, SymbolColorRole::Fill);
 }
 
-TEST(SvgRoundTrip, FullCorpusOfFSymbols) {
-    const std::filesystem::path corpus_path = F4_SYMBOLS_JSON_PATH;
-    if (!std::filesystem::exists(corpus_path)) {
-        GTEST_SKIP() << "f4_symbols.json not found at " << corpus_path;
+TEST(SvgRoundTrip, EverySymbolsDirectoryFileRoundTrips) {
+    const std::filesystem::path symbols_dir = F4_SYMBOLS_DIR;
+    if (!std::filesystem::exists(symbols_dir)) {
+        GTEST_SKIP() << "symbols/ not found at " << symbols_dir;
     }
-    const f4::renderer::SymbolLibrary lib =
-        f4::renderer::load_symbol_library(corpus_path);
-    ASSERT_GE(lib.symbols().size(), 70u);
 
-    int exported = 0;
-    for (const auto& s : lib.symbols()) {
-        if (s.polygons.empty() && s.polylines.empty()) continue;
-        ++exported;
+    std::vector<std::filesystem::path> files;
+    for (const auto& entry : std::filesystem::directory_iterator(symbols_dir)) {
+        if (entry.path().extension() == ".svg") files.push_back(entry.path());
+    }
+    ASSERT_GE(files.size(), 70u);  // the converted corpus is 75 symbols
+
+    for (const auto& file : files) {
+        const std::string key = file.stem().string();
+        const SymbolDefinition def = import_symbol_from_svg_file(file);
+        ASSERT_FALSE(def.polygons.empty() || def.polylines.empty()) << key;
 
         const SymbolDefinition back =
-            import_symbol_from_svg_string(symbol_to_svg(s), s.key);
+            import_symbol_from_svg_string(symbol_to_svg(def), key);
 
-        if (std::getenv("F4_SVG_DEBUG") && std::getenv("F4_SVG_DEBUG")[0] == '1') {
-            fprintf(stderr, "=== %s ===\n%s", s.key.c_str(), symbol_to_svg(s).c_str());
-            for (std::size_t i = 0; i < s.polygons.size(); ++i) {
-                fprintf(stderr, "orig poly[%zu] filled=%d role=%d npts=%zu holes=%zu first=(%.3f,%.3f)\n",
-                        i, (int)s.polygons[i].filled, (int)s.polygons[i].color_role,
-                        s.polygons[i].points.size(), s.polygons[i].holes.size(),
-                        s.polygons[i].points.empty() ? 0.f : s.polygons[i].points[0].x,
-                        s.polygons[i].points.empty() ? 0.f : s.polygons[i].points[0].y);
-            }
-            for (std::size_t i = 0; i < s.polylines.size(); ++i) {
-                fprintf(stderr, "orig line[%zu] closed=%d role=%d w=%.3f npts=%zu first=(%.3f,%.3f)\n",
-                        i, (int)s.polylines[i].closed, (int)s.polylines[i].color_role,
-                        s.polylines[i].width, s.polylines[i].points.size(),
-                        s.polylines[i].points.empty() ? 0.f : s.polylines[i].points[0].x,
-                        s.polylines[i].points.empty() ? 0.f : s.polylines[i].points[0].y);
-            }
-            for (std::size_t i = 0; i < back.polygons.size(); ++i) {
-                fprintf(stderr, "back poly[%zu] filled=%d role=%d npts=%zu holes=%zu first=(%.3f,%.3f)\n",
-                        i, (int)back.polygons[i].filled, (int)back.polygons[i].color_role,
-                        back.polygons[i].points.size(), back.polygons[i].holes.size(),
-                        back.polygons[i].points.empty() ? 0.f : back.polygons[i].points[0].x,
-                        back.polygons[i].points.empty() ? 0.f : back.polygons[i].points[0].y);
-            }
-            for (std::size_t i = 0; i < back.polylines.size(); ++i) {
-                fprintf(stderr, "back line[%zu] closed=%d role=%d w=%.3f npts=%zu first=(%.3f,%.3f)\n",
-                        i, (int)back.polylines[i].closed, (int)back.polylines[i].color_role,
-                        back.polylines[i].width, back.polylines[i].points.size(),
-                        back.polylines[i].points.empty() ? 0.f : back.polylines[i].points[0].x,
-                        back.polylines[i].points.empty() ? 0.f : back.polylines[i].points[0].y);
+        // Files came from the exporter, so both sides use the canonical
+        // representation (unfilled shapes are closed polylines) — compare
+        // 1:1 with no representation mapping.
+        ASSERT_EQ(back.polygons.size(), def.polygons.size()) << key;
+        for (std::size_t i = 0; i < def.polygons.size(); ++i) {
+            EXPECT_TRUE(points_near(back.polygons[i].points, def.polygons[i].points, 1e-3)) << key;
+            EXPECT_EQ(back.polygons[i].filled, def.polygons[i].filled) << key;
+            EXPECT_EQ(back.polygons[i].color_role, def.polygons[i].color_role) << key;
+            ASSERT_EQ(back.polygons[i].holes.size(), def.polygons[i].holes.size()) << key;
+            for (std::size_t h = 0; h < def.polygons[i].holes.size(); ++h) {
+                EXPECT_TRUE(points_near(back.polygons[i].holes[h], def.polygons[i].holes[h], 1e-3)) << key;
             }
         }
-
-        // Filled polygons survive 1:1 (points, roles, holes).
-        std::size_t filled_count = 0;
-        for (const auto& pg : s.polygons) {
-            if (pg.filled) ++filled_count;
-        }
-        ASSERT_EQ(back.polygons.size(), filled_count) << "symbol " << s.key;
-        std::size_t fi = 0;
-        for (const auto& pg : s.polygons) {
-            if (!pg.filled) continue;
-            const auto& got = back.polygons[fi++];
-            EXPECT_TRUE(points_near(got.points, pg.points, 1e-3)) << s.key;
-            EXPECT_EQ(got.color_role, pg.color_role) << s.key;
-            ASSERT_EQ(got.holes.size(), pg.holes.size()) << s.key;
-            for (std::size_t h = 0; h < pg.holes.size(); ++h) {
-                EXPECT_TRUE(points_near(got.holes[h], pg.holes[h], 1e-3)) << s.key;
-            }
-        }
-
-        // Unfilled polygons become closed 1px Outline polylines; original
-        // polylines follow in order.
-        std::size_t unfilled_count = 0;
-        for (const auto& pg : s.polygons) {
-            if (!pg.filled) ++unfilled_count;
-        }
-        ASSERT_EQ(back.polylines.size(), unfilled_count + s.polylines.size())
-            << "symbol " << s.key;
-        std::size_t pi = 0;
-        for (const auto& pg : s.polygons) {
-            if (pg.filled) continue;  // only the unfilled ones map to polylines
-            const auto& got = back.polylines[pi++];
-            EXPECT_TRUE(got.closed) << s.key;
-            EXPECT_NEAR(got.width, 1.0f, 1e-2) << s.key;
-            EXPECT_EQ(got.color_role, SymbolColorRole::Outline) << s.key;
-            EXPECT_TRUE(points_near(got.points, pg.points, 1e-3)) << s.key;
-        }
-        for (const auto& pl : s.polylines) {
-            const auto& got = back.polylines[pi++];
-            EXPECT_TRUE(points_near(got.points, pl.points, 1e-3)) << s.key;
-            EXPECT_NEAR(got.width, pl.width, 1e-2) << s.key;
-            EXPECT_EQ(got.closed, pl.closed) << s.key;
-            EXPECT_EQ(got.color_role, pl.color_role) << s.key;
+        ASSERT_EQ(back.polylines.size(), def.polylines.size()) << key;
+        for (std::size_t i = 0; i < def.polylines.size(); ++i) {
+            EXPECT_TRUE(points_near(back.polylines[i].points, def.polylines[i].points, 1e-3)) << key;
+            EXPECT_NEAR(back.polylines[i].width, def.polylines[i].width, 1e-2) << key;
+            EXPECT_EQ(back.polylines[i].closed, def.polylines[i].closed) << key;
+            EXPECT_EQ(back.polylines[i].color_role, def.polylines[i].color_role) << key;
         }
     }
-    EXPECT_GT(exported, 60);  // corpus is ~75 symbols; all should carry geometry
 }
 
-TEST(SvgRoundTrip, JsonIOCarriesColorRolesAndHoles) {
-    // The JSON side of the v2 fields (the corpus's schema).
-    const std::string json = R"({
-      "version": 2,
-      "symbols": [ {
-        "key": "holed", "display_name": "Holed", "category": "t", "description": "",
-        "polylines": [],
-        "polygons": [ {
-          "filled": true, "color_role": "fill_blend",
-          "points": [ {"x": -0.8, "y": -0.8}, {"x": 0.8, "y": -0.8},
-                      {"x": 0.8, "y": 0.8}, {"x": -0.8, "y": 0.8} ],
-          "holes": [ [ {"x": -0.2, "y": -0.2}, {"x": 0.2, "y": -0.2},
-                       {"x": 0.2, "y": 0.2}, {"x": -0.2, "y": 0.2} ] ]
-        } ]
-      } ]
-    })";
-    const f4::renderer::SymbolLibrary lib =
-        f4::renderer::load_symbol_library_from_string(json);
-    const SymbolDefinition* def = lib.find("holed");
-    ASSERT_NE(def, nullptr);
-    EXPECT_EQ(def->polygons[0].color_role, SymbolColorRole::FillBlend);
-    ASSERT_EQ(def->polygons[0].holes.size(), 1u);
-    EXPECT_FALSE(def->polygons[0].triangles.empty());  // loader refreshed caches
+TEST(SvgRoundTrip, EveryMappedKeyHasAnSvg) {
+    // The deletion-safety net for the procedural vocabulary: every key
+    // the entity_render mapping tables can produce must resolve to a
+    // file in symbols/ — otherwise the map silently fills with fallback
+    // squares.
+    const std::filesystem::path symbols_dir = F4_SYMBOLS_DIR;
+    if (!std::filesystem::exists(symbols_dir)) {
+        GTEST_SKIP() << "symbols/ not found at " << symbols_dir;
+    }
+    using f4::renderer::frame_key_for_unit_class;
+    using f4::renderer::glyph_key_for_unit;
+    using f4::renderer::key_for_objective_type;
 
-    // And it serializes back out.
-    const std::string out = f4::renderer::symbol_library_to_json(lib);
-    EXPECT_NE(out.find("\"color_role\": \"fill_blend\""), std::string::npos);
-    EXPECT_NE(out.find("\"holes\""), std::string::npos);
+    auto require_file = [&](const char* key) {
+        ASSERT_NE(nullptr, key);
+        EXPECT_TRUE(std::filesystem::exists(symbols_dir / (std::string(key) + ".svg")))
+            << "missing symbols/" << key << ".svg";
+    };
+    for (int t = 0; t <= 39; ++t) require_file(key_for_objective_type(static_cast<uint8_t>(t)));
+    for (int c = 0; c <= static_cast<int>(f4::entities::UnitClass::Package); ++c) {
+        const auto cls = static_cast<f4::entities::UnitClass>(c);
+        require_file(frame_key_for_unit_class(cls));
+        for (int st = 0; st <= 20; ++st) {
+            if (const char* g = glyph_key_for_unit(cls, static_cast<uint8_t>(st))) {
+                require_file(g);
+            }
+        }
+    }
+    require_file("glyph_fighter");  // the live-aircraft marker on the canvas
 }
 
 } // namespace

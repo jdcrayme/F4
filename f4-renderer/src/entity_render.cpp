@@ -13,8 +13,8 @@
 //   UnitCoreComponent + TransformComponent      → draw_feature_mesh() for the unit
 //
 // entity_icon_info() and RenderEntityIcon() handle the 2D symbol case:
-//   ObjectiveTypeComponent → symbol_for_objective_type()
-//   UnitCoreComponent      → symbol_for_unit()
+//   ObjectiveTypeComponent → key_for_objective_type()
+//   UnitCoreComponent      → frame_key_for_unit_class() + glyph_key_for_unit()
 
 #include <f4/renderer/entity_render.hpp>
 
@@ -246,6 +246,101 @@ DrawStats RenderEntity(EntityRenderResources& res,
 
 // ── entity_icon_info ─────────────────────────────────────────────────────
 
+const char* key_for_objective_type(uint8_t t) noexcept {
+    switch (t) {
+        case 1:  return "obj_airbase";
+        case 2:  return "obj_airstrip";
+        case 3:  return "obj_army_base";
+        case 4:  return "obj_beach";
+        case 5:  return "obj_border";
+        case 6:  return "obj_bridge";
+        case 7:  return "obj_chemical";
+        case 8:  return "obj_city";
+        case 9:  return "obj_com_control";
+        case 10: return "obj_depot";
+        case 11: return "obj_factory";
+        case 12: return "obj_ford";
+        case 13: return "obj_fortification";
+        case 14: return "obj_hill_top";
+        case 15: return "obj_intersection";
+        case 17: return "obj_nuclear";
+        case 18: return "obj_pass";
+        case 19: return "obj_port";
+        case 20: return "obj_power_plant";
+        case 21: return "obj_radar";
+        case 22: return "obj_radio_tower";
+        case 23: return "obj_rail_terminal";
+        case 24: return "obj_railroad";
+        case 25: return "obj_refinery";
+        case 26: return "obj_road";
+        case 27: return "obj_sam_site";
+        case 28: return "obj_town";
+        case 29: return "obj_village";
+        case 30: return "obj_harts";
+        case 39: return "obj_air_terminal";
+        default: return "obj_unknown";
+    }
+}
+
+const char* frame_key_for_unit_class(f4::entities::UnitClass cls) noexcept {
+    switch (cls) {
+        case f4::entities::UnitClass::Battalion: return "frame_battalion";
+        case f4::entities::UnitClass::Brigade:   return "frame_brigade";
+        case f4::entities::UnitClass::Squadron:  return "frame_squadron";
+        case f4::entities::UnitClass::TaskForce: return "frame_task_force";
+        case f4::entities::UnitClass::Flight:    return "frame_flight";
+        case f4::entities::UnitClass::Package:   return "frame_package";
+        default: return nullptr;
+    }
+}
+
+const char* glyph_key_for_unit(f4::entities::UnitClass cls,
+                               uint8_t subtype) noexcept {
+    switch (cls) {
+        case f4::entities::UnitClass::Battalion:
+        case f4::entities::UnitClass::Brigade: {
+            // Ground unit subtypes — same glyph vocabulary for both
+            // battalion (rect frame) and brigade (diamond frame).
+            switch (subtype) {
+                case 1:  return "glyph_air_defense";  // STYPE_LAND_AIR_DEFENSE
+                case 2:  return "glyph_airmobile";    // STYPE_LAND_AIRMOBILE
+                case 3:  return "glyph_armor";        // STYPE_LAND_ARMOR
+                case 4:  return "glyph_armored_cav";  // STYPE_LAND_ARMORED_CAV
+                case 5:  return "glyph_engineer";     // STYPE_LAND_ENGINEER
+                case 6:  return "glyph_hq";           // STYPE_LAND_HQ
+                case 7:  return "glyph_infantry";     // STYPE_LAND_INFANTRY
+                case 8:  return "glyph_marine";       // STYPE_LAND_MARINE
+                case 9:  return "glyph_mechanized";   // STYPE_LAND_MECHANIZED
+                case 10: return "glyph_rocket";       // STYPE_LAND_ROCKET
+                case 11: return "glyph_artillery";    // STYPE_LAND_SP_ARTILLERY
+                case 12: return "glyph_sa_missile";   // STYPE_LAND_SS_MISSILE
+                case 13: return "glyph_supply";       // STYPE_LAND_SUPPLY
+                case 14: return "glyph_artillery";    // STYPE_LAND_TOWED_ARTILLERY
+                default: return nullptr;
+            }
+        }
+        case f4::entities::UnitClass::Squadron: {
+            switch (subtype) {
+                case 1:  return "glyph_transport";    // STYPE_AIR_AIR_TRANSPORT
+                case 4:  return "glyph_helicopter";   // STYPE_AIR_ATTACK_HELO
+                case 6:  return "glyph_bomber";       // STYPE_AIR_BOMBER
+                case 8:  return "glyph_fighter";      // STYPE_AIR_FIGHTER
+                case 9:  return "glyph_fighter";      // STYPE_AIR_FIGHTER_BOMBER
+                case 13: return "glyph_transport";    // STYPE_AIR_TANKER
+                case 14: return "glyph_helicopter";   // STYPE_AIR_TRANSPORT_HELO
+                default: return nullptr;
+            }
+        }
+        case f4::entities::UnitClass::TaskForce: {
+            switch (subtype) {
+                case 3:  return "glyph_carrier";      // STYPE_SEA_CARRIER
+                default: return "glyph_naval_surface";
+            }
+        }
+        default: return nullptr;
+    }
+}
+
 EntityIconInfo entity_icon_info(f4::entities::EntityHandle& entity)
 {
     EntityIconInfo info{};
@@ -254,7 +349,7 @@ EntityIconInfo entity_icon_info(f4::entities::EntityHandle& entity)
 
     // ── ObjectiveTypeComponent → objective symbol ─────────────────────
     //
-    // The objective type is needed to look up the correct SymbolKind.
+    // The objective type is needed to look up the correct symbol key.
     // Two sources:
     //   1. PropertyBag.ints["objective_type"] — the raw type value (1..39)
     //      set by the world bridge during loading. This is the same
@@ -297,20 +392,21 @@ EntityIconInfo entity_icon_info(f4::entities::EntityHandle& entity)
         }
 
         if (obj_type > 0) {
-            info.kind  = symbol_for_objective_type(obj_type);
+            info.symbol_key = key_for_objective_type(obj_type);
             info.valid = true;
             return info;
         }
     }
 
-    // ── UnitCoreComponent → unit symbol ───────────────────────────────
+    // ── UnitCoreComponent → unit frame (+ glyph) ──────────────────────
     //
-    // SymbolKind is determined by unit_class (the frame shape) and
-    // unit_subtype (the inner glyph — armor, fighter, bomber, etc.).
+    // The frame key encodes unit_class; the glyph key (optional) encodes
+    // unit_subtype. Renderers draw the frame first, the glyph on top.
     auto* uc = entity.get<f4::entities::UnitCoreComponent>();
     if (uc) {
-        info.kind  = symbol_for_unit(uc->unit_class, uc->unit_subtype);
-        info.valid = true;
+        info.frame_key = frame_key_for_unit_class(uc->unit_class);
+        info.glyph_key = glyph_key_for_unit(uc->unit_class, uc->unit_subtype);
+        info.valid = info.frame_key != nullptr;
         return info;
     }
 
@@ -320,7 +416,8 @@ EntityIconInfo entity_icon_info(f4::entities::EntityHandle& entity)
 
 // ── RenderEntityIcon ─────────────────────────────────────────────────────
 
-void RenderEntityIcon(f4::entities::EntityHandle& entity,
+void RenderEntityIcon(SymbolDirectory& symbols,
+                      f4::entities::EntityHandle& entity,
                       float center_x, float center_y,
                       float size_px,
                       RlColor fill_color, RlColor outline_color,
@@ -328,11 +425,23 @@ void RenderEntityIcon(f4::entities::EntityHandle& entity,
 {
     // Determine the icon, then draw it. If the entity has no icon
     // components (e.g. a Campaign or Team entity), this is a no-op.
+    // Missing SVGs render as the fallback square.
     const auto info = entity_icon_info(entity);
     if (!info.valid) return;
 
-    draw_symbol(info.kind, center_x, center_y, size_px,
-                fill_color, outline_color, filled);
+    if (info.symbol_key) {
+        symbols.draw(info.symbol_key, center_x, center_y, size_px,
+                     fill_color, outline_color, filled);
+        return;
+    }
+    if (info.frame_key) {
+        symbols.draw(info.frame_key, center_x, center_y, size_px,
+                     fill_color, outline_color, filled);
+    }
+    if (info.glyph_key) {
+        symbols.draw(info.glyph_key, center_x, center_y, size_px,
+                     fill_color, outline_color, filled);
+    }
 }
 
 } // namespace f4::renderer

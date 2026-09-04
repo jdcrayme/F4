@@ -499,7 +499,8 @@ void ViewerApp::draw_canvas() {
                 static_cast<unsigned char>(c.g * 0.4f),
                 static_cast<unsigned char>(c.b * 0.4f),
                 255};
-            f4::renderer::RenderEntityIcon(h, p.x, p.y, base_size, c, outline);
+            f4::renderer::RenderEntityIcon(impl_->symbols, h, p.x, p.y,
+                                           base_size, c, outline);
             if (pri && pri->priority >= 40) {
                 const float ring_r = base_size * 0.5f + 3.0f;
                 const Color ring = (pri->priority >= 70)
@@ -620,7 +621,8 @@ void ViewerApp::draw_canvas() {
                 static_cast<unsigned char>(c.g * 0.4f),
                 static_cast<unsigned char>(c.b * 0.4f),
                 255};
-            f4::renderer::RenderEntityIcon(h, p.x, p.y, s, c, outline);
+            f4::renderer::RenderEntityIcon(impl_->symbols, h, p.x, p.y,
+                                           s, c, outline);
 
             // Destination line — reads from MovementOrdersComponent.
             if (impl_->show_unit_destinations) {
@@ -812,9 +814,7 @@ void ViewerApp::draw_canvas() {
                 c.g = static_cast<unsigned char>(c.g * 0.55f + 64);
                 c.b = static_cast<unsigned char>(c.b * 0.55f + 64);
             }
-            f4::renderer::draw_symbol(
-                f4::renderer::SymbolKind::UnitFighter,
-                p.x, p.y, s, c, outline);
+            impl_->symbols.draw("glyph_fighter", p.x, p.y, s, c, outline);
 
             if (selected_is_live && impl_->sel_entity == eid) {
                 DrawCircleLines(static_cast<int>(p.x),

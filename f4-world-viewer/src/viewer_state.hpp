@@ -31,7 +31,6 @@
 #include <f4/viewer/viewer_app.hpp>
 #include <f4/viewer/hex_inspector.hpp>
 #include <f4/viewer/class_table_browser.hpp>
-#include <f4/viewer/symbol_creator.hpp>
 #include <f4/viewer/settings.hpp>
 #include <f4/viewer/replay_mode.hpp>   // ReplayState (Path B2 — trace playback)
 
@@ -90,11 +89,20 @@
 #include <unordered_map>
 #include <vector>
 
-#include "symbols.hpp"  // Backward-compat aliases → f4::renderer::SymbolKind etc.
 #include <f4/renderer/ground_layout_models.hpp>  // AirfieldGeometry3D + builder (shared)
+#include <f4/renderer/symbol_library.hpp>        // SymbolDirectory (lazy SVG symbols)
 using f4::renderer::AirfieldGeometry3D;
+using f4::renderer::RlColor;
 
 namespace f4::viewer {
+
+// ---------------------------------------------------------------------------
+// Symbols directory resolution — where the lazy SymbolDirectory looks
+// for <key>.svg files. The build copies symbols/ next to the executable;
+// running from the repo root also works. F4_SYMBOLS_DIR overrides
+// everything (used by headless runs/tests). Defined in viewer_app.cpp.
+// ---------------------------------------------------------------------------
+std::filesystem::path resolve_symbols_dir();
 
 // ---------------------------------------------------------------------------
 // Color helpers — keyed by owner (Control) byte. Same scheme as the
@@ -103,8 +111,7 @@ namespace f4::viewer {
 // tile rendering, objective icon tinting, unit fill colors) and
 // imgui_panels.cpp (the legend panel swatches).
 // ---------------------------------------------------------------------------
-// RlColor now comes from f4::renderer::RlColor via the using alias
-// in symbols.hpp. The struct layout is identical:
+// RlColor is f4::renderer::RlColor (via symbol_library.hpp):
 //   struct RlColor { unsigned char r, g, b, a; };
 
 inline RlColor color_for_owner(uint8_t owner) {
@@ -657,13 +664,12 @@ struct ViewerApp::Impl {
     // Class Table Browser panel — owned by the viewer, opened via Tools menu.
     ClassTableBrowser class_table_browser;
 
-    // Symbol Creator panel — owned by the viewer, opened via Tools menu.
-    // Interactive editor for the data-driven symbol library (see
-    // f4/renderer/symbol_library.hpp). Lets the user build symbol
-    // definitions by dragging points on a 2D canvas, then save/load
-    // the resulting library to JSON. The eventual refactor of
-    // symbols.cpp will consume the same library data model.
-    SymbolCreator symbol_creator;
+    // Lazy SVG symbol directory — the map icon vocabulary. Keys resolve
+    // to <symbols dir>/<key>.svg, parsed on first use; missing files
+    // render as the fallback square (see f4/renderer/symbol_library.hpp).
+    // The directory is probed once at startup (exe-relative candidates
+    // cover both the build tree and running from the repo root).
+    f4::renderer::SymbolDirectory symbols{resolve_symbols_dir()};
 
     // Scheduled screenshot (for headless smoke tests)
     bool screenshot_pending = false;

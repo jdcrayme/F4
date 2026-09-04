@@ -1,0 +1,11 @@
+<?xml version="1.0"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-1 -1 2 2">
+  <title>ComControl</title>
+  <desc>Square with two antenna lines and dots</desc>
+  <path d="M -0.5 -0.5 L 0.5 -0.5 L 0.5 0.5 L -0.5 0.5 Z" fill="currentColor" data-color-role="fill_blend" />
+  <path d="M -0.5 -0.5 L 0.5 -0.5 L 0.5 0.5 L -0.5 0.5 Z" fill="none" stroke="#000000" stroke-width="0.03125" />
+  <path d="M -0.2 -1 L -0.214645 -0.964645 L -0.25 -0.95 L -0.285355 -0.964645 L -0.3 -1 L -0.285355 -1.03536 L -0.25 -1.05 L -0.214645 -1.03536 Z" fill="#000000" data-color-role="outline" />
+  <path d="M 0.3 -1 L 0.285355 -0.964645 L 0.25 -0.95 L 0.214645 -0.964645 L 0.2 -1 L 0.214645 -1.03536 L 0.25 -1.05 L 0.285355 -1.03536 Z" fill="#000000" data-color-role="outline" />
+  <path d="M -0.25 -0.5 L -0.25 -1" fill="none" stroke="#000000" stroke-width="0.046875" />
+  <path d="M 0.25 -0.5 L 0.25 -1" fill="none" stroke="#000000" stroke-width="0.046875" />
+</svg>
