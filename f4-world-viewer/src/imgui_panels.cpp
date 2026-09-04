@@ -198,11 +198,20 @@ void ViewerApp::draw_imgui() {
                     ImGui::TextDisabled("(no world loaded)");
                 }
             } else {
-                if (ImGui::MenuItem(impl_->session->paused()
-                                        ? "Play (Space)"
-                                        : "Pause (Space)")) {
-                    impl_->session->set_paused(
-                        !impl_->session->paused());
+                // V-THREAD: the menu draws inside run()'s frame
+                // session-lock scope — flip the runner's ATOMIC flag
+                // (set_paused() would re-lock the held mutex) AND
+                // mirror the session's own flag directly (consistent:
+                // the worker can't be mid-advance while we hold).
+                const bool menu_paused = impl_->session_runner
+                    ? impl_->session_runner->paused()
+                    : impl_->session->paused();
+                if (ImGui::MenuItem(menu_paused ? "Play (Space)"
+                                                : "Pause (Space)")) {
+                    if (impl_->session_runner) {
+                        impl_->session_runner->set_paused_flag(!menu_paused);
+                    }
+                    impl_->session->set_paused(!menu_paused);
                 }
                 if (ImGui::MenuItem("Reset Session")) {
                     stop_campaign_session();

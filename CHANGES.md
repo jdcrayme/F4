@@ -1,5 +1,74 @@
 # F4 Cleanup Pass — Changes Summary
 
+## C4 — The Campaign Thread + Full 3D Coverage: Everything on the Map Renders (C4-FIX-3)
+
+**Two user reports over the live session: "the UI becomes unresponsive
+while running the session" and "many things don't have a 3D view —
+ground units should show vehicles and personnel, squadrons should show
+parked aircraft, in-flight aircraft should show them flying." Both were
+architectural gaps, now closed.**
+
+**(1) The campaign thread (V-THREAD).** The render loop called
+`session->advance(wall_dt * speed)` inline in the ImGui frame — one
+advance could legally run 240 ticks (the spiral-of-death cap) over 449
+aircraft, which is seconds of work INSIDE one frame: the window went
+"not responding". New `CampaignSessionRunner` (f4-simulation) owns the
+loop: a worker thread advances the session in short mutex-guarded
+batches (an ADAPTIVE tick budget measures each batch and scales the
+per-call tick cap 1..session-cap to target a ~6-12 ms lock hold), and
+the render loop takes the SAME mutex for one frame read+draw scope —
+so every existing session read (canvas hit tests, the Campaign window,
+the inspector, threat overlay, `session_handle` derefs) sees a frozen,
+consistent session WITHOUT touching any of those ~70 call sites.
+Pause/speed are atomics (the pause path mirrors the session's own flag
+under the already-held frame lock; the locking `set_paused()` form
+serves library hosts). Stop is deferred: the Stop button (inside the
+frame lock) only sets a flag — `run()` performs the stop-join-reset
+right after the scope releases the lock, so the join can never
+deadlock against a worker waiting on our own lock. `advance()` gained
+an optional `max_steps_override` (the runner's short-hold mechanism;
+0 = the session's option — the QC and every test keep byte-identical
+behavior, pinned by the two-run ledger MD5 test).
+
+**(2) Full 3D coverage (V-3DLIVE).** What the user was missing, from
+the data up: FALCON4.CT gives UNIT-level entities (battalion, brigade,
+squadron) visType[0] == 0 — by data design, a campaign unit icon has
+NO 3D model; the models live at the VEHICLE level and only exist after
+DEAGGREGATION. On top of that, three of our own gaps: the session ran
+with an empty ModelDatabase (2D-symbols-only by design), so even
+deaggregated vehicles spawned NOTHING (the spawn path required a
+resolvable model record); the parked squadron aircraft existed as
+entities since create() but no layer drew them; and the deagg bubble
+followed the first PARKED aircraft (a 1-grid circle around a ramp),
+not the user's view. Fixed as a stack: (a)
+`VisualModelComponent::vis_type` — every spawn path (flights, synthetic
+intents, squadron parked aircraft, deagg vehicles, airfield features,
+scenario aircraft) records the resolved vis type at spawn, so the
+renderable identity survives an empty db; (b) vehicle deagg no longer
+requires the db (identity lives in the class table; the mesh is the
+host's problem); (c) new `draw_vis_type_mesh()` (f4-renderer) — the
+same build/draw/cache path `draw_feature_mesh` uses after its
+class-table lookup, callable with the vis type directly (`build_feature_mesh`
+also lost a null-class_table check it never actually read); (d) the
+canvas gained a LIVE 3D pass — session aircraft, parked squadron
+aircraft, and deaggregated vehicles drawn as real KoreaObj models under
+the same top-down ortho camera as the static pass (facing from velocity
+or the parked quaternion), plus 2D dot layers for parked aircraft and
+vehicles so everything on the map is visible at ANY zoom; and (e) the
+VIEW BUBBLE — when the user is zoomed in, the deaggregation bubble
+follows the CAMERA (the map viewer's "player"), radius scaled with the
+visible extent (clamped 2.5-25 grid units), applied immediately so a
+PAUSED session still deaggregates what the user zooms into. Toggle in
+the Campaign window; off = FreeFalcon's ownship bubble.
+
+Verification: full suite 100% (2,247/2,247, incl. 5 new runner tests +
+the draw_vis_type_mesh GPU test); campaign_qc over TestCamp
+(--tasking 30 --minutes 20 --no-record): 449 aircraft, 140 bombs,
+85 features, 29 objectives — identical to the C4-FIX-2 baseline, ledger
+byte-identical across two runs; in-container viewer smoke over the
+real TestCamp world: --session --zoom 12 (camera bubble active, live 3D
+pass drawing) runs 6 s under Xvfb, clean exit 0.
+
 ## C4 — Start Session Crash + Freeze: Lender Lifetimes in the Session Wiring, Async Start (C4-FIX-2)
 
 **"Start Session" froze the viewer for a long time and then died with an

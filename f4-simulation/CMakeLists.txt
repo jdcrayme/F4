@@ -39,11 +39,17 @@ add_library(f4-simulation STATIC
     src/campaign_spawner.cpp
     src/campaign_result_sink.cpp
     src/campaign_session.cpp
+    src/campaign_session_runner.cpp
     src/combat_bridge.cpp
     src/combat_transcript.cpp
     src/bubble_manager.cpp
 )
 target_link_libraries(f4-simulation PUBLIC f4_warnings)
+
+# V-THREAD: CampaignSessionRunner owns a std::thread — the library (not
+# just its executables) needs the threads library now.
+find_package(Threads REQUIRED)
+target_link_libraries(f4-simulation PUBLIC Threads::Threads)
 
 target_include_directories(f4-simulation
     PUBLIC

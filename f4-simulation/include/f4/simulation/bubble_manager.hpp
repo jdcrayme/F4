@@ -170,6 +170,16 @@ public:
         return ground_radius_ft_;
     }
 
+    /// Override the ground-bubble radius (ft). V-3DLIVE: the map viewer
+    /// drives the bubble from the CAMERA instead of the ownship, and
+    /// scales the radius with the zoom level (deaggregate what the user
+    /// is looking at — a quarter of the visible extent, clamped). The
+    /// ownship path never calls this, so the radius stays the AII /
+    /// documented default there. Clamped to a sane minimum (128 ft).
+    void set_ground_radius_ft(double ft) noexcept {
+        ground_radius_ft_ = ft < 128.0 ? 128.0 : ft;
+    }
+
     /// The configured air-bubble radius (ft).
     [[nodiscard]] double air_radius_ft() const noexcept {
         return air_radius_ft_;

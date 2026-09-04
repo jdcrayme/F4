@@ -165,7 +165,14 @@ public:
     /// campaign ladder and the damage sync in whole campaign seconds.
     /// Returns true when the tick cap hit (the caller may surface
     /// "time dilated" — the debt is dropped, not queued).
-    bool advance(double real_seconds);
+    ///
+    /// V-THREAD: max_steps_override caps the ticks THIS call may run
+    /// (0 = the session's max_steps_per_advance option — the QC and
+    /// every test keep that behavior exactly). The session runner's
+    /// worker uses the override to keep each lock hold short: it feeds
+    /// the accumulator in small tick batches so the UI thread can grab
+    /// the session between them. The override never RAISES the cap.
+    bool advance(double real_seconds, int max_steps_override = 0);
 
     /// Pause/resume the drain (advance() no-ops while paused). The
     /// pause state is the UI's, not the sim's — the session keeps it
@@ -234,6 +241,25 @@ public:
     /// its own copy).
     [[nodiscard]] const f4::world::WorldState& world_state() const noexcept {
         return ws_;
+    }
+
+    // --- V-3DLIVE: camera-driven deaggregation (view bubble) ----------
+    /// Point the deaggregation bubble at the host's CAMERA position
+    /// (ENU feet) with a host-chosen radius (scales with zoom), and
+    /// apply it immediately — a PAUSED session still deaggregates the
+    /// units the user zooms into (the viewer calls this under the
+    /// session lock as the camera moves). Forwards to Simulation::
+    /// set_view_bubble() + one refresh_bubble() pass.
+    void set_view_bubble(double radius_ft,
+                         const f4::geo::WorldPosition& center) {
+        sim_->set_view_bubble(radius_ft, center);
+        sim_->refresh_bubble();
+    }
+
+    /// Return to the ownship-driven bubble + apply immediately.
+    void clear_view_bubble() {
+        sim_->clear_view_bubble();
+        sim_->refresh_bubble();
     }
 
     /// EntityId lookup for the LIVE world (the sim's): VU_ID.num →

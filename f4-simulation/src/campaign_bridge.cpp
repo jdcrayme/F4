@@ -569,8 +569,12 @@ spawn_aircraft_for_flight(f4::entities::EntityWorld& world,
             /*east_ft=*/parking_spot.x);
     fm.set_ground(parking_spot.z, f4::math::Vec3d{0.0, 0.0, -1.0});
 
-    // 3. VisualModelComponent — the renderable handle.
+    // 3. VisualModelComponent — the renderable handle. vis_type records
+    //    the resolved identity even when the db is empty (the session's
+    //    2D-symbols-only mode) — a host with its own model db resolves
+    //    the mesh from vis_type alone (V-3DLIVE).
     auto& vis = h.add<VisualModelComponent>();
+    vis.vis_type = vis_type_index;
     if (db.valid()) {
         vis.model_record = db.model(vis_type_index);
     }
@@ -1214,6 +1218,7 @@ spawn_aircraft_for_intent(
     fm.set_ground(parking_spot.z, f4::math::Vec3d{0.0, 0.0, -1.0});
 
     auto& vis = h.add<VisualModelComponent>();
+    vis.vis_type = vis_type_index;  // V-3DLIVE (see flight path note)
     if (db.valid()) {
         vis.model_record = db.model(vis_type_index);
     }
@@ -1395,19 +1400,20 @@ Offset rotate_offset(Offset local, double heading_rad) {
             -local.dx * sh + local.dy * ch };
 }
 
-/// Resolve a VEHICLE entity_type → ModelRecord* via the ClassTable.
-/// Returns nullptr if the lookup fails at any stage (entity_type out of
-/// range, visType[0] == 0, model DB has no record for the vis_type).
-const f4::models::ModelRecord*
-resolve_vehicle_model(const f4::world_convert::ClassTable& ct,
-                       const f4::models::ModelDatabase& db,
-                       int16_t vehicle_entity_type) {
-    if (vehicle_entity_type < 100) return nullptr;  // not a valid entity_type
-    const auto vis_type = ct.vis_type_for(
-        static_cast<uint16_t>(vehicle_entity_type), 0);
-    if (vis_type <= 0) return nullptr;
-    if (!db.valid()) return nullptr;
-    return db.model(vis_type);
+/// Resolve a VEHICLE entity_type → vis_type via the ClassTable.
+/// Returns 0 if the lookup fails (entity_type out of range,
+/// visType[0] == 0). V-3DLIVE: no ModelDatabase involvement — the
+/// vehicle ENTITY still spawns with VMC.vis_type set and a possibly
+/// null model_record (the old contract here returned nullptr when the
+/// db was empty/invalid, which made the SESSION's deaggregation a
+/// no-op: its db_ is deliberately empty, so the garrison battalions
+/// the bubble deaggregated spawned ZERO vehicles. The identity lives
+/// in the class table alone; the mesh is the host's problem.)
+int16_t resolve_vehicle_vis_type(
+    const f4::world_convert::ClassTable& ct,
+    int16_t vehicle_entity_type) {
+    if (vehicle_entity_type < 100) return 0;  // not a valid entity_type
+    return ct.vis_type_for(static_cast<uint16_t>(vehicle_entity_type), 0);
 }
 
 } // namespace
@@ -1448,16 +1454,23 @@ spawn_vehicles_from_unit(f4::entities::EntityWorld& world,
     for (const auto& g : vc->groups) {
         if (g.live_count <= 0) continue;
 
-        // Resolve the vehicle model once per group (all vehicles in a
-        // group share the same vehicle_type → same ModelRecord).
-        const auto* model_rec = resolve_vehicle_model(ct, db, g.vehicle_type);
-        if (!model_rec) {
-            // No model for this vehicle_type — skip the whole group.
-            // We still advance vehicle_index so subsequent groups land in
-            // distinct formation slots (otherwise two groups could overlap).
+        // Resolve the vehicle's VIS TYPE once per group (all vehicles
+        // in a group share the same vehicle_type → same vis_type →
+        // same mesh). V-3DLIVE: the model RECORD is optional — an
+        // empty db (the session) still spawns the vehicle with
+        // VMC.vis_type set; only a group whose entity_type has NO
+        // class-table entry at all (vis_type <= 0) is skipped.
+        const int16_t vis_type =
+            resolve_vehicle_vis_type(ct, g.vehicle_type);
+        if (vis_type <= 0) {
+            // No model identity for this vehicle_type — skip the whole
+            // group. We still advance vehicle_index so subsequent
+            // groups land in distinct formation slots (otherwise two
+            // groups could overlap).
             vehicle_index += g.live_count;
             continue;
         }
+        const auto* model_rec = db.valid() ? db.model(vis_type) : nullptr;
 
         for (int i = 0; i < g.live_count; ++i) {
             const Offset local = formation_offset(vehicle_index);
@@ -1476,8 +1489,10 @@ spawn_vehicles_from_unit(f4::entities::EntityWorld& world,
 
             // 2. VisualModelComponent — the renderable handle. No FM, no
             // brain — vehicles are static for now. Ground AI (DigitalBrain
-            // for vehicles) is a separate porting task.
+            // for vehicles) is a separate porting task. V-3DLIVE: vis_type
+            // carries the identity when model_record is null (empty db).
             auto& vis = h.add<VisualModelComponent>();
+            vis.vis_type = vis_type;
             vis.model_record = model_rec;
             vis.active_lod = 0;
             // model_state defaults — the renderer's draw_entity_meshes()
@@ -1640,6 +1655,7 @@ spawn_aircraft_from_squadrons(f4::entities::EntityWorld& world,
             fm.set_ground(parking_pos.z, f4::math::Vec3d{0.0, 0.0, -1.0});
 
             auto& vis = h.add<VisualModelComponent>();
+            vis.vis_type = vis_type_index;  // V-3DLIVE (see flight path note)
             vis.model_record = model_rec;
             vis.active_lod = 0;
             f4::models::SwitchState gear_switch;

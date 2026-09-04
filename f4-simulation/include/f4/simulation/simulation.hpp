@@ -193,6 +193,40 @@ public:
         return terrain_source_;
     }
 
+    // --- V-3DLIVE: the view bubble (camera-driven deaggregation) --------
+    /// Point the deaggregation bubble at the VIEWING position instead
+    /// of the ownship — the map viewer's camera IS the "player" when
+    /// the user is inspecting the map. radius_ft scales with the zoom
+    /// (the host computes it — typically a fraction of the visible
+    /// extent); the BubbleManager's own radius is overridden while a
+    /// view bubble is active. Takes effect on the next update_bubble()
+    /// tick — call refresh_bubble() to apply it immediately (a paused
+    /// session still deaggregates when the user zooms in).
+    void set_view_bubble(double radius_ft,
+                         const f4::geo::WorldPosition& center) noexcept {
+        view_bubble_active_ = true;
+        view_bubble_center_ = center;
+        view_bubble_radius_ft_ = radius_ft;
+    }
+
+    /// Return to the ownship-driven bubble (the FreeFalcon behavior:
+    /// the first aircraft's position, the AII ground radius).
+    void clear_view_bubble() noexcept { view_bubble_active_ = false; }
+
+    /// Run one update_bubble() pass NOW — not waiting for the next
+    /// tick. The viewer calls this under the session lock when the
+    /// camera moved, so a PAUSED session still deaggregates the
+    /// battalions the user zooms into (bubbles follow the eye, not
+    /// the clock). No-op without a BubbleManager (scenario-list
+    /// worlds have no campaign units to deaggregate).
+    void refresh_bubble() { update_bubble(); }
+
+    /// True while a view bubble (camera-driven) overrides the ownship
+    /// bubble — diagnostics / tests.
+    [[nodiscard]] bool view_bubble_active() const noexcept {
+        return view_bubble_active_;
+    }
+
     [[nodiscard]] const f4::models::ModelDatabase& model_db() const noexcept { return *model_db_; }
     [[nodiscard]] const Scenario& scenario() const noexcept { return scenario_; }
 
@@ -405,6 +439,18 @@ private:
     // when not in campaign-flights mode (no BubbleManager needed for the
     // scenario-list spawn path, which has no campaign units).
     std::unique_ptr<BubbleManager> bubble_manager_;
+
+    // V-3DLIVE: the camera-driven bubble override (see set_view_bubble).
+    // When active, update_bubble() centers the deaggregation bubble on
+    // view_bubble_center_ (the host's camera position, ENU feet) with
+    // view_bubble_radius_ft_ instead of the ownship + the AII default —
+    // the map viewer's "zoom into a battalion → its vehicles appear"
+    // behavior. The AII default radius is cached so clear_view_bubble()
+    // restores it exactly.
+    bool view_bubble_active_{false};
+    f4::geo::WorldPosition view_bubble_center_{};
+    double view_bubble_radius_ft_{1024.0};
+    double default_ground_radius_ft_{1024.0};
 
     // B.3+: per-airbase derived airfields (key: airbase objective VU_ID.num)
     // from the LAST spawn_from_campaign_flights() run. Kept as a member so

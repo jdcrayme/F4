@@ -252,3 +252,88 @@ TEST_F(FeatureMeshGpuTest, DrawFeatureMesh_UnknownEntityType_ReturnsZeroStats) {
     }
     UnloadMaterial(default_mat);
 }
+
+// V-3DLIVE: the vis-type-DIRECT entry point — the live session pass.
+// (1) A known-good vis_type draws the same meshes draw_feature_mesh
+//     would (the shared path), WITHOUT needing the class table.
+// (2) vis_type 0 ("never resolved") draws nothing.
+TEST_F(FeatureMeshGpuTest, DrawVisTypeMesh_DirectAndZero) {
+    namespace fs = std::filesystem;
+    const auto hdr = find_fixture("KoreaObj.HDR");
+    const auto lod = find_fixture("KoreaObj.LOD");
+    const auto ct  = find_fixture("FALCON4.ct");
+    if (hdr.empty() || lod.empty() || ct.empty()) {
+        GTEST_SKIP() << "Fixtures not found";
+    }
+
+    f4::models::ModelDatabase db;
+    ASSERT_TRUE(db.load(hdr, lod).empty());
+    f4::world_convert::ClassTable class_table;
+    ASSERT_NO_THROW(class_table.load(ct));
+
+    // Find an entity_type whose vis_type[0] resolves a real model —
+    // the SAME scan the known-good feature test uses (prefer
+    // CLASS_FEATURE entries; the fixture subset models those).
+    uint16_t found_entity_type = 0;
+    int16_t found_vis_type = 0;
+    const std::size_t n_entries = class_table.size();
+    for (std::size_t i = 0; i < n_entries; ++i) {
+        const uint16_t entity_type = static_cast<uint16_t>(
+            f4::world_convert::VU_LAST_ENTITY_TYPE + i);
+        const auto* entry = class_table.lookup(entity_type);
+        if (!entry) continue;
+        const int16_t vis0 = class_table.vis_type_for(entity_type, 0);
+        if (vis0 <= 0) continue;
+        if (!db.model(vis0)) continue;
+        found_entity_type = entity_type;
+        found_vis_type = vis0;
+        if (entry->cls == f4::world_convert::CLASS_FEATURE) break;
+    }
+    if (found_vis_type <= 0) {
+        GTEST_SKIP() << "No resolvable vis_type in the fixture subset";
+    }
+
+    f4::renderer::TextureCache tex_cache;
+    f4::renderer::LitShader lit_shader;
+    std::unordered_map<int, f4::renderer::FeatureMeshCacheEntry> mesh_cache;
+    ::Material default_mat = LoadMaterialDefault();
+
+    f4::renderer::FeatureMeshResources res{};
+    res.model_db = &db;
+    // NOTE: no class_table — the direct path must not need one.
+    res.texture_cache = &tex_cache;
+    res.lit_shader = &lit_shader;
+    res.mesh_cache = &mesh_cache;
+    res.default_material = &default_mat;
+
+    Camera3D cam = {};
+    cam.position = {0.0f, 100.0f, 0.0f};
+    cam.target   = {0.0f, 0.0f, 0.0f};
+    cam.up       = {0.0f, 0.0f, -1.0f};
+    cam.fovy     = 200.0f;
+    cam.projection = CAMERA_ORTHOGRAPHIC;
+
+    BeginDrawing();
+    ClearBackground(BLACK);
+    BeginMode3D(cam);
+    const auto stats = f4::renderer::draw_vis_type_mesh(
+        res, found_vis_type, 100.0f, 200.0f, 0.0f, /*facing=*/45.0f);
+    const auto zero = f4::renderer::draw_vis_type_mesh(
+        res, /*vis_type=*/0, 0.0f, 0.0f, 0.0f, 0.0f);
+    EndMode3D();
+    EndDrawing();
+
+    EXPECT_GT(stats.meshes_drawn, 0)
+        << "vis_type " << found_vis_type << " drew nothing";
+    EXPECT_GT(stats.vertices_drawn, 0u);
+    EXPECT_EQ(zero.meshes_drawn, 0);
+    EXPECT_EQ(zero.vertices_drawn, 0u);
+
+    tex_cache.unload_all();
+    for (auto& [_, entry] : mesh_cache) {
+        for (auto& me : entry.meshes) {
+            UnloadMesh(me.mesh);
+        }
+    }
+    UnloadMaterial(default_mat);
+}

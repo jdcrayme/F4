@@ -44,8 +44,12 @@ namespace f4::renderer {
 
 void build_feature_mesh(FeatureMeshResources& res, int vis_type) {
     if (vis_type <= 0) return;
-    if (!res.model_db || !res.class_table || !res.texture_cache ||
-        !res.mesh_cache) {
+    // NOTE: class_table is NOT required here — the build path resolves
+    // vis_type → ModelRecord through the ModelDatabase alone. (The old
+    // check rejected a null class_table it never read, which made the
+    // vis-type-DIRECT path — V-3DLIVE's draw_vis_type_mesh, whose
+    // callers legitimately hold no table — a silent no-op.)
+    if (!res.model_db || !res.texture_cache || !res.mesh_cache) {
         return;
     }
 
@@ -104,30 +108,31 @@ void build_feature_mesh(FeatureMeshResources& res, int vis_type) {
     }
 }
 
-// ── draw_feature_mesh ──────────────────────────────────────────────────────
+// ── draw_vis_type_mesh ─────────────────────────────────────────────────────
+//
+// V-3DLIVE: the vis-type-DIRECT entry point — everything draw_feature_mesh
+// does after its class-table lookup, for callers that ALREADY hold the
+// vis type (VisualModelComponent::vis_type — the session entities, whose
+// spawn paths resolved the class table against the session's own CT).
+// Shares the same per-vis_type mesh cache and draw path, so a feature and
+// a session entity of the same vis type reuse one GPU upload.
 
-DrawStats draw_feature_mesh(
+DrawStats draw_vis_type_mesh(
     FeatureMeshResources& res,
-    uint16_t class_table_index,
+    int vis_type,
     float enu_x, float enu_y, float enu_z,
     float facing_deg)
 {
     DrawStats stats{};
-    if (!res.model_db || !res.class_table || !res.texture_cache ||
+    if (!res.model_db || !res.texture_cache ||
         !res.lit_shader || !res.mesh_cache || !res.default_material) {
         return stats;  // incompletely configured
     }
-
-    // Step 1: entity_type → vis_type[0] via the class table.
-    // The caller is responsible for converting FeatureEntryState.index
-    // (a descriptionIndex) to entity_type (descriptionIndex + 100) before
-    // calling — this matches ClassTable::vis_type_for()'s convention.
-    const auto vis_type = res.class_table->vis_type_for(class_table_index, 0);
     if (vis_type <= 0) {
-        return stats;  // no model for this entity_type
+        return stats;  // never resolved / no model
     }
 
-    // Step 2: lazily build the mesh (cached by vis_type).
+    // Lazily build the mesh (cached by vis_type).
     build_feature_mesh(res, vis_type);
 
     auto cache_it = res.mesh_cache->find(vis_type);
@@ -135,7 +140,7 @@ DrawStats draw_feature_mesh(
         return stats;  // build failed or yielded no meshes
     }
 
-    // Step 3: ensure lit shader + set lighting uniforms.
+    // Ensure lit shader + set lighting uniforms.
     // Idempotent — caller may have already done this, but doing it again
     // per-call is cheap (just uniform uploads) and avoids relying on
     // caller-side setup ordering.
@@ -148,7 +153,7 @@ DrawStats draw_feature_mesh(
             res.ambient_color);
     }
 
-    // Step 4: build the model matrix.
+    // Build the model matrix.
     //   - Convert ENU position to Raylib RH Y-up via enu_to_raylib().
     //   - Rotate around the vertical (Raylib +Y, ENU +Z) axis by facing.
     //
@@ -164,7 +169,7 @@ DrawStats draw_feature_mesh(
     const Matrix model_matrix = MatrixMultiply(rot,
         MatrixTranslate(pos_rh.x, pos_rh.y, pos_rh.z) );
 
-    // Step 5: draw each mesh entry. Disable backface culling because
+    // Draw each mesh entry. Disable backface culling because
     // FreeFalcon's BSP models have inconsistent winding order (same
     // convention as draw_meshes() — see draw_3d.cpp:70-73 for rationale).
     rlDisableBackfaceCulling();
@@ -190,6 +195,35 @@ DrawStats draw_feature_mesh(
     rlEnableBackfaceCulling();
 
     return stats;
+}
+
+// ── draw_feature_mesh ──────────────────────────────────────────────────────
+
+DrawStats draw_feature_mesh(
+    FeatureMeshResources& res,
+    uint16_t class_table_index,
+    float enu_x, float enu_y, float enu_z,
+    float facing_deg)
+{
+    DrawStats stats{};
+    if (!res.model_db || !res.class_table || !res.texture_cache ||
+        !res.lit_shader || !res.mesh_cache || !res.default_material) {
+        return stats;  // incompletely configured
+    }
+
+    // Step 1: entity_type → vis_type[0] via the class table.
+    // The caller is responsible for converting FeatureEntryState.index
+    // (a descriptionIndex) to entity_type (descriptionIndex + 100) before
+    // calling — this matches ClassTable::vis_type_for()'s convention.
+    const auto vis_type = res.class_table->vis_type_for(class_table_index, 0);
+    if (vis_type <= 0) {
+        return stats;  // no model for this entity_type
+    }
+
+    // Step 2: everything else (build + draw), shared with
+    // draw_vis_type_mesh.
+    return draw_vis_type_mesh(res, vis_type,
+                              enu_x, enu_y, enu_z, facing_deg);
 }
 
 } // namespace f4::renderer

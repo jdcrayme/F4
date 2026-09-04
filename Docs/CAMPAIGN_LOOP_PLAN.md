@@ -402,7 +402,14 @@ certificate.
    airfield/map/template lenders, and create() moved to a worker
    thread so the viewer's Start Session never freezes; the session
    panel shows a live "Starting session…" state and `--session` gives
-   headless smoke coverage).
+   headless smoke coverage. Plus C4-FIX-3: the campaign's OWN thread —
+   `CampaignSessionRunner` advances the session in short mutex-guarded
+   batches while the render loop locks the same mutex for its frame
+   read+draw scope (the UI never blocks on a 240-tick advance again);
+   and full 3D coverage — every session entity (flying + parked
+   aircraft, deaggregated vehicles/personnel) renders, with the deagg
+   bubble following the CAMERA when zoomed in, so the interactive
+   session is watchable, not just runnable).
 2. C5 the long run (the 24-hour war, now over the ATM pipeline).
 
 ---

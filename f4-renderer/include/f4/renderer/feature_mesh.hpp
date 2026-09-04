@@ -117,6 +117,26 @@ struct FeatureMeshResources {
 /// even on failure so we don't retry every frame.
 void build_feature_mesh(FeatureMeshResources& res, int vis_type);
 
+/// V-3DLIVE: draw one model by VIS TYPE directly — everything
+/// draw_feature_mesh does AFTER its class-table lookup, for callers
+/// that already hold the resolved vis type. The session entities carry
+/// theirs in VisualModelComponent::vis_type (resolved at spawn against
+/// the SESSION's class table; the viewer resolves the mesh through ITS
+/// OWN model db — the session's is deliberately empty). Shares the
+/// per-vis_type mesh cache and draw path with draw_feature_mesh, so a
+/// static feature and a session entity of the same vis type reuse one
+/// GPU upload.
+///
+/// Must be called inside a BeginMode3D/EndMode3D block (same contract
+/// as draw_feature_mesh). Behavior: vis_type <= 0 → zeroed DrawStats;
+/// otherwise lazily build + DrawMesh each mesh entry at the ENU
+/// position rotated by facing_deg around the vertical axis.
+DrawStats draw_vis_type_mesh(
+    FeatureMeshResources& res,
+    int vis_type,
+    float enu_x, float enu_y, float enu_z,
+    float facing_deg);
+
 /// Resolve class_table_index (entity_type) → vis_type[0] → cached mesh,
 /// then DrawMesh each mesh entry at the given ENU position rotated by
 /// the given facing around the vertical axis.

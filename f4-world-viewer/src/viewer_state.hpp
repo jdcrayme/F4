@@ -40,6 +40,8 @@
 #include <f4/terrain/terrain_data.hpp>
 #include <f4/world/world_loader.hpp>
 #include <f4/simulation/campaign_session.hpp>  // V-CAMP: the live loop
+#include <f4/simulation/campaign_session_runner.hpp>  // V-THREAD: the campaign thread
+#include <f4/simulation/bubble_manager.hpp>  // V-3DLIVE: vehicle roster
 
 // KoreaObj model database + Falcon4.ct class table — used by the
 // Ground Layout 3D panel to render real 3D feature models (buildings,
@@ -336,6 +338,24 @@ struct ViewerApp::Impl {
     // new session).
     std::unique_ptr<f4::simulation::CampaignSession> session;
 
+    // V-THREAD: the campaign's OWN thread. The old run() called
+    // session->advance(wall_dt * speed) inline in the ImGui frame — a
+    // frame's advance could legally run 240 ticks over hundreds of
+    // aircraft (seconds of work inside one BeginDrawing/EndDrawing:
+    // "the UI becomes unresponsive", the user's report). The runner's
+    // worker advances the session in short mutex-guarded batches
+    // (adaptive tick budget, ~6-12 ms per hold); the render loop takes
+    // the SAME mutex for its frame read+draw scope, so every existing
+    // session read (canvas layers, Campaign window, inspector, hit
+    // tests through session_handle) stays consistent WITHOUT touching
+    // each call site — one lock scope in run() instead.
+    //
+    // Declared AFTER `session`: reverse-order destruction stops +
+    // joins the worker BEFORE the session dies (the runner borrows it).
+    // stop_campaign_session()/run()'s exit path stop it explicitly;
+    // ~Impl is the belt-and-braces second line.
+    std::unique_ptr<f4::simulation::CampaignSessionRunner> session_runner;
+
     // V-CAMP async start: CampaignSession::create() over a real install
     // world is SLOW (world-JSON parse + world population + hundreds of
     // flights + thousands of squadron parked aircraft — tens of seconds
@@ -371,12 +391,27 @@ struct ViewerApp::Impl {
     bool show_threat_overlay = false;
     /// True when advance() hit the tick cap last frame (time dilated —
     /// surfaced in the window so the user knows the preset outran CPU).
+    /// V-THREAD: mirrored from the runner's atomic once per frame (the
+    /// worker, not the frame, advances now).
     bool campaign_time_dilated = false;
+    /// V-3DLIVE: the campaign camera bubble drives deaggregation (zoom
+    /// into a ground unit → its vehicles/personnel appear, even while
+    /// paused). Toggle in the Campaign window.
+    bool campaign_view_bubble = true;
+    /// V-3DLIVE: the view bubble is re-pointed only when the camera
+    /// moved/zoomed beyond these thresholds — avoids per-frame deagg
+    /// churn (and re-pointing while the camera sits still).
+    float last_bubble_gx = -1.0e9f, last_bubble_gy = -1.0e9f;
+    float last_bubble_zoom = -1.0f;
     /// Session start options (the Campaign window's start row).
     int campaign_start_team = -1;
     int campaign_start_max_flights = 48;
     /// Last session creation failure (shown in the window when set).
     char campaign_error[256] = {0};
+    /// V-THREAD: the Stop button's deferred stop — set inside the
+    /// frame session-lock scope (a direct runner->stop() there would
+    /// self-deadlock); run() processes it right after the scope ends.
+    bool session_stop_requested = false;
 
     // --- Selection --------------------------------------------------------
     // The sel_kind/sel_entity pair; a LiveAircraft selection stores
@@ -424,6 +459,26 @@ struct ViewerApp::Impl {
     live_aircraft() const {
         static const std::vector<f4::entities::EntityId> empty;
         return session ? session->sim().aircraft_entities() : empty;
+    }
+    /// V-3DLIVE: the session's PARKED squadron aircraft roster (empty
+    /// when no session) — the aircraft sitting on the ramps. Drawn
+    /// dimmed in the 2D live layer and as models in the live 3D pass.
+    [[nodiscard]] const std::vector<f4::entities::EntityId>&
+    parked_aircraft() const {
+        static const std::vector<f4::entities::EntityId> empty;
+        return session ? session->sim().squadron_aircraft_entities()
+                       : empty;
+    }
+    /// V-3DLIVE: the session's DEAGGREGATED vehicle roster (empty when
+    /// no session / nothing deaggregated) — individual tanks, trucks,
+    /// and personnel squads. Grows/shrinks as the (camera or ownship)
+    /// bubble moves.
+    [[nodiscard]] const std::vector<f4::entities::EntityId>&
+    deaggregated_vehicles() const {
+        static const std::vector<f4::entities::EntityId> empty;
+        return (session && session->sim().bubble_manager())
+                   ? session->sim().bubble_manager()->vehicle_entities()
+                   : empty;
     }
     /// Get the grid X coordinate from a TransformComponent (feet → grid).
     static float grid_x(const f4::entities::TransformComponent* tr) {

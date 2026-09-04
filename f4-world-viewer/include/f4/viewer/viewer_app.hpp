@@ -233,6 +233,14 @@ private:
     /// the session (a reset = stop + start).
     void start_campaign_session();
     void stop_campaign_session();
+    /// V-THREAD: the OUT-OF-LOCK half of stop_campaign_session. The
+    /// Stop button runs inside run()'s frame session-lock scope;
+    /// runner->stop() would join a worker waiting on that lock — so
+    /// the button only sets impl_->session_stop_requested, and run()
+    /// calls this right AFTER the frame scope ends (lock released) to
+    /// stop + join the worker and drop the session. At most one frame
+    /// of latency.
+    void process_session_stop();
     /// V-CAMP async start, frame half: polls the session-start future
     /// and adopts the result when create() finishes (join + move the
     /// session in, or surface the error). Called once per frame from

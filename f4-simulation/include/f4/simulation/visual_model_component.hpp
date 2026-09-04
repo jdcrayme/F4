@@ -54,6 +54,19 @@ struct VisualModelComponent : entities::Component<VisualModelComponent> {
     /// skip drawing in that case (and ideally log a warning).
     const f4::models::ModelRecord* model_record{nullptr};
 
+    /// V-3DLIVE: the VIS TYPE itself (FALCON4.CT's visual-model index),
+    /// recorded at spawn — the renderable IDENTITY of the entity,
+    /// independent of any ModelDatabase. Set by every campaign spawn
+    /// path (flights, synthetic intents, squadron parked aircraft,
+    /// deaggregated vehicles) alongside model_record. The session runs
+    /// with an EMPTY ModelDatabase (its db_ never loads KoreaObj —
+    /// 2D-symbols-only was the original design), so model_record is
+    /// null there; a host that DID load a model db (the world viewer)
+    /// resolves the mesh through vis_type + ITS OWN db/mesh cache
+    /// instead. 0 = never resolved (no class-table entry) — the same
+    /// convention ClassTable::vis_type_for() itself uses.
+    int16_t vis_type{0};
+
     /// Active LOD index into model_record->lods[]. Renderer picks based
     /// on distance to camera, but for the taxi demo we lock to LOD 0
     /// (highest detail) since the camera is close.

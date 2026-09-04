@@ -4790,3 +4790,80 @@ Stage Summary:
 - Next per the plan: C5 the 24-hour war — the long-horizon QC run
   over the ATM pipeline, now on a Start Session that survives being
   clicked.
+
+---
+Task ID: 20
+Agent: main (Super Z)
+Task: C4-FIX-3 — the user's two follow-ups on the live session: (1) "the UI
+becomes unresponsive when running the session" → a campaign thread separate
+from the UI thread; (2) "many things don't have a 3D view — ground units
+should show vehicles and personnel, squadrons parked aircraft, in-flight
+aircraft flying" → full 3D coverage for everything on the map.
+
+Work Log:
+- Synced to d4a9dd5 (the user's push of C4-FIX-2; working tree was
+  byte-identical → hard reset, no divergence).
+- Root causes: (a) run() called session->advance() inline in the ImGui
+  frame (240-tick cap × 449 aircraft = seconds inside one frame — the
+  freeze); (b) FALCON4.CT gives UNIT-level entities visType[0]==0 (the
+  models live at VEHICLE level, post-deagg) while the session ran with an
+  EMPTY db — so spawn_vehicles_from_unit's db-validity gate made the
+  session's deagg a NO-OP (zero vehicles ever spawned); (c) parked
+  squadron aircraft + deagg vehicles had no draw layer; (d) the bubble
+  followed the first PARKED aircraft, not the user's view.
+- V-THREAD: new CampaignSessionRunner (f4-simulation) — worker thread +
+  one session mutex + adaptive tick budget (6-12 ms lock holds, doubled /
+  halved on measured batch cost); run() takes the runner's mutex for its
+  frame read+draw scope (input hit tests + canvas + imgui all inside —
+  zero changes to the ~70 existing session read sites); pause/speed via
+  atomics (atomic-only set_paused_flag for callers holding the frame
+  lock — set_paused() would self-deadlock there); Stop deferred via
+  session_stop_requested + process_session_stop() outside the lock;
+  adopt_session_start stops any previous runner BEFORE overwriting the
+  session (borrower-before-lender destruction, enforced).
+- CampaignSession::advance(real, max_steps_override=0) — the runner's
+  per-call budget; never raises the option cap; QC/tests byte-identical.
+- V-3DLIVE: VisualModelComponent::vis_type set at all 6 spawn sites
+  (flights, intents, squadron parked, vehicles, features, scenario
+  aircraft); vehicle deagg requires the vis TYPE only (empty db spawns
+  record-less vehicles); draw_vis_type_mesh (f4-renderer) — feature_mesh
+  split at the class-table lookup (also dropped a bogus null-class_table
+  requirement in build_feature_mesh that made the direct path a no-op);
+  canvas live 3D pass (aircraft + parked + vehicles under the static
+  pass's ortho camera, facing from velocity/parked quaternion) + 2D dot
+  layers for parked (zoom>2) and vehicles (any zoom); VIEW BUBBLE —
+  Simulation::set_view_bubble(radius, center)/clear/refresh_bubble,
+  BubbleManager::set_ground_radius_ft, CampaignSession forwarding with
+  immediate apply (paused sessions deagg on zoom), viewer pushes the
+  camera position at zoom>4 (radius = clamp(¼ visible extent, 2.5-25
+  grid)) with still-camera churn guards; Campaign-window toggle.
+- Tests: NEW test_campaign_session_runner.cpp (5 units: paused runner
+  advances nothing; worker advances + concurrent read() consistency;
+  max_steps override determinism; VIEW BUBBLE deagg-while-paused over the
+  garrison world — 3 vehicles, vis types, reagg on bubble move, ownship
+  restore on clear; dtor joins without explicit stop). Lifetime test now
+  asserts vis_type on aircraft/parked/vehicles. NEW renderer GPU test
+  DrawVisTypeMesh_DirectAndZero (no class table needed; vis 0 draws
+  nothing).
+- Verification: full build clean; suite 2,247/2,247 (100%) under Xvfb
+  (:99); campaign_qc on cam2json-converted TestCamp (--tasking 30
+  --minutes 20 --no-record): 449 aircraft, 140 bombs, 85 features, 29
+  objectives — IDENTICAL to the C4-FIX-2 baseline numbers; ledger MD5
+  identical across two runs; in-container viewer smoke over the real
+  TestCamp world with --session --zoom 12 --center 390,455 (camera
+  bubble + live 3D pass live): 6 s clean run, 531 KB screenshot, exit 0.
+
+Stage Summary:
+- The session never blocks the UI again: create() runs on the start
+  worker (C4-FIX-2), ticking runs on the campaign runner (this tranche)
+  — the render loop only ever locks for its own frame scope.
+- Everything on the map renders: aircraft (flying + parked) as 3D models
+  when zoomed, 2D glyphs/dots otherwise; ground units deaggregate into
+  individual vehicles + personnel under the camera; the class-table
+  reality (unit icons have no model by design) is now surfaced by
+  behavior instead of hidden by a no-op.
+- Threading contract in one place: ONE mutex (the runner's), two lock
+  sites (worker batch / frame scope), no nesting, deferred stop for
+  button-context joins.
+- Next: C5 the 24-hour war (the long-horizon QC acceptance over the ATM
+  pipeline) — now on a session that survives being watched.

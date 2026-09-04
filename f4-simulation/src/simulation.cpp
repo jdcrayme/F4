@@ -349,6 +349,7 @@ void Simulation::spawn_from_scenario_list() {
         //    This is the ONLY new component type. The renderer reads it to draw
         //    the F-16 mesh; the host syncs its gear switch from the FM each tick.
         auto& vis = h.add<VisualModelComponent>();
+        vis.vis_type = sc.vis_type_index;  // V-3DLIVE (identity w/o db)
         if (model_db_->valid()) {
             vis.model_record = model_db_->model(sc.vis_type_index);
             // If the lookup failed, model_record stays null and the renderer
@@ -956,7 +957,10 @@ void Simulation::spawn_airfield_features() {
         // VisualModelComponent — the renderable handle. Same component type
         // as the aircraft's, resolved the same way (model_record pointer from
         // ModelDatabase). No gear switch sync needed (features have no gear).
+        // V-3DLIVE: vis_type recorded for hosts that resolve meshes from
+        // their own db (the session's features carry no model_record).
         auto& vis = h.add<VisualModelComponent>();
+        vis.vis_type = sf.vis_type_index;
         if (model_db_->valid()) {
             vis.model_record = model_db_->model(sf.vis_type_index);
         }
@@ -1644,6 +1648,7 @@ void Simulation::init_bubble_manager() {
     // is byte-identical. A present-but-malformed AII throws (loud).
     const auto [ground_radius_ft, air_radius_ft] =
         bubble_radii_from_aii(scenario_.aii_path);
+    default_ground_radius_ft_ = ground_radius_ft;
 
     bubble_manager_ = std::make_unique<BubbleManager>(
         world_, class_table_, *model_db_, ground_radius_ft, air_radius_ft);
@@ -1651,7 +1656,22 @@ void Simulation::init_bubble_manager() {
 
 void Simulation::update_bubble() {
     if (!bubble_manager_) return;
+
+    // V-3DLIVE: the view bubble wins when the host set one — the
+    // deaggregation follows the EYE (the map camera), not the clock:
+    // zoom into a battalion and its vehicles spawn, even while the
+    // session is paused (the host calls refresh_bubble() as the camera
+    // moves). The radius override scales with the host's zoom.
+    if (view_bubble_active_) {
+        bubble_manager_->set_ground_radius_ft(view_bubble_radius_ft_);
+        bubble_manager_->update(view_bubble_center_);
+        return;
+    }
+
+    // The ownship path (FreeFalcon's bubble): restore the AII default
+    // radius, then follow the first (primary) aircraft's position.
     if (aircraft_entities_.empty()) return;
+    bubble_manager_->set_ground_radius_ft(default_ground_radius_ft_);
 
     // Use the first (primary) aircraft's position as the bubble center.
     // Phase 2 has N aircraft, but the bubble follows the camera focus —

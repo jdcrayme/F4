@@ -34,9 +34,10 @@
 //       - Write Result JSON (the C1 ledger artifact, byte-stable) and
 //         Write Back (apply_to the session's WorldState — in-memory).
 //
-// The window advances nothing itself — run() drains the session each
-// frame (viewer_app.cpp) so the canvas, the ATO window, and this
-// window all see the same tick.
+// The window advances nothing itself — the campaign RUNNER's worker
+// thread drains the session (V-THREAD; run()'s frame scope takes the
+// runner's mutex around input + draw), so the canvas, the ATO window,
+// and this window all see the same tick.
 
 #include "viewer_state.hpp"
 #include <f4/viewer/enum_text.hpp>
@@ -206,6 +207,17 @@ bool ViewerApp::adopt_session_start() {
     impl_->session_starting = false;
 
     if (r.session) {
+        // V-THREAD: stop any PREVIOUS runner BEFORE the old session is
+        // destroyed by the assignment below (the worker borrows it). The
+        // Restart flow (stop → start) normally stops it one frame earlier
+        // via process_session_stop(); this is the belt-and-braces order
+        // guarantee for ANY adopt-over-a-live-session path. We are NOT
+        // holding the frame lock here (adopt runs before the scope), so
+        // stop()'s join is deadlock-free.
+        if (impl_->session_runner) {
+            impl_->session_runner->stop();
+            impl_->session_runner.reset();
+        }
         impl_->session = std::move(r.session);
         // A new session starts PAUSED — the user starts the clock
         // deliberately (the tasking cycle is a 30-minute commitment at
@@ -213,6 +225,22 @@ bool ViewerApp::adopt_session_start() {
         impl_->session->set_paused(true);
         impl_->sel_kind = Impl::SelectionKind::None;
         impl_->sel_entity = f4::entities::EntityId{};
+        // V-THREAD: launch the campaign runner — the worker thread that
+        // owns advance() from now on (the frame read scope in run()
+        // locks the runner's mutex; the old inline per-frame advance is
+        // gone). Starts PAUSED with the current speed preset; the
+        // worker idles (no debt accrues) until the user presses Play.
+        const int idx = std::clamp(impl_->campaign_speed_index, 0,
+                                   kSessionSpeedCount - 1);
+        impl_->session_runner =
+            std::make_unique<f4::simulation::CampaignSessionRunner>(
+                *impl_->session, kSessionSpeedTable[idx], /*paused=*/true);
+        impl_->session_runner->start();
+        // V-3DLIVE: reset the camera-bubble tracking (a fresh session
+        // re-points the bubble on the next camera move).
+        impl_->last_bubble_zoom = -1.0f;
+        impl_->last_bubble_gx = -1.0e9f;
+        impl_->last_bubble_gy = -1.0e9f;
         impl_->status_msg = "Campaign session started (paused)";
         return true;
     }
@@ -251,12 +279,31 @@ void ViewerApp::stop_campaign_session() {
         return;
     }
     if (!impl_->session) return;
+    // V-THREAD DEFERRED STOP: this runs from an ImGui button — INSIDE
+    // run()'s frame session-lock scope. runner->stop() joins a worker
+    // that may be waiting on that very lock = self-deadlock. So the
+    // button only sets the flag; run() performs the actual
+    // stop-join-reset one step later, right AFTER the frame scope
+    // releases the lock (at most one frame of latency).
+    impl_->session_stop_requested = true;
+    impl_->campaign_time_dilated = false;
+}
+
+void ViewerApp::process_session_stop() {
+    // run() calls this every frame, OUTSIDE the frame session lock —
+    // the safe place to join the worker and drop the session.
+    if (!impl_->session_stop_requested) return;
+    impl_->session_stop_requested = false;
+
+    if (impl_->session_runner) {
+        impl_->session_runner->stop();
+        impl_->session_runner.reset();
+    }
     impl_->session.reset();
     if (impl_->sel_kind == Impl::SelectionKind::LiveAircraft) {
         impl_->sel_kind = Impl::SelectionKind::None;
         impl_->sel_entity = f4::entities::EntityId{};
     }
-    impl_->campaign_time_dilated = false;
     impl_->status_msg = "Campaign session stopped";
 }
 
@@ -352,12 +399,27 @@ void ViewerApp::draw_campaign_session_view() {
     // --- Session running: time controls ---------------------------------
     const auto& st = impl_->session->stats();
 
-    // Play/pause + speed presets. The presets scale wall-clock time;
-    // the tick dt is the session's fixed 1/60 s regardless.
-    if (ImGui::Button(impl_->session->paused() ? "Play (Space)"
-                                               : "Pause (Space)",
+    // V-THREAD: Play/pause + speed presets talk to the RUNNER now (its
+    // worker thread owns advance()); the presets scale wall-clock time,
+    // the tick dt stays the session's fixed 1/60 s. This window draws
+    // inside run()'s frame session-lock scope, so the pause flip uses
+    // the runner's ATOMIC-ONLY setter (set_paused() would re-lock the
+    // mutex we already hold = self-deadlock) and mirrors the session's
+    // own flag directly — consistent, because the worker can't be
+    // mid-advance while we hold the lock. Speed is atomic — lock-free.
+    const bool session_paused = impl_->session_runner
+        ? impl_->session_runner->paused()
+        : impl_->session->paused();
+
+    if (ImGui::Button(session_paused ? "Play (Space)"
+                                     : "Pause (Space)",
                       ImVec2(110, 0))) {
-        impl_->session->set_paused(!impl_->session->paused());
+        if (impl_->session_runner) {
+            impl_->session_runner->set_paused_flag(!session_paused);
+            impl_->session->set_paused(!session_paused);
+        } else {
+            impl_->session->set_paused(!session_paused);
+        }
     }
     ImGui::SameLine();
     for (int i = 0; i < kSessionSpeedCount; ++i) {
@@ -365,6 +427,29 @@ void ViewerApp::draw_campaign_session_view() {
         if (ImGui::RadioButton(kSessionSpeedNames[i],
                                impl_->campaign_speed_index == i)) {
             impl_->campaign_speed_index = i;
+            // V-THREAD: the runner's speed is an atomic — lock-free,
+            // no deadlock risk under the frame scope.
+            if (impl_->session_runner) {
+                impl_->session_runner->set_speed(kSessionSpeedTable[i]);
+            }
+        }
+    }
+
+    // V-3DLIVE: the camera bubble — when on (default), zooming in past
+    // ~4 px/grid drives the deaggregation bubble from the camera: the
+    // ground units you're looking at spawn their individual vehicles
+    // and personnel (works while paused). Off = FreeFalcon's ownship
+    // bubble (the first parked aircraft — tiny).
+    ImGui::Checkbox("camera bubble (deagg what you zoom into)",
+                    &impl_->campaign_view_bubble);
+    if (!impl_->campaign_view_bubble) {
+        // Turning it off mid-run: return to the ownship bubble NOW
+        // (we hold the frame lock — the worker can't be mid-advance).
+        if (impl_->session && impl_->last_bubble_zoom >= 0.0f) {
+            impl_->session->clear_view_bubble();
+            impl_->last_bubble_zoom = -1.0f;
+            impl_->last_bubble_gx = -1.0e9f;
+            impl_->last_bubble_gy = -1.0e9f;
         }
     }
 

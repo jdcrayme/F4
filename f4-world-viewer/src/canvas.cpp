@@ -770,6 +770,236 @@ void ViewerApp::draw_canvas() {
         }
     }
 
+    // --- V-3DLIVE: the session's PARKED squadron aircraft (2D) ----------
+    //
+    // The aircraft sitting on the ramps — thousands of entities that
+    // existed in the sim's world since create() but never had a layer
+    // to draw them (the user: "squadrons would show parked aircraft").
+    // Small dimmed owner-tinted squares, view-culled; only when zoomed
+    // past ~2 px/grid (below that they'd be sub-pixel noise and a
+    // thousands-strong draw-call pile).
+    if (impl_->session && impl_->show_live_layer &&
+        impl_->cam_zoom > 2.0f) {
+        const float dot_r = std::clamp(1.5f + impl_->cam_zoom * 0.10f,
+                                       2.0f, 4.0f);
+        const float cull = dot_r + 8.0f;
+        const float sx_min = -cull;
+        const float sx_max = static_cast<float>(impl_->window_w) + cull;
+        const float sy_min = -cull;
+        const float sy_max = static_cast<float>(impl_->window_h) + cull;
+        const bool selected_is_live =
+            impl_->sel_kind == Impl::SelectionKind::LiveAircraft;
+
+        for (const auto eid : impl_->parked_aircraft()) {
+            auto h = impl_->session_handle(eid);
+            auto* tf = h.get<f4::entities::TransformComponent>();
+            if (!tf) continue;
+            const float gx = Impl::grid_x(tf), gy = Impl::grid_y(tf);
+            const Vector2 p = impl_->world_to_screen(gx, gy);
+            if (p.x < sx_min || p.x > sx_max ||
+                p.y < sy_min || p.y > sy_max) {
+                continue;
+            }
+
+            auto* org = h.get<f4::simulation::CampaignOriginComponent>();
+            const uint8_t owner = org ? org->team_slot : 0;
+            RlColor c = color_for_owner(owner);
+            // Parked = dim (the ramp picture, not the air picture).
+            c.r = static_cast<unsigned char>(c.r * 0.45f);
+            c.g = static_cast<unsigned char>(c.g * 0.45f);
+            c.b = static_cast<unsigned char>(c.b * 0.45f);
+            if (impl_->team_filter != 0xFF && owner != impl_->team_filter) {
+                c.a = static_cast<unsigned char>(c.a * 0.3f);
+            }
+            DrawRectangleRec(
+                Rectangle{p.x - dot_r, p.y - dot_r, dot_r * 2, dot_r * 2},
+                Color{c.r, c.g, c.b, c.a});
+
+            if (selected_is_live && impl_->sel_entity == eid) {
+                DrawCircleLines(static_cast<int>(p.x),
+                                static_cast<int>(p.y),
+                                static_cast<int>(dot_r + 4),
+                                Color{255, 255, 0, 255});
+            }
+        }
+    }
+
+    // --- V-3DLIVE: the session's DEAGGREGATED vehicles (2D) ------------
+    //
+    // The individual tanks / trucks / personnel squads the (camera or
+    // ownship) bubble spawned from ground units — 2-px owner-tinted
+    // dots so they're visible at any zoom while the 3D pass below
+    // gives them real models when zoomed in.
+    if (impl_->session && impl_->show_live_layer) {
+        constexpr float dot_r = 2.0f;
+        constexpr float cull = 10.0f;
+        const float sx_min = -cull;
+        const float sx_max = static_cast<float>(impl_->window_w) + cull;
+        const float sy_min = -cull;
+        const float sy_max = static_cast<float>(impl_->window_h) + cull;
+
+        for (const auto eid : impl_->deaggregated_vehicles()) {
+            auto h = impl_->session_handle(eid);
+            auto* tf = h.get<f4::entities::TransformComponent>();
+            if (!tf) continue;
+            const float gx = Impl::grid_x(tf), gy = Impl::grid_y(tf);
+            const Vector2 p = impl_->world_to_screen(gx, gy);
+            if (p.x < sx_min || p.x > sx_max ||
+                p.y < sy_min || p.y > sy_max) {
+                continue;
+            }
+
+            // Vehicles carry no CampaignOrigin (they inherit the unit's
+            // owner implicitly) — neutral khaki reads as "ground stuff".
+            DrawCircleV(p, dot_r, Color{150, 150, 110, 220});
+        }
+    }
+
+    // --- V-3DLIVE: the LIVE 3D pass (session entities as models) -------
+    //
+    // The static 3D pass above renders the LOADED world's objectives
+    // and units; the SESSION's entities — flying aircraft, parked
+    // squadron aircraft, deaggregated vehicles — had only 2D glyphs.
+    // This pass resolves each session entity's vis type
+    // (VisualModelComponent::vis_type, recorded at spawn against the
+    // session's own class table) through the VIEWER's model db + mesh
+    // cache and draw_vis_type_mesh-es it under the same top-down ortho
+    // camera the static pass uses, so live models land on the same
+    // pixels as the static ones. Zoom-gated like the static pass
+    // (> 6 px/grid: sub-pixel models are clutter, not detail).
+    if (impl_->session && impl_->show_live_layer &&
+        impl_->world_loaded && impl_->cam_zoom > 6.0f) {
+        if (!impl_->models_3d_load_attempted) {
+            impl_->ensure_models_3d_loaded();
+        }
+        const bool models_ready = impl_->models_3d_loaded &&
+                                  impl_->model_db_3d.has_value() &&
+                                  impl_->class_table_3d.loaded();
+        if (models_ready &&
+            impl_->render_res_3d.ensure_default_material()) {
+            constexpr float FT_PER_GRID = 1024.0f;
+            const float cam_east_ft  = impl_->cam_x * FT_PER_GRID;
+            const float cam_north_ft = impl_->cam_y * FT_PER_GRID;
+            const float visible_h_ft =
+                (static_cast<float>(impl_->window_h) / impl_->cam_zoom) *
+                FT_PER_GRID;
+            constexpr float CAM_ALT_FT = 5000.0f;
+
+            Camera3D cam3d = {};
+            cam3d.position   = { cam_east_ft,  CAM_ALT_FT, -cam_north_ft };
+            cam3d.target     = { cam_east_ft,         0.0f, -cam_north_ft };
+            cam3d.up         = { 0.0f, 0.0f, -1.0f };
+            cam3d.fovy       = visible_h_ft;
+            cam3d.projection = CAMERA_ORTHOGRAPHIC;
+
+            // View-cull margin (models can extend a few hundred feet).
+            const float cull_margin_px = 600.0f * impl_->cam_zoom /
+                                         FT_PER_GRID;
+            const float sx_min = -cull_margin_px;
+            const float sx_max =
+                static_cast<float>(impl_->window_w) + cull_margin_px;
+            const float sy_min = -cull_margin_px;
+            const float sy_max =
+                static_cast<float>(impl_->window_h) + cull_margin_px;
+
+            BeginMode3D(cam3d);
+            {
+                f4::renderer::EntityRenderResources res =
+                    f4::renderer::make_entity_render_resources(
+                        impl_->render_res_3d,
+                        &*impl_->model_db_3d,
+                        &impl_->class_table_3d);
+                res.show_ground_layout = false;
+
+                // Facing: aircraft models point along their motion when
+                // moving (velocity → compass), else their parked
+                // heading (the spawn-time compass quaternion). Compass
+                // = 0 north, clockwise east (atan2(east, north)).
+                const auto facing_deg_from_transform =
+                    [](const f4::entities::TransformComponent* tf) {
+                        if (!tf) return 0.0f;
+                        const double v2 = tf->vx * tf->vx + tf->vy * tf->vy;
+                        if (v2 > 400.0) {  // > 20 ft/s ground speed
+                            const double rad = std::atan2(tf->vx, tf->vy);
+                            return static_cast<float>(rad * 57.29577951308232);
+                        }
+                        // enu_quat_from_compass(h) = (cos(h/2),0,0,
+                        // -sin(h/2)): h = -2*atan2(qz, qw), wrapped.
+                        double rad = -2.0 * std::atan2(tf->qz, tf->qw);
+                        while (rad < 0.0) rad += 6.283185307179586;
+                        while (rad >= 6.283185307179586) {
+                            rad -= 6.283185307179586;
+                        }
+                        return static_cast<float>(rad * 57.29577951308232);
+                    };
+
+                // (1) Aircraft — the save's flights + the synthetic
+                // spawns (one roster; both have FM + Transform + VMC).
+                for (const auto eid : impl_->live_aircraft()) {
+                    auto h = impl_->session_handle(eid);
+                    auto* tf = h.get<f4::entities::TransformComponent>();
+                    auto* vmc =
+                        h.get<f4::simulation::VisualModelComponent>();
+                    if (!tf || !vmc || vmc->vis_type <= 0) continue;
+                    const float gx = Impl::grid_x(tf), gy = Impl::grid_y(tf);
+                    const Vector2 p = impl_->world_to_screen(gx, gy);
+                    if (p.x < sx_min || p.x > sx_max ||
+                        p.y < sy_min || p.y > sy_max) {
+                        continue;
+                    }
+                    f4::renderer::draw_vis_type_mesh(
+                        res, vmc->vis_type,
+                        gx * FT_PER_GRID, gy * FT_PER_GRID,
+                        static_cast<float>(tf->position.z),
+                        facing_deg_from_transform(tf));
+                }
+
+                // (2) Parked squadron aircraft — same shape, dormant.
+                for (const auto eid : impl_->parked_aircraft()) {
+                    auto h = impl_->session_handle(eid);
+                    auto* tf = h.get<f4::entities::TransformComponent>();
+                    auto* vmc =
+                        h.get<f4::simulation::VisualModelComponent>();
+                    if (!tf || !vmc || vmc->vis_type <= 0) continue;
+                    const float gx = Impl::grid_x(tf), gy = Impl::grid_y(tf);
+                    const Vector2 p = impl_->world_to_screen(gx, gy);
+                    if (p.x < sx_min || p.x > sx_max ||
+                        p.y < sy_min || p.y > sy_max) {
+                        continue;
+                    }
+                    f4::renderer::draw_vis_type_mesh(
+                        res, vmc->vis_type,
+                        gx * FT_PER_GRID, gy * FT_PER_GRID,
+                        static_cast<float>(tf->position.z),
+                        facing_deg_from_transform(tf));
+                }
+
+                // (3) Deaggregated vehicles — tanks, trucks, personnel;
+                // the formation offsets were baked into their transforms
+                // at spawn (unit heading included via the quaternion).
+                for (const auto eid : impl_->deaggregated_vehicles()) {
+                    auto h = impl_->session_handle(eid);
+                    auto* tf = h.get<f4::entities::TransformComponent>();
+                    auto* vmc =
+                        h.get<f4::simulation::VisualModelComponent>();
+                    if (!tf || !vmc || vmc->vis_type <= 0) continue;
+                    const float gx = Impl::grid_x(tf), gy = Impl::grid_y(tf);
+                    const Vector2 p = impl_->world_to_screen(gx, gy);
+                    if (p.x < sx_min || p.x > sx_max ||
+                        p.y < sy_min || p.y > sy_max) {
+                        continue;
+                    }
+                    f4::renderer::draw_vis_type_mesh(
+                        res, vmc->vis_type,
+                        gx * FT_PER_GRID, gy * FT_PER_GRID,
+                        static_cast<float>(tf->position.z),
+                        facing_deg_from_transform(tf));
+                }
+            }
+            EndMode3D();
+        }
+    }
+
     // --- B.3 QC overlays: mission links, package links, bullseye -------
     //
     // These three passes draw the campaign's tasking RELATIONSHIPS over

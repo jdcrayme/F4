@@ -260,6 +260,27 @@ TEST(SimulationLifetime, ClassTableStaysLoadedAfterInitialize) {
     // The lookups the deagg path depends on (vehicle_type 101 → 225).
     EXPECT_EQ(live.sim->class_table().vis_type_for(101, 0), 225);
 
+    // V-3DLIVE: every spawned aircraft carries its vis type (the
+    // renderable identity — the session's empty db means no model
+    // records, the host resolves meshes from vis_type alone).
+    for (const auto eid : live.sim->aircraft_entities()) {
+        EntityHandle h(eid, &live.sim->world());
+        const auto* vis = h.get<f4::simulation::VisualModelComponent>();
+        ASSERT_NE(vis, nullptr);
+        EXPECT_GT(vis->vis_type, 0)
+            << "flight aircraft " << eid.value
+            << " carries no vis type — the live 3D pass has nothing "
+               "to draw";
+    }
+    for (const auto eid : live.sim->squadron_aircraft_entities()) {
+        EntityHandle h(eid, &live.sim->world());
+        const auto* vis = h.get<f4::simulation::VisualModelComponent>();
+        ASSERT_NE(vis, nullptr);
+        EXPECT_GT(vis->vis_type, 0)
+            << "parked squadron aircraft " << eid.value
+            << " carries no vis type";
+    }
+
     // The bubble manager exists (the world has vehicle-composition
     // units) — the object whose dangling ct_ used to crash.
     ASSERT_NE(live.sim->bubble_manager(), nullptr);
@@ -293,6 +314,9 @@ TEST(SimulationLifetime, DeaggReadsLiveClassTableAfterStackStomp) {
         EntityHandle h(vid, &sim->world());
         const auto* vis = h.get<f4::simulation::VisualModelComponent>();
         ASSERT_NE(vis, nullptr);
+        // V-3DLIVE: the identity rides in vis_type (225 for the
+        // fixture's vehicle_type 101) — model_record needs a db.
+        EXPECT_EQ(vis->vis_type, 225);
         EXPECT_NE(vis->model_record, nullptr)
             << "vehicle " << vid.value << " has no model — the class "
                "table lookup returned garbage";

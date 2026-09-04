@@ -403,17 +403,22 @@ CampaignSession::~CampaignSession() {
 // advance()
 // ---------------------------------------------------------------------------
 
-bool CampaignSession::advance(double real_seconds) {
+bool CampaignSession::advance(double real_seconds, int max_steps_override) {
     if (paused_ || real_seconds <= 0.0) {
         refresh_stats_();
         return false;
     }
     accumulator_ += real_seconds;
 
+    // V-THREAD: the runner's per-call budget (never above the option).
+    const int step_cap = max_steps_override > 0
+        ? std::min(max_steps_override, max_steps_per_advance_)
+        : max_steps_per_advance_;
+
     int steps = 0;
     bool capped = false;
     while (accumulator_ >= sim_dt_) {
-        if (steps >= max_steps_per_advance_) {
+        if (steps >= step_cap) {
             capped = true;
             break;
         }

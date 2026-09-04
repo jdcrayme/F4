@@ -67,6 +67,14 @@ ViewerApp::ViewerApp()  : impl_(std::make_unique<Impl>()) {
 }
 
 ViewerApp::~ViewerApp() {
+    // V-THREAD: last-resort stop for the campaign runner (run()'s exit
+    // path stops it first; this covers destruction without run()).
+    // Must run BEFORE Impl dies — the worker borrows the session. The
+    // member order (runner declared after session) is the second line
+    // of defense; this is the first.
+    if (impl_->session_runner) {
+        impl_->session_runner->stop();
+    }
     // V-CAMP: last-resort join for a session-start worker that is still
     // running (run()'s exit path joins first; this covers destruction
     // without run() — CLI-only usage). A joinable std::thread dtor would
@@ -142,15 +150,6 @@ void ViewerApp::run() {
             impl_->window_h = new_h;
         }
 
-        // Dispatch input handling. Replay mode has its own input path
-        // (arrow keys for stepping, etc.); the normal canvas path
-        // handles pan/zoom/select.
-        if (impl_->replay.active()) {
-            handle_replay_input();
-        } else {
-            handle_input();
-        }
-
         // F2 = screenshot (useful for headless smoke tests)
         if (IsKeyPressed(KEY_F2)) {
             const std::string path = "f4_viewer_screenshot.png";
@@ -189,52 +188,157 @@ void ViewerApp::run() {
 
         // V-CAMP: adopt a finished async session start BEFORE anything
         // reads impl_->session this frame (the Space toggle below, the
-        // advance block, the canvas live layer, this window). Returns
-        // quickly while the worker is still building.
+        // canvas live layer, the Campaign window). Returns quickly
+        // while the worker is still building. V-THREAD: this also
+        // launches the campaign runner thread when a session lands —
+        // before any frame scope below could lock it.
         adopt_session_start();
 
-        // V-CAMP: Space toggles the live campaign session's clock (the
-        // Campaign window's own button mirrors it). Only when a session
-        // runs; the scenario player's Space is a different app.
-        if (IsKeyPressed(KEY_SPACE) && !ImGui::GetIO().WantCaptureKeyboard &&
-            impl_->session) {
-            impl_->session->set_paused(!impl_->session->paused());
-        }
+        // V-THREAD: the frame READ scope. The campaign runner's worker
+        // advances the session on its own thread in short mutex-guarded
+        // batches; this scope takes the SAME mutex for the whole
+        // input-read + draw phase, so every existing session read —
+        // hit tests, canvas layers, the Campaign window, the inspector,
+        // the threat overlay, session_handle() derefs — sees a frozen,
+        // consistent session for the frame without touching any of
+        // those call sites. The old inline advance() lived here; it
+        // could legally run 240 ticks (seconds) inside the ImGui frame
+        // and froze the UI ("not responding"). Gone: the worker owns
+        // advance().
+        {
+            std::unique_lock<std::mutex> session_frame_lock;
+            if (impl_->session_runner) {
+                session_frame_lock =
+                    std::unique_lock<std::mutex>(
+                        impl_->session_runner->mutex());
+            }
 
-        // V-CAMP: advance the live campaign session. The speed preset
-        // scales WALL-CLOCK time; the session drains its accumulator in
-        // whole fixed sim_dt ticks (the FM's tuned discretization holds
-        // at every speed), advancing the campaign ladder in whole
-        // campaign seconds off the same ticks — one clock. The cap
-        // drops un-payable debt (spiral-of-death guard) and is
-        // surfaced as "time dilated" in the window.
-        if (impl_->session && !impl_->session->paused()) {
-            const int idx = std::clamp(impl_->campaign_speed_index, 0,
-                                       static_cast<int>(
-                                           sizeof(kSessionSpeedTable) /
-                                           sizeof(kSessionSpeedTable[0])) - 1);
-            impl_->campaign_time_dilated = impl_->session->advance(
-                GetFrameTime() * kSessionSpeedTable[idx]);
-        }
+            // Dispatch input handling INSIDE the frame scope — the
+            // canvas click path hit-tests the session's live aircraft
+            // (session_handle derefs), which must not race the worker.
+            // Replay mode has its own input path (arrow keys for
+            // stepping, etc.); it never touches the session.
+            if (impl_->replay.active()) {
+                handle_replay_input();
+            } else {
+                handle_input();
+            }
 
-        BeginDrawing();
-        ClearBackground(Color{20, 22, 28, 255});
-        if (impl_->replay.active()) {
-            draw_replay_canvas();
-            // The replay panel uses ImGui, so it must be wrapped in
-            // rlImGuiBegin/End — same as the normal draw_imgui() path.
-            // Without this, ImGui::Begin() asserts (g.WithinFrameScope).
-            rlImGuiBegin();
-            draw_replay_panel();
-            rlImGuiEnd();
-        } else {
-            draw_canvas();
-            draw_imgui();
-        }
-        EndDrawing();
+            // V-CAMP: Space toggles the live campaign session's clock
+            // (the Campaign window's own button mirrors it). We HOLD
+            // the frame lock here, so the runner's ATOMIC-ONLY setter
+            // is the safe call (set_paused() would re-lock the mutex
+            // we already hold = self-deadlock); the session's own flag
+            // is mirrored directly — the worker can't be mid-advance
+            // while we hold the lock, so this is consistent.
+            if (IsKeyPressed(KEY_SPACE) &&
+                !ImGui::GetIO().WantCaptureKeyboard &&
+                impl_->session_runner && impl_->session) {
+                const bool p = !impl_->session_runner->paused();
+                impl_->session_runner->set_paused_flag(p);
+                impl_->session->set_paused(p);
+            }
+
+            // V-THREAD: mirror the worker's one-frame flags (the worker,
+            // not this frame, advances now — its atomic is the source).
+            if (impl_->session_runner) {
+                impl_->campaign_time_dilated =
+                    impl_->session_runner->time_dilated();
+            }
+
+            // V-3DLIVE: the camera bubble — when the user is zoomed in
+            // enough to see models, the deaggregation bubble follows
+            // the CAMERA (the map viewer's "player"), scaled with the
+            // visible extent: zoom into a battalion and its vehicles /
+            // personnel appear, even while the session is paused (the
+            // session refreshes the bubble immediately). Re-pointed
+            // only when the camera actually moved (grid threshold =
+            // 1/16 of the visible extent; zoom threshold = 15%) — a
+            // still camera never churns deagg state.
+            if (impl_->session && impl_->campaign_view_bubble &&
+                !impl_->replay.active()) {
+                const bool zoomed_in = impl_->cam_zoom > 4.0f;
+                if (zoomed_in) {
+                    const float vis_w_grid =
+                        static_cast<float>(impl_->window_w) /
+                        impl_->cam_zoom;
+                    const float vis_h_grid =
+                        static_cast<float>(impl_->window_h) /
+                        impl_->cam_zoom;
+                    const float moved =
+                        std::max(std::abs(impl_->cam_x -
+                                          impl_->last_bubble_gx),
+                                 std::abs(impl_->cam_y -
+                                          impl_->last_bubble_gy));
+                    const bool camera_moved =
+                        moved > vis_w_grid / 16.0f ||
+                        std::abs(impl_->cam_zoom -
+                                 impl_->last_bubble_zoom) >
+                            impl_->last_bubble_zoom * 0.15f;
+                    if (camera_moved ||
+                        impl_->last_bubble_zoom < 0.0f) {
+                        // Radius: a quarter of the visible extent, in
+                        // FEET (grid = 1024 ft), clamped [2.5, 25] grid
+                        // units — deaggregate what's around the view
+                        // center without spawning a battalion-per-grid
+                        // tile across the whole screen.
+                        const double radius_ft =
+                            std::clamp(0.25 * std::max(vis_w_grid, vis_h_grid),
+                                       2.5, 25.0) * 1024.0;
+                        impl_->session->set_view_bubble(
+                            radius_ft,
+                            f4::geo::WorldPosition(
+                                impl_->cam_x * 1024.0,
+                                impl_->cam_y * 1024.0, 0.0));
+                        impl_->last_bubble_gx = impl_->cam_x;
+                        impl_->last_bubble_gy = impl_->cam_y;
+                        impl_->last_bubble_zoom = impl_->cam_zoom;
+                    }
+                } else if (impl_->last_bubble_zoom >= 0.0f) {
+                    // Zoomed back out: ownship bubble (FreeFalcon's
+                    // default), applied immediately. The still-camera
+                    // guard (last_bubble_zoom < 0) keeps this a one-shot
+                    // per zoom-out, not a per-frame churn.
+                    impl_->session->clear_view_bubble();
+                    impl_->last_bubble_zoom = -1.0f;
+                    impl_->last_bubble_gx = -1.0e9f;
+                    impl_->last_bubble_gy = -1.0e9f;
+                }
+            }
+
+            BeginDrawing();
+            ClearBackground(Color{20, 22, 28, 255});
+            if (impl_->replay.active()) {
+                draw_replay_canvas();
+                // The replay panel uses ImGui, so it must be wrapped in
+                // rlImGuiBegin/End — same as the normal draw_imgui() path.
+                // Without this, ImGui::Begin() asserts (g.WithinFrameScope).
+                rlImGuiBegin();
+                draw_replay_panel();
+                rlImGuiEnd();
+            } else {
+                draw_canvas();
+                draw_imgui();
+            }
+            EndDrawing();
+        }  // frame read scope — the worker resumes advancing here
+
+        // V-THREAD: the Stop button's deferred stop — processed OUTSIDE
+        // the frame lock (the join needs the worker able to finish its
+        // current batch).
+        process_session_stop();
     }
 
     rlImGuiShutdown();
+
+    // V-THREAD: stop the campaign runner FIRST — its worker borrows the
+    // session; the session must not die (below, when Impl is destroyed)
+    // while the worker is mid-advance. stop() signals + joins; called
+    // outside any frame lock (the loop above is done), so no deadlock.
+    if (impl_->session_runner) {
+        impl_->session_runner->stop();
+        impl_->session_runner.reset();
+    }
 
     // A session start still running when the window closes: join it
     // BEFORE Impl dies (the worker writes only into the future's
