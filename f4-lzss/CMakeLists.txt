@@ -7,6 +7,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 add_library(f4-lzss STATIC
     src/lzss.cpp
+    src/compress.cpp
 )
 target_link_libraries(f4-lzss PUBLIC f4_warnings)
 

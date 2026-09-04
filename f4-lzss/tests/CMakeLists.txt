@@ -9,3 +9,4 @@ function(f4_lzss_add_test name source)
 endfunction()
 
 f4_lzss_add_test(test_lzss_core test_lzss.cpp)
+f4_lzss_add_test(test_lzss_compress test_lzss_compress.cpp)

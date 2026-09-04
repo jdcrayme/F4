@@ -217,6 +217,18 @@ struct TeamRecord {
     /// The team's Air Tasking Manager (decoded from the ATM record that
     /// follows this TeamClass in the .tea stream).
     ATMRecord atm;
+
+    /// Raw bytes of the GTM (Ground Tasking Manager) record — 15 bytes
+    /// (13-byte manager header + 2-byte flags). Captured verbatim by the
+    /// decoder so the .tea encoder can reproduce them byte-faithfully
+    /// (the GTM's VU_ID/entity_type/owner are meaningful to FreeFalcon's
+    /// LoadTeams, not just structural padding). Empty when the team was
+    /// constructed by a caller (the encoder writes zeros).
+    std::vector<uint8_t> gtm_raw;
+
+    /// Raw bytes of the NTM (Naval Tasking Manager) record — 15 bytes,
+    /// same layout as gtm_raw. Captured verbatim for the encoder.
+    std::vector<uint8_t> ntm_raw;
 };
 
 struct DecodedTeams {

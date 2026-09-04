@@ -21,9 +21,16 @@ add_library(f4-world-convert STATIC
     src/lzss.cpp
     src/cam_archive.cpp
     src/campaign_decoder.cpp
+    src/cmp_encoder.cpp
+    src/campaign_json.cpp
+    src/campaign_saver.cpp
+    src/cam_writer.cpp
     src/objective_decoder.cpp
+    src/objective_encoder.cpp
     src/unit_decoder.cpp
+    src/unit_encoder.cpp
     src/team_decoder.cpp
+    src/team_encoder.cpp
     src/class_table.cpp
     src/aii_config.cpp
     src/theater_data.cpp
@@ -41,6 +48,13 @@ target_link_libraries(f4-world-convert PRIVATE f4-lzss f4-install f4-io f4-json)
 # CLI tool
 add_executable(cam2json cli/cam2json.cpp)
 target_link_libraries(cam2json PRIVATE f4-world-convert f4-import f4-io)
+
+# CLI tool: json2cam — reassemble a .cam from a world JSON produced by
+# `cam2json --preserve-subfiles` (the save-write round-trip). The JSON
+# parsing lives in the library (cam_from_world_json); the CLI is a thin
+# read -> assemble -> write shell.
+add_executable(json2cam cli/json2cam.cpp)
+target_link_libraries(json2cam PRIVATE f4-world-convert f4-io)
 
 # Copy FALCON4.ct (the class table) next to cam2json so the CLI finds it
 # from CWD when run via `cmake --build build --target world`. The class
