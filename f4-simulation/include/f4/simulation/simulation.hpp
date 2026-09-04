@@ -149,6 +149,37 @@ public:
     /// false on duplicate or unknown entity.
     bool register_aircraft(entities::EntityId id);
 
+    /// Retire an aircraft: erase it from the flying roster, the
+    /// wingman-pair table, and the combat-policy set, then DESTROY the
+    /// entity in world(). C5's wreck reaper calls this for aircraft
+    /// whose EntityKilledMessage landed `wreck_hold` sim-seconds ago —
+    /// the ledger booked the loss at EVENT time (the sink's bus
+    /// subscription), so removing the frozen wreck afterwards never
+    /// races the books, and the debrief trace is the only other wreck
+    /// consumer (long-horizon harnesses run with it off).
+    ///
+    /// FreeFalcon correspondence: the reference removes dead sim
+    /// entities on its own cadence (the sim object dies; the CAMPAIGN
+    /// object and its bookkeeping live on — exactly the split this
+    /// models: the books survive in the ledger, the corpse does not).
+    ///
+    /// Without any retire call the lifetime is the pre-C5 behavior —
+    /// wrecks freeze in place forever — which every existing golden
+    /// pins; retiring is strictly opt-in. Idempotent: returns true only
+    /// when the entity was on the flying roster and got removed; a
+    /// parked-squadron spawn, a feature, an unknown id, or a double
+    /// retire all return false (the parked/feature populations are
+    /// never the wreck policy's business — they don't die in this
+    /// slice and never join the flying roster).
+    bool retire_aircraft(entities::EntityId id);
+
+    /// Aircraft retired via retire_aircraft() so far — the churn
+    /// counter long-horizon hosts read (roster == initial + spawned −
+    /// retired, the identity the C5 harness pins).
+    [[nodiscard]] int retired_aircraft() const noexcept {
+        return retired_aircraft_;
+    }
+
     /// All spawned airfield-feature entities (Phase 2A). Each carries
     /// TransformComponent + VisualModelComponent (no FM, no brain). The
     /// renderer iterates all VisualModelComponent-bearing entities to draw
@@ -423,6 +454,10 @@ private:
     // Phase 1 spawn path (scenario_list) pushes one entry; the Phase 2 path
     // (campaign_flights) pushes one per Flight unit found in the world JSON.
     std::vector<entities::EntityId> aircraft_entities_;
+
+    // C5: aircraft removed via retire_aircraft() (the wreck-reaper
+    // counter — roster == initial + registered − retired).
+    int retired_aircraft_ = 0;
 
     // Phase 2A: static airfield-feature entities (buildings, runway sections,
     // taxiways, towers, hangars). Each carries TransformComponent +

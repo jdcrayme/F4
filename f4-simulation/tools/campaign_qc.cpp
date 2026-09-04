@@ -52,6 +52,24 @@
 //      when the ladder drew NOT ONE aircraft despite belligerents
 //      with aircraft available (the tasking-broke gate).
 //
+//   6. THE 24-HOUR WAR (C5 — the acceptance): --war <hours> runs the
+//      long-horizon loop — both sides generate, fly, fight, attrite,
+//      recover, and resupply over the ATM pipeline for HOURS of sim
+//      time, headless and deterministic, through CampaignWarHarness
+//      (f4-simulation — the same CampaignSession composition the
+//      world viewer drives). The harness runs the war TWICE and
+//      certifies: identical ledger bytes (MD5), one-pool accounting
+//      identities every sample, the roster identity (initial +
+//      spawned − retired) every sample, and a war that stays alive
+//      (clock, cycles, and every belligerent's generation). The
+//      wreck reaper (wreck_hold) keeps killed aircraft's frozen
+//      corpses from accumulating — the entity-churn bound. Artifacts:
+//      campaign_result.json (byte-stable), the summary's "war" block
+//      (deterministic content only), and campaign_war_diary.json
+//      (per-hour telemetry: wall-clock, ticks/sec, RSS — explicitly
+//      NOT byte-stable). Exits 9–12 are the war's own gates (see
+//      run_war below).
+//
 // Usage:
 //   campaign_qc <world.json> [options]
 //     --class-table <FALCON4.ct>   (default: <src>/f4-world-convert/tests/fixtures/FALCON4.ct)
@@ -69,6 +87,16 @@
 //                                   default 43200 = 12 h)
 //     --profiles <json>            (default: <bin>/generated_campaign/MissionProfiles.json)
 //     --record-every <n> / --no-record
+//     --war <hours>                (C5: the 24-hour war; 0 = off. 24 =
+//                                   the acceptance horizon; smoke runs
+//                                   use fractions — 0.1 = 6 min)
+//     --war-runs <n>               (C5: determinism proof passes; 2 =
+//                                   default, 1 = skip the proof)
+//     --war-sample <sec>           (C5: diary + check cadence; 3600)
+//     --wreck-hold <sec>           (C5: killed aircraft retire after
+//                                   this many sim seconds; 300. 0 =
+//                                   wrecks persist, the pre-C5 lifetime)
+//     --war-max-wall <sec>         (C5: total wall-clock watchdog; 0 = off)
 //     --out-dir <dir>              (default: beside the world JSON)
 //
 // Exit code: 0 when the loop produced at least one aircraft AND the sim
@@ -104,6 +132,7 @@
 #include <f4/simulation/campaign_bridge.hpp>
 #include <f4/simulation/campaign_spawner.hpp>
 #include <f4/simulation/campaign_result_sink.hpp>
+#include <f4/simulation/campaign_war_harness.hpp>
 #include <f4/campaign/campaign.hpp>
 #include <f4/campaign/mission_type.hpp>
 #include <f4/campaign/result_ledger.hpp>
@@ -126,6 +155,7 @@
 #include <f4/models/model_database.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -167,6 +197,15 @@ struct Args {
     int reinforce_period_sec = -1; // -1 = engine default (43200); 0 = off
     std::filesystem::path profiles_json;
     std::filesystem::path out_dir;
+    // C5 — the 24-hour war (--war): the long-horizon acceptance run
+    // (both sides generate, fly, fight, attrite, recover, resupply for
+    // HOURS of sim time, headless, deterministic). 0 = off (the B.3/
+    // C2/C3/C4 QC modes run instead).
+    double war_hours = 0.0;       // sim hours; 24 = the acceptance
+    int war_runs = 2;             // determinism proof passes
+    double war_sample_sec = 3600.0; // diary + check cadence (1 hour)
+    double wreck_hold_sec = 300.0;  // C5's reaper (0 = wrecks persist)
+    double war_max_wall_sec = 0.0;  // total wall-clock watchdog (0 = off)
 };
 
 [[noreturn]] void usage(const char* prog) {
@@ -178,6 +217,8 @@ struct Args {
         "          [--tasking <minutes>] [--tasking-cycle <sec>]\n"
         "          [--reinforce-period <sec>] [--profiles <json>]\n"
         "          [--record-every <n>] [--no-record]\n"
+        "          [--war <hours>] [--war-runs <n>] [--war-sample <sec>]\n"
+        "          [--wreck-hold <sec>] [--war-max-wall <sec>]\n"
         "          [--out-dir <dir>]\n",
         prog);
     std::exit(1);
@@ -220,6 +261,11 @@ Args parse_args(int argc, char** argv) {
         else if (k == "--record-every") a.record_every = std::max(1, std::atoi(next()));
         else if (k == "--no-record")   a.record = false;
         else if (k == "--out-dir")     a.out_dir = next();
+        else if (k == "--war")         a.war_hours = std::atof(next());
+        else if (k == "--war-runs")    a.war_runs = std::max(1, std::atoi(next()));
+        else if (k == "--war-sample")  a.war_sample_sec = std::atof(next());
+        else if (k == "--wreck-hold")  a.wreck_hold_sec = std::atof(next());
+        else if (k == "--war-max-wall") a.war_max_wall_sec = std::atof(next());
         else if (k == "--mission") {
             const std::string v = next();
             if (!v.empty() && v[0] >= '0' && v[0] <= '9') {
@@ -266,6 +312,469 @@ void write_string(f4::json::Writer& w, const std::string& s) {
     w.put('"');
 }
 
+// ---------------------------------------------------------------------------
+// 6. C5 — THE 24-HOUR WAR (--war <hours>): the long-horizon acceptance
+// run. Both sides generate, fly, fight, attrite, recover, and resupply
+// for hours of sim time over the ATM pipeline, headless and
+// deterministic, through CampaignWarHarness (which composes the same
+// CampaignSession the world viewer drives). Exit gates:
+//   6  belligerent aircraft existed and the ladder drew nothing (the
+//      tasking-broke class, war edition);
+//   7  aircraft were drawn but no route built / nothing materialized
+//      (generation-to-spawn, war edition);
+//   8  the ATM pipeline built no packages (war edition);
+//   9  DETERMINISM — run 2's ledger bytes differ from run 1's;
+//  10  LEDGER DRIFT — a one-pool identity broke at some sample;
+//  11  ENTITY LEAK — the roster identity broke at some sample;
+//  12  WAR STALLED — the clock, the cycles, or a belligerent's
+//      generation went silent while aircraft remained.
+// Artifacts: campaign_result.json (run 0's ledger — byte-stable),
+// campaign_qc_summary.json (the "war" block — deterministic content
+// only), campaign_war_diary.json (per-sample telemetry: wall-clock,
+// ticks/sec, RSS — explicitly NOT byte-stable).
+// ---------------------------------------------------------------------------
+int run_war(const Args& args) {
+    if (args.profiles_json.empty() ||
+        !std::filesystem::exists(args.profiles_json)) {
+        std::fprintf(stderr,
+                     "campaign_qc: mission profiles not found (%s) — "
+                     "--war needs the generated table\n",
+                     args.profiles_json.string().c_str());
+        return 1;
+    }
+
+    // World stats for the summary (the same block every mode reports).
+    f4::world::WorldState ws;
+    ws.load(args.world_json);
+    int flights_total = 0, flights_tasked = 0;
+    std::vector<int> missions_by_byte(
+        static_cast<std::size_t>(kMissionTypeCount), 0);
+    for (const auto& u : ws.units) {
+        if (u.unit_class != f4::entities::UnitClass::Flight) continue;
+        ++flights_total;
+        if (is_mission_tasked(u.mission)) {
+            ++flights_tasked;
+            if (u.mission < kMissionTypeCount) {
+                ++missions_by_byte[u.mission];
+            }
+        }
+    }
+
+    WarHarnessOptions hopts;
+    hopts.session.world_json =
+        std::filesystem::absolute(args.world_json);
+    if (std::filesystem::exists(args.class_table)) {
+        hopts.session.class_table =
+            std::filesystem::absolute(args.class_table);
+    }
+    hopts.session.aircraft_config =
+        std::filesystem::absolute(args.config);
+    hopts.session.mission_profiles =
+        std::filesystem::absolute(args.profiles_json);
+    hopts.session.team = args.team;
+    hopts.session.mission = args.mission;
+    // The war's saved-flight cap: the session's own 48 default (the
+    // interactivity budget — 449 FMs at 60 Hz is a replay-mode budget;
+    // the WAR's story is the generated packages, and the ledger's pool
+    // arithmetic counts every drawn aircraft whether it flies here or
+    // not). An explicit --max-flights still wins.
+    hopts.session.max_flights =
+        args.max_flights > 0 ? args.max_flights : 48;
+    hopts.session.tasking_cycle_sec = args.tasking_cycle_sec;
+    hopts.session.reinforce_period_sec =
+        args.reinforce_period_sec < 0 ? 43200
+                                      : args.reinforce_period_sec;
+    // The QC's tasking shape (C4): the ATM pipeline armed, the SEAD
+    // pairing threshold the fixture theater needs (see the ladder
+    // block above for the reasoning).
+    hopts.session.atm_pipeline = true;
+    hopts.session.atm_seadescort_threat = 25;
+    hopts.session.sim_dt = args.sim_dt;
+    hopts.horizon_sec =
+        static_cast<std::int64_t>(args.war_hours * 3600.0);
+    hopts.sample_sec = args.war_sample_sec;
+    hopts.runs = args.war_runs;
+    hopts.wreck_hold_sec = args.wreck_hold_sec;
+    hopts.max_wall_sec_total = args.war_max_wall_sec;
+
+    std::printf("war: horizon=%llds (%.2fh) runs=%d sample=%.0fs "
+                "wreck_hold=%.0fs cycle=%ds reinforce=%ds\n",
+                (long long)hopts.horizon_sec, args.war_hours, hopts.runs,
+                hopts.sample_sec, hopts.wreck_hold_sec,
+                hopts.session.tasking_cycle_sec,
+                hopts.session.reinforce_period_sec);
+
+    std::string err;
+    auto harness = CampaignWarHarness::create(hopts, &err);
+    if (harness == nullptr) {
+        std::fprintf(stderr, "campaign_qc: %s\n", err.c_str());
+        return 1;
+    }
+
+    const auto t_wall = std::chrono::steady_clock::now();
+    harness->execute([](const WarHourSample& s) {
+        char perf[160];
+        std::snprintf(perf, sizeof(perf), "%.1fs %.0ftps %ldMB",
+                      s.wall_sec, s.ticks_per_sec, s.rss_kb / 1024);
+        std::printf("war[h%02d] t=%llds cycles=%d(+%d) drawn=%d(+%d) "
+                    "spawned=%d(+%d) live=%d retired=%d air=%d/%d "
+                    "routes=%d lost=%d recov=%d | %s\n",
+                    s.sample, (long long)s.sim_time_s, s.cycles,
+                    s.hour_cycles, s.drawn, s.hour_draws,
+                    s.synthetic_spawned, s.hour_spawns, s.live_aircraft,
+                    s.retired, s.airborne, s.live_aircraft,
+                    s.routes_built, s.air_losses, s.recovered, perf);
+        std::fflush(stdout);
+    });
+    const std::chrono::duration<double> wall =
+        std::chrono::steady_clock::now() - t_wall;
+    const auto& r = harness->report();
+
+    if (r.aborted) {
+        std::fprintf(stderr, "campaign_qc: war ABORTED — %s\n",
+                     r.abort_reason.c_str());
+        return 1;
+    }
+
+    // ------------------------------------------------------------------
+    // Artifacts
+    // ------------------------------------------------------------------
+    std::filesystem::create_directories(args.out_dir);
+    const auto result_path = args.out_dir / "campaign_result.json";
+    {
+        std::ofstream out(result_path);
+        out << r.ledger_json;
+    }
+
+    const auto summary_path = args.out_dir / "campaign_qc_summary.json";
+    {
+        f4::json::Writer w;
+        w.put("{\n  \"format\": \"f4-campaign-qc-summary\",\n  ");
+        w.put("\"version\": 1,\n  \"mode\": \"war\"");
+        w.put(",\n  \"world_json\": ");
+        write_string(w, args.world_json.string());
+        w.put(",\n  \"world\": {\n    \"theater\": ");
+        write_string(w, ws.theater);
+        w.put(",\n    ");
+        w.number_key("teams", ws.teams.size());
+        w.put(",    ");
+        w.number_key("objectives", ws.objectives.size());
+        w.put(",    ");
+        w.number_key("units", ws.units.size());
+        w.put(",    ");
+        w.number_key("flights", flights_total);
+        w.put(",    ");
+        w.number_key("flights_tasked", flights_tasked);
+        w.put(",\n    \"missions_by_type\": {");
+        {
+            bool first = true;
+            for (std::size_t b = 1; b < kMissionTypeCount; ++b) {
+                if (missions_by_byte[b] == 0) continue;
+                w.put(first ? "\n      " : ",\n      ");
+                first = false;
+                w.put("\"");
+                w.put(kMissionTypeNames[b]);
+                w.put("\": ");
+                w.number(missions_by_byte[b]);
+            }
+        }
+        w.put("\n    }");
+        w.put("\n  }");
+
+        // The war block: DETERMINISTIC CONTENT ONLY (the byte-stable
+        // certificate — wall-clock, ticks/sec, and RSS live in the
+        // diary, which is explicitly not byte-stable).
+        w.put(",\n  \"war\": {\n    ");
+        w.number_key("horizon_sec",
+                     static_cast<std::int64_t>(hopts.horizon_sec));
+        w.put(",    ");
+        w.number_key("sample_sec",
+                     static_cast<std::int64_t>(args.war_sample_sec));
+        w.put(",    ");
+        w.number_key("runs", hopts.runs);
+        w.put(",    ");
+        w.number_key("tasking_cycle_sec", args.tasking_cycle_sec);
+        w.put(",    ");
+        w.number_key("reinforce_period_sec",
+                     hopts.session.reinforce_period_sec);
+        w.put(",    ");
+        w.number_key("wreck_hold_sec",
+                     static_cast<std::int64_t>(args.wreck_hold_sec));
+        w.put(",\n    ");
+        w.number_key("cycles", r.cycles);
+        w.put(",    ");
+        w.number_key("intents", r.intents);
+        w.put(",    ");
+        w.number_key("packages", r.packages);
+        w.put(",    ");
+        w.number_key("escorts", r.escorts);
+        w.put(",    ");
+        w.number_key("routes_built", r.routes_built);
+        w.put(",    ");
+        w.number_key("routes_failed", r.routes_failed);
+        w.put(",    ");
+        w.number_key("drawn_aircraft", r.drawn);
+        w.put(",    ");
+        w.number_key("air_losses", r.air_losses);
+        w.put(",    ");
+        w.number_key("recovered", r.recovered);
+        w.put(",    ");
+        w.number_key("reinforced", r.reinforced);
+        w.put(",    ");
+        w.number_key("reinforce_fires", r.reinforce_fires);
+        w.put(",    ");
+        w.number_key("synthetic_spawned", r.synthetic_spawned);
+        w.put(",    ");
+        w.number_key("retired", r.retired);
+        w.put(",    ");
+        w.number_key("live_aircraft", r.live_aircraft);
+        w.put(",    ");
+        w.number_key("airborne", r.airborne);
+        w.put(",    ");
+        w.number_key("samples", r.samples);
+        w.put(",\n    ");
+        w.put("\"belligerent_air\": ");
+        w.put(r.belligerent_air ? "true" : "false");
+        w.put(",    \"atm_armed\": ");
+        w.put(r.atm_armed ? "true" : "false");
+        w.put(",\n    \"ledger_md5_run0\": ");
+        write_string(w, r.verdict.ledger_md5_run0);
+        w.put(",\n    \"ledger_md5_run1\": ");
+        write_string(w, r.verdict.ledger_md5_run1);
+        w.put(",\n    \"deterministic\": ");
+        w.put(r.verdict.deterministic ? "true" : "false");
+        w.put(",\n    \"ledger_consistent\": ");
+        w.put(r.verdict.ledger_consistent ? "true" : "false");
+        w.put(",\n    \"entities_bounded\": ");
+        w.put(r.verdict.entities_bounded ? "true" : "false");
+        w.put(",\n    \"war_alive\": ");
+        w.put(r.verdict.war_alive ? "true" : "false");
+        w.put(",\n    \"ledger_drift\": ");
+        write_string(w, r.verdict.ledger_drift);
+        w.put(",\n    \"entity_leak\": ");
+        write_string(w, r.verdict.entity_leak);
+        w.put(",\n    \"war_stall\": ");
+        write_string(w, r.verdict.war_stall);
+        // The pool trajectory's final row (the believable depletion /
+        // refill picture, as numbers): the ledger's own per-team view.
+        w.put(",\n    \"teams\": [");
+        {
+            bool first = true;
+            for (const auto& t : r.ledger_teams) {
+                w.put(first ? "\n      {" : ",\n      {");
+                first = false;
+                w.number_key("slot", t.slot);
+                w.put(", \"name\": ");
+                write_string(w, t.name);
+                w.put(", ");
+                w.number_key("aircraft_initial", t.initial);
+                w.put(", ");
+                w.number_key("aircraft_remaining", t.remaining);
+                w.put(", ");
+                w.number_key("aircraft_tasking", t.tasking);
+                w.put(", ");
+                w.number_key("aircraft_drawn", t.drawn);
+                w.put(", ");
+                w.number_key("air_losses", t.losses);
+                w.put(", ");
+                w.number_key("air_reinforced", t.reinforced);
+                w.put(", ");
+                w.number_key("air_recovered", t.recovered);
+                w.put("}");
+            }
+        }
+        w.put(r.ledger_teams.empty() ? "]" : "\n    ]");
+        w.put(",\n    \"result_json\": ");
+        write_string(w, result_path.string());
+        w.put("\n  }");
+        w.put("\n}\n");
+
+        std::ofstream out(summary_path);
+        out << w.str();
+    }
+
+    // The war diary: one row per sample, telemetry included.
+    const auto diary_path = args.out_dir / "campaign_war_diary.json";
+    {
+        f4::json::Writer w;
+        w.put("{\n  \"format\": \"f4-campaign-war-diary\",\n  ");
+        w.put("\"version\": 1,\n  ");
+        w.put("\"note\": \"performance telemetry (wall-clock, ticks/sec, "
+              "RSS) varies by host; the byte-stable artifacts are "
+              "campaign_result.json and campaign_qc_summary.json\",\n  ");
+        w.number_key("samples", r.diary.size());
+        w.put(",\n  \"rows\": [");
+        bool first = true;
+        for (const auto& s : r.diary) {
+            w.put(first ? "\n    {" : ",\n    {");
+            first = false;
+            w.number_key("sample", s.sample);
+            w.put(", ");
+            w.number_key("campaign_time", s.campaign_time);
+            w.put(", ");
+            w.number_key("sim_time_s",
+                         static_cast<std::int64_t>(s.sim_time_s));
+            w.put(", ");
+            w.number_key("cycles", s.cycles);
+            w.put(", ");
+            w.number_key("hour_cycles", s.hour_cycles);
+            w.put(", ");
+            w.number_key("intents", s.intents);
+            w.put(", ");
+            w.number_key("packages", s.packages);
+            w.put(", ");
+            w.number_key("routes_built", s.routes_built);
+            w.put(", ");
+            w.number_key("routes_failed", s.routes_failed);
+            w.put(", ");
+            w.number_key("drawn", s.drawn);
+            w.put(", ");
+            w.number_key("hour_draws", s.hour_draws);
+            w.put(", ");
+            w.number_key("air_losses", s.air_losses);
+            w.put(", ");
+            w.number_key("recovered", s.recovered);
+            w.put(", ");
+            w.number_key("reinforced", s.reinforced);
+            w.put(", ");
+            w.number_key("reinforce_fires", s.reinforce_fires);
+            w.put(", ");
+            w.number_key("synthetic_spawned", s.synthetic_spawned);
+            w.put(", ");
+            w.number_key("hour_spawns", s.hour_spawns);
+            w.put(", ");
+            w.number_key("live_aircraft", s.live_aircraft);
+            w.put(", ");
+            w.number_key("airborne", s.airborne);
+            w.put(", ");
+            w.number_key("retired", s.retired);
+            w.put(", ");
+            w.number_key("world_entities", s.world_entities);
+            char buf[128];
+            std::snprintf(buf, sizeof(buf),
+                          ", \"wall_sec\": %.3f, \"ticks_per_sec\": %.1f, "
+                          "\"rss_kb\": %ld",
+                          s.wall_sec, s.ticks_per_sec, s.rss_kb);
+            w.put(buf);
+            w.put(",\n      \"teams\": [");
+            {
+                bool fteam = true;
+                for (const auto& p : s.teams) {
+                    w.put(fteam ? "\n        {" : ",\n        {");
+                    fteam = false;
+                    w.number_key("slot", p.slot);
+                    w.put(", \"name\": ");
+                    write_string(w, p.name);
+                    w.put(", ");
+                    w.number_key("remaining", p.remaining);
+                    w.put(", ");
+                    w.number_key("tasking", p.tasking);
+                    w.put(", ");
+                    w.number_key("drawn_total", p.drawn_total);
+                    w.put(", ");
+                    w.number_key("losses", p.losses);
+                    w.put(", ");
+                    w.number_key("reinforced", p.reinforced);
+                    w.put("}");
+                }
+            }
+            w.put(s.teams.empty() ? "]" : "\n      ]");
+            w.put("\n    }");
+        }
+        w.put(r.diary.empty() ? "]" : "\n  ]");
+        w.put("\n}\n");
+
+        std::ofstream out(diary_path);
+        out << w.str();
+    }
+
+    // ------------------------------------------------------------------
+    // The headline + the gates
+    // ------------------------------------------------------------------
+    std::printf("war: wall=%.1fs cycles=%d intents=%d packages=%d "
+                "(+%d escorts) routes=%d failed=%d drawn=%d losses=%d "
+                "recovered=%d reinforced=%d spawns=%d retired=%d "
+                "live=%d\n",
+                wall.count(), r.cycles, r.intents, r.packages, r.escorts,
+                r.routes_built, r.routes_failed, r.drawn, r.air_losses,
+                r.recovered, r.reinforced, r.synthetic_spawned, r.retired,
+                r.live_aircraft);
+    std::printf("war: deterministic=%s drift=%s leak=%s alive=%s "
+                "md5=%s\n",
+                r.verdict.deterministic ? "yes" : "NO",
+                r.verdict.ledger_consistent ? "ok" : "DRIFT",
+                r.verdict.entities_bounded ? "ok" : "LEAK",
+                r.verdict.war_alive ? "ok" : "STALLED",
+                r.verdict.ledger_md5_run0.c_str());
+    std::printf("wrote: %s\n", summary_path.string().c_str());
+    std::printf("wrote: %s\n", result_path.string().c_str());
+    std::printf("wrote: %s\n", diary_path.string().c_str());
+
+    if (r.belligerent_air && !r.verdict.drew_aircraft) {
+        std::fprintf(stderr,
+                     "campaign_qc: QC FAILURE — the war ran %llds over "
+                     "belligerents with aircraft and drew NOTHING "
+                     "(exit 6, war edition). Inspect the war block in "
+                     "campaign_qc_summary.json.\n",
+                     (long long)hopts.horizon_sec);
+        return 6;
+    }
+    if (r.verdict.drew_aircraft &&
+        (!r.verdict.routes_built || !r.verdict.materialized)) {
+        std::fprintf(stderr,
+                     "campaign_qc: QC FAILURE — the war drew %d aircraft "
+                     "but built %d routes and materialized %d aircraft "
+                     "(exit 7, war edition). Inspect the war block in "
+                     "campaign_qc_summary.json.\n",
+                     r.drawn, r.routes_built, r.synthetic_spawned);
+        return 7;
+    }
+    if (r.verdict.drew_aircraft && r.atm_armed &&
+        !r.verdict.packages_built) {
+        std::fprintf(stderr,
+                     "campaign_qc: QC FAILURE — the war drew %d aircraft "
+                     "over the ATM pipeline and built no packages "
+                     "(exit 8, war edition). Inspect the war block in "
+                     "campaign_qc_summary.json.\n",
+                     r.drawn);
+        return 8;
+    }
+    if (hopts.runs >= 2 && !r.verdict.deterministic) {
+        std::fprintf(stderr,
+                     "campaign_qc: QC FAILURE — the war is NOT "
+                     "deterministic: run 0 md5 %s != run 1 md5 %s "
+                     "(exit 9). Diff campaign_result.json against a "
+                     "re-run to find the first diverging event.\n",
+                     r.verdict.ledger_md5_run0.c_str(),
+                     r.verdict.ledger_md5_run1.c_str());
+        return 9;
+    }
+    if (!r.verdict.ledger_consistent) {
+        std::fprintf(stderr,
+                     "campaign_qc: QC FAILURE — ledger drift: %s "
+                     "(exit 10). The one-pool books stopped balancing.\n",
+                     r.verdict.ledger_drift.c_str());
+        return 10;
+    }
+    if (!r.verdict.entities_bounded) {
+        std::fprintf(stderr,
+                     "campaign_qc: QC FAILURE — entity leak: %s "
+                     "(exit 11). The roster identity broke — spawn/reap "
+                     "churn is leaking entities.\n",
+                     r.verdict.entity_leak.c_str());
+        return 11;
+    }
+    if (!r.verdict.war_alive) {
+        std::fprintf(stderr,
+                     "campaign_qc: QC FAILURE — the war stalled: %s "
+                     "(exit 12). A side with aircraft stopped "
+                     "generating, or the clock/cycles stopped.\n",
+                     r.verdict.war_stall.c_str());
+        return 12;
+    }
+    return 0;
+}
+
 } // namespace
 
 // ===========================================================================
@@ -276,6 +785,14 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "campaign_qc: world JSON not found: %s\n",
                      args.world_json.string().c_str());
         return 1;
+    }
+
+    // C5: the long-horizon war mode is a SEPARATE top-level flow — the
+    // B.3/C2/C3/C4 modes below stay byte-identical (their goldens are
+    // pinned); --war composes the CampaignSession the viewer drives,
+    // runs the horizon, and returns its own exit codes (6..12).
+    if (args.war_hours > 0.0) {
+        return run_war(args);
     }
 
     // -----------------------------------------------------------------------

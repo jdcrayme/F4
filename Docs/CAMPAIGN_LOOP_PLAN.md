@@ -3,10 +3,12 @@
 > **Status**: Active plan. **C1 (the result ledger + sink + write-back),
 > C2 (one pool — draws, netting, reinforcement), C3 (threat map +
 > A* + route builder, generation-to-spawn), V-CAMP (the live
-> campaign session — the viewer runs the war), and C4 (the ATM
+> campaign session — the viewer runs the war), C4 (the ATM
 > pipeline — 7-phase tasking, FindBestAir, escort pairing, TOT
-> slots, mission recovery) are LANDED** — the rest of this document
-> is the roadmap they opened.
+> slots, mission recovery), and C5 (the 24-hour war — the
+> long-horizon acceptance harness) are LANDED** — the campaign loop
+> is CLOSED end to end. The rest of this document is the roadmap
+> that got here (the known-gaps §7 is the forward queue).
 > **Prerequisite**: B.3 landed (campaign→sim loop: intents → spawner →
 > aircraft fly saved routes; `campaign_qc` gates the loop end to end).
 > **Companion**: [Next Phase Plan](NEXT_PHASE_PLAN.md) (§B — the campaign
@@ -316,15 +318,81 @@ The C3 role-fallback bridge is retired at its armed sites (the QC
 and the session now run the pipeline; the config flag stays for
 hosts that want the legacy shape).
 
-### C5 — the 24-hour war (the acceptance)
-`campaign_qc` grows a long-horizon mode: both sides generate, fly,
-fight, attrite, adapt — hours of sim time, headless, deterministic
-(byte-stable summary at the end). The C1 ledger + the C2 one-pool
-tasking + the C3 routed generation + the C4 ATM pipeline make this
-run MEANINGFUL: every hour's packages, draws, losses, recoveries, and
-resupply reshape the next hour's force. That run's artifacts (summary
-+ result + trace) are the "core game functionality replicated"
+### C5 — the 24-hour war (the acceptance) (LANDED)
+`campaign_qc --war <hours>` runs the long-horizon mode: both sides
+generate, fly, fight, attrite, recover, and adapt over the ATM
+pipeline — hours of sim time, headless, deterministic. The C1 ledger
++ the C2 one-pool tasking + the C3 routed generation + the C4 ATM
+pipeline make the run MEANINGFUL: every hour's packages, draws,
+losses, recoveries, and resupply reshape the next hour's force. The
+run's artifacts ARE the "core game functionality replicated"
 certificate.
+
+Three pieces, in the layer each belongs to:
+
+| Piece | Library | What it is |
+|-------|---------|------------|
+| `CampaignWarHarness` | f4-simulation | The acceptance runner: composes the SAME `CampaignSession` the viewer drives, advances it in fully-drained 4-sim-second batches (byte-equivalent to any other tick split — the C2 pin), samples the war every `--war-sample` seconds, and derives the four verdicts. Runs the whole war TWICE in-process and compares the ledger BYTES (the MD5 is the certificate humans re-derive with `md5sum`). |
+| `Simulation::retire_aircraft` + `CampaignSessionOptions::wreck_hold_sec` | f4-simulation | The entity-churn bound: killed aircraft retire (roster + wingman pairs + combat policies + world entity) `wreck_hold` sim-seconds after their `EntityKilledMessage` — the ledger booked the loss at EVENT time, so the corpse's removal never races the books. 0 = the pre-C5 lifetime (wrecks freeze forever; every golden pins it). FreeFalcon's own shape: the sim object dies, the campaign object's bookkeeping lives on. |
+| `--war` mode | campaign_qc | The CLI face: per-hour progress lines (cycles, draws, spawns, live roster, throughput, RSS), three artifacts, and the exit gates. |
+
+The four C5 gates (per-sample, run 0):
+
+- **DETERMINISM (exit 9)**: run 1's ledger bytes differ from run 0's.
+  The comparison is the bytes themselves; the MD5s are the certificate.
+- **LEDGER DRIFT (exit 10)**: a one-pool identity broke — a team pool
+  outside `[0, initial]`, the tasking view outside `[0, remaining]`,
+  the team books disagreeing with the squadron books (guarded on the
+  ledger's own unmatched-flow counters), or a monotone counter going
+  backwards.
+- **ENTITY LEAK (exit 11)**: the roster identity broke —
+  `live != initial + spawned − retired` at any sample. The churn
+  bound's deterministic form (RSS is diary telemetry, never a gate —
+  platform-dependent bytes are not acceptance evidence).
+- **WAR ALIVE (exit 12)**: the clock stopped (a run of frozen advance
+  batches aborts the war), no cycle fired in a sample (when the cycle
+  period is shorter than the cadence) or the whole war (a period
+  beyond the horizon), or a belligerent that has EVER drawn went
+  silent for a full sample with aircraft taskable (a side that never
+  drew from t0 is fixture data — role mix — visible in the diary's
+  per-team `drawn_total` rows, not a gate: the false stall is worse
+  than the missing gate).
+
+The inherited tasking gates ride along (war edition): exit 6 (drew
+nothing with belligerent air), 7 (drew but no routes / nothing
+materialized), 8 (ATM armed, no packages).
+
+Artifacts: `campaign_result.json` (run 0's ledger — byte-stable),
+`campaign_qc_summary.json`'s `war` block (DETERMINISTIC content only —
+verdicts, counters, MD5, per-team final pools; no wall-clock, no
+RSS, no ticks/sec), and `campaign_war_diary.json` (one row per
+sample WITH the performance telemetry — explicitly NOT byte-stable,
+and in its own file for exactly that reason). The diary is the
+watch surface: throughput (ticks/sec), RSS growth, live-roster
+trend, per-team pool trajectories.
+
+Verified on real data (TestCamp, v71, regenerated world JSON): a
+6-minute war (`--war 0.1 --war-sample 60 --tasking-cycle 60`, 2
+in-process runs) — 6 cycles, 556 intents, 413 ATM packages + 143
+escorts, 115 routes (0 failures), 1,362 aircraft drawn (ROK 672 /
+DPRK 690 — both belligerents generating), 48 synthetic aircraft
+flown alongside the capped 48 saved flights (96 live, all airborne
+by t=360 s), ledger MD5 identical across the two runs and equal to
+`md5sum campaign_result.json`, all four verdicts green, exit 0.
+Reinforcement verified with a 60 s cadence (28 delivered on the
+deficit); the default 12 h cadence fires the stale-anchor catch-up
+at t≈0 and refills the deficits at hour 12 — one believable refill
+inside the 24-hour horizon. Debug-build throughput on the dev
+container: ~330-540 ticks/sec at ~96 live aircraft (a 24-hour war
+is a multi-hour Debug run — Release builds are the acceptance
+medium; the diary's ticks-per-sec column makes the rate visible).
+
+Known limitation, honest by design: A/A combat is dark for campaign
+flights in this slice (the combat chain's arming — see
+COMBAT_CHAIN_PLAN), so war runs book bomb damage and attrition-side
+ledger events but no air kills, and the reaper's churn machinery
+stays quiet until that arming lands (its mechanics are pinned by the
+harness tests regardless: hold → retire-once → roster identity).
 
 ## 6. What does NOT change
 
@@ -410,7 +478,10 @@ certificate.
    aircraft, deaggregated vehicles/personnel) renders, with the deagg
    bubble following the CAMERA when zoomed in, so the interactive
    session is watchable, not just runnable).
-2. C5 the long run (the 24-hour war, now over the ATM pipeline).
+2. ~~C5 the long run (the 24-hour war, now over the ATM pipeline)~~ —
+   LANDED: `campaign_qc --war` + `CampaignWarHarness` + the wreck
+   reaper (see §5's C5 section for the verification numbers and the
+   exit-gate table).
 
 ---
 

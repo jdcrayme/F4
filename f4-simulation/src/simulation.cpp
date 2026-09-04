@@ -271,6 +271,43 @@ bool Simulation::register_aircraft(entities::EntityId id) {
     return true;
 }
 
+bool Simulation::retire_aircraft(entities::EntityId id) {
+    // C5's wreck reaper — see the header for the lifetime contract.
+    // Order of operations: every in-memory reference to the id is
+    // dropped BEFORE world().destroy() so nothing walks a destroyed
+    // entity, and the destroy is last so a failure above leaves the
+    // world intact.
+    if (!id.valid()) return false;
+    const auto it = std::find(aircraft_entities_.begin(),
+                              aircraft_entities_.end(), id);
+    if (it == aircraft_entities_.end()) return false;  // not ours to reap
+    aircraft_entities_.erase(it);
+
+    // Wingman pairs die with either member — the survivor degrades to
+    // single-ship, the same rung-drop a dead lead already causes in
+    // push_wingman_lead_pictures() (invalid picture → no formation).
+    wingman_pairs_.erase(
+        std::remove_if(wingman_pairs_.begin(), wingman_pairs_.end(),
+                       [id](const WingmanPair& p) {
+                           return p.wingman == id || p.lead == id;
+                       }),
+        wingman_pairs_.end());
+
+    // Radar policies are ownship-keyed and only exist on the
+    // scenario-list path (campaign spawns never build one — the scan
+    // is a cheap no-op there).
+    combat_policies_.erase(
+        std::remove_if(combat_policies_.begin(), combat_policies_.end(),
+                       [v = id.value](
+                           const std::unique_ptr<RadarBackedDetectionPolicy>&
+                               p) { return p->ownship_id() == v; }),
+        combat_policies_.end());
+
+    world_.destroy(id);
+    ++retired_aircraft_;
+    return true;
+}
+
 void Simulation::spawn_from_scenario_list() {
     using namespace f4::entities;
     using namespace f4::flight;

@@ -120,6 +120,17 @@ struct CampaignSessionOptions {
     /// reach 240x, so the cap follows). Debt beyond the cap is dropped,
     /// never accumulated: the session stays live, time dilates.
     int max_steps_per_advance = 240;
+
+    /// C5: the wreck hold — killed aircraft are RETIRED (removed from
+    /// the roster + destroyed in the world) this many sim seconds
+    /// after their EntityKilledMessage, keeping long-horizon rosters
+    /// bounded (without it every death freezes a wreck in the world
+    /// forever: a 24-hour war accumulates corpses until the per-tick
+    /// roster walks drown). The loss is booked in the ledger at EVENT
+    /// time, so retiring the wreck never races the books. 0 = the
+    /// pre-C5 lifetime (wrecks freeze in place; every golden pins it);
+    /// the war harness arms 300.
+    double wreck_hold_sec = 0.0;
 };
 
 /// The live campaign session. Create via create(); destroy to reset —
@@ -143,6 +154,7 @@ public:
         int live_aircraft = 0;        ///< sim roster size
         int airborne = 0;             ///< FM gear.inAir
         double sim_time_s = 0.0;      ///< sim clock
+        int retired = 0;              ///< C5: wrecks reaped so far
         // --- C4 (ATM pipeline) ------------------------------------------
         int packages = 0;             ///< ATM: packages built
         int escorts = 0;              ///< ATM: support flights paired
@@ -280,6 +292,10 @@ private:
     /// call (the roster delta) — the one-world closure.
     void adopt_new_spawns_();
 
+    /// Retire wrecks whose hold expired (the C5 roster bound; only
+    /// armed when wreck_hold_sec > 0 — a no-op otherwise).
+    void retire_due_wrecks_();
+
     /// Recompute stats_ from the live objects.
     void refresh_stats_();
 
@@ -339,6 +355,19 @@ private:
     double campaign_sec_accum_ = 0.0;  ///< fractional campaign seconds
     bool paused_ = false;
     std::size_t registered_spawns_ = 0;  ///< spawner().spawned() index
+
+    // C5: the wreck policy. The kill subscription records
+    // (entity, sim-time) pairs as EntityKilledMessage lands; the
+    // per-campaign-second cadence in advance() retires the ones past
+    // the hold. Arrival order, deterministic; ids retire at most once
+    // (retire_aircraft's idempotence eats replayed messages).
+    double wreck_hold_sec_ = 0.0;
+    std::size_t kill_subscription_ = 0;  ///< 0 = not subscribed
+    struct PendingWreck {
+        f4::entities::EntityId id;
+        double death_s = 0.0;
+    };
+    std::vector<PendingWreck> pending_wrecks_;
 
     // Display snapshot.
     Stats stats_;

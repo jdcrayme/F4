@@ -4927,3 +4927,122 @@ Stage Summary:
   entirely host-side composition).
 - Next: C5 proper — the 24-hour war acceptance run (long-horizon QC
   over the ATM pipeline), now on a campaign whose clock provably runs.
+
+---
+Task ID: 22
+Agent: main (Super Z)
+Task: C5 — the 24-hour war (the acceptance): the long-horizon QC
+harness over the ATM pipeline, per CAMPAIGN_LOOP_PLAN §5's C5 spec.
+Both sides generate, fly, fight, attrite, recover, and resupply for
+hours of sim time — headless, deterministic, byte-certified.
+
+Work Log:
+- Fresh clone (the workspace had been reset); re-read the C5 spec
+  (CAMPAIGN_LOOP_PLAN §5), the worklog tail (Task 21 / C5-FIX-1),
+  campaign_qc.cpp, campaign_session.hpp/cpp, the ledger/campaign
+  APIs, and the session test fixture patterns before writing code.
+- THE ENTITY-CHURN FIX first (C5's watch item become code): killed
+  aircraft froze in place FOREVER (FM stops, transform parks, the
+  roster walks the corpse every tick) — a 24-hour war would drown
+  in wrecks. Simulation::retire_aircraft(id): roster erase → wingman
+  pairs (either member) → radar policies (ownship match, new
+  ownship_id() accessor on RadarBackedDetectionPolicy) → world
+  destroy, last; retired_aircraft() counter. Idempotent, roster-only
+  (parked/feature populations are not the wreck policy's business).
+- CampaignSessionOptions::wreck_hold_sec (default 0 = the pre-C5
+  lifetime, every golden untouched): the session subscribes the
+  EntityKilledMessage feed (subscription AFTER the result sink's, so
+  the ledger books the loss before the corpse schedules its exit —
+  bus order is subscription order), records (id, sim-time) pairs,
+  and the per-campaign-second cadence in advance() retires the
+  expired ones (arrival order, stable compaction — identical worlds
+  across identically-driven runs). Stats gain .retired; the dtor
+  unsubscribes.
+- CampaignWarHarness (f4-simulation, campaign_war_harness.hpp/cpp):
+  composes the SAME CampaignSession the viewer drives, advances in
+  fully-drained 4-sim-second batches (the 240-tick cap; byte-
+  equivalent to any split, the C2 pin) until the horizon, samples
+  every sample_sec. Runs the whole war `runs` times (default 2) and
+  compares run 1's ledger BYTES against run 0's — MD5 (RFC 1321,
+  self-contained, ~100 lines) is the certificate, byte equality is
+  the gate. Per-sample checks: (a) one-pool identities (team pool in
+  [0,initial], tasking in [0,remaining], team books vs squadron
+  books guarded on the ledger's unmatched-flow counters, monotone
+  counters); (b) roster identity live == initial + spawned −
+  retired (exact); (c) war alive — cycles per sample (period ≤
+  cadence), zero cycles over the whole war, and ever-drew
+  belligerents silent a full sample with taskable aircraft (a side
+  that never drew from t0 is fixture data, diary-visible, not
+  gated — the false stall is worse than the missing gate). Clock
+  guard: 64 consecutive frozen advance batches abort the war (the
+  C5-FIX-1 class, harness edition). Wall-clock watchdog optional.
+  RSS telemetry (Linux statm / Apple mach / 0 elsewhere) is diary-
+  only, NEVER a gate. Options validated at create().
+- campaign_qc --war: the CLI face. --war <hours> (fractions for
+  smoke), --war-runs, --war-sample, --wreck-hold, --war-max-wall.
+  War mode is a SEPARATE top-level flow — the B.3/C2/C3/C4 modes
+  below it stay byte-identical (goldens pinned). Artifacts:
+  campaign_result.json (run 0's ledger), the summary's "war" block
+  (DETERMINISTIC content only — no wall-clock/RSS/tps), and
+  campaign_war_diary.json (telemetry rows, explicitly not
+  byte-stable). Per-hour progress lines to stdout. Exit gates:
+  6/7/8 (inherited tasking classes, war edition) then 9 (non-
+  deterministic), 10 (ledger drift), 11 (entity leak), 12 (stalled
+  war). The war's saved-flight default is the session's 48-flight
+  interactivity cap (449 FMs at 60 Hz is a replay-mode budget; the
+  war's story is the generated packages; --max-flights overrides).
+- Tests: NEW test_campaign_war_harness.cpp (5 units) — the war runs
+  + certifies + is deterministic over the routed kunsan fixture
+  (verdicts green, 4 diary rows, MD5s equal and 32-hex, progress
+  callback count, roster identity re-derived); the reaper (bus-fed
+  kill: unchanged inside the hold, retired exactly once past it,
+  roster loses only the victim, stale handle resolves nothing,
+  second retire a no-op, hold-0 keeps the wreck frozen); the stall
+  verdict (cycle period beyond the horizon → "no tasking cycle"
+  diagnostic, other gates untouched); runs==1 (single MD5, vacuous
+  determinism); option validation.
+- Container plumbing: cmake+ninja via pip (none installed); headless
+  configure (renderer/viewer/scenario-player OFF); TestCamp.world.json
+  regenerated with cam2json (the plan's own command).
+- Verification: war harness suite 5/5; FULL headless suite
+  2,176/2,176 (the one parallel-run flake, F4ImportCLI.DoctorOn...
+  in f4-import — untouched by this tranche — passes standalone and
+  on the re-run; pre-existing). Real-data smokes on TestCamp (v71):
+  (a) 6-minute war, 60 s cycle, 2 runs — 6 cycles, 556 intents, 413
+  ATM packages + 143 escorts, 115 routes (0 failures), 1,362 drawn
+  (ROK 672 / DPRK 690 — BOTH belligerents generating), 48 synthetic
+  aircraft flown + the capped 48 saved (96 live, all airborne by
+  t=360 s), ledger MD5 identical across runs AND equal to md5sum
+  campaign_result.json, all four verdicts green, exit 0, RSS flat
+  241→244 MB, ~330-540 tps (Debug); (b) 3-minute war with 60 s
+  reinforce cadence — 28 delivered on the deficits (the default 12 h
+  cadence fires the stale-anchor catch-up at t≈0 and refills at hour
+  12 — one believable refill inside the 24 h horizon); (c) a
+  mis-configured 6-minute run at the DEFAULT 1800 s cycle (no cycle
+  due) correctly exits 6 with the STALLED verdict and the exact
+  diagnostic ("no tasking cycle fired the entire war (period 1800s
+  over a 360s horizon)") — the gates fail loud, not wrong.
+- Docs: CAMPAIGN_LOOP_PLAN §5 C5 → LANDED (pieces table, the four
+  gates, artifacts, verification numbers, the honest A/A-dark
+  limitation), status header + implementation order updated;
+  CHANGES.md entry; campaign_qc's file-header usage block (item 6 +
+  the new flags + exits 9-12).
+
+Stage Summary:
+- The campaign loop is CLOSED end to end and CERTIFIED: simulate →
+  attrite → retask, both sides, hours of sim time, deterministic by
+  construction and by proof (byte-identical ledgers across two
+  in-process runs, MD5 re-derivable by hand).
+- The C5 watch items are instrumented, not just observed: entity
+  churn (the roster identity + the reaper), ledger drift (the
+  one-pool identities), route failures (per-sample counters),
+  memory (RSS telemetry + the deterministic roster bound), wall-
+  clock throughput (ticks/sec per sample) — all in the diary.
+- Known gaps carried forward: A/A dark for campaign flights (no air
+  kills in war runs until the combat chain's arming lands — the
+  reaper's mechanics are test-pinned regardless); the full 24 h
+  acceptance run wants a Release build (Debug ≈ 330-540 tps).
+- Next per the roadmap: the .cam re-encoder tranche (world JSON
+  re-emission + save-write), the ground war (battalion movement /
+  front line), or the real-data imports (FALCON4.WST / full UCD) —
+  the known-gaps §7 queue, in whatever order the user picks.

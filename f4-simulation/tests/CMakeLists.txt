@@ -76,6 +76,18 @@ target_compile_definitions(test_campaign_session PRIVATE
 )
 add_dependencies(test_campaign_session mission_profiles_fixture)
 
+# C5 — the 24-hour war harness: the long-horizon acceptance rig over
+# the routed kunsan fixture (compressed horizons; the same generated
+# fixtures the session and campaign_qc tests consume).
+f4_simulation_add_test(test_campaign_war_harness test_campaign_war_harness.cpp)
+target_compile_definitions(test_campaign_war_harness PRIVATE
+    F4_SIMULATION_TEST_FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures"
+    F4_SOURCE_FIXTURES_DIR="${CMAKE_SOURCE_DIR}/f4-world-convert/tests/fixtures"
+    F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}"
+    F4_MISSION_PROFILES_JSON="${F4_MISSION_PROFILES_JSON}"
+)
+add_dependencies(test_campaign_war_harness mission_profiles_fixture)
+
 # The combat integration test drives the full M3 chain (radar detect ->
 # track -> lock -> RWR -> launch -> kill -> sweep) through Simulation. It
 # needs the generated F-16 aircraft config (FlightModelComponent::init

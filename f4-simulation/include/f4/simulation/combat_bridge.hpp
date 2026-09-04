@@ -104,6 +104,13 @@ public:
 
     Verdict classify(const f4::ai::TargetInfo& t) override;
 
+    /// The ownship this policy was built for (C5's reaper matches
+    /// retired entities against their policies — the scenario-list path
+    /// is the only one that builds them).
+    [[nodiscard]] std::uint64_t ownship_id() const noexcept {
+        return ownship_id_;
+    }
+
 private:
     entities::EntityWorld* world_;
     std::uint64_t ownship_id_;

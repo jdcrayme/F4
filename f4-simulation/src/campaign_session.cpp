@@ -11,6 +11,7 @@
 #include <f4/flight/flight_model_component.hpp>
 #include <f4/data/config_loader.hpp>
 #include <f4/io/read_file.hpp>
+#include <f4/weapons/messages.hpp>
 
 #include <algorithm>
 #include <fstream>
@@ -384,6 +385,28 @@ CampaignSession::create(const CampaignSessionOptions& opts,
             *session->ledger_, session->sim_->world());
     session->sink_->attach(session->sim_->bus());
 
+    // 14. C5's wreck policy — subscribe the kill feed when armed. The
+    //     ledger's loss booking happens in the SINK's own subscription
+    //     (registered above, so it hears the message FIRST — bus order
+    //     is subscription order); this one only schedules the corpse's
+    //     removal. A kill published between advance() calls (a host
+    //     driving combat by hand) lands here too — the retire walk
+    //     reads the sim clock on the next cadence tick.
+    session->wreck_hold_sec_ = opts.wreck_hold_sec;
+    if (session->wreck_hold_sec_ > 0.0) {
+        auto* pending = &session->pending_wrecks_;
+        session->kill_subscription_ =
+            session->sim_->bus()
+                .subscribe<f4::weapons::EntityKilledMessage>(
+                    [pending](const f4::weapons::EntityKilledMessage& m) {
+                        f4::entities::EntityId victim{};
+                        victim.value = m.target_id;
+                        if (!victim.valid()) return;
+                        pending->push_back(
+                            PendingWreck{victim, m.sim_time_s});
+                    });
+    }
+
     session->refresh_stats_();
     return session;
 }
@@ -396,6 +419,10 @@ CampaignSession::~CampaignSession() {
     if (sim_) {
         if (sink_) sink_->detach(sim_->bus());
         if (spawner_) spawner_->detach(sim_->bus());
+        if (kill_subscription_ != 0) {
+            sim_->bus().unsubscribe<f4::weapons::EntityKilledMessage>(
+                kill_subscription_);
+        }
     }
 }
 
@@ -438,6 +465,7 @@ bool CampaignSession::advance(double real_seconds, int max_steps_override) {
             // objectives with damage components).
             sink_->sync_objective_damage();
             adopt_new_spawns_();
+            retire_due_wrecks_();
         }
 
         accumulator_ -= sim_dt_;
@@ -464,6 +492,29 @@ void CampaignSession::adopt_new_spawns_() {
     }
 }
 
+void CampaignSession::retire_due_wrecks_() {
+    // C5's roster bound: wrecks past their hold leave the world. The
+    // walk is arrival-ordered and stable (compaction keeps relative
+    // order), so two identically-driven sessions retire the same
+    // entities on the same ticks — the ledger books stayed identical
+    // anyway; this keeps the WORLDS identical too.
+    if (wreck_hold_sec_ <= 0.0 || pending_wrecks_.empty()) return;
+    const double now = sim_->sim_time_s();
+    const double horizon = now - wreck_hold_sec_;
+    std::size_t kept = 0;
+    for (std::size_t i = 0; i < pending_wrecks_.size(); ++i) {
+        if (pending_wrecks_[i].death_s <= horizon) {
+            sim_->retire_aircraft(pending_wrecks_[i].id);
+        } else {
+            if (kept != i) {
+                pending_wrecks_[kept] = pending_wrecks_[i];
+            }
+            ++kept;
+        }
+    }
+    pending_wrecks_.resize(kept);
+}
+
 void CampaignSession::refresh_stats_() {
     stats_ = {};
     if (!sim_) return;
@@ -488,6 +539,7 @@ void CampaignSession::refresh_stats_() {
     stats_.recovered = ledger_->aircraft_recovered();
     stats_.synthetic_spawned = spawner_->stats().synthetic_spawned;
     stats_.live_aircraft = static_cast<int>(sim_->aircraft_entities().size());
+    stats_.retired = sim_->retired_aircraft();
     for (const auto eid : sim_->aircraft_entities()) {
         auto h = f4::entities::EntityHandle(eid, &sim_->world());
         auto* fm = h.get<f4::flight::FlightModelComponent>();
