@@ -1,7 +1,7 @@
 {
   "name": "wvr_merge",
   "theater": "korea",
-  "terrain_json_path": "@F4_BINARY_DIR@/korea.terrain.json",
+  "terrain_json_path": "@F4_TERRAIN_JSON@",
   "theater_dir": "@F4_SCENARIO_THEATER_DIR@",
   "models_hdr_path": "@F4_SOURCE_DIR@/temp/KoreaObj.HDR",
   "models_lod_path": "@F4_SOURCE_DIR@/temp/KoreaObj.LOD",
@@ -9,7 +9,7 @@
   "aircraft": [
     {
       "callsign": "EAGLE1",
-      "aircraft_config_path": "@F4_BINARY_DIR@/generated_fixtures/f16.json",
+      "aircraft_config_path": "@F4_AIRCRAFT_CONFIG@",
       "aircraft_name": "F-16C_50",
       "vis_type_index": 1052,
       "parking_spot": { "x": 0.0, "y": 0.0, "z": 15000.0 },
@@ -21,7 +21,7 @@
     },
     {
       "callsign": "BANDIT1",
-      "aircraft_config_path": "@F4_BINARY_DIR@/generated_fixtures/f16.json",
+      "aircraft_config_path": "@F4_AIRCRAFT_CONFIG@",
       "aircraft_name": "F-16C_50",
       "vis_type_index": 1052,
       "parking_spot": { "x": 0.0, "y": 30380.0, "z": 15000.0 },

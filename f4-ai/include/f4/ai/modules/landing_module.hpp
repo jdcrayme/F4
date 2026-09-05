@@ -243,7 +243,7 @@ public:
                                         // aiming at the threshold itself
                                         // makes the flare land short)
     double establish_hdg_tol_rad{0.26}; // ~15 deg on-course for Established
-    double establish_lateral_ft{500.0}; // localizer capture tolerance
+    double establish_lateral_ft{250.0}; // Tranche 37: tightened from 500 — forces the intercept to converge within the tracking tolerance before establishing OnFinal
     double localizer_gain{0.0005};      // heading correction per ft of xtrack
                                         // STAB-E20/E53: softened from 0.0009
                                         // (and originally 0.0015) — at 200
@@ -275,17 +275,30 @@ public:
                                         // course; 0.0005 x 600 = 17 deg,
                                         // continuous with the scaled-lead
                                         // cut at the boundary (18.4 deg)
-    double intercept_lead_ft{1500.0};   // floor on the intercept lead
-                                        // distance (ft along the course).
-                                        // Keeps small offsets from cutting
-                                        // near-perpendicular to the course.
-    double intercept_lead_ratio{3.0};   // STAB-E20/E53: the lead SCALES with
-                                        // the cross-track at this ratio —
-                                        // 3.0 bounds the intercept cut at
-                                        // atan(1/3) = 18.4 deg for ANY
-                                        // offset. 2.0 (26.6 deg cuts) still
-                                        // hunted at the 23-deg bank cap's
-                                        // turn radius (fix29)
+    double intercept_lead_ft{0.0};      // Tranche 33: the intercept lead is
+                                        // now COMPUTED from the turn radius
+                                        // (R = V²/(11.25×tan(θ))) in
+                                        // configure(). This static value is
+                                        // a fallback floor (0 = always use
+                                        // the computed R). The old fixed
+                                        // 1500 ft was less than 1/4 of the
+                                        // turn radius at 185 kts / 25 deg
+                                        // bank (R = 6525 ft) — the aircraft
+                                        // started the turn too late and
+                                        // physically could not complete it
+                                        // before crossing the course,
+                                        // overshooting by 350-640 ft.
+    double intercept_lead_ratio{5.0};   // Tranche 31: shallower intercept cut
+                                        // (atan(1/5) = 11.3 deg vs the old
+                                        // atan(1/3) = 18.4 deg). The steeper
+                                        // 18.4 deg cut crossed the centerline
+                                        // with too much lateral velocity and
+                                        // overshot to 641 ft (the intercept
+                                        // S-turn). 11.3 deg converges more
+                                        // gradually, shrinking the overshoot.
+                                        // The trade: longer intercept track
+                                        // (~2x), but the scenario starts far
+                                        // enough out to accommodate it.
     double establish_beam_tol_ft{400.0};// STAB-E23: Established also
                                         // requires being this close to the
                                         // glide beam — refuses to hand

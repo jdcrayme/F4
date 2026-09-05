@@ -79,15 +79,16 @@ void run_full_mission(Scenario scenario, bool require_pattern) {
     ASSERT_GE(scenario.waypoints.size(), 2u);
     // (airfield fields are DERIVED at sim initialize from airbase_source)
 
-    // Skip when the real-world JSON data the scenario references is missing
-    // (it's only generated when F4_INSTALL points at a Falcon install —
-    // a CI environment without that install cannot run this test).
+    // Skip when the world JSON the scenario references is missing. With the
+    // committed Data/ tree (Tranche 0a follow-up), this should never fire in
+    // a full clone — the data is in the repo. Kept as a safety valve for
+    // shallow clones or builds without Data/ (backward-compatible).
     if (!scenario.airbase_source.world_json_path.empty() &&
         !std::filesystem::exists(scenario.airbase_source.world_json_path)) {
         GTEST_SKIP() << "world JSON '"
                      << scenario.airbase_source.world_json_path
-                     << "' not generated (requires F4_INSTALL set to a "
-                        "Falcon 4.0 install)";
+                     << "' not found (expected in Data/World/ — run "
+                        "scripts/export-game-data.sh to generate)";
     }
 
     Simulation sim(scenario, scenario_path.parent_path());
@@ -350,3 +351,36 @@ TEST(DigiMission, FullLoopTrafficPattern) {
     // As configured in digi_full_mission.json: "approach": "pattern".
     run_full_mission(load_scenario(scenario_path), /*require_pattern=*/true);
 }
+
+// ============================================================================
+// Tranche 35: Full mission parametrized over multiple aircraft.
+// The existing two tests run the F-16 only. This parametrized test runs the
+// complete taxi→takeoff→navigate→approach→land→taxi-back loop for each
+// aircraft in Data/Aircraft/, verifying the control law works end-to-end
+// across the fleet (fighters + heavy bombers + transports).
+// ============================================================================
+class DigiMissionMultiAircraft : public ::testing::TestWithParam<std::string> {};
+
+TEST_P(DigiMissionMultiAircraft, FullLoopStraightIn) {
+    if (!std::filesystem::exists(scenario_path)) {
+        GTEST_SKIP() << "digi_full_mission.json not configured (run CMake configure)";
+    }
+    const auto& stem = GetParam();
+
+    auto scenario = load_scenario(scenario_path);
+    scenario.approach_mode = "straight_in";
+
+    // Swap the aircraft config to the requested type.
+    if (scenario.aircraft.empty()) GTEST_SKIP() << "no aircraft in scenario";
+    const auto data_path = std::filesystem::path("Data/Aircraft") / (stem + ".json");
+    if (!std::filesystem::exists(data_path)) {
+        GTEST_SKIP() << "aircraft config not found: " << data_path;
+    }
+    scenario.aircraft[0].aircraft_config_path = std::filesystem::absolute(data_path).string();
+
+    run_full_mission(std::move(scenario), /*require_pattern=*/false);
+}
+
+INSTANTIATE_TEST_SUITE_P(AircraftTypes, DigiMissionMultiAircraft,
+    ::testing::Values("f16", "f15", "a10", "mig29", "f14", "f18", "f5",
+                      "b52", "b1b", "c130", "f111"));

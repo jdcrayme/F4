@@ -246,10 +246,20 @@ void NavigationModule::check_waypoint_capture()
     const double along_in = (current_position_.x - leg_from_.x) * 0.0;  // unused
     (void)along_in;
     const double xte_now = cross_track_ft();
-    const bool established_enough = std::abs(xte_now) < 400.0;
+    // Tranche 37: relaxed from 400 to 1500 ft. At 300 kts the cross-track
+    // during a turn easily exceeds 400 ft (0.8 s of lateral velocity) —
+    // the tight check blocked the lead capture mid-turn, forcing the
+    // aircraft to fly past the waypoint without sequencing.
+    const bool established_enough = std::abs(xte_now) < 1500.0;
+    // Tranche 37: speed-proportional capture radius. At 300 kts the old
+    // fixed 3000 ft is 3 s of flight — the aircraft flies through it in
+    // one tick. Scale by 10× the CAS (300 kts → 3000 ft, 350 → 3500 ft),
+    // floored at the config value.
+    const double effective_capture = std::max(capture_radius_ft,
+                                               10.0 * current_vcas_kts_);
     const bool captured =
         (dist < turn_lead_ft_ && established_enough) ||
-        dist < capture_radius_ft ||
+        dist < effective_capture ||
         (wp_timer_ > min_wp_dwell_s && dist < abeam_capture_ft &&
          off_nose > abeam_bearing_rad);
 
@@ -285,7 +295,14 @@ AIControlOutput NavigationModule::controls_for_waypoint() const
     // the same aircraft at 300 kts holds +-26 ft — course_intercept).
     // Enroute legs never need slow flight: the landing module owns the
     // drag-curve backside with its own floors and flaps.
-    constexpr double ENROUTE_SPEED_FLOOR_KTS = 270.0;
+    // Tranche 37: lowered from 270 to 220. The old 270 floor prevented
+    // deceleration for the approach transition — the aircraft arrived at
+    // the approach entry fix at 270+ kts (way too fast for a 170-213 kt
+    // approach). 220 stays above the clean-airframe power-curve backside
+    // for fighters while allowing the waypoint speeds (200-350) to actually
+    // command what they specify. The landing module owns the slow-flight
+    // regime below this with its own floors + flaps.
+    constexpr double ENROUTE_SPEED_FLOOR_KTS = 200.0;  // Tranche 38: lowered from 220 for approach deceleration
     double speed = std::max(wp.speed_kts, ENROUTE_SPEED_FLOOR_KTS);
     const double hdg_err = std::abs(AirSteering::heading_error(desired_hdg,
                                                                current_heading_rad_));
@@ -298,7 +315,13 @@ AIControlOutput NavigationModule::controls_for_waypoint() const
         speed = std::min(speed, std::max(turn_speed_kts, ENROUTE_SPEED_FLOOR_KTS));
     }
 
-    constexpr double TERRAIN_CLEARANCE_FLOOR_MSL = 3000.0;
+    // Tranche 39: lowered from 3000 to 500. The old 3000 ft MSL floor
+    // overrode the 1500 ft pattern altitude of the radar pattern's downwind
+    // leg — the aircraft never descended below 3000 ft during enroute, arriving
+    // at the approach entry fix at 3000+ ft instead of 1500 ft (too high for
+    // a glideslope-from-below intercept). 500 ft MSL is above Korea's coastal
+    // terrain (near sea level) and below the 1500 ft pattern altitude.
+    constexpr double TERRAIN_CLEARANCE_FLOOR_MSL = 500.0;
     double target_alt = std::max(wp.position.z, TERRAIN_CLEARANCE_FLOOR_MSL);
     return air_steering.steer(desired_hdg, target_alt, speed,
                               steering_input());

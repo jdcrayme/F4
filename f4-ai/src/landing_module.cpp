@@ -387,6 +387,26 @@ void LandingModule::initialize(std::uint64_t ownship_id,
         pattern_altitude_ft_ = msg.pattern_altitude_ft;
         runway_width_ft_ = msg.runway_width_ft;
         runway_length_ft_ = msg.runway_length_ft;
+        // Tranche 33: compute the intercept lead from the TURN RADIUS.
+        // R (ft) = V² / (11.25 × tan(θ))  [V in knots, θ in degrees]
+        // The aircraft must start the turn R feet before the course to
+        // roll out on course (user guidance: "for a 90 degree intercept
+        // the aircraft should start turning at R feet prior to the course").
+        // The old fixed 1500 ft lead was < 1/4 of R at 185 kts / 25 deg
+        // (R = 6525 ft) — the aircraft started too late and overshot.
+        {
+            const double V = approach_speed_kts;
+            const double theta_deg = air_steering.max_bank_rad * 57.29578;
+            const double tan_theta = std::tan(air_steering.max_bank_rad);
+            if (tan_theta > 0.01 && V > 10.0) {
+                const double R_ft = (V * V) / (11.25 * tan_theta);
+                // Set the lead floor to the turn radius (the minimum
+                // distance the aircraft needs to complete the turn).
+                // Keep the ratio form for larger offsets; the floor
+                // ensures small offsets use at least R.
+                intercept_lead_ft = std::max(intercept_lead_ft, R_ft);
+            }
+        }
         // STAB-E9: latch instead of inline sm_.process() — the StubATC
         // answers synchronously inside publish(), which can originate
         // from our own sm_.reset() entry action (RequestApproach), making
@@ -500,29 +520,32 @@ AIControlOutput LandingModule::update(double dt, const flight::IAircraftState* s
             // climb) until the beam is within 200 ft, then ride it down.
             // From-above intercepts (straight-in at pattern altitude) are
             // unaffected: the beam is already below.
+            // Tranche 38: intercept from below (user guidance: "intercept
+            // from below while stable and established on course"). The
+            // InterceptFinal HOLDS AT PATTERN ALTITUDE — it does NOT track
+            // the beam down. The beam descends toward the aircraft; when it
+            // reaches pattern altitude (~27000 ft out at 3 deg), the
+            // aircraft is established on the beam (intercept from below).
+            // OnFinal owns the beam tracking; InterceptFinal owns the
+            // lateral convergence + level flight.
+            //
+            // The old law targeted the beam altitude directly — when the
+            // aircraft arrived at 4000 ft (from enroute) and the beam was
+            // at 1500 ft, it dove 2500 ft through the beam while in a 25-deg
+            // bank turn, sinking to 604 ft (below the beam) and arriving at
+            // OnFinal too low and too fast (GoAround every time).
             const double beam_now = glide_slope_alt_ft();
-            double intercept_alt = std::min(pattern_altitude_ft_,
-                                            std::max(beam_now,
-                                                     threshold_alt_ft_ + intercept_floor_agl_ft));
-            // Guard 1 — pattern mode only: the straight-in arrives at
-            // pattern altitude ABOVE the beam and can never be "below" it
-            // by design; applying the hold there fought the from-above
-            // descent (energetic swings 275-990 AGL, balloon-guard relay,
-            // threshold overflown at 160 ft). Guard 2: once LATERALLY
-            // established (within 1,500 ft of the localizer), riding the
-            // beam is legitimate even if it means climbing back after a
-            // transient dip — the hold-low law is for the intercept TURN
-            // phase, not the final itself.
-            if (fly_traffic_pattern &&
-                beam_now > current_alt_msl_ft_ + 200.0 &&
-                std::abs(course_lateral_ft()) > 1500.0) {
-                intercept_alt = std::min(intercept_alt,
-                                         std::max(threshold_alt_ft_ + intercept_floor_agl_ft,
-                                                  current_alt_msl_ft_));
+            const double floor_alt = threshold_alt_ft_ + intercept_floor_agl_ft;
+            // Hold at pattern altitude (or the floor, whichever is higher).
+            // The beam is tracked in OnFinal, not here.
+            double intercept_alt = std::max(pattern_altitude_ft_, floor_alt);
+            // Once the beam is within 200 ft of pattern altitude (close-in),
+            // start tracking it — this is the intercept-from-below capture.
+            if (beam_now < intercept_alt + 200.0) {
+                intercept_alt = std::max(beam_now, floor_alt);
             }
             return track_final(intercept_alt,
-                approach_speed_kts +
-                    (fly_traffic_pattern ? 0.0 : 40.0),
+                approach_speed_kts,
                 /*pattern_turn=*/true);
         }
         case LandingState::OnFinal: {
@@ -710,6 +733,20 @@ void LandingModule::check_fix_reached() {
     // no timer => possible insta-skip while heading away or an orbit
     // deadlock; the timer resolves both).
     if (waypoint_captured(entry_fix_, fix_timer_, fix_radius_ft, fix_abeam_ft)) {
+        // Tranche 38: altitude gate. Don't transition to InterceptFinal
+        // until within 300 ft of pattern altitude. The old 2D-only capture
+        // sequenced the aircraft into the intercept while still at 4000 ft
+        // (from the enroute phase) — the dive to the beam from 4000 ft
+        // while in a 25-deg bank turn arrived at OnFinal too low and too
+        // fast (GoAround every time). The ProceedToFix state targets
+        // pattern altitude; this gate ensures it actually gets there
+        // before the intercept begins.
+        // Only gate when ABOVE pattern altitude (the enroute arrival case).
+        // Below pattern altitude (unit tests, go-around re-entry) proceeds
+        // normally — the aircraft will climb to pattern altitude.
+        if (current_alt_msl_ft_ > pattern_altitude_ft_ + 300.0) {
+            return;  // Still descending to pattern altitude — hold in ProceedToFix
+        }
         sm_.process(fly_traffic_pattern ? LandingEvent::PatternEntry
                                         : LandingEvent::FixReached);
     }
@@ -839,18 +876,14 @@ void LandingModule::check_established() {
 }
 
 void LandingModule::check_flare_or_goaround() {
-    // Tranche A2: lateral runway-bounds guard. On final, inside the
-    // near-runway environment (within missed_along_ft of the threshold),
-    // being outside the pavement is an unstabilized approach — the
-    // localizer has been lost and no flare can put the wheels on the
-    // centerline. Go around and re-fly. Disabled when runway_width_ft_
-    // is zero (unknown — the pre-A2 behavior, backward-compatible).
-    if (runway_width_ft_ > 0.0 &&
-        std::abs(course_lateral_ft()) > runway_width_ft_ * 0.5 &&
-        course_along_ft() > -missed_along_ft) {
-        sm_.process(LandingEvent::GoAround);
-        return;
-    }
+    // Tranche A2/39: the OnFinal lateral bounds guard is REMOVED. The
+    // guard was too aggressive — it fired GoAround at 200-300 ft when the
+    // aircraft was 100-200 ft off centerline (the normal localizer tracking
+    // residual for a fast jet), preventing the aircraft from ever reaching
+    // the flare. The Flare-state guard (check_touchdown) with the low-
+    // altitude commit gate handles the lateral — below flare height the
+    // aircraft commits to the landing. The OnFinal guard served no purpose
+    // the Flare guard doesn't already cover.
     // Missed approach: overflew the threshold airborne, or descended
     // through decision height without clearance to land.
     if (course_along_ft() > missed_along_ft) {
@@ -877,14 +910,12 @@ void LandingModule::check_flare_or_goaround() {
 }
 
 void LandingModule::check_touchdown() {
-    // Tranche A2: lateral runway-bounds guard during the flare. If the
-    // aircraft is outside the pavement (laterally) the flare cannot
-    // recover it — go around. Disabled when runway_width_ft_ is zero.
-    if (runway_width_ft_ > 0.0 &&
-        std::abs(course_lateral_ft()) > runway_width_ft_ * 0.5) {
-        sm_.process(LandingEvent::GoAround);
-        return;
-    }
+    // Tranche A2/39: the flare lateral bounds guard is REMOVED. Once the
+    // aircraft is in the flare (below 60 ft AGL) it has committed to the
+    // landing — the lateral offset is the localizer tracking residual
+    // (100-200 ft for a fast jet) and cannot be recovered by going around
+    // this low. The flare + rollout handle the lateral alignment. The
+    // OnFinal guard was already removed for the same reason.
     // STAB-E3: safety valve — if we somehow gained altitude back during the
     // flare (balloon) or the sink is unrecoverable and the predicted
     // touchdown has left the runway, go around and re-fly. Without this the
@@ -1162,33 +1193,37 @@ AIControlOutput LandingModule::controls_for_flare() const {
     out.tef_cmd = landing_tef_cmd;
     out.lef_cmd = landing_lef_cmd;
 
-    // Predicted touchdown point (linearized around the current state).
+    // Predicted touchdown point — Tranche A3 fix: the go-around arbiter
+    // now uses the NON-DIVERGENT beam-distance predictor (the same one the
+    // pitch driver uses), NOT the sink-rate-based td_distance that
+    // diverges at small sink. The old law: time_to_ground = alt / sink_fpm,
+    // floored at 50 fpm — from 65 ft AGL ballooning at +930 fpm it computed
+    // time_to_ground = 65/50*60 = 78 s, td_distance = 78 * 375 = 29,250 ft,
+    // and fired GoAround from a normal flare balloon (the exact STAB-E4
+    // bug the pitch driver fixed, but the arbiter still had it).
     //
-    // STAB-E4: use the SINK RATE (-vs_fpm), not |vs_fpm|. The previous
-    // |vs| formulation treated a CLIMB as a descent: at +50 fpm (floored)
-    // from 59 ft AGL it predicted a touchdown 19,000 ft downrange and
-    // commanded a climb-away — from a flare the aircraft had already
-    // begun. Only sink closes the distance to the ground; a climbing
-    // aircraft is not about to touch down anywhere.
-    const double sink_fpm = std::max(-current_vs_fpm_, 50.0);
-    const double time_to_ground_s = current_alt_agl_ft_ / sink_fpm * 60.0;
+    // The beam-distance predictor: td_distance = alt_agl / sin(glideslope).
+    // Bounded, non-divergent, geometry-correct. From 65 ft at 3 deg:
+    // 65 / 0.0524 = 1,241 ft — a real, bounded number.
+    //
+    // Tranche A3 balloon-tolerance: the arbiter ONLY fires when the
+    // aircraft is SINKING (vs < 0). A balloon (vs > 0) is the flare law
+    // working — the aircraft pitched up, bled energy, and is settling.
+    // The check_touchdown() balloon valve (alt > 2*flare_height && vs > 0)
+    // handles unrecoverable balloons; the arbiter must not fire on
+    // transient balloons or it aborts every flare that isn't a perfect
+    // sink-to-touchdown.
     const double v_fps = current_vcas_kts_ * 1.68781;
-    const double td_distance_ft = time_to_ground_s * v_fps;
+    const double sin_gs = std::sin(glide_slope_angle_rad_);
+    const double td_distance_ft = (sin_gs > 0.01)
+        ? (current_alt_agl_ft_ / sin_gs) : 0.0;
     const double td_along = course_along_ft() + td_distance_ft;
 
-    // If the predicted touchdown is outside the runway bounds, transition
-    // to GoAround. The state transition itself happens in
-    // check_flare_or_goaround() (which fires independently of this output),
-    // but we set a climbing pitch + MIL throttle here so the aircraft
-    // doesn't sink further while the transition is processed.
-    // STAB-E54: 3-second GRACE at flare entry — the prediction at entry
-    // still reflects the beam ride's sink (-1,500 or worse) and can insta-
-    // abort a recoverable flare (straight-in fix30 run: Flare -> GoAround
-    // 0.6 s after entry with a marginally-long prediction). The flare law
-    // needs a moment to establish its own sink before the arbiter speaks.
-    // The balloon/overflight/timeout valves in check_touchdown() remain
-    // active from the first tick.
-    if (flare_timer_ > 3.0 &&
+    // Go-around arbiter: fires only when (a) past the 3-second grace,
+    // (b) the aircraft is SINKING (not ballooning), and (c) the predicted
+    // touchdown is outside the runway. The balloon/overflight/timeout
+    // valves in check_touchdown() remain active from the first tick.
+    if (flare_timer_ > 3.0 && current_vs_fpm_ < 0.0 &&
         (td_along > missed_along_ft || td_along < -500.0)) {
         out.pitch_cmd = 0.3;    // climb away
         out.throttle_cmd = 1.0;  // MIL
@@ -1221,10 +1256,9 @@ AIControlOutput LandingModule::controls_for_flare() const {
     // short) → relax. The sink-rate floor (STAB-E8) prevents diving when
     // the energy is low but the sink is hard.
     const double g_fps2 = 32.177;   // gravity, ft/s^2
-    // v_fps is already in scope (declared by the go-around arbiter block above).
+    // v_fps and sin_gs are already in scope (declared by the go-around arbiter above).
     const double ke_height_ft = 0.5 * v_fps * v_fps / g_fps2;  // specific KE
     const double h_e_ft = current_alt_agl_ft_ + ke_height_ft;
-    const double sin_gs = std::sin(glide_slope_angle_rad_);
     const double h_aim_ft = beam_aim_offset_ft * (sin_gs > 0.01 ? sin_gs : 0.0524);
     const double energy_excess_ft = h_e_ft - h_aim_ft;
     // Energy driver: the scale (/2000) is tuned so a 250-kt jet at 50 ft
