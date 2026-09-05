@@ -30,6 +30,7 @@ using f4::renderer::SymbolPoint;
 using f4::renderer::SymbolPolygon;
 using f4::renderer::SymbolPolyline;
 using f4::renderer::import_symbol_from_svg_string;
+using f4::renderer::import_symbol_from_svg_file;
 using f4::renderer::refresh_fill_caches;
 using f4::renderer::symbol_to_svg;
 
@@ -347,7 +348,10 @@ TEST(SvgRoundTrip, EverySymbolsDirectoryFileRoundTrips) {
     for (const auto& file : files) {
         const std::string key = file.stem().string();
         const SymbolDefinition def = import_symbol_from_svg_file(file);
-        ASSERT_FALSE(def.polygons.empty() || def.polylines.empty()) << key;
+        // Some symbols are outline-only (e.g. glyph_transport — three
+        // unfilled rects → three polylines, zero polygons). The contract
+        // is "the SVG produces SOME geometry", not "both kinds present".
+        ASSERT_FALSE(def.polygons.empty() && def.polylines.empty()) << key;
 
         const SymbolDefinition back =
             import_symbol_from_svg_string(symbol_to_svg(def), key);
@@ -396,7 +400,7 @@ TEST(SvgRoundTrip, EveryMappedKeyHasAnSvg) {
     for (int t = 0; t <= 39; ++t) require_file(key_for_objective_type(static_cast<uint8_t>(t)));
     for (int c = 0; c <= static_cast<int>(f4::entities::UnitClass::Package); ++c) {
         const auto cls = static_cast<f4::entities::UnitClass>(c);
-        require_file(frame_key_for_unit_class(cls));
+        if (const char* f = frame_key_for_unit_class(cls)) require_file(f);
         for (int st = 0; st <= 20; ++st) {
             if (const char* g = glyph_key_for_unit(cls, static_cast<uint8_t>(st))) {
                 require_file(g);

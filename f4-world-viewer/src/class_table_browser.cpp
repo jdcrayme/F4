@@ -34,6 +34,15 @@
 #include <sstream>
 #include <string>
 
+namespace {
+// Safe char-lowercasing for std::transform. The bare ::tolower (returning
+// int) triggers MSVC C4244 "conversion from int to char, possible loss
+// of data" — this lambda makes the narrowing explicit and warning-clean.
+inline char to_lower_char(char c) noexcept {
+    return static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+}
+} // namespace
+
 // ---------------------------------------------------------------------------
 // PreviewCache — PImpl holding all Raylib GPU resources owned by
 // ClassTableBrowser. Defined here (not in the header) because it contains
@@ -274,11 +283,11 @@ bool ClassTableBrowser::passes_filter(
     if (search_buf_[0] != '\0') {
         std::string search_lower(search_buf_);
         std::transform(search_lower.begin(), search_lower.end(),
-                       search_lower.begin(), ::tolower);
+                       search_lower.begin(), to_lower_char);
 
         // Match entity type ID
         std::string id_str = std::to_string(entity_type);
-        std::transform(id_str.begin(), id_str.end(), id_str.begin(), ::tolower);
+        std::transform(id_str.begin(), id_str.end(), id_str.begin(), to_lower_char);
         if (id_str.find(search_lower) != std::string::npos) return true;
 
         // Match subtype name
@@ -286,7 +295,7 @@ bool ClassTableBrowser::passes_filter(
         if (sub) {
             std::string sub_lower(sub);
             std::transform(sub_lower.begin(), sub_lower.end(),
-                           sub_lower.begin(), ::tolower);
+                           sub_lower.begin(), to_lower_char);
             if (sub_lower.find(search_lower) != std::string::npos) return true;
         }
 
@@ -295,7 +304,7 @@ bool ClassTableBrowser::passes_filter(
         if (cls) {
             std::string cls_lower(cls);
             std::transform(cls_lower.begin(), cls_lower.end(),
-                           cls_lower.begin(), ::tolower);
+                           cls_lower.begin(), to_lower_char);
             if (cls_lower.find(search_lower) != std::string::npos) return true;
         }
 
@@ -304,7 +313,7 @@ bool ClassTableBrowser::passes_filter(
         if (dt_name) {
             std::string dt_lower(dt_name);
             std::transform(dt_lower.begin(), dt_lower.end(),
-                           dt_lower.begin(), ::tolower);
+                           dt_lower.begin(), to_lower_char);
             if (dt_lower.find(search_lower) != std::string::npos) return true;
         }
 
@@ -315,7 +324,7 @@ bool ClassTableBrowser::passes_filter(
             if (vcd && !vcd->name.empty()) {
                 std::string name_lower(vcd->name);
                 std::transform(name_lower.begin(), name_lower.end(),
-                               name_lower.begin(), ::tolower);
+                               name_lower.begin(), to_lower_char);
                 if (name_lower.find(search_lower) != std::string::npos) return true;
             }
         }
@@ -324,7 +333,7 @@ bool ClassTableBrowser::passes_filter(
             if (ocd && !ocd->name.empty()) {
                 std::string name_lower(ocd->name);
                 std::transform(name_lower.begin(), name_lower.end(),
-                               name_lower.begin(), ::tolower);
+                               name_lower.begin(), to_lower_char);
                 if (name_lower.find(search_lower) != std::string::npos) return true;
             }
         }
@@ -333,7 +342,7 @@ bool ClassTableBrowser::passes_filter(
             if (ucd && !ucd->name.empty()) {
                 std::string name_lower(ucd->name);
                 std::transform(name_lower.begin(), name_lower.end(),
-                               name_lower.begin(), ::tolower);
+                               name_lower.begin(), to_lower_char);
                 if (name_lower.find(search_lower) != std::string::npos) return true;
             }
         }
@@ -342,7 +351,7 @@ bool ClassTableBrowser::passes_filter(
             if (fcd && !fcd->name.empty()) {
                 std::string name_lower(fcd->name);
                 std::transform(name_lower.begin(), name_lower.end(),
-                               name_lower.begin(), ::tolower);
+                               name_lower.begin(), to_lower_char);
                 if (name_lower.find(search_lower) != std::string::npos) return true;
             }
         }
@@ -351,7 +360,7 @@ bool ClassTableBrowser::passes_filter(
             if (wcd && !wcd->name.empty()) {
                 std::string name_lower(wcd->name);
                 std::transform(name_lower.begin(), name_lower.end(),
-                               name_lower.begin(), ::tolower);
+                               name_lower.begin(), to_lower_char);
                 if (name_lower.find(search_lower) != std::string::npos) return true;
             }
         }

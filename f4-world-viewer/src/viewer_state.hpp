@@ -11,8 +11,6 @@
 // moves the Impl struct + per-concern implementations into:
 //   viewer_state.hpp    — this file (Impl struct + color helpers)
 //   viewer_app.cpp      — lifecycle (ctor/dtor/run) + small helpers
-//   symbols.cpp         — procedural symbol drawing (replaces the old
-//                         PNG-icon system — see symbols.hpp)
 //   camera.cpp          — Impl world<->screen transforms + fit_to_world
 //   file_ops.cpp        — ViewerApp::load_*_json / import_*
 //   install_flow.cpp    — ViewerApp::set_install_path* / open_campaign_dialog
@@ -22,6 +20,13 @@
 //                         / open_install_diagnostics
 //   canvas.cpp          — ViewerApp::handle_input / draw_canvas
 //   imgui_panels.cpp    — ViewerApp::draw_imgui / open_file_dialog
+//
+// 2D map symbols are now authored as SVGs in the repo-root symbols/
+// directory; f4::renderer::SymbolDirectory (a member of Impl) loads them
+// lazily, and the canvas + inspector render through
+// f4::renderer::RenderEntityIcon() / SymbolDirectory::draw(). The old
+// procedural symbols.cpp (~850 LoC vocabulary) was deleted in the
+// SYMBOL-SVG-2 follow-up; see f4/renderer/symbol_library.hpp.
 //
 // Cross-file internal helpers (the diagnostics builders) live in
 // diagnostics.hpp alongside this header.
@@ -75,6 +80,22 @@
 #include <f4/renderer/terrain_mesh.hpp>      // TerrainMesh (Path B1)
 #include <f4/renderer/terrain_chunks.hpp>    // TerrainChunkSet (Path B1 chunked)
 #include <f4/renderer/world_view.hpp>        // WorldView (textured theater path)
+
+#if defined(_WIN32)
+// On Windows, raylib's CloseWindow/ShowCursor clash with Win32's
+// winuser.h (C2733: "you cannot overload a function with extern C
+// linkage"). If a translation unit includes <windows.h> before this
+// header (directly or transitively) without NOUSER, the build breaks.
+// Defining NOUSER here ensures that even if a downstream .cpp includes
+// <windows.h> without the guard, the USER-decl API set (CloseWindow,
+// ShowCursor, etc.) stays out of scope. Harmless on non-Windows.
+#ifndef NOGDI
+#define NOGDI
+#endif
+#ifndef NOUSER
+#define NOUSER
+#endif
+#endif
 
 #include <raylib.h>
 
@@ -152,11 +173,11 @@ inline constexpr int kSessionSpeedCount =
 // toggles, status, install-aware state, modals, hex inspector, screenshots)
 // so a reader can find what they need without scanning the whole struct.
 //
-// Member-function definitions that need to touch this struct (draw_symbol,
-// world_to_screen, screen_to_world, fit_to_world, rebuild_objective_index)
-// live in symbols.cpp and camera.cpp — declared here, defined there. The
-// free functions in diagnostics.cpp take a const Installation& and don't
-// need Impl access.
+// Member-function definitions that need to touch this struct
+// (world_to_screen, screen_to_world, fit_to_world,
+// rebuild_objective_index) live in camera.cpp and canvas.cpp — declared
+// here, defined there. The free functions in diagnostics.cpp take a
+// const Installation& and don't need Impl access.
 // ---------------------------------------------------------------------------
 struct ViewerApp::Impl {
     // Window / camera
@@ -679,13 +700,15 @@ struct ViewerApp::Impl {
     // VU_ID.num → EntityId lookups are now in pop.objective_id_map and
     // pop.unit_id_map (populated by populate_world). No separate rebuild needed.
 
-    // --- Procedural symbols ---
+    // --- SVG symbols ---
     //
-    // Symbol drawing is now provided by f4::renderer::draw_symbol()
-    // (raylib direct) and f4::renderer::draw_symbol_imgui() (ImGui draw
-    // list). Call sites in canvas.cpp use f4::renderer::draw_symbol()
-    // directly; imgui_panels.cpp uses draw_symbol_imgui() via the
-    // f4::viewer::draw_symbol_imgui using alias from symbols.hpp.
+    // 2D map symbols are SVG files in symbols/ (one per icon key, see
+    // f4::renderer::SymbolDirectory). The directory above is probed once
+    // at startup (exe-relative candidates cover both the build tree and
+    // running from the repo root). Call sites in canvas.cpp use
+    // SymbolDirectory::draw() (raylib direct) and RenderEntityIcon()
+    // (entity dispatch); imgui_panels.cpp can use draw_imgui() when a
+    // legend or inspector needs to render a symbol into a draw list.
 
     // --- Camera transforms (defined in camera.cpp) ---
 

@@ -74,8 +74,6 @@ set(TINYFILEDIALOGS_SOURCES
 # per-concern breakdown):
 #   viewer_app.cpp      — lifecycle (ctor/dtor/run) + set_initial_camera
 #                         + schedule_screenshot
-#   symbols.cpp         — procedural symbol drawing (replaces icons.cpp —
-#                         no PNG assets, see symbols.hpp)
 #   camera.cpp          — Impl world<->screen transforms + fit_to_world
 #   file_ops.cpp        — load_*_json / import_cam_archive / import_terrain_binary
 #   install_flow.cpp    — set_install_path* / open_campaign_dialog /
@@ -224,7 +222,8 @@ if(TARGET convert_golden_fixtures)
     add_dependencies(f4-world-viewer convert_golden_fixtures)
 endif()
 
-# NOTE: The viewer no longer ships or loads any PNG icon assets. Every
-# objective and unit is drawn procedurally from raylib primitives — see
-# src/symbols.cpp. The assets/icons/ directory is kept in the source tree
-# for historical reference only and is NOT copied to the build directory.
+# NOTE: 2D map icons are SVG files in the repo-root symbols/ directory
+# (one .svg per icon key). The build step above copies them next to the
+# executable; the viewer's SymbolDirectory loads them lazily at runtime.
+# The legacy assets/icons/ PNG directory (kept for historical reference)
+# is NOT copied to the build directory.

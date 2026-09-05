@@ -35,6 +35,12 @@ using namespace f4::viewer;
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
+#ifndef NOGDI
+#define NOGDI
+#endif
+#ifndef NOUSER
+#define NOUSER
+#endif
 #include <windows.h>
 
 inline int setenv(const char* name, const char* value, int overwrite) {

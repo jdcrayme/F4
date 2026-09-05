@@ -198,8 +198,12 @@ void SymbolDirectory::draw_imgui(const std::string& key, ImDrawList* dl,
                                  ImVec2 center, float size_px,
                                  unsigned int fill_col, unsigned int outline_col,
                                  bool filled) {
-    if (!dl) return;
+    // Always probe the disk so callers observing the library / failed_keys
+    // after a no-op draw (tests, headless smoke runs) see the same state a
+    // real draw would have produced. The draw itself is the only part
+    // gated on a non-null draw list.
     ensure_loaded(key);
+    if (!dl) return;
     draw_library_symbol(dl, lib_, key, center, size_px,
                         fill_col, outline_col, filled);
 }

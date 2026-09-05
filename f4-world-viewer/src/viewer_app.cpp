@@ -5,7 +5,6 @@
 // of the original 1920-LoC god-file after the architecture-review split
 // (item #5) into:
 //   viewer_state.hpp    — Impl struct + color helpers
-//   symbols.cpp         — procedural symbol drawing (replaces icons.cpp)
 //   camera.cpp          — world<->screen transforms + fit_to_world
 //   file_ops.cpp        — load_*_json / import_*
 //   install_flow.cpp    — set_install_path* / open_campaign_dialog /
@@ -15,6 +14,9 @@
 //                         free functions
 //   canvas.cpp          — handle_input / draw_canvas
 //   imgui_panels.cpp    — draw_imgui / open_file_dialog
+//
+// 2D map symbols are SVG files in symbols/, loaded lazily by the
+// f4::renderer::SymbolDirectory member of Impl (see viewer_state.hpp).
 //
 // Every other .cpp in this directory includes viewer_state.hpp for the
 // Impl struct definition. This file does too — for the ctor's
@@ -38,8 +40,16 @@
 #include <vector>
 
 #if defined(_WIN32)
+// raylib declares CloseWindow/ShowCursor as C++ free functions; Win32's
+// winuser.h declares them as `extern "C"`. Including both produces C2733
+// ("you cannot overload a function with extern C linkage"). NOGDI keeps
+// GDI out; NOUSER keeps the conflicting USER APIs (CloseWindow, ShowCursor,
+// etc.) out of <windows.h> entirely — viewer_app.cpp doesn't call any USER
+// function directly, and the raylib functions are the ones we actually use.
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
+#define NOGDI
+#define NOUSER
 #include <windows.h>
 #endif
 

@@ -122,3 +122,16 @@ target_link_libraries(png_probe PRIVATE f4_warnings raylib)
 # PNG for visual comparison against real geography.
 add_executable(paint-map-check tools/paint_map_check.cpp)
 target_link_libraries(paint-map-check PRIVATE f4-terrain f4_warnings raylib)
+
+# Render every symbol in symbols/ to a grid PNG — headless visual
+# verification that the SVG→SymbolLibrary pipeline produces distinct,
+# recognizable shapes (not all generic squares). Loads each .svg through
+# the real SymbolDirectory + draw_library_symbol path the canvas uses.
+add_executable(symbol-grid tools/symbol_grid.cpp)
+target_include_directories(symbol-grid PRIVATE ${IMGUI_DIR} ${IMGUI_DIR}/backends)
+target_sources(symbol-grid PRIVATE
+    ${IMGUI_DIR}/imgui.cpp
+    ${IMGUI_DIR}/imgui_draw.cpp
+    ${IMGUI_DIR}/imgui_tables.cpp
+    ${IMGUI_DIR}/imgui_widgets.cpp)
+target_link_libraries(symbol-grid PRIVATE f4-renderer f4_warnings raylib)

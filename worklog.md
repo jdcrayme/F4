@@ -5593,3 +5593,91 @@ Stage Summary (G2 LANDED, Task 26 — complete):
   with the real-data import).
 - Patch file for user testing: /home/z/my-project/download/
   interdiction-tranche.patch (git format-patch vs G1's 37591e6).
+
+---
+Task ID: SYMBOL-SVG-2
+Agent: main (Super Z)
+Task: Finish the SVG icon conversion on IcoWork (previous session ran out
+of tokens) and make the world-viewer work again. The SYMBOL-SVG-1 spike
+landed the foundation (f4-xml, svg_import, SymbolLibrary v2, symbols/
+corpus, entity_render wiring, CMakeLists copy step); this tranche closes
+the loop: build + test the wiring the spike shipped without ever running
+it, fix the real bugs the tests catch, kill the stale procedural-symbol
+documentation, and verify the canvas renders distinct icon shapes.
+
+Work Log:
+- Build env bootstrapped (sandbox had no cmake and no libxrandr/xi/
+  xinerama/xcursor dev packages). Pulled .debs via `apt-get download`
+  and unpacked into /home/z/my-project/{cmake-root,x11-root,x11-runtime,
+  gl-root,xauth-root} with LD_LIBRARY_PATH + explicit
+  X11_Xrandr_INCLUDE_PATH / OPENGL_gl_LIBRARY / etc. so raylib's GLFW
+  submodule configures. Xvfb (system-installed) + apt-downloaded
+  xauth provide the headless display the screenshot smoke test needs.
+- Real build bug #1 (test_symbol_library.cpp): included <imgui.h> via
+  the symbol_library.hpp forward declaration only — `ImVec2{}` in the
+  draw_imgui test callsites was an incomplete type. Added the include.
+- Real build bug #2 (test_svg_import.cpp): the corpus round-trip test
+  called `import_symbol_from_svg_file` but only `import_symbol_from_svg_
+  string` was brought in via `using`. Added the missing alias.
+- Real runtime bug (symbol_library.cpp, the load-bearing fix):
+  SymbolDirectory::draw_imgui early-returned on a null ImDrawList BEFORE
+  ensure_loaded(key) ran — so passing nullptr (the documented "no draw,
+  just trigger the load" path) silently NO-OP'd, leaving failed_keys
+  empty and the library empty for that key. Moved ensure_loaded above
+  the null-dl guard. 4 SymbolDirectory tests now pass (were red).
+- Real test bug (test_svg_import.cpp, EverySymbolsDirectoryFile
+  RoundTrips): ASSERT_FALSE(polygons.empty() || polylines.empty())
+  required BOTH kinds present. Outline-only glyphs (glyph_transport —
+  three unfilled rects → three polylines, zero polygons) failed.
+  Fixed to `&&` ("the SVG produces SOME geometry, either kind").
+- Real test bug (EveryMappedKeyHasAnSvg): the UnitClass loop called
+  require_file(frame_key_for_unit_class(cls)) for cls=Unknown too,
+  but Unknown returns nullptr from the mapping. Guarded with the same
+  `if (key)` pattern the inner glyph loop already used.
+- Stale doc cleanup (the symbols.cpp god-file is GONE; the comments
+  lied): viewer_state.hpp header (dropped the symbols.cpp entry from
+  the split list, added an SVG-conversion summary), ViewerApp::Impl
+  member-function pointer comment (removed the symbols.cpp reference),
+  the "Procedural symbols" block (rewritten as "SVG symbols"), and
+  f4-world-viewer/CMakeLists.txt source-layout block + the trailing
+  "no PNG icon assets" NOTE (rewritten as the SVG copy-step note).
+- New developer tool: f4-renderer/tools/symbol_grid.cpp (built as the
+  `symbol-grid` target). Renders every .svg in a directory to a grid
+  PNG through the real SymbolDirectory + draw_library_symbol path the
+  canvas uses — headless visual verification of the SVG pipeline with
+  no UI panels, no map, no terrain. CMakeLists wires ImGui sources in
+  (f4-renderer.a has unresolved ImGui symbols, same pattern as the
+  test targets).
+- Verification: full build clean (0 errors, 0 warnings in the new
+  sources). test_symbol_library 10/10, test_svg_import 15/15 (incl.
+  the full 75-symbol corpus round-trip + the mapped-keys coverage),
+  test_entity_render 32/32, test_symbol_mapping 7/7, the 4 world-
+  viewer test executables (settings/hex_model/enum_text/replay_mode)
+  65/65. ctest -j2 (excluding GPU-context tests that need a live
+  OpenGL context under Xvfb) 2305/2307 (the 2 fails are pre-existing
+  fs-state flakies that pass in isolation).
+- Visual verification: symbol-grid PNG (75 icons rendered at 78px each)
+  — VLM identifies distinct shapes: rectangle (frame_battalion),
+  diamond (glyph_supply), dashed line (obj_border), filled triangle
+  (obj_hill_top), lightning bolt (obj_power_plant). Confirms the
+  SVG→SymbolLibrary pipeline produces recognizable tactical icons,
+  not generic squares. World-viewer screenshot (save1.world.json +
+  korea.terrain.json, default zoom 4) — VLM identifies circles for
+  airbases, rectangles for battalions, diamonds for brigades, plus
+  signs for packages, with team-color variation. The world-viewer
+  renders SVG icons end-to-end.
+
+Stage Summary (SYMBOL-SVG-2 — IcoWork conversion LANDED):
+- The procedural icon vocabulary is gone; the world-viewer renders
+  authored SVGs from symbols/ through the same SymbolDirectory path
+  the canvas + entity_render + inspector all share. One vocabulary,
+  one render path, one authoring format.
+- The spike's latent bugs are fixed (draw_imgui load ordering, the
+  two test build breaks, the round-trip assertion, the Unknown-class
+  coverage call). The full renderer + viewer test suites are green.
+- The symbol-grid tool gives future maintainers a one-shot visual
+  diff: edit any .svg, `make symbol-grid && ./symbol-grid symbols/
+  out.png`, eyeball.
+- Patch file for user testing: /home/z/my-project/download/
+  svg-icon-conversion.patch (git format-patch vs SYMBOL-SVG-1's
+  33dbc65).

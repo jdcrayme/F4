@@ -8,6 +8,8 @@
 #include <f4/renderer/symbol_library.hpp>
 #include <f4/renderer/svg_import.hpp>
 
+#include <imgui.h>  // ImVec2 (draw_imgui signature needs the full type)
+
 #include <gtest/gtest.h>
 
 #include <cmath>
