@@ -385,6 +385,8 @@ void LandingModule::initialize(std::uint64_t ownship_id,
         threshold_alt_ft_ = msg.threshold_altitude_ft;
         glide_slope_angle_rad_ = msg.glide_slope_angle_rad;
         pattern_altitude_ft_ = msg.pattern_altitude_ft;
+        runway_width_ft_ = msg.runway_width_ft;
+        runway_length_ft_ = msg.runway_length_ft;
         // STAB-E9: latch instead of inline sm_.process() — the StubATC
         // answers synchronously inside publish(), which can originate
         // from our own sm_.reset() entry action (RequestApproach), making
@@ -837,6 +839,18 @@ void LandingModule::check_established() {
 }
 
 void LandingModule::check_flare_or_goaround() {
+    // Tranche A2: lateral runway-bounds guard. On final, inside the
+    // near-runway environment (within missed_along_ft of the threshold),
+    // being outside the pavement is an unstabilized approach — the
+    // localizer has been lost and no flare can put the wheels on the
+    // centerline. Go around and re-fly. Disabled when runway_width_ft_
+    // is zero (unknown — the pre-A2 behavior, backward-compatible).
+    if (runway_width_ft_ > 0.0 &&
+        std::abs(course_lateral_ft()) > runway_width_ft_ * 0.5 &&
+        course_along_ft() > -missed_along_ft) {
+        sm_.process(LandingEvent::GoAround);
+        return;
+    }
     // Missed approach: overflew the threshold airborne, or descended
     // through decision height without clearance to land.
     if (course_along_ft() > missed_along_ft) {
@@ -863,6 +877,14 @@ void LandingModule::check_flare_or_goaround() {
 }
 
 void LandingModule::check_touchdown() {
+    // Tranche A2: lateral runway-bounds guard during the flare. If the
+    // aircraft is outside the pavement (laterally) the flare cannot
+    // recover it — go around. Disabled when runway_width_ft_ is zero.
+    if (runway_width_ft_ > 0.0 &&
+        std::abs(course_lateral_ft()) > runway_width_ft_ * 0.5) {
+        sm_.process(LandingEvent::GoAround);
+        return;
+    }
     // STAB-E3: safety valve — if we somehow gained altitude back during the
     // flare (balloon) or the sink is unrecoverable and the predicted
     // touchdown has left the runway, go around and re-fly. Without this the
@@ -1174,27 +1196,55 @@ AIControlOutput LandingModule::controls_for_flare() const {
         return out;
     }
 
-    // Modulate the flare by SINK RATE (STAB-E8), not by the touchdown
-    // prediction. The prediction's time-to-ground diverges at small sink
-    // (floored at 50 fpm it predicted touchdowns 18,000 ft downrange from
-    // 59 ft AGL, commanding a MIL climb-away from a flare already begun —
-    // the balloon + go-around in the on_glideslope trace). A real flare
-    // targets a touchdown SINK RATE (~250 fpm) and modulates pitch to
-    // achieve it; the touchdown-point prediction above remains the
-    // go-around ARBITER only.
+    // Tranche A3: energy-height flare point-precision. STAB-E8 demoted the
+    // touchdown predictor to a ±2 deg trim because the predictor's
+    // time_to_ground (alt / sink_fpm) diverged at small sink — floored at
+    // 50 fpm it predicted touchdowns 18,000 ft downrange. The cure is a
+    // NON-DIVERGENT predictor that stays speed-dependent (a faster aircraft
+    // carries more kinetic energy, floats longer, lands longer — the STAB-E8
+    // sink-rate-only law threw away that information).
     //
-    //   sink_err = target_sink - current_sink   (positive = sinking too fast)
-    //   pitch_target = flare_pitch_deg + clamp(sink_err / 300, -3, +5) deg
+    // Energy height (specific energy):  h_e = alt_agl + v^2 / (2g)
+    //   — the altitude the aircraft would reach if it traded all KE for PE,
+    //     or equivalently the airspeed it would have at sea level from PE.
+    //   — bounded (alt and v are both bounded), non-divergent (no division
+    //     by sink), and speed-dependent (v^2 term).
+    //
+    // The aim point on the beam has its own energy height:
+    //   h_aim = beam_aim_offset_ft * sin(glideslope)
+    //   (the altitude of the beam at the aim distance — for a 1500 ft aim
+    //   on a 3-deg beam, ~78 ft. The aircraft should arrive at the aim
+    //   point at ~0 AGL with approach speed, so its target h_e ≈ h_aim.)
+    //
+    // Energy excess = h_e - h_aim. Positive = too much energy (will land
+    // long / float) → pitch up to bleed. Negative = too little (will land
+    // short) → relax. The sink-rate floor (STAB-E8) prevents diving when
+    // the energy is low but the sink is hard.
+    const double g_fps2 = 32.177;   // gravity, ft/s^2
+    // v_fps is already in scope (declared by the go-around arbiter block above).
+    const double ke_height_ft = 0.5 * v_fps * v_fps / g_fps2;  // specific KE
+    const double h_e_ft = current_alt_agl_ft_ + ke_height_ft;
+    const double sin_gs = std::sin(glide_slope_angle_rad_);
+    const double h_aim_ft = beam_aim_offset_ft * (sin_gs > 0.01 ? sin_gs : 0.0524);
+    const double energy_excess_ft = h_e_ft - h_aim_ft;
+    // Energy driver: the scale (/2000) is tuned so a 250-kt jet at 50 ft
+    // AGL (~2800 ft energy height, ~2740 ft excess) commands ~1.4 deg of
+    // extra flare pitch, while a 160-kt baseline (~1100 ft excess) commands
+    // ~0.55 deg. Both stay below the ±0.5 pitch_cmd clamp so the speed-
+    // differentiation is observable (the old STAB-E8 trim was ±2 deg; this
+    // is the same range but as the driver, not the trim). Negative excess
+    // (slow + low) relaxes toward the sink floor.
+    double flare_pitch_adj = std::clamp(energy_excess_ft / 2000.0, -2.0, 3.0);
+    // Sink-rate FLOOR (the STAB-E8 law, kept as the lower bound). If the
+    // aircraft is sinking faster than −400 fpm, add pitch regardless of
+    // the energy prediction — the energy says "short" but the sink says
+    // "hard". Positive sink_err = sinking faster than target.
     const double target_sink_fpm = -400.0;
-    // Positive sink_err = sinking faster than the target → pitch up more.
     const double sink_err = target_sink_fpm - current_vs_fpm_;
-    double flare_pitch_adj = std::clamp(sink_err / 300.0, -3.0, 5.0);  // deg
-    // STAB-E13: small bounded trim from the touchdown-point prediction
-    // (the C4 energy idea, demoted from driver to trim). Keeps the float
-    // near the aim point: landing long → pitch up a touch more; short →
-    // relax. Bounded to ±2 deg so it can never dominate the sink law.
-    flare_pitch_adj += std::clamp((td_along - beam_aim_offset_ft) / 1000.0,
-                                  -2.0, 2.0);
+    const double sink_floor_deg = std::clamp(sink_err / 300.0, -3.0, 5.0);
+    // The floor only ever adds pitch (prevents diving); it never overrides
+    // a "you're long, pitch up" command from the energy driver.
+    flare_pitch_adj = std::max(flare_pitch_adj, sink_floor_deg);
     const double target = (flare_pitch_deg + flare_pitch_adj) * D2R;
     out.pitch_cmd = std::clamp(flare_pitch_gain * (target - current_pitch_rad_),
                                -0.1, 0.5);

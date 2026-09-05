@@ -1,0 +1,27 @@
+{
+  "kind": "f4.visualdata",
+  "sensors": [
+    {
+      "az_limit_deg": 181.0,
+      "el_limit_deg": 91.0,
+      "gain": 3700000000.0,
+      "name": "generic",
+      "nominal_range_nm": 10.010939637865835
+    },
+    {
+      "az_limit_deg": 5.0,
+      "el_limit_deg": 5.0,
+      "gain": 370000000000.0,
+      "name": "mav",
+      "nominal_range_nm": 100.10939637865836
+    },
+    {
+      "az_limit_deg": 5.0,
+      "el_limit_deg": 5.0,
+      "gain": 370000000000.0,
+      "name": "tpod",
+      "nominal_range_nm": 100.10939637865836
+    }
+  ],
+  "version": 1
+}

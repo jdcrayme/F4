@@ -263,12 +263,20 @@ void parse_atm(Cursor& c, ATMRecord& m, int v) {
     }
 }
 
-// GTM / NTM: manager header (13) + flags (2). Not exposed.
-void parse_gtm(Cursor& c) {
-    c.skip(13 + 2);
+// GTM / NTM: manager header (13) + flags (2) = 15 bytes. Captured verbatim
+// into the TeamRecord (gtm_raw / ntm_raw) so the .tea encoder reproduces
+// them byte-faithfully. FreeFalcon's LoadTeams reads these (gtm.cpp:137 /
+// ntm.cpp:65), so their VU_ID/entity_type/owner are meaningful — not just
+// structural padding.
+void parse_gtm(Cursor& c, TeamRecord& t) {
+    constexpr int GTM_BYTES = 13 + 2;
+    t.gtm_raw.resize(GTM_BYTES);
+    c.read(t.gtm_raw.data(), GTM_BYTES);
 }
-void parse_ntm(Cursor& c) {
-    c.skip(13 + 2);
+void parse_ntm(Cursor& c, TeamRecord& t) {
+    constexpr int NTM_BYTES = 13 + 2;
+    t.ntm_raw.resize(NTM_BYTES);
+    c.read(t.ntm_raw.data(), NTM_BYTES);
 }
 
 } // namespace
@@ -293,9 +301,9 @@ DecodedTeams decode_tea(const uint8_t* data, std::size_t size, int camp_version)
         }
         parse_atm(c, t.atm, camp_version);
         if (c.error) break;
-        parse_gtm(c);
+        parse_gtm(c, t);
         if (c.error) break;
-        parse_ntm(c);
+        parse_ntm(c, t);
         if (c.error) break;
         out.teams.push_back(std::move(t));
     }

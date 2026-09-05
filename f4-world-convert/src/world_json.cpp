@@ -8,6 +8,8 @@
 #include <f4/io/read_file.hpp>
 
 #include <cmath>
+#include <iomanip>
+#include <limits>
 #include <optional>
 #include <sstream>
 #include <stdexcept>
@@ -84,6 +86,11 @@ std::filesystem::path find_base_objectives(const std::filesystem::path& cam_path
 
 std::string to_world_json(const CamArchive& cam, const WorldJsonOptions& opts) {
     std::ostringstream o;
+    // Emit floats with full precision (max_digits10) so the JSON round-trip
+    // (to_world_json → from_world_json_campaign → encode_cmp) is byte-exact
+    // for float fields (squadron x/y, objective z, ...). The default 6-digit
+    // precision loses ~2 bits and produces different bytes on re-encode.
+    o << std::setprecision(std::numeric_limits<float>::max_digits10);
     o << "{\n";
 
     // --- Theater + terrain reference (NEW) ---
@@ -137,6 +144,13 @@ std::string to_world_json(const CamArchive& cam, const WorldJsonOptions& opts) {
         for (std::size_t i = 0; i < h.te_number_aircraft.size(); ++i) {
             if (i) o << ", ";
             o << h.te_number_aircraft[i];
+        }
+        o << "],\n";
+        // te_number_f16s[8] — needed by the .cmp re-encoder (save-write path).
+        o << "    \"te_number_f16s\": [";
+        for (std::size_t i = 0; i < h.te_number_f16s.size(); ++i) {
+            if (i) o << ", ";
+            o << h.te_number_f16s[i];
         }
         o << "],\n";
         o << "    \"te_team_pts\": [";
@@ -282,6 +296,13 @@ std::string to_world_json(const CamArchive& cam, const WorldJsonOptions& opts) {
         o << "    ],\n";
         o << "    \"decoded_bytes\": " << h.bytes_consumed << ",\n";
         o << "    \"undecoded_bytes\": " << h.remaining_payload.size() << ",\n";
+        // remaining_payload bytes as base64 — the forward-compat tail the
+        // decoder couldn't parse. Preserved verbatim so the .cmp re-encoder
+        // reproduces it (byte-faithful even on files with unknown trailing
+        // fields).
+        o << "    \"remaining_payload_b64\": \""
+          << base64_encode(h.remaining_payload.data(), h.remaining_payload.size())
+          << "\",\n";
         // ---- Extension fields (CampaignClass::Decode, cmpclass.cpp:1404+) ----
         // Timers, ratios, theater size, day/progress state, bullseye,
         // names, player squadron. These turn the header into a real
@@ -320,7 +341,35 @@ std::string to_world_json(const CamArchive& cam, const WorldJsonOptions& opts) {
         o << "    \"creation_time\": " << h.creation_time << ",\n";
         o << "    \"creation_rand\": " << h.creation_rand << ",\n";
         o << "    \"camp_map_size\": " << h.camp_map_size << ",\n";
+        // camp_map bytes as base64 — the terrain ownership map (2 bits per
+        // cell, packed). Needed by the .cmp re-encoder to reproduce the
+        // camp_map verbatim.
+        o << "    \"camp_map_b64\": \""
+          << base64_encode(h.camp_map.data(), h.camp_map.size()) << "\",\n";
+        o << "    \"last_index_num\": " << h.last_index_num << ",\n";
         o << "    \"num_avail_squadrons\": " << h.num_avail_squadrons << ",\n";
+        // Squadron preload list (SquadUIInfoClass × num_avail_squadrons).
+        // Each record is 68 bytes on disk; emitted as a JSON array so the
+        // .cmp re-encoder can reproduce them verbatim.
+        o << "    \"squadrons\": [\n";
+        for (std::size_t si = 0; si < h.squadrons.size(); ++si) {
+            const auto& s = h.squadrons[si];
+            o << "      {\"x\": " << s.x
+              << ", \"y\": " << s.y
+              << ", \"id_num\": " << s.id_num
+              << ", \"id_creator\": " << s.id_creator
+              << ", \"d_index\": " << s.d_index
+              << ", \"name_id\": " << s.name_id
+              << ", \"airbase_icon\": " << s.airbase_icon
+              << ", \"squadron_patch\": " << s.squadron_patch
+              << ", \"specialty\": " << static_cast<int>(s.specialty)
+              << ", \"current_strength\": " << static_cast<int>(s.current_strength)
+              << ", \"country\": " << static_cast<int>(s.country)
+              << ", \"airbase_name\": \"" << escape_string(s.airbase_name) << "\"}";
+            if (si + 1 < h.squadrons.size()) o << ",";
+            o << "\n";
+        }
+        o << "    ],\n";
         // UI event queues — the campaign news feed (mid-campaign saves
         // carry the last ~10 events: kills, captures, missions).
         o << "    \"events\": [";
@@ -1094,6 +1143,28 @@ std::string to_world_json(const CamArchive& cam, const WorldJsonOptions& opts) {
         o << "\n  }\n";
     } else {
         o << "  \"campaign\": null\n";
+    }
+
+    // --- All sub-files as base64 (save-write path) ---
+    // When preserve_all_subfiles is set, emit every sub-file's raw bytes
+    // so json2cam can reassemble a byte-faithful .cam without re-encoding
+    // each typed sub-file. This is the foundation of the save-write
+    // tranche: cam2json --preserve-subfiles produces a world JSON that
+    // json2cam reads back into the identical .cam. See
+    // Docs/SAVE_WRITE_PLAN.md.
+    if (opts.preserve_all_subfiles) {
+        o << ",\n  \"subfiles_b64\": [\n";
+        const auto& sfs = cam.subfiles();
+        for (std::size_t i = 0; i < sfs.size(); ++i) {
+            const auto& sf = sfs[i];
+            o << "    {\"name\": \"" << escape_string(sf.name)
+              << "\", \"size\": " << sf.size
+              << ", \"data_b64\": \""
+              << base64_encode(sf.data.data(), sf.data.size()) << "\"}";
+            if (i + 1 < sfs.size()) o << ",";
+            o << "\n";
+        }
+        o << "  ]\n";
     }
 
     o << "}\n";

@@ -1,0 +1,70 @@
+{
+  "kind": "f4.irstdata",
+  "sensors": [
+    {
+      "az_limit_deg": 120.0,
+      "el_limit_deg": 60.0,
+      "flare_chance": 0.0,
+      "ground_factor": 1.0,
+      "name": "generic",
+      "nominal_range_nm": 10.0
+    },
+    {
+      "az_limit_deg": 60.0,
+      "el_limit_deg": 60.0,
+      "flare_chance": 0.2,
+      "ground_factor": 0.001,
+      "name": "aim9l",
+      "nominal_range_nm": 10.0
+    },
+    {
+      "az_limit_deg": 60.0,
+      "el_limit_deg": 60.0,
+      "flare_chance": 0.4,
+      "ground_factor": 0.001,
+      "name": "aim9p",
+      "nominal_range_nm": 2.0
+    },
+    {
+      "az_limit_deg": 45.0,
+      "el_limit_deg": 45.0,
+      "flare_chance": 0.5,
+      "ground_factor": 0.001,
+      "name": "sa7",
+      "nominal_range_nm": 2.0
+    },
+    {
+      "az_limit_deg": 60.0,
+      "el_limit_deg": 60.0,
+      "flare_chance": 0.3,
+      "ground_factor": 0.001,
+      "name": "sa14",
+      "nominal_range_nm": 2.5
+    },
+    {
+      "az_limit_deg": 60.0,
+      "el_limit_deg": 60.0,
+      "flare_chance": 0.4,
+      "ground_factor": 0.001,
+      "name": "sa9",
+      "nominal_range_nm": 3.0
+    },
+    {
+      "az_limit_deg": 60.0,
+      "el_limit_deg": 60.0,
+      "flare_chance": 0.4,
+      "ground_factor": 0.001,
+      "name": "sa13",
+      "nominal_range_nm": 5.0
+    },
+    {
+      "az_limit_deg": 60.0,
+      "el_limit_deg": 60.0,
+      "flare_chance": 0.0,
+      "ground_factor": 2.0,
+      "name": "agm65b",
+      "nominal_range_nm": 5.0
+    }
+  ],
+  "version": 1
+}

@@ -1,0 +1,18 @@
+{
+  "kind": "f4.rwrdata",
+  "sensors": [
+    {
+      "az_limit_deg": 180.0,
+      "el_limit_deg": 90.0,
+      "name": "generic",
+      "sensitivity": 1.0
+    },
+    {
+      "az_limit_deg": 60.0,
+      "el_limit_deg": 60.0,
+      "name": "harm",
+      "sensitivity": 2.0
+    }
+  ],
+  "version": 1
+}

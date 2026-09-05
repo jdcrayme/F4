@@ -58,6 +58,15 @@ struct WorldJsonOptions {
     /// gCampDataVersion of the base objectives file (default 63 — the
     /// version of the bundled save1.cam-derived .obj fixtures).
     int base_objectives_version = 63;
+
+    /// When true, emit a top-level `"subfiles_b64"` block containing every
+    /// sub-file's raw bytes as base64. This is the save-write path's
+    /// input: `json2cam` reads it back to reassemble a byte-faithful .cam.
+    /// Off by default (it roughly doubles the JSON size); cam2json enables
+    /// it with `--preserve-subfiles` when the output is destined for
+    /// json2cam. The existing `"raw_subfiles"` block (the subset of
+    /// not-yet-decoded sub-files) is unchanged.
+    bool preserve_all_subfiles = false;
 };
 
 /// Locate a base objectives .obj for a .cam that carries none (normal

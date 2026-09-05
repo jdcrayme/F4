@@ -1,0 +1,1654 @@
+{
+  "archetypes": [
+    {
+      "modes": [
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "GroundAvoidMode",
+          "priority": 0.5,
+          "rangeFt": 0.0,
+          "row": 0
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "CollisionAvoidMode",
+          "priority": 0.5,
+          "rangeFt": 0.0,
+          "row": 1
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "GunsJinkMode",
+          "priority": 1.0,
+          "rangeFt": 0.0,
+          "row": 2
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "MissileDefeatMode",
+          "priority": 0.5,
+          "rangeFt": 0.0,
+          "row": 3
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "Defensive Modes - This is a tag",
+          "priority": 0.0,
+          "rangeFt": 0.0,
+          "row": 4
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "FollowOrdersMode",
+          "priority": 0.0,
+          "rangeFt": 0.0,
+          "row": 5
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "",
+          "priority": 0.0,
+          "rangeFt": 0.0,
+          "row": 6
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "",
+          "priority": 0.0,
+          "rangeFt": 0.0,
+          "row": 7
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "",
+          "priority": 0.0,
+          "rangeFt": 0.0,
+          "row": 8
+        },
+        {
+          "angleDeg": 45.0,
+          "enabled": 1,
+          "label": "GunsEngageMode",
+          "priority": 1.0,
+          "rangeFt": 6000.0,
+          "row": 9
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "MissileEngageMode",
+          "priority": 3.0,
+          "rangeFt": 0.0,
+          "row": 10
+        },
+        {
+          "angleDeg": 180.0,
+          "enabled": 1,
+          "label": "WVREngageMode",
+          "priority": 3.0,
+          "rangeFt": 50000.0,
+          "row": 11
+        },
+        {
+          "angleDeg": 180.0,
+          "enabled": 1,
+          "label": "",
+          "priority": 5.0,
+          "rangeFt": 90000.0,
+          "row": 12
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "AccelerateMode",
+          "priority": 2.0,
+          "rangeFt": 0.0,
+          "row": 13
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "BVREngageMode",
+          "priority": 3.0,
+          "rangeFt": 0.0,
+          "row": 14
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "RunAwayMode",
+          "priority": 5.0,
+          "rangeFt": 0.0,
+          "row": 15
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "LoiterMode",
+          "priority": 10.0,
+          "rangeFt": 0.0,
+          "row": 16
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "SeparateMode",
+          "priority": 5.0,
+          "rangeFt": 0.0,
+          "row": 17
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "RTBMode",
+          "priority": 10.0,
+          "rangeFt": 0.0,
+          "row": 18
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "WingyMode",
+          "priority": 10.0,
+          "rangeFt": 0.0,
+          "row": 19
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "WaypointMode",
+          "priority": 10.0,
+          "rangeFt": 0.0,
+          "row": 20
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "RoopMode",
+          "priority": 0.0,
+          "rangeFt": 0.0,
+          "row": 21
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "OverBMode",
+          "priority": 0.0,
+          "rangeFt": 0.0,
+          "row": 22
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "GroundMnvr",
+          "priority": 0.0,
+          "rangeFt": 0.0,
+          "row": 23
+        },
+        {
+          "angleDeg": 78.900002,
+          "enabled": 0,
+          "label": "LastValidMode",
+          "priority": 123.0,
+          "rangeFt": 456.0,
+          "row": 24
+        }
+      ],
+      "name": "Generic"
+    },
+    {
+      "modes": [
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "GroundAvoidMode",
+          "priority": 1.0,
+          "rangeFt": 0.0,
+          "row": 0
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "CollisionAvoidMode",
+          "priority": 1.0,
+          "rangeFt": 0.0,
+          "row": 1
+        },
+        {
+          "angleDeg": 180.0,
+          "enabled": 1,
+          "label": "GunsJinkMode",
+          "priority": 1.0,
+          "rangeFt": 3000.0,
+          "row": 2
+        },
+        {
+          "angleDeg": 180.0,
+          "enabled": 1,
+          "label": "MissileDefeatMode",
+          "priority": 1.0,
+          "rangeFt": 50000.0,
+          "row": 3
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "Defensive Modes - This is a tag",
+          "priority": 1.0,
+          "rangeFt": 0.0,
+          "row": 4
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "FollowOrdersMode",
+          "priority": 1.0,
+          "rangeFt": 0.0,
+          "row": 5
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "",
+          "priority": 1.0,
+          "rangeFt": 0.0,
+          "row": 6
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "",
+          "priority": 1.0,
+          "rangeFt": 0.0,
+          "row": 7
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "",
+          "priority": 1.0,
+          "rangeFt": 0.0,
+          "row": 8
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 0,
+          "label": "GunsEngageMode",
+          "priority": 0.0,
+          "rangeFt": 0.0,
+          "row": 9
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 0,
+          "label": "MissileEngageMode",
+          "priority": 0.0,
+          "rangeFt": 0.0,
+          "row": 10
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 0,
+          "label": "WVREngageMode",
+          "priority": 0.0,
+          "rangeFt": 0.0,
+          "row": 11
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 0,
+          "label": "",
+          "priority": 0.0,
+          "rangeFt": 0.0,
+          "row": 12
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 0,
+          "label": "AccelerateMode",
+          "priority": 0.0,
+          "rangeFt": 0.0,
+          "row": 13
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 0,
+          "label": "BVREngageMode",
+          "priority": 0.0,
+          "rangeFt": 0.0,
+          "row": 14
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 0,
+          "label": "RunAwayMode",
+          "priority": 0.0,
+          "rangeFt": 0.0,
+          "row": 15
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "LoiterMode",
+          "priority": 1.0,
+          "rangeFt": 0.0,
+          "row": 16
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "SeparateMode",
+          "priority": 1.0,
+          "rangeFt": 0.0,
+          "row": 17
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "RTBMode",
+          "priority": 10.0,
+          "rangeFt": 0.0,
+          "row": 18
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "WingyMode",
+          "priority": 1.0,
+          "rangeFt": 0.0,
+          "row": 19
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "WaypointMode",
+          "priority": 1.0,
+          "rangeFt": 0.0,
+          "row": 20
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 0,
+          "label": "RoopMode",
+          "priority": 0.0,
+          "rangeFt": 0.0,
+          "row": 21
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 0,
+          "label": "OverBMode",
+          "priority": 0.0,
+          "rangeFt": 0.0,
+          "row": 22
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "GroundMnvr",
+          "priority": 0.0,
+          "rangeFt": 0.0,
+          "row": 23
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "GroundMnvr",
+          "priority": 0.0,
+          "rangeFt": 0.0,
+          "row": 24
+        },
+        {
+          "angleDeg": 180.0,
+          "enabled": 1,
+          "label": "LastValidMode",
+          "priority": 1.0,
+          "rangeFt": 50000.0,
+          "row": 25
+        }
+      ],
+      "name": "SEAD"
+    },
+    {
+      "modes": [
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "GroundAvoidMode",
+          "priority": 1.0,
+          "rangeFt": 0.0,
+          "row": 0
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "CollisionAvoidMode",
+          "priority": 1.0,
+          "rangeFt": 0.0,
+          "row": 1
+        },
+        {
+          "angleDeg": 180.0,
+          "enabled": 1,
+          "label": "GunsJinkMode",
+          "priority": 1.0,
+          "rangeFt": 3000.0,
+          "row": 2
+        },
+        {
+          "angleDeg": 180.0,
+          "enabled": 1,
+          "label": "MissileDefeatMode",
+          "priority": 1.0,
+          "rangeFt": 50000.0,
+          "row": 3
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "Defensive Modes - This is a tag",
+          "priority": 1.0,
+          "rangeFt": 0.0,
+          "row": 4
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "FollowOrdersMode",
+          "priority": 1.0,
+          "rangeFt": 0.0,
+          "row": 5
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "",
+          "priority": 1.0,
+          "rangeFt": 0.0,
+          "row": 6
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "",
+          "priority": 1.0,
+          "rangeFt": 0.0,
+          "row": 7
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "",
+          "priority": 1.0,
+          "rangeFt": 0.0,
+          "row": 8
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 0,
+          "label": "GunsEngageMode",
+          "priority": 0.0,
+          "rangeFt": 0.0,
+          "row": 9
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 0,
+          "label": "MissileEngageMode",
+          "priority": 0.0,
+          "rangeFt": 0.0,
+          "row": 10
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 0,
+          "label": "WVREngageMode",
+          "priority": 0.0,
+          "rangeFt": 0.0,
+          "row": 11
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 0,
+          "label": "",
+          "priority": 0.0,
+          "rangeFt": 0.0,
+          "row": 12
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 0,
+          "label": "AccelerateMode",
+          "priority": 0.0,
+          "rangeFt": 0.0,
+          "row": 13
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 0,
+          "label": "BVREngageMode",
+          "priority": 0.0,
+          "rangeFt": 0.0,
+          "row": 14
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 0,
+          "label": "RunAwayMode",
+          "priority": 0.0,
+          "rangeFt": 0.0,
+          "row": 15
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 0,
+          "label": "LoiterMode",
+          "priority": 0.0,
+          "rangeFt": 0.0,
+          "row": 16
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "SeparateMode",
+          "priority": 5.0,
+          "rangeFt": 0.0,
+          "row": 17
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "RTBMode",
+          "priority": 10.0,
+          "rangeFt": 0.0,
+          "row": 18
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "WingyMode",
+          "priority": 1.0,
+          "rangeFt": 0.0,
+          "row": 19
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "WaypointMode",
+          "priority": 1.0,
+          "rangeFt": 0.0,
+          "row": 20
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 0,
+          "label": "RoopMode",
+          "priority": 0.0,
+          "rangeFt": 0.0,
+          "row": 21
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 0,
+          "label": "OverBMode",
+          "priority": 0.0,
+          "rangeFt": 0.0,
+          "row": 22
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "GroundMnvr",
+          "priority": 0.0,
+          "rangeFt": 0.0,
+          "row": 23
+        },
+        {
+          "angleDeg": 180.0,
+          "enabled": 1,
+          "label": "LastValidMode",
+          "priority": 1.0,
+          "rangeFt": 50000.0,
+          "row": 24
+        }
+      ],
+      "name": "Strike"
+    },
+    {
+      "modes": [
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "GroundAvoidMode",
+          "priority": 1.0,
+          "rangeFt": 0.0,
+          "row": 0
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "CollisionAvoidMode",
+          "priority": 1.0,
+          "rangeFt": 0.0,
+          "row": 1
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "GunsJinkMode",
+          "priority": 1.0,
+          "rangeFt": 0.0,
+          "row": 2
+        },
+        {
+          "angleDeg": 180.0,
+          "enabled": 1,
+          "label": "MissileDefeatMode",
+          "priority": 1.0,
+          "rangeFt": 50000.0,
+          "row": 3
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "Defensive Modes - This is a tag",
+          "priority": 1.0,
+          "rangeFt": 0.0,
+          "row": 4
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "FollowOrdersMode",
+          "priority": 1.0,
+          "rangeFt": 0.0,
+          "row": 5
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 0,
+          "label": "",
+          "priority": 0.0,
+          "rangeFt": 0.0,
+          "row": 6
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 0,
+          "label": "",
+          "priority": 0.0,
+          "rangeFt": 0.0,
+          "row": 7
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 0,
+          "label": "",
+          "priority": 0.0,
+          "rangeFt": 0.0,
+          "row": 8
+        },
+        {
+          "angleDeg": 135.0,
+          "enabled": 1,
+          "label": "GunsEngageMode",
+          "priority": 1.0,
+          "rangeFt": 6000.0,
+          "row": 9
+        },
+        {
+          "angleDeg": 135.0,
+          "enabled": 1,
+          "label": "MissileEngageMode",
+          "priority": 2.0,
+          "rangeFt": 50000.0,
+          "row": 10
+        },
+        {
+          "angleDeg": 180.0,
+          "enabled": 1,
+          "label": "WVREngageMode",
+          "priority": 3.0,
+          "rangeFt": 50000.0,
+          "row": 11
+        },
+        {
+          "angleDeg": 180.0,
+          "enabled": 1,
+          "label": "",
+          "priority": 5.0,
+          "rangeFt": 90000.0,
+          "row": 12
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "AccelerateMode",
+          "priority": 1.0,
+          "rangeFt": 0.0,
+          "row": 13
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "BVREngageMode",
+          "priority": 5.0,
+          "rangeFt": 0.0,
+          "row": 14
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 0,
+          "label": "RunAwayMode",
+          "priority": 0.0,
+          "rangeFt": 0.0,
+          "row": 15
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 0,
+          "label": "LoiterMode",
+          "priority": 0.0,
+          "rangeFt": 0.0,
+          "row": 16
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "SeparateMode",
+          "priority": 6.0,
+          "rangeFt": 0.0,
+          "row": 17
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "RTBMode",
+          "priority": 10.0,
+          "rangeFt": 0.0,
+          "row": 18
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "WingyMode",
+          "priority": 1.0,
+          "rangeFt": 0.0,
+          "row": 19
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "WaypointMode",
+          "priority": 1.0,
+          "rangeFt": 0.0,
+          "row": 20
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "RoopMode",
+          "priority": 1.0,
+          "rangeFt": 0.0,
+          "row": 21
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "OverBMode",
+          "priority": 1.0,
+          "rangeFt": 0.0,
+          "row": 22
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "GroundMnvr",
+          "priority": 0.0,
+          "rangeFt": 0.0,
+          "row": 23
+        },
+        {
+          "angleDeg": 180.0,
+          "enabled": 1,
+          "label": "LastValidMode",
+          "priority": 1.0,
+          "rangeFt": 50000.0,
+          "row": 24
+        }
+      ],
+      "name": "Intercepter"
+    },
+    {
+      "modes": [
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "GroundAvoidMode",
+          "priority": 1.0,
+          "rangeFt": 0.0,
+          "row": 0
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "CollisionAvoidMode",
+          "priority": 1.0,
+          "rangeFt": 0.0,
+          "row": 1
+        },
+        {
+          "angleDeg": 180.0,
+          "enabled": 1,
+          "label": "GunsJinkMode",
+          "priority": 1.0,
+          "rangeFt": 3000.0,
+          "row": 2
+        },
+        {
+          "angleDeg": 180.0,
+          "enabled": 1,
+          "label": "MissileDefeatMode",
+          "priority": 1.0,
+          "rangeFt": 50000.0,
+          "row": 3
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "Defensive Modes - This is a tag",
+          "priority": 1.0,
+          "rangeFt": 0.0,
+          "row": 4
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "FollowOrdersMode",
+          "priority": 1.0,
+          "rangeFt": 0.0,
+          "row": 5
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 0,
+          "label": "",
+          "priority": 0.0,
+          "rangeFt": 0.0,
+          "row": 6
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 0,
+          "label": "",
+          "priority": 0.0,
+          "rangeFt": 0.0,
+          "row": 7
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 0,
+          "label": "",
+          "priority": 0.0,
+          "rangeFt": 0.0,
+          "row": 8
+        },
+        {
+          "angleDeg": 135.0,
+          "enabled": 1,
+          "label": "GunsEngageMode",
+          "priority": 1.0,
+          "rangeFt": 6000.0,
+          "row": 9
+        },
+        {
+          "angleDeg": 135.0,
+          "enabled": 1,
+          "label": "MissileEngageMode",
+          "priority": 2.0,
+          "rangeFt": 50000.0,
+          "row": 10
+        },
+        {
+          "angleDeg": 135.0,
+          "enabled": 1,
+          "label": "WVREngageMode",
+          "priority": 3.0,
+          "rangeFt": 50000.0,
+          "row": 11
+        },
+        {
+          "angleDeg": 180.0,
+          "enabled": 1,
+          "label": "",
+          "priority": 5.0,
+          "rangeFt": 90000.0,
+          "row": 12
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "AccelerateMode",
+          "priority": 1.0,
+          "rangeFt": 0.0,
+          "row": 13
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "BVREngageMode",
+          "priority": 5.0,
+          "rangeFt": 0.0,
+          "row": 14
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 0,
+          "label": "RunAwayMode",
+          "priority": 0.0,
+          "rangeFt": 0.0,
+          "row": 15
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "LoiterMode",
+          "priority": 1.0,
+          "rangeFt": 0.0,
+          "row": 16
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 0,
+          "label": "SeparateMode",
+          "priority": 0.0,
+          "rangeFt": 0.0,
+          "row": 17
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 0,
+          "label": "RTBMode",
+          "priority": 1.0,
+          "rangeFt": 0.0,
+          "row": 18
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "WingyMode",
+          "priority": 1.0,
+          "rangeFt": 0.0,
+          "row": 19
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "WaypointMode",
+          "priority": 1.0,
+          "rangeFt": 0.0,
+          "row": 20
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "RoopMode",
+          "priority": 1.0,
+          "rangeFt": 0.0,
+          "row": 21
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "OverBMode",
+          "priority": 1.0,
+          "rangeFt": 0.0,
+          "row": 22
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "GroundMnvr",
+          "priority": 0.0,
+          "rangeFt": 0.0,
+          "row": 23
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "LastValidMode",
+          "priority": 1.0,
+          "rangeFt": 0.0,
+          "row": 24
+        }
+      ],
+      "name": "Air CAP"
+    },
+    {
+      "modes": [
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "GroundAvoidMode",
+          "priority": 1.0,
+          "rangeFt": 0.0,
+          "row": 0
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "CollisionAvoidMode",
+          "priority": 1.0,
+          "rangeFt": 0.0,
+          "row": 1
+        },
+        {
+          "angleDeg": 180.0,
+          "enabled": 1,
+          "label": "GunsJinkMode",
+          "priority": 1.0,
+          "rangeFt": 3000.0,
+          "row": 2
+        },
+        {
+          "angleDeg": 180.0,
+          "enabled": 1,
+          "label": "MissileDefeatMode",
+          "priority": 1.0,
+          "rangeFt": 60000.0,
+          "row": 3
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "Defensive Modes - This is a tag",
+          "priority": 1.0,
+          "rangeFt": 0.0,
+          "row": 4
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "FollowOrdersMode",
+          "priority": 1.0,
+          "rangeFt": 0.0,
+          "row": 5
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 0,
+          "label": "",
+          "priority": 0.0,
+          "rangeFt": 0.0,
+          "row": 6
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 0,
+          "label": "",
+          "priority": 0.0,
+          "rangeFt": 0.0,
+          "row": 7
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 0,
+          "label": "",
+          "priority": 0.0,
+          "rangeFt": 0.0,
+          "row": 8
+        },
+        {
+          "angleDeg": 135.0,
+          "enabled": 1,
+          "label": "GunsEngageMode",
+          "priority": 1.0,
+          "rangeFt": 6000.0,
+          "row": 9
+        },
+        {
+          "angleDeg": 135.0,
+          "enabled": 1,
+          "label": "MissileEngageMode",
+          "priority": 3.0,
+          "rangeFt": 50000.0,
+          "row": 10
+        },
+        {
+          "angleDeg": 180.0,
+          "enabled": 1,
+          "label": "WVREngageMode",
+          "priority": 3.0,
+          "rangeFt": 60000.0,
+          "row": 11
+        },
+        {
+          "angleDeg": 180.0,
+          "enabled": 1,
+          "label": "",
+          "priority": 5.0,
+          "rangeFt": 90000.0,
+          "row": 12
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "AccelerateMode",
+          "priority": 1.0,
+          "rangeFt": 0.0,
+          "row": 13
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "BVREngageMode",
+          "priority": 5.0,
+          "rangeFt": 0.0,
+          "row": 14
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 0,
+          "label": "RunAwayMode",
+          "priority": 0.0,
+          "rangeFt": 0.0,
+          "row": 15
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "LoiterMode",
+          "priority": 1.0,
+          "rangeFt": 0.0,
+          "row": 16
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "SeparateMode",
+          "priority": 1.0,
+          "rangeFt": 0.0,
+          "row": 17
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "RTBMode",
+          "priority": 1.0,
+          "rangeFt": 0.0,
+          "row": 18
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "WingyMode",
+          "priority": 1.0,
+          "rangeFt": 0.0,
+          "row": 19
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "WaypointMode",
+          "priority": 1.0,
+          "rangeFt": 0.0,
+          "row": 20
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "RoopMode",
+          "priority": 1.0,
+          "rangeFt": 0.0,
+          "row": 21
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "OverBMode",
+          "priority": 1.0,
+          "rangeFt": 0.0,
+          "row": 22
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "GroundMnvr",
+          "priority": 0.0,
+          "rangeFt": 0.0,
+          "row": 23
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "LastValidMode",
+          "priority": 1.0,
+          "rangeFt": 0.0,
+          "row": 24
+        }
+      ],
+      "name": "Air Sweep"
+    },
+    {
+      "modes": [
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "GroundAvoidMode",
+          "priority": 1.0,
+          "rangeFt": 0.0,
+          "row": 0
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "CollisionAvoidMode",
+          "priority": 1.0,
+          "rangeFt": 0.0,
+          "row": 1
+        },
+        {
+          "angleDeg": 180.0,
+          "enabled": 1,
+          "label": "GunsJinkMode",
+          "priority": 1.0,
+          "rangeFt": 6000.0,
+          "row": 2
+        },
+        {
+          "angleDeg": 180.0,
+          "enabled": 1,
+          "label": "MissileDefeatMode",
+          "priority": 1.0,
+          "rangeFt": 60000.0,
+          "row": 3
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "Defensive Modes - This is a tag",
+          "priority": 0.0,
+          "rangeFt": 0.0,
+          "row": 4
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "FollowOrdersMode",
+          "priority": 0.0,
+          "rangeFt": 0.0,
+          "row": 5
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 0,
+          "label": "",
+          "priority": 0.0,
+          "rangeFt": 0.0,
+          "row": 6
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 0,
+          "label": "",
+          "priority": 0.0,
+          "rangeFt": 0.0,
+          "row": 7
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 0,
+          "label": "",
+          "priority": 0.0,
+          "rangeFt": 0.0,
+          "row": 8
+        },
+        {
+          "angleDeg": 135.0,
+          "enabled": 1,
+          "label": "GunsEngageMode",
+          "priority": 1.0,
+          "rangeFt": 6000.0,
+          "row": 9
+        },
+        {
+          "angleDeg": 135.0,
+          "enabled": 1,
+          "label": "MissileEngageMode",
+          "priority": 2.0,
+          "rangeFt": 60000.0,
+          "row": 10
+        },
+        {
+          "angleDeg": 180.0,
+          "enabled": 1,
+          "label": "WVREngageMode",
+          "priority": 3.0,
+          "rangeFt": 50000.0,
+          "row": 11
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 0,
+          "label": "",
+          "priority": 0.0,
+          "rangeFt": 0.0,
+          "row": 12
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "AccelerateMode",
+          "priority": 1.0,
+          "rangeFt": 0.0,
+          "row": 13
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "BVREngageMode",
+          "priority": 5.0,
+          "rangeFt": 0.0,
+          "row": 14
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 0,
+          "label": "RunAwayMode",
+          "priority": 1.0,
+          "rangeFt": 0.0,
+          "row": 15
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 0,
+          "label": "LoiterMode",
+          "priority": 1.0,
+          "rangeFt": 0.0,
+          "row": 16
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "SeparateMode",
+          "priority": 1.0,
+          "rangeFt": 0.0,
+          "row": 17
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 0,
+          "label": "RTBMode",
+          "priority": 1.0,
+          "rangeFt": 0.0,
+          "row": 18
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "WingyMode",
+          "priority": 1.0,
+          "rangeFt": 0.0,
+          "row": 19
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "WaypointMode",
+          "priority": 1.0,
+          "rangeFt": 0.0,
+          "row": 20
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "RoopMode",
+          "priority": 1.0,
+          "rangeFt": 0.0,
+          "row": 21
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "OverBMode",
+          "priority": 1.0,
+          "rangeFt": 0.0,
+          "row": 22
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "GroundMnvr",
+          "priority": 0.0,
+          "rangeFt": 0.0,
+          "row": 23
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "LastValidMode",
+          "priority": 1.0,
+          "rangeFt": 0.0,
+          "row": 24
+        }
+      ],
+      "name": "Escort"
+    },
+    {
+      "modes": [
+        {
+          "angleDeg": 180.0,
+          "enabled": 1,
+          "label": "GroundAvoidMode",
+          "priority": 1.0,
+          "rangeFt": 50000.0,
+          "row": 0
+        },
+        {
+          "angleDeg": 180.0,
+          "enabled": 1,
+          "label": "CollisionAvoidMode",
+          "priority": 1.0,
+          "rangeFt": 50000.0,
+          "row": 1
+        },
+        {
+          "angleDeg": 180.0,
+          "enabled": 1,
+          "label": "GunsJinkMode",
+          "priority": 1.0,
+          "rangeFt": 50000.0,
+          "row": 2
+        },
+        {
+          "angleDeg": 180.0,
+          "enabled": 1,
+          "label": "MissileDefeatMode",
+          "priority": 1.0,
+          "rangeFt": 50000.0,
+          "row": 3
+        },
+        {
+          "angleDeg": 180.0,
+          "enabled": 1,
+          "label": "Defensive Modes - This is a tag",
+          "priority": 1.0,
+          "rangeFt": 50000.0,
+          "row": 4
+        },
+        {
+          "angleDeg": 180.0,
+          "enabled": 1,
+          "label": "FollowOrdersMode",
+          "priority": 1.0,
+          "rangeFt": 50000.0,
+          "row": 5
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 0,
+          "label": "",
+          "priority": 0.0,
+          "rangeFt": 0.0,
+          "row": 6
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 0,
+          "label": "",
+          "priority": 0.0,
+          "rangeFt": 0.0,
+          "row": 7
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 0,
+          "label": "",
+          "priority": 0.0,
+          "rangeFt": 0.0,
+          "row": 8
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 0,
+          "label": "GunsEngageMode",
+          "priority": 0.0,
+          "rangeFt": 0.0,
+          "row": 9
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 0,
+          "label": "MissileEngageMode",
+          "priority": 0.0,
+          "rangeFt": 0.0,
+          "row": 10
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 0,
+          "label": "WVREngageMode",
+          "priority": 0.0,
+          "rangeFt": 0.0,
+          "row": 11
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 0,
+          "label": "",
+          "priority": 0.0,
+          "rangeFt": 0.0,
+          "row": 12
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 0,
+          "label": "AccelerateMode",
+          "priority": 0.0,
+          "rangeFt": 0.0,
+          "row": 13
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 0,
+          "label": "BVREngageMode",
+          "priority": 0.0,
+          "rangeFt": 0.0,
+          "row": 14
+        },
+        {
+          "angleDeg": 180.0,
+          "enabled": 1,
+          "label": "RunAwayMode",
+          "priority": 1.0,
+          "rangeFt": 50000.0,
+          "row": 15
+        },
+        {
+          "angleDeg": 180.0,
+          "enabled": 1,
+          "label": "LoiterMode",
+          "priority": 1.0,
+          "rangeFt": 50000.0,
+          "row": 16
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 0,
+          "label": "SeparateMode",
+          "priority": 0.0,
+          "rangeFt": 0.0,
+          "row": 17
+        },
+        {
+          "angleDeg": 180.0,
+          "enabled": 1,
+          "label": "RTBMode",
+          "priority": 1.0,
+          "rangeFt": 50000.0,
+          "row": 18
+        },
+        {
+          "angleDeg": 180.0,
+          "enabled": 1,
+          "label": "WingyMode",
+          "priority": 1.0,
+          "rangeFt": 50000.0,
+          "row": 19
+        },
+        {
+          "angleDeg": 180.0,
+          "enabled": 1,
+          "label": "WaypointMode",
+          "priority": 1.0,
+          "rangeFt": 50000.0,
+          "row": 20
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 0,
+          "label": "RoopMode",
+          "priority": 0.0,
+          "rangeFt": 0.0,
+          "row": 21
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 0,
+          "label": "OverBMode",
+          "priority": 0.0,
+          "rangeFt": 0.0,
+          "row": 22
+        },
+        {
+          "angleDeg": 0.0,
+          "enabled": 1,
+          "label": "GroundMnvr",
+          "priority": 0.0,
+          "rangeFt": 0.0,
+          "row": 23
+        },
+        {
+          "angleDeg": 180.0,
+          "enabled": 1,
+          "label": "LastValidMode",
+          "priority": 1.0,
+          "rangeFt": 50000.0,
+          "row": 24
+        }
+      ],
+      "name": "Waypointer"
+    }
+  ],
+  "kind": "f4.braindata",
+  "version": 1
+}

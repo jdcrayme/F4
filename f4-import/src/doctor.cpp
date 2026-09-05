@@ -294,6 +294,11 @@ void check_d8_id_and_files(const std::filesystem::path& data_dir,
                             DoctorReport& out) {
     std::unordered_set<std::string> seen_lower;
     for (const auto& a : manifest.assets) {
+        // Provenance-only entries (no "id" in the JSON — e.g.
+        // generate_manifest.py fingerprints) share an empty id string;
+        // they have no identity to collide. The case-collision check is
+        // about f4 asset ids differing only by case.
+        if (!a.id.valid()) continue;
         std::string key = to_lower(a.id.to_string());
         if (seen_lower.count(key)) {
             add_finding(out, "D8", a.id.to_string(),
@@ -332,6 +337,12 @@ void check_d8_id_and_files(const std::filesystem::path& data_dir,
         }
     }
     static const char* kScanSubdirs[] = {"Models", "Theater", "World", "Classes"};
+    // Directories the manifest declares as intentionally unlisted (e.g.
+    // Models while it is a local-only, gitignored export) are not noise.
+    std::set<std::string> excluded_dirs;
+    for (const auto& d : manifest.excluded_dirs) {
+        excluded_dirs.insert(to_lower(d));
+    }
     for (const char* sub : kScanSubdirs) {
         auto sub_dir = data_dir / sub;
         std::error_code ec2;
@@ -344,6 +355,12 @@ void check_d8_id_and_files(const std::filesystem::path& data_dir,
             if (ec2) continue;
             std::string rels = rel.string();
             for (char& c : rels) if (c == '\\') c = '/';
+            if (!excluded_dirs.empty()) {
+                const std::size_t slash = rels.find('/');
+                const std::string top = to_lower(
+                    slash == std::string::npos ? rels : rels.substr(0, slash));
+                if (excluded_dirs.count(top) != 0) continue;
+            }
             std::string low = to_lower(rels);
             if (manifest_paths.count(low) == 0) {
                 std::string ext = it->path().extension().string();
@@ -379,7 +396,16 @@ void check_d9_manifest_consistency(const std::filesystem::path& data_dir,
         add_finding(out, "D9", "", "manifest.json missing on disk");
     }
     for (const auto& a : manifest.assets) {
-        if (!a.id.valid()) {
+        // An entry whose id is absent (unknown family + empty local id —
+        // the reader only fills the id when the JSON carries an "id" key)
+        // is a provenance-only entry, e.g. generate_manifest.py's
+        // fingerprint records for the committed JSON subset. That is
+        // legitimate; only entries that CARRIED an id and are still
+        // invalid are a schema error.
+        const bool carries_id =
+            a.id.family != f4::assets::AssetFamily::unknown ||
+            !a.id.local_id.empty();
+        if (!a.id.valid() && carries_id) {
             add_finding(out, "D9", "",
                 "manifest contains an asset entry with invalid id");
         }

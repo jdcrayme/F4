@@ -23,6 +23,9 @@ add_library(f4-import STATIC
     src/doctor.cpp
     src/manifest_writer.cpp
     src/gltf_emitter.cpp
+    src/texture_png.cpp
+    # The single TU instantiating the vendored stb_image_write (PNG encode).
+    src/stb_image_write_impl.cpp
 )
 target_link_libraries(f4-import PUBLIC f4_warnings f4-assets f4-json)
 target_link_libraries(f4-import PRIVATE f4-models f4-gltf)
@@ -31,6 +34,8 @@ target_include_directories(f4-import
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>
+    PRIVATE
+        ${CMAKE_SOURCE_DIR}/third_party/stb
 )
 
 # CLI tool

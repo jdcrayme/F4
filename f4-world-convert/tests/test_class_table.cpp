@@ -13,8 +13,10 @@
 
 #include <gtest/gtest.h>
 #include <f4/world_convert/class_table.hpp>
+#include <f4/json/writer.hpp>
 
 #include <filesystem>
+#include <fstream>
 
 using namespace f4::world_convert;
 
@@ -135,4 +137,103 @@ TEST(ClassTable, VisTypeArrayHasNonZeroEntriesForMostRecords) {
         if (ct.vis_type_for(et, 0) != 0) ++non_zero;
     }
     EXPECT_GE(non_zero, 500);
+}
+
+// ============================================================================
+// Tranche 0a.1 (NO_BINARY_RUNTIME_PLAN.md): ClassTable::load_json round-trip.
+// ct2json produces falcon4.ct.json from FALCON4.ct; load_json reads it back.
+// The two ClassTable instances must be identical — behavior-preserving.
+// ============================================================================
+TEST(ClassTable, LoadJsonRoundTripsIdenticalToBinaryLoad) {
+    // Load the binary form (the source of truth).
+    ClassTable ct_bin;
+    ct_bin.load(FIXTURE_DIR "FALCON4.ct");
+    ASSERT_TRUE(ct_bin.loaded());
+    const auto n = ct_bin.size();
+    ASSERT_GT(n, 0u);
+
+    // Write the JSON form to a temp file via the ct2json library path.
+    // (We don't shell out to the CLI in a unit test; we emit the JSON
+    // inline using the same writer pattern, then load_json it back.)
+    f4::json::Writer w;
+    w.raw("{\n");
+    w.string("format"); w.raw(":"); w.string("f4-class-table"); w.raw(",\n");
+    w.string("version"); w.raw(":"); w.number(1); w.raw(",\n");
+    w.string("source"); w.raw(":"); w.string("FALCON4.ct"); w.raw(",\n");
+    w.string("source_fingerprint"); w.raw(":"); w.string("test"); w.raw(",\n");
+    w.string("first_entity_type"); w.raw(":"); w.number(100); w.raw(",\n");
+    w.number_key("count", static_cast<std::uint64_t>(n)); w.raw(",\n");
+    w.string("entries"); w.raw(": [\n");
+    for (std::size_t i = 0; i < n; ++i) {
+        const auto* e = ct_bin.lookup(static_cast<uint16_t>(100 + i));
+        ASSERT_NE(e, nullptr);
+        w.raw("  {");
+        w.number_key("entity_type", static_cast<int>(100 + i)); w.raw(", ");
+        w.number_key("domain", static_cast<int>(e->domain)); w.raw(", ");
+        w.number_key("cls", static_cast<int>(e->cls)); w.raw(", ");
+        w.number_key("type", static_cast<int>(e->type)); w.raw(", ");
+        w.number_key("stype", static_cast<int>(e->stype)); w.raw(", ");
+        w.raw("\"vis_type\": [");
+        for (int v = 0; v < 7; ++v) {
+            if (v) w.raw(", ");
+            w.number(static_cast<int>(e->vis_type[v]));
+        }
+        w.raw("], ");
+        w.number_key("data_type", static_cast<int>(e->data_type)); w.raw(", ");
+        w.number_key("data_ptr_index", static_cast<uint32_t>(e->data_ptr_index));
+        w.raw("}");
+        if (i + 1 < n) w.raw(",");
+        w.raw("\n");
+    }
+    w.raw("]\n}\n");
+
+    const auto tmp = std::filesystem::temp_directory_path() / "f4_ct_roundtrip.json";
+    {
+        std::ofstream f(tmp, std::ios::binary);
+        f << w.str();
+    }
+
+    // Load the JSON form back.
+    ClassTable ct_json;
+    ct_json.load_json(tmp);
+    ASSERT_TRUE(ct_json.loaded());
+    ASSERT_EQ(ct_json.size(), n);
+
+    // Every entry must match.
+    for (std::size_t i = 0; i < n; ++i) {
+        const auto et = static_cast<uint16_t>(100 + i);
+        const auto* a = ct_bin.lookup(et);
+        const auto* b = ct_json.lookup(et);
+        ASSERT_NE(a, nullptr) << "binary lookup failed at index " << i;
+        ASSERT_NE(b, nullptr) << "json lookup failed at index " << i;
+        EXPECT_EQ(a->domain, b->domain) << "domain mismatch at entity_type " << et;
+        EXPECT_EQ(a->cls, b->cls) << "cls mismatch at entity_type " << et;
+        EXPECT_EQ(a->type, b->type) << "type mismatch at entity_type " << et;
+        EXPECT_EQ(a->stype, b->stype) << "stype mismatch at entity_type " << et;
+        EXPECT_EQ(a->data_type, b->data_type) << "data_type mismatch at entity_type " << et;
+        EXPECT_EQ(a->data_ptr_index, b->data_ptr_index) << "data_ptr_index mismatch at entity_type " << et;
+        for (int v = 0; v < 7; ++v) {
+            EXPECT_EQ(a->vis_type[v], b->vis_type[v])
+                << "vis_type[" << v << "] mismatch at entity_type " << et;
+        }
+    }
+
+    // The derived lookups must also match (they read the same fields).
+    for (std::size_t i = 0; i < n; ++i) {
+        const auto et = static_cast<uint16_t>(100 + i);
+        EXPECT_EQ(ct_bin.objective_type_for(et), ct_json.objective_type_for(et));
+        EXPECT_EQ(ct_bin.unit_subtype_for(et), ct_json.unit_subtype_for(et));
+        EXPECT_EQ(ct_bin.vis_type_for(et, 0), ct_json.vis_type_for(et, 0));
+        uint8_t dt_bin = 0, dt_json = 0;
+        uint32_t dp_bin = 0, dp_json = 0;
+        const bool has_bin = ct_bin.data_ptr_for(et, dt_bin, dp_bin);
+        const bool has_json = ct_json.data_ptr_for(et, dt_json, dp_json);
+        EXPECT_EQ(has_bin, has_json) << "data_ptr_for presence differs at entity_type " << et;
+        if (has_bin) {
+            EXPECT_EQ(dt_bin, dt_json) << "data_type mismatch at entity_type " << et;
+            EXPECT_EQ(dp_bin, dp_json) << "data_ptr_index mismatch at entity_type " << et;
+        }
+    }
+
+    std::filesystem::remove(tmp);
 }

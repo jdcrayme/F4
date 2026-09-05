@@ -448,6 +448,11 @@ private:
     double runway_heading_rad_{0.0};
     geo::WorldPosition threshold_position_;
     double threshold_alt_ft_{0.0};
+    // Tranche A2: runway dimensions for the lateral bounds guard. Zero =
+    // unknown (clearance carried no width — the guard is disabled, the
+    // pre-A2 behavior). Populated from LandingClearance on initialize().
+    double runway_width_ft_{0.0};
+    double runway_length_ft_{0.0};
     double glide_slope_angle_rad_{3.0 * 3.14159265358979 / 180.0};
     double pattern_altitude_ft_{2500.0};
     bool cleared_to_land_{false};

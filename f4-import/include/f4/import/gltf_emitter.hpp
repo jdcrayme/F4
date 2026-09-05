@@ -16,6 +16,11 @@
 //     are not lost").
 //   - LOD chains: each LOD level becomes a sibling mesh node tagged
 //     lod:N.
+//   - Materials: one primitive per source mesh (already grouped per
+//     texture/kind), with TEXCOORD_0/COLOR_0 accessors and materials
+//     referencing textures/NNNNN.png — written by the `f4import
+//     textures` step. Until that step runs the image URIs dangle (and
+//     viewers show flat colors), but the geometry is always complete.
 //   - Coordinate conversion: Falcon model space is feet, +Z up; glTF
 //     is meters, +Y up. The transform is baked at export.
 //
@@ -59,11 +64,16 @@ struct GltfEmitResult {
     std::filesystem::path gltf_path;   // the .gltf file
     std::filesystem::path bin_path;    // the .bin file (external buffer)
     std::size_t total_vertices = 0;    // across all LODs
-    std::size_t total_triangles = 0;  // across all LODs
+    std::size_t total_triangles = 0;  // triangle count across all LODs
+                                      // (lines/points are not triangles)
     std::size_t lod_count = 0;        // number of LOD levels emitted
     std::size_t dof_count = 0;        // number of DOF nodes tagged
     std::size_t switch_count = 0;     // number of switch nodes tagged
     std::size_t slot_count = 0;       // number of slot nodes tagged
+    std::size_t primitive_count = 0;  // glTF primitives across all LODs
+                                      // (one per textured/colored source mesh)
+    std::size_t material_count = 0;   // materials emitted (incl. vertexcolor)
+    std::size_t texture_count = 0;    // materials referencing a texture image
 };
 
 /// Emit a single KoreaObj model as a .gltf + .bin file pair.

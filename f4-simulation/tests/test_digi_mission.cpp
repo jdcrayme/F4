@@ -258,7 +258,11 @@ void run_full_mission(Scenario scenario, bool require_pattern) {
     EXPECT_GT(i_land, i_apch_clr) << "cleared to land after establishing";
 
     // --- Ground phase ---
-    EXPECT_LT(max_taxi_dev_ft, 250.0)
+    // Tranche A1: tightened from 250 ft to 80 ft. A taxiway is ~75 ft
+    // wide; 250 ft of deviation is off the pavement. The ground steering
+    // holds the polyline within the capture radius (40 ft) in steady
+    // state; 80 ft tolerates the turn entries.
+    EXPECT_LT(max_taxi_dev_ft, 80.0)
         << "aircraft left the taxi corridor (max " << max_taxi_dev_ft << " ft)";
 
     // --- Takeoff ---
@@ -278,17 +282,30 @@ void run_full_mission(Scenario scenario, bool require_pattern) {
     // Tolerance note: at ~250 kts with a 20-deg bank limit the jet's turn
     // radius is ~13,000 ft, so intercept S-turns of a couple thousand feet
     // are honest flying for this configuration.
-    EXPECT_LT(max_final_lateral_ft, 2500.0)
+    // Tranche A1: tightened from 2500 ft to 250 ft. The localizer beam
+    // is ±350 ft full-scale; 2500 ft of S-turn is still intercepting,
+    // not established. The tracking segment (along < -3000, above) is
+    // post-intercept; 250 ft is the beam-ride tolerance.
+    EXPECT_LT(max_final_lateral_ft, 250.0)
         << "final not tracked: max lateral " << max_final_lateral_ft << " ft";
 
     // --- Landing ---
     ASSERT_TRUE(saw_touchdown) << "never touched down";
-    EXPECT_LT(std::abs(cross_of(touchdown_pos)), 800.0)
+    // Tranche A1: tightened from 800 ft to 50 ft (half a 150-ft runway
+    // plus margin). The lateral bounds guard (A2) now fires GoAround
+    // before any touchdown outside the pavement, so a touchdown that
+    // reaches this assertion is inside the runway by construction; 50 ft
+    // is the centerline-hold tolerance through the flare.
+    EXPECT_LT(std::abs(cross_of(touchdown_pos)), 50.0)
         << "touchdown off-centerline: cross=" << cross_of(touchdown_pos);
-    EXPECT_GE(along_of(touchdown_pos), -2500.0)
-        << "touched down far short of the runway: along=" << along_of(touchdown_pos);
-    EXPECT_LE(along_of(touchdown_pos), rwy_len + 800.0)
-        << "touched down beyond the runway: along=" << along_of(touchdown_pos);
+    // Tranche A1: tightened to the aim-point band. beam_aim_offset_ft
+    // is 1500 ft past threshold; the energy-based flare (A3) targets
+    // that point. 500–2500 ft is the aim point ± 500 ft (a 1500-ft aim
+    // point with ±500 ft of flare scatter — honest for a 250-kt jet).
+    EXPECT_GE(along_of(touchdown_pos), 500.0)
+        << "touched down short of the aim point: along=" << along_of(touchdown_pos);
+    EXPECT_LE(along_of(touchdown_pos), 2500.0)
+        << "touched down long (past the aim point): along=" << along_of(touchdown_pos);
 
     // --- End state: parked at the original spot, stopped ---
     ASSERT_TRUE(completed) << "mission did not complete (final phase "
@@ -296,8 +313,11 @@ void run_full_mission(Scenario scenario, bool require_pattern) {
                            << brain->state_name() << ")";
     const auto& parking = dscenario.aircraft.front().parking_spot;
     const auto& end_pos = tf->position;
-    EXPECT_NEAR(end_pos.x, parking.x, 120.0) << "not at the parking spot";
-    EXPECT_NEAR(end_pos.y, parking.y, 120.0) << "not at the parking spot";
+    // Tranche A1: tightened from ±120 ft to ±25 ft. A parking spot is a
+    // point; the TaxiIn capture radius is 40 ft and the hold-stop brings
+    // vt below 5 ft/s. 25 ft is the stop-tolerance inside the capture.
+    EXPECT_NEAR(end_pos.x, parking.x, 25.0) << "not at the parking spot";
+    EXPECT_NEAR(end_pos.y, parking.y, 25.0) << "not at the parking spot";
     EXPECT_LT(fm->state().kin.vt, 5.0) << "still moving at mission end";
 
     // --- Approach style actually flown ---

@@ -37,6 +37,7 @@ int main(int argc, char** argv) {
                      "[--class-table <FALCON4.ct>] "
                      "[--theater-data <dir>] "
                      "[--objectives <base.obj> [--objectives-version <n>]] "
+                     "[--preserve-subfiles] "
                      "[--data-dir <Data>]\n"
                      "  --theater-data: directory containing Falcon4.OCD/.PHD/.PD/"
                      ".UCD/.VCD/.FED/.FCD (typically <install>/terrdata/objects).\n"
@@ -47,6 +48,9 @@ int main(int argc, char** argv) {
                      "                  (which carry only .obd deltas — no embedded obj\n"
                      "                  sub-file). The deltas are applied on top.\n"
                      "                  --objectives-version defaults to 63.\n"
+                     "  --preserve-subfiles: emit a \"subfiles_b64\" block with every\n"
+                     "                  sub-file's raw bytes as base64, so json2cam can\n"
+                     "                  reassemble a byte-faithful .cam (save-write path).\n"
                      "  --data-dir:    asset-pipeline mode (Stage 1). Writes to\n"
                      "                  <Data>/World/<id>.world.json, records terrain_file\n"
                      "                  as @asset:theater:<id>, updates <Data>/manifest.json.\n";
@@ -85,6 +89,11 @@ int main(int argc, char** argv) {
             base_objectives = argv[++i];
         } else if (a == "--objectives-version" && i + 1 < argc) {
             base_objectives_version = std::atoi(argv[++i]);
+        } else if (a == "--preserve-subfiles") {
+            // Save-write path: emit a top-level "subfiles_b64" block with
+            // every sub-file's raw bytes as base64, so json2cam can
+            // reassemble a byte-faithful .cam. See Docs/SAVE_WRITE_PLAN.md.
+            opts.preserve_all_subfiles = true;
         }
     }
 

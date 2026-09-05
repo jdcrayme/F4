@@ -1,0 +1,2228 @@
+{
+  "entries": [
+    {
+      "definition": null,
+      "file": "unused",
+      "name": "unused",
+      "type": -1,
+      "type_name": "Unused"
+    },
+    {
+      "definition": {
+        "ai_sensors": [
+          {
+            "index": 0,
+            "type": 3
+          },
+          {
+            "index": 0,
+            "type": 1
+          },
+          {
+            "index": 0,
+            "type": 2
+          }
+        ],
+        "airframe_index": 4,
+        "combat_class": 4,
+        "combat_class_name": "F16",
+        "player_sensors": [
+          {
+            "index": 0,
+            "type": 3
+          },
+          {
+            "index": 0,
+            "type": 1
+          },
+          {
+            "index": 0,
+            "type": 0
+          },
+          {
+            "index": 0,
+            "type": 2
+          }
+        ]
+      },
+      "file": "Sim\\VehDef\\f16.veh",
+      "name": "f16",
+      "type": 0,
+      "type_name": "Aircraft"
+    },
+    {
+      "definition": {
+        "ai_sensors": [
+          {
+            "index": 0,
+            "type": 3
+          },
+          {
+            "index": 0,
+            "type": 2
+          }
+        ],
+        "airframe_index": 9,
+        "combat_class": 8,
+        "combat_class_name": "Bomber",
+        "player_sensors": [
+          {
+            "index": 0,
+            "type": 3
+          },
+          {
+            "index": 0,
+            "type": 1
+          },
+          {
+            "index": 0,
+            "type": 0
+          },
+          {
+            "index": 0,
+            "type": 2
+          }
+        ]
+      },
+      "file": "Sim\\VehDef\\b52.veh",
+      "name": "b52",
+      "type": 0,
+      "type_name": "Aircraft"
+    },
+    {
+      "definition": {
+        "sensors": [
+          {
+            "index": 0,
+            "type": 3
+          },
+          {
+            "index": 0,
+            "type": 1
+          }
+        ]
+      },
+      "file": "Sim\\VehDef\\tank.veh",
+      "name": "tank",
+      "type": 1,
+      "type_name": "Ground"
+    },
+    {
+      "definition": {
+        "airframe_index": 0,
+        "sensors": [
+          {
+            "index": 0,
+            "type": 3
+          }
+        ]
+      },
+      "file": "Sim\\VehDef\\helo.veh",
+      "name": "helo",
+      "type": 2,
+      "type_name": "Helicopter"
+    },
+    {
+      "definition": {
+        "sensors": [
+          {
+            "index": 0,
+            "type": 3
+          }
+        ]
+      },
+      "file": "Sim\\VehDef\\truck.veh",
+      "name": "truck",
+      "type": 1,
+      "type_name": "Ground"
+    },
+    {
+      "definition": {
+        "area": 0.2,
+        "cd": 0.01,
+        "data_idx": 0,
+        "domain": 1,
+        "flags": 0,
+        "mnemonic": "A-9LP",
+        "weapon_class": 0,
+        "weapon_class_name": "wcAimWpn",
+        "weapon_type": 1,
+        "weapon_type_name": "wtAim9",
+        "weight": 125.0,
+        "x_ejection": 0.0,
+        "y_ejection": 0.0,
+        "z_ejection": 0.0
+      },
+      "file": "Sim\\VehDef\\missile.veh",
+      "name": "missile",
+      "type": 3,
+      "type_name": "Weapon"
+    },
+    {
+      "definition": {
+        "area": 0.3,
+        "cd": 0.02,
+        "data_idx": 7,
+        "domain": 2,
+        "flags": 0,
+        "mnemonic": "RCKT",
+        "weapon_class": 1,
+        "weapon_class_name": "wcRocketWpn",
+        "weapon_type": 9,
+        "weapon_type_name": "wtLAU",
+        "weight": 0.9,
+        "x_ejection": 2000.0,
+        "y_ejection": 0.0,
+        "z_ejection": 0.0
+      },
+      "file": "Sim\\VehDef\\Rcktxxx.veh",
+      "name": "rcktxxx",
+      "type": 3,
+      "type_name": "Weapon"
+    },
+    {
+      "definition": {
+        "area": 2.0,
+        "cd": 0.2,
+        "data_idx": 0,
+        "domain": 2,
+        "flags": 1,
+        "mnemonic": "MK82",
+        "weapon_class": 2,
+        "weapon_class_name": "wcBombWpn",
+        "weapon_type": 6,
+        "weapon_type_name": "wtMk84",
+        "weight": 500.0,
+        "x_ejection": 0.0,
+        "y_ejection": 0.0,
+        "z_ejection": 0.0
+      },
+      "file": "Sim\\VehDef\\bomb.veh",
+      "name": "bomb",
+      "type": 3,
+      "type_name": "Weapon"
+    },
+    {
+      "definition": null,
+      "file": "Sim\\VehDef\\ship.veh",
+      "name": "ship",
+      "type": 4,
+      "type_name": "Sea"
+    },
+    {
+      "definition": null,
+      "file": "Sim\\VehDef\\sub.veh",
+      "name": "sub",
+      "type": 4,
+      "type_name": "Sea"
+    },
+    {
+      "definition": null,
+      "file": "Sim\\VehDef\\torpedo.veh",
+      "name": "torpedo",
+      "type": 4,
+      "type_name": "Sea"
+    },
+    {
+      "definition": null,
+      "file": "Sim\\VehDef\\dpthchrg,veh",
+      "name": "dpthchrg,veh",
+      "type": 4,
+      "type_name": "Sea"
+    },
+    {
+      "definition": {
+        "sensors": [
+          {
+            "index": 0,
+            "type": 3
+          }
+        ]
+      },
+      "file": "Sim\\VehDef\\foot.veh",
+      "name": "foot",
+      "type": 1,
+      "type_name": "Ground"
+    },
+    {
+      "definition": {
+        "area": 0.3,
+        "cd": 0.02,
+        "data_idx": 0,
+        "domain": 3,
+        "flags": 0,
+        "mnemonic": "20MM",
+        "weapon_class": 3,
+        "weapon_class_name": "wcGunWpn",
+        "weapon_type": 0,
+        "weapon_type_name": "wtGuns",
+        "weight": 0.9,
+        "x_ejection": 3000.0,
+        "y_ejection": 0.0,
+        "z_ejection": 0.0
+      },
+      "file": "Sim\\VehDef\\20mm.veh",
+      "name": "20mm",
+      "type": 3,
+      "type_name": "Weapon"
+    },
+    {
+      "definition": {
+        "area": 0.3,
+        "cd": 0.02,
+        "data_idx": 4,
+        "domain": 2,
+        "flags": 2,
+        "mnemonic": "AG45",
+        "weapon_class": 7,
+        "weapon_class_name": "wcHARMWpn",
+        "weapon_type": 3,
+        "weapon_type_name": "wtAgm88",
+        "weight": 125.0,
+        "x_ejection": 0.0,
+        "y_ejection": 0.0,
+        "z_ejection": 0.0
+      },
+      "file": "Sim\\VehDef\\AGM45.veh",
+      "name": "agm45",
+      "type": 3,
+      "type_name": "Weapon"
+    },
+    {
+      "definition": {
+        "area": 0.4,
+        "cd": 0.02,
+        "data_idx": 3,
+        "domain": 2,
+        "flags": 2,
+        "mnemonic": "AG65A",
+        "weapon_class": 6,
+        "weapon_class_name": "wcAgmWpn",
+        "weapon_type": 4,
+        "weapon_type_name": "wtAgm65",
+        "weight": 225.0,
+        "x_ejection": 0.0,
+        "y_ejection": 0.0,
+        "z_ejection": 0.0
+      },
+      "file": "Sim\\VehDef\\AGM65a.veh",
+      "name": "agm65a",
+      "type": 3,
+      "type_name": "Weapon"
+    },
+    {
+      "definition": {
+        "area": 0.4,
+        "cd": 0.02,
+        "data_idx": 2,
+        "domain": 2,
+        "flags": 2,
+        "mnemonic": "AG65B",
+        "weapon_class": 6,
+        "weapon_class_name": "wcAgmWpn",
+        "weapon_type": 4,
+        "weapon_type_name": "wtAgm65",
+        "weight": 225.0,
+        "x_ejection": 0.0,
+        "y_ejection": 0.0,
+        "z_ejection": 0.0
+      },
+      "file": "Sim\\VehDef\\AGM65b.veh",
+      "name": "agm65b",
+      "type": 3,
+      "type_name": "Weapon"
+    },
+    {
+      "definition": {
+        "area": 0.4,
+        "cd": 0.02,
+        "data_idx": 3,
+        "domain": 2,
+        "flags": 2,
+        "mnemonic": "AG65D",
+        "weapon_class": 6,
+        "weapon_class_name": "wcAgmWpn",
+        "weapon_type": 4,
+        "weapon_type_name": "wtAgm65",
+        "weight": 225.0,
+        "x_ejection": 0.0,
+        "y_ejection": 0.0,
+        "z_ejection": 0.0
+      },
+      "file": "Sim\\VehDef\\AGM65d.veh",
+      "name": "agm65d",
+      "type": 3,
+      "type_name": "Weapon"
+    },
+    {
+      "definition": {
+        "area": 0.4,
+        "cd": 0.02,
+        "data_idx": 2,
+        "domain": 2,
+        "flags": 2,
+        "mnemonic": "AG65G",
+        "weapon_class": 6,
+        "weapon_class_name": "wcAgmWpn",
+        "weapon_type": 4,
+        "weapon_type_name": "wtAgm65",
+        "weight": 225.0,
+        "x_ejection": 0.0,
+        "y_ejection": 0.0,
+        "z_ejection": 0.0
+      },
+      "file": "Sim\\VehDef\\AGM65g.veh",
+      "name": "agm65g",
+      "type": 3,
+      "type_name": "Weapon"
+    },
+    {
+      "definition": {
+        "area": 0.3,
+        "cd": 0.02,
+        "data_idx": 5,
+        "domain": 2,
+        "flags": 2,
+        "mnemonic": "AG88",
+        "weapon_class": 7,
+        "weapon_class_name": "wcHARMWpn",
+        "weapon_type": 3,
+        "weapon_type_name": "wtAgm88",
+        "weight": 125.0,
+        "x_ejection": 0.0,
+        "y_ejection": 0.0,
+        "z_ejection": 0.0
+      },
+      "file": "Sim\\VehDef\\AGM88.veh",
+      "name": "agm88",
+      "type": 3,
+      "type_name": "Weapon"
+    },
+    {
+      "definition": {
+        "area": 0.2,
+        "cd": 0.01,
+        "data_idx": 0,
+        "domain": 1,
+        "flags": 0,
+        "mnemonic": "A-9P",
+        "weapon_class": 0,
+        "weapon_class_name": "wcAimWpn",
+        "weapon_type": 1,
+        "weapon_type_name": "wtAim9",
+        "weight": 125.0,
+        "x_ejection": 0.0,
+        "y_ejection": 0.0,
+        "z_ejection": 0.0
+      },
+      "file": "Sim\\VehDef\\aim9p.veh",
+      "name": "aim9p",
+      "type": 3,
+      "type_name": "Weapon"
+    },
+    {
+      "definition": {
+        "area": 0.2,
+        "cd": 0.01,
+        "data_idx": 1,
+        "domain": 1,
+        "flags": 0,
+        "mnemonic": "A120",
+        "weapon_class": 0,
+        "weapon_class_name": "wcAimWpn",
+        "weapon_type": 2,
+        "weapon_type_name": "wtAim120",
+        "weight": 150.0,
+        "x_ejection": 0.0,
+        "y_ejection": 0.0,
+        "z_ejection": 0.0
+      },
+      "file": "Sim\\VehDef\\aim120.veh",
+      "name": "aim120",
+      "type": 3,
+      "type_name": "Weapon"
+    },
+    {
+      "definition": {
+        "area": 0.4,
+        "cd": 0.02,
+        "data_idx": 0,
+        "domain": 0,
+        "flags": 0,
+        "mnemonic": "AL131",
+        "weapon_class": 4,
+        "weapon_class_name": "wcECM",
+        "weapon_type": 9,
+        "weapon_type_name": "wtLAU",
+        "weight": 100.0,
+        "x_ejection": 0.0,
+        "y_ejection": 0.0,
+        "z_ejection": 0.0
+      },
+      "file": "Sim\\VehDef\\ALQ131.veh",
+      "name": "alq131",
+      "type": 3,
+      "type_name": "Weapon"
+    },
+    {
+      "definition": {
+        "area": 1.0,
+        "cd": 0.2,
+        "data_idx": 0,
+        "domain": 2,
+        "flags": 1,
+        "mnemonic": "GB24",
+        "weapon_class": 9,
+        "weapon_class_name": "wcGbuWpn",
+        "weapon_type": 7,
+        "weapon_type_name": "wtGBU",
+        "weight": 300.0,
+        "x_ejection": 0.0,
+        "y_ejection": 0.0,
+        "z_ejection": 0.0
+      },
+      "file": "Sim\\VehDef\\GBU24.veh",
+      "name": "gbu24",
+      "type": 3,
+      "type_name": "Weapon"
+    },
+    {
+      "definition": {
+        "area": 2.0,
+        "cd": 0.2,
+        "data_idx": 0,
+        "domain": 2,
+        "flags": 1,
+        "mnemonic": "MK82",
+        "weapon_class": 2,
+        "weapon_class_name": "wcBombWpn",
+        "weapon_type": 6,
+        "weapon_type_name": "wtMk84",
+        "weight": 500.0,
+        "x_ejection": 0.0,
+        "y_ejection": 0.0,
+        "z_ejection": 0.0
+      },
+      "file": "Sim\\VehDef\\Mk82.veh",
+      "name": "mk82",
+      "type": 3,
+      "type_name": "Weapon"
+    },
+    {
+      "definition": {
+        "area": 2.0,
+        "cd": 0.2,
+        "data_idx": 0,
+        "domain": 2,
+        "flags": 1,
+        "mnemonic": "MK84",
+        "weapon_class": 2,
+        "weapon_class_name": "wcBombWpn",
+        "weapon_type": 6,
+        "weapon_type_name": "wtMk84",
+        "weight": 2000.0,
+        "x_ejection": 0.0,
+        "y_ejection": 0.0,
+        "z_ejection": 0.0
+      },
+      "file": "Sim\\VehDef\\Mk84.veh",
+      "name": "mk84",
+      "type": 3,
+      "type_name": "Weapon"
+    },
+    {
+      "definition": {
+        "area": 0.4,
+        "cd": 0.02,
+        "data_idx": 6,
+        "domain": 1,
+        "flags": 0,
+        "mnemonic": "SA6",
+        "weapon_class": 8,
+        "weapon_class_name": "wcSamWpn",
+        "weapon_type": 8,
+        "weapon_type_name": "wtSAM",
+        "weight": 225.0,
+        "x_ejection": 0.0,
+        "y_ejection": 0.0,
+        "z_ejection": 0.0
+      },
+      "file": "Sim\\VehDef\\Sam.veh",
+      "name": "sam",
+      "type": 3,
+      "type_name": "Weapon"
+    },
+    {
+      "definition": {
+        "area": 1.0,
+        "cd": 0.2,
+        "data_idx": 0,
+        "domain": 0,
+        "flags": 0,
+        "mnemonic": "TK300",
+        "weapon_class": 5,
+        "weapon_class_name": "wcTank",
+        "weapon_type": 0,
+        "weapon_type_name": "wtGuns",
+        "weight": 300.0,
+        "x_ejection": 0.0,
+        "y_ejection": 0.0,
+        "z_ejection": 0.0
+      },
+      "file": "Sim\\VehDef\\Tank300.veh",
+      "name": "tank300",
+      "type": 3,
+      "type_name": "Weapon"
+    },
+    {
+      "definition": {
+        "area": 1.0,
+        "cd": 0.2,
+        "data_idx": 0,
+        "domain": 0,
+        "flags": 0,
+        "mnemonic": "TK370",
+        "weapon_class": 5,
+        "weapon_class_name": "wcTank",
+        "weapon_type": 0,
+        "weapon_type_name": "wtGuns",
+        "weight": 370.0,
+        "x_ejection": 0.0,
+        "y_ejection": 0.0,
+        "z_ejection": 0.0
+      },
+      "file": "Sim\\VehDef\\Tank370.veh",
+      "name": "tank370",
+      "type": 3,
+      "type_name": "Weapon"
+    },
+    {
+      "definition": {
+        "area": 1.0,
+        "cd": 0.2,
+        "data_idx": 0,
+        "domain": 0,
+        "flags": 0,
+        "mnemonic": "TK600",
+        "weapon_class": 5,
+        "weapon_class_name": "wcTank",
+        "weapon_type": 0,
+        "weapon_type_name": "wtGuns",
+        "weight": 600.0,
+        "x_ejection": 0.0,
+        "y_ejection": 0.0,
+        "z_ejection": 0.0
+      },
+      "file": "Sim\\VehDef\\Tank600.veh",
+      "name": "tank600",
+      "type": 3,
+      "type_name": "Weapon"
+    },
+    {
+      "definition": {
+        "area": 0.3,
+        "cd": 0.02,
+        "data_idx": 8,
+        "domain": 2,
+        "flags": 2,
+        "mnemonic": "AGXXX",
+        "weapon_class": 6,
+        "weapon_class_name": "wcAgmWpn",
+        "weapon_type": 3,
+        "weapon_type_name": "wtAgm88",
+        "weight": 125.0,
+        "x_ejection": 0.0,
+        "y_ejection": 0.0,
+        "z_ejection": 0.0
+      },
+      "file": "Sim\\VehDef\\AGMxxx.veh",
+      "name": "agmxxx",
+      "type": 3,
+      "type_name": "Weapon"
+    },
+    {
+      "definition": {
+        "area": 0.2,
+        "cd": 0.01,
+        "data_idx": 0,
+        "domain": 1,
+        "flags": 0,
+        "mnemonic": "AXXX",
+        "weapon_class": 0,
+        "weapon_class_name": "wcAimWpn",
+        "weapon_type": 1,
+        "weapon_type_name": "wtAim9",
+        "weight": 125.0,
+        "x_ejection": 0.0,
+        "y_ejection": 0.0,
+        "z_ejection": 0.0
+      },
+      "file": "Sim\\VehDef\\aimxxx.veh",
+      "name": "aimxxx",
+      "type": 3,
+      "type_name": "Weapon"
+    },
+    {
+      "definition": {
+        "area": 100.0,
+        "cd": 0.0,
+        "data_idx": 9,
+        "domain": 4,
+        "flags": 0,
+        "mnemonic": "0.0",
+        "weapon_class": 0,
+        "weapon_class_name": "wcAimWpn",
+        "weapon_type": 0,
+        "weapon_type_name": "wtGuns",
+        "weight": 0.02,
+        "x_ejection": 0.4,
+        "y_ejection": 0.0,
+        "z_ejection": 0.0
+      },
+      "file": "Sim\\VehDef\\ALQxxx.veh",
+      "name": "alqxxx",
+      "type": 3,
+      "type_name": "Weapon"
+    },
+    {
+      "definition": {
+        "area": 1.0,
+        "cd": 0.2,
+        "data_idx": 0,
+        "domain": 2,
+        "flags": 1,
+        "mnemonic": "GBXXX",
+        "weapon_class": 9,
+        "weapon_class_name": "wcGbuWpn",
+        "weapon_type": 7,
+        "weapon_type_name": "wtGBU",
+        "weight": 300.0,
+        "x_ejection": 0.0,
+        "y_ejection": 0.0,
+        "z_ejection": 0.0
+      },
+      "file": "Sim\\VehDef\\GBUxxx.veh",
+      "name": "gbuxxx",
+      "type": 3,
+      "type_name": "Weapon"
+    },
+    {
+      "definition": {
+        "area": 0.3,
+        "cd": 0.02,
+        "data_idx": 0,
+        "domain": 3,
+        "flags": 0,
+        "mnemonic": "GUNXXX",
+        "weapon_class": 3,
+        "weapon_class_name": "wcGunWpn",
+        "weapon_type": 0,
+        "weapon_type_name": "wtGuns",
+        "weight": 0.9,
+        "x_ejection": 3000.0,
+        "y_ejection": 0.0,
+        "z_ejection": 0.0
+      },
+      "file": "Sim\\VehDef\\GunXXX.veh",
+      "name": "gunxxx",
+      "type": 3,
+      "type_name": "Weapon"
+    },
+    {
+      "definition": {
+        "area": 2.0,
+        "cd": 0.2,
+        "data_idx": 0,
+        "domain": 2,
+        "flags": 1,
+        "mnemonic": "MKXXX",
+        "weapon_class": 2,
+        "weapon_class_name": "wcBombWpn",
+        "weapon_type": 6,
+        "weapon_type_name": "wtMk84",
+        "weight": 500.0,
+        "x_ejection": 0.0,
+        "y_ejection": 0.0,
+        "z_ejection": 0.0
+      },
+      "file": "Sim\\VehDef\\Mkxxx.veh",
+      "name": "mkxxx",
+      "type": 3,
+      "type_name": "Weapon"
+    },
+    {
+      "definition": {
+        "area": 1.0,
+        "cd": 0.2,
+        "data_idx": 0,
+        "domain": 0,
+        "flags": 0,
+        "mnemonic": "TKXXX",
+        "weapon_class": 5,
+        "weapon_class_name": "wcTank",
+        "weapon_type": 0,
+        "weapon_type_name": "wtGuns",
+        "weight": 300.0,
+        "x_ejection": 0.0,
+        "y_ejection": 0.0,
+        "z_ejection": 0.0
+      },
+      "file": "Sim\\VehDef\\Tankxxx.veh",
+      "name": "tankxxx",
+      "type": 3,
+      "type_name": "Weapon"
+    },
+    {
+      "definition": {
+        "ai_sensors": [
+          {
+            "index": 0,
+            "type": 3
+          },
+          {
+            "index": 0,
+            "type": 1
+          },
+          {
+            "index": 0,
+            "type": 2
+          }
+        ],
+        "airframe_index": 4,
+        "combat_class": 4,
+        "combat_class_name": "F16",
+        "player_sensors": [
+          {
+            "index": 0,
+            "type": 3
+          },
+          {
+            "index": 0,
+            "type": 1
+          },
+          {
+            "index": 0,
+            "type": 0
+          },
+          {
+            "index": 0,
+            "type": 2
+          }
+        ]
+      },
+      "file": "Sim\\vehdef\\f16.veh",
+      "name": "f16",
+      "type": 0,
+      "type_name": "Aircraft"
+    },
+    {
+      "definition": {
+        "ai_sensors": [
+          {
+            "index": 0,
+            "type": 3
+          },
+          {
+            "index": 0,
+            "type": 2
+          }
+        ],
+        "airframe_index": 9,
+        "combat_class": 8,
+        "combat_class_name": "Bomber",
+        "player_sensors": [
+          {
+            "index": 0,
+            "type": 3
+          },
+          {
+            "index": 0,
+            "type": 1
+          },
+          {
+            "index": 0,
+            "type": 0
+          },
+          {
+            "index": 0,
+            "type": 2
+          }
+        ]
+      },
+      "file": "sim\\vehdef\\tu16.veh",
+      "name": "tu16",
+      "type": 0,
+      "type_name": "Aircraft"
+    },
+    {
+      "definition": {
+        "ai_sensors": [
+          {
+            "index": 0,
+            "type": 3
+          }
+        ],
+        "airframe_index": 8,
+        "combat_class": 8,
+        "combat_class_name": "Bomber",
+        "player_sensors": [
+          {
+            "index": 0,
+            "type": 3
+          },
+          {
+            "index": 0,
+            "type": 1
+          },
+          {
+            "index": 0,
+            "type": 0
+          },
+          {
+            "index": 0,
+            "type": 2
+          }
+        ]
+      },
+      "file": "sim\\vehdef\\an2.veh",
+      "name": "an2",
+      "type": 0,
+      "type_name": "Aircraft"
+    },
+    {
+      "definition": {
+        "ai_sensors": [
+          {
+            "index": 0,
+            "type": 3
+          },
+          {
+            "index": 0,
+            "type": 2
+          }
+        ],
+        "airframe_index": 9,
+        "combat_class": 8,
+        "combat_class_name": "Bomber",
+        "player_sensors": [
+          {
+            "index": 0,
+            "type": 3
+          },
+          {
+            "index": 0,
+            "type": 1
+          },
+          {
+            "index": 0,
+            "type": 0
+          },
+          {
+            "index": 0,
+            "type": 2
+          }
+        ]
+      },
+      "file": "sim\\vehdef\\kc10.veh",
+      "name": "kc10",
+      "type": 0,
+      "type_name": "Aircraft"
+    },
+    {
+      "definition": {
+        "ai_sensors": [
+          {
+            "index": 0,
+            "type": 3
+          },
+          {
+            "index": 0,
+            "type": 1
+          },
+          {
+            "index": 0,
+            "type": 2
+          }
+        ],
+        "airframe_index": 18,
+        "combat_class": 4,
+        "combat_class_name": "F16",
+        "player_sensors": [
+          {
+            "index": 0,
+            "type": 3
+          },
+          {
+            "index": 0,
+            "type": 1
+          },
+          {
+            "index": 0,
+            "type": 0
+          },
+          {
+            "index": 0,
+            "type": 2
+          }
+        ]
+      },
+      "file": "sim\\vehdef\\mig29.veh",
+      "name": "mig29",
+      "type": 0,
+      "type_name": "Aircraft"
+    },
+    {
+      "definition": {
+        "ai_sensors": [
+          {
+            "index": 0,
+            "type": 3
+          },
+          {
+            "index": 0,
+            "type": 1
+          }
+        ],
+        "airframe_index": 13,
+        "combat_class": 1,
+        "combat_class_name": "F5",
+        "player_sensors": [
+          {
+            "index": 0,
+            "type": 3
+          },
+          {
+            "index": 0,
+            "type": 1
+          },
+          {
+            "index": 0,
+            "type": 0
+          },
+          {
+            "index": 0,
+            "type": 2
+          }
+        ]
+      },
+      "file": "sim\\vehdef\\mig19.veh",
+      "name": "mig19",
+      "type": 0,
+      "type_name": "Aircraft"
+    },
+    {
+      "definition": {
+        "ai_sensors": [
+          {
+            "index": 0,
+            "type": 3
+          },
+          {
+            "index": 0,
+            "type": 1
+          },
+          {
+            "index": 0,
+            "type": 2
+          }
+        ],
+        "airframe_index": 12,
+        "combat_class": 3,
+        "combat_class_name": "F15",
+        "player_sensors": [
+          {
+            "index": 0,
+            "type": 3
+          },
+          {
+            "index": 0,
+            "type": 1
+          },
+          {
+            "index": 0,
+            "type": 0
+          },
+          {
+            "index": 0,
+            "type": 2
+          }
+        ]
+      },
+      "file": "sim\\vehdef\\su27.veh",
+      "name": "su27",
+      "type": 0,
+      "type_name": "Aircraft"
+    },
+    {
+      "definition": {
+        "airframe_index": 0,
+        "sensors": [
+          {
+            "index": 0,
+            "type": 3
+          }
+        ]
+      },
+      "file": "sim\\vehdef\\ah64.veh",
+      "name": "ah64",
+      "type": 2,
+      "type_name": "Helicopter"
+    },
+    {
+      "definition": {
+        "area": 0.2,
+        "cd": 0.01,
+        "data_idx": 17,
+        "domain": 1,
+        "flags": 0,
+        "mnemonic": "A-7",
+        "weapon_class": 0,
+        "weapon_class_name": "wcAimWpn",
+        "weapon_type": 2,
+        "weapon_type_name": "wtAim120",
+        "weight": 125.0,
+        "x_ejection": 0.0,
+        "y_ejection": 0.0,
+        "z_ejection": 0.0
+      },
+      "file": "sim\\VehDef\\aim7.veh",
+      "name": "aim7",
+      "type": 3,
+      "type_name": "Weapon"
+    },
+    {
+      "definition": {
+        "area": 1.0,
+        "cd": 0.2,
+        "data_idx": 0,
+        "domain": 2,
+        "flags": 1,
+        "mnemonic": "GB10",
+        "weapon_class": 9,
+        "weapon_class_name": "wcGbuWpn",
+        "weapon_type": 7,
+        "weapon_type_name": "wtGBU",
+        "weight": 300.0,
+        "x_ejection": 0.0,
+        "y_ejection": 0.0,
+        "z_ejection": 0.0
+      },
+      "file": "sim\\VehDef\\gb10.veh",
+      "name": "gb10",
+      "type": 3,
+      "type_name": "Weapon"
+    },
+    {
+      "definition": {
+        "area": 1.0,
+        "cd": 0.2,
+        "data_idx": 0,
+        "domain": 2,
+        "flags": 1,
+        "mnemonic": "GB15",
+        "weapon_class": 9,
+        "weapon_class_name": "wcGbuWpn",
+        "weapon_type": 7,
+        "weapon_type_name": "wtGBU",
+        "weight": 300.0,
+        "x_ejection": 0.0,
+        "y_ejection": 0.0,
+        "z_ejection": 0.0
+      },
+      "file": "sim\\VehDef\\gb15.veh",
+      "name": "gb15",
+      "type": 3,
+      "type_name": "Weapon"
+    },
+    {
+      "definition": {
+        "area": 1.0,
+        "cd": 0.2,
+        "data_idx": 0,
+        "domain": 2,
+        "flags": 1,
+        "mnemonic": "GB28",
+        "weapon_class": 9,
+        "weapon_class_name": "wcGbuWpn",
+        "weapon_type": 7,
+        "weapon_type_name": "wtGBU",
+        "weight": 300.0,
+        "x_ejection": 0.0,
+        "y_ejection": 0.0,
+        "z_ejection": 0.0
+      },
+      "file": "sim\\VehDef\\gb28.veh",
+      "name": "gb28",
+      "type": 3,
+      "type_name": "Weapon"
+    },
+    {
+      "definition": {
+        "area": 1.0,
+        "cd": 0.2,
+        "data_idx": 0,
+        "domain": 2,
+        "flags": 1,
+        "mnemonic": "GB12",
+        "weapon_class": 9,
+        "weapon_class_name": "wcGbuWpn",
+        "weapon_type": 7,
+        "weapon_type_name": "wtGBU",
+        "weight": 300.0,
+        "x_ejection": 0.0,
+        "y_ejection": 0.0,
+        "z_ejection": 0.0
+      },
+      "file": "sim\\VehDef\\gb12.veh",
+      "name": "gb12",
+      "type": 3,
+      "type_name": "Weapon"
+    },
+    {
+      "definition": {
+        "area": 0.2,
+        "cd": 0.01,
+        "data_idx": 0,
+        "domain": 1,
+        "flags": 0,
+        "mnemonic": "A-9LM",
+        "weapon_class": 0,
+        "weapon_class_name": "wcAimWpn",
+        "weapon_type": 1,
+        "weapon_type_name": "wtAim9",
+        "weight": 125.0,
+        "x_ejection": 0.0,
+        "y_ejection": 0.0,
+        "z_ejection": 0.0
+      },
+      "file": "Sim\\VehDef\\aim9m.veh",
+      "name": "aim9m",
+      "type": 3,
+      "type_name": "Weapon"
+    },
+    {
+      "definition": {
+        "area": 2.0,
+        "cd": 0.2,
+        "data_idx": 0,
+        "domain": 2,
+        "flags": 0,
+        "mnemonic": "RPOD",
+        "weapon_class": 10,
+        "weapon_class_name": "wcCamera",
+        "weapon_type": 10,
+        "weapon_type_name": "wtFixed",
+        "weight": 200.0,
+        "x_ejection": 0.0,
+        "y_ejection": 0.0,
+        "z_ejection": 0.0
+      },
+      "file": "Sim\\VehDef\\camera.veh",
+      "name": "camera",
+      "type": 3,
+      "type_name": "Weapon"
+    },
+    {
+      "definition": {
+        "ai_sensors": [
+          {
+            "index": 0,
+            "type": 3
+          },
+          {
+            "index": 0,
+            "type": 1
+          }
+        ],
+        "airframe_index": 14,
+        "combat_class": 1,
+        "combat_class_name": "F5",
+        "player_sensors": [
+          {
+            "index": 0,
+            "type": 3
+          },
+          {
+            "index": 0,
+            "type": 1
+          },
+          {
+            "index": 0,
+            "type": 0
+          },
+          {
+            "index": 0,
+            "type": 2
+          }
+        ]
+      },
+      "file": "sim\\vehdef\\mig21.veh",
+      "name": "mig21",
+      "type": 0,
+      "type_name": "Aircraft"
+    },
+    {
+      "definition": {
+        "ai_sensors": [
+          {
+            "index": 0,
+            "type": 3
+          },
+          {
+            "index": 0,
+            "type": 1
+          },
+          {
+            "index": 0,
+            "type": 2
+          }
+        ],
+        "airframe_index": 2,
+        "combat_class": 2,
+        "combat_class_name": "F14",
+        "player_sensors": [
+          {
+            "index": 0,
+            "type": 3
+          },
+          {
+            "index": 0,
+            "type": 1
+          },
+          {
+            "index": 0,
+            "type": 0
+          },
+          {
+            "index": 0,
+            "type": 2
+          }
+        ]
+      },
+      "file": "sim\\vehdef\\f14.veh",
+      "name": "f14",
+      "type": 0,
+      "type_name": "Aircraft"
+    },
+    {
+      "definition": {
+        "ai_sensors": [
+          {
+            "index": 0,
+            "type": 3
+          },
+          {
+            "index": 0,
+            "type": 1
+          },
+          {
+            "index": 0,
+            "type": 2
+          }
+        ],
+        "airframe_index": 3,
+        "combat_class": 3,
+        "combat_class_name": "F15",
+        "player_sensors": [
+          {
+            "index": 0,
+            "type": 3
+          },
+          {
+            "index": 0,
+            "type": 1
+          },
+          {
+            "index": 0,
+            "type": 2
+          }
+        ]
+      },
+      "file": "sim\\vehdef\\f15.veh",
+      "name": "f15",
+      "type": 0,
+      "type_name": "Aircraft"
+    },
+    {
+      "definition": {
+        "ai_sensors": [
+          {
+            "index": 0,
+            "type": 3
+          },
+          {
+            "index": 0,
+            "type": 1
+          },
+          {
+            "index": 0,
+            "type": 2
+          }
+        ],
+        "airframe_index": 5,
+        "combat_class": 4,
+        "combat_class_name": "F16",
+        "player_sensors": [
+          {
+            "index": 0,
+            "type": 3
+          },
+          {
+            "index": 0,
+            "type": 1
+          },
+          {
+            "index": 0,
+            "type": 2
+          }
+        ]
+      },
+      "file": "sim\\vehdef\\f18.veh",
+      "name": "f18",
+      "type": 0,
+      "type_name": "Aircraft"
+    },
+    {
+      "definition": {
+        "ai_sensors": [
+          {
+            "index": 0,
+            "type": 3
+          },
+          {
+            "index": 0,
+            "type": 1
+          },
+          {
+            "index": 0,
+            "type": 2
+          }
+        ],
+        "airframe_index": 0,
+        "combat_class": 0,
+        "combat_class_name": "F4",
+        "player_sensors": [
+          {
+            "index": 0,
+            "type": 3
+          },
+          {
+            "index": 0,
+            "type": 1
+          },
+          {
+            "index": 0,
+            "type": 0
+          },
+          {
+            "index": 0,
+            "type": 2
+          }
+        ]
+      },
+      "file": "sim\\vehdef\\f4.veh",
+      "name": "f4",
+      "type": 0,
+      "type_name": "Aircraft"
+    },
+    {
+      "definition": {
+        "ai_sensors": [
+          {
+            "index": 0,
+            "type": 3
+          },
+          {
+            "index": 0,
+            "type": 1
+          },
+          {
+            "index": 0,
+            "type": 2
+          }
+        ],
+        "airframe_index": 1,
+        "combat_class": 1,
+        "combat_class_name": "F5",
+        "player_sensors": [
+          {
+            "index": 0,
+            "type": 3
+          },
+          {
+            "index": 0,
+            "type": 1
+          },
+          {
+            "index": 0,
+            "type": 0
+          },
+          {
+            "index": 0,
+            "type": 2
+          }
+        ]
+      },
+      "file": "sim\\vehdef\\f5.veh",
+      "name": "f5",
+      "type": 0,
+      "type_name": "Aircraft"
+    },
+    {
+      "definition": {
+        "ai_sensors": [
+          {
+            "index": 0,
+            "type": 3
+          },
+          {
+            "index": 0,
+            "type": 1
+          },
+          {
+            "index": 0,
+            "type": 2
+          }
+        ],
+        "airframe_index": 11,
+        "combat_class": 7,
+        "combat_class_name": "A10",
+        "player_sensors": [
+          {
+            "index": 0,
+            "type": 3
+          },
+          {
+            "index": 0,
+            "type": 1
+          },
+          {
+            "index": 0,
+            "type": 0
+          },
+          {
+            "index": 0,
+            "type": 2
+          }
+        ]
+      },
+      "file": "sim\\vehdef\\su25.veh",
+      "name": "su25",
+      "type": 0,
+      "type_name": "Aircraft"
+    },
+    {
+      "definition": {
+        "ai_sensors": [
+          {
+            "index": 0,
+            "type": 3
+          },
+          {
+            "index": 0,
+            "type": 1
+          },
+          {
+            "index": 0,
+            "type": 2
+          }
+        ],
+        "airframe_index": 15,
+        "combat_class": 0,
+        "combat_class_name": "F4",
+        "player_sensors": [
+          {
+            "index": 0,
+            "type": 3
+          },
+          {
+            "index": 0,
+            "type": 1
+          },
+          {
+            "index": 0,
+            "type": 0
+          },
+          {
+            "index": 0,
+            "type": 2
+          }
+        ]
+      },
+      "file": "sim\\vehdef\\mig23.veh",
+      "name": "mig23",
+      "type": 0,
+      "type_name": "Aircraft"
+    },
+    {
+      "definition": {
+        "ai_sensors": [
+          {
+            "index": 0,
+            "type": 3
+          },
+          {
+            "index": 0,
+            "type": 1
+          },
+          {
+            "index": 0,
+            "type": 2
+          }
+        ],
+        "airframe_index": 16,
+        "combat_class": 5,
+        "combat_class_name": "Mig25",
+        "player_sensors": [
+          {
+            "index": 0,
+            "type": 3
+          },
+          {
+            "index": 0,
+            "type": 1
+          },
+          {
+            "index": 0,
+            "type": 0
+          },
+          {
+            "index": 0,
+            "type": 2
+          }
+        ]
+      },
+      "file": "sim\\vehdef\\mig25.veh",
+      "name": "mig25",
+      "type": 0,
+      "type_name": "Aircraft"
+    },
+    {
+      "definition": {
+        "ai_sensors": [
+          {
+            "index": 0,
+            "type": 3
+          },
+          {
+            "index": 0,
+            "type": 1
+          },
+          {
+            "index": 0,
+            "type": 2
+          }
+        ],
+        "airframe_index": 17,
+        "combat_class": 6,
+        "combat_class_name": "Mig27",
+        "player_sensors": [
+          {
+            "index": 0,
+            "type": 3
+          },
+          {
+            "index": 0,
+            "type": 1
+          },
+          {
+            "index": 0,
+            "type": 0
+          },
+          {
+            "index": 0,
+            "type": 2
+          }
+        ]
+      },
+      "file": "sim\\vehdef\\mig27.veh",
+      "name": "mig27",
+      "type": 0,
+      "type_name": "Aircraft"
+    },
+    {
+      "definition": {
+        "ai_sensors": [
+          {
+            "index": 0,
+            "type": 3
+          },
+          {
+            "index": 0,
+            "type": 1
+          },
+          {
+            "index": 0,
+            "type": 2
+          }
+        ],
+        "airframe_index": 19,
+        "combat_class": 5,
+        "combat_class_name": "Mig25",
+        "player_sensors": [
+          {
+            "index": 0,
+            "type": 3
+          },
+          {
+            "index": 0,
+            "type": 1
+          },
+          {
+            "index": 0,
+            "type": 0
+          },
+          {
+            "index": 0,
+            "type": 2
+          }
+        ]
+      },
+      "file": "sim\\vehdef\\mig31.veh",
+      "name": "mig31",
+      "type": 0,
+      "type_name": "Aircraft"
+    },
+    {
+      "definition": {
+        "ai_sensors": [
+          {
+            "index": 0,
+            "type": 3
+          },
+          {
+            "index": 0,
+            "type": 2
+          }
+        ],
+        "airframe_index": 7,
+        "combat_class": 7,
+        "combat_class_name": "A10",
+        "player_sensors": [
+          {
+            "index": 0,
+            "type": 3
+          },
+          {
+            "index": 0,
+            "type": 1
+          },
+          {
+            "index": 0,
+            "type": 0
+          },
+          {
+            "index": 0,
+            "type": 2
+          }
+        ]
+      },
+      "file": "sim\\vehdef\\a10.veh",
+      "name": "a10",
+      "type": 0,
+      "type_name": "Aircraft"
+    },
+    {
+      "definition": {
+        "ai_sensors": [
+          {
+            "index": 0,
+            "type": 3
+          },
+          {
+            "index": 0,
+            "type": 2
+          }
+        ],
+        "airframe_index": 10,
+        "combat_class": 8,
+        "combat_class_name": "Bomber",
+        "player_sensors": [
+          {
+            "index": 0,
+            "type": 3
+          },
+          {
+            "index": 0,
+            "type": 1
+          },
+          {
+            "index": 0,
+            "type": 0
+          },
+          {
+            "index": 0,
+            "type": 2
+          }
+        ]
+      },
+      "file": "sim\\vehdef\\c130.veh",
+      "name": "c130",
+      "type": 0,
+      "type_name": "Aircraft"
+    },
+    {
+      "definition": {
+        "ai_sensors": [
+          {
+            "index": 0,
+            "type": 3
+          },
+          {
+            "index": 0,
+            "type": 1
+          },
+          {
+            "index": 0,
+            "type": 2
+          }
+        ],
+        "airframe_index": 6,
+        "combat_class": 6,
+        "combat_class_name": "Mig27",
+        "player_sensors": [
+          {
+            "index": 0,
+            "type": 3
+          },
+          {
+            "index": 0,
+            "type": 1
+          },
+          {
+            "index": 0,
+            "type": 0
+          },
+          {
+            "index": 0,
+            "type": 2
+          }
+        ]
+      },
+      "file": "sim\\vehdef\\f111.veh",
+      "name": "f111",
+      "type": 0,
+      "type_name": "Aircraft"
+    },
+    {
+      "definition": {
+        "area": 0.3,
+        "cd": 0.02,
+        "data_idx": 5,
+        "domain": 2,
+        "flags": 2,
+        "mnemonic": "AG84",
+        "weapon_class": 7,
+        "weapon_class_name": "wcHARMWpn",
+        "weapon_type": 3,
+        "weapon_type_name": "wtAgm88",
+        "weight": 125.0,
+        "x_ejection": 0.0,
+        "y_ejection": 0.0,
+        "z_ejection": 0.0
+      },
+      "file": "Sim\\VehDef\\AGM84.veh",
+      "name": "agm84",
+      "type": 3,
+      "type_name": "Weapon"
+    },
+    {
+      "definition": {
+        "area": 0.2,
+        "cd": 0.01,
+        "data_idx": 10,
+        "domain": 1,
+        "flags": 0,
+        "mnemonic": "A120",
+        "weapon_class": 0,
+        "weapon_class_name": "wcAimWpn",
+        "weapon_type": 2,
+        "weapon_type_name": "wtAim120",
+        "weight": 150.0,
+        "x_ejection": 0.0,
+        "y_ejection": 0.0,
+        "z_ejection": 0.0
+      },
+      "file": "Sim\\VehDef\\aim54.veh",
+      "name": "aim54",
+      "type": 3,
+      "type_name": "Weapon"
+    },
+    {
+      "definition": {
+        "area": 0.2,
+        "cd": 0.01,
+        "data_idx": 11,
+        "domain": 1,
+        "flags": 0,
+        "mnemonic": "A-9LM",
+        "weapon_class": 0,
+        "weapon_class_name": "wcAimWpn",
+        "weapon_type": 1,
+        "weapon_type_name": "wtAim9",
+        "weight": 125.0,
+        "x_ejection": 0.0,
+        "y_ejection": 0.0,
+        "z_ejection": 0.0
+      },
+      "file": "Sim\\VehDef\\aa7.veh",
+      "name": "aa7",
+      "type": 3,
+      "type_name": "Weapon"
+    },
+    {
+      "definition": {
+        "area": 0.2,
+        "cd": 0.01,
+        "data_idx": 12,
+        "domain": 1,
+        "flags": 0,
+        "mnemonic": "A-9LM",
+        "weapon_class": 0,
+        "weapon_class_name": "wcAimWpn",
+        "weapon_type": 1,
+        "weapon_type_name": "wtAim9",
+        "weight": 125.0,
+        "x_ejection": 0.0,
+        "y_ejection": 0.0,
+        "z_ejection": 0.0
+      },
+      "file": "Sim\\VehDef\\aa7r.veh",
+      "name": "aa7r",
+      "type": 3,
+      "type_name": "Weapon"
+    },
+    {
+      "definition": {
+        "area": 0.2,
+        "cd": 0.01,
+        "data_idx": 13,
+        "domain": 1,
+        "flags": 0,
+        "mnemonic": "A-9LM",
+        "weapon_class": 0,
+        "weapon_class_name": "wcAimWpn",
+        "weapon_type": 1,
+        "weapon_type_name": "wtAim9",
+        "weight": 125.0,
+        "x_ejection": 0.0,
+        "y_ejection": 0.0,
+        "z_ejection": 0.0
+      },
+      "file": "Sim\\VehDef\\aa9.veh",
+      "name": "aa9",
+      "type": 3,
+      "type_name": "Weapon"
+    },
+    {
+      "definition": {
+        "area": 0.2,
+        "cd": 0.01,
+        "data_idx": 14,
+        "domain": 1,
+        "flags": 0,
+        "mnemonic": "A-9LM",
+        "weapon_class": 0,
+        "weapon_class_name": "wcAimWpn",
+        "weapon_type": 1,
+        "weapon_type_name": "wtAim9",
+        "weight": 125.0,
+        "x_ejection": 0.0,
+        "y_ejection": 0.0,
+        "z_ejection": 0.0
+      },
+      "file": "Sim\\VehDef\\aa10.veh",
+      "name": "aa10",
+      "type": 3,
+      "type_name": "Weapon"
+    },
+    {
+      "definition": {
+        "area": 0.2,
+        "cd": 0.01,
+        "data_idx": 15,
+        "domain": 1,
+        "flags": 0,
+        "mnemonic": "A-9LM",
+        "weapon_class": 0,
+        "weapon_class_name": "wcAimWpn",
+        "weapon_type": 1,
+        "weapon_type_name": "wtAim9",
+        "weight": 125.0,
+        "x_ejection": 0.0,
+        "y_ejection": 0.0,
+        "z_ejection": 0.0
+      },
+      "file": "Sim\\VehDef\\aa10c.veh",
+      "name": "aa10c",
+      "type": 3,
+      "type_name": "Weapon"
+    },
+    {
+      "definition": {
+        "area": 0.2,
+        "cd": 0.01,
+        "data_idx": 16,
+        "domain": 1,
+        "flags": 0,
+        "mnemonic": "A-9LM",
+        "weapon_class": 0,
+        "weapon_class_name": "wcAimWpn",
+        "weapon_type": 1,
+        "weapon_type_name": "wtAim9",
+        "weight": 125.0,
+        "x_ejection": 0.0,
+        "y_ejection": 0.0,
+        "z_ejection": 0.0
+      },
+      "file": "Sim\\VehDef\\aa11.veh",
+      "name": "aa11",
+      "type": 3,
+      "type_name": "Weapon"
+    },
+    {
+      "definition": {
+        "area": 0.4,
+        "cd": 0.02,
+        "data_idx": 22,
+        "domain": 1,
+        "flags": 0,
+        "mnemonic": "SA2",
+        "weapon_class": 8,
+        "weapon_class_name": "wcSamWpn",
+        "weapon_type": 8,
+        "weapon_type_name": "wtSAM",
+        "weight": 225.0,
+        "x_ejection": 0.0,
+        "y_ejection": 0.0,
+        "z_ejection": 0.0
+      },
+      "file": "Sim\\VehDef\\sa2.veh",
+      "name": "sa2",
+      "type": 3,
+      "type_name": "Weapon"
+    },
+    {
+      "definition": {
+        "area": 0.4,
+        "cd": 0.02,
+        "data_idx": 23,
+        "domain": 1,
+        "flags": 0,
+        "mnemonic": "SA3",
+        "weapon_class": 8,
+        "weapon_class_name": "wcSamWpn",
+        "weapon_type": 8,
+        "weapon_type_name": "wtSAM",
+        "weight": 225.0,
+        "x_ejection": 0.0,
+        "y_ejection": 0.0,
+        "z_ejection": 0.0
+      },
+      "file": "Sim\\VehDef\\sa3.veh",
+      "name": "sa3",
+      "type": 3,
+      "type_name": "Weapon"
+    },
+    {
+      "definition": {
+        "area": 0.4,
+        "cd": 0.02,
+        "data_idx": 24,
+        "domain": 1,
+        "flags": 0,
+        "mnemonic": "SA4",
+        "weapon_class": 8,
+        "weapon_class_name": "wcSamWpn",
+        "weapon_type": 8,
+        "weapon_type_name": "wtSAM",
+        "weight": 225.0,
+        "x_ejection": 0.0,
+        "y_ejection": 0.0,
+        "z_ejection": 0.0
+      },
+      "file": "Sim\\VehDef\\sa4.veh",
+      "name": "sa4",
+      "type": 3,
+      "type_name": "Weapon"
+    },
+    {
+      "definition": {
+        "area": 0.4,
+        "cd": 0.02,
+        "data_idx": 25,
+        "domain": 1,
+        "flags": 0,
+        "mnemonic": "SA5",
+        "weapon_class": 8,
+        "weapon_class_name": "wcSamWpn",
+        "weapon_type": 8,
+        "weapon_type_name": "wtSAM",
+        "weight": 225.0,
+        "x_ejection": 0.0,
+        "y_ejection": 0.0,
+        "z_ejection": 0.0
+      },
+      "file": "Sim\\VehDef\\sa5.veh",
+      "name": "sa5",
+      "type": 3,
+      "type_name": "Weapon"
+    },
+    {
+      "definition": {
+        "area": 0.4,
+        "cd": 0.02,
+        "data_idx": 6,
+        "domain": 1,
+        "flags": 0,
+        "mnemonic": "SA6",
+        "weapon_class": 8,
+        "weapon_class_name": "wcSamWpn",
+        "weapon_type": 8,
+        "weapon_type_name": "wtSAM",
+        "weight": 225.0,
+        "x_ejection": 0.0,
+        "y_ejection": 0.0,
+        "z_ejection": 0.0
+      },
+      "file": "Sim\\VehDef\\sa6.veh",
+      "name": "sa6",
+      "type": 3,
+      "type_name": "Weapon"
+    },
+    {
+      "definition": {
+        "area": 0.4,
+        "cd": 0.02,
+        "data_idx": 18,
+        "domain": 1,
+        "flags": 0,
+        "mnemonic": "SA7",
+        "weapon_class": 8,
+        "weapon_class_name": "wcSamWpn",
+        "weapon_type": 8,
+        "weapon_type_name": "wtSAM",
+        "weight": 225.0,
+        "x_ejection": 0.0,
+        "y_ejection": 0.0,
+        "z_ejection": 0.0
+      },
+      "file": "Sim\\VehDef\\sa7.veh",
+      "name": "sa7",
+      "type": 3,
+      "type_name": "Weapon"
+    },
+    {
+      "definition": {
+        "area": 0.4,
+        "cd": 0.02,
+        "data_idx": 26,
+        "domain": 1,
+        "flags": 0,
+        "mnemonic": "SA8",
+        "weapon_class": 8,
+        "weapon_class_name": "wcSamWpn",
+        "weapon_type": 8,
+        "weapon_type_name": "wtSAM",
+        "weight": 225.0,
+        "x_ejection": 0.0,
+        "y_ejection": 0.0,
+        "z_ejection": 0.0
+      },
+      "file": "Sim\\VehDef\\sa8.veh",
+      "name": "sa8",
+      "type": 3,
+      "type_name": "Weapon"
+    },
+    {
+      "definition": {
+        "area": 0.4,
+        "cd": 0.02,
+        "data_idx": 20,
+        "domain": 1,
+        "flags": 0,
+        "mnemonic": "SA9",
+        "weapon_class": 8,
+        "weapon_class_name": "wcSamWpn",
+        "weapon_type": 8,
+        "weapon_type_name": "wtSAM",
+        "weight": 225.0,
+        "x_ejection": 0.0,
+        "y_ejection": 0.0,
+        "z_ejection": 0.0
+      },
+      "file": "Sim\\VehDef\\sa9.veh",
+      "name": "sa9",
+      "type": 3,
+      "type_name": "Weapon"
+    },
+    {
+      "definition": {
+        "area": 0.4,
+        "cd": 0.02,
+        "data_idx": 19,
+        "domain": 1,
+        "flags": 0,
+        "mnemonic": "SA13",
+        "weapon_class": 8,
+        "weapon_class_name": "wcSamWpn",
+        "weapon_type": 8,
+        "weapon_type_name": "wtSAM",
+        "weight": 225.0,
+        "x_ejection": 0.0,
+        "y_ejection": 0.0,
+        "z_ejection": 0.0
+      },
+      "file": "Sim\\VehDef\\sa13.veh",
+      "name": "sa13",
+      "type": 3,
+      "type_name": "Weapon"
+    },
+    {
+      "definition": {
+        "area": 0.4,
+        "cd": 0.02,
+        "data_idx": 21,
+        "domain": 1,
+        "flags": 0,
+        "mnemonic": "SA14",
+        "weapon_class": 8,
+        "weapon_class_name": "wcSamWpn",
+        "weapon_type": 8,
+        "weapon_type_name": "wtSAM",
+        "weight": 225.0,
+        "x_ejection": 0.0,
+        "y_ejection": 0.0,
+        "z_ejection": 0.0
+      },
+      "file": "Sim\\VehDef\\sa14.veh",
+      "name": "sa14",
+      "type": 3,
+      "type_name": "Weapon"
+    },
+    {
+      "definition": {
+        "area": 0.4,
+        "cd": 0.02,
+        "data_idx": 27,
+        "domain": 1,
+        "flags": 0,
+        "mnemonic": "SA15",
+        "weapon_class": 8,
+        "weapon_class_name": "wcSamWpn",
+        "weapon_type": 8,
+        "weapon_type_name": "wtSAM",
+        "weight": 225.0,
+        "x_ejection": 0.0,
+        "y_ejection": 0.0,
+        "z_ejection": 0.0
+      },
+      "file": "Sim\\VehDef\\sa15.veh",
+      "name": "sa15",
+      "type": 3,
+      "type_name": "Weapon"
+    }
+  ],
+  "kind": "f4.vehdef",
+  "version": 1
+}

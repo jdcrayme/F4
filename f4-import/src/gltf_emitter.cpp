@@ -1,13 +1,27 @@
 // f4-import/src/gltf_emitter.cpp
 //
-// KoreaObj → glTF 2.0 emitter. Takes the flat triangle lists from
+// KoreaObj → glTF 2.0 emitter. Takes the flat primitive lists from
 // f4-models' geometry extractor and writes a .gltf JSON + .bin binary
-// pair that the runtime f4-gltf loader can read back.
+// pair that any glTF 2.0 loader can read back.
 //
-// The emitter is deliberately minimal: one mesh per LOD, one material
-// per texture (no texture extraction yet — that's a follow-up), and
-// DOF/switch/slot nodes tagged with the §6 grammar using dof:unknown.N
-// for unmapped indices (the spec's "Untagged DOFs are not lost" rule).
+// Per Tranche 0c of NO_BINARY_RUNTIME_PLAN.md the emitter is
+// spec-compliant and textured:
+//   - One glTF mesh per LOD; one primitive per source Mesh. Source
+//     meshes are already grouped per (texture, primitive kind), so each
+//     glTF primitive maps 1:1 to a material — no merging, nothing lost
+//     (triangle, line, and point meshes all survive).
+//   - TEXCOORD_0 / COLOR_0 accessors are emitted when the source mesh
+//     carries UVs / vertex colors. Vertex colors are resolved through
+//     the HDR ColorBank exactly like f4-renderer's resolve_vertex_color
+//     (index < 4096 → bank lookup; larger values are direct packed RGBA).
+//   - Materials reference "textures/NNNNN.png" written by the
+//     `f4import textures` step (Tranche 0c.1). Chroma-keyed textures get
+//     alphaMode MASK so their keyed color stays transparent.
+//   - DOF/switch/slot nodes tagged with the §6 grammar (dof:unknown.N
+//     for unmapped indices — the spec's "Untagged DOFs are not lost").
+//
+// Coordinate conversion: Falcon model space is feet, +Z up; glTF is
+// meters, +Y up. The transform is baked at export.
 
 #include <f4/import/gltf_emitter.hpp>
 #include <f4/models/model_database.hpp>
@@ -19,8 +33,11 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <fstream>
+#include <map>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -40,10 +57,6 @@ namespace {
 //   glTF_x =  falcon_y  * FEET_TO_METERS
 //   glTF_y =  falcon_z  * FEET_TO_METERS
 //   glTF_z = -falcon_x  * FEET_TO_METERS
-//
-// This is the standard "Z-up to Y-up" rotation combined with a unit
-// conversion. The runtime never needs to know about Falcon's coordinate
-// conventions.
 
 constexpr float kFeetToMeters = 0.3048f;
 
@@ -59,39 +72,119 @@ Vec3f to_gltf(float fx, float fy, float fz) {
     };
 }
 
+// ── Vertex color resolution ───────────────────────────────────────────────
+//
+// Prim.rgba is an int index into the HDR ColorBank, NOT packed ARGB.
+// Mirrors f4-renderer/src/mesh_builder.cpp resolve_vertex_color so the
+// exported colors match what the runtime renders:
+//   0            → no color (white when textured, gray otherwise)
+//   1..4095      → ColorBank lookup (0xRRGGBBAA)
+//   >= 4096      → direct packed RGBA, R in the low byte (legacy path)
+
+struct Rgba4 {
+    float r, g, b, a;
+};
+
+Rgba4 resolve_color(uint32_t color_index,
+                    const f4::models::ColorBank& bank,
+                    bool mesh_is_textured) {
+    if (color_index == 0) {
+        if (mesh_is_textured) return {1.0f, 1.0f, 1.0f, 1.0f};
+        return {180.0f / 255.0f, 180.0f / 255.0f, 180.0f / 255.0f, 1.0f};
+    }
+    if (color_index < 4096) {
+        const uint32_t rgba = bank.rgba_at(static_cast<int>(color_index));
+        if (rgba != 0) {
+            return {
+                static_cast<float>((rgba >> 24) & 0xFF) / 255.0f,
+                static_cast<float>((rgba >> 16) & 0xFF) / 255.0f,
+                static_cast<float>((rgba >> 8) & 0xFF) / 255.0f,
+                static_cast<float>(rgba & 0xFF) / 255.0f};
+        }
+    }
+    return {
+        static_cast<float>(color_index & 0xFF) / 255.0f,
+        static_cast<float>((color_index >> 8) & 0xFF) / 255.0f,
+        static_cast<float>((color_index >> 16) & 0xFF) / 255.0f,
+        static_cast<float>((color_index >> 24) & 0xFF) / 255.0f};
+}
+
 // ── Binary buffer builder ─────────────────────────────────────────────────
 //
-// The .bin file contains all vertex data (positions, normals) and index
-// data, concatenated. Buffer views describe the slices; accessors describe
-// the typed views into the buffer views.
+// The .bin file contains all vertex data (positions, normals, uvs,
+// colors) and index data, concatenated. Buffer views describe the
+// slices; accessors describe the typed views into the buffer views.
 
 struct BufferBuilder {
     std::vector<uint8_t> data;
 
-    template <typename T>
-    std::size_t push(const std::vector<T>& items) {
-        // Align to the size of T (glTF requires 4-byte alignment for
-        // accessor byteOffset; we align all buffer views to 4 bytes).
-        while (data.size() % alignof(T) != 0) data.push_back(0);
-        std::size_t offset = data.size();
-        const auto* base = reinterpret_cast<const uint8_t*>(items.data());
-        data.insert(data.end(), base, base + items.size() * sizeof(T));
-        return offset;
+    // Align to 4 bytes (glTF requires accessor byteOffset to be aligned
+    // to the component size; all our components are 4-byte floats/uints).
+    void align4() {
+        while (data.size() % 4 != 0) data.push_back(0);
     }
-
     std::size_t size() const noexcept { return data.size(); }
 };
 
-// Write a float as little-endian bytes.
 void push_float(std::vector<uint8_t>& buf, float v) {
     uint32_t u;
     std::memcpy(&u, &v, 4);
     for (int i = 0; i < 4; ++i) buf.push_back(static_cast<uint8_t>(u >> (i * 8)));
 }
 
-// Write a uint32 as little-endian bytes.
 void push_u32(std::vector<uint8_t>& buf, uint32_t u) {
     for (int i = 0; i < 4; ++i) buf.push_back(static_cast<uint8_t>(u >> (i * 8)));
+}
+
+struct AccessorInfo {
+    std::size_t buffer_view;
+    int component_type;        // 5126 = FLOAT, 5125 = UINT
+    std::size_t count;
+    std::string type;          // "SCALAR", "VEC2", "VEC3", "VEC4"
+};
+
+struct BufferViewInfo {
+    std::size_t byte_offset;
+    std::size_t byte_length;
+    int target;                // 34962 = ARRAY_BUFFER, 34963 = ELEMENT_ARRAY_BUFFER
+};
+
+// Append float data + buffer view + accessor; returns the accessor index.
+// element_count is the number of vecN elements (values.size() / components).
+std::size_t append_float_accessor(
+    BufferBuilder& builder,
+    std::vector<BufferViewInfo>& buffer_views,
+    std::vector<AccessorInfo>& accessors,
+    const std::vector<float>& values,
+    std::size_t element_count,
+    const char* type,
+    int target) {
+    builder.align4();
+    const std::size_t offset = builder.size();
+    for (float f : values) push_float(builder.data, f);
+
+    const std::size_t bv = buffer_views.size();
+    buffer_views.push_back({offset, values.size() * 4, target});
+    const std::size_t acc = accessors.size();
+    accessors.push_back({bv, 5126, element_count, type});
+    return acc;
+}
+
+// Append uint32 index data; returns the accessor index (SCALAR, UINT).
+std::size_t append_index_accessor(
+    BufferBuilder& builder,
+    std::vector<BufferViewInfo>& buffer_views,
+    std::vector<AccessorInfo>& accessors,
+    const std::vector<uint32_t>& indices) {
+    builder.align4();
+    const std::size_t offset = builder.size();
+    for (uint32_t i : indices) push_u32(builder.data, i);
+
+    const std::size_t bv = buffer_views.size();
+    buffer_views.push_back({offset, indices.size() * 4, 34963});
+    const std::size_t acc = accessors.size();
+    accessors.push_back({bv, 5125, indices.size(), "SCALAR"});
+    return acc;
 }
 
 // ── Node name generators (§6 grammar) ─────────────────────────────────────
@@ -154,111 +247,195 @@ GltfEmitResult emit_model_as_gltf(
             " has no extractable geometry (all LODs empty)");
     }
 
+    // ── Plan materials ──────────────────────────────────────────────────
+    //
+    // One material per referenced texture (sorted by texture id for
+    // deterministic output) plus one shared "vertexcolor" material for
+    // untextured meshes. Chroma-keyed textures get alphaMode MASK.
+    struct MaterialInfo {
+        int32_t tex_id;        // -1 = vertex-color/untextured
+        bool chroma_keyed;
+        std::string name;
+    };
+    std::vector<MaterialInfo> materials;
+
+    std::set<int32_t> used_tex_ids;
+    for (const auto& lod : lods) {
+        for (const auto& m : lod.geom.meshes) {
+            if (m.tex_id >= 0) used_tex_ids.insert(m.tex_id);
+        }
+    }
+    const auto& tex_entries = db.tex_entries();
+    for (int32_t tex_id : used_tex_ids) {
+        bool chroma = false;
+        if (static_cast<std::size_t>(tex_id) < tex_entries.size()) {
+            chroma = tex_entries[static_cast<std::size_t>(tex_id)].chroma_key != 0;
+        }
+        char name[32];
+        std::snprintf(name, sizeof(name), "tex:%05d", tex_id);
+        materials.push_back({tex_id, chroma, name});
+    }
+    // The shared vertex-color material always sits at the last index;
+    // untextured meshes reference it.
+    const int vertexcolor_material = static_cast<int>(materials.size());
+    materials.push_back({-1, false, "vertexcolor"});
+
+    auto material_index_for = [&](const f4::models::Mesh& m) -> int {
+        if (m.tex_id >= 0) {
+            auto it = std::find_if(materials.begin(), materials.end(),
+                [&](const MaterialInfo& mi) { return mi.tex_id == m.tex_id; });
+            return static_cast<int>(std::distance(materials.begin(), it));
+        }
+        return vertexcolor_material;
+    };
+
     // ── Build the binary buffer ─────────────────────────────────────────
     //
-    // Layout: for each LOD, positions (VEC3 FLOAT) + normals (VEC3 FLOAT)
-    // + indices (SCALAR UINT). Buffer views point at the slices.
+    // Per source mesh: positions (VEC3 FLOAT) + normals (VEC3 FLOAT) +
+    // optional uvs (VEC2 FLOAT) + optional colors (VEC4 FLOAT) + indices
+    // (SCALAR UINT). One glTF primitive per source mesh.
+
     BufferBuilder builder;
-
-    struct AccessorInfo {
-        std::size_t buffer_view;
-        std::size_t byte_offset;   // within buffer view
-        int component_type;        // 5126 = FLOAT, 5125 = UINT
-        std::size_t count;
-        std::string type;          // "VEC3" or "SCALAR"
-    };
-
-    struct BufferViewInfo {
-        std::size_t byte_offset;
-        std::size_t byte_length;
-        int target;                // 34962 = ARRAY_BUFFER, 34963 = ELEMENT_ARRAY_BUFFER
-    };
-
     std::vector<BufferViewInfo> buffer_views;
     std::vector<AccessorInfo> accessors;
 
-    struct LodMeshInfo {
+    struct PrimInfo {
+        int level;
         std::size_t positions_accessor;
         std::size_t normals_accessor;
+        std::size_t uv_accessor;       // SIZE_MAX = not emitted
+        std::size_t color_accessor;    // SIZE_MAX = not emitted
         std::size_t indices_accessor;
         std::size_t vertex_count;
-        std::size_t triangle_count;
-        int level;
+        std::size_t prim_count;        // tris / lines / points
+        int mode;                      // 4 = TRIANGLES, 1 = LINES, 0 = POINTS
+        int material;
     };
+    constexpr std::size_t kNoAccessor = static_cast<std::size_t>(-1);
 
-    std::vector<LodMeshInfo> lod_meshes;
-    lod_meshes.reserve(lods.size());
+    std::vector<PrimInfo> prims;
 
     for (const auto& lod : lods) {
-        // Merge all meshes in this LOD into one (the emitter doesn't
-        // do per-texture materials yet — that's a follow-up).
-        f4::models::Mesh merged = lod.geom.merged();
-        if (merged.vertices.empty() || merged.triangles.empty()) continue;
+        for (const auto& m : lod.geom.meshes) {
+            // Mirror the renderer's skip logic (mesh_builder.cpp).
+            if (m.vertices.empty()) continue;
+            bool has_data = false;
+            switch (m.kind) {
+                case f4::models::PrimitiveKind::Triangles: has_data = !m.triangles.empty(); break;
+                case f4::models::PrimitiveKind::Lines:     has_data = !m.lines.empty();     break;
+                case f4::models::PrimitiveKind::Points:    has_data = !m.points.empty();    break;
+            }
+            if (!has_data) continue;
 
-        // Positions
-        std::vector<float> positions;
-        positions.reserve(merged.vertices.size() * 3);
-        for (const auto& v : merged.vertices) {
-            Vec3f p = opts.convert_to_gltf_coords
-                ? to_gltf(v.position.x, v.position.y, v.position.z)
-                : Vec3f{v.position.x, v.position.y, v.position.z};
-            positions.push_back(p.x);
-            positions.push_back(p.y);
-            positions.push_back(p.z);
+            const bool mesh_is_textured = (m.tex_id >= 0);
+
+            // UV / color presence. Unset UVs stay (0,0); unset colors are 0.
+            bool has_uv = false, has_color = false;
+            for (const auto& v : m.vertices) {
+                if (v.uv.u != 0.0f || v.uv.v != 0.0f) has_uv = true;
+                if (v.color != 0) has_color = true;
+            }
+
+            // Positions
+            std::vector<float> positions;
+            positions.reserve(m.vertices.size() * 3);
+            for (const auto& v : m.vertices) {
+                Vec3f p = opts.convert_to_gltf_coords
+                    ? to_gltf(v.position.x, v.position.y, v.position.z)
+                    : Vec3f{v.position.x, v.position.y, v.position.z};
+                positions.push_back(p.x);
+                positions.push_back(p.y);
+                positions.push_back(p.z);
+            }
+            const std::size_t pos_acc = append_float_accessor(
+                builder, buffer_views, accessors,
+                positions, m.vertices.size(), "VEC3", 34962);
+
+            // Normals
+            std::vector<float> normals;
+            normals.reserve(m.vertices.size() * 3);
+            for (const auto& v : m.vertices) {
+                Vec3f n = opts.convert_to_gltf_coords
+                    ? to_gltf(v.normal.x, v.normal.y, v.normal.z)
+                    : Vec3f{v.normal.x, v.normal.y, v.normal.z};
+                normals.push_back(n.x);
+                normals.push_back(n.y);
+                normals.push_back(n.z);
+            }
+            const std::size_t norm_acc = append_float_accessor(
+                builder, buffer_views, accessors,
+                normals, m.vertices.size(), "VEC3", 34962);
+
+            // UVs
+            std::size_t uv_acc = kNoAccessor;
+            if (has_uv) {
+                std::vector<float> uvs;
+                uvs.reserve(m.vertices.size() * 2);
+                for (const auto& v : m.vertices) {
+                    uvs.push_back(v.uv.u);
+                    uvs.push_back(v.uv.v);
+                }
+                uv_acc = append_float_accessor(
+                    builder, buffer_views, accessors,
+                    uvs, m.vertices.size(), "VEC2", 34962);
+            }
+
+            // Vertex colors (resolved through the ColorBank)
+            std::size_t color_acc = kNoAccessor;
+            if (has_color) {
+                std::vector<float> colors;
+                colors.reserve(m.vertices.size() * 4);
+                for (const auto& v : m.vertices) {
+                    const Rgba4 c = resolve_color(v.color, db.color_bank(), mesh_is_textured);
+                    colors.push_back(c.r);
+                    colors.push_back(c.g);
+                    colors.push_back(c.b);
+                    colors.push_back(c.a);
+                }
+                color_acc = append_float_accessor(
+                    builder, buffer_views, accessors,
+                    colors, m.vertices.size(), "VEC4", 34962);
+            }
+
+            // Indices per primitive kind
+            std::vector<uint32_t> indices;
+            int mode = 4;
+            switch (m.kind) {
+                case f4::models::PrimitiveKind::Triangles:
+                    mode = 4;
+                    indices.reserve(m.triangles.size() * 3);
+                    for (const auto& t : m.triangles) {
+                        indices.push_back(t.v0);
+                        indices.push_back(t.v1);
+                        indices.push_back(t.v2);
+                    }
+                    break;
+                case f4::models::PrimitiveKind::Lines:
+                    mode = 1;
+                    indices.reserve(m.lines.size() * 2);
+                    for (const auto& l : m.lines) {
+                        indices.push_back(l.v0);
+                        indices.push_back(l.v1);
+                    }
+                    break;
+                case f4::models::PrimitiveKind::Points:
+                    mode = 0;
+                    indices.reserve(m.points.size());
+                    for (uint32_t i = 0; i < m.points.size(); ++i) {
+                        indices.push_back(i);
+                    }
+                    break;
+            }
+            const std::size_t idx_acc = append_index_accessor(
+                builder, buffer_views, accessors, indices);
+
+            prims.push_back({lod.level, pos_acc, norm_acc, uv_acc, color_acc,
+                             idx_acc, m.vertices.size(),
+                             m.primitive_count(), mode, material_index_for(m)});
         }
-        std::size_t pos_offset = builder.push<float>({});
-        // Actually push the positions.
-        builder.data.resize(pos_offset);
-        for (float f : positions) push_float(builder.data, f);
-
-        std::size_t pos_bv = buffer_views.size();
-        buffer_views.push_back({pos_offset, positions.size() * 4, 34962});
-        std::size_t pos_acc = accessors.size();
-        accessors.push_back({pos_bv, 0, 5126, merged.vertices.size(), "VEC3"});
-
-        // Normals
-        std::vector<float> normals;
-        normals.reserve(merged.vertices.size() * 3);
-        for (const auto& v : merged.vertices) {
-            Vec3f n = opts.convert_to_gltf_coords
-                ? to_gltf(v.normal.x, v.normal.y, v.normal.z)
-                : Vec3f{v.normal.x, v.normal.y, v.normal.z};
-            normals.push_back(n.x);
-            normals.push_back(n.y);
-            normals.push_back(n.z);
-        }
-        std::size_t norm_offset = builder.push<float>({});
-        builder.data.resize(norm_offset);
-        for (float f : normals) push_float(builder.data, f);
-
-        std::size_t norm_bv = buffer_views.size();
-        buffer_views.push_back({norm_offset, normals.size() * 4, 34962});
-        std::size_t norm_acc = accessors.size();
-        accessors.push_back({norm_bv, 0, 5126, merged.vertices.size(), "VEC3"});
-
-        // Indices (uint32)
-        std::vector<uint32_t> indices;
-        indices.reserve(merged.triangles.size() * 3);
-        for (const auto& t : merged.triangles) {
-            indices.push_back(t.v0);
-            indices.push_back(t.v1);
-            indices.push_back(t.v2);
-        }
-        std::size_t idx_offset = builder.push<uint32_t>({});
-        builder.data.resize(idx_offset);
-        for (uint32_t i : indices) push_u32(builder.data, i);
-
-        std::size_t idx_bv = buffer_views.size();
-        buffer_views.push_back({idx_offset, indices.size() * 4, 34963});
-        std::size_t idx_acc = accessors.size();
-        accessors.push_back({idx_bv, 0, 5125, indices.size(), "SCALAR"});
-
-        lod_meshes.push_back({pos_acc, norm_acc, idx_acc,
-                              merged.vertices.size(), merged.triangles.size(),
-                              lod.level});
     }
 
-    if (lod_meshes.empty()) {
+    if (prims.empty()) {
         throw std::runtime_error("gltf_emitter: no meshes with geometry");
     }
 
@@ -282,11 +459,17 @@ GltfEmitResult emit_model_as_gltf(
                 static_cast<std::streamsize>(builder.data.size()));
     }
 
+    // ── Group primitives by LOD (one glTF mesh per LOD) ─────────────────
+    std::map<int, std::vector<std::size_t>> prims_by_lod;
+    for (std::size_t i = 0; i < prims.size(); ++i) {
+        prims_by_lod[prims[i].level].push_back(i);
+    }
+
     // ── Build the .gltf JSON ───────────────────────────────────────────
     f4::json::Writer w;
 
     w.raw("{\n");
-    w.raw("  \"asset\": { \"version\": \"2.0\", \"generator\": \"f4import models 0.4.0\" },\n");
+    w.raw("  \"asset\": { \"version\": \"2.0\", \"generator\": \"f4import models 0.5.0\" },\n");
     w.raw("  \"scene\": 0,\n");
 
     // Scene
@@ -304,20 +487,11 @@ GltfEmitResult emit_model_as_gltf(
     //   N+1..: DOF nodes (dof:unknown.0, dof:unknown.1, ...)
     //   ...: switch nodes
     //   ...: slot nodes
-    //
-    // For Stage 3 minimal: root + LOD mesh nodes + DOF nodes (from the
-    // model record's n_dofs). Switch and slot nodes are added when the
-    // model has them.
 
-    std::size_t n_lod_nodes = lod_meshes.size();
+    std::size_t n_lod_nodes = prims_by_lod.size();
     int n_dofs = rec->effective_dofs();
     int n_switches = rec->effective_switches();
     int n_slots = static_cast<int>(rec->slots.size());
-
-    std::size_t total_nodes = 1 + n_lod_nodes;
-    if (opts.tag_dof_switch_slot) {
-        total_nodes += static_cast<std::size_t>(n_dofs + n_switches + n_slots);
-    }
 
     w.raw("  \"nodes\": [\n");
 
@@ -331,21 +505,24 @@ GltfEmitResult emit_model_as_gltf(
     }
     w.raw("] }");
 
-    // LOD mesh nodes
-    for (std::size_t i = 0; i < lod_meshes.size(); ++i) {
-        w.raw(",\n    { \"name\": ");
-        w.string(lod_node_name(lod_meshes[i].level));
-        w.raw(", \"mesh\": ");
-        w.number(static_cast<unsigned long>(i));
-        w.raw(", \"extras\": { \"f4\": { \"v\": 1, \"kind\": \"lod\", \"id\": \"");
-        w.raw(std::to_string(lod_meshes[i].level));
-        w.raw("\", \"level\": ");
-        w.number(static_cast<unsigned long>(lod_meshes[i].level));
-        w.raw(" } } }");
+    // LOD mesh nodes (mesh index = position within prims_by_lod)
+    {
+        std::size_t mesh_index = 0;
+        for (const auto& [level, prim_indices] : prims_by_lod) {
+            w.raw(",\n    { \"name\": ");
+            w.string(lod_node_name(level));
+            w.raw(", \"mesh\": ");
+            w.number(static_cast<unsigned long>(mesh_index));
+            w.raw(", \"extras\": { \"f4\": { \"v\": 1, \"kind\": \"lod\", \"id\": \"");
+            w.raw(std::to_string(level));
+            w.raw("\", \"level\": ");
+            w.number(static_cast<unsigned long>(level));
+            w.raw(" } } }");
+            ++mesh_index;
+        }
     }
 
     // DOF nodes (dof:unknown.N)
-    std::size_t node_idx = 1 + n_lod_nodes;
     if (opts.tag_dof_switch_slot) {
         for (int d = 0; d < n_dofs; ++d) {
             w.raw(",\n    { \"name\": ");
@@ -355,7 +532,6 @@ GltfEmitResult emit_model_as_gltf(
             w.raw("\", \"index\": ");
             w.number(static_cast<unsigned long>(d));
             w.raw(", \"min\": 0.0, \"max\": 0.0, \"mult\": 1.0, \"flags\": 0 } } }");
-            ++node_idx;
         }
 
         // Switch nodes (sw:unknown.N)
@@ -367,7 +543,6 @@ GltfEmitResult emit_model_as_gltf(
             w.raw("\", \"index\": ");
             w.number(static_cast<unsigned long>(s));
             w.raw(" } } }");
-            ++node_idx;
         }
 
         // Slot nodes (slot:unknown.N)
@@ -389,7 +564,6 @@ GltfEmitResult emit_model_as_gltf(
             std::snprintf(tmp, sizeof(tmp), "%.6g, %.6g, %.6g", p.x, p.y, p.z);
             w.raw(tmp);
             w.raw("] } } }");
-            ++node_idx;
         }
     }
 
@@ -397,18 +571,41 @@ GltfEmitResult emit_model_as_gltf(
 
     // ── Meshes ───────────────────────────────────────────────────────
     w.raw("  \"meshes\": [\n");
-    for (std::size_t i = 0; i < lod_meshes.size(); ++i) {
-        if (i) w.raw(",\n");
-        const auto& lm = lod_meshes[i];
-        w.raw("    { \"name\": ");
-        w.string("LOD_" + std::to_string(lm.level));
-        w.raw(", \"primitives\": [ { \"POSITION\": ");
-        w.number(static_cast<unsigned long>(lm.positions_accessor));
-        w.raw(", \"NORMAL\": ");
-        w.number(static_cast<unsigned long>(lm.normals_accessor));
-        w.raw(", \"indices\": ");
-        w.number(static_cast<unsigned long>(lm.indices_accessor));
-        w.raw(", \"mode\": 4 } ] }");
+    {
+        std::size_t mesh_index = 0;
+        for (const auto& [level, prim_indices] : prims_by_lod) {
+            if (mesh_index) w.raw(",\n");
+            w.raw("    { \"name\": ");
+            w.string("LOD_" + std::to_string(level));
+            w.raw(", \"primitives\": [");
+            bool first_prim = true;
+            for (std::size_t pi : prim_indices) {
+                const auto& p = prims[pi];
+                if (!first_prim) w.raw(",");
+                first_prim = false;
+                w.raw("\n      { \"attributes\": { \"POSITION\": ");
+                w.number(static_cast<unsigned long>(p.positions_accessor));
+                w.raw(", \"NORMAL\": ");
+                w.number(static_cast<unsigned long>(p.normals_accessor));
+                if (p.uv_accessor != kNoAccessor) {
+                    w.raw(", \"TEXCOORD_0\": ");
+                    w.number(static_cast<unsigned long>(p.uv_accessor));
+                }
+                if (p.color_accessor != kNoAccessor) {
+                    w.raw(", \"COLOR_0\": ");
+                    w.number(static_cast<unsigned long>(p.color_accessor));
+                }
+                w.raw(" }, \"indices\": ");
+                w.number(static_cast<unsigned long>(p.indices_accessor));
+                w.raw(", \"material\": ");
+                w.number(static_cast<unsigned long>(p.material));
+                w.raw(", \"mode\": ");
+                w.number(static_cast<unsigned long>(p.mode));
+                w.raw(" }");
+            }
+            w.raw("\n    ] }");
+            ++mesh_index;
+        }
     }
     w.raw("\n  ],\n");
 
@@ -446,6 +643,77 @@ GltfEmitResult emit_model_as_gltf(
     }
     w.raw("\n  ],\n");
 
+    // ── Samplers / images / textures / materials ────────────────────
+    //
+    // Image URIs are relative to the .gltf file: write_texture_png puts
+    // them in <data>/Models/koreaobj/textures/NNNNN.png and this emitter
+    // writes .gltf files into <data>/Models/koreaobj/, so the relative
+    // path is always "textures/NNNNN.png".
+    if (!materials.empty()) {
+        w.raw("  \"samplers\": [\n");
+        w.raw("    { \"magFilter\": 9729, \"minFilter\": 9729, \"wrapS\": 10497, \"wrapT\": 10497 }\n");
+        w.raw("  ],\n");
+
+        w.raw("  \"images\": [\n");
+        bool first_img = true;
+        for (const auto& mat : materials) {
+            if (mat.tex_id < 0) continue;
+            if (!first_img) w.raw(",\n");
+            first_img = false;
+            char uri[32];
+            std::snprintf(uri, sizeof(uri), "textures/%05d.png", mat.tex_id);
+            w.raw("    { \"uri\": ");
+            w.string(uri);
+            w.raw(" }");
+        }
+        w.raw("\n  ],\n");
+
+        w.raw("  \"textures\": [\n");
+        {
+            int tex_idx = 0;
+            bool first_tex = true;
+            for (const auto& mat : materials) {
+                if (mat.tex_id < 0) continue;
+                if (!first_tex) w.raw(",\n");
+                first_tex = false;
+                w.raw("    { \"sampler\": 0, \"source\": ");
+                w.number(static_cast<unsigned long>(tex_idx));
+                w.raw(" }");
+                ++tex_idx;
+            }
+        }
+        w.raw("\n  ],\n");
+
+        w.raw("  \"materials\": [\n");
+        for (std::size_t i = 0; i < materials.size(); ++i) {
+            if (i) w.raw(",\n");
+            const auto& mat = materials[i];
+            w.raw("    { \"name\": ");
+            w.string(mat.name);
+            w.raw(", \"pbrMetallicRoughness\": { ");
+            if (mat.tex_id >= 0) {
+                // Textured: texture index = position among textured materials.
+                int tex_idx = 0;
+                for (std::size_t j = 0; j < i; ++j) {
+                    if (materials[j].tex_id >= 0) ++tex_idx;
+                }
+                w.raw("\"baseColorTexture\": { \"index\": ");
+                w.number(static_cast<unsigned long>(tex_idx));
+                w.raw(" }");
+            } else {
+                w.raw("\"baseColorFactor\": [1.0, 1.0, 1.0, 1.0]");
+            }
+            w.raw(", \"metallicFactor\": 0.0, \"roughnessFactor\": 0.9 }");
+            if (mat.chroma_keyed) {
+                // Chroma-keyed pixels were exported with alpha = 0 by the
+                // TEX decoder; MASK keeps them cut out in glTF viewers.
+                w.raw(", \"alphaMode\": \"MASK\", \"alphaCutoff\": 0.5");
+            }
+            w.raw(", \"doubleSided\": true }");
+        }
+        w.raw("\n  ],\n");
+    }
+
     // ── Buffers ─────────────────────────────────────────────────────
     w.raw("  \"buffers\": [\n");
     w.raw("    { \"byteLength\": ");
@@ -470,13 +738,18 @@ GltfEmitResult emit_model_as_gltf(
     GltfEmitResult result;
     result.gltf_path = gltf_path;
     result.bin_path = bin_path;
-    result.lod_count = lod_meshes.size();
+    result.lod_count = prims_by_lod.size();
     result.dof_count = static_cast<std::size_t>(n_dofs);
     result.switch_count = static_cast<std::size_t>(n_switches);
     result.slot_count = static_cast<std::size_t>(n_slots);
-    for (const auto& lm : lod_meshes) {
-        result.total_vertices += lm.vertex_count;
-        result.total_triangles += lm.triangle_count;
+    result.material_count = materials.size();
+    for (const auto& mat : materials) {
+        if (mat.tex_id >= 0) ++result.texture_count;
+    }
+    for (const auto& p : prims) {
+        result.total_vertices += p.vertex_count;
+        result.primitive_count += p.prim_count;
+        if (p.mode == 4) result.total_triangles += p.prim_count;
     }
     return result;
 }
