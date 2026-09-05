@@ -351,3 +351,36 @@ TEST(DigiMission, FullLoopTrafficPattern) {
     // As configured in digi_full_mission.json: "approach": "pattern".
     run_full_mission(load_scenario(scenario_path), /*require_pattern=*/true);
 }
+
+// ============================================================================
+// Tranche 35: Full mission parametrized over multiple aircraft.
+// The existing two tests run the F-16 only. This parametrized test runs the
+// complete taxi→takeoff→navigate→approach→land→taxi-back loop for each
+// aircraft in Data/Aircraft/, verifying the control law works end-to-end
+// across the fleet (fighters + heavy bombers + transports).
+// ============================================================================
+class DigiMissionMultiAircraft : public ::testing::TestWithParam<std::string> {};
+
+TEST_P(DigiMissionMultiAircraft, FullLoopStraightIn) {
+    if (!std::filesystem::exists(scenario_path)) {
+        GTEST_SKIP() << "digi_full_mission.json not configured (run CMake configure)";
+    }
+    const auto& stem = GetParam();
+
+    auto scenario = load_scenario(scenario_path);
+    scenario.approach_mode = "straight_in";
+
+    // Swap the aircraft config to the requested type.
+    if (scenario.aircraft.empty()) GTEST_SKIP() << "no aircraft in scenario";
+    const auto data_path = std::filesystem::path("Data/Aircraft") / (stem + ".json");
+    if (!std::filesystem::exists(data_path)) {
+        GTEST_SKIP() << "aircraft config not found: " << data_path;
+    }
+    scenario.aircraft[0].aircraft_config_path = std::filesystem::absolute(data_path).string();
+
+    run_full_mission(std::move(scenario), /*require_pattern=*/false);
+}
+
+INSTANTIATE_TEST_SUITE_P(AircraftTypes, DigiMissionMultiAircraft,
+    ::testing::Values("f16", "f15", "a10", "mig29", "f14", "f18", "f5",
+                      "b52", "b1b", "c130", "f111"));

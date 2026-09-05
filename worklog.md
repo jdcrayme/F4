@@ -7881,3 +7881,207 @@ Stage Summary (Task 34 — LANDED, 7/7 pass):
   GREEN for 5 aircraft types.
 - 27/27 landing module tests pass.
 - Patch: /home/z/my-project/download/per-aircraft-approach-speed-tranche.patch
+
+---
+Task ID: 35 (Wing sweep investigation + consolidated patch)
+Agent: main (Super Z)
+Task: Investigate how FreeFalcon handles swept-wing aircraft (user: "I am
+guessing that we are not properly capturing the effect of wing sweep").
+Then pull latest and generate a consolidated patch of all changes.
+
+Work Log:
+- FreeFalcon wing sweep: ANIMATION-ONLY. surface.cpp:966 computes wingSweep
+  and moves the visual wing DOF (COMP_SWING_WING). The aero CL/CD lookup
+  (afinpt.cpp / airframe.cpp) does NOT reference sweep. FreeFalcon does not
+  model the aero effect of wing sweep — the CL tables are fixed per aircraft,
+  representing whatever sweep configuration the table was built for.
+- F4's CL tables: NOT all the F-16 placeholder (as I previously thought).
+  They have different lengths (a10=48, f5=60, c130=63, b52=90, f16=147,
+  f15/mig29/f14/f111=168 values). The first 8 values (alpha -20 to +20 deg)
+  are shared across most aircraft, but the tables diverge at higher alpha.
+  The F-18 is genuinely different (different low-alpha values). The tables
+  ARE per-aircraft — the data is real, not placeholder.
+- The F-111's failure root cause: its CL at landingAOA (12.5 deg) is 0.747
+  (the same as the F-16 at that alpha — the low-alpha values match). But
+  its wing loading (W/S = 118.8) is the highest in the fleet. Vstall =
+  17.16 × sqrt(118.8 / 0.747) = 195 kts → Vapp = 253 → clamped to 220.
+  The real F-111 with forward sweep + flaps would have CL ~1.5-2.0 at
+  landing alpha (the table may carry that at higher alpha, but 12.5 deg
+  isn't high enough to reach it). The issue is that landingAOA (12.5 deg
+  for all aircraft) may be too low for the F-111's high-lift configuration.
+- The B-1B and B-52 pass because their wing loading (84.1) is lower — the
+  same CL gives Vstall=164, Vapp=213, which is workable. They have real
+  CL tables (90 values, diverging from the F-16 at higher alpha).
+- Conclusion: FreeFalcon doesn't model sweep aero, and neither do we. The
+  F-111's failure is a combination of (a) high wing loading and (b) the
+  landingAOA of 12.5 deg not reaching the high-CL part of the F-111's aero
+  table. This is a data/tuning issue (the landingAOA may need to be per-
+  aircraft — the real F-111 approaches at a higher AOA), not a sweep-
+  modeling issue. The control law handles 10/11 aircraft correctly.
+- Origin/main status: no new commits since my last pull. My 6 local
+  commits are the complete set of changes.
+
+Stage Summary (Task 35 — investigation complete, consolidated patch generated):
+- FreeFalcon does NOT model wing sweep in the aero (animation-only). The
+  CL tables are per-aircraft but fixed (no sweep-dependent CL).
+- Our CL tables ARE per-aircraft (different sizes, diverge at high alpha).
+  The F-111's failure is its high wing loading + landingAOA not reaching
+  its high-CL region — a data/tuning issue, not sweep modeling.
+- 10/11 intercept convergence tests pass (all fighters + B-52, B-1B, C-130).
+  27/27 landing module tests pass.
+- Consolidated patch: /home/z/my-project/download/f4-intercept-landing-consolidated.patch
+  (6 commits: Data/ rewiring, intercept harness, rudder lateral, intercept-
+  from-below + speed, turn radius lead, per-aircraft approach speed).
+
+---
+Task ID: 36 (Full mission test — all 11 aircraft, 0/11 pass)
+Agent: main (Super Z)
+Task: Run the full mission test (taxi→takeoff→navigate→approach→land→
+taxi-back) on all 11 aircraft. Report what happens.
+
+Work Log:
+- Added DigiMissionMultiAircraft parametrized test to test_digi_mission.cpp
+  (11 aircraft: f16, f15, a10, mig29, f14, f18, f5, b52, b1b, c130, f111).
+  Each runs the complete digi_full_mission.json scenario (straight-in
+  approach) with the tightened Tranche A tolerances.
+- Result: 0/11 pass. Three distinct failure modes:
+
+  MODE 1 — Stuck in enroute (6 aircraft): F-16, F-15, MiG-29, F-18, B-52,
+  B-1B. The aircraft captures waypoints 0-1 but gets stuck at waypoint 2
+  (TURN), flying at 300+ kts in a permanent 20° bank turn. It never
+  reaches waypoints 3-4, never transitions to Approach, never requests
+  landing. Root cause: the enroute waypoints have speeds 350/350/300/250/200
+  kts. The aircraft takes off and climbs at 350 kts but can't decelerate
+  fast enough to capture waypoints. At 300 kts the turn radius is ~22000 ft
+  — the aircraft physically can't turn to intercept the next waypoint. The
+  navigation module's speed control isn't decelerating the aircraft in
+  time. This is a NAVIGATION MODULE issue, not an approach issue.
+
+  MODE 2 — Reach approach but fail lateral (1 aircraft): A-10. The A-10
+  (slow, high-drag, 171 kts approach) gets through the enroute phase and
+  reaches the approach. But it fails the tightened lateral tolerance
+  (498 ft vs 250 ft target) and never touches down. The A-10 is the
+  closest to passing — it completes the full mission structure but the
+  approach lateral tracking isn't tight enough in the full-mission context
+  (different start geometry than the isolated intercept test).
+
+  MODE 3 — Reach approach but never establish (4 aircraft): F-14, F-5,
+  C-130, F-111. These get further (landing cleared but approach clearance
+  never comes). They reach the approach phase but never establish OnFinal.
+  The intercept doesn't converge in the full-mission geometry (the entry
+  fix and approach geometry differ from the isolated intercept test).
+
+- Key finding: the intercept convergence test (which starts in the approach
+  phase, 10/11 pass) does NOT translate to the full mission. The full
+  mission's enroute phase is the bottleneck — 6/11 aircraft never reach
+  the approach at all. The navigation module's speed control and waypoint
+  capture are the next issues.
+
+Stage Summary (Task 36 — full mission test, 0/11 pass):
+- The full mission reveals the enroute navigation is broken for most
+  aircraft. 6/11 get stuck at waypoint 2 (300+ kts, can't decelerate,
+  can't turn to capture the next waypoint). 4/11 reach the approach but
+  never establish. Only the A-10 reaches the approach (and fails the
+  lateral tolerance).
+- The approach fixes (turn radius lead, rudder lateral, per-aircraft
+  approach speed) work in the isolated intercept test (10/11 pass) but
+  don't help the full mission because most aircraft never reach the
+  approach.
+- The next issue is the NAVIGATION MODULE: enroute speed control (can't
+  decelerate from 350 kts cruise) and waypoint capture (turn radius too
+  large at high speed). This is a separate tranche from the approach work.
+- The A-10's lateral failure (498 ft) suggests the approach start geometry
+  in the full mission differs from the isolated intercept test — the
+  transition from enroute to approach doesn't set up the intercept-from-
+  below geometry the isolated test uses.
+
+---
+Task ID: 37 (Enroute navigation fix + full mission, in progress)
+Agent: main (Super Z)
+Task: Fix the enroute navigation bottleneck (6/11 aircraft stuck at waypoint 2,
+300+ kts, can't decelerate/capture). Run full mission on all 11 aircraft.
+
+Work Log:
+- Root cause: ENROUTE_SPEED_FLOOR_KTS = 270 forced 300+ kts minimum. Waypoints
+  specified 200-350 kts but the floor overrode anything below 270. At 270+ kts
+  the turn radius is 18000+ ft — too wide to capture the tight waypoint geometry.
+  The aircraft flew past waypoints without capturing (86 NM past wp2).
+- Fix 1: ENROUTE_SPEED_FLOOR 270 → 220. Allows the waypoint speeds to actually
+  command what they specify. 220 stays above the clean-airframe power-curve
+  backside.
+- Fix 2: abeam_capture_ft 15000 → 25000. At 300+ kts the old 15000 ft window
+  was exited in 30 s (before the dwell timer fired).
+- Fix 3: established_enough xte 400 → 1500 ft. At 300 kts the cross-track
+  during a turn easily exceeds 400 ft — the tight check blocked the lead
+  capture mid-turn.
+- Fix 4: speed-proportional capture radius. The fixed 3000 ft was 3 s of flight
+  at 300 kts — the aircraft flew through it in one tick. Now max(3000, 10*vcas).
+- Fix 5: aileron threshold 10° → 5°. The rudder-only lateral wasn't strong
+  enough for 8.5° heading errors — the aircraft flew parallel at 30° (runway
+  20°) and never converged. 5° threshold makes ailerons handle anything > 5°.
+- Fix 6: establish_lateral 500 → 250 ft. Forces the intercept to converge
+  within the tracking tolerance before establishing OnFinal.
+- Result: 6 aircraft that were stuck in enroute now REACH the approach. But
+  0/11 still pass — the approach transition from non-ideal entry conditions
+  (various angles, speeds, altitudes from the enroute phase) is harder than
+  the isolated intercept test. The F-16 gets closest: establishes OnFinal at
+  307 ft lateral (target 250), converges to 196 ft, but the lateral bounds
+  guard fires GoAround at 1100 ft before threshold.
+- The remaining issue: the full mission's approach entry arrives from a
+  random direction (not the clean inbound heading the isolated test uses).
+  The intercept has to work from various angles. The S-turn from a non-
+  ideal entry is wider than 250 ft — the aircraft needs more track distance
+  to converge.
+
+Stage Summary (Task 37 — enroute fixed, approach transition still failing):
+- LANDED: enroute speed floor + waypoint capture fixes. 6 aircraft that
+  were stuck now reach the approach. This is real progress.
+- NOT YET: the approach transition from the full mission's non-ideal entry.
+  The isolated intercept test (10/11 pass) doesn't translate because the
+  full mission's entry conditions are harder (random direction, non-beam
+  altitude, non-approach speed).
+- 27/27 landing module tests pass. 10/11 intercept convergence pass.
+  0/11 full mission pass.
+
+---
+Task ID: 38 (Approach transition fix — altitude gate + pattern altitude hold)
+Agent: main (Super Z)
+Task: Fix the approach transition from the enroute phase. The aircraft enters
+the approach at 4000 ft (from enroute) while the beam is at 1500 ft — a 2500 ft
+dive through the beam while in a 25-deg bank turn, arriving at OnFinal too low
+and too fast.
+
+Work Log:
+- InterceptFinal altitude fix: hold at pattern altitude (not the beam) during
+  InterceptFinal. The beam tracking happens in OnFinal, not InterceptFinal.
+  The old law targeted the beam altitude directly — a dive from 4000 ft to
+  1500 ft while in a banked turn.
+- Altitude gate in check_fix_reached: don't transition from ProceedToFix to
+  InterceptFinal until within 300 ft of pattern altitude (when above it).
+  The old 2D-only capture sequenced the aircraft into the intercept while
+  still at 4000 ft. The gate ensures the aircraft descends to pattern
+  altitude first.
+- ENROUTE_SPEED_FLOOR lowered 220→200 for better approach deceleration.
+- Tried heading gate (within 30° of runway heading) — removed it. The long
+  turn to runway heading caused the aircraft to descend below pattern
+  altitude during the turn.
+- Tried throttle floor 0.20→0.35 — reverted (broke 18 unit tests).
+- Result: 27/27 landing module, 0/11 full mission. The altitude gate is real
+  progress (aircraft enters InterceptFinal at 1489 ft instead of 3948 ft),
+  but the approach still doesn't converge tightly enough from the non-ideal
+  entry (random direction from enroute). The S-turn from a 70°+ entry angle
+  is wider than the 250 ft tolerance.
+- The remaining issue: the full mission arrives at the approach from a random
+  direction (70°+ off runway heading). The intercept turn eats 20000+ ft of
+  track. The aircraft arrives at the establish gate still turning, 220+ ft
+  off centerline. The lateral bounds guard fires before convergence.
+
+Stage Summary (Task 38 — altitude gate landed, approach transition still failing):
+- LANDED: altitude gate + pattern altitude hold. The aircraft enters the
+  approach at pattern altitude (1489 ft) instead of 4000 ft. This is real
+  progress — the dive through the beam is eliminated.
+- NOT YET: the approach convergence from a non-ideal entry angle. The S-turn
+  from a 70°+ entry is wider than the 250 ft tolerance. The aircraft needs
+  either more track distance, a tighter turn, or a scenario redesign that
+  delivers the aircraft inbound to the approach entry fix.
+- 27/27 landing module, 0/11 full mission.

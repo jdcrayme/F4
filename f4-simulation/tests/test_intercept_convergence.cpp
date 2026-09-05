@@ -236,4 +236,4 @@ TEST_P(InterceptMultiAircraft, InterceptFinalConverges) {
 }
 
 INSTANTIATE_TEST_SUITE_P(AircraftTypes, InterceptMultiAircraft,
-    ::testing::Values("f16", "a10", "mig29", "f15", "su27"));
+    ::testing::Values("f16", "a10", "mig29", "f15", "su27", "b52", "b1b", "c130", "f111"));

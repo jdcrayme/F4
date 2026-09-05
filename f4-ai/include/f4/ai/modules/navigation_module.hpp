@@ -132,8 +132,16 @@ public:
     [[nodiscard]] double cross_track_ft() const;
 
     // --- Configuration ---
-    double capture_radius_ft{3000.0};  ///< waypoint capture radius (last wp)
-    double abeam_capture_ft{15000.0};  ///< off-nose capture distance window
+    double capture_radius_ft{3000.0};  ///< waypoint capture radius (last wp).
+                                       ///< Tranche 37: also used as a floor for
+                                       ///< the speed-proportional capture
+                                       ///< (effective_capture = max(this, 10*vcas)).
+    double abeam_capture_ft{25000.0};  ///< off-nose capture distance window.
+                                       ///< Tranche 37: widened from 15000 — at
+                                       ///< 300+ kts the aircraft exits the 15000
+                                       ///< ft window in 30 s (before the dwell
+                                       ///< timer fires), flying 86 NM past the
+                                       ///< waypoint without capturing.
     double abeam_bearing_rad{1.4};     ///< ~80 deg off the nose = "passed it"
     double min_wp_dwell_s{30.0};       ///< min time on a wp before abeam capture
     double turn_speed_kts{250.0};      ///< slow to this for large heading changes

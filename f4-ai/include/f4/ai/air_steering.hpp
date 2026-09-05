@@ -254,7 +254,7 @@ public:
                                           ///<  200 kts / 150 corner = 0.067 rad
                                           ///<  pedal per 10-deg heading error.
     double approach_rudder_max{0.3};      ///< clamp on the rudder command
-    double approach_aileron_threshold_rad{0.175}; ///< ~10 deg: below this, use
+    double approach_aileron_threshold_rad{0.087}; ///< ~5 deg: below this, use
                                           ///<  rudder only; above, the bank
                                           ///<  cascade assists (intercept cuts)
     double approach_speed_pitch_gain{0.003}; ///< stick per kt of speed error

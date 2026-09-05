@@ -243,7 +243,7 @@ public:
                                         // aiming at the threshold itself
                                         // makes the flare land short)
     double establish_hdg_tol_rad{0.26}; // ~15 deg on-course for Established
-    double establish_lateral_ft{500.0}; // localizer capture tolerance
+    double establish_lateral_ft{250.0}; // Tranche 37: tightened from 500 — forces the intercept to converge within the tracking tolerance before establishing OnFinal
     double localizer_gain{0.0005};      // heading correction per ft of xtrack
                                         // STAB-E20/E53: softened from 0.0009
                                         // (and originally 0.0015) — at 200

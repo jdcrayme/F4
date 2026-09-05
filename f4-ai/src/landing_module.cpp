@@ -520,25 +520,29 @@ AIControlOutput LandingModule::update(double dt, const flight::IAircraftState* s
             // climb) until the beam is within 200 ft, then ride it down.
             // From-above intercepts (straight-in at pattern altitude) are
             // unaffected: the beam is already below.
+            // Tranche 38: intercept from below (user guidance: "intercept
+            // from below while stable and established on course"). The
+            // InterceptFinal HOLDS AT PATTERN ALTITUDE — it does NOT track
+            // the beam down. The beam descends toward the aircraft; when it
+            // reaches pattern altitude (~27000 ft out at 3 deg), the
+            // aircraft is established on the beam (intercept from below).
+            // OnFinal owns the beam tracking; InterceptFinal owns the
+            // lateral convergence + level flight.
+            //
+            // The old law targeted the beam altitude directly — when the
+            // aircraft arrived at 4000 ft (from enroute) and the beam was
+            // at 1500 ft, it dove 2500 ft through the beam while in a 25-deg
+            // bank turn, sinking to 604 ft (below the beam) and arriving at
+            // OnFinal too low and too fast (GoAround every time).
             const double beam_now = glide_slope_alt_ft();
-            double intercept_alt = std::min(pattern_altitude_ft_,
-                                            std::max(beam_now,
-                                                     threshold_alt_ft_ + intercept_floor_agl_ft));
-            // Guard 1 — pattern mode only: the straight-in arrives at
-            // pattern altitude ABOVE the beam and can never be "below" it
-            // by design; applying the hold there fought the from-above
-            // descent (energetic swings 275-990 AGL, balloon-guard relay,
-            // threshold overflown at 160 ft). Guard 2: once LATERALLY
-            // established (within 1,500 ft of the localizer), riding the
-            // beam is legitimate even if it means climbing back after a
-            // transient dip — the hold-low law is for the intercept TURN
-            // phase, not the final itself.
-            if (fly_traffic_pattern &&
-                beam_now > current_alt_msl_ft_ + 200.0 &&
-                std::abs(course_lateral_ft()) > 1500.0) {
-                intercept_alt = std::min(intercept_alt,
-                                         std::max(threshold_alt_ft_ + intercept_floor_agl_ft,
-                                                  current_alt_msl_ft_));
+            const double floor_alt = threshold_alt_ft_ + intercept_floor_agl_ft;
+            // Hold at pattern altitude (or the floor, whichever is higher).
+            // The beam is tracked in OnFinal, not here.
+            double intercept_alt = std::max(pattern_altitude_ft_, floor_alt);
+            // Once the beam is within 200 ft of pattern altitude (close-in),
+            // start tracking it — this is the intercept-from-below capture.
+            if (beam_now < intercept_alt + 200.0) {
+                intercept_alt = std::max(beam_now, floor_alt);
             }
             return track_final(intercept_alt,
                 approach_speed_kts,
@@ -729,6 +733,20 @@ void LandingModule::check_fix_reached() {
     // no timer => possible insta-skip while heading away or an orbit
     // deadlock; the timer resolves both).
     if (waypoint_captured(entry_fix_, fix_timer_, fix_radius_ft, fix_abeam_ft)) {
+        // Tranche 38: altitude gate. Don't transition to InterceptFinal
+        // until within 300 ft of pattern altitude. The old 2D-only capture
+        // sequenced the aircraft into the intercept while still at 4000 ft
+        // (from the enroute phase) — the dive to the beam from 4000 ft
+        // while in a 25-deg bank turn arrived at OnFinal too low and too
+        // fast (GoAround every time). The ProceedToFix state targets
+        // pattern altitude; this gate ensures it actually gets there
+        // before the intercept begins.
+        // Only gate when ABOVE pattern altitude (the enroute arrival case).
+        // Below pattern altitude (unit tests, go-around re-entry) proceeds
+        // normally — the aircraft will climb to pattern altitude.
+        if (current_alt_msl_ft_ > pattern_altitude_ft_ + 300.0) {
+            return;  // Still descending to pattern altitude — hold in ProceedToFix
+        }
         sm_.process(fly_traffic_pattern ? LandingEvent::PatternEntry
                                         : LandingEvent::FixReached);
     }
