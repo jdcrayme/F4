@@ -30,8 +30,8 @@
   "waypoints": [
     { "name": "DEPART",    "position": { "x": 0.0,       "y": 30000.0,    "z": 3000.0 }, "speed_kts": 250.0 },
     { "name": "CROSSWIND", "position": { "x": 182280.0,  "y": 30000.0,    "z": 3000.0 }, "speed_kts": 200.0 },
-    { "name": "DOWNWIND",  "position": { "x": 182280.0,  "y": -303806.0,  "z": 1500.0 }, "speed_kts": 200.0 },
-    { "name": "BASE",      "position": { "x": 0.0,       "y": -303806.0,  "z": 1500.0 }, "speed_kts": 200.0 },
+    { "name": "DOWNWIND",  "position": { "x": 182280.0,  "y": -303806.0,  "z": 3000.0 }, "speed_kts": 200.0 },
+    { "name": "BASE",      "position": { "x": 0.0,       "y": -303806.0,  "z": 3000.0 }, "speed_kts": 200.0 },
     { "name": "APCH_FIX",  "position": { "x": 0.0,       "y": -121522.0,  "z": 1500.0 }, "speed_kts": 180.0 }
   ],
   "approach": "straight_in",

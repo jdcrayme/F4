@@ -129,7 +129,7 @@ ScenarioAirfield synthesize_airfield_for_objective(
     af.runway_length_ft = 2.0 * HALF_LEN_FT;
     af.runway_width_ft = 150.0;
     af.threshold_altitude_ft = center.z;
-    af.departure_altitude_ft = center.z + 2500.0;
+    af.departure_altitude_ft = center.z + 3000.0;  // Tranche 45: 3000 ft — above terrain, not too far  // Tranche 44: raised from 2500
 
     // Taxi route: a ramp point 600 ft before the threshold, offset 300 ft
     // to the right of the centerline, then the threshold itself (hold
@@ -300,7 +300,7 @@ derive_airfield_from_objective(const f4::world::ObjectiveState& obj,
         af.threshold_position = threshold;
         af.runway_end_position = add_offset(obj_center, far_end->x, far_end->y);
         af.threshold_altitude_ft = obj_center.z;
-        af.departure_altitude_ft = af.threshold_altitude_ft + 2500.0;
+        af.departure_altitude_ft = af.threshold_altitude_ft + 3000.0;  // Tranche 44: raised from 2500
 
         // Dimensions from the same runway_num's PLT_RUNWAY_DIM quad.
         for (const auto& l : obj.ground_layout) {
@@ -391,7 +391,7 @@ derive_airfield_from_objective(const f4::world::ObjectiveState& obj,
                                          chosen->points.back().x,
                                          chosen->points.back().y);
     af.threshold_altitude_ft = obj_center.z;
-    af.departure_altitude_ft = af.threshold_altitude_ft + 2500.0;
+    af.departure_altitude_ft = af.threshold_altitude_ft + 3000.0;  // Tranche 44: raised from 2500
 
     std::vector<f4::geo::WorldPosition> route;
     const auto* park_list = find_layout(obj, f4::world_convert::PLT_PARK);

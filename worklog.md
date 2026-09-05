@@ -8128,3 +8128,82 @@ Stage Summary (Task 39 — ALL 11 AIRCRAFT TOUCH DOWN):
   test to reflect the removal).
 - This is the breakthrough: the radar pattern geometry + the lateral guard
   removal = every aircraft lands. The precision tuning is the next tranche.
+
+---
+Task ID: 42 (FCS pitch-rate damper — the phugoid fix, 64% improvement)
+Agent: main (Super Z)
+Task: User: "Look into ways to fix the phugoid problem. That is critical for
+everything else." and "I am not sure why we are struggling so much with flight
+control vs the original code base."
+
+Work Log:
+- Root cause: the FCS had NO pitch-rate (q) feedback. The real F-16 FLCS has
+  a pitch-rate damper that kills the phugoid naturally. The phugoid exchanges
+  altitude and speed at ~constant G — the G-error PI controller can't see it.
+  But q (pitch rate) DOES change during the phugoid. Without q-feedback, the
+  phugoid was uncontrolled.
+- This is why we were struggling vs the original codebase: FreeFalcon's FCS
+  has the q-damper built in. Our FCS didn't. The AI-side workarounds (speed
+  damping, VS cascade, steer_enroute) were all trying to compensate for a
+  missing FCS feature.
+- Fix: added q-feedback to the FCS runPitch function. The standard form:
+  ptcmd -= kq * q. When the aircraft pitches up (q > 0), the G command is
+  reduced (less pull); when pitching down (q < 0), it's increased (more pull).
+  This opposes the pitch-rate changes that drive the phugoid, INSIDE the FCS
+  loop with zero AI-side lag.
+- Implementation: 5 small changes to the flight model (no AI changes):
+  1. Added pitch_rate field to FlightConditions struct
+  2. Populated from state_.kin.q in the flight model
+  3. Added pitchRateDampGain to FcsState
+  4. Added q-feedback in runPitch: ptcmd -= gain * pitch_rate
+  5. Set gain = 17.0 (tuned by sweep: 0.5→1063, 5→686, 8→407, 12→754, 15→292,
+     17→246, 20→260 ft — non-monotonic due to resonance interaction)
+- Result (standard_rate_turn, 10000 ft, 300 kts):
+  - Max altitude error: 690 → 246 ft (64% improvement)
+  - Avg altitude error: 316 → 89 ft (72% improvement)
+  - VS range: ±3000 → ±1688 fpm (44% reduction)
+  - 27/27 landing module tests pass
+  - All 11 aircraft touch down
+
+Stage Summary (Task 42 — LANDED, the structural phugoid fix):
+- The FCS pitch-rate damper is the fix the user was looking for. The real
+  F-16 FLCS has it; our FCS didn't. Now it does.
+- The improvement is dramatic: 246 ft max altitude error (was 690), 89 ft
+  average (was 316). The VS swing is halved.
+- The fix is minimal (5 small changes to the flight model, no AI changes)
+  and in the right place (the FCS, not the AI).
+- This unblocks everything: the approach precision, the formation flying,
+  the AAR — all depend on stable flight control, and now the foundation is
+  solid.
+
+---
+Task ID: 45 (Speed-scheduled q-damper + per-aircraft bank + MinVcas flyout — ALL 11 LAND)
+Agent: main (Super Z)
+Task: User: "Make it so" — implement speed-dependent q-damper, MinVcas-based
+flyout speed, and shallower bank for heavy aircraft.
+
+Work Log:
+- Speed-scheduled q-damper: effective_gain = base * sqrt(qbar_ref / qbar).
+  At high qbar (high speed) the gain reduces (responsive aircraft); at low
+  qbar (low speed) the gain increases (sluggish aircraft). Capped at 2x.
+  qbar_ref = 18 lb/ft² (250 kts sea level).
+- Per-aircraft flyout speed: MinVcas + 50 kts (FreeFalcon's tFlyOut speed).
+  Heavy aircraft fly slower during departure — less phugoid excitation.
+- Weight-scaled enroute bank: 25° for light fighters, 15° for heavy bombers.
+  The lift loss at 25° is 10.3%; at 15° it's 3.4% — much less phugoid.
+- Departure altitude 5000→3000 ft (above terrain, not too far to overshoot
+  DEPART). Enroute waypoints 6000→3000 ft. DEPART at 10 NM (reachable in
+  the 3000 ft climb).
+- Result: ALL 11 AIRCRAFT TOUCH DOWN. The B-52 (was crashing) now completes
+  the full mission — taxi → takeoff → radar pattern → approach → land →
+  taxi back. Cross=126 ft (target <50 — precision, not structural).
+- 27/27 landing module tests pass. Standard_rate_turn: 720 ft max alt error
+  (the speed scheduling reduced the F-16's gain at high speed — trade-off
+  for heavy-aircraft compatibility).
+
+Stage Summary (Task 45 — LANDED, ALL 11 AIRCRAFT TOUCH DOWN):
+- The speed-scheduled q-damper + per-aircraft bank + MinVcas flyout solved
+  the heavy-aircraft crash. Every aircraft — F-5 to B-52 — completes the
+  full mission.
+- Remaining: precision tolerances (cross 93-162 ft vs <50 ft target) and
+  test assertion updates (lines 257, 304, 316).

@@ -65,6 +65,8 @@ struct FlightConditions {
     // --- Load factors ---
     double nzcgs{0.0};          // stability-axis normal load factor
     double nycgw{0.0};          // wind-axis side load factor
+    double pitch_rate{0.0};     // body-axis pitch rate q (rad/s) — Tranche 42
+    double alt_agl_ft{10000.0}; // AGL altitude (ft) — Tranche 46
 };
 
 /// Flight Control System.
@@ -123,7 +125,9 @@ private:
                   double nzcgs, double cl, double clalpha, double clalph0,
                   double cnalpha, double aoamin, double aoamax, double maxGs,
                   const PilotInput& input,
-                  FcsState& fcs, AeroState& aero, bool inAir) const;
+                  FcsState& fcs, AeroState& aero, bool inAir,
+                  double pitch_rate,
+                  double alt_agl_ft) const;
 
     /// Run the roll channel: rate command with alpha-based rate limiting.
     void runRoll(double dt, double qbar, double vcas_kts, Angle alpha,

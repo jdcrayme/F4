@@ -1,0 +1,25 @@
+diff a/f4-flight-model/src/flight_model.cpp b/f4-flight-model/src/flight_model.cpp	(rejected hunks)
+@@ -201,6 +201,15 @@ void FlightModel::initTrimAndAtmosphere(double initialAltitude_ft) {
+     state_.fcs.pitchAlphaLag.reset(0.0);
+     state_.fcs.pitchRateLag.reset(0.0);
+     state_.fcs.pitchIntegral.reset(0.0);
++    // Tranche 44: per-aircraft q-damper gain. Scale by sqrt(weight_ratio)
++    // — heavy aircraft have longer phugoid periods and need more damping.
++    // The F-16 (21,819 lb) is the baseline at gain=17. The B-52 (336,500 lb)
++    // gets gain=17*sqrt(336500/21819) = 17*3.93 = 67.
++    {
++        const double w = cfg_.geometry.emptyWeight.value();
++        const double weight_ratio = std::max(0.5, w / 21819.0);
++        state_.fcs.pitchRateDampGain = 17.0 * std::sqrt(weight_ratio);
++    }
+     state_.fcs.aoacmd = state_.aero.alpha;
+ 
+     // --- Set theta so gamma = theta - alpha = 0 (level flight) ---
+@@ -359,6 +368,7 @@ void FlightModel::minorStep(double dt, const PilotInput& input) {
+     fc.loadingFraction = state_.fuel.loadingFraction;
+     fc.inAir           = state_.gear.inAir;
+     fc.nzcgs           = state_.loads.nzcgs;
++    fc.pitch_rate      = state_.kin.q;  // Tranche 42: body pitch rate for FCS q-damper
+     fc.nycgw           = state_.loads.nycgw;
+     fcs_.update(input, fc, f, a, dt);
+ 

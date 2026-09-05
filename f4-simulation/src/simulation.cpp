@@ -510,6 +510,23 @@ void Simulation::spawn_from_scenario_list() {
         brain.takeoff().departure_alt_ft = scenario_.airfield.departure_altitude_ft;
         brain.takeoff().taxi_speed_kts = 15.0;
 
+        // Tranche 45: per-aircraft flyout speed + enroute bank (FreeFalcon:
+        // flyout at MinVcas+50, bank scaled by aircraft weight). Heavy
+        // aircraft fly slower (less phugoid excitation) and bank shallower
+        // (less lift loss in turns).
+        if (aircraft_cfg_.geometry.area.value() > 0.0) {
+            const double min_vcas = aircraft_cfg_.geometry.minVcas.value();
+            brain.takeoff().flyout_speed_kts = min_vcas + 50.0;
+
+            // Scale the enroute bank by aircraft weight: light fighters get
+            // 25 deg, heavy bombers get 15 deg. The lift loss at 25 deg is
+            // 10.3%; at 15 deg it's 3.4% — much less phugoid excitation.
+            const double w = aircraft_cfg_.geometry.emptyWeight.value();
+            const double bank_deg = std::clamp(25.0 - (w - 20000.0) / 20000.0,
+                                               15.0, 25.0);
+            brain.navigation().air_steering.max_bank_rad = bank_deg * 0.01745329;
+        }
+
         // Tranche 33: per-aircraft approach speed = 1.3 × landing stall speed.
         // Vstall_land = K_STALL × sqrt((W/S) / |CL_landing|) — the FM's own
         // stall formula (aerodynamics.cpp:206) using CL at landingAOA (the

@@ -165,7 +165,7 @@ void FlightControlSystem::update(const PilotInput& pilot,
              alpha, cosmu, cosgam, singam,
              nzcgs, aero.cl, aero.clalpha, aero.clalph0,
              aero.cnalpha, aoamin, aoamax, maxGs,
-             pilot, fcs, aero, inAir);
+             pilot, fcs, aero, inAir, fc.pitch_rate, fc.alt_agl_ft);
 
     runRoll(dt, qbar, vcas_kts, alpha,
             aero.gearPos, phi,
@@ -354,7 +354,9 @@ void FlightControlSystem::runPitch(double dt, double qbar, double qsom,
                                     double aoamin, double aoamax, double maxGs,
                                     const PilotInput& input,
                                     FcsState& fcs, AeroState& aero,
-                                    bool inAir) const {
+                                    bool inAir,
+                                    double pitch_rate,
+                                    double alt_agl_ft) const {
     (void)qbar; (void)vt; (void)vcas_kts;
     (void)alpha;  // pitch channel writes aero.alpha; current value unused
     (void)cl; (void)clalpha; (void)singam;
@@ -471,6 +473,26 @@ void FlightControlSystem::runPitch(double dt, double qbar, double qsom,
     // FM's inAir flag is authoritative ground contact.
     const bool on_ground = (!inAir && aero.gearPos > 0.5 && nzcgs < 0.8);
     const bool ground_guard = (aero.gearPos > 0.5 && qsom < 5.0) || on_ground;
+    // Tranche 42: pitch-rate (q) feedback — the phugoid damper INSIDE the FCS.
+    // The real F-16 FLCS has q-feedback that kills the phugoid naturally.
+    // The phugoid exchanges altitude and speed at ~constant G, so the G-error
+    // PI controller can't see it. But q (pitch rate) DOES change during the
+    // phugoid. Subtracting kq*q from the G command opposes the pitch-rate
+    // changes, damping the phugoid with zero AI-side lag.
+    // Tranche 45: speed-scheduled q-damper. At high qbar (high speed) the
+    // aircraft is responsive — reduce the gain to prevent over-damping.
+    // At low qbar (low speed) keep the full gain. effective_gain =
+    // base * sqrt(qbar_ref / qbar), capped at 2x.
+    // Tranche 44: gate off during takeoff/landing (gear down).
+    // Tranche 46: gate off below 200 ft AGL (flare zone) — the high gain
+    // fights the flare pitch-up. Also gate off when gear down (takeoff/landing).
+    const double alt_agl = alt_agl_ft;  // passed in from FlightModel
+    if (fcs.pitchRateDampGain > 0.0 && aero.gearPos < 0.5 && alt_agl > 200.0) {
+        constexpr double QBAR_REF = 18.0;  // lb/ft² at 250 kts sea level
+        const double qbar_ratio = std::sqrt(QBAR_REF / std::max(1.0, qbar));
+        const double effective_gain = fcs.pitchRateDampGain * std::min(2.0, qbar_ratio);
+        ptcmd -= effective_gain * pitch_rate;
+    }
     const double error = ground_guard ? 0.0
                         : (ptcmd - (nzcgs - cosmu_lim * cosgam - gearGravityTerm)) * fcs.kp05;
 

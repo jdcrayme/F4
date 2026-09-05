@@ -1,0 +1,18 @@
+diff a/f4-ai/src/navigation_module.cpp b/f4-ai/src/navigation_module.cpp	(rejected hunks)
+@@ -321,8 +321,14 @@ AIControlOutput NavigationModule::controls_for_waypoint() const
+     // at the approach entry fix at 3000+ ft instead of 1500 ft (too high for
+     // a glideslope-from-below intercept). 500 ft MSL is above Korea's coastal
+     // terrain (near sea level) and below the 1500 ft pattern altitude.
+-    constexpr double TERRAIN_CLEARANCE_FLOOR_MSL = 500.0;
+-    double target_alt = std::max(wp.position.z, TERRAIN_CLEARANCE_FLOOR_MSL);
++    constexpr double TERRAIN_CLEARANCE_FLOOR_MSL = 3000.0;  // Tranche 43: raised from 500 — Korea has mountains
++    // The LAST waypoint (approach entry fix) is NOT floored — it needs its
++    // specified altitude (1500 ft) for the glideslope-from-below intercept.
++    // The landing module's altitude gate (check_fix_reached) handles the
++    // descent to pattern altitude before the intercept begins.
++    const bool is_last_wp = (wp_index_ >= route_.size() - 1);
++    double target_alt = is_last_wp ? wp.position.z
++                                   : std::max(wp.position.z, TERRAIN_CLEARANCE_FLOOR_MSL);
+     return air_steering.steer(desired_hdg, target_alt, speed,
+                               steering_input());
+ }

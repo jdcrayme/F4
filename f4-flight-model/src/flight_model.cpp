@@ -201,6 +201,14 @@ void FlightModel::initTrimAndAtmosphere(double initialAltitude_ft) {
     state_.fcs.pitchAlphaLag.reset(0.0);
     state_.fcs.pitchRateLag.reset(0.0);
     state_.fcs.pitchIntegral.reset(0.0);
+    // Tranche 45: per-aircraft q-damper base gain. Scales with sqrt(weight)
+    // — heavy aircraft have longer phugoid periods and need more damping.
+    // The FCS runPitch modulates this by qbar (speed scheduling).
+    {
+        const double w = cfg_.geometry.emptyWeight.value();
+        const double weight_ratio = std::max(0.5, w / 21819.0);
+        state_.fcs.pitchRateDampGain = std::min(60.0, 40.0 * std::sqrt(weight_ratio));  // Tranche 46: capped at 60  // Tranche 46: raised from 17 to compensate for speed scheduling
+    }
     state_.fcs.aoacmd = state_.aero.alpha;
 
     // --- Set theta so gamma = theta - alpha = 0 (level flight) ---
@@ -359,6 +367,8 @@ void FlightModel::minorStep(double dt, const PilotInput& input) {
     fc.loadingFraction = state_.fuel.loadingFraction;
     fc.inAir           = state_.gear.inAir;
     fc.nzcgs           = state_.loads.nzcgs;
+    fc.pitch_rate      = state_.kin.q;  // Tranche 42: body pitch rate for FCS q-damper
+    fc.alt_agl_ft     = -state_.kin.z - state_.gear.groundZ_ft;  // Tranche 46: AGL
     fc.nycgw           = state_.loads.nycgw;
     fcs_.update(input, fc, f, a, dt);
 

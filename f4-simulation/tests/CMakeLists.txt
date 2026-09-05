@@ -202,3 +202,8 @@ endif()
 # spawn-path origin-stamp case) — same define as the combat tests.
 target_compile_definitions(test_campaign_result_sink PRIVATE
     F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}")
+
+add_executable(run_scenario run_scenario.cpp)
+target_link_libraries(run_scenario PRIVATE f4-simulation GTest::gtest)
+target_compile_definitions(run_scenario PRIVATE
+    F4_SCENARIOS_DIR="${CMAKE_BINARY_DIR}/scenarios")

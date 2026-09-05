@@ -1,0 +1,14 @@
+diff a/f4-flight-model/include/f4/flight/aircraft_state.hpp b/f4-flight-model/include/f4/flight/aircraft_state.hpp	(rejected hunks)
+@@ -212,6 +212,12 @@ struct FuelState {
+ struct FcsState {
+     // --- Pitch channel ---
+     math::LagFilter       pitchRateLag;      // filters the pitch-rate command
++    double                pitchRateDampGain{0.0}; // Tranche 42: pitch-rate
++                                                  // damping gain (q feedback). When
++                                                  // > 0, the FCS subtracts
++                                                  // gain*q from the G command,
++                                                  // damping the phugoid INSIDE
++                                                  // the FCS loop (no AI-side lag).
+     math::AdamsBash2Filter pitchIntegral;    // NZ error integrator (Adams-Bashforth 2nd order)
+     math::LeadLagFilter   pitchAlphaLag;     // F7Tust lead-lag on alpha command
+ 
