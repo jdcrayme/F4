@@ -485,22 +485,17 @@ void ViewerApp::draw_canvas() {
                 owner = static_cast<uint8_t>(*team_tag->as_int());
             }
 
-            // Team filter
-            RlColor c = color_for_owner(owner);
+            // Two-tone icon paint: the team's PRIMARY fills the icon
+            // background, its SECONDARY strokes the glyph/outline (both
+            // runtime-substituted from the SVG's black/white placeholders).
+            // Filtered teams fade as one pair.
+            TeamPalette pal = team_palette_for_owner(owner);
             if (impl_->team_filter != 0xFF && owner != impl_->team_filter) {
-                c.r = static_cast<unsigned char>(c.r * 0.3f);
-                c.g = static_cast<unsigned char>(c.g * 0.3f);
-                c.b = static_cast<unsigned char>(c.b * 0.3f);
-                c.a = static_cast<unsigned char>(c.a * 0.3f);
+                pal = dimmed_palette(pal, 0.3f);
             }
-
-            const RlColor outline = {
-                static_cast<unsigned char>(c.r * 0.4f),
-                static_cast<unsigned char>(c.g * 0.4f),
-                static_cast<unsigned char>(c.b * 0.4f),
-                255};
             f4::renderer::RenderEntityIcon(impl_->symbols, h, p.x, p.y,
-                                           base_size, c, outline);
+                                           base_size, pal.primary,
+                                           pal.secondary);
             if (pri && pri->priority >= 40) {
                 const float ring_r = base_size * 0.5f + 3.0f;
                 const Color ring = (pri->priority >= 70)
@@ -599,11 +594,16 @@ void ViewerApp::draw_canvas() {
             auto team_tag = h.get_tag(f4::entities::tags::TEAM);
             const uint8_t owner = (team_tag && team_tag->as_int()) ? static_cast<uint8_t>(*team_tag->as_int()) : 0;
             RlColor c = color_for_owner(owner);
+            // Two-tone icon paint (primary bg + secondary glyph). `c`
+            // stays the single-color source for the destination line and
+            // waypoint dots below.
+            TeamPalette pal = team_palette_for_owner(owner);
             if (impl_->team_filter != 0xFF && owner != impl_->team_filter) {
                 c.r = static_cast<unsigned char>(c.r * 0.3f);
                 c.g = static_cast<unsigned char>(c.g * 0.3f);
                 c.b = static_cast<unsigned char>(c.b * 0.3f);
                 c.a = static_cast<unsigned char>(c.a * 0.3f);
+                pal = dimmed_palette(pal, 0.3f);
             }
             // B.3 QC: the mission filter dims flights of other mission
             // types (same 30% treatment as the team filter) so a filtered
@@ -615,14 +615,10 @@ void ViewerApp::draw_canvas() {
                 c.g = static_cast<unsigned char>(c.g * 0.3f);
                 c.b = static_cast<unsigned char>(c.b * 0.3f);
                 c.a = static_cast<unsigned char>(c.a * 0.3f);
+                pal = dimmed_palette(pal, 0.3f);
             }
-            const RlColor outline = {
-                static_cast<unsigned char>(c.r * 0.4f),
-                static_cast<unsigned char>(c.g * 0.4f),
-                static_cast<unsigned char>(c.b * 0.4f),
-                255};
             f4::renderer::RenderEntityIcon(impl_->symbols, h, p.x, p.y,
-                                           s, c, outline);
+                                           s, pal.primary, pal.secondary);
 
             // Destination line — reads from MovementOrdersComponent.
             if (impl_->show_unit_destinations) {
@@ -754,14 +750,18 @@ void ViewerApp::draw_canvas() {
             }
 
             // Owner color (campaign origin; gray for unattributed).
+            // `c` feeds the route polyline; the icon paints from the
+            // team's two-tone palette.
             auto* org = h.get<f4::simulation::CampaignOriginComponent>();
             const uint8_t owner = org ? org->team_slot : 0;
             RlColor c = color_for_owner(owner);
+            TeamPalette pal = team_palette_for_owner(owner);
             if (impl_->team_filter != 0xFF && owner != impl_->team_filter) {
                 c.r = static_cast<unsigned char>(c.r * 0.3f);
                 c.g = static_cast<unsigned char>(c.g * 0.3f);
                 c.b = static_cast<unsigned char>(c.b * 0.3f);
                 c.a = static_cast<unsigned char>(c.a * 0.3f);
+                pal = dimmed_palette(pal, 0.3f);
             }
 
             // The route polyline (BELOW the symbol so the symbol sits
@@ -799,22 +799,24 @@ void ViewerApp::draw_canvas() {
                 }
             }
 
-            // The symbol: fighter glyph, filled owner color, airborne
-            // full-strength / grounded dimmed (the taxiing picture at
-            // campaign speed is mostly ground traffic at the start).
-            const RlColor outline = {
-                static_cast<unsigned char>(c.r * 0.4f),
-                static_cast<unsigned char>(c.g * 0.4f),
-                static_cast<unsigned char>(c.b * 0.4f),
-                255};
+            // The symbol: fighter glyph in the team's two-tone palette,
+            // airborne full-strength / grounded dimmed (the taxiing
+            // picture at campaign speed is mostly ground traffic at the
+            // start). The per-type rotating disaggregated icons ride on
+            // this site in the deaggregation tranche.
             auto* fm = h.get<f4::flight::FlightModelComponent>();
             const bool airborne = fm && fm->model().state().gear.inAir;
             if (!airborne) {
-                c.r = static_cast<unsigned char>(c.r * 0.55f + 64);
-                c.g = static_cast<unsigned char>(c.g * 0.55f + 64);
-                c.b = static_cast<unsigned char>(c.b * 0.55f + 64);
+                // Wash both palette entries toward gray.
+                pal.primary.r = static_cast<unsigned char>(pal.primary.r * 0.55f + 64);
+                pal.primary.g = static_cast<unsigned char>(pal.primary.g * 0.55f + 64);
+                pal.primary.b = static_cast<unsigned char>(pal.primary.b * 0.55f + 64);
+                pal.secondary.r = static_cast<unsigned char>(pal.secondary.r * 0.55f + 64);
+                pal.secondary.g = static_cast<unsigned char>(pal.secondary.g * 0.55f + 64);
+                pal.secondary.b = static_cast<unsigned char>(pal.secondary.b * 0.55f + 64);
             }
-            impl_->symbols.draw("glyph_fighter", p.x, p.y, s, c, outline);
+            impl_->symbols.draw("glyph_fighter", p.x, p.y, s,
+                                pal.primary, pal.secondary);
 
             if (selected_is_live && impl_->sel_entity == eid) {
                 DrawCircleLines(static_cast<int>(p.x),

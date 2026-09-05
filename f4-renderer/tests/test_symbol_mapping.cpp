@@ -1,11 +1,11 @@
 // f4-renderer/tests/test_symbol_mapping.cpp
 //
 // Unit tests for the symbol-key mapping tables (entity_render.hpp):
-// ObjectiveType → "obj_*" key, UnitClass → "frame_*" key, and
-// (UnitClass, subtype) → "glyph_*" key. Ported 1:1 from the old
-// symbol_for_objective_type()/symbol_for_unit() switches — every entry
-// here has a symbols/<key>.svg in the repo (checked by the corpus test
-// in test_svg_import.cpp). Pure functions; no GPU context.
+// ObjectiveType → "obj_*" key and (UnitClass, subtype) → the unit's
+// composite icon key ("unit_*", or the bare "frame_*" when the class has
+// no subtype glyph). Every entry here has a symbols/<key>.svg in the
+// repo (checked by the corpus test in test_svg_import.cpp). Pure
+// functions; no GPU context.
 
 #include <f4/renderer/entity_render.hpp>
 
@@ -58,63 +58,74 @@ TEST(SymbolMapping, ObjectiveType_UnmappedFallsBackToUnknown) {
     EXPECT_STREQ("obj_unknown", key_for_objective_type(200));
 }
 
-// ── Unit frame mapping ────────────────────────────────────────────────────
+// ── Composite unit mapping ────────────────────────────────────────────────
+//
+// Units resolve to ONE icon key: a composite "unit_*" SVG (frame + glyph
+// authored together). The frame/glyph split is retired — no glyph is ever
+// reused across frames (no bomber battalions, no artillery squadrons).
 
-TEST(SymbolMapping, FramePerUnitClass) {
-    EXPECT_STREQ("frame_battalion", frame_key_for_unit_class(UC::Battalion));
-    EXPECT_STREQ("frame_brigade",   frame_key_for_unit_class(UC::Brigade));
-    EXPECT_STREQ("frame_squadron",  frame_key_for_unit_class(UC::Squadron));
-    EXPECT_STREQ("frame_task_force", frame_key_for_unit_class(UC::TaskForce));
-    EXPECT_STREQ("frame_flight",    frame_key_for_unit_class(UC::Flight));
-    EXPECT_STREQ("frame_package",   frame_key_for_unit_class(UC::Package));
-}
-
-// ── Unit glyph mapping ────────────────────────────────────────────────────
-
-TEST(SymbolMapping, GroundGlyphs_SharedByBattalionAndBrigade) {
+TEST(SymbolMapping, GroundComposites_SharedByBattalionAndBrigade) {
     for (const UC cls : {UC::Battalion, UC::Brigade}) {
-        EXPECT_STREQ("glyph_air_defense", glyph_key_for_unit(cls, 1));
-        EXPECT_STREQ("glyph_airmobile",   glyph_key_for_unit(cls, 2));
-        EXPECT_STREQ("glyph_armor",       glyph_key_for_unit(cls, 3));
-        EXPECT_STREQ("glyph_armored_cav", glyph_key_for_unit(cls, 4));
-        EXPECT_STREQ("glyph_engineer",    glyph_key_for_unit(cls, 5));
-        EXPECT_STREQ("glyph_hq",          glyph_key_for_unit(cls, 6));
-        EXPECT_STREQ("glyph_infantry",    glyph_key_for_unit(cls, 7));
-        EXPECT_STREQ("glyph_marine",      glyph_key_for_unit(cls, 8));
-        EXPECT_STREQ("glyph_mechanized",  glyph_key_for_unit(cls, 9));
-        EXPECT_STREQ("glyph_rocket",      glyph_key_for_unit(cls, 10));
-        EXPECT_STREQ("glyph_artillery",   glyph_key_for_unit(cls, 11));  // SP
-        EXPECT_STREQ("glyph_sa_missile",  glyph_key_for_unit(cls, 12));
-        EXPECT_STREQ("glyph_supply",      glyph_key_for_unit(cls, 13));
-        EXPECT_STREQ("glyph_artillery",   glyph_key_for_unit(cls, 14));  // towed
-        // Unmapped ground subtype -> frame only.
-        EXPECT_EQ(nullptr, glyph_key_for_unit(cls, 0));
-        EXPECT_EQ(nullptr, glyph_key_for_unit(cls, 15));
+        EXPECT_STREQ("unit_air_defense", unit_symbol_key_for(cls, 1));
+        EXPECT_STREQ("unit_airmobile",   unit_symbol_key_for(cls, 2));
+        EXPECT_STREQ("unit_armor",       unit_symbol_key_for(cls, 3));
+        EXPECT_STREQ("unit_armored_cav", unit_symbol_key_for(cls, 4));
+        EXPECT_STREQ("unit_engineer",    unit_symbol_key_for(cls, 5));
+        EXPECT_STREQ("unit_hq",          unit_symbol_key_for(cls, 6));
+        EXPECT_STREQ("unit_infantry",    unit_symbol_key_for(cls, 7));
+        EXPECT_STREQ("unit_marine",      unit_symbol_key_for(cls, 8));
+        EXPECT_STREQ("unit_mechanized",  unit_symbol_key_for(cls, 9));
+        EXPECT_STREQ("unit_rocket",      unit_symbol_key_for(cls, 10));
+        EXPECT_STREQ("unit_artillery",   unit_symbol_key_for(cls, 11));  // SP
+        EXPECT_STREQ("unit_sa_missile",  unit_symbol_key_for(cls, 12));
+        EXPECT_STREQ("unit_supply",      unit_symbol_key_for(cls, 13));
+        EXPECT_STREQ("unit_artillery",   unit_symbol_key_for(cls, 14));  // towed
     }
 }
 
-TEST(SymbolMapping, AirGlyphs) {
+TEST(SymbolMapping, AirComposites) {
     const UC cls = UC::Squadron;
-    EXPECT_STREQ("glyph_transport",  glyph_key_for_unit(cls, 1));   // transport
-    EXPECT_STREQ("glyph_helicopter", glyph_key_for_unit(cls, 4));   // attack helo
-    EXPECT_STREQ("glyph_bomber",     glyph_key_for_unit(cls, 6));
-    EXPECT_STREQ("glyph_fighter",    glyph_key_for_unit(cls, 8));
-    EXPECT_STREQ("glyph_fighter",    glyph_key_for_unit(cls, 9));   // fighter-bomber
-    EXPECT_STREQ("glyph_transport",  glyph_key_for_unit(cls, 13));  // tanker
-    EXPECT_STREQ("glyph_helicopter", glyph_key_for_unit(cls, 14));  // transport helo
-    EXPECT_EQ(nullptr, glyph_key_for_unit(cls, 0));
+    EXPECT_STREQ("unit_transport",  unit_symbol_key_for(cls, 1));   // transport
+    EXPECT_STREQ("unit_helicopter", unit_symbol_key_for(cls, 4));   // attack helo
+    EXPECT_STREQ("unit_bomber",     unit_symbol_key_for(cls, 6));
+    EXPECT_STREQ("unit_fighter",    unit_symbol_key_for(cls, 8));
+    EXPECT_STREQ("unit_fighter",    unit_symbol_key_for(cls, 9));   // fighter-bomber
+    EXPECT_STREQ("unit_transport",  unit_symbol_key_for(cls, 13));  // tanker
+    EXPECT_STREQ("unit_helicopter", unit_symbol_key_for(cls, 14));  // transport helo
 }
 
-TEST(SymbolMapping, NavalGlyphs) {
+TEST(SymbolMapping, NavalComposites) {
     const UC cls = UC::TaskForce;
-    EXPECT_STREQ("glyph_carrier", glyph_key_for_unit(cls, 3));
-    // Every other naval subtype draws the generic surface-ship glyph —
+    EXPECT_STREQ("unit_carrier", unit_symbol_key_for(cls, 3));
+    // Every other naval subtype draws the generic surface-ship composite —
     // parity with the old table.
-    EXPECT_STREQ("glyph_naval_surface", glyph_key_for_unit(cls, 0));
-    EXPECT_STREQ("glyph_naval_surface", glyph_key_for_unit(cls, 7));
+    EXPECT_STREQ("unit_naval_surface", unit_symbol_key_for(cls, 0));
+    EXPECT_STREQ("unit_naval_surface", unit_symbol_key_for(cls, 7));
 }
 
-TEST(SymbolMapping, FrameOnlyClasses_HaveNoGlyphs) {
-    EXPECT_EQ(nullptr, glyph_key_for_unit(UC::Flight, 8));
-    EXPECT_EQ(nullptr, glyph_key_for_unit(UC::Package, 1));
+// ── Frame fallbacks (classes/subtypes without a glyph) ────────────────────
+
+TEST(SymbolMapping, UnknownSubtypes_FallBackToBareFrame) {
+    // Mapped classes with an unmapped subtype render the bare frame —
+    // the frame files stay live for exactly this case.
+    EXPECT_STREQ("frame_battalion", unit_symbol_key_for(UC::Battalion, 0));
+    EXPECT_STREQ("frame_battalion", unit_symbol_key_for(UC::Battalion, 15));
+    EXPECT_STREQ("frame_brigade",   unit_symbol_key_for(UC::Brigade, 0));
+    EXPECT_STREQ("frame_brigade",   unit_symbol_key_for(UC::Brigade, 20));
+    EXPECT_STREQ("frame_squadron",  unit_symbol_key_for(UC::Squadron, 0));
+    EXPECT_STREQ("frame_squadron",  unit_symbol_key_for(UC::Squadron, 2));
+}
+
+TEST(SymbolMapping, FrameOnlyClasses_AreTheirOwnIcons) {
+    // Flight and Package have no subtype glyph — the bare frame IS the
+    // composite (for any subtype value).
+    EXPECT_STREQ("frame_flight",  unit_symbol_key_for(UC::Flight, 0));
+    EXPECT_STREQ("frame_flight",  unit_symbol_key_for(UC::Flight, 8));
+    EXPECT_STREQ("frame_package", unit_symbol_key_for(UC::Package, 0));
+    EXPECT_STREQ("frame_package", unit_symbol_key_for(UC::Package, 1));
+}
+
+TEST(SymbolMapping, UnclassifiableClasses_ReturnNull) {
+    EXPECT_EQ(nullptr, unit_symbol_key_for(UC::Unknown, 1));
+    EXPECT_EQ(nullptr, unit_symbol_key_for(static_cast<UC>(99), 1));
 }

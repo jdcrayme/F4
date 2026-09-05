@@ -29,7 +29,7 @@
 //
 // RenderEntityIcon() handles 2D map symbol representation:
 //   - ObjectiveTypeComponent → objective symbol (shape encodes type)
-//   - UnitCoreComponent → unit symbol (frame + glyph)
+//   - UnitCoreComponent → unit symbol (one composite SVG: frame + glyph)
 //
 // entity_icon_info() is a pure-query variant that returns the symbol
 // keys without drawing — useful for legends, tooltips, and hover states.
@@ -199,15 +199,20 @@ DrawStats RenderEntity(EntityRenderResources& res,
 /// Unmapped types return "obj_unknown".
 [[nodiscard]] const char* key_for_objective_type(uint8_t obj_type) noexcept;
 
-/// UnitClass → "frame_*" key (the symbol frame shape: battalion=rect,
-/// brigade=diamond, squadron=circle, task_force=triangle, flight=small
-/// circle, package=plus). Returns nullptr for unclassifiable units.
-[[nodiscard]] const char* frame_key_for_unit_class(
-    f4::entities::UnitClass cls) noexcept;
-
-/// unit_class + unit_subtype → "glyph_*" key (the frame-agnostic inner
-/// glyph), or nullptr when the subtype has no glyph (frame-only symbol).
-[[nodiscard]] const char* glyph_key_for_unit(
+/// (unit_class, unit_subtype) → the unit's COMPLETE icon key — one
+/// composite "unit_*" SVG (frame + glyph drawn together, e.g.
+/// "unit_armor" = battalion rectangle + tank ellipse). The frame/glyph
+/// split is retired: no glyph is ever reused across frames (no bomber
+/// battalions, no artillery squadrons), so the pair is authored as a
+/// single file per unit type.
+///
+/// Fallbacks that keep the frame vocabulary live:
+///   - Flight / Package (no subtype glyph exists) → "frame_flight" /
+///     "frame_package" (the bare frame IS the icon).
+///   - Any class with an unmapped subtype (e.g. Battalion subtype 0) →
+///     the bare frame ("frame_battalion", "frame_squadron", ...).
+/// Returns nullptr only for unclassifiable unit classes.
+[[nodiscard]] const char* unit_symbol_key_for(
     f4::entities::UnitClass cls, uint8_t subtype) noexcept;
 
 // ---------------------------------------------------------------------------
@@ -217,19 +222,15 @@ DrawStats RenderEntity(EntityRenderResources& res,
 // ---------------------------------------------------------------------------
 
 /// Information about an entity's 2D map icon, determined by inspecting
-/// its components without performing any drawing. Objectives set
-/// symbol_key; units set frame_key (always) and glyph_key (when the
-/// subtype has one). Renderers draw frame first, then the glyph on top.
+/// its components without performing any drawing. Both objectives and
+/// units resolve to a single `symbol_key` (objectives: "obj_*"; units:
+/// one composite "unit_*" SVG — see unit_symbol_key_for()).
 struct EntityIconInfo {
-    /// Objective symbol key ("obj_airbase", ...). Null for units.
+    /// The complete icon key ("obj_airbase", "unit_armor", ...).
+    /// Null when the entity has no icon.
     const char* symbol_key = nullptr;
-    /// Unit frame key ("frame_battalion", ...). Null for objectives.
-    const char* frame_key = nullptr;
-    /// Optional inner glyph key ("glyph_armor", ...). Null when the
-    /// unit's subtype has no glyph.
-    const char* glyph_key = nullptr;
 
-    /// Whether the entity has an icon at all. When false, every key is
+    /// Whether the entity has an icon at all. When false, symbol_key is
     /// null and nothing should be drawn (e.g. a Campaign or Team entity).
     bool valid = false;
 };
@@ -247,7 +248,8 @@ struct EntityIconInfo {
 //      deriving from ObjectiveTypeComponent.type (type - 100) if the
 //      PropertyBag key is absent. Mapped through key_for_objective_type.
 //   2. UnitCoreComponent:
-//      unit_class → frame key, unit_subtype → glyph key.
+//      (unit_class, unit_subtype) → one composite key via
+//      unit_symbol_key_for().
 //   3. If neither component is present, returns an invalid info.
 // ---------------------------------------------------------------------------
 
@@ -265,7 +267,12 @@ EntityIconInfo entity_icon_info(f4::entities::EntityHandle& entity);
 //
 // Component dispatch:
 //   - ObjectiveTypeComponent → draws the objective's symbol
-//   - UnitCoreComponent → draws the unit's frame, then its glyph
+//   - UnitCoreComponent → draws the unit's composite symbol (the one
+//     "unit_*" SVG already contains frame + glyph)
+//
+// Both draw with the entity team's two-tone palette: pass the team's
+// PRIMARY color as fill_color and its SECONDARY as outline_color (see
+// f4-world-viewer's team_palette_for_owner()).
 //
 // Convenience wrapper: entity_icon_info() + SymbolDirectory::draw().
 // Missing SVGs render as the fallback square; entities with no icon
@@ -276,8 +283,8 @@ EntityIconInfo entity_icon_info(f4::entities::EntityHandle& entity);
 // @param center_x      Screen-space X center of the symbol
 // @param center_y      Screen-space Y center of the symbol
 // @param size_px       Symbol extent in pixels (width = height = size_px)
-// @param fill_color    Fill color (typically team color)
-// @param outline_color Outline color
+// @param fill_color    Team PRIMARY color (icon background / frame fill)
+// @param outline_color Team SECONDARY color (glyph / contrast strokes)
 // @param filled        If false, draws outline only (for hover/selection)
 // ---------------------------------------------------------------------------
 

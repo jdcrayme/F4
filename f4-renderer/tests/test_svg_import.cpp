@@ -203,6 +203,42 @@ TEST(SvgImport, DataColorRoleOverridesPaintMapping) {
     EXPECT_EQ(def.polygons[0].color_role, SymbolColorRole::FillBlend);
 }
 
+TEST(SvgImport, TwoTonePlaceholders_WhitePrimaryBlackSecondary) {
+    // The two-tone authoring contract: an icon drawn black-on-white
+    // imports with white -> Fill (the team's PRIMARY at draw time) and
+    // black -> Outline (the team's SECONDARY). Both placeholder paints
+    // are therefore runtime-substituted per owning team.
+    const SymbolDefinition def = import_symbol_from_svg_string(
+        svg_doc("<rect x=\"-0.9\" y=\"-0.9\" width=\"1.8\" height=\"1.8\" "
+                "fill=\"#ffffff\" stroke=\"#000000\" stroke-width=\"0.05\"/>"),
+        "twotone_test");
+
+    // White fill -> primary polygon. The stroke on a FILLED shape is
+    // not honored (the model draws its built-in 1px contrast outline at
+    // render time), so no polyline is stored.
+    ASSERT_EQ(def.polygons.size(), 1u);
+    EXPECT_TRUE(def.polygons[0].filled);
+    EXPECT_EQ(def.polygons[0].color_role, SymbolColorRole::Fill);
+    EXPECT_EQ(def.polylines.size(), 0u);
+
+    // Stroked (unfilled) shapes store their stroke as a polyline with
+    // the paint's role: "white" -> Fill (primary), "black" -> Outline
+    // (secondary) — keywords and 3-digit forms behave like the 6-digit
+    // forms above.
+    const SymbolDefinition kw = import_symbol_from_svg_string(
+        svg_doc("<path d=\"M -0.5 0 L 0.5 0\" fill=\"none\" "
+                "stroke=\"white\" stroke-width=\"0.05\"/>"
+                "<path d=\"M -0.5 0.2 L 0.5 0.2\" fill=\"none\" "
+                "stroke=\"black\" stroke-width=\"0.05\"/>"
+                "<path d=\"M -0.5 0.4 L 0.5 0.4\" fill=\"none\" "
+                "stroke=\"#fff\" stroke-width=\"0.05\"/>"),
+        "twotone_kw");
+    ASSERT_EQ(kw.polylines.size(), 3u);
+    EXPECT_EQ(kw.polylines[0].color_role, SymbolColorRole::Fill);
+    EXPECT_EQ(kw.polylines[1].color_role, SymbolColorRole::Outline);
+    EXPECT_EQ(kw.polylines[2].color_role, SymbolColorRole::Fill);
+}
+
 TEST(SvgImport, UnsupportedElementFailsByName) {
     try {
         (void)import_symbol_from_svg_string(
@@ -380,16 +416,14 @@ TEST(SvgRoundTrip, EverySymbolsDirectoryFileRoundTrips) {
 }
 
 TEST(SvgRoundTrip, EveryMappedKeyHasAnSvg) {
-    // The deletion-safety net for the procedural vocabulary: every key
-    // the entity_render mapping tables can produce must resolve to a
-    // file in symbols/ — otherwise the map silently fills with fallback
-    // squares.
+    // The deletion-safety net for the icon vocabulary: every key the
+    // entity_render mapping tables can produce must resolve to a file in
+    // symbols/ — otherwise the map silently fills with fallback squares.
     const std::filesystem::path symbols_dir = F4_SYMBOLS_DIR;
     if (!std::filesystem::exists(symbols_dir)) {
         GTEST_SKIP() << "symbols/ not found at " << symbols_dir;
     }
-    using f4::renderer::frame_key_for_unit_class;
-    using f4::renderer::glyph_key_for_unit;
+    using f4::renderer::unit_symbol_key_for;
     using f4::renderer::key_for_objective_type;
 
     auto require_file = [&](const char* key) {
@@ -400,10 +434,11 @@ TEST(SvgRoundTrip, EveryMappedKeyHasAnSvg) {
     for (int t = 0; t <= 39; ++t) require_file(key_for_objective_type(static_cast<uint8_t>(t)));
     for (int c = 0; c <= static_cast<int>(f4::entities::UnitClass::Package); ++c) {
         const auto cls = static_cast<f4::entities::UnitClass>(c);
-        if (const char* f = frame_key_for_unit_class(cls)) require_file(f);
         for (int st = 0; st <= 20; ++st) {
-            if (const char* g = glyph_key_for_unit(cls, static_cast<uint8_t>(st))) {
-                require_file(g);
+            // Unknown/unclassifiable classes legitimately return null
+            // (no icon) — only require a file when a key is produced.
+            if (const char* k = unit_symbol_key_for(cls, static_cast<uint8_t>(st))) {
+                require_file(k);
             }
         }
     }

@@ -21,7 +21,15 @@
 //              when the attribute is absent — a deliberate deviation from
 //              SVG's black default, for team-colored tactical symbols),
 //              "none" -> outline-only,
-//              "#000000"/"#ffffff"/"black"/"white" -> Outline role.
+//              "#000000"/"black" -> Outline role,
+//              "#ffffff"/"white" -> Fill role.
+//              Two-tone authoring contract: icons are drawn black-on-white
+//              (the MIL-STD-2525 convention) and BOTH placeholder paints
+//              are replaced at draw time by the owning team's palette —
+//              white areas become the team's PRIMARY color (the icon
+//              background / frame fill), black areas become the team's
+//              SECONDARY color (the glyph / contrast outline). See
+//              f4-world-viewer's team_palette_for_owner() for the palette.
 //              data-color-role="fill|fill_blend|outline" overrides the
 //              paint-to-role mapping (this is how the exporter round-trips
 //              all three roles).

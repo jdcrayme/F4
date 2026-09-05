@@ -148,6 +148,56 @@ inline RlColor color_for_owner(uint8_t owner) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Two-tone team palettes — the icon paint source.
+// ---------------------------------------------------------------------------
+// Every team gets TWO colors (the user's two-tone design): a PRIMARY that
+// paints the icon's background/frame fill and a SECONDARY that paints the
+// glyph strokes and contrast outlines. SVG icons are authored as
+// black-on-white placeholders and the importer maps white -> Fill (primary)
+// and black -> Outline (secondary), so BOTH icon colors are runtime-
+// substituted per team — e.g. the enemy team renders red icons with
+// dark-red glyphs where the SVG had white and black.
+//
+// The pairs are hand-tuned per team (hue kept from color_for_owner, the
+// secondary a distinctly darker shade) rather than derived by a fixed
+// multiply — a 0.4x multiply turns the yellow team's fill into mud, and
+// glyphs need more contrast than a linear scale gives.
+//
+// color_for_owner() above stays the single-color source for destination
+// lines, waypoint dots, selection rings and the legend swatches.
+struct TeamPalette {
+    RlColor primary;    // icon background / frame fill
+    RlColor secondary;  // glyph strokes / contrast outline
+};
+
+inline TeamPalette team_palette_for_owner(uint8_t owner) {
+    switch (owner) {
+        case 0:  return {{172, 172, 172, 255}, { 76,  76,  76, 255}}; // neutral
+        case 1:  return {{210,  65,  60, 255}, {118,  22,  20, 255}}; // enemy — red / dark red
+        case 2:  return {{ 74, 134, 216, 255}, { 28,  58, 122, 255}}; // friendly — blue / navy
+        case 3:  return {{ 88, 182,  88, 255}, { 32,  96,  34, 255}}; // ROK — green / forest
+        case 4:  return {{228, 206,  88, 255}, {126, 101,  26, 255}}; // Japan — yellow / olive
+        case 5:  return {{226, 130,  62, 255}, {132,  58,  20, 255}}; // DPRK — orange / rust
+        case 6:  return {{184,  86, 184, 255}, {102,  30, 102, 255}}; // PRC — magenta / plum
+        default: return {{200, 200, 200, 255}, { 96,  96,  96, 255}};
+    }
+}
+
+/// Scale both palette entries by `f` (the team/mission filter's 0.3 dim,
+/// applied to the pair so filtered icons fade as one).
+inline TeamPalette dimmed_palette(TeamPalette p, float f) {
+    p.primary.r = static_cast<unsigned char>(p.primary.r * f);
+    p.primary.g = static_cast<unsigned char>(p.primary.g * f);
+    p.primary.b = static_cast<unsigned char>(p.primary.b * f);
+    p.primary.a = static_cast<unsigned char>(p.primary.a * f);
+    p.secondary.r = static_cast<unsigned char>(p.secondary.r * f);
+    p.secondary.g = static_cast<unsigned char>(p.secondary.g * f);
+    p.secondary.b = static_cast<unsigned char>(p.secondary.b * f);
+    p.secondary.a = static_cast<unsigned char>(p.secondary.a * f);
+    return p;
+}
+
 inline RlColor to_rl(const f4::terrain::Color4& c) {
     return {c.r, c.g, c.b, c.a};
 }

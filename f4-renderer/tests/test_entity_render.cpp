@@ -27,8 +27,6 @@ TEST(EntityIconInfo, InvalidEntity_ReturnsInvalid) {
     const auto info = entity_icon_info(invalid);
     EXPECT_FALSE(info.valid);
     EXPECT_EQ(nullptr, info.symbol_key);
-    EXPECT_EQ(nullptr, info.frame_key);
-    EXPECT_EQ(nullptr, info.glyph_key);
 }
 
 TEST(EntityIconInfo, EntityWithNoRenderableComponents_ReturnsInvalid) {
@@ -55,8 +53,6 @@ TEST(EntityIconInfo, ObjectiveTypeComponent_TypeFromPropertyBag) {
     EXPECT_TRUE(info.valid);
     // obj_type 8 = city
     EXPECT_STREQ("obj_city", info.symbol_key);
-    EXPECT_EQ(nullptr, info.frame_key);
-    EXPECT_EQ(nullptr, info.glyph_key);
 }
 
 TEST(EntityIconInfo, ObjectiveTypeComponent_TypeDerivedFromTypeField) {
@@ -143,16 +139,14 @@ TEST(EntityIconInfo, UnitCoreComponent_Battalion) {
 
     auto& uc = h.add<UnitCoreComponent>();
     uc.unit_class = UC::Battalion;
-    uc.unit_subtype = 0;  // no glyph subtype
+    uc.unit_subtype = 0;  // unknown subtype — bare-frame fallback
 
     const auto info = entity_icon_info(h);
     EXPECT_TRUE(info.valid);
-    EXPECT_STREQ("frame_battalion", info.frame_key);
-    EXPECT_EQ(nullptr, info.glyph_key);
-    EXPECT_EQ(nullptr, info.symbol_key);
+    EXPECT_STREQ("frame_battalion", info.symbol_key);
 }
 
-TEST(EntityIconInfo, UnitCoreComponent_BrigadeArmor_ComposesFrameAndGlyph) {
+TEST(EntityIconInfo, UnitCoreComponent_BrigadeArmor_OneCompositeKey) {
     EntityWorld world;
     auto h = world.create();
 
@@ -162,10 +156,9 @@ TEST(EntityIconInfo, UnitCoreComponent_BrigadeArmor_ComposesFrameAndGlyph) {
 
     const auto info = entity_icon_info(h);
     EXPECT_TRUE(info.valid);
-    // Frame encodes the class, glyph the subtype — the same glyph
-    // vocabulary as battalion ground units.
-    EXPECT_STREQ("frame_brigade", info.frame_key);
-    EXPECT_STREQ("glyph_armor", info.glyph_key);
+    // One composite SVG per unit type — the frame and the glyph are
+    // authored together (the frame/glyph split is retired).
+    EXPECT_STREQ("unit_armor", info.symbol_key);
 }
 
 TEST(EntityIconInfo, UnitCoreComponent_Squadron_Fighter) {
@@ -178,8 +171,7 @@ TEST(EntityIconInfo, UnitCoreComponent_Squadron_Fighter) {
 
     const auto info = entity_icon_info(h);
     EXPECT_TRUE(info.valid);
-    EXPECT_STREQ("frame_squadron", info.frame_key);
-    EXPECT_STREQ("glyph_fighter", info.glyph_key);
+    EXPECT_STREQ("unit_fighter", info.symbol_key);
 }
 
 TEST(EntityIconInfo, UnitCoreComponent_Squadron_Bomber) {
@@ -192,8 +184,7 @@ TEST(EntityIconInfo, UnitCoreComponent_Squadron_Bomber) {
 
     const auto info = entity_icon_info(h);
     EXPECT_TRUE(info.valid);
-    EXPECT_STREQ("frame_squadron", info.frame_key);
-    EXPECT_STREQ("glyph_bomber", info.glyph_key);
+    EXPECT_STREQ("unit_bomber", info.symbol_key);
 }
 
 TEST(EntityIconInfo, UnitCoreComponent_Flight_FrameOnly) {
@@ -206,8 +197,7 @@ TEST(EntityIconInfo, UnitCoreComponent_Flight_FrameOnly) {
 
     const auto info = entity_icon_info(h);
     EXPECT_TRUE(info.valid);
-    EXPECT_STREQ("frame_flight", info.frame_key);
-    EXPECT_EQ(nullptr, info.glyph_key);
+    EXPECT_STREQ("frame_flight", info.symbol_key);
 }
 
 TEST(EntityIconInfo, UnitCoreComponent_TaskForce_Carrier) {
@@ -220,8 +210,7 @@ TEST(EntityIconInfo, UnitCoreComponent_TaskForce_Carrier) {
 
     const auto info = entity_icon_info(h);
     EXPECT_TRUE(info.valid);
-    EXPECT_STREQ("frame_task_force", info.frame_key);
-    EXPECT_STREQ("glyph_carrier", info.glyph_key);
+    EXPECT_STREQ("unit_carrier", info.symbol_key);
 }
 
 TEST(EntityIconInfo, UnitCoreComponent_TaskForce_DefaultNavalSurface) {
@@ -234,8 +223,7 @@ TEST(EntityIconInfo, UnitCoreComponent_TaskForce_DefaultNavalSurface) {
 
     const auto info = entity_icon_info(h);
     EXPECT_TRUE(info.valid);
-    EXPECT_STREQ("frame_task_force", info.frame_key);
-    EXPECT_STREQ("glyph_naval_surface", info.glyph_key);
+    EXPECT_STREQ("unit_naval_surface", info.symbol_key);
 }
 
 TEST(EntityIconInfo, UnitCoreComponent_BattalionArtillerySharedWithTowed) {
@@ -250,8 +238,7 @@ TEST(EntityIconInfo, UnitCoreComponent_BattalionArtillerySharedWithTowed) {
 
     const auto info = entity_icon_info(h);
     EXPECT_TRUE(info.valid);
-    EXPECT_STREQ("frame_battalion", info.frame_key);
-    EXPECT_STREQ("glyph_artillery", info.glyph_key);
+    EXPECT_STREQ("unit_artillery", info.symbol_key);
 }
 
 // ── entity_icon_info — priority: objective before unit ────────────────────
@@ -271,7 +258,6 @@ TEST(EntityIconInfo, ObjectiveTakesPrecedenceOverUnit) {
     const auto info = entity_icon_info(h);
     EXPECT_TRUE(info.valid);
     EXPECT_STREQ("obj_port", info.symbol_key);
-    EXPECT_EQ(nullptr, info.frame_key);
 }
 
 // ── EntityRenderResources defaults ────────────────────────────────────────
@@ -541,6 +527,4 @@ TEST(EntityIconInfo, DefaultState) {
     EntityIconInfo info;
     EXPECT_FALSE(info.valid);
     EXPECT_EQ(nullptr, info.symbol_key);
-    EXPECT_EQ(nullptr, info.frame_key);
-    EXPECT_EQ(nullptr, info.glyph_key);
 }

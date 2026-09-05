@@ -16,10 +16,15 @@
 //   screen_y = sy + py * (size_px * 0.5f)
 //
 // Colors are ROLES, not values: every primitive picks one of the two
-// colors the caller supplies (fill = team color, outline = contrast), so
-// authored symbols never fight the team palette. The SVG subset contract
-// (supported elements/attributes, the loud-failure policy) is documented
-// in svg_import.hpp.
+// colors the caller supplies — the owning team's palette. The pair is
+// two-tone (both colors come from the same team's palette):
+//   fill_col    = the team's PRIMARY (icon background, frame fill)
+//   outline_col = the team's SECONDARY (glyph strokes, contrast outline)
+// The SVG corpus is authored black-on-white and the importer maps those
+// placeholder paints to these roles (see svg_import.hpp), so authored
+// symbols never fight the team palette — the exact question "can the
+// SVG's black and white be overwritten at runtime?" resolves to: yes,
+// white -> primary, black -> secondary, replaced per draw call.
 //
 // A key whose SVG is missing or fails to parse gets the built-in fallback
 // square (make_fallback_square) — the only non-file symbol in the system.
@@ -66,14 +71,15 @@ struct SymbolPoint {
 };
 
 /// Which of the caller's two runtime colors a primitive paints with.
-/// The draw helpers receive (fill, outline) — typically team color and a
-/// contrast color — and every primitive selects one of them, so authored
-/// symbols never carry absolute colors (which would fight the team
-/// palette).
+/// The draw helpers receive the owning team's two-tone palette
+/// (primary, secondary) and every primitive selects one of them, so
+/// authored symbols never carry absolute colors (which would fight the
+/// team palette). See svg_import.hpp for how SVG placeholder paints
+/// (white/black) map onto these roles.
 enum class SymbolColorRole {
-    Fill,       // the caller's fill color (team color), opaque
-    FillBlend,  // the fill color at 85% alpha — overlapping translucency
-    Outline,    // the caller's outline color (contrast)
+    Fill,       // the caller's PRIMARY color (team fill), opaque
+    FillBlend,  // the primary color at 85% alpha — overlapping translucency
+    Outline,    // the caller's SECONDARY color (glyph / contrast strokes)
 };
 
 /// An open or closed polyline (line strip).

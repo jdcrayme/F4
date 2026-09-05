@@ -224,9 +224,16 @@ Style inherit_style(const Style& parent, const f4::xml::xml_node& n) {
     return s;
 }
 
+// Two-tone placeholder mapping: an icon is authored black-on-white (the
+// MIL-STD-2525 convention) and both placeholder paints are replaced at
+// draw time by the owning team's palette — white -> Fill (the team's
+// primary), black -> Outline (the team's secondary). data-color-role
+// overrides the mapping when an author wants an explicit role.
 SymbolColorRole paint_role(Paint p, const Style& st) {
     if (st.role_override) return *st.role_override;
-    return p == Paint::Current ? SymbolColorRole::Fill : SymbolColorRole::Outline;
+    return (p == Paint::Current || p == Paint::White)
+               ? SymbolColorRole::Fill
+               : SymbolColorRole::Outline;
 }
 
 // ===========================================================================

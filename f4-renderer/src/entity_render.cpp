@@ -14,7 +14,7 @@
 //
 // entity_icon_info() and RenderEntityIcon() handle the 2D symbol case:
 //   ObjectiveTypeComponent → key_for_objective_type()
-//   UnitCoreComponent      → frame_key_for_unit_class() + glyph_key_for_unit()
+//   UnitCoreComponent      → unit_symbol_key_for() (one composite SVG)
 
 #include <f4/renderer/entity_render.hpp>
 
@@ -282,61 +282,62 @@ const char* key_for_objective_type(uint8_t t) noexcept {
     }
 }
 
-const char* frame_key_for_unit_class(f4::entities::UnitClass cls) noexcept {
-    switch (cls) {
-        case f4::entities::UnitClass::Battalion: return "frame_battalion";
-        case f4::entities::UnitClass::Brigade:   return "frame_brigade";
-        case f4::entities::UnitClass::Squadron:  return "frame_squadron";
-        case f4::entities::UnitClass::TaskForce: return "frame_task_force";
-        case f4::entities::UnitClass::Flight:    return "frame_flight";
-        case f4::entities::UnitClass::Package:   return "frame_package";
-        default: return nullptr;
-    }
-}
-
-const char* glyph_key_for_unit(f4::entities::UnitClass cls,
-                               uint8_t subtype) noexcept {
+// ── unit_symbol_key_for ──────────────────────────────────────────────────
+//
+// (unit_class, unit_subtype) → one composite "unit_*" SVG containing the
+// frame AND the glyph. Rationale (the user's call): no glyph is ever
+// reused across frames — there are no bomber battalions or artillery
+// squadrons — so the frame/glyph pair adds a composition step without a
+// reuse payoff. Each unit type owns exactly one icon file.
+//
+// The frame files stay live for the classes/subtypes that have no glyph:
+// Flight and Package icons ARE their bare frames, and any mapped class
+// with an unknown subtype falls back to its bare frame.
+const char* unit_symbol_key_for(f4::entities::UnitClass cls,
+                                uint8_t subtype) noexcept {
     switch (cls) {
         case f4::entities::UnitClass::Battalion:
         case f4::entities::UnitClass::Brigade: {
-            // Ground unit subtypes — same glyph vocabulary for both
-            // battalion (rect frame) and brigade (diamond frame).
+            // Ground unit subtypes — the same composite vocabulary for
+            // both battalion (rect) and brigade (diamond) frames.
             switch (subtype) {
-                case 1:  return "glyph_air_defense";  // STYPE_LAND_AIR_DEFENSE
-                case 2:  return "glyph_airmobile";    // STYPE_LAND_AIRMOBILE
-                case 3:  return "glyph_armor";        // STYPE_LAND_ARMOR
-                case 4:  return "glyph_armored_cav";  // STYPE_LAND_ARMORED_CAV
-                case 5:  return "glyph_engineer";     // STYPE_LAND_ENGINEER
-                case 6:  return "glyph_hq";           // STYPE_LAND_HQ
-                case 7:  return "glyph_infantry";     // STYPE_LAND_INFANTRY
-                case 8:  return "glyph_marine";       // STYPE_LAND_MARINE
-                case 9:  return "glyph_mechanized";   // STYPE_LAND_MECHANIZED
-                case 10: return "glyph_rocket";       // STYPE_LAND_ROCKET
-                case 11: return "glyph_artillery";    // STYPE_LAND_SP_ARTILLERY
-                case 12: return "glyph_sa_missile";   // STYPE_LAND_SS_MISSILE
-                case 13: return "glyph_supply";       // STYPE_LAND_SUPPLY
-                case 14: return "glyph_artillery";    // STYPE_LAND_TOWED_ARTILLERY
-                default: return nullptr;
+                case 1:  return "unit_air_defense";  // STYPE_LAND_AIR_DEFENSE
+                case 2:  return "unit_airmobile";    // STYPE_LAND_AIRMOBILE
+                case 3:  return "unit_armor";        // STYPE_LAND_ARMOR
+                case 4:  return "unit_armored_cav";  // STYPE_LAND_ARMORED_CAV
+                case 5:  return "unit_engineer";     // STYPE_LAND_ENGINEER
+                case 6:  return "unit_hq";           // STYPE_LAND_HQ
+                case 7:  return "unit_infantry";     // STYPE_LAND_INFANTRY
+                case 8:  return "unit_marine";       // STYPE_LAND_MARINE
+                case 9:  return "unit_mechanized";   // STYPE_LAND_MECHANIZED
+                case 10: return "unit_rocket";       // STYPE_LAND_ROCKET
+                case 11: return "unit_artillery";    // STYPE_LAND_SP_ARTILLERY
+                case 12: return "unit_sa_missile";   // STYPE_LAND_SS_MISSILE
+                case 13: return "unit_supply";       // STYPE_LAND_SUPPLY
+                case 14: return "unit_artillery";    // STYPE_LAND_TOWED_ARTILLERY
+                default: // unknown ground subtype — bare frame
+                    return cls == f4::entities::UnitClass::Battalion
+                               ? "frame_battalion" : "frame_brigade";
             }
         }
         case f4::entities::UnitClass::Squadron: {
             switch (subtype) {
-                case 1:  return "glyph_transport";    // STYPE_AIR_AIR_TRANSPORT
-                case 4:  return "glyph_helicopter";   // STYPE_AIR_ATTACK_HELO
-                case 6:  return "glyph_bomber";       // STYPE_AIR_BOMBER
-                case 8:  return "glyph_fighter";      // STYPE_AIR_FIGHTER
-                case 9:  return "glyph_fighter";      // STYPE_AIR_FIGHTER_BOMBER
-                case 13: return "glyph_transport";    // STYPE_AIR_TANKER
-                case 14: return "glyph_helicopter";   // STYPE_AIR_TRANSPORT_HELO
-                default: return nullptr;
+                case 1:  return "unit_transport";    // STYPE_AIR_AIR_TRANSPORT
+                case 4:  return "unit_helicopter";   // STYPE_AIR_ATTACK_HELO
+                case 6:  return "unit_bomber";       // STYPE_AIR_BOMBER
+                case 8:  return "unit_fighter";      // STYPE_AIR_FIGHTER
+                case 9:  return "unit_fighter";      // STYPE_AIR_FIGHTER_BOMBER
+                case 13: return "unit_transport";    // STYPE_AIR_TANKER
+                case 14: return "unit_helicopter";   // STYPE_AIR_TRANSPORT_HELO
+                default: return "frame_squadron";    // unknown air subtype
             }
         }
         case f4::entities::UnitClass::TaskForce: {
-            switch (subtype) {
-                case 3:  return "glyph_carrier";      // STYPE_SEA_CARRIER
-                default: return "glyph_naval_surface";
-            }
+            if (subtype == 3) return "unit_carrier"; // STYPE_SEA_CARRIER
+            return "unit_naval_surface";
         }
+        case f4::entities::UnitClass::Flight:    return "frame_flight";
+        case f4::entities::UnitClass::Package:   return "frame_package";
         default: return nullptr;
     }
 }
@@ -398,15 +399,16 @@ EntityIconInfo entity_icon_info(f4::entities::EntityHandle& entity)
         }
     }
 
-    // ── UnitCoreComponent → unit frame (+ glyph) ──────────────────────
+    // ── UnitCoreComponent → composite unit symbol ─────────────────────
     //
-    // The frame key encodes unit_class; the glyph key (optional) encodes
-    // unit_subtype. Renderers draw the frame first, the glyph on top.
+    // (unit_class, unit_subtype) resolves to ONE "unit_*" key — the
+    // composite SVG already contains the frame and the glyph, so the
+    // renderer draws a single symbol per unit.
     auto* uc = entity.get<f4::entities::UnitCoreComponent>();
     if (uc) {
-        info.frame_key = frame_key_for_unit_class(uc->unit_class);
-        info.glyph_key = glyph_key_for_unit(uc->unit_class, uc->unit_subtype);
-        info.valid = info.frame_key != nullptr;
+        info.symbol_key = unit_symbol_key_for(uc->unit_class,
+                                              uc->unit_subtype);
+        info.valid = info.symbol_key != nullptr;
         return info;
     }
 
@@ -425,23 +427,15 @@ void RenderEntityIcon(SymbolDirectory& symbols,
 {
     // Determine the icon, then draw it. If the entity has no icon
     // components (e.g. a Campaign or Team entity), this is a no-op.
-    // Missing SVGs render as the fallback square.
+    // Missing SVGs render as the fallback square. Units resolve to one
+    // composite key (the SVG carries frame + glyph), objectives to their
+    // "obj_*" key — both draw in a single call with the team's two-tone
+    // palette (fill = primary, outline = secondary).
     const auto info = entity_icon_info(entity);
     if (!info.valid) return;
 
-    if (info.symbol_key) {
-        symbols.draw(info.symbol_key, center_x, center_y, size_px,
-                     fill_color, outline_color, filled);
-        return;
-    }
-    if (info.frame_key) {
-        symbols.draw(info.frame_key, center_x, center_y, size_px,
-                     fill_color, outline_color, filled);
-    }
-    if (info.glyph_key) {
-        symbols.draw(info.glyph_key, center_x, center_y, size_px,
-                     fill_color, outline_color, filled);
-    }
+    symbols.draw(info.symbol_key, center_x, center_y, size_px,
+                 fill_color, outline_color, filled);
 }
 
 } // namespace f4::renderer
