@@ -1,0 +1,285 @@
+{
+  "formations": [
+    {
+      "formNum": 0,
+      "name": "spread",
+      "slots": [
+        {
+          "formNum": 0,
+          "rangeNm": 0.5,
+          "relAzDeg": -90.0,
+          "relElDeg": 0.0
+        },
+        {
+          "formNum": 0,
+          "rangeNm": 1.0,
+          "relAzDeg": 90.0,
+          "relElDeg": 0.0
+        },
+        {
+          "formNum": 0,
+          "rangeNm": 1.5,
+          "relAzDeg": 90.0,
+          "relElDeg": 0.0
+        }
+      ],
+      "twoShip": {
+        "formNum": 0,
+        "rangeNm": 0.5,
+        "relAzDeg": -90.0,
+        "relElDeg": 0.0
+      },
+      "twoShipExplicit": false
+    },
+    {
+      "formNum": 1,
+      "name": "wedge",
+      "slots": [
+        {
+          "formNum": 1,
+          "rangeNm": 0.165,
+          "relAzDeg": 135.0,
+          "relElDeg": 0.0
+        },
+        {
+          "formNum": 1,
+          "rangeNm": 1.0,
+          "relAzDeg": -135.0,
+          "relElDeg": 0.0
+        },
+        {
+          "formNum": 1,
+          "rangeNm": 1.165,
+          "relAzDeg": -135.0,
+          "relElDeg": 0.0
+        }
+      ],
+      "twoShip": {
+        "formNum": 1,
+        "rangeNm": 0.165,
+        "relAzDeg": 135.0,
+        "relElDeg": 0.0
+      },
+      "twoShipExplicit": false
+    },
+    {
+      "formNum": 2,
+      "name": "trail",
+      "slots": [
+        {
+          "formNum": 2,
+          "rangeNm": 0.165,
+          "relAzDeg": 135.0,
+          "relElDeg": 0.0
+        },
+        {
+          "formNum": 2,
+          "rangeNm": 5.0,
+          "relAzDeg": 180.0,
+          "relElDeg": 0.0
+        },
+        {
+          "formNum": 2,
+          "rangeNm": 5.118,
+          "relAzDeg": 178.69,
+          "relElDeg": 0.0
+        }
+      ],
+      "twoShip": {
+        "formNum": 2,
+        "rangeNm": 2.0,
+        "relAzDeg": 180.0,
+        "relElDeg": 0.0
+      },
+      "twoShipExplicit": true
+    },
+    {
+      "formNum": 3,
+      "name": "ladder",
+      "slots": [
+        {
+          "formNum": 3,
+          "rangeNm": 1.05,
+          "relAzDeg": 180.0,
+          "relElDeg": 45.0
+        },
+        {
+          "formNum": 3,
+          "rangeNm": 2.1,
+          "relAzDeg": 180.0,
+          "relElDeg": 45.0
+        },
+        {
+          "formNum": 3,
+          "rangeNm": 3.15,
+          "relAzDeg": 180.0,
+          "relElDeg": 45.0
+        }
+      ],
+      "twoShip": {
+        "formNum": 3,
+        "rangeNm": 1.05,
+        "relAzDeg": 180.0,
+        "relElDeg": 45.0
+      },
+      "twoShipExplicit": false
+    },
+    {
+      "formNum": 4,
+      "name": "stack",
+      "slots": [
+        {
+          "formNum": 4,
+          "rangeNm": 0.233,
+          "relAzDeg": 0.0,
+          "relElDeg": -90.0
+        },
+        {
+          "formNum": 4,
+          "rangeNm": 0.466,
+          "relAzDeg": 0.0,
+          "relElDeg": -90.0
+        },
+        {
+          "formNum": 4,
+          "rangeNm": 0.688,
+          "relAzDeg": 0.0,
+          "relElDeg": -90.0
+        }
+      ],
+      "twoShip": {
+        "formNum": 4,
+        "rangeNm": 0.233,
+        "relAzDeg": 0.0,
+        "relElDeg": -90.0
+      },
+      "twoShipExplicit": false
+    },
+    {
+      "formNum": 5,
+      "name": "rescell",
+      "slots": [
+        {
+          "formNum": 5,
+          "rangeNm": 0.0823,
+          "relAzDeg": 135.0,
+          "relElDeg": 0.0
+        },
+        {
+          "formNum": 5,
+          "rangeNm": 1.06,
+          "relAzDeg": 93.138,
+          "relElDeg": 0.0
+        },
+        {
+          "formNum": 5,
+          "rangeNm": 1.0,
+          "relAzDeg": -90.0,
+          "relElDeg": 0.0
+        }
+      ],
+      "twoShip": {
+        "formNum": 5,
+        "rangeNm": 0.0823,
+        "relAzDeg": 135.0,
+        "relElDeg": 0.0
+      },
+      "twoShipExplicit": false
+    },
+    {
+      "formNum": 6,
+      "name": "box",
+      "slots": [
+        {
+          "formNum": 6,
+          "rangeNm": 1.0,
+          "relAzDeg": 90.0,
+          "relElDeg": 0.0
+        },
+        {
+          "formNum": 6,
+          "rangeNm": 2.0,
+          "relAzDeg": 180.0,
+          "relElDeg": 0.0
+        },
+        {
+          "formNum": 6,
+          "rangeNm": 1.0,
+          "relAzDeg": 135.0,
+          "relElDeg": 0.0
+        }
+      ],
+      "twoShip": {
+        "formNum": 6,
+        "rangeNm": 1.0,
+        "relAzDeg": 90.0,
+        "relElDeg": 0.0
+      },
+      "twoShipExplicit": false
+    },
+    {
+      "formNum": 7,
+      "name": "arrowhead",
+      "slots": [
+        {
+          "formNum": 7,
+          "rangeNm": 0.165,
+          "relAzDeg": 135.0,
+          "relElDeg": 0.0
+        },
+        {
+          "formNum": 7,
+          "rangeNm": 2.236,
+          "relAzDeg": -153.43,
+          "relElDeg": 0.0
+        },
+        {
+          "formNum": 7,
+          "rangeNm": 2.236,
+          "relAzDeg": 153.43,
+          "relElDeg": 0.0
+        }
+      ],
+      "twoShip": {
+        "formNum": 7,
+        "rangeNm": 0.165,
+        "relAzDeg": 135.0,
+        "relElDeg": 0.0
+      },
+      "twoShipExplicit": false
+    },
+    {
+      "formNum": 8,
+      "name": "fluid",
+      "slots": [
+        {
+          "formNum": 8,
+          "rangeNm": 0.33,
+          "relAzDeg": -135.0,
+          "relElDeg": 0.0
+        },
+        {
+          "formNum": 8,
+          "rangeNm": 1.0,
+          "relAzDeg": 90.0,
+          "relElDeg": 0.0
+        },
+        {
+          "formNum": 8,
+          "rangeNm": 1.255,
+          "relAzDeg": 100.71,
+          "relElDeg": 0.0
+        }
+      ],
+      "twoShip": {
+        "formNum": 8,
+        "rangeNm": 1.0,
+        "relAzDeg": 90.0,
+        "relElDeg": 0.0
+      },
+      "twoShipExplicit": true
+    }
+  ],
+  "kind": "f4.formdata",
+  "version": 1
+}

@@ -60,6 +60,13 @@ struct AirfieldConfig {
 
     // Runway centerline end (for takeoff roll reference)
     geo::WorldPosition runway_end_position;
+
+    // Runway dimensions (feet). Tranche A2: threaded through to
+    // LandingClearance so the landing module's lateral bounds guard can
+    // fire GoAround when an approach is outside the pavement. Zero =
+    // unknown (guard disabled, the pre-A2 behavior).
+    double runway_width_ft{0.0};
+    double runway_length_ft{0.0};
 };
 
 // ============================================================================
@@ -181,6 +188,8 @@ private:
             clearance.glide_slope_angle_rad = af.glide_slope_angle_rad;
             clearance.pattern_altitude_ft = af.pattern_altitude_ft;
             clearance.decision_height_ft = af.decision_height_ft;
+            clearance.runway_width_ft = af.runway_width_ft;
+            clearance.runway_length_ft = af.runway_length_ft;
             bus_.publish(clearance);
         });
 

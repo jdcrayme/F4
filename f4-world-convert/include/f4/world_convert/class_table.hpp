@@ -261,6 +261,19 @@ public:
     /// Load from a Falcon4.ct file. Throws on I/O or parse error.
     void load(const std::filesystem::path& ct_path);
 
+    /// Load from a falcon4.ct.json file (produced by ct2json). Throws on
+    /// I/O or parse error. Behavior-preserving vs load() — the JSON form
+    /// carries the same ClassTableEntry fields. Tranche 0a.1
+    /// (NO_BINARY_RUNTIME_PLAN.md): eliminates the binary .ct from the
+    /// runtime.
+    void load_json(const std::filesystem::path& json_path);
+
+    /// Format-aware load: dispatches on the path extension. .json →
+    /// load_json; .ct (or anything else) → load. Lets consumers switch
+    /// to JSON without code changes — just point the path at the .json.
+    /// Tranche 0a.3 (NO_BINARY_RUNTIME_PLAN.md).
+    void load_auto(const std::filesystem::path& path);
+
     /// Look up an entity_type value. Returns nullptr if out of range.
     [[nodiscard]] const ClassTableEntry* lookup(uint16_t entity_type) const noexcept;
 

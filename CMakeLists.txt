@@ -99,7 +99,12 @@ endif()
 # Phase 0c (FLIGHT_CONTROL_NEXT_STEPS.md §3.2): the takeoff_only and
 # landing_only scenarios are isolated diagnostic scenarios. Each emits a
 # per-tick CSV trace via fcs_trace_path for offline plotting.
-if(F4_INSTALL AND EXISTS "${F4_INSTALL}/terrdata/objects/FALCON4.ct")
+# Tranche 0a.3 (NO_BINARY_RUNTIME_PLAN.md): prefer the committed JSON class
+# table when present — eliminates the binary FALCON4.ct from the runtime.
+# ClassTable::load_auto() dispatches on the extension (.json → load_json).
+if(EXISTS "${CMAKE_SOURCE_DIR}/Data/Classes/falcon4.ct.json")
+    set(F4_DIGI_CLASS_TABLE "${CMAKE_SOURCE_DIR}/Data/Classes/falcon4.ct.json")
+elseif(F4_INSTALL AND EXISTS "${F4_INSTALL}/terrdata/objects/FALCON4.ct")
     set(F4_DIGI_CLASS_TABLE "${F4_INSTALL}/terrdata/objects/FALCON4.ct")
 else()
     set(F4_DIGI_CLASS_TABLE "${CMAKE_SOURCE_DIR}/f4-world-convert/tests/fixtures/FALCON4.ct")

@@ -54,7 +54,9 @@ TEST(ModelsGltf, SimpleModelRoundTrips) {
     auto db = load_db();
     ASSERT_TRUE(db->valid());
 
-    // Model 2 (airbase section) has 3 LODs, 0 DOFs — a simple test case.
+    // Model 2 (airbase section) has 4 LODs, 0 DOFs — a simple test case.
+    // (The 4th LOD is lines/points-only; the pre-0c emitter merged every
+    // LOD into a single triangle mesh and silently dropped it.)
     ASSERT_GT(db->n_models(), 2);
     ASSERT_EQ(db->parse_model(2), "");
     auto data_dir = make_data_dir("simple");
@@ -64,7 +66,7 @@ TEST(ModelsGltf, SimpleModelRoundTrips) {
 
     EXPECT_GT(result.total_vertices, 0u);
     EXPECT_GT(result.total_triangles, 0u);
-    EXPECT_EQ(result.lod_count, 3u);  // model 2 has 3 LODs
+    EXPECT_EQ(result.lod_count, 4u);
     EXPECT_EQ(result.dof_count, 0u);
     EXPECT_EQ(result.switch_count, 0u);
 

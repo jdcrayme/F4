@@ -60,6 +60,11 @@ struct Manifest {
     int format_version = kManifestFormatVersion;
     std::string generator;
     std::string data_dir;
+    // Top-level directories under data_dir that are intentionally NOT
+    // listed in "assets" (e.g. "Models" while it is a local-only,
+    // gitignored export). The doctor's unlisted-file scan (D8) skips
+    // them; everything else must be listed or it is flagged.
+    std::vector<std::string> excluded_dirs;
     std::vector<AssetEntry> assets;
 
     [[nodiscard]] const AssetEntry* find(const AssetId& id) const noexcept;

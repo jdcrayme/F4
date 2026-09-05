@@ -56,6 +56,12 @@ target_link_libraries(cam2json PRIVATE f4-world-convert f4-import f4-io)
 add_executable(json2cam cli/json2cam.cpp)
 target_link_libraries(json2cam PRIVATE f4-world-convert f4-io)
 
+# CLI tool: ct2json — convert FALCON4.ct (binary class table) to open JSON.
+# Tranche 0a.1 (NO_BINARY_RUNTIME_PLAN.md): eliminates the binary .ct from
+# the runtime. ClassTable::load_json() is the consumer-side counterpart.
+add_executable(ct2json cli/ct2json.cpp)
+target_link_libraries(ct2json PRIVATE f4-world-convert f4-json f4-io)
+
 # Copy FALCON4.ct (the class table) next to cam2json so the CLI finds it
 # from CWD when run via `cmake --build build --target world`. The class
 # table maps entity_type values (100-2000+) to ObjectiveType (1-39) and

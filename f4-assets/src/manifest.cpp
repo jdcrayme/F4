@@ -208,6 +208,14 @@ Manifest read_manifest(std::string_view json) {
         r.expect(':');
         if (key == "data_dir") {
             m.data_dir = r.read_string();
+        } else if (key == "excluded_dirs") {
+            r.skip_ws();
+            r.expect('[');
+            while (!r.consume(']')) {
+                m.excluded_dirs.push_back(r.read_string());
+                r.skip_ws();
+                (void)r.consume(',');
+            }
         } else if (key == "assets") {
             r.skip_ws();
             r.expect('[');
@@ -342,6 +350,14 @@ std::string write_manifest(const Manifest& m) {
     w.raw("  },\n");
     w.raw("  ");
     w.string_key("data_dir", m.data_dir);
+    if (!m.excluded_dirs.empty()) {
+        w.raw(",\n  \"excluded_dirs\": [");
+        for (std::size_t i = 0; i < m.excluded_dirs.size(); ++i) {
+            if (i) w.raw(", ");
+            w.string(m.excluded_dirs[i]);
+        }
+        w.raw("]");
+    }
     w.raw(",\n");
     w.raw("  \"assets\": [\n");
     const std::size_t n = m.assets.size();

@@ -90,6 +90,9 @@ AirfieldConfig make_landing_config() {
     config.glide_slope_angle_rad = GS3;
     config.decision_height_ft = 200.0;
     config.runway_end_position = geo::WorldPosition(0.0, 10000.0, 0.0);
+    // Tranche A2: arm the lateral bounds guard (150-ft runway, half-width 75 ft).
+    config.runway_width_ft = 150.0;
+    config.runway_length_ft = 5000.0;
     return config;
 }
 
@@ -329,6 +332,54 @@ TEST_F(LandingTestFixture, EnergyManagedFlareModulatesPitchOnLongPrediction) {
     EXPECT_GT(out_high.pitch_cmd, out_base.pitch_cmd)
         << "high-energy flare should command MORE pitch to bleed energy "
         << "(high=" << out_high.pitch_cmd << ", base=" << out_base.pitch_cmd << ")";
+}
+
+// Tranche A2: lateral runway-bounds guard. An aircraft on final, inside
+// the near-runway environment (within missed_along_ft of the threshold),
+// but LATERALLY outside the runway pavement fires GoAround — no flare can
+// recover a landing 400 ft off the centerline of a 150-ft runway.
+TEST_F(LandingTestFixture, LateralBoundsGuardFiresGoAroundOutsideRunway) {
+    drive_to_on_final();
+    ASSERT_EQ(mod.state(), LandingState::OnFinal);
+
+    // 400 ft off centerline (runway half-width is 75 ft), 500 ft before the
+    // threshold (course_along = -500, inside the -missed_along_ft gate),
+    // well above flare height (800 ft AGL — this is an OnFinal check, not
+    // a flare check). The guard fires before any flare logic.
+    auto s = on_final(400.0, 500.0, 800.0, 0.0);
+    const auto out = mod.update(0.1, s.get());
+    EXPECT_EQ(mod.state(), LandingState::GoAround)
+        << "expected GoAround for an approach 400 ft off a 150-ft runway";
+    (void)out;
+}
+
+// Tranche A2: the guard does NOT fire when the aircraft is outside the
+// runway laterally but still far out on the approach (course_along <
+// -missed_along_ft) — the localizer is still being intercepted, not lost.
+TEST_F(LandingTestFixture, LateralBoundsGuardDoesNotFireFarOutOnApproach) {
+    drive_to_on_final();
+    ASSERT_EQ(mod.state(), LandingState::OnFinal);
+
+    // 400 ft off centerline but 10,000 ft before the threshold — still
+    // intercepting the localizer, not established near the runway. The
+    // guard stays silent; OnFinal's own localizer tracking continues.
+    auto s = on_final(400.0, 10000.0, 800.0, 0.0);
+    mod.update(0.1, s.get());
+    EXPECT_EQ(mod.state(), LandingState::OnFinal)
+        << "guard must not fire far out on the approach (course_along < -missed_along_ft)";
+}
+
+// Tranche A2: the guard does NOT fire when the aircraft is ON the
+// centerline (within the half-width) inside the near-runway environment.
+TEST_F(LandingTestFixture, LateralBoundsGuardSilentOnCenterline) {
+    drive_to_on_final();
+    ASSERT_EQ(mod.state(), LandingState::OnFinal);
+
+    // On centerline (east=0), 500 ft before the threshold, 800 ft AGL.
+    auto s = on_final(0.0, 500.0, 800.0, 0.0);
+    mod.update(0.1, s.get());
+    EXPECT_EQ(mod.state(), LandingState::OnFinal)
+        << "guard must not fire when on the centerline";
 }
 
 TEST_F(LandingTestFixture, TouchdownTransitionsToRolloutWithBrakes) {

@@ -4,6 +4,7 @@
 
 #include <f4/install/installation.hpp>
 #include <f4/io/read_file.hpp>
+#include <f4/json/reader.hpp>
 
 #include <cstring>
 #include <stdexcept>
@@ -145,6 +146,82 @@ std::filesystem::path find_class_table(const std::filesystem::path& reference_fi
     auto p = inst.find_class_table(reference_file);
     if (!p.empty()) return p;
     return f4::install::find_class_table_cwd_fallback();
+}
+
+void ClassTable::load_json(const std::filesystem::path& json_path) {
+    // Tranche 0a.1: load the class table from the JSON form produced by
+    // ct2json. Same ClassTableEntry fields, behavior-preserving vs load().
+    auto file_bytes = read_file(json_path);
+    std::string json_str(file_bytes.begin(), file_bytes.end());
+
+    json::Reader r(json_str);
+    r.skip_ws(); r.expect('{');
+    std::size_t count = 0;
+    while (!r.consume('}')) {
+        std::string key = r.read_string();
+        r.expect(':');
+        if (key == "count") {
+            count = static_cast<std::size_t>(r.read_int());
+        } else if (key == "entries") {
+            r.skip_ws(); r.expect('[');
+            entries_.clear();
+            entries_.reserve(count);
+            while (!r.consume(']')) {
+                r.skip_ws(); r.expect('{');
+                ClassTableEntry e;
+                while (!r.consume('}')) {
+                    std::string ek = r.read_string();
+                    r.expect(':');
+                    if (ek == "entity_type") {
+                        r.read_int();  // entity_type = 100 + index; implicit
+                    } else if (ek == "domain") {
+                        e.domain = static_cast<uint8_t>(r.read_int());
+                    } else if (ek == "cls") {
+                        e.cls = static_cast<uint8_t>(r.read_int());
+                    } else if (ek == "type") {
+                        e.type = static_cast<uint8_t>(r.read_int());
+                    } else if (ek == "stype") {
+                        e.stype = static_cast<uint8_t>(r.read_int());
+                    } else if (ek == "vis_type") {
+                        r.skip_ws(); r.expect('[');
+                        for (int vi = 0; vi < 7; ++vi) {
+                            e.vis_type[vi] = static_cast<int16_t>(r.read_int());
+                            if (vi < 6) { r.skip_ws(); r.expect(','); }
+                        }
+                        r.skip_ws(); r.expect(']');
+                    } else if (ek == "data_type") {
+                        e.data_type = static_cast<uint8_t>(r.read_int());
+                    } else if (ek == "data_ptr_index") {
+                        e.data_ptr_index = static_cast<uint32_t>(r.read_int());
+                    } else {
+                        r.skip_value();
+                    }
+                    (void)r.consume(',');
+                }
+                entries_.push_back(e);
+                r.skip_ws();
+                (void)r.consume(',');
+            }
+        } else {
+            r.skip_value();
+        }
+        (void)r.consume(',');
+    }
+    if (entries_.empty()) {
+        throw std::runtime_error("class_table: JSON had no entries");
+    }
+}
+
+void ClassTable::load_auto(const std::filesystem::path& path) {
+    // Tranche 0a.3: format-aware dispatch. .json → load_json; .ct (or
+    // anything else) → load. Backward-compatible: existing .ct paths
+    // keep working; new .json paths eliminate the binary from the runtime.
+    const auto ext = path.extension().string();
+    if (ext == ".json") {
+        load_json(path);
+    } else {
+        load(path);
+    }
 }
 
 } // namespace f4::world_convert

@@ -1,0 +1,1047 @@
+{
+  "classFlags": [
+    1828,
+    1847,
+    1831,
+    1831,
+    1847,
+    1316,
+    1316,
+    823,
+    803
+  ],
+  "classes": [
+    "F4",
+    "F5",
+    "F14",
+    "F15",
+    "F16",
+    "Mig25",
+    "Mig27",
+    "A10",
+    "Bomber"
+  ],
+  "kind": "f4.mnvrdata",
+  "table": [
+    [
+      {
+        "intercepts": [
+          0,
+          1
+        ],
+        "merges": [
+          1,
+          2
+        ],
+        "reacts": [
+          1,
+          2
+        ]
+      },
+      {
+        "intercepts": [
+          0,
+          1,
+          2
+        ],
+        "merges": [
+          0,
+          1
+        ],
+        "reacts": [
+          0,
+          1
+        ]
+      },
+      {
+        "intercepts": [
+          0,
+          1
+        ],
+        "merges": [
+          0,
+          1
+        ],
+        "reacts": [
+          1,
+          2
+        ]
+      },
+      {
+        "intercepts": [
+          0,
+          1
+        ],
+        "merges": [
+          0,
+          1
+        ],
+        "reacts": [
+          1,
+          2
+        ]
+      },
+      {
+        "intercepts": [
+          0,
+          1
+        ],
+        "merges": [
+          0,
+          1
+        ],
+        "reacts": [
+          1,
+          2
+        ]
+      },
+      {
+        "intercepts": [
+          2
+        ],
+        "merges": [
+          2
+        ],
+        "reacts": [
+          2
+        ]
+      },
+      {
+        "intercepts": [
+          0,
+          1
+        ],
+        "merges": [
+          2
+        ],
+        "reacts": [
+          0,
+          1
+        ]
+      },
+      {
+        "intercepts": [
+          2
+        ],
+        "merges": [
+          0,
+          1
+        ],
+        "reacts": [
+          0
+        ]
+      },
+      {
+        "intercepts": [
+          2
+        ],
+        "merges": [
+          0,
+          1
+        ],
+        "reacts": [
+          0
+        ]
+      }
+    ],
+    [
+      {
+        "intercepts": [
+          0,
+          1
+        ],
+        "merges": [
+          2
+        ],
+        "reacts": [
+          1,
+          2
+        ]
+      },
+      {
+        "intercepts": [
+          0,
+          1
+        ],
+        "merges": [
+          1,
+          2
+        ],
+        "reacts": [
+          0,
+          1,
+          2
+        ]
+      },
+      {
+        "intercepts": [
+          0,
+          1
+        ],
+        "merges": [
+          0,
+          1
+        ],
+        "reacts": [
+          1,
+          2
+        ]
+      },
+      {
+        "intercepts": [
+          0,
+          1
+        ],
+        "merges": [
+          0,
+          1
+        ],
+        "reacts": [
+          1,
+          2
+        ]
+      },
+      {
+        "intercepts": [
+          0,
+          1
+        ],
+        "merges": [
+          0,
+          1
+        ],
+        "reacts": [
+          1,
+          2
+        ]
+      },
+      {
+        "intercepts": [
+          2
+        ],
+        "merges": [
+          2
+        ],
+        "reacts": [
+          3
+        ]
+      },
+      {
+        "intercepts": [
+          0,
+          1
+        ],
+        "merges": [
+          1,
+          2
+        ],
+        "reacts": [
+          0,
+          1
+        ]
+      },
+      {
+        "intercepts": [
+          1
+        ],
+        "merges": [
+          0,
+          1
+        ],
+        "reacts": [
+          0,
+          1
+        ]
+      },
+      {
+        "intercepts": [
+          2
+        ],
+        "merges": [
+          0,
+          1
+        ],
+        "reacts": [
+          0,
+          1
+        ]
+      }
+    ],
+    [
+      {
+        "intercepts": [
+          1,
+          2
+        ],
+        "merges": [
+          2
+        ],
+        "reacts": [
+          1,
+          2
+        ]
+      },
+      {
+        "intercepts": [
+          1,
+          2
+        ],
+        "merges": [
+          1,
+          2
+        ],
+        "reacts": [
+          0,
+          1
+        ]
+      },
+      {
+        "intercepts": [
+          1,
+          2
+        ],
+        "merges": [
+          0,
+          1
+        ],
+        "reacts": [
+          2,
+          3
+        ]
+      },
+      {
+        "intercepts": [
+          1,
+          2
+        ],
+        "merges": [
+          0,
+          1
+        ],
+        "reacts": [
+          2,
+          3
+        ]
+      },
+      {
+        "intercepts": [
+          1,
+          2
+        ],
+        "merges": [
+          0,
+          1
+        ],
+        "reacts": [
+          2,
+          3
+        ]
+      },
+      {
+        "intercepts": [
+          2
+        ],
+        "merges": [
+          2
+        ],
+        "reacts": [
+          2,
+          3
+        ]
+      },
+      {
+        "intercepts": [
+          1,
+          2
+        ],
+        "merges": [
+          2
+        ],
+        "reacts": [
+          0,
+          1
+        ]
+      },
+      {
+        "intercepts": [
+          1
+        ],
+        "merges": [
+          0,
+          1
+        ],
+        "reacts": [
+          0,
+          1
+        ]
+      },
+      {
+        "intercepts": [
+          1
+        ],
+        "merges": [
+          0,
+          1
+        ],
+        "reacts": [
+          0,
+          1
+        ]
+      }
+    ],
+    [
+      {
+        "intercepts": [
+          1,
+          2
+        ],
+        "merges": [
+          2
+        ],
+        "reacts": [
+          1
+        ]
+      },
+      {
+        "intercepts": [
+          1,
+          2
+        ],
+        "merges": [
+          2
+        ],
+        "reacts": [
+          1
+        ]
+      },
+      {
+        "intercepts": [
+          1,
+          2
+        ],
+        "merges": [
+          1,
+          2
+        ],
+        "reacts": [
+          1,
+          2
+        ]
+      },
+      {
+        "intercepts": [
+          1,
+          2
+        ],
+        "merges": [
+          1,
+          2
+        ],
+        "reacts": [
+          1,
+          2
+        ]
+      },
+      {
+        "intercepts": [
+          1,
+          2
+        ],
+        "merges": [
+          1,
+          2
+        ],
+        "reacts": [
+          1,
+          2
+        ]
+      },
+      {
+        "intercepts": [
+          2
+        ],
+        "merges": [
+          2
+        ],
+        "reacts": [
+          2
+        ]
+      },
+      {
+        "intercepts": [
+          1,
+          2
+        ],
+        "merges": [
+          2
+        ],
+        "reacts": [
+          1
+        ]
+      },
+      {
+        "intercepts": [
+          2
+        ],
+        "merges": [
+          0,
+          1
+        ],
+        "reacts": [
+          0,
+          1
+        ]
+      },
+      {
+        "intercepts": [
+          2
+        ],
+        "merges": [
+          0,
+          1
+        ],
+        "reacts": [
+          0,
+          1
+        ]
+      }
+    ],
+    [
+      {
+        "intercepts": [
+          0,
+          1
+        ],
+        "merges": [
+          2
+        ],
+        "reacts": [
+          1
+        ]
+      },
+      {
+        "intercepts": [
+          1,
+          2
+        ],
+        "merges": [
+          2
+        ],
+        "reacts": [
+          1
+        ]
+      },
+      {
+        "intercepts": [
+          0,
+          1
+        ],
+        "merges": [
+          1,
+          2
+        ],
+        "reacts": [
+          2,
+          3
+        ]
+      },
+      {
+        "intercepts": [
+          0,
+          1
+        ],
+        "merges": [
+          1,
+          2
+        ],
+        "reacts": [
+          2,
+          3
+        ]
+      },
+      {
+        "intercepts": [
+          0,
+          1
+        ],
+        "merges": [
+          1,
+          2
+        ],
+        "reacts": [
+          2,
+          3
+        ]
+      },
+      {
+        "intercepts": [
+          2
+        ],
+        "merges": [
+          2
+        ],
+        "reacts": [
+          2
+        ]
+      },
+      {
+        "intercepts": [
+          1,
+          2
+        ],
+        "merges": [
+          2
+        ],
+        "reacts": [
+          1
+        ]
+      },
+      {
+        "intercepts": [
+          2
+        ],
+        "merges": [
+          0,
+          1
+        ],
+        "reacts": [
+          0,
+          1
+        ]
+      },
+      {
+        "intercepts": [
+          2
+        ],
+        "merges": [
+          0,
+          1
+        ],
+        "reacts": [
+          0,
+          1
+        ]
+      }
+    ],
+    [
+      {
+        "intercepts": [
+          2
+        ],
+        "merges": [
+          0
+        ],
+        "reacts": [
+          0,
+          1
+        ]
+      },
+      {
+        "intercepts": [
+          2
+        ],
+        "merges": [
+          0
+        ],
+        "reacts": [
+          0,
+          1
+        ]
+      },
+      {
+        "intercepts": [
+          2
+        ],
+        "merges": [
+          0
+        ],
+        "reacts": [
+          0,
+          1
+        ]
+      },
+      {
+        "intercepts": [
+          2
+        ],
+        "merges": [
+          0
+        ],
+        "reacts": [
+          0,
+          1
+        ]
+      },
+      {
+        "intercepts": [
+          2
+        ],
+        "merges": [
+          0
+        ],
+        "reacts": [
+          0,
+          1
+        ]
+      },
+      {
+        "intercepts": [
+          2
+        ],
+        "merges": [
+          0
+        ],
+        "reacts": [
+          0,
+          1
+        ]
+      },
+      {
+        "intercepts": [
+          2
+        ],
+        "merges": [
+          0
+        ],
+        "reacts": [
+          0,
+          1
+        ]
+      },
+      {
+        "intercepts": [
+          2
+        ],
+        "merges": [
+          0
+        ],
+        "reacts": [
+          0,
+          1
+        ]
+      },
+      {
+        "intercepts": [
+          2
+        ],
+        "merges": [
+          0
+        ],
+        "reacts": [
+          0,
+          1
+        ]
+      }
+    ],
+    [
+      {
+        "intercepts": [
+          2
+        ],
+        "merges": [
+          0
+        ],
+        "reacts": [
+          2,
+          3
+        ]
+      },
+      {
+        "intercepts": [
+          2
+        ],
+        "merges": [
+          0
+        ],
+        "reacts": [
+          2,
+          3
+        ]
+      },
+      {
+        "intercepts": [
+          2
+        ],
+        "merges": [
+          0
+        ],
+        "reacts": [
+          2,
+          3
+        ]
+      },
+      {
+        "intercepts": [
+          2
+        ],
+        "merges": [
+          0
+        ],
+        "reacts": [
+          2,
+          3
+        ]
+      },
+      {
+        "intercepts": [
+          2
+        ],
+        "merges": [
+          0
+        ],
+        "reacts": [
+          2,
+          3
+        ]
+      },
+      {
+        "intercepts": [
+          2
+        ],
+        "merges": [
+          0
+        ],
+        "reacts": [
+          3
+        ]
+      },
+      {
+        "intercepts": [
+          2
+        ],
+        "merges": [
+          0
+        ],
+        "reacts": [
+          0,
+          1
+        ]
+      },
+      {
+        "intercepts": [
+          2
+        ],
+        "merges": [
+          0
+        ],
+        "reacts": [
+          0,
+          1
+        ]
+      },
+      {
+        "intercepts": [
+          2
+        ],
+        "merges": [
+          0
+        ],
+        "reacts": [
+          0,
+          1
+        ]
+      }
+    ],
+    [
+      {
+        "intercepts": [
+          2
+        ],
+        "merges": [
+          0
+        ],
+        "reacts": [
+          3
+        ]
+      },
+      {
+        "intercepts": [
+          2
+        ],
+        "merges": [
+          0
+        ],
+        "reacts": [
+          3
+        ]
+      },
+      {
+        "intercepts": [
+          2
+        ],
+        "merges": [
+          0
+        ],
+        "reacts": [
+          3
+        ]
+      },
+      {
+        "intercepts": [
+          2
+        ],
+        "merges": [
+          0
+        ],
+        "reacts": [
+          3
+        ]
+      },
+      {
+        "intercepts": [
+          2
+        ],
+        "merges": [
+          0
+        ],
+        "reacts": [
+          3
+        ]
+      },
+      {
+        "intercepts": [
+          2
+        ],
+        "merges": [
+          0
+        ],
+        "reacts": [
+          3
+        ]
+      },
+      {
+        "intercepts": [
+          2
+        ],
+        "merges": [
+          0
+        ],
+        "reacts": [
+          2,
+          3
+        ]
+      },
+      {
+        "intercepts": [
+          2
+        ],
+        "merges": [
+          0,
+          1,
+          2
+        ],
+        "reacts": [
+          0,
+          1
+        ]
+      },
+      {
+        "intercepts": [
+          2
+        ],
+        "merges": [
+          0,
+          1,
+          2
+        ],
+        "reacts": [
+          0,
+          1
+        ]
+      }
+    ],
+    [
+      {
+        "intercepts": [],
+        "merges": [],
+        "reacts": [
+          0,
+          1,
+          2,
+          3
+        ]
+      },
+      {
+        "intercepts": [],
+        "merges": [],
+        "reacts": [
+          0,
+          1,
+          2,
+          3
+        ]
+      },
+      {
+        "intercepts": [],
+        "merges": [],
+        "reacts": [
+          0,
+          1,
+          2,
+          3
+        ]
+      },
+      {
+        "intercepts": [],
+        "merges": [],
+        "reacts": [
+          0,
+          1,
+          2,
+          3
+        ]
+      },
+      {
+        "intercepts": [],
+        "merges": [],
+        "reacts": [
+          0,
+          1,
+          2,
+          3
+        ]
+      },
+      {
+        "intercepts": [],
+        "merges": [],
+        "reacts": [
+          0,
+          1,
+          2,
+          3
+        ]
+      },
+      {
+        "intercepts": [],
+        "merges": [],
+        "reacts": [
+          0,
+          1,
+          2,
+          3
+        ]
+      },
+      {
+        "intercepts": [],
+        "merges": [],
+        "reacts": [
+          0,
+          1,
+          2,
+          3
+        ]
+      },
+      {
+        "intercepts": [],
+        "merges": [],
+        "reacts": [
+          0,
+          1,
+          2,
+          3
+        ]
+      }
+    ]
+  ],
+  "version": 1
+}

@@ -35,9 +35,26 @@ Testing/
 !temp/KoreaObj.LOD
 !temp/KoreaObj.TEX
 
-# Asset pipeline target tree (ASSET_PIPELINE_SPEC.md §4: Data/ is generated
-# by f4import from a game install, never committed).
-Data/
+# Asset pipeline target tree (ASSET_PIPELINE_SPEC.md §4).
+# Tranche 0a (NO_BINARY_RUNTIME_PLAN.md): the JSON subset of Data/ IS committed
+# (world, terrain, class table, aircraft, simdata) so the runtime + tests run
+# anywhere without F4_INSTALL. The binary-derived subsets (Models/koreaobj/
+# glTF+PNG) stay gitignored until Tranche 0c/0d land.
+# NOTE: the ignore must be `Data/**` (not `Data/`): git cannot re-include
+# a path inside a directory that is itself excluded, so `Data/` + `!Data/…`
+# negations never matched. `Data/**` ignores everything INSIDE Data/ while
+# leaving the directory traversable; `!Data/**/` keeps directories visible
+# so the subtree negations below can match their files.
+Data/**
+!Data/**/
+!Data/manifest.json
+!Data/World/**
+!Data/Theater/**
+!Data/Aircraft/**
+!Data/SimData/**
+!Data/Classes/**
+# Models/ stays fully ignored (glTF + PNG land in Tranche 0c/0d) — no
+# !Data/Models/** negation on purpose.
 
 # Generated from TestCamp.cam by cam2json (regenerable on demand)
 /TestCamp.world.json

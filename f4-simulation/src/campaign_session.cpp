@@ -232,7 +232,7 @@ CampaignSession::create(const CampaignSessionOptions& opts,
     if (!opts.class_table.empty() && std::filesystem::exists(
             opts.class_table)) {
         try {
-            session->ct_.load(opts.class_table.string());
+            session->ct_.load_auto(opts.class_table.string());
         } catch (const std::exception& e) {
             return fail(std::string("class table load failed: ") + e.what());
         }

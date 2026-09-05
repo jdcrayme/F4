@@ -1182,6 +1182,8 @@ void Simulation::spawn_from_campaign_flights() {
             cfg.pattern_altitude_ft = af.threshold_altitude_ft + 1500.0;
             cfg.taxi_route = af.taxi_route;
             cfg.runway_end_position = af.runway_end_position;
+            cfg.runway_width_ft = af.runway_width_ft;
+            cfg.runway_length_ft = af.runway_length_ft;
             atc_->set_airbase_airfield(vu, cfg);
         }
     }
@@ -1290,7 +1292,7 @@ void Simulation::derive_real_airbase() {
     // no model (lights, trucks) or the (0,0,0) placeholder are skipped.
     if (!scenario_.airbase_source.class_table_path.empty()) {
         f4::world_convert::ClassTable ct;
-        ct.load(scenario_.airbase_source.class_table_path);
+        ct.load_auto(scenario_.airbase_source.class_table_path);
         int skipped_no_vistype = 0;
         for (const auto& f : obj->features) {
             if (f.index == 0 && f.offset_x == 0 && f.offset_y == 0) continue;
@@ -1352,6 +1354,8 @@ void Simulation::wire_atc() {
     af.pattern_altitude_ft = scenario_.airfield.threshold_altitude_ft + 1500.0;
     af.taxi_route = scenario_.airfield.taxi_route;
     af.runway_end_position = scenario_.airfield.runway_end_position;
+    af.runway_width_ft = scenario_.airfield.runway_width_ft;
+    af.runway_length_ft = scenario_.airfield.runway_length_ft;
     atc_->set_airfield(af);
 }
 
@@ -1882,7 +1886,7 @@ void Simulation::load_class_table() {
     // (vis_type_for returns 0, the spawn paths fall back). Malformed
     // content throws (loud) exactly like the per-path loads used to.
     if (!scenario_.class_table_path.empty()) {
-        class_table_.load(scenario_.class_table_path);
+        class_table_.load_auto(scenario_.class_table_path);
     }
 }
 

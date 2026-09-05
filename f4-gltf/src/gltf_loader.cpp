@@ -120,7 +120,30 @@ Primitive read_primitive(f4::json::Reader& r) {
         r.skip_ws();
         std::string key = r.read_string();
         r.expect(':');
-        if (key == "POSITION") {
+        if (key == "attributes") {
+            // Spec-compliant form: "attributes": { "POSITION": n, ... }
+            r.skip_ws();
+            r.expect('{');
+            while (!r.consume('}')) {
+                r.skip_ws();
+                std::string attr = r.read_string();
+                r.expect(':');
+                if (attr == "POSITION") {
+                    p.positions = static_cast<std::size_t>(r.read_int());
+                } else if (attr == "NORMAL") {
+                    p.normals = static_cast<std::size_t>(r.read_int());
+                } else if (attr == "TEXCOORD_0") {
+                    p.texcoords0 = static_cast<std::size_t>(r.read_int());
+                } else if (attr == "COLOR_0") {
+                    p.colors0 = static_cast<std::size_t>(r.read_int());
+                } else {
+                    r.skip_value();
+                }
+                r.skip_ws();
+                (void)r.consume(',');
+            }
+        } else if (key == "POSITION") {
+            // Legacy flat form emitted by f4import < 0.5.0.
             p.positions = static_cast<std::size_t>(r.read_int());
         } else if (key == "NORMAL") {
             p.normals = static_cast<std::size_t>(r.read_int());

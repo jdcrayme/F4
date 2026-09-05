@@ -18,7 +18,14 @@ endfunction()
 f4_add_test(test_lzss         test_lzss.cpp)
 f4_add_test(test_cam_archive  test_cam_archive.cpp)
 f4_add_test(test_campaign     test_campaign.cpp)
-f4_add_test(test_class_table  test_class_table.cpp)
+# Tranche 0a.1: test_class_table now exercises load_json (f4-json reader),
+# so it links f4-json directly (f4-world-convert carries f4-json PRIVATE).
+add_executable(test_class_table test_class_table.cpp)
+target_link_libraries(test_class_table PRIVATE GTest::gtest_main f4-world-convert f4-json)
+target_compile_definitions(test_class_table PRIVATE
+    FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/"
+    REPO_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/../../")
+gtest_discover_tests(test_class_table)
 f4_add_test(test_aii_config   test_aii_config.cpp)
 f4_add_test(test_objectives   test_objectives.cpp)
 f4_add_test(test_units        test_units.cpp)

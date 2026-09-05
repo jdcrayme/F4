@@ -116,6 +116,12 @@ struct LandingClearance {
     double pattern_altitude_ft{0.0};
     // Decision height (AGL feet).
     double decision_height_ft{0.0};
+    // Runway dimensions (feet). Lateral bounds guard (Tranche A2):
+    // the landing module fires GoAround when |course_lateral_ft| exceeds
+    // runway_width_ft/2 in the near-runway environment. Zero = unknown
+    // (the guard is disabled — backward-compatible default).
+    double runway_width_ft{0.0};
+    double runway_length_ft{0.0};
 };
 
 struct ApproachClearance {

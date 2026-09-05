@@ -22,6 +22,17 @@ target_compile_definitions(test_models_gltf PRIVATE
 )
 gtest_discover_tests(test_models_gltf)
 
+# Tranche 0c: material emission + texture PNG export. The PNG tests need
+# KoreaObj.TEX — optional (the test skips when missing), falling back to
+# the repo's temp/ copy.
+add_executable(test_textures_gltf test_textures_gltf.cpp)
+target_link_libraries(test_textures_gltf PRIVATE GTest::gtest_main f4-import f4-gltf f4-models)
+target_compile_definitions(test_textures_gltf PRIVATE
+    KOREAOBJ_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/f4-models/tests/fixtures"
+    KOREAOBJ_TEX_FALLBACK="${CMAKE_SOURCE_DIR}/temp/KoreaObj.TEX"
+)
+gtest_discover_tests(test_textures_gltf)
+
 # The CLI test spawns the f4import binary as a subprocess — it needs the
 # path baked in at compile time.
 add_executable(test_f4import_cli test_f4import_cli.cpp)
