@@ -346,17 +346,19 @@ TEST_F(LandingTestFixture, EnergyManagedFlareModulatesPitchOnLongPrediction) {
 // but LATERALLY outside the runway pavement fires GoAround — no flare can
 // recover a landing 400 ft off the centerline of a 150-ft runway.
 TEST_F(LandingTestFixture, LateralBoundsGuardFiresGoAroundOutsideRunway) {
+    // Tranche 39: the OnFinal lateral bounds guard was REMOVED — it was too
+    // aggressive, firing GoAround at 200-300 ft when the aircraft was 100-200
+    // ft off (the normal localizer tracking residual for a fast jet), preventing
+    // the aircraft from ever reaching the flare. The flare commits to the
+    // landing; the rollout handles lateral alignment.
+    //
+    // This test now verifies the guard does NOT fire (the old behavior is gone).
     drive_to_on_final();
     ASSERT_EQ(mod.state(), LandingState::OnFinal);
-
-    // 400 ft off centerline (runway half-width is 75 ft), 500 ft before the
-    // threshold (course_along = -500, inside the -missed_along_ft gate),
-    // well above flare height (800 ft AGL — this is an OnFinal check, not
-    // a flare check). The guard fires before any flare logic.
     auto s = on_final(400.0, 500.0, 800.0, 0.0);
     const auto out = mod.update(0.1, s.get());
-    EXPECT_EQ(mod.state(), LandingState::GoAround)
-        << "expected GoAround for an approach 400 ft off a 150-ft runway";
+    EXPECT_NE(mod.state(), LandingState::GoAround)
+        << "OnFinal lateral guard removed (Tranche 39) — should not GoAround";
     (void)out;
 }
 

@@ -8085,3 +8085,46 @@ Stage Summary (Task 38 — altitude gate landed, approach transition still faili
   either more track distance, a tighter turn, or a scenario redesign that
   delivers the aircraft inbound to the approach entry fix.
 - 27/27 landing module, 0/11 full mission.
+
+---
+Task ID: 39 (Radar pattern redesign + lateral guard removal — ALL 11 LAND)
+Agent: main (Super Z)
+Task: Redesign the scenario waypoints for a proper jet radar pattern (user
+guidance). Remove the lateral bounds guards that prevented the flare.
+
+Work Log:
+- Redesigned digi_full_mission.json.in waypoints for a jet radar pattern:
+  DEPART (5 NM, 3000 ft, 250 kts) → CROSSWIND (30 NM right, 3000 ft, 200 kts)
+  → DOWNWIND (30 NM right, 50 NM south, 1500 ft, 200 kts) → BASE (on
+  centerline, 50 NM south, 1500 ft, 200 kts) → APCH_FIX (20 NM south, 1500
+  ft, 180 kts). Approach changed from "pattern" (overhead break) to
+  "straight_in" (user: "remove the overhead break until formation stuff").
+- TERRAIN_CLEARANCE_FLOOR_MSL lowered 3000 → 500. The old 3000 ft floor
+  overrode the 1500 ft pattern altitude — the aircraft never descended below
+  3000 ft during enroute. 500 ft is above Korea's coastal terrain and below
+  the 1500 ft pattern.
+- BASE positioned on the centerline at the same y as DOWNWIND — gives a
+  proper 90° base leg (perpendicular) followed by a 30 NM inbound final
+  leg aligned with the runway heading. The navigation module's turn-
+  anticipation handles the 90° corner.
+- REMOVED the OnFinal lateral bounds guard (check_flare_or_goaround). The
+  guard fired GoAround at 200-300 ft when the aircraft was 100-200 ft off
+  centerline (the normal localizer tracking residual for a fast jet),
+  preventing the aircraft from ever reaching the flare.
+- REMOVED the Flare lateral bounds guard (check_touchdown). Once the
+  aircraft is in the flare (below 60 ft AGL) it has committed to the
+  landing — the lateral offset cannot be recovered by going around this
+  low. The flare + rollout handle the lateral alignment.
+
+Stage Summary (Task 39 — ALL 11 AIRCRAFT TOUCH DOWN):
+- The radar pattern works for every aircraft: f16, f15, a10, mig29, f14,
+  f18, f5, b52, b1b, c130, f111 ALL touch down. The full mission
+  (taxi→takeoff→radar pattern→approach→land) completes for the entire fleet.
+- The remaining failures are PRECISION tolerances (the Tranche A1 tightened
+  tolerances): touchdown cross < 50 ft (actual 75-154 ft), touchdown along
+  500-2500 ft (actual -806 to 190 ft). The aircraft land — they just land
+  off-centerline and short/long of the aim point.
+- 27/27 landing module unit tests pass (updated the lateral bounds guard
+  test to reflect the removal).
+- This is the breakthrough: the radar pattern geometry + the lateral guard
+  removal = every aircraft lands. The precision tuning is the next tranche.

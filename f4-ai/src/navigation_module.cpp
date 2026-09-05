@@ -315,7 +315,13 @@ AIControlOutput NavigationModule::controls_for_waypoint() const
         speed = std::min(speed, std::max(turn_speed_kts, ENROUTE_SPEED_FLOOR_KTS));
     }
 
-    constexpr double TERRAIN_CLEARANCE_FLOOR_MSL = 3000.0;
+    // Tranche 39: lowered from 3000 to 500. The old 3000 ft MSL floor
+    // overrode the 1500 ft pattern altitude of the radar pattern's downwind
+    // leg — the aircraft never descended below 3000 ft during enroute, arriving
+    // at the approach entry fix at 3000+ ft instead of 1500 ft (too high for
+    // a glideslope-from-below intercept). 500 ft MSL is above Korea's coastal
+    // terrain (near sea level) and below the 1500 ft pattern altitude.
+    constexpr double TERRAIN_CLEARANCE_FLOOR_MSL = 500.0;
     double target_alt = std::max(wp.position.z, TERRAIN_CLEARANCE_FLOOR_MSL);
     return air_steering.steer(desired_hdg, target_alt, speed,
                               steering_input());

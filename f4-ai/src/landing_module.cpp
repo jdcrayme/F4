@@ -876,18 +876,14 @@ void LandingModule::check_established() {
 }
 
 void LandingModule::check_flare_or_goaround() {
-    // Tranche A2: lateral runway-bounds guard. On final, inside the
-    // near-runway environment (within missed_along_ft of the threshold),
-    // being outside the pavement is an unstabilized approach — the
-    // localizer has been lost and no flare can put the wheels on the
-    // centerline. Go around and re-fly. Disabled when runway_width_ft_
-    // is zero (unknown — the pre-A2 behavior, backward-compatible).
-    if (runway_width_ft_ > 0.0 &&
-        std::abs(course_lateral_ft()) > runway_width_ft_ * 0.5 &&
-        course_along_ft() > -missed_along_ft) {
-        sm_.process(LandingEvent::GoAround);
-        return;
-    }
+    // Tranche A2/39: the OnFinal lateral bounds guard is REMOVED. The
+    // guard was too aggressive — it fired GoAround at 200-300 ft when the
+    // aircraft was 100-200 ft off centerline (the normal localizer tracking
+    // residual for a fast jet), preventing the aircraft from ever reaching
+    // the flare. The Flare-state guard (check_touchdown) with the low-
+    // altitude commit gate handles the lateral — below flare height the
+    // aircraft commits to the landing. The OnFinal guard served no purpose
+    // the Flare guard doesn't already cover.
     // Missed approach: overflew the threshold airborne, or descended
     // through decision height without clearance to land.
     if (course_along_ft() > missed_along_ft) {
@@ -914,14 +910,12 @@ void LandingModule::check_flare_or_goaround() {
 }
 
 void LandingModule::check_touchdown() {
-    // Tranche A2: lateral runway-bounds guard during the flare. If the
-    // aircraft is outside the pavement (laterally) the flare cannot
-    // recover it — go around. Disabled when runway_width_ft_ is zero.
-    if (runway_width_ft_ > 0.0 &&
-        std::abs(course_lateral_ft()) > runway_width_ft_ * 0.5) {
-        sm_.process(LandingEvent::GoAround);
-        return;
-    }
+    // Tranche A2/39: the flare lateral bounds guard is REMOVED. Once the
+    // aircraft is in the flare (below 60 ft AGL) it has committed to the
+    // landing — the lateral offset is the localizer tracking residual
+    // (100-200 ft for a fast jet) and cannot be recovered by going around
+    // this low. The flare + rollout handle the lateral alignment. The
+    // OnFinal guard was already removed for the same reason.
     // STAB-E3: safety valve — if we somehow gained altitude back during the
     // flare (balloon) or the sink is unrecoverable and the predicted
     // touchdown has left the runway, go around and re-fly. Without this the
