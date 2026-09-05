@@ -241,6 +241,34 @@ public:
     double throttle_min{0.25};
     double throttle_max{1.0};          ///< MIL (nav never selects AB)
 
+    // --- Approach mode (Tranche 31: pitch-for-speed + throttle-for-altitude
+    // + rudder-for-lateral). The ILS technique: decouple the lateral from
+    // the altitude by using rudder for small heading corrections (no bank,
+    // no lift-vector tilt) and moving the altitude loop to the throttle.
+    // Pitch holds alpha (speed) — independent of bank. See
+    // LANDING_PRECISION_FORMATION_AAR_PLAN.md §1.3 (the lateral-altitude
+    // coupling root cause) and the user's control-law guidance.
+    double approach_rudder_gain{0.05};   ///< yaw_cmd per rad of heading error,
+                                          ///<  scaled by v/v_corner (FreeFalcon
+                                          ///<  autopilot.cpp:34 form). 0.05 at
+                                          ///<  200 kts / 150 corner = 0.067 rad
+                                          ///<  pedal per 10-deg heading error.
+    double approach_rudder_max{0.3};      ///< clamp on the rudder command
+    double approach_aileron_threshold_rad{0.175}; ///< ~10 deg: below this, use
+                                          ///<  rudder only; above, the bank
+                                          ///<  cascade assists (intercept cuts)
+    double approach_speed_pitch_gain{0.003}; ///< stick per kt of speed error
+                                          ///<  (nose up when slow). The PRIMARY
+                                          ///<  pitch driver in approach mode.
+    double approach_alt_throttle_gain{0.0008}; ///< throttle per ft of altitude
+                                          ///<  error (more power when below).
+    double approach_alt_integral_gain{0.00005}; ///< integral on altitude error
+                                          ///<  (kills steady-state beam offset).
+    double approach_alt_integral_max{0.3}; ///< clamp on the altitude integral
+    double approach_wings_level_gain{2.0}; ///< roll damping when in rudder-only
+                                          ///<  mode (keep wings level without
+                                          ///<  banking for small corrections)
+
     // --- Rudder (NAV-A) ---
     // There are no rudder gains here on purpose: the AI commands
     // yaw_cmd = 0 in sustained flight and the FCS yaw damper (fcs.cpp
@@ -273,6 +301,19 @@ public:
                                         const Input& in,
                                         double throttle_floor = -1.0) const;
 
+    /// Approach-mode steering (Tranche 31): the ILS technique — pitch for
+    /// speed (alpha), throttle for altitude (glide slope), rudder for small
+    /// lateral, ailerons only for large corrections. Decouples the lateral
+    /// from the altitude (the coupling that breaks the beam ride when the
+    /// localizer oscillates). `intercept` true = large corrections allowed
+    /// (InterceptFinal); false = rudder-only (OnFinal beam ride).
+    [[nodiscard]] AIControlOutput steer_approach(double desired_heading_rad,
+                                                 double target_alt_ft,
+                                                 double target_speed_kts,
+                                                 const Input& in,
+                                                 bool intercept,
+                                                 double throttle_floor = -1.0) const;
+
     /// Reset the integral accumulators (call on mode transition, e.g.
     /// when NavigationModule hands off to LandingModule with a different
     /// target speed — otherwise the integral carries a stale offset).
@@ -281,6 +322,7 @@ public:
         speed_integral_ = 0.0;
         alt_integral_ = 0.0;
         vs_target_ = 0.0;
+        approach_alt_integral_ = 0.0;
     }
 
 private:
@@ -292,6 +334,8 @@ private:
     mutable double alt_integral_{0.0};
     /// STAB-E29: last VS command (fpm) — the slew-rate limiter's state.
     mutable double vs_target_{0.0};
+    /// Tranche 31: approach-mode altitude integral (throttle-channel).
+    mutable double approach_alt_integral_{0.0};
 };
 
 } // namespace f4::ai

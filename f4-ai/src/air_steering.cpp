@@ -34,24 +34,42 @@ AIControlOutput AirSteering::steer(double desired_heading_rad,
                                    double throttle_floor) const {
     AIControlOutput out;
 
-    // --- Heading: bank-to-turn cascade ---
-    // Target bank from heading error (clamped), then roll rate command
-    // from bank error. Positive heading error (turn right) commands right
-    // roll; the FCS roll channel is not subject to the ground pedal
-    // inversion (that lives in GroundSteering for nose-wheel steering).
+    // --- Heading: rudder for small corrections, bank-to-turn for large ---
+    // Tranche 31 (user guidance): rudder for small lateral adjustments,
+    // easier on the ailerons. The bank-to-turn cascade tilts the lift
+    // vector — for small heading errors (beam tracking) this degrades the
+    // altitude hold (the lateral-altitude coupling). Rudder yawes the nose
+    // WITHOUT banking: the lift vector stays vertical, the altitude hold
+    // stays decoupled. Ailerons only kick in for large errors (intercept
+    // cuts), where the bank cascade's authority is needed.
     //
-    // The roll_damp term (-Kd * p) is critical: without it, the bank
-    // cascade + FCS roll-rate lag can phase-shift into a sustained
-    // limit cycle (the documented "roll flutter" symptom). The damping
-    // term adds explicit derivative feedback that kills the cycle.
+    // FreeFalcon autopilot.cpp:34: yPedal = headingErr * 0.05 * RTD * vt / cornerSpeed.
     const double hdg_err = heading_error(desired_heading_rad, in.heading_rad);
-    const double bank_target = std::clamp(bank_gain * hdg_err,
-                                          -max_bank_rad, max_bank_rad);
-    const double bank_err = bank_target - in.roll_rad;
-    out.roll_cmd = std::clamp(roll_gain * bank_err - roll_damp * in.roll_rate_radps,
-                              -1.0, 1.0);
+    const double v_corner = 150.0 * 1.68781;  // ~150 kts corner speed
+    const double v_fps = std::max(100.0, in.vcas_kts * 1.68781);
+    const double rudder_scale = v_fps / v_corner;
+    out.yaw_cmd = std::clamp(approach_rudder_gain * hdg_err * rudder_scale,
+                              -approach_rudder_max, approach_rudder_max);
 
-    // --- Rudder: centered in sustained flight (NAV-A) ---
+    if (std::fabs(hdg_err) > approach_aileron_threshold_rad) {
+        // Large heading error (intercept cut): bank-to-turn cascade.
+        const double bank_target = std::clamp(bank_gain * hdg_err,
+                                              -max_bank_rad, max_bank_rad);
+        const double bank_err = bank_target - in.roll_rad;
+        out.roll_cmd = std::clamp(roll_gain * bank_err - roll_damp * in.roll_rate_radps,
+                                  -1.0, 1.0);
+    } else {
+        // Small heading error (beam ride): wings-level damping only. No
+        // bank command — the rudder handles the lateral, the wings stay
+        // level, the lift vector stays vertical. This is the decoupling
+        // that lets the altitude hold track the beam through localizer
+        // corrections.
+        out.roll_cmd = std::clamp(-approach_wings_level_gain * in.roll_rad
+                                  - roll_damp * in.roll_rate_radps,
+                                  -0.3, 0.3);
+    }
+
+    // --- Rudder: (see the lateral channel above — Tranche 31) ---
     //
     // The AI commands ZERO steady-state pedal. The Phase A2
     // "coordinated-turn feedforward" that used to live here
@@ -75,13 +93,9 @@ AIControlOutput AirSteering::steer(double desired_heading_rad,
     //      the waypoint", and much of the in-turn altitude loss (a
     //      tilted lift vector reads as missing pitch authority).
     //
-    // Coordination is the yaw damper's job (Phase A1 holds beta ~ 0 with
-    // the pedals centered). A steady turn needs no steady rudder; turn
-    // entry/exit adverse yaw is a roll-rate effect, and if this EOM ever
-    // grows adverse-yaw coefficients the right home for the compensation
-    // is a roll-rate-proportional term there — not a bank-proportional
-    // steady pedal here.
-    out.yaw_cmd = 0.0;
+    // (The rudder is set by the lateral channel above — Tranche 31.
+    // The old NAV-A law centered the pedals; the new law uses them for
+    // small heading corrections, decoupling the lateral from the altitude.)
 
     // --- Altitude: gamma-hold ---
     // Target VS from the altitude error, convert to a commanded
@@ -130,7 +144,7 @@ AIControlOutput AirSteering::steer(double desired_heading_rad,
                                              -step, step);
     }
     vs_target_ = vs_target;
-    const double v_fps = std::max(100.0, in.vcas_kts * 1.68781);
+    // v_fps is already in scope (declared by the lateral channel above).
     const double gamma_now = std::asin(std::clamp((in.vs_fpm / 60.0) / v_fps,
                                                   -0.7, 0.7));
     // STAB-E17: clamp the alpha estimate to a physically-sane band. The
@@ -241,6 +255,104 @@ AIControlOutput AirSteering::steer(double desired_heading_rad,
         out.throttle_cmd = std::min(out.throttle_cmd, 0.08);
         out.speed_brake_cmd = 1.0;   // full board
     }
+
+    return out;
+}
+
+AIControlOutput AirSteering::steer_approach(double desired_heading_rad,
+                                                       double target_alt_ft,
+                                                       double target_speed_kts,
+                                                       const Input& in,
+                                                       bool intercept,
+                                                       double throttle_floor) const {
+    // Tranche 31: the ILS approach technique — pitch for speed (alpha),
+    // throttle for altitude (glide slope), rudder for small lateral,
+    // ailerons only for large corrections. Decouples the lateral from the
+    // altitude (the bank → lift-vector-tilt coupling that breaks the beam
+    // ride when the localizer oscillates).
+    //
+    // FreeFalcon uses the cruise technique (pitch-for-altitude, throttle-
+    // for-speed) even on approach (TrackPointLanding, mnvers.cpp:41). This
+    // is an IMPROVEMENT over FreeFalcon, permitted by the project's design
+    // principle: "Preserve functionality, not code; the implementation is
+    // free to use modern architectures."
+    AIControlOutput out;
+
+    const double hdg_err = heading_error(desired_heading_rad, in.heading_rad);
+    const double abs_hdg_err = std::fabs(hdg_err);
+
+    // --- Lateral: rudder for small corrections, ailerons for large ---
+    // FreeFalcon autopilot.cpp:34: yPedal = headingErr * 0.05 * RTD * vt / cornerSpeed.
+    // The rudder yawes the nose toward the heading without banking — no
+    // lift-vector tilt, no altitude coupling. Below the aileron threshold
+    // (~10 deg) this is the only lateral input; above it the bank cascade
+    // assists (intercept cuts still need coordinated turns).
+    const double v_corner = 150.0 * 1.68781;  // ~150 kts corner speed
+    const double v_fps = std::max(100.0, in.vcas_kts * 1.68781);
+    const double rudder_scale = v_fps / v_corner;
+    out.yaw_cmd = std::clamp(approach_rudder_gain * hdg_err * rudder_scale,
+                              -approach_rudder_max, approach_rudder_max);
+
+    if (intercept && abs_hdg_err > approach_aileron_threshold_rad) {
+        // Large heading error (intercept cut): use the bank cascade.
+        const double bank_target = std::clamp(bank_gain * hdg_err,
+                                              -max_bank_rad, max_bank_rad);
+        const double bank_err = bank_target - in.roll_rad;
+        out.roll_cmd = std::clamp(roll_gain * bank_err - roll_damp * in.roll_rate_radps,
+                                  -1.0, 1.0);
+    } else {
+        // Small heading error (beam ride): wings-level damping only. No
+        // bank command — the rudder yawes the nose, the wings stay level,
+        // the lift vector stays vertical. This is the decoupling.
+        out.roll_cmd = std::clamp(-approach_wings_level_gain * in.roll_rad
+                                  - roll_damp * in.roll_rate_radps,
+                                  -0.3, 0.3);
+    }
+
+    // --- Pitch: for SPEED (alpha), not altitude ---
+    // The primary pitch driver is the SPEED ERROR: nose up when slow (more
+    // alpha → more lift → slows the descent AND bleeds speed), nose down
+    // when fast. The altitude is NOT in the pitch loop — it moves to the
+    // throttle. This breaks the lateral-altitude coupling: a bank for a
+    // lateral correction no longer fights the altitude hold, because the
+    // pitch loop isn't holding altitude.
+    //
+    // The speed error drives pitch directly (stick per kt). The gamma_ff
+    // (the beam's descent rate) is added as a feedforward so the aircraft
+    // RIDES the beam instead of commanding level flight.
+    const double speed_err = target_speed_kts - in.vcas_kts;  // + = slow
+    const double gamma_ff = std::clamp((in.vs_ff_fpm / 60.0) / v_fps, -0.35, 0.35);
+    const double alpha_est = std::clamp(in.pitch_rad - gamma_ff,
+                                        alpha_min_rad, alpha_max_rad);
+    // Pitch target: alpha_est (hold current alpha) + speed correction (nose
+    // up if slow) + gamma_ff (ride the beam). The speed gain is the PRIMARY
+    // driver — approach_speed_pitch_gain * speed_err.
+    const double theta_target = std::clamp(
+        alpha_est + gamma_ff + approach_speed_pitch_gain * speed_err * 57.29578,
+        min_path_rad, max_path_rad);
+    out.pitch_cmd = std::clamp(attitude_gain * (theta_target - in.pitch_rad)
+                                - pitch_rate_damp * in.pitch_rate_radps,
+                               pitch_min, pitch_max);
+
+    // --- Throttle: for ALTITUDE (glide slope), not speed ---
+    // The altitude loop moves to the throttle: more power when below the
+    // beam, less when above. This is the ILS technique — the throttle
+    // controls the energy (climb/descent rate), the pitch controls the
+    // speed (alpha). The leaky integral kills the steady-state beam offset.
+    const double alt_err = target_alt_ft - in.alt_msl_ft;  // + = below
+    approach_alt_integral_ = approach_alt_integral_ * (1.0 - 1.0 / 600.0)
+                           + approach_alt_integral_gain * alt_err * (1.0 / 60.0);
+    approach_alt_integral_ = std::clamp(approach_alt_integral_,
+                                         -approach_alt_integral_max,
+                                         approach_alt_integral_max);
+    const double floor = std::max(throttle_min, throttle_floor);
+    out.throttle_cmd = std::clamp(
+        throttle_mid + approach_alt_throttle_gain * alt_err + approach_alt_integral_,
+        floor, throttle_max);
+
+    // Speed brake: proportional over a 15-kt band (same as steer()).
+    const double over_speed = in.vcas_kts - (target_speed_kts + 5.0);
+    out.speed_brake_cmd = -1.0 + 1.85 * std::clamp(over_speed / 15.0, 0.0, 1.0);
 
     return out;
 }

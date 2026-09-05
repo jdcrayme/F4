@@ -79,15 +79,16 @@ void run_full_mission(Scenario scenario, bool require_pattern) {
     ASSERT_GE(scenario.waypoints.size(), 2u);
     // (airfield fields are DERIVED at sim initialize from airbase_source)
 
-    // Skip when the real-world JSON data the scenario references is missing
-    // (it's only generated when F4_INSTALL points at a Falcon install —
-    // a CI environment without that install cannot run this test).
+    // Skip when the world JSON the scenario references is missing. With the
+    // committed Data/ tree (Tranche 0a follow-up), this should never fire in
+    // a full clone — the data is in the repo. Kept as a safety valve for
+    // shallow clones or builds without Data/ (backward-compatible).
     if (!scenario.airbase_source.world_json_path.empty() &&
         !std::filesystem::exists(scenario.airbase_source.world_json_path)) {
         GTEST_SKIP() << "world JSON '"
                      << scenario.airbase_source.world_json_path
-                     << "' not generated (requires F4_INSTALL set to a "
-                        "Falcon 4.0 install)";
+                     << "' not found (expected in Data/World/ — run "
+                        "scripts/export-game-data.sh to generate)";
     }
 
     Simulation sim(scenario, scenario_path.parent_path());

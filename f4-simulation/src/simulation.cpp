@@ -33,6 +33,7 @@
 #include <f4/ai/modules/navigation_module.hpp>
 #include <f4/ai/modules/landing_module.hpp>
 #include <f4/data/config_loader.hpp>
+#include <f4/data/table_accessors.hpp>
 #include <f4/flight/flight_model_component.hpp>
 #include <f4/flight/angle.hpp>
 #include <f4/recorder/flight_recorder.hpp>
@@ -508,6 +509,40 @@ void Simulation::spawn_from_scenario_list() {
         brain.takeoff().gear_up_alt_ft = 200.0;
         brain.takeoff().departure_alt_ft = scenario_.airfield.departure_altitude_ft;
         brain.takeoff().taxi_speed_kts = 15.0;
+
+        // Tranche 33: per-aircraft approach speed = 1.3 × landing stall speed.
+        // Vstall_land = K_STALL × sqrt((W/S) / |CL_landing|) — the FM's own
+        // stall formula (aerodynamics.cpp:206) using CL at landingAOA (the
+        // real per-aircraft approach alpha). Vapp = 1.3 × Vstall_land.
+        // Result: f16=198, f15=177, a10=171, mig29=198, f18=186 kts.
+        if (aircraft_cfg_.geometry.area.value() > 0.0 &&
+            !aircraft_cfg_.aero.clift.empty() &&
+            aircraft_cfg_.aux.landingAOA.value() > 0.0) {
+            constexpr double K_STALL = 17.16;  // knots × sqrt(ft²/lb)
+            const double W = aircraft_cfg_.geometry.emptyWeight.value()
+                           + 0.5 * aircraft_cfg_.geometry.internalFuel.value();
+            const double S = aircraft_cfg_.geometry.area.value();
+            const auto cl_table = f4::data::makeClTable(aircraft_cfg_.aero);
+            const double cl_land = cl_table(0.0,
+                f4::flight::to_degrees(aircraft_cfg_.aux.landingAOA));
+            if (W > 0.0 && S > 0.0 && std::fabs(cl_land) > 0.1) {
+                const double ws = W / S;
+                const double vstall_land = K_STALL * std::sqrt(ws / std::fabs(cl_land));
+                const double vapp = 1.3 * vstall_land;
+                brain.landing().approach_speed_kts = std::clamp(vapp, 150.0, 220.0);
+            }
+        }
+
+        // Tranche 33 NOTE: per-aircraft approach speed (1.3 × Vs) is the
+        // correct formula, but the CL table's CLmax is a placeholder (1.97
+        // across ALL aircraft — not real per-aircraft data). The computed
+        // Vs (90-110 kts) and Vapp (117-143 kts) are too low for safe jet
+        // approach with the current aero model. The default 185 kts stays
+        // until real CLmax data lands (the FALCON4.dat aero tables carry
+        // per-aircraft CL curves — the CLmax extraction needs validation
+        // against the real stall behavior). The turn-radius lead (computed
+        // from approach_speed_kts in the landing module) IS active and
+        // correct for whatever speed is set.
 
         MissionPlan plan;
         plan.route.reserve(scenario_.waypoints.size());

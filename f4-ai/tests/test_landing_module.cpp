@@ -196,11 +196,18 @@ TEST_F(LandingTestFixture, LocalizerCorrectionSteersLeftWhenRightOfCourse) {
     drive_to_on_final();
     ASSERT_EQ(mod.state(), LandingState::OnFinal);
 
-    // 1000 ft right of the centerline: desired heading < runway heading
-    // (correction to the left -> negative roll command from the cascade).
+    // 1000 ft right of the centerline: the aircraft must steer LEFT (toward
+    // the course). Tranche 31/33: small heading corrections now use RUDDER
+    // (yaw_cmd < 0 = rudder left) + wings-level damping (roll_cmd ≈ 0);
+    // large corrections use ailerons (roll_cmd < 0). At 1000 ft offset with
+    // the turn-radius lead (6500 ft), the heading error is ~8.7 deg — below
+    // the 10 deg aileron threshold, so the rudder handles it. The test
+    // checks EITHER channel for the left correction.
     auto s = on_final(1000.0, 14000.0, 800.0, 0.0);
     const auto out = mod.update(0.1, s.get());
-    EXPECT_LT(out.roll_cmd, 0.0) << "right of centerline must steer left";
+    EXPECT_TRUE(out.roll_cmd < 0.0 || out.yaw_cmd < 0.0)
+        << "right of centerline must steer left (roll=" << out.roll_cmd
+        << ", yaw=" << out.yaw_cmd << ")";
     EXPECT_TRUE(out.gear_handle_down);
 }
 

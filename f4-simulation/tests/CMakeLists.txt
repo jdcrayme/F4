@@ -29,6 +29,7 @@ f4_simulation_add_test(test_bubble_manager         test_bubble_manager.cpp)
 f4_simulation_add_test(test_frames                 test_frames.cpp)
 f4_simulation_add_test(test_real_layout_derivation test_real_layout_derivation.cpp)
 f4_simulation_add_test(test_digi_mission           test_digi_mission.cpp)
+f4_simulation_add_test(test_intercept_convergence    test_intercept_convergence.cpp)
 f4_simulation_add_test(test_fcs_trace_pipeline     test_fcs_trace_pipeline.cpp)
 f4_simulation_add_test(test_combat_integration     test_combat_integration.cpp)
 f4_simulation_add_test(test_combat_transcript      test_combat_transcript.cpp)
@@ -124,6 +125,9 @@ target_compile_definitions(test_combat_transcript PRIVATE
 # The DIGI end-to-end mission test runs the build-configured
 # digi_full_mission.json scenario (paths inside it are absolute).
 target_compile_definitions(test_digi_mission PRIVATE
+    F4_SCENARIOS_DIR="${CMAKE_BINARY_DIR}/scenarios"
+)
+target_compile_definitions(test_intercept_convergence PRIVATE
     F4_SCENARIOS_DIR="${CMAKE_BINARY_DIR}/scenarios"
 )
 

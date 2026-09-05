@@ -110,6 +110,28 @@ else()
     set(F4_DIGI_CLASS_TABLE "${CMAKE_SOURCE_DIR}/f4-world-convert/tests/fixtures/FALCON4.ct")
 endif()
 
+# Tranche 0a follow-up (NO_BINARY_RUNTIME_PLAN.md): prefer the committed
+# Data/ JSON for world, terrain, and aircraft config when present. These
+# replace the @F4_BINARY_DIR@/korea_real.world.json etc. references in the
+# scenario templates — the data is now in the repo, not generated at build
+# time from F4_INSTALL. Fallbacks preserve the old build-dir paths for
+# environments without Data/ (backward-compatible).
+if(EXISTS "${CMAKE_SOURCE_DIR}/Data/World/korea.world.json")
+    set(F4_WORLD_JSON "${CMAKE_SOURCE_DIR}/Data/World/korea.world.json")
+else()
+    set(F4_WORLD_JSON "${CMAKE_BINARY_DIR}/korea_real.world.json")
+endif()
+if(EXISTS "${CMAKE_SOURCE_DIR}/Data/Theater/korea/terrain.json")
+    set(F4_TERRAIN_JSON "${CMAKE_SOURCE_DIR}/Data/Theater/korea/terrain.json")
+else()
+    set(F4_TERRAIN_JSON "${CMAKE_BINARY_DIR}/korea.terrain.json")
+endif()
+if(EXISTS "${CMAKE_SOURCE_DIR}/Data/Aircraft/f16.json")
+    set(F4_AIRCRAFT_CONFIG "${CMAKE_SOURCE_DIR}/Data/Aircraft/f16.json")
+else()
+    set(F4_AIRCRAFT_CONFIG "${CMAKE_BINARY_DIR}/generated_fixtures/f16.json")
+endif()
+
 # Textured-terrain data for the scenario player: when a real install is
 # configured, point the scenarios at its korea theater (raw THEATER.L*/
 # O* post files + TEXTURE.BIN/texture.zip/FArtILES tile art). Substituted
