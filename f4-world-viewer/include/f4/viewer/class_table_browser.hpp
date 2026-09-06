@@ -1,9 +1,11 @@
 // f4-world-viewer/include/f4/viewer/class_table_browser.hpp
 //
-// The ImGui panel that renders the Falcon4.ct class table as a browsable,
-// filterable, exportable grid with 3D model preview. Owns its own window
-// state; the ViewerApp creates one ClassTableBrowser and toggles its
-// visibility via the Tools menu.
+// The ImGui panel that renders the runtime class table
+// (Data/Classes/falcon4.ct.json — the committed JSON; the binary .ct
+// decoder is no longer linked, Tranche 0d) as a browsable, filterable,
+// exportable grid with 3D model preview (glTF via the shared
+// RuntimeModelCache). Owns its own window state; the ViewerApp creates
+// one ClassTableBrowser and toggles its visibility via the Tools menu.
 //
 // Layout:
 //   ┌──────────────────────────────────────────────────────────────────┐
@@ -26,10 +28,7 @@
 
 #pragma once
 
-#include <f4/world_convert/class_table.hpp>
-#include <f4/world_convert/theater_data.hpp>
-#include <f4/models/model_database.hpp>
-#include <f4/install/installation.hpp>
+#include <f4/world_types/class_table.hpp>
 
 #include <cstdint>
 #include <filesystem>
@@ -38,6 +37,10 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+
+namespace f4::renderer {
+class RenderResources;   // fwd — the shared GPU resources (models/textures/shader)
+}
 
 namespace f4::viewer {
 
@@ -67,14 +70,13 @@ public:
     void close() { open_ = false; cleanup_preview(); }
     [[nodiscard]] bool is_open() const noexcept { return open_; }
 
-    /// Provide the Installation so we can lazy-load data. Called each
-    /// frame from draw() if we don't have it yet. The browser does NOT
-    /// take ownership.
-    void set_install(const f4::install::Installation* inst) { install_ = inst; }
-
-    /// Provide the already-loaded 3D ModelDatabase for cross-referencing
-    /// vis_type -> ModelRecord metadata. May be nullptr.
-    void set_model_db(f4::models::ModelDatabase* db) { model_db_ = db; }
+    /// Provide the shared RenderResources (glTF model cache + PNG texture
+    /// cache + lit shader + default material). May be nullptr — the 3D
+    /// preview degrades to a status message. The browser does NOT take
+    /// ownership. Called each frame from the panels pass.
+    void set_render_resources(f4::renderer::RenderResources* res) {
+        render_resources_ = res;
+    }
 
     /// Render the panel. Call every frame inside the ImGui frame.
     void draw();
@@ -82,13 +84,15 @@ public:
 private:
     bool open_ = false;
 
-    // --- Data sources (set externally or lazy-loaded) ---
-    const f4::install::Installation* install_ = nullptr;
-    f4::models::ModelDatabase* model_db_ = nullptr;
+    // --- Data sources (set externally) ---
+    f4::renderer::RenderResources* render_resources_ = nullptr;
 
     // --- Lazy-loaded data (owned by this panel) ---
-    f4::world_convert::ClassTable class_table_;
-    f4::world_convert::TheaterObjectDatabase theater_db_;
+    // Tranche 0d: the table loads from Data/Classes/falcon4.ct.json via
+    // f4-world-types (the binary .ct decoder is no longer linked). The
+    // joined OCD/UCD/VCD/FCD/WCD record browsing moved to the converted
+    // artifacts (cam2json --theater-data / ct2json outputs).
+    f4::world_types::ClassTable class_table_;
     bool data_load_attempted_ = false;
     bool data_loaded_ = false;
     std::string load_error_;
@@ -102,7 +106,7 @@ private:
     // --- Pre-computed filtered entries ---
     struct FilteredEntry {
         uint16_t entity_type;
-        const f4::world_convert::ClassTableEntry* entry;
+        const f4::world_types::ClassTableEntry* entry;
     };
     std::vector<FilteredEntry> filtered_entries_;
 
@@ -166,7 +170,7 @@ private:
     /// Check if an entry matches the current filters.
     [[nodiscard]] bool passes_filter(
         uint16_t entity_type,
-        const f4::world_convert::ClassTableEntry& entry) const;
+        const f4::world_types::ClassTableEntry& entry) const;
 
     /// Export the currently-filtered entries as CSV.
     void export_csv(const std::filesystem::path& path);
@@ -184,27 +188,10 @@ private:
     /// Ensure the RenderTexture2D for the preview exists.
     void ensure_preview_target(int w, int h);
 
-    /// Lazy-compile the lit shader (single directional sun + ambient).
-    /// Idempotent. Returns true if the shader is available (either
-    /// freshly compiled or already cached). Returns false if compilation
-    /// fails — caller falls back to unlit default material.
-    bool ensure_lit_shader();
-
-    /// Lazy-create the 1x1 white fallback texture + the cached default
-    /// material that binds it (and the lit shader, if available).
-    /// Required so untextured meshes sample (1,1,1,1) instead of
-    /// undefined data — the lit shader's `if (tex.a < 0.5) discard;`
-    /// would otherwise kill every fragment of every untextured mesh.
-    bool ensure_default_material();
-
-    /// Build (or skip if cached) Raylib Mesh objects for one KoreaObj
-    /// model. Requires the GL context. No-op if vis_type_idx <= 0 or
-    /// already cached. Sets preview_cache_->mesh_cache[vis_type_idx].built = true
-    /// even on failure (so we don't retry every frame).
+    /// Build (or skip if cached) the glTF model for one vis_type through
+    /// the shared RuntimeModelCache. Requires the GL context. No-op when
+    /// render_resources_ is null or vis_type_idx <= 0.
     void build_preview_meshes(int16_t vis_type_idx);
-
-    /// Upload textures is now handled by f4::renderer::TextureCache
-    /// in build_preview_meshes(). No separate method needed.
 
     /// Fit the orbit camera to the model's bounding box so the model
     /// fills a reasonable portion of the preview viewport. Called once

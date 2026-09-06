@@ -28,15 +28,13 @@ namespace f4::renderer {
 
 EntityRenderResources make_entity_render_resources(
     RenderResources& res,
-    f4::models::ModelDatabase* db,
-    f4::world_convert::ClassTable* ct)
+    f4::world_types::ClassTable* ct)
 {
     EntityRenderResources eres{};
-    eres.model_db       = db;
+    eres.model_cache    = &res.model_cache;
     eres.class_table    = ct;
     eres.texture_cache  = &res.texture_cache;
     eres.lit_shader     = &res.lit_shader;
-    eres.mesh_cache     = &res.mesh_cache;
     eres.light_direction = res.light_direction;
     eres.light_color     = res.light_color;
     eres.light_intensity = res.light_intensity;

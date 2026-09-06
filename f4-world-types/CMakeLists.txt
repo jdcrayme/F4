@@ -26,6 +26,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 add_library(f4-world-types STATIC
     src/class_table.cpp
+    src/campaign_names.cpp
     src/aii_config.cpp
 )
 target_link_libraries(f4-world-types PUBLIC f4_warnings)

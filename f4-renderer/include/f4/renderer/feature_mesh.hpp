@@ -1,17 +1,23 @@
 // f4-renderer/include/f4/renderer/feature_mesh.hpp
 //
 // Feature mesh rendering — resolves a class table entity_type → vis_type →
-// KoreaObj BSP model → Raylib Mesh, then DrawMesh-es it at a given ENU
-// position with a given facing. Caches the mesh per vis_type and the
-// textures per tex_id so multiple features of the same type reuse one
-// GPU upload.
+// glTF model (Data/Models/koreaobj/NNNNN.gltf) → Raylib Mesh, then
+// DrawMesh-es it at a given ENU position with a given facing. Caches the
+// meshes per vis_type (RuntimeModelCache) and the textures per tex_id
+// (TextureCache) so multiple features of the same type reuse one GPU
+// upload.
 //
 // This is the single source of truth for the feature → mesh pipeline.
 // The 2D world-viewer canvas and the 3D Ground Layout panel both call
-// draw_feature_mesh() to render real KoreaObj feature models at
+// draw_feature_mesh() to render real feature models at
 // FeatureEntryState offsets — replacing the previous duplicate
 // implementations in canvas.cpp (placeholder) and ground_layout_3d.cpp
 // (inline).
+//
+// Tranche 0d (RENDERER_GLTF_REWIRE_PLAN.md): the model source is the
+// glTF export (f4import models) + PNG textures (f4import textures) —
+// f4-renderer no longer links f4-models / f4-world-convert. The class
+// table is f4-world-types (the runtime-safe JSON loader).
 //
 // IMPORTANT: draw_feature_mesh() must be called inside a
 // BeginMode3D/EndMode3D block. The caller is responsible for setting up
@@ -38,9 +44,7 @@
 #include <f4/renderer/lit_shader.hpp>
 #include <f4/renderer/mesh_builder.hpp>  // MeshEntry
 #include <f4/renderer/texture_cache.hpp>
-
-#include <f4/models/model_database.hpp>
-#include <f4/world_convert/class_table.hpp>
+#include <f4/renderer/runtime_model_cache.hpp>
 
 #include <raylib.h>
 // Undef raylib macros that pollute the namespace
@@ -49,45 +53,37 @@
 #undef RAD2DEG
 
 #include <cstdint>
-#include <unordered_map>
 #include <vector>
 
-namespace f4::renderer {
+namespace f4::world_types {
+struct ClassTable;
+}  // namespace f4::world_types
 
-/// One entry in the per-vis_type mesh cache. Multiple features with the
-/// same vis_type share one entry (one GPU upload per KoreaObj model).
-///
-/// The `built` flag is set to true even on failure so we don't retry
-/// every frame (a model that fails to parse will stay failing).
-struct FeatureMeshCacheEntry {
-    std::vector<MeshEntry> meshes;
-    bool built = false;
-};
+namespace f4::renderer {
 
 /// Bundle of resources needed to draw feature meshes. Built once and
 /// passed (by reference) to draw_feature_mesh() for each feature.
 ///
-/// Lifetime: the caller owns all pointed-to objects (ModelDatabase,
-/// ClassTable, TextureCache, LitShader, default_material). The mesh_cache
-/// is also caller-owned so the same cache can be reused across multiple
-/// draw_feature_mesh() calls (and shared with other paths if desired).
+/// Lifetime: the caller owns all pointed-to objects (RuntimeModelCache —
+/// typically RenderResources::model_cache — ClassTable, TextureCache,
+/// LitShader, default_material).
 struct FeatureMeshResources {
-    /// KoreaObj model database (HDR + LOD + TEX). Required.
-    f4::models::ModelDatabase* model_db = nullptr;
+    /// glTF runtime model cache (vis_type → loaded meshes). Required.
+    /// Typically &RenderResources::model_cache. Configure the Data/
+    /// root via RenderResources::set_model_data_dir().
+    RuntimeModelCache* model_cache = nullptr;
 
-    /// Falcon4.ct class table (entity_type → vis_type[7]). Required.
-    f4::world_convert::ClassTable* class_table = nullptr;
+    /// Runtime class table (entity_type → vis_type[7]), from
+    /// f4-world-types (JSON). Required by draw_feature_mesh(); NOT
+    /// required by draw_vis_type_mesh() (callers that already hold the
+    /// vis type legitimately pass null).
+    f4::world_types::ClassTable* class_table = nullptr;
 
     /// GPU texture cache (lazy, keyed by tex_id). Required.
     TextureCache* texture_cache = nullptr;
 
     /// Lit shader (compiled lazily via ensure()). Required.
     LitShader* lit_shader = nullptr;
-
-    /// Per-vis_type mesh cache (caller-owned). Mutated by
-    /// build_feature_mesh() / draw_feature_mesh() to insert newly-built
-    /// meshes. Required.
-    std::unordered_map<int, FeatureMeshCacheEntry>* mesh_cache = nullptr;
 
     /// Default Material for untextured meshes (tex_id < 0). Must be
     /// created by the caller with a 1x1 opaque-white fallback texture
@@ -106,15 +102,15 @@ struct FeatureMeshResources {
     Color   ambient_color      = {  80,  80,  90, 255 };
 };
 
-/// Lazily build the Raylib meshes for one KoreaObj model, cached by
-/// vis_type. No-op if already cached (or if the previous build attempt
-/// failed — `built` stays true). Used internally by draw_feature_mesh,
-/// but exposed so callers can pre-warm the cache outside the render loop
-/// (e.g. when the selection changes, before the first frame draws).
+/// Lazily build (load + upload) the glTF model for one vis_type,
+/// cached by RuntimeModelCache. No-op if already cached (or if the
+/// previous build attempt failed — the cache marks it built). Used
+/// internally by draw_vis_type_mesh, but exposed so callers can
+/// pre-warm the cache outside the render loop (e.g. when the selection
+/// changes, before the first frame draws).
 ///
-/// Requires the GL context. Safe to call when model_db/class_table/
-/// texture_cache are null (no-op). Sets mesh_cache[vis_type].built = true
-/// even on failure so we don't retry every frame.
+/// Requires the GL context. Safe to call when model_cache/texture_cache
+/// are null (no-op).
 void build_feature_mesh(FeatureMeshResources& res, int vis_type);
 
 /// V-3DLIVE: draw one model by VIS TYPE directly — everything
@@ -122,10 +118,10 @@ void build_feature_mesh(FeatureMeshResources& res, int vis_type);
 /// that already hold the resolved vis type. The session entities carry
 /// theirs in VisualModelComponent::vis_type (resolved at spawn against
 /// the SESSION's class table; the viewer resolves the mesh through ITS
-/// OWN model db — the session's is deliberately empty). Shares the
-/// per-vis_type mesh cache and draw path with draw_feature_mesh, so a
-/// static feature and a session entity of the same vis type reuse one
-/// GPU upload.
+/// OWN model cache — the session's is deliberately empty). Shares the
+/// RuntimeModelCache and draw path with draw_feature_mesh, so a static
+/// feature and a session entity of the same vis type reuse one GPU
+/// upload.
 ///
 /// Must be called inside a BeginMode3D/EndMode3D block (same contract
 /// as draw_feature_mesh). Behavior: vis_type <= 0 → zeroed DrawStats;
@@ -148,12 +144,12 @@ DrawStats draw_vis_type_mesh(
 /// Behavior:
 ///   - Looks up vis_type[0] for the given entity_type. If 0 (no model),
 ///     returns zeroed DrawStats.
-///   - Lazily builds the mesh (via build_feature_mesh) if not cached.
+///   - Lazily builds the model (via build_feature_mesh) if not cached.
 ///   - Ensures the lit shader is compiled (idempotent) and sets lighting
 ///     uniforms once per call.
-///   - Disables backface culling (FreeFalcon models have inconsistent
-///     winding order — same convention as draw_meshes() and the existing
-///     ground_layout_3d panel).
+///   - Disables backface culling (FreeFalcon-derived models have
+///     inconsistent winding order — same convention as draw_meshes()
+///     and the existing ground_layout_3d panel).
 ///   - For each mesh entry: picks the material (default_material for
 ///     untextured, or tex_cache.lookup(tex_id)->material for textured),
 ///     then DrawMesh(mesh, material, model_matrix).
@@ -164,8 +160,8 @@ DrawStats draw_vis_type_mesh(
 /// @param enu_x, enu_y, enu_z  Feature world position in ENU feet.
 /// @param facing_deg         Feature facing in degrees (CCW around +Z up).
 /// @return  DrawStats describing what was drawn. draw_calls == 0 means
-///          the feature was skipped (no vis_type, no mesh, empty geometry,
-///          or model_db/class_table pointers were null).
+///          the feature was skipped (no vis_type, no mesh, empty
+///          geometry, or model_cache/class_table pointers were null).
 DrawStats draw_feature_mesh(
     FeatureMeshResources& res,
     uint16_t class_table_index,

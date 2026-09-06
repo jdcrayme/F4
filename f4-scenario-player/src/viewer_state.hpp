@@ -23,9 +23,6 @@
 #include <f4/simulation/scenario.hpp>
 #include <f4/simulation/combat_transcript.hpp>
 #include <f4/simulation/visual_model_component.hpp>
-#include <f4/models/model_database.hpp>
-#include <f4/models/geometry.hpp>
-#include <f4/models/texture.hpp>
 #include <f4/entities/entity.hpp>
 #include <f4/weapons/missile_battery.hpp>   // MissileComponent (combat view)
 #include <f4/flight/flight_model_component.hpp>  // must come BEFORE raylib.h
@@ -117,19 +114,14 @@ struct PlayerApp::Impl {
     bool initial_camera_set = false;
 
     // ── Shared GPU resources (f4::renderer::RenderResources) ────────
-    // Owns the lit shader, texture cache, KoreaObj mesh cache, default
-    // material, lighting state, and airfield geometry cache. Replaces the
-    // per-app mesh_cache / texture_cache / lit_shader / lighting fields
-    // that used to live here (identical caches also lived in the
+    // Owns the glTF model cache (RuntimeModelCache — loads
+    // Data/Models/koreaobj/<vis_type>.gltf + textures/*.png), the PNG
+    // texture cache, the lit shader, the default material, lighting
+    // state, and the airfield geometry cache. Replaces the per-app
+    // mesh_cache / texture_cache / lit_shader / lighting fields that
+    // used to live here (identical caches also lived in the
     // world-viewer — one implementation now serves both).
     f4::renderer::RenderResources render_res;
-
-    // Tranche 0d: the scenario-player owns its own ModelDatabase (the
-    // simulation no longer owns one). Loaded from the scenario's
-    // KoreaObj.HDR/.LOD/.TEX paths. Transitional — the final glTF path
-    // will replace this with a RuntimeModelCache that loads
-    // Data/Models/koreaobj/*.gltf + textures/*.png.
-    f4::models::ModelDatabase model_db;
 
     /// True once the primary aircraft's mesh has been ensured in the
     /// cache (build_aircraft_meshes ran after GL context creation).

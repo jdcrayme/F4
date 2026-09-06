@@ -213,11 +213,10 @@ TEST(EntityRenderResources, Defaults) {
     EXPECT_TRUE(res.show_ground_layout);
     EXPECT_TRUE(res.show_units);  // Mode A unit rendering on by default
     // Inherited from FeatureMeshResources:
-    EXPECT_EQ(nullptr, res.model_db);
+    EXPECT_EQ(nullptr, res.model_cache);
     EXPECT_EQ(nullptr, res.class_table);
     EXPECT_EQ(nullptr, res.texture_cache);
     EXPECT_EQ(nullptr, res.lit_shader);
-    EXPECT_EQ(nullptr, res.mesh_cache);
     EXPECT_EQ(nullptr, res.default_material);
 }
 

@@ -5,7 +5,6 @@
 #include <f4/renderer/world_renderer.hpp>
 
 #include <f4/renderer/terrain_mesh.hpp>  // draw_terrain_mesh (Path B1)
-#include <f4/models/model_database.hpp>
 
 #include <raylib.h>
 
@@ -58,7 +57,7 @@ FrameStats render_world(RenderResources& res, const SceneDescription& s) {
     // ── Component-dispatch entities ─────────────────────────────────
     if (s.world && !s.entities.empty()) {
         EntityRenderResources eres =
-            make_entity_render_resources(res, s.model_db, s.class_table);
+            make_entity_render_resources(res, s.class_table);
         eres.show_features = s.draw_feature_models;
         eres.airfield_toggles = s.airfield_toggles;
 
@@ -86,9 +85,9 @@ FrameStats render_world(RenderResources& res, const SceneDescription& s) {
     }
 
     // ── VisualModelComponent entity meshes ──────────────────────────
-    if (!s.entity_meshes.empty() && s.model_db) {
+    if (!s.entity_meshes.empty()) {
         const auto st = draw_entity_meshes(
-            res, *s.model_db, s.entity_meshes,
+            res, s.entity_meshes,
             cull_e, cull_n, cull_u, s.cull_radius_ft);
         stats.draw.draw_calls   += st.draw_calls;
         stats.draw.meshes_drawn += st.meshes_drawn;

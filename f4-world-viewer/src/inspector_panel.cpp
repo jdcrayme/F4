@@ -21,9 +21,8 @@
 #include <f4/campaign/mission_type.hpp>  // mission_type_name (flight QC)
 #include <f4/terrain/terrain_data.hpp>
 #include <f4/viewer/enum_text.hpp>
-#include <f4/world_convert/class_table.hpp>      // unit_subtype_name(), DOMAIN_*
-#include <f4/world_convert/objective_decoder.hpp> // objective_type_name()
-#include <f4/world_convert/theater_data.hpp>     // point_type_name(), point_list_type_name()
+#include <f4/world_types/class_table.hpp>        // unit_subtype_name(), DOMAIN_*
+#include <f4/world_types/campaign_names.hpp>      // objective_type_name(), point names
 #include <f4/ai/brain_component.hpp>              // V-CAMP: live MissionPlan
 #include <f4/flight/flight_model_component.hpp>  // V-CAMP: live kinematics
 #include <f4/simulation/campaign_origin.hpp>     // V-CAMP: live identity
@@ -153,7 +152,7 @@ void ViewerApp::draw_inspector() {
                 const uint8_t obj_type = impl_->obj_type_from_pb(pb);
                 const std::string obj_type_name_str =
                     (obj_type > 0)
-                        ? f4::world_convert::objective_type_name(
+                        ? f4::world_types::objective_type_name(
                               static_cast<int16_t>(obj_type))
                         : std::string("Unknown");
                 ImGui::Text("Objective");
@@ -254,7 +253,7 @@ void ViewerApp::draw_inspector() {
                             for (std::size_t li = 0; li < gl->layouts.size(); ++li) {
                                 const auto& layout = gl->layouts[li];
                                 const char* type_str =
-                                    f4::world_convert::point_list_type_name(layout.type);
+                                    f4::world_types::point_list_type_name(layout.type);
                                 char label[96];
                                 std::snprintf(label, sizeof(label), "[%zu] %s (runway %d, %d pts, %.0f deg)",
                                               li, type_str, layout.runway_num,
@@ -270,7 +269,7 @@ void ViewerApp::draw_inspector() {
                                             pt.flags, flag_buf, sizeof(flag_buf));
                                         ImGui::Text("  pt %d: (%.0f, %.0f) type=%d (%s) flags=0x%02x (%s)",
                                                     pi++, pt.x, pt.y, pt.type,
-                                                    f4::world_convert::point_type_name(pt.type),
+                                                    f4::world_types::point_type_name(pt.type),
                                                     pt.flags, flag_buf);
                                     }
                                     ImGui::TreePop();
@@ -294,7 +293,7 @@ void ViewerApp::draw_inspector() {
                 const uint8_t owner = (team_tag && team_tag->as_int()) ? static_cast<uint8_t>(*team_tag->as_int()) : 0;
                 const char* team_name = impl_->world_loaded
                     ? impl_->team_name_for_slot(owner) : "(no world)";
-                const char* subtype_str = f4::world_convert::unit_subtype_name(
+                const char* subtype_str = f4::world_types::unit_subtype_name(
                     uc->domain, uc->unit_subtype);
                 ImGui::Text("Unit");
                 ImGui::Separator();

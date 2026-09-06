@@ -1,8 +1,15 @@
 // f4-world-viewer/src/class_table_browser.cpp
 //
 // ClassTableBrowser -- a browsable, filterable, exportable view over the
-// Falcon4.ct class table + OCD/UCD/VCD/FCD/WCD/SSD theater object data,
-// with 3D model preview via RenderTexture2D.
+// runtime class table (Data/Classes/falcon4.ct.json), with 3D model
+// preview via RenderTexture2D drawing glTF models from the shared
+// RuntimeModelCache.
+//
+// Tranche 0d: the binary FALCON4.ct decoder and the joined
+// OCD/UCD/VCD/FCD/WCD/SSD theater-record browsing are gone from the
+// viewer (f4-world-convert is no longer linked). The same joined data is
+// available through the converted artifacts (cam2json --theater-data and
+// ct2json outputs).
 //
 // Follows the HexInspector pattern: self-contained panel with open/close/
 // draw, owns its own state, accessed via Tools menu.
@@ -12,12 +19,8 @@
 #include <f4/viewer/enum_text.hpp>
 #include <f4/viewer/file_dialog.hpp>
 
-#include <f4/world_convert/class_table.hpp>      // unit_subtype_name, DOMAIN_*, CLASS_*
-#include <f4/world_convert/objective_decoder.hpp> // objective_type_name
-#include <f4/world_convert/theater_data.hpp>     // movement_type_name, damage_type_name
-
-#include <f4/models/geometry.hpp>
-#include <f4/models/model_database.hpp>
+#include <f4/world_types/class_table.hpp>        // unit_subtype_name, DOMAIN_*, CLASS_*
+#include <f4/assets/asset_root.hpp>              // Data/ discovery
 
 #include <imgui.h>
 #include <rlImGui.h>
@@ -35,49 +38,17 @@
 #include <string>
 
 // ---------------------------------------------------------------------------
-// PreviewCache — PImpl holding all Raylib GPU resources owned by
+// PreviewCache — PImpl holding the Raylib GPU state owned by
 // ClassTableBrowser. Defined here (not in the header) because it contains
 // Raylib types that must NOT leak into the public header (raylib is a
 // PRIVATE dependency of f4_world_viewer).
 //
-// Members:
-//   mesh_cache     — per-vis_type vector of (::Mesh, tex_id). Each ::Mesh
-//                    is built via UploadMesh and must be freed with
-//                    UnloadMesh (which needs the full struct, not just
-//                    an id, to access vboId/vaoId for GPU cleanup).
-//   texture_cache  — per-tex_id (::Texture2D, ::Material). The Material
-//                    references the Texture on its diffuse map; both must
-//                    be freed (UnloadMaterial then UnloadTexture).
-//   lit_shader     — single directional+ambient shader, compiled once.
-//   default_mat    — cached Material with a 1x1 white texture on diffuse
-//                    (so untextured meshes sample (1,1,1,1) instead of
-//                    undefined data, which would trigger the lit shader's
-//                    `if (tex.a < 0.5) discard;` and hide the mesh).
-//   fallback_white_tex — the 1x1 texture bound to default_mat.
+// Tranche 0d: the meshes, textures, lit shader, and default material all
+// come from the shared f4::renderer::RenderResources (one GPU upload per
+// unique model across every view). The only GPU state the browser still
+// owns is the preview's display-texture descriptor (see its comment).
 // ---------------------------------------------------------------------------
 struct f4::viewer::PreviewCache {
-    struct MeshEntry {
-        ::Mesh mesh = {};
-        int32_t tex_id = -1;  // -1 = untextured, use default_mat
-    };
-    struct MeshCacheEntry {
-        std::vector<MeshEntry> meshes;
-        bool built = false;
-        bool valid = false;
-        std::size_t tri_count = 0;
-    };
-    std::unordered_map<int, MeshCacheEntry> mesh_cache;
-
-    // f4::renderer::TextureCache replaces the manual texture cache map.
-    f4::renderer::TextureCache texture_cache;
-
-    // f4::renderer::LitShader replaces the manual shader + uniform locs.
-    f4::renderer::LitShader lit_shader_ensure;
-
-    ::Texture2D fallback_white_tex = {};
-    ::Material default_mat = {};
-    bool default_mat_built = false;
-
     // Persistent Texture2D descriptor for the preview RenderTexture2D's
     // color attachment. rlImGuiImageSize casts the Texture* pointer to
     // ImTextureID and later DEREFERENCES it during ImGui::Render() (which
@@ -90,16 +61,14 @@ struct f4::viewer::PreviewCache {
 
 namespace f4::viewer {
 
-using f4::world_convert::unit_subtype_name;
-using f4::world_convert::movement_type_name;
-using f4::world_convert::damage_type_name;
+using f4::world_types::unit_subtype_name;
 
 // ---------------------------------------------------------------------------
 // Corrected data_type_name -- uses the verified DataType enum from
 // class_table.hpp, NOT the stale mapping in enum_text.hpp.
 // ---------------------------------------------------------------------------
 const char* ClassTableBrowser::ct_data_type_name(uint8_t dt) noexcept {
-    using namespace f4::world_convert;
+    using namespace f4::world_types;
     switch (static_cast<DataType>(dt)) {
         case DTYPE_NOTHING:       return "Nothing";
         case DTYPE_FEATURE:       return "Feature(FCD)";
@@ -166,42 +135,9 @@ void ClassTableBrowser::cleanup_preview() {
         return;
     }
 
-    // Free cached meshes. Each ::Mesh was allocated with RL_MALLOC for its
-    // vertex/normal/texcoord/color/indices arrays and uploaded with
-    // UploadMesh; UnloadMesh handles both the GPU VBOs/VAO and the CPU
-    // arrays. We pass the full struct so Raylib can access vboId/vaoId.
-    for (auto& [vis_idx, entry] : preview_cache_->mesh_cache) {
-        for (auto& me : entry.meshes) {
-            // me.mesh.vaoId != 0 means it was actually uploaded to GPU.
-            // (A default-constructed ::Mesh has vaoId == 0.)
-            if (me.mesh.vaoId != 0 || me.mesh.vboId[0] != 0) {
-                UnloadMesh(me.mesh);
-            }
-            me.mesh = {};
-        }
-    }
-    preview_cache_->mesh_cache.clear();
-
-    // Free cached textures via f4::renderer::TextureCache.
-    preview_cache_->texture_cache.unload_all();
-
-    // Free the default material + fallback white texture + lit shader.
-    // These are built once per browser-open cycle; freeing them here lets
-    // us re-build cleanly if the user closes and re-opens the browser.
-    if (preview_cache_->default_mat_built) {
-        // Detach the fallback texture so UnloadMaterial doesn't free it
-        // (we own it separately).
-        preview_cache_->default_mat.maps[MATERIAL_MAP_DIFFUSE].texture = {};
-        UnloadMaterial(preview_cache_->default_mat);
-        preview_cache_->default_mat = {};
-        preview_cache_->default_mat_built = false;
-    }
-    if (preview_cache_->fallback_white_tex.id != 0) {
-        UnloadTexture(preview_cache_->fallback_white_tex);
-        preview_cache_->fallback_white_tex = {};
-    }
-    // LitShader handles its own cleanup via RAII destructor.
-    // No need to manually UnloadShader.
+    // Tranche 0d: the meshes, PNG textures, lit shader, and default
+    // material live in the shared f4::renderer::RenderResources — owned
+    // and cleaned up by the viewer app, nothing to free here anymore.
 
     // Reset selection tracking so the next preview refits the camera.
     last_previewed_vis_type_ = -1;
@@ -214,45 +150,30 @@ void ClassTableBrowser::ensure_data_loaded() {
     if (data_load_attempted_) return;
     data_load_attempted_ = true;
 
-    if (!install_) {
-        load_error_ = "No installation configured. Use File > Set Install Path.";
-        return;
+    // Tranche 0d: load the committed JSON class table — the binary .ct
+    // decoder is no longer linked. Data/ is discovered from the working
+    // directory (AssetRoot::discover) or the source tree (F4_SOURCE_DIR).
+    std::filesystem::path data_dir;
+    if (auto root = f4::assets::AssetRoot::discover()) {
+        data_dir = root->data_dir();
     }
-
-    // Load class table.
-    auto ct_path = install_->class_table();
-    if (ct_path.empty()) {
-        ct_path = install_->find_class_table();
+    if (data_dir.empty() || !std::filesystem::exists(data_dir)) {
+#ifdef F4_SOURCE_DIR
+        data_dir = std::filesystem::path(F4_SOURCE_DIR) / "Data";
+#endif
     }
-    if (ct_path.empty()) {
-        load_error_ = "FALCON4.ct not found in install.";
+    const auto ct_path = data_dir / "Classes" / "falcon4.ct.json";
+    if (!std::filesystem::exists(ct_path)) {
+        load_error_ = "Data/Classes/falcon4.ct.json not found (the binary "
+                      "FALCON4.ct is no longer loaded in-app — run ct2json "
+                      "or scripts/export-game-data).";
         return;
     }
     try {
-        class_table_.load(ct_path);
+        class_table_.load_auto(ct_path.string());
     } catch (const std::exception& e) {
         load_error_ = std::string("Error loading class table: ") + e.what();
         return;
-    }
-
-    // Load theater object database (OCD/UCD/VCD/FCD/WCD/SSD/etc.)
-    // Same two search locations as install_flow.cpp:
-    //   1. install-level terrdata/objects
-    //   2. per-theater <theater.dir>/objects
-    const std::array<std::filesystem::path, 2> base_dirs = {
-        install_->terrdata_dir() / "objects",
-        (!install_->theaters().empty())
-            ? install_->theaters()[0].dir / "objects"
-            : std::filesystem::path{},
-    };
-    for (const auto& d : base_dirs) {
-        if (d.empty() || !std::filesystem::exists(d)) continue;
-        try {
-            theater_db_.load_all(d);
-            if (theater_db_.loaded()) break;
-        } catch (...) {
-            // Continue trying other dirs.
-        }
     }
 
     data_loaded_ = class_table_.loaded();
@@ -266,7 +187,7 @@ void ClassTableBrowser::ensure_data_loaded() {
 // ---------------------------------------------------------------------------
 bool ClassTableBrowser::passes_filter(
     uint16_t entity_type,
-    const f4::world_convert::ClassTableEntry& entry) const
+    const f4::world_types::ClassTableEntry& entry) const
 {
     if (filter_domain_ != 0 && entry.domain != filter_domain_) return false;
     if (filter_class_ != 0 && entry.cls != filter_class_) return false;
@@ -308,54 +229,6 @@ bool ClassTableBrowser::passes_filter(
             if (dt_lower.find(search_lower) != std::string::npos) return true;
         }
 
-        // Match name from the corresponding data table
-        using namespace f4::world_convert;
-        if (entry.data_type == DTYPE_VEHICLE) {
-            const auto* vcd = theater_db_.vehicles.at(entry.data_ptr_index);
-            if (vcd && !vcd->name.empty()) {
-                std::string name_lower(vcd->name);
-                std::transform(name_lower.begin(), name_lower.end(),
-                               name_lower.begin(), ::tolower);
-                if (name_lower.find(search_lower) != std::string::npos) return true;
-            }
-        }
-        if (entry.data_type == DTYPE_OBJECTIVE) {
-            const auto* ocd = theater_db_.objectives.at(entry.data_ptr_index);
-            if (ocd && !ocd->name.empty()) {
-                std::string name_lower(ocd->name);
-                std::transform(name_lower.begin(), name_lower.end(),
-                               name_lower.begin(), ::tolower);
-                if (name_lower.find(search_lower) != std::string::npos) return true;
-            }
-        }
-        if (entry.data_type == DTYPE_UNIT) {
-            const auto* ucd = theater_db_.units.at(entry.data_ptr_index);
-            if (ucd && !ucd->name.empty()) {
-                std::string name_lower(ucd->name);
-                std::transform(name_lower.begin(), name_lower.end(),
-                               name_lower.begin(), ::tolower);
-                if (name_lower.find(search_lower) != std::string::npos) return true;
-            }
-        }
-        if (entry.data_type == DTYPE_FEATURE) {
-            const auto* fcd = theater_db_.features.at(entry.data_ptr_index);
-            if (fcd && !fcd->name.empty()) {
-                std::string name_lower(fcd->name);
-                std::transform(name_lower.begin(), name_lower.end(),
-                               name_lower.begin(), ::tolower);
-                if (name_lower.find(search_lower) != std::string::npos) return true;
-            }
-        }
-        if (entry.data_type == DTYPE_WEAPON) {
-            const auto* wcd = theater_db_.weapons.at(entry.data_ptr_index);
-            if (wcd && !wcd->name.empty()) {
-                std::string name_lower(wcd->name);
-                std::transform(name_lower.begin(), name_lower.end(),
-                               name_lower.begin(), ::tolower);
-                if (name_lower.find(search_lower) != std::string::npos) return true;
-            }
-        }
-
         return false;
     }
 
@@ -370,7 +243,7 @@ void ClassTableBrowser::rebuild_filtered_entries() {
     if (!class_table_.loaded()) return;
 
     const int n = static_cast<int>(class_table_.size());
-    const int base = f4::world_convert::VU_LAST_ENTITY_TYPE;
+    const int base = f4::world_types::VU_LAST_ENTITY_TYPE;
 
     for (int i = 0; i < n; ++i) {
         const uint16_t et = static_cast<uint16_t>(base + i);
@@ -409,7 +282,7 @@ void ClassTableBrowser::draw() {
         ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "Error: %s",
                             load_error_.c_str());
     } else {
-        ImGui::TextDisabled("No data loaded. Set an install path and re-open.");
+        ImGui::TextDisabled("No data loaded. Data/Classes/falcon4.ct.json not found.");
     }
 
     ImGui::End();
@@ -417,17 +290,7 @@ void ClassTableBrowser::draw() {
 
 void ClassTableBrowser::draw_toolbar() {
     if (data_loaded_) {
-        ImGui::Text("FALCON4.ct: %zu entries", class_table_.size());
-        if (theater_db_.loaded()) {
-            ImGui::SameLine();
-            ImGui::TextDisabled("  Theater: OCD=%zu UCD=%zu VCD=%zu FCD=%zu WCD=%zu SSD=%zu",
-                                theater_db_.objectives.size(),
-                                theater_db_.units.size(),
-                                theater_db_.vehicles.size(),
-                                theater_db_.features.size(),
-                                theater_db_.weapons.size(),
-                                theater_db_.squad_stores.size());
-        }
+        ImGui::Text("falcon4.ct.json: %zu entries", class_table_.size());
     } else if (!load_error_.empty()) {
         ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "%s",
                             load_error_.c_str());
@@ -438,8 +301,7 @@ void ClassTableBrowser::draw_toolbar() {
         data_load_attempted_ = false;
         data_loaded_ = false;
         load_error_.clear();
-        class_table_ = f4::world_convert::ClassTable{};
-        theater_db_ = f4::world_convert::TheaterObjectDatabase{};
+        class_table_ = f4::world_types::ClassTable{};
         selected_entity_type_ = -1;
         filtered_entries_.clear();
         filter_dirty_ = true;
@@ -567,15 +429,15 @@ void ClassTableBrowser::draw_table() {
                 ImGui::TextUnformatted(vu_class_name(entry->cls));
 
                 ImGui::TableSetColumnIndex(3);
-                if (entry->cls == f4::world_convert::CLASS_OBJECTIVE && entry->type > 0) {
+                if (entry->cls == f4::world_types::CLASS_OBJECTIVE && entry->type > 0) {
                     ImGui::Text("%d", entry->type);
                 } else {
                     ImGui::TextDisabled("-");
                 }
 
                 ImGui::TableSetColumnIndex(4);
-                if (entry->cls == f4::world_convert::CLASS_UNIT ||
-                    entry->cls == f4::world_convert::CLASS_VEHICLE) {
+                if (entry->cls == f4::world_types::CLASS_UNIT ||
+                    entry->cls == f4::world_types::CLASS_VEHICLE) {
                     ImGui::TextUnformatted(unit_subtype_name(entry->domain, entry->stype));
                 } else {
                     ImGui::TextDisabled("-");
@@ -592,7 +454,7 @@ void ClassTableBrowser::draw_table() {
                 ImGui::TextUnformatted(ct_data_type_name(entry->data_type));
 
                 ImGui::TableSetColumnIndex(7);
-                if (entry->data_type != f4::world_convert::DTYPE_NOTHING) {
+                if (entry->data_type != f4::world_types::DTYPE_NOTHING) {
                     ImGui::Text("%u", entry->data_ptr_index);
                 } else {
                     ImGui::TextDisabled("-");
@@ -646,159 +508,56 @@ void ClassTableBrowser::ensure_preview_target(int w, int h) {
     preview_rt_valid_ = true;
 }
 
-bool ClassTableBrowser::ensure_lit_shader() {
-    // Lazy-allocate the PreviewCache on first GPU use. We can't allocate
-    // it in the constructor because the GL context doesn't exist yet
-    // (ViewerApp constructs ClassTableBrowser before run() → InitWindow).
-    if (!preview_cache_) preview_cache_ = std::make_unique<PreviewCache>();
-    // Use f4::renderer::LitShader instead of manual shader compilation.
-    return preview_cache_->lit_shader_ensure.ensure();
-}
-
-bool ClassTableBrowser::ensure_default_material() {
-    if (!preview_cache_) preview_cache_ = std::make_unique<PreviewCache>();
-    if (preview_cache_->default_mat_built) {
-        return preview_cache_->default_mat.maps != nullptr;
-    }
-
-    // 1) 1x1 opaque-white fallback texture. Required so the lit shader's
-    //    `if (tex.a < 0.5) discard;` doesn't kill every fragment of every
-    //    untextured mesh (tex_id < 0). Without this, untextured meshes
-    //    sample undefined data from the default sampler, which on most
-    //    drivers returns (0,0,0,0) → fully transparent → discarded.
-    if (preview_cache_->fallback_white_tex.id == 0) {
-        Image img = {};
-        img.data = RL_MALLOC(4);
-        if (!img.data) return false;
-        unsigned char* px = static_cast<unsigned char*>(img.data);
-        px[0] = 255; px[1] = 255; px[2] = 255; px[3] = 255;
-        img.width = 1;
-        img.height = 1;
-        img.mipmaps = 1;
-        img.format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8;
-        preview_cache_->fallback_white_tex = LoadTextureFromImage(img);
-        UnloadImage(img);
-        if (preview_cache_->fallback_white_tex.id == 0) return false;
-    }
-
-    // 2) Default material with white texture on diffuse map + lit shader.
-    preview_cache_->default_mat = LoadMaterialDefault();
-    preview_cache_->default_mat.maps[MATERIAL_MAP_DIFFUSE].texture =
-        preview_cache_->fallback_white_tex;
-    preview_cache_->default_mat.maps[MATERIAL_MAP_DIFFUSE].color = WHITE;
-    if (preview_cache_->lit_shader_ensure.is_loaded()) {
-        preview_cache_->default_mat.shader = preview_cache_->lit_shader_ensure.shader();
-    }
-    preview_cache_->default_mat_built = true;
-    return true;
-}
-
 void ClassTableBrowser::build_preview_meshes(int16_t vis_type_idx) {
     if (vis_type_idx <= 0) return;
-    if (!preview_cache_) preview_cache_ = std::make_unique<PreviewCache>();
-
-    auto it = preview_cache_->mesh_cache.find(vis_type_idx);
-    if (it != preview_cache_->mesh_cache.end() && it->second.built) return;
-
-    if (!model_db_) {
-        if (it != preview_cache_->mesh_cache.end()) it->second.built = true;
-        else preview_cache_->mesh_cache[vis_type_idx].built = true;
-        return;
-    }
-
-    const auto* rec = model_db_->model(vis_type_idx);
-    if (!rec || rec->lods.empty()) {
-        if (it != preview_cache_->mesh_cache.end()) it->second.built = true;
-        else preview_cache_->mesh_cache[vis_type_idx].built = true;
-        return;
-    }
-
-    // Lock to LOD 0 (highest detail) for the preview.
-    const int lod = 0;
-    auto err = model_db_->parse_lod(vis_type_idx, lod);
-    if (!err.empty()) {
-        if (it != preview_cache_->mesh_cache.end()) it->second.built = true;
-        else preview_cache_->mesh_cache[vis_type_idx].built = true;
-        return;
-    }
-
-    f4::models::ModelState default_state;
-    default_state.texture_set = 0;
-    default_state.n_texture_sets = std::max(1, static_cast<int>(rec->n_texture_sets));
-
-    auto geom = model_db_->extract_model_geometry(vis_type_idx, lod, default_state);
-    if (geom.meshes.empty()) {
-        preview_cache_->mesh_cache[vis_type_idx].built = true;
-        return;
-    }
-
-    const auto& cb = model_db_->color_bank();
-
-    // Use f4::renderer to build Raylib meshes + mesh entries.
-    auto raylib_meshes = f4::renderer::build_raylib_meshes(
-        geom, cb, f4::renderer::model_vertex_to_raylib);
-    // Filter to triangles only (skip lines/points for preview).
-    std::vector<::Mesh> tri_meshes;
-    std::vector<int> tri_tex_ids;
-    for (std::size_t i = 0; i < geom.meshes.size(); ++i) {
-        if (geom.meshes[i].kind == f4::models::PrimitiveKind::Triangles &&
-            !geom.meshes[i].triangles.empty() && !geom.meshes[i].vertices.empty()) {
-            tri_meshes.push_back(std::move(raylib_meshes[i]));
-            tri_tex_ids.push_back(geom.meshes[i].tex_id);
-        }
-    }
-
-    PreviewCache::MeshCacheEntry entry;
-    entry.meshes.reserve(tri_meshes.size());
-    std::size_t total_tris = 0;
-
-    for (std::size_t i = 0; i < tri_meshes.size(); ++i) {
-        PreviewCache::MeshEntry me;
-        me.mesh = tri_meshes[i];
-        me.tex_id = tri_tex_ids[i];
-        entry.meshes.push_back(std::move(me));
-        total_tris += static_cast<std::size_t>(tri_meshes[i].triangleCount);
-    }
-
-    entry.built = true;
-    entry.valid = !entry.meshes.empty();
-    entry.tri_count = total_tris;
-    preview_cache_->mesh_cache[vis_type_idx] = std::move(entry);
-
-    // Upload textures via f4::renderer::TextureCache.
-    std::vector<int> tex_ids;
-    for (const auto& me : entry.meshes) {
-        if (me.tex_id >= 0) tex_ids.push_back(me.tex_id);
-    }
-    if (!tex_ids.empty() && model_db_) {
-        preview_cache_->texture_cache.upload(*model_db_, tex_ids);
-    }
+    if (!render_resources_) return;
+    // The shared RuntimeModelCache handles load + mesh build + PNG
+    // texture upload (lazy, idempotent, marked built even on failure).
+    render_resources_->build_mesh_for_model(vis_type_idx);
 }
 
-// upload_preview_textures() is no longer needed — textures are uploaded
-// via f4::renderer::TextureCache in build_preview_meshes().
-
 void ClassTableBrowser::fit_camera_to_model(int16_t vis_type_idx) {
-    if (!model_db_ || vis_type_idx <= 0) return;
-    const auto* rec = model_db_->model(vis_type_idx);
-    if (!rec) return;
+    if (!render_resources_ || vis_type_idx <= 0) return;
 
-    // Bbox center is in LH Y-up model space; convert to Raylib RH Y-up.
-    const auto center_f3 = f4::renderer::model_vertex_to_raylib(
-        rec->bbox.center_x(), rec->bbox.center_y(), rec->bbox.center_z());
-    const Vector3 center = {center_f3.x, center_f3.y, center_f3.z};
-    cam_target_x_ = center.x;
-    cam_target_y_ = center.y;
-    cam_target_z_ = center.z;
+    // Compute the bbox by scanning the loaded LOD-0 mesh vertices (they
+    // are already in Raylib RH Y-up feet — the glTF loader baked the
+    // transform, so no model-space conversion is needed).
+    const auto* model = render_resources_->model_cache.lookup(vis_type_idx);
+    if (!model || model->lod0_meshes.empty()) return;
+
+    float min_x = 0, min_y = 0, min_z = 0, max_x = 0, max_y = 0, max_z = 0;
+    bool any = false;
+    for (const auto& me : model->lod0_meshes) {
+        if (!me.mesh.vertices || me.mesh.vertexCount <= 0) continue;
+        for (int v = 0; v < me.mesh.vertexCount; ++v) {
+            const float x = me.mesh.vertices[v * 3 + 0];
+            const float y = me.mesh.vertices[v * 3 + 1];
+            const float z = me.mesh.vertices[v * 3 + 2];
+            if (!any) {
+                min_x = max_x = x; min_y = max_y = y; min_z = max_z = z;
+                any = true;
+            } else {
+                min_x = std::min(min_x, x); max_x = std::max(max_x, x);
+                min_y = std::min(min_y, y); max_y = std::max(max_y, y);
+                min_z = std::min(min_z, z); max_z = std::max(max_z, z);
+            }
+        }
+    }
+    if (!any) return;
+
+    cam_target_x_ = (min_x + max_x) * 0.5f;
+    cam_target_y_ = (min_y + max_y) * 0.5f;
+    cam_target_z_ = (min_z + max_z) * 0.5f;
+
+    const float dx = max_x - min_x, dy = max_y - min_y, dz = max_z - min_z;
+    const float radius = 0.5f * std::sqrt(dx * dx + dy * dy + dz * dz);
 
     // Distance = radius * 2.5 so the model fills a reasonable portion of
     // the view at fovy=45. Degenerate (radius=0) models get a sane default.
-    cam_distance_ = rec->radius * 2.5f;
+    cam_distance_ = radius * 2.5f;
     if (cam_distance_ < 1.0f) cam_distance_ = 50.0f;
 
     // Reset orbit angles so the user sees the model head-on.
-    // Values match the f4-models-viewer's defaults (cam_yaw=45°,
-    // cam_pitch=30°) — see f4-models-viewer/src/viewer_state.hpp:61-62.
     // The 30° pitch is important: with the lit shader's lightDir pointing
     // DOWN (sun above), top-facing inward normals are unlit (NdotL=0,
     // ambient only). A steeper pitch shows more of the side surfaces,
@@ -813,9 +572,9 @@ void ClassTableBrowser::draw_model_preview(int16_t vis_type_idx) {
     last_preview_drew_meshes_ = false;
     last_preview_status_.clear();
 
-    if (!model_db_) {
-        ImGui::TextDisabled("Model database not loaded (set install path).");
-        last_preview_status_ = "no model_db";
+    if (!render_resources_) {
+        ImGui::TextDisabled("No render resources (glTF models unavailable).");
+        last_preview_status_ = "no render_resources";
         return;
     }
     if (vis_type_idx <= 0) {
@@ -824,10 +583,13 @@ void ClassTableBrowser::draw_model_preview(int16_t vis_type_idx) {
         return;
     }
 
-    const auto* model = model_db_->model(vis_type_idx);
-    if (!model) {
-        ImGui::TextDisabled("Model[%d] not found in database", vis_type_idx);
-        last_preview_status_ = "model not found";
+    // Build (or reuse) the glTF model through the shared cache.
+    build_preview_meshes(vis_type_idx);
+    const auto* model = render_resources_->model_cache.lookup(vis_type_idx);
+    if (!model || model->lod0_meshes.empty()) {
+        ImGui::TextDisabled("Model[%d] has no glTF export in Data/Models/koreaobj",
+                            vis_type_idx);
+        last_preview_status_ = "no geometry";
         return;
     }
 
@@ -837,26 +599,14 @@ void ClassTableBrowser::draw_model_preview(int16_t vis_type_idx) {
         last_previewed_vis_type_ = vis_type_idx;
     }
 
-    // Ensure the RenderTexture2D exists BEFORE building any GPU resources,
-    // because ensure_preview_target() may call cleanup_preview() (if the
-    // target size changed) which would clear the mesh/shader/material
-    // caches. By doing this first, we guarantee that any cleanup happens
-    // before we build, not after.
+    // Ensure the RenderTexture2D exists before drawing.
     const int preview_w = 512;
     const int preview_h = 512;
     ensure_preview_target(preview_w, preview_h);
 
-    // Lazy GPU setup (shader, default material, mesh upload, textures).
-    ensure_lit_shader();
-    ensure_default_material();
-    build_preview_meshes(vis_type_idx);
-
-    const auto cache_it = preview_cache_->mesh_cache.find(vis_type_idx);
-    if (cache_it == preview_cache_->mesh_cache.end() || !cache_it->second.valid) {
-        ImGui::TextDisabled("Model[%d] has no renderable geometry", vis_type_idx);
-        last_preview_status_ = "no geometry";
-        return;
-    }
+    // Shared GPU setup (lit shader, default material — the model meshes
+    // and PNG textures are already in the shared caches).
+    render_resources_->ensure_default_material();
 
     // Build camera from orbit params + model bbox center.
     const float az = cam_azimuth_;
@@ -893,39 +643,34 @@ void ClassTableBrowser::draw_model_preview(int16_t vis_type_idx) {
     rt.texture.mipmaps = 1;
     rt.texture.format  = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8;
 
+    auto& lit_shader = render_resources_->lit_shader;
+    const Material* default_mat = render_resources_->default_material_valid()
+        ? &render_resources_->default_material() : nullptr;
+
     BeginTextureMode(rt);
         ClearBackground({ 30, 30, 38, 255 });
         BeginMode3D(camera);
-            // Bounding sphere hint (wireframe) so the user can see the
-            // model's extent even if the mesh itself is sparse.
-            //DrawSphereWires(target, model->radius, 12, 12, { 80, 80, 100, 255 });
-
-            // Push shader uniforms via f4::renderer::LitShader.
-            if (preview_cache_->lit_shader_ensure.is_loaded()) {
-                preview_cache_->lit_shader_ensure.set_lighting(
+            // Push shader uniforms via the shared f4::renderer::LitShader.
+            if (lit_shader.is_loaded()) {
+                lit_shader.set_lighting(
                     { 0.65f, -1.0f, 0.35f },     // light_dir
                     { 255, 250, 235, 255 },         // light_color
                     1.0f,                            // intensity
                     { 80, 80, 90, 255 });            // ambient
             }
 
-            // Draw each cached mesh with its material (textured or default).
-            // We use the full ::Mesh and ::Material structs from the cache
-            // (not reconstructed-from-id stand-ins) because DrawMesh reads
-            // vaoId/vboId from the Mesh and maps/shader from the Material.
-            //
-            // Draw opaque meshes first, then alpha ones. FreeFalcon's .TEX
-            // chroma-key textures have alpha=0 on transparent pixels; the
-            // lit shader's `discard` handles them, but drawing opaque first
-            // is a belt-and-suspenders safety net for any unlit fallback.
+            // Draw each mesh with its material (textured or default).
+            // Draw opaque meshes first, then alpha ones — belt-and-suspenders
+            // ordering for the chroma-key alpha in the PNG textures.
+            const auto& meshes = model->lod0_meshes;
             std::vector<std::size_t> opaque_order, alpha_order;
-            opaque_order.reserve(cache_it->second.meshes.size());
-            alpha_order.reserve(cache_it->second.meshes.size());
-            for (std::size_t i = 0; i < cache_it->second.meshes.size(); ++i) {
-                const auto& me = cache_it->second.meshes[i];
+            opaque_order.reserve(meshes.size());
+            alpha_order.reserve(meshes.size());
+            for (std::size_t i = 0; i < meshes.size(); ++i) {
+                const auto& me = meshes[i];
                 bool has_alpha = false;
                 if (me.tex_id >= 0) {
-                    auto* ce = preview_cache_->texture_cache.lookup(me.tex_id);
+                    auto* ce = render_resources_->texture_cache.lookup(me.tex_id);
                     if (ce && ce->uploaded) {
                         has_alpha = ce->has_alpha;
                     }
@@ -935,26 +680,29 @@ void ClassTableBrowser::draw_model_preview(int16_t vis_type_idx) {
             }
 
             auto draw_one = [&](std::size_t idx) {
-                const auto& me = cache_it->second.meshes[idx];
+                const auto& me = meshes[idx];
                 if (me.mesh.vaoId == 0 && me.mesh.vboId[0] == 0) return;
                 if (me.mesh.triangleCount <= 0) return;
 
-                const Material* matToUse = &preview_cache_->default_mat;
+                const Material* matToUse = default_mat;
                 if (me.tex_id >= 0) {
-                    auto* ce = preview_cache_->texture_cache.lookup(me.tex_id);
+                    auto* ce = render_resources_->texture_cache.lookup(me.tex_id);
                     if (ce && ce->uploaded) {
                         matToUse = &ce->material;
                     }
                     // else: texture not yet uploaded — fall through to
                     // default material (mesh renders with vertex colors).
                 }
+                if (!matToUse) return;
                 DrawMesh(me.mesh, *matToUse, MatrixIdentity());
             };
 
             BeginBlendMode(BLEND_ALPHA);
+            rlDisableBackfaceCulling();
             std::size_t drawn = 0;
             for (auto idx : opaque_order) { draw_one(idx); ++drawn; }
             for (auto idx : alpha_order)  { draw_one(idx); ++drawn; }
+            rlEnableBackfaceCulling();
             EndBlendMode();
 
             last_preview_drew_meshes_ = (drawn > 0);
@@ -965,21 +713,11 @@ void ClassTableBrowser::draw_model_preview(int16_t vis_type_idx) {
     //
     // CRITICAL: rlImGuiImageSize (rlImGui.cpp:517) casts the Texture*
     // POINTER to ImTextureID — NOT texture->id. The ImGui render callback
-    // (rlImGui.cpp:177) later casts ImTextureID back to Texture* and reads
-    // ->id to bind the GL texture. This means the Texture struct MUST
-    // outlive the call to rlImGuiImageSize — it must still be valid when
-    // ImGui::Render() runs at the end of the frame.
-    //
-    // A stack temporary (as the previous code used) gets destroyed when
-    // draw_model_preview() returns, leaving a dangling pointer. ImGui then
-    // dereferences the dangling pointer, reads garbage for texture->id
-    // (likely 0), and renders a solid black rectangle — which is exactly
-    // the symptom the user reported (changing ClearBackground to red had
-    // no effect; the rect stayed solid black).
-    //
-    // Fix: store the Texture2D in the persistent PreviewCache and pass a
-    // pointer to that. The PreviewCache lives for the lifetime of the
-    // browser panel, so the pointer is valid when ImGui renders.
+    // later casts ImTextureID back to Texture* and reads ->id to bind the
+    // GL texture. This means the Texture struct MUST outlive the call to
+    // rlImGuiImageSize — it must still be valid when ImGui::Render() runs
+    // at the end of the frame. The persistent PreviewCache member below
+    // guarantees that (a stack temporary would dangle).
     if (!preview_cache_) preview_cache_ = std::make_unique<PreviewCache>();
     preview_cache_->preview_display_tex = { preview_tex_id_,
                                               preview_rt_w_, preview_rt_h_, 1,
@@ -988,13 +726,15 @@ void ClassTableBrowser::draw_model_preview(int16_t vis_type_idx) {
 
     // Status line below the preview.
     {
-        std::size_t n_meshes = cache_it->second.meshes.size();
-        std::size_t n_tris   = cache_it->second.tri_count;
+        std::size_t n_meshes = meshes.size();
+        std::size_t n_tris = 0;
         int n_textured = 0;
-        for (const auto& me : cache_it->second.meshes) if (me.tex_id >= 0) ++n_textured;
-        ImGui::TextDisabled("%zu meshes | %zu tris | %d textured | r=%.1f | LODs=%d",
-                             n_meshes, n_tris, n_textured,
-                             model->radius, model->n_lods);
+        for (const auto& me : meshes) {
+            n_tris += static_cast<std::size_t>(me.mesh.triangleCount);
+            if (me.tex_id >= 0) ++n_textured;
+        }
+        ImGui::TextDisabled("%zu meshes | %zu tris | %d textured | glTF LOD 0",
+                             n_meshes, n_tris, n_textured);
     }
 
     // Orbit camera controls via drag on the image.
@@ -1119,308 +859,34 @@ void ClassTableBrowser::draw_detail_panel() {
                             ? entry->vis_type[selected_vis_slot_] : 0;
     if (active_vis > 0) {
         ImGui::BeginGroup();
-        const auto* model = model_db_ ? model_db_->model(active_vis) : nullptr;
-        if (model) {
-            ImGui::Text("Model[%d]: r=%.1f  LODs=%d  slots=%d  class=%s",
-                        active_vis,
-                        model->radius,
-                        model->n_lods,
-                        model->n_slots,
-                        std::string(model->visual_class()).c_str());
-        } else if (model_db_) {
-            ImGui::TextDisabled("Model[%d] not found in database", active_vis);
-        } else {
-            ImGui::TextDisabled("Model database not loaded");
-        }
-        // Always call draw_model_preview — it handles the "no model_db"
-        // and "model not found" cases gracefully with a status message,
-        // and it keeps the preview pane at a stable size so the layout
-        // doesn't jump when the user switches entries.
+        ImGui::Text("Model[%d] (glTF)", active_vis);
+        // Always call draw_model_preview — it handles the "no render
+        // resources" and "no glTF export" cases gracefully with a status
+        // message, and it keeps the preview pane at a stable size so the
+        // layout doesn't jump when the user switches entries.
         draw_model_preview(active_vis);
         ImGui::EndGroup();
         ImGui::SameLine();
     }
 
-    // Right column: data table detail
+    // Right column: data detail
     ImGui::BeginGroup();
 
-    // VCD detail.
-    if (entry->data_type == f4::world_convert::DTYPE_VEHICLE) {
-        const auto* vcd = theater_db_.vehicles.at(entry->data_ptr_index);
-        if (vcd) {
-            if (ImGui::TreeNode("VehicleClassData (VCD)")) {
-                ImGui::Text("Name:       %s", vcd->name.c_str());
-                ImGui::Text("NCTR:       %s", vcd->nctr.c_str());
-                ImGui::Text("Hit Points: %d", vcd->hit_points);
-                ImGui::Text("Max Speed:  %d kph", vcd->max_speed);
-                ImGui::Text("Max Wt:     %d lbs", vcd->max_wt);
-                ImGui::Text("Empty Wt:   %d lbs", vcd->empty_wt);
-                ImGui::Text("Fuel Wt:    %d lbs", vcd->fuel_wt);
-                ImGui::Text("RCS Factor: %.3f", vcd->rcs_factor);
-                ImGui::Text("Radar Type: %d", vcd->radar_type);
-                ImGui::Text("Pilots:     %d", vcd->number_of_pilots);
-                if (ImGui::TreeNode("Weapons (16 hardpoints)")) {
-                    for (int i = 0; i < 16; ++i) {
-                        if (vcd->weapon[i] != 0) {
-                            // Try to resolve weapon name from WCD
-                            const auto* wcd = theater_db_.weapons.at(
-                                static_cast<std::size_t>(vcd->weapon[i]));
-                            if (wcd && !wcd->name.empty()) {
-                                ImGui::Text("  HP[%2d]: %s  qty=%d",
-                                            i, wcd->name.c_str(), vcd->weapons[i]);
-                            } else {
-                                ImGui::Text("  HP[%2d]: weapon=%d  qty=%d",
-                                            i, vcd->weapon[i], vcd->weapons[i]);
-                            }
-                        }
-                    }
-                    ImGui::TreePop();
-                }
-                if (ImGui::TreeNode("Damage Modifiers")) {
-                    for (std::size_t i = 0; i < vcd->damage_mod.size(); ++i) {
-                        if (vcd->damage_mod[i] != 0) {
-                            ImGui::Text("  [%zu] = %d", i, vcd->damage_mod[i]);
-                        }
-                    }
-                    ImGui::TreePop();
-                }
-                ImGui::TreePop();
-            }
-        } else {
-            ImGui::TextDisabled("VCD index %u out of range (table has %zu entries)",
-                                entry->data_ptr_index, theater_db_.vehicles.size());
-        }
+    // Tranche 0d: the joined OCD/UCD/VCD/FCD/WCD/SSD record browsing is
+    // gone from the viewer (f4-world-convert — the binary parser library
+    // — is no longer linked). The same joined data is available through
+    // the converted artifacts: Data/World/korea.world.json
+    // (cam2json --theater-data) and Data/Classes/falcon4.ct.json (ct2json).
+    ImGui::Text("Data table: %s", ct_data_type_name(entry->data_type));
+    if (entry->data_type != f4::world_types::DTYPE_NOTHING) {
+        ImGui::Text("Data ptr index: %u", entry->data_ptr_index);
     }
-
-    // UCD detail.
-    if (entry->data_type == f4::world_convert::DTYPE_UNIT) {
-        const auto* ucd = theater_db_.units.at(entry->data_ptr_index);
-        if (ucd) {
-            if (ImGui::TreeNode("UnitClassData (UCD)")) {
-                ImGui::Text("Name:          %s", ucd->name.c_str());
-                ImGui::Text("Movement:      %s (%d kph)",
-                            movement_type_name(ucd->movement_type),
-                            ucd->movement_speed);
-                ImGui::Text("Max Range:     %d km", ucd->max_range);
-                ImGui::Text("Fuel:          %d lbs", ucd->fuel);
-                ImGui::Text("Fuel Rate:     %d lbs/min", ucd->rate);
-                ImGui::Text("Role:          %d", ucd->role);
-                ImGui::Text("Special Index: %d", ucd->special_index);
-                if (ImGui::TreeNode("Vehicle Groups (16 slots)")) {
-                    for (int i = 0; i < 16; ++i) {
-                        if (ucd->num_elements[i] > 0) {
-                            // vehicle_type in UCD is a 0-based class table
-                            // entries[] index, NOT an entity_type. Convert to
-                            // entity_type by adding VU_LAST_ENTITY_TYPE (100)
-                            // before resolving through the class table.
-                            const int16_t vt = ucd->vehicle_type[i];
-                            const uint16_t vt_et = static_cast<uint16_t>(
-                                vt + f4::world_convert::VU_LAST_ENTITY_TYPE);
-                            const char* vname = nullptr;
-                            if (class_table_.loaded() && theater_db_.vehicles.loaded()) {
-                                uint8_t vcd_dt = 0;
-                                uint32_t vcd_idx = 0;
-                                if (class_table_.data_ptr_for(
-                                        vt_et, vcd_dt, vcd_idx)
-                                    && vcd_dt == f4::world_convert::DTYPE_VEHICLE) {
-                                    const auto* vcd = theater_db_.vehicles.at(
-                                        static_cast<std::size_t>(vcd_idx));
-                                    if (vcd) vname = vcd->name.c_str();
-                                }
-                            }
-                            if (vname) {
-                                ImGui::Text("  Group[%2d]: %d vehicles of type %d (%s)",
-                                            i, ucd->num_elements[i], vt_et, vname);
-                            } else {
-                                ImGui::Text("  Group[%2d]: %d vehicles of type %d",
-                                            i, ucd->num_elements[i], vt_et);
-                            }
-                        }
-                    }
-                    ImGui::TreePop();
-                }
-                if (ImGui::TreeNode("Mission Scores")) {
-                    for (int i = 0; i < 16; ++i) {
-                        if (ucd->scores[i] != 0) {
-                            ImGui::Text("  Role[%2d] = %d", i, ucd->scores[i]);
-                        }
-                    }
-                    ImGui::TreePop();
-                }
-                // Show squadron stores if special_index is valid
-                if (ucd->special_index >= 0 && theater_db_.squad_stores.loaded()) {
-                    const auto* ssd = theater_db_.squad_stores.at(
-                        static_cast<std::size_t>(ucd->special_index));
-                    if (ssd) {
-                        if (ImGui::TreeNode("Squadron Stores (SSD)")) {
-                            ImGui::Text("Infinite AG:  %d", ssd->infinite_ag);
-                            ImGui::Text("Infinite AA:  %d", ssd->infinite_aa);
-                            ImGui::Text("Infinite Gun: %d", ssd->infinite_gun);
-                            int non_zero = 0;
-                            for (int w = 0; w < f4::world_convert::TD_MAXIMUM_WEAPTYPES; ++w) {
-                                if (ssd->stores[w] > 0) ++non_zero;
-                            }
-                            ImGui::Text("Weapons in stock: %d types", non_zero);
-                            if (ImGui::TreeNode("Stock detail")) {
-                                for (int w = 0; w < f4::world_convert::TD_MAXIMUM_WEAPTYPES; ++w) {
-                                    if (ssd->stores[w] > 0) {
-                                        const auto* wcd = theater_db_.weapons.at(
-                                            static_cast<std::size_t>(w));
-                                        if (wcd && !wcd->name.empty()) {
-                                            ImGui::Text("  [%3d] %s: %d",
-                                                        w, wcd->name.c_str(), ssd->stores[w]);
-                                        } else {
-                                            ImGui::Text("  [%3d] weapon %d: %d",
-                                                        w, w, ssd->stores[w]);
-                                        }
-                                    }
-                                }
-                                ImGui::TreePop();
-                            }
-                            ImGui::TreePop();
-                        }
-                    }
-                }
-                ImGui::TreePop();
-            }
-        } else {
-            ImGui::TextDisabled("UCD index %u out of range (table has %zu entries)",
-                                entry->data_ptr_index, theater_db_.units.size());
-        }
-    }
-
-    // OCD detail.
-    if (entry->data_type == f4::world_convert::DTYPE_OBJECTIVE) {
-        const auto* ocd = theater_db_.objectives.at(entry->data_ptr_index);
-        if (ocd) {
-            if (ImGui::TreeNode("ObjectiveClassData (OCD)")) {
-                ImGui::Text("Name:          %s", ocd->name.c_str());
-                ImGui::Text("Features:      %d", ocd->features);
-                ImGui::Text("Radar Feature: %d", ocd->radar_feature);
-                ImGui::Text("First Feature: %d", ocd->first_feature);
-                ImGui::Text("Data Rate:     %d", ocd->data_rate);
-                ImGui::Text("Deag Dist:     %d m", ocd->deag_distance);
-                ImGui::Text("PtData Index:  %d", ocd->pt_data_index);
-                ImGui::Text("Icon Index:    %d", ocd->icon_index);
-                if (ImGui::TreeNode("Detection Ranges")) {
-                    for (std::size_t i = 0; i < ocd->detection.size(); ++i) {
-                        if (ocd->detection[i] != 0) {
-                            ImGui::Text("  [%zu] = %d", i, ocd->detection[i]);
-                        }
-                    }
-                    ImGui::TreePop();
-                }
-                if (ImGui::TreeNode("Damage Modifiers")) {
-                    for (std::size_t i = 0; i < ocd->damage_mod.size(); ++i) {
-                        if (ocd->damage_mod[i] != 0) {
-                            ImGui::Text("  [%zu] = %d", i, ocd->damage_mod[i]);
-                        }
-                    }
-                    ImGui::TreePop();
-                }
-                ImGui::TreePop();
-            }
-        } else {
-            ImGui::TextDisabled("OCD index %u out of range (table has %zu entries)",
-                                entry->data_ptr_index, theater_db_.objectives.size());
-        }
-    }
-
-    // FCD detail.
-    if (entry->data_type == f4::world_convert::DTYPE_FEATURE) {
-        const auto* fcd = theater_db_.features.at(entry->data_ptr_index);
-        if (fcd) {
-            if (ImGui::TreeNode("FeatureClassData (FCD)")) {
-                ImGui::Text("Name:          %s", fcd->name.c_str());
-                ImGui::Text("Hit Points:    %d", fcd->hit_points);
-                ImGui::Text("Repair Time:   %d s", fcd->repair_time);
-                ImGui::Text("Height:        %d", fcd->height);
-                ImGui::Text("Angle:         %.1f deg", fcd->angle);
-                ImGui::Text("Radar Type:    %d", fcd->radar_type);
-                ImGui::Text("Priority:      %d", fcd->priority);
-                ImGui::TreePop();
-            }
-        } else {
-            ImGui::TextDisabled("FCD index %u out of range (table has %zu entries)",
-                                entry->data_ptr_index, theater_db_.features.size());
-        }
-    }
-
-    // WCD detail.
-    if (entry->data_type == f4::world_convert::DTYPE_WEAPON) {
-        const auto* wcd = theater_db_.weapons.at(entry->data_ptr_index);
-        if (wcd) {
-            if (ImGui::TreeNode("WeaponClassData (WCD)")) {
-                ImGui::Text("Name:          %s", wcd->name.c_str());
-                ImGui::Text("Strength:      %u", wcd->strength);
-                ImGui::Text("Damage Type:   %s (%d)",
-                            damage_type_name(wcd->damage_type), wcd->damage_type);
-                ImGui::Text("Range:         %d km", wcd->range_km);
-                ImGui::Text("Weight:        %u lbs", wcd->weight);
-                ImGui::Text("Blast Radius:  %u ft", wcd->blast_radius);
-                ImGui::Text("Fire Rate:     %d", wcd->fire_rate);
-                ImGui::Text("Rarity:        %d%%", wcd->rarity);
-                ImGui::Text("Guidance:      0x%04X", wcd->guidance_flags);
-                ImGui::Text("Max Alt:       %d kft", static_cast<int>(wcd->max_alt));
-                ImGui::Text("Radar Type:    %d", wcd->radar_type);
-                ImGui::Text("SimWeap Index: %d", wcd->simweap_index);
-                ImGui::Text("SimData Index: %d", wcd->sim_data_idx);
-                ImGui::Text("Flags:         0x%04X", wcd->flags);
-                if (ImGui::TreeNode("Hit Chance (per movement type)")) {
-                    for (std::size_t i = 0; i < wcd->hit_chance.size(); ++i) {
-                        if (wcd->hit_chance[i] != 0) {
-                            ImGui::Text("  %s: %d%%",
-                                        movement_type_name(static_cast<int32_t>(i)),
-                                        wcd->hit_chance[i]);
-                        }
-                    }
-                    ImGui::TreePop();
-                }
-                ImGui::TreePop();
-            }
-        } else {
-            ImGui::TextDisabled("WCD index %u out of range (table has %zu entries)",
-                                entry->data_ptr_index, theater_db_.weapons.size());
-        }
-    }
-
-    // SSD detail (rare — usually accessed via UCD::special_index,
-    // but the class table can point directly too).
-    if (entry->data_type == f4::world_convert::DTYPE_SQUAD_STORES) {
-        const auto* ssd = theater_db_.squad_stores.at(entry->data_ptr_index);
-        if (ssd) {
-            if (ImGui::TreeNode("SquadronStoresData (SSD)")) {
-                ImGui::Text("Infinite AG:  %d", ssd->infinite_ag);
-                ImGui::Text("Infinite AA:  %d", ssd->infinite_aa);
-                ImGui::Text("Infinite Gun: %d", ssd->infinite_gun);
-                int non_zero = 0;
-                for (int w = 0; w < f4::world_convert::TD_MAXIMUM_WEAPTYPES; ++w) {
-                    if (ssd->stores[w] > 0) ++non_zero;
-                }
-                ImGui::Text("Weapons in stock: %d types", non_zero);
-                if (ImGui::TreeNode("Stock detail")) {
-                    for (int w = 0; w < f4::world_convert::TD_MAXIMUM_WEAPTYPES; ++w) {
-                        if (ssd->stores[w] > 0) {
-                            const auto* wcd = theater_db_.weapons.at(
-                                static_cast<std::size_t>(w));
-                            if (wcd && !wcd->name.empty()) {
-                                ImGui::Text("  [%3d] %s: %d",
-                                            w, wcd->name.c_str(), ssd->stores[w]);
-                            } else {
-                                ImGui::Text("  [%3d] weapon %d: %d",
-                                            w, w, ssd->stores[w]);
-                            }
-                        }
-                    }
-                    ImGui::TreePop();
-                }
-                ImGui::TreePop();
-            }
-        } else {
-            ImGui::TextDisabled("SSD index %u out of range (table has %zu entries)",
-                                entry->data_ptr_index, theater_db_.squad_stores.size());
-        }
-    }
+    ImGui::Text("Type: %d   Subtype: %s", static_cast<int>(entry->type),
+                unit_subtype_name(entry->domain, entry->stype));
+    ImGui::Separator();
+    ImGui::TextDisabled("Class-table record detail (OCD/UCD/VCD/FCD/WCD joins)\n"
+                        "moved to the converted JSON artifacts — see\n"
+                        "Data/World/korea.world.json + ct2json output.");
 
     ImGui::EndGroup();
 }
@@ -1464,15 +930,10 @@ void ClassTableBrowser::export_csv(const std::filesystem::path& path) {
     }
 
     f << "entity_type,domain,class,type,subtype,vis_type_0,vis_type_1,vis_type_2,"
-      << "vis_type_3,vis_type_4,vis_type_5,vis_type_6,data_type,data_ptr_index,"
-      << "table_name,vcd_name,vcd_hitpoints,vcd_max_speed,vcd_max_wt,"
-      << "ucd_name,ucd_movement_type,ucd_movement_speed,ucd_max_range,"
-      << "ocd_name,ocd_features,"
-      << "fcd_name,fcd_hit_points,fcd_repair_time,"
-      << "wcd_name,wcd_strength,wcd_damage_type,wcd_range_km,wcd_weight\n";
+      << "vis_type_3,vis_type_4,vis_type_5,vis_type_6,data_type,data_ptr_index\n";
 
     const int n = static_cast<int>(class_table_.size());
-    const int base = f4::world_convert::VU_LAST_ENTITY_TYPE;
+    const int base = f4::world_types::VU_LAST_ENTITY_TYPE;
 
     int exported = 0;
     for (int i = 0; i < n; ++i) {
@@ -1488,57 +949,7 @@ void ClassTableBrowser::export_csv(const std::filesystem::path& path) {
           << static_cast<int>(entry->stype) << ",";
         for (int s = 0; s < 7; ++s) f << entry->vis_type[s] << ",";
         f << static_cast<int>(entry->data_type) << ","
-          << entry->data_ptr_index << ","
-          << ct_data_type_name(entry->data_type) << ",";
-
-        using namespace f4::world_convert;
-
-        // VCD
-        if (entry->data_type == DTYPE_VEHICLE) {
-            const auto* vcd = theater_db_.vehicles.at(entry->data_ptr_index);
-            if (vcd) {
-                f << vcd->name << "," << vcd->hit_points << ","
-                  << vcd->max_speed << "," << vcd->max_wt << ",";
-            } else { f << ",,,,"; }
-        } else { f << ",,,,"; }
-
-        // UCD
-        if (entry->data_type == DTYPE_UNIT) {
-            const auto* ucd = theater_db_.units.at(entry->data_ptr_index);
-            if (ucd) {
-                f << ucd->name << "," << ucd->movement_type << ","
-                  << ucd->movement_speed << "," << ucd->max_range << ",";
-            } else { f << ",,,,"; }
-        } else { f << ",,,,"; }
-
-        // OCD
-        if (entry->data_type == DTYPE_OBJECTIVE) {
-            const auto* ocd = theater_db_.objectives.at(entry->data_ptr_index);
-            if (ocd) {
-                f << ocd->name << "," << static_cast<int>(ocd->features) << ",";
-            } else { f << ",,"; }
-        } else { f << ",,"; }
-
-        // FCD
-        if (entry->data_type == DTYPE_FEATURE) {
-            const auto* fcd = theater_db_.features.at(entry->data_ptr_index);
-            if (fcd) {
-                f << fcd->name << "," << fcd->hit_points << ","
-                  << fcd->repair_time << ",";
-            } else { f << ",,,"; }
-        } else { f << ",,,"; }
-
-        // WCD
-        if (entry->data_type == DTYPE_WEAPON) {
-            const auto* wcd = theater_db_.weapons.at(entry->data_ptr_index);
-            if (wcd) {
-                f << wcd->name << "," << wcd->strength << ","
-                  << wcd->damage_type << "," << wcd->range_km << ","
-                  << wcd->weight << ",";
-            } else { f << ",,,,,"; }
-        } else { f << ",,,,,"; }
-
-        f << "\n";
+          << entry->data_ptr_index << "\n";
         ++exported;
     }
 
@@ -1559,7 +970,7 @@ void ClassTableBrowser::export_json(const std::filesystem::path& path) {
     f << "[\n";
 
     const int n = static_cast<int>(class_table_.size());
-    const int base = f4::world_convert::VU_LAST_ENTITY_TYPE;
+    const int base = f4::world_types::VU_LAST_ENTITY_TYPE;
     int exported = 0;
 
     for (int i = 0; i < n; ++i) {
@@ -1590,104 +1001,6 @@ void ClassTableBrowser::export_json(const std::filesystem::path& path) {
         f << "    \"data_type\": " << static_cast<int>(entry->data_type)
           << ", \"data_type_name\": \"" << ct_data_type_name(entry->data_type) << "\",\n";
         f << "    \"data_ptr_index\": " << entry->data_ptr_index;
-
-        using namespace f4::world_convert;
-
-        if (entry->data_type == DTYPE_VEHICLE) {
-            const auto* vcd = theater_db_.vehicles.at(entry->data_ptr_index);
-            if (vcd) {
-                f << ",\n    \"vehicle\": {\n";
-                f << "      \"name\": \"" << vcd->name << "\",\n";
-                f << "      \"nctr\": \"" << vcd->nctr << "\",\n";
-                f << "      \"hit_points\": " << vcd->hit_points << ",\n";
-                f << "      \"max_speed\": " << vcd->max_speed << ",\n";
-                f << "      \"max_wt\": " << vcd->max_wt << ",\n";
-                f << "      \"empty_wt\": " << vcd->empty_wt << ",\n";
-                f << "      \"fuel_wt\": " << vcd->fuel_wt << ",\n";
-                f << "      \"rcs_factor\": " << vcd->rcs_factor << ",\n";
-                f << "      \"radar_type\": " << vcd->radar_type << ",\n";
-                f << "      \"pilots\": " << vcd->number_of_pilots << ",\n";
-                f << "      \"weapons\": [";
-                for (int w = 0; w < 16; ++w) {
-                    if (vcd->weapon[w] != 0) {
-                        if (w > 0 && vcd->weapon[w-1] != 0) f << ", ";
-                        f << "{\"id\":" << vcd->weapon[w]
-                          << ",\"qty\":" << static_cast<int>(vcd->weapons[w]) << "}";
-                    }
-                }
-                f << "]\n";
-                f << "    }";
-            }
-        }
-
-        if (entry->data_type == DTYPE_UNIT) {
-            const auto* ucd = theater_db_.units.at(entry->data_ptr_index);
-            if (ucd) {
-                f << ",\n    \"unit\": {\n";
-                f << "      \"name\": \"" << ucd->name << "\",\n";
-                f << "      \"movement_type\": " << ucd->movement_type
-                  << ", \"movement_type_name\": \"" << movement_type_name(ucd->movement_type) << "\",\n";
-                f << "      \"movement_speed\": " << ucd->movement_speed << ",\n";
-                f << "      \"max_range\": " << ucd->max_range << ",\n";
-                f << "      \"fuel\": " << ucd->fuel << ",\n";
-                f << "      \"role\": " << static_cast<int>(ucd->role) << ",\n";
-                f << "      \"vehicle_groups\": [";
-                bool first = true;
-                for (int g = 0; g < 16; ++g) {
-                    if (ucd->num_elements[g] > 0) {
-                        if (!first) f << ", ";
-                        f << "{\"count\":" << ucd->num_elements[g]
-                          << ",\"vehicle_type\":" << ucd->vehicle_type[g] << "}";
-                        first = false;
-                    }
-                }
-                f << "]\n";
-                f << "    }";
-            }
-        }
-
-        if (entry->data_type == DTYPE_OBJECTIVE) {
-            const auto* ocd = theater_db_.objectives.at(entry->data_ptr_index);
-            if (ocd) {
-                f << ",\n    \"objective\": {\n";
-                f << "      \"name\": \"" << ocd->name << "\",\n";
-                f << "      \"features\": " << static_cast<int>(ocd->features) << ",\n";
-                f << "      \"radar_feature\": " << static_cast<int>(ocd->radar_feature) << ",\n";
-                f << "      \"first_feature\": " << ocd->first_feature << ",\n";
-                f << "      \"deag_distance\": " << ocd->deag_distance << "\n";
-                f << "    }";
-            }
-        }
-
-        if (entry->data_type == DTYPE_FEATURE) {
-            const auto* fcd2 = theater_db_.features.at(entry->data_ptr_index);
-            if (fcd2) {
-                f << ",\n    \"feature\": {\n";
-                f << "      \"name\": \"" << fcd2->name << "\",\n";
-                f << "      \"hit_points\": " << fcd2->hit_points << ",\n";
-                f << "      \"repair_time\": " << fcd2->repair_time << ",\n";
-                f << "      \"radar_type\": " << fcd2->radar_type << "\n";
-                f << "    }";
-            }
-        }
-
-        if (entry->data_type == DTYPE_WEAPON) {
-            const auto* wcd = theater_db_.weapons.at(entry->data_ptr_index);
-            if (wcd) {
-                f << ",\n    \"weapon\": {\n";
-                f << "      \"name\": \"" << wcd->name << "\",\n";
-                f << "      \"strength\": " << wcd->strength << ",\n";
-                f << "      \"damage_type\": " << wcd->damage_type
-                  << ", \"damage_type_name\": \"" << damage_type_name(wcd->damage_type) << "\",\n";
-                f << "      \"range_km\": " << wcd->range_km << ",\n";
-                f << "      \"weight\": " << wcd->weight << ",\n";
-                f << "      \"blast_radius\": " << wcd->blast_radius << ",\n";
-                f << "      \"fire_rate\": " << static_cast<int>(wcd->fire_rate) << ",\n";
-                f << "      \"rarity\": " << static_cast<int>(wcd->rarity) << ",\n";
-                f << "      \"guidance_flags\": " << wcd->guidance_flags << "\n";
-                f << "    }";
-            }
-        }
 
         f << "\n  }";
         ++exported;

@@ -174,7 +174,6 @@ struct Args {
     std::filesystem::path world_json;
     std::filesystem::path class_table;
     std::filesystem::path config;
-    std::filesystem::path models_hdr;
     int team = -1;
     int mission = -1;            // byte; -1 = any
     int max_flights = 0;
@@ -251,7 +250,6 @@ Args parse_args(int argc, char** argv) {
 #ifdef F4_SOURCE_DIR
     a.class_table = std::filesystem::path(F4_SOURCE_DIR) /
                     "f4-world-convert/tests/fixtures/FALCON4.ct";
-    a.models_hdr = std::filesystem::path(F4_SOURCE_DIR) / "temp/KoreaObj.HDR";
 #endif
 #ifdef F4_BINARY_DIR
     a.config = std::filesystem::path(F4_BINARY_DIR) /
@@ -268,7 +266,6 @@ Args parse_args(int argc, char** argv) {
         };
         if (k == "--class-table")      a.class_table = next();
         else if (k == "--config")      a.config = next();
-        else if (k == "--models")      a.models_hdr = next();
         else if (k == "--profiles")    a.profiles_json = next();
         else if (k == "--team")        a.team = std::atoi(next());
         else if (k == "--max-flights") a.max_flights = std::atoi(next());
@@ -1298,11 +1295,6 @@ int main(int argc, char** argv) {
              << json_escape(args.world_json.string()) << "\",\n";
         out << "  \"class_table_path\": \""
              << json_escape(args.class_table.string()) << "\",\n";
-        out << "  \"models_hdr_path\": \""
-             << json_escape(args.models_hdr.string()) << "\",\n";
-        out << "  \"models_lod_path\": \""
-             << json_escape((args.models_hdr.parent_path() /
-                             "KoreaObj.LOD").string()) << "\",\n";
         out << "  \"campaign_flight_filter\": {";
         out << "\"team\": " << args.team;
         out << ", \"mission\": " << args.mission;

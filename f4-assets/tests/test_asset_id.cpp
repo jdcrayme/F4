@@ -111,3 +111,17 @@ TEST(AssetId, IsValidLocalId) {
     EXPECT_FALSE(is_valid_local_id("has space"));
     EXPECT_FALSE(is_valid_local_id("with/slash"));
 }
+
+// Task 58 (Tranche 0e): the simdata family — Data/SimData/*.json became
+// addressable when the legacy fingerprint manifests gained id derivation.
+TEST(AssetId, SimdataFamilyRoundTrip) {
+    AssetId id = parse_asset_id("simdata:braindata");
+    EXPECT_EQ(id.family, AssetFamily::simdata);
+    EXPECT_EQ(id.local_id, "braindata");
+    EXPECT_EQ(id.to_string(), "simdata:braindata");
+    EXPECT_EQ(family_to_string(AssetFamily::simdata), "simdata");
+    EXPECT_EQ(family_from_string("simdata"), AssetFamily::simdata);
+    EXPECT_NO_THROW(parse_asset_ref("@asset:simdata:braindata"));
+    EXPECT_TRUE(parse_asset_id_or_invalid("simdata:visualdata").valid());
+    EXPECT_TRUE(parse_asset_id("class:falcon4.ct").valid());  // dots are legal local-ids
+}

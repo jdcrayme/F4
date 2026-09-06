@@ -18,6 +18,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 #   - f4_warnings: shared warning flags.
 add_library(f4-assets STATIC
     src/asset_id.cpp
+    src/hash.cpp
     src/manifest.cpp
     src/asset_root.cpp
 )

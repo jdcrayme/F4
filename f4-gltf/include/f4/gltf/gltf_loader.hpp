@@ -71,7 +71,30 @@ struct Primitive {
     std::optional<std::size_t> texcoords0;  // accessor index for TEXCOORD_0
     std::optional<std::size_t> colors0;     // accessor index for COLOR_0
     std::optional<std::size_t> indices;    // accessor index for indices
+    std::optional<std::size_t> material;   // index into GltfDocument::materials
     int mode = 4;                           // 4 = TRIANGLES, see glTF spec
+};
+
+/// A glTF image — an external file reference (f4import emits PNG URIs).
+struct Image {
+    std::string name;
+    std::string uri;             // external file URI (relative to the .gltf)
+};
+
+/// A glTF texture — a reference to an image with a sampler.
+struct Texture {
+    std::string name;
+    std::optional<std::size_t> image;  // index into GltfDocument::images
+};
+
+/// A glTF material — the subset f4import models emits:
+/// name ("tex:NNNNN" or "vertexcolor"), baseColorTexture, alphaMode MASK
+/// for chroma-keyed textures, and baseColorFactor white otherwise.
+struct Material {
+    std::string name;
+    std::optional<std::size_t> baseColorTexture;  // index into GltfDocument::textures
+    int alphaMode = 0;              // 0 = OPAQUE, 1 = MASK, 2 = BLEND
+    float alphaCutoff = 0.5f;
 };
 
 /// A mesh — one or more primitives.
@@ -132,6 +155,9 @@ struct GltfDocument {
     std::vector<Buffer> buffers;
     std::vector<BufferView> buffer_views;
     std::vector<Accessor> accessors;
+    std::vector<Image> images;
+    std::vector<Texture> textures;
+    std::vector<Material> materials;
     std::vector<Mesh> meshes;
     std::vector<Node> nodes;
     std::vector<Scene> scenes;
@@ -168,6 +194,21 @@ struct GltfDocument {
     /// nullopt if invalid. Used by the renderer to read triangle indices.
     [[nodiscard]] std::optional<uint32_t>
     read_index_u32(std::size_t accessor_index, std::size_t element_index) const;
+
+    /// Read a single RGBA color from a COLOR_0 accessor at a given index.
+    /// Supports FLOAT VEC4 (5126) and normalized UBYTE VEC4 (5121) — the
+    /// two encodings f4import models emits. Returns nullopt if the
+    /// accessor is missing, invalid, or the data isn't loaded.
+    [[nodiscard]] std::optional<std::array<float, 4>>
+    read_color_rgba(std::size_t accessor_index, std::size_t element_index) const;
+
+    /// Resolve a primitive's base-color texture URI through the material
+    /// chain: material.baseColorTexture → texture.image → image.uri. The
+    /// returned URI is relative to the .gltf file's directory (e.g.
+    /// "textures/00042.png"). Returns nullopt when the primitive has no
+    /// material or its material has no base-color texture.
+    [[nodiscard]] std::optional<std::string>
+    material_basecolor_uri(std::optional<std::size_t> material_index) const;
 
     /// Count of nodes with f4 extras of a given kind.
     [[nodiscard]] std::size_t count_f4_nodes(const std::string& kind) const noexcept;

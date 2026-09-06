@@ -1,6 +1,23 @@
 # Tranche 0d (renderer half) — Runtime glTF Rewire: Implementation Plan
 
-> **Status**: Design plan — for execution in a GL-enabled environment.
+> **Status**: LANDED (Task 59) — executed in the sandbox against a
+> compile-only X11/GL shim (vendored headers + runtime .so symlinks), so
+> every GL-side target compile-verified headless. §2.1/§2.2/§2.3 landed
+> as planned (RuntimeModelCache + link cut + signature updates). §2.4
+> landed (temp/KoreaObj deleted; the vestigial scenario model-path
+> fields removed outright instead of migrating to `@asset:` — the
+> renderer resolves models per vis_type from Data/, which needs no
+> per-scenario reference). Deviations from the plan: f4-gltf gained
+> materials/textures/images parsing (the plan's "material index →
+> MeshEntry::tex_id" needed the chain); the viewer's in-process binary
+> imports (file_ops / install_flow) now shell out to the cam2json /
+> terrain2json CLIs (keeps the features AND the P2 boundary); the class
+> table browser lost its joined OCD/UCD/VCD/FCD/WCD record panels (the
+> binary theater DB is importer-side — the same data ships in
+> Data/World/korea.world.json); the name helpers (objective_type_name,
+> point_type_name, point_list_type_name, movement_type_name,
+> damage_type_name) moved to f4-world-types/campaign_names.hpp.
+> Visual QA (§5.5) remains a user-environment step.
 > **Predecessor**: Tranche 0d simulation half (Task 54) — LANDED. The
 > `f4-world-convert` link is cut from `f4-simulation`; the remaining
 > boundary violations are `f4-models` + `f4-lzss`, both via

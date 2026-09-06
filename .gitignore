@@ -23,23 +23,18 @@ imgui.ini
 Testing/
 
 # temp/ is a scratch dir for reference dumps, screenshots, and validation
-# output. Only the load-bearing KoreaObj model archive stays tracked: every
-# f4-scenario-player/scenarios/*.json.in references it via
-# @F4_SOURCE_DIR@/temp/KoreaObj.*, and the f4-simulation scenario tests
-# consume those configured scenarios. Its removal — along with the other
-# committed game-derived fixtures — is deferred to the asset pipeline's
-# Stage 3 (glTF export) and Stage 0 synthetic-fixture work
-# (ASSET_PIPELINE_SPEC.md §12), which replaces it with generated Data/
-# assets. Until then: no new junk in temp/.
-!temp/KoreaObj.HDR
-!temp/KoreaObj.LOD
-!temp/KoreaObj.TEX
+# output. Nothing in it is tracked: the KoreaObj binary model archive left
+# the repo with the Tranche 0d glTF rewire — the runtime consumes
+# Data/Models/koreaobj/*.gltf + textures/*.png (produced by `f4import
+# models` / `f4import textures`, Tranche 0c; exported into Data/ per the
+# 0e.1 step of NO_BINARY_RUNTIME_PLAN.md). No new junk in temp/.
 
 # Asset pipeline target tree (ASSET_PIPELINE_SPEC.md §4).
 # Tranche 0a (NO_BINARY_RUNTIME_PLAN.md): the JSON subset of Data/ IS committed
 # (world, terrain, class table, aircraft, simdata) so the runtime + tests run
 # anywhere without F4_INSTALL. The binary-derived subsets (Models/koreaobj/
-# glTF+PNG) stay gitignored until Tranche 0c/0d land.
+# glTF+PNG, 0c producers) stay gitignored — export them locally with
+# `f4import models/textures --install <root> --data Data --all` (0e.1).
 # NOTE: the ignore must be `Data/**` (not `Data/`): git cannot re-include
 # a path inside a directory that is itself excluded, so `Data/` + `!Data/…`
 # negations never matched. `Data/**` ignores everything INSIDE Data/ while

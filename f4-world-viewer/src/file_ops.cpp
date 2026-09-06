@@ -1,8 +1,11 @@
 // f4-world-viewer/src/file_ops.cpp
 //
-// ViewerApp file-load / import operations. These wrap the cam2json and
-// terrain2json CLIs' libraries in-process (no fork/exec) so the user
-// can import raw FreeFalcon binary files without leaving the app.
+// ViewerApp file-load / import operations. Binary imports (.cam
+// archives, THEATER.* terrain) run through the converter CLIs
+// (cam2json / terrain2json) as subprocesses — Tranche 0d: the runtime
+// app no longer links the converter libraries (P2 boundary). The CLIs
+// are importer-side tools; their paths are injected at configure time
+// via generator expressions (F4_CAM2JSON_EXE / F4_TERRAIN2JSON_EXE).
 //
 // Split out of the original 1920-LoC viewer_app.cpp god-file (item #5
 // of the architecture review). No behavior change — same paths, same
@@ -16,12 +19,9 @@
 
 #include "viewer_state.hpp"
 
-#include <f4/terrain_convert/terrain_converter.hpp>
-#include <f4/world_convert/cam_archive.hpp>
-#include <f4/world_convert/class_table.hpp>
-#include <f4/world_convert/world_json.hpp>
 #include <f4/world/detail/world_state.hpp>
 
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <cstdio>
@@ -29,6 +29,26 @@
 #include <string>
 
 namespace f4::viewer {
+
+namespace {
+
+// Quote a path for a shell command line (paths may contain spaces).
+std::string shell_quote(const std::filesystem::path& p) {
+    const auto s = p.string();
+    if (s.find(' ') == std::string::npos && s.find('"') == std::string::npos &&
+        s.find('\t') == std::string::npos) {
+        return s;
+    }
+    std::string out = "\"";
+    for (const char c : s) {
+        if (c == '"') out += '\\';
+        out += c;
+    }
+    out += '"';
+    return out;
+}
+
+}  // namespace
 
 void ViewerApp::Impl::try_load_theater_tiles() {
     // The install flow (load_campaign_from_install) does this inline with
@@ -147,53 +167,56 @@ void ViewerApp::load_world_json(const std::filesystem::path& path) {
 }
 
 void ViewerApp::import_terrain_binary(const std::filesystem::path& terrain_dir) {
-    // Use the in-process library so we don't shell out to terrain2json.
+    // Tranche 0d: run the terrain2json CLI instead of linking the
+    // converter library (P2 boundary — the runtime stays binary-free).
+#ifdef F4_TERRAIN2JSON_EXE
     const auto out = terrain_dir / "terrain.json";
-    f4::terrain_convert::convert_terrain_dir(terrain_dir, out, "korea");
+    const std::string cmd = std::string(F4_TERRAIN2JSON_EXE) + " " +
+        shell_quote(terrain_dir) + " " + shell_quote(out);
+    const int rc = std::system(cmd.c_str());
+    if (rc != 0) {
+        throw std::runtime_error("terrain2json failed (exit " +
+                                 std::to_string(rc) + ")");
+    }
     load_terrain_json(out);
+#else
+    throw std::runtime_error("terrain2json CLI not configured in this build");
+#endif
 }
 
 void ViewerApp::import_cam_archive(const std::filesystem::path& cam_path) {
-    f4::world_convert::CamArchive cam;
-    cam.load(cam_path);
-    f4::world_convert::WorldJsonOptions opts;
-    opts.theater = "korea";
-    opts.terrain_file = "korea.terrain.json";
-
-    // Auto-search for FALCON4.ct (the class table) in a few standard
-    // locations. Without it, objectives carry only their raw entity_type
-    // and the viewer can't pick icons — they all fall back to circles.
-    // The class table is a binary file shipped with the game data; the
-    // repo bundles a copy in f4-world-convert/tests/fixtures/FALCON4.ct
-    // so we can resolve types out-of-the-box.
-    f4::world_convert::ClassTable class_table;
-    const auto ct_path = f4::world_convert::find_class_table(cam_path);
-    if (!ct_path.empty()) {
-        try {
-            class_table.load(ct_path);
-            opts.class_table = &class_table;
-            impl_->status_msg = "Loaded class table: " + ct_path.string() +
-                " (" + std::to_string(class_table.size()) + " entries)";
-        } catch (const std::exception& e) {
-            impl_->last_error = "Class table load failed: " + std::string(e.what());
-        }
-    } else {
-        impl_->last_error =
-            "FALCON4.ct not found — objectives will render as fallback circles "
-            "(no icon mapping). Place FALCON4.ct next to the .cam or in assets/.";
-    }
-
-    const std::string json = f4::world_convert::to_world_json(cam, opts);
-
-    // Write to a temp file next to the .cam, then load via the normal path.
+    // Tranche 0d: run the cam2json CLI instead of linking the converter
+    // library (P2 boundary). cam2json resolves the class table (bundled
+    // fixture fallback) and joins theater names/layouts when an objects
+    // dir is available — the same flow the build's korea-real-world-json
+    // target uses.
+#ifdef F4_CAM2JSON_EXE
     auto out = cam_path;
     out.replace_extension(".world.json");
-    {
-        std::ofstream f(out);
-        if (!f) throw std::runtime_error("cannot write " + out.string());
-        f << json;
+
+    // Prefer a theater objects dir near the .cam for the join.
+    std::filesystem::path objects_dir;
+    for (const auto& cand : { cam_path.parent_path() / "terrdata" / "objects",
+                              cam_path.parent_path() / "objects" }) {
+        if (std::filesystem::exists(cand)) {
+            objects_dir = cand;
+            break;
+        }
+    }
+
+    std::string cmd = std::string(F4_CAM2JSON_EXE) + " " +
+        shell_quote(cam_path) + " " + shell_quote(out);
+    if (!objects_dir.empty()) {
+        cmd += " --theater-data " + shell_quote(objects_dir);
+    }
+    const int rc = std::system(cmd.c_str());
+    if (rc != 0) {
+        throw std::runtime_error("cam2json failed (exit " + std::to_string(rc) + ")");
     }
     load_world_json(out);
+#else
+    throw std::runtime_error("cam2json CLI not configured in this build");
+#endif
 }
 
 } // namespace f4::viewer

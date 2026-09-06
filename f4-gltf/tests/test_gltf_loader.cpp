@@ -315,3 +315,79 @@ TEST(GltfLoader, ThrowsOnMissingFile) {
     GltfDocument doc;
     EXPECT_THROW(doc.load("/no/such/file.gltf"), std::runtime_error);
 }
+
+// ── Materials / textures / images (Tranche 0d — the texture-binding
+//    chain the RuntimeModelCache walks) ─────────────────────────────────
+
+TEST(GltfLoader, ParsesMaterialTextureChain) {
+    const std::string json = R"({
+        "asset": {"version": "2.0"},
+        "scenes": [{"nodes": [0]}],
+        "nodes": [{"name": "root"}],
+        "images": [
+            {"name": "tex42", "uri": "textures/00042.png"},
+            {"uri": "textures/00043.png"}
+        ],
+        "textures": [
+            {"name": "t0", "source": 0},
+            {"source": 1}
+        ],
+        "materials": [
+            {"name": "tex:00042",
+             "pbrMetallicRoughness": {"baseColorTexture": {"index": 0}},
+             "alphaMode": "MASK", "alphaCutoff": 0.4},
+            {"name": "vertexcolor"}
+        ],
+        "meshes": []
+    })";
+    f4::gltf::GltfDocument doc;
+    doc.load_from_string(json);
+
+    ASSERT_EQ(doc.images.size(), 2u);
+    EXPECT_EQ(doc.images[0].uri, "textures/00042.png");
+    ASSERT_EQ(doc.textures.size(), 2u);
+    ASSERT_TRUE(doc.textures[0].image.has_value());
+    EXPECT_EQ(*doc.textures[0].image, 0u);
+    ASSERT_EQ(doc.materials.size(), 2u);
+
+    // Full chain: material → texture → image URI.
+    auto uri = doc.material_basecolor_uri(0);
+    ASSERT_TRUE(uri.has_value());
+    EXPECT_EQ(*uri, "textures/00042.png");
+
+    // The vertexcolor material has no base-color texture.
+    EXPECT_FALSE(doc.material_basecolor_uri(1).has_value());
+    // Out-of-range index → nullopt.
+    EXPECT_FALSE(doc.material_basecolor_uri(99).has_value());
+    // No material at all → nullopt.
+    EXPECT_FALSE(doc.material_basecolor_uri(std::nullopt).has_value());
+}
+
+TEST(GltfLoader, ParsesPrimitiveMaterialIndex) {
+    const std::string json = R"({
+        "asset": {"version": "2.0"},
+        "scenes": [{"nodes": [0]}],
+        "nodes": [{"name": "root"}],
+        "materials": [{"name": "tex:00007"}],
+        "meshes": [{
+            "name": "LOD_0",
+            "primitives": [
+                {"attributes": {"POSITION": 0}, "mode": 4, "material": 0},
+                {"attributes": {"POSITION": 0}, "mode": 4}
+            ]
+        }],
+        "accessors": [{"componentType": 5126, "count": 3,
+                        "type": "VEC3",
+                        "min": [0,0,0], "max": [0,0,0]}],
+        "bufferViews": [],
+        "buffers": []
+    })";
+    f4::gltf::GltfDocument doc;
+    doc.load_from_string(json);
+
+    ASSERT_EQ(doc.meshes.size(), 1u);
+    ASSERT_EQ(doc.meshes[0].primitives.size(), 2u);
+    ASSERT_TRUE(doc.meshes[0].primitives[0].material.has_value());
+    EXPECT_EQ(*doc.meshes[0].primitives[0].material, 0u);
+    EXPECT_FALSE(doc.meshes[0].primitives[1].material.has_value());
+}

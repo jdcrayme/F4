@@ -8,9 +8,6 @@
 //     "name": "takeoff_kunsan",
 //     "theater": "korea",
 //     "terrain_json_path": "korea.terrain.json",
-//     "models_hdr_path": "KoreaObj.HDR",
-//     "models_lod_path": "KoreaObj.LOD",
-//     "models_tex_path": "KoreaObj.TEX",
 //     "aircraft": [ { "callsign", "aircraft_config_path", "aircraft_name",
 //                     "vis_type_index", "parking_spot": {x,y,z}, "heading_rad",
 //                     "initial_fuel_lbs", "team": "blue|red" } ],
@@ -28,10 +25,12 @@
 
 #include "f4/simulation/scenario.hpp"
 
+#include <f4/assets/asset_root.hpp>   // Task 58 (Tranche 0e): @asset: resolution
 #include <f4/campaign/mission_type.hpp>  // mission_type_byte (B.3 filter)
 #include <f4/json/reader.hpp>
 #include <f4/io/read_file.hpp>
 
+#include <optional>
 #include <stdexcept>
 #include <string>
 
@@ -206,9 +205,6 @@ Scenario parse_scenario(f4::json::Reader& r) {
         else if (key == "theater")        s.theater = r.read_string();
         else if (key == "terrain_json_path") s.terrain_json_path = r.read_string();
         else if (key == "theater_dir")       s.theater_dir = r.read_string();
-        else if (key == "models_hdr_path")   s.models_hdr_path = r.read_string();
-        else if (key == "models_lod_path")   s.models_lod_path = r.read_string();
-        else if (key == "models_tex_path")   s.models_tex_path = r.read_string();
         else if (key == "world_json_path")   s.world_json_path = r.read_string();
         else if (key == "class_table_path")  s.class_table_path = r.read_string();
         else if (key == "aii_path")          s.aii_path = r.read_string();
@@ -314,6 +310,9 @@ Scenario parse_scenario(f4::json::Reader& r) {
             s.brain_data_path = r.read_string();
         } else if (key == "formation_library_path") {
             s.formation_library_path = r.read_string();
+        } else if (key == "data_dir") {
+            // Task 58 (Tranche 0e): explicit Data/ root for @asset: refs.
+            s.data_dir = r.read_string();
         } else if (key == "tanker") {
             // AAR redesign: the top-level "tanker" block is removed (the
             // tanker is now a ScenarioAircraft with "tanker": true).
@@ -455,6 +454,33 @@ std::filesystem::path resolve(const std::filesystem::path& base_dir,
     return p.is_absolute() ? p : (base_dir / p);
 }
 
+// Task 58 (NO_BINARY_RUNTIME_PLAN Tranche 0e): resolve "@asset:<id>"
+// references through the Data/ manifest.
+//
+// The manifest is the authority: when a Data/ root is available (the
+// scenario's "data_dir" field, else AssetRoot::discover()), every @asset:
+// reference must resolve or load_scenario FAILS LOUD — a dangling id is a
+// real error, not something to paper over with a guess. When no root is
+// discoverable (e.g. a bare test checkout without F4_DATA_DIR), references
+// are preserved verbatim — the pre-Task-58 behavior.
+std::filesystem::path resolve_maybe_asset(
+    const f4::assets::AssetRoot* root, const char* field,
+    const std::filesystem::path& base_dir, const std::filesystem::path& p) {
+    const std::string s = p.string();
+    if (s.size() < 7 || s.substr(0, 7) != "@asset:") {
+        return resolve(base_dir, p);
+    }
+    if (!root) {
+        return p;  // no manifest discoverable — preserve (documented fallback)
+    }
+    const auto rr = f4::assets::resolve_ref(*root, s);
+    if (!rr.ok) {
+        throw std::runtime_error(std::string("scenario: cannot resolve ") +
+                                 field + " '" + s + "': " + rr.error);
+    }
+    return rr.path;
+}
+
 } // namespace
 
 Scenario load_scenario_from_string(const std::string& json) {
@@ -471,26 +497,41 @@ Scenario load_scenario(const std::filesystem::path& json_path) {
 
     Scenario s = load_scenario_from_string(json);
 
-    // Resolve asset paths relative to the scenario file's parent directory.
+    // Task 58 (Tranche 0e): the Data/ root for @asset: resolution — the
+    // scenario's explicit "data_dir" field wins, else discover().
+    std::optional<f4::assets::AssetRoot> root;
+    if (!s.data_dir.empty()) {
+        root = f4::assets::AssetRoot::at(s.data_dir);
+        if (!root) {
+            throw std::runtime_error("scenario: data_dir '" + s.data_dir.string() +
+                                     "' is not a directory (or its manifest.json "
+                                     "does not parse)");
+        }
+    } else {
+        root = f4::assets::AssetRoot::discover();
+    }
+    const f4::assets::AssetRoot* root_ptr = root ? &*root : nullptr;
+
+    // Resolve asset paths relative to the scenario file's parent directory,
+    // and @asset: references through the manifest (when discoverable).
     const auto base_dir = json_path.parent_path();
-    s.terrain_json_path = resolve(base_dir, s.terrain_json_path);
-    s.theater_dir       = resolve(base_dir, s.theater_dir);
-    s.models_hdr_path   = resolve(base_dir, s.models_hdr_path);
-    s.models_lod_path   = resolve(base_dir, s.models_lod_path);
-    s.models_tex_path   = resolve(base_dir, s.models_tex_path);
-    s.world_json_path   = resolve(base_dir, s.world_json_path);
-    s.airbase_source.world_json_path = resolve(base_dir, s.airbase_source.world_json_path);
-    s.airbase_source.class_table_path = resolve(base_dir, s.airbase_source.class_table_path);
-    s.class_table_path  = resolve(base_dir, s.class_table_path);
-    s.aii_path          = resolve(base_dir, s.aii_path);
+    s.terrain_json_path = resolve_maybe_asset(root_ptr, "terrain_json_path", base_dir, s.terrain_json_path);
+    s.theater_dir       = resolve_maybe_asset(root_ptr, "theater_dir", base_dir, s.theater_dir);
+    s.world_json_path   = resolve_maybe_asset(root_ptr, "world_json_path", base_dir, s.world_json_path);
+    s.airbase_source.world_json_path = resolve_maybe_asset(root_ptr, "airbase_source.world_json_path", base_dir, s.airbase_source.world_json_path);
+    s.airbase_source.class_table_path = resolve_maybe_asset(root_ptr, "airbase_source.class_table_path", base_dir, s.airbase_source.class_table_path);
+    s.class_table_path  = resolve_maybe_asset(root_ptr, "class_table_path", base_dir, s.class_table_path);
+    s.aii_path          = resolve_maybe_asset(root_ptr, "aii_path", base_dir, s.aii_path);
     s.record_path       = resolve(base_dir, s.record_path);
     s.fcs_trace_path    = resolve(base_dir, s.fcs_trace_path);
-    s.brain_data_path   = resolve(base_dir, s.brain_data_path);
-    s.formation_library_path = resolve(base_dir, s.formation_library_path);
+    s.brain_data_path   = resolve_maybe_asset(root_ptr, "brain_data_path", base_dir, s.brain_data_path);
+    s.formation_library_path = resolve_maybe_asset(root_ptr, "formation_library_path", base_dir, s.formation_library_path);
 
     // Resolve aircraft config paths too.
     for (auto& a : s.aircraft) {
-        a.aircraft_config_path = resolve(base_dir, a.aircraft_config_path).string();
+        a.aircraft_config_path =
+            resolve_maybe_asset(root_ptr, "aircraft_config_path", base_dir,
+                                std::filesystem::path(a.aircraft_config_path)).string();
     }
 
     return s;

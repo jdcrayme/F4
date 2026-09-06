@@ -7,6 +7,8 @@
 #include <f4/json/reader.hpp>
 #include <f4/json/writer.hpp>
 
+#include <algorithm>
+#include <cctype>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -163,11 +165,21 @@ AssetEntry read_asset(f4::json::Reader& r) {
         std::string key = r.read_string();
         r.expect(':');
         if (key == "id") {
-            a.id = parse_asset_id(r.read_string());
+            // Empty id = unaddressable entry (no convention match); keep it
+            // listed rather than throwing — the committed manifests always
+            // carry a convention-matching id, but foreign producers may not.
+            const std::string id_str = r.read_string();
+            if (!id_str.empty()) a.id = parse_asset_id(id_str);
         } else if (key == "path") {
             a.path = r.read_string();
         } else if (key == "format_version") {
             a.format_version = static_cast<int>(r.read_int());
+        } else if (key == "size_bytes") {
+            a.size_bytes = static_cast<std::uintmax_t>(r.read_int());
+        } else if (key == "sha256") {
+            a.sha256 = r.read_string();
+        } else if (key == "fnv1a_64") {
+            a.fnv1a_64 = r.read_string();
         } else if (key == "capabilities") {
             r.skip_ws();
             r.expect('[');
@@ -193,6 +205,86 @@ AssetEntry read_asset(f4::json::Reader& r) {
     return a;
 }
 
+// ── Legacy fingerprint-schema id derivation (Task 58) ────────────────────
+//
+// The Tranche 0a manifests (generate_manifest.py ≤ 0a) list entries as
+// {path, size_bytes, sha256, fnv1a_64} with NO id. The runtime derives ids
+// from paths so those manifests resolve without regeneration. The convention
+// is MIRRORED by scripts/generate_manifest.py (which now emits explicit
+// ids) — keep the two in sync:
+//
+//   Aircraft/<stem>.json        -> aircraft:<stem-lowercased>
+//   Classes/<name>.json         -> class:<name minus trailing .json>
+//   SimData/<stem>.json         -> simdata:<stem-lowercased>
+//   Theater/<t>/<file>          -> theater:<t>
+//   World/<stem>.world.json     -> campaign:<manifest save, else stem>
+//   Models/koreaobj/<N>.gltf    -> koreaobj:<N>
+//
+// Anything else yields an invalid id (entry stays listed but is not
+// addressable via @asset:).
+
+std::string tolower_ascii(std::string s) {
+    for (char& c : s) {
+        if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+    }
+    return s;
+}
+
+std::string stem_lower(const std::string& path) {
+    const auto slash = path.find_last_of('/');
+    std::string name = (slash == std::string::npos) ? path : path.substr(slash + 1);
+    const auto dot = name.find_last_of('.');
+    if (dot != std::string::npos) name = name.substr(0, dot);
+    return tolower_ascii(std::move(name));
+}
+
+AssetId derive_id_from_path(const std::string& path,
+                            const std::string& theater,
+                            const std::string& save) {
+    auto starts = [&path](const char* prefix) {
+        return path.rfind(prefix, 0) == 0;
+    };
+    if (starts("Aircraft/")) {
+        return {AssetFamily::aircraft, stem_lower(path)};
+    }
+    if (starts("Classes/")) {
+        // falcon4.ct.json -> class:falcon4.ct (strip only the final .json)
+        const auto slash = path.find_last_of('/');
+        std::string name = path.substr(slash + 1);
+        const auto dot = name.rfind(".json");
+        if (dot != std::string::npos) name = name.substr(0, dot);
+        return {AssetFamily::class_, tolower_ascii(std::move(name))};
+    }
+    if (starts("SimData/")) {
+        return {AssetFamily::simdata, stem_lower(path)};
+    }
+    if (starts("Theater/")) {
+        const auto t = theater.empty()
+            ? stem_lower(path.substr(std::string("Theater/").size()))
+            : tolower_ascii(theater);
+        // stem of "korea/terrain.json" is "korea/terrain" — take the first
+        // path component only when deriving from the path.
+        std::string tid = t;
+        const auto slash = tid.find('/');
+        if (slash != std::string::npos) tid = tid.substr(0, slash);
+        return {AssetFamily::theater, tid};
+    }
+    if (starts("World/")) {
+        const std::string stem = stem_lower(path);          // "korea.world"
+        std::string local = save.empty() ? stem : tolower_ascii(save);
+        // Strip a trailing ".world" when deriving from the stem.
+        if (save.empty()) {
+            const auto w = local.rfind(".world");
+            if (w != std::string::npos) local = local.substr(0, w);
+        }
+        return {AssetFamily::campaign, std::move(local)};
+    }
+    if (starts("Models/koreaobj/")) {
+        return {AssetFamily::koreaobj, stem_lower(path)};
+    }
+    return {};
+}
+
 } // namespace
 
 Manifest read_manifest(std::string_view json) {
@@ -208,6 +300,10 @@ Manifest read_manifest(std::string_view json) {
         r.expect(':');
         if (key == "data_dir") {
             m.data_dir = r.read_string();
+        } else if (key == "theater") {
+            m.theater = r.read_string();
+        } else if (key == "save") {
+            m.save = r.read_string();
         } else if (key == "excluded_dirs") {
             r.skip_ws();
             r.expect('[');
@@ -229,6 +325,14 @@ Manifest read_manifest(std::string_view json) {
         }
         r.skip_ws();
         (void)r.consume(',');
+    }
+
+    // Legacy fingerprint entries carry no id — derive one from the path so
+    // they become addressable. Explicit ids (new schema) are kept as-is.
+    for (auto& a : m.assets) {
+        if (!a.id.valid() && !a.path.empty()) {
+            a.id = derive_id_from_path(a.path, m.theater, m.save);
+        }
     }
 
     return m;
@@ -293,10 +397,12 @@ void write_source(f4::json::Writer& w, const AssetSource& s, const char* indent)
 void write_asset(f4::json::Writer& w, const AssetEntry& a, const char* indent) {
     w.raw(indent);
     w.raw("{\n");
-    w.raw(indent);
-    w.raw("  ");
-    w.string_key("id", a.id.to_string());
-    w.raw(",\n");
+    if (a.id.valid()) {
+        w.raw(indent);
+        w.raw("  ");
+        w.string_key("id", a.id.to_string());
+        w.raw(",\n");
+    }
     w.raw(indent);
     w.raw("  ");
     w.string_key("path", a.path);
@@ -304,6 +410,24 @@ void write_asset(f4::json::Writer& w, const AssetEntry& a, const char* indent) {
     w.raw(indent);
     w.raw("  ");
     w.number_key("format_version", a.format_version);
+    if (a.size_bytes.has_value()) {
+        w.raw(",\n");
+        w.raw(indent);
+        w.raw("  ");
+        w.number_key("size_bytes", static_cast<long long>(*a.size_bytes));
+    }
+    if (a.sha256.has_value()) {
+        w.raw(",\n");
+        w.raw(indent);
+        w.raw("  ");
+        w.string_key("sha256", *a.sha256);
+    }
+    if (a.fnv1a_64.has_value()) {
+        w.raw(",\n");
+        w.raw(indent);
+        w.raw("  ");
+        w.string_key("fnv1a_64", *a.fnv1a_64);
+    }
     if (!a.capabilities.empty()) {
         w.raw(",\n");
         w.raw(indent);
@@ -350,6 +474,14 @@ std::string write_manifest(const Manifest& m) {
     w.raw("  },\n");
     w.raw("  ");
     w.string_key("data_dir", m.data_dir);
+    if (!m.theater.empty()) {
+        w.raw(",\n  ");
+        w.string_key("theater", m.theater);
+    }
+    if (!m.save.empty()) {
+        w.raw(",\n  ");
+        w.string_key("save", m.save);
+    }
     if (!m.excluded_dirs.empty()) {
         w.raw(",\n  \"excluded_dirs\": [");
         for (std::size_t i = 0; i < m.excluded_dirs.size(); ++i) {

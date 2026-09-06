@@ -41,14 +41,10 @@
 #include <f4/renderer/layout_draw.hpp>
 #include <f4/renderer/scene_draw.hpp>            // draw_airfield_geometry
 
-// f4-models + f4-world-convert headers MUST come before raylib.h because
-// Raylib defines `PI` as a preprocessor macro that would otherwise collide
-// with any transitive `using PI` declaration. (The scenario-player uses
-// the same include-order pattern — see f4-scenario-player/src/renderer.cpp.)
-#include <f4/models/model_database.hpp>
-#include <f4/models/geometry.hpp>
-#include <f4/models/texture.hpp>
-#include <f4/world_convert/class_table.hpp>
+// Tranche 0d: f4-models / f4-world-convert are no longer linked — the
+// glTF models come from Data/Models/koreaobj (RuntimeModelCache) and the
+// class table from f4-world-types (JSON).
+#include <f4/assets/asset_root.hpp>
 #include <f4/install/installation.hpp>
 
 #include <imgui.h>
@@ -152,71 +148,51 @@ bool ViewerApp::Impl::ensure_models_3d_loaded() {
     if (models_3d_load_attempted) return models_3d_loaded;
     models_3d_load_attempted = true;
 
-    // Resolve KoreaObj.HDR + .LOD + .TEX + Falcon4.ct from the install.
-    if (!install.has_value()) {
-        models_3d_error = "No installation configured — set the install path to load feature models.";
-        return false;
+    // Tranche 0d: the model source is the glTF export tree
+    // (Data/Models/koreaobj — produced by `f4import models` +
+    // `f4import textures`), NOT the KoreaObj binary. Locate Data/ by
+    // (1) AssetRoot::discover() (walks up from the working directory),
+    // (2) the source-tree Data/ (compile-time F4_SOURCE_DIR).
+    std::filesystem::path data_dir;
+    if (auto root = f4::assets::AssetRoot::discover()) {
+        data_dir = root->data_dir();
     }
-    const auto& inst = *install;
-    if (inst.terrdata_dir().empty()) {
-        models_3d_error = "Installation has no terrdata/ — cannot locate KoreaObj files.";
-        return false;
+    if (data_dir.empty() || !std::filesystem::exists(data_dir)) {
+#ifdef F4_SOURCE_DIR
+        data_dir = std::filesystem::path(F4_SOURCE_DIR) / "Data";
+#endif
     }
-
-    // Locate KoreaObj.HDR/.LOD (or .DXH/.DXL) under the install root.
-    auto [hdr_path, lod_path] =
-        f4::models::ModelDatabase::find_koreaobj_files(inst.root());
-    if (hdr_path.empty() || lod_path.empty()) {
-        // Try terrdata/ root as fallback (some installs nest objects there).
-        const auto& td = inst.terrdata_dir();
-        auto [hdr2, lod2] = f4::models::ModelDatabase::find_koreaobj_files(td);
-        if (!hdr2.empty() && !lod2.empty()) {
-            hdr_path = hdr2;
-            lod_path = lod2;
-        }
-    }
-    if (hdr_path.empty() || lod_path.empty()) {
-        models_3d_error = "KoreaObj.HDR/.LOD not found under install root.";
+    if (!std::filesystem::exists(data_dir / "Models" / "koreaobj")) {
+        models_3d_error =
+            "glTF models not found under Data/Models/koreaobj — run "
+            "`f4import models --install <root> --data Data --all` and "
+            "`f4import textures --install <root> --data Data --all` "
+            "(or scripts/export-game-data) to export them.";
         return false;
     }
 
-    // Locate the .TEX file (try install root first, then terrdata/).
-    auto tex_path = f4::models::ModelDatabase::find_tex_file(inst.root());
-    if (tex_path.empty()) {
-        tex_path = f4::models::ModelDatabase::find_tex_file(inst.terrdata_dir());
-    }
-
-    // Load the class table (FALCON4.ct) — needed to map FeatureEntryState.index
-    // (entity_type) → vis_type[0] (KoreaObj model index).
-    const auto& ct_path = inst.class_table();
-    if (ct_path.empty()) {
-        models_3d_error = "FALCON4.ct not found — cannot resolve feature entity_type to model.";
+    // Load the runtime class table (JSON) — maps FeatureEntryState.index
+    // (entity_type) → vis_type[0] (KoreaObj model index). The committed
+    // Data/Classes/falcon4.ct.json ships with the repo; the binary .ct
+    // decoder is no longer linked (Tranche 0d).
+    std::filesystem::path ct_path = data_dir / "Classes" / "falcon4.ct.json";
+    if (!std::filesystem::exists(ct_path)) {
+        models_3d_error =
+            "Data/Classes/falcon4.ct.json not found — cannot resolve "
+            "feature entity_type to model.";
         return false;
     }
     try {
-        class_table_3d.load(ct_path);
+        class_table_3d.load_auto(ct_path.string());
     } catch (const std::exception& e) {
-        models_3d_error = std::string("Failed to load FALCON4.ct: ") + e.what();
+        models_3d_error = std::string("Failed to load class table JSON: ") + e.what();
         return false;
     }
 
-    // Load the model database.
-    model_db_3d.emplace();
-    auto err = model_db_3d->load(hdr_path, lod_path);
-    if (!err.empty()) {
-        model_db_3d.reset();
-        models_3d_error = "ModelDatabase::load failed: " + err;
-        return false;
-    }
-    if (!tex_path.empty()) {
-        auto tex_err = model_db_3d->load_tex(tex_path);
-        if (!tex_err.empty()) {
-            // Textures are optional — features will render with vertex
-            // colors only. Don't treat this as a hard failure.
-            // (Note: many FF installs don't ship KoreaObj.TEX at all —
-            //  the textures live in the theater's texture atlas instead.)
-        }
-    }
+    // Point the shared RuntimeModelCache at Data/. Meshes + PNG textures
+    // load lazily per vis_type inside the draw loop (GL context
+    // required — that's why this runs after InitWindow).
+    render_res_3d.set_model_data_dir(data_dir);
 
     models_3d_loaded = true;
     return true;
@@ -256,7 +232,7 @@ void ViewerApp::draw_ground_layout_3d() {
         impl_->ensure_models_3d_loaded();
     }
     const bool models_ready = impl_->models_3d_loaded &&
-                              impl_->model_db_3d.has_value() &&
+                              impl_->render_res_3d.model_cache.ready() &&
                               impl_->class_table_3d.loaded();
 
     // ── World-space positioning (Path B1 fix) ──────────────────────────
@@ -424,20 +400,17 @@ void ViewerApp::draw_ground_layout_3d() {
 
     // Model-loading status indicator (only shown when 3D Models is on
     // AND we have features). Helps the user understand why nothing is
-    // rendering as 3D — common cases: no install set, KoreaObj.HDR not
-    // found, FALCON4.ct missing.
+    // rendering as 3D — common cases: no glTF export in Data/, class
+    // table JSON missing.
     if (impl_->ground_layout_3d_show_models && has_features) {
-        if (!impl_->install.has_value()) {
-            ImGui::TextDisabled("[3D models: no install set — using footprints]");
-        } else if (!models_ready) {
+        if (!models_ready) {
             const char* err = impl_->models_3d_error.empty()
                 ? "(loading…)" : impl_->models_3d_error.c_str();
             ImGui::TextDisabled("[3D models: %s]", err);
         } else {
-            const int cached = static_cast<int>(impl_->render_res_3d.mesh_cache.size());
             const int textures = static_cast<int>(impl_->render_res_3d.texture_cache.map().size());
-            ImGui::TextDisabled("[3D models: %d cached, %d textures]",
-                                cached, textures);
+            ImGui::TextDisabled("[3D models: glTF cache ready, %d textures]",
+                                textures);
             // Per-frame diagnostic — shows where features are being
             // dropped in the pipeline. The numbers reset every frame so
             // they always reflect the CURRENT selection. If "drawn" is 0
@@ -741,7 +714,6 @@ void ViewerApp::draw_ground_layout_3d() {
                     f4::renderer::EntityRenderResources nres =
                         f4::renderer::make_entity_render_resources(
                             impl_->render_res_3d,
-                            &*impl_->model_db_3d,
                             &impl_->class_table_3d);
                     constexpr uint16_t VU_LAST_ENTITY_TYPE = 100;
                     for (const auto& nf : nfs->features) {
@@ -769,7 +741,6 @@ void ViewerApp::draw_ground_layout_3d() {
                 f4::renderer::EntityRenderResources res =
                     f4::renderer::make_entity_render_resources(
                         impl_->render_res_3d,
-                        &*impl_->model_db_3d,
                         &impl_->class_table_3d);
 
                 impl_->diag_3d_features_total =

@@ -60,11 +60,15 @@ namespace f4::renderer {
 
 class RenderResources;
 
+}  // namespace f4::renderer
+namespace f4::world_types { struct ClassTable; }
+namespace f4::renderer {
+
 // ---------------------------------------------------------------------------
 // EntityRenderResources
 // ---------------------------------------------------------------------------
-// Extends FeatureMeshResources (model_db, class_table, texture_cache,
-// lit_shader, mesh_cache, default_material, lighting) with entity-specific
+// Extends FeatureMeshResources (model_cache, class_table, texture_cache,
+// lit_shader, default_material, lighting) with entity-specific
 // render state and toggles.
 //
 // Inheritance: EntityRenderResources IS-A FeatureMeshResources, so it
@@ -75,10 +79,9 @@ class RenderResources;
 /// Bundle of resources needed to render entities. Built once and passed
 /// (by reference) to RenderEntity() for each entity.
 ///
-/// Lifetime: the caller owns all pointed-to objects (ModelDatabase,
-/// ClassTable, TextureCache, LitShader, default_material, EntityWorld).
-/// The mesh_cache is also caller-owned so the same cache can be reused
-/// across multiple RenderEntity() calls.
+/// Lifetime: the caller owns all pointed-to objects (RuntimeModelCache —
+/// typically RenderResources::model_cache — ClassTable, TextureCache,
+/// LitShader, default_material, EntityWorld).
 struct EntityRenderResources : FeatureMeshResources {
     /// Whether to render features (3D KoreaObj models) on objectives.
     /// When false, the FeatureSetComponent path is skipped entirely.
@@ -122,15 +125,14 @@ struct EntityRenderResources : FeatureMeshResources {
 };
 
 /// Build an EntityRenderResources bundle from a RenderResources instance
-/// (shader/texture/mesh caches, default material, lighting) plus the
-/// feature-path database + class table. This replaces the per-viewer
-/// pointer wiring that each app used to duplicate. If the class table or
-/// model db is null (or the default material can't be created), the
+/// (shader/texture/model caches, default material, lighting) plus the
+/// feature-path class table. This replaces the per-viewer
+/// pointer wiring that each app used to duplicate. If the class table
+/// is null (or the default material can't be created), the
 /// affected paths degrade to no-ops rather than crashing.
 EntityRenderResources make_entity_render_resources(
     RenderResources& res,
-    f4::models::ModelDatabase* db,
-    f4::world_convert::ClassTable* ct);
+    f4::world_types::ClassTable* ct);
 
 // ---------------------------------------------------------------------------
 // RenderEntity

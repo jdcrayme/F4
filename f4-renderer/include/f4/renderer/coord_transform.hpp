@@ -32,6 +32,32 @@ inline f4::math::Vec3f model_vertex_to_raylib(float x, float y, float z) noexcep
     return f4::math::Vec3f{y, -z, -x};
 }
 
+/// glTF model-space vertex → Raylib RH Y-up coordinates.
+///
+/// The glTF exporter (f4-import/src/gltf_emitter.cpp `to_gltf`) bakes
+/// Falcon model space (feet, x=right, y=up, z=forward) into glTF
+/// (meters, +Y up): (x, y, z)_falcon → (y, z, −x) × 0.3048.
+/// Composing that with model_vertex_to_raylib() gives the runtime-side
+/// inverse: (x, y, z)_gltf → (x, −y, z) × (1/0.3048). The handedness
+/// flip (det −1) mirrors triangle winding — the draw paths disable
+/// backface culling for exactly this reason (FreeFalcon BSP models have
+/// inconsistent winding regardless).
+inline constexpr float kMetersToFeet = 3.28083989501312f;  // 1/0.3048
+
+inline f4::math::Vec3f gltf_vertex_to_raylib(float x, float y, float z) noexcept {
+    return f4::math::Vec3f{x * kMetersToFeet, -y * kMetersToFeet,
+                            z * kMetersToFeet};
+}
+
+/// glTF normal → Raylib RH Y-up. Same basis change as
+/// gltf_vertex_to_raylib WITHOUT the scale (normals are directions; the
+/// uniform scale cancels under normalization). The mirror axis makes
+/// this the correct normal transform (diag(1,−1,1) is its own
+/// inverse-transpose).
+inline f4::math::Vec3f gltf_normal_to_raylib(float x, float y, float z) noexcept {
+    return f4::math::Vec3f{x, -y, z};
+}
+
 /// Convert an ENU position (feet) to RH Y-up coordinates.
 ///
 /// ENU: x=east, y=north, z=up

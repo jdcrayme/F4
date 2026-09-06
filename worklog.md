@@ -9140,3 +9140,282 @@ Stage Summary (Task 56 — f4-models + f4-lzss cut from f4-simulation):
 - 2341/2348 tests pass (7 pre-existing, zero regressions).
 - The GUI app changes (scenario-player) are mechanical but GL-unverified.
   The user's GL env will confirm compilation + visual correctness.
+
+---
+Task ID: 57 (AAR redesign reconciliation — verification + artifact cleanup, complete)
+Agent: main (Super Z)
+Task: The AAR redesign change set (AAR_REDESIGN_PLAN.md — real-aircraft tanker
++ 8-state USAF RefuelModule: NoTanker → Rendezvous → PreContact →
+ClearedContact → Hold → BackingOut → Departing → Done, ATP-56 duplex ATC
+messages) was applied to the tree by hand from f4-aar-redesign.patch but was
+never verified or logged, and the repo carried 5 stale .rej patch artifacts
+(f4-ai/src/navigation_module.cpp.rej, f4-flight-model/src/fcs.cpp.rej,
+f4-flight-model/src/flight_model.cpp.rej,
+f4-flight-model/include/f4/flight/{fcs.hpp,aircraft_state.hpp}.rej). This
+task reconciles the tree: verify every rejected hunk is actually present,
+build + run the AAR suite + the full test suite, clean the artifacts, and
+log the redesign as verified.
+
+Work Log:
+- RECON (.rej audit): read all 5 .rej files and diffed their hunks against
+  the current sources. EVERY rejected hunk is present in the tree in a
+  NEWER form than the patch: navigation_module.cpp has
+  TERRAIN_CLEARANCE_FLOOR_MSL = 3000.0 (Tranche 43) + the is_last_wp
+  non-floor branch (Tranche 38); fcs.cpp has the pitch_rate + alt_agl_ft
+  parameters (Tranches 42/46), the speed-scheduled q-damper
+  (effective_gain = pitchRateDampGain * min(2.0, qbar_ratio), gated on
+  gearPos < 0.5 && alt_agl > 200.0 — superseding the patch's plain
+  gain*q form); flight_model.cpp has fc.pitch_rate = state_.kin.q wiring +
+  the Tranche 46 gain (min(60.0, 40.0*sqrt(weight_ratio)), not the patch's
+  17.0*sqrt(weight_ratio)); fcs.hpp declares pitch_rate/alt_agl_ft +
+  runPitch's new signature; aircraft_state.hpp has pitchRateDampGain.
+  Conclusion: the .rej files are stale artifacts of a superseded patch
+  application, not missing work. All 5 deleted.
+- AAR REDESIGN STATE CONFIRMED IN TREE: refuel_module.hpp implements the
+  8-state USAF SM + RefuelEvent set (TankerAssigned, AtPrecontactPos,
+  ClearToContact, InContactEnvelope, ContactLost,
+  ReceiverRequestsDisconnect, DisconnectApproved); brain_component.hpp
+  documents the StubATC stopgap for the tanker-side protocol (dedicated
+  TankerModule remains a follow-up); Data/Aircraft/kc10.json present;
+  ScriptedTanker/ScenarioTanker deleted per plan §2.1.
+- BUILD: full headless configure (renderer/viewer/scenario-player OFF) +
+  build on GCC 14.2 / cmake 4.4.3 — clean, zero warnings-as-errors.
+- AAR TESTS: test_refuel_module 8/8 PASS (RendezvousToPreContact,
+  PreContactThroughClearedToHold, HoldAutoDisconnects, DepartingToDone,
+  DeparturePointIs1000ftBelow, ...). test_aar_e2e
+  FullUsafProcedureWithRealTanker PASS (3565 ms): reaches Hold at 61.0 s;
+  saw_departing=0, saw_done=0 — Departing/Done remain the documented open
+  tuning item (hold duration + 1000-ft descent), asserted tolerantly per
+  the plan.
+- TEST SUITE: 2341/2348 PASS (99.7%). The 7 failures are EXACTLY the
+  pre-existing set from Task 56 (CmpEncoder.LzssRoundTripOnRealPayload,
+  CampaignBridge.DerivesDepartureAltitude,
+  CampaignBridge.SynthesizesForLayoutlessAirbaseObjective,
+  DigiMission.FullLoopTaxiTakeoffNavigateApproachLandParks,
+  DigiMission.FullLoopTrafficPattern,
+  InterceptConvergence.OnGlideslopeFromCenterlineTracksBeam,
+  FcsTracePipelineTest.LandingOnlyProducesTrace). Zero regressions; the
+  AAR-redesign tree state is now a verified baseline.
+
+Stage Summary (Task 57 — AAR redesign VERIFIED as the tree baseline):
+- 5 stale .rej artifacts deleted after audit (every hunk present in newer
+  form — superseded by Tranches 38/42/43/46).
+- AAR redesign verified: 8/8 refuel unit tests + AAR E2E PASS; the
+  8-state USAF procedure works through Hold (30 s-class contact hold per
+  Tasks 50-51) with Departing/Done tuning still open.
+- 2341/2348 full-suite PASS, same 7 pre-existing flight-model failures as
+  Task 56 — zero regressions.
+- Open AAR items (unchanged): Departing/Done reach in E2E, 95th-pct
+  envelope tightening (along 63 ft / vert 137 ft vs <30/<20 targets),
+  tanker-side TankerModule (StubATC stopgap), worklog/CHANGES closure of
+  the redesign (this entry + the CHANGES.md section).
+
+---
+Task ID: 58 (Tranche 0e.3 — @asset: resolver with manifest hash verification, complete)
+Agent: main (Super Z)
+Task: NO_BINARY_RUNTIME_PLAN Tranche 0e's headless-verifiable core: make
+"@asset:<id>" references actually resolve at runtime with manifest hash
+verification (spec §8 + P7). Recon found f4-assets ~80% built (AssetId,
+manifest v1 read/write, AssetRoot discovery, capability check) but with
+stale unreachable (no hash verification at all) and the committed
+Data/manifest.json in the legacy fingerprint schema (path+size+sha256+
+fnv1a_64, NO id) which the reader parsed into unusable entries; and no
+consumer wired — @asset: strings flowed out of the scenario loader
+verbatim into filesystem paths and only worked by accident.
+
+Work Log:
+- RECON (subagent): full map of ASSET_PIPELINE_SPEC §4/§5/§7/§8 vs the
+  tree. f4-assets/f4-import/f4-world consumers inventoried; 17 scenario
+  *.json.in templates still bake configure-time absolutes (0e.2, GL-side
+  consumers); the committed manifest is the legacy fingerprint schema
+  (35 entries, missing kc10.json); f4-json Reader/Writer is the JSON
+  convention (nlohmann confined to f4-convert/f4-data).
+- HASH MODULE (new f4-assets/src/hash.{hpp,cpp}): zero-dep FNV-1a 64 +
+  SHA-256 (FIPS 180-4, standard block construction with the two-block
+  padding path). Two bugs found by the vectors and fixed during TDD:
+  append_hex wrote at index 0 instead of the append position (every
+  digest after the first word was garbage), and the padding put 0x80 at
+  tail[0] and never copied the remaining bytes (empty input accidentally
+  passed — the classic reason you pin FIPS vectors). Final state: all
+  published vectors pass AND the committed Data/ fingerprints reproduce
+  (Python hashlib ↔ C++ contract pinned by test_hash on every run).
+- MANIFEST SCHEMA: AssetEntry gains optional size_bytes/sha256/fnv1a_64
+  fingerprints + has_fingerprints(); Manifest gains theater/save
+  provenance. read_asset accepts the fingerprint fields and an EMPTY id
+  (unaddressable entry — kept, not thrown); write_asset omits invalid
+  ids. Legacy no-id entries derive ids from paths after parse
+  (derive_id_from_path): Aircraft/<stem>.json → aircraft:<stem-lower>,
+  Classes/falcon4.ct.json → class:falcon4.ct, SimData/<stem>.json →
+  simdata:<stem>, Theater/<t>/* → theater:<t>, World/*.world.json →
+  campaign:<manifest save>, Models/koreaobj/<N>.gltf → koreaobj:<N>.
+  The convention is MIRRORED by the upgraded scripts/generate_manifest.py
+  (explicit ids now emitted; warning when an entry matches no
+  convention). New simdata AssetFamily (kFamilyNames 7→8 entries).
+- Data/manifest.json REGENERATED with the upgraded generator (provenance
+  preserved from the old manifest): 36/36 assets addressable — also
+  picks up Aircraft/kc10.json, which the AAR redesign added AFTER the
+  old manifest was generated (the committed manifest was stale).
+- ASSET ROOT: check() now hash-verifies — size mismatch is the fast
+  stale path, fnv1a_64/sha256 mismatch reports stale with pointed detail
+  ("manifest says X, disk hashes to Y"); no fingerprints → vacuous ok.
+  verify_entry_fingerprints() is the single-entry form. resolve_ref()
+  is the consumer-side resolver: non-refs pass through, refs resolve
+  through the manifest, dangling id / missing file / invalid root return
+  a human-readable error. Umbrella header f4_assets.hpp gains hash.hpp.
+- f4-simulation WIRING (the consumer half): CMakeLists links f4-assets.
+  Scenario gains an optional data_dir field (parse + validate unchanged
+  otherwise). load_scenario() builds the root (data_dir field wins —
+  non-existent dir is a hard error; else AssetRoot::discover()) and
+  routes every @asset: path field (terrain/world/class_table/aii/
+  models_*/theater_dir/brain_data/formation_library/airbase_source/
+  per-aircraft aircraft_config_path) through resolve_maybe_asset():
+  refs resolve via the manifest and FAIL LOUD with field name + id + the
+  resolver's reason on any dangling reference; with NO discoverable root
+  refs are preserved verbatim (the pre-Task-58 behavior, so bare
+  checkouts keep working). record_path/fcs_trace_path stay
+  build-dir-relative (outputs, not assets).
+- TESTS (+22, all pass): test_hash (7: FNV vectors incl. foobar;
+  FIPS 180-4 vectors incl. the 1M-'a' two-block case; block-boundary
+  inputs; file helpers; the committed-manifest reproduction across all
+  36 entries — requires F4_SOURCE_DIR, skips bare). test_manifest (3
+  new: legacy derivation incl. uppercase stems + unmapped entry;
+  fingerprint round-trip; explicit-id precedence). test_asset_root (7
+  new: stale on hash mismatch, stale on size mismatch, ok when
+  fingerprints match, ok without fingerprints, resolve_ref pass-through
+  / id / dangling / missing-file). test_asset_id (1: simdata family).
+  test_scenario_loader (3 new: file-form resolves all ref kinds through
+  a fixture Data dir with a legacy-schema manifest; dangling id fails
+  loud with the field name + id; non-existent data_dir rejects).
+  test_asset_root's raw-string JSON concatenation needed the R"json(...)
+  json" delimiter (the JSON's `)"` closed the default raw string —
+  twice) and one correct std::string( paren placement.
+- FULL SUITE: 2370 run / 2373 total (22 new tests), 7 failures = EXACTLY
+  the pre-existing Task 56 set (CmpEncoder.LzssRoundTripOnRealPayload,
+  CampaignBridge.DerivesDepartureAltitude,
+  CampaignBridge.SynthesizesForLayoutlessAirbaseObjective,
+  DigiMission.FullLoopTaxi..., DigiMission.FullLoopTrafficPattern,
+  InterceptConvergence.OnGlideslope..., FcsTracePipeline.LandingOnly).
+  Zero regressions.
+
+Stage Summary (Task 58 — Tranche 0e.3 LANDED: @asset: resolves, stale detects):
+- f4-assets: hash module (FNV-1a 64 + SHA-256), fingerprint fields,
+  legacy id derivation, simdata family, hash-verifying check(),
+  resolve_ref() — 58 tests green (22 new).
+- f4-simulation: scenario-level @asset: resolution through the Data/
+  manifest with fail-loud semantics; optional data_dir scenario field.
+- Data/manifest.json regenerated: 36/36 assets addressable (kc10.json
+  gap closed); generator emits explicit ids (C++ derivation kept as the
+  legacy fallback — conventions cross-referenced in both sources).
+- 2370 tests, same 7 pre-existing failures, zero regressions.
+- Remaining in Tranche 0e: 0e.1 (full export incl. glTF+PNG — needs a
+  game install; the manifest step is already upgraded) and 0e.2 (the 17
+  scenario *.json.in templates — GL-side consumers, deferred with the
+  renderer half per RENDERER_GLTF_REWIRE_PLAN.md).
+
+---
+
+Task ID: 59 (F4 repo — Tranche 0d renderer half: runtime glTF rewire, complete)
+Agent: main (Super Z)
+Task: RENDERER_GLTF_REWIRE_PLAN.md execution — cut f4-models /
+f4-world-convert / f4-terrain-convert / f4-lzss from f4-renderer,
+f4-world-viewer, f4-scenario-player; make the 0b boundary verifier pass
+with every target enabled; delete temp/KoreaObj.
+
+Work Log:
+- Built a compile-only X11/GL rig in the sandbox (no root): apt-get
+  download + dpkg -x of libxrandr/xcursor/xinerama/xi/xfixes/xrender/gl
+  dev packages into /home/z/f4-gl-shim, .so symlinks to the runtime
+  libs, FindX11 cache seeds at configure. build-gl (Ninja) then compiled
+  and linked all 800+ targets incl. raylib, f4-renderer, both viewers,
+  the scenario player — the "needs GL environment" blocker for compile
+  verification is gone.
+- f4-gltf: materials/textures/images parsing + primitives[].material +
+  read_color_rgba() (FLOAT/UBYTE-norm/USHORT-norm VEC4) +
+  material_basecolor_uri(). 2 new tests.
+- f4-renderer: RuntimeModelCache (glTF per vis_type from
+  Data/Models/koreaobj, pure-CPU extract_gltf_lod_geometry, LOD-0 mesh
+  upload + PNG texture upload); mesh_builder rewritten around glTF
+  (gltf_vertex/normal_to_raylib = (x,-y,z)/0.3048 — inverse of the
+  exporter bake); TextureCache upload_png/insert; FeatureMeshResources/
+  SceneDescription/draw_entity_meshes/make_entity_render_resources
+  signature updates; class table = f4-world-types; CMake link cut
+  (f4-models, f4-world-convert OUT; f4-gltf, f4-world-types IN).
+  test_mesh_builder rewritten for glTF extraction (15 tests); renderer
+  GPU tests re-pointed at the committed clean_data glTF fixture + JSON
+  class table.
+- f4-world-viewer: model_db_3d → RenderResources::model_cache; class
+  table via load_auto(falcon4.ct.json); campaign_names.hpp (5 name
+  helpers) added to f4-world-types; file_ops/install_flow binary
+  imports → cam2json/terrain2json subprocesses (paths via
+  $<TARGET_FILE:...> compile defs); hex .cam manifest decode made
+  self-contained; class-table browser on JSON + shared glTF preview
+  (joined OCD/UCD/VCD/WCD/FCD/SSD panels retired — data lives in the
+  converted artifacts); CMake link cut (3 parser libs OUT).
+- f4-scenario-player: transitional ModelDatabase deleted; models via
+  render_res.model_cache (data_dir / AssetRoot::discover).
+- f4-simulation: vestigial Scenario::models_hdr/lod/tex_path fields
+  removed (struct, parse, @asset: resolve, campaign_qc echo + --models
+  flag, 17 templates, 3 test files).
+- f4-models-viewer: legacy ModelGeometry conversion + TEX decode moved
+  into the tool (legacy_mesh_builder.{hpp,cpp}) using the new generic
+  TextureCache::insert() seam — tool stays importer-side by design.
+- temp/KoreaObj.{HDR,LOD,TEX} deleted (38 MB); .gitignore exception
+  removed; stale boundary/scenario comments updated; docs updated
+  (NO_BINARY_RUNTIME_PLAN 0d → COMPLETE, RENDERER_GLTF_REWIRE_PLAN →
+  LANDED with deviations), CHANGES.md entry.
+- Verification: build-gl full build clean; boundary verifier PASSES
+  with F4_ENFORCE_BOUNDARY=ON and every GL target enabled; headless
+  rebuild + ctest: 2371 tests, the same 7 pre-existing
+  flight-model/LZSS failures — zero regressions.
+
+Stage Summary (Task 59 — Tranche 0d COMPLETE; the boundary is a contract):
+- Runtime link closure contains zero legacy binary parsers with every
+  target enabled; -DF4_ENFORCE_BOUNDARY=ON is the CI gate.
+- The runtime consumes glTF + PNG + JSON only. 0e.1 (user export of
+  Data/Models/koreaobj via f4import + visual QA in the viewers/player)
+  is the remaining user-environment step; 0e.2 @asset: template
+  migration still deferred.
+- Next per recommended order: Task 60 — WorldState→JSON emitter +
+  save-loop closure (head of the campaign queue).
+
+---
+Task ID: 59-fix (F4 repo — user-environment LNK2019 diagnosis: f4-world-viewer make_entity_render_resources unresolved)
+Agent: main (Super Z)
+Task: Diagnose user-reported MSVC link failure — f4-world-viewer LNK2019/LNK1120: unresolved
+`f4::renderer::make_entity_render_resources(RenderResources&, f4::world_types::ClassTable*)`
+referenced from canvas.obj / ground_layout_3d.obj / entity_model_3d.obj inside f4_world_viewer.lib.
+
+Work Log:
+- Decoded the mangled name: the reference is the NEW 2-arg Task 59 form
+  (RenderResources&, world_types::ClassTable*) — so the user's viewer TUs compiled
+  against Task 59 headers (canvas.cpp includes f4/renderer/entity_render.hpp).
+- Signature history: e69fc79/2270037 declared/defined the 3-arg form
+  (RenderResources&, f4::models::ModelDatabase*, f4::world_convert::ClassTable*);
+  c81ce50 (Task 59) changed header + entity_render.cpp to the 2-arg form
+  (eres.model_cache = &res.model_cache) in a 6-line diff to entity_render.cpp.
+- Only ONE symbol unresolved => f4-renderer.lib IS present and mostly current
+  (RenderEntity/entity_icon_info/RenderEntityIcon resolve from the same TU), but its
+  entity_render.obj is the pre-Task-59 (3-arg) object. Conclusion: stale f4-renderer
+  build product (up-to-date check fooled after file sync) — not a repo bug.
+- Verified HEAD self-consistency in the sandbox: build-gl full GL build (X11 shim rig
+  from Task 59) — `ninja f4-world-viewer` links clean; libf4-renderer.a DEFINES the
+  exact Itanium-mangled 2-arg symbol
+  _ZN2f48renderer28make_entity_render_resourcesERNS0_15RenderResourcesEPNS_11world_types10ClassTableE;
+  libf4_world_viewer.a references exactly that symbol; exe produced (14 MB).
+- Repo git state: main at c81ce50, clean tree, ahead of origin/main by 2 (2270037,
+  c81ce50 unpushed; no credential helper in sandbox). Generated
+  task59-renderer-gltf-rewire.patch (format-patch of c81ce50, 330 KB, temp/KoreaObj.*
+  binary deletions excluded to keep it text-only) as the authoritative sync artifact.
+
+Stage Summary:
+- Not a source bug: a clean build of c81ce50 links f4-world-viewer — proven end-to-end
+  in build-gl. The user's f4-renderer.lib contains a pre-Task-59 entity_render.obj
+  (old 3-arg make_entity_render_resources) while their viewer objects are Task-59.
+- User remediation: sync tree to Task 59 (verify f4-renderer/src/entity_render.cpp has
+  the 2-arg definition with `eres.model_cache = &res.model_cache;` and no
+  ModelDatabase* parameter), then REBUILD f4-renderer (Rebuild Solution or delete
+  Build/f4-renderer — a plain incremental Build may keep skipping it), then build
+  f4-world-viewer. Once this lands, the Tranche 0b boundary warnings also disappear
+  (verify_boundary passes with F4_ENFORCE_BOUNDARY=ON at this commit).
+- task59-renderer-gltf-rewire.patch placed in repo root; temp/KoreaObj.* deletion is
+  NOT in the patch — delete temp/ manually (or keep; it only affects disk space).

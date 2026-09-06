@@ -10,7 +10,7 @@
 #include "viewer_state.hpp"
 
 #include <f4/terrain/terrain_data.hpp>
-#include <f4/world_convert/objective_decoder.hpp>  // objective_type_name()
+#include <f4/world_types/campaign_names.hpp>      // objective_type_name()
 #include <f4/renderer/entity_render.hpp>  // EntityRenderResources, make_entity_render_resources
 #include <f4/ai/brain_component.hpp>      // V-CAMP: MissionPlan routes
 #include <f4/flight/flight_model_component.hpp>  // V-CAMP: airborne state
@@ -515,7 +515,7 @@ void ViewerApp::draw_canvas() {
                 } else if (!ot->class_name.empty()) {
                     label = ot->class_name;
                 } else {
-                    label = f4::world_convert::objective_type_name(
+                    label = f4::world_types::objective_type_name(
                         static_cast<int16_t>(impl_->obj_type_from_pb(pb)));
                 }
                 if (!label.empty() && label != "Unknown") {
@@ -928,7 +928,7 @@ void ViewerApp::draw_canvas() {
             impl_->ensure_models_3d_loaded();
         }
         const bool models_ready = impl_->models_3d_loaded &&
-                                  impl_->model_db_3d.has_value() &&
+                                  impl_->render_res_3d.model_cache.ready() &&
                                   impl_->class_table_3d.loaded();
         if (models_ready &&
             impl_->render_res_3d.ensure_default_material()) {
@@ -962,7 +962,6 @@ void ViewerApp::draw_canvas() {
                 f4::renderer::EntityRenderResources res =
                     f4::renderer::make_entity_render_resources(
                         impl_->render_res_3d,
-                        &*impl_->model_db_3d,
                         &impl_->class_table_3d);
                 res.show_ground_layout = false;
 
@@ -1412,7 +1411,7 @@ void ViewerApp::draw_canvas() {
             impl_->ensure_models_3d_loaded();
         }
         const bool models_ready = impl_->models_3d_loaded &&
-                                  impl_->model_db_3d.has_value() &&
+                                  impl_->render_res_3d.model_cache.ready() &&
                                   impl_->class_table_3d.loaded();
 
         constexpr float FT_PER_GRID = 1024.0f;
@@ -1446,7 +1445,6 @@ void ViewerApp::draw_canvas() {
                 f4::renderer::EntityRenderResources res =
                     f4::renderer::make_entity_render_resources(
                         impl_->render_res_3d,
-                        &*impl_->model_db_3d,
                         &impl_->class_table_3d);
                 // Don't draw the GroundLayoutComponent airfield geometry
                 // here — that's the selected-objective overlay above.
@@ -1657,7 +1655,7 @@ void ViewerApp::draw_canvas() {
                     if (!ot->class_name.empty()) {
                         sel_name = ot->class_name;
                     } else {
-                        sel_name = f4::world_convert::objective_type_name(
+                        sel_name = f4::world_types::objective_type_name(
                             static_cast<int16_t>(impl_->obj_type_from_pb(pb)));
                     }
                     snprintf(buf, sizeof(buf), "Sel: [Obj] %s  owner=%u",
@@ -1728,7 +1726,7 @@ void ViewerApp::draw_canvas() {
                 if (ot && !ot->class_name.empty()) {
                     hover_name = ot->class_name;
                 } else {
-                    hover_name = f4::world_convert::objective_type_name(
+                    hover_name = f4::world_types::objective_type_name(
                         static_cast<int16_t>(impl_->obj_type_from_pb(pb)));
                 }
                 snprintf(buf, sizeof(buf), "Hover: [Obj] %s", hover_name.c_str());

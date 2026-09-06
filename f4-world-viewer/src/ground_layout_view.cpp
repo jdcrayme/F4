@@ -14,7 +14,7 @@
 
 #include "viewer_state.hpp"
 #include <f4/viewer/enum_text.hpp>
-#include <f4/world_convert/theater_data.hpp>
+#include <f4/world_types/campaign_names.hpp>
 #include <f4/math/constants.hpp>
 
 #include <imgui.h>
@@ -291,7 +291,7 @@ void ViewerApp::draw_ground_layout_view() {
             dl->AddCircle(ImVec2(p.x + 8, sy), lc.marker_radius, lc.stroke, 12, 1.0f);
             ImGui::Dummy(ImVec2(20, ImGui::GetTextLineHeight()));
             ImGui::SameLine();
-            ImGui::TextUnformatted(f4::world_convert::point_list_type_name(e.type));
+            ImGui::TextUnformatted(f4::world_types::point_list_type_name(e.type));
             ImGui::SameLine();
             ImGui::TextDisabled("(type %d)", e.type);
         }
@@ -325,7 +325,7 @@ void ViewerApp::draw_ground_layout_view() {
             const auto& layout = gl->layouts[i];
             char type_buf[64];
             std::snprintf(type_buf, sizeof(type_buf), "%d (%s)",
-                          layout.type, f4::world_convert::point_list_type_name(layout.type));
+                          layout.type, f4::world_types::point_list_type_name(layout.type));
             ImGui::Text("%-4zu %-26s %-4d %-7d %-8.0f %s",
                         i, type_buf,
                         static_cast<int>(layout.points.size()),

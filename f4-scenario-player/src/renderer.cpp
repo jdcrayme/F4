@@ -28,7 +28,6 @@
 #include <f4/weapons/gun_component.hpp>    // GunComponent (tracer streaks)
 #include <f4/flight/flight_model_component.hpp>
 #include <f4/flight/angle.hpp>
-#include <f4/models/model_database.hpp>
 #include <f4/renderer/draw_3d.hpp>
 #include <f4/renderer/layout_draw.hpp>
 #include <f4/renderer/scene_draw.hpp>
@@ -152,18 +151,18 @@ void PlayerApp::Impl::build_aircraft_meshes() {
         return;
     }
 
-    const int parent_index = vis->vis_type;
-    if (model_db.valid()) {
-        render_res.build_mesh_for_model(model_db, parent_index);
-    }
+    render_res.build_mesh_for_model(vis->vis_type);
 
     meshes_built = true;
-    auto it = render_res.mesh_cache.find(parent_index);
-    if (it != render_res.mesh_cache.end()) {
+    const auto* model = render_res.model_cache.lookup(vis->vis_type);
+    if (model && !model->lod0_meshes.empty()) {
         int n_textured = 0;
-        for (const auto& me : it->second.meshes) if (me.tex_id >= 0) ++n_textured;
-        status_msg = "F-16 loaded: " + std::to_string(it->second.meshes.size()) +
-                     " meshes, " + std::to_string(n_textured) + " textured";
+        for (const auto& me : model->lod0_meshes) if (me.tex_id >= 0) ++n_textured;
+        status_msg = "Aircraft loaded: " + std::to_string(model->lod0_meshes.size()) +
+                     " meshes, " + std::to_string(n_textured) + " textured (glTF)";
+    } else if (render_res.model_cache.ready()) {
+        status_msg = "Aircraft vis_type " + std::to_string(vis->vis_type) +
+                     " has no glTF export in Data/Models/koreaobj";
     }
 }
 
@@ -306,10 +305,6 @@ void PlayerApp::Impl::draw_scene() {
                 return std::find(aircraft_ids.begin(), aircraft_ids.end(), id)
                     != aircraft_ids.end();
             };
-
-        // Tranche 0d: the scenario-player owns its own ModelDatabase
-        // (transitional). vis_type IS the parent_index (the cache key).
-        scene.model_db = &model_db;
 
         for (const auto eid : entities) {
             auto h = f4::entities::EntityHandle(eid, &sim->world());

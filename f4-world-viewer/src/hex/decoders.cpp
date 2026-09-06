@@ -3,8 +3,7 @@
 #include <f4/viewer/decoders.hpp>
 
 #include <f4/viewer/enum_text.hpp>   // domain_name, vu_class_name, data_type_name
-#include <f4/world_convert/cam_archive.hpp>
-#include <f4/world_convert/class_table.hpp>   // unit_subtype_name, DOMAIN_*
+#include <f4/world_types/class_table.hpp>     // unit_subtype_name, DOMAIN_*
 
 #include "hex_utils.hpp"
 
@@ -44,52 +43,71 @@ std::vector<Annotation> decode_cam_manifest(const HexModel& m) {
     std::vector<Annotation> out;
     if (!m.loaded()) return out;
 
-    // Delegate to f4-world-convert's CamArchive for the actual parsing.
-    // We catch any exception — the decoder must be permissive.
-    f4::world_convert::CamArchive cam;
-    try {
-        cam.load(m.path());
-    } catch (const std::exception&) {
-        // Not a valid .cam — fall back to generic.
-        return decode_generic(m);
-    }
+    // Tranche 0d: the manifest is parsed directly here — the .cam
+    // container directory is three fields (see cam_archive.hpp's format
+    // comment) and the hex inspector must not link f4-world-convert (P2
+    // boundary). Sub-file data extraction / LZSS stays in the importer
+    // library; the inspector only annotates byte ranges.
+    //
+    // Any malformed structure falls back to the generic decoder — the
+    // inspector must be permissive.
+    auto fail = [&]() { return decode_generic(m); };
 
-    // Annotate the manifest offset (first 4 bytes).
     const uint32_t manifest_off = static_cast<uint32_t>(m.read_le(0, 4));
-    out.push_back({
-        {0, 4},
-        "manifest_offset",
-        std::to_string(manifest_off),
-        "Byte offset of the sub-file directory within this .cam file.",
-        "header"
-    });
+    if (manifest_off == 0 || manifest_off + 4 > m.size()) return fail();
+    const int32_t num = static_cast<int32_t>(m.read_le(manifest_off, 4));
+    if (num < 0 || num > 4096) return fail();
 
-    // Annotate each sub-file's byte range.
-    for (const auto& sf : cam.subfiles()) {
+    std::size_t p = manifest_off + 4;
+    std::size_t count = 0;
+    while (count < static_cast<std::size_t>(num)) {
+        if (p + 1 > m.size()) return fail();
+        const uint8_t name_len = m.byte_at(p++);
+        if (name_len == 0 || p + name_len + 8 > m.size()) return fail();
+        std::string name;
+        name.reserve(name_len);
+        for (int i = 0; i < name_len; ++i) {
+            name.push_back(static_cast<char>(m.byte_at(p++)));
+        }
+        if (p + 8 > m.size()) return fail();
+        const uint32_t off = static_cast<uint32_t>(m.read_le(p, 4));
+        p += 4;
+        const uint32_t size = static_cast<uint32_t>(m.read_le(p, 4));
+        p += 4;
+        if (off > m.size() || off + size > m.size()) return fail();
+
+        // Extension without the dot (mirrors CamArchive SubFile::ext()).
+        const auto dot = name.find_last_of('.');
+        const std::string ext =
+            (dot == std::string::npos) ? "" : name.substr(dot + 1);
+
         Annotation a;
-        a.range = {static_cast<std::size_t>(sf.offset),
-                   static_cast<std::size_t>(sf.size)};
-        a.label = "subfile: " + sf.name;
+        a.range = {static_cast<std::size_t>(off), static_cast<std::size_t>(size)};
+        a.label = "subfile: " + name;
         std::ostringstream ss;
-        ss << sf.size << " bytes";
-        if (sf.data.size() >= 4) {
-            ss << "  magic=" << hex_byte(sf.data[0]) << hex_byte(sf.data[1])
-               << hex_byte(sf.data[2]) << hex_byte(sf.data[3]);
+        ss << size << " bytes";
+        if (size >= 4) {
+            ss << "  magic=" << hex_byte(m.byte_at(off))
+               << hex_byte(m.byte_at(off + 1))
+               << hex_byte(m.byte_at(off + 2))
+               << hex_byte(m.byte_at(off + 3));
         }
         a.value = ss.str();
-        a.description = "Sub-file '" + sf.name + "' inside the .cam container. "
-                        "Extension '." + sf.ext() + "' identifies its type.";
+        a.description = "Sub-file '" + name + "' inside the .cam container. "
+                        "Extension '." + ext + "' identifies its type.";
         a.category = "field";
         out.push_back(std::move(a));
+        ++count;
     }
 
     // Annotate the manifest directory itself.
     Annotation manifest;
     manifest.range = {manifest_off, m.size() - manifest_off};
     manifest.label = "manifest_directory";
-    manifest.value = std::to_string(cam.subfiles().size()) + " sub-files";
+    manifest.value = std::to_string(count) + " sub-files";
     manifest.description = "Trailing directory listing every sub-file's name, "
-                           "offset, and size. Read by CamArchive::load().";
+                           "offset, and size (uint8 name_len, char[name_len] "
+                           "name, int32 offset, int32 size per entry).";
     manifest.category = "header";
     out.push_back(std::move(manifest));
 
@@ -267,7 +285,7 @@ std::vector<Annotation> decode_falcon4_ct(const HexModel& m) {
         // Decode the four classInfo bytes to human-readable names so the
         // user doesn't have to keep the classtbl.h constants in their head.
         // The domain+stype pair resolves to a unit-subtype name (e.g.
-        // "Armor" / "Fighter" / "Carrier") via f4-world-convert's lookup.
+        // "Armor" / "Fighter" / "Carrier") via f4-world-types's lookup.
         std::ostringstream ss;
         ss << "domain=" << static_cast<int>(domain)
            << " (" << f4::viewer::domain_name(domain) << ")  "
@@ -282,7 +300,7 @@ std::vector<Annotation> decode_falcon4_ct(const HexModel& m) {
         // would be a heavier include. The user can look up `type` in
         // the inspector's "Type:" line if they want the name.
         if (cls == 6 /* CLASS_UNIT */ && stype > 0) {
-            ss << " (" << f4::world_convert::unit_subtype_name(domain, stype) << ")";
+            ss << " (" << f4::world_types::unit_subtype_name(domain, stype) << ")";
         }
         out.push_back({
             {entry_off, ENTRY_SIZE},

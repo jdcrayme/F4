@@ -153,6 +153,8 @@ Primitive read_primitive(f4::json::Reader& r) {
             p.colors0 = static_cast<std::size_t>(r.read_int());
         } else if (key == "indices") {
             p.indices = static_cast<std::size_t>(r.read_int());
+        } else if (key == "material") {
+            p.material = static_cast<std::size_t>(r.read_int());
         } else if (key == "mode") {
             p.mode = static_cast<int>(r.read_int());
         } else {
@@ -401,10 +403,119 @@ void GltfDocument::load_from_string(const std::string& json) {
                 r.skip_ws();
                 (void)r.consume(',');
             }
+        } else if (key == "images") {
+            r.skip_ws();
+            r.expect('[');
+            while (!r.consume(']')) {
+                Image img;
+                r.skip_ws();
+                r.expect('{');
+                while (!r.consume('}')) {
+                    r.skip_ws();
+                    std::string ik = r.read_string();
+                    r.expect(':');
+                    if (ik == "name") {
+                        img.name = r.read_string();
+                    } else if (ik == "uri") {
+                        img.uri = r.read_string();
+                    } else {
+                        r.skip_value();
+                    }
+                    r.skip_ws();
+                    (void)r.consume(',');
+                }
+                images.push_back(std::move(img));
+                r.skip_ws();
+                (void)r.consume(',');
+            }
+        } else if (key == "textures") {
+            r.skip_ws();
+            r.expect('[');
+            while (!r.consume(']')) {
+                Texture t;
+                r.skip_ws();
+                r.expect('{');
+                while (!r.consume('}')) {
+                    r.skip_ws();
+                    std::string tk = r.read_string();
+                    r.expect(':');
+                    if (tk == "name") {
+                        t.name = r.read_string();
+                    } else if (tk == "source") {
+                        t.image = static_cast<std::size_t>(r.read_int());
+                    } else {
+                        r.skip_value();
+                    }
+                    r.skip_ws();
+                    (void)r.consume(',');
+                }
+                textures.push_back(std::move(t));
+                r.skip_ws();
+                (void)r.consume(',');
+            }
+        } else if (key == "materials") {
+            r.skip_ws();
+            r.expect('[');
+            while (!r.consume(']')) {
+                Material mat;
+                r.skip_ws();
+                r.expect('{');
+                while (!r.consume('}')) {
+                    r.skip_ws();
+                    std::string mk = r.read_string();
+                    r.expect(':');
+                    if (mk == "name") {
+                        mat.name = r.read_string();
+                    } else if (mk == "pbrMetallicRoughness") {
+                        r.skip_ws();
+                        r.expect('{');
+                        while (!r.consume('}')) {
+                            r.skip_ws();
+                            std::string pk = r.read_string();
+                            r.expect(':');
+                            if (pk == "baseColorTexture") {
+                                r.skip_ws();
+                                r.expect('{');
+                                while (!r.consume('}')) {
+                                    r.skip_ws();
+                                    std::string bk = r.read_string();
+                                    r.expect(':');
+                                    if (bk == "index") {
+                                        mat.baseColorTexture =
+                                            static_cast<std::size_t>(r.read_int());
+                                    } else {
+                                        r.skip_value();
+                                    }
+                                    r.skip_ws();
+                                    (void)r.consume(',');
+                                }
+                            } else {
+                                r.skip_value();
+                            }
+                            r.skip_ws();
+                            (void)r.consume(',');
+                        }
+                    } else if (mk == "alphaMode") {
+                        const std::string mode = r.read_string();
+                        if (mode == "MASK") mat.alphaMode = 1;
+                        else if (mode == "BLEND") mat.alphaMode = 2;
+                        else mat.alphaMode = 0;
+                    } else if (mk == "alphaCutoff") {
+                        mat.alphaCutoff = static_cast<float>(r.read_number());
+                    } else {
+                        r.skip_value();
+                    }
+                    r.skip_ws();
+                    (void)r.consume(',');
+                }
+                materials.push_back(std::move(mat));
+                r.skip_ws();
+                (void)r.consume(',');
+            }
         } else {
-            // Skip unknown top-level fields (asset, materials, images,
-            // textures, samplers, etc. — not needed by the runtime loader
-            // for the f4import models output).
+            // Skip unknown top-level fields (asset, samplers, extensions,
+            // etc. — not needed by the runtime loader for the f4import
+            // models output).
             r.skip_value();
         }
         r.skip_ws();
@@ -492,6 +603,54 @@ GltfDocument::read_index_u32(std::size_t accessor_index,
         return static_cast<uint32_t>(base[element_index]);
     }
     return std::nullopt;
+}
+
+std::optional<std::array<float, 4>>
+GltfDocument::read_color_rgba(std::size_t accessor_index,
+                              std::size_t element_index) const {
+    if (accessor_index >= accessors.size()) return std::nullopt;
+    const Accessor& a = accessors[accessor_index];
+    if (a.type != "VEC4") return std::nullopt;
+    const uint8_t* base = accessor_data(accessor_index);
+    if (!base) return std::nullopt;
+    if (element_index >= a.count) return std::nullopt;
+    if (a.component_type == 5126) {  // FLOAT
+        const float* p = reinterpret_cast<const float*>(base) + element_index * 4;
+        return std::array<float, 4>{p[0], p[1], p[2], p[3]};
+    }
+    if (a.component_type == 5121) {  // UNSIGNED_BYTE (normalized)
+        const uint8_t* p = base + element_index * 4;
+        const float inv = 1.0f / 255.0f;
+        return std::array<float, 4>{p[0] * inv, p[1] * inv,
+                                     p[2] * inv, p[3] * inv};
+    }
+    if (a.component_type == 5123) {  // UNSIGNED_SHORT (normalized)
+        const uint16_t* p = reinterpret_cast<const uint16_t*>(base) +
+                            element_index * 4;
+        const float inv = 1.0f / 65535.0f;
+        return std::array<float, 4>{p[0] * inv, p[1] * inv,
+                                     p[2] * inv, p[3] * inv};
+    }
+    return std::nullopt;
+}
+
+std::optional<std::string>
+GltfDocument::material_basecolor_uri(
+    std::optional<std::size_t> material_index) const {
+    if (!material_index || *material_index >= materials.size()) {
+        return std::nullopt;
+    }
+    const Material& mat = materials[*material_index];
+    if (!mat.baseColorTexture || *mat.baseColorTexture >= textures.size()) {
+        return std::nullopt;
+    }
+    const Texture& tex = textures[*mat.baseColorTexture];
+    if (!tex.image || *tex.image >= images.size()) {
+        return std::nullopt;
+    }
+    const Image& img = images[*tex.image];
+    if (img.uri.empty()) return std::nullopt;
+    return img.uri;
 }
 
 std::size_t GltfDocument::count_f4_nodes(const std::string& kind) const noexcept {

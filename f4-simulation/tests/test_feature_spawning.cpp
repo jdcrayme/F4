@@ -72,12 +72,6 @@ std::string build_scenario_json(const std::string& features_json_array,
     ss << R"({
         "name": "feature_spawn_test",
         "theater": "korea",
-        "models_hdr_path": ")" << models_dir() << "/KoreaObj.HDR",
-    ss << R"(",
-        "models_lod_path": ")" << models_dir() << "/KoreaObj.LOD",
-    ss << R"(",
-        "models_tex_path": ")" << models_dir() << "/KoreaObj.TEX",
-    ss << R"(",
         )";
     if (include_aircraft) {
         ss << R"(

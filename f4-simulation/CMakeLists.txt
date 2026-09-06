@@ -73,6 +73,7 @@ target_link_libraries(f4-simulation PUBLIC
     f4-recorder
     f4-json
     f4-io
+    f4-assets          # Task 58 (Tranche 0e): @asset: resolution through the Data/ manifest
     f4-world           # Phase 2: WorldState, populate_world for spawn_from_campaign_flights
     f4-world-types     # Tranche 0d: ClassTable JSON loader + layout enums (replaces f4-world-convert)
     f4-terrain         # Phase 2: transitively required by f4-world/detail/world_state.hpp (TerrainData)

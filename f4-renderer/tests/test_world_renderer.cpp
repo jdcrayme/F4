@@ -31,7 +31,6 @@ TEST(SceneDescriptionTest, SensibleDefaults) {
     EXPECT_EQ(s.target, nullptr);
     EXPECT_EQ(s.world, nullptr);
     EXPECT_TRUE(s.entities.empty());
-    EXPECT_EQ(s.model_db, nullptr);
     EXPECT_EQ(s.class_table, nullptr);
     EXPECT_EQ(s.airfield, nullptr);
     EXPECT_FLOAT_EQ(s.cull_radius_ft, 0.0f);   // unlimited by default
@@ -193,7 +192,7 @@ TEST_F(RenderWorldGpuTest, RenderResourcesLifecycleIsIdempotent) {
     EXPECT_TRUE(res.ensure_default_material());   // idempotent
     res.unload_all();
     EXPECT_FALSE(res.default_material_valid());
-    EXPECT_TRUE(res.mesh_cache.empty());
+    EXPECT_TRUE(res.airfield_cache.empty());
     EXPECT_TRUE(res.airfield_cache.empty());
 }
 

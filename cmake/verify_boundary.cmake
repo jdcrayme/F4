@@ -29,10 +29,10 @@
 #   -DF4_ENFORCE_BOUNDARY=OFF (default) — violations print as WARNING (build proceeds)
 #   -DF4_ENFORCE_BOUNDARY=ON            — violations are FATAL_ERROR (configure fails)
 #
-# Today (Tranche 0b landed, 0d not yet) the verifier reports violations on
-# f4-renderer, f4-simulation, f4-world-viewer, and their downstream consumers.
-# Each violation turns green as Tranche 0d (runtime glTF rewire) decouples them.
-# After 0d, the verifier passes cleanly — the boundary becomes a contract.
+# Status (Tranche 0d landed, Task 59): the verifier PASSES with every
+# target enabled — the runtime link closure contains zero legacy binary
+# parsers. The boundary is a contract now; any new runtime target that
+# links a parser fails configure ( fatally with F4_ENFORCE_BOUNDARY=ON).
 
 option(F4_ENFORCE_BOUNDARY "Fail configure if a runtime target links a legacy binary parser" OFF)
 

@@ -10,4 +10,5 @@
 
 #include <f4/assets/asset_id.hpp>
 #include <f4/assets/asset_root.hpp>
+#include <f4/assets/hash.hpp>
 #include <f4/assets/manifest.hpp>

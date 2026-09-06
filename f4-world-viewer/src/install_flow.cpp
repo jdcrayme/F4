@@ -20,17 +20,35 @@
 #include "diagnostics.hpp"
 #include "snapshot.hpp"
 
+namespace {
+
+// Quote a path for a shell command line (paths may contain spaces).
+// Mirrors the helper in file_ops.cpp.
+std::string shell_quote(const std::filesystem::path& p) {
+    const auto s = p.string();
+    if (s.find(' ') == std::string::npos && s.find('"') == std::string::npos &&
+        s.find('\t') == std::string::npos) {
+        return s;
+    }
+    std::string out = "\"";
+    for (const char c : s) {
+        if (c == '"') out += '\\';
+        out += c;
+    }
+    out += '"';
+    return out;
+}
+
+}  // namespace
+
 #include <f4/install/installation.hpp>
-#include <f4/terrain_convert/terrain_converter.hpp>
 #include <f4/viewer/file_dialog.hpp>
-#include <f4/world_convert/cam_archive.hpp>
-#include <f4/world_convert/class_table.hpp>
-#include <f4/world_convert/theater_data.hpp>
-#include <f4/world_convert/world_json.hpp>
 
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cstdio>
+#include <cstdlib>
 #include <ctime>
 #include <filesystem>
 #include <fstream>
@@ -225,17 +243,30 @@ void ViewerApp::load_campaign_from_install(const std::string& theater_key,
             "' not found in theater '" + theater_key + "'");
     }
 
-    // Step 1: convert THEATER.* → terrain JSON in a temp file next to
-    // the theater dir. We use a temp file rather than in-memory because
-    // f4-terrain's loader expects a path.
+    // Step 1: convert THEATER.* → terrain JSON via the terrain2json CLI.
+    // Tranche 0d: the runtime app no longer links the converter libraries
+    // (P2 boundary) — binary conversion happens in the importer-side CLI
+    // tools; this app consumes only the JSON outputs.
+#ifndef F4_TERRAIN2JSON_EXE
+    throw std::runtime_error("terrain2json CLI not configured in this build");
+#else
     const auto terrain_json = theater->dir / "terrain.json";
-    f4::terrain_convert::convert_terrain_dir(theater->dir, terrain_json, theater_key);
+    {
+        const std::string cmd = std::string(F4_TERRAIN2JSON_EXE) + " " +
+            shell_quote(theater->dir) + " " + shell_quote(terrain_json);
+        const int rc = std::system(cmd.c_str());
+        if (rc != 0) {
+            throw std::runtime_error("terrain2json failed (exit " +
+                                     std::to_string(rc) + ")");
+        }
+    }
     impl_->terrain.load_terrain_json(terrain_json);
     impl_->terrain_loaded = true;
     impl_->last_terrain_json_path = terrain_json;
     impl_->status_msg = "Terrain: " + theater_key + " (" +
         std::to_string(impl_->terrain.header.width) + "x" +
         std::to_string(impl_->terrain.header.height) + ")";
+#endif  // F4_TERRAIN2JSON_EXE
 
     // Also load the raw theater binaries through the shared WorldView
     // (post levels + tile art) for TEXTURED terrain in the 3D panel.
@@ -258,66 +289,43 @@ void ViewerApp::load_campaign_from_install(const std::string& theater_key,
         }
     }
 
-    // Step 2: convert .cam → world JSON using the install's class table.
-    // Use the install-aware resolver — finds FALCON4.ct automatically.
-    f4::world_convert::CamArchive cam;
-    cam.load(camp->cam);
-    f4::world_convert::WorldJsonOptions opts;
-    opts.theater = theater_key;
-    opts.terrain_file = terrain_json.filename().string();
-
-    f4::world_convert::ClassTable class_table;
-    const auto ct_path = impl_->install->find_class_table(camp->cam);
-    if (!ct_path.empty()) {
-        try {
-            class_table.load(ct_path);
-            opts.class_table = &class_table;
-        } catch (const std::exception& e) {
-            impl_->last_error = "Class table load failed: " + std::string(e.what());
-        }
-    } else {
-        impl_->last_error = "FALCON4.ct not found — objectives will lack icons";
-    }
-
-    // Always load the theater object database (Falcon4.OCD/PHD/PD/UCD/
-    // VCD/FCD/FED) so the world JSON carries objective class names,
-    // airfield ground layouts (runways, taxiways, parking, helipads,
-    // docks), unit class names, and per-group vehicle composition.
-    // Without this, the Ground Layout window never lights up because
-    // world_json.cpp gates the `ground_layout` and `features` arrays on
-    // opts.theater_db being set.
-    //
-    // Two search locations cover both on-disk layouts used by Falcon
-    // variants: install-level `terrdata/objects` (vanilla Falcon 4.0 /
-    // FreeFalcon / Allied Force) and per-theater `<terrdata>/<key>/
-    // objects` (some community theaters). load_all() skips missing
-    // files silently, so probing both is safe; we stop as soon as at
-    // least one table is loaded.
-    f4::world_convert::TheaterObjectDatabase theater_db;
-    const std::array<std::filesystem::path, 2> objects_dirs = {
-        impl_->install->terrdata_dir() / "objects",
-        theater->dir / "objects",
-    };
-    for (const auto& d : objects_dirs) {
-        if (d.empty() || !std::filesystem::exists(d)) continue;
-        theater_db.load_all(d);
-        if (theater_db.loaded()) break;
-    }
-    if (theater_db.loaded()) {
-        opts.theater_db = &theater_db;
-    }
-
-    const std::string json = f4::world_convert::to_world_json(cam, opts);
-
-    // Write next to the .cam, then load via the normal path.
+    // Step 2: convert .cam → world JSON via the cam2json CLI, pointing
+    // --theater-data at the install's objects dir so the world JSON
+    // carries objective class names, airfield ground layouts (runways,
+    // taxiways, parking, helipads, docks), unit class names, and
+    // per-group vehicle composition — the same inputs the build's
+    // korea-real-world-json target passes. Two search locations cover
+    // both on-disk layouts used by Falcon variants: install-level
+    // `terrdata/objects` (vanilla Falcon 4.0 / FreeFalcon / Allied
+    // Force) and per-theater `<terrdata>/<key>/objects` (some community
+    // theaters).
+#ifdef F4_CAM2JSON_EXE
     auto world_json = camp->cam;
     world_json.replace_extension(".world.json");
     {
-        std::ofstream f(world_json);
-        if (!f) throw std::runtime_error("cannot write " + world_json.string());
-        f << json;
+        std::filesystem::path objects_dir;
+        for (const auto& d : { impl_->install->terrdata_dir() / "objects",
+                               theater->dir / "objects" }) {
+            if (!d.empty() && std::filesystem::exists(d)) {
+                objects_dir = d;
+                break;
+            }
+        }
+        std::string cmd = std::string(F4_CAM2JSON_EXE) + " " +
+            shell_quote(camp->cam) + " " + shell_quote(world_json);
+        if (!objects_dir.empty()) {
+            cmd += " --theater-data " + shell_quote(objects_dir);
+        }
+        const int rc = std::system(cmd.c_str());
+        if (rc != 0) {
+            throw std::runtime_error("cam2json failed (exit " +
+                                     std::to_string(rc) + ")");
+        }
     }
     load_world_json(world_json);
+#else
+    throw std::runtime_error("cam2json CLI not configured in this build");
+#endif
 
     // Persist the last theater + campaign so the next launch pre-selects them.
     impl_->settings.last_theater_key = theater_key;

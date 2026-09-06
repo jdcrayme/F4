@@ -1,17 +1,13 @@
 // f4-renderer/src/texture_cache.cpp
 //
-// GPU texture cache implementation.
+// GPU texture cache implementation (PNG loading path).
 
 #include <f4/renderer/texture_cache.hpp>
-#include <f4/renderer/mesh_builder.hpp>
-
-#include <f4/models/model_database.hpp>
-#include <f4/models/texture.hpp>
 
 #include <raylib.h>
 
 #include <cstring>
-#include <vector>
+#include <filesystem>
 
 namespace f4::renderer {
 
@@ -21,64 +17,80 @@ TextureCache::~TextureCache() {
     unload_all();
 }
 
-// ── upload ────────────────────────────────────────────────────────────────────
+// ── upload_png ───────────────────────────────────────────────────────────────
 
-void TextureCache::upload(f4::models::ModelDatabase& db, const std::vector<int>& tex_ids) {
-    for (int tex_id : tex_ids) {
-        if (tex_id < 0) continue;
-        if (cache_.count(tex_id)) continue;  // already cached
+void TextureCache::upload_png(int tex_id, const std::filesystem::path& png_path) {
+    if (tex_id < 0) return;
+    if (cache_.count(tex_id)) return;  // already cached (or previously failed)
 
-        // Decode the texture (lazy, cached in ModelDatabase)
-        const auto* decoded = db.fetch_texture(tex_id);
-        if (!decoded || !decoded->valid()) {
-            // Mark as cached-but-failed so we don't retry
-            TexCacheEntry ce;
-            ce.uploaded = false;
-            cache_[tex_id] = ce;
-            continue;
-        }
-
-        // Create a Raylib Image from the RGBA8 pixel data
-        Image img = {};
-        img.data = RL_MALLOC(decoded->width * decoded->height * 4);
-        if (!img.data) {
-            TexCacheEntry ce;
-            ce.uploaded = false;
-            cache_[tex_id] = ce;
-            continue;
-        }
-        std::memcpy(img.data, decoded->rgba.data(),
-                     static_cast<std::size_t>(decoded->width * decoded->height * 4));
-        img.width = decoded->width;
-        img.height = decoded->height;
-        img.mipmaps = 1;
-        img.format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8;
-
-        // Upload to GPU
-        Texture2D tex = LoadTextureFromImage(img);
-
-        // Create a material with this texture bound
-        Material mat = LoadMaterialDefault();
-        mat.maps[MATERIAL_MAP_DIFFUSE].texture = tex;
-        mat.maps[MATERIAL_MAP_DIFFUSE].color = WHITE;
-
+    const auto fail = [this, tex_id]() {
+        // Cache as failed so we don't retry every frame.
         TexCacheEntry ce;
-        ce.texture = tex;
-        ce.material = mat;
-        ce.has_alpha = decoded->has_alpha;
-        ce.uploaded = true;
+        ce.uploaded = false;
         cache_[tex_id] = ce;
+    };
 
-        // Free the CPU-side image (GPU copy is retained)
-        UnloadImage(img);
+    if (!std::filesystem::exists(png_path)) {
+        fail();
+        return;
     }
+
+    // Load via LoadImage (not LoadTexture directly) so we can detect
+    // alpha — the draw paths sort alpha-blended meshes last, and the
+    // old DecodedTexture path provided that bit. PNGs without an alpha
+    // channel decode to a 3-byte-per-pixel format, which is the
+    // has_alpha=false case.
+    Image img = LoadImage(png_path.string().c_str());
+    if (img.data == nullptr || img.width <= 0 || img.height <= 0) {
+        fail();
+        return;
+    }
+
+    bool has_alpha = false;
+    if (img.format == PIXELFORMAT_UNCOMPRESSED_R8G8B8A8) {
+        const unsigned char* px = static_cast<const unsigned char*>(img.data);
+        const std::size_t n = static_cast<std::size_t>(img.width) *
+                              static_cast<std::size_t>(img.height);
+        for (std::size_t i = 0; i < n; ++i) {
+            if (px[i * 4 + 3] != 255) {
+                has_alpha = true;
+                break;
+            }
+        }
+    }
+
+    // Upload to GPU.
+    Texture2D tex = LoadTextureFromImage(img);
+    UnloadImage(img);
+    if (tex.id == 0) {
+        fail();
+        return;
+    }
+
+    // Create a material with this texture bound.
+    Material mat = LoadMaterialDefault();
+    mat.maps[MATERIAL_MAP_DIFFUSE].texture = tex;
+    mat.maps[MATERIAL_MAP_DIFFUSE].color = WHITE;
+
+    TexCacheEntry ce;
+    ce.texture = tex;
+    ce.material = mat;
+    ce.has_alpha = has_alpha;
+    ce.uploaded = true;
+    cache_[tex_id] = ce;
 }
 
-// ── upload_for_entries ────────────────────────────────────────────────────────
+// ── insert ───────────────────────────────────────────────────────────────────
 
-void TextureCache::upload_for_entries(f4::models::ModelDatabase& db,
-                                       const std::vector<int>& tex_ids) {
-    upload(db, tex_ids);
+void TextureCache::insert(int tex_id, const TexCacheEntry& entry) {
+    if (tex_id < 0) return;
+    // Free any previous GPU state the new entry replaces.
+    auto it = cache_.find(tex_id);
+    if (it != cache_.end() && it->second.uploaded) {
+        UnloadTexture(it->second.texture);
+        it->second.material.maps[MATERIAL_MAP_DIFFUSE].texture = {};
+    }
+    cache_[tex_id] = entry;
 }
 
 // ── lookup ────────────────────────────────────────────────────────────────────

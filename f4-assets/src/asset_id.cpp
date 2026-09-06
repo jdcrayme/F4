@@ -10,8 +10,9 @@ namespace f4::assets {
 
 namespace {
 
-constexpr std::array<std::string_view, 7> kFamilyNames = {
-    "koreaobj", "class", "theater", "campaign", "aircraft", "tileset", "unknown"
+constexpr std::array<std::string_view, 8> kFamilyNames = {
+    "koreaobj", "class", "theater", "campaign", "aircraft", "tileset",
+    "simdata", "unknown"
 };
 
 } // namespace

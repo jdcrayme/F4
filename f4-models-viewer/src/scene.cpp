@@ -20,6 +20,7 @@
 //   - canvas3d.cpp uses the per-mesh material for DrawMesh.
 
 #include "viewer_state.hpp"
+#include "legacy_mesh_builder.hpp"
 
 #include <f4/models/geometry.hpp>
 #include <f4/models/model_database.hpp>
@@ -301,11 +302,12 @@ void ViewerApp::Impl::rebuild_meshes() {
         return;
     }
 
-    // Convert to Raylib meshes, resolving ColorBank indices to RGBA.
-    raylib_meshes = f4::renderer::build_raylib_meshes(geom, db.color_bank());
-
-    // Build mesh_entries with tex_id for per-mesh material lookup
-    mesh_entries = f4::renderer::build_mesh_entries(geom, raylib_meshes);
+    // Convert to Raylib meshes, resolving ColorBank indices to RGBA
+    // (the legacy pipeline lives in this tool now — f4-renderer moved
+    // to glTF and no longer links f4-models).
+    mesh_entries = f4::models_viewer::build_legacy_meshes(geom, db.color_bank());
+    raylib_meshes.clear();
+    for (const auto& me : mesh_entries) raylib_meshes.push_back(me.mesh);
 
     // Collect lines and points into separate lists for canvas drawing.
     // Raylib's ::Mesh / DrawMesh path only handles triangle lists; lines
@@ -349,7 +351,7 @@ void ViewerApp::Impl::rebuild_meshes() {
     for (const auto& me : mesh_entries) {
         if (me.tex_id >= 0) tex_ids.push_back(me.tex_id);
     }
-    texture_cache.upload(db, tex_ids);
+    f4::models_viewer::upload_legacy_textures(texture_cache, db, tex_ids);
 
     // Count textured meshes for status
     int n_textured = 0;

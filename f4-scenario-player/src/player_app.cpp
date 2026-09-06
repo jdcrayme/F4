@@ -13,6 +13,7 @@
 #include <f4/simulation/visual_model_component.hpp>
 #include <f4/entities/entity.hpp>
 #include <f4/flight/flight_model_component.hpp>
+#include <f4/assets/asset_root.hpp>   // Data/ discovery for the glTF models
 
 // Now safe to include Raylib (PI macro won't break the flight headers).
 #include <rlImGui.h>
@@ -62,23 +63,26 @@ void PlayerApp::load_scenario(const std::filesystem::path& json_path) {
     impl_->sim->initialize();
     impl_->sim_initialized = true;
 
-    // Tranche 0d: the scenario-player owns its own ModelDatabase (the sim
-    // no longer loads KoreaObj binary). Load from the scenario's paths for
-    // the transitional binary-rendering path. The @asset: case (glTF) is
-    // handled by the RuntimeModelCache (future); for now, skip if the path
-    // is an asset ref or doesn't exist.
-    const auto& hdr = impl_->scenario.models_hdr_path;
-    const auto& lod = impl_->scenario.models_lod_path;
-    const std::string hdr_str = hdr.string();
-    if (!hdr.empty() && !lod.empty() &&
-        hdr_str.substr(0, 7) != "@asset:" &&
-        std::filesystem::exists(hdr) && std::filesystem::exists(lod)) {
-        const auto err = impl_->model_db.load(hdr.string(), lod.string());
-        if (!err.empty()) {
-            std::fprintf(stderr, "PlayerApp: model db load failed: %s\n", err.c_str());
+    // Tranche 0d: the model source is the glTF export tree
+    // (Data/Models/koreaobj — RuntimeModelCache), NOT the KoreaObj
+    // binary. Locate Data/ from the scenario's data_dir (Task 58) or by
+    // AssetRoot discovery; the render path builds meshes lazily per
+    // vis_type once the GL context exists.
+    {
+        std::filesystem::path data_dir = impl_->scenario.data_dir;
+        if (data_dir.empty()) {
+            if (auto root = f4::assets::AssetRoot::discover()) {
+                data_dir = root->data_dir();
+            }
         }
-        if (!impl_->scenario.models_tex_path.empty()) {
-            (void)impl_->model_db.load_tex(impl_->scenario.models_tex_path);
+        if (!data_dir.empty() &&
+            std::filesystem::exists(data_dir / "Models" / "koreaobj")) {
+            impl_->render_res.set_model_data_dir(data_dir);
+        } else {
+            std::fprintf(stderr,
+                "PlayerApp: no glTF models under Data/Models/koreaobj — "
+                "aircraft will render without meshes. Run `f4import models "
+                "--install <root> --data Data --all` to export them.\n");
         }
     }
 

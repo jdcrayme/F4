@@ -3,9 +3,6 @@
   "theater": "korea",
   "terrain_json_path": "@F4_TERRAIN_JSON@",
   "theater_dir": "@F4_SCENARIO_THEATER_DIR@",
-  "models_hdr_path": "@F4_SOURCE_DIR@/temp/KoreaObj.HDR",
-  "models_lod_path": "@F4_SOURCE_DIR@/temp/KoreaObj.LOD",
-  "models_tex_path": "@F4_SOURCE_DIR@/temp/KoreaObj.TEX",
   "airbase_source": {
     "world_json": "@F4_WORLD_JSON@",
     "class_table": "@F4_DIGI_CLASS_TABLE@",

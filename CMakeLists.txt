@@ -92,10 +92,11 @@ endif()
 # ── Configure the scenario JSON templates at build time ────────────────────
 # This block runs regardless of whether f4-scenario-player is built (the
 # scenarios are pure JSON consumed by f4-simulation tests + the player).
-# Substitutes @F4_SOURCE_DIR@, @F4_BINARY_DIR@, @F4_DIGI_CLASS_TABLE@ so the
-# scenarios can reference KoreaObj.HDR/.LOD/.TEX (in temp/), the generated
-# f16.json (in build/generated_fixtures/), and FALCON4.ct (from the install
-# when available, else the bundled fixture).
+# Substitutes @F4_SOURCE_DIR@, @F4_BINARY_DIR@, @F4_DIGI_CLASS_TABLE@ for the
+# committed Data/ JSON paths, the generated f16.json (build/generated_
+# fixtures/), and the class table fallback. Tranche 0d: scenarios carry no
+# model paths — the renderer resolves models per vis_type through
+# Data/Models/koreaobj (RuntimeModelCache).
 #
 # Phase 0c (FLIGHT_CONTROL_NEXT_STEPS.md §3.2): the takeoff_only and
 # landing_only scenarios are isolated diagnostic scenarios. Each emits a
@@ -191,10 +192,9 @@ endif()
 # F4_BUILD_VIEWER etc.) are guarded by f4_mark_side's TARGET check, so the
 # marking list is the same regardless of which optional apps are enabled.
 #
-# Today (Tranche 0b landed, 0d not yet) the verifier reports violations on
-# f4-renderer, f4-simulation, f4-world-viewer, and downstream consumers.
-# Tranche 0d (runtime glTF rewire) decouples them, and the verifier turns
-# green — at which point -DF4_ENFORCE_BOUNDARY=ON becomes the CI gate.
+# Tranche 0d (runtime glTF rewire, Task 59) decoupled the last violators
+# (f4-renderer, the viewers, the scenario player) — the verifier PASSES
+# with every target enabled, and -DF4_ENFORCE_BOUNDARY=ON is the CI gate.
 include(verify_boundary)
 
 # 0b.2 — Importer side: may link legacy binary parsers.

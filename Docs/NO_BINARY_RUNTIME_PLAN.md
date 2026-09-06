@@ -146,23 +146,21 @@ visual loop.
 
 ### Tranche 0d — Runtime glTF rewire (the big refactor)
 
-> **Status: PARTIAL — simulation half LANDED (Tasks 54-56), renderer half
-> PLAN written (RENDERER_GLTF_REWIRE_PLAN.md), execution deferred to a
-> GL-enabled environment.** The `f4-world-convert` AND `f4-models` AND
-> `f4-lzss` links are ALL cut from `f4-simulation` (and its downstream
-> `trace_runner` / `campaign_qc`): `VisualModelComponent` no longer
-> carries `model_record` or `ModelState` — `vis_type` IS the identity,
-> `gear_switch_child` replaces the switch vector. `Simulation` no longer
-> owns a `ModelDatabase` or calls `load_models()`. The scenario-player
-> owns its own `ModelDatabase` (transitional, for the binary rendering
-> path). The boundary verifier PASSES clean when renderer/viewer are OFF
-> (the headless runtime links zero legacy binary parsers). The remaining
-> violations are `f4-renderer` + `f4-world-viewer` (GUI apps with their
-> own `ModelDatabase` for the geometry pipeline) — the GL-dependent
-> renderer rewire (RuntimeModelCache → glTF) is in
-> `Docs/RENDERER_GLTF_REWIRE_PLAN.md`. 2341/2348 tests pass (7 pre-
-> existing flight-model precision failures, confirmed identical on the
-> pre-0d code).
+> **Status: COMPLETE — simulation half (Tasks 54-56) + renderer half
+> (Task 59).** The `f4-models` + `f4-world-convert` + `f4-terrain-convert`
+> + `f4-lzss` links are cut from EVERY runtime target: `f4-simulation`
+> (Task 54), and — Task 59 — `f4-renderer` (RuntimeModelCache: glTF +
+> PNG from Data/Models/koreaobj/), `f4-world-viewer` (runtime class
+> table from f4-world-types; binary imports now run the converter CLIs
+> as subprocesses; the Hex Inspector's .cam manifest decode is
+> self-contained), `f4-scenario-player`, and the models-viewer keeps its
+> legacy binary path locally (importer-side dev tool). The boundary
+> verifier PASSES with every target enabled — `-DF4_ENFORCE_BOUNDARY=ON`
+> is the CI gate. `temp/KoreaObj.{HDR,LOD,TEX}` (38 MB) is deleted.
+> Scenario model-path fields removed (renderer resolves per vis_type).
+> 2371 tests, same 7 pre-existing flight-model/LZSS failures — zero
+> regressions. Visual QA of the glTF rendering (plan §6.5) remains a
+> user-environment step (no X11 in the sandbox).
 
 **The work that makes P2 pass.** The runtime stops linking `f4-models`;
 it loads glTF via `f4-gltf` instead.
@@ -195,6 +193,31 @@ deleted. The gitignore exception is removed. The repo drops to ~76 MB
 **Acceptance (§6).**
 
 ### Tranche 0e — Full Data/ export (the destination)
+
+> **Status: PARTIAL — 0e.3 (the @asset: resolver with manifest hash
+> verification) LANDED (Task 58).** `f4-assets` now does the P7 staleness
+> check: `AssetEntry` carries content fingerprints (size + sha256 +
+> fnv1a_64 — implemented zero-dep in f4-assets/src/hash.cpp), `check()`
+> reports `stale` on any mismatch, and `resolve_ref()` is the consumer-side
+> `@asset:` → path resolver. The legacy fingerprint manifests
+> (generate_manifest.py ≤ 0a, no ids) parse through a path→id derivation
+> convention mirrored by the upgraded generator (which now emits explicit
+> ids); the committed Data/manifest.json was regenerated (36 assets, every
+> one addressable — this also picked up Aircraft/kc10.json, which the old
+> manifest predated). `f4-simulation` links f4-assets: `load_scenario()`
+> resolves `@asset:` path fields through the manifest (scenario `data_dir`
+> field, else `AssetRoot::discover()`), fails LOUD on a dangling id, and
+> preserves refs verbatim when no root is discoverable. A `simdata` asset
+> family was added for Data/SimData/*.json. Verified: 2370 tests, same 7
+> pre-existing failures, zero regressions; the C++ sha256 reproduces the
+> committed Python-generated fingerprints (pinned by test_hash against
+> FIPS 180-4 vectors AND the committed Data/). **Remaining**: 0e.1 (full
+> export incl. glTF+PNG — needs an install; the script's manifest step is
+> upgraded), 0e.2 (the 17 scenario *.json.in templates still bake
+> absolute world/terrain/aircraft paths — Task 59 removed the vestigial
+> KoreaObj model paths from the Scenario struct and templates; the
+> remaining @asset: migration is deferred; record/fcs_trace stay
+> build-dir outputs by design).
 
 **0e.1 — `export-game-data.sh` extended.** Now exports the full `Data/`
 tree per spec §4: JSON subset (0a) + glTF models (0d, via `f4import models`)
@@ -253,15 +276,22 @@ resolver finds it, checks the manifest hash, and returns the path.
 
 ## 6. Acceptance criteria — Tranche 0d (runtime glTF rewire)
 
-1. `VisualModelComponent` carries a glTF handle, not `const ModelRecord*`.
-2. `f4-renderer`, `f4-simulation`, `f4-world-viewer` no longer link
-   `f4-models`. The CMake boundary verifier (0b) passes.
-3. `f4-gltf` is linked by the runtime targets instead.
-4. `temp/KoreaObj.HDR/.LOD/.TEX` is deleted from the repo. The gitignore
-   exception is removed.
-5. The scenario player and world viewer render correctly against
-   `Data/Models/koreaobj/*.gltf` (user verification — no X11 here).
-6. No regressions in the headless test suite (combat chain, campaign loop,
+1. ✅ `VisualModelComponent` carries `vis_type` (+ `gear_switch_child`) —
+   not `const ModelRecord*` (Task 54).
+2. ✅ `f4-renderer`, `f4-simulation`, `f4-world-viewer` no longer link
+   `f4-models` (Task 59). The CMake boundary verifier (0b) PASSES with
+   every target enabled.
+3. ✅ `f4-gltf` is linked by the runtime targets instead (Task 59 — plus
+   the materials/textures/images parsing the texture-binding chain
+   needed).
+4. ✅ `temp/KoreaObj.HDR/.LOD/.TEX` is deleted from the repo. The
+   gitignore exception is removed (Task 59).
+5. ⏳ The scenario player and world viewer render correctly against
+   `Data/Models/koreaobj/*.gltf` (user verification — no X11 in the
+   sandbox; the headless geometry path is unit-tested via
+   test_mesh_builder + the clean_data glTF fixture).
+6. ✅ No regressions in the headless test suite — 2371 tests, same 7
+   pre-existing flight-model/LZSS failures (combat chain, campaign loop,
    campaign_qc MD5 certificates byte-identical — the sim doesn't render).
 
 ## 7. Acceptance criteria — Tranche 0e (full Data/ export)

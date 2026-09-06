@@ -34,10 +34,6 @@
 #include <f4/renderer/feature_mesh.hpp>
 #include <f4/renderer/scene_draw.hpp>
 
-// f4-models + f4-world-convert headers MUST come before raylib.h (the
-// PI macro collision — see ground_layout_3d.cpp).
-#include <f4/models/model_database.hpp>
-#include <f4/world_convert/class_table.hpp>
 
 #include <imgui.h>
 #include <raylib.h>
@@ -103,7 +99,7 @@ void ViewerApp::draw_entity_model_3d() {
     if (!impl_->models_3d_load_attempted) {
         impl_->ensure_models_3d_loaded();
     }
-    if (!impl_->models_3d_loaded || !impl_->model_db_3d.has_value() ||
+    if (!impl_->models_3d_loaded || !impl_->render_res_3d.model_cache.ready() ||
         !impl_->class_table_3d.loaded()) {
         ImGui::TextDisabled(
             "3D models not available — configure an install "
@@ -316,7 +312,6 @@ void ViewerApp::draw_entity_model_3d() {
         f4::renderer::EntityRenderResources res =
             f4::renderer::make_entity_render_resources(
                 impl_->render_res_3d,
-                &*impl_->model_db_3d,
                 &impl_->class_table_3d);
         res.show_ground_layout = false;
 

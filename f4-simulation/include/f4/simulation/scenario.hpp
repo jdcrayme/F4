@@ -282,9 +282,6 @@ struct Scenario {
 
     // Asset paths (relative to the scenario file's parent directory).
     std::filesystem::path terrain_json_path;
-    std::filesystem::path models_hdr_path;   ///< KoreaObj.HDR
-    std::filesystem::path models_lod_path;   ///< KoreaObj.LOD
-    std::filesystem::path models_tex_path;   ///< KoreaObj.TEX
 
     /// Optional: the theater directory (e.g. <install>/terrdata/korea)
     /// with raw binary terrain + texture data (terrain/THEATER.L*,
@@ -424,15 +421,28 @@ struct Scenario {
     /// per-wingman via "formation".
     std::filesystem::path formation_library_path;
 
+    /// Optional explicit Data/ root (Task 58, NO_BINARY_RUNTIME_PLAN 0e).
+    /// When set, any path field in this scenario that is an "@asset:<id>"
+    /// reference is resolved through that root's manifest at load time.
+    /// When empty, the loader falls back to AssetRoot::discover()
+    /// (F4_DATA_DIR env → exe-side Data → cwd/Data); if no root is
+    /// discoverable, @asset: references are preserved verbatim (the
+    /// pre-Task-58 behavior).
+    std::filesystem::path data_dir;
+
     // AAR redesign: the tanker is a ScenarioAircraft with tanker=true
     // (no separate ScenarioTanker block). The std::optional<ScenarioTanker>
     // field is removed.
 };
 
 /// Load a scenario from a JSON file. Resolves asset paths relative to the
-/// scenario file's parent directory. Throws std::runtime_error on parse
-/// failure, missing required fields, or invalid values (e.g. taxi route
-/// with < 2 waypoints, no aircraft, etc.).
+/// scenario file's parent directory; "@asset:<id>" references are resolved
+/// through the Data/ manifest (scenario "data_dir" field, then
+/// AssetRoot::discover()) when one is discoverable, and preserved verbatim
+/// otherwise. Throws std::runtime_error on parse failure, missing required
+/// fields, invalid values (e.g. taxi route with < 2 waypoints, no aircraft,
+/// etc.), or an @asset: reference that fails to resolve through a
+/// discoverable manifest (NO_BINARY_RUNTIME_PLAN Tranche 0e).
 Scenario load_scenario(const std::filesystem::path& json_path);
 
 /// Load a scenario from an in-memory JSON string. Asset paths are returned

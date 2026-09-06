@@ -1,7 +1,13 @@
 // f4-renderer/include/f4/renderer/texture_cache.hpp
 //
-// GPU texture cache: lazily decodes TEX blobs via ModelDatabase and
-// uploads RGBA8 data as Texture2D + Material.
+// GPU texture cache: lazily loads PNG textures and uploads them as
+// Texture2D + Material, keyed by KoreaObj texture bank id.
+//
+// Tranche 0d: the texture source is the exported PNG set
+// (Data/Models/koreaobj/textures/NNNNN.png — produced by
+// `f4import textures`, Tranche 0c) instead of KoreaObj.TEX decoding.
+// The bank id (the cache key) is unchanged, so the draw paths'
+// MeshEntry.tex_id → lookup(tex_id) → material flow is unchanged.
 //
 // Consolidated from 4 duplicated implementations.
 
@@ -13,12 +19,8 @@
 #undef DEG2RAD
 #undef RAD2DEG
 
+#include <filesystem>
 #include <unordered_map>
-#include <vector>
-
-namespace f4::models {
-class ModelDatabase;
-}  // namespace f4::models
 
 namespace f4::renderer {
 
@@ -30,12 +32,12 @@ struct TexCacheEntry {
     bool uploaded = false;        ///< true once texture is on GPU
 };
 
-/// GPU texture cache. Lazily decodes TEX blobs via ModelDatabase::fetch_texture()
-/// and uploads the RGBA8 data as Texture2D + Material.
+/// GPU texture cache. Lazily loads PNG files and uploads them as
+/// Texture2D + Material.
 ///
 /// Usage:
 ///   TextureCache cache;
-///   cache.upload(db, mesh_entries);    // upload any new textures
+///   cache.upload_png(tex_id, png_path);  // upload any new textures
 ///   // ... later, in draw loop:
 ///   auto* ce = cache.lookup(tex_id);
 ///   if (ce && ce->uploaded) DrawMesh(mesh, ce->material, transform);
@@ -50,15 +52,20 @@ public:
     TextureCache(const TextureCache&) = delete;
     TextureCache& operator=(const TextureCache&) = delete;
 
-    /// Upload textures for all mesh entries that have tex_ids not yet in cache.
-    /// @param db     Model database to decode textures from
-    /// @param tex_ids  Vector of texture IDs to ensure are cached
-    void upload(f4::models::ModelDatabase& db, const std::vector<int>& tex_ids);
+    /// Load a PNG from disk (raylib LoadImage path) and upload it to the
+    /// GPU, cached under the KoreaObj texture bank id. No-op when the
+    /// id is already cached (or previously failed). A missing/corrupt
+    /// file is cached as not-uploaded so the draw path doesn't retry.
+    /// Requires the GL context.
+    void upload_png(int tex_id, const std::filesystem::path& png_path);
 
-    /// Upload textures for MeshEntry vector (convenience overload).
-    /// Extracts tex_ids from entries and calls upload().
-    void upload_for_entries(f4::models::ModelDatabase& db,
-                           const std::vector<int>& tex_ids);
+    /// Inject a pre-built entry (GPU texture already uploaded by the
+    /// caller). Generic escape hatch for tools that decode textures
+    /// themselves (e.g. f4-models-viewer's legacy KoreaObj.TEX path —
+    /// the decoder lives in the importer-side tool, not here).
+    /// Overwrites any existing entry for the id; takes ownership of the
+    /// GPU texture for cleanup (unload_all()).
+    void insert(int tex_id, const TexCacheEntry& entry);
 
     /// Look up a cached texture by tex_id. Returns nullptr if not cached.
     const TexCacheEntry* lookup(int tex_id) const;

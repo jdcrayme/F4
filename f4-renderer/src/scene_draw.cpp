@@ -4,8 +4,6 @@
 
 #include <f4/renderer/scene_draw.hpp>
 
-#include <f4/models/model_database.hpp>
-
 #include <raylib.h>
 #include <raymath.h>
 #include <rlgl.h>
@@ -58,7 +56,6 @@ void draw_ground(const GroundConfig& cfg) {
 
 DrawStats draw_entity_meshes(
     RenderResources& res,
-    f4::models::ModelDatabase& db,
     const std::vector<EntityMeshDraw>& entities,
     float cull_enu_x, float cull_enu_y, float cull_enu_z,
     float cull_radius_ft)
@@ -96,12 +93,12 @@ DrawStats draw_entity_meshes(
             if (dx * dx + dy * dy + dz * dz > cull_r2) continue;
         }
 
-        // Lazy mesh build on first encounter.
-        res.build_mesh_for_model(db, ent.parent_index);
+        // Lazy mesh build on first encounter (glTF + PNG via
+        // RuntimeModelCache; no-op when the Data dir isn't configured).
+        res.build_mesh_for_model(ent.parent_index);
 
-        auto cache_it = res.mesh_cache.find(ent.parent_index);
-        if (cache_it == res.mesh_cache.end() ||
-            cache_it->second.meshes.empty()) {
+        const RuntimeModel* model = res.model_cache.lookup(ent.parent_index);
+        if (!model || model->lod0_meshes.empty()) {
             continue;
         }
 
@@ -115,7 +112,7 @@ DrawStats draw_entity_meshes(
             QuaternionToMatrix(q),
             MatrixTranslate(pos_rh.x, pos_rh.y, pos_rh.z));
 
-        for (const auto& me : cache_it->second.meshes) {
+        for (const auto& me : model->lod0_meshes) {
             if (me.mesh.triangleCount <= 0) continue;
 
             const Material* mat_to_use = default_mat;

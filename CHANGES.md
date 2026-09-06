@@ -1,5 +1,129 @@
 # F4 Cleanup Pass — Changes Summary
 
+## Task 59 — Tranche 0d renderer half: the runtime glTF rewire lands
+
+**The boundary warning is gone for real.** `cmake/verify_boundary.cmake`
+now prints `F4 boundary check: PASS` with every target enabled —
+`f4-renderer`, `f4-world-viewer`, `f4-scenario-player` (and their libs)
+no longer link `f4-models` / `f4-world-convert` / `f4-terrain-convert` /
+`f4-lzss`. `-DF4_ENFORCE_BOUNDARY=ON` configures clean. The runtime
+loads glTF + PNG + JSON only; the last KoreaObj binary left the repo.
+
+- **f4-gltf**: parses materials / textures / images
+  (`pbrMetallicRoughness.baseColorTexture` → `source` → `uri`) and
+  `primitives[].material`; new `read_color_rgba()` (FLOAT VEC4 +
+  normalized UBYTE/USHORT) and `material_basecolor_uri()`.
+- **f4-renderer**: new `RuntimeModelCache` — loads
+  `Data/Models/koreaobj/<vis_type 5-digit>.gltf` per vis_type, extracts
+  LOD-0 geometry (pure-CPU `extract_gltf_lod_geometry`, headless-tested),
+  uploads meshes + PNG textures. `mesh_builder` rewritten around the
+  glTF path (the glTF→raylib transform is `(x, −y, z) × 1/0.3048` — the
+  exact inverse of the exporter's bake). `TextureCache` gains
+  `upload_png()` + `insert()`; the `ModelDatabase` upload path is gone.
+  `FeatureMeshResources` / `SceneDescription` / `draw_entity_meshes` /
+  `make_entity_render_resources` drop the model-db parameter; the class
+  table is `f4-world-types`.
+- **f4-world-viewer**: `model_db_3d` → `RenderResources::model_cache`;
+  the class table loads `Data/Classes/falcon4.ct.json`; the name helpers
+  (`objective_type_name`, `point_type_name`, `point_list_type_name`,
+  `movement_type_name`, `damage_type_name`) moved to
+  `f4-world-types/campaign_names.hpp`; binary imports (.cam /
+  THEATER.*) now run the `cam2json` / `terrain2json` CLIs as
+  subprocesses (CLI paths injected via generator expressions) — same
+  features, no parser links; the Hex Inspector's .cam manifest decode is
+  self-contained; the class-table browser loads the JSON table and
+  previews glTF models through the shared cache (the joined
+  OCD/UCD/VCD/FCD/WCD panels moved to the converted artifacts).
+- **f4-scenario-player**: the transitional `ModelDatabase` is gone;
+  models load per vis_type from `Data/Models/koreaobj` (discovered via
+  the scenario's `data_dir` / `AssetRoot::discover()`).
+- **f4-simulation**: the vestigial `Scenario::models_hdr_path /
+  models_lod_path / models_tex_path` fields are removed (parse, `@asset:`
+  resolution, campaign_qc echo, 17 templates, test fixtures).
+- **f4-models-viewer**: keeps its KoreaObj binary path (importer-side
+  dev tool) via a self-contained `legacy_mesh_builder` — the legacy
+  ModelGeometry conversion + TEX decode moved into the tool
+  (`TextureCache::insert()` is the generic injection seam).
+- **`temp/KoreaObj.{HDR,LOD,TEX}` deleted** (38 MB) + `.gitignore`
+  exception removed.
+- **Verified headless with a compile-only X11/GL shim** (vendored dev
+  headers + runtime `.so` symlinks — no root needed): full GL build
+  (raylib, all viewers, scenario player, all tests) compiles + links;
+  boundary verifier PASSES (`-DF4_ENFORCE_BOUNDARY=ON` clean); 2371
+  tests, the same 7 pre-existing flight-model/LZSS failures — zero
+  regressions; test_mesh_builder rewritten for the glTF extraction
+  pipeline (15 tests), f4-gltf gains material-chain tests, renderer
+  GPU tests run against the committed clean_data glTF fixture.
+- **User-env follow-ups**: run `f4import models --install <root> --data
+  Data --all` + `f4import textures …` (0e.1) to populate
+  `Data/Models/koreaobj/` locally, then visual QA: scenario player
+  (textured F-16), world viewer 3D (feature models), models-viewer
+  (unchanged legacy path).
+
+## Task 58 — Tranche 0e.3: @asset: resolver with manifest hash verification
+
+**The runtime's `@asset:` references now actually resolve.** `f4-assets`
+gained the P7 staleness check and the consumer-side resolver;
+`f4-simulation` gained the wiring. The `AssetStatus::stale` state finally
+exists as more than a declaration.
+
+- **Hash module (`f4-assets/src/hash.{hpp,cpp}`)**: zero-dependency
+  FNV-1a 64 + SHA-256 (FIPS 180-4). Pinned by published vectors AND by
+  reproducing the committed `Data/manifest.json` fingerprints — the
+  generator (Python `hashlib`) ↔ runtime (C++) contract verified on every
+  test run.
+- **Manifest schema**: entries carry optional content fingerprints
+  (size_bytes/sha256/fnv1a_64); the reader derives ids for the legacy
+  no-id entries via a path→id convention (`aircraft:f16`,
+  `class:falcon4.ct`, `simdata:braindata`, `theater:korea`,
+  `campaign:save1`, `koreaobj:00042`) mirrored by the upgraded
+  `generate_manifest.py`, which now emits explicit ids. Manifest gains
+  `theater`/`save` provenance context. New `simdata` asset family.
+- **`AssetRoot`**: `check()` hash-verifies — any size/sha/fnv mismatch on
+  a recorded fingerprint reports `stale` with a pointed detail; entries
+  without fingerprints verify vacuously (ok, never stale).
+  `resolve_ref(root, ref)` resolves `@asset:<id>` → concrete path, fails
+  with a reason on dangling ids / missing files, passes non-refs through.
+- **`Data/manifest.json` regenerated**: 36/36 assets addressable — also
+  picks up `Aircraft/kc10.json`, which the old manifest predated.
+- **f4-simulation wiring**: `Scenario` gains an optional `data_dir`
+  field; `load_scenario()` resolves `@asset:` path fields through the
+  manifest (`data_dir`, else `AssetRoot::discover()`), FAILS LOUD on a
+  dangling id, and preserves refs verbatim when no root is discoverable
+  (pre-Task-58 behavior; `record_path`/`fcs_trace_path` remain
+  build-dir-relative outputs, not assets).
+- **Tests**: 22 new (hash vectors + committed-fingerprint reproduction;
+  legacy derivation + fingerprint round-trip; stale/ok/missing check
+  paths; resolve_ref pass-through/id/dangling; scenario loader resolve +
+  fail-loud + bad data_dir). Suite: **2370 run, 7 pre-existing failures,
+  zero regressions.**
+- **Remaining in 0e**: 0e.1 full export (glTF+PNG — needs an install;
+  manifest step upgraded), 0e.2 template migration to `@asset:`
+  (consumers are the GL-side player/viewer — deferred with the renderer
+  half).
+
+## Task 57 — AAR redesign reconciliation (verified baseline + artifact cleanup)
+
+**The AAR redesign (real-aircraft tanker + 8-state USAF RefuelModule) is
+verified as the tree baseline.** The hand-applied `f4-aar-redesign.patch`
+change set had never been built/tested/logged, and 5 stale `.rej` artifacts
+sat in the tree. This pass audits every rejected hunk, runs the AAR suite +
+the full test suite, and cleans the artifacts.
+
+- **.rej audit**: all 5 rejected hunks are present in the sources in
+  *newer* form (superseded by Tranches 38/42/43/46 — e.g. the speed-
+  scheduled, AGL-gated q-damper replaced the patch's plain `gain*q`). All
+  5 `.rej` files deleted: `f4-ai/src/navigation_module.cpp.rej`,
+  `f4-flight-model/src/{fcs.cpp,flight_model.cpp}.rej`,
+  `f4-flight-model/include/f4/flight/{fcs.hpp,aircraft_state.hpp}.rej`.
+- **AAR verification**: `test_refuel_module` 8/8 PASS; `test_aar_e2e`
+  FullUsafProcedureWithRealTanker PASS (reaches Hold at 61 s; Departing/
+  Done remain the documented open tuning item).
+- **Full suite**: 2341/2348 PASS — the 7 failures are exactly the
+  pre-existing Task 56 set (zero regressions).
+- Open AAR items unchanged: Departing/Done E2E reach, 95th-pct envelope
+  tightening, tanker-side `TankerModule` (StubATC stopgap).
+
 ## Tranche 0d (renderer half, sim decoupling) — f4-models cut from f4-simulation
 
 **The headless runtime links zero legacy binary parsers.** `f4-simulation`
@@ -1546,6 +1670,66 @@ is the first fixture where the campaign engine can read REAL tasking
 generation from these live flights instead of the profile ladder.
 
 # F4 Cleanup Pass — Changes Summary
+
+## Task 59 — Tranche 0d renderer half: the runtime glTF rewire lands
+
+**The boundary warning is gone for real.** `cmake/verify_boundary.cmake`
+now prints `F4 boundary check: PASS` with every target enabled —
+`f4-renderer`, `f4-world-viewer`, `f4-scenario-player` (and their libs)
+no longer link `f4-models` / `f4-world-convert` / `f4-terrain-convert` /
+`f4-lzss`. `-DF4_ENFORCE_BOUNDARY=ON` configures clean. The runtime
+loads glTF + PNG + JSON only; the last KoreaObj binary left the repo.
+
+- **f4-gltf**: parses materials / textures / images
+  (`pbrMetallicRoughness.baseColorTexture` → `source` → `uri`) and
+  `primitives[].material`; new `read_color_rgba()` (FLOAT VEC4 +
+  normalized UBYTE/USHORT) and `material_basecolor_uri()`.
+- **f4-renderer**: new `RuntimeModelCache` — loads
+  `Data/Models/koreaobj/<vis_type 5-digit>.gltf` per vis_type, extracts
+  LOD-0 geometry (pure-CPU `extract_gltf_lod_geometry`, headless-tested),
+  uploads meshes + PNG textures. `mesh_builder` rewritten around the
+  glTF path (the glTF→raylib transform is `(x, −y, z) × 1/0.3048` — the
+  exact inverse of the exporter's bake). `TextureCache` gains
+  `upload_png()` + `insert()`; the `ModelDatabase` upload path is gone.
+  `FeatureMeshResources` / `SceneDescription` / `draw_entity_meshes` /
+  `make_entity_render_resources` drop the model-db parameter; the class
+  table is `f4-world-types`.
+- **f4-world-viewer**: `model_db_3d` → `RenderResources::model_cache`;
+  the class table loads `Data/Classes/falcon4.ct.json`; the name helpers
+  (`objective_type_name`, `point_type_name`, `point_list_type_name`,
+  `movement_type_name`, `damage_type_name`) moved to
+  `f4-world-types/campaign_names.hpp`; binary imports (.cam /
+  THEATER.*) now run the `cam2json` / `terrain2json` CLIs as
+  subprocesses (CLI paths injected via generator expressions) — same
+  features, no parser links; the Hex Inspector's .cam manifest decode is
+  self-contained; the class-table browser loads the JSON table and
+  previews glTF models through the shared cache (the joined
+  OCD/UCD/VCD/FCD/WCD panels moved to the converted artifacts).
+- **f4-scenario-player**: the transitional `ModelDatabase` is gone;
+  models load per vis_type from `Data/Models/koreaobj` (discovered via
+  the scenario's `data_dir` / `AssetRoot::discover()`).
+- **f4-simulation**: the vestigial `Scenario::models_hdr_path /
+  models_lod_path / models_tex_path` fields are removed (parse, `@asset:`
+  resolution, campaign_qc echo, 17 templates, test fixtures).
+- **f4-models-viewer**: keeps its KoreaObj binary path (importer-side
+  dev tool) via a self-contained `legacy_mesh_builder` — the legacy
+  ModelGeometry conversion + TEX decode moved into the tool
+  (`TextureCache::insert()` is the generic injection seam).
+- **`temp/KoreaObj.{HDR,LOD,TEX}` deleted** (38 MB) + `.gitignore`
+  exception removed.
+- **Verified headless with a compile-only X11/GL shim** (vendored dev
+  headers + runtime `.so` symlinks — no root needed): full GL build
+  (raylib, all viewers, scenario player, all tests) compiles + links;
+  boundary verifier PASSES (`-DF4_ENFORCE_BOUNDARY=ON` clean); 2371
+  tests, the same 7 pre-existing flight-model/LZSS failures — zero
+  regressions; test_mesh_builder rewritten for the glTF extraction
+  pipeline (15 tests), f4-gltf gains material-chain tests, renderer
+  GPU tests run against the committed clean_data glTF fixture.
+- **User-env follow-ups**: run `f4import models --install <root> --data
+  Data --all` + `f4import textures …` (0e.1) to populate
+  `Data/Models/koreaobj/` locally, then visual QA: scenario player
+  (textured F-16), world viewer 3D (feature models), models-viewer
+  (unchanged legacy path).
 
 ## G2 — The Interdiction Link (CAS against real battalions, the bombs booking)
 

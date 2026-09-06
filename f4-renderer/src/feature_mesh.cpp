@@ -7,28 +7,21 @@
 // f4-world-viewer/src/ground_layout_3d.cpp and stubbed in
 // f4-world-viewer/src/canvas.cpp. The pipeline:
 //
-//   1. entity_type → vis_type[0]  via ClassTable
-//   2. vis_type → ModelRecord + parse_lod + extract_model_geometry
-//                via ModelDatabase
-//   3. ModelGeometry → Raylib ::Mesh[]  via build_raylib_meshes
-//   4. ::Mesh[] → MeshEntry[]  via build_mesh_entries (pairs each mesh
-//                with its tex_id for per-mesh material lookup)
-//   5. Texture upload via TextureCache (lazy, keyed by tex_id)
-//   6. Per-feature DrawMesh at Translate(enu_pos) * RotateY(facing)
+//   1. entity_type → vis_type[0]  via f4-world-types ClassTable
+//   2. vis_type → glTF load + LOD-0 mesh extraction + upload
+//                via RuntimeModelCache (Data/Models/koreaobj/NNNNN.gltf)
+//   3. PNG texture upload via TextureCache (lazy, keyed by tex_id)
+//   4. Per-feature DrawMesh at Translate(enu_pos) * RotateY(facing)
 //
-// The mesh cache (keyed by vis_type) and texture cache (keyed by tex_id)
-// are owned by the caller (typically ViewerApp::Impl) so they persist
-// across frames and across selections — building a KoreaObj mesh is
-// expensive (~1-10ms per model), so caching is essential.
+// Tranche 0d (RENDERER_GLTF_REWIRE_PLAN.md): steps 2-3 read the glTF+PNG
+// export instead of KoreaObj binary — f4-models is no longer linked.
 
 #include <f4/renderer/feature_mesh.hpp>
 
 #include <f4/renderer/coord_transform.hpp>  // enu_to_raylib
-#include <f4/renderer/mesh_builder.hpp>     // build_raylib_meshes, build_mesh_entries
 #include <f4/math/constants.hpp>
 
-#include <f4/models/geometry.hpp>
-#include <f4/models/model_record.hpp>
+#include <f4/world_types/class_table.hpp>
 
 #include <raylib.h>
 #include <raymath.h>
@@ -45,67 +38,16 @@ namespace f4::renderer {
 void build_feature_mesh(FeatureMeshResources& res, int vis_type) {
     if (vis_type <= 0) return;
     // NOTE: class_table is NOT required here — the build path resolves
-    // vis_type → ModelRecord through the ModelDatabase alone. (The old
-    // check rejected a null class_table it never read, which made the
-    // vis-type-DIRECT path — V-3DLIVE's draw_vis_type_mesh, whose
-    // callers legitimately hold no table — a silent no-op.)
-    if (!res.model_db || !res.texture_cache || !res.mesh_cache) {
+    // vis_type → model through the RuntimeModelCache alone. (The draw
+    // path's vis-type-DIRECT entry — V-3DLIVE's draw_vis_type_mesh,
+    // whose callers legitimately hold no table — shares this builder.)
+    if (!res.model_cache || !res.texture_cache) {
         return;
     }
 
-    // Already cached (or previously failed) — don't rebuild.
-    auto it = res.mesh_cache->find(vis_type);
-    if (it != res.mesh_cache->end() && it->second.built) return;
-
-    auto& db = *res.model_db;
-    const auto* rec = db.model(vis_type);
-    if (!rec || rec->lods.empty()) {
-        // Mark as built so we don't retry every frame.
-        if (it != res.mesh_cache->end()) it->second.built = true;
-        else (*res.mesh_cache)[vis_type].built = true;
-        return;
-    }
-
-    // Lock to LOD 0 (highest detail) — same convention as the 3D panel.
-    const int lod = 0;
-    auto err = db.parse_lod(vis_type, lod);
-    if (!err.empty()) {
-        if (it != res.mesh_cache->end()) it->second.built = true;
-        else (*res.mesh_cache)[vis_type].built = true;
-        return;
-    }
-
-    // Default ModelState: texture_set=0, no DOFs/switches active.
-    // Matches the existing 3D-panel behavior.
-    f4::models::ModelState default_state;
-    default_state.texture_set = 0;
-    default_state.n_texture_sets = std::max(1, static_cast<int>(rec->n_texture_sets));
-
-    auto geom = db.extract_model_geometry(vis_type, lod, default_state);
-    if (geom.meshes.empty()) {
-        (*res.mesh_cache)[vis_type].built = true;
-        return;
-    }
-
-    // Build Raylib meshes + mesh entries (consolidated path).
-    auto raylib_meshes = build_raylib_meshes(
-        geom, db.color_bank(), model_vertex_to_raylib);
-    auto entries = build_mesh_entries(geom, raylib_meshes);
-
-    FeatureMeshCacheEntry cache_entry;
-    cache_entry.meshes = std::move(entries);
-    cache_entry.built = true;
-    (*res.mesh_cache)[vis_type] = std::move(cache_entry);
-
-    // Upload any new textures via the shared TextureCache. Tex_ids come
-    // from the geometry's per-mesh material assignment.
-    std::vector<int> tex_ids;
-    for (const auto& me : (*res.mesh_cache)[vis_type].meshes) {
-        if (me.tex_id >= 0) tex_ids.push_back(me.tex_id);
-    }
-    if (!tex_ids.empty()) {
-        res.texture_cache->upload(db, tex_ids);
-    }
+    // Lazy load + build; RuntimeModelCache marks the entry built even
+    // on failure so we don't retry every frame.
+    res.model_cache->build_model(vis_type, *res.texture_cache);
 }
 
 // ── draw_vis_type_mesh ─────────────────────────────────────────────────────
@@ -114,7 +56,7 @@ void build_feature_mesh(FeatureMeshResources& res, int vis_type) {
 // does after its class-table lookup, for callers that ALREADY hold the
 // vis type (VisualModelComponent::vis_type — the session entities, whose
 // spawn paths resolved the class table against the session's own CT).
-// Shares the same per-vis_type mesh cache and draw path, so a feature and
+// Shares the same RuntimeModelCache and draw path, so a feature and
 // a session entity of the same vis type reuse one GPU upload.
 
 DrawStats draw_vis_type_mesh(
@@ -124,8 +66,8 @@ DrawStats draw_vis_type_mesh(
     float facing_deg)
 {
     DrawStats stats{};
-    if (!res.model_db || !res.texture_cache ||
-        !res.lit_shader || !res.mesh_cache || !res.default_material) {
+    if (!res.model_cache || !res.texture_cache ||
+        !res.lit_shader || !res.default_material) {
         return stats;  // incompletely configured
     }
     if (vis_type <= 0) {
@@ -135,8 +77,8 @@ DrawStats draw_vis_type_mesh(
     // Lazily build the mesh (cached by vis_type).
     build_feature_mesh(res, vis_type);
 
-    auto cache_it = res.mesh_cache->find(vis_type);
-    if (cache_it == res.mesh_cache->end() || cache_it->second.meshes.empty()) {
+    const RuntimeModel* model = res.model_cache->lookup(vis_type);
+    if (!model || model->lod0_meshes.empty()) {
         return stats;  // build failed or yielded no meshes
     }
 
@@ -159,9 +101,10 @@ DrawStats draw_vis_type_mesh(
     //
     // The facing sign matches the existing footprint code in
     // ground_layout_3d.cpp (which uses facing_rad = facing * (π/180),
-    // no negation). The model_vertex_to_raylib transform already maps
-    // FreeFalcon's -Z-up BSP convention to Raylib's +Y-up — no extra
-    // RotateX(π) needed (was the GLV3D-DIAG-1 / GLV3D-DIAG-2 bug).
+    // no negation). The glTF→raylib transform maps the exported
+    // meters/Y-up geometry into the same Raylib frame the binary path
+    // produced — no extra RotateX(π) needed (was the GLV3D-DIAG-1 /
+    // GLV3D-DIAG-2 bug).
     const auto pos_f = enu_to_raylib(enu_x, enu_y, enu_z);
     const Vector3 pos_rh = { pos_f.x, pos_f.y, pos_f.z };
     const float facing_rad = (-facing_deg) * static_cast<float>(f4::math::DEG_TO_RAD);
@@ -170,12 +113,13 @@ DrawStats draw_vis_type_mesh(
         MatrixTranslate(pos_rh.x, pos_rh.y, pos_rh.z) );
 
     // Draw each mesh entry. Disable backface culling because
-    // FreeFalcon's BSP models have inconsistent winding order (same
-    // convention as draw_meshes() — see draw_3d.cpp:70-73 for rationale).
+    // FreeFalcon's BSP-derived geometry has inconsistent winding order
+    // (same convention as draw_meshes() — see draw_3d.cpp:70-73 for
+    // rationale).
     rlDisableBackfaceCulling();
     BeginBlendMode(BLEND_ALPHA);
 
-    for (const auto& me : cache_it->second.meshes) {
+    for (const auto& me : model->lod0_meshes) {
         if (me.mesh.triangleCount <= 0) continue;
 
         const ::Material* mat_to_use = res.default_material;
@@ -206,8 +150,8 @@ DrawStats draw_feature_mesh(
     float facing_deg)
 {
     DrawStats stats{};
-    if (!res.model_db || !res.class_table || !res.texture_cache ||
-        !res.lit_shader || !res.mesh_cache || !res.default_material) {
+    if (!res.model_cache || !res.class_table || !res.texture_cache ||
+        !res.lit_shader || !res.default_material) {
         return stats;  // incompletely configured
     }
 

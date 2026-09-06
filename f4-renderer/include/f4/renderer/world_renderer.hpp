@@ -45,8 +45,7 @@
 #include <functional>
 #include <vector>
 
-namespace f4::models { class ModelDatabase; }
-namespace f4::world_convert { class ClassTable; }
+namespace f4::world_types { struct ClassTable; }
 
 namespace f4::renderer {
 
@@ -108,19 +107,21 @@ struct SceneDescription {
     f4::entities::EntityWorld* world = nullptr;
     std::vector<f4::entities::EntityId> entities;
 
-    /// KoreaObj model database + Falcon4.ct class table for the feature
-    /// model path. May be null (feature dispatch degrades to no-ops).
-    f4::models::ModelDatabase* model_db = nullptr;
-    f4::world_convert::ClassTable* class_table = nullptr;
+    /// Runtime class table (f4-world-types, JSON) for the feature model
+    /// path. May be null (feature dispatch degrades to no-ops). The
+    /// model side of the path is RenderResources::model_cache (glTF),
+    /// which render_world() reads through the resources — no pointer
+    /// here.
+    f4::world_types::ClassTable* class_table = nullptr;
 
     /// Layer toggles applied to GroundLayoutComponent dispatch and the
     /// standalone airfield below.
     AirfieldDrawToggles airfield_toggles;
 
-    /// Render 3D KoreaObj feature models for FeatureSetComponent entities
-    /// (requires model_db + class_table). When false or when models
-    /// aren't available, enable airfield_toggles.features to draw flat
-    /// footprints instead.
+    /// Render 3D feature models for FeatureSetComponent entities
+    /// (requires class_table + a configured model cache). When false or
+    /// when models aren't available, enable airfield_toggles.features to
+    /// draw flat footprints instead.
     bool draw_feature_models = true;
 
     // ── VisualModelComponent entity meshes ─────────────────────────────

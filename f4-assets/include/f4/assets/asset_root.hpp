@@ -60,4 +60,29 @@ struct AssetReport {
 [[nodiscard]] std::vector<AssetReport> check(const AssetRoot& root,
                                               const std::vector<RequiredAsset>& required);
 
+// ── @asset: reference resolution (Task 58) ────────────────────────────────
+//
+// The consumer-side half of the pipeline: scenario JSONs (and world JSON
+// `terrain_file`) carry "@asset:<id>" strings; this is where they become
+// concrete paths. Non-@asset: inputs pass through unchanged (the caller
+// resolves them against their own base dir); @asset: inputs go through the
+// manifest, and a missing id or file is an ERROR (fail loud — the manifest
+// is the authority).
+
+struct RefResolution {
+    bool ok = false;
+    std::filesystem::path path;  // concrete path when ok; empty otherwise
+    std::string error;           // human-readable reason when !ok
+};
+
+[[nodiscard]] RefResolution resolve_ref(const AssetRoot& root,
+                                        std::string_view asset_ref_or_path);
+
+// Hash-verify one entry's file against its recorded fingerprints (size,
+// sha256, fnv1a_64 — whichever are recorded). Returns nullopt when the file
+// matches (or the entry carries no fingerprints and there is nothing to
+// check); returns a human-readable mismatch reason otherwise.
+[[nodiscard]] std::optional<std::string> verify_entry_fingerprints(
+    const AssetRoot& root, const AssetEntry& entry);
+
 } // namespace f4::assets

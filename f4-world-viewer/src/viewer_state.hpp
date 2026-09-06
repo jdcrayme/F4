@@ -43,19 +43,17 @@
 #include <f4/simulation/campaign_session_runner.hpp>  // V-THREAD: the campaign thread
 #include <f4/simulation/bubble_manager.hpp>  // V-3DLIVE: vehicle roster
 
-// KoreaObj model database + Falcon4.ct class table — used by the
-// Ground Layout 3D panel to render real 3D feature models (buildings,
-// towers, hangars, etc.) at their FeatureEntryState offsets.
+// Runtime class table (f4-world-types, JSON) — used by the
+// Ground Layout 3D panel and the 3D entity modes to resolve
+// entity_type → vis_type. The models themselves load through
+// RenderResources::model_cache (RuntimeModelCache — glTF + PNG from
+// Data/Models/koreaobj/, Tranche 0d).
 //
-// IMPORTANT: include these BEFORE <raylib.h>. Raylib defines `PI` as a
-// preprocessor macro which would otherwise collide with any `using PI`
-// declaration brought in transitively. We don't pull in f4-flight-model
-// here (no flight headers in the world-viewer), but keeping f4-models
-// before raylib is the safe pattern used across this codebase.
-#include <f4/models/model_database.hpp>
-#include <f4/models/geometry.hpp>
-#include <f4/models/texture.hpp>
-#include <f4/world_convert/class_table.hpp>
+// Tranche 0d: f4-models / f4-world-convert are no longer linked by the
+// viewer — the KoreaObj binary path is gone. The glTF models come from
+// `f4import models` / `f4import textures` exports.
+#include <f4/world_types/class_table.hpp>
+#include <f4/world_types/campaign_names.hpp>
 
 // f4-renderer — consolidated 3D rendering components (orbit camera,
 // lit shader, mesh builder, texture cache, draw helpers, symbols,
@@ -756,34 +754,36 @@ struct ViewerApp::Impl {
     // shows runway/taxiway/parking geometry).
     bool ground_layout_3d_show_models = true;
 
-    // --- KoreaObj model database + class table (lazy) -------------------
+    // --- Runtime class table + glTF model cache (lazy) ------------------
     //
-    // Loaded once on first use of draw_ground_layout_3d() when an
-    // installation is configured. We don't load eagerly at startup
-    // because:
-    //   - ModelDatabase::load() is ~50-150ms for a full KoreaObj
-    //   - The user may never open the 3D panel
+    // Loaded once on first use of draw_ground_layout_3d() (or the 3D
+    // entity modes). We don't load eagerly at startup because:
+    //   - The glTF discovery + class-table JSON parse are cheap but the
+    //     user may never open a 3D view
     //   - We need the GL context for any mesh upload, and that's not
     //     available until run() calls InitWindow()
     //
     // `models_3d_load_attempted` distinguishes "haven't tried yet" from
     // "tried and failed" so we don't re-attempt every frame after a
     // failure (the failure message would otherwise pollute status_msg).
-    std::optional<f4::models::ModelDatabase> model_db_3d;
-    f4::world_convert::ClassTable class_table_3d;
+    //
+    // The model meshes live in render_res_3d.model_cache (keyed by
+    // vis_type) — there is no separate ModelDatabase anymore. Point it
+    // at Data/ with set_model_data_dir(); check readiness via
+    // model_cache.ready().
+    f4::world_types::ClassTable class_table_3d;
     bool models_3d_load_attempted = false;
     bool models_3d_loaded = false;
     std::string models_3d_error;  // empty if loaded successfully
 
     // --- Shared GPU resources (f4::renderer::RenderResources) ------------
     //
-    // Owns the mesh cache (one Raylib Mesh per unique KoreaObj
-    // parent_index — features sharing a vis_type share one GPU upload),
-    // the texture cache, the lit shader, the default material, lighting
-    // state, and the airfield geometry cache. Shared across the 3D
-    // Ground Layout panel, the 2D canvas's feature-mesh pass, and the
-    // 3D world mode — a feature rendered once in any view is cached for
-    // all the others.
+    // Owns the glTF model cache (one uploaded model per unique vis_type
+    // — features sharing a vis_type share one GPU upload), the texture
+    // cache, the lit shader, the default material, lighting state, and
+    // the airfield geometry cache. Shared across the 3D Ground Layout
+    // panel, the 2D canvas's feature-mesh pass, and the 3D world mode —
+    // a feature rendered once in any view is cached for all the others.
     //
     // Must be unloaded before the GL context goes away —
     // render_res_3d.unload_all() (called from run()'s shutdown path).

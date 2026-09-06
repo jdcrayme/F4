@@ -32,10 +32,6 @@
 
 #include <vector>
 
-namespace f4::models {
-class ModelDatabase;
-} // namespace f4::models
-
 namespace f4::renderer {
 
 // ---------------------------------------------------------------------------
@@ -96,10 +92,10 @@ struct EntityMeshDraw {
     float qx = 0.0f;
     float qy = 0.0f;
     float qz = 0.0f;
-    int parent_index = -1;   ///< KoreaObj model cache key
+    int parent_index = -1;   ///< model cache key (vis_type)
 };
 
-/// Draw entities as KoreaObj meshes at their ENU positions/orientations.
+/// Draw entities as loaded glTF models at their ENU positions/orientations.
 /// Meshes are built lazily via RenderResources::build_mesh_for_model() on
 /// first encounter; the lit shader, backface-cull disable, and alpha blend
 /// are managed internally.
@@ -111,7 +107,6 @@ struct EntityMeshDraw {
 /// Must be called inside BeginMode3D/EndMode3D.
 DrawStats draw_entity_meshes(
     RenderResources& res,
-    f4::models::ModelDatabase& db,
     const std::vector<EntityMeshDraw>& entities,
     float cull_enu_x = 0.0f, float cull_enu_y = 0.0f, float cull_enu_z = 0.0f,
     float cull_radius_ft = 0.0f);

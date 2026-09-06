@@ -9,9 +9,9 @@
 //     <family>:<local-id>
 //
 // `family` is one of the registered families (koreaobj / class / theater /
-// campaign / aircraft / tileset). `local-id` is lowercase `[a-z0-9._-]`,
-// no spaces. The zero-padded numeric form for koreaobj (`koreaobj:00042`)
-// preserves sort order.
+// campaign / aircraft / tileset / simdata). `local-id` is lowercase
+// `[a-z0-9._-]`, no spaces. The zero-padded numeric form for koreaobj
+// (`koreaobj:00042`) preserves sort order.
 //
 // References inside JSON documents (world JSON `terrain_file`, scenario
 // paths) use the prefixed form `@asset:<id>` to distinguish an asset ID
@@ -35,6 +35,7 @@ enum class AssetFamily {
     campaign,
     aircraft,
     tileset,
+    simdata,   // Data/SimData/*.json (braindata, formdat, ... — Task 58)
     unknown
 };
 

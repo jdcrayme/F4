@@ -74,10 +74,15 @@ target_include_directories(test_draw_3d PRIVATE ${IMGUI_DIR} ${IMGUI_DIR}/backen
 target_link_libraries(test_draw_3d PRIVATE f4-renderer GTest::gtest_main)
 add_test(NAME draw_3d COMMAND test_draw_3d)
 
-# test_feature_mesh uses the bundled KoreaObj + FALCON4.ct fixtures; the
+# test_feature_mesh uses the committed glTF fixture tree
+# (f4-import/tests/fixtures/clean_data/Models/koreaobj — the same tree the
+# f4import round-trip tests use) + the committed JSON class table. The
 # GPU-context tests auto-skip if those fixtures aren't available.
 add_executable(test_feature_mesh test_feature_mesh.cpp ${IMGUI_SOURCES})
 target_include_directories(test_feature_mesh PRIVATE ${IMGUI_DIR} ${IMGUI_DIR}/backends)
+target_compile_definitions(test_feature_mesh PRIVATE
+    F4_KOREAOBJ_DATA_DIR="${CMAKE_SOURCE_DIR}/f4-import/tests/fixtures/clean_data"
+    F4_CLASS_TABLE_JSON="${CMAKE_SOURCE_DIR}/Data/Classes/falcon4.ct.json")
 target_link_libraries(test_feature_mesh PRIVATE f4-renderer GTest::gtest_main)
 add_test(NAME feature_mesh COMMAND test_feature_mesh)
 

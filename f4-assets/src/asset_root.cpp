@@ -2,8 +2,13 @@
 
 #include <f4/assets/asset_root.hpp>
 
+#include <f4/assets/asset_id.hpp>
+#include <f4/assets/hash.hpp>
+
 #include <cstdlib>
+#include <fstream>
 #include <iostream>
+#include <sstream>
 #include <system_error>
 
 namespace f4::assets {
@@ -135,8 +140,18 @@ std::vector<AssetReport> check(const AssetRoot& root,
         } else {
             std::error_code ec;
             if (std::filesystem::exists(p, ec)) {
-                r.status = AssetStatus::ok;
-                r.detail.clear();
+                // File exists — now the P7 freshness check (Task 58): any
+                // recorded fingerprint that no longer matches the file on
+                // disk reports `stale`. Existence alone is never evidence
+                // of freshness.
+                const AssetEntry* entry = root.manifest().find(req.id);
+                if (auto mismatch = verify_entry_fingerprints(root, *entry)) {
+                    r.status = AssetStatus::stale;
+                    r.detail = *mismatch;
+                } else {
+                    r.status = AssetStatus::ok;
+                    r.detail.clear();
+                }
             } else {
                 r.status = AssetStatus::missing;
                 r.detail = "file missing on disk: " + p.string();
@@ -144,6 +159,78 @@ std::vector<AssetReport> check(const AssetRoot& root,
         }
         out.push_back(std::move(r));
     }
+    return out;
+}
+
+std::optional<std::string> verify_entry_fingerprints(const AssetRoot& root,
+                                                     const AssetEntry& entry) {
+    if (!entry.has_fingerprints()) return std::nullopt;  // nothing recorded to check
+    const auto p = root.data_dir() / entry.path;
+    std::error_code ec;
+    if (!std::filesystem::exists(p, ec)) return "file missing on disk: " + p.string();
+
+    if (entry.size_bytes.has_value()) {
+        const auto sz = file_size_bytes(p);
+        if (!sz) return "cannot stat file: " + p.string();
+        if (*sz != *entry.size_bytes) {
+            return "size mismatch: manifest says " + std::to_string(*entry.size_bytes) +
+                   " bytes, disk has " + std::to_string(*sz) + " (" + p.string() + ")";
+        }
+    }
+    if (entry.fnv1a_64.has_value() || entry.sha256.has_value()) {
+        std::ifstream f(p, std::ios::binary);
+        if (!f) return "cannot open file: " + p.string();
+        std::ostringstream ss;
+        ss << f.rdbuf();
+        const std::string content = ss.str();
+        if (entry.fnv1a_64.has_value() &&
+            *entry.fnv1a_64 != fnv1a_64_hex(content)) {
+            return "fnv1a_64 mismatch: manifest says " + *entry.fnv1a_64 +
+                   ", disk hashes to " + fnv1a_64_hex(content) + " (" + p.string() + ")";
+        }
+        if (entry.sha256.has_value() && *entry.sha256 != sha256_hex(content)) {
+            return "sha256 mismatch: manifest says " + *entry.sha256 +
+                   ", disk hashes to " + sha256_hex(content) + " (" + p.string() + ")";
+        }
+    }
+    return std::nullopt;
+}
+
+RefResolution resolve_ref(const AssetRoot& root, std::string_view asset_ref_or_path) {
+    RefResolution out;
+    const std::string s(asset_ref_or_path);
+    if (!is_asset_ref(s)) {
+        // Not a reference — pass through; the caller resolves it against
+        // its own base directory.
+        out.ok = true;
+        out.path = std::filesystem::path(s);
+        return out;
+    }
+    if (!root.valid()) {
+        out.error = "asset root invalid — cannot resolve " + s;
+        return out;
+    }
+    AssetId id;
+    try {
+        id = parse_asset_ref(s);
+    } catch (const std::exception& e) {
+        out.error = e.what();
+        return out;
+    }
+    const AssetEntry* e = root.manifest().find(id);
+    if (!e) {
+        out.error = "id '" + id.to_string() + "' is not in the manifest (" +
+                    root.data_dir().string() + "/manifest.json)";
+        return out;
+    }
+    const auto p = root.data_dir() / e->path;
+    std::error_code ec;
+    if (!std::filesystem::exists(p, ec)) {
+        out.error = "file missing on disk for " + id.to_string() + ": " + p.string();
+        return out;
+    }
+    out.ok = true;
+    out.path = p;
     return out;
 }
 

@@ -24,9 +24,7 @@
 #include <f4/terrain/terrain_data.hpp>
 #include <f4/viewer/enum_text.hpp>
 #include <f4/viewer/file_dialog.hpp>
-#include <f4/world_convert/class_table.hpp>      // unit_subtype_name(), DOMAIN_*
-#include <f4/world_convert/objective_decoder.hpp> // objective_type_name()
-#include <f4/world_convert/theater_data.hpp>     // point_type_name(), point_list_type_name()
+#include <f4/world_types/class_table.hpp>        // unit_subtype_name(), DOMAIN_*
 
 #include <imgui.h>
 #include <rlImGui.h>
@@ -684,19 +682,14 @@ void ViewerApp::draw_imgui() {
     impl_->hex_inspector.draw();
 
     // --- Class Table Browser panel (Tools > Class Table Browser) ---
-    // Provide the installation and model database for cross-referencing.
-    // The model DB is lazy-loaded by draw_ground_layout_3d(); if the user
-    // opens the Class Table Browser WITHOUT first opening the 3D ground
-    // layout panel, model_db_3d would be std::nullopt and the browser's
-    // 3D preview would silently no-op. Force-load it here when the
-    // browser is open so visType previews always work.
-    impl_->class_table_browser.set_install(
-        impl_->install.has_value() ? &*impl_->install : nullptr);
+    // Provide the shared render resources (glTF model cache + textures +
+    // lit shader) for the 3D visType preview. The glTF data is
+    // lazy-discovered by ensure_models_3d_loaded(); force-load it here
+    // when the browser is open so visType previews always work.
     if (impl_->class_table_browser.is_open()) {
         impl_->ensure_models_3d_loaded();
     }
-    impl_->class_table_browser.set_model_db(
-        impl_->model_db_3d.has_value() ? &*impl_->model_db_3d : nullptr);
+    impl_->class_table_browser.set_render_resources(&impl_->render_res_3d);
     impl_->class_table_browser.draw();
 
     // --- Symbol Creator panel (Tools > Symbol Creator) ---

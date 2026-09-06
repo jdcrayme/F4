@@ -31,6 +31,7 @@ target_include_directories(test_hex_model PRIVATE
 target_link_libraries(test_hex_model PRIVATE
     GTest::gtest_main
     f4-world-convert
+    f4-world-types
         f4-terrain
 )
 target_compile_definitions(test_hex_model PRIVATE
@@ -69,5 +70,5 @@ add_executable(test_enum_text
 target_include_directories(test_enum_text PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../include
 )
-target_link_libraries(test_enum_text PRIVATE GTest::gtest_main f4-world-convert)
+target_link_libraries(test_enum_text PRIVATE GTest::gtest_main f4-world-convert f4-world-types)
 gtest_discover_tests(test_enum_text)

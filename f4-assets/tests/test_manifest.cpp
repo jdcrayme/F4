@@ -175,3 +175,97 @@ TEST(Manifest, AtomicWriteDoesNotLeaveTempOnSuccess) {
         << "atomic rename should leave no .tmp file behind";
     std::filesystem::remove_all(tmp);
 }
+
+// ============================================================================
+// Task 58 (NO_BINARY_RUNTIME_PLAN Tranche 0e): legacy fingerprint schema.
+//
+// The Tranche 0a manifests (generate_manifest.py ≤ 0a) carry
+// {path, size_bytes, sha256, fnv1a_64} with NO id. The reader derives ids
+// from paths (the convention mirrored by the upgraded generator) so the
+// committed manifest resolves without regeneration. Explicit ids are kept
+// as-is. Fingerprints round-trip through the writer.
+// ============================================================================
+
+namespace {
+const char* kLegacyFingerprintManifest = R"({
+  "f4": { "v": 1 },
+  "format": "f4-data-manifest",
+  "version": 1,
+  "generated_at": "2026-09-05T12:16:43Z",
+  "source_install": "D:\\SteamLibrary\\steamapps\\common\\Falcon 4.0",
+  "theater": "korea",
+  "save": "save1",
+  "data_dir": "Data/",
+  "excluded_dirs": ["Models"],
+  "assets": [
+    { "path": "Aircraft/f16.json", "size_bytes": 11413,
+      "sha256": "aa11", "fnv1a_64": "bb22" },
+    { "path": "Aircraft/Mig19.json", "size_bytes": 1, "sha256": "cc33" },
+    { "path": "Classes/falcon4.ct.json", "size_bytes": 305215 },
+    { "path": "SimData/braindata.json", "size_bytes": 900 },
+    { "path": "SimData/visualdata.json", "size_bytes": 901 },
+    { "path": "Theater/korea/terrain.json", "size_bytes": 85818 },
+    { "path": "World/korea.world.json", "size_bytes": 11846124 },
+    { "path": "Models/koreaobj/00042.gltf", "size_bytes": 555 },
+    { "path": "Misc/unmapped.txt", "size_bytes": 1 }
+  ]
+})";
+} // namespace
+
+TEST(Manifest, LegacyFingerprintEntriesDeriveIdsFromPaths) {
+    const Manifest m = read_manifest(kLegacyFingerprintManifest);
+    ASSERT_EQ(m.assets.size(), 9u);
+    EXPECT_EQ(m.theater, "korea");
+    EXPECT_EQ(m.save, "save1");
+
+    EXPECT_EQ(m.find(AssetId{AssetFamily::aircraft, "f16"})->path, "Aircraft/f16.json");
+    EXPECT_EQ(m.find(AssetId{AssetFamily::aircraft, "mig19"})->path, "Aircraft/Mig19.json")
+        << "uppercase stems lowercase into the local-id";
+    EXPECT_EQ(m.find(AssetId{AssetFamily::class_, "falcon4.ct"})->path,
+              "Classes/falcon4.ct.json");
+    EXPECT_EQ(m.find(AssetId{AssetFamily::simdata, "braindata"})->path,
+              "SimData/braindata.json");
+    EXPECT_EQ(m.find(AssetId{AssetFamily::theater, "korea"})->path,
+              "Theater/korea/terrain.json");
+    EXPECT_EQ(m.find(AssetId{AssetFamily::campaign, "save1"})->path,
+              "World/korea.world.json")
+        << "World/*.world.json takes the campaign id from the manifest's save field";
+    EXPECT_EQ(m.find(AssetId{AssetFamily::koreaobj, "00042"})->path,
+              "Models/koreaobj/00042.gltf");
+    // No convention match — the entry stays listed but unaddressable.
+    EXPECT_EQ(m.find(AssetId{AssetFamily::tileset, "unmapped"}), nullptr);
+    EXPECT_FALSE(m.assets[8].id.valid());
+}
+
+TEST(Manifest, LegacyFingerprintFieldsRoundTrip) {
+    const Manifest m = read_manifest(kLegacyFingerprintManifest);
+    const AssetEntry& f16 = *m.find(AssetId{AssetFamily::aircraft, "f16"});
+    ASSERT_TRUE(f16.has_fingerprints());
+    EXPECT_EQ(*f16.size_bytes, 11413u);
+    EXPECT_EQ(*f16.sha256, "aa11");
+    EXPECT_EQ(*f16.fnv1a_64, "bb22");
+    // The entry without sha/fnv still counts (size alone is a fingerprint).
+    const AssetEntry& ct = *m.find(AssetId{AssetFamily::class_, "falcon4.ct"});
+    ASSERT_TRUE(ct.has_fingerprints());
+    EXPECT_FALSE(ct.sha256.has_value());
+
+    const std::string json = write_manifest(m);
+    const Manifest m2 = read_manifest(json);
+    ASSERT_EQ(m2.assets.size(), 9u);
+    const AssetEntry& f16b = *m2.find(AssetId{AssetFamily::aircraft, "f16"});
+    EXPECT_EQ(f16b.path, f16.path);
+    EXPECT_EQ(*f16b.size_bytes, 11413u);
+    EXPECT_EQ(*f16b.sha256, "aa11");
+    EXPECT_EQ(*f16b.fnv1a_64, "bb22");
+    EXPECT_EQ(m2.theater, "korea");
+    EXPECT_EQ(m2.save, "save1");
+}
+
+TEST(Manifest, ExplicitIdEntriesAreKeptAsIs) {
+    // The new-schema sample already carries ids; derivation must NOT
+    // rewrite them (id takes precedence over path-derived guesses).
+    const Manifest m = read_manifest(kSampleManifest);
+    const AssetEntry* korea = m.find(AssetId{AssetFamily::theater, "korea"});
+    ASSERT_NE(korea, nullptr);
+    EXPECT_EQ(korea->path, "Theater/korea/theater.json");
+}

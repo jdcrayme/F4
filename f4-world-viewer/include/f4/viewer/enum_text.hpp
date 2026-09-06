@@ -26,7 +26,7 @@
 
 #pragma once
 
-#include <f4/world_convert/class_table.hpp>  // DataType enum (DTYPE_*)
+#include <f4/world_types/class_table.hpp>   // DataType enum (DTYPE_*)
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -93,7 +93,7 @@ namespace f4::viewer {
 // Falcon4.ct data (Phase 1 fix).
 // ---------------------------------------------------------------------------
 [[nodiscard]] inline const char* data_type_name(uint8_t dt) noexcept {
-    using f4::world_convert::DataType;
+    using f4::world_types::DataType;
     switch (static_cast<DataType>(dt)) {
         case DataType::DTYPE_NOTHING:       return "Nothing";
         case DataType::DTYPE_FEATURE:       return "Feature";      // -> Falcon4.FCD

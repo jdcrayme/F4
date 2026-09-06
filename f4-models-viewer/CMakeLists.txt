@@ -37,6 +37,7 @@ add_library(f4_models_viewer STATIC
     src/viewer_app.cpp
     src/camera3d.cpp
     src/scene.cpp
+    src/legacy_mesh_builder.cpp
     src/canvas3d.cpp
     src/file_ops.cpp
     src/imgui_panels.cpp

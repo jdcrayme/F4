@@ -17,6 +17,8 @@
 #include "f4/simulation/scenario.hpp"
 #include "f4/simulation/simulation.hpp"  // Tranche 0d: AssetModelRefSkipsBinaryLoad
 
+#include <f4/assets/asset_id.hpp>        // Task 58: is_asset_ref
+
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -61,11 +63,6 @@ TEST(ScenarioLoader, LoadsValidScenarioWithAllFields) {
     EXPECT_EQ(s.total_ticks, 600);
     EXPECT_TRUE(s.record);
     EXPECT_EQ(s.record_path, "trace.json");
-
-    // Asset paths (NOT resolved by load_scenario_from_string — only by load_scenario)
-    EXPECT_EQ(s.models_hdr_path, "KoreaObj.HDR");
-    EXPECT_EQ(s.models_lod_path, "KoreaObj.LOD");
-    EXPECT_EQ(s.models_tex_path, "KoreaObj.TEX");
 
     // Aircraft
     ASSERT_EQ(s.aircraft.size(), 1u);
@@ -587,30 +584,6 @@ TEST(ScenarioLoader, AssetRefInTerrainJsonPathIsPreserved) {
     EXPECT_EQ(s.aircraft[0].aircraft_config_path, "@asset:aircraft:f16");
 }
 
-TEST(ScenarioLoader, AssetRefInModelsPathsIsPreserved) {
-    const auto json = R"({
-        "name": "asset_models_test",
-        "models_hdr_path": "@asset:koreaobj:00001",
-        "models_lod_path": "@asset:koreaobj:00001",
-        "models_tex_path": "@asset:koreaobj:00001",
-        "aircraft": [
-            {"callsign":"E1","aircraft_config_path":"f16.json",
-             "aircraft_name":"F-16","vis_type_index":1052,
-             "parking_spot":{"x":0,"y":0,"z":0},"heading_rad":0,"initial_fuel_lbs":1}
-        ],
-        "airfield": {
-            "active_runway_id": 36,
-            "threshold_position": {"x":0,"y":0,"z":0},
-            "runway_end_position": {"x":0,"y":1000,"z":0},
-            "taxi_route": [{"x":0,"y":0,"z":0},{"x":0,"y":1000,"z":0}]
-        }
-    })";
-    auto s = load_scenario_from_string(json);
-    EXPECT_EQ(s.models_hdr_path.string(), "@asset:koreaobj:00001");
-    EXPECT_EQ(s.models_lod_path.string(), "@asset:koreaobj:00001");
-    EXPECT_EQ(s.models_tex_path.string(), "@asset:koreaobj:00001");
-}
-
 TEST(ScenarioLoader, LoadScenarioFilePreservesAssetRef) {
     // load_scenario() (the file form) must NOT resolve @asset: refs
     // against the scenario's parent dir — they're preserved as-is so
@@ -644,13 +617,12 @@ TEST(ScenarioLoader, LoadScenarioFilePreservesAssetRef) {
     fs::remove_all(tmp);
 }
 
-// ── Tranche 0d: @asset: model refs skip the binary KoreaObj load ──────────
+// ── Tranche 0d: scenarios load without any model-path fields ─────────────
 //
-// Simulation::load_models() must NOT attempt ModelDatabase::load() when the
-// scenario's models_hdr_path is an @asset: reference — the binary loader
-// can't resolve asset IDs, and the runtime glTF loader (renderer-owned)
-// resolves them lazily per vis_type. This test verifies the skip: initialize
-// succeeds, the model db stays empty (model_record null), and the aircraft
+// The KoreaObj model paths left the Scenario struct with the renderer
+// glTF rewire — the runtime resolves models per vis_type through
+// Data/Models/koreaobj (RuntimeModelCache). This test verifies a
+// scenario with no model fields initializes cleanly and the aircraft
 // entity is still created with its vis_type identity.
 
 TEST(ScenarioLoader, AssetModelRefSkipsBinaryLoad) {
@@ -671,9 +643,6 @@ TEST(ScenarioLoader, AssetModelRefSkipsBinaryLoad) {
 
     const auto json = R"({
         "name": "asset_model_skip",
-        "models_hdr_path": "@asset:koreaobj:00001",
-        "models_lod_path": "@asset:koreaobj:00001",
-        "models_tex_path": "@asset:koreaobj:00001",
         "aircraft": [
             {"callsign":"E1","aircraft_config_path":")" + f16.string() + R"(",
              "aircraft_name":"F-16","vis_type_index":1052,
@@ -696,4 +665,151 @@ TEST(ScenarioLoader, AssetModelRefSkipsBinaryLoad) {
     // entity is created with vis_type as the identity (the renderer resolves
     // the mesh through its own model cache).
     ASSERT_EQ(sim.aircraft_entities().size(), 1u);
+}
+
+// ============================================================================
+// Task 58 (NO_BINARY_RUNTIME_PLAN Tranche 0e): @asset: resolution through
+// the Data/ manifest. The file loader now resolves "@asset:<id>" path
+// fields via the scenario's "data_dir" field (or AssetRoot::discover());
+// a dangling id under a discoverable manifest fails LOUD. Without any
+// discoverable root the references are preserved verbatim (the
+// pre-Task-58 behavior, LoadScenarioFilePreservesAssetRef above).
+// ============================================================================
+
+namespace {
+
+// A minimal legacy-"fingerprint"-schema manifest: no explicit ids — the
+// ids are DERIVED from paths (the Tranche 0a generator shape, still what
+// the committed Data/manifest.json upgrades from).
+void write_asset_fixture(const std::filesystem::path& data_dir) {
+    std::filesystem::create_directories(data_dir / "Aircraft");
+    std::filesystem::create_directories(data_dir / "Classes");
+    std::filesystem::create_directories(data_dir / "Theater" / "korea");
+    std::filesystem::create_directories(data_dir / "World");
+    std::filesystem::create_directories(data_dir / "SimData");
+    auto wf = [&data_dir](const std::filesystem::path& rel, const std::string& body) {
+        std::ofstream f(data_dir / rel, std::ios::binary);
+        f << body;
+    };
+    wf("Aircraft/f16.json", R"({"name":"F-16"})");
+    wf("Aircraft/kc10.json", R"({"name":"KC-10"})");
+    wf("Classes/falcon4.ct.json", "[]");
+    wf("Theater/korea/terrain.json", "{}");
+    wf("World/korea.world.json", "{}");
+    wf("SimData/braindata.json", "{}");
+    wf("DataIgnored/unlisted.json", "{}");
+    std::ofstream f(data_dir / "manifest.json");
+    f << R"({
+        "f4": { "v": 1 },
+        "theater": "korea",
+        "save": "save1",
+        "data_dir": "Data/",
+        "assets": [
+            { "path": "Aircraft/f16.json", "size_bytes": 15 },
+            { "path": "Aircraft/kc10.json", "size_bytes": 15 },
+            { "path": "Classes/falcon4.ct.json", "size_bytes": 2 },
+            { "path": "Theater/korea/terrain.json", "size_bytes": 2 },
+            { "path": "World/korea.world.json", "size_bytes": 2 },
+            { "path": "SimData/braindata.json", "size_bytes": 2 }
+        ]
+    })";
+}
+
+std::filesystem::path make_scenario_data_dir(const std::string& suffix) {
+    auto p = std::filesystem::temp_directory_path() / "f4_scenario_assets_test" / suffix;
+    std::filesystem::remove_all(p);
+    write_asset_fixture(p);
+    return p;
+}
+
+const char* kAssetRefScenario = R"({
+    "name": "asset_resolution_e2e",
+    "theater": "korea",
+    "data_dir": "__DATA_DIR__",
+    "terrain_json_path": "@asset:theater:korea",
+    "world_json_path": "@asset:campaign:save1",
+    "class_table_path": "@asset:class:falcon4.ct",
+    "brain_data_path": "@asset:simdata:braindata",
+    "aircraft": [
+        {"callsign":"E1","aircraft_config_path":"@asset:aircraft:f16",
+         "aircraft_name":"F-16","vis_type_index":1052,
+         "parking_spot":{"x":0,"y":0,"z":0},"heading_rad":0,"initial_fuel_lbs":1}
+    ],
+    "airfield": {
+        "active_runway_id": 36,
+        "threshold_position": {"x":0,"y":0,"z":0},
+        "runway_end_position": {"x":0,"y":1000,"z":0},
+        "taxi_route": [{"x":0,"y":0,"z":0},{"x":0,"y":1000,"z":0}]
+    }
+})";
+
+} // namespace
+
+TEST(ScenarioLoader, LoadScenarioFileResolvesAssetRefsThroughDataDir) {
+    const auto data_dir = make_scenario_data_dir("resolve");
+    std::string json(kAssetRefScenario);
+    const std::string marker = "__DATA_DIR__";
+    json.replace(json.find(marker), marker.size(), data_dir.string());
+
+    auto tmp = std::filesystem::temp_directory_path() / "f4_scenario_assets_test" / "scn";
+    std::filesystem::create_directories(tmp);
+    {
+        std::ofstream f(tmp / "scenario.json");
+        f << json;
+    }
+    const auto s = load_scenario(tmp / "scenario.json");
+
+    // Every @asset: reference became a concrete path inside the fixture.
+    EXPECT_FALSE(f4::assets::is_asset_ref(s.terrain_json_path.string()));
+    EXPECT_EQ(s.terrain_json_path, data_dir / "Theater/korea/terrain.json");
+    EXPECT_EQ(s.world_json_path, data_dir / "World/korea.world.json");
+    EXPECT_EQ(s.class_table_path, data_dir / "Classes/falcon4.ct.json");
+    EXPECT_EQ(s.brain_data_path, data_dir / "SimData/braindata.json");
+    ASSERT_FALSE(s.aircraft.empty());
+    EXPECT_EQ(s.aircraft[0].aircraft_config_path, (data_dir / "Aircraft/f16.json").string());
+    std::filesystem::remove_all(data_dir.parent_path());
+}
+
+TEST(ScenarioLoader, LoadScenarioFileFailsLoudOnDanglingAssetRef) {
+    const auto data_dir = make_scenario_data_dir("dangling");
+    // kc10 is IN the manifest but nothing references it; reference an id
+    // the manifest does not carry.
+    std::string json(kAssetRefScenario);
+    const std::string marker = "__DATA_DIR__";
+    json.replace(json.find(marker), marker.size(), data_dir.string());
+    const std::string f16ref = "@asset:aircraft:f16";
+    json.replace(json.find(f16ref), f16ref.size(), "@asset:aircraft:f22");
+
+    auto tmp = std::filesystem::temp_directory_path() / "f4_scenario_assets_test" / "scn2";
+    std::filesystem::create_directories(tmp);
+    {
+        std::ofstream f(tmp / "scenario.json");
+        f << json;
+    }
+    bool threw = false;
+    try {
+        (void)load_scenario(tmp / "scenario.json");
+    } catch (const std::exception& e) {
+        threw = true;
+        const std::string what = e.what();
+        EXPECT_NE(what.find("aircraft_config_path"), std::string::npos) << what;
+        EXPECT_NE(what.find("@asset:aircraft:f22"), std::string::npos) << what;
+    }
+    EXPECT_TRUE(threw) << "a dangling @asset: id under a discoverable manifest must fail loud";
+    std::filesystem::remove_all(data_dir.parent_path());
+}
+
+TEST(ScenarioLoader, LoadScenarioFileRejectsMissingDataDir) {
+    // An explicit data_dir that does not exist is a hard error — silently
+    // preserving refs would hide a broken pipeline.
+    const std::string json = std::string(kAssetRefScenario);
+    auto tmp = std::filesystem::temp_directory_path() / "f4_scenario_assets_test" / "scn3";
+    std::filesystem::create_directories(tmp);
+    {
+        std::ofstream f(tmp / "scenario.json");
+        f << json;
+    }
+    // data_dir stays "__DATA_DIR__" — not a directory.
+    EXPECT_THROW(load_scenario(tmp / "scenario.json"), std::exception);
+    std::filesystem::remove_all(tmp);
 }

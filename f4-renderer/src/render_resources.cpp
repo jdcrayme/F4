@@ -1,18 +1,13 @@
 // f4-renderer/src/render_resources.cpp
 //
-// RenderResources implementation. The mesh-build body consolidates the
-// (previously 3x-duplicated) KoreaObj LOD-0 extraction + mesh/texture
-// upload sequence from the scenario-player and world-viewer apps.
+// RenderResources implementation. The model-build path delegates to
+// RuntimeModelCache (glTF + PNG — Tranche 0d); this file owns the
+// default material, lighting state, and the airfield geometry cache.
 
 #include <f4/renderer/render_resources.hpp>
 
-#include <f4/models/model_database.hpp>
-#include <f4/models/geometry.hpp>
-
 #include <raylib.h>
 #include <rlgl.h>   // GetShaderDefault
-
-#include <vector>
 
 namespace f4::renderer {
 
@@ -20,6 +15,12 @@ namespace f4::renderer {
 
 RenderResources::~RenderResources() {
     unload_all();
+}
+
+// ── set_model_data_dir ───────────────────────────────────────────────────
+
+void RenderResources::set_model_data_dir(const std::filesystem::path& data_dir) {
+    model_cache.set_data_dir(data_dir);
 }
 
 // ── ensure_default_material ──────────────────────────────────────────────
@@ -64,62 +65,11 @@ bool RenderResources::ensure_default_material() {
 
 // ── build_mesh_for_model ─────────────────────────────────────────────────
 
-void RenderResources::build_mesh_for_model(
-    f4::models::ModelDatabase& db, int parent_index)
-{
-    if (parent_index < 0) return;
-    auto it = mesh_cache.find(parent_index);
-    if (it != mesh_cache.end() && it->second.built) return;  // already cached
-
-    const auto mark_built = [&]() {
-        if (it != mesh_cache.end()) it->second.built = true;
-        else mesh_cache[parent_index].built = true;
-    };
-
-    const auto* rec = db.model(parent_index);
-    if (!rec || rec->lods.empty()) {
-        mark_built();
-        return;
-    }
-
-    const int lod = 0;  // lock to LOD 0 (highest detail) for now
-    auto err = db.parse_lod(parent_index, lod);
-    if (!err.empty()) {
-        mark_built();
-        return;
-    }
-
-    // Default ModelState: texture_set 0, no DOF/switch animation. Static
-    // gear-down geometry is baked at build time (see scenario-player
-    // build_mesh_for_model's original note); animating later means
-    // invalidating the cache entry.
-    f4::models::ModelState default_state;
-    default_state.texture_set = 0;
-    default_state.n_texture_sets = std::max(1, static_cast<int>(rec->n_texture_sets));
-
-    auto geom = db.extract_model_geometry(parent_index, lod, default_state);
-    if (geom.meshes.empty()) {
-        mark_built();
-        return;
-    }
-
-    auto raylib_meshes = build_raylib_meshes(
-        geom, db.color_bank(), model_vertex_to_raylib);
-    auto mesh_entries = build_mesh_entries(geom, raylib_meshes);
-
-    MeshCacheEntry entry;
-    entry.meshes = std::move(mesh_entries);
-    entry.built = true;
-    mesh_cache[parent_index] = std::move(entry);
-
-    // Upload any new textures referenced by this model's meshes.
-    std::vector<int> tex_ids;
-    for (const auto& me : mesh_cache[parent_index].meshes) {
-        if (me.tex_id >= 0) tex_ids.push_back(me.tex_id);
-    }
-    if (!tex_ids.empty()) {
-        texture_cache.upload(db, tex_ids);
-    }
+void RenderResources::build_mesh_for_model(int vis_type) {
+    // RuntimeModelCache handles the lazy build + texture upload (glTF
+    // load → mesh extraction → UploadMesh → upload_png). It marks the
+    // entry built even on failure, so this stays idempotent.
+    model_cache.build_model(vis_type, texture_cache);
 }
 
 // ── unload_all ───────────────────────────────────────────────────────────
@@ -127,14 +77,8 @@ void RenderResources::build_mesh_for_model(
 void RenderResources::unload_all() {
     texture_cache.unload_all();
 
-    for (auto& [parent_idx, cache_entry] : mesh_cache) {
-        for (auto& me : cache_entry.meshes) {
-            UnloadMesh(me.mesh);
-        }
-        cache_entry.meshes.clear();
-        cache_entry.built = false;
-    }
-    mesh_cache.clear();
+    // glTF model meshes (GPU handles owned by the cache).
+    model_cache.unload_all();
 
     // Pure data — no GPU resources, but free the memory.
     airfield_cache.clear();

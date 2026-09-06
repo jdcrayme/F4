@@ -65,14 +65,6 @@ std::filesystem::path f16_config_path() {
     return std::filesystem::path(F4_GENERATED_FIXTURES_DIR) / "f16.json";
 }
 
-std::filesystem::path models_hdr_path() {
-    return std::filesystem::path(F4_MODELS_DIR) / "KoreaObj.HDR";
-}
-
-std::filesystem::path models_lod_path() {
-    return std::filesystem::path(F4_MODELS_DIR) / "KoreaObj.LOD";
-}
-
 // A campaign world shaped like a save: two teams at war, an AIRBASE
 // objective (empty ground_layout — the B.3+ synthetic-field path), a
 // squadron, one flight parked at the base, and — the piece the fixture
@@ -188,10 +180,6 @@ LiveSim make_initialized_sim(const std::filesystem::path& dir) {
           // on Windows filesystems too.
           << "  \"world_json_path\": \"" << world.generic_string() << "\",\n"
           << "  \"class_table_path\": \"" << class_table_path().generic_string()
-          << "\",\n"
-          << "  \"models_hdr_path\": \"" << models_hdr_path().generic_string()
-          << "\",\n"
-          << "  \"models_lod_path\": \"" << models_lod_path().generic_string()
           << "\",\n"
           << "  \"aircraft\": [{\n"
           << "    \"callsign\": \"CAMPAIGN\",\n"

@@ -2,8 +2,8 @@
 //
 // RenderResources — owns the shared GPU resources that every viewer needs:
 //   - LitShader (lazy-compiled GLSL 330 Lambertian + chroma-key discard)
-//   - TextureCache (tex_id → GPU Texture2D + Material)
-//   - MeshCache (KoreaObj parent_index → cached Raylib meshes)
+//   - TextureCache (tex_id → GPU Texture2D + Material, loaded from PNG)
+//   - RuntimeModelCache (vis_type → glTF-loaded Raylib meshes)
 //   - Default Material (1×1 white fallback texture + lit shader)
 //   - Lighting state (direction, color, intensity, ambient)
 //   - AirfieldGeometry3D cache (EntityId → pre-built geometry)
@@ -12,6 +12,12 @@
 // its 2D canvas, the 3D Ground Layout tab, and the 3D world mode; the
 // scenario-player owns one. A mesh or texture uploaded through any view is
 // cached for all the others.
+//
+// Tranche 0d (RENDERER_GLTF_REWIRE_PLAN.md): the model path is
+// RuntimeModelCache — glTF + PNG from Data/Models/koreaobj/ (produced by
+// `f4import models` / `f4import textures`). The legacy KoreaObj
+// ModelDatabase path is gone; f4-renderer no longer links f4-models or
+// f4-world-convert.
 //
 // Consolidates the per-app GPU caches that used to live in:
 //   - f4-world-viewer ViewerApp::Impl (mesh_cache_3d, texture_cache_3d,
@@ -22,7 +28,7 @@
 // (build_mesh_for_model / build_mesh_3d, upload_textures,
 // ensure_default_material_3d, unload_meshes / unload_meshes_3d).
 //
-// Dependencies: f4-models, f4-entities, f4-world-convert, raylib.
+// Dependencies: f4-gltf, f4-world-types, f4-entities, raylib.
 // C++20.
 
 #pragma once
@@ -30,8 +36,9 @@
 #include <f4/renderer/lit_shader.hpp>
 #include <f4/renderer/mesh_builder.hpp>             // MeshEntry
 #include <f4/renderer/texture_cache.hpp>
+#include <f4/renderer/runtime_model_cache.hpp>      // RuntimeModelCache
 #include <f4/renderer/ground_layout_models.hpp>     // AirfieldGeometry3D
-#include <f4/renderer/feature_mesh.hpp>             // FeatureMeshCacheEntry
+#include <f4/renderer/feature_mesh.hpp>             // FeatureMeshResources
 
 #include <f4/entities/entity.hpp>                   // EntityId
 
@@ -41,27 +48,20 @@
 #undef DEG2RAD
 #undef RAD2DEG
 
+#include <filesystem>
 #include <unordered_map>
 
-namespace f4::models { class ModelDatabase; }
-namespace f4::world_convert { class ClassTable; }
-
 namespace f4::renderer {
-
-/// One entry in the per-parent_index mesh cache. Multiple entities sharing
-/// the same KoreaObj model (same vis_type) share one entry — one GPU upload
-/// per unique model. Same layout as FeatureMeshCacheEntry (the feature path
-/// and the VisualModelComponent path key meshes identically).
-using MeshCacheEntry = FeatureMeshCacheEntry;
 
 /// Owns the shared GPU resources that every viewer needs.
 ///
 /// Usage:
 ///   RenderResources res;                       // one per app
+///   res.set_model_data_dir(data_dir);          // Data/ root (glTF models)
 ///   res.ensure_default_material();             // after GL context exists
-///   res.build_mesh_for_model(db, parent);      // lazy, idempotent
+///   res.build_mesh_for_model(vis_type);        // lazy, idempotent
 ///   // ... per frame:
-///   auto eres = make_entity_render_resources(res, &db, &ct);
+///   auto eres = make_entity_render_resources(res, &ct);
 ///   RenderEntity(eres, handle);                // or render_world()
 ///
 /// Cleanup: unload_all() — also invoked by the destructor, but must run
@@ -82,13 +82,14 @@ public:
     /// GL context can't compile GLSL 330).
     LitShader lit_shader;
 
-    /// Lazy texture cache, keyed by KoreaObj tex_id.
+    /// Lazy texture cache, keyed by KoreaObj tex_id (loaded from PNG).
     TextureCache texture_cache;
 
-    /// Mesh cache, keyed by KoreaObj parent model index. Shared by the
-    /// feature-mesh path (vis_type-keyed) and the VisualModelComponent
-    /// path (model_record-keyed) — both resolve to the same parent index.
-    std::unordered_map<int, MeshCacheEntry> mesh_cache;
+    /// glTF model cache, keyed by vis_type (the FALCON4.CT visType[0]
+    /// value — the same key the legacy KoreaObj parent_index path used).
+    /// Shared by the feature-mesh path and the VisualModelComponent
+    /// path — both resolve to the same vis_type.
+    RuntimeModelCache model_cache;
 
     /// Airfield geometry cache: EntityId.value → pre-built
     /// AirfieldGeometry3D from GroundLayoutComponent. Rebuilt only when
@@ -115,17 +116,23 @@ public:
     /// ensure_default_material() returns true.
     Material& default_material() noexcept { return default_mat_; }
 
-    // ── Mesh building ──────────────────────────────────────────────────
+    // ── Model data ──────────────────────────────────────────────────────
+
+    /// Point the glTF model cache at a Data/ root (models at
+    /// <data_dir>/Models/koreaobj/). Changing the dir clears the cache.
+    void set_model_data_dir(const std::filesystem::path& data_dir);
+
+    // ── Mesh building ──────────────────────────────────────────────
 
     /// Build (or skip if already cached) the Raylib meshes for one
-    /// KoreaObj model, then upload any new textures it references.
-    /// Sets mesh_cache[parent_index].built = true even on failure so we
-    /// don't retry every frame.
+    /// model, then upload any new PNG textures it references. Sets the
+    /// cache entry's built = true even on failure so we don't retry
+    /// every frame.
     ///
-    /// Requires the GL context (UploadMesh). Called lazily from draw
-    /// loops the first time a previously-unseen parent_index appears, or
-    /// eagerly at startup for the primary aircraft.
-    void build_mesh_for_model(f4::models::ModelDatabase& db, int parent_index);
+    /// Requires the GL context (mesh upload + texture upload). Called
+    /// lazily from draw loops the first time a previously-unseen
+    /// vis_type appears, or eagerly at startup for the primary aircraft.
+    void build_mesh_for_model(int vis_type);
 
     // ── Lighting ───────────────────────────────────────────────────────
 
@@ -136,9 +143,10 @@ public:
 
     // ── Cleanup ────────────────────────────────────────────────────────
 
-    /// Unload all GPU resources: textures, meshes, default material,
-    /// fallback texture; clear the airfield cache. Must be called before
-    /// the GL context goes away. Safe to call when nothing is cached.
+    /// Unload all GPU resources: textures, glTF model meshes, default
+    /// material, fallback texture; clear the airfield cache. Must be
+    /// called before the GL context goes away. Safe to call when
+    /// nothing is cached.
     void unload_all();
 
 private:

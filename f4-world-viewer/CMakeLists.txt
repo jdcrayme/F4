@@ -142,10 +142,7 @@ target_include_directories(f4_world_viewer
 target_link_libraries(f4_world_viewer PUBLIC
     f4-terrain
     f4-world
-    f4-world-convert
-    f4-terrain-convert
     f4-install
-    f4-models
     f4-json
     f4-renderer
     f4-recorder
@@ -159,6 +156,12 @@ target_compile_definitions(f4_world_viewer PRIVATE
     F4_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
     F4_BINARY_DIR="${CMAKE_BINARY_DIR}"
     F4_MISSION_PROFILES_JSON="${F4_MISSION_PROFILES_JSON}"
+    # Tranche 0d: binary imports run through the converter CLIs as
+    # subprocesses — the runtime app no longer links the converter
+    # libraries (P2 boundary). Generator expressions pin the exact
+    # binaries from this build tree.
+    F4_CAM2JSON_EXE="$<TARGET_FILE:cam2json>"
+    F4_TERRAIN2JSON_EXE="$<TARGET_FILE:terrain2json>"
 )
 target_link_libraries(f4_world_viewer PRIVATE raylib)
 # tinyfiledialogs needs to be compiled as C (it's a .c file). Set the
