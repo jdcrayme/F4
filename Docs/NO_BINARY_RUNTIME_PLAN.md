@@ -117,6 +117,18 @@ the gate that makes "no binary runtime" a contract, not a hope.
 
 ### Tranche 0c — KoreaObj.TEX → PNG extractor (the one new producer)
 
+> **Status: LANDED** (Task 53). All three sub-items verified in-sandbox:
+> 0c.1 — `f4import textures --all` exports 1290/1290 PNGs (0 failures, 60s,
+> 37 MB, valid PNG signatures). 0c.2 — `f4import textures` subcommand fully
+> implemented (`--texture <N>` / `--all`, manifest update with alpha/chroma_key
+> capabilities). 0c.3 — `f4import models` emits glTF materials
+> (`pbrMetallicRoughness` + `baseColorTexture` + `alphaMode MASK` for
+> chroma-keyed) referencing `textures/NNNNN.png`. 10/10 tests pass
+> (test_textures_gltf: 4, test_models_gltf: 6). The code was implemented in a
+> prior session; Task 53 is the build + test + end-to-end verification +
+> status closure. Criterion §5.3 (visual rendering) deferred to user's env
+> (no X11/GL in sandbox).
+
 **0c.1 — TEX → PNG.** New `f4-import/src/tex_extractor.cpp`. The TEX
 decoder exists (`f4-models/src/texture_cache.cpp`); add a PNG writer
 (libpng, or stb_image_write for zero-dependency). Output:

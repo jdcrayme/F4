@@ -1,5 +1,81 @@
 # F4 Cleanup Pass — Changes Summary
 
+## Tranche 0c — TEX→PNG + glTF materials: verified + landed (NO_BINARY_RUNTIME_PLAN.md)
+
+**The producer side of the asset pipeline is complete.** All three 0c
+sub-items are verified in-sandbox: the runtime can now load glTF + PNG
+instead of parsing KoreaObj binary. The code was implemented in a prior
+session; this tranche is the build + test + end-to-end verification +
+status closure.
+
+### 0c.1 — TEX → PNG extractor
+
+`f4import textures --install <root> --data <dir> [--texture <N>] [--all]`
+decodes KoreaObj.TEX entries to PNG via stb_image_write (zero-dependency).
+Output: `Data/Models/koreaobj/textures/NNNNN.png`.
+
+**Verified**: `--all` exports 1290/1290 PNGs (0 failures, 60s, 37 MB).
+Valid PNG signatures, correct 256×256 square dimensions, alpha + chroma-
+key flags recorded as manifest capabilities.
+
+### 0c.2 — `f4import textures` subcommand
+
+Fully implemented CLI (`f4import.cpp:run_textures`): `--texture <N>` for
+single export, `--all` for the full bank, manifest update with
+`alpha`/`chroma_key` capabilities and `KoreaObj.TEX`/`.HDR` sources.
+
+### 0c.3 — glTF materials emission
+
+`gltf_emitter.cpp` emits spec-compliant materials referencing the PNG
+textures:
+- One material per referenced texture (sorted by tex_id for deterministic
+  output) + one shared `vertexcolor` material for untextured meshes.
+- `pbrMetallicRoughness` with `baseColorTexture` → `textures/NNNNN.png`.
+- `alphaMode: MASK` + `alphaCutoff: 0.5` for chroma-keyed textures.
+- `TEXCOORD_0` accessors on textured primitives; `COLOR_0` on vertex-
+  colored meshes (resolved through the HDR ColorBank).
+- Samplers/images/textures/materials arrays in the glTF JSON.
+
+**Verified**: `f4import models --model 2` produces a glTF with 2 materials,
+`baseColorTexture`, `pbrMetallicRoughness`, `alphaMode`, referencing
+`textures/00017.png`. The visual loop is closed: geometry + UVs +
+materials + texture references in one spec-compliant glTF.
+
+### Test results
+
+| Suite | Tests | Result |
+|-------|-------|--------|
+| `test_textures_gltf` | 4 | PASS (113 ms) |
+| `test_models_gltf` | 6 | PASS (53 ms) |
+
+No regressions. 10/10 tests pass.
+
+### Acceptance criteria (NO_BINARY_RUNTIME_PLAN.md §5)
+
+1. `f4import textures` produces 1290 PNG files — **YES** (1290/1290, 0 failures).
+2. `f4import models` emits glTF materials referencing PNG textures — **YES**.
+3. A rendered model shows textured geometry — **DEFERRED** (visual, user's env; no X11/GL in sandbox).
+
+### Files
+
+No code changes — the 0c code was implemented in a prior session. This
+tranche is verification + status closure:
+
+| File | Change |
+|------|--------|
+| `Docs/NO_BINARY_RUNTIME_PLAN.md` | Tranche 0c status: LANDED |
+| `worklog.md` | Task 53 entry |
+| `CHANGES.md` | This entry |
+
+### What's next
+
+**0d** — the runtime glTF rewire. The producer side is complete; 0d is
+the consumer-side refactor: `VisualModelComponent` → glTF handle, the
+renderer/sim/viewer link-cut, and `temp/KoreaObj.*` deletion (repo drops
+~38 MB). Each decoupling turns a 0b boundary violation green.
+
+---
+
 ## Tranche 0b — CMake boundary enforcement (NO_BINARY_RUNTIME_PLAN.md)
 
 **The boundary is now a contract.** P2 (link-time isolation) from

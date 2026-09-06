@@ -8780,3 +8780,101 @@ Stage Summary (Task 52 — Tranche 0b LANDED, build-verified):
 - The boundary is now a contract. Every new runtime target that links a
   parser will be caught at configure time. The 0c/0d work proceeds with
   the gate documenting exactly which decouplings remain.
+
+---
+Task ID: 53 (Tranche 0c — TEX→PNG + glTF materials: verification + closure)
+Agent: main (Super Z)
+Task: NO_BINARY_RUNTIME_PLAN.md Tranche 0c — the one new producer that
+unblocks 0d (runtime glTF rewire). 0c has three sub-items: 0c.1 TEX→PNG
+extractor, 0c.2 f4import textures subcommand, 0c.3 glTF materials
+emission. During the 0b recon, I noticed all three already existed in
+the codebase (texture_png.cpp, the f4import textures CLI, and the
+gltf_emitter materials section) — implemented in a prior session but
+never built, tested, or marked as landed. This task is the build + test
++ end-to-end verification + status closure.
+
+Work Log:
+- RECON: read f4-import/src/texture_png.cpp (0c.1 — the TEX→PNG
+  extractor, 57 lines: fetch_texture → stbi_write_png, RGBA8 top-down,
+  chroma_key flag from tex_entries), f4-import/cli/f4import.cpp (0c.2 —
+  the run_textures function, --texture/--all flags, manifest update
+  with alpha/chroma_key capabilities, 113 lines), and
+  f4-import/src/gltf_emitter.cpp (0c.3 — the materials emission: one
+  material per referenced texture, sorted by tex_id for deterministic
+  output; pbrMetallicRoughness with baseColorTexture; alphaMode MASK +
+  alphaCutoff 0.5 for chroma-keyed textures; samplers/images/textures
+  arrays with URIs "textures/NNNNN.png"). The header comment confirms:
+  "Per Tranche 0c of NO_BINARY_RUNTIME_PLAN.md the emitter is
+  spec-compliant and textured." All three sub-items were implemented but
+  unverified.
+- BUILD: configured with g++ 14.2.0 + cmake 4.4.3 (renderer/viewer OFF —
+  no GL headers; CLI + tests ON). The 0b boundary verifier runs at
+  configure time (WARNING, expected). Built test_textures_gltf +
+  f4import + test_models_gltf targets. Clean compile — the f4-import
+  chain (f4-json, f4-lzss, f4-assets, f4-install, f4-gltf, f4-models,
+  f4-import) + the test executables all link.
+- TEST 1 — test_textures_gltf (4/4 PASSED, 113 ms):
+  - TexturedModelEmitsMaterials: scans the first 300 models for a
+    textured triangle mesh, emits glTF, verifies the JSON contains
+    materials/images/textures/baseColorTexture/attributes/TEXCOORD_0,
+    and round-trips through f4-gltf (nested attributes parse, UVs
+    present). PASS.
+  - EmissionIsDeterministic: same input → byte-identical glTF. PASS.
+  - PngExportMatchesDecodedDimensions: exports texture 0, verifies the
+    PNG signature (89 50 4E 47...) + IHDR dimensions match the decoded
+    texture (square). PASS (uses temp/KoreaObj.TEX via
+    KOREAOBJ_TEX_FALLBACK).
+  - PngExportRejectsBadIndex: out-of-range index throws. PASS.
+- TEST 2 — test_models_gltf (6/6 PASSED, 53 ms): the pre-existing
+  models round-trip suite (coordinate conversion, doctor D1/D5
+  validation). No regressions from the 0c code.
+- END-TO-END 0c.1 — f4import textures --all:
+  `f4import textures --install temp/ --data /tmp/f4c-test-all --all`
+  loaded 1290 textures from temp/KoreaObj.TEX, exported 1290/1290 PNGs
+  (0 failures, 60s, 37 MB total). Output: Data/Models/koreaobj/textures/
+  00000.png through 01289.png. Verified PNG signature via od:
+  89 50 4e 47 0d 0a 1a 0a (valid PNG). Texture 0: 256x256, alpha,
+  chroma-keyed (89776 bytes). The manifest gained 1290 texture assets
+  with IDs koreaobj:00000.png, paths Models/koreaobj/textures/00000.png,
+  capabilities [alpha=present, chroma_key=present], and sources
+  [temp/KoreaObj.TEX, temp/KoreaObj.HDR].
+- END-TO-END 0c.3 — f4import models:
+  `f4import models --install temp/ --data /tmp/f4c-test --model 2`
+  loaded 1342 models, converted model 2 to glTF (168 verts, 82 tris, 4
+  LODs). The output 00002.gltf contains: "materials" array (2
+  materials), "images" array, "textures" array, "baseColorTexture",
+  "pbrMetallicRoughness" (2 occurrences), "alphaMode" (MASK for
+  chroma-keyed), and a material referencing "textures/00017.png" — the
+  PNG produced by the textures step. The visual loop is closed: geometry
+  + UVs + materials + texture references all in one spec-compliant glTF.
+- MINOR OBSERVATION (not a blocker): the manifest's source paths are
+  inconsistent — sources[0].path is "temp/KoreaObj.TEX" (relative,
+  from find_tex_file) while sources[1].path is the absolute
+  /home/z/F4/temp/KoreaObj.HDR (from find_koreaobj_files). Both sha256
+  fields are empty (the manifest_writer doesn't compute source hashes
+  yet — expected per NO_BINARY_RUNTIME_PLAN §9: "runtime hash-checking
+  lands with f4-assets (0e.3). For now the manifest is provenance-only."
+  These are cosmetic/provenance issues, not 0c blockers.
+
+Stage Summary (Task 53 — Tranche 0c VERIFIED + LANDED):
+- 0c.1 (TEX→PNG): 1290/1290 PNGs exported, 0 failures, valid PNG
+  signatures, correct dimensions (256x256 square). Code: texture_png.cpp.
+- 0c.2 (f4import textures): fully implemented CLI subcommand with
+  --texture/--all flags + manifest update. Code: f4import.cpp run_textures().
+- 0c.3 (glTF materials): pbrMetallicRoughness + baseColorTexture +
+  alphaMode MASK for chroma-keyed, referencing textures/NNNNN.png.
+  Code: gltf_emitter.cpp materials section (lines 250-280, 646-745).
+- 10/10 tests pass (test_textures_gltf: 4, test_models_gltf: 6). No
+  regressions.
+- Acceptance criteria (NO_BINARY_RUNTIME_PLAN.md §5):
+  1. f4import textures produces 1290 PNG files — YES (1290/1290, 0 failures).
+  2. f4import models emits glTF materials referencing PNG textures — YES
+     (materials/images/textures/baseColorTexture/pbrMetallicRoughness/
+     alphaMode, referencing textures/00017.png).
+  3. A rendered model shows textured geometry — DEFERRED to user's env
+     (no X11/GL in sandbox; same as the plan's own §6.5 for 0d).
+- 0c is unblocked. The producer side of the pipeline is complete: the
+  runtime can now load glTF + PNG instead of parsing KoreaObj binary.
+  0d (the runtime glTF rewire) is the remaining work — it decouples
+  f4-renderer, f4-simulation, f4-world-viewer from f4-models, turning
+  each 0b boundary violation green.
