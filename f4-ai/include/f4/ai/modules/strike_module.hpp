@@ -64,6 +64,23 @@ namespace f4::ai::modules {
     }
 }
 
+/// Tranche D (AAR): the waypoint action that arms the RefuelModule rung.
+/// FreeFalcon campwp.h has no dedicated WP_REFUEL constant (refuel in the
+/// original was triggered by the DigitalBrain's fuel-gate + a proximity
+/// check on the tanker entity, not a waypoint action). We reserve 20 here
+/// as the engine-agnostic scenario marker: a route waypoint carrying this
+/// action tells the host (Simulation) to arm the receiver's refuel rung
+/// and push the tanker picture while the receiver flies this leg. The
+/// value 20 is the next free slot after the SEAD action (19) and below
+/// the campaign bridge's internal range — it round-trips through the
+/// scenario JSON as `"action": 20` and through MissionPlan::route as the
+/// Waypoint::action byte.
+inline constexpr std::uint8_t WP_REFUEL{20};
+
+[[nodiscard]] constexpr bool is_refuel_action(std::uint8_t action) noexcept {
+    return action == WP_REFUEL;
+}
+
 class StrikeModule {
 public:
     /// Release-trigger parameters. Defaults are the doctrine fill for a

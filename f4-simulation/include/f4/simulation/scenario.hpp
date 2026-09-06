@@ -23,10 +23,28 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <vector>
 
 namespace f4::simulation {
+
+/// One waypoint in the scenario's flight plan (air phase). Flown in order
+/// by the NavigationModule after departure. The LAST waypoint is the
+/// approach entry fix handed to the LandingModule.
+/// (Declared before ScenarioAircraft so the per-aircraft `route` field
+/// can use std::vector<ScenarioWaypoint>.)
+struct ScenarioWaypoint {
+    std::string name;                   ///< "WP1", "APCH_FIX" (display + trace)
+    geo::WorldPosition position;        ///< ENU feet; z = target altitude MSL
+    double speed_kts{350.0};            ///< target CAS approaching this waypoint
+    /// Tranche D (AAR): the waypoint's WP_ACTION (0 = none). Mirrors
+    /// NavigationModule::Waypoint::action (campwp.h values: 14-19 A/G
+    /// delivery, 20 REFUEL). The Simulation threads this through to the
+    /// MissionPlan::route, and uses it to arm the receiver's refuel rung
+    /// when action == f4::ai::modules::WP_REFUEL. Default 0 = plain nav.
+    std::uint8_t action{0};
+};
 
 /// One aircraft in the scenario.
 struct ScenarioAircraft {
@@ -89,6 +107,21 @@ struct ScenarioAircraft {
     /// against formation_library_path (else the generated FORMDAT
     /// fixture); an unknown name fails initialize() loudly.
     std::string formation;
+    /// TANKER ROLE (AAR redesign): this aircraft is an aerial refueling
+    /// tanker. The Simulation spawns it like any other aircraft (own
+    /// flight model + own brain), but the brain is configured as a
+    /// tanker (is_tanker_ = true) — it flies its own route (the refuel
+    /// track) and manages the refuel protocol instead of the
+    /// takeoff/nav/landing mission sequence. The tanker's route is its
+    /// own per-aircraft `route` (below); the receiver's route carries a
+    /// WP_REFUEL waypoint that arms the receiver's refuel rung.
+    bool tanker{false};
+    /// Per-aircraft route (AAR redesign). Empty = use the shared
+    /// scenario_.waypoints (the legacy behavior — one route for all
+    /// aircraft). When non-empty, this aircraft flies its own route.
+    /// The tanker uses this to fly its refuel track independently of the
+    /// receiver's flight plan.
+    std::vector<ScenarioWaypoint> route;
 };
 
 /// One parking spot on the airfield (derived from the ground layout —
@@ -123,14 +156,15 @@ struct ScenarioAirfield {
     std::vector<ScenarioParkingSpot> parking_spots;
 };
 
-/// One waypoint in the scenario's flight plan (air phase). Flown in order
-/// by the NavigationModule after departure. The LAST waypoint is the
-/// approach entry fix handed to the LandingModule.
-struct ScenarioWaypoint {
-    std::string name;                   ///< "WP1", "APCH_FIX" (display + trace)
-    geo::WorldPosition position;        ///< ENU feet; z = target altitude MSL
-    double speed_kts{350.0};            ///< target CAS approaching this waypoint
-};
+/// (ScenarioWaypoint is declared above, before ScenarioAircraft.)
+
+/// Tranche D (AAR): a scripted tanker for the refuel scenario. The
+/// Simulation constructs a f4::ai::modules::ScriptedTanker from this,
+/// advances it kinematically each tick, pushes its picture to every
+/// Tranche D (AAR redesign): the tanker is now a regular ScenarioAircraft
+/// with `"tanker": true`. The old ScenarioTanker struct + the `"tanker"`
+/// JSON block are removed. The ScenarioAircraft::tanker flag + the
+/// per-aircraft `route` field replace them.
 
 /// Combat configuration (COMBAT_CHAIN_PLAN.md M3 integration).
 /// When enabled, spawned scenario-list aircraft carry the combat component
@@ -389,6 +423,10 @@ struct Scenario {
     /// Formation library (f4.formdata JSON, from form2json) — consumed
     /// per-wingman via "formation".
     std::filesystem::path formation_library_path;
+
+    // AAR redesign: the tanker is a ScenarioAircraft with tanker=true
+    // (no separate ScenarioTanker block). The std::optional<ScenarioTanker>
+    // field is removed.
 };
 
 /// Load a scenario from a JSON file. Resolves asset paths relative to the

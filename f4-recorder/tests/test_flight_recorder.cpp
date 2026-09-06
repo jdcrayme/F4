@@ -119,6 +119,8 @@ TEST(FlightRecorder, ToJsonContainsSnapshotData) {
     auto snap = make_test_snapshot(42, 4.2, 1, "TakeoffMode", "TakeRunway");
     snap.vcas_kts = 120.0;
     snap.throttle_cmd = 1.0;
+    snap.tef_cmd = 1.0;   // Tranche A4: assert the key is emitted
+    snap.lef_cmd = 0.6;
     rec.record(snap);
 
     std::string json = rec.to_json();
@@ -127,6 +129,11 @@ TEST(FlightRecorder, ToJsonContainsSnapshotData) {
     EXPECT_NE(json.find("\"sim_time_s\":"), std::string::npos);
     EXPECT_NE(json.find("\"TakeoffMode\""), std::string::npos);
     EXPECT_NE(json.find("\"TakeRunway\""), std::string::npos);
+    // Tranche A4: the flap keys are emitted (the values use %.17g, so
+    // match the key prefix, not the exact number — 1.0 -> "1", 0.6 -> a
+    // 17-digit representation).
+    EXPECT_NE(json.find("\"tef_cmd\":"), std::string::npos);
+    EXPECT_NE(json.find("\"lef_cmd\":"), std::string::npos);
 }
 
 TEST(FlightRecorder, ToJsonMultipleSnapshots) {
@@ -271,6 +278,8 @@ TEST(RoundTrip, SingleSnapshot) {
     s.gear_handle_down = false;
     s.wheel_brakes = false;
     s.nose_steer_on = true;
+    s.tef_cmd = 1.0;    // Tranche A4: landing-configuration TEF
+    s.lef_cmd = 0.6;    // Tranche A4: landing-configuration LEF
     s.ai_mode = "CruiseMode";
     s.ai_state = "Tracking";
     s.ai_event = "wp_reached";
@@ -308,6 +317,8 @@ TEST(RoundTrip, SingleSnapshot) {
     EXPECT_NEAR(s2.pitch_cmd, 0.2, 1e-9);
     EXPECT_NEAR(s2.throttle_cmd, 0.85, 1e-9);
     EXPECT_EQ(s2.gear_handle_down, false);
+    EXPECT_NEAR(s2.tef_cmd, 1.0, 1e-9);   // Tranche A4
+    EXPECT_NEAR(s2.lef_cmd, 0.6, 1e-9);   // Tranche A4
     EXPECT_EQ(s2.ai_mode, "CruiseMode");
     EXPECT_EQ(s2.ai_state, "Tracking");
     EXPECT_NEAR(s2.target_position.x, 500.0, 1e-9);

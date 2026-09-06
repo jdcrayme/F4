@@ -38,6 +38,7 @@ add_library(f4-ai STATIC
     src/ground_avoid_module.cpp
     src/collision_avoid_module.cpp
     src/strike_module.cpp
+    src/refuel_module.cpp
 )
 target_link_libraries(f4-ai PUBLIC f4_warnings)
 

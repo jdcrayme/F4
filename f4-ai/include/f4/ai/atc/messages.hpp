@@ -149,6 +149,17 @@ struct TaxiOffClearance {
 // ============================================================================
 // Air Refueling messages
 // ============================================================================
+//
+// The full USAF boom AAR procedure (see Docs/AAR_REDESIGN_PLAN.md §1):
+//   rendezvous -> pre-contact -> (tanker clears contact) -> contact ->
+//   hold -> (receiver requests disconnect) -> back to pre-contact ->
+//   (tanker reports fuel + clears departure) -> descend 1000 ft below
+//   tanker -> resume route.
+//
+// The protocol is full-duplex: the receiver reports its position state
+// (PrecontactReport, ContactRequest, DisconnectRequest), and the tanker
+// responds with clearances + status (TankerAssigned, ClearToContact,
+// ContactMade, ContactLost, DisconnectApproved, FuelTransferred).
 
 struct RefuelRequest {
     std::uint64_t aircraft_id{0};   // receiver
@@ -165,6 +176,21 @@ struct TankerAssigned {
     double ar_altitude_ft{0.0};
 };
 
+// Receiver -> Tanker: "I'm at the pre-contact position, stabilized"
+// (the USAF "Precontact" call). The tanker responds with ClearToContact
+// when the boom operator is ready.
+struct PrecontactReport {
+    std::uint64_t receiver_id{0};
+    std::uint64_t tanker_id{0};
+};
+
+// Tanker -> Receiver: "Cleared to contact" — the boom operator clears
+// the receiver to close from pre-contact into the contact position.
+struct ClearToContact {
+    std::uint64_t receiver_id{0};
+    std::uint64_t tanker_id{0};
+};
+
 struct ContactRequest {
     std::uint64_t receiver_id{0};
     std::uint64_t tanker_id{0};
@@ -179,6 +205,30 @@ struct ContactLost {
     std::uint64_t receiver_id{0};
     std::uint64_t tanker_id{0};
     std::string reason;  // "drifted", "receiver_disconnected"
+};
+
+// Receiver -> Tanker: "Disconnect" — the receiver requests disconnect
+// when refueling is complete. The tanker responds with DisconnectApproved.
+struct DisconnectRequest {
+    std::uint64_t receiver_id{0};
+    std::uint64_t tanker_id{0};
+};
+
+// Tanker -> Receiver: "Cleared to depart" — the tanker acknowledges the
+// disconnect, reports the fuel transferred (via FuelTransferred), and
+// clears the receiver to depart (descend 1000 ft below the tanker, resume
+// own navigation).
+struct DisconnectApproved {
+    std::uint64_t receiver_id{0};
+    std::uint64_t tanker_id{0};
+};
+
+// Tanker -> Receiver: "X lbs received" — the tanker reports the fuel
+// offloaded during the contact. Sent alongside DisconnectApproved.
+struct FuelTransferred {
+    std::uint64_t receiver_id{0};
+    std::uint64_t tanker_id{0};
+    double fuel_lbs{0.0};
 };
 
 struct RefuelComplete {

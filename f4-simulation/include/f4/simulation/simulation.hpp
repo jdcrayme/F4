@@ -42,10 +42,12 @@
 #include <f4/weapons/weapon_class_table.hpp>
 #include <f4/world_convert/class_table.hpp>  // owned here (see class_table_)
 #include <f4/ai/air_picture.hpp>       // PERF-1: the shared snapshot
+#include <f4/ai/modules/strike_module.hpp>   // Tranche D: WP_REFUEL predicate
 
 #include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <vector>
 
 #include "f4/simulation/scenario.hpp"
@@ -235,6 +237,15 @@ public:
         return squadron_aircraft_entities_;
     }
 
+    /// Tranche D (AAR): the scripted tanker entity (a TransformComponent-
+    /// carrying kinematic entity, no flight model). Default-constructed
+    /// EntityId (value=0) when the scenario has no tanker. The world viewer
+    /// and the recorder use this to draw/track the boom platform.
+    [[nodiscard]] entities::EntityId tanker_entity() const noexcept {
+        return tanker_entity_;
+    }
+    [[nodiscard]] bool has_tanker() const noexcept { return tanker_entity_.value != 0; }
+
     /// The BubbleManager (Mode B). Null when the sim is not in campaign-flights
     /// mode (BubbleManager only makes sense when the EntityWorld contains
     /// campaign units with VehicleCompositionComponent). Hosts can call
@@ -396,6 +407,19 @@ private:
     /// (one tick old at push time — exactly what every other brain sees)
     /// and the lead brain's combat_engagement_id() for the sort.
     void push_wingman_lead_pictures();
+    /// Tranche D (AAR): construct the ScriptedTanker from the scenario's
+    /// tanker block (initialize(), if present), advance it kinematically
+    /// each tick (tick(), BEFORE the brains run), and push its picture to
+    /// every armed receiver's BrainComponent. The Simulation is the
+    /// tanker's eyes — the RefuelModule is engine-agnostic. Arming: a
+    /// receiver is armed when the scenario has a tanker AND the scenario's
+    /// waypoint list carries a WP_REFUEL waypoint (the scenario-list path
+    /// shares one route across all aircraft; per-aircraft arming waits for
+    /// the campaign bridge to emit WP_REFUEL). No tanker block => tanker_
+    /// is std::nullopt and this push is a no-op. dt advances the tanker
+    /// kinematically (straight-and level; ScriptedTanker holds heading/
+    /// alt/speed constant).
+    void push_tanker_picture(double dt);
     /// The arbiter's safety rungs (M3-arbiter): every tick BEFORE world
     /// update, push each airborne aircraft brain (a) its TERRAIN picture
     /// — elevation under the jet + the max elevation in the look-ahead
@@ -493,6 +517,20 @@ private:
         entities::EntityId lead;
     };
     std::vector<WingmanPair> wingman_pairs_{};
+
+    // Tranche D (AAR): the scripted tanker, constructed from the
+    // scenario's tanker block at initialize(). std::nullopt when the
+    // scenario has no tanker (the refuel rung never arms). The tanker is
+    // AAR redesign: the tanker is a real aircraft (own flight model +
+    // brain, spawned by spawn_from_scenario_list). tanker_entity_ is
+    // the EntityId of the tanker (found at initialize by scanning for
+    // brain->is_tanker()); 0 when the scenario has no tanker.
+    // push_tanker_picture reads the tanker's real FM each tick.
+    entities::EntityId tanker_entity_{};
+    /// True when the scenario route (shared or per-aircraft) contains a
+    /// WP_REFUEL waypoint. Cached at initialize() so the per-tick
+    /// push_tanker_picture arming decision is a single bool read.
+    bool scenario_has_refuel_waypoint_{false};
 
     // SimData AI data (BRAINDAT.brn + FORMDAT.FIL, converted to canonical
     // JSON by f4-convert). OWNED HERE because both consumers take

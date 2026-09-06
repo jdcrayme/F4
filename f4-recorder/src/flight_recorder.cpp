@@ -118,6 +118,8 @@ std::string FlightRecorder::to_json(const std::string& scenario_name) const {
         w.raw("    "); w.string("gear_handle_down"); w.raw(":"); w.raw(s.gear_handle_down ? "true" : "false"); w.raw(",\n");
         w.raw("    "); w.string("wheel_brakes"); w.raw(":"); w.raw(s.wheel_brakes ? "true" : "false"); w.raw(",\n");
         w.raw("    "); w.string("nose_steer_on"); w.raw(":"); w.raw(s.nose_steer_on ? "true" : "false"); w.raw(",\n");
+        w.raw("    "); w.string("tef_cmd"); w.raw(":"); w.number(s.tef_cmd); w.raw(",\n");
+        w.raw("    "); w.string("lef_cmd"); w.raw(":"); w.number(s.lef_cmd); w.raw(",\n");
 
         // AI brain state
         w.raw("    "); w.string("ai_mode"); w.raw(":"); w.string(s.ai_mode); w.raw(",\n");
@@ -620,6 +622,8 @@ FlightSnapshot parse_snapshot(json::Reader& r) {
         else if (key == "gear_handle_down")  { snap.gear_handle_down = r.read_bool(); }
         else if (key == "wheel_brakes")      { snap.wheel_brakes = r.read_bool(); }
         else if (key == "nose_steer_on")     { snap.nose_steer_on = r.read_bool(); }
+        else if (key == "tef_cmd")           { snap.tef_cmd = r.read_number(); }
+        else if (key == "lef_cmd")           { snap.lef_cmd = r.read_number(); }
 
         // AI brain state
         else if (key == "ai_mode")           { snap.ai_mode = r.read_string(); }

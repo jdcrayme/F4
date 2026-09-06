@@ -76,6 +76,16 @@ struct FlightSnapshot {
     bool   parking_brake{false};
     bool   nose_steer_on{true};
 
+    // --- Flap commands (Tranche A4) ---
+    // Mirrors AIControlOutput::tef_cmd/lef_cmd and PilotInput::tefCmd/lefCmd.
+    // The FCS CSV trace (FcsTraceSample) already carried these; the replay
+    // JSON (FlightSnapshot) did not, leaving flare debugging blind to the
+    // landing-configuration schedule. Defaults to 0 (clean) so a snapshot
+    // that never set them reads back identically; the writer emits the two
+    // keys unconditionally so the replay host's parser is the only contract.
+    double tef_cmd{0.0};             // [0, 1] trailing-edge flap
+    double lef_cmd{0.0};             // [0, 1] leading-edge flap
+
     // --- AI brain state (human-readable for LLM debugging) ---
     std::string ai_mode;             // e.g. "TakeoffMode", "LandingMode"
     std::string ai_state;            // e.g. "TakeRunway", "OnFinal"

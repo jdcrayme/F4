@@ -8,6 +8,29 @@
 > hiding, plus the two procedural-skill demonstrations the AI plan sequenced
 > but never delivered (formation, AAR).
 >
+> **Progress (Tasks 46–48, code landed — build/test pending in the user's env)**:
+> - **A4** ✅ — `tef_cmd`/`lef_cmd` in the replay JSON `FlightSnapshot` +
+>   the full control-command block populated (the replay JSON was
+>   control-blind before; the FCS CSV trace had the data, the replay
+>   didn't). Round-trip + JSON-content tests pin the new keys.
+> - **A1–A3** ✅ (earlier) — tightened tolerances + lateral bounds guard
+>   + energy-based flare predictor all in code. **A precision residual**:
+>   the `<50 ft` cross-track assertion (Tranche A1) is held as the gate;
+>   Task 45 measured 93–162 ft actual. The residual is the next tuning
+>   target (wings-level through the flare + centerline-hold in rollout,
+>   iterated against the CSV trace) — needs the user's build env, not
+>   silently relaxed.
+> - **Tranche D (AAR)** ✅ code — `RefuelModule` (5-state SM) +
+>   BrainComponent AAR rung (between Formation and Mission) + `tanker_track`
+>   scenario + unit + E2E tests. Built on the pre-existing
+>   ATC/ScriptedTanker/TankerConfig scaffold. Build/test pending.
+> - **Tranche C (formation)** ✅ code — `formation_acceptance` scenario
+>   (4-ship, 3 FORMDAT slots: trail/wedge/ladder) + slot-position
+>   tolerance test. "Extend, don't build" — no WingmanModule changes.
+>   Build/test pending.
+> - **Tranche B (taxi-back)** ⏳ — not started (PLT_PARK data
+>   investigation + Kunsan `taxi_in_route`/`parking_spots` wiring).
+>
 > **Predecessors**: `FLIGHT_CONTROL_NEXT_STEPS.md` (§2 table verified STALE
 > by RECON-1 — 15 of 18 "not done" items are actually done), `AI_IMPLEMENTATION_PLAN.md` §5
 > (Steps 1–5, 7–11 DONE; Step 6 AAR NOT STARTED; Step 12 DONE as BrainComponent),

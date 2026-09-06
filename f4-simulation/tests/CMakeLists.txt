@@ -29,6 +29,8 @@ f4_simulation_add_test(test_bubble_manager         test_bubble_manager.cpp)
 f4_simulation_add_test(test_frames                 test_frames.cpp)
 f4_simulation_add_test(test_real_layout_derivation test_real_layout_derivation.cpp)
 f4_simulation_add_test(test_digi_mission           test_digi_mission.cpp)
+f4_simulation_add_test(test_aar_e2e                 test_aar_e2e.cpp)   # Tranche D (AAR)
+f4_simulation_add_test(test_formation_acceptance   test_formation_acceptance.cpp)  # Tranche C
 f4_simulation_add_test(test_intercept_convergence    test_intercept_convergence.cpp)
 f4_simulation_add_test(test_fcs_trace_pipeline     test_fcs_trace_pipeline.cpp)
 f4_simulation_add_test(test_combat_integration     test_combat_integration.cpp)
@@ -127,6 +129,25 @@ target_compile_definitions(test_combat_transcript PRIVATE
 target_compile_definitions(test_digi_mission PRIVATE
     F4_SCENARIOS_DIR="${CMAKE_BINARY_DIR}/scenarios"
 )
+# Tranche D (AAR): the E2E test runs the build-configured
+# tanker_track.json scenario (same scenarios dir as digi_full_mission).
+target_compile_definitions(test_aar_e2e PRIVATE
+    F4_SCENARIOS_DIR="${CMAKE_BINARY_DIR}/scenarios"
+)
+# Tranche C (formation): the acceptance test runs the build-configured
+# formation_acceptance.json scenario. The wingmen reference FORMDAT
+# formations (trail/wedge/ladder), so the test depends on the generated
+# formdat.json fixture (simdata_golden_fixtures) like test_simdata_wiring.
+target_compile_definitions(test_formation_acceptance PRIVATE
+    F4_SCENARIOS_DIR="${CMAKE_BINARY_DIR}/scenarios"
+    F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}"
+)
+if(TARGET simdata_golden_fixtures)
+    add_dependencies(test_formation_acceptance simdata_golden_fixtures)
+endif()
+if(TARGET convert_golden_fixtures)
+    add_dependencies(test_formation_acceptance convert_golden_fixtures)
+endif()
 target_compile_definitions(test_intercept_convergence PRIVATE
     F4_SCENARIOS_DIR="${CMAKE_BINARY_DIR}/scenarios"
 )
@@ -145,6 +166,8 @@ target_compile_definitions(test_fcs_trace_pipeline PRIVATE
 # (it is skipped when F4_BUILD_SCENARIO_PLAYER=OFF — e.g. in headless CI).
 if(TARGET f4_scenario_player_lib)
     add_dependencies(test_digi_mission f4_scenario_player_lib)
+    add_dependencies(test_aar_e2e f4_scenario_player_lib)
+    add_dependencies(test_formation_acceptance f4_scenario_player_lib)
 endif()
 
 # Point the scenario loader test at the bundled fixture so it can load a real

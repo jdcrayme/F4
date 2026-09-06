@@ -184,6 +184,56 @@ void Simulation::initialize() {
     if (!scenario_.fcs_trace_path.empty()) {
         fcs_trace_ = std::make_unique<f4::recorder::FcsTraceWriter>();
     }
+
+    // AAR redesign: the tanker is a REAL AIRCRAFT (spawned by
+    // spawn_from_scenario_list like any other aircraft, with its own
+    // flight model + brain configured via brain->set_tanker(true)).
+    // Find the tanker entity by scanning the spawned aircraft for the
+    // is_tanker flag. The ScriptedTanker + ScenarioTanker block are gone.
+    for (const auto eid : aircraft_entities_) {
+        entities::EntityHandle h(eid, &world_);
+        auto* brain = h.get<f4::ai::BrainComponent>();
+        if (brain != nullptr && brain->is_tanker()) {
+            tanker_entity_ = eid;
+            break;
+        }
+    }
+    // Configure the stub's tanker with the real tanker entity ID +
+    // initial position. The stub uses this for the RefuelRequest ->
+    // TankerAssigned response; the receiver gets the LIVE position from
+    // the per-tick tanker picture push (which reads the real FM).
+    if (tanker_entity_.value != 0 && atc_) {
+        entities::EntityHandle th(tanker_entity_, &world_);
+        const auto* tf = th.get<entities::TransformComponent>();
+        const auto* fm = th.get<f4::flight::FlightModelComponent>();
+        f4::ai::atc::TankerConfig tc;
+        tc.tanker_entity_id = tanker_entity_.value;
+        if (tf) tc.position = tf->position;
+        if (tf) tc.altitude_ft = tf->position.z;
+        if (fm) tc.speed_kts = fm->state().vcas;
+        atc_->set_tanker(tc);
+    }
+    // Cache whether the scenario route carries a REFUEL waypoint so the
+    // per-tick arming decision in push_tanker_picture is a single bool.
+    for (const auto& wp : scenario_.waypoints) {
+        if (f4::ai::modules::is_refuel_action(wp.action)) {
+            scenario_has_refuel_waypoint_ = true;
+            break;
+        }
+    }
+    // Also check per-aircraft routes (the receiver's WP_REFUEL might be
+    // in its own route, not the shared waypoints).
+    if (!scenario_has_refuel_waypoint_) {
+        for (const auto& ac : scenario_.aircraft) {
+            for (const auto& wp : ac.route) {
+                if (f4::ai::modules::is_refuel_action(wp.action)) {
+                    scenario_has_refuel_waypoint_ = true;
+                    break;
+                }
+            }
+            if (scenario_has_refuel_waypoint_) break;
+        }
+    }
 }
 
 void Simulation::load_models() {
@@ -562,10 +612,14 @@ void Simulation::spawn_from_scenario_list() {
         // correct for whatever speed is set.
 
         MissionPlan plan;
-        plan.route.reserve(scenario_.waypoints.size());
-        for (const auto& wp : scenario_.waypoints) {
+        // AAR redesign: use the per-aircraft route if declared (the
+        // tanker's own track), else the shared scenario waypoints.
+        const auto& route_source = sc.route.empty()
+            ? scenario_.waypoints : sc.route;
+        plan.route.reserve(route_source.size());
+        for (const auto& wp : route_source) {
             plan.route.push_back(modules::NavigationModule::Waypoint{
-                wp.name, wp.position, wp.speed_kts});
+                wp.name, wp.position, wp.speed_kts, wp.action});
         }
         plan.taxi_in_route = scenario_.airfield.taxi_in_route;
         plan.fly_traffic_pattern = scenario_.approach_is_pattern();
@@ -576,6 +630,13 @@ void Simulation::spawn_from_scenario_list() {
             plan.start_phase = MissionPlan::StartPhase::Enroute;
         }
         brain.set_mission_plan(std::move(plan));
+
+        // AAR redesign: mark the tanker brain. The tanker flies its own
+        // route + does NOT arm the refuel rung (it's the tanker, not the
+        // receiver). The tanker-side protocol is handled by the StubATC.
+        if (sc.tanker) {
+            brain.set_tanker(true);
+        }
 
         // The arbiter's fuel policy (FrameExec step 2): joker/bingo in
         // pounds of usable fuel, from the scenario's fuel block. Zero
@@ -878,6 +939,52 @@ void Simulation::push_wingman_lead_pictures() {
     }
 }
 
+void Simulation::push_tanker_picture(double dt) {
+    // AAR redesign: the tanker is a real aircraft. Read its
+    // TransformComponent + FlightModelComponent (the same pattern
+    // push_wingman_lead_pictures uses for the lead) to build the
+    // TankerPicture, then push it to every receiver (non-tanker
+    // aircraft with a REFUEL waypoint).
+    (void)dt;   // the tanker's own FM advances in world_.update_all
+    if (tanker_entity_.value == 0) return;   // no tanker in this scenario
+    if (!scenario_has_refuel_waypoint_) return;
+
+    entities::EntityHandle tanker_h(tanker_entity_, &world_);
+    const auto* tf = tanker_h.get<entities::TransformComponent>();
+    const auto* fm = tanker_h.get<f4::flight::FlightModelComponent>();
+    if (tf == nullptr || fm == nullptr) return;
+
+    // Build the tanker picture from the real FM.
+    f4::ai::modules::TankerPicture p{};
+    p.valid = fm->state().gear.inAir;
+    p.position = tf->position;
+    p.altitude_msl_ft = tf->position.z;
+    p.speed_kts = fm->state().vcas;
+    // Heading: prefer the velocity-derived heading (the tanker's nose IS
+    // its velocity vector at formation distances). When the velocity is
+    // zero (the first tick — no position delta yet), fall back to the
+    // FM's psi (the heading the FM was initialized with). Without this
+    // fallback the heading defaults to 0 (north) and the pre-contact
+    // point is computed in the wrong place.
+    const auto vel = tf->velocity();
+    if (std::hypot(vel.x, vel.y) > 1.0) {
+        p.heading_rad = std::atan2(vel.x, vel.y);
+    } else {
+        p.heading_rad = f4::flight::to_radians(fm->state().kin.psi);
+    }
+
+    // Push to every receiver (non-tanker aircraft). The tanker itself
+    // is skipped (it's the tanker, not a receiver).
+    for (const auto eid : aircraft_entities_) {
+        if (eid.value == tanker_entity_.value) continue;   // skip the tanker
+        entities::EntityHandle h(eid, &world_);
+        auto* brain = h.get<f4::ai::BrainComponent>();
+        if (brain == nullptr || brain->is_tanker()) continue;
+        brain->set_refuel_armed(true);
+        brain->update_tanker_picture(p);
+    }
+}
+
 void Simulation::push_air_picture_(double dt) {
     // PERF-1 (PERFORMANCE_PLAN.md §3): ONE walk over the transform
     // bucket — but only on ticks where at least one brain's fusion will
@@ -1060,8 +1167,21 @@ void Simulation::push_safety_pictures() {
 
         // --- Traffic picture ---------------------------------------------
         std::vector<f4::ai::modules::CollisionAvoidModule::Intruder> traffic;
+        // Is this aircraft the tanker? If so, skip refuel-armed receivers
+        // (the tanker shouldn't avoid the receiver it's refueling).
+        const bool self_is_tanker = (self.id.value == tanker_entity_.value);
         for (const auto& other : airborne) {
             if (other.id == self.id) continue;
+            // AAR redesign: skip the tanker in ALL traffic pictures — it's
+            // a cooperative platform, not an intruder. Skip refuel-armed
+            // receivers from the TANKER's traffic (the tanker shouldn't
+            // avoid the receiver it's refueling).
+            if (other.id.value == tanker_entity_.value) continue;
+            if (self_is_tanker) {
+                auto* other_brain = entities::EntityHandle(other.id, &world_)
+                    .get<f4::ai::BrainComponent>();
+                if (other_brain && other_brain->refuel_armed()) continue;
+            }
             const double dx = other.tf->position.x - pos.x;
             const double dy = other.tf->position.y - pos.y;
             const double dz = other.tf->position.z - pos.z;
@@ -1409,6 +1529,8 @@ void Simulation::wire_atc() {
     af.runway_width_ft = scenario_.airfield.runway_width_ft;
     af.runway_length_ft = scenario_.airfield.runway_length_ft;
     atc_->set_airfield(af);
+    // AAR redesign: the stub's tanker config is set in initialize() after
+    // the tanker entity is found (wire_atc runs before spawn_aircraft).
 }
 
 
@@ -1518,6 +1640,17 @@ void Simulation::tick(double dt) {
     // a combat behavior); no-op when no aircraft declared a lead_callsign.
     if (!wingman_pairs_.empty()) {
         push_wingman_lead_pictures();
+    }
+
+    // Tranche D (AAR): advance the scripted tanker + push its picture to
+    // every receiver armed for refuel, BEFORE the brains run — the
+    // RefuelModule is engine-agnostic, the host is its eyes. No-op when
+    // the scenario has no tanker block.
+    // AAR redesign: push the tanker picture to receivers (the tanker is
+    // a real aircraft; push_tanker_picture reads its FM). No-op when the
+    // scenario has no tanker.
+    if (tanker_entity_.value != 0) {
+        push_tanker_picture(dt);
     }
 
     // The arbiter's safety rungs (M3): terrain + traffic pictures BEFORE
@@ -1724,6 +1857,28 @@ void Simulation::record_snapshot() {
         if (auto* brain = h.get<f4::ai::BrainComponent>(); brain) {
             snap.ai_mode = brain->mode_name();
             snap.ai_state = brain->state_name();
+        }
+
+        // Control commands (Tranche A4): the AI's last PilotInput, the
+        // same source the FCS CSV trace (FcsTraceSample) reads. Carries
+        // pitch/roll/yaw/throttle/speed-brake/gear/wheel/parking/nose-steer
+        // AND the landing-configuration flap schedule (tef_cmd/lef_cmd)
+        // so the replay JSON is no longer blind to the flare schedule.
+        // (Missile/bomb snapshots below intentionally skip this — their
+        // commands are not flown through the FCS.)
+        if (fm) {
+            const auto& pi = fm->last_consumed_input();
+            snap.pitch_cmd       = pi.pstick;
+            snap.roll_cmd        = pi.rstick;
+            snap.yaw_cmd         = pi.ypedal;
+            snap.throttle_cmd    = pi.throttle;
+            snap.speed_brake_cmd = pi.speedBrake;
+            snap.gear_handle_down = (pi.gearHandle > 0.0);
+            snap.wheel_brakes    = pi.wheelBrakes;
+            snap.parking_brake   = pi.parkingBrake;
+            snap.nose_steer_on   = pi.noseSteerOn;
+            snap.tef_cmd         = pi.tefCmd;
+            snap.lef_cmd         = pi.lefCmd;
         }
 
         recorder_->record(snap);

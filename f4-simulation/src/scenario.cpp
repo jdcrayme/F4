@@ -64,6 +64,10 @@ void skip_unknown(f4::json::Reader& r) {
     r.skip_value();
 }
 
+// Forward decl: read_aircraft (below) calls read_waypoint for the
+// per-aircraft route; read_waypoint is defined after read_aircraft.
+ScenarioWaypoint read_waypoint(f4::json::Reader& r);
+
 ScenarioAircraft read_aircraft(f4::json::Reader& r) {
     ScenarioAircraft a{};
     r.expect('{');
@@ -99,6 +103,17 @@ ScenarioAircraft read_aircraft(f4::json::Reader& r) {
         else if (key == "lead_callsign")    a.lead_callsign = r.read_string();
         else if (key == "brain_profile")    a.brain_profile = r.read_string();
         else if (key == "formation")        a.formation = r.read_string();
+        else if (key == "tanker")           a.tanker = r.read_bool();
+        else if (key == "route") {
+            // Per-aircraft route (AAR redesign). Empty = use shared waypoints.
+            r.expect('[');
+            bool arr_first = true;
+            while (!r.consume(']')) {
+                if (!arr_first) r.expect(',');
+                arr_first = false;
+                a.route.push_back(read_waypoint(r));
+            }
+        }
         else                                 skip_unknown(r);
     }
     return a;
@@ -134,10 +149,14 @@ ScenarioWaypoint read_waypoint(f4::json::Reader& r) {
         if (key == "name")            w.name = r.read_string();
         else if (key == "position")   w.position = read_world_position(r);
         else if (key == "speed_kts")  w.speed_kts = r.read_number();
+        else if (key == "action")     w.action = static_cast<std::uint8_t>(r.read_int());
         else                          skip_unknown(r);
     }
     return w;
 }
+
+// AAR redesign: the read_tanker helper is removed (the tanker is now a
+// regular ScenarioAircraft with tanker=true + a per-aircraft route).
 
 ScenarioAirfield read_airfield(f4::json::Reader& r) {
     ScenarioAirfield af{};
@@ -295,6 +314,11 @@ Scenario parse_scenario(f4::json::Reader& r) {
             s.brain_data_path = r.read_string();
         } else if (key == "formation_library_path") {
             s.formation_library_path = r.read_string();
+        } else if (key == "tanker") {
+            // AAR redesign: the top-level "tanker" block is removed (the
+            // tanker is now a ScenarioAircraft with "tanker": true).
+            // skip_unknown handles the old format gracefully.
+            skip_unknown(r);
         } else if (key == "combat") {
             r.expect('{');
             bool cfirst = true;

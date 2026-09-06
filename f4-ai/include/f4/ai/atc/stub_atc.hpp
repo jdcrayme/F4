@@ -219,6 +219,34 @@ private:
             contact.tanker_id = msg.tanker_id;
             bus_.publish(contact);
         });
+
+        // Tranche D redesign (USAFFull AAR): the stub auto-grants the
+        // full duplex protocol. A real tanker (the TankerModule) drives
+        // these clearances from its own SM; the stub is the test/demo
+        // surface that grants immediately so the receiver can exercise
+        // the full SM without a real tanker brain.
+        bus_.subscribe<PrecontactReport>([this](const PrecontactReport& msg) {
+            // Stub clears contact immediately (real tanker would wait
+            // for the boom operator's "ready" — a short stabilize hold).
+            ClearToContact clear;
+            clear.receiver_id = msg.receiver_id;
+            clear.tanker_id = msg.tanker_id;
+            bus_.publish(clear);
+        });
+
+        bus_.subscribe<DisconnectRequest>([this](const DisconnectRequest& msg) {
+            // Stub approves disconnect + reports fuel immediately (real
+            // tanker would report the actual fuel offloaded).
+            DisconnectApproved approved;
+            approved.receiver_id = msg.receiver_id;
+            approved.tanker_id = msg.tanker_id;
+            bus_.publish(approved);
+            FuelTransferred fuel;
+            fuel.receiver_id = msg.receiver_id;
+            fuel.tanker_id = msg.tanker_id;
+            fuel.fuel_lbs = 5000.0;   // stub: 5000 lbs offloaded
+            bus_.publish(fuel);
+        });
     }
 
     messaging::MessageBus& bus_;

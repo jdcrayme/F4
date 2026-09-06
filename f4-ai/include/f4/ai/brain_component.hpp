@@ -67,10 +67,13 @@
 #include "f4/ai/modules/strike_module.hpp"
 #include "f4/ai/modules/ground_avoid_module.hpp"
 #include "f4/ai/modules/collision_avoid_module.hpp"
+#include "f4/ai/modules/refuel_module.hpp"   // Tranche D (AAR)
 #include "f4/ai/sensor_fusion.hpp"
 
 #include <optional>
 #include <vector>
+#include <cstdio>    // Tranche D tuning: AAR CSV trace
+#include <cstdlib>   // getenv
 
 namespace f4::ai {
 
@@ -171,7 +174,8 @@ public:
         BVR,         // BVRModule engaged (Entering/Employing/Separating)
         WVR,         // WVRModule engaged (Merge/Offensive/Defensive/BugOut)
         Defensive,   // MissileModule beaming an incoming hostile missile
-        Formation    // WingmanModule keeping formation on the flight lead
+        Formation,   // WingmanModule keeping formation on the flight lead
+        Refuel       // RefuelModule flying the AAR rendezvous/contact/hold (Tranche D)
     };
 
     /// Safety mode — the ladder's TOP rungs (FreeFalcon priorities 1-2:
@@ -226,6 +230,20 @@ public:
     void set_dormant(bool d) noexcept { dormant_ = d; }
     [[nodiscard]] bool is_dormant() const noexcept { return dormant_; }
 
+    // --- Tanker role (AAR redesign) -------------------------------------
+    // Set by the Simulation when the scenario declares this aircraft as
+    // a tanker ("tanker": true). A tanker brain:
+    //   - Starts in Phase::Enroute (skips takeoff/landing — the tanker
+    //     spawns airborne on its refuel track).
+    //   - Flies its own route (the refuel track) via the NavigationModule.
+    //   - Does NOT arm the refuel rung (it's the tanker, not a receiver).
+    // The tanker-side protocol (PrecontactReport -> ClearToContact,
+    // DisconnectRequest -> DisconnectApproved + FuelTransferred) is
+    // handled by the StubATC for now; a dedicated TankerModule (the
+    // real tanker-side brain with its own SM) is a follow-up.
+    void set_tanker(bool t) noexcept { is_tanker_ = t; }
+    [[nodiscard]] bool is_tanker() const noexcept { return is_tanker_; }
+
     void update(double dt, messaging::MessageBus& bus) override {
         if (!owner_.valid()) return;  // not attached to any entity — no-op
 
@@ -254,6 +272,21 @@ public:
             if (!world) return;
             takeoff_.initialize(owner_.id().value, *world, bus);
             takeoff_initialized_ = true;
+        }
+
+        // Initialize the RefuelModule on the first ARMED update (Tranche D).
+        // Gated on refuel_armed_ so non-refueling aircraft never publish a
+        // RefuelRequest (the stub would assign every aircraft a tanker
+        // otherwise). The first armed tick subscribes to the ATC refuel
+        // protocol and fires NoTanker's entry action -> RefuelRequest ->
+        // TankerAssigned (synchronous stub round-trip, latched + drained
+        // by RefuelModule::update at its first call below).
+        if (refuel_armed_ && !refuel_initialized_ && !is_tanker_) {
+            auto* world = owner_.world();
+            if (world) {
+                refuel_.initialize(owner_.id().value, *world, bus);
+                refuel_initialized_ = true;
+            }
         }
 
         // Phase 0c (isolated scenarios): if the mission plan says to start
@@ -635,6 +668,68 @@ public:
             ai_out = wingman_.update(dt, state);
         }
 
+        // =================================================================
+        // AAR rung (Tranche D): between Formation and Mission.
+        // LANDING_PRECISION_FORMATION_AAR_PLAN.md §D2. Triggered by the
+        // host arming refuel_ for this brain (the Simulation sets
+        // refuel_armed_ when the scenario declares a tanker and the
+        // receiver's route carries a REFUEL-action waypoint). The rung
+        // sits BELOW the combat ladder (a refueling jet that is attacked
+        // breaks contact via the higher collision/safety rungs — the
+        // refuel rung does not stand itself down for a threat) and ABOVE
+        // the mission modules (a refueling jet does not fly its own
+        // route while on the boom). Preempted by safety (ground/collision
+        // avoid) like every rung; the fuel-gate (bingo) preempts it too
+        // — a bingoing jet stops refueling and goes home. Not gated by
+        // is_wingman_ (a single-ship can refuel) nor by the Wingy
+        // archetype row (refuel is a mission-phase activity, not a
+        // formation doctrine).
+        // =================================================================
+        if (safety_mode_ == SafetyMode::None &&
+            combat_mode_ == CombatMode::None &&
+            !fuel_bingo_ &&
+            phase_ == Phase::Enroute && refuel_armed_ &&
+            refuel_.is_active() && !is_tanker_) {
+            combat_mode_ = CombatMode::Refuel;
+            ai_out = refuel_.update(dt, state);
+        }
+        // Tranche D tuning: env-var-gated CSV trace of the AAR hold loop.
+        // F4_AAR_TRACE=/path/to.csv writes one row per tick: the boom-
+        // envelope errors (along/lat/vert), the module's commands, and
+        // the receiver's actual speed/alt/heading (the IAircraftState
+        // read). Used by the hold-tuning iteration (the STAB-E pattern:
+        // instrument before you touch). Gated on the env var so normal
+        // test runs are unaffected.
+        if (refuel_armed_ && refuel_.is_active()) {
+            static const char* _aar_trace_path = std::getenv("F4_AAR_TRACE");
+            static FILE* _aar_trace_fp = []() -> FILE* {
+                if (!_aar_trace_path) return nullptr;
+                FILE* f = std::fopen(_aar_trace_path, "w");
+                if (f) std::fprintf(f,
+                    "tick,along_ft,lat_ft,vert_ft,state,pitch_cmd,roll_cmd,"
+                    "throttle_cmd,vcas_kts,alt_msl_ft,heading_rad,pitch_rad,"
+                    "roll_rad,vs_fpm\n");
+                return f;
+            }();
+            if (_aar_trace_fp) {
+                auto& r = refuel_;
+                std::fprintf(_aar_trace_fp, "%d,%.2f,%.2f,%.2f,%d,%.4f,%.4f,"
+                    "%.4f,%.2f,%.2f,%.4f,%.4f,%.4f,%.1f\n",
+                    /*tick*/ 0,  // (tick counter not available here; the
+                                 // row index IS the tick for a fixed-dt sim)
+                    r.along_err_ft(), r.lat_err_ft(), r.vert_err_ft(),
+                    (int)r.state(),
+                    ai_out.pitch_cmd, ai_out.roll_cmd, ai_out.throttle_cmd,
+                    state ? state->vcas_kts() : 0.0,
+                    state ? state->altitude_msl_ft() : 0.0,
+                    state ? state->heading_rad() : 0.0,
+                    state ? state->pitch_angle_rad() : 0.0,
+                    state ? state->roll_angle_rad() : 0.0,
+                    state ? state->vertical_speed_fpm() : 0.0);
+                std::fflush(_aar_trace_fp);
+            }
+        }
+
         // Ladder bookkeeping (single source, every rung — safety,
         // combat, formation): falling to None from ANY active rung —
         // the pull-up flown, the break complete, BVR separated, target
@@ -732,6 +827,7 @@ public:
         if (combat_mode_ == CombatMode::WVR)         return "WVREngage";
         if (combat_mode_ == CombatMode::Defensive)   return "MissileDefeat";
         if (combat_mode_ == CombatMode::Formation)   return "WingmanFormation";
+        if (combat_mode_ == CombatMode::Refuel)      return "RefuelMode";
         if (fuel_bingo_ && phase_ == Phase::Enroute) return "RTB";
         switch (phase_) {
             case Phase::Ground:   return takeoff_.mode_name();
@@ -754,6 +850,7 @@ public:
         if (combat_mode_ == CombatMode::WVR)         return wvr_.state_name();
         if (combat_mode_ == CombatMode::Defensive)   return "Defending";
         if (combat_mode_ == CombatMode::Formation)   return wingman_.state_name();
+        if (combat_mode_ == CombatMode::Refuel)      return refuel_.state_name();
         if (fuel_bingo_ && phase_ == Phase::Enroute) return fuel_state_name();
         switch (phase_) {
             case Phase::Ground:   return takeoff_.state_name();
@@ -787,6 +884,7 @@ public:
             case CombatMode::WVR:       return "WVREngage";
             case CombatMode::Defensive: return "MissileDefeat";
             case CombatMode::Formation: return "WingmanFormation";
+            case CombatMode::Refuel:    return "RefuelMode";
         }
         return "?";
     }
@@ -973,6 +1071,27 @@ public:
     [[nodiscard]] modules::WingmanModule&       wingman()       noexcept { return wingman_; }
     [[nodiscard]] const modules::WingmanModule& wingman() const noexcept { return wingman_; }
 
+    // --- AAR role (Tranche D; the host drives this at spawn + per tick) ---
+    /// Arm/disarm the RefuelModule rung. The host (Simulation) sets this
+    /// when the scenario declares a tanker AND the receiver's route
+    /// carries a REFUEL-action waypoint (the receiver is enroute to the
+    /// boom). The rung itself only fires while refuel_.is_active()
+    /// (NoTanker/Done are inert — the brain falls through to nav). The
+    /// first armed tick lazily initializes the module (subscribes to the
+    /// ATC refuel protocol and publishes RefuelRequest), mirroring the
+    /// TakeoffModule's first-update init.
+    void set_refuel_armed(bool on) noexcept { refuel_armed_ = on; }
+    [[nodiscard]] bool refuel_armed() const noexcept { return refuel_armed_; }
+    /// Push the tanker's kinematic picture for THIS tick (the host calls
+    /// it every tick BEFORE update: the module is engine-agnostic, it
+    /// cannot read the tanker entity itself). An invalid picture
+    /// (despawned tanker) drops the rung to NoTanker for that tick.
+    void update_tanker_picture(const modules::TankerPicture& p) {
+        refuel_.set_tanker_picture(p);
+    }
+    [[nodiscard]] modules::RefuelModule&       refuel()       noexcept { return refuel_; }
+    [[nodiscard]] const modules::RefuelModule& refuel() const noexcept { return refuel_; }
+
     /// Legacy alias for the Phase A API (tests + hosts configure the
     /// takeoff module through this).
     [[nodiscard]] modules::TakeoffModule&       module()       noexcept { return takeoff_; }
@@ -1092,6 +1211,22 @@ private:
     std::uint64_t lead_id_{0};
     std::uint64_t lead_engaged_id_{0};
     modules::WingmanModule wingman_{};
+
+    // Tanker role (AAR redesign): this brain IS a tanker. Tankers fly
+    // their own route + do NOT arm the refuel rung (they're the tanker,
+    // not the receiver). The tanker-side protocol is handled by the
+    // StubATC for now; a dedicated TankerModule is a follow-up.
+    bool is_tanker_{false};
+
+    // AAR role (Tranche D): the refuel module + the host-driven arming
+    // flag + the lazy-init guard. refuel_ is default-constructed; it
+    // subscribes to the ATC refuel protocol on the first armed update
+    // (see the lazy init in update()). refuel_armed_ is set by the host
+    // when the scenario declares a tanker + a REFUEL waypoint;
+    // refuel_initialized_ prevents re-subscribing every armed tick.
+    modules::RefuelModule refuel_{};
+    bool refuel_armed_{false};
+    bool refuel_initialized_{false};
 
     // Safety ladder (the arbiter's top rungs): the terrain pull-up + the
     // mid-air break, and the pictures the host pushes each tick (the
