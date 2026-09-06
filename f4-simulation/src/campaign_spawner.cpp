@@ -14,7 +14,6 @@ CampaignSimSpawner::CampaignSimSpawner(
         f4::entities::EntityWorld& world,
         std::unordered_map<std::uint32_t, f4::entities::EntityId> unit_id_map,
         const f4::world_types::ClassTable& ct,
-        const f4::models::ModelDatabase& db,
         const f4::data::AircraftConfig& cfg,
         const ScenarioAirfield& airfield,
         const ScenarioAircraft& scenario_aircraft,
@@ -22,7 +21,6 @@ CampaignSimSpawner::CampaignSimSpawner(
     : world_(world),
       unit_id_map_(std::move(unit_id_map)),
       ct_(ct),
-      db_(db),
       cfg_(cfg),
       airfield_(airfield),
       tpl_(scenario_aircraft),
@@ -95,7 +93,7 @@ void CampaignSimSpawner::handle(const f4::campaign::MissionIntent& intent) {
             // included — keyed by VU; the plan builder resolves the CAS
             // delivery waypoint's battalion target through it).
             const auto spawned_id = spawn_aircraft_for_intent(
-                world_, intent, unit_id_map_, ct_, db_, cfg_, airfield_,
+                world_, intent, unit_id_map_, ct_, cfg_, airfield_,
                 tpl_, slot, airbase_airfields_, objective_id_map_,
                 weapon_table_, &unit_id_map_);
             if (spawned_id) {
@@ -157,7 +155,7 @@ void CampaignSimSpawner::handle(const f4::campaign::MissionIntent& intent) {
     // host supplied them; null table = unarmed spawns (the pre-A-G
     // behavior for single-purpose route QC).
     auto spawned_id = spawn_aircraft_for_flight(
-        world_, it->second, ct_, db_, cfg_, airfield_, tpl_, slot,
+        world_, it->second, ct_, cfg_, airfield_, tpl_, slot,
         nullptr, objective_id_map_, weapon_table_, &unit_id_map_);
     if (!spawned_id) {
         // Resolved entity wasn't a flight (corrupt map?). Count it as

@@ -447,7 +447,6 @@ std::optional<f4::entities::EntityId>
 spawn_aircraft_for_flight(f4::entities::EntityWorld& world,
                           f4::entities::EntityId flight_entity,
                           const f4::world_types::ClassTable& ct,
-                          const f4::models::ModelDatabase& db,
                           const f4::data::AircraftConfig& cfg,
                           const ScenarioAirfield& airfield,
                           const ScenarioAircraft& scenario_aircraft,
@@ -577,14 +576,7 @@ spawn_aircraft_for_flight(f4::entities::EntityWorld& world,
     //    the mesh from vis_type alone (V-3DLIVE).
     auto& vis = h.add<VisualModelComponent>();
     vis.vis_type = vis_type_index;
-    if (db.valid()) {
-        vis.model_record = db.model(vis_type_index);
-    }
     vis.active_lod = 0;
-    f4::models::SwitchState gear_switch;
-    gear_switch.switch_number = 10;
-    gear_switch.active_child  = 0;  // 0 = gear down
-    vis.model_state.switches.push_back(gear_switch);
 
     // 4. BrainComponent — wraps TakeoffModule. B.3: when the flight
     // carries a saved waypoint plan, ALSO attach the derived MissionPlan
@@ -652,7 +644,6 @@ spawn_aircraft_for_flight(f4::entities::EntityWorld& world,
 std::vector<f4::entities::EntityId>
 spawn_aircraft_from_flights(f4::entities::EntityWorld& world,
                              const f4::world_types::ClassTable& ct,
-                             const f4::models::ModelDatabase& db,
                              const f4::data::AircraftConfig& cfg,
                              const ScenarioAirfield& airfield,
                              const ScenarioAircraft& scenario_aircraft,
@@ -712,7 +703,7 @@ spawn_aircraft_from_flights(f4::entities::EntityWorld& world,
         const int slot = per_airbase_index[airbase_id.value]++;
 
         if (auto spawned_id = spawn_aircraft_for_flight(
-                world, flight_id, ct, db, cfg, airfield,
+                world, flight_id, ct, cfg, airfield,
                 scenario_aircraft, slot, airbase_airfields,
                 objective_id_map, weapon_table, unit_id_map)) {
             spawned.push_back(*spawned_id);
@@ -1157,7 +1148,6 @@ spawn_aircraft_for_intent(
         const std::unordered_map<std::uint32_t, f4::entities::EntityId>&
             unit_id_map,
         const f4::world_types::ClassTable& ct,
-        const f4::models::ModelDatabase& db,
         const f4::data::AircraftConfig& cfg,
         const ScenarioAirfield& airfield,
         const ScenarioAircraft& scenario_aircraft,
@@ -1261,14 +1251,7 @@ spawn_aircraft_for_intent(
 
     auto& vis = h.add<VisualModelComponent>();
     vis.vis_type = vis_type_index;  // V-3DLIVE (see flight path note)
-    if (db.valid()) {
-        vis.model_record = db.model(vis_type_index);
-    }
     vis.active_lod = 0;
-    f4::models::SwitchState gear_switch;
-    gear_switch.switch_number = 10;
-    gear_switch.active_child  = 0;
-    vis.model_state.switches.push_back(gear_switch);
 
     auto& brain = h.add<BrainComponent>();
     brain.module().rotate_speed_kts = 140.0;
@@ -1528,7 +1511,6 @@ int16_t resolve_vehicle_vis_type(
 std::vector<f4::entities::EntityId>
 spawn_vehicles_from_unit(f4::entities::EntityWorld& world,
                           const f4::world_types::ClassTable& ct,
-                          const f4::models::ModelDatabase& db,
                           f4::entities::EntityId unit_id) {
     using namespace f4::entities;
     using namespace f4::simulation;
@@ -1577,7 +1559,6 @@ spawn_vehicles_from_unit(f4::entities::EntityWorld& world,
             vehicle_index += g.live_count;
             continue;
         }
-        const auto* model_rec = db.valid() ? db.model(vis_type) : nullptr;
 
         for (int i = 0; i < g.live_count; ++i) {
             const Offset local = formation_offset(vehicle_index);
@@ -1600,7 +1581,6 @@ spawn_vehicles_from_unit(f4::entities::EntityWorld& world,
             // carries the identity when model_record is null (empty db).
             auto& vis = h.add<VisualModelComponent>();
             vis.vis_type = vis_type;
-            vis.model_record = model_rec;
             vis.active_lod = 0;
             // model_state defaults — the renderer's draw_entity_meshes()
             // doesn't consult switches/DOFs today.
@@ -1615,14 +1595,13 @@ spawn_vehicles_from_unit(f4::entities::EntityWorld& world,
 
 std::vector<f4::entities::EntityId>
 spawn_vehicles_from_units(f4::entities::EntityWorld& world,
-                           const f4::world_types::ClassTable& ct,
-                           const f4::models::ModelDatabase& db) {
+                           const f4::world_types::ClassTable& ct) {
     using namespace f4::entities;
 
     const auto unit_ids = world.with_component<VehicleCompositionComponent>();
     std::vector<EntityId> spawned;
     for (const auto unit_id : unit_ids) {
-        auto batch = spawn_vehicles_from_unit(world, ct, db, unit_id);
+        auto batch = spawn_vehicles_from_unit(world, ct, unit_id);
         spawned.insert(spawned.end(), batch.begin(), batch.end());
     }
     return spawned;
@@ -1680,7 +1659,6 @@ pick_parking_spot(const std::vector<ScenarioParkingSpot>& spots, int i) {
 std::vector<f4::entities::EntityId>
 spawn_aircraft_from_squadrons(f4::entities::EntityWorld& world,
                                 const f4::world_types::ClassTable& ct,
-                                const f4::models::ModelDatabase& db,
                                 const f4::data::AircraftConfig& cfg,
                                 const ScenarioAirfield& airfield,
                                 const ScenarioAircraft& scenario_aircraft) {
@@ -1708,7 +1686,6 @@ spawn_aircraft_from_squadrons(f4::entities::EntityWorld& world,
         if (vis_type_index <= 0) {
             vis_type_index = scenario_aircraft.vis_type_index;
         }
-        const auto* model_rec = db.valid() ? db.model(vis_type_index) : nullptr;
 
         // 2. Count active Flights — only spawn the un-tasked remainder.
         const int active_flights = count_active_flights_for_squadron(world, squadron_id);
@@ -1783,12 +1760,7 @@ spawn_aircraft_from_squadrons(f4::entities::EntityWorld& world,
 
             auto& vis = h.add<VisualModelComponent>();
             vis.vis_type = vis_type_index;  // V-3DLIVE (see flight path note)
-            vis.model_record = model_rec;
             vis.active_lod = 0;
-            f4::models::SwitchState gear_switch;
-            gear_switch.switch_number = 10;
-            gear_switch.active_child  = 0;  // gear down
-            vis.model_state.switches.push_back(gear_switch);
 
             auto& brain = h.add<BrainComponent>();
             brain.module().rotate_speed_kts = 140.0;

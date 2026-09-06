@@ -24,7 +24,6 @@
 #include <f4/entities/entity.hpp>
 #include <f4/entities/types.hpp>
 #include <f4/world_types/class_table.hpp>
-#include <f4/models/model_database.hpp>
 
 #include <filesystem>
 #include <fstream>
@@ -132,9 +131,8 @@ TEST(BubbleRadii, MalformedAiiThrows) {
 TEST(BubbleManager, Constructor_SetsDefaultRadii) {
     EntityWorld world;
     ClassTable ct;
-    f4::models::ModelDatabase db;
 
-    BubbleManager bm(world, ct, db);
+    BubbleManager bm(world, ct);
     EXPECT_DOUBLE_EQ(bm.ground_radius_ft(), 1024.0);  // GROUND_BUBBLE_SIZE
     EXPECT_DOUBLE_EQ(bm.air_radius_ft(), 2560.0);     // SIM_BUBBLE_SIZE
 }
@@ -142,9 +140,8 @@ TEST(BubbleManager, Constructor_SetsDefaultRadii) {
 TEST(BubbleManager, Constructor_AcceptsCustomRadii) {
     EntityWorld world;
     ClassTable ct;
-    f4::models::ModelDatabase db;
 
-    BubbleManager bm(world, ct, db, /*ground=*/500.0, /*air=*/1000.0);
+    BubbleManager bm(world, ct, /*ground=*/500.0, /*air=*/1000.0);
     EXPECT_DOUBLE_EQ(bm.ground_radius_ft(), 500.0);
     EXPECT_DOUBLE_EQ(bm.air_radius_ft(), 1000.0);
 }
@@ -152,9 +149,8 @@ TEST(BubbleManager, Constructor_AcceptsCustomRadii) {
 TEST(BubbleManager, InitiallyEmpty) {
     EntityWorld world;
     ClassTable ct;
-    f4::models::ModelDatabase db;
 
-    BubbleManager bm(world, ct, db);
+    BubbleManager bm(world, ct);
     EXPECT_TRUE(bm.vehicle_entities().empty());
     EXPECT_EQ(bm.deaggregated_unit_count(), 0u);
 }
@@ -166,10 +162,9 @@ TEST(BubbleManager, Update_PlayerFarFromUnit_NoDeagg) {
     // No deaggregation.
     EntityWorld world;
     ClassTable ct;
-    f4::models::ModelDatabase db;
 
     make_battalion_at(world, 100000.0, 0.0);
-    BubbleManager bm(world, ct, db);
+    BubbleManager bm(world, ct);
 
     bm.update(f4::geo::WorldPosition(0.0, 0.0, 0.0));
     EXPECT_EQ(bm.deaggregated_unit_count(), 0u);
@@ -183,10 +178,9 @@ TEST(BubbleManager, Update_PlayerOnUnit_DeaggButEmptyDueToEmptyCT) {
     // marked as deaggregated in the map (so we don't retry every tick).
     EntityWorld world;
     ClassTable ct;
-    f4::models::ModelDatabase db;
 
     make_battalion_at(world, 0.0, 0.0);
-    BubbleManager bm(world, ct, db);
+    BubbleManager bm(world, ct);
 
     bm.update(f4::geo::WorldPosition(0.0, 0.0, 0.0));
     // spawn_vehicles_from_unit returned empty (CT empty → no models).
@@ -201,10 +195,9 @@ TEST(BubbleManager, Update_PlayerLeavesBubble_Reagg) {
     // the deaggregated map stays empty.
     EntityWorld world;
     ClassTable ct;
-    f4::models::ModelDatabase db;
 
     make_battalion_at(world, 0.0, 0.0);
-    BubbleManager bm(world, ct, db);
+    BubbleManager bm(world, ct);
 
     bm.update(f4::geo::WorldPosition(0.0, 0.0, 0.0));          // in bubble
     bm.update(f4::geo::WorldPosition(100000.0, 0.0, 0.0));     // out of bubble
@@ -216,10 +209,9 @@ TEST(BubbleManager, Update_PlayerLeavesBubble_Reagg) {
 TEST(BubbleManager, ForceDeaggregate_OnEmptyCT_StillNoSpawns) {
     EntityWorld world;
     ClassTable ct;
-    f4::models::ModelDatabase db;
 
     auto bid = make_battalion_at(world, 100000.0, 0.0);  // far from origin
-    BubbleManager bm(world, ct, db);
+    BubbleManager bm(world, ct);
 
     bm.force_deaggregate(bid);
     // CT empty → spawn returns empty → not recorded as deaggregated.
@@ -230,10 +222,9 @@ TEST(BubbleManager, ForceDeaggregate_OnEmptyCT_StillNoSpawns) {
 TEST(BubbleManager, ForceReaggregate_NotDeaggregated_NoOp) {
     EntityWorld world;
     ClassTable ct;
-    f4::models::ModelDatabase db;
 
     auto bid = make_battalion_at(world, 0.0, 0.0);
-    BubbleManager bm(world, ct, db);
+    BubbleManager bm(world, ct);
 
     // No prior deaggregate — force_reaggregate should be a no-op.
     bm.force_reaggregate(bid);
@@ -246,9 +237,8 @@ TEST(BubbleManager, ForceReaggregate_NotDeaggregated_NoOp) {
 TEST(BubbleManager, Clear_OnEmptyManager_NoOp) {
     EntityWorld world;
     ClassTable ct;
-    f4::models::ModelDatabase db;
 
-    BubbleManager bm(world, ct, db);
+    BubbleManager bm(world, ct);
     bm.clear();
     EXPECT_EQ(bm.deaggregated_unit_count(), 0u);
     EXPECT_TRUE(bm.vehicle_entities().empty());
@@ -263,11 +253,10 @@ TEST(BubbleManager, Update_MultipleUnits_AllProcessed) {
     // crashing and the deaggregated map stays empty.
     EntityWorld world;
     ClassTable ct;
-    f4::models::ModelDatabase db;
 
     make_battalion_at(world, 0.0, 0.0);          // near player
     make_battalion_at(world, 100000.0, 0.0);     // far from player
-    BubbleManager bm(world, ct, db);
+    BubbleManager bm(world, ct);
 
     bm.update(f4::geo::WorldPosition(0.0, 0.0, 0.0));
     EXPECT_EQ(bm.deaggregated_unit_count(), 0u);  // CT empty
@@ -277,9 +266,8 @@ TEST(BubbleManager, Update_MultipleUnits_AllProcessed) {
 TEST(BubbleManager, Update_NoUnitsInWorld_NoOp) {
     EntityWorld world;
     ClassTable ct;
-    f4::models::ModelDatabase db;
 
-    BubbleManager bm(world, ct, db);
+    BubbleManager bm(world, ct);
     bm.update(f4::geo::WorldPosition(0.0, 0.0, 0.0));
     EXPECT_EQ(bm.deaggregated_unit_count(), 0u);
 }
@@ -293,10 +281,9 @@ TEST(BubbleManager, Update_CalledMultipleTimes_NoDoubleDeagg) {
     // idempotent — no crash, no growth in deaggregated_unit_count.
     EntityWorld world;
     ClassTable ct;
-    f4::models::ModelDatabase db;
 
     make_battalion_at(world, 0.0, 0.0);
-    BubbleManager bm(world, ct, db);
+    BubbleManager bm(world, ct);
 
     for (int i = 0; i < 5; ++i) {
         bm.update(f4::geo::WorldPosition(0.0, 0.0, 0.0));

@@ -26,12 +26,10 @@ std::pair<double, double> bubble_radii_from_aii(
 
 BubbleManager::BubbleManager(f4::entities::EntityWorld& world,
                               const f4::world_types::ClassTable& ct,
-                              const f4::models::ModelDatabase& db,
                               double ground_radius_ft,
                               double air_radius_ft)
     : world_(world)
     , ct_(ct)
-    , db_(db)
     , ground_radius_ft_(ground_radius_ft)
     , air_radius_ft_(air_radius_ft) {}
 
@@ -112,7 +110,7 @@ BubbleManager::deaggregate_(f4::entities::EntityId unit_id) {
     // Idempotent — no-op if already deaggregated.
     if (deaggregated_.count(unit_id.value) > 0) return {};
 
-    auto spawned = spawn_vehicles_from_unit(world_, ct_, db_, unit_id);
+    auto spawned = spawn_vehicles_from_unit(world_, ct_, unit_id);
     if (spawned.empty()) return {};
 
     // Record the spawned IDs so we can despawn them later.

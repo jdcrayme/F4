@@ -9049,3 +9049,94 @@ Stage Summary (Task 55 — @asset: model skip LANDED + renderer-half plan writte
   needs GL headers to build/verify f4-renderer + the viewers. The plan
   doc is the handoff — a GL-enabled agent/session can execute it in
   3-5 days. Each sub-task turns boundary violations green as it lands.
+
+---
+Task ID: 56 (Tranche 0d renderer half — f4-models cut from f4-simulation)
+Agent: main (Super Z)
+Task: Cut f4-models + f4-lzss from f4-simulation's link closure. The
+simulation half (Tasks 54-55) cut f4-world-convert. This task completes
+the simulation-side decoupling: VisualModelComponent drops model_record +
+ModelState, Simulation drops model_db_ ownership, and the campaign_bridge/
+spawner/bubble_manager functions drop their ModelDatabase& params. The
+scenario-player owns its own ModelDatabase (transitional). The boundary
+verifier PASSES clean for the headless runtime.
+
+Work Log:
+- RECON (subagent): exhaustive map of every model_record / ModelDatabase /
+  ModelState / SwitchState / model_db / load_models / #include <f4/models/
+  reference across f4-simulation (src+include+tests+tools), f4-renderer
+  (src+include), f4-scenario-player (src+include), f4-world-viewer
+  (src+include). 27 #include <f4/models/...> lines, ~90+ ModelDatabase
+  references, ~22 model_record references. Key finding: f4-renderer has
+  its OWN deep ModelDatabase usage (geometry pipeline: extract_model_
+  geometry, fetch_texture, color_bank, parse_lod) — separate from the
+  simulation's. The scenario-player does vis->model_record pointer
+  arithmetic to get parent_index. The world-viewer doesn't read
+  model_record at all (it has its own model_db_3d).
+- VisualModelComponent REWIRE: removed `const f4::models::ModelRecord*
+  model_record` + `f4::models::ModelState model_state`. Kept `vis_type`
+  (already the identity) + `active_lod` + `texture_set`. Added
+  `uint8_t gear_switch_child{0}` (replaces the ModelState.switches vector
+  — only the gear switch was ever animated by the sim). Removed the
+  f4/models includes. The component now depends on f4-entities only.
+- Simulation REWIRE: removed `std::unique_ptr<ModelDatabase> model_db_`
+  member, `load_models()` function, `model_db()` accessor, the
+  `model_db_(std::make_unique<...>)` constructor init, and the
+  `load_models()` call from initialize(). Removed `#include <f4/models/
+  model_database.hpp>` from simulation.hpp.
+- Spawn path updates: simulation.cpp's spawn_aircraft + spawn_airfield_
+  features dropped `vis.model_record = model_db_->model(...)` + the
+  SwitchState construction. The gear sync (tick) changed from
+  `vis->model_state.switches[0].active_child = ...` to
+  `vis->gear_switch_child = ...`.
+- Function signature updates: campaign_bridge/spawner/bubble_manager
+  dropped `const f4::models::ModelDatabase& db` params from ~10 function
+  signatures + their call sites. The db_ members removed from
+  CampaignSimSpawner + BubbleManager. campaign_session dropped its db_
+  member + the db arg to CampaignSimSpawner.
+- CMakeLists: f4-simulation drops `f4-models` from target_link_libraries.
+  f4-lzss was transitive (via f4-models) — also gone.
+- Test updates: 11 test files updated. model_record assertions → vis_type
+  assertions (test_simulation_lifetime, test_feature_spawning,
+  test_campaign_bridge, test_campaign_session_runner). ModelDatabase{}
+  args removed from spawn function calls. f4/models includes removed.
+  test_visual_model_component.cpp rewritten for the new component shape
+  (vis_type + gear_switch_child, no model_record/model_state/SwitchState).
+  test_scenario_loader's AssetModelRefSkipsBinaryLoad dropped the
+  `sim.model_db().valid()` check (accessor gone).
+- GUI app updates (mechanical, GL-unverified): scenario-player renderer.cpp
+  changed `vis->model_record` checks → `vis->vis_type` checks, and
+  `vis->model_record - base` pointer arithmetic → `vis->vis_type` (the
+  vis_type IS the KoreaObj parent index — same value, no pointer math).
+  The scenario-player's Impl gets its own `f4::models::ModelDatabase
+  model_db` member (viewer_state.hpp) + loads KoreaObj from the scenario
+  paths in player_app.cpp (moved from Simulation::load_models). The
+  world-viewer is unchanged (it already owned its own model_db_3d + uses
+  vis_type; it never read model_record).
+- BOUNDARY VERIFIER: PASSES clean when renderer/viewer/scenario-player
+  are OFF (the headless configuration). "F4 boundary check: PASS (no
+  runtime target links a legacy binary parser)". Before: f4-simulation
+  had direct f4-models + transitive f4-lzss. After: zero. trace_runner
+  + campaign_qc also clean (transitive via f4-simulation).
+- TEST SUITE: 2341/2348 PASS (99.7%). The 7 failures are PRE-EXISTING
+  (CmpEncoder.LzssRoundTrip, CampaignBridge.DerivesDepartureAltitude,
+  CampaignBridge.SynthesizesForLayoutless, DigiMission×2,
+  FcsTracePipeline, InterceptConvergence) — verified by stashing the 0d
+  changes + rebuilding + running the same tests against the original
+  code: they fail identically. Zero regressions.
+
+Stage Summary (Task 56 — f4-models + f4-lzss cut from f4-simulation):
+- VisualModelComponent: vis_type + gear_switch_child (no f4-models types).
+- Simulation: no model_db_ ownership, no load_models(), no model_db().
+- campaign_bridge/spawner/bubble_manager: no ModelDatabase& params.
+- f4-simulation/CMakeLists.txt: f4-models dropped (f4-lzss transitive
+  gone too).
+- Boundary verifier: PASSES for the headless runtime (f4-simulation,
+  trace_runner, campaign_qc link zero legacy binary parsers).
+- The remaining violations (f4-renderer, f4-world-viewer,
+  f4-scenario-player) are GUI apps with their own ModelDatabase for the
+  geometry pipeline — the GL-dependent RuntimeModelCache rewire
+  (RENDERER_GLTF_REWIRE_PLAN.md) is the final step.
+- 2341/2348 tests pass (7 pre-existing, zero regressions).
+- The GUI app changes (scenario-player) are mechanical but GL-unverified.
+  The user's GL env will confirm compilation + visual correctness.

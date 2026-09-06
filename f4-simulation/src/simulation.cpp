@@ -96,7 +96,6 @@ namespace {
 Simulation::Simulation(Scenario scenario, std::filesystem::path asset_dir)
     : scenario_(std::move(scenario))
     , asset_dir_(std::move(asset_dir))
-    , model_db_(std::make_unique<f4::models::ModelDatabase>())
 {
 }
 
@@ -126,7 +125,6 @@ void Simulation::initialize() {
     // tick (which publishes a TaxiRequest). The brain's initialize() runs
     // lazily on first update(), so we just need StubATC alive before tick().
     wire_atc();
-    load_models();
     load_aircraft_config();
     // Load the class table ONCE, before every consumer: the spawn
     // paths below and the BubbleManager (init_bubble_manager) borrow
@@ -232,41 +230,6 @@ void Simulation::initialize() {
                 }
             }
             if (scenario_has_refuel_waypoint_) break;
-        }
-    }
-}
-
-void Simulation::load_models() {
-    const auto& hdr = scenario_.models_hdr_path;
-    const auto& lod = scenario_.models_lod_path;
-    if (hdr.empty() || lod.empty()) {
-        // No models loaded — VisualModelComponent::model_record will be null.
-        // The renderer should skip drawing in that case. This is acceptable
-        // for headless runs that don't need rendering.
-        return;
-    }
-    // Tranche 0d (NO_BINARY_RUNTIME_PLAN.md): @asset: model references are
-    // glTF-based asset-pipeline IDs (e.g. @asset:koreaobj:00001). The
-    // binary ModelDatabase loader cannot resolve them; the runtime glTF
-    // loader (f4-gltf, owned by the renderer) resolves them lazily per
-    // vis_type. Skip the binary load entirely — VisualModelComponent::
-    // model_record stays null, and the renderer resolves the mesh via
-    // vis_type + its own glTF cache (the V-3DLIVE contract the session
-    // already uses). This is the simulation-side half of 0d: the runtime
-    // stops parsing KoreaObj binary; the renderer loads glTF+PNG instead.
-    const std::string hdr_str = hdr.string();
-    if (hdr_str.size() >= 7 && hdr_str.substr(0, 7) == "@asset:") {
-        return;  // glTF resolution deferred to the renderer
-    }
-    auto err = model_db_->load(hdr, lod);
-    if (!err.empty()) {
-        throw std::runtime_error("Simulation::load_models: " + err);
-    }
-    if (!scenario_.models_tex_path.empty()) {
-        auto tex_err = model_db_->load_tex(scenario_.models_tex_path);
-        if (!tex_err.empty()) {
-            // Non-fatal: textures are optional for the geometry to load.
-            // The renderer will use vertex colors as a fallback.
         }
     }
 }
@@ -545,22 +508,12 @@ void Simulation::spawn_from_scenario_list() {
         }
 
         // 3. VisualModelComponent — the renderable handle (DrawableBSP* equivalent).
-        //    This is the ONLY new component type. The renderer reads it to draw
-        //    the F-16 mesh; the host syncs its gear switch from the FM each tick.
+        //    Tranche 0d: vis_type IS the identity — the renderer resolves the
+        //    mesh through its own model cache. No ModelDatabase involvement.
         auto& vis = h.add<VisualModelComponent>();
-        vis.vis_type = sc.vis_type_index;  // V-3DLIVE (identity w/o db)
-        if (model_db_->valid()) {
-            vis.model_record = model_db_->model(sc.vis_type_index);
-            // If the lookup failed, model_record stays null and the renderer
-            // will skip drawing. We don't throw — the sim should still run
-            // headless even if the model isn't available.
-        }
+        vis.vis_type = sc.vis_type_index;  // V-3DLIVE (identity)
         vis.active_lod = 0;  // highest detail
-        // Default ModelState: gear down (switch #10, child 0 = down per f4-models-viewer)
-        f4::models::SwitchState gear_switch;
-        gear_switch.switch_number = 10;
-        gear_switch.active_child  = 0;  // 0 = gear down
-        vis.model_state.switches.push_back(gear_switch);
+        vis.gear_switch_child = 0;  // 0 = gear down (switch #10, child 0)
 
         // 4. BrainComponent — the mission sequencer (takeoff -> navigation
         //    -> landing), runs in pass 1 (priority 100). The taxi route
@@ -1324,7 +1277,7 @@ void Simulation::spawn_from_campaign_flights() {
     filter.mission = scenario_.campaign_flight_filter.mission;
     filter.max_flights = scenario_.campaign_flight_filter.max_flights;
     aircraft_entities_ = spawn_aircraft_from_flights(
-        world_, class_table_, *model_db_, aircraft_cfg_,
+        world_, class_table_, aircraft_cfg_,
         derived, template_ac, filter,
         airbase_airfields_.empty() ? nullptr : &airbase_airfields_,
         &populated.objective_id_map, &weapon_table_,
@@ -1402,12 +1355,9 @@ void Simulation::spawn_airfield_features() {
         // as the aircraft's, resolved the same way (model_record pointer from
         // ModelDatabase). No gear switch sync needed (features have no gear).
         // V-3DLIVE: vis_type recorded for hosts that resolve meshes from
-        // their own db (the session's features carry no model_record).
+        // Tranche 0d: vis_type IS the identity — no ModelDatabase lookup.
         auto& vis = h.add<VisualModelComponent>();
         vis.vis_type = sf.vis_type_index;
-        if (model_db_->valid()) {
-            vis.model_record = model_db_->model(sf.vis_type_index);
-        }
         vis.active_lod = 0;
 
         feature_entities_.push_back(h.id());
@@ -1764,9 +1714,10 @@ void Simulation::tick(double dt) {
         // F-16 gear is switch #10 (per f4-models-viewer comment); 0=down, 1=up.
         // AeroState::gearPos is 1.0 when fully down, 0.0 when fully up (the FM
         // auto-commands gearHandle based on gear.inAir — see flight_model.cpp:263).
+        // Tranche 0d: gear_switch_child replaces the old ModelState.switches vector.
         auto* vis = h.get<VisualModelComponent>();
-        if (vis && !vis->model_state.switches.empty()) {
-            vis->model_state.switches[0].active_child = (s.aero.gearPos > 0.5) ? 0 : 1;
+        if (vis) {
+            vis->gear_switch_child = (s.aero.gearPos > 0.5) ? 0 : 1;
         }
     }
     const auto prof_t6 = g_prof.on ? std::chrono::steady_clock::now()
@@ -2127,7 +2078,7 @@ void Simulation::spawn_squadron_aircraft() {
     // pre-fix code loaded a THIRD copy here into another local).
     const auto& template_ac = scenario_.aircraft.front();
     squadron_aircraft_entities_ = spawn_aircraft_from_squadrons(
-        world_, class_table_, *model_db_, aircraft_cfg_,
+        world_, class_table_, aircraft_cfg_,
         scenario_.airfield, template_ac);
 }
 
@@ -2166,7 +2117,7 @@ void Simulation::init_bubble_manager() {
     default_ground_radius_ft_ = ground_radius_ft;
 
     bubble_manager_ = std::make_unique<BubbleManager>(
-        world_, class_table_, *model_db_, ground_radius_ft, air_radius_ft);
+        world_, class_table_, ground_radius_ft, air_radius_ft);
 }
 
 void Simulation::update_bubble() {

@@ -124,6 +124,13 @@ struct PlayerApp::Impl {
     // world-viewer — one implementation now serves both).
     f4::renderer::RenderResources render_res;
 
+    // Tranche 0d: the scenario-player owns its own ModelDatabase (the
+    // simulation no longer owns one). Loaded from the scenario's
+    // KoreaObj.HDR/.LOD/.TEX paths. Transitional — the final glTF path
+    // will replace this with a RuntimeModelCache that loads
+    // Data/Models/koreaobj/*.gltf + textures/*.png.
+    f4::models::ModelDatabase model_db;
+
     /// True once the primary aircraft's mesh has been ensured in the
     /// cache (build_aircraft_meshes ran after GL context creation).
     bool meshes_built = false;

@@ -26,7 +26,6 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 #   - f4-math           (Vec3d, etc.)
 #   - f4-units          (Quantity, Radians — used by flight::Angle)
 #   - f4-state-machine  (StateMachine — used by TakeoffModule)
-#   - f4-models         (ModelDatabase, ModelRecord — for VisualModelComponent; Tranche 0d pending)
 #   - f4-world-types    (runtime-safe ClassTable JSON loader + layout enums;
 #                        Tranche 0d: replaces f4-world-convert for the runtime)
 #   - f4-recorder       (FlightRecorder, FlightSnapshot)
@@ -71,7 +70,6 @@ target_link_libraries(f4-simulation PUBLIC
     f4-math
     f4-units
     f4-state-machine
-    f4-models
     f4-recorder
     f4-json
     f4-io

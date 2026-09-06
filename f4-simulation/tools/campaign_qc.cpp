@@ -152,7 +152,6 @@
 #include <f4/world_types/class_table.hpp>
 #include <f4/data/aircraft_config.hpp>
 #include <f4/data/config_loader.hpp>
-#include <f4/models/model_database.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -1032,21 +1031,6 @@ int main(int argc, char** argv) {
                              "vis_type resolution will fall back\n",
                      args.class_table.string().c_str());
     }
-    f4::models::ModelDatabase db;
-    if (std::filesystem::exists(args.models_hdr) &&
-        std::filesystem::exists(args.models_hdr.parent_path() /
-                                "KoreaObj.LOD")) {
-        const auto err = db.load(args.models_hdr.string(),
-                                 (args.models_hdr.parent_path() /
-                                  "KoreaObj.LOD").string());
-        if (!err.empty()) {
-            std::fprintf(stderr, "campaign_qc: model db load failed: %s\n",
-                         err.c_str());
-        }
-    } else {
-        std::fprintf(stderr, "campaign_qc: KoreaObj models missing — "
-                             "spawned aircraft carry null model records\n");
-    }
     f4::data::AircraftConfig cfg;
     {
         const auto result = f4::data::loadConfig(args.config.string());
@@ -1099,7 +1083,7 @@ int main(int argc, char** argv) {
     filter.mission = args.mission;
     filter.max_flights = args.max_flights;
 
-    CampaignSimSpawner spawner(b3_world, populated.unit_id_map, ct, db, cfg,
+    CampaignSimSpawner spawner(b3_world, populated.unit_id_map, ct, cfg,
                                airfield, tpl, filter);
     // A-G tranche: bus-fed spawns get the same strike arming as the bulk
     // path (objective map resolves waypoint targets; the weapon table

@@ -139,26 +139,23 @@ void PlayerApp::Impl::reset_camera() {
 void PlayerApp::Impl::build_aircraft_meshes() {
     // Thin wrapper: ensure the aircraft's mesh is in the cache after GL
     // context creation (draw_entity_meshes builds the rest lazily).
+    // Tranche 0d: vis_type IS the model index (the renderer's cache key).
+    // The scenario-player owns its own ModelDatabase (transitional — the
+    // final glTF path will use a RuntimeModelCache instead).
     if (!sim_initialized) { meshes_built = true; return; }
 
     auto h = f4::entities::EntityHandle(sim->aircraft_entity(), &sim->world());
     auto* vis = h.get<f4::simulation::VisualModelComponent>();
-    if (!vis || !vis->model_record) {
+    if (!vis || vis->vis_type <= 0) {
         status_msg = "No visual model on aircraft entity";
         meshes_built = true;
         return;
     }
 
-    auto& db = const_cast<f4::models::ModelDatabase&>(sim->model_db());
-    const auto* base = db.model(0);
-    const int parent_index = base ? static_cast<int>(vis->model_record - base) : -1;
-    if (parent_index < 0) {
-        status_msg = "Cannot resolve model index from pointer";
-        meshes_built = true;
-        return;
+    const int parent_index = vis->vis_type;
+    if (model_db.valid()) {
+        render_res.build_mesh_for_model(model_db, parent_index);
     }
-
-    render_res.build_mesh_for_model(db, parent_index);
 
     meshes_built = true;
     auto it = render_res.mesh_cache.find(parent_index);
@@ -310,23 +307,22 @@ void PlayerApp::Impl::draw_scene() {
                     != aircraft_ids.end();
             };
 
-        auto& db = const_cast<f4::models::ModelDatabase&>(sim->model_db());
-        const auto* base = db.model(0);
-        scene.model_db = &db;
+        // Tranche 0d: the scenario-player owns its own ModelDatabase
+        // (transitional). vis_type IS the parent_index (the cache key).
+        scene.model_db = &model_db;
 
         for (const auto eid : entities) {
             auto h = f4::entities::EntityHandle(eid, &sim->world());
             auto* vis = h.get<f4::simulation::VisualModelComponent>();
             auto* tf  = h.get<f4::entities::TransformComponent>();
-            if (!vis || !vis->model_record || !tf) continue;
+            if (!vis || vis->vis_type <= 0 || !tf) continue;
 
             const bool is_aircraft = is_scenario_aircraft(eid);
             if (is_aircraft && !show_aircraft) continue;
             if (!is_aircraft && !show_airport) continue;
 
-            const int parent_index = base
-                ? static_cast<int>(vis->model_record - base) : -1;
-            if (parent_index < 0) continue;
+            const int parent_index = vis->vis_type;
+            if (parent_index <= 0) continue;
 
             f4::renderer::EntityMeshDraw emd;
             emd.enu_x = static_cast<float>(tf->position.x);

@@ -35,7 +35,9 @@
 
 #include <f4/entities/entity.hpp>
 #include <f4/messaging/bus.hpp>
-#include <f4/models/model_database.hpp>
+// Tranche 0d: f4-models is no longer linked. VisualModelComponent carries
+// vis_type (the identity); the renderer resolves the mesh through its own
+// model cache. The Simulation does not own a ModelDatabase.
 #include <f4/data/aircraft_config.hpp>
 #include <f4/data/brain_data.hpp>       // SimData BRAINDAT.brn archetypes
 #include <f4/data/formation_data.hpp>  // SimData FORMDAT.FIL formations
@@ -307,7 +309,6 @@ public:
         return view_bubble_active_;
     }
 
-    [[nodiscard]] const f4::models::ModelDatabase& model_db() const noexcept { return *model_db_; }
     [[nodiscard]] const Scenario& scenario() const noexcept { return scenario_; }
 
     // --- SimData AI data (diagnostics; see apply_simdata_ai_profiles) ---
@@ -367,7 +368,6 @@ public:
     void set_trace_time_scale(double s) noexcept { trace_time_scale_ = s; }
 
 private:
-    void load_models();           // KoreaObj.HDR/.LOD/.TEX -> ModelDatabase
     void load_aircraft_config();  // f16.json -> AircraftConfig
     /// NAV-D2: rotate runway-frame waypoints into ENU about the threshold.
     /// Runs from spawn_aircraft() (idempotent) so synthetic-airfield
@@ -475,7 +475,6 @@ private:
 
     entities::EntityWorld world_;
     messaging::MessageBus bus_;
-    std::unique_ptr<f4::models::ModelDatabase> model_db_;
     std::unique_ptr<f4::ai::atc::StubATC> atc_;
     std::unique_ptr<f4::recorder::FlightRecorder> recorder_;
     std::unique_ptr<f4::recorder::FcsTraceWriter> fcs_trace_;

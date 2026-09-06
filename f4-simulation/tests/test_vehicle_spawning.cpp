@@ -2,7 +2,7 @@
 //
 // Verifies the three new campaign_bridge functions:
 //
-//   1. spawn_vehicles_from_unit(world, ct, db, unit_id)
+//   1. spawn_vehicles_from_unit(world, ct, unit_id)
 //      - Returns empty if the unit has no VehicleCompositionComponent.
 //      - Returns empty if the unit has no TransformComponent.
 //      - Spawns N vehicles per group × live_count (roster-decoded).
@@ -11,7 +11,7 @@
 //      - Formation offsets are applied (vehicles don't all sit at unit center).
 //      - Heading from GroundTacticalComponent rotates the formation.
 //
-//   2. spawn_vehicles_from_units(world, ct, db)
+//   2. spawn_vehicles_from_units(world, ct)
 //      - Bulk wrapper: spawns for every VehicleCompositionComponent entity.
 //      - Returns the combined vector.
 //
@@ -36,7 +36,6 @@
 #include <f4/flight/flight_model_component.hpp>
 #include <f4/ai/brain_component.hpp>
 #include <f4/world_types/class_table.hpp>
-#include <f4/models/model_database.hpp>
 #include <f4/data/aircraft_config.hpp>
 #include <f4/data/config_loader.hpp>
 
@@ -110,36 +109,33 @@ EntityId make_battalion(EntityWorld& world,
 TEST(SpawnVehiclesFromUnit, NoVehicleComponent_ReturnsEmpty) {
     EntityWorld world;
     ClassTable ct;
-    f4::models::ModelDatabase db;
 
     // Entity with TransformComponent but no VehicleCompositionComponent.
     auto h = world.create();
     h.add<TransformComponent>();
 
-    auto spawned = spawn_vehicles_from_unit(world, ct, db, h.id());
+    auto spawned = spawn_vehicles_from_unit(world, ct, h.id());
     EXPECT_TRUE(spawned.empty());
 }
 
 TEST(SpawnVehiclesFromUnit, NoTransformComponent_ReturnsEmpty) {
     EntityWorld world;
     ClassTable ct;
-    f4::models::ModelDatabase db;
 
     // Entity with VehicleCompositionComponent but no TransformComponent.
     auto h = world.create();
     h.add<VehicleCompositionComponent>();
 
-    auto spawned = spawn_vehicles_from_unit(world, ct, db, h.id());
+    auto spawned = spawn_vehicles_from_unit(world, ct, h.id());
     EXPECT_TRUE(spawned.empty());
 }
 
 TEST(SpawnVehiclesFromUnit, InvalidEntityId_ReturnsEmpty) {
     EntityWorld world;
     ClassTable ct;
-    f4::models::ModelDatabase db;
 
     EntityId invalid{};
-    auto spawned = spawn_vehicles_from_unit(world, ct, db, invalid);
+    auto spawned = spawn_vehicles_from_unit(world, ct, invalid);
     EXPECT_TRUE(spawned.empty());
 }
 
@@ -150,17 +146,15 @@ TEST(SpawnVehiclesFromUnit, EmptyClassTable_SkipsAllGroups) {
     // don't overlap.
     EntityWorld world;
     ClassTable ct;
-    f4::models::ModelDatabase db;
 
     auto bid = make_battalion(world, 10, 20, /*vehicle_type=*/273, /*live=*/3);
-    auto spawned = spawn_vehicles_from_unit(world, ct, db, bid);
+    auto spawned = spawn_vehicles_from_unit(world, ct, bid);
     EXPECT_TRUE(spawned.empty());  // CT empty → no models → no spawns
 }
 
 TEST(SpawnVehiclesFromUnit, ZeroLiveCount_ReturnsEmpty) {
     EntityWorld world;
     ClassTable ct;
-    f4::models::ModelDatabase db;
 
     auto h = world.create();
     h.add<TransformComponent>();
@@ -170,7 +164,7 @@ TEST(SpawnVehiclesFromUnit, ZeroLiveCount_ReturnsEmpty) {
     g.live_count = 0;  // no live vehicles
     vc.groups.push_back(g);
 
-    auto spawned = spawn_vehicles_from_unit(world, ct, db, h.id());
+    auto spawned = spawn_vehicles_from_unit(world, ct, h.id());
     EXPECT_TRUE(spawned.empty());
 }
 
@@ -186,7 +180,6 @@ TEST(SpawnVehiclesFromUnit, MultipleGroups_SpawnCountMatchesLiveCountSum) {
     // groups) and doesn't crash on multi-group units.
     EntityWorld world;
     ClassTable ct;
-    f4::models::ModelDatabase db;
 
     auto h = world.create();
     h.add<TransformComponent>();
@@ -196,7 +189,7 @@ TEST(SpawnVehiclesFromUnit, MultipleGroups_SpawnCountMatchesLiveCountSum) {
     vc.groups.push_back(g1);
     vc.groups.push_back(g2);
 
-    auto spawned = spawn_vehicles_from_unit(world, ct, db, h.id());
+    auto spawned = spawn_vehicles_from_unit(world, ct, h.id());
     EXPECT_TRUE(spawned.empty());  // CT empty → all groups skipped
 }
 
@@ -205,22 +198,20 @@ TEST(SpawnVehiclesFromUnit, MultipleGroups_SpawnCountMatchesLiveCountSum) {
 TEST(SpawnVehiclesFromUnits, NoUnits_ReturnsEmpty) {
     EntityWorld world;
     ClassTable ct;
-    f4::models::ModelDatabase db;
 
-    auto spawned = spawn_vehicles_from_units(world, ct, db);
+    auto spawned = spawn_vehicles_from_units(world, ct);
     EXPECT_TRUE(spawned.empty());
 }
 
 TEST(SpawnVehiclesFromUnits, MultipleUnits_AllProcessed) {
     EntityWorld world;
     ClassTable ct;
-    f4::models::ModelDatabase db;
 
     // Two battalions with empty CT → both skip → empty result, but no crash.
     make_battalion(world, 10, 20, 273, 3);
     make_battalion(world, 30, 40, 273, 2);
 
-    auto spawned = spawn_vehicles_from_units(world, ct, db);
+    auto spawned = spawn_vehicles_from_units(world, ct);
     EXPECT_TRUE(spawned.empty());  // CT empty
 }
 
@@ -229,12 +220,11 @@ TEST(SpawnVehiclesFromUnits, MultipleUnits_AllProcessed) {
 TEST(SpawnAircraftFromSquadrons, NoSquadrons_ReturnsEmpty) {
     EntityWorld world;
     ClassTable ct;
-    f4::models::ModelDatabase db;
     f4::data::AircraftConfig cfg;
     ScenarioAirfield airfield;
     ScenarioAircraft tpl;
 
-    auto spawned = spawn_aircraft_from_squadrons(world, ct, db, cfg, airfield, tpl);
+    auto spawned = spawn_aircraft_from_squadrons(world, ct, cfg, airfield, tpl);
     EXPECT_TRUE(spawned.empty());
 }
 
@@ -246,7 +236,6 @@ TEST(SpawnAircraftFromSquadrons, SquadronWithPilots_SpawnsAircraft) {
 
     EntityWorld world;
     ClassTable ct;
-    f4::models::ModelDatabase db;
 
     // Airbase objective — needed for parking fallback.
     auto ab_h = world.create();
@@ -271,7 +260,7 @@ TEST(SpawnAircraftFromSquadrons, SquadronWithPilots_SpawnsAircraft) {
     ScenarioAircraft tpl;
     tpl.vis_type_index = 1052;
 
-    auto spawned = spawn_aircraft_from_squadrons(world, ct, db, cfg, airfield, tpl);
+    auto spawned = spawn_aircraft_from_squadrons(world, ct, cfg, airfield, tpl);
     ASSERT_EQ(spawned.size(), 4u);
 
     // Each spawned aircraft has the four-component aircraft shape.
@@ -291,7 +280,6 @@ TEST(SpawnAircraftFromSquadrons, ActiveFlights_ReduceParkedCount) {
 
     EntityWorld world;
     ClassTable ct;
-    f4::models::ModelDatabase db;
 
     auto ab_h = world.create();
     ab_h.add<TransformComponent>().position = f4::geo::WorldPosition(0.0, 0.0, 50.0);
@@ -314,7 +302,7 @@ TEST(SpawnAircraftFromSquadrons, ActiveFlights_ReduceParkedCount) {
     ScenarioAircraft tpl;
     tpl.vis_type_index = 1052;
 
-    auto spawned = spawn_aircraft_from_squadrons(world, ct, db, cfg, airfield, tpl);
+    auto spawned = spawn_aircraft_from_squadrons(world, ct, cfg, airfield, tpl);
     EXPECT_EQ(spawned.size(), 3u);  // 4 pilots - 1 active flight
 }
 
@@ -325,7 +313,6 @@ TEST(SpawnAircraftFromSquadrons, AllPilotsCovered_SpawnsNothing) {
 
     EntityWorld world;
     ClassTable ct;
-    f4::models::ModelDatabase db;
 
     auto ab_h = world.create();
     ab_h.add<TransformComponent>().position = f4::geo::WorldPosition(0.0, 0.0, 50.0);
@@ -347,7 +334,7 @@ TEST(SpawnAircraftFromSquadrons, AllPilotsCovered_SpawnsNothing) {
     ScenarioAircraft tpl;
     tpl.vis_type_index = 1052;
 
-    auto spawned = spawn_aircraft_from_squadrons(world, ct, db, cfg, airfield, tpl);
+    auto spawned = spawn_aircraft_from_squadrons(world, ct, cfg, airfield, tpl);
     EXPECT_TRUE(spawned.empty());
 }
 
@@ -359,7 +346,6 @@ TEST(SpawnAircraftFromSquadrons, ParkingSpotsUsed_WhenAvailable) {
 
     EntityWorld world;
     ClassTable ct;
-    f4::models::ModelDatabase db;
 
     auto ab_h = world.create();
     ab_h.add<TransformComponent>().position = f4::geo::WorldPosition(0.0, 0.0, 50.0);
@@ -387,7 +373,7 @@ TEST(SpawnAircraftFromSquadrons, ParkingSpotsUsed_WhenAvailable) {
     ScenarioAircraft tpl;
     tpl.vis_type_index = 1052;
 
-    auto spawned = spawn_aircraft_from_squadrons(world, ct, db, cfg, airfield, tpl);
+    auto spawned = spawn_aircraft_from_squadrons(world, ct, cfg, airfield, tpl);
     ASSERT_EQ(spawned.size(), 2u);
 
     // Verify the first aircraft is at s1's position, not the threshold.
@@ -417,7 +403,6 @@ TEST(SpawnAircraftFromSquadrons, OversubscribedSpots_WrapInOffsetRows) {
 
     EntityWorld world;
     ClassTable ct;
-    f4::models::ModelDatabase db;
 
     auto ab_h = world.create();
     ab_h.add<TransformComponent>().position = f4::geo::WorldPosition(0.0, 0.0, 50.0);
@@ -446,7 +431,7 @@ TEST(SpawnAircraftFromSquadrons, OversubscribedSpots_WrapInOffsetRows) {
     ScenarioAircraft tpl;
     tpl.vis_type_index = 1052;
 
-    auto spawned = spawn_aircraft_from_squadrons(world, ct, db, cfg, airfield, tpl);
+    auto spawned = spawn_aircraft_from_squadrons(world, ct, cfg, airfield, tpl);
     ASSERT_EQ(spawned.size(), 5u);
 
     // Expected positions, in spawn order: the spot itself for i < 2,

@@ -36,7 +36,6 @@
 #include <f4/world/detail/world_state.hpp>
 #include <f4/world_types/class_table.hpp>
 #include <f4/world_types/layout_types.hpp>  // PLT_RUNWAY, PLT_PARK
-#include <f4/models/model_database.hpp>
 #include <f4/data/aircraft_config.hpp>
 #include <f4/data/config_loader.hpp>
 
@@ -289,13 +288,12 @@ TEST(CampaignBridge, SpawnFromFlightsEmptyWorldReturnsEmpty) {
     // FlightModelComponent::init()).
     EntityWorld world;
     ClassTable ct;
-    f4::models::ModelDatabase db;
     f4::data::AircraftConfig cfg;  // empty is fine here
     ScenarioAirfield airfield;
     ScenarioAircraft tpl;
     tpl.vis_type_index = 1052;
 
-    auto spawned = spawn_aircraft_from_flights(world, ct, db, cfg, airfield, tpl);
+    auto spawned = spawn_aircraft_from_flights(world, ct, cfg, airfield, tpl);
     EXPECT_TRUE(spawned.empty());
 }
 
@@ -328,7 +326,6 @@ TEST(CampaignBridge, SpawnFromFlightsCreatesOneEntityPerFlight) {
     }
 
     ClassTable ct;
-    f4::models::ModelDatabase db;
 
     ScenarioAirfield airfield;
     airfield.runway_heading_rad = 0.0;
@@ -340,7 +337,7 @@ TEST(CampaignBridge, SpawnFromFlightsCreatesOneEntityPerFlight) {
     tpl.callsign = "EAGLE";
     tpl.aircraft_config_path = "f16.json";
 
-    auto spawned = spawn_aircraft_from_flights(world, ct, db, cfg, airfield, tpl);
+    auto spawned = spawn_aircraft_from_flights(world, ct, cfg, airfield, tpl);
     ASSERT_EQ(spawned.size(), 2u);
 
     // Each spawned entity must carry all four aircraft components.
@@ -378,7 +375,6 @@ TEST(CampaignBridge, SpawnFromFlightsAppliesPerFlightOffset) {
     }
 
     ClassTable ct;
-    f4::models::ModelDatabase db;
 
     ScenarioAirfield airfield;
     airfield.runway_heading_rad = 0.0;
@@ -387,7 +383,7 @@ TEST(CampaignBridge, SpawnFromFlightsAppliesPerFlightOffset) {
     ScenarioAircraft tpl;
     tpl.vis_type_index = 1052;
 
-    auto spawned = spawn_aircraft_from_flights(world, ct, db, cfg, airfield, tpl);
+    auto spawned = spawn_aircraft_from_flights(world, ct, cfg, airfield, tpl);
     ASSERT_EQ(spawned.size(), 2u);
 
     EntityHandle h0(spawned[0], &world);
@@ -429,7 +425,6 @@ TEST(CampaignBridge, SpawnFromFlightsFallsBackToTemplateVisType) {
     fp.squadron = sq_h.id();
 
     ClassTable ct;  // empty — vis_type_for returns 0 for everything
-    f4::models::ModelDatabase db;
 
     ScenarioAirfield airfield;
     airfield.runway_heading_rad = 0.0;
@@ -438,16 +433,15 @@ TEST(CampaignBridge, SpawnFromFlightsFallsBackToTemplateVisType) {
     ScenarioAircraft tpl;
     tpl.vis_type_index = 1052;  // F-16 fallback
 
-    auto spawned = spawn_aircraft_from_flights(world, ct, db, cfg, airfield, tpl);
+    auto spawned = spawn_aircraft_from_flights(world, ct, cfg, airfield, tpl);
     ASSERT_EQ(spawned.size(), 1u);
 
-    // The spawned aircraft should be valid. We can't easily verify the
-    // vis_type_index was used (ModelDatabase is also empty, so model_record
-    // is null), but the entity should at least exist with a VisualModelComponent.
+    // The spawned aircraft should be valid. Tranche 0d: vis_type is always
+    // set at spawn (the identity, independent of any ModelDatabase).
     EntityHandle h(spawned[0], &world);
     auto* vis = h.get<VisualModelComponent>();
     ASSERT_NE(vis, nullptr);
-    EXPECT_EQ(vis->model_record, nullptr);  // db was empty
+    EXPECT_EQ(vis->vis_type, 1052);  // F-16 vis type
 }
 
 TEST(CampaignBridge, SpawnFromFlightsFallsBackToThresholdWithoutSquadron) {
@@ -464,7 +458,6 @@ TEST(CampaignBridge, SpawnFromFlightsFallsBackToThresholdWithoutSquadron) {
     // fp.squadron defaults to EntityId{0} — unresolved.
 
     ClassTable ct;
-    f4::models::ModelDatabase db;
 
     ScenarioAirfield airfield;
     airfield.runway_heading_rad = 0.0;
@@ -473,7 +466,7 @@ TEST(CampaignBridge, SpawnFromFlightsFallsBackToThresholdWithoutSquadron) {
     ScenarioAircraft tpl;
     tpl.vis_type_index = 1052;
 
-    auto spawned = spawn_aircraft_from_flights(world, ct, db, cfg, airfield, tpl);
+    auto spawned = spawn_aircraft_from_flights(world, ct, cfg, airfield, tpl);
     ASSERT_EQ(spawned.size(), 1u);
 
     EntityHandle h(spawned[0], &world);

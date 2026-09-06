@@ -25,7 +25,6 @@
 
 #include <f4/entities/entity.hpp>
 #include <f4/flight/flight_model_component.hpp>
-#include <f4/models/model_database.hpp>
 
 #include <cstdlib>
 #include <filesystem>
@@ -170,7 +169,7 @@ TEST(FeatureSpawning, FeatureEntityHasTransformAndVisualModel) {
 
     EXPECT_NE(h.get<TransformComponent>(), nullptr);
     EXPECT_NE(h.get<VisualModelComponent>(), nullptr);
-    EXPECT_NE(h.get<VisualModelComponent>()->model_record, nullptr);
+    EXPECT_NE(h.get<VisualModelComponent>()->vis_type, 0);
 
     std::filesystem::remove(path);
 }
@@ -252,9 +251,9 @@ TEST(FeatureSpawning, FeaturesWithSameVisTypeShareModelRecord) {
     auto* v0 = h0.get<VisualModelComponent>();
     auto* v1 = h1.get<VisualModelComponent>();
 
-    ASSERT_NE(v0->model_record, nullptr);
-    ASSERT_NE(v1->model_record, nullptr);
-    EXPECT_EQ(v0->model_record, v1->model_record);  // same pointer
+    ASSERT_NE(v0->vis_type, 0);
+    ASSERT_NE(v1->vis_type, 0);
+    EXPECT_EQ(v0->vis_type, v1->vis_type);  // same pointer
 
     std::filesystem::remove(path);
 }

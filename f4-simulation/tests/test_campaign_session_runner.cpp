@@ -296,7 +296,6 @@ TEST(CampaignSessionRunner, ViewBubbleDeaggregatesWhilePaused) {
         const auto* vis = h.get<VisualModelComponent>();
         ASSERT_NE(vis, nullptr);
         EXPECT_EQ(vis->vis_type, 225);  // vehicle_type 101 → vis 225
-        EXPECT_EQ(vis->model_record, nullptr);  // empty session db
     }
 
     // The camera moves to the far corner: units outside the bubble

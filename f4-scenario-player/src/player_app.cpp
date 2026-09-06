@@ -62,6 +62,26 @@ void PlayerApp::load_scenario(const std::filesystem::path& json_path) {
     impl_->sim->initialize();
     impl_->sim_initialized = true;
 
+    // Tranche 0d: the scenario-player owns its own ModelDatabase (the sim
+    // no longer loads KoreaObj binary). Load from the scenario's paths for
+    // the transitional binary-rendering path. The @asset: case (glTF) is
+    // handled by the RuntimeModelCache (future); for now, skip if the path
+    // is an asset ref or doesn't exist.
+    const auto& hdr = impl_->scenario.models_hdr_path;
+    const auto& lod = impl_->scenario.models_lod_path;
+    const std::string hdr_str = hdr.string();
+    if (!hdr.empty() && !lod.empty() &&
+        hdr_str.substr(0, 7) != "@asset:" &&
+        std::filesystem::exists(hdr) && std::filesystem::exists(lod)) {
+        const auto err = impl_->model_db.load(hdr.string(), lod.string());
+        if (!err.empty()) {
+            std::fprintf(stderr, "PlayerApp: model db load failed: %s\n", err.c_str());
+        }
+        if (!impl_->scenario.models_tex_path.empty()) {
+            (void)impl_->model_db.load_tex(impl_->scenario.models_tex_path);
+        }
+    }
+
     // Adopt the DERIVED scenario (initialize() resolves airbase_source:
     // real runway/taxi/parking layout, runway-frame waypoints rotated to
     // world, parking:"auto" assigned a real spot). The player's pre-init

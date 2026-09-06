@@ -692,9 +692,8 @@ TEST(ScenarioLoader, AssetModelRefSkipsBinaryLoad) {
     Simulation sim(std::move(s), std::filesystem::path("."));
     EXPECT_NO_THROW(sim.initialize());
 
-    // The model db stays empty (no binary parse). The aircraft entity is
-    // still created; VisualModelComponent carries vis_type, model_record
-    // is null (the V-3DLIVE contract — the renderer resolves via vis_type).
-    EXPECT_FALSE(sim.model_db().valid());
+    // Tranche 0d: the simulation no longer owns a ModelDatabase. The aircraft
+    // entity is created with vis_type as the identity (the renderer resolves
+    // the mesh through its own model cache).
     ASSERT_EQ(sim.aircraft_entities().size(), 1u);
 }

@@ -41,7 +41,6 @@
 #include <f4/entities/entity.hpp>
 #include <f4/world/detail/world_state.hpp>
 #include <f4/world_types/class_table.hpp>
-#include <f4/models/model_database.hpp>
 #include <f4/data/aircraft_config.hpp>
 
 #include <cstdint>
@@ -217,7 +216,6 @@ spawn_aircraft_for_intent(
     const std::unordered_map<std::uint32_t, f4::entities::EntityId>&
         unit_id_map,
     const f4::world_types::ClassTable& ct,
-    const f4::models::ModelDatabase& db,
     const f4::data::AircraftConfig& cfg,
     const ScenarioAirfield& airfield,
     const ScenarioAircraft& scenario_aircraft,
@@ -361,7 +359,6 @@ airbase_vu_id(const f4::entities::EntityWorld& world,
 spawn_aircraft_for_flight(f4::entities::EntityWorld& world,
                           f4::entities::EntityId flight_entity,
                           const f4::world_types::ClassTable& ct,
-                          const f4::models::ModelDatabase& db,
                           const f4::data::AircraftConfig& cfg,
                           const ScenarioAirfield& airfield,
                           const ScenarioAircraft& scenario_aircraft,
@@ -424,7 +421,6 @@ spawn_aircraft_for_flight(f4::entities::EntityWorld& world,
 [[nodiscard]] std::vector<f4::entities::EntityId>
 spawn_aircraft_from_flights(f4::entities::EntityWorld& world,
                              const f4::world_types::ClassTable& ct,
-                             const f4::models::ModelDatabase& db,
                              const f4::data::AircraftConfig& cfg,
                              const ScenarioAirfield& airfield,
                              const ScenarioAircraft& scenario_aircraft,
@@ -492,7 +488,6 @@ spawn_aircraft_from_flights(f4::entities::EntityWorld& world,
 [[nodiscard]] std::vector<f4::entities::EntityId>
 spawn_vehicles_from_unit(f4::entities::EntityWorld& world,
                           const f4::world_types::ClassTable& ct,
-                          const f4::models::ModelDatabase& db,
                           f4::entities::EntityId unit_id);
 
 /// Bulk wrapper: deaggregate every unit with a VehicleCompositionComponent.
@@ -506,8 +501,7 @@ spawn_vehicles_from_unit(f4::entities::EntityWorld& world,
 /// \returns The combined vector of all spawned vehicle EntityIds.
 [[nodiscard]] std::vector<f4::entities::EntityId>
 spawn_vehicles_from_units(f4::entities::EntityWorld& world,
-                           const f4::world_types::ClassTable& ct,
-                           const f4::models::ModelDatabase& db);
+                           const f4::world_types::ClassTable& ct);
 
 /// Spawn parked aircraft for Squadron units that have no active Flights.
 ///
@@ -540,7 +534,6 @@ spawn_vehicles_from_units(f4::entities::EntityWorld& world,
 [[nodiscard]] std::vector<f4::entities::EntityId>
 spawn_aircraft_from_squadrons(f4::entities::EntityWorld& world,
                                 const f4::world_types::ClassTable& ct,
-                                const f4::models::ModelDatabase& db,
                                 const f4::data::AircraftConfig& cfg,
                                 const ScenarioAirfield& airfield,
                                 const ScenarioAircraft& scenario_aircraft);

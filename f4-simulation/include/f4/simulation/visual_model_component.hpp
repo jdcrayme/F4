@@ -3,8 +3,8 @@
 // VisualModelComponent — the renderable handle for an entity.
 //
 // This is the ECS equivalent of FreeFalcon's DrawableBSP* on SimVehicleClass.
-// It carries a pointer to the resolved 3D model (from f4-models::ModelDatabase)
-// plus per-instance visual state (active LOD, DOF/switch values, texture set).
+// It carries the entity's visual-model identity (vis_type) plus per-instance
+// visual state (active LOD, gear switch, texture set).
 //
 // CRITICAL DESIGN NOTE (see Docs/AIRCRAFT_BINDING_DESIGN.md):
 //   This component is ONLY the renderable handle. It is NOT a god-class
@@ -15,72 +15,66 @@
 //   resolved via EntityHandle::get<T>() / get_interface<I>(), NOT via raw
 //   pointers stored on this component.
 //
+// Tranche 0d (NO_BINARY_RUNTIME_PLAN.md): the component no longer carries
+//   a `const f4::models::ModelRecord*` or `f4::models::ModelState`. The
+//   vis_type IS the renderable identity — the renderer resolves the mesh
+//   through its own model cache (ModelDatabase for the legacy binary path,
+//   RuntimeModelCache for the glTF path). The gear switch (the only DOF/
+//   switch the sim animates) is a simple uint8. This cuts f4-models from
+//   f4-simulation's link closure: the component header has no f4/models
+//   includes, and the simulation never calls ModelDatabase methods.
+//
 // Why this lives in f4-simulation (not f4-entities):
-//   The component holds a const f4::models::ModelRecord*, so it depends on
-//   f4-models. f4-entities is currently dependency-free (only f4-geo +
-//   stdlib) and must stay that way — it's the substrate every other library
-//   builds on. f4-simulation is the orchestration layer proposed in
-//   Docs/ARCHITECTURE PROPOSAL.md §13 that depends on both f4-entities and
-//   f4-models. Any library can define new components via the Component<T>
-//   CRTP base + type_index key without modifying f4-entities.
+//   f4-entities is dependency-free (only f4-geo + stdlib) and must stay
+//   that way — it's the substrate every other library builds on. Any
+//   library can define new components via the Component<T> CRTP base +
+//   type_index key without modifying f4-entities.
 //
 // Why passive (Component<T>, not BehavioralComponent<T>):
 //   The visual state is purely a function of the FM's gear flag and the
 //   entity's transform. The renderer reads it directly; the host syncs
-//   model_state.switches from the FM each tick. No per-tick update needed.
+//   gear_switch_child from the FM each tick. No per-tick update needed.
 //
-// Dependencies: f4-entities (Component<T>), f4-models (ModelRecord, ModelState).
-// C++20.
+// Dependencies: f4-entities (Component<T>) only. C++20.
 
 #pragma once
 
 #include <f4/entities/entity.hpp>
-#include <f4/models/model_database.hpp>  // for ModelRecord
-#include <f4/models/geometry.hpp>        // for ModelState
+
+#include <cstdint>
 
 namespace f4::simulation {
 
-/// Renderable handle for an entity. Carries a pointer to the resolved
-/// 3D model (from f4-models::ModelDatabase) plus per-instance visual
-/// state (active LOD, DOF/switch values, texture set).
+/// Renderable handle for an entity. Carries the visual-model identity
+/// (vis_type — the FALCON4.CT visType[0] index) plus per-instance visual
+/// state (active LOD, gear switch, texture set).
 ///
 /// Equivalent to FreeFalcon's DrawableBSP* on SimVehicleClass — JUST
 /// the renderable, nothing else. The flight model and brain are
 /// sibling components on the same entity, resolved via the ECS.
 struct VisualModelComponent : entities::Component<VisualModelComponent> {
-    /// Resolved at scenario load from the entity's visType[0] + ModelDatabase.
-    /// Owned by ModelDatabase (long-lived); raw pointer is safe.
-    /// May be nullptr if the visType didn't resolve — the renderer should
-    /// skip drawing in that case (and ideally log a warning).
-    const f4::models::ModelRecord* model_record{nullptr};
-
-    /// V-3DLIVE: the VIS TYPE itself (FALCON4.CT's visual-model index),
-    /// recorded at spawn — the renderable IDENTITY of the entity,
-    /// independent of any ModelDatabase. Set by every campaign spawn
-    /// path (flights, synthetic intents, squadron parked aircraft,
-    /// deaggregated vehicles) alongside model_record. The session runs
-    /// with an EMPTY ModelDatabase (its db_ never loads KoreaObj —
-    /// 2D-symbols-only was the original design), so model_record is
-    /// null there; a host that DID load a model db (the world viewer)
-    /// resolves the mesh through vis_type + ITS OWN db/mesh cache
-    /// instead. 0 = never resolved (no class-table entry) — the same
-    /// convention ClassTable::vis_type_for() itself uses.
+    /// The VIS TYPE itself (FALCON4.CT's visual-model index), set at
+    /// spawn — the renderable IDENTITY of the entity, independent of any
+    /// model database. The renderer resolves vis_type → mesh through ITS
+    /// OWN model cache (ModelDatabase for the legacy binary path,
+    /// RuntimeModelCache for the glTF path). 0 = never resolved (no
+    /// class-table entry) — the renderer should skip drawing in that case.
     int16_t vis_type{0};
 
-    /// Active LOD index into model_record->lods[]. Renderer picks based
-    /// on distance to camera, but for the taxi demo we lock to LOD 0
-    /// (highest detail) since the camera is close.
+    /// Active LOD index. Renderer picks based on distance to camera, but
+    /// for the taxi demo we lock to LOD 0 (highest detail) since the
+    /// camera is close.
     int active_lod{0};
 
-    /// Per-instance DOF and switch state. Mirrors FreeFalcon's
-    /// DrawableBSP::DOFValues / SwitchValues / TextureSet.
-    /// The host syncs gear-down via the FM's gear flag → switch mask each tick.
-    /// For the F-16, switch #10 is the gear (0=down, 1=up) per
-    /// f4-models-viewer/src/scene.cpp.
-    f4::models::ModelState model_state{};
+    /// Gear switch child selection (0=down, 1=up). The host syncs this
+    /// from the FM's gear flag each tick. The renderer maps it to the
+    /// model's switch node child selection (switch #10 on the F-16 per
+    /// f4-models-viewer/src/scene.cpp). Replaces the old
+    /// f4::models::ModelState (which carried a vector of SwitchState +
+    /// DofState — only the gear switch was ever animated by the sim).
+    uint8_t gear_switch_child{0};
 
     /// Optional: which texture set (summer/winter/desert). Default 0.
-    /// ModelRecord::n_texture_sets gives the count of available sets.
     int texture_set{0};
 };
 

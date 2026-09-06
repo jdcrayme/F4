@@ -364,7 +364,7 @@ CampaignSession::create(const CampaignSessionOptions& opts,
     session->spawner_ =
         std::make_unique<f4::simulation::CampaignSimSpawner>(
             session->sim_->world(), session->unit_id_map_,
-            session->ct_, session->db_, session->cfg_, session->airfield_,
+            session->ct_, session->cfg_, session->airfield_,
             session->spawn_tpl_, filter);
     // Arming + parking: the builtin weapon table is a MEMBER (the
     // spawner borrows it; a temporary would dangle) — the QC keeps a

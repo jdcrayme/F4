@@ -1,5 +1,83 @@
 # F4 Cleanup Pass — Changes Summary
 
+## Tranche 0d (renderer half, sim decoupling) — f4-models cut from f4-simulation
+
+**The headless runtime links zero legacy binary parsers.** `f4-simulation`
+no longer links `f4-models` or `f4-lzss`. `VisualModelComponent` carries
+`vis_type` (the identity) + `gear_switch_child` — no `model_record`, no
+`ModelState`. `Simulation` no longer owns a `ModelDatabase`. The boundary
+verifier **PASSES clean** for the headless configuration.
+
+### What landed
+
+**`VisualModelComponent` rewire**: removed `const ModelRecord* model_record`
++ `f4::models::ModelState model_state`. `vis_type` (already present as the
+V-3DLIVE identity) is the sole renderable identity. `gear_switch_child`
+(uint8) replaces the `ModelState.switches` vector — only the gear switch
+was ever animated by the sim. The component header has no `f4/models`
+includes; f4-simulation no longer links f4-models.
+
+**`Simulation` rewire**: removed `model_db_` member, `load_models()`,
+`model_db()` accessor. The simulation never calls `ModelDatabase` methods.
+The scenario-player owns its own `ModelDatabase` (transitional, for the
+binary rendering path).
+
+**Function signatures**: `campaign_bridge` / `campaign_spawner` /
+`bubble_manager` dropped `const ModelDatabase& db` params from ~10
+functions + their call sites. The `db_` members removed from
+`CampaignSimSpawner` + `BubbleManager` + `CampaignSession`.
+
+**GUI app updates** (mechanical, GL-unverified): scenario-player
+`renderer.cpp` uses `vis->vis_type` as the cache key (was `vis->model_record
+- base` pointer arithmetic). The scenario-player's `Impl` owns its own
+`ModelDatabase` + loads KoreaObj from the scenario paths. The world-viewer
+is unchanged (it already owned its own `model_db_3d` + used `vis_type`).
+
+### Boundary verifier: before → after
+
+| Configuration | Before (Task 55) | After (Task 56) |
+|---------------|------------------|-----------------|
+| Headless (renderer/viewer OFF) | f4-simulation: direct f4-models, transitive f4-lzss | **PASS** (zero violations) |
+| Full (renderer/viewer ON) | f4-renderer + f4-world-viewer + f4-scenario-player | f4-renderer + f4-world-viewer + f4-scenario-player (unchanged — GUI apps) |
+
+The headless runtime (f4-simulation, trace_runner, campaign_qc) is
+**clean**. The GUI apps still link f4-models (their own geometry
+pipeline) — the RuntimeModelCache glTF rewire
+(`RENDERER_GLTF_REWIRE_PLAN.md`) is the final GL-dependent step.
+
+### Test results
+
+- **Full suite**: 2341/2348 PASS (99.7%)
+- The 7 failures are **pre-existing** (verified by stashing + rebuilding
+  against original code). Zero regressions.
+
+### Files changed (27 files, +773/-333)
+
+| Area | Change |
+|------|--------|
+| `VisualModelComponent` | Drop `model_record` + `ModelState`; add `gear_switch_child` |
+| `Simulation` | Drop `model_db_` + `load_models()` + `model_db()` |
+| `campaign_bridge` / `spawner` / `bubble_manager` | Drop `ModelDatabase&` params + `db_` members |
+| `f4-simulation/CMakeLists.txt` | Drop `f4-models` |
+| `f4-simulation/tests/` (11 files) | `model_record` → `vis_type` assertions; drop `ModelDatabase{}` args |
+| `campaign_qc.cpp` | Drop `ModelDatabase` construction + `db` arg |
+| `f4-scenario-player/renderer.cpp` | `vis->model_record` → `vis->vis_type`; own `model_db` |
+| `f4-scenario-player/viewer_state.hpp` | Add `model_db` member |
+| `f4-scenario-player/player_app.cpp` | Load KoreaObj into `model_db` (moved from Simulation) |
+
+### What's next (the final GL-dependent step)
+
+The `f4-renderer` + `f4-world-viewer` still link `f4-models` for their
+geometry pipeline (`extract_model_geometry`, `fetch_texture`,
+`color_bank`, `parse_lod`). The `RuntimeModelCache` (glTF loader) in
+`Docs/RENDERER_GLTF_REWIRE_PLAN.md` replaces this with glTF + PNG
+loading. Once landed: `temp/KoreaObj.*` (38 MB) leaves the repo, and the
+boundary verifier passes clean for ALL targets. Requires GL headers +
+visual verification.
+
+---
+
+
 ## Tranche 0d (cont.) — @asset: model skip + renderer-half plan
 
 **The simulation now skips the binary KoreaObj load when a scenario uses

@@ -146,23 +146,20 @@ visual loop.
 
 ### Tranche 0d — Runtime glTF rewire (the big refactor)
 
-> **Status: PARTIAL — simulation half LANDED (Task 54 + Task 55),
-> renderer half PLAN written (RENDERER_GLTF_REWIRE_PLAN.md), execution
-> deferred to a GL-enabled environment.** The `f4-world-convert` link is
-> cut from `f4-simulation` (and its downstream `trace_runner` /
-> `campaign_qc`): a new neutral `f4-world-types` library holds the
-> runtime-safe enums (`ObjectiveType`/`PointType`/`PointListType`), the
-> JSON `ClassTable` loader, and `AiiConfig` — all the runtime needs from
-> `f4-world-convert`, with no binary parsing (Task 54). `Simulation::
-> load_models` now skips the binary KoreaObj load when the scenario uses
-> `@asset:` model references — the glTF resolution is deferred to the
-> renderer's runtime cache (Task 55). The boundary verifier confirms:
-> `f4-simulation`'s direct `f4-world-convert` violation is GONE. The
-> remaining `f4-models` + `f4-lzss` violations (direct on
-> `f4-simulation`, transitive on `trace_runner`/`campaign_qc`) are the
-> renderer half (0d.1/0d.2/0d.3-remainder) — `VisualModelComponent` →
-> glTF-handle rewire + `f4-renderer` link-cut — which requires GL
-> headers to verify. The full implementation plan is in
+> **Status: PARTIAL — simulation half LANDED (Tasks 54-56), renderer half
+> PLAN written (RENDERER_GLTF_REWIRE_PLAN.md), execution deferred to a
+> GL-enabled environment.** The `f4-world-convert` AND `f4-models` AND
+> `f4-lzss` links are ALL cut from `f4-simulation` (and its downstream
+> `trace_runner` / `campaign_qc`): `VisualModelComponent` no longer
+> carries `model_record` or `ModelState` — `vis_type` IS the identity,
+> `gear_switch_child` replaces the switch vector. `Simulation` no longer
+> owns a `ModelDatabase` or calls `load_models()`. The scenario-player
+> owns its own `ModelDatabase` (transitional, for the binary rendering
+> path). The boundary verifier PASSES clean when renderer/viewer are OFF
+> (the headless runtime links zero legacy binary parsers). The remaining
+> violations are `f4-renderer` + `f4-world-viewer` (GUI apps with their
+> own `ModelDatabase` for the geometry pipeline) — the GL-dependent
+> renderer rewire (RuntimeModelCache → glTF) is in
 > `Docs/RENDERER_GLTF_REWIRE_PLAN.md`. 2341/2348 tests pass (7 pre-
 > existing flight-model precision failures, confirmed identical on the
 > pre-0d code).
