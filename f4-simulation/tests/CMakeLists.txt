@@ -171,9 +171,12 @@ if(TARGET f4_scenario_player_lib)
 endif()
 
 # Point the scenario loader test at the bundled fixture so it can load a real
-# JSON file without depending on the install layout.
+# JSON file without depending on the install layout. Tranche 0d: also expose
+# F4_SOURCE_DIR so the AssetModelRefSkipsBinaryLoad test can resolve
+# Data/Aircraft/f16.json from the source tree.
 target_compile_definitions(test_scenario_loader PRIVATE
     F4_SIMULATION_TEST_FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures"
+    F4_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
 
 # Point the campaign bridge test at the generated F-16 aircraft config

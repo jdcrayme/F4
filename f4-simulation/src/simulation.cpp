@@ -245,6 +245,19 @@ void Simulation::load_models() {
         // for headless runs that don't need rendering.
         return;
     }
+    // Tranche 0d (NO_BINARY_RUNTIME_PLAN.md): @asset: model references are
+    // glTF-based asset-pipeline IDs (e.g. @asset:koreaobj:00001). The
+    // binary ModelDatabase loader cannot resolve them; the runtime glTF
+    // loader (f4-gltf, owned by the renderer) resolves them lazily per
+    // vis_type. Skip the binary load entirely — VisualModelComponent::
+    // model_record stays null, and the renderer resolves the mesh via
+    // vis_type + its own glTF cache (the V-3DLIVE contract the session
+    // already uses). This is the simulation-side half of 0d: the runtime
+    // stops parsing KoreaObj binary; the renderer loads glTF+PNG instead.
+    const std::string hdr_str = hdr.string();
+    if (hdr_str.size() >= 7 && hdr_str.substr(0, 7) == "@asset:") {
+        return;  // glTF resolution deferred to the renderer
+    }
     auto err = model_db_->load(hdr, lod);
     if (!err.empty()) {
         throw std::runtime_error("Simulation::load_models: " + err);

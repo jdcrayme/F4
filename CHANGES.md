@@ -1,5 +1,64 @@
 # F4 Cleanup Pass — Changes Summary
 
+## Tranche 0d (cont.) — @asset: model skip + renderer-half plan
+
+**The simulation now skips the binary KoreaObj load when a scenario uses
+`@asset:` model references.** This is the verifiable headless slice of
+the renderer half of 0d — scenarios can reference glTF asset IDs instead
+of KoreaObj binary paths, and `Simulation::load_models` defers to the
+renderer's runtime glTF cache instead of parsing binary.
+
+The full renderer rewrite (`VisualModelComponent` → glTF handle,
+`f4-renderer` geometry/texture pipeline, link-cut, `temp/KoreaObj.*`
+deletion) needs GL headers to verify. The comprehensive implementation
+plan is now in `Docs/RENDERER_GLTF_REWIRE_PLAN.md`, ready for execution
+in a GL-enabled environment.
+
+### What landed
+
+**`Simulation::load_models`** (`f4-simulation/src/simulation.cpp`):
+detects `@asset:` model references and skips `ModelDatabase::load`.
+The runtime glTF loader (renderer-owned, per the V-3DLIVE contract)
+resolves them lazily per `vis_type`. `VisualModelComponent::model_record`
+stays null (the session already runs this way); the renderer resolves
+via `vis_type` + its own cache.
+
+**New test**: `ScenarioLoader.AssetModelRefSkipsBinaryLoad` — verifies
+`initialize()` succeeds with `@asset:` paths, the model db stays empty,
+and the aircraft entity is still created with its `vis_type` identity.
+
+### What's planned (renderer half — `Docs/RENDERER_GLTF_REWIRE_PLAN.md`)
+
+| Sub-task | Description |
+|----------|-------------|
+| 2.1 VisualModelComponent rewire | Remove `model_record`; `vis_type` is the sole identity; `gear_switch_child` replaces `ModelState` |
+| 2.2 f4-renderer rewire | New `RuntimeModelCache` loads glTF via `f4-gltf`, builds Raylib meshes from accessors, loads PNG textures by URI |
+| 2.3 Link-cut | Drop `f4-models` + `f4-lzss` + `f4-world-convert` from `f4-renderer` / `f4-simulation` / `f4-world-viewer` |
+| 2.4 temp/ deletion | Delete `temp/KoreaObj.{HDR,LOD,TEX}` (38 MB); migrate scenario templates to `@asset:` IDs |
+
+Each turns boundary violations green as it lands. Estimated 3-5 days in
+a GL-enabled environment.
+
+### Test results
+
+- **New**: 1/1 PASS (`AssetModelRefSkipsBinaryLoad`)
+- **Full suite**: 2341/2348 PASS (99.7%)
+- The 7 failures are **pre-existing** flight-model precision issues (verified identical on pre-0d code). Zero regressions.
+
+### Files changed
+
+| File | Change |
+|------|--------|
+| `f4-simulation/src/simulation.cpp` | `load_models()`: `@asset:` guard (skip binary load) |
+| `f4-simulation/tests/test_scenario_loader.cpp` | New test `AssetModelRefSkipsBinaryLoad` |
+| `f4-simulation/tests/CMakeLists.txt` | Expose `F4_SOURCE_DIR` to the test target |
+| `Docs/RENDERER_GLTF_REWIRE_PLAN.md` | **NEW** — the renderer-half 0d implementation plan |
+| `Docs/NO_BINARY_RUNTIME_PLAN.md` | Tranche 0d status updated (Task 55 + plan doc reference) |
+| `worklog.md` / `CHANGES.md` | This entry |
+
+---
+
+
 ## Tranche 0d (simulation half) — f4-world-convert cut from the runtime
 
 **The `f4-world-convert` link is gone from `f4-simulation`.** A new

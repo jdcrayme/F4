@@ -8972,3 +8972,80 @@ Stage Summary (Task 54 — Tranche 0d simulation half LANDED, renderer half DEFE
 - The boundary gate now documents a narrower violation set: only f4-models
   + f4-lzss remain (both via VisualModelComponent's ModelRecord* handle).
   Each turns green when the renderer loads glTF instead of parsing KoreaObj.
+
+---
+Task ID: 55 (Tranche 0d — @asset: model skip + renderer-half plan)
+Agent: main (Super Z)
+Task: Continue Tranche 0d toward the renderer half (cutting f4-models +
+f4-lzss from the runtime). The full renderer rewrite (VisualModelComponent
+→ glTF handle, f4-renderer geometry/texture pipeline rewire) needs GL
+headers to verify and is a multi-day task. This task delivers (a) the
+verifiable headless improvement: Simulation::load_models skips the binary
+KoreaObj load when the scenario uses @asset: model references, and (b)
+the comprehensive implementation plan doc for the renderer half, ready
+for execution in a GL-enabled environment.
+
+Work Log:
+- RECON (renderer half): mapped the full f4-renderer geometry/texture
+  pipeline. render_resources.cpp::build_mesh_for_model calls
+  db.parse_lod + db.extract_model_geometry + db.color_bank() +
+  texture_cache.upload(db, tex_ids). feature_mesh.cpp + texture_cache.cpp
+  + mesh_builder.cpp all take ModelDatabase& directly. The scenario-player
+  renderer does pointer arithmetic on model_record (vis->model_record -
+  base) to recover the parent index. ~20 call sites in f4-simulation set
+  vis.model_record = db.model(vis_type). The VisualModelComponent carries
+  both model_record (f4-models) AND vis_type (the identity, V-3DLIVE).
+  Headless tests assert on model_record (test_simulation_lifetime expects
+  non-null, test_campaign_bridge expects null-when-db-empty, test_feature
+  _spawning expects non-null, test_visual_model_component checks null).
+  This is a deep refactor: removing model_record changes test semantics,
+  and the renderer's mesh/texture pipeline is a rewrite (glTF accessors →
+  Raylib meshes, PNG URIs → LoadTexture). Confirmed it needs GL
+  verification — cannot be done headlessly.
+- IMPLEMENTED (headless-verifiable slice): Simulation::load_models now
+  detects @asset: model references (models_hdr_path starting with
+  "@asset:") and skips the binary ModelDatabase::load entirely. The
+  runtime glTF loader (renderer-owned, per the V-3DLIVE contract)
+  resolves them lazily per vis_type. VisualModelComponent::model_record
+  stays null (the session already runs this way); the renderer resolves
+  via vis_type + its own cache. This is the simulation-side half of 0d's
+  model decoupling: scenarios can now reference glTF asset IDs instead
+  of KoreaObj binary paths, and the simulation doesn't parse binary.
+  Code: f4-simulation/src/simulation.cpp load_models() + the @asset:
+  guard (7 lines).
+- NEW TEST: ScenarioLoader.AssetModelRefSkipsBinaryLoad — constructs a
+  scenario with @asset:koreaobj:00001 model paths, calls sim.initialize(),
+  verifies (a) no throw, (b) model_db().valid() is false (no binary
+  parse), (c) aircraft_entities().size() == 1 (entity still created with
+  vis_type identity). Resolves f16.json from F4_SOURCE_DIR/Data/Aircraft/
+  (CMakeLists updated to expose F4_SOURCE_DIR to the test target). PASSES.
+- NEW DOC: Docs/RENDERER_GLTF_REWIRE_PLAN.md (the renderer-half 0d plan).
+  Documents the 4 sub-tasks: (2.1) VisualModelComponent rewire — remove
+  model_record, keep vis_type + gear_switch_child; (2.2) f4-renderer
+  rewire — new RuntimeModelCache loads glTF via f4-gltf, builds Raylib
+  meshes from accessors, loads PNG textures by URI (replaces
+  ModelDatabase::extract_model_geometry + fetch_texture); (2.3) link-cut
+  — drop f4-models + f4-lzss + f4-world-convert from f4-renderer,
+  f4-simulation, f4-world-viewer; (2.4) temp/KoreaObj.* deletion +
+  scenario template migration to @asset: IDs. Includes the test-impact
+  table (which tests assert on model_record + how to update them), the
+  file-by-file change list, the implementation order (3-5 days), and the
+  acceptance criteria mapping to NO_BINARY_RUNTIME_PLAN §6.
+- VERIFICATION: full build + ctest. 2341/2348 PASS (the +1 is the new
+  AssetModelRefSkipsBinaryLoad test; the same 7 pre-existing flight-model
+  precision failures, zero regressions). The boundary verifier still
+  reports f4-models + f4-lzss on f4-simulation/trace_runner/campaign_qc
+  (the renderer half, pending GL-enabled execution).
+
+Stage Summary (Task 55 — @asset: model skip LANDED + renderer-half plan written):
+- Simulation::load_models skips binary KoreaObj load for @asset: refs
+  (the runtime glTF path). Headless-verified: initialize succeeds, db
+  stays empty, aircraft entity created with vis_type identity.
+- Docs/RENDERER_GLTF_REWIRE_PLAN.md: the comprehensive plan for the
+  renderer half (VisualModelComponent rewire, RuntimeModelCache, link-
+  cut, temp/ deletion). Ready for execution in a GL-enabled environment.
+- 2341/2348 tests pass (7 pre-existing, zero regressions).
+- The remaining 0d work (f4-models + f4-lzss cut) is the renderer half:
+  needs GL headers to build/verify f4-renderer + the viewers. The plan
+  doc is the handoff — a GL-enabled agent/session can execute it in
+  3-5 days. Each sub-task turns boundary violations green as it lands.

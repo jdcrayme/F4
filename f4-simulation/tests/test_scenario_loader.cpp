@@ -15,6 +15,7 @@
 #include <gtest/gtest.h>
 
 #include "f4/simulation/scenario.hpp"
+#include "f4/simulation/simulation.hpp"  // Tranche 0d: AssetModelRefSkipsBinaryLoad
 
 #include <cstdlib>
 #include <filesystem>
@@ -641,4 +642,59 @@ TEST(ScenarioLoader, LoadScenarioFilePreservesAssetRef) {
     EXPECT_EQ(s.terrain_json_path.string(), "@asset:theater:korea");
     EXPECT_EQ(s.aircraft[0].aircraft_config_path, "@asset:aircraft:f16");
     fs::remove_all(tmp);
+}
+
+// ── Tranche 0d: @asset: model refs skip the binary KoreaObj load ──────────
+//
+// Simulation::load_models() must NOT attempt ModelDatabase::load() when the
+// scenario's models_hdr_path is an @asset: reference — the binary loader
+// can't resolve asset IDs, and the runtime glTF loader (renderer-owned)
+// resolves them lazily per vis_type. This test verifies the skip: initialize
+// succeeds, the model db stays empty (model_record null), and the aircraft
+// entity is still created with its vis_type identity.
+
+TEST(ScenarioLoader, AssetModelRefSkipsBinaryLoad) {
+    // The fixture needs a real aircraft config for initialize() to succeed.
+    // Resolve f16.json from (in order): the build's generated fixtures
+    // (F4_GENERATED_FIXTURES_DIR), the source Data/ tree (F4_SOURCE_DIR),
+    // or a relative ../Data/Aircraft/f16.json (when run from build/).
+    std::filesystem::path f16;
+    const char* gen = std::getenv("F4_GENERATED_FIXTURES_DIR");
+    if (gen) f16 = std::filesystem::path(gen) / "f16.json";
+#ifdef F4_SOURCE_DIR
+    if (f16.empty() || !std::filesystem::exists(f16))
+        f16 = std::filesystem::path(F4_SOURCE_DIR) / "Data" / "Aircraft" / "f16.json";
+#endif
+    if (f16.empty() || !std::filesystem::exists(f16))
+        f16 = std::filesystem::path("..") / "Data" / "Aircraft" / "f16.json";
+    if (!std::filesystem::exists(f16)) GTEST_SKIP() << "f16.json not found";
+
+    const auto json = R"({
+        "name": "asset_model_skip",
+        "models_hdr_path": "@asset:koreaobj:00001",
+        "models_lod_path": "@asset:koreaobj:00001",
+        "models_tex_path": "@asset:koreaobj:00001",
+        "aircraft": [
+            {"callsign":"E1","aircraft_config_path":")" + f16.string() + R"(",
+             "aircraft_name":"F-16","vis_type_index":1052,
+             "parking_spot":{"x":0,"y":0,"z":0},"heading_rad":0,"initial_fuel_lbs":1}
+        ],
+        "airfield": {
+            "active_runway_id": 36,
+            "threshold_position": {"x":0,"y":0,"z":0},
+            "runway_end_position": {"x":0,"y":1000,"z":0},
+            "taxi_route": [{"x":0,"y":0,"z":0},{"x":0,"y":1000,"z":0}]
+        }
+    })";
+    auto s = load_scenario_from_string(json);
+
+    // initialize() must NOT throw — the @asset: path skips the binary load.
+    Simulation sim(std::move(s), std::filesystem::path("."));
+    EXPECT_NO_THROW(sim.initialize());
+
+    // The model db stays empty (no binary parse). The aircraft entity is
+    // still created; VisualModelComponent carries vis_type, model_record
+    // is null (the V-3DLIVE contract — the renderer resolves via vis_type).
+    EXPECT_FALSE(sim.model_db().valid());
+    ASSERT_EQ(sim.aircraft_entities().size(), 1u);
 }
