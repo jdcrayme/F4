@@ -35,6 +35,15 @@ struct PilotInput {
     double tefCmd{0.0};      // trailing-edge flap command, 0..1
     double lefCmd{0.0};      // leading-edge flap command, 0..1
 
+    // EXPERIMENT S: Roll-limit commands from the steering layer.
+    // When maxRollDeg < 80.0, the FCS clamps the bank to ±maxRollDeg and
+    // applies a roll-rate taper as the bank approaches the limit (Falcon's
+    // maxRollDelta mechanism). maxRollDeltaDeg sets the taper window width.
+    // Negative values (the default) mean "no limit set" — the FCS uses its
+    // internal defaults (80° bank, 5° taper window).
+    double maxRollDeg{-1.0};       // bank limit (deg); <0 = no override
+    double maxRollDeltaDeg{-1.0};  // roll-rate taper window (deg); <0 = no override
+
     bool wheelBrakes{false};
     bool parkingBrake{false};
     bool noseSteerOn{true};

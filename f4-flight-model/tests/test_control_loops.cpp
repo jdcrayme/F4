@@ -122,6 +122,8 @@ PilotInput mapAI(const f4::ai::AIControlOutput& ai) {
     pi.wheelBrakes = ai.wheel_brakes;
     pi.parkingBrake = ai.parking_brake;
     pi.noseSteerOn = true;
+    pi.maxRollDeg = ai.max_roll_deg;           // EXPERIMENT S
+    pi.maxRollDeltaDeg = ai.max_roll_delta_deg; // EXPERIMENT S
     pi.validate();
     return pi;
 }
@@ -366,9 +368,14 @@ TEST(ControlLoopSpeed, DISABLED_SpeedHold_300kts_NoMoreThan10ktDrift) {
 // Heading capture — full cascade closes
 // ============================================================================
 
-TEST(ControlLoopHeading, DISABLED_HeadingCapture_90degTurn) {
+TEST(ControlLoopHeading, HeadingCapture_90degTurn) {
     // A 90-deg heading step commands max bank; the aircraft should turn
-    // through 90 deg and stabilize on the new heading within 25 s.
+    // through 90 deg and stabilize on the new heading within 50 s.
+    //
+    // At 30 deg bank (max_bank_rad default) the theoretical turn rate is
+    // g*tan(30)/V = 2.13 deg/s, so a 90 deg turn takes ~42 s. The test
+    // budget is 50 s (3000 ticks at 60 Hz) to allow the turn to complete
+    // plus a 5 s settle window for the sign-reversal stability check.
     auto fm = makeTrimmedF16(10000.0, 500.0);
     if (!fm) GTEST_SKIP() << "f16.json fixture not found or trim failed";
 
@@ -378,7 +385,7 @@ TEST(ControlLoopHeading, DISABLED_HeadingCapture_90degTurn) {
     const double target_speed_kts = fm->state().vcas;
 
     std::vector<double> hdg_history;
-    for (int tick = 0; tick < 1500; ++tick) {  // 25 s
+    for (int tick = 0; tick < 3000; ++tick) {  // 50 s
         AirSteering::Input in = readState(*fm);
         const auto ai = as.steer(target_heading, target_alt, target_speed_kts, in);
         fm->update(MAJOR_DT, mapAI(ai), GROUND_Z_FLAT, FLAT_NORMAL);
@@ -391,7 +398,7 @@ TEST(ControlLoopHeading, DISABLED_HeadingCapture_90degTurn) {
         hdg_history.push_back(hdg_err);
     }
 
-    // Convergence: heading error < 5 deg after 25 s
+    // Convergence: heading error < 5 deg after 50 s
     const double final_err = std::abs(hdg_history.back());
     EXPECT_LT(final_err, 5.0 * kD2R)
         << "heading did not converge: error=" << (final_err * kRTD) << " deg";

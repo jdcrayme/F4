@@ -1,6 +1,10 @@
 # F4 Flight Control — Next-Step Diagnostic & Fix Plan
 
-> **Status**: Picks up where `FLIGHT_CONTROL_STABILITY_PLAN.md` left off, after ALT-2…ALT-5 and Phases 0a/1b/1c/2a–2e landed.
+> **Status**: Updated after the control-law stability experiments (commits
+> `e3071ff` through `cb75738`). The cruise control phugoid is eliminated;
+> most items in the original plan are now done. The remaining work is the
+> landing approach VS tracking (§4 Phase C approach law) and envelope
+> validation.
 > **Source of Truth**: `https://github.com/jdcrayme/F4`
 > **Predecessors**: `FLIGHT_CONTROL_STABILITY_PLAN.md`, worklog tasks DIGI-1, DIGI-2, ALT-2, ALT-3, ALT-4, ALT-5
 > **Symptoms being addressed**: altitude oscillation, ground-track drift, runway overflight offset, landing outside runway bounds.
@@ -9,11 +13,9 @@
 
 ## 1. Why a New Plan
 
-The existing `FLIGHT_CONTROL_STABILITY_PLAN.md` was a comprehensive catalogue of root causes. Several of its fixes have landed since (ALT-5 alpha-bias feedforward, Phase 0a FCS HUD, Phase 1b/c takeoff roll hardening, Phase 2a–e altitude-loop cleanup). The aircraft is **still unstable** in the full takeoff-and-landing mission.
+The existing `FLIGHT_CONTROL_STABILITY_PLAN.md` was a comprehensive catalogue of root causes. Several of its fixes have landed since (ALT-5 alpha-bias feedforward, Phase 0a FCS HUD, Phase 1b/c takeoff roll hardening, Phase 2a–e altitude-loop cleanup). **The cruise control phugoid is now eliminated** (commits `e3071ff`–`cb75738`): the FCS alpha-bias/G-error formula fix, the pitch integrator leak, zero cruise rudder, and the TECS-inspired energy term together dropped sustained-turn altitude range from 742ft to 15ft and max VS from 5119fpm to 148fpm.
 
-The most likely reason: the altitude-loop fix (ALT-5) was validated **in isolation** — a steady-state altitude hold at 10 000 ft, no turns, no localizer capture, no flare. The user is observing the **full mission**, which exercises subsystems that the existing plan identified but that are still unaddressed: the stubbed yaw channel, the 333-ft localizer saturation, the missing flaps wiring, and the energy-blind flare law. Those subsystems excite the phugoid that ALT-5 damps in isolation.
-
-This document audits the gap between plan and code, sequences the remaining work, and tightens the diagnostic methodology so we stop fixing things that "work in isolation, fail in mission."
+The remaining instability is in the **landing approach**: the aircraft descends ~3x faster than the glideslope beam (-2500 vs -845fpm) because the F-16 is on the back side of the drag curve at approach speed. The `steer_approach()` function (ILS technique: pitch-for-speed, throttle-for-altitude) was written to address this but is dead code with bugs and was never tuned.
 
 ---
 
@@ -24,29 +26,43 @@ Verified by reading current source, not by trusting the plan:
 | Plan item | Status | Evidence (file:line) |
 |---|---|---|
 | Phase 0a — FCS-state HUD overlay (F3) | ✅ Done | `renderer.cpp:426` — FCS column with aoacmd/pscmd/pstab/nzcgs/k.p/k.q/k.r |
-| Phase 0b — CSV trace exporter | ❌ Not done | `f4-recorder/` has no CSV support |
+| Phase 0b — CSV trace exporter | ✅ Done | `f4-recorder/src/fcs_trace.cpp` exists |
 | Phase 0c — Isolated `takeoff_only` / `landing_only` scenarios | ❌ Not done | Only `takeoff_kunsan.json` exists |
 | Phase 0d — Aircraft trim init at spawn | ❌ Not done | `simulation.cpp` still spawns vt=0 |
-| Phase 1a — Un-stub yaw channel | ❌ Not done | `fcs.cpp:618` still `aero.beta = zero_angle()` |
+| Phase 1a — Un-stub yaw channel | ✅ Done | `fcs.cpp:732-748` — `PEDAL_DEADBAND` logic, `aero.beta = fcs.betcmd` when pedal nonzero, `aero.beta = 0` when centered (coordinated flight by construction) |
 | Phase 1b — FlyOut uses air_steering cascade | ✅ Done | `takeoff_module.cpp:498` calls `air_steering.steer()` |
 | Phase 1c — Zero roll_cmd during takeoff roll | ✅ Done | `takeoff_module.cpp:460` explicit zero |
-| Phase 1d — Coordinated-turn feedforward | ❌ Not done | `air_steering.cpp` has no `tan(bank)·v·g` term |
+| Phase 1d — Coordinated-turn feedforward | ✅ Done (different) | Not the `tan(bank)*v/g` pedal (found dimensionally inverted). Instead: `lift_comp = 1/cos(bank)` on alpha_est (`air_steering.cpp:203`) + `bank_g_ff` stick feedforward (`air_steering.cpp:221`). Cruise rudder zeroed (Exp C) — FCS holds beta=0 with pedals centered. |
 | Phase 2a — Terrain query before `update_all` | ✅ Done | `simulation.cpp:482–492` moved before `world_.update_all` |
-| Phase 2b — time_scale clamp to 4× | ✅ Superseded | Replaced by the fixed-timestep accumulator (`player_app.cpp`): dt is always `sim_dt`, the slider scales wall-clock time (now up to 10×), so filter stability no longer depends on the slider. See CHANGES.md. |
+| Phase 2b — time_scale clamp to 4× | ✅ Superseded | Replaced by fixed-timestep accumulator |
 | Phase 2c — Conditional-integration anti-windup | ✅ Done | `fcs.cpp:475–483` sign-matched halt |
 | Phase 2d — Speed integral in AirSteering | ✅ Done | `air_steering.cpp:92` leaky integral |
 | Phase 2e — `speed_damp_rad_per_kt = 0.002` restored | ✅ Done | `landing_module.cpp:47` comment confirms |
-| Phase 3a — Raise localizer corr + intercept lead | ❌ Not done | `landing_module.hpp:213–214` still 0.0015 / 0.5 rad |
-| Phase 3b — Tighten takeoff lineup tolerance | ❌ Not done | unchanged |
-| Phase 4a — `flaps_extended` in `AIControlOutput` | ❌ Not done | `ai_output.hpp` has no flap fields |
-| Phase 4b — Set flaps on `on_enter(OnFinal)` | ❌ Not done | depends on 4a |
-| Phase 4c — Touchdown-point predictor | ❌ Not done | `landing_module.cpp:653–662` flare unchanged |
-| Phase 4d — Tighten `missed_along_ft` | ❌ Not done | still 4000 ft |
-| Phase 5a — Watchdog hold-last | ❌ Not done | `brain_component.hpp:251` no hold-last |
-| Phase 5b — Tighten DigiMission tolerances | ❌ Not done | still 500 ft / anywhere on runway |
+| Phase 3a — Raise localizer corr + intercept lead | ✅ Done | `landing_module.cpp:407` intercept lead from turn radius; `landing_module.cpp:651-652` lead = max(intercept_lead_ft, ratio*|xtrack|) |
+| Phase 3b — Tighten takeoff lineup tolerance | ❓ Unverified | Not checked in this audit |
+| Phase 4a — `flaps_extended` in `AIControlOutput` | ✅ Done | `ai_output.hpp:47-48` — `tef_cmd`, `lef_cmd` fields |
+| Phase 4b — Set flaps on `on_enter(OnFinal)` | ✅ Done | `landing_module.cpp:1089-1090` sets `tef_cmd`/`lef_cmd` |
+| Phase 4c — Touchdown-point predictor | ✅ Done | `landing_module.cpp:1169` `controls_for_flare()` with predicted-vs-aim error |
+| Phase 4d — Tighten `missed_along_ft` | ✅ Done | Test comment confirms 2500 ft (`test_landing_module.cpp:263`) |
+| Phase 5a — Watchdog hold-last | ✅ Done | `brain_component.hpp:675` — empty-output detection + hold `last_pilot_input_` |
+| Phase 5b — Tighten DigiMission tolerances | ❓ Unverified | Not checked in this audit |
 | ALT-5 — alpha_bias after lead-lag | ✅ Done | `fcs.cpp:504` adds bias post-filter |
 
-**The single biggest unaddressed defect is the stubbed yaw channel.** It contributes to every user-visible symptom: roll flutter (no coordinated-turn damping), ground-track drift (no rudder authority above 89 kts), localizer capture distortion (beta build-up in intercept turns), and altitude oscillation (lift vector tilts off-vertical in uncoordinated turns, exciting the phugoid that ALT-5 otherwise damps).
+**Control-law experiments that landed (commits `e3071ff`–`cb75738`):**
+
+| Experiment | Fix | Impact |
+|---|---|---|
+| Exp L | FCS alpha-bias + G-error: `cos(mu)` → `1/cos(mu)` | Phugoid root cause — 670→14ft altitude range |
+| Exp QIL | FCS pitch integrator slow leak (120s) | Eliminated residual 20s phugoid — 138→14ft sustained turn |
+| Exp C | Zero cruise rudder | Sideslip=0, turn rate restored to theoretical |
+| Exp G | Bank-rate taper in AirSteering | Smooth bank capture, no overshoot |
+| Exp Q3 | Adaptive gamma_corr_limit | Full damping in level, reduced in climb |
+| Exp V2 | TECS-inspired energy term on throttle | Proactive energy management |
+| Exp W | Predictive descent speed brake | Approach speed error 22→11kt |
+| Exp S | PilotInput maxRollDeg/maxRollDeltaDeg API | Infrastructure (wired, not yet used) |
+| Exp U2 | Alpha-rate damping infrastructure | Disabled (QIL already solves it) |
+
+**The single remaining unaddressed defect is the landing approach VS tracking.** The cruise `steer()` law can't track a glideslope in landing configuration because the F-16 is on the back side of the drag curve at approach speed. The `steer_approach()` function was written to address this but is dead code with bugs (57x gain multiplier) and was never tuned.
 
 ---
 
@@ -164,9 +180,30 @@ This is the standard ILS intercept geometry. Below 1000 ft cross-track, revert t
 
 Verification: `test_landing_localizer_capture` — start 1000 ft off centerline at 5 nm; `course_lateral_ft` converges to < 50 ft within 3 nm of the threshold.
 
-### Phase C — Flaps + energy-managed flare
+### Phase C — Flaps + energy-managed flare + approach law
 
 **Rationale.** The "lands outside the runway" symptom is dominated by approach speed (210 kts with flaps retracted) and a flare law that has no concept of energy. A real F-16 lands at 130–150 kts with flaps; the 60+ kt difference doubles landing distance.
+
+> **Pilot guidance (from user)**: The approach procedure should slow down
+> BEFORE glideslope capture. Drop the gear and flaps and cut the throttle
+> as soon as the glideslope needle starts to move (comes alive). By the
+> time the glideslope is captured, the aircraft should already be at
+> approach speed. This is the standard ILS technique — you don't
+> intercept the beam at cruise speed and then slow down; you arrive at
+> approach speed already configured for landing.
+
+> **Status of C1–C5**: All done. The flare law (`controls_for_flare` at
+> `landing_module.cpp:1169`) has the energy-managed touchdown predictor.
+> Flaps are wired through `AIControlOutput.tef_cmd/lef_cmd` and set on
+> OnFinal. `approach_speed_kts` is 160. `missed_along_ft` is 2500.
+>
+> **Remaining issue**: the cruise `steer()` law (pitch-for-altitude,
+> throttle-for-speed) can't track a glideslope in landing config because
+> the F-16 is on the back side of the drag curve at approach speed. The
+> `steer_approach()` function (pitch-for-speed, throttle-for-altitude)
+> was written to fix this but is dead code with bugs (57x gain multiplier
+> in the pitch-for-speed formula) and was never tuned. Developing it
+> properly is the next major task.
 
 **C1 — Wire flaps through `AIControlOutput`.** Add to `ai_output.hpp`:
 

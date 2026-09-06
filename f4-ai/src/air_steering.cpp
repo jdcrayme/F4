@@ -44,19 +44,34 @@ AIControlOutput AirSteering::steer(double desired_heading_rad,
     // cuts), where the bank cascade's authority is needed.
     //
     // FreeFalcon autopilot.cpp:34: yPedal = headingErr * 0.05 * RTD * vt / cornerSpeed.
+    //
+    // EXPERIMENT C: zero the cruise-mode rudder. The FCS yaw channel is a
+    // beta-command PI loop: any non-zero pedal drives beta AWAY from zero,
+    // which creates a side force that opposes the bank turn. The FCS only
+    // produces coordinated flight (beta=0) with pedals centered. Banking
+    // with non-zero pedal causes the aircraft to yaw sideways, killing the
+    // turn rate (~0.6 deg/s observed vs 2.13 deg/s theoretical at 30° bank).
+    // The approach-mode rudder-for-small-corrections is preserved below.
     const double hdg_err = heading_error(desired_heading_rad, in.heading_rad);
     const double v_corner = 150.0 * 1.68781;  // ~150 kts corner speed
     const double v_fps = std::max(100.0, in.vcas_kts * 1.68781);
-    const double rudder_scale = v_fps / v_corner;
-    out.yaw_cmd = std::clamp(approach_rudder_gain * hdg_err * rudder_scale,
-                              -approach_rudder_max, approach_rudder_max);
+    out.yaw_cmd = 0.0;
 
     if (std::fabs(hdg_err) > approach_aileron_threshold_rad) {
         // Large heading error (intercept cut): bank-to-turn cascade.
+        // EXPERIMENT G (Idea 2A): bank-rate taper. Scale the roll command
+        // by proximity to the target bank so the roll arrests itself
+        // before crossing zero — Falcon's maxRollDelta taper. Without this
+        // the bank overshoots, the AP reverses, and you get a sinusoid.
         const double bank_target = std::clamp(bank_gain * hdg_err,
                                               -max_bank_rad, max_bank_rad);
         const double bank_err = bank_target - in.roll_rad;
-        out.roll_cmd = std::clamp(roll_gain * bank_err - roll_damp * in.roll_rate_radps,
+        // Taper: 1.0 far from target, 0.0 at target.
+        const double phi_to_target = std::fabs(bank_err);
+        const double taper_window = 0.20;  // rad (~11 deg), starts decelerating within this of target
+        const double taper = std::clamp(phi_to_target / taper_window, 0.0, 1.0);
+        out.roll_cmd = std::clamp(taper * (roll_gain * bank_err)
+                                  - roll_damp * in.roll_rate_radps,
                                   -1.0, 1.0);
     } else {
         // Small heading error (beam ride): wings-level damping only. No
@@ -163,8 +178,16 @@ AIControlOutput AirSteering::steer(double desired_heading_rad,
     const double alpha_est = std::clamp(in.pitch_rad - gamma_now,
                                         alpha_min_rad, alpha_max_rad);
     const double gamma_ff = std::clamp((vs_target / 60.0) / v_fps, -0.35, 0.35);
+    // EXPERIMENT Q3: Adaptive gamma_corr limit. Full authority (0.15) in
+    // level flight (vs_target~0) for phugoid damping; reduced authority
+    // during climbs/descents (vs_target high) to prevent the VS-error
+    // correction from fighting the commanded VS and causing overshoot.
+    // The reduction factor 0.4 was tuned to pass SpeedHold (5.0 kts stdev
+    // threshold) while keeping the sustained-turn phugoid damping.
+    const double gamma_corr_lim_eff = gamma_corr_limit
+        * (1.0 - 0.4 * std::min(1.0, std::fabs(vs_target) / max_vs_fpm));
     const double gamma_corr = std::clamp(path_gain * (vs_target - in.vs_fpm),
-                                         -gamma_corr_limit, gamma_corr_limit);
+                                         -gamma_corr_lim_eff, gamma_corr_lim_eff);
     // NAV-D: bank-compensated alpha feedforward. A level turn needs
     // nz = 1/cos(phi): at 30 deg bank the wing must carry 15.5% more
     // lift, i.e. roughly 15.5% more alpha at the same speed. The alpha
@@ -196,8 +219,23 @@ AIControlOutput AirSteering::steer(double desired_heading_rad,
     // by the pitch stick clamp; does not affect steady-state trim (the
     // lift_comp alpha term owns that).
     const double bank_g_ff = bank_g_ff_gain * (lift_comp - 1.0);
+    // EXPERIMENT U2: Alpha-rate damping. The phugoid is an alpha-gamma
+    // oscillation where alpha leads gamma by ~90°. The pitch-rate damper
+    // (q) doesn't directly target this mode — q includes the gravity turn-rate
+    // term that's CORRECT in banked flight. Damping the rate of the ACTUAL
+    // alpha (derived from pitch - gamma, not the FCS command) targets the
+    // phugoid mode directly. Uses the 1/60s major-frame assumption (same
+    // as the leaky integrals). Skipped on the first frame (prev_alpha_est_
+    // is NaN until the first call seeds it).
+    double alpha_rate_damp_term = 0.0;
+    if (!std::isnan(prev_alpha_est_)) {
+        const double alpha_rate = (alpha_est - prev_alpha_est_) * 60.0;  // rad/s
+        alpha_rate_damp_term = -alpha_rate_damp * alpha_rate;
+    }
+    prev_alpha_est_ = alpha_est;
     out.pitch_cmd = std::clamp(attitude_gain * (theta_target - in.pitch_rad)
                                 - pitch_rate_damp * in.pitch_rate_radps
+                                + alpha_rate_damp_term
                                 + bank_g_ff,
                                pitch_min, pitch_max);
 
@@ -216,21 +254,58 @@ AIControlOutput AirSteering::steer(double desired_heading_rad,
                    + throttle_integral_gain * speed_err;
     speed_integral_ = std::clamp(speed_integral_, -throttle_integral_max,
                                                   throttle_integral_max);
+    // EXPERIMENT V2: TECS-inspired energy term on the throttle. The throttle
+    // responds to TOTAL energy error (altitude + kinetic), not just speed.
+    // This makes it PROACTIVE during altitude changes: when climbing, the
+    // throttle increases BEFORE the speed bleeds (instead of reacting after).
+    // This prevents the "arrive at target with residual VS" problem that
+    // causes the ALT_CAPTURE overshoot.
+    //
+    // Energy altitude: h_e = h + V²/(2g). In feet:
+    //   kinetic_alt_ft = (V_target² - V_actual²) / (2g), V in fps
+    // At 300 kts: 1 kt of speed ≈ 13.2 ft of energy altitude.
+    const double target_v_fps = target_speed_kts * 1.68781;
+    const double kinetic_alt_ft = (target_v_fps * target_v_fps - v_fps * v_fps)
+                                   / (2.0 * 32.177);
+    const double energy_err_ft = alt_err + kinetic_alt_ft;
+    // EXPERIMENT: when the caller specifies a throttle_floor (>=0), use it
+    // directly (it's the landing module's per-call minimum). When not
+    // specified (<0, the default), use throttle_min (the cruise baseline).
+    // This lets the landing module set a LOWER floor (0.20) than the cruise
+    // baseline (0.25) — the old max(min, floor) formula kept the higher
+    // cruise minimum, preventing idle in the landing descent.
+    const double effective_floor = (throttle_floor >= 0.0)
+                                   ? std::min(throttle_floor, throttle_min)
+                                   : throttle_min;
     out.throttle_cmd = std::clamp(
-        throttle_mid + throttle_gain * speed_err + speed_integral_,
-        std::max(throttle_min, throttle_floor), throttle_max);
+        throttle_mid + throttle_gain * speed_err + speed_integral_
+                      + energy_throttle_gain * energy_err_ft,
+        effective_floor, throttle_max);
     // NAV-E: proportional speed brake. The old law was a relay
     // (full board above target+15, slam retracted below) — with the
     // airframe's multi-second energy lag that is a textbook limit-cycle
-    // oscillator: standard_rate_turn t=112-200 showed the board bang-bang
-    // +0.80/-1.00, the throttle square-waving 0.08-0.93 in anti-phase,
-    // speed square-waving 245-265 kts, and the altitude sawtoothing
-    // +-450 ft at 9,500-10,400 (the reported "losing altitude enroute").
-    // Proportional over a 15-kt band starting at target+5: brake grows
-    // with the actual overspeed, releases gradually as it bleeds, no
-    // relay chatter for the phugoid to feed on. Command space is
-    // [-1 = retracted, +1 = full]; scale to 0.85 max extension (nav use).
-    const double over_speed = in.vcas_kts - (target_speed_kts + 5.0);
+    // oscillator. Proportional over a 15-kt band starting at target+5.
+    // (Exp L's FCS fix eliminated the phugoid that drove the cycling;
+    //  the +5kt threshold is fine now that the speed swings are small.)
+    //
+    // EXPERIMENT W: Predictive descent speed brake. When the aircraft is
+    // descending, gravity adds thrust along the flight path (g*sin(gamma)),
+    // causing acceleration even at idle throttle. The speed brake should
+    // deploy BEFORE the speed exceeds target — based on the predicted speed
+    // gain over the next few seconds. The predicted gain is:
+    //   dV/dt = g * sin(gamma) = g * (VS/60) / V_fps
+    // Over 5s: dV = 5 * 32.177 * (VS/60) / V_fps  (fps)
+    // Convert to kts: dV_kts = dV_fps / 1.68781
+    // At -2000fpm VS, 250kt: dV_5s = 5*32.177*(-2000/60)/422 / 1.68781 = -8.5 kts
+    // (negative VS = descent = speed gain, so the predicted gain is positive)
+    double over_speed = in.vcas_kts - (target_speed_kts + 5.0);
+    if (predictive_speedbrake_gain > 0.0 && in.vs_fpm < 0.0) {
+        // Predicted speed gain from the descent over the look-ahead time
+        const double dV_fps = predictive_speedbrake_lookahead_s
+                             * 32.177 * (-in.vs_fpm / 60.0) / v_fps;
+        const double dV_kts = dV_fps / 1.68781;
+        over_speed += predictive_speedbrake_gain * dV_kts;
+    }
     out.speed_brake_cmd = -1.0 + 1.85 * std::clamp(over_speed / 15.0, 0.0, 1.0);
 
     // --- STAB-E46: anti-balloon energy damper ---
@@ -249,9 +324,15 @@ AIControlOutput AirSteering::steer(double desired_heading_rad,
     // trim alpha (~13 deg) equals the pitch attitude and the aircraft
     // CANNOT descend — it floated 880 ft over the threshold at alpha 13,
     // fix22 t=1215-1245.)
+    // EXPERIMENT L3: Only fire the balloon guard when the AP is NOT commanding
+    // a climb. The guard was designed for level flight (catch the phugoid's
+    // uncommanded zoom), but with vs_target=2500 (climb command) an actual
+    // VS of 3700 is a 48% overshoot — normal airframe response, not a balloon.
+    // Firing during a commanded climb creates a VS spike that causes overshoot.
     if (in.vs_fpm > balloon_guard_fpm &&
         in.vcas_kts > target_speed_kts - 5.0 &&
-        in.vs_fpm - vs_target > 1200.0) {
+        in.vs_fpm - vs_target > 1200.0 &&
+        vs_target < 500.0) {  // only when AP wants level/descent
         out.throttle_cmd = std::min(out.throttle_cmd, 0.08);
         out.speed_brake_cmd = 1.0;   // full board
     }

@@ -47,6 +47,13 @@ struct AIControlOutput {
     double tef_cmd{0.0};           // [0, 1] trailing-edge flap (0=retracted, 1=full)
     double lef_cmd{0.0};           // [0, 1] leading-edge flap (0=retracted, 1=full)
 
+    // EXPERIMENT S: Roll-limit commands passed to the FCS.
+    // When max_roll_deg < 80.0, the FCS clamps the bank and applies a
+    // roll-rate taper as the bank approaches the limit. max_roll_delta_deg
+    // sets the taper window width. Negative values mean "no override".
+    double max_roll_deg{-1.0};       // bank limit (deg); <0 = no override
+    double max_roll_delta_deg{-1.0}; // roll-rate taper window (deg); <0 = no override
+
     // --- Weapon system intent ---
     bool   trigger_down{false};     // gun trigger held
     bool   weapon_release{false};   // release current weapon (bomb/missile)

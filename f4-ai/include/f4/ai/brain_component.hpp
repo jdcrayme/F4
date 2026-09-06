@@ -1011,6 +1011,10 @@ private:
         // doubling the landing roll distance.
         pi.tefCmd = ai_out.tef_cmd;
         pi.lefCmd = ai_out.lef_cmd;
+        // EXPERIMENT S: forward roll-limit commands so the FCS applies its
+        // own bank clamp + taper (Falcon's maxRoll/maxRollDelta mechanism).
+        pi.maxRollDeg = ai_out.max_roll_deg;
+        pi.maxRollDeltaDeg = ai_out.max_roll_delta_deg;
         pi.noseSteerOn = true;  // always on for AI
         pi.validate();
         return pi;

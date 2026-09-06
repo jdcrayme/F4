@@ -132,6 +132,19 @@ void FlightControlSystem::update(const PilotInput& pilot,
     const bool gearDown = (aero.gearPos > 0.5);
     const bool landingGains = pilot.refueling || gearDown;
 
+    // EXPERIMENT S: Apply roll-limit overrides from the steering layer.
+    // When the AI sets maxRollDeg/maxRollDeltaDeg on PilotInput (>= 0), the
+    // FCS uses those values to clamp bank and taper roll rate as the bank
+    // approaches the limit. This is Falcon's maxRoll/maxRollDelta mechanism,
+    // exposed cleanly through the PilotInput boundary. Negative values (the
+    // default) leave the FCS internal defaults (80° bank, 5° taper window).
+    if (pilot.maxRollDeg >= 0.0) {
+        fcs.maxRoll = pilot.maxRollDeg;
+    }
+    if (pilot.maxRollDeltaDeg >= 0.0) {
+        fcs.maxRollDelta = pilot.maxRollDeltaDeg;
+    }
+
     // --- Damper gains from limiters ---
     // These scale the pitch/roll/yaw outputs based on dynamic pressure.
     fcs.plsdamp = applyLimiter(LimiterKey::PitchYawControlDamper, qbar);
@@ -403,7 +416,14 @@ void FlightControlSystem::runPitch(double dt, double qbar, double qsom,
         if (aero.gearPos > 0.5 && input.throttle < 0.05 && nzcgs < 1.05) {
             flare_g_factor = 0.92;
         }
-        const double cl_needed = flare_g_factor * GRAVITY * cosgam * std::max(0.0, cosmu) / qsom
+        // EXPERIMENT L (Idea 1A done right): the coordinated-turn lift needed
+        // is L = m*g*cos(γ) / cos(μ), so cl_needed = g*cos(γ) / (cos(μ)*qsom).
+        // The previous formula had cos(γ)*cos(μ) (multiply instead of divide),
+        // which UNDER-CORRECTED by cos²(bank): at 30° bank it commanded 0.866G
+        // instead of 1.155G, the aircraft sank, and the AI cascade compensated
+        // through the FCS PI lag → phugoid → speed-brake cycling.
+        const double cosmu_safe = std::max(0.3, cosmu);  // clamp at ~72° bank
+        const double cl_needed = flare_g_factor * GRAVITY * cosgam / (cosmu_safe * qsom)
                                + 0.1 * aero.gearPos
                                - clift0 * tefFactor * aux_->CLtefFactor;
         // clalph0 is per-degree, so cl_needed / clalph0 is in degrees.
@@ -454,7 +474,12 @@ void FlightControlSystem::runPitch(double dt, double qbar, double qsom,
     // --- G error ---
     // The error is the difference between commanded G and actual G, minus
     // the gravity component that the FCS must cancel.
-    const double cosmu_lim = std::max(0.0, cosmu);
+    // EXPERIMENT L (Idea 1A done right): the gravity baseline is 1/cos(mu),
+    // NOT cos(mu). In a 30° bank the aircraft needs 1.155G to hold altitude;
+    // the old formula used cos(30°)=0.866, so the FCS trimmed to 0.866G and
+    // the aircraft sank in every turn.
+    const double cosmu_lim = std::max(0.3, cosmu);  // clamp at ~72° bank
+    const double gravity_baseline = cosgam / cosmu_lim;  // 1G / cos(bank) in banked flight
     const double gearGravityTerm = 0.1 * aero.gearPos * qsom / GRAVITY;
     // Ground guard: on the ground (gear down) at low speed, the aero model
     // can't produce enough lift for 1-G, so nzcgs < 1. The FCS interprets
@@ -494,7 +519,7 @@ void FlightControlSystem::runPitch(double dt, double qbar, double qsom,
         ptcmd -= effective_gain * pitch_rate;
     }
     const double error = ground_guard ? 0.0
-                        : (ptcmd - (nzcgs - cosmu_lim * cosgam - gearGravityTerm)) * fcs.kp05;
+                        : (ptcmd - (nzcgs - gravity_baseline - gearGravityTerm)) * fcs.kp05;
 
     // --- PI controller ---
     const double eprop = fcs.kp02 * error;
@@ -526,6 +551,20 @@ void FlightControlSystem::runPitch(double dt, double qbar, double qsom,
     // Clamp to the limit range (the step may overshoot by one frame's worth).
     if (eintg > aoamax) eintg = aoamax;
     else if (eintg < aoamin) eintg = aoamin;
+
+    // EXPERIMENT QIL: Slow integrator leak. The pitch integrator has
+    // anti-windup (stops at limits) and shedding (drains under strong
+    // opposition), but no slow leak. In sustained flight it slowly winds
+    // up to compensate for the FCS's own 1-G bias inaccuracy (the alpha_bias
+    // formula uses approximations), then slowly unwinds through the shedding
+    // mechanism when the error reverses — creating a 20s phugoid. A slow
+    // leak (120s time constant) lets the integrator hold trim in the short
+    // term while preventing the slow windup. The leak factor is small enough
+    // that the integrator still tracks real trim changes (the P term
+    // dominates during transients, the I term only settles the residual).
+    constexpr double INTEGRATOR_LEAK_PER_S = 1.0 / 120.0;  // 120s time constant
+    eintg *= std::max(0.0, 1.0 - INTEGRATOR_LEAK_PER_S * dt);
+    fcs.pitchIntegral.reset(eintg);
 
     // --- STAB-E51: integrator shedding under strong opposition ---
     // The conditional-integration anti-windup above stops further winding

@@ -28,6 +28,8 @@
 
 #include <f4/geo/position.hpp>
 
+#include <limits>
+
 #include "f4/ai/ai_output.hpp"
 
 namespace f4::ai {
@@ -180,7 +182,7 @@ public:
                                        ///< only 0.03 rad (~1.7 deg) — too weak to
                                        ///< arrest the zoom/dive cycle. 0.0004 gives
                                        ///< 0.08 rad (~4.6 deg) at the same error.
-    double gamma_corr_limit{0.09};     ///< clamp on the VS-error gamma correction
+    double gamma_corr_limit{0.15};     ///< EXPERIMENT Q3: adaptive — full at level, reduced at climb
     double alpha_min_rad{-0.06};       ///< STAB-E17: clamp on the alpha estimate
                                        ///< (pitch - gamma) used as the pitch
                                        ///< feedforward trim. ~-3.4 deg: a real
@@ -209,6 +211,18 @@ public:
                                        ///< (STAB-E1) — more derivative feedback to
                                        ///< damp the altitude phugoid through the
                                        ///< FCS pitch-rate lag.
+    double alpha_rate_damp{0.0};       ///< EXPERIMENT U2: alpha-rate damping
+                                       ///< (disabled — the QIL integrator leak
+                                       ///< already eliminates the phugoid, and
+                                       ///< damping alpha_est rate fights the
+                                       ///< intentional pitch feedforwards).
+                                       ///< (stick per rad/s of actual alpha rate).
+                                       ///< The phugoid is fundamentally an
+                                       ///< alpha-gamma oscillation; damping the
+                                       ///< rate of the ACTUAL alpha (derived from
+                                       ///< pitch-gamma, not the FCS command)
+                                       ///< targets the phugoid mode directly
+                                       ///< without fighting the coordinated turn.
     double bank_g_ff_gain{1.0};        ///< NAV-D2: stick feedforward for the
                                        ///< 1/cos(phi)-1 load increment in banked
                                        ///< flight. 1.0 maps the +15.5% lift need
@@ -238,8 +252,33 @@ public:
                                             ///< speed_damp — see
                                             ///< FLIGHT_CONTROL_STABILITY_PLAN.md §4.2 RC-3).
     double throttle_integral_max{0.3}; ///< anti-windup clamp on the integral
-    double throttle_min{0.25};
+    double energy_throttle_gain{0.001}; ///< EXPERIMENT V2: TECS-inspired energy
+                                          ///<  term on the throttle (throttle per
+                                          ///<  ft of total energy error). Makes
+                                          ///<  the throttle proactive during
+                                          ///<  altitude changes — adds power
+                                          ///<  BEFORE speed bleeds during a climb.
+                                          ///<  0.0003 at 1000ft energy error =
+                                          ///<  0.3 throttle (significant but not
+                                          ///<  overwhelming). Zero disables.
+    double throttle_min{0.25};       ///< cruise throttle floor. The landing
+                                       ///< module passes throttle_floor=0.20
+                                       ///< per-call; the effective floor is
+                                       ///< min(throttle_floor, throttle_min)
+                                       ///< so the landing floor takes effect.
     double throttle_max{1.0};          ///< MIL (nav never selects AB)
+
+    // EXPERIMENT W: Predictive descent speed brake. When the aircraft is
+    // descending, gravity adds thrust along the flight path, causing
+    // acceleration even at idle throttle. These params deploy the speed
+    // brake BEFORE the speed exceeds target, based on the predicted speed
+    // gain over the look-ahead time.
+    double predictive_speedbrake_gain{1.0};     ///< how much of the predicted
+                                                 ///<  speed gain to add to the
+                                                 ///<  over_speed error (1.0 =
+                                                 ///<  full prediction). Zero
+                                                 ///<  disables.
+    double predictive_speedbrake_lookahead_s{5.0}; ///< look-ahead time (s)
 
     // --- Approach mode (Tranche 31: pitch-for-speed + throttle-for-altitude
     // + rudder-for-lateral). The ILS technique: decouple the lateral from
@@ -322,6 +361,19 @@ public:
         speed_integral_ = 0.0;
         alt_integral_ = 0.0;
         vs_target_ = 0.0;
+        prev_alpha_est_ = std::numeric_limits<double>::quiet_NaN();
+        approach_alt_integral_ = 0.0;
+    }
+
+    /// Seed the integrators from the current state (call once after trim
+    /// to avoid the first-tick transient). Sets vs_target_ to the current
+    /// VS so the slew limiter doesn't ramp from 0, and prev_alpha_est_ to
+    /// the current alpha so the alpha-rate damper doesn't spike.
+    void seed_from_state(double current_vs_fpm, double current_alpha_est) noexcept {
+        vs_target_ = current_vs_fpm;
+        prev_alpha_est_ = current_alpha_est;
+        speed_integral_ = 0.0;
+        alt_integral_ = 0.0;
         approach_alt_integral_ = 0.0;
     }
 
@@ -334,6 +386,9 @@ private:
     mutable double alt_integral_{0.0};
     /// STAB-E29: last VS command (fpm) — the slew-rate limiter's state.
     mutable double vs_target_{0.0};
+    /// EXPERIMENT U2: previous frame's actual alpha (rad) for alpha-rate damping.
+    /// NaN on first call (skip damping on the first frame).
+    mutable double prev_alpha_est_{std::numeric_limits<double>::quiet_NaN()};
     /// Tranche 31: approach-mode altitude integral (throttle-channel).
     mutable double approach_alt_integral_{0.0};
 };

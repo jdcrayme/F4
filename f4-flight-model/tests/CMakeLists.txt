@@ -34,6 +34,13 @@ target_compile_definitions(test_control_loops PRIVATE
     F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}")
 add_dependencies(test_control_loops convert_golden_fixtures)
 
+# Diagnostic executable (not a GoogleTest) for trajectory analysis.
+add_executable(diag_trajectory diag_trajectory.cpp)
+target_link_libraries(diag_trajectory PRIVATE f4-flight-model f4-ai)
+target_compile_definitions(diag_trajectory PRIVATE
+    F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}")
+add_dependencies(diag_trajectory convert_golden_fixtures)
+
 target_compile_definitions(test_flight_model PRIVATE
     F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}")
 target_compile_definitions(test_flight_model_component PRIVATE
