@@ -40,7 +40,7 @@
 #include <f4/data/brain_data.hpp>       // SimData BRAINDAT.brn archetypes
 #include <f4/data/formation_data.hpp>  // SimData FORMDAT.FIL formations
 #include <f4/weapons/weapon_class_table.hpp>
-#include <f4/world_convert/class_table.hpp>  // owned here (see class_table_)
+#include <f4/world_types/class_table.hpp>  // owned here (see class_table_)
 #include <f4/ai/air_picture.hpp>       // PERF-1: the shared snapshot
 #include <f4/ai/modules/strike_module.hpp>   // Tranche D: WP_REFUEL predicate
 
@@ -107,7 +107,7 @@ public:
     /// carries no class_table_path (every consumer degrades
     /// gracefully). Hosts that need their own lookups (renderers,
     /// inspectors) share this instead of re-loading the file.
-    [[nodiscard]] const f4::world_convert::ClassTable& class_table()
+    [[nodiscard]] const f4::world_types::ClassTable& class_table()
         const noexcept {
         return class_table_;
     }
@@ -496,7 +496,7 @@ private:
     // deaggregates nothing near the bubble center). The member is the
     // fix; the same discipline brain_data_/formation_library_ already
     // follow for their non-owning consumers.
-    f4::world_convert::ClassTable class_table_{};
+    f4::world_types::ClassTable class_table_{};
 
     // Combat chain (M3): weapon class data for launch_missile + the
     // component attachment at spawn. Built-in table; WST import later.

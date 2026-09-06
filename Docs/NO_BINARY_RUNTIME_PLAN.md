@@ -146,6 +146,22 @@ visual loop.
 
 ### Tranche 0d — Runtime glTF rewire (the big refactor)
 
+> **Status: PARTIAL — simulation half LANDED (Task 54), renderer half
+> DEFERRED to user env.** The `f4-world-convert` link is cut from
+> `f4-simulation` (and its downstream `trace_runner` / `campaign_qc`):
+> a new neutral `f4-world-types` library holds the runtime-safe enums
+> (`ObjectiveType`/`PointType`/`PointListType`), the JSON `ClassTable`
+> loader, and `AiiConfig` — all the runtime needs from
+> `f4-world-convert`, with no binary parsing. The boundary verifier
+> confirms: `f4-simulation`'s direct `f4-world-convert` violation is
+> GONE. The remaining `f4-models` + `f4-lzss` violations (direct on
+> `f4-simulation`, transitive on `trace_runner`/`campaign_qc`) are the
+> renderer half (0d.1/0d.2/0d.3-remainder) — `VisualModelComponent` →
+> glTF-handle rewire + `f4-renderer` link-cut — which requires GL
+> headers to verify and is deferred. 2340/2347 tests pass (7 pre-
+> existing flight-model precision failures, confirmed identical on the
+> pre-0d code).
+
 **The work that makes P2 pass.** The runtime stops linking `f4-models`;
 it loads glTF via `f4-gltf` instead.
 

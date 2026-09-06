@@ -23,7 +23,7 @@
 
 #include <f4/entities/entity.hpp>
 #include <f4/entities/types.hpp>
-#include <f4/world_convert/class_table.hpp>
+#include <f4/world_types/class_table.hpp>
 #include <f4/models/model_database.hpp>
 
 #include <filesystem>
@@ -35,7 +35,7 @@
 
 using namespace f4::simulation;
 using namespace f4::entities;
-using namespace f4::world_convert;
+using namespace f4::world_types;
 using UC = f4::entities::UnitClass;
 
 namespace {

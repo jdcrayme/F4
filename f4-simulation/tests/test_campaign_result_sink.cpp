@@ -177,7 +177,7 @@ TEST(CampaignOrigin, SpawnStampsCampaignIdentity) {
     tpl.vis_type_index = 1052;
 
     auto spawned = spawn_aircraft_from_flights(
-        ew, f4::world_convert::ClassTable{}, f4::models::ModelDatabase{},
+        ew, f4::world_types::ClassTable{}, f4::models::ModelDatabase{},
         cfg, airfield, tpl);
     ASSERT_EQ(spawned.size(), 3u);
 

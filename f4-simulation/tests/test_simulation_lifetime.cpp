@@ -39,7 +39,7 @@
 
 #include <f4/entities/entity.hpp>
 #include <f4/simulation/visual_model_component.hpp>
-#include <f4/world_convert/class_table.hpp>
+#include <f4/world_types/class_table.hpp>
 
 #include <gtest/gtest.h>
 
@@ -58,7 +58,7 @@ using f4::entities::EntityId;
 namespace {
 
 std::filesystem::path class_table_path() {
-    return std::filesystem::path(F4_SOURCE_FIXTURES_DIR) / "FALCON4.ct";
+    return std::filesystem::path(F4_SOURCE_FIXTURES_DIR) / "falcon4.ct.json";
 }
 
 std::filesystem::path f16_config_path() {

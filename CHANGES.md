@@ -1,5 +1,93 @@
 # F4 Cleanup Pass — Changes Summary
 
+## Tranche 0d (simulation half) — f4-world-convert cut from the runtime
+
+**The `f4-world-convert` link is gone from `f4-simulation`.** A new
+neutral `f4-world-types` library holds the runtime-safe subset of
+`f4-world-convert` (enums + JSON ClassTable + AiiConfig), and
+`f4-simulation` (+ its downstream `trace_runner` / `campaign_qc`) now
+link that instead. The 0b boundary verifier confirms the
+`f4-world-convert` direct violation on `f4-simulation` is **GONE**.
+
+The renderer half of 0d (VisualModelComponent → glTF handle, f4-renderer
+link-cut, temp/KoreaObj.* deletion) is deferred to the user's env — it
+requires GL headers to build/verify and involves a deeper renderer
+rewrite. The remaining `f4-models` + `f4-lzss` violations are all via
+`VisualModelComponent`'s `ModelRecord*` handle.
+
+### New library: f4-world-types
+
+The runtime-safe subset of `f4-world-convert`, extracted into a neutral
+library the runtime can link without pulling in legacy binary parsers:
+
+| Header | Contents |
+|--------|----------|
+| `layout_types.hpp` | `ObjectiveType`, `PointType`, `PointListType` enum constants |
+| `class_table.hpp` | `ClassTableEntry` + `ClassTable` (JSON loader only: `load_json` / `load_auto`) + lookup methods + `unit_subtype_name()` |
+| `aii_config.hpp` | `AiiConfig` (the Falcon4.AII INI reader — text-only, moved verbatim) |
+
+Dependencies: `f4-json` + `f4-io` only. NO `f4-install`, NO `f4-lzss`,
+NO binary format knowledge. The binary `ClassTable::load()` (FALCON4.ct
+decoder) + `find_class_table()` stay in `f4-world-convert` (importer-only).
+
+### Migration
+
+Every `f4::world_convert::` reference in `f4-simulation` (sources,
+headers, tests, `campaign_qc.cpp`) replaced with `f4::world_types::`:
+`ClassTable`, `AiiConfig`, all enum constants (`TYPE_AIRBASE`,
+`PLT_RUNWAY`, `PT_RUNWAY`, etc.). `f4-simulation/CMakeLists.txt` drops
+`f4-world-convert`, adds `f4-world-types`.
+
+The scenario-player's `F4_DIGI_CLASS_TABLE` override updated to prefer
+`Data/Classes/falcon4.ct.json` (the runtime `ClassTable::load_auto`
+rejects `.ct` — the runtime no longer links the binary decoder).
+
+### Boundary verifier: before → after
+
+| Target | Before (0b/0c) | After (0d sim half) |
+|--------|----------------|---------------------|
+| `f4-simulation` | direct: f4-models, **f4-world-convert** \| transitive: f4-lzss | direct: f4-models \| transitive: f4-lzss |
+| `trace_runner` | transitive: f4-models, **f4-world-convert**, f4-lzss | transitive: f4-models, f4-lzss |
+| `campaign_qc` | transitive: f4-models, **f4-world-convert**, f4-lzss | transitive: f4-models, f4-lzss |
+
+The `f4-world-convert` column is gone. The remaining `f4-models` +
+`f4-lzss` are the renderer half (VisualModelComponent → glTF), deferred.
+
+### Test results
+
+- **f4-world-types**: 12/12 PASS (9 class_table_json + 3 layout_types)
+- **Full suite**: 2340/2347 PASS (99.7%)
+- The 7 failures are **pre-existing** flight-model precision issues
+  (DigiMission, InterceptConvergence, FcsTracePipeline, CampaignBridge,
+  CampaignSession, CampaignWarHarness) — verified identical on the
+  pre-0d code (stashed changes, rebuilt, ran same tests). Zero regressions.
+
+### Files changed
+
+| File | Change |
+|------|--------|
+| `f4-world-types/` (new library) | `CMakeLists.txt`, `include/f4/world_types/{world_types,class_table,layout_types,aii_config}.hpp`, `src/{class_table,aii_config}.cpp`, `tests/{test_class_table_json,test_layout_types}.cpp` + `tests/CMakeLists.txt` |
+| `CMakeLists.txt` | `add_subdirectory(f4-world-types)` before `f4-models` |
+| `f4-simulation/CMakeLists.txt` | drop `f4-world-convert`, add `f4-world-types` |
+| `f4-simulation/src/*.cpp`, `f4-simulation/include/*.hpp` | `f4::world_convert::` → `f4::world_types::` (ClassTable, AiiConfig, enums, includes) |
+| `f4-simulation/tests/*.cpp` | same migration + `using namespace` fix + `.ct` → `.ct.json` fixture paths |
+| `f4-simulation/tools/campaign_qc.cpp` | `ct.load()` → `ct.load_auto()` (runtime ClassTable has no binary load) |
+| `f4-scenario-player/CMakeLists.txt` | `F4_DIGI_CLASS_TABLE` prefers `Data/Classes/falcon4.ct.json` |
+| `f4-world-convert/tests/fixtures/falcon4.ct.json` | copied from `Data/Classes/` (test fixture for JSON path) |
+| `Docs/NO_BINARY_RUNTIME_PLAN.md` | Tranche 0d status: PARTIAL (sim half landed, renderer half deferred) |
+
+### What's next (renderer half of 0d — deferred to user env)
+
+1. **`VisualModelComponent` rewire** — replace `const ModelRecord*` with a glTF model handle from `f4-gltf`
+2. **`f4-renderer` rewire** — `feature_mesh` / `render_resources` / `texture_cache` stop calling `ModelDatabase::extract_model_geometry` / `fetch_texture`; mesh + texture data comes from the glTF load
+3. **`f4-simulation` / `f4-renderer` / `f4-world-viewer` / `f4-scenario-player` link-cut** — drop `f4-models` + `f4-lzss`
+4. **`temp/KoreaObj.{HDR,LOD,TEX}` deletion** — the 38 MB committed binary leaves the repo
+
+Each turns the remaining `f4-models` / `f4-lzss` boundary violations green. Requires GL headers + visual verification (no X11 in sandbox).
+
+---
+
+
 ## Tranche 0c — TEX→PNG + glTF materials: verified + landed (NO_BINARY_RUNTIME_PLAN.md)
 
 **The producer side of the asset pipeline is complete.** All three 0c

@@ -29,8 +29,8 @@
 #include <f4/ai/brain_component.hpp>
 #include <f4/campaign/mission_type.hpp>
 #include <f4/weapons/bomb.hpp>
-#include <f4/world_convert/objective_decoder.hpp>  // ObjectiveType::TYPE_AIRBASE
-#include <f4/world_convert/theater_data.hpp>        // PointListType
+#include <f4/world_types/layout_types.hpp>  // ObjectiveType::TYPE_AIRBASE
+#include <f4/world_types/layout_types.hpp>        // PointListType
 #include <f4/math/vec3.hpp>
 
 #include <algorithm>
@@ -202,14 +202,14 @@ derive_airfield_from_objective(const f4::world::ObjectiveState& obj,
     // every aircraft at those bases a taxi route to the first DERIVABLE
     // airbase — cross-theater taxi, zero takeoffs (B.3 QC catch).
     if (obj.ground_layout.empty()) {
-        if (obj.objective_type == f4::world_convert::TYPE_AIRBASE ||
-            obj.objective_type == f4::world_convert::TYPE_AIRSTRIP) {
+        if (obj.objective_type == f4::world_types::TYPE_AIRBASE ||
+            obj.objective_type == f4::world_types::TYPE_AIRSTRIP) {
             return synthesize_airfield_for_objective(obj, active_runway_id);
         }
         return std::nullopt;
     }
 
-    const auto* runway_list = find_layout(obj, f4::world_convert::PLT_RUNWAY);
+    const auto* runway_list = find_layout(obj, f4::world_types::PLT_RUNWAY);
     if (!runway_list || runway_list->points.size() < 2) return std::nullopt;
 
     ScenarioAirfield af;
@@ -245,7 +245,7 @@ derive_airfield_from_objective(const f4::world::ObjectiveState& obj,
         const auto* best = runway_list;
         double best_d = 1e9;
         for (const auto& l : obj.ground_layout) {
-            if (l.type != f4::world_convert::PLT_RUNWAY) continue;
+            if (l.type != f4::world_types::PLT_RUNWAY) continue;
             const double d = heading_diff_deg(l.heading_deg, want);
             if (d < best_d) { best_d = d; best = &l; }
         }
@@ -258,10 +258,10 @@ derive_airfield_from_objective(const f4::world::ObjectiveState& obj,
     std::vector<const f4::entities::GroundLayoutPoint*> taxi;
     for (const auto& p : chosen->points) {
         switch (p.type) {
-            case f4::world_convert::PT_RUNWAY:      if (!far_end) far_end = &p; break;
-            case f4::world_convert::PT_TAKEOFF:     if (!takeoff) takeoff = &p; break;
-            case f4::world_convert::PT_TAKE_RUNWAY: if (!access) access = &p; break;
-            case f4::world_convert::PT_TAXI:        taxi.push_back(&p); break;
+            case f4::world_types::PT_RUNWAY:      if (!far_end) far_end = &p; break;
+            case f4::world_types::PT_TAKEOFF:     if (!takeoff) takeoff = &p; break;
+            case f4::world_types::PT_TAKE_RUNWAY: if (!access) access = &p; break;
+            case f4::world_types::PT_TAXI:        taxi.push_back(&p); break;
             default: break;
         }
     }
@@ -286,9 +286,9 @@ derive_airfield_from_objective(const f4::world::ObjectiveState& obj,
                                    takeoff->y + 300.0f * static_cast<float>(hy));
         double best_d = 1e9;
         for (const auto& l : obj.ground_layout) {
-            if (l.type != f4::world_convert::PLT_RUNWAY || &l == chosen) continue;
+            if (l.type != f4::world_types::PLT_RUNWAY || &l == chosen) continue;
             for (const auto& p : l.points) {
-                if (p.type != f4::world_convert::PT_RUNWAY) continue;
+                if (p.type != f4::world_types::PT_RUNWAY) continue;
                 const double d = std::hypot(p.x - takeoff->x, p.y - takeoff->y);
                 if (d < best_d && d < 1200.0) {
                     best_d = d;
@@ -304,7 +304,7 @@ derive_airfield_from_objective(const f4::world::ObjectiveState& obj,
 
         // Dimensions from the same runway_num's PLT_RUNWAY_DIM quad.
         for (const auto& l : obj.ground_layout) {
-            if (l.type != f4::world_convert::PLT_RUNWAY_DIM) continue;
+            if (l.type != f4::world_types::PLT_RUNWAY_DIM) continue;
             if (l.runway_num != chosen->runway_num || l.points.size() != 4) continue;
             const double len0 = std::hypot(l.points[0].x - l.points[3].x,
                                            l.points[0].y - l.points[3].y);
@@ -394,13 +394,13 @@ derive_airfield_from_objective(const f4::world::ObjectiveState& obj,
     af.departure_altitude_ft = af.threshold_altitude_ft + 3000.0;  // Tranche 44: raised from 2500
 
     std::vector<f4::geo::WorldPosition> route;
-    const auto* park_list = find_layout(obj, f4::world_convert::PLT_PARK);
+    const auto* park_list = find_layout(obj, f4::world_types::PLT_PARK);
     if (park_list && !park_list->points.empty()) {
         route.push_back(add_offset(obj_center,
                                     park_list->points.front().x,
                                     park_list->points.front().y));
     }
-    const auto* follow_list = find_layout(obj, f4::world_convert::PLT_FOLLOW_ME);
+    const auto* follow_list = find_layout(obj, f4::world_types::PLT_FOLLOW_ME);
     if (follow_list) {
         for (const auto& p : follow_list->points) {
             route.push_back(add_offset(obj_center, p.x, p.y));
@@ -446,7 +446,7 @@ std::uint32_t entity_vu_id(const f4::entities::EntityWorld& world,
 std::optional<f4::entities::EntityId>
 spawn_aircraft_for_flight(f4::entities::EntityWorld& world,
                           f4::entities::EntityId flight_entity,
-                          const f4::world_convert::ClassTable& ct,
+                          const f4::world_types::ClassTable& ct,
                           const f4::models::ModelDatabase& db,
                           const f4::data::AircraftConfig& cfg,
                           const ScenarioAirfield& airfield,
@@ -651,7 +651,7 @@ spawn_aircraft_for_flight(f4::entities::EntityWorld& world,
 
 std::vector<f4::entities::EntityId>
 spawn_aircraft_from_flights(f4::entities::EntityWorld& world,
-                             const f4::world_convert::ClassTable& ct,
+                             const f4::world_types::ClassTable& ct,
                              const f4::models::ModelDatabase& db,
                              const f4::data::AircraftConfig& cfg,
                              const ScenarioAirfield& airfield,
@@ -1156,7 +1156,7 @@ spawn_aircraft_for_intent(
         const f4::campaign::MissionIntent& intent,
         const std::unordered_map<std::uint32_t, f4::entities::EntityId>&
             unit_id_map,
-        const f4::world_convert::ClassTable& ct,
+        const f4::world_types::ClassTable& ct,
         const f4::models::ModelDatabase& db,
         const f4::data::AircraftConfig& cfg,
         const ScenarioAirfield& airfield,
@@ -1517,7 +1517,7 @@ Offset rotate_offset(Offset local, double heading_rad) {
 /// the bubble deaggregated spawned ZERO vehicles. The identity lives
 /// in the class table alone; the mesh is the host's problem.)
 int16_t resolve_vehicle_vis_type(
-    const f4::world_convert::ClassTable& ct,
+    const f4::world_types::ClassTable& ct,
     int16_t vehicle_entity_type) {
     if (vehicle_entity_type < 100) return 0;  // not a valid entity_type
     return ct.vis_type_for(static_cast<uint16_t>(vehicle_entity_type), 0);
@@ -1527,7 +1527,7 @@ int16_t resolve_vehicle_vis_type(
 
 std::vector<f4::entities::EntityId>
 spawn_vehicles_from_unit(f4::entities::EntityWorld& world,
-                          const f4::world_convert::ClassTable& ct,
+                          const f4::world_types::ClassTable& ct,
                           const f4::models::ModelDatabase& db,
                           f4::entities::EntityId unit_id) {
     using namespace f4::entities;
@@ -1615,7 +1615,7 @@ spawn_vehicles_from_unit(f4::entities::EntityWorld& world,
 
 std::vector<f4::entities::EntityId>
 spawn_vehicles_from_units(f4::entities::EntityWorld& world,
-                           const f4::world_convert::ClassTable& ct,
+                           const f4::world_types::ClassTable& ct,
                            const f4::models::ModelDatabase& db) {
     using namespace f4::entities;
 
@@ -1679,7 +1679,7 @@ pick_parking_spot(const std::vector<ScenarioParkingSpot>& spots, int i) {
 
 std::vector<f4::entities::EntityId>
 spawn_aircraft_from_squadrons(f4::entities::EntityWorld& world,
-                                const f4::world_convert::ClassTable& ct,
+                                const f4::world_types::ClassTable& ct,
                                 const f4::models::ModelDatabase& db,
                                 const f4::data::AircraftConfig& cfg,
                                 const ScenarioAirfield& airfield,

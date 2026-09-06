@@ -149,7 +149,7 @@
 #include <f4/weapons/weapon_types.hpp>
 #include <f4/world/world_loader.hpp>
 #include <f4/world/world_adapters.hpp>
-#include <f4/world_convert/class_table.hpp>
+#include <f4/world_types/class_table.hpp>
 #include <f4/data/aircraft_config.hpp>
 #include <f4/data/config_loader.hpp>
 #include <f4/models/model_database.hpp>
@@ -1020,9 +1020,13 @@ int main(int argc, char** argv) {
     // here, ahead of the ladder, so both the synthetic and the
     // saved-flight spawns share one setup.
     // -----------------------------------------------------------------------
-    f4::world_convert::ClassTable ct;
+    f4::world_types::ClassTable ct;
     if (std::filesystem::exists(args.class_table)) {
-        ct.load(args.class_table.string());
+        // Tranche 0d: load_auto dispatches on extension (.json -> load_json).
+        // The runtime ClassTable no longer links the binary .ct decoder;
+        // a .ct path here throws (convert via ct2json first, or point at
+        // Data/Classes/falcon4.ct.json).
+        ct.load_auto(args.class_table.string());
     } else {
         std::fprintf(stderr, "campaign_qc: class table missing (%s) — "
                              "vis_type resolution will fall back\n",

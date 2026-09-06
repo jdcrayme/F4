@@ -8878,3 +8878,97 @@ Stage Summary (Task 53 — Tranche 0c VERIFIED + LANDED):
   0d (the runtime glTF rewire) is the remaining work — it decouples
   f4-renderer, f4-simulation, f4-world-viewer from f4-models, turning
   each 0b boundary violation green.
+
+---
+Task ID: 54 (Tranche 0d — simulation half: f4-world-convert cut from runtime)
+Agent: main (Super Z)
+Task: NO_BINARY_RUNTIME_PLAN.md Tranche 0d — the runtime glTF rewire.
+The plan describes 0d as a 3-5 day refactor with four sub-items:
+0d.1 VisualModelComponent → glTF handle, 0d.2 f4-renderer rewire,
+0d.3 f4-simulation link-cut, 0d.4 viewer/player link-cut. The sandbox
+has no GL headers (can't build f4-renderer/viewer/scenario-player), so
+the renderer half (0d.1/0d.2/0d.4) can't be browser-verified here.
+This task lands the verifiable simulation half: extract the runtime-
+safe subset of f4-world-convert into a new neutral f4-world-types
+library, migrate f4-simulation to it, and cut the f4-world-convert
+link. The boundary verifier confirms the f4-world-convert direct
+violation on f4-simulation is GONE.
+
+Work Log:
+- RECON: mapped every f4-world-convert consumer in the runtime targets.
+  f4-simulation uses: ClassTable (load_auto, vis_type_for, lookup,
+  objective_type_for, data_ptr_for), the layout enums (TYPE_AIRBASE,
+  PLT_RUNWAY, PT_RUNWAY, PT_TAKEOFF, PT_TAKE_RUNWAY, PT_TAXI, etc.),
+  and AiiConfig (bubble_manager). All are runtime-safe: ClassTable has
+  load_json (JSON) + load (binary); the enums are pure constants; AiiConfig
+  is a text INI parser (f4-io only, no binary). The binary load() +
+  find_class_table() (f4-install) stay importer-only.
+- NEW LIBRARY f4-world-types (neutral, runtime-safe):
+  - include/f4/world_types/layout_types.hpp: ObjectiveType, PointType,
+    PointListType enums (extracted verbatim from theater_data.hpp +
+    objective_decoder.hpp).
+  - include/f4/world_types/class_table.hpp: ClassTableEntry + ClassTable
+    (JSON loader only: load_json, load_auto). load_auto dispatches on
+    extension; .json → load_json, .ct → throws (the runtime doesn't link
+    the binary decoder). All lookup methods (vis_type_for,
+    objective_type_for, unit_subtype_for, data_ptr_for, lookup) + the
+    domain/class/stype constants + unit_subtype_name() helper.
+  - include/f4/world_types/aii_config.hpp: AiiConfig (the Falcon4.AII
+    INI reader, moved verbatim — text-only, f4-io dep, no binary).
+  - src/class_table.cpp + src/aii_config.cpp: implementations.
+  - tests/test_class_table_json.cpp (9 tests) + test_layout_types.cpp
+    (3 tests): smoke tests against the committed falcon4.ct.json +
+    enum value checks. 12/12 PASS.
+  - CMakeLists.txt: links f4-json + f4-io (PUBLIC). NO f4-install, NO
+    f4-lzss, NO binary format knowledge.
+- MIGRATION: sed-replaced every f4::world_convert:: reference in
+  f4-simulation (src + include + tests + tools/campaign_qc.cpp) with
+  f4::world_types:: — ClassTable, AiiConfig, all enum constants
+  (TYPE_AIRBASE, PLT_RUNWAY, PT_RUNWAY, etc.), all includes. The
+  using-namespace declarations in 4 test files updated. No f4-world-
+  convert reference remains in f4-simulation.
+- LINK-CUT: f4-simulation/CMakeLists.txt drops f4-world-convert from
+  target_link_libraries, adds f4-world-types. The scenario-player's
+  F4_DIGI_CLASS_TABLE override updated to prefer Data/Classes/
+  falcon4.ct.json (the runtime ClassTable rejects .ct).
+- TEST FIXTURE: copied Data/Classes/falcon4.ct.json to f4-world-convert/
+  tests/fixtures/ so the tests' F4_SOURCE_FIXTURES_DIR resolves the
+  JSON (they previously pointed at the binary FALCON4.ct).
+- campaign_qc.cpp: ct.load(.ct) → ct.load_auto(path) (the runtime
+  ClassTable no longer has load(); load_auto dispatches on extension).
+- BOUNDARY VERIFIER (the 0b gate): confirms the f4-world-convert
+  violation is GONE from f4-simulation. Before:
+    f4-simulation  -- direct: f4-models, f4-world-convert | transitive: f4-lzss
+    trace_runner   -- transitive: f4-models, f4-world-convert, f4-lzss
+    campaign_qc    -- transitive: f4-models, f4-world-convert, f4-lzss
+  After:
+    f4-simulation  -- direct: f4-models | transitive: f4-lzss
+    trace_runner   -- transitive: f4-models, f4-lzss
+    campaign_qc    -- transitive: f4-models, f4-lzss
+  The f4-world-convert link is cut on all three targets. The remaining
+  f4-models + f4-lzss violations are the renderer half (VisualModelComponent
+  → glTF-handle rewire) — deferred to the user's env (needs GL headers).
+- TEST SUITE: 2340/2347 PASS (99.7%). The 7 failures are PRE-EXISTING
+  flight-model precision issues (DigiMission.FullLoopTaxi,
+  InterceptConvergence.OnGlideslope, FcsTracePipeline.LandingOnly,
+  CampaignBridge.SynthesizesForLayoutless, + 3 CampaignSession/WarHarness).
+  Verified by stashing the 0d changes + rebuilding + running the same
+  tests against the original (pre-0d) code: they fail identically.
+  Zero regressions from the 0d simulation-half decoupling.
+
+Stage Summary (Task 54 — Tranche 0d simulation half LANDED, renderer half DEFERRED):
+- NEW f4-world-types library: the runtime-safe subset of f4-world-convert
+  (enums + JSON ClassTable + AiiConfig). 12/12 tests pass.
+- f4-simulation: migrated to f4-world-types, f4-world-convert link cut.
+  The boundary verifier confirms the direct f4-world-convert violation
+  is GONE (zero f4-world-convert in f4-simulation's transitive closure).
+- 2340/2347 tests pass (7 pre-existing failures, zero regressions).
+- The renderer half (0d.1 VisualModelComponent → glTF handle, 0d.2
+  f4-renderer rewire, 0d.4 viewer/player link-cut, temp/KoreaObj.* deletion)
+  is DEFERRED to the user's env — it requires GL headers to build/verify,
+  and the renderer's geometry pipeline (extract_model_geometry /
+  fetch_texture / ModelRecord* pointer arithmetic) is a deeper rewrite
+  than the simulation-side enum/table extraction.
+- The boundary gate now documents a narrower violation set: only f4-models
+  + f4-lzss remain (both via VisualModelComponent's ModelRecord* handle).
+  Each turns green when the renderer loads glTF instead of parsing KoreaObj.

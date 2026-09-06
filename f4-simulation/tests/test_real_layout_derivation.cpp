@@ -19,14 +19,14 @@
 
 #include <f4/entities/types.hpp>
 #include <f4/world/detail/world_state.hpp>
-#include <f4/world_convert/theater_data.hpp>
+#include <f4/world_types/layout_types.hpp>
 
 #include <cmath>
 
 using namespace f4::simulation;
 using namespace f4::entities;
 using namespace f4::world;
-using namespace f4::world_convert;
+using namespace f4::world_types;
 
 namespace {
 

@@ -90,7 +90,7 @@ public:
     ///                       default filter spawns every resolved intent.
     CampaignSimSpawner(f4::entities::EntityWorld& world,
                        std::unordered_map<std::uint32_t, f4::entities::EntityId> unit_id_map,
-                       const f4::world_convert::ClassTable& ct,
+                       const f4::world_types::ClassTable& ct,
                        const f4::models::ModelDatabase& db,
                        const f4::data::AircraftConfig& cfg,
                        const ScenarioAirfield& airfield,
@@ -142,7 +142,7 @@ public:
 private:
     f4::entities::EntityWorld& world_;
     std::unordered_map<std::uint32_t, f4::entities::EntityId> unit_id_map_;
-    const f4::world_convert::ClassTable& ct_;
+    const f4::world_types::ClassTable& ct_;
     const f4::models::ModelDatabase& db_;
     const f4::data::AircraftConfig& cfg_;
     const ScenarioAirfield& airfield_;

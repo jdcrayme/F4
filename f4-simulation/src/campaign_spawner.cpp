@@ -13,7 +13,7 @@ namespace f4::simulation {
 CampaignSimSpawner::CampaignSimSpawner(
         f4::entities::EntityWorld& world,
         std::unordered_map<std::uint32_t, f4::entities::EntityId> unit_id_map,
-        const f4::world_convert::ClassTable& ct,
+        const f4::world_types::ClassTable& ct,
         const f4::models::ModelDatabase& db,
         const f4::data::AircraftConfig& cfg,
         const ScenarioAirfield& airfield,

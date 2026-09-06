@@ -55,7 +55,7 @@
 #include <f4/simulation/visual_model_component.hpp>
 
 #include <f4/entities/entity.hpp>
-#include <f4/world_convert/class_table.hpp>
+#include <f4/world_types/class_table.hpp>
 #include <f4/models/model_database.hpp>
 #include <f4/geo/position.hpp>
 
@@ -108,7 +108,7 @@ public:
     ///                          = SIM_BUBBLE_SIZE). Currently unused —
     ///                          Squadron deagg is handled out-of-band.
     BubbleManager(f4::entities::EntityWorld& world,
-                    const f4::world_convert::ClassTable& ct,
+                    const f4::world_types::ClassTable& ct,
                     const f4::models::ModelDatabase& db,
                     double ground_radius_ft = 1024.0,
                     double air_radius_ft = 2560.0);
@@ -201,7 +201,7 @@ private:
     void remove_vehicle_(f4::entities::EntityId vid);
 
     f4::entities::EntityWorld& world_;
-    const f4::world_convert::ClassTable& ct_;
+    const f4::world_types::ClassTable& ct_;
     const f4::models::ModelDatabase& db_;
     double ground_radius_ft_;
     double air_radius_ft_;

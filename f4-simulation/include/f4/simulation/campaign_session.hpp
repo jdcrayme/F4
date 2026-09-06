@@ -63,7 +63,7 @@
 #include <f4/simulation/simulation.hpp>
 #include <f4/world/detail/world_state.hpp>
 #include <f4/world/world_adapters.hpp>
-#include <f4/world_convert/class_table.hpp>
+#include <f4/world_types/class_table.hpp>
 #include <f4/data/aircraft_config.hpp>
 #include <f4/models/model_database.hpp>
 
@@ -412,7 +412,7 @@ private:
     // Data layer (the lenders).
     f4::world::WorldState ws_;                 // the write-back target
     std::unique_ptr<f4::world::WorldStateAdapters> adapters_;
-    f4::world_convert::ClassTable ct_;
+    f4::world_types::ClassTable ct_;
     f4::models::ModelDatabase db_;             // empty: 2D symbols only
     f4::data::AircraftConfig cfg_;
     f4::campaign::MissionProfileTable profiles_;

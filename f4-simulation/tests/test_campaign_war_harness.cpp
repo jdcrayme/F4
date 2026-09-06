@@ -39,7 +39,7 @@ std::filesystem::path routed_world() {
            "kunsan_session.world.json";
 }
 std::filesystem::path class_table() {
-    return std::filesystem::path(F4_SOURCE_FIXTURES_DIR) / "FALCON4.ct";
+    return std::filesystem::path(F4_SOURCE_FIXTURES_DIR) / "falcon4.ct.json";
 }
 std::filesystem::path f16_config() {
     return std::filesystem::path(F4_GENERATED_FIXTURES_DIR) / "f16.json";

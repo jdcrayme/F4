@@ -48,7 +48,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
-#include <f4/world_convert/class_table.hpp>
+#include <f4/world_types/class_table.hpp>
 #include <f4/world/world_loader.hpp>
 #include <f4/world/detail/world_state.hpp>
 
@@ -1463,7 +1463,7 @@ void Simulation::derive_real_airbase() {
     // entity_type is index + 100) -> KoreaObj vis_type[0]. Features with
     // no model (lights, trucks) or the (0,0,0) placeholder are skipped.
     if (!scenario_.airbase_source.class_table_path.empty()) {
-        f4::world_convert::ClassTable ct;
+        f4::world_types::ClassTable ct;
         ct.load_auto(scenario_.airbase_source.class_table_path);
         int skipped_no_vistype = 0;
         for (const auto& f : obj->features) {

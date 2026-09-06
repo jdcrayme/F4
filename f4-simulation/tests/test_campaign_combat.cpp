@@ -459,7 +459,7 @@ TEST(ArmedWar, RunsGreenArmsAircraftAndStaysDeterministic) {
         std::filesystem::path(F4_SIMULATION_TEST_FIXTURES_DIR) /
         "kunsan_session.world.json";
     o.session.class_table =
-        std::filesystem::path(F4_SOURCE_FIXTURES_DIR) / "FALCON4.ct";
+        std::filesystem::path(F4_SOURCE_FIXTURES_DIR) / "falcon4.ct.json";
     o.session.aircraft_config = f16;
     o.session.mission_profiles = F4_MISSION_PROFILES_JSON;
     o.session.tasking_cycle_sec = 5;

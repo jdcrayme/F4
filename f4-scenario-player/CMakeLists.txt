@@ -76,11 +76,16 @@ set_target_properties(f4-scenario-player PROPERTIES
 # reference KoreaObj.HDR/.LOD/.TEX (in temp/) and f16.json (in
 # build/generated_fixtures/) without hardcoding absolute paths.
 
-# Class table for the DIGI mission's feature models: the install's real
-# FALCON4.ct when available, else the bundled fixture (fewer rows -> more
-# features skipped, but the scenario still runs). Must be set BEFORE the
-# configure_file calls below substitute @F4_DIGI_CLASS_TABLE@.
-if(F4_INSTALL AND EXISTS "${F4_INSTALL}/terrdata/objects/FALCON4.ct")
+# Class table for the DIGI mission's feature models. Tranche 0d
+# (NO_BINARY_RUNTIME_PLAN.md): prefer the committed JSON class table
+# (f4-world-types::ClassTable::load_auto rejects .ct — the runtime no
+# longer links the binary decoder). Fallback to the binary .ct only when
+# no JSON is available AND an install is configured (the converter CLIs
+# can still read it; the runtime cannot, so this branch documents the
+# legacy path rather than exercising it).
+if(EXISTS "${CMAKE_SOURCE_DIR}/Data/Classes/falcon4.ct.json")
+    set(F4_DIGI_CLASS_TABLE "${CMAKE_SOURCE_DIR}/Data/Classes/falcon4.ct.json")
+elseif(F4_INSTALL AND EXISTS "${F4_INSTALL}/terrdata/objects/FALCON4.ct")
     set(F4_DIGI_CLASS_TABLE "${F4_INSTALL}/terrdata/objects/FALCON4.ct")
 else()
     set(F4_DIGI_CLASS_TABLE "${CMAKE_SOURCE_DIR}/f4-world-convert/tests/fixtures/FALCON4.ct")

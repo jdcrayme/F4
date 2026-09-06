@@ -55,7 +55,7 @@ std::filesystem::path kunsan_routed_world() {
 }
 
 std::filesystem::path class_table_path() {
-    return std::filesystem::path(F4_SOURCE_FIXTURES_DIR) / "FALCON4.ct";
+    return std::filesystem::path(F4_SOURCE_FIXTURES_DIR) / "falcon4.ct.json";
 }
 
 std::filesystem::path f16_config_path() {

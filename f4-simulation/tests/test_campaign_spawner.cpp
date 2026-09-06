@@ -204,7 +204,7 @@ TEST(SpawnFromFlightsB3, AttachesRoutesAndTeamTags) {
     airfield.threshold_position = f4::geo::WorldPosition(0.0, 5000.0, 50.0);
 
     auto spawned = spawn_aircraft_from_flights(
-        ew, f4::world_convert::ClassTable{}, f4::models::ModelDatabase{},
+        ew, f4::world_types::ClassTable{}, f4::models::ModelDatabase{},
         cfg, airfield, make_template());
     // All three flights spawn (no filter).
     ASSERT_EQ(spawned.size(), 3u);
@@ -252,7 +252,7 @@ TEST(SpawnFromFlightsB3, FilterTeamMissionAndCap) {
         FlightSpawnFilter f;
         f.team = 6;
         auto spawned = spawn_aircraft_from_flights(
-            ew, f4::world_convert::ClassTable{}, f4::models::ModelDatabase{},
+            ew, f4::world_types::ClassTable{}, f4::models::ModelDatabase{},
             cfg, airfield, make_template(), f);
         ASSERT_EQ(spawned.size(), 1u);
     }
@@ -261,7 +261,7 @@ TEST(SpawnFromFlightsB3, FilterTeamMissionAndCap) {
         FlightSpawnFilter f;
         f.mission = 1;
         auto spawned = spawn_aircraft_from_flights(
-            ew, f4::world_convert::ClassTable{}, f4::models::ModelDatabase{},
+            ew, f4::world_types::ClassTable{}, f4::models::ModelDatabase{},
             cfg, airfield, make_template(), f);
         ASSERT_EQ(spawned.size(), 1u);
     }
@@ -270,7 +270,7 @@ TEST(SpawnFromFlightsB3, FilterTeamMissionAndCap) {
         FlightSpawnFilter f;
         f.max_flights = 2;
         auto spawned = spawn_aircraft_from_flights(
-            ew, f4::world_convert::ClassTable{}, f4::models::ModelDatabase{},
+            ew, f4::world_types::ClassTable{}, f4::models::ModelDatabase{},
             cfg, airfield, make_template(), f);
         EXPECT_EQ(spawned.size(), 2u);
     }
@@ -292,7 +292,7 @@ TEST(CampaignSimSpawner, EndToEndLoop) {
 
     ScenarioAirfield airfield;
     CampaignSimSpawner spawner(ew, pw.unit_id_map,
-                               f4::world_convert::ClassTable{},
+                               f4::world_types::ClassTable{},
                                f4::models::ModelDatabase{},
                                cfg, airfield, make_template());
     spawner.attach(bus);
@@ -337,7 +337,7 @@ TEST(CampaignSimSpawner, IntentFilterAndUnknownIds) {
     FlightSpawnFilter filter;
     filter.team = 6;             // only the DPRK flight
     CampaignSimSpawner spawner(ew, pw.unit_id_map,
-                               f4::world_convert::ClassTable{},
+                               f4::world_types::ClassTable{},
                                f4::models::ModelDatabase{},
                                cfg, airfield, make_template(), filter);
 
@@ -448,7 +448,7 @@ TEST(SpawnFromFlightsB3, PerBaseAirfieldMapParksAtHomeBase) {
     fallback.threshold_position = f4::geo::WorldPosition(1.0e6, 1.0e6, 0.0);
 
     auto spawned = spawn_aircraft_from_flights(
-        ew, f4::world_convert::ClassTable{}, f4::models::ModelDatabase{},
+        ew, f4::world_types::ClassTable{}, f4::models::ModelDatabase{},
         cfg, fallback, make_template(),
         FlightSpawnFilter{}, &map);
     ASSERT_EQ(spawned.size(), 2u);
@@ -490,7 +490,7 @@ TEST(SpawnFromFlightsB3, NullMapKeepsLegacySquadronBaseParking) {
     fallback.threshold_position = f4::geo::WorldPosition(1.0e6, 1.0e6, 0.0);
 
     auto spawned = spawn_aircraft_from_flights(
-        ew, f4::world_convert::ClassTable{}, f4::models::ModelDatabase{},
+        ew, f4::world_types::ClassTable{}, f4::models::ModelDatabase{},
         cfg, fallback, make_template());  // no map
     ASSERT_EQ(spawned.size(), 2u);
 
@@ -650,7 +650,7 @@ TEST(SpawnAircraftForIntent, ComposesAircraftWithRouteAndOriginStamp) {
     intent.route = {w1, w2, w3};
 
     const auto spawned = spawn_aircraft_for_intent(
-        ew, intent, pw.unit_id_map, f4::world_convert::ClassTable{},
+        ew, intent, pw.unit_id_map, f4::world_types::ClassTable{},
         f4::models::ModelDatabase{}, cfg, airfield, make_template(), 0);
     ASSERT_TRUE(spawned.has_value());
 
@@ -681,7 +681,7 @@ TEST(SpawnAircraftForIntent, ComposesAircraftWithRouteAndOriginStamp) {
     f4::campaign::MissionIntent bare = intent;
     bare.route.clear();
     EXPECT_FALSE(spawn_aircraft_for_intent(
-        ew, bare, pw.unit_id_map, f4::world_convert::ClassTable{},
+        ew, bare, pw.unit_id_map, f4::world_types::ClassTable{},
         f4::models::ModelDatabase{}, cfg, airfield, make_template(), 0)
         .has_value());
 }
@@ -698,7 +698,7 @@ TEST(CampaignSimSpawner, SyntheticIntentSpawnsAndCounts) {
     ScenarioAirfield airfield;
 
     CampaignSimSpawner spawner(ew, pw.unit_id_map,
-                               f4::world_convert::ClassTable{},
+                               f4::world_types::ClassTable{},
                                f4::models::ModelDatabase{},
                                cfg, airfield, make_template());
     spawner.attach(bus);

@@ -35,7 +35,7 @@
 #include <f4/entities/types.hpp>
 #include <f4/flight/flight_model_component.hpp>
 #include <f4/ai/brain_component.hpp>
-#include <f4/world_convert/class_table.hpp>
+#include <f4/world_types/class_table.hpp>
 #include <f4/models/model_database.hpp>
 #include <f4/data/aircraft_config.hpp>
 #include <f4/data/config_loader.hpp>
@@ -46,7 +46,7 @@
 
 using namespace f4::simulation;
 using namespace f4::entities;
-using namespace f4::world_convert;
+using namespace f4::world_types;
 using UC = f4::entities::UnitClass;
 
 namespace {
