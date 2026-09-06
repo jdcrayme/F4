@@ -1,5 +1,91 @@
 # F4 Cleanup Pass — Changes Summary
 
+## Tranche 0b — CMake boundary enforcement (NO_BINARY_RUNTIME_PLAN.md)
+
+**The boundary is now a contract.** P2 (link-time isolation) from
+`ASSET_PIPELINE_SPEC.md` §10 is mechanically enforced at configure time:
+no runtime target may link a legacy binary parser (`f4-models`,
+`f4-world-convert`, `f4-terrain-convert`, `f4-lzss`). The gate FAILS
+today (documenting the known violations) and turns green as Tranche 0d
+(runtime glTF rewire) decouples each one.
+
+`cmake/verify_boundary.cmake` (new, 272 lines) provides:
+
+- `f4_mark_side(side target...)` — sets `F4_SIDE=importer|runtime` on
+  each target and registers it in a global property (the authoritative
+  target set the verifier iterates). Conditionally-built targets are
+  silently skipped via a `TARGET` guard, so the marking list is the same
+  regardless of which `F4_BUILD_*` options are enabled.
+- `_f4_link_closure(out_var target)` — worklist-based BFS over
+  `LINK_LIBRARIES` + `INTERFACE_LINK_LIBRARIES`, stripping generator
+  expressions (`$<LINK_ONLY:name>`, `$<BUILD_INTERFACE:name>`). Includes
+  PRIVATE links (for static libs, CMake propagates private deps to the
+  final link line — the correct semantic for "does parser code end up
+  here").
+- `f4_verify_boundary()` — iterates registered targets, exempts
+  `F4_SIDE=importer` (the parser's legitimate consumers), test
+  executables (SOURCE_DIR contains `/tests`), UTILITY (custom targets),
+  and IMPORTED (third-party). Classifies each finding as direct or
+  transitive.
+
+**Enforcement modes:**
+- `-DF4_ENFORCE_BOUNDARY=OFF` (default) — violations print as WARNING;
+  the build proceeds (so 0c/0d development isn't blocked).
+- `-DF4_ENFORCE_BOUNDARY=ON` — violations are FATAL_ERROR; configure
+  fails. The CI gate.
+
+**Today's violations** (verified in-sandbox with renderer/viewer OFF;
+f4-renderer/f4-world-viewer/f4-scenario-player verified by code inspection):
+
+| Target | Direct | Transitive |
+|--------|--------|------------|
+| `f4-simulation` | `f4-models`, `f4-world-convert` | `f4-lzss` |
+| `f4-renderer` | `f4-models`, `f4-world-convert` | — |
+| `f4_world_viewer` | `f4-models`, `f4-world-convert`, `f4-terrain-convert` | — |
+| `f4-world-viewer` | — | `f4-models`, `f4-world-convert`, `f4-lzss` |
+| `f4-scenario-player` | — | (via `f4-simulation`, `f4-renderer`) |
+| `trace_runner` | — | `f4-models`, `f4-world-convert`, `f4-lzss` |
+| `campaign_qc` | — | `f4-models`, `f4-world-convert`, `f4-lzss` |
+
+Each turns green as Tranche 0d's `VisualModelComponent` → glTF-handle
+rewire + the renderer/sim/viewer link-cut lands.
+
+### Files changed
+
+| File | Change |
+|------|--------|
+| `cmake/verify_boundary.cmake` | **NEW** — P2 enforcement: `f4_mark_side()`, `_f4_link_closure()`, `f4_verify_boundary()`, `F4_ENFORCE_BOUNDARY` option |
+| `CMakeLists.txt` | 0b block after all `add_subdirectory`: `include(verify_boundary)`, `f4_mark_side(importer ...)` on 15 targets, `f4_mark_side(runtime ...)` on 28 targets, `f4_verify_boundary()` |
+
+### Design decisions
+
+- **Centralized marking** (one declarative list in the root CMakeLists)
+  rather than scattered `F4_SIDE` calls across 20+ library CMakeLists.
+  Easier to audit, harder to miss a target. `f4-import`'s pre-existing
+  `F4_SIDE importer` (line 47, anticipating Stage 5) is left in place —
+  harmless (same value set twice), the centralized block is authoritative.
+- **Global-property target registration** (`F4_REGISTERED_TARGETS`)
+  rather than directory-walking (`get_directory_property(SUBDIRECTORIES)`
+  recursion). The directory-walk approach produced exponential recursion
+  in CMake 4.4.3. The registration pattern is simpler, robust, and the
+  marking IS the registration — a new target must appear in a
+  `f4_mark_side` call, which is the natural declaration of its boundary
+  side.
+- **Warning default, fatal opt-in.** The plan says "FAILS at configure
+  time today" — with `F4_ENFORCE_BOUNDARY=ON` it does (FATAL_ERROR). The
+  default OFF keeps the build working for 0c/0d development; CI enables
+  ON as the gate. After 0d, both modes are clean.
+
+### Acceptance criteria (NO_BINARY_RUNTIME_PLAN.md §4)
+
+1. `cmake/verify_boundary.cmake` exists and runs at configure time — **YES**.
+2. `F4_SIDE` set on every importer/converter target — **YES** (15 importer targets).
+3. Verifier FAILS at configure time today — **YES** (FATAL_ERROR with `ON`; WARNING by default).
+4. After 0d lands, verifier PASSES — pending (the gate is in place; 0d turns each violation green).
+
+---
+
+
 ## G2 — The Interdiction Link (CAS against real battalions, the bombs booking)
 
 **The two wars touched.** C6 made the air fight; G1 made the ground

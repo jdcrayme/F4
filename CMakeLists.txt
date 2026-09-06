@@ -176,6 +176,59 @@ if(F4_BUILD_SCENARIO_PLAYER)
 endif()
 
 # ============================================================================
+# Tranche 0b — CMake boundary enforcement (NO_BINARY_RUNTIME_PLAN.md §0b)
+# ============================================================================
+#
+# Every f4-* target declares its side of the importer/runtime boundary via
+# the F4_SIDE property. The verifier (cmake/verify_boundary.cmake) then walks
+# each non-importer target's transitive link closure and fails if any
+# legacy-binary parser library (f4-models, f4-world-convert, f4-terrain-
+# convert, f4-lzss) is present.
+#
+# This block runs AFTER all add_subdirectory() calls so every target exists.
+# Conditionally-built targets (viewers, scenario player — gated on
+# F4_BUILD_VIEWER etc.) are guarded by f4_mark_side's TARGET check, so the
+# marking list is the same regardless of which optional apps are enabled.
+#
+# Today (Tranche 0b landed, 0d not yet) the verifier reports violations on
+# f4-renderer, f4-simulation, f4-world-viewer, and downstream consumers.
+# Tranche 0d (runtime glTF rewire) decouples them, and the verifier turns
+# green — at which point -DF4_ENFORCE_BOUNDARY=ON becomes the CI gate.
+include(verify_boundary)
+
+# 0b.2 — Importer side: may link legacy binary parsers.
+# Libraries: the parser/decoder libraries + the dev-tool model viewer
+# (f4_models_viewer inspects KoreaObj binary by design — same exemption as
+# the hex inspector, ASSET_PIPELINE_SPEC.md §8 / NO_BINARY_RUNTIME_PLAN §8).
+# CLIs: the converter front-ends (cam2json, ct2json, dat2json, f4import, …).
+f4_mark_side(importer
+    f4-models f4-world-convert f4-convert f4-terrain-convert f4-import f4-install
+    f4_models_viewer
+    f4import cam2json json2cam ct2json terrain2json
+    dat2json mnvr2json brain2json form2json veh2json sens2json sig2json
+    dat_validate json_diff f4-models-viewer
+)
+
+# 0b.2 — Runtime side: must NOT link legacy binary parsers.
+# Libraries: the simulation, rendering, and data libraries that ship as the
+# runtime. Neutral libraries (f4-math, f4-json, f4-entities, …) are marked
+# runtime too — they're on the runtime side of the boundary even though they
+# don't currently link parsers (the marking makes intent explicit and catches
+# future regressions).
+# Executables: the apps + headless tools that are shipped runtime binaries.
+f4_mark_side(runtime
+    f4-renderer f4-simulation f4-assets f4-gltf f4-world f4-terrain
+    f4-flight-model f4-ai f4-campaign f4-flight-api f4-recorder
+    f4-sensors f4-weapons f4-entities f4-messaging f4-state-machine
+    f4-data f4-geo f4-math f4-units f4-json f4-xml f4-io
+    f4_world_viewer f4_scenario_player_lib
+    f4-world-viewer f4-scenario-player trace_runner campaign_qc
+)
+
+# 0b.3 — Run the verifier at configure time.
+f4_verify_boundary()
+
+# ============================================================================
 # Convenience targets — one-command world generation
 # ============================================================================
 #

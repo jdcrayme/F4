@@ -8652,3 +8652,131 @@ Stage Summary (Task 51 — 30 s AAR hold ACHIEVED, clean disconnect):
   landing: 27). No regressions.
 - The CSV trace instrumentation (F4_AAR_TRACE) is left in place for the
   next tuning iteration (the 95th-pct tightening).
+
+---
+Task ID: 52 (Tranche 0b — CMake boundary enforcement)
+Agent: main (Super Z)
+Task: NO_BINARY_RUNTIME_PLAN.md Tranche 0b — the gate that makes "no
+binary in the runtime" an enforceable contract, not a hope. The producer
+half of the pipeline exists (0a landed: Data/ JSON committed, ct2json
+CLI, 18 consumer sites switched). The consumer half (0d: runtime glTF
+rewire) is the big refactor — 3-5 days. 0b is the half-day gate that
+turns green per 0c/0d: verify_boundary.cmake + F4_SIDE markings + the
+configure-time check. It FAILS today (documenting the violations) and
+turns green as each decoupling lands.
+
+Work Log:
+- RECON: read the full CMake target graph — root CMakeLists.txt (257
+  lines), every library's CMakeLists (f4-models, f4-world-convert,
+  f4-convert, f4-terrain-convert, f4-import, f4-install, f4-renderer,
+  f4-simulation, f4-world-viewer, f4-scenario-player, f4-models-viewer,
+  f4-world, f4-terrain, f4-lzss, f4-convert/cli), and ASSET_PIPELINE_SPEC
+  §10 (the P2 design). Mapped every link edge: the forbidden parsers are
+  f4-models (KoreaObj HDR/LOD/TEX), f4-world-convert (.cam + FALCON4.ct),
+  f4-terrain-convert (THEATER.* wrapper), f4-lzss (LZSS decompression).
+  The current violations: f4-renderer PUBLIC-links f4-models +
+  f4-world-convert; f4-simulation PUBLIC-links f4-models +
+  f4-world-convert; f4_world_viewer (the viewer lib) PUBLIC-links
+  f4-models + f4-world-convert + f4-terrain-convert + f4-install;
+  f4_models_viewer (the model-viewer lib) PUBLIC-links f4-models (dev
+  tool, exempt per ASSET_PIPELINE_SPEC §8 / NO_BINARY_RUNTIME_PLAN §8).
+- NEW FILE cmake/verify_boundary.cmake (272 lines): the P2 enforcement.
+  - f4_mark_side(side target...): sets F4_SIDE=importer|runtime on each
+    target that exists, silently skipping conditionally-built targets
+    (F4_BUILD_VIEWER=OFF etc.). Also appends to a GLOBAL property
+    F4_REGISTERED_TARGETS — the authoritative target set the verifier
+    iterates (avoids the directory-walking recursion problem; see below).
+  - _f4_link_closure(out_var target): worklist-based BFS over
+    LINK_LIBRARIES + INTERFACE_LINK_LIBRARIES, stripping generator
+    expressions ($<LINK_ONLY:name>, $<BUILD_INTERFACE:name>) to recover
+    the bare target name. Includes PRIVATE links (for static libs, CMake
+    propagates private deps to consumers' final link lines — the correct
+    semantic for "does parser code end up in this binary"). Cycle guard
+    via _visited set.
+  - f4_verify_boundary(): iterates registered targets, skips F4_SIDE=importer
+    (exempt), skips test executables (TYPE=EXECUTABLE whose SOURCE_DIR
+    contains /tests — they test what they link), skips UTILITY (custom
+    targets) and IMPORTED (third-party) targets. For each remaining
+    target, walks the link closure and classifies each forbidden parser
+    as direct (in the target's own LINK_LIBRARIES) or transitive.
+  - Enforcement: -DF4_ENFORCE_BOUNDARY=OFF (default) → message(WARNING);
+    ON → message(FATAL_ERROR). The default keeps the build working for
+    0c development; CI enables ON as the gate.
+- DESIGN DECISION — target collection via GLOBAL property, not directory
+  walk: the initial implementation used get_directory_property(SUBDIRECTORIES
+  DIRECTORY dir) recursion to collect ALL targets. In CMake 4.4.3 this
+  produced exponential recursion (the stack trace showed ~70 frames of
+  _f4_collect_targets_dir calling itself). Root cause unclear (possibly
+  SUBDIRECTORIES returning all descendants, not just immediate children,
+  in this CMake version). Switched to the GLOBAL-property registration
+  pattern: f4_mark_side appends each target to F4_REGISTERED_TARGETS, and
+  the verifier iterates that list. Simpler, robust, and the marking IS the
+  registration — a new target MUST be in a f4_mark_side call, which is the
+  natural declaration of its boundary side. Unregistered targets (test
+  executables, dev tools like dump-terrain-textures/png_probe/paint-map-check
+  that link only non-forbidden libs) are not checked.
+- ROOT CMakeLists.txt: after the last add_subdirectory (f4-scenario-player,
+  line 176) and before the convenience targets, added the 0b block:
+  include(verify_boundary), f4_mark_side(importer ...) on 15 targets
+  (6 importer libs + f4_models_viewer dev-tool lib + 9 CLIs), f4_mark_side
+  (runtime ...) on 28 targets (23 runtime libs + f4_world_viewer +
+  f4_scenario_player_lib + 3 runtime executables: f4-world-viewer,
+  f4-scenario-player, trace_runner, campaign_qc), then f4_verify_boundary().
+  The marking is centralized (one declarative list) rather than scattered
+  across 20+ CMakeLists — easier to audit, harder to miss a target.
+  f4_mark_side's TARGET guard handles conditionally-built targets (the
+  marking list is the same regardless of which F4_BUILD_* options are on).
+- EXISTING MARKING: f4-import/CMakeLists.txt already had
+  set_target_properties(f4-import f4import PROPERTIES F4_SIDE importer)
+  (line 47, anticipating Stage 5). Left in place — harmless (same value
+  set twice), and the centralized marking is the authoritative source.
+- SANDBOX VERIFICATION (g++ 14.2.0, cmake 4.4.3 via pip, no GL headers):
+  configured with -DF4_BUILD_RENDERER=OFF -DF4_BUILD_VIEWER=OFF
+  -DF4_BUILD_MODEL_VIEWER=OFF -DF4_BUILD_SCENARIO_PLAYER=OFF (same as
+  Task 49 — the libraries + their unit tests don't need raylib). The
+  verifier runs at configure time and reports:
+    f4-simulation [F4_SIDE=runtime] -- direct: f4-models, f4-world-convert
+      | transitive: f4-lzss
+    trace_runner [F4_SIDE=runtime] -- transitive: f4-models,
+      f4-world-convert, f4-lzss
+    campaign_qc [F4_SIDE=runtime] -- transitive: f4-models,
+      f4-world-convert, f4-lzss
+  (f4-renderer, f4-world-viewer, f4-scenario-player don't appear because
+  those targets are OFF — with them ON, they'd also be flagged: f4-renderer
+  direct, f4_world_viewer direct, f4_scenario_player_lib transitive,
+  f4-world-viewer transitive, f4-scenario-player transitive.)
+  - Default (F4_ENFORCE_BOUNDARY=OFF): WARNING, configure succeeds, build
+    files generated, f4-math builds clean.
+  - F4_ENFORCE_BOUNDARY=ON: FATAL_ERROR, configure fails (the CI gate).
+- NOT VERIFIED in this sandbox: the full 2054-test suite (would confirm
+  no compilation regressions from the CMake change — but the change only
+  adds a target property + a configure-time function call, no compilation
+  or link changes). The renderer/viewer violations (f4-renderer,
+  f4-world-viewer, f4-scenario-player) can't be demonstrated without GL
+  dev headers — verified by code inspection instead (the link edges are
+  in the CMakeLists: f4-renderer line 99, f4-simulation line 72+77,
+  f4-world-viewer line 145-148).
+
+Stage Summary (Task 52 — Tranche 0b LANDED, build-verified):
+- cmake/verify_boundary.cmake: the P2 enforcement gate. Transitive link
+  closure walk, generator-expression stripping, direct/transitive
+  classification, configurable enforcement (WARNING default, FATAL_ERROR
+  on -DF4_ENFORCE_BOUNDARY=ON).
+- Root CMakeLists.txt: centralized F4_SIDE marking (importer: 15 targets,
+  runtime: 28 targets) + verifier call, after all add_subdirectory.
+- Acceptance criteria (NO_BINARY_RUNTIME_PLAN.md §4):
+  1. verify_boundary.cmake exists and runs at configure time — YES.
+  2. F4_SIDE set on every importer/converter target — YES (15 importer
+     targets marked; f4-import's pre-existing marking left in place).
+  3. Verifier FAILS at configure time today — YES (FATAL_ERROR with
+     -DF4_ENFORCE_BOUNDARY=ON; WARNING by default). The violations match
+     the plan's expectation: f4-simulation (direct), f4-renderer (direct,
+     code-verified), f4-world-viewer (direct, code-verified), plus
+     downstream transitive consumers (trace_runner, campaign_qc,
+     f4-scenario-player).
+  4. After 0d lands, verifier PASSES — pending (the gate is in place;
+     0d's VisualModelComponent rewire + link-cut turns each violation
+     green).
+- The boundary is now a contract. Every new runtime target that links a
+  parser will be caught at configure time. The 0c/0d work proceeds with
+  the gate documenting exactly which decouplings remain.

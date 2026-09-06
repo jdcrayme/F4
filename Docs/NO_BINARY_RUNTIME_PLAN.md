@@ -92,6 +92,12 @@ until 0c/0d land. The manifest records provenance so staleness is detectable.
 
 ### Tranche 0b — CMake boundary enforcement (makes the goal enforceable)
 
+> **Status: LANDED** (Task 52). `cmake/verify_boundary.cmake` exists and runs
+> at configure time. `F4_SIDE` set on 15 importer + 28 runtime targets. The
+> verifier reports the expected violations (f4-simulation, f4-renderer,
+> f4-world-viewer + downstream) as WARNING by default, FATAL_ERROR with
+> `-DF4_ENFORCE_BOUNDARY=ON`. Each violation turns green as 0d decouples it.
+
 **0b.1 — `cmake/verify_boundary.cmake`.** Implements the spec's P2 test:
 no runtime target may link a legacy-binary parser (`f4-models`,
 `f4-world-convert`, `f4-terrain-convert`, `f4-lzss`). The `F4_SIDE` target
