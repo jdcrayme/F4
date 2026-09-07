@@ -1,3 +1,38 @@
+## Task 60 — viewer install flow: on-demand conversions into Data/Temp
+
+**"Set install → open .cam" works again under the no-binary-runtime
+boundary.** The viewer consumes canonical `Data/` exports when present
+and converts whatever is missing ON DEMAND into `Data/Temp/` (same
+sub-layout, gitignored, manifest untouched, canonical `Data/` never
+written):
+
+- **New `pipeline_io` module** (f4-world-viewer): `discover_data_dir()`,
+  `run_converter()` (CreateProcess + `CREATE_NO_WINDOW`, captures
+  stdout/stderr for error modals — replaces `std::system`, which
+  returned cmd.exe's exit 1 "path not found" for a missing exe and
+  flashed a console), and the `ensure_*` resolvers: class table
+  (`ct2json` → `Data/Temp/Classes/`), terrain (`terrain2json` →
+  `Data/Temp/Theater/<key>/`), world (`cam2json` →
+  `Data/Temp/World/<stem>.world.json`, manifest-first candidate order),
+  models (`f4import textures+models --all` → staging dir → move to
+  `Data/Temp/Models/`, so an interrupted run can't look finished).
+- **CMake**: `F4_CT2JSON_EXE` / `F4_F4IMPORT_EXE` defines join the
+  existing pair; `add_dependencies(f4_world_viewer cam2json
+  terrain2json ct2json f4import)` — a viewer-only build now builds the
+  CLIs it spawns (the missing-exe failure that motivated this task).
+- **Background models conversion**: first campaign load without glTF
+  exports kicks f4import on a detached worker (shared job struct, no
+  Impl pointers); the frame loop polls, shows live progress, and
+  repoints `RenderResources` at `Data/Temp` when it lands.
+- **Campaign session fix**: the session got a BINARY `.ct` path but
+  runtime `ClassTable::load_auto` is JSON-only — sessions could never
+  start. It now uses the resolved JSON path (Temp conversion included).
+- Manual imports (`File > Advanced`) also land in `Data/Temp/` —
+  installs can be read-only.
+
+WorldView's binary tile path (THEATER.L*/O*, TEXTURE.BIN, FArtILES.*)
+is unchanged — the pipeline doesn't produce a replacement artifact yet.
+
 # F4 Cleanup Pass — Changes Summary
 
 ## Task 59 — Tranche 0d renderer half: the runtime glTF rewire lands

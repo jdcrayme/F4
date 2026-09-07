@@ -103,6 +103,7 @@ add_library(f4_world_viewer STATIC
     src/camera.cpp
     src/file_ops.cpp
     src/install_flow.cpp
+    src/pipeline_io.cpp
     src/diagnostics.cpp
     src/snapshot.cpp
     src/canvas.cpp
@@ -144,6 +145,7 @@ target_link_libraries(f4_world_viewer PUBLIC
     f4-world
     f4-install
     f4-json
+    f4-assets          # pipeline_io: AssetRoot + manifest lookups for Data/
     f4-renderer
     f4-recorder
     f4-campaign        # B.3 QC: mission name/category tables for the ATO view
@@ -162,7 +164,16 @@ target_compile_definitions(f4_world_viewer PRIVATE
     # binaries from this build tree.
     F4_CAM2JSON_EXE="$<TARGET_FILE:cam2json>"
     F4_TERRAIN2JSON_EXE="$<TARGET_FILE:terrain2json>"
+    F4_CT2JSON_EXE="$<TARGET_FILE:ct2json>"
+    F4_F4IMPORT_EXE="$<TARGET_FILE:f4import>"
 )
+# The CLIs are runtime inputs of the app (spawned for on-demand
+# imports), so building the viewer must build them too. Before this,
+# a viewer-only build shipped without terrain2json.exe and the .cam
+# import failed with "terrain2json failed (exit 1)" — cmd.exe's exit
+# code for a command it cannot find.
+add_dependencies(f4_world_viewer
+    cam2json terrain2json ct2json f4import)
 target_link_libraries(f4_world_viewer PRIVATE raylib)
 # tinyfiledialogs needs to be compiled as C (it's a .c file). Set the
 # language explicitly on the source so CMake doesn't try to compile it

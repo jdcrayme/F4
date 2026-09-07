@@ -20,29 +20,9 @@
 #include "diagnostics.hpp"
 #include "snapshot.hpp"
 
-namespace {
-
-// Quote a path for a shell command line (paths may contain spaces).
-// Mirrors the helper in file_ops.cpp.
-std::string shell_quote(const std::filesystem::path& p) {
-    const auto s = p.string();
-    if (s.find(' ') == std::string::npos && s.find('"') == std::string::npos &&
-        s.find('\t') == std::string::npos) {
-        return s;
-    }
-    std::string out = "\"";
-    for (const char c : s) {
-        if (c == '"') out += '\\';
-        out += c;
-    }
-    out += '"';
-    return out;
-}
-
-}  // namespace
-
 #include <f4/install/installation.hpp>
 #include <f4/viewer/file_dialog.hpp>
+#include <f4/viewer/pipeline_io.hpp>
 
 #include <algorithm>
 #include <array>
@@ -56,6 +36,7 @@ std::string shell_quote(const std::filesystem::path& p) {
 #include <stdexcept>
 #include <string>
 #include <system_error>
+#include <thread>
 
 namespace f4::viewer {
 
@@ -243,30 +224,26 @@ void ViewerApp::load_campaign_from_install(const std::string& theater_key,
             "' not found in theater '" + theater_key + "'");
     }
 
-    // Step 1: convert THEATER.* → terrain JSON via the terrain2json CLI.
-    // Tranche 0d: the runtime app no longer links the converter libraries
-    // (P2 boundary) — binary conversion happens in the importer-side CLI
-    // tools; this app consumes only the JSON outputs.
-#ifndef F4_TERRAIN2JSON_EXE
-    throw std::runtime_error("terrain2json CLI not configured in this build");
-#else
-    const auto terrain_json = theater->dir / "terrain.json";
-    {
-        const std::string cmd = std::string(F4_TERRAIN2JSON_EXE) + " " +
-            shell_quote(theater->dir) + " " + shell_quote(terrain_json);
-        const int rc = std::system(cmd.c_str());
-        if (rc != 0) {
-            throw std::runtime_error("terrain2json failed (exit " +
-                                     std::to_string(rc) + ")");
-        }
-    }
+    // Step 0: class table JSON — canonical Data/Classes export, else a
+    // one-time ct2json conversion into Data/Temp. Everything on the
+    // runtime side of the P2 boundary reads the JSON (class table
+    // browser, 3D model path, campaign session); cam2json below is the
+    // only consumer of the install's BINARY .ct, passed separately.
+    impl_->class_table_json_path = ensure_class_table_json(*impl_->install);
+
+    // Step 1: convert THEATER.* → terrain JSON via the terrain2json CLI
+    // when the canonical Data/Theater/<key>/terrain.json export is
+    // absent — the conversion lands in Data/Temp/Theater/<key>/ and
+    // never touches committed Data/ files.
+    bool terrain_converted = false;
+    const auto terrain_json =
+        ensure_terrain_json(theater_key, theater->dir, &terrain_converted);
     impl_->terrain.load_terrain_json(terrain_json);
     impl_->terrain_loaded = true;
     impl_->last_terrain_json_path = terrain_json;
     impl_->status_msg = "Terrain: " + theater_key + " (" +
         std::to_string(impl_->terrain.header.width) + "x" +
         std::to_string(impl_->terrain.header.height) + ")";
-#endif  // F4_TERRAIN2JSON_EXE
 
     // Also load the raw theater binaries through the shared WorldView
     // (post levels + tile art) for TEXTURED terrain in the 3D panel.
@@ -289,48 +266,111 @@ void ViewerApp::load_campaign_from_install(const std::string& theater_key,
         }
     }
 
-    // Step 2: convert .cam → world JSON via the cam2json CLI, pointing
-    // --theater-data at the install's objects dir so the world JSON
-    // carries objective class names, airfield ground layouts (runways,
-    // taxiways, parking, helipads, docks), unit class names, and
-    // per-group vehicle composition — the same inputs the build's
-    // korea-real-world-json target passes. Two search locations cover
-    // both on-disk layouts used by Falcon variants: install-level
-    // `terrdata/objects` (vanilla Falcon 4.0 / FreeFalcon / Allied
-    // Force) and per-theater `<terrdata>/<key>/objects` (some community
-    // theaters).
-#ifdef F4_CAM2JSON_EXE
-    auto world_json = camp->cam;
-    world_json.replace_extension(".world.json");
-    {
-        std::filesystem::path objects_dir;
-        for (const auto& d : { impl_->install->terrdata_dir() / "objects",
-                               theater->dir / "objects" }) {
-            if (!d.empty() && std::filesystem::exists(d)) {
-                objects_dir = d;
-                break;
-            }
-        }
-        std::string cmd = std::string(F4_CAM2JSON_EXE) + " " +
-            shell_quote(camp->cam) + " " + shell_quote(world_json);
-        if (!objects_dir.empty()) {
-            cmd += " --theater-data " + shell_quote(objects_dir);
-        }
-        const int rc = std::system(cmd.c_str());
-        if (rc != 0) {
-            throw std::runtime_error("cam2json failed (exit " +
-                                     std::to_string(rc) + ")");
+    // Step 3: convert .cam → world JSON via the cam2json CLI when no
+    // canonical export covers it (manifest campaign:<stem> entry, then
+    // the well-known Data/World names). Conversions land in
+    // Data/Temp/World/<stem>.world.json. --theater-data points at the
+    // install's objects dir so the world JSON carries objective class
+    // names, airfield ground layouts (runways, taxiways, parking,
+    // helipads, docks), unit class names, and per-group vehicle
+    // composition — the same inputs the build's korea-real-world-json
+    // target passes. Two search locations cover both on-disk layouts
+    // used by Falcon variants: install-level `terrdata/objects`
+    // (vanilla Falcon 4.0 / FreeFalcon / Allied Force) and per-theater
+    // `<terrdata>/<key>/objects` (some community theaters).
+    std::filesystem::path objects_dir;
+    for (const auto& d : { impl_->install->terrdata_dir() / "objects",
+                           theater->dir / "objects" }) {
+        if (!d.empty() && std::filesystem::exists(d)) {
+            objects_dir = d;
+            break;
         }
     }
+    bool world_converted = false;
+    const auto world_json = ensure_world_json(
+        camp->cam, objects_dir,
+        impl_->install->class_table(), &world_converted);
     load_world_json(world_json);
-#else
-    throw std::runtime_error("cam2json CLI not configured in this build");
-#endif
+
+    if (terrain_converted || world_converted) {
+        impl_->status_msg += "  [converted into Data/Temp:";
+        if (terrain_converted) impl_->status_msg += " terrain";
+        if (world_converted) impl_->status_msg += " world";
+        impl_->status_msg += "]";
+    }
+
+    // Step 4: glTF models + textures. The canonical Data/Models/
+    // koreaobj export (or a previous Temp conversion) makes this a
+    // no-op; otherwise the multi-minute f4import run starts in the
+    // background and poll_pipeline_job() adopts the result when done.
+    if (find_models_data_root(discover_data_dir()).empty()) {
+        start_models_conversion();
+    }
 
     // Persist the last theater + campaign so the next launch pre-selects them.
     impl_->settings.last_theater_key = theater_key;
     impl_->settings.last_campaign_stem = campaign_stem;
     save_settings(impl_->settings);
+}
+
+void ViewerApp::start_models_conversion() {
+    if (!impl_->install || !impl_->install->valid()) return;
+    if (impl_->models_job) return;  // already running
+
+    auto job = std::make_shared<ModelsImportJob>();
+    impl_->models_job = job;
+    // The worker gets a copy of the Installation — no lifetime tie to
+    // Impl, so quitting mid-conversion can't leave it dereferencing a
+    // dead viewer. It only touches the shared job struct.
+    const auto install = *impl_->install;
+    std::thread([job, install]() {
+        try {
+            auto root = ensure_models_root(
+                install, [job](const std::string& line) {
+                    std::lock_guard<std::mutex> g(job->mutex);
+                    job->progress = line;
+                });
+            std::lock_guard<std::mutex> g(job->mutex);
+            job->ok = true;
+            job->models_root = root;
+        } catch (const std::exception& e) {
+            std::lock_guard<std::mutex> g(job->mutex);
+            job->ok = false;
+            job->error = e.what();
+        }
+        job->done.store(true);
+    }).detach();
+    impl_->status_msg = "Converting 3D models/textures into Data/Temp "
+                        "(one-time, several minutes)...";
+}
+
+void ViewerApp::poll_pipeline_job() {
+    if (!impl_->models_job) return;
+    auto& job = *impl_->models_job;
+    if (!job.done.load()) {
+        {
+            std::lock_guard<std::mutex> g(job.mutex);
+            if (!job.progress.empty()) {
+                impl_->status_msg = "Converting 3D models/textures into "
+                                    "Data/Temp: " + job.progress;
+            }
+        }
+        return;
+    }
+
+    const auto finished = impl_->models_job;
+    impl_->models_job.reset();
+    if (finished->ok) {
+        impl_->models_data_dir_override = finished->models_root;
+        // Re-arm the lazy 3D load — the next draw_ground_layout_3d /
+        // canvas feature-mesh pass discovers the Temp models root.
+        impl_->models_3d_load_attempted = false;
+        impl_->models_3d_error.clear();
+        impl_->status_msg = "3D models/textures ready (Data/Temp).";
+    } else {
+        impl_->last_error = "3D model conversion failed: " + finished->error;
+        impl_->status_msg = "3D model conversion failed — see Error.";
+    }
 }
 
 void ViewerApp::open_hex_inspector_with_file(const std::filesystem::path& path) {

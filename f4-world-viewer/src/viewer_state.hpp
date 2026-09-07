@@ -82,6 +82,8 @@
 #include <functional>
 #include <future>
 #include <atomic>
+#include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <thread>
@@ -135,6 +137,22 @@ inline constexpr const char* kSessionSpeedNames[] = {"1x", "10x", "60x",
 inline constexpr int kSessionSpeedCount =
     static_cast<int>(sizeof(kSessionSpeedTable) /
                      sizeof(kSessionSpeedTable[0]));
+
+// ---------------------------------------------------------------------------
+// ModelsImportJob — shared state for the background Data/Temp conversion
+// (f4import textures+models --all). The worker thread touches ONLY this
+// struct (kept alive via shared_ptr), never Impl — so the job can be
+// started and forgotten, and quitting the app mid-conversion can't
+// leave the worker dereferencing a dead Impl.
+// ---------------------------------------------------------------------------
+struct ModelsImportJob {
+    std::mutex mutex;         // guards progress + results below
+    std::string progress;     // latest f4import output line
+    bool ok = false;          // valid once done.load() is true
+    std::string error;        // converter output tail on failure
+    std::filesystem::path models_root;  // Data/Temp root on success
+    std::atomic<bool> done{false};
+};
 
 // ---------------------------------------------------------------------------
 // ViewerApp::Impl — all state the render loop touches, in one struct.
@@ -601,6 +619,25 @@ struct ViewerApp::Impl {
     // Conversion cache — paths used by the most recent import operation.
     std::filesystem::path last_world_json_path;
     std::filesystem::path last_terrain_json_path;
+
+    // --- Pipeline conversions (Data/ first, else Data/Temp) --------------
+
+    // Resolved class-table JSON (canonical Data/Classes/falcon4.ct.json
+    // or the Data/Temp conversion produced on demand). Set by
+    // load_campaign_from_install; consumed by the campaign session and
+    // the 3D model path.
+    std::filesystem::path class_table_json_path;
+
+    // Data/ root holding Models/koreaobj when it is NOT the canonical
+    // Data/ (i.e. the f4import conversion ran into Data/Temp). Empty =
+    // ensure_models_3d_loaded() uses normal Data/ discovery.
+    std::filesystem::path models_data_dir_override;
+
+    // Background first-run conversion of 3D models + textures into
+    // Data/Temp. Null when idle; polled each frame by poll_pipeline_job()
+    // (which adopts the result and resets this). The detached worker
+    // only touches the job struct — see ModelsImportJob above.
+    std::shared_ptr<ModelsImportJob> models_job;
 
     // --- Install-aware state (new primary flow) ---
 

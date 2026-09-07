@@ -50,6 +50,9 @@ Data/**
 !Data/Classes/**
 # Models/ stays fully ignored (glTF + PNG land in Tranche 0c/0d) — no
 # !Data/Models/** negation on purpose.
+# Data/Temp/ (on-demand conversions from a personal install, written by
+# the viewer's pipeline_io) stays fully ignored too — it is per-machine
+# scratch and must never shadow the committed Data/ exports.
 
 # Generated from TestCamp.cam by cam2json (regenerable on demand)
 /TestCamp.world.json

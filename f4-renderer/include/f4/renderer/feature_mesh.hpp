@@ -56,7 +56,7 @@
 #include <vector>
 
 namespace f4::world_types {
-struct ClassTable;
+class ClassTable;
 }  // namespace f4::world_types
 
 namespace f4::renderer {

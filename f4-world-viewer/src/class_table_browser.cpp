@@ -21,6 +21,7 @@
 
 #include <f4/world_types/class_table.hpp>        // unit_subtype_name, DOMAIN_*, CLASS_*
 #include <f4/assets/asset_root.hpp>              // Data/ discovery
+#include <f4/viewer/pipeline_io.hpp>             // discover_data_dir, temp_dir
 
 #include <imgui.h>
 #include <rlImGui.h>
@@ -151,22 +152,20 @@ void ClassTableBrowser::ensure_data_loaded() {
     data_load_attempted_ = true;
 
     // Tranche 0d: load the committed JSON class table — the binary .ct
-    // decoder is no longer linked. Data/ is discovered from the working
-    // directory (AssetRoot::discover) or the source tree (F4_SOURCE_DIR).
-    std::filesystem::path data_dir;
-    if (auto root = f4::assets::AssetRoot::discover()) {
-        data_dir = root->data_dir();
-    }
-    if (data_dir.empty() || !std::filesystem::exists(data_dir)) {
-#ifdef F4_SOURCE_DIR
-        data_dir = std::filesystem::path(F4_SOURCE_DIR) / "Data";
-#endif
-    }
-    const auto ct_path = data_dir / "Classes" / "falcon4.ct.json";
+    // decoder is no longer linked. Prefer the canonical Data/ export;
+    // fall back to a previous Data/Temp conversion (produced when a
+    // campaign was loaded from an install without one).
+    std::filesystem::path data_dir = discover_data_dir();
+    auto ct_path = data_dir / "Classes" / "falcon4.ct.json";
     if (!std::filesystem::exists(ct_path)) {
-        load_error_ = "Data/Classes/falcon4.ct.json not found (the binary "
-                      "FALCON4.ct is no longer loaded in-app — run ct2json "
-                      "or scripts/export-game-data).";
+        const auto temp_ct = temp_dir(data_dir) / "Classes" / "falcon4.ct.json";
+        if (std::filesystem::exists(temp_ct)) ct_path = temp_ct;
+    }
+    if (!std::filesystem::exists(ct_path)) {
+        load_error_ = "class table JSON not found (Data/Classes/falcon4.ct.json "
+                      "or Data/Temp/Classes/) — run ct2json or "
+                      "scripts/export-game-data, or load a campaign from an "
+                      "install (converts it into Data/Temp).";
         return;
     }
     try {

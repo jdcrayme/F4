@@ -231,6 +231,10 @@ void ViewerApp::run() {
         // before any frame scope below could lock it.
         adopt_session_start();
 
+        // Pipeline: adopt a finished background Data/Temp models
+        // conversion (or refresh the status line while one runs).
+        poll_pipeline_job();
+
         // V-THREAD: the frame READ scope. The campaign runner's worker
         // advances the session on its own thread in short mutex-guarded
         // batches; this scope takes the SAME lock for the whole

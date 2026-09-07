@@ -21,6 +21,8 @@
 
 #include <f4/world/detail/world_state.hpp>
 
+#include <f4/viewer/pipeline_io.hpp>
+
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -29,26 +31,6 @@
 #include <string>
 
 namespace f4::viewer {
-
-namespace {
-
-// Quote a path for a shell command line (paths may contain spaces).
-std::string shell_quote(const std::filesystem::path& p) {
-    const auto s = p.string();
-    if (s.find(' ') == std::string::npos && s.find('"') == std::string::npos &&
-        s.find('\t') == std::string::npos) {
-        return s;
-    }
-    std::string out = "\"";
-    for (const char c : s) {
-        if (c == '"') out += '\\';
-        out += c;
-    }
-    out += '"';
-    return out;
-}
-
-}  // namespace
 
 void ViewerApp::Impl::try_load_theater_tiles() {
     // The install flow (load_campaign_from_install) does this inline with
@@ -168,20 +150,30 @@ void ViewerApp::load_world_json(const std::filesystem::path& path) {
 
 void ViewerApp::import_terrain_binary(const std::filesystem::path& terrain_dir) {
     // Tranche 0d: run the terrain2json CLI instead of linking the
-    // converter library (P2 boundary — the runtime stays binary-free).
-#ifdef F4_TERRAIN2JSON_EXE
-    const auto out = terrain_dir / "terrain.json";
-    const std::string cmd = std::string(F4_TERRAIN2JSON_EXE) + " " +
-        shell_quote(terrain_dir) + " " + shell_quote(out);
-    const int rc = std::system(cmd.c_str());
+    // converter library (P2 boundary). The JSON lands in Data/Temp/
+    // — installs can be read-only, and Temp conversions must not
+    // shadow the canonical Data/Theater exports.
+    const auto data_dir = discover_data_dir();
+    if (data_dir.empty() || !std::filesystem::exists(data_dir)) {
+        throw std::runtime_error(
+            "Data/ directory not found — cannot place the converted "
+            "terrain JSON. Run from the repo or export the pipeline "
+            "data with scripts/export-game-data.");
+    }
+    const auto out = temp_dir(data_dir) / "Theater" /
+                     terrain_dir.filename().string() / "terrain.json";
+    std::filesystem::create_directories(out.parent_path());
+
+    std::string output;
+    const int rc = run_converter(F4_TERRAIN2JSON_EXE,
+                                 quote_arg(terrain_dir) + " " + quote_arg(out),
+                                 &output);
     if (rc != 0) {
         throw std::runtime_error("terrain2json failed (exit " +
-                                 std::to_string(rc) + ")");
+                                 std::to_string(rc) + ")" +
+                                 (output.empty() ? "" : ":\n" + output));
     }
     load_terrain_json(out);
-#else
-    throw std::runtime_error("terrain2json CLI not configured in this build");
-#endif
 }
 
 void ViewerApp::import_cam_archive(const std::filesystem::path& cam_path) {
@@ -189,10 +181,19 @@ void ViewerApp::import_cam_archive(const std::filesystem::path& cam_path) {
     // library (P2 boundary). cam2json resolves the class table (bundled
     // fixture fallback) and joins theater names/layouts when an objects
     // dir is available — the same flow the build's korea-real-world-json
-    // target uses.
-#ifdef F4_CAM2JSON_EXE
-    auto out = cam_path;
-    out.replace_extension(".world.json");
+    // target uses. The world JSON lands in Data/Temp/World/ rather than
+    // next to the .cam: installs can be read-only, and Temp keeps the
+    // canonical Data/World exports untouched.
+    const auto data_dir = discover_data_dir();
+    if (data_dir.empty() || !std::filesystem::exists(data_dir)) {
+        throw std::runtime_error(
+            "Data/ directory not found — cannot place the converted "
+            "world JSON. Run from the repo or export the pipeline data "
+            "with scripts/export-game-data.");
+    }
+    const auto out = temp_dir(data_dir) / "World" /
+                     (cam_path.stem().string() + ".world.json");
+    std::filesystem::create_directories(out.parent_path());
 
     // Prefer a theater objects dir near the .cam for the join.
     std::filesystem::path objects_dir;
@@ -204,19 +205,18 @@ void ViewerApp::import_cam_archive(const std::filesystem::path& cam_path) {
         }
     }
 
-    std::string cmd = std::string(F4_CAM2JSON_EXE) + " " +
-        shell_quote(cam_path) + " " + shell_quote(out);
+    std::string args = quote_arg(cam_path) + " " + quote_arg(out);
     if (!objects_dir.empty()) {
-        cmd += " --theater-data " + shell_quote(objects_dir);
+        args += " --theater-data " + quote_arg(objects_dir);
     }
-    const int rc = std::system(cmd.c_str());
+    std::string output;
+    const int rc = run_converter(F4_CAM2JSON_EXE, args, &output);
     if (rc != 0) {
-        throw std::runtime_error("cam2json failed (exit " + std::to_string(rc) + ")");
+        throw std::runtime_error("cam2json failed (exit " +
+                                 std::to_string(rc) + ")" +
+                                 (output.empty() ? "" : ":\n" + output));
     }
     load_world_json(out);
-#else
-    throw std::runtime_error("cam2json CLI not configured in this build");
-#endif
 }
 
 } // namespace f4::viewer

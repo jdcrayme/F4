@@ -46,6 +46,7 @@
 // class table from f4-world-types (JSON).
 #include <f4/assets/asset_root.hpp>
 #include <f4/install/installation.hpp>
+#include <f4/viewer/pipeline_io.hpp>
 
 #include <imgui.h>
 #include <raylib.h>
@@ -150,21 +151,20 @@ bool ViewerApp::Impl::ensure_models_3d_loaded() {
 
     // Tranche 0d: the model source is the glTF export tree
     // (Data/Models/koreaobj — produced by `f4import models` +
-    // `f4import textures`), NOT the KoreaObj binary. Locate Data/ by
-    // (1) AssetRoot::discover() (walks up from the working directory),
-    // (2) the source-tree Data/ (compile-time F4_SOURCE_DIR).
-    std::filesystem::path data_dir;
-    if (auto root = f4::assets::AssetRoot::discover()) {
-        data_dir = root->data_dir();
+    // `f4import textures`), NOT the KoreaObj binary. Locate the Data/
+    // root that holds it: the explicit override set when the
+    // background Data/Temp conversion finished, else the shared
+    // discovery (AssetRoot::discover() walking up from the working
+    // directory, then the source-tree Data/).
+    std::filesystem::path data_dir = models_data_dir_override;
+    if (data_dir.empty()) {
+        data_dir = discover_data_dir();
     }
-    if (data_dir.empty() || !std::filesystem::exists(data_dir)) {
-#ifdef F4_SOURCE_DIR
-        data_dir = std::filesystem::path(F4_SOURCE_DIR) / "Data";
-#endif
-    }
-    if (!std::filesystem::exists(data_dir / "Models" / "koreaobj")) {
+    if (data_dir.empty() || !std::filesystem::exists(data_dir / "Models" / "koreaobj")) {
         models_3d_error =
-            "glTF models not found under Data/Models/koreaobj — run "
+            "glTF models not found under Data/Models/koreaobj — they are "
+            "converted automatically into Data/Temp when a campaign is "
+            "loaded from an install, or run "
             "`f4import models --install <root> --data Data --all` and "
             "`f4import textures --install <root> --data Data --all` "
             "(or scripts/export-game-data) to export them.";
@@ -172,14 +172,19 @@ bool ViewerApp::Impl::ensure_models_3d_loaded() {
     }
 
     // Load the runtime class table (JSON) — maps FeatureEntryState.index
-    // (entity_type) → vis_type[0] (KoreaObj model index). The committed
-    // Data/Classes/falcon4.ct.json ships with the repo; the binary .ct
-    // decoder is no longer linked (Tranche 0d).
-    std::filesystem::path ct_path = data_dir / "Classes" / "falcon4.ct.json";
+    // (entity_type) → vis_type[0] (KoreaObj model index). Prefer the
+    // path the campaign load resolved (canonical Data/ export or the
+    // Data/Temp conversion); the binary .ct decoder is no longer
+    // linked (Tranche 0d).
+    std::filesystem::path ct_path = class_table_json_path;
+    if (ct_path.empty() || !std::filesystem::exists(ct_path)) {
+        ct_path = data_dir / "Classes" / "falcon4.ct.json";
+    }
     if (!std::filesystem::exists(ct_path)) {
         models_3d_error =
-            "Data/Classes/falcon4.ct.json not found — cannot resolve "
-            "feature entity_type to model.";
+            "class table JSON not found (Data/Classes/falcon4.ct.json "
+            "or Data/Temp) — cannot resolve feature entity_type to "
+            "model.";
         return false;
     }
     try {
@@ -189,9 +194,10 @@ bool ViewerApp::Impl::ensure_models_3d_loaded() {
         return false;
     }
 
-    // Point the shared RuntimeModelCache at Data/. Meshes + PNG textures
-    // load lazily per vis_type inside the draw loop (GL context
-    // required — that's why this runs after InitWindow).
+    // Point the shared RuntimeModelCache at the chosen Data/ root.
+    // Meshes + PNG textures load lazily per vis_type inside the draw
+    // loop (GL context required — that's why this runs after
+    // InitWindow).
     render_res_3d.set_model_data_dir(data_dir);
 
     models_3d_loaded = true;

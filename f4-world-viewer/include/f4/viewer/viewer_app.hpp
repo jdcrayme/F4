@@ -77,13 +77,29 @@ public:
 
     /// Install-aware campaign load: takes a Theater key + Campaign
     /// stem, resolves them to on-disk paths via the Installation,
-    /// and runs the in-process converters (terrain2json + cam2json
-    /// with auto-resolved FALCON4.ct) to populate WorldState. This
-    /// is the "one-click load" the new CONOPS promises.
+    /// and runs the converter CLIs (terrain2json + cam2json) to
+    /// populate WorldState. Artifacts already exported under Data/
+    /// are used as-is; anything missing is converted ON DEMAND into
+    /// Data/Temp/ (never overwriting canonical Data/ exports). When
+    /// the glTF model exports are missing too, the (multi-minute)
+    /// f4import conversion starts in the background — see
+    /// start_models_conversion().
     /// Throws on missing files or parse errors — caller catches and
     /// shows the error in the status bar.
     void load_campaign_from_install(const std::string& theater_key,
                                      const std::string& campaign_stem);
+
+    /// Start the background Data/Temp models/textures conversion
+    /// (f4import --all, several minutes on first run). No-op when no
+    /// install is set or a job is already running. Results are
+    /// adopted by poll_pipeline_job().
+    void start_models_conversion();
+
+    /// Frame-loop hook: adopts a finished models conversion (points
+    /// the render resources at Data/Temp and re-arms the lazy model
+    /// load) and refreshes the status line while one is running.
+    /// Call once per frame from run().
+    void poll_pipeline_job();
 
     /// Open the Hex Inspector panel (Tools > Hex Inspector) with a file
     /// pre-loaded. Used by the --hex-inspect CLI flag for scripted use

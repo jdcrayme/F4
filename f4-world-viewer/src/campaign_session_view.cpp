@@ -41,6 +41,7 @@
 
 #include "viewer_state.hpp"
 #include <f4/viewer/enum_text.hpp>
+#include <f4/viewer/pipeline_io.hpp>
 
 #include <f4/campaign/mission_type.hpp>
 
@@ -96,19 +97,28 @@ void ViewerApp::start_campaign_session() {
     opts.world_json = std::filesystem::absolute(
         impl_->last_world_json_path);
 
-    std::filesystem::path class_table;
-#ifdef F4_SOURCE_DIR
-    class_table = std::filesystem::path(F4_SOURCE_DIR) /
-                  "f4-world-convert/tests/fixtures/FALCON4.ct";
-#endif
-    if (impl_->install && impl_->install->valid()) {
-        // The install's own class table (real theater data) when the
-        // user configured one — same preference the campaign load flow
-        // applies for the world JSON.
-        const auto& ct = impl_->install->class_table();
-        if (!ct.empty() && std::filesystem::exists(ct)) {
-            class_table = ct;
+    // The session's ClassTable::load_auto is JSON-only (Tranche 0d) —
+    // handing it a binary .ct path always failed at session create.
+    // Use the path the campaign load resolved (canonical Data/ export
+    // or the Data/Temp conversion); when unset, resolve on demand, and
+    // only fall back to the committed Data/ export if that's all there
+    // is. (The old fixture fallback pointed at a BINARY .ct fixture —
+    // it could never have loaded.)
+    std::filesystem::path class_table = impl_->class_table_json_path;
+    if (class_table.empty() || !std::filesystem::exists(class_table)) {
+        if (impl_->install && impl_->install->valid()) {
+            try {
+                class_table = ensure_class_table_json(*impl_->install);
+            } catch (const std::exception&) {
+                // fall through to the committed Data/ export below
+            }
         }
+    }
+    if (class_table.empty() || !std::filesystem::exists(class_table)) {
+#ifdef F4_SOURCE_DIR
+        class_table = std::filesystem::path(F4_SOURCE_DIR) /
+                      "Data/Classes/falcon4.ct.json";
+#endif
     }
     opts.class_table = class_table;
 
