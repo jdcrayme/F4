@@ -42,6 +42,7 @@ add_library(f4-simulation STATIC
     src/campaign_session.cpp
     src/campaign_session_runner.cpp
     src/campaign_war_harness.cpp
+    src/bvr_intercept_harness.cpp
     src/combat_bridge.cpp
     src/combat_transcript.cpp
     src/bubble_manager.cpp
@@ -142,3 +143,18 @@ add_dependencies(campaign_qc mission_profiles_fixture)
 if(TARGET convert_golden_fixtures)
     add_dependencies(campaign_qc convert_golden_fixtures)
 endif()
+
+# ============================================================================
+# bvr_intercept_qc — the M4 end-to-end BVR intercept acceptance tool
+# (tools/bvr_intercept_qc.cpp). The combat-chain sibling of campaign_qc's
+# --war mode: runs a BVR intercept scenario headless through
+# BvrInterceptHarness, writes the three artifacts (result + summary +
+# diary), and derives the exit-code verdict. See the tool's header comment
+# + Docs/COMBAT_CHAIN_M4_PLAN.md §4 for the exit-code table. Links
+# f4-simulation only (f4-json comes transitively PUBLIC; the harness owns
+# the f4-recorder interaction). No default-fixture compile defs — the tool
+# consumes a scenario JSON path directly as argv[1].
+# ============================================================================
+add_executable(bvr_intercept_qc tools/bvr_intercept_qc.cpp)
+target_link_libraries(bvr_intercept_qc PRIVATE f4-simulation)
+target_compile_features(bvr_intercept_qc PRIVATE cxx_std_20)

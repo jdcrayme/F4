@@ -11,9 +11,11 @@
 
 #include <f4/simulation/simulation.hpp>
 #include <f4/simulation/visual_model_component.hpp>
+#include <f4/simulation/bvr_intercept_harness.hpp>
 #include <f4/entities/entity.hpp>
 #include <f4/flight/flight_model_component.hpp>
 #include <f4/assets/asset_root.hpp>   // Data/ discovery for the glTF models
+#include <f4/json/f4_json.hpp>        // run_harness's summary + diary writers
 
 // Now safe to include Raylib (PI macro won't break the flight headers).
 #include <rlImGui.h>
@@ -22,10 +24,26 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdio>
+#include <filesystem>
+#include <fstream>
 #include <stdexcept>
+#include <string>
 #include <thread>
 
 namespace f4::scenario_player {
+
+namespace {
+
+// JSON string literal emitter — mirrors campaign_qc.cpp's write_string
+// (the project's f4::json::Writer doesn't expose a one-call quoted-string
+// helper, just the unquoted string() + raw() primitives). Kept private
+// to this TU; the summary + diary writers below both use it.
+void write_json_string_(f4::json::Writer& w, const std::string& s) {
+    w.string(s);
+}
+
+} // namespace
 
 // ── ctor ───────────────────────────────────────────────────────────────────
 PlayerApp::PlayerApp() : impl_(std::make_unique<Impl>()) {
@@ -50,6 +68,11 @@ void PlayerApp::set_window_size(int width, int height) noexcept {
 
 // ── load_scenario ──────────────────────────────────────────────────────────
 void PlayerApp::load_scenario(const std::filesystem::path& json_path) {
+    // Remember the path for run_harness (the harness re-loads the scenario
+    // fresh from disk — the player's already-built Simulation is left
+    // untouched — so the path must outlive load_scenario's stack frame).
+    scenario_json_path_ = json_path;
+
     // Load and validate the scenario JSON (resolves asset paths).
     impl_->scenario = f4::simulation::load_scenario(json_path);
 
@@ -464,6 +487,362 @@ void PlayerApp::run() {
     if (impl_->sim) {
         impl_->sim->write_recording();
     }
+}
+
+// ── run_harness ────────────────────────────────────────────────────────────
+// The --harness CLI flag's headless path. Mirrors bvr_intercept_qc's run
+// (the M4 plan §4 item 3–4 contract): build InterceptHarnessOptions from
+// the loaded scenario's path, create the harness, execute it (no progress
+// callback — the CLI variant is silent until the verdict), write the three
+// artifacts (bvr_intercept_result.json + bvr_intercept_summary.json +
+// bvr_intercept_diary.json), print the verdict, and return the exit code.
+//
+// SIBLING to run(); does NOT create a GL context (no InitWindow, no
+// SetConfigFlags, no UploadMesh) and does NOT enter the render loop. The
+// load_scenario() that precedes it has already loaded terrain + airfield
+// overlays into the player's own Simulation, but those are read-only data
+// loads — the harness composes its OWN fresh Simulation from the scenario
+// JSON (the determinism proof demands a from-scratch build per pass), so
+// the player's Simulation is left untouched. The whole point of this path
+// is a headless run: no window, no ImGui, no GPU.
+int PlayerApp::run_harness(const std::filesystem::path& summary_out,
+                           std::int64_t horizon_sec,
+                           double sample_sec,
+                           int runs) {
+    if (!impl_->sim_initialized) {
+        throw std::runtime_error(
+            "PlayerApp::run_harness: no scenario loaded — call "
+            "load_scenario() first");
+    }
+    if (scenario_json_path_.empty()) {
+        std::fprintf(stderr,
+            "PlayerApp::run_harness: scenario JSON path not recorded "
+            "(load_scenario was not called)\n");
+        return 1;
+    }
+
+    // Build the harness options from the loaded scenario's path. The
+    // asset dir is the scenario file's parent — the same dir
+    // load_scenario used for @asset: refs (the harness's own
+    // Simulation ctor takes the same asset_dir).
+    f4::simulation::InterceptHarnessOptions opts;
+    opts.scenario_json = scenario_json_path_;
+    opts.asset_dir = scenario_json_path_.parent_path();
+    opts.horizon_sec = horizon_sec;
+    opts.sample_sec = sample_sec;
+    opts.runs = runs;
+    // No wall-clock watchdog — the CLI variant runs to completion. The
+    // harness's max_wall_sec_total is for CI hosts that need a global
+    // guard; the player's --harness is for local acceptance runs.
+
+    std::string err;
+    auto harness = f4::simulation::BvrInterceptHarness::create(opts, &err);
+    if (!harness) {
+        std::fprintf(stderr,
+            "PlayerApp::run_harness: harness create failed (exit 1): %s\n",
+            err.c_str());
+        return 1;
+    }
+
+    // Run the fight (no progress callback — the CLI variant is silent
+    // until the verdict). This is the HEADLESS path: no GL context, no
+    // render loop, no ImGui. Just sim ticks, in 4-sim-second batches,
+    // twice (when runs == 2) for the determinism proof.
+    const auto& report = harness->execute(/*on_sample=*/nullptr);
+
+    // ── Artifacts ────────────────────────────────────────────────────────
+    // The M4 plan §4 item 3 trio, written under the SAME naming
+    // bvr_intercept_qc uses, so the rendered variant produces the same
+    // artifacts as the headless tool:
+    //   bvr_intercept_result.json  — run 0's recorder JSON (the
+    //                                byte-stable certificate; the MD5
+    //                                input). Written to summary_out
+    //                                verbatim.
+    //   bvr_intercept_summary.json — verdicts + counters + MD5 + the
+    //                                engagement window. Deterministic
+    //                                content ONLY.
+    //   bvr_intercept_diary.json   — per-sample telemetry (wall_sec,
+    //                                ticks_per_sec, rss_kb). Explicitly
+    //                                NOT byte-stable.
+    const auto out_dir = summary_out.parent_path();
+    if (!out_dir.empty()) {
+        std::error_code ec;
+        std::filesystem::create_directories(out_dir, ec);
+        // Ignore ec — the ofstream open below will fail loudly if the
+        // dir didn't get created and the path is unwritable.
+    }
+    const auto result_path = summary_out;
+    const auto summary_path = out_dir / "bvr_intercept_summary.json";
+    const auto diary_path = out_dir / "bvr_intercept_diary.json";
+
+    // 1. The recorder JSON (the byte-stable certificate).
+    {
+        std::ofstream out(result_path);
+        if (!out) {
+            std::fprintf(stderr,
+                "PlayerApp::run_harness: cannot write %s (exit 1)\n",
+                result_path.string().c_str());
+            return 1;
+        }
+        out << report.recorder_json;
+    }
+
+    // 2. The summary JSON — deterministic content only (verdicts +
+    //    counters + MD5 + the engagement window). Mirrors campaign_qc's
+    //    summary block shape.
+    {
+        f4::json::Writer w;
+        w.put("{\n  \"format\": \"f4-bvr-intercept-summary\",\n  ");
+        w.put("\"version\": 1");
+        w.put(",\n  \"scenario_json\": ");
+        write_json_string_(w, scenario_json_path_.string());
+        w.put(",\n  \"bvr\": {\n    ");
+        w.number_key("horizon_sec", horizon_sec);
+        w.put(",    ");
+        w.number_key("sample_sec", sample_sec);
+        w.put(",    ");
+        w.number_key("runs", runs);
+        w.put(",    ");
+        w.number_key("samples", report.samples);
+        w.put(",    ");
+        w.put("\"combat_enabled\": ");
+        w.put(report.combat_enabled ? "true" : "false");
+        w.put(",    ");
+        w.number_key("aircraft_count", report.aircraft_count);
+        w.put(",    ");
+        w.number_key("blue_aircraft", report.blue_aircraft);
+        w.put(",    ");
+        w.number_key("red_aircraft", report.red_aircraft);
+        w.put(",    ");
+        w.number_key("tracks_acquired", report.tracks_acquired);
+        w.put(",    ");
+        w.number_key("tracks_dropped", report.tracks_dropped);
+        w.put(",    ");
+        w.number_key("rwr_locks", report.rwr_locks);
+        w.put(",    ");
+        w.number_key("rwr_launches", report.rwr_launches);
+        w.put(",    ");
+        w.number_key("missiles_launched", report.missiles_launched);
+        w.put(",    ");
+        w.number_key("missiles_detonated", report.missiles_detonated);
+        w.put(",    ");
+        w.number_key("damage_events", report.damage_events);
+        w.put(",    ");
+        w.number_key("kills", report.kills);
+        w.put(",\n    \"recorder_md5_run0\": ");
+        write_json_string_(w, report.verdict.recorder_md5_run0);
+        w.put(",\n    \"recorder_md5_run1\": ");
+        write_json_string_(w, report.verdict.recorder_md5_run1);
+        w.put(",\n    \"deterministic\": ");
+        w.put(report.verdict.deterministic ? "true" : "false");
+        w.put(",\n    \"engagement_completed\": ");
+        w.put(report.verdict.engagement_completed ? "true" : "false");
+        w.put(",\n    \"roster_bounded\": ");
+        w.put(report.verdict.roster_bounded ? "true" : "false");
+        w.put(",\n    \"fight_alive\": ");
+        w.put(report.verdict.fight_alive ? "true" : "false");
+        w.put(",\n    \"engagement_failure\": ");
+        write_json_string_(w, report.verdict.engagement_failure);
+        w.put(",\n    \"roster_leak\": ");
+        write_json_string_(w, report.verdict.roster_leak);
+        w.put(",\n    \"fight_stall\": ");
+        write_json_string_(w, report.verdict.fight_stall);
+        w.put(",\n    ");
+        w.number_key("first_detect_s", report.verdict.first_detect_s);
+        w.put(",    ");
+        w.number_key("first_launch_s", report.verdict.first_launch_s);
+        w.put(",    ");
+        w.number_key("first_kill_s", report.verdict.first_kill_s);
+        w.put(",    ");
+        w.number_key("shots_fired", report.verdict.shots_fired);
+        w.put(",    ");
+        w.number_key("shots_hit", report.verdict.shots_hit);
+        w.put(",    ");
+        w.number_key("shots_missed", report.verdict.shots_missed);
+        w.put(",\n    \"aborted\": ");
+        w.put(report.aborted ? "true" : "false");
+        w.put(",\n    \"abort_reason\": ");
+        write_json_string_(w, report.abort_reason);
+        w.put(",\n    \"result_json\": ");
+        write_json_string_(w, result_path.string());
+        w.put("\n  }");
+        w.put("\n}\n");
+
+        std::ofstream out(summary_path);
+        if (!out) {
+            std::fprintf(stderr,
+                "PlayerApp::run_harness: cannot write %s (exit 1)\n",
+                summary_path.string().c_str());
+            return 1;
+        }
+        out << w.str();
+    }
+
+    // 3. The diary JSON — per-sample telemetry. Explicitly NOT
+    //    byte-stable (wall_sec / ticks_per_sec / rss_kb vary by host);
+    //    lives in its own file for exactly that reason. Mirrors
+    //    campaign_qc's diary shape.
+    {
+        f4::json::Writer w;
+        w.put("{\n  \"format\": \"f4-bvr-intercept-diary\",\n  ");
+        w.put("\"version\": 1,\n  ");
+        w.put("\"note\": \"performance telemetry (wall-clock, ticks/sec, "
+              "RSS) varies by host; the byte-stable artifacts are "
+              "bvr_intercept_result.json and bvr_intercept_summary.json\",\n  ");
+        w.number_key("samples",
+                     static_cast<std::int64_t>(report.diary.size()));
+        w.put(",\n  \"rows\": [");
+        bool first = true;
+        for (const auto& s : report.diary) {
+            w.put(first ? "\n    {" : ",\n    {");
+            first = false;
+            w.number_key("sample", s.sample);
+            w.put(", ");
+            w.number_key("sim_time_s", s.sim_time_s);
+            w.put(", ");
+            w.number_key("initial_entities", s.initial_entities);
+            w.put(", ");
+            w.number_key("spawned_entities", s.spawned_entities);
+            w.put(", ");
+            w.number_key("retired_entities", s.retired_entities);
+            w.put(", ");
+            w.number_key("live_entities", s.live_entities);
+            w.put(", ");
+            w.number_key("live_missiles", s.live_missiles);
+            w.put(", ");
+            w.number_key("tracks_acquired", s.tracks_acquired);
+            w.put(", ");
+            w.number_key("tracks_dropped", s.tracks_dropped);
+            w.put(", ");
+            w.number_key("rwr_locks", s.rwr_locks);
+            w.put(", ");
+            w.number_key("rwr_launches", s.rwr_launches);
+            w.put(", ");
+            w.number_key("missiles_launched", s.missiles_launched);
+            w.put(", ");
+            w.number_key("missiles_detonated", s.missiles_detonated);
+            w.put(", ");
+            w.number_key("damage_events", s.damage_events);
+            w.put(", ");
+            w.number_key("kills", s.kills);
+            w.put(", ");
+            w.number_key("sample_launches", s.sample_launches);
+            w.put(", ");
+            w.number_key("sample_detonations", s.sample_detonations);
+            w.put(", ");
+            w.number_key("sample_kills", s.sample_kills);
+            // The telemetry trio (wall_sec / ticks_per_sec / rss_kb) —
+            // formatted with explicit precision to mirror campaign_qc's
+            // diary row shape (the only place floats appear in the row).
+            char buf[128];
+            std::snprintf(buf, sizeof(buf),
+                ", \"wall_sec\": %.3f, \"ticks_per_sec\": %.1f, "
+                "\"rss_kb\": %ld",
+                s.wall_sec, s.ticks_per_sec, s.rss_kb);
+            w.put(buf);
+            w.put("\n    }");
+        }
+        w.put(report.diary.empty() ? "]" : "\n  ]");
+        w.put("\n}\n");
+
+        std::ofstream out(diary_path);
+        if (!out) {
+            std::fprintf(stderr,
+                "PlayerApp::run_harness: cannot write %s (exit 1)\n",
+                diary_path.string().c_str());
+            return 1;
+        }
+        out << w.str();
+    }
+
+    // ── Verdict printout (one line per gate + the engagement window) ────
+    // Mirrors campaign_qc's "war: deterministic=... drift=... leak=...
+    // alive=... md5=..." headline — one line for the four gates + the
+    // MD5, one line for the engagement window (detect → launch → kill
+    // timing + shot effectiveness).
+    std::printf("bvr: deterministic=%s engagement=%s roster=%s alive=%s "
+                "md5=%s\n",
+                report.verdict.deterministic ? "yes" : "NO",
+                report.verdict.engagement_completed ? "ok" : "FAIL",
+                report.verdict.roster_bounded ? "ok" : "LEAK",
+                report.verdict.fight_alive ? "ok" : "STALLED",
+                report.verdict.recorder_md5_run0.c_str());
+    std::printf("bvr: detect@%.1fs launch@%.1fs kill@%.1fs "
+                "shots=%d hit=%d miss=%d\n",
+                report.verdict.first_detect_s,
+                report.verdict.first_launch_s,
+                report.verdict.first_kill_s,
+                report.verdict.shots_fired,
+                report.verdict.shots_hit,
+                report.verdict.shots_missed);
+    std::printf("wrote: %s\n", result_path.string().c_str());
+    std::printf("wrote: %s\n", summary_path.string().c_str());
+    std::printf("wrote: %s\n", diary_path.string().c_str());
+
+    // ── Exit code (mirrors bvr_intercept_qc's table, M4 plan §4 item 4) ─
+    // Precedence: abort > deterministic > roster > fight_alive > launch >
+    // engagement. The abort class splits on the abort_reason text — the
+    // non-combat-scenario refusal (combat.enabled == false) is exit 2
+    // (silent success would be the worst failure class); every other
+    // abort (scenario load fail, sim init fail, watchdog) is exit 1.
+    if (report.aborted) {
+        if (report.abort_reason.find("combat.enabled") != std::string::npos) {
+            std::fprintf(stderr,
+                "PlayerApp::run_harness: harness refused scenario "
+                "(exit 2): %s\n",
+                report.abort_reason.c_str());
+            return 2;
+        }
+        std::fprintf(stderr,
+            "PlayerApp::run_harness: harness aborted (exit 1): %s\n",
+            report.abort_reason.c_str());
+        return 1;
+    }
+    if (runs >= 2 && !report.verdict.deterministic) {
+        std::fprintf(stderr,
+            "PlayerApp::run_harness: NON-DETERMINISTIC (exit 9) — "
+            "run 0 md5 %s != run 1 md5 %s. Diff bvr_intercept_result.json "
+            "against a re-run to find the first diverging event.\n",
+            report.verdict.recorder_md5_run0.c_str(),
+            report.verdict.recorder_md5_run1.c_str());
+        return 9;
+    }
+    if (!report.verdict.roster_bounded) {
+        std::fprintf(stderr,
+            "PlayerApp::run_harness: ROSTER LEAK (exit 6): %s. The roster "
+            "identity broke — spawn/reap churn is leaking entities.\n",
+            report.verdict.roster_leak.c_str());
+        return 6;
+    }
+    if (!report.verdict.fight_alive) {
+        std::fprintf(stderr,
+            "PlayerApp::run_harness: FIGHT STALLED (exit 3): %s. The brain "
+            "never detected / never reached Entering within the horizon.\n",
+            report.verdict.fight_stall.c_str());
+        return 3;
+    }
+    // fight_alive is green (the brain detected + reached Entering). The
+    // finer-grained "detected but never fired" class (exit 4) keys on
+    // first_launch_s < 0 — the MAR/Pk gate mis-tune symptom the M4 plan
+    // calls out separately from engagement_completed (exit 5, "fired but
+    // no kill attributed").
+    if (report.verdict.first_launch_s < 0.0) {
+        std::fprintf(stderr,
+            "PlayerApp::run_harness: NO LAUNCH (exit 4) — the brain "
+            "detected but never fired within the horizon. Inspect "
+            "first_detect_s / first_launch_s in bvr_intercept_summary.json "
+            "(MAR/Pk gate mis-tuned).\n");
+        return 4;
+    }
+    if (!report.verdict.engagement_completed) {
+        std::fprintf(stderr,
+            "PlayerApp::run_harness: ENGAGEMENT NOT COMPLETED (exit 5): "
+            "%s. The brain fired but no kill was attributed within the "
+            "horizon.\n",
+            report.verdict.engagement_failure.c_str());
+        return 5;
+    }
+    return 0;
 }
 
 } // namespace f4::scenario_player

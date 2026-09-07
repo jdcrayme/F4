@@ -91,6 +91,23 @@ target_compile_definitions(test_campaign_war_harness PRIVATE
 )
 add_dependencies(test_campaign_war_harness mission_profiles_fixture)
 
+# M4 — the BVR intercept acceptance harness: runs the shipped
+# bvr_intercept.json scenario headless through BvrInterceptHarness,
+# pins the four verdicts (deterministic / engagement_completed /
+# roster_bounded / fight_alive), the MD5 certificate, and the
+# engagement_summary block. Consumes the build-configured scenario
+# (F4_SCENARIOS_DIR) + the generated F-16 config (the scenario's
+# @F4_AIRCRAFT_CONFIG@ resolves to it at configure time). See
+# Docs/COMBAT_CHAIN_M4_PLAN.md §4 item 9 for the test rig.
+f4_simulation_add_test(test_bvr_intercept_harness test_bvr_intercept_harness.cpp)
+target_compile_definitions(test_bvr_intercept_harness PRIVATE
+    F4_SCENARIOS_DIR="${CMAKE_BINARY_DIR}/scenarios"
+    F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}"
+)
+if(TARGET convert_golden_fixtures)
+    add_dependencies(test_bvr_intercept_harness convert_golden_fixtures)
+endif()
+
 # C6 — arming the campaign flights: the arm mechanics (role doctrine,
 # component set, policy handoff, idempotence), the Simulation surface
 # (late-spawn arm + counters), and the ARMED war over the routed kunsan

@@ -13,6 +13,7 @@
 #include <gtest/gtest.h>
 
 #include <f4/recorder/flight_recorder.hpp>
+#include <f4/json/reader.hpp>
 
 #include <cstddef>
 #include <string>
@@ -371,6 +372,158 @@ TEST(CombatEvents, SummaryCombatDebrief) {
     // The kill entry names the victim, killer, and the weapon.
     EXPECT_NE(summary.find("\"killer_id\":3"), std::string::npos);
     EXPECT_NE(summary.find("\"target_id\":4"), std::string::npos);
+}
+
+// ============================================================================
+// Summary: the engagement_summary block (M4 item 5)
+// ============================================================================
+//
+// Helper: walk a summary JSON document, locate the top-level
+// "engagement_summary" object, and pull its fields into the out-parameters.
+// Returns true if the block was found. Uses f4::json::Reader (the same parser
+// from_json uses) so the assertions are exact, not substring-prefix matches
+// — the duration/effectiveness doubles are NOT whole numbers and %.17g
+// emits them with trailing digits (30.05 -> "30.050000000000001"), so
+// std::string::find() would be fragile here.
+struct EngagementSummary {
+    bool        present{false};
+    double      first_detect_s{0.0};
+    double      first_launch_s{0.0};
+    double      first_kill_s{0.0};
+    double      engagement_duration_s{0.0};
+    long long   shots_fired{0};
+    long long   shots_hit{0};
+    long long   shots_missed{0};
+    double      weapon_effectiveness_pct{0.0};
+};
+
+EngagementSummary parse_engagement_summary(const std::string& json) {
+    EngagementSummary out;
+    f4::json::Reader r(json);
+    r.skip_ws();
+    r.expect('{');
+    while (!r.consume('}')) {
+        const auto key = r.read_string();
+        r.expect(':');
+        if (key == "engagement_summary") {
+            out.present = true;
+            r.expect('{');
+            while (!r.consume('}')) {
+                const auto sub = r.read_string();
+                r.expect(':');
+                if      (sub == "first_detect_s")            out.first_detect_s = r.read_number();
+                else if (sub == "first_launch_s")            out.first_launch_s = r.read_number();
+                else if (sub == "first_kill_s")              out.first_kill_s   = r.read_number();
+                else if (sub == "engagement_duration_s")     out.engagement_duration_s = r.read_number();
+                else if (sub == "shots_fired")               out.shots_fired  = r.read_int();
+                else if (sub == "shots_hit")                 out.shots_hit    = r.read_int();
+                else if (sub == "shots_missed")              out.shots_missed = r.read_int();
+                else if (sub == "weapon_effectiveness_pct")  out.weapon_effectiveness_pct = r.read_number();
+                else                                          r.skip_value();
+                r.consume(',');
+            }
+        } else {
+            r.skip_value();
+        }
+        r.consume(',');
+    }
+    return out;
+}
+
+TEST(CombatEvents, SummaryEngagementSummaryForBvr) {
+    // Case 1: a clean BVR kill — detect, launch, target_hit, kill.
+    {
+        FlightRecorder rec;
+        rec.record(make_aircraft(0, 0.0, 3));
+        rec.record(make_aircraft(0, 0.0, 4));
+
+        CombatEvent track;
+        track.tick = 60; track.sim_time_s = 1.0;
+        track.kind = CombatEventKind::TrackAcquired;
+        track.subject_id = 3; track.object_id = 4;
+        rec.record(track);
+
+        rec.record(make_launch(300, 5.0, 3, 4, 7));   // launch at t=5
+
+        CombatEvent det;
+        det.tick = 1800; det.sim_time_s = 30.0;
+        det.kind = CombatEventKind::MissileDetonated;
+        det.subject_id = 3; det.object_id = 4; det.missile_id = 7;
+        det.end_cause = "target_hit";
+        det.miss_distance_ft = 0.0;
+        det.flight_time_s = 25.0;
+        rec.record(det);
+
+        rec.record(make_kill(1803, 30.05, 4, 3));     // kill at t=30.05
+
+        const auto summary = rec.to_summary_json("bvr");
+        const auto es = parse_engagement_summary(summary);
+
+        ASSERT_TRUE(es.present);
+        EXPECT_DOUBLE_EQ(es.first_detect_s, 1.0);
+        EXPECT_DOUBLE_EQ(es.first_launch_s, 5.0);
+        EXPECT_DOUBLE_EQ(es.first_kill_s, 30.05);
+        EXPECT_DOUBLE_EQ(es.engagement_duration_s, 29.05);
+        EXPECT_EQ(es.shots_fired, 1);
+        EXPECT_EQ(es.shots_hit, 1);
+        EXPECT_EQ(es.shots_missed, 0);
+        EXPECT_DOUBLE_EQ(es.weapon_effectiveness_pct, 100.0);
+    }
+
+    // Case 2: a missed shot — detect, launch, closest_approach, NO kill.
+    // first_kill_s and engagement_duration_s go to -1; effectiveness to 0.
+    {
+        FlightRecorder rec;
+        rec.record(make_aircraft(0, 0.0, 3));
+        rec.record(make_aircraft(0, 0.0, 4));
+
+        CombatEvent track;
+        track.tick = 60; track.sim_time_s = 1.0;
+        track.kind = CombatEventKind::TrackAcquired;
+        track.subject_id = 3; track.object_id = 4;
+        rec.record(track);
+
+        rec.record(make_launch(300, 5.0, 3, 4, 7));
+
+        CombatEvent det;
+        det.tick = 1800; det.sim_time_s = 30.0;
+        det.kind = CombatEventKind::MissileDetonated;
+        det.subject_id = 3; det.object_id = 4; det.missile_id = 7;
+        det.end_cause = "closest_approach";
+        det.miss_distance_ft = 500.0;
+        det.flight_time_s = 25.0;
+        rec.record(det);
+        // No EntityKilled event.
+
+        const auto summary = rec.to_summary_json("bvr_miss");
+        const auto es = parse_engagement_summary(summary);
+
+        ASSERT_TRUE(es.present);
+        EXPECT_DOUBLE_EQ(es.first_detect_s, 1.0);
+        EXPECT_DOUBLE_EQ(es.first_launch_s, 5.0);
+        EXPECT_DOUBLE_EQ(es.first_kill_s, -1.0);
+        EXPECT_DOUBLE_EQ(es.engagement_duration_s, -1.0);
+        EXPECT_EQ(es.shots_fired, 1);
+        EXPECT_EQ(es.shots_hit, 0);
+        EXPECT_EQ(es.shots_missed, 1);
+        EXPECT_DOUBLE_EQ(es.weapon_effectiveness_pct, 0.0);
+    }
+}
+
+TEST(CombatEvents, OldRecordingHasNoEngagementSummary) {
+    // Byte-stability for old recordings: a recorder with snapshots but NO
+    // combat events must not emit the engagement_summary block (the block
+    // is gated on !combat_events_.empty(), same as the combat block).
+    FlightRecorder rec;
+    rec.record(make_aircraft(0, 0.0, 3));
+    rec.record(make_aircraft(60, 6.0, 3));
+    rec.record(make_aircraft(120, 12.0, 3));
+    ASSERT_TRUE(rec.combat_events().empty());
+
+    const auto summary = rec.to_summary_json("quiet_flight");
+    EXPECT_EQ(summary.find("engagement_summary"), std::string::npos);
+    // Sanity: the existing combat block is also absent for the same reason.
+    EXPECT_EQ(summary.find("\"combat\""), std::string::npos);
 }
 
 TEST(CombatEvents, SummaryWithoutCombatHasNoCombatSection) {

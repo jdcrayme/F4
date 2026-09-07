@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <cstdint>
 #include <filesystem>
 #include <memory>
 
@@ -65,7 +66,35 @@ public:
     /// Run the render + sim loop until window close. Blocks.
     void run();
 
+    /// Run the BVR intercept harness headlessly over the loaded scenario
+    /// and write the summary JSON. Sibling to run() — used by the
+    /// --harness CLI flag. Does NOT create a GL context; does NOT enter
+    /// the render loop. Returns the harness's exit code (0 = all green;
+    /// 1 = abort; 2 = non-combat; 3/4 = fight_alive; 5 = engagement;
+    /// 6 = roster; 9 = non-deterministic — see bvr_intercept_qc.cpp's
+    /// exit-code table).
+    ///
+    /// `summary_out` is the path of the byte-stable recorder JSON
+    /// artifact (bvr_intercept_result.json). The summary JSON
+    /// (bvr_intercept_summary.json — verdicts + counters + MD5) and the
+    /// diary JSON (bvr_intercept_diary.json — per-sample telemetry) are
+    /// written as siblings under the SAME naming bvr_intercept_qc uses,
+    /// so the rendered variant produces the same artifacts as the
+    /// headless tool.
+    int run_harness(const std::filesystem::path& summary_out,
+                    std::int64_t horizon_sec = 300,
+                    double sample_sec = 30.0,
+                    int runs = 2);
+
 private:
+    // The path passed to load_scenario(). run_harness builds the harness
+    // options from it (the harness re-loads the scenario fresh, so the
+    // player's already-built Simulation is left untouched — the harness
+    // composes its own). Stored outside the Impl so the header stays
+    // free of f4-simulation types (the pimpl keeps the heavy includes
+    // in the .cpp).
+    std::filesystem::path scenario_json_path_;
+
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };

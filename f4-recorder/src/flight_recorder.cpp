@@ -552,6 +552,79 @@ std::string FlightRecorder::to_summary_json(
         w.raw("  ]\n");
 
         w.raw("}\n");
+
+        // Engagement summary (M4 item 5): derived window + effectiveness
+        // metrics over the combat event stream. Computed only from
+        // combat_events_ — no new state, no new CombatEvent fields. Sits
+        // inside the same combat_events_.empty() gate as the combat block
+        // above, so old recordings (no combat events) emit neither block
+        // and stay byte-identical to the pre-M4 summary format.
+        bool have_detect = false;
+        bool have_launch = false;
+        bool have_kill   = false;
+        double first_detect_s = -1.0;
+        double first_launch_s = -1.0;
+        double first_kill_s   = -1.0;
+        std::uint64_t shots_fired  = 0;
+        std::uint64_t shots_hit    = 0;
+        std::uint64_t shots_missed = 0;
+        for (const auto& e : combat_events_) {
+            switch (e.kind) {
+                case CombatEventKind::TrackAcquired:
+                    if (!have_detect || e.sim_time_s < first_detect_s) {
+                        first_detect_s = e.sim_time_s;
+                        have_detect = true;
+                    }
+                    break;
+                case CombatEventKind::MissileLaunched:
+                    ++shots_fired;
+                    if (!have_launch || e.sim_time_s < first_launch_s) {
+                        first_launch_s = e.sim_time_s;
+                        have_launch = true;
+                    }
+                    break;
+                case CombatEventKind::EntityKilled:
+                    if (!have_kill || e.sim_time_s < first_kill_s) {
+                        first_kill_s = e.sim_time_s;
+                        have_kill = true;
+                    }
+                    break;
+                case CombatEventKind::MissileDetonated:
+                    if (e.end_cause == "target_hit") ++shots_hit;
+                    else                              ++shots_missed;
+                    break;
+                default:
+                    break;
+            }
+        }
+        const double engagement_duration_s =
+            (have_detect && have_kill)
+                ? (first_kill_s - first_detect_s) : -1.0;
+        const double weapon_effectiveness_pct =
+            shots_fired > 0
+                ? (static_cast<double>(shots_hit) * 100.0 /
+                   static_cast<double>(shots_fired))
+                : 0.0;
+
+        w.raw(",\n");
+        w.string("engagement_summary"); w.raw(": {\n");
+        w.raw("  "); w.string("first_detect_s"); w.raw(":");
+            w.number(first_detect_s); w.raw(",\n");
+        w.raw("  "); w.string("first_launch_s"); w.raw(":");
+            w.number(first_launch_s); w.raw(",\n");
+        w.raw("  "); w.string("first_kill_s"); w.raw(":");
+            w.number(first_kill_s); w.raw(",\n");
+        w.raw("  "); w.string("engagement_duration_s"); w.raw(":");
+            w.number(engagement_duration_s); w.raw(",\n");
+        w.raw("  "); w.string("shots_fired"); w.raw(":");
+            w.number(shots_fired); w.raw(",\n");
+        w.raw("  "); w.string("shots_hit"); w.raw(":");
+            w.number(shots_hit); w.raw(",\n");
+        w.raw("  "); w.string("shots_missed"); w.raw(":");
+            w.number(shots_missed); w.raw(",\n");
+        w.raw("  "); w.string("weapon_effectiveness_pct"); w.raw(":");
+            w.number(weapon_effectiveness_pct); w.raw("\n");
+        w.raw("}\n");
     }
 
     w.raw("}\n");
