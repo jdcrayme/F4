@@ -540,26 +540,68 @@ applied — the closed loop.
 
 ## 6. Follow-on (not in this tranche)
 
-### 6.1 WorldState → JSON emitter (the runtime-mutated save path)
+### 6.1 WorldState → JSON emitter (the runtime-mutated save path) — ✅ LANDED (Task 62)
 
-`f4-world` currently only *reads* the world JSON. A `WorldState` → JSON
-emitter (the reverse of `world_loader.cpp`, over the typed structs) lets a
-host write the *full* mutated world (not just the `.cmp` campaign header) as
-JSON, which `json2cam --reencode-cmp` could then turn into a `.cam`. This
-closes the diagonal for objectives (`.obj`/`.obd`) and units (`.uni`), whose
-positions and damage a campaign tick mutates.
+**Landed as a two-piece design** (Task 62; see CHANGES.md):
 
-Lives in `f4-world-convert` over the decode structs (the `world_json.cpp`
-emit pattern), composing with `encode_cmp` for the `.cmp` (✅ landed) and
-`encode_obj` for the `.obj` (✅ landed) and pass-through base64 for sub-files
-not yet re-encodable.
+1. **The emitter (`f4-world`)** — `WorldState::to_json_string()`, the exact
+   inverse of `load_from_string()` over the typed structs (the same key
+   vocabulary the parser reads). Semantic round-trip pinned field-for-field
+   against the real save1-derived fixture plus synthetic edge cases
+   (`test_world_emit.cpp`), floats bit-exact through the `%.17g` wire form.
+   The document is a **projection**: it carries the world-JSON schema, not
+   the decode structs' full wire fidelity (spot_time, spotted, base_flags,
+   the .tea team-status block, squadron stores[] and their kin are not part
+   of the schema and are not reconstructible from a WorldState).
+
+2. **The diff-then-overwrite assembly (`f4-world-convert`)** —
+   `save_writeback.hpp`: `derive_save_mutations(original, mutated)` diffs
+   the two documents over the fields the campaign loop OWNS (C1: clock,
+   timers, team pools, squadron counters, objective fstatus; G1: battalion
+   movement/state, objective owner flips), and
+   `build_campaign_with_mutations()` re-encodes `.cmp` from the ORIGINAL's
+   full-fidelity campaign block with the mutations applied, DECODES the
+   original `.obj`/`.uni` from `subfiles_b64`, overwrites only the mutated
+   fields on the decode structs, and re-encodes — **struct-faithful**:
+   untouched records and fields are byte-identical to the original decode
+   (the same bar the §2b–§2e encoders set). Everything else passes through
+   verbatim. `json2cam --reencode-all --baseline <original.json>` is the
+   CLI form.
+
+   Why diff-then-overwrite rather than re-encoding from the projection
+   alone: re-encoding from the mutated projection would ZERO every
+   decode-struct field the schema doesn't carry. Starting from the original
+   decode and overwriting only the owned fields preserves them.
+
+**The closed loop** (verified end-to-end in `test_save_writeback.cpp` over
+the real save1.cam fixture, Debug and Release):
+
+```
+cam2json --preserve-subfiles save1.cam        → original.world.json
+WorldState::load_from_string(original)        → the run's state
+(apply_to / apply_ground_to mutate it)        → the mutated state
+WorldState::to_json_string()                  → mutated.world.json
+json2cam mutated.world.json out.cam \
+    --reencode-all --baseline original.world.json
+→ save1_resumed.cam loads (in FreeFalcon or F4) to the mutated state
+```
+
+E2E verified mutations: clock advance, maintenance timers, team pool
+attrition, objective feature damage (fstatus), objective capture (owner
+flip), squadron kill counters, battalion move/decay/heading/last_move —
+each surviving the full `.cam` round-trip, with an unchanged-diff identity
+test pinning `encode_obj_payload`/`encode_uni_payload` equality.
 
 ### 6.2 `.uni` / `.tea` encoders
 
 All four typed sub-file encoders have landed: `.cmp` (✅), `.obj` (✅), `.tea`
-(✅), `.uni` (✅). The save format now handles every typed sub-file FreeFalcon's
-campaign uses. The remaining save-path work is the WorldState → JSON emitter
-(§6.1) and optional full byte-identity (§6.3).
+(✅), `.uni` (✅). The save format handles every typed sub-file FreeFalcon's
+campaign uses, and the WorldState → JSON emitter + owned-field diff
+(§6.1) close the runtime-mutated save path. The remaining save-path work is
+optional full byte-identity (§6.3) — and the host-side wiring that feeds a
+run's ledger through `apply_to` → `to_json_string` → `json2cam --reencode-all`
+automatically (the library surface is done; `campaign_qc`'s save-write mode
+is the natural next consumer).
 
 The `.uni` encoder was the largest lift — 6 subclass tails (Battalion/Brigade/
 Squadron/TaskForce/Flight/Package), version-gated fields, variable-length

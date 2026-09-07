@@ -4,7 +4,8 @@
 // emitted by f4-world-convert. The reader is shape-compatible with the
 // hand-rolled JsonReader that lived here previously — the field parsers
 // below are unchanged from the original implementation; only the local
-// class definition has been replaced with #include <f4/json/reader.hpp>.
+// class definition has been replaced with #include <f4/json/reader.hpp>
+#include <f4/json/writer.hpp>.
 
 #include <f4/world/detail/world_state.hpp>
 
@@ -717,7 +718,16 @@ void parse_campaign_field(Reader& r, const std::string& key, CampaignState& c) {
     else if (key == "te_number_aircraft" || key == "te_team_pts") {
         r.skip_ws(); r.expect('[');
         std::vector<int32_t> arr;
-        if (!r.peek(']')) for (;;) {
+        // consume(']') — the same empty-array pattern as every other
+        // array in this parser. This was a peek() that left the ']' in
+        // the stream, so an EMPTY "te_number_aircraft": [] threw
+        // "expected ','" on the next field boundary (latent since the
+        // campaign-field parse was written; exposed by the §6.1
+        // emitter's empty-array emission and pinned by
+        // test_world_emit.cpp).
+        if (r.consume(']')) {
+            // empty array
+        } else for (;;) {
             arr.push_back(static_cast<int32_t>(r.read_int()));
             if (r.consume(']')) break;
             r.expect(',');
@@ -871,6 +881,618 @@ void WorldState::load_terrain_via_assets(const f4::assets::AssetRoot& root) {
     }
     terrain.load_terrain_json(path);
     terrain_loaded = true;
+}
+
+} // namespace f4::world
+
+// ============================================================================
+// WorldState::to_json_string() — the emitter (SAVE_WRITE_PLAN §6.1).
+//
+// The exact mirror of the parse functions above, field for field, in the
+// same key vocabulary. Every float goes through Writer::number(double)
+// (%.17g — full double precision): float→double is exact and the %g form
+// round-trips the double, so read_number() recovers the original float
+// bit-for-bit (the SAVE_WRITE_PLAN §2b float-precision lesson applied at
+// the source).
+//
+// What is deliberately NOT emitted:
+//   * terrain (the terrain_file REFERENCE is; the terrain JSON lives
+//     side-by-side — the world-JSON contract)
+//   * FeatureEntryState::damage_state (derived from fstatus at parse time)
+//   * detect_ratio when has_radar is false (the parse defaults to zeros)
+//   * the .tea fields when tea_loaded is false (a non-enriched team emits
+//     the base five + replacements_avail only)
+//
+// ObjWriter owns the comma discipline (the Reader tolerates whitespace,
+// not trailing commas — every emitter bug of this class is a parse throw).
+// ============================================================================
+
+namespace f4::world {
+namespace {
+
+using f4::json::Writer;
+
+class ObjWriter {
+public:
+    explicit ObjWriter(Writer& w, const char* indent = "  ")
+        : w_(w), indent_(indent) {
+        w_.raw("{");
+    }
+    ~ObjWriter() {
+        if (!first_) w_.raw("\n");
+        w_.raw(indent_last_);
+        w_.raw("}");
+    }
+    ObjWriter(const ObjWriter&) = delete;
+    ObjWriter& operator=(const ObjWriter&) = delete;
+
+    template <typename T>
+        requires std::is_integral_v<T>
+    ObjWriter& num(const char* k, T v) {
+        sep();
+        w_.string(k); w_.raw(": ");
+        w_.number(v);
+        return *this;
+    }
+    ObjWriter& numf(const char* k, float v) {
+        sep();
+        w_.string(k); w_.raw(": ");
+        w_.number(static_cast<double>(v));
+        return *this;
+    }
+    ObjWriter& str(const char* k, std::string_view v) {
+        sep();
+        w_.string(k); w_.raw(": ");
+        w_.string(v);
+        return *this;
+    }
+    ObjWriter& boolean(const char* k, bool v) {
+        sep();
+        w_.string(k); w_.raw(v ? ": true" : ": false");
+        return *this;
+    }
+    /// Begin an array / nested object value: emits "key": and leaves the
+    /// value shape to the caller. Pair with end_array()/nested ObjWriter.
+    ObjWriter& key(const char* k) {
+        sep();
+        w_.string(k); w_.raw(": ");
+        return *this;
+    }
+    void raw(std::string_view r) { w_.raw(r); }
+
+private:
+    void sep() {
+        if (!first_) w_.raw(",");
+        first_ = false;
+        w_.raw("\n");
+        w_.raw(indent_);
+    }
+
+    Writer& w_;
+    const char* indent_;
+    bool first_ = true;
+    const char* indent_last_ = "";
+};
+
+void emit_uint_vec(Writer& w, const std::vector<uint8_t>& v) {
+    w.raw("[");
+    for (std::size_t i = 0; i < v.size(); ++i) {
+        if (i) w.raw(", ");
+        w.number(v[i]);
+    }
+    w.raw("]");
+}
+void emit_short_vec(Writer& w, const std::vector<int16_t>& v) {
+    w.raw("[");
+    for (std::size_t i = 0; i < v.size(); ++i) {
+        if (i) w.raw(", ");
+        w.number(v[i]);
+    }
+    w.raw("]");
+}
+void emit_int_vec(Writer& w, const std::vector<int32_t>& v) {
+    w.raw("[");
+    for (std::size_t i = 0; i < v.size(); ++i) {
+        if (i) w.raw(", ");
+        w.number(v[i]);
+    }
+    w.raw("]");
+}
+
+// ---------------------------------------------------------------------------
+// Team — the mirror of parse_team().
+// ---------------------------------------------------------------------------
+void emit_team(Writer& w, const TeamState& t) {
+    ObjWriter o(w);
+    o.num("slot", t.slot);
+    o.num("flags", t.flags);
+    o.num("colour", t.colour);
+    o.str("name", t.name);
+    o.str("motto", t.motto);
+    o.num("replacements_avail", t.replacements_avail);
+
+    // The .tea enrichment block: emitted as a unit when tea_loaded —
+    // INCLUDING the empty marker arrays, because the PARSE sets
+    // tea_loaded from the PRESENCE of any of these keys (an empty
+    // "member": [] still flips the flag).
+    if (t.tea_loaded) {
+        o.num("cteam", t.cteam);
+        o.num("team_flags", t.team_flags);
+        o.num("first_colonel", t.first_colonel);
+        o.num("first_commander", t.first_commander);
+        o.num("first_wingman", t.first_wingman);
+        o.num("last_wingman", t.last_wingman);
+        o.num("air_experience", t.air_experience);
+        o.num("air_defense_experience", t.air_defense_experience);
+        o.num("ground_experience", t.ground_experience);
+        o.num("naval_experience", t.naval_experience);
+        o.key("member");        emit_uint_vec(w, t.member);
+        o.key("stance");        emit_short_vec(w, t.stance);
+        o.key("mission_priority"); emit_uint_vec(w, t.mission_priority);
+        o.key("objtype_priority"); emit_uint_vec(w, t.objtype_priority);
+
+        o.key("atm_schedules");
+        w.raw("[");
+        for (std::size_t i = 0; i < t.atm_airbases.size(); ++i) {
+            if (i) w.raw(",");
+            w.raw("\n      ");
+            ObjWriter ab(w, "      ");
+            ab.num("id", t.atm_airbases[i].id_num);
+            ab.key("schedule");
+            w.raw("[");
+            for (std::size_t b = 0; b < t.atm_airbases[i].schedule.size(); ++b) {
+                if (b) w.raw(", ");
+                w.number(t.atm_airbases[i].schedule[b]);
+            }
+            w.raw("]");
+        }
+        if (!t.atm_airbases.empty()) w.raw("\n    ");
+        w.raw("]");
+
+        o.key("atm_requests");
+        w.raw("[");
+        for (std::size_t i = 0; i < t.atm_requests.size(); ++i) {
+            const auto& rq = t.atm_requests[i];
+            if (i) w.raw(",");
+            w.raw("\n      ");
+            ObjWriter rqo(w, "      ");
+            rqo.num("mission", rq.mission);
+            rqo.num("who", rq.who);
+            rqo.num("tot", rq.tot);
+            rqo.num("priority", rq.priority);
+            rqo.num("aircraft", rq.aircraft);
+            rqo.num("target_num", rq.target_num);
+            rqo.num("requester_num", rq.requester_num);
+        }
+        if (!t.atm_requests.empty()) w.raw("\n    ");
+        w.raw("]");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Objective — the mirror of parse_objective().
+// ---------------------------------------------------------------------------
+void emit_objective(Writer& w, const ObjectiveState& o) {
+    ObjWriter obj(w, "      ");
+    obj.num("type", o.type);
+    obj.num("objective_type", o.objective_type);
+    obj.num("id_num", o.id_num);
+    obj.num("id_creator", o.id_creator);
+    obj.num("entity_type", o.entity_type);
+    obj.num("x", o.x);
+    obj.num("y", o.y);
+    obj.numf("z", o.z);
+    obj.num("owner", o.owner);
+    obj.num("priority", o.priority);
+    obj.num("nameid", o.nameid);
+    obj.num("camp_id", o.camp_id);
+    obj.num("obj_flags", o.obj_flags);
+    obj.num("supply", o.supply);
+    obj.num("fuel", o.fuel);
+    obj.num("losses", o.losses);
+    obj.num("last_repair", o.last_repair);
+    obj.num("first_owner", o.first_owner);
+    obj.num("parent_id", o.parent_id);
+
+    obj.key("fstatus");
+    emit_uint_vec(w, o.fstatus);
+
+    obj.boolean("has_radar", o.has_radar);
+    if (o.has_radar) {
+        obj.key("detect_ratio");
+        w.raw("[");
+        for (int i = 0; i < 8; ++i) {
+            if (i) w.raw(", ");
+            w.number(static_cast<double>(o.detect_ratio[i]));
+        }
+        w.raw("]");
+    }
+    obj.numf("radar_range_km", o.radar_range_km);
+    obj.str("radar_name", o.radar_name);
+    obj.num("radar_type_idx", o.radar_type_idx);
+
+    obj.key("links");
+    w.raw("[");
+    for (std::size_t i = 0; i < o.links.size(); ++i) {
+        const auto& l = o.links[i];
+        if (i) w.raw(",");
+        w.raw("\n        ");
+        ObjWriter lo(w, "        ");
+        lo.num("n", l.neighbor_num);
+        lo.num("c", l.neighbor_creator);
+        lo.boolean("road", l.is_road);
+        lo.boolean("rail", l.is_rail);
+        lo.key("costs");
+        w.raw("[");
+        for (int ci = 0; ci < 8; ++ci) {
+            if (ci) w.raw(", ");
+            w.number(l.costs[ci]);
+        }
+        w.raw("]");
+    }
+    if (!o.links.empty()) w.raw("\n      ");
+    w.raw("]");
+
+    // --- theater static-data enrichment ---
+    obj.str("class_name", o.class_name);
+    obj.num("features_count", o.features_count);
+    obj.num("radar_feature", o.radar_feature);
+    obj.num("deag_distance", o.deag_distance);
+    obj.num("pt_data_index", o.pt_data_index);
+    // The wire key is "detection" (world_json.cpp's emission vocabulary);
+    // the WorldState field is objective_detection[].
+    obj.key("detection");
+    w.raw("[");
+    for (int di = 0; di < 8; ++di) {
+        if (di) w.raw(", ");
+        w.number(o.objective_detection[static_cast<std::size_t>(di)]);
+    }
+    w.raw("]");
+
+    obj.key("ground_layout");
+    w.raw("[");
+    for (std::size_t i = 0; i < o.ground_layout.size(); ++i) {
+        const auto& g = o.ground_layout[i];
+        if (i) w.raw(",");
+        w.raw("\n        ");
+        ObjWriter go(w, "        ");
+        go.num("type", g.type);
+        go.num("count", g.count);
+        go.num("runway_num", g.runway_num);
+        go.num("ltrt", g.ltrt);
+        go.numf("heading_deg", g.heading_deg);
+        go.key("points");
+        w.raw("[");
+        for (std::size_t p = 0; p < g.points.size(); ++p) {
+            if (p) w.raw(",");
+            w.raw("\n          ");
+            ObjWriter po(w, "          ");
+            po.numf("x", g.points[p].x);
+            po.numf("y", g.points[p].y);
+            po.num("type", g.points[p].type);
+            po.num("flags", g.points[p].flags);
+        }
+        if (!g.points.empty()) w.raw("\n        ");
+        w.raw("]");
+    }
+    if (!o.ground_layout.empty()) w.raw("\n      ");
+    w.raw("]");
+
+    obj.key("features");
+    w.raw("[");
+    for (std::size_t i = 0; i < o.features.size(); ++i) {
+        const auto& f = o.features[i];
+        if (i) w.raw(",");
+        w.raw("\n        ");
+        ObjWriter fo(w, "        ");
+        fo.num("index", f.index);
+        fo.num("flags", f.flags);
+        fo.num("value", f.value);
+        fo.numf("offset_x", f.offset_x);
+        fo.numf("offset_y", f.offset_y);
+        fo.numf("offset_z", f.offset_z);
+        fo.num("facing", f.facing);
+        fo.str("name", f.name);
+        fo.num("hit_points", f.hit_points);
+        fo.num("repair_time", f.repair_time);
+        fo.num("priority", f.priority);
+        fo.num("feat_flags", f.feat_flags);
+        fo.num("radar_type", f.radar_type);
+        // damage_state is DERIVED from fstatus at parse time — not emitted.
+    }
+    if (!o.features.empty()) w.raw("\n      ");
+    w.raw("]");
+}
+
+// ---------------------------------------------------------------------------
+// Unit — the mirror of parse_unit().
+// ---------------------------------------------------------------------------
+void emit_unit(Writer& w, const UnitState& u) {
+    ObjWriter uo(w, "      ");
+    uo.num("type", u.type);
+    // f4::entities::unit_class_name() speaks the parse's exact vocabulary
+    // (including "unknown" for UnitClass::Unknown — the parse's else-branch
+    // maps it back), so the round-trip is exact for every class value.
+    uo.str("unit_class", f4::entities::unit_class_name(u.unit_class));
+    uo.num("unit_subtype", u.unit_subtype);
+    uo.num("domain", u.domain);
+    uo.num("id_num", u.id_num);
+    uo.num("id_creator", u.id_creator);
+    uo.num("roster", u.roster);
+    uo.num("x", u.x);
+    uo.num("y", u.y);
+    uo.numf("z", u.z);
+    uo.num("owner", u.owner);
+    uo.num("dest_x", u.dest_x);
+    uo.num("dest_y", u.dest_y);
+    uo.num("name_id", u.name_id);
+    uo.num("camp_id", u.camp_id);
+    uo.num("entity_type", u.entity_type);
+    uo.num("reinforcement", u.reinforcement);
+    uo.num("wp_count", u.wp_count);
+
+    uo.key("waypoints");
+    w.raw("[");
+    for (std::size_t i = 0; i < u.waypoints.size(); ++i) {
+        const auto& wp = u.waypoints[i];
+        if (i) w.raw(",");
+        w.raw("\n        ");
+        ObjWriter wo(w, "        ");
+        wo.num("x", wp.x);
+        wo.num("y", wp.y);
+        wo.num("z", wp.z);
+        wo.num("arrive", wp.arrive);
+        wo.num("action", wp.action);
+        wo.num("route_action", wp.route_action);
+        wo.num("formation", wp.formation);
+        wo.num("flags", wp.flags);
+        wo.num("target_num", wp.target_num);
+        wo.num("target_creator", wp.target_creator);
+        wo.num("target_building", wp.target_building);
+        wo.num("depart", wp.depart);
+    }
+    if (!u.waypoints.empty()) w.raw("\n      ");
+    w.raw("]");
+
+    uo.num("losses", u.losses);
+    uo.num("supply", u.supply);
+    uo.num("morale", u.morale);
+    uo.num("fatigue", u.fatigue);
+    uo.num("elements", u.elements);
+    uo.num("fuel", u.fuel);
+    uo.num("parent_id", u.parent_id);
+    uo.num("last_move", u.last_move);
+    uo.num("last_combat", u.last_combat);
+    uo.num("heading", u.heading);
+    uo.num("final_heading", u.final_heading);
+    uo.num("position", u.position);
+    uo.num("airbase_id", u.airbase_id);
+    uo.num("specialty", u.specialty);
+    uo.num("aa_kills", u.aa_kills);
+    uo.num("ag_kills", u.ag_kills);
+    uo.num("as_kills", u.as_kills);
+    uo.num("an_kills", u.an_kills);
+    uo.num("missions_flown", u.missions_flown);
+    uo.num("mission_score", u.mission_score);
+    uo.num("total_losses", u.total_losses);
+    uo.num("pilot_losses", u.pilot_losses);
+    uo.num("squadron_patch", u.squadron_patch);
+
+    uo.key("element_ids");
+    w.raw("[");
+    for (std::size_t i = 0; i < u.element_ids.size(); ++i) {
+        if (i) w.raw(", ");
+        w.number(u.element_ids[i]);
+    }
+    w.raw("]");
+
+    if (!u.pilots.empty()) {
+        uo.key("pilots");
+        w.raw("[");
+        for (std::size_t i = 0; i < u.pilots.size(); ++i) {
+            const auto& p = u.pilots[i];
+            if (i) w.raw(",");
+            w.raw("\n        ");
+            ObjWriter po(w, "        ");
+            po.num("id", p.pilot_id);
+            po.num("skill", p.skill);
+            po.num("rating", p.rating);
+            po.num("status", p.status);
+            po.num("aa", p.aa_kills);
+            po.num("ag", p.ag_kills);
+            po.num("as", p.as_kills);
+            po.num("an", p.an_kills);
+            po.num("missions", p.missions_flown);
+        }
+        w.raw("\n      ");
+        w.raw("]");
+    }
+
+    // --- theater static-data enrichment ---
+    uo.str("class_name", u.class_name);
+    uo.num("movement_type", u.movement_type);
+    uo.str("movement_type_name", u.movement_type_name);
+    uo.num("movement_speed", u.movement_speed);
+    uo.num("max_range", u.max_range);
+
+    if (!u.vehicle_groups.empty()) {
+        uo.key("vehicle_groups");
+        w.raw("[");
+        for (std::size_t i = 0; i < u.vehicle_groups.size(); ++i) {
+            const auto& vg = u.vehicle_groups[i];
+            if (i) w.raw(",");
+            w.raw("\n        ");
+            ObjWriter vo(w, "        ");
+            vo.num("group", vg.group);
+            vo.num("vehicle_type", vg.vehicle_type);
+            vo.num("count", vg.count);
+            vo.num("live_count", vg.live_count);
+            vo.str("vehicle_name", vg.vehicle_name);
+            vo.str("vehicle_nctr", vg.vehicle_nctr);
+            vo.num("hit_points", vg.hit_points);
+            vo.num("max_speed", vg.max_speed);
+        }
+        w.raw("\n      ");
+        w.raw("]");
+    }
+
+    uo.key("scores");
+    w.raw("[");
+    for (int si = 0; si < 16; ++si) {
+        if (si) w.raw(", ");
+        w.number(u.unit_class_scores[static_cast<std::size_t>(si)]);
+    }
+    w.raw("]");
+    uo.key("hit_chance");
+    w.raw("[");
+    for (int mi = 0; mi < 8; ++mi) {
+        if (mi) w.raw(", ");
+        w.number(u.unit_hit_chance[static_cast<std::size_t>(mi)]);
+    }
+    w.raw("]");
+    uo.key("weapon_range");
+    w.raw("[");
+    for (int mi = 0; mi < 8; ++mi) {
+        if (mi) w.raw(", ");
+        w.number(u.unit_weapon_range[static_cast<std::size_t>(mi)]);
+    }
+    w.raw("]");
+
+    // --- Flight subclass ---
+    uo.numf("flight_altitude", u.flight_altitude);
+    uo.num("fuel_burnt", u.fuel_burnt);
+    uo.num("time_on_target", u.time_on_target);
+    uo.num("mission_over_time", u.mission_over_time);
+    uo.num("mission_target", u.mission_target);
+    uo.num("loadouts", u.loadouts);
+    if (!u.loadout_stations.empty()) {
+        uo.key("loadout_stations");
+        w.raw("[");
+        for (std::size_t i = 0; i < u.loadout_stations.size(); ++i) {
+            if (i) w.raw(",");
+            w.raw("\n        ");
+            ObjWriter so(w, "        ");
+            so.num("id", u.loadout_stations[i].weapon_id);
+            so.num("count", u.loadout_stations[i].count);
+        }
+        w.raw("\n      ");
+        w.raw("]");
+    }
+    uo.num("mission", u.mission);
+    uo.num("flight_priority", u.flight_priority);
+    uo.num("mission_id", u.mission_id);
+    uo.num("eval_flags", u.eval_flags);
+    uo.num("package_id", u.package_id);
+    uo.num("squadron_id", u.squadron_id);
+    uo.num("callsign_id", u.callsign_id);
+    uo.num("callsign_num", u.callsign_num);
+
+    // --- Package subclass ---
+    uo.num("wait_cycles", u.wait_cycles);
+    uo.num("interceptor_id", u.interceptor_id);
+    uo.num("awacs_id", u.awacs_id);
+    uo.num("jstar_id", u.jstar_id);
+    uo.num("ecm_id", u.ecm_id);
+    uo.num("tanker_id", u.tanker_id);
+
+    // B.3: the ATM mission request that produced the package (v71 saves).
+    if (u.request_present) {
+        uo.key("mis_request");
+        ObjWriter mo(w, "        ");
+        mo.num("mission", u.request_mission);
+        mo.num("tot", u.request_tot);
+        mo.num("priority", u.request_priority);
+        mo.num("action_type", u.request_action_type);
+        mo.num("target_num", u.request_target_num);
+        mo.num("target_creator", u.request_target_creator);
+        mo.num("requester_num", u.request_requester_num);
+    }
+}
+
+} // namespace
+
+// ---------------------------------------------------------------------------
+// The WorldState document.
+// ---------------------------------------------------------------------------
+std::string WorldState::to_json_string() const {
+    f4::json::Writer w;
+
+    {
+        ObjWriter top(w, "  ");
+        top.num("version", version);
+        top.str("theater", theater);
+        top.str("terrain_file", terrain_file);
+
+        // The campaign object — WITH the teams array nested inside it
+        // (the same shape cam2json emits and load_from_string walks).
+        top.key("campaign");
+        {
+            ObjWriter c(w, "    ");
+            c.num("current_time", campaign.current_time);
+            c.num("te_start_time", campaign.te_start_time);
+            c.num("te_time_limit", campaign.te_time_limit);
+            c.num("te_victory_points", campaign.te_victory_points);
+            c.num("te_type", campaign.te_type);
+            c.num("te_number_teams", campaign.te_number_teams);
+            c.num("te_team", campaign.te_team);
+            c.num("te_flags", campaign.te_flags);
+            c.num("bullseye_x", campaign.bullseye_x);
+            c.num("bullseye_y", campaign.bullseye_y);
+            c.num("bullseye_name", campaign.bullseye_name);
+            c.num("last_resupply", campaign.last_resupply);
+            c.num("last_repair", campaign.last_repair);
+            c.num("last_reinforcement", campaign.last_reinforcement);
+            c.key("te_number_aircraft");
+            emit_int_vec(w, campaign.te_number_aircraft);
+            c.key("te_team_pts");
+            emit_int_vec(w, campaign.te_team_pts);
+
+            c.key("teams");
+            w.raw("[");
+            for (std::size_t i = 0; i < teams.size(); ++i) {
+                if (i) w.raw(",");
+                w.raw("\n    ");
+                emit_team(w, teams[i]);
+            }
+            if (!teams.empty()) w.raw("\n    ");
+            w.raw("]");
+        }
+
+        top.key("objectives");
+        {
+            ObjWriter ob(w, "      ");
+            ob.num("count", static_cast<int>(objectives.size()));
+            ob.num("decoded", static_cast<int>(objectives.size()));
+            ob.key("items");
+            w.raw("[");
+            for (std::size_t i = 0; i < objectives.size(); ++i) {
+                if (i) w.raw(",");
+                w.raw("\n");
+                emit_objective(w, objectives[i]);
+            }
+            if (!objectives.empty()) w.raw("\n      ");
+            w.raw("]");
+        }
+
+        top.key("units");
+        {
+            ObjWriter ub(w, "      ");
+            ub.num("count", static_cast<int>(units.size()));
+            ub.num("decoded", static_cast<int>(units.size()));
+            ub.key("items");
+            w.raw("[");
+            for (std::size_t i = 0; i < units.size(); ++i) {
+                if (i) w.raw(",");
+                w.raw("\n");
+                emit_unit(w, units[i]);
+            }
+            if (!units.empty()) w.raw("\n      ");
+            w.raw("]");
+        }
+    }
+
+    w.raw("\n");
+    return w.str();
 }
 
 } // namespace f4::world

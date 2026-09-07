@@ -9419,3 +9419,197 @@ Stage Summary:
   (verify_boundary passes with F4_ENFORCE_BOUNDARY=ON at this commit).
 - task59-renderer-gltf-rewire.patch placed in repo root; temp/KoreaObj.* deletion is
   NOT in the patch — delete temp/ manually (or keep; it only affects disk space).
+
+---
+Task ID: 61 (F4 repo — M4 verification + closure: the BVR intercept acceptance earned, complete)
+Agent: main (Super Z)
+Task: Verify the `bvr stuff` commit (a27401b) against Docs/COMBAT_CHAIN_M4_PLAN.md's
+acceptance criteria (§5), fix what verification caught, close the plan, and
+produce the sync artifact (patch) for the user.
+
+Work Log:
+- SANDBOX: fresh clone of origin/main (a27401b); headless configure (g++ 14.2.0,
+  cmake 4.4.3 via pip, renderer/viewer/model-viewer/scenario-player OFF,
+  Release). Boundary verifier PASSES at configure. Built
+  test_bvr_intercept_harness + bvr_intercept_qc (178 targets).
+- VERIFICATION FAILED 3 of 7 — three real rig defects:
+  (1) FightAliveFiresWhenNoDetection + HoldFireDetectsLocksButDoesNotFire
+  aborted at scenario load: the synthetic scenarios embedded the
+  unsubstituted @F4_AIRCRAFT_CONFIG@ CMake placeholder (these are written
+  at test runtime to temp files — configure_file never sees them) and no
+  vis_type_index, so load_scenario's vis_type_index > 0 validation aborted.
+  (2) RejectsNonCombatScenario got the WRONG failure class: run_pass_
+  loads the scenario (which requires >= 1 aircraft) BEFORE the
+  combat.enabled check, so the minimal non-combat scenario aborted with
+  "no aircraft defined" — the QC tool would exit 1, not the contracted 2.
+  (3) HoldFire never reached STT: the synthetic hold-fire scenario had no
+  waypoints; A/B verified the brain's combat ladder needs an active route
+  (no-waypoints → detect-but-never-STT, alive=STALL; with-waypoints →
+  RwrLock at ~5 s).
+- FIX (harness): execute() pre-scans the raw scenario JSON (f4-json Reader,
+  best-effort — parse problems defer to run_pass_'s authoritative load
+  error) and refuses combat.enabled == false BEFORE any per-run load
+  validation. The abort_reason keeps the stable "scenario combat.enabled
+  is false" prefix (the QC tool's exit-2 contract). The post-load check
+  stays (defense in depth). f4-json include added (f4-simulation already
+  links it PUBLIC).
+- FIX (test rig): f16_config_path() helper (the test_combat_integration
+  pattern: env F4_GENERATED_FIXTURES_DIR or compile definition,
+  generic_string() for JSON-safe forward slashes); synthetic scenarios now
+  carry the real fixture path + aircraft_name F-16C_50 + vis_type_index
+  1052 + initial_fuel_lbs + the airfield block (scenario validation
+  requires a 2-point taxi_route) + waypoints (FAR_NORTH, mirroring the
+  shipped template). hold_fire set on BOTH aircraft: the verdicts are
+  fight-wide — a live bandit acquires and kills the weapons-tight eagle
+  inside the 90 s horizon (verified: 2 × AIM-120C, kill at 74.9 s), which
+  would legitimately flip engagement_completed/kills. GTEST_SKIP when the
+  generated fixture is absent.
+- NEW TEST FreeFalconEmploymentValidation (M4 §5.3 — the acceptance
+  criterion the landed rig skipped): reads the shipped fight from the
+  recorder document (the trace IS the evidence): MAR firing (first-launch
+  range <= 26 NM; measured 6.68 NM), cooldown (>= 4.0 s between a
+  shooter's consecutive shots; measured 8.0 s), shoot-shoot (<= 2 per
+  shooter), crank geometry (the [30,60] deg band ± the plan's own 5 deg
+  tolerance entered between first shot and kill; observed peak 28.4 deg
+  in-process / a 48 -> 28 deg sweep via the QC tool — the tactic eases the
+  offset as the target closes; entity-id-derived fight choreography
+  differs across processes, the determinism certificate is per-process).
+- ACCEPTANCE (§5): test_bvr_intercept_harness 8/8 PASS;
+  bvr_intercept_qc build/scenarios/bvr_intercept.json --horizon-sec 300
+  --runs 2 exits 0 — deterministic=yes (MD5 5cf2df9b0511674de5116461cc830554),
+  engagement=ok, roster=ok, alive=ok — three artifacts written
+  (result/summary/diary); non-combat scenario exits 2 (verified). §5.1/5.2
+  pinned by the test rig; §5.3 by the new employment test; §5.4 replay via
+  FlightRecorder::from_json round-trip (EngagementCompletedHasCorrectAttribution);
+  §5.6 no new library surface (2 files, f4-simulation only).
+- REGRESSION: full headless ctest — 8 failures, ALL pre-existing: verified
+  against the clean a27401b baseline (git stash + targeted rebuild): the 6
+  f4-simulation-side failures (CampaignBridge.DerivesDepartureAltitude,
+  CampaignBridge.SynthesizesForLayoutlessAirbaseObjective,
+  DigiMission.FullLoopTaxiTakeoffNavigateApproachLandParks,
+  DigiMission.FullLoopTrafficPattern,
+  InterceptConvergence.OnGlideslopeFromCenterlineTracksBeam,
+  FcsTracePipelineTest.LandingOnlyProducesTrace) fail identically WITHOUT
+  this task's changes; CmpEncoder.LzssRoundTripOnRealPayload +
+  NearTileDB.MissingArtCachesNegative are in untouched libraries. Zero
+  regressions. (The Task-59-era count was 7; the user's commits since —
+  the textured-terrain work in particular — account for the delta.)
+- DOCS: CHANGES.md Task 61 entry; COMBAT_CHAIN_M4_PLAN.md status header
+  flipped to LANDED with the verification record; this worklog entry.
+  (Ledger note: Task 60 — the viewer install-flow session — recorded only
+  a CHANGES.md entry; its worklog entry was never written. Not backfilled
+  here — this entry covers from 60 onward.)
+
+Stage Summary (Task 61 — M4 LANDED, the acceptance is earned):
+- The M4 contract holds end-to-end: a fight that runs to a verdict with a
+  byte-stable two-pass MD5 certificate, or fails with a named failure
+  class; the QC tool's exit-code table is a verified contract (0 green /
+  1 harness error / 2 combat-disabled refusal).
+- The FreeFalcon employment constants (MAR, cooldown, shoot-shoot, crank)
+  are enforced by the test suite against the recorded fight — the plan's
+  §5.3 gap is closed.
+- Two behavioral facts documented for future tranches: the brain's combat
+  ladder needs an active route (waypoints) to reach STT/BVR —
+  route-less scenarios detect but never engage; and hold_fire must be
+  set per-side when a test asserts fight-wide verdicts.
+- Patch: task61-m4-verification-closure.patch (format-patch, 2 files,
+  text-only) — the user applies/pushes.
+- Next per the queue: Task 62 — the WorldState -> JSON emitter + the
+  mutated-save loop (SAVE_WRITE_PLAN §6.1, the campaign queue head).
+
+---
+Task ID: 62 (F4 repo — WorldState → JSON emitter + the closed save loop, complete)
+Agent: main (Super Z)
+Task: SAVE_WRITE_PLAN §6.1 — the runtime-mutated save path. Land the
+WorldState → JSON emitter (the named "Task 60" deliverable from the
+Task-59 worklog, deferred when the viewer install-flow session took the
+number), close the decode → run → fight → apply → save → reload loop,
+and produce the sync patch.
+
+Work Log:
+- DESIGN: the world-JSON schema is a LOSSY projection of the decode
+  structs (spot_time / spotted / base_flags / initiative / the .tea
+  team-status block / squadron stores[] are not in the schema — verified
+  against world_json.cpp's emission and world_state.cpp's parse).
+  Re-encoding a .cam from the projection alone would ZERO those fields.
+  Design decision: the emitter is a PROJECTION (the runtime's open-format
+  save), and the .cam path diffs the mutated projection against the
+  original over the campaign loop's OWNED fields, overwriting those onto
+  the ORIGINAL decode — struct-faithful by construction. Documented in
+  the emitter's header comment + SAVE_WRITE_PLAN §6.1.
+- EMITTER (f4-world/src/world_state.cpp, +626 lines): WorldState::
+  to_json_string() — ObjWriter owns the comma discipline; every float via
+  Writer::number(double) (%.17g — float→double exact, %g round-trips the
+  double, read_number recovers the float bit-for-bit); the campaign
+  object carries the nested teams array (the parse's shape); objectives/
+  units as {count, decoded, items[]}; deliberate non-emissions documented
+  (terrain body, feature damage_state, detect_ratio when !has_radar, tea
+  fields when !tea_loaded). Reuses f4::entities::unit_class_name() (the
+  parse's exact vocabulary — "unknown" maps back to UnitClass::Unknown).
+- EMITTER TESTS (f4-world/tests/test_world_emit.cpp, 4 tests): real
+  save1 fixture round-trip field-for-field + fixed-point third pass;
+  synthetic edge cases (tea both ways, radar arcs, ground layouts,
+  features with names, waypoints, pilots, vehicle groups, loadout
+  stations, mis_request, atm schedules/requests, Unknown class, >INT32_MAX
+  obj_flags, negative waypoint flags); bit-exact float table; empty world.
+  The equality helper compares every parsed field EXCEPT the derived
+  feature damage_state.
+- LOADER BUG FIXED EN ROUTE: parse_campaign_field's te_number_aircraft/
+  te_team_pts arrays used peek(']') for the empty case without consuming
+  the ']' — any world JSON with an empty "te_number_aircraft": [] threw
+  "expected ','" (latent since the campaign-field parse was written; the
+  emitter's empty-array emission exposed it). Now the standard consume
+  (']') pattern; the whole WorldState family re-verified green (37 tests).
+- SAVE-WRITEBACK (f4-world-convert, save_writeback.hpp/.cpp):
+  ObjectiveSaveMutation (fstatus bytes + optional owner) and
+  UnitSaveMutation (optional<> per owned field — no sentinel collisions
+  with legal values like roster=0xFFFFFFFF) + DerivedSaveMutations;
+  derive_save_mutations(original, mutated) walks BOTH documents with the
+  f4-json Reader and diffs the owned fields (campaign clock/timers/pools
+  diff only when the mutated doc carries them — a synthetic state's
+  missing fields mean "not owned", not "zeroed"); build_campaign_with_
+  mutations() = from_world_json_campaign(ORIGINAL) + campaign mutations
+  → encode_cmp; CamArchive from subfiles_b64 → decode_obj/decode_uni →
+  apply mutations by id_num (loud throw on an unmatched id) →
+  encode_obj/encode_uni → CamWriter assembly (everything else verbatim).
+  Subclass-tail writes are guarded by the record's own unit_class.
+- CLI: json2cam --reencode-all --baseline <original.world.json> — the
+  importer-side half of the flow (the runtime host cannot link
+  world-convert: the boundary).
+- E2E (f4-world-convert/tests/test_save_writeback.cpp, 3 tests, links
+  f4-world + f4-world-convert): identical docs → empty diff; the hand-
+  applied write-back surface (clock +86400, resupply timer, pool attrit,
+  fstatus damage, owner capture, squadron kills, battalion move/decay/
+  heading/last_move) survives the full .cam round-trip (decoded fields
+  asserted individually); empty-diff identity pins encode_obj_payload/
+  encode_uni_payload equality on the real fixture. CLI E2E in the
+  sandbox: cam2json --preserve-subfiles → JSON-edited mutations →
+  json2cam --reencode-all --baseline → cam2json reload — clock 32486400 ✓,
+  fstatus[0]=3 ✓, aa_kills survived ✓.
+- VERIFICATION: full headless ctest 2388 tests — the 7 pre-existing
+  failures only (a strict subset of the Task-61 baseline; NearTileDB
+  passed this run — env-dependent user-side WIP), zero regressions;
+  Debug configure + build of the new targets green (the CI's Debug-first
+  discipline); boundary verifier PASS (no new parser links on the runtime
+  side).
+- DOCS: SAVE_WRITE_PLAN §6.1 → LANDED with the design record, §6.2's
+  remaining-work note updated; CHANGES.md Task 62; this worklog entry.
+
+Stage Summary (Task 62 — the save loop is CLOSED):
+- The runtime's save format is the world JSON (open format, boundary-
+  clean); the importer's json2cam --reencode-all turns a mutated
+  emission back into a FreeFalcon-loadable .cam with struct-faithful
+  fidelity on every field the loop doesn't own.
+- The loop's owned-field surface (C1 + G1) is fully covered: clock,
+  maintenance timers, team pools, squadron counters, objective fstatus +
+  owner, battalion movement/state. A future write-back tranche only adds
+  fields to the diff — the pipeline is done.
+- Stage gates: emitter round-trip (4 tests), save loop E2E (3 tests),
+  2388-test suite green modulo the pre-existing 7, Debug green,
+  boundary PASS.
+- Patch: task62-worldstate-json-emitter.patch (format-patch, 9 files,
+  text-only) — the user applies/pushes.
+- Next per the queue: support flights (tankers/AWACS racetracks — the
+  ATM's FindSupportFlights port) or the real-data tier (FALCON4.WST
+  weapon table via f4-convert; type/aspect RCS tables) — both are
+  documented queues; the save story no longer gates anything.

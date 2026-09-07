@@ -86,3 +86,15 @@ target_compile_definitions(test_campaign_saver PRIVATE
     FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/"
     REPO_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/../../")
 gtest_discover_tests(test_campaign_saver)
+
+# Save-write tranche §6.1: the runtime-mutated save path. Links f4-world
+# (the WorldState the campaign loop mutates) + f4-world-convert (the
+# diff + assembly) — the test IS the host the docs describe. Test
+# executables are boundary-exempt (they test what they link).
+add_executable(test_save_writeback test_save_writeback.cpp)
+target_link_libraries(test_save_writeback PRIVATE GTest::gtest_main
+                                                  f4-world-convert f4-world)
+target_compile_definitions(test_save_writeback PRIVATE
+    FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/"
+    REPO_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/../../")
+gtest_discover_tests(test_save_writeback)

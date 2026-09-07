@@ -12,16 +12,27 @@
 //     MODIFIED campaign: edit current_time / team states / timers in the
 //     JSON, then re-encode. The result loads to the mutated campaign state.
 //
+//   json2cam mutated.world.json out.cam --reencode-all --baseline original.world.json
+//     The §6.1 runtime-mutated save path: the input is a WorldState::
+//     to_json_string() emission (the f4-world emitter — a PROJECTION with
+//     no subfiles_b64), the baseline is the original cam2json
+//     --preserve-subfiles document. The diff over the campaign loop's
+//     owned fields (clock/timers/pools, objective fstatus + owner,
+//     squadron counters + battalion state) drives a struct-faithful
+//     re-encode of the .cmp/.obj/.uni on top of the original decode;
+//     everything else passes through verbatim. See
+//     f4/world_convert/save_writeback.hpp + Docs/SAVE_WRITE_PLAN.md §6.1.
+//
 // The default mode is the byte-identical passthrough (every sub-file's raw
 // bytes pass through from the "subfiles_b64" block). --reencode-cmp replaces
 // only the .cmp sub-file with a freshly encoded one; all other sub-files
-// pass through unchanged. Re-encoding the .obj/.uni/.tea sub-files is the
-// documented follow-on (see Docs/SAVE_WRITE_PLAN.md §6).
+// pass through unchanged.
 
 #include <f4/world_convert/cam_archive.hpp>
 #include <f4/world_convert/cam_writer.hpp>
 #include <f4/world_convert/campaign_json.hpp>
 #include <f4/world_convert/cmp_encoder.hpp>
+#include <f4/world_convert/save_writeback.hpp>
 #include <f4/io/read_file.hpp>
 
 #include <algorithm>
@@ -35,7 +46,7 @@ namespace fs = std::filesystem;
 
 int main(int argc, char** argv) {
     if (argc < 2) {
-        std::cerr << "usage: json2cam <input.world.json> [output.cam] [--reencode-cmp]\n"
+        std::cerr << "usage: json2cam <input.world.json> [output.cam] [--reencode-cmp] [--reencode-all --baseline <original.world.json>]\n"
                      "  Reassembles a .cam from a world JSON produced by\n"
                      "  `cam2json --preserve-subfiles`. The output decodes\n"
                      "  (via cam2json or CamArchive::load) to the identical\n"
@@ -43,19 +54,34 @@ int main(int argc, char** argv) {
                      "  tranche.\n"
                      "  --reencode-cmp: re-encode the .cmp sub-file from the\n"
                      "  \"campaign\" JSON block (modified-save path). Use this\n"
-                     "  to persist a mutated campaign state.\n";
+                     "  to persist a mutated campaign state.\n"
+                     "  --reencode-all --baseline <original.json>: the §6.1\n"
+                     "  runtime-mutated save path — input is a WorldState::\n"
+                     "  to_json_string() emission, baseline is the original\n"
+                     "  cam2json --preserve-subfiles doc; the owned-field diff\n"
+                     "  drives a struct-faithful .cmp/.obj/.uni re-encode.\n";
         return 2;
     }
     const fs::path in = argv[1];
     fs::path out;
+    fs::path baseline;
     bool reencode_cmp = false;
+    bool reencode_all = false;
     for (int i = 2; i < argc; ++i) {
         const std::string a = argv[i];
         if (a == "--reencode-cmp") {
             reencode_cmp = true;
+        } else if (a == "--reencode-all") {
+            reencode_all = true;
+        } else if (a == "--baseline" && i + 1 < argc) {
+            baseline = fs::path(argv[++i]);
         } else if (out.empty() && a.substr(0, 2) != "--") {
             out = fs::path(a);
         }
+    }
+    if (reencode_all && baseline.empty()) {
+        std::cerr << "json2cam: --reencode-all requires --baseline <original.world.json>\n";
+        return 2;
     }
     if (out.empty()) {
         out = in;
@@ -76,7 +102,22 @@ int main(int argc, char** argv) {
         std::string json(raw.begin(), raw.end());
 
         std::vector<uint8_t> cam_bytes;
-        if (reencode_cmp) {
+        if (reencode_all) {
+            // The §6.1 runtime-mutated save path.
+            auto baseline_raw = f4::io::read_file(baseline, "json2cam");
+            std::string baseline_json(baseline_raw.begin(), baseline_raw.end());
+            const auto mut = f4::world_convert::derive_save_mutations(
+                baseline_json, json);
+            cam_bytes = f4::world_convert::build_campaign_with_mutations(
+                baseline_json, mut);
+            std::cerr << "  §6.1 save path: " << mut.objectives.size()
+                      << " objective + " << mut.units.size()
+                      << " unit mutation(s) applied (campaign clock: "
+                      << (mut.campaign.current_time == INT32_MIN
+                              ? std::string("unchanged")
+                              : std::to_string(mut.campaign.current_time))
+                      << ")\n";
+        } else if (reencode_cmp) {
             // Modified-save path: re-encode the .cmp from the campaign JSON
             // block, pass every other sub-file through verbatim.
             const int camp_version = f4::world_convert::read_world_json_version(json);
@@ -136,6 +177,7 @@ int main(int argc, char** argv) {
 
         std::cout << "wrote " << out << " (" << cam_bytes.size()
                   << " bytes) from " << in;
+        if (reencode_all) std::cout << " [reencode-all]";
         if (reencode_cmp) std::cout << " [cmp re-encoded]";
         std::cout << "\n";
         return 0;

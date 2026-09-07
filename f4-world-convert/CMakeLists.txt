@@ -24,6 +24,7 @@ add_library(f4-world-convert STATIC
     src/cmp_encoder.cpp
     src/campaign_json.cpp
     src/campaign_saver.cpp
+    src/save_writeback.cpp
     src/cam_writer.cpp
     src/objective_decoder.cpp
     src/objective_encoder.cpp

@@ -386,6 +386,29 @@ struct WorldState {
     /// Load from an in-memory JSON string (for testing).
     void load_from_string(const std::string& json);
 
+    /// Emit this WorldState back to the world JSON schema (SAVE_WRITE_PLAN
+    /// §6.1 — the runtime-mutated save path). The exact inverse of
+    /// load_from_string() over the typed structs: every field the parser
+    /// reads is emitted, so
+    ///
+    ///     WorldState ws2; ws2.load_from_string(ws.to_json_string());
+    ///
+    /// reproduces `ws` field-for-field (semantic round-trip; pinned by
+    /// test_world_emit.cpp against the real save1.cam-derived fixture and
+    /// synthetic edge cases). The document is a PROJECTION: it carries the
+    /// world-schema fields (the same ones cam2json emits / this loader
+    /// reads), not the decode structs' full wire fidelity — spot_time,
+    /// spotted, base_flags, the .tea team-status block and their kin are
+    /// not part of the world JSON schema and are NOT reconstructible from
+    /// a WorldState. The .cam save path therefore diffs this document
+    /// against the original (f4-world-convert's derive_save_mutations)
+    /// and overwrites ONLY the fields the campaign loop owns on top of
+    /// the original decode — struct-faithful, never projection-faithful.
+    ///
+    /// Terrain is NOT emitted (the terrain_file reference is; the terrain
+    /// JSON lives side-by-side per the world-JSON contract).
+    [[nodiscard]] std::string to_json_string() const;
+
     /// Load the terrain JSON referenced by `terrain_file`. If `base_dir`
     /// is non-empty, the terrain_file path is resolved relative to it
     /// (typically the directory containing the world JSON). Throws on

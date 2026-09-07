@@ -1,8 +1,16 @@
 # Combat Chain — M4: End-to-End BVR Intercept + Replay
 
-> **Status**: Active plan. M1 (f4-weapons), M2 (f4-sensors), M3 (f4-ai combat
-> modules) are LANDED. M4 is the named next deliverable — the first
-> end-to-end combat acceptance artifact.
+> **Status**: LANDED — implemented, verified, closed (Task 61; see CHANGES.md).
+> M1 (f4-weapons), M2 (f4-sensors), M3 (f4-ai combat modules) are LANDED.
+> M4 was the named next deliverable — the first end-to-end combat
+> acceptance artifact — and is now earned: `test_bvr_intercept_harness`
+> 8/8 (including the §5.3 FreeFalcon employment validation), the QC tool
+> exits 0 with all four verdicts green + the two-pass MD5 certificate
+> (and 2 on a non-combat scenario). Verification caught and fixed three
+> rig defects (unsubstituted fixture placeholders in the synthetic
+> scenarios; the non-combat refusal firing the wrong failure class; the
+> no-waypoints fight that never reaches STT) — the record is in
+> CHANGES.md Task 61.
 > **Prerequisite**: M3 (BVRModule / WVRModule / MissileModule / WingmanModule
 > delivered; `BrainComponent` is the M3-arbiter; `attach_combat_event_recorder`
 > wired to all 11 combat bus message types).

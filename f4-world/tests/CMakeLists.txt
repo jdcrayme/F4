@@ -25,6 +25,9 @@ endfunction()
 
 f4_add_test(test_world_state  test_world_state.cpp)
 f4_add_test(test_world_loader test_world_loader.cpp)
+# The §6.1 emitter: WorldState → JSON → WorldState round-trip over the
+# same save1-derived fixture (and synthetic edge cases).
+f4_add_test(test_world_emit   test_world_emit.cpp)
 f4_add_test(test_interface_bridge test_interface_bridge.cpp)
 
 # The asset-pipeline test exercises load_terrain_via_assets() — it links
@@ -40,3 +43,4 @@ gtest_discover_tests(test_world_assets)
 # Ensure the JSON fixture is generated before the state tests run.
 add_custom_target(world_json_fixture ALL DEPENDS ${WORLD_JSON_FIXTURE})
 add_dependencies(test_world_state world_json_fixture)
+add_dependencies(test_world_emit world_json_fixture)
