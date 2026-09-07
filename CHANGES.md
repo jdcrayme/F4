@@ -1,3 +1,146 @@
+## Task 66 — pole-diagnosis program merged onto the PHUG tree; the two diagnoses cross-validated; re-derived CI pole gates
+
+**The pole program (Tasks 63/64) and the upstream PHUG-PLAN program are
+now one tree — and each validated the other's headline finding.** The
+P4.1 inner-loop corrections (kp05 = 1/K_nz, real integrator) reduced the
+Task-63 G-hold aperiodic speed mode 26× (+0.02106 → +0.00115 /s at
+15k/250): the plant+FCS closed map now passes the original stability
+acceptance. STAB-P1 (alt_integral_gain 0.6) re-measures as load-bearing
+against the corrected loop (nav tune 15k/250: +0.017 vs +0.220 with the
+pre-STAB-P1 1.2). The merged tree's test_poles_envelope grows to 5 gates
+(plant stability gate, nav-tune golden + regression gate, a time-domain
+boundedness gate — +25 ft/s kick must stay under 1500 fpm max |dVS|,
+measured 731 — and a default-tune regression bound), with the Task-64
+goldens re-derived and the move explained per the plan's §8.4 protocol
+in Docs/POLE_DIAGNOSIS_RESULTS.md §7.
+
+- **diag_poles --tune**: named cruise tunes (default / nav = the
+  NavigationModule shipping values / nav-linband / approach = the P5.2
+  gate tune), composable with the existing per-knob scales. Measurement
+  note: nav-linband (the M3 linear-band path_gain rescale the nav tune's
+  comment claims but the code never applied) measures WORSE at 15k/250
+  (+0.419 vs +0.017) — at cruise the gamma_corr damper is load-bearing;
+  do not rescale it without the margin campaign.
+- **The default-tune cascade stays marginally unstable** (envelope
+  +0.23..+0.58 /s; wingman/BVR/WVR/missile/collision/ground-avoid fly
+  it) and gain re-hunting is REFUSED by measurement (razor-non-monotonic
+  landscape = the 30-patch-loop signature); the structural fix remains
+  the parked P4.2 TECS margin campaign. The new default-tune gate bounds
+  regression until then.
+- **Cross-verification with the upstream instruments on this tree**:
+  test_p5_stability GREEN (PhugoidDampingCruise, AltitudeCapture); the
+  two disabled P5 gates re-measured and their baselines pinned in the
+  test comments (SpeedHoldStep 46.23 kt overshoot / no settle = upstream
+  M4; approach catch-down cannot hold 160 kt at idle); fm_sysid margin g
+  at the approach point reproduces upstream's §6.3 open question exactly
+  (5.59 @ 0.40 rad/s at amp 0.03) and the amplitude sweep (53.5× @ 0.01
+  → 0.48× @ 1.0, damper live 53.5× vs zeroed 6.2× small-signal) resolves
+  it as amplitude conditioning with the shipped q-damper destabilizing
+  small-signal at the approach config — recorded for the upstream
+  approach margin campaign.
+- Suites on the merged tree: test_eigen 7, test_fcs 20, test_eom 10,
+  test_flight_model 9, test_control_loops 3, test_air_steering 23,
+  test_p5_stability 2 (+2 disabled), test_poles_envelope 5 — all green;
+  the Task 63/64 changes are default-off / tune-level and introduce no
+  behavior change beyond STAB-P1's already-validated 0.6.
+
+## Task 64 — Phase D mode-ID, the pitch-damper refutation, STAB-P1, and the golden-pole CI gate
+
+**Phase D and the first Phase E ablation are executed, one architectural
+fix landed, and the plan's pole methodology is now a CI contract.** Four
+new findings (F7–F11 in `Docs/POLE_DIAGNOSIS_RESULTS.md §6`):
+
+- **Phase D (`scripts/trace_modes.py`)**: Welch PSD + cross-spectrum phase +
+  envelope doubling time for any recorder/verify CSV. On the committed
+  approach verify trace the oscillation is closed-loop (α leads VS +138°,
+  NOT the bare-plant α≈const signature); T = 45 s full-window / 17.5 s
+  growth-phase.
+- **The plan §3.1 FCS pitch speed damper is REFUTED by measurement.**
+  Implemented as specified (washout-referenced G-command injection,
+  `--sd-gain/--sd-tau`, default OFF) and swept: k > 0 worsens the aperiodic
+  modes at every τ tried and creates an unstable oscillatory pair at the
+  approach condition. Pitch cannot damp this mode — consistent with the
+  plan §9.2 phase budget. Kept default-off as documented negative evidence.
+- **STAB-P1 (plan §7 F-3 applied to L1): `alt_integral_gain` 1.2 → 0.6.**
+  The AI-closed altitude-integral loop was the last measured cruise
+  instability (Re +0.1035/s, t2x 6.7 s, ai_altI-dominated — Task 63 F6).
+  The pole scan located the optimum non-monotonically (×0.25 is worse than
+  ×0.5); at 0.6 the worst sub-1-rad/s mode is +0.0015/s (neutral) and the
+  time-domain mean VS error after a speed perturbation improves 8×.
+- **Phase E ablation matrix (first pass)**: the QIL leak (+0.080) and the
+  q-damper (+0.061, contrary to the plant-only "no q participation")
+  EARN their place at cruise; the bias feedback earns +0.048; shedding is a
+  cruise no-op. At the (low-confidence, cruise-law-proxy) approach
+  condition the signs FLIP: leak and shedding are harmful, the FCS speed
+  damper helps (+0.244 → +0.066). Condition-dependent patches, now
+  measurable per condition.
+- **The residual T≈12.7 s limit cycle** (α/nz in phase, amplitude-
+  independent, pstick grazing the pitch clamp) is sustained by none of the
+  band-aids (leak/shedding/window/alpha-rate/q-damper all ablate to no
+  change); the VS slew limiter modulates it (×4 slew → −43% amplitude).
+  Describing-function work is the documented next step — not another damper.
+
+Also fixed: the pre-existing `--ai --verify` segfault (the perturbation
+loop indexed the packer entries with the full-state size, reading 4 entries
+past the vector); `worst_slow_Re_1s` added to the sweep CSV so AI-closed
+runs are not dominated by slew-limiter artifacts (Re 1e2–1e3).
+
+- **`scripts/trace_modes.py`** — Phase D tool (scipy Welch/csd/Hilbert).
+- **`aircraft_state.hpp` / `fcs.cpp`** — speed damper (default off), leak/
+  shed ablation scales (default 1.0 = stock), bumpless washout re-seed in
+  `trim()`.
+- **`diag_poles.cpp`** — the knobs above + `--altI/vs/thrI-gain-scale`,
+  `--vs-window/alpha-rate/vs-slew-scale`, `--verify-amp`; segfault fix.
+- **`air_steering.hpp`** — STAB-P1 alt_integral_gain 0.6 with the measured
+  evidence in the header comment.
+- **`test_poles_envelope.cpp`** — 3 CI tests driving `diag_poles`: plant
+  golden +0.02106 ±5%, AI-cruise slow-mode gate ≤ +0.005 and golden
+  +0.00151. Regression proof: the plant 18-condition sweep reproduces the
+  Task-63 CSV to 0.0% with all changes default-off.
+- **Evidence**: `Docs/diagnostics/phaseB2_plant_default_poles.csv`,
+  `phaseB2_ai_default_poles.csv` (living AI envelope baseline),
+  `phaseE_ablation.csv`. Findings: `Docs/POLE_DIAGNOSIS_RESULTS.md §6`.
+
+## Task 63 — pole-based flight-control diagnosis (Phase A–C executed)
+
+**The persistent "phugoid" is now a measured pole, not a symptom.** The new
+`diag_poles` tool (trim → finite-difference linearization → eigenvalues of
+the major-frame map) shows the plant+FCS closed map carries an aperiodic,
+airspeed-dominated UNSTABLE mode at every one of 18 trims across the
+envelope (Re +0.004…+0.29, doubling 3–144 s, eigenvector 92–99% vt) — and
+that the frozen-alpha airframe is positively damped everywhere (S_u < 0,
+predicted zeta +0.07…+0.17, INCLUDING approach config). The back-side-of-the-
+drag-curve hypothesis and the alpha-bias feedback hypothesis were both
+tested and REFUTED; the mechanism is the G-hold law itself (lift pinned to
+the weight component through an integrator + lag chain converts the drag
+damping into positive feedback via the alpha/induced-drag path), which also
+explains why the Tranche-42 q-damper is inert against it (the mode has no q
+participation) and why the integrator-leak/shedding/speed_damp band-aids
+keep being needed.
+
+- **`f4-math/eigen_real.hpp`** — dense real nonsymmetric eigensolver
+  (balance → Hessenberg → shifted complex QR → inverse-iteration vectors);
+  `test_eigen.cpp` (7 tests) validates known spectra + eigenpair residuals.
+- **`f4-math/filters.hpp`** — additive diagnosis hooks only: `prime()` /
+  `prev_input()` / lead-lag history getters so a linearization can inject
+  exact filter states (no behavior change; existing paths untouched).
+- **`f4-flight-model/diag_poles.cpp`** (target `diag_poles`) — nested
+  fixed-point trim (outer secant on throttle, inner square Newton on 24
+  carried states), central-difference Jacobian with automatic dead-state
+  pruning, speed-stability map, loop-at-a-time knobs (`--freeze-bias`,
+  `--qdamp-scale`, `--ai`, `--ai-gain-scale`), time-domain `--verify`.
+- **`fcs.cpp` / `aircraft_state.hpp`** — `debug_bias_freeze` knob (default
+  off, zero cost) to break the alpha-bias' sensed feedback for the L3 loop
+  measurement; **`air_steering.hpp`** — `debug_get/set_integrators` for the
+  AI closed-loop linearization (default behavior unchanged).
+- **Evidence**: `Docs/diagnostics/phaseB_plant_poles.csv` (18-condition
+  sweep), `Docs/diagnostics/verify_approach_200kts_gearflaps.csv` (time
+  domain: +25 ft/s perturbation diverges to +1,736 fpm mean balloon,
+  ±2,224 fpm swings — matching the linear poles). Findings and the revised
+  fix direction (FCS-internal speed damper entering V-dot; TECS) in
+  `Docs/POLE_DIAGNOSIS_RESULTS.md`; plan in
+  `Docs/FLIGHT_CONTROL_POLE_DIAGNOSIS_PLAN.md`.
+
 ## Task 62 — the WorldState → JSON emitter + the closed save loop (§6.1 LANDED)
 
 **The decode → run → fight → apply → save → reload loop is closed.** A

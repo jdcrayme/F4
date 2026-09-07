@@ -83,6 +83,16 @@ public:
         u_prev_ = y;
     }
 
+    // --- Diagnosis hooks (pole tool / linearization; no behavior change) ---
+    // Prime BOTH history values exactly, so a linearization can inject a
+    // consistent filter state (reset() forces u_prev_ == y_prev_, which is
+    // wrong for a general operating point).
+    void prime(double y, double u) noexcept {
+        y_prev_ = y;
+        u_prev_ = u;
+    }
+    [[nodiscard]] double prev_input() const noexcept { return u_prev_; }
+
     [[nodiscard]] double output() const noexcept { return y_prev_; }
 };
 
@@ -234,6 +244,22 @@ public:
         jstart_ = 0;
     }
 
+    // --- Diagnosis hooks (pole tool / linearization; no behavior change) ---
+    // Prime the full two-step history AND mark the bootstrap complete
+    // (jstart_ = 2), so the first step() after priming uses the steady-state
+    // history-shift path exactly as an in-flight filter does.
+    void prime(double y_nm1, double y_nm2, double u_nm1, double u_nm2) noexcept {
+        y_nm1_ = y_nm1;
+        y_nm2_ = y_nm2;
+        u_nm1_ = u_nm1;
+        u_nm2_ = u_nm2;
+        jstart_ = 2;
+    }
+    [[nodiscard]] double output_prev1() const noexcept { return y_nm1_; }
+    [[nodiscard]] double output_prev2() const noexcept { return y_nm2_; }
+    [[nodiscard]] double input_prev1() const noexcept { return u_nm1_; }
+    [[nodiscard]] double input_prev2() const noexcept { return u_nm2_; }
+
     [[nodiscard]] double output() const noexcept { return y_nm1_; }
 };
 
@@ -289,6 +315,13 @@ public:
         y_prev_ = y;
         u_prev_ = y;
     }
+
+    // --- Diagnosis hooks (pole tool / linearization; no behavior change) ---
+    void prime(double y, double u) noexcept {
+        y_prev_ = y;
+        u_prev_ = u;
+    }
+    [[nodiscard]] double prev_input() const noexcept { return u_prev_; }
 
     [[nodiscard]] double output() const noexcept { return y_prev_; }
 };

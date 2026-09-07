@@ -260,6 +260,13 @@ TEST(P5Stability, PhugoidDampingCruise) {
 // authority or widen the gate) is the follow-up. Enabling this gate now
 // would just encode a guess. Run manually with
 //   --gtest_also_run_disabled_tests --gtest_filter=*SpeedHoldStep*
+//
+// Task 66 baseline re-measurement on the PHUG-merged tree (1x timestep):
+// +25 kt step -> overshoot 46.23 kt, final v 371.2 kt vs the 325 target,
+// no settle in-window; -25 kt step -> no settle. Unchanged vs the P4-era
+// numbers: consistent with LOOP_MARGIN_REPORT M4 (the L4 speed loop has
+// no authority at the 250-kt cruise trim: throttle floor > trim throttle).
+// The structural fix is the parked P4.2 TECS throttle loop, NOT a gate.
 // ---------------------------------------------------------------------------
 TEST(P5Stability, DISABLED_SpeedHoldStep) {
     for (const double dt_mult : {1.0, 4.0}) {

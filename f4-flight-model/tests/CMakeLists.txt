@@ -50,6 +50,29 @@ target_compile_definitions(diag_trajectory PRIVATE
     F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}")
 add_dependencies(diag_trajectory convert_golden_fixtures)
 
+# Pole-based diagnosis tool (FLIGHT_CONTROL_POLE_DIAGNOSIS_PLAN.md Phase A-C):
+# trim -> finite-difference linearization -> eigenvalues, plus the
+# speed-stability map and the loop-at-a-time knobs (--freeze-bias,
+# --qdamp-scale, --ai). Not a GoogleTest — standalone diagnostic executable.
+add_executable(diag_poles diag_poles.cpp)
+target_link_libraries(diag_poles PRIVATE f4-flight-model f4-ai)
+target_compile_definitions(diag_poles PRIVATE
+    F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}")
+add_dependencies(diag_poles convert_golden_fixtures)
+
+# Golden-pole CI regression (plan §8.4, Task 64): drives the diag_poles
+# binary end-to-end and asserts the golden eigenvalues at the canonical
+# conditions (plant baseline unchanged; AI-closed slow-mode stability gate
+# for STAB-P1). Golden values live in the test source with tolerance; the
+# evidence CSVs live in Docs/diagnostics/.
+add_executable(test_poles_envelope test_poles_envelope.cpp)
+target_link_libraries(test_poles_envelope PRIVATE GTest::gtest_main f4-flight-model)
+target_compile_definitions(test_poles_envelope PRIVATE
+    DIAG_POLES_BINARY="$<TARGET_FILE:diag_poles>"
+    F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}")
+add_dependencies(test_poles_envelope diag_poles convert_golden_fixtures)
+gtest_discover_tests(test_poles_envelope)
+
 target_compile_definitions(test_flight_model PRIVATE
     F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}")
 target_compile_definitions(test_flight_model_component PRIVATE

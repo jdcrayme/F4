@@ -1,0 +1,12 @@
+case,alt,kcas,config,knobs,worst_slow_Re_1s,trim_residual,trim_converged
+250clean_base,15000,250,clean,"stock",0.00151,2.38e+02,yes
+250clean_leak0,15000,250,clean,"leak-scale=0",0.08178,2.36e+02,yes
+250clean_shed0,15000,250,clean,"shed-scale=0",0.00151,2.38e+02,yes
+250clean_leak0shed0,15000,250,clean,"leak-scale=0;shed-scale=0",0.08178,2.36e+02,yes
+250clean_qdamp0,15000,250,clean,"qdamp-scale=0",0.06222,2.09e+02,yes
+250clean_freezebias,15000,250,clean,"freeze-bias",0.04943,2.38e+02,yes
+250clean_sd0.002,15000,250,clean,"sd-gain=0.002",0.00380,5.75e+03,NO
+160gf_base,5000,160,gearflaps,"stock",0.24396,1.18e+04,NO
+160gf_leak0,5000,160,gearflaps,"leak-scale=0",0.02123,2.96e+03,NO
+160gf_shed0,5000,160,gearflaps,"shed-scale=0",0.09976,7.26e+02,NO
+160gf_sd0.002,5000,160,gearflaps,"sd-gain=0.002",0.06644,1.21e+03,NO

@@ -497,6 +497,9 @@ bool FlightModel::trim() {
         state_.aero.alpha = zero_angle();
         state_.fcs.pitchAlphaLag.reset(0.0);
         state_.fcs.pitchIntegral.reset(0.0);
+        // Speed-damper washout: re-seed at the current speed (bumpless).
+        state_.fcs.speedTrimVt = state_.kin.vt;
+        state_.fcs.speedTrimVtInit = true;
         state_.fcs.aoacmd = zero_angle();
         state_.trimming = false;
         return true;  // "converged" trivially — 0 alpha at 0 speed
@@ -590,6 +593,9 @@ bool FlightModel::trim() {
             state_.fcs.alphaBiasTrim.reset(to_degrees(state_.aero.alpha));
             state_.fcs.pitchAlphaLag.reset(0.0);
             state_.fcs.pitchIntegral.reset(0.0);
+            // Speed-damper washout: re-seed at the current speed (bumpless).
+            state_.fcs.speedTrimVt = state_.kin.vt;
+            state_.fcs.speedTrimVtInit = true;
             state_.fcs.aoacmd = state_.aero.alpha;
             state_.trimming = false;
             return true;

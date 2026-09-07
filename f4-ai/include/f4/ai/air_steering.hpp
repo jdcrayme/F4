@@ -148,7 +148,7 @@ public:
                                        ///< in digi_full_mission trace t=200-670).
                                        ///< 6.0 halves the demand and lets the
                                        ///< path_gain damping dominate.
-    double alt_integral_gain{1.2};     ///< STAB-E7: leaky integral on altitude
+    double alt_integral_gain{0.6};     ///< STAB-E7: leaky integral on altitude
                                        ///< error (fpm of extra VS command per
                                        ///< ft of sustained error, per second).
                                        ///< Kills the P-only steady-state beam
@@ -157,6 +157,23 @@ public:
                                        ///< because the proportional cascade
                                        ///< undershoots and nothing integrates
                                        ///< the residual out).
+                                       ///< STAB-P1 (Task 64, pole-based F-3):
+                                       ///< halved 1.2 -> 0.6. The AI-closed
+                                       ///< linearization at the canonical cruise
+                                       ///< trim had the alt-integral loop
+                                       ///< crossover at ~0.125 rad/s with the
+                                       ///< integral leak pole (0.1/s) inside its
+                                       ///< bandwidth — measured unstable modes
+                                       ///< Re +0.1035/s (t2x 6.7 s) and
+                                       ///< +0.0048/s (t2x 144 s), both
+                                       ///< ai_altI-dominated (docs/
+                                       ///< diagnostics/phaseB2 CSVs). At 0.6 the
+                                       ///< crossover drops to ~0.06 rad/s and the
+                                       ///< worst sub-1-rad/s mode is +0.0015/s
+                                       ///< (within trim noise); time-domain mean
+                                       ///< VS error after a speed perturbation
+                                       ///< improves 8x. This is plan §7 F-3
+                                       ///< (bandwidth separation) applied to L1.
     double alt_integral_max{500.0};    ///< STAB-E7: clamp on the altitude integral
                                        ///< (fpm). Bounds the correction so a
                                        ///< transient can't wind it to the VS cap.
@@ -421,6 +438,31 @@ public:
     /// reset_integrators() — it is a diagnostic echo, not control state.
     [[nodiscard]] const AirSteerDebug& last_debug() const noexcept {
         return last_debug_;
+    }
+
+    // --- Diagnosis hooks (pole tool / linearization; no behavior change) ---
+    // The closed-loop integrator states ARE part of the aircraft's dynamic
+    // state (they carry memory across ticks inside the control loop). The
+    // pole-analysis tool must read and inject them to linearize the full
+    // AI + FCS + airframe loop exactly.
+    struct DebugIntegrators {
+        double speed_integral;         ///< speed-channel integral accumulator
+        double alt_integral;           ///< altitude-channel integral (fpm)
+        double vs_target;              ///< slew-limiter state (fpm)
+        double prev_alpha_est;         ///< previous alpha estimate (rad)
+        double approach_alt_integral;  ///< approach-mode throttle integral
+    };
+    [[nodiscard]] DebugIntegrators debug_get_integrators() const noexcept {
+        return {speed_integral_, alt_integral_, vs_target_,
+                prev_alpha_est_, approach_alt_integral_};
+    }
+    void debug_set_integrators(const DebugIntegrators& v) noexcept {
+        speed_integral_ = v.speed_integral;
+        alt_integral_ = v.alt_integral;
+        vs_target_ = v.vs_target;
+        prev_alpha_est_ = v.prev_alpha_est;
+        approach_alt_integral_ = v.approach_alt_integral;
+
     }
 
 private:

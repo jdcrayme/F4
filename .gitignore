@@ -56,3 +56,4 @@ Data/**
 
 # Generated from TestCamp.cam by cam2json (regenerable on demand)
 /TestCamp.world.json
+build*.log

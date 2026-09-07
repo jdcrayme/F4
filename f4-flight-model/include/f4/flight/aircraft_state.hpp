@@ -297,6 +297,50 @@ struct FcsState {
 
     // --- Damper gains (from limiters) ---
     double plsdamp{1.0}, rlsdamp{1.0}, ylsdamp{1.0};
+
+    // --- Diagnosis hooks (pole tool; default off, zero cost when off) ---
+    // FLIGHT_CONTROL_POLE_DIAGNOSIS_PLAN.md Phase C, loop L3: the 1-G alpha
+    // bias in runPitch feeds back SENSED cos(gamma), cos(mu) and qsom. With
+    // debug_bias_freeze = true the bias formula uses the frozen values below
+    // instead, breaking that feedback path so loop-at-a-time pole analysis
+    // can measure its contribution (linearize with the flag off vs on; the
+    // eigenvalue difference is the bias loop's effect).
+    bool   debug_bias_freeze{false};
+    double debug_bias_cosgam{1.0};
+    double debug_bias_cosmu{1.0};
+    double debug_bias_qsom{0.0};
+    // Phase E ablation knobs (pole tool; default 1.0 = stock behavior).
+    // debug_leak_scale scales the QIL integrator leak (1/120 s); 0 = leak
+    // off. debug_shed_scale scales the STAB-E51 integrator shedding rate.
+    double debug_leak_scale{1.0};
+    double debug_shed_scale{1.0};
+
+    // --- Speed damper (Task 64; plan §7 F-2 step 1) ---
+    // The G-hold law pins lift to weight at every speed, so induced drag
+    // FALLS as speed rises (CL ~ 1/V^2 at L=W) and the closed plant has an
+    // anti-damped aperiodic speed mode at every trim (measured: Re
+    // +0.004..+0.29 /s, 92-99% vt participation — Docs/POLE_DIAGNOSIS_
+    // RESULTS.md F1-F4). The damper re-adds V-dot damping through the G
+    // command: speed above its slowly-adapting reference raises the
+    // commanded (and hence held) G, which raises induced drag (dD/dL > 0 —
+    // true V-dot damping) and tilts the flightpath up (phugoid exchange
+    // stiffness). The G command is the only pitch injection the G-loop PI
+    // cannot reject; alpha-channel and pitch-rate-channel injections were
+    // ruled out by Phase C (PI rejection; zero q participation).
+    //
+    // The reference speed is NOT a pilot/MISSION value: it is a first-order
+    // low-pass of vt (washout). The damper therefore acts only on
+    // excursions in the phugoid band, fades at DC (leaving trim authority
+    // to the bias/PI/throttle controllers), and needs no scheduling.
+    // No gear/AGL gates: those binary gates are why the Tranche-42
+    // q-damper was absent exactly where the plant is worst (approach).
+    // speedDampGain units: G per ft/s of washed-out speed deviation.
+    // 0.0 = damper off (stock behavior; the tuned production value is set
+    // by the pole sweep, see test_poles_envelope).
+    double speedDampGain{0.0};
+    double speedDampTau{60.0};      // washout time constant [s]
+    double speedTrimVt{0.0};        // low-passed vt (washout state) [ft/s]
+    bool   speedTrimVtInit{false};  // lazy-seed flag (bumpless start)
 };
 
 // ---------------------------------------------------------------------------

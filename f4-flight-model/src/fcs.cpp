@@ -497,8 +497,18 @@ void FlightControlSystem::runPitch(double dt, double qbar, double qsom,
         // which UNDER-CORRECTED by cos²(bank): at 30° bank it commanded 0.866G
         // instead of 1.155G, the aircraft sank, and the AI cascade compensated
         // through the FCS PI lag → phugoid → speed-brake cycling.
-        const double cosmu_safe = std::max(0.3, cosmu);  // clamp at ~72° bank
-        const double cl_needed = flare_g_factor * GRAVITY * cosgam / (cosmu_safe * qsom)
+        //
+        // debug_bias_freeze (pole tool, Phase C loop L3): when set, use the
+        // frozen trim values instead of the sensed cos(gamma)/cos(mu)/qsom —
+        // this removes the bias' feedback of the flight-path state without
+        // changing the bias' trim VALUE (the frozen values are the trim
+        // values), so the eigenvalue difference vs. the live bias isolates
+        // the L3 loop's contribution to the modes.
+        const double cosmu_safe = std::max(0.3, fcs.debug_bias_freeze
+                                                   ? fcs.debug_bias_cosmu : cosmu);
+        const double cosgam_b = fcs.debug_bias_freeze ? fcs.debug_bias_cosgam : cosgam;
+        const double qsom_b   = fcs.debug_bias_freeze ? fcs.debug_bias_qsom : qsom;
+        const double cl_needed = flare_g_factor * GRAVITY * cosgam_b / (cosmu_safe * qsom_b)
                                + 0.1 * aero.gearPos
                                - clift0 * tefFactor * aux_->CLtefFactor;
         // clalph0 is per-degree, so cl_needed / clalph0 is in degrees.
@@ -634,6 +644,68 @@ void FlightControlSystem::runPitch(double dt, double qbar, double qsom,
         // PHUG-PLAN P0.3: the L1 loop signal actually applied this frame.
         fcs.qDamperTerm = effective_gain * pitch_rate;
     }
+
+    // --- Speed damper (Task 64; plan §7 F-2 step 1; default OFF) ---
+    // The G-hold law pins lift to weight at every speed, so induced drag
+    // FALLS as speed rises (CL ~ 1/V² at L=W) and the closed plant has an
+    // anti-damped aperiodic speed mode at every trim (measured on the
+    // pre-P4.1 loop: Re +0.004..+0.29 /s, 92-99% vt participation —
+    // Docs/POLE_DIAGNOSIS_RESULTS.md F1-F4). Damping must enter V-dot.
+    // The G COMMAND is the only pitch injection the G-loop PI cannot
+    // reject. Adding k·(V − V_lp) to ptcmd raises the commanded (and
+    // hence held) G with speed: the extra induced drag (dD/dL > 0) is
+    // true V-dot damping, and the flightpath tilt (fast → climb) restores
+    // the phugoid exchange stiffness.
+    //
+    // V_lp is a first-order low-pass of vt (the washout state below), so
+    // the damper acts only on phugoid-band excursions and fades at DC —
+    // no reference-speed input, no fight with the bias/PI/throttle trim
+    // authorities, bumpless through mode changes (lazy re-seed).
+    // Contribution clamp bounds the damper's G authority.
+    // Task 64 verdict: REFUTED as a fix on the pre-P4.1 loop (k>0 worsens
+    // the aperiodic modes at every tau; unstable pair at approach) and
+    // kept default-off as documented negative evidence; re-evaluate
+    // against the P4.1 corrected inner loop before any re-enable.
+    if (fcs.speedDampGain > 0.0 && inAir) {
+        if (!fcs.speedTrimVtInit || fcs.speedTrimVt <= 0.0) {
+            fcs.speedTrimVt = vt;  // bumpless seed
+            fcs.speedTrimVtInit = true;
+        }
+        fcs.speedTrimVt += (dt / (fcs.speedDampTau + dt)) * (vt - fcs.speedTrimVt);
+        const double v_dev = vt - fcs.speedTrimVt;
+        ptcmd += std::clamp(fcs.speedDampGain * v_dev, -0.4, 0.4);
+    }
+
+    // --- Speed damper (Task 64; plan §7 F-2 step 1) ---
+    // The G-hold law pins lift to weight at every speed, so induced drag
+    // FALLS as speed rises (CL ~ 1/V² at L=W) and the closed plant has an
+    // anti-damped aperiodic speed mode at every trim (measured: Re
+    // +0.004..+0.29 /s, 92-99% vt participation — Docs/POLE_DIAGNOSIS_
+    // RESULTS.md F1-F4). Damping must enter V-dot. The G COMMAND is the
+    // only pitch injection the G-loop PI cannot reject (an alpha-channel
+    // disturbance is integrated out; the pitch-rate channel has no q
+    // participation — Phase C). Adding k·(V − V_lp) to ptcmd raises the
+    // commanded (and hence held) G with speed: the extra induced drag
+    // (dD/dL > 0) is true V-dot damping, and the flightpath tilt (fast →
+    // climb) restores the phugoid exchange stiffness.
+    //
+    // V_lp is a first-order low-pass of vt (the washout state below), so
+    // the damper acts only on phugoid-band excursions and fades at DC —
+    // no reference-speed input, no fight with the bias/PI/throttle trim
+    // authorities, bumpless through mode changes (lazy re-seed).
+    // Always on in the air: no gear/AGL gates (the q-damper's gates
+    // disable damping exactly where the plant is worst — approach).
+    // Contribution clamp bounds the damper's G authority.
+    if (fcs.speedDampGain > 0.0 && inAir) {
+        if (!fcs.speedTrimVtInit || fcs.speedTrimVt <= 0.0) {
+            fcs.speedTrimVt = vt;  // bumpless seed
+            fcs.speedTrimVtInit = true;
+        }
+        fcs.speedTrimVt += (dt / (fcs.speedDampTau + dt)) * (vt - fcs.speedTrimVt);
+        const double v_dev = vt - fcs.speedTrimVt;
+        ptcmd += std::clamp(fcs.speedDampGain * v_dev, -0.4, 0.4);
+    }
+
     const double error = ground_guard ? 0.0
                         : (ptcmd - (nzcgs - gravity_baseline - gearGravityTerm)) * fcs.kp05;
     // PHUG-PLAN P0.3: the L0 loop input signal (post-kp05, post-guard).
