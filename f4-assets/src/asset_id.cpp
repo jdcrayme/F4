@@ -5,6 +5,7 @@
 #include <array>
 #include <cctype>
 #include <stdexcept>
+#include <string>
 
 namespace f4::assets {
 

@@ -35,6 +35,44 @@
 namespace f4::ai {
 
 // ============================================================================
+// AirSteerDebug — PHUG-PLAN P0.3: last steer() intermediates for the
+// control-loop CSV trace (Docs/LONGITUDINAL_STABILITY_PLAN.md).
+//
+// The altitude cascade's internal signals are otherwise invisible: the FCS
+// trace shows the COMMANDS and the AIRCRAFT RESPONSE, but not the cascade
+// states between them. Phase 2/3 loop attribution (which loop owns an
+// observed oscillation) needs the full chain:
+//   alt_err -> vs_corr -> vs_target -> gamma_ff/gamma_corr -> theta_target
+//   -> pitch_cmd, plus the speed channel that cross-couples through it
+//   (speed_err, energy_err) and the leaky-integrator states.
+// ============================================================================
+struct AirSteerDebug {
+    // Altitude cascade (gamma-hold)
+    double alt_err_ft{0.0};         ///< target_alt - alt
+    double vs_corr_fpm{0.0};        ///< P + leaky-I correction (window-clamped)
+    double vs_target_fpm{0.0};      ///< after the STAB-E29 slew limiter
+    double vs_ff_fpm{0.0};          ///< path feedforward VS (input echo)
+    double gamma_now_rad{0.0};      ///< asin(vs/v) from the ACTUAL VS
+    double gamma_ff_rad{0.0};       ///< commanded path angle from vs_target
+    double gamma_corr_rad{0.0};     ///< VS-error damping term (Q3-clamped)
+    double alpha_est_rad{0.0};      ///< pitch - gamma_now (STAB-E17 clamped)
+    double theta_target_rad{0.0};   ///< final pitch-attitude target
+    double alt_integral_fpm{0.0};   ///< STAB-E7 leaky integrator state
+    // Lateral channel
+    double hdg_err_rad{0.0};        ///< wrapped heading error
+    double bank_target_rad{0.0};    ///< 0 in rudder-only (beam-ride) mode
+    // Speed channel
+    double speed_err_kt{0.0};       ///< target_speed - vcas
+    double speed_integral{0.0};     ///< leaky integrator state
+    double energy_err_ft{0.0};      ///< EXP V2: total-energy error (ft)
+    double speedbrake_pred_kt{0.0}; ///< EXP W: predicted speed-gain contribution
+    // Output echo (what steer() commanded this call)
+    double pitch_cmd{0.0};
+    double roll_cmd{0.0};
+    double throttle_cmd{0.0};
+};
+
+// ============================================================================
 // AirSteering
 // ============================================================================
 class AirSteering {
@@ -377,6 +415,14 @@ public:
         approach_alt_integral_ = 0.0;
     }
 
+    /// PHUG-PLAN P0.3: intermediates from the most recent steer() call.
+    /// Written through a mutable member (steer() stays const); consumed by
+    /// the FCS CSV trace for loop attribution. NOT reset by
+    /// reset_integrators() — it is a diagnostic echo, not control state.
+    [[nodiscard]] const AirSteerDebug& last_debug() const noexcept {
+        return last_debug_;
+    }
+
 private:
     /// Speed-channel integral accumulator (mutable so the public steer()
     /// can remain const — the integral is closed-loop state, not config).
@@ -391,6 +437,8 @@ private:
     mutable double prev_alpha_est_{std::numeric_limits<double>::quiet_NaN()};
     /// Tranche 31: approach-mode altitude integral (throttle-channel).
     mutable double approach_alt_integral_{0.0};
+    /// PHUG-PLAN P0.3: diagnostic echo of the last steer() intermediates.
+    mutable AirSteerDebug last_debug_{};
 };
 
 } // namespace f4::ai

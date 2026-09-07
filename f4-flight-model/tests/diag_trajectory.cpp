@@ -16,6 +16,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -156,9 +157,8 @@ Summary summarize(const std::vector<TrajectoryPoint>& pts) {
     int sb_changes = 0;
     int prev_sb_sign = 0;
     for (const auto& p : pts) {
-        double delta = p.speed_brake - (-1.0);  // -1 = retracted
-        int sgn = (delta > 0.05) ? 1 : (delta < -0.05 ? -1 : 0);
-        // Actually count transitions between deployed (>0.1) and retracted (<-0.9)
+        // Count transitions between deployed (>0.1) and retracted (<-0.9);
+        // chatter below the 0.05 threshold is deliberately ignored.
         int state = (p.speed_brake > -0.5) ? 1 : 0;
         if (prev_sb_sign != 0 && state != prev_sb_sign) ++sb_changes;
         if (state != 0 || prev_sb_sign != 0) prev_sb_sign = state;

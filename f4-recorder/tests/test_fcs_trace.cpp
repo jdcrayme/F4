@@ -13,6 +13,8 @@
 #include <string>
 #include <vector>
 
+#include <cstdlib>  // std::stod
+
 namespace f4::recorder {
 namespace {
 
@@ -78,7 +80,8 @@ TEST(FcsTraceTest, EmptyWriterProducesHeaderOnly) {
     const auto rows = parse_csv(csv);
     ASSERT_EQ(rows.size(), 1u);
     EXPECT_EQ(rows[0][0], "tick");
-    EXPECT_EQ(rows[0].back(), "nx");
+    // PHUG-PLAN P0.3: the last column is now the AirSteering energy term.
+    EXPECT_EQ(rows[0].back(), "ai_energy_err_ft");
 }
 
 TEST(FcsTraceTest, HeaderHasExpectedColumnCount) {
@@ -87,10 +90,78 @@ TEST(FcsTraceTest, HeaderHasExpectedColumnCount) {
     w.write_csv(os);
     const auto rows = parse_csv(os.str());
     ASSERT_EQ(rows.size(), 1u);
-    // FcsTraceSample has 53 columns — keep this in sync with the struct.
-    // Counted by the field list in fcs_trace.hpp and the header in
-    // fcs_trace.cpp.
-    EXPECT_EQ(rows[0].size(), 53u);
+    // FcsTraceSample has 84 columns — keep this in sync with the struct.
+    // 53 baseline + 31 PHUG-PLAN P0.3 loop-diagnostic columns (9 plant,
+    // 7 FCS internals, 15 AirSteering cascade). Counted by the field list
+    // in fcs_trace.hpp and the header in fcs_trace.cpp.
+    EXPECT_EQ(rows[0].size(), 84u);
+}
+
+TEST(FcsTraceTest, LoopDiagnosticColumnsRoundTrip) {
+    // PHUG-PLAN P0.3: the loop-attribution columns must round-trip with
+    // values distinguishable from their defaults (0.0/0).
+    FcsTraceSample s = make_sample(7, 8000.0);
+    s.qsom = 98.7;
+    s.qbar = 212.3;
+    s.gamma_deg = -3.25;
+    s.vt_dot = -1.5;
+    s.thrust_accel = 3.4;
+    s.stall_state = 2;
+    s.tef_pos = 1.0;
+    s.lef_pos = 0.6;
+    s.dbrake_pos = 0.25;
+    s.alpha_bias_deg = 5.75;
+    s.q_damper_term = -0.12;
+    s.omega_sp = 1.7;
+    s.zp01 = 0.9;
+    s.tp02 = 0.4;
+    s.tp03 = 0.8;
+    s.pi_error = 0.05;
+    s.ai_alt_err_ft = -320.5;
+    s.ai_vs_corr_fpm = 410.0;
+    s.ai_vs_target_fpm = -845.0;
+    s.ai_vs_ff_fpm = -845.0;
+    s.ai_gamma_now_rad = -0.06;
+    s.ai_gamma_ff_rad = -0.05;
+    s.ai_gamma_corr_rad = 0.02;
+    s.ai_alpha_est_rad = 0.20;
+    s.ai_theta_target_rad = 0.15;
+    s.ai_alt_integral_fpm = 120.0;
+    s.ai_hdg_err_rad = 0.01;
+    s.ai_bank_target_rad = 0.0;
+    s.ai_speed_err_kt = 4.5;
+    s.ai_speed_integral = -0.02;
+    s.ai_energy_err_ft = -180.0;
+
+    FcsTraceWriter w;
+    w.record(s);
+    std::ostringstream os;
+    w.write_csv(os);
+    const auto rows = parse_csv(os.str());
+    ASSERT_EQ(rows.size(), 2u);
+
+    // Locate the new columns by header name so this test is robust against
+    // future column reordering.
+    const auto& header = rows[0];
+    auto col = [&header](const std::string& name) -> std::size_t {
+        for (std::size_t i = 0; i < header.size(); ++i) {
+            if (header[i] == name) return i;
+        }
+        ADD_FAILURE() << "missing column: " << name;
+        return 0;
+    };
+    const auto& row = rows[1];
+    EXPECT_EQ(row[col("stall_state")], "2");
+    EXPECT_DOUBLE_EQ(std::stod(row[col("qsom")]), 98.7);
+    EXPECT_DOUBLE_EQ(std::stod(row[col("gamma_deg")]), -3.25);
+    EXPECT_DOUBLE_EQ(std::stod(row[col("alpha_bias_deg")]), 5.75);
+    EXPECT_DOUBLE_EQ(std::stod(row[col("q_damper_term")]), -0.12);
+    EXPECT_DOUBLE_EQ(std::stod(row[col("omega_sp")]), 1.7);
+    EXPECT_DOUBLE_EQ(std::stod(row[col("pi_error")]), 0.05);
+    EXPECT_DOUBLE_EQ(std::stod(row[col("ai_alt_err_ft")]), -320.5);
+    EXPECT_DOUBLE_EQ(std::stod(row[col("ai_vs_target_fpm")]), -845.0);
+    EXPECT_DOUBLE_EQ(std::stod(row[col("ai_theta_target_rad")]), 0.15);
+    EXPECT_DOUBLE_EQ(std::stod(row[col("ai_speed_err_kt")]), 4.5);
 }
 
 TEST(FcsTraceTest, OneSampleProducesOneDataRow) {

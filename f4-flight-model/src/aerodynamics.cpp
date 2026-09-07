@@ -187,11 +187,27 @@ void Aerodynamics::update(const AeroInputs& in, AeroState& aero) const {
     cd += aero.cdStores;
 
     // --- Stall model ---
-    // Matches FreeFalcon aero.cpp:293-356.
+    // Matches FreeFalcon aero.cpp:293-356 in structure, with ONE measured
+    // correction (PHUG-PLAN P4.3, worklog PHUG-P4):
     //
-    // When criticalAOA > 0 and alpha > 10 deg, compute the stall speed:
-    //   stallSpeed = 17.16 * sqrt((W/S) / |CL|)
-    // If vcas < stallSpeed OR alpha > criticalAOA, the aircraft is stalled
+    //   The stall-speed boundary is a WING property — the speed at which the
+    //   wing's MAXIMUM lift barely holds 1-G:  Vs = 17.16·sqrt((W/S)/CL_max).
+    //   The previous implementation used the INSTANTANEOUS CL. At exactly 1-G
+    //   the current CL equals W/(q·S), so stallSpeed collapsed to
+    //   17.16·sqrt(q) ≈ vcas — the boundary sat ON the 1-G flight line by
+    //   construction. Every nz<1 excursion at alpha>10 deg declared the
+    //   aircraft stalled, and the +5 kt exit margin (below) is unreachable at
+    //   1-G, so the FlightModel's stall SM latched DeepStall for entire
+    //   approach runs (measured: 13,582 of 13,800 frames in DeepStall at the
+    //   160-kt gear trim; lift collapsed to min(0, cl·0.5)·(vcas/stallSpeed)
+    //   and nzcgs to 0.05 at the trim alpha — the "approach porpoising" plant
+    //   that no controller tuning could fix).
+    //
+    //   CL_max = the CL curve at the critical AOA (same effective-alpha
+    //   convention as the main lookup: +TEF −LEF, with the TEF lift scale).
+    //
+    // When criticalAOA > 0 and alpha > 10 deg, compute the stall speed;
+    // if vcas < stallSpeed OR alpha > criticalAOA, the aircraft is stalled
     // and lift is reduced (goes to 0 or negative, scaled by speed ratio).
     bool stalled = false;
     double stallSpeed = 0.0;
@@ -202,9 +218,18 @@ void Aerodynamics::update(const AeroInputs& in, AeroState& aero) const {
         const double mass_from_qsom = (qsom > QSOM_FLOOR) ? (q_val * S / qsom) : 1.0;
         const double weight_lbs = mass_from_qsom * GRAVITY;
         const double ws = weight_lbs / S;  // wing loading W/S
-        if (std::fabs(cl) > 1e-3) {
-            stallSpeed = K_STALL * std::sqrt(ws / std::fabs(cl));
+        // CL_max: the lift coefficient at the stall boundary alpha. One extra
+        // bilinear table lookup per frame — cheap, and it keeps the boundary
+        // a property of the wing + config instead of the operating point.
+        double cl_max = 0.0;
+        {
+            const double crit_deg = aux_->criticalAOA.to<f4::Degrees>().value();
+            const double temp_crit = crit_deg + tefFactor - lefFactor;
+            cl_max = cl_(mach, temp_crit) * table_->clFactor
+                   * (1.0 + tefFactor * aux_->CLtefFactor);
+            if (cl_max < 0.1) cl_max = 0.1;  // degenerate tables: keep Vs finite
         }
+        stallSpeed = K_STALL * std::sqrt(ws / cl_max);
         // STAB-E2: hysteresis on the stall boundary. The previous hard
         // comparison (vcas < stallSpeed || alpha > criticalAOA) chattered
         // at the boundary: an alpha oscillation riding criticalAOA flipped
@@ -218,6 +243,9 @@ void Aerodynamics::update(const AeroInputs& in, AeroState& aero) const {
         const double crit_deg = aux_->criticalAOA.to<f4::Degrees>().value();
         const double aoa_enter = crit_deg + 1.0;
         const double aoa_exit  = crit_deg - 3.0;
+        // With CL_max the boundary is now a constant per config/weight: the
+        // exit margin below is reachable in normal 1-G flight (it was not
+        // before — at 1-G the old boundary EQUALLED the current speed).
         const double spd_enter = stallSpeed;               // enter below stall speed
         const double spd_exit  = stallSpeed + 5.0;         // exit only with margin
         if (aero.stalled) {

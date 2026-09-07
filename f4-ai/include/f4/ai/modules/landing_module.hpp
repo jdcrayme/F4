@@ -468,6 +468,10 @@ private:
     double runway_length_ft_{0.0};
     double glide_slope_angle_rad_{3.0 * 3.14159265358979 / 180.0};
     double pattern_altitude_ft_{2500.0};
+    // PHUG-P4 retune (findings §3.6): MSL altitude latched at InterceptFinal
+    // entry — the straight-in do-not-climb hold reference (level intercept;
+    // the descending beam arrives from above).
+    double intercept_entry_alt_ft_{0.0};
     bool cleared_to_land_{false};
     double fix_timer_{0.0};     ///< seconds in ProceedToFix (abeam guard)
     double pattern_timer_{0.0}; ///< seconds in the current pattern state

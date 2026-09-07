@@ -36,6 +36,12 @@ ViewerApp::~ViewerApp() {
     }
 }
 
+// ── window size ────────────────────────────────────────────────────────────
+void ViewerApp::set_window_size(int width, int height) {
+    impl_->window_w = width;
+    impl_->window_h = height;
+}
+
 // ── run ────────────────────────────────────────────────────────────────────
 void ViewerApp::run() {
     SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_VSYNC_HINT);

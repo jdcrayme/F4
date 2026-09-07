@@ -382,7 +382,8 @@ TEST(SymbolLibraryJson, LoadNonexistentFileThrows) {
     namespace fs = std::filesystem;
     const auto tmp_dir = fs::temp_directory_path() / "f4_symbol_library_nonexistent";
     const auto nope = tmp_dir / "does_not_exist.json";
-    EXPECT_THROW(load_symbol_library(nope), std::runtime_error);
+    EXPECT_THROW([[maybe_unused]] auto lib = load_symbol_library(nope),
+                 std::runtime_error);
 }
 
 // ===========================================================================

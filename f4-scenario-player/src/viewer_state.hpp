@@ -33,7 +33,9 @@
 // Now safe to include Raylib.
 #include <raylib.h>
 
+#include <cstdint>
 #include <filesystem>
+#include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>

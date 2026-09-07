@@ -15,6 +15,7 @@
 #include <iomanip>
 #include <sstream>
 #include <string>
+#include <vector>
 
 namespace f4::viewer {
 
@@ -57,6 +58,20 @@ std::vector<Annotation> decode_cam_manifest(const HexModel& m) {
     if (manifest_off == 0 || manifest_off + 4 > m.size()) return fail();
     const int32_t num = static_cast<int32_t>(m.read_le(manifest_off, 4));
     if (num < 0 || num > 4096) return fail();
+
+    // Annotate the leading pointer first: [0..3] is the u32 offset of the
+    // manifest directory at the end of the file (annotations[0] contract —
+    // see test_hex_model.cpp DecodeCamManifest.LoadsRealFixture).
+    {
+        Annotation ptr;
+        ptr.range = {0, 4};
+        ptr.label = "manifest_offset";
+        ptr.value = hex_str(manifest_off);
+        ptr.description = "Offset of the manifest directory (byte 0 of the "
+                          "container is a u32 little-endian pointer to it).";
+        ptr.category = "header";
+        out.push_back(std::move(ptr));
+    }
 
     std::size_t p = manifest_off + 4;
     std::size_t count = 0;

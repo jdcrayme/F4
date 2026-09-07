@@ -9,6 +9,7 @@
 
 #include <gtest/gtest.h>
 
+#include <cstdint>
 #include <filesystem>
 #include <stdexcept>
 
@@ -50,7 +51,7 @@ TEST(ClassTableJson, LoadAutoRejectsBinaryCt) {
 TEST(ClassTableJson, LookupOutOfRange) {
     auto ct = load_committed();
     EXPECT_EQ(ct.lookup(50), nullptr);   // below VU_LAST_ENTITY_TYPE (100)
-    EXPECT_EQ(ct.lookup(99999), nullptr); // above the table
+    EXPECT_EQ(ct.lookup(65000), nullptr); // far above the table (fits uint16_t)
 }
 
 TEST(ClassTableJson, VisTypeForReturnsModel) {

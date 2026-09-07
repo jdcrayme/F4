@@ -32,9 +32,11 @@
 #include <raylib.h>
 
 #include <algorithm>
+#include <cstdint>
 #include <cstring>
 #include <map>
 #include <set>
+#include <string>
 #include <vector>
 
 namespace f4::models_viewer {

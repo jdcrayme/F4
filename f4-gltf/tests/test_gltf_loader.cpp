@@ -7,10 +7,12 @@
 
 #include <gtest/gtest.h>
 
+#include <cstdint>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <vector>
 
 using namespace f4::gltf;
 namespace fs = std::filesystem;

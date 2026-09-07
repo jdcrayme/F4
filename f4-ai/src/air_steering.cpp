@@ -53,9 +53,13 @@ AIControlOutput AirSteering::steer(double desired_heading_rad,
     // turn rate (~0.6 deg/s observed vs 2.13 deg/s theoretical at 30° bank).
     // The approach-mode rudder-for-small-corrections is preserved below.
     const double hdg_err = heading_error(desired_heading_rad, in.heading_rad);
-    const double v_corner = 150.0 * 1.68781;  // ~150 kts corner speed
+    // v_corner is only needed by steer_approach()'s rudder law (Tranche 31);
+    // steer() no longer scales anything by corner speed.
     const double v_fps = std::max(100.0, in.vcas_kts * 1.68781);
     out.yaw_cmd = 0.0;
+    // PHUG-PLAN P0.3: hoisted so last_debug_ can publish it (0 in the
+    // rudder-only beam-ride branch, where no bank is commanded).
+    double bank_target = 0.0;
 
     if (std::fabs(hdg_err) > approach_aileron_threshold_rad) {
         // Large heading error (intercept cut): bank-to-turn cascade.
@@ -63,8 +67,8 @@ AIControlOutput AirSteering::steer(double desired_heading_rad,
         // by proximity to the target bank so the roll arrests itself
         // before crossing zero — Falcon's maxRollDelta taper. Without this
         // the bank overshoots, the AP reverses, and you get a sinusoid.
-        const double bank_target = std::clamp(bank_gain * hdg_err,
-                                              -max_bank_rad, max_bank_rad);
+        bank_target = std::clamp(bank_gain * hdg_err,
+                                 -max_bank_rad, max_bank_rad);
         const double bank_err = bank_target - in.roll_rad;
         // Taper: 1.0 far from target, 0.0 at target.
         const double phi_to_target = std::fabs(bank_err);
@@ -201,9 +205,26 @@ AIControlOutput AirSteering::steer(double desired_heading_rad,
     // Clamped at 40 deg bank (x1.30) to stay in the linear regime.
     const double phi_for_lift = std::clamp(std::fabs(in.roll_rad), 0.0, 0.7);
     const double lift_comp = 1.0 / std::max(0.3, std::cos(phi_for_lift));
+    // PHUG-P4 retune (M3 demand-side authority bound): the speed-damper
+    // term is a phugoid TRIM damper — its legitimate input band is the
+    // ±20-50 kt speed oscillation, worth ~0.7-2 deg of pitch. It ran
+    // UNBOUNDED: measured (ground-avoid E2E), the max-performance escape
+    // (hard-coded full throttle) accelerated the jet ~230 kt past
+    // escape_speed, the damper computed -0.47 rad (-27 deg) of
+    // nose-down, overrode the +13 deg climb demand of the very recovery
+    // that commanded the throttle, pinned theta_target at the -0.21 rad
+    // clamp, and the jet dove into the ridge at full power. The P3 loop
+    // could not execute such a demand (weak gain) so the preemption was
+    // masked; the P4.1-corrected loop flies it faithfully. Bounded to
+    // +-0.10 rad (+-5.7 deg — the gamma_corr_limit band): damping
+    // authority is preserved across the whole phugoid band while the
+    // damper can no longer out-vote the path demand.
+    const double speed_damp_rad = std::clamp(
+        speed_damp_rad_per_kt * (in.vcas_kts - target_speed_kts),
+        -0.10, 0.10);
     const double theta_target = std::clamp(
         alpha_est * lift_comp + gamma_ff + gamma_corr
-            - speed_damp_rad_per_kt * (in.vcas_kts - target_speed_kts),
+            - speed_damp_rad,
         min_path_rad, max_path_rad);
     // Pitch-rate damping: subtract Kd*q from the stick command. Same
     // rationale as the roll-rate damping — kills the phugoid by adding
@@ -299,12 +320,15 @@ AIControlOutput AirSteering::steer(double desired_heading_rad,
     // At -2000fpm VS, 250kt: dV_5s = 5*32.177*(-2000/60)/422 / 1.68781 = -8.5 kts
     // (negative VS = descent = speed gain, so the predicted gain is positive)
     double over_speed = in.vcas_kts - (target_speed_kts + 5.0);
+    // PHUG-PLAN P0.3: predicted-gain contribution, published to last_debug_.
+    double speedbrake_pred_kt = 0.0;
     if (predictive_speedbrake_gain > 0.0 && in.vs_fpm < 0.0) {
         // Predicted speed gain from the descent over the look-ahead time
         const double dV_fps = predictive_speedbrake_lookahead_s
                              * 32.177 * (-in.vs_fpm / 60.0) / v_fps;
         const double dV_kts = dV_fps / 1.68781;
-        over_speed += predictive_speedbrake_gain * dV_kts;
+        speedbrake_pred_kt = predictive_speedbrake_gain * dV_kts;
+        over_speed += speedbrake_pred_kt;
     }
     out.speed_brake_cmd = -1.0 + 1.85 * std::clamp(over_speed / 15.0, 0.0, 1.0);
 
@@ -336,6 +360,30 @@ AIControlOutput AirSteering::steer(double desired_heading_rad,
         out.throttle_cmd = std::min(out.throttle_cmd, 0.08);
         out.speed_brake_cmd = 1.0;   // full board
     }
+
+    // --- PHUG-PLAN P0.3: publish the cascade intermediates for the trace.
+    // Single exit point: every local the altitude/speed loops computed is
+    // still in scope here. (steer_approach() is separate dead code and does
+    // not write last_debug_ — its signals are not part of the live loop.)
+    last_debug_.alt_err_ft        = alt_err;
+    last_debug_.vs_corr_fpm       = vs_corr;
+    last_debug_.vs_target_fpm     = vs_target;
+    last_debug_.vs_ff_fpm         = in.vs_ff_fpm;
+    last_debug_.gamma_now_rad     = gamma_now;
+    last_debug_.gamma_ff_rad      = gamma_ff;
+    last_debug_.gamma_corr_rad    = gamma_corr;
+    last_debug_.alpha_est_rad     = alpha_est;
+    last_debug_.theta_target_rad  = theta_target;
+    last_debug_.alt_integral_fpm  = alt_integral_;
+    last_debug_.hdg_err_rad       = hdg_err;
+    last_debug_.bank_target_rad   = bank_target;
+    last_debug_.speed_err_kt      = speed_err;
+    last_debug_.speed_integral    = speed_integral_;
+    last_debug_.energy_err_ft     = energy_err_ft;
+    last_debug_.speedbrake_pred_kt = speedbrake_pred_kt;
+    last_debug_.pitch_cmd         = out.pitch_cmd;
+    last_debug_.roll_cmd          = out.roll_cmd;
+    last_debug_.throttle_cmd      = out.throttle_cmd;
 
     return out;
 }

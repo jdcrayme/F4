@@ -6,6 +6,7 @@
 
 #include <stdexcept>
 #include <unordered_set>
+#include <string>
 
 using namespace f4::assets;
 
@@ -26,31 +27,31 @@ TEST(AssetId, ParsesAllRegisteredFamilies) {
 }
 
 TEST(AssetId, RejectsMissingColon) {
-    EXPECT_THROW(parse_asset_id("koreaobj"), std::invalid_argument);
+    EXPECT_THROW([[maybe_unused]] auto _t = parse_asset_id("koreaobj"), std::invalid_argument);
 }
 
 TEST(AssetId, RejectsUppercase) {
-    EXPECT_THROW(parse_asset_id("Koreaobj:00042"), std::invalid_argument);
-    EXPECT_THROW(parse_asset_id("koreaobj:00042A"), std::invalid_argument);
+    EXPECT_THROW([[maybe_unused]] auto _t = parse_asset_id("Koreaobj:00042"), std::invalid_argument);
+    EXPECT_THROW([[maybe_unused]] auto _t = parse_asset_id("koreaobj:00042A"), std::invalid_argument);
 }
 
 TEST(AssetId, RejectsSpaces) {
-    EXPECT_THROW(parse_asset_id("koreaobj: 0042"), std::invalid_argument);
-    EXPECT_THROW(parse_asset_id(" koreaobj:0042"), std::invalid_argument);
+    EXPECT_THROW([[maybe_unused]] auto _t = parse_asset_id("koreaobj: 0042"), std::invalid_argument);
+    EXPECT_THROW([[maybe_unused]] auto _t = parse_asset_id(" koreaobj:0042"), std::invalid_argument);
 }
 
 TEST(AssetId, RejectsEmptyLocalId) {
-    EXPECT_THROW(parse_asset_id("koreaobj:"), std::invalid_argument);
+    EXPECT_THROW([[maybe_unused]] auto _t = parse_asset_id("koreaobj:"), std::invalid_argument);
 }
 
 TEST(AssetId, AcceptsDotDashUnderscore) {
-    EXPECT_NO_THROW(parse_asset_id("tileset:korea.near"));
-    EXPECT_NO_THROW(parse_asset_id("tileset:korea-near"));
-    EXPECT_NO_THROW(parse_asset_id("tileset:korea_near_v2"));
+    EXPECT_NO_THROW([[maybe_unused]] auto _t = parse_asset_id("tileset:korea.near"));
+    EXPECT_NO_THROW([[maybe_unused]] auto _t = parse_asset_id("tileset:korea-near"));
+    EXPECT_NO_THROW([[maybe_unused]] auto _t = parse_asset_id("tileset:korea_near_v2"));
 }
 
 TEST(AssetId, UnknownFamilyRejectedByStrictParser) {
-    EXPECT_THROW(parse_asset_id("bmsobj:00042"), std::invalid_argument);
+    EXPECT_THROW([[maybe_unused]] auto _t = parse_asset_id("bmsobj:00042"), std::invalid_argument);
 }
 
 TEST(AssetId, UnknownFamilyReturnsInvalidInLenientParser) {
@@ -88,7 +89,7 @@ TEST(AssetId, AssetRefPrefix) {
     EXPECT_FALSE(is_asset_ref("koreaobj:00042"));
     EXPECT_FALSE(is_asset_ref(""));
     EXPECT_TRUE(is_asset_ref("@asset:"));
-    EXPECT_THROW(parse_asset_ref("@asset:"), std::invalid_argument);
+    EXPECT_THROW([[maybe_unused]] auto _t = parse_asset_ref("@asset:"), std::invalid_argument);
 }
 
 TEST(AssetId, ParseAndEmitAssetRef) {
@@ -99,7 +100,7 @@ TEST(AssetId, ParseAndEmitAssetRef) {
 }
 
 TEST(AssetId, ParseAssetRefRejectsMissingPrefix) {
-    EXPECT_THROW(parse_asset_ref("theater:korea"), std::invalid_argument);
+    EXPECT_THROW([[maybe_unused]] auto _t = parse_asset_ref("theater:korea"), std::invalid_argument);
 }
 
 TEST(AssetId, IsValidLocalId) {
@@ -121,7 +122,7 @@ TEST(AssetId, SimdataFamilyRoundTrip) {
     EXPECT_EQ(id.to_string(), "simdata:braindata");
     EXPECT_EQ(family_to_string(AssetFamily::simdata), "simdata");
     EXPECT_EQ(family_from_string("simdata"), AssetFamily::simdata);
-    EXPECT_NO_THROW(parse_asset_ref("@asset:simdata:braindata"));
+    EXPECT_NO_THROW([[maybe_unused]] auto _t = parse_asset_ref("@asset:simdata:braindata"));
     EXPECT_TRUE(parse_asset_id_or_invalid("simdata:visualdata").valid());
     EXPECT_TRUE(parse_asset_id("class:falcon4.ct").valid());  // dots are legal local-ids
 }

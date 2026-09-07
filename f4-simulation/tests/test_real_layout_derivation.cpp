@@ -22,6 +22,7 @@
 #include <f4/world_types/layout_types.hpp>
 
 #include <cmath>
+#include <cstdint>
 
 using namespace f4::simulation;
 using namespace f4::entities;

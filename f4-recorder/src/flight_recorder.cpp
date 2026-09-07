@@ -9,7 +9,11 @@
 #include <algorithm>
 #include <cmath>
 #include <fstream>
+#include <filesystem>
+#include <cstdint>
 #include <sstream>
+#include <vector>
+#include <string>
 
 namespace f4::recorder {
 

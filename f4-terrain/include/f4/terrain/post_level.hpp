@@ -63,7 +63,7 @@ struct TerrainPost {
 
     /// Decoded surface normal in ENU (unit length; theta measured from
     /// east toward north). FreeFalcon's lighting used this encoding.
-    [[nodiscard]] void normal_enu(float& nx, float& ny, float& nz) const noexcept {
+    void normal_enu(float& nx, float& ny, float& nz) const noexcept {
         const float az = static_cast<float>(theta) * (6.2831853f / 255.99f);
         const float el = static_cast<float>(phi)   * (1.5707963f / 63.99f);
         const float c = std::cos(el);

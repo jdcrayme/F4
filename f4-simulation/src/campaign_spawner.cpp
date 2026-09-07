@@ -7,6 +7,8 @@
 
 #include <f4/entities/entity.hpp>
 #include <f4/ai/brain_component.hpp>
+#include <unordered_map>
+#include <cstdint>
 
 namespace f4::simulation {
 

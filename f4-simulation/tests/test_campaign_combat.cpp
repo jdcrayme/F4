@@ -49,8 +49,10 @@
 #include <f4/weapons/weapon_store.hpp>
 
 #include <algorithm>
+#include <cstdint>
 #include <cstdlib>
 #include <filesystem>
+#include <memory>
 #include <string>
 #include <vector>
 

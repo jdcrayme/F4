@@ -45,6 +45,8 @@
 #include <cmath>
 #include <filesystem>
 #include <numeric>
+#include <string>
+#include <memory>
 #include <vector>
 
 using namespace f4::flight;

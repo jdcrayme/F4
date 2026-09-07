@@ -26,6 +26,10 @@ public:
     /// Blocking Raylib event loop. Call after setting initial state.
     void run();
 
+    /// Override the initial window size (default 1600x900). Must be
+    /// called before run() — the size is consumed by InitWindow().
+    void set_window_size(int width, int height);
+
     // ── Install-aware API ─────────────────────────────────────────────
 
     /// Set the Falcon 4.0 install path and auto-locate KoreaObj files.

@@ -162,6 +162,74 @@ is unchanged — the pipeline doesn't produce a replacement artifact yet.
 
 # F4 Cleanup Pass — Changes Summary
 
+## Task 60 — Cleanup pass: CI is actually fixed now, the "LZSS failure" was a use-after-free, and the suite is 2446/2450
+
+**Headline: the CI workflow has been broken since it was committed** —
+`on.push.branches: ain]` is mangled YAML (should be `[main]`), and the
+suite had a use-after-free masquerading as a pre-existing LZSS
+regression. Both fixed; the full GL build (all viewers, renderer,
+scenario player) compiles and links on GCC, the boundary gate PASSES,
+and the suite is down from 14 failures to 4 (all four are the
+documented open landing-precision tuning items — see below).
+
+- **CI (.github/workflows/ci.yml)**: the trigger filter was the literal
+  string `ain]`, so push/PR events matched no branch reliably; fixed to
+  `[main]`. Added a second job (`gl`) that installs the X11/OpenGL dev
+  packages, builds EVERY target (raylib, f4-renderer, f4-world-viewer,
+  f4-models-viewer, f4-scenario-player) and runs ctest under xvfb —
+  world-viewer/renderer compile breaks can no longer land undetected.
+  Both jobs now run with `-DF4_ENFORCE_BOUNDARY=ON` (the Tranche 0b/0d
+  gate was documented as the CI gate but CI never set it).
+- **test_cmp_encoder use-after-free (the "pre-existing LZSS failure")**:
+  `decode_fixture_cmp` handed callers a pointer into its LOCAL
+  `CamArchive`, destroyed at return — the LzssRoundTripOnRealPayload
+  test then read garbage sizes (20813/21847 one run, 20807/21985 the
+  next). The compressor was never wrong. The helper now copies the
+  SubFile out; test passes deterministically. This failure had been
+  carried as "pre-existing" since Task 56 — it was a test bug all along.
+- **DecodeCamManifest.LoadsRealFixture regression (introduced by the
+  Tranche 0d hex-decoder rewrite)**: the self-contained .cam decoder
+  stopped annotating the leading 4-byte manifest_offset pointer.
+  Re-added as annotations[0] ({0,4}, value = the pointer, hex) — the
+  test contract and the hex-inspector UX both expect it.
+- **CampaignBridge stale expectations**: `derive_airfield_from_objective`
+  was raised to threshold+3000 ft in Tranche 44, but two tests still
+  expected the old +2500 values (2550/2600). Updated to 3050/3100 with
+  a comment pointing at the code.
+- **GPU tests no longer segfault headless**: the six raylib-context
+  tests (orbit_camera, lit_shader, texture_cache, draw_3d, feature_mesh,
+  world_renderer) crashed inside InitWindow→rlglInit when DISPLAY is
+  unset (CI, containers). New `f4-renderer/tests/display_guard.hpp`
+  skips them gracefully (GTEST_SKIP) when no display exists; they run
+  for real under xvfb in the CI gl job. NOTE: GTEST_SKIP must live in
+  SetUp itself, not in a helper — the macro is a `return`, so calling it
+  from a helper returns from the helper and SetUp carries on.
+- **IWYU sweep (62 files)**: the Tranche 0d / campaign / render-path
+  tranche leaned on transitive standard includes; added the direct
+  <cstdint> / <string> / <filesystem> / <vector> / <memory> / etc.
+  includes to every recently-touched source. MSVC is far less forgiving
+  than GCC about transitive includes — this is the cheap insurance for
+  the Windows build.
+- **Warnings driven to zero (GCC -Wall -Wextra -Wpedantic, full GL
+  build)**: removed two stray `[[nodiscard]]`-on-void attributes
+  (terrain post_level.hpp, viewer enum_text.hpp); deleted dead code
+  (unused push16, unused models_dir, unused water_art lambda, unused
+  cfg/sgn); fixed the 99999→uint16_t narrowing in
+  test_class_table_json (65000 now, still above the table); fixed
+  EXPECT_THROW discarding [[nodiscard]] returns (test_asset_id,
+  test_symbol_library).
+- **f4-models-viewer `--width/--height` actually work now**: the CLI
+  parsed them but never wired them to the window; added
+  `ViewerApp::set_window_size()` and called it before run().
+- **Verification**: full GL build (800+ targets, RelWithDebInfo) compiles
+  and links clean with zero warnings; boundary verifier PASSES with
+  -DF4_ENFORCE_BOUNDARY=ON; ctest: 2446/2450 PASS — the only failures
+  are DigiMission.FullLoop ×2, InterceptConvergence.OnGlideslope, and
+  FcsTracePipeline.LandingOnly, the documented open landing-precision
+  tuning family (touchdown at 279 ft past threshold vs the 500 ft bar,
+  260 ft lateral vs 250, cross-185 ft vs 50 — the AI lands, just short
+  and slightly left).
+
 ## Task 59 — Tranche 0d renderer half: the runtime glTF rewire lands
 
 **The boundary warning is gone for real.** `cmake/verify_boundary.cmake`

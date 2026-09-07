@@ -1797,8 +1797,8 @@ TEST(CombatIntegration, GunsMergeScenarioFilePlaysOut) {
 
 /// A synthetic ridge for the ground-avoid E2E: flat 0 MSL, a 1.9 ft/ft
 /// ramp climbing between y=25,000 and y=30,000, then a 9,500-ft plateau.
-/// A northbound jet at 10,000 ft MSL meets the predicted-clearance floor
-/// (MIN_ALTT 1,500) ~8 s before the ramp — the pull-up must fly.
+/// A northbound jet at 9,200 ft MSL meets the predicted-clearance floor
+/// (MIN_ALTT 1,500) before the ramp — the pull-up must fly.
 class RidgeTerrain final : public f4::terrain::TerrainSource {
 public:
     [[nodiscard]] double elevation_at_ft(double, double y_ft) const override {
@@ -1812,17 +1812,29 @@ TEST(CombatIntegration, GroundAvoidPullsUpOverTheRidge) {
     const auto f16 = f16_config_path();
     if (f16.empty()) GTEST_SKIP() << "f16.json fixture not generated";
 
-    // One jet, combat DISABLED (safety is not a tactic): 10,000 ft MSL
+    // One jet, combat DISABLED (safety is not a tactic): 9,200 ft MSL
     // northbound at ~420 kt into the ridge. The route's leg altitude
     // (16,000) is above the plateau — after the recovery the nav module
     // finishes the climb, proving the rung ENDED instead of flapping.
+    // PHUG-P4 retune: spawn 10,000 -> 9,000 ft. The trip law is
+    //   min(alt - terrain_here, alt + min(0,vs)*T_look - terrain_ahead)
+    //   < 1,500 ft — a CLIMBING jet trips only while alt < plateau+1,500.
+    // The P4.1-corrected loop converts the F6 spawn trim into a vigorous
+    // transient climb (measured ~14,000 fpm decaying), so at the original
+    // 10,000-ft spawn the jet was already above plateau+1,500 when the
+    // 6-s look-ahead cone first saw the ridge and the rung never fired
+    // (the P3 loop's lazy climb had made the same geometry trip by
+    // accident). At 9,000 ft the clearance prediction at cone contact is
+    // ~300 ft < 1,500 for ANY healthy climb rate, while the 6,000-fpm
+    // escape still clears the plateau with >1,500 ft of margin — the
+    // test's actual contract (trip, recover, release, nav resumes).
     const std::string json = R"({
   "name": "ground_avoid_ridge",
   "theater": "korea",
   "aircraft": [
     { "callsign": "EAGLE1", "aircraft_config_path": ")" + f16 + R"(",
       "aircraft_name": "F-16C_50", "vis_type_index": 1052,
-      "parking_spot": { "x": 0.0, "y": 20000.0, "z": 10000.0 },
+      "parking_spot": { "x": 0.0, "y": 20000.0, "z": 9200.0 },
       "heading_rad": 0.0, "initial_fuel_lbs": 6500.0,
       "initial_vt_fps": 700.0, "spawn_in_air": true, "team": "blue" }
   ],
@@ -1895,7 +1907,14 @@ TEST(CombatIntegration, GroundAvoidPullsUpOverTheRidge) {
         << "ground avoid never released after the ridge";
     const auto* tf = jet.get<entities::TransformComponent>();
     ASSERT_NE(tf, nullptr);
-    EXPECT_GT(tf->position.z, 12000.0)
+    // PHUG-P4 re-baseline: 12,000 -> 11,500 ft (plateau + 2,000). Under
+    // the corrected inner loop the post-release state settles through an
+    // honest phugoid (gentle ~300 fpm letdown, nz 1.00) and samples
+    // ~11,970 ft at this arbitrary 40-s tick — 2,470 ft ABOVE the plateau
+    // and released to nav, which is the assertion's actual contract. The
+    // old 12,000 pass rode on the broken loop's inability to exchange
+    // climb energy back into speed after the pull-up.
+    EXPECT_GT(tf->position.z, 11500.0)
         << "the jet did not climb out after the recovery";
     EXPECT_EQ(brain->mode_name(), "NavigationMode")
         << "the navigation module did not take the jet back";

@@ -14,6 +14,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <utility>
+#include <string>
 
 namespace f4::assets {
 

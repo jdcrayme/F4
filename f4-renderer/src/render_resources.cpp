@@ -7,6 +7,7 @@
 #include <f4/renderer/render_resources.hpp>
 
 #include <raylib.h>
+#include <filesystem>
 #include <rlgl.h>   // GetShaderDefault
 
 namespace f4::renderer {

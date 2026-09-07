@@ -61,7 +61,18 @@ void FcsTraceWriter::write_csv(std::ostream& os) const {
        << "heading_deg,pitch_deg,roll_deg,x_ft,y_ft,mach,"
        << "target_alt_ft,target_speed_kts,target_heading_deg,"
        << "course_lateral_ft,course_along_ft,localizer_heading_deg,"
-       << "on_ground,gear_pos,engine_rpm,fuel_lbs,nz,nx\n";
+       << "on_ground,gear_pos,engine_rpm,fuel_lbs,nz,nx,"
+       // --- Loop diagnostics: plant group (PHUG-PLAN P0.3) ---
+       << "qsom,qbar,gamma_deg,vt_dot,thrust_accel,stall_state,"
+       << "tef_pos,lef_pos,dbrake_pos,"
+       // --- Loop diagnostics: FCS internals group ---
+       << "alpha_bias_deg,q_damper_term,omega_sp,zp01,tp02,tp03,pi_error,"
+       // --- Loop diagnostics: AirSteering cascade group ---
+       << "ai_alt_err_ft,ai_vs_corr_fpm,ai_vs_target_fpm,ai_vs_ff_fpm,"
+       << "ai_gamma_now_rad,ai_gamma_ff_rad,ai_gamma_corr_rad,"
+       << "ai_alpha_est_rad,ai_theta_target_rad,ai_alt_integral_fpm,"
+       << "ai_hdg_err_rad,ai_bank_target_rad,ai_speed_err_kt,"
+       << "ai_speed_integral,ai_energy_err_ft\n";
 
     for (const auto& s : samples_) {
         // --- Timing ---
@@ -131,7 +142,44 @@ void FcsTraceWriter::write_csv(std::ostream& os) const {
         write_double(os, s.engine_rpm);               os << ',';
         write_double(os, s.fuel_lbs);                 os << ',';
         write_double(os, s.nz);                       os << ',';
-        write_double(os, s.nx);
+        write_double(os, s.nx);                       os << ',';
+
+        // --- Loop diagnostics: plant group (PHUG-PLAN P0.3) ---
+        write_double(os, s.qsom);                     os << ',';
+        write_double(os, s.qbar);                     os << ',';
+        write_double(os, s.gamma_deg);                os << ',';
+        write_double(os, s.vt_dot);                   os << ',';
+        write_double(os, s.thrust_accel);             os << ',';
+        os << s.stall_state;                          os << ',';
+        write_double(os, s.tef_pos);                  os << ',';
+        write_double(os, s.lef_pos);                  os << ',';
+        write_double(os, s.dbrake_pos);               os << ',';
+
+        // --- Loop diagnostics: FCS internals group ---
+        write_double(os, s.alpha_bias_deg);           os << ',';
+        write_double(os, s.q_damper_term);            os << ',';
+        write_double(os, s.omega_sp);                 os << ',';
+        write_double(os, s.zp01);                     os << ',';
+        write_double(os, s.tp02);                     os << ',';
+        write_double(os, s.tp03);                     os << ',';
+        write_double(os, s.pi_error);                 os << ',';
+
+        // --- Loop diagnostics: AirSteering cascade group ---
+        write_double(os, s.ai_alt_err_ft);            os << ',';
+        write_double(os, s.ai_vs_corr_fpm);           os << ',';
+        write_double(os, s.ai_vs_target_fpm);         os << ',';
+        write_double(os, s.ai_vs_ff_fpm);             os << ',';
+        write_double(os, s.ai_gamma_now_rad);         os << ',';
+        write_double(os, s.ai_gamma_ff_rad);          os << ',';
+        write_double(os, s.ai_gamma_corr_rad);        os << ',';
+        write_double(os, s.ai_alpha_est_rad);         os << ',';
+        write_double(os, s.ai_theta_target_rad);      os << ',';
+        write_double(os, s.ai_alt_integral_fpm);      os << ',';
+        write_double(os, s.ai_hdg_err_rad);           os << ',';
+        write_double(os, s.ai_bank_target_rad);       os << ',';
+        write_double(os, s.ai_speed_err_kt);          os << ',';
+        write_double(os, s.ai_speed_integral);        os << ',';
+        write_double(os, s.ai_energy_err_ft);
 
         os << '\n';
     }

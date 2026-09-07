@@ -10,10 +10,15 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdint>
 #include <cstring>
 #include <fstream>
+#include <optional>
+#include <filesystem>
 #include <sstream>
 #include <stdexcept>
+#include <vector>
+#include <string>
 
 namespace f4::gltf {
 

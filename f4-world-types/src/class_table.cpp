@@ -10,6 +10,8 @@
 #include <f4/json/reader.hpp>
 
 #include <stdexcept>
+#include <filesystem>
+#include <cstdint>
 #include <string>
 
 namespace f4::world_types {

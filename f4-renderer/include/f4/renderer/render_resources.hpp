@@ -48,6 +48,7 @@
 #undef DEG2RAD
 #undef RAD2DEG
 
+#include <cstdint>
 #include <filesystem>
 #include <unordered_map>
 

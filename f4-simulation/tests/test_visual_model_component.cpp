@@ -19,6 +19,7 @@
 #include <f4/entities/entity.hpp>
 
 #include <typeinfo>
+#include <string>
 
 using namespace f4::simulation;
 using namespace f4::entities;

@@ -38,10 +38,6 @@ void push32(std::vector<uint8_t>& v, uint32_t x) {
     for (int i = 0; i < 4; ++i) v.push_back(static_cast<uint8_t>(x >> (8 * i)));
 }
 
-void push16(std::vector<uint8_t>& v, uint16_t x) {
-    v.push_back(static_cast<uint8_t>(x & 0xFF));
-    v.push_back(static_cast<uint8_t>(x >> 8));
-}
 
 /// Minimal 4x4 8-bit PCX, all pixels = `color_index`, palette entry 0
 /// forced to (#10,#20,#30) so decodes are distinguishable.

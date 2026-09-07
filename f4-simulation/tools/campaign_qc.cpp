@@ -155,6 +155,8 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdint>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>

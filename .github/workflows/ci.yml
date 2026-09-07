@@ -1,27 +1,33 @@
-# Continuous integration — headless build + full test suite.
+# Continuous integration — two jobs:
 #
-# Mirrors the local verification workflow used throughout the worklog
-# (e.g. WEAPONS-2b): configure with all GUI/viewer targets OFF, build every
-# library + test target, run the complete ctest suite. This is the same
-# command sequence that produced the "1,539/1,539 green" STEP-0 baseline.
+# 1. headless — every GUI/viewer target OFF, full test suite. Mirrors the
+#    local verification workflow used throughout the worklog (e.g.
+#    WEAPONS-2b): the same command sequence that produced the
+#    "1,539/1,539 green" STEP-0 baseline.
+# 2. gl — every target ON (raylib, f4-renderer, both viewers, scenario
+#    player) under xvfb. This is the job that catches world-viewer /
+#    renderer compile breaks; the headless job never builds those targets.
+#    The GPU-context tests (orbit_camera, lit_shader, texture_cache,
+#    draw_3d, feature_mesh, world_renderer) run for real under xvfb's
+#    software GL (llvmpipe supports GL 3.3+, which raylib 5.0 needs); on
+#    a display-less runner they self-skip via display_guard.hpp instead
+#    of segfaulting.
 #
 # Notes:
 # - Debug build: the suite's value is precisely in the assertions and
 #   contract checks that only fire there (the STEP-0 fixes exist because
 #   Debug asserts contradicted tested contracts).
 # - GCC 14 to match the development toolchain (GCC 14.2 locally).
-# - FetchContent (GoogleTest v1.14.0, nlohmann/json v3.11.3) needs network
-#   access, which GitHub-hosted runners provide.
+# - FetchContent (GoogleTest v1.14.0, nlohmann/json v3.11.3, raylib 5.0,
+#   Dear ImGui, rlImGui) needs network access, which GitHub-hosted
+#   runners provide.
+# - -DF4_ENFORCE_BOUNDARY=ON on BOTH jobs: the Tranche 0b/0d importer/
+#   runtime boundary check is a configure-time gate (cmake/
+#   verify_boundary.cmake) — a runtime target that links a legacy binary
+#   parser must fail CI, not just the local build.
 # - DigiMission.FullLoop* and the F4_INSTALL-dependent tests skip
 #   gracefully without a game install (GTEST_SKIP) — that is expected on
 #   CI, same as on a clean local checkout.
-#
-# Extending later (deliberately out of scope for STEP-0):
-# - A Release + -O2 job (add to the build-type matrix).
-# - A renderer job (needs X11/OpenGL dev packages: libx11-dev,
-#   libxcursor-dev, libxrandr-dev, libxi-dev, libgl1-mesa-dev, and a
-#   headless GL context for --screenshot smoke tests).
-# - ccache for build-time caching.
 
 name: CI
 
@@ -61,10 +67,11 @@ jobs:
           echo "cmake: $(cmake --version | head -1)"
           echo "g++:   $(g++-14 --version | head -1)"
 
-      - name: Configure (headless — all X11/OpenGL targets OFF)
+      - name: Configure (headless — all X11/OpenGL targets OFF, boundary gate ON)
         run: >
           cmake -B build
           -DCMAKE_BUILD_TYPE=Debug
+          -DF4_ENFORCE_BOUNDARY=ON
           -DF4_BUILD_RENDERER=OFF
           -DF4_BUILD_MODEL_VIEWER=OFF
           -DF4_BUILD_VIEWER=OFF
@@ -75,3 +82,46 @@ jobs:
 
       - name: Test
         run: ctest --test-dir build --output-on-failure -j"$(nproc)"
+
+  gl:
+    name: Full GL build + test (GCC 14, Debug, xvfb)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    env:
+      CC: gcc-14
+      CXX: g++-14
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install toolchain + X11/OpenGL dev packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            g++-14 \
+            libx11-dev libxext-dev libxfixes-dev libxi-dev \
+            libxcursor-dev libxrandr-dev libxinerama-dev \
+            libgl1-mesa-dev libglu1-mesa-dev \
+            xvfb
+
+      - name: Configure (every target ON, boundary gate ON)
+        run: >
+          cmake -B build
+          -DCMAKE_BUILD_TYPE=Debug
+          -DF4_ENFORCE_BOUNDARY=ON
+
+      - name: Build
+        run: cmake --build build -j"$(nproc)"
+
+      # xvfb-run provides a virtual X display so the GPU-context tests
+      # execute against Mesa's software renderer instead of skipping.
+      - name: Test (under xvfb)
+        run: xvfb-run -a -s "-screen 0 1024x768x24" ctest --test-dir build --output-on-failure
+
+      - name: Boundary verifier (explicit re-configure, every target enabled)
+        run: >
+          cmake -B build
+          -DCMAKE_BUILD_TYPE=Debug
+          -DF4_ENFORCE_BOUNDARY=ON

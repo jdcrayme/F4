@@ -21,6 +21,10 @@
 
 #include <gtest/gtest.h>
 #include <raylib.h>
+#include <unordered_map>
+#include <cstdint>
+
+#include "display_guard.hpp"
 
 using namespace f4::renderer;
 
@@ -116,8 +120,9 @@ protected:
 
     void SetUp() override {
         if (!initialized_) {
-            SetConfigFlags(FLAG_WINDOW_HIDDEN | FLAG_WINDOW_UNDECORATED);
-            InitWindow(256, 256, "test");
+            if (!f4::testing::init_window_if_display(256, 256, "test", FLAG_WINDOW_HIDDEN | FLAG_WINDOW_UNDECORATED)) {
+                GTEST_SKIP() << "no display available — GPU-context test skipped";
+            }
             initialized_ = true;
         }
     }

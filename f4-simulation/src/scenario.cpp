@@ -30,6 +30,8 @@
 #include <f4/json/reader.hpp>
 #include <f4/io/read_file.hpp>
 
+#include <filesystem>
+#include <cstdint>
 #include <optional>
 #include <stdexcept>
 #include <string>

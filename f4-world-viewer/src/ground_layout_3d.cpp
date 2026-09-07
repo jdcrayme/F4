@@ -56,9 +56,12 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <utility>
+#include <string>
+#include <filesystem>
 #include <vector>
 
 namespace f4::viewer {

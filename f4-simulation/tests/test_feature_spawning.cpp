@@ -48,10 +48,6 @@ std::string env_or(const char* key, const char* fallback) {
     return v ? v : fallback;
 }
 
-std::string models_dir() {
-    return env_or("F4_MODELS_DIR", F4_MODELS_DIR);
-}
-
 std::string generated_fixtures_dir() {
     return env_or("F4_GENERATED_FIXTURES_DIR", F4_GENERATED_FIXTURES_DIR);
 }

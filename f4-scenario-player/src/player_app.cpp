@@ -30,6 +30,10 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <string>
+#include <memory>
+#include <filesystem>
+#include <cstdio>
 
 namespace f4::scenario_player {
 

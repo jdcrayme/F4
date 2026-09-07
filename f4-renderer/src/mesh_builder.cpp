@@ -9,8 +9,12 @@
 #include <raylib.h>
 
 #include <algorithm>
+#include <cstdint>
+#include <array>
 #include <cstring>
 #include <stdexcept>
+#include <string>
+#include <optional>
 #include <vector>
 
 namespace f4::renderer {

@@ -31,12 +31,16 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
 #include <iomanip>
+#include <memory>
+#include <filesystem>
 #include <sstream>
 #include <string>
+#include <vector>
 
 // ---------------------------------------------------------------------------
 // PreviewCache — PImpl holding the Raylib GPU state owned by

@@ -20,6 +20,7 @@
 #include <imgui.h>
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 
 namespace f4::viewer {

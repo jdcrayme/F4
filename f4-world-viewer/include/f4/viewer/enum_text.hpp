@@ -300,7 +300,7 @@ inline void obj_flags_text(uint32_t flags, char* buf, std::size_t buf_size) noex
 // 38,574,360 ≈ day 0, 10:42), so the canonical display is "D# HH:MM:SS".
 // Negative values render as-is (relative negatives happen on MOT fields).
 // ---------------------------------------------------------------------------
-[[nodiscard]] inline void format_campaign_time(int32_t t,
+inline void format_campaign_time(int32_t t,
                                                char* buf,
                                                std::size_t buf_size) noexcept {
     if (t < 0) {

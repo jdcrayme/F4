@@ -39,9 +39,11 @@
 #include <f4/data/aircraft_config.hpp>
 #include <f4/data/config_loader.hpp>
 
+#include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <string>
+#include <vector>
 
 using namespace f4::simulation;
 using namespace f4::entities;

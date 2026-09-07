@@ -34,6 +34,15 @@ target_compile_definitions(test_control_loops PRIVATE
     F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}")
 add_dependencies(test_control_loops convert_golden_fixtures)
 
+# PHUG-PLAN Phase 5 (§9 P5.2): CI stability guardrails — the four
+# regression sims (phugoid damping, speed hold, altitude capture,
+# approach VS tracking) over the real FlightModel + AirSteering.
+f4_fm_add_test(test_p5_stability         test_p5_stability.cpp)
+target_link_libraries(test_p5_stability PRIVATE f4-ai)
+target_compile_definitions(test_p5_stability PRIVATE
+    F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}")
+add_dependencies(test_p5_stability convert_golden_fixtures)
+
 # Diagnostic executable (not a GoogleTest) for trajectory analysis.
 add_executable(diag_trajectory diag_trajectory.cpp)
 target_link_libraries(diag_trajectory PRIVATE f4-flight-model f4-ai)

@@ -20,6 +20,7 @@
 
 #include <f4/renderer/feature_mesh.hpp>     // build_feature_mesh, draw_feature_mesh
 #include <f4/renderer/render_resources.hpp>
+#include <cstdint>
 #include <f4/renderer/scene_draw.hpp>       // draw_airfield_geometry
 
 namespace f4::renderer {

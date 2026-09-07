@@ -11,6 +11,8 @@
 #include <algorithm>
 #include <cmath>
 #include <utility>
+#include <vector>
+#include <filesystem>
 
 namespace f4::simulation {
 

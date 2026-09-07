@@ -47,7 +47,18 @@ LandingModule::LandingModule()
     // GREW the cycle: ±3,500 fpm around the beam, threshold crossed
     // 1,540 ft high (fix15 t=1144-1203). With the STAB-E6 beam ff
     // carrying the descent rate, the loop only needs to trim residuals.
-    air_steering.vs_gain = 1.5;
+    // PHUG-P4 retune (STAB-E43 rescale): vs_gain 1.5 -> 3.0. The E43
+    // reduction (4.0 -> 1.5) tamed a beam cycle sustained by the OLD inner
+    // loop's ~10 s effective lag — 200 ft of beam error became 800 fpm of
+    // command the airframe could not follow. The P4.1-corrected loop
+    // delivers gamma within ~1 s, so the outer gain is no longer hot; at
+    // 1.5 the law commands only ~-280 fpm against the spawn-transient
+    // phugoid (+1,100 fpm at 188 ft above the target, measured) and the
+    // aircraft floats 188 ft over the ProceedToFix target before the
+    // reversal dives back through the beam (the establish-delay chain).
+    // 3.0 halves the transient overshoot while staying inside the
+    // corrected loop's bandwidth.
+    air_steering.vs_gain = 3.0;
     // STAB-E18: 900 -> 1400. The beam feedforward alone is -980 fpm at
     // 185 kts on a 3-deg beam; with the VS cap at 900 the law could never
     // command even the beam's own rate, so a correctly-tracked final
@@ -55,18 +66,51 @@ LandingModule::LandingModule()
     // until the alt error grows the E10 window past the cap). The cap
     // must exceed |beam ff| + the correction window: -980 - 300 = -1280.
     air_steering.max_vs_fpm = 1400.0;
+    // PHUG-P4 retune (findings §3.2 — M3 one level up): the altitude
+    // integral's clamp is sized to the TRIM NEED, not the capture
+    // authority. The STAB-E7 integral exists to null the P-only
+    // steady-state beam offset (~40 ft -> ~60 fpm); the old 500 fpm
+    // clamp let it saturate on any sustained 40-ft error in ~3 s and
+    // unwind through a 10 s leak — at the InterceptFinal->OnFinal
+    // handoff it carried a ~500 fpm climb bias that held the aircraft
+    // 300-380 ft above the beam while the lateral capture peak was
+    // measured (1500ftOffset: max_final_lateral 392 -> 417 ft with the
+    // corrected P4.1 inner loop, which tracks the demand the broken
+    // loop used to sag under). 150 fpm keeps the nulling authority
+    // with 3x margin and bounds the handoff transient.
+    air_steering.alt_integral_max = 150.0;
+    // PHUG-P4 retune (STAB-E29 rescale): the 400 fpm/s slew limit was
+    // tuned to the P3 G-loop's ~0.07 rad/s response — "a full-authority
+    // change ramps over ~4 s, comparable to the FCS G-lag". P4.1 corrected
+    // the inner loop to omega_sp ~ 0.8 rad/s (10x faster); the limiter is
+    // now the bottleneck: ProceedToFix hands InterceptFinal a -1,300 fpm
+    // demand that takes 3+ s to reverse, the aircraft dips ~150 ft below
+    // the hold altitude, the dip-recovery climb blocks the SETTLED
+    // establish gate until 232 ft ACROSS the course, and the lateral
+    // window's overshoot grows past the 400-ft gate. 800 fpm/s halves the
+    // handoff ramp (2 s) to match the corrected G-loop; the limiter keeps
+    // its anti-ring role.
+    air_steering.vs_slew_fpm_per_s = 800.0;
     // STAB-E10: base correction window ±300 fpm around the beam
     // feedforward, scaling up with altitude error (see air_steering.cpp).
     // Tight near the beam (smooth ride), full ±900 authority for a
     // from-below capture.
     air_steering.vs_corr_max_fpm = 300.0;
-    // STAB-E1: path_gain raised from 0.00008 to 0.0004 (5x) — the VS-error
-    // damping term is what arrests the phugoid. At 0.00008 a 2,000 fpm VS
-    // error produced 0.016 rad (~0.9 deg) of correction: nothing. The
-    // on_glideslope trace showed the aircraft crossing the beam with
-    // +2,811 fpm and the law unable to flatten it — it sailed 466 ft
-    // high, reversed, and dove at -6,200 fpm into the flare.
-    air_steering.path_gain = 0.0006;
+    // PHUG-P4 retune (M3 linear-band rule): path_gain rescaled
+    // 0.0006 -> 0.00006. At 0.0006 the gamma-correction damper
+    // saturated its 0.10-rad (5.7 deg) limit for ANY vs error beyond
+    // 167 fpm — across the whole ±1,300 fpm handover phugoid it ran
+    // as a bang-bang RELAY, and the P4.1-corrected inner loop
+    // (omega_sp ~0.8 rad/s) faithfully executes the relay instead of
+    // filtering it: the ProceedToFix handover dive-recover ring that
+    // the broken loop could not drive is now fully excited (this is
+    // the P2-measured L3 16.7-s relay cycle). 0.00006 puts the ring
+    // amplitude (±1,300 fpm) at ~80% of the limit — a proportional
+    // damper across the operating band that rails only beyond
+    // ±1,670 fpm. STAB-E1's "unable to flatten" symptom does not
+    // return: the corrected inner loop actually delivers the commanded
+    // gamma within ~1 s, which is what the 0.00008-era tune lacked.
+    air_steering.path_gain = 0.00006;
     air_steering.gamma_corr_limit = 0.10;
     // STAB-E1: attitude_gain lowered 1.2 -> 0.9 and pitch_rate_damp raised
     // 0.3 (class default) -> 0.5. The final tune's 1.2 with the FCS G-lag
@@ -169,7 +213,15 @@ LandingModule::LandingModule()
     pattern_steering.attitude_gain = 0.8;
     pattern_steering.pitch_rate_damp = 0.8;
     pattern_steering.vs_gain = 2.0;
-    pattern_steering.path_gain = 0.0006;
+    // PHUG-P4 retune (M3 linear-band rule): 0.0006 -> 0.00006 — the same
+    // rescale as the straight-in tune above. STAB-E28's gamma RELAY
+    // history (saturated beyond ~420 fpm of vs error, bang-bang through
+    // the FCS G-lag, ±4,000-8,000 fpm pattern limit cycle) is the same
+    // mechanism: the P4.1-corrected inner loop now executes the relay
+    // faithfully, so the damper must live in its linear band. At 0.00006
+    // the ±1,500 fpm pattern-descent band maps to ~80% of the 0.10-rad
+    // limit, proportional end to end.
+    pattern_steering.path_gain = 0.00006;
     pattern_steering.max_vs_fpm = 1500.0;        // calm jet pattern descents
     // STAB-E31: pattern mid covers the flap-1/2 downwind through the
     // gear+full-flap base/intercept; the integral covers the rest.
@@ -313,6 +365,12 @@ LandingModule::build_sm()
         .on_enter(LandingState::PatternBase, [this](const LandingEvent&) {
             pattern_timer_ = 0.0;
         })
+        .on_enter(LandingState::InterceptFinal, [this](const LandingEvent&) {
+            // PHUG-P4 retune (findings §3.6): latch the arrival altitude
+            // for the straight-in do-not-climb hold (see the altitude
+            // target selection in controls_for_state).
+            intercept_entry_alt_ft_ = current_alt_msl_ft_;
+        })
         .on_enter(LandingState::OnFinal, [this](const LandingEvent&) {
             // Established inbound: request clearance to land.
             if (bus_) {
@@ -396,7 +454,6 @@ void LandingModule::initialize(std::uint64_t ownship_id,
         // (R = 6525 ft) — the aircraft started too late and overshot.
         {
             const double V = approach_speed_kts;
-            const double theta_deg = air_steering.max_bank_rad * 57.29578;
             const double tan_theta = std::tan(air_steering.max_bank_rad);
             if (tan_theta > 0.01 && V > 10.0) {
                 const double R_ft = (V * V) / (11.25 * tan_theta);
@@ -543,6 +600,22 @@ AIControlOutput LandingModule::update(double dt, const flight::IAircraftState* s
             // start tracking it — this is the intercept-from-below capture.
             if (beam_now < intercept_alt + 200.0) {
                 intercept_alt = std::max(beam_now, floor_alt);
+            }
+            // PHUG-P4 retune (findings §3.6): straight-in arrivals must NOT
+            // climb on the intercept. Hold the arrival altitude (latched at
+            // state entry) and let the descending beam arrive from above —
+            // the NAV-F principle above, applied to the pattern-altitude
+            // hold as well. MEASURED (P4.1 inner loop, 1500ftOffset): the
+            // corrected G-loop faithfully tracks the climb-to-pattern
+            // target the broken loop used to sag under, the aircraft
+            // balloons ~150 ft through the roll-out, the SETTLED
+            // establish gate delays the handoff, and the lateral window's
+            // overshoot grows 392 -> 417 ft (threshold 400). A level
+            // intercept removes the balloon at the source.
+            if (!fly_traffic_pattern) {
+                intercept_alt = std::min(intercept_alt,
+                                         std::max(intercept_entry_alt_ft_,
+                                                  floor_alt));
             }
             return track_final(intercept_alt,
                 approach_speed_kts,

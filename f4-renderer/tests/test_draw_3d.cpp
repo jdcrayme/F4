@@ -8,12 +8,15 @@
 #include <gtest/gtest.h>
 #include <raylib.h>
 
+#include "display_guard.hpp"
+
 class Draw3DTest : public ::testing::Test {
 protected:
     void SetUp() override {
         if (!initialized_) {
-            SetConfigFlags(FLAG_WINDOW_HIDDEN);
-            InitWindow(256, 256, "test");
+            if (!f4::testing::init_window_if_display(256, 256, "test", FLAG_WINDOW_HIDDEN)) {
+                GTEST_SKIP() << "no display available — GPU-context test skipped";
+            }
             initialized_ = true;
         }
     }

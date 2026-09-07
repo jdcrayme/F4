@@ -78,6 +78,9 @@ int main(int argc, char** argv) {
         }
     }
 
+    // Apply --width / --height (must precede run() — InitWindow consumes them)
+    app.set_window_size(window_w, window_h);
+
     // Apply --install
     if (have_install) {
         if (!app.set_install_path(install_path)) {

@@ -30,6 +30,7 @@
 #include <rlImGui.h>
 #include <raylib.h>
 
+#include <cstdint>
 #include <cstdio>
 #include <filesystem>
 #include <string>

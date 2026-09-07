@@ -367,10 +367,7 @@ TEST(AtmPrioritize, SortsByPriorityThenGenerationOrder) {
 
 TEST(AtmPrioritize, TempoBudgetCapsTheCycle) {
     auto rig = Rig::make();
-    AtmConfig cfg = rig->atm->stats().requests_generated == 0
-                        ? AtmConfig{}
-                        : AtmConfig{};
-    // (config is fixed at construction — test through a fresh ATM)
+    // (config is fixed at construction — test through a fresh ATM `c` below)
     auto ws = make_atm_world();
     f4::world::WorldStateAdapters adapters(ws);
     auto profiles = load_profiles();

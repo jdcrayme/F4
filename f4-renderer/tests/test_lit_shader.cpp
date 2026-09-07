@@ -8,14 +8,17 @@
 #include <gtest/gtest.h>
 #include <raylib.h>
 
+#include "display_guard.hpp"
+
 using namespace f4::renderer;
 
 class LitShaderTest : public ::testing::Test {
 protected:
     void SetUp() override {
         if (!initialized_) {
-            SetConfigFlags(FLAG_WINDOW_HIDDEN);
-            InitWindow(1, 1, "test");
+            if (!f4::testing::init_window_if_display(1, 1, "test", FLAG_WINDOW_HIDDEN)) {
+                GTEST_SKIP() << "no display available — GPU-context test skipped";
+            }
             initialized_ = true;
         }
     }

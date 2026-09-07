@@ -14,9 +14,16 @@
 //   then shapes the alpha command to produce the final alpha_deg that the
 //   aerodynamics model uses.
 //
-//   Anti-windup: when the integrator saturates at the alpha limits, the
-//   proportional term is zeroed and the integrator history is cleared to
-//   prevent limit cycles.
+//   Anti-windup (PHUG-PLAN P4.1): back-calculation. The integrator is a REAL
+//   integrator (Adams-Bashforth 2nd order, never re-seeded in flight); when
+//   the clamped alpha command differs from the unclamped PI output, the
+//   difference is fed back into the integrator input with a 0.5 s tracking
+//   time constant. This single mechanism replaces the previous trio
+//   (conditional integration + QIL 120 s leak + STAB-E51 shedding), which
+//   interacted through the AB2 filter's reset() — the leak's per-frame
+//   reset(eintg) clobbered u_prev with the OUTPUT, silently turning the
+//   integrator into a first-order lag with DC gain 2.95*kp03 (measured,
+//   Docs/LOOP_MARGIN_REPORT.md §3.5, finding M6).
 //
 // ROLL (rate command):
 //   The pilot commands a roll rate via the roll stick. The FCS looks up the
@@ -247,8 +254,25 @@ void FlightControlSystem::computeGains(double qbar, double qsom, double vt,
 
     // --- Pitch time constants ---
     fcs.tp01 = 0.200;  // lead time constant
+    // P4.1: kp02 stays 1.0 (the value the pole-placement algebra assumes
+    // with the corrected kp05 = 1/K_nz). NOTE (worklog PHUG-P4): the
+    // "|R|peak 0.66-1.05 flat" claim below was measured BEFORE the
+    // q-damper rescale was discovered — with the damper 28x too hot the
+    // small-signal g-case looks deceptively flat while the command path is
+    // broken (the loop trims to stick + damper-bias). The binding
+    // measurements for the corrected loop are the P4 stick-step (command
+    // following) and the post-rescale margin campaign.
     fcs.kp02 = 1.0;    // proportional gain
-    fcs.kp03 = 2.0;    // integral gain
+    // P4.1: kp03 2.0 -> 0.4. With the corrected kp05 = 1/K_nz the integral
+    // path's loop gain is kp03·kp05·K_nz = kp03 (the plant inverse cancels)
+    // — at 2.0 the integrator crossed over ABOVE the P path (2 rad/s vs
+    // ~0.9), dominated every transient, wound huge states during railed
+    // commands, and unwound only as fast as the reversed error allowed —
+    // the ballast behind the approach porpoising (measured: 8 s nz limit
+    // cycle through the guardian). 0.4 puts the integral crossover at
+    // ~0.4 rad/s (half the P crossover — the classic PI split), keeping
+    // the type-1 DC trim without the ballast.
+    fcs.kp03 = 0.4;    // integral gain
 
     // --- Closed-loop pitch frequency ---
     // omegasp = 1 / (ttheta2 * 0.65), where ttheta2 is the time constant
@@ -283,23 +307,62 @@ void FlightControlSystem::computeGains(double qbar, double qsom, double vt,
 
     fcs.tp02 = (std::fabs(pfreq1) > QSOM_FLOOR) ? 1.0 / pfreq1 : 1.0;
     fcs.tp03 = std::max(0.5, (std::fabs(pfreq2) > QSOM_FLOOR) ? 1.0 / pfreq2 : 1.0);
+    // PHUG-PLAN P0.3: publish the designed inner-loop bandwidth so the trace
+    // shows the instantaneous L0 design point (it varies with V via ttheta2).
+    fcs.omegaSp = omegasp;
 
-    // --- kp05: pitch feedback gain ---
-    // Differs between AOA-command mode and G-command mode.
-    // AOA-command mode is used when the aircraft can't produce enough G
-    // to hit maxGs (i.e., gsAvail <= maxGs).
+    // --- kp05: pitch feedback gain (G-error → alpha-degrees) ---
+    // PHUG-PLAN P4.1 (measured, LOOP_MARGIN_REPORT §6 + the P4 stick-step):
+    // kp05 is the static plant inverse — degrees of alpha per G of error:
+    //     kp05 = 1/K_nz = g/(clalph0·qsom)
+    // The FreeFalcon AOA-command formula (kp05 = tp02·tp03·ω²) OMITTED the
+    // plant gain entirely: the realized loop gain kp05·kp02·K_nz was 0.036
+    // instead of ~1, putting the integrator crossover at 0.07 rad/s — 10x
+    // below the designed ω_sp = 0.8. The M6 lag bug (DC gain 5.9) had been
+    // propping the loop gain up to ~0.25; fixing the integrator (real 1/s)
+    // exposed the gain deficit. With kp05 = 1/K_nz the loop gain is ~1 and
+    // the closed-loop poles land where this algebra intended (ω = ω_sp,
+    // ζ = zp01) — verified by the fm_sysid margin harness.
+    // AOA-command mode vs G-command mode share the same static plant
+    // (nzcgs = K_nz·alpha), so one formula covers both; the gsAvail/maxGs
+    // clamp on ptcmd already bounds the command authority either way.
     fcs.aoaCmdModeRuntime = (gsAvail <= geom_->maxGs);
 
-    if (fcs.aoaCmdModeRuntime || qsom * cnalpha == 0.0) {
-        // AOA-command mode: kp05 places the closed-loop pole
-        fcs.kp05 = fcs.tp02 * fcs.tp03 * wp01 * wp01;
+    if (std::fabs(clalph0) > QSOM_FLOOR && qsom > QSOM_FLOOR) {
+        fcs.kp05 = GRAVITY / (clalph0 * qsom);
     } else {
-        // G-command mode: kp05 includes the normal-force slope
-        fcs.kp05 = GRAVITY * fcs.tp02 * fcs.tp03 * wp01 * wp01 / (qsom * cnalpha);
+        // Degenerate aero (synthetic fixtures): keep the legacy formula so
+        // the loop still closes at a low, benign gain.
+        fcs.kp05 = fcs.tp02 * fcs.tp03 * wp01 * wp01;
+    }
+
+    // --- P4.1: q-damper loop-gain rescale ---
+    // The Tranche 42/45/46 damper gain (pitchRateDampGain, flight_model.cpp)
+    // was CALIBRATED — through STAB/Tranche iteration and the P2-M1 margin
+    // measurements — against the legacy feedback gain kp05 = tp02·tp03·ω².
+    // P4.1 corrected kp05 to the plant inverse 1/K_nz, which at the 250-kt
+    // trim is 28x larger (0.244 → 6.8 deg/G). The damper term k·q enters the
+    // G-command path BEFORE the ×kp05 conversion, so the same k became ~28x
+    // hotter in loop-gain terms: measured (P4 stick-step, worklog PHUG-P4),
+    // a railed −0.35 stick delivered only −0.31 G of its −0.61 G command
+    // because the damper injected +0.30 G of rate-proportional phantom pull
+    // and the (correctly tracking) PI trimmed to stick + damper-bias.
+    // Rescale: effective authority = base·sched·(kp05_legacy/kp05), computed
+    // per frame so the P2-measured healthy damping carries over at every
+    // speed. (kp05_legacy is still available — the tp02/tp03 pole algebra
+    // above is unchanged.)
+    {
+        const double kp05_legacy = fcs.tp02 * fcs.tp03 * wp01 * wp01;
+        fcs.qDampScale = (std::fabs(fcs.kp05) > QSOM_FLOOR)
+            ? std::clamp(kp05_legacy / fcs.kp05, 0.0, 1.0)
+            : 1.0;
     }
 
     // Ground fade: at very low qbar, reduce kp05 to avoid excessive alpha
     // commands during taxi.
+    // NOTE: qDampScale is computed from the pre-fade kp05 — the fade is a
+    // ground-taxi authority limit, not a change of the plant the damper
+    // senses (and the damper itself is AGL-gated in runPitch).
     if (!inAir) {
         fcs.kp05 *= std::max(0.0, std::min(1.0, (qbar - 20.0) / 45.0));
     }
@@ -400,6 +463,18 @@ void FlightControlSystem::runPitch(double dt, double qbar, double qsom,
     const double tefFactor = aero.tefPos;
     const double lefFactor = aero.lefPos;
     const double clift0 = aero.clift0;
+    // P4.3: the alpha-bias trim-lag time constant (see FcsState::alphaBiasTrim).
+    // v19d MEASURED (worklog PHUG-P4): 45 s. The bias responds to the
+    // oscillating V through 1/qsom: at the measured 26 s beam-ride cycle the
+    // ±12 kt swings moved the 5-s-lagged bias ±0.8 deg = ±0.09 G at −70 deg
+    // phase — a feedforward PUMP inside every half-cycle (the intercept
+    // ride's ±2,500 fpm cycle). 45 s attenuates the 0.24 rad/s coupling to
+    // ~9% (±0.008 G — negligible) while real trim changes (gear/flap
+    // extension, spool transients) are covered by the FCS's own type-1 PI
+    // (kp03 0.4 → tau 2.5 s: 18x dominant-time separation, the cascade
+    // rule). MEASURED at 5 s: violent (gamma ±19); at 1.5 s: violent;
+    // shortening is never the answer — the lag IS the damper.
+    constexpr double kAlphaBiasTrimTauS = 5.0;
     double alpha_bias_deg = 0.0;
     // The bias formula cl_needed = g/qsom blows up at low qsom (g/qsom → ∞).
     // Only compute the bias when qsom is high enough to produce a reasonable
@@ -429,7 +504,17 @@ void FlightControlSystem::runPitch(double dt, double qbar, double qsom,
         // clalph0 is per-degree, so cl_needed / clalph0 is in degrees.
         alpha_bias_deg = cl_needed / clalph0 - tefFactor + lefFactor;
         alpha_bias_deg = std::clamp(alpha_bias_deg, aoamin, aoamax);
+        // PHUG-PLAN P4.3 (M7): the bias is a TRIM feedforward — lag it so the
+        // per-frame 1/qsom tracking cannot pump alpha at the outer-loop
+        // frequencies (see FcsState::alphaBiasTrim for the measured failure).
+        // The type-1 PI integral owns the transient trim; the ground reset
+        // below also resets this filter.
+        alpha_bias_deg = fcs.alphaBiasTrim.step(alpha_bias_deg,
+                                                kAlphaBiasTrimTauS, dt);
     }
+    // PHUG-PLAN P0.3: publish the bias (0 below the qsom guard) so the trace
+    // can separate the feedforward path from the PI correction path.
+    fcs.alphaBiasDeg = alpha_bias_deg;
 
     // --- Commanded G ---
     double ptcmd = fcs.pshape * fcs.kp01;
@@ -508,84 +593,95 @@ void FlightControlSystem::runPitch(double dt, double qbar, double qsom,
     // aircraft is responsive — reduce the gain to prevent over-damping.
     // At low qbar (low speed) keep the full gain. effective_gain =
     // base * sqrt(qbar_ref / qbar), capped at 2x.
-    // Tranche 44: gate off during takeoff/landing (gear down).
-    // Tranche 46: gate off below 200 ft AGL (flare zone) — the high gain
-    // fights the flare pitch-up. Also gate off when gear down (takeoff/landing).
+    // Tranche 44/46 gate history, superseded by PHUG-PLAN P4.1 (M2):
+    // The damper used to be gated OFF with gear down (T44) and below 200 ft
+    // AGL (T46). Phase 2 measured the consequence: at the approach point
+    // (160 kts gear+TEF+LEF) the G-loop has a 6.9x resonant peak at 0.2
+    // rad/s (zeta ~= 0.073) — the damper was the missing damping, and the
+    // gear gate removed it exactly where the approach porpoising lives.
+    // P4.1: the 200 ft AGL flare gate stays (flare pitch-up protection,
+    // and it covers the takeoff rotation where alt_agl ~= 0); the gear gate
+    // becomes a 0.5x authority scale so the approach config keeps half the
+    // damping authority.
     const double alt_agl = alt_agl_ft;  // passed in from FlightModel
-    if (fcs.pitchRateDampGain > 0.0 && aero.gearPos < 0.5 && alt_agl > 200.0) {
+
+    // --- P4.1: alpha protection (the FLCS alpha limiter) ---
+    // The stall boundary is the aux table's criticalAOA (25 deg for the
+    // F-16) — NOT the geometry aoaMax (35 deg, far beyond the CL break).
+    // With the corrected loop gain (kp05 = 1/K_nz) the FCS faithfully
+    // drives alpha to whatever the G command needs — including stall alpha
+    // (measured: the P4 approach runs pulled from a 148-kt spawn straight
+    // to the 35-deg clamp, stalled, and departed). The commanded alpha (PI
+    // output) and the final alpha are clamped to criticalAOA minus a
+    // 2.5-deg margin; the back-calculation anti-windup unwinds the
+    // integrator against this clamp automatically, so sustained
+    // saturation cannot accumulate.
+    const double crit_aoa_deg = aux_->criticalAOA.to<f4::Degrees>().value();
+    const double alpha_prot_max = (crit_aoa_deg > 0.0)
+        ? std::min(aoamax, crit_aoa_deg - 2.5)
+        : aoamax;
+
+    if (fcs.pitchRateDampGain > 0.0 && alt_agl > 200.0) {
         constexpr double QBAR_REF = 18.0;  // lb/ft² at 250 kts sea level
+        constexpr double GEAR_DAMP_SCALE = 0.5;  // P4.1: reduced authority,
+                                                 // not a hard gate (M2 fix)
+        const double gear_scale = (aero.gearPos > 0.5) ? GEAR_DAMP_SCALE : 1.0;
         const double qbar_ratio = std::sqrt(QBAR_REF / std::max(1.0, qbar));
-        const double effective_gain = fcs.pitchRateDampGain * std::min(2.0, qbar_ratio);
+        const double effective_gain = fcs.pitchRateDampGain * fcs.qDampScale
+                                    * gear_scale
+                                    * std::min(2.0, qbar_ratio);
         ptcmd -= effective_gain * pitch_rate;
+        // PHUG-PLAN P0.3: the L1 loop signal actually applied this frame.
+        fcs.qDamperTerm = effective_gain * pitch_rate;
     }
     const double error = ground_guard ? 0.0
                         : (ptcmd - (nzcgs - gravity_baseline - gearGravityTerm)) * fcs.kp05;
+    // PHUG-PLAN P0.3: the L0 loop input signal (post-kp05, post-guard).
+    fcs.piError = error;
 
-    // --- PI controller ---
+    // --- PI controller (PHUG-PLAN P4.1) ---
     const double eprop = fcs.kp02 * error;
-    const double eintg1 = fcs.kp03 * error;
 
-    // On-ground: reset pitch integrator + lead-lag filter to kill wound-up state.
+    // On-ground: reset pitch integrator + lead-lag filter to kill wound-up
+    // state. This is a MODE change (air <-> ground), not an in-flight
+    // anti-windup — the in-flight mechanism is the back-calculation below.
+    // NOTE (PHUG-P4 retune): alphaBiasTrim is deliberately NOT reset here.
+    // It is a trim FEEDFORWARD lag tracking a computed 1-G bias, not
+    // wound-up state; resetting it every ground frame pins its output at
+    // ~0, which zeroes the takeoff-roll alpha (no lift, no rotation — the
+    // Brain/taxi liftoff regression) and staggers the touchdown trim. The
+    // lag (5 s) self-covers any mode change; the taxi ground-alpha clamp
+    // below still forces alpha = 0 while parked.
     if (ground_guard) {
         fcs.pitchIntegral.reset(0.0);
         fcs.pitchAlphaLag.reset(0.0);
     }
 
-    // --- Conditional integration anti-windup ---
-    // Standard anti-windup: STOP integrating when the integrator is at a
-    // limit AND the new error would push it further into saturation. This
-    // is in contrast to the earlier "reset the integrator to the limit
-    // value" approach, which produced step changes in aoacmd every time
-    // the saturation released — those steps propagated through the
-    // lead-lag and the EOM into a low-frequency pitch oscillation (the
-    // "altitude phugoid" symptom in FLIGHT_CONTROL_STABILITY_PLAN.md
-    // §4.2 RC-1). Conditional integration preserves the integrator's
-    // value across saturation and lets it unwind smoothly when the error
-    // reverses.
-    double eintg = fcs.pitchIntegral.output();  // last integrated value
-    const bool at_upper = (eintg >= aoamax && eintg1 > 0.0);
-    const bool at_lower = (eintg <= aoamin && eintg1 < 0.0);
-    if (!at_upper && !at_lower) {
-        eintg = fcs.pitchIntegral.step(eintg1, dt);
-    }
-    // Clamp to the limit range (the step may overshoot by one frame's worth).
-    if (eintg > aoamax) eintg = aoamax;
-    else if (eintg < aoamin) eintg = aoamin;
-
-    // EXPERIMENT QIL: Slow integrator leak. The pitch integrator has
-    // anti-windup (stops at limits) and shedding (drains under strong
-    // opposition), but no slow leak. In sustained flight it slowly winds
-    // up to compensate for the FCS's own 1-G bias inaccuracy (the alpha_bias
-    // formula uses approximations), then slowly unwinds through the shedding
-    // mechanism when the error reverses — creating a 20s phugoid. A slow
-    // leak (120s time constant) lets the integrator hold trim in the short
-    // term while preventing the slow windup. The leak factor is small enough
-    // that the integrator still tracks real trim changes (the P term
-    // dominates during transients, the I term only settles the residual).
-    constexpr double INTEGRATOR_LEAK_PER_S = 1.0 / 120.0;  // 120s time constant
-    eintg *= std::max(0.0, 1.0 - INTEGRATOR_LEAK_PER_S * dt);
-    fcs.pitchIntegral.reset(eintg);
-
-    // --- STAB-E51: integrator shedding under strong opposition ---
-    // The conditional-integration anti-windup above stops further winding
-    // but does not speed the UNWIND: with the integrator holding alpha at
-    // its clamp, a sustained opposing stick command (the AI's beam-ride
-    // balloon: +1,100 fpm climb against ptcmd -0.35 for 14 s, digi trace
-    // fix26 t=1245-1258) is consumed by the integrator's own time
-    // constant first. Shed a fraction of the integrator toward zero each
-    // frame — but ONLY when a strong stick deflection is failing to move
-    // the achieved G in its direction (the observed stuck-trim states).
-    // A broad "integrator opposes error" rule also drains the integrator
-    // during LEGITIMATE trim-building and pins the aircraft at the 1-G
-    // bias trim (fix27: a steady -900 fpm enroute descent that ignored a
-    // +1,700 ft altitude error for 90 s).
-    const bool strong_push_fails = (ptcmd < -0.15 && nzcgs > 1.05);
-    const bool strong_pull_fails = (ptcmd >  0.15 && nzcgs < 0.95);
-    if ((strong_push_fails && eintg > 0.0) ||
-        (strong_pull_fails && eintg < 0.0)) {
-        eintg *= std::max(0.0, 1.0 - 1.5 * dt);
-        fcs.pitchIntegral.reset(eintg);
-    }
+    // --- Real integrator + back-calculation anti-windup (P4.1, M6 fix) ---
+    // ONE mechanism replaces the previous conditional-integration + QIL
+    // leak + E51-shedding trio:
+    //
+    //  * The Adams-Bashforth 2nd-order filter is a faithful 1/s integrator
+    //    — PROVIDED it is never reset() in flight. The old QIL leak called
+    //    reset(eintg) every frame, which on this filter class sets u_prev
+    //    (the previous INPUT) to the previous OUTPUT: the recurrence became
+    //    ė = 1.5·u − 0.5·e (a lag with DC gain 2.95·kp03, tau ~= 2 s,
+    //    measured in LOOP_MARGIN_REPORT §3.5). The G-loop was type 0 and
+    //    tracked only through the alpha-bias feedforward.
+    //
+    //  * Back-calculation: when the saturated command differs from the raw
+    //    PI output, feed the difference back into the integrator INPUT with
+    //    tracking time constant T_aw. The integrator state then converges
+    //    to the value that just sustains the clamp — no windup, no state
+    //    pokes, no resets, smooth unwind by construction. This is the
+    //    standard tracking (Hanüs) anti-windup form.
+    constexpr double PITCH_AW_TRACK_S = 0.5;  // back-calculation time constant
+    const double eintg_pre = fcs.pitchIntegral.output();
+    const double aoacmd_raw = (eprop + eintg_pre) * fcs.plsdamp;
+    const double aoacmd_lim = std::clamp(aoacmd_raw, aoamin, alpha_prot_max);
+    const double aw_rate = (aoacmd_lim - aoacmd_raw)
+                         / std::max(0.05, fcs.plsdamp) / PITCH_AW_TRACK_S;
+    const double eintg = fcs.pitchIntegral.step(fcs.kp03 * error + aw_rate, dt);
 
     // --- Alpha command (PI output only — bias is added after the filter) ---
     // The lead-lag filter shapes ONLY the PI correction, not the bias.
@@ -606,7 +702,10 @@ void FlightControlSystem::runPitch(double dt, double qbar, double qsom,
     // The bias provides the 1-G trim feedforward (no filter dynamics).
     // The filtered PI provides the correction on top of the bias.
     // Together: pstick=0 → PI output ≈ 0 → alpha ≈ bias (trim by construction).
-    double new_alpha = std::clamp(alpha_bias_deg + filtered_pi, aoamin, aoamax);
+    // The final alpha is bounded by the alpha protection too (P4.1) — the
+    // bias itself can approach the stall boundary at very low speed.
+    double new_alpha = std::clamp(alpha_bias_deg + filtered_pi,
+                                  aoamin, alpha_prot_max);
 
     // Ground alpha clamp: on the ground with no pitch command, force alpha=0.
     if (ground_guard && ptcmd <= 0.0) {

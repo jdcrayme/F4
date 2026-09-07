@@ -223,6 +223,7 @@ public:
         return to_radians(fm_.state().kin.theta);
     }
 
+
     double roll_angle_rad() const override {
         return to_radians(fm_.state().kin.phi);
     }

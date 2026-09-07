@@ -17,8 +17,14 @@
 
 #include <algorithm>
 #include <fstream>
+#include <memory>
+#include <filesystem>
+#include <cstdint>
 #include <sstream>
 #include <system_error>
+#include <vector>
+#include <unordered_map>
+#include <string>
 
 namespace f4::simulation {
 

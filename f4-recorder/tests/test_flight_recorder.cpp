@@ -5,6 +5,9 @@
 #include <gtest/gtest.h>
 
 #include <f4/recorder/flight_recorder.hpp>
+#include <string>
+#include <filesystem>
+#include <cstdint>
 
 using namespace f4::recorder;
 

@@ -220,6 +220,19 @@ struct FcsState {
                                                   // the FCS loop (no AI-side lag).
     math::AdamsBash2Filter pitchIntegral;    // NZ error integrator (Adams-Bashforth 2nd order)
     math::LeadLagFilter   pitchAlphaLag;     // F7Tust lead-lag on alpha command
+    math::LagFilter       alphaBiasTrim;     // PHUG-PLAN P4.3: 5 s lag on the
+                                              // 1-G alpha-bias feedforward. The
+                                              // instantaneous bias (proportional to
+                                              // 1/qsom) is a TRIM term, but tracked
+                                              // per-frame it becomes an in-loop
+                                              // element (LOOP_MARGIN_REPORT M7): at
+                                              // the approach point its 2·bias/V gain
+                                              // pumped alpha ±2.4 deg per ±12 kt of
+                                              // speed oscillation — the backside's
+                                              // own positive feedback. The lag keeps
+                                              // the speed scheduling while the
+                                              // (type-1) PI integral carries the
+                                              // transient trim.
 
     // Pitch gains (computed by computeGains, read by runPitch)
     double kp01{1.0}, kp02{1.0}, kp03{2.0}, kp05{1.0};
@@ -229,6 +242,35 @@ struct FcsState {
     double ptcmd{0.0};                        // commanded pitch (G or alpha — G is dimensionless)
     Angle aoacmd{zero_angle()};               // commanded alpha
     bool   aoaCmdModeRuntime{false};          // true = alpha-command, false = G-command
+
+    // --- Pitch diagnostics (PHUG-PLAN P0.3: control-loop trace) ---
+    // Observability for the longitudinal-stability diagnosis
+    // (Docs/LONGITUDINAL_STABILITY_PLAN.md). These are values that used to
+    // live only in runPitch/computeGains locals; storing them per-frame
+    // makes the closed loop fully observable in the FCS CSV trace.
+    double alphaBiasDeg{0.0};  // 1-G trim feedforward added AFTER the lead-lag
+                               // (fcs.cpp runPitch). Speed-coupled via qsom —
+                               // the L2 loop gain of the stability plan.
+    double qDamperTerm{0.0};   // the ACTUAL effective_gain*q subtracted from
+                               // ptcmd by the Tranche 42/45/46 q-damper this
+                               // frame (0 when gated off). The L1 loop signal.
+    double omegaSp{0.0};       // computeGains: designed inner-loop bandwidth
+                               // (rad/s) — the instantaneous L0 design point.
+    double piError{0.0};       // post-kp05 G error into the PI (0 under the
+                               // ground guard) — the L0 loop input signal.
+    double qDampScale{1.0};    // PHUG-PLAN P4.1: q-damper loop-gain rescale
+                               // factor (kp05_legacy/kp05, computed in
+                               // computeGains). The Tranche 42/45/46 damper
+                               // gain was calibrated against the legacy
+                               // kp05 = tp02·tp03·ω²; with the corrected
+                               // kp05 = 1/K_nz (~28x larger at cruise) the
+                               // same k is ~28x hotter in loop-gain terms
+                               // (measured: the stick command path delivered
+                               // half its G while the loop trimmed to
+                               // stick + damper-bias). runPitch multiplies
+                               // the damper authority by this factor so the
+                               // P2-measured healthy damping carries over
+                               // across the envelope.
 
     // --- Roll channel ---
     math::LagFilter rollRateLag;

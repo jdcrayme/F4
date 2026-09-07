@@ -28,9 +28,12 @@
 #include <gtest/gtest.h>
 
 #include <cmath>
+#include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <string>
+#include <vector>
+#include <unordered_map>
 
 using namespace f4::simulation;
 using f4::entities::EntityHandle;

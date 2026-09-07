@@ -10,9 +10,13 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstdint>
 #include <cstdlib>
 #include <stdexcept>
 #include <utility>
+#include <vector>
+#include <string>
+#include <filesystem>
 
 namespace f4::world_types {
 

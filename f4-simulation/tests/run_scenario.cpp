@@ -2,6 +2,7 @@
 #include <f4/ai/brain_component.hpp>
 #include <f4/flight/flight_model_component.hpp>
 #include <f4/entities/entity.hpp>
+#include <algorithm>
 #include <cstdio>
 #include <cmath>
 #include <filesystem>

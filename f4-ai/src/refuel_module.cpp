@@ -7,6 +7,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <string>
+#include <cstdint>
 
 namespace f4::ai::modules {
 
@@ -35,6 +37,14 @@ RefuelModule::RefuelModule()
     air_steering.vs_gain           = 0.5;
     air_steering.alt_integral_gain  = 0.1;
     air_steering.alt_integral_max   = 50.0;
+    // PHUG-P4 retune (M3 linear-band rule): class-default path_gain 0.0006
+    // saturated the 0.10-rad gamma-correction limit beyond ~167 fpm of vs
+    // error — a bang-bang relay the P4.1-corrected inner loop executes
+    // faithfully (the P3 G-lag used to filter it). The station-keeping
+    // phugoid's ±100 ft / ±500 fpm band maps to ~50-80% of the limit,
+    // proportional end to end. See the landing/nav tunes for the full
+    // measurement record.
+    air_steering.path_gain = 0.00006;
     air_steering.attitude_gain      = 1.0;
     air_steering.pitch_rate_damp   = 1.0;
     air_steering.bank_gain         = 3.0;
@@ -120,13 +130,19 @@ RefuelModule::build_sm()
             published_contact_request_ = false;
             hold_time_s_ = 0.0;
             precontact_stable_time_s_ = 0.0;
-            // Reset air_steering integrators to prevent windup from the
-            // spawn transient (the receiver enters PreContact with a
-            // large VS; the altitude/speed integrals accumulate during
-            // the stabilization, then over-correct on the next state
-            // transition). The speed_damp term (the phugoid damper) is
-            // a PROPORTIONAL term, not an integral — it doesn't wind up.
-            air_steering.reset_integrators();
+            // PHUG-P4 retune: the integrator reset that used to live here
+            // is REMOVED. The Rendezvous phase flies the same altitude
+            // target with a decaying closure bias — its throttle and
+            // altitude integrals ARE the correct arrival trim, and
+            // resetting them restarts the type-1 speed loop from the
+            // P-only point: the receiver sheds trim thrust for ~30 s and
+            // drifts astern of the station (measured: -15 ft at handoff,
+            // -980 ft astern by the time the |VS| gate reported ready —
+            // at P3 the broken loop's speed error masked the drift).
+            // The along-track closure that recovers this lives in
+            // controls_for_cleared_contact. The speed_damp term (the
+            // phugoid damper) is a PROPORTIONAL term, not an integral —
+            // it doesn't wind up.
             // Do NOT publish PrecontactReport yet — the USAF procedure
             // requires the receiver to STABILIZE at the pre-contact
             // position before calling "Precontact." The update loop
@@ -489,7 +505,18 @@ AIControlOutput RefuelModule::controls_for_cleared_contact() const
     air_steering.alt_integral_max = 200.0;
     air_steering.attitude_gain = 1.5;
     air_steering.pitch_rate_damp = 0.8;
-    const double target_speed = tanker_picture_.speed_kts + 1.0;
+    // PHUG-P4 retune: the closure bias is a bounded PROPORTIONAL term on
+    // the along-track gap, not a fixed +1 kt. MEASURED (AAR E2E): the
+    // receiver reached ClearedContact ~980 ft astern (the PreContact
+    // station-keep drifts astern after the integrator reset — pre-existing
+    // behavior the P3 loop's speed error masked), and a +1 kt bias needs
+    // ~8 min for that gap: the 360-s budget expired before the boom
+    // envelope. 0.05/ft capped at 8 kt closes 980 ft in ~75 s and decays
+    // to ~0.7 kt inside the ±15 ft envelope, preserving the gentle
+    // terminal closure the envelope gate expects.
+    const double closure_gap = -along_err_ft() - config.precontact_offset_long_ft;
+    const double closure_bias = std::clamp(0.05 * closure_gap, 0.0, 8.0);
+    const double target_speed = tanker_picture_.speed_kts + closure_bias;
     auto out = air_steering.steer(tanker_picture_.heading_rad,
                                   tanker_picture_.altitude_msl_ft,
                                   target_speed, steering_input());

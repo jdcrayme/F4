@@ -38,6 +38,15 @@ namespace f4::recorder {
 //   7. Navigation    — target_alt_ft, target_speed_kts, target_heading_deg,
 //                       course_lateral_ft, course_along_ft, localizer_heading_deg
 //   8. Ground/Engine — on_ground, gear_pos, engine_rpm, fuel_lbs, nz, nx
+//   9. Loop diagnos. — PHUG-PLAN P0.3 (Docs/LONGITUDINAL_STABILITY_PLAN.md):
+//                       the plant/FCS/cascade signals needed to attribute an
+//                       observed oscillation to its owning loop (L0..L4):
+//                       plant group (qsom, qbar, gamma, vtDot, thrust, stall,
+//                       flap/brake positions), FCS internals group (alpha
+//                       bias, q-damper term, designed bandwidth + gains, PI
+//                       error), AirSteering cascade group (alt_err, vs_corr,
+//                       vs_target, gamma chain, integrator states, speed
+//                       channel cross-coupling).
 struct FcsTraceSample {
     // --- Timing ---
     std::uint64_t tick{0};
@@ -107,6 +116,43 @@ struct FcsTraceSample {
     double fuel_lbs{0.0};
     double nz{0.0};                  // normal load factor (G)
     double nx{0.0};                  // axial load factor
+
+    // --- Loop diagnostics: plant group (PHUG-PLAN P0.3) ---
+    double qsom{0.0};               // q*S/m — sets the L0 loop gain K_nz
+    double qbar{0.0};               // dynamic pressure (lb/ft²)
+    double gamma_deg{0.0};          // flight-path angle (the phugoid variable)
+    double vt_dot{0.0};             // dVt/dt (ft/s²) — axial dynamics
+    double thrust_accel{0.0};       // engine thrust acceleration (ft/s²)
+    int    stall_state{0};          // StallState enum value (mode filter)
+    double tef_pos{0.0};            // actual TEF position 0..1 (actuator lag)
+    double lef_pos{0.0};            // actual LEF position 0..1
+    double dbrake_pos{0.0};         // actual speed-brake position 0..1
+
+    // --- Loop diagnostics: FCS internals group (PHUG-PLAN P0.3) ---
+    double alpha_bias_deg{0.0};     // 1-G trim feedforward (L2: V² coupling)
+    double q_damper_term{0.0};      // Tranche 42/45/46 term subtracted from ptcmd (L1)
+    double omega_sp{0.0};           // designed inner-loop bandwidth (rad/s)
+    double zp01{0.0};               // designed pitch damping ratio
+    double tp02{0.0};               // lead-lag lag constant (s)
+    double tp03{0.0};               // lead-lag lag constant (s)
+    double pi_error{0.0};           // post-kp05 G error into the pitch PI
+
+    // --- Loop diagnostics: AirSteering cascade group (PHUG-PLAN P0.3) ---
+    double ai_alt_err_ft{0.0};      // altitude error driving the cascade
+    double ai_vs_corr_fpm{0.0};     // P + leaky-I VS correction (windowed)
+    double ai_vs_target_fpm{0.0};   // VS command after the slew limiter
+    double ai_vs_ff_fpm{0.0};       // path feedforward VS
+    double ai_gamma_now_rad{0.0};   // asin(vs/v) from ACTUAL VS
+    double ai_gamma_ff_rad{0.0};    // path angle from vs_target
+    double ai_gamma_corr_rad{0.0};  // VS-error damping term (Q3-clamped)
+    double ai_alpha_est_rad{0.0};   // pitch - gamma_now (STAB-E17 clamped)
+    double ai_theta_target_rad{0.0};// final pitch-attitude target
+    double ai_alt_integral_fpm{0.0};// alt leaky-integrator state
+    double ai_hdg_err_rad{0.0};     // wrapped heading error
+    double ai_bank_target_rad{0.0}; // commanded bank (0 = beam ride)
+    double ai_speed_err_kt{0.0};    // speed error (L4 input)
+    double ai_speed_integral{0.0};  // speed leaky-integrator state
+    double ai_energy_err_ft{0.0};   // V2 total-energy error (ft)
 };
 
 // ============================================================================

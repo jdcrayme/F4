@@ -8,8 +8,12 @@
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
+#include <optional>
+#include <filesystem>
 #include <sstream>
 #include <system_error>
+#include <vector>
+#include <string>
 
 namespace f4::assets {
 

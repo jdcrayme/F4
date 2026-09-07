@@ -39,6 +39,8 @@
 #include <f4/data/aircraft_config.hpp>
 #include <f4/data/config_loader.hpp>
 
+#include <cstdint>
+#include <cmath>
 #include <cstdlib>
 #include <filesystem>
 #include <string>
@@ -162,9 +164,10 @@ TEST(CampaignBridge, DerivesDepartureAltitude) {
     auto obj = make_airbase_objective();
     auto af = derive_airfield_from_objective(obj);
     ASSERT_TRUE(af.has_value());
-    // Departure altitude = threshold altitude + 2500 ft.
+    // Departure altitude = threshold altitude + 3000 ft (Tranche 44:
+    // raised from 2500 — see campaign_bridge.cpp).
     EXPECT_DOUBLE_EQ(af->threshold_altitude_ft, 50.0);
-    EXPECT_DOUBLE_EQ(af->departure_altitude_ft, 2550.0);
+    EXPECT_DOUBLE_EQ(af->departure_altitude_ft, 3050.0);
 }
 
 TEST(CampaignBridge, TaxiRouteIncludesParkingFollowMeAndThreshold) {
@@ -231,7 +234,7 @@ TEST(CampaignBridge, SynthesizesForLayoutlessAirbaseObjective) {
     EXPECT_NEAR(af->runway_heading_rad, 0.0, 1e-9);  // 360 deg wraps to 0
     EXPECT_NEAR(af->runway_length_ft, 7000.0, 1e-6);
     EXPECT_NEAR(af->threshold_altitude_ft, 100.0, 1e-6);
-    EXPECT_NEAR(af->departure_altitude_ft, 2600.0, 1e-6);
+    EXPECT_NEAR(af->departure_altitude_ft, 3100.0, 1e-6);
 
     // The taxi route is LOCAL: 2+ waypoints, last one is the threshold
     // (the TakeoffModule's hold-short), and the total route length stays

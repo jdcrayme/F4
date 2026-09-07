@@ -5,6 +5,8 @@
 // (objective_decoder.cpp / theater_data.cpp) — keep both in sync.
 
 #include <f4/world_types/campaign_names.hpp>
+#include <string>
+#include <cstdint>
 
 namespace f4::world_types {
 

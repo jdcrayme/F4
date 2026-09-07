@@ -36,6 +36,7 @@
 
 #include <f4/messaging/bus.hpp>
 #include <f4/geo/position.hpp>
+#include <vector>
 
 #include "f4/ai/atc/messages.hpp"
 

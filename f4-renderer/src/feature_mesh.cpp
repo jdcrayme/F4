@@ -29,6 +29,7 @@
 
 #include <cmath>
 #include <utility>
+#include <cstdint>
 #include <vector>
 
 namespace f4::renderer {

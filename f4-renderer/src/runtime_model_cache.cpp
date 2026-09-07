@@ -12,6 +12,9 @@
 #include <cstdio>
 #include <exception>
 #include <utility>
+#include <string>
+#include <memory>
+#include <filesystem>
 
 namespace f4::renderer {
 

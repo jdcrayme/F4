@@ -31,12 +31,17 @@ using namespace f4::world_convert;
 namespace {
 
 // Load the fixture's .cmp sub-file and decode it.
-CampaignHeader decode_fixture_cmp(const SubFile** cmp_out = nullptr) {
+//
+// cmp_out (optional) receives a COPY of the SubFile. It must NOT receive
+// a pointer into `cam` — the archive is a local destroyed at return, and
+// handing out an interior pointer was a use-after-free that made the
+// LzssRoundTrip test read garbage sizes nondeterministically.
+CampaignHeader decode_fixture_cmp(SubFile* cmp_out = nullptr) {
     CamArchive cam;
     cam.load(FIXTURE_DIR "save1.cam");
     const SubFile* cmp = cam.find("cmp");
     EXPECT_NE(cmp, nullptr);
-    if (cmp_out) *cmp_out = cmp;
+    if (cmp_out && cmp) *cmp_out = *cmp;   // copy out of the local archive
     return decode_cmp(cmp->data.data(), cmp->data.size());
 }
 
@@ -125,16 +130,16 @@ TEST(CmpEncoder, LzssRoundTripOnRealPayload) {
     // must decompress back to the identical bytes. This exercises the LZSS
     // compressor on real campaign data (long NUL runs, struct sequences)
     // independent of the cmp struct serialization.
-    const SubFile* cmp = nullptr;
+    SubFile cmp;
     decode_fixture_cmp(&cmp);
-    ASSERT_NE(cmp, nullptr);
+    ASSERT_EQ(cmp.ext(), "cmp");  // fixture load asserts internally on missing
 
     // Read the original decompressed payload via the decode adapter.
     int32_t dec_size = 0;
-    std::memcpy(&dec_size, cmp->data.data() + 4, 4);
+    std::memcpy(&dec_size, cmp.data.data() + 4, 4);
     ASSERT_GT(dec_size, 0);
-    auto orig_payload = lzss_expand(cmp->data.data() + 8,
-                                    cmp->data.size() - 8,
+    auto orig_payload = lzss_expand(cmp.data.data() + 8,
+                                    cmp.data.size() - 8,
                                     static_cast<std::size_t>(dec_size));
     ASSERT_EQ(orig_payload.size(), static_cast<std::size_t>(dec_size));
 

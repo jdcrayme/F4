@@ -36,10 +36,13 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <stdexcept>
+#include <optional>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace f4::simulation {
 

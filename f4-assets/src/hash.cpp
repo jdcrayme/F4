@@ -9,9 +9,13 @@
 #include <f4/assets/hash.hpp>
 
 #include <array>
+#include <cstdint>
 #include <cstdio>
 #include <fstream>
+#include <optional>
+#include <filesystem>
 #include <sstream>
+#include <string>
 
 namespace f4::assets {
 

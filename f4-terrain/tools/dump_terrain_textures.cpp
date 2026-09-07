@@ -180,19 +180,6 @@ int main(int argc, char* argv[]) {
     // level whose art doesn't reproduce the same coastline is broken.
     if (far_ok && !td.elevation.empty()) {
         std::vector<uint8_t> px;
-        auto water_art = [&](uint16_t tex_id, bool& have) {
-            have = false;
-            if (tex_id == 0xFFFF) return false;
-            if (!far_db.tile_rgba(tex_id, px)) return false;
-            long r = 0, g = 0, b = 0, n = 0;
-            for (std::size_t i = 0; i + 3 < px.size(); i += 4) {
-                r += px[i]; g += px[i + 1]; b += px[i + 2]; ++n;
-            }
-            if (n == 0) return false;
-            have = true;
-            r /= n; g /= n; b /= n;
-            return b > r + 8;   // ocean art is blue-dominant
-        };
         const uint32_t gw = td.header.width, gh = td.header.height;
         const uint32_t step = std::max<uint32_t>(1, gw / 48);
         std::printf("\nMEA water/land ('W'=water, '.'=land), north at top:\n");
@@ -227,9 +214,9 @@ int main(int argc, char* argv[]) {
                                            std::min(pr, pl.posts_wide() - 1));
                     double w = 0.0;
                     if (p.tex_id != 0xFFFF && far_db.tile_rgba(p.tex_id, px)) {
-                        long r = 0, g = 0, b = 0; long n = 0, wb = 0;
+                        long r = 0, b = 0; long n = 0, wb = 0;
                         for (std::size_t i = 0; i + 3 < px.size(); i += 4) {
-                            r = px[i]; g = px[i + 1]; b = px[i + 2];
+                            r = px[i]; b = px[i + 2];
                             if (b > r + 8) ++wb;
                             ++n;
                         }

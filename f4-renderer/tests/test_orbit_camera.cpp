@@ -7,6 +7,8 @@
 
 #include <gtest/gtest.h>
 #include <raylib.h>
+
+#include "display_guard.hpp"
 #include <cmath>
 
 using namespace f4::renderer;
@@ -16,8 +18,9 @@ protected:
     void SetUp() override {
         // Only init once for all tests in this suite
         if (!initialized_) {
-            SetConfigFlags(FLAG_WINDOW_HIDDEN);
-            InitWindow(1, 1, "test");
+            if (!f4::testing::init_window_if_display(1, 1, "test", FLAG_WINDOW_HIDDEN)) {
+                GTEST_SKIP() << "no display available — GPU-context test skipped";
+            }
             initialized_ = true;
         }
     }

@@ -6,7 +6,10 @@
 
 #include <f4/ai/modules/strike_module.hpp>  // is_ag_delivery_action
 
+#include <algorithm>
 #include <cmath>
+#include <vector>
+#include <string>
 
 namespace f4::ai::modules {
 
@@ -37,7 +40,17 @@ NavigationModule::NavigationModule()
     // (standard_rate_turn t=104-220). 0.0012 restores damping without
     // re-triggering the STAB-E1 bang-bang (that needed hot attitude_gain
     // AND path_gain together; attitude stays soft here).
-    air_steering.path_gain = 0.0005;
+    // PHUG-P4 retune (M3 linear-band rule): 0.0005 -> 0.00005. At 0.0005
+    // the gamma-correction damper saturated its 0.10-rad limit for ANY vs
+    // error beyond 200 fpm — across the enroute phugoid's ±2,000 fpm it
+    // ran as a bang-bang RELAY (direction flips with the error sign).
+    // The P4.1-corrected inner loop executes the relay faithfully instead
+    // of filtering it through the old G-lag: measured (ground-avoid E2E),
+    // the post-recovery release state decays through an honest phugoid
+    // downswing (vs 0 -> -9,000 fpm) the railed damper cannot arrest and
+    // the jet descends onto terrain. 0.00005 keeps the ±2,000 fpm
+    // operating band proportional (~5.7 deg of correction at the swing
+    // amplitude, the limit reached only beyond ±2,000 fpm).
     air_steering.vs_gain = 2.5;
     air_steering.max_vs_fpm = 1500.0;
     air_steering.roll_gain = 4.0;

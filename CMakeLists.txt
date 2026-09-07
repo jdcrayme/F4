@@ -81,6 +81,7 @@ add_subdirectory(f4-ai)             # AI brain: SensorFusion + tactic modules (c
 # var + fixture target must exist when f4-simulation is configured).
 add_subdirectory(f4-campaign)       # Headless dynamic campaign (mission profiles, tasking tick, attrition) — see Docs/NEXT_PHASE_PLAN.md §B
 add_subdirectory(f4-simulation)     # Orchestration: EntityWorld + MessageBus + ModelDatabase + tick loop (no rendering)
+add_subdirectory(tools/fm_sysid)    # PHUG-PLAN Phase 1: flight-model system-identification harness (Docs/LONGITUDINAL_STABILITY_PLAN.md)
 # The viewer AFTER f4-campaign + f4-simulation (see the note above its
 # former location): the CampaignSession composes the campaign loop with
 # the Simulation, and its tests consume both fixture surfaces.

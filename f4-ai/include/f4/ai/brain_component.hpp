@@ -70,7 +70,9 @@
 #include "f4/ai/modules/refuel_module.hpp"   // Tranche D (AAR)
 #include "f4/ai/sensor_fusion.hpp"
 
+#include <cstdint>
 #include <optional>
+#include <string>
 #include <vector>
 #include <cstdio>    // Tranche D tuning: AAR CSV trace
 #include <cstdlib>   // getenv

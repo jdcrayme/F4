@@ -46,6 +46,7 @@
 #include <f4/sensors/f4_sensors.hpp>
 
 #include <chrono>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <f4/world_types/class_table.hpp>
@@ -54,8 +55,12 @@
 
 #include <algorithm>
 #include <cmath>
+#include <filesystem>
 #include <map>
 #include <stdexcept>
+#include <vector>
+#include <string>
+#include <memory>
 
 namespace f4::simulation {
 
@@ -1924,6 +1929,29 @@ void Simulation::write_fcs_trace() {
     fcs_trace_->write_csv(scenario_.fcs_trace_path.string());
 }
 
+// PHUG-PLAN P0.3: copy the active AirSteering cascade's intermediates into
+// the trace sample. Free function (not a member) so record_fcs_trace_sample
+// stays a single flat loop; the caller picks WHICH cascade is active
+// (takeoff/navigation/landing) per phase.
+static void fill_ai_cascade_columns(f4::recorder::FcsTraceSample& sample,
+                                    const f4::ai::AirSteerDebug& dbg) {
+    sample.ai_alt_err_ft       = dbg.alt_err_ft;
+    sample.ai_vs_corr_fpm      = dbg.vs_corr_fpm;
+    sample.ai_vs_target_fpm    = dbg.vs_target_fpm;
+    sample.ai_vs_ff_fpm        = dbg.vs_ff_fpm;
+    sample.ai_gamma_now_rad    = dbg.gamma_now_rad;
+    sample.ai_gamma_ff_rad     = dbg.gamma_ff_rad;
+    sample.ai_gamma_corr_rad   = dbg.gamma_corr_rad;
+    sample.ai_alpha_est_rad    = dbg.alpha_est_rad;
+    sample.ai_theta_target_rad = dbg.theta_target_rad;
+    sample.ai_alt_integral_fpm = dbg.alt_integral_fpm;
+    sample.ai_hdg_err_rad      = dbg.hdg_err_rad;
+    sample.ai_bank_target_rad  = dbg.bank_target_rad;
+    sample.ai_speed_err_kt     = dbg.speed_err_kt;
+    sample.ai_speed_integral   = dbg.speed_integral;
+    sample.ai_energy_err_ft    = dbg.energy_err_ft;
+}
+
 void Simulation::record_fcs_trace_sample() {
     // One row per aircraft per tick. The trace's purpose is control-loop
     // diagnosis (see FLIGHT_CONTROL_NEXT_STEPS.md §3.1), so it captures the
@@ -2013,6 +2041,7 @@ void Simulation::record_fcs_trace_sample() {
                 sample.target_speed_kts  = t.flyout_speed_kts;
                 sample.target_heading_deg = f4::flight::to_degrees(
                     f4::flight::angle_from_radians(t.runway_heading_rad()));
+                fill_ai_cascade_columns(sample, t.air_steering.last_debug());
             } else if (phase == Phase::Enroute) {
                 const auto& n = brain->navigation();
                 const auto* wp = n.current_waypoint();
@@ -2022,6 +2051,7 @@ void Simulation::record_fcs_trace_sample() {
                 }
                 sample.target_heading_deg = f4::flight::to_degrees(
                     f4::flight::angle_from_radians(n.current_heading_rad()));
+                fill_ai_cascade_columns(sample, n.air_steering.last_debug());
             } else if (phase == Phase::Approach) {
                 const auto& l = brain->landing();
                 sample.target_alt_ft     = l.glide_slope_alt_ft();
@@ -2032,6 +2062,11 @@ void Simulation::record_fcs_trace_sample() {
                 sample.course_along_ft       = l.course_along_ft();
                 sample.localizer_heading_deg = f4::flight::to_degrees(
                     f4::flight::angle_from_radians(l.localizer_heading_rad()));
+                // The beam ride / final uses the module's air_steering
+                // instance (pattern legs use pattern_steering — a different
+                // state machine, not part of the glide-slope loop being
+                // diagnosed).
+                fill_ai_cascade_columns(sample, l.air_steering.last_debug());
             }
         }
 
@@ -2042,6 +2077,26 @@ void Simulation::record_fcs_trace_sample() {
         sample.fuel_lbs    = s.fuel.fuel_lbs;
         sample.nz         = s.loads.nzcgs;
         sample.nx         = s.loads.nxcgs;
+
+        // --- Loop diagnostics: plant group (PHUG-PLAN P0.3) ---
+        sample.qsom        = s.qsom;
+        sample.qbar        = s.qbar;
+        sample.gamma_deg   = f4::flight::to_degrees(s.kin.gmma);
+        sample.vt_dot      = s.vtDot;
+        sample.thrust_accel = s.engine.thrust;
+        sample.stall_state = static_cast<int>(s.aero.stallState);
+        sample.tef_pos     = s.aero.tefPos;
+        sample.lef_pos     = s.aero.lefPos;
+        sample.dbrake_pos  = s.aero.dbrake;
+
+        // --- Loop diagnostics: FCS internals group (PHUG-PLAN P0.3) ---
+        sample.alpha_bias_deg = fcs.alphaBiasDeg;
+        sample.q_damper_term  = fcs.qDamperTerm;
+        sample.omega_sp       = fcs.omegaSp;
+        sample.zp01           = fcs.zp01;
+        sample.tp02           = fcs.tp02;
+        sample.tp03           = fcs.tp03;
+        sample.pi_error       = fcs.piError;
 
         fcs_trace_->record(sample);
     }

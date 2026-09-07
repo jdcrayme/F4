@@ -100,11 +100,13 @@ TEST(FcsTracePipelineTest, TakeoffOnlyProducesTrace) {
     const auto rows = parse_csv_file(trace_path);
     ASSERT_GE(rows.size(), 2u) << "trace must have a header + >=1 data rows";
     EXPECT_EQ(rows[0][0], "tick");
-    EXPECT_EQ(rows[0].back(), "nx");
+    // PHUG-PLAN P0.3: the trace now ends with the AirSteering energy term.
+    EXPECT_EQ(rows[0].back(), "ai_energy_err_ft");
 
     // Verify the expected number of columns (header + every data row).
     const std::size_t expected_cols = rows[0].size();
-    EXPECT_EQ(expected_cols, 53u);
+    // 53 baseline + 31 PHUG-PLAN P0.3 loop-diagnostic columns.
+    EXPECT_EQ(expected_cols, 84u);
     for (std::size_t i = 1; i < rows.size(); ++i) {
         EXPECT_EQ(rows[i].size(), expected_cols)
             << "row " << i << " has wrong column count";
@@ -123,6 +125,26 @@ TEST(FcsTracePipelineTest, TakeoffOnlyProducesTrace) {
     EXPECT_NE(col_index(rows[0], "alpha_deg"), SIZE_MAX);
     EXPECT_NE(col_index(rows[0], "beta_deg"), SIZE_MAX);
     EXPECT_NE(col_index(rows[0], "ai_state"), SIZE_MAX);
+
+    // PHUG-PLAN P0.3: loop-diagnostic columns exist and the plant group is
+    // populated by the flight model on every tick. A 5 s takeoff trace is
+    // mostly taxi (qsom stays < 1.0 until ~50 kts), so assert the column is
+    // WIRED (varies with the live state) rather than asserting a magnitude.
+    const auto qsom_idx = col_index(rows[0], "qsom");
+    const auto omega_idx = col_index(rows[0], "omega_sp");
+    const auto bias_idx = col_index(rows[0], "alpha_bias_deg");
+    ASSERT_NE(qsom_idx, SIZE_MAX);
+    ASSERT_NE(omega_idx, SIZE_MAX);
+    ASSERT_NE(bias_idx, SIZE_MAX);
+    double qsom_min = 1e30, qsom_max = -1e30;
+    for (std::size_t i = 1; i < rows.size(); ++i) {
+        const double v = std::stod(rows[i][qsom_idx]);
+        qsom_min = std::min(qsom_min, v);
+        qsom_max = std::max(qsom_max, v);
+    }
+    EXPECT_GT(qsom_max, qsom_min + 1e-6)
+        << "qsom must track the live state (it varied over the run); "
+        << "a constant column means the trace wiring is broken";
 
     // Cleanup
     std::remove(trace_path.c_str());
@@ -172,7 +194,8 @@ TEST(FcsTracePipelineTest, LandingOnlyProducesTrace) {
 
     const auto rows = parse_csv_file(trace_path);
     ASSERT_GE(rows.size(), 2u);
-    EXPECT_EQ(rows[0].size(), 53u);
+    // 53 baseline + 31 PHUG-PLAN P0.3 loop-diagnostic columns.
+    EXPECT_EQ(rows[0].size(), 84u);
 
     // In the Approach phase, the localizer_heading_deg column should be
     // populated. Spot-check that at least one row has a non-zero value

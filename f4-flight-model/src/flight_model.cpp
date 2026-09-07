@@ -198,6 +198,10 @@ void FlightModel::initTrimAndAtmosphere(double initialAltitude_ft) {
     // not the full alpha. So the lead-lag and integrator are seeded to 0
     // (no PI correction at trim) — the bias handles trim by construction.
     // trim() re-seeds with the converged value if called.
+    // P4.3: the alpha-bias trim-lag filter seeds at the initial alpha so
+    // the first seconds don't fly with bias 0 (see trim() for the failure
+    // mode; the initial alpha is the best available 1-G estimate here).
+    state_.fcs.alphaBiasTrim.reset(to_degrees(state_.aero.alpha));
     state_.fcs.pitchAlphaLag.reset(0.0);
     state_.fcs.pitchRateLag.reset(0.0);
     state_.fcs.pitchIntegral.reset(0.0);
@@ -545,11 +549,45 @@ bool FlightModel::trim() {
             state_.aero.zsaero += zsprop;
             state_.aero.xwaero += xsprop * state_.kin.cosbet;
             accelerometers();
+            // PHUG-PLAN F6 fix (P0.4/P4): the alpha iteration CHANGES alpha
+            // but the old code left theta at its pre-trim value, so the
+            // converged state flew gamma = theta − alpha ≈ +3 deg (measured,
+            // PLANT_IDENTIFICATION.md §3.4) — every trim/spawn started with
+            // an unintended ~1,400 fpm climb (or descent) transient that
+            // contaminated every downstream measurement and kicked the AI
+            // loops into their protection logic on the first seconds.
+            // Level-flight trim: theta = alpha (phi = 0), gamma = 0. The
+            // quaternion and trig cache must follow the attitude change.
+            {
+                KinematicState& k = state_.kin;
+                k.theta = state_.aero.alpha;
+                const double cr = std::cos(0.0);           // phi = 0
+                const double sr = std::sin(0.0);
+                const double cp = std::cos(to_radians(k.theta) * 0.5);
+                const double sp = std::sin(to_radians(k.theta) * 0.5);
+                const double cy2 = std::cos(to_radians(k.psi) * 0.5);
+                const double sy2 = std::sin(to_radians(k.psi) * 0.5);
+                k.quat = Quatd(cr * cp * cy2 + sr * sp * sy2,
+                               sr * cp * cy2 - cr * sp * sy2,
+                               cr * sp * cy2 + sr * cp * sy2,
+                               cr * cp * sy2 - sr * sp * cy2).normalized();
+                k.sinthe = std::sin(to_radians(k.theta));  k.costhe = std::cos(to_radians(k.theta));
+                k.singam = 0.0;  k.cosgam = 1.0;  k.gmma = zero_angle();
+                k.sinalp = std::sin(to_radians(state_.aero.alpha));
+                k.cosalp = std::cos(to_radians(state_.aero.alpha));
+            }
             // With the alpha_bias feedforward added AFTER the lead-lag
             // filter (fcs.cpp runPitch), the FCS holds trim by construction
             // when pstick=0: the bias provides the 1-G trim alpha, and the
             // PI loop (lead-lag + integrator) starts at 0. No seeding needed
             // — the bias handles trim, the PI loop handles corrections.
+            // P4.3: the bias trim-lag filter must START at the converged
+            // trim alpha — the bias's steady value IS the 1-G trim alpha, so
+            // seeding it here keeps the first seconds transient-free (an
+            // unseeded filter holds bias 0 and the FCS drops the nose until
+            // the lag catches up — measured: nz −0.02 at t=0 and a +3,700
+            // fpm phantom zoom).
+            state_.fcs.alphaBiasTrim.reset(to_degrees(state_.aero.alpha));
             state_.fcs.pitchAlphaLag.reset(0.0);
             state_.fcs.pitchIntegral.reset(0.0);
             state_.fcs.aoacmd = state_.aero.alpha;
