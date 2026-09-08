@@ -585,6 +585,7 @@ UnitState parse_unit(Reader& r) {
                     else if (gk == "vehicle_nctr")  vg.vehicle_nctr  = r.read_string();
                     else if (gk == "hit_points")    vg.hit_points    = static_cast<int16_t>(r.read_int());
                     else if (gk == "max_speed")     vg.max_speed     = static_cast<int16_t>(r.read_int());
+                    else if (gk == "rcs_factor")    vg.rcs_factor    = static_cast<float>(r.read_number());
                     else                            r.skip_value();
                     if (r.consume('}')) break;
                     r.expect(',');
@@ -1331,6 +1332,10 @@ void emit_unit(Writer& w, const UnitState& u) {
             vo.str("vehicle_nctr", vg.vehicle_nctr);
             vo.num("hit_points", vg.hit_points);
             vo.num("max_speed", vg.max_speed);
+            // Real-data tier (Task 64): emit only when non-zero — every
+            // pre-Task-64 state emits byte-identically (the same rule
+            // detect_ratio under has_radar==false keeps).
+            if (vg.rcs_factor != 0.0f) vo.numf("rcs_factor", vg.rcs_factor);
         }
         w.raw("\n      ");
         w.raw("]");

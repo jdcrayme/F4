@@ -18,9 +18,14 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # Deliberately NOT a dependency: f4-flight-model (a missile is a 3-DOF
 # point mass, not a 6-DOF aircraft — see COMBAT_CHAIN_PLAN.md §2 M1),
 # f4-ai (tactics consume weapons, never the reverse).
+#
+# f4-io + f4-json are PRIVATE deps of the real-data reader
+# (wcd_weapon_data.cpp — the wcd2json export's runtime consumer), the same
+# dependency set f4-world-types uses for its class-table JSON loader.
 # ---------------------------------------------------------------------------
 add_library(f4-weapons STATIC
     src/weapon_class_table.cpp
+    src/wcd_weapon_data.cpp
     src/damage.cpp
     src/missile.cpp
     src/weapon_store.cpp
@@ -40,6 +45,10 @@ target_link_libraries(f4-weapons PUBLIC
     f4-math
     f4-entities
     f4-messaging
+)
+target_link_libraries(f4-weapons PRIVATE
+    f4-io
+    f4-json
 )
 
 # Tests

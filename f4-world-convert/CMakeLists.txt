@@ -63,6 +63,13 @@ target_link_libraries(json2cam PRIVATE f4-world-convert f4-io)
 add_executable(ct2json cli/ct2json.cpp)
 target_link_libraries(ct2json PRIVATE f4-world-convert f4-json f4-io)
 
+# CLI tool: wcd2json — convert Falcon4.WCD (binary campaign weapon-class
+# table) to open JSON. The real-data tier's weapon export
+# (COMBAT_CHAIN_PLAN.md §5): f4-weapons' wcd_weapon_data loader is the
+# runtime consumer.
+add_executable(wcd2json cli/wcd2json.cpp)
+target_link_libraries(wcd2json PRIVATE f4-world-convert f4-json f4-io)
+
 # Copy FALCON4.ct (the class table) next to cam2json so the CLI finds it
 # from CWD when run via `cmake --build build --target world`. The class
 # table maps entity_type values (100-2000+) to ObjectiveType (1-39) and

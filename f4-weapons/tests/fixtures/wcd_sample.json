@@ -1,0 +1,21 @@
+{
+  "format": "f4-weapon-class-table",
+  "version": 1,
+  "source": "FALCON4.WCD",
+  "source_fingerprint": "0000000000000000",
+  "count": 2,
+  "entries": [
+    { "index": 12, "strength": 40, "damage_type": 2, "range_km": 48,
+      "flags": 512, "name": "AIM-120 AMRAAM",
+      "hit_chance": [0, 0, 0, 0, 0, 0, 0, 0], "fire_rate": 1, "rarity": 1,
+      "guidance_flags": 0, "collective": 0, "simweap_index": -1,
+      "weight": 335, "drag_index": 0, "blast_radius": 50,
+      "radar_type": 0, "sim_data_idx": 0, "max_alt": 60 },
+    { "index": 68, "strength": 89, "damage_type": 4, "range_km": 9,
+      "flags": 4096, "name": "GBU-12",
+      "hit_chance": [0, 0, 0, 0, 0, 0, 0, 0], "fire_rate": 1, "rarity": 2,
+      "guidance_flags": 0, "collective": 0, "simweap_index": -1,
+      "weight": 275, "drag_index": 1, "blast_radius": 65,
+      "radar_type": 0, "sim_data_idx": 0, "max_alt": 50 }
+  ]
+}

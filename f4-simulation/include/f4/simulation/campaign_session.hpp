@@ -145,6 +145,12 @@ struct CampaignSessionOptions {
     /// armed campaign flies: full (bvr/missiles/guns all free — the
     /// war's acceptance wants fights to resolve).
     bool aa_combat = false;
+
+    /// Real-data tier (Task 64): wcd2json export path folded over the
+    /// built-in weapon table (empty = built-ins only). Read at session
+    /// create; failures throw (loud), alias misses land in
+    /// weapon_import_warnings().
+    std::string weapon_data_path;
     /// C6: the BRAINDAT archetype table the doctrine's defensive roles
     /// stand down through. Empty = the sim's build-tree generated
     /// default (simdata/braindata.json). Only read when aa_combat.
@@ -415,6 +421,7 @@ private:
     f4::data::AircraftConfig cfg_;
     f4::campaign::MissionProfileTable profiles_;
     f4::weapons::WeaponClassTable weapon_table_;  // arming the spawns
+    std::vector<std::string> weapon_import_warnings_;
 
     // Spawner lenders (create() used to hand CampaignSimSpawner three
     // LOCALS — the fallback airfield, the per-airbase airfield map, and

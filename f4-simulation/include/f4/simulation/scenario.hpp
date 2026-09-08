@@ -216,6 +216,35 @@ struct CombatConfig {
     /// are byte-identical to the pre-C6 shape with it off (the same
     /// contract wreck_hold_sec = 0 keeps).
     bool campaign_armed{false};
+    /// Real-data tier (Task 64): path to a wcd2json export
+    /// ("f4-weapon-class-table" JSON — the vanilla install's
+    /// Falcon4.WCD). Empty (default) = the built-in placeholder set
+    /// exactly as authored — the golden identity. When set, the table is
+    /// the built-ins with the export's REAL employment/damage envelope
+    /// (range/weight/strength/blast radius) folded over the matching
+    /// records (see combat_bridge.hpp kDefaultWeaponAliases + f4-weapons'
+    /// overlay_wcd_weapon_data). A configured-but-unloadable path is a
+    /// LOUD failure (the brain-data discipline).
+    std::string weapon_data_path;
+    /// Real-data tier (Task 64): path to a SignatureDataLibrary JSON
+    /// (sig2json output / the shipped Data/SimData/sigdata.json). Empty
+    /// (default) = no library — every aircraft keeps the placeholder
+    /// scalar signature (the golden identity). When set, aircraft whose
+    /// name matches a binding below get the stem's RCS GRID on their
+    /// SignatureComponent (the grid path replaces the placeholder
+    /// aspect-lobe model inside f4-sensors; the scalar path is
+    /// untouched otherwise). A configured-but-unloadable path is a LOUD
+    /// failure.
+    std::string signature_data_path;
+    /// aircraft-name -> SIGDATA.LST stem. Match is exact, then
+    /// case-insensitive, on ScenarioAircraft::aircraft_name — campaign
+    /// aircraft spawn from the same scenario template, so one binding
+    /// covers both spawn paths.
+    struct SignatureBinding {
+        std::string aircraft_name;   ///< e.g. "F-16C_50"
+        std::string stem;            ///< e.g. "generic" (SIGDATA.LST stem)
+    };
+    std::vector<SignatureBinding> aircraft_signature_stems;
 };
 
 /// Fuel policy for every spawned aircraft (the DigitalBrain's fuel check

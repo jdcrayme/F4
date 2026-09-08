@@ -614,7 +614,10 @@ TEST(WorldEmit, SyntheticEdgeCasesRoundTrip) {
     wp.depart = 22222;
     bn.waypoints.push_back(wp);
     bn.vehicle_groups.push_back(
-        {0, 2100, 3, 3, "M-1A1", "ARMOR", 60, 72});
+        // Task 64: the last field is the VCD rcs_factor (log2 domain) —
+        // non-zero forces the emitter's conditional rcs_factor emission
+        // and pins its round-trip through the wire form.
+        {0, 2100, 3, 3, "M-1A1", "ARMOR", 60, 72, 3.4594f});
     ws.units.push_back(bn);
 
     UnitState unk;

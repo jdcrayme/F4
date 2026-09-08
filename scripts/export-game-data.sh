@@ -40,6 +40,7 @@
 #   │   ├── vehdef.json    sigdata.json
 #   │   └── irstdata.json  rwrdata.json   visualdata.json
 #   ├── Classes/falcon4.ct.json          # ct2json (kills the .ct binary)
+#   ├── Weapons/falcon4.wcd.json         # wcd2json (kills the .WCD binary)
 #   └── Models/koreaobj/                 # f4import (LOCAL ONLY — gitignored
 #       ├── *.gltf|*.bin                 #  until Tranche 0d rewires the
 #       └── textures/*.png               #  runtime; PNGs feed the glTF materials)
@@ -102,7 +103,7 @@ find_tool() {
     local exts=("" ".exe")
     local subdirs=("")
     case "$tool" in
-        cam2json|ct2json)              subdirs=("f4-world-convert" "f4-world-convert/cli") ;;
+        cam2json|ct2json|wcd2json)     subdirs=("f4-world-convert" "f4-world-convert/cli") ;;
         terrain2json)                  subdirs=("f4-terrain-convert" "f4-terrain-convert/cli") ;;
         f4import)                      subdirs=("f4-import" "f4-import/cli") ;;
         *)                             subdirs=("f4-convert/cli" "f4-convert") ;;
@@ -124,6 +125,7 @@ find_tool() {
 TOOL_C2J="$(find_tool cam2json)"      || fail "cam2json not built — configure+build first (cmake -B $BUILD)"
 TOOL_T2J="$(find_tool terrain2json)"  || fail "terrain2json not built"
 TOOL_CT2J="$(find_tool ct2json)"      || fail "ct2json not built (Tranche 0a.1)"
+TOOL_WCD2J="$(find_tool wcd2json)"    || fail "wcd2json not built (real-data tier)"
 TOOL_D2J="$(find_tool dat2json)"      || fail "dat2json not built"
 TOOL_MNVR="$(find_tool mnvr2json)"    || fail "mnvr2json not built"
 TOOL_BRAIN="$(find_tool brain2json)"  || fail "brain2json not built"
@@ -246,6 +248,12 @@ echo "[2/8] Terrain JSON (terrain2json)..."
 
 echo "[3/8] Class table JSON (ct2json)..."
 "$TOOL_CT2J" "$CT" "$OUTPUT/Classes/falcon4.ct.json" | sed 's/^/    /' || fail "ct2json failed"
+
+echo "[3b/8] Weapon class table JSON (wcd2json)..."
+# The theater-db dir is FALCON4.ct's parent (terrdata/objects) — the same
+# directory holding Falcon4.WCD. wcd2json locates it case-insensitively.
+"$TOOL_WCD2J" "$(dirname "$CT")" "$OUTPUT/Weapons/falcon4.wcd.json" | sed 's/^/    /' \
+    || fail "wcd2json failed"
 
 echo "[4/8] Aircraft JSON (dat2json over ACDATA/*.dat)..."
 if [[ "$F16_ONLY" == 1 ]]; then

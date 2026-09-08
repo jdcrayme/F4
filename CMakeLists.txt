@@ -206,7 +206,7 @@ include(verify_boundary)
 f4_mark_side(importer
     f4-models f4-world-convert f4-convert f4-terrain-convert f4-import f4-install
     f4_models_viewer
-    f4import cam2json json2cam ct2json terrain2json
+    f4import cam2json json2cam ct2json wcd2json terrain2json
     dat2json mnvr2json brain2json form2json veh2json sens2json sig2json
     dat_validate json_diff f4-models-viewer
 )

@@ -378,12 +378,46 @@ void Simulation::ensure_campaign_brain_data() {
     brain_data_loaded_ = true;
 }
 
+
+void Simulation::ensure_signature_data() {
+    // The real-data tier's signature leg: no path configured -> no
+    // library, every aircraft keeps the placeholder scalar signature
+    // (the golden identity). A configured path that fails is LOUD —
+    // a silently-missing library would change detection behavior for
+    // the types it was authored for.
+    if (signature_library_loaded_) return;
+    signature_library_loaded_ = true;
+    if (scenario_.combat.signature_data_path.empty()) return;
+    auto result = f4::data::loadSignatureDataLibrary(
+        scenario_.combat.signature_data_path);
+    if (!result.ok) {
+        std::string msg =
+            "Simulation::ensure_signature_data: failed to load signature "
+            "data '" + scenario_.combat.signature_data_path + "':";
+        for (const auto& e : result.errors) msg += "\n  " + e;
+        throw std::runtime_error(msg);
+    }
+    signature_library_ =
+        std::make_unique<f4::data::SignatureDataLibrary>(
+            std::move(result.library));
+}
+
 bool Simulation::arm_campaign_aircraft(entities::EntityId id) {
     // The C6 opt-in: everything below exists for the armed campaign
     // only; an unarmed sim answers false without touching the entity
     // (the pre-C6 world, byte-for-byte).
     if (!scenario_.combat.campaign_armed) return false;
     if (!id.valid()) return false;
+    std::optional<SignatureContext> sig_ctx;
+    if (signature_library() != nullptr &&
+        !scenario_.combat.aircraft_signature_stems.empty()) {
+        sig_ctx = SignatureContext{
+            signature_library(),
+            &scenario_.combat.aircraft_signature_stems,
+            scenario_.aircraft.empty()
+                ? std::string{}
+                : scenario_.aircraft.front().aircraft_name};
+    }
 
     entities::EntityHandle h(id, &world_);
     std::unique_ptr<RadarBackedDetectionPolicy> policy;
@@ -396,7 +430,8 @@ bool Simulation::arm_campaign_aircraft(entities::EntityId id) {
         scenario_.combat.missiles_hold,
         scenario_.combat.guns_hold,
         brain_data_loaded_ ? &brain_data_ : nullptr,
-        &policy);
+        &policy,
+        sig_ctx ? &*sig_ctx : nullptr);
     if (!result.armed) {
         // Not a candidate (no origin/brain/store) or already armed —
         // EXCEPT the doctrine-failure shapes, which are misconfigurations
@@ -449,10 +484,19 @@ void Simulation::spawn_from_scenario_list() {
     }
 
     // Combat chain (M3): the weapon class table every launch goes through.
-    // Built-in placeholder set for now; the FALCON4.WST import replaces the
-    // card contents without touching call sites (COMBAT_CHAIN_PLAN.md §5).
+    // Built-in placeholder set; the real-data tier overlays the wcd2json
+    // export's envelope when combat.weapon_data_path is configured
+    // (COMBAT_CHAIN_PLAN.md §5 — the WST/WCD import replaces the card
+    // contents without touching call sites).
     if (scenario_.combat.enabled) {
-        weapon_table_ = weapons::WeaponClassTable::with_builtins();
+        weapon_table_ = resolve_weapon_table(
+            scenario_.combat.weapon_data_path, &weapon_import_warnings_);
+    }
+    // The real-data signature leg: load for EITHER combat shape (the
+    // scenario combat path AND the C6 campaign arming both attach
+    // SignatureComponents).
+    if (scenario_.combat.enabled || scenario_.combat.campaign_armed) {
+        ensure_signature_data();
     }
 
     for (std::size_t ac_index = 0; ac_index < scenario_.aircraft.size(); ++ac_index) {
@@ -628,10 +672,14 @@ void Simulation::spawn_from_scenario_list() {
         //    leaves combat disabled (the default) NONE of this exists and
         //    the world is bit-for-bit what it was before the combat chain.
         if (scenario_.combat.enabled) {
+            const simulation::SignatureContext sig_ctx{
+                signature_library(),
+                &scenario_.combat.aircraft_signature_stems};
             attach_combat_loadout(h, weapon_table_, sc,
                                   scenario_.combat.radar_rng_seed,
                                   ac_index,
-                                  scenario_.combat.fighter_hit_points);
+                                  scenario_.combat.fighter_hit_points,
+                                  &sig_ctx);
 
             // The gun's ammo ledger: the store's gun station (attached
             // just above; 511 for a standard M61A1 load). The brain's
@@ -1273,8 +1321,13 @@ void Simulation::spawn_from_campaign_flights() {
     //     every flight's decoded loadout through it (wire stations +
     //     doctrine MK-82 fill + the strike fire control). NOT gated on
     //     combat.enabled — ordnance delivery is a mission behavior; only
-    //     the A/A combat sweeps stay combat-gated.
-    weapon_table_ = weapons::WeaponClassTable::with_builtins();
+    //     the A/A combat sweeps stay combat-gated. The real-data tier
+    //     overlays the wcd2json export when configured.
+    weapon_table_ = resolve_weapon_table(
+        scenario_.combat.weapon_data_path, &weapon_import_warnings_);
+    if (scenario_.combat.enabled || scenario_.combat.campaign_armed) {
+        ensure_signature_data();
+    }
 
     const auto& template_ac = scenario_.aircraft.front();
     FlightSpawnFilter filter;

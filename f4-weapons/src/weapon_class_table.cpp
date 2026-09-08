@@ -165,6 +165,11 @@ std::uint32_t WeaponClassTable::add(WeaponClassRecord record) {
     return record.id;
 }
 
+WeaponClassRecord* WeaponClassTable::get_mut(std::uint32_t handle) noexcept {
+    return const_cast<WeaponClassRecord*>(
+        static_cast<const WeaponClassTable*>(this)->get(handle));
+}
+
 const WeaponClassRecord* WeaponClassTable::get(std::uint32_t handle) const noexcept {
     if (handle == kInvalidWeapon || handle >= records_.size()) {
         return nullptr;

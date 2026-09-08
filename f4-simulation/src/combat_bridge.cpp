@@ -18,6 +18,9 @@
 #include <f4/weapons/missile_battery.hpp>
 #include <f4/weapons/weapon_store.hpp>
 #include <f4/weapons/weapon_types.hpp>
+#include <f4/weapons/wcd_weapon_data.hpp>
+#include <f4/data/signature_data.hpp>
+#include <f4/sensors/signature.hpp>
 #include <f4/sensors/track_store.hpp>
 #include "f4/simulation/campaign_origin.hpp"
 
@@ -26,6 +29,43 @@ namespace f4::simulation {
 namespace {
 
 constexpr double FEET_PER_NM = 6076.11548;
+
+// The real-data signature resolution (Task 64): exact name match first,
+// then case-insensitive; the stem lookup is the library's own
+// case-insensitive find. Nothing resolves -> nullptr -> the placeholder
+// scalar path (the golden identity).
+[[nodiscard]] const f4::data::AircraftSignatureData* resolve_signature(
+    const SignatureContext& ctx, const std::string& aircraft_name) {
+    if (ctx.library == nullptr || ctx.bindings == nullptr) return nullptr;
+    for (const auto& b : *ctx.bindings) {
+        const bool exact = b.aircraft_name == aircraft_name;
+        const bool ci = !exact &&
+            b.aircraft_name.size() == aircraft_name.size() &&
+            std::equal(b.aircraft_name.begin(), b.aircraft_name.end(),
+                       aircraft_name.begin(),
+                       [](char x, char y) {
+                           return std::tolower(static_cast<unsigned char>(x)) ==
+                                  std::tolower(static_cast<unsigned char>(y));
+                       });
+        if (!exact && !ci) continue;
+        return ctx.library->find(b.stem);
+    }
+    return nullptr;
+}
+
+/// Bind the resolved grid onto the entity's (freshly attached) signature
+/// component. No-op when the context carries no library or nothing
+/// resolved.
+void apply_signature_grid(entities::EntityHandle& aircraft,
+                          const SignatureContext* signatures,
+                          const std::string& aircraft_name) {
+    if (signatures == nullptr) return;
+    const auto* entry = resolve_signature(*signatures, aircraft_name);
+    if (entry == nullptr) return;
+    if (auto* sig = aircraft.get<sensors::SignatureComponent>()) {
+        sig->rcs_grid = &entry->rcs;
+    }
+}
 
 /// The BVR weapon: the LONGEST-RANGE air-to-air missile class in the
 /// table (AIM-120C over AIM-9M). find_by_category would return the FIRST
@@ -152,7 +192,8 @@ void attach_combat_loadout(entities::EntityHandle& aircraft,
                            const ScenarioAircraft& ac,
                            std::uint32_t seed_base,
                            std::size_t aircraft_index,
-                           double hit_points) {
+                           double hit_points,
+                           const SignatureContext* signatures) {
     // Identity first: the TEAM tag drives IFF (TrackStore), RWR emitter
     // role checks, and launch_missile's team copy. CampaignIdentity
     // carries the callsign the radar's NCTR resolves after a few scans.
@@ -191,6 +232,7 @@ void attach_combat_loadout(entities::EntityHandle& aircraft,
 
     // Observability: default fighter RCS.
     aircraft.add<sensors::SignatureComponent>();
+    apply_signature_grid(aircraft, signatures, ac.aircraft_name);
 
     // The radar: default parameter card + scan volume; per-aircraft seed
     // derived from the scenario base seed so the whole scenario stays
@@ -743,7 +785,8 @@ CampaignCombatArmament arm_campaign_combat(
     bool missiles_hold,
     bool guns_hold,
     const f4::data::BrainData* brain_data,
-    std::unique_ptr<RadarBackedDetectionPolicy>* out_policy) {
+    std::unique_ptr<RadarBackedDetectionPolicy>* out_policy,
+    const SignatureContext* signatures) {
     CampaignCombatArmament out;
 
     // 0. The candidate contract: a campaign aircraft (origin stamped) with
@@ -823,7 +866,9 @@ CampaignCombatArmament arm_campaign_combat(
     if (aircraft.get<sensors::SignatureComponent>() == nullptr) {
         aircraft.add<sensors::SignatureComponent>();
         out.components_attached = true;
-    }
+    }    apply_signature_grid(aircraft, signatures,
+                         signatures ? signatures->aircraft_name : "");
+
     if (aircraft.get<sensors::RadarSimComponent>() == nullptr) {
         auto& radar = aircraft.add<sensors::RadarSimComponent>();
         radar.rng_seed = seed_base + static_cast<std::uint32_t>(arm_index);
@@ -888,6 +933,36 @@ CampaignCombatArmament arm_campaign_combat(
 
     out.armed = true;
     return out;
+}
+
+
+// ============================================================================
+// The real-data weapon seam (Task 64) — see combat_bridge.hpp.
+// ============================================================================
+f4::weapons::WeaponClassTable resolve_weapon_table(
+    const std::string& weapon_data_path,
+    std::vector<std::string>* warnings) {
+    auto table = f4::weapons::WeaponClassTable::with_builtins();
+    if (weapon_data_path.empty()) return table;  // the golden identity
+
+    const auto loaded =
+        f4::weapons::load_wcd_weapon_json(weapon_data_path);
+    if (!loaded.ok) {
+        std::string msg =
+            "resolve_weapon_table: failed to load weapon data '"
+            + weapon_data_path + "':";
+        for (const auto& e : loaded.errors) msg += "\n  " + e;
+        throw std::runtime_error(msg);
+    }
+
+    std::vector<std::pair<std::string, std::string>> aliases;
+    aliases.reserve(std::size(kDefaultWeaponAliases));
+    for (const auto& b : kDefaultWeaponAliases) {
+        aliases.emplace_back(b.engine_name, b.wcd_name);
+    }
+    (void)f4::weapons::overlay_wcd_weapon_data(
+        table, loaded.data, aliases, warnings);
+    return table;
 }
 
 } // namespace f4::simulation

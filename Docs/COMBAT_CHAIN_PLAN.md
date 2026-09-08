@@ -154,9 +154,18 @@ cooldown, shoot-shoot doctrine, beam-defeat geometry).
 
 ## 5. Out of scope (deferred, deliberately)
 
-- **FALCON4.WST parsing** — real weapon class data via f4-convert (M2+; the
-  built-in table's fields are shaped so the WST loader can replace defaults
-  without touching call sites).
+- **~~FALCON4.WST parsing~~ — real weapon class data: LANDED as the WCD
+  tranche (Task 64).** The vanilla install the exporter targets does not
+  ship a FreeFalcon-runtime FALCON4.WST; its campaign weapon table IS
+  Falcon4.WCD (the table ClassTableEntry.data_ptr_index points at for
+  DTYPE_WEAPON). wcd2json (f4-world-convert) exports it; f4-weapons'
+  wcd_weapon_data.hpp reads the JSON and overlays the real
+  employment/damage envelope (range/weight/strength/blast radius) onto
+  the built-in records via CombatConfig::weapon_data_path — the
+  flyout/seeker card and every call site untouched. The WCD enum
+  vocabularies (damage_type, WEAP_/guidance flags) are carried RAW;
+  mapping them into WeaponCategory/GuidanceKind waits on establishing
+  the camplib.h bit definitions against a real export.
 - **Air-to-ground / bombs loft & ballistics tables**, SAM batteries, naval
   units — the store and damage model are domain-neutral already; the flyout
   profiles for them land with the campaign-dynamics milestone.

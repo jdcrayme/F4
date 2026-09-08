@@ -9858,3 +9858,92 @@ Stage Summary:
   measurements attached.
 - Committed on merge-pole-diagnosis; format-patch exported to
   /home/z/my-project/download/.
+
+---
+Task ID: 67 (F4 repo — the real-data tier: the Falcon4.WCD weapon table + the signature grid wiring)
+Agent: main (Super Z)
+Task: The queue head after the support-flights tranche — the real-data
+tier (COMBAT_CHAIN_PLAN §5's WST item + the M4 plan's "Real RCS tables"
+deferral): the WCD-backed weapon class table end to end, the signature
+grid wiring, the VCD rcs_factor world-JSON leg, verification, docs, and
+the delivery patch.
+
+Work Log:
+- Pulled origin/main 16f4d34 (the flight-model pole program, Tasks 63-66
+  upstream). NUMBERING NOTE: the delivered-but-unpushed support-flights
+  tranche is numbered 63 in its patch; when it lands the entry may be
+  renumbered to keep this ledger monotonic — content unaffected. This
+  tranche takes 67 (the head).
+- Surveyed both seams with repo-wide agents before writing: (a) the
+  f4-sensors grid path was live but UNFED — no production code ever set
+  SignatureComponent::rcs_grid; the shipped Data/SimData/sigdata.json
+  has exactly one "generic" stem (flat 10 m²) — real per-type grids
+  need a full-install export, so the join is config-driven; (b) no WST
+  format analysis exists anywhere in the repo, and the vanilla install
+  the exporter targets does not SHIP a WST — its campaign weapon table
+  is Falcon4.WCD, already decoded byte-exactly by theater_data.
+- wcd2json CLI (f4-world-convert, the ct2json shape): loads the WCD via
+  the existing public load_weapon_data, emits the full raw record
+  (strength/damage_type/range_km/flags/name/hit_chance[8]/fire_rate/
+  rarity/guidance_flags/collective/simweap_index/weight/drag_index/
+  blast_radius/radar_type/sim_data_idx/max_alt) with the fnv1a source
+  fingerprint; --data-dir mode writes Data/Weapons/falcon4.wcd.json.
+  Registered in both CMakeLists (importer side) and export-game-data.sh
+  ([3b/8], the theater-db dir = FALCON4.ct's parent).
+- f4-weapons wcd_weapon_data.{hpp,cpp} (+ PRIVATE f4-io/f4-json — the
+  f4-world-types shape; boundary PASS): streaming-Reader parse into RAW
+  WcdWeaponRecords (unknown keys skipped), case-insensitive trimmed
+  find_by_name, and overlay_wcd_weapon_data — the REAL envelope
+  (range km->ft exact, weight->launch mass, strength->warhead,
+  blast radius->lethal radius) onto the built-in records; category/
+  guidance/the whole flyout card stay authored (invariants hold by
+  construction; unit test re-runs them over the overlaid table). The
+  WCD enum vocabularies are carried RAW — mapping waits on the
+  camplib.h bit definitions; fabricating them would be a fidelity lie.
+- The seam: CombatConfig::weapon_data_path (+ CampaignSessionOptions +
+  the QC's --weapon-data) -> resolve_weapon_table() in combat_bridge
+  (builtins; overlaid per kDefaultWeaponAliases — M61A1->M61,
+  AIM-9M->AIM-9, AIM-7M->AIM-7, AIM-120C->AIM-120, MK-82->MK-82,
+  GBU-12->GBU-12; misses = captured warnings in
+  Simulation::weapon_import_warnings, a bad path = loud throw). All
+  four construction sites go through it (simulation x2, campaign_
+  session, campaign_qc).
+- The signature leg: CombatConfig::signature_data_path +
+  aircraft_signature_stems (aircraft_name -> SIGDATA.LST stem, parsed
+  from the scenario combat block), Simulation owns a
+  SignatureDataLibrary (ensure_signature_data, lazy + loud), and both
+  attach paths take a SignatureContext — resolve_signature (exact then
+  case-insensitive) binds the stem's RCS grid onto the spawned
+  aircraft's SignatureComponent. The binding key is the scenario
+  template's aircraft_name; campaign aircraft spawn from the same
+  template, so one binding covers both paths. Nothing resolves = the
+  placeholder scalar path.
+- The rcs_factor leg (the future per-vehicle join data): f4-world-
+  convert emits VehicleGroup.rcs_factor when non-zero; f4-world parses
+  + conditionally emits it (every existing world JSON round-trips
+  byte-identically); the emitter test's synthetic fixture pins the
+  non-zero round-trip (the An-70's 3.4594 as the number).
+- FIXED en route: the scenario JSON combat block now parses the three
+  new keys; a first-pass test failure (the overlay "reaching" the table
+  produced builtins) was the default alias "AIM-120" not matching the
+  test export's "AIM-120 AMRAAM" — the warning path did exactly its
+  job (degrade, never throw); the test export was aligned to the alias
+  map and the warnings-order assertion corrected (M61A1 first).
+- Verified: 14 new tests green (test_wcd_weapon_data 9 — schema round-
+  trip, format-tag rejection, malformed-JSON capture, case-insensitive
+  lookup, file loader, overlay semantics + degradation + invariants;
+  test_combat_integration +4 — RealSignatureGridBindsByAircraftName
+  (grid bound, beam/nose range ratio == 4^0.25), NoSignatureConfig
+  golden, WeaponDataOverlayReachesTheTable (real envelope + flyout
+  card + 5 alias warnings), NoWeaponDataPathIsTheGoldenTable;
+  test_world_emit 4 with the rcs_factor extension). Pre-existing
+  failures unchanged (the combat guns-merge pair).
+
+Stage Summary:
+- The real-data tier tranche is complete and verified; the queue head
+  returns to the WVR/A-G harness family or the camplib.h vocabulary
+  tranche (damage_type/WEAP_ bits -> WeaponCategory/GuidanceKind) once
+  a real wcd2json export exists to establish the bit definitions
+  against.
+- Delivery: format-patch onto origin/main (16f4d34), git am verified to
+  reproduce the exact tree.

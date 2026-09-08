@@ -173,6 +173,15 @@ struct VehicleGroup {
     std::string vehicle_nctr;     // NCTR classification (radar IFF)
     int16_t  hit_points = 0;      // from VCD
     int16_t  max_speed = 0;       // from VCD (knots for air, kph for ground)
+    // Real-data tier (Task 64): the VCD's per-vehicle RCS factor —
+    // log2(1 + RCS relative to the F-16), the vanilla runtime's own
+    // per-type signature scalar. Emitted by wcd/vcd-backed cam2json
+    // exports; 0.0 when the source decode lacked it (every pre-Task-64
+    // world JSON, which round-trips byte-identically because the emitter
+    // skips the zero). Joins vehicle_name/hit_points/max_speed in the
+    // exported-but-not-yet-sim-consumed family: the consumer wiring
+    // (SignatureComponent scaling) is the next tranche.
+    float    rcs_factor = 0.0f;   // from VCD (dimensionless, log2 domain)
 };
 
 } // namespace f4::entities

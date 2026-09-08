@@ -214,10 +214,17 @@ The harness is "done" when ALL of the following hold:
   AI's defense flies. Countermeasures as physics entities (chaff clouds,
   flare heat sources) that the missile seeker must discriminate against
   is an M5+ fidelity tranche.
-- **Real RCS tables** — every target uses the placeholder 5 m² fighter
-  signature. Theater-aware RCS by aircraft type/aspect is a Tier 1
-  follow-on (see the next-step roadmap in the conversation that produced
-  this plan); it changes detection range but not the harness shape.
+- **Real RCS tables** — LANDED as the Task 64 wiring tranche: the
+  f4-sensors grid path (TargetSignature.rcs_grid / SignatureComponent
+  .rcs_grid) is now FED — the scenario "combat" block takes
+  signature_data_path + aircraft_signature_stems (name -> SIGDATA.LST
+  stem), the Simulation owns the SignatureDataLibrary (brain-data
+  pattern), and matching aircraft get the stem's azimuth/elevation RCS
+  grid in place of the placeholder lobe model. Config-only join for now
+  (campaign aircraft spawn from the scenario template, so the binding
+  covers both paths); the VCD rcs_factor rides the world JSON
+  (VehicleGroup.rcs_factor) as the future per-vehicle join data. Every
+  pre-Task-64 scenario is byte-identical (no config = placeholder path).
 - **FALCON4.WST parsing** — the built-in placeholder WeaponClassTable
   (AIM-9M/AIM-7M/AIM-120C/M61/Mk-82/GBU-12) is sufficient for M4. Real
   weapon class data via `f4-convert` is a Tier 1 follow-on.

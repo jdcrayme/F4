@@ -129,6 +129,7 @@
 // margin.
 
 #include <f4/simulation/simulation.hpp>
+#include <f4/simulation/combat_bridge.hpp>
 #include <f4/simulation/campaign_bridge.hpp>
 #include <f4/simulation/campaign_spawner.hpp>
 #include <f4/simulation/campaign_result_sink.hpp>
@@ -225,6 +226,8 @@ struct Args {
     // unit strike produced nothing — CAS needs its TOT window, so
     // the 1-hour war is the honest horizon).
     bool unit_strike = false;
+    // Real-data tier: the wcd2json export folded over the built-in table.
+    std::string weapon_data;
 };
 
 [[noreturn]] void usage(const char* prog) {
@@ -240,7 +243,7 @@ struct Args {
         "          [--wreck-hold <sec>] [--war-max-wall <sec>] [--aa-combat]\n"
         "          [--ground-war] [--ground-update-sec <sec>]\n"
         "          [--ground-orders-sec <sec>] [--ground-resupply-sec <sec>]\n"
-        "          [--unit-strike] [--out-dir <dir>]\n",
+        "          [--unit-strike] [--weapon-data <wcd.json>] [--out-dir <dir>]\n",
         prog);
     std::exit(1);
 }
@@ -288,6 +291,7 @@ Args parse_args(int argc, char** argv) {
         else if (k == "--aa-combat")   a.aa_combat = true;
         else if (k == "--ground-war")  a.ground_war = true;
         else if (k == "--unit-strike") a.unit_strike = true;
+        else if (k == "--weapon-data") a.weapon_data = next();
         else if (k == "--ground-update-sec")
             a.ground_update_sec = std::atoi(next());
         else if (k == "--ground-orders-sec")
@@ -431,6 +435,7 @@ int run_war(const Args& args) {
     hopts.session.ground_resupply_sec = args.ground_resupply_sec;
     // G2: the interdiction link (opt-in, the same contract).
     hopts.session.unit_strike = args.unit_strike;
+    hopts.session.weapon_data_path = args.weapon_data;
     hopts.horizon_sec =
         static_cast<std::int64_t>(args.war_hours * 3600.0);
     hopts.sample_sec = args.war_sample_sec;
@@ -1088,7 +1093,7 @@ int main(int argc, char** argv) {
     // path (objective map resolves waypoint targets; the weapon table
     // arms the decoded loadout + doctrine fill).
     const auto builtin_weapons =
-        f4::weapons::WeaponClassTable::with_builtins();
+        f4::simulation::resolve_weapon_table(args.weapon_data);
     spawner.set_objective_id_map(&populated.objective_id_map);
     spawner.set_weapon_table(&builtin_weapons);
     spawner.set_airbase_airfields(&airbase_airfields);

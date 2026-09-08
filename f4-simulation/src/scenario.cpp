@@ -336,6 +336,37 @@ Scenario parse_scenario(f4::json::Reader& r) {
                 else if (k == "missiles_hold") s.combat.missiles_hold = r.read_bool();
                 else if (k == "guns_hold")     s.combat.guns_hold = r.read_bool();
                 else if (k == "campaign_armed") s.combat.campaign_armed = r.read_bool();
+                // Real-data tier (Task 64): the wcd2json weapon export
+                // and the sig2json signature library, plus the
+                // name->stem bindings. Unset keys keep the placeholder
+                // paths (the golden identity).
+                else if (k == "weapon_data_path")
+                    s.combat.weapon_data_path = r.read_string();
+                else if (k == "signature_data_path")
+                    s.combat.signature_data_path = r.read_string();
+                else if (k == "aircraft_signature_stems") {
+                    r.skip_ws(); r.expect('[');
+                    if (!r.consume(']')) {
+                        for (;;) {
+                            r.skip_ws(); r.expect('{');
+                            CombatConfig::SignatureBinding b;
+                            while (!r.consume('}')) {
+                                std::string bk = r.read_string();
+                                r.expect(':');
+                                if (bk == "aircraft_name")
+                                    b.aircraft_name = r.read_string();
+                                else if (bk == "stem")
+                                    b.stem = r.read_string();
+                                else r.skip_value();
+                                (void)r.consume(',');
+                            }
+                            s.combat.aircraft_signature_stems.push_back(b);
+                            r.skip_ws();
+                            (void)r.consume(',');
+                            if (r.consume(']')) break;
+                        }
+                    }
+                }
                 else                            skip_unknown(r);
             }
         } else if (key == "fuel") {

@@ -34,6 +34,11 @@ f4_simulation_add_test(test_formation_acceptance   test_formation_acceptance.cpp
 f4_simulation_add_test(test_intercept_convergence    test_intercept_convergence.cpp)
 f4_simulation_add_test(test_fcs_trace_pipeline     test_fcs_trace_pipeline.cpp)
 f4_simulation_add_test(test_combat_integration     test_combat_integration.cpp)
+# Task 64: the real-data signature fixture (the aspect-grid stem the
+# binding tests resolve against).
+target_compile_definitions(test_combat_integration PRIVATE
+    F4_SIMULATION_TEST_FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures"
+)
 f4_simulation_add_test(test_combat_transcript      test_combat_transcript.cpp)
 f4_simulation_add_test(test_register_aircraft      test_register_aircraft.cpp)
 f4_simulation_add_test(test_campaign_session       test_campaign_session.cpp)

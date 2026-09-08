@@ -20,3 +20,8 @@ f4_weapons_add_test(test_gun           test_gun.cpp)
 f4_weapons_add_test(test_engagement    test_engagement.cpp)
 f4_weapons_add_test(test_bomb          test_bomb.cpp)
 f4_weapons_add_test(test_bomb_unit      test_bomb_unit.cpp)
+add_executable(test_wcd_weapon_data test_wcd_weapon_data.cpp)
+target_link_libraries(test_wcd_weapon_data PRIVATE GTest::gtest_main f4-weapons)
+target_compile_definitions(test_wcd_weapon_data PRIVATE
+    WCD_TEST_FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+gtest_discover_tests(test_wcd_weapon_data)

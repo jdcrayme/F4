@@ -9,6 +9,7 @@
 #include <f4/campaign/mission_profile.hpp>
 #include <f4/campaign/world_writeback.hpp>
 #include <f4/simulation/scenario.hpp>
+#include <f4/simulation/combat_bridge.hpp>
 #include <f4/flight/flight_model_component.hpp>
 #include <f4/data/config_loader.hpp>
 #include <f4/io/read_file.hpp>
@@ -375,7 +376,9 @@ CampaignSession::create(const CampaignSessionOptions& opts,
     // Arming + parking: the builtin weapon table is a MEMBER (the
     // spawner borrows it; a temporary would dangle) — the QC keeps a
     // named local alive for the whole run, the session stores one.
-    session->weapon_table_ = f4::weapons::WeaponClassTable::with_builtins();
+    session->weapon_table_ =
+        f4::simulation::resolve_weapon_table(opts.weapon_data_path,
+                                             &session->weapon_import_warnings_);
     session->spawner_->set_objective_id_map(&session->objective_id_map_);
     session->spawner_->set_weapon_table(&session->weapon_table_);
     session->spawner_->set_airbase_airfields(

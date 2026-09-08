@@ -44,7 +44,9 @@
 #include <f4/weapons/f4_weapons.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdlib>
+#include <fstream>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -74,6 +76,18 @@ std::string f16_config_path() {
     return std::filesystem::exists(path) ? path.generic_string() : "";
 }
 
+// The real-data signature fixture (Task 64): one stem, "asptest", whose
+// RCS grid is 5 m^2 nose / 20 m^2 beam — the aspect dependence the grid
+// path exists for.
+std::string aspect_signature_fixture_path() {
+#ifdef F4_SIMULATION_TEST_FIXTURES_DIR
+    return std::string(F4_SIMULATION_TEST_FIXTURES_DIR) +
+           "/signatures_aspect.json";
+#else
+    return "";
+#endif
+}
+
 constexpr double kDt = 1.0 / 60.0;
 
 // The scenario: two fighters in a stern chase at 10,000 ft. The bandit is
@@ -84,7 +98,8 @@ constexpr double kDt = 1.0 / 60.0;
 std::string combat_scenario_json(const std::string& f16_path,
                                  bool combat_enabled,
                                  const std::string& record_path = {},
-                                 const std::string& fuel_block = {}) {
+                                 const std::string& fuel_block = {},
+                                 const std::string& extra_combat = {}) {
     const std::string record_block = record_path.empty()
         ? "\"record\": false"
         : "\"record\": true,\n  \"record_path\": \"" + record_path + "\"";
@@ -124,7 +139,7 @@ std::string combat_scenario_json(const std::string& f16_path,
   "total_ticks": 30000,
   )" + record_block + fuel_seg + R"(,
   "combat": { "enabled": )" + (combat_enabled ? "true" : "false") + R"(,
-              "radar_rng_seed": 777 }
+              "radar_rng_seed": 777)" + extra_combat + R"( }
 })";
 }
 
@@ -2351,4 +2366,152 @@ TEST(CombatIntegration, RadarBackedPolicyBatchMatchesPerCall) {
     // fusion->prepare_batch()->classify() wiring runs clean).
     sf.set_detection_policy(&batch);
     sf.force_refresh();
+}
+
+// ============================================================================
+// Task 64 — the real-data tier: signature grid wiring + the WCD weapon
+// overlay, both through the Simulation seam (scenario "combat" block).
+// ============================================================================
+TEST(CombatIntegration, RealSignatureGridBindsByAircraftName) {
+    const auto f16 = f16_config_path();
+    if (f16.empty()) GTEST_SKIP() << "f16.json fixture not generated";
+    const auto sig = aspect_signature_fixture_path();
+    ASSERT_FALSE(sig.empty());
+
+    const std::string extra = R"(,
+              "signature_data_path": ")" + sig + R"(",
+              "aircraft_signature_stems": [
+                { "aircraft_name": "F-16C_50", "stem": "asptest" }])";
+    auto scenario = load_scenario_from_string(
+        combat_scenario_json(f16, true, {}, {}, extra));
+    Simulation sim(std::move(scenario), std::filesystem::path("."));
+    sim.initialize();
+
+    // The library is owned by the sim; the entities borrow from it.
+    ASSERT_NE(sim.signature_library(), nullptr);
+    ASSERT_EQ(sim.aircraft_entities().size(), 2u);
+    for (const auto eid : sim.aircraft_entities()) {
+        entities::EntityHandle h(eid, &sim.world());
+        const auto* sig_comp = h.get<sensors::SignatureComponent>();
+        ASSERT_NE(sig_comp, nullptr);
+        ASSERT_NE(sig_comp->rcs_grid, nullptr);
+        // The grid IS the bound stem's: beam 20 m^2 vs nose 5 m^2 — the
+        // aspect dependence the placeholder scalar cannot express.
+        EXPECT_DOUBLE_EQ(sig_comp->rcs_grid->value_at(0.0, 0.0), 5.0);
+        EXPECT_DOUBLE_EQ(sig_comp->rcs_grid->value_at(90.0, 0.0), 20.0);
+        // The beam signature is 4x the nose signature; the fourth-root
+        // detection law turns that into ~1.414x the detection range.
+        sensors::RadarParameters params{};
+        sensors::TargetSignature nose{};
+        nose.rcs_grid = sig_comp->rcs_grid;
+        nose.aspect_rad = 0.0;
+        sensors::TargetSignature beam = nose;
+        beam.aspect_rad = 1.5707963267948966;  // 90 deg in rad
+        const double nose_nm = detection_range_nm(params, nose);
+        const double beam_nm = detection_range_nm(params, beam);
+        EXPECT_NEAR(beam_nm / nose_nm, std::pow(4.0, 0.25), 1e-9);
+    }
+}
+
+TEST(CombatIntegration, NoSignatureConfigKeepsThePlaceholderPath) {
+    const auto f16 = f16_config_path();
+    if (f16.empty()) GTEST_SKIP() << "f16.json fixture not generated";
+
+    auto scenario =
+        load_scenario_from_string(combat_scenario_json(f16, true));
+    Simulation sim(std::move(scenario), std::filesystem::path("."));
+    sim.initialize();
+
+    EXPECT_EQ(sim.signature_library(), nullptr);
+    ASSERT_EQ(sim.aircraft_entities().size(), 2u);
+    for (const auto eid : sim.aircraft_entities()) {
+        entities::EntityHandle h(eid, &sim.world());
+        const auto* sig_comp = h.get<sensors::SignatureComponent>();
+        ASSERT_NE(sig_comp, nullptr);
+        EXPECT_EQ(sig_comp->rcs_grid, nullptr);
+        EXPECT_DOUBLE_EQ(sig_comp->rcs_m2, 5.0);
+    }
+}
+
+TEST(CombatIntegration, WeaponDataOverlayReachesTheTable) {
+    const auto f16 = f16_config_path();
+    if (f16.empty()) GTEST_SKIP() << "f16.json fixture not generated";
+
+    // The WCD export: written to a temp file (the schema the wcd2json
+    // CLI produces — the loader consumes it through the same seam the
+    // scenario JSON configures).
+    namespace fs = std::filesystem;
+    const fs::path wcd = fs::temp_directory_path() /
+                         "f4_test_wcd_overlay.json";
+    {
+        std::ofstream f(wcd, std::ios::binary);
+        ASSERT_TRUE(f.is_open());
+        f << R"({
+  "format": "f4-weapon-class-table", "version": 1,
+  "source": "FALCON4.WCD", "source_fingerprint": "0123456789abcdef",
+  "count": 1,
+  "entries": [
+    { "index": 12, "strength": 40, "damage_type": 2, "range_km": 48,
+      "flags": 512, "name": "AIM-120",
+      "hit_chance": [0,0,0,0,0,0,0,0], "fire_rate": 1, "rarity": 1,
+      "guidance_flags": 0, "collective": 0, "simweap_index": -1,
+      "weight": 335, "drag_index": 0, "blast_radius": 50,
+      "radar_type": 0, "sim_data_idx": 0, "max_alt": 60 }
+  ]
+})";
+    }
+
+    const std::string extra = R"(,
+              "weapon_data_path": ")" + wcd.generic_string() + R"(")";
+    auto scenario = load_scenario_from_string(
+        combat_scenario_json(f16, true, {}, {}, extra));
+    Simulation sim(std::move(scenario), std::filesystem::path("."));
+    sim.initialize();
+
+    // The real envelope replaced the built-in AMRAAM's numbers.
+    const auto amraam = sim.weapon_table().find_by_name("AIM-120C");
+    ASSERT_NE(amraam, weapons::kInvalidWeapon);
+    const auto* rec = sim.weapon_table().get(amraam);
+    ASSERT_NE(rec, nullptr);
+    EXPECT_NEAR(rec->max_range_ft, 48.0 * 3280.83989501312, 1e-6);
+    EXPECT_DOUBLE_EQ(rec->launch_mass_lb, 335.0);
+    EXPECT_DOUBLE_EQ(rec->warhead_power_lb, 40.0);
+    EXPECT_DOUBLE_EQ(rec->lethal_radius_ft, 50.0);
+    // The flyout card survived the overlay.
+    EXPECT_GT(rec->thrust_lbf, 0.0);
+    EXPECT_GT(rec->burn_time_s, 0.0);
+    // The default alias map hits "AIM-120" and misses the other 5
+    // engine names against this single-record export — misses are
+    // captured as warnings, not failures.
+    ASSERT_EQ(sim.weapon_import_warnings().size(), 5u);
+    EXPECT_NE(sim.weapon_import_warnings()[0].find("M61A1"),
+              std::string::npos);
+
+    std::error_code ec;
+    fs::remove(wcd, ec);
+}
+
+TEST(CombatIntegration, NoWeaponDataPathIsTheGoldenTable) {
+    const auto f16 = f16_config_path();
+    if (f16.empty()) GTEST_SKIP() << "f16.json fixture not generated";
+
+    auto scenario =
+        load_scenario_from_string(combat_scenario_json(f16, true));
+    Simulation sim(std::move(scenario), std::filesystem::path("."));
+    sim.initialize();
+
+    // Byte-equal to the built-in placeholder set: same size, same
+    // AMRAAM numbers the pre-Task-64 tests pinned.
+    const auto golden = weapons::WeaponClassTable::with_builtins();
+    ASSERT_EQ(sim.weapon_table().size(), golden.size());
+    const auto h = sim.weapon_table().find_by_name("AIM-120C");
+    const auto hg = golden.find_by_name("AIM-120C");
+    ASSERT_NE(h, weapons::kInvalidWeapon);
+    ASSERT_NE(hg, weapons::kInvalidWeapon);
+    const auto* a = sim.weapon_table().get(h);
+    const auto* b = golden.get(hg);
+    EXPECT_DOUBLE_EQ(a->max_range_ft, b->max_range_ft);
+    EXPECT_DOUBLE_EQ(a->launch_mass_lb, b->launch_mass_lb);
+    EXPECT_DOUBLE_EQ(a->warhead_power_lb, b->warhead_power_lb);
+    EXPECT_TRUE(sim.weapon_import_warnings().empty());
 }

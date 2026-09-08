@@ -1,3 +1,62 @@
+## Task 67 — the real-data tier: the Falcon4.WCD weapon table + the signature grid wiring
+
+**The combat chain now runs on the vanilla install's own numbers where the
+data exists.** Two seams landed, both default-off with the golden identity
+pinned by tests (every pre-Task-67 scenario/table is byte-identical):
+
+- **The WCD weapon tranche (COMBAT_CHAIN_PLAN §5 closed).** The vanilla
+  install has no FreeFalcon-runtime FALCON4.WST; its campaign weapon table
+  is Falcon4.WCD — already decoded byte-exactly by f4-world-convert's
+  theater_data. New `wcd2json` CLI (the ct2json shape: standalone +
+  --data-dir mode, fnv1a source fingerprint) dumps it as
+  "f4-weapon-class-table" JSON; export-game-data.sh gained the [3b/8]
+  step (writes Data/Weapons/falcon4.wcd.json). Runtime side:
+  f4-weapons' wcd_weapon_data.{hpp,cpp} (+ f4-io/f4-json PRIVATE — the
+  f4-world-types dependency shape) parses the export into RAW
+  WcdWeaponRecords and `overlay_wcd_weapon_data` folds the REAL
+  employment/damage envelope — range km→ft, weight lb→launch mass,
+  strength→warhead power, blast radius→lethal radius — onto the built-in
+  records. Category/guidance and the entire flyout/seeker/fuze card stay
+  as authored: the invariants hold by construction and no call site
+  changes. The WCD enum vocabularies (damage_type, WEAP_/guidance bits)
+  are carried RAW — mapping them waits on the camplib.h bit definitions
+  (fabricating them would be a fidelity lie). The seam:
+  CombatConfig::weapon_data_path (+ CampaignSessionOptions, + the QC's
+  --weapon-data) drives resolve_weapon_table() — builtins, overlaid with
+  kDefaultWeaponAliases (M61A1→M61, AIM-9M→AIM-9, AIM-7M→AIM-7,
+  AIM-120C→AIM-120, MK-82→MK-82, GBU-12→GBU-12); alias misses are
+  captured warnings (Simulation::weapon_import_warnings), a bad path is a
+  loud throw (the brain-data discipline). All four construction sites
+  (simulation ×2, campaign_session, campaign_qc) go through it.
+- **The signature grid wiring (COMBAT_CHAIN_M4_PLAN's "Real RCS tables"
+  deferral closed at the config join).** f4-sensors' grid path
+  (TargetSignature.rcs_grid) was live but UNFED — no code ever set the
+  grid. Now: CombatConfig::signature_data_path + aircraft_signature_stems
+  (aircraft_name → SIGDATA.LST stem, scenario-JSON parsed), the
+  Simulation owns a SignatureDataLibrary (lazy, loud-failure —
+  ensure_signature_data), and attach_combat_loadout /
+  arm_campaign_combat take a SignatureContext that binds the stem's RCS
+  grid onto the spawned aircraft's SignatureComponent. The binding key
+  is the scenario template's aircraft_name — campaign aircraft spawn
+  from the same template, so one binding covers both paths. Resolution
+  is exact-then-case-insensitive; nothing resolves = the placeholder
+  scalar path.
+- **The VCD rcs_factor rides the world JSON** (the future per-vehicle
+  join data): f4-world-convert emits it on VehicleGroup when non-zero,
+  f4-world parses + emits it (conditional emission — every existing
+  world JSON round-trips byte-identically; the emitter test's synthetic
+  fixture pins the non-zero round-trip). It joins the
+  exported-but-not-yet-sim-consumed family (vehicle_name / hit_points /
+  max_speed).
+- **Verified**: 14 new tests (9 loader/overlay in f4-weapons over a
+  committed wcd_sample.json fixture; 4 real-data integration tests in
+  test_combat_integration — grid binding + aspect dependence (beam/nose
+  range ratio == 4^0.25), placeholder-path golden, the overlay reaching
+  the table through the scenario seam, the no-path golden table; + the
+  emitter round-trip extension). Boundary PASS at configure (f4-weapons
+  gains only PRIVATE f4-io/f4-json — both runtime-marked leaves);
+  wcd2json builds importer-side.
+
 ## Task 66 — pole-diagnosis program merged onto the PHUG tree; the two diagnoses cross-validated; re-derived CI pole gates
 
 **The pole program (Tasks 63/64) and the upstream PHUG-PLAN program are

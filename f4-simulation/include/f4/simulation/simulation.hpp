@@ -34,6 +34,7 @@
 #pragma once
 
 #include <f4/entities/entity.hpp>
+#include <f4/data/signature_data.hpp>
 #include <f4/messaging/bus.hpp>
 // Tranche 0d: f4-models is no longer linked. VisualModelComponent carries
 // vis_type (the identity); the renderer resolves the mesh through its own
@@ -354,6 +355,13 @@ public:
     [[nodiscard]] const f4::weapons::WeaponClassTable& weapon_table() const noexcept {
         return weapon_table_;
     }
+    /// Warnings from the real-data weapon overlay (unresolved aliases in
+    /// the default map, malformed-but-tolerated exports). Empty unless a
+    /// CombatConfig::weapon_data_path was configured.
+    [[nodiscard]] const std::vector<std::string>&
+    weapon_import_warnings() const noexcept {
+        return weapon_import_warnings_;
+    }
     /// Trace metadata ONLY — does NOT affect tick(). tick(dt) is
     /// authoritative: hosts pace the sim by calling tick() with a FIXED
     /// dt (the scenario's sim_dt) once per unit of owed sim time (the
@@ -500,6 +508,25 @@ private:
     // Combat chain (M3): weapon class data for launch_missile + the
     // component attachment at spawn. Built-in table; WST import later.
     f4::weapons::WeaponClassTable weapon_table_{};
+    std::vector<std::string> weapon_import_warnings_;
+
+    // Real-data tier (Task 64): the scenario's signature library, owned
+    // here (exactly like brain_data_), grids lent to the spawned
+    // aircraft's SignatureComponent as non-owning pointers.
+    std::unique_ptr<f4::data::SignatureDataLibrary> signature_library_;
+    bool signature_library_loaded_ = false;
+    void ensure_signature_data();
+
+public:
+    /// The loaded signature library (null when no signature_data_path
+    /// was configured). Grids are pointers INTO this — the Simulation
+    /// must outlive every armed entity.
+    [[nodiscard]] const f4::data::SignatureDataLibrary*
+    signature_library() const noexcept {
+        return signature_library_.get();
+    }
+
+private:
 
     // M3 tactics: one detection policy per spawned combat aircraft,
     // installed on that aircraft brain's SensorFusion at spawn. The

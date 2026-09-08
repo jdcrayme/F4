@@ -44,6 +44,7 @@
 #include <f4/entities/entity.hpp>
 #include <f4/weapons/gun_component.hpp>
 #include <f4/weapons/weapon_class_table.hpp>
+#include <f4/data/signature_data.hpp>
 #include <f4/sensors/radar_component.hpp>
 #include <f4/sensors/rwr.hpp>
 #include <f4/sensors/signature.hpp>
@@ -71,12 +72,25 @@ class Simulation;  // combat event recording (attach_combat_event_recorder)
 /// command_track(); nothing here hard-codes a doctrine.
 ///
 /// `hit_points` sets DamageStateComponent (light-fighter strength default).
+/// The real-data signature context (Task 64): the Simulation-owned
+/// SignatureDataLibrary + the scenario's name->stem bindings. Null or
+/// empty fields = the placeholder signature path, untouched (the golden
+/// identity). `aircraft_name` is the binder key for the campaign arm
+/// path (the scenario template's name); attach_combat_loadout resolves
+/// on ScenarioAircraft::aircraft_name directly.
+struct SignatureContext {
+    const f4::data::SignatureDataLibrary* library = nullptr;
+    const std::vector<CombatConfig::SignatureBinding>* bindings = nullptr;
+    std::string aircraft_name;
+};
+
 void attach_combat_loadout(entities::EntityHandle& aircraft,
                            const weapons::WeaponClassTable& table,
                            const ScenarioAircraft& ac,
                            std::uint32_t seed_base,
                            std::size_t aircraft_index,
-                           double hit_points);
+                           double hit_points,
+                           const SignatureContext* signatures = nullptr);
 
 /// SensorFusion::DetectionPolicy backed by the ownship's radar tracks and
 /// RWR picture. This is the M2 integration point (SensorFusion::
@@ -294,6 +308,45 @@ enum class CampaignCombatRole {
 [[nodiscard]] CampaignCombatRole
 campaign_combat_role(std::uint8_t mission_byte) noexcept;
 
+// ============================================================================
+// The real-data weapon seam (Task 64).
+// ============================================================================
+
+/// One alias pair: the engine's canonical record name (what every call
+/// site finds: find_by_name("AIM-120C") and friends) -> the WCD export
+/// record it maps onto. WCD names are the game's own strings ("AIM-120
+/// AMRAAM" style); the overlay compares case-insensitively + trimmed.
+struct WeaponAliasBinding {
+    const char* engine_name;
+    const char* wcd_name;
+};
+
+/// The default engine->WCD alias set, overlay order = declaration order.
+/// The five pinned engine names (weapon_store / combat_bridge / the
+/// campaign wire map all find these) plus the wire map's GBU-12. A name
+/// that does not resolve in a given export warns and degrades to the
+/// built-in card — never throws.
+inline constexpr WeaponAliasBinding kDefaultWeaponAliases[] = {
+    {"M61A1",    "M61"},
+    {"AIM-9M",   "AIM-9"},
+    {"AIM-7M",   "AIM-7"},
+    {"AIM-120C", "AIM-120"},
+    {"MK-82",    "MK-82"},
+    {"GBU-12",   "GBU-12"},
+};
+
+/// Build the runtime weapon table for a scenario/option set:
+///   - empty path  -> the built-in placeholder set, byte-for-byte (the
+///     golden identity — every pre-real-data test keeps its numbers);
+///   - a path      -> the built-ins with the wcd2json export's real
+///     employment/damage envelope overlaid per kDefaultWeaponAliases.
+/// Throws std::runtime_error when a configured path fails to load (the
+/// loud-failure discipline ensure_campaign_brain_data established).
+/// Unresolved aliases are WARNINGS (returned), not failures.
+[[nodiscard]] f4::weapons::WeaponClassTable resolve_weapon_table(
+    const std::string& weapon_data_path,
+    std::vector<std::string>* warnings = nullptr);
+
 /// What arm_campaign_combat did — the QC surface + the session's
 /// diagnostics read exactly these fields.
 struct CampaignCombatArmament {
@@ -362,6 +415,7 @@ struct CampaignCombatArmament {
     bool missiles_hold,
     bool guns_hold,
     const f4::data::BrainData* brain_data,
-    std::unique_ptr<RadarBackedDetectionPolicy>* out_policy = nullptr);
+    std::unique_ptr<RadarBackedDetectionPolicy>* out_policy = nullptr,
+    const SignatureContext* signatures = nullptr);
 
 } // namespace f4::simulation
