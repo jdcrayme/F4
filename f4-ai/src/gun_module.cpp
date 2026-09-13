@@ -102,6 +102,16 @@ bool GunModule::in_envelope(const TargetInfo& t,
     return range_nm >= cfg_.min_range_nm && range_nm <= cfg_.max_range_nm;
 }
 
+bool GunModule::in_commit_band(const TargetInfo& t,
+                               const geo::WorldPosition& ownship_pos)
+    const noexcept {
+    // The outer edge only — see in_commit_band's header comment for the
+    // trigger-envelope vs geometry-ownership distinction and the measured
+    // mid-pass break the minimum bound produced.
+    const double range_nm = range_now_ft(t, ownship_pos) / FEET_PER_NM;
+    return range_nm <= cfg_.max_range_nm;
+}
+
 double GunModule::solution_error_rad(
     const TargetInfo& t, const geo::WorldPosition& ownship_pos,
     const math::Vec3<double>& ownship_velocity) const noexcept {

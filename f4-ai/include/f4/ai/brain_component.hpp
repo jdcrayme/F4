@@ -436,6 +436,22 @@ public:
                 if (sensors_.missile_threat() != nullptr) {
                     sensors_.force_refresh();
                 }
+                // A committed merge needs the same data rate. The gun fire
+                // control dead-reckons the track file on age_s (the radar
+                // fire-control practice GunModule documents), and at merge
+                // closure (1,000+ ft/s) a Veteran-interval snapshot IS the
+                // entire gun envelope of error: the predictor aims at a
+                // phantom position thousands of feet down-range and the
+                // hit-quality cone never closes (measured on the guns
+                // merge: a decelerating bandit's stale +195 ft/s climb
+                // rate dead-reckoned +977 ft of phantom altitude into the
+                // lead point — the trigger held at 7-13 deg of error
+                // against a 1.1-1.7 deg cone). While the WVR module owns
+                // the geometry (the merge commit — one tick stale, the
+                // band develops over seconds), STT refreshes every tick.
+                if (in_wvr_ && wvr_.gun_pass_target_id() != 0) {
+                    sensors_.force_refresh();
+                }
 
                 if (const auto* incoming = sensors_.missile_threat()) {
                     // Missile defense outranks even bingo (FreeFalcon's

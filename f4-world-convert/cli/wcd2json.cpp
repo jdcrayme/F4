@@ -72,12 +72,13 @@ std::string content_fingerprint(const std::vector<uint8_t>& data) {
 }
 
 int run(const fs::path& db_dir, const fs::path& out_path, bool data_dir_mode) {
-    // Load the binary weapon table (the library's existing decoder; it
-    // case-insensitively locates Falcon4.WCD under the directory and
-    // throws with a human-readable cause when it is missing/corrupt).
+    // Load the binary weapon table (the library's existing decoder). The
+    // loader takes a file BASE path (stem only) — the same convention as
+    // TheaterObjectDatabase::load_all: it appends each extension and, if
+    // that misses, scans the directory case-insensitively for <stem>.<ext>.
     wc::WeaponClassTable wcd;
     try {
-        wc::load_weapon_data(db_dir, wcd);
+        wc::load_weapon_data(db_dir / "Falcon4", wcd);
     } catch (const std::exception& e) {
         std::cerr << "wcd2json: failed to load Falcon4.WCD from "
                   << db_dir << ": " << e.what() << "\n";
@@ -155,6 +156,9 @@ int run(const fs::path& db_dir, const fs::path& out_path, bool data_dir_mode) {
     if (data_dir_mode) {
         fs::create_directories(out_path / "Weapons");
         final_path = out_path / "Weapons" / "falcon4.wcd.json";
+    }
+    if (final_path.has_parent_path()) {
+        fs::create_directories(final_path.parent_path());
     }
     std::ofstream f(final_path, std::ios::binary);
     if (!f) {

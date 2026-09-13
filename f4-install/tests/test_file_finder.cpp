@@ -150,3 +150,25 @@ TEST(FileFinder, FindFileByExtensionCiReturnsEmptyOnMissing) {
     EXPECT_TRUE(p.empty());
     fs::remove_all(d);
 }
+
+TEST(FileFinder, FindFileByExtensionCiMatchesVerbatimPathWithExtension) {
+    // Step 2 of the finder: the caller passes the full path including
+    // the extension — return it as-is (canonicalized).
+    auto d = make_test_dir("ext_verbatim", {"Falcon4.OCD"});
+    auto p = find_file_by_extension_ci(d / "Falcon4.OCD", "WCD");
+    EXPECT_FALSE(p.empty());
+    EXPECT_EQ(p.filename(), "Falcon4.OCD");
+    fs::remove_all(d);
+}
+
+TEST(FileFinder, FindFileByExtensionCiNeverReturnsADirectory) {
+    // Regression: base_path pointing at an existing DIRECTORY used to
+    // short-circuit at the verbatim step (exists() is true for dirs) and
+    // the directory itself came back as the "found file" — which then
+    // failed downstream with a confusing "cannot open <dir>" read error.
+    // A directory is not a file match: the finder must return empty.
+    auto d = make_test_dir("ext_dir_base", {"Falcon4.WCD"});
+    auto p = find_file_by_extension_ci(d, "WCD");  // d is a directory
+    EXPECT_TRUE(p.empty());
+    fs::remove_all(d);
+}

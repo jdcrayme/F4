@@ -220,7 +220,7 @@ SIG_DIR="$(find_first "$TMP" -type d -iname 'SIGDATA')"
 # Convert.
 # ---------------------------------------------------------------------------
 mkdir -p "$OUTPUT/World" "$OUTPUT/Theater/$THEATER" "$OUTPUT/Aircraft" \
-         "$OUTPUT/SimData" "$OUTPUT/Classes"
+         "$OUTPUT/SimData" "$OUTPUT/Classes" "$OUTPUT/Weapons"
 
 echo "=== Exporting game data to $OUTPUT/ ==="
 echo "    install:     $INSTALL"

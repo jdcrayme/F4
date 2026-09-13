@@ -299,6 +299,59 @@ TEST(GunTrigger, ResetEngagementClearsTriggerNotAmmoOrCooldown) {
 }
 
 // ============================================================================
+// The commit band — the merge-geometry ownership bound (M5a)
+// ============================================================================
+//
+// The commit band is the envelope's OUTER edge only: the trigger
+// envelope's minimum bound is trigger doctrine (do not fire at a target
+// already past the pipper), not geometry ownership — a head-on pass
+// spends its most lethal second with the predicted range BELOW the min
+// bound, and dropping the merge commit there hands the geometry to
+// collision-avoid for exactly the one tick the exemption lags (the
+// measured mid-pass break that kept the guns fight from ever
+// completing; see GunModule::in_commit_band's header).
+
+TEST(GunCommitBand, CommitBandHoldsBelowTheTriggerMinimum) {
+    GunModule gun;   // defaults: min 0.08 NM, max 0.35 NM
+    const auto own = ownship_at(0.0, 0.0, 20000.0);
+    // Predicted range 300 ft = 0.049 NM: BELOW the min bound (the
+    // trigger envelope is closed) but INSIDE the commit band (the pass
+    // owns the geometry through the crossing).
+    const auto t = hostile(300.0 / FT_PER_NM, -900.0);
+    EXPECT_FALSE(gun.in_envelope(t, own));
+    EXPECT_TRUE(gun.in_commit_band(t, own));
+}
+
+TEST(GunCommitBand, CommitBandMatchesEnvelopeAtTheOuterEdge) {
+    GunModule gun;
+    const auto own = ownship_at(0.0, 0.0, 20000.0);
+    // Just inside the outer edge (0.35 NM = 2,126.6 ft): both agree.
+    const auto in_edge = hostile(2120.0 / FT_PER_NM, -900.0);
+    EXPECT_TRUE(gun.in_envelope(in_edge, own));
+    EXPECT_TRUE(gun.in_commit_band(in_edge, own));
+    // Just outside: both closed.
+    const auto out_edge = hostile(2140.0 / FT_PER_NM, -900.0);
+    EXPECT_FALSE(gun.in_envelope(out_edge, own));
+    EXPECT_FALSE(gun.in_commit_band(out_edge, own));
+}
+
+TEST(GunCommitBand, CommitBandFollowsThePredictionNotTheSnapshot) {
+    GunModule gun;
+    const auto own = ownship_at(0.0, 0.0, 20000.0);
+    // A 3-s-stale snapshot: the target WAS 8000 ft north closing at
+    // 900 ft/s -> predicted NOW at 8000 - 2700 = 5300 ft (0.87 NM) —
+    // outside the commit band. Then the same snapshot evaluated from
+    // an ownship 5000 ft further north: predicted 300 ft (0.049 NM) —
+    // inside the commit band, below the trigger minimum.
+    auto t = hostile(8000.0 / FT_PER_NM, -900.0);
+    t.age_s = 3.0;
+    EXPECT_FALSE(gun.in_commit_band(t, own));
+    const auto own_north = ownship_at(0.0, 5000.0, 20000.0);
+    EXPECT_TRUE(gun.in_commit_band(t, own_north));
+    EXPECT_FALSE(gun.in_envelope(t, own_north));  // 300 ft < 486 ft min
+}
+
+// ============================================================================
 // Configuration surface (host wiring)
 // ============================================================================
 

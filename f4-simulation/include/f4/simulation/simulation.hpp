@@ -51,6 +51,7 @@
 #include <filesystem>
 #include <memory>
 #include <optional>
+#include <unordered_map>
 #include <vector>
 
 #include "f4/simulation/scenario.hpp"
@@ -575,6 +576,21 @@ private:
     // Phase 1 spawn path (scenario_list) pushes one entry; the Phase 2 path
     // (campaign_flights) pushes one per Flight unit found in the world JSON.
     std::vector<entities::EntityId> aircraft_entities_;
+
+    // M5a: per-aircraft WVR-band presence (combat_mode == WVR last time
+    // the flip recorder looked), for the WvrEngaged/WvrDisengaged combat
+    // events. Keyed by EntityId::value; a stale entry after a retirement
+    // is harmless (the flip pass walks the CURRENT roster). Only written
+    // when recording is on.
+    std::unordered_map<std::uint64_t, bool> wvr_band_state_;
+
+    /// M5a: walk the active roster after the intents pass and append a
+    /// WvrEngaged/WvrDisengaged CombatEvent wherever a brain's combat
+    /// mode crossed the WVR boundary since the previous tick. Recording
+    /// only (recorder() == nullptr is a no-op) — the events make the
+    /// band transitions first-class replayable evidence for the WVR
+    /// harness's fight-alive gate.
+    void record_wvr_band_flips(double sim_time_s);
 
     // C5: aircraft removed via retire_aircraft() (the wreck-reaper
     // counter — roster == initial + registered − retired).

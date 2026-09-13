@@ -56,6 +56,19 @@ WVRModule::WVRModule()
     air_steering_.max_bank_rad = 1.22;       // ~70 deg
     air_steering_.balloon_guard_fpm = 1000000.0;
     air_steering_.throttle_max = 1.5;        // AB available in the fight
+    // The vertical authority too. The nav-comfort VS tune (STAB-E1's
+    // 2,500 fpm cap + STAB-E29's 400 fpm/s slew) cannot hold a fight
+    // plane against a spawn-energy balloon: the guns-merge eagle
+    // balloons at ~4,900 fpm while the merge's descent command slews
+    // toward ~2,500 — the pair diverges ~850 ft vertically through the
+    // merge and the gun cone (1.5 deg at 1,500 ft) never closes. A
+    // fight lives seconds; the CA break already flies this authority
+    // (12,000 fpm, slew off) for exactly this reason — the comfort
+    // limiters are the wrong tune for it. The E46 balloon guard stays
+    // off (set above): the merge's own altitude command IS the
+    // anti-balloon loop.
+    air_steering_.max_vs_fpm = 12000.0;
+    air_steering_.vs_slew_fpm_per_s = -1.0;  // STAB-E29: OFF in the fight
     fire_.config().fire_cooldown_sec = 3.0;
     fire_.config().pk_base = 0.9;            // heater-class reliability
     fire_.config().shoot_shoot_threshold = 0.35;
@@ -306,8 +319,24 @@ AIControlOutput WVRModule::update(double dt,
             tactic_ = WVRTactic::RandP;
             wants_lock_ = true;   // keep the STT hot through the merge
             desired_heading_rad_ = pursuit_heading_rad();
-            desired_alt_ft_ = clamp_alt_ft(target_ ? target_->position.z
-                                                   : engage_alt_ft_);
+            // The fight plane: the altitude captured at engage() — the
+            // engage() contract's own words ("the altitude the vertical
+            // game weaves around"). Chasing the target's LIVE altitude
+            // here builds a two-brain positive feedback loop: both sides
+            // of a merge run this same doctrine, each chasing the
+            // other's lagged climb response, and the pair diverges
+            // vertically through the merge (measured: 846 ft apart by
+            // t+10 s of the guns fight — eagle at 16,653 ft climbing
+            // +81 ft/s while its bandit chased it at +195 ft/s from
+            // 15,807 ft). The gun fire control pays for that divergence
+            // first: the lead point rides hundreds of feet off the
+            // boresight plane and the hit-quality cone (1.5 deg at
+            // 1,500 ft) can never close through the transient. The
+            // Defensive weave and the BugOut already reference this
+            // captured plane; the Merge now holds it too, and the gun
+            // branch's lead-point tracking (below) owns the remaining
+            // vertical aiming.
+            desired_alt_ft_ = clamp_alt_ft(engage_alt_ft_);
             // GUNS (Steps 11-12) — the merge SNAPSHOT. While the gun is
             // armed and the target is inside its envelope, the steering
             // tracks the GUN solution (aiming IS steering there); the
@@ -318,15 +347,18 @@ AIControlOutput WVRModule::update(double dt,
                 fightable && !guns_.config().hold_fire &&
                 guns_.in_envelope(*target, current_position_);
             // The committed merge (the cavoid exemption): INSIDE the
-            // gun band the pass owns the geometry for BOTH jets — this
-            // one whether its own trigger is armed (gun_work) or the
-            // opponent holds the angle on us (a drone defending the
-            // pass holds its line; a 0.7-s break spoils nothing but the
-            // pass). FRESH track-file range — the fusion's range_nm is
-            // seconds stale at merge closure.
+            // gun COMMIT BAND (the outer edge only — see GunModule::
+            // in_commit_band; the trigger envelope's minimum bound ends
+            // the commit exactly at the pass's most lethal second) the
+            // pass owns the geometry for BOTH jets — this one whether
+            // its own trigger is armed (gun_work) or the opponent holds
+            // the angle on us (a drone defending the pass holds its
+            // line; a 0.7-s break spoils nothing but the pass). FRESH
+            // track-file range — the fusion's range_nm is seconds stale
+            // at merge closure.
             merge_committed_ =
                 fightable &&
-                guns_.in_envelope(*target, current_position_);
+                guns_.in_commit_band(*target, current_position_);
             if (gun_work && !gun_steering_active_) {
                 // The steering reference CHANGES here (level merge ->
                 // the gun's climbing lead line). Integrators wound on
@@ -376,9 +408,14 @@ AIControlOutput WVRModule::update(double dt,
             const bool gun_work =
                 fightable && !guns_.config().hold_fire &&
                 guns_.in_envelope(*target, current_position_);
+            // The commit band (see the Merge case): the geometry stays
+            // owned through the Offensive pass too — the overshoot
+            // offset turn below is a WEAPONS maneuver, and the min-bound
+            // race measured on the guns merge (predicted range crossing
+            // below 0.08 NM mid-pass) lives here as well.
             merge_committed_ =
                 fightable &&
-                guns_.in_envelope(*target, current_position_);
+                guns_.in_commit_band(*target, current_position_);
             gun_steering_active_ = gun_work;
             if (gun_work) {
                 desired_heading_rad_ = guns_.lead_heading_rad(
@@ -399,11 +436,20 @@ AIControlOutput WVRModule::update(double dt,
             } else {
                 tactic_ = WVRTactic::RandP;
             }
+            // The fight plane (see the Merge case): the captured engage
+            // altitude in the pursuit branch — chasing the target's LIVE
+            // altitude here re-opens the two-brain vertical loop through
+            // the Offensive rung (the opponent's Merge/Offensive chases
+            // US; a live-reference chase on both sides diverges). The
+            // gun-work branch keeps the lead-point tracking: with both
+            // jets holding stable fight planes the lead point's z is
+            // nearly static and the VS cascade settles onto it — the
+            // remaining vertical error is the predictor's drop term,
+            // inside the hit-quality cone.
             desired_alt_ft_ = clamp_alt_ft(
                 gun_work ? guns_.lead_point(*target_,
                                             current_position_).z
-                         : (target_ ? target_->position.z
-                                    : engage_alt_ft_));
+                         : engage_alt_ft_);
             if (fightable && target->ata_from_rad < cfg_.fire_cone_rad &&
                 fire_.should_fire(*target)) {
                 fire_.note_fired();
@@ -424,6 +470,16 @@ AIControlOutput WVRModule::update(double dt,
             tactic_ = WVRTactic::GunJink;
             gun_steering_active_ = false;  // jinking, not aiming
             wants_lock_ = true;   // keep the picture: re-counter needs it
+            // The commit band holds here too (the band is symmetric —
+            // see gun_pass_target_id's header): a target inside the gun
+            // band while WE are defensive is the same committed pass —
+            // the jink IS the defensive maneuver, and a cavoid break
+            // hijacking it mid-pass forfeits both the jink's geometry
+            // and the re-counter. Outside the band the exemption drops
+            // and full collision protection returns.
+            merge_committed_ =
+                fightable &&
+                guns_.in_commit_band(*target, current_position_);
             // Break turn: offset off the THREAT bearing, reversing every
             // jink_period_sec. The reversal is the point — a constant
             // turn settles into a predictable rate the shooter can lead;
@@ -458,10 +514,24 @@ AIControlOutput WVRModule::update(double dt,
         (sm_.current() == WVRState::Defensive ||
          sm_.current() == WVRState::BugOut)
             ? 0.9 : 0.4;
+    // The offensive states fight at MIL. AB buys closure the head-on
+    // geometry already has (two ~400-kt jets close at ~1,350 fps — the
+    // gun envelope opens and closes in ~2 s regardless), and the FCS's
+    // G-hold converts the excess thrust into climb: measured on the
+    // guns merge, the bandit's speed loop saturated at 1.5 chasing the
+    // 450-kt engage command from its spawn CAS and the aircraft
+    // ballooned +2,400 fpm AGAINST its own descent command — the whole
+    // gun solution (a 1.1-1.7 deg hit-quality cone) pays for every foot
+    // of that vertical excursion. Defensive/BugOut keep AB: the break
+    // and the separation are energy fights.
+    air_steering_.throttle_max =
+        (sm_.current() == WVRState::Defensive ||
+         sm_.current() == WVRState::BugOut)
+            ? 1.5 : 1.0;
     const double speed_kts = (sm_.current() == WVRState::Defensive ||
                               sm_.current() == WVRState::BugOut)
                                  ? cfg_.defensive_speed_kts
-                                 : cfg_.engage_speed_kts;
+                                 : engage_cas_kts_;
     out = air_steering_.steer(desired_heading_rad_, desired_alt_ft_,
                               speed_kts, steering_input(*state));
     out.weapon_release = release_pulse_;
@@ -543,6 +613,10 @@ void WVRModule::engage(const TargetInfo& target) {
     engagement_target_id_ = target.entity_id;
     // Capture the altitude the vertical game weaves around.
     engage_alt_ft_ = current_alt_msl_ft_;
+    // Capture the speed the merge holds: the CAS it arrived at, capped
+    // at the doctrine maximum (the CAP doctrine — see Config::
+    // engage_speed_kts; an acceleration command balloons the plant).
+    engage_cas_kts_ = std::min(current_vcas_kts_, cfg_.engage_speed_kts);
     // Drop the velocity history: it may be stale from before this fight
     // (the module only runs while the WVR rung is live), and a stale
     // delta over a fresh dt is a garbage boresight. The first tick of

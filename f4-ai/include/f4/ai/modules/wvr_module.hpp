@@ -144,7 +144,17 @@ public:
         /// the floor; thin air above the ceiling).
         double min_alt_ft{3000.0};
         double max_alt_ft{30000.0};
-        /// Speed target while maneuvering (kts CAS).
+        /// Speed target while maneuvering (kts CAS). This is the CAP for
+        /// the merge's engage speed, not a chase target: the plant's
+        /// closed-loop speed mode is marginally unstable (the pole
+        /// program's default-tune finding), so an acceleration command
+        /// converts to a climb transient (the G-hold turns excess thrust
+        /// into lift) — measured: commanding 450 KCAS from a ~300-kt
+        /// spawn balloons the jet +2,400..7,000 fpm through the merge and
+        /// the gun solution pays every foot. The merge holds the speed it
+        /// ARRIVED at (capped here); Defensive/BugOut chase their own
+        /// doctrine speeds (energy fights, seconds-scale, the transient
+        /// is the maneuver).
         double engage_speed_kts{450.0};
         /// Speed target while defensive (running - AB).
         double defensive_speed_kts{480.0};
@@ -307,6 +317,12 @@ private:
     bool wants_lock_{false};
     bool release_pulse_{false};
     bool gun_pulse_{false};
+
+    /// The merge's speed command: the CAS captured at engage(), capped at
+    /// the config's engage_speed_kts (see the config comment — the CAP
+    /// doctrine; an acceleration command balloons the plant). Recaptured
+    /// on every (re)engage.
+    double engage_cas_kts_{450.0};
 
     // Ownship velocity estimate (ft/s, world frame): consecutive cached
     // positions / dt. The guns solution error is measured against the

@@ -110,14 +110,17 @@ std::filesystem::path find_file_by_extension_ci(
         auto p = base_path;
         p += ".";
         p += ext;
-        if (fs::exists(p, ec)) {
+        if (fs::is_regular_file(p, ec)) {
             auto real = fs::weakly_canonical(p, ec);
             if (!ec) return real;
             return p;
         }
     }
-    // 2. base_path verbatim (no extension — caller may have included it)
-    if (fs::exists(base_path, ec)) {
+    // 2. base_path verbatim (no extension — caller may have included it).
+    // is_regular_file, not exists(): a directory argument (e.g. the caller
+    // passed terrdata/objects instead of terrdata/objects/Falcon4) must
+    // fall through to the scan below, not come back as a "found file".
+    if (fs::is_regular_file(base_path, ec)) {
         auto real = fs::weakly_canonical(base_path, ec);
         if (!ec) return real;
         return base_path;

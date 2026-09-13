@@ -52,6 +52,11 @@ enum class CombatEventKind : std::uint8_t {
     GunFired       = 8,  // a gun burst's first round       (weapons)
     BombReleased   = 9,  // a gravity weapon left the rack  (weapons)
     BombImpact     = 10, // a bomb reached the impact plane (weapons)
+    WvrEngaged     = 11, // a brain's combat ladder entered the WVR band
+                         // (M5a: the band transition is the WVR fight's
+                         // "engaged" evidence — replayable, certifiable)
+    WvrDisengaged  = 12, // the brain left the WVR band (target dead/lost,
+                         // range exit, bingo) — the disengage evidence
 };
 
 /// Stable wire names ("track_acquired", ...). Emitted as the JSON "kind"
@@ -69,6 +74,8 @@ enum class CombatEventKind : std::uint8_t {
         case CombatEventKind::GunFired:        return "gun_fired";
         case CombatEventKind::BombReleased:    return "bomb_released";
         case CombatEventKind::BombImpact:      return "bomb_impact";
+        case CombatEventKind::WvrEngaged:      return "wvr_engaged";
+        case CombatEventKind::WvrDisengaged:   return "wvr_disengaged";
     }
     return "unknown";
 }

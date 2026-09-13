@@ -755,8 +755,14 @@ CombatEvent parse_combat_event(json::Reader& r) {
         else if (key == "kind") {
             const auto name = r.read_string();
             // Kind names are the stable wire strings; unknown names (a
-            // newer writer added a kind) keep the default but still parse.
-            for (std::uint8_t k = 0; k <= 8; ++k) {
+            // newer writer added a kind) keep the default but still
+            // parse. The loop walks the FULL enum — the old 0..8 bound
+            // silently degraded bomb_released/bomb_impact (and would
+            // have degraded the M5a band events) on round-trip.
+            for (std::uint8_t k = 0;
+                 k <= static_cast<std::uint8_t>(
+                         CombatEventKind::WvrDisengaged);
+                 ++k) {
                 const auto kk = static_cast<CombatEventKind>(k);
                 if (name == combat_event_kind_name(kk)) {
                     e.kind = kk;

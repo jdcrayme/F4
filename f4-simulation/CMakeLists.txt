@@ -43,6 +43,7 @@ add_library(f4-simulation STATIC
     src/campaign_session_runner.cpp
     src/campaign_war_harness.cpp
     src/bvr_intercept_harness.cpp
+    src/wvr_merge_harness.cpp
     src/combat_bridge.cpp
     src/combat_transcript.cpp
     src/bubble_manager.cpp
@@ -158,3 +159,15 @@ endif()
 add_executable(bvr_intercept_qc tools/bvr_intercept_qc.cpp)
 target_link_libraries(bvr_intercept_qc PRIVATE f4-simulation)
 target_compile_features(bvr_intercept_qc PRIVATE cxx_std_20)
+
+# ============================================================================
+# wvr_merge_qc — the M5a end-to-end WVR / guns merge acceptance tool
+# (tools/wvr_merge_qc.cpp). The combat-chain sibling of bvr_intercept_qc:
+# runs a WVR merge scenario headless through WvrMergeHarness, writes the
+# three artifacts (result + summary + diary), and derives the exit-code
+# verdict. See the tool's header comment + Docs/COMBAT_CHAIN_M5_PLAN.md
+# for the exit-code table. Links f4-simulation only.
+# ============================================================================
+add_executable(wvr_merge_qc tools/wvr_merge_qc.cpp)
+target_link_libraries(wvr_merge_qc PRIVATE f4-simulation)
+target_compile_features(wvr_merge_qc PRIVATE cxx_std_20)

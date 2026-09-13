@@ -312,6 +312,54 @@ bool Simulation::register_aircraft(entities::EntityId id) {
     return true;
 }
 
+void Simulation::record_wvr_band_flips(double sim_time_s) {
+    // M5a — the WVR band transition recorder. The brain's combat ladder
+    // decides combat_mode_ per tick; the recorder only hears about bus
+    // messages, and a band entry/exit is not one. This walk (called from
+    // tick() right after the intents pass, only when recording) diffs
+    // the roster's WVR presence against last tick's and appends a
+    // WvrEngaged/WvrDisengaged CombatEvent per crossing. The events make
+    // the band transitions first-class replayable evidence — the WVR
+    // harness's fight-alive gate reads them instead of proxying through
+    // weapon events (a merge that commits but never fires is still a
+    // fight that entered the band).
+    auto* rec = recorder();
+    if (rec == nullptr) return;
+
+    // Same +1 alignment the bus handlers use (bus events publish mid-
+    // tick, before Simulation::tick() increments its counter; this walk
+    // runs inside the same tick() call, after update_all — the snapshot
+    // tick() records THIS call carries the post-increment value, so +1
+    // aligns the event with them).
+    const auto event_tick = tick_count() + 1;
+
+    for (const auto eid : aircraft_entities_) {
+        entities::EntityHandle h(eid, &world_);
+        auto* brain = h.get<f4::ai::BrainComponent>();
+        if (brain == nullptr) continue;
+
+        const bool in_band =
+            brain->combat_mode() ==
+            f4::ai::BrainComponent::CombatMode::WVR;
+        const auto [it, inserted] =
+            wvr_band_state_.emplace(eid.value, in_band);
+        if (!inserted && it->second == in_band) continue;  // no crossing
+        if (!inserted) it->second = in_band;
+
+        recorder::CombatEvent e;
+        e.tick = event_tick;
+        e.sim_time_s = sim_time_s;
+        e.kind = in_band ? recorder::CombatEventKind::WvrEngaged
+                         : recorder::CombatEventKind::WvrDisengaged;
+        e.subject_id = eid.value;
+        // The engagement target the brain is holding (0 on a disengage —
+        // the ladder has already dropped the fight; the intent block is
+        // per-tick state).
+        e.object_id = in_band ? brain->combat_intent().lock_target_id : 0;
+        rec->record(std::move(e));
+    }
+}
+
 bool Simulation::retire_aircraft(entities::EntityId id) {
     // C5's wreck reaper — see the header for the lifetime contract.
     // Order of operations: every in-memory reference to the id is
@@ -1711,6 +1759,8 @@ void Simulation::tick(double dt) {
         // the simulated set).
         execute_brain_combat_intents(world_, bus_, weapon_table_, t_now,
                                      &aircraft_entities_);
+        // M5a: the WVR band transitions as combat events (recording only).
+        record_wvr_band_flips(t_now);
     }
     const auto prof_t4 = g_prof.on ? std::chrono::steady_clock::now()
                                    : std::chrono::steady_clock::time_point{};

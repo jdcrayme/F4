@@ -1,3 +1,77 @@
+## Task 68 — M5a: the WVR / guns merge harness + the merge-geometry fixes
+
+**The combat chain's last un-certified surface — the inside-the-band
+fight — is now a certified acceptance run, and the guns merge fights
+again.** Two threads landed together (each forced the other):
+
+- **The merge-geometry fixes (the guns-merge diagnosis).** The
+  guns-merge E2E pair had been failing on main (a casualty of the
+  flight-model stability work's energy response). Instrumenting the
+  fight produced five code fixes + one re-calibration, all
+  doctrine-level: (1) `GunModule::in_commit_band` — the merge commit
+  (the cavoid exemption) now uses the employment envelope's OUTER edge
+  only; the trigger envelope's MINIMUM bound (0.08 NM) is trigger
+  doctrine, not geometry ownership, and dropping the commit there
+  (measured: predicted range 467 ft < the 486-ft minimum at t+10.67 s)
+  handed the pass to collision-avoid for exactly the one tick the
+  exemption lags — the mid-pass break that kept the fight from ever
+  completing; (2) the FIGHT PLANE — Merge/Offensive hold the engage
+  altitude captured at engage() (its own documented purpose) instead of
+  chasing the target's live altitude; the two-brain live-reference
+  chase diverged 846 ft through the merge; (3) combat VS authority —
+  the WVR steering now flies 12,000 fpm with the slew off (the CA
+  break's precedent; the nav-comfort tune cannot fight a balloon); (4)
+  MIL in the offensive states — AB buys closure the head-on geometry
+  already has and the G-hold converts the excess to climb (measured
+  +2,400 fpm against the bandit's own descent command); Defensive/
+  BugOut keep AB; (5) the captured engage CAS — engage_speed_kts is a
+  CAP, not a chase target; commanding 450 KCAS from a ~300-kt spawn is
+  an acceleration command and the plant's marginally-unstable speed
+  mode converts it to a climb transient (the pole program's finding,
+  measured from the AI side at +2,400..+7,000 fpm); (6) merge STT
+  refresh — while the merge is committed the fusion refreshes every
+  tick (the missile-defense rule): a Veteran-interval snapshot
+  dead-reckoned +977 ft of phantom altitude into the gun's lead point
+  (a stale +195 ft/s climb rate) and the 1.1–1.7 deg hit-quality cone
+  never closed against 7–13 deg of error; (7) guns_merge re-calibrated
+  to the current plant's ~15,000-ft trim speed (532 fps ≈ 250 KCAS —
+  the energy state the pole program certified), doctrine under test
+  unchanged. Full suite 2423/2426 — the guns-merge pair is FIXED, only
+  the 3 pre-existing flight-model failures remain.
+- **The M5a harness tranche (COMBAT_CHAIN_M4_PLAN §6's WVR/guns +
+  multi-flight deferrals closed).** `WvrMergeHarness`
+  (wvr_merge_harness.{hpp,cpp}) mirrors BvrInterceptHarness line for
+  line with the WVR verdict contents: engagement_completed attributes
+  via MissileLaunched OR GunFired (the gun kill rides missile_id == 0);
+  fight_alive = detection AND band ENTRY. The band entry is first-class
+  evidence: f4-recorder gains WvrEngaged/WvrDisengaged (kinds 11/12,
+  wire names wvr_engaged/wvr_disengaged — additive, old traces parse),
+  Simulation::record_wvr_band_flips() appends them per combat-mode
+  crossing (recording only), and the parser's kind-name round-trip loop
+  now walks the FULL enum — the old 0..8 bound silently degraded
+  bomb_released/bomb_impact on reload. `wvr_merge_qc`
+  (tools/wvr_merge_qc.cpp) mirrors bvr_intercept_qc: three artifacts
+  (result = the byte-stable MD5 certificate, summary = deterministic
+  content only, diary = telemetry) and the exit-code table (0 green /
+  1 harness error / 2 the combat-disabled refusal / 3 no detection /
+  4 detected but never in band / 5 no kill / 6 roster leak /
+  9 non-deterministic). The engagement window narrates the merge:
+  first_detect_s → first_wvr_engage_s → first_gun_s/first_launch_s →
+  first_kill_s → first_wvr_disengage_s. Verified: test_gun_module
+  18/18 (3 new commit-band tests), test_wvr_merge_harness 7/7 (the
+  guns fight certified + deterministic, the heater fight certified +
+  deterministic, the refusal contract, the band-boundary fight_alive
+  diagnostic, the --runs 1 skip, the 2v2 multi-flight acceptance, the
+  digest shape; the band events pinned through the recorder JSON
+  round-trip), wvr_merge_qc exit 0 on both shipped scenarios
+  (guns_merge MD5 3d301d8e…, wvr_merge MD5 9c2bb944…), exit 2 on
+  non-combat, bvr_intercept_qc re-run exit 0 (M4 unaffected — the M4
+  MD5 certificate VALUE moves with the recorder's new event kinds, the
+  verdicts and the two-pass byte-identity hold). Boundary PASS at
+  configure. DOCS: COMBAT_CHAIN_M5_PLAN.md (the fix diagnosis §2, the
+  band-evidence design §3, the harness contract §4, the acceptance §7);
+  CHANGES.md Task 68; this worklog entry.
+
 ## Task 67 — the real-data tier: the Falcon4.WCD weapon table + the signature grid wiring
 
 **The combat chain now runs on the vanilla install's own numbers where the

@@ -1588,12 +1588,12 @@ TEST(CombatIntegration, AiVersusAiGunsMergeFight) {
       "aircraft_name": "F-16C_50", "vis_type_index": 1052,
       "parking_spot": { "x": 0.0, "y": 0.0, "z": 15000.0 },
       "heading_rad": 0.0, "initial_fuel_lbs": 6500.0,
-      "initial_vt_fps": 760.0, "spawn_in_air": true, "team": "blue" },
+      "initial_vt_fps": 532.0, "spawn_in_air": true, "team": "blue" },
     { "callsign": "BANDIT1", "aircraft_config_path": ")" + f16 + R"(",
       "aircraft_name": "F-16C_50", "vis_type_index": 1052,
       "parking_spot": { "x": 0.0, "y": 17013.0, "z": 15000.0 },
       "heading_rad": 3.14159265358979, "initial_fuel_lbs": 6500.0,
-      "initial_vt_fps": 720.0, "spawn_in_air": true, "team": "red",
+      "initial_vt_fps": 532.0, "spawn_in_air": true, "team": "red",
       "hold_fire": true }
   ],
   "airfield": {

@@ -156,6 +156,31 @@ public:
                                    const geo::WorldPosition& ownship_pos)
         const noexcept;
 
+    /// True when the target is inside the COMMIT BAND — the pass-geometry
+    /// ownership bound — NOW (predicted range, same dead-reckoning as
+    /// in_envelope).
+    ///
+    /// The commit band is the envelope's OUTER edge only:
+    ///     predicted range <= max_range_nm
+    /// with NO minimum. The distinction is load-bearing. in_envelope
+    /// answers "may the TRIGGER move" — a gun does not fire at a target
+    /// already inside the min bound (0.08 NM: past the pipper, bullets
+    /// cannot converge in the remaining flight time). The commit band
+    /// answers "who owns the merge GEOMETRY" — and a head-on pass spends
+    /// its most lethal second with the predicted range BELOW the min
+    /// bound (the airframes are about to cross / have crossed; the
+    /// tracers fired a second ago are still converging). Dropping the
+    /// commit there — measured on the guns-merge fight: predicted range
+    /// 467 ft < the 486-ft min bound at t+10.67 s — hands the geometry
+    /// to collision-avoid for exactly the one tick the exemption lags,
+    /// the break fires mid-pass, and the gun envelope never re-opens
+    /// (the WVR fight never completes). The commit band is therefore
+    /// the employment doctrine's outer boundary applied to GEOMETRY, not
+    /// to the trigger.
+    [[nodiscard]] bool in_commit_band(const TargetInfo& t,
+                                      const geo::WorldPosition& ownship_pos)
+        const noexcept;
+
     /// The firing solution error (rad): angle between the ownship's
     /// 3D velocity (the boresight) and the direction to the lead point.
     /// `ownship_velocity` is the world-frame velocity (ft/s) — the
