@@ -133,9 +133,9 @@ void encode_brigade(Writer& w, const UnitSubclassData& s) {
     }
 }
 
-// Inverse of parse_squadron (squadron.cpp:316). The decoder skips stores[],
-// schedule[], and rating[]; the encoder writes them as zero (struct-faithful
-// — the decoder reads 0 on re-decode, matching the default struct).
+// Inverse of parse_squadron (squadron.cpp:316). stores[]/schedule[]/rating[]
+// are written verbatim from the decoder's capture; a hand-built record
+// (captures empty) zero-fills them (struct-faithful).
 void encode_squadron(Writer& w, const UnitSubclassData& s, int v) {
     w.i32(s.fuel);
     w.u8(s.specialty);
@@ -143,7 +143,11 @@ void encode_squadron(Writer& w, const UnitSubclassData& s, int v) {
     std::size_t stores_bytes = 200;
     if (v >= 69 && v < 72) stores_bytes = 220;
     else if (v >= 72)      stores_bytes = 600;
-    for (std::size_t i = 0; i < stores_bytes; ++i) w.u8(0);
+    if (s.stores_raw.size() == stores_bytes) {
+        w.bytes(s.stores_raw.data(), stores_bytes);
+    } else {
+        for (std::size_t i = 0; i < stores_bytes; ++i) w.u8(0);
+    }
     // pilot_data: 48 pilots × 10 bytes.
     for (int i = 0; i < PILOTS_PER_SQUADRON; ++i) {
         PilotRecord p;
@@ -158,15 +162,23 @@ void encode_squadron(Writer& w, const UnitSubclassData& s, int v) {
         w.u8(p.an_kills);
         w.i16(p.missions_flown);
     }
-    // schedule[16 × 4 = 64 bytes] — not exposed, zeroed.
-    for (int i = 0; i < 64; ++i) w.u8(0);
+    // schedule[16 × 4 = 64 bytes] — verbatim when captured.
+    if (s.schedule_raw.size() == 64) {
+        w.bytes(s.schedule_raw.data(), 64);
+    } else {
+        for (int i = 0; i < 64; ++i) w.u8(0);
+    }
     // airbase VU_ID + hot_spot VU_ID.
     w.u32(s.airbase_id_num);
     w.u32(s.airbase_id_creator);
     w.u32(s.hot_spot_num);
     w.u32(s.hot_spot_creator);
-    // rating[ARO_OTHER = 16] — not exposed, zeroed.
-    for (int i = 0; i < SQUADRON_RATING_COUNT; ++i) w.u8(0);
+    // rating[ARO_OTHER = 16] — verbatim when captured.
+    if (s.rating_raw.size() == SQUADRON_RATING_COUNT) {
+        w.bytes(s.rating_raw.data(), SQUADRON_RATING_COUNT);
+    } else {
+        for (int i = 0; i < SQUADRON_RATING_COUNT; ++i) w.u8(0);
+    }
     w.i16(s.aa_kills);
     w.i16(s.ag_kills);
     w.i16(s.as_kills);
@@ -184,13 +196,14 @@ void encode_taskforce(Writer& w, const UnitSubclassData& s) {
     w.u8(s.supply);
 }
 
-// Inverse of parse_flight (flight.cpp:518). The decoder skips duplicate
-// loadout entries and several timing slots; the encoder writes them as zero.
+// Inverse of parse_flight (flight.cpp:518). The decoder captures the
+// duplicate loadout entries and the skipped slots verbatim; the encoder
+// writes them back (zero for hand-built records).
 void encode_flight(Writer& w, const UnitSubclassData& s, int v) {
     w.f32(s.altitude);                  // pos_.z_
     w.i32(s.fuel_burnt);
-    w.i32(0);                           // last_move — skipped by decoder
-    w.i32(0);                           // last_combat — skipped
+    w.i32(s.last_move);                 // flight tail timer (70b: semantic)
+    w.i32(s.last_combat);
     w.i32(s.time_on_target);
     w.i32(s.mission_over_time);
     w.i16(s.mission_target);
@@ -198,40 +211,50 @@ void encode_flight(Writer& w, const UnitSubclassData& s, int v) {
     const std::size_t loadout_bytes = (v <= 72) ? 32 : 48;
     for (uint8_t li = 0; li < s.loadouts; ++li) {
         if (li == 0) {
-            // Entry 0: reconstruct the 16-station struct from loadout_stations.
-            // The struct is two parallel arrays: WeaponID[16] + WeaponCount[16].
-            uint16_t ids[16] = {0};
-            uint16_t cnts[16] = {0};
-            for (const auto& st : s.loadout_stations) {
-                // loadout_stations only carries non-zero weapon_ids; the
-                // station index is implied by order. We write them in order
-                // into the first N slots. (The decoder reconstructs the same
-                // way — non-zero ids only — so the round-trip is struct-
-                // faithful even though the original station indices are lost.)
-                for (int slot = 0; slot < 16; ++slot) {
-                    if (ids[slot] == 0) {
-                        ids[slot] = st.weapon_id;
-                        cnts[slot] = st.count;
-                        break;
+            if (s.loadout0_raw.size() == loadout_bytes) {
+                // Verbatim capture: preserves the station slot positions.
+                w.bytes(s.loadout0_raw.data(), loadout_bytes);
+            } else {
+                // Entry 0: reconstruct the 16-station struct from
+                // loadout_stations. The struct is two parallel arrays:
+                // WeaponID[16] + WeaponCount[16].
+                uint16_t ids[16] = {0};
+                uint16_t cnts[16] = {0};
+                for (const auto& st : s.loadout_stations) {
+                    // loadout_stations only carries non-zero weapon_ids;
+                    // the station index is implied by order. We write
+                    // them in order into the first N slots.
+                    for (int slot = 0; slot < 16; ++slot) {
+                        if (ids[slot] == 0) {
+                            ids[slot] = st.weapon_id;
+                            cnts[slot] = st.count;
+                            break;
+                        }
                     }
                 }
-            }
-            for (int st = 0; st < 16; ++st) {
-                if (v <= 72) w.u8(static_cast<uint8_t>(ids[st]));
-                else         w.u16(ids[st]);
-            }
-            for (int st = 0; st < 16; ++st) {
-                if (v <= 72) w.u8(static_cast<uint8_t>(cnts[st]));
-                else         w.u16(cnts[st]);
+                for (int st = 0; st < 16; ++st) {
+                    if (v <= 72) w.u8(static_cast<uint8_t>(ids[st]));
+                    else         w.u16(ids[st]);
+                }
+                for (int st = 0; st < 16; ++st) {
+                    if (v <= 72) w.u8(static_cast<uint8_t>(cnts[st]));
+                    else         w.u16(cnts[st]);
+                }
             }
         } else {
-            // Duplicate entries — skipped by decoder, zeroed here.
-            for (std::size_t b = 0; b < loadout_bytes; ++b) w.u8(0);
+            // Duplicate entries — verbatim when captured, else zero.
+            const std::size_t idx = static_cast<std::size_t>(li) - 1;
+            if (idx < s.extra_loadouts_raw.size() &&
+                s.extra_loadouts_raw[idx].size() == loadout_bytes) {
+                w.bytes(s.extra_loadouts_raw[idx].data(), loadout_bytes);
+            } else {
+                for (std::size_t b = 0; b < loadout_bytes; ++b) w.u8(0);
+            }
         }
     }
     w.u8(s.mission);
     if (v > 65) w.u8(s.old_mission);
-    w.u8(0);                            // last_direction — skipped
+    w.u8(s.last_direction);             // captured (70b)
     w.u8(s.priority);
     w.u8(s.mission_id);
     w.u8(s.eval_flags);
@@ -244,13 +267,14 @@ void encode_flight(Writer& w, const UnitSubclassData& s, int v) {
         w.u32(s.requester_num);
         w.u32(s.requester_creator);
     }
-    // slots[4] + pilots[4] + plane_stats[4] + player_slots[4] — skipped, zeroed.
-    for (int i = 0; i < 16; ++i) w.u8(0);
-    w.u8(0);                            // last_player_slot — skipped
+    // slots[4] + pilots[4] + plane_stats[4] + player_slots[4] — verbatim
+    // when captured.
+    w.bytes(s.flight_misc, 16);
+    w.u8(s.last_player_slot);           // captured (70b)
     w.u8(s.callsign_id);
     w.u8(s.callsign_num);
     if (v >= 72) {
-        w.u32(0);                       // refuel — skipped
+        w.u32(s.refuel);                // captured (70b)
     }
 }
 
@@ -279,9 +303,11 @@ void encode_package_small(Writer& w, const UnitSubclassData& s, int v) {
     w.i16(s.requests);
     w.i16(s.responses);
     // mis_request.mission and .context are streamed as sizeof(short) —
-    // the high byte is always 0 (uchar values).
-    w.u16(static_cast<uint16_t>(s.mis_request.mission));
-    w.u16(static_cast<uint16_t>(s.mis_request.context));
+    // the high byte is the decoder's verbatim capture (0 for hand-built).
+    w.u16(static_cast<uint16_t>(s.mis_request.mission) |
+          (static_cast<uint16_t>(s.small_mission_hi) << 8));
+    w.u16(static_cast<uint16_t>(s.mis_request.context) |
+          (static_cast<uint16_t>(s.small_context_hi) << 8));
     w.u32(s.mis_request.requester_id_num);
     w.u32(s.mis_request.requester_id_creator);
     w.u32(s.mis_request.target_id_num);
@@ -331,7 +357,7 @@ void encode_package_big(Writer& w, const UnitSubclassData& s, int v) {
     w.u32(m.pak_id_num);       w.u32(m.pak_id_creator);
     w.u8(m.who);
     w.u8(m.vs);
-    w.u8(0); w.u8(0);              // alignment padding
+    w.bytes(m.align_pad, 2);       // alignment padding (captured when decoded)
     w.i32(m.tot);
     w.i16(m.tx);
     w.i16(m.ty);
@@ -353,7 +379,7 @@ void encode_package_big(Writer& w, const UnitSubclassData& s, int v) {
     for (int i = 0; i < 4; ++i) w.u8(m.slots[i]);
     w.s8(m.min_to);
     w.s8(m.max_to);
-    w.u8(0); w.u8(0); w.u8(0);     // trailing padding → 76
+    w.bytes(m.tail_pad, 3);        // trailing padding → 76 (captured)
 }
 
 // Encode the subclass tail for a unit, dispatching on unit_class.
@@ -414,7 +440,11 @@ std::vector<uint8_t> encode_uni(const DecodedUnits& dec, int camp_version) {
 
     std::vector<uint8_t> out;
     out.reserve(10 + compressed.size());
-    const int32_t outer = static_cast<int32_t>(10 + compressed.size());
+    // FreeFalcon's EncodeUnitData returns newsize + sizeof(short) +
+    // DISK_LONG: the outer size EXCLUDES its own 4 bytes and counts
+    // [count][inner][stream] = 6 + compressed. (The same convention the
+    // .obd writer uses.)
+    const int32_t outer = static_cast<int32_t>(6 + compressed.size());
     const int16_t count = static_cast<int16_t>(dec.units.size());
     const int32_t inner = static_cast<int32_t>(payload.size());
     out.insert(out.end(), reinterpret_cast<const uint8_t*>(&outer),

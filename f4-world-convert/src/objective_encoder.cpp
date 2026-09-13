@@ -6,10 +6,12 @@
 // sequence). See objective_encoder.hpp for the byte-identity scope note.
 
 #include <f4/world_convert/objective_encoder.hpp>
+#include <f4/world_convert/objective_decoder.hpp>
 #include <f4/world_convert/lzss.hpp>
 #include <f4/lzss/lzss.hpp>
 #include "byte_writer.hpp"
 
+#include <cstring>
 #include <stdexcept>
 
 namespace f4::world_convert {
@@ -91,6 +93,55 @@ std::vector<uint8_t> encode_obj_payload(const DecodedObjectives& dec, int camp_v
         encode_objective_record(w, o, camp_version);
     }
     return w.buf;
+}
+
+// ── .obd — objective deltas ───────────────────────────────────────────────
+// Inverse of decode_obd (objective_decoder.cpp) / FreeFalcon's
+// EncodeObjectiveDeltas (objectiv.cpp:3490). The decompressed buffer is
+// one record per dirty objective: VU_ID(num, creator) + last_repair i32 +
+// owner u8 + supply u8 + fuel u8 + losses u8 + fstatus_len u8 + bytes.
+
+std::vector<uint8_t> encode_obd_payload(const DecodedObjectiveDeltas& dec) {
+    Writer w;
+    for (const auto& d : dec.deltas) {
+        w.u32(d.id_num);            // VU_ID: num first, then creator
+        w.u32(d.id_creator);
+        w.i32(d.last_repair);
+        w.u8(d.owner);
+        w.u8(d.supply);
+        w.u8(d.fuel);
+        w.u8(d.losses);
+        w.u8(static_cast<uint8_t>(d.fstatus.size()));
+        w.bytes(d.fstatus.data(), d.fstatus.size());
+    }
+    return w.buf;
+}
+
+std::vector<uint8_t> encode_obd(const DecodedObjectiveDeltas& dec) {
+    auto payload = encode_obd_payload(dec);
+
+    const int16_t count = static_cast<int16_t>(dec.deltas.size());
+    const int32_t uncompressed = static_cast<int32_t>(payload.size());
+
+    std::vector<uint8_t> out;
+    // FreeFalcon's EncodeObjectiveDeltas returns newsize + sizeof(short)
+    // + DISK_LONG — the size of [count][uncompressed][compressed stream] —
+    // and SaveObjectiveDeltas prefixes it with that value as an i32. An
+    // empty delta set compresses to a zero-length stream: [i32 6][i16 0]
+    // [i32 0] — exactly the 10-byte .obd save1.cam carries.
+    auto compressed = f4::lzss::compress(payload.data(), payload.size());
+    const int32_t total =
+        static_cast<int32_t>(compressed.size() + sizeof(int16_t) + 4);
+
+    out.reserve(10 + compressed.size());
+    out.insert(out.end(), reinterpret_cast<const uint8_t*>(&total),
+               reinterpret_cast<const uint8_t*>(&total) + 4);
+    out.insert(out.end(), reinterpret_cast<const uint8_t*>(&count),
+               reinterpret_cast<const uint8_t*>(&count) + 2);
+    out.insert(out.end(), reinterpret_cast<const uint8_t*>(&uncompressed),
+               reinterpret_cast<const uint8_t*>(&uncompressed) + 4);
+    out.insert(out.end(), compressed.begin(), compressed.end());
+    return out;
 }
 
 std::vector<uint8_t> encode_obj(const DecodedObjectives& dec, int camp_version) {

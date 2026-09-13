@@ -68,6 +68,14 @@ struct TeamEntry {
     uint8_t colour = 0;
     std::string name;     // up to 20 chars, null-terminated in the file
     std::string motto;    // up to 200 chars
+
+    // Byte-identity capture: the exact bytes the original file carried
+    // AFTER the NUL terminator in each fixed-width field. FreeFalcon's
+    // team blocks were written from uninitialized stack buffers, so the
+    // padding carries non-zero garbage; reproducing it verbatim is what
+    // makes decode->encode byte-identical (SAVE_WRITE_PLAN section 4).
+    std::vector<uint8_t> name_pad;    // width 20 - name.size() - 1 when set
+    std::vector<uint8_t> motto_pad;   // width 200 - motto.size() - 1 when set
 };
 
 /// One entry in the campaign's standard/priority UI event queue.
@@ -78,6 +86,15 @@ struct CampaignEvent {
     uint8_t  flags = 0;
     uint8_t  team = 0;          // team which benefited most
     std::string text;
+
+    // Byte-identity capture. node_tail: the 10 skipped uieventnode bytes
+    // (2 pad + the eventText/next x86 pointers — freed-memory garbage in
+    // the original). disk_text_len: the on-disk i16 length, which may
+    // exceed text.size() (the buffer was written with its NUL padding);
+    // text_pad: the bytes after the NUL within that region.
+    std::vector<uint8_t> node_tail;   // 10 bytes when captured
+    int16_t  disk_text_len = 0;
+    std::vector<uint8_t> text_pad;
 };
 
 /// One preload-squadron record (SquadUIInfoClass — the squadron list the
@@ -95,6 +112,11 @@ struct SquadronUIInfo {
     uint8_t  current_strength = 0;   // active aircraft count
     uint8_t  country = 0;
     std::string airbase_name;   // char[40]
+
+    // Byte-identity capture: padding after the NUL in airbaseName[40]
+    // and the 68th struct byte (67 meaningful + 1 pad).
+    std::vector<uint8_t> airbase_name_pad;
+    uint8_t  struct_pad = 0;
 };
 
 struct CampaignHeader {
@@ -142,6 +164,11 @@ struct CampaignHeader {
     std::string scenario;
     std::string save_file;
     std::string ui_name;
+    // Byte-identity capture: padding after each field's NUL terminator.
+    std::vector<uint8_t> theater_name_pad;
+    std::vector<uint8_t> scenario_pad;
+    std::vector<uint8_t> save_file_pad;
+    std::vector<uint8_t> ui_name_pad;
     uint32_t player_squadron_num = 0;       // VU_ID
     uint32_t player_squadron_creator = 0;
 

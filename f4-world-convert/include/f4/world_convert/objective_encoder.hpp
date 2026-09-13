@@ -41,4 +41,22 @@ namespace f4::world_convert {
 [[nodiscard]] std::vector<uint8_t> encode_obj_payload(
     const DecodedObjectives& dec, int camp_version = 63);
 
+// ── .obd — objective deltas ───────────────────────────────────────────────
+// FreeFalcon's SaveObjectiveDeltas writes [i32 total][i16 count][i32
+// uncompressed][LZSS payload], where `total` = 6 + compressed size and the
+// compressed payload is one record per dirty objective: VU_ID + (last_
+// repair, owner, supply, fuel, losses, fstatus_len + bytes). An empty delta
+// set writes [i32 6][i16 0][i32 0] — no stream at all (that is exactly the
+// 10-byte .obd save1.cam carries).
+
+/// Build the decompressed .obd record buffer (the flat delta sequence).
+[[nodiscard]] std::vector<uint8_t> encode_obd_payload(
+    const DecodedObjectiveDeltas& dec);
+
+/// Encode a DecodedObjectiveDeltas into the .obd sub-file's raw bytes:
+/// i32 total (= 6 + compressed size) + i16 count + i32 uncompressed +
+/// LZSS-compressed record buffer.
+[[nodiscard]] std::vector<uint8_t> encode_obd(
+    const DecodedObjectiveDeltas& dec);
+
 } // namespace f4::world_convert

@@ -228,7 +228,11 @@ TEST(UniEncoder, EncodedUniHasValidHeader) {
     EXPECT_EQ(count, static_cast<int16_t>(d1.units.size()));
     EXPECT_EQ(inner, static_cast<int32_t>(encode_uni_payload(d1).size()));
     EXPECT_GT(outer, 0);
-    EXPECT_GE(static_cast<std::size_t>(outer), encoded.size());
+    // FreeFalcon's EncodeUnitData writes outer = sizeof(short) + DISK_LONG
+    // + compressed size — it EXCLUDES its own 4 bytes. The convention is
+    // pinned by the fixtures (save1.uni carries 34160 for a 34164-byte
+    // sub-file); see CamByteIdentity for the byte-level closure.
+    EXPECT_EQ(static_cast<std::size_t>(outer) + 4, encoded.size());
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

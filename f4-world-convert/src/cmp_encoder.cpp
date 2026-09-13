@@ -28,6 +28,22 @@ constexpr int SQUAD_UI_INFO_SIZE = 68;   // 67 meaningful + 1 pad
 
 using Writer = f4::world_convert::ByteWriter;
 
+// Byte-identity emission of a fixed-width NUL-terminated string field:
+// content + NUL + the captured padding bytes, zero-filling whatever
+// remains (hand-built structs carry no captured padding and reproduce
+// the C convention: content + NUL + zero pad).
+void fixed_string_padded(Writer& w, const std::string& s,
+                         const std::vector<uint8_t>& pad, std::size_t width) {
+    const std::size_t n = std::min<std::size_t>(s.size(), width);
+    w.buf.insert(w.buf.end(), s.begin(), s.begin() + n);
+    if (n >= width) return;   // content filled the field — no NUL, no pad
+    w.u8(0);                  // the terminator
+    std::size_t written = 0;
+    for (; written < pad.size() && n + 1 + written < width; ++written)
+        w.u8(pad[written]);
+    for (std::size_t i = n + 1 + written; i < width; ++i) w.u8(0);
+}
+
 // Inverse of parse_event_queue (campaign_decoder.cpp). On-disk form per
 // entry: i16 x, i16 y, i32 time, u8 flags, u8 team, 10 zero bytes (the
 // x86 pointer/pad slots the decoder skips), i16 len, len bytes of text.
@@ -40,15 +56,39 @@ void encode_event_queue(Writer& w, const std::vector<CampaignEvent>& events) {
         w.u8(e.flags);
         w.u8(e.team);
         // The 10 bytes the decoder skips (pad(2) + eventText ptr(4) +
-        // next ptr(4)). Zero them — the decoder ignores these slots.
-        for (int i = 0; i < UI_EVENT_NODE_SIZE - 10; ++i) w.u8(0);
-        // Text: minimal form — len = text.size(), then the bytes. The
-        // decoder reads `len` bytes and extracts the prefix before the
-        // first NUL; text has no embedded NUL, so this round-trips to
-        // the identical struct. (If the original carried NUL padding
-        // inside `len`, the bytes differ here but the struct matches.)
-        w.i16(static_cast<int16_t>(e.text.size()));
-        w.bytes(e.text.data(), e.text.size());
+        // next ptr(4)). Reproduce the captured bytes verbatim when
+        // present; a hand-built event zero-fills them.
+        if (e.node_tail.size() == static_cast<std::size_t>(UI_EVENT_NODE_SIZE - 10)) {
+            w.bytes(e.node_tail.data(), e.node_tail.size());
+        } else {
+            for (int i = 0; i < UI_EVENT_NODE_SIZE - 10; ++i) w.u8(0);
+        }
+        // Text region. When the on-disk length was captured, reproduce
+        // it exactly: content + NUL + captured padding out to
+        // disk_text_len. Hand-built events (disk_text_len == 0) take
+        // the minimal form: len = text.size(), then the bytes.
+        if (e.disk_text_len > 0 &&
+            static_cast<std::size_t>(e.disk_text_len) >= e.text.size()) {
+            w.i16(e.disk_text_len);
+            w.bytes(e.text.data(), e.text.size());
+            if (static_cast<std::size_t>(e.disk_text_len) > e.text.size()) {
+                w.u8(0);   // the terminator
+                std::size_t written = 0;
+                for (; written < e.text_pad.size() &&
+                     e.text.size() + 1 + written <
+                         static_cast<std::size_t>(e.disk_text_len);
+                     ++written) {
+                    w.u8(e.text_pad[written]);
+                }
+                for (std::size_t i = e.text.size() + 1 + written;
+                     i < static_cast<std::size_t>(e.disk_text_len); ++i) {
+                    w.u8(0);
+                }
+            }
+        } else {
+            w.i16(static_cast<int16_t>(e.text.size()));
+            w.bytes(e.text.data(), e.text.size());
+        }
     }
 }
 
@@ -65,8 +105,8 @@ void encode_squadron_ui(Writer& w, const SquadronUIInfo& s) {
     w.u8(s.specialty);
     w.u8(s.current_strength);
     w.u8(s.country);
-    w.fixed_string(s.airbase_name, 40);
-    w.u8(0);   // struct padding: 67 → 68
+    fixed_string_padded(w, s.airbase_name, s.airbase_name_pad, 40);
+    w.u8(s.struct_pad);   // struct padding: 67 → 68 (captured when decoded)
 }
 
 // Read element `i` from a vector that should hold NUM_TEAMS entries,
@@ -105,8 +145,8 @@ std::vector<uint8_t> encode_cmp_payload(const CampaignHeader& h, int camp_versio
         if (i < static_cast<int>(h.teams.size())) t = h.teams[i];
         w.u8(t.flags);
         w.u8(t.colour);
-        w.fixed_string(t.name, TEAM_NAME_LEN);
-        w.fixed_string(t.motto, TEAM_MOTTO_LEN);
+        fixed_string_padded(w, t.name, t.name_pad, TEAM_NAME_LEN);
+        fixed_string_padded(w, t.motto, t.motto_pad, TEAM_MOTTO_LEN);
     }
 
     // v >= 19 block (all v63/v71 files carry this).
@@ -133,10 +173,10 @@ std::vector<uint8_t> encode_cmp_payload(const CampaignHeader& h, int camp_versio
     w.u8(h.bullseye_name);
     w.i16(h.bullseye_x);
     w.i16(h.bullseye_y);
-    w.fixed_string(h.theater_name, CAMP_NAME_SIZE);
-    w.fixed_string(h.scenario, CAMP_NAME_SIZE);
-    w.fixed_string(h.save_file, CAMP_NAME_SIZE);
-    w.fixed_string(h.ui_name, CAMP_NAME_SIZE);
+    fixed_string_padded(w, h.theater_name, h.theater_name_pad, CAMP_NAME_SIZE);
+    fixed_string_padded(w, h.scenario, h.scenario_pad, CAMP_NAME_SIZE);
+    fixed_string_padded(w, h.save_file, h.save_file_pad, CAMP_NAME_SIZE);
+    fixed_string_padded(w, h.ui_name, h.ui_name_pad, CAMP_NAME_SIZE);
     w.u32(h.player_squadron_num);
     w.u32(h.player_squadron_creator);
 

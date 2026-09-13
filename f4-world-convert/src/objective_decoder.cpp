@@ -222,7 +222,14 @@ DecodedObjectiveDeltas decode_obd(const uint8_t* data, std::size_t size,
     out.count = top.i16();
     int32_t inner = top.i32();
     if (out.count < 0) throw std::runtime_error("obd: negative delta count");
-    if (inner <= 0) throw std::runtime_error("obd: invalid inner size");
+    if (inner < 0) throw std::runtime_error("obd: invalid inner size");
+    // A save with no dirty objectives carries a 10-byte .obd: [i32 6]
+    // [i16 0][i32 0] — count 0, no stream at all (FreeFalcon's
+    // EncodeObjectiveDeltas with count == 0 writes exactly that).
+    if (out.count == 0 || inner == 0) {
+        out.bytes_consumed = 0;
+        return out;
+    }
 
     const uint8_t* comp = data + 10;
     auto buf = lzss_expand(comp, size - 10, static_cast<std::size_t>(inner));

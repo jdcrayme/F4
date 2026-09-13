@@ -35,6 +35,30 @@ std::string fixed_string(Cursor& c, std::size_t n) {
     return s;
 }
 
+// fixed_string + byte-identity capture: content is the prefix before the
+// first NUL; `pad` receives the exact bytes after that NUL (empty when
+// the content filled the whole field — no NUL terminator present).
+std::string fixed_string_padded(Cursor& c, std::size_t n,
+                                std::vector<uint8_t>* pad) {
+    std::string s;
+    s.reserve(n);
+    for (std::size_t i = 0; i < n; ++i) {
+        char ch = static_cast<char>(c.u8());
+        if (ch == '\0') {
+            const std::size_t rest = n - i - 1;
+            if (pad && rest > 0) {
+                pad->resize(rest);
+                c.read(pad->data(), rest);
+            } else {
+                c.skip(rest);
+            }
+            return s;
+        }
+        s.push_back(ch);
+    }
+    return s;   // filled the field with no NUL — pad stays empty
+}
+
 // One event queue: [short entries] then per entry: uieventnode (20 bytes
 // on disk — x, y, time, flags, team + two ignored x86 pointer slots) +
 // [short len] + char[len] text.
@@ -52,16 +76,32 @@ void parse_event_queue(Cursor& c, std::vector<CampaignEvent>& out) {
         e.time = c.i32();         // offset 4
         e.flags = c.u8();         // offset 8
         e.team = c.u8();          // offset 9
-        c.skip(UI_EVENT_NODE_SIZE - 10);  // pad(2) + eventText(4) + next(4)
+        // Byte-identity capture: the 10 skipped bytes (pad(2) +
+        // eventText(4) + next(4) — freed-memory garbage in the original).
+        e.node_tail.resize(UI_EVENT_NODE_SIZE - 10);
+        c.read(e.node_tail.data(), UI_EVENT_NODE_SIZE - 10);
         int16_t len = c.i16();
         if (c.error || len < 0 || len > 4096) {
             c.error = true;
             return;
         }
+        e.disk_text_len = len;
+        // Read the on-disk text region, splitting it into the content
+        // prefix (before the first NUL) and the captured padding.
         e.text.clear();
         for (int16_t j = 0; j < len; ++j) {
             char ch = static_cast<char>(c.u8());
-            if (ch == '\0') { c.skip(static_cast<std::size_t>(len - j - 1)); break; }
+            if (ch == '\0') {
+                const std::size_t rest =
+                    static_cast<std::size_t>(len - j - 1);
+                if (rest > 0) {
+                    e.text_pad.resize(rest);
+                    c.read(e.text_pad.data(), rest);
+                } else {
+                    c.skip(rest);
+                }
+                break;
+            }
             e.text.push_back(ch);
         }
         out.push_back(std::move(e));
@@ -84,8 +124,8 @@ void parse_squadron_ui(Cursor& c, SquadronUIInfo& s) {
     s.specialty = c.u8();
     s.current_strength = c.u8();
     s.country = c.u8();
-    s.airbase_name = fixed_string(c, 40);
-    c.skip(1);   // struct padding: 67 → 68
+    s.airbase_name = fixed_string_padded(c, 40, &s.airbase_name_pad);
+    s.struct_pad = c.u8();   // struct padding: 67 → 68
 }
 
 } // namespace
@@ -146,8 +186,10 @@ CampaignHeader decode_cmp(const uint8_t* data, std::size_t size, int camp_versio
     for (int i = 0; i < NUM_TEAMS; ++i) {
         h.teams[i].flags = c.u8();
         h.teams[i].colour = c.u8();
-        h.teams[i].name    = fixed_string(c, TEAM_NAME_LEN);
-        h.teams[i].motto   = fixed_string(c, TEAM_MOTTO_LEN);
+        h.teams[i].name  = fixed_string_padded(c, TEAM_NAME_LEN,
+                                               &h.teams[i].name_pad);
+        h.teams[i].motto = fixed_string_padded(c, TEAM_MOTTO_LEN,
+                                               &h.teams[i].motto_pad);
     }
 
     c.check_and_throw("cmp: payload truncated");
@@ -177,10 +219,10 @@ CampaignHeader decode_cmp(const uint8_t* data, std::size_t size, int camp_versio
     h.bullseye_name    = c.u8();
     h.bullseye_x = c.i16();
     h.bullseye_y = c.i16();
-    h.theater_name = fixed_string(c, CAMP_NAME_SIZE);
-    h.scenario     = fixed_string(c, CAMP_NAME_SIZE);
-    h.save_file    = fixed_string(c, CAMP_NAME_SIZE);
-    h.ui_name      = fixed_string(c, CAMP_NAME_SIZE);
+    h.theater_name = fixed_string_padded(c, CAMP_NAME_SIZE, &h.theater_name_pad);
+    h.scenario     = fixed_string_padded(c, CAMP_NAME_SIZE, &h.scenario_pad);
+    h.save_file    = fixed_string_padded(c, CAMP_NAME_SIZE, &h.save_file_pad);
+    h.ui_name      = fixed_string_padded(c, CAMP_NAME_SIZE, &h.ui_name_pad);
     h.player_squadron_num     = c.u32();   // VU_ID: num then creator
     h.player_squadron_creator = c.u32();
 

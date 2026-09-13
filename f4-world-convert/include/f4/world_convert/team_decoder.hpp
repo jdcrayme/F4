@@ -108,6 +108,11 @@ struct ATMRequestRecord {
     uint8_t  slots[4] = {0, 0, 0, 0};
     int8_t   min_to = 0;
     int8_t   max_to = 0;
+
+    // Byte-identity capture: the MSVC alignment padding (2 bytes after
+    // `vs`, 3 bytes trailing) carried garbage in the original files.
+    uint8_t  align_pad[2] = {0, 0};
+    uint8_t  tail_pad[3] = {0, 0, 0};
 };
 
 /// One airbase entry in a team's ATM (ATMAirbaseClass, atm.cpp:124):
@@ -180,6 +185,8 @@ struct TeamRecord {
     uint8_t  start_fuel_level = 0;
     int16_t  reinforcement = 0;
     std::vector<uint32_t> bonus_obj_nums;    // MAX_BONUSES VU_ID nums
+    std::vector<uint32_t> bonus_obj_creators;  // MAX_BONUSES VU_ID creators
+                                               // (byte-identity capture)
     std::vector<int32_t>  bonus_times;       // MAX_BONUSES
     std::vector<uint8_t>  objtype_priority;  // 36
     std::vector<uint8_t>  unittype_priority; // 20
@@ -190,6 +197,10 @@ struct TeamRecord {
     uint8_t  equipment = 0;
     std::string name;                        // MAX_TEAM_NAME_SIZE (20)
     std::string motto;                       // MAX_MOTTO_SIZE (200)
+    // Byte-identity capture: padding after each field's NUL terminator
+    // (the .tea was written from uninitialized buffers — non-zero garbage).
+    std::vector<uint8_t> name_pad;
+    std::vector<uint8_t> motto_pad;
     // TeamGndActionType (packed, 19)
     int32_t  gnd_action_time = 0;
     int32_t  gnd_action_timeout = 0;
@@ -206,6 +217,7 @@ struct TeamRecord {
     uint32_t def_air_last_obj_num = 0;
     uint32_t def_air_last_obj_creator = 0;
     uint8_t  def_air_action_type = 0;
+    uint8_t  def_air_pad[3] = {0, 0, 0};   // alignment garbage (captured)
     int32_t  off_air_start_time = 0;
     int32_t  off_air_stop_time = 0;
     uint32_t off_air_obj_num = 0;
@@ -213,6 +225,7 @@ struct TeamRecord {
     uint32_t off_air_last_obj_num = 0;
     uint32_t off_air_last_obj_creator = 0;
     uint8_t  off_air_action_type = 0;
+    uint8_t  off_air_pad[3] = {0, 0, 0};   // alignment garbage (captured)
 
     /// The team's Air Tasking Manager (decoded from the ATM record that
     /// follows this TeamClass in the .tea stream).

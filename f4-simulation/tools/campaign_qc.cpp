@@ -97,6 +97,16 @@
 //                                   this many sim seconds; 300. 0 =
 //                                   wrecks persist, the pre-C5 lifetime)
 //     --war-max-wall <sec>         (C5: total wall-clock watchdog; 0 = off)
+//     --save-write                 (C6: after the run, emit the mutated
+//                                   WorldState as campaign_after.world.json
+//                                   and assemble campaign_after.cam through
+//                                   the importer's json2cam --reencode-all
+//                                   — the runtime-emits-JSON /
+//                                   importer-assembles-.cam hand-off the
+//                                   F4_SIDE boundary prescribes. Needs the
+//                                   input world.json to carry subfiles_b64
+//                                   (cam2json --preserve-subfiles) and the
+//                                   json2cam binary in the build tree.)
 //     --out-dir <dir>              (default: beside the world JSON)
 //
 // Exit code: 0 when the loop produced at least one aircraft AND the sim
@@ -198,6 +208,9 @@ struct Args {
     int reinforce_period_sec = -1; // -1 = engine default (43200); 0 = off
     std::filesystem::path profiles_json;
     std::filesystem::path out_dir;
+    // C6 — the save-write hand-off (--save-write): emit the mutated
+    // WorldState JSON and let the importer assemble the .cam.
+    bool save_write = false;
     // C5 — the 24-hour war (--war): the long-horizon acceptance run
     // (both sides generate, fly, fight, attrite, recover, resupply for
     // HOURS of sim time, headless, deterministic). 0 = off (the B.3/
@@ -283,6 +296,7 @@ Args parse_args(int argc, char** argv) {
         else if (k == "--record-every") a.record_every = std::max(1, std::atoi(next()));
         else if (k == "--no-record")   a.record = false;
         else if (k == "--out-dir")     a.out_dir = next();
+        else if (k == "--save-write")  a.save_write = true;
         else if (k == "--war")         a.war_hours = std::atof(next());
         else if (k == "--war-runs")    a.war_runs = std::max(1, std::atoi(next()));
         else if (k == "--war-sample")  a.war_sample_sec = std::atof(next());
@@ -1489,6 +1503,96 @@ int main(int argc, char** argv) {
                 writeback.unmatched_squadrons.size(),
                 writeback.unmatched_objectives.size());
 
+    bool save_write_cam_ok = false;
+    std::size_t save_write_cam_bytes = 0;
+    // -----------------------------------------------------------------------
+    // 4b. THE SAVE-WRITE HAND-OFF (C6, --save-write): the run's mutated
+    // WorldState back out to a .cam. The F4_SIDE boundary forbids the
+    // runtime from linking the importer, so this is a process hand-off:
+    // the runtime emits campaign_after.world.json (the §6.1 emitter's
+    // projection of the mutated WorldState), then the importer's json2cam
+    // --reencode-all diffs it against the ORIGINAL subfiles_b64 doc and
+    // assembles campaign_after.cam — diff-then-overwrite, every untouched
+    // record byte-identical to the original decode.
+    // -----------------------------------------------------------------------
+    if (args.save_write) {
+        const auto after_json_path = args.out_dir / "campaign_after.world.json";
+        {
+            std::ofstream out(after_json_path);
+            out << ws.to_json_string();
+        }
+        std::printf("save-write: wrote %s\n", after_json_path.string().c_str());
+
+        // The assembly needs the ORIGINAL doc to carry subfiles_b64 (the
+        // cam2json --preserve-subfiles form) and the json2cam binary.
+        auto original_text = [&]() -> std::string {
+            std::ifstream f(args.world_json);
+            if (!f) return {};
+            std::ostringstream ss;
+            ss << f.rdbuf();
+            return ss.str();
+        }();
+        const bool baseline_assembles =
+            original_text.find("subfiles_b64") != std::string::npos;
+
+        if (!baseline_assembles) {
+            std::printf(
+                "save-write: baseline world JSON carries no subfiles_b64 — "
+                "run cam2json --preserve-subfiles on the source .cam and "
+                "pass THAT to campaign_qc to enable the .cam assembly\n");
+        } else {
+            // Locate json2cam next to this binary (both land in the build
+            // tree: <build>/f4-simulation/campaign_qc and
+            // <build>/f4-world-convert/json2cam).
+            std::filesystem::path exe = [] {
+                std::error_code ec;
+                auto p = std::filesystem::read_symlink("/proc/self/exe", ec);
+                return ec ? std::filesystem::path() : p;
+            }();
+            std::filesystem::path json2cam;
+            const std::filesystem::path candidates[] = {
+                exe.parent_path() / "json2cam",
+                exe.parent_path() / ".." / "f4-world-convert" / "json2cam",
+            };
+            for (const auto& c : candidates) {
+                std::error_code ec;
+                if (!c.empty() && std::filesystem::exists(c, ec)) {
+                    json2cam = std::filesystem::weakly_canonical(c, ec);
+                    break;
+                }
+            }
+
+            const auto after_cam = args.out_dir / "campaign_after.cam";
+            if (json2cam.empty()) {
+                std::printf(
+                    "save-write: json2cam not found in the build tree — "
+                    "assemble by hand:\n"
+                    "  json2cam %s %s --reencode-all --baseline %s\n",
+                    after_json_path.string().c_str(),
+                    after_cam.string().c_str(),
+                    args.world_json.string().c_str());
+            } else {
+                const std::string cmd =
+                    "\"" + json2cam.string() + "\" \"" +
+                    after_json_path.string() + "\" \"" +
+                    after_cam.string() +
+                    "\" --reencode-all --baseline \"" +
+                    args.world_json.string() + "\"";
+                const int rc = std::system(cmd.c_str());
+                if (rc == 0 && std::filesystem::exists(after_cam)) {
+                    save_write_cam_ok = true;
+                    save_write_cam_bytes =
+                        std::filesystem::file_size(after_cam);
+                    std::printf("save-write: assembled %s (%zu bytes)\n",
+                                after_cam.string().c_str(),
+                                save_write_cam_bytes);
+                } else {
+                    std::printf("save-write: json2cam failed (rc=%d)\n", rc);
+                }
+            }
+        }
+    }
+
     // C1 gate (exit 5): combat outcomes occurred — kills and/or bomb
     // impacts — but the ledger recorded NOTHING. Every outcome died on
     // the bus: a sink that never fired, an origin stamp that never
@@ -1794,6 +1898,23 @@ int main(int argc, char** argv) {
         w.put(",\n    \"result_json\": ");
         write_string(w, result_path.string());
         w.put("\n  }");
+
+        // C6 — the save-write hand-off block (only when --save-write ran).
+        if (args.save_write) {
+            w.put(",\n  \"save_write\": {");
+            w.put("\n    ");
+            w.number_key("cam_assembled", save_write_cam_ok ? 1 : 0);
+            w.put(", ");
+            w.number_key("cam_bytes",
+                         static_cast<std::int64_t>(save_write_cam_bytes));
+            w.put(",\n    \"after_json\": ");
+            write_string(w,
+                         (args.out_dir / "campaign_after.world.json")
+                             .string());
+            w.put(",\n    \"after_cam\": ");
+            write_string(w, (args.out_dir / "campaign_after.cam").string());
+            w.put("\n  }");
+        }
         w.put("\n}\n");
 
         std::ofstream out(summary_path);

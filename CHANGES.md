@@ -1,3 +1,122 @@
+## Task 70 — the .cam re-encoder reaches byte-identity: the write side now
+## reproduces FreeFalcon's exact bytes (Task 69's struct-faithful bar was the
+## last honest excuse)
+
+**The decode → mutate → save → reload loop is now byte-exact: every
+LZSS-structured sub-file of BOTH committed fixtures (.cmp/.obj/.obd/.tea/.uni)
+re-encodes to the IDENTICAL bytes, the whole archives round-trip through
+load → decode → re-encode → assemble to the identical .cam files, and the
+runtime's save-write hand-off (campaign_qc --save-write) produces a .cam
+FreeFalcon itself would load. Full suite: 2,442/2,442.**
+
+- **The keystone: f4::lzss::compress is now a faithful port of
+  FreeFalcon's LZSS_Compress, and the streams are byte-identical.** The
+  old compressor was a generic hash-chain inverse — valid LZSS, but a
+  DIFFERENT byte stream (the repo's own docs said "any valid LZSS stream
+  decompresses identically", which is exactly why every re-encoded
+  sub-file shipped with ~4,000 spurious byte diffs: one payload
+  difference anywhere reshuffles the whole stream). The real compressor
+  was recovered from FreeFalcon's src/utils/lzss.cpp — the Nelson &
+  Gailly carman LZSS (buffer-I/O variant, Dave Lewak's Falcon adaptation)
+  — and ported line-faithfully: the binary-tree AddString with the book's
+  `i >= match_length` tie rule (the LAST equal-length candidate on the
+  descent wins — the single subtlety a longest-match reimplementation
+  always gets wrong), replace-on-full-match, DeleteString ahead of the
+  write head, LOOK_AHEAD_SIZE = 17, and the blocked (flag byte, 8 tokens)
+  output with its exact flush discipline. Verified byte-for-byte against
+  all six compressed streams in the fixtures: save1 .cmp 4412/4412,
+  .uni 34154/34154, .obj 113753/113753; TestCamp .cmp 4570/4570,
+  .uni 155038/155038, .obd 114/114. Two upstream quirks are preserved on
+  purpose: the compressor reads one byte past the logical end on its
+  final advance steps (the value is discarded; this port substitutes a 0
+  instead of touching OOB memory) and there is no "output grew past
+  input" abort (FreeFalcon stripped the carman overflow check —
+  incompressible inputs simply emit a slightly larger stream).
+
+- **The sub-file encoders went from struct-identical to byte-identical.**
+  With the stream fixed, the remaining diffs were exactly the fields the
+  semantic projection dropped — now captured by the decoders and
+  reproduced verbatim by the encoders:
+  - .cmp: the team name[20]/motto[200] padding garbage (the 1,680-byte
+    diff the save-write plan measured in Task 62), the theater/scenario/
+    save_file/ui_name[40] padding, the 10 uieventnode tail bytes (the x86
+    eventText/next pointers — freed-memory garbage), the event text
+    region's on-disk length + trailing pad (the emitter wrote a minimal
+    len; the original carried the NUL-padded buffer), the
+    SquadUIInfoClass airbaseName padding and its 68th byte.
+  - .tea: the name/motto padding, the bonus_objs VU_ID creators (the
+    decoder discarded them and the encoder wrote 0 — 640 bytes of
+    fabrication), both TeamAirActionType alignment pads, and the
+    MissionRequestClass alignment + trailing pads (2 + 3 bytes of garbage
+    per request, the 76-byte-stride diffs the fixtures show).
+  - .uni: squadron stores[]/schedule[]/rating[] verbatim (up to 680 bytes
+    per squadron that used to come back as ZEROS — a fabricated stockpile
+    wipe), the flight tail's last_move/last_combat timers (now semantic
+    fields — they were skipped bytes), last_direction,
+    last_player_slot, the 16-byte slots/pilots/plane_stats/player_slots
+    block, refuel (v>=72), and — the subtle one — the loadout entries:
+    entry 0 is captured RAW (32/48 bytes) so station slot positions
+    survive (the old projection re-packed non-zero stations into slots
+    0..N, MOVING every weapon on re-encode), and the duplicate
+    per-aircraft entries ride verbatim. The small-branch mis_request
+    mission/context shorts kept their garbage high bytes (464 diffs
+    traced to two bytes per small-branch package: the file bulk-writes
+    shorts, the high byte is memory junk, not 0).
+  - .obd finally has an encoder (encode_obd) and the 10-byte empty-delta
+    save decodes instead of throwing: FreeFalcon's EncodeObjectiveDeltas
+    writes [i32 6][i16 0][i32 0] for zero deltas — save1.cam's .obd is
+    exactly that, and TestCamp's 14 deltas re-encode byte-identically.
+    The .uni outer-size header convention was corrected to the
+    file-verified one (outer = 6 + compressed, excluding its own 4 bytes
+    — the same convention the .obd writer uses).
+
+- **The bar is pinned by the CamByteIdentity suite** (6 tests, both
+  fixtures): every structurally decoded sub-file re-encodes byte-for-byte
+  (save1: 5 sub-files; TestCamp: 4 — the .obd-only save), the whole
+  archives reassemble to identical .cam bytes, the empty .obd edge is
+  its own test, and TestCamp's .obd deltas (owner flips + fstatus damage
+  bitmaps) survive encode. SaveWriteback.EmptyDiffPreservesEverything
+  was upgraded from payload-equality to whole-sub-file byte equality
+  (.obj/.tea/.uni), and the .cmp JSON path keeps its documented
+  struct-identity bar (the world-JSON campaign block is a lossy
+  projection — the padding garbage is not part of the schema; the byte
+  bar lives in the decode-struct path where it belongs).
+
+- **The .tea mutation surface landed in the save-write path.**
+  derive_save_mutations now diffs the teams' .tea pool block (keyed by
+  slot: supply/fuel/replacements_avail + the full TeamStatusType
+  current_stats snapshot), and build_campaign_with_mutations decodes the
+  .tea, applies by TeamRecord::who, and re-encodes — with the same
+  no-silent-drop contract (a team mutation matching no decoded record
+  throws; a .tea mutation with no .tea sub-file throws). The runtime does
+  not write team stocks yet, so the surface is exercised at the JSON
+  layer the diff sees (SaveWriteback.TeamPoolMutationSurvivesSaveReload:
+  a drained team pool flows through derive → build → reload, untouched
+  teams re-encode byte-identically) — the moment a war-loop tranche owns
+  team stocks, the write-back needs no further plumbing.
+
+- **The runtime hand-off exists: campaign_qc --save-write.** The F4_SIDE
+  boundary forbids linking the importer into the runtime, so the tool
+  does what the docs prescribe — runtime-emits-JSON /
+  importer-assembles-.cam: after apply_to writes the run's ledger into
+  the WorldState, --save-write emits campaign_after.world.json (the §6.1
+  emitter) and invokes the build tree's json2cam --reencode-all against
+  the baseline doc to assemble campaign_after.cam, reporting the
+  assembly in the summary's "save_write" block. Verified end-to-end over
+  TestCamp: 9 of 10 sub-files byte-identical on a no-op diff (everything
+  except the JSON-path .cmp), all decoders accept the reassembled save
+  (1,715 units, cursor lands on inner_size, 8 teams).
+
+- **Data: the committed manifest was repaired first** (prerequisite
+  commit): 3 stale fingerprints (kc10.json, Theater/korea/terrain.json,
+  World/korea.world.json — sizes drifted 13355→12539, 85825→85818,
+  11989759→11986248) and 6 entries referencing files that were never in
+  the tree (5× Data/Temp/* per-machine scratch, which .gitignore itself
+  says "must never shadow the committed Data/ exports", plus the absent
+  Weapons/falcon4.wcd.json). Sha256.ReproducesCommittedManifestFinger
+  prints — a generator↔runtime contract test — could not pass on a fresh
+  clone; 42 entries → 36, every remaining entry byte-exact.
+
 ## Task 69 — the three pre-existing E2E failures root-caused and closed (data + precision + approach geometry)
 
 **The "3 pre-existing flight-model failures" ledger entry was three

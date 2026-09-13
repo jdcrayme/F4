@@ -11,6 +11,8 @@
 #include <f4/world_convert/cmp_encoder.hpp>
 #include <f4/world_convert/objective_decoder.hpp>
 #include <f4/world_convert/objective_encoder.hpp>
+#include <f4/world_convert/team_decoder.hpp>
+#include <f4/world_convert/team_encoder.hpp>
 #include <f4/world_convert/unit_decoder.hpp>
 #include <f4/world_convert/unit_encoder.hpp>
 #include <f4/json/reader.hpp>
@@ -48,6 +50,15 @@ struct UnitFields {
     std::optional<int32_t> last_move, last_combat;
 };
 
+struct TeamFields {
+    bool seen = false;                    // the team item existed in the doc
+    std::optional<int> supply_avail, fuel_avail, replacements_avail;
+    std::optional<int> current_aircraft, current_air_defense_vehs;
+    std::optional<int> current_ground_vehs, current_ships;
+    std::optional<int> current_supply, current_fuel, current_airbases;
+    std::optional<int> current_supply_level, current_fuel_level;
+};
+
 struct DocFields {
     // Campaign-level owned fields (absent = not carried by the doc).
     std::optional<int32_t> current_time;
@@ -57,6 +68,7 @@ struct DocFields {
     std::vector<int32_t> te_number_aircraft;
     bool te_number_aircraft_present = false;
 
+    std::map<int, TeamFields> teams;      // keyed by slot
     std::map<uint32_t, ObjFields> objectives;
     std::map<uint32_t, UnitFields> units;
 };
@@ -147,6 +159,73 @@ std::pair<uint32_t, UnitFields> collect_unit(Reader& r) {
     return {id, f};
 }
 
+// Walk one team item (the Reader sits at the item's '{'). Keyed by the
+// "slot" field; only the .tea-sourced pool block is owned. Teams in a
+// .cmp-only doc (no .tea enrichment) carry just slot/flags/colour/name/
+// motto — every owned field absent, nothing to diff.
+std::pair<int, TeamFields> collect_team(Reader& r) {
+    TeamFields f;
+    int slot = -1;
+    r.skip_ws();
+    r.expect('{');
+    if (r.consume('}')) return {slot, f};
+    for (;;) {
+        const std::string k = r.read_string();
+        r.expect(':');
+        if (k == "slot") {
+            slot = static_cast<int>(r.read_int());
+            f.seen = true;
+        }
+        // --- strategic stocks ---
+        else if (k == "supply_avail")
+            f.supply_avail = static_cast<int>(r.read_int());
+        else if (k == "fuel_avail")
+            f.fuel_avail = static_cast<int>(r.read_int());
+        else if (k == "replacements_avail")
+            f.replacements_avail = static_cast<int>(r.read_int());
+        // --- current_stats block ---
+        else if (k == "current_stats") {
+            r.skip_ws();
+            r.expect('{');
+            if (!r.consume('}')) {
+                for (;;) {
+                    const std::string ck = r.read_string();
+                    r.expect(':');
+                    if (ck == "aircraft")
+                        f.current_aircraft = static_cast<int>(r.read_int());
+                    else if (ck == "air_defense_vehs")
+                        f.current_air_defense_vehs =
+                            static_cast<int>(r.read_int());
+                    else if (ck == "ground_vehs")
+                        f.current_ground_vehs = static_cast<int>(r.read_int());
+                    else if (ck == "ships")
+                        f.current_ships = static_cast<int>(r.read_int());
+                    else if (ck == "supply")
+                        f.current_supply = static_cast<int>(r.read_int());
+                    else if (ck == "fuel")
+                        f.current_fuel = static_cast<int>(r.read_int());
+                    else if (ck == "airbases")
+                        f.current_airbases = static_cast<int>(r.read_int());
+                    else if (ck == "supply_level")
+                        f.current_supply_level = static_cast<int>(r.read_int());
+                    else if (ck == "fuel_level")
+                        f.current_fuel_level = static_cast<int>(r.read_int());
+                    else {
+                        r.skip_value();
+                    }
+                    if (r.consume('}')) break;
+                    r.expect(',');
+                }
+            }
+        } else {
+            r.skip_value();
+        }
+        if (r.consume('}')) break;
+        r.expect(',');
+    }
+    return {slot, f};
+}
+
 // Walk a whole document (original or mutated — both sides of the diff
 // speak the world-JSON vocabulary).
 DocFields collect_doc(const std::string& json) {
@@ -193,6 +272,18 @@ DocFields collect_doc(const std::string& json) {
                                 if (r.consume(']')) break;
                                 r.expect(',');
                             }
+                    } else if (ck == "teams") {
+                        r.skip_ws();
+                        r.expect('[');
+                        if (!r.consume(']')) {
+                            for (;;) {
+                                auto [slot, f] = collect_team(r);
+                                if (f.seen && slot >= 0)
+                                    doc.teams[slot] = std::move(f);
+                                if (r.consume(']')) break;
+                                r.expect(',');
+                            }
+                        }
                     } else {
                         r.skip_value();
                     }
@@ -317,6 +408,36 @@ void apply_mutation(UnitRecord& rec, const UnitSaveMutation& m) {
     }
 }
 
+void apply_mutation(TeamRecord& rec, const TeamSaveMutation& m) {
+    // Strategic stocks.
+    if (m.supply_avail.has_value())
+        rec.supply_avail = static_cast<uint16_t>(*m.supply_avail);
+    if (m.fuel_avail.has_value())
+        rec.fuel_avail = static_cast<uint16_t>(*m.fuel_avail);
+    if (m.replacements_avail.has_value())
+        rec.replacements_avail = static_cast<uint16_t>(*m.replacements_avail);
+    // TeamStatusType current_stats (the live snapshot).
+    if (m.current_aircraft.has_value())
+        rec.current_aircraft = static_cast<uint16_t>(*m.current_aircraft);
+    if (m.current_air_defense_vehs.has_value())
+        rec.current_air_defense_vehs =
+            static_cast<uint16_t>(*m.current_air_defense_vehs);
+    if (m.current_ground_vehs.has_value())
+        rec.current_ground_vehs = static_cast<uint16_t>(*m.current_ground_vehs);
+    if (m.current_ships.has_value())
+        rec.current_ships = static_cast<uint16_t>(*m.current_ships);
+    if (m.current_supply.has_value())
+        rec.current_supply = static_cast<uint16_t>(*m.current_supply);
+    if (m.current_fuel.has_value())
+        rec.current_fuel = static_cast<uint16_t>(*m.current_fuel);
+    if (m.current_airbases.has_value())
+        rec.current_airbases = static_cast<uint16_t>(*m.current_airbases);
+    if (m.current_supply_level.has_value())
+        rec.current_supply_level = static_cast<uint8_t>(*m.current_supply_level);
+    if (m.current_fuel_level.has_value())
+        rec.current_fuel_level = static_cast<uint8_t>(*m.current_fuel_level);
+}
+
 // The CampaignSaver's mutation application (mirrored from
 // campaign_saver.cpp's anonymous namespace — the same sentinel semantics;
 // the codebase prefers duplication over premature sharing).
@@ -400,6 +521,45 @@ DerivedSaveMutations derive_save_mutations(const std::string& original_json,
             changed = true;
         }
         if (changed) out.objectives.push_back(std::move(m));
+    }
+
+    // --- teams (.tea pool block, keyed by slot) ---------------------------
+    for (const auto& [slot, mf] : mutd.teams) {
+        const auto it = orig.teams.find(slot);
+        if (it == orig.teams.end()) continue;   // not in the original
+
+        TeamSaveMutation m;
+        m.slot = slot;
+        bool changed = false;
+        auto diff_opt = [&changed](const auto& mv, const auto& ov,
+                                   auto& dst) {
+            if (mv.has_value() && ov.has_value() && *mv != *ov) {
+                dst = *mv;
+                changed = true;
+            }
+        };
+        diff_opt(mf.supply_avail, it->second.supply_avail, m.supply_avail);
+        diff_opt(mf.fuel_avail, it->second.fuel_avail, m.fuel_avail);
+        diff_opt(mf.replacements_avail, it->second.replacements_avail,
+                 m.replacements_avail);
+        diff_opt(mf.current_aircraft, it->second.current_aircraft,
+                 m.current_aircraft);
+        diff_opt(mf.current_air_defense_vehs,
+                 it->second.current_air_defense_vehs,
+                 m.current_air_defense_vehs);
+        diff_opt(mf.current_ground_vehs, it->second.current_ground_vehs,
+                 m.current_ground_vehs);
+        diff_opt(mf.current_ships, it->second.current_ships, m.current_ships);
+        diff_opt(mf.current_supply, it->second.current_supply,
+                 m.current_supply);
+        diff_opt(mf.current_fuel, it->second.current_fuel, m.current_fuel);
+        diff_opt(mf.current_airbases, it->second.current_airbases,
+                 m.current_airbases);
+        diff_opt(mf.current_supply_level, it->second.current_supply_level,
+                 m.current_supply_level);
+        diff_opt(mf.current_fuel_level, it->second.current_fuel_level,
+                 m.current_fuel_level);
+        if (changed) out.teams.push_back(std::move(m));
     }
 
     // --- units (counters + battalion state) --------------------------------
@@ -530,7 +690,34 @@ std::vector<uint8_t> build_campaign_with_mutations(
             "original carries no .uni sub-file");
     }
 
-    // Assemble: the re-encoded .cmp + .obj + .uni, everything else
+    // The .tea: same pattern, matched by slot (TeamRecord::who).
+    std::vector<uint8_t> tea_bytes;
+    if (const SubFile* tea = cam.find("tea"); tea != nullptr) {
+        DecodedTeams dec =
+            decode_tea(tea->data.data(), tea->data.size(), camp_version);
+        for (const auto& m : mut.teams) {
+            bool found = false;
+            for (auto& rec : dec.teams) {
+                if (rec.who == m.slot) {
+                    apply_mutation(rec, m);
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                throw std::runtime_error(
+                    "build_campaign_with_mutations: team mutation slot " +
+                    std::to_string(m.slot) + " matches no decoded record");
+            }
+        }
+        tea_bytes = encode_tea(dec, camp_version);
+    } else if (!mut.teams.empty()) {
+        throw std::runtime_error(
+            "build_campaign_with_mutations: team mutations given but the "
+            "original carries no .tea sub-file");
+    }
+
+    // Assemble: the re-encoded .cmp + .obj + .uni + .tea, everything else
     // verbatim from the original.
     CamWriter w;
     for (const auto& sf : cam.subfiles()) {
@@ -540,6 +727,8 @@ std::vector<uint8_t> build_campaign_with_mutations(
             w.add(sf.name, obj_bytes);
         } else if (sf.ext() == "uni" && !uni_bytes.empty()) {
             w.add(sf.name, uni_bytes);
+        } else if (sf.ext() == "tea" && !tea_bytes.empty()) {
+            w.add(sf.name, tea_bytes);
         } else {
             w.add(sf.name, sf.data);
         }

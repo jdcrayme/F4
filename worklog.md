@@ -10209,3 +10209,85 @@ Stage Summary (Task 69 — the three ledger failures were three defects):
   the pole goldens.
 - Delivery: format-patch onto origin/main (2614ba1), git am verified to
   reproduce the tree.
+
+---
+Task ID: 2 (Tier 2 — .cam binary re-encoder, byte-identity)
+Agent: Z.ai Code (main)
+Task: The .cam re-encoder reaches byte-identity — faithful FreeFalcon LZSS compressor, byte-identity hardening of the sub-file encoders, encode_obd, the CamByteIdentity suite, the .tea mutation surface, and the campaign_qc --save-write host wiring.
+
+Work Log:
+- Synced to origin/main (b6d4090 "Updates to flight model" — the user's
+  squash of the Task 69 patch + their own flight-model work; the patch
+  file itself was committed upstream). Local divergent commit reset.
+- Found the data tier broken on upstream (pre-existing, both 2614ba1 and
+  b6d4090): Sha256.ReproducesCommittedManifestFingerprints red — 3 stale
+  fingerprints + 6 entries for files never committed (5x Data/Temp/*
+  per-machine scratch + Weapons/falcon4.wcd.json). Repaired: 42 → 36
+  entries, all byte-exact. Committed FIRST as its own commit (ba61f35).
+- Surveyed the .cam write stack (Docs/SAVE_WRITE_PLAN.md tranches
+  landed): CamWriter byte-identical, .cmp/.obj/.tea/.uni encoders
+  struct-faithful, save_writeback diff-then-overwrite. Gaps: no
+  byte-identity, no encode_obd, no v71 round-trip test, no .tea
+  mutation surface, no host wiring.
+- Built a measurement harness (/home/z/measure) that decodes each
+  sub-file and re-encodes, reporting byte-diff runs. Baseline on the
+  v63/v71 fixtures: .cmp payload 1680/219 diffs, .tea 176/270, .uni
+  payload 1593/16942, .obj whole-stream divergence.
+- Root-caused the whole-stream divergence: f4::lzss::compress is a
+  generic hash-chain inverse, NOT FreeFalcon's compressor. Token-level
+  forensic pass over save1.cmp (feedback-aware match-length simulation,
+  ring write-time analysis) established the encoder is greedy with
+  tree-order tie-breaks; the tie data (recency_rank ~190 in 4,000-candidate
+  zero-run ties) ruled out every simple policy.
+- Recovered the actual compressor from the FreeFalcon source tree
+  (github.com/FreeFalcon/freefalcon-central, src/utils/lzss.cpp — the
+  Nelson & Gailly carman LZSS, buffer-I/O variant, with the repo's own
+  decompressor header citing this file). Ported line-faithfully into
+  f4-lzss/src/compress.cpp: binary-tree AddString with the book's
+  `i >= match_length` tie rule, replace-on-full-match, DeleteString
+  ahead of the write head, LOOK_AHEAD_SIZE=17, blocked output with the
+  exact flush discipline; the past-the-end input read is bounded (a
+  discarded value upstream), the stripped carman overflow abort is
+  documented. BYTE-IDENTICAL on all six fixture streams.
+- Hardened the decoders/encoders to byte-identity: fixed-width-string
+  pad capture (.cmp teams + the 4 camp-name fields + SquadUIInfo,
+  .tea name/motto), uieventnode 10-byte tails + disk text length/pad,
+  bonus_obj creators, TeamAirActionType pads, MissionRequestClass
+  align/tail pads (both .tea and .uni), squadron stores/schedule/rating
+  verbatim, flight last_move/last_combat (semantic now), last_direction,
+  last_player_slot, flight_misc[16], refuel, loadout entry-0 RAW capture
+  (station slot positions survive) + duplicate entries verbatim, and
+  the small-branch mis_request mission/context high bytes (464 diffs
+  traced to two garbage bytes per small-branch package).
+- encode_obd + the empty-.obd decode fix ([i32 6][i16 0][i32 0] is a
+  valid empty delta set — save1's is exactly that); the .uni outer-size
+  header corrected to the file-verified convention (6 + compressed).
+- New CamByteIdentity suite (6 tests): per-sub-file byte identity on
+  both fixtures, whole-.cam reassembly identity, the empty-.obd edge,
+  TestCamp's 14 deltas. Upgraded SaveWriteback.EmptyDiffPreserves
+  Everything to whole-sub-file byte equality (.obj/.tea/.uni).
+- .tea mutation surface: TeamSaveMutation (slot-keyed pool block),
+  diff in derive_save_mutations, decode-apply-encode in
+  build_campaign_with_mutations with the no-silent-drop contract;
+  SaveWriteback.TeamPoolMutationSurvivesSaveReload drives it JSON-level
+  (the runtime doesn't own team stocks yet — by design).
+- campaign_qc --save-write: emits campaign_after.world.json (runtime
+  side), invokes the build tree's json2cam --reencode-all to assemble
+  campaign_after.cam (importer side) — the F4_SIDE boundary respected
+  as a process hand-off; summary "save_write" block. Verified over
+  TestCamp: 9/10 sub-files byte-identical on a no-op diff, all decoders
+  accept the reassembled save.
+- Full headless ctest 2,442/2,442 (4 environment skips: 2 locale,
+  2 GL/PNG — unchanged).
+
+Stage Summary (Task 70 — the save-write loop is byte-exact):
+- f4::lzss::compress is byte-identical to FreeFalcon's LZSS_Compress on
+  every fixture stream; the "valid LZSS, different bytes" excuse is gone.
+- Every structurally decoded sub-file re-encodes byte-for-byte on both
+  committed fixtures; the archives round-trip to identical .cam bytes.
+- The .obd sub-file finally has both directions (encode + empty-set
+  decode); the fabricated-data class (zeroed stores, moved loadout
+  stations, zeroed padding) is eliminated from the save path.
+- The .tea mutation surface + the campaign_qc --save-write hand-off
+  close SAVE_WRITE_PLAN §6.2's "natural next consumer" item.
+- Delivery: format-patch onto origin/main (b6d4090), git am verified.

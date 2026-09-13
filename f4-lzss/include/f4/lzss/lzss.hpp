@@ -52,31 +52,15 @@ std::vector<uint8_t> decompress(
     std::size_t expected_size = 0);
 
 // ──────────────────────────────────────────────────────────────────────────
-// Compression — the inverse of decompress().
+// Compression — a faithful port of FreeFalcon's LZSS_Compress() (the
+// Nelson & Gailly carman LZSS the game ships in src/utils/lzss.cpp).
 //
-// compress(src, src_size) produces an LZSS stream that decompress() reads
-// back to the exact original bytes. The window/encoding conventions are
-// the mirror of the decompressor (see "Format" above):
-//   - 4096-byte ring window, current_position starts at 1
-//   - tokens blocked in (flag byte, 8 tokens) groups; flag bit N (LSB
-//     first) = 1 for a literal (1 byte), 0 for a match (2 bytes)
-//   - match token: b0 = ((length_raw) << 4) | (position >> 8),
-//                  b1 = position & 0xFF
-//     where length_raw = match_length - 2  (match_length in [3, 17];
-//     the decoder copies length_raw + 2 bytes via its `i <= match_length`
-//     loop), and position = (1 + match_source_index) & 4095
-//   - position 0 is never emitted (reserved as the EOS sentinel by
-//     FreeFalcon's compressor); a candidate that would map to position 0
-//     is skipped (one literal every 4096 bytes worst case)
-//
-// Match finding is a hash-chain over 3-byte prefixes (greedy, longest-
-// match, capped at 17). Minimum match length is 3 (a 2-byte match saves
-// no space over two literals and is left as literals).
-//
-// This is NOT a byte-identical reproduction of FreeFalcon's compressor —
-// the compressed byte stream differs (different match heuristics), but
-// ANY valid LZSS stream decompresses identically, so both FreeFalcon's
-// decoder and f4::lzss::decompress read it back to the original bytes.
+// compress(src, src_size) is BYTE-IDENTICAL to FreeFalcon's compressor:
+// same tree-descent match choices (the book's `i >= match_length` tie
+// rule), same token stream, same trailing partial group. Verified
+// byte-for-byte against every LZSS sub-file of both committed .cam
+// fixtures (see f4-lzss/src/compress.cpp for the algorithm notes and the
+// fixture scorecard). decompress() reads it back to the exact original.
 // ──────────────────────────────────────────────────────────────────────────
 
 /// Compress `src` into an LZSS stream readable by decompress().

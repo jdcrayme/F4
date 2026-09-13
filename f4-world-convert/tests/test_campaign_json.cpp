@@ -35,8 +35,45 @@ CampaignHeader decode_fixture_cmp() {
 // JSON round-trip: decode → to_world_json → from_world_json_campaign → compare
 // ═══════════════════════════════════════════════════════════════════════════
 
+namespace {
+
+// The world-JSON campaign block is a LOSSY projection: it carries the
+// semantic fields but not the byte-identity pad captures (the garbage
+// bytes after fixed-width-string NULs). Strip them from the decoded
+// header so the payload comparison below tests the JSON round-trip
+// contract — the JSON→struct→payload path. The FULL byte-identity path
+// (decode → encode, captures intact) is pinned by the CamRoundTrip
+// tests in test_cam_writer.cpp.
+void strip_pad_captures(CampaignHeader& h) {
+    for (auto& t : h.teams) {
+        t.name_pad.clear();
+        t.motto_pad.clear();
+    }
+    h.theater_name_pad.clear();
+    h.scenario_pad.clear();
+    h.save_file_pad.clear();
+    h.ui_name_pad.clear();
+    for (auto& e : h.standard_events) {
+        e.node_tail.clear();
+        e.text_pad.clear();
+        e.disk_text_len = 0;
+    }
+    for (auto& e : h.priority_events) {
+        e.node_tail.clear();
+        e.text_pad.clear();
+        e.disk_text_len = 0;
+    }
+    for (auto& s : h.squadrons) {
+        s.airbase_name_pad.clear();
+        s.struct_pad = 0;
+    }
+}
+
+} // namespace
+
 TEST(CampaignJson, RoundTripPreservesAllFields) {
     CampaignHeader h1 = decode_fixture_cmp();
+    strip_pad_captures(h1);
 
     // Emit to JSON (with the new fields: te_number_f16s, camp_map_b64,
     // squadrons, remaining_payload_b64). preserve_all_subfiles is not

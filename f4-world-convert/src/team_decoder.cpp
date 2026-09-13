@@ -51,6 +51,28 @@ std::string fixed_string(Cursor& c, std::size_t n) {
     return s;
 }
 
+// fixed_string + byte-identity capture (bytes after the first NUL).
+std::string fixed_string_padded(Cursor& c, std::size_t n,
+                                std::vector<uint8_t>* pad) {
+    std::string s;
+    s.reserve(n);
+    for (std::size_t i = 0; i < n; ++i) {
+        char ch = static_cast<char>(c.u8());
+        if (ch == '\0') {
+            const std::size_t rest = n - i - 1;
+            if (pad && rest > 0) {
+                pad->resize(rest);
+                c.read(pad->data(), rest);
+            } else {
+                c.skip(rest);
+            }
+            return s;
+        }
+        s.push_back(ch);
+    }
+    return s;   // filled the field with no NUL — pad stays empty
+}
+
 // ---------------------------------------------------------------------------
 // TeamClass(FILE*) — team.cpp:270. 739 bytes at v63/v71.
 // ---------------------------------------------------------------------------
@@ -110,10 +132,12 @@ void parse_team_class(Cursor& c, TeamRecord& t, int v) {
     t.reinforcement = c.i16();
 
     t.bonus_obj_nums.resize(MAX_BONUSES);
+    t.bonus_obj_creators.resize(MAX_BONUSES);
     t.bonus_times.resize(MAX_BONUSES);
     for (int j = 0; j < MAX_BONUSES; ++j) {
         VuId b = read_vu_id(c);
         t.bonus_obj_nums[j] = b.num;
+        t.bonus_obj_creators[j] = b.creator;   // byte-identity capture
     }
     for (int j = 0; j < MAX_BONUSES; ++j) t.bonus_times[j] = c.i32();
 
@@ -130,8 +154,8 @@ void parse_team_class(Cursor& c, TeamRecord& t, int v) {
     if (v > 4)  t.team_flag = c.u8();
     if (v > 32) t.team_color = c.u8();
     t.equipment = c.u8();
-    t.name = fixed_string(c, MAX_TEAM_NAME);
-    if (v > 32) t.motto = fixed_string(c, MAX_MOTTO);
+    t.name = fixed_string_padded(c, MAX_TEAM_NAME, &t.name_pad);
+    if (v > 32) t.motto = fixed_string_padded(c, MAX_MOTTO, &t.motto_pad);
 
     // TeamGndActionType (pack(1), 19 bytes) at v > 33 (sizeof at v > 50).
     if (v > 33) {
@@ -155,7 +179,8 @@ void parse_team_class(Cursor& c, TeamRecord& t, int v) {
         t.def_air_last_obj_num = dl.num;
         t.def_air_last_obj_creator = dl.creator;
         t.def_air_action_type = c.u8();
-        c.skip(3);   // MSVC pads the uchar to the 4-byte struct alignment
+        c.read(t.def_air_pad, 3);   // MSVC pads the uchar to 4-byte alignment
+                                    // (byte-identity capture)
 
         t.off_air_start_time = c.i32();
         t.off_air_stop_time  = c.i32();
@@ -166,7 +191,7 @@ void parse_team_class(Cursor& c, TeamRecord& t, int v) {
         t.off_air_last_obj_num = ol.num;
         t.off_air_last_obj_creator = ol.creator;
         t.off_air_action_type = c.u8();
-        c.skip(3);
+        c.read(t.off_air_pad, 3);   // alignment garbage (byte-identity capture)
     }
 }
 
@@ -197,7 +222,7 @@ void parse_mission_request(Cursor& c, ATMRequestRecord& m) {
     m.pak_id_num = pk.num; m.pak_id_creator = pk.creator;
     m.who = c.u8();
     m.vs  = c.u8();
-    c.skip(2);                    // alignment padding
+    c.read(m.align_pad, 2);       // alignment padding (byte-identity capture)
     m.tot = c.i32();
     m.tx  = c.i16();
     m.ty  = c.i16();
@@ -219,7 +244,7 @@ void parse_mission_request(Cursor& c, ATMRequestRecord& m) {
     for (int i = 0; i < 4; ++i) m.slots[i] = c.u8();
     m.min_to = static_cast<int8_t>(c.u8());
     m.max_to = static_cast<int8_t>(c.u8());
-    c.skip(3);                    // trailing padding → 76
+    c.read(m.tail_pad, 3);        // trailing padding → 76 (captured)
 }
 
 // ---------------------------------------------------------------------------

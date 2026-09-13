@@ -82,6 +82,15 @@ target_compile_definitions(test_unit_encoder PRIVATE
     REPO_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/../../")
 gtest_discover_tests(test_unit_encoder)
 
+# Byte-identity closure: every LZSS-structured sub-file re-encodes
+# byte-for-byte on both fixtures, and the whole archive round-trips.
+add_executable(test_cam_byte_identity test_cam_byte_identity.cpp)
+target_link_libraries(test_cam_byte_identity PRIVATE GTest::gtest_main f4-world-convert)
+target_compile_definitions(test_cam_byte_identity PRIVATE
+    FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/"
+    REPO_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/../../")
+gtest_discover_tests(test_cam_byte_identity)
+
 # Save-write tranche: CampaignSaver integration bridge.
 add_executable(test_campaign_saver test_campaign_saver.cpp)
 target_link_libraries(test_campaign_saver PRIVATE GTest::gtest_main f4-world-convert)

@@ -196,6 +196,11 @@ struct MissionRequestRecord {
     uint8_t  slots[4] = {0, 0, 0, 0};   // big branch only
     int8_t   min_to = 0;                // big branch only
     int8_t   max_to = 0;                // big branch only
+
+    // Byte-identity capture: the MSVC alignment padding (2 bytes after
+    // `vs`, 3 trailing to sizeof 76) carried garbage in the originals.
+    uint8_t  align_pad[2] = {0, 0};
+    uint8_t  tail_pad[3] = {0, 0, 0};
 };
 
 /// One station in a flight's LoadoutStruct (the per-hardpoint fill for
@@ -243,8 +248,11 @@ struct UnitSubclassData {
     // Squadron:
     int32_t  fuel = 0;
     uint8_t  specialty = 0;
-    // stores[] (200/220/600 bytes) and schedule[] (64 bytes) are decoded
-    // but not exposed — too large to be useful in the viewer.
+    // stores[] (200/220/600 bytes), schedule[] (64) and rating[] (16) are
+    // captured verbatim (byte-identity) but not semantically exposed.
+    std::vector<uint8_t> stores_raw;
+    std::vector<uint8_t> schedule_raw;
+    std::vector<uint8_t> rating_raw;
     std::vector<PilotRecord> pilots;   // 48 pilots per squadron (PILOTS_PER_SQUADRON)
     uint32_t airbase_id_creator = 0;
     uint32_t airbase_id_num = 0;
@@ -267,6 +275,18 @@ struct UnitSubclassData {
     float    altitude = 0.0f;   // pos_.z_
     int32_t  fuel_burnt = 0;
     int32_t  time_on_target = 0;
+    // (last_move / last_combat share the Battalion fields above — a unit
+    // record is exactly one subclass, and the flight tail's two timers
+    // sit at the same struct offset they do for battalions.)
+    // Byte-identity captures for the rest of the flight tail:
+    std::vector<uint8_t> loadout0_raw;              // entry 0 verbatim
+                                                    // (32/48 bytes)
+    std::vector<std::vector<uint8_t>> extra_loadouts_raw;  // entries 1..n-1
+    uint8_t  last_direction = 0;
+    uint8_t  flight_misc[16] = {0};   // slots[4]+pilots[4]+plane_stats[4]
+                                      // +player_slots[4]
+    uint8_t  last_player_slot = 0;
+    uint32_t refuel = 0;              // v >= 72
     int32_t  mission_over_time = 0;
     int16_t  mission_target = 0;
     uint8_t  loadouts = 0;      // count of loadout[] entries
@@ -305,6 +325,12 @@ struct UnitSubclassData {
     // Package small branch:
     int16_t  requests = 0;          // outstanding vulcan requests
     int16_t  responses = 0;
+    // Byte-identity capture: FreeFalcon streams the small branch's
+    // mission/context as sizeof(short); the high byte carries garbage in
+    // real files (the uchar source values never fill it, but the short
+    // was bulk-written from memory).
+    uint8_t  small_mission_hi = 0;
+    uint8_t  small_context_hi = 0;
 
     // Package big branch:
     uint8_t  flights = 0;           // # of flights in the package

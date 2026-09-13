@@ -209,7 +209,8 @@ void parse_squadron(Cursor& c, UnitSubclassData& s, int v) {
     std::size_t stores_bytes = 200;                 // v < 69
     if (v >= 69 && v < 72) stores_bytes = 220;      // 69 <= v < 72
     else if (v >= 72)      stores_bytes = 600;      // MAXIMUM_WEAPTYPES
-    c.skip(stores_bytes);                           // stores[] — weapon stockpile
+    s.stores_raw.resize(stores_bytes);              // verbatim capture
+    c.read(s.stores_raw.data(), stores_bytes);
     // Parse pilot_data: 48 pilots × 10 bytes = 480 bytes.
     // PilotClass layout (pilot.h:32):
     //   short pilot_id(2) + uchar pilot_skill_and_rating(1) + uchar pilot_status(1)
@@ -231,14 +232,16 @@ void parse_squadron(Cursor& c, UnitSubclassData& s, int v) {
         p.missions_flown = c.i16();
         s.pilots.push_back(p);
     }
-    c.skip(64);                   // schedule[16 × 4] — not exposed
+    s.schedule_raw.resize(64);    // schedule[16 × 4] — verbatim capture
+    c.read(s.schedule_raw.data(), 64);
     VuId ab = read_vu_id(c);
     s.airbase_id_num = ab.num;
     s.airbase_id_creator = ab.creator;
     VuId hs = read_vu_id(c);
     s.hot_spot_num = hs.num;
     s.hot_spot_creator = hs.creator;
-    c.skip(16);                   // rating[ARO_OTHER=16] — not exposed
+    s.rating_raw.resize(16);      // rating[ARO_OTHER=16] — verbatim capture
+    c.read(s.rating_raw.data(), 16);
     s.aa_kills         = c.i16();
     s.ag_kills         = c.i16();
     s.as_kills         = c.i16();
@@ -271,8 +274,8 @@ void parse_taskforce(Cursor& c, UnitSubclassData& s) {
 void parse_flight(Cursor& c, UnitSubclassData& s, int v) {
     s.altitude           = c.f32();   // pos_.z_
     s.fuel_burnt         = c.i32();
-    c.skip(4);                        // last_move (CampaignTime)
-    c.skip(4);                        // last_combat (CampaignTime)
+    s.last_move          = c.i32();   // (CampaignTime) — semantic since 70b
+    s.last_combat        = c.i32();
     s.time_on_target     = c.i32();
     s.mission_over_time  = c.i32();
     s.mission_target     = c.i16();
@@ -280,6 +283,13 @@ void parse_flight(Cursor& c, UnitSubclassData& s, int v) {
     const std::size_t loadout_bytes = (v <= 72) ? 32 : 48;
     for (uint8_t li = 0; li < s.loadouts; ++li) {
         if (li == 0) {
+            // Byte-identity capture: entry 0's raw bytes (preserves the
+            // station slot positions AND any duplicate-slot content the
+            // semantic projection cannot represent). Read bounds-checked,
+            // then rewind for the semantic parse of the same region.
+            s.loadout0_raw.resize(loadout_bytes);
+            c.read(s.loadout0_raw.data(), loadout_bytes);
+            c.p -= loadout_bytes;
             // Decode entry 0. The struct is two PARALLEL arrays —
             // WeaponID[16] then WeaponCount[16] — not interleaved pairs.
             uint16_t ids[16] = {0};
@@ -301,14 +311,17 @@ void parse_flight(Cursor& c, UnitSubclassData& s, int v) {
                 }
             }
         } else {
-            c.skip(loadout_bytes);   // duplicate fill for slot li
+            // Duplicate fill for slot li — verbatim capture.
+            std::vector<uint8_t> raw(loadout_bytes);
+            c.read(raw.data(), loadout_bytes);
+            s.extra_loadouts_raw.push_back(std::move(raw));
         }
     }
     s.mission            = c.u8();
     if (v > 65) {
         s.old_mission    = c.u8();    // old_mission — written at v > 65
     }
-    c.skip(1);                        // last_direction
+    s.last_direction    = c.u8();     // last_direction — captured (70b)
     s.priority           = c.u8();
     s.mission_id         = c.u8();
     s.eval_flags         = c.u8();
@@ -326,15 +339,13 @@ void parse_flight(Cursor& c, UnitSubclassData& s, int v) {
         s.requester_num = req.num;    // requester — written at v > 65
         s.requester_creator = req.creator;
     }
-    c.skip(4);                        // slots[PILOTS_PER_FLIGHT=4]
-    c.skip(4);                        // pilots[4]
-    c.skip(4);                        // plane_stats[4]
-    c.skip(4);                        // player_slots[4]
-    c.skip(1);                        // last_player_slot
+    c.read(s.flight_misc, 16);        // slots[4]+pilots[4]+plane_stats[4]
+                                      // +player_slots[4] (captured)
+    s.last_player_slot  = c.u8();     // last_player_slot — captured (70b)
     s.callsign_id        = c.u8();
     s.callsign_num       = c.u8();
     if (v >= 72) {
-        c.skip(4);                    // refuel (unsigned int) — v >= 72
+        s.refuel = c.u32();           // refuel (unsigned int) — v >= 72
     }
 }
 
@@ -375,11 +386,17 @@ void parse_package_small(Cursor& c, UnitSubclassData& s, int v) {
     s.requests  = c.i16();
     s.responses = c.i16();
     // mis_request.mission and .context are streamed as sizeof(short) — a
-    // FreeFalcon quirk (the uchar fields are written/read as shorts in
-    // both directions; package.cpp:245/451). The source values are uchar,
-    // so the high byte is always 0 — take the low byte.
-    s.mis_request.mission  = static_cast<uint8_t>(c.u16() & 0xFF);
-    s.mis_request.context  = static_cast<uint8_t>(c.u16() & 0xFF);
+    // FreeFalcon quirk (the uchar fields are written as shorts; see
+    // package.cpp:451). The source values are uchar, but the high byte is
+    // bulk-written memory garbage, not always 0 — capture it verbatim.
+    {
+        const uint16_t mission_s = c.u16();
+        const uint16_t context_s = c.u16();
+        s.mis_request.mission  = static_cast<uint8_t>(mission_s & 0xFF);
+        s.mis_request.context  = static_cast<uint8_t>(context_s & 0xFF);
+        s.small_mission_hi = static_cast<uint8_t>(mission_s >> 8);
+        s.small_context_hi = static_cast<uint8_t>(context_s >> 8);
+    }
     VuId req = read_vu_id(c);
     s.mis_request.requester_id_num = req.num;
     s.mis_request.requester_id_creator = req.creator;
@@ -471,7 +488,7 @@ void parse_package_big(Cursor& c, UnitSubclassData& s, int v) {
     m.pak_id_num = pk.num; m.pak_id_creator = pk.creator;
     m.who = c.u8();
     m.vs  = c.u8();
-    c.skip(2);                     // alignment padding (34..36)
+    c.read(m.align_pad, 2);        // alignment padding (34..36, captured)
     m.tot = c.i32();               // 36
     m.tx  = c.i16();               // 40
     m.ty  = c.i16();               // 42
@@ -493,7 +510,7 @@ void parse_package_big(Cursor& c, UnitSubclassData& s, int v) {
     for (int i = 0; i < 4; ++i) m.slots[i] = c.u8();   // 67..70
     m.min_to = static_cast<int8_t>(c.u8());            // 71
     m.max_to = static_cast<int8_t>(c.u8());            // 72
-    c.skip(3);                     // trailing padding → sizeof 76
+    c.read(m.tail_pad, 3);         // trailing padding → sizeof 76 (captured)
     s.package_branch = PackageBranch::Big;
 }
 

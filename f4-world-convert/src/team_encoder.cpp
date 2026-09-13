@@ -33,6 +33,20 @@ constexpr int NTM_BYTES = 15;
 
 using Writer = f4::world_convert::ByteWriter;
 
+// Byte-identity emission of a fixed-width NUL-terminated string field
+// (content + NUL + captured padding, zero-filling the remainder).
+void fixed_string_padded(Writer& w, const std::string& s,
+                         const std::vector<uint8_t>& pad, std::size_t width) {
+    const std::size_t n = std::min<std::size_t>(s.size(), width);
+    w.buf.insert(w.buf.end(), s.begin(), s.begin() + n);
+    if (n >= width) return;
+    w.u8(0);
+    std::size_t written = 0;
+    for (; written < pad.size() && n + 1 + written < width; ++written)
+        w.u8(pad[written]);
+    for (std::size_t i = n + 1 + written; i < width; ++i) w.u8(0);
+}
+
 // Inverse of parse_team_class (team.cpp:270, 739 bytes at v63/v71).
 void encode_team_class(Writer& w, const TeamRecord& t, int v) {
     // VU_ID: num then creator.
@@ -93,14 +107,12 @@ void encode_team_class(Writer& w, const TeamRecord& t, int v) {
 
     w.i16(t.reinforcement);
 
-    // bonus_objs[20] VU_IDs + bonus_time[20] int32s.
+    // bonus_objs[20] VU_IDs + bonus_time[20] int32s. The creator half is
+    // captured by the decoder (byte-identity); hand-built records write 0.
     for (int j = 0; j < MAX_BONUSES; ++j) {
-        // VU_ID: num + creator(0 — the decoder only captures num; creator
-        // is discarded. We write creator=0, matching what the decoder sees
-        // when it re-reads: read_vu_id reads num then creator, and the
-        // encoder writes num then 0. The decoded bonus_obj_nums match.)
         w.u32(j < static_cast<int>(t.bonus_obj_nums.size()) ? t.bonus_obj_nums[j] : 0);
-        w.u32(0);   // creator — not captured by the decoder
+        w.u32(j < static_cast<int>(t.bonus_obj_creators.size())
+                  ? t.bonus_obj_creators[j] : 0);
     }
     for (int j = 0; j < MAX_BONUSES; ++j) {
         w.i32(j < static_cast<int>(t.bonus_times.size()) ? t.bonus_times[j] : 0);
@@ -123,8 +135,8 @@ void encode_team_class(Writer& w, const TeamRecord& t, int v) {
     if (v > 4)  w.u8(t.team_flag);
     if (v > 32) w.u8(t.team_color);
     w.u8(t.equipment);
-    w.fixed_string(t.name, MAX_TEAM_NAME);
-    if (v > 32) w.fixed_string(t.motto, MAX_MOTTO);
+    fixed_string_padded(w, t.name, t.name_pad, MAX_TEAM_NAME);
+    if (v > 32) fixed_string_padded(w, t.motto, t.motto_pad, MAX_MOTTO);
 
     // TeamGndActionType (packed, 19 bytes) at v > 33.
     if (v > 33) {
@@ -146,7 +158,7 @@ void encode_team_class(Writer& w, const TeamRecord& t, int v) {
         w.u32(t.def_air_last_obj_num);
         w.u32(t.def_air_last_obj_creator);
         w.u8(t.def_air_action_type);
-        w.u8(0); w.u8(0); w.u8(0);   // MSVC pads uchar to 4-byte alignment
+        w.bytes(t.def_air_pad, 3);   // MSVC pads uchar to 4-byte alignment
 
         // Offensive air action.
         w.i32(t.off_air_start_time);
@@ -156,7 +168,7 @@ void encode_team_class(Writer& w, const TeamRecord& t, int v) {
         w.u32(t.off_air_last_obj_num);
         w.u32(t.off_air_last_obj_creator);
         w.u8(t.off_air_action_type);
-        w.u8(0); w.u8(0); w.u8(0);   // padding
+        w.bytes(t.off_air_pad, 3);   // padding (captured when decoded)
     }
 }
 
@@ -178,7 +190,7 @@ void encode_mission_request(Writer& w, const ATMRequestRecord& m) {
     w.u32(m.pak_id_num);       w.u32(m.pak_id_creator);
     w.u8(m.who);
     w.u8(m.vs);
-    w.u8(0); w.u8(0);              // alignment padding
+    w.bytes(m.align_pad, 2);       // alignment padding (captured when decoded)
     w.i32(m.tot);
     w.i16(m.tx);
     w.i16(m.ty);
@@ -200,7 +212,7 @@ void encode_mission_request(Writer& w, const ATMRequestRecord& m) {
     for (int i = 0; i < 4; ++i) w.u8(m.slots[i]);
     w.s8(m.min_to);
     w.s8(m.max_to);
-    w.u8(0); w.u8(0); w.u8(0);      // trailing padding → 76
+    w.bytes(m.tail_pad, 3);         // trailing padding → 76 (captured)
 }
 
 // Inverse of parse_atm (atm.cpp:238).

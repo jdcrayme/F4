@@ -90,6 +90,32 @@ struct UnitSaveMutation {
     std::optional<int32_t> last_combat;
 };
 
+/// One team's save-side mutation (.tea sub-file, matched by slot —
+/// TeamRecord::who is the team index the .cmp slots index too). The
+/// surface is the team POOL block the resupply/reinforcement cadences
+/// own: the strategic stocks (supply/fuel/replacements) and the current-
+/// status snapshot the UI and the tasking managers read. nullopt = keep
+/// the original value.
+struct TeamSaveMutation {
+    int slot = -1;                        // 0..7 (TeamRecord::who)
+
+    // --- strategic stocks ---
+    std::optional<int> supply_avail;
+    std::optional<int> fuel_avail;
+    std::optional<int> replacements_avail;
+
+    // --- TeamStatusType current_stats (the live snapshot) ---
+    std::optional<int> current_aircraft;
+    std::optional<int> current_air_defense_vehs;
+    std::optional<int> current_ground_vehs;
+    std::optional<int> current_ships;
+    std::optional<int> current_supply;
+    std::optional<int> current_fuel;
+    std::optional<int> current_airbases;
+    std::optional<int> current_supply_level;
+    std::optional<int> current_fuel_level;
+};
+
 /// The diff result: what changed between the original and the mutated
 /// world documents, expressed as mutations over the decode structs.
 struct DerivedSaveMutations {
@@ -103,6 +129,9 @@ struct DerivedSaveMutations {
     /// Units whose counters or battalion state changed.
     std::vector<UnitSaveMutation> units;
 
+    /// Teams whose pool/status block changed (.tea).
+    std::vector<TeamSaveMutation> teams;
+
     /// True when nothing differs on any owned field (a ground- and
     /// air-quiet run). build_campaign_with_mutations() on an unchanged
     /// diff still re-encodes — the .cmp/.obj/.uni round-trips are
@@ -113,7 +142,7 @@ struct DerivedSaveMutations {
                campaign.last_repair == INT32_MIN &&
                campaign.last_reinforcement == INT32_MIN &&
                campaign.te_number_aircraft.empty() &&
-               objectives.empty() && units.empty();
+               objectives.empty() && units.empty() && teams.empty();
     }
 };
 
