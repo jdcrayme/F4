@@ -305,6 +305,11 @@ public:
                 const auto& entry_fix = plan_.route.back().position;
                 landing_.configure(entry_fix, plan_.taxi_in_route);
                 landing_.fly_traffic_pattern = plan_.fly_traffic_pattern;
+                // The landing side of the home-base tag: LandingRequest and
+                // the RunwayVacatedReport carry the SAME airbase the taxi/
+                // takeoff requests did, so an ATC answers and releases the
+                // right field's runway (campaign path — multiple bases).
+                landing_.airbase_id = takeoff_.airbase_id;
                 landing_.air_steering.reset_integrators();
                 landing_.pattern_steering.reset_integrators();
                 landing_.initialize(owner_.id().value, *world, bus);
@@ -342,6 +347,9 @@ public:
                 const auto& entry_fix = plan_.route.back().position;
                 landing_.configure(entry_fix, plan_.taxi_in_route);
                 landing_.fly_traffic_pattern = plan_.fly_traffic_pattern;
+                // Home-base tag carried into the landing phase (see the
+                // Approach-start site above — same contract, Enroute entry).
+                landing_.airbase_id = takeoff_.airbase_id;
                 // Reset the LandingModule's air_steering integrators BEFORE
                 // initialize() — the NavigationModule's air_steering has
                 // accumulated VS-rate state that, if carried into the

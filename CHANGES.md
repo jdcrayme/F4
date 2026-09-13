@@ -1,3 +1,78 @@
+## Task 71 — Tier 3: TowerATC, the sequencing tower behind the stub's
+## protocol: the runway becomes a RESOURCE (one occupant, FIFO holds,
+## report-driven releases, occupancy timeout)
+
+**The grant-everything StubATC finally has a real counterpart: TowerATC
+sequences departures and arrivals onto ONE runway — a second aircraft's
+clearance is DEFERRED until the first reports the runway free — behind the
+IDENTICAL message protocol, so the AI modules, the RadioLog panel, and
+every clearance-driven test assertion are unaware of the swap. Full suite:
+2,459/2,459 (+17 tests), zero-TODO, zero new warnings under
+-Wall -Wextra -Wpedantic.**
+
+- **The protocol grew the release edges it always lacked (additive).**
+  `DepartureReport` ("wheels up") is published by the TakeoffModule on the
+  FlyOut entry (liftoff); `RunwayVacatedReport` is published by the
+  LandingModule on the Rollout -> TaxiIn transition. The StubATC ignores
+  both; the tower consumes them as the release edges of its runway
+  state machine. `ApproachClearance` and `GoAroundMessage` gained an
+  `airbase_id` (default 0, the documented fallback), and LandingModule
+  gained the same public `airbase_id` the TakeoffModule always had — the
+  BrainComponent copies it from the takeoff module at the approach
+  handoff, so the landing side of a campaign flight answers and releases
+  the RIGHT field's runway.
+
+- **IAirTrafficControl: the ATC is now an implementation choice.** The
+  interface (tick + airfield/tanker config) is implemented by both the
+  stub (tick = no-op) and the tower; Simulation::wire_atc() picks from the
+  scenario JSON's new `"atc": { "mode": "stub"|"tower",
+  "occupancy_timeout_s": 300 }` block. Default: stub — zero behavior
+  change for every existing scenario; unknown modes fail loudly.
+  Simulation::tick ages the tower's timers BEFORE the brains run (a
+  timed-out claim releases and promotes on the same tick).
+
+- **TowerATC: per-airbase RunwayController, each an f4::fsm::StateMachine
+  (Vacant / Departing / Arriving) over the f4-state-machine toolchain the
+  17-state landing SM established.** Grants publish the same clearance
+  messages the stub publishes (approach-data parity is asserted against
+  the stub field-for-field). The payload discipline matches the AI
+  modules: the FSM carries the discrete protocol; ids/timers ride plain
+  controller members the handlers set before process().
+
+- **The sequencing contract, certified bus-level in test_tower_atc.cpp
+  (16 tests):** solo departures clear immediately; a second departure (or
+  an arrival established on final while the runway is held) is queued
+  FIFO and DEFERRED — silence is the hold, which is already the modules'
+  documented contract (TakeoffModule waits in HoldShort; the LandingModule
+  fires its own "not_cleared" go-around at the decision height and
+  re-requests on the next pass); releases promote exactly ONE waiter
+  (FIFO order asserted across three departures); a go-around releases a
+  granted claim ("threshold_overflown") or removes a queued arrival
+  ("not_cleared"); the occupancy timeout (default 300 s) releases a
+  vanished occupant and promotes the next waiter, with the
+  reporter==occupant guards making a late ghost report inert; per-airbase
+  controllers sequence independently (base 77's occupancy never holds the
+  default field); duplicate requests don't double-queue; an occupant's
+  re-request (the module's Wait -> HoldShort bounce) is answered
+  idempotently, never self-queued; stray reports on a vacant runway are
+  ignored; and every transition lands in the controller's fsm::Trace ring
+  buffer (parseable to_text, reasons: departure_cleared,
+  departure_reported, arrival_cleared, runway_vacated, go_around,
+  occupancy_timeout).
+
+- **The AR (tanker) surface keeps the stub's immediate-grant policy inside
+  TowerATC** — Tier 3 scope is the runway; the AAR duplex protocol is
+  driven by the tanker-side SM and sequencing tanker contacts is future
+  work. Tower mode is therefore a drop-in for AAR scenarios too.
+
+- **End-to-end: the full 6-DOF digi mission now flies through the tower.**
+  test_digi_mission gained a tower-mode variant of the complete
+  taxi -> takeoff -> route -> approach -> land -> park loop (plus
+  exactly-once + ordering assertions for the two new reports in every
+  mission run: DepartureReport once, after the takeoff clearance;
+  RunwayVacatedReport once, after the departure report and the landing
+  clearance).
+
 ## Task 70 — the .cam re-encoder reaches byte-identity: the write side now
 ## reproduces FreeFalcon's exact bytes (Task 69's struct-faithful bar was the
 ## last honest excuse)

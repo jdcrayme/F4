@@ -142,6 +142,13 @@ public:
     [[nodiscard]] AIControlOutput hold_complete() const;
 
     // --- Configuration (public doubles, f4-ai module convention) ---
+    // The airbase this aircraft is landing at (VU_ID.num of the airbase
+    // objective; 0 = unknown). Published in LandingRequest and the
+    // RunwayVacatedReport so an ATC answers with THIS field's approach data
+    // and releases THIS field's runway claim. Mirrors TakeoffModule's
+    // airbase_id (the BrainComponent copies it from the takeoff module at
+    // the approach handoff). Scenario-list scenarios leave it 0.
+    std::uint64_t airbase_id{0};
     double approach_speed_kts{185.0};   // final approach CAS.
                                         // STAB-E5: raised from 160 (Phase
                                         // C3). Trace-driven correction:

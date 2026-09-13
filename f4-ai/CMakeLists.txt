@@ -25,6 +25,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # ---------------------------------------------------------------------------
 add_library(f4-ai STATIC
     src/sensor_fusion.cpp
+    src/tower_atc.cpp
     src/takeoff_module.cpp
     src/ground_steering.cpp
     src/air_steering.cpp

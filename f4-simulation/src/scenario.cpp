@@ -369,6 +369,31 @@ Scenario parse_scenario(f4::json::Reader& r) {
                 }
                 else                            skip_unknown(r);
             }
+        } else if (key == "atc") {
+            // Tier 3: ATC selection. "stub" (default) keeps the
+            // grant-everything controller; "tower" runs the sequencing
+            // TowerATC. Unknown modes fail loudly — an atc block is an
+            // explicit authoring intent, and silently running the stub
+            // under a misspelled "towel" would hide it.
+            r.expect('{');
+            bool afirst = true;
+            while (!r.consume('}')) {
+                if (!afirst) r.expect(',');
+                afirst = false;
+                const auto k = r.read_string();
+                r.expect(':');
+                if (k == "mode") {
+                    s.atc.mode = r.read_string();
+                    if (s.atc.mode != "stub" && s.atc.mode != "tower") {
+                        throw std::runtime_error(
+                            "scenario: atc.mode must be \"stub\" or "
+                            "\"tower\" (got \"" + s.atc.mode + "\")");
+                    }
+                }
+                else if (k == "occupancy_timeout_s")
+                    s.atc.occupancy_timeout_s = r.read_number();
+                else                            skip_unknown(r);
+            }
         } else if (key == "fuel") {
             r.expect('{');
             bool ffirst = true;

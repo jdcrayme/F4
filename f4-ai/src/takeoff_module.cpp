@@ -119,6 +119,20 @@ TakeoffModule::build_sm()
             nullptr, nullptr, "abort_takeoff")
 
         // Entry actions
+        .on_enter(TakeoffState::FlyOut, [this](const TakeoffEvent&) {
+            // Airborne (Liftoff fired this transition): report the departure
+            // to the ATC. A sequencing tower (TowerATC) releases this
+            // aircraft's runway claim on the report; the StubATC ignores it.
+            // The TakeoffModule's own runway claim ends here — the aircraft
+            // is flying and the pavement is behind it.
+            if (bus_) {
+                atc::DepartureReport report;
+                report.aircraft_id = ownship_id_;
+                report.airbase_id = airbase_id;
+                report.runway_id = runway_id_;
+                bus_->publish(report);
+            }
+        })
         .on_enter(TakeoffState::RequestTaxi, [this](const TakeoffEvent&) {
             // Publish TaxiRequest to ATC.
             // At construction time bus_ is null (initialize() hasn't been

@@ -26,6 +26,13 @@
 // types — so the AI modules never know the difference. The StubATC is
 // swapped out at the MessageBus wiring level, not in the AI code.
 //
+// The AirfieldConfig/TankerConfig data types now live in
+// airfield_config.hpp (extracted so the IAirTrafficControl interface and
+// TowerATC can share them); this header re-exports them for its existing
+// includers. The stub also implements IAirTrafficControl so Simulation can
+// hold either controller behind the same pointer — its tick() is a no-op
+// (the stub is purely reactive).
+//
 // Dependencies: f4-messaging, f4-geo. C++20.
 
 #pragma once
@@ -38,57 +45,16 @@
 #include <f4/geo/position.hpp>
 #include <vector>
 
+#include "f4/ai/atc/atc_interface.hpp"
+#include "f4/ai/atc/airfield_config.hpp"
 #include "f4/ai/atc/messages.hpp"
 
 namespace f4::ai::atc {
 
 // ============================================================================
-// AirfieldConfig — ground layout data the StubATC needs.
-// ============================================================================
-struct AirfieldConfig {
-    int active_runway_id{36};
-    std::string active_runway_name{"Rwy 36L"};
-    double runway_heading_rad{0.0};              // magnetic heading, radians
-    geo::WorldPosition threshold_position;        // runway threshold
-    double threshold_altitude_ft{0.0};            // threshold elevation MSL
-    double pattern_altitude_ft{2500.0};           // traffic pattern altitude
-    double glide_slope_angle_rad{0.05235988};     // 3 degrees in radians
-    double decision_height_ft{200.0};             // DH for ILS
-    double departure_altitude_ft{2500.0};         // initial departure altitude
-
-    // Taxi route: parking -> hold short -> runway
-    std::vector<geo::WorldPosition> taxi_route;
-
-    // Runway centerline end (for takeoff roll reference)
-    geo::WorldPosition runway_end_position;
-
-    // Runway dimensions (feet). Tranche A2: threaded through to
-    // LandingClearance so the landing module's lateral bounds guard can
-    // fire GoAround when an approach is outside the pavement. Zero =
-    // unknown (guard disabled, the pre-A2 behavior).
-    double runway_width_ft{0.0};
-    double runway_length_ft{0.0};
-};
-
-// ============================================================================
-// TankerConfig — data for a scripted tanker.
-// ============================================================================
-struct TankerConfig {
-    std::uint64_t tanker_entity_id{0};
-    geo::WorldPosition position;              // tanker's orbit position
-    double heading_rad{4.71238898};           // 270 degrees (westbound AR track)
-    double altitude_ft{20000.0};             // AR altitude MSL
-    double speed_kts{250.0};                 // AR speed
-    // Boom envelope (from FreeFalcon digi_refuel.cpp):
-    double lateral_tolerance_ft{5.0};        // ±5ft lateral
-    double vertical_tolerance_ft{10.0};      // ±10ft vertical
-    double longitudinal_tolerance_ft{30.0};  // ±30ft longitudinal (boom length)
-};
-
-// ============================================================================
 // StubATC — grants everything immediately.
 // ============================================================================
-class StubATC {
+class StubATC final : public IAirTrafficControl {
 public:
     explicit StubATC(messaging::MessageBus& bus)
         : bus_(bus)
@@ -96,8 +62,11 @@ public:
         subscribe_all();
     }
 
+    // The stub is purely reactive — nothing ages with time.
+    void tick(double /*dt*/) override {}
+
     // Configure the airfield the stub will clear aircraft for.
-    void set_airfield(const AirfieldConfig& config) {
+    void set_airfield(const AirfieldConfig& config) override {
         airfield_ = config;
     }
 
@@ -110,7 +79,7 @@ public:
     // runway, sending them taxiing across the theater (the B.3 QC
     // harness caught exactly that). Registering per-base configs keeps
     // every aircraft's ground ops local to its own field.
-    void set_airbase_airfield(std::uint64_t airbase_id, const AirfieldConfig& config) {
+    void set_airbase_airfield(std::uint64_t airbase_id, const AirfieldConfig& config) override {
         airbase_airfields_[airbase_id] = config;
     }
 
@@ -120,7 +89,7 @@ public:
     }
 
     // Configure a tanker for AR.
-    void set_tanker(const TankerConfig& config) {
+    void set_tanker(const TankerConfig& config) override {
         tanker_ = config;
     }
 

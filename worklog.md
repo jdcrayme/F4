@@ -10291,3 +10291,95 @@ Stage Summary (Task 70 — the save-write loop is byte-exact):
 - The .tea mutation surface + the campaign_qc --save-write hand-off
   close SAVE_WRITE_PLAN §6.2's "natural next consumer" item.
 - Delivery: format-patch onto origin/main (b6d4090), git am verified.
+
+---
+Task ID: 3 (Tier 3 — TowerATC: real ATC sequencing behind the stub's protocol)
+Agent: Z.ai Code (main)
+Task: Replace the grant-everything StubATC with a real single-airfield tower: runway occupancy state machine, FIFO sequencing, holds, releases, occupancy timeout — drop-in at the MessageBus wiring level.
+
+Work Log (plan):
+- Synced to origin/main (d716e9f "Cam recorder" = the user's squash of the
+  Task 70 patch). Re-based the orphaned manifest repair onto the new tip
+  (1ef29f7) — it was not applied upstream; kc10.json's committed sha
+  (da05a43d) still disagrees with the manifest (24856d4d) and the 6
+  Data/Temp/* per-machine entries are still listed. It rides along with
+  this task's patch.
+- Surveyed the protocol (atc/messages.hpp), the stub's 9 handlers, the
+  TakeoffModule 9-state + LandingModule 11-state SMs, the f4-fsm
+  StateMachine/Trace toolchain, and the Simulation::wire_atc() wiring.
+- DESIGN (TowerATC):
+  * Protocol additions (additive): DepartureReport (aircraft -> ATC,
+    published on liftoff — TakeoffModule enters FlyOut) and
+    RunwayVacatedReport (published on Rollout -> TaxiIn). These are the
+    runway-release signals the tower needs; the stub ignores them.
+  * LandingModule gains the airbase_id member (mirrors TakeoffModule) so
+    LandingRequest carries the home base; BrainComponent copies it from
+    the takeoff module at handoff.
+  * IAirTrafficControl interface (tick + airfield/tanker config);
+    StubATC implements it with a no-op tick. Simulation holds the
+    interface and selects stub|tower from scenario JSON "atc"."mode"
+    (default stub — zero behavior change for existing scenarios).
+  * TowerATC: per-airbase RunwayController, each an fsm::StateMachine
+    (Vacant/Departing/Arriving; events GrantDeparture/GrantArrival/
+    Release/Abort/Timeout) + a FIFO waiter queue keyed (id, kind).
+    Grants publish the SAME clearance messages the stub publishes, so
+    the AI modules and the RadioLog panel are unaware of the swap.
+    Release paths: DepartureReport, RunwayVacatedReport, GoAroundMessage
+    (releases a granted claim; removes a queued arrival), and an
+    occupancy timeout (default 300 s sim time) against vanished
+    occupants. Reporter==occupant guards make late reports inert.
+    Re-requests from a promoted aircraft (the module's Wait -> HoldShort
+    bounce re-publishes TakeoffRequest) are answered immediately — at
+    that point the runway is free by construction. The AR (tanker)
+    messages keep the stub's immediate-grant policy — Tier 3 scope is
+    the runway.
+  * Tests: test_tower_atc.cpp (bus-level sequencing battery), module
+    report-hook asserts in the takeoff/landing module tests, and a
+    tower-mode variant of the full 6-DOF digi mission E2E.
+
+Work Log (results):
+- Implemented the protocol additions (messages.hpp): DepartureReport,
+  RunwayVacatedReport, + airbase_id on ApproachClearance/GoAroundMessage.
+  Extracted AirfieldConfig/TankerConfig into atc/airfield_config.hpp and
+  the IAirTrafficControl surface into atc/atc_interface.hpp (stub_atc.hpp
+  re-exports the config types; StubATC now implements the interface with a
+  no-op tick).
+- TakeoffModule publishes DepartureReport on the FlyOut entry (liftoff);
+  LandingModule publishes RunwayVacatedReport on TaxiIn entry, publishes
+  airbase_id in LandingRequest/ApproachClearance/GoAroundMessage, and
+  gained the airbase_id member (BrainComponent copies it from the takeoff
+  module at both approach handoff sites).
+- TowerATC (atc/tower_atc.hpp + src/tower_atc.cpp): per-airbase
+  RunwayController = fsm::StateMachine(Vacant/Departing/Arriving;
+  GrantDeparture/GrantArrival/Release/Abort/Timeout) + a FIFO
+  (id, kind) queue. SM built via a static make_sm (the StateMachine is not
+  default-constructible); payload ids ride controller members set before
+  process() — the modules' own payload discipline. Grants publish the
+  stub's exact clearance content; the AR handlers keep the stub policy
+  (Tier 3 scope is the runway).
+- Simulation: atc_ is now unique_ptr<IAirTrafficControl>; wire_atc()
+  selects stub|tower from scenario JSON "atc"."mode" (default stub;
+  unknown modes throw); tick() ages the tower before the brains run.
+- Tests: f4-ai/tests/test_tower_atc.cpp (16 bus-level tests — immediate
+  grant, FIFO holds, release promotion, go-around claim/queue handling,
+  timeout + inert late reports, per-airbase isolation, unknown-id
+  fallback, dedupe, occupant re-request, stub parity, FSM trace);
+  test_digi_mission.cpp gained exactly-once/ordering assertions for both
+  reports and a FullLoopTowerATC variant of the full 6-DOF mission.
+- Full headless ctest: 2,459 passed / 0 failed (2459 executed; 5
+  pre-existing environment skips — 4 multi-aircraft skips + GL/locale as
+  before). One FileFinder test flaked once under -j$(nproc) load and
+  passed on every isolated/sequential rerun (pre-existing, unrelated).
+- Discipline: zero TODO/FIXME in all touched files; -Wall -Wextra
+  -Wpedantic clean on the new translation unit.
+
+Stage Summary (Task 71 — the tower is real):
+- The runway is a resource with ONE holder; everything else queues.
+- The swap stub<->tower is a scenario-config choice behind
+  IAirTrafficControl; the AI modules cannot tell the difference by design
+  (parity test pins the approach data field-for-field).
+- The release edges are the aircraft's own reports; the timeout is the
+  self-healing edge against vanished occupants (combat kills, despawns).
+- Delivery: two commits — the re-based manifest repair (1ef29f7, not
+  applied upstream last round) + this task — packaged as format-patch
+  onto origin/main (d716e9f).

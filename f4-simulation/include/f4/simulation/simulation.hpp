@@ -59,7 +59,7 @@
 
 #include <f4/terrain/terrain_source.hpp>  // TerrainSource (Path B1)
 
-namespace f4::ai::atc { class StubATC; }
+namespace f4::ai::atc { class IAirTrafficControl; }
 namespace f4::recorder { class FlightRecorder; class FcsTraceWriter; }
 
 namespace f4::simulation {
@@ -462,7 +462,7 @@ private:
     /// carries a hand-authored airfield (non-empty taxi route) or when no
     /// airbase objective exists (spawn then fails loudly).
     void derive_campaign_airfield();
-    void wire_atc();              // StubATC + AirfieldConfig from scenario
+    void wire_atc();              // ATC (stub|tower per scenario.atc) + AirfieldConfig
     void record_snapshot();
     void record_fcs_trace_sample();
     /// Load scenario_.class_table_path into class_table_ ONCE per
@@ -484,7 +484,7 @@ private:
 
     entities::EntityWorld world_;
     messaging::MessageBus bus_;
-    std::unique_ptr<f4::ai::atc::StubATC> atc_;
+    std::unique_ptr<f4::ai::atc::IAirTrafficControl> atc_;
     std::unique_ptr<f4::recorder::FlightRecorder> recorder_;
     std::unique_ptr<f4::recorder::FcsTraceWriter> fcs_trace_;
     f4::data::AircraftConfig aircraft_cfg_;

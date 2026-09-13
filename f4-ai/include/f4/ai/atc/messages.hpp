@@ -128,6 +128,10 @@ struct ApproachClearance {
     std::uint64_t aircraft_id{0};
     int runway_id{0};
     std::string approach_type;  // "ILS", "VOR", "VISUAL"
+    // The airbase the approach is for (VU_ID.num; 0 = default field).
+    // The LandingModule publishes it on the OnFinal entry so a sequencing
+    // ATC queues the arrival on the RIGHT field's runway.
+    std::uint64_t airbase_id{0};
 };
 
 struct ClearedToLand {
@@ -139,11 +143,43 @@ struct GoAroundMessage {
     std::uint64_t aircraft_id{0};
     int runway_id{0};
     std::string reason;  // "not_cleared", "runway_occupied", "below_DH"
+    // The airbase the missed approach happened at (VU_ID.num; 0 = default).
+    // A sequencing ATC releases the aborter's claim / removes it from that
+    // field's queue on this message.
+    std::uint64_t airbase_id{0};
 };
 
 struct TaxiOffClearance {
     std::uint64_t aircraft_id{0};
     std::vector<geo::WorldPosition> taxi_route;
+};
+
+// ============================================================================
+// Runway resource reports (aircraft -> ATC)
+// ============================================================================
+//
+// The tower must know when the runway resource becomes usable again. Under
+// the StubATC these reports go unanswered (nothing subscribes); a
+// sequencing ATC (TowerATC) consumes them as the release edge of its
+// runway-occupancy state machine.
+//
+//   DepartureReport     "wheels up, climbing away" — published when the
+//                       TakeoffModule enters FlyOut (liftoff detected).
+//                       Releases the departure's runway claim.
+//   RunwayVacatedReport "runway vacated" — published when the LandingModule
+//                       transitions Rollout -> TaxiIn (exit taxiway ahead).
+//                       Releases the arrival's runway claim.
+
+struct DepartureReport {
+    std::uint64_t aircraft_id{0};
+    std::uint64_t airbase_id{0};
+    int runway_id{0};
+};
+
+struct RunwayVacatedReport {
+    std::uint64_t aircraft_id{0};
+    std::uint64_t airbase_id{0};
+    int runway_id{0};
 };
 
 // ============================================================================

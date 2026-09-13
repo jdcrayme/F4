@@ -434,6 +434,20 @@ struct Scenario {
     /// Combat configuration (M3 integration). Default: disabled.
     CombatConfig combat;
 
+    /// ATC configuration (Tier 3). Default: the stub ("stub") — zero
+    /// behavior change for existing scenarios. "tower" selects the
+    /// sequencing TowerATC (runway occupancy, FIFO queue, holds, releases,
+    /// occupancy timeout) behind the identical message protocol.
+    struct AtcConfig {
+        /// "stub" (default) | "tower". Anything else fails load loudly.
+        std::string mode{"stub"};
+        /// Seconds of sim time a runway claim may go without a report
+        /// before the tower force-releases it (occupant vanished — killed,
+        /// despawned, aborted). Tower mode only.
+        double occupancy_timeout_s{300.0};
+    };
+    AtcConfig atc;
+
     /// Fuel policy (the arbiter's fuel check). Default: disabled.
     FuelConfig fuel;
 

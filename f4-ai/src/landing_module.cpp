@@ -354,6 +354,7 @@ LandingModule::build_sm()
             if (bus_) {
                 atc::LandingRequest req;
                 req.aircraft_id = ownship_id_;
+                req.airbase_id = airbase_id;
                 bus_->publish(req);
             }
         
@@ -394,6 +395,7 @@ LandingModule::build_sm()
                 req.aircraft_id = ownship_id_;
                 req.runway_id = runway_id_;
                 req.approach_type = "VISUAL";
+                req.airbase_id = airbase_id;
                 bus_->publish(req);
             }
         })
@@ -402,6 +404,17 @@ LandingModule::build_sm()
             flare_timer_ = 0.0;
         })
         .on_enter(LandingState::TaxiIn, [this](const LandingEvent&) {
+            // The rollout ended: report the runway vacated. A sequencing
+            // tower (TowerATC) releases this aircraft's runway claim on the
+            // report and clears the next waiter; the StubATC ignores it.
+            if (bus_) {
+                atc::RunwayVacatedReport report;
+                report.aircraft_id = ownship_id_;
+                report.airbase_id = airbase_id;
+                report.runway_id = runway_id_;
+                bus_->publish(report);
+            }
+
             // STAB-E25: skip taxi-in waypoints that are already BEHIND the
             // aircraft. The derived taxi-in route starts at the threshold
             // (the takeoff position), but the rollout typically ends
@@ -426,6 +439,7 @@ LandingModule::build_sm()
                 msg.aircraft_id = ownship_id_;
                 msg.runway_id = runway_id_;
                 msg.reason = cleared_to_land_ ? "threshold_overflown" : "not_cleared";
+                msg.airbase_id = airbase_id;
                 bus_->publish(msg);
             }
         

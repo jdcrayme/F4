@@ -28,7 +28,9 @@
 #include "f4/simulation/frames.hpp"
 
 #include <f4/ai/brain_component.hpp>
+#include <f4/ai/atc/atc_interface.hpp>
 #include <f4/ai/atc/stub_atc.hpp>
+#include <f4/ai/atc/tower_atc.hpp>
 #include <f4/ai/modules/takeoff_module.hpp>
 #include <f4/ai/modules/navigation_module.hpp>
 #include <f4/ai/modules/landing_module.hpp>
@@ -1596,7 +1598,18 @@ void Simulation::derive_real_airbase() {
 }
 
 void Simulation::wire_atc() {
-    atc_ = std::make_unique<f4::ai::atc::StubATC>(bus_);  // subscribes immediately
+    // Tier 3: the scenario picks the controller. "stub" (default) keeps
+    // the grant-everything StubATC — zero behavior change for existing
+    // scenarios. "tower" runs the sequencing TowerATC behind the SAME
+    // message protocol and configuration surface (IAirTrafficControl), so
+    // the AI modules, the RadioLog panel, and every clearance-driven test
+    // assertion are unaware of the swap.
+    if (scenario_.atc.mode == "tower") {
+        atc_ = std::make_unique<f4::ai::atc::TowerATC>(
+            bus_, scenario_.atc.occupancy_timeout_s);
+    } else {
+        atc_ = std::make_unique<f4::ai::atc::StubATC>(bus_);
+    }
     f4::ai::atc::AirfieldConfig af;
     af.active_runway_id = scenario_.airfield.active_runway_id;
     af.active_runway_name = scenario_.airfield.active_runway_name;
@@ -1750,6 +1763,13 @@ void Simulation::tick(double dt) {
         push_air_picture_(dt);
     }
 
+
+    // Tier 3: age the tower's runway-occupancy timers BEFORE the brains
+    // run — a timed-out claim releases (and promotes the next waiter) on
+    // this tick's clearances, not the next one. No-op for the stub.
+    if (atc_) {
+        atc_->tick(dt);
+    }
 
     world_.update_all(dt, bus_);
     bus_.flush_pending();  // drain deferred ATC messages (TaxiClearance, etc.)

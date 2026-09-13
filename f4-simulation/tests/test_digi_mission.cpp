@@ -68,6 +68,11 @@ long index_of(const std::vector<std::string>& seq, const std::string& msg) {
     return it == seq.end() ? -1 : static_cast<long>(it - seq.begin());
 }
 
+// Number of times an event appears in the ATC sequence (0 if never).
+long count_of(const std::vector<std::string>& seq, const std::string& msg) {
+    return static_cast<long>(std::count(seq.begin(), seq.end(), msg));
+}
+
 } // anonymous namespace
 
 // Runs one full mission (taxi -> takeoff -> route -> approach -> landing
@@ -119,6 +124,11 @@ void run_full_mission(Scenario scenario, bool require_pattern) {
     sim.bus().subscribe<LandingClearance>(tap("LandingClearance"));
     sim.bus().subscribe<ApproachClearance>(tap("ApproachClearance"));
     sim.bus().subscribe<ClearedToLand>(tap("ClearedToLand"));
+    // Tier 3: the runway-resource reports the sequencing tower releases
+    // claims on. The stub ignores them; the sequence assertions below pin
+    // them to the flight phases that publish them.
+    sim.bus().subscribe<DepartureReport>(tap("DepartureReport"));
+    sim.bus().subscribe<RunwayVacatedReport>(tap("RunwayVacatedReport"));
 
     // --- Aircraft handles ---
     auto h = entities::EntityHandle(sim.aircraft_entity(), &sim.world());
@@ -252,10 +262,31 @@ void run_full_mission(Scenario scenario, bool require_pattern) {
     const long i_ldg_clr  = index_of(atc, "LandingClearance");
     const long i_apch_clr = index_of(atc, "ApproachClearance");
     const long i_land     = index_of(atc, "ClearedToLand");
+    // Tier 3: the aircraft's runway-resource reports.
+    const long i_dep_rep  = index_of(atc, "DepartureReport");
+    const long i_vac_rep  = index_of(atc, "RunwayVacatedReport");
     EXPECT_GE(i_taxi_req, 0) << "never requested taxi";
     EXPECT_GT(i_taxi_clr, i_taxi_req) << "taxi clearance must follow the request";
     EXPECT_GT(i_to_req, i_taxi_clr) << "takeoff request comes after taxi";
     EXPECT_GT(i_to_clr, i_to_req);
+    // Tier 3: the departure report fires exactly once, on liftoff (the
+    // FlyOut entry), after the takeoff clearance that put the aircraft on
+    // the runway. A sequencing tower releases the runway claim on it.
+    EXPECT_EQ(count_of(atc, "DepartureReport"), 1)
+        << "the departure report must fire exactly once per mission";
+    EXPECT_GT(i_dep_rep, i_to_clr)
+        << "wheels-up report must follow the takeoff clearance";
+    // The runway-vacated report fires exactly once, on the rollout exit
+    // (Rollout -> TaxiIn) — after the landing clearance that granted the
+    // runway, and strictly after the departure report of the SAME mission.
+    EXPECT_EQ(count_of(atc, "RunwayVacatedReport"), 1)
+        << "the runway-vacated report must fire exactly once per mission";
+    EXPECT_GT(i_vac_rep, i_dep_rep)
+        << "vacated report must come after the departure report";
+    if (i_land >= 0) {
+        EXPECT_GT(i_vac_rep, i_land)
+            << "vacated report must follow the landing clearance";
+    }
     // Tranche 46: LandingRequest is optional — some aircraft transition
     // to Approach directly. The critical sequence is taxi → takeoff.
     if (i_ldg_req >= 0) {
@@ -373,6 +404,22 @@ TEST(DigiMission, FullLoopTrafficPattern) {
     auto scenario = load_scenario(scenario_path);
     scenario.approach_mode = "pattern";
     run_full_mission(std::move(scenario), /*require_pattern=*/true);
+}
+
+TEST(DigiMission, FullLoopTowerATC) {
+    if (!std::filesystem::exists(scenario_path)) {
+        GTEST_SKIP() << "digi_full_mission.json not configured (run CMake configure)";
+    }
+    // Tier 3: the SAME full 6-DOF mission through the sequencing TowerATC
+    // instead of the stub. For a solo aircraft the tower grants everything
+    // immediately (the runway is never contended), so every mission
+    // assertion in run_full_mission must hold unchanged — the swap is
+    // invisible to the AI by design. The sequencing behavior itself is
+    // certified bus-level in f4-ai's test_tower_atc.
+    auto scenario = load_scenario(scenario_path);
+    scenario.approach_mode = "straight_in";
+    scenario.atc.mode = "tower";
+    run_full_mission(std::move(scenario), /*require_pattern=*/false);
 }
 
 // ============================================================================
