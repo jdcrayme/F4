@@ -15,6 +15,8 @@ f4_data_add_test(test_config_loader   test_config_loader.cpp)
 f4_data_add_test(test_table_accessors test_table_accessors.cpp)
 f4_data_add_test(test_engine_rpm_schedule test_engine_rpm_schedule.cpp)
 f4_data_add_test(test_simdata_loaders test_simdata_loaders.cpp)
+f4_data_add_test(test_auxaero_record test_auxaero_record.cpp)
+f4_data_add_test(test_fleet_auxaero test_fleet_auxaero.cpp)
 
 # Pass the path to the generated JSON fixtures (produced by f4-convert at
 # build time) to the test executables that need them.
@@ -29,3 +31,7 @@ target_compile_definitions(test_simdata_loaders PRIVATE
 add_dependencies(test_config_loader  convert_golden_fixtures)
 add_dependencies(test_table_accessors convert_golden_fixtures)
 add_dependencies(test_simdata_loaders convert_golden_fixtures)
+
+# test_fleet_auxaero reads the COMMITTED Data/Aircraft from the source tree.
+target_compile_definitions(test_fleet_auxaero PRIVATE
+    F4_SOURCE_DIR="${CMAKE_SOURCE_DIR}")

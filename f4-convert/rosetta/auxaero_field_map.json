@@ -9,7 +9,7 @@
       "ID_INT": "single integer (also used for booleans; see field default)",
       "ID_VECTOR": "three doubles (x y z), typically a body-frame position"
     },
-    "usage": "f4-convert uses this map to populate the typed AuxAero struct from the rawAuxAeroData verbatim map. f4-data uses it to validate that every key in a JSON has a known field mapping. If a key appears in a .dat file but not in this map, it is captured verbatim into rawAuxAeroData but does not get a typed field \u2014 that is by design, not a bug."
+    "usage": "f4-convert uses this map (via the generated f4-data table, auxaero_rosetta.hpp \u2014 regenerate with scripts/gen_auxaero_table.py) to complete each aircraft's full 443-key auxAero record: FreeFalcon's readin.cpp defaults, overridden by the .dat's verbatim rawAuxAeroData keys. f4-data uses the same table to resolve JSON value types on load (Vector vs Chart disambiguation) and to validate the committed fleet (test_fleet_auxaero). If a key appears in a .dat file but not in this map, it is captured verbatim into rawAuxAeroData but does not get a record entry \u2014 that is by design, not a bug."
   },
   "categories": [
     {

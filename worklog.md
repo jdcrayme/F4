@@ -10383,3 +10383,74 @@ Stage Summary (Task 71 — the tower is real):
 - Delivery: two commits — the re-based manifest repair (1ef29f7, not
   applied upstream last round) + this task — packaged as format-patch
   onto origin/main (d716e9f).
+
+---
+Task ID: 4 (Tier 4 — Task 72: the complete AuxAeroData record, fleet-wide)
+Agent: Z.ai Code (main)
+Task: Execute the next roadmap item after the Tier 2 (.cam byte-identity) and Tier 3 (TowerATC) deliveries landed upstream (cb0c32c). Per the approved Tier 1–5 roadmap, Tier 4's first sandbox-doable item: make the dormant 443-key AuxAero rosetta executable and carry the COMPLETE AuxAeroData record in every fleet aircraft JSON.
+
+Work Log (plan):
+- Synced to origin/main (cb0c32c "ATC Updates" = the user's squash of the
+  Task 71 patch, manifest repair included — kc10 sha now consistent).
+- Surveyed the 0e remainder (0e.1 blocked on an install; 0e.2 is a small
+  path-migration) and picked the roadmap's AuxAero expansion: the rosetta
+  (auxaero_field_map.json, 443 keys extracted from readin.cpp's
+  AuxAeroDataDesc[]) was committed but consumed by NO C++ code, and the
+  committed fleet JSONs' rawAuxAeroData blocks were all empty.
+- Key reconnaissance: the 24 committed fixture .dat files set essentially
+  NO AuxAeroData keys (only f16.dat: criticalAOA 25.0) — the FreeFalcon
+  fleet flew on readin.cpp defaults; kc10.dat is the one aircraft whose
+  .dat was never committed (its typed view carries its known overrides).
+- Found (and this task repairs) two fleet data bugs: `name` leaked the
+  original export's temp path in all 24 files, and f16.json had lost the
+  criticalAOA override (0.0 silently DISABLED the F-16 stall model).
+- DESIGN: rosetta JSON -> generated committed C++ table in f4-data (pure
+  schema data, engine-side; no build-time python); AuxAeroRecord =
+  map<key, typed variant> on AircraftConfig; record completion in the
+  dat parser with legacy loader semantics (defaults + overrides, strtod
+  fallback + zero-fill for the two known malformed defaults, override
+  parse failures warn); rosetta-guided JSON typing on load (Vector vs
+  Chart needs the schema — sndAero1AOAChart's default IS three tokens);
+  fleet certification + byte-level reproducibility tests.
+
+Work Log (results):
+- scripts/gen_auxaero_table.py -> f4-data/include/f4/data/auxaero_rosetta.hpp
+  + f4-data/src/auxaero_rosetta.cpp (443 entries, readin.cpp order,
+  unique-key + find API). Committed generated files.
+- f4-data: aux_aero_record.hpp (AuxAeroValue variant: Float/Int/Vector/
+  Chart), AircraftConfig::auxAero, config_loader read/write of the
+  `auxAero` JSON block (unknown keys warn + capture, wrong-shaped vectors
+  warn), CMake source + test registrations.
+- f4-convert: completeAuxAeroRecord() in dat_parser (after parseAuxAero;
+  defaults first, raw overrides on top — readin.cpp semantics), name
+  fallback -> basename (repairs the temp-path leak), dat_validate prints
+  the record coverage line.
+- Fleet regenerated: 24 aircraft from fixtures via dat2json — byte-
+  identical to the new committed files (pinned by test); kc10's record
+  reconstructed by scripts/reconstruct_kc10_auxaero.py (49 typed
+  counterparts + 394 defaults, nlohmann formatting conventions). Record
+  type census per aircraft: 206 floats + 136 ints + 77 vectors + 24
+  charts = 443.
+- Manifest: fingerprints regenerated for the 25 changed aircraft assets
+  (Task 71's surgical convention; generated_at bumped).
+- Tests (+15): AuxAeroRosettaTest.* (table size/uniqueness/defaults/find —
+  including the two documented legacy default defects), AuxAeroRecordJson
+  Test.* (schema-guided typing, unknown/wrong-shape warnings, round-trip),
+  FleetAuxAeroTest.* (25-file coverage + types, f16 override chain,
+  kc10 known overrides, record round-trip), FleetReproducibility (24
+  fixtures -> committed JSON byte-for-byte).
+- Full headless ctest: 2,474 passed / 0 failed (5 pre-existing environment
+  skips). The restored f16 criticalAOA=25 (stall guard active) passes the
+  entire 6-DOF E2E suite.
+- Discipline: zero TODO/FIXME in touched files; no new warnings.
+
+Stage Summary (Task 72 — the data surface is complete):
+- Every future engine system reads AuxAeroData from the fleet JSONs
+  (443 typed keys) instead of re-deriving FreeFalcon's defaults.
+- The fleet JSONs are proven byte-reproducible from the committed
+  fixtures; the rosetta JSON remains the single curated schema source.
+- Known conscious divergence (pinned, documented): the typed AuxAero
+  view's C++ defaults vs the record's legacy defaults (jfsSpoolRate*,
+  gearPitchFactor, ...). Reconciling them is a flight-model task with
+  harness revalidation, not a data task.
+- Delivery: single commit, format-patch onto origin/main (cb0c32c).

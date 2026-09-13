@@ -21,6 +21,11 @@
 
 #include "f4/convert/dat_parser.hpp"
 
+#include <f4/data/auxaero_rosetta.hpp>
+
+#include <array>
+#include <cstring>
+
 #include <f4/math/constants.hpp>
 
 #include <algorithm>
@@ -45,6 +50,13 @@ using f4::data::LimiterKey;
 using f4::data::kLimiterCount;
 using f4::data::GearPoint;
 using f4::data::RollCommandTable;
+using f4::data::AuxAeroRecord;
+using f4::data::AuxAeroValue;
+using f4::data::AuxAeroValueType;
+using f4::data::RosettaType;
+using f4::data::RosettaEntry;
+using f4::data::kAuxAeroRosetta;
+using f4::data::kAuxAeroRosettaCount;
 
 // Conversion constant: degrees to radians (for thetaMax storage).
 // Single source of truth is f4/math/constants.hpp.
@@ -761,6 +773,114 @@ static void parseAuxAero(const std::string& contents,
 }
 
 // ---------------------------------------------------------------------------
+// Complete the full AuxAeroData record (443 keys): start from FreeFalcon's
+// readin.cpp defaults (the rosetta's default token strings), then override
+// with every key the .dat actually set (rawAuxAeroData), typed per the
+// rosetta schema. This is exactly the legacy loader's semantics: FreeFalcon
+// initialized AuxAeroData from the Desc table and then consumed the .dat's
+// key/value lines. A malformed override falls back to the default with a
+// warning — the verbatim string remains in rawAuxAeroData either way.
+// ---------------------------------------------------------------------------
+static void completeAuxAeroRecord(AircraftConfig& cfg,
+                                  std::vector<std::string>& warnings) {
+    auto isBlank = [](const std::string& v) {
+        return v.find_first_not_of(" \t\r\n") == std::string::npos;
+    };
+
+    // Parse a token string into a typed value per its schema kind. Returns
+    // false when the shape is wrong (not enough tokens / non-numeric).
+    auto parseTokens = [](RosettaType type, const std::string& tokens,
+                          AuxAeroValue& out) -> bool {
+        std::istringstream vs(tokens);
+        switch (type) {
+            case RosettaType::Float: {
+                out.type = AuxAeroValueType::Float;
+                return static_cast<bool>(vs >> out.f);
+            }
+            case RosettaType::Int: {
+                out.type = AuxAeroValueType::Int;
+                long long v = 0;
+                if (!(vs >> v)) return false;
+                out.i = static_cast<int64_t>(v);
+                return true;
+            }
+            case RosettaType::Vector: {
+                out.type = AuxAeroValueType::Vector;
+                for (int k = 0; k < 3; ++k) {
+                    if (!(vs >> out.v[static_cast<std::size_t>(k)])) return false;
+                }
+                return true;
+            }
+            case RosettaType::LookupTable:
+            case RosettaType::TwoDTable: {
+                out.type = AuxAeroValueType::Chart;
+                double t = 0.0;
+                while (vs >> t) out.t.push_back(t);
+                return !out.t.empty();
+            }
+        }
+        return false;
+    };
+
+    for (std::size_t idx = 0; idx < kAuxAeroRosettaCount; ++idx) {
+        const RosettaEntry& e = kAuxAeroRosetta[idx];
+
+        // FreeFalcon semantics: the Desc table default first, then the .dat's
+        // key/value line overrides it.
+        std::string tokens = e.default_tokens;
+        bool overridden = false;
+        auto raw = cfg.rawAuxAeroData.find(e.key);
+        if (raw != cfg.rawAuxAeroData.end() && !isBlank(raw->second)) {
+            tokens = raw->second;
+            overridden = true;
+        }
+
+        AuxAeroValue val;
+        if (!parseTokens(e.type, tokens, val)) {
+            if (overridden) {
+                warnings.push_back(std::string("AuxAeroData: could not parse '") +
+                                   e.key + "' value '" + tokens +
+                                   "' — using the schema default");
+            }
+            if (!parseTokens(e.type, e.default_tokens, val)) {
+                // A malformed default is a rosetta data defect, not a defect
+                // of the .dat being parsed — so it does not pollute the
+                // per-file warnings. Parse what strtod would accept and
+                // zero-fill the rest. Known instances (pinned by f4-data's
+                // AuxAeroRosettaTest.DefaultsParsePerType): vortexAOALimit
+                // ("29.5" — a 3-vector default with one token) and FlareVec4
+                // ("0 0,200" — "0,200" strtod-parses as 0).
+                val = AuxAeroValue{};
+                std::istringstream vs(e.default_tokens);
+                switch (e.type) {
+                    case RosettaType::Float:
+                        val.type = AuxAeroValueType::Float; vs >> val.f; break;
+                    case RosettaType::Int: {
+                        val.type = AuxAeroValueType::Int;
+                        long long v = 0; vs >> v; val.i = static_cast<int64_t>(v); break;
+                    }
+                    case RosettaType::Vector: {
+                        val.type = AuxAeroValueType::Vector;
+                        for (int k = 0; k < 3; ++k) {
+                            if (!(vs >> val.v[static_cast<std::size_t>(k)])) break;
+                        }
+                        break;
+                    }
+                    default: {
+                        val.type = AuxAeroValueType::Chart;
+                        double t = 0.0;
+                        while (vs >> t) val.t.push_back(t);
+                        break;
+                    }
+                }
+            }
+        }
+
+        cfg.auxAero[e.key] = std::move(val);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Extract source metadata (Title/Author/Revision) from the header comments.
 // ---------------------------------------------------------------------------
 static void extractSourceMetadata(const std::string& contents,
@@ -854,7 +974,7 @@ ParseResult loadString(const std::string& contents, const std::string& sourceNam
 
     extractSourceMetadata(contents, sourceName, cfg);
     cfg.name = cfg.sourceTitle;
-    if (cfg.name.empty()) cfg.name = sourceName;
+    if (cfg.name.empty()) cfg.name = cfg.sourceFile;  // basename, not the path
 
     // Capture aeropt options from raw contents (before TokenStream stripping).
     {
@@ -913,6 +1033,12 @@ ParseResult loadString(const std::string& contents, const std::string& sourceNam
         } catch (const std::exception& e) {
             result.warnings.push_back(std::string("AuxAero: ") + e.what());
         }
+
+        // The complete 443-key record: readin.cpp defaults + the .dat's
+        // verbatim overrides, typed per the rosetta schema. Never throws —
+        // parse failures fall back to the default (the legacy loader's own
+        // permissive semantics) with a warning.
+        completeAuxAeroRecord(cfg, result.warnings);
 
         result.ok = true;
     } catch (const std::exception& e) {

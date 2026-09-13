@@ -596,6 +596,876 @@
     "yawGearGain": 0.6,
     "yawMomentum": 1.0
   },
+  "auxAero": {
+    "A2GAGMAlt": 18000.0,
+    "A2GBombMissileAlt": 13000.0,
+    "A2GCameraAlt": 12000.0,
+    "A2GClusterAlt": 15000.0,
+    "A2GDumbHDAlt": 1500.0,
+    "A2GDumbLDAlt": 15000.0,
+    "A2GGBUAlt": 18000.0,
+    "A2GGenericBombAlt": 1000.0,
+    "A2GGunRocketAlt": 8000.0,
+    "A2GHarmAlt": 20000.0,
+    "A2GJDAMAlt": 20000.0,
+    "A2GJSOWAlt": 25000.0,
+    "AIBoomDistance": 50.0,
+    "AddMARIded18k": 0.0,
+    "AddMARIded28k": 0.0,
+    "AddMARIded5k": 0.0,
+    "AddMARIdedSpike": 0.0,
+    "BingoReturnDistance": 0.0,
+    "BoomRFPos": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "BoomStoredAngle": 14.0,
+    "CDLDGFactor": 0.06,
+    "CDSPDBFactor": 0.08,
+    "CDlefFactor": 0.0,
+    "CDtefFactor": 0.05,
+    "CLtefFactor": 0.05,
+    "ChaffCount1": 30,
+    "ChaffCount10": 30,
+    "ChaffCount2": 30,
+    "ChaffCount3": 30,
+    "ChaffCount4": 30,
+    "ChaffCount5": 30,
+    "ChaffCount6": 30,
+    "ChaffCount7": 30,
+    "ChaffCount8": 30,
+    "ChaffCount9": 30,
+    "ChaffDispensers": 1,
+    "ChaffPos1": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "ChaffPos10": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "ChaffPos2": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "ChaffPos3": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "ChaffPos4": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "ChaffPos5": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "ChaffPos6": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "ChaffPos7": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "ChaffPos8": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "ChaffPos9": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "ChaffSeq": 0,
+    "ChaffVec1": [
+      0.0,
+      0.0,
+      200.0
+    ],
+    "ChaffVec10": [
+      0.0,
+      0.0,
+      200.0
+    ],
+    "ChaffVec2": [
+      0.0,
+      0.0,
+      200.0
+    ],
+    "ChaffVec3": [
+      0.0,
+      0.0,
+      200.0
+    ],
+    "ChaffVec4": [
+      0.0,
+      0.0,
+      200.0
+    ],
+    "ChaffVec5": [
+      0.0,
+      0.0,
+      200.0
+    ],
+    "ChaffVec6": [
+      0.0,
+      0.0,
+      200.0
+    ],
+    "ChaffVec7": [
+      0.0,
+      0.0,
+      200.0
+    ],
+    "ChaffVec8": [
+      0.0,
+      0.0,
+      200.0
+    ],
+    "ChaffVec9": [
+      0.0,
+      0.0,
+      200.0
+    ],
+    "DeepStallEngineStall": 0,
+    "DrogueExt": 40.0,
+    "DrogueRFPos": [
+      -60.0,
+      0.0,
+      0.0
+    ],
+    "EVA1_HardFactor": 1.2,
+    "EVA1_MedFactor": 0.8,
+    "EVA1_SoftFactor": 0.6,
+    "EVA2_HardFactor": 0.9,
+    "EVA2_MedFactor": 0.6,
+    "EVA2_SoftFactor": 0.4,
+    "EVA_Gain": 5.0,
+    "FTITIdle": 7.0,
+    "FTITMax": 8.9,
+    "FTITStart": 5.0,
+    "FlareCount1": 30,
+    "FlareCount10": 30,
+    "FlareCount2": 30,
+    "FlareCount3": 30,
+    "FlareCount4": 30,
+    "FlareCount5": 30,
+    "FlareCount6": 30,
+    "FlareCount7": 30,
+    "FlareCount8": 30,
+    "FlareCount9": 30,
+    "FlareDispensers": 1,
+    "FlarePos1": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "FlarePos10": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "FlarePos2": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "FlarePos3": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "FlarePos4": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "FlarePos5": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "FlarePos6": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "FlarePos7": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "FlarePos8": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "FlarePos9": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "FlareSeq": 0,
+    "FlareVec1": [
+      0.0,
+      0.0,
+      200.0
+    ],
+    "FlareVec10": [
+      0.0,
+      0.0,
+      200.0
+    ],
+    "FlareVec2": [
+      0.0,
+      0.0,
+      200.0
+    ],
+    "FlareVec3": [
+      0.0,
+      0.0,
+      200.0
+    ],
+    "FlareVec4": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "FlareVec5": [
+      0.0,
+      0.0,
+      200.0
+    ],
+    "FlareVec6": [
+      0.0,
+      0.0,
+      200.0
+    ],
+    "FlareVec7": [
+      0.0,
+      0.0,
+      200.0
+    ],
+    "FlareVec8": [
+      0.0,
+      0.0,
+      200.0
+    ],
+    "FlareVec9": [
+      0.0,
+      0.0,
+      200.0
+    ],
+    "Has_TFR": 0,
+    "HtsAble": 0,
+    "IL78Factor": 0.0,
+    "LantirnCameraX": 10.0,
+    "LantirnCameraY": 2.0,
+    "LantirnCameraZ": 5.0,
+    "MaxMARIdedStart": 0.0,
+    "MeanTimeBetweenFailures": 0.0,
+    "MinTGTMAR": 0.0,
+    "PID_K": 0.5,
+    "PID_KD": 0.39,
+    "PID_KI": 0.0,
+    "PilotEyePos": [
+      15.0,
+      0.0,
+      -3.0
+    ],
+    "SlowPercent": 0.0,
+    "TFR_Clearance": 20.0,
+    "TFR_Corner": 350.0,
+    "TFR_Gain": 0.01,
+    "TFR_GammaCorrMult": 1.0,
+    "TFR_HardG": 6.0,
+    "TFR_LimitMX": 0,
+    "TFR_MaxRoll": 20.0,
+    "TFR_MedG": 4.0,
+    "TFR_SoftG": 2.0,
+    "TFR_lookAhead": 4000.0,
+    "abSpoolRate": 0.4,
+    "activeDrogue": 1,
+    "aileronMaxAngle": 20.0,
+    "airbrakeMaxAngle": 60.0,
+    "anim": 0.0,
+    "animAileronRate": 45.0,
+    "animEngineRPMMult": 1000.0,
+    "animExhNozAB": 0.0,
+    "animExhNozIdle": 0.0,
+    "animExhNozMil": 10.0,
+    "animExhNozRate": 5.0,
+    "animGearMaxComp1": 0.0,
+    "animGearMaxComp2": 0.0,
+    "animGearMaxComp3": 0.0,
+    "animGearMaxComp4": 0.0,
+    "animGearMaxComp5": 0.0,
+    "animGearMaxComp6": 0.0,
+    "animGearMaxComp7": 0.0,
+    "animGearMaxComp8": 0.0,
+    "animGearMaxExt1": 0.0,
+    "animGearMaxExt2": 0.0,
+    "animGearMaxExt3": 0.0,
+    "animGearMaxExt4": 0.0,
+    "animGearMaxExt5": 0.0,
+    "animGearMaxExt6": 0.0,
+    "animGearMaxExt7": 0.0,
+    "animGearMaxExt8": 0.0,
+    "animHookAngle": 60.0,
+    "animHookRate": 10.0,
+    "animIntakeRamp1": [
+      0.0,
+      0.0
+    ],
+    "animIntakeRamp2": [
+      0.0,
+      0.0
+    ],
+    "animIntakeRamp3": [
+      0.0,
+      0.0
+    ],
+    "animRefuelAngle": 1.0,
+    "animRefuelRate": 0.5,
+    "animSpoiler1AirBrake": 1,
+    "animSpoiler1Max": 0.0,
+    "animSpoiler1OffAtWingSweep": 70.0,
+    "animSpoiler1Rate": 45.0,
+    "animSpoiler2AirBrake": 1,
+    "animSpoiler2Max": 0.0,
+    "animSpoiler2OffAtWingSweep": 45.0,
+    "animSpoiler2Rate": 20.0,
+    "animStrobeOffTime": 2.0,
+    "animStrobeOnTime": 0.08,
+    "animSwingWingAngle1": 25.0,
+    "animSwingWingAngle10": 0.0,
+    "animSwingWingAngle2": 50.0,
+    "animSwingWingAngle3": 0.0,
+    "animSwingWingAngle4": 0.0,
+    "animSwingWingAngle5": 0.0,
+    "animSwingWingAngle6": 0.0,
+    "animSwingWingAngle7": 0.0,
+    "animSwingWingAngle8": 0.0,
+    "animSwingWingAngle9": 0.0,
+    "animSwingWingMach1": 0.6,
+    "animSwingWingMach10": 0.0,
+    "animSwingWingMach2": 0.8,
+    "animSwingWingMach3": 0.0,
+    "animSwingWingMach4": 0.0,
+    "animSwingWingMach5": 0.0,
+    "animSwingWingMach6": 0.0,
+    "animSwingWingMach7": 0.0,
+    "animSwingWingMach8": 0.0,
+    "animSwingWingMach9": 0.0,
+    "animSwingWingRate": 5.0,
+    "animSwingWingStages": 2,
+    "animThrRevAngle": 60.0,
+    "animThrRevRate": 10.0,
+    "animWheelRadius1": 0.0,
+    "animWheelRadius2": 0.0,
+    "animWheelRadius3": 0.0,
+    "animWheelRadius4": 0.0,
+    "animWheelRadius5": 0.0,
+    "animWheelRadius6": 0.0,
+    "animWheelRadius7": 0.0,
+    "animWheelRadius8": 0.0,
+    "animWingFlashOffTime": 0.5,
+    "animWingFlashOnTime": 0.4,
+    "animWingFoldAngle": 110.0,
+    "animWingFoldRate": 5.0,
+    "area2Span": 0.1066,
+    "bingoFactor": 5.0,
+    "boomParent": 2211,
+    "canopyMaxAngle": 20.0,
+    "canopyRate": 5.0,
+    "catapultThrustMultiplier": 4.0,
+    "criticalAOA": 0.0,
+    "dataLinkCapLevel": 1,
+    "decelDistance": 1000.0,
+    "desiredClosureFactor": 0.25,
+    "dragChuteCd": 0.0,
+    "dragChuteMaxSpeed": 170.0,
+    "drogueParent": 2221,
+    "elevRate": 90.0,
+    "elevatorRoll": 1,
+    "elevonMaxAngle": 20.0,
+    "engine1Location": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "engine2Location": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "engine3Location": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "engine4Location": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "engine5Location": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "engine6Location": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "engine7Location": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "engine8Location": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "engineDamageHitThreshold": 0,
+    "engineDamageNoRestartThreshold": 50,
+    "engineDamageStopThreshold": 13,
+    "engineSmokes": 0,
+    "epuBurnTime": 600.0,
+    "flameoutSpoolRate": 5.0,
+    "flap2Nozzle": 0,
+    "flapGearRelative": 1,
+    "flapVcasRange": 130.0,
+    "followRate": 20.0,
+    "fuelAft1": 0.0,
+    "fuelAft1Rate": 0.0,
+    "fuelAftRes": 0.0,
+    "fuelAftResRate": 0.0,
+    "fuelClineRate": 0.0,
+    "fuelFlowFactorAb": 0.65,
+    "fuelFlowFactorNormal": 0.25,
+    "fuelFwd1": 0.0,
+    "fuelFwd1Rate": 0.0,
+    "fuelFwdRes": 0.0,
+    "fuelFwdResRate": 0.0,
+    "fuelGaugeMultiplier": 10.0,
+    "fuelMinAft": 250.0,
+    "fuelMinFwd": 400.0,
+    "fuelWingAl": 0.0,
+    "fuelWingAlRate": 0.0,
+    "fuelWingExtRate": 0.0,
+    "fuelWingFr": 0.0,
+    "fuelWingFrRate": 0.0,
+    "fumesFactor": 15.0,
+    "gearPitchFactor": 0.1,
+    "gunLocation": [
+      2.0,
+      -2.0,
+      0.0
+    ],
+    "gunPitch": 0.0,
+    "gunSwitchDofRate": [
+      -1.0,
+      -1.0,
+      0.0
+    ],
+    "gunTrailID": 11,
+    "gunYaw": 0.0,
+    "hardpoint10Grp": -1,
+    "hardpoint11Grp": -1,
+    "hardpoint12Grp": -1,
+    "hardpoint13Grp": -1,
+    "hardpoint14Grp": -1,
+    "hardpoint15Grp": -1,
+    "hardpoint16Grp": -1,
+    "hardpoint1Grp": -1,
+    "hardpoint2Grp": -1,
+    "hardpoint3Grp": -1,
+    "hardpoint4Grp": -1,
+    "hardpoint5Grp": -1,
+    "hardpoint6Grp": -1,
+    "hardpoint7Grp": -1,
+    "hardpoint8Grp": -1,
+    "hardpoint9Grp": -1,
+    "hasFlapperons": 1,
+    "hasIFF": 0,
+    "hasLef": 2,
+    "hasProgrammableEWS": 1,
+    "hasSwingWing": 0,
+    "hasTef": 2,
+    "hasThrRev": 0,
+    "hp10SwitchDofRate": [
+      -1.0,
+      -1.0,
+      0.0
+    ],
+    "hp11SwitchDofRate": [
+      -1.0,
+      -1.0,
+      0.0
+    ],
+    "hp12SwitchDofRate": [
+      -1.0,
+      -1.0,
+      0.0
+    ],
+    "hp13SwitchDofRate": [
+      -1.0,
+      -1.0,
+      0.0
+    ],
+    "hp14SwitchDofRate": [
+      -1.0,
+      -1.0,
+      0.0
+    ],
+    "hp15SwitchDofRate": [
+      -1.0,
+      -1.0,
+      0.0
+    ],
+    "hp16SwitchDofRate": [
+      -1.0,
+      -1.0,
+      0.0
+    ],
+    "hp1SwitchDofRate": [
+      -1.0,
+      -1.0,
+      0.0
+    ],
+    "hp2SwitchDofRate": [
+      -1.0,
+      -1.0,
+      0.0
+    ],
+    "hp3SwitchDofRate": [
+      -1.0,
+      -1.0,
+      0.0
+    ],
+    "hp4SwitchDofRate": [
+      -1.0,
+      -1.0,
+      0.0
+    ],
+    "hp5SwitchDofRate": [
+      -1.0,
+      -1.0,
+      0.0
+    ],
+    "hp6SwitchDofRate": [
+      -1.0,
+      -1.0,
+      0.0
+    ],
+    "hp7SwitchDofRate": [
+      -1.0,
+      -1.0,
+      0.0
+    ],
+    "hp8SwitchDofRate": [
+      -1.0,
+      -1.0,
+      0.0
+    ],
+    "hp9SwitchDofRate": [
+      -1.0,
+      -1.0,
+      0.0
+    ],
+    "isComplex": 0,
+    "jfsMinRechargeRpm": 0.12,
+    "jfsRechargeTime": 60.0,
+    "jfsSpinTime": 240.0,
+    "jfsSpoolUpLimit": 0.25,
+    "jfsSpoolUpRate": 15.0,
+    "jokerFactor": 2.0,
+    "landingAOA": 12.5,
+    "largePark": 0,
+    "largeVortex": 0,
+    "lefGround": -2.0,
+    "lefMaxAngle": 20.0,
+    "lefMaxMach": 0.4,
+    "lefNStages": 1,
+    "lefRate": 5.0,
+    "lightupSpoolRate": 10.0,
+    "limitPstick": 1,
+    "longLeg": 100.0,
+    "mainGenRpm": 0.63,
+    "maxFlapVcas": 370.0,
+    "maxLasingAlt": 25000.0,
+    "maxRippleCount": 19,
+    "minFuelFlow": 1200.0,
+    "nBooms": 1,
+    "nChaff": 60,
+    "nDrogues": 0,
+    "nEngines": 1,
+    "nFlare": 30,
+    "normSpoolRate": 0.7,
+    "pitchElasticity": 1.0,
+    "pitchGearGain": 0.8,
+    "pitchMomentum": 1.0,
+    "refuelAltitude": 22500.0,
+    "refuelBoomSlot0": 0,
+    "refuelDrogueSlot0": 0,
+    "refuelDrogueSlot1": 1,
+    "refuelDrogueSlot2": 2,
+    "refuelLocation": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "refuelRate": 50.0,
+    "refuelSpeed": 310.0,
+    "rollCouple": 0.0,
+    "rollGearGain": 0.6,
+    "rollLimitForAiInWP": 180.0,
+    "rollMomentum": 1.0,
+    "rudderMaxAngle": 20.0,
+    "shortLeg": 25.0,
+    "sinkRate": 15.0,
+    "sndAbExt": 39,
+    "sndAbExtChart": [
+      2.0,
+      0.0,
+      0.0,
+      1.0,
+      1.0
+    ],
+    "sndAbExtPitchChart": [
+      2.0,
+      0.0,
+      0.0,
+      1.03,
+      1.47
+    ],
+    "sndAbInt": 40,
+    "sndAbIntChart": [
+      2.0,
+      0.0,
+      0.0,
+      1.0,
+      1.0
+    ],
+    "sndAbIntPitchChart": [
+      2.0,
+      0.0,
+      0.0,
+      1.03,
+      1.47
+    ],
+    "sndAero1": 0,
+    "sndAero1AOAChart": [
+      1.0,
+      0.0,
+      0.0
+    ],
+    "sndAero1SpeedChart": [
+      1.0,
+      0.0,
+      0.0
+    ],
+    "sndAero2": 0,
+    "sndAero2AOAChart": [
+      1.0,
+      0.0,
+      0.0
+    ],
+    "sndAero2SpeedChart": [
+      1.0,
+      0.0,
+      0.0
+    ],
+    "sndAero3": 0,
+    "sndAero3AOAChart": [
+      1.0,
+      0.0,
+      0.0
+    ],
+    "sndAero3SpeedChart": [
+      1.0,
+      0.0,
+      0.0
+    ],
+    "sndAero4": 0,
+    "sndAero4AOAChart": [
+      1.0,
+      0.0,
+      0.0
+    ],
+    "sndAero4SpeedChart": [
+      1.0,
+      0.0,
+      0.0
+    ],
+    "sndBBAltitude": 65,
+    "sndBBBingo": 66,
+    "sndBBCaution": 64,
+    "sndBBChaffFlare": 183,
+    "sndBBChaffFlareLow": 184,
+    "sndBBChaffFlareOut": 185,
+    "sndBBFlare": 138,
+    "sndBBLock": 67,
+    "sndBBPullup": 68,
+    "sndBBWarning": 63,
+    "sndCanopyCloseEnd": 274,
+    "sndCanopyCloseStart": 273,
+    "sndCanopyLoop": 275,
+    "sndCanopyOpenEnd": 272,
+    "sndCanopyOpenStart": 271,
+    "sndDragChute": 217,
+    "sndEject": 5,
+    "sndExt": 35,
+    "sndExt2": 0,
+    "sndExt2Chart": [
+      3.0,
+      0.0,
+      0.0,
+      1.0,
+      1.0,
+      1.035,
+      1.0
+    ],
+    "sndExt2PitchChart": [
+      2.0,
+      0.0,
+      0.0,
+      1.03,
+      1.47
+    ],
+    "sndExtChart": [
+      1.0,
+      0.0,
+      1.0
+    ],
+    "sndExtPitchChart": [
+      2.0,
+      0.0,
+      0.0,
+      1.03,
+      1.47
+    ],
+    "sndExternalVol": -2000.0,
+    "sndFlapEnd": 143,
+    "sndFlapLoop": 144,
+    "sndFlapStart": 145,
+    "sndGearCloseEnd": 146,
+    "sndGearCloseStart": 147,
+    "sndGearLoop": 148,
+    "sndGearOpenEnd": 150,
+    "sndGearOpenStart": 149,
+    "sndGunEnd": 27,
+    "sndGunLoop": 26,
+    "sndGunStart": 25,
+    "sndHookEnd": 193,
+    "sndHookLoop": 194,
+    "sndHookStart": 195,
+    "sndInt": -1,
+    "sndInt2": 0,
+    "sndInt2Chart": [
+      3.0,
+      0.0,
+      0.0,
+      1.0,
+      1.0,
+      1.035,
+      1.0
+    ],
+    "sndInt2PitchChart": [
+      2.0,
+      0.0,
+      0.0,
+      1.03,
+      1.47
+    ],
+    "sndIntChart": [
+      1.0,
+      0.0,
+      1.0
+    ],
+    "sndIntPitchChart": [
+      2.0,
+      0.0,
+      0.0,
+      1.03,
+      1.47
+    ],
+    "sndLowSpeed": 167,
+    "sndOverSpeed1": 191,
+    "sndOverSpeed2": 192,
+    "sndSpdBrakeEnd": 139,
+    "sndSpdBrakeLoop": 140,
+    "sndSpdBrakeStart": 141,
+    "sndSpdBrakeWind": 142,
+    "sndTouchDown": 42,
+    "sndWheelBrakes": 132,
+    "sndWind": 33,
+    "startGroundAvoidCheck": 3000.0,
+    "stbyGenRpm": 0.6,
+    "swingwingHinge": [
+      2.0,
+      3.0,
+      0.0
+    ],
+    "tankerType": 6,
+    "tefMaxAngle": 20.0,
+    "tefNStages": 2,
+    "tefRate": 5.0,
+    "tefTakeoff": 0.0,
+    "typeAC": 0,
+    "typeEngine": 0,
+    "vortex1Location": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "vortex2Location": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "vortexAOALimit": [
+      29.5,
+      0.0,
+      0.0
+    ],
+    "vortexPS1Location": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "vortexPS2Location": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "vortexPS3Location": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "wingTipLocation": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "yawGearGain": 0.6,
+    "yawMomentum": 1.0
+  },
   "description": "",
   "engine": {
     "alt_ft": [
@@ -1080,7 +1950,7 @@
       "y2": 0.0
     }
   ],
-  "name": "C:/Users/jdcra/AppData/Local/Temp/tmp.VhZIGOAl4q/sim/ACDATA/Mig27.dat",
+  "name": "Mig27.dat",
   "rawAuxAeroData": {},
   "rollCmd": {
     "alpha_deg": [

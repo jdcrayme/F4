@@ -1,3 +1,83 @@
+## Task 72 — the fleet carries the COMPLETE AuxAeroData record: all 443
+## schema keys per aircraft (FreeFalcon's readin.cpp defaults + each .dat's
+## verbatim overrides), rosetta-typed, round-trip-stable, and byte-
+## reproducible from the committed fixtures
+
+**The dormant Rosetta Stone is now executable: f4-convert/rosetta/
+auxaero_field_map.json (extracted in the f4-data session from FreeFalcon's
+readin.cpp AuxAeroDataDesc[]) is compiled into f4-data as a generated C++
+table, and every aircraft JSON in Data/Aircraft now carries the complete
+443-key auxAero record — 206 floats, 136 ints, 77 vectors, 24 sound/anim
+charts — so the engine systems of the next tranches (engine damage
+thresholds, fuel/countermeasures, weapons delivery, AAR hardpoints/boom
+positions) read DATA instead of re-deriving legacy defaults from code.
+Full suite: 2,474/2,474 (+15 tests), zero-TODO, zero new warnings under
+-Wall -Wextra -Wpedantic.**
+
+- **The rosetta is a build artifact now.** scripts/gen_auxaero_table.py
+  turns the curated JSON into f4-data's auxaero_rosetta.hpp/.cpp (443
+  entries: key, type, struct field, default token string — committed, no
+  build-time python). Pure schema data, so it lives engine-side: f4-data
+  resolves JSON value types on load, f4-convert completes records from
+  .dat overrides. Extract_rosetta stays the upstream-regeneration path.
+
+- **AuxAeroRecord (f4-data): the full-fidelity data surface.** Every key
+  the .dat does not override carries FreeFalcon's own default — exactly
+  what the legacy loader did (Desc table init, then key/value overrides).
+  The typed AuxAero view stays the flight model's projection; where the
+  record's legacy defaults and the typed view's C++ member defaults
+  disagree (jfsSpoolRate*, gearPitchFactor, hasLef=2-vs-false, ...), that
+  is DELIBERATE: the record preserves loader semantics, the typed view
+  preserves the certified flight-model behavior. The two known legacy
+  default defects (vortexAOALimit "29.5" — a 3-vector default with one
+  token; FlareVec4 "0 0,200" — "0,200" strtod-parses as 0) are handled
+  with strtod semantics + zero-fill and pinned in
+  AuxAeroRosettaTest.DefaultsParsePerType.
+
+- **The fleet regeneration also repaired two real data bugs.** (1) Every
+  committed aircraft JSON had `name` leaking the export-time temp path
+  ("C:/Users/.../tmp.VhZIGOAl4q/sim/ACDATA/f16.dat") — the parser's
+  fallback now uses the basename. (2) f16.json had lost its .dat's
+  criticalAOA override: committed 0.0 SILENTLY DISABLED the F-16's stall
+  model (criticalAOA = 0 disables the stall guard); the restored 25.0
+  matches the .dat and every stall test's documented expectation, and the
+  full 6-DOF E2E suite passes with the guard active. The other 23
+  aircraft's typed views are bit-identical (their .dat files set NO
+  AuxAeroData keys — the fleet flew on readin.cpp defaults).
+
+- **JSON contract: `auxAero` (object, key-ordered, nlohmann dump(2)).**
+  Floats as JSON floats, ints as JSON integers, vectors as [x y z],
+  charts as token arrays. Load-side typing is rosetta-guided (a chart can
+  legitimately have exactly three tokens — gunLocation vs
+  sndAero1AOAChart is unambiguous only through the schema); unknown keys
+  warn + capture as charts, wrong-shaped vectors warn. Round-trip is
+  value-and-type-stable.
+
+- **kc10.dat is the one fleet .dat without a committed fixture** (it was
+  converted during the original export, before the fixture set existed).
+  Its record is reconstructed from its typed view by
+  scripts/reconstruct_kc10_auxaero.py (rosetta defaults + the 49 typed
+  counterparts in legacy units, documented provenance) — its known
+  overrides (hasLef/hasTef=0, typeEngine=2, jfsSpoolRates, lefMaxMach=1.0,
+  tefTakeoff=20, elevatorRoll=0, rudderMaxAngle=30) are pinned in
+  FleetAuxAeroTest.KC10ReconstructedRecordCarriesTheKnownOverrides.
+
+- **The fleet is pinned as a REPRODUCIBILITY artifact.**
+  FleetReproducibility.DatFixtureRegeneratesCommittedJsonByteForByte
+  re-parses all 24 committed fixtures and requires writeConfig to emit
+  the committed Data/Aircraft/*.json BYTE FOR BYTE; test_hash's manifest
+  fingerprints were regenerated for the 25 changed aircraft files. The
+  fleet tests (test_fleet_auxaero) additionally certify coverage
+  (443/443 per aircraft), schema types, the f16 override chain
+  (.dat → rawAuxAeroData → record → typed view), and the write/load
+  record round-trip for all 25.
+
+- **Regeneration recipes (all committed):** fleet = dat2json over
+  f4-convert/tests/fixtures (as before); rosetta table =
+  scripts/gen_auxaero_table.py; kc10 = scripts/reconstruct_kc10_auxaero.py;
+  manifest = regenerate fingerprints for changed assets (Task 71's
+  surgical convention).
+
 ## Task 71 — Tier 3: TowerATC, the sequencing tower behind the stub's
 ## protocol: the runway becomes a RESOURCE (one occupant, FIFO holds,
 ## report-driven releases, occupancy timeout)

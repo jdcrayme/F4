@@ -16,6 +16,8 @@
 
 #include "f4/data/config_loader.hpp"
 
+#include "f4/data/auxaero_rosetta.hpp"
+
 #include <nlohmann/json.hpp>
 
 #include <fstream>
@@ -281,6 +283,63 @@ void readLimiter(const json& j, Limiter& l) {
     l.y0 = j.value("y0", l.y0);
 }
 
+// ---------------------------------------------------------------------------
+// The complete AuxAeroData record (aux_aero_record.hpp). Value types are
+// resolved against the rosetta schema: a JSON number loads as Float or Int
+// per the schema, an array of 3 as Vector, any other array as Chart. A key
+// outside the schema is a WARNING + verbatim capture as a Chart (the JSON
+// emitter only writes schema keys, so hitting one here means the file was
+// written by a different schema generation — report it, don't lose it).
+// ---------------------------------------------------------------------------
+void readAuxAeroRecord(const json& j, AuxAeroRecord& rec,
+                       std::vector<std::string>& warnings) {
+    for (auto it = j.begin(); it != j.end(); ++it) {
+        const std::string& key = it.key();
+        const json& v = it.value();
+
+        AuxAeroValue out;
+        const RosettaEntry* entry = findAuxAeroEntry(key);
+        if (entry == nullptr) {
+            warnings.push_back("auxAero: key not in the schema: '" + key +
+                               "' (captured as a Chart token list)");
+            out.type = AuxAeroValueType::Chart;
+            if (v.is_number()) {
+                out.t.push_back(v.get<double>());
+            } else if (v.is_array()) {
+                for (const auto& t : v) out.t.push_back(t.get<double>());
+            } else {
+                warnings.push_back("auxAero: unsupported scalar shape for '" + key + "'");
+                continue;
+            }
+        } else if (v.is_number_integer()) {
+            out.type = AuxAeroValueType::Int;
+            out.i = v.get<int64_t>();
+        } else if (v.is_number_float()) {
+            out.type = AuxAeroValueType::Float;
+            out.f = v.get<double>();
+        } else if (v.is_array() && v.size() == 3 &&
+                   entry->type == RosettaType::Vector) {
+            out.type = AuxAeroValueType::Vector;
+            for (std::size_t k = 0; k < 3; ++k) out.v[k] = v.at(k).get<double>();
+        } else if (v.is_array() && entry != nullptr &&
+                   entry->type == RosettaType::Vector) {
+            warnings.push_back("auxAero: Vector key '" + key + "' has " +
+                               std::to_string(v.size()) +
+                               " elements (schema says 3); captured as a Chart");
+            out.type = AuxAeroValueType::Chart;
+            for (const auto& t : v) out.t.push_back(t.get<double>());
+        } else if (v.is_array()) {
+            out.type = AuxAeroValueType::Chart;
+            out.t.reserve(v.size());
+            for (const auto& t : v) out.t.push_back(t.get<double>());
+        } else {
+            warnings.push_back("auxAero: unsupported JSON shape for '" + key + "'");
+            continue;
+        }
+        rec[key] = std::move(out);
+    }
+}
+
 } // namespace
 
 LoadResult loadConfigFromString(const std::string& jsonStr) {
@@ -304,6 +363,9 @@ LoadResult loadConfigFromString(const std::string& jsonStr) {
         }
         if (j.contains("rawAuxAeroData")) {
             cfg.rawAuxAeroData = j.at("rawAuxAeroData").get<std::map<std::string, std::string>>();
+        }
+        if (j.contains("auxAero")) {
+            readAuxAeroRecord(j.at("auxAero"), cfg.auxAero, result.warnings);
         }
         if (j.contains("aeroOptions"))   cfg.aeroOptions   = j.at("aeroOptions").get<std::vector<std::string>>();
         if (j.contains("engineOptions")) cfg.engineOptions = j.at("engineOptions").get<std::vector<std::string>>();
@@ -482,6 +544,18 @@ std::string writeConfig(const AircraftConfig& cfg) {
     for (const auto& l : cfg.limiters) limitersArr.push_back(limiterToJson(l));
     j["limiters"] = limitersArr;
 
+    json auxAeroJson = json::object();
+    for (const auto& [key, val] : cfg.auxAero) {
+        switch (val.type) {
+            case AuxAeroValueType::Float:  auxAeroJson[key] = val.f; break;
+            case AuxAeroValueType::Int:    auxAeroJson[key] = val.i; break;
+            case AuxAeroValueType::Vector:
+                auxAeroJson[key] = json::array({val.v[0], val.v[1], val.v[2]});
+                break;
+            case AuxAeroValueType::Chart:  auxAeroJson[key] = val.t; break;
+        }
+    }
+    j["auxAero"]        = std::move(auxAeroJson);
     j["rawAuxAeroData"] = cfg.rawAuxAeroData;
     j["aeroOptions"]    = cfg.aeroOptions;
     j["engineOptions"]  = cfg.engineOptions;

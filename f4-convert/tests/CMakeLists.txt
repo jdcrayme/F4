@@ -20,6 +20,7 @@ f4_convert_add_test(test_formation_parser test_formation_parser.cpp)
 f4_convert_add_test(test_veh_parser       test_veh_parser.cpp)
 f4_convert_add_test(test_sensor_parser    test_sensor_parser.cpp)
 f4_convert_add_test(test_signature_parser test_signature_parser.cpp)
+f4_convert_add_test(test_fleet_reproducibility test_fleet_reproducibility.cpp)
 
 # Pass paths to test executables via compile definitions.
 target_compile_definitions(test_dat_parser PRIVATE
@@ -39,6 +40,9 @@ foreach(t test_veh_parser test_sensor_parser test_signature_parser)
         F4_CONVERT_TEST_FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures"
         F4_CONVERT_TEST_OUTPUT_DIR="${CMAKE_CURRENT_BINARY_DIR}")
 endforeach()
+target_compile_definitions(test_fleet_reproducibility PRIVATE
+    F4_CONVERT_TEST_FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures"
+    F4_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 
 # ---------------------------------------------------------------------------
 # Build-time fixture generation: MOVED to the parent f4-convert/

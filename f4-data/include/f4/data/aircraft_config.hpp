@@ -17,6 +17,8 @@
 #include <f4/units.hpp>
 #include <f4/aviation.hpp>
 
+#include <f4/data/aux_aero_record.hpp>
+
 #include <array>
 #include <cstdint>
 #include <map>
@@ -298,6 +300,20 @@ struct AircraftConfig {
     //                   file name.
     // -----------------------------------------------------------------------
     std::map<std::string, std::string> rawAuxAeroData;
+
+    // -----------------------------------------------------------------------
+    // The COMPLETE AuxAeroData record: all 443 schema keys (auxaero_rosetta)
+    // with FreeFalcon's readin.cpp defaults applied for every key the .dat
+    // does not override. See aux_aero_record.hpp. The typed `aux` view above
+    // remains the flight model's projection of the subset it consumes; where
+    // the record's legacy defaults and the typed view's C++ member defaults
+    // disagree (jfsSpoolRate*s, gearPitchFactor, ...), that disagreement is
+    // deliberate: the record preserves FreeFalcon's loader semantics, the
+    // typed view preserves the flight model's certified behavior. Pinned by
+    // test_fleet_auxaero.
+    // -----------------------------------------------------------------------
+    AuxAeroRecord auxAero;
+
     std::vector<std::string> aeroOptions;
     std::vector<std::string> engineOptions;
     std::string sourceTitle;

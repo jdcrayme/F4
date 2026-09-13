@@ -13,6 +13,8 @@
 
 #include "f4/convert/dat_parser.hpp"
 
+#include <f4/data/auxaero_rosetta.hpp>
+
 #include <cstdio>
 #include <string>
 
@@ -51,5 +53,7 @@ int main(int argc, char** argv) {
     std::printf("  Roll table:      %zu alpha x %zu qbar\n",
                 c.rollCmd.alpha_deg.size(), c.rollCmd.qbar.size());
     std::printf("  rawAuxAeroData:  %zu keys captured\n", c.rawAuxAeroData.size());
+    std::printf("  auxAero record:  %zu of %zu schema keys\n",
+                c.auxAero.size(), f4::data::kAuxAeroRosettaCount);
     return 0;
 }

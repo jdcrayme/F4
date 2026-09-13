@@ -13,6 +13,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # ---------------------------------------------------------------------------
 add_library(f4-data STATIC
     src/aircraft_config.cpp
+    src/auxaero_rosetta.cpp
     src/brain_data.cpp
     src/config_loader.cpp
     src/engine_rpm_schedule.cpp
