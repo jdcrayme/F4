@@ -211,6 +211,11 @@ struct Args {
     // C6 — the save-write hand-off (--save-write): emit the mutated
     // WorldState JSON and let the importer assemble the .cam.
     bool save_write = false;
+    // Task 73: optional environment opt-ins for the QC run (raw JSON
+    // object contents, injected verbatim into the synthesized scenario;
+    // empty = the block is absent).
+    std::string weather_block;
+    std::string time_block;
     // C5 — the 24-hour war (--war): the long-horizon acceptance run
     // (both sides generate, fly, fight, attrite, recover, resupply for
     // HOURS of sim time, headless, deterministic). 0 = off (the B.3/
@@ -256,7 +261,8 @@ struct Args {
         "          [--wreck-hold <sec>] [--war-max-wall <sec>] [--aa-combat]\n"
         "          [--ground-war] [--ground-update-sec <sec>]\n"
         "          [--ground-orders-sec <sec>] [--ground-resupply-sec <sec>]\n"
-        "          [--unit-strike] [--weapon-data <wcd.json>] [--out-dir <dir>]\n",
+        "          [--unit-strike] [--weapon-data <wcd.json>] [--out-dir <dir>]\n"
+        "          [--weather <json-obj>] [--time <json-obj>] (Task 73 env)\n",
         prog);
     std::exit(1);
 }
@@ -297,6 +303,8 @@ Args parse_args(int argc, char** argv) {
         else if (k == "--no-record")   a.record = false;
         else if (k == "--out-dir")     a.out_dir = next();
         else if (k == "--save-write")  a.save_write = true;
+        else if (k == "--weather")     a.weather_block = next();
+        else if (k == "--time")        a.time_block = next();
         else if (k == "--war")         a.war_hours = std::atof(next());
         else if (k == "--war-runs")    a.war_runs = std::max(1, std::atoi(next()));
         else if (k == "--war-sample")  a.war_sample_sec = std::atof(next());
@@ -1334,6 +1342,13 @@ int main(int argc, char** argv) {
         out << "    \"parking_spot\": {\"x\": 0.0, \"y\": 0.0, \"z\": 0.0},\n";
         out << "    \"heading_rad\": 0.0\n";
         out << "  }],\n";
+        // Task 73: the environment opt-ins ride the synthesized
+        // scenario verbatim (the blocks are the same JSON the loader
+        // parses from hand-authored scenarios — one schema, one path).
+        if (!args.weather_block.empty())
+            out << "  \"weather\": " << args.weather_block << ",\n";
+        if (!args.time_block.empty())
+            out << "  \"time\": " << args.time_block << ",\n";
         out << "  \"sim_dt\": " << args.sim_dt << ",\n";
         out << "  \"total_ticks\": " << args.ticks << ",\n";
         out << "  \"record_every\": " << args.record_every << ",\n";
@@ -1781,6 +1796,31 @@ int main(int argc, char** argv) {
         w.put(",\n    \"trace\": ");
         write_string(w, (args.out_dir / "trace.json").string());
         w.put("\n  }");
+
+        // Task 73: the theater environment END state — emitted ONLY when
+        // the scenario configured one (absent block = no block in the
+        // summary; the existing summaries stay byte-identical).
+        if (sim.environment() != nullptr) {
+            const auto& env = *sim.environment();
+            const auto& st = env.state();
+            w.put(",\n  \"environment\": {\n    ");
+            w.number_key("configured", 1);
+            w.put(", \"condition\": ");
+            write_string(w, f4::world_types::condition_name(st.condition));
+            w.put(", \"band\": ");
+            write_string(w, f4::world_types::band_name(env.band()));
+            char ebuf[256];
+            std::snprintf(ebuf, sizeof(ebuf),
+                          ", \"seconds_of_day\": %.1f, \"day_of_year\": %d"
+                          ", \"visibility_nm\": %.1f"
+                          ", \"cloud_cover_tenths\": %.1f"
+                          ", \"wind_low_kts\": %.1f, \"visual_scale\": %.3f",
+                          env.seconds_of_day(), env.day_of_year(),
+                          st.visibility_nm, st.cloud_cover_tenths,
+                          st.wind_low.speed_kts, env.visual_scale());
+            w.put(ebuf);
+            w.put("\n  }");
+        }
 
         // The A-G ordnance ledger (this slice's QC block): releases,
         // impacts, the damage they did, per-objective state, and the

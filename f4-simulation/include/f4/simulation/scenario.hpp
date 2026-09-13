@@ -19,6 +19,7 @@
 #pragma once
 
 #include <f4/geo/position.hpp>
+#include <f4/world_types/weather.hpp>  // WeatherCondition (Task 73 env)
 #include <f4/entities/types.hpp>   // GroundLayoutList (real-airbase rendering)
 
 #include <cstdint>
@@ -447,6 +448,41 @@ struct Scenario {
         double occupancy_timeout_s{300.0};
     };
     AtcConfig atc;
+
+    /// Task 73 — the theater environment (Weather v1). ABSENT scenario
+    /// blocks = today's environment exactly: clear, still, fixed solar
+    /// noon (DaylightBand::Day), no evolution — every pre-existing
+    /// scenario behaves bit-identically. A "weather" or "time" block is
+    /// an explicit authoring intent and turns that piece on.
+    struct EnvironmentConfig {
+        /// True when a "weather" block exists (the block's presence, not
+        /// its contents, unlocks weather evolution — "locked": true then
+        /// freezes the condition but the authored profile steers in).
+        bool weather_configured{false};
+        /// Initial condition ("clear" | "hazy" | "inclement"; parsed via
+        /// world_types::condition_from_name — unknown names fail loudly).
+        f4::world_types::WeatherCondition condition{
+            f4::world_types::WeatherCondition::Clear};
+        /// FreeFalcon's lockedCondition: freeze the Markov draw.
+        bool locked{false};
+        /// Evolution seed (deterministic stream id).
+        std::uint32_t seed{0x57E47E5};
+        /// Condition re-check cadence, seconds of sim time.
+        double check_interval_s{900.0};
+
+        /// True when a "time" block exists (unlocks the campaign clock).
+        bool time_configured{false};
+        /// Clock start: seconds-of-day (solar) and day-of-year.
+        double start_seconds_of_day{43200.0};
+        int day_of_year{172};
+        /// Clock advance: with the block present this defaults TRUE (a
+        /// "time" block means the author wants a day); absent block =
+        /// frozen noon (zero change).
+        bool advance_clock{true};
+        /// Theater latitude for the solar model.
+        double latitude_deg{f4::world_types::kDefaultTheaterLatitudeDeg};
+    };
+    EnvironmentConfig environment;
 
     /// Fuel policy (the arbiter's fuel check). Default: disabled.
     FuelConfig fuel;

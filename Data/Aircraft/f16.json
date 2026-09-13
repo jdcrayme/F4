@@ -494,7 +494,7 @@
     "aileronMaxAngle": 20.0,
     "airbrakeMaxAngle": 59.99999999999999,
     "area2Span": 0.1066,
-    "criticalAOA": 0.0,
+    "criticalAOA": 25.0,
     "dragChuteCd": 0.0,
     "elevatorRolls": false,
     "epuBurnTime": 600.0,
@@ -929,7 +929,7 @@
     "canopyMaxAngle": 20.0,
     "canopyRate": 5.0,
     "catapultThrustMultiplier": 4.0,
-    "criticalAOA": 0.0,
+    "criticalAOA": 25.0,
     "dataLinkCapLevel": 1,
     "decelDistance": 1000.0,
     "desiredClosureFactor": 0.25,
@@ -1988,7 +1988,9 @@
     }
   ],
   "name": "f16.dat",
-  "rawAuxAeroData": {},
+  "rawAuxAeroData": {
+    "criticalAOA": "25.0"
+  },
   "rollCmd": {
     "alpha_deg": [
       -10.0,

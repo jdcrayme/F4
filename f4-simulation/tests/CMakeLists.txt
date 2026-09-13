@@ -17,6 +17,11 @@ function(f4_simulation_add_test name source)
     gtest_discover_tests(${name})
 endfunction()
 
+f4_simulation_add_test(test_weather_system          test_weather_system.cpp)
+f4_simulation_add_test(test_environment_wiring      test_environment_wiring.cpp)
+target_compile_definitions(test_environment_wiring PRIVATE
+    F4_SOURCE_FIXTURES_DIR="${CMAKE_SOURCE_DIR}/Data/Aircraft"
+)
 f4_simulation_add_test(test_visual_model_component test_visual_model_component.cpp)
 f4_simulation_add_test(test_scenario_loader        test_scenario_loader.cpp)
 f4_simulation_add_test(test_simdata_wiring         test_simdata_wiring.cpp)

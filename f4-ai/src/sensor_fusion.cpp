@@ -376,7 +376,8 @@ void SensorFusion::emplace_target(
         t.detected_by_gci    = true;
         t.detected_by_radar  = (t.range_nm <= cfg_.max_radar_range_nm)  && t.is_hostile;
         t.detected_by_rwr    = (t.range_nm <= cfg_.max_rwr_range_nm)    && t.is_hostile;
-        t.detected_by_visual = (t.range_nm <= cfg_.max_visual_range_nm);
+        t.detected_by_visual =
+            (t.range_nm <= cfg_.max_visual_range_nm * visual_range_scale_);
     }
 
     // EWMA smoothing — find the previous snapshot for this entity.

@@ -1,3 +1,81 @@
+## Task 73 — the theater has an environment: Weather v1 + the day/night
+## model land as a deterministic, engine-agnostic surface — FreeFalcon's
+## 3-state condition model, the solar-geometry daylight bands, the seeded
+## evolution driver, and the detection-model wiring (visual range scales
+## with weather x daylight; every pre-Task-73 scenario is bit-identical
+## by the absence-of-blocks zero-change rule)
+
+**The campaign world now has a WEATHER + CLOCK surface: f4-world-types
+carries the WeatherState (Clear/Hazy/Inclement, cloud deck, visibility,
+three wind bands, temperature, turbulence — FreeFalcon's WeatherClass
+shape, theater-uniform in v1) and the solar day/night model (simplified
+NOAA position -> Night / CivilTwilight / Day bands); f4-simulation's
+WeatherSystem evolves both deterministically (seeded mt19937, the C2
+discipline applied to the environment); the AI's visual detection range
+carries the combined scale. Full suite: 2,513/2,513 (+39 tests), zero-
+TODO, zero new warnings in the touched sources.**
+
+- **The state surface is FreeFalcon-shaped** (campaign/include/weather.h
+  recovered from freefalcon-central as the reference): the 3-state
+  condition model of UpdateCondition, cloud cover in tenths + a stratus
+  base (v1 keeps ONE deck; the second stratus layer waits for a
+  consumer), visibility in NM, the windMin/Med/Max band set as
+  low/medium/high direction+speed pairs with altitude interpolation
+  (shortest-arc direction blending — 350->10 goes through north),
+  TemperatureAt's Celsius, turbFactor. The per-condition profiles
+  (Clear 40 NM vis / Hazy 12 / Inclement 3, ordered severity pinned by
+  test) are the evolution targets.
+- **Day/night is the standard simplified solar model** (Spencer
+  declination + hour angle, solar-time approximation documented in the
+  header): solar_elevation_deg(seconds_of_day, day_of_year, latitude)
+  with the Korea-theater 37.5 N default, classified into the detection
+  bands Night / CivilTwilight / Day at the 0 / -6 deg civil-dusk
+  boundaries. Sunrise/sunset are DERIVED (the band walk is pinned by
+  test around the equinox), no tabulation to disagree with.
+- **The evolution driver is deterministic and capped**: a seeded
+  mt19937 walks the documented condition Markov chain (rows sum to 1.0)
+  on a 15-campaign-minute cadence, jitters the per-check targets
+  (visibility +-20%, wind +-25%, temp +-1.5 C), and the continuous
+  fields STEER toward them through a 600 s exponential approach — no
+  check ever teleports the state (the per-step steering bound is pinned
+  by test). FreeFalcon's lockedCondition is the exact "locked" flag.
+  Same seed + same advance sequence = identical weather, two hosts.
+- **The detection wiring is the plain-double interface pattern** (the
+  DetectionPolicy convention): f4-ai links no weather types —
+  SensorFusion gains set_visual_range_scale(), the host computes the
+  combined scale from f4-world-types' shared functions (weather x
+  daylight, floored at 0.05 — the night-whiteout floor keeps close-in
+  lights-only detection) and pushes it per tick from Simulation. The
+  scale multiplies the legacy visual rule's max_visual_range_nm only;
+  a DetectionPolicy override owns its own environment response, GCI/
+  radar/RWR are v1-unaffected (radar nets and datalinks do not care
+  about clouds in v1), and the IR flyout keeps the authored weapon card
+  (weather gates ACQUISITION, not a 2-NM seeker track — the defensible
+  physics, documented).
+- **The zero-change rule is enforced structurally**: a scenario WITHOUT
+  "weather"/"time" blocks builds NO WeatherSystem at all
+  (sim.environment() == nullptr), every fusion keeps its 1.0 scale
+  default, and the QC summary gains NO environment block — existing
+  runs are byte-identical. Presence of a block unlocks that piece:
+  "weather" starts the Markov evolution (unless locked) and steers the
+  authored condition in from t=0; "time" starts the campaign clock
+  (advance defaults true WITH the block, frozen noon without). Unknown
+  condition names fail loudly at load (the atc.mode convention).
+- **The QC tool carries the trajectory**: campaign_qc --weather
+  <json-obj> / --time <json-obj> inject the blocks into the synthesized
+  scenario verbatim (one schema, one path), and the summary reports the
+  END state in the new "environment" block (condition, band, clock,
+  visibility, cover, surface wind, visual_scale) — a night-inclement
+  TestCamp run reports exactly the 0.05 compound floor. Verified E2E
+  over TestCamp.cam (449 flights, 3 spawned, the block byte-stable
+  against the baseline run which emits nothing).
+- **v1 boundaries, documented**: theater-uniform weather (the per-grid
+  cloud cover/level of GetCloudCover is the v2 expansion the state
+  layout anticipates), wind/temperature/turbulence ride the state and
+  are pinned by tests but have NO FM consumer yet (the FM tranche that
+  takes wind drift does the harness revalidation), and the renderer
+  keeps its sky (the viewer tint is a follow-up).
+
 ## Task 72 — the fleet carries the COMPLETE AuxAeroData record: all 443
 ## schema keys per aircraft (FreeFalcon's readin.cpp defaults + each .dat's
 ## verbatim overrides), rosetta-typed, round-trip-stable, and byte-

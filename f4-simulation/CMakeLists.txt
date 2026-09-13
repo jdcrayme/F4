@@ -36,6 +36,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 add_library(f4-simulation STATIC
     src/scenario.cpp
     src/simulation.cpp
+    src/weather_system.cpp
     src/campaign_bridge.cpp
     src/campaign_spawner.cpp
     src/campaign_result_sink.cpp

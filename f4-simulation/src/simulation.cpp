@@ -109,6 +109,25 @@ Simulation::Simulation(Scenario scenario, std::filesystem::path asset_dir)
 Simulation::~Simulation() = default;
 
 void Simulation::initialize() {
+    // Task 73 (Weather v1): build the environment system when the
+    // scenario carries a "weather" or "time" block. Absent blocks leave
+    // weather_ null — the zero-change rule (every fusion scale stays at
+    // its 1.0 default and nothing in the tick path moves).
+    if (scenario_.environment.weather_configured ||
+        scenario_.environment.time_configured) {
+        f4::sim::WeatherSystem::Options o{};
+        o.initial_condition = scenario_.environment.condition;
+        o.locked = scenario_.environment.locked;
+        o.seed = scenario_.environment.seed;
+        o.check_interval_s = scenario_.environment.check_interval_s;
+        o.start_seconds_of_day = scenario_.environment.start_seconds_of_day;
+        o.start_day_of_year = scenario_.environment.day_of_year;
+        o.latitude_deg = scenario_.environment.latitude_deg;
+        o.advance_clock = scenario_.environment.time_configured &&
+                          scenario_.environment.advance_clock;
+        weather_ = std::make_unique<f4::sim::WeatherSystem>(o);
+    }
+
     // Real-airbase derivation runs FIRST: it rewrites scenario_.airfield
     // (runway, taxi routes, parking) and resolves aircraft parking:auto
     // spawns before any entity is created.
@@ -1169,6 +1188,24 @@ void Simulation::push_air_picture_(double dt) {
     }
 }
 
+void Simulation::push_environment_scale_() {
+    // Task 73: the roster's fusions carry the environment's combined
+    // visual scale. Unconditional per-tick push — the weather steers
+    // continuously, so a change gate would pass almost every tick
+    // anyway, and the walk itself is O(roster) double writes (nothing
+    // next to the air-picture walk this tick also runs). With no
+    // environment configured the helper is never called (the tick
+    // gates on weather_) and every fusion keeps its 1.0 default — the
+    // zero-change rule.
+    const double scale = weather_->visual_scale();
+    for (const auto eid : aircraft_entities_) {
+        entities::EntityHandle h(eid, &world_);
+        auto* brain = h.get<f4::ai::BrainComponent>();
+        if (brain == nullptr) continue;
+        brain->sensors().set_visual_range_scale(scale);
+    }
+}
+
 void Simulation::push_safety_pictures() {
     // The arbiter's safety rungs are engine-agnostic: the host is their
     // entire view of terrain and traffic. Per tick, BEFORE update_all:
@@ -1759,6 +1796,15 @@ void Simulation::tick(double dt) {
     // every-tick refresh made the per-brain walk the merge-phase
     // collapse; see PERFORMANCE_PLAN.md §1). Combat-gated: unarmed
     // worlds keep the fusion's own world query (and its goldens).
+    if (weather_) {
+        // Task 73: the environment advances EVERY tick (the clock and
+        // the weather do not care about the ROE), and the roster's
+        // fusions re-carry the combined visual scale. Combat-gating
+        // would freeze the daylight at combat-off spawns — the exact
+        // environment the air-picture walk itself is allowed to skip.
+        weather_->advance(dt);
+        push_environment_scale_();
+    }
     if (combat_on) {
         push_air_picture_(dt);
     }

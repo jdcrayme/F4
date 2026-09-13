@@ -238,6 +238,23 @@ public:
     // --- Detection policy (M2 hook; see DetectionPolicy above) --------------
     /// Set (or clear, with nullptr) the detection-source override. Non-owning.
     void set_detection_policy(DetectionPolicy* policy) noexcept { policy_ = policy; }
+
+    /// Task 73 (Weather v1): the environment scale on the VISUAL
+    /// detection range — daylight band x weather visibility, computed by
+    /// the host from f4-world-types' shared scaling functions and pushed
+    /// here (f4-ai links no weather types; a plain double is the whole
+    /// interface, the same "the host computes, the brain consumes"
+    /// pattern as the DetectionPolicy). 1.0 (the default) = the clear-day
+    /// ceiling max_visual_range_nm is used verbatim — every pre-Task-73
+    /// caller is bit-identical. The scale applies to the legacy visual
+    /// rule only; a DetectionPolicy override owns its own environment
+    /// response (the policy replaced the rules wholesale).
+    void set_visual_range_scale(double scale) noexcept {
+        visual_range_scale_ = scale;
+    }
+    [[nodiscard]] double visual_range_scale() const noexcept {
+        return visual_range_scale_;
+    }
     [[nodiscard]] DetectionPolicy* detection_policy() noexcept { return policy_; }
 
     // --- Skill parameters (per AI_IMPLEMENTATION_PLAN §9) ---
@@ -284,6 +301,7 @@ private:
     SkillLevel skill_{SkillLevel::Rookie};
     Config cfg_{};
     DetectionPolicy* policy_{nullptr};
+    double visual_range_scale_{1.0};
 
     /// Ownship's TEAM tag, resolved at each rebuild. Own-relative
     /// hostility (M3 tactics): target.is_hostile = (target team !=

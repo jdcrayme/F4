@@ -15,3 +15,5 @@ endfunction()
 
 f4_add_test(test_class_table_json test_class_table_json.cpp)
 f4_add_test(test_layout_types test_layout_types.cpp)
+f4_add_test(test_day_night test_day_night.cpp)
+f4_add_test(test_weather test_weather.cpp)

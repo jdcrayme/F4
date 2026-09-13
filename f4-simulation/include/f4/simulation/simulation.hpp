@@ -55,6 +55,7 @@
 #include <vector>
 
 #include "f4/simulation/scenario.hpp"
+#include <f4/simulation/weather_system.hpp>  // Task 73: Weather v1
 #include <f4/simulation/campaign_bridge.hpp>  // AirbaseAirfieldMap (B.3+)
 
 #include <f4/terrain/terrain_source.hpp>  // TerrainSource (Path B1)
@@ -88,6 +89,16 @@ public:
     /// from the FM state for every aircraft entity, and records a snapshot
     /// per aircraft if recording is enabled.
     void tick(double dt);
+
+    /// Task 73 (Weather v1): the theater environment. Non-null only when
+    /// the scenario carries a "weather" or "time" block (the zero-change
+    /// rule: absent blocks = no environment system at all, and every
+    /// SensorFusion scale stays at its 1.0 default). Hosts (the QC tool,
+    /// the campaign session viewers) read the CURRENT state/band/visual
+    /// scale for display; the evolution itself runs inside tick().
+    [[nodiscard]] const f4::sim::WeatherSystem* environment() const noexcept {
+        return weather_.get();
+    }
 
     /// Write the flight recording to disk (if recording was enabled).
     void write_recording();
@@ -453,6 +464,11 @@ private:
     /// fusion will actually rebuild — `dt` is the tick's own dt, the
     /// same value update_all will hand the brains).
     void push_air_picture_(double dt);
+    /// Task 73: push the weather/day-night visual scale to every roster
+    /// brain's SensorFusion (unconditional, O(roster) double writes).
+    /// Never called when no environment is configured — the scale stays
+    /// at every fusion's 1.0 default (the zero-change rule).
+    void push_environment_scale_();
     void init_bubble_manager();             // Mode B: BubbleManager for ground/naval units
     void update_bubble();                   // Mode B: per-tick bubble update (in tick())
     void derive_real_airbase();   // airbase_source -> real ground layout
@@ -484,6 +500,7 @@ private:
 
     entities::EntityWorld world_;
     messaging::MessageBus bus_;
+    std::unique_ptr<f4::sim::WeatherSystem> weather_;  // Task 73; null = not configured
     std::unique_ptr<f4::ai::atc::IAirTrafficControl> atc_;
     std::unique_ptr<f4::recorder::FlightRecorder> recorder_;
     std::unique_ptr<f4::recorder::FcsTraceWriter> fcs_trace_;

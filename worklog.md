@@ -10454,3 +10454,108 @@ Stage Summary (Task 72 — the data surface is complete):
   gearPitchFactor, ...). Reconciling them is a flight-model task with
   harness revalidation, not a data task.
 - Delivery: single commit, format-patch onto origin/main (cb0c32c).
+
+---
+Task ID: 5 (Task 73 — Weather v1 + day/night: the theater environment surface)
+Agent: Z.ai Code (main)
+Task: Execute the next roadmap item after Tasks 70-72 landed upstream
+(69a1638). Per the approved Tier 1-5 roadmap, the remaining Tier 4 item:
+Weather + day/night v1 — the deterministic environment surface and the
+detection-model wiring.
+
+Work Log (plan):
+- Synced to origin/main (69a1638 "Updates" = the user's squash of the
+  Task 72 patch). Found the squash LOST the f16 criticalAOA fix: the
+  committed f16.json carries criticalAOA 0.0 in BOTH the typed view
+  (line 497 /aux/criticalAOA) and the 443-key auxAero record (line 932
+  /auxAero/criticalAOA), and rawAuxAeroData is {} — while Task 72's own
+  CHANGES entry claims "the restored 25.0" and the .dat fixture says
+  criticalAOA 25.0. Upstream's FleetReproducibility test must be red on
+  origin/main (regenerating f16.json from the fixture yields 25.0, not
+  the committed 0.0). Re-based the fix as its own commit on top — it
+  rides with this task's patch.
+- Surveyed the roadmap remainder: Tranche 0e done (Task 72; 0e.1 blocked
+  on an install, 0e.2 a small path migration), IR seekers + the IR
+  missile DONE (Tasks 68/69: the WVR heater path, seeker cone/range/
+  re-acquisition in f4-weapons), the AAR redesign DONE (the 8-state
+  USAF procedure in RefuelModule; Tranche B taxi-back still blocked on
+  PLT_PARK data). Weather + day/night: NOTHING existed (zero matches
+  across f4-*/Docs plans).
+- Recovered the reference: FreeFalcon's campaign/include/weather.h from
+  freefalcon-central (WeatherClass: the 3-state UpdateCondition model,
+  stratusBase/cumulusBase, the windMin/Med/Max band set, TemperatureAt,
+  turbFactor, lockedCondition, the per-grid GetCloudCover v2 surface).
+
+Work Log (results):
+- f4-world-types: day_night.hpp/.cpp (solar_elevation_deg via the
+  standard simplified position — Spencer declination + hour angle,
+  solar-time approximation documented; Night/CivilTwilight/Day bands at
+  the 0/-6 deg boundaries; seconds wrap, day-of-year clamp, southern-
+  hemisphere correct) and weather.hpp/.cpp (WeatherCondition
+  Clear/Hazy/Inclement + name round-trip; WeatherState with the three
+  wind bands; per-condition profiles with ordered severity; the visual
+  scale functions — weather (vis/40, floor 0.1) x daylight (1.0/0.5/
+  0.1), compound floor 0.05; wind_speed_at_ft/wind_dir_at_ft band
+  interpolation with the shortest-arc direction blend — the 350->10
+  through-north case is pinned).
+- f4-simulation: WeatherSystem (weather_system.hpp/.cpp) — the seeded
+  mt19937 Markov evolution on the 15-min cadence, per-check jittered
+  targets, 600 s exponential steering (no teleport; per-step bound
+  pinned), lockedCondition, the campaign clock (seconds-of-day wrap +
+  day rollover + day-of-year clamp), band refresh, visual_scale().
+  Scenario: EnvironmentConfig + the "weather"/"time" block parsers
+  (loud unknown-condition failure, the atc.mode convention). Simulation:
+  weather_ built ONLY when a block exists, advanced every tick (the
+  clock does not care about the ROE — the combat-gate placement was
+  caught and fixed in review), the roster push (O(roster) double writes
+  per tick), environment() accessor.
+- f4-ai: SensorFusion::set_visual_range_scale() — the plain-double
+  interface (no weather types cross the f4-ai boundary); the gate
+  multiplies the legacy visual rule only; DetectionPolicy overrides own
+  their own environment response; default 1.0 = bit-identical legacy.
+- campaign_qc: --weather/--time CLI flags inject the blocks verbatim
+  into the synthesized scenario; the summary's "environment" block
+  (emitted ONLY when configured — baseline summaries stay byte-
+  identical) reports condition/band/clock/visibility/cover/wind/
+  visual_scale.
+- Tests (+39): DayNight.* (10: noon/midnight/solstice pins, band
+  boundaries, the equinox band walk with the exact 18.5 h night
+  crossing, seconds wrap, day clamp, the southern-hemisphere season
+  flip), Weather* (10: name round-trip, the zero-change default state,
+  profile severity order, the scale floors, the compound floor, band
+  interpolation, shortest-arc, negative altitude), WeatherSystem.* (10:
+  determinism same-seed-equal/different-seed-diverges, locked freeze,
+  the band walk, day rollover, frozen clock, the steering bound),
+  ScenarioLoader.Environment*/Weather*/Time* (6: absence defaults, all
+  fields, bare-block presence unlock, loud bad condition, coexistence),
+  EnvironmentWiring.* (3: absent blocks -> nullptr + scale 1.0 after
+  ticks; midnight push lands 0.1 on the roster fusion; weather-only
+  scenario keeps the noon band with the hazy 0.3 scale).
+- E2E: campaign_qc over TestCamp.cam (449 flights) with --weather
+  '{"condition":"inclement","locked":true}' --time
+  '{"start_seconds":0}' reports environment visual_scale 0.05 (the
+  compound floor) at band night; the baseline run emits NO block.
+- Full headless ctest: 2,513 passed / 0 failed (+39; the 5 pre-existing
+  environment skips unchanged). The two victim_id unused-variable
+  warnings in bvr_intercept_harness.cpp:739 / wvr_merge_harness.cpp:683
+  are PRE-EXISTING on upstream HEAD (the owner's 6c986c4 lineage) —
+  verified by stash-building clean HEAD; left untouched to keep this
+  patch's surface focused.
+- Discipline: zero TODO/FIXME in all touched files; no new warnings in
+  the touched sources.
+
+Stage Summary (Task 73 — the theater has an environment):
+- The WeatherState + solar model are engine-agnostic data + pure
+  functions in f4-world-types; the evolution is a deterministic
+  simulation service; the detection wiring is a plain double through
+  the existing host-push pattern.
+- Every pre-Task-73 scenario is bit-identical (no blocks = no system,
+  scale 1.0, no summary block); every block is an explicit authoring
+  intent that fails loudly on garbage.
+- v1 boundaries documented: theater-uniform (per-grid cover is v2),
+  wind/temp/turb pinned but FM-consumer-less (the FM tranche does the
+  harness revalidation), the IR flyout keeps the authored card
+  (acquisition gates, not close-range tracking), the renderer keeps
+  its sky (viewer tint is a follow-up).
+- Delivery: two commits — the re-based f16 criticalAOA data repair +
+  this task — packaged as format-patch onto origin/main (69a1638).

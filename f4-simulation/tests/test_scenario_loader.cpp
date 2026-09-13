@@ -813,3 +813,89 @@ TEST(ScenarioLoader, LoadScenarioFileRejectsMissingDataDir) {
     EXPECT_THROW(load_scenario(tmp / "scenario.json"), std::exception);
     std::filesystem::remove_all(tmp);
 }
+
+// ---------------------------------------------------------------------------
+// Task 73 — the environment blocks ("weather" / "time"). Absence = the
+// zero-change defaults; presence is an authoring intent, and a malformed
+// one fails loudly (the atc.mode convention).
+// ---------------------------------------------------------------------------
+
+TEST(ScenarioLoader, EnvironmentDefaultsWhenBlocksAbsent) {
+    auto s = load_scenario_from_string(with_extra_block(R"("record": false)"));
+    EXPECT_FALSE(s.environment.weather_configured);
+    EXPECT_FALSE(s.environment.time_configured);
+    EXPECT_EQ(s.environment.condition, f4::world_types::WeatherCondition::Clear);
+    EXPECT_FALSE(s.environment.locked);
+    EXPECT_DOUBLE_EQ(s.environment.start_seconds_of_day, 43200.0);
+    EXPECT_EQ(s.environment.day_of_year, 172);
+    // advance_clock's default is true, but the SIMULATION only advances
+    // when the block exists — the flag alone never moves the clock.
+    EXPECT_TRUE(s.environment.advance_clock);
+    EXPECT_DOUBLE_EQ(s.environment.latitude_deg,
+                     f4::world_types::kDefaultTheaterLatitudeDeg);
+}
+
+TEST(ScenarioLoader, WeatherBlockParsesAllFields) {
+    auto s = load_scenario_from_string(with_extra_block(R"(
+        "weather": {
+            "condition": "inclement",
+            "locked": true,
+            "seed": 777,
+            "check_interval_s": 300
+        }
+    )"));
+    EXPECT_TRUE(s.environment.weather_configured);
+    EXPECT_EQ(s.environment.condition,
+              f4::world_types::WeatherCondition::Inclement);
+    EXPECT_TRUE(s.environment.locked);
+    EXPECT_EQ(s.environment.seed, 777u);
+    EXPECT_DOUBLE_EQ(s.environment.check_interval_s, 300.0);
+}
+
+TEST(ScenarioLoader, WeatherBlockPresenceUnlocksEvenBare) {
+    // The block's PRESENCE (not its contents) is what unlocks evolution:
+    // a bare "weather": {} means "evolve from clear, seeded default".
+    auto s = load_scenario_from_string(with_extra_block(R"(
+        "weather": {}
+    )"));
+    EXPECT_TRUE(s.environment.weather_configured);
+    EXPECT_EQ(s.environment.condition,
+              f4::world_types::WeatherCondition::Clear);
+    EXPECT_FALSE(s.environment.locked);
+}
+
+TEST(ScenarioLoader, WeatherUnknownConditionFailsLoud) {
+    // "hazey" must not silently run clear — the atc.mode convention.
+    const auto json = with_extra_block(R"(
+        "weather": { "condition": "hazey" }
+    )");
+    EXPECT_THROW(load_scenario_from_string(json), std::runtime_error);
+}
+
+TEST(ScenarioLoader, TimeBlockParsesAllFields) {
+    auto s = load_scenario_from_string(with_extra_block(R"(
+        "time": {
+            "start_seconds": 7200,
+            "day_of_year": 355,
+            "advance": false,
+            "latitude": 40.0
+        }
+    )"));
+    EXPECT_TRUE(s.environment.time_configured);
+    EXPECT_DOUBLE_EQ(s.environment.start_seconds_of_day, 7200.0);
+    EXPECT_EQ(s.environment.day_of_year, 355);
+    EXPECT_FALSE(s.environment.advance_clock);
+    EXPECT_DOUBLE_EQ(s.environment.latitude_deg, 40.0);
+}
+
+TEST(ScenarioLoader, BothBlocksCoexist) {
+    auto s = load_scenario_from_string(with_extra_block(R"(
+        "weather": { "condition": "hazy" },
+        "time": { "start_seconds": 64800, "day_of_year": 200 }
+    )"));
+    EXPECT_TRUE(s.environment.weather_configured);
+    EXPECT_TRUE(s.environment.time_configured);
+    EXPECT_EQ(s.environment.condition,
+              f4::world_types::WeatherCondition::Hazy);
+    EXPECT_DOUBLE_EQ(s.environment.start_seconds_of_day, 64800.0);
+}

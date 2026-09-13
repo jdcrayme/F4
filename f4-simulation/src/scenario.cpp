@@ -369,6 +369,65 @@ Scenario parse_scenario(f4::json::Reader& r) {
                 }
                 else                            skip_unknown(r);
             }
+        } else if (key == "weather") {
+            // Task 73 (Weather v1): the block's PRESENCE unlocks weather
+            // evolution for the run (absence = clear, frozen — the
+            // pre-Task-73 environment). Unknown condition names fail
+            // loudly, exactly like atc.mode: a misspelled "hazey" must
+            // not silently run clear.
+            s.environment.weather_configured = true;
+            r.expect('{');
+            bool wfirst = true;
+            while (!r.consume('}')) {
+                if (!wfirst) r.expect(',');
+                wfirst = false;
+                const auto k = r.read_string();
+                r.expect(':');
+                if (k == "condition") {
+                    const auto name = r.read_string();
+                    const auto parsed =
+                        f4::world_types::condition_from_name(name);
+                    if (!parsed.has_value()) {
+                        throw std::runtime_error(
+                            "scenario: weather.condition must be "
+                            "\"clear\", \"hazy\", or \"inclement\" (got \""
+                            "" + name + "\")");
+                    }
+                    s.environment.condition = *parsed;
+                }
+                else if (k == "locked")
+                    s.environment.locked = r.read_bool();
+                else if (k == "seed")
+                    s.environment.seed = static_cast<std::uint32_t>(
+                        r.read_number());
+                else if (k == "check_interval_s")
+                    s.environment.check_interval_s = r.read_number();
+                else                            skip_unknown(r);
+            }
+        } else if (key == "time") {
+            // Task 73: the campaign clock — solar time-of-day + day of
+            // year for the day/night model. Presence unlocks the clock
+            // (advance defaults true WITH the block present); absence is
+            // frozen noon.
+            s.environment.time_configured = true;
+            r.expect('{');
+            bool tfirst = true;
+            while (!r.consume('}')) {
+                if (!tfirst) r.expect(',');
+                tfirst = false;
+                const auto k = r.read_string();
+                r.expect(':');
+                if (k == "start_seconds")
+                    s.environment.start_seconds_of_day = r.read_number();
+                else if (k == "day_of_year")
+                    s.environment.day_of_year =
+                        static_cast<int>(r.read_number());
+                else if (k == "advance")
+                    s.environment.advance_clock = r.read_bool();
+                else if (k == "latitude")
+                    s.environment.latitude_deg = r.read_number();
+                else                            skip_unknown(r);
+            }
         } else if (key == "atc") {
             // Tier 3: ATC selection. "stub" (default) keeps the
             // grant-everything controller; "tower" runs the sequencing
