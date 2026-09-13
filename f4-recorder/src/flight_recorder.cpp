@@ -205,7 +205,8 @@ std::string FlightRecorder::to_json(const std::string& scenario_name) const {
                     w.number(e.missile_id);
             }
 
-            if (e.kind == CombatEventKind::MissileLaunched) {
+            if (e.kind == CombatEventKind::MissileLaunched ||
+                e.kind == CombatEventKind::BombReleased) {
                 next_field(); w.string("weapon_name"); w.raw(":");
                     w.string(e.weapon_name);
                 next_field(); w.string("speed_ft_s"); w.raw(":");
@@ -222,14 +223,17 @@ std::string FlightRecorder::to_json(const std::string& scenario_name) const {
 
             if (e.kind == CombatEventKind::MissileLaunched ||
                 e.kind == CombatEventKind::MissileDetonated ||
-                e.kind == CombatEventKind::GunFired) {
+                e.kind == CombatEventKind::GunFired ||
+                e.kind == CombatEventKind::BombReleased ||
+                e.kind == CombatEventKind::BombImpact) {
                 next_field(); w.string("position"); w.raw(": { ");
                 w.string("x"); w.raw(":"); w.number(e.position.x); w.raw(", ");
                 w.string("y"); w.raw(":"); w.number(e.position.y); w.raw(", ");
                 w.string("z"); w.raw(":"); w.number(e.position.z); w.raw(" }");
             }
 
-            if (e.kind == CombatEventKind::MissileDetonated) {
+            if (e.kind == CombatEventKind::MissileDetonated ||
+                e.kind == CombatEventKind::BombImpact) {
                 next_field(); w.string("end_cause"); w.raw(":");
                     w.string(e.end_cause);
                 next_field(); w.string("miss_distance_ft"); w.raw(":");
@@ -238,7 +242,14 @@ std::string FlightRecorder::to_json(const std::string& scenario_name) const {
                     w.number(e.flight_time_s);
             }
 
-            if (e.kind == CombatEventKind::DamageApplied) {
+            if (e.kind == CombatEventKind::DamageApplied ||
+                e.kind == CombatEventKind::BombImpact) {
+                // BombImpact carries the OBJECTIVE damage summary in the
+                // same fields (damage = features destroyed this hit,
+                // hit_points_after = the value-weighted destroyed %, killed
+                // = any feature destroyed — see combat_bridge.cpp's bomb
+                // subscriptions; the M5b ground-strike certificate reads
+                // them back through the round-trip).
                 next_field(); w.string("damage"); w.raw(":");
                     w.number(e.damage);
                 next_field(); w.string("hit_points_after"); w.raw(":");

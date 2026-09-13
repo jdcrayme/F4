@@ -44,6 +44,7 @@ add_library(f4-simulation STATIC
     src/campaign_war_harness.cpp
     src/bvr_intercept_harness.cpp
     src/wvr_merge_harness.cpp
+    src/ground_strike_harness.cpp
     src/combat_bridge.cpp
     src/combat_transcript.cpp
     src/bubble_manager.cpp
@@ -171,3 +172,18 @@ target_compile_features(bvr_intercept_qc PRIVATE cxx_std_20)
 add_executable(wvr_merge_qc tools/wvr_merge_qc.cpp)
 target_link_libraries(wvr_merge_qc PRIVATE f4-simulation)
 target_compile_features(wvr_merge_qc PRIVATE cxx_std_20)
+
+# ============================================================================
+# ground_strike_qc — the M5b end-to-end air-to-ground strike acceptance
+# tool (tools/ground_strike_qc.cpp). The combat-chain sibling of
+# bvr_intercept_qc / wvr_merge_qc: runs a strike scenario headless
+# through GroundStrikeHarness, composes the strike world (the objective,
+# the bomb station, the StrikeModule + mission-plan binding), writes the
+# three artifacts (result + summary + diary), and derives the exit-code
+# verdict. See the tool's header comment + Docs/COMBAT_CHAIN_M4_PLAN.md
+# §6 / Docs/COMBAT_CHAIN_M5_PLAN.md §6 (the deferral this closes) for
+# the exit-code table. Links f4-simulation only.
+# ============================================================================
+add_executable(ground_strike_qc tools/ground_strike_qc.cpp)
+target_link_libraries(ground_strike_qc PRIVATE f4-simulation)
+target_compile_features(ground_strike_qc PRIVATE cxx_std_20)

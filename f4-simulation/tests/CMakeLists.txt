@@ -128,6 +128,21 @@ if(TARGET convert_golden_fixtures)
     add_dependencies(test_wvr_merge_harness convert_golden_fixtures)
 endif()
 
+# M5b — the air-to-ground strike acceptance harness (the A/G rung both
+# COMBAT_CHAIN_M4_PLAN §6 and COMBAT_CHAIN_M5_PLAN §6 deferred). Pins the
+# five verdicts + the MD5 certificate + the ledger cross-check over the
+# shipped ground_strike.json scenario, the refusal contract, the
+# no-ordnance arming stall, the no-delivery-waypoint abort, and the
+# single-run determinism skip. See test_ground_strike_harness.cpp.
+f4_simulation_add_test(test_ground_strike_harness test_ground_strike_harness.cpp)
+target_compile_definitions(test_ground_strike_harness PRIVATE
+    F4_SCENARIOS_DIR="${CMAKE_BINARY_DIR}/scenarios"
+    F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}"
+)
+if(TARGET convert_golden_fixtures)
+    add_dependencies(test_ground_strike_harness convert_golden_fixtures)
+endif()
+
 # C6 — arming the campaign flights: the arm mechanics (role doctrine,
 # component set, policy handoff, idempotence), the Simulation surface
 # (late-spawn arm + counters), and the ARMED war over the routed kunsan
