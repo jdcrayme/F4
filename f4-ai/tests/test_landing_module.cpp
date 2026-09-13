@@ -714,8 +714,10 @@ TEST_F(PatternTestFixture, PatternWalksUpwindCrosswindDownwindBaseFinal) {
     ASSERT_EQ(mod.state(), LandingState::InterceptFinal);
 
     // Established inbound on the centerline, ON the beam and settled
-    // (STAB-E23/E45: 4000 ft out the beam is ~288 ft): OnFinal + request.
-    s = at_pos(-300.0, 1000.0, 300.0, 0.2);   // along = -4000, beam ~288
+    // (STAB-E52: the establish floor moved to 7,000 ft out, so the walk's
+    // establish point moves out with it — at 8,000 ft out the beam is
+    // ~498 ft): OnFinal + request.
+    s = at_pos(-300.0, -3000.0, 500.0, 0.2);   // along = -8000, beam ~498
     mod.update(0.1, s.get());
     EXPECT_EQ(mod.state(), LandingState::OnFinal);
     EXPECT_TRUE(cleared);

@@ -866,7 +866,7 @@ std::string to_world_json(const CamArchive& cam, const WorldJsonOptions& opts) {
                                             o << ", \"vehicle_name\": \"" << escape_string(vcd->name) << "\""
                                               << ", \"vehicle_nctr\": \"" << escape_string(vcd->nctr) << "\""
                                               << ", \"hit_points\": " << vcd->hit_points
-                                              << ", \"max_speed\": "
+                                              << ", \"max_speed\": " << vcd->max_speed
                                               // Real-data tier (Task 64): the VCD per-vehicle RCS factor —
                                               // emitted only when non-zero, so every existing world JSON
                                               // stays byte-identical.

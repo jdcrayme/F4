@@ -133,18 +133,66 @@ AIControlOutput AirSteering::steer(double desired_heading_rad,
     // leak model as the speed integral). Eliminates the P-only steady-state
     // beam offset. Clamped to alt_integral_max so transients can't wind it
     // to the VS cap.
+    // STAB-E56: Hanüs back-calculation anti-windup on the altitude
+    // integral — the same ONE scheme the P4.1 FCS pitch integrator uses.
+    // With the E53 split (the integral riding on top of the windowed P)
+    // a long catch-down railed the total VS command at +-max_vs and the
+    // integral wound to its clamp; when the beam was caught the wound
+    // state kept pushing (a -150 fpm stale descent through the 600 s
+    // leak) and the ride sank BELOW the beam near the threshold — the
+    // straight-in touchdown moved to -310 ft (before the pavement).
+    // Back-calculation: when the pre-clamp total exceeds the clamp, feed
+    // the excess back into the integral INPUT with a 1 s tracking time
+    // constant, so the state converges to the value that just sustains
+    // the command at the clamp — no windup, bumpless unwind by
+    // construction (M6/P4.1's mechanism, one loop up).
     alt_integral_ = alt_integral_ * (1.0 - 1.0 / 600.0)
                   + alt_integral_gain * alt_err * (1.0 / 60.0);
     alt_integral_ = std::clamp(alt_integral_, -alt_integral_max, alt_integral_max);
+    // STAB-E53: the window bounds the PROPORTIONAL correction only; the
+    // altitude integral rides ON TOP of it (inside its own clamp). The old
+    // law clamped P+I together, so whenever the P demand reached the
+    // window the integral was clamped with it — every windowed altitude
+    // loop was secretly type-0: a standing altitude error the integral
+    // could never null (measured: the pattern base leg sagged ~186 ft
+    // under a +186 ft / +558 fpm demand it could never satisfy, and the
+    // pattern intercept's catch-down stalled ~400 ft above the beam —
+    // the establish beam gate never passed). The window's smooth-ride
+    // semantics are unchanged (the P contribution is windowed exactly as
+    // before); the integral still carries its own anti-windup clamp and
+    // the sum is still bounded by max_vs_fpm below.
     double vs_corr = vs_gain * alt_err + alt_integral_;
-    // STAB-E10: when enabled, clamp the CORRECTION around the path
-    // feedforward with an error-scaled window: tight near the path (smooth
-    // beam ride), full authority far from it (from-below capture). The
-    // window is always clamped by max_vs_fpm regardless.
-    if (vs_corr_max_fpm >= 0.0) {
+    if (window_excludes_integral && vs_corr_max_fpm >= 0.0) {
+        // STAB-E53 (landing flows only): the window bounds the
+        // PROPORTIONAL correction; the integral rides on top so the loop
+        // is type-1 (the pattern base leg sagged ~186 ft under a demand
+        // the coupled clamp could never satisfy).
+        const double window = std::clamp(vs_corr_max_fpm + 1.5 * std::fabs(alt_err),
+                                          0.0, max_vs_fpm);
+        vs_corr = std::clamp(vs_gain * alt_err, -window, window) + alt_integral_;
+    } else if (vs_corr_max_fpm >= 0.0) {
+        // STAB-E10 (the historical form): the window clamps P+I together.
         const double window = std::clamp(vs_corr_max_fpm + 1.5 * std::fabs(alt_err),
                                           0.0, max_vs_fpm);
         vs_corr = std::clamp(vs_corr, -window, window);
+    }
+    // STAB-E56 Hanüs step (landing flows — same scoping as E53): when the
+    // total command saturates, the excess feeds back into the integral
+    // (T_aw = 1 s) so the state converges to the value that just sustains
+    // the clamp — a long catch-down cannot wind it past the beam.
+    if (window_excludes_integral && vs_corr_max_fpm >= 0.0) {
+        const double raw = std::clamp(in.vs_ff_fpm + vs_corr,
+                                      -max_vs_fpm, max_vs_fpm);
+        const double excess = raw - (in.vs_ff_fpm + vs_corr);
+        alt_integral_ += excess * (1.0 / 60.0) / 1.0;  // T_aw = 1 s
+        alt_integral_ = std::clamp(alt_integral_, -alt_integral_max,
+                                   alt_integral_max);
+        vs_corr = std::clamp(vs_gain * alt_err,
+                             -std::clamp(vs_corr_max_fpm + 1.5 * std::fabs(alt_err),
+                                         0.0, max_vs_fpm),
+                             std::clamp(vs_corr_max_fpm + 1.5 * std::fabs(alt_err),
+                                        0.0, max_vs_fpm))
+                  + alt_integral_;
     }
     const double vs_target_raw = std::clamp(in.vs_ff_fpm + vs_corr,
                                             -max_vs_fpm, max_vs_fpm);

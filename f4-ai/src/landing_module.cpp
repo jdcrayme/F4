@@ -65,7 +65,17 @@ LandingModule::LandingModule()
     // drifted slowly high with no authority to correct (the ride floats
     // until the alt error grows the E10 window past the cap). The cap
     // must exceed |beam ff| + the correction window: -980 - 300 = -1280.
-    air_steering.max_vs_fpm = 1400.0;
+    // STAB-E65: 1,400 -> 1,800. The pattern-mode intercept establishes
+    // ~350 ft above the beam (the catch-down equilibrium) and the ride
+    // must null it before the deck: at 1,400 the commanded catch ran
+    // -1,400 against the beam's own -1,080 — a ~70 fpm NET after the
+    // FCS delivery gap — the catch was still 200 ft high at the threshold
+    // and the firm arrival touched 2,639 ft out (the band ends at 2,500).
+    // 1,800 doubles the net to ~470 fpm; the beam ride itself is
+    // unaffected (it commands the beam rate +- residuals, far below the
+    // clamp).
+    air_steering.max_vs_fpm = 1800.0;
+    air_steering.window_excludes_integral = true;  // STAB-E53
     // PHUG-P4 retune (findings §3.2 — M3 one level up): the altitude
     // integral's clamp is sized to the TRIM NEED, not the capture
     // authority. The STAB-E7 integral exists to null the P-only
@@ -346,7 +356,13 @@ LandingModule::build_sm()
                 req.aircraft_id = ownship_id_;
                 bus_->publish(req);
             }
-        })
+        
+            // STAB-E48: arm the past-the-fix geometric capture for THIS
+            // approach handoff only (start_in_approach spawns established
+            // past the entry fix). Any GoAround disarms it — the climb-out
+            // is itself past the fix, and re-capturing mid-missed-approach
+            // ping-pongs the state machine.
+            past_fix_capture_armed_ = true;})
         .on_enter(LandingState::ProceedToFix, [this](const LandingEvent&) {
             // Restart the abeam-capture dwell timer (guards the fix
             // capture — see check_fix_reached).
@@ -412,6 +428,8 @@ LandingModule::build_sm()
                 msg.reason = cleared_to_land_ ? "threshold_overflown" : "not_cleared";
                 bus_->publish(msg);
             }
+        
+            past_fix_capture_armed_ = false;  // STAB-E48: re-fly the procedure
         })
         .build();
 }
@@ -732,7 +750,26 @@ double LandingModule::localizer_heading_rad() const {
     // is continuous with the scaled-lead law's cut there (~15 deg) — the
     // old 0.0015 gain produced a 34-deg command at the boundary, a bank
     // step UP right where the intercept should be relaxing.
-    const double corr = std::clamp(localizer_gain * xtrack,
+    //
+    // STAB-E47 (P4.3 lateral damping, measured): the P-only localizer
+    // chases with the bank cascade's response lag and WEAVES — the
+    // digi_full_mission final crosses the centerline every ~13 s with a
+    // ~27 s period and NO decay (±250 ft limit cycle, phi ±8, psi ±5;
+    // touchdown cross 180 ft, max tracking lateral 257 ft — both gates
+    // missed by exactly this weave). The closing rate is the aircraft's
+    // own cross-course velocity: feeding it back (k2 = 0.008 rad per
+    // ft/s, design zeta ~= 1.0 nominal against omega_n = sqrt(g·k1) =
+    // 0.127 rad/s, the heading-loop lag eats the rest) turns the tracker
+    // into a damped 2nd-order loop. The contribution is clamped to
+    // +-0.15 rad (8.6 deg) so a wide intercept cut (heading 25+ deg off
+    // course inside the 600-ft band) cannot saturate the total command.
+    const double v_fps = std::max(100.0, current_vcas_kts_ * 1.68781);
+    const double v_cross_fps = v_fps * std::sin(current_heading_rad_
+                                                - runway_heading_rad_);
+    const double damp_corr = std::clamp(localizer_damp_gain * v_cross_fps,
+                                        -localizer_damp_max_rad,
+                                        localizer_damp_max_rad);
+    const double corr = std::clamp(localizer_gain * xtrack + damp_corr,
                                    -max_localizer_corr_rad, max_localizer_corr_rad);
     return runway_heading_rad_ - corr;
 }
@@ -801,6 +838,44 @@ bool LandingModule::waypoint_captured(const geo::WorldPosition& target,
 // ============================================================================
 
 void LandingModule::check_fix_reached() {
+    // STAB-E48: past-the-fix capture (the start_in_approach handoff). An
+    // aircraft ALREADY established inbound past the entry fix — projection
+    // onto the course beyond the fix, inside the lateral corridor, rolling
+    // out on the course heading, not climbing away — has effectively
+    // arrived: flying 8,000 ft BACK to the fix is not a procedure. The
+    // landing_only scenario spawns exactly there (30k ft out, on the
+    // centerline, at the approach fix altitude), and the old law held
+    // ProceedToFix forever (the abeam capture needs a 30 s dwell AND the
+    // fix behind the nose; the orbit guard made both unreachable).
+    //
+    // The Tranche-38 pattern-altitude gate below does NOT apply here: that
+    // gate protects the ENROUTE arrival that still has 2,500 ft to
+    // descend; this arm admits only a non-climbing aircraft already on the
+    // approach (the InterceptFinal do-not-climb latch owns the altitude
+    // from there, and the go-around climb-out (vs > 500) is excluded so a
+    // Reintercept cannot shortcut through this arm mid-missed-approach).
+    {
+        const double fx = std::sin(runway_heading_rad_);
+        const double fy = std::cos(runway_heading_rad_);
+        const double past_fix = (current_position_.x - entry_fix_.x) * fx
+                              + (current_position_.y - entry_fix_.y) * fy;
+        const double lat_fix = (current_position_.x - entry_fix_.x)
+                                   * std::cos(runway_heading_rad_)
+                             - (current_position_.y - entry_fix_.y)
+                                   * std::sin(runway_heading_rad_);
+        const double hdg_off = std::abs(AirSteering::heading_error(
+            runway_heading_rad_, current_heading_rad_));
+        if (past_fix_capture_armed_ &&
+            past_fix > 0.0 &&
+            std::abs(lat_fix) < std::max(establish_lateral_ft, 1000.0) &&
+            hdg_off < 0.35 &&
+            current_vs_fpm_ < 500.0) {
+            past_fix_capture_armed_ = false;
+            sm_.process(fly_traffic_pattern ? LandingEvent::PatternEntry
+                                            : LandingEvent::FixReached);
+            return;
+        }
+    }
     // Off-nose (abeam) capture with a dwell timer guard (same rationale
     // and same pitfall as NavigationModule — see the long comment there:
     // no timer => possible insta-skip while heading away or an orbit
@@ -932,17 +1007,31 @@ void LandingModule::check_established() {
                                ? std::max(establish_lateral_ft, 1000.0)
                                : establish_lateral_ft;
     // STAB-E23: vertical gate — established means on the BEAM too, and
-    // (STAB-E45) SETTLED: |vs| < 900. The old gate handed OnFinal a
-    // +280 ft / +1,800 fpm climbing transient at 15k ft out (fix17);
-    // the calm final needs ~30 s to damp such a transient and 15,000 ft
-    // of track is only ~45 s — the balloon peaked +1,500 ft above the
-    // beam and the threshold was crossed at 1,300 ft. Refusing unsettled
-    // handoffs keeps the ride in its linear band from the first second.
+    // (STAB-E45/E55) SETTLED. The E45 form (|vs| < 900) measured a
+    // level-hold context; it conflates "settled" with "level" and can
+    // never pass on an honest beam-riding catch-down (the pattern-mode
+    // intercept rides the beam at -1,080..-1,150 fpm — a settled loop
+    // equilibrium the old gate reads as a -1,150 fpm transient and
+    // refuses forever). SETTLED means IN EQUILIBRIUM WITH THE COMMANDED
+    // PATH: the aircraft's VS within 900 fpm of the VS the control law
+    // itself commanded last frame (AirSteerDebug::vs_target_fpm — the
+    // law's own demand). The E45 transient refusal is preserved: the
+    // fix17 case (a +280 ft / +1,800 fpm climbing balloon against a
+    // level/beam command) still fails by ~900+ fpm of command tracking
+    // error, and the calm final still receives a loop in its linear band.
     const double beam_err = std::abs(current_alt_msl_ft_ - glide_slope_alt_ft());
-    const double settle_err = std::abs(current_vs_fpm_ + 0.0);
+    const double vs_commanded = pattern_steering.last_debug().vs_target_fpm;
+    const double settle_err = std::abs(current_vs_fpm_ - vs_commanded);
     if (hdg_err < establish_hdg_tol_rad &&
         std::abs(course_lateral_ft()) < lat_tol &&
-        beam_err < 300.0 &&
+        // STAB-E54: establish_beam_tol_ft IS the configured gate — the
+        // hardcoded 300.0 here was a silent re-tighten of the E23 knob
+        // (the header default 400 never took effect). The pattern-mode
+        // intercept rides the beam-catch-down equilibrium ~340 ft above
+        // the beam at the floor: inside the configured 400, outside the
+        // dead-code 300 — GoAround every cycle on a gate that was never
+        // the documented one.
+        beam_err < establish_beam_tol_ft &&
         settle_err < 900.0) {
         sm_.process(LandingEvent::Established);
     }
@@ -973,9 +1062,19 @@ void LandingModule::check_flare_or_goaround() {
     // 9,500 ft short while still 200 ft below the beam — the flare law
     // cannot salvage that and touchdown would be far short of the
     // pavement). Go around and re-fly instead of flaring at the grass.
+    // STAB-E64: the flare fires only when the sink is ARRESTABLE — the
+    // E57/E58/E60 probe chain measured that an entry beyond ~-1,250 fpm
+    // cannot be rounded out inside the FCS alpha lag (~2.5 s): the stored
+    // G arrives at the deck and the aircraft bounces (the pattern-mode
+    // catch-down rode into the flare still converging at -1,450..-1,850).
+    // A firm arrival (the ride continues through the gate; the sink
+    // guardian bounds the dive) beats a bounced flare that never lands.
     if (current_alt_agl_ft_ < flare_agl_ft) {
         if (course_along_ft() > -missed_along_ft) {
-            sm_.process(LandingEvent::Flare);
+            if (std::fabs(current_vs_fpm_) < 1250.0) {
+                sm_.process(LandingEvent::Flare);
+            }
+            // else: hold the ride — a firm touchdown follows.
         } else {
             sm_.process(LandingEvent::GoAround);
         }
@@ -1346,16 +1445,66 @@ AIControlOutput LandingModule::controls_for_flare() const {
     // aircraft is sinking faster than −400 fpm, add pitch regardless of
     // the energy prediction — the energy says "short" but the sink says
     // "hard". Positive sink_err = sinking faster than target.
-    const double target_sink_fpm = -400.0;
+    // STAB-E61: -700, not -400. The flare's mid-phase descent must clear
+    // the ground-effect float inside the 15 s flare timeout: measured,
+    // the -400 target held the aircraft at ~90-190 ft descending -350 —
+    // the timeout fired GoAround on every attempt (the arrest itself is
+    // unaffected: it is driven by the ENTRY sink, not this target). The
+    // touchdown sinks ~-700 fpm — within the FM's gear envelope.
+    const double target_sink_fpm = -700.0;
     const double sink_err = target_sink_fpm - current_vs_fpm_;
-    const double sink_floor_deg = std::clamp(sink_err / 300.0, -3.0, 5.0);
-    // The floor only ever adds pitch (prevents diving); it never overrides
-    // a "you're long, pitch up" command from the energy driver.
-    flare_pitch_adj = std::max(flare_pitch_adj, sink_floor_deg);
+    // STAB-E60 gain note: the floor's rate-to-pitch gain (1/300 deg per
+    // fpm) through the ~2.5 s FCS alpha lag hunted at ~7 s (the arrest
+    // overshot, the push overshot, repeat). 1/600 puts the hunt inside
+    // the loop's damping; the +-3/5 deg clamps still bound the authority.
+    const double sink_floor_deg = std::clamp(sink_err / 600.0, -3.0, 5.0);
+    // STAB-E60: the floor is SYMMETRIC at the target level. The old
+    // max() kept only the floor's pull half — a flare that crossed the
+    // -400 fpm target into a climb had NO push path (the energy driver's
+    // +0.5 deg trim held the nose up): measured, the arrest overshot into
+    // a ~60 ft balloon and the flare hunted +-800 fpm until the 15 s
+    // timeout fired GoAround. Sinking too fast -> the floor pulls (as
+    // before); climbing/balloon -> the floor pushes the target down, and
+    // the energy trim still owns the slow aim-point management.
+    if (sink_floor_deg >= 0.0) {
+        flare_pitch_adj = std::max(flare_pitch_adj, sink_floor_deg);
+    } else {
+        // The push side is a bounded DAMPER on top of the energy trim, not
+        // an override: an override erased the energy driver's fast-vs-slow
+        // distinction whenever the sink was above the target (the flare
+        // unit test pinned exactly that distinction).
+        flare_pitch_adj = std::clamp(flare_pitch_adj + sink_floor_deg, -2.0, 3.0);
+    }
     const double target = (flare_pitch_deg + flare_pitch_adj) * D2R;
+    // STAB-E57/E58 (REVERTED with measurement): driving the sink error
+    // into the STICK directly (even symmetric, even clamp-open) rails the
+    // FCS at 2 G for the ~2.5 s of the FCS alpha lag, and the stored G
+    // then arrives at once — the flare ballooned +4,100 fpm through 240 ft
+    // and the balloon valve fired GoAround on every attempt. The flare
+    // arrest must ride the ATTITUDE loop (the target rises via the sink
+    // floor above, the rotation rate follows the FCS lag smoothly), and
+    // the entry must carry the height budget the lag spends — that is
+    // flare_agl_ft 130 (E49/E57 probe: ~50-60 ft of lag loss at beam-rate
+    // sink + ~30 ft of round-out). The command clamp opens to -0.25 (E59):
+    // after the arrest the flare HUNTS at ~98 ft — the attitude loop needs
+    // a bounded push (the nose 3 deg above the decaying target) to descend
+    // out of the ground-effect float, and the old -0.1 floor swallowed it
+    // until the 15 s flare timeout fired GoAround. -0.25 still cannot dive
+    // (the arrest overshoot push is capped by the same floor).
     out.pitch_cmd = std::clamp(flare_pitch_gain * (target - current_pitch_rad_),
-                               -0.1, 0.5);
-    out.roll_cmd = std::clamp(-2.0 * current_roll_rad_, -0.3, 0.3);  // wings level
+                               -0.25, 0.5);
+    // STAB-E63: the flare keeps flying the LOCALIZER with a bounded-bank
+    // heading chase (wings-level let the flare-start residual plus ~8 s of
+    // drift ride to the touchdown — 75 ft measured vs the 50 ft gate). The
+    // PD heading hold nulls the residual heading and the cross-track drift
+    // with banks bounded ~4 deg: the stick saturates at 0.12 (roll rate
+    // ~21 deg/s) only for a large error, and the FCS roll loop's own rate
+    // damping carries the rest.
+    const double lat_hdg_err = AirSteering::heading_error(localizer_heading_rad(),
+                                                          current_heading_rad_);
+    out.roll_cmd = std::clamp(1.2 * lat_hdg_err
+                                  - 0.6 * current_roll_rate_radps_,
+                              -0.12, 0.12);
     return out;
 }
 

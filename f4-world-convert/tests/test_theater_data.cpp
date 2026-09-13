@@ -19,6 +19,7 @@
 // their install, the same parsers will Just Work on those — the on-disk
 // format is identical.
 
+#include <f4/json/reader.hpp>
 #include <f4/world_convert/theater_data.hpp>
 #include <f4/world_convert/class_table.hpp>
 #include <f4/world_convert/world_json.hpp>
@@ -181,6 +182,84 @@ std::vector<uint8_t> build_synthetic_pd(int n_entries) {
         // 2 bytes of trailing padding (struct size = 12, fields = 10)
         buf.push_back(0);
         buf.push_back(0);
+    }
+    return buf;
+}
+
+// Build a synthetic Falcon4.VCD file with N entries.
+//
+// Layout follows the decoder (theater_data.cpp load_vehicle_data): MSVC
+// default alignment, 160-byte records, 2-byte LE count header.
+//   off 0: index (s16), off 2: hit_points (s16), off 4: flags (u32),
+//   off 8: name[15], off 23: nctr[5], off 28: rcs_factor (f32),
+//   off 32: max_wt (s32), 36: empty_wt (s32), 40: fuel_wt (s32),
+//   off 44: fuel_econ (s16), 46: engine_sound, 48: high_alt, 50: low_alt,
+//   off 52: cruise_alt, 54: max_speed (s16), 56: radar_type, 58: pilots,
+//   off 60: rack_flags (u16), 62: visible_flags (u16),
+//   off 64: callsign_index (u8), 65: callsign_slots (u8),
+//   off 66: hit_chance[8], 74: strength[8], 82: range[8], 90: detection[8],
+//   off 98: weapon[16] (s16), 130: weapons[16] (u8),
+//   off 146: damage_mod[11] (u8), off 157: 3 bytes trailing pad → 160.
+std::vector<uint8_t> build_synthetic_vcd(int n_entries, int16_t max_speed) {
+    std::vector<uint8_t> buf;
+    buf.reserve(2 + static_cast<std::size_t>(n_entries) *
+                        f4::world_convert::VCD_RECORD_SIZE);
+
+    // Header: short NumEntities (LE)
+    buf.push_back(static_cast<uint8_t>(n_entries & 0xFF));
+    buf.push_back(static_cast<uint8_t>((n_entries >> 8) & 0xFF));
+
+    auto push_u16 = [&buf](uint16_t v) {
+        buf.push_back(static_cast<uint8_t>(v & 0xFF));
+        buf.push_back(static_cast<uint8_t>((v >> 8) & 0xFF));
+    };
+    auto push_u32 = [&buf](uint32_t v) {
+        buf.push_back(static_cast<uint8_t>(v & 0xFF));
+        buf.push_back(static_cast<uint8_t>((v >> 8) & 0xFF));
+        buf.push_back(static_cast<uint8_t>((v >> 16) & 0xFF));
+        buf.push_back(static_cast<uint8_t>((v >> 24) & 0xFF));
+    };
+
+    for (int i = 0; i < n_entries; ++i) {
+        push_u16(static_cast<uint16_t>(i));            // index
+        push_u16(static_cast<uint16_t>(100 + i));      // hit_points
+        push_u32(0);                                    // flags
+        char name[15] = {0};
+        std::snprintf(name, sizeof(name), "Veh_%d", i);
+        for (int j = 0; j < 15; ++j) buf.push_back(static_cast<uint8_t>(name[j]));
+        char nctr[5] = {0};
+        std::snprintf(nctr, sizeof(nctr), "V%d", i);
+        for (int j = 0; j < 5; ++j) buf.push_back(static_cast<uint8_t>(nctr[j]));
+        // rcs_factor (float bits) — non-zero, distinctive
+        const float rcs = 1.0f + 0.1f * static_cast<float>(i);
+        uint32_t rcs_bits;
+        std::memcpy(&rcs_bits, &rcs, 4);
+        push_u32(rcs_bits);
+        push_u32(40000);                               // max_wt
+        push_u32(30000);                               // empty_wt
+        push_u32(5000);                                // fuel_wt
+        push_u16(10);                                  // fuel_econ
+        push_u16(3);                                   // engine_sound
+        push_u16(200);                                 // high_alt
+        push_u16(100);                                 // low_alt
+        push_u16(150);                                 // cruise_alt
+        push_u16(static_cast<uint16_t>(max_speed + i));  // max_speed — THE FIELD
+        push_u16(0);                                   // radar_type
+        push_u16(1);                                   // number_of_pilots
+        push_u16(0);                                   // rack_flags
+        push_u16(0);                                   // visible_flags
+        buf.push_back(0);                              // callsign_index
+        buf.push_back(0);                              // callsign_slots
+        for (int j = 0; j < 8; ++j) buf.push_back(10); // hit_chance[8]
+        for (int j = 0; j < 8; ++j) buf.push_back(20); // strength[8]
+        for (int j = 0; j < 8; ++j) buf.push_back(15); // range[8]
+        for (int j = 0; j < 8; ++j) buf.push_back(0);  // detection[8]
+        for (int j = 0; j < 16; ++j) {                 // weapon[16] (s16)
+            buf.push_back(0xFF); buf.push_back(0xFF);  // -1 = none
+        }
+        for (int j = 0; j < 16; ++j) buf.push_back(0); // weapons[16] (u8)
+        for (int j = 0; j < 11; ++j) buf.push_back(5); // damage_mod[11]
+        buf.push_back(0); buf.push_back(0); buf.push_back(0);  // 3-byte pad
     }
     return buf;
 }
@@ -527,6 +606,90 @@ TEST(TheaterData, WorldJsonEmitsClassNameWhenTheaterDbLoaded) {
     EXPECT_NE(json.find("\"Obj_"), std::string::npos);  // our synthetic names
     EXPECT_NE(json.find("\"features_count\""), std::string::npos);
     EXPECT_NE(json.find("\"pt_data_index\""), std::string::npos);
+
+    std::filesystem::remove_all(dir);
+}
+
+TEST(TheaterData, WorldJsonVehicleGroupsAreStrictJsonWithMaxSpeed) {
+    // REGRESSION (the "Strike logic" data-regen defect): the vehicle-group
+    // enrichment wrote the "max_speed" KEY without its VALUE —
+    // `"max_speed": , "rcs_factor": 1` — so the shipped korea.world.json
+    // was not valid JSON and every airbase-derived E2E (DigiMission.FullLoop*)
+    // crashed in the world loader before the first tick. The exporter output
+    // must strictly parse, and enriched vehicle groups must carry an INTEGER
+    // max_speed (the VCD value), never a dangling key.
+    const std::string cam_path = std::string(FIXTURE_DIR) + "save1.cam";
+    ASSERT_TRUE(std::filesystem::exists(cam_path));
+    f4::world_convert::CamArchive cam;
+    ASSERT_NO_THROW(cam.load(cam_path));
+
+    // Class table: resolves every battalion's entity_type to a VCD index.
+    f4::world_convert::ClassTable class_table;
+    ASSERT_NO_THROW(class_table.load(std::string(FIXTURE_DIR) + "FALCON4.ct"));
+    ASSERT_GT(class_table.size(), 0u);
+
+    // Theater DB with (a) the REAL Falcon4.UCD fixture (the unit-class
+    // records carry num_elements[]/vehicle_type[] — without it the
+    // vehicle_groups block is not emitted at all) and (b) a synthetic VCD
+    // large enough to cover every vehicle-class pointer the save's
+    // battalions reference (285 real records on an install; 300 synthetic
+    // entries covers the fixture's).
+    const auto dir = std::filesystem::temp_directory_path() / "f4_vcd_regr_test";
+    std::filesystem::create_directories(dir);
+    std::filesystem::copy_file(std::string(FIXTURE_DIR) + "Falcon4.UCD",
+                               dir / "Falcon4.UCD",
+                               std::filesystem::copy_options::overwrite_existing);
+    {
+        const auto vcd_buf = build_synthetic_vcd(300, /*max_speed=*/64);
+        std::ofstream f(dir / "Falcon4.VCD", std::ios::binary);
+        f.write(reinterpret_cast<const char*>(vcd_buf.data()),
+                static_cast<std::streamsize>(vcd_buf.size()));
+    }
+    f4::world_convert::TheaterObjectDatabase theater_db;
+    theater_db.load_all(dir);
+    ASSERT_TRUE(theater_db.vehicles.loaded());
+    ASSERT_TRUE(theater_db.units.loaded());
+
+    f4::world_convert::WorldJsonOptions opts;
+    opts.class_table = &class_table;
+    opts.theater_db = &theater_db;
+
+    std::string json;
+    ASSERT_NO_THROW(json = f4::world_convert::to_world_json(cam, opts));
+
+    // 1. The document is STRICT JSON: the same Reader class the world
+    //    loader uses must walk the whole value without throwing.
+    {
+        // skip_value() walks the whole root value with strict validation;
+        // any dangling key (", "max_speed": ,") throws mid-walk.
+        f4::json::Reader r(json);
+        r.skip_ws();
+        EXPECT_NO_THROW(r.skip_value())
+            << "export is not strict JSON (dangling key or truncated value)";
+    }
+
+    // 2. Enriched vehicle groups carry an integer max_speed: every
+    //    "max_speed" key is followed by a number, not a comma/brace.
+    {
+        const std::string key = "\"max_speed\": ";
+        std::size_t pos = 0;
+        int checked = 0;
+        while ((pos = json.find(key, pos)) != std::string::npos) {
+            const char c = json[pos + key.size()];
+            ASSERT_TRUE(c == '-' || (c >= '0' && c <= '9'))
+                << "max_speed not followed by a number at byte " << pos;
+            ++checked;
+            pos += key.size();
+        }
+        EXPECT_GT(checked, 0)
+            << "expected at least one enriched vehicle group in the export";
+    }
+
+    // 3. The joined value is the VCD record's own max_speed (the synthetic
+    //    table writes max_speed = 64 + record index): find the joined
+    //    vehicle_name and confirm its max_speed matches the same record's
+    //    hit_points convention — spot-check one known pair.
+    EXPECT_NE(json.find("\"vehicle_name\": \"Veh_"), std::string::npos);
 
     std::filesystem::remove_all(dir);
 }

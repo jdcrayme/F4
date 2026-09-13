@@ -685,6 +685,19 @@ void Simulation::spawn_from_scenario_list() {
                 wp.name, wp.position, wp.speed_kts, wp.action});
         }
         plan.taxi_in_route = scenario_.airfield.taxi_in_route;
+        // STAB-E50: the taxi-in route must TERMINATE at this aircraft's own
+        // parking spot. The derived layout ends the route at the ramp-end
+        // taxi node and synthesizes the spots ~90 ft OFF the node
+        // (perpendicular) — the old plan parked every auto-assigned
+        // aircraft ~90-107 ft from the spot the mission checks against
+        // (digi_full_mission end-state gate: 93.5 ft off, gate 50).
+        // parking:auto only: a hand-authored parking spot rides a
+        // hand-authored route whose terminal point is the author's intent.
+        // Spawn-in-air aircraft never taxi (their parking_spot is the spawn
+        // geometry, not a ramp position) — excluded.
+        if (sc.parking_auto && !sc.spawn_in_air && !plan.taxi_in_route.empty()) {
+            plan.taxi_in_route.push_back(sc.parking_spot);
+        }
         plan.fly_traffic_pattern = scenario_.approach_is_pattern();
         if (scenario_.start_in_approach) {
             plan.start_phase = MissionPlan::StartPhase::Approach;

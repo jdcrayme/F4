@@ -366,8 +366,13 @@ TEST(DigiMission, FullLoopTrafficPattern) {
     if (!std::filesystem::exists(scenario_path)) {
         GTEST_SKIP() << "digi_full_mission.json not configured (run CMake configure)";
     }
-    // As configured in digi_full_mission.json: "approach": "pattern".
-    run_full_mission(load_scenario(scenario_path), /*require_pattern=*/true);
+    // Force the PATTERN variant here (the sibling test forces straight_in)
+    // so both approach styles stay covered by E2E regardless of the
+    // scenario template's shipped "approach" value — the test owns its
+    // input, it does not lean on a config field it does not control.
+    auto scenario = load_scenario(scenario_path);
+    scenario.approach_mode = "pattern";
+    run_full_mission(std::move(scenario), /*require_pattern=*/true);
 }
 
 // ============================================================================

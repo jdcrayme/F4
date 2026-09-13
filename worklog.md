@@ -10058,3 +10058,154 @@ Stage Summary (Task 68 — the inside-the-band fight is certified):
   CI gates still bound the default-tune cascade.
 - Delivery: format-patch onto origin/main (bda8dfd), git am verified
   to reproduce the exact tree.
+
+---
+Task ID: 69
+Agent: main (Super Z)
+Task: "Proceed to next item" — the roadmap's next item was the P4.2 TECS
+merge expected to close the 3 pre-existing flight-model failures. The
+session root-caused those 3 failures instead (they were not control-law
+failures at all in two cases), closed all of them, and left the full
+suite at 2,435/2,435 with the pole goldens intact. The P4.2 TECS margin
+campaign remains the structural follow-up it was before — no longer
+masked by, or credited with, these three.
+
+Work Log:
+- Pulled origin/main 2614ba1 (the user pushed the ground_strike patch);
+  rebuilt headless Debug (GCC 14.2, CI config) and ran the full suite to
+  name the 3 failures: DigiMission.FullLoopTaxiTakeoffNavigateApproach
+  LandParks, DigiMission.FullLoopTrafficPattern,
+  FcsTracePipelineTest.LandingOnlyProducesTrace.
+- DIAGNOSIS 1 (the DigiMission pair): both died in the test body with
+  `f4::json: expected integer at position 9706351` — the committed
+  Data/World/korea.world.json is INVALID JSON: the cam2json vehicle-group
+  enrichment wrote the "max_speed" key with no value (the value
+  expression was dropped when Task 64's rcs_factor emission was bolted
+  on in world_json.cpp) — `"max_speed": , "rcs_factor": 1` in all 8,016
+  enriched vehicle groups, 598 lines, in a5dc63b's data regen. The
+  "flight-model" label in the ledger was wrong: the tests never reached
+  a single tick.
+- DATA REPAIR: the true VCD values exist only on an install (the repo's
+  Falcon4.VCD fixture carries the first 12 of 285 records; kunsan has no
+  vehicle-group enrichment) — the honest in-repo repair removes the
+  8,016 dangling keys (semantically identical to the parser's absent-key
+  default 0; every pre-Task-64 world JSON ships that way). Exporter
+  fixed at the source: `<< vcd->max_speed` restored. New regression test
+  (test_theater_data, WorldJsonVehicleGroupsAreStrictJsonWithMaxSpeed):
+  emits the save1.cam fixture through the real UCD fixture + a synthetic
+  300-record VCD (a build_synthetic_vcd helper next to the OCD/PD
+  builders) and walks the whole document with the f4-json Reader the
+  world loader uses, then asserts every "max_speed" key is followed by a
+  number. Manifest repaired too: korea.world.json / terrain.json /
+  kc10.json hashes recomputed, 6 entries dropped (Temp/* staging +
+  Weapons/falcon4.wcd.json — declared by the regen, never committed).
+  Sha256.ReproducesCommittedManifestFingerprints was ALREADY failing on
+  the pushed tree (the manifest matched neither the committed file nor
+  the manifest's own recorded size) — now green.
+- DIAGNOSIS 2 (the straight-in precision gates): with the load crash
+  lifted the mission ran and missed all four Tranche-A1 gates (lateral
+  257.3/250, cross 179.6/50, along 390.8/500, parking 93.5/50). Built a
+  per-tick probe (scratch main, not committed) dumping along/cross/AGL/
+  vs/theta/ptcmd for the Approach phase and instrumented everything.
+- THE WEAVE: the P-only localizer law (gain 0.0005/ft) chases through
+  the bank cascade's response lag — the final crossed the centerline
+  every ~13 s, ~27 s period, amplitude ±250 ft, NO decay (a phase-lag
+  limit cycle: the heading loop's ~4 s lag at the loop's natural
+  0.127 rad/s). STAB-E47: cross-course velocity feedback
+  (localizer_damp_gain 0.008→0.010 rad per ft/s, contribution clamped
+  ±0.15 rad) — xtrack_dot IS the aircraft's own cross velocity — the
+  tracker became a damped 2nd-order loop; the weave collapsed to a
+  converging residual (design zeta ~1.0 nominal, the heading lag eats
+  the rest).
+- THE PARKING: the derived taxi-in route ends at the ramp-end taxi node;
+  the parking spots are synthesized 90 ft OFF that node
+  (campaign_bridge/simulation derive) — every auto-parked aircraft
+  stopped 93.5 ft from its spot. STAB-E50: spawn_aircraft appends the
+  aircraft's own resolved parking spot to ITS plan taxi_in_route
+  (parking:auto only; spawn_in_air excluded).
+- THE FLARE (the deepest chain, every step probed): the energy-flare at
+  60 ft AGL entered 355 ft short with -1,150 fpm and touched +390 (the
+  band is 500-2,500). E49: entry height follows the ARREST BUDGET — the
+  2 G pull reaches the airframe through the ~2.5 s FCS alpha lag, which
+  spends 45-60 ft before the sink eases; 60/82 ft entries impacted and
+  pogo-sticked (the probe caught ptcmd 2.001 G with theta frozen — the
+  stored G arriving at 16 ft AGL and bouncing the airframe to 258 ft),
+  155 ft floated past the timeout; 130 ft is the measured budget.
+  E60: the sink floor is SYMMETRIC at the target level — the old
+  max(energy_adj, floor) kept only the pull half, so the arrest
+  overshot into a ~60 ft balloon no law could push down; the push side
+  now DAMPS on top of the energy trim (an override erased the
+  fast-vs-slow distinction the flare unit test pins — caught by
+  EnergyManagedFlareModulatesPitchOnLongPrediction). Floor gain 1/600
+  deg per fpm (1/300 hunted at ~7 s through the same lag). E61: the
+  target sink -700 fpm (-400 floated past the 15 s flare timeout).
+  E63: the flare keeps flying the LOCALIZER with a bounded-bank PD
+  heading chase (wings-level let the residual + drift ride to a 75 ft
+  touchdown cross). E57/E58 (the sink error into the STICK directly,
+  pull-only then symmetric) were REVERTED with measurement: the railed
+  2 G through the alpha lag arrives all at once and balloons.
+- THE APPROACH GEOMETRY (LandingOnly + the pattern): E48: landing_only
+  spawns established 8,000 ft PAST the entry fix — ProceedToFix held
+  forever (the abeam capture needs a 30 s dwell AND the fix behind the
+  nose); the module seeds a past-the-fix capture (projection past the
+  fix + the lateral corridor + the heading cone + not climbing), ARMED
+  only at the RequestApproach entry and disarmed by any GoAround (the
+  first version re-captured mid-missed-approach and ping-ponged the
+  state machine at 2,000 ft — caught by the probe). E51: the scaled-lead
+  cut steepened to atan(1/2.5) = 21.8 deg — the pattern intercept hands
+  off ~9,000 ft off with 30,000 ft of track before the floor; an 11.3
+  deg cut needs 45,000 ft (the Tranche-31 overshoot objection is owned
+  by the E47 damping now). E52: the establish floor 4,000 → 7,000 ft
+  (the beam catch-down runs ~320 fpm net and needs ~2,600 ft more
+  track). E54: establish_beam_tol_ft (400) WAS A DEAD KNOB — the check
+  hardcoded 300.0; wired the parameter (the pattern's catch-down
+  equilibrium ~390 ft sits inside 400, outside the silent 300).
+  E55: "settled" = IN EQUILIBRIUM WITH THE COMMANDED PATH
+  (|vs − vs_target from AirSteerDebug| < 900) instead of |vs| < 900 —
+  the old form read an honest beam-riding catch-down (-1,080) as a
+  transient and refused it forever. E64: the flare fires only when
+  |vs| < 1,250 — a firm arrival beats a bounced flare that never lands.
+  E65: the landing tune's max_vs 1,400 → 1,800 (the catch-down's net
+  rate doubled; the beam ride commands far below the clamp).
+- THE TYPE-0 ALTITUDE LOOP (scoped): the E10 window clamped P+I
+  together — whenever the P demand reached the window the integral was
+  clamped with it (the pattern base leg sagged ~186 ft under a +558 fpm
+  demand it could never satisfy). E53: the integral rides ON TOP of the
+  windowed P with E56 Hanüs back-calculation AW (the P4.1 FCS scheme one
+  loop up) — SCOPED to the landing tune via
+  window_excludes_integral (default false): the first global version
+  moved the AI-closed nav-cruise slow pole +0.0166 → +0.7118 (the
+  coupled clamp is part of the STAB-P1 balance the pole goldens pin —
+  the goldens caught it exactly as designed).
+- TEST OWNERSHIP: FullLoopTrafficPattern forces approach_mode "pattern"
+  itself (the sibling forces straight_in) — the test owns its input
+  instead of leaning on the template's shipped "approach" field.
+  PatternWalksUpwindCrosswindDownwindBaseFinal's establish point moved
+  out with the E52 floor (the synthetic geometry must respect the new
+  floor).
+- VERIFICATION: full headless ctest 2,435/2,435 (4 environment skips:
+  2 locale, 2 GL/PNG — unchanged, environment-gated). The pole suite
+  (5 gates), the P5 pair, the WVR/BVR/ground-strike/AAR harnesses, the
+  campaign families: all green. git diff CHANGES.md = +115 lines (the
+  Task 69 entry only; a botched prepend duplicated the entry and ate
+  the Task 68 body — restored byte-exact from git before commit).
+
+Stage Summary (Task 69 — the three ledger failures were three defects):
+- The E2E landing chain is green end to end: the digi straight-in and
+  pattern variants complete taxi→takeoff→route→approach→land→parks
+  inside every Tranche-A1 precision gate, and the landing_only trace
+  walks its approach states. The landing module's lateral tracker is a
+  damped loop, the flare is symmetric and energy-managed with a measured
+  entry budget, the establish gates are wired to their documented knobs,
+  and the taxi-in terminates at the parking spot.
+- The data tier is self-consistent again: the exporter cannot emit
+  invalid JSON (regression-pinned), the committed world JSON parses, the
+  manifest matches the tree.
+- The P4.2 TECS margin campaign is UNCHANGED as the structural follow-up
+  for the default-tune cascade (the pole gates still bound it) — but it
+  is no longer the item that "fixes the 3 failures" (they never were its
+  failures). The E47/E53/E56 work here (damped tracking, type-1
+  integrals with Hanüs AW) is consistent with the PHUG principles and
+  the pole goldens.
+- Delivery: format-patch onto origin/main (2614ba1), git am verified to
+  reproduce the tree.

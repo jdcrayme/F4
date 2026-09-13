@@ -29,7 +29,10 @@ gtest_discover_tests(test_class_table)
 f4_add_test(test_aii_config   test_aii_config.cpp)
 f4_add_test(test_objectives   test_objectives.cpp)
 f4_add_test(test_units        test_units.cpp)
+# The vehicle-group regression test strict-parses the export with the
+# f4-json Reader (the same parser the world loader uses).
 f4_add_test(test_theater_data test_theater_data.cpp)
+target_link_libraries(test_theater_data PRIVATE f4-json)
 
 # Save-write tranche tests. test_cmp_encoder links f4-lzss directly because
 # it exercises f4::lzss::compress on the real .cmp payload (f4-world-convert

@@ -1,3 +1,118 @@
+## Task 69 — the three pre-existing E2E failures root-caused and closed (data + precision + approach geometry)
+
+**The "3 pre-existing flight-model failures" ledger entry was three
+different defects wearing one label, and all three are now closed with
+their root causes named: a data-export corruption, a landing-precision
+chain, and an approach-geometry seed gap. Full suite: 2,435/2,435
+(zero failures, zero regressions).**
+
+- **The data defect (DigiMission.FullLoop* crashed at load).** The
+  shipped `Data/World/korea.world.json` was NOT valid JSON: the cam2json
+  vehicle-group enrichment (Task 64's rcs_factor tranche) wrote the
+  `"max_speed"` KEY without its VALUE — `o << ", \"max_speed\": "` with
+  the value expression dropped when the rcs_factor emission was bolted
+  on — producing `"max_speed": , "rcs_factor": 1` in all 8,016 enriched
+  vehicle groups. Every airbase-derived E2E died in the world loader
+  (`f4::json: expected integer at position 9706351`) before the first
+  tick. Fixed at both ends: the exporter emits `vcd->max_speed` again
+  (pinned by a new strict-JSON regression test that emits the save
+  fixture through a synthetic 300-record VCD + the real UCD fixture and
+  walks the document with the same Reader the world loader uses), and
+  the committed data was repaired by removing the 8,016 dangling keys —
+  the exact semantic state the parser already accepted (max_speed
+  absent = 0 = unknown; the true VCD values return on the next export
+  from an install). `Data/manifest.json` was also stale from the same
+  regen (3 file hashes drifted, 6 entries referenced files never
+  committed — Temp/* staging and the uncommitted WCD JSON): hashes
+  recomputed, dead entries dropped, `Sha256.ReproducesCommittedManifest
+  Fingerprints` green again.
+
+- **The final-approach weave (±250 ft limit cycle, ~27 s, no decay).**
+  With the crash lifted, the straight-in DigiMission failed its four
+  Tranche-A1 precision gates. The probe data showed the P-only localizer
+  law chasing through the bank cascade's response lag: the digi final
+  crossed the centerline every ~13 s with NO decay (max lateral 257 ft
+  against a 250 ft gate; the touchdown cross inherited whatever phase
+  the weave was in — 179.6 ft against a 50 ft gate). STAB-E47: the
+  localizer now feeds the cross-course velocity back with the xtrack
+  error (`localizer_damp_gain` 0.008→0.010 rad per ft/s, contribution
+  clamped ±0.15 rad) — the tracker became a damped 2nd-order loop and
+  the weave collapsed to a converging residual.
+
+- **The flare (touchdown short, then the physics).** The energy-based
+  flare entry at 60 ft AGL flared 355 ft short of the threshold and
+  touched at +390 ft (the aim band is 500-2,500). The fix chain, each
+  step measured with the per-tick probe: the flare entry height follows
+  the arrest budget (130 ft — the 2 G pull reaches the airframe through
+  the ~2.5 s FCS alpha lag, which spends 45-60 ft BEFORE the sink eases;
+  60 and 82 ft entries impacted and pogo-sticked, 155 ft floated past
+  the timeout); the sink floor is SYMMETRIC at the target level (the old
+  `max()` kept only the pull half — the arrest overshot into a ~60 ft
+  balloon no law could push down; the push side now damps on top of the
+  energy trim, preserving the fast-vs-slow distinction the unit test
+  pins); the floor gain 1/600 deg per fpm (1/300 hunted at ~7 s through
+  the same lag); the target sink -700 fpm (-400 floated past the 15 s
+  timeout); and the flare keeps flying the LOCALIZER with a bounded-bank
+  heading chase (wings-level let the residual + drift ride to a 75 ft
+  touchdown cross — now under the 50 ft gate). The E56 Hanüs
+  back-calculation anti-windup on the altitude integral (the P4.1 FCS
+  scheme, one loop up) stops a long catch-down winding the integral
+  past the beam.
+
+- **The approach geometry (LandingOnly + the pattern variant).**
+  STAB-E48: the landing_only scenario spawns established 8,000 ft PAST
+  the entry fix — the old law held ProceedToFix forever (the abeam
+  capture needs a 30 s dwell AND the fix behind the nose). The module
+  now seeds a past-the-fix capture at the initial approach handoff
+  (armed only there, disarmed by any GoAround so a climb-out cannot
+  re-capture mid-missed-approach). STAB-E51/E52: the pattern-mode
+  intercept handed off ~9,000 ft off-course with the establish floor
+  30,000 ft of track ahead — an 11.3 deg cut needs 45,000 ft, so the
+  aircraft crossed the floor still 270 ft off and 430 ft above the beam,
+  GoAround every cycle. The cut steepened to 21.8 deg (the Tranche-31
+  overshoot objection is owned by the E47 velocity damping now) and the
+  floor moved to 7,000 ft (the beam catch-down runs at only ~320 fpm net
+  and needs ~2,600 ft more track). STAB-E55: "settled" now means IN
+  EQUILIBRIUM WITH THE COMMANDED PATH (|vs − the law's own vs_target| <
+  900) instead of |vs| < 900 — the old form read an honest beam-riding
+  catch-down (-1,080 fpm) as a transient and refused it forever.
+  STAB-E54: `establish_beam_tol_ft` (400) IS the configured gate — the
+  check hardcoded 300.0, a silent re-tighten of a dead knob. STAB-E64:
+  the flare fires only when the sink is arrestable (< 1,250 fpm) — a
+  firmer arrival beats a bounced flare that never lands. STAB-E65: the
+  landing tune's VS authority 1,400 → 1,800 so the catch-down doubles
+  its net rate and nulls before the threshold.
+
+- **The altitude loop was secretly type-0 (scoped fix).** The E10 window
+  clamp bounded P+I together, so whenever the P demand reached the
+  window the integral was clamped with it — no windowed altitude loop
+  could null a standing error (the pattern base leg sagged ~186 ft under
+  a +558 fpm demand it could never satisfy). STAB-E53 lets the integral
+  ride ON TOP of the windowed P — scoped to the landing tune via
+  `window_excludes_integral` (default false): the first global version
+  moved the AI-closed nav-cruise slow pole +0.0166 → +0.7118 (the
+  coupled clamp is part of the STAB-P1 balance the pole goldens pin), so
+  the decoupled form ships where it was measured to be needed.
+
+- **Taxi-in parking.** The derived taxi-in route ended at the ramp-end
+  taxi node while the parking spots are synthesized ~90 ft OFF that node
+  — every auto-parked aircraft stopped ~93 ft from the spot the mission
+  checks (gate 50). The plan now APPENDS the aircraft's own resolved
+  parking spot to its taxi-in route (parking:auto only; spawn-in-air
+  aircraft excluded — their parking_spot is spawn geometry, not a ramp
+  position).
+
+- **Test ownership.** `DigiMission.FullLoopTrafficPattern` forced its
+  own approach mode (the sibling test's pattern) instead of leaning on
+  the scenario template's shipped "approach" field it does not control.
+
+- **Verification.** Headless Debug, GCC 14.2, the CI configuration:
+  2,435/2,435 tests pass (4 environment skips: 2 locale, 2 GL/PNG —
+  unchanged). The new strict-JSON regression test fails against the old
+  exporter and passes against the fixed one. The pole goldens (plant,
+  nav golden/gate/boundedness, default bound) all hold on the scoped
+  E53.
+
 ## Task 68 — M5a: the WVR / guns merge harness + the merge-geometry fixes
 
 **The combat chain's last un-certified surface — the inside-the-band

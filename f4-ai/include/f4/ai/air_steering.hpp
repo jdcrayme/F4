@@ -216,6 +216,21 @@ public:
                                        ///< approach engine at 155 kts into
                                        ///< a stall-float (fix21/22) — the
                                        ///< final wants ~800.
+    bool window_excludes_integral{false}; ///< STAB-E53 scoping: when true,
+                                         ///<  the E10 window bounds the
+                                         ///<  PROPORTIONAL correction only
+                                         ///<  and the altitude integral
+                                         ///<  rides on top (a type-1 loop
+                                         ///<  for the landing flows). The
+                                         ///<  default false keeps the
+                                         ///<  historical coupled clamp
+                                         ///<  (P+I windowed together) that
+                                         ///<  the nav-tune cruise pole
+                                         ///<  goldens are measured against
+                                         ///<  — the decoupled integral
+                                         ///<  destabilized the AI-closed
+                                         ///<  cruise slow mode (the golden
+                                         ///<  +0.0166 -> +0.7118, measured).
     double vs_corr_max_fpm{-1.0};      ///< STAB-E10: BASE cap on the VS
                                        ///< CORRECTION around the path
                                        ///< feedforward (fpm). Negative = disabled

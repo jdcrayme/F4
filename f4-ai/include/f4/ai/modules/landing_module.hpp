@@ -160,6 +160,13 @@ public:
                                         // margin; the energy-managed flare
                                         // (C4) bleeds the excess over the
                                         // threshold.
+    bool past_fix_capture_armed_{false}; // STAB-E48: the past-the-fix
+                                         // geometric capture is armed for
+                                         // the initial approach handoff
+                                         // (start_in_approach) and disarmed
+                                         // by any GoAround (re-fly the
+                                         // procedure after a missed
+                                         // approach).
     double fix_radius_ft{2500.0};       // "reached" radius for the entry fix
     double fix_abeam_ft{15000.0};       // off-nose capture distance window
     double fix_abeam_bearing_rad{1.4};  // ~80 deg off the nose = "passed it"
@@ -288,16 +295,27 @@ public:
                                         // physically could not complete it
                                         // before crossing the course,
                                         // overshooting by 350-640 ft.
-    double intercept_lead_ratio{5.0};   // Tranche 31: shallower intercept cut
-                                        // (atan(1/5) = 11.3 deg vs the old
-                                        // atan(1/3) = 18.4 deg). The steeper
-                                        // 18.4 deg cut crossed the centerline
-                                        // with too much lateral velocity and
-                                        // overshot to 641 ft (the intercept
-                                        // S-turn). 11.3 deg converges more
-                                        // gradually, shrinking the overshoot.
+    double intercept_lead_ratio{2.5};   // STAB-E51: steepen the scaled-lead
+                                        // cut back to atan(1/2.5) = 21.8 deg
+                                        // (was 1/5 = 11.3 deg, Tranche 31).
+                                        // MEASURED (digi pattern E2E, the
+                                        // base->final intercept): the turn
+                                        // hands off ~9,000 ft off-course with
+                                        // the establish floor 30,000 ft of
+                                        // track ahead — an 11.3 deg cut needs
+                                        // 9,000/tan(11.3) = 45,000 ft, so the
+                                        // aircraft crossed the establish floor
+                                        // still 270 ft off and ~430 ft above
+                                        // the beam: GoAround every cycle. A
+                                        // 21.8 deg cut converges in 22,500 ft.
+                                        // The Tranche-31 overshoot objection
+                                        // (18.4 deg overshot to 641 ft) is
+                                        // owned by the STAB-E47 cross-course
+                                        // velocity damping now: the D term
+                                        // flattens the centerline crossing
+                                        // instead of letting the S-turn
+                                        // re-amplify it.
                                         // The trade: longer intercept track
-                                        // (~2x), but the scenario starts far
                                         // enough out to accommodate it.
     double establish_beam_tol_ft{400.0};// STAB-E23: Established also
                                         // requires being this close to the
@@ -306,8 +324,8 @@ public:
                                         // stabilize (observed: +3,500 ft
                                         // high at handoff, threshold
                                         // overflown at 1,905 ft AGL)
-    double establish_floor_ft{4000.0};  // STAB-E21/E50: not established by
-                                        // 4,000 ft out = intercept not
+    double establish_floor_ft{7000.0};  // STAB-E21/E50/E52: not established
+                                        // by this floor = intercept not
                                         // converging; go around cleanly
                                         // instead of dragging a crosser
                                         // through the missed-approach
@@ -317,8 +335,60 @@ public:
                                         // lateral by ~4,500 ft out but not
                                         // by 5,000 (fix25: gates otherwise
                                         // ALL green at along -5,729 with
+                                        // 4,000 -> 7,000 (STAB-E52, measured
+                                        // digi pattern E2E): the pattern
+                                        // intercept hands off ~9,000 ft off
+                                        // and ~440 ft BELOW the beam; with
+                                        // the E51 21.8-deg cut the lateral
+                                        // converges by ~16k ft out but the
+                                        // beam catch-down runs at only
+                                        // ~320 fpm net (max_vs 1,400 vs the
+                                        // beam's ~1,080), needing ~2,600 ft
+                                        // more track than 4,000 leaves. The
+                                        // floor now bounds genuinely broken
+                                        // intercepts 3,000 ft later; every
+                                        // converging handoff (straight-in
+                                        // establishes by ~30k ft out) is
+                                        // unaffected.
                                         // lat -1,052, floor fired first).
-    double flare_agl_ft{60.0};          // begin the flare below this AGL
+    double localizer_damp_gain{0.010};  // STAB-E47: heading correction per
+                                        // ft/s of cross-course velocity
+                                        // (the xtrack closing rate). The
+                                        // P-only localizer wove +-250 ft
+                                        // at ~27 s with no decay (the
+                                        // bank cascade's response lag at
+                                        // the loop's natural bandwidth);
+                                        // this velocity feedback makes
+                                        // the tracker a damped 2nd-order
+                                        // loop (design zeta ~= 1.0
+                                        // nominal). Zero restores the
+                                        // P-only law.
+    double localizer_damp_max_rad{0.15}; // clamp on the damping contribution
+                                         // (8.6 deg) — a wide intercept cut
+                                         // inside the proportional band
+                                         // must not saturate the command.
+    double flare_agl_ft{130.0};         // STAB-E49/E57/E62: begin the flare below
+                                        // this AGL (was 60). The E57 probe
+                                        // measured the arrest budget: the
+                                        // 2 G flare pull reaches the airframe
+                                        // through the FCS alpha lag in ~2.5 s
+                                        // — at -1,050 fpm of beam-rate sink
+                                        // that spends ~45-60 ft of height
+                                        // BEFORE the sink eases, then the
+                                        // round-out needs ~30 ft more. The
+                                        // 60 ft entry impacted (the touchdown
+                                        // metric fired 310-525 ft SHORT of
+                                        // the threshold) and the 6 ft contact
+                                        // under a live 2 G command pogo-sticked
+                                        // the airframe to 138 ft. 130 ft gives
+                                        // the lag + round-out their height
+                                        // budget with margin; the touchdown
+                                        // then lands inside the 500-2,500 ft
+                                        // aim band. (The aim-point beam's
+                                        // threshold crossing height is
+                                        // 1,500·tan(3°) = 78.6 ft — the flare
+                                        // now begins shortly before the
+                                        // threshold, as a real ILS flare does.)
     double flare_pitch_deg{8.0};        // flare target pitch attitude
     double flare_pitch_gain{3.0};       // stick per rad of pitch error
     // Phase C2 (FLIGHT_CONTROL_NEXT_STEPS.md §4 Phase C2): flap settings
