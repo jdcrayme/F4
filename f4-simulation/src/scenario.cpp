@@ -257,6 +257,8 @@ Scenario parse_scenario(f4::json::Reader& r) {
         else if (key == "sim_dt")          s.sim_dt = r.read_number();
         else if (key == "total_ticks")     s.total_ticks = static_cast<int>(r.read_int());
         else if (key == "record")          s.record = r.read_bool();
+        else if (key == "campaign_flights_deferred")
+                                            s.campaign_flights_deferred = r.read_bool();
         else if (key == "record_every")    s.record_every = std::max(1, static_cast<int>(r.read_int()));
         else if (key == "record_path")     s.record_path = r.read_string();
         else if (key == "fcs_trace_path")  s.fcs_trace_path = r.read_string();

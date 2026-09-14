@@ -8,6 +8,7 @@
 #include <f4/campaign/ground_writeback.hpp>
 #include <f4/campaign/mission_profile.hpp>
 #include <f4/campaign/world_writeback.hpp>
+#include <f4/simulation/campaign_bridge.hpp>
 #include <f4/simulation/scenario.hpp>
 #include <f4/simulation/combat_bridge.hpp>
 #include <f4/flight/flight_model_component.hpp>
@@ -17,8 +18,10 @@
 #include <f4/world/world_loader.hpp>   // populate_world (G1 mirror)
 
 #include <algorithm>
+#include <cmath>
 #include <fstream>
 #include <memory>
+#include <optional>
 #include <filesystem>
 #include <cstdint>
 #include <sstream>
@@ -70,6 +73,7 @@ std::string session_scenario_json(
         const f4::simulation::FlightSpawnFilter& filter,
         double sim_dt,
         bool aa_combat,
+        bool tiered,
         const std::filesystem::path& brain_data) {
     std::ostringstream out;
     out << "{\n";
@@ -139,6 +143,12 @@ std::string session_scenario_json(
         out << "\"team\": " << filter.team;
         out << ", \"mission\": " << filter.mission;
         out << ", \"max_flights\": " << filter.max_flights << "},\n";
+        if (tiered) {
+            // FID-1: the tiered session's deferred spawn — the world
+            // populates, the flights stay aggregates (see
+            // Simulation::spawn_from_campaign_flights' deferred gate).
+            out << "  \"campaign_flights_deferred\": true,\n";
+        }
     }
     out << "  \"sim_dt\": " << sim_dt << ",\n";
     out << "  \"total_ticks\": 1000000000,\n";
@@ -291,6 +301,8 @@ CampaignSession::create(const CampaignSessionOptions& opts,
         out << session_scenario_json(world_abs, ct_abs,
                                      opts.aircraft_config, have_flights,
                                      filter, opts.sim_dt, opts.aa_combat,
+                                     opts.fidelity_policy ==
+                                         FidelityPolicy::Tiered,
                                      brain_abs);
         if (!out.good()) {
             return fail("cannot write " + scenario_path.string());
@@ -433,6 +445,43 @@ CampaignSession::create(const CampaignSessionOptions& opts,
             session->ledger_.get(), gcfg);
     }
 
+    // 11c. FID — the aggregate flight engine (Tier-A truth; see
+    //      Docs/FIDELITY_TIERS_PLAN.md). Tiered sessions only: a
+    //      FullFidelity session never constructs it and never defers
+    //      the saved flights' spawn (the byte-identical contract). The
+    //      scenario JSON above carries campaign_flights_deferred so
+    //      initialize() populated the world WITHOUT the per-flight
+    //      aircraft — this engine is where those flights live now.
+    if (opts.fidelity_policy == FidelityPolicy::Tiered) {
+        f4::campaign::FlightAggregateConfig fcfg;
+        fcfg.update_sec = opts.air_agg_update_sec > 0
+            ? opts.air_agg_update_sec : 60;
+        f4::campaign::FlightAggregateFilter ffilter;
+        ffilter.team = opts.team;
+        ffilter.mission = opts.mission;
+        ffilter.max_flights =
+            opts.max_flights > 0 ? opts.max_flights : -1;
+        session->flights_ =
+            std::make_unique<f4::campaign::FlightAggregateEngine>(
+                static_cast<const f4::world::ICampaignSource&>(
+                    session->adapters_->campaign),
+                static_cast<const f4::world::IUnitCoreSource&>(
+                    session->adapters_->units),
+                static_cast<const f4::world::IFlightSource&>(
+                    session->adapters_->units),
+                fcfg, ffilter);
+        // FID pacing (the options die after create(); the members
+        // outlive them — the sim_dt_/max_steps_ pattern).
+        session->air_agg_update_sec_ = opts.air_agg_update_sec;
+        session->ops_window_sec_ = opts.ops_window_sec;
+        session->air_reagg_factor_ = opts.air_reagg_factor;
+        session->deagg_cooldown_sec_ = opts.deagg_cooldown_sec;
+        // FID-1: the AII-parsed SIM_BUBBLE_SIZE is the air-bubble
+        // floor (the camera bubble never shrinks below it).
+        session->default_air_radius_ft_ =
+            session->sim_->air_bubble_radius_ft();
+    }
+
     // 12. The route planner (C3) — threat map from the same sources,
     //     viewed from the FIRST BELLIGERENT (te_team can be neutral;
     //     the QC's own correction). Host tunable: MinAvoidThreat 25
@@ -550,6 +599,13 @@ bool CampaignSession::advance(double real_seconds, int max_steps_override) {
             if (ground_ != nullptr) {
                 ground_sec_accum_ += static_cast<double>(whole);
                 advance_ground_();
+            }
+            // FID: the aggregate flights ride the same whole-second
+            // cadence (the engine accumulates to its own update gate;
+            // the tier pass runs per second — O(flights)).
+            if (flights_ != nullptr) {
+                flight_sec_accum_ += static_cast<double>(whole);
+                advance_flights_();
             }
             // The damage sync rides the same cadence: final-state diff
             // of every damaged objective (cheap — the diff walks only
@@ -698,6 +754,278 @@ void CampaignSession::sync_ground_entities_() {
     }
 }
 
+// ---------------------------------------------------------------------------
+// FID — the fidelity-tier machinery (Docs/FIDELITY_TIERS_PLAN.md)
+// ---------------------------------------------------------------------------
+
+void CampaignSession::advance_flights_() {
+    if (flights_ == nullptr) return;
+
+    // The engine's tick() accumulates on its own clock (the ground
+    // war's shape): feed it the whole campaign seconds owed.
+    if (flight_sec_accum_ >= 1.0) {
+        const auto whole = static_cast<f4::campaign::CampaignTime>(
+            flight_sec_accum_);
+        flight_sec_accum_ -= static_cast<double>(whole);
+        flights_->tick(whole);
+    }
+
+    // Mirror whenever the engine actually advanced, then one tier pass
+    // (per campaign second — O(flights), all distance tests).
+    if (flights_->stats().updates != flight_synced_updates_) {
+        flight_synced_updates_ = flights_->stats().updates;
+        sync_flight_entities_();
+    }
+    evaluate_tiers_();
+}
+
+void CampaignSession::sync_flight_entities_() {
+    // The engine's state is campaign truth; the sim's flight entities
+    // are its mirror (the one-world rule, the ground mirror's twin).
+    // Only changed values write. Deaggregated flights are skipped —
+    // their aircraft own the truth while materialized.
+    auto& world = sim_->world();
+    for (const auto& f : flights_->flights()) {
+        if (f.suspended) continue;
+        const auto it = unit_id_map_.find(f.vu);
+        if (it == unit_id_map_.end()) continue;
+        f4::entities::EntityHandle h(it->second, &world);
+
+        if (auto* tf = h.get<f4::entities::TransformComponent>()) {
+            const f4::geo::WorldPosition want{
+                f.fx * kFtPerGrid, f.fy * kFtPerGrid,
+                static_cast<double>(f.altitude_ft)};
+            if (want.x != tf->position.x || want.y != tf->position.y ||
+                want.z != tf->position.z) {
+                tf->position = want;
+            }
+        }
+        if (auto* fp = h.get<f4::entities::FlightPlanComponent>()) {
+            if (fp->fuel_burnt != f.fuel_burnt) {
+                fp->fuel_burnt = f.fuel_burnt;
+            }
+            if (fp->altitude != f.altitude_ft) {
+                fp->altitude = f.altitude_ft;
+            }
+        }
+    }
+}
+
+void CampaignSession::evaluate_tiers_() {
+    if (flights_ == nullptr) return;
+    const std::int64_t now = campaign_time();
+    const auto& fleet = flights_->flights();
+
+    for (std::size_t i = 0; i < fleet.size(); ++i) {
+        const auto& f = fleet[i];
+        if (f.destroyed) continue;
+
+        auto rec = deaggregated_.find(f.vu);
+        if (rec != deaggregated_.end()) {
+            // --- the reagg rules (FID-3) ---
+            if (rec->second.trigger ==
+                    DeaggregatedFlight::Trigger::Force) {
+                continue;   // force pins until force_reaggregate_flight
+            }
+            if (now < rec->second.pinned_until) {
+                continue;   // the ops window holds
+            }
+            // The bubble rule governs every non-force, unpinned
+            // record: reaggregate when unobserved (the bubble dropped)
+            // or outside the hysteresis band, cooldown permitting.
+            const double dx = f.fx * kFtPerGrid - air_bubble_center_.x;
+            const double dy = f.fy * kFtPerGrid - air_bubble_center_.y;
+            const double dist_ft = std::sqrt(dx * dx + dy * dy);
+            const double reagg_r =
+                air_bubble_radius_ft_ * air_reagg_factor_;
+            const bool unobserved =
+                !air_bubble_active_ || dist_ft > reagg_r;
+            const bool cooled =
+                now >= rec->second.deagg_time +
+                           static_cast<std::int64_t>(deagg_cooldown_sec_);
+            if (unobserved && cooled) {
+                reaggregate_flight_(f.vu);
+            }
+            continue;
+        }
+
+        // --- the deagg triggers (FID-3): ops > bubble ---
+        const std::int32_t to_depart = flights_->seconds_to_depart(i);
+        const std::int32_t to_over =
+            flights_->seconds_to_mission_over(i);
+        const auto window = static_cast<std::int32_t>(
+            std::min<std::int64_t>(std::max(0, ops_window_sec_),
+                                   2147483647));
+        const bool takeoff_window = to_depart > 0 && to_depart <= window;
+        const bool recovery_window = to_over >= 0 && to_over <= window;
+        bool in_bubble = false;
+        if (air_bubble_active_) {
+            const double dx = f.fx * kFtPerGrid - air_bubble_center_.x;
+            const double dy = f.fy * kFtPerGrid - air_bubble_center_.y;
+            in_bubble = dx * dx + dy * dy <=
+                        air_bubble_radius_ft_ * air_bubble_radius_ft_;
+        }
+        if (!takeoff_window && !recovery_window && !in_bubble) continue;
+
+        deaggregate_flight_(
+            i, (takeoff_window || recovery_window)
+                   ? DeaggregatedFlight::Trigger::Ops
+                   : DeaggregatedFlight::Trigger::Bubble);
+    }
+}
+
+void CampaignSession::deaggregate_flight_(
+    std::size_t index, DeaggregatedFlight::Trigger trigger) {
+    const auto& f = flights_->flights()[index];
+    if (deaggregated_.count(f.vu) > 0) return;
+    const auto it = unit_id_map_.find(f.vu);
+    if (it == unit_id_map_.end()) return;   // no world flight — skip
+
+    // The handoff's spawn half (FID-4 §4.4): a GROUND spawn while the
+    // flight has not departed (the ops takeoff — the ATC flies it off
+    // through the takeoff modules) or when it has ARRIVED home (it is
+    // parked at its base); an AIR spawn at the aggregate state otherwise
+    // (the bridge's AirSpawnPose: in-air FM init, the plan's Enroute
+    // start phase, the handoff's fuel).
+    const auto& st = flights_->flights()[index];
+    const std::int32_t to_depart = flights_->seconds_to_depart(index);
+    const bool ground_spawn = to_depart > 0 || st.arrived;
+    std::optional<f4::entities::EntityId> spawned;
+    if (ground_spawn) {
+        spawned = f4::simulation::spawn_aircraft_for_flight(
+            sim_->world(), it->second, ct_, cfg_, airfield_, spawn_tpl_,
+            /*parking_slot=*/0,
+            airbase_airfields_.empty() ? nullptr : &airbase_airfields_,
+            &objective_id_map_, &weapon_table_, &unit_id_map_);
+    } else {
+        f4::simulation::AirSpawnPose pose;
+        pose.position = f4::geo::WorldPosition{
+            f.fx * kFtPerGrid, f.fy * kFtPerGrid,
+            static_cast<double>(f.altitude_ft)};
+        pose.heading_rad = flights_->current_heading_rad(index);
+        // Cruise: the engine's speed-mode constant (grid/min → ft/s).
+        pose.vt_fps = flights_->cruise_grid_per_min() * kFtPerGrid / 60.0;
+        // The handoff's fuel: capacity − the aggregate's per-aircraft
+        // burnt. ≤ 0 (exhausted or capacity-less configs) keeps the
+        // config default — the scenario path's own rule.
+        const double capacity = cfg_.geometry.internalFuel.value();
+        pose.fuel_lbs =
+            std::max(0.0, capacity - static_cast<double>(f.fuel_burnt));
+        spawned = f4::simulation::spawn_aircraft_for_flight(
+            sim_->world(), it->second, ct_, cfg_, airfield_, spawn_tpl_,
+            0, airbase_airfields_.empty() ? nullptr : &airbase_airfields_,
+            &objective_id_map_, &weapon_table_, &unit_id_map_, &pose);
+    }
+    if (!spawned.has_value() || !spawned->valid()) return;
+
+    // The adopt cadence's own pairing: roster + doctrine arm (both
+    // idempotent — the same calls adopt_new_spawns_ makes).
+    sim_->register_aircraft(*spawned);
+    sim_->arm_campaign_aircraft(*spawned);
+
+    flights_->set_suspended(f.vu, true);
+    DeaggregatedFlight rec;
+    rec.aircraft = *spawned;
+    rec.trigger = trigger;
+    rec.deagg_time = campaign_time();
+    rec.pinned_until = trigger == DeaggregatedFlight::Trigger::Ops
+        ? rec.deagg_time +
+              2 * static_cast<std::int64_t>(std::max(0, ops_window_sec_))
+        : 0;
+    deaggregated_.emplace(f.vu, rec);
+    ++tier_deaggs_;
+}
+
+bool CampaignSession::reaggregate_flight_(std::uint32_t vu) {
+    auto rec = deaggregated_.find(vu);
+    if (rec == deaggregated_.end()) return false;
+
+    // The handoff's fold half (FID-4 §4.4): the LEAD aircraft's state
+    // rolls up — position (the transform's ENU, grid-divided),
+    // altitude, fuel (capacity − remaining, monotone into the engine).
+    // An entity that died in-sim (killed, or already reaped) folds as
+    // DESTROYED — the flight closes in the aggregate layer; its loss
+    // is already booked at the C1 sink (the EntityKilled path).
+    bool folded_live = false;
+    if (rec->second.aircraft.valid()) {
+        f4::entities::EntityHandle h(rec->second.aircraft, &sim_->world());
+        auto* fm = h.get<f4::flight::FlightModelComponent>();
+        if (fm != nullptr) {
+            const auto alive = h.get_tag(f4::entities::tags::ALIVE);
+            const bool is_alive = !alive.has_value() || alive->as_bool();
+            auto* tf = h.get<f4::entities::TransformComponent>();
+            if (is_alive && tf != nullptr) {
+                const double capacity = cfg_.geometry.internalFuel.value();
+                const std::int32_t burnt = static_cast<std::int32_t>(
+                    std::max(0.0, capacity - fm->fuel_lbs()));
+                flights_->reaggregate(
+                    vu, tf->position.x / kFtPerGrid,
+                    tf->position.y / kFtPerGrid,
+                    static_cast<float>(tf->position.z), burnt);
+                folded_live = true;
+            }
+        }
+    }
+    if (!folded_live) {
+        flights_->mark_destroyed(vu);
+    }
+    // The aircraft leaves the roster + the world (the reaper's own
+    // mechanics; idempotent when the reaper already retired it).
+    sim_->retire_aircraft(rec->second.aircraft);
+    deaggregated_.erase(rec);
+    ++tier_reaggs_;
+    return true;
+}
+
+std::vector<CampaignSession::FlightTierView>
+CampaignSession::flight_tiers() const {
+    std::vector<FlightTierView> out;
+    if (flights_ == nullptr) return out;
+    out.reserve(flights_->flights().size());
+    for (std::size_t i = 0; i < flights_->flights().size(); ++i) {
+        const auto& f = flights_->flights()[i];
+        FlightTierView v;
+        v.vu = f.vu;
+        v.team = f.team;
+        v.mission = f.mission;
+        v.aircraft_count = f.aircraft_count;
+        v.x_grid = f.fx;
+        v.y_grid = f.fy;
+        v.altitude_ft = f.altitude_ft;
+        v.fuel_burnt = f.fuel_burnt;
+        v.live = f.suspended;
+        v.arrived = f.arrived;
+        v.destroyed = f.destroyed;
+        v.to_depart = flights_->seconds_to_depart(i);
+        v.to_mission_over = flights_->seconds_to_mission_over(i);
+        out.push_back(v);
+    }
+    return out;
+}
+
+void CampaignSession::force_deaggregate_flight(std::uint32_t vu) {
+    if (flights_ == nullptr) return;
+    const std::size_t idx = flights_->index_of(vu);
+    if (idx == static_cast<std::size_t>(-1)) return;
+    if (deaggregated_.count(vu) > 0) {
+        // Already live: pin it (force beats every automatic trigger).
+        deaggregated_[vu].trigger = DeaggregatedFlight::Trigger::Force;
+        deaggregated_[vu].pinned_until = 0;
+        return;
+    }
+    // Immediate (the UI calls this under the session lock — a paused
+    // session still deaggregates on request, the V-3DLIVE rule).
+    deaggregate_flight_(idx, DeaggregatedFlight::Trigger::Force);
+    refresh_stats_();
+}
+
+void CampaignSession::force_reaggregate_flight(std::uint32_t vu) {
+    if (flights_ == nullptr) return;
+    if (reaggregate_flight_(vu)) {
+        refresh_stats_();
+    }
+}
+
 void CampaignSession::refresh_stats_() {
     stats_ = {};
     if (!sim_) return;
@@ -744,6 +1072,17 @@ void CampaignSession::refresh_stats_() {
     // losses are state even when nobody applies them).
     stats_.ground_losses_air = ledger_->ground_vehicle_losses_air();
     stats_.synthetic_spawned = spawner_->stats().synthetic_spawned;
+    // FID: the tier numbers (inert without the engine).
+    if (flights_ != nullptr) {
+        const auto& fs = flights_->stats();
+        stats_.agg_updates = fs.updates;
+        stats_.agg_flights = fs.flights;
+        stats_.agg_live = fs.suspended;
+        stats_.agg_arrived = fs.arrived;
+        stats_.agg_destroyed = fs.destroyed;
+        stats_.tier_deaggs = tier_deaggs_;
+        stats_.tier_reaggs = tier_reaggs_;
+    }
     stats_.live_aircraft = static_cast<int>(sim_->aircraft_entities().size());
     stats_.retired = sim_->retired_aircraft();
     for (const auto eid : sim_->aircraft_entities()) {

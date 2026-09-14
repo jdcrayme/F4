@@ -346,6 +346,18 @@ struct Scenario {
     };
     CampaignFlightFilter campaign_flight_filter;
 
+    /// FID-1 (Docs/FIDELITY_TIERS_PLAN.md): defer the saved flights'
+    /// aircraft spawn. When true, a campaign_flights scenario still
+    /// POPULATES the world (teams + objectives + units — the flight
+    /// entities, airfields, weapon table, and id maps all build exactly
+    /// as today) but spawns NO per-flight aircraft: the fidelity-tier
+    /// session keeps the flights as campaign aggregates
+    /// (f4-campaign::FlightAggregateEngine) and materializes one
+    /// aircraft per flight on deaggregation (bubble / ops window /
+    /// explicit request). Default false — every existing scenario and
+    /// golden keeps the pre-FID shape bit for bit.
+    bool campaign_flights_deferred{false};
+
     /// Optional: Falcon4.AII (terrdata/ai/Falcon4.AII) — the campaign AI
     /// INI whose SIM_BUBBLE_SIZE / GROUND_BUBBLE_SIZE tune the sim-bubble
     /// deaggregation radii (B.0). Empty (the default) or a missing file

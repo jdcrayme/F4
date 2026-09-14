@@ -22,6 +22,8 @@ add_library(f4-campaign STATIC
     src/world_writeback.cpp
     src/ground_war.cpp
     src/ground_writeback.cpp
+    src/flight_aggregate.cpp
+    src/flight_writeback.cpp
     src/threat_map.cpp
     src/path_finder.cpp
     src/route_builder.cpp

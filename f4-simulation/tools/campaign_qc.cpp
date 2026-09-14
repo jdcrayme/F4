@@ -70,6 +70,27 @@
 //      NOT byte-stable). Exits 9–12 are the war's own gates (see
 //      run_war below).
 //
+//   7. THE ACCELERATION CERTIFICATE (FID-6): --accel <x> runs the SAME
+//      war through CampaignWarHarness under the TIERED fidelity policy
+//      (the phase's whole point: flights are campaign aggregates until
+//      an airfield-ops window or an observer deaggregates them) at an
+//      interactive speed preset, and certifies what the original game
+//      could do and the pre-FID engine could not — time compression
+//      that survives the CPU it runs on:
+//        exit 15  DILATION — a run-0 sample (or the pass's sustained
+//                 rate) measured below speed × (1 − tolerance): the
+//                 preset outran the CPU, the 0.8x ceiling is back;
+//        exit 16  DEAGG CEILING — the deaggregated set (Tier-B
+//                 flights) exceeded --accel-max-live at some sample.
+//      The C5 gates all still apply (6–14): the tiered war is a WAR —
+//      deterministic (two passes, identical ledger bytes), one-pool
+//      consistent, roster-bounded (the identity gains the tier term),
+//      alive. Artifacts: the same three files, the summary's mode
+//      "accel" with the accel block (rates, peaks, verdicts).
+//      --accel-baseline additionally measures the same war at
+//      FullFidelity (ungated) so one artifact carries the before/after
+//      rate — what the aggregate tier bought.
+//
 // Usage:
 //   campaign_qc <world.json> [options]
 //     --class-table <FALCON4.ct>   (default: <src>/f4-world-convert/tests/fixtures/FALCON4.ct)
@@ -97,6 +118,20 @@
 //                                   this many sim seconds; 300. 0 =
 //                                   wrecks persist, the pre-C5 lifetime)
 //     --war-max-wall <sec>         (C5: total wall-clock watchdog; 0 = off)
+//     --accel <x>                  (FID-6: the acceleration certificate;
+//                                   0 = off, 60 = the acceptance preset.
+//                                   Forces the TIERED policy — the war
+//                                   runs the game's own way — and gates
+//                                   exits 15/16 on top of the C5 set)
+//     --accel-hours <h>            (FID-6: certified horizon; default 1.0)
+//     --accel-max-live <n>         (FID-6: the Tier-B ceiling K; default
+//                                   32 — the deaggregated set the tier
+//                                   machinery must stay under)
+//     --accel-tolerance <f>        (FID-6: dilation tolerance; default
+//                                   0.05 — the preset minus host noise)
+//     --accel-baseline             (FID-6: also measure the same war at
+//                                   FullFidelity, ungated — the summary
+//                                   carries both rates)
 //     --save-write                 (C6: after the run, emit the mutated
 //                                   WorldState as campaign_after.world.json
 //                                   and assemble campaign_after.cam through
@@ -131,6 +166,11 @@
 // materialized as aircraft) — the generation-to-spawn failure (a
 // threat map that never painted, an A* that never converges, an
 // airbase that never resolves).
+// In --war/--accel modes the war's own gates apply (6–12: the tasking
+// classes war-edition, then DETERMINISM, LEDGER DRIFT, ENTITY LEAK,
+// WAR STALLED; 13/14 the G1/G2 opt-in gates), and --accel adds
+// 15 DILATION (the preset outran the CPU) and 16 the DEAGG CEILING
+// (the Tier-B set breached --accel-max-live) — FID-6's certificate.
 //
 // The 15-minute default window (was 5): TestCamp's strike flights sit a
 // median 34 NM from their targets — a 5-minute window proved the taxi/
@@ -246,6 +286,18 @@ struct Args {
     bool unit_strike = false;
     // Real-data tier: the wcd2json export folded over the built-in table.
     std::string weapon_data;
+    // FID-6 — the acceleration certificate (--accel <x>): the tiered
+    // war at an interactive preset, gated on ZERO DILATION (exit 15)
+    // and the deaggregated-set ceiling (exit 16). 0 = off; 60 = the
+    // acceptance preset the plan names.
+    double accel_speed = 0.0;
+    double accel_hours = 1.0;       // the certified horizon
+    int accel_max_live = 32;        // the Tier-B ceiling K
+    double accel_tolerance = 0.05;  // the dilation tolerance
+    bool accel_baseline = false;    // also measure the FullFidelity rate
+    // Whether --war-sample was passed explicitly (the accel mode's
+    // finer default of 60 s must not clobber a host's choice).
+    bool war_sample_set = false;
 };
 
 [[noreturn]] void usage(const char* prog) {
@@ -262,6 +314,8 @@ struct Args {
         "          [--ground-war] [--ground-update-sec <sec>]\n"
         "          [--ground-orders-sec <sec>] [--ground-resupply-sec <sec>]\n"
         "          [--unit-strike] [--weapon-data <wcd.json>] [--out-dir <dir>]\n"
+        "          [--accel <x>] [--accel-hours <h>] [--accel-max-live <n>]\n"
+        "          [--accel-tolerance <f>] [--accel-baseline]\n"
         "          [--weather <json-obj>] [--time <json-obj>] (Task 73 env)\n",
         prog);
     std::exit(1);
@@ -307,7 +361,17 @@ Args parse_args(int argc, char** argv) {
         else if (k == "--time")        a.time_block = next();
         else if (k == "--war")         a.war_hours = std::atof(next());
         else if (k == "--war-runs")    a.war_runs = std::max(1, std::atoi(next()));
-        else if (k == "--war-sample")  a.war_sample_sec = std::atof(next());
+        else if (k == "--war-sample")  {
+            a.war_sample_sec = std::atof(next());
+            a.war_sample_set = true;
+        }
+        else if (k == "--accel")       a.accel_speed = std::atof(next());
+        else if (k == "--accel-hours") a.accel_hours = std::atof(next());
+        else if (k == "--accel-max-live")
+            a.accel_max_live = std::atoi(next());
+        else if (k == "--accel-tolerance")
+            a.accel_tolerance = std::atof(next());
+        else if (k == "--accel-baseline") a.accel_baseline = true;
         else if (k == "--wreck-hold")  a.wreck_hold_sec = std::atof(next());
         else if (k == "--war-max-wall") a.war_max_wall_sec = std::atof(next());
         else if (k == "--aa-combat")   a.aa_combat = true;
@@ -383,11 +447,29 @@ void write_string(f4::json::Writer& w, const std::string& s) {
 //  12  WAR STALLED — the clock, the cycles, or a belligerent's
 //      generation went silent while aircraft remained.
 // Artifacts: campaign_result.json (run 0's ledger — byte-stable),
-// campaign_qc_summary.json (the "war" block — deterministic content
-// only), campaign_war_diary.json (per-sample telemetry: wall-clock,
-// ticks/sec, RSS — explicitly NOT byte-stable).
+// campaign_qc_summary.json (the "war"/"accel" block — deterministic
+// content only), campaign_war_diary.json (per-sample telemetry:
+// wall-clock, ticks/sec, RSS — explicitly NOT byte-stable).
+//
+// FID-6 (--accel <x>): the same flow runs under the TIERED fidelity
+// policy at an interactive preset and adds two gates —
+//   15  DILATION — a sample (or the sustained pass) measured below
+//       speed × (1 − tolerance): the preset outran the CPU;
+//   16  DEAGG CEILING — the deaggregated set (Tier-B) exceeded
+//       --accel-max-live at some sample.
+// --accel-baseline measures the same war at FullFidelity (ungated,
+// one pass) and records its sustained rate beside the tiered one.
 // ---------------------------------------------------------------------------
 int run_war(const Args& args) {
+    const bool accel = args.accel_speed > 0.0;
+    if (accel && (args.accel_hours <= 0.0 ||
+                  args.accel_tolerance < 0.0 ||
+                  args.accel_tolerance >= 1.0)) {
+        std::fprintf(stderr,
+                     "campaign_qc: --accel-hours must be > 0 and "
+                     "--accel-tolerance in [0, 1)\n");
+        return 1;
+    }
     if (args.profiles_json.empty() ||
         !std::filesystem::exists(args.profiles_json)) {
         std::fprintf(stderr,
@@ -458,17 +540,37 @@ int run_war(const Args& args) {
     // G2: the interdiction link (opt-in, the same contract).
     hopts.session.unit_strike = args.unit_strike;
     hopts.session.weapon_data_path = args.weapon_data;
-    hopts.horizon_sec =
-        static_cast<std::int64_t>(args.war_hours * 3600.0);
-    hopts.sample_sec = args.war_sample_sec;
+    // FID-6: the accel certificate FORCES the tiered policy — the war
+    // runs the game's own way (aggregates until observed), which is
+    // the mechanism whose acceleration the gate certifies. The plain
+    // --war mode keeps FullFidelity (the pinned shape).
+    hopts.session.fidelity_policy =
+        accel ? FidelityPolicy::Tiered : FidelityPolicy::FullFidelity;
+    hopts.speed = accel ? args.accel_speed : 1.0;
+    hopts.dilation_tolerance = args.accel_tolerance;
+    hopts.max_deagg_aircraft = accel ? args.accel_max_live : 0;
+    hopts.horizon_sec = static_cast<std::int64_t>(
+        (accel ? args.accel_hours : args.war_hours) * 3600.0);
+    // The accel mode's default sample is finer (60 s): the deagg
+    // ceiling and the dilation gate read the diary, and an ops window
+    // (600 s) deserves several samples of resolution. An explicit
+    // --war-sample wins in both modes.
+    hopts.sample_sec = args.war_sample_set
+                           ? args.war_sample_sec
+                           : (accel ? 60.0 : 3600.0);
     hopts.runs = args.war_runs;
     hopts.wreck_hold_sec = args.wreck_hold_sec;
     hopts.max_wall_sec_total = args.war_max_wall_sec;
 
-    std::printf("war: horizon=%llds (%.2fh) runs=%d sample=%.0fs "
+    std::printf("%s: horizon=%llds (%.2fh) speed=%.0fx tol=%.2f "
+                "max_live=%d runs=%d sample=%.0fs "
                 "wreck_hold=%.0fs cycle=%ds reinforce=%ds aa_combat=%s "
                 "ground=%s unit_strike=%s\n",
-                (long long)hopts.horizon_sec, args.war_hours, hopts.runs,
+                accel ? "accel" : "war",
+                (long long)hopts.horizon_sec,
+                accel ? args.accel_hours : args.war_hours,
+                hopts.speed, args.accel_tolerance,
+                hopts.max_deagg_aircraft, hopts.runs,
                 hopts.sample_sec, hopts.wreck_hold_sec,
                 hopts.session.tasking_cycle_sec,
                 hopts.session.reinforce_period_sec,
@@ -484,13 +586,14 @@ int run_war(const Args& args) {
     }
 
     const auto t_wall = std::chrono::steady_clock::now();
-    harness->execute([](const WarHourSample& s) {
+    harness->execute([accel](const WarHourSample& s) {
         char perf[160];
         std::snprintf(perf, sizeof(perf), "%.1fs %.0ftps %ldMB",
                       s.wall_sec, s.ticks_per_sec, s.rss_kb / 1024);
-        std::printf("war[h%02d] t=%llds cycles=%d(+%d) drawn=%d(+%d) "
+        std::printf("%s[h%02d] t=%llds cycles=%d(+%d) drawn=%d(+%d) "
                     "spawned=%d(+%d) live=%d retired=%d air=%d/%d "
                     "routes=%d lost=%d recov=%d",
+                    accel ? "accel" : "war",
                     s.sample, (long long)s.sim_time_s, s.cycles,
                     s.hour_cycles, s.drawn, s.hour_draws,
                     s.synthetic_spawned, s.hour_spawns, s.live_aircraft,
@@ -512,6 +615,18 @@ int run_war(const Args& args) {
                         s.ground_losses, s.ground_captures,
                         s.ground_front_columns, s.ground_march_grid);
         }
+        // FID: the tier machinery's pulse — the aggregate/Tier-B sets
+        // and the deagg/reagg counters, plus the measured rate when
+        // the dilation gate is armed (the preset vs what the CPU
+        // delivered).
+        if (s.agg_flights > 0 || s.tier_deaggs > 0) {
+            std::printf(" agg=%d/%d d=%d/%d", s.agg_live, s.agg_flights,
+                        s.tier_deaggs, s.tier_reaggs);
+        }
+        if (accel && (s.dilated || s.sim_rate > 0.0)) {
+            std::printf(" rate=%.0fx%s", s.sim_rate,
+                        s.dilated ? " DILATED" : "");
+        }
         std::printf(" | %s\n", perf);
         std::fflush(stdout);
     });
@@ -523,6 +638,33 @@ int run_war(const Args& args) {
         std::fprintf(stderr, "campaign_qc: war ABORTED — %s\n",
                      r.abort_reason.c_str());
         return 1;
+    }
+
+    // FID-6 --accel-baseline: the same war at FullFidelity, one pass,
+    // measured but never gated — the before/after the summary carries
+    // (what the aggregate tier bought, as a rate ratio on this host).
+    double baseline_rate = 0.0;
+    if (accel && args.accel_baseline) {
+        WarHarnessOptions bopts = hopts;
+        bopts.session.fidelity_policy = FidelityPolicy::FullFidelity;
+        bopts.runs = 1;
+        bopts.speed = hopts.speed;  // measured; the verdicts are ignored
+        std::string berr;
+        auto base = CampaignWarHarness::create(bopts, &berr);
+        if (base == nullptr) {
+            std::fprintf(stderr,
+                         "campaign_qc: baseline harness failed: %s\n",
+                         berr.c_str());
+            return 1;
+        }
+        std::printf("accel: measuring the FullFidelity baseline "
+                    "(same horizon, one pass)...\n");
+        std::fflush(stdout);
+        base->execute();
+        baseline_rate = base->report().verdict.sustained_rate;
+        std::printf("accel: baseline sustained rate %.1fx "
+                    "(tiered run below)\n", baseline_rate);
+        std::fflush(stdout);
     }
 
     // ------------------------------------------------------------------
@@ -539,7 +681,8 @@ int run_war(const Args& args) {
     {
         f4::json::Writer w;
         w.put("{\n  \"format\": \"f4-campaign-qc-summary\",\n  ");
-        w.put("\"version\": 1,\n  \"mode\": \"war\"");
+        w.put("\"version\": 1,\n  \"mode\": ");
+        write_string(w, accel ? "accel" : "war");
         w.put(",\n  \"world_json\": ");
         write_string(w, args.world_json.string());
         w.put(",\n  \"world\": {\n    \"theater\": ");
@@ -664,6 +807,73 @@ int run_war(const Args& args) {
         w.put(r.belligerent_air ? "true" : "false");
         w.put(",    \"atm_armed\": ");
         w.put(r.atm_armed ? "true" : "false");
+        // FID-6: the acceleration certificate's block (the accel mode
+        // only — the plain war's summary keeps its exact bytes). The
+        // rates are host telemetry (diary-class), the verdicts and
+        // counters are certificate content.
+        if (accel) {
+            char rate_buf[64];
+            w.put(",\n    ");
+            w.put("\"fidelity_tiered\": ");
+            w.put(r.fidelity_tiered ? "true" : "false");
+            w.put(",\n    ");
+            std::snprintf(rate_buf, sizeof(rate_buf), "%.3f", r.speed);
+            w.put("\"accel_speed\": ");
+            w.put(rate_buf);
+            w.put(",    ");
+            std::snprintf(rate_buf, sizeof(rate_buf), "%.3f",
+                          r.dilation_tolerance);
+            w.put("\"accel_tolerance\": ");
+            w.put(rate_buf);
+            w.put(",    ");
+            w.number_key("accel_max_live", r.max_deagg_aircraft);
+            w.put(",\n    ");
+            std::snprintf(rate_buf, sizeof(rate_buf), "%.3f",
+                          r.verdict.sustained_rate);
+            w.put("\"sustained_rate\": ");
+            w.put(rate_buf);
+            w.put(",    ");
+            std::snprintf(rate_buf, sizeof(rate_buf), "%.3f",
+                          r.verdict.min_sample_rate);
+            w.put("\"min_sample_rate\": ");
+            w.put(rate_buf);
+            w.put(",    ");
+            w.number_key("dilated_samples", r.dilated_samples);
+            w.put(",    ");
+            w.number_key("deagg_peak", r.deagg_peak);
+            w.put(",\n    ");
+            w.put("\"zero_dilation\": ");
+            w.put(r.verdict.zero_dilation ? "true" : "false");
+            w.put(",\n    \"dilation_report\": ");
+            write_string(w, r.verdict.dilation_report);
+            w.put(",\n    \"deagg_bounded\": ");
+            w.put(r.verdict.deagg_bounded ? "true" : "false");
+            w.put(",\n    \"deagg_report\": ");
+            write_string(w, r.verdict.deagg_report);
+            w.put(",\n    ");
+            w.number_key("agg_flights", r.agg_flights);
+            w.put(",    ");
+            w.number_key("agg_live", r.agg_live);
+            w.put(",    ");
+            w.number_key("agg_arrived", r.agg_arrived);
+            w.put(",    ");
+            w.number_key("agg_destroyed", r.agg_destroyed);
+            w.put(",\n    ");
+            w.number_key("tier_deaggs", r.tier_deaggs);
+            w.put(",    ");
+            w.number_key("tier_reaggs", r.tier_reaggs);
+            if (args.accel_baseline) {
+                char base_buf[64];
+                std::snprintf(base_buf, sizeof(base_buf), "%.3f",
+                              baseline_rate);
+                w.put(",\n    ");
+                w.put("\"baseline_full_fidelity\": ");
+                w.put("true");
+                w.put(",    ");
+                w.put("\"baseline_sustained_rate\": ");
+                w.put(base_buf);
+            }
+        }
         w.put(",\n    \"ledger_md5_run0\": ");
         write_string(w, r.verdict.ledger_md5_run0);
         w.put(",\n    \"ledger_md5_run1\": ");
@@ -803,6 +1013,30 @@ int run_war(const Args& args) {
                 w.put(", ");
                 w.number_key("ground_march_grid", s.ground_march_grid);
             }
+            // FID: the tier machinery's columns (tiered wars only —
+            // the full-fidelity diary keeps its exact bytes). sim_rate
+            // is telemetry (diary-class by definition).
+            if (r.fidelity_tiered) {
+                char fid_buf[64];
+                w.put(", ");
+                w.number_key("agg_flights", s.agg_flights);
+                w.put(", ");
+                w.number_key("agg_live", s.agg_live);
+                w.put(", ");
+                w.number_key("agg_arrived", s.agg_arrived);
+                w.put(", ");
+                w.number_key("agg_destroyed", s.agg_destroyed);
+                w.put(", ");
+                w.number_key("tier_deaggs", s.tier_deaggs);
+                w.put(", ");
+                w.number_key("tier_reaggs", s.tier_reaggs);
+                std::snprintf(fid_buf, sizeof(fid_buf), "%.3f",
+                              s.sim_rate);
+                w.put(", \"sim_rate\": ");
+                w.put(fid_buf);
+                w.put(", \"dilated\": ");
+                w.put(s.dilated ? "true" : "false");
+            }
             char buf[128];
             std::snprintf(buf, sizeof(buf),
                           ", \"wall_sec\": %.3f, \"ticks_per_sec\": %.1f, "
@@ -869,6 +1103,23 @@ int run_war(const Args& args) {
                 r.verdict.entities_bounded ? "ok" : "LEAK",
                 r.verdict.war_alive ? "ok" : "STALLED",
                 r.verdict.ledger_md5_run0.c_str());
+    if (accel) {
+        char rate_buf[128];
+        std::snprintf(rate_buf, sizeof(rate_buf),
+                      "accel: tiered rate=%.1fx min_sample=%.1fx "
+                      "dilated=%d deagg_peak=%d ceiling=%d",
+                      r.verdict.sustained_rate,
+                      r.verdict.min_sample_rate, r.dilated_samples,
+                      r.deagg_peak, r.max_deagg_aircraft);
+        std::printf("%s dilation=%s ceiling=%s\n", rate_buf,
+                    r.verdict.zero_dilation ? "ok" : "FIRED",
+                    r.verdict.deagg_bounded ? "ok" : "FIRED");
+        if (args.accel_baseline) {
+            std::printf("accel: baseline (FullFidelity) rate=%.1fx vs "
+                        "tiered %.1fx\n",
+                        baseline_rate, r.verdict.sustained_rate);
+        }
+    }
     std::printf("wrote: %s\n", summary_path.string().c_str());
     std::printf("wrote: %s\n", result_path.string().c_str());
     std::printf("wrote: %s\n", diary_path.string().c_str());
@@ -971,6 +1222,38 @@ int run_war(const Args& args) {
                      "horizon (CAS TOT ~15 min) needs --war >= 0.5.\n");
         return 14;
     }
+    // FID-6, gate 15: DILATION. The certificate's whole point — the
+    // interactive preset the tiered campaign actually sustains. A
+    // fired gate means the 0.8x ceiling is back: either the preset
+    // outran the CPU (inspect the diary's sim_rate column for the
+    // first dilated sample) or the sustained rate fell short (the
+    // whole pass was slower than speed × (1 − tolerance)).
+    if (r.verdict.rate_gated && !r.verdict.zero_dilation) {
+        std::fprintf(stderr,
+                     "campaign_qc: QC FAILURE — DILATION at the %.0fx "
+                     "preset: %s (exit 15). The tiered war could not "
+                     "sustain the preset on this host — inspect "
+                     "campaign_war_diary.json's sim_rate/dilated "
+                     "columns and the summary's accel block.\n",
+                     r.speed, r.verdict.dilation_report.c_str());
+        return 15;
+    }
+    // FID-6, gate 16: the DEAGG CEILING. The tier machinery's own
+    // bound — the deaggregated set (Tier-B, each flight a 60 Hz
+    // aircraft) breached --accel-max-live. The aggregate tier exists
+    // to keep this set at interactive scale; a breach means the
+    // trigger/hysteresis policy ballooned it (or the ceiling K was
+    // set below the theater's honest ops traffic).
+    if (r.max_deagg_aircraft > 0 && !r.verdict.deagg_bounded) {
+        std::fprintf(stderr,
+                     "campaign_qc: QC FAILURE — the deaggregated set "
+                     "breached the ceiling of %d: %s (exit 16). "
+                     "Inspect the summary's accel block (deagg_peak) "
+                     "and the diary's agg_live column.\n",
+                     r.max_deagg_aircraft,
+                     r.verdict.deagg_report.c_str());
+        return 16;
+    }
     return 0;
 }
 
@@ -986,11 +1269,14 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    // C5: the long-horizon war mode is a SEPARATE top-level flow — the
-    // B.3/C2/C3/C4 modes below stay byte-identical (their goldens are
-    // pinned); --war composes the CampaignSession the viewer drives,
-    // runs the horizon, and returns its own exit codes (6..12).
-    if (args.war_hours > 0.0) {
+    // C5/FID-6: the long-horizon war and the acceleration certificate
+    // are SEPARATE top-level flows — the B.3/C2/C3/C4 modes below stay
+    // byte-identical (their goldens are pinned); --war and --accel
+    // compose the CampaignSession the viewer drives through the war
+    // harness and return their own exit codes (6..14, and --accel adds
+    // 15/16). --accel wins when both are given (the tiered certificate
+    // is the stricter run; a plain war wants no --accel on the line).
+    if (args.accel_speed > 0.0 || args.war_hours > 0.0) {
         return run_war(args);
     }
 

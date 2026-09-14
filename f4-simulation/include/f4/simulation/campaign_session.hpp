@@ -53,6 +53,8 @@
 #pragma once
 
 #include <f4/campaign/campaign.hpp>
+#include <f4/campaign/flight_aggregate.hpp>
+#include <f4/campaign/flight_writeback.hpp>
 #include <f4/campaign/ground_war.hpp>
 #include <f4/campaign/ground_writeback.hpp>
 #include <f4/campaign/result_ledger.hpp>
@@ -74,6 +76,26 @@
 #include <vector>
 
 namespace f4::simulation {
+
+/// FIDELITY_TIERS_PLAN (Docs/FIDELITY_TIERS_PLAN.md): how much of the
+/// war runs at sim fidelity.
+///
+///   FullFidelity — TODAY's behavior, bit for bit: every spawned
+///     aircraft runs the full FM + AI + sensors at 60 Hz from spawn to
+///     recovery. Every existing golden pins this mode.
+///   Tiered — the save's flights stay campaign AGGREGATES
+///     (f4-campaign::FlightAggregateEngine: route-leg propagation at a
+///     coarse cadence, cruise fuel burn) until an observer bubble (the
+///     camera, V-3DLIVE semantics), an airfield-ops window (takeoff /
+///     recovery), or an explicit request deaggregates them into real
+///     per-flight aircraft. Time compression becomes a fidelity
+///     problem, not a clock problem — the FIXED-dt discipline forbids
+///     dt scaling, so the number of full-fidelity entities is the only
+///     lever.
+enum class FidelityPolicy {
+    FullFidelity,
+    Tiered,
+};
 
 /// Session inputs. Paths must be absolute. Defaults mirror campaign_qc
 /// where the QC's choice is also right for an interactive host; the
@@ -188,6 +210,29 @@ struct CampaignSessionOptions {
     /// deferral) and unit-loss events count but do not book — the
     /// session is byte-identical to the pre-G2 shape with it off.
     bool unit_strike = false;
+
+    /// FID-1: the fidelity policy (see FidelityPolicy above). Default
+    /// FullFidelity — the session is byte-identical to the pre-FID
+    /// shape with it (the same contract aa_combat / ground_war /
+    /// unit_strike keep). Tiered arms the aggregate flight engine,
+    /// defers the saved flights' aircraft spawn, and drives the
+    /// deagg/reagg machinery below.
+    FidelityPolicy fidelity_policy = FidelityPolicy::FullFidelity;
+    /// FID-2: the aggregate advance cadence (campaign seconds; 60 =
+    /// the ground war's update precedent).
+    int air_agg_update_sec = 60;
+    /// FID-3: the airfield-ops deagg window (campaign seconds) — a
+    /// flight whose takeoff slot or mission-over time is within this
+    /// window deaggregates (a GROUND spawn for a pending takeoff — the
+    /// ATC flies it off; an AIR spawn for a recovery).
+    int ops_window_sec = 600;
+    /// FID-3: the reagg hysteresis factor — an observer-bubble
+    /// deaggregation reaggregates at reagg_factor × the deagg radius
+    /// (the band that keeps the boundary from thrashing).
+    double air_reagg_factor = 1.5;
+    /// FID-3: the minimum deaggregated time (campaign seconds) before
+    /// a bubble-driven reagg may fire (the thrash guard).
+    double deagg_cooldown_sec = 30.0;
 };
 
 /// The live campaign session. Create via create(); destroy to reset —
@@ -233,6 +278,14 @@ public:
         int ground_captures = 0;      ///< ledger: objectives captured
         int ground_engaged = 0;       ///< engine: pairs in last update
         int ground_front_columns = 0; ///< engine: contested front columns
+        // --- FID (fidelity tiers) -----------------------------------------
+        int agg_updates = 0;          ///< engine: aggregate update ticks
+        int agg_flights = 0;          ///< engine: aggregated flights
+        int agg_live = 0;             ///< deaggregated (Tier-B) right now
+        int agg_arrived = 0;          ///< reached their last waypoint
+        int agg_destroyed = 0;        ///< folded as all-dead
+        int tier_deaggs = 0;          ///< session: deaggregations so far
+        int tier_reaggs = 0;          ///< session: reaggregations so far
     };
 
     /// Build the whole graph. Returns nullptr and fills `error` on any
@@ -354,17 +407,75 @@ public:
     /// units the user zooms into (the viewer calls this under the
     /// session lock as the camera moves). Forwards to Simulation::
     /// set_view_bubble() + one refresh_bubble() pass.
+    /// FID: under the Tiered policy the SAME bubble drives the AIR
+    /// deaggregation (the ground BubbleManager's own bubble stays
+    /// ground-only) — flights within max(radius, the AII SIM_BUBBLE
+    /// floor) spawn their aircraft; see force_deaggregate_flight.
     void set_view_bubble(double radius_ft,
                          const f4::geo::WorldPosition& center) {
         sim_->set_view_bubble(radius_ft, center);
+        air_bubble_active_ = true;
+        air_bubble_radius_ft_ = std::max(radius_ft, default_air_radius_ft_);
+        air_bubble_center_ = center;
         sim_->refresh_bubble();
+        // FID: the V-3DLIVE rule for the AIR side too — the tier pass
+        // runs NOW, so a paused session still deaggregates the flights
+        // the user zooms into (the next advance() re-evaluates anyway).
+        if (flights_ != nullptr) {
+            evaluate_tiers_();
+            refresh_stats_();
+        }
     }
 
     /// Return to the ownship-driven bubble + apply immediately.
+    /// FID: the AIR bubble drops with it (unobserved aggregates
+    /// reaggregate on the next tier evaluation, cooldown permitting).
     void clear_view_bubble() {
         sim_->clear_view_bubble();
+        air_bubble_active_ = false;
         sim_->refresh_bubble();
     }
+
+    // --- FID: the tier machinery (fidelity-tier sessions only) --------
+
+    /// One flight's tier snapshot for the UI (the flights table).
+    struct FlightTierView {
+        std::uint32_t vu = 0;
+        std::uint8_t team = 0;
+        std::uint8_t mission = 0;
+        int aircraft_count = 0;
+        double x_grid = 0.0;
+        double y_grid = 0.0;
+        float altitude_ft = 0.0f;
+        std::int32_t fuel_burnt = 0;
+        bool live = false;      ///< Tier-B (deaggregated) right now
+        bool arrived = false;
+        bool destroyed = false;
+        std::int32_t to_depart = -1;        ///< seconds (−1 = none)
+        std::int32_t to_mission_over = -1;  ///< seconds (−1 = none)
+    };
+
+    /// True under the Tiered policy (the aggregate engine exists).
+    [[nodiscard]] bool tiered() const noexcept {
+        return flights_ != nullptr;
+    }
+
+    /// The flights' tier snapshot (wire order; the Campaign window's
+    /// flights table). Called under the session lock.
+    [[nodiscard]] std::vector<FlightTierView> flight_tiers() const;
+
+    /// FID-4: force one flight deaggregated NOW — an ops-airfield GROUND
+    /// spawn when the aggregate has not departed yet (the ATC flies it
+    /// off), an AIR spawn at the aggregate's position otherwise. The
+    /// flight stays deaggregated until force_reaggregate_flight
+    /// (force beats every automatic trigger). Unknown vu = no-op.
+    void force_deaggregate_flight(std::uint32_t vu);
+
+    /// FID-4: force one flight reaggregated NOW — the lead-aircraft
+    /// roll-up (position/altitude/fuel fold into the aggregate, the
+    /// aircraft entity retires); an all-dead flight folds as destroyed.
+    /// Clears the force-deagg pin. Unknown/not-deaggregated vu = no-op.
+    void force_reaggregate_flight(std::uint32_t vu);
 
     /// EntityId lookup for the LIVE world (the sim's): VU_ID.num →
     /// entity, rebuilt at construction from the sim's own population.
@@ -379,6 +490,17 @@ public:
 
 private:
     CampaignSession() = default;
+
+    /// One deaggregated flight: the materialized aircraft + the tier
+    /// bookkeeping (the trigger that spawned it, when, and until when
+    /// an ops-window pin holds). Declared first — the tier methods'
+    /// signatures name it.
+    struct DeaggregatedFlight {
+        f4::entities::EntityId aircraft{};
+        enum class Trigger : std::uint8_t { Force, Ops, Bubble } trigger;
+        std::int64_t deagg_time = 0;     ///< campaign time of the deagg
+        std::int64_t pinned_until = 0;   ///< ops-window pin (0 = none)
+    };
 
     /// Register any entities the spawner materialized since the last
     /// call (the roster delta) — the one-world closure.
@@ -399,6 +521,36 @@ private:
     /// G1: the entity-side mirror — one pass over the engine's dirty
     /// battalions (the write-back's own activity rule).
     void sync_ground_entities_();
+
+    /// FID-2: fire the aggregate engine's update ticks for every whole
+    /// air-aggregate second owed by the campaign clock (the ground
+    /// cadence's twin), then mirror moved flights into the sim's
+    /// flight entities (transforms + FlightPlanComponent fields) and
+    /// run one tier evaluation (bubble / ops-window / force triggers,
+    /// the reagg hysteresis + cooldown).
+    void advance_flights_();
+
+    /// FID-2: the entity-side mirror — engine positions/altitudes/fuel
+    /// into the flight entities' TransformComponent +
+    /// FlightPlanComponent (only changed values write).
+    void sync_flight_entities_();
+
+    /// FID-3: one tier pass — deagg triggers (force > ops > bubble) and
+    /// reagg rules (force pins; ops pins through its window; bubble
+    /// obeys the hysteresis band + cooldown). Runs per campaign second.
+    void evaluate_tiers_();
+
+    /// FID-4: materialize one aggregate flight (the deagg half of the
+    /// handoff): a GROUND spawn when the flight has not departed yet,
+    /// an AIR spawn at the aggregate position otherwise; registers +
+    /// arms the aircraft (the adopt path's own pairing).
+    void deaggregate_flight_(std::size_t index,
+                             DeaggregatedFlight::Trigger trigger);
+
+    /// FID-4: fold one live flight back (the reagg half): lead-aircraft
+    /// state into the engine, the aircraft retired; an all-dead flight
+    /// folds as destroyed. Returns true when a fold happened.
+    bool reaggregate_flight_(std::uint32_t vu);
 
     /// Recompute stats_ from the live objects.
     void refresh_stats_();
@@ -479,6 +631,27 @@ private:
     // the entity mirror only walks when the engine actually advanced).
     double ground_sec_accum_ = 0.0;
     int ground_synced_updates_ = 0;
+
+    // FID: the fidelity-tier machinery. flights_ is null unless the
+    // Tiered policy armed it (tiered() reads that); every member below
+    // is inert without it.
+    std::unique_ptr<f4::campaign::FlightAggregateEngine> flights_;
+    /// FID pacing (copied from Options — they outlive the options object).
+    int air_agg_update_sec_ = 60;
+    int ops_window_sec_ = 600;
+    double air_reagg_factor_ = 1.5;
+    double deagg_cooldown_sec_ = 30.0;
+
+    std::unordered_map<std::uint32_t, DeaggregatedFlight> deaggregated_;
+    int tier_deaggs_ = 0;
+    int tier_reaggs_ = 0;
+
+    double flight_sec_accum_ = 0.0;
+    int flight_synced_updates_ = 0;
+    double default_air_radius_ft_ = 2560.0;  ///< the AII SIM_BUBBLE floor
+    bool air_bubble_active_ = false;         ///< the camera-driven air bubble
+    double air_bubble_radius_ft_ = 2560.0;
+    f4::geo::WorldPosition air_bubble_center_{};
 
     // Display snapshot.
     Stats stats_;

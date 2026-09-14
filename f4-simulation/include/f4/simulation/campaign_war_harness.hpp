@@ -38,6 +38,22 @@
 //                     a fixture-data matter — role mix — visible in the
 //                     diary's per-team rows, not gated).
 //
+// FID-6 (Docs/FIDELITY_TIERS_PLAN.md §5) adds the ACCELERATION
+// certificate, armed by the host (campaign_qc --accel):
+//   * ZERO DILATION — with speed >= 2 set, every run-0 sample's measured
+//                     rate (sim sec per wall sec, the window's
+//                     throughput) and the pass's sustained rate must
+//                     reach speed × (1 − dilation_tolerance): the
+//                     interactive preset the CPU actually delivers.
+//   * DEAGG BOUND   — the deaggregated set (Tier-B flights) stays
+//                     <= max_deagg_aircraft at every run-0 sample: the
+//                     tier machinery bounds the expensive set.
+// A tiered war's roster identity gains the tier term (each
+// deaggregation materializes one aircraft outside the spawner's
+// synthetic counter; every reagg retires it): live == initial +
+// synthetic_spawned + tier_deaggs − retired. Zero in full-fidelity
+// mode — the pre-FID arithmetic, unchanged.
+//
 // WHAT RUNS. The harness composes CampaignSession — the same V-CAMP
 // object the world viewer drives frame by frame — so the acceptance
 // run exercises EXACTLY the interactive loop (one world, one clock,
@@ -112,6 +128,31 @@ struct WarHarnessOptions {
     /// spiraling war is a failure, but a DIFFERENT failure class than
     /// the four verdicts, and it must not masquerade as one.
     double max_wall_sec_total = 0.0;
+
+    // --- FID-6: the acceleration certificate -----------------------------
+    // The plan (Docs/FIDELITY_TIERS_PLAN.md §5): `campaign_qc --accel`
+    // — exit 15 (dilation) and exit 16 (deaggregated-set ceiling).
+
+    /// The acceleration preset this run CERTIFIES: sim seconds the
+    /// interactive host would need per wall second. 1.0 (the default)
+    /// is the existing semantics — the war runs as fast as the CPU
+    /// allows and the rate is telemetry only. >= 2.0 arms the DILATION
+    /// gate: every run-0 sample's measured rate, and the pass's
+    /// sustained rate, must reach speed × (1 − dilation_tolerance) —
+    /// "zero dilation" in the plan's wording, minus host noise.
+    double speed = 1.0;
+
+    /// The fraction of the preset a measured rate may fall short
+    /// before counting as dilated (scheduler/noise allowance; the
+    /// gate must catch a CPU that cannot keep up, not a jittery
+    /// clock). Must be in [0, 1).
+    double dilation_tolerance = 0.05;
+
+    /// The Tier-B ceiling: the largest deaggregated set (session
+    /// Stats::agg_live) any run-0 sample may show. 0 = not gated (the
+    /// plain war certifies nothing about fidelity tiers). The accel
+    /// gate arms it — the plan's exit 16.
+    int max_deagg_aircraft = 0;
 };
 
 /// One row of the war diary — the world's state at one sample. All
@@ -157,6 +198,22 @@ struct WarHourSample {
     int ground_front_columns = 0;   ///< contested front columns now
     int ground_march_grid = 0;      ///< army distance walked (grid units)
     int ground_losses_air = 0;      ///< G2: vehicles lost to AIR (cumulative)
+
+    // --- FID (fidelity tiers) -------------------------------------------
+    int agg_flights = 0;            ///< engine: aggregated flights now
+    int agg_live = 0;               ///< deaggregated (Tier-B) flights now
+    int agg_arrived = 0;            ///< reached their last waypoint
+    int agg_destroyed = 0;          ///< folded as all-dead
+    int tier_deaggs = 0;            ///< session: deaggregations (cumulative)
+    int tier_reaggs = 0;            ///< session: reaggregations (cumulative)
+
+    // --- FID-6: the acceleration telemetry (run 0 only) ------------------
+    // sim_rate is this sample's window: sim seconds advanced per wall
+    // second — the rate an interactive host at the preset would have
+    // experienced. TELEMETRY (never a deterministic value); dilated is
+    // the FID-6 gate's per-sample verdict against speed × (1 − tol).
+    double sim_rate = 0.0;
+    bool dilated = false;
 
     // --- this sample's pulse -------------------------------------------
     int hour_spawns = 0;
@@ -208,6 +265,15 @@ struct WarVerdict {
     // -- the certificate --------------------------------------------------
     std::string ledger_md5_run0;    ///< 32 lowercase hex ("" on abort)
     std::string ledger_md5_run1;    ///< "" when runs == 1
+
+    // -- FID-6: the acceleration certificate -------------------------------
+    bool rate_gated = false;        ///< speed >= 2 armed the dilation gate
+    bool zero_dilation = true;      ///< every sample AND the pass sustained
+    bool deagg_bounded = true;      ///< the Tier-B set stayed <= the ceiling
+    std::string dilation_report;    ///< first dilated sample ("" when green)
+    std::string deagg_report;       ///< first ceiling breach ("" when green)
+    double sustained_rate = 0.0;    ///< run 0: sim sec / wall sec, whole pass
+    double min_sample_rate = 0.0;   ///< run 0: the slowest sample's rate
 };
 
 /// Everything the host needs after execute(): the verdicts, run 0's
@@ -257,6 +323,22 @@ struct WarReport {
     // (the QC's exit 14 reads these: air never attrited a unit).
     bool unit_strike = false;       ///< the session's G2 opt-in
     int ground_losses_air = 0;      ///< ledger: vehicles lost to air
+
+    // FID: which fidelity ran + the tier headline counters (the same
+    // provenance-echo pattern as aa_combat; the summary's accel block
+    // and the QC's exit 15/16 read these).
+    bool fidelity_tiered = false;   ///< the session's FID-1 policy
+    int agg_flights = 0;            ///< engine: aggregated flights (end)
+    int agg_live = 0;               ///< deaggregated (Tier-B) now (end)
+    int agg_arrived = 0;            ///< reached their last waypoint
+    int agg_destroyed = 0;          ///< folded as all-dead
+    int tier_deaggs = 0;            ///< session: deaggregations (cumulative)
+    int tier_reaggs = 0;            ///< session: reaggregations (cumulative)
+    int deagg_peak = 0;             ///< run 0: the largest Tier-B set seen
+    int dilated_samples = 0;        ///< run 0: samples below the preset
+    double speed = 1.0;             ///< the acceleration preset (echo)
+    double dilation_tolerance = 0.05; ///< the gate's noise allowance (echo)
+    int max_deagg_aircraft = 0;     ///< the Tier-B ceiling (echo; 0 = off)
 
     // Preconditions the inherited gates key on (echoed for the host's
     // exit-code decisions — the QC's tasking_had_air, war edition).

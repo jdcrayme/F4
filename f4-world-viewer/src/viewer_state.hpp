@@ -394,6 +394,11 @@ struct ViewerApp::Impl {
     /// fixed sim tick (the "Fix Your Timestep" contract).
     int campaign_speed_index = 1;         // default 10x (tasking on a
                                           // 30-min cycle is visible)
+    /// FID: the session's fidelity policy — Tiered by default (the
+    /// original game's own shape: aggregates until observed; see
+    /// Docs/FIDELITY_TIERS_PLAN.md). Unchecked = full-fidelity
+    /// everything (the pre-FID behavior).
+    bool campaign_tiered = true;
     /// The Campaign window (draw_campaign_session_view).
     bool show_campaign_window = true;
     /// Canvas live layer: the session's aircraft + their routes.

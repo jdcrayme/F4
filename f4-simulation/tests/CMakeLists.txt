@@ -38,6 +38,12 @@ f4_simulation_add_test(test_aar_e2e                 test_aar_e2e.cpp)   # Tranch
 f4_simulation_add_test(test_formation_acceptance   test_formation_acceptance.cpp)  # Tranche C
 f4_simulation_add_test(test_intercept_convergence    test_intercept_convergence.cpp)
 f4_simulation_add_test(test_fcs_trace_pipeline     test_fcs_trace_pipeline.cpp)
+f4_simulation_add_test(test_fidelity_tiers         test_fidelity_tiers.cpp)   # FID-1..4
+target_compile_definitions(test_fidelity_tiers PRIVATE
+    F4_SOURCE_FIXTURES_DIR="${CMAKE_SOURCE_DIR}/f4-world-convert/tests/fixtures"
+    F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}"
+    F4_MISSION_PROFILES_JSON="${F4_MISSION_PROFILES_JSON}"
+)
 f4_simulation_add_test(test_combat_integration     test_combat_integration.cpp)
 # Task 64: the real-data signature fixture (the aspect-grid stem the
 # binding tests resolve against).

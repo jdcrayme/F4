@@ -336,7 +336,26 @@ arm_flight_strike(const weapons::WeaponClassTable& table,
 airbase_vu_id(const f4::entities::EntityWorld& world,
               f4::entities::EntityId airbase_entity);
 
-/// Spawn ONE aircraft for ONE campaign Flight entity (the shared core of
+/// Spawn ONE aircraft for ONE campaign Flight entity — the campaign
+/// generation-to-spawn leg (the bridge's core spawn primitive).
+///
+/// Airborne override (FID-4, Docs/FIDELITY_TIERS_PLAN.md §4.4): when
+/// `air_pose` is non-null the aircraft spawns IN AIR at the pose —
+/// the aggregate flight's current position/heading/speed/fuel —
+/// instead of taxiing from its squadron's airbase parking. The FM
+/// initializes with inAir=true and the pose's true airspeed (clamped
+/// to a flyable minimum, the scenario path's own rule), the internal
+/// fuel comes from the pose (≤ 0 keeps the config default), and the
+/// MissionPlan starts at Enroute (the brain skips the takeoff phases
+/// and flies the saved route directly). Null (the default) is exactly
+/// the pre-FID behavior, bit for bit.
+struct AirSpawnPose {
+    f4::geo::WorldPosition position{};  ///< ENU feet (x east, y north, z MSL alt)
+    double heading_rad = 0.0;           ///< compass bearing (radians)
+    double vt_fps = 0.0;                ///< true airspeed at spawn (ft/s)
+    double fuel_lbs = 0.0;              ///< internal fuel (≤ 0 = config default)
+};
+
 /// the B.3 spawn paths). Composes Transform + FlightModel + VisualModel +
 /// Brain (+ MissionPlan from the flight's saved waypoints, when usable) +
 /// TEAM tag, at the flight's squadron airbase plus the caller-chosen
@@ -368,7 +387,8 @@ spawn_aircraft_for_flight(f4::entities::EntityWorld& world,
                               f4::entities::EntityId>* objective_id_map = nullptr,
                           const weapons::WeaponClassTable* weapon_table = nullptr,
                           const std::unordered_map<std::uint32_t,
-                              f4::entities::EntityId>* unit_id_map = nullptr);
+                              f4::entities::EntityId>* unit_id_map = nullptr,
+                          const AirSpawnPose* air_pose = nullptr);
 
 /// Spawn one aircraft entity per Flight-class unit in the EntityWorld.
 ///

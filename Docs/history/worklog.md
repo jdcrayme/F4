@@ -10559,3 +10559,189 @@ Stage Summary (Task 73 — the theater has an environment):
   its sky (viewer tint is a follow-up).
 - Delivery: two commits — the re-based f16 criticalAOA data repair +
   this task — packaged as format-patch onto origin/main (69a1638).
+
+## FID-PLAN-1 — the fidelity-tiers plan (air agg/deagg) drafted
+
+Task: the live campaign cannot sustain 1x (effective ~0.8x) because every
+spawned aircraft runs the full FM+AI+sensors stack at 60 Hz from spawn to
+recovery — no simulation-fidelity tiers exist for air entities. Draft the
+active plan that replicates FreeFalcon's aggregate/deaggregate mechanism.
+
+Work Log:
+- Evidence pass over the landed surface: campaign_session.hpp ("449 FMs at
+  60 Hz is a headless-budget run, not a UI"), campaign_session_runner.hpp
+  (presets 1x/10x/60x/240x; time_dilated() = "the preset outran the CPU";
+  effective_speed() EMA), bubble_manager.hpp (SIM_BUBBLE_SIZE 2.5 grid =
+  2560 ft air radius parsed via bubble_radii_from_aii() but documented
+  "currently unused"; ground bubble live + camera-scaled V-3DLIVE),
+  campaign_bridge.hpp (spawn_aircraft_for_flight / FlightSpawnFilter),
+  world_state.hpp (flight aggregate fields already decoded: flight_altitude,
+  fuel_burnt, time_on_target, mission_over_time), route_builder.hpp (legs +
+  TOT slots), simulation.hpp (FIXED-dt discipline — the removed
+  set_time_scale path and FLIGHT_CONTROL §4.2 RC-2), tools/campaign_qc.cpp
+  (exits 0–14 in use).
+- Upstream grounding: camplib/unit.cpp Deaggregate (:1612),
+  SendDeaggregateData (:1135), DeaggregateFromData (:2126); AII [Sim]
+  bubble keys.
+- Wrote Docs/FIDELITY_TIERS_PLAN.md: two-tier model (A aggregate at 60 s
+  campaign cadence / B deaggregated 60 Hz), deagg triggers + hysteresis,
+  the serialized-handoff contract with pinned edge cases, event-driven
+  combat deagg as v1 (abstract ledger resolution kept as v2 Option B),
+  aggregate contacts in the shared air picture, fidelity_policy option
+  (full_fidelity stays bit-identical — goldens untouched), milestones
+  FID-1..FID-6 with acceptance gates, campaign_qc --accel taking exits
+  15/16.
+- Updated Docs/README.md index (Active plans table).
+
+Stage Summary (FID-PLAN-1 — the plan exists):
+- Time compression is reframed as a fidelity problem, not a clock problem:
+  FIXED-dt discipline forbids dt scaling, so the only lever is how many
+  entities run the expensive path — aggregation.
+- Design decisions: tier on the session flight table (not entities);
+  lead-aircraft roll-up at reagg with ledger booking; seeded event-driven
+  deagg for combat (one combat model in v1); divergence bounded by the
+  FID-2 harness (upstream's silent divergence not inherited).
+- Sequencing rule recorded: the CAMPAIGN_LOOP §7 strategy tranche must not
+  start before FID-3 — every added support flight multiplies the 0.8x
+  problem.
+- Delivery: one local commit (plan + index + this entry), format-patch
+  ready; FID-1 implementation is the next session's task.
+
+## FID-1..4 — the fidelity tiers land (air agg/deagg end to end)
+
+Task: implement the plan (FIDELITY_TIERS_PLAN.md) — the session runs the
+war the original game's way: flights are campaign aggregates until the
+camera bubble, an airfield-ops window, or an explicit request
+deaggregates them; the viewer gets the Falcon-4-campaign-view UX
+(select an aircraft, deaggregate it and its surroundings).
+
+Work Log:
+- Engine (FID-2): f4-campaign's FlightAggregateEngine + flight_writeback
+  (the GroundWar twin — snapshot over the adapter sources, 60 s cadence,
+  TIME mode on the save's arrive/depart schedule, SPEED mode at the ATM's
+  12 grid/min cruise, per-aircraft 70 lbs/min burn, ops-window and
+  bearing queries, suspend/reaggregate/mark_destroyed, dirty-only
+  write-back). 11 unit tests (test_flight_aggregate): filters/counts,
+  snap/carry leg math, schedule walk, fold monotonicity, destroy, ops
+  queries, write-back identity, determinism.
+- Plumbing (FID-1): Simulation::air_bubble_radius_ft() (the AII
+  SIM_BUBBLE_SIZE, consumed at last); scenario "campaign_flights_deferred"
+  (the tiered world populates — ATC registration included — with NO
+  per-flight aircraft); CampaignSessionOptions::fidelity_policy
+  (FullFidelity default, bit-identical; Tiered arms everything).
+- Session (FID-3/4): advance_flights_ beside advance_ground_ (own
+  accumulator, entity mirror, per-second tier pass); evaluate_tiers_
+  (ops > bubble triggers; force-pin > ops-pin > hysteresis ×1.5 +
+  cooldown reagg rules); deaggregate_flight_ (GROUND spawn pre-takeoff
+  and at-home — the ATC path; AIR spawn via the bridge's AirSpawnPose:
+  in-air FM init, plan start Enroute, the handoff's fuel);
+  reaggregate_flight_ (lead transform + fuel fold, monotone, cursor
+  reset; dead aircraft fold destroyed); force API (immediate, the
+  paused-session rule) + flight_tiers() snapshot; set_view_bubble drives
+  air + ground with an immediate tier pass.
+- Viewer: the fidelity-tiers checkbox on Start Session (Tiered DEFAULT
+  — the user's directive: run the campaign like the original game);
+  the Campaign window's FLIGHTS table (VU/team/mission/grid/alt/fuel/
+  tier AGG-LIVE-HOME-LOST/ops window, click-to-select + pan, per-row
+  D/R); the tier summary line. 2D map follows the aggregates (the
+  mirror moves the flight entities); the 3D camera bubble deaggregates
+  air flights around the eye — the game's own workflow.
+- Verification: 18 new tests green; full ctest green except two
+  PRE-EXISTING, unrelated failures (f4-json RegisteredEscapesStillDecode,
+  f4-assets kc10 hash pin) — both outside the change surface, both
+  self-contained modules. The viewer TU was type-checked with g++
+  -fsyntax-only over the full include closure (imgui + raylib headers
+  fetched for the check) — raylib LINKING is unavailable in this
+  environment (no X11 dev headers), so the viewer binary itself needs a
+  build + smoke on a normal desktop before release.
+- Discipline: the FM's fixed dt untouched; full-fidelity sessions never
+  construct the engine; the ledger stays the single book of record;
+  f4-campaign still never sees EntityWorld.
+
+Stage Summary (FID-1..4 — the campaign accelerates like the game):
+- The 0.8x ceiling's root cause is gone: 60x presets over an
+  aggregate-heavy war are O(flights) leg propagation + 60 Hz work only
+  around the eye and the ops windows.
+- Docs updated as-built (plan status, milestones, gaps); CHANGELOG +
+  README index + this entry.
+- Queue: FID-5 (combat deagg + the recorder A/B divergence harness),
+  FID-6 (the --accel certificate, exits 15/16).
+
+## FID-6 — the acceleration certificate (--accel, exits 15/16)
+
+Task: implement FID-6 from Docs/FIDELITY_TIERS_PLAN.md (the user's
+directive: pull latest, proceed with FID-6) — the certificate the phase
+is named for: `campaign_qc --accel <x>` under the tiered policy, gated
+on zero dilation and the deaggregated-set ceiling, ledger invariants
+intact. (FID-5 stays queued; the plan's §8 order was host-directed.)
+
+Work Log:
+- Harness (f4-simulation): WarHarnessOptions::speed (>= 2 arms the
+  dilation gate; 1.0 = the ungated war, byte-identical shape),
+  dilation_tolerance (default 0.05), max_deagg_aircraft (0 = off) +
+  create() validation. WarHourSample gained the FID columns
+  (agg_flights/live/arrived/destroyed, tier_deaggs/reaggs) and the
+  run-0 telemetry (sim_rate, dilated). WarVerdict gained
+  rate_gated/zero_dilation/deagg_bounded with first-violation reports
+  and the sustained/min-sample rates; WarReport echoes the policy +
+  accel knobs and carries the tier counters + deagg_peak +
+  dilated_samples. Per-sample dilation verdict + sustained-pass check
+  (the pass-level check covers the unsampled final window); the deagg
+  ceiling checks samples AND the end state.
+- THE TIERED ROSTER IDENTITY (a real integration gap surfaced before
+  the first run): the session's deagg materializes one aircraft via
+  the bridge + register_aircraft — NOT the spawner's
+  synthetic_spawned — and every reagg retires via retire_aircraft. The
+  C5 leak gate's identity gained the tier term: live == initial +
+  synthetic_spawned + tier_deaggs − retired (zero in full fidelity).
+  Without it every tiered war false-fires exit 11.
+- QC tool: --accel <x> / --accel-hours (1.0) / --accel-max-live (32) /
+  --accel-tolerance (0.05) / --accel-baseline; run_war arms the
+  Tiered policy + the accel knobs and defaults a finer 60 s sample
+  (explicit --war-sample wins); the summary's mode "accel" with the
+  accel block (rates, peaks, verdicts, baseline); the diary's FID
+  columns conditional on the tiered run (full-fidelity diaries keep
+  their exact bytes); console accel lines (per-sample agg/rate, the
+  certificate headline); exits 15/16 after the inherited 6..14.
+- Tests (test_campaign_war_harness, 5 new): gates green on a
+  sustainable preset (the tiered kunsan war is also CERTIFIED
+  deterministic — §4.7 at harness level, MD5-equal passes); dilation
+  fires at speed 1e7 with the books still balancing; the ceiling
+  fires over a crafted two-pre-takeoff-flight world (K=1) with the
+  tiered identity re-derived per sample; option validation; speed 1.0
+  stays ungated with the rate still measured.
+- Fix on the way: the fidelity-tiers rig's make_temp_dir used a
+  process-local counter — ctest -jN runs the suite's filters as
+  concurrent processes that all start at f4_tiers_1, clobbering each
+  other's world files (a real flake hit in this session's first
+  parallel run). The name now carries a steady-clock tag; the ceiling
+  test's temp dir too.
+- Real-war acceptance (TestCamp 1 sim-hour, 2 passes, this sandbox):
+  the tiered war passes every C5 gate (deterministic — the ledger MD5
+  is IDENTICAL at 20x and 60x, e63edffd9a17f1d090272b78e0d33136; the
+  measurement does not perturb the war). 20x: exit 0, dilated=0,
+  ceiling ok. 60x: exit 15 fired honestly (sustained 31.7x, min
+  sample 22.6x). --accel-baseline: FullFidelity 20.7x vs tiered
+  31.7x. Diagnosis (the certificate's job): the fixed per-tick cost
+  over the ~8,446-entity theater walk caps this host at ~48x with
+  ZERO aircraft live; the war's live aircraft are ALL synthetic
+  Tier-B (34-48) once tasking fires — the documented v1 gap, i.e.
+  FID-5 is the next lever; and the save's stale schedules (nearest
+  future departure 11.2 h out, no TOT within the hour) legitimately
+  keep the ops windows silent — data, not bug.
+- Docs as-built: the plan's status banner, FID-6 section (the first
+  run's numbers + the two non-FM ceiling parts), §7 gap entry, §8
+  order (FID-6 before FID-5 by host direction); README index;
+  CHANGELOG; this entry.
+
+Stage Summary (FID-6 — the presets have a mechanism to certify):
+- campaign_qc --accel gates what the plan promised: exit 15 dilation,
+  exit 16 deagg ceiling, C5 invariants intact; the certificate is
+  host-relative by design and its summary carries the rates that
+  localize the remaining cost.
+- The tiered war is certified deterministic on the real fixture (the
+  §4.7 claim, now evidence).
+- Queue: FID-5 (combat deagg + the recorder A/B harness + synthetic
+  intents as aggregates — the certificate's own numbers say it is the
+  biggest remaining lever); the ~8.4k-entity per-tick walk is an
+  optimization tranche, deliberately out of this phase.

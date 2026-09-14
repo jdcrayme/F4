@@ -233,6 +233,17 @@ CampaignWarHarness::create(const WarHarnessOptions& opts, std::string* error) {
     if (opts.runs < 1 || opts.runs > 8) {
         return fail("war harness: runs must be 1..8");
     }
+    if (opts.speed < 1.0) {
+        return fail("war harness: speed must be >= 1.0 (the acceleration "
+                    "preset the run certifies; 1.0 = ungated telemetry)");
+    }
+    if (opts.dilation_tolerance < 0.0 || opts.dilation_tolerance >= 1.0) {
+        return fail("war harness: dilation_tolerance must be in [0, 1)");
+    }
+    if (opts.max_deagg_aircraft < 0) {
+        return fail("war harness: max_deagg_aircraft must be >= 0 "
+                    "(0 = the Tier-B ceiling is not gated)");
+    }
     if (opts.session.world_json.empty()) {
         return fail("war harness: session world_json is empty");
     }
@@ -382,6 +393,63 @@ void CampaignWarHarness::run_pass_(int run, const ProgressFn& on_sample) {
         }
     }
 
+    // FID-6: the pass-level acceleration numbers (run 0). The
+    // sustained rate covers the WHOLE pass (every batch's wall, the
+    // samples' windows included) — the per-sample gate can miss a
+    // slow patch that never spans a sample boundary; this one cannot.
+    // The peaks/dips are derived from the diary rows (already
+    // collected with their per-sample flags).
+    if (run == 0) {
+        const std::chrono::duration<double> pass_wall =
+            std::chrono::steady_clock::now() - pass_wall_start;
+        const double sim_advanced =
+            session_->stats().sim_time_s - pass_t0_;
+        if (pass_wall.count() > 1e-9) {
+            report_.verdict.sustained_rate =
+                sim_advanced / pass_wall.count();
+        }
+        bool have_rate = false;
+        for (const auto& s : report_.diary) {
+            if (s.agg_live > report_.deagg_peak) {
+                report_.deagg_peak = s.agg_live;
+            }
+            if (s.sim_rate > 0.0 &&
+                (!have_rate || s.sim_rate < report_.verdict.min_sample_rate)) {
+                report_.verdict.min_sample_rate = s.sim_rate;
+                have_rate = true;
+            }
+        }
+        // The end state counts too: the last sample's window does not
+        // reach the horizon's end (the final partial window is
+        // unsampled), so the ceiling's last chance to fire is here.
+        const int end_live = session_->stats().agg_live;
+        if (end_live > report_.deagg_peak) {
+            report_.deagg_peak = end_live;
+        }
+        if (opts_.max_deagg_aircraft > 0 && end_live > opts_.max_deagg_aircraft &&
+            report_.verdict.deagg_bounded) {
+            report_.verdict.deagg_bounded = false;
+            report_.verdict.deagg_report =
+                "end state: deaggregated set " + std::to_string(end_live) +
+                " > ceiling " + std::to_string(opts_.max_deagg_aircraft);
+        }
+        if (opts_.speed >= 2.0) {
+            report_.verdict.rate_gated = true;
+            const double required =
+                opts_.speed * (1.0 - opts_.dilation_tolerance);
+            if (report_.verdict.zero_dilation &&
+                report_.verdict.sustained_rate < required &&
+                report_.verdict.sustained_rate > 0.0) {
+                report_.verdict.zero_dilation = false;
+                report_.verdict.dilation_report =
+                    "sustained rate " +
+                    std::to_string(report_.verdict.sustained_rate) +
+                    " < required " + std::to_string(required) +
+                    " (preset " + std::to_string(opts_.speed) + ")";
+            }
+        }
+    }
+
     // The pass's ledger bytes + MD5. Run 0 keeps the document; every
     // run re-derives the digest, and run 1+ compares the BYTES (the
     // strict form of the MD5 certificate — a digest collision cannot
@@ -423,6 +491,19 @@ void CampaignWarHarness::run_pass_(int run, const ProgressFn& on_sample) {
         report_.aa_combat = opts_.session.aa_combat;
         report_.armed_aircraft = st.armed_aircraft;
         report_.armed_fighters = st.armed_fighters;
+        // FID: which fidelity ran + the tier counters (the accel
+        // certificate's headline; the echo pattern of aa_combat).
+        report_.fidelity_tiered =
+            opts_.session.fidelity_policy == FidelityPolicy::Tiered;
+        report_.agg_flights = st.agg_flights;
+        report_.agg_live = st.agg_live;
+        report_.agg_arrived = st.agg_arrived;
+        report_.agg_destroyed = st.agg_destroyed;
+        report_.tier_deaggs = st.tier_deaggs;
+        report_.tier_reaggs = st.tier_reaggs;
+        report_.speed = opts_.speed;
+        report_.dilation_tolerance = opts_.dilation_tolerance;
+        report_.max_deagg_aircraft = opts_.max_deagg_aircraft;
         // G1: the ground war's headline counters (the QC's exit 13 +
         // the summary's ground block read these; the LEDGER's ground
         // block — inside the byte-stable certificate — is the full
@@ -517,6 +598,15 @@ void CampaignWarHarness::sample_(int run) {
         s.ground_march_grid = static_cast<int>(
             gw->stats().army_distance_fp >> 8);
     }
+    // FID: the tier machinery's pulse per sample (the aggregate set,
+    // the Tier-B set, the deagg/reagg counters — the diary's FID
+    // columns; inert zeros in a full-fidelity war).
+    s.agg_flights = st.agg_flights;
+    s.agg_live = st.agg_live;
+    s.agg_arrived = st.agg_arrived;
+    s.agg_destroyed = st.agg_destroyed;
+    s.tier_deaggs = st.tier_deaggs;
+    s.tier_reaggs = st.tier_reaggs;
     s.hour_spawns = s.synthetic_spawned - pass_prev_.synthetic_spawned;
     s.hour_draws = s.drawn - pass_prev_.drawn;
     s.hour_cycles = s.cycles - pass_prev_.cycles;
@@ -534,6 +624,32 @@ void CampaignWarHarness::sample_(int run) {
         }
         s.rss_kb = current_rss_kb();
         pass_sample_wall_ = now;
+        // FID-6: the sample's measured rate — sim seconds advanced per
+        // wall second across this window — and, when the dilation gate
+        // is armed (speed >= 2), its verdict. The first violation is
+        // recorded with numbers; every violation counts.
+        if (s.wall_sec > 1e-9) {
+            s.sim_rate =
+                (s.sim_time_s - pass_prev_.sim_time_s) / s.wall_sec;
+        }
+        if (opts_.speed >= 2.0) {
+            report_.verdict.rate_gated = true;
+            const double required =
+                opts_.speed * (1.0 - opts_.dilation_tolerance);
+            if (s.sim_rate < required) {
+                s.dilated = true;
+                ++report_.dilated_samples;
+                if (report_.verdict.zero_dilation) {
+                    report_.verdict.zero_dilation = false;
+                    report_.verdict.dilation_report =
+                        "sample " + std::to_string(s.sample) + " (sim " +
+                        std::to_string(static_cast<long>(s.sim_time_s)) +
+                        "s): rate " + std::to_string(s.sim_rate) +
+                        " < required " + std::to_string(required) +
+                        " (preset " + std::to_string(opts_.speed) + ")";
+                }
+            }
+        }
     }
 
     // Per-team rows + the per-team book data (the squadron-side sums
@@ -738,7 +854,15 @@ void CampaignWarHarness::check_sample_(const WarHourSample& s,
     }
 
     // --- the ENTITY LEAK gate: the roster identity ----------------------
-    const int expected = pass_roster0_ + s.synthetic_spawned - s.retired;
+    // FID-6: a tiered session materializes ONE aircraft per
+    // deaggregation through the bridge + register_aircraft — NOT the
+    // spawner's synthetic counter — and every reagg retires it via
+    // retire_aircraft (the reaper's own mechanics; a kill's wreck
+    // retires once, whichever path reaps it). The identity gains the
+    // tier term; zero in full-fidelity mode (the pre-FID arithmetic,
+    // unchanged).
+    const int expected = pass_roster0_ + s.synthetic_spawned +
+                         s.tier_deaggs - s.retired;
     if (s.live_aircraft != expected && report_.verdict.entities_bounded) {
         report_.verdict.entities_bounded = false;
         report_.verdict.entity_leak =
@@ -746,9 +870,28 @@ void CampaignWarHarness::check_sample_(const WarHourSample& s,
             std::to_string(static_cast<long>(s.sim_time_s)) + "s): roster " +
             std::to_string(s.live_aircraft) + " != initial " +
             std::to_string(pass_roster0_) + " + spawned " +
-            std::to_string(s.synthetic_spawned) + " - retired " +
-            std::to_string(s.retired) + " (slack " +
+            std::to_string(s.synthetic_spawned) +
+            (s.tier_deaggs > 0
+                 ? " + tier-deagg " + std::to_string(s.tier_deaggs)
+                 : "") +
+            " - retired " + std::to_string(s.retired) + " (slack " +
             std::to_string(s.live_aircraft - expected) + ")";
+    }
+
+    // --- the FID-6 DEAGG CEILING gate (armed by max_deagg_aircraft) -----
+    // The tier machinery's bound: the deaggregated set (Tier-B flights
+    // — each one a 60 Hz aircraft) stays within the certificate's
+    // ceiling at every sample. The end state is checked post-loop
+    // (the final partial window is unsampled).
+    if (opts_.max_deagg_aircraft > 0 &&
+        s.agg_live > opts_.max_deagg_aircraft &&
+        report_.verdict.deagg_bounded) {
+        report_.verdict.deagg_bounded = false;
+        report_.verdict.deagg_report =
+            "sample " + std::to_string(s.sample) + " (sim " +
+            std::to_string(static_cast<long>(s.sim_time_s)) + "s): " +
+            "deaggregated set " + std::to_string(s.agg_live) + " > ceiling " +
+            std::to_string(opts_.max_deagg_aircraft);
     }
 
     // --- the WAR ALIVE gate ----------------------------------------------

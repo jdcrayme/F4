@@ -316,6 +316,15 @@ public:
     /// worlds have no campaign units to deaggregate).
     void refresh_bubble() { update_bubble(); }
 
+    /// FID-1 (Docs/FIDELITY_TIERS_PLAN.md): the AII-parsed AIR deagg
+    /// radius in feet (Falcon4.AII [Sim] SIM_BUBBLE_SIZE, 2.5 grid =
+    /// 2560 ft when the file is absent). Dead config until the
+    /// fidelity-tier session consumed it: the tiered session's air
+    /// bubble never shrinks below this radius (the ownship-bubble
+    /// semantics the AII documents, camera-driven per V-3DLIVE).
+    /// 2560.0 when no BubbleManager exists (scenario-list worlds).
+    [[nodiscard]] double air_bubble_radius_ft() const noexcept;
+
     /// True while a view bubble (camera-driven) overrides the ownship
     /// bubble — diagnostics / tests.
     [[nodiscard]] bool view_bubble_active() const noexcept {

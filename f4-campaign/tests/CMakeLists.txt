@@ -57,5 +57,6 @@ target_compile_definitions(test_atm PRIVATE
 # resupply, air-loss pullback, determinism, write-back, ledger block.
 # Links f4-json explicitly (the ground-block structural walk).
 f4_campaign_add_test(test_ground_war     test_ground_war.cpp)
+f4_campaign_add_test(test_flight_aggregate     test_flight_aggregate.cpp)
 f4_campaign_add_test(test_ground_targeting     test_ground_targeting.cpp)
 target_link_libraries(test_ground_war PRIVATE f4-json)

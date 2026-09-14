@@ -1430,6 +1430,46 @@ void Simulation::spawn_from_campaign_flights() {
     }
 
     const auto& template_ac = scenario_.aircraft.front();
+
+    // 6. Register every derived airbase with the ATC (B.3+): the StubATC
+    //    answers TaxiRequest/TakeoffRequest per airbase_id, falling back
+    //    to the default airfield wire_atc() configured. Without this, the
+    //    per-flight home-base tag would arrive at an ATC that can't
+    //    resolve it. (FID: registered BEFORE the deferred-spawn gate —
+    //    an ops-window deagg spawns on the ground and needs the ATC.)
+    if (atc_ && !airbase_airfields_.empty()) {
+        for (const auto& [vu, af] : airbase_airfields_) {
+            f4::ai::atc::AirfieldConfig cfg;
+            cfg.active_runway_id = af.active_runway_id;
+            cfg.active_runway_name = af.active_runway_name;
+            cfg.runway_heading_rad = af.runway_heading_rad;
+            cfg.threshold_position = af.threshold_position;
+            cfg.threshold_altitude_ft = af.threshold_altitude_ft;
+            cfg.departure_altitude_ft = af.departure_altitude_ft;
+            cfg.pattern_altitude_ft = af.threshold_altitude_ft + 1500.0;
+            cfg.taxi_route = af.taxi_route;
+            cfg.runway_end_position = af.runway_end_position;
+            cfg.runway_width_ft = af.runway_width_ft;
+            cfg.runway_length_ft = af.runway_length_ft;
+            atc_->set_airbase_airfield(vu, cfg);
+        }
+    }
+
+    if (scenario_.campaign_flights_deferred) {
+        // FID-1 (Docs/FIDELITY_TIERS_PLAN.md): the fidelity-tier
+        // session's deferred spawn — the world is POPULATED and every
+        // side system above built exactly as today, but NO per-flight
+        // aircraft spawn. The flights stay campaign aggregates
+        // (f4-campaign's FlightAggregateEngine, owned by the session);
+        // the tier session materializes one aircraft per flight on
+        // deaggregation (bubble / ops window / explicit request) — a
+        // GROUND spawn for an ops-window takeoff (the ATC above is
+        // live), an AIR spawn (the bridge's AirSpawnPose) for an
+        // already-airborne aggregate. The empty-roster throw below is
+        // deferred-path-exempt: an aggregate fleet is legal.
+        return;
+    }
+
     FlightSpawnFilter filter;
     filter.team = scenario_.campaign_flight_filter.team;
     filter.mission = scenario_.campaign_flight_filter.mission;
@@ -1458,29 +1498,6 @@ void Simulation::spawn_from_campaign_flights() {
     if (scenario_.combat.campaign_armed) {
         for (const auto eid : aircraft_entities_) {
             arm_campaign_aircraft(eid);
-        }
-    }
-
-    // 6. Register every derived airbase with the ATC (B.3+): the StubATC
-    //    answers TaxiRequest/TakeoffRequest per airbase_id, falling back
-    //    to the default airfield wire_atc() configured. Without this, the
-    //    per-flight home-base tag would arrive at an ATC that can't
-    //    resolve it.
-    if (atc_ && !airbase_airfields_.empty()) {
-        for (const auto& [vu, af] : airbase_airfields_) {
-            f4::ai::atc::AirfieldConfig cfg;
-            cfg.active_runway_id = af.active_runway_id;
-            cfg.active_runway_name = af.active_runway_name;
-            cfg.runway_heading_rad = af.runway_heading_rad;
-            cfg.threshold_position = af.threshold_position;
-            cfg.threshold_altitude_ft = af.threshold_altitude_ft;
-            cfg.departure_altitude_ft = af.departure_altitude_ft;
-            cfg.pattern_altitude_ft = af.threshold_altitude_ft + 1500.0;
-            cfg.taxi_route = af.taxi_route;
-            cfg.runway_end_position = af.runway_end_position;
-            cfg.runway_width_ft = af.runway_width_ft;
-            cfg.runway_length_ft = af.runway_length_ft;
-            atc_->set_airbase_airfield(vu, cfg);
         }
     }
 }
@@ -2357,9 +2374,14 @@ void Simulation::init_bubble_manager() {
         world_, class_table_, ground_radius_ft, air_radius_ft);
 }
 
+double Simulation::air_bubble_radius_ft() const noexcept {
+    // FID-1: the AII-parsed SIM_BUBBLE_SIZE (feet) — the tiered
+    // session's air-bubble floor (see the header's contract).
+    return bubble_manager_ ? bubble_manager_->air_radius_ft() : 2560.0;
+}
+
 void Simulation::update_bubble() {
     if (!bubble_manager_) return;
-
     // V-3DLIVE: the view bubble wins when the host set one — the
     // deaggregation follows the EYE (the map camera), not the clock:
     // zoom into a battalion and its vehicles spawn, even while the

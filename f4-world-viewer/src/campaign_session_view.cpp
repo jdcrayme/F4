@@ -174,6 +174,13 @@ void ViewerApp::start_campaign_session() {
     opts.max_flights = impl_->campaign_start_max_flights;
     opts.tasking_cycle_sec = 1800;  // FreeFalcon's own ATM cadence
     opts.reinforce_period_sec = 43200;  // the QC's armed 12 h
+    // FID: the fidelity policy. Tiered is the DEFAULT (the original
+    // game's own shape: flights are campaign aggregates until you zoom
+    // into or select one) — full-fidelity-everything is the checkbox's
+    // other side, and the pre-FID behavior exactly.
+    opts.fidelity_policy = impl_->campaign_tiered
+        ? f4::simulation::FidelityPolicy::Tiered
+        : f4::simulation::FidelityPolicy::FullFidelity;
     // C4: the ATM pipeline (FindBestAir replaces the C3 fallback
     // bridge this line used to arm).
 
@@ -485,6 +492,15 @@ void ViewerApp::draw_campaign_session_view() {
             }
         }
 
+        // FID: the fidelity policy. Tiered (default) runs the war the
+        // way the original game did — aggregates everywhere, full
+        // fidelity only around the eye and at the airfield ops windows;
+        // the high speed presets actually deliver. Full fidelity spawns
+        // every flight's aircraft at start (the pre-FID behavior; the
+        // CPU-limited readout below is its honest cost).
+        ImGui::Checkbox("fidelity tiers (aggregates until observed)",
+                        &impl_->campaign_tiered);
+
         ImGui::Separator();
         if (ImGui::Button("Start Session", ImVec2(160, 0))) {
             start_campaign_session();
@@ -612,15 +628,185 @@ void ViewerApp::draw_campaign_session_view() {
     ImGui::Text("live aircraft %d (%d airborne)   synthetic %d   sim %.0fs",
                 st.live_aircraft, st.airborne, st.synthetic_spawned,
                 st.sim_time_s);
+    // FID: the tier machinery's one-line summary (the aggregate/live
+    // split the flights table below renders row by row).
+    if (impl_->session->tiered()) {
+        ImGui::Text(
+            "flights %d (%d aggregate / %d live / %d home / %d lost)"
+            "   deaggs %d   reaggs %d",
+            st.agg_flights,
+            st.agg_flights - st.agg_live - st.agg_arrived -
+                st.agg_destroyed,
+            st.agg_live, st.agg_arrived, st.agg_destroyed,
+            st.tier_deaggs, st.tier_reaggs);
+    }
 
     ImGui::Separator();
+
+    const ImGuiTableFlags table_flags =
+        ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersOuterH |
+        ImGuiTableFlags_Resizable | ImGuiTableFlags_ScrollY;
+
+    // --- FID: the flights table (select + deaggregate, the Falcon 4
+    // campaign-view workflow) --------------------------------------------
+    // Under the Tiered policy the save's flights are campaign
+    // aggregates until something deaggregates them: the camera bubble
+    // (V-3DLIVE — the 3D view deaggregates what you zoom into), an
+    // airfield-ops window (takeoff/recovery), or the row buttons here
+    // (the explicit "select an aircraft and de-aggregate it" act).
+    // Clicking a row selects the flight entity and pans the map — the
+    // same affordance the missions table's target cell uses.
+    if (impl_->session->tiered()) {
+        const auto tiers = impl_->session->flight_tiers();
+        const auto& teams = impl_->session->world_state().teams;
+        const auto team_name = [&teams](std::uint8_t slot) {
+            for (const auto& t : teams) {
+                if (t.slot == static_cast<std::int8_t>(slot)) {
+                    return t.name.c_str();
+                }
+            }
+            return "?";
+        };
+        const auto mmss = [](std::int32_t sec, char* buf, size_t cap) {
+            if (sec < 0) {
+                std::snprintf(buf, cap, "-");
+                return;
+            }
+            std::snprintf(buf, cap, "%d:%02d", sec / 60, sec % 60);
+        };
+
+        ImGui::TextUnformatted(
+            "Flights (click to select; D deaggregates, R folds):");
+        if (ImGui::BeginTable("session_flights", 9, table_flags,
+                              ImVec2(0.0f, 0.0f))) {
+            ImGui::TableSetupScrollFreeze(0, 1);
+            ImGui::TableSetupColumn("VU", ImGuiTableColumnFlags_WidthFixed,
+                                    52.0f, 0);
+            ImGui::TableSetupColumn("team", ImGuiTableColumnFlags_WidthFixed,
+                                    56.0f, 1);
+            ImGui::TableSetupColumn("mission",
+                                    ImGuiTableColumnFlags_WidthFixed,
+                                    96.0f, 2);
+            ImGui::TableSetupColumn("grid",
+                                    ImGuiTableColumnFlags_WidthStretch,
+                                    90.0f, 3);
+            ImGui::TableSetupColumn("alt", ImGuiTableColumnFlags_WidthFixed,
+                                    56.0f, 4);
+            ImGui::TableSetupColumn("fuel burnt",
+                                    ImGuiTableColumnFlags_WidthFixed,
+                                    64.0f, 5);
+            ImGui::TableSetupColumn("tier", ImGuiTableColumnFlags_WidthFixed,
+                                    52.0f, 6);
+            ImGui::TableSetupColumn("window",
+                                    ImGuiTableColumnFlags_WidthFixed,
+                                    60.0f, 7);
+            ImGui::TableSetupColumn("ops", ImGuiTableColumnFlags_WidthFixed,
+                                    96.0f, 8);
+            ImGui::TableHeadersRow();
+
+            ImGuiListClipper clipper;
+            clipper.Begin(static_cast<int>(tiers.size()));
+            while (clipper.Step()) {
+                for (int i = clipper.DisplayStart; i < clipper.DisplayEnd;
+                     ++i) {
+                    const auto& t = tiers[static_cast<std::size_t>(i)];
+                    ImGui::TableNextRow();
+                    ImGui::TableNextColumn();
+                    {
+                        // Click the VU: select the flight entity + pan.
+                        char vbuf[16];
+                        std::snprintf(vbuf, sizeof(vbuf), "%u", t.vu);
+                        const bool selected =
+                            impl_->sel_kind == Impl::SelectionKind::Unit &&
+                            impl_->session != nullptr &&
+                            impl_->session->unit_id_map().find(t.vu) !=
+                                impl_->session->unit_id_map().end() &&
+                            impl_->session->unit_id_map().at(t.vu) ==
+                                impl_->sel_entity;
+                        if (ImGui::Selectable(vbuf, selected)) {
+                            const auto it = impl_->session->unit_id_map()
+                                .find(t.vu);
+                            if (it != impl_->session->unit_id_map().end() &&
+                                it->second.valid()) {
+                                impl_->sel_kind = Impl::SelectionKind::Unit;
+                                impl_->sel_entity = it->second;
+                                impl_->cam_x = static_cast<float>(t.x_grid);
+                                impl_->cam_y = static_cast<float>(t.y_grid);
+                                impl_->cam_zoom =
+                                    std::max(impl_->cam_zoom, 4.0f);
+                            }
+                        }
+                    }
+                    ImGui::TableNextColumn();
+                    ImGui::TextUnformatted(team_name(t.team));
+                    ImGui::TableNextColumn();
+                    {
+                        const std::string mname(
+                            f4::campaign::mission_type_name(t.mission));
+                        ImGui::TextUnformatted(mname.c_str());
+                    }
+                    ImGui::TableNextColumn();
+                    ImGui::Text("%.0f,%.0f", t.x_grid, t.y_grid);
+                    ImGui::TableNextColumn();
+                    ImGui::Text("%.0f", static_cast<double>(t.altitude_ft));
+                    ImGui::TableNextColumn();
+                    ImGui::Text("%d", t.fuel_burnt);
+                    ImGui::TableNextColumn();
+                    if (t.destroyed) {
+                        ImGui::TextDisabled("LOST");
+                    } else if (t.arrived) {
+                        ImGui::TextDisabled("HOME");
+                    } else if (t.live) {
+                        ImGui::TextColored(ImVec4(0.55f, 0.85f, 0.55f, 1.0f),
+                                           "LIVE");
+                    } else {
+                        ImGui::TextDisabled("AGG");
+                    }
+                    ImGui::TableNextColumn();
+                    {
+                        // The next ops window: takeoff countdown when the
+                        // flight still holds at its base, else the
+                        // recovery countdown. "-" = no schedule.
+                        char wbuf[16];
+                        const std::int32_t w =
+                            t.to_depart >= 0
+                                ? t.to_depart
+                                : t.to_mission_over;
+                        mmss(w, wbuf, sizeof(wbuf));
+                        ImGui::TextUnformatted(wbuf);
+                    }
+                    ImGui::TableNextColumn();
+                    {
+                        // The explicit acts: deaggregate (ground spawn
+                        // pre-takeoff or at home, air spawn otherwise)
+                        // and fold back. Both are synchronous under the
+                        // frame lock — the paused-session rule.
+                        ImGui::PushID(static_cast<int>(t.vu));
+                        if (!t.live && !t.destroyed) {
+                            if (ImGui::Button("D")) {
+                                impl_->session->force_deaggregate_flight(
+                                    t.vu);
+                            }
+                            ImGui::SameLine();
+                        }
+                        if (t.live) {
+                            if (ImGui::Button("R")) {
+                                impl_->session->force_reaggregate_flight(
+                                    t.vu);
+                            }
+                        }
+                        ImGui::PopID();
+                    }
+                }
+            }
+            ImGui::EndTable();
+        }
+        ImGui::Separator();
+    }
 
     // --- Generated missions table ---------------------------------------
     const auto& intents = impl_->session->intents();
     ImGui::TextUnformatted("Generated missions (ATM packages):");
-    const ImGuiTableFlags table_flags =
-        ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersOuterH |
-        ImGuiTableFlags_Resizable | ImGuiTableFlags_ScrollY;
     if (ImGui::BeginTable("session_missions", 7, table_flags,
                           ImVec2(0.0f, 0.0f))) {
         ImGui::TableSetupScrollFreeze(0, 1);

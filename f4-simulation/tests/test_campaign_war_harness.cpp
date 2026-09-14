@@ -27,7 +27,9 @@
 #include <gtest/gtest.h>
 
 #include <cctype>
+#include <chrono>
 #include <filesystem>
+#include <fstream>
 #include <string>
 
 using namespace f4::simulation;
@@ -359,5 +361,298 @@ TEST(CampaignWarHarness, RejectsInvalidOptions) {
         o.session.world_json.clear();
         EXPECT_EQ(CampaignWarHarness::create(o, &err), nullptr);
         EXPECT_NE(err.find("world_json"), std::string::npos) << err;
+    }
+    {
+        auto o = make_war_opts();
+        o.speed = 0.5;  // below 1 — the harness is not a real-time clock
+        EXPECT_EQ(CampaignWarHarness::create(o, &err), nullptr);
+        EXPECT_NE(err.find("speed"), std::string::npos) << err;
+    }
+    {
+        auto o = make_war_opts();
+        o.dilation_tolerance = 1.0;  // [0, 1)
+        EXPECT_EQ(CampaignWarHarness::create(o, &err), nullptr);
+        EXPECT_NE(err.find("dilation_tolerance"), std::string::npos) << err;
+    }
+    {
+        auto o = make_war_opts();
+        o.max_deagg_aircraft = -1;
+        EXPECT_EQ(CampaignWarHarness::create(o, &err), nullptr);
+        EXPECT_NE(err.find("max_deagg_aircraft"), std::string::npos) << err;
+    }
+}
+
+// ── 7. FID-6 — the acceleration certificate ────────────────────────────────
+//
+// The tiered war at an interactive preset, and the two gates the plan
+// names (Docs/FIDELITY_TIERS_PLAN.md §5): exit 15 (dilation — every
+// sample and the whole pass must sustain speed × (1 − tolerance)) and
+// exit 16 (the deaggregated set stays under the ceiling). The tiered
+// war is ALSO a war: the C5 certificate (determinism, drift, leak,
+// alive) covers it — with the roster identity extended by the tier
+// term (each deagg materializes one aircraft outside the spawner's
+// synthetic counter; every reagg retires it).
+
+// The FID-6 rig: the routed kunsan fixture under the TIERED policy,
+// the compressed 5 s cadences, and the accel knobs. Tolerance 0.98
+// makes the required rate speed × 0.02 — a preset any host sustains —
+// so the green-path test measures the GATE, not the machine.
+WarHarnessOptions make_accel_opts() {
+    WarHarnessOptions o = make_war_opts();
+    o.session.fidelity_policy = FidelityPolicy::Tiered;
+    o.speed = 2.0;
+    o.dilation_tolerance = 0.98;
+    o.max_deagg_aircraft = 64;
+    return o;
+}
+
+TEST(CampaignWarHarness, AccelVerdictsStayGreenOnASustainablePreset) {
+    if (!fixtures_ready()) {
+        GTEST_SKIP() << "f16.json fixture not generated";
+    }
+    WarHarnessOptions o = make_accel_opts();
+    std::string err;
+    auto harness = CampaignWarHarness::create(o, &err);
+    ASSERT_NE(harness, nullptr) << err;
+    harness->execute();
+    const auto& r = harness->report();
+
+    ASSERT_FALSE(r.aborted) << r.abort_reason;
+
+    // The certificate's own gates: armed, and green.
+    EXPECT_TRUE(r.fidelity_tiered);
+    EXPECT_TRUE(r.verdict.rate_gated);
+    EXPECT_TRUE(r.verdict.zero_dilation) << r.verdict.dilation_report;
+    EXPECT_TRUE(r.verdict.deagg_bounded) << r.verdict.deagg_report;
+    EXPECT_GT(r.verdict.sustained_rate, 0.0);
+    EXPECT_GT(r.verdict.min_sample_rate, 0.0);
+    EXPECT_DOUBLE_EQ(r.speed, 2.0);
+    EXPECT_DOUBLE_EQ(r.dilation_tolerance, 0.98);
+    EXPECT_EQ(r.max_deagg_aircraft, 64);
+
+    // The diary's FID columns flowed: every row measured a rate and
+    // none of them dilated.
+    ASSERT_FALSE(r.diary.empty());
+    for (const auto& s : r.diary) {
+        EXPECT_GT(s.sim_rate, 0.0) << "sample " << s.sample;
+        EXPECT_FALSE(s.dilated) << "sample " << s.sample;
+    }
+
+    // The C5 gates hold over the tiered war too — the DETERMINISM
+    // proof in particular (two passes, identical ledger bytes) is the
+    // plan's §4.7 claim, now certified at harness level.
+    EXPECT_TRUE(r.verdict.deterministic);
+    EXPECT_TRUE(r.verdict.ledger_consistent) << r.verdict.ledger_drift;
+    // The roster identity WITH the tier term: every deagg this war
+    // materialized is accounted (live == initial + spawned +
+    // tier_deaggs − retired).
+    EXPECT_TRUE(r.verdict.entities_bounded) << r.verdict.entity_leak;
+    EXPECT_TRUE(r.verdict.war_alive) << r.verdict.war_stall;
+}
+
+TEST(CampaignWarHarness, DilationGateFiresWhenThePresetOutrunsTheCpu) {
+    if (!fixtures_ready()) {
+        GTEST_SKIP() << "f16.json fixture not generated";
+    }
+    WarHarnessOptions o = make_accel_opts();
+    o.speed = 1e7;     // nothing sustains this — the gate must fire
+    o.horizon_sec = 12;
+    o.sample_sec = 6.0;
+    o.runs = 1;        // the proof is not the point here
+
+    std::string err;
+    auto harness = CampaignWarHarness::create(o, &err);
+    ASSERT_NE(harness, nullptr) << err;
+    harness->execute();
+    const auto& r = harness->report();
+
+    ASSERT_FALSE(r.aborted) << r.abort_reason;
+    EXPECT_TRUE(r.verdict.rate_gated);
+    EXPECT_FALSE(r.verdict.zero_dilation);
+    EXPECT_NE(r.verdict.dilation_report.find("rate"),
+              std::string::npos) << r.verdict.dilation_report;
+    EXPECT_GT(r.dilated_samples, 0);
+    // Every sampled window was below the required rate, and so was
+    // the pass itself.
+    const double required = o.speed * (1.0 - o.dilation_tolerance);
+    ASSERT_FALSE(r.diary.empty());
+    for (const auto& s : r.diary) {
+        EXPECT_TRUE(s.dilated) << "sample " << s.sample;
+        EXPECT_LT(s.sim_rate, required) << "sample " << s.sample;
+    }
+    EXPECT_LT(r.verdict.sustained_rate, required);
+    EXPECT_LT(r.verdict.min_sample_rate, required);
+
+    // The dilation gate is a THROUGHPUT verdict — it does not corrupt
+    // the war: the books still balance.
+    EXPECT_TRUE(r.verdict.ledger_consistent) << r.verdict.ledger_drift;
+}
+
+// The ceiling rig: the crafted tier world (the fidelity-tiers test's
+// shape) with TWO pre-takeoff flights — both inside the ops window at
+// t0, so the first tier pass deaggregates both as GROUND spawns.
+// Ceiling 1 must fire; the tiered roster identity must hold with both
+// tier aircraft on it.
+std::int64_t accel_now() { return 38574360; }
+
+std::string accel_ceiling_world_json() {
+    const std::int64_t depart = accel_now() + 300;  // inside the window
+    const auto flight = [&](const int id_num,
+                            const int package_id) -> std::string {
+        return ",\n      {\"type\": 200, \"id_num\": " +
+               std::to_string(id_num) +
+               R"(, "unit_class": "flight",)"
+               R"( "entity_type": 273, "domain": 2,)"
+               R"( "x": 390, "y": 455, "z": 0, "owner": 2,)"
+               R"( "mission": 13, "squadron_id": 4281, "package_id": )" +
+               std::to_string(package_id) +
+               R"(, "time_on_target": 43739352,)"
+               R"( "waypoints": [)"
+               R"({"x": 390, "y": 455, "z": 0, "action": 1, "depart": )" +
+               std::to_string(depart) +
+               R"(},)"
+               R"({"x": 420, "y": 460, "z": 2500, "action": 15},)"
+               R"({"x": 460, "y": 500, "z": 2500, "action": 17},)"
+               R"({"x": 390, "y": 455, "z": 0, "action": 7})"
+               R"(]})";
+    };
+    return R"({
+  "version": 71,
+  "theater": "korea",
+  "campaign": {
+    "current_time": )" + std::to_string(accel_now()) +
+           R"(,
+    "te_team": 2,
+    "teams": [
+      {"slot": 2, "name": "ROK", "member": [0,0,1,0,0,0,0,0],
+       "stance": [0,0,0,0,0,0,5,0]},
+      {"slot": 6, "name": "DPRK", "member": [0,0,0,0,0,0,1,0],
+       "stance": [0,0,5,0,0,0,0,0]}
+    ]
+  },
+  "objectives": {
+    "count": 1,
+    "decoded": 1,
+    "items": [
+      {"type": 100, "id_num": 4101, "id_creator": 0,
+       "objective_type": 1,
+       "x": 390, "y": 455, "z": 0,
+       "owner": 2, "nameid": 1627, "priority": 10,
+       "fstatus": [0, 0], "links": []}
+    ]
+  },
+  "units": {
+    "count": 4,
+    "decoded": 4,
+    "items": [
+      {"type": 200, "id_num": 4281, "unit_class": "squadron",
+       "entity_type": 273, "domain": 2,
+       "x": 390, "y": 455, "z": 0, "owner": 2,
+       "airbase_id": 4101, "class_name": "52 TFS PAK"},
+      {"type": 200, "id_num": 6001, "unit_class": "battalion",
+       "entity_type": 180, "domain": 3,
+       "x": 390, "y": 455, "z": 0, "owner": 6,
+       "vehicle_groups": [
+         {"group": 0, "vehicle_type": 101, "count": 3, "live_count": 3}
+       ]})" +
+           flight(5001, 7029) + flight(5002, 7030) + R"(
+    ]
+  }
+})";
+}
+
+TEST(CampaignWarHarness, DeaggCeilingFiresAndTheTierIdentityHolds) {
+    if (!fixtures_ready()) {
+        GTEST_SKIP() << "f16.json fixture not generated";
+    }
+    namespace fs = std::filesystem;
+    // Unique across processes (ctest -jN runs the filters concurrently;
+    // a fixed name would race a concurrent re-run of the same test).
+    const auto dir = fs::temp_directory_path() /
+                     ("f4_accel_ceiling_" +
+                      std::to_string(
+                          std::chrono::steady_clock::now()
+                              .time_since_epoch()
+                              .count()));
+    std::error_code ec;
+    fs::create_directories(dir, ec);
+    const auto world = dir / "accel_ceiling.world.json";
+    {
+        std::ofstream f(world);
+        f << accel_ceiling_world_json();
+    }
+
+    WarHarnessOptions o = make_accel_opts();
+    o.session.world_json = world;
+    o.session.tasking_cycle_sec = 1000000;  // no tasking — tiers only
+    o.session.reinforce_period_sec = 0;
+    o.session.atm_pipeline = false;
+    o.session.ops_window_sec = 600;  // the default; both flights sit in it
+    o.horizon_sec = 120;
+    o.sample_sec = 30.0;
+    o.runs = 1;
+    o.max_deagg_aircraft = 1;  // two flights deagg — the ceiling fires
+
+    std::string err;
+    auto harness = CampaignWarHarness::create(o, &err);
+    ASSERT_NE(harness, nullptr) << err;
+    harness->execute();
+    const auto& r = harness->report();
+
+    ASSERT_FALSE(r.aborted) << r.abort_reason;
+
+    // Both pre-takeoff flights deaggregated in the first tier pass —
+    // the ceiling (1) fired at the first sample that saw them.
+    EXPECT_FALSE(r.verdict.deagg_bounded) << r.verdict.deagg_report;
+    EXPECT_NE(r.verdict.deagg_report.find("deaggregated set"),
+              std::string::npos) << r.verdict.deagg_report;
+    EXPECT_GE(r.deagg_peak, 2);
+    ASSERT_FALSE(r.diary.empty());
+    EXPECT_GE(r.diary.front().agg_live, 2);
+    EXPECT_GE(r.diary.front().tier_deaggs, 2);
+
+    // THE TIERED ROSTER IDENTITY: the two tier aircraft are on the
+    // roster OUTSIDE the spawner's synthetic counter — the extended
+    // identity (live == initial + spawned + tier_deaggs − retired)
+    // must accept them. This is the FID-6 integration pin: without
+    // the tier term the C5 leak gate false-fires on every tiered war.
+    EXPECT_TRUE(r.verdict.entities_bounded) << r.verdict.entity_leak;
+    for (const auto& s : r.diary) {
+        EXPECT_EQ(s.live_aircraft,
+                  r.diary.front().live_aircraft -
+                      r.diary.front().synthetic_spawned -
+                      r.diary.front().tier_deaggs +
+                      r.diary.front().retired +
+                      s.synthetic_spawned + s.tier_deaggs - s.retired)
+            << "sample " << s.sample;
+    }
+    std::filesystem::remove_all(dir, ec);
+}
+
+TEST(CampaignWarHarness, AccelOptionValidationEchoesAndTelemetry) {
+    if (!fixtures_ready()) {
+        GTEST_SKIP() << "f16.json fixture not generated";
+    }
+    // speed 1.0 (the default) does NOT arm the gate — the plain war's
+    // shape is untouched, its rate is telemetry only.
+    {
+        WarHarnessOptions o = make_accel_opts();
+        o.speed = 1.0;
+        o.horizon_sec = 12;
+        o.sample_sec = 6.0;
+        o.runs = 1;
+        std::string err;
+        auto harness = CampaignWarHarness::create(o, &err);
+        ASSERT_NE(harness, nullptr) << err;
+        harness->execute();
+        const auto& r = harness->report();
+        ASSERT_FALSE(r.aborted) << r.abort_reason;
+        EXPECT_FALSE(r.verdict.rate_gated);
+        EXPECT_TRUE(r.verdict.zero_dilation);  // vacuously green
+        // The rate was still MEASURED (the diary carries it).
+        ASSERT_FALSE(r.diary.empty());
+        EXPECT_GT(r.diary.front().sim_rate, 0.0);
+        EXPECT_FALSE(r.diary.front().dilated);
+        EXPECT_DOUBLE_EQ(r.speed, 1.0);
     }
 }

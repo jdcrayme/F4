@@ -5,6 +5,36 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## Fidelity tiers (most recent)
+
+- **FID-6** — the acceleration certificate (Docs/FIDELITY_TIERS_PLAN.md):
+  `campaign_qc --accel <x>` runs the war harness under the TIERED policy
+  at an interactive preset and gates exit 15 (DILATION — a sample or the
+  sustained pass below x×(1−tolerance)) and exit 16 (DEAGG CEILING — the
+  deaggregated set over `--accel-max-live`) on top of the C5 set (6–14);
+  `--accel-baseline` measures the same war at FullFidelity for the
+  before/after. The C5 roster identity gained the tier term
+  (`+ tier_deaggs` — the deagg spawn path bypasses the spawner's
+  synthetic counter), the diary gained the FID columns (agg_live,
+  tier counters, sim_rate, dilated), and the harness validates the new
+  knobs. First TestCamp run: tiered war passes every C5 gate
+  (deterministic — identical ledger MD5 at 20× and 60×; drift/leak/alive
+  ok); 20× green exit 0; 60× honestly fires exit 15 (sustained 31.7×:
+  the ~8.4k-entity theater walk caps the host at ~48× empty, the
+  synthetic Tier-B mass drops it to ~25×; FullFidelity baseline 20.7×).
+  5 new harness tests; the fidelity-tiers test rig's temp-dir race
+  (ctest -jN) fixed.
+- **FID-1..4** — air agg/deagg (Docs/FIDELITY_TIERS_PLAN.md): the tiered
+  session runs the war the game's way — flights are campaign aggregates
+  (`FlightAggregateEngine`: the save's own arrive/depart schedule or the
+  cruise walk, per-aircraft fuel burn) until the camera bubble, an
+  airfield-ops window, or a click deaggregates them (`AirSpawnPose`
+  airborne handoff; lead roll-up fold-back; a lost aircraft folds the
+  flight destroyed). Viewer: fidelity-tiers checkbox (Tiered by default),
+  the flights table (click-to-select + D/R per row), the tier summary
+  line. Full fidelity untouched and bit-identical; 18 new tests
+  (`test_flight_aggregate` 11, `test_fidelity_tiers` 7).
+
 ## Environment & data (most recent)
 
 - **73** — Weather v1 + day/night model: 3-state condition Markov chain (seeded, deterministic), solar twilight bands, visual detection scales with weather×daylight. Suite 2,513.
