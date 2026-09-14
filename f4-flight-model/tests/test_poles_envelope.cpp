@@ -43,11 +43,20 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <regex>
 #include <sstream>
 #include <string>
+
+// MSVC has no POSIX popen/pclose — only the underscored CRT names. The
+// file never compiled on Windows without this shim (the test binary was
+// a permanent gtest_discover_tests NOT_BUILT placeholder there).
+#if defined(_WIN32)
+#  define popen  _popen
+#  define pclose _pclose
+#endif
 
 namespace {
 
