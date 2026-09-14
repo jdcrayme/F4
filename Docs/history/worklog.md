@@ -10745,3 +10745,63 @@ Stage Summary (FID-6 — the presets have a mechanism to certify):
   intents as aggregates — the certificate's own numbers say it is the
   biggest remaining lever); the ~8.4k-entity per-tick walk is an
   optimization tranche, deliberately out of this phase.
+
+## FID-VIEW-1 — the campaign view shows the war (aggregate air picture)
+
+Task: host report after pushing the FID patch — "I don't see anything
+happen when I run the campaign (no ATO missions or anything else)".
+Diagnose against the pushed tree (3669433, tree-identical to the
+delivered patch series) and fix.
+
+Work Log:
+- Diagnosis (static): the Tiered DEFAULT viewer session runs the war
+  but the canvas live layer draws only MATERIALIZED aircraft (spawned
+  roster, parked, deagg vehicles) — every aggregate flight was
+  invisible, the map sat frozen-looking. The ladder's first generated
+  missions land a FULL tasking cycle in (next_cycle_ starts at 0 → the
+  first fire is at 1800 campaign s — 30 wall-min at 1x, 3 at 10x) and
+  nothing said so. The 6/12 s V-SMOKE window can never see a cycle.
+  The ATO/Tasking window reads the STATIC world (world_loader
+  populates FlightPlanComponent) — 449 tasked rows exist, static.
+  Engines were already certified headless (FID-6).
+- Reproduction (Xvfb :99 + Mesa llvmpipe; xvfb-run unusable — no
+  xauth; unix-socket X transport unusable — /tmp/.X11-unix not root-
+  owned, so Xvfb needs `-listen tcp` and DISPLAY=localhost:99;
+  raylib/GLFW dlopen the X stack so the build links only -lGL):
+  tiered --play 200 s — map frozen-looking, war status zeros, exit
+  summary "cycles 0 missions 0 live 0" at sim 1233 s (6.2x effective
+  under llvmpipe) — 1233 < 1800, the cycle had not fired yet.
+- Landed (all viewer-side; the engines untouched):
+  - canvas.cpp: the AGGREGATE AIR PICTURE — a pass over
+    flight_tiers() draws every non-live flight's fighter glyph at its
+    aggregate position (AGG translucent/reduced, HOME dimmed, LOST a
+    small gray cross, LIVE skipped — their aircraft draw as
+    entities), team filter + view culling honored, click-pick via
+    unit_id_map with the flights table's own selection convention +
+    ring. Renders while PAUSED too (a fresh session shows the war on
+    start).
+  - campaign.hpp/.cpp + campaign_session: Campaign::
+    seconds_to_next_cycle() → SessionStats::next_tasking_sec → a
+    war-status "next tasking cycle in MM:SS" line.
+  - cli/main.cpp: --smoke-seconds <n> (screenshot 2 s before exit) —
+    the long-window smoke.
+- Verification: 480 s run — exit summary "[session] sim 2476.5s
+  campaign 38576836 cycles 1 missions 94 live 34" (routes 20/0
+  failed, drawn 230, 34 synthetic Tier-B AIRBORNE; screenshots show
+  the aggregate air picture + the flights table ticking fuel/alt +
+  the countdown flipping to the next wave). Suites: f4-campaign
+  155/155, f4-simulation 295/295 (the new
+  StatsCountDownToTheNextTaskingCycle pins the countdown: full window
+  at create, (0, cycle] after two fires). Build note: F4_BUILD_VIEWER
+  was OFF in this tree — reconfigured ON with a local X11/GL dev
+  header prefix (no root; extracted .debs + CMAKE_INCLUDE_PATH/
+  LIBRARY_PATH + dangling-symlink repair), everything else unchanged.
+
+Stage Summary (FID-VIEW-1 — the tiered campaign is VISIBLE):
+- The tiered default now LOOKS like the original game's campaign map:
+  the whole war's air picture moving from second one; generated ATO
+  waves land at the ladder's cadence with a countdown; synthetic
+  Tier-B flights materialize airborne and fly; zoom-in/ops-window/
+  flights-table deagg unchanged.
+- Queue unchanged: FID-5 (combat deagg) remains the next lever; the
+  certificate's numbers stand.

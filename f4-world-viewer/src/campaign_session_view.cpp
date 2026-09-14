@@ -617,6 +617,14 @@ void ViewerApp::draw_campaign_session_view() {
     ImGui::Text("cycles %d   missions %d   routes %d (failed %d, wps %d)",
                 st.cycles, st.intents, st.routes_built, st.routes_failed,
                 st.route_waypoints);
+    // The tasking countdown: the ladder's first generated missions land
+    // a FULL air_task_cycle_sec in (FreeFalcon's 30-minute ATM cadence
+    // here) — without this line a fresh session's zero missions read
+    // as "nothing happens" instead of "the first ATO wave is N away".
+    {
+        const int nt = std::max(0, st.next_tasking_sec);
+        ImGui::Text("next tasking cycle in %d:%02d", nt / 60, nt % 60);
+    }
     ImGui::Text("drawn %d   losses %d   reinforced %d (fires %d)",
                 st.drawn_aircraft, st.air_losses, st.reinforced,
                 st.reinforce_fires);

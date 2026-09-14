@@ -244,6 +244,10 @@ public:
     /// window shows, computed once per advance() (never per draw).
     struct Stats {
         int cycles = 0;               ///< tasking cycles fired
+        /// Seconds until the next tasking cycle fires (the campaign
+        /// view's "next ATO wave" countdown — the first generated
+        /// missions land at air_task_cycle_sec, NOT at start).
+        int next_tasking_sec = 0;
         int intents = 0;              ///< missions generated (ladder)
         int routes_built = 0;         ///< ladder route counters
         int routes_failed = 0;

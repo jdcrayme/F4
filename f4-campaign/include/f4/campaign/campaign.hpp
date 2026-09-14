@@ -233,6 +233,14 @@ public:
     /// Tasking cycles fired so far.
     [[nodiscard]] int cycles_fired() const noexcept { return cycles_fired_; }
 
+    /// Seconds until the next tasking cycle fires (the campaign view's
+    /// "next ATO wave in MM:SS" readout). next_cycle_ starts at 0, so a
+    /// fresh ladder reports the full air_task_cycle_sec — the first
+    /// generated missions land exactly that many campaign seconds in.
+    [[nodiscard]] CampaignTime seconds_to_next_cycle() const noexcept {
+        return next_cycle_ + cfg_.air_task_cycle_sec - clock_;
+    }
+
     /// Reinforcement ticks fired so far (C2 — the cadence fires when
     /// campaign time passes the .cmp anchor + period; see
     /// CampaignConfig::reinforcement_period_sec). Requires a ledger

@@ -13,7 +13,9 @@
 > the milestone sections; the deviations from the draft are recorded
 > there (the aggregate tier rides the world's existing flight
 > entities; v1 covers the save's flights — synthetic intents spawn
-> straight to Tier-B).
+> straight to Tier-B). **FID-VIEW-1 (the campaign view shows the war)
+> is also LANDED** — the aggregate air picture, the tasking countdown,
+> and the long-window smoke; see its section below FID-5.
 > **Problem it closes**: the session runs every spawned aircraft through the
 > full FM + AI + sensors at 60 Hz from spawn to recovery — 449 flights is
 > "a headless-budget run, not a UI" (`campaign_session.hpp`), so the
@@ -316,6 +318,42 @@ triggers + transient deagg windows with phase-pinned reagg, and the
 f4-recorder A/B divergence harness the FID-2 acceptance deferred.
 Nothing landed.
 
+### FID-VIEW-1 — the campaign view shows the war — LANDED
+
+Host report: "I don't see anything happen when I run the campaign (no
+ATO missions or anything else)" — the FID-1..4 patch made Tiered the
+viewer default and the machinery ran, but the VIEW was blind to it.
+Three compounding gaps, all viewer-side (the engines were already
+verified headless by the FID-6 certificate):
+
+1. **The aggregate air picture was never drawn.** The canvas live layer
+   draws only MATERIALIZED aircraft (spawned/parked/deagg-vehicles); a
+   tiered session's flights are aggregates — every flight in the air
+   was invisible, the map sat frozen-looking. LANDED: a pass over
+   `flight_tiers()` draws each non-live flight's fighter glyph at its
+   aggregate position, moving with the 60-s cadence (the Falcon 4
+   campaign map's own look) — AGG translucent/reduced, HOME dimmed,
+   LOST a small gray cross, LIVE skipped (their aircraft draw as
+   entities), team filter and view culling honored — plus click-pick
+   (selects the flight's session-world entity, the flights table's own
+   convention) with the flights-table selection ring.
+2. **The first generated missions land a FULL tasking cycle in** (the
+   ladder fires at 1800 s — 30 wall-minutes at 1x, 3 at 10x) and
+   nothing said so. LANDED: `Campaign::seconds_to_next_cycle()` +
+   `Stats::next_tasking_sec` + a war-status "next tasking cycle in
+   MM:SS" line — zero missions now read as a countdown, not a dead
+   session.
+3. **The smoke could not see the cycle.** The V-SMOKE window (6/12 s)
+   can never cross 1800 campaign s. LANDED: `--smoke-seconds <n>`
+   holds the window open n seconds with the screenshot taken 2 s
+   before exit — the headless proof that generated missions appear and
+   spawn.
+
+Also as-built: interactive sessions still start PAUSED (deliberate —
+an accidentally-live loop is the worse default), and the aggregate
+layer renders while paused so a fresh session shows the war's air
+picture immediately on start.
+
 ### FID-6 — the acceleration certificate — LANDED
 
 Landed: `campaign_qc --accel <x>` — the war-harness flow under the
@@ -434,6 +472,8 @@ tiering; the certificate will say so wherever it runs.
 6. FID-5 (needs FID-3 + FID-4 — the last open milestone, and the
    certificate's own evidence says the biggest remaining lever: the
    war's live aircraft are all synthetic Tier-B).
+7. FID-VIEW-1 (viewer visibility follow-on — landed alongside; no
+   session-machinery surface changes, the engines untouched).
 
 Sequencing rule for other plans: **the strategy tranche
 (CAMPAIGN_LOOP §7) must not start before FID-3 lands** — every added

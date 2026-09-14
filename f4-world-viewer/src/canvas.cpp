@@ -97,6 +97,37 @@ void ViewerApp::handle_input() {
                 return;
             }
 
+            // FID: aggregate flights — pickable between live aircraft
+            // and parked (the flights table's own selection convention:
+            // the flight's session-world entity via unit_id_map, so the
+            // flights-table ring, the inspector pan and this pick all
+            // agree on one selection).
+            if (impl_->session && impl_->session->tiered()) {
+                const float atol = 10.0f / impl_->cam_zoom;
+                f4::entities::EntityId agg_best;
+                float agg_d2 = atol * atol;
+                for (const auto& t : impl_->session->flight_tiers()) {
+                    if (t.live || t.destroyed) continue;
+                    const float dx = static_cast<float>(t.x_grid) - gx;
+                    const float dy = static_cast<float>(t.y_grid) - gy;
+                    const float d2 = dx * dx + dy * dy;
+                    if (d2 >= agg_d2) continue;
+                    const auto it =
+                        impl_->session->unit_id_map().find(t.vu);
+                    if (it == impl_->session->unit_id_map().end() ||
+                        !it->second.valid()) {
+                        continue;
+                    }
+                    agg_d2 = d2;
+                    agg_best = it->second;
+                }
+                if (agg_best.valid()) {
+                    impl_->sel_kind = Impl::SelectionKind::Unit;
+                    impl_->sel_entity = agg_best;
+                    return;
+                }
+            }
+
             // Parked aircraft + deaggregated vehicles: clickable as
             // LiveAircraft too — but only when they're actually
             // visible (their dots draw at zoom > 2), so a click in a
@@ -715,6 +746,97 @@ void ViewerApp::draw_canvas() {
             // Selection outline
             if (unit_selected) {
                 DrawCircleLines(static_cast<int>(p.x), static_cast<int>(p.y),
+                                static_cast<int>(s * 0.6f + 4),
+                                Color{255, 255, 0, 255});
+            }
+        }
+    }
+
+    // --- FID: the aggregate air picture (the tiered campaign view) -------
+    //
+    // Under the Tiered policy the save's flights are campaign
+    // aggregates: the flight engine moves them at its 60 s cadence but
+    // no aircraft materialize until something deaggregates them — and
+    // the passes below draw only MATERIALIZED aircraft. The result was
+    // a map that sat frozen-looking even while the war ran (the "no ATO
+    // missions or anything else" report): every flight in the air was
+    // invisible. This pass draws the aggregate air picture from the
+    // session's tier snapshot — the whole war's flights moving with the
+    // campaign clock (the Falcon 4 campaign map's own look):
+    //   * LIVE flights are skipped — their materialized aircraft draw
+    //     in the live pass below (per aircraft, not per flight).
+    //   * AGG flights draw the fighter glyph at reduced size with a
+    //     translucent fill (an aggregate, visibly not a sim entity).
+    //   * HOME (arrived) draws dimmed, the parked dots' own treatment.
+    //   * LOST (folded all-dead) draws a small dim gray cross.
+    // The selection ring matches the flights table's selection (the
+    // flight's session-world entity).
+    if (impl_->session && impl_->session->tiered() &&
+        impl_->show_live_layer) {
+        const float s = std::clamp(6.0f + impl_->cam_zoom * 1.5f, 9.0f, 24.0f);
+        const float cull_margin = s + 8.0f;
+        const float agg_sx_min = -cull_margin;
+        const float agg_sx_max =
+            static_cast<float>(impl_->window_w) + cull_margin;
+        const float agg_sy_min = -cull_margin;
+        const float agg_sy_max =
+            static_cast<float>(impl_->window_h) + cull_margin;
+        std::uint32_t sel_vu = 0;
+        if (impl_->sel_kind == Impl::SelectionKind::Unit) {
+            // Reverse-lookup the selected entity's VU once (the tier
+            // snapshot is keyed by VU; the selection holds the entity).
+            for (const auto& [vu, eid] : impl_->session->unit_id_map()) {
+                if (eid == impl_->sel_entity) {
+                    sel_vu = vu;
+                    break;
+                }
+            }
+        }
+        for (const auto& t : impl_->session->flight_tiers()) {
+            if (t.live) continue;  // materialized: the live pass draws it
+            const Vector2 p = impl_->world_to_screen(
+                static_cast<float>(t.x_grid),
+                static_cast<float>(t.y_grid));
+            if (p.x < agg_sx_min || p.x > agg_sx_max ||
+                p.y < agg_sy_min || p.y > agg_sy_max) {
+                continue;
+            }
+            if (t.destroyed) {
+                constexpr unsigned char xcol = 130;
+                DrawLineEx(Vector2{p.x - 3.0f, p.y - 3.0f},
+                           Vector2{p.x + 3.0f, p.y + 3.0f}, 1.0f,
+                           Color{xcol, xcol, xcol, 150});
+                DrawLineEx(Vector2{p.x - 3.0f, p.y + 3.0f},
+                           Vector2{p.x + 3.0f, p.y - 3.0f}, 1.0f,
+                           Color{xcol, xcol, xcol, 150});
+                continue;
+            }
+            RlColor c = color_for_owner(t.team);
+            if (impl_->team_filter != 0xFF && t.team != impl_->team_filter) {
+                c.r = static_cast<unsigned char>(c.r * 0.3f);
+                c.g = static_cast<unsigned char>(c.g * 0.3f);
+                c.b = static_cast<unsigned char>(c.b * 0.3f);
+                c.a = static_cast<unsigned char>(c.a * 0.3f);
+            } else if (t.arrived) {
+                // HOME: the ramp picture — dim like the parked dots.
+                c.r = static_cast<unsigned char>(c.r * 0.45f);
+                c.g = static_cast<unsigned char>(c.g * 0.45f);
+                c.b = static_cast<unsigned char>(c.b * 0.45f);
+            } else {
+                // AGG: translucent fill — the aggregate look.
+                c.a = 205;
+            }
+            const RlColor agg_outline = {
+                static_cast<unsigned char>(c.r * 0.4f),
+                static_cast<unsigned char>(c.g * 0.4f),
+                static_cast<unsigned char>(c.b * 0.4f),
+                c.a};
+            f4::renderer::draw_symbol(
+                f4::renderer::SymbolKind::UnitFighter,
+                p.x, p.y, s, c, agg_outline);
+            if (sel_vu != 0 && sel_vu == t.vu) {
+                DrawCircleLines(static_cast<int>(p.x),
+                                static_cast<int>(p.y),
                                 static_cast<int>(s * 0.6f + 4),
                                 Color{255, 255, 0, 255});
             }

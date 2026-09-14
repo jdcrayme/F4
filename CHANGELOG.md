@@ -7,6 +7,18 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 
 ## Fidelity tiers (most recent)
 
+- **FID-VIEW-1** — the campaign view shows the war (Docs/FIDELITY_TIERS_PLAN.md):
+  the viewer's Tiered default ran the war but drew none of it — the canvas
+  live layer rendered only materialized aircraft, so every aggregate flight
+  was invisible and a fresh session read as dead. Landed: the aggregate air
+  picture (a pass over `flight_tiers()` — AGG translucent, HOME dimmed, LOST
+  a gray cross, LIVE skipped for the materialized aircraft, team filter +
+  cull + click-pick with the flights-table selection ring), the tasking
+  countdown (`Campaign::seconds_to_next_cycle` → `Stats::next_tasking_sec` →
+  a "next tasking cycle in MM:SS" war-status line — the ladder's first
+  generated missions land a full 1800-s cycle in), and the viewer
+  `--smoke-seconds <n>` long-window smoke (the 6/12 s default can never
+  cross the cycle). Engines untouched; one new session stats test.
 - **FID-6** — the acceleration certificate (Docs/FIDELITY_TIERS_PLAN.md):
   `campaign_qc --accel <x>` runs the war harness under the TIERED policy
   at an interactive preset and gates exit 15 (DILATION — a sample or the

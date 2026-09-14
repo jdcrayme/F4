@@ -176,6 +176,37 @@ TEST(CampaignSession, AdvanceTicksCampaignGeneratesAndMaterializes) {
               session->stats().drawn_aircraft);
 }
 
+// ── 2b. The tasking countdown (the campaign view's "next ATO wave") ────────
+// The viewer's war-status block shows when the ladder's generated
+// missions first land — the readout that keeps a fresh session's zero
+// missions from reading as "nothing happens" (the first cycle is a
+// FULL air_task_cycle_sec in, NOT at start).
+TEST(CampaignSession, StatsCountDownToTheNextTaskingCycle) {
+    if (!std::filesystem::exists(f16_config())) {
+        GTEST_SKIP() << "f16.json fixture not generated";
+    }
+    std::string err;
+    auto session = CampaignSession::create(make_opts(kunsan_routed_world()),
+                                           &err);
+    ASSERT_NE(session, nullptr) << "create failed: " << err;
+
+    // A fresh session: the full cycle ahead of the clock (the rig's 5 s
+    // — the viewer's FreeFalcon-cadence default is 1800), zero fired.
+    EXPECT_EQ(session->stats().cycles, 0);
+    EXPECT_EQ(session->stats().next_tasking_sec, 5);
+    EXPECT_EQ(session->stats().next_tasking_sec,
+              static_cast<int>(session->campaign().seconds_to_next_cycle()));
+
+    // Advance past two cycles: the countdown cycles back through the
+    // full window (0 < next <= cycle) while the fired count climbs.
+    for (int frame = 0; frame < 15; ++frame) {
+        session->advance(1.0 / 60.0 * 60);   // 1 sim second per frame
+    }
+    EXPECT_GE(session->campaign().cycles_fired(), 2);
+    EXPECT_GT(session->stats().next_tasking_sec, 0);
+    EXPECT_LE(session->stats().next_tasking_sec, 5);
+}
+
 // ── 3. Determinism: identical advances → identical artifacts ───────────────
 TEST(CampaignSession, IdenticalRunsAreByteIdentical) {
     if (!std::filesystem::exists(f16_config())) {

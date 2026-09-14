@@ -42,6 +42,13 @@
 //       one-line summary ("[session] sim <s> campaign <t> ...") — the
 //       headless proof that campaign time actually advanced (the
 //       starved-worker regression shipped invisible without it).
+//   f4-world-viewer world.json terrain.json --session --play \
+//                    --smoke-seconds 220 --screenshot out.png
+//       Hold the smoke window open N seconds (default: 6, or 12 with
+//       --play) with the screenshot taken 2 s before exit. Long enough
+//       to cross the tasking ladder's first cycle (1800 campaign s =
+//       180 wall s at the 10x preset) — the headless proof that the
+//       generated missions actually appear and spawn.
 //
 // On startup, the viewer auto-restores the last install path from
 // settings.json (Linux: ~/.config/f4-viewer/; macOS: ~/Library/Application
@@ -114,6 +121,9 @@ int main(int argc, char** argv) {
     bool auto_play = false;               // --play: session starts RUNNING
                                           // (headless smoke: verify time
                                           // actually advances)
+    int smoke_seconds = 0;                // --smoke-seconds <n>: hold the
+                                          // screenshot smoke window open n
+                                          // seconds (0 = the 6/12 s default)
 
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
@@ -169,6 +179,12 @@ int main(int argc, char** argv) {
             // campaign clock advanced (run() prints the one-line
             // session summary on exit). No effect without --session.
             auto_play = true;
+        } else if (a == "--smoke-seconds" && i + 1 < argc) {
+            // V-SMOKE: hold the window open n seconds instead of the
+            // default 6/12 — long enough to cross the tasking ladder's
+            // first cycle at the speed presets (180 wall s at 10x).
+            smoke_seconds = std::atoi(argv[++i]);
+            if (smoke_seconds < 0) smoke_seconds = 0;
         } else if (positional == 0) {
             try { app.load_world_json(a); }
             catch (const std::exception& e) { std::cerr << "world load: " << e.what() << "\n"; }
@@ -291,21 +307,30 @@ int main(int argc, char** argv) {
     }
 
     if (exit_after_screenshot) {
-        // Take a screenshot after 4 seconds — enough for the first frames
-        // INCLUDING one-time work that happens on frame 1 (the 2D map's
-        // far-tile paint can take a second or two on a real theater; the
-        // capture must land on a frame AFTER the first swap, or it reads
-        // an undefined back buffer and comes out black).
-        app.schedule_screenshot(4.0f, screenshot_path);
         // Run for 6 seconds total, then exit — 12 when --play gave the
         // session a running clock (the async create can eat half the
         // window on a real theater; the smoke's assertion is that the
-        // exit summary shows sim time > 0). V-SMOKE: this now asks the
-        // run() loop to exit CLEANLY (request_exit) instead of
-        // std::exit() mid-frame — the epilogue stops + joins the
-        // campaign runner, prints the session summary, and unloads GPU
-        // resources in order before CloseWindow.
-        const int run_seconds = auto_play ? 12 : 6;
+        // exit summary shows sim time > 0). --smoke-seconds overrides
+        // (the long-window smoke that crosses a tasking cycle). V-SMOKE:
+        // this now asks the run() loop to exit CLEANLY (request_exit)
+        // instead of std::exit() mid-frame — the epilogue stops + joins
+        // the campaign runner, prints the session summary, and unloads
+        // GPU resources in order before CloseWindow.
+        const int run_seconds = smoke_seconds > 0
+            ? smoke_seconds
+            : (auto_play ? 12 : 6);
+        // Take a screenshot 2 s before exit (4 s in the default window —
+        // enough for the first frames INCLUDING one-time work that
+        // happens on frame 1 (the 2D map's far-tile paint can take a
+        // second or two on a real theater; the capture must land on a
+        // frame AFTER the first swap, or it reads an undefined back
+        // buffer and comes out black). The long window gets its shot at
+        // the END of the run — the state the smoke is asserting on.
+        app.schedule_screenshot(
+            smoke_seconds > 4
+                ? static_cast<float>(run_seconds - 2)
+                : 4.0f,
+            screenshot_path);
         std::thread([&app, path = screenshot_path, run_seconds]() {
             // The exit countdown must not run while an async session
             // create is in flight: on a slow (Debug) build the create

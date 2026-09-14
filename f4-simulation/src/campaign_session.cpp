@@ -1030,6 +1030,10 @@ void CampaignSession::refresh_stats_() {
     stats_ = {};
     if (!sim_) return;
     stats_.cycles = ladder_->cycles_fired();
+    // The tasking countdown (the campaign view's "next ATO wave"
+    // readout — generated missions first land a full cycle in).
+    stats_.next_tasking_sec = static_cast<int>(std::min<std::int64_t>(
+        ladder_->seconds_to_next_cycle(), 2147483647));
     stats_.intents = static_cast<int>(ladder_->intents().size());
     stats_.routes_built = ladder_->routes_built();
     stats_.routes_failed = ladder_->routes_failed();
