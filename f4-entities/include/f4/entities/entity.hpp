@@ -661,7 +661,7 @@ namespace f4::entities {
         std::array<uint8_t, 16> scores{};
     };
 
-    // --- Damage / vitality (combat chain, see Docs/COMBAT_CHAIN_PLAN.md) ----
+    // --- Damage / vitality (combat chain, see Docs/archive/COMBAT_CHAIN_PLAN.md) ----
 
     /// Hit-point state for any damageable entity (aircraft, vehicle, ship).
     ///

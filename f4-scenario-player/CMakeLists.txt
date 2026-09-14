@@ -10,7 +10,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 #
 # Owns the Simulation (EntityWorld + MessageBus + ModelDatabase + tick
 # loop, via f4-simulation) and a Raylib renderer that draws the airport
-# geometry + aircraft each frame. See Docs/SCENARIO_PLAYER_PLAN.md.
+# geometry + aircraft each frame. See Docs/archive/SCENARIO_PLAYER_PLAN.md.
 #
 # The library half (f4_scenario_player_lib) is built as a static library
 # so the test executable can link against it without recompiling the

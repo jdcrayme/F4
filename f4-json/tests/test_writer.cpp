@@ -2,6 +2,7 @@
 
 #include <gtest/gtest.h>
 #include <f4/json/f4_json.hpp>
+#include <filesystem>
 #include <string>
 
 using f4::json::Reader;
@@ -128,4 +129,46 @@ TEST(JsonWriter, ComposeSmallObject) {
     EXPECT_EQ(theater, "Korea");
     EXPECT_EQ(width, 128);
     EXPECT_EQ(height, 128);
+}
+
+// ── escape_string — hand-built documents interpolating external strings ──
+//
+// The canonical trap: a raw native Windows path pasted into a hand-built
+// JSON document. "\f" is a form feed, so "...\generated_fixtures\f16.json"
+// silently parsed (under the lenient reader) as "...\generated_fixtures"
+// + FF + "16.json" — miles from where the document was built.
+
+TEST(JsonWriter, EscapeStringPassesPlainTextThrough) {
+    EXPECT_EQ(f4::json::escape_string("Data/Aircraft/f16.json"),
+              "Data/Aircraft/f16.json");
+    EXPECT_TRUE(f4::json::escape_string("").empty());
+}
+
+TEST(JsonWriter, EscapeStringEscapesBackslashesAndQuotes) {
+    // Input carries single backslashes (C++ source doubles them); the
+    // escaped output carries doubled backslashes (source quadruples).
+    EXPECT_EQ(f4::json::escape_string("E:\\Code\\F4\\f16.json"),
+              "E:\\\\Code\\\\F4\\\\f16.json");
+    EXPECT_EQ(f4::json::escape_string("say \"hi\""), "say \\\"hi\\\"");
+}
+
+TEST(JsonWriter, EscapeStringEscapesControlCharacters) {
+    EXPECT_EQ(f4::json::escape_string(std::string("a\nb\tc")),
+              "a\\nb\\tc");
+    // A literal form feed (what the lenient reader USED to turn "\f" into).
+    EXPECT_EQ(f4::json::escape_string(std::string("a\fb")),
+              "a\\fb");
+    // Control characters below 0x20 without a short escape go as \u00XX.
+    EXPECT_EQ(f4::json::escape_string(std::string("a\x01" "b")),
+              "a\\u0001b");
+}
+
+TEST(JsonWriter, EscapedPathRoundTripsThroughReader) {
+    const std::string native =
+        (std::filesystem::path("E:/Code/F4/Build") / "generated_fixtures" /
+         "f16.json").string();
+    Writer w;
+    w.string(native);
+    Reader r(w.str());
+    EXPECT_EQ(r.read_string(), native);
 }

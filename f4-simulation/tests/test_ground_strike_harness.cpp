@@ -21,7 +21,7 @@
 //   6. The certificate's MD5 (self-consistency over a real run's bytes —
 //      the file-private helper, the M5a rig's approach).
 //
-// Companion: Docs/COMBAT_CHAIN_M4_PLAN.md §6, Docs/COMBAT_CHAIN_M5_PLAN
+// Companion: Docs/archive/COMBAT_CHAIN_M4_PLAN.md §6, Docs/archive/COMBAT_CHAIN_M5_PLAN
 // .md §6 (the deferral this closes), test_wvr_merge_harness.cpp (the M5a
 // rig this mirrors), test_bomb.cpp / test_bomb_unit.cpp (the A/G chain
 // links this certifies end to end).

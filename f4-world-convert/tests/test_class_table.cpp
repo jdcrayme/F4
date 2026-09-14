@@ -1,7 +1,7 @@
 // test_class_table.cpp — ClassTable parser tests.
 //
 // Verifies the visType[7] exposure added when closing the aircraft-binding
-// data-flow gap (see Docs/SCENARIO_PLAYER_PLAN.md §4.1). Previously the
+// data-flow gap (see Docs/archive/SCENARIO_PLAYER_PLAN.md §4.1). Previously the
 // parser read only classInfo_[4] + dataType + dataPtr from each 81-byte
 // record, silently discarding the 14-byte visType[7] array at offset 60.
 // That left no path from entity_type → visual model index without which

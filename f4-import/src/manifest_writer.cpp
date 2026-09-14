@@ -2,9 +2,12 @@
 
 #include <f4/import/manifest_writer.hpp>
 #include <f4/assets/manifest.hpp>
+#include <f4/assets/hash.hpp>
 
 #include <cctype>
 #include <filesystem>
+#include <fstream>
+#include <sstream>
 
 namespace f4::import {
 
@@ -69,8 +72,28 @@ std::filesystem::path update_manifest_for_asset(
     namespace fs = std::filesystem;
     f4::assets::Manifest m = load_or_create_manifest(data_dir);
     if (m.generator.empty()) m.generator = generator;
-    upsert_asset(m, id, std::move(path), format_version,
+    upsert_asset(m, id, path, format_version,
                   std::move(capabilities), std::move(sources));
+
+    // Fingerprint the asset from its bytes on disk. Every producer routes
+    // through this helper, so an entry written here can never carry a stale
+    // size/sha256 — the failure mode that made the fleet entries rot the
+    // moment their files were regenerated (the Sha256 manifest-fingerprint
+    // test is the loud witness).
+    if (f4::assets::AssetEntry* e = m.find(id)) {
+        std::error_code read_ec;
+        const auto file = data_dir / path;
+        if (fs::exists(file, read_ec)) {
+            std::ifstream f(file, std::ios::binary);
+            std::ostringstream ss;
+            ss << f.rdbuf();
+            const std::string content = ss.str();
+            e->size_bytes = content.size();
+            e->sha256 = f4::assets::sha256_hex(content);
+            e->fnv1a_64 = f4::assets::fnv1a_64_hex(content);
+        }
+    }
+
     std::error_code ec;
     fs::create_directories(data_dir, ec);
     const auto mp = data_dir / "manifest.json";

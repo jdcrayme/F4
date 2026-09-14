@@ -108,7 +108,7 @@ add_dependencies(test_campaign_war_harness mission_profiles_fixture)
 # engagement_summary block. Consumes the build-configured scenario
 # (F4_SCENARIOS_DIR) + the generated F-16 config (the scenario's
 # @F4_AIRCRAFT_CONFIG@ resolves to it at configure time). See
-# Docs/COMBAT_CHAIN_M4_PLAN.md §4 item 9 for the test rig.
+# Docs/archive/COMBAT_CHAIN_M4_PLAN.md §4 item 9 for the test rig.
 f4_simulation_add_test(test_bvr_intercept_harness test_bvr_intercept_harness.cpp)
 target_compile_definitions(test_bvr_intercept_harness PRIVATE
     F4_SCENARIOS_DIR="${CMAKE_BINARY_DIR}/scenarios"
@@ -123,7 +123,7 @@ endif()
 # WvrMergeHarness, pins the four verdicts + the MD5 certificate + the
 # band-event round-trip, the refusal contract, the band-boundary
 # fight_alive diagnostic, and the 2v2 multi-flight acceptance (M4 §6's
-# deferral). See Docs/COMBAT_CHAIN_M5_PLAN.md for the test rig.
+# deferral). See Docs/archive/COMBAT_CHAIN_M5_PLAN.md for the test rig.
 f4_simulation_add_test(test_wvr_merge_harness test_wvr_merge_harness.cpp)
 target_compile_definitions(test_wvr_merge_harness PRIVATE
     F4_SCENARIOS_DIR="${CMAKE_BINARY_DIR}/scenarios"

@@ -2,7 +2,7 @@
 
 > **Status**: Design note — captures the binding decision made when planning the scenario player.
 > **Created**: 2026-08-09
-> **Updated**: 2026-08-09 — host app renamed `f4-taxi-demo` → `f4-scenario-player` (better reflects that the same host will eventually run takeoff, landing, and combat scenarios, not just taxi). See [Scenario Player Plan](SCENARIO_PLAYER_PLAN.md), [Architecture Proposal §13](ARCHITECTURE%20PROPOSAL.md#13-f4-simulation--orchestration), [ECS Decoupling Plan](ECS_DECOUPLING_PLAN.md)
+> **Updated**: 2026-08-09 — host app renamed `f4-taxi-demo` → `f4-scenario-player` (better reflects that the same host will eventually run takeoff, landing, and combat scenarios, not just taxi). See [Scenario Player Plan](archive/SCENARIO_PLAYER_PLAN.md), [Architecture Proposal §13](ARCHITECTURE%20PROPOSAL.md#13-f4-simulation--orchestration), [ECS Decoupling Plan](archive/ECS_DECOUPLING_PLAN.md)
 
 ---
 

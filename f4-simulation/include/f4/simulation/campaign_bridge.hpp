@@ -3,7 +3,7 @@
 // Campaign Bridge — derive scenario data (airfield + aircraft roster) from
 // a real Falcon 4.0 campaign saved on disk.
 //
-// This closes the gap identified in Docs/SCENARIO_PLAYER_PLAN.md §4.3 and
+// This closes the gap identified in Docs/archive/SCENARIO_PLAYER_PLAN.md §4.3 and
 // Docs/AIRCRAFT_BINDING_DESIGN.md §8: the v0 host used a hand-authored
 // scenario JSON with hardcoded parking spots + taxi route. Phase 2 lets
 // the host load a real `save1.cam` (already converted to world JSON by

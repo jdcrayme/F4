@@ -44,6 +44,7 @@
 #include <f4/entities/entity.hpp>
 #include <f4/entities/types.hpp>
 #include <f4/flight/flight_model_component.hpp>
+#include <f4/json/f4_json.hpp>
 #include <f4/sensors/f4_sensors.hpp>
 #include <f4/weapons/f4_weapons.hpp>
 #include <f4/weapons/weapon_store.hpp>
@@ -377,7 +378,8 @@ TEST(SimulationArmCampaign, ArmsLateSpawnAndBooksTheCounters) {
   "theater": "korea",
   "combat": { "enabled": true, "campaign_armed": true },
   "aircraft": [
-    { "callsign": "ANCHOR", "aircraft_config_path": ")" + f16 + R"(",
+    { "callsign": "ANCHOR", "aircraft_config_path": ")" +
+        f4::json::escape_string(f16) + R"(",
       "aircraft_name": "F-16C_50", "vis_type_index": 1052,
       "parking_spot": { "x": 0.0, "y": 0.0, "z": 10000.0 },
       "heading_rad": 0.0, "initial_vt_fps": 500.0,

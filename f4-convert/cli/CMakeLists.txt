@@ -5,7 +5,9 @@
 # unit-testable.
 
 add_executable(dat2json     dat2json.cpp)
-target_link_libraries(dat2json PRIVATE f4-convert)
+# f4-import: the manifest-update side effect shared by every producer CLI
+# (cam2json and terrain2json take the same dependency).
+target_link_libraries(dat2json PRIVATE f4-convert f4-import)
 
 add_executable(mnvr2json    mnvr2json.cpp)
 target_link_libraries(mnvr2json PRIVATE f4-convert)

@@ -2,7 +2,7 @@
 //
 // Pole-based flight-control diagnosis tool (not a GoogleTest).
 //
-// Implements Phases A/B/C of Docs/FLIGHT_CONTROL_POLE_DIAGNOSIS_PLAN.md:
+// Implements Phases A/B/C of Docs/archive/FLIGHT_CONTROL_POLE_DIAGNOSIS_PLAN.md:
 //
 //   A. Trim -> finite-difference linearization of the FlightModel major-frame
 //      map x[k+1] = F(x[k], u[k]) -> eigenvalues (f4-math eigen_real.hpp).

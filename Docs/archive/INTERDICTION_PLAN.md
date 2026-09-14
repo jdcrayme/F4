@@ -14,7 +14,7 @@
 > engine, the ledger's ground books, the entity mirror — and the
 > C1/C3/C4 air chain (the sink, the route builder, the ATM pipeline,
 > the strike fire control).
-> **Companion**: [Campaign Loop Plan](CAMPAIGN_LOOP_PLAN.md) (the loop
+> **Companion**: [Campaign Loop Plan](../CAMPAIGN_LOOP_PLAN.md) (the loop
 > this closes the air→ground leg of), [Combat Chain Plan](COMBAT_CHAIN_PLAN.md)
 > (the weapons themselves).
 

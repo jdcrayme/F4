@@ -3,7 +3,7 @@
 > **Status**: Active plan. Milestone M1 (f4-weapons core) is the first deliverable.
 > **Prerequisite**: Digi flight-control stack landed (digi_full_mission lands, taxis
 > back, parks; 1,421/1,421 tests per worklog NAV-DIAG1).
-> **Companion**: [AI Implementation Plan](AI_IMPLEMENTATION_PLAN.md) (§5 Steps 6–12
+> **Companion**: [AI Implementation Plan](../AI_IMPLEMENTATION_PLAN.md) (§5 Steps 6–12
 > are the tactic modules this plan feeds), [ECS Decoupling Plan](ECS_DECOUPLING_PLAN.md),
 > [Next Phase Plan](NEXT_PHASE_PLAN.md).
 

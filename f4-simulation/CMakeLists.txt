@@ -153,7 +153,7 @@ endif()
 # --war mode: runs a BVR intercept scenario headless through
 # BvrInterceptHarness, writes the three artifacts (result + summary +
 # diary), and derives the exit-code verdict. See the tool's header comment
-# + Docs/COMBAT_CHAIN_M4_PLAN.md §4 for the exit-code table. Links
+# + Docs/archive/COMBAT_CHAIN_M4_PLAN.md §4 for the exit-code table. Links
 # f4-simulation only (f4-json comes transitively PUBLIC; the harness owns
 # the f4-recorder interaction). No default-fixture compile defs — the tool
 # consumes a scenario JSON path directly as argv[1].
@@ -167,7 +167,7 @@ target_compile_features(bvr_intercept_qc PRIVATE cxx_std_20)
 # (tools/wvr_merge_qc.cpp). The combat-chain sibling of bvr_intercept_qc:
 # runs a WVR merge scenario headless through WvrMergeHarness, writes the
 # three artifacts (result + summary + diary), and derives the exit-code
-# verdict. See the tool's header comment + Docs/COMBAT_CHAIN_M5_PLAN.md
+# verdict. See the tool's header comment + Docs/archive/COMBAT_CHAIN_M5_PLAN.md
 # for the exit-code table. Links f4-simulation only.
 # ============================================================================
 add_executable(wvr_merge_qc tools/wvr_merge_qc.cpp)
@@ -181,8 +181,8 @@ target_compile_features(wvr_merge_qc PRIVATE cxx_std_20)
 # through GroundStrikeHarness, composes the strike world (the objective,
 # the bomb station, the StrikeModule + mission-plan binding), writes the
 # three artifacts (result + summary + diary), and derives the exit-code
-# verdict. See the tool's header comment + Docs/COMBAT_CHAIN_M4_PLAN.md
-# §6 / Docs/COMBAT_CHAIN_M5_PLAN.md §6 (the deferral this closes) for
+# verdict. See the tool's header comment + Docs/archive/COMBAT_CHAIN_M4_PLAN.md
+# §6 / Docs/archive/COMBAT_CHAIN_M5_PLAN.md §6 (the deferral this closes) for
 # the exit-code table. Links f4-simulation only.
 # ============================================================================
 add_executable(ground_strike_qc tools/ground_strike_qc.cpp)

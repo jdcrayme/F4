@@ -17,7 +17,7 @@
 //
 // Harness pattern follows tools/fm_sysid (P0/P1): spawn trimmed via
 // FlightModel::trim(), pre-settle through the AI altitude cascade, then
-// measure the requested quantity. See Docs/PHASE4_FINDINGS.md (P5 gate)
+// measure the requested quantity. See Docs/archive/PHASE4_FINDINGS.md (P5 gate)
 // and Docs/LONGITUDINAL_STABILITY_PLAN.md §9.
 
 #include "f4/flight/flight_model.hpp"

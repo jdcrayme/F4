@@ -3,7 +3,7 @@
 // Umbrella header for the f4-weapons library.
 //
 // f4-weapons is the weapons & effects core of the F4 combat chain
-// (Docs/COMBAT_CHAIN_PLAN.md, Milestone M1):
+// (Docs/archive/COMBAT_CHAIN_PLAN.md, Milestone M1):
 //
 //   weapon_types / weapon_class_table — what the weapons ARE
 //   weapon_store                      — what a loaded entity CARRIES

@@ -183,7 +183,7 @@ struct CampaignSessionOptions {
     /// (the sink's unit-loss arm: ground losses air-sourced + per-
     /// vehicle ag credit; the ground-war engine pulls them and thins
     /// the line when ground_war is on — see
-    /// Docs/INTERDICTION_PLAN.md). Default false: UNIT-target
+    /// Docs/archive/INTERDICTION_PLAN.md). Default false: UNIT-target
     /// profiles stay target-less/route-less (the C3-documented
     /// deferral) and unit-loss events count but do not book — the
     /// session is byte-identical to the pre-G2 shape with it off.

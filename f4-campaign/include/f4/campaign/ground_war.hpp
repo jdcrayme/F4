@@ -1,7 +1,7 @@
 // f4-campaign/include/f4/campaign/ground_war.hpp
 //
 // GroundWar — the G1 ground-war engine (the "battalion-level movement +
-// front line" tranche; see Docs/GROUND_WAR_PLAN.md).
+// front line" tranche; see Docs/archive/GROUND_WAR_PLAN.md).
 //
 // WHAT THIS IS. The air side of the war closed in C1–C6: tasking draws
 // aircraft, aircraft fly and fight, losses write back, the next cycle

@@ -1,7 +1,7 @@
 // f4-simulation/tools/bvr_intercept_qc.cpp
 //
 // bvr_intercept_qc — the M4 end-to-end BVR intercept acceptance tool
-// (see Docs/COMBAT_CHAIN_M4_PLAN.md). The combat-chain sibling of
+// (see Docs/archive/COMBAT_CHAIN_M4_PLAN.md). The combat-chain sibling of
 // campaign_qc's --war mode: where campaign_qc --war certifies the
 // CAMPAIGN loop (the 24-hour war — ledger, tasking, resupply, the ground
 // war), bvr_intercept_qc certifies the COMBAT chain at scenario scale

@@ -1,7 +1,7 @@
 // f4-simulation/include/f4/simulation/wvr_merge_harness.hpp
 //
 // PUBLIC HEADER — M5a, the end-to-end WVR / guns merge acceptance harness
-// (see Docs/COMBAT_CHAIN_M5_PLAN.md). The combat-chain sibling of
+// (see Docs/archive/COMBAT_CHAIN_M5_PLAN.md). The combat-chain sibling of
 // BvrInterceptHarness (M4 — see bvr_intercept_harness.hpp): where M4
 // certifies the beyond-visual-range chain (detection → employment →
 // launch → crank → kill), M5a certifies the INSIDE-the-band fight — the

@@ -267,3 +267,34 @@ TEST(JsonReader, ParseEmptyArray) {
     r.expect('[');
     EXPECT_TRUE(r.consume(']'));
 }
+
+// ── Strict escapes — "throws on malformed" covers unknown escapes too ────
+//
+// The lenient default (drop the backslash, emit the character) is how an
+// unescaped native Windows path in a hand-built document surfaced miles
+// away as a mangled path: "...\f16.json" parsed as FF + "16.json".
+
+TEST(JsonReader, InvalidEscapeThrows) {
+    // Every letter that is not a registered short escape must throw, not
+    // silently pass the character through.
+    for (char bad : {'A', 'g', 'p', 'x'}) {
+        std::string s = "\"\\";
+        s += bad;
+        s += "\"";
+        Reader r(s);
+        EXPECT_THROW(r.read_string(), std::runtime_error) << s;
+    }
+}
+
+TEST(JsonReader, RegisteredEscapesStillDecode) {
+    // JSON document: "a\n\t\b\\\/\"z"
+    Reader r("\"a\\n\\t\\b\\\\\\/\\\"z\"");
+    EXPECT_EQ(r.read_string(), "a\n\t\b\\/\"z");
+}
+
+TEST(JsonReader, UnescapedNativeWindowsPathThrowsLoud) {
+    // The exact shape the simulation tests used to emit by hand: a
+    // backslash path pasted raw into the document.
+    Reader r("\"E:\\Code\\F4\\f16.json\"");
+    EXPECT_THROW(r.read_string(), std::runtime_error);
+}

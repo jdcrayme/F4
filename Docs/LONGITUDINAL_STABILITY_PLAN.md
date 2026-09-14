@@ -166,7 +166,7 @@ integrals, slew limiter). Confirm the actual major rate everywhere the stack
 runs (time_scale clamping, recorder, replay) so Phase 2's discrete analysis
 uses true sample times.
 
-**Deliverable**: `Docs/PLANT_IDENTIFICATION.md` — parameter table at 4 trim
+**Deliverable**: `Docs/archive/PLANT_IDENTIFICATION.md` — parameter table at 4 trim
 points. This document is the yardstick every later margin claim is checked
 against.
 
@@ -251,7 +251,7 @@ unwind). Deliverable: replace all three with ONE documented scheme
 (back-calculation) in Phase 4 — but first *measure* which mechanism, if any,
 owns a mode.
 
-**Deliverable**: `Docs/LOOP_MARGIN_REPORT.md` — table of PM/GM/crossover per
+**Deliverable**: `Docs/archive/LOOP_MARGIN_REPORT.md` — table of PM/GM/crossover per
 loop × trim point, with the failing loops highlighted and the predicted mode
 ownership for Phase 3.
 
@@ -289,7 +289,7 @@ Gain-sweep root-locus by brute force: for each of
 one-at-a-time. A mode whose frequency tracks a given gain is owned by that
 gain's loop. Twelve runs per trim point; cheap at 60–120 s sim time.
 
-**Deliverable**: `Docs/BISECTION_RESULTS.md` — mode → owner table with
+**Deliverable**: `Docs/archive/BISECTION_RESULTS.md` — mode → owner table with
 period/ζ evidence per config. This is the document the redesign implements
 against.
 

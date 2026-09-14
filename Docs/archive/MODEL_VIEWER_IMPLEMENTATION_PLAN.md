@@ -2,7 +2,7 @@
 
 > **Status**: Draft — For implementation reference
 > **Source of Truth**: [FreeFalcon/freefalcon-central](https://github.com/FreeFalcon/freefalcon-central) (develop branch)
-> **Companions**: [Architecture Proposal](ARCHITECTURE%20PROPOSAL.md) §15, [Falcon4 File Layout](FALCON4_FILE_LAYOUT.md), [f4-world-viewer source](../f4-world-viewer/)
+> **Companions**: [Architecture Proposal](../ARCHITECTURE%20PROPOSAL.md) §15, [Falcon4 File Layout](../FALCON4_FILE_LAYOUT.md), [f4-world-viewer source](../f4-world-viewer/)
 > **Predecessor Lessons**: f4-world-viewer REFACTOR-1..5 god-file split — see §1.5
 
 ---

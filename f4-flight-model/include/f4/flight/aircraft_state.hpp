@@ -319,7 +319,7 @@ struct FcsState {
     // The G-hold law pins lift to weight at every speed, so induced drag
     // FALLS as speed rises (CL ~ 1/V^2 at L=W) and the closed plant has an
     // anti-damped aperiodic speed mode at every trim (measured: Re
-    // +0.004..+0.29 /s, 92-99% vt participation — Docs/POLE_DIAGNOSIS_
+    // +0.004..+0.29 /s, 92-99% vt participation — Docs/archive/POLE_DIAGNOSIS_
     // RESULTS.md F1-F4). The damper re-adds V-dot damping through the G
     // command: speed above its slowly-adapting reference raises the
     // commanded (and hence held) G, which raises induced drag (dD/dL > 0 —

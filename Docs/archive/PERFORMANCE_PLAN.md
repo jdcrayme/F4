@@ -7,7 +7,7 @@
 > measured).
 > **Prerequisite**: C1–C6 LANDED (`CAMPAIGN_LOOP_PLAN.md` §5), M1–M4 LANDED
 > (`COMBAT_CHAIN_PLAN.md`).
-> **Companion**: [Campaign Loop Plan](CAMPAIGN_LOOP_PLAN.md) (the war
+> **Companion**: [Campaign Loop Plan](../CAMPAIGN_LOOP_PLAN.md) (the war
 > harness whose diary is this plan's watch surface).
 
 ---

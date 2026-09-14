@@ -7,7 +7,7 @@
 > surface was the inside-the-band fight.
 > **Companion**: [COMBAT_CHAIN_PLAN.md](COMBAT_CHAIN_PLAN.md),
 > [COMBAT_CHAIN_M4_PLAN.md](COMBAT_CHAIN_M4_PLAN.md),
-> [AI_IMPLEMENTATION_PLAN.md](AI_IMPLEMENTATION_PLAN.md) (Steps 8–12),
+> [AI_IMPLEMENTATION_PLAN.md](../AI_IMPLEMENTATION_PLAN.md) (Steps 8–12),
 > [POLE_DIAGNOSIS_RESULTS.md](POLE_DIAGNOSIS_RESULTS.md) (the balloon
 > findings this tranche measured from the AI side).
 

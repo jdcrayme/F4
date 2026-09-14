@@ -16,8 +16,8 @@
 > (the known-gaps §7 is the forward queue).
 > **Prerequisite**: B.3 landed (campaign→sim loop: intents → spawner →
 > aircraft fly saved routes; `campaign_qc` gates the loop end to end).
-> **Companion**: [Next Phase Plan](NEXT_PHASE_PLAN.md) (§B — the campaign
-> slice), [Combat Chain Plan](COMBAT_CHAIN_PLAN.md) (the fight itself).
+> **Companion**: [Next Phase Plan](archive/NEXT_PHASE_PLAN.md) (§B — the campaign
+> slice), [Combat Chain Plan](archive/COMBAT_CHAIN_PLAN.md) (the fight itself).
 
 ---
 
@@ -572,7 +572,7 @@ follow-up refinement, documented here.
 
 - ~~**Ground losses** book only the CREDIT side (ag_kills); battalion
   roster attrition lands with the ground-war tranche.~~ — LANDED
-  with **G1** ([GROUND_WAR_PLAN.md](GROUND_WAR_PLAN.md)): the
+  with **G1** ([GROUND_WAR_PLAN.md](archive/GROUND_WAR_PLAN.md)): the
   `GroundWar` engine (battalion movement, the front line, contact
   attrition, objective capture, the last_resupply cadence), the
   ledger's ground books + write-back, the session's entity mirror,
@@ -655,7 +655,7 @@ follow-up refinement, documented here.
    LANDED: `f4-campaign/ground_war.hpp` (the engine) + the ledger's
    ground books + `apply_ground_to` + the session's entity mirror +
    `campaign_qc --ground-war` and exit 13 (see
-   [GROUND_WAR_PLAN.md](GROUND_WAR_PLAN.md) for the verification
+   [GROUND_WAR_PLAN.md](archive/GROUND_WAR_PLAN.md) for the verification
    numbers — the 1-hour war's ledger MD5 is the certificate, the
    front line moves, and the books balance on both sides of the
    DMZ).
@@ -665,7 +665,7 @@ follow-up refinement, documented here.
    route resolution, the battalion blast endpoint +
    `GroundUnitLossMessage`, the sink's booking arm, and
    `campaign_qc --unit-strike` + exit 14 (see
-   [INTERDICTION_PLAN.md](INTERDICTION_PLAN.md) for the
+   [INTERDICTION_PLAN.md](archive/INTERDICTION_PLAN.md) for the
    verification numbers — the 0.3 h/1 h wars' MD5s are the
    certificates, air power thins the line, and the engine's pull
    decays the roster).

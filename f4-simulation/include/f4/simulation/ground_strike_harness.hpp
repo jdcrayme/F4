@@ -1,8 +1,8 @@
 // f4-simulation/include/f4/simulation/ground_strike_harness.hpp
 //
 // PUBLIC HEADER — M5b, the end-to-end AIR-TO-GROUND strike acceptance
-// harness (see Docs/COMBAT_CHAIN_M4_PLAN.md §6 and
-// Docs/COMBAT_CHAIN_M5_PLAN.md §6 — the harness both plans deferred as
+// harness (see Docs/archive/COMBAT_CHAIN_M4_PLAN.md §6 and
+// Docs/archive/COMBAT_CHAIN_M5_PLAN.md §6 — the harness both plans deferred as
 // "the certified A/G rung is its own tranche"). The combat-chain sibling
 // of BvrInterceptHarness (M4 — the BVR chain) and WvrMergeHarness (M5a —
 // the inside-the-band fight): where those certify the A/A ladder, M5b

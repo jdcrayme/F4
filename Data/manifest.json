@@ -1,311 +1,510 @@
 {
   "f4": {
-    "v": 1
+    "v":1,
+    "generator":"dat2json (f4-convert 0.5.0)"
   },
-  "format": "f4-data-manifest",
-  "version": 1,
-  "generated_at": "2026-09-13T21:25:48Z",
-  "source_install": "D:\\SteamLibrary\\steamapps\\common\\Falcon 4.0",
-  "theater": "korea",
-  "save": "save1",
-  "data_dir": "Data/",
-  "excluded_dirs": [
-    "Models"
-  ],
+  "data_dir":"Data/",
+  "theater":"korea",
+  "save":"save1",
+  "excluded_dirs": ["Models"],
   "assets": [
     {
-      "id": "aircraft:a10",
-      "path": "Aircraft/a10.json",
-      "size_bytes": 26849,
-      "sha256": "d3f7a92e0acd9e77ff16209f2b3ec6bc02c431a02e73ee1441a447ea91254f2a",
-      "fnv1a_64": "0385ae55667c0b01"
+      "id":"aircraft:a10",
+      "path":"Aircraft/a10.json",
+      "format_version":1,
+      "size_bytes":26851,
+      "sha256":"45fe31a7846fb565063607465bad2781708445d2ac2c53dcfe82f762c609e377",
+      "fnv1a_64":"255bd936c7174363",
+      "sources": [
+        {
+          "path":"f4-convert/tests/fixtures/a10.dat",
+          "role":"ACDATA",
+          "sha256":""
+        }
+      ]
     },
     {
-      "id": "aircraft:an2",
-      "path": "Aircraft/an2.json",
-      "size_bytes": 21933,
-      "sha256": "dc94a91b742a322deb460888890ef7e9b67e817c9509d540324ec4de3424e0d8",
-      "fnv1a_64": "bf264f5c700afe4c"
+      "id":"aircraft:an2",
+      "path":"Aircraft/an2.json",
+      "format_version":1,
+      "size_bytes":21935,
+      "sha256":"44eac4e4c23a72e89f941ac2b55a84a6c9d8cf09bbe302e86433e033954a0e94",
+      "fnv1a_64":"3d659090929e6c96",
+      "sources": [
+        {
+          "path":"f4-convert/tests/fixtures/an2.dat",
+          "role":"ACDATA",
+          "sha256":""
+        }
+      ]
     },
     {
-      "id": "aircraft:b1b",
-      "path": "Aircraft/b1b.json",
-      "size_bytes": 28027,
-      "sha256": "2d73f0d2bdb0d01b0cb6da98d10090e4cabe3f3d1aa06d662890e242528bbf47",
-      "fnv1a_64": "6cd533b4643bc2e0"
+      "id":"aircraft:b1b",
+      "path":"Aircraft/b1b.json",
+      "format_version":1,
+      "size_bytes":28029,
+      "sha256":"faace5d9acfeb61b972b3724de1bd793bb322128fd0f62dc984c48e4e0cf47ef",
+      "fnv1a_64":"396cef0df26c652a",
+      "sources": [
+        {
+          "path":"f4-convert/tests/fixtures/b1b.dat",
+          "role":"ACDATA",
+          "sha256":""
+        }
+      ]
     },
     {
-      "id": "aircraft:b52",
-      "path": "Aircraft/b52.json",
-      "size_bytes": 28027,
-      "sha256": "44c05a7f599f8fe0db33296d7744ea6752886805c634161e587fa0acefc8f471",
-      "fnv1a_64": "8d666e9683a4d5f3"
+      "id":"aircraft:b52",
+      "path":"Aircraft/b52.json",
+      "format_version":1,
+      "size_bytes":28029,
+      "sha256":"3485e1169c0759056bdcac49e11ba9b2a4d00db57d0eac41cad3e2545e1dbf2b",
+      "fnv1a_64":"bce460329541ecd1",
+      "sources": [
+        {
+          "path":"f4-convert/tests/fixtures/b52.dat",
+          "role":"ACDATA",
+          "sha256":""
+        }
+      ]
     },
     {
-      "id": "aircraft:c130",
-      "path": "Aircraft/c130.json",
-      "size_bytes": 26859,
-      "sha256": "90a5f1ca1fb707533709b6d280ec19f968cdd3f9d47bef2a2b360f3dd77be0c2",
-      "fnv1a_64": "cf4ce3bd5a2e4854"
+      "id":"aircraft:c130",
+      "path":"Aircraft/c130.json",
+      "format_version":1,
+      "size_bytes":26861,
+      "sha256":"3619b4dbf8312708fd4b383edf33302bd8aca1243a98343eaa4d6df1db4b20f7",
+      "fnv1a_64":"b8b703de3f813626",
+      "sources": [
+        {
+          "path":"f4-convert/tests/fixtures/c130.dat",
+          "role":"ACDATA",
+          "sha256":""
+        }
+      ]
     },
     {
-      "id": "aircraft:ea6",
-      "path": "Aircraft/ea6.json",
-      "size_bytes": 33773,
-      "sha256": "07333d0ebc508a8e64ba468d1dd6156c9308484270077238e5da3c4f9afbbb81",
-      "fnv1a_64": "6df5ccae4a3f0002"
+      "id":"aircraft:ea6",
+      "path":"Aircraft/ea6.json",
+      "format_version":1,
+      "size_bytes":33775,
+      "sha256":"39436ed5a04bfca6191f0bdad7e455eec47e42c78e834609bfbe8ba286390e45",
+      "fnv1a_64":"cb559cf3a030abc8",
+      "sources": [
+        {
+          "path":"f4-convert/tests/fixtures/ea6.dat",
+          "role":"ACDATA",
+          "sha256":""
+        }
+      ]
     },
     {
-      "id": "aircraft:f111",
-      "path": "Aircraft/f111.json",
-      "size_bytes": 33775,
-      "sha256": "5b1c75e1e6f4fa7fe2ea42cd163d9c74a86cb7788826c0fef2d3ebefc5cf2c2a",
-      "fnv1a_64": "afaff166212a3cae"
+      "id":"aircraft:f111",
+      "path":"Aircraft/f111.json",
+      "format_version":1,
+      "size_bytes":33777,
+      "sha256":"39db9ea6fffcae6eef48ac3a2a1c26a1b21c43b35c1995f5581786f50db9076b",
+      "fnv1a_64":"4712981543983058",
+      "sources": [
+        {
+          "path":"f4-convert/tests/fixtures/f111.dat",
+          "role":"ACDATA",
+          "sha256":""
+        }
+      ]
     },
     {
-      "id": "aircraft:f14",
-      "path": "Aircraft/f14.json",
-      "size_bytes": 33767,
-      "sha256": "583bbabc864835a0ea776aea381afa7914c17bdec1048b2068940d1e30c74b34",
-      "fnv1a_64": "635e3e2f9d27d3f3"
+      "id":"aircraft:f14",
+      "path":"Aircraft/f14.json",
+      "format_version":1,
+      "size_bytes":33769,
+      "sha256":"a4916a1fb632f55789687230b90ac2adf005a5410eedf88536e24d48cecde4a9",
+      "fnv1a_64":"37630f779dc26df9",
+      "sources": [
+        {
+          "path":"f4-convert/tests/fixtures/f14.dat",
+          "role":"ACDATA",
+          "sha256":""
+        }
+      ]
     },
     {
-      "id": "aircraft:f15",
-      "path": "Aircraft/f15.json",
-      "size_bytes": 33768,
-      "sha256": "385f4f52fb9ef5c6f7de3465868ef4cab24a008d2f32c9ea74da5b6356707d73",
-      "fnv1a_64": "bbfa57ad9ba61612"
+      "id":"aircraft:f15",
+      "path":"Aircraft/f15.json",
+      "format_version":1,
+      "size_bytes":33770,
+      "sha256":"a4611b25a13d6bca9059715ae802679e26224efbb038620595cafe9f797feeb8",
+      "fnv1a_64":"e340e63fbfea64e8",
+      "sources": [
+        {
+          "path":"f4-convert/tests/fixtures/f15.dat",
+          "role":"ACDATA",
+          "sha256":""
+        }
+      ]
     },
     {
-      "id": "aircraft:f16",
-      "path": "Aircraft/f16.json",
-      "size_bytes": 34403,
-      "sha256": "6b80e33568d26ae32396f58bcadf3daca075880c1a1d502a61b18566acb50b68",
-      "fnv1a_64": "a4ea7e234c847d1a"
+      "id":"aircraft:f16",
+      "path":"Aircraft/f16.json",
+      "format_version":1,
+      "size_bytes":34434,
+      "sha256":"677485bca09901a8a3a5ac3d9584724147ca13676d0251f6a9e965414d688a4f",
+      "fnv1a_64":"b0dcc0415ffab5cf",
+      "sources": [
+        {
+          "path":"f4-convert/tests/fixtures/f16.dat",
+          "role":"ACDATA",
+          "sha256":""
+        }
+      ]
     },
     {
-      "id": "aircraft:f18",
-      "path": "Aircraft/f18.json",
-      "size_bytes": 33869,
-      "sha256": "455f0960410898db2c2466bfc953b84320cf2a42ef3ff2ec232e52a269268ac4",
-      "fnv1a_64": "a5906ab7f516785d"
+      "id":"aircraft:f18",
+      "path":"Aircraft/f18.json",
+      "format_version":1,
+      "size_bytes":33871,
+      "sha256":"db2c7b7c3f532c62527f043ce84d78cc7871f3b4be0b47da91624a4e8456b10e",
+      "fnv1a_64":"c153dedf2d321e3f",
+      "sources": [
+        {
+          "path":"f4-convert/tests/fixtures/f18.dat",
+          "role":"ACDATA",
+          "sha256":""
+        }
+      ]
     },
     {
-      "id": "aircraft:f22",
-      "path": "Aircraft/f22.json",
-      "size_bytes": 34258,
-      "sha256": "9885d3ba242e7749f7843139b38b8befc57f1a229c95e1e44af4cd1a2bc701c2",
-      "fnv1a_64": "8ee55c542ce75b03"
+      "id":"aircraft:f22",
+      "path":"Aircraft/f22.json",
+      "format_version":1,
+      "size_bytes":34260,
+      "sha256":"cf09a8957af1d37bf76543d09a67cf0f0538992f9d1b052948e499d439e85ed2",
+      "fnv1a_64":"501c91dba341a981",
+      "sources": [
+        {
+          "path":"f4-convert/tests/fixtures/f22.dat",
+          "role":"ACDATA",
+          "sha256":""
+        }
+      ]
     },
     {
-      "id": "aircraft:f4",
-      "path": "Aircraft/f4.json",
-      "size_bytes": 29934,
-      "sha256": "3c554e037e0cda559b8366f088bc95abae598bd49bb4a2b25db5d06c446322e4",
-      "fnv1a_64": "5975a934e97569e0"
+      "id":"aircraft:f4",
+      "path":"Aircraft/f4.json",
+      "format_version":1,
+      "size_bytes":29936,
+      "sha256":"e6cc39dd91ed2730e79ba3f7642367742485818a5e297d3e801fae9264e6e7ba",
+      "fnv1a_64":"79da05d4a5b86406",
+      "sources": [
+        {
+          "path":"f4-convert/tests/fixtures/f4.dat",
+          "role":"ACDATA",
+          "sha256":""
+        }
+      ]
     },
     {
-      "id": "aircraft:f5",
-      "path": "Aircraft/f5.json",
-      "size_bytes": 29933,
-      "sha256": "8fb442890f40c4fcb5a1127ff6e5c68e9ac0ee1266e669a5c5de83d0c7d72362",
-      "fnv1a_64": "080a3f435f695879"
+      "id":"aircraft:f5",
+      "path":"Aircraft/f5.json",
+      "format_version":1,
+      "size_bytes":29935,
+      "sha256":"ee58a20134c2adb69210c26a7edab1e72ea1e471cb5476c741253a9eb942330e",
+      "fnv1a_64":"88e6ffb3c0b80b3b",
+      "sources": [
+        {
+          "path":"f4-convert/tests/fixtures/f5.dat",
+          "role":"ACDATA",
+          "sha256":""
+        }
+      ]
     },
     {
-      "id": "aircraft:kc10",
-      "path": "Aircraft/kc10.json",
-      "size_bytes": 29748,
-      "sha256": "37fa6fc3a21213a07d62f153b4c52c3b787c618720d173a084219f2c2e7fd196",
-      "fnv1a_64": "3d0a0b6662a5cbc5"
+      "id":"aircraft:kc10",
+      "path":"Aircraft/kc10.json",
+      "format_version":1,
+      "size_bytes":29748,
+      "sha256":"37fa6fc3a21213a07d62f153b4c52c3b787c618720d173a084219f2c2e7fd196",
+      "fnv1a_64":"3d0a0b6662a5cbc5"
     },
     {
-      "id": "aircraft:mig19",
-      "path": "Aircraft/Mig19.json",
-      "size_bytes": 29916,
-      "sha256": "572dda7c8af7ce1cbdc2c0938099286e1d2d98129425a7be086f19612cf858b1",
-      "fnv1a_64": "cb8816fba29886ea"
+      "id":"aircraft:mig19",
+      "path":"Aircraft/Mig19.json",
+      "format_version":1,
+      "size_bytes":29918,
+      "sha256":"3e9480376c6c665a5d995bb314b1e214f7c88118a9c2e49ebe2eeb5c12c40790",
+      "fnv1a_64":"170cdebdc8700de4",
+      "sources": [
+        {
+          "path":"f4-convert/tests/fixtures/Mig19.dat",
+          "role":"ACDATA",
+          "sha256":""
+        }
+      ]
     },
     {
-      "id": "aircraft:mig21",
-      "path": "Aircraft/Mig21.json",
-      "size_bytes": 29943,
-      "sha256": "a6bcdd9f7e66ed6a2a17d38f51fa537cee23fc26a39036413acf02eca591ae29",
-      "fnv1a_64": "9b2d46cda07b3400"
+      "id":"aircraft:mig21",
+      "path":"Aircraft/Mig21.json",
+      "format_version":1,
+      "size_bytes":29945,
+      "sha256":"ddb9dee10206c57264c80f245621d53cb486e4d3ab7e6cd960212d01719abf8a",
+      "fnv1a_64":"bd16420ee4e93792",
+      "sources": [
+        {
+          "path":"f4-convert/tests/fixtures/Mig21.dat",
+          "role":"ACDATA",
+          "sha256":""
+        }
+      ]
     },
     {
-      "id": "aircraft:mig23",
-      "path": "Aircraft/mig23.json",
-      "size_bytes": 33779,
-      "sha256": "34b2e6642783511ce43396b57baf6e247679f6d4e519913ed33af60f3a36f9b3",
-      "fnv1a_64": "3400c159a441d4db"
+      "id":"aircraft:mig23",
+      "path":"Aircraft/mig23.json",
+      "format_version":1,
+      "size_bytes":33781,
+      "sha256":"3c210138ec71188def226e7d28aea0b976ecbd77acd285c17eb62df6101345dd",
+      "fnv1a_64":"b6994c9f7067fd85",
+      "sources": [
+        {
+          "path":"f4-convert/tests/fixtures/mig23.dat",
+          "role":"ACDATA",
+          "sha256":""
+        }
+      ]
     },
     {
-      "id": "aircraft:mig25",
-      "path": "Aircraft/Mig25.json",
-      "size_bytes": 33779,
-      "sha256": "bd579ff47cb9fa7d29752e7a459f1eaaba8a462ef728f7d70f4880c723252d8c",
-      "fnv1a_64": "574ad76fd874f95d"
+      "id":"aircraft:mig25",
+      "path":"Aircraft/Mig25.json",
+      "format_version":1,
+      "size_bytes":33781,
+      "sha256":"1e1fc3f5ce1e82c1161d91ca955a5d4d8769491b8d4a793e46294c3d12092826",
+      "fnv1a_64":"583a9078790eb7cf",
+      "sources": [
+        {
+          "path":"f4-convert/tests/fixtures/Mig25.dat",
+          "role":"ACDATA",
+          "sha256":""
+        }
+      ]
     },
     {
-      "id": "aircraft:mig27",
-      "path": "Aircraft/Mig27.json",
-      "size_bytes": 33780,
-      "sha256": "ce0f98cfc6e918820423d7cedf089966170b528b0552a9088ff31dfb79061846",
-      "fnv1a_64": "af177843410130ba"
+      "id":"aircraft:mig27",
+      "path":"Aircraft/Mig27.json",
+      "format_version":1,
+      "size_bytes":33782,
+      "sha256":"806d97c5d405eb92cd580196d58b43b7eaa983eb6fc6eb0fd34bbd3d3fceec79",
+      "fnv1a_64":"e5ffb38b54ccbfac",
+      "sources": [
+        {
+          "path":"f4-convert/tests/fixtures/Mig27.dat",
+          "role":"ACDATA",
+          "sha256":""
+        }
+      ]
     },
     {
-      "id": "aircraft:mig29",
-      "path": "Aircraft/mig29.json",
-      "size_bytes": 33769,
-      "sha256": "aaa4963dba6cf0a4db1ea4bcd173bb83c4ffc519a949daec21d95c15850b51df",
-      "fnv1a_64": "eff16d84d717e0af"
+      "id":"aircraft:mig29",
+      "path":"Aircraft/mig29.json",
+      "format_version":1,
+      "size_bytes":33771,
+      "sha256":"10b0ae5e356b602414da005f5b9fd4822d771d507ed2c0dc7b7598aa81c6e2f2",
+      "fnv1a_64":"032bf3d2d132c695",
+      "sources": [
+        {
+          "path":"f4-convert/tests/fixtures/mig29.dat",
+          "role":"ACDATA",
+          "sha256":""
+        }
+      ]
     },
     {
-      "id": "aircraft:mig31",
-      "path": "Aircraft/Mig31.json",
-      "size_bytes": 33779,
-      "sha256": "4893ecd2f53f61e126e7da3fa9a6265f1b37a714813701c06afc07720b04fab5",
-      "fnv1a_64": "2147441ffc562bc0"
+      "id":"aircraft:mig31",
+      "path":"Aircraft/Mig31.json",
+      "format_version":1,
+      "size_bytes":33781,
+      "sha256":"e9f061efc96e4a5ffdea3a9215c21587205b6a03eaa4fab838f57dae159a0c7b",
+      "fnv1a_64":"0f5e4329b55be766",
+      "sources": [
+        {
+          "path":"f4-convert/tests/fixtures/Mig31.dat",
+          "role":"ACDATA",
+          "sha256":""
+        }
+      ]
     },
     {
-      "id": "aircraft:su25",
-      "path": "Aircraft/Su25.json",
-      "size_bytes": 26851,
-      "sha256": "31cd60dbfb374f5216d9e3265c58c9aa5e02dcc26c7df2cda527814828e9982b",
-      "fnv1a_64": "5dbe4621c23bed46"
+      "id":"aircraft:su25",
+      "path":"Aircraft/Su25.json",
+      "format_version":1,
+      "size_bytes":26853,
+      "sha256":"6cd3e7f93eb023501573dab527245bf0c9d04a9c3295a7aaed01cb05326344c4",
+      "fnv1a_64":"131828461f574d3c",
+      "sources": [
+        {
+          "path":"f4-convert/tests/fixtures/Su25.dat",
+          "role":"ACDATA",
+          "sha256":""
+        }
+      ]
     },
     {
-      "id": "aircraft:su27",
-      "path": "Aircraft/Su27.json",
-      "size_bytes": 33793,
-      "sha256": "308044741c1efa6ca1ed958ec0815d606f4ad4f2e2a40d2aef492d0a8cefd79a",
-      "fnv1a_64": "28db922f6ae1ea22"
+      "id":"aircraft:su27",
+      "path":"Aircraft/Su27.json",
+      "format_version":1,
+      "size_bytes":33795,
+      "sha256":"d2004dbba52b6e09498eba631f0340e8b5c2b8d6bae14662aab35e4040bc48be",
+      "fnv1a_64":"78ae2f6e5e5ad230",
+      "sources": [
+        {
+          "path":"f4-convert/tests/fixtures/Su27.dat",
+          "role":"ACDATA",
+          "sha256":""
+        }
+      ]
     },
     {
-      "id": "aircraft:tu95",
-      "path": "Aircraft/tu95.json",
-      "size_bytes": 28028,
-      "sha256": "7bb30b24e03cfffb1ea1338cd52680d94dffb5032d06e0bd7d7889f19bcac6c9",
-      "fnv1a_64": "65c959af4f1d1900"
+      "id":"aircraft:tu95",
+      "path":"Aircraft/tu95.json",
+      "format_version":1,
+      "size_bytes":28030,
+      "sha256":"68d4ab2b76b60f0cb227d55027bacf49679d11692beb76b9a470f9cd120ab2a4",
+      "fnv1a_64":"135caa0d02f420f2",
+      "sources": [
+        {
+          "path":"f4-convert/tests/fixtures/tu95.dat",
+          "role":"ACDATA",
+          "sha256":""
+        }
+      ]
     },
     {
-      "id": "class:falcon4.ct",
-      "path": "Classes/falcon4.ct.json",
-      "size_bytes": 305215,
-      "sha256": "35e3fa5eb6f9f96f48c41fa62110bdc4e5c239d0e6a12662cdffb34bb0852746",
-      "fnv1a_64": "f1e17f1ec8fc072e"
+      "id":"class:falcon4.ct",
+      "path":"Classes/falcon4.ct.json",
+      "format_version":1,
+      "size_bytes":305215,
+      "sha256":"35e3fa5eb6f9f96f48c41fa62110bdc4e5c239d0e6a12662cdffb34bb0852746",
+      "fnv1a_64":"f1e17f1ec8fc072e"
     },
     {
-      "id": "simdata:braindata",
-      "path": "SimData/braindata.json",
-      "size_bytes": 36783,
-      "sha256": "31e041e87731feb8839950a6606a18cb664cb00ed15239c8aedc5883358d8541",
-      "fnv1a_64": "3b5b9c7be8026049"
+      "id":"simdata:braindata",
+      "path":"SimData/braindata.json",
+      "format_version":1,
+      "size_bytes":36783,
+      "sha256":"31e041e87731feb8839950a6606a18cb664cb00ed15239c8aedc5883358d8541",
+      "fnv1a_64":"3b5b9c7be8026049"
     },
     {
-      "id": "simdata:formdat",
-      "path": "SimData/formdat.json",
-      "size_bytes": 5651,
-      "sha256": "d2ca0b14dce833fb1301fb4eae393a72e480544b859f6775a63161cb0f56eabe",
-      "fnv1a_64": "dc89c72889f8d991"
+      "id":"simdata:formdat",
+      "path":"SimData/formdat.json",
+      "format_version":1,
+      "size_bytes":5651,
+      "sha256":"d2ca0b14dce833fb1301fb4eae393a72e480544b859f6775a63161cb0f56eabe",
+      "fnv1a_64":"dc89c72889f8d991"
     },
     {
-      "id": "simdata:irstdata",
-      "path": "SimData/irstdata.json",
-      "size_bytes": 1491,
-      "sha256": "d039b88f5a6ade37f3903a2505ca64e1cd2691904198f40dbc2d5b9faae8db33",
-      "fnv1a_64": "24ee3bdb35cdfacd"
+      "id":"simdata:irstdata",
+      "path":"SimData/irstdata.json",
+      "format_version":1,
+      "size_bytes":1491,
+      "sha256":"d039b88f5a6ade37f3903a2505ca64e1cd2691904198f40dbc2d5b9faae8db33",
+      "fnv1a_64":"24ee3bdb35cdfacd"
     },
     {
-      "id": "simdata:mnvrdata",
-      "path": "SimData/mnvrdata.json",
-      "size_bytes": 13991,
-      "sha256": "8e45bf461ad75b2e3a38e81e7cd1b1538727a5d36512d331182bbbcded8d8c5a",
-      "fnv1a_64": "4f22923fb94a96d7"
+      "id":"simdata:mnvrdata",
+      "path":"SimData/mnvrdata.json",
+      "format_version":1,
+      "size_bytes":13991,
+      "sha256":"8e45bf461ad75b2e3a38e81e7cd1b1538727a5d36512d331182bbbcded8d8c5a",
+      "fnv1a_64":"4f22923fb94a96d7"
     },
     {
-      "id": "simdata:rwrdata",
-      "path": "SimData/rwrdata.json",
-      "size_bytes": 298,
-      "sha256": "b3436d7f3c96815598381d180b444836799a5abbbe3173dbc5dd3119d1d4262c",
-      "fnv1a_64": "84db91457820e6c4"
+      "id":"simdata:rwrdata",
+      "path":"SimData/rwrdata.json",
+      "format_version":1,
+      "size_bytes":298,
+      "sha256":"b3436d7f3c96815598381d180b444836799a5abbbe3173dbc5dd3119d1d4262c",
+      "fnv1a_64":"84db91457820e6c4"
     },
     {
-      "id": "simdata:sigdata",
-      "path": "SimData/sigdata.json",
-      "size_bytes": 2356,
-      "sha256": "e21658bc002298f5d2a41c72fd3b944a255dc984541a6a969793af0e9c4b3af1",
-      "fnv1a_64": "c32dc75b4c4a2f44"
+      "id":"simdata:sigdata",
+      "path":"SimData/sigdata.json",
+      "format_version":1,
+      "size_bytes":2356,
+      "sha256":"e21658bc002298f5d2a41c72fd3b944a255dc984541a6a969793af0e9c4b3af1",
+      "fnv1a_64":"c32dc75b4c4a2f44"
     },
     {
-      "id": "simdata:vehdef",
-      "path": "SimData/vehdef.json",
-      "size_bytes": 47739,
-      "sha256": "ec5353619243d46e5b4e69064d53905e27d47cf1480a27bd97549ad666ed0608",
-      "fnv1a_64": "c453c71fc93a573a"
+      "id":"simdata:vehdef",
+      "path":"SimData/vehdef.json",
+      "format_version":1,
+      "size_bytes":47739,
+      "sha256":"ec5353619243d46e5b4e69064d53905e27d47cf1480a27bd97549ad666ed0608",
+      "fnv1a_64":"c453c71fc93a573a"
     },
     {
-      "id": "simdata:visualdata",
-      "path": "SimData/visualdata.json",
-      "size_bytes": 560,
-      "sha256": "209071e72be3af731505e43d13fd2c51d38cb641c88f8eec2d071636b246dac9",
-      "fnv1a_64": "6a31ef910a7cf155"
+      "id":"simdata:visualdata",
+      "path":"SimData/visualdata.json",
+      "format_version":1,
+      "size_bytes":560,
+      "sha256":"209071e72be3af731505e43d13fd2c51d38cb641c88f8eec2d071636b246dac9",
+      "fnv1a_64":"6a31ef910a7cf155"
     },
     {
-      "id": "",
-      "path": "Temp/Classes/falcon4.ct.json",
-      "size_bytes": 305215,
-      "sha256": "35e3fa5eb6f9f96f48c41fa62110bdc4e5c239d0e6a12662cdffb34bb0852746",
-      "fnv1a_64": "f1e17f1ec8fc072e"
+      "path":"Temp/Classes/falcon4.ct.json",
+      "format_version":1,
+      "size_bytes":305215,
+      "sha256":"35e3fa5eb6f9f96f48c41fa62110bdc4e5c239d0e6a12662cdffb34bb0852746",
+      "fnv1a_64":"f1e17f1ec8fc072e"
     },
     {
-      "id": "",
-      "path": "Temp/Theater/korea/terrain.json",
-      "size_bytes": 85825,
-      "sha256": "0257fb03087d4ae124974cb188762df80186cc37c6436ec44b509c6357f0169f",
-      "fnv1a_64": "a2bcb9daf220874f"
+      "path":"Temp/Theater/korea/terrain.json",
+      "format_version":1,
+      "size_bytes":85825,
+      "sha256":"0257fb03087d4ae124974cb188762df80186cc37c6436ec44b509c6357f0169f",
+      "fnv1a_64":"a2bcb9daf220874f"
     },
     {
-      "id": "",
-      "path": "Temp/World/Auto Save.world.json",
-      "size_bytes": 14676466,
-      "sha256": "7665ae8d15acb0fd7082ad1fded5cff74349854b869556c69a39e6dba7760dab",
-      "fnv1a_64": "1ae2c4d3da79f311"
+      "path":"Temp/World/Auto Save.world.json",
+      "format_version":1,
+      "size_bytes":14676466,
+      "sha256":"7665ae8d15acb0fd7082ad1fded5cff74349854b869556c69a39e6dba7760dab",
+      "fnv1a_64":"1ae2c4d3da79f311"
     },
     {
-      "id": "",
-      "path": "Temp/World/save1.world.json",
-      "size_bytes": 11849635,
-      "sha256": "34965d148f7aa7026e857f9b6537fc60fabb83c0d235d1418630d81ed3dd87d4",
-      "fnv1a_64": "4cdeec7c07896824"
+      "path":"Temp/World/save1.world.json",
+      "format_version":1,
+      "size_bytes":11849635,
+      "sha256":"34965d148f7aa7026e857f9b6537fc60fabb83c0d235d1418630d81ed3dd87d4",
+      "fnv1a_64":"4cdeec7c07896824"
     },
     {
-      "id": "",
-      "path": "Temp/World/TestCamp.world.json",
-      "size_bytes": 14591691,
-      "sha256": "e389cb714d51d4b8e0035c9bbaa0e2b8249ec41cc3cf73f48d2825cfaf17172a",
-      "fnv1a_64": "72b5e0176a0ceada"
+      "path":"Temp/World/TestCamp.world.json",
+      "format_version":1,
+      "size_bytes":14591691,
+      "sha256":"e389cb714d51d4b8e0035c9bbaa0e2b8249ec41cc3cf73f48d2825cfaf17172a",
+      "fnv1a_64":"72b5e0176a0ceada"
     },
     {
-      "id": "theater:korea",
-      "path": "Theater/korea/terrain.json",
-      "size_bytes": 85825,
-      "sha256": "0257fb03087d4ae124974cb188762df80186cc37c6436ec44b509c6357f0169f",
-      "fnv1a_64": "a2bcb9daf220874f"
+      "id":"theater:korea",
+      "path":"Theater/korea/terrain.json",
+      "format_version":1,
+      "size_bytes":85825,
+      "sha256":"0257fb03087d4ae124974cb188762df80186cc37c6436ec44b509c6357f0169f",
+      "fnv1a_64":"a2bcb9daf220874f"
     },
     {
-      "id": "",
-      "path": "Weapons/falcon4.wcd.json",
-      "size_bytes": 64709,
-      "sha256": "f0fb97f7d63af5e29541738afa7d1410f83cadbcc7438651199ef4edb26eafbc",
-      "fnv1a_64": "10b7696dfeaf9f58"
+      "path":"Weapons/falcon4.wcd.json",
+      "format_version":1,
+      "size_bytes":64709,
+      "sha256":"f0fb97f7d63af5e29541738afa7d1410f83cadbcc7438651199ef4edb26eafbc",
+      "fnv1a_64":"10b7696dfeaf9f58"
     },
     {
-      "id": "campaign:save1",
-      "path": "World/korea.world.json",
-      "size_bytes": 11989759,
-      "sha256": "5dd89edeb5b82704b6d1b8980d5cb4564e81f798b7ffc38d3347b36e1d24f6b5",
-      "fnv1a_64": "533f948d7bd625b8"
+      "id":"campaign:save1",
+      "path":"World/korea.world.json",
+      "format_version":1,
+      "size_bytes":11989759,
+      "sha256":"5dd89edeb5b82704b6d1b8980d5cb4564e81f798b7ffc38d3347b36e1d24f6b5",
+      "fnv1a_64":"533f948d7bd625b8"
     }
   ]
 }

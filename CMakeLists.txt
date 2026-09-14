@@ -47,8 +47,8 @@ add_subdirectory(f4-entities)     # component-based entity system (uses f4-geo)
 add_subdirectory(f4-messaging)    # type-safe message bus with cross-thread queuing
 add_subdirectory(f4-data)
 add_subdirectory(f4-io)           # shared binary I/O primitives (Cursor + read_file) — consumed by f4-world-convert and f4-terrain
-add_subdirectory(f4-weapons)      # weapons & effects core (missile flyout, gun, damage, stores) — see Docs/COMBAT_CHAIN_PLAN.md
-add_subdirectory(f4-sensors)      # sensor model (radar detection, track files, RWR) — see Docs/COMBAT_CHAIN_PLAN.md
+add_subdirectory(f4-weapons)      # weapons & effects core (missile flyout, gun, damage, stores) — see Docs/archive/COMBAT_CHAIN_PLAN.md
+add_subdirectory(f4-sensors)      # sensor model (radar detection, track files, RWR) — see Docs/archive/COMBAT_CHAIN_PLAN.md
 add_subdirectory(f4-convert)
 add_subdirectory(f4-install)      # locates Falcon 4.0 install layout (FALCON4.ct, terrdata/, campaign/)
 add_subdirectory(f4-world-convert) # .cam campaign archive -> JSON (keystone)
@@ -79,7 +79,7 @@ add_subdirectory(f4-ai)             # AI brain: SensorFusion + tactic modules (c
 # f4-campaign BEFORE f4-simulation: the QC harness's synthetic tasking
 # ladder consumes the campaign's generated MissionProfiles.json (cache
 # var + fixture target must exist when f4-simulation is configured).
-add_subdirectory(f4-campaign)       # Headless dynamic campaign (mission profiles, tasking tick, attrition) — see Docs/NEXT_PHASE_PLAN.md §B
+add_subdirectory(f4-campaign)       # Headless dynamic campaign (mission profiles, tasking tick, attrition) — see Docs/archive/NEXT_PHASE_PLAN.md §B
 add_subdirectory(f4-simulation)     # Orchestration: EntityWorld + MessageBus + ModelDatabase + tick loop (no rendering)
 add_subdirectory(tools/fm_sysid)    # PHUG-PLAN Phase 1: flight-model system-identification harness (Docs/LONGITUDINAL_STABILITY_PLAN.md)
 # The viewer AFTER f4-campaign + f4-simulation (see the note above its

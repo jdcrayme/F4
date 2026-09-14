@@ -31,6 +31,51 @@
 
 namespace f4::json {
 
+// Free-function form of the JSON string escaping used by Writer::string().
+//
+// Returns the escaped BODY of the string literal — WITHOUT the surrounding
+// double quotes. This matches how the existing emitters (e.g.
+// f4-world-convert/src/world_json.cpp) call it:
+//
+//     o << "  \"theater\": \"" << escape_string(opts.theater) << "\",\n";
+//                              ^^^ literal opening quote      ^^^ literal closing quote
+//
+// Callers that want the full quoted literal (body + quotes) should use
+// Writer::string() instead, which delegates to this function and adds the
+// quotes. The two are kept consistent by sharing the same escape table.
+//
+// It is also the right tool for hand-built JSON that interpolates
+// external strings into a document (test scenario builders, ad-hoc
+// templates): a raw native Windows path is the canonical trap — pasted
+// unescaped, "C:\code\f16.json" silently parses as form-feed +
+// "16.json". Defined before the Writer class: the member body's
+// unqualified call needs it visible first.
+[[nodiscard]] inline std::string escape_string(std::string_view s) {
+    std::string out;
+    out.reserve(s.size());
+    for (char ch : s) {
+        switch (ch) {
+            case '"':  out += "\\\""; break;
+            case '\\': out += "\\\\"; break;
+            case '\b': out += "\\b";  break;
+            case '\f': out += "\\f";  break;
+            case '\n': out += "\\n";  break;
+            case '\r': out += "\\r";  break;
+            case '\t': out += "\\t";  break;
+            default:
+                if (static_cast<unsigned char>(ch) < 0x20) {
+                    char tmp[8];
+                    std::snprintf(tmp, sizeof(tmp), "\\u%04x",
+                                  static_cast<unsigned char>(ch));
+                    out += tmp;
+                } else {
+                    out += ch;
+                }
+        }
+    }
+    return out;
+}
+
 class Writer {
 public:
     void put(char c) { buf_.push_back(c); }
@@ -48,26 +93,7 @@ public:
     // or external data — paths, team names, theater names, etc.
     void string(std::string_view s) {
         put('"');
-        for (char ch : s) {
-            switch (ch) {
-                case '"':  put("\\\""); break;
-                case '\\': put("\\\\"); break;
-                case '\b': put("\\b");  break;
-                case '\f': put("\\f");  break;
-                case '\n': put("\\n");  break;
-                case '\r': put("\\r");  break;
-                case '\t': put("\\t");  break;
-                default:
-                    if (static_cast<unsigned char>(ch) < 0x20) {
-                        char tmp[8];
-                        std::snprintf(tmp, sizeof(tmp), "\\u%04x",
-                                      static_cast<unsigned char>(ch));
-                        put(tmp);
-                    } else {
-                        put(ch);
-                    }
-            }
-        }
+        put(escape_string(s));
         put('"');
     }
 
@@ -129,43 +155,5 @@ public:
 private:
     std::string buf_;
 };
-
-// Free-function form of the JSON string escaping used by Writer::string().
-//
-// Returns the escaped BODY of the string literal — WITHOUT the surrounding
-// double quotes. This matches how the existing emitters (e.g.
-// f4-world-convert/src/world_json.cpp) call it:
-//
-//     o << "  \"theater\": \"" << escape_string(opts.theater) << "\",\n";
-//                              ^^^ literal opening quote      ^^^ literal closing quote
-//
-// Callers that want the full quoted literal (body + quotes) should use
-// Writer::string() instead, which delegates to this function and adds the
-// quotes. The two are kept consistent by sharing the same escape table.
-[[nodiscard]] inline std::string escape_string(std::string_view s) {
-    std::string out;
-    out.reserve(s.size());
-    for (char ch : s) {
-        switch (ch) {
-            case '"':  out.append("\\\""); break;
-            case '\\': out.append("\\\\"); break;
-            case '\b': out.append("\\b");  break;
-            case '\f': out.append("\\f");  break;
-            case '\n': out.append("\\n");  break;
-            case '\r': out.append("\\r");  break;
-            case '\t': out.append("\\t");  break;
-            default:
-                if (static_cast<unsigned char>(ch) < 0x20) {
-                    char tmp[8];
-                    std::snprintf(tmp, sizeof(tmp), "\\u%04x",
-                                  static_cast<unsigned char>(ch));
-                    out.append(tmp);
-                } else {
-                    out.push_back(ch);
-                }
-        }
-    }
-    return out;
-}
 
 } // namespace f4::json

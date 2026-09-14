@@ -10,9 +10,9 @@
 > problem, we should be able to easily do the same thing."
 >
 > **Companions**: [Performance Plan](PERFORMANCE_PLAN.md) (PERF-1 landed,
-> PERF-2 closed-by-evidence), [AI Implementation Plan](AI_IMPLEMENTATION_PLAN.md)
+> PERF-2 closed-by-evidence), [AI Implementation Plan](../AI_IMPLEMENTATION_PLAN.md)
 > §10 (Simple vs Complex Flight Model Selection — the deferred design),
-> [Architecture Proposal](ARCHITECTURE%20PROPOSAL.md) §1437-1470 (the
+> [Architecture Proposal](../ARCHITECTURE%20PROPOSAL.md) §1437-1470 (the
 > `IFlightModel` strategy sketch).
 
 ---

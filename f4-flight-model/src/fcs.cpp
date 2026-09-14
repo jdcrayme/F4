@@ -23,7 +23,7 @@
 //   interacted through the AB2 filter's reset() — the leak's per-frame
 //   reset(eintg) clobbered u_prev with the OUTPUT, silently turning the
 //   integrator into a first-order lag with DC gain 2.95*kp03 (measured,
-//   Docs/LOOP_MARGIN_REPORT.md §3.5, finding M6).
+//   Docs/archive/LOOP_MARGIN_REPORT.md §3.5, finding M6).
 //
 // ROLL (rate command):
 //   The pilot commands a roll rate via the roll stick. The FCS looks up the
@@ -650,7 +650,7 @@ void FlightControlSystem::runPitch(double dt, double qbar, double qsom,
     // FALLS as speed rises (CL ~ 1/V² at L=W) and the closed plant has an
     // anti-damped aperiodic speed mode at every trim (measured on the
     // pre-P4.1 loop: Re +0.004..+0.29 /s, 92-99% vt participation —
-    // Docs/POLE_DIAGNOSIS_RESULTS.md F1-F4). Damping must enter V-dot.
+    // Docs/archive/POLE_DIAGNOSIS_RESULTS.md F1-F4). Damping must enter V-dot.
     // The G COMMAND is the only pitch injection the G-loop PI cannot
     // reject. Adding k·(V − V_lp) to ptcmd raises the commanded (and
     // hence held) G with speed: the extra induced drag (dD/dL > 0) is
@@ -680,7 +680,7 @@ void FlightControlSystem::runPitch(double dt, double qbar, double qsom,
     // The G-hold law pins lift to weight at every speed, so induced drag
     // FALLS as speed rises (CL ~ 1/V² at L=W) and the closed plant has an
     // anti-damped aperiodic speed mode at every trim (measured: Re
-    // +0.004..+0.29 /s, 92-99% vt participation — Docs/POLE_DIAGNOSIS_
+    // +0.004..+0.29 /s, 92-99% vt participation — Docs/archive/POLE_DIAGNOSIS_
     // RESULTS.md F1-F4). Damping must enter V-dot. The G COMMAND is the
     // only pitch injection the G-loop PI cannot reject (an alpha-channel
     // disturbance is integrated out; the pitch-rate channel has no q

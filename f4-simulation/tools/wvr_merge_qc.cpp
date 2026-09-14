@@ -1,7 +1,7 @@
 // f4-simulation/tools/wvr_merge_qc.cpp
 //
 // wvr_merge_qc — the M5a end-to-end WVR / guns merge acceptance tool
-// (see Docs/COMBAT_CHAIN_M5_PLAN.md). The combat-chain sibling of
+// (see Docs/archive/COMBAT_CHAIN_M5_PLAN.md). The combat-chain sibling of
 // bvr_intercept_qc (M4): where M4 certifies the BVR intercept, M5a
 // certifies the inside-the-band fight — the merge, the guns, the
 // heaters, the disengage.

@@ -11,11 +11,16 @@
 //   3  write failure
 //   4  skipped (AFM format — BMS Advanced Flight Model not supported)
 
+#include <f4/assets/asset_id.hpp>
+#include <f4/assets/manifest.hpp>
+#include <f4/import/manifest_writer.hpp>
 #include "f4/convert/dat_parser.hpp"
 #include "f4/convert/json_io.hpp"
 
 #include <cstdio>
+#include <filesystem>
 #include <string>
+#include <vector>
 
 int main(int argc, char** argv) {
     if (argc != 3) {
@@ -52,6 +57,38 @@ int main(int argc, char** argv) {
     if (!f4::convert::writeJsonFile(result.config, outputPath)) {
         std::fprintf(stderr, "ERROR: Failed to write %s\n", outputPath.c_str());
         return 3;
+    }
+
+    // When the output lands in a Data tree that carries a manifest (the
+    // repo's Data/, the export script's output), refresh the aircraft entry
+    // — path, fingerprints, generator — the same way every other producer
+    // (f4import, cam2json, terrain2json) does. Best-effort: a manifest
+    // problem is bookkeeping, not a conversion failure, and outputs outside
+    // a Data tree (generated_fixtures, test temp dirs) are skipped.
+    {
+        const std::filesystem::path output(outputPath);
+        const std::filesystem::path data_dir =
+            output.parent_path().parent_path();
+        std::error_code ec;
+        if (std::filesystem::exists(data_dir / "manifest.json", ec)) {
+            try {
+                std::vector<f4::assets::AssetSource> sources;
+                sources.push_back({inputPath, "ACDATA", ""});
+                (void)f4::import::update_manifest_for_asset(
+                    data_dir,
+                    f4::assets::AssetId{
+                        f4::assets::AssetFamily::aircraft,
+                        f4::import::to_lower_ascii(output.stem().string())},
+                    "Aircraft/" + output.filename().string(),
+                    /*format_version=*/1,
+                    /*capabilities=*/{},
+                    std::move(sources),
+                    /*generator=*/"dat2json (f4-convert 0.5.0)");
+            } catch (const std::exception& e) {
+                std::fprintf(stderr, "WARN: manifest not updated: %s\n",
+                             e.what());
+            }
+        }
     }
 
     auto const& c = result.config;

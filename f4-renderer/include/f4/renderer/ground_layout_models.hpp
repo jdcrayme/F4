@@ -19,7 +19,7 @@
 //   - The renderer converts ENU feet to Raylib's RH Y-up at draw time:
 //     raylib_x = enu_x, raylib_y = enu_z, raylib_z = -enu_y.
 //
-// See Docs/SCENARIO_PLAYER_PLAN.md §5.5 for the coordinate-frame rationale.
+// See Docs/archive/SCENARIO_PLAYER_PLAN.md §5.5 for the coordinate-frame rationale.
 
 #pragma once
 

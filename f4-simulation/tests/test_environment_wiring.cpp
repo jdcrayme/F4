@@ -8,6 +8,7 @@
 #include <f4/simulation/weather_system.hpp>
 
 #include <f4/ai/brain_component.hpp>
+#include <f4/json/f4_json.hpp>
 
 #include <gtest/gtest.h>
 
@@ -40,7 +41,8 @@ std::string scenario_json(const std::filesystem::path& f16,
     return R"({
         "name": "env_wiring",
         "aircraft": [
-            {"callsign":"E1","aircraft_config_path":")" + f16.string() +
+            {"callsign":"E1","aircraft_config_path":")" +
+             f4::json::escape_string(f16.string()) +
            R"(","aircraft_name":"F-16","vis_type_index":1052,
              "spawn_in_air": true,
              "position":{"x":0,"y":10000,"z":10000},

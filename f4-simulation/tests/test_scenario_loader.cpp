@@ -18,6 +18,7 @@
 #include "f4/simulation/simulation.hpp"  // Tranche 0d: AssetModelRefSkipsBinaryLoad
 
 #include <f4/assets/asset_id.hpp>        // Task 58: is_asset_ref
+#include <f4/json/f4_json.hpp>           // escape_string: native paths in hand-built JSON
 
 #include <cstdlib>
 #include <filesystem>
@@ -644,7 +645,8 @@ TEST(ScenarioLoader, AssetModelRefSkipsBinaryLoad) {
     const auto json = R"({
         "name": "asset_model_skip",
         "aircraft": [
-            {"callsign":"E1","aircraft_config_path":")" + f16.string() + R"(",
+            {"callsign":"E1","aircraft_config_path":")" +
+             f4::json::escape_string(f16.string()) + R"(",
              "aircraft_name":"F-16","vis_type_index":1052,
              "parking_spot":{"x":0,"y":0,"z":0},"heading_rad":0,"initial_fuel_lbs":1}
         ],
@@ -749,7 +751,10 @@ TEST(ScenarioLoader, LoadScenarioFileResolvesAssetRefsThroughDataDir) {
     const auto data_dir = make_scenario_data_dir("resolve");
     std::string json(kAssetRefScenario);
     const std::string marker = "__DATA_DIR__";
-    json.replace(json.find(marker), marker.size(), data_dir.string());
+    // Escaped: a raw native path in the template is invalid JSON — the
+    // backslashes before 'U', 'A', 'f', 'r'… in C:\Users\… get consumed.
+    json.replace(json.find(marker), marker.size(),
+                 f4::json::escape_string(data_dir.string()));
 
     auto tmp = std::filesystem::temp_directory_path() / "f4_scenario_assets_test" / "scn";
     std::filesystem::create_directories(tmp);
@@ -776,7 +781,8 @@ TEST(ScenarioLoader, LoadScenarioFileFailsLoudOnDanglingAssetRef) {
     // the manifest does not carry.
     std::string json(kAssetRefScenario);
     const std::string marker = "__DATA_DIR__";
-    json.replace(json.find(marker), marker.size(), data_dir.string());
+    json.replace(json.find(marker), marker.size(),
+                 f4::json::escape_string(data_dir.string()));
     const std::string f16ref = "@asset:aircraft:f16";
     json.replace(json.find(f16ref), f16ref.size(), "@asset:aircraft:f22");
 

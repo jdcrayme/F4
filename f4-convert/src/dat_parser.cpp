@@ -878,6 +878,24 @@ static void completeAuxAeroRecord(AircraftConfig& cfg,
 
         cfg.auxAero[e.key] = std::move(val);
     }
+
+    // A .dat that never mentions criticalAOA rides the readin.cpp default of
+    // 0.0 — which the flight model reads as the "stall model disabled"
+    // sentinel, taking the FCS alpha protection (keyed off the same field)
+    // with it. The vanilla Simdata.ZIP .dats predate the key/value block
+    // entirely, so the raw legacy default ships the whole fleet with stall
+    // detection silently off. An absent key falls back to 25 deg — the
+    // F-16's curated stall boundary. An explicit `criticalAOA 0` line still
+    // disables it on purpose.
+    constexpr double kCriticalAoAFallbackDeg = 25.0;
+    if (cfg.rawAuxAeroData.count("criticalAOA") == 0) {
+        cfg.aux.criticalAOA =
+            f4::Quantity<f4::Degrees>(kCriticalAoAFallbackDeg).to<f4::Radians>();
+        AuxAeroValue fallback{};
+        fallback.type = AuxAeroValueType::Float;
+        fallback.f = kCriticalAoAFallbackDeg;
+        cfg.auxAero["criticalAOA"] = std::move(fallback);
+    }
 }
 
 // ---------------------------------------------------------------------------

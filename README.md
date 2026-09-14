@@ -556,7 +556,7 @@ f4-geo, f4-data, f4-math.
 ### f4-weapons — Weapons & effects core
 
 Static library implementing the bottom of the combat chain
-(`Docs/COMBAT_CHAIN_PLAN.md`, Milestone M1): weapon class data, loadout
+(`Docs/archive/COMBAT_CHAIN_PLAN.md`, Milestone M1): weapon class data, loadout
 stores, a 3-DOF guided-missile flyout (proportional navigation, seeker
 cone/range limits, proximity fuze, time-of-flight self-destruct), a
 ballistic gun model, and the warhead-vs-strength damage model. Missiles are
@@ -602,7 +602,7 @@ NOT dependent on f4-flight-model or f4-ai.
 ### f4-sensors — Sensor model (radar, tracks, RWR)
 
 Static library implementing the "eyes" of the combat chain
-(`Docs/COMBAT_CHAIN_PLAN.md`, Milestone M2): an airborne radar with scan
+(`Docs/archive/COMBAT_CHAIN_PLAN.md`, Milestone M2): an airborne radar with scan
 volumes and a probability-of-detection model (fourth-root RCS scaling,
 aspect lobes, closure effect), track files with quality build-up and
 exponential decay (Tentative → Established → Coasting → Dropped), IFF by
@@ -714,7 +714,7 @@ rebuilds consume ONE host-built snapshot per tick
 entity database — the armed war's merge-phase collapse (~37 tps)
 closed at a 140–200 tps sustained floor with the ledger bytes
 UNCHANGED (`AirPicture` in f4-ai; the walk is demand-gated on the
-fusions' own rebuild decisions). See `Docs/PERFORMANCE_PLAN.md`.
+fusions' own rebuild decisions). See `Docs/archive/PERFORMANCE_PLAN.md`.
 
 **G1 — the ground war**: `CampaignSessionOptions::ground_war` (or
 `campaign_qc --ground-war`) runs the campaign-side twin of the tasking
@@ -730,7 +730,7 @@ determinism MD5 covers both wars), the write-back
 WorldState, and the session mirrors the engine's battalions into the
 sim's entities every update — the 3D world's ground units march.
 Ground-off sessions stay byte-identical (the `aa_combat` opt-in
-contract). See `Docs/GROUND_WAR_PLAN.md`.
+contract). See `Docs/archive/GROUND_WAR_PLAN.md`.
 
 **G2 — the interdiction link**: `CampaignSessionOptions::unit_strike`
 (or `campaign_qc --unit-strike`) closes the DIAGONAL between the two
@@ -750,7 +750,7 @@ layer (tasking rungs + the sink's booking; flag off, documents
 byte-identical — the C6 and G1 goldens re-verified). The QC's exit 14
 fires when an armed unit strike attrites nothing (CAS needs its TOT
 window — the honest acceptance horizon is `--war >= 0.3`). See
-`Docs/INTERDICTION_PLAN.md`.
+`Docs/archive/INTERDICTION_PLAN.md`.
 
 **V-CAMP**: `campaign_session.hpp` — the live campaign loop as ONE
 frame-driven object (the `campaign_qc` wiring, composed for hosts):
@@ -795,7 +795,7 @@ command rather than a bare path when a stale build tree loses them.
 **Dependencies**: f4-entities, f4-messaging, f4-flight-model, f4-flight-api,
 f4-ai, f4-data, f4-geo, f4-math, f4-units, f4-state-machine, f4-models,
 f4-recorder, f4-json, f4-io, f4-world, f4-world-convert, f4-terrain,
-f4-weapons, f4-sensors, f4-campaign. See `Docs/COMBAT_CHAIN_PLAN.md` (M3),
+f4-weapons, f4-sensors, f4-campaign. See `Docs/archive/COMBAT_CHAIN_PLAN.md` (M3),
 `Docs/AIRCRAFT_BINDING_DESIGN.md`, and `Docs/CAMPAIGN_LOOP_PLAN.md` (V-CAMP).
 
 ### f4-campaign — headless dynamic campaign + the result ledger (the war loop)

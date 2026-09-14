@@ -2,7 +2,7 @@
 
 > **Status**: Active plan. Replaces the earlier "f4-taxi-demo" concept.
 > **Created**: 2026-08-09
-> **Companion**: [Aircraft Binding Design](AIRCRAFT_BINDING_DESIGN.md), [Architecture Proposal §13](ARCHITECTURE%20PROPOSAL.md#13-f4-simulation--orchestration), [ECS Decoupling Plan](ECS_DECOUPLING_PLAN.md)
+> **Companion**: [Aircraft Binding Design](../AIRCRAFT_BINDING_DESIGN.md), [Architecture Proposal §13](ARCHITECTURE%20PROPOSAL.md#13-f4-simulation--orchestration), [ECS Decoupling Plan](ECS_DECOUPLING_PLAN.md)
 
 ---
 

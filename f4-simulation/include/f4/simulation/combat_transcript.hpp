@@ -6,7 +6,7 @@
 // Engine-agnostic by design: no renderer, no window, no Raylib. The
 // scenario player polls the ring buffer to draw its COMBAT panel; tests
 // assert the calls directly. This is the M4 "combat observability" half of
-// the deferred recorder work (Docs/COMBAT_CHAIN_PLAN.md M4) — the events
+// the deferred recorder work (Docs/archive/COMBAT_CHAIN_PLAN.md M4) — the events
 // were already on the bus since M1/M2, nothing formatted them for humans.
 //
 // Subscribed events (state TRANSITIONS only — the bus never carries

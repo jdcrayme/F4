@@ -2,7 +2,7 @@
 
 > **Status**: Active plan, picks up where `SCENARIO_PLAYER_PLAN.md` left off.
 > **Prerequisite**: Phase 1 patch (`f4-aircraft-binding-and-scenario-player.patch`) committed.
-> **Companion**: [Aircraft Binding Design](AIRCRAFT_BINDING_DESIGN.md), [Scenario Player Plan](SCENARIO_PLAYER_PLAN.md), [ECS Decoupling Plan](ECS_DECOUPLING_PLAN.md)
+> **Companion**: [Aircraft Binding Design](../AIRCRAFT_BINDING_DESIGN.md), [Scenario Player Plan](SCENARIO_PLAYER_PLAN.md), [ECS Decoupling Plan](ECS_DECOUPLING_PLAN.md)
 
 ---
 

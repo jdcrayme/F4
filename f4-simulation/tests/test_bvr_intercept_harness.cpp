@@ -30,7 +30,7 @@
 //      bvr_intercept_harness.cpp; a load-first order would abort with
 //      the wrong failure class and mislabel the QC exit code).
 //
-// Companion: Docs/COMBAT_CHAIN_M4_PLAN.md (the M4 plan), test_combat_
+// Companion: Docs/archive/COMBAT_CHAIN_M4_PLAN.md (the M4 plan), test_combat_
 // integration.cpp::BvrInterceptScenarioFilePlaysOut (the M3 precedent
 // — the same scenario, hand-driven, that the harness now drives via
 // the brain).

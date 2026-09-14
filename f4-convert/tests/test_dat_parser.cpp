@@ -302,6 +302,35 @@ TEST(DatParserTest, RawAuxAeroDataCapturesEveryKeyValuePairVerbatim) {
     EXPECT_EQ(r.config.rawAuxAeroData.at("abSpoolRate"),   "10.5");
 }
 
+TEST(DatParserTest, CriticalAoAFallsBackTo25DegWhenAbsent) {
+    // The vanilla Simdata.ZIP .dats never mention criticalAOA (their
+    // key/value block predates the key), and readin.cpp's 0.0 default is
+    // the flight model's "stall model disabled" sentinel — the raw legacy
+    // default silently ships stall detection off. An absent key falls back
+    // to the 25 deg stall boundary in both the typed view and the record;
+    // the verbatim map stays empty for it. The a10 fixture carries no
+    // criticalAOA line.
+    auto r = loadFile(std::string(F4_CONVERT_TEST_FIXTURES_DIR) + "/a10.dat");
+    ASSERT_TRUE(r.ok);
+    EXPECT_NEAR(r.config.aux.criticalAOA.to<f4::Degrees>().value(), 25.0, 1e-9);
+    ASSERT_EQ(r.config.auxAero.count("criticalAOA"), 1u);
+    EXPECT_EQ(r.config.auxAero.at("criticalAOA").type, AuxAeroValueType::Float);
+    EXPECT_NEAR(r.config.auxAero.at("criticalAOA").f, 25.0, 1e-9);
+    EXPECT_EQ(r.config.rawAuxAeroData.count("criticalAOA"), 0u);
+}
+
+TEST(DatParserTest, CriticalAoAExplicitZeroStaysDisabled) {
+    // An explicit 0 in the .dat is the deliberate disable sentinel and must
+    // survive the absent-key fallback. The synthetic fixture carries a
+    // literal `criticalAOA 0` line.
+    auto r = loadSyntheticFixture();
+    ASSERT_TRUE(r.ok);
+    EXPECT_EQ(r.config.rawAuxAeroData.count("criticalAOA"), 1u);
+    EXPECT_NEAR(r.config.aux.criticalAOA.to<f4::Degrees>().value(), 0.0, 1e-9);
+    ASSERT_EQ(r.config.auxAero.count("criticalAOA"), 1u);
+    EXPECT_NEAR(r.config.auxAero.at("criticalAOA").f, 0.0, 1e-9);
+}
+
 // ============================================================================
 // AFM (BMS Advanced Flight Model) detection
 // ============================================================================

@@ -1,7 +1,7 @@
 // f4-simulation/include/f4/simulation/bvr_intercept_harness.hpp
 //
 // PUBLIC HEADER — M4, the end-to-end BVR intercept acceptance harness
-// (see Docs/COMBAT_CHAIN_M4_PLAN.md). The combat-chain sibling of
+// (see Docs/archive/COMBAT_CHAIN_M4_PLAN.md). The combat-chain sibling of
 // CampaignWarHarness (C5, the 24-hour war — see campaign_war_harness.hpp):
 // where C5 certifies the CAMPAIGN loop (the ledger, the tasking, the
 // resupply, the ground war), M4 certifies the COMBAT chain at scenario

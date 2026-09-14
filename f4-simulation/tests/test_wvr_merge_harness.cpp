@@ -23,7 +23,7 @@
 //      closes here): a blue 2-ship vs a red 2-ship through the harness,
 //      engagement completes, roster bounded.
 //
-// Companion: Docs/COMBAT_CHAIN_M5_PLAN.md, test_bvr_intercept_harness
+// Companion: Docs/archive/COMBAT_CHAIN_M5_PLAN.md, test_bvr_intercept_harness
 // .cpp (the M4 rig this mirrors), test_combat_integration.cpp (the
 // hand-driven guns/wvr fights the harness now certifies).
 

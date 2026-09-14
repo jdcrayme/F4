@@ -8,7 +8,7 @@
 > ENGINE over the same IDataSource boundary, writing through the same
 > result ledger, moved by the same one clock. **Prerequisite**: C5
 > (the war harness + the wreck reaper) and C6 (the armed campaign).
-> **Companion**: [Campaign Loop Plan](CAMPAIGN_LOOP_PLAN.md) (the loop
+> **Companion**: [Campaign Loop Plan](../CAMPAIGN_LOOP_PLAN.md) (the loop
 > this closes the ground side of), [Performance Plan](PERFORMANCE_PLAN.md).
 
 ---

@@ -12,7 +12,7 @@
 //   app.load_scenario("scenarios/kunsan_parking.json");
 //   app.run();          // opens a window and runs the sim+render loop
 //
-// See Docs/SCENARIO_PLAYER_PLAN.md for the full plan.
+// See Docs/archive/SCENARIO_PLAYER_PLAN.md for the full plan.
 
 #pragma once
 

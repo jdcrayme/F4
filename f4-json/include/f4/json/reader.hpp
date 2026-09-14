@@ -144,8 +144,14 @@ public:
                         continue;  // we already advanced past the escape
                     }
                     default:
-                        out += esc;
-                        break;
+                        // Strict, per the "throws on malformed" contract
+                        // above. Silently dropping the backslash here is
+                        // how an unescaped native Windows path in a
+                        // hand-built document ("...\f16.json") surfaced
+                        // miles away as a mangled, not-a-directory path.
+                        throw std::runtime_error(
+                            "f4::json: invalid escape '\\" +
+                            std::string(1, esc) + "'");
                 }
                 pos_ += 2;
             } else {

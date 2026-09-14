@@ -2,7 +2,7 @@
 
 > **Status**: Active diagnostic plan, picks up where DIGI-1/DIGI-2 left off.
 > **Source of Truth**: `https://github.com/jdcrayme/F4`
-> **Companions**: [AI Implementation Plan](AI_IMPLEMENTATION_PLAN.md), [DIGI AI Phase 2 Plan](DIGI_AI_PHASE2_PLAN.md) §347–348, [Architecture Proposal](ARCHITECTURE%20PROPOSAL.md) §12
+> **Companions**: [AI Implementation Plan](../AI_IMPLEMENTATION_PLAN.md), [DIGI AI Phase 2 Plan](../DIGI_AI_PHASE2_PLAN.md) §347–348, [Architecture Proposal](../ARCHITECTURE%20PROPOSAL.md) §12
 > **Predecessor Lessons**: `worklog.md` Task DIGI-1 (airspeed-rotated gamma-hold law, att-cmd rotation), DIGI-2 (NED→ENU quaternion fix), DIGI_AI_PHASE2_PLAN §10 (trace summary/anomaly workflow)
 
 ---

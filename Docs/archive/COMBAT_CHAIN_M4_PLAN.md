@@ -16,8 +16,8 @@
 > wired to all 11 combat bus message types).
 > **Companion**: [Combat Chain Plan](COMBAT_CHAIN_PLAN.md) (M1–M3 landed; M4
 > is §2's "M4 — Combat E2E scenario + validation"), [AI Implementation Plan
-> §6](AI_IMPLEMENTATION_PLAN.md) (the FreeFalcon validation targets M4 asserts
-> against), [Campaign Loop Plan §5](CAMPAIGN_LOOP_PLAN.md) (C5 — the war
+> §6](../AI_IMPLEMENTATION_PLAN.md) (the FreeFalcon validation targets M4 asserts
+> against), [Campaign Loop Plan §5](../CAMPAIGN_LOOP_PLAN.md) (C5 — the war
 > harness whose verdict/MD5/determinism contract M4 mirrors at scenario scale).
 
 ---

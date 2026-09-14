@@ -2,7 +2,7 @@
 //
 // Weapon domain types shared by the whole f4-weapons library.
 //
-// Scope: air-to-air weapons for M1 (see Docs/COMBAT_CHAIN_PLAN.md). The
+// Scope: air-to-air weapons for M1 (see Docs/archive/COMBAT_CHAIN_PLAN.md). The
 // category/guidance enums are domain-neutral from day one so air-to-ground
 // and SAM flyouts can be added without breaking call sites.
 //
