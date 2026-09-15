@@ -200,6 +200,10 @@ build_mission_plan_from_route(
     const std::unordered_map<std::uint32_t, f4::entities::EntityId>*
         unit_id_map = nullptr);
 
+/// FID-5 forward declaration: the airborne spawn override (the full
+/// struct lives with spawn_aircraft_for_flight below).
+struct AirSpawnPose;
+
 /// Spawn ONE aircraft for ONE synthetic-ladder MissionIntent (the
 /// generation-to-spawn leg — the mirror of spawn_aircraft_for_flight
 /// for missions that have no live Flight unit in the save). Resolves
@@ -209,6 +213,10 @@ build_mission_plan_from_route(
 /// flight id — kills write back to the tasked squadron), and arms the
 /// doctrine ordnance when the mission is a delivery category.
 /// Returns nullopt when the intent carries no route.
+/// FID-5: `air_pose` (optional) is the flight path's own airborne
+/// override — an in-air FM init at the pose, the plan's Enroute start
+/// phase, the handoff's fuel. Null (every existing caller) keeps the
+/// grounded parking spawn, byte-identical.
 [[nodiscard]] std::optional<f4::entities::EntityId>
 spawn_aircraft_for_intent(
     f4::entities::EntityWorld& world,
@@ -225,7 +233,8 @@ spawn_aircraft_for_intent(
         objective_id_map = nullptr,
     const weapons::WeaponClassTable* weapon_table = nullptr,
     const std::unordered_map<std::uint32_t, f4::entities::EntityId>*
-        target_unit_id_map = nullptr);
+        target_unit_id_map = nullptr,
+    const AirSpawnPose* air_pose = nullptr);
 
 /// Map a campaign owner slot to the sim's TEAM-tag string vocabulary.
 ///

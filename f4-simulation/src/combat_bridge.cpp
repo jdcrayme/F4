@@ -260,6 +260,26 @@ RadarBackedDetectionPolicy::Verdict
 RadarBackedDetectionPolicy::classify(const f4::ai::TargetInfo& t) {
     Verdict v{};
 
+    // FID-5 (§4.6): the AGGREGATE contacts — coarse-granularity
+    // detection. The contact id is a campaign flight VU, not an entity:
+    // no DamageState, no radar track, no RWR emitter can exist for it.
+    // The coarse rule the plan names: the theater's campaign radar net
+    // hands the aggregate to the ownship's picture — range-gated by the
+    // ownship radar's reference card, no scan volume, no RCS grid.
+    if (aggregate_ids_ != nullptr &&
+        aggregate_ids_->count(t.entity_id) != 0) {
+        const sensors::RadarSimComponent* radar = batch_radar_;
+        if (radar == nullptr) {
+            radar = entities::EntityHandle(entities::EntityId{ownship_id_},
+                                           world_)
+                        .get<sensors::RadarSimComponent>();
+        }
+        const double max_nm = radar != nullptr
+            ? radar->params.reference_range_nm : 40.0;
+        v.radar = t.range_nm <= max_nm;
+        return v;
+    }
+
     // CORPSES DON'T PAINT (the M3 host decision radar_component.hpp
     // defers to this layer): an entity whose DamageStateComponent is
     // killed answers all-false, so the shooter's SensorFusion drops it
@@ -323,7 +343,9 @@ std::size_t execute_brain_combat_intents(
     messaging::MessageBus& bus,
     const weapons::WeaponClassTable& table,
     double sim_time_s,
-    const std::vector<entities::EntityId>* active_aircraft) {
+    const std::vector<entities::EntityId>* active_aircraft,
+    const std::unordered_set<std::uint64_t>* deferred_launch_ids,
+    int* deferred_release_count) {
     std::size_t launches = 0;
 
     // The visit set: the host's ACTIVE roster when it provides one (see
@@ -357,6 +379,14 @@ std::size_t execute_brain_combat_intents(
         // do not fight — see classify above).
         const auto* dmg = shooter.get<entities::DamageStateComponent>();
         const bool dead = dmg != nullptr && dmg->killed;
+
+        // FID-5 (§4.5): the commit-window veto — a release against an
+        // AGGREGATE contact id would fly a phantom missile (the id
+        // resolves to no entity). The tiered session vetoes the release
+        // until its commit trigger deaggregates the flight (the next
+        // campaign second); the brain re-evaluates against the real
+        // aircraft. A/A releases and gun bursts only — the A-G bomb
+        // path targets objectives/battalions, never an air contact.
 
         // --- A-G release intent (the M5 strike slice). ----------------------
         // Runs for brains with combat ON or OFF alike — bombing a target
@@ -401,6 +431,13 @@ std::size_t execute_brain_combat_intents(
 
         // --- Release intent: one missile through the sim's table. ------
         if (intent.weapon_release && intent.release_target_id != 0 && !dead) {
+            // FID-5: the aggregate veto (see the block comment above).
+            if (deferred_launch_ids != nullptr &&
+                deferred_launch_ids->count(intent.release_target_id) != 0) {
+                if (deferred_release_count != nullptr) {
+                    ++*deferred_release_count;
+                }
+            } else {
             auto* store = shooter.get<weapons::WeaponStoreComponent>();
             if (store) {
                 // Station doctrine. BVR: among the loaded A/A stations,
@@ -454,6 +491,7 @@ std::size_t execute_brain_combat_intents(
                     if (missile.valid()) ++launches;
                 }
             }
+            }   // FID-5: the aggregate-veto else branch closes here
         }
 
         // --- Gun intent: start a burst through the gun station. ---------
@@ -461,7 +499,14 @@ std::size_t execute_brain_combat_intents(
         // burst_rounds), clipped to the drum; the store debits what
         // actually left the muzzle. The tracers fly in the update_guns
         // sweep later this tick — fresh muzzle pose, real ballistics.
+        // FID-5: the same aggregate veto as the release path.
         if (intent.gun_trigger && intent.gun_target_id != 0 && !dead) {
+            if (deferred_launch_ids != nullptr &&
+                deferred_launch_ids->count(intent.gun_target_id) != 0) {
+                if (deferred_release_count != nullptr) {
+                    ++*deferred_release_count;
+                }
+            } else {
             auto* gun = shooter.get<weapons::GunComponent>();
             auto* store = shooter.get<weapons::WeaponStoreComponent>();
             if (gun != nullptr && store != nullptr) {
@@ -479,6 +524,7 @@ std::size_t execute_brain_combat_intents(
                             burst, intent.gun_target_id);
                     }
                 }
+            }
             }
         }
     }

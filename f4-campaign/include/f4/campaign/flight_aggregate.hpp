@@ -111,6 +111,23 @@ struct FlightAggregateFilter {
     int max_flights = -1;   // < 0 = unlimited
 };
 
+/// FID-5 (Docs/FIDELITY_TIERS_PLAN.md §4.5): one generated mission's
+/// aggregate seed — register_synthetic()'s input. The session fills it
+/// from the ladder's MissionIntent (the spawner's synthetic path no
+/// longer spawns straight to Tier-B); the route is already converted to
+/// the engine's waypoint vocabulary.
+struct SyntheticFlightSeed {
+    std::uint32_t vu = 0;               ///< reserved-namespace flight id
+    std::uint8_t team = 0;              ///< owner slot (the intent's)
+    std::uint8_t mission = 0;           ///< mission byte (the intent's)
+    int aircraft_count = 1;             ///< the intent's package size
+    std::int32_t time_on_target = 0;    ///< ABSOLUTE campaign time
+    /// The intent's planned route (takeoff → ingress → target → egress →
+    /// landing). May be empty — a route-less synthetic flight is a
+    /// parked aggregate (has_route false, nothing advances).
+    std::vector<f4::entities::WaypointState> route;
+};
+
 /// One flight's aggregate state. Public read-only by convention —
 /// mutation flows through tick()/set_suspended()/reaggregate()/
 /// mark_destroyed() so the invariants hold.
@@ -175,6 +192,20 @@ public:
     /// the C1 sink as today. Unknown vu = no-op.
     void mark_destroyed(std::uint32_t vu);
 
+    /// FID-5: register a generated mission as an AGGREGATE (the
+    /// synthetic-intent tiering — the FID-6 certificate's "the war's
+    /// live aircraft are all synthetic" lever). The flight starts at
+    /// its route's first waypoint (the base the planner launched from),
+    /// holds there until that waypoint's depart (the session sets it to
+    /// the intent's TOT-anchored takeoff gate), then walks SPEED mode at
+    /// the cruise. Bypasses the construction filter: the generated
+    /// war's own budget is the spawner's, not the save-flight cap.
+    /// Returns the new flight's index; \c size_t(-1) when the seed is
+    /// unusable (vu 0, or a duplicate — the reserved namespace makes
+    /// that a caller bug, so the refusal is loud).
+    [[nodiscard]] std::size_t register_synthetic(
+        const SyntheticFlightSeed& seed);
+
     // --- Read access ---------------------------------------------------
 
     /// The engine's flights, wire order (parallel with routes()).
@@ -211,6 +242,13 @@ public:
     /// Seconds until the flight's mission-over time (<= 0 past/none).
     /// The recovery-ops window query.
     [[nodiscard]] std::int32_t seconds_to_mission_over(
+        std::size_t index) const;
+    /// FID-5: seconds until the flight's time-on-target (<= 0 past/none).
+    /// The delivery-ops window query: a flight approaching its TOT
+    /// deaggregates to fly the attack (the delivery is a per-aircraft
+    /// phase — §4.3's mission-phase pinning, the same arms the takeoff
+    /// and recovery windows ride).
+    [[nodiscard]] std::int32_t seconds_to_time_on_target(
         std::size_t index) const;
     /// Current leg bearing (compass radians, atan2(east, north)) — the
     /// deagg spawn pose's heading. Holds pose at the save position

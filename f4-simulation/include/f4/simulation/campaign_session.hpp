@@ -52,6 +52,7 @@
 
 #pragma once
 
+#include <f4/ai/air_picture.hpp>          // FID-5: the aggregate contacts
 #include <f4/campaign/campaign.hpp>
 #include <f4/campaign/flight_aggregate.hpp>
 #include <f4/campaign/flight_writeback.hpp>
@@ -73,6 +74,7 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace f4::simulation {
@@ -233,6 +235,31 @@ struct CampaignSessionOptions {
     /// FID-3: the minimum deaggregated time (campaign seconds) before
     /// a bubble-driven reagg may fire (the thrash guard).
     double deagg_cooldown_sec = 30.0;
+
+    /// FID-5 (Docs/FIDELITY_TIERS_PLAN.md §4.5): run the event-driven
+    /// COMBAT deagg — the aggregate contacts in the shared air picture,
+    /// the commit/convergence triggers, and the transient combat windows
+    /// (phase-pinned reagg). Tiered sessions only; false restores the
+    /// FID-1..4 tiered shape exactly (the A/B and the escape hatch).
+    bool combat_deagg = true;
+    /// FID-5: register the tasking ladder's SYNTHETIC intents as
+    /// AGGREGATES instead of spawning them straight to Tier-B (the
+    /// FID-6 certificate's "the war's live aircraft are all synthetic"
+    /// lever — the generated war rides the tier machinery like the save's
+    /// own flights). Tiered sessions only; false restores the pre-FID-5
+    /// spawner behavior byte for byte.
+    bool synthetic_as_aggregates = true;
+    /// FID-5: the engagement envelope (feet) — two opposing aggregate
+    /// tracks whose PREDICTED positions (current + velocity ×
+    /// combat_lookahead_sec) come inside this range, closing, deaggregate
+    /// and the fight runs in-sim (§4.5's convergence trigger).
+    double combat_envelope_ft = 30000.0;
+    /// FID-5: the convergence lookahead (campaign seconds).
+    int combat_lookahead_sec = 120;
+    /// FID-5: the combat deagg pin (campaign seconds) — a combat-
+    /// triggered deaggregation stays live this long before the standard
+    /// reagg rules apply (the transient window; the phase pin).
+    int combat_window_sec = 600;
 };
 
 /// The live campaign session. Create via create(); destroy to reset —
@@ -290,6 +317,11 @@ public:
         int agg_destroyed = 0;        ///< folded as all-dead
         int tier_deaggs = 0;          ///< session: deaggregations so far
         int tier_reaggs = 0;          ///< session: reaggregations so far
+        // --- FID-5 (event-driven combat deagg) -----------------------------
+        int combat_deaggs = 0;        ///< deaggs the combat triggers fired
+        int synthetic_aggregates = 0; ///< generated missions registered as aggregates
+        int agg_contacts = 0;         ///< aggregate contacts in the air picture now
+        int deferred_releases = 0;    ///< the commit-window veto's skipped releases
     };
 
     /// Build the whole graph. Returns nullptr and fills `error` on any
@@ -340,6 +372,12 @@ public:
     [[nodiscard]] const std::vector<f4::campaign::MissionIntent>&
     intents() const noexcept {
         return ladder_->intents();
+    }
+    /// The spawner's own counters (the QC's summary vocabulary — the
+    /// FID-5 deferral split reads it directly).
+    [[nodiscard]] const CampaignSimSpawner::Stats& spawner_stats()
+        const noexcept {
+        return spawner_->stats();
     }
     /// The result ledger (draws, losses, reinforcements, damage).
     [[nodiscard]] const f4::campaign::CampaignResultLedger& ledger()
@@ -501,10 +539,29 @@ private:
     /// signatures name it.
     struct DeaggregatedFlight {
         f4::entities::EntityId aircraft{};
-        enum class Trigger : std::uint8_t { Force, Ops, Bubble } trigger;
+        /// FID-5 adds Combat: a commit/convergence trigger deaggregated
+        /// the flight into a transient fight window (the plan §4.5 —
+        /// both flights of a convergence deagg, seeded, deterministic).
+        enum class Trigger : std::uint8_t { Force, Ops, Bubble, Combat }
+            trigger;
         std::int64_t deagg_time = 0;     ///< campaign time of the deagg
-        std::int64_t pinned_until = 0;   ///< ops-window pin (0 = none)
+        std::int64_t pinned_until = 0;   ///< ops/combat pin (0 = none)
     };
+
+    /// FID-5: the session's own MissionIntent subscription (registered
+    /// BEFORE the spawner's — bus order is subscription order — so the
+    /// synthetic-deferral arm hears the intent first).
+    void handle_mission_intent_(const f4::campaign::MissionIntent& intent);
+
+    /// FID-5: one combat pass — rebuild the aggregate-contact feed (the
+    /// shared air picture's §4.6 form) and run the commit/convergence
+    /// triggers (§4.5). Per campaign second, after the tier pass.
+    void evaluate_combat_();
+
+    /// FID-5: rebuild aggregate_contacts_ + aggregate_vu_set_ from the
+    /// engine's state (the picture-exclusion and launch-veto sets ride
+    /// the same buffers).
+    void rebuild_aggregate_feed_();
 
     /// Register any entities the spawner materialized since the last
     /// call (the roster delta) — the one-world closure.
@@ -649,6 +706,39 @@ private:
     std::unordered_map<std::uint32_t, DeaggregatedFlight> deaggregated_;
     int tier_deaggs_ = 0;
     int tier_reaggs_ = 0;
+
+    // FID-5: the combat-deagg machinery + the synthetic-intent tiering.
+    // Everything below is inert unless the Tiered policy armed flights_
+    // AND the corresponding option is on.
+    bool synthetic_as_aggregates_ = true;
+    bool combat_deagg_ = true;
+    double combat_envelope_ft_ = 30000.0;
+    int combat_lookahead_sec_ = 120;
+    int combat_window_sec_ = 600;
+    /// The generated missions' intents, keyed by the reserved-namespace
+    /// vu register_synthetic returned (the deagg spawn path reads the
+    /// intent — parking/squadron/loadout resolution lives there).
+    std::unordered_map<std::uint32_t, f4::campaign::MissionIntent>
+        synthetic_intents_;
+    /// The aggregate-contact feed the sim's picture appends (non-owning
+    /// pointer handed over at create; rebuilt per campaign second).
+    std::vector<f4::ai::AggregateContact> aggregate_contacts_;
+    /// The flight VUs currently published as contacts — the combat
+    /// triggers' id space (a brain's engagement id is matched here) and
+    /// the sim's launch-veto set (the SAME set object, so the veto is
+    /// always exactly the published contacts).
+    std::unordered_set<std::uint64_t> aggregate_vu_set_;
+    /// The campaign-flight entities excluded from the picture's world
+    /// walk (their truth flows through the feed; a suspended flight's
+    /// frozen transform must not linger as a phantom contact).
+    std::unordered_set<std::uint64_t> flight_entity_ids_;
+    /// Per-airbase parking counters for the synthetic ground spawns (the
+    /// spawner's own bookkeeping shape; its counters stay untouched —
+    /// deferral means it never spawns these flights).
+    std::unordered_map<std::uint64_t, int> synthetic_parking_index_;
+    std::size_t intent_subscription_ = 0;  ///< 0 = not subscribed
+    int combat_deaggs_ = 0;                ///< combat-trigger deaggs so far
+    int synthetic_registered_ = 0;         ///< generated aggregates so far
 
     double flight_sec_accum_ = 0.0;
     int flight_synced_updates_ = 0;

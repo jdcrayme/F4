@@ -297,6 +297,43 @@ void FlightAggregateEngine::mark_destroyed(std::uint32_t vu) {
     refresh_stats();
 }
 
+std::size_t FlightAggregateEngine::register_synthetic(
+    const SyntheticFlightSeed& seed) {
+    if (seed.vu == 0) return static_cast<std::size_t>(-1);
+    if (index_of(seed.vu) != static_cast<std::size_t>(-1)) {
+        return static_cast<std::size_t>(-1);   // duplicate — loud refusal
+    }
+    FlightAggregateState f;
+    f.vu = seed.vu;
+    f.team = seed.team;
+    f.mission = seed.mission;
+    f.aircraft_count = seed.aircraft_count > 0 ? seed.aircraft_count : 1;
+    f.time_on_target = seed.time_on_target;
+    // Synthetic missions carry no mission-over time (the ATM's recovery
+    // books on the ladder's own clock; the recovery-ops window is the
+    // save flights' landing-phase behavior — a documented v1 gap).
+    f.mission_over_time = 0;
+    routes_.push_back(seed.route);
+    const auto& route = routes_.back();
+    // The flight holds at its route's first waypoint — the takeoff
+    // waypoint IS the base the planner launched from (the intent path's
+    // own parking fallback). Has no route = a parked aggregate.
+    f.fx = route.empty() ? 0.0 : static_cast<double>(route.front().x);
+    f.fy = route.empty() ? 0.0 : static_cast<double>(route.front().y);
+    f.altitude_ft =
+        route.empty() ? 0.0f : static_cast<float>(route.front().z);
+    f.fuel_burnt = 0;
+    f.last_move = static_cast<std::int32_t>(
+        std::min<std::int64_t>(epoch_ + clock_, 2147483647));
+    f.has_route = !route.empty();
+    // SPEED mode always: the intent's route carries no leg times (the
+    // ATM's own takeoff estimate is the TOT anchor, not a wire schedule).
+    time_mode_.push_back(false);
+    flights_.push_back(f);
+    refresh_stats();
+    return flights_.size() - 1;
+}
+
 void FlightAggregateEngine::reset_cursor_(
         FlightAggregateState& f,
         const std::vector<f4::entities::WaypointState>& route,
@@ -374,13 +411,35 @@ std::int32_t FlightAggregateEngine::seconds_to_mission_over(
                            : static_cast<std::int32_t>(d);
 }
 
+std::int32_t FlightAggregateEngine::seconds_to_time_on_target(
+    std::size_t index) const {
+    if (index >= flights_.size()) return -1;
+    const std::int64_t tot = flights_[index].time_on_target;
+    if (tot <= 0) return -1;      // no TOT in the save / on the intent
+    const std::int64_t d = tot - (epoch_ + clock_);
+    return d > 2147483647 ? 2147483647
+         : d < -2147483648 ? -2147483648
+                           : static_cast<std::int32_t>(d);
+}
+
 double FlightAggregateEngine::current_heading_rad(std::size_t index) const {
     if (index >= flights_.size() || routes_[index].empty()) return 0.0;
     const auto& route = routes_[index];
     const auto& f = flights_[index];
     std::size_t target = f.wp_index < route.size() ? f.wp_index : 0;
-    const double dx = static_cast<double>(route[target].x) - f.fx;
-    const double dy = static_cast<double>(route[target].y) - f.fy;
+    double dx = static_cast<double>(route[target].x) - f.fx;
+    double dy = static_cast<double>(route[target].y) - f.fy;
+    // FID-5: a flight sitting ON its cursor waypoint (the pre-departure
+    // hold, or a fold-back landing exactly on a waypoint) has a
+    // degenerate zero leg — the bearing it will actually FLY is the
+    // NEXT leg's. Without this the pose/velocity reads north (the
+    // 0-radian default) while the flight is pointed down its route,
+    // and the convergence trigger's predicted tracks never close.
+    while (dx == 0.0 && dy == 0.0 && target + 1 < route.size()) {
+        ++target;
+        dx = static_cast<double>(route[target].x) - f.fx;
+        dy = static_cast<double>(route[target].y) - f.fy;
+    }
     if (dx == 0.0 && dy == 0.0) return 0.0;
     // Compass bearing (0 = north = +grid-y), radians — the same
     // convention enu_quat_from_compass consumes at the spawn.

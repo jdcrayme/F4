@@ -38,6 +38,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <unordered_set>
 
 #include <f4/ai/sensor_fusion.hpp>
 #include <f4/data/brain_data.hpp>
@@ -120,6 +121,20 @@ public:
 
     Verdict classify(const f4::ai::TargetInfo& t) override;
 
+    /// FID-5 (Docs/FIDELITY_TIERS_PLAN.md §4.6): the tiered session's
+    /// published AGGREGATE contact ids (flight VUs). An aggregate is not
+    /// an entity — the ownship's radar track list can never hold one —
+    /// so without this set the radar-backed policy could never see the
+    /// aggregate war and the commit trigger (§4.5) could never fire.
+    /// The coarse rule: a published aggregate inside the ownship radar's
+    /// reference range classifies radar-visible (the campaign net's own
+    /// hand-off — coarse granularity, no scan volume, no RCS grid).
+    /// Non-owning; null (default) = the pre-FID-5 policy.
+    void set_aggregate_ids(
+        const std::unordered_set<std::uint64_t>* ids) noexcept {
+        aggregate_ids_ = ids;
+    }
+
     /// PERF-1 batch hook: resolve the ownship's radar + RWR components
     /// ONCE per rebuild (the per-contact classify loop used to resolve
     /// them per contact — two component-map probes x ~150 contacts x
@@ -142,6 +157,9 @@ public:
 private:
     entities::EntityWorld* world_;
     std::uint64_t ownship_id_;
+
+    // FID-5: the aggregate contact ids (see set_aggregate_ids).
+    const std::unordered_set<std::uint64_t>* aggregate_ids_ = nullptr;
 
     // Batch-cached ownship components (PERF-1; see prepare_batch). Null
     // until the first prepare_batch() of a rebuild — classify falls back
@@ -197,7 +215,9 @@ std::size_t execute_brain_combat_intents(
     messaging::MessageBus& bus,
     const weapons::WeaponClassTable& table,
     double sim_time_s,
-    const std::vector<entities::EntityId>* active_aircraft = nullptr);
+    const std::vector<entities::EntityId>* active_aircraft = nullptr,
+    const std::unordered_set<std::uint64_t>* deferred_launch_ids = nullptr,
+    int* deferred_release_count = nullptr);
 
 /// Turn a spawned brain into a fighting brain: enables the combat ladder
 /// and configures the fire-control envelopes from the weapon class

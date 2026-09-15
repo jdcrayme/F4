@@ -180,6 +180,10 @@ struct WarHourSample {
 
     // --- sim side ------------------------------------------------------
     int synthetic_spawned = 0;      ///< cumulative generated flights
+    /// FID-5: generated missions registered as AGGREGATES (the tiered
+    /// war's materialization evidence — the spawner's counter stays 0
+    /// under deferral; the tier machinery owns the materialization).
+    int synthetic_aggregates = 0;
     int live_aircraft = 0;          ///< roster size now
     int airborne = 0;
     int retired = 0;                ///< wrecks reaped (cumulative)
@@ -298,6 +302,9 @@ struct WarReport {
     int reinforced = 0;
     int reinforce_fires = 0;
     int synthetic_spawned = 0;
+    /// FID-5: generated missions registered as aggregates (the tiered
+    /// war's materialization evidence — see finalize_'s verdict rule).
+    int synthetic_aggregates = 0;
     int retired = 0;
     int live_aircraft = 0;
     int airborne = 0;

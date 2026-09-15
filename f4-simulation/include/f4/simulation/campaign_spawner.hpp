@@ -70,6 +70,14 @@ public:
         /// aircraft (route unbuildable / unresolvable) — the QC gate's
         /// route-loss counter.
         int synthetic_failed = 0;
+        /// FID-5: synthetic intents DEFERRED to the aggregate tier (the
+        /// tiered session's synthetic_as_aggregates arm). The intent is
+        /// registered as a campaign aggregate instead of spawning
+        /// Tier-B aircraft here; the tier machinery materializes the
+        /// flight through its own triggers (ops windows, bubbles,
+        /// combat). The roster identity keeps balancing: those aircraft
+        /// land on the roster as tier_deaggs, not synthetic_spawned.
+        int synthetic_deferred = 0;
     };
 
     /// Construct over the SAME EntityWorld the campaign flight units live
@@ -118,6 +126,20 @@ public:
         airbase_airfields_ = m;
     }
 
+    /// FID-5 (Docs/FIDELITY_TIERS_PLAN.md §4.5): defer SYNTHETIC
+    /// intents to the aggregate tier. When armed (the tiered session's
+    /// synthetic_as_aggregates arm), a synthetic+route intent is counted
+    /// (Stats::synthetic_deferred) and NOT spawned — the session
+    /// registered the flight in the aggregate engine and its tier
+    /// machinery owns the materialization. Saved-flight intents and the
+    /// bus path keep their pre-FID-5 behavior exactly.
+    void set_synthetic_deferred(bool on) noexcept {
+        synthetic_deferred_ = on;
+    }
+    [[nodiscard]] bool synthetic_deferred() const noexcept {
+        return synthetic_deferred_;
+    }
+
     /// Subscribe to MissionIntent on `bus` (returns the subscription id).
     /// The bus must outlive the spawner unless detach() is called first —
     /// the handler is a raw this-capture.
@@ -161,6 +183,9 @@ private:
     std::unordered_map<std::uint64_t, int> per_airbase_index_;
     /// flight VU_ID.nums already materialized (duplicate guard).
     std::unordered_set<std::uint32_t> spawned_flight_ids_;
+
+    /// FID-5: the synthetic-deferral arm (see set_synthetic_deferred).
+    bool synthetic_deferred_ = false;
 
     std::vector<f4::entities::EntityId> spawned_;
     Stats stats_;

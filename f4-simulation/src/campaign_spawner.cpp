@@ -65,6 +65,16 @@ void CampaignSimSpawner::handle(const f4::campaign::MissionIntent& intent) {
     // ids that never resolve — they're counted, not errors.
     const auto it = unit_id_map_.find(intent.flight_id);
     if (it == unit_id_map_.end() || !it->second.valid()) {
+        // FID-5: the synthetic-deferral arm — the tiered session's
+        // synthetic_as_aggregates option registered this intent's flight
+        // in the aggregate engine (the session's own subscription heard
+        // the intent FIRST — bus order is subscription order); the tier
+        // machinery materializes it through its own triggers.
+        if (intent.synthetic && !intent.route.empty() &&
+            synthetic_deferred_) {
+            ++stats_.synthetic_deferred;
+            return;
+        }
         // C3: a SYNTHETIC intent (route built by the campaign's route
         // planner) spawns through the intent path — generation to spawn.
         // Route-less synthetic intents stay skips (nothing to fly).

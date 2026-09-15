@@ -10805,3 +10805,93 @@ Stage Summary (FID-VIEW-1 — the tiered campaign is VISIBLE):
   flights-table deagg unchanged.
 - Queue unchanged: FID-5 (combat deagg) remains the next lever; the
   certificate's numbers stand.
+
+## FID-5 — event-driven combat deagg (the phase's last machinery milestone)
+
+Task: "proceed with the plan" (host) — the plan's §8 order named FID-5
+next after FID-VIEW-1: the aggregate contacts in the shared air picture
+(§4.6), the commit/convergence triggers (§4.5A), the transient combat
+windows with the phase-pinned reagg, the f4-recorder A/B divergence
+harness the FID-2 acceptance deferred, and the §7 v1 gap — synthetic
+ATM intents riding the tier machinery instead of spawning straight to
+Tier-B (the FID-6 certificate's own "biggest remaining lever").
+
+Work Log:
+- Environment rebuild (sandbox reset): cloned origin/main
+  (cab2dd7), installed cmake/ninja via pip, configured with the
+  four X11-dependent targets OFF (viewer/model-viewer/renderer/
+  scenario-player) — FID-5 is headless work.
+- Diagnosis that shaped the design: the campaign-flight ENTITIES are
+  in the world but carry TEAM as an INT tag — the picture/fusion read
+  team STRINGS, so aggregates were non-hostile invisible-to-combat
+  contacts; the radar-backed detection policy (C6) classifies by live
+  radar track / RWR emitter, neither of which can exist for a
+  non-entity; and the combat driver launches at raw target ids, so an
+  id-carrying aggregate contact would eat phantom missiles.
+- Landed (all six §4.5/§4.6 surfaces):
+  f4-ai AggregateContact (plain structs, flight_vu identity — NOT an
+  entity id); Simulation::set_air_picture_aggregates /
+  _excluded / _deferred_launch_ids (+ deferred_releases counter);
+  push_air_picture_ appends the feed (team strings interned) and skips
+  the excluded flight entities; RadarBackedDetectionPolicy::
+  set_aggregate_ids + the coarse aggregate rule (theater-net hand-off,
+  range-gated by the ownship card); execute_brain_combat_intents'
+  launch veto (A/A release + gun, counted); the session's
+  handle_mission_intent_ (subscribed BEFORE the spawner — bus order is
+  subscription order) + FlightAggregateEngine::register_synthetic
+  (reserved-VU namespace 0x53590000, TOT-anchored takeoff gate) +
+  seconds_to_time_on_target; the spawner's set_synthetic_deferred arm
+  (+ synthetic_deferred stat); spawn_aircraft_for_intent's AirSpawnPose
+  airborne override (the flight path's own FID-4 rule); the session's
+  evaluate_combat_ (feed rebuild + trigger A + trigger B, per campaign
+  second after the tier pass) + the Combat trigger pin
+  (combat_window_sec) + the synthetic deagg branch (per-base parking
+  counters); the ops trigger's TOT arm; the engine's zero-leg bearing
+  fix (a flight sitting ON its cursor waypoint reported north — the
+  convergence trigger's predicted tracks never closed);
+  Stats::combat_deaggs / synthetic_aggregates / agg_contacts /
+  deferred_releases; the harness's synthetic_aggregates evidence +
+  the materialized verdict's tiered rule (the spawner's counter stays
+  0 under deferral); the full-fidelity deferral bug caught by the
+  suite (the flag was armed unconditionally — gated to Tiered only).
+- Tests: test_fidelity_combat (7: aggregate registration, the
+  deferral-off control, the takeoff-window ground spawn, the
+  convergence pair, the combat-window pin/fold, the commit chain with
+  the veto's phantom releases eaten, the combat_deagg=false escape
+  hatch) + test_aggregate_fm_divergence (the A/B harness: the FM led
+  the measured leg 2.03×; position ratio pinned [0.5×,10×], fuel gap
+  [0×,25×]; the aggregate walks the engine constants exactly per
+  update). Two test-side lessons pinned in comments: the session's
+  per-second block misses a 1.0-wall-second advance at the FP boundary
+  (the FID-3 tests' advance(2.0) lesson), and mission byte 13 is
+  STRIKE (Defensive — never commits); byte 7 is the Sweep fighter.
+- Certificate (real TestCamp, re-converted from the repo archive via
+  cam2json — 1,715 units, epoch 38574360; NOTE the committed
+  Data/World/korea.world.json is a different, smaller theater whose
+  ATM legitimately builds no routes — the exit-7 it fires is fixture,
+  not regression, proven by the bit-identical full-fidelity --war):
+  20× GREEN exit 0 — tiered sustained 58.1× (min 55.5×, dilated 0)
+  vs the FullFidelity baseline 25.3× (pre-FID-5 tiered: 31.7× —
+  FID-5 nearly DOUBLED the war's acceleration, the certificate's
+  lever delivered); 60× fires honestly (58.3× sustained, dilated 2);
+  the 2-h armed war 59.5× sustained with the tier machinery cycling
+  the generated missions (16 deaggs / 4 reaggs, deagg_peak 12, 32
+  recoveries, identity green). The deep-horizon armed war (hours 3–4,
+  32 live in sustained A/A) dilates to single digits — the concurrent-
+  fight budget is the optimization tranche's item, documented in §7.
+- Docs as-built: the plan's status banner (the phase COMPLETE), the
+  FID-5 section (the six surfaces + deviations + the second
+  certificate run), §7 (the v1 gap closed; the commit-window exposure
+  documented; the divergence entry updated), §8 (FID-5 landed last of
+  the machinery); Docs/README index; CHANGELOG; this entry.
+
+Stage Summary (FID-5 — the war deaggregates itself where the fight is):
+- The tiered war now sees its own aggregates (the picture), commits
+  against them (the triggers), vetoes the phantom shots (the window),
+  and materializes the generated missions through the same machinery
+  as the save's flights (the deferral) — at 58.1× sustained on a 2-core
+  sandbox against a 25.3× full-fidelity baseline.
+- Queue: the phase is COMPLETE (FID-1..6 + FID-VIEW-1). Follow-ons per
+  the plan §7/§8: the optimization pass (the theater walk + the
+  concurrent-fight budget), the mid tier (v2), Option B abstract
+  resolution, the strategy tranche (unblocked since FID-3).

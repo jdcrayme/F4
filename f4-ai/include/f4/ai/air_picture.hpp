@@ -50,6 +50,29 @@ struct AirPictureContact {
     bool is_missile{false};  // ROLE tag == "missile"
 };
 
+/// One AGGREGATE (campaign-tier) contact — FIDELITY_TIERS_PLAN §4.6.
+/// The Tiered session's flights are not entities in the sim world (they
+/// advance on the campaign engine at the 60-s cadence); the session
+/// publishes them here so the shared picture still carries the whole
+/// war's air order of battle — "grid position + velocity + altitude
+/// from the aggregate state", the plan's own words. Plain structs, the
+/// same boundary discipline as AirPictureContact: no EntityWorld, no
+/// components.
+///
+/// Identity: the campaign flight's VU_ID.num, NOT an entity id — an
+/// aggregate resolves to no entity, so the combat driver can never
+/// launch a phantom missile at it (the session vetoes releases against
+/// the aggregate set until the commit trigger deaggregates the flight,
+/// §4.5). The id is unique across the picture because the session
+/// registers each flight once.
+struct AggregateContact {
+    std::uint64_t flight_vu{0};
+    f4::geo::WorldPosition position{};   ///< ENU feet (x=east, y=north, z=MSL)
+    f4::geo::WorldPosition velocity{};   ///< ENU ft/s (cruise along the leg)
+    std::string team;                    ///< the sim's blue/red/green vocabulary
+    bool is_missile{false};              ///< aggregates never carry one; symmetry
+};
+
 /// The per-tick shared snapshot. Contacts are in entity-index order —
 /// the order the component-type-index bucket walk yields — which is the
 /// order the per-brain rebuild iterates candidates in. Order matters:

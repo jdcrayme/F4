@@ -482,6 +482,10 @@ void CampaignWarHarness::run_pass_(int run, const ProgressFn& on_sample) {
         report_.reinforced = session_->ledger().aircraft_reinforced();
         report_.reinforce_fires = session_->ledger().reinforcement_fires();
         report_.synthetic_spawned = st.synthetic_spawned;
+        // FID-5: the tiered war's materialization evidence — the
+        // generated missions the session registered as aggregates (the
+        // spawner's own counter stays 0 under the deferral arm).
+        report_.synthetic_aggregates = st.synthetic_aggregates;
         report_.retired = st.retired;
         report_.live_aircraft = st.live_aircraft;
         report_.airborne = st.airborne;
@@ -946,7 +950,14 @@ void CampaignWarHarness::finalize_() {
     report_.atm_armed = opts_.session.atm_pipeline;
     report_.verdict.drew_aircraft = report_.drawn > 0;
     report_.verdict.routes_built = report_.routes_built > 0;
-    report_.verdict.materialized = report_.synthetic_spawned > 0;
+    // FID-5: a TIERED war materializes its generated missions through
+    // the tier machinery (ops windows / bubbles / combat), not the
+    // spawner — the aggregate registrations are the evidence. The
+    // full-fidelity war keeps the spawner's own counter (the pre-FID-5
+    // arithmetic, unchanged).
+    report_.verdict.materialized =
+        report_.synthetic_spawned > 0 ||
+        (report_.fidelity_tiered && report_.synthetic_aggregates > 0);
     // Packages gate only where the ATM pipeline was armed (the legacy
     // ladder builds intents, not packages — its coverage is the
     // routes/materialized gates).

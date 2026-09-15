@@ -522,8 +522,10 @@ bool Simulation::arm_campaign_aircraft(entities::EntityId id) {
     // scenario path's policies (retire_aircraft reaps by ownship id,
     // so campaign wrecks clean up exactly like scenario ones) and
     // installed on the brain's SensorFusion — radar truth, not
-    // GCI-omniscience.
+    // GCI-omniscience. FID-5: the policy also carries the aggregate
+    // contact set (the tiered session's §4.6 coarse detection).
     if (policy) {
+        policy->set_aggregate_ids(deferred_launch_ids_);
         auto* brain = h.get<f4::ai::BrainComponent>();
         combat_policies_.push_back(std::move(policy));
         if (brain != nullptr) {
@@ -794,6 +796,10 @@ void Simulation::spawn_from_scenario_list() {
             combat_policies_.push_back(
                 std::make_unique<RadarBackedDetectionPolicy>(
                     world_, h.id().value));
+            // FID-5: the aggregate contact set rides every policy (null
+            // on scenario-list sessions — nothing publishes aggregates).
+            combat_policies_.back()->set_aggregate_ids(
+                deferred_launch_ids_);
             brain.sensors().set_detection_policy(
                 combat_policies_.back().get());
         }
@@ -1136,6 +1142,16 @@ void Simulation::push_air_picture_(double dt) {
             const auto* tf = h.get<entities::TransformComponent>();
             if (tf == nullptr) continue;
 
+            // FID-5 (§4.6): the tiered session's campaign-flight entities
+            // are excluded — their truth lives in the aggregate engine and
+            // flows through the aggregate-contact feed below (a suspended
+            // flight's frozen transform would otherwise linger as a stale
+            // phantom).
+            if (picture_excluded_ != nullptr &&
+                picture_excluded_->count(eid.value) != 0) {
+                continue;
+            }
+
             // The same C6 rule the fusion's world walk applies (and the
             // radar's candidate walk): stationary low-altitude entities
             // are ground clutter, not air picture.
@@ -1172,6 +1188,38 @@ void Simulation::push_air_picture_(double dt) {
                 }
             }
             air_picture_.contacts.push_back(c);
+        }
+
+        // FID-5 (§4.6): the aggregate feed — the session's Tier-A flights
+        // appended AFTER the world walk, in flight order (deterministic:
+        // the session rebuilds the buffer in the engine's wire order).
+        // Team strings go through the same interning table so the
+        // fusion's own-relative hostility sees aggregates exactly as it
+        // sees materialized aircraft.
+        if (aggregate_contacts_ != nullptr) {
+            for (const auto& a : *aggregate_contacts_) {
+                f4::ai::AirPictureContact c;
+                c.entity_id = a.flight_vu;   // NOT an entity — the veto
+                                             // (set_deferred_launch_ids)
+                                             // keeps releases off it.
+                c.position = a.position;
+                c.velocity = a.velocity;
+                std::int16_t idx = -1;
+                for (std::size_t i = 0; i < air_picture_.teams.size(); ++i) {
+                    if (air_picture_.teams[i] == a.team) {
+                        idx = static_cast<std::int16_t>(i);
+                        break;
+                    }
+                }
+                if (idx < 0) {
+                    air_picture_.teams.push_back(a.team);
+                    idx = static_cast<std::int16_t>(
+                        air_picture_.teams.size() - 1);
+                }
+                c.team = idx;
+                c.is_missile = a.is_missile;
+                air_picture_.contacts.push_back(c);
+            }
         }
         push = &air_picture_;
     }
@@ -1854,7 +1902,9 @@ void Simulation::tick(double dt) {
         // not the world (FreeFalcon fidelity-tiering: no sim work outside
         // the simulated set).
         execute_brain_combat_intents(world_, bus_, weapon_table_, t_now,
-                                     &aircraft_entities_);
+                                     &aircraft_entities_,
+                                     deferred_launch_ids_,
+                                     &deferred_releases_);
         // M5a: the WVR band transitions as combat events (recording only).
         record_wvr_band_flips(t_now);
     }

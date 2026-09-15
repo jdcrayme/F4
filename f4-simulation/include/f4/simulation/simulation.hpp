@@ -52,6 +52,7 @@
 #include <memory>
 #include <optional>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "f4/simulation/scenario.hpp"
@@ -329,6 +330,51 @@ public:
     /// bubble — diagnostics / tests.
     [[nodiscard]] bool view_bubble_active() const noexcept {
         return view_bubble_active_;
+    }
+
+    // --- FID-5 (Docs/FIDELITY_TIERS_PLAN.md §4.5–4.6): the aggregate
+    // --- air picture + the commit-window launch veto ---------------------
+
+    /// Publish the Tiered session's AGGREGATE flights as coarse contacts
+    /// in the shared air picture (§4.6). Non-owning: `contacts` must
+    /// outlive the sim (the session rebuilds its buffer per campaign
+    /// second; the sim appends the vector's contents at every picture
+    /// build — team strings interned into the picture's own table).
+    /// Null (the default) publishes nothing — full-fidelity and the
+    /// pre-FID-5 tiered sessions are byte-identical.
+    void set_air_picture_aggregates(
+        const std::vector<f4::ai::AggregateContact>* contacts) noexcept {
+        aggregate_contacts_ = contacts;
+    }
+
+    /// Exclude entity ids from the picture's world walk (§4.6). The
+    /// session passes its campaign flight entities: their truth lives in
+    /// the aggregate engine, so publishing them through the walk would
+    /// DOUBLE-count them (the feed above is the single source) — and a
+    /// SUSPENDED flight's frozen transform would linger as a stale
+    /// phantom contact. Non-owning, null (default) = walk everything.
+    void set_air_picture_excluded(
+        const std::unordered_set<std::uint64_t>* ids) noexcept {
+        picture_excluded_ = ids;
+    }
+
+    /// Weapon/gun-release veto against these target ids (§4.5's commit
+    /// window): an aggregate contact id resolves to no entity, so a
+    /// release against it would fly a phantom missile. The session
+    /// passes the published aggregate set; the combat driver skips the
+    /// release (and counts it) until the commit trigger deaggregates the
+    /// flight — the NEXT campaign second — and the brain re-evaluates
+    /// against the real aircraft. Non-owning, null (default) = no veto.
+    void set_deferred_launch_ids(
+        const std::unordered_set<std::uint64_t>* ids) noexcept {
+        deferred_launch_ids_ = ids;
+    }
+
+    /// Releases the veto skipped so far (the session surfaces it in the
+    /// stats; the certificate's diary reads it as the commit window's
+    /// own load number).
+    [[nodiscard]] int deferred_releases() const noexcept {
+        return deferred_releases_;
     }
 
     [[nodiscard]] const Scenario& scenario() const noexcept { return scenario_; }
@@ -635,6 +681,15 @@ private:
     // brain. The members are reused tick over tick so the steady state
     // allocates nothing (contacts/teams clear + repopulate in place).
     f4::ai::AirPicture air_picture_{};
+
+    // FID-5: the aggregate-contact feed + the picture-exclusion and
+    // launch-veto sets — all NON-OWNING pointers the fidelity-tier
+    // session owns (null = the pre-FID-5 behavior, every default).
+    const std::vector<f4::ai::AggregateContact>* aggregate_contacts_ =
+        nullptr;
+    const std::unordered_set<std::uint64_t>* picture_excluded_ = nullptr;
+    const std::unordered_set<std::uint64_t>* deferred_launch_ids_ = nullptr;
+    int deferred_releases_ = 0;
 
     // Phase 2A: static airfield-feature entities (buildings, runway sections,
     // taxiways, towers, hangars). Each carries TransformComponent +

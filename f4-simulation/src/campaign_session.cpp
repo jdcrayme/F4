@@ -5,6 +5,7 @@
 
 #include <f4/simulation/campaign_session.hpp>
 
+#include <f4/ai/brain_component.hpp>   // FID-5: combat_engagement_id
 #include <f4/campaign/ground_writeback.hpp>
 #include <f4/campaign/mission_profile.hpp>
 #include <f4/campaign/world_writeback.hpp>
@@ -397,6 +398,29 @@ CampaignSession::create(const CampaignSessionOptions& opts,
         session->airbase_airfields_.empty()
             ? nullptr
             : &session->airbase_airfields_);
+    // FID-5 pacing + arms (copied from Options — they outlive the
+    // options object, the sim_dt_ pattern). The spawner's deferral flag
+    // is read at handle() time; inert unless the Tiered policy armed
+    // the engine below (the intent handler checks flights_ itself).
+    session->synthetic_as_aggregates_ = opts.synthetic_as_aggregates;
+    session->combat_deagg_ = opts.combat_deagg;
+    session->combat_envelope_ft_ = opts.combat_envelope_ft;
+    session->combat_lookahead_sec_ = opts.combat_lookahead_sec;
+    session->combat_window_sec_ = opts.combat_window_sec;
+    session->spawner_->set_synthetic_deferred(
+        opts.fidelity_policy == FidelityPolicy::Tiered &&
+        session->synthetic_as_aggregates_);
+    // FID-5: the session's OWN MissionIntent subscription, registered
+    // BEFORE the spawner's (bus order is subscription order) so a
+    // tiered session's synthetic-deferral handler hears the intent
+    // first and registers the aggregate; the spawner (flagged deferred)
+    // then skips the spawn. Full-fidelity sessions: the handler no-ops
+    // (flights_ == nullptr) and the spawner spawns exactly as before.
+    session->intent_subscription_ = session->sim_->bus()
+        .subscribe<f4::campaign::MissionIntent>(
+            [raw = session.get()](const f4::campaign::MissionIntent& in) {
+                raw->handle_mission_intent_(in);
+            });
     session->spawner_->attach(session->sim_->bus());
 
     // 11. The ladder (C2's one-pool tasking + C4's ATM pipeline) over
@@ -480,6 +504,30 @@ CampaignSession::create(const CampaignSessionOptions& opts,
         // floor (the camera bubble never shrinks below it).
         session->default_air_radius_ft_ =
             session->sim_->air_bubble_radius_ft();
+
+        // FID-5: the aggregate air picture + the commit-window veto.
+        // Armed ONLY with combat_deagg — the feed makes the aggregates
+        // HOSTILE contacts (the picture's team interning), and without
+        // the triggers a hostile aggregate could never be fought (the
+        // veto would stand forever). Disarmed sessions keep the
+        // FID-1..4 shape exactly. The exclusion set covers every save
+        // flight's world entity (synthetic flights have none) — the
+        // feed is the aggregate truth's single publisher.
+        if (session->combat_deagg_) {
+            for (const auto& f : session->flights_->flights()) {
+                const auto it = session->unit_id_map_.find(f.vu);
+                if (it != session->unit_id_map_.end() &&
+                    it->second.valid()) {
+                    session->flight_entity_ids_.insert(it->second.value);
+                }
+            }
+            session->sim_->set_air_picture_excluded(
+                &session->flight_entity_ids_);
+            session->sim_->set_air_picture_aggregates(
+                &session->aggregate_contacts_);
+            session->sim_->set_deferred_launch_ids(
+                &session->aggregate_vu_set_);
+        }
     }
 
     // 12. The route planner (C3) — threat map from the same sources,
@@ -553,6 +601,10 @@ CampaignSession::~CampaignSession() {
     if (sim_) {
         if (sink_) sink_->detach(sim_->bus());
         if (spawner_) spawner_->detach(sim_->bus());
+        if (intent_subscription_ != 0) {
+            sim_->bus().unsubscribe<f4::campaign::MissionIntent>(
+                intent_subscription_);
+        }
         if (kill_subscription_ != 0) {
             sim_->bus().unsubscribe<f4::weapons::EntityKilledMessage>(
                 kill_subscription_);
@@ -606,6 +658,10 @@ bool CampaignSession::advance(double real_seconds, int max_steps_override) {
             if (flights_ != nullptr) {
                 flight_sec_accum_ += static_cast<double>(whole);
                 advance_flights_();
+                // FID-5: the combat pass — the aggregate feed + the
+                // commit/convergence triggers (§4.5), after the tier
+                // pass so the feed reflects the final tier state.
+                evaluate_combat_();
             }
             // The damage sync rides the same cadence: final-state diff
             // of every damaged objective (cheap — the diff walks only
@@ -675,6 +731,13 @@ namespace {
 // One grid unit = 1024 ft (the campaign bridge's own constant; not
 // exported — re-declared here the same way campaign_bridge.cpp does).
 constexpr double kFtPerGrid = 1024.0;
+
+// FID-5: the synthetic flights' reserved VU namespace. The save's
+// VU_ID.nums share the 32-bit space, so the base is chosen in a range
+// packed ids never take ("SY"); a collision is still handled loudly
+// (register_synthetic refuses duplicates — the intent is dropped, the
+// ladder's ledger books the draw, nothing crashes).
+constexpr std::uint32_t kSyntheticVuBase = 0x53590000u;
 
 } // namespace
 
@@ -850,14 +913,23 @@ void CampaignSession::evaluate_tiers_() {
         }
 
         // --- the deagg triggers (FID-3): ops > bubble ---
+        // FID-5 adds the TOT arm: a flight approaching its TIME ON
+        // TARGET deaggregates to fly the attack (the delivery is a
+        // per-aircraft phase — §4.3's mission-phase pinning; the same
+        // window the takeoff/recovery arms ride). The generated war's
+        // synthetic missions depend on it: a flight that folded back
+        // mid-ingress re-deaggregates here and still delivers.
         const std::int32_t to_depart = flights_->seconds_to_depart(i);
         const std::int32_t to_over =
             flights_->seconds_to_mission_over(i);
+        const std::int32_t to_tot =
+            flights_->seconds_to_time_on_target(i);
         const auto window = static_cast<std::int32_t>(
             std::min<std::int64_t>(std::max(0, ops_window_sec_),
                                    2147483647));
         const bool takeoff_window = to_depart > 0 && to_depart <= window;
         const bool recovery_window = to_over >= 0 && to_over <= window;
+        const bool tot_window = to_tot > 0 && to_tot <= window;
         bool in_bubble = false;
         if (air_bubble_active_) {
             const double dx = f.fx * kFtPerGrid - air_bubble_center_.x;
@@ -865,21 +937,236 @@ void CampaignSession::evaluate_tiers_() {
             in_bubble = dx * dx + dy * dy <=
                         air_bubble_radius_ft_ * air_bubble_radius_ft_;
         }
-        if (!takeoff_window && !recovery_window && !in_bubble) continue;
+        if (!takeoff_window && !recovery_window && !tot_window &&
+            !in_bubble) continue;
 
         deaggregate_flight_(
-            i, (takeoff_window || recovery_window)
+            i, (takeoff_window || recovery_window || tot_window)
                    ? DeaggregatedFlight::Trigger::Ops
                    : DeaggregatedFlight::Trigger::Bubble);
     }
+}
+
+// ---------------------------------------------------------------------------
+// FID-5 — event-driven combat deagg (Docs/FIDELITY_TIERS_PLAN.md §4.5–4.6)
+// ---------------------------------------------------------------------------
+
+void CampaignSession::handle_mission_intent_(
+    const f4::campaign::MissionIntent& intent) {
+    // Tiered + the synthetic arm only; full-fidelity sessions never
+    // touch this path (the spawner's behavior is byte-identical).
+    if (flights_ == nullptr || !synthetic_as_aggregates_) return;
+    if (!intent.synthetic || intent.route.empty()) return;
+
+    // Duplicate guard: a republished intent re-registers nothing (the
+    // engine's own refusal is the second line of defense).
+    const std::uint32_t vu =
+        kSyntheticVuBase | (intent.flight_id & 0xFFFFu);
+    if (flights_->find(vu) != nullptr) return;
+
+    f4::campaign::SyntheticFlightSeed seed;
+    seed.vu = vu;
+    seed.team = intent.team;
+    seed.mission = intent.mission_byte;
+    seed.aircraft_count = intent.aircraft_count;
+    // TOT: the intent's time is campaign-RELATIVE (the ladder's clock);
+    // the engine's times are ABSOLUTE (the save epoch + advanced clock)
+    // — the same anchor the waypoints' arrive/depart run on.
+    const std::int64_t tot_abs =
+        epoch_ + static_cast<std::int64_t>(intent.time_on_target);
+    seed.time_on_target = static_cast<std::int32_t>(
+        std::clamp<std::int64_t>(tot_abs, 0, 2147483647));
+    seed.route.reserve(intent.route.size());
+    for (const auto& wp : intent.route) {
+        f4::entities::WaypointState w;
+        w.x = wp.x;
+        w.y = wp.y;
+        w.z = static_cast<std::int16_t>(
+            std::clamp<std::int32_t>(wp.altitude_ft, -32768, 32767));
+        w.action = wp.action;
+        w.flags = static_cast<std::int16_t>(wp.flags);
+        w.target_num = wp.target_num;
+        seed.route.push_back(w);
+    }
+    // The takeoff gate: the flight holds at its base until the first
+    // waypoint departs. Two ops windows before TOT — the ATC's whole
+    // window to fly it off before the delivery — clamped forward so a
+    // late TOT never walks the aggregate immediately (the TOT window
+    // arms the ground spawn for late missions anyway).
+    if (!seed.route.empty()) {
+        const std::int64_t earliest = campaign_time() + 1;
+        const std::int64_t depart =
+            std::max(tot_abs - 2 * static_cast<std::int64_t>(
+                                       std::max(0, ops_window_sec_)),
+                     earliest);
+        seed.route.front().depart = static_cast<std::int32_t>(
+            std::clamp<std::int64_t>(depart, 1, 2147483647));
+    }
+    if (flights_->register_synthetic(seed) ==
+        static_cast<std::size_t>(-1)) {
+        return;   // unusable seed — the loud refusal, nothing registered
+    }
+    synthetic_intents_.emplace(vu, intent);
+    ++synthetic_registered_;
+    // The one-frame numbers go live immediately (the handler fires
+    // outside the advance() cadence — a host reading stats between
+    // frames sees the registration the same frame it happened).
+    refresh_stats_();
+}
+
+void CampaignSession::rebuild_aggregate_feed_() {
+    aggregate_contacts_.clear();
+    aggregate_vu_set_.clear();
+    if (flights_ == nullptr || !combat_deagg_) return;
+    const auto& fleet = flights_->flights();
+    aggregate_contacts_.reserve(fleet.size());
+    const double cruise_fps =
+        flights_->cruise_grid_per_min() * kFtPerGrid / 60.0;
+    for (std::size_t i = 0; i < fleet.size(); ++i) {
+        const auto& f = fleet[i];
+        // The picture rule (§4.6, the walk's own clutter semantics made
+        // coarse): airborne, progressing aggregates only — a ground-held
+        // or arrived flight is the ramp, not the air picture; a
+        // suspended flight's truth is its live aircraft (real contacts).
+        if (f.suspended || f.destroyed || f.arrived) continue;
+        if (f.altitude_ft < 8000.0f) continue;
+        f4::ai::AggregateContact c;
+        c.flight_vu = f.vu;
+        c.position = f4::geo::WorldPosition{
+            f.fx * kFtPerGrid, f.fy * kFtPerGrid,
+            static_cast<double>(f.altitude_ft)};
+        // Cruise velocity along the leg: the aggregate's own heading ×
+        // the engine's cruise constant. Compass → ENU (0 = north/+y).
+        const double hdg = flights_->current_heading_rad(i);
+        c.velocity = f4::geo::WorldPosition{
+            std::sin(hdg) * cruise_fps, std::cos(hdg) * cruise_fps, 0.0};
+        // The sim's own team vocabulary (blue/red/green) — the same
+        // mapping the spawned aircraft's TEAM tags carry, so the
+        // fusion's own-relative hostility sees aggregates exactly as it
+        // sees materialized aircraft.
+        c.team = owner_team_string(sim_->world(), f.team);
+        aggregate_contacts_.push_back(c);
+        aggregate_vu_set_.insert(f.vu);
+    }
+}
+
+void CampaignSession::evaluate_combat_() {
+    if (flights_ == nullptr || !combat_deagg_) return;
+    const auto& fleet = flights_->flights();
+
+    // --- Trigger A: a Tier-B fighter COMMITS against a Tier-A contact.
+    // The brain's engagement id is the aggregate's flight VU (the
+    // contact id the picture published). The roster is COPIED first —
+    // the deagg below spawns entities into it.
+    if (!aggregate_vu_set_.empty()) {
+        const auto roster = sim_->aircraft_entities();   // copy
+        for (const auto eid : roster) {
+            f4::entities::EntityHandle h(eid, &sim_->world());
+            auto* brain = h.get<f4::ai::BrainComponent>();
+            if (brain == nullptr) continue;
+            const std::uint64_t engaged = brain->combat_engagement_id();
+            if (engaged == 0) continue;
+            if (aggregate_vu_set_.count(engaged) == 0) continue;
+            const std::size_t idx = flights_->index_of(
+                static_cast<std::uint32_t>(engaged));
+            if (idx == static_cast<std::size_t>(-1)) continue;
+            deaggregate_flight_(idx, DeaggregatedFlight::Trigger::Combat);
+        }
+    }
+
+    // --- Trigger B: two Tier-A tracks CONVERGE inside the engagement
+    // envelope (§4.5). Predicted positions (current + cruise velocity ×
+    // the lookahead) within the envelope and closing — both flights
+    // deaggregate and the fight runs in-sim. Wire order, deterministic.
+    if (combat_envelope_ft_ <= 0.0 || combat_lookahead_sec_ <= 0) return;
+    const double T = static_cast<double>(combat_lookahead_sec_);
+    const double cruise_fps =
+        flights_->cruise_grid_per_min() * kFtPerGrid / 60.0;
+    // The eligible set: airborne, progressing, opposing-team aggregates
+    // (the same rule the picture feed applies, plus the belligerent
+    // gate — the belligerents are the war's combatant slots).
+    const auto belligerents = ladder_->belligerent_teams();
+    const auto at_war = [&belligerents](std::uint8_t team) {
+        for (const int b : belligerents) {
+            if (b == static_cast<int>(team)) return true;
+        }
+        return false;
+    };
+    std::vector<std::size_t> eligible;
+    eligible.reserve(fleet.size());
+    for (std::size_t i = 0; i < fleet.size(); ++i) {
+        const auto& f = fleet[i];
+        if (f.suspended || f.destroyed || f.arrived) continue;
+        if (f.altitude_ft < 8000.0f) continue;
+        if (!at_war(f.team)) continue;
+        eligible.push_back(i);
+    }
+    for (std::size_t a = 0; a < eligible.size(); ++a) {
+        const std::size_t i = eligible[a];
+        const auto& fi = fleet[i];
+        if (fi.suspended) continue;   // a trigger-A deagg this pass
+        const double hdg_i = flights_->current_heading_rad(i);
+        const double vx_i = std::sin(hdg_i) * cruise_fps;
+        const double vy_i = std::cos(hdg_i) * cruise_fps;
+        const double px_i = fi.fx * kFtPerGrid + vx_i * T;
+        const double py_i = fi.fy * kFtPerGrid + vy_i * T;
+        for (std::size_t b = a + 1; b < eligible.size(); ++b) {
+            const std::size_t j = eligible[b];
+            const auto& fj = fleet[j];
+            if (fj.suspended) continue;
+            if (fj.team == fi.team) continue;   // allies do not merge
+            // Current separation + closing rate (relative velocity along
+            // the line of sight — negative = closing).
+            const double rx = (fi.fx - fj.fx) * kFtPerGrid;
+            const double ry = (fi.fy - fj.fy) * kFtPerGrid;
+            const double rz = static_cast<double>(fi.altitude_ft) -
+                              static_cast<double>(fj.altitude_ft);
+            const double hdg_j = flights_->current_heading_rad(j);
+            const double vx_j = std::sin(hdg_j) * cruise_fps;
+            const double vy_j = std::cos(hdg_j) * cruise_fps;
+            const double rvx = vx_i - vx_j;
+            const double rvy = vy_i - vy_j;
+            const double r_now =
+                std::sqrt(rx * rx + ry * ry + rz * rz);
+            if (r_now > combat_envelope_ft_ + cruise_fps * T) continue;
+            if (rx * rvx + ry * rvy >= 0.0) continue;   // opening
+            const double px_j = fj.fx * kFtPerGrid + vx_j * T;
+            const double py_j = fj.fy * kFtPerGrid + vy_j * T;
+            const double miss_x = px_i - px_j;
+            const double miss_y = py_i - py_j;
+            const double miss = std::sqrt(miss_x * miss_x +
+                                          miss_y * miss_y + rz * rz);
+            if (miss > combat_envelope_ft_) continue;
+            deaggregate_flight_(i, DeaggregatedFlight::Trigger::Combat);
+            deaggregate_flight_(j, DeaggregatedFlight::Trigger::Combat);
+        }
+    }
+
+    // The feed LAST: the picture + the veto set always describe the
+    // state this pass left behind (deaggregated flights drop out —
+    // their aircraft are real contacts now).
+    rebuild_aggregate_feed_();
 }
 
 void CampaignSession::deaggregate_flight_(
     std::size_t index, DeaggregatedFlight::Trigger trigger) {
     const auto& f = flights_->flights()[index];
     if (deaggregated_.count(f.vu) > 0) return;
-    const auto it = unit_id_map_.find(f.vu);
-    if (it == unit_id_map_.end()) return;   // no world flight — skip
+
+    // FID-5: two flight identities — a SAVE flight resolves through the
+    // world's unit map (the FID-4 bridge path); a SYNTHETIC flight
+    // (the generated war's aggregate, §4.5) carries its MissionIntent
+    // and spawns through the intent path.
+    const auto entity_it = unit_id_map_.find(f.vu);
+    const auto intent_it = synthetic_intents_.find(f.vu);
+    const bool synthetic = entity_it == unit_id_map_.end();
+    if (!synthetic) {
+        // A save flight materializes through its world entity; an
+        // invalid id (corrupt map) is the FID-4 loud-skip as before.
+        if (!entity_it->second.valid()) return;
+    } else if (intent_it == synthetic_intents_.end()) {
+        return;   // no world flight, no intent — skip
+    }
 
     // The handoff's spawn half (FID-4 §4.4): a GROUND spawn while the
     // flight has not departed (the ops takeoff — the ATC flies it off
@@ -891,9 +1178,53 @@ void CampaignSession::deaggregate_flight_(
     const std::int32_t to_depart = flights_->seconds_to_depart(index);
     const bool ground_spawn = to_depart > 0 || st.arrived;
     std::optional<f4::entities::EntityId> spawned;
-    if (ground_spawn) {
+    if (synthetic) {
+        const auto& intent = intent_it->second;
+        if (ground_spawn) {
+            // Parking slot keyed on the squadron's airbase (the
+            // spawner's own keying; its counters stay untouched under
+            // deferral — the session owns the synthetic slots).
+            std::uint64_t base_key = 0;
+            const auto sq_it = unit_id_map_.find(intent.squadron_id);
+            if (sq_it != unit_id_map_.end() && sq_it->second.valid()) {
+                auto* sq = f4::entities::EntityHandle(sq_it->second,
+                                                      &sim_->world())
+                               .get<f4::entities::SquadronComponent>();
+                if (sq && sq->airbase.value != 0) {
+                    base_key = sq->airbase.value;
+                }
+            }
+            const int slot = synthetic_parking_index_[base_key]++;
+            spawned = f4::simulation::spawn_aircraft_for_intent(
+                sim_->world(), intent, unit_id_map_, ct_, cfg_, airfield_,
+                spawn_tpl_, slot,
+                airbase_airfields_.empty() ? nullptr
+                                           : &airbase_airfields_,
+                &objective_id_map_, &weapon_table_, &unit_id_map_);
+        } else {
+            f4::simulation::AirSpawnPose pose;
+            pose.position = f4::geo::WorldPosition{
+                f.fx * kFtPerGrid, f.fy * kFtPerGrid,
+                static_cast<double>(f.altitude_ft)};
+            pose.heading_rad = flights_->current_heading_rad(index);
+            // Cruise: the engine's speed-mode constant (grid/min → ft/s).
+            pose.vt_fps =
+                flights_->cruise_grid_per_min() * kFtPerGrid / 60.0;
+            const double capacity = cfg_.geometry.internalFuel.value();
+            pose.fuel_lbs = std::max(
+                0.0, capacity - static_cast<double>(f.fuel_burnt));
+            spawned = f4::simulation::spawn_aircraft_for_intent(
+                sim_->world(), intent, unit_id_map_, ct_, cfg_, airfield_,
+                spawn_tpl_, 0,
+                airbase_airfields_.empty() ? nullptr
+                                           : &airbase_airfields_,
+                &objective_id_map_, &weapon_table_, &unit_id_map_,
+                &pose);
+        }
+    } else if (ground_spawn) {
         spawned = f4::simulation::spawn_aircraft_for_flight(
-            sim_->world(), it->second, ct_, cfg_, airfield_, spawn_tpl_,
+            sim_->world(), entity_it->second, ct_, cfg_, airfield_,
+            spawn_tpl_,
             /*parking_slot=*/0,
             airbase_airfields_.empty() ? nullptr : &airbase_airfields_,
             &objective_id_map_, &weapon_table_, &unit_id_map_);
@@ -912,7 +1243,8 @@ void CampaignSession::deaggregate_flight_(
         pose.fuel_lbs =
             std::max(0.0, capacity - static_cast<double>(f.fuel_burnt));
         spawned = f4::simulation::spawn_aircraft_for_flight(
-            sim_->world(), it->second, ct_, cfg_, airfield_, spawn_tpl_,
+            sim_->world(), entity_it->second, ct_, cfg_, airfield_,
+            spawn_tpl_,
             0, airbase_airfields_.empty() ? nullptr : &airbase_airfields_,
             &objective_id_map_, &weapon_table_, &unit_id_map_, &pose);
     }
@@ -928,12 +1260,24 @@ void CampaignSession::deaggregate_flight_(
     rec.aircraft = *spawned;
     rec.trigger = trigger;
     rec.deagg_time = campaign_time();
-    rec.pinned_until = trigger == DeaggregatedFlight::Trigger::Ops
-        ? rec.deagg_time +
-              2 * static_cast<std::int64_t>(std::max(0, ops_window_sec_))
-        : 0;
+    // The pins: an ops deagg holds through its window (2×); a COMBAT
+    // deagg holds the transient fight window (§4.5's phase pin) before
+    // the standard reagg rules may fold it; a bubble deagg obeys the
+    // hysteresis + cooldown immediately.
+    rec.pinned_until =
+        trigger == DeaggregatedFlight::Trigger::Ops
+            ? rec.deagg_time +
+                  2 * static_cast<std::int64_t>(std::max(0, ops_window_sec_))
+        : trigger == DeaggregatedFlight::Trigger::Combat
+            ? rec.deagg_time +
+                  static_cast<std::int64_t>(
+                      std::max(0, combat_window_sec_))
+            : 0;
     deaggregated_.emplace(f.vu, rec);
     ++tier_deaggs_;
+    if (trigger == DeaggregatedFlight::Trigger::Combat) {
+        ++combat_deaggs_;
+    }
 }
 
 bool CampaignSession::reaggregate_flight_(std::uint32_t vu) {
@@ -1086,6 +1430,12 @@ void CampaignSession::refresh_stats_() {
         stats_.agg_destroyed = fs.destroyed;
         stats_.tier_deaggs = tier_deaggs_;
         stats_.tier_reaggs = tier_reaggs_;
+        // FID-5: the combat numbers (the triggers' bookkeeping + the
+        // picture feed the sim is publishing this frame).
+        stats_.combat_deaggs = combat_deaggs_;
+        stats_.synthetic_aggregates = synthetic_registered_;
+        stats_.agg_contacts = static_cast<int>(aggregate_contacts_.size());
+        stats_.deferred_releases = sim_->deferred_releases();
     }
     stats_.live_aircraft = static_cast<int>(sim_->aircraft_entities().size());
     stats_.retired = sim_->retired_aircraft();

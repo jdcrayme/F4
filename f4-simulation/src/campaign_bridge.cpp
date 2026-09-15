@@ -1192,7 +1192,8 @@ spawn_aircraft_for_intent(
             objective_id_map,
         const weapons::WeaponClassTable* weapon_table,
         const std::unordered_map<std::uint32_t, f4::entities::EntityId>*
-            target_unit_id_map) {
+            target_unit_id_map,
+        const AirSpawnPose* air_pose) {
     using namespace f4::entities;
     using namespace f4::flight;
     using namespace f4::ai;
@@ -1242,12 +1243,16 @@ spawn_aircraft_for_intent(
     const ScenarioAirfield& field = base_af ? *base_af : airfield;
 
     // Per-flight lateral offset — the same parking spread the flight
-    // path uses (alternate sides, 80 ft steps).
-    constexpr double OFFSET_STEP_FT = 80.0;
-    const double offset = (parking_slot % 2 == 0 ? 1.0 : -1.0)
-                        * (static_cast<double>(parking_slot / 2) + 1.0)
-                        * OFFSET_STEP_FT;
-    parking_spot.x += offset;
+    // path uses (alternate sides, 80 ft steps). FID-4/FID-5: the
+    // airborne override skips parking entirely — the pose IS the spawn
+    // spot (the flight path's own rule).
+    if (air_pose == nullptr) {
+        constexpr double OFFSET_STEP_FT = 80.0;
+        const double offset = (parking_slot % 2 == 0 ? 1.0 : -1.0)
+                            * (static_cast<double>(parking_slot / 2) + 1.0)
+                            * OFFSET_STEP_FT;
+        parking_spot.x += offset;
+    }
 
     // The model: the SQUADRON's entity_type (the aircraft type the
     // campaign drew from), the same resolution the flight path uses.
@@ -1266,23 +1271,39 @@ spawn_aircraft_for_intent(
 
     // Compose the aircraft — the same component set the flight path
     // composes, fed from the intent instead of a flight entity.
+    // FID-5: the airborne override inits the FM IN AIR at the pose —
+    // the flight path's own FID-4 rule (vt clamped to a flyable
+    // minimum, flat ground at 0 for the fallback terrain source).
+    const f4::geo::WorldPosition spawn_pos =
+        air_pose != nullptr ? air_pose->position : parking_spot;
+    const bool spawn_in_air = air_pose != nullptr;
     auto h = world.create();
 
     auto& tf = h.add<TransformComponent>();
-    tf.position = parking_spot;
-    const double hdg = field.runway_heading_rad;
+    tf.position = spawn_pos;
+    const double hdg = spawn_in_air ? air_pose->heading_rad
+                                    : field.runway_heading_rad;
     const auto q0 = f4::simulation::enu_quat_from_compass(hdg);
     tf.qw = q0.w;  tf.qx = q0.x;  tf.qy = q0.y;  tf.qz = q0.z;
 
     auto& fm = h.add<FlightModelComponent>();
     fm.init(cfg,
-            /*alt_ft=*/parking_spot.z,
-            /*vt_ftps=*/0.0,
+            /*alt_ft=*/spawn_pos.z,
+            /*vt_ftps=*/spawn_in_air
+                ? std::max(air_pose->vt_fps, 100.0)
+                : 0.0,
             /*hdg_rad=*/hdg,
-            /*inAir=*/false,
-            /*north_ft=*/parking_spot.y,
-            /*east_ft=*/parking_spot.x);
-    fm.set_ground(parking_spot.z, f4::math::Vec3d{0.0, 0.0, -1.0});
+            /*inAir=*/spawn_in_air,
+            /*north_ft=*/spawn_pos.y,
+            /*east_ft=*/spawn_pos.x);
+    fm.set_ground(spawn_in_air ? 0.0 : spawn_pos.z,
+                  f4::math::Vec3d{0.0, 0.0, -1.0});
+    // FID-5: the handoff's fuel — the aggregate's remaining internal
+    // fuel (capacity − burnt, the session computes it). ≤ 0 keeps the
+    // config default (full tanks), the flight path's own rule.
+    if (spawn_in_air && air_pose->fuel_lbs > 0.0) {
+        fm.model().set_internal_fuel_lbs(air_pose->fuel_lbs);
+    }
 
     auto& vis = h.add<VisualModelComponent>();
     vis.vis_type = vis_type_index;  // V-3DLIVE (see flight path note)
@@ -1304,6 +1325,11 @@ spawn_aircraft_for_intent(
     if (auto plan = build_mission_plan_from_route(
             intent.route, intent.target_objective_id, objective_id_map,
             effective_unit_map)) {
+        // FID-5: an airborne spawn flies its route directly — the brain
+        // skips the taxi/takeoff phases (the flight path's FID-4 rule).
+        if (spawn_in_air) {
+            plan->start_phase = MissionPlan::StartPhase::Enroute;
+        }
         brain.set_mission_plan(std::move(*plan));
     }
 

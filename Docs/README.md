@@ -29,7 +29,7 @@ its surviving content is folded into the doc that supersedes it.
 | Landing / taxi / formation / AAR | `LANDING_PRECISION_FORMATION_AAR_PLAN.md` | Active. Tranche B (taxi-back) not started. |
 | AAR redesign | `AAR_REDESIGN_PLAN.md` | Active. Supersedes Tranche D ScriptedTanker. |
 | Campaign loop | `CAMPAIGN_LOOP_PLAN.md` | C1–C6, G1, G2 landed; doc retains the roadmap. |
-| Fidelity tiers (air agg/deagg) | `FIDELITY_TIERS_PLAN.md` | FID-1..4 + FID-6 + FID-VIEW-1 LANDED (tiered sessions, the viewer's flights table, the `--accel` certificate with exits 15/16, and the campaign view that shows the aggregate air picture + the tasking countdown); FID-5 (combat deagg) is the queue — and the certificate points at it (the war's live aircraft are all synthetic Tier-B). |
+| Fidelity tiers (air agg/deagg) | `FIDELITY_TIERS_PLAN.md` | ALL LANDED (FID-1..6 + FID-VIEW-1): tiered sessions, the viewer's flights table, the `--accel` certificate with exits 15/16, the campaign view that shows the aggregate air picture + the tasking countdown, and FID-5's event-driven combat deagg (the aggregate contacts in the shared air picture, the commit/convergence triggers with the launch veto, the transient combat windows, and synthetic intents riding the tier machinery — the 20× tiered certificate sustained 58.1× vs the 25.3× full-fidelity baseline). |
 | AI architecture | `AI_IMPLEMENTATION_PLAN.md` + `DIGI_AI_PHASE2_PLAN.md` | Implementation reference. Consolidate these two into one AI doc. |
 | Data / no-binary runtime | `NO_BINARY_RUNTIME_PLAN.md` | Tranches 0a–0e landed. **This (`Docs/`) is the canonical copy — the root copy was a stale duplicate and is deleted.** |
 | Asset pipeline | `ASSET_PIPELINE_SPEC.md` | Draft v1 — design agreed, pending implementation. |

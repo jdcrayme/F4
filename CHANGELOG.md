@@ -7,6 +7,36 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 
 ## Fidelity tiers (most recent)
 
+- **FID-5** — event-driven combat deagg (Docs/FIDELITY_TIERS_PLAN.md §4.5–4.6):
+  the last open milestone of the phase, and the certificate's own lever.
+  Landed: the AGGREGATE AIR PICTURE (f4-ai `AggregateContact` +
+  `Simulation::set_air_picture_aggregates` — the session publishes the
+  engine's airborne aggregates as coarse contacts with team strings and
+  cruise velocity; the campaign-flight entities are excluded from the
+  world walk so the feed is the single publisher), the COMMIT TRIGGER
+  (a Tier-B fighter's engagement id matched against the published set
+  deaggregates the contact's flight; the radar-backed policy's coarse
+  aggregate rule makes them detectable; the launch veto eats releases
+  aimed at the phantom id — no missile ever flies at a non-entity), the
+  CONVERGENCE TRIGGER (two opposing aggregates whose predicted tracks
+  land inside the 30-kft envelope at the 120-s lookahead deaggregate
+  both — wire order, deterministic), the TRANSIENT COMBAT WINDOWS (a
+  Combat deagg pins for `combat_window_sec`, then the standard reagg
+  rules fold it), and SYNTHETIC INTENTS AS AGGREGATES (the session's
+  MissionIntent subscription + the engine's `register_synthetic` +
+  the spawner's deferral arm — the generated war rides the tier
+  machinery instead of spawning straight to Tier-B; the intent spawn
+  path gained the flight path's AirSpawnPose airborne override; the ops
+  trigger gained the TOT arm so deliveries still happen). Plus the A/B
+  divergence harness the FID-2 acceptance deferred
+  (`test_aggregate_fm_divergence` — the FM led the measured leg by
+  2.03×, the ratio and the fuel gap pinned). The certificate's second
+  run on real TestCamp: 20× tiered GREEN at 58.1× sustained vs the
+  25.3× FullFidelity baseline (~2.3× the pre-FID-5 tiered war); the
+  2-h armed war ran 59.5× with the tier machinery cycling the generated
+  missions (16 deaggs / 4 reaggs, identity green). 7 new session tests
+  + the A/B harness; the full suite green and unchanged.
+
 - **FID-VIEW-1** — the campaign view shows the war (Docs/FIDELITY_TIERS_PLAN.md):
   the viewer's Tiered default ran the war but drew none of it — the canvas
   live layer rendered only materialized aircraft, so every aggregate flight
