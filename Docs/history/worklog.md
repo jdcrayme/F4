@@ -10895,3 +10895,93 @@ Stage Summary (FID-5 — the war deaggregates itself where the fight is):
   the plan §7/§8: the optimization pass (the theater walk + the
   concurrent-fight budget), the mid tier (v2), Option B abstract
   resolution, the strategy tranche (unblocked since FID-3).
+
+---
+Task ID: FID-OPT-1
+Agent: Z.ai Code (main)
+Task: The optimization tranche's first item — the theater walk the
+FID-6 certificate named ("the session's fixed per-tick cost over the
+~8,400-entity theater walk caps this host at ~48x with ZERO aircraft
+live") — plus whatever the deep-horizon re-measure surfaced.
+
+Work Log:
+- Upstream aligned first: the user pushed FID-5 as 4476f2f (content
+  byte-identical to the local e6b5d05 — `git diff` empty); local main
+  reset onto origin/main.
+- MEASURED BEFORE DESIGNING: `F4_TICK_PROF` on the 1-h armed war —
+  update_all 99.3% of tick time, flat ~311-327 us/tick across the
+  whole war (live aircraft barely move it). A temporary cache-size
+  diagnostic (added, measured, reverted) printed the cargo:
+  entities=8446 behavioral=8126 — ~4,000 parked airframes x
+  (BrainComponent + FlightModelComponent), each `set_dormant(true)`
+  with a documented no-op update, still paying two virtual priority()
+  dispatches per component per tick. The arithmetic closed exactly
+  (~38 ns/dispatch).
+- FID-OPT-1: the dormant flag moved to `BehavioralComponentBase`
+  (per-component; `EntityHandle::add<T>` hands the component its
+  owning world so `set_dormant` invalidates through the base;
+  idempotent — no invalidate on a same-value write) + the ACTIVE
+  behavioral cache (`rebuild_behavioral_cache` fills both lists in one
+  sweep; `update_all` walks the non-dormant subset; pass semantics,
+  visit order and the two-pass split unchanged for active components).
+  BrainComponent/FlightModelComponent delegate to the base (their
+  in-update early-returns stay as defense in depth). Byte-safety: the
+  dormant updates were pure early-returns, so skipping them entirely is
+  observationally identical.
+- FOUND AND FIXED EN ROUTE (the latent UAF the speed-up exposed): the
+  first 4-h armed run at 60x segfaulted at ~3 sim-hours. ASAN (a
+  build-asan tree) pinned it: heap-use-after-free in a TakeoffModule
+  TaxiClearance handler — the per-entity modules (Takeoff x2, Landing
+  x2, Refuel x8) subscribed this-capturing lambdas and NEVER
+  unsubscribed; a destroyed aircraft's handlers stayed in the bus and
+  the next live brain's TaxiRequest publish (the StubATC answers
+  synchronously inside the publish chain) invoked freed memory. Latent
+  since the modules landed — pre-OPT the deep-horizon war dilated so
+  hard almost nothing materialized (no deaths, no dead handlers, no
+  crash; ASAN on the pre-OPT tree came back clean for exactly that
+  reason). Fix: `ScopedSubscriptions` (f4-messaging RAII bundle — bind
+  at initialize, the dtor unsubscribes; non-copyable non-movable)
+  adopted by all three modules; Simulation's member order swapped
+  (bus_ before world_) so teardown destroys the world (components
+  unsubscribe) while the bus is still alive. The ATC's subscriptions
+  are session-lifetime and safe (documented in the plan).
+- The sub-profiled deep-horizon arc (temporary instrumentation, added
+  measured reverted): zero aircraft = update_all ~0.1 us/tick flat;
+  the 1 sim-hour armed war costs 247 ms of tick time END TO END; the
+  cost re-appears only when aircraft materialize (hour ~1.4) and
+  scales as brains x picture-contacts — the per-brain SensorFusion
+  rebuild over the shared air picture every tick (~52 us/tick at 3
+  aircraft, ~700-800 at 21). The rebuild runs ~1-4 times per RUN
+  (not per tick); safety/ATC/weather/flush exonerated. THAT is
+  FID-OPT-2, measured and designed in the plan §3, deliberately not
+  this patch (it changes detection timing; needs its own goldens).
+- Certificate (real TestCamp): 20x tiered GREEN at 1472x sustained
+  (was 58.1x) with zero dilation; 60x — the preset the plan has named
+  since FID-6 — now passes GREEN at 1331x (was exit-15 honest-fire);
+  the FullFidelity baseline itself lifted 25.3x -> 55.3x (the same
+  parked mass was taxing it). The 2-h armed war's ledger MD5 is
+  IDENTICAL to the pre-OPT run (641174c7dccd5f0a9fb89d6ca9102b61) —
+  byte-identical war, faster host. The deep-horizon 4-h armed run at
+  60x runs past the old crash point through massive churn (117 deaggs
+  / 81 reaggs / 26 A/A kills / 32 live at the ceiling) — crash-free;
+  its dilation arc (9-22x) is the FID-OPT-2 baseline.
+- Tests: 6 new f4-entities tests (UpdateAllDormant.*: the dormant
+  skip, unpark-without-invalidate, active order preservation,
+  idempotent set_dormant, the campaign spawn/unpark pattern, the
+  passive+dormant edge) + the full suite 2559 green, the two
+  pre-existing tree failures unchanged. Fixed the FID-5 divergence
+  harness's unused-variable warning en route.
+- Docs as-built: Docs/FID_OPT_PLAN.md (new — the measurements, the
+  design, the UAF finding, the FID-OPT-2 lever set), Docs/README index
+  row, FIDELITY_TIERS_PLAN §7's two optimization gaps updated (the
+  walk CLOSED; the fusion budget re-measured), CHANGELOG, this entry.
+
+Stage Summary (FID-OPT-1 — the walk dies, the 60x preset passes):
+- The per-tick dispatch is now proportional to the SIMULATED set, not
+  the theater: ~0.1 us/tick with zero aircraft (was ~317), the whole
+  1 sim-hour armed war costs 0.12 s of tick time (was 80.4 s), the
+  20x certificate runs 1472x and the named 60x preset passes on the
+  sandbox that used to fire exit-15 honestly at it. The war's bytes
+  did not change. The subscription UAF that the speed-up exposed is
+  fixed at the root. FID-OPT-2 (the fusion-rebuild throttle) is the
+  next lever, designed and measured, not started.

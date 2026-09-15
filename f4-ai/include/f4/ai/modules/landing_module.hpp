@@ -527,6 +527,10 @@ private:
     std::optional<LandingEvent> deferred_event_{};
     entities::EntityWorld* world_{nullptr};
     messaging::MessageBus* bus_{nullptr};
+    /// FID-OPT-1: the ATC-clearance subscriptions, unbundled when this
+    /// module dies (the RAII bundle — see ScopedSubscriptions in
+    /// f4-messaging bus.hpp and TakeoffModule's note).
+    messaging::ScopedSubscriptions subscriptions_{};
 
     // Mission geometry.
     geo::WorldPosition entry_fix_;

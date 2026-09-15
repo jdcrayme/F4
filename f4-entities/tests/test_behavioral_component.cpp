@@ -447,3 +447,173 @@ TEST(UpdateAll, DoesNotFlushBusPending) {
     // fire during teardown.
     bus.flush_pending();
 }
+
+// ============================================================================
+// FID-OPT-1 — the dormant flag and the active-cache walk
+// (Docs/FID_OPT_PLAN.md §2: a dormant behavioral component is not
+// visited by update_all() at all; the active list preserves the full
+// cache's relative order; set_dormant() routes its cache invalidation
+// through the owning world captured by add<T>().)
+// ============================================================================
+TEST(UpdateAllDormant, DormantComponentsAreNotUpdated) {
+    // The parked-inventory shape: two entities, one active (the live
+    // aircraft), one dormant (the parked airframe's brain + physics).
+    // The dormant pair's updates are never called; the active brain
+    // ticks every time.
+    EntityWorld w;
+    MessageBus bus;
+
+    auto live = w.create();
+    auto& live_brain = live.add<FakeBrain>();
+    live.add<FakePhysics>();
+
+    auto parked = w.create();
+    auto& parked_brain = parked.add<FakeBrain>();
+    auto& parked_phys  = parked.add<FakePhysics>();
+    parked_brain.set_dormant(true);
+    parked_phys.set_dormant(true);
+
+    for (int i = 0; i < 3; ++i) w.update_all(0.016, bus);
+
+    EXPECT_EQ(live_brain.update_count.load(), 3);
+    EXPECT_EQ(parked_brain.update_count.load(), 0);
+    EXPECT_EQ(parked_phys.update_count.load(), 0);
+    EXPECT_TRUE(parked_brain.is_dormant());
+    EXPECT_FALSE(live_brain.is_dormant());
+}
+
+TEST(UpdateAllDormant, UnparkResumesUpdatesWithoutManualInvalidate) {
+    // The transition contract: set_dormant() invalidates through the
+    // owning world (captured in add<T>()), so a component parked between
+    // ticks is skipped by the very next update_all(), and one unparked
+    // between ticks rejoins the walk with no manual invalidate.
+    EntityWorld w;
+    MessageBus bus;
+    auto h = w.create();
+    auto& brain = h.add<FakeBrain>();
+
+    w.update_all(0.016, bus);
+    EXPECT_EQ(brain.update_count.load(), 1);
+
+    brain.set_dormant(true);   // park between ticks
+    w.update_all(0.016, bus);
+    w.update_all(0.016, bus);
+    EXPECT_EQ(brain.update_count.load(), 1);   // parked: no ticks
+
+    brain.set_dormant(false);  // unpark between ticks
+    w.update_all(0.016, bus);
+    EXPECT_EQ(brain.update_count.load(), 2);   // back in the walk
+}
+
+TEST(UpdateAllDormant, ActiveVisitOrderPreservesStorageOrder) {
+    // The active list is the full cache filtered by the dormant flag —
+    // the survivors keep the entity-storage relative order, and the
+    // two-pass split is unchanged (all brains before all physics).
+    EntityWorld w;
+    MessageBus bus;
+    std::vector<int> log;
+
+    auto h1 = w.create();
+    auto& b1 = h1.add<FakeBrain>();
+    auto& p1 = h1.add<FakePhysics>();
+    b1.order_log = &log; b1.self_id = 10;
+    p1.order_log = &log; p1.self_id = 20;
+
+    auto h2 = w.create();   // fully parked middle entity
+    auto& b2 = h2.add<FakeBrain>();
+    auto& p2 = h2.add<FakePhysics>();
+    b2.order_log = &log; b2.self_id = 11;
+    p2.order_log = &log; p2.self_id = 21;
+    b2.set_dormant(true);
+    p2.set_dormant(true);
+
+    auto h3 = w.create();
+    auto& b3 = h3.add<FakeBrain>();
+    auto& p3 = h3.add<FakePhysics>();
+    b3.order_log = &log; b3.self_id = 12;
+    p3.order_log = &log; p3.self_id = 22;
+
+    w.update_all(0.016, bus);
+
+    // The dormant pair (11, 21) is absent; the survivors run in storage
+    // order with the pass split intact.
+    ASSERT_EQ(log.size(), 4u);
+    EXPECT_EQ(log[0], 10);
+    EXPECT_EQ(log[1], 12);
+    EXPECT_EQ(log[2], 20);
+    EXPECT_EQ(log[3], 22);
+}
+
+TEST(UpdateAllDormant, SetDormantIsIdempotent) {
+    // Setting the same value is a no-op (no invalidation) — functionally:
+    // the flag stays, the world stays consistent, updates stay skipped.
+    EntityWorld w;
+    MessageBus bus;
+    auto h = w.create();
+    auto& brain = h.add<FakeBrain>();
+
+    brain.set_dormant(true);
+    brain.set_dormant(true);   // same value again — no-op
+    brain.set_dormant(false);
+    brain.set_dormant(false);  // same value again — no-op
+
+    w.update_all(0.016, bus);
+    EXPECT_EQ(brain.update_count.load(), 1);
+    EXPECT_FALSE(brain.is_dormant());
+}
+
+TEST(UpdateAllDormant, DormantSpawnThenUnparkAcrossTicks) {
+    // The campaign pattern end to end: spawn a batch where most are
+    // parked (spawn_aircraft_from_squadrons), tick, then launch one
+    // (unpark). The launched airframe joins the walk the next tick;
+    // the rest never tick.
+    EntityWorld w;
+    MessageBus bus;
+    FakeBrain* launched = nullptr;
+    std::vector<FakeBrain*> parked_batch;
+
+    for (int i = 0; i < 4; ++i) {
+        auto h = w.create();
+        auto& b = h.add<FakeBrain>();
+        b.set_dormant(true);
+        parked_batch.push_back(&b);
+    }
+    {
+        auto h = w.create();
+        launched = &h.add<FakeBrain>();
+        // launched stays active — the flight spawner creates non-dormant
+        // aircraft.
+    }
+
+    w.update_all(0.016, bus);
+    EXPECT_EQ(launched->update_count.load(), 1);
+    for (auto* p : parked_batch) EXPECT_EQ(p->update_count.load(), 0);
+
+    parked_batch[2]->set_dormant(false);   // the "launch"
+    w.update_all(0.016, bus);
+    EXPECT_EQ(launched->update_count.load(), 2);
+    EXPECT_EQ(parked_batch[2]->update_count.load(), 1);
+    for (int i : {0, 1, 3}) {
+        EXPECT_EQ(parked_batch[i]->update_count.load(), 0);
+    }
+}
+
+TEST(UpdateAllDormant, DormantComponentIsSkippedEvenWithPriorityZero) {
+    // A dormant component with the DEFAULT priority (0) was never
+    // updated even pre-OPT (passive components are skipped); the flag
+    // must not change that, and a dormant PRIORITY component must not
+    // resurrect a passive one. Belt and braces around the rebuild
+    // filter's predicate.
+    struct PassiveDormant : BehavioralComponent<PassiveDormant> {
+        int update_count{0};
+        void update(double, MessageBus&) override { ++update_count; }
+    };
+    EntityWorld w;
+    MessageBus bus;
+    auto h = w.create();
+    auto& pd = h.add<PassiveDormant>();
+    pd.set_dormant(true);
+
+    w.update_all(0.016, bus);
+    EXPECT_EQ(pd.update_count, 0);
+}

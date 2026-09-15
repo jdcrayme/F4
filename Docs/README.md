@@ -30,6 +30,7 @@ its surviving content is folded into the doc that supersedes it.
 | AAR redesign | `AAR_REDESIGN_PLAN.md` | Active. Supersedes Tranche D ScriptedTanker. |
 | Campaign loop | `CAMPAIGN_LOOP_PLAN.md` | C1–C6, G1, G2 landed; doc retains the roadmap. |
 | Fidelity tiers (air agg/deagg) | `FIDELITY_TIERS_PLAN.md` | ALL LANDED (FID-1..6 + FID-VIEW-1): tiered sessions, the viewer's flights table, the `--accel` certificate with exits 15/16, the campaign view that shows the aggregate air picture + the tasking countdown, and FID-5's event-driven combat deagg (the aggregate contacts in the shared air picture, the commit/convergence triggers with the launch veto, the transient combat windows, and synthetic intents riding the tier machinery — the 20× tiered certificate sustained 58.1× vs the 25.3× full-fidelity baseline). |
+| Fidelity tiers optimization tranche | `FID_OPT_PLAN.md` | FID-OPT-1 LANDED: the active-cache walk (dormant components leave the per-tick dispatch — 317 µs → 0.1 µs, the 60× preset GREEN) + the ScopedSubscriptions UAF fix the speed-up exposed. FID-OPT-2 (the fusion-rebuild budget) measured and designed, not started. |
 | AI architecture | `AI_IMPLEMENTATION_PLAN.md` + `DIGI_AI_PHASE2_PLAN.md` | Implementation reference. Consolidate these two into one AI doc. |
 | Data / no-binary runtime | `NO_BINARY_RUNTIME_PLAN.md` | Tranches 0a–0e landed. **This (`Docs/`) is the canonical copy — the root copy was a stale duplicate and is deleted.** |
 | Asset pipeline | `ASSET_PIPELINE_SPEC.md` | Draft v1 — design agreed, pending implementation. |

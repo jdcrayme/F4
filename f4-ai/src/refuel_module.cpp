@@ -185,7 +185,13 @@ void RefuelModule::initialize(
     world_ = &world;
     bus_ = &bus;
 
-    bus.subscribe<atc::TankerAssigned>([this](const atc::TankerAssigned& msg) {
+    // FID-OPT-1: RAII subscription bundle (see TakeoffModule::initialize —
+    // the eight leaked refuel-protocol handlers outlived the module and
+    // read freed memory on every later publish).
+    subscriptions_.unsubscribe_all();
+    subscriptions_.bind(bus);
+
+    subscriptions_.subscribe<atc::TankerAssigned>([this](const atc::TankerAssigned& msg) {
         if (msg.receiver_id == ownship_id_) {
             tanker_id_      = msg.tanker_id;
             tanker_picture_.valid       = true;
@@ -196,38 +202,38 @@ void RefuelModule::initialize(
             deferred_event_ = RefuelEvent::TankerAssigned;
         }
     });
-    bus.subscribe<atc::ClearToContact>([this](const atc::ClearToContact& msg) {
+    subscriptions_.subscribe<atc::ClearToContact>([this](const atc::ClearToContact& msg) {
         if (msg.receiver_id == ownship_id_) {
             deferred_event_ = RefuelEvent::ClearToContact;
         }
     });
-    bus.subscribe<atc::ContactMade>([this](const atc::ContactMade& msg) {
+    subscriptions_.subscribe<atc::ContactMade>([this](const atc::ContactMade& msg) {
         if (msg.receiver_id == ownship_id_) {
             deferred_event_ = RefuelEvent::ContactMade;
         }
     });
-    bus.subscribe<atc::ContactLost>([this](const atc::ContactLost& msg) {
+    subscriptions_.subscribe<atc::ContactLost>([this](const atc::ContactLost& msg) {
         if (msg.receiver_id == ownship_id_) {
             deferred_event_ = RefuelEvent::ContactLost;
         }
     });
-    bus.subscribe<atc::DisconnectApproved>([this](const atc::DisconnectApproved& msg) {
+    subscriptions_.subscribe<atc::DisconnectApproved>([this](const atc::DisconnectApproved& msg) {
         if (msg.receiver_id == ownship_id_) {
             deferred_event_ = RefuelEvent::DisconnectApproved;
         }
     });
-    bus.subscribe<atc::FuelTransferred>([this](const atc::FuelTransferred& msg) {
+    subscriptions_.subscribe<atc::FuelTransferred>([this](const atc::FuelTransferred& msg) {
         if (msg.receiver_id == ownship_id_) {
             fuel_received_lbs_ = msg.fuel_lbs;
         }
     });
-    bus.subscribe<atc::RefuelComplete>([this](const atc::RefuelComplete& msg) {
+    subscriptions_.subscribe<atc::RefuelComplete>([this](const atc::RefuelComplete& msg) {
         if (msg.receiver_id == ownship_id_) {
             // Legacy: treat as a disconnect trigger.
             deferred_event_ = RefuelEvent::ReceiverRequestsDisconnect;
         }
     });
-    bus.subscribe<atc::DisconnectMessage>([this](const atc::DisconnectMessage& msg) {
+    subscriptions_.subscribe<atc::DisconnectMessage>([this](const atc::DisconnectMessage& msg) {
         if (msg.receiver_id == ownship_id_) {
             deferred_event_ = RefuelEvent::ReceiverRequestsDisconnect;
         }

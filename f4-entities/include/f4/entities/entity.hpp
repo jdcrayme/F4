@@ -261,6 +261,10 @@ namespace f4::entities {
         [[nodiscard]] uint64_t next_world_cookie() noexcept;
     }
 
+    class EntityWorld;  // forward declaration for the dormant-flag routing
+                        // (BehavioralComponentBase::set_dormant hands the
+                        // cache-invalidate through it; defined below)
+
     // ============================================================================
     // Components — typed data blobs attached to entities.
     // ============================================================================
@@ -346,6 +350,50 @@ namespace f4::entities {
         // this component on the entity. Override to capture a back-reference
         // for sibling-component lookup. Default is a no-op.
         virtual void on_attached(EntityHandle& self) { (void)self; }
+
+        // --- FID-OPT-1: the dormant flag (the active-cache walk) ---------
+        //
+        // A DORMANT behavioral component is not simulated: update_all()
+        // does not call its update() at all — the component is not even
+        // visited. The flag lives on the base (not on the derived
+        // classes) so the world's ACTIVE behavioral cache — the list
+        // update_all() actually walks — can be rebuilt from one sweep
+        // over the components.
+        //
+        // Contract, pinned by Docs/FID_OPT_PLAN.md §2:
+        //   * A dormant component's update() MUST be side-effect-free —
+        //     the walk skip is observationally identical to calling an
+        //     update that begins with `if (dormant_) return;`. That is
+        //     exactly the shape the parked-inventory fix already had
+        //     (BrainComponent/FlightModelComponent's dormant early-
+        //     returns, kept as defense in depth).
+        //   * set_dormant() invalidates the world's behavioral caches
+        //     through the owning-world pointer EntityHandle::add<T>()
+        //     captured — a transition between ticks is picked up by the
+        //     next update_all() with no manual invalidate. Setting the
+        //     SAME value is a no-op (no invalidation; idempotent).
+        //   * The flag is per-COMPONENT (a parked airframe's brain and
+        //     flight model are parked separately — the spawner sets both).
+        //
+        // Before this flag existed, "dormant" meant the update() was a
+        // cheap no-op — but the component still sat in the walk, and a
+        // populated campaign save (~4,000 parked airframes × 2
+        // components) paid ~16k virtual priority() dispatches per tick
+        // (~0.3 ms, 99% of the tick) for nothing.
+        void set_dormant(bool d) noexcept;
+        [[nodiscard]] bool is_dormant() const noexcept { return dormant_; }
+
+        // Called by EntityHandle::add<T>() — hands the component its
+        // owning world so set_dormant() can invalidate the caches. Not
+        // part of the public API; do not call.
+        void note_attached_world(EntityWorld* w) noexcept {
+            attached_world_ = w;
+        }
+
+    private:
+        friend class EntityWorld;   // rebuild_behavioral_cache reads dormant_
+        bool dormant_{false};
+        EntityWorld* attached_world_{nullptr};
     };
 
     template<typename Derived>
@@ -772,6 +820,7 @@ namespace f4::entities {
             // source rebuilds (into an empty world) instead of walking
             // dangling pointers. The destination rebuilds lazily.
             other.behavioral_cache_.clear();
+            other.active_behavioral_cache_.clear();
             other.behavioral_cache_dirty_ = true;
             behavioral_cache_dirty_ = true;
         }
@@ -789,8 +838,10 @@ namespace f4::entities {
                 // Both sides' caches are now stale (this: old components
                 // destroyed; other: nodes transferred here). See move ctor.
                 behavioral_cache_.clear();
+                active_behavioral_cache_.clear();
                 behavioral_cache_dirty_ = true;
                 other.behavioral_cache_.clear();
+                other.active_behavioral_cache_.clear();
                 other.behavioral_cache_dirty_ = true;
             }
             return *this;
@@ -843,12 +894,29 @@ namespace f4::entities {
         // Components with priority() == 0 (passive data: TransformComponent,
         // TeamComponent, ...) are skipped.
         //
+        // FID-OPT-1: components whose dormant flag is set (the parked
+        // squadron inventory — Docs/FID_OPT_PLAN.md §2) are not visited
+        // at all; the walk runs over the ACTIVE behavioral cache. See
+        // BehavioralComponentBase::set_dormant for the contract.
+        //
         // Threading: NOT thread-safe. Call from the sim thread only.
         // Bus flushing: this call does NOT call bus.flush_pending(). The
         // caller is responsible for draining deferred messages after the
         // tick completes (typical pattern: update_all(dt, bus);
         // bus.flush_pending();).
         void update_all(double dt, messaging::MessageBus& bus);
+
+        // FID-OPT-1 diagnostics: the cache sizes (the full behavioral
+        // walk vs the active one update_all() actually runs). Counts are
+        // valid after the next rebuild — reading them without a prior
+        // update_all() triggers nothing (they report the last rebuild's
+        // sizes; a dirty flag means the numbers are stale-but-safe).
+        [[nodiscard]] std::size_t behavioral_count() const noexcept {
+            return behavioral_cache_.size();
+        }
+        [[nodiscard]] std::size_t active_behavioral_count() const noexcept {
+            return active_behavioral_cache_.size();
+        }
 
         [[nodiscard]] std::size_t size() const noexcept { return entities_.size(); }
         [[nodiscard]] std::size_t capacity() const noexcept { return entities_.capacity(); }
@@ -938,11 +1006,35 @@ namespace f4::entities {
         // Simulation::tick). If that invariant is ever broken, both the
         // cached and the uncached version are UB; the cache adds no new
         // requirement.
+        //
+        // ── FID-OPT-1: the ACTIVE cache (Docs/FID_OPT_PLAN.md §2) ────────
+        //
+        // A populated campaign save parks ~4,000 airframes × 2 behavioral
+        // components (brain + flight model, `set_dormant(true)`): the
+        // full cache held 8,126 entries whose updates are documented
+        // no-ops, and update_all() still paid two virtual priority()
+        // dispatches per entry per tick (~0.3 ms — 99% of the tick,
+        // measured). update_all() therefore walks active_behavioral_
+        // instead: the non-dormant subset, in the same relative order.
+        //
+        // Both lists fill in ONE rebuild sweep (the same O(world) walk
+        // the dirty flag already paid); no new invalidation events exist
+        // — a dormant transition goes through set_dormant() → the base
+        // flag → invalidate_behavioral_cache(), the same dirty path every
+        // spawn/destroy already rides. Pass semantics for active
+        // components are unchanged: priorities re-read per tick,
+        // entity-storage visit order, the two-pass split.
         std::vector<BehavioralComponentBase*> behavioral_cache_;
+        std::vector<BehavioralComponentBase*> active_behavioral_cache_;
         bool behavioral_cache_dirty_ = true;
 
         void invalidate_behavioral_cache() noexcept { behavioral_cache_dirty_ = true; }
         void rebuild_behavioral_cache();
+
+        // FID-OPT-1: BehavioralComponentBase::set_dormant() routes a
+        // dormant transition through this world's invalidate (the base
+        // captured the owning world in EntityHandle::add<T>()).
+        friend class BehavioralComponentBase;
 
         // ── Component-type index (with_component at campaign scale) ──────
         //
@@ -1133,6 +1225,11 @@ namespace f4::entities {
         // from on_attached() will cleanly destroy it without leaving a
         // half-registered entry in the map.
         if constexpr (std::is_base_of_v<BehavioralComponentBase, T>) {
+            // FID-OPT-1: hand the component its owning world BEFORE
+            // on_attached fires, so even an on_attached() that parks the
+            // component routes its invalidation correctly (set_dormant
+            // → base flag → this world's cache).
+            comp->note_attached_world(world_);
             comp->on_attached(*this);
         }
         rec->components[tid] = std::move(comp);

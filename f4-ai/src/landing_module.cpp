@@ -467,7 +467,13 @@ void LandingModule::initialize(std::uint64_t ownship_id,
     world_ = &world;
     bus_ = &bus;
 
-    bus.subscribe<atc::LandingClearance>([this](const atc::LandingClearance& msg) {
+    // FID-OPT-1: RAII subscription bundle (see TakeoffModule::initialize —
+    // the leaked LandingClearance/ClearedToLand handlers outlived the
+    // module and read freed memory on every later publish).
+    subscriptions_.unsubscribe_all();
+    subscriptions_.bind(bus);
+
+    subscriptions_.subscribe<atc::LandingClearance>([this](const atc::LandingClearance& msg) {
         if (msg.aircraft_id != ownship_id_) return;
         runway_id_ = msg.runway_id;
         runway_heading_rad_ = msg.runway_heading_rad;
@@ -505,7 +511,7 @@ void LandingModule::initialize(std::uint64_t ownship_id,
         }
     });
 
-    bus.subscribe<atc::ClearedToLand>([this](const atc::ClearedToLand& msg) {
+    subscriptions_.subscribe<atc::ClearedToLand>([this](const atc::ClearedToLand& msg) {
         if (msg.aircraft_id == ownship_id_) {
             cleared_to_land_ = true;
         }

@@ -7,6 +7,44 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 
 ## Fidelity tiers (most recent)
 
+- **FID-OPT-1** — the active-cache walk + the ScopedSubscriptions fix
+  (Docs/FID_OPT_PLAN.md): the optimization tranche's first item, driven
+  by the FID-6 certificate's own finding ("the session's fixed per-tick
+  cost over the ~8,400-entity theater walk"). Landed: the DORMANT FLAG
+  on `BehavioralComponentBase` (per-component, routed through the
+  owning world so a transition between ticks is picked up without a
+  manual invalidate) + the ACTIVE behavioral cache (one rebuild sweep
+  fills both lists; `update_all` walks the non-dormant subset — the
+  ~8,126-component walk was ~99% of tick time, of which ~8,000 were the
+  parked squadron inventory's documented no-op updates paying two
+  virtual priority() dispatches each per tick). BrainComponent and
+  FlightModelComponent delegate their dormancy to the base; their
+  in-update early-returns stay as defense in depth. Measured on real
+  TestCamp: update_all ~317 µs → ~0.1 µs/tick with zero aircraft; the
+  1 sim-hour armed war's tick work 80.4 s → 0.12 s; the 20× tiered
+  certificate sustained 1472× (was 58.1×); **the 60× preset — the plan's
+  named target since FID-6 — now passes GREEN at 1331×**; the
+  FullFidelity baseline itself lifted 25.3× → 55.3× (the same parked
+  mass was taxing it). The 2-h armed war's ledger MD5 is IDENTICAL to
+  the pre-OPT run — the war's behavior is byte-identical, only the
+  host got faster. FOUND AND FIXED EN ROUTE: the per-entity AI modules'
+  bus subscriptions (Takeoff ×2 / Landing ×2 / Refuel ×8) were never
+  unsubscribed — a destroyed aircraft's handlers stayed in the bus and
+  the next live brain's TaxiRequest publish invoked handlers whose
+  captured `this` was freed memory (ASAN: heap-use-after-free on the
+  4-hour armed war at ~3 sim-hours; latent since the modules landed —
+  pre-OPT the deep-horizon war dilated so hard almost nothing
+  materialized). Fix: `ScopedSubscriptions` (f4-messaging RAII bundle;
+  bind at initialize, unsubscribe on destruction) adopted by all three
+  modules; `Simulation`'s member order swapped so the bus outlives the
+  world at teardown. Six new f4-entities tests (dormant skip, the
+  unpark transition, active order, idempotence, the campaign
+  spawn/unpark pattern, the passive edge); the full suite green, the
+  two pre-existing tree failures unchanged. FID-OPT-2 (the
+  fusion-rebuild budget — the per-materialized-aircraft cost the
+  walk's removal exposed: ~52 µs/tick at 3 aircraft, ~700 at 21) is
+  measured and designed in the plan §3, deliberately not in this patch.
+
 - **FID-5** — event-driven combat deagg (Docs/FIDELITY_TIERS_PLAN.md §4.5–4.6):
   the last open milestone of the phase, and the certificate's own lever.
   Landed: the AGGREGATE AIR PICTURE (f4-ai `AggregateContact` +

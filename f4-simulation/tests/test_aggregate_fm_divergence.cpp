@@ -245,7 +245,6 @@ TEST(AggregateFmDivergence, CruiseLegBothTiersPinnedBounds) {
     auto* tf = h.get<f4::entities::TransformComponent>();
     ASSERT_NE(tf, nullptr);
     const double fm_dx_grid = tf->position.x / 1024.0 - 390.0;
-    const double fm_dy_grid = tf->position.y / 1024.0 - 455.0;
     EXPECT_GT(fm_dx_grid, 0.0) << "the FM made no easting";
 
     // THE PINNED DIVERGENCE (the deliverable — upstream had none).

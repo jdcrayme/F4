@@ -184,15 +184,26 @@ std::vector<EntityId> EntityWorld::within_radius(double cx, double cy, double cz
 void EntityWorld::update_all(double dt, messaging::MessageBus& bus) {
     if (behavioral_cache_dirty_) rebuild_behavioral_cache();
 
+    // FID-OPT-1: the walk runs over the ACTIVE behavioral cache — the
+    // non-dormant subset, in the full cache's relative order (see the
+    // cache notes in entity.hpp and Docs/FID_OPT_PLAN.md §2). Dormant
+    // components' updates are side-effect-free by contract; skipping
+    // them entirely is observationally identical and removes the
+    // parked-inventory mass (~8k components in a populated save) from
+    // the per-tick dispatch budget.
+    // Pass semantics for the active components are unchanged: priorities
+    // re-read every tick (a component whose priority() changes at
+    // runtime still moves between passes).
+
     // Pass 1: brains (priority >= BRAIN_THRESHOLD).
-    for (auto* bc : behavioral_cache_) {
+    for (auto* bc : active_behavioral_cache_) {
         if (bc->priority() >= update_phase::BRAIN_THRESHOLD) {
             bc->update(dt, bus);
         }
     }
 
     // Pass 2: physics (0 < priority < BRAIN_THRESHOLD).
-    for (auto* bc : behavioral_cache_) {
+    for (auto* bc : active_behavioral_cache_) {
         const int prio = bc->priority();
         if (prio > 0 && prio < update_phase::BRAIN_THRESHOLD) {
             bc->update(dt, bus);
@@ -209,15 +220,34 @@ void EntityWorld::update_all(double dt, messaging::MessageBus& bus) {
 // pointers stay valid for as long as the cache is clean.
 void EntityWorld::rebuild_behavioral_cache() {
     behavioral_cache_.clear();
+    active_behavioral_cache_.clear();
     for (const auto& rec : entities_) {
         if (!rec.alive) continue;
         for (const auto& [tid, comp] : rec.components) {
             if (auto* bc = dynamic_cast<BehavioralComponentBase*>(comp.get())) {
                 behavioral_cache_.push_back(bc);
+                // FID-OPT-1: one sweep fills both lists — the active
+                // list is the full cache filtered by the dormant flag,
+                // preserving the entity-storage relative order.
+                if (!bc->dormant_) {
+                    active_behavioral_cache_.push_back(bc);
+                }
             }
         }
     }
     behavioral_cache_dirty_ = false;
+}
+
+void BehavioralComponentBase::set_dormant(bool d) noexcept {
+    if (dormant_ == d) return;   // idempotent — no invalidation on a no-op
+    dormant_ = d;
+    // The active list must be rebuilt before the next update_all(). The
+    // attached world was captured by EntityHandle::add<T>() (which fires
+    // for every behavioral component); a component not yet added has no
+    // world and its add<T>() will invalidate anyway.
+    if (attached_world_ != nullptr) {
+        attached_world_->invalidate_behavioral_cache();
+    }
 }
 
 // ============================================================================

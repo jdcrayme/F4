@@ -254,6 +254,10 @@ private:
     std::optional<RefuelEvent> deferred_event_{};
     entities::EntityWorld* world_{nullptr};
     messaging::MessageBus* bus_{nullptr};
+    /// FID-OPT-1: the refuel-protocol subscriptions, unbundled when this
+    /// module dies (the RAII bundle — see ScopedSubscriptions in
+    /// f4-messaging bus.hpp and TakeoffModule's note).
+    messaging::ScopedSubscriptions subscriptions_{};
 
     std::uint64_t tanker_id_{0};
     TankerPicture tanker_picture_{};

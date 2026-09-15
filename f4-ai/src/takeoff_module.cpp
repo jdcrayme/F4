@@ -173,8 +173,15 @@ void TakeoffModule::initialize(
     world_ = &world;
     bus_ = &bus;
 
+    // FID-OPT-1: re-initialization safety — drop any bundle a previous
+    // initialize left (no-op on the normal first call), then subscribe
+    // through the RAII bundle so the clearances stop arriving when this
+    // module dies with its aircraft.
+    subscriptions_.unsubscribe_all();
+    subscriptions_.bind(bus);
+
     // Subscribe to ATC clearances
-    bus.subscribe<atc::TaxiClearance>([this](const atc::TaxiClearance& msg) {
+    subscriptions_.subscribe<atc::TaxiClearance>([this](const atc::TaxiClearance& msg) {
         if (msg.aircraft_id == ownship_id_) {
             taxi_route_ = msg.taxi_route;
             runway_id_ = msg.runway_id;
@@ -192,7 +199,7 @@ void TakeoffModule::initialize(
         }
     });
 
-    bus.subscribe<atc::TakeoffClearance>([this](const atc::TakeoffClearance& msg) {
+    subscriptions_.subscribe<atc::TakeoffClearance>([this](const atc::TakeoffClearance& msg) {
         if (msg.aircraft_id == ownship_id_) {
             runway_heading_rad_ = msg.runway_heading_rad;
             threshold_position_ = msg.threshold_position;

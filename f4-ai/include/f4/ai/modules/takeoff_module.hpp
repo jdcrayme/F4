@@ -273,6 +273,12 @@ private:
     std::optional<TakeoffEvent> deferred_event_{};
     entities::EntityWorld* world_{nullptr};
     messaging::MessageBus* bus_{nullptr};
+    /// FID-OPT-1: the ATC-clearance subscriptions, unbundled when this
+    /// module dies (the pre-RAII leak kept them in the bus forever — every
+    /// later TaxiRequest/TakeoffClearance publish invoked handlers whose
+    /// captured `this` was freed; the ASAN finding on the 4-hour armed
+    /// war). See f4-messaging bus.hpp ScopedSubscriptions.
+    messaging::ScopedSubscriptions subscriptions_{};
 
     // Taxi route from ATC clearance.
     std::vector<geo::WorldPosition> taxi_route_;

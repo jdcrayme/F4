@@ -553,8 +553,14 @@ private:
     bool has_departure_override{false};  // hand-authored departure alt wins
     std::filesystem::path asset_dir_;
 
-    entities::EntityWorld world_;
+    // FID-OPT-1 (member ORDER matters): bus_ is declared BEFORE world_
+    // so the reverse destruction order tears the world (and every
+    // component, whose dtor unsubscribes its bus subscriptions) down
+    // FIRST, while the bus is still alive. The pre-RAII code had this
+    // backwards and simply never unsubscribed; with ScopedSubscriptions
+    // the components' dtors need a live bus at teardown.
     messaging::MessageBus bus_;
+    entities::EntityWorld world_;
     std::unique_ptr<f4::sim::WeatherSystem> weather_;  // Task 73; null = not configured
     std::unique_ptr<f4::ai::atc::IAirTrafficControl> atc_;
     std::unique_ptr<f4::recorder::FlightRecorder> recorder_;

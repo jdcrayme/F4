@@ -304,6 +304,74 @@ private:
 };
 
 // ============================================================================
+// ScopedSubscriptions — RAII bundle of MessageBus subscriptions.
+//
+// FID-OPT-1 (deep-horizon armed war, Docs/FID_OPT_PLAN.md §3): the
+// per-entity AI modules (TakeoffModule / LandingModule / RefuelModule)
+// subscribed to the bus with `this`-capturing lambdas and NEVER
+// unsubscribed. The module dies with its aircraft (the brain component
+// is destroyed on kill/reagg/retire), but the subscription stayed in
+// the bus's handler list forever — every later publish of that message
+// type invoked a handler whose captured `this` pointed at FREED memory.
+// AddressSanitizer on the 4-hour armed war: heap-use-after-free in the
+// TakeoffModule TaxiClearance handler the moment a live brain published
+// TaxiRequest after an earlier aircraft had died. The reads return
+// garbage pre-crash (invisible without ASAN) and the crash itself is
+// heap-layout luck — this was latent since the modules landed.
+//
+// Contract: bind(bus) once at initialize, subscribe<Msg>(...) for each
+// handler; the destructor unsubscribes everything from that bus. The
+// owner (a module inside a component) therefore never outlives its
+// subscriptions. Non-copyable AND non-movable (a move would transfer
+// the unsubscribers while the source's destructor would still fire —
+// double-unsubscribe or dangling id).
+// ============================================================================
+class ScopedSubscriptions {
+public:
+    ScopedSubscriptions() = default;
+    ~ScopedSubscriptions() { unsubscribe_all(); }
+
+    ScopedSubscriptions(const ScopedSubscriptions&) = delete;
+    ScopedSubscriptions& operator=(const ScopedSubscriptions&) = delete;
+    ScopedSubscriptions(ScopedSubscriptions&&) = delete;
+    ScopedSubscriptions& operator=(ScopedSubscriptions&&) = delete;
+
+    // Hand the helper its bus. Call once, before the first subscribe —
+    // the module's initialize(bus&) is the natural place (the same bus
+    // the handlers were going to use).
+    void bind(MessageBus& bus) { bus_ = &bus; }
+
+    // Subscribe and remember how to undo. Same overload shape as
+    // MessageBus::subscribe (lambdas / callables).
+    template <typename Msg, typename Callable>
+    void subscribe(Callable&& handler) {
+        // (bus_ is non-null: bind() precedes any subscribe by contract —
+        // the module's initialize binds before its state machine runs.)
+        MessageBus* bus = bus_;
+        const std::size_t id = bus->subscribe<Msg>(
+            std::forward<Callable>(handler));
+        unsubscribers_.push_back([bus, id]() { bus->unsubscribe<Msg>(id); });
+    }
+
+    // Unsubscribe everything (also what the destructor runs). Idempotent:
+    // a second call is a no-op, so a module that re-initializes can clear
+    // its old bundle first without double-unsubscribe.
+    void unsubscribe_all() {
+        for (auto& undo : unsubscribers_) undo();
+        unsubscribers_.clear();
+        bus_ = nullptr;
+    }
+
+    [[nodiscard]] std::size_t count() const noexcept {
+        return unsubscribers_.size();
+    }
+
+private:
+    MessageBus* bus_ = nullptr;
+    std::vector<std::function<void()>> unsubscribers_;
+};
+
+// ============================================================================
 // MessageQueue<Msg> — thread-safe single-producer/single-consumer queue for
 // the "I just want a queue of things to process" pattern. Use this when
 // you don't need fan-out (one consumer), as opposed to MessageBus (N

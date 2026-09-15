@@ -550,9 +550,12 @@ tiering; the certificate will say so wherever it runs.
 
 - **No mid tier** (v2): a coarse point-mass tier (~5 Hz) for
   "near-bubble" flights. v1 is two-tier; the FID-5 certificate says
-  the gap matters for the DEEP-HORIZON armed war (hours 3–4, 32 live
-  aircraft in sustained A/A combat dilate to single digits — the
-  concurrent-fight budget is the optimization tranche's item).
+  the gap matters for the DEEP-HORIZON armed war — and FID-OPT-1
+  (Docs/FID_OPT_PLAN.md) re-measured it precisely: the concurrent-fight
+  cost is the per-brain SensorFusion rebuild over the shared picture
+  (~52 µs/tick at 3 aircraft, ~700 at 21; the deep-horizon 60× armed
+  war dilates to 9–22×). The fusion-rebuild throttle is FID-OPT-2's
+  lever, designed in that plan §3, not started.
 - **Out-of-bubble combat resolves via transient deagg** (§4.5A), not
   abstract ledger resolution — Option B is v2. (FID-5 landed the
   triggers: a commit or a convergence inside the envelope deaggregates
@@ -568,10 +571,14 @@ tiering; the certificate will say so wherever it runs.
   both unbounded.
 - **The certificate's measured ceiling has two non-FM parts** (FID-6's
   first run): the session's fixed per-tick cost over the theater walk
-  (an optimization tranche, deliberately out of this phase) and the
-  synthetic Tier-B mass — the FID-5 tranche CLOSED the second one (the
-  20× tiered certificate sustained 58.1× vs the 25.3× full-fidelity
-  baseline); the walk remains the optimization tranche's.
+  and the synthetic Tier-B mass. **FID-OPT-1 CLOSED the first one**
+  (Docs/FID_OPT_PLAN.md — the active-cache walk: the ~8,126-component
+  dispatch was 99% of the tick, of which ~8,000 were the parked
+  inventory's documented no-ops; 317 µs → 0.1 µs/tick, the 60× preset
+  GREEN, the 2-h armed MD5 byte-identical); FID-5 CLOSED the second
+  (the 20× tiered certificate sustained 58.1× vs the 25.3×
+  full-fidelity baseline at the time; post-OPT-1 the same preset runs
+  1472× against a 55.3× baseline).
 - **Divergence**: aggregate vs FM cruise paths differ within pinned
   bounds (upstream: unbounded and undocumented) — the A/B harness
   landed with FID-5 (`test_aggregate_fm_divergence`): the FM led the

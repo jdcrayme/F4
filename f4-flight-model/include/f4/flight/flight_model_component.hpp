@@ -92,8 +92,11 @@ public:
         // Transform + VisualModel components are passive and always
         // current); a dormant airframe only starts simulating when a
         // future campaign tick launches it (the flight spawner always
-        // creates NON-dormant aircraft).
-        if (dormant_) return;
+        // creates NON-dormant aircraft). FID-OPT-1: update_all() skips
+        // dormant components in the walk entirely (the base flag —
+        // Docs/FID_OPT_PLAN.md §2); this check is defense in depth (a
+        // direct update() call still obeys the park).
+        if (is_dormant()) return;
 
         // Drive the FlightModel one step using the pending input.
         // If no brain wrote to pending_input_ this tick, we use idle
@@ -144,8 +147,9 @@ public:
     // --- Dormancy (parked inventory) ------------------------------------
     // See the update() override. Set by the squadron spawner; cleared by
     // nothing today (a launch creates a fresh non-dormant entity).
-    void set_dormant(bool d) noexcept { dormant_ = d; }
-    [[nodiscard]] bool is_dormant() const noexcept { return dormant_; }
+    // FID-OPT-1: the flag itself moved to BehavioralComponentBase (the
+    // base set_dormant/is_dormant are inherited) so update_all() can
+    // skip dormant components in the walk entirely.
 
     // --- FlightModel access ---
     [[nodiscard]] FlightModel&       model()       noexcept { return fm_; }
@@ -263,8 +267,8 @@ private:
     // is a no-op (the FM's tables are empty; calling update() would crash).
     bool initialized_{false};
 
-    // Dormant: skip update() entirely (parked squadron inventory).
-    bool dormant_{false};
+    // (dormancy moved to BehavioralComponentBase — FID-OPT-1; the base
+    // flag is what update_all()'s active-cache walk filters on.)
 
     // The brain's output for this tick. Default-constructed = idle controls.
     // Written by BrainComponent in pass 1, consumed and cleared in pass 2.
