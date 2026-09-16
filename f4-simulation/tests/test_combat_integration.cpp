@@ -2590,3 +2590,39 @@ TEST(CombatIntegration, NoWeaponDataPathIsTheGoldenTable) {
     EXPECT_DOUBLE_EQ(a->warhead_power_lb, b->warhead_power_lb);
     EXPECT_TRUE(sim.weapon_import_warnings().empty());
 }
+
+// ============================================================================
+// FID-OPT-3: the RWR sweep rides the licensed cadence. The counter starts
+// DUE (the war's first combat tick sweeps immediately, matching the
+// pre-OPT-3 behavior at war start), then the age cycles
+// 0..kRwrCadenceTicks-1 with sweeps landing exactly kRwrCadenceTicks
+// apart. Warnings still flow end-to-end (the AiVersusAi test's
+// bandit_saw_launch runs under this cadence); this test pins the
+// arithmetic itself.
+// ============================================================================
+TEST(CombatIntegration, RwrSweepRidesTheCadence) {
+    const auto f16 = f16_config_path();
+    if (f16.empty()) GTEST_SKIP() << "f16.json fixture not generated";
+
+    auto scenario =
+        load_scenario_from_string(combat_scenario_json(f16, true));
+    Simulation sim(std::move(scenario), std::filesystem::path("."));
+    sim.initialize();
+
+    // DUE before the first tick — the sweep happens on combat tick 1.
+    EXPECT_EQ(sim.rwr_sweep_age_ticks(), Simulation::kRwrCadenceTicks);
+
+    for (int i = 0; i < 13; ++i) {
+        sim.tick(kDt);
+        const int age = sim.rwr_sweep_age_ticks();
+        EXPECT_GE(age, 0);
+        EXPECT_LT(age, Simulation::kRwrCadenceTicks)
+            << "the RWR sweep went " << (age + 1)
+            << " ticks without a refresh — past the licensed bound";
+        if (i % Simulation::kRwrCadenceTicks == 0) {
+            EXPECT_EQ(age, 0)
+                << "tick " << (i + 1)
+                << ": the sweep must land exactly kRwrCadenceTicks apart";
+        }
+    }
+}

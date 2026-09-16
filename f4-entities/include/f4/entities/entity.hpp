@@ -823,6 +823,10 @@ namespace f4::entities {
             other.active_behavioral_cache_.clear();
             other.behavioral_cache_dirty_ = true;
             behavioral_cache_dirty_ = true;
+            // FID-OPT-3: the ref buckets hold component pointers — dropped
+            // on both sides (the destination rebuilds lazily, one walk),
+            // the same defensive move the behavioral cache makes.
+            component_ref_index_.clear();
         }
 
         // Move assignment: same reasoning — regenerate the cookie so old
@@ -843,6 +847,7 @@ namespace f4::entities {
                 other.behavioral_cache_.clear();
                 other.active_behavioral_cache_.clear();
                 other.behavioral_cache_dirty_ = true;
+                component_ref_index_.clear();  // FID-OPT-3: see move ctor
             }
             return *this;
         }
@@ -879,6 +884,24 @@ namespace f4::entities {
         // --- Component queries ---
         template<typename T>
         [[nodiscard]] std::vector<EntityId> with_component() const;
+
+        // FID-OPT-3: the pointer-carrying sibling of with_component<T>().
+        // Same bucket, same invariants (exactly the live entities carrying T,
+        // in entity-index order — the order the uncached scan walked), but
+        // each entry pairs the id with its component pointer so read-only
+        // walks (the radar scan's clutter/range pre-gates) skip the
+        // per-candidate EntityHandle + component-map lookup that dominated
+        // the scan cost at campaign scale (7,400 candidates/scan, 99.8%
+        // rejected by two arithmetic checks that need only the transform).
+        // By-value like with_component<T>() — the snapshot contract: safe
+        // to iterate while sweeps destroy entities. The lazy build, the
+        // incremental maintenance (add/remove/destroy), and the
+        // correct-or-absent discipline mirror the id bucket exactly; the
+        // world's move ops drop the ref buckets (pointers into component
+        // maps — rebuilt lazily, one walk, the defensive move the
+        // behavioral cache makes too).
+        template<typename T>
+        [[nodiscard]] std::vector<std::pair<EntityId, T*>> with_component_ref() const;
 
         // --- Spatial queries (forwarded to SpatialIndex when present) ---
         [[nodiscard]] std::vector<EntityId> within_radius(double cx, double cy, double cz,
@@ -1069,11 +1092,25 @@ namespace f4::entities {
         mutable std::unordered_map<std::type_index, std::vector<EntityId>>
             component_index_;
 
+        // FID-OPT-3: the ref sibling — type_index → (id, component pointer)
+        // pairs, maintained under the same discipline as component_index_
+        // (lazy per-type build, tail-append-else-drop on add, erase on
+        // remove/destroy, kept-when-empty). Pointers point into the
+        // per-entity component maps, whose nodes are stable across
+        // entities_ growth (the same stability the behavioral cache
+        // relies on); the world's move ops drop the buckets defensively.
+        mutable std::unordered_map<
+            std::type_index, std::vector<std::pair<EntityId, ComponentBase*>>>
+            component_ref_index_;
+
         // Index maintenance (called from EntityHandle::add/remove — the
         // friend declaration covers them — and from destroy()).
         void component_index_on_add(std::type_index tid, EntityId id,
                                     bool replacing);
         void component_index_on_remove(std::type_index tid, EntityId id);
+        void component_ref_index_on_add(std::type_index tid, EntityId id,
+                                        ComponentBase* comp, bool replacing);
+        void component_ref_index_on_remove(std::type_index tid, EntityId id);
 
         // World cookie: a random 64-bit value generated at EntityWorld construction.
         // EntityHandle captures this cookie at creation. If the EntityWorld is
@@ -1154,6 +1191,34 @@ namespace f4::entities {
             it = component_index_.emplace(tid, std::move(bucket)).first;
         }
         return it->second;  // copy — the snapshot contract the scan offered
+    }
+
+    template<typename T>
+    std::vector<std::pair<EntityId, T*>>
+    EntityWorld::with_component_ref() const {
+        const auto tid = std::type_index(typeid(T));
+        auto it = component_ref_index_.find(tid);
+        if (it == component_ref_index_.end()) {
+            // Lazy per-type build: the id bucket's walk, pairing each hit
+            // with its component pointer (same order, same result set).
+            std::vector<std::pair<EntityId, ComponentBase*>> bucket;
+            for (uint32_t i = 0; i < entities_.size(); ++i) {
+                const auto& rec = entities_[i];
+                if (!rec.alive) continue;
+                auto cit = rec.components.find(tid);
+                if (cit != rec.components.end()) {
+                    bucket.emplace_back(EntityId::make(i, rec.generation),
+                                        cit->second.get());
+                }
+            }
+            it = component_ref_index_.emplace(tid, std::move(bucket)).first;
+        }
+        std::vector<std::pair<EntityId, T*>> out;
+        out.reserve(it->second.size());
+        for (const auto& [id, comp] : it->second) {
+            out.emplace_back(id, static_cast<T*>(comp));
+        }
+        return out;  // copy — the same snapshot contract as with_component
     }
 
     template<typename T>
@@ -1241,6 +1306,7 @@ namespace f4::entities {
         // Component-type index maintenance (no-op until the type has been
         // queried once; see the index notes in EntityWorld).
         world_->component_index_on_add(tid, id_, replacing);
+        world_->component_ref_index_on_add(tid, id_, &ref, replacing);
         return ref;
     }
 
@@ -1252,6 +1318,7 @@ namespace f4::entities {
         const auto tid = std::type_index(typeid(T));
         rec->components.erase(tid);
         world_->component_index_on_remove(tid, id_);
+        world_->component_ref_index_on_remove(tid, id_);
         if constexpr (std::is_base_of_v<BehavioralComponentBase, T>) {
             // A behavioral component left the world (its unique_ptr was
             // just destroyed) — the cache's pointer now dangles until

@@ -5,8 +5,11 @@
 > Fidelity Tiers phase is COMPLETE (FID-1..6 + FID-VIEW-1); this tranche
 > attacks the two cost centers its own certificate named.
 
-Status: **IN PROGRESS** — FID-OPT-1 and FID-OPT-2 landed; FID-OPT-3
-(the component-update budget) measured, not designed.
+Status: **FID-OPT-1, FID-OPT-2, FID-OPT-3 LANDED.** The tranche's
+original two named cost centers (the theater walk, the concurrent-fight
+budget) are dead; the deep-horizon residual is measured and named (the
+flight-model floor, the brain's glue, the post-OPT-3 radar term) —
+see §5.
 
 ---
 
@@ -252,46 +255,155 @@ pre-existing tree failures unchanged (one unrelated timing flake in
 `CampaignSaver.MutatesTimers` observed once under `-j4`, passes
 consistently in isolation and on rerun).
 
-## 4. What remains — FID-OPT-3 candidate (measured, not designed)
+## 4. FID-OPT-3 — the sensor-sweep budget (LANDED)
 
 The deep-horizon fight minutes still cost ~400–660 µs/tick and the
 armed certificates' per-sample gates still dilate there (the 60× 3-h
 worst sample 15.1×; the 20× 4-h tail 11–23×). The fusion-rebuild
 throttle is done — the post-OPT-2 tick split over the same 6 sim-hours
-names what is left:
+named ~228 s of active-component work. The FID-OPT-3 measurement (a
+temporary env-gated per-component profiler, `F4_COMP_PROF=1`, on the
+3-hour TestCamp armed war at 60× — removed before landing) split that
+budget, and it re-attributed AGAIN, harder than §3 did:
 
-- tick total 281.8 s, of which `update_all` 268.8 s (95%);
-- the picture walk 36.2 s + the fusion rebuilds 3.7 s are INSIDE that
-  window now, leaving **~228 s of active-component work**: the radar
-  sim scans, the steering modules, the flight models, the RWR sweep
-  over the materialized set — everything the concurrent fight actually
-  simulates.
+**What the measurement found** (3-h armed war, 60×, 1,296,000 ticks):
 
-That is the next tranche item's budget. The fusion and the walk are no
-longer the story.
+| term (whole war, instrumented) | total | share of `update_all` |
+|---|---|---|
+| **RadarSimComponent** | **161.9 s** | **62%** |
+| FlightModelComponent | 33.9 s | 13% |
+| BrainComponent | 26.6 s | 10% (the profiled module arms are 3.3 s of it — the rest is diffuse glue: interface resolution, fuel state, threat queries, intent bookkeeping) |
+| MissileSimComponent | 0.05 s | ~0 |
+| `update_rwr` (outside `update_all`) | 8.6 s | ~6.6 µs/tick, never cadenced |
 
-## 5. What does NOT change
+The radar scan is the air-picture walk all over again — once per radar.
+The per-scan mix explains where the 161.9 s lives: **7,406 candidates
+per scan, 7,390 (99.8%) rejected by the ground-clutter gate**, 0 by
+range, ~12 by the scan volume, ~2 detections. Cost **~1,259 µs/scan**:
+the walk resolves every candidate through an EntityHandle + a
+component-map lookup (~170 ns each) to reject it with two arithmetic
+checks that need only the transform pointer. 99.8% of the dominant
+term is pure waste.
+
+**The design as landed — two levers, one licensed bound.**
+
+1. **The radar scan walks pointers, not maps** (f4-entities +
+   f4-sensors). `EntityWorld::with_component_ref<T>()` — the
+   component-type index's pointer-carrying sibling: the same bucket,
+   the same invariants (exactly the live entities carrying T, in
+   entity-index order), lazy build + incremental maintenance +
+   correct-or-absent + kept-when-empty, dropped defensively on world
+   move. `perform_scan`'s Search walk reads the transform through the
+   pair and applies the two cheap pre-gates (clutter, 8× range cutoff)
+   INLINE; only survivors build handles. Byte-safety: the pre-gates
+   precede the detection roll and draw no RNG, so the candidate SET
+   the rolls see, its ORDER, and the RNG stream are exactly the
+   pre-OPT-3 scan's; the loop's own gates re-run idempotently on the
+   survivors and keep gating Track-mode candidates. Measured:
+   **1,259 → 130 µs/scan (9.7×)**, the radar term **161.9 → 20.8 s
+   (7.8×)**.
+   Found-and-fixed en route: **the replacing-add stale pointer** — a
+   component overwritten in place keeps its id but changes its object
+   address; the id bucket's replace-is-a-no-op rule would have left
+   the ref bucket pointing at the DESTROYED component. The ref
+   on-add refreshes the pair's pointer in place (pinned by a test).
+2. **The RWR sweep rides the licensed cadence** (f4-simulation,
+   host-side). `kRwrCadenceTicks = 6` — the same ≤100 ms bound the
+   combat refresh and the picture walk already carry. Aged BEFORE the
+   gate (increment-then-compare — the off-by-one shape the §3 walk
+   gate caught); initialized DUE so the war's first combat tick sweeps
+   immediately. The sweep itself is UNCHANGED (a pure world function —
+   direct callers, including every test, sweep exactly when they ask);
+   between sweeps every RwrComponent keeps its LAST warning picture,
+   transitions publish at the sweep. Measured: **8.6 → 1.9 s**.
+
+**Tests.** 6 ref-bucket tests (id-set + order agreement with
+`with_component`, pointer identity, incremental tail append,
+remove/destroy correctness, the replacing-add pointer refresh, the
+world-move drop) + 2 radar tests (clutter never tracks through the
+ref walk; **the detection timeline is invariant to the clutter
+population** — 0 vs 2,000 parked entities produce the identical
+per-seed scan timeline, the byte-safety pin) + 1 integration test
+(the RWR cadence arithmetic: DUE start, the age cycling 0..5, sweeps
+exactly 6 apart; the end-to-end launch-warning flow runs under the
+cadence inside the existing AiVersusAi test). Full suite 2,574 green
+(2,565 + 9), the two pre-existing tree failures unchanged; one
+unrelated parallel-run flake observed once, passed on rerun.
+
+**Measured (real TestCamp, Release, post-OPT-3 vs the pre-OPT-3
+tree — the component terms from the SAME instrumented yardstick):**
+
+| metric (3-h armed war, 60×, instrumented runs) | before | after |
+|---|---|---|
+| radar scan, per scan | 1,259 µs | **130 µs (9.7×)** |
+| RadarSimComponent total | 161.9 s | **20.8 s (7.8×)** |
+| RWR sweep total | 8.6 s | **1.9 s (4.5×)** |
+| detections per scan | ~2 | ~2 (war shape preserved) |
+| dilated samples, same instrument | 60 | **30** |
+| sustained rate, same instrument | 75.1× | **137.5×** |
+
+| certificate (real TestCamp, clean runs) | before (§3) | after |
+|---|---|---|
+| 20× 1-h tiered + baseline | 1324× / baseline 54.6× | **1676.6× GREEN, zero dilation / baseline 54.1×** (unchanged within noise) |
+| 60× 1-h tiered | 1707× GREEN | **1636.7× GREEN, zero dilation** |
+| 2-h armed, 20× | 410×, ledger `73a06efd…` | **623.4× GREEN, zero dilation, ledger `641174c7…`** — the ORIGINAL pre-OPT-1 ledger: the RWR cadence's own ≤100 ms shift re-aligned the one marginal event the fusion cadence had displaced; the war's shape is the original's again |
+| 3-h armed, 60× (deep horizon) | sustained 61.07×, min 15.14×, 60 dilated | **sustained 137.1× (2.2×; the 57 gate now clears 2.4× over), min sample 30.2× (doubled), 30 dilated** — still exit-15 honestly: the per-sample floor gate on the residual AND the Tier-B ceiling (33 live deaggregated > 32 — the faster host materializes deeper; a certificate parameter, not a sim defect) |
+| 4-h armed soak, 20× | crash-free, 41 live, 46 dilated | **crash-free with `--accel-max-live 64` (deagg peak 46 — the war materializes deeper than the default ceiling), ZERO dilated samples, sustained 81.3×**; deterministic, leak-free |
+
+The 1-h armed ledger MD5 (`76711c97…`) is byte-identical pre/post
+OPT-3 across the 20× and 60× presets — the scan walk's output is
+unchanged to the byte.
+
+## 5. What remains (measured, not designed)
+
+- **The flight-model floor** — 33.9 s of the instrumented 3-h war
+  (13% of `update_all`, ~3.7 µs per aircraft-tick): the six
+  minor-step EOM integrations. This is the physics; a throttle here
+  is a fidelity change, not an optimization.
+- **The brain's glue** — 26.6 s total, of which the profiled module
+  arms are 3.3 s; the remaining ~23 s is diffuse (per-tick interface
+  resolution, fuel state, threat queries, intent bookkeeping) at
+  ~2.9 µs per brain-tick. No single lever named yet.
+- **The post-OPT-3 radar term** — 20.8 s: the ref-bucket copy + the
+  pre-gate walk. A 3D spatial hash (`SpatialIndex`) exists in
+  f4-entities but is unwired (nothing maintains it against moving
+  aircraft); wiring it would prune the walk to the cutoff ball.
+- **The picture walk** — 36.2 s / 6 sim-hours (§3): could adopt the
+  same ref primitive (`with_component_ref`) for its transform reads;
+  named, not landed (2% of the tick, and the path is byte-pinned by
+  the fusions).
+
+## 6. What does NOT change
 
 - The save/load pipeline, the ATM ladder, the ground war engine, the
   C2 clock model — untouched.
-- Full-fidelity sessions — the throttle only engages through the
-  combat ladder's demand gate and the shared picture; the baseline
-  rate is unchanged within noise (55.3× → 54.6× on the same war).
+- Full-fidelity sessions — the radar scan's output is byte-identical
+  (the 1-h armed ledger is unchanged across the 20×/60× presets) and
+  the baseline rate is unchanged within noise (54.6× → 54.1× on the
+  same war).
 - The scenario player / viewer paths — `update_all` semantics are
-  preserved exactly; the picture cadence is host-side and
+  preserved exactly; the picture and RWR cadences are host-side and
   combat-gated.
 - The bubble manager, the FID tier machinery — consumers of the
   world, not the picture; untouched. The FID-5 aggregate feed rides
   the walk (aggregate contacts refresh at the picture cadence too,
   the same ≤100 ms bound; the launch veto is id-based and unaffected).
+- The radar's detection model, its scan cadence (`scan_interval_s`),
+  Track mode, the RWR model, and its transition-only publishing —
+  the scan's candidate SET and the roll stream are byte-identical;
+  only the access path changed.
 
 ---
 
 *Evidence for §1: `F4_TICK_PROF=1` + a temporary cache-size diagnostic
-on the 1-hour TestCamp armed war, this sandbox, 2026-09-15 (recorded
-in Docs/history/worklog.md). The diagnostic was removed before the
-implementation landed. Evidence for §3: the temporary
-`F4_FUSION_PROF=1` harness (per-second brain/tier/walk/rebuild
-counters over the roster) on 2×3-hour TestCamp armed wars at 60×,
-same sandbox and day; removed before the implementation landed — its
-counters and the before/after tables above are the record.*
+on the 1-hour TestCamp armed war, recorded in Docs/history/worklog.md;
+removed before the implementation landed. Evidence for §3: the
+temporary `F4_FUSION_PROF=1` harness (per-second brain/tier/walk/
+rebuild counters over the roster) on 2×3-hour TestCamp armed wars at
+60×; removed before landing. Evidence for §4: the temporary
+`F4_COMP_PROF=1` per-component profiler (steady-clock totals per
+component type inside update_all, per-arm timers inside the brain
+update, per-scan candidate/gate counters inside the radar scan, the
+sweeps-phase split) on 3-hour TestCamp armed wars at 60×, same
+sandbox; removed before the implementation landed — its counters and
+the before/after tables above are the record.*

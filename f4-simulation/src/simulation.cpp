@@ -1955,7 +1955,20 @@ void Simulation::tick(double dt) {
     //                         Expired). The kill message already flowed; the
     //                         corpse sweep belongs to the host.
     if (combat_on) {
-        sensors::update_rwr(world_, bus_, t_now);
+        // FID-OPT-3: the RWR sweep rides the licensed cadence — at most
+        // one sweep per kRwrCadenceTicks ticks (the same <= 100 ms bound
+        // the combat refresh and the picture walk carry). Aged BEFORE the
+        // gate (increment then compare — the off-by-one shape the
+        // FID-OPT-2 walk gate caught); initialized DUE so the war's first
+        // combat tick sweeps immediately. The sweep itself is unchanged;
+        // direct callers sweep exactly when they ask. Between sweeps every
+        // RwrComponent keeps its LAST warning picture — transitions
+        // (Lock/Launch) publish at the sweep, <= 100 ms late worst case.
+        ++ticks_since_rwr_sweep_;
+        if (ticks_since_rwr_sweep_ >= kRwrCadenceTicks) {
+            ticks_since_rwr_sweep_ = 0;
+            sensors::update_rwr(world_, bus_, t_now);
+        }
         weapons::sweep_spent_missiles(world_);
         weapons::sweep_spent_bombs(world_);
     }

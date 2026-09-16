@@ -11127,3 +11127,122 @@ Stage Summary (FID-OPT-2 — the fight gets a budget):
   57 required). The residual dilation is measured and named (the
   component-update work, ~228 s / 6 sim-hours) — the next tranche
   item's budget, with the fusion and the walk no longer the story.
+FID-OPT-3 — the sensor-sweep budget (the radar scan walks pointers, not
+maps + the RWR sweep's licensed cadence).
+
+MEASURED BEFORE DESIGNING: a temporary env-gated per-component profiler
+(F4_COMP_PROF=1: steady-clock totals per component type inside
+EntityWorld::update_all keyed by typeid, per-arm timers inside
+BrainComponent::update, per-scan candidate/gate counters inside
+RadarSimComponent::perform_scan, and a sweeps-phase split in
+Simulation::tick) over the 3-hour TestCamp armed war at 60x — and the
+measurement RE-ATTRIBUTED the plan's own §4 budget, harder than §3 did:
+- The ~228 s of post-OPT-2 "active-component work" is 62% RADAR SCAN:
+  RadarSimComponent 161.9 s of the instrumented war's 263.2 s
+  update_all. Each radar scans once per second (scan_interval_s) and
+  each perform_scan walks EVERY transform-bearing entity
+  (with_component) — ~7,400 candidates per scan at the deep-horizon
+  peak — resolving each through an EntityHandle + a component-map
+  lookup (~170 ns) only to reject it. The per-scan mix: 7,390 (99.8%)
+  rejected by the ground-clutter gate, 0 by the range pre-gate (clutter
+  fires first), ~12 by the scan volume, ~2 detections; ~1,259 us/scan.
+  99.8% of the dominant term is pure waste.
+- The flight model is 33.9 s (13%): the six minor-step EOM integrations
+  per aircraft-tick — the physics floor.
+- The brain is 26.6 s (10%), of which the profiled module arms (fusion
+  0.75, nav 1.24, ground/collision avoid 0.7, the rest ~0.5) are 3.3 s;
+  the remaining ~23 s is diffuse glue (~2.9 us per brain-tick:
+  interface resolution, fuel state, threat queries, intent
+  bookkeeping).
+- The RWR sweep (update_rwr, outside update_all) is 8.6 s — ~6.6 us per
+  tick, NEVER cadenced: every live RWR's warning picture rebuilt every
+  tick.
+- Missiles: 0.05 s. The fusion and the walk (36.2 s / 6 h) are no
+  longer the story.
+
+The implementation (two levers, one licensed bound):
+- f4-entities: EntityWorld::with_component_ref<T>() — the component-type
+  index's POINTER-CARRYING sibling. Same bucket, same invariants (exactly
+  the live entities carrying T, in entity-index order), lazy per-type
+  build, incremental maintenance (tail-append-else-drop on add, erase on
+  remove/destroy, kept-when-empty), by-value snapshot like with_component,
+  dropped defensively on world move (both move ops). FOUND-AND-FIXED
+  EN ROUTE: the replacing-add stale pointer — a component overwritten in
+  place keeps its id but changes its object address; the id bucket's
+  replace-is-a-no-op rule would have left the ref bucket pointing at the
+  DESTROYED component. The ref on-add refreshes the pair's pointer in
+  place. EntityHandle::add<T> hands the pointer at add time (the only
+  place the concrete pointer exists).
+- f4-sensors RadarSimComponent::perform_scan: the Search walk reads the
+  transform through the ref pair and applies the two cheap pre-gates
+  (clutter, the 8x range cutoff) INLINE; only survivors build handles.
+  Byte-safety: the pre-gates precede the detection roll and draw no RNG —
+  the candidate SET the rolls see, its ORDER, and the RNG stream are
+  exactly the pre-OPT-3 scan's; the loop's own gates re-run idempotently
+  on the survivors and keep gating Track-mode candidates (which skip the
+  walk entirely).
+- f4-simulation Simulation::tick: the RWR sweep rides the licensed
+  cadence — kRwrCadenceTicks = 6 (the same <=100 ms bound the combat
+  refresh and the picture walk carry), aged BEFORE the gate (increment
+  then compare — the off-by-one shape the FID-OPT-2 walk gate caught),
+  initialized DUE so the war's first combat tick sweeps immediately.
+  The sweep itself is UNCHANGED (a pure world function; direct callers —
+  including every test — sweep exactly when they ask). rwr_sweep_age_ticks()
+  accessor + kRwrCadenceTicks on the public surface.
+- All profiler code removed before landing.
+
+Tests (9 new, all green):
+- f4-entities x6: id-set + order agreement with with_component, pointer
+  identity, incremental tail append keeps both buckets agreeing,
+  remove/destroy correctness, the replacing-add pointer refresh, the
+  world-move drop + rebuild.
+- f4-sensors x2: clutter never tracks through the ref walk (300 parked
+  entities, 3 scans, no clutter id in the track store); THE
+  detection-timeline-invariant-to-clutter-population pin — 0 vs 2,000
+  parked entities produce the IDENTICAL per-seed 12-scan timeline (the
+  byte-safety statement for the RNG stream, in one test).
+- f4-simulation x1: the RWR cadence arithmetic (DUE start; the age
+  cycles 0..5; sweeps exactly 6 apart; the end-to-end launch-warning
+  flow runs under the cadence inside the existing AiVersusAi test).
+Full suite 2,574 green (2,565 + 9), the two pre-existing tree failures
+unchanged; one unrelated parallel-run flake observed once (passed on
+rerun).
+
+Certificates (real TestCamp, Release, clean runs):
+- 20x 1-h tiered + --accel-baseline: 1676.6x sustained, zero dilation,
+  GREEN; FullFidelity baseline 54.1x (was 54.6x — unchanged within
+  noise). The 1-h armed ledger MD5 76711c97... is BYTE-IDENTICAL
+  pre/post OPT-3 across the 20x and 60x presets — the scan walk's
+  output is unchanged to the byte.
+- 60x 1-h tiered: 1636.7x GREEN, zero dilation.
+- 2-h armed, 20x: 623.4x GREEN, zero dilation. The ledger MD5 is
+  641174c7... — the ORIGINAL pre-OPT-1 value: the RWR cadence's own
+  <=100 ms shift re-aligned the one marginal event the fusion cadence
+  had displaced; the war's shape is the original's again.
+- 3-h armed, 60x (deep horizon): sustained 61.07x -> 137.1x (2.2x; the
+  57 sustained gate now clears 2.4x over), min sample 15.14x -> 30.2x
+  (doubled), dilated samples 60 -> 30. Still exit-15 honestly: the
+  per-sample floor gate on the residual AND the Tier-B ceiling (33
+  live deaggregated > 32 — the faster host materializes deeper; the
+  ceiling is a certificate parameter, not a sim defect).
+- 4-h armed soak, 20x (--war-runs 1): with --accel-max-live 64 (deagg
+  peak 46 — the war materializes deeper than the default ceiling):
+  completed crash-free, deterministic, leak-free, ZERO dilated
+  samples, sustained 81.3x. Without the raise the QC stops at the
+  ceiling breach (exit 16) — the gate doing its job, reported
+  honestly.
+
+What remains (measured, not designed — plan §5): the flight-model
+floor (33.9 s; physics, a throttle there is a fidelity change), the
+brain's diffuse glue (~23 s; no single lever named), the post-OPT-3
+radar term (20.8 s: the ref-bucket copy + the pre-gate walk; a 3D
+spatial hash exists in f4-entities but is unwired), the picture walk
+(36.2 s / 6 h; could adopt the same ref primitive — named, not
+landed).
+
+Docs as-built: Docs/FID_OPT_PLAN.md (status line; §4 rewritten as
+LANDED with the re-attribution finding, the two-lever design, the
+replacing-add found-and-fixed, the before/after tables, the new §5
+"What remains" with the FM floor/glue/radar-term/picture-walk names;
+§6 keeps the what-does-NOT-change list), Docs/README index row,
+CHANGELOG, this entry.

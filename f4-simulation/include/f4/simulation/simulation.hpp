@@ -623,6 +623,26 @@ public:
     /// and the QC surface reason about the bounded-staleness guarantee.
     static constexpr int kPictureCadenceTicks = 6;
 
+    /// FID-OPT-3 test/QC accessor: ticks since the last RWR sweep. Under
+    /// combat it cycles 0..kRwrCadenceTicks-1 — a value of 0 = the RWR
+    /// picture was (re)built THIS tick.
+    [[nodiscard]] int rwr_sweep_age_ticks() const noexcept {
+        return ticks_since_rwr_sweep_;
+    }
+    /// FID-OPT-3: the RWR sweep's cadence in ticks (6 ticks = 10 Hz at
+    /// the 60 Hz minor frame — the SAME bound the design licenses for
+    /// the combat refresh and the picture walk). The sweep rebuilds
+    /// every live RWR's warning picture per call; the deep-horizon
+    /// profile measured it at ~6.6 us/tick (8.6 s per 3-h armed war) —
+    /// the third named term after the radar scan and the flight
+    /// models. Cadenced host-side (the sweep itself stays a pure
+    /// world function — direct callers, including every test, sweep
+    /// exactly when they ask). Warnings (Lock/Launch transitions)
+    /// publish at the sweep: detection/reaction timing shifts by
+    /// <= 100 ms of sim, the licensed bound. Deterministic: an integer
+    /// tick counter.
+    static constexpr int kRwrCadenceTicks = 6;
+
 private:
 
     // M3 tactics: one detection policy per spawned combat aircraft,
@@ -721,6 +741,14 @@ private:
     // freshness). Deterministic: an integer tick counter.
     // Initialized DUE so the first demand walk builds immediately.
     int ticks_since_picture_walk_{kPictureCadenceTicks};
+
+    // FID-OPT-3: the RWR sweep's own cadence — the same shape as the
+    // picture's (aged BEFORE the gate: increment then compare, the
+    // off-by-one the FID-OPT-2 walk gate caught; initialized DUE so the
+    // war's first combat tick sweeps immediately, matching the
+    // pre-OPT-3 behavior at war start). Between sweeps every RwrComponent
+    // keeps its LAST warning picture — bounded <= 100 ms staleness.
+    int ticks_since_rwr_sweep_{kRwrCadenceTicks};
 
     // FID-5: the aggregate-contact feed + the picture-exclusion and
     // launch-veto sets — all NON-OWNING pointers the fidelity-tier

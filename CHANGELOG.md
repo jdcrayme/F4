@@ -7,6 +7,42 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 
 ## Fidelity tiers (most recent)
 
+- **FID-OPT-3** — the sensor-sweep budget: the radar scan walks
+  pointers, not maps + the RWR sweep's licensed cadence
+  (Docs/FID_OPT_PLAN.md §4): the optimization tranche's third item.
+  MEASURED FIRST (the temporary `F4_COMP_PROF` per-component profiler,
+  removed before landing), and the budget re-attributed AGAIN, harder
+  than §3: the ~228 s of post-OPT-2 "component work" is 62% RADAR SCAN
+  (161.9 s of the instrumented 3-h/60× armed war) — each radar's
+  once-per-second sweep resolves ~7,400 candidates through an
+  EntityHandle + a component-map lookup (~1,259 µs/scan) to reject
+  99.8% of them with two arithmetic checks that need only the
+  transform pointer, and finds ~2 detections. LANDED, two levers:
+  (1) `EntityWorld::with_component_ref<T>()` — the component-type
+  index's pointer-carrying sibling (same bucket, same invariants,
+  same entity-index order; dropped on world move; the replacing-add
+  pointer refresh found-and-fixed en route) + the scan's Search walk
+  applies the clutter/range pre-gates INLINE so only survivors build
+  handles — byte-identical output (the pre-gates draw no RNG; the
+  candidate set, its order, and the roll stream are unchanged; pinned
+  by the detection-timeline-invariant-to-clutter-population test);
+  per-scan 1,259 → 130 µs (9.7×), the radar term 161.9 → 20.8 s
+  (7.8×); (2) the RWR sweep rides the licensed ≤100 ms cadence
+  host-side (`kRwrCadenceTicks = 6`, the same bound the combat
+  refresh and the picture walk carry; the sweep itself unchanged) —
+  8.6 → 1.9 s. The deep-horizon 3-h/60× armed certificate: sustained
+  61.07× → **137.1×** (the 57 gate now clears 2.4× over), min sample
+  15.14× → 30.2×, dilated samples 60 → 30; the 20× baseline
+  unchanged (54.6× → 54.1×); the 1-h armed ledger byte-identical
+  pre/post across presets; the 2-h armed ledger returned to the
+  ORIGINAL pre-OPT-1 value (`641174c7…`) — the RWR cadence's own
+  ≤100 ms shift re-aligned the marginal event the fusion cadence had
+  displaced. Full suite 2,574 green (2,565 + 9: six ref-bucket, two
+  radar, one RWR-cadence test), the two pre-existing tree failures
+  unchanged. The residual is measured and named (plan §5): the
+  flight-model floor (physics), the brain's diffuse glue, the
+  post-OPT-3 radar term, the picture walk.
+
 - **FID-OPT-2** — the concurrent-fight budget: the fusion-refresh
   tiering + the shared picture's own cadence (Docs/FID_OPT_PLAN.md
   §3): the optimization tranche's second item. MEASURED FIRST, and

@@ -76,6 +76,11 @@ void RadarSimComponent::perform_scan(messaging::MessageBus& bus) {
     // --- Candidate set -----------------------------------------------------
     // Search: every other transform-bearing entity. Track: only the locked
     // target (the antenna is parked); if it vanished, go back to search.
+    const f4::geo::WorldPosition own_pos = own_tf->position;
+    const f4::math::Vec3<double> own_vel{own_tf->vx, own_tf->vy, own_tf->vz};
+    const double cutoff_ft =
+        8.0 * params.reference_range_nm * 6076.11548;  // the range pre-gate
+
     std::vector<entities::EntityId> candidates;
     if (mode_ == RadarMode::Track) {
         entities::EntityHandle locked(entities::EntityId{locked_target_id_},
@@ -87,17 +92,35 @@ void RadarSimComponent::perform_scan(messaging::MessageBus& bus) {
         }
     }
     if (mode_ == RadarMode::Search) {
-        for (const auto eid : world->with_component<entities::TransformComponent>()) {
+        // FID-OPT-3: the candidate walk reads each transform through the
+        // component-type index's ref bucket (with_component_ref — same
+        // live set, same entity-index order, pointer attached) and
+        // applies the two cheap pre-gates INLINE, so the per-candidate
+        // EntityHandle + component-map lookup (the scan's measured
+        // dominant cost at campaign scale: ~7,400 candidates/scan, 99.8%
+        // rejected by these two arithmetic checks, ~1.26 ms/scan) is paid
+        // only by the handful of candidates that survive both. The
+        // survivors still meet the SAME gates in the detection loop below
+        // — idempotent pure predicates over the same component values —
+        // so the candidate set, its order, and the RNG stream the
+        // detection rolls consume are exactly the pre-OPT-3 scan's.
+        for (const auto& [eid, tf] :
+             world->with_component_ref<entities::TransformComponent>()) {
             if (eid.value == owner_.id().value) continue;
+            if (tf->is_ground_clutter()) continue;
+            const double dxr = tf->position.x - own_pos.x;
+            const double dyr = tf->position.y - own_pos.y;
+            const double dzr = tf->position.z - own_pos.z;
+            if (dxr * dxr + dyr * dyr + dzr * dzr >
+                cutoff_ft * cutoff_ft) {
+                continue;
+            }
             candidates.push_back(eid);
         }
     }
 
     // --- Roll each candidate against the detection model --------------------
     std::uniform_real_distribution<double> uniform01{0.0, 1.0};
-
-    const f4::geo::WorldPosition own_pos = own_tf->position;
-    const f4::math::Vec3<double> own_vel{own_tf->vx, own_tf->vy, own_tf->vz};
 
     for (const auto eid : candidates) {
         entities::EntityHandle h(eid, const_cast<entities::EntityWorld*>(world));
@@ -120,6 +143,9 @@ void RadarSimComponent::perform_scan(messaging::MessageBus& bus) {
         // post) is also the reference's shape: FreeFalcon's radar air
         // picture never paints parked vehicles. A stationary entity at
         // altitude still tracks.
+        // (FID-OPT-3: the Search walk above pre-applies this gate so the
+        // handle resolution is only paid by survivors — this repeated
+        // check is idempotent and keeps Track-mode candidates gated.)
         if (tf->is_ground_clutter()) {
             continue;
         }
@@ -135,16 +161,17 @@ void RadarSimComponent::perform_scan(messaging::MessageBus& bus) {
         // per-candidate cost at campaign scale (a populated save:
         // ~4,400 transform-bearing entities per radar sweep; most sit
         // beyond any radar's horizon).
+        // (FID-OPT-3: pre-applied by the Search walk above, same shape.)
         {
             constexpr double kScanCutoffMultiplier = 8.0;
             constexpr double kNmToFt = 6076.11548;
-            const double cutoff_ft =
+            const double loop_cutoff_ft =
                 kScanCutoffMultiplier * params.reference_range_nm * kNmToFt;
             const double dxr = tgt_pos.x - own_pos.x;
             const double dyr = tgt_pos.y - own_pos.y;
             const double dzr = tgt_pos.z - own_pos.z;
             if (dxr * dxr + dyr * dyr + dzr * dzr >
-                cutoff_ft * cutoff_ft) {
+                loop_cutoff_ft * loop_cutoff_ft) {
                 continue;
             }
         }

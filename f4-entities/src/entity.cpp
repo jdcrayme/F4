@@ -70,6 +70,7 @@ void EntityWorld::destroy(EntityId id) {
     // the types it carries). Unbuilt types are skipped inside.
     for (const auto& [tid, comp] : rec->components) {
         component_index_on_remove(tid, id);
+        component_ref_index_on_remove(tid, id);   // FID-OPT-3: ref sibling
     }
     rec->alive = false;
     rec->tags.clear();
@@ -387,6 +388,54 @@ void EntityWorld::component_index_on_remove(std::type_index tid, EntityId id) {
     // carrying T — none) and on_add appends into it fine. The map holds at
     // most one bucket per distinct queried type, so keeping empties is
     // bounded by the number of types the host actually queries (~15).
+}
+
+// FID-OPT-3: the ref sibling's maintenance — the id bucket's discipline,
+// with the component pointer captured at add() time (only add<T>() knows
+// the concrete pointer; these entry points are type-erased like the id
+// index's).
+void EntityWorld::component_ref_index_on_add(std::type_index tid, EntityId id,
+                                             ComponentBase* comp,
+                                             bool replacing) {
+    auto it = component_ref_index_.find(tid);
+    if (it == component_ref_index_.end()) return;  // type never queried yet
+    auto& bucket = it->second;
+    if (replacing) {
+        // Component overwritten in place: the id stays, but the POINTER
+        // changed (the old component object was destroyed). Refresh the
+        // pair in place — same entity, same order, new component. Rare.
+        for (auto& entry : bucket) {
+            if (entry.first == id) {
+                entry.second = comp;
+                return;
+            }
+        }
+        return;  // unreachable if the id-index invariants hold
+    }
+    if (bucket.empty() || id.index() > bucket.back().first.index()) {
+        // Tail append preserves entity-index order (the scan's order).
+        bucket.emplace_back(id, comp);
+    } else {
+        // Out-of-order insert (component added to a reused slot below the
+        // tail): drop the bucket, rebuild lazily on the next query. Rare.
+        component_ref_index_.erase(it);
+    }
+}
+
+void EntityWorld::component_ref_index_on_remove(std::type_index tid,
+                                                EntityId id) {
+    auto it = component_ref_index_.find(tid);
+    if (it == component_ref_index_.end()) return;
+    auto& bucket = it->second;
+    for (auto b = bucket.begin(); b != bucket.end(); ++b) {
+        if (b->first == id) {
+            bucket.erase(b);
+            break;
+        }
+    }
+    // Empty buckets are KEPT — the same kept-when-empty rule the id
+    // bucket documents above (the queried-every-tick empty type would
+    // otherwise rebuild on every query).
 }
 
 // ============================================================================

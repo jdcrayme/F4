@@ -947,3 +947,104 @@ TEST(ConditionalComponents, UnitSubclassDispatchViaComponents) {
     EXPECT_EQ(ground_units.size(), 1u);
     EXPECT_EQ(air_units.size(), 1u);
 }
+
+// ============================================================================
+// FID-OPT-3: with_component_ref — the pointer-carrying sibling of
+// with_component. Same bucket, same invariants, pointer attached.
+// ============================================================================
+TEST(WithComponentRef, MatchesWithComponentIdSetAndOrder) {
+    EntityWorld w;
+    auto a = w.create(); a.add<TransformComponent>();
+    auto b = w.create();                    // no transform
+    auto c = w.create(); c.add<TransformComponent>();
+    auto d = w.create(); d.add<TransformComponent>();
+    EXPECT_GT(d.id().index(), c.id().index());
+
+    const auto ids = w.with_component<TransformComponent>();
+    const auto refs = w.with_component_ref<TransformComponent>();
+
+    ASSERT_EQ(ids.size(), refs.size());
+    for (std::size_t i = 0; i < ids.size(); ++i) {
+        EXPECT_EQ(ids[i], refs[i].first) << "order diverged at " << i;
+    }
+    EXPECT_EQ(refs.size(), 3u);
+}
+
+TEST(WithComponentRef, PointersResolveTheSameComponents) {
+    EntityWorld w;
+    auto a = w.create(); a.add<TransformComponent>();
+    a.get<TransformComponent>()->position = WorldPosition{10.0, 20.0, 30.0};
+    auto b = w.create(); b.add<TransformComponent>();
+
+    for (const auto& [id, tf] : w.with_component_ref<TransformComponent>()) {
+        auto h = EntityHandle(id, &w);
+        EXPECT_EQ(tf, h.get<TransformComponent>())
+            << "ref-bucket pointer is not the entity's component";
+        EXPECT_EQ(tf->position.z, h.get<TransformComponent>()->position.z);
+    }
+}
+
+TEST(WithComponentRef, IncrementalTailAppendKeepsBothBucketsAgreeing) {
+    EntityWorld w;
+    auto a = w.create(); a.add<TransformComponent>();
+    (void)w.with_component<TransformComponent>();      // build the id bucket
+    (void)w.with_component_ref<TransformComponent>();  // build the ref bucket
+
+    // Both buckets exist; tail appends must land in BOTH in the same order.
+    auto b = w.create(); b.add<TransformComponent>();
+    auto c = w.create(); c.add<TransformComponent>();
+
+    const auto ids = w.with_component<TransformComponent>();
+    const auto refs = w.with_component_ref<TransformComponent>();
+    ASSERT_EQ(ids.size(), 3u);
+    ASSERT_EQ(refs.size(), 3u);
+    for (std::size_t i = 0; i < ids.size(); ++i) {
+        EXPECT_EQ(ids[i], refs[i].first);
+    }
+}
+
+TEST(WithComponentRef, RemoveAndDestroyKeepTheBucketCorrect) {
+    EntityWorld w;
+    auto a = w.create(); a.add<TransformComponent>();
+    auto b = w.create(); b.add<TransformComponent>();
+    auto c = w.create(); c.add<TransformComponent>();
+    (void)w.with_component_ref<TransformComponent>();  // build
+
+    b.remove<TransformComponent>();
+    w.destroy(a.id());
+
+    const auto refs = w.with_component_ref<TransformComponent>();
+    const auto ids = w.with_component<TransformComponent>();
+    ASSERT_EQ(ids.size(), 1u);
+    ASSERT_EQ(refs.size(), 1u);
+    EXPECT_EQ(refs[0].first, c.id());
+    EXPECT_EQ(refs[0].second, c.get<TransformComponent>());
+}
+
+TEST(WithComponentRef, ReplacingAddRefreshesThePointer) {
+    EntityWorld w;
+    auto a = w.create();
+    auto* first = &a.add<TransformComponent>();
+    (void)w.with_component_ref<TransformComponent>();  // build with `first`
+
+    auto* second = &a.add<TransformComponent>();  // replace in place
+    EXPECT_NE(first, second);
+
+    const auto refs = w.with_component_ref<TransformComponent>();
+    ASSERT_EQ(refs.size(), 1u);
+    EXPECT_EQ(refs[0].second, second)
+        << "a replaced component's stale pointer survived in the bucket";
+}
+
+TEST(WithComponentRef, WorldMoveDropsTheBucketAndRebuildsCorrectly) {
+    EntityWorld w;
+    auto a = w.create(); a.add<TransformComponent>();
+    a.get<TransformComponent>()->position = WorldPosition{1.0, 2.0, 3.0};
+    (void)w.with_component_ref<TransformComponent>();  // build pre-move
+
+    EntityWorld w2(std::move(w));   // move ctor: ref buckets dropped
+    const auto refs = w2.with_component_ref<TransformComponent>();
+    ASSERT_EQ(refs.size(), 1u);
+    EXPECT_EQ(refs[0].first, a.id());
+    EXPECT_EQ(refs[0].second->position.z, 3.0);
+}

@@ -232,3 +232,106 @@ TEST(RadarRwr, LockingFeedsVictimRwrThroughTheSweep) {
     EXPECT_EQ(messages[0].emitter_id, radar.id().value);
     EXPECT_NEAR(messages[0].bearing_rad, kPi, 1e-9);  // radar due SOUTH of victim
 }
+
+// ============================================================================
+// FID-OPT-3: the scan's candidate walk pre-applies the clutter + range
+// gates on the component-type ref bucket. The pins: clutter NEVER tracks,
+// and the detection timeline is INVARIANT to the clutter population (the
+// pre-gates are RNG-neutral, so adding clutter cannot shift the rolls).
+// ============================================================================
+namespace {
+/// HeadOn plus `n` parked ground entities scattered between the radar and
+/// the target (zero velocity, near the ground — the clutter predicate).
+struct HeadOnWithClutter {
+    World w;
+    entities::EntityHandle radar;
+    entities::EntityHandle target;
+
+    explicit HeadOnWithClutter(double range_ft, int n,
+                               std::uint32_t seed = 0x46344ull) {
+        radar = w.world.create();
+        radar.add<entities::TransformComponent>()
+             .position = f4::geo::WorldPosition{0.0, 0.0, 20000.0};
+        auto& r = radar.add<RadarSimComponent>();
+        r.rng_seed = seed;
+        r.scan_interval_s = 1.0;
+
+        for (int i = 0; i < n; ++i) {
+            auto g = w.world.create();
+            auto& tf = g.add<entities::TransformComponent>();
+            // Parked vehicles: stationary, near the ground, spread across
+            // the theater (some inside the cutoff ball, some outside —
+            // both classes must reject).
+            tf.position = f4::geo::WorldPosition{
+                static_cast<double>(i % 7) * 20000.0 - 60000.0,
+                static_cast<double>(i) * 2500.0,
+                100.0};
+        }
+
+        target = w.world.create();
+        auto& tf = target.add<entities::TransformComponent>();
+        tf.position = f4::geo::WorldPosition{0.0, range_ft, 20000.0};
+        tf.vy = -400.0;
+        target.set_tag(entities::tags::TEAM,
+                       f4::entities::TagValue::from(std::string("red")));
+    }
+
+    RadarSimComponent& r() { return *radar.get<RadarSimComponent>(); }
+
+    void run(double seconds, double tick = 0.2) {
+        for (double i = 0; i < seconds; i += tick) {
+            RadarSimComponent::set_sim_time(RadarSimComponent::sim_time() +
+                                            tick);
+            w.world.update_all(tick, w.bus);
+        }
+    }
+};
+} // namespace
+
+TEST(RadarScan, ClutterNeverTracksEvenThroughTheRefWalk) {
+    HeadOnWithClutter s{30.0 * kFeetPerNm, /*n=*/300};
+    s.run(3.0);  // three scans
+
+    // The air target established a track; no clutter entity ever did.
+    EXPECT_NE(s.r().tracks().find(s.target.id().value), nullptr)
+        << "the in-volume air target was not tracked";
+    for (const auto* t : s.r().tracks().live()) {
+        if (t->entity_id == s.target.id().value) continue;
+        auto h = entities::EntityHandle(entities::EntityId{t->entity_id},
+                                        &s.w.world);
+        const auto* tf = h.get<entities::TransformComponent>();
+        if (tf != nullptr) {
+            EXPECT_FALSE(tf->is_ground_clutter())
+                << "a ground-clutter entity entered the track store";
+        }
+    }
+}
+
+TEST(RadarScan, DetectionTimelineInvariantToClutterPopulation) {
+    // THE byte-safety pin for the FID-OPT-3 scan walk: the pre-gates
+    // consume no RNG, so the detection timeline for the SAME seed must be
+    // identical whether the theater holds 0 or 2,000 parked ground
+    // entities. (Pre-OPT-3 this held because the roll loop drew in
+    // candidate order; post-OPT-3 the pre-gated walk must preserve that
+    // order exactly.)
+    auto run_once = [](int clutter) {
+        HeadOnWithClutter s{44.0 * kFeetPerNm, clutter, 0xABCD};
+        std::vector<bool> detected;
+        for (int i = 0; i < 12; ++i) {
+            s.run(1.0);
+            const auto* t = s.r().tracks().find(s.target.id().value);
+            const bool saw_now =
+                t != nullptr &&
+                t->last_detected_s >= RadarSimComponent::sim_time() - 0.5;
+            detected.push_back(saw_now);
+        }
+        return detected;
+    };
+
+    const auto bare = run_once(0);
+    const auto cluttered = run_once(2000);
+    EXPECT_EQ(bare, cluttered)
+        << "adding ground clutter changed the detection timeline — the "
+           "pre-gated walk reordered or re-streamed the rolls";
+    EXPECT_FALSE(bare.empty());
+}
