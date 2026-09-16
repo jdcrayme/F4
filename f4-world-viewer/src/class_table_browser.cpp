@@ -937,6 +937,26 @@ void ClassTableBrowser::draw_detail_panel() {
             ImGui::Separator();
             ImGui::Text("Animation doctor — model %d", active_vis);
             draw_animation_doctor(*previewed);
+        } else if (previewed && previewed->doc) {
+            // Flat export still carrying dof/switch stub tags — the
+            // tags name animation capability the flat geometry can't
+            // express. Tell the user how to make it animatable rather
+            // than silently showing nothing.
+            int dof_tags = 0, sw_tags = 0;
+            for (const auto& n : previewed->doc->nodes) {
+                if (!n.has_f4) continue;
+                if (n.f4.kind == "dof") ++dof_tags;
+                else if (n.f4.kind == "sw") ++sw_tags;
+            }
+            if (dof_tags > 0 || sw_tags > 0) {
+                ImGui::Separator();
+                ImGui::TextWrapped(
+                    "Model %d carries %d dof / %d switch tags but was "
+                    "exported without the animation hierarchy. Re-run "
+                    "f4import models --hierarchy --vocab "
+                    "<f4-import/vocab> to make it animatable.",
+                    active_vis, dof_tags, sw_tags);
+            }
         }
     }
 }

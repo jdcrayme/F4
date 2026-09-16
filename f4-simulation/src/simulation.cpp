@@ -36,6 +36,8 @@
 #include <f4/ai/modules/landing_module.hpp>
 #include <f4/data/config_loader.hpp>
 #include <f4/data/table_accessors.hpp>
+#include <f4/anim/channels.hpp>
+#include <f4/anim/rig.hpp>
 #include <f4/flight/flight_model_component.hpp>
 #include <f4/flight/angle.hpp>
 #include <f4/recorder/flight_recorder.hpp>
@@ -639,6 +641,13 @@ void Simulation::spawn_from_scenario_list() {
         vis.vis_type = sc.vis_type_index;  // V-3DLIVE (identity)
         vis.active_lod = 0;  // highest detail
         vis.gear_switch_child = 0;  // 0 = gear down (switch #10, child 0)
+        // Ground-staged aircraft render with FreeFalcon's parked preset
+        // (gear shown, doors/holes shown) — all-zero switch masks would
+        // hide the gear geometry on hierarchy-emitted models until the
+        // per-tick rig sync commands it.
+        if (!spawn_airborne) {
+            vis.anim_values.set_parked_defaults();
+        }
 
         // 4. BrainComponent — the mission sequencer (takeoff -> navigation
         //    -> landing), runs in pass 1 (priority 100). The taxi route
@@ -2036,6 +2045,22 @@ void Simulation::tick(double dt) {
         auto* vis = h.get<VisualModelComponent>();
         if (vis) {
             vis->gear_switch_child = (s.aero.gearPos > 0.5) ? 0 : 1;
+
+            // ANIM rig: drive the gear channel family from the airframe's
+            // gearPos through the sequencer — the same eval the Class
+            // Table Browser's doctor panel runs by hand (doors first,
+            // legs second, 5°-equivalent visibility hysteresis). Station
+            // params mirror the doctor defaults; real per-airframe
+            // NosGearRng arrives with auxaero-sourced rig params.
+            f4::anim::GearStationParams anim_params;
+            anim_params.num_gear = 3;
+            for (uint16_t i = 0; i < 3; ++i) {
+                anim_params.leg_range_rad[i] = 40.0f * 0.017453292519943295f;
+                anim_params.door_range_rad[i] = 90.0f * 0.017453292519943295f;
+            }
+            const auto gear_cmd = f4::anim::eval_gear(
+                s.aero.gearPos, nullptr, anim_params);
+            f4::anim::apply_gear_command(gear_cmd, vis->anim_values);
         }
     }
     const auto prof_t6 = g_prof.on ? std::chrono::steady_clock::now()

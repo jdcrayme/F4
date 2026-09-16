@@ -73,10 +73,17 @@ struct GltfPartData {
 
 /// Extract one LOD level's geometry from a glTF model document.
 ///
-/// The f4import models emitter writes one glTF mesh per LOD level,
-/// named "LOD_0", "LOD_1", ...; each mesh holds one primitive per
-/// source BSP mesh. Returns one GltfMeshData per primitive of the
-/// requested LOD (empty vector when the LOD doesn't exist).
+/// Layout-agnostic across the three on-disk layouts:
+///   - the legacy flat export: one glTF mesh per LOD level, named
+///     "LOD_0", "LOD_1", ..., attached DIRECTLY to the lod:N node;
+///   - the f4import --hierarchy export's UNTAGGED models: per-part
+///     meshes on identity-transform part nodes beneath the lod:N node
+///     (static geometry — only tagged dof/sw chain nodes ever carry
+///     transforms, so drawing the raw vertices as-is is correct);
+///   - hand-authored fixtures without a node graph: a single
+///     un-prefixed mesh serves as LOD 0.
+/// Returns one GltfMeshData per primitive of the requested LOD (empty
+/// vector when the LOD doesn't exist).
 ///
 /// Texture binding: each primitive's material chain
 /// (material → baseColorTexture → image) resolves to a PNG URI of the

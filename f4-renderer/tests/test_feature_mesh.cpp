@@ -410,6 +410,37 @@ TEST_F(FeatureMeshGpuTest, RuntimeModelCache_FlatDocWithStubTags_FallsBackToFlat
     EXPECT_FALSE(model->lod0_meshes.empty());
     EXPECT_TRUE(model->lod0_parts.empty());
 
+    // Draw it the way the live views do — a built model must render,
+    // not just sit in the cache.
+    {
+        f4::renderer::LitShader lit_shader;
+        ::Material default_mat = LoadMaterialDefault();
+        default_mat.maps[MATERIAL_MAP_DIFFUSE].color = WHITE;
+        f4::renderer::FeatureMeshResources res{};
+        res.model_cache = &model_cache;
+        res.texture_cache = &tex_cache;
+        res.lit_shader = &lit_shader;
+        res.default_material = &default_mat;
+
+        Camera3D cam = {};
+        cam.position = {0.0f, 100.0f, 0.0f};
+        cam.target = {0.0f, 0.0f, 0.0f};
+        cam.up = {0.0f, 0.0f, -1.0f};
+        cam.fovy = 200.0f;
+        cam.projection = CAMERA_ORTHOGRAPHIC;
+        BeginDrawing();
+        ClearBackground(BLACK);
+        BeginMode3D(cam);
+        const auto st = f4::renderer::draw_vis_type_mesh(
+            res, 99, 0.0f, 0.0f, 0.0f, 0.0f);
+        EndMode3D();
+        EndDrawing();
+        EXPECT_GT(st.meshes_drawn, 0)
+            << "flat-with-stubs model drew nothing through the static path";
+
+        UnloadMaterial(default_mat);
+    }
+
     model_cache.unload_all();
     tex_cache.unload_all();
     std::filesystem::remove_all(dir);
@@ -448,6 +479,43 @@ TEST_F(FeatureMeshGpuTest, RuntimeModelCache_HierarchyDoc_BuildsParts) {
     EXPECT_EQ(model->lod0_parts[0].entry.mesh.triangleCount, 1);
     ASSERT_EQ(model->lod0_parts[0].node_chain.size(), 2u);  // dof + mesh node
     EXPECT_FALSE(model->anim_map.empty());
+    // The document must stay alive on the model: the animated draw path
+    // evaluates node chains against it every frame. (A build path that
+    // dropped it produced a null doc → null deref in eval_tagged_local
+    // the first time an animated model was actually drawn.)
+    ASSERT_NE(model->doc, nullptr);
+
+    // DRAW it — the coverage gap that hid the null-doc bug: building an
+    // animated model never touches doc, drawing it does.
+    {
+        f4::renderer::LitShader lit_shader;
+        ::Material default_mat = LoadMaterialDefault();
+        default_mat.maps[MATERIAL_MAP_DIFFUSE].color = WHITE;
+        f4::renderer::FeatureMeshResources res{};
+        res.model_cache = &model_cache;
+        res.texture_cache = &tex_cache;
+        res.lit_shader = &lit_shader;
+        res.default_material = &default_mat;
+
+        Camera3D cam = {};
+        cam.position = {0.0f, 100.0f, 0.0f};
+        cam.target = {0.0f, 0.0f, 0.0f};
+        cam.up = {0.0f, 0.0f, -1.0f};
+        cam.fovy = 200.0f;
+        cam.projection = CAMERA_ORTHOGRAPHIC;
+        BeginDrawing();
+        ClearBackground(BLACK);
+        BeginMode3D(cam);
+        // anim = null → the staged-parked preset drives the channels.
+        const auto st = f4::renderer::draw_vis_type_mesh(
+            res, 98, 0.0f, 0.0f, 0.0f, 0.0f);
+        EndMode3D();
+        EndDrawing();
+        EXPECT_GT(st.meshes_drawn, 0)
+            << "hierarchy model drew nothing through the animated path";
+
+        UnloadMaterial(default_mat);
+    }
 
     model_cache.unload_all();
     tex_cache.unload_all();

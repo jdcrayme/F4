@@ -66,34 +66,15 @@ std::vector<GltfMeshData> extract_gltf_lod_geometry(
 {
     std::vector<GltfMeshData> out;
 
-    // The emitter names meshes "LOD_<level>" (one glTF mesh per LOD).
-    const std::string want = "LOD_" + std::to_string(lod_level);
-    const f4::gltf::Mesh* mesh = nullptr;
-    for (const auto& m : doc.meshes) {
-        if (m.name == want) {
-            mesh = &m;
-            break;
-        }
-    }
-    // Fallback: a document with a single un-prefixed mesh (hand-authored
-    // test fixtures) serves as LOD 0.
-    if (!mesh && lod_level == 0) {
-        for (const auto& m : doc.meshes) {
-            if (m.name.empty() || m.name.rfind("LOD_", 0) != 0) {
-                mesh = &m;
-                break;
-            }
-        }
-    }
-    if (!mesh) return out;
-
-    for (const auto& prim : mesh->primitives) {
+    // One primitive → one GltfMeshData (shared by the lod-node and
+    // name-based collectors below).
+    auto extract_primitive = [&](const f4::gltf::Primitive& prim) {
         // TRIANGLES only — the same filter the old build_raylib_meshes
         // applied to f4::models::PrimitiveKind (the emitter emits mode 4).
-        if (prim.mode != 4) continue;
-        if (!prim.positions || *prim.positions >= doc.accessors.size()) continue;
+        if (prim.mode != 4) return;
+        if (!prim.positions || *prim.positions >= doc.accessors.size()) return;
         const auto& pos_acc = doc.accessors[*prim.positions];
-        if (pos_acc.count == 0) continue;
+        if (pos_acc.count == 0) return;
 
         GltfMeshData data;
 
@@ -115,7 +96,7 @@ std::vector<GltfMeshData> extract_gltf_lod_geometry(
             data.positions.push_back(p.z);
         }
         if (data.positions.size() != pos_acc.count * 3) {
-            continue;  // accessor read failed mid-way — skip this primitive
+            return;  // accessor read failed mid-way — skip this primitive
         }
         const std::size_t vert_count = pos_acc.count;
 
@@ -125,7 +106,8 @@ std::vector<GltfMeshData> extract_gltf_lod_geometry(
             for (std::size_t i = 0; i < vert_count; ++i) {
                 auto n = doc.read_vec3_float(*prim.normals, i);
                 if (!n) break;
-                const auto t = gltf_normal_to_raylib((*n)[0], (*n)[1], (*n)[2]);
+                const auto t = gltf_normal_to_raylib((*n)[0], (*n)[1],
+                                                     (*n)[2]);
                 data.normals.push_back(t.x);
                 data.normals.push_back(t.y);
                 data.normals.push_back(t.z);
@@ -157,7 +139,8 @@ std::vector<GltfMeshData> extract_gltf_lod_geometry(
                 auto c = doc.read_color_rgba(*prim.colors0, i);
                 if (!c) break;
                 auto to_u8 = [](float v) {
-                    const float clamped = std::clamp(v, 0.0f, 1.0f) * 255.0f;
+                    const float clamped =
+                        std::clamp(v, 0.0f, 1.0f) * 255.0f;
                     return static_cast<unsigned char>(clamped + 0.5f);
                 };
                 data.colors.push_back(to_u8((*c)[0]));
@@ -187,6 +170,90 @@ std::vector<GltfMeshData> extract_gltf_lod_geometry(
         }
 
         out.push_back(std::move(data));
+    };
+
+    // Collector 1 — the lod:N node (f4 extras kind "lod" + level, with
+    // the §6 name-grammar fallback). This covers BOTH runtime layouts:
+    //   - the legacy flat export (mesh DIRECTLY on the lod node), and
+    //   - the --hierarchy export's untagged models (identity-transform
+    //     part nodes beneath it — the static path draws them as-is,
+    //     which is geometrically identical since only tagged dof/sw
+    //     chain nodes ever carry transforms).
+    // Orphan stub nodes contribute nothing (they carry no meshes).
+    const f4::gltf::Node* lod_node = nullptr;
+    for (const auto& n : doc.nodes) {
+        if (!n.has_f4 || n.f4.kind != "lod") continue;
+        if (n.f4.lod_level.value_or(-1) == lod_level) {
+            lod_node = &n;
+            break;
+        }
+    }
+    if (!lod_node) {
+        for (const auto& n : doc.nodes) {
+            std::string kind, id;
+            if (f4::gltf::parse_f4_node_name(n.name, kind, id) &&
+                kind == "lod" && id == std::to_string(lod_level)) {
+                lod_node = &n;
+                break;
+            }
+        }
+    }
+    if (lod_node) {
+        if (lod_node->mesh.has_value() && *lod_node->mesh < doc.meshes.size()) {
+            for (const auto& prim : doc.meshes[*lod_node->mesh].primitives) {
+                extract_primitive(prim);
+            }
+        }
+        // DFS the subtree in document order, collecting mesh nodes.
+        struct Frame {
+            std::size_t node;
+        };
+        std::vector<Frame> stack;
+        for (auto it = lod_node->children.rbegin();
+             it != lod_node->children.rend(); ++it) {
+            stack.push_back({*it});
+        }
+        while (!stack.empty()) {
+            const auto fr = stack.back();
+            stack.pop_back();
+            if (fr.node >= doc.nodes.size()) continue;
+            const auto& node = doc.nodes[fr.node];
+            if (node.mesh.has_value() && *node.mesh < doc.meshes.size()) {
+                for (const auto& prim : doc.meshes[*node.mesh].primitives) {
+                    extract_primitive(prim);
+                }
+            }
+            for (auto it = node.children.rbegin();
+                 it != node.children.rend(); ++it) {
+                stack.push_back({*it});
+            }
+        }
+        if (!out.empty()) return out;
+    }
+
+    // Collector 2 — name-based fallback: meshes named "LOD_<level>"
+    // (the legacy flat export's mesh naming), or a single un-prefixed
+    // mesh for hand-authored test fixtures without a node graph.
+    const std::string want = "LOD_" + std::to_string(lod_level);
+    const f4::gltf::Mesh* mesh = nullptr;
+    for (const auto& m : doc.meshes) {
+        if (m.name == want) {
+            mesh = &m;
+            break;
+        }
+    }
+    if (!mesh && lod_level == 0) {
+        for (const auto& m : doc.meshes) {
+            if (m.name.empty() || m.name.rfind("LOD_", 0) != 0) {
+                mesh = &m;
+                break;
+            }
+        }
+    }
+    if (!mesh) return out;
+
+    for (const auto& prim : mesh->primitives) {
+        extract_primitive(prim);
     }
 
     return out;

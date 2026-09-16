@@ -619,6 +619,12 @@ spawn_aircraft_for_flight(f4::entities::EntityWorld& world,
     auto& vis = h.add<VisualModelComponent>();
     vis.vis_type = vis_type_index;
     vis.active_lod = 0;
+    // Ground-staged aircraft render with FreeFalcon's parked preset
+    // (gear shown) — all-zero switch masks would hide the gear on
+    // hierarchy-emitted models until the per-tick rig sync commands it.
+    if (!spawn_in_air) {
+        vis.anim_values.set_parked_defaults();
+    }
 
     // 4. BrainComponent — wraps TakeoffModule. B.3: when the flight
     // carries a saved waypoint plan, ALSO attach the derived MissionPlan
@@ -1318,6 +1324,10 @@ spawn_aircraft_for_intent(
     auto& vis = h.add<VisualModelComponent>();
     vis.vis_type = vis_type_index;  // V-3DLIVE (see flight path note)
     vis.active_lod = 0;
+    // Parked preset for ground-staged flights (see spawn_aircraft_from_flights).
+    if (!spawn_in_air) {
+        vis.anim_values.set_parked_defaults();
+    }
 
     auto& brain = h.add<BrainComponent>();
     brain.module().rotate_speed_kts = 140.0;
@@ -1654,7 +1664,10 @@ spawn_vehicles_from_unit(f4::entities::EntityWorld& world,
             vis.vis_type = vis_type;
             vis.active_lod = 0;
             // model_state defaults — the renderer's draw_entity_meshes()
-            // doesn't consult switches/DOFs today.
+            // doesn't consult switches/DOFs today. Parked preset: ground
+            // vehicles stage with gear-style visibility switches shown
+            // (no-op for models without bound switches).
+            vis.anim_values.set_parked_defaults();
 
             spawned.push_back(h.id());
             ++vehicle_index;
@@ -1831,6 +1844,9 @@ spawn_aircraft_from_squadrons(f4::entities::EntityWorld& world,
             auto& vis = h.add<VisualModelComponent>();
             vis.vis_type = vis_type_index;  // V-3DLIVE (see flight path note)
             vis.active_lod = 0;
+            // Parked inventory: gear down, doors shown (hierarchy models
+            // would render gear-less with all-zero switch masks).
+            vis.anim_values.set_parked_defaults();
 
             auto& brain = h.add<BrainComponent>();
             brain.module().rotate_speed_kts = 140.0;

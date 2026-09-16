@@ -37,7 +37,6 @@ std::size_t append_floats(std::vector<uint8_t>& data,
 
 struct PrimitiveFixture {
     f4::gltf::GltfDocument doc;
-
     // Builds one LOD_0 mesh with one triangle:
     //   positions (glTF meters): (0,0,0), (1,0,0), (0,1,0)
     //   normals:                 (0,1,0) x3
@@ -134,6 +133,30 @@ struct PrimitiveFixture {
         mesh.primitives.push_back(prim);
         f.doc.meshes.push_back(std::move(mesh));
         return f;
+    }
+
+    // Tagged lod:N node (extras kind "lod", level N).
+    static f4::gltf::Node make_lod_node(int level) {
+        f4::gltf::Node n;
+        n.name = "lod:" + std::to_string(level);
+        n.has_f4 = true;
+        n.f4.version = 1;
+        n.f4.kind = "lod";
+        n.f4.id = std::to_string(level);
+        n.f4.lod_level = level;
+        return n;
+    }
+
+    // dof/sw stub node — the f4import emitter writes these beside (or
+    // orphaned from) the geometry. Carries no mesh and no children.
+    static f4::gltf::Node make_stub_node(const char* name, const char* kind) {
+        f4::gltf::Node n;
+        n.name = name;
+        n.has_f4 = true;
+        n.f4.version = 1;
+        n.f4.kind = kind;
+        n.f4.id = name;
+        return n;
     }
 };
 
@@ -288,6 +311,40 @@ TEST(ExtractGltfLodGeometry, UnprefixedSingleMesh_ServesAsLod0) {
     ASSERT_EQ(meshes.size(), 1u);
 }
 
+TEST(ExtractGltfLodGeometry, HierarchyPartNodes_UntaggedModel_ExtractsSubtree) {
+    // The --hierarchy emitter's UNTAGGED models (no dof/sw chains):
+    // per-part meshes on identity part nodes beneath lod:0, named
+    // "part_<lod>_<n>" — NOT "LOD_<level>". The static extractor must
+    // find them via the lod node's subtree (the raw vertices are the
+    // same geometry the flat path emitted; part nodes carry no
+    // transforms), or re-importing with --hierarchy would blank every
+    // building and ground object in the 3D view.
+    auto f = PrimitiveFixture::make_default();
+
+    auto lod = PrimitiveFixture::make_lod_node(0);
+    f4::gltf::Node part;
+    part.name = "part_0_0";
+    part.mesh = 0;
+    f.doc.meshes[0].name = "part_0_0";  // hierarchy mesh naming
+
+    f.doc.nodes.push_back(std::move(lod));   // index 0
+    f.doc.nodes.push_back(std::move(part));  // index 1
+    f.doc.nodes[0].children = {1};
+    f.doc.scenes.push_back({{0}});
+    f.doc.scene = 0;
+
+    // No dof/sw tags anywhere — build_model classifies this document
+    // static, so the static extractor below is what the runtime uses
+    // (the parts extractor would also find the mesh node, but the
+    // animated path is never taken for an untagged document).
+    EXPECT_FALSE(f4::gltf::has_animation_tags(f.doc));
+
+    auto meshes = extract_gltf_lod_geometry(f.doc, 0);
+    ASSERT_EQ(meshes.size(), 1u);
+    EXPECT_EQ(meshes[0].positions.size(), 9u);
+    EXPECT_EQ(meshes[0].tex_id, 7);
+}
+
 TEST(ExtractGltfLodGeometry, VertexColors_UbyteNormalized) {
     auto f = PrimitiveFixture::make_default();
 
@@ -333,34 +390,6 @@ TEST(ExtractGltfLodGeometry, VertexColors_UbyteNormalized) {
 
 // ── extract_gltf_lod_parts ───────────────────────────────────────────────────
 
-namespace {
-
-// Tagged lod:N node (extras kind "lod", level N).
-f4::gltf::Node make_lod_node(int level) {
-    f4::gltf::Node n;
-    n.name = "lod:" + std::to_string(level);
-    n.has_f4 = true;
-    n.f4.version = 1;
-    n.f4.kind = "lod";
-    n.f4.id = std::to_string(level);
-    n.f4.lod_level = level;
-    return n;
-}
-
-// dof/sw stub node — the f4import emitter writes these beside (or
-// orphaned from) the geometry. Carries no mesh and no children.
-f4::gltf::Node make_stub_node(const char* name, const char* kind) {
-    f4::gltf::Node n;
-    n.name = name;
-    n.has_f4 = true;
-    n.f4.version = 1;
-    n.f4.kind = kind;
-    n.f4.id = name;
-    return n;
-}
-
-}  // namespace
-
 TEST(ExtractGltfLodParts, FlatLodMeshWithStubTags_ReturnsEmpty) {
     // The hybrid layout on disk (f4import without --hierarchy):
     // geometry attaches DIRECTLY to the lod:0 node while dof/sw/slot
@@ -371,11 +400,11 @@ TEST(ExtractGltfLodParts, FlatLodMeshWithStubTags_ReturnsEmpty) {
     // bogus empty lod0_parts).
     auto f = PrimitiveFixture::make_default();
 
-    auto lod = make_lod_node(0);
+    auto lod = PrimitiveFixture::make_lod_node(0);
     lod.mesh = 0;  // flat geometry on the lod node itself
     f.doc.nodes.push_back(std::move(lod));
-    f.doc.nodes.push_back(make_stub_node("dof:unknown.0", "dof"));
-    f.doc.nodes.push_back(make_stub_node("sw:unknown.0", "sw"));
+    f.doc.nodes.push_back(PrimitiveFixture::make_stub_node("dof:unknown.0", "dof"));
+    f.doc.nodes.push_back(PrimitiveFixture::make_stub_node("sw:unknown.0", "sw"));
 
     f.doc.scenes.push_back({{0}});  // scene root = the lod node only
     f.doc.scene = 0;
@@ -397,10 +426,10 @@ TEST(ExtractGltfLodParts, ReachableStubOverFlatMesh_TaggedButPartsEmpty) {
     // falls back to the flat path (otherwise the model draws nothing).
     auto f = PrimitiveFixture::make_default();
 
-    auto lod = make_lod_node(0);
+    auto lod = PrimitiveFixture::make_lod_node(0);
     lod.mesh = 0;
     f.doc.nodes.push_back(std::move(lod));
-    f.doc.nodes.push_back(make_stub_node("dof:unknown.0", "dof"));
+    f.doc.nodes.push_back(PrimitiveFixture::make_stub_node("dof:unknown.0", "dof"));
 
     f.doc.scenes.push_back({{0, 1}});  // stub referenced from the scene
     f.doc.scene = 0;
@@ -415,8 +444,8 @@ TEST(ExtractGltfLodParts, HierarchyMeshChain_ExtractsPartWithChain) {
     // (and including) the mesh node.
     auto f = PrimitiveFixture::make_default();
 
-    auto lod = make_lod_node(0);
-    auto dof = make_stub_node("dof:gear_leg.0", "dof");
+    auto lod = PrimitiveFixture::make_lod_node(0);
+    auto dof = PrimitiveFixture::make_stub_node("dof:gear_leg.0", "dof");
     dof.f4.channel = "gear_leg_pos.0";
 
     f4::gltf::Node mesh_node;

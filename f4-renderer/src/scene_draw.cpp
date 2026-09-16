@@ -143,6 +143,7 @@ DrawStats draw_animated_model(FeatureMeshResources& res,
                               const f4::anim::AnimValues* anim,
                               bool lighting_active) {
     DrawStats stats{};
+    if (!model.doc) return stats;  // no document — nothing to evaluate
     const Material* default_mat = res.default_material;
 
     for (const auto& part : model.lod0_parts) {

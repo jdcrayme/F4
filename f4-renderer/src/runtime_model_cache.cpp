@@ -19,6 +19,28 @@
 
 namespace f4::renderer {
 
+namespace {
+
+/// Store the parsed document on a successfully-built model. The
+/// document (nodes/meshes/accessors/extras) must outlive the cache
+/// entry: the animated draw path evaluates node chains against it
+/// every frame (eval_tagged_local) and the model-doctor UI reads the
+/// tags. Forgetting this left every built model with a null doc —
+/// static models never noticed, animated ones crashed. The buffer
+/// BYTES are dropped here: the mesh extraction above was their last
+/// consumer, and keeping them would pin every model's .bin in RAM
+/// across the whole cache.
+void keep_document(RuntimeModel& model,
+                   std::shared_ptr<f4::gltf::GltfDocument> doc) {
+    for (auto& buf : doc->buffers) {
+        buf.data.clear();
+        buf.data.shrink_to_fit();
+    }
+    model.doc = std::move(doc);
+}
+
+}  // namespace
+
 RuntimeModelCache::~RuntimeModelCache() {
     unload_all();
 }
@@ -104,6 +126,7 @@ void RuntimeModelCache::build_model(int vis_type, TextureCache& textures) {
             }
         }
 
+        keep_document(model, std::move(doc));
         model.built = true;
         cache_[vis_type] = std::move(model);
         return;
@@ -132,6 +155,7 @@ void RuntimeModelCache::build_model(int vis_type, TextureCache& textures) {
         }
     }
 
+    keep_document(model, std::move(doc));
     model.built = true;
     cache_[vis_type] = std::move(model);
 }
