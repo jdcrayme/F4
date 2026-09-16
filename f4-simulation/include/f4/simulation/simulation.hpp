@@ -518,6 +518,11 @@ private:
     /// (the walk happens only on ticks where at least one brain's
     /// fusion will actually rebuild — `dt` is the tick's own dt, the
     /// same value update_all will hand the brains).
+    ///
+    /// FID-OPT-2: the walk is ALSO cadence-gated — at most one walk per
+    /// kPictureCadenceTicks ticks; between walks a demanding tick hands
+    /// out the LAST snapshot (bounded <= 100 ms staleness). See the
+    /// kPictureCadenceTicks note for the measured rationale.
     void push_air_picture_(double dt);
     /// Task 73: push the weather/day-night visual scale to every roster
     /// brain's SensorFusion (unconditional, O(roster) double writes).
@@ -605,6 +610,19 @@ public:
         return signature_library_.get();
     }
 
+    /// FID-OPT-2 test/QC accessor: ticks since the last air-picture
+    /// walk. Grows without bound through demand-less quiet periods (the
+    /// next demand then walks immediately); under CONTINUOUS demand it
+    /// cycles 0..kPictureCadenceTicks-1 — a value of 0 = the picture
+    /// was (re)built THIS tick.
+    [[nodiscard]] int air_picture_age_ticks() const noexcept {
+        return ticks_since_picture_walk_;
+    }
+    /// FID-OPT-2: the shared air picture's refresh cadence in ticks
+    /// (6 ticks = 10 Hz at the 60 Hz minor frame). Public: hosts, tests,
+    /// and the QC surface reason about the bounded-staleness guarantee.
+    static constexpr int kPictureCadenceTicks = 6;
+
 private:
 
     // M3 tactics: one detection policy per spawned combat aircraft,
@@ -682,11 +700,27 @@ private:
     int campaign_armed_fighters_ = 0;
     int campaign_armed_defensive_ = 0;
 
-    // PERF-1: the shared air picture, rebuilt in place every combat tick
+    // PERF-1: the shared air picture, rebuilt in place on the walk ticks
     // by push_air_picture_() and handed (non-owning) to every roster
     // brain. The members are reused tick over tick so the steady state
     // allocates nothing (contacts/teams clear + repopulate in place).
     f4::ai::AirPicture air_picture_{};
+
+    // FID-OPT-2: the picture's own refresh cadence. The deep-horizon
+    // profile (the FID-OPT-2 measurement: the walk is ~1.4 ms — the
+    // ~4,400-entity transform scan — and the fusion rebuilds are ~3-6
+    // us) showed the WALK, not the per-brain rebuilds, is the
+    // concurrent-fight budget: any single demanding brain forced the
+    // walk every fight tick. The walk now runs at most every
+    // kPictureCadenceTicks ticks (10 Hz at the 60 Hz minor frame) while
+    // any brain demands the picture; between walks the LAST snapshot
+    // stays valid and is what the fusions' rebuilds consume — bounded
+    // staleness (<= 100 ms of sim), the same bound the design licenses
+    // for the cadence tier of the fusion refresh. Urgency does not
+    // bypass the walk cadence (it buys rebuild rate, not picture
+    // freshness). Deterministic: an integer tick counter.
+    // Initialized DUE so the first demand walk builds immediately.
+    int ticks_since_picture_walk_{kPictureCadenceTicks};
 
     // FID-5: the aggregate-contact feed + the picture-exclusion and
     // launch-veto sets — all NON-OWNING pointers the fidelity-tier

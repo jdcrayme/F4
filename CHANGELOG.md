@@ -7,6 +7,51 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 
 ## Fidelity tiers (most recent)
 
+- **FID-OPT-2** — the concurrent-fight budget: the fusion-refresh
+  tiering + the shared picture's own cadence (Docs/FID_OPT_PLAN.md
+  §3): the optimization tranche's second item. MEASURED FIRST, and
+  the measurement re-attributed the plan's own budget: the deep-
+  horizon cost is NOT the per-brain fusion rebuild the §3 arithmetic
+  had closed on (~3–6 µs each) but the SHARED AIR-PICTURE WALK it sat
+  next to invisibly (~1.4–1.7 ms per walk, 20–40× the fusion term —
+  `push_air_picture_` runs outside the `update_all` window the
+  FID-OPT-1 sub-profile had split, so the walk never showed). The
+  mechanism: the legacy GCI rule sees every missile in the theater,
+  so the beam-fight rule ("a visible hostile missile refreshes every
+  tick") pinned EVERY combat brain at 60 Hz for as long as any red
+  missile was airborne anywhere, and any single brain forced the walk
+  every fight tick. LANDED, one bound (≤100 ms staleness — the
+  design's own latency license), two cadences: (1) the fusion refresh
+  is TIERED BY THREAT — imminent (inside the fusion's own 50 NM RWR
+  band) keeps the every-tick beam-fight refresh, a distant theater
+  missile rides the new 6-tick (10 Hz) combat cadence, quiet brains
+  keep the skill timer; `will_rebuild_this_tick` mirrors all three
+  exactly; (2) the shared picture walk is ALSO cadence-gated — at
+  most one walk per 6 ticks while any brain demands it, the LAST
+  snapshot handed out between walks. FOUND AND FIXED EN ROUTE: the
+  push-null invariant (the first cut handed `nullptr` on
+  demanding-but-not-walking ticks, dropping every rebuilding brain
+  onto its ~1 ms world-query path — rebuilds measured at 977 µs
+  before the fix) and the walk-gate off-by-one (walks 7 ticks apart →
+  exactly 6). Measured on real TestCamp: walks 95,862 → 21,642 (4.4×
+  fewer) and walk time 131.6 s → 36.2 s across 6 sim-hours of armed
+  war with the missile-laden brain-seconds IDENTICAL (671,744 →
+  672,770 — the war's shape preserved); the 60× deep-horizon armed
+  certificate's sustained rate 52.36× → **61.07× (the 60× sustained
+  gate now clears)** and its worst sample 7.92× → 15.14×; the 20× 1-h
+  cert 1324× GREEN (baseline 54.6×, unchanged within noise), the 60×
+  1-h cert **1707×** GREEN, the 2-h armed cert 410× GREEN zero
+  dilation, the 4-h armed soak crash-free through 187+ deaggs / 48
+  A/A kills / the hour-4 tasking wave. The 2-h armed ledger MD5
+  changed (`73a06efd…`) — the first OPT patch that does: the throttle
+  shifts detection timing within the licensed bound; re-pinned as the
+  golden. The residual deep-horizon dilation (60 dilated samples,
+  worst 15.1×) is now NAMED: ~228 s of active-component work (radar
+  sim scans, steering, FMs, RWR over the materialized set) — the
+  FID-OPT-3 budget, measured, not designed. Tests: 5 fusion + 1
+  integration; full suite 2,565 green (the two pre-existing tree
+  failures unchanged).
+
 - **FID-OPT-1** — the active-cache walk + the ScopedSubscriptions fix
   (Docs/FID_OPT_PLAN.md): the optimization tranche's first item, driven
   by the FID-6 certificate's own finding ("the session's fixed per-tick

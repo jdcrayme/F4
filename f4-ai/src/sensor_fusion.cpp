@@ -119,6 +119,7 @@ void SensorFusion::initialize(std::uint64_t ownship_id,
     skill_      = skill;
     cfg_        = cfg;
     update_timer_ = 0.0;  // refresh on first update()
+    ticks_since_rebuild_ = 0;
     targets_.clear();
     prev_targets_.clear();
     picture_ = nullptr;  // the host re-pushes per tick; a stale pointer
@@ -133,9 +134,11 @@ void SensorFusion::update(double dt) {
     // predictor) dead-reckon on age_s; age 0 = fresh.
     for (auto& t : targets_) t.age_s += dt;
     update_timer_ -= dt;
+    ++ticks_since_rebuild_;
     if (update_timer_ <= 0.0) {
         rebuild_target_list();
         update_timer_ = update_interval_sec(skill_);
+        ticks_since_rebuild_ = 0;
     }
 }
 
@@ -143,6 +146,26 @@ void SensorFusion::force_refresh() {
     if (!world_) return;
     rebuild_target_list();
     update_timer_ = update_interval_sec(skill_);
+    ticks_since_rebuild_ = 0;
+}
+
+bool SensorFusion::missile_threat_imminent() const noexcept {
+    // The urgent tier of the combat refresh (FID-OPT-2): the nearest
+    // hostile missile inside the fusion's own RWR warning band. The band
+    // is the fusion's own config (the legacy rule's RWR range gate), so
+    // the tier scales with the host's configuration instead of adding a
+    // new magic number. No visible hostile missile => not urgent.
+    const TargetInfo* m = missile_threat();
+    if (m == nullptr) return false;
+    return m->range_ft <= cfg_.max_rwr_range_nm * FEET_PER_NM;
+}
+
+void SensorFusion::refresh_cadenced() {
+    if (!world_) return;
+    if (ticks_since_rebuild_ < kCombatCadenceTicks) return;
+    rebuild_target_list();
+    update_timer_ = update_interval_sec(skill_);
+    ticks_since_rebuild_ = 0;
 }
 
 const TargetInfo* SensorFusion::primary_target() const noexcept {

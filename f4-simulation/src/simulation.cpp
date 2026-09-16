@@ -1125,7 +1125,26 @@ void Simulation::push_air_picture_(double dt) {
         }
     }
 
-    if (any_demand) {
+    // FID-OPT-2: the walk's own cadence gate. The demand query alone
+    // still fired the ~1.4 ms walk on every fight tick (any single
+    // demanding brain — and in a multi-merge war SOME brain always has
+    // a theater-visible missile — forced it). The walk now refreshes
+    // the snapshot at most every kPictureCadenceTicks ticks (10 Hz at
+    // the 60 Hz minor frame); between walks the LAST snapshot stays
+    // valid and is what the rebuilding fusions consume — bounded
+    // staleness (<= 100 ms of sim), the same bound the design licenses
+    // for the combat cadence tier. Urgency buys rebuild rate, not
+    // picture freshness. Demand-less quiet periods leave the counter
+    // growing, so the first demand after a quiet stretch walks at once.
+    // (The window ages BEFORE the gate — increment then compare, the
+    // same shape as the fusion's cadence — so walks land exactly 6
+    // ticks apart under continuous demand.)
+    ++ticks_since_picture_walk_;
+    const bool walked =
+        any_demand &&
+        ticks_since_picture_walk_ >= kPictureCadenceTicks;
+
+    if (walked) {
         // Build: bucket copy (the with_component snapshot-by-value
         // contract), one EntityHandle::get per entity (~4,400 in a
         // populated save), the shared clutter predicate, and — for the
@@ -1221,13 +1240,27 @@ void Simulation::push_air_picture_(double dt) {
                 air_picture_.contacts.push_back(c);
             }
         }
-        push = &air_picture_;
+
+        // The walk resets the cadence window (the increment at the top
+        // of the gate already aged it for this tick).
+        ticks_since_picture_walk_ = 0;
     }
+
+    // A demanding tick ALWAYS hands the picture to the rebuilding
+    // brains — fresh on walk ticks, the LAST snapshot between walks
+    // (bounded <= 100 ms staleness; this is the invariant the original
+    // per-tick build provided implicitly, and the cadence gate must
+    // preserve it or every rebuilding brain falls back to its ~1 ms
+    // world-query path). No-demand ticks keep nullptr — the fusion's
+    // own world-query path, output-identical.
+    push = any_demand ? &air_picture_ : nullptr;
 
     // Push (or clear) on every roster brain in one pass. A brain that
     // initializes its fusion AFTER a push (the first combat tick) clears
     // the pointer in initialize() and rebuilds via the world path that
-    // one tick — output-identical either way.
+    // one tick — output-identical either way. On a demanding tick
+    // between walks the push hands out the LAST snapshot (bounded
+    // staleness — the FID-OPT-2 cadence), not a fresh build.
     for (const auto eid : aircraft_entities_) {
         entities::EntityHandle h(eid, &world_);
         auto* brain = h.get<f4::ai::BrainComponent>();

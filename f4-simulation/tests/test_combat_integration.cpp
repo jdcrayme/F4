@@ -344,6 +344,81 @@ TEST(CombatIntegration, DetectTrackLockLaunchKillSweep) {
 }
 
 // ============================================================================
+// FID-OPT-2: the shared air picture's own refresh cadence. The walk is
+// demand-gated (PERF-1) AND cadence-gated — at most one walk per
+// kPictureCadenceTicks ticks; between walks a demanding tick hands the
+// rebuilding fusions the LAST snapshot (bounded staleness).
+// ============================================================================
+TEST(CombatIntegration, AirPictureWalksAtTheCadenceUnderContinuousDemand) {
+    const auto f16 = f16_config_path();
+    if (f16.empty()) GTEST_SKIP() << "f16.json fixture not generated";
+
+    auto scenario =
+        load_scenario_from_string(combat_scenario_json(f16, true));
+    Simulation sim(std::move(scenario), std::filesystem::path("."));
+    sim.initialize();
+
+    const auto shooter_id = sim.aircraft_entities()[0];
+    const auto bandit_id = sim.aircraft_entities()[1];
+    entities::EntityHandle shooter(shooter_id, &sim.world());
+    entities::EntityHandle bandit(bandit_id, &sim.world());
+
+    // --- Quiet cruise: no hostile missile anywhere, so demand fires
+    // only on the fusions' 5 s skill timers. The picture age grows past
+    // the cadence between those sparse demands — the quiet periods pay
+    // no walk at all.
+    for (int i = 0; i < 120; ++i) sim.tick(kDt);  // 2 s, no skill expiry
+    EXPECT_GT(sim.air_picture_age_ticks(), Simulation::kPictureCadenceTicks)
+        << "a quiet theater must age the picture past the cadence";
+
+    // --- Launch: the victim's fusion sees the hostile missile on its
+    // next rebuild (GCI at first, then the RWR band — 13.2 NM launch
+    // range is deep inside it) and the urgent tier demands EVERY tick.
+    const auto amraam = sim.weapon_table().find_by_name("AIM-120C");
+    ASSERT_NE(amraam, weapons::kInvalidWeapon);
+    const auto missile = weapons::launch_missile(
+        sim.world(), sim.bus(), shooter, bandit_id,
+        sim.weapon_table(), amraam, sim.sim_time_s());
+    ASSERT_TRUE(missile.valid());
+
+    // Tick until the victim's fusion has the missile (its next skill
+    // rebuild — at most one 5 s interval away).
+    const auto* bandit_brain = bandit.get<f4::ai::BrainComponent>();
+    ASSERT_NE(bandit_brain, nullptr);
+    int detect_tick = -1;
+    for (int i = 0; i < 400; ++i) {
+        sim.tick(kDt);
+        if (bandit_brain->sensors().missile_threat() != nullptr) {
+            detect_tick = i;
+            break;
+        }
+    }
+    ASSERT_NE(detect_tick, -1)
+        << "the victim's fusion never saw the incoming missile";
+
+    // From here the urgent tier demands every tick, so the walk age
+    // must cycle exactly: the detection tick itself walked (its skill
+    // timer demanded, the quiet-aged picture was due), so the next 18
+    // ticks run 1,2,3,4,5,0,1,... — a walk every 6th tick, the cached
+    // snapshot handed out in between.
+    for (int i = 0; i < 3 * Simulation::kPictureCadenceTicks; ++i) {
+        sim.tick(kDt);
+        EXPECT_EQ(sim.air_picture_age_ticks(),
+                  (i + 1) % Simulation::kPictureCadenceTicks)
+            << "under continuous demand the walk must hold the "
+               "kPictureCadenceTicks cycle (tick " << i << ")";
+    }
+
+    // The demand gate stays armed the whole time (the urgent tier
+    // refreshes every tick) — the cycle above IS the cadence bound:
+    // the picture any rebuild consumes is at most 6 ticks (100 ms)
+    // stale.
+    const auto* m = bandit_brain->sensors().missile_threat();
+    ASSERT_NE(m, nullptr);
+    EXPECT_TRUE(bandit_brain->sensors().missile_threat_imminent());
+}
+
+// ============================================================================
 // 3. The policy adapter: SensorFusion sees radar truth, not GCI truth.
 // ============================================================================
 TEST(CombatIntegration, RadarBackedPolicyFlipsSensorFusionOffGci) {

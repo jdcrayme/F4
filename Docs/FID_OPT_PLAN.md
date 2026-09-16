@@ -5,7 +5,8 @@
 > Fidelity Tiers phase is COMPLETE (FID-1..6 + FID-VIEW-1); this tranche
 > attacks the two cost centers its own certificate named.
 
-Status: **IN PROGRESS** — FID-OPT-1 in flight.
+Status: **IN PROGRESS** — FID-OPT-1 and FID-OPT-2 landed; FID-OPT-3
+(the component-update budget) measured, not designed.
 
 ---
 
@@ -142,64 +143,155 @@ set_dormant, the spawn/unpark campaign pattern, the passive+dormant
 edge) + the full suite green (the two pre-existing tree failures
 unchanged).
 
-## 3. FID-OPT-2 — the concurrent-fight budget (measured, designed; NOT in this patch)
+## 3. FID-OPT-2 — the concurrent-fight budget (LANDED)
 
 With the walk dead, the deep-horizon armed war re-measures clean until
-the first aircraft materialize — then a NEW cost appears, and the
-sub-profiled tick (`F4_TICK_PROF` split of the update_all window)
-names it:
+the first aircraft materialize — then the concurrent-fight cost
+appears. The FID-OPT-2 measurement (a temporary env-gated profiler on
+the real TestCamp armed war — `F4_FUSION_PROF`, removed before
+landing) re-attributed the budget, and the plan's own §3 arithmetic
+was PARTLY WRONG in an instructive way:
 
-- Zero aircraft (hours 0–1.4): update_all ≈ **0.1 µs/tick**, flat.
-  The 1 sim-hour armed war costs 247 ms of tick time end to end.
-- First deagg (hour ~1.4, active=6): the update_all window steps to
-  ~65 µs/tick and then GROWS LINEARLY with the materialized set —
-  ~120 µs/tick at 6 aircraft, ~700–800 µs/tick at 21 (the 4-hour
-  run's deep-horizon arc).
-- The sub-timers exonerate everything else: the rebuild runs ~1–4
-  times per RUN (not per tick; ~5 ms each), safety O(n²) ≤ 11 ms
-  total, ATC/weather ~1 ms, the deferred-queue flush is empty
-  (nothing in production publishes deferred). What remains scales
-  as **brains × picture-contacts**: each materialized aircraft's
-  combat brain rebuilds its SensorFusion from the shared air
-  picture EVERY tick (the PERF-1 design: one world walk builds the
-  snapshot; each brain's fusion still consumes it per brain per
-  tick). At ~200 contacts × ~40 ns × 6 brains the arithmetic closes
-  on the measured ~52 µs/tick exactly.
+**What the measurement found** (3-h armed war at 60×, fight minutes):
 
-So the concurrent-fight budget is **O(live-aircraft × picture
-contacts) per tick in the fusion rebuild** — the price of every
-materialized fighter searching continuously. The levers, in order of
-preference (NONE ride this patch — each changes detection timing and
-needs its own golden set):
+- The shared air-picture walk (`push_air_picture_`, the PERF-1
+  build) costs **~1.4–1.7 ms per walk** — the ~4,400-entity transform
+  scan + tag reads + contact fill — and ran on **21–37 of every 60
+  fight ticks** (~30–53 ms per sim-second).
+- The per-brain fusion rebuilds cost **~3–6 µs each** (the plan's
+  arithmetic closed on these: ~200 contacts × ~40 ns), 200–283 per
+  sim-second (~1–2.4 ms per sim-second).
+- **The walk is 20–40× the fusion term.** The plan's sub-profile
+  (F4_TICK_PROF) had split `update_all` — and `push_air_picture_`
+  runs OUTSIDE `world_.update_all`, inside the same phase window — so
+  the walk was invisible to the split and the whole budget got
+  attributed to the rebuild loop.
+- The mechanism: the legacy GCI rule sees every missile in the
+  THEATER, so `missile_threat() != nullptr` — the beam-fight rule's
+  trigger, written for "a missile is chasing ME" — was true for every
+  combat brain for as long as ANY red missile was airborne anywhere.
+  Every brain force-refreshed every tick, and any single one of them
+  forced the shared walk via the demand gate.
+- Threat tiers measured across the fight minutes: 68–85% of
+  missile-threat brain-ticks had the nearest hostile missile inside
+  the 50 NM RWR band; time-to-impact ≤ 15 s was ~0 (missiles are
+  either in long flyout or already past); gun passes ~0.
 
-1. **Fusion rebuild throttling**: rebuild a brain's fusion at a fixed
-   cadence (e.g. every 6 ticks = 10 Hz) unless an urgent condition
-   (missile in flight, an existing STT lock) forces the every-tick
-   path. Deterministic (fixed N), bounded latency (≤100 ms sim),
-   tiered by threat instead of uniform.
-2. **Contact-set culling per brain**: feed each fusion only the
-   contacts within its radar's honest range/geometry before the
-   rebuild (the fusion's own filters run after the copy today).
-3. **A hard concurrent-fight cap** (the plan's original phrasing):
-   hold the rest abstract — last resort, it changes war outcomes.
+**The design as landed — one bound, two cadences.** The design's own
+"bounded latency (≤100 ms sim)" is the license: nothing a brain reads
+through the combat refresh is ever more than 6 ticks (100 ms) stale.
 
-The 4-hour armed war at 60× now completes cleanly (the UAF fix); its
-per-tick arc is the FID-OPT-2 baseline to beat.
+1. **The fusion refresh tiering** (the plan's lever 1, verbatim):
+   - **urgent** — the nearest hostile missile inside the fusion's OWN
+     RWR warning band (`cfg_.max_rwr_range_nm`, 50 nm — no new magic
+     number): every-tick `force_refresh()`, the classic beam fight,
+     unchanged. The WVR gun-pass STT refresh is also unchanged.
+   - **cadence** — a hostile missile visible beyond the band: the new
+     `refresh_cadenced()` rebuilds at `kCombatCadenceTicks = 6` (10 Hz
+     at the 60 Hz minor frame). Deterministic, integer-tick.
+   - **quiet** — no hostile missile: the skill-interval timer,
+     unchanged.
+   Every rebuild of ANY kind restarts the cadence window;
+   `will_rebuild_this_tick()` mirrors all three tiers exactly (pinned
+   against actual rebuild events, not the intended ones).
+2. **The shared picture's own cadence** (the measured addition — the
+   design's lever 1 alone would have left the walk running every fight
+   tick, because one urgent brain forces it): the walk is ALSO gated —
+   at most one walk per `kPictureCadenceTicks = 6` while any brain
+   demands the picture. Between walks a demanding tick hands the
+   rebuilding fusions the **LAST snapshot** — bounded ≤ 100 ms
+   staleness. Urgency buys rebuild rate, not picture freshness. The
+   demand-less quiet periods grow the counter without bound, so the
+   first demand after a quiet stretch walks at once.
 
-## 4. What does NOT change
+**Found-and-fixed en route (both pinned by tests):**
+
+- **The push-null invariant.** The first cut kept `push =
+  &air_picture_` inside the walk branch, so demanding-but-not-walking
+  ticks handed every rebuilding brain `nullptr` — and each urgent
+  force-refresh fell back to its ~1 ms world-query path (measured:
+  rebuilds went 5 µs → 977 µs each, the fusion term exploding 200×).
+  The invariant the original per-tick build provided implicitly — a
+  demanding tick ALWAYS hands a picture, fresh or cached — is now
+  explicit and tested.
+- **The cadence off-by-one.** The walk gate compared the PRE-increment
+  counter, landing walks 7 ticks apart. Fixed to increment-then-compare
+  (the same shape as the fusion's cadence): walks land exactly 6 apart
+  under continuous demand.
+
+**Measured (real TestCamp, post-OPT-2 vs the pre-OPT-2 tree):**
+
+| metric (6 sim-hours = 2×3-h armed wars, 60×) | before | after |
+|---|---|---|
+| air-picture walks | 95,862 | **21,642 (4.4× fewer)** |
+| walk time | 131.6 s | **36.2 s (3.6×)** |
+| fusion rebuilds | 696k @ 4.79 s | 520k @ 3.67 s |
+| missile-laden brain-seconds | 671,744 | 672,770 (war shape preserved) |
+
+| certificate (real TestCamp) | before | after |
+|---|---|---|
+| 20× 1-h tiered | 1472× GREEN | **1324× GREEN, zero dilation** |
+| — FullFidelity baseline | 55.3× | 54.6× (unchanged within noise) |
+| 60× 1-h tiered | 1331× GREEN | **1707× GREEN** |
+| 2-h armed, 20× | — | **410× GREEN, zero dilation** |
+| 3-h armed, 60× (deep horizon) | sustained 52.36×, min sample 7.92× | **sustained 61.07× (clears 57), min sample 15.14×** |
+| 4-h armed soak, 20× | crash-free | **crash-free** (187+ deaggs / 48 A/A kills / 46 aggregate flights / 41 live at the hour-4 tasking wave) |
+
+The 2-h armed ledger MD5 changed (`73a06efd…`) — the first OPT patch
+that does: the throttle shifts detection/reaction timing within the
+licensed ≤100 ms bound, and the new ledger is the re-pinned golden.
+The 3-h/60× armed certificate still exits 15 honestly: 60 dilated
+samples remain (unchanged count) with the worst at 15.1× — see below.
+
+**Tests.** 5 new fusion tests (imminent-in-band, distant-cadence,
+the 6-tick bound, force-refresh window restart, skill-shorter-than-
+cadence) + 1 integration test (the walk-age cycle 1..5,0 under
+continuous demand; quiet-period growth past the bound; the
+bounded-staleness consumption). Full suite 2,565 green — the two
+pre-existing tree failures unchanged (one unrelated timing flake in
+`CampaignSaver.MutatesTimers` observed once under `-j4`, passes
+consistently in isolation and on rerun).
+
+## 4. What remains — FID-OPT-3 candidate (measured, not designed)
+
+The deep-horizon fight minutes still cost ~400–660 µs/tick and the
+armed certificates' per-sample gates still dilate there (the 60× 3-h
+worst sample 15.1×; the 20× 4-h tail 11–23×). The fusion-rebuild
+throttle is done — the post-OPT-2 tick split over the same 6 sim-hours
+names what is left:
+
+- tick total 281.8 s, of which `update_all` 268.8 s (95%);
+- the picture walk 36.2 s + the fusion rebuilds 3.7 s are INSIDE that
+  window now, leaving **~228 s of active-component work**: the radar
+  sim scans, the steering modules, the flight models, the RWR sweep
+  over the materialized set — everything the concurrent fight actually
+  simulates.
+
+That is the next tranche item's budget. The fusion and the walk are no
+longer the story.
+
+## 5. What does NOT change
 
 - The save/load pipeline, the ATM ladder, the ground war engine, the
   C2 clock model — untouched.
-- Full-fidelity sessions (no parked inventory in their worlds, the
-  walk was already near-empty) — behavior and bytes identical.
-- The scenario player / viewer paths — `update_all` semantics for
-  active components are preserved exactly.
-- The bubble manager, the FID tier machinery, the aggregate feed —
-  consumers of the world, not the walk; untouched.
+- Full-fidelity sessions — the throttle only engages through the
+  combat ladder's demand gate and the shared picture; the baseline
+  rate is unchanged within noise (55.3× → 54.6× on the same war).
+- The scenario player / viewer paths — `update_all` semantics are
+  preserved exactly; the picture cadence is host-side and
+  combat-gated.
+- The bubble manager, the FID tier machinery — consumers of the
+  world, not the picture; untouched. The FID-5 aggregate feed rides
+  the walk (aggregate contacts refresh at the picture cadence too,
+  the same ≤100 ms bound; the launch veto is id-based and unaffected).
 
 ---
 
 *Evidence for §1: `F4_TICK_PROF=1` + a temporary cache-size diagnostic
 on the 1-hour TestCamp armed war, this sandbox, 2026-09-15 (recorded
 in Docs/history/worklog.md). The diagnostic was removed before the
-implementation landed.*
+implementation landed. Evidence for §3: the temporary
+`F4_FUSION_PROF=1` harness (per-second brain/tier/walk/rebuild
+counters over the roster) on 2×3-hour TestCamp armed wars at 60×,
+same sandbox and day; removed before the implementation landed — its
+counters and the before/after tables above are the record.*

@@ -1144,3 +1144,202 @@ TEST(SensorFusion, WillRebuildThisTickMirrorsTimerAndMissileThreat) {
             << "the beam-fight rule must demand the picture every tick";
     }
 }
+
+// ============================================================================
+// FID-OPT-2: the combat refresh tiering. The legacy beam-fight rule
+// force-refreshed every tick whenever ANY hostile missile was visible —
+// and the legacy GCI rule sees every missile in the THEATER, so a
+// multi-merge war pinned every brain at 60 Hz. The refresh is now tiered:
+// imminent (inside the fusion's own RWR band) = every tick; distant =
+// a fixed 6-tick combat cadence; quiet = the skill timer. The host's
+// demand gate mirrors all three exactly — pinned here against the ACTUAL
+// rebuild events (a target list's age resets on every rebuild).
+// ============================================================================
+
+namespace {
+
+/// The brain's tiered refresh decision, verbatim (brain_component.hpp):
+/// the test drives the fusion exactly the way the combat ladder does.
+void brain_tiered_refresh(SensorFusion& sf, double dt) {
+    sf.update(dt);
+    if (sf.missile_threat() != nullptr) {
+        if (sf.missile_threat_imminent()) {
+            sf.force_refresh();
+        } else {
+            sf.refresh_cadenced();
+        }
+    }
+}
+
+/// True when the fusion's target list was (re)built during the call
+/// just made — a rebuild produces fresh entries (age_s == 0); between
+/// rebuilds update() only ages them.
+bool rebuilt_this_tick(const SensorFusion& sf) {
+    for (const auto& t : sf.targets()) {
+        if (t.age_s != 0.0) return false;
+    }
+    return true;  // empty list counts as rebuilt (nothing aged)
+}
+
+/// A hostile missile `range_nm` north of the ownship, closing at
+/// `closing_fps` (southbound). GCI sees it at any range — that is the
+/// theater-global visibility the tiering exists to bound.
+void add_incoming_missile(EntityWorld& world, double range_nm,
+                          double closing_fps) {
+    add_entity(world, {WorldPosition{0.0, range_nm * FT_PER_NM, 20000.0},
+                       WorldPosition{0.0, -closing_fps, 0.0},
+                       "red", "missile"});
+}
+
+constexpr double kTestDt = 1.0 / 60.0;
+
+} // anonymous namespace
+
+TEST(SensorFusion, ImminentMissileIsInsideTheRwrBand) {
+    EntityWorld world;
+    MessageBus bus;
+    OwnshipSpec os;
+    const auto own = add_entity(world, {os.pos, os.vel, "blue", "fighter"});
+    // 2 NM, closing 1,200 ft/s: the classic beam fight — deep inside
+    // the fusion's own 50 NM RWR warning band.
+    add_incoming_missile(world, 2.0, 1200.0);
+
+    SensorFusion sf;
+    sf.initialize(own, world, bus, SkillLevel::Veteran);
+    brain_tiered_refresh(sf, kTestDt);  // first update rebuilds
+    ASSERT_NE(sf.missile_threat(), nullptr);
+
+    for (int i = 0; i < 20; ++i) {
+        EXPECT_TRUE(sf.missile_threat_imminent())
+            << "a 2 NM missile must read as urgent (tick " << i << ")";
+        EXPECT_TRUE(sf.will_rebuild_this_tick(kTestDt))
+            << "the urgent tier must demand the picture every tick";
+        brain_tiered_refresh(sf, kTestDt);
+        EXPECT_TRUE(rebuilt_this_tick(sf))
+            << "the urgent tier must refresh EVERY tick (tick " << i << ")";
+    }
+}
+
+TEST(SensorFusion, DistantMissileRidesTheCombatCadence) {
+    EntityWorld world;
+    MessageBus bus;
+    OwnshipSpec os;
+    const auto own = add_entity(world, {os.pos, os.vel, "blue", "fighter"});
+    // 70 NM, closing: visible to GCI (the theater rumor tier) but
+    // beyond the RWR band. Over the 30-tick window it moves ~3,700 ft —
+    // still ~69 NM, so the tier never flips mid-test.
+    add_incoming_missile(world, 70.0, 700.0);
+
+    SensorFusion sf;
+    sf.initialize(own, world, bus, SkillLevel::Veteran);
+    brain_tiered_refresh(sf, kTestDt);  // first update rebuilds
+    ASSERT_NE(sf.missile_threat(), nullptr);
+    EXPECT_FALSE(sf.missile_threat_imminent());
+
+    // 30 ticks at dt=1/60: the cadence (6 ticks) fires exactly 5 times
+    // — on ticks 6, 12, 18, 24, 30 — and the demand gate predicts every
+    // one of them exactly (and nothing else).
+    int rebuilds = 0;
+    for (int i = 0; i < 30; ++i) {
+        const bool predicted = sf.will_rebuild_this_tick(kTestDt);
+        brain_tiered_refresh(sf, kTestDt);
+        const bool actual = rebuilt_this_tick(sf);
+        EXPECT_EQ(predicted, actual)
+            << "demand gate must mirror the tiered refresh (tick " << i
+            << ")";
+        if (actual) ++rebuilds;
+        // Inside the window the track file ages; the cadence bound is
+        // 6 ticks of staleness — never more.
+        ASSERT_LE(sf.targets()[0].age_s, 6.0 * kTestDt + 1e-9);
+    }
+    EXPECT_EQ(rebuilds, 5);
+}
+
+TEST(SensorFusion, CadenceBoundIsSixTicks) {
+    EntityWorld world;
+    MessageBus bus;
+    OwnshipSpec os;
+    const auto own = add_entity(world, {os.pos, os.vel, "blue", "fighter"});
+    add_incoming_missile(world, 70.0, 700.0);
+
+    SensorFusion sf;
+    sf.initialize(own, world, bus, SkillLevel::Veteran);
+    brain_tiered_refresh(sf, kTestDt);  // rebuild #1
+    ASSERT_NE(sf.missile_threat(), nullptr);
+
+    // Five quiet ticks (no rebuild, ages accumulate)...
+    for (int i = 0; i < 5; ++i) {
+        EXPECT_FALSE(sf.will_rebuild_this_tick(kTestDt))
+            << "inside the cadence window there is no demand (tick " << i
+            << ")";
+        brain_tiered_refresh(sf, kTestDt);
+        EXPECT_FALSE(rebuilt_this_tick(sf)) << "tick " << i;
+    }
+    // ...the sixth tick fires the cadence...
+    EXPECT_TRUE(sf.will_rebuild_this_tick(kTestDt));
+    brain_tiered_refresh(sf, kTestDt);
+    EXPECT_TRUE(rebuilt_this_tick(sf));
+    // ...and the window restarts.
+    EXPECT_FALSE(sf.will_rebuild_this_tick(kTestDt));
+    brain_tiered_refresh(sf, kTestDt);
+    EXPECT_FALSE(rebuilt_this_tick(sf));
+}
+
+TEST(SensorFusion, ForceRefreshRestartsTheCadenceWindow) {
+    EntityWorld world;
+    MessageBus bus;
+    OwnshipSpec os;
+    const auto own = add_entity(world, {os.pos, os.vel, "blue", "fighter"});
+    add_incoming_missile(world, 70.0, 700.0);
+
+    SensorFusion sf;
+    sf.initialize(own, world, bus, SkillLevel::Veteran);
+    brain_tiered_refresh(sf, kTestDt);  // rebuild #1
+
+    // Burn three ticks of the window, then an event-driven refresh (a
+    // gun pass, a policy hook — any force_refresh caller) lands.
+    for (int i = 0; i < 3; ++i) brain_tiered_refresh(sf, kTestDt);
+    sf.force_refresh();
+    EXPECT_TRUE(rebuilt_this_tick(sf));
+
+    // The window restarts from the forced rebuild: five quiet ticks,
+    // then the cadence fires on the sixth.
+    for (int i = 0; i < 5; ++i) {
+        EXPECT_FALSE(sf.will_rebuild_this_tick(kTestDt));
+        brain_tiered_refresh(sf, kTestDt);
+        EXPECT_FALSE(rebuilt_this_tick(sf)) << "tick " << i;
+    }
+    EXPECT_TRUE(sf.will_rebuild_this_tick(kTestDt));
+    brain_tiered_refresh(sf, kTestDt);
+    EXPECT_TRUE(rebuilt_this_tick(sf));
+}
+
+TEST(SensorFusion, SkillIntervalShorterThanCadenceKeepsTheSkillReign) {
+    EntityWorld world;
+    MessageBus bus;
+    OwnshipSpec os;
+    const auto own = add_entity(world, {os.pos, os.vel, "blue", "fighter"});
+    add_incoming_missile(world, 70.0, 700.0);
+
+    // Veteran at dt = 1.0 s: the skill interval (5 s) is SHORTER than
+    // the cadence (6 updates), so every window is cut short by the
+    // skill rebuild and the cadence never independently fires — the
+    // skill timer remains the only refresh mechanism. Whole-second
+    // updates keep the timer arithmetic exact (5 decrements of 1.0).
+    SensorFusion sf;
+    sf.initialize(own, world, bus, SkillLevel::Veteran);
+    brain_tiered_refresh(sf, 1.0);  // rebuild #1 (first update)
+
+    int rebuilds = 0;
+    for (int i = 0; i < 30; ++i) {
+        const bool predicted = sf.will_rebuild_this_tick(1.0);
+        brain_tiered_refresh(sf, 1.0);
+        const bool actual = rebuilt_this_tick(sf);
+        EXPECT_EQ(predicted, actual)
+            << "demand gate must mirror the tiered refresh (tick " << i
+            << ")";
+        if (actual) ++rebuilds;
+    }
+    // Skill rebuilds every 5th update; the cadence never fires.
+    EXPECT_EQ(rebuilds, 6);
+}

@@ -137,6 +137,45 @@ public:
     /// immediate re-evaluation.
     void force_refresh();
 
+    // --- Combat refresh tiering (FID-OPT-2) ---------------------------------
+    // The beam-fight rule ("a visible hostile missile force-refreshes every
+    // tick") was written for a missile chasing YOU. The legacy GCI rule
+    // (GCI sees everything in the theater) makes missile_threat()
+    // theater-global, so in a multi-merge war every brain sat at a
+    // force-refresh every tick for as long as any red missile was airborne
+    // anywhere — the deep-horizon concurrent-fight collapse the FID-OPT-2
+    // certificate named. The refresh is now TIERED BY THREAT:
+    //
+    //   urgent  — the nearest hostile missile is inside the fusion's own
+    //             RWR warning band (cfg_.max_rwr_range_nm): the classic
+    //             beam-fight. Every-tick refresh, unchanged.
+    //   cadence — a hostile missile is visible but beyond the band (the
+    //             GCI "theater rumor" tier). The fusion rebuilds at a
+    //             fixed kCombatCadenceTicks (10 Hz at the 60 Hz minor
+    //             frame) instead of every tick.
+    //   quiet   — no hostile missile: the skill-interval timer, unchanged.
+    //
+    // Deterministic (fixed N), bounded latency (the cadence tier's data is
+    // at most kCombatCadenceTicks stale — 100 ms of sim at the minor
+    // frame), and the host's demand gate (will_rebuild_this_tick) mirrors
+    // the tiers exactly, so the shared air picture is only built when a
+    // rebuild will actually consume it.
+    /// The combat cadence, in ticks (6 ticks = 10 Hz at the 60 Hz minor
+    /// frame). Public so hosts/tests reason about the bound.
+    static constexpr int kCombatCadenceTicks = 6;
+
+    /// True when the nearest hostile missile is INSIDE the fusion's own
+    /// RWR warning band (the urgent tier of the combat refresh — see the
+    /// tiering note above). False with no visible hostile missile.
+    [[nodiscard]] bool missile_threat_imminent() const noexcept;
+
+    /// The cadence tier of the combat refresh: rebuild only when at least
+    /// kCombatCadenceTicks ticks have passed since the last rebuild (of
+    /// any kind — the window restarts on force_refresh and the skill
+    /// timer too). A no-op inside the window. The brain calls this for
+    /// missile threats beyond the RWR band; see the tiering note above.
+    void refresh_cadenced();
+
     // --- Shared air picture (PERF-1, PERFORMANCE_PLAN.md §3) -----------------
     /// Set (or clear, with nullptr) the host-built snapshot the NEXT
     /// rebuild consumes instead of walking the EntityWorld. Non-owning;
@@ -160,16 +199,23 @@ public:
     }
 
     /// PERF-1 demand query: will THIS update(dt) rebuild the target
-    /// list? Exactly the update() decision — the skill timer expiring
-    /// (update_timer_ <= dt after decay) OR the beam-fight rule (a
-    /// visible hostile missile force-refreshes every tick). The HOST
-    /// asks this before world update to decide whether building the
-    /// shared air picture this tick is necessary: no consumer, no
+    /// list? Exactly the update() + the brain's tiered refresh decision
+    /// (FID-OPT-2): the skill timer expiring (update_timer_ <= dt after
+    /// decay), OR the beam-fight urgent tier (a hostile missile inside
+    /// the RWR band force-refreshes every tick), OR the cadence tier (a
+    /// visible hostile missile beyond the band: the brain's
+    /// refresh_cadenced() fires when the post-update counter reaches
+    /// kCombatCadenceTicks — this pre-update query mirrors it with +1).
+    /// The HOST asks this before world update to decide whether building
+    /// the shared air picture this tick is necessary: no consumer, no
     /// walk. Const, side-effect-free, and exact — the same inputs the
-    /// brain's own update() will see this tick (nothing mutates
-    /// between the host query and the brain's update).
+    /// brain's own update() will see this tick (nothing mutates between
+    /// the host query and the brain's update).
     [[nodiscard]] bool will_rebuild_this_tick(double dt) const noexcept {
-        return update_timer_ <= dt || missile_threat() != nullptr;
+        if (update_timer_ <= dt) return true;
+        if (missile_threat() == nullptr) return false;
+        if (missile_threat_imminent()) return true;
+        return ticks_since_rebuild_ + 1 >= kCombatCadenceTicks;
     }
 
     // --- Accessors ---
@@ -310,6 +356,9 @@ private:
     std::string own_team_{};
 
     double update_timer_{0.0};
+    /// Ticks since the last rebuild of any kind (FID-OPT-2 cadence
+    /// window; incremented in update(), reset by every rebuild).
+    int ticks_since_rebuild_{0};
     std::vector<TargetInfo> targets_;
     std::vector<TargetInfo> prev_targets_;  // snapshot for EWMA rate computation
 

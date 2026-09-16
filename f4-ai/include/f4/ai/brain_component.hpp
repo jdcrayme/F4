@@ -443,12 +443,24 @@ public:
                 }
                 // Per the skill interval (Veteran = 5 s)...
                 sensors_.update(dt);
-                // ...but a beam fight needs a fresh picture: while an
-                // incoming hostile missile is visible, refresh every tick
-                // (the stale entry itself keeps the refresh armed — see
-                // MissileModule's defeat-linger note for the tail end).
+                // ...but a beam fight needs a fresh picture. FID-OPT-2
+                // tiers the refresh by threat: the legacy rule force-
+                // refreshed every tick whenever ANY hostile missile was
+                // visible — and the legacy GCI rule sees every missile
+                // in the THEATER, so in a multi-merge war every brain
+                // sat at 60 Hz for as long as any red missile was
+                // airborne anywhere (the deep-horizon collapse the
+                // FID-OPT-2 certificate named). Now: an imminent threat
+                // — inside the fusion's own RWR warning band — keeps
+                // the every-tick refresh (the classic beam fight); a
+                // distant one rides the fixed 10 Hz combat cadence
+                // (deterministic, bounded at 100 ms of staleness).
                 if (sensors_.missile_threat() != nullptr) {
-                    sensors_.force_refresh();
+                    if (sensors_.missile_threat_imminent()) {
+                        sensors_.force_refresh();
+                    } else {
+                        sensors_.refresh_cadenced();
+                    }
                 }
                 // A committed merge needs the same data rate. The gun fire
                 // control dead-reckons the track file on age_s (the radar
