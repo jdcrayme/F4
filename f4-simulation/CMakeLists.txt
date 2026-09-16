@@ -50,7 +50,7 @@ add_library(f4-simulation STATIC
     src/combat_transcript.cpp
     src/bubble_manager.cpp
 )
-target_link_libraries(f4-simulation PUBLIC f4_warnings)
+target_link_libraries(f4-simulation PUBLIC f4_warnings f4-anim)  # AnimValues on VisualModelComponent (AIRCRAFT_ANIMATION_PLAN §3.4)
 
 # V-THREAD: CampaignSessionRunner owns a std::thread — the library (not
 # just its executables) needs the threads library now.

@@ -107,6 +107,25 @@ F4Extras read_f4_extras(f4::json::Reader& r) {
             f.col_shape = r.read_string();
         } else if (key == "material") {
             f.col_material = r.read_string();
+        } else if (key == "channel") {
+            // Animation channel binding (AIRCRAFT_ANIMATION_PLAN §3.2):
+            // the semantic channel that drives this node, as serialized
+            // by f4::anim::channel_name().
+            f.channel = r.read_string();
+        } else if (key == "op") {
+            // Animated operation: "rot" (rotate about local axis),
+            // "trans" (translate along a vector), "scale" (lerp to a
+            // target scale). Default when absent: "rot".
+            f.op = r.read_string();
+        } else if (key == "axis") {
+            f.axis = read_fixed_array<3>(r);
+        } else if (key == "trans") {
+            f.trans = read_fixed_array<3>(r);
+        } else if (key == "scale_target") {
+            f.scale_target = read_fixed_array<3>(r);
+        } else if (key == "reversed") {
+            // BXSwitchNode XSWT_REVERSED_EFFECT: the mask is inverted.
+            f.reversed = r.read_bool();
         } else {
             r.skip_value();
         }

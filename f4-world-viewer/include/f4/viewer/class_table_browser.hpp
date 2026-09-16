@@ -28,6 +28,7 @@
 
 #pragma once
 
+#include <f4/anim/channels.hpp>   // AnimValues — the doctor's scratch channel state
 #include <f4/world_types/class_table.hpp>
 
 #include <cstdint>
@@ -40,6 +41,7 @@
 
 namespace f4::renderer {
 class RenderResources;   // fwd — the shared GPU resources (models/textures/shader)
+struct RuntimeModel;     // fwd — the loaded model the doctor actuates
 }
 
 namespace f4::viewer {
@@ -154,6 +156,12 @@ private:
     bool last_preview_drew_meshes_ = false;
     std::string last_preview_status_;
 
+    // ANIM-DOCTOR: scratch animation channel state driving the preview's
+    // animated draw path (hierarchy-emitted models). Edited by
+    // draw_animation_doctor; reset to parked defaults whenever the
+    // previewed vis_type changes.
+    f4::anim::AnimValues doctor_anim_{};
+
     // --- Export state ---
     char export_path_buf_[1024] = {};
     std::string export_status_;
@@ -184,6 +192,11 @@ private:
 
     /// Draw the 3D model preview for a given vis_type index.
     void draw_model_preview(int16_t vis_type_idx);
+
+    /// ANIM-DOCTOR: channel sliders + gear cycle for an animated
+    /// (hierarchy-emitted) preview model (model_doctor.cpp). Writes
+    /// doctor_anim_; the preview's animated draw path reads it.
+    void draw_animation_doctor(const f4::renderer::RuntimeModel& model);
 
     /// Ensure the RenderTexture2D for the preview exists.
     void ensure_preview_target(int w, int h);

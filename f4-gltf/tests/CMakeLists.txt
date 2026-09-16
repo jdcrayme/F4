@@ -5,3 +5,4 @@ function(f4_add_test name source)
 endfunction()
 
 f4_add_test(test_gltf_loader test_gltf_loader.cpp)
+f4_add_test(test_anim_map test_anim_map.cpp)

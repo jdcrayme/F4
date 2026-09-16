@@ -42,7 +42,8 @@
 
 #include <f4/renderer/draw_3d.hpp>      // DrawStats
 #include <f4/renderer/lit_shader.hpp>
-#include <f4/renderer/mesh_builder.hpp>  // MeshEntry
+#include <f4/renderer/mesh_builder.hpp>
+#include <f4/anim/channels.hpp>   // AnimValues (per-entity animation channels)  // MeshEntry
 #include <f4/renderer/texture_cache.hpp>
 #include <f4/renderer/runtime_model_cache.hpp>
 
@@ -131,7 +132,8 @@ DrawStats draw_vis_type_mesh(
     FeatureMeshResources& res,
     int vis_type,
     float enu_x, float enu_y, float enu_z,
-    float facing_deg);
+    float facing_deg,
+    const f4::anim::AnimValues* anim = nullptr);
 
 /// Resolve class_table_index (entity_type) → vis_type[0] → cached mesh,
 /// then DrawMesh each mesh entry at the given ENU position rotated by

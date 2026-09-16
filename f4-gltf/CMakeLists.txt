@@ -17,8 +17,9 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 #   - f4_warnings: shared warning flags.
 add_library(f4-gltf STATIC
     src/gltf_loader.cpp
+    src/anim_map.cpp
 )
-target_link_libraries(f4-gltf PUBLIC f4_warnings f4-json)
+target_link_libraries(f4-gltf PUBLIC f4_warnings f4-json f4-anim)
 
 target_include_directories(f4-gltf
     PUBLIC

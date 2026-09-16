@@ -17,3 +17,4 @@ function(f4_add_test name source)
 endfunction()
 
 f4_add_test(test_models test_models.cpp)
+f4_add_test(test_grouped_extraction test_grouped_extraction.cpp)

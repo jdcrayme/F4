@@ -21,7 +21,11 @@
 #include <f4/import/gltf_emitter.hpp>
 #include <f4/import/manifest_writer.hpp>
 #include <f4/import/texture_png.hpp>
+#include <f4/import/vocab.hpp>
 #include <f4/models/model_database.hpp>
+
+#include <cstdlib>
+#include <map>
 
 #include <cstdio>
 #include <cstdlib>
@@ -48,6 +52,10 @@ void print_usage() {
         "    Convert KoreaObj models to glTF. Writes to <Data>/Models/koreaobj/.\n"
         "    --model <N>  Convert a single model by index.\n"
         "    --all        Convert all models in the database.\n"
+        "    --hierarchy  Emit the animated DOF/switch hierarchy with\n"
+        "                 channel bindings (AIRCRAFT_ANIMATION_PLAN §4).\n"
+        "    --vocab <d>  Family vocabulary dir (default: F4_VOCAB_DIR env\n"
+        "                 or the source-tree f4-import/vocab).\n"
         "    (Without --model or --all, converts model 0 as a smoke test.)\n"
         "\n"
         "  f4import textures --install <root> --data <dir> [--texture <N>] [--all]\n"
@@ -192,6 +200,25 @@ bool want_all(int argc, char** argv, int start) {
     return false;
 }
 
+bool want_flag(int argc, char** argv, int start, const char* flag) {
+    for (int i = start; i < argc; ++i) {
+        if (std::string(argv[i]) == flag) return true;
+    }
+    return false;
+}
+
+// Value of --vocab <path> (family vocabulary directory). Empty when
+// absent — the caller falls back to the source-tree vocab dir baked in
+// at configure time.
+std::string parse_vocab_dir(int argc, char** argv, int start) {
+    for (int i = start; i < argc; ++i) {
+        std::string a = argv[i];
+        if (a == "--vocab" && i + 1 < argc) return argv[++i];
+        if (a.rfind("--vocab=", 0) == 0) return a.substr(8);
+    }
+    return {};
+}
+
 int run_models(int argc, char** argv) {
     namespace fs = std::filesystem;
     auto install_root = parse_install(argc, argv, 2);
@@ -203,6 +230,27 @@ int run_models(int argc, char** argv) {
 
     int model_idx = parse_model_index(argc, argv, 2);
     bool all = want_all(argc, argv, 2);
+    bool hierarchy = want_flag(argc, argv, 2, "--hierarchy");
+    auto vocab_dir = parse_vocab_dir(argc, argv, 2);
+    if (vocab_dir.empty() && std::getenv("F4_VOCAB_DIR")) {
+        vocab_dir = std::getenv("F4_VOCAB_DIR");
+    }
+    if (vocab_dir.empty()) vocab_dir = F4_VOCAB_DEFAULT_DIR;
+
+    // Family vocabulary: only needed on the hierarchy path. A missing
+    // dir degrades to unknown.N tagging (no renaming, no channels).
+    std::map<std::string, f4::import::FamilyTable> families;
+    if (hierarchy) {
+        try {
+            families = f4::import::load_family_tables(vocab_dir);
+            std::cerr << "  vocab: " << families.size()
+                      << " family table(s) from " << vocab_dir << "\n";
+        } catch (const std::exception& e) {
+            std::cerr << "f4import models: vocab load failed: " << e.what()
+                      << "\n";
+            return 1;
+        }
+    }
 
     try {
         // Find KoreaObj.HDR/LOD in the install.
@@ -255,6 +303,20 @@ int run_models(int argc, char** argv) {
 
             try {
                 f4::import::GltfEmitOptions opts;
+                opts.emit_hierarchy = hierarchy;
+                if (hierarchy) {
+                    // Classify the model into a family and bind its
+                    // table (unknown family → no renaming).
+                    const auto* rec = db.model(idx);
+                    const std::string fam = f4::import::guess_family(
+                        rec->effective_dofs(), rec->effective_switches(),
+                        static_cast<int>(rec->slots.size()));
+                    if (auto it = families.find(fam); it != families.end()) {
+                        opts.family_table = &it->second;
+                        std::cerr << "  model " << idx << ": family " << fam
+                                  << "\n";
+                    }
+                }
                 auto result = f4::import::emit_model_as_gltf(
                     db, idx, out_dir, asset_id, opts);
 

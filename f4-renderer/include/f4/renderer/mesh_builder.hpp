@@ -60,6 +60,17 @@ struct GltfMeshData {
     std::string texture_uri;             ///< PNG URI relative to the model dir
 };
 
+/// One drawable PART of a hierarchy-emitted model (Docs/
+/// AIRCRAFT_ANIMATION_PLAN.md §5.2): the vertex data plus the glTF node
+/// chain that positions it. The chain holds document node indices from
+/// the lod node's child down to (and including) the mesh's own node —
+/// the tagged DOF/switch nodes in between are what the runtime
+/// animates. An empty chain = static geometry under the lod node.
+struct GltfPartData {
+    GltfMeshData data;
+    std::vector<std::size_t> node_chain;
+};
+
 /// Extract one LOD level's geometry from a glTF model document.
 ///
 /// The f4import models emitter writes one glTF mesh per LOD level,
@@ -77,6 +88,19 @@ struct GltfMeshData {
 /// .bin buffers must already be loaded — GltfDocument::load() does
 /// that).
 std::vector<GltfMeshData> extract_gltf_lod_geometry(
+    const f4::gltf::GltfDocument& doc, int lod_level);
+
+/// Extract one LOD level as ANIMATED PARTS from a hierarchy-emitted
+/// document (the f4import --hierarchy layout: lod:N nodes with
+/// dof/sw node chains and per-part meshes). Returns one GltfPartData
+/// per mesh node beneath the requested lod node, each carrying its
+/// node chain. Empty vector when the document has no lod node (or the
+/// LOD has no mesh nodes) — callers fall back to
+/// extract_gltf_lod_geometry for flat documents.
+///
+/// Pure function: no Raylib, no GL, no I/O (the document's external
+/// .bin buffers must already be loaded).
+std::vector<GltfPartData> extract_gltf_lod_parts(
     const f4::gltf::GltfDocument& doc, int lod_level);
 
 /// Upload one extracted mesh to the GPU as a Raylib ::Mesh.

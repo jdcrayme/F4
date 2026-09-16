@@ -130,6 +130,13 @@ struct F4Extras {
     // Col-specific:
     std::optional<std::string> col_shape;
     std::optional<std::string> col_material;
+    // Animation binding (AIRCRAFT_ANIMATION_PLAN.md §3.2/§4):
+    std::optional<std::string> channel;  // semantic channel name (f4-anim)
+    std::optional<std::string> op;       // "rot" (default), "trans", "scale"
+    std::optional<std::array<double, 3>> axis;   // rot axis (unit, local)
+    std::optional<std::array<double, 3>> trans;  // trans vector at value 1
+    std::optional<std::array<double, 3>> scale_target; // scale at value 1
+    std::optional<bool> reversed;        // switch mask inverted (BXSwitch)
 };
 
 /// A node in the scene graph.

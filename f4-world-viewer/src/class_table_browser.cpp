@@ -23,6 +23,9 @@
 #include <f4/assets/asset_root.hpp>              // Data/ discovery
 #include <f4/viewer/pipeline_io.hpp>             // discover_data_dir, temp_dir
 
+#include <f4/renderer/feature_mesh.hpp>          // FeatureMeshResources (animated preview)
+#include <f4/renderer/scene_draw.hpp>            // draw_animated_model
+
 #include <imgui.h>
 #include <rlImGui.h>
 #include <raylib.h>
@@ -524,14 +527,17 @@ void ClassTableBrowser::fit_camera_to_model(int16_t vis_type_idx) {
 
     // Compute the bbox by scanning the loaded LOD-0 mesh vertices (they
     // are already in Raylib RH Y-up feet — the glTF loader baked the
-    // transform, so no model-space conversion is needed).
+    // transform, so no model-space conversion is needed). Animated
+    // models contribute their parts' raw vertices (the parked pose —
+    // node chains apply on top at draw time).
     const auto* model = render_resources_->model_cache.lookup(vis_type_idx);
-    if (!model || model->lod0_meshes.empty()) return;
+    if (!model || (model->lod0_meshes.empty() && model->lod0_parts.empty()))
+        return;
 
     float min_x = 0, min_y = 0, min_z = 0, max_x = 0, max_y = 0, max_z = 0;
     bool any = false;
-    for (const auto& me : model->lod0_meshes) {
-        if (!me.mesh.vertices || me.mesh.vertexCount <= 0) continue;
+    auto scan_mesh = [&](const f4::renderer::MeshEntry& me) {
+        if (!me.mesh.vertices || me.mesh.vertexCount <= 0) return;
         for (int v = 0; v < me.mesh.vertexCount; ++v) {
             const float x = me.mesh.vertices[v * 3 + 0];
             const float y = me.mesh.vertices[v * 3 + 1];
@@ -545,7 +551,9 @@ void ClassTableBrowser::fit_camera_to_model(int16_t vis_type_idx) {
                 min_z = std::min(min_z, z); max_z = std::max(max_z, z);
             }
         }
-    }
+    };
+    for (const auto& me : model->lod0_meshes) scan_mesh(me);
+    for (const auto& part : model->lod0_parts) scan_mesh(part.entry);
     if (!any) return;
 
     cam_target_x_ = (min_x + max_x) * 0.5f;
@@ -589,7 +597,7 @@ void ClassTableBrowser::draw_model_preview(int16_t vis_type_idx) {
     // Build (or reuse) the glTF model through the shared cache.
     build_preview_meshes(vis_type_idx);
     const auto* model = render_resources_->model_cache.lookup(vis_type_idx);
-    if (!model || model->lod0_meshes.empty()) {
+    if (!model || (model->lod0_meshes.empty() && model->lod0_parts.empty())) {
         ImGui::TextDisabled("Model[%d] has no glTF export in Data/Models/koreaobj",
                             vis_type_idx);
         last_preview_status_ = "no geometry";
@@ -600,6 +608,9 @@ void ClassTableBrowser::draw_model_preview(int16_t vis_type_idx) {
     if (last_previewed_vis_type_ != vis_type_idx) {
         fit_camera_to_model(vis_type_idx);
         last_previewed_vis_type_ = vis_type_idx;
+        // ANIM-DOCTOR: fresh scratch channels for the new model
+        // (parked — gear shown, effects off).
+        doctor_anim_.set_parked_defaults();
     }
 
     // Ensure the RenderTexture2D exists before drawing.
@@ -647,14 +658,15 @@ void ClassTableBrowser::draw_model_preview(int16_t vis_type_idx) {
     rt.texture.format  = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8;
 
     auto& lit_shader = render_resources_->lit_shader;
-    const Material* default_mat = render_resources_->default_material_valid()
+    Material* default_mat = render_resources_->default_material_valid()
         ? &render_resources_->default_material() : nullptr;
+    const bool lighting_active = lit_shader.ensure();
 
     BeginTextureMode(rt);
         ClearBackground({ 30, 30, 38, 255 });
         BeginMode3D(camera);
             // Push shader uniforms via the shared f4::renderer::LitShader.
-            if (lit_shader.is_loaded()) {
+            if (lighting_active) {
                 lit_shader.set_lighting(
                     { 0.65f, -1.0f, 0.35f },     // light_dir
                     { 255, 250, 235, 255 },         // light_color
@@ -703,8 +715,24 @@ void ClassTableBrowser::draw_model_preview(int16_t vis_type_idx) {
             BeginBlendMode(BLEND_ALPHA);
             rlDisableBackfaceCulling();
             std::size_t drawn = 0;
-            for (auto idx : opaque_order) { draw_one(idx); ++drawn; }
-            for (auto idx : alpha_order)  { draw_one(idx); ++drawn; }
+            if (model->animated && !model->lod0_parts.empty()) {
+                // ANIM-DOCTOR: animated (hierarchy-emitted) model —
+                // draw the parts through the shared animated loop with
+                // the doctor's scratch channel values, so the doctor's
+                // sliders actuate the preview live.
+                f4::renderer::FeatureMeshResources base;
+                base.model_cache      = &render_resources_->model_cache;
+                base.texture_cache    = &render_resources_->texture_cache;
+                base.lit_shader       = &lit_shader;
+                base.default_material = default_mat;
+                const auto st = f4::renderer::draw_animated_model(
+                    base, *model, MatrixIdentity(), &doctor_anim_,
+                    lighting_active);
+                drawn = st.meshes_drawn;
+            } else {
+                for (auto idx : opaque_order) { draw_one(idx); ++drawn; }
+                for (auto idx : alpha_order)  { draw_one(idx); ++drawn; }
+            }
             rlEnableBackfaceCulling();
             EndBlendMode();
 
@@ -729,15 +757,19 @@ void ClassTableBrowser::draw_model_preview(int16_t vis_type_idx) {
 
     // Status line below the preview.
     {
-        std::size_t n_meshes = meshes.size();
         std::size_t n_tris = 0;
         int n_textured = 0;
-        for (const auto& me : meshes) {
+        auto scan = [&](const f4::renderer::MeshEntry& me) {
             n_tris += static_cast<std::size_t>(me.mesh.triangleCount);
             if (me.tex_id >= 0) ++n_textured;
-        }
-        ImGui::TextDisabled("%zu meshes | %zu tris | %d textured | glTF LOD 0",
-                             n_meshes, n_tris, n_textured);
+        };
+        for (const auto& me : model->lod0_meshes) scan(me);
+        for (const auto& part : model->lod0_parts) scan(part.entry);
+        const std::size_t n_meshes =
+            model->lod0_meshes.size() + model->lod0_parts.size();
+        ImGui::TextDisabled("%zu meshes | %zu tris | %d textured | glTF LOD 0%s",
+                             n_meshes, n_tris, n_textured,
+                             model->animated ? " | animated" : "");
     }
 
     // Orbit camera controls via drag on the image.
@@ -892,6 +924,21 @@ void ClassTableBrowser::draw_detail_panel() {
                         "Data/World/korea.world.json + ct2json output.");
 
     ImGui::EndGroup();
+
+    // ANIM-DOCTOR: for hierarchy-emitted models, the animation doctor
+    // section lives here under the preview (not a separate Inspector
+    // tab) — its sliders actuate the model shown above.
+    if (render_resources_ && active_vis > 0) {
+        build_preview_meshes(active_vis);
+        const auto* previewed =
+            render_resources_->model_cache.lookup(active_vis);
+        if (previewed && previewed->animated &&
+            !previewed->lod0_parts.empty()) {
+            ImGui::Separator();
+            ImGui::Text("Animation doctor — model %d", active_vis);
+            draw_animation_doctor(*previewed);
+        }
+    }
 }
 
 void ClassTableBrowser::draw_export_bar() {

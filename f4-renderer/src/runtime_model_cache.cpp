@@ -5,6 +5,7 @@
 #include <f4/renderer/runtime_model_cache.hpp>
 
 #include <f4/renderer/texture_cache.hpp>
+#include <f4/gltf/anim_map.hpp>
 #include <f4/gltf/gltf_loader.hpp>
 
 #include <raylib.h>
@@ -60,6 +61,54 @@ void RuntimeModelCache::build_model(int vis_type, TextureCache& textures) {
         return;
     }
 
+    // Animated (hierarchy-emitted) models extract as PARTS with node
+    // chains + an animation map; flat/legacy documents keep the static
+    // path. Docs/AIRCRAFT_ANIMATION_PLAN.md §5.1-5.2.
+    //
+    // has_animation_tags scans every node in the document — including
+    // the stub dof/sw/slot nodes the emitter writes BESIDE the geometry
+    // in the §4 intermediate layout (lod node owns the mesh directly;
+    // the tags hang off no mesh chain). Those documents must keep
+    // drawing through the flat path, so the parts extraction is the
+    // real animated-vs-static test: empty parts → fall through
+    // (extract_gltf_lod_parts' documented contract).
+    model.animated = f4::gltf::has_animation_tags(*doc);
+    auto parts = model.animated ? extract_gltf_lod_parts(*doc, 0)
+                                : std::vector<GltfPartData>{};
+    if (model.animated && parts.empty()) {
+        // Flat geometry on the lod node — the dof/sw tags are stub
+        // nodes emitted beside the mesh, not chains over it. Keep the
+        // static draw path (extract_gltf_lod_parts' documented
+        // "callers fall back" contract).
+        model.animated = false;
+    }
+    if (model.animated) {
+        model.anim_map = f4::gltf::build_anim_map(*doc);
+        model.lod0_parts.reserve(parts.size());
+        for (auto& p : parts) {
+            RuntimePart rp;
+            rp.entry.tex_id = p.data.tex_id;
+            rp.entry.texture_uri = std::move(p.data.texture_uri);
+            rp.node_chain = std::move(p.node_chain);
+            if (!p.data.positions.empty()) {
+                rp.entry.mesh = build_gltf_mesh(p.data);
+            }
+            model.lod0_parts.push_back(std::move(rp));
+        }
+
+        // Texture uploads for the parts path.
+        for (const auto& rp : model.lod0_parts) {
+            if (rp.entry.tex_id >= 0 && !rp.entry.texture_uri.empty()) {
+                textures.upload_png(rp.entry.tex_id,
+                                    model_dir / rp.entry.texture_uri);
+            }
+        }
+
+        model.built = true;
+        cache_[vis_type] = std::move(model);
+        return;
+    }
+
     // Extract + upload LOD 0 (highest detail — same convention as the
     // old build_mesh_for_model / build_feature_mesh paths).
     auto geoms = extract_gltf_lod_geometry(*doc, 0);
@@ -105,6 +154,15 @@ void RuntimeModelCache::unload_all() {
             entry.mesh = {};
         }
         model.lod0_meshes.clear();
+        for (auto& part : model.lod0_parts) {
+            if (part.entry.mesh.vertexCount > 0) {
+                UnloadMesh(part.entry.mesh);
+            }
+            part.entry.mesh = {};
+        }
+        model.lod0_parts.clear();
+        model.anim_map = {};
+        model.animated = false;
         model.built = false;
     }
     cache_.clear();

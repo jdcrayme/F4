@@ -109,6 +109,7 @@ add_library(f4_world_viewer STATIC
     src/canvas.cpp
     src/imgui_panels.cpp
     src/inspector_panel.cpp
+    src/model_doctor.cpp
     src/ground_layout_view.cpp
     src/ground_layout_3d.cpp
     src/entity_model_3d.cpp

@@ -21,6 +21,10 @@ using namespace f4::sensors;
 namespace entities = f4::entities;
 namespace messaging = f4::messaging;
 
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif // !M_PI
+
 namespace {
 
 constexpr double kFeetPerNm = 6076.11548;

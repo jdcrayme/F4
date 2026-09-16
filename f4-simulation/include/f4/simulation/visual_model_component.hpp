@@ -39,6 +39,7 @@
 
 #pragma once
 
+#include <f4/anim/channels.hpp>
 #include <f4/entities/entity.hpp>
 
 #include <cstdint>
@@ -76,6 +77,16 @@ struct VisualModelComponent : entities::Component<VisualModelComponent> {
 
     /// Optional: which texture set (summer/winter/desert). Default 0.
     int texture_set{0};
+
+    /// Per-instance animation channel values (Docs/
+    /// AIRCRAFT_ANIMATION_PLAN.md §3.4). Written by the rig (driven
+    /// from the flight model's semantic state) or by the world-viewer's
+    /// model-doctor panel; read by the renderer's animated draw path.
+    /// Defaults to all-zero — FreeFalcon's zero-initialized
+    /// SwitchValues[], i.e. switch-masked variants hidden until the rig
+    /// commands them. Hosts staging aircraft on the ground should apply
+    /// set_parked_defaults() at spawn.
+    f4::anim::AnimValues anim_values{};
 };
 
 } // namespace f4::simulation

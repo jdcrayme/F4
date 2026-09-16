@@ -33,6 +33,16 @@ target_compile_definitions(test_textures_gltf PRIVATE
 )
 gtest_discover_tests(test_textures_gltf)
 
+# Hierarchy emission tests (AIRCRAFT_ANIMATION_PLAN.md §4): family
+# vocab path baked in for the table loader.
+add_executable(test_hierarchy_emit test_hierarchy_emit.cpp)
+target_link_libraries(test_hierarchy_emit PRIVATE GTest::gtest_main f4-import f4-gltf f4-models)
+target_compile_definitions(test_hierarchy_emit PRIVATE
+    KOREAOBJ_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/f4-models/tests/fixtures"
+    F4_VOCAB_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../vocab"
+)
+gtest_discover_tests(test_hierarchy_emit)
+
 # The CLI test spawns the f4import binary as a subprocess — it needs the
 # path baked in at compile time.
 add_executable(test_f4import_cli test_f4import_cli.cpp)

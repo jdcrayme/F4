@@ -39,6 +39,8 @@
 
 namespace f4::import {
 
+struct FamilyTable;  // vocab.hpp — family→channel mapping tables
+
 /// Options for the glTF emitter.
 struct GltfEmitOptions {
     /// When true, convert Falcon model space (feet, +Z up) to glTF
@@ -57,6 +59,22 @@ struct GltfEmitOptions {
     /// slot:unknown.N). When a rosetta map is available (future work),
     /// the unknown.N tags are replaced with semantic names.
     bool tag_dof_switch_slot = true;
+
+    /// When true, emit the ANIMATED hierarchy (Docs/AIRCRAFT_ANIMATION_PLAN.md
+    /// §4): grouped extraction keeps the DOF/switch node structure, real
+    /// frames + value-processing parameters land in the extras, geometry
+    /// primitives attach beneath their tagged nodes, and family-table
+    /// bindings rename unknown.N tags to semantic ids with channel
+    /// bindings. When false (default), the legacy flat path emits one
+    /// static mesh per LOD with placeholder tagged nodes — compatible
+    /// with pre-animation Data/ exports and the static draw path.
+    bool emit_hierarchy = false;
+
+    /// Family vocabulary table applied during hierarchy emission
+    /// (vocab.hpp). Null = no renaming: every tag stays unknown.N and
+    /// no channel is bound (the hierarchy is still emitted and
+    /// animatable through later rebinding).
+    const FamilyTable* family_table = nullptr;
 };
 
 /// Result of a glTF emission.
@@ -74,6 +92,9 @@ struct GltfEmitResult {
                                       // (one per textured/colored source mesh)
     std::size_t material_count = 0;   // materials emitted (incl. vertexcolor)
     std::size_t texture_count = 0;    // materials referencing a texture image
+    /// Hierarchy path: distinct channel names bound in the emitted
+    /// document (first-seen order). Empty on the flat path.
+    std::vector<std::string> channels;
 };
 
 /// Emit a single KoreaObj model as a .gltf + .bin file pair.

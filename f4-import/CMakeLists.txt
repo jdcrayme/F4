@@ -20,6 +20,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 #   - f4_warnings: shared warning flags.
 
 add_library(f4-import STATIC
+    src/vocab.cpp
     src/doctor.cpp
     src/manifest_writer.cpp
     src/gltf_emitter.cpp
@@ -41,6 +42,10 @@ target_include_directories(f4-import
 # CLI tool
 add_executable(f4import cli/f4import.cpp)
 target_link_libraries(f4import PRIVATE f4-import f4-models)
+# Default vocabulary directory (family tables) — the source tree, for
+# non-installed builds. --vocab / F4_VOCAB_DIR override at runtime.
+target_compile_definitions(f4import PRIVATE
+    F4_VOCAB_DEFAULT_DIR="${CMAKE_CURRENT_SOURCE_DIR}/vocab")
 
 # F4_SIDE marks this as an importer-side library for the boundary
 # enforcement check (Stage 5 adds verify_boundary.cmake).

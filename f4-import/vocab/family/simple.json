@@ -1,0 +1,43 @@
+{
+  "f4": { "v": 1 },
+  "family": "simple",
+  "doc": "Simple-model family mapping from FreeFalcon's SIMP_* indices (src/sim/include/dofsnswitches.h). Simple models share one switch per effect and frequently mirror parts as separate DOFs bound to the same channel (e.g. both rudder halves at 8/9).",
+  "dof": {
+    "0":  { "id": "stab.l",     "channel": "stab.l" },
+    "1":  { "id": "stab.r",     "channel": "stab.r" },
+    "6":  { "id": "flap.l",     "channel": "flap.l" },
+    "7":  { "id": "flap.r",     "channel": "flap.r" },
+    "8":  { "id": "rudder",     "channel": "rudder" },
+    "9":  { "id": "rudder.2",   "channel": "rudder" },
+    "11": { "id": "swing_wing", "channel": "swing_wing" },
+    "12": { "id": "swing_wing.2", "channel": "swing_wing" },
+    "13": { "id": "swing_wing.3", "channel": "swing_wing" },
+    "14": { "id": "swing_wing.4", "channel": "swing_wing" },
+    "15": { "id": "swing_wing.5", "channel": "swing_wing" },
+    "16": { "id": "swing_wing.6", "channel": "swing_wing" },
+    "17": { "id": "swing_wing.7", "channel": "swing_wing" },
+    "18": { "id": "swing_wing.8", "channel": "swing_wing" },
+    "19": { "id": "tef.r",      "channel": "tef.r" },
+    "20": { "id": "tef.l",      "channel": "tef.l" },
+    "21": { "id": "lef.r",      "channel": "lef.r" },
+    "22": { "id": "lef.l",      "channel": "lef.l" },
+    "23": { "id": "canopy",     "channel": "canopy" },
+    "40": { "id": "prop",       "channel": "prop_spin" },
+    "41": { "id": "refuel_probe", "channel": "refuel_probe" },
+    "42": { "id": "spoiler.l1", "channel": "spoiler.l1" },
+    "43": { "id": "spoiler.r1", "channel": "spoiler.r1" },
+    "44": { "id": "spoiler.l2", "channel": "spoiler.l2" },
+    "45": { "id": "spoiler.r2", "channel": "spoiler.r2" },
+    "47": { "id": "throttle",   "channel": "throttle" },
+    "48": { "id": "rpm",        "channel": "rpm" }
+  },
+  "sw": {
+    "0": { "id": "ab",          "channel": "sw.ab" },
+    "1": { "id": "tanker_lights", "channel": "light.nav" },
+    "2": { "id": "gear_leg.0",  "channel": "sw.gear_leg.0" },
+    "3": { "id": "vapor",       "channel": "effect.vapor" },
+    "5": { "id": "canopy",      "channel": "sw.canopy" },
+    "6": { "id": "dragchute",   "channel": "sw.dragchute" },
+    "7": { "id": "hook",        "channel": "sw.hook" }
+  }
+}

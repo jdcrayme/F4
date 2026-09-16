@@ -4,6 +4,9 @@
 
 #include <f4/renderer/scene_draw.hpp>
 
+#include <f4/gltf/anim_map.hpp>
+#include <f4/gltf/gltf_loader.hpp>
+
 #include <raylib.h>
 #include <raymath.h>
 #include <rlgl.h>
@@ -48,6 +51,127 @@ void draw_ground(const GroundConfig& cfg) {
         DrawLine3D(origin, {origin.x, origin.y, origin.z + L},
                    Color{60, 60, 220, 255});
     }
+}
+
+// ---------------------------------------------------------------------------
+// Animated model application (AIRCRAFT_ANIMATION_PLAN.md §5.2)
+//
+// A hierarchy-emitted model draws as PARTS: each part's node chain is
+// composed per frame from the entity's channel values (dof nodes)
+// and switch visibility (sw branch nodes). Static nodes contribute
+// their authored transform. All matrix math lives here — the f4-gltf
+// side stays pure double math via eval_tagged_local().
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// Compose one chain node's local matrix for this frame.
+Matrix anim_node_local_matrix(const f4::gltf::GltfDocument& doc,
+                              std::size_t node_index,
+                              const f4::anim::AnimValues* anim,
+                              const f4::gltf::AnimNode* anim_node) {
+    // The driving value: bound channel from the instance's AnimValues,
+    // 0 (= the authored default pose) when unbound or no instance
+    // state.
+    float value = 0.0f;
+    if (anim_node && anim_node->kind == "dof" && anim &&
+        !anim_node->channel.empty()) {
+        if (auto ch = f4::anim::channel_from_name(anim_node->channel)) {
+            value = (*anim)[*ch];
+        }
+    }
+
+    double t[3], q[4], s[3];
+    f4::gltf::eval_tagged_local(doc, node_index, value, t, q, s);
+
+    const Matrix rot = QuaternionToMatrix(Quaternion{
+        static_cast<float>(q[0]), static_cast<float>(q[1]),
+        static_cast<float>(q[2]), static_cast<float>(q[3])});
+    const Matrix scale = MatrixScale(static_cast<float>(s[0]),
+                                     static_cast<float>(s[1]),
+                                     static_cast<float>(s[2]));
+    const Matrix trans = MatrixTranslate(static_cast<float>(t[0]),
+                                         static_cast<float>(t[1]),
+                                         static_cast<float>(t[2]));
+    // glTF node semantics: local = T · R · S.
+    return MatrixMultiply(trans, MatrixMultiply(rot, scale));
+}
+
+/// Switch visibility along a part's chain: every sw branch node gates
+/// the part through FreeFalcon's bitmask rule. UNBOUND switches (no
+/// channel) stay visible — the legacy show-all convention, so geometry
+/// never silently vanishes on models the rig doesn't command.
+bool anim_part_visible(const f4::renderer::RuntimeModel& model,
+                       const f4::renderer::RuntimePart& part,
+                       const f4::anim::AnimValues* anim) {
+    for (const auto node : part.node_chain) {
+        const auto* an = model.anim_map.find_by_node(node);
+        if (!an || an->kind != "sw") continue;
+        if (an->channel.empty() || !anim) continue;
+        auto ch = f4::anim::channel_from_name(an->channel);
+        if (!ch) continue;  // unknown channel name — treat as unbound
+        const float mask = (*anim)[*ch];
+        if (!f4::gltf::switch_mask_visible(mask, an->sw_child, an->reversed)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/// Compose a part's full node-chain matrix (identity for empty chains).
+Matrix anim_part_matrix(const f4::renderer::RuntimeModel& model,
+                        const f4::renderer::RuntimePart& part,
+                        const f4::anim::AnimValues* anim) {
+    Matrix m = MatrixIdentity();
+    for (const auto node : part.node_chain) {
+        const auto* an = model.anim_map.find_by_node(node);
+        const Matrix local = anim_node_local_matrix(*model.doc, node, anim, an);
+        m = MatrixMultiply(m, local);
+    }
+    return m;
+}
+
+} // namespace
+
+// Public: shared animated draw loop (parts × material selection ×
+// DrawMesh), also used by feature_mesh.cpp's draw_vis_type_mesh for
+// staged animated models. Takes the FeatureMeshResources base so both
+// the entity path (RenderResources&) and the feature path can call it.
+DrawStats draw_animated_model(FeatureMeshResources& res,
+                              const RuntimeModel& model,
+                              const Matrix& model_matrix,
+                              const f4::anim::AnimValues* anim,
+                              bool lighting_active) {
+    DrawStats stats{};
+    const Material* default_mat = res.default_material;
+
+    for (const auto& part : model.lod0_parts) {
+        if (part.entry.mesh.triangleCount <= 0) continue;
+        if (!anim_part_visible(model, part, anim)) continue;
+
+        const Matrix part_matrix =
+            MatrixMultiply(anim_part_matrix(model, part, anim), model_matrix);
+
+        const Material* mat_to_use = default_mat;
+        if (part.entry.tex_id >= 0 && res.texture_cache) {
+            auto* tex_entry = res.texture_cache->lookup(part.entry.tex_id);
+            if (tex_entry && tex_entry->uploaded) {
+                mat_to_use = &tex_entry->material;
+                if (lighting_active && res.lit_shader) {
+                    const_cast<Material*>(mat_to_use)->shader =
+                        res.lit_shader->shader();
+                }
+            }
+        }
+        if (!mat_to_use) continue;
+
+        DrawMesh(part.entry.mesh, *mat_to_use, part_matrix);
+        ++stats.draw_calls;
+        ++stats.meshes_drawn;
+        stats.vertices_drawn +=
+            static_cast<std::size_t>(part.entry.mesh.vertexCount);
+    }
+    return stats;
 }
 
 // ---------------------------------------------------------------------------
@@ -98,9 +222,13 @@ DrawStats draw_entity_meshes(
         res.build_mesh_for_model(ent.parent_index);
 
         const RuntimeModel* model = res.model_cache.lookup(ent.parent_index);
-        if (!model || model->lod0_meshes.empty()) {
+        if (!model) {
             continue;
         }
+        // NOTE: no lod0_meshes.empty() check here — animated
+        // (hierarchy-emitted) models carry their geometry in
+        // lod0_parts and an empty lod0_meshes; the branches below
+        // pick the right surface per model.
 
         const auto pos_f = enu_to_raylib(ent.enu_x, ent.enu_y, ent.enu_z);
         const Vector3 pos_rh = {pos_f.x, pos_f.y, pos_f.z};
@@ -111,6 +239,26 @@ DrawStats draw_entity_meshes(
         const Matrix model_matrix = MatrixMultiply(
             QuaternionToMatrix(q),
             MatrixTranslate(pos_rh.x, pos_rh.y, pos_rh.z));
+
+        // Animated (hierarchy-emitted) models draw through the parts
+        // path with the entity's per-instance channel values; static
+        // models keep the flat loop below untouched.
+        if (model->animated && !model->lod0_parts.empty()) {
+            // RenderResources carries value members; the shared animated
+            // loop takes the pointer-style FeatureMeshResources view.
+            FeatureMeshResources base;
+            base.model_cache    = &res.model_cache;
+            base.texture_cache  = &res.texture_cache;
+            base.lit_shader     = &res.lit_shader;
+            base.default_material = res.default_material_valid()
+                ? &res.default_material() : nullptr;
+            const auto st = draw_animated_model(base, *model, model_matrix,
+                                                ent.anim, lighting_active);
+            total.draw_calls     += st.draw_calls;
+            total.meshes_drawn   += st.meshes_drawn;
+            total.vertices_drawn += st.vertices_drawn;
+            continue;
+        }
 
         for (const auto& me : model->lod0_meshes) {
             if (me.mesh.triangleCount <= 0) continue;

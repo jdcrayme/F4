@@ -1,0 +1,7 @@
+{
+  "f4": { "v": 1 },
+  "family": "airdef",
+  "doc": "Air-defense / ground-unit family mapping from FreeFalcon's AIRDEF_* indices (src/sim/include/dofsnswitches.h). Radar sweep and turret DOFs (0..5) are reserved for the ground-unit rig; they stay unmapped here until that rig exists, so ground models currently export with unknown.N tags.",
+  "dof": {},
+  "sw": {}
+}

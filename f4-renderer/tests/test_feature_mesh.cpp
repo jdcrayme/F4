@@ -18,6 +18,8 @@
 // (GTEST_SKIP) when the fixture tree isn't available.
 
 #include <f4/renderer/feature_mesh.hpp>
+#include <f4/renderer/runtime_model_cache.hpp>
+#include <f4/renderer/texture_cache.hpp>
 
 #include <f4/world_types/class_table.hpp>
 
@@ -29,6 +31,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
+#include <fstream>
 #include <string>
 
 #ifndef F4_KOREAOBJ_DATA_DIR
@@ -314,4 +317,139 @@ TEST_F(FeatureMeshGpuTest, DrawVisTypeMesh_DirectAndZero) {
     tex_cache.unload_all();
     model_cache.unload_all();
     UnloadMaterial(default_mat);
+}
+
+// ── RuntimeModelCache classification (the animated-vs-static regression) ───
+//
+// The f4import legacy ("flat") emitter writes dof/sw/slot stub nodes as
+// ORPHANS beside the geometry, and attaches the LOD mesh DIRECTLY to the
+// lod:N node. A build path that classifies such documents as animated
+// (has_animation_tags saw the stubs) extracted zero parts AND skipped
+// the flat extraction — the model drew nothing. These tests pin the
+// runtime classification for both on-disk layouts, with real GL uploads
+// (build_gltf_mesh needs a context — hence the GPU fixture).
+
+namespace {
+
+// One-triangle glTF document (positions + uint32 indices in an external
+// .bin) — the minimum the extractor accepts. `nodes_json` spliced in
+// verbatim picks the layout: flat-with-stubs vs hierarchy chain.
+std::filesystem::path write_model_fixture(const std::filesystem::path& dir,
+                                          const char* file_stem,
+                                          const std::string& nodes_json,
+                                          const std::string& scene_nodes) {
+    const auto model_dir = dir / "Models" / "koreaobj";
+    std::filesystem::create_directories(model_dir);
+
+    const float positions[9] = {0.f, 0.f, 0.f, 1.f, 0.f, 0.f, 0.f, 1.f, 0.f};
+    const uint32_t indices[3] = {0, 1, 2};
+
+    const auto bin_path = model_dir / (std::string(file_stem) + ".bin");
+    {
+        std::ofstream bin(bin_path, std::ios::binary);
+        bin.write(reinterpret_cast<const char*>(positions), sizeof(positions));
+        bin.write(reinterpret_cast<const char*>(indices), sizeof(indices));
+    }
+
+    std::string json = R"({
+  "asset": { "version": "2.0" },
+  "scene": 0,
+  "scenes": [ { "nodes": [)" + scene_nodes + R"(] } ],
+  "nodes": [)" + nodes_json + R"(],
+  "meshes": [ { "name": "LOD_0", "primitives": [
+      { "attributes": { "POSITION": 0 }, "indices": 1, "mode": 4 } ] } ],
+  "accessors": [
+    { "bufferView": 0, "componentType": 5126, "count": 3, "type": "VEC3" },
+    { "bufferView": 1, "componentType": 5125, "count": 3, "type": "SCALAR" }
+  ],
+  "bufferViews": [
+    { "buffer": 0, "byteOffset": 0, "byteLength": 36, "target": 34962 },
+    { "buffer": 0, "byteOffset": 36, "byteLength": 12, "target": 34963 }
+  ],
+  "buffers": [ { "byteLength": 48, "uri": ")" +
+               std::string(file_stem) + R"(.bin" } ]
+})";
+
+    const auto gltf_path = model_dir / (std::string(file_stem) + ".gltf");
+    std::ofstream out(gltf_path);
+    out << json;
+    return dir;
+}
+
+}  // namespace
+
+TEST_F(FeatureMeshGpuTest, RuntimeModelCache_FlatDocWithStubTags_FallsBackToFlat) {
+    if (!f4::testing::init_window_if_display(64, 64, "t", FLAG_WINDOW_HIDDEN))
+        GTEST_SKIP() << "no display available";
+
+    const auto dir = write_model_fixture(
+        std::filesystem::temp_directory_path() / "f4_hybrid_model_test",
+        "00099",
+        // root → lod:0 (mesh DIRECT on the lod node) + orphan stubs.
+        R"(    { "name": "root", "children": [1] },
+    { "name": "lod:0", "mesh": 0,
+      "extras": { "f4": { "v": 1, "kind": "lod", "id": "0", "level": 0 } } },
+    { "name": "dof:unknown.0",
+      "extras": { "f4": { "v": 1, "kind": "dof", "id": "unknown.0", "index": 0 } } },
+    { "name": "sw:unknown.0",
+      "extras": { "f4": { "v": 1, "kind": "sw", "id": "unknown.0", "index": 0 } } })",
+        "0");
+
+    f4::renderer::TextureCache tex_cache;
+    f4::renderer::RuntimeModelCache model_cache;
+    model_cache.set_data_dir(dir);
+    model_cache.build_model(99, tex_cache);
+    const auto* model = model_cache.lookup(99);
+    ASSERT_NE(model, nullptr);
+    ASSERT_TRUE(model->built);
+
+    // The regression: these documents must classify STATIC and keep
+    // their geometry in lod0_meshes. The broken classification left
+    // both surfaces empty → aircraft vanished from the 3D view.
+    EXPECT_FALSE(model->animated);
+    EXPECT_FALSE(model->lod0_meshes.empty());
+    EXPECT_TRUE(model->lod0_parts.empty());
+
+    model_cache.unload_all();
+    tex_cache.unload_all();
+    std::filesystem::remove_all(dir);
+}
+
+TEST_F(FeatureMeshGpuTest, RuntimeModelCache_HierarchyDoc_BuildsParts) {
+    if (!f4::testing::init_window_if_display(64, 64, "t", FLAG_WINDOW_HIDDEN))
+        GTEST_SKIP() << "no display available";
+
+    const auto dir = write_model_fixture(
+        std::filesystem::temp_directory_path() / "f4_hier_model_test",
+        "00098",
+        R"(    { "name": "root", "children": [1] },
+    { "name": "lod:0",
+      "extras": { "f4": { "v": 1, "kind": "lod", "id": "0", "level": 0 } },
+      "children": [2] },
+    { "name": "dof:gear_leg.0",
+      "extras": { "f4": { "v": 1, "kind": "dof", "id": "gear_leg.0",
+                          "index": 19, "channel": "gear_leg_pos.0" } },
+      "children": [3] },
+    { "name": "part", "mesh": 0 })",
+        "0");
+
+    f4::renderer::TextureCache tex_cache;
+    f4::renderer::RuntimeModelCache model_cache;
+    model_cache.set_data_dir(dir);
+    model_cache.build_model(98, tex_cache);
+    const auto* model = model_cache.lookup(98);
+    ASSERT_NE(model, nullptr);
+    ASSERT_TRUE(model->built);
+
+    // A genuine --hierarchy document goes through the parts path.
+    EXPECT_TRUE(model->animated);
+    EXPECT_TRUE(model->lod0_meshes.empty());
+    ASSERT_EQ(model->lod0_parts.size(), 1u);
+    EXPECT_EQ(model->lod0_parts[0].entry.mesh.triangleCount, 1);
+    ASSERT_EQ(model->lod0_parts[0].node_chain.size(), 2u);  // dof + mesh node
+    EXPECT_FALSE(model->anim_map.empty());
+
+    model_cache.unload_all();
+    tex_cache.unload_all();
+    std::filesystem::remove_all(dir);
 }

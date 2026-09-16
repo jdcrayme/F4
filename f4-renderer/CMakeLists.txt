@@ -98,6 +98,7 @@ target_include_directories(f4-renderer
 target_link_libraries(f4-renderer
     PUBLIC
         f4-gltf             # Tranche 0d: the runtime model loader (replaces f4-models)
+        f4-anim             # Animation channels on the animated draw path (AIRCRAFT_ANIMATION_PLAN §5.2)
         f4-world-types      # Tranche 0d: runtime-safe ClassTable (replaces f4-world-convert)
         f4-entities
         f4-terrain          # Path B1: terrain_mesh.hpp includes f4/terrain/terrain_data.hpp

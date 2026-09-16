@@ -23,6 +23,7 @@
 #include <f4/renderer/draw_3d.hpp>          // DrawStats, draw_grid_at
 #include <f4/renderer/layout_draw.hpp>      // draw_layout_quad/line/marker
 #include <f4/renderer/ground_layout_models.hpp>  // AirfieldGeometry3D, AirfieldDrawToggles
+#include <f4/anim/channels.hpp>             // AnimValues — per-entity channel state
 
 #include <raylib.h>
 // Undef raylib macros that pollute the namespace
@@ -93,7 +94,26 @@ struct EntityMeshDraw {
     float qy = 0.0f;
     float qz = 0.0f;
     int parent_index = -1;   ///< model cache key (vis_type)
+    /// Per-instance animation channels (AIRCRAFT_ANIMATION_PLAN §5.2).
+    /// Null or a non-animated model → static draw. The values are owned
+    /// by the entity's VisualModelComponent (or the doctor panel's
+    /// scratch state); the draw path only reads them.
+    const f4::anim::AnimValues* anim{nullptr};
 };
+
+/// Shared animated-model draw loop (AIRCRAFT_ANIMATION_PLAN §5.2):
+/// draws one animated RuntimeModel's parts at `model_matrix`, applying
+/// per-instance channel values (null = parked defaults are the
+/// CALLER's choice here — pass the values you want). Used by
+/// draw_entity_meshes and draw_vis_type_mesh. Must be called inside
+/// BeginMode3D/EndMode3D; manages backface culling + blend mode
+/// internally (same convention as draw_entity_meshes).
+DrawStats draw_animated_model(
+    FeatureMeshResources& res,
+    const RuntimeModel& model,
+    const Matrix& model_matrix,
+    const f4::anim::AnimValues* anim,
+    bool lighting_active);
 
 /// Draw entities as loaded glTF models at their ENU positions/orientations.
 /// Meshes are built lazily via RenderResources::build_mesh_for_model() on

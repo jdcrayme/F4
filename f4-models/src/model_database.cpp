@@ -5,6 +5,7 @@
 #include <f4/models/model_database.hpp>
 #include <f4/models/model_record.hpp>
 #include <f4/models/geometry.hpp>
+#include <f4/models/geometry_grouped.hpp>
 #include <f4/install/file_finder.hpp>
 
 #include "bin_reader.hpp"
@@ -307,6 +308,26 @@ ModelGeometry ModelDatabase::extract_model_geometry(
 
     std::string err;
     return detail::extract_geometry(*tree, state, 0, err);
+}
+
+GroupedGeometry ModelDatabase::extract_model_geometry_grouped(
+    int parent_index, int lod_index,
+    const ModelState& state) const
+{
+    LodKey key{parent_index, lod_index};
+    auto it = parsed_lods_.find(key);
+    if (it == parsed_lods_.end()) {
+        return {};  // not parsed yet
+    }
+
+    const auto& mlod = it->second;
+    const BspTree* tree = mlod.bsp_tree();
+    if (!tree) {
+        return {};  // DX format not yet supported for extraction
+    }
+
+    std::string err;
+    return detail::extract_geometry_grouped(*tree, state, 0, err);
 }
 
 const BspTree* ModelDatabase::bsp_tree(int parent_index, int lod_index) const {

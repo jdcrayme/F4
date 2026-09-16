@@ -18,6 +18,10 @@
 
 #include <f4/renderer/feature_mesh.hpp>
 
+#include <f4/anim/channels.hpp>
+#include <f4/gltf/anim_map.hpp>
+#include <f4/renderer/scene_draw.hpp>   // draw_animated_model (animated parts path)
+
 #include <f4/renderer/coord_transform.hpp>  // enu_to_raylib
 #include <f4/math/constants.hpp>
 
@@ -64,7 +68,8 @@ DrawStats draw_vis_type_mesh(
     FeatureMeshResources& res,
     int vis_type,
     float enu_x, float enu_y, float enu_z,
-    float facing_deg)
+    float facing_deg,
+    const f4::anim::AnimValues* anim)
 {
     DrawStats stats{};
     if (!res.model_cache || !res.texture_cache ||
@@ -79,8 +84,8 @@ DrawStats draw_vis_type_mesh(
     build_feature_mesh(res, vis_type);
 
     const RuntimeModel* model = res.model_cache->lookup(vis_type);
-    if (!model || model->lod0_meshes.empty()) {
-        return stats;  // build failed or yielded no meshes
+    if (!model) {
+        return stats;  // build failed
     }
 
     // Ensure lit shader + set lighting uniforms.
@@ -119,6 +124,30 @@ DrawStats draw_vis_type_mesh(
     // rationale).
     rlDisableBackfaceCulling();
     BeginBlendMode(BLEND_ALPHA);
+
+    // Animated (hierarchy-emitted) models on this path have no
+    // per-entity channel state — stage them with FreeFalcon's parked
+    // preset (gear down, effects off) so staged aircraft read as
+    // parked, not as gear-less hulks. Docs/AIRCRAFT_ANIMATION_PLAN §5.2.
+    if (model->animated && !model->lod0_parts.empty()) {
+        // Explicit per-entity values win; otherwise stage with
+        // FreeFalcon's parked preset (gear down, effects off) so
+        // staged aircraft read as parked, not gear-less hulks.
+        static const f4::anim::AnimValues parked = [] {
+            f4::anim::AnimValues v;
+            v.set_parked_defaults();
+            return v;
+        }();
+        const f4::anim::AnimValues* values = anim ? anim : &parked;
+        const auto st = draw_animated_model(res, *model, model_matrix,
+                                            values, lighting_active);
+        EndBlendMode();
+        rlEnableBackfaceCulling();
+        stats.draw_calls     += st.draw_calls;
+        stats.meshes_drawn   += st.meshes_drawn;
+        stats.vertices_drawn += st.vertices_drawn;
+        return stats;
+    }
 
     for (const auto& me : model->lod0_meshes) {
         if (me.mesh.triangleCount <= 0) continue;

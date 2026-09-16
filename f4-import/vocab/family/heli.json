@@ -1,0 +1,12 @@
+{
+  "f4": { "v": 1 },
+  "family": "heli",
+  "doc": "Helicopter family mapping from FreeFalcon's HELI_* indices (src/sim/include/dofsnswitches.h, driven by src/sim/helo/helimain.cpp).",
+  "dof": {
+    "2": { "id": "rotor.main", "channel": "rotor.main" },
+    "4": { "id": "rotor.tail", "channel": "rotor.tail" }
+  },
+  "sw": {
+    "0": { "id": "rotors", "channel": "sw.rotors" }
+  }
+}

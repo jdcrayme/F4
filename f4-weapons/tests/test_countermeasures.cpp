@@ -18,6 +18,10 @@
 #include <cmath>
 #include <vector>
 
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif // !M_PI
+
 using namespace f4::weapons;
 
 namespace entities = f4::entities;

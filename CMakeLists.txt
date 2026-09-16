@@ -36,6 +36,7 @@ set(F4_GENERATED_FIXTURES_DIR "${CMAKE_BINARY_DIR}/generated_fixtures" CACHE PAT
 
 add_subdirectory(f4-units)
 add_subdirectory(f4-math)
+add_subdirectory(f4-anim)         # semantic animation channels + rig (see Docs/AIRCRAFT_ANIMATION_PLAN.md) — leaf dependency of f4-gltf/f4-import/f4-simulation
 add_subdirectory(f4-json)         # minimal dependency-free JSON reader/writer
 add_subdirectory(f4-xml)          # vendored pugixml XML parser (SVG symbol import; future BMS XML data tables)
 add_subdirectory(f4-assets)      # runtime asset root, manifest reader, capability/staleness API (see Docs/ASSET_PIPELINE_SPEC.md)

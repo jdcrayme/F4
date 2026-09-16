@@ -24,7 +24,8 @@
 
 #pragma once
 
-#include <f4/renderer/mesh_builder.hpp>   // MeshEntry
+#include <f4/renderer/mesh_builder.hpp>   // MeshEntry, GltfPartData
+#include <f4/gltf/anim_map.hpp>           // AnimMap
 
 #include <filesystem>
 #include <memory>
@@ -39,13 +40,35 @@ namespace f4::renderer {
 
 class TextureCache;
 
+/// One drawable part of an animated model: the uploaded mesh plus the
+/// glTF node chain that positions it (AIRCRAFT_ANIMATION_PLAN §5.2).
+/// The chain is evaluated per frame against the entity's channel
+/// values; switch-branch nodes in the chain gate visibility.
+struct RuntimePart {
+    MeshEntry entry;
+    std::vector<std::size_t> node_chain;
+};
+
 /// One loaded runtime model: the parsed glTF document plus the LOD-0
 /// Raylib meshes built from it (one MeshEntry per glTF primitive).
+///
+/// Animated documents (hierarchy-emitted: f4::gltf::has_animation_tags)
+/// populate lod0_parts + anim_map instead of lod0_meshes; the draw
+/// path picks per model. `animated` is false for flat/legacy exports,
+/// which keep drawing through lod0_meshes unchanged.
 struct RuntimeModel {
     /// Parsed .gltf (owns the DOF/switch/slot f4-extras tags).
     std::shared_ptr<const f4::gltf::GltfDocument> doc;
-    /// Uploaded LOD-0 meshes, paired with their KoreaObj tex ids.
+    /// Uploaded LOD-0 meshes (STATIC path — one per glTF primitive).
     std::vector<MeshEntry> lod0_meshes;
+    /// Uploaded LOD-0 parts (ANIMATED path — chain per part).
+    std::vector<RuntimePart> lod0_parts;
+    /// Resolved animation tags (channel -> node bindings). Empty for
+    /// static models.
+    f4::gltf::AnimMap anim_map;
+    /// True when the document was hierarchy-emitted and lod0_parts is
+    /// the draw surface.
+    bool animated = false;
     /// true after the first build attempt — including failures, so the
     /// draw path never retries a missing/corrupt model every frame.
     bool built = false;

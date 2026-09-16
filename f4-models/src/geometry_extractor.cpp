@@ -39,12 +39,14 @@
 // are misplaced, and DOF sliders have no visual effect.
 
 #include "geometry_extractor.hpp"
+#include <f4/models/geometry_grouped.hpp>
 #include "poly_parser.hpp"
 
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <map>
 
 namespace f4::models::detail {
 
@@ -159,9 +161,23 @@ struct ActivePool {
 struct WalkContext {
     const BspTree& tree;
     const ModelState& state;
-    ModelGeometry& geometry;
     int max_depth;
     int current_depth = 0;
+
+    // Exactly one output is non-null. `geometry` receives the flat
+    // world-space extraction (grouped == false); `grouped_geometry`
+    // receives the chain-grouped extraction (grouped == true).
+    ModelGeometry* geometry = nullptr;
+    GroupedGeometry* grouped_geometry = nullptr;
+    bool grouped = false;
+
+    // Grouped mode: the current chain of tagged ancestors (outermost
+    // first) and the map from (chain, tex_id, kind) key → index into
+    // grouped_geometry->meshes. std::map keeps creation order
+    // deterministic. Key layout: one element per ancestor encoding
+    // (node_index << 4 | switch_child+1), then tex_id, then kind.
+    std::vector<TaggedAncestor> chain;
+    std::map<std::vector<int64_t>, std::size_t> mesh_key_to_group;
 
     // Track visited nodes to prevent infinite loops
     std::vector<bool> visited;
@@ -174,13 +190,54 @@ struct WalkContext {
     // Stack of accumulated affine transforms. The TOP is the combined
     // transform from the root to the current subtree. Pushed when entering
     // a DOF/Trans/Scale node; popped when leaving. If empty, no transform
-    // is needed (identity).
+    // is needed (identity). In grouped mode vertices do NOT consume this
+    // (they stay ancestor-local); the stack still tracks scope so the
+    // single-path walk keeps working.
     std::vector<AffineTransform> transform_stack;
 
     WalkContext(const BspTree& t, const ModelState& s,
                 ModelGeometry& g, int md)
-        : tree(t), state(s), geometry(g), max_depth(md),
+        : tree(t), state(s), max_depth(md),
+          geometry(&g), grouped(false),
           visited(t.nodes.size(), false) {}
+
+    WalkContext(const BspTree& t, const ModelState& s,
+                GroupedGeometry& g, int md)
+        : tree(t), state(s), max_depth(md),
+          grouped_geometry(&g), grouped(true),
+          visited(t.nodes.size(), false) {}
+
+    /// Grouped mode: find or create the GroupedMesh for the current
+    /// chain + (tex_id, kind). Mirrors the flat path's (texture, kind)
+    /// merge rule, scoped to the tagged chain.
+    Mesh& grouped_mesh_for(int32_t tex_id, PrimitiveKind kind) {
+        std::vector<int64_t> key;
+        key.reserve(chain.size() + 2);
+        for (const auto& a : chain) {
+            // Low 4 bits carry (switch_child + 1) — switch_child is a
+            // bit index, < 15 for any sane model. Node indices stay far
+            // below 2^48.
+            const int64_t child = (a.switch_child >= 0)
+                                      ? (static_cast<int64_t>(a.switch_child) + 1)
+                                      : 0;
+            key.push_back((static_cast<int64_t>(a.node_index) << 4) | child);
+        }
+        key.push_back(static_cast<int64_t>(tex_id));
+        key.push_back(static_cast<int64_t>(kind));
+
+        auto it = mesh_key_to_group.find(key);
+        if (it != mesh_key_to_group.end()) {
+            return grouped_geometry->meshes[it->second].mesh;
+        }
+        GroupedMesh gm;
+        gm.chain = chain;
+        gm.mesh.tex_id = tex_id;
+        gm.mesh.kind = kind;
+        grouped_geometry->meshes.push_back(std::move(gm));
+        const std::size_t idx = grouped_geometry->meshes.size() - 1;
+        mesh_key_to_group.emplace(std::move(key), idx);
+        return grouped_geometry->meshes[idx].mesh;
+    }
 
     /// Push a subtree's pools onto the stack if they're non-empty.
     /// Returns true if anything was pushed (caller must pop).
@@ -422,14 +479,27 @@ void process_prim(WalkContext& ctx, int32_t prim_offset)
         }
     }
 
+    // ── Grouped mode: emit into the chain-scoped group ────────────────
+    // Vertices stay in the local space of the deepest tagged ancestor
+    // (chain.back()) — no accumulated transform is applied. Between the
+    // deepest tagged node and the primitive there are no other
+    // transform-carrying nodes, so ancestor-local space == raw pool
+    // coordinates.
+    if (ctx.grouped) {
+        Mesh& mesh = ctx.grouped_mesh_for(tex_id, kind);
+        prim_to_mesh(prim, ctx.tree, mesh, pool.coords, pool.n_coords,
+                     pool.tex_ids, pool.n_tex_ids, nullptr);
+        return;
+    }
+
     // Find or create a mesh for this (texture, primitive_kind) pair.
     Mesh* mesh = nullptr;
-    for (auto& m : ctx.geometry.meshes) {
+    for (auto& m : ctx.geometry->meshes) {
         if (m.tex_id == tex_id && m.kind == kind) { mesh = &m; break; }
     }
     if (!mesh) {
-        ctx.geometry.meshes.emplace_back();
-        auto& nm = ctx.geometry.meshes.back();
+        ctx.geometry->meshes.emplace_back();
+        auto& nm = ctx.geometry->meshes.back();
         nm.tex_id = tex_id;
         nm.kind = kind;
         mesh = &nm;
@@ -477,8 +547,9 @@ void walk_node(WalkContext& ctx, NodeIdx node_idx)
             break;
     }
 
-    // Track whether we pushed a transform (to pop it later)
+    // Track whether we pushed a transform / chain entry (to pop later)
     bool pushed_transform = false;
+    bool pushed_chain = false;
 
     switch (node.type) {
     case BspNodeType::BNode:
@@ -543,6 +614,22 @@ void walk_node(WalkContext& ctx, NodeIdx node_idx)
         ctx.push_transform(dof_xform);
         pushed_transform = true;
 
+        // Grouped mode: record this DOF as an ancestor for the subtree.
+        if (ctx.grouped) {
+            TaggedAncestor a;
+            a.type = node.type;
+            a.node_index = node_idx;
+            a.number = node.dof_number;
+            a.frame_rotation = node.dof_rotation;
+            a.frame_translation = node.dof_translation;
+            a.dof_min = node.dof_min;
+            a.dof_max = node.dof_max;
+            a.dof_multiplier = node.dof_multiplier;
+            a.dof_flags = node.dof_flags;
+            ctx.chain.push_back(a);
+            pushed_chain = true;
+        }
+
         if (node.subtree >= 0) walk_node(ctx, node.subtree);
         break;
     }
@@ -575,6 +662,21 @@ void walk_node(WalkContext& ctx, NodeIdx node_idx)
 
         ctx.push_transform(trans_xform);
         pushed_transform = true;
+
+        // Grouped mode: record this translator as an ancestor.
+        if (ctx.grouped) {
+            TaggedAncestor a;
+            a.type = node.type;
+            a.node_index = node_idx;
+            a.number = node.dof_number;
+            a.frame_translation = node.dof_translation;
+            a.dof_min = node.dof_min;
+            a.dof_max = node.dof_max;
+            a.dof_multiplier = node.dof_multiplier;
+            a.dof_flags = node.dof_flags;
+            ctx.chain.push_back(a);
+            pushed_chain = true;
+        }
 
         if (node.subtree >= 0) walk_node(ctx, node.subtree);
         break;
@@ -613,6 +715,22 @@ void walk_node(WalkContext& ctx, NodeIdx node_idx)
         ctx.push_transform(scale_xform);
         pushed_transform = true;
 
+        // Grouped mode: record this scale node as an ancestor.
+        if (ctx.grouped) {
+            TaggedAncestor a;
+            a.type = node.type;
+            a.node_index = node_idx;
+            a.number = node.dof_number;
+            a.frame_translation = node.dof_translation;
+            a.dof_min = node.dof_min;
+            a.dof_max = node.dof_max;
+            a.dof_multiplier = node.dof_multiplier;
+            a.dof_flags = node.dof_flags;
+            a.scale_target = node.scale;
+            ctx.chain.push_back(a);
+            pushed_chain = true;
+        }
+
         if (node.subtree >= 0) walk_node(ctx, node.subtree);
         break;
     }
@@ -629,6 +747,36 @@ void walk_node(WalkContext& ctx, NodeIdx node_idx)
         //   -1  = "Show All" — walk every child
         //   0..n-1 = "Specific Child" — walk only this child
         if (node.n_children > 0 && node.switch_children_offset >= 0) {
+            auto base = static_cast<std::size_t>(node.switch_children_offset);
+            auto count = static_cast<std::size_t>(node.n_children);
+
+            // Bounds check: base + count must fit within switch_children
+            if (base + count > ctx.tree.switch_children.size()) {
+                break;  // corrupted switch children — skip
+            }
+
+            // ── Grouped mode: walk EVERY child branch, recording the
+            // branch index as a chain ancestor. Switch values are
+            // BITMASKS in FreeFalcon (BSwitchNode::Draw: mask >>= 1 per
+            // child), so branch k ↔ bit k. Visibility is a runtime
+            // decision; extraction keeps all variants.
+            if (ctx.grouped) {
+                for (std::size_t k = 0; k < count; ++k) {
+                    auto child_idx = ctx.tree.switch_children[base + k];
+                    if (child_idx < 0) continue;
+                    TaggedAncestor a;
+                    a.type = node.type;
+                    a.node_index = node_idx;
+                    a.number = node.switch_number;
+                    a.switch_child = static_cast<int32_t>(k);
+                    a.switch_flags = node.switch_flags;
+                    ctx.chain.push_back(a);
+                    walk_node(ctx, child_idx);
+                    ctx.chain.pop_back();
+                }
+                break;
+            }
+
             // Check if ModelState has a specific child selection
             int active_child = -1;
             for (const auto& sw : ctx.state.switches) {
@@ -636,14 +784,6 @@ void walk_node(WalkContext& ctx, NodeIdx node_idx)
                     active_child = sw.active_child;
                     break;
                 }
-            }
-
-            auto base = static_cast<std::size_t>(node.switch_children_offset);
-            auto count = static_cast<std::size_t>(node.n_children);
-
-            // Bounds check: base + count must fit within switch_children
-            if (base + count > ctx.tree.switch_children.size()) {
-                break;  // corrupted switch children — skip
             }
 
             if (active_child == -2) {
@@ -720,6 +860,7 @@ void walk_node(WalkContext& ctx, NodeIdx node_idx)
         break;
     }
 
+    if (pushed_chain) ctx.chain.pop_back();
     if (pushed_transform) ctx.pop_transform();
     if (pushed) ctx.pop_pools();
 
@@ -767,6 +908,7 @@ f4::models::ModelGeometry extract_geometry(
         for (bool v : ctx.visited) if (v) ++visited_count;
         std::size_t total_tris = 0;
         for (const auto& m : geometry.meshes) total_tris += m.triangles.size();
+        (void)total_tris;
         std::fprintf(stderr,
             "[DIAG] === geometry extraction summary ===\n"
             "[DIAG]   nodes=%zu visited=%zu (%.1f%%)\n"
@@ -779,6 +921,39 @@ f4::models::ModelGeometry extract_geometry(
                 "[DIAG] WARNING: %zu orphan nodes not visited by main walk\n",
                 tree.nodes.size() - visited_count);
         }
+    }
+
+    return geometry;
+}
+
+// ── Grouped extraction (geometry_grouped.hpp) ─────────────────────────────
+
+f4::models::GroupedGeometry extract_geometry_grouped(
+    const BspTree& tree,
+    const ModelState& state,
+    int max_depth,
+    std::string& err)
+{
+    (void)err;
+
+    f4::models::GroupedGeometry geometry;
+
+    if (tree.nodes.empty()) return geometry;
+
+    WalkContext ctx(tree, state, geometry, max_depth);
+
+    // Start from node 0 (root). The grouped walk records a
+    // TaggedAncestor chain per mesh group; switch children are all
+    // walked; vertices stay in the deepest tagged ancestor's local
+    // space. See geometry_grouped.hpp for the space contract.
+    walk_node(ctx, 0);
+
+    if (diag_enabled()) {
+        std::fprintf(stderr,
+            "[DIAG] === grouped extraction summary ===\n"
+            "[DIAG]   nodes=%zu groups=%zu total_verts=%zu\n",
+            tree.nodes.size(), geometry.meshes.size(),
+            geometry.total_vertices());
     }
 
     return geometry;

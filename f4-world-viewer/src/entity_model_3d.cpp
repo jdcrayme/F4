@@ -67,6 +67,9 @@ struct ModelPlacement {
     float dy;
     float facing_deg;
     float dz = 0.0f;
+    // ANIM-DOCTOR: per-entity channel values (live aircraft only).
+    // Null → the draw path stages the model with parked defaults.
+    const f4::anim::AnimValues* anim = nullptr;
 };
 
 constexpr float RT_W = 800;   // must match ground_layout_3d.cpp (the
@@ -209,10 +212,11 @@ void ViewerApp::draw_entity_model_3d() {
                                    live_ground_z);
             placements.push_back({vmc->vis_type, 0.0f, 0.0f,
                                   facing_deg_from_transform(tf),
-                                  live_draw_z});
+                                  live_draw_z, &vmc->anim_values});
         } else {
             placements.push_back({vmc->vis_type, 0.0f, 0.0f,
-                                  facing_deg_from_transform(tf)});
+                                  facing_deg_from_transform(tf),
+                                  0.0f, &vmc->anim_values});
         }
     } else if (impl_->sel_kind == Impl::SelectionKind::Unit) {
         auto h = impl_->unit_handle(impl_->sel_entity);
@@ -642,7 +646,7 @@ void ViewerApp::draw_entity_model_3d() {
         for (const auto& pl : placements) {
             f4::renderer::draw_vis_type_mesh(
                 res, pl.vis_type, cx + pl.dx, cy + pl.dy, pl.dz,
-                pl.facing_deg);
+                pl.facing_deg, pl.anim);
         }
 
         rlEnableBackfaceCulling();

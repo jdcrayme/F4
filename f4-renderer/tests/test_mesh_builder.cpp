@@ -8,6 +8,7 @@
 #include <f4/renderer/mesh_builder.hpp>
 #include <f4/renderer/coord_transform.hpp>
 #include <f4/gltf/gltf_loader.hpp>
+#include <f4/gltf/anim_map.hpp>      // has_animation_tags (hybrid-layout pin)
 
 #include <gtest/gtest.h>
 
@@ -328,4 +329,121 @@ TEST(ExtractGltfLodGeometry, VertexColors_UbyteNormalized) {
     EXPECT_EQ(m.colors[7], 128);
     // 0 alpha stays 0
     EXPECT_EQ(m.colors[11], 0);
+}
+
+// ── extract_gltf_lod_parts ───────────────────────────────────────────────────
+
+namespace {
+
+// Tagged lod:N node (extras kind "lod", level N).
+f4::gltf::Node make_lod_node(int level) {
+    f4::gltf::Node n;
+    n.name = "lod:" + std::to_string(level);
+    n.has_f4 = true;
+    n.f4.version = 1;
+    n.f4.kind = "lod";
+    n.f4.id = std::to_string(level);
+    n.f4.lod_level = level;
+    return n;
+}
+
+// dof/sw stub node — the f4import emitter writes these beside (or
+// orphaned from) the geometry. Carries no mesh and no children.
+f4::gltf::Node make_stub_node(const char* name, const char* kind) {
+    f4::gltf::Node n;
+    n.name = name;
+    n.has_f4 = true;
+    n.f4.version = 1;
+    n.f4.kind = kind;
+    n.f4.id = name;
+    return n;
+}
+
+}  // namespace
+
+TEST(ExtractGltfLodParts, FlatLodMeshWithStubTags_ReturnsEmpty) {
+    // The hybrid layout on disk (f4import without --hierarchy):
+    // geometry attaches DIRECTLY to the lod:0 node while dof/sw/slot
+    // tags are emitted as stub nodes the scene never reaches. The
+    // runtime build path relies on parts extraction coming back empty
+    // here to fall back to the flat draw path — if this ever returns
+    // parts, those models go invisible again (empty lod0_meshes AND
+    // bogus empty lod0_parts).
+    auto f = PrimitiveFixture::make_default();
+
+    auto lod = make_lod_node(0);
+    lod.mesh = 0;  // flat geometry on the lod node itself
+    f.doc.nodes.push_back(std::move(lod));
+    f.doc.nodes.push_back(make_stub_node("dof:unknown.0", "dof"));
+    f.doc.nodes.push_back(make_stub_node("sw:unknown.0", "sw"));
+
+    f.doc.scenes.push_back({{0}});  // scene root = the lod node only
+    f.doc.scene = 0;
+
+    // The stubs are unreferenced orphans, so the scene-aware tag scan
+    // (same reachability as build_anim_map) classifies the document
+    // static…
+    EXPECT_FALSE(f4::gltf::has_animation_tags(f.doc));
+    // …and parts extraction finds no mesh chain either — the
+    // documented "callers fall back to extract_gltf_lod_geometry"
+    // signal.
+    EXPECT_TRUE(extract_gltf_lod_parts(f.doc, 0).empty());
+}
+
+TEST(ExtractGltfLodParts, ReachableStubOverFlatMesh_TaggedButPartsEmpty) {
+    // Hybrid edge: a scene-reachable dof stub, but the geometry still
+    // attaches directly to the lod node. The tag scan says animated;
+    // parts extraction must still return empty so the runtime build
+    // falls back to the flat path (otherwise the model draws nothing).
+    auto f = PrimitiveFixture::make_default();
+
+    auto lod = make_lod_node(0);
+    lod.mesh = 0;
+    f.doc.nodes.push_back(std::move(lod));
+    f.doc.nodes.push_back(make_stub_node("dof:unknown.0", "dof"));
+
+    f.doc.scenes.push_back({{0, 1}});  // stub referenced from the scene
+    f.doc.scene = 0;
+
+    EXPECT_TRUE(f4::gltf::has_animation_tags(f.doc));
+    EXPECT_TRUE(extract_gltf_lod_parts(f.doc, 0).empty());
+}
+
+TEST(ExtractGltfLodParts, HierarchyMeshChain_ExtractsPartWithChain) {
+    // The --hierarchy layout: lod:0 → dof node → mesh node. One part
+    // per mesh node, carrying the chain from the lod's child down to
+    // (and including) the mesh node.
+    auto f = PrimitiveFixture::make_default();
+
+    auto lod = make_lod_node(0);
+    auto dof = make_stub_node("dof:gear_leg.0", "dof");
+    dof.f4.channel = "gear_leg_pos.0";
+
+    f4::gltf::Node mesh_node;
+    mesh_node.name = "part";
+    mesh_node.mesh = 0;
+
+    f.doc.nodes.push_back(std::move(lod));       // index 0
+    f.doc.nodes.push_back(std::move(dof));       // index 1
+    f.doc.nodes.push_back(std::move(mesh_node)); // index 2
+    f.doc.nodes[0].children = {1};
+    f.doc.nodes[1].children = {2};
+
+    f.doc.scenes.push_back({{0}});
+    f.doc.scene = 0;
+
+    EXPECT_TRUE(f4::gltf::has_animation_tags(f.doc));
+
+    auto parts = extract_gltf_lod_parts(f.doc, 0);
+    ASSERT_EQ(parts.size(), 1u);
+    ASSERT_EQ(parts[0].node_chain.size(), 2u);  // dof + mesh node
+    EXPECT_EQ(parts[0].node_chain[0], 1u);
+    EXPECT_EQ(parts[0].node_chain[1], 2u);
+    // Same geometry payload contract as the flat path.
+    EXPECT_EQ(parts[0].data.positions.size(), 9u);
+    EXPECT_EQ(parts[0].data.indices.size(), 3u);
+    EXPECT_EQ(parts[0].data.tex_id, 7);
+
+    // A different LOD level finds nothing.
+    EXPECT_TRUE(extract_gltf_lod_parts(f.doc, 1).empty());
 }

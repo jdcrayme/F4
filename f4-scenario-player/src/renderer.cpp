@@ -329,6 +329,7 @@ void PlayerApp::Impl::draw_scene() {
             emd.qy = static_cast<float>(tf->qy);
             emd.qz = static_cast<float>(tf->qz);
             emd.parent_index = parent_index;
+            emd.anim = &vis->anim_values;
             scene.entity_meshes.push_back(emd);
         }
     }

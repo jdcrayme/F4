@@ -20,6 +20,7 @@
 #include <f4/models/model_record.hpp>
 #include <f4/models/model_lod.hpp>
 #include <f4/models/geometry.hpp>
+#include <f4/models/geometry_grouped.hpp>
 #include <f4/models/texture.hpp>
 
 #include <array>
@@ -132,6 +133,15 @@ public:
     /// @param state         DOF/switch state controls
     /// @return              Extracted geometry (empty on failure)
     [[nodiscard]] ModelGeometry extract_model_geometry(
+        int parent_index, int lod_index,
+        const ModelState& state = {}) const;
+
+    /// Hierarchy-preserving variant of extract_model_geometry() (see
+    /// geometry_grouped.hpp): meshes are grouped under their tagged
+    /// DOF/switch node chains, vertices in the deepest ancestor's local
+    /// space, all switch children walked. Used by the glTF hierarchy
+    /// emitter (Docs/AIRCRAFT_ANIMATION_PLAN.md §4).
+    [[nodiscard]] GroupedGeometry extract_model_geometry_grouped(
         int parent_index, int lod_index,
         const ModelState& state = {}) const;
 
