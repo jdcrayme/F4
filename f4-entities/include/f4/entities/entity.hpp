@@ -1034,7 +1034,7 @@ namespace f4::entities {
         // FID-OPT-1: BehavioralComponentBase::set_dormant() routes a
         // dormant transition through this world's invalidate (the base
         // captured the owning world in EntityHandle::add<T>()).
-        friend class BehavioralComponentBase;
+        friend struct BehavioralComponentBase;
 
         // ── Component-type index (with_component at campaign scale) ──────
         //

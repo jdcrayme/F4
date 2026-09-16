@@ -446,6 +446,23 @@ std::uint32_t entity_vu_id(const f4::entities::EntityWorld& world,
     return airbase_vu_id(world, entity);
 }
 
+/// Resolve a UNIT's aircraft vis type. The CT's unit rows (flights,
+/// squadrons) carry NO visual model of their own — every unit entry's
+/// vis_type array is all zeros (e.g. flight 394 "Fighter" → zeros); the
+/// model belongs to the VEHICLE the unit operates (F-16C vehicle 273 →
+/// visType 1052). Read the unit's VehicleCompositionComponent (the
+/// world loader fills it from the save's UCD vehicle groups for every
+/// unit class) and resolve the FIRST group's vehicle_type. 0 when the
+/// unit carries no groups or the CT has no entry for the vehicle —
+/// callers fall back (the scenario template).
+int16_t resolve_unit_aircraft_vis(f4::entities::EntityHandle unit_h,
+                                  const f4::world_types::ClassTable& ct) {
+    const auto* vc = unit_h.get<f4::entities::VehicleCompositionComponent>();
+    if (!vc || vc->groups.empty()) return 0;
+    return ct.vis_type_for(
+        static_cast<uint16_t>(vc->groups.front().vehicle_type), 0);
+}
+
 std::optional<f4::entities::EntityId>
 spawn_aircraft_for_flight(f4::entities::EntityWorld& world,
                           f4::entities::EntityId flight_entity,
@@ -531,21 +548,17 @@ spawn_aircraft_for_flight(f4::entities::EntityWorld& world,
         parking_spot.x += offset;
     }
 
-    // Look up the flight's squadron entity_type via its UnitCoreComponent
-    // (the squadron is also a unit — it has its own UnitCoreComponent
-    // with class_table_index). Resolve that entity_type → vis_type[0]
-    // → ModelRecord.
-    int16_t vis_type_index = 0;
-    if (sq) {
-        auto* sq_uc = EntityHandle(fp->squadron, &world).get<UnitCoreComponent>();
-        if (sq_uc) {
-            vis_type_index = ct.vis_type_for(
-                static_cast<uint16_t>(sq_uc->class_table_index), 0);
-        }
+    // The aircraft's vis type: CT unit rows (flights, squadrons) carry
+    // NO vis of their own — the model belongs to the VEHICLE the unit
+    // operates (see resolve_unit_aircraft_vis). The flight's own vehicle
+    // composition first, then the squadron's, and only then the
+    // scenario's template vis_type_index — the F-16 default for the
+    // kunsan scenarios is the last resort, not the identity.
+    int16_t vis_type_index = resolve_unit_aircraft_vis(flight_h, ct);
+    if (vis_type_index <= 0 && sq) {
+        vis_type_index = resolve_unit_aircraft_vis(
+            EntityHandle(fp->squadron, &world), ct);
     }
-    // Fallback: if the CT lookup fails (or no squadron), use the
-    // scenario's template vis_type_index. This is the F-16 default
-    // for the kunsan scenarios.
     if (vis_type_index <= 0) {
         vis_type_index = scenario_aircraft.vis_type_index;
     }
@@ -1254,16 +1267,13 @@ spawn_aircraft_for_intent(
         parking_spot.x += offset;
     }
 
-    // The model: the SQUADRON's entity_type (the aircraft type the
-    // campaign drew from), the same resolution the flight path uses.
+    // The model: the SQUADRON's vehicle type (the aircraft type the
+    // campaign drew from — the intent names no vehicles of its own),
+    // the same resolution the flight path uses.
     int16_t vis_type_index = 0;
     if (sq) {
-        auto* sq_uc =
-            EntityHandle(squadron_entity, &world).get<UnitCoreComponent>();
-        if (sq_uc) {
-            vis_type_index = ct.vis_type_for(
-                static_cast<uint16_t>(sq_uc->class_table_index), 0);
-        }
+        vis_type_index = resolve_unit_aircraft_vis(
+            EntityHandle(squadron_entity, &world), ct);
     }
     if (vis_type_index <= 0) {
         vis_type_index = scenario_aircraft.vis_type_index;
@@ -1739,11 +1749,10 @@ spawn_aircraft_from_squadrons(f4::entities::EntityWorld& world,
         const auto* sq_uc = sq_h.get<UnitCoreComponent>();
         if (!sq || !sq_uc) continue;
 
-        // 1. Resolve the aircraft visType from the squadron's class_table_index.
-        //    This is the aircraft type the squadron flies (e.g. F-16 entity_type
-        //    273 → visType 1052 → F-16 ModelRecord).
-        int16_t vis_type_index = ct.vis_type_for(
-            static_cast<uint16_t>(sq_uc->class_table_index), 0);
+        // 1. Resolve the aircraft visType through the squadron's VEHICLE
+        //    type (CT unit rows carry no vis — see
+        //    resolve_unit_aircraft_vis; F-16C vehicle 273 → vis 1052).
+        int16_t vis_type_index = resolve_unit_aircraft_vis(sq_h, ct);
         if (vis_type_index <= 0) {
             vis_type_index = scenario_aircraft.vis_type_index;
         }

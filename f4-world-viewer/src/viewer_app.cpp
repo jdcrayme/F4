@@ -329,9 +329,35 @@ void ViewerApp::run() {
             // only when the camera actually moved (grid threshold =
             // 1/16 of the visible extent; zoom threshold = 15%) — a
             // still camera never churns deagg state.
+            //
+            // SELECTION: a selected flight / live aircraft IS "where
+            // the user is" — the bubble anchors on it (no zoom gate),
+            // so its surroundings deaggregate exactly as if the camera
+            // sat there, and a moving aircraft drags the bubble with
+            // it. A moving anchor re-points often; the session's own
+            // deagg/reagg cooldowns absorb the churn.
             if (impl_->session && impl_->campaign_view_bubble &&
                 !impl_->replay.active()) {
-                const bool zoomed_in = impl_->cam_zoom > 4.0f;
+                float anchor_gx = impl_->cam_x;
+                float anchor_gy = impl_->cam_y;
+                bool selection_anchored = false;
+                if (impl_->sel_kind == Impl::SelectionKind::LiveAircraft) {
+                    auto h = impl_->session_handle(impl_->sel_entity);
+                    if (auto* tf = h.get<f4::entities::TransformComponent>()) {
+                        anchor_gx = Impl::grid_x(tf);
+                        anchor_gy = Impl::grid_y(tf);
+                        selection_anchored = true;
+                    }
+                } else if (impl_->sel_kind == Impl::SelectionKind::Unit) {
+                    if (auto* tf = impl_->unit_handle(impl_->sel_entity)
+                                       .get<f4::entities::TransformComponent>()) {
+                        anchor_gx = Impl::grid_x(tf);
+                        anchor_gy = Impl::grid_y(tf);
+                        selection_anchored = true;
+                    }
+                }
+                const bool zoomed_in =
+                    selection_anchored || impl_->cam_zoom > 4.0f;
                 if (zoomed_in) {
                     const float vis_w_grid =
                         static_cast<float>(impl_->window_w) /
@@ -340,9 +366,9 @@ void ViewerApp::run() {
                         static_cast<float>(impl_->window_h) /
                         impl_->cam_zoom;
                     const float moved =
-                        std::max(std::abs(impl_->cam_x -
+                        std::max(std::abs(anchor_gx -
                                           impl_->last_bubble_gx),
-                                 std::abs(impl_->cam_y -
+                                 std::abs(anchor_gy -
                                           impl_->last_bubble_gy));
                     const bool camera_moved =
                         moved > vis_w_grid / 16.0f ||
@@ -362,16 +388,17 @@ void ViewerApp::run() {
                         impl_->session->set_view_bubble(
                             radius_ft,
                             f4::geo::WorldPosition(
-                                impl_->cam_x * 1024.0,
-                                impl_->cam_y * 1024.0, 0.0));
-                        impl_->last_bubble_gx = impl_->cam_x;
-                        impl_->last_bubble_gy = impl_->cam_y;
+                                anchor_gx * 1024.0,
+                                anchor_gy * 1024.0, 0.0));
+                        impl_->last_bubble_gx = anchor_gx;
+                        impl_->last_bubble_gy = anchor_gy;
                         impl_->last_bubble_zoom = impl_->cam_zoom;
                     }
                 } else if (impl_->last_bubble_zoom >= 0.0f) {
-                    // Zoomed back out: ownship bubble (FreeFalcon's
-                    // default), applied immediately. The still-camera
-                    // guard (last_bubble_zoom < 0) keeps this a one-shot
+                    // Zoomed back out (no selection anchored): ownship
+                    // bubble (FreeFalcon's default), applied
+                    // immediately. The still-camera guard
+                    // (last_bubble_zoom < 0) keeps this a one-shot
                     // per zoom-out, not a per-frame churn.
                     impl_->session->clear_view_bubble();
                     impl_->last_bubble_zoom = -1.0f;

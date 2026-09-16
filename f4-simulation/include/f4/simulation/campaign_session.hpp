@@ -72,6 +72,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -505,6 +506,13 @@ public:
     /// The flights' tier snapshot (wire order; the Campaign window's
     /// flights table). Called under the session lock.
     [[nodiscard]] std::vector<FlightTierView> flight_tiers() const;
+
+    /// The aggregate flight's current course (compass radians, 0 =
+    /// north) — the engine's per-flight heading, the same value the
+    /// deagg spawn pose uses. nullopt when not tiered / unknown vu.
+    /// Called under the session lock.
+    [[nodiscard]] std::optional<double> flight_heading_rad(
+        std::uint32_t vu) const;
 
     /// FID-4: force one flight deaggregated NOW — an ops-airfield GROUND
     /// spawn when the aggregate has not departed yet (the ATC flies it

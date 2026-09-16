@@ -16,10 +16,12 @@
 #include <f4/simulation/campaign_spawner.hpp>
 #include <f4/simulation/campaign_origin.hpp>
 #include <f4/simulation/scenario.hpp>
+#include <f4/simulation/visual_model_component.hpp>
 #include <f4/campaign/campaign.hpp>
 #include <f4/entities/entity.hpp>
 #include <f4/world/world_adapters.hpp>
 #include <f4/world/world_loader.hpp>
+#include <f4/world_types/class_table.hpp>
 #include <f4/ai/brain_component.hpp>
 #include <f4/flight/flight_model_component.hpp>
 #include <f4/data/aircraft_config.hpp>
@@ -31,6 +33,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <string>
 #include <vector>
 #include <unordered_map>
@@ -510,6 +513,140 @@ TEST(SpawnFromFlightsB3, NullMapKeepsLegacySquadronBaseParking) {
         EXPECT_TRUE(d_air < 500.0 || d_army < 500.0)
             << "null map: park at the squadron base objective";
     }
+}
+
+// ============================================================================
+// Vehicle-based vis resolution — CT unit rows carry no vis
+//
+// FALCON4.CT gives flights and squadrons all-zero vis_type arrays (the
+// real table's rows 380-626 / 454-946); the model belongs to the VEHICLE
+// the unit operates (F-16C vehicle 273 → vis 1052). The spawn paths used
+// to look up the unit's OWN row → 0 → the scenario template (the F-16
+// default) — every aircraft in the theater rendered as an F-16. These
+// tests pin the vehicle-group resolution.
+// ============================================================================
+
+namespace {
+
+// A minimal CT JSON: rows 100 (a flight) and 101 (a squadron) are UNIT
+// rows with all-zero vis — the real table's shape — and row 102 is the
+// vehicle row carrying a distinctive vis (913, an Su-25 in the real
+// table). Entries are implicit-indexed (entity_type = 100 + array
+// position).
+void write_unit_row_ct(const std::filesystem::path& path) {
+    std::ofstream out(path);
+    out << "{\"format\":\"f4-class-table\",\"version\":1,"
+           "\"first_entity_type\":100,\"count\":3,\"entries\":["
+           "{\"entity_type\":100,\"vis_type\":[0,0,0,0,0,0,0]},"
+           "{\"entity_type\":101,\"vis_type\":[0,0,0,0,0,0,0]},"
+           "{\"entity_type\":102,\"vis_type\":[913,0,0,0,0,0,0]}]}";
+}
+
+// Airbase + squadron + one tasked flight whose vehicle group is
+// entity_type 102 (the CT's only modeled row).
+f4::world::WorldState make_vehicle_vis_world() {
+    using f4::world::TeamState;
+    using f4::world::UnitState;
+    using f4::world::ObjectiveState;
+
+    f4::world::WorldState ws;
+    ws.version = 71;
+    ws.campaign.te_team = 2;
+    ws.teams.resize(8);
+    ws.teams[2] = TeamState{2, 2, 2, "ROK", ""};
+
+    ObjectiveState ab;
+    ab.objective_type = 1;
+    ab.x = 390; ab.y = 455; ab.owner = 2;
+    ab.id_num = 4101; ab.camp_id = 50;
+    ws.objectives = {ab};
+
+    UnitState sq;
+    sq.unit_class = UnitClass::Squadron;
+    sq.domain = 2;
+    sq.entity_type = 101;   // the squadron's own row — zero vis
+    sq.x = 390; sq.y = 455; sq.owner = 2; sq.id_num = 4281;
+    sq.airbase_id = 4101;
+
+    UnitState fl;
+    fl.unit_class = UnitClass::Flight;
+    fl.domain = 2;
+    fl.entity_type = 100;   // the flight's own row — zero vis
+    fl.x = 392; fl.y = 451; fl.owner = 2; fl.id_num = 5001;
+    fl.mission = 13;
+    fl.squadron_id = 4281;
+    fl.callsign_id = 125; fl.callsign_num = 1;
+    f4::entities::VehicleGroup vg;
+    vg.vehicle_type = 102;  // the modeled vehicle row
+    vg.count = 2;
+    fl.vehicle_groups = {vg};
+
+    ws.units = {sq, fl};
+    return ws;
+}
+
+ScenarioAirfield test_airfield() {
+    ScenarioAirfield airfield;
+    airfield.runway_heading_rad = 0.0;
+    airfield.threshold_position = f4::geo::WorldPosition(0.0, 5000.0, 50.0);
+    return airfield;
+}
+
+} // namespace
+
+TEST(SpawnFromFlightsB3, ResolvesAircraftVisThroughTheVehicleType) {
+    f4::data::AircraftConfig cfg;
+    if (!loadF16Config(cfg)) GTEST_SKIP() << "F-16 config fixture missing";
+
+    const auto ct_path = std::filesystem::temp_directory_path() /
+                         "f4_spawner_unit_row_ct.json";
+    write_unit_row_ct(ct_path);
+    f4::world_types::ClassTable ct;
+    ct.load_auto(ct_path.string());
+    ASSERT_TRUE(ct.loaded());
+    EXPECT_EQ(ct.vis_type_for(102, 0), 913);
+
+    auto ws = make_vehicle_vis_world();
+    EntityWorld ew;
+    auto pw = f4::world::populate_world(ew, ws);
+
+    auto spawned = spawn_aircraft_from_flights(
+        ew, ct, cfg, test_airfield(), make_template());
+    ASSERT_EQ(spawned.size(), 1u);
+
+    EntityHandle h(spawned[0], &ew);
+    auto* vis = h.get<f4::simulation::VisualModelComponent>();
+    ASSERT_NE(vis, nullptr);
+    // The VEHICLE's vis (913) — not the flight/squadron rows (0) and
+    // not the scenario template's F-16 (1052).
+    EXPECT_EQ(vis->vis_type, 913);
+
+    std::error_code ec;
+    std::filesystem::remove(ct_path, ec);
+}
+
+TEST(SpawnFromFlightsB3, NoVehicleGroupsFallsBackToTheTemplate) {
+    f4::data::AircraftConfig cfg;
+    if (!loadF16Config(cfg)) GTEST_SKIP() << "F-16 config fixture missing";
+
+    // Same table, but the flight carries NO vehicle groups — nothing to
+    // resolve, the spawn keeps the template vis (1052) rather than a
+    // zero (which would render nothing).
+    auto ws = make_vehicle_vis_world();
+    ws.units[1].vehicle_groups.clear();
+
+    EntityWorld ew;
+    auto pw = f4::world::populate_world(ew, ws);
+
+    auto spawned = spawn_aircraft_from_flights(
+        ew, f4::world_types::ClassTable{}, cfg, test_airfield(),
+        make_template());
+    ASSERT_EQ(spawned.size(), 1u);
+
+    EntityHandle h(spawned[0], &ew);
+    auto* vis = h.get<f4::simulation::VisualModelComponent>();
+    ASSERT_NE(vis, nullptr);
+    EXPECT_EQ(vis->vis_type, 1052);
 }
 
 // ============================================================================

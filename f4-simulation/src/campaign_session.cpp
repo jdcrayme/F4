@@ -1347,6 +1347,14 @@ CampaignSession::flight_tiers() const {
     return out;
 }
 
+std::optional<double> CampaignSession::flight_heading_rad(
+    std::uint32_t vu) const {
+    if (flights_ == nullptr) return std::nullopt;
+    const std::size_t idx = flights_->index_of(vu);
+    if (idx == static_cast<std::size_t>(-1)) return std::nullopt;
+    return flights_->current_heading_rad(idx);
+}
+
 void CampaignSession::force_deaggregate_flight(std::uint32_t vu) {
     if (flights_ == nullptr) return;
     const std::size_t idx = flights_->index_of(vu);

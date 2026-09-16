@@ -486,6 +486,22 @@ struct ViewerApp::Impl {
         return f4::entities::EntityHandle(id,
             const_cast<f4::entities::EntityWorld*>(&session->sim().world()));
     }
+    /// The handle for a UNIT selection: the session's entity when a
+    /// session runs and one resolves there, else the static world's.
+    /// The flights table and the canvas's aggregate pick select the
+    /// SESSION's flight entities — the copies whose transform the
+    /// session keeps updating (the static world's stay at the save
+    /// position). The two worlds populate identically, so the ids
+    /// coincide for campaign units; the UnitCoreComponent check guards
+    /// against a spawned aircraft owning the id in the session world.
+    [[nodiscard]] f4::entities::EntityHandle
+    unit_handle(f4::entities::EntityId id) const {
+        if (session) {
+            auto sh = session_handle(id);
+            if (sh.get<f4::entities::UnitCoreComponent>()) return sh;
+        }
+        return handle(id);
+    }
     /// The session's live aircraft roster (empty when no session).
     [[nodiscard]] const std::vector<f4::entities::EntityId>&
     live_aircraft() const {
@@ -907,6 +923,16 @@ struct ViewerApp::Impl {
     std::filesystem::path current_theater_dir;   // set by the install flow
     bool theater_tiles_loaded = false;           // world.theater_loaded()
     f4::entities::EntityId world_view_cached_entity;  // rebuild on selection change
+
+    // Entity 3D view terrain tracking (live aircraft): the aircraft
+    // MOVES, so the shared terrain views can't key on the selection
+    // alone. The entity view owns a build while valid and rebuilds when
+    // the aircraft drifts beyond its rebuild threshold from this center;
+    // it clears the objective view's *_cached_entity keys after each
+    // rebuild so the objective tab rebuilds on its next selection.
+    bool entity_3d_terrain_valid = false;
+    float entity_3d_terrain_center_east_ft = 0.0f;
+    float entity_3d_terrain_center_north_ft = 0.0f;
 
     // -----------------------------------------------------------------------
     // Replay mode state (Path B2 — trace playback)
