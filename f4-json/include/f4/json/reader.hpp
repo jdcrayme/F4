@@ -55,14 +55,23 @@ namespace f4::json {
 //   try/catch and translate to library-specific exceptions if desired.
 //
 // String lifetime:
-//   The Reader holds a const reference to the source string. The caller
-//   must keep the source alive for the Reader's lifetime. This matches
-//   the existing JsonReader pattern in f4-world / f4-terrain and avoids
-//   a string copy on every parse.
+//   The Reader OWNS a copy of the source string. Any construction form is
+//   safe — a named std::string, a string_view, or a temporary/literal
+//   ("..." binds to the constructor parameter and is copied before the
+//   calling statement ends). The historical version held a const reference
+//   "to avoid a copy on every parse"; that made Reader r("literal") a
+//   silent dangling-reference UB (the temporary died at the end of the
+//   declaration statement and the parse read freed SSO stack — caught as
+//   JsonReader.RegisteredEscapesStillDecode failing with a garbage first
+//   character). One copy per constructed Reader is the correct trade:
+//   Readers are constructed per document, not per token.
 // ============================================================================
 class Reader {
 public:
-    explicit Reader(const std::string& s) : s_(s), pos_(0) {}
+    // Takes a view for call-site flexibility (string, literal, string_view);
+    // the view is materialized into the owned s_ immediately, so no caller
+    // can observe the parameter's lifetime.
+    explicit Reader(std::string_view s) : s_(s), pos_(0) {}
 
     // ------------------- position / diagnostics ---------------------------
 
@@ -332,7 +341,7 @@ public:
     }
 
 private:
-    const std::string& s_;
+    std::string s_;      // owned — see the String lifetime note above
     std::size_t pos_;
 };
 

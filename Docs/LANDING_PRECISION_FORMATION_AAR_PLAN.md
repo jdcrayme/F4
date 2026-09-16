@@ -20,7 +20,10 @@
 >   target (wings-level through the flare + centerline-hold in rollout,
 >   iterated against the CSV trace) — needs the user's build env, not
 >   silently relaxed.
-> - **Tranche D (AAR)** ✅ code — `RefuelModule` (5-state SM) +
+> - **Tranche D (AAR)** ✅ LANDED — superseded by the AAR redesign
+>   (`archive/AAR_REDESIGN_PLAN.md`, Task 57: real tanker + 8-state SM;
+>   P5 closed its last tuning item — `test_aar_e2e` reaches Departing
+>   and Done with fuel transferred) — formerly: `RefuelModule` (5-state SM) +
 >   BrainComponent AAR rung (between Formation and Mission) + `tanker_track`
 >   scenario + unit + E2E tests. Built on the pre-existing
 >   ATC/ScriptedTanker/TankerConfig scaffold. Build/test pending.

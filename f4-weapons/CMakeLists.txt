@@ -34,6 +34,7 @@ add_library(f4-weapons STATIC
     src/bomb_battery.cpp
     src/gun.cpp
     src/gun_component.cpp
+    src/countermeasures.cpp
 )
 target_link_libraries(f4-weapons PUBLIC f4_warnings)
 

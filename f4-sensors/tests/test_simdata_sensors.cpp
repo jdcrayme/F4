@@ -60,6 +60,16 @@ SignatureGrid lobeGrid() {
     return g;
 }
 
+/// A flat grid of `v` at every breakpoint (the test's stand-in for a
+/// uniform signature band).
+SignatureGrid flatGridOf(double v) {
+    SignatureGrid g;
+    g.azimuth_deg = {0.0, 90.0, 180.0};
+    g.elevation_deg = {-90.0, 0.0, 90.0};
+    g.values = {{v, v, v}, {v, v, v}, {v, v, v}};
+    return g;
+}
+
 } // namespace
 
 // ============================================================================
@@ -155,6 +165,50 @@ TEST(SimDataSensors, SignatureComponentLooksUpTheGrid) {
     sig.rcs_grid = &grid;
     EXPECT_DOUBLE_EQ(sig.effective_rcs_m2(90.0 * (M_PI / 180.0)), 20.0);
     EXPECT_DOUBLE_EQ(sig.effective_rcs_m2(45.0 * (M_PI / 180.0)), 12.5);
+}
+
+// ============================================================================
+// IR + visual signature accessors (the SIGDATA ir0/ir1/ir2/visual grids)
+// ============================================================================
+TEST(SimDataSensors, IrSignatureReadsTheBandThePowerModeSelects) {
+    // The shipped generic shape, compressed: ir0 flat 0.05, ir1 flat
+    // 0.5, ir2 flat 3.5 (the real grids vary by aspect; flat pins the
+    // band SELECTION, which is what this test is about).
+    AircraftSignatureData rec;
+    rec.name = "generic";
+    rec.ir0 = flatGridOf(0.05);
+    rec.ir1 = flatGridOf(0.5);
+    rec.ir2 = flatGridOf(3.5);
+
+    SignatureComponent sig;
+    sig.sig_data = &rec;
+
+    sig.ir_power = IrPowerMode::Baseline;
+    EXPECT_DOUBLE_EQ(sig.ir_signature_value(0.7), 0.05);
+    sig.ir_power = IrPowerMode::Afterburner;
+    EXPECT_DOUBLE_EQ(sig.ir_signature_value(0.7), 0.5);
+    sig.ir_power = IrPowerMode::Max;
+    EXPECT_DOUBLE_EQ(sig.ir_signature_value(0.7), 3.5);
+}
+
+TEST(SimDataSensors, VisualSignatureReadsTheVisGrid) {
+    AircraftSignatureData rec;
+    rec.name = "generic";
+    rec.visual = flatGridOf(2.0);
+
+    SignatureComponent sig;
+    sig.sig_data = &rec;
+    EXPECT_DOUBLE_EQ(sig.visual_signature_value(1.1), 2.0);
+}
+
+TEST(SimDataSensors, NoSignatureDataReadsAsTheReference) {
+    // The data-free default: every target reads as the reference
+    // airframe the sensor cards' nominal ranges were authored against.
+    SignatureComponent sig;
+    EXPECT_DOUBLE_EQ(sig.ir_signature_value(1.2), 1.0);
+    EXPECT_DOUBLE_EQ(sig.visual_signature_value(1.2), 1.0);
+    // And the radar path is unchanged (the scalar).
+    EXPECT_DOUBLE_EQ(sig.effective_rcs_m2(1.2), 5.0);
 }
 
 // ============================================================================

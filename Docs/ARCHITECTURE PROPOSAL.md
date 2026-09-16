@@ -1,6 +1,8 @@
 # F4 Modern C++ Libraries — Architecture
 
-> **Status**: Draft — Proposal for community review  
+> **Status**: As-built (refreshed from the community-review draft; the
+> library inventory in §3 now lists every target in the build with its
+> real CMake link edges, and §17's phases are all landed)  
 > **Source of Truth**: [FreeFalcon/freefalcon-central](https://github.com/FreeFalcon/freefalcon-central) (develop branch)  
 > **Companion**: [FreeFalcon Core Systems Reference](Docs/FreeFalcon_Core_Systems_Reference.html)
 
@@ -80,75 +82,171 @@ The original often interleaves concerns — `AirframeClass::Exec()` runs atmosph
 
 ## 3. Library Overview & Dependency Graph
 
+As-built: the build defines **30 CMake targets** (27 libraries + 3
+interactive apps) plus two standalone tools (`campaign_qc`,
+`fm_sysid`). The graph below is extracted from the real
+`target_link_libraries` declarations — each CMakeLists.txt is the
+normative source. §4–§15 that follow are the deep-dives for the
+proposal's representative subset; the remaining libraries document
+their design in their own headers (the project convention: design
+notes live next to the code they describe).
+
 ```mermaid
 graph TD
-    units["f4-units<br/>Physical Quantities"]
-    math["f4-math<br/>Numerical Mathematics"]
-    data["f4-data<br/>Configuration & Loading"]
-    fsm["f4-state-machine<br/>State Machine Framework"]
-    entities["f4-entities<br/>Entity System"]
-    messaging["f4-messaging<br/>Type-Safe Message Bus"]
-    flight["f4-flight-model<br/>Flight Dynamics"]
-    campaign["f4-campaign<br/>Dynamic Campaign"]
-    ai["f4-ai<br/>Artificial Intelligence"]
-    simulation["f4-simulation<br/>Orchestration"]
-    convert["f4-convert<br/>Data Conversion Tool"]
-    testvis["f4-test-vis<br/>Test Visualization"]
+    subgraph Foundation["Foundation — zero domain coupling"]
+        units["f4-units"]
+        math["f4-math"]
+        json["f4-json"]
+        xml["f4-xml"]
+        geo["f4-geo"]
+        fsm["f4-state-machine"]
+        lzss["f4-lzss"]
+        io["f4-io"]
+        fapi["f4-flight-api"]
+    end
+    subgraph Infrastructure["Infrastructure"]
+        entities["f4-entities"]
+        messaging["f4-messaging"]
+        wtypes["f4-world-types"]
+        gltf["f4-gltf"]
+        assets["f4-assets"]
+        install["f4-install"]
+    end
+    subgraph Conversion["Importers (the only legacy-binary parsers)"]
+        convert["f4-convert"]
+        data["f4-data"]
+        wconv["f4-world-convert"]
+        tconv["f4-terrain-convert"]
+        models["f4-models"]
+        fimport["f4-import"]
+    end
+    subgraph Domain["Domain"]
+        flight["f4-flight-model"]
+        weapons["f4-weapons"]
+        sensors["f4-sensors"]
+        recorder["f4-recorder"]
+        ai["f4-ai"]
+        campaign["f4-campaign"]
+        world["f4-world"]
+        terrain["f4-terrain"]
+    end
+    subgraph Orchestration["Orchestration & apps"]
+        simulation["f4-simulation"]
+        renderer["f4-renderer"]
+        wviewer["f4-world-viewer"]
+        mviewer["f4-models-viewer"]
+        splayer["f4-scenario-player"]
+    end
 
-    units --> math
-    math --> data
-    units --> data
-    data --> entities
-    entities --> messaging
-    entities --> flight
-    entities --> campaign
-    messaging --> flight
-    messaging --> campaign
-    fsm --> flight
-    fsm --> campaign
-    fsm --> ai
-    math --> flight
-    units --> flight
-    flight --> ai
+    geo --> entities
     entities --> ai
+    math --> ai
+    data --> ai
+    fapi --> ai
     messaging --> ai
-    flight --> simulation
-    campaign --> simulation
-    ai --> simulation
-    messaging --> simulation
-    entities --> simulation
-    data --> convert
+    recorder --> ai
+    fsm --> ai
 
-    style units fill:#1a7a3a,color:#fff
-    style math fill:#1a7a3a,color:#fff
-    style data fill:#2563eb,color:#fff
-    style fsm fill:#2563eb,color:#fff
-    style entities fill:#7c3aed,color:#fff
-    style messaging fill:#7c3aed,color:#fff
-    style flight fill:#dc2626,color:#fff
-    style campaign fill:#dc2626,color:#fff
-    style ai fill:#dc2626,color:#fff
-    style simulation fill:#ea580c,color:#fff
-    style convert fill:#6b7280,color:#fff
-    style testvis fill:#6b7280,color:#fff
+    math --> flight
+    data --> flight
+    entities --> flight
+    fapi --> flight
+    messaging --> flight
+    fsm --> flight
+    units --> flight
+
+    entities --> weapons
+    messaging --> weapons
+    entities --> sensors
+    messaging --> sensors
+    json --> recorder
+    geo --> recorder
+
+    world --> campaign
+    messaging --> campaign
+    json --> campaign
+    io --> campaign
+
+    terrain --> world
+    entities --> world
+    assets --> world
+    json --> world
+
+    io --> wtypes
+    json --> wtypes
+    json --> gltf
+    json --> assets
+
+    convert --> data
+    math --> convert
+    install --> wconv
+    io --> wconv
+    json --> wconv
+    lzss --> wconv
+    terrain --> tconv
+    install --> models
+    assets --> fimport
+    gltf --> fimport
+    models --> fimport
+    json --> fimport
+
+    ai --> simulation
+    flight --> simulation
+    world --> simulation
+    weapons --> simulation
+    sensors --> simulation
+    campaign --> simulation
+    recorder --> simulation
+    assets --> simulation
+    wtypes --> simulation
+
+    gltf --> renderer
+    models --> renderer
 ```
 
-### Library Summary
+### Library Summary (as-built)
 
-| Library | Role | C++ Standard | Dependencies |
-|---------|------|-------------|--------------|
-| `f4-units` | Compile-time physical quantity types | C++20 | None |
-| `f4-math` | Tables, interpolation, integration, filtering, solvers | C++20 | f4-units |
-| `f4-data` | JSON/TOML config loading, validation, schema | C++20 | f4-math, f4-units |
-| `f4-state-machine` | Type-safe state machines with transition tables | C++20 | None |
-| `f4-entities` | Component-based entity handles, tags, spatial index | C++20 | f4-data, f4-math |
-| `f4-messaging` | Typed message bus with thread-safe queues | C++20 | f4-entities |
-| `f4-flight-model` | Atmosphere, aero, FCS, engine, EOM, ground model | C++20 | f4-math, f4-units, f4-state-machine, f4-entities, f4-messaging |
-| `f4-campaign` | ATM, GTM, packages, squadrons, route planning | C++20 | f4-math, f4-entities, f4-messaging, f4-state-machine |
-| `f4-ai` | DigitalBrain, BVR/WVR, sensors, navigation, landing | C++20 | f4-flight-model, f4-entities, f4-messaging, f4-state-machine |
-| `f4-simulation` | Time management, threading, main loop orchestration | C++20 | All above |
-| `f4-convert` | CLI tool: legacy binary → JSON conversion | C++17 | f4-data (for schema emission) |
-| `f4-test-vis` | Test trace recording and HTML/SVG visualization | C++20 | f4-math, f4-entities |
+| Library | Role | Deps (CMake) |
+|---------|------|--------------|
+| `f4-units` | Compile-time physical quantity types | — |
+| `f4-math` | Tables, interpolation, integration, filters, solvers | — |
+| `f4-json` | Dependency-free JSON reader/writer | — |
+| `f4-xml` | XML (vendored pugixml) — SVG symbol authoring | pugixml (vendored) |
+| `f4-geo` | Strong-typed coordinate frames & geodesy (WGS84) | f4-math |
+| `f4-state-machine` | Transition-table state machines + layered ladder | — |
+| `f4-lzss` | LZSS decompress/compress (TEX blobs, .cam archives) | — |
+| `f4-io` | Cursor + file primitives shared by converters | — |
+| `f4-flight-api` | PilotInput / IAircraftState / IPilotInputSink interfaces | — |
+| `f4-entities` | Entity handles + typed components, spatial index | f4-geo |
+| `f4-messaging` | Typed message bus, cross-thread queues | — |
+| `f4-world-types` | Runtime-safe enums + JSON class-table loader | f4-io, f4-json |
+| `f4-gltf` | glTF 2.0 runtime loader (replaces f4-models in runtime) | f4-json |
+| `f4-assets` | Runtime asset root, manifest, @asset: resolution, staleness | f4-json |
+| `f4-install` | Falcon 4.0 install layout locator | — |
+| `f4-convert` | .dat aircraft parser → JSON + Rosetta field map | f4-data, f4-math |
+| `f4-data` | AircraftConfig loading/validation/table access | f4-math, f4-units |
+| `f4-world-convert` | .cam archive ↔ JSON (decode + byte-faithful re-encode) | f4-install, f4-io, f4-json, f4-lzss |
+| `f4-terrain-convert` | THEATER.* → terrain JSON | f4-terrain |
+| `f4-models` | KoreaObj.HDR/.LOD/TEX parser (importer side) | f4-install, f4-json, f4-lzss, f4-math |
+| `f4-import` | f4import CLI + doctor (asset-pipeline importer) | f4-assets, f4-gltf, f4-json, f4-models |
+| `f4-flight-model` | Atmosphere, aero, FCS, engine, EOM, gear, stall SM | f4-data, f4-entities, f4-flight-api, f4-math, f4-messaging, f4-state-machine, f4-units |
+| `f4-weapons` | Gun, bomb, missile flyout, damage, stores, WCD | f4-entities, f4-geo, f4-io, f4-json, f4-math, f4-messaging |
+| `f4-sensors` | Radar detection/scan, track store, RWR | f4-data, f4-entities, f4-geo, f4-math, f4-messaging |
+| `f4-recorder` | Flight snapshots, replay, LLM-friendly trace export | f4-geo, f4-json |
+| `f4-ai` | BrainComponent arbiter + 13 tactic modules, ATC protocol | f4-data, f4-entities, f4-flight-api, f4-geo, f4-math, f4-messaging, f4-recorder, f4-state-machine |
+| `f4-campaign` | Campaign ladder (tasking), ledger, ground war, routes | f4-io, f4-json, f4-messaging, f4-world |
+| `f4-world` | Typed WorldState loader → EntityWorld population | f4-assets, f4-entities, f4-geo, f4-json, f4-terrain |
+| `f4-terrain` | Theater terrain (elevation/palette/overlay) | f4-install, f4-io, f4-json |
+| `f4-simulation` | Orchestration: world + bus + tick loop, session, QC harnesses | 21 libraries (see CMakeLists) |
+| `f4-renderer` | Shared Raylib rendering (terrain, symbols, 3D) | f4-gltf, f4-models + raylib |
+| `f4-world-viewer` | Interactive campaign/world viewer (app) | f4-simulation + f4-renderer + raylib/imgui |
+| `f4-models-viewer` | Interactive 3D model inspector (app) | f4-renderer + raylib/imgui |
+| `f4-scenario-player` | Scenario host executable (app) | f4-simulation + f4-renderer |
+
+The proposal's `f4-test-vis` (§15) was never built as a separate
+library — its concern (greppable, LLM-friendly trace output) is served
+by `f4-recorder`'s JSON snapshots + `f4-state-machine`'s text traces
+and the `F4_AAR_TRACE`-style env-gated CSV probes.
 
 ### Color Legend
 - 🟢 **Foundation** — zero domain coupling, independently testable
@@ -2121,6 +2219,11 @@ This is fundamentally a **reverse engineering task** that produces a Rosetta Sto
 
 ## 15. f4-test-vis — Test Visualization Support
 
+> **As-built note**: never built as a separate library. Its concern —
+> greppable, LLM-friendly traces — shipped inside `f4-recorder`
+> (JSON flight snapshots + replay) and `f4-state-machine`'s text
+> traces. Retained as the original design rationale.
+
 ### 15.1 Motivation
 
 Many test assertions in this domain require visualization to be meaningful. A text assertion "path has 47 waypoints" tells you nothing about whether the path avoids threats correctly. A time-series of FCS output tells you nothing without seeing the oscillation.
@@ -2321,6 +2424,12 @@ Tests that produce traces should archive them as CI artifacts. A GitHub Action c
 ---
 
 ## 17. Implementation Roadmap
+
+> **As-built status: LANDED.** Every phase below shipped — the
+> milestone-by-milestone record lives in `CHANGELOG.md` (one line per
+> landed task, newest first), and the per-subsystem design decisions
+> live in `Docs/`' active plans and the library headers. The roadmap
+> text is retained as the original sequencing rationale.
 
 ### Phase 1 — Foundation (Weeks 1–4)
 

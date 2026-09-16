@@ -520,7 +520,18 @@ AIControlOutput RefuelModule::controls_for_cleared_contact() const
     // envelope. 0.05/ft capped at 8 kt closes 980 ft in ~75 s and decays
     // to ~0.7 kt inside the ±15 ft envelope, preserving the gentle
     // terminal closure the envelope gate expects.
-    const double closure_gap = -along_err_ft() - config.precontact_offset_long_ft;
+    //
+    // P5 fix (the -50 ft stall, measured on the F4_AAR_TRACE CSV): the
+    // bias originally subtracted precontact_offset_long_ft, targeting the
+    // PRECONTACT station — but that offset belongs to the PreContact
+    // state's station-keep. Once CLEARED to contact, the USAF procedure
+    // closes to the RECEPTACLE (along ≈ 0): the bias must go to zero at
+    // the boom, not at the 50-ft station. The old target made the bias
+    // clamp to 0 at 50 ft astern while the latch gate sits at ±15 ft —
+    // the receiver crept the last 35 ft at integrator-noise speed
+    // (~0.1 ft/s, 120 s stuck at -52 ft in the trace) and the E2E
+    // expired 12 s into Hold, never reaching Departing/Done.
+    const double closure_gap = -along_err_ft();
     const double closure_bias = std::clamp(0.05 * closure_gap, 0.0, 8.0);
     const double target_speed = tanker_picture_.speed_kts + closure_bias;
     auto out = air_steering.steer(tanker_picture_.heading_rad,

@@ -11246,3 +11246,234 @@ replacing-add found-and-fixed, the before/after tables, the new §5
 "What remains" with the FM floor/glue/radar-term/picture-walk names;
 §6 keeps the what-does-NOT-change list), Docs/README index row,
 CHANGELOG, this entry.
+
+## P5 — the two tree failures fixed, save-write verified, AAR closed
+
+Task: proceed as recommended (Tier 0 cleanup: fix the two pre-existing
+tree failures + verify the campaign_qc save-write consumer + docs pass;
+then the AAR redesign tranche — which Task 57 had already landed, so the
+session closed its remaining open item instead).
+
+Environment: fresh clone at 16516f9 (f4-fid-opt-3.patch), headless
+configure (renderer/viewer/scenario-player OFF), GCC 14.2 / cmake 4.4.3 /
+Ninja, Release. Full build 657 targets, zero errors.
+
+DIAGNOSIS 1 (JsonReader.RegisteredEscapesStillDecode): NOT a bad test.
+A standalone reproducer (named-const source vs a temporary literal into
+the same ctor) split the behavior — the temp-literal form's document
+came back with first byte 'B' (0x42) instead of '"' (0x22). Root cause:
+`Reader` held `const std::string& s_` — the class doc even said "the
+caller must keep the source alive" — so `Reader r("literal")` bound the
+member to a temporary that died at the end of the declaration
+statement. The parse read freed SSO stack. Every production call site
+passes a named string, which is why only this test (and the API's own
+doc-contract) surfaced it. FIX: `Reader` OWNS its source —
+`std::string s_` + `explicit Reader(std::string_view)`. One copy per
+constructed Reader (Readers are constructed per document, not per
+token). The String-lifetime comment block rewritten to document the
+ownership + the UB it replaces.
+
+DIAGNOSIS 2 (Sha256.ReproducesCommittedManifestFingerprints): manifest
+drift, three layers deep —
+- Aircraft/kc10.json fingerprints stale (Task 72's fleet AuxAero regen
+  postdated the manifest; the weather patch 7a47674 had ALSO reverted
+  the prior session's manifest repair — git archaeology: 69a1638 had
+  the correct 36-entry manifest, 7a47674 restored the stale 42-entry
+  one).
+- 5 `Temp/` entries (viewer on-demand conversions, never committed) +
+  Weapons/falcon4.wcd.json (declared by the regen, never committed) —
+  a fresh clone fails fs::exists forever.
+FIX: surgical repair preserving the original compact formatting
+(36 entries; kc10/terrain/world recomputed; the 6 phantom entries
+dropped) — scripts/repair_manifest.py. Hardened at both ends:
+generate_manifest.py hard-excludes `Temp/` (the committed manifest only
+lists committed files), and the hash test skips `Temp/` entries loudly
+(GTEST_SUCCEED note) instead of ASSERT-failing a fresh clone. The first
+regex attempt taught a lesson worth recording: `"sha256":"<hex>"` — the
+closing quote after the hex belongs in the pattern; without it the fnv
+tail group can never match (the greedy hex run abuts the quote, not
+the comma).
+
+EN ROUTE (campaign_qc --save-write): the consumer was ALREADY WIRED
+(C6) — the docs' "natural next consumer" note was stale. Verified live:
+TestCamp.cam → cam2json → campaign_qc --save-write →
+campaign_after.world.json → json2cam --reencode-all →
+campaign_after.cam (327,883 bytes) → cam2json round-trip decodes with
+objectives/units/teams intact — the decode → run → fight → apply →
+save loop CLOSED on real data. FOUND AND FIXED en route: a bare
+relative world filename ("testcamp.world.json") has an empty
+parent_path; `create_directories("")` threw "Invalid argument" — the
+out_dir default now falls back to CWD. (The QC's own A-G gate fired on
+the 3-minute smoke — 115 armed strike flights, 0 releases — the flights
+never reached targets in 3 sim-minutes; not a save-write defect, the
+24-h certificates are the arm for that.)
+
+AAR CLOSURE (the plan's documented open tuning item): test_aar_e2e
+reached Hold but never Departing/Done. The F4_AAR_TRACE CSV (the
+prior session's instrument, reused) split the 360-s budget: PreContact
+99.5 s, ClearedContact 248 s (!), Hold 12 s — expired before the 20-s
+auto-disconnect. Inside ClearedContact the along-track error collapsed
+-1186 ft → -52 ft in ~124 s, then STALLED at ~-50 ft for 120 s. Root
+cause: `controls_for_cleared_contact`'s closure bias subtracted
+`precontact_offset_long_ft` — it targeted the PRECONTACT station (bias
+→ 0 at 50 ft astern) while `in_contact_envelope` latches at
+±15 ft. The last 35 ft arrived at integrator-noise speed. The offset
+belongs to PreContact's station-keep; once CLEARED, the USAF procedure
+closes to the receptacle. FIX: `closure_gap = -along_err_ft()` (bias 0
+at the boom). RESULT: Hold latches at 195.2 s, Done at 319.6 s — the
+full rendezvous → pre-contact → cleared-contact → contact → hold →
+disconnect → backing-out → departing → descent → Done procedure INSIDE
+the original 360-s budget, 5,000 lbs transferred — and the test now
+PINS saw_departing/saw_done/fuel>0 instead of tolerating their absence
+(the plan's own acceptance tightening). test_refuel_module 8/8 green.
+
+DOCS AS-BUILT (the index's own action items, cleared):
+- ARCHITECTURE PROPOSAL: Draft → As-built. §3 replaced with the
+  as-built inventory — 30 CMake targets with the REAL
+  target_link_libraries edges (extracted programmatically, each
+  CMakeLists normative); §17 marked LANDED with a pointer to the
+  CHANGELOG; §15 f4-test-vis noted never-built (superseded by
+  f4-recorder + FSM text traces).
+- AAR_REDESIGN_PLAN → archive/ (Task 57 landed it; P5 closed the last
+  open item; surviving truth lives in refuel_module.cpp's header).
+- DIGI_AI_PHASE2_PLAN → archive/ (everything it scoped shipped; folded
+  into AI_IMPLEMENTATION_PLAN, whose status banner is now as-built —
+  the open Part-III chapters named: facbrain, flitlead).
+- SAVE_WRITE_PLAN: status Landed end to end; §6.2's remaining-work note
+  records the campaign_qc --save-write verification.
+- Docs/README index rows for all of the above.
+- CHANGELOG: the P5 entry.
+
+VERIFICATION: full ctest after the fixes — the two tree failures GONE
+(first time since Task 56), no regressions (see the P5 patch record).
+Suite green including the tightened test_aar_e2e.
+
+Queue (named, not started): IR/visual sensor models + countermeasures
+(the data is already in Data/SimData; radar is the template), the ATM
+strategy layer (support-flight racetracks, GetPriority/ACTION,
+enemy-requested BARCAP/SWEEP), FAC/AWACS brain + flight-lead behavior,
+the full-data conversion pass from a real install (full UCD → threat
+map paints with no code change; PLT_PARK → taxi-back unblocks),
+LONGITUDINAL P4.2/describing-function work, Tranche B taxi-back.
+
+P6 — IR/VISUAL SENSORS + COUNTERMEASURES (the seduction tranche)
+
+SCOPE: the AI plan's named queue item — IR/visual sensor runtime
+models + the countermeasure consumption model — executed with the
+converted SimData as the data leg (IRST cards, visual cards, the
+SIGDATA ir0/ir1/ir2/visual grids). Radar stayed the implementation
+template; the repo's golden-identity discipline shaped the landing
+(the hard way — see THE GATE below).
+
+PASSIVE SENSORS (f4-sensors):
+- PassiveTrackStore: the shared contact book (on_detection/decay).
+  No track quality, no NCTR — a passive scan sees the thing or not;
+  what it keeps is what it saw last and when (3-s hold).
+- SignatureComponent: `sig_data` (the full five-grid record, non-
+  owning) + `IrPowerMode` band selection (default Afterburner) +
+  ir_signature_value()/visual_signature_value() — 1.0 data-free, so
+  every pre-SimData caller reads the reference airframe unchanged.
+- IrstComponent (priority 45): candidate walk (with_component_ref +
+  the FID-OPT-3 pre-gates), gimbal gates (az off own heading —
+  stationary = gate off, the RWR omni contract; el off the horizon),
+  clutter rejection unless track_ground_clutter (the airframe card
+  watches the air picture), the detection model
+  R_det = nominal × sqrt(ir_sig) × ground_factor (sqrt: one-way
+  flux — the radar's fourth root is the two-way echo), the 0.75-knee
+  Pd ramp, seeded mt19937. No transition publishing (queryable state;
+  the fusion tranche decides the event surface).
+- VisualComponent (priority 45): THE ORIGINAL's documented law —
+  signal = gain × vis_sig / range_ft² ≥ 1 — deterministic (no RNG),
+  no clutter rejection (an eyeball sees the ramp), same gates.
+  3.7e9 ⇒ threshold at 10.0109 NM (the shipped JSON's own implied
+  nominal — 3.7e9 is a rounded authoring value; the test pins the
+  imprecision).
+
+COUNTERMEASURES (f4-weapons):
+- CountermeasureComponent: chaff 30 / flare 15, salvo 2/1, interval
+  0.5 s (the pacemaker — the defeat intents re-raise every tick of
+  the beam; the dispenser releases one salvo per interval).
+- Decoys are ENTITIES (the FreeFalcon VuEntity shape): DecoyComponent
+  + DecoySimComponent at priority 42 (after radar 45, before missiles
+  40 — seekers read this tick's decoy positions). Chaff stalls hard
+  (2.5/s drag), flares fall (gravity + 0.35/s). TEAM tag copied (IFF);
+  ROLE "decoy"; ttl 5/3.5 s; release ~15 ft behind the airframe with
+  seeded dispersion. deploy_countermeasure (validates/debits/spawns/
+  publishes once per salvo; refusals change nothing) +
+  sweep_expired_decoys (the host sweep rule: never inside
+  update_all) + count_live_decoys.
+- make_decoy_aware_seeker_source: the documented MissileComponent::
+  seeker_source hook's first production user. Per tick: the seduced
+  decoy is sticky while it lives (burnout re-arms); candidates gated
+  by guidance kind (flares⇄Ir, chaff⇄radar), IFF (same-team decoys
+  never seduce), aliveness, and the seeker's OWN envelope (the
+  weapon record's cone half-angle + max range, off the velocity
+  axis); ONE honest roll per decoy (a 60 Hz re-roll would be certain
+  seduction) — success transfers the track to the decoy. P: the
+  SEEKER CARD's flare_chance for IR (aim9l 0.2 / aim9p 0.4 / sa7 0.5
+  / ... — the data's own numbers, resolved by
+  find_ir_seeker_flare_chance: exact stem → card-prefix → family
+  bridges AIM-9*→aim9p, AGM-65*→agm65b → kDefaultIrFlareChance
+  0.3), chaff_transfer_p 0.5 for radar (a tuning constant, documented
+  as such until a data source exists). No bait ⇒ the exact M1
+  snapshot_target read.
+- THE MISS-DISTANCE FIX (the tranche's hidden find): the terminal
+  handler measured miss distance as min_range_ — the closest range
+  to whatever the seeker TRACKED. A seduced seeker rides the flare,
+  so min_range_ ≈ 0 at the fuze → a seduced missile would have read
+  as a DIRECT HIT on the aircraft it missed. With decoy_aware_seeker
+  set, miss distance is measured against the ASSIGNED target's live
+  position; every legacy path keeps the byte-identical proxy. This
+  is why seduction saves the jet: fuze fires at the flare, the
+  burst-to-aircraft distance is large, the damage falloff does the
+  rest (test: a seduced AIM-9M detonates at the flare, the jet walks
+  away at 100 hp).
+
+HOST WIRING (f4-simulation):
+- Scenario keys: combat.ir_seeker_data_path (the irstdata library,
+  loud-failure on unloadable; empty = the identity) + combat.
+  countermeasures (THE GATE). resolve_ir_seeker_data +
+  find_ir_seeker_flare_chance live in combat_bridge.
+- execute_brain_combat_intents: deploy intents (chaff/flare through
+  the dispenser, before the release intents — the brain's own
+  priority order) + the seduction seeker attached to every guided
+  release (seed = shooter/missile ids — the ids are the entropy).
+- The tick: sweep_expired_decoys after the missile/bomb sweeps.
+
+THE GATE (the lesson, worth the bytes): the first cut attached
+dispensers unconditionally in both arm paths — SIX pinned fights
+failed (AiVersusAiWvrMergeFight "the heater never killed the bandit"
+— the AIM-9 flew against flares; the BVR/WVR harness certificates,
+the transcripts, the scenario-file replay all re-priced). Correct
+fidelity, WRONG landing: a fidelity tranche may not silently re-price
+every existing deterministic fight — that is what the repo's
+golden-identity rule EXISTS for. `CombatConfig::countermeasures`
+(default FALSE) now gates the dispenser attach (both paths), the
+deploy intents, the seeker attach, and the sweep; the pinned
+harnesses run with the default and pass unchanged; the E2E turns it
+ON in its scenario JSON. Fidelity lands behind switches, not on top
+of them.
+
+TESTS (+36, suite 2,617/2,617 green): test_irst_component (the sqrt
+law, ground factor, gates, clutter switch, hot-vs-cold scaling, hold
+drops, determinism), test_visual_component (the signal law at/beyond
+threshold, size scaling, parked targets visible, determinism),
+test_simdata_sensors extensions (band selection, VIS lookup, the 1.0
+identity), test_countermeasures (deploy debits/salvo/publish/IFF,
+interval pacing, dry + clip refusals, motion, ttl sweep, the full
+seduction surface, the survival integration), test_countermeasure_e2e
+(the AI-vs-AI chain: the AI fires on its own → the release carries
+the seduction seeker → the victim's RWR lights → the brain beams
+→ the dispenser releases under fire; the shooter does NOT dispense
+— the intents are threat-driven, not lock-driven; the shipped
+irstdata.json flows through the scenario key; the loud failure
+holds).
+
+QUEUE (named, not started): SensorFusion fusion of the passive legs
+(a fighter with a dead radar still fights — deliberately deferred:
+the fusion + air-picture machinery is FID-OPT-tuned and gets its own
+tranche with its own perf certificate); ECM/jamming (the
+seeker_source hook + the radar burn-through take it without API
+change); throttle-driven ir_power (the signature component is
+already shaped for it); VCD countermeasure counts (the Tier-3
+full-data pass replaces the documented defaults).

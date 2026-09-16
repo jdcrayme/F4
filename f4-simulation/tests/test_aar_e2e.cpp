@@ -116,6 +116,21 @@ TEST(AarE2E, FullUsafProcedureWithRealTanker) {
     EXPECT_TRUE(saw_precontact) << "receiver never reached PreContact";
     EXPECT_TRUE(saw_cleared) << "receiver never reached ClearedContact";
     EXPECT_TRUE(saw_hold) << "receiver never reached Hold (boom never latched)";
+    // P5: the ClearedContact closure-bias target fix (the -50 ft stall —
+    // the bias zeroed at the PRECONTACT station while the latch gate sits
+    // at ±15 ft) closed the tuning item this test used to tolerate. The
+    // full procedure now completes inside the 360-s budget, so Departing
+    // and Done are pinned, not merely printed: the boom latches, the
+    // auto-disconnect fires, the tanker clears departure, and the
+    // receiver descends to the departure altitude.
+    EXPECT_TRUE(saw_departing) << "receiver never reached Departing "
+                                  "(disconnect/departure-clearance chain broke)";
+    EXPECT_TRUE(saw_done) << "receiver never reached Done "
+                             "(1000-ft descent to departure altitude broke)";
+    if (saw_done) {
+        EXPECT_GT(receiver_brain->refuel().fuel_received_lbs(), 0.0)
+            << "reached Done without receiving fuel";
+    }
 
     // Hold is the key milestone (boom latches). Print diagnostics if not reached.
     if (saw_hold) {

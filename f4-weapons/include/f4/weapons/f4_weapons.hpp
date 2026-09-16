@@ -24,4 +24,5 @@
 #include <f4/weapons/missile.hpp>
 #include <f4/weapons/missile_battery.hpp>
 #include <f4/weapons/gun.hpp>
+#include <f4/weapons/countermeasures.hpp>
 #include <f4/weapons/messages.hpp>

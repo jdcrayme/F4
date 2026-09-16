@@ -62,6 +62,11 @@ f4_simulation_add_test(test_combat_integration     test_combat_integration.cpp)
 target_compile_definitions(test_combat_integration PRIVATE
     F4_SIMULATION_TEST_FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures"
 )
+f4_simulation_add_test(test_countermeasure_e2e     test_countermeasure_e2e.cpp)
+target_compile_definitions(test_countermeasure_e2e PRIVATE
+    F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}"
+    F4_SOURCE_DATA_DIR="${CMAKE_SOURCE_DIR}/Data"
+)
 f4_simulation_add_test(test_combat_transcript      test_combat_transcript.cpp)
 f4_simulation_add_test(test_register_aircraft      test_register_aircraft.cpp)
 f4_simulation_add_test(test_campaign_session       test_campaign_session.cpp)

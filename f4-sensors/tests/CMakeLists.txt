@@ -21,3 +21,10 @@ f4_sensors_add_test(test_rwr           test_rwr.cpp)
 f4_sensors_add_test(test_radar_component test_radar_component.cpp)
 f4_sensors_add_test(test_simdata_sensors test_simdata_sensors.cpp)
 target_link_libraries(test_simdata_sensors PRIVATE f4-data)
+f4_sensors_add_test(test_irst_component  test_irst_component.cpp)
+f4_sensors_add_test(test_visual_component test_visual_component.cpp)
+# Both sensor tests construct f4::data::SignatureGrid values (the DATA
+# side of the SimData pipeline) — the same sanctioned f4-data link the
+# simdata test carries.
+target_link_libraries(test_irst_component PRIVATE f4-data)
+target_link_libraries(test_visual_component PRIVATE f4-data)

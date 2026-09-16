@@ -62,6 +62,17 @@ struct MissileComponent : public entities::Component<MissileComponent> {
     using SeekerSourceFn = std::function<TargetSnapshot(
         const entities::EntityWorld& world, std::uint64_t target_id)>;
     SeekerSourceFn seeker_source;
+
+    /// True when seeker_source is the COUNTERMEASURE-AWARE factory
+    /// (f4-weapons' make_decoy_aware_seeker_source). While set, the
+    /// terminal handler measures the miss distance against the ASSIGNED
+    /// TARGET entity's live position instead of min_range_ — a seduced
+    /// seeker rides the decoy at detonation, so the range to the FLARE
+    /// says nothing about how close the burst came to the aircraft
+    /// (the legacy min_range_ proxy is exactly right only when the
+    /// seeker tracked the assigned target the whole way). Unset by
+    /// default: every legacy path keeps byte-identical terminal math.
+    bool decoy_aware_seeker = false;
 };
 
 // ============================================================================

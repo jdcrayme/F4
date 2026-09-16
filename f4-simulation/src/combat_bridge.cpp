@@ -8,12 +8,18 @@
 
 #include "f4/simulation/simulation.hpp"
 
+#define _USE_MATH_DEFINES
+
+#include <cctype>
+#include <cmath>
+
 #include <f4/ai/brain_component.hpp>
 #include <f4/campaign/mission_type.hpp>
 #include <f4/entities/types.hpp>
 #include <f4/recorder/flight_recorder.hpp>
 #include <f4/sensors/messages.hpp>
 #include <f4/weapons/bomb_battery.hpp>
+#include <f4/weapons/countermeasures.hpp>
 #include <f4/weapons/messages.hpp>
 #include <f4/weapons/missile_battery.hpp>
 #include <f4/weapons/weapon_store.hpp>
@@ -113,6 +119,40 @@ const weapons::WeaponClassRecord* gun_class(
     return nullptr;
 }
 
+/// Attach the countermeasure-aware seeker source to a freshly launched
+/// A/A missile — the documented MissileComponent::seeker_source hook's
+/// first production user (f4-weapons' countermeasures.hpp: seduction
+/// rolls against the launcher-side decoys).
+void attach_countermeasure_seeker(
+    entities::EntityWorld& world,
+    entities::EntityId missile_id,
+    const entities::EntityHandle& shooter,
+    const weapons::WeaponClassRecord& rec,
+    const f4::data::IrstSensorData* ir_seekers) {
+    auto missile = entities::EntityHandle(missile_id, &world);
+    auto* mc = missile.get<weapons::MissileComponent>();
+    if (mc == nullptr) return;
+
+    weapons::SeekerCountermeasureConfig cfg;
+    cfg.guidance = rec.guidance;
+    cfg.flare_chance = find_ir_seeker_flare_chance(ir_seekers, rec.name);
+    cfg.seeker_half_angle_rad =
+        rec.seeker_half_angle_deg * (M_PI / 180.0);
+    cfg.seeker_max_range_ft = rec.seeker_max_range_ft;
+    cfg.missile_id = missile_id.value;
+    if (auto team = shooter.get_tag(entities::tags::TEAM);
+        team && team->as_string()) {
+        cfg.shooter_team = *team->as_string();
+    }
+    // Deterministic per (shooter, missile): no scenario seed flows into
+    // the intents pass; the spawn-derived entity ids are the entropy.
+    cfg.rng_seed = static_cast<std::uint32_t>(missile_id.value) ^
+                   static_cast<std::uint32_t>(
+                       shooter.id().value * 2654435761u);
+    mc->seeker_source = weapons::make_decoy_aware_seeker_source(cfg);
+    mc->decoy_aware_seeker = true;
+}
+
 } // anonymous namespace
 
 void configure_brain_combat(f4::ai::BrainComponent& brain,
@@ -193,7 +233,8 @@ void attach_combat_loadout(entities::EntityHandle& aircraft,
                            std::uint32_t seed_base,
                            std::size_t aircraft_index,
                            double hit_points,
-                           const SignatureContext* signatures) {
+                           const SignatureContext* signatures,
+                           bool countermeasures) {
     // Identity first: the TEAM tag drives IFF (TrackStore), RWR emitter
     // role checks, and launch_missile's team copy. CampaignIdentity
     // carries the callsign the radar's NCTR resolves after a few scans.
@@ -233,6 +274,17 @@ void attach_combat_loadout(entities::EntityHandle& aircraft,
     // Observability: default fighter RCS.
     aircraft.add<sensors::SignatureComponent>();
     apply_signature_grid(aircraft, signatures, ac.aircraft_name);
+
+    // The dispenser: chaff + flare rounds (the fighter defaults — the
+    // VCD's per-unit counts land with the unit-data conversion). The
+    // brain's MissileDefeat intents ride these; without the component
+    // the intents have nothing to spend (a clean no-op at deploy time).
+    // Gate: the countermeasure fidelity ON (the golden identity rule —
+    // pre-tranche scenarios arm no dispenser and fly byte-identical
+    // fights).
+    if (countermeasures) {
+        aircraft.add<weapons::CountermeasureComponent>();
+    }
 
     // The radar: default parameter card + scan volume; per-aircraft seed
     // derived from the scenario base seed so the whole scenario stays
@@ -345,7 +397,9 @@ std::size_t execute_brain_combat_intents(
     double sim_time_s,
     const std::vector<entities::EntityId>* active_aircraft,
     const std::unordered_set<std::uint64_t>* deferred_launch_ids,
-    int* deferred_release_count) {
+    int* deferred_release_count,
+    const f4::data::IrstSensorData* ir_seekers,
+    bool countermeasures_on) {
     std::size_t launches = 0;
 
     // The visit set: the host's ACTIVE roster when it provides one (see
@@ -379,6 +433,36 @@ std::size_t execute_brain_combat_intents(
         // do not fight — see classify above).
         const auto* dmg = shooter.get<entities::DamageStateComponent>();
         const bool dead = dmg != nullptr && dmg->killed;
+
+        // --- Defensive dispenser intents (the MissileModule contract) ------
+        // The defeat module raises should_chaff/should_flare every tick
+        // its beam runs (range-gated); the DISPENSER paces them through
+        // its salvo interval — a defending jet drops bundles, not a
+        // bundle per tick. Runs before the release intents (the
+        // brain's own priority order: defending preempts shooting).
+        // Gate: countermeasures ON only (the golden identity rule).
+        if (!dead && countermeasures_on) {
+            auto* cm = shooter.get<weapons::CountermeasureComponent>();
+            if (cm != nullptr) {
+                const auto& md = brain->missile_defense();
+                if (md.should_chaff()) {
+                    weapons::deploy_countermeasure(
+                        world, bus, shooter, weapons::DecoyKind::Chaff,
+                        sim_time_s,
+                        static_cast<std::uint32_t>(0x43484146u) ^
+                            static_cast<std::uint32_t>(
+                                shooter.id().value));
+                }
+                if (md.should_flare()) {
+                    weapons::deploy_countermeasure(
+                        world, bus, shooter, weapons::DecoyKind::Flare,
+                        sim_time_s,
+                        static_cast<std::uint32_t>(0x464C4152u) ^
+                            static_cast<std::uint32_t>(
+                                shooter.id().value));
+                }
+            }
+        }
 
         // FID-5 (§4.5): the commit-window veto — a release against an
         // AGGREGATE contact id would fly a phantom missile (the id
@@ -488,7 +572,24 @@ std::size_t execute_brain_combat_intents(
                         world, bus, shooter,
                         entities::EntityId{intent.release_target_id},
                         table, st->weapon_handle, sim_time_s);
-                    if (missile.valid()) ++launches;
+                    if (missile.valid()) {
+                        ++launches;
+                        // The countermeasure-aware seeker: guided
+                        // missiles only (bombs/gun rounds have no
+                        // seeker to seduce); gate = the fidelity ON
+                        // (the golden identity rule).
+                        if (countermeasures_on) {
+                            const auto* rec =
+                                table.get(st->weapon_handle);
+                            if (rec != nullptr &&
+                                rec->guidance !=
+                                    weapons::GuidanceKind::None) {
+                                attach_countermeasure_seeker(
+                                    world, missile, shooter, *rec,
+                                    ir_seekers);
+                            }
+                        }
+                    }
                 }
             }
             }   // FID-5: the aggregate-veto else branch closes here
@@ -819,6 +920,10 @@ const f4::data::BrainArchetype* disengaged_archetype(
     }
 }
 
+/// Attach the countermeasure-aware seeker source: defined in the file's
+/// FIRST anonymous namespace block (ahead of execute_brain_combat_intents,
+/// its only caller).
+
 } // namespace
 
 CampaignCombatArmament arm_campaign_combat(
@@ -832,7 +937,8 @@ CampaignCombatArmament arm_campaign_combat(
     bool guns_hold,
     const f4::data::BrainData* brain_data,
     std::unique_ptr<RadarBackedDetectionPolicy>* out_policy,
-    const SignatureContext* signatures) {
+    const SignatureContext* signatures,
+    bool countermeasures) {
     CampaignCombatArmament out;
 
     // 0. The candidate contract: a campaign aircraft (origin stamped) with
@@ -929,6 +1035,16 @@ CampaignCombatArmament arm_campaign_combat(
         aircraft.add<sensors::RwrComponent>();
         out.components_attached = true;
     }
+    // The dispenser (fighters and defensive roles alike — the SHIPPED
+    // SEAD/Strike archetypes keep MissileDefeat armed, so every armed
+    // aircraft can be called on to defend; a jet without the component
+    // would jink without ever spending a flare). Gate: the fidelity ON
+    // (the golden identity rule).
+    if (countermeasures &&
+        aircraft.get<weapons::CountermeasureComponent>() == nullptr) {
+        aircraft.add<weapons::CountermeasureComponent>();
+        out.components_attached = true;
+    }
     if (aircraft.get<entities::DamageStateComponent>() == nullptr) {
         auto& d = aircraft.add<entities::DamageStateComponent>();
         d.hit_points = hit_points;
@@ -1009,6 +1125,86 @@ f4::weapons::WeaponClassTable resolve_weapon_table(
     (void)f4::weapons::overlay_wcd_weapon_data(
         table, loaded.data, aliases, warnings);
     return table;
+}
+
+// ============================================================================
+// The IR seeker cards (the countermeasure seduction's data leg).
+// ============================================================================
+f4::data::IrstSensorData resolve_ir_seeker_data(
+    const std::string& ir_seeker_data_path) {
+    f4::data::IrstSensorData empty;
+    if (ir_seeker_data_path.empty()) return empty;  // the golden identity
+
+    const auto loaded =
+        f4::data::loadIrstSensorData(ir_seeker_data_path);
+    if (!loaded.ok) {
+        std::string msg =
+            "resolve_ir_seeker_data: failed to load IR seeker data '"
+            + ir_seeker_data_path + "':";
+        for (const auto& e : loaded.errors) msg += "\n  " + e;
+        throw std::runtime_error(msg);
+    }
+    return loaded.data;
+}
+
+namespace {
+
+/// Lowercase, keep alphanumerics only ("AIM-9M" -> "aim9m").
+std::string normalize_weapon_key(const std::string& name) {
+    std::string out;
+    out.reserve(name.size());
+    for (const char c : name) {
+        if (std::isalnum(static_cast<unsigned char>(c))) {
+            out.push_back(static_cast<char>(
+                std::tolower(static_cast<unsigned char>(c))));
+        }
+    }
+    return out;
+}
+
+} // namespace
+
+double find_ir_seeker_flare_chance(
+    const f4::data::IrstSensorData* seekers,
+    const std::string& weapon_name) {
+    if (seekers == nullptr) return weapons::kDefaultIrFlareChance;
+
+    const std::string key = normalize_weapon_key(weapon_name);
+    if (key.empty()) return weapons::kDefaultIrFlareChance;
+
+    // 1. Exact stem match ("sa7" -> sa7, "agm65b" -> agm65b).
+    if (const auto* entry = seekers->find(key)) {
+        return entry->data.flare_chance;
+    }
+
+    // 2. Card stem as a prefix of the weapon ("sa7" -> "sa7m" would
+    //    match; none of the shipped weapons need this today).
+    for (const auto& s : seekers->sensors) {
+        const std::string stem = normalize_weapon_key(s.name);
+        if (stem.size() >= 3 && key.rfind(stem, 0) == 0) {
+            return s.data.flare_chance;
+        }
+    }
+
+    // 3. Family bridges where the 1998 card vocabulary and the WCD
+    //    names diverge:
+    //      AIM-9*   -> aim9p  (the P card: mid-band flare resistance —
+    //                          AIM-9M improved IRCM resistance over the
+    //                          L card's 1970s seeker)
+    //      AGM-65*  -> agm65b (the IR Maverick's own card)
+    //    Everything else (AIM-120/7, guns, bombs) has no IR card and
+    //    never reaches an IR roll (the guidance-kind gate) — the radar
+    //    classes roll chaff, not flares.
+    const auto* family = seekers->find("aim9p");
+    if (family != nullptr && key.rfind("aim9", 0) == 0) {
+        return family->data.flare_chance;
+    }
+    const auto* maverick = seekers->find("agm65b");
+    if (maverick != nullptr && key.rfind("agm65", 0) == 0) {
+        return maverick->data.flare_chance;
+    }
+
+    return weapons::kDefaultIrFlareChance;
 }
 
 } // namespace f4::simulation

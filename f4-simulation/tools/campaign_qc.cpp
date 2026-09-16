@@ -401,7 +401,13 @@ Args parse_args(int argc, char** argv) {
             usage(argv[0]);
         }
     }
-    if (a.out_dir.empty()) a.out_dir = a.world_json.parent_path();
+    if (a.out_dir.empty()) {
+        a.out_dir = a.world_json.parent_path();
+        // A bare relative filename ("testcamp.world.json") has an EMPTY
+        // parent_path — create_directories("") throws "Invalid argument".
+        // Default to CWD in that case.
+        if (a.out_dir.empty()) a.out_dir = ".";
+    }
     return a;
 }
 

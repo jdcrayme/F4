@@ -1,7 +1,9 @@
 # Save-Write Tranche — Closing the Decode → Run → Fight → Apply → Save Loop
 
-> **Status**: Foundation landed (binary save format). Runtime-verified against
-> the `save1.cam` fixture. The follow-on (WorldState → JSON → modified `.cmp`)
+> **Status**: Landed end to end. Binary save format runtime-verified against
+> the `save1.cam` fixture; all four typed sub-file encoders + CampaignSaver
+> landed; the host consumer (`campaign_qc --save-write`) landed with the
+> decode → run → fight → apply → save loop verified on TestCamp (P5). The follow-on (WorldState → JSON → modified `.cmp`)
 > is scoped below.
 >
 > **Companions**: [Campaign Loop Plan](CAMPAIGN_LOOP_PLAN.md) §7 (the
@@ -597,11 +599,14 @@ test pinning `encode_obj_payload`/`encode_uni_payload` equality.
 All four typed sub-file encoders have landed: `.cmp` (✅), `.obj` (✅), `.tea`
 (✅), `.uni` (✅). The save format handles every typed sub-file FreeFalcon's
 campaign uses, and the WorldState → JSON emitter + owned-field diff
-(§6.1) close the runtime-mutated save path. The remaining save-path work is
-optional full byte-identity (§6.3) — and the host-side wiring that feeds a
-run's ledger through `apply_to` → `to_json_string` → `json2cam --reencode-all`
-automatically (the library surface is done; `campaign_qc`'s save-write mode
-is the natural next consumer).
+(§6.1) close the runtime-mutated save path. The host-side wiring is
+LANDED too: `campaign_qc --save-write` feeds the run's mutated WorldState
+through `apply_to` → the §6.1 emitter → `json2cam --reencode-all` (the
+runtime-emits-JSON / importer-assembles-.cam process isolation the spec
+prescribes) and P5 verified the full loop end to end on the TestCamp
+fixture — decode → run → fight → apply → save → decode round-trips with
+objectives/units/teams intact. What remains is optional: full byte-identity
+(§6.3) and the viewer's own save button riding the same path.
 
 The `.uni` encoder was the largest lift — 6 subclass tails (Battalion/Brigade/
 Squadron/TaskForce/Flight/Package), version-gated fields, variable-length

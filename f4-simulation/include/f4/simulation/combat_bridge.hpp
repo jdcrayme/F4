@@ -42,6 +42,7 @@
 
 #include <f4/ai/sensor_fusion.hpp>
 #include <f4/data/brain_data.hpp>
+#include <f4/data/sensor_data.hpp>
 #include <f4/entities/entity.hpp>
 #include <f4/weapons/gun_component.hpp>
 #include <f4/weapons/weapon_class_table.hpp>
@@ -91,7 +92,12 @@ void attach_combat_loadout(entities::EntityHandle& aircraft,
                            std::uint32_t seed_base,
                            std::size_t aircraft_index,
                            double hit_points,
-                           const SignatureContext* signatures = nullptr);
+                           const SignatureContext* signatures = nullptr,
+                           /// The countermeasure gate (the golden
+                           /// identity rule): the dispenser only
+                           /// attaches when the scenario turned the
+                           /// fidelity on (combat.countermeasures).
+                           bool countermeasures = false);
 
 /// SensorFusion::DetectionPolicy backed by the ownship's radar tracks and
 /// RWR picture. This is the M2 integration point (SensorFusion::
@@ -217,7 +223,17 @@ std::size_t execute_brain_combat_intents(
     double sim_time_s,
     const std::vector<entities::EntityId>* active_aircraft = nullptr,
     const std::unordered_set<std::uint64_t>* deferred_launch_ids = nullptr,
-    int* deferred_release_count = nullptr);
+    int* deferred_release_count = nullptr,
+    /// The IR seeker cards (SimData irstdata), when the host loaded
+    /// them: the flare chances the countermeasure-aware seeker sources
+    /// roll against (see f4-weapons' countermeasures.hpp). Nullptr = no
+    /// library — every IR missile flies kDefaultIrFlareChance.
+    const f4::data::IrstSensorData* ir_seekers = nullptr,
+    /// The countermeasure gate (the golden identity rule): the deploy
+    /// intents execute and the seduction seekers attach ONLY when the
+    /// scenario turned the fidelity on. False = byte-identical
+    /// pre-tranche intents pass.
+    bool countermeasures_on = false);
 
 /// Turn a spawned brain into a fighting brain: enables the combat ladder
 /// and configures the fire-control envelopes from the weapon class
@@ -367,6 +383,27 @@ inline constexpr WeaponAliasBinding kDefaultWeaponAliases[] = {
     const std::string& weapon_data_path,
     std::vector<std::string>* warnings = nullptr);
 
+/// The IR seeker cards the countermeasure seduction rolls against (the
+/// runtime consumer of SimData's SENSDATA/IRST text cards — the same
+/// rows that double as the airframe IRST card supply). Same contract as
+/// resolve_weapon_table:
+///   - an empty path -> an EMPTY library (every lookup falls back to
+///     kDefaultIrFlareChance — the golden identity);
+///   - a path        -> the parsed card library, name-lookup ready
+///     (find_ir_seeker_flare_chance matches weapon names to cards).
+/// Throws std::runtime_error when a configured path fails to load.
+[[nodiscard]] f4::data::IrstSensorData resolve_ir_seeker_data(
+    const std::string& ir_seeker_data_path);
+
+/// The flare chance an IR missile of `weapon_name` rolls against:
+/// the SENSDATA/IRST card matched by a dash/space-insensitive prefix of
+/// the weapon name ("AIM-9M" -> "aim9...", "SA-7" -> "sa7"), falling
+/// back to kDefaultIrFlareChance when no card matches or `seekers` is
+/// null. Radar-guided weapons never consult this.
+[[nodiscard]] double find_ir_seeker_flare_chance(
+    const f4::data::IrstSensorData* seekers,
+    const std::string& weapon_name);
+
 /// What arm_campaign_combat did — the QC surface + the session's
 /// diagnostics read exactly these fields.
 struct CampaignCombatArmament {
@@ -436,6 +473,9 @@ struct CampaignCombatArmament {
     bool guns_hold,
     const f4::data::BrainData* brain_data,
     std::unique_ptr<RadarBackedDetectionPolicy>* out_policy = nullptr,
-    const SignatureContext* signatures = nullptr);
+    const SignatureContext* signatures = nullptr,
+    /// The countermeasure gate (the golden identity rule — see
+    /// attach_combat_loadout).
+    bool countermeasures = false);
 
 } // namespace f4::simulation

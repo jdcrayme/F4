@@ -71,6 +71,13 @@ def main():
     args = ap.parse_args()
 
     excludes = set(args.exclude)
+    # Temp/ is ALWAYS runtime territory (the viewer's on-demand conversions
+    # write Data/Temp/** and are never committed — spec P1). The committed
+    # manifest must only list committed files: a regen that walks a Data/
+    # tree carrying local Temp/ outputs used to fingerprint them in, which
+    # broke Sha256.ReproducesCommittedManifestFingerprints on every fresh
+    # clone (the files do not exist there).
+    excludes.add("Temp")
     # The manifest lives in the f4 envelope ({"f4": {"v": 1}, ...}) so the
     # runtime readers — f4import check, doctor D9, f4-assets — can parse it.
     # Since Task 58 each entry carries an explicit "id" (the runtime's

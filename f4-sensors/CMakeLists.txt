@@ -34,6 +34,9 @@ add_library(f4-sensors STATIC
     src/rwr.cpp
     src/radar_component.cpp
     src/signature.cpp
+    src/passive_track.cpp
+    src/irst_component.cpp
+    src/visual_component.cpp
 )
 target_link_libraries(f4-sensors PUBLIC f4_warnings)
 

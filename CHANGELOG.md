@@ -5,6 +5,88 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## P6 — IR/visual sensors + countermeasures (the seduction tranche, most recent)
+
+- **P6** — the AI plan's named queue item "IR/visual sensor models +
+  countermeasures" LANDED (Docs/SENSORS_COUNTERMEASURES_PLAN.md is the
+  as-built reference). THREE LEGS. (1) The passive sensors: f4-sensors
+  gains `IrstComponent` (the SENSDATA/IRST airframe card — gimbal
+  gates, ground factor, the sqrt-of-intensity range law, the radar's
+  0.75-knee Pd ramp, seeded rolls) and `VisualComponent` (THE ORIGINAL's
+  documented signal law: gain × VIS-grid factor / range² ≥ 1 —
+  deterministic, no RNG), both over a shared `PassiveTrackStore`
+  contact book; `SignatureComponent` carries the full five-grid
+  signature record (`sig_data` + `IrPowerMode` band selection, 1.0
+  data-free — the golden identity at the component level). (2) The
+  countermeasures: f4-weapons gains `CountermeasureComponent` (chaff
+  30/flare 15, salvo 2/1, 0.5 s pacing — the MissileModule defeat
+  intents' long-documented "no consumption model exists" gap closed),
+  decoy ENTITIES (the FreeFalcon VuEntity shape: chaff bloom 25 m² /
+  flare, TEAM-tagged, priority 42 — after radar, before missiles),
+  and `make_decoy_aware_seeker_source` — the documented
+  `seeker_source` hook's first production user: one honest roll per
+  decoy inside the seeker cone (IR missiles roll their OWN card's
+  `flare_chance` — aim9p 0.4, sa7 0.5 — via
+  `find_ir_seeker_flare_chance` over the shipped irstdata.json; radar
+  missiles roll chaff at 0.5), sticky through burnout, one-honest-
+  chance, IFF-gated. The seduction exposed a latent terminal-math
+  proxy bug (min_range_ measured the SEEKER's picture, so a flare hit
+  read as a direct kill): with the decoy-aware seeker the miss
+  distance is measured against the ASSIGNED target — every legacy path
+  byte-identical. (3) The host: `combat.ir_seeker_data_path` +
+  `combat.countermeasures` scenario keys, deploy intents in the combat
+  pass, seduction seekers on every AI-guided release, the decoy ttl
+  sweep. THE GATE IS THE STORY: the first cut armed dispensers
+  unconditionally and six pinned fights failed (the merge-fight AIM-9
+  flew against flares — correct fidelity, WRONG landing discipline);
+  with `countermeasures` defaulting FALSE every pre-tranche fight is
+  byte-identical and the pinned harnesses pass unchanged. Suite
+  2,617/2,617 (36 new tests: the sensor models, the deploy/sweep/
+  seduction units, the seduced-missile-survives integration, and the
+  AI-vs-AI E2E — the AI fires on its own, the victim's RWR lights, its
+  brain beams, the dispenser releases under fire). Queue: SensorFusion
+  fusion of the passive legs, ECM/jamming, throttle-driven IR bands,
+  VCD countermeasure counts.
+
+## P5 — tree hygiene, save-write verification, AAR closure
+- **P5** — the two pre-existing tree failures are FIXED, not apologized
+  for: (1) `JsonReader.RegisteredEscapesStillDecode` — f4-json's
+  `Reader` held a `const std::string&` to its source, so
+  `Reader r("literal")` was silent dangling-reference UB (the
+  temporary died at the end of the declaration statement; the parse
+  read freed SSO stack and the test's document came back with a
+  garbage first byte). `Reader` now OWNS its source (`std::string` +
+  `std::string_view` ctor) — one copy per constructed Reader; the
+  literal/temporary construction form is safe for every caller.
+  (2) `Sha256.ReproducesCommittedManifestFingerprints` — the committed
+  manifest had drifted (kc10/terrain/world fingerprints stale; 5
+  runtime-generated `Temp/` entries + the never-committed
+  `Weapons/falcon4.wcd.json` declared but absent — the weather patch
+  had reverted the prior session's repair). Manifest surgically
+  repaired (36 entries, every file present and matching);
+  `generate_manifest.py` now hard-excludes `Temp/` and the hash test
+  skips `Temp/` entries loudly instead of failing a fresh clone.
+  En route: `campaign_qc`'s out_dir default hardened (bare relative
+  world filename → empty parent_path → `create_directories("")`
+  threw). `--save-write` verified end to end on TestCamp: decode →
+  run → fight → apply → save → decode (campaign_after.cam 327,883
+  bytes, round-trips with objectives/units/teams intact). AAR
+  REDESIGN CLOSED: the ClearedContact closure-bias targeted the
+  PRECONTACT station (bias → 0 at 50 ft astern) while the latch gate
+  sits at ±15 ft — the receiver crept the last 35 ft at
+  integrator-noise speed (120 s stuck at −52 ft on the F4_AAR_TRACE
+  CSV) and expired 12 s into Hold; the bias now targets the
+  receptacle (USAF: cleared contact closes to the boom) and the full
+  procedure completes in 319.6 s — Done, 5,000 lbs transferred — with
+  `test_aar_e2e` pinning Departing/Done/fuel instead of tolerating
+  their absence. Docs as-built: ARCHITECTURE PROPOSAL refreshed to
+  as-built (the §3 inventory = 30 targets with real CMake edges),
+  AAR_REDESIGN_PLAN + DIGI_AI_PHASE2_PLAN archived with
+  supersession banners, AI_IMPLEMENTATION_PLAN status banner as-built,
+  SAVE_WRITE_PLAN + the docs index updated. Suite green (see the
+  patch's ctest record), the two tree failures gone for the first
+  time since Task 56.
+
 ## Fidelity tiers (most recent)
 
 - **FID-OPT-3** — the sensor-sweep budget: the radar scan walks

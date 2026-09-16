@@ -42,6 +42,7 @@
 #include <f4/data/aircraft_config.hpp>
 #include <f4/data/brain_data.hpp>       // SimData BRAINDAT.brn archetypes
 #include <f4/data/formation_data.hpp>  // SimData FORMDAT.FIL formations
+#include <f4/data/sensor_data.hpp>      // SimData SENSDATA/IRST seeker cards
 #include <f4/weapons/weapon_class_table.hpp>
 #include <f4/world_types/class_table.hpp>  // owned here (see class_table_)
 #include <f4/ai/air_picture.hpp>       // PERF-1: the shared snapshot
@@ -593,6 +594,12 @@ private:
     // component attachment at spawn. Built-in table; WST import later.
     f4::weapons::WeaponClassTable weapon_table_{};
     std::vector<std::string> weapon_import_warnings_;
+
+    // The countermeasure tranche: the IR seeker cards (SimData irstdata)
+    // the seduction rolls resolve their flare chances against. Empty
+    // library = the kDefaultIrFlareChance identity; owned here exactly
+    // like weapon_table_ (loaded once, lent as a const pointer).
+    f4::data::IrstSensorData ir_seeker_data_{};
 
     // Real-data tier (Task 64): the scenario's signature library, owned
     // here (exactly like brain_data_), grids lent to the spawned

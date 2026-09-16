@@ -16,7 +16,7 @@ its surviving content is folded into the doc that supersedes it.
 
 | Document | What it is |
 |---|---|
-| `ARCHITECTURE PROPOSAL.md` | As-built architecture of the 34 libraries. *(Action: refresh from "Draft proposal" to as-built — the TOC still lists libraries that don't exist and omits ~19 that do.)* |
+| `ARCHITECTURE PROPOSAL.md` | As-built architecture — the §3 inventory lists every build target with its real CMake link edges (refreshed P5; §17's phases all landed). |
 | `FALCON4_FILE_LAYOUT.md` | Living reference: every Falcon 4.0 / FreeFalcon on-disk file, what it contains, whether we parse it. |
 | `FreeFalcon_Core_Systems_Reference.html` | Generated analysis of the upstream FreeFalcon codebase. Regenerable artifact — do not hand-edit. |
 | `AIRCRAFT_BINDING_DESIGN.md` | Short design note on aircraft↔entity binding. Stable. |
@@ -26,15 +26,15 @@ its surviving content is folded into the doc that supersedes it.
 | Subsystem | Document | State |
 |---|---|---|
 | Flight control (longitudinal, control-theoretic) | `LONGITUDINAL_STABILITY_PLAN.md` | Active. P4.2 TECS margin campaign parked; describing-function work is next. |
-| Landing / taxi / formation / AAR | `LANDING_PRECISION_FORMATION_AAR_PLAN.md` | Active. Tranche B (taxi-back) not started. |
-| AAR redesign | `AAR_REDESIGN_PLAN.md` | Active. Supersedes Tranche D ScriptedTanker. |
+| Landing / taxi / formation / AAR | `LANDING_PRECISION_FORMATION_AAR_PLAN.md` | Active. Tranche B (taxi-back) not started (PLT_PARK data). Tranche D/AAR LANDED (Task 57 + P5 closure). |
 | Campaign loop | `CAMPAIGN_LOOP_PLAN.md` | C1–C6, G1, G2 landed; doc retains the roadmap. |
 | Fidelity tiers (air agg/deagg) | `FIDELITY_TIERS_PLAN.md` | ALL LANDED (FID-1..6 + FID-VIEW-1): tiered sessions, the viewer's flights table, the `--accel` certificate with exits 15/16, the campaign view that shows the aggregate air picture + the tasking countdown, and FID-5's event-driven combat deagg (the aggregate contacts in the shared air picture, the commit/convergence triggers with the launch veto, the transient combat windows, and synthetic intents riding the tier machinery — the 20× tiered certificate sustained 58.1× vs the 25.3× full-fidelity baseline). |
 | Fidelity tiers optimization tranche | `FID_OPT_PLAN.md` | FID-OPT-1 LANDED: the active-cache walk (dormant components leave the per-tick dispatch — 317 µs → 0.1 µs, the 60× preset GREEN) + the ScopedSubscriptions UAF fix the speed-up exposed. FID-OPT-2 LANDED: the concurrent-fight budget — the fusion refresh tiered by threat (imminent/distant/quiet) + the shared air picture's own 10 Hz walk cadence, both under the ≤100 ms staleness bound (walks 4.4× fewer; the 60× deep-horizon armed sustained gate now clears). FID-OPT-3 LANDED: the sensor-sweep budget — the radar scan walks pointers, not maps (with_component_ref + inline clutter/range pre-gates: 1,259 → 130 µs/scan, 9.7×; byte-identical detections) + the RWR sweep's licensed 6-tick cadence (8.6 → 1.9 s); the deep-horizon armed sustained rate 61× → 137×. The residual (the FM floor, the brain's glue) measured and named in the plan §5. |
-| AI architecture | `AI_IMPLEMENTATION_PLAN.md` + `DIGI_AI_PHASE2_PLAN.md` | Implementation reference. Consolidate these two into one AI doc. |
+| AI architecture | `AI_IMPLEMENTATION_PLAN.md` | As-built implementation reference (Steps 1–12 LANDED; Phase-2 doc folded in and archived — the FAC/AWACS brain and flight-lead behavior are the open Part-III chapters). |
+| IR/visual sensors + countermeasures | `SENSORS_COUNTERMEASURES_PLAN.md` | LANDED (as-built): IrstComponent + VisualComponent (the SENSDATA cards + the SIGDATA IR/VIS grids driving real detection), the dispenser/decoy/seeker-seduction model (the MissileModule defeat intents get their consumption half; flare chances from the data's own seeker cards), and the golden-identity `combat.countermeasures` gate — pre-tranche fights byte-identical. SensorFusion fusion + ECM are the named next legs. |
 | Data / no-binary runtime | `NO_BINARY_RUNTIME_PLAN.md` | Tranches 0a–0e landed. **This (`Docs/`) is the canonical copy — the root copy was a stale duplicate and is deleted.** |
 | Asset pipeline | `ASSET_PIPELINE_SPEC.md` | Draft v1 — design agreed, pending implementation. |
-| Save / write | `SAVE_WRITE_PLAN.md` | Foundation landed (binary save format + §6.1 emitter). |
+| Save / write | `SAVE_WRITE_PLAN.md` | LANDED end to end — encoders + CampaignSaver + the `campaign_qc --save-write` host consumer; the TestCamp decode→run→fight→apply→save→decode round-trip verified (P5). |
 
 ## Design documents (as-built, the worked example)
 
@@ -56,6 +56,8 @@ its surviving content is folded into the doc that supersedes it.
 | `TEXTURE_PIPELINE_PROGRESS.md` | T1–T5 complete. |
 | `SCENARIO_PLAYER_PLAN.md`, `NEXT_PHASE_PLAN.md` | Superseded lineage; campaign-derived scenarios landed. Verify no unlanded §items remain, then archive. |
 | `MODEL_VIEWER_IMPLEMENTATION_PLAN.md` | The viewer shipped; doc predates the implementation. |
+| `AAR_REDESIGN_PLAN.md` | LANDED (Task 57 — real tanker + 8-state SM) and its last open tuning item closed (P5 — `test_aar_e2e` reaches Departing/Done with fuel transferred). Surviving design truth lives in `refuel_module.cpp`'s header. |
+| `DIGI_AI_PHASE2_PLAN.md` | LANDED — recorder, ATC protocol, takeoff/landing/refuel demos, viewer replay all shipped; folded into `AI_IMPLEMENTATION_PLAN.md`. |
 
 ## History
 

@@ -31,6 +31,17 @@ struct MissileLaunchedMessage {
     double        sim_time_s{0.0};
 };
 
+/// Published by deploy_countermeasure() after the store was debited and
+/// the salvo's decoy entities were created. One message per salvo (not
+/// per decoy).
+struct CountermeasureDeployedMessage {
+    std::uint64_t owner_id{0};
+    std::uint32_t kind{0};            // DecoyKind (0=chaff, 1=flare)
+    int count{0};                     // decoys actually released
+    f4::geo::WorldPosition position{};   // release point
+    double        sim_time_s{0.0};
+};
+
 /// Why a missile stopped flying.
 enum class MissileEndCause : std::uint8_t {
     TargetHit,          // fuze fired within fuze_radius of the target

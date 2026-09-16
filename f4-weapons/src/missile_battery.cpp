@@ -82,10 +82,28 @@ void MissileSimComponent::update(double dt, messaging::MessageBus& bus) {
     }
 
     const MissileStatus st = mc->missile.status();
-    const double miss_distance =
-        mc->missile.min_range_ft() >= 0.0
-            ? mc->missile.min_range_ft()
-            : distance(mc->missile.position(), snap.position);
+
+    // Miss distance. Legacy proxy (min range ever achieved to the
+    // seeker's picture) stays for every non-countermeasure path —
+    // byte-identical terminal math. With the decoy-aware seeker the
+    // proxy is wrong exactly when seduction works (the seeker rides
+    // the decoy; min_range_ is the range to the FLARE), so the miss
+    // distance is measured against the assigned target's live position.
+    double miss_distance = -1.0;
+    if (mc->decoy_aware_seeker && mc->target_id != 0) {
+        const entities::EntityHandle assigned(entities::EntityId{mc->target_id},
+                                              world);
+        if (auto* atf = assigned.get<entities::TransformComponent>()) {
+            miss_distance =
+                distance(mc->missile.position(), atf->position);
+        }
+    }
+    if (miss_distance < 0.0) {
+        miss_distance =
+            mc->missile.min_range_ft() >= 0.0
+                ? mc->missile.min_range_ft()
+                : distance(mc->missile.position(), snap.position);
+    }
 
     // Map the terminal state to a cause for the bus.
     MissileEndCause cause = MissileEndCause::SelfDestruct;

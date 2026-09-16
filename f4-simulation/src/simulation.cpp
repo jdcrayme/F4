@@ -500,7 +500,8 @@ bool Simulation::arm_campaign_aircraft(entities::EntityId id) {
         scenario_.combat.guns_hold,
         brain_data_loaded_ ? &brain_data_ : nullptr,
         &policy,
-        sig_ctx ? &*sig_ctx : nullptr);
+        sig_ctx ? &*sig_ctx : nullptr,
+        scenario_.combat.countermeasures);
     if (!result.armed) {
         // Not a candidate (no origin/brain/store) or already armed —
         // EXCEPT the doctrine-failure shapes, which are misconfigurations
@@ -562,6 +563,10 @@ void Simulation::spawn_from_scenario_list() {
     if (scenario_.combat.enabled) {
         weapon_table_ = resolve_weapon_table(
             scenario_.combat.weapon_data_path, &weapon_import_warnings_);
+        // The countermeasure tranche: the IR seeker cards the seduction
+        // rolls resolve against (empty path = the default-flare identity).
+        ir_seeker_data_ = resolve_ir_seeker_data(
+            scenario_.combat.ir_seeker_data_path);
     }
     // The real-data signature leg: load for EITHER combat shape (the
     // scenario combat path AND the C6 campaign arming both attach
@@ -763,7 +768,8 @@ void Simulation::spawn_from_scenario_list() {
                                   scenario_.combat.radar_rng_seed,
                                   ac_index,
                                   scenario_.combat.fighter_hit_points,
-                                  &sig_ctx);
+                                  &sig_ctx,
+                                  scenario_.combat.countermeasures);
 
             // The gun's ammo ledger: the store's gun station (attached
             // just above; 511 for a standard M61A1 load). The brain's
@@ -1506,6 +1512,8 @@ void Simulation::spawn_from_campaign_flights() {
     //     overlays the wcd2json export when configured.
     weapon_table_ = resolve_weapon_table(
         scenario_.combat.weapon_data_path, &weapon_import_warnings_);
+    ir_seeker_data_ = resolve_ir_seeker_data(
+        scenario_.combat.ir_seeker_data_path);
     if (scenario_.combat.enabled || scenario_.combat.campaign_armed) {
         ensure_signature_data();
     }
@@ -1937,7 +1945,9 @@ void Simulation::tick(double dt) {
         execute_brain_combat_intents(world_, bus_, weapon_table_, t_now,
                                      &aircraft_entities_,
                                      deferred_launch_ids_,
-                                     &deferred_releases_);
+                                     &deferred_releases_,
+                                     &ir_seeker_data_,
+                                     scenario_.combat.countermeasures);
         // M5a: the WVR band transitions as combat events (recording only).
         record_wvr_band_flips(t_now);
     }
@@ -1971,6 +1981,14 @@ void Simulation::tick(double dt) {
         }
         weapons::sweep_spent_missiles(world_);
         weapons::sweep_spent_bombs(world_);
+        // The decoy sweep: countermeasure entities past their ttl leave
+        // the world the same way missiles do — between ticks, never
+        // inside update_all. Gate: the fidelity ON (with it off no
+        // decoy can exist — the walk is skipped, the pre-tranche tick
+        // keeps its exact cost shape).
+        if (scenario_.combat.countermeasures) {
+            weapons::sweep_expired_decoys(world_, t_now);
+        }
     }
     const auto prof_t5 = g_prof.on ? std::chrono::steady_clock::now()
                                    : std::chrono::steady_clock::time_point{};

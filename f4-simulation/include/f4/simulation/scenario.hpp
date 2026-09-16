@@ -191,6 +191,15 @@ struct CombatConfig {
     /// scenario to hand the fight to the merge without the AMRAAM
     /// exchange ending it early.
     bool bvr_hold{false};
+    /// Countermeasure fidelity (the seduction tranche): dispensers on
+    /// every armed aircraft, the defeat intents executed through
+    /// deploy_countermeasure, decoy-aware seekers on every guided
+    /// release, decoy ttl sweeps. Default FALSE — the golden identity:
+    /// no component, no intent execution, no seeker override, and every
+    /// pre-tranche fight stays byte-identical (the pinned combat
+    /// harnesses run with the default). Turn ON for the countermeasure
+    /// E2E and any scenario that wants missiles defeated by decoys.
+    bool countermeasures{false};
     /// ROE: ALL A/A MISSILES tight for every spawned aircraft (radar +
     /// IR) while the guns stay free — "missiles tight, guns free", the
     /// classic guns-dogfight doctrine. Scenario-level "missiles_hold".
@@ -227,6 +236,16 @@ struct CombatConfig {
     /// overlay_wcd_weapon_data). A configured-but-unloadable path is a
     /// LOUD failure (the brain-data discipline).
     std::string weapon_data_path;
+    /// Real-data tier (the countermeasure tranche): path to an IR
+    /// seeker card library JSON (irst2json output / the shipped
+    /// Data/SimData/irstdata.json). Empty (default) = no cards — every
+    /// IR missile's flare-seduction roll flies f4-weapons'
+    /// kDefaultIrFlareChance (the golden identity). When set, the card
+    /// matched per weapon name carries the seeker's flare_chance (see
+    /// combat_bridge.hpp find_ir_seeker_flare_chance). A configured-
+    /// but-unloadable path is a LOUD failure (the brain-data
+    /// discipline).
+    std::string ir_seeker_data_path;
     /// Real-data tier (Task 64): path to a SignatureDataLibrary JSON
     /// (sig2json output / the shipped Data/SimData/sigdata.json). Empty
     /// (default) = no library — every aircraft keeps the placeholder

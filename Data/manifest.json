@@ -222,9 +222,9 @@
       "id":"aircraft:kc10",
       "path":"Aircraft/kc10.json",
       "format_version":1,
-      "size_bytes":29748,
-      "sha256":"37fa6fc3a21213a07d62f153b4c52c3b787c618720d173a084219f2c2e7fd196",
-      "fnv1a_64":"3d0a0b6662a5cbc5"
+      "size_bytes":28062,
+      "sha256":"9bc20dc6722c2c35afe57590274824690a0502bef353b4d4df2efc5ce35c1417",
+      "fnv1a_64":"e8c8dcb01da2c295"
     },
     {
       "id":"aircraft:mig19",
@@ -449,62 +449,20 @@
       "fnv1a_64":"6a31ef910a7cf155"
     },
     {
-      "path":"Temp/Classes/falcon4.ct.json",
-      "format_version":1,
-      "size_bytes":305215,
-      "sha256":"35e3fa5eb6f9f96f48c41fa62110bdc4e5c239d0e6a12662cdffb34bb0852746",
-      "fnv1a_64":"f1e17f1ec8fc072e"
-    },
-    {
-      "path":"Temp/Theater/korea/terrain.json",
-      "format_version":1,
-      "size_bytes":85825,
-      "sha256":"0257fb03087d4ae124974cb188762df80186cc37c6436ec44b509c6357f0169f",
-      "fnv1a_64":"a2bcb9daf220874f"
-    },
-    {
-      "path":"Temp/World/Auto Save.world.json",
-      "format_version":1,
-      "size_bytes":14676466,
-      "sha256":"7665ae8d15acb0fd7082ad1fded5cff74349854b869556c69a39e6dba7760dab",
-      "fnv1a_64":"1ae2c4d3da79f311"
-    },
-    {
-      "path":"Temp/World/save1.world.json",
-      "format_version":1,
-      "size_bytes":11849635,
-      "sha256":"34965d148f7aa7026e857f9b6537fc60fabb83c0d235d1418630d81ed3dd87d4",
-      "fnv1a_64":"4cdeec7c07896824"
-    },
-    {
-      "path":"Temp/World/TestCamp.world.json",
-      "format_version":1,
-      "size_bytes":14591691,
-      "sha256":"e389cb714d51d4b8e0035c9bbaa0e2b8249ec41cc3cf73f48d2825cfaf17172a",
-      "fnv1a_64":"72b5e0176a0ceada"
-    },
-    {
       "id":"theater:korea",
       "path":"Theater/korea/terrain.json",
       "format_version":1,
-      "size_bytes":85825,
-      "sha256":"0257fb03087d4ae124974cb188762df80186cc37c6436ec44b509c6357f0169f",
-      "fnv1a_64":"a2bcb9daf220874f"
-    },
-    {
-      "path":"Weapons/falcon4.wcd.json",
-      "format_version":1,
-      "size_bytes":64709,
-      "sha256":"f0fb97f7d63af5e29541738afa7d1410f83cadbcc7438651199ef4edb26eafbc",
-      "fnv1a_64":"10b7696dfeaf9f58"
+      "size_bytes":85818,
+      "sha256":"a5b3b76a3388102f358a7045e0b01c1530373cc22de20f7ad340df7bb3952a16",
+      "fnv1a_64":"ac97fa756505dbc4"
     },
     {
       "id":"campaign:save1",
       "path":"World/korea.world.json",
       "format_version":1,
-      "size_bytes":11989759,
-      "sha256":"5dd89edeb5b82704b6d1b8980d5cb4564e81f798b7ffc38d3347b36e1d24f6b5",
-      "fnv1a_64":"533f948d7bd625b8"
+      "size_bytes":11986248,
+      "sha256":"687cbcd8a70452dbd9a3f9ddf5d97c8309190710f7258202182ea6ce6672734e",
+      "fnv1a_64":"f445f99701780c5b"
     }
   ]
 }
