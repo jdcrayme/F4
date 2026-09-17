@@ -682,9 +682,9 @@ struct ViewerApp::Impl {
     bool show_legend = true;
 
     // Canvas layer toggles
-    bool show_terrain = false;    // PROBE-TEMP
-    bool show_objectives = false; // PROBE-TEMP
-    bool show_units = true;       // PROBE-TEMP
+    bool show_terrain = true;
+    bool show_objectives = true;
+    bool show_units = true;
     bool show_grid = false;
     // Visualization overlays — toggled off by default to reduce clutter
     // when the user just wants to see the strategic picture. Enable
