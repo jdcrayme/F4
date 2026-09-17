@@ -38,6 +38,7 @@ add_subdirectory(f4-units)
 add_subdirectory(f4-math)
 add_subdirectory(f4-anim)         # semantic animation channels + rig (see Docs/AIRCRAFT_ANIMATION_PLAN.md) — leaf dependency of f4-gltf/f4-import/f4-simulation
 add_subdirectory(f4-json)         # minimal dependency-free JSON reader/writer
+add_subdirectory(f4-campaign-api) # the campaign engine's host contract (CAMP_HOST_PLAN.md) — leaf dependency of f4-simulation/campaignd
 add_subdirectory(f4-xml)          # vendored pugixml XML parser (SVG symbol import; future BMS XML data tables)
 add_subdirectory(f4-assets)      # runtime asset root, manifest reader, capability/staleness API (see Docs/ASSET_PIPELINE_SPEC.md)
 add_subdirectory(f4-import)      # importer side: doctor + f4import CLI (see Docs/ASSET_PIPELINE_SPEC.md)
@@ -223,10 +224,11 @@ f4_mark_side(importer
 f4_mark_side(runtime
     f4-renderer f4-simulation f4-assets f4-gltf f4-world f4-terrain
     f4-flight-model f4-ai f4-campaign f4-flight-api f4-recorder
+    f4-campaign-api
     f4-sensors f4-weapons f4-entities f4-messaging f4-state-machine
     f4-data f4-geo f4-math f4-units f4-json f4-xml f4-io
     f4_world_viewer f4_scenario_player_lib
-    f4-world-viewer f4-scenario-player trace_runner campaign_qc
+    f4-world-viewer f4-scenario-player trace_runner campaign_qc campaignd
 )
 
 # 0b.3 — Run the verifier at configure time.

@@ -84,17 +84,21 @@ Matrix anim_node_local_matrix(const f4::gltf::GltfDocument& doc,
     double t[3], q[4], s[3];
     f4::gltf::eval_tagged_local(doc, node_index, value, t, q, s);
 
-    const Matrix rot = QuaternionToMatrix(Quaternion{
-        static_cast<float>(q[0]), static_cast<float>(q[1]),
-        static_cast<float>(q[2]), static_cast<float>(q[3])});
-    const Matrix scale = MatrixScale(static_cast<float>(s[0]),
-                                     static_cast<float>(s[1]),
-                                     static_cast<float>(s[2]));
-    const Matrix trans = MatrixTranslate(static_cast<float>(t[0]),
-                                         static_cast<float>(t[1]),
-                                         static_cast<float>(t[2]));
-    // glTF node semantics: local = T · R · S.
-    return MatrixMultiply(trans, MatrixMultiply(rot, scale));
+        const Matrix rot = QuaternionToMatrix(Quaternion{
+            static_cast<float>(q[0]), static_cast<float>(q[1]),
+            static_cast<float>(q[2]), static_cast<float>(q[3])});
+        const Matrix scale = MatrixScale(static_cast<float>(s[0]),
+                                         static_cast<float>(s[1]),
+                                         static_cast<float>(s[2]));
+        const Matrix trans = MatrixTranslate(static_cast<float>(t[0]),
+                                             static_cast<float>(t[1]),
+                                             static_cast<float>(t[2]));
+        // glTF node semantics: scale, then rotate, then translate.
+        // RAYLIB IS ROW-VECTOR: MatrixMultiply(A, B) applies A first,
+        // then B — so the product must read S·R·T (the translation
+        // LAST, or the frame rotation swings the pivot to a mirrored
+        // position — the "DOF parts at the wing root" bug).
+        return MatrixMultiply(MatrixMultiply(scale, rot), trans);
 }
 
 /// Switch visibility along a part's chain: every sw branch node gates
@@ -120,12 +124,13 @@ bool anim_part_visible(const f4::renderer::RuntimeModel& model,
 
 /// Compose a part's full node-chain matrix (identity for empty chains).
 ///
-/// Composition ORDER: outermost chain node pushed first with
-/// m = m·local, giving M_o·M_m·…·M_i — the innermost frame is applied
-/// to the vertex first, matching the flat extractor's accumulated
-/// transform stack (compose(accum, local) — first-pushed outermost in
-/// application). Verified by the rest-pose parity tests: nested-DOF
-/// chains (F-16 gear assemblies) reproduce the flat bake to 0.0 m.
+/// Composition ORDER: the INNERMOST chain frame must touch the vertex
+/// first, the outermost last. Row-vector raylib: MatrixMultiply(local, m)
+/// PREPENDS local to the application sequence — iterating the chain
+/// outermost→innermost with local·m yields M_i·…·M_o, applied to the
+/// vertex as innermost-first. Verified by the rest-pose parity tests
+/// (nested F-16 gear chains reproduce the flat bake to 0.0 m) — the
+/// swapped argument order displaces nested-DOF parts by meters.
 Matrix anim_part_matrix(const f4::renderer::RuntimeModel& model,
                         const f4::renderer::RuntimePart& part,
                         const f4::anim::AnimValues* anim) {
@@ -133,7 +138,7 @@ Matrix anim_part_matrix(const f4::renderer::RuntimeModel& model,
     for (const auto node : part.node_chain) {
         const auto* an = model.anim_map.find_by_node(node);
         const Matrix local = anim_node_local_matrix(*model.doc, node, anim, an);
-        m = MatrixMultiply(m, local);
+        m = MatrixMultiply(local, m);
     }
     return m;
 }
@@ -153,12 +158,38 @@ DrawStats draw_animated_model(FeatureMeshResources& res,
     if (!model.doc) return stats;  // no document — nothing to evaluate
     const Material* default_mat = res.default_material;
 
+    // Basis bridge: part VERTICES are extracted in raylib space —
+    // gltf_vertex_to_raylib: (x,y,z) m → (x,−y,z) ft (lateral stays
+    // lateral, the glTF y-down flip unwraps, longitudinal stays
+    // longitudinal; meters → feet) — while the chain matrices evaluate
+    // in glTF space. The bridge is that diagonal map; conjugate the
+    // composed chain with it — otherwise every DOF-framed part renders
+    // displaced (basis-mixed and 3.28× too close to the origin).
+    const float k_ft = 1.0f / 0.3048f;   // meters → feet
+    const Matrix gl_to_rl = {
+        k_ft, 0.0f, 0.0f, 0.0f,
+        0.0f, -k_ft, 0.0f, 0.0f,
+        0.0f, 0.0f, k_ft, 0.0f,
+        0.0f, 0.0f, 0.0f, 1.0f,
+    };
+    const Matrix rl_to_gl = {
+        1.0f / k_ft, 0.0f, 0.0f, 0.0f,
+        0.0f, -1.0f / k_ft, 0.0f, 0.0f,
+        0.0f, 0.0f, 1.0f / k_ft, 0.0f,
+        0.0f, 0.0f, 0.0f, 1.0f,
+    };
+
     for (const auto& part : model.lod0_parts) {
         if (part.entry.mesh.triangleCount <= 0) continue;
         if (!anim_part_visible(model, part, anim)) continue;
 
-        const Matrix part_matrix =
-            MatrixMultiply(anim_part_matrix(model, part, anim), model_matrix);
+        // Chain matrix: raylib vertex → glTF space → chain frames →
+        // back to raylib space, then the world placement.
+        // MatrixMultiply(A, B) applies A first.
+        const Matrix part_r = MatrixMultiply(
+            rl_to_gl, MatrixMultiply(anim_part_matrix(model, part, anim),
+                                     gl_to_rl));
+        const Matrix part_matrix = MatrixMultiply(part_r, model_matrix);
 
         const Material* mat_to_use = default_mat;
         if (part.entry.tex_id >= 0 && res.texture_cache) {

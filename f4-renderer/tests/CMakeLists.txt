@@ -82,7 +82,8 @@ add_executable(test_feature_mesh test_feature_mesh.cpp ${IMGUI_SOURCES})
 target_include_directories(test_feature_mesh PRIVATE ${IMGUI_DIR} ${IMGUI_DIR}/backends)
 target_compile_definitions(test_feature_mesh PRIVATE
     F4_KOREAOBJ_DATA_DIR="${CMAKE_SOURCE_DIR}/f4-import/tests/fixtures/clean_data"
-    F4_CLASS_TABLE_JSON="${CMAKE_SOURCE_DIR}/Data/Classes/falcon4.ct.json")
+    F4_CLASS_TABLE_JSON="${CMAKE_SOURCE_DIR}/Data/Classes/falcon4.ct.json"
+    F4_DATA_ROOT="${CMAKE_SOURCE_DIR}/Data")
 target_link_libraries(test_feature_mesh PRIVATE f4-renderer GTest::gtest_main)
 add_test(NAME feature_mesh COMMAND test_feature_mesh)
 
