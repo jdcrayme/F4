@@ -28,6 +28,7 @@
 #include <filesystem>
 #include <map>
 #include <string>
+#include <vector>
 
 namespace f4::import {
 
@@ -68,14 +69,23 @@ struct FamilyTable {
 [[nodiscard]] std::map<std::string, FamilyTable> load_family_tables(
     const std::filesystem::path& family_dir);
 
-/// Guess the family for a model from its slot/DOF/switch counts — the
-/// same signals ModelRecord::visual_class() uses, refined for the
-/// animation families. Community models that disagree with the guess
-/// are corrected through overrides (future) or the doctor's warnings;
-/// a wrong guess degrades to unmapped unknown.N tags, never to wrong
-/// geometry.
-[[nodiscard]] std::string guess_family(int effective_dofs,
-                                       int effective_switches,
-                                       int n_slots);
+/// Guess the family for a model from its DOF-index set and slot/switch
+/// counts — the same signals ModelRecord::visual_class() uses, refined
+/// for the animation families. The discriminator that counts alone
+/// can't express: a HELICOPTER carries the FF rotor pair (dof 2 =
+/// HELI_MAIN_ROTOR + dof 4 = HELI_TAIL_ROTOR) in its tree; a ground
+/// unit with the same DOF count is a radar/turret model and must NOT
+/// get the heli table (its sweep would stay unbound). `dof_indices` is
+/// the distinct set collected from the parsed BSP tree's transform
+/// nodes; `effective_dofs` is the record's declared count (the complex
+/// threshold, which the LOD tree alone can undercount). Community
+/// models that disagree with the guess are corrected through overrides
+/// (future) or the doctor's warnings; a wrong guess degrades to
+/// unmapped unknown.N tags, never to wrong geometry.
+[[nodiscard]] std::string guess_family(
+    const std::vector<int>& dof_indices,
+    int effective_dofs,
+    int effective_switches,
+    int n_slots);
 
 } // namespace f4::import

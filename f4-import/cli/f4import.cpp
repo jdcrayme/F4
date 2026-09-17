@@ -25,6 +25,7 @@
 #include <f4/models/model_database.hpp>
 
 #include <cstdlib>
+#include <algorithm>
 #include <map>
 
 #include <cstdio>
@@ -306,10 +307,37 @@ int run_models(int argc, char** argv) {
                 opts.emit_hierarchy = hierarchy;
                 if (hierarchy) {
                     // Classify the model into a family and bind its
-                    // table (unknown family → no renaming).
+                    // table (unknown family → no renaming). The
+                    // discriminator is the DOF-INDEX set (the rotor
+                    // pair separates helicopters from ground radars),
+                    // collected from the parsed BSP tree's transform
+                    // nodes.
                     const auto* rec = db.model(idx);
+                    std::vector<int> dof_indices;
+                    if (const auto* tree = db.bsp_tree(idx, 0)) {
+                        for (const auto& node : tree->nodes) {
+                            switch (node.type) {
+                                case f4::models::BspNodeType::BDofNode:
+                                case f4::models::BspNodeType::BXDofNode:
+                                case f4::models::BspNodeType::BTransNode:
+                                case f4::models::BspNodeType::BScaleNode:
+                                    if (node.dof_number >= 0 &&
+                                        std::find(dof_indices.begin(),
+                                                  dof_indices.end(),
+                                                  node.dof_number) ==
+                                            dof_indices.end()) {
+                                        dof_indices.push_back(
+                                            node.dof_number);
+                                    }
+                                    break;
+                                default:
+                                    break;
+                            }
+                        }
+                    }
                     const std::string fam = f4::import::guess_family(
-                        rec->effective_dofs(), rec->effective_switches(),
+                        dof_indices, rec->effective_dofs(),
+                        rec->effective_switches(),
                         static_cast<int>(rec->slots.size()));
                     if (auto it = families.find(fam); it != families.end()) {
                         opts.family_table = &it->second;

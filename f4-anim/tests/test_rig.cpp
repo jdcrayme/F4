@@ -260,3 +260,42 @@ TEST(SpinIntegrator, LongRunStaysBounded) {
         ASSERT_LT(angle, 6.283185307179586f);
     }
 }
+
+// ── Spinners (rotors / radar dishes) ──────────────────────────────────────
+
+TEST(Spinners, SeedIsDeterministicAndPhaseSeparates) {
+    AnimValues a, b;
+    seed_spinners(12345u, a);
+    seed_spinners(12345u, b);
+    // Deterministic: the same seed seeds the same phases.
+    EXPECT_EQ(a[Channel::rotor_main], b[Channel::rotor_main]);
+    EXPECT_EQ(a[Channel::radar_dish_spin], b[Channel::radar_dish_spin]);
+
+    // Adjacent entity ids must not spin in lockstep.
+    seed_spinners(12346u, b);
+    EXPECT_NE(a[Channel::rotor_main], b[Channel::rotor_main]);
+
+    // All seeded channels land in [0, 2π).
+    for (const Channel c : {Channel::rotor_main, Channel::rotor_tail,
+                            Channel::radar_dish_spin}) {
+        EXPECT_GE(a[c], 0.0f);
+        EXPECT_LT(a[c], 6.283185307179586f);
+    }
+}
+
+TEST(Spinners, IntegrateAdvancesAndWraps) {
+    AnimValues v;
+    seed_spinners(7u, v);
+    const float before = v[Channel::rotor_main];
+    integrate_spinner(Channel::rotor_main, 10.0f, 0.1, v);
+    EXPECT_NEAR(v[Channel::rotor_main],
+                std::fmod(before + 1.0f, 6.283185307179586f), 1e-5f);
+}
+
+TEST(Spinners, IntegrateStoppedRateHoldsAngle) {
+    AnimValues v;
+    v[Channel::radar_dish_spin] = 1.234f;
+    integrate_spinner(Channel::radar_dish_spin, 0.0f, 0.5, v);
+    integrate_spinner(Channel::radar_dish_spin, -2.0f, 0.5, v);
+    EXPECT_FLOAT_EQ(v[Channel::radar_dish_spin], 1.234f);
+}

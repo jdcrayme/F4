@@ -430,9 +430,9 @@
       "id":"koreaobj:00004",
       "path":"Models/koreaobj/00004.gltf",
       "format_version":1,
-      "size_bytes":7342,
-      "sha256":"80facae9353b4339a791e5463730673405cc7b03fef500ce8c2b5d8a7f4c253c",
-      "fnv1a_64":"72dfa1eb5dc2a546",
+      "size_bytes":7306,
+      "sha256":"275d2c120aadeffaece05a7defd543f02dd2f812bd897ecc24613f2f6dbed0e2",
+      "fnv1a_64":"2a5dc402264416c8",
       "capabilities": [
         {
           "name":"dofs",
@@ -512,9 +512,9 @@
       "id":"koreaobj:00006",
       "path":"Models/koreaobj/00006.gltf",
       "format_version":1,
-      "size_bytes":6611,
-      "sha256":"119dccb6843d67d223ffdee28b22a23c8bba283be996351d160184410fe2950d",
-      "fnv1a_64":"ae4eda49414e7c48",
+      "size_bytes":6521,
+      "sha256":"3fd4ef6dcf75732d4a5323ea77914535fc3d6b19ee8155b0f1cb3ef388552d7b",
+      "fnv1a_64":"cde72cd044a81848",
       "capabilities": [
         {
           "name":"dofs",
@@ -635,9 +635,9 @@
       "id":"koreaobj:00009",
       "path":"Models/koreaobj/00009.gltf",
       "format_version":1,
-      "size_bytes":35306,
-      "sha256":"04583c3b0e9bffccc4e3b19627a1b7b9185314279dc1a1f229ac4d1f5ec5ac5c",
-      "fnv1a_64":"671b569f80ace38a",
+      "size_bytes":35270,
+      "sha256":"5422cb0ce63c7a85df1f101bd86af30c8aa7997d32a1106826adc02283e90c5e",
+      "fnv1a_64":"da6271d34216d438",
       "capabilities": [
         {
           "name":"dofs",
@@ -1045,9 +1045,9 @@
       "id":"koreaobj:00020",
       "path":"Models/koreaobj/00020.gltf",
       "format_version":1,
-      "size_bytes":54176,
-      "sha256":"d01b3b5a5ac14e8001fa0683341c6e3302d2ed2fc858d00c34c5cf2545014d7c",
-      "fnv1a_64":"cb3ead8f786dba73",
+      "size_bytes":53816,
+      "sha256":"f7c8a0389d2da436ba5fd1a556800f3720fa0209bf2dbf1b0e2f648fcba49461",
+      "fnv1a_64":"da6f62aff4a898a1",
       "capabilities": [
         {
           "name":"dofs",
@@ -1086,9 +1086,9 @@
       "id":"koreaobj:00021",
       "path":"Models/koreaobj/00021.gltf",
       "format_version":1,
-      "size_bytes":33039,
-      "sha256":"ef1eaa405a289208cf73c655915dfa1eaf181ac6306b7bb7bb02d564cac73b69",
-      "fnv1a_64":"15f7744ac29c1457",
+      "size_bytes":33033,
+      "sha256":"96ac38f0db2d7ded54fb53f933a56c3fa90490fc9e356e77b9b14218c530620c",
+      "fnv1a_64":"39bebccf56785e5f",
       "capabilities": [
         {
           "name":"dofs",
@@ -1168,9 +1168,9 @@
       "id":"koreaobj:00023",
       "path":"Models/koreaobj/00023.gltf",
       "format_version":1,
-      "size_bytes":77752,
-      "sha256":"5a1ea514fba0e1fc3ecf25df9b277bc5e59e20fd47601c113cf8481f5d2979be",
-      "fnv1a_64":"8717d6ce3853ed72",
+      "size_bytes":77786,
+      "sha256":"d8187be9a94196354df5cc76cb9eeef08f1d2aee5a6be3ed173dd0796ba685a8",
+      "fnv1a_64":"8541a4f74f0722ca",
       "capabilities": [
         {
           "name":"dofs",
@@ -1209,9 +1209,9 @@
       "id":"koreaobj:00024",
       "path":"Models/koreaobj/00024.gltf",
       "format_version":1,
-      "size_bytes":57252,
-      "sha256":"d96c49db1f97f4bd0a20383384af4392c45e35b5745c1adfbbda8c4692793736",
-      "fnv1a_64":"14b5eaa6300f3c00",
+      "size_bytes":57028,
+      "sha256":"f57d744de83f7a8fd3ddb93ff903e0999bdb0068a11b6f88e71d97ad072048f3",
+      "fnv1a_64":"0db36fe6d3af2078",
       "capabilities": [
         {
           "name":"dofs",
@@ -1250,9 +1250,9 @@
       "id":"koreaobj:00025",
       "path":"Models/koreaobj/00025.gltf",
       "format_version":1,
-      "size_bytes":35735,
-      "sha256":"8cca2101f7772e3ef741afd006cdf5b6c4592965c7827e29cf7ef3aa23faee4b",
-      "fnv1a_64":"db8783d5dd605fa2",
+      "size_bytes":35681,
+      "sha256":"9f27f3c94eb40f819bcaada4bebcb7710b620a23e663bc368cf0ea62ec86ee5e",
+      "fnv1a_64":"f6d35e0645805b62",
       "capabilities": [
         {
           "name":"dofs",
@@ -1537,9 +1537,9 @@
       "id":"koreaobj:00032",
       "path":"Models/koreaobj/00032.gltf",
       "format_version":1,
-      "size_bytes":9535,
-      "sha256":"c6159ed37a289f869ab2cd71069060b92041858c1fcfe074e54c274583d4107d",
-      "fnv1a_64":"87d32384466081fa",
+      "size_bytes":9391,
+      "sha256":"93bea2e3dd42be2575fa00c711506935444e0e2234237184b334f883ef461141",
+      "fnv1a_64":"3ca4e4a6f0130960",
       "capabilities": [
         {
           "name":"dofs",
@@ -1619,9 +1619,9 @@
       "id":"koreaobj:00034",
       "path":"Models/koreaobj/00034.gltf",
       "format_version":1,
-      "size_bytes":12892,
-      "sha256":"f5828ef258cfc54182433ef33c5032708f87582236768d10f39d4388d0da9f2a",
-      "fnv1a_64":"2bdf56f4ff0692b4",
+      "size_bytes":12748,
+      "sha256":"76fec1e781f1fb0d8d431857e006b0ed1f6801579934cfad908257ededf65df4",
+      "fnv1a_64":"7be6157725b7a2b0",
       "capabilities": [
         {
           "name":"dofs",
@@ -2521,9 +2521,9 @@
       "id":"koreaobj:00056",
       "path":"Models/koreaobj/00056.gltf",
       "format_version":1,
-      "size_bytes":10801,
-      "sha256":"0859d3c5f40b57a8ea597dee67990b58c8fb38b77acee7ac4bed7d87b85be0a6",
-      "fnv1a_64":"77c5675fa28a2f26",
+      "size_bytes":10603,
+      "sha256":"4efd39cedeb17b2420960937ac07d5bd6a39cdbc4bd064c40cc24907bd148bfc",
+      "fnv1a_64":"91fd81e38a282bb2",
       "capabilities": [
         {
           "name":"dofs",
@@ -2562,9 +2562,9 @@
       "id":"koreaobj:00057",
       "path":"Models/koreaobj/00057.gltf",
       "format_version":1,
-      "size_bytes":10801,
-      "sha256":"bac44c822b7183647a481ecb977a9e40f5b0764765c50b4d90fa801f000493fc",
-      "fnv1a_64":"8475511b15d0209f",
+      "size_bytes":10603,
+      "sha256":"8b5c6ca35fed33b6dc97cc351167e93f3b236998d0c960c2a6fbe91972b54ac9",
+      "fnv1a_64":"d412f9b4886f150b",
       "capabilities": [
         {
           "name":"dofs",
@@ -2849,9 +2849,9 @@
       "id":"koreaobj:00064",
       "path":"Models/koreaobj/00064.gltf",
       "format_version":1,
-      "size_bytes":84200,
-      "sha256":"03b8bafc9f570a3e007889cb4228118954daa739472bc4fccf93de82710d65c0",
-      "fnv1a_64":"bdf355a18f5a98f1",
+      "size_bytes":83912,
+      "sha256":"6b8df32122a178fb84d1000bc29747070dc34d57174a52c627864ee951bf92b1",
+      "fnv1a_64":"b85f455d369bdc53",
       "capabilities": [
         {
           "name":"dofs",
@@ -2931,9 +2931,9 @@
       "id":"koreaobj:00066",
       "path":"Models/koreaobj/00066.gltf",
       "format_version":1,
-      "size_bytes":8966,
-      "sha256":"27a55705eda3696b63dcc7fd3c3aef098ef5ed02899599dee0268cae1cc1fd20",
-      "fnv1a_64":"7eccb4928c6fca1b",
+      "size_bytes":8804,
+      "sha256":"a3af5342380399237a9a495059b4c112bb6c5ecf1cca400af2039b79a68d4945",
+      "fnv1a_64":"0a6c15b4c4a67c1b",
       "capabilities": [
         {
           "name":"dofs",
@@ -2972,9 +2972,9 @@
       "id":"koreaobj:00067",
       "path":"Models/koreaobj/00067.gltf",
       "format_version":1,
-      "size_bytes":8966,
-      "sha256":"9034791abe5ee107da7dffc8ffdefc4dd48377c3fabef3932c34e6b3cbb5a691",
-      "fnv1a_64":"27a180a0a4c7b982",
+      "size_bytes":8804,
+      "sha256":"2d377f0148df1a4df196aa186393b78f58564f31b5de515e0f72333c15d05232",
+      "fnv1a_64":"b340e1c2dcfe6b82",
       "capabilities": [
         {
           "name":"dofs",
@@ -4120,9 +4120,9 @@
       "id":"koreaobj:00095",
       "path":"Models/koreaobj/00095.gltf",
       "format_version":1,
-      "size_bytes":5132,
-      "sha256":"4e6a516010178a4d8d259bc48d6100c6381c377f98ac7543eb961bc58b3210ad",
-      "fnv1a_64":"71ddfaadc4cbb2e4",
+      "size_bytes":5096,
+      "sha256":"b14256e215e4800bca64232bcffe2b9f2c7b4f803ef371c48cc701f5ba64d60c",
+      "fnv1a_64":"9fa7ab633d6d542e",
       "capabilities": [
         {
           "name":"dofs",
@@ -4284,9 +4284,9 @@
       "id":"koreaobj:00099",
       "path":"Models/koreaobj/00099.gltf",
       "format_version":1,
-      "size_bytes":4022,
-      "sha256":"a9825eee5929de14dfe560e0b394b730e77c973af7b7d0ecabfade96c12d0862",
-      "fnv1a_64":"76fa63c0b2e0e64e",
+      "size_bytes":3986,
+      "sha256":"05c46959aa5d83dd1b3a0c72567c25c06d61d9db59ebd6f6bdd7ae2de172d2ac",
+      "fnv1a_64":"409844e85cc60df4",
       "capabilities": [
         {
           "name":"dofs",
@@ -5063,9 +5063,9 @@
       "id":"koreaobj:00118",
       "path":"Models/koreaobj/00118.gltf",
       "format_version":1,
-      "size_bytes":31514,
-      "sha256":"b816427207587c846eec1d1a6aadac4f26decb36f8fc56fbe35db97ba0ebb626",
-      "fnv1a_64":"be7d21acc7bdb15f",
+      "size_bytes":31604,
+      "sha256":"febd28bc3122980d3df0d03013e9163d3c8c287c650b43f221404a40fb98afca",
+      "fnv1a_64":"1cdb286ee2ddc467",
       "capabilities": [
         {
           "name":"dofs",
@@ -5186,9 +5186,9 @@
       "id":"koreaobj:00121",
       "path":"Models/koreaobj/00121.gltf",
       "format_version":1,
-      "size_bytes":9529,
-      "sha256":"ba085462468ab005c5375d21a9476f3a2a1d7e21fdf1e925524fed2773856456",
-      "fnv1a_64":"edf60b77810b2497",
+      "size_bytes":9385,
+      "sha256":"b8b6b366e27cb741e52a59ad73136b26d1d4e92b33d5ade90d1ca9cc274b62b4",
+      "fnv1a_64":"fe57151968d6ed7d",
       "capabilities": [
         {
           "name":"dofs",
@@ -5637,9 +5637,9 @@
       "id":"koreaobj:00132",
       "path":"Models/koreaobj/00132.gltf",
       "format_version":1,
-      "size_bytes":21487,
-      "sha256":"16bf1214aadd85eb8bcc68d7236cd9f481952f8ca6458de55b374b9a141181c2",
-      "fnv1a_64":"19caef05ee2c9086",
+      "size_bytes":21532,
+      "sha256":"ffcb4ec90742349bcaf32a365268cf78d8a62196d9e28ebf967dd4411c937c50",
+      "fnv1a_64":"5f2edfb9379604c7",
       "capabilities": [
         {
           "name":"dofs",
@@ -5801,9 +5801,9 @@
       "id":"koreaobj:00136",
       "path":"Models/koreaobj/00136.gltf",
       "format_version":1,
-      "size_bytes":22319,
-      "sha256":"9d1d890767e6a51b942e1e34da00ecaf2b303a0f42022dc26c6fdff70e1ecabc",
-      "fnv1a_64":"39f708f911ba672d",
+      "size_bytes":22409,
+      "sha256":"6fbb8e208f673cc41252e4fb973557d7e9fba9fc40b2cadcf93a98d95e9cdb0d",
+      "fnv1a_64":"38a43801ac0ac94d",
       "capabilities": [
         {
           "name":"dofs",
@@ -5842,9 +5842,9 @@
       "id":"koreaobj:00137",
       "path":"Models/koreaobj/00137.gltf",
       "format_version":1,
-      "size_bytes":22319,
-      "sha256":"12cab748f6b9a8f181b79e61d8075c627a847841da088f8f4dfe19d435dee103",
-      "fnv1a_64":"182632d3674c1464",
+      "size_bytes":22409,
+      "sha256":"579ed6ca666f1cb5dc04b13c850355be10ad03daa113586afd53166c2dd419d7",
+      "fnv1a_64":"54f8dc46b356f384",
       "capabilities": [
         {
           "name":"dofs",
@@ -6703,9 +6703,9 @@
       "id":"koreaobj:00158",
       "path":"Models/koreaobj/00158.gltf",
       "format_version":1,
-      "size_bytes":9529,
-      "sha256":"6892605b74a47b90a5108de783a128ea7c5413483cf8c5c3661e9aa6bca5f543",
-      "fnv1a_64":"a304b9c9cab2931a",
+      "size_bytes":9385,
+      "sha256":"bc9759bde3da453a547116b3da07633c89a9eda6e1c1324ac3773d9d791cbe5f",
+      "fnv1a_64":"614eb5165e822d04",
       "capabilities": [
         {
           "name":"dofs",
@@ -6990,9 +6990,9 @@
       "id":"koreaobj:00165",
       "path":"Models/koreaobj/00165.gltf",
       "format_version":1,
-      "size_bytes":11224,
-      "sha256":"ef1702824b66a5d9372d12bbd337e6bfbe73a0a2e614a631901d9ab2bc409814",
-      "fnv1a_64":"dff948c263fd29f3",
+      "size_bytes":11080,
+      "sha256":"a1b62d736c037c67d9820a8e592ee726caa44fbcf48ecb5a90144764421fc81c",
+      "fnv1a_64":"315e569b14bf73e7",
       "capabilities": [
         {
           "name":"dofs",
@@ -7113,9 +7113,9 @@
       "id":"koreaobj:00168",
       "path":"Models/koreaobj/00168.gltf",
       "format_version":1,
-      "size_bytes":12099,
-      "sha256":"32aabae15b7236745003aac06e9e6971c69ace8124834b03b4ecd468fe2ee4ad",
-      "fnv1a_64":"a2a809c9e7e40602",
+      "size_bytes":11955,
+      "sha256":"5fdc42202d7448c89fe3c27846b7b6188634ee18826b986aa1b979c863410caa",
+      "fnv1a_64":"71c48aa2b4bbc3fe",
       "capabilities": [
         {
           "name":"dofs",
@@ -7318,9 +7318,9 @@
       "id":"koreaobj:00173",
       "path":"Models/koreaobj/00173.gltf",
       "format_version":1,
-      "size_bytes":12428,
-      "sha256":"3a59ce8a2e85ef6ae0e0b8fac4a820f271fd78856ab4288dd875f0b8c5acc576",
-      "fnv1a_64":"0c10261e10cdd3fb",
+      "size_bytes":12248,
+      "sha256":"761df9c0f5884579c42afbdc11ed72f5b4041daf81db3dd3070eefced6a05fc3",
+      "fnv1a_64":"cfd23001c9f602fd",
       "capabilities": [
         {
           "name":"dofs",
@@ -7400,9 +7400,9 @@
       "id":"koreaobj:00175",
       "path":"Models/koreaobj/00175.gltf",
       "format_version":1,
-      "size_bytes":9538,
-      "sha256":"217eaecbab9f8131e45a6e1611b1f59a38c9d6ca3096816412c30c883dad6357",
-      "fnv1a_64":"9a2983db5c823028",
+      "size_bytes":9394,
+      "sha256":"aa33b60249f5e50e70cf822785f4add5261c6991bf86e4f42379ba3704913b4d",
+      "fnv1a_64":"df6535a160d40d1a",
       "capabilities": [
         {
           "name":"dofs",
@@ -7441,9 +7441,9 @@
       "id":"koreaobj:00176",
       "path":"Models/koreaobj/00176.gltf",
       "format_version":1,
-      "size_bytes":12629,
-      "sha256":"b3fb85fae388bde600f83df0f04066ce4270b6e7a163b7ee2aeb811152dcdb5f",
-      "fnv1a_64":"b409e411b4cf10c9",
+      "size_bytes":12731,
+      "sha256":"689bf077ddf0636f08238c7f69a4ce0e42101b02c68f8a1763c6a52ac0ff7960",
+      "fnv1a_64":"e1afbae1908ba089",
       "capabilities": [
         {
           "name":"dofs",
@@ -7482,9 +7482,9 @@
       "id":"koreaobj:00177",
       "path":"Models/koreaobj/00177.gltf",
       "format_version":1,
-      "size_bytes":8320,
-      "sha256":"80c6d3ed0a62626d3d87e9f6665401f9ea4b232916aa1dbb5df1af96120613a4",
-      "fnv1a_64":"1104fc1d9bc7e0cc",
+      "size_bytes":8422,
+      "sha256":"995dd74dfebf28ad4aded75326a542a4835bc822894818e439c501562deab343",
+      "fnv1a_64":"76e395ccd8b5498c",
       "capabilities": [
         {
           "name":"dofs",
@@ -7892,9 +7892,9 @@
       "id":"koreaobj:00187",
       "path":"Models/koreaobj/00187.gltf",
       "format_version":1,
-      "size_bytes":8935,
-      "sha256":"48f5c5e5ef483f2482efd3a5045e0fd6595a6a1d3d110f0c28a23ab630c85424",
-      "fnv1a_64":"cdf491a10fc267eb",
+      "size_bytes":8791,
+      "sha256":"ce41d484efbacd100d19f916a3bc692ffbce6e876231ccfba0bbb835a734a117",
+      "fnv1a_64":"d97de7d4f74ad47d",
       "capabilities": [
         {
           "name":"dofs",
@@ -8261,9 +8261,9 @@
       "id":"koreaobj:00196",
       "path":"Models/koreaobj/00196.gltf",
       "format_version":1,
-      "size_bytes":11051,
-      "sha256":"149a2241bfc645ceb60e95ff071df61625f9fd8de602ee4bc9f65cf6a68c3aa8",
-      "fnv1a_64":"59fae236f2199e9c",
+      "size_bytes":10871,
+      "sha256":"d677bc8feff87f87fa24366f327d8a6a2173bb92664d9a948a506dda5b43202d",
+      "fnv1a_64":"d1baf578fed6e080",
       "capabilities": [
         {
           "name":"dofs",
@@ -8302,9 +8302,9 @@
       "id":"koreaobj:00197",
       "path":"Models/koreaobj/00197.gltf",
       "format_version":1,
-      "size_bytes":13075,
-      "sha256":"3c8b35cb6bc62962295da9ec298099518a0a5f4fe689e86a076adc8005a3c4a9",
-      "fnv1a_64":"38f229dc4f82cd7d",
+      "size_bytes":12931,
+      "sha256":"88febd74340907cc817218f91b163b61445790ca3941dbdf4326ef127c945f72",
+      "fnv1a_64":"c6b92535666c4e3f",
       "capabilities": [
         {
           "name":"dofs",
@@ -8384,9 +8384,9 @@
       "id":"koreaobj:00199",
       "path":"Models/koreaobj/00199.gltf",
       "format_version":1,
-      "size_bytes":18295,
-      "sha256":"0b74ebb51b57ed015705e91fe32dc8a979f0ab2f7eca03a761724eda0e38a746",
-      "fnv1a_64":"20518b9a12ee699a",
+      "size_bytes":18397,
+      "sha256":"c49261f994cbebbae9f7110be1200e99240a8dad46efea3198abcbd60e61eecc",
+      "fnv1a_64":"e82a552e04c74014",
       "capabilities": [
         {
           "name":"dofs",
@@ -8466,9 +8466,9 @@
       "id":"koreaobj:00201",
       "path":"Models/koreaobj/00201.gltf",
       "format_version":1,
-      "size_bytes":12551,
-      "sha256":"a8deba62533078eef30a2e9d975698b1f7031201792e99a9ffa7ada159e38cf9",
-      "fnv1a_64":"fa09f2a17d25b8eb",
+      "size_bytes":12653,
+      "sha256":"9135d4da04491d974d2c71218309bc3054b3e7954615188ee9a5fd3fa070d9d4",
+      "fnv1a_64":"7a32a0e0501e582b",
       "capabilities": [
         {
           "name":"dofs",
@@ -8548,9 +8548,9 @@
       "id":"koreaobj:00203",
       "path":"Models/koreaobj/00203.gltf",
       "format_version":1,
-      "size_bytes":12047,
-      "sha256":"2e18ad8b3425a31a2cc647303d29422ce047b5c3a4927a1785225e4a5edbf58d",
-      "fnv1a_64":"21bdd9c6c648d711",
+      "size_bytes":12183,
+      "sha256":"b03a5bb663f30315a205dd7d30a3fb6877b29550659b5a1bfcad1689099a7707",
+      "fnv1a_64":"5c88aa7685611fa7",
       "capabilities": [
         {
           "name":"dofs",
@@ -8794,9 +8794,9 @@
       "id":"koreaobj:00209",
       "path":"Models/koreaobj/00209.gltf",
       "format_version":1,
-      "size_bytes":32014,
-      "sha256":"fda42492b0116ab8401ac7369d531b1e202b1d6b8de6c00ac15baa3b1e612468",
-      "fnv1a_64":"5419940f845d6bdd",
+      "size_bytes":31582,
+      "sha256":"8acb38646b245f75e895d7d63a6c22985e2927bbdf4a7b8b515f11c412df58fd",
+      "fnv1a_64":"89663c5ac6041393",
       "capabilities": [
         {
           "name":"dofs",
@@ -8917,9 +8917,9 @@
       "id":"koreaobj:00212",
       "path":"Models/koreaobj/00212.gltf",
       "format_version":1,
-      "size_bytes":26620,
-      "sha256":"88ab151c897967ed5e7c97fd83e8b07e083af5ed5944fa92e78ee7ddf7a62f06",
-      "fnv1a_64":"17946366e37187b7",
+      "size_bytes":26188,
+      "sha256":"99c1a8ce0d35a15dc127dd4e05c69393a23aa3aa5de889370e039781fe7f11de",
+      "fnv1a_64":"fdc4ad643e923d73",
       "capabilities": [
         {
           "name":"dofs",
@@ -9040,9 +9040,9 @@
       "id":"koreaobj:00215",
       "path":"Models/koreaobj/00215.gltf",
       "format_version":1,
-      "size_bytes":21487,
-      "sha256":"8777fbdc7c49cec7ce5473541e0c2162d3aebe046d77110e31d24a9c2a35a7c1",
-      "fnv1a_64":"4ac874481823abd0",
+      "size_bytes":21532,
+      "sha256":"5299d3eae2f87dc6142a81d8eaa0c850d058e621a204fb61378b8775c1b9bb27",
+      "fnv1a_64":"a06ba64b60949235",
       "capabilities": [
         {
           "name":"dofs",
@@ -9081,9 +9081,9 @@
       "id":"koreaobj:00216",
       "path":"Models/koreaobj/00216.gltf",
       "format_version":1,
-      "size_bytes":29980,
-      "sha256":"ce57de54fe110ffc67da8759863bcb1b8712073f3ca0bde3a7f08d8d009db6ec",
-      "fnv1a_64":"8b071c8c281288ee",
+      "size_bytes":29548,
+      "sha256":"0930958d0763c045d7ade67906f039b4140e533e2a69ef32715d177b1224e269",
+      "fnv1a_64":"b8dca74fead2312c",
       "capabilities": [
         {
           "name":"dofs",
@@ -9204,9 +9204,9 @@
       "id":"koreaobj:00219",
       "path":"Models/koreaobj/00219.gltf",
       "format_version":1,
-      "size_bytes":33255,
-      "sha256":"6ca2a397160458429a0c304eabd6e3e16d4f44230a1c54fc8e274760d516f822",
-      "fnv1a_64":"0d66ba9235e928f4",
+      "size_bytes":32823,
+      "sha256":"02d599f2d36bdd50a8787582904a3d2eb83eaed28596b09ce5e6352b2d3b9f4c",
+      "fnv1a_64":"6c9f3197b97d5b50",
       "capabilities": [
         {
           "name":"dofs",
@@ -9245,9 +9245,9 @@
       "id":"koreaobj:00220",
       "path":"Models/koreaobj/00220.gltf",
       "format_version":1,
-      "size_bytes":36714,
-      "sha256":"fb084b91e624ac93b54c6ddc71792bfeddee4e35653988c78afa4a931e942bac",
-      "fnv1a_64":"a6721a5a0d4c0862",
+      "size_bytes":36426,
+      "sha256":"122e9060503bfe6825825bd1c7592f79f7bc7e3ef20fa78025f1349df4fb206f",
+      "fnv1a_64":"5f445652797c198a",
       "capabilities": [
         {
           "name":"dofs",
@@ -9286,9 +9286,9 @@
       "id":"koreaobj:00221",
       "path":"Models/koreaobj/00221.gltf",
       "format_version":1,
-      "size_bytes":38875,
-      "sha256":"6a290253df77ecae80e4fe8a890272ac85f171dc02cd197abd67f608b5a73413",
-      "fnv1a_64":"18c53b2da0f4a3be",
+      "size_bytes":38443,
+      "sha256":"aea191f13f469974c0b626ec9aae93e0167ac4a491d86f540612b4ea3cc623c2",
+      "fnv1a_64":"f5384a3b4cd46cb2",
       "capabilities": [
         {
           "name":"dofs",
@@ -9327,9 +9327,9 @@
       "id":"koreaobj:00222",
       "path":"Models/koreaobj/00222.gltf",
       "format_version":1,
-      "size_bytes":44278,
-      "sha256":"766e45910e3a0cdfa837c7d4aa852b20c90cc66fefd2f8de0e6e87da16db842e",
-      "fnv1a_64":"e345efda83dc30be",
+      "size_bytes":44080,
+      "sha256":"a209b5221b3b0d19f67474d8b95df0bb9f38304a3dc3f89131f77630286e8d1e",
+      "fnv1a_64":"f50dee7fe30d0f5c",
       "capabilities": [
         {
           "name":"dofs",
@@ -9450,9 +9450,9 @@
       "id":"koreaobj:00225",
       "path":"Models/koreaobj/00225.gltf",
       "format_version":1,
-      "size_bytes":19251,
-      "sha256":"75ce30213040c054e5b081163e6441ca990c73260d2d8e50a3efddcb28354df3",
-      "fnv1a_64":"e6c0de894a545b6f",
+      "size_bytes":19341,
+      "sha256":"dcc6f927fc3130f0e5e02b2e8e549a2f4f5b85bac8401d40fd797b6e55089023",
+      "fnv1a_64":"de435d92a824253f",
       "capabilities": [
         {
           "name":"dofs",
@@ -9491,9 +9491,9 @@
       "id":"koreaobj:00226",
       "path":"Models/koreaobj/00226.gltf",
       "format_version":1,
-      "size_bytes":29890,
-      "sha256":"a5934945fb09b0244b7448708eca1a519077b5b73a24bdc803c7d5dd54bce91c",
-      "fnv1a_64":"f57c382e05ec34f3",
+      "size_bytes":29458,
+      "sha256":"0af07317dfc7132834eb6fde7fad1edc30f9b6f256ce1e3fb7570b7f15d011e0",
+      "fnv1a_64":"3bf4d384bfc00ab9",
       "capabilities": [
         {
           "name":"dofs",
@@ -9532,9 +9532,9 @@
       "id":"koreaobj:00227",
       "path":"Models/koreaobj/00227.gltf",
       "format_version":1,
-      "size_bytes":30872,
-      "sha256":"00b456f82c52efa9133c927360c1997ec932e3ef4d354c67cc064eb3099c32f1",
-      "fnv1a_64":"41c05b840e0ba79a",
+      "size_bytes":30440,
+      "sha256":"148be438950f87728adb87d20f8ef6c614519da36cb2c388343b3ee903cbccdb",
+      "fnv1a_64":"f19836fb93edd6ac",
       "capabilities": [
         {
           "name":"dofs",
@@ -9573,9 +9573,9 @@
       "id":"koreaobj:00228",
       "path":"Models/koreaobj/00228.gltf",
       "format_version":1,
-      "size_bytes":10790,
-      "sha256":"e1165c0ba691b789838cf6922b5482a0764f636725aa757c3eed770897165ab6",
-      "fnv1a_64":"725ad1f356aa35f4",
+      "size_bytes":10824,
+      "sha256":"2ab7d8b602dab4d2ad1074ecdf76af0c0b08edd0d9a49e01285087b91249ba59",
+      "fnv1a_64":"d2b615689c90f55a",
       "capabilities": [
         {
           "name":"dofs",
@@ -9696,9 +9696,9 @@
       "id":"koreaobj:00231",
       "path":"Models/koreaobj/00231.gltf",
       "format_version":1,
-      "size_bytes":35197,
-      "sha256":"88505688c95e2fd8569adafaf92893eb6686cd429655b508a97284cdadf35b96",
-      "fnv1a_64":"a0fa758c68d1cb3a",
+      "size_bytes":35029,
+      "sha256":"f1c0461088deca39d0ffe9367de1062b557c6bab5190724977e854bfe5d049fa",
+      "fnv1a_64":"646a393470385d46",
       "capabilities": [
         {
           "name":"dofs",
@@ -9942,9 +9942,9 @@
       "id":"koreaobj:00237",
       "path":"Models/koreaobj/00237.gltf",
       "format_version":1,
-      "size_bytes":37427,
-      "sha256":"fd41b4cb9b68abf69c7a2e8e452a15ddd803796cfb0940ea1dfb9ed4408422e2",
-      "fnv1a_64":"e877baf296a5431a",
+      "size_bytes":37259,
+      "sha256":"3e47c15e0f2f2918cc1fc75a20d9ece631c3911039b5dd00645a1aebcd372497",
+      "fnv1a_64":"f512b2f8d081ffdc",
       "capabilities": [
         {
           "name":"dofs",
@@ -10229,9 +10229,9 @@
       "id":"koreaobj:00244",
       "path":"Models/koreaobj/00244.gltf",
       "format_version":1,
-      "size_bytes":42028,
-      "sha256":"f9363468b1d5bbbf30705e8a355f10085a0258340be6389024851f9cce351b83",
-      "fnv1a_64":"96482ae181495d20",
+      "size_bytes":41830,
+      "sha256":"d844ba042d703ab8d483909afd3e462cc2e43e0d0f9b1eec13647905819967ef",
+      "fnv1a_64":"613e6c8e6772e66a",
       "capabilities": [
         {
           "name":"dofs",
@@ -10926,9 +10926,9 @@
       "id":"koreaobj:00261",
       "path":"Models/koreaobj/00261.gltf",
       "format_version":1,
-      "size_bytes":12882,
-      "sha256":"fad904135cc70a191522ed436d835c657c0c9fdeb5864d0feffe853a0fd54e8f",
-      "fnv1a_64":"4539624964c9fc1a",
+      "size_bytes":12738,
+      "sha256":"35e0005ea7eb9f4dc0238bf6db4ba6f934079136a53e9efd5738374f2ca44af3",
+      "fnv1a_64":"7072d753703b57c6",
       "capabilities": [
         {
           "name":"dofs",
@@ -11049,9 +11049,9 @@
       "id":"koreaobj:00264",
       "path":"Models/koreaobj/00264.gltf",
       "format_version":1,
-      "size_bytes":17470,
-      "sha256":"1a6be06cbab5eabf3dbe2ac0e4f2a2390b89ed8e46b048df1a89a1a0380851b6",
-      "fnv1a_64":"b797d4ae48a75976",
+      "size_bytes":17290,
+      "sha256":"fec4ae6e3b002d8df1ebee434f7008bd6ee8abaa7128c84beca684929118bf97",
+      "fnv1a_64":"46ad2f2d8af36080",
       "capabilities": [
         {
           "name":"dofs",
@@ -11090,9 +11090,9 @@
       "id":"koreaobj:00265",
       "path":"Models/koreaobj/00265.gltf",
       "format_version":1,
-      "size_bytes":34134,
-      "sha256":"fc18d243efbc91245b2f449cd1114665b9d54cbfc03dc705b92c150499595a1b",
-      "fnv1a_64":"068058a838375ae8",
+      "size_bytes":33972,
+      "sha256":"54587103ef0c9d530ec8595c8176617df4c41163ccf6a09ac44a0d011be2ebd3",
+      "fnv1a_64":"0dffdc5d1e56a1a6",
       "capabilities": [
         {
           "name":"dofs",
@@ -11172,9 +11172,9 @@
       "id":"koreaobj:00267",
       "path":"Models/koreaobj/00267.gltf",
       "format_version":1,
-      "size_bytes":59241,
-      "sha256":"8e4eec7a7ee184c7af94bd286597891585c4dd7838e93a3c7e91f049c69d2e96",
-      "fnv1a_64":"74065fe02eb64ab0",
+      "size_bytes":58989,
+      "sha256":"3f7f0cac924c8052c5e13092f8c802d7f1550f2c357ad5af7e68f89ccbce39c9",
+      "fnv1a_64":"4b106a755c3cf6da",
       "capabilities": [
         {
           "name":"dofs",
@@ -11254,9 +11254,9 @@
       "id":"koreaobj:00269",
       "path":"Models/koreaobj/00269.gltf",
       "format_version":1,
-      "size_bytes":18470,
-      "sha256":"3d1ea580cac0f2143d4f71b810546fde17645d34f21b12dd5b67dac0d0f23cbc",
-      "fnv1a_64":"f7c989f5fec8e0ac",
+      "size_bytes":18290,
+      "sha256":"dcbc800284b7f6fd9535e57c0dbb3fc65bedd31242b5f606564581fbb7bf6a66",
+      "fnv1a_64":"7fe56f3669cb3726",
       "capabilities": [
         {
           "name":"dofs",
@@ -11336,9 +11336,9 @@
       "id":"koreaobj:00271",
       "path":"Models/koreaobj/00271.gltf",
       "format_version":1,
-      "size_bytes":9547,
-      "sha256":"85d432860dbb987599ae07c5165a87ca0ec0e17e3960b7198c760e320b30b186",
-      "fnv1a_64":"8f24d146a96718cc",
+      "size_bytes":9403,
+      "sha256":"6324d468f136c16dfccf4003a92f9128ce1ab82dfea080491683861d713d413b",
+      "fnv1a_64":"e15404b4ea37a192",
       "capabilities": [
         {
           "name":"dofs",
@@ -11582,9 +11582,9 @@
       "id":"koreaobj:00277",
       "path":"Models/koreaobj/00277.gltf",
       "format_version":1,
-      "size_bytes":16301,
-      "sha256":"bc78e08a51b794f500f1d5f4a1f8e459fa431dfc26f8c5401eae3bd2e17051d1",
-      "fnv1a_64":"a9aa45f91d1da5a2",
+      "size_bytes":16121,
+      "sha256":"a12508e8504c3cb1539ed901eb52cd4d6827658b7e6c04a67fa2fe2e6e9c52ab",
+      "fnv1a_64":"b70f2e912b8a3376",
       "capabilities": [
         {
           "name":"dofs",
@@ -12484,9 +12484,9 @@
       "id":"koreaobj:00299",
       "path":"Models/koreaobj/00299.gltf",
       "format_version":1,
-      "size_bytes":58213,
-      "sha256":"df87b832583e302161e2453fdcc64cf36b50453d4a58b6101c221398bba2922a",
-      "fnv1a_64":"9fbb1b1067281d64",
+      "size_bytes":57979,
+      "sha256":"fc4edaac704f3a30fb353d264356638dace7dab9ffc408e866bca7d763cd82ba",
+      "fnv1a_64":"106694aadade7f78",
       "capabilities": [
         {
           "name":"dofs",
@@ -15149,9 +15149,9 @@
       "id":"koreaobj:00364",
       "path":"Models/koreaobj/00364.gltf",
       "format_version":1,
-      "size_bytes":18869,
-      "sha256":"0c29cf3c27d71792c2801c500876020b1bf4b8408089bb9736f744fadb790ed3",
-      "fnv1a_64":"6db240e558cd91ba",
+      "size_bytes":18725,
+      "sha256":"66339dc2ddf0840597dfa7a285cb5a6ddf8754a886e4b2fd6cc9219dbd5e4324",
+      "fnv1a_64":"47aa8a9cf1546d22",
       "capabilities": [
         {
           "name":"dofs",
@@ -15272,9 +15272,9 @@
       "id":"koreaobj:00367",
       "path":"Models/koreaobj/00367.gltf",
       "format_version":1,
-      "size_bytes":9529,
-      "sha256":"5ddabfb58306b46da34dce61f688741bd13001d6c07796b2485bc29c4ec57208",
-      "fnv1a_64":"1026a3a04be20d3a",
+      "size_bytes":9385,
+      "sha256":"f56b9dc702a9af14c3c243120af25bcf96d8424456e9eff1630c1749ff713eff",
+      "fnv1a_64":"b95f54286fb29428",
       "capabilities": [
         {
           "name":"dofs",
@@ -15313,9 +15313,9 @@
       "id":"koreaobj:00368",
       "path":"Models/koreaobj/00368.gltf",
       "format_version":1,
-      "size_bytes":12011,
-      "sha256":"8f5661ea7d223dcbf0d34867e9a8e1631368b84430ae17c30dc11cae5400c637",
-      "fnv1a_64":"e02d93e3b96d12b3",
+      "size_bytes":11867,
+      "sha256":"fa98002ef9e94bae28727c1d18949c2e3691a1a0fa578564b19f54f6ecbf46b0",
+      "fnv1a_64":"c060fb048e52c457",
       "capabilities": [
         {
           "name":"dofs",
@@ -18183,9 +18183,9 @@
       "id":"koreaobj:00438",
       "path":"Models/koreaobj/00438.gltf",
       "format_version":1,
-      "size_bytes":9926,
-      "sha256":"b151dc8159d739468a88ae69bacb38b2580c3fa32854ccff804edb7ada22eb10",
-      "fnv1a_64":"063ca39801f6dfc5",
+      "size_bytes":9782,
+      "sha256":"a82105c9db7cc4a66fe5a5a1b0710a25908310fbe25839488bbb987f41e9684e",
+      "fnv1a_64":"79ba66c779ec6703",
       "capabilities": [
         {
           "name":"dofs",
@@ -21832,9 +21832,9 @@
       "id":"koreaobj:00528",
       "path":"Models/koreaobj/00528.gltf",
       "format_version":1,
-      "size_bytes":14034,
-      "sha256":"9710b9380642d37586c6e59a70d020fb7768de25c0e44bf0608bc4d54526c488",
-      "fnv1a_64":"3b8974b27daf8e2a",
+      "size_bytes":13890,
+      "sha256":"cf65ec39357345199a7a62ba95ee3daafa47e7eafa86122e71aa60dd583a09af",
+      "fnv1a_64":"497132428e76d9e0",
       "capabilities": [
         {
           "name":"dofs",
@@ -21873,9 +21873,9 @@
       "id":"koreaobj:00529",
       "path":"Models/koreaobj/00529.gltf",
       "format_version":1,
-      "size_bytes":11480,
-      "sha256":"4992b194bd7265a05962e526978e1d5a7154fd60e8a2750099c6927c9881813e",
-      "fnv1a_64":"ce5e97551a3ffd55",
+      "size_bytes":11336,
+      "sha256":"eeb4aa3366c244a3e0bd6eb895fd287042d3241c62124bb35ff0e6fdb632f936",
+      "fnv1a_64":"35aa17c6cd594599",
       "capabilities": [
         {
           "name":"dofs",
@@ -21996,9 +21996,9 @@
       "id":"koreaobj:00532",
       "path":"Models/koreaobj/00532.gltf",
       "format_version":1,
-      "size_bytes":31906,
-      "sha256":"92e317b05bab18a3b7aee4ea4e6d648c34d4f39d025e160a24a0fdfc9694ec56",
-      "fnv1a_64":"791a4c3231a5c51b",
+      "size_bytes":31600,
+      "sha256":"499fa36a8b6c902f30c038d789ffbe7a3da9275eb53ccbaf8a29aee41874f3d9",
+      "fnv1a_64":"e212f49e32515fed",
       "capabilities": [
         {
           "name":"dofs",
@@ -22037,9 +22037,9 @@
       "id":"koreaobj:00533",
       "path":"Models/koreaobj/00533.gltf",
       "format_version":1,
-      "size_bytes":31906,
-      "sha256":"fc41bf19080ffa6a87a1d5c4efe150911d0f9bed831d089f595c7e8c45f0db30",
-      "fnv1a_64":"21ef184049fdb482",
+      "size_bytes":31600,
+      "sha256":"679df46bb15e39731bafbfdeeb53f02ea39915b85e4d6485f6f8bff2e359368e",
+      "fnv1a_64":"56aaeb71594df724",
       "capabilities": [
         {
           "name":"dofs",
@@ -22078,9 +22078,9 @@
       "id":"koreaobj:00534",
       "path":"Models/koreaobj/00534.gltf",
       "format_version":1,
-      "size_bytes":31906,
-      "sha256":"77431d0760447843efe29c045ec8234985519c08e5d5ef28f5cc53e936cd91f1",
-      "fnv1a_64":"f8a4a51923314c95",
+      "size_bytes":31600,
+      "sha256":"45793d4ebb266163fd4ae49c0525b2b3ae18457aaa016ee815fb6acdd51cece5",
+      "fnv1a_64":"71dc6fa467996d73",
       "capabilities": [
         {
           "name":"dofs",
@@ -22119,9 +22119,9 @@
       "id":"koreaobj:00535",
       "path":"Models/koreaobj/00535.gltf",
       "format_version":1,
-      "size_bytes":31906,
-      "sha256":"02c1d917d03db1d9266fba5c3d2777649babdf76cabc6fc3f9dea11fd632253f",
-      "fnv1a_64":"9507c299698de84c",
+      "size_bytes":31600,
+      "sha256":"13ecad83448fcf1ae12b23a2af03250b6f9aa8491855893d18360c346b42b034",
+      "fnv1a_64":"db1c3e80f5cd699a",
       "capabilities": [
         {
           "name":"dofs",
@@ -22160,9 +22160,9 @@
       "id":"koreaobj:00536",
       "path":"Models/koreaobj/00536.gltf",
       "format_version":1,
-      "size_bytes":31906,
-      "sha256":"bcd110caafdec52319706550d7b4b118ab59500b32c77b647632d97ab13f25b9",
-      "fnv1a_64":"7b78e1e9d75d9baf",
+      "size_bytes":31600,
+      "sha256":"903ff812251713f53d3ea73cdc6bf0d823cff93df037187d41e585d7eca74a4a",
+      "fnv1a_64":"3bd8ad0a0e369b59",
       "capabilities": [
         {
           "name":"dofs",
@@ -22201,9 +22201,9 @@
       "id":"koreaobj:00537",
       "path":"Models/koreaobj/00537.gltf",
       "format_version":1,
-      "size_bytes":31906,
-      "sha256":"ad79641d1fd1a2efa0f1da09074892ccfb98a50d4cd301f1fd1414945561040e",
-      "fnv1a_64":"1b0304909f2ee176",
+      "size_bytes":31600,
+      "sha256":"2e8028fd52aa7c5116ed32754e607b0ba9de189c60a226b1a11ee626979a00a1",
+      "fnv1a_64":"b3a9be763ffb6200",
       "capabilities": [
         {
           "name":"dofs",
@@ -22242,9 +22242,9 @@
       "id":"koreaobj:00538",
       "path":"Models/koreaobj/00538.gltf",
       "format_version":1,
-      "size_bytes":31906,
-      "sha256":"0281b3d2e37962ed02b8c05df111fde007bb1114b73be439aa93a0d31cea1f5f",
-      "fnv1a_64":"62a843e3cf184619",
+      "size_bytes":31600,
+      "sha256":"1f85a045e7ce80e18312e384247e99177016be05ec76c7fa2096734ef64018da",
+      "fnv1a_64":"3face017150070ef",
       "capabilities": [
         {
           "name":"dofs",
@@ -22283,9 +22283,9 @@
       "id":"koreaobj:00539",
       "path":"Models/koreaobj/00539.gltf",
       "format_version":1,
-      "size_bytes":31906,
-      "sha256":"c75faf02b25f1525ce9f7f03be03b9492f0b504e8143a27d8617d4b4dd5fd36e",
-      "fnv1a_64":"59118d5b109253c0",
+      "size_bytes":31600,
+      "sha256":"bbc74e9aa6ce1e4719d3a28708a3cbaf9f2322385287adf1cbd418931e4c82ad",
+      "fnv1a_64":"ca4570953cfac5b6",
       "capabilities": [
         {
           "name":"dofs",
@@ -22324,9 +22324,9 @@
       "id":"koreaobj:00540",
       "path":"Models/koreaobj/00540.gltf",
       "format_version":1,
-      "size_bytes":31906,
-      "sha256":"c609c65d66774bc28705e6719298a4ca81140c7e01739d038b5994d73083106a",
-      "fnv1a_64":"ef4816aa8dbd14a8",
+      "size_bytes":31600,
+      "sha256":"b01c227a2ef31c46df3a318d5cd5f8e655dfd1fae4f6f6204062ba8dea6f19b6",
+      "fnv1a_64":"03e34d39e821e7aa",
       "capabilities": [
         {
           "name":"dofs",
@@ -22365,9 +22365,9 @@
       "id":"koreaobj:00541",
       "path":"Models/koreaobj/00541.gltf",
       "format_version":1,
-      "size_bytes":31906,
-      "sha256":"c0ba98229a36b88c91e0da30dbd8cd0a2c466b6f837a650a582b7653732124fc",
-      "fnv1a_64":"ef63f2d84f9bb281",
+      "size_bytes":31600,
+      "sha256":"78f27cb09329ce924db5b586608aadfa749404267f75950bee4144c12824887f",
+      "fnv1a_64":"0f54c6f70000e1c3",
       "capabilities": [
         {
           "name":"dofs",
@@ -22406,9 +22406,9 @@
       "id":"koreaobj:00542",
       "path":"Models/koreaobj/00542.gltf",
       "format_version":1,
-      "size_bytes":31906,
-      "sha256":"9ed9081d54409dd2e97480835241734fe4323d8eead376bea671e2c1126e4a67",
-      "fnv1a_64":"3449f32b738fb802",
+      "size_bytes":31600,
+      "sha256":"a4d5043f582ad20274ea6bedea6e5549fe5f3be70ebbe144e9da00af0e838431",
+      "fnv1a_64":"6404dc599d0e4610",
       "capabilities": [
         {
           "name":"dofs",
@@ -22447,9 +22447,9 @@
       "id":"koreaobj:00543",
       "path":"Models/koreaobj/00543.gltf",
       "format_version":1,
-      "size_bytes":31906,
-      "sha256":"b4e0f52eb4bffc198df8006caf78b70681b62af8b14dc6baf9f5d271db17ea62",
-      "fnv1a_64":"8b75271d5b37c89b",
+      "size_bytes":31600,
+      "sha256":"7dfc310bbe9b1de57c8081c1b4d9721ed2e40b22c8617ada936e6becaca70579",
+      "fnv1a_64":"b26da79a2a3f03e9",
       "capabilities": [
         {
           "name":"dofs",
@@ -22488,9 +22488,9 @@
       "id":"koreaobj:00544",
       "path":"Models/koreaobj/00544.gltf",
       "format_version":1,
-      "size_bytes":31906,
-      "sha256":"6d5f8ee23a15bf6430ada9c9a554654e0523128bfa2b6d8fbcd1e2a43037ea43",
-      "fnv1a_64":"a7629d84931febcc",
+      "size_bytes":31600,
+      "sha256":"bebb605270d7605eafe93ac042ba55a05113c4fbe806d826af73f7a7fd593a05",
+      "fnv1a_64":"b0cca22644b1e15e",
       "capabilities": [
         {
           "name":"dofs",
@@ -22529,9 +22529,9 @@
       "id":"koreaobj:00545",
       "path":"Models/koreaobj/00545.gltf",
       "format_version":1,
-      "size_bytes":31906,
-      "sha256":"751701289bf68c956dd9240cfebfda0d2fa5d42bdb1dba7ff18967749c1f49a6",
-      "fnv1a_64":"0aff80044cc35015",
+      "size_bytes":31600,
+      "sha256":"c802cd2b510915dc4363631a60049483d9b3477477918489729cee030f19f7ef",
+      "fnv1a_64":"d1c1e8e626c2be77",
       "capabilities": [
         {
           "name":"dofs",
@@ -22570,9 +22570,9 @@
       "id":"koreaobj:00546",
       "path":"Models/koreaobj/00546.gltf",
       "format_version":1,
-      "size_bytes":31906,
-      "sha256":"9ee5a228479c136e8cb9e1167e645d33d5172195cd20cfdeb8839642d651878d",
-      "fnv1a_64":"2d5ddf7bc8c0e4f6",
+      "size_bytes":31600,
+      "sha256":"1244b8d22dc9f20a448a53ef93067a71ed1106b028595b4901f067756a2c0be3",
+      "fnv1a_64":"36e7b227abff7d34",
       "capabilities": [
         {
           "name":"dofs",
@@ -22611,9 +22611,9 @@
       "id":"koreaobj:00547",
       "path":"Models/koreaobj/00547.gltf",
       "format_version":1,
-      "size_bytes":31906,
-      "sha256":"1e56408ce6e6bd63017b37e9fd95b048c946ec1ba17bb1de7eb284d7543cc04c",
-      "fnv1a_64":"8dd3bcd500ef9f2f",
+      "size_bytes":31600,
+      "sha256":"b3c92d0bc9c30d94e088b9c7b135bc2b6adcecc2ff7df1ec6f3e33d48cdecb20",
+      "fnv1a_64":"2f3ce6ace50bf2bd",
       "capabilities": [
         {
           "name":"dofs",
@@ -22652,9 +22652,9 @@
       "id":"koreaobj:00548",
       "path":"Models/koreaobj/00548.gltf",
       "format_version":1,
-      "size_bytes":31906,
-      "sha256":"be0710172f7e8de56d8ffed3b56041973fa901549661018125e967f1251a1ceb",
-      "fnv1a_64":"6b6c68463a245740",
+      "size_bytes":31600,
+      "sha256":"d5de63142f2d0443981c5d690e79eefe14be78475c566da3556eff5630b731ae",
+      "fnv1a_64":"e283231126a4b052",
       "capabilities": [
         {
           "name":"dofs",
@@ -22693,9 +22693,9 @@
       "id":"koreaobj:00549",
       "path":"Models/koreaobj/00549.gltf",
       "format_version":1,
-      "size_bytes":31906,
-      "sha256":"5e45eb1bfdda8e58a6a6851f4fc22240cd17107db5ae9fa272ab7e171a839636",
-      "fnv1a_64":"75031ecef8aa4999",
+      "size_bytes":31600,
+      "sha256":"0cdd01c745acee6495b3b98d42af1ffc6e5e436d08d27325ecff40682773d60e",
+      "fnv1a_64":"a8e42675508131ab",
       "capabilities": [
         {
           "name":"dofs",
@@ -22734,9 +22734,9 @@
       "id":"koreaobj:00550",
       "path":"Models/koreaobj/00550.gltf",
       "format_version":1,
-      "size_bytes":31906,
-      "sha256":"0e7fea98666ef8d3e5a7b47a69c7bd15695f1235f1e1c18698735bf88042dac3",
-      "fnv1a_64":"b06cfb5466b26aeb",
+      "size_bytes":31600,
+      "sha256":"1775db1e1dc79bc2ec017885c1a75cf9246c2f610fb605b3eb3b9b5a99232751",
+      "fnv1a_64":"87e9a53f30e50c65",
       "capabilities": [
         {
           "name":"dofs",
@@ -22775,9 +22775,9 @@
       "id":"koreaobj:00551",
       "path":"Models/koreaobj/00551.gltf",
       "format_version":1,
-      "size_bytes":31906,
-      "sha256":"8d9f5ffcaef74e55255be00dbfc65c9a5addc0d91bcf518ecdccd9ccc79fdba7",
-      "fnv1a_64":"a8428d1078294692",
+      "size_bytes":31600,
+      "sha256":"34f0322eb497f910164961291fcdffe7747b43675ec9fac9457efdd015fcbb72",
+      "fnv1a_64":"8a03a1211108675c",
       "capabilities": [
         {
           "name":"dofs",
@@ -22816,9 +22816,9 @@
       "id":"koreaobj:00552",
       "path":"Models/koreaobj/00552.gltf",
       "format_version":1,
-      "size_bytes":31906,
-      "sha256":"d2f1ecf1d7ffe4e4e4aed660ec34ee06108f2affb79bbf93755fa14c6cd53a26",
-      "fnv1a_64":"8301361bd073a751",
+      "size_bytes":31600,
+      "sha256":"6382e5efdc37803962adfe7f8e281ea45fe6b107d7e670f90843aed469c6f6f4",
+      "fnv1a_64":"c9f4f7eab2d896ff",
       "capabilities": [
         {
           "name":"dofs",
@@ -22857,9 +22857,9 @@
       "id":"koreaobj:00553",
       "path":"Models/koreaobj/00553.gltf",
       "format_version":1,
-      "size_bytes":31906,
-      "sha256":"8a9736cfe7af83ea64c557b61bdf6a4f65bf3817a608259a77f3b05bc13a1fcd",
-      "fnv1a_64":"0620d851aa52d4b8",
+      "size_bytes":31600,
+      "sha256":"c384d6e1222d5c61ac3f4c45e887fe1204c67701e551f724223a10b63a19b9c2",
+      "fnv1a_64":"73e69fbbfcb3a506",
       "capabilities": [
         {
           "name":"dofs",
@@ -22898,9 +22898,9 @@
       "id":"koreaobj:00554",
       "path":"Models/koreaobj/00554.gltf",
       "format_version":1,
-      "size_bytes":31906,
-      "sha256":"1749b1a0456bbad89f7649f672de6236fb063edcb558835117126ee9480f69aa",
-      "fnv1a_64":"61f2bc7773bdbaff",
+      "size_bytes":31600,
+      "sha256":"3eddb98193dc376534dcf6df6c7f557b4458d32eed6d67df5ad744890e37b300",
+      "fnv1a_64":"eb03718f0f8e8351",
       "capabilities": [
         {
           "name":"dofs",
@@ -22939,9 +22939,9 @@
       "id":"koreaobj:00555",
       "path":"Models/koreaobj/00555.gltf",
       "format_version":1,
-      "size_bytes":31906,
-      "sha256":"1221932961183dbd5247b0f5ca14c30f2a6367564a19567538b43b557a0afe28",
-      "fnv1a_64":"0be46448bd98c906",
+      "size_bytes":31600,
+      "sha256":"ad7e27316b86e63548439886ccc49471d4ca05945d60ad132260acfdb956785f",
+      "fnv1a_64":"6e2313c4e96db0b8",
       "capabilities": [
         {
           "name":"dofs",
@@ -22980,9 +22980,9 @@
       "id":"koreaobj:00556",
       "path":"Models/koreaobj/00556.gltf",
       "format_version":1,
-      "size_bytes":7654,
-      "sha256":"f35a344387404b46ec05fb08685dec220e87f0cdb08dd707cc892be53eb2d061",
-      "fnv1a_64":"8a17097899acfb15",
+      "size_bytes":7564,
+      "sha256":"bd4d98646a7bb6bd08628b209d28e7a4978a00110e359d2e5901685612365ff5",
+      "fnv1a_64":"4508e010a28018e5",
       "capabilities": [
         {
           "name":"dofs",
@@ -23021,9 +23021,9 @@
       "id":"koreaobj:00557",
       "path":"Models/koreaobj/00557.gltf",
       "format_version":1,
-      "size_bytes":5352,
-      "sha256":"2b81ca28d59d4099893d52ec0e28f6ceca1fc59fcf1fd07959841c033313d52a",
-      "fnv1a_64":"d341151243e6cbfe",
+      "size_bytes":5298,
+      "sha256":"50c449f9962c2fa225fe685607060f123e4c0ea5bdca056d1cd4f047eec1e9a8",
+      "fnv1a_64":"ef574da6dfe553fc",
       "capabilities": [
         {
           "name":"dofs",
@@ -23062,9 +23062,9 @@
       "id":"koreaobj:00558",
       "path":"Models/koreaobj/00558.gltf",
       "format_version":1,
-      "size_bytes":8907,
-      "sha256":"9271e3e1c7468acc76d4ec86cc816f8234920d3d2cafb2503cfd7496d8420e8e",
-      "fnv1a_64":"6e317f8e102e4779",
+      "size_bytes":8763,
+      "sha256":"4bfab2197604f9e84edb407f4d3650db934d0c6313cfd1e9379716589227d675",
+      "fnv1a_64":"a8fabeef5665cd27",
       "capabilities": [
         {
           "name":"dofs",
@@ -23103,9 +23103,9 @@
       "id":"koreaobj:00559",
       "path":"Models/koreaobj/00559.gltf",
       "format_version":1,
-      "size_bytes":8902,
-      "sha256":"76ba4645e6617e53b8a69067ca2ae996c4cc01fa010cf5b6ff1e6afa700f9218",
-      "fnv1a_64":"838f2e21d80b7ec4",
+      "size_bytes":8758,
+      "sha256":"99c866e996a7fa1d99887bab63f6687b7bf11e72eea16d7093e1fc3824962c33",
+      "fnv1a_64":"c116210bb390fa8a",
       "capabilities": [
         {
           "name":"dofs",
@@ -24743,9 +24743,9 @@
       "id":"koreaobj:00599",
       "path":"Models/koreaobj/00599.gltf",
       "format_version":1,
-      "size_bytes":5132,
-      "sha256":"38f6928b113472069ba21090eca8bc97a7608342f30f0c717c452800bc8deb7c",
-      "fnv1a_64":"7c726f16f0f7af87",
+      "size_bytes":5096,
+      "sha256":"6e102ab656e65f0a16d9a06de7dbdfd9aec68ba9a96a28ee551a9385866f2c24",
+      "fnv1a_64":"d96209f5842e0c19",
       "capabilities": [
         {
           "name":"dofs",
@@ -24784,9 +24784,9 @@
       "id":"koreaobj:00600",
       "path":"Models/koreaobj/00600.gltf",
       "format_version":1,
-      "size_bytes":5132,
-      "sha256":"34279c36a52b4fd9e9acfb9524c3c3e92485c50a7e2275ec15a68fad1a2c9bd8",
-      "fnv1a_64":"c91212d809847468",
+      "size_bytes":5096,
+      "sha256":"1ad4f68fd2f13e90f28fc6ffc254a40d9fb887bedbde823225c74381dc04a890",
+      "fnv1a_64":"a114d6f69421a0b6",
       "capabilities": [
         {
           "name":"dofs",
@@ -24825,9 +24825,9 @@
       "id":"koreaobj:00601",
       "path":"Models/koreaobj/00601.gltf",
       "format_version":1,
-      "size_bytes":5132,
-      "sha256":"24aa96d9a35cb8c09c9777fd020aeff67894d335aa4f4925644ef3e46cb997c4",
-      "fnv1a_64":"14119995fe4419a7",
+      "size_bytes":5096,
+      "sha256":"0e212691af12e7163358ac931ec2802e428a31564301dd6e51d3d17512ddb475",
+      "fnv1a_64":"88bd3d2f1b21f185",
       "capabilities": [
         {
           "name":"dofs",
@@ -24866,9 +24866,9 @@
       "id":"koreaobj:00602",
       "path":"Models/koreaobj/00602.gltf",
       "format_version":1,
-      "size_bytes":5132,
-      "sha256":"87f051bec50084747a9fe104c5278c9789e5d6a615226b8c9179abdc3f45da21",
-      "fnv1a_64":"4af468b78c87b8e2",
+      "size_bytes":5096,
+      "sha256":"b30527752880211df3cda0eab230a076db4936e929c063ff4c2949078b40a882",
+      "fnv1a_64":"86bdf7987fcc7ddc",
       "capabilities": [
         {
           "name":"dofs",
@@ -25399,9 +25399,9 @@
       "id":"koreaobj:00615",
       "path":"Models/koreaobj/00615.gltf",
       "format_version":1,
-      "size_bytes":4022,
-      "sha256":"55a36619192ba52a6729f9447c2e546a428df7ed7c0cacf20826cb32a9c88987",
-      "fnv1a_64":"163b31f6b3e4554a",
+      "size_bytes":3986,
+      "sha256":"c2391a901176d0464a6e6c580ee6dfb356ac3898729b8469d6a5a96399c48cfb",
+      "fnv1a_64":"68145377a83f51a4",
       "capabilities": [
         {
           "name":"dofs",
@@ -25440,9 +25440,9 @@
       "id":"koreaobj:00616",
       "path":"Models/koreaobj/00616.gltf",
       "format_version":1,
-      "size_bytes":4022,
-      "sha256":"fc6232008b1f131a66e93a0642a8ad1b569ea1376c8fe8e21c092aac005637de",
-      "fnv1a_64":"af2e3a6885b1892b",
+      "size_bytes":3986,
+      "sha256":"8d3fbe4ebe6e33d55b483ce104850be2ae6c46fa87c06ee6abae36cacef1af70",
+      "fnv1a_64":"b2a3b2b06e943a39",
       "capabilities": [
         {
           "name":"dofs",
@@ -25481,9 +25481,9 @@
       "id":"koreaobj:00617",
       "path":"Models/koreaobj/00617.gltf",
       "format_version":1,
-      "size_bytes":4022,
-      "sha256":"a047911d343f5a59a890e670177f70ea5972fa648295e511e1f7416e4cd1c9b0",
-      "fnv1a_64":"be1a5434c16bd372",
+      "size_bytes":3986,
+      "sha256":"ba8287cf3076992a4cee7b1baf593671ca780f74e45b83da962515e6229692e4",
+      "fnv1a_64":"47570ce04bc83b98",
       "capabilities": [
         {
           "name":"dofs",
@@ -25522,9 +25522,9 @@
       "id":"koreaobj:00618",
       "path":"Models/koreaobj/00618.gltf",
       "format_version":1,
-      "size_bytes":4022,
-      "sha256":"4cd8b064fadb4d874cdf1fcadd5f8f4f7c332876333e58fba7eb8ef9f8a352dd",
-      "fnv1a_64":"713b8dd33b6921f3",
+      "size_bytes":3986,
+      "sha256":"c4eb2804c42de6c638a234507bb4412cd5a319dceb11d83fe9030cf86ad02193",
+      "fnv1a_64":"4b02511fe84569cd",
       "capabilities": [
         {
           "name":"dofs",
@@ -34255,9 +34255,9 @@
       "id":"koreaobj:00833",
       "path":"Models/koreaobj/00833.gltf",
       "format_version":1,
-      "size_bytes":43594,
-      "sha256":"aa7ff3c74074472883f37c3193d1f3f8586b91a0da12c1841dbe9184ec5e0c02",
-      "fnv1a_64":"0d6e867f383a8aac",
+      "size_bytes":43298,
+      "sha256":"9b48e81633690fb5c4cf7a890761e1db0ef48975c7c20ad89690612eefa0f110",
+      "fnv1a_64":"4d9a648709365a56",
       "capabilities": [
         {
           "name":"dofs",
@@ -34296,9 +34296,9 @@
       "id":"koreaobj:00834",
       "path":"Models/koreaobj/00834.gltf",
       "format_version":1,
-      "size_bytes":47745,
-      "sha256":"6d5590271820fe23712ba3930da8d06032cae4f7ede6f3d3abe5189376c08da3",
-      "fnv1a_64":"eccc974c25d07cb1",
+      "size_bytes":47449,
+      "sha256":"c561c7783153a413c46b22a31aa36f345e6d918a05f9b6e13ff95137fdd05235",
+      "fnv1a_64":"d7cc8b518a208d2f",
       "capabilities": [
         {
           "name":"dofs",
@@ -34337,9 +34337,9 @@
       "id":"koreaobj:00835",
       "path":"Models/koreaobj/00835.gltf",
       "format_version":1,
-      "size_bytes":44776,
-      "sha256":"397fd663bdecd0a6aa2f44eecfd8834fa288bebfb3aace00b0a1a611f1202f7d",
-      "fnv1a_64":"b788de9050d49af1",
+      "size_bytes":44344,
+      "sha256":"5b8956ab8bb8ec2a50030b51a12eac106ebd0c736e2f9d1513a3f670ccd1d4c4",
+      "fnv1a_64":"5b6a74c498c1a14b",
       "capabilities": [
         {
           "name":"dofs",
@@ -34378,9 +34378,9 @@
       "id":"koreaobj:00836",
       "path":"Models/koreaobj/00836.gltf",
       "format_version":1,
-      "size_bytes":44788,
-      "sha256":"1d03d1cfc3c100a5d037dcc1245fd8d47cf9cbc9668795843b9fc9e81867512c",
-      "fnv1a_64":"6ba2c49e438d5e3d",
+      "size_bytes":44492,
+      "sha256":"4b53cfd49716044716891dfdce5c48892a3fc7e7e62ba4d6d2de4a296e40c652",
+      "fnv1a_64":"49a3f01b26e8120f",
       "capabilities": [
         {
           "name":"dofs",
@@ -34419,9 +34419,9 @@
       "id":"koreaobj:00837",
       "path":"Models/koreaobj/00837.gltf",
       "format_version":1,
-      "size_bytes":35219,
-      "sha256":"2acc57b6cafc60710e92559d6dce2a9d53ae64aa13076ce3ec5bb56187782d37",
-      "fnv1a_64":"fe9a0fc661180f87",
+      "size_bytes":35355,
+      "sha256":"03c6bdaf45490e4b80775b9309e80b1086c887e7b069d8faad619f0db7180a81",
+      "fnv1a_64":"98be7974308617f7",
       "capabilities": [
         {
           "name":"dofs",
@@ -34460,9 +34460,9 @@
       "id":"koreaobj:00838",
       "path":"Models/koreaobj/00838.gltf",
       "format_version":1,
-      "size_bytes":18437,
-      "sha256":"7059e2a23871f503c356afd2da5d0beaf8d082a68c3df9631c84462b9c0d8326",
-      "fnv1a_64":"8b048941a987ef3b",
+      "size_bytes":18573,
+      "sha256":"9c524dc9ec06805911d860fa5ce9285c97f22ae81292d81d2354f1767ac17ae9",
+      "fnv1a_64":"aa79c24f7a68a287",
       "capabilities": [
         {
           "name":"dofs",
@@ -34501,9 +34501,9 @@
       "id":"koreaobj:00839",
       "path":"Models/koreaobj/00839.gltf",
       "format_version":1,
-      "size_bytes":21396,
-      "sha256":"d0a6100dcce02953ccf21c69c3d19a6788ed068187235f7fee219b17ccee5568",
-      "fnv1a_64":"ecab4b9fa4ae4bb4",
+      "size_bytes":21532,
+      "sha256":"7cf6bdbceaf88a8776fdfd3b10669da7d0dec1f9eb9771ba9bb13c7d63f42236",
+      "fnv1a_64":"61f0c74fd6994bf2",
       "capabilities": [
         {
           "name":"dofs",
@@ -34583,9 +34583,9 @@
       "id":"koreaobj:00841",
       "path":"Models/koreaobj/00841.gltf",
       "format_version":1,
-      "size_bytes":28331,
-      "sha256":"c575ffc5f736707c46af2a5ac1efba633bcdc027f37815fce3c6c5383cce9e3c",
-      "fnv1a_64":"e972a6eb9c6c5e00",
+      "size_bytes":28151,
+      "sha256":"442a0c953a8dccb277756327eaef70ef2f816c40b189450ff8e6fb855915f38f",
+      "fnv1a_64":"0bd1e357234242f0",
       "capabilities": [
         {
           "name":"dofs",
@@ -34747,9 +34747,9 @@
       "id":"koreaobj:00845",
       "path":"Models/koreaobj/00845.gltf",
       "format_version":1,
-      "size_bytes":19101,
-      "sha256":"2e8752a492c651e70d5a807acfe5ddf92e240f25b1d4c0a0d95c8588fded35c4",
-      "fnv1a_64":"ade03c09df7bf2d2",
+      "size_bytes":18921,
+      "sha256":"f0a75b35a4d2aa480636a525aa0ef0dad1c6d1b23c9b681fd2637a8f8634e504",
+      "fnv1a_64":"0c167ae372646420",
       "capabilities": [
         {
           "name":"dofs",
@@ -35116,9 +35116,9 @@
       "id":"koreaobj:00854",
       "path":"Models/koreaobj/00854.gltf",
       "format_version":1,
-      "size_bytes":41535,
-      "sha256":"933023749fa1ae0c6c18a9d20bbd47898aa9bb15274dd12a9e2093446d08337f",
-      "fnv1a_64":"c4acf0d211529840",
+      "size_bytes":41457,
+      "sha256":"9a8dd325cadcc6c818f226015e5ae05ffefb5fdea372a383b15a10090fa24375",
+      "fnv1a_64":"00174bfda208643a",
       "capabilities": [
         {
           "name":"dofs",
@@ -35280,9 +35280,9 @@
       "id":"koreaobj:00858",
       "path":"Models/koreaobj/00858.gltf",
       "format_version":1,
-      "size_bytes":9757,
-      "sha256":"972963b1f3800d276cbca6649e1af23bb1028e4cd94bd5586a6001d164dc0c2d",
-      "fnv1a_64":"53c50e7c7d7ae24b",
+      "size_bytes":9649,
+      "sha256":"e2a3ce1de63f55c864d40b2bbbee263d25c62662391b3532eb1e37a05ef5bda3",
+      "fnv1a_64":"b10d2382b5995e19",
       "capabilities": [
         {
           "name":"dofs",
@@ -35321,9 +35321,9 @@
       "id":"koreaobj:00859",
       "path":"Models/koreaobj/00859.gltf",
       "format_version":1,
-      "size_bytes":12116,
-      "sha256":"f2fd4c705852f06ec629c90104f7dbd85257982d116ac1df1d6f8bc42197cc6d",
-      "fnv1a_64":"4d21c6e3bdb82838",
+      "size_bytes":12080,
+      "sha256":"b0bbfe5f740a5d38f68d739695d1696534eab90aff3fd91d34ae2d3b9627f166",
+      "fnv1a_64":"3272e9f0cfc44c6e",
       "capabilities": [
         {
           "name":"dofs",
@@ -35362,9 +35362,9 @@
       "id":"koreaobj:00860",
       "path":"Models/koreaobj/00860.gltf",
       "format_version":1,
-      "size_bytes":12109,
-      "sha256":"cd408ef2611a146f5c4b299de277dfb8eec9a59002b27ae113d987b7bf6ac606",
-      "fnv1a_64":"cb82a4316b94feb0",
+      "size_bytes":12073,
+      "sha256":"eb22ddaed1919d6ba495369245c7808b9575568cee2b8316435ef94f79bd18b3",
+      "fnv1a_64":"1afd4a565969af86",
       "capabilities": [
         {
           "name":"dofs",
@@ -35403,9 +35403,9 @@
       "id":"koreaobj:00861",
       "path":"Models/koreaobj/00861.gltf",
       "format_version":1,
-      "size_bytes":12116,
-      "sha256":"82238b8a409d95f6f7ea11317cac6c6712390fa5201e95f5c73bacb02255c222",
-      "fnv1a_64":"2b442dcbd4176e25",
+      "size_bytes":12080,
+      "sha256":"301f58df6ea701f9f2c91ee18a2bbeade957e5bff44658a2cccf022ac5e593af",
+      "fnv1a_64":"31797089aaa843e7",
       "capabilities": [
         {
           "name":"dofs",
@@ -35444,9 +35444,9 @@
       "id":"koreaobj:00862",
       "path":"Models/koreaobj/00862.gltf",
       "format_version":1,
-      "size_bytes":12116,
-      "sha256":"1943a0001ca844391bb55c4c82c92c548ca2ea4a9fa5daf4e63538cd5a9e6852",
-      "fnv1a_64":"174128489fe606c6",
+      "size_bytes":12080,
+      "sha256":"65c99425ee0a0ee69fbf01e868522b2ed9f1ecbc5f1bd80c8a72257f2451e1ad",
+      "fnv1a_64":"cfbd439417119264",
       "capabilities": [
         {
           "name":"dofs",
@@ -36100,9 +36100,9 @@
       "id":"koreaobj:00878",
       "path":"Models/koreaobj/00878.gltf",
       "format_version":1,
-      "size_bytes":23195,
-      "sha256":"7ad46b2e9735dc930212c1006f35f97c4dfc188094af7933a2c6840d1d051319",
-      "fnv1a_64":"4af8f18f65fc48a7",
+      "size_bytes":23285,
+      "sha256":"41ec02c078484ea5fcf85c5d1e21b43d245d615607e0af1910f793b41ce85498",
+      "fnv1a_64":"babf58434303d845",
       "capabilities": [
         {
           "name":"dofs",
@@ -36141,9 +36141,9 @@
       "id":"koreaobj:00879",
       "path":"Models/koreaobj/00879.gltf",
       "format_version":1,
-      "size_bytes":37103,
-      "sha256":"4bfb32847b779bf4c009cd78d913e46eb5c4a12cabf0f3cf72db156015213ebf",
-      "fnv1a_64":"cd8b14496670bd1f",
+      "size_bytes":37193,
+      "sha256":"6956752900d4d1b8fcfd2357a712566525d0f9ac9a004673459d109b704db43a",
+      "fnv1a_64":"804268a63089b41d",
       "capabilities": [
         {
           "name":"dofs",
@@ -36182,9 +36182,9 @@
       "id":"koreaobj:00880",
       "path":"Models/koreaobj/00880.gltf",
       "format_version":1,
-      "size_bytes":23562,
-      "sha256":"54cf53e4344f16ef5e4db06e9de4af002af20a2e83e660928dd099cd6c955f03",
-      "fnv1a_64":"058efc3933abe55b",
+      "size_bytes":23652,
+      "sha256":"6aed47492ab1008a73eed9a5a864a7aadcf91855666303fb4a4d8d133a74ce4a",
+      "fnv1a_64":"4651a57b5f8dcc8f",
       "capabilities": [
         {
           "name":"dofs",
@@ -36715,9 +36715,9 @@
       "id":"koreaobj:00893",
       "path":"Models/koreaobj/00893.gltf",
       "format_version":1,
-      "size_bytes":37532,
-      "sha256":"54bec545a9cf36cc7a590e12e01883436a122c8e96ff81a998b083979d8e4635",
-      "fnv1a_64":"88016dd73287234a",
+      "size_bytes":37519,
+      "sha256":"6fa16fd26852dbd703d15963fc09eb6839045540d77bd2512d46e40be64d4175",
+      "fnv1a_64":"979f8016b7929b24",
       "capabilities": [
         {
           "name":"dofs",
@@ -36838,9 +36838,9 @@
       "id":"koreaobj:00896",
       "path":"Models/koreaobj/00896.gltf",
       "format_version":1,
-      "size_bytes":67173,
-      "sha256":"145ed1d774b8fb7a2b99a4b79c4edf4276fdeea3b2a51355ceb1dd5779ec03d2",
-      "fnv1a_64":"872032a389432aa6",
+      "size_bytes":66299,
+      "sha256":"37df8d1ae42f66e954049fe8df29d4eea69c8a959087232886bb4ad6303e0651",
+      "fnv1a_64":"24c9a2ebd2268a84",
       "capabilities": [
         {
           "name":"dofs",
@@ -37248,9 +37248,9 @@
       "id":"koreaobj:00906",
       "path":"Models/koreaobj/00906.gltf",
       "format_version":1,
-      "size_bytes":31409,
-      "sha256":"5d10c912eae0c242a9e25b1a55495255d257b5244e6eed1d2a89c252b5313a10",
-      "fnv1a_64":"4a750eeff2614b7a",
+      "size_bytes":31973,
+      "sha256":"d68a8bcddde9b9602b7b679d1e4ee0c96656027ca6e7981d12d26ff9aaa247ec",
+      "fnv1a_64":"b32fe8676d89cbd2",
       "capabilities": [
         {
           "name":"dofs",
@@ -37289,9 +37289,9 @@
       "id":"koreaobj:00907",
       "path":"Models/koreaobj/00907.gltf",
       "format_version":1,
-      "size_bytes":81367,
-      "sha256":"ade946bea5dda06423d745e0d21a4346f359d6013fddd3495663bce6c4f908c2",
-      "fnv1a_64":"5ecdb12de238f5cc",
+      "size_bytes":82255,
+      "sha256":"057a161abff009312d761d16ec515a2c35a9c2a2441de7e6da250b0320bcff73",
+      "fnv1a_64":"9117d8d43c664464",
       "capabilities": [
         {
           "name":"dofs",
@@ -37945,9 +37945,9 @@
       "id":"koreaobj:00923",
       "path":"Models/koreaobj/00923.gltf",
       "format_version":1,
-      "size_bytes":4025,
-      "sha256":"1460bfc1175da0d0850c93ca4cd48e77d4b9e67b150564c8e0d501fb87c2c64e",
-      "fnv1a_64":"8e93305c88f237c8",
+      "size_bytes":3989,
+      "sha256":"b27b58ba1231a56018356df0cbac6c35e5546618fe59070542b0b637a13a0c23",
+      "fnv1a_64":"980d6d69b3a84a58",
       "capabilities": [
         {
           "name":"dofs",
@@ -37986,9 +37986,9 @@
       "id":"koreaobj:00924",
       "path":"Models/koreaobj/00924.gltf",
       "format_version":1,
-      "size_bytes":10987,
-      "sha256":"609de62bc9e1fde2a2b63b8ec81a230cdde8484296bedb83fd49273e86233495",
-      "fnv1a_64":"9c269debeecdb01c",
+      "size_bytes":10879,
+      "sha256":"ec48eb2fa8d40c1184d598e2cc4cc0ba9a55cf5ec776bb47b09be4277f44d1e1",
+      "fnv1a_64":"ecc2551a294d3ace",
       "capabilities": [
         {
           "name":"dofs",
@@ -38191,9 +38191,9 @@
       "id":"koreaobj:00929",
       "path":"Models/koreaobj/00929.gltf",
       "format_version":1,
-      "size_bytes":48161,
-      "sha256":"80ed244114a2509171083933b6ffece46acc9bdda33d7a68663fa1ad58cf7287",
-      "fnv1a_64":"9c65959293212c16",
+      "size_bytes":48087,
+      "sha256":"476f4362153eb7287b113cdd3f86c2320f86e15f443e3982d605db7f6f40f0ef",
+      "fnv1a_64":"75f0de0b02359b09",
       "capabilities": [
         {
           "name":"dofs",
@@ -39257,9 +39257,9 @@
       "id":"koreaobj:00955",
       "path":"Models/koreaobj/00955.gltf",
       "format_version":1,
-      "size_bytes":9552,
-      "sha256":"ab61c6e9ed7312a39a340df5063d09df0cb2270ea03399e26fe691b30c798541",
-      "fnv1a_64":"91911fa443c59696",
+      "size_bytes":9494,
+      "sha256":"0f3101cedc2611f0907b3c301763697f6441d28a283c8e3fc93d72828dcf198d",
+      "fnv1a_64":"ea2304f15ce4dd3a",
       "capabilities": [
         {
           "name":"dofs",
@@ -39380,9 +39380,9 @@
       "id":"koreaobj:00958",
       "path":"Models/koreaobj/00958.gltf",
       "format_version":1,
-      "size_bytes":9742,
-      "sha256":"d8f48db5aa9f8225f8d4003d9b0f74214681f6f63fdd82ef88a954c9fbdb973f",
-      "fnv1a_64":"7229f33ac15045d6",
+      "size_bytes":9634,
+      "sha256":"b74ba8d76a9a6274601658b274a2346425a462748d3acd99d702646a7c9d5b0e",
+      "fnv1a_64":"5c8a555200daa500",
       "capabilities": [
         {
           "name":"dofs",
@@ -40528,9 +40528,9 @@
       "id":"koreaobj:00986",
       "path":"Models/koreaobj/00986.gltf",
       "format_version":1,
-      "size_bytes":28339,
-      "sha256":"1a179f9e1f68b20ca0ef641c142094f23902fe068dbcfa2cd3f07e15d4a812b8",
-      "fnv1a_64":"1bc135bdacefccd2",
+      "size_bytes":28051,
+      "sha256":"a303d59a64172ae66226026aa98af4a725b5be72a78b8a8e3707ef7a1a8ec4b4",
+      "fnv1a_64":"d641846f1b04e79e",
       "capabilities": [
         {
           "name":"dofs",
@@ -40651,9 +40651,9 @@
       "id":"koreaobj:00989",
       "path":"Models/koreaobj/00989.gltf",
       "format_version":1,
-      "size_bytes":30756,
-      "sha256":"ed6c8604d00afe510b8f6c1d385f31a2435978a81e9131f1ebc57c2aa431ceb3",
-      "fnv1a_64":"dbf1d0665d371ae8",
+      "size_bytes":30597,
+      "sha256":"979eefbc08380bc6e39ee41c243b86bcd6c36db29fdc19c771f147e03ad79f77",
+      "fnv1a_64":"d7de8765054ec4a5",
       "capabilities": [
         {
           "name":"dofs",
@@ -40692,9 +40692,9 @@
       "id":"koreaobj:00990",
       "path":"Models/koreaobj/00990.gltf",
       "format_version":1,
-      "size_bytes":31378,
-      "sha256":"009d7eba92f1ada5a8aa1f2ae098ec5d5e69b432b7e86ffafa2116eaadf24a1a",
-      "fnv1a_64":"6b0b3cde1e7ebb8e",
+      "size_bytes":31324,
+      "sha256":"bb1a11b6a3d7ce489c416050908c12c17093eca4e297d9261a2825e0fdc096b4",
+      "fnv1a_64":"8f71bcaedbf650bc",
       "capabilities": [
         {
           "name":"dofs",
@@ -40897,9 +40897,9 @@
       "id":"koreaobj:00995",
       "path":"Models/koreaobj/00995.gltf",
       "format_version":1,
-      "size_bytes":9535,
-      "sha256":"24118ba31eb2517d1edce4d87a16d3f9dd1901655d8a1acaad9198ebdaadf9d3",
-      "fnv1a_64":"25f877891da6ec78",
+      "size_bytes":9391,
+      "sha256":"437f99c9211597d459c3a265b070976965638e676853f1518543d2c9c165ee0d",
+      "fnv1a_64":"b6d479682ea9c576",
       "capabilities": [
         {
           "name":"dofs",
@@ -41799,9 +41799,9 @@
       "id":"koreaobj:01017",
       "path":"Models/koreaobj/01017.gltf",
       "format_version":1,
-      "size_bytes":11207,
-      "sha256":"49320257fb3deb60f7d9043e2109d1b596ead8c691dffe246e39a9c3dcc7b993",
-      "fnv1a_64":"8dedbaad39722c7d",
+      "size_bytes":11063,
+      "sha256":"add8b6855d41ae272ff36b63bd971f5411a12e646149d847682f17c9e65ac7bf",
+      "fnv1a_64":"498f8699716afbb9",
       "capabilities": [
         {
           "name":"dofs",
@@ -41840,9 +41840,9 @@
       "id":"koreaobj:01018",
       "path":"Models/koreaobj/01018.gltf",
       "format_version":1,
-      "size_bytes":12842,
-      "sha256":"95cc2145fef67f988f1f2615a559c0968dc42b6bd70a5a1dfd83d06045b94509",
-      "fnv1a_64":"008f3fe8a6511005",
+      "size_bytes":12698,
+      "sha256":"2e9af50c40de812ee4ca18027f28ec29f00b40ada4ca5f196d59e63c7da05b60",
+      "fnv1a_64":"a12ac093f375ff19",
       "capabilities": [
         {
           "name":"dofs",
@@ -42250,9 +42250,9 @@
       "id":"koreaobj:01028",
       "path":"Models/koreaobj/01028.gltf",
       "format_version":1,
-      "size_bytes":9535,
-      "sha256":"5583d4bbc724b889f1bb50d2248847e590036f0cfc52a0fb5660ea41f4ca2715",
-      "fnv1a_64":"b72db020f501c1ea",
+      "size_bytes":9391,
+      "sha256":"279a2fbab97f376029f858fced42263f1aa6785c7b82b345a8447d70f8588b9f",
+      "fnv1a_64":"b2ad88ae9c9a29d0",
       "capabilities": [
         {
           "name":"dofs",
@@ -42291,9 +42291,9 @@
       "id":"koreaobj:01029",
       "path":"Models/koreaobj/01029.gltf",
       "format_version":1,
-      "size_bytes":9535,
-      "sha256":"5b3a5ffdc3919546685027c39f7f278b54aafe77779697d62efc6efa5b720245",
-      "fnv1a_64":"f7725446198ee72d",
+      "size_bytes":9391,
+      "sha256":"eaf27b961e0542286858994a956e62ee2bf32216fd3021a07203ff68eed64d02",
+      "fnv1a_64":"9b1bf5be6802950b",
       "capabilities": [
         {
           "name":"dofs",
@@ -42373,9 +42373,9 @@
       "id":"koreaobj:01031",
       "path":"Models/koreaobj/01031.gltf",
       "format_version":1,
-      "size_bytes":9537,
-      "sha256":"a90be99cff53bddb9864d3443b602ae44dd6ef89d835863febd006f3fad8a7bc",
-      "fnv1a_64":"138f68644cd8ea27",
+      "size_bytes":9393,
+      "sha256":"9517ddc51ab3681f0af084704c1f83a738bee3bf71b0d00ec4673a3b401ebf59",
+      "fnv1a_64":"993d103ad6514161",
       "capabilities": [
         {
           "name":"dofs",
@@ -42455,9 +42455,9 @@
       "id":"koreaobj:01033",
       "path":"Models/koreaobj/01033.gltf",
       "format_version":1,
-      "size_bytes":9535,
-      "sha256":"1690fc19083b1f2055115c70666244988bf45bdcf0e812a784a5a4180e6fa901",
-      "fnv1a_64":"36e89942de6f5683",
+      "size_bytes":9391,
+      "sha256":"470f0ed1fa3c03d4b466366df6d09a77e2f9c93d5e0945a45bbff52c73f5ec73",
+      "fnv1a_64":"87dab2bfd5e27ab9",
       "capabilities": [
         {
           "name":"dofs",
@@ -42988,9 +42988,9 @@
       "id":"koreaobj:01046",
       "path":"Models/koreaobj/01046.gltf",
       "format_version":1,
-      "size_bytes":16913,
-      "sha256":"f3be183d6d58feaa5cd236b13e331306e98b626e17728f3fd96aff46f7b06bbc",
-      "fnv1a_64":"befdd86c2ef35518",
+      "size_bytes":16769,
+      "sha256":"e2f35e2d16e4524394957d11c5ca520f29ff63fff8de5ec385c9a83c2e492e00",
+      "fnv1a_64":"768e6dcfd9434a84",
       "capabilities": [
         {
           "name":"dofs",
@@ -43275,9 +43275,9 @@
       "id":"koreaobj:01053",
       "path":"Models/koreaobj/01053.gltf",
       "format_version":1,
-      "size_bytes":26654,
-      "sha256":"e239c3c0fe99adea327cf4725bd4a4580b2c6c7bdbc6482d554745f3f492aaae",
-      "fnv1a_64":"7eda88454545df92",
+      "size_bytes":26222,
+      "sha256":"533ad964b02d39a721b48bfc5fd772d31913a64ab256a3f3495322624ca2115c",
+      "fnv1a_64":"bf2b76c25fe38f2a",
       "capabilities": [
         {
           "name":"dofs",
@@ -43480,9 +43480,9 @@
       "id":"koreaobj:01058",
       "path":"Models/koreaobj/01058.gltf",
       "format_version":1,
-      "size_bytes":12674,
-      "sha256":"c01fc16052713245aa616a3ccad6518fb41782e9ed3fd0a6c4fc2ed5f2814a98",
-      "fnv1a_64":"1b679ef43598465a",
+      "size_bytes":12530,
+      "sha256":"4fa2ecf4535ae1e67c459cad9b3688f2b1bff1c7ddd95b6983e6e14711cf2041",
+      "fnv1a_64":"fef6825393da381e",
       "capabilities": [
         {
           "name":"dofs",
@@ -43521,9 +43521,9 @@
       "id":"koreaobj:01059",
       "path":"Models/koreaobj/01059.gltf",
       "format_version":1,
-      "size_bytes":14371,
-      "sha256":"86d51b474cea3418ad08e9fa13313e0b4188b1b199ee67ac4d040c3e18996f31",
-      "fnv1a_64":"3e83d0a80784a74d",
+      "size_bytes":14227,
+      "sha256":"ab8570ecbe6a3303f05b8386d382a85f26003c9d1748b7fcbab068f23272734a",
+      "fnv1a_64":"6d7c6a78394b3009",
       "capabilities": [
         {
           "name":"dofs",
@@ -43562,9 +43562,9 @@
       "id":"koreaobj:01060",
       "path":"Models/koreaobj/01060.gltf",
       "format_version":1,
-      "size_bytes":9567,
-      "sha256":"af1a9b1e9bd20bb2f7992b21c0091ed8d3ee40e1d0e620853cda085817fe84b1",
-      "fnv1a_64":"c7d97a5f5e4e36f0",
+      "size_bytes":9423,
+      "sha256":"dc33bf862ff8a1f4d02b0dec58f28f492d1ec487f4651c726d3dfad72c943bda",
+      "fnv1a_64":"e43941de0ccfc356",
       "capabilities": [
         {
           "name":"dofs",
@@ -43603,9 +43603,9 @@
       "id":"koreaobj:01061",
       "path":"Models/koreaobj/01061.gltf",
       "format_version":1,
-      "size_bytes":11820,
-      "sha256":"702fe2abc3a54e6c4aa2c37728ce98b3b6f62230320435bd4e2470fe5c9676dc",
-      "fnv1a_64":"e604199eee7c6f93",
+      "size_bytes":11676,
+      "sha256":"e9d5e2cbcf036e07ad29e2a42eab27672dbac57f39699c07c4f654484362bf7d",
+      "fnv1a_64":"21d5ebc7ddfe622f",
       "capabilities": [
         {
           "name":"dofs",
@@ -43644,9 +43644,9 @@
       "id":"koreaobj:01062",
       "path":"Models/koreaobj/01062.gltf",
       "format_version":1,
-      "size_bytes":9564,
-      "sha256":"76871ea10c770d6105ad4785cbee02db7a7cfc98291cede773e84e4840d5fc22",
-      "fnv1a_64":"8dafadeea8b02b16",
+      "size_bytes":9420,
+      "sha256":"7ae70ecf13dbfd9acd4fe5732bbb4d3862dedfdd87be05bc74b70dc348f2dc63",
+      "fnv1a_64":"e3091e84f9511160",
       "capabilities": [
         {
           "name":"dofs",
@@ -43685,9 +43685,9 @@
       "id":"koreaobj:01063",
       "path":"Models/koreaobj/01063.gltf",
       "format_version":1,
-      "size_bytes":9557,
-      "sha256":"e2d61d6cedfe107f26ff4d08ba6dbfec663b469b9693c3f10fd82754be0bb475",
-      "fnv1a_64":"8078613e1ddfa6f8",
+      "size_bytes":9413,
+      "sha256":"e69f5eece9e3d250c067710a48a162687b0537e8b61cc0dcf09cb94747d73212",
+      "fnv1a_64":"d309a7d0f0014bc6",
       "capabilities": [
         {
           "name":"dofs",
@@ -43726,9 +43726,9 @@
       "id":"koreaobj:01064",
       "path":"Models/koreaobj/01064.gltf",
       "format_version":1,
-      "size_bytes":12680,
-      "sha256":"190b261dbdf1c3001aaadc1ce11ccdc08fa698d457d4b05b71e35a53fd4d6343",
-      "fnv1a_64":"750233183fe2d6fd",
+      "size_bytes":12536,
+      "sha256":"d7fae6eb50fd290ebd908e240af6615fa6ecda044f66fe76c835d45d12ca3416",
+      "fnv1a_64":"af492d366e015e79",
       "capabilities": [
         {
           "name":"dofs",
@@ -43767,9 +43767,9 @@
       "id":"koreaobj:01065",
       "path":"Models/koreaobj/01065.gltf",
       "format_version":1,
-      "size_bytes":9541,
-      "sha256":"249327ccf7916647fff7e020e041ce8fc1f54e69d173f8b341c77f178e7fc931",
-      "fnv1a_64":"719d6c8292b5a63e",
+      "size_bytes":9397,
+      "sha256":"bece7705aff11926e311f1e80efd1e7bbb604cebd5fc195a87ce7109ff34fb6b",
+      "fnv1a_64":"6d1e9ec6b6b47340",
       "capabilities": [
         {
           "name":"dofs",
@@ -43808,9 +43808,9 @@
       "id":"koreaobj:01066",
       "path":"Models/koreaobj/01066.gltf",
       "format_version":1,
-      "size_bytes":8040,
-      "sha256":"18220512a86ce728935aaf7ebab960d77c8919a9815f82f9523b4afd6162abe8",
-      "fnv1a_64":"4b2897af6fb99807",
+      "size_bytes":7932,
+      "sha256":"3c78cf71a17add7c209e04a76bf70faea9f959f7a1927896e890961772093e85",
+      "fnv1a_64":"5db56ee060f14975",
       "capabilities": [
         {
           "name":"dofs",
@@ -43849,9 +43849,9 @@
       "id":"koreaobj:01067",
       "path":"Models/koreaobj/01067.gltf",
       "format_version":1,
-      "size_bytes":13291,
-      "sha256":"73701af4dc100581af8a96f172658b3372da29928c08919e210fff80f0c65b19",
-      "fnv1a_64":"0dd4e0d7b948b182",
+      "size_bytes":13021,
+      "sha256":"0ee2571cd586abcec38d47463f7182034d38b9d439b1487d20786a145caf217e",
+      "fnv1a_64":"a9b5ac27474a8aa6",
       "capabilities": [
         {
           "name":"dofs",
@@ -49097,9 +49097,9 @@
       "id":"koreaobj:01195",
       "path":"Models/koreaobj/01195.gltf",
       "format_version":1,
-      "size_bytes":15200,
-      "sha256":"6a9da54db42abf564eea845e0fb78ec07d68491e1a1c636f7a8fbcc66bd717fd",
-      "fnv1a_64":"2a0bb520e7d046d7",
+      "size_bytes":15198,
+      "sha256":"765f64feed777d8526ee6ba6aab69afa198bb65cb7f8021a6df59d8244aa95da",
+      "fnv1a_64":"9a0dc4d3a28ad931",
       "capabilities": [
         {
           "name":"dofs",
@@ -49917,9 +49917,9 @@
       "id":"koreaobj:01215",
       "path":"Models/koreaobj/01215.gltf",
       "format_version":1,
-      "size_bytes":7194,
-      "sha256":"892a8ae9842db5fd2d079075292efd68b66a96a60e7df46e39571767c826daa6",
-      "fnv1a_64":"ea317bb682e21f0e",
+      "size_bytes":7201,
+      "sha256":"0e9ca721f808dd2240356e7f26b4b32a730dcf46845e02fc3df59840325381b1",
+      "fnv1a_64":"9887f2c9dfa1fb44",
       "capabilities": [
         {
           "name":"dofs",
@@ -50081,9 +50081,9 @@
       "id":"koreaobj:01219",
       "path":"Models/koreaobj/01219.gltf",
       "format_version":1,
-      "size_bytes":24431,
-      "sha256":"265055c3b15e3b800537934494ac36b159ad1ab6383c98c78c1f12a38d3c49b4",
-      "fnv1a_64":"b13305ba15336d43",
+      "size_bytes":24425,
+      "sha256":"53610644dbdfeaebe95f104c1178daddf6e20eb995fc908cbc588fbe03bf39e9",
+      "fnv1a_64":"d125bc52c5fa6e0b",
       "capabilities": [
         {
           "name":"dofs",
@@ -50122,9 +50122,9 @@
       "id":"koreaobj:01220",
       "path":"Models/koreaobj/01220.gltf",
       "format_version":1,
-      "size_bytes":39731,
-      "sha256":"2cc3e5d60e6b6c8c12ab0988d36326c8dd8d90c97b467ace0979c6b2ff889aea",
-      "fnv1a_64":"13811ea05509d80e",
+      "size_bytes":39867,
+      "sha256":"54d2000fdbabc607c8deb57abd6c62e9d8dc6a752ab83b742d562669fcee0c6f",
+      "fnv1a_64":"f6c220a080fef56c",
       "capabilities": [
         {
           "name":"dofs",
@@ -50163,9 +50163,9 @@
       "id":"koreaobj:01221",
       "path":"Models/koreaobj/01221.gltf",
       "format_version":1,
-      "size_bytes":7196,
-      "sha256":"a0e0478aa156e4137d207864da5b8ad1eb0fe3843d0ec19e269fdcad03991029",
-      "fnv1a_64":"157f25ba2ec8dd3e",
+      "size_bytes":7203,
+      "sha256":"359fa035285e48980b107c3c3f3e80ebfcc795bd73add82643ebafad6d758c9f",
+      "fnv1a_64":"87cd571598222b30",
       "capabilities": [
         {
           "name":"dofs",
@@ -50245,9 +50245,9 @@
       "id":"koreaobj:01223",
       "path":"Models/koreaobj/01223.gltf",
       "format_version":1,
-      "size_bytes":2934,
-      "sha256":"33f3ecf0f505e254d1547f2a87f7bbf6f1613c3e5ce19d949f1517a968dec325",
-      "fnv1a_64":"ff97dcd277548438",
+      "size_bytes":2949,
+      "sha256":"b7d09a2e93267434d22fcf91397aad303f700a3f31c960e96f35147fec5fbb64",
+      "fnv1a_64":"6157576323b6e87d",
       "capabilities": [
         {
           "name":"dofs",
@@ -50368,9 +50368,9 @@
       "id":"koreaobj:01226",
       "path":"Models/koreaobj/01226.gltf",
       "format_version":1,
-      "size_bytes":50733,
-      "sha256":"3254791b5a93c9456e440566ba6bb83d91fd004e71eb50c1d778160a29b28d30",
-      "fnv1a_64":"ae5e240951481479",
+      "size_bytes":50595,
+      "sha256":"d5d3464967c1c2e5c3dd502d2ba25c99e059ba4cc8201f675af7f38ba0be51d7",
+      "fnv1a_64":"9176ae600dc7dd5f",
       "capabilities": [
         {
           "name":"dofs",
@@ -50532,9 +50532,9 @@
       "id":"koreaobj:01230",
       "path":"Models/koreaobj/01230.gltf",
       "format_version":1,
-      "size_bytes":9482,
-      "sha256":"7d8fefa5688e520193a90822dd19a92e828ed1c7ec2c5f1b9416166baaedfcf2",
-      "fnv1a_64":"4cb6f7b66463933b",
+      "size_bytes":9230,
+      "sha256":"b846c388b468f8c62e5494eb0baf0c0cd86a36a2ddb0c7040425aa6b672f25cf",
+      "fnv1a_64":"39c0b1ea08dc9a27",
       "capabilities": [
         {
           "name":"dofs",
@@ -50573,9 +50573,9 @@
       "id":"koreaobj:01231",
       "path":"Models/koreaobj/01231.gltf",
       "format_version":1,
-      "size_bytes":9486,
-      "sha256":"195f3b8d8cdf651c0abfa1b2c233b7dd4e33bbb2cdc03bfeaabc98e8cf9f3a61",
-      "fnv1a_64":"cbfeb4cbc8625768",
+      "size_bytes":9234,
+      "sha256":"40d91eb22bbc265375d7d901e1c5fc3c646f852d4423fb53857ecd1fd58bf886",
+      "fnv1a_64":"dd9a94235a2d0334",
       "capabilities": [
         {
           "name":"dofs",
@@ -50614,9 +50614,9 @@
       "id":"koreaobj:01232",
       "path":"Models/koreaobj/01232.gltf",
       "format_version":1,
-      "size_bytes":9471,
-      "sha256":"9ce91983bf0e7a1efa0ca45e8aa49ebd2df6dc551570b977e19dacce1adb8d96",
-      "fnv1a_64":"26b2e78464dfe1c5",
+      "size_bytes":9219,
+      "sha256":"148c34e80c5dded68a86f6581974983640fe76f71124173576cb93d5b24b7fa4",
+      "fnv1a_64":"e34fa5651239a9e9",
       "capabilities": [
         {
           "name":"dofs",
@@ -50942,9 +50942,9 @@
       "id":"koreaobj:01240",
       "path":"Models/koreaobj/01240.gltf",
       "format_version":1,
-      "size_bytes":1928,
-      "sha256":"b9134d7622444eb60471ba138db644ea48c51cea0ba4cecd0f8c2f5e7cd23051",
-      "fnv1a_64":"d0cbf568af5a4789",
+      "size_bytes":1892,
+      "sha256":"4818b0ff8a589b0e1a86c0b116474405b3ef05bfdcb2ee1aa52d076c165c7442",
+      "fnv1a_64":"31eebcada3044f63",
       "capabilities": [
         {
           "name":"dofs",
@@ -50983,9 +50983,9 @@
       "id":"koreaobj:01241",
       "path":"Models/koreaobj/01241.gltf",
       "format_version":1,
-      "size_bytes":9478,
-      "sha256":"eddf93797e3368f3bd8432b8c4a9d9228183ab561de15929b25a8eb1859db33e",
-      "fnv1a_64":"a0ad34651d37249e",
+      "size_bytes":9226,
+      "sha256":"8d579819e86b481980cf96687544d6e7dbd965103bfc754dc9808da06020daa6",
+      "fnv1a_64":"f5cefdca0f92c86a",
       "capabilities": [
         {
           "name":"dofs",
@@ -51024,9 +51024,9 @@
       "id":"koreaobj:01242",
       "path":"Models/koreaobj/01242.gltf",
       "format_version":1,
-      "size_bytes":9451,
-      "sha256":"30c56174f116eb31febbda5a64c84b59bdea9e951ee7e8c10be5b4bb3ce9f804",
-      "fnv1a_64":"3588c03e273f4546",
+      "size_bytes":9199,
+      "sha256":"32496fa2d8383a317f5bcd1a78d381b567e8975dd400d52882ce165e8b290122",
+      "fnv1a_64":"a410ba5645a0f222",
       "capabilities": [
         {
           "name":"dofs",
@@ -51065,9 +51065,9 @@
       "id":"koreaobj:01243",
       "path":"Models/koreaobj/01243.gltf",
       "format_version":1,
-      "size_bytes":9479,
-      "sha256":"19a099fd2096f01dbbf2da1b6c174530ffcc420b4a96381c4ae54261e7665404",
-      "fnv1a_64":"30197190afd36dca",
+      "size_bytes":9227,
+      "sha256":"1b31726a31a007ee2757db6b084c3b7a9dd9deed9b115115465b8d75e0073fb2",
+      "fnv1a_64":"9714b35f3c7569f6",
       "capabilities": [
         {
           "name":"dofs",
@@ -51106,9 +51106,9 @@
       "id":"koreaobj:01244",
       "path":"Models/koreaobj/01244.gltf",
       "format_version":1,
-      "size_bytes":9475,
-      "sha256":"125d961a793b353f1bf624dd477a068f631c9067453b1ec6f70a0462a0ca67b4",
-      "fnv1a_64":"1d8fba3f4e69b52e",
+      "size_bytes":9223,
+      "sha256":"dde1b2461775cad884e465fb5257eb404a5372b9e55b44613bb8e6980431de12",
+      "fnv1a_64":"dc402647f2b03f82",
       "capabilities": [
         {
           "name":"dofs",
@@ -51147,9 +51147,9 @@
       "id":"koreaobj:01245",
       "path":"Models/koreaobj/01245.gltf",
       "format_version":1,
-      "size_bytes":11676,
-      "sha256":"58c11eba6a6477f344220665ef40cdedecff3f0e2284ef1fc44f259658b73d8c",
-      "fnv1a_64":"a42d21d077b26652",
+      "size_bytes":11640,
+      "sha256":"880a2fbe8d28251cffa5eb56c4367ef227a7325abdbf19b6c680fd6e57ee60bc",
+      "fnv1a_64":"4d03e33cdec94f40",
       "capabilities": [
         {
           "name":"dofs",
@@ -52828,9 +52828,9 @@
       "id":"koreaobj:01286",
       "path":"Models/koreaobj/01286.gltf",
       "format_version":1,
-      "size_bytes":6921,
-      "sha256":"aa743daac98b2abdfc33bbf5d544139920f06c6ffe67bfb8edb8a552978af899",
-      "fnv1a_64":"5f0a42812dfff82c",
+      "size_bytes":6741,
+      "sha256":"872696e556d61ef3a9db0ef75fa3e1098505256189f2885c590dede8f2035847",
+      "fnv1a_64":"65271dff1247c3f4",
       "capabilities": [
         {
           "name":"dofs",
@@ -52869,9 +52869,9 @@
       "id":"koreaobj:01287",
       "path":"Models/koreaobj/01287.gltf",
       "format_version":1,
-      "size_bytes":6936,
-      "sha256":"0374a4cee65632fe8aa2decc5a5a6966195d073b75d4c4453894f1f2a8d7e815",
-      "fnv1a_64":"ff67d05c96197020",
+      "size_bytes":6756,
+      "sha256":"635cadcb7aea45b19e722a08cc5d3a8d329f1b58d28ab65e76c975abb60cda47",
+      "fnv1a_64":"763d90603fc24968",
       "capabilities": [
         {
           "name":"dofs",
@@ -52951,9 +52951,9 @@
       "id":"koreaobj:01289",
       "path":"Models/koreaobj/01289.gltf",
       "format_version":1,
-      "size_bytes":6919,
-      "sha256":"629aafb38baf188548e4b413880c81480296b87251d4eb6cca52274312f19cf4",
-      "fnv1a_64":"9b29bd92a77c377b",
+      "size_bytes":6739,
+      "sha256":"a4f1f0c5473e69b92c9c4fdacd9a2cd331e2ca06695890d040d5d4abd5acb4cb",
+      "fnv1a_64":"b2e78e3355dfa673",
       "capabilities": [
         {
           "name":"dofs",
@@ -52992,9 +52992,9 @@
       "id":"koreaobj:01290",
       "path":"Models/koreaobj/01290.gltf",
       "format_version":1,
-      "size_bytes":6933,
-      "sha256":"e276e5bea43aa8b7380b0422d96dba0d9bc184664dfe67eb9d7d7642a27804dd",
-      "fnv1a_64":"70cf405b417deec2",
+      "size_bytes":6753,
+      "sha256":"291ecb6c8f1924d90121678433196bc3b285eb96163f090163a1a4afc053c5fc",
+      "fnv1a_64":"4c429d878ac30fea",
       "capabilities": [
         {
           "name":"dofs",
@@ -53033,9 +53033,9 @@
       "id":"koreaobj:01291",
       "path":"Models/koreaobj/01291.gltf",
       "format_version":1,
-      "size_bytes":6918,
-      "sha256":"77af6978bef8d56e92d7e05ec684bd5a57ad7c31690a744d625a3fe256c3fd7a",
-      "fnv1a_64":"6078ffc9e8c87199",
+      "size_bytes":6738,
+      "sha256":"1c847a2cf186b62875da66a199c74324701c97636849618aa9558f4ead883fb8",
+      "fnv1a_64":"a8a64e5ea3f9c4f1",
       "capabilities": [
         {
           "name":"dofs",
@@ -53074,9 +53074,9 @@
       "id":"koreaobj:01292",
       "path":"Models/koreaobj/01292.gltf",
       "format_version":1,
-      "size_bytes":6929,
-      "sha256":"3a244889d5cc54e627aac3ccd418e05436d4f41f67bbbbb44ef4a81b9db1a2a3",
-      "fnv1a_64":"ed54a6cf162ab245",
+      "size_bytes":6749,
+      "sha256":"2047918eb346aa63ee657a98d42be71666f5632ed27459c8e4734289567bfcbd",
+      "fnv1a_64":"6e8bce1f52d6861d",
       "capabilities": [
         {
           "name":"dofs",
@@ -53115,9 +53115,9 @@
       "id":"koreaobj:01293",
       "path":"Models/koreaobj/01293.gltf",
       "format_version":1,
-      "size_bytes":6897,
-      "sha256":"ac627f07ca85f8de71d0e5fa8e8cf8e24c22c78be7f6b05cb6d3d43ca4e9249a",
-      "fnv1a_64":"8bc85e657e764f6d",
+      "size_bytes":6717,
+      "sha256":"0f670c67642aa4236c21505bdb6759cc82ce1070c48ef83f48926115199e03b2",
+      "fnv1a_64":"1c5149844e926345",
       "capabilities": [
         {
           "name":"dofs",
@@ -53156,9 +53156,9 @@
       "id":"koreaobj:01294",
       "path":"Models/koreaobj/01294.gltf",
       "format_version":1,
-      "size_bytes":6924,
-      "sha256":"9754f0a88e69bb444f62bfc4c067d0d74c1db7662adfa338443f38fdd76f523f",
-      "fnv1a_64":"b6b38abed27dfd3d",
+      "size_bytes":6744,
+      "sha256":"6136f0d363db70a1f980228e1a9dcceab53ea881132c4fd603831e1b914f42a5",
+      "fnv1a_64":"5b58f5197f56e8f5",
       "capabilities": [
         {
           "name":"dofs",
@@ -53197,9 +53197,9 @@
       "id":"koreaobj:01295",
       "path":"Models/koreaobj/01295.gltf",
       "format_version":1,
-      "size_bytes":6890,
-      "sha256":"c217ded7ee8bbac862f1742f9bd883d2805cbda3ee1a51da80c32a38e7a79497",
-      "fnv1a_64":"cc66eb4c085e0baf",
+      "size_bytes":6710,
+      "sha256":"6b2ff94e6787a5ab85a9fb6a03cbae5883c5ef212a2e28b825cbda07b5193775",
+      "fnv1a_64":"625c92ff889deac7",
       "capabilities": [
         {
           "name":"dofs",
@@ -53238,9 +53238,9 @@
       "id":"koreaobj:01296",
       "path":"Models/koreaobj/01296.gltf",
       "format_version":1,
-      "size_bytes":6885,
-      "sha256":"c2380b1514329c33ef043cd8883f287749032ee867316140f1577b3eaa335352",
-      "fnv1a_64":"694249752d95cda8",
+      "size_bytes":6705,
+      "sha256":"3e254a124c8eb5678323898db16681b507538c8804a48586b6b44f1d18122b40",
+      "fnv1a_64":"f43d5681a7e0a870",
       "capabilities": [
         {
           "name":"dofs",
@@ -53279,9 +53279,9 @@
       "id":"koreaobj:01297",
       "path":"Models/koreaobj/01297.gltf",
       "format_version":1,
-      "size_bytes":6925,
-      "sha256":"a5f3e8138268cdac32d4bd75c1b0eac130caa4b36677be292e9547076d1cf1bc",
-      "fnv1a_64":"9f78d3747b05dbf3",
+      "size_bytes":6745,
+      "sha256":"c75a9431b09a7e181d775ae3d4e779c2b847cc128f2621781a64c981776dd43d",
+      "fnv1a_64":"bf42021755d403db",
       "capabilities": [
         {
           "name":"dofs",
@@ -53320,9 +53320,9 @@
       "id":"koreaobj:01298",
       "path":"Models/koreaobj/01298.gltf",
       "format_version":1,
-      "size_bytes":6917,
-      "sha256":"d8786f5fa386f04799794964bf3db1a737247036f97bf19d6d88ecd4044c079d",
-      "fnv1a_64":"694cbe4fa3431b99",
+      "size_bytes":6737,
+      "sha256":"3fba9f8119ff920b9d168b77da7813db2db4ee6612c6eab600138b033e90e1b8",
+      "fnv1a_64":"669cc52437367691",
       "capabilities": [
         {
           "name":"dofs",
@@ -53361,9 +53361,9 @@
       "id":"koreaobj:01299",
       "path":"Models/koreaobj/01299.gltf",
       "format_version":1,
-      "size_bytes":6873,
-      "sha256":"8ef04d8fa199c9bd37ef261a68bb6e6cec0a89f66a4bb6140de6222bac5b1d82",
-      "fnv1a_64":"6414e05ea93f88f5",
+      "size_bytes":6693,
+      "sha256":"acebf1f8b2ed7f23cee01c983c14ae9dfa3745d0dafa0c40d292c02a73377872",
+      "fnv1a_64":"13cb0cce9329710d",
       "capabilities": [
         {
           "name":"dofs",
@@ -53648,9 +53648,9 @@
       "id":"koreaobj:01306",
       "path":"Models/koreaobj/01306.gltf",
       "format_version":1,
-      "size_bytes":11817,
-      "sha256":"c2d0055b5f58dd95994040ea7d84ecbea5255bdf2d7cc12b847fde540b74ab65",
-      "fnv1a_64":"30a13de4827e1b67",
+      "size_bytes":11709,
+      "sha256":"01506f00e4e51f91e43e9453aee596f09e6acbf340893940922d2d5d95f23fe4",
+      "fnv1a_64":"ea7d832c8bb932e1",
       "capabilities": [
         {
           "name":"dofs",
@@ -53689,9 +53689,9 @@
       "id":"koreaobj:01307",
       "path":"Models/koreaobj/01307.gltf",
       "format_version":1,
-      "size_bytes":5162,
-      "sha256":"a58eb2745fae9b0e20edb114ed497c2a866f2fc552fe3e91b610512436a688e1",
-      "fnv1a_64":"9831146d0815091b",
+      "size_bytes":5090,
+      "sha256":"c3f45ac07915a7ca993cddb4ce141259ed2f443a0c984548f33fd4b72363a4a7",
+      "fnv1a_64":"8a22c27687147a97",
       "capabilities": [
         {
           "name":"dofs",
@@ -53730,9 +53730,9 @@
       "id":"koreaobj:01308",
       "path":"Models/koreaobj/01308.gltf",
       "format_version":1,
-      "size_bytes":6311,
-      "sha256":"50a85855c0e95b550ef067b045ff397245a7b4ef89e006d41365f7c3cc6e6735",
-      "fnv1a_64":"7890cb50dbcc5759",
+      "size_bytes":6203,
+      "sha256":"bf18fc8dbc3e2bfaa42af6790019801f5dbd26aa44e833164f8aad1002df5745",
+      "fnv1a_64":"2d8907ec21c9e3af",
       "capabilities": [
         {
           "name":"dofs",
@@ -53935,9 +53935,9 @@
       "id":"koreaobj:01313",
       "path":"Models/koreaobj/01313.gltf",
       "format_version":1,
-      "size_bytes":10999,
-      "sha256":"4b1b68de71f3ba82b8507884a36932b61ece3106edf38bffc356cbd761fcaaf8",
-      "fnv1a_64":"5ebd1759ea539175",
+      "size_bytes":10819,
+      "sha256":"50541385d2b5219949cb347682f8699e6cb3706feef23be6e6d25f121fdb2c49",
+      "fnv1a_64":"745f6bb643cb97e1",
       "capabilities": [
         {
           "name":"dofs",
@@ -54632,9 +54632,9 @@
       "id":"koreaobj:01331",
       "path":"Models/koreaobj/01331.gltf",
       "format_version":1,
-      "size_bytes":98254,
-      "sha256":"62570171aba4e2a8e99cc7b3c8b0b9793e54ea0152f10dcb493be8c11e71398b",
-      "fnv1a_64":"134b63a4cb0790bd",
+      "size_bytes":96628,
+      "sha256":"9fc58b2dc08ca0ba1383f5a680925214d448a38d6eb6d81449e553aa00bb15c9",
+      "fnv1a_64":"f9f8fce781945117",
       "capabilities": [
         {
           "name":"dofs",

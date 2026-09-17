@@ -665,10 +665,48 @@ TEST(HierarchyEmit, VocabTablesLoadAndCoverKeyIndices) {
 }
 
 TEST(HierarchyEmit, FamilyGuessClassifiesFixtureModels) {
-    // The F-16 (11 dofs, 7 switches, 9 slots) must classify complex.
+    // The fixture F-16 (11 dofs, 7 switches, 9 slots) must classify
+    // complex. The DOF-index set comes from the parsed BSP tree's
+    // transform nodes — the same collection the importer CLI does.
     auto db = load_db();
     const auto* rec = db->model(1);
-    EXPECT_EQ(guess_family(rec->effective_dofs(), rec->effective_switches(),
+    std::vector<int> dof_indices;
+    const auto* tree = db->bsp_tree(1, 0);
+    ASSERT_NE(tree, nullptr);
+    for (const auto& node : tree->nodes) {
+        switch (node.type) {
+            case f4::models::BspNodeType::BDofNode:
+            case f4::models::BspNodeType::BXDofNode:
+            case f4::models::BspNodeType::BTransNode:
+            case f4::models::BspNodeType::BScaleNode:
+                if (node.dof_number >= 0 &&
+                    std::find(dof_indices.begin(), dof_indices.end(),
+                              node.dof_number) == dof_indices.end()) {
+                    dof_indices.push_back(node.dof_number);
+                }
+                break;
+            default:
+                break;
+        }
+    }
+    EXPECT_EQ(guess_family(dof_indices, rec->effective_dofs(),
+                           rec->effective_switches(),
                            static_cast<int>(rec->slots.size())),
               "complex");
+}
+
+TEST(HierarchyEmit, FamilyGuessRotorPairSeparatesHelisFromRadars) {
+    // Counts alone can't tell a 2-DOF helicopter from a 2-DOF ground
+    // radar — the rotor pair (dofs 2 AND 4) does. A radar must land in
+    // airdef (its sweep binds to radar.dish_spin); a heli keeps the
+    // heli table even when it also carries an unrelated index 0.
+    EXPECT_EQ(guess_family({2, 4}, 2, 0, 0), "heli");
+    EXPECT_EQ(guess_family({0, 2, 4}, 3, 1, 0), "heli");   // heli + extra tag
+    EXPECT_EQ(guess_family({0}, 1, 0, 0), "airdef");        // radar sweep only
+    EXPECT_EQ(guess_family({0, 1}, 2, 2, 0), "airdef");     // sweep + elevation
+    EXPECT_EQ(guess_family({0, 1, 2}, 3, 3, 0), "airdef");  // + turret yaw
+    EXPECT_EQ(guess_family({2, 3}, 2, 0, 2), "simple");   // 2 slots → not heli
+    EXPECT_EQ(guess_family({0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13},
+                           14, 5, 6),
+              "complex");                                 // full aircraft
 }

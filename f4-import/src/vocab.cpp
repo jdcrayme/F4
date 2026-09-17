@@ -7,6 +7,7 @@
 
 #include <f4/json/reader.hpp>
 
+#include <algorithm>
 #include <cstdlib>
 #include <stdexcept>
 
@@ -123,24 +124,39 @@ std::map<std::string, FamilyTable> load_family_tables(
     return out;
 }
 
-std::string guess_family(int effective_dofs, int effective_switches,
+std::string guess_family(const std::vector<int>& dof_indices,
+                         int effective_dofs, int effective_switches,
                          int n_slots) {
     // FreeFalcon's model families:
-    //   helicopter models are driven through the HELI_* space and carry
-    //     few DOFs (main/tail rotor) and almost no weapon slots;
+    //   helicopter models are driven through the HELI_* space and are
+    //     identified by the ROTOR PAIR — dof 2 (HELI_MAIN_ROTOR) and
+    //     dof 4 (HELI_TAIL_ROTOR) together;
     //   simple aircraft use the SIMP_* space (≤ ~24 DOFs, few slots);
     //   complex aircraft use the COMP_* space (airbrake stacks, gear
     //     stacks, weapon bays — many DOFs and many slots);
-    //   air-defense/ground units use the AIRDEF_* space (sweep/elevation
-    //     DOFs, no weapon-slot racks).
+    //   air-defense/ground units use the AIRDEF_* space (radar sweep =
+    //     dof 0, elevation/turret DOFs, no weapon-slot racks).
+    //
+    // Counts alone can't separate a 2-DOF helicopter from a 2-DOF radar
+    // — the rotor pair can. Getting this wrong flips which family table
+    // applies: a radar classified heli loses its sweep binding, a heli
+    // classified airdef loses its rotors.
     //
     // The guess is advisory: it only decides which rename table to
     // apply, and unmapped indices always degrade to unknown.N. A wrong
     // guess costs nothing structural.
     (void)effective_switches;
-    if (effective_dofs <= 6 && n_slots <= 1) return "heli";
+
+    const bool has_rotor_pair =
+        std::find(dof_indices.begin(), dof_indices.end(), 2) !=
+            dof_indices.end() &&
+        std::find(dof_indices.begin(), dof_indices.end(), 4) !=
+            dof_indices.end();
+    const int n = static_cast<int>(dof_indices.size());
+
+    if (has_rotor_pair && n <= 6 && n_slots <= 1) return "heli";
     if (effective_dofs >= 10 && n_slots >= 4) return "complex";
-    if (effective_dofs <= 8 && n_slots == 0) return "airdef";
+    if (!has_rotor_pair && n <= 8 && n_slots == 0) return "airdef";
     return "simple";
 }
 
