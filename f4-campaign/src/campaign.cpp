@@ -85,6 +85,7 @@ Campaign::Campaign(const f4::world::ICampaignSource& camp,
         // truth — CampaignConfig::unit_strike).
         AtmConfig atm_cfg = cfg_.atm;
         atm_cfg.unit_strike = cfg_.unit_strike;
+        atm_cfg.strategy = cfg_.strategy_layer;
         atm_ = std::make_unique<AirTaskingManager>(
             profiles_, camp_, teams_, units_, nullptr, atm_cfg);
         atm_->set_id_base(cfg_.first_package_id);
@@ -494,9 +495,23 @@ void Campaign::run_tasking_cycle_atm_() {
         // order, so a simple by-package cache suffices.
         std::unordered_map<std::uint32_t, std::vector<RouteWaypoint>>
             package_routes;
+        // P7 — the support filings' OWN station routes (per flight —
+        // the orbit objective is the flight's, not the package's; the
+        // package key would collide with the main's route).
+        std::unordered_map<std::uint32_t, std::vector<RouteWaypoint>>
+            support_routes;
 
         for (auto& ft : flights) {
             const auto& profile = profiles_.for_mission(ft.mission);
+
+            // P7 — the loiter-station shape: TPROF_LOITER profiles
+            // with a station target fly the racetrack circuit (only
+            // when the strategy arm is on — the pre-strategy shape
+            // gives them no route at all).
+            const bool loiter_station =
+                cfg_.strategy_layer &&
+                profile.target_profile == "TPROF_LOITER" &&
+                profile.loitertime > 0;
 
             // PHASE 6 — the route (the C3 builder, now package-aware):
             // the MAIN flight's build is the package's route — the
@@ -506,15 +521,36 @@ void Campaign::run_tasking_cycle_atm_() {
             // G2: the unit-delivery family (CAS) routes too when the
             // interdiction arm is on — the builder resolves the
             // battalion's grid position.
+            // P7: the loiter family (stationed CAPs) routes under the
+            // strategy arm; Support-role flights build their OWN
+            // station route (never the package's).
             if (route_planner_ != nullptr && ft.role == FlightRole::Main &&
                 ft.airbase_vu != 0 && ft.target_vu != 0 &&
                 (profile_flies_delivery_route(profile) ||
                  (cfg_.unit_strike &&
-                  profile_flies_unit_delivery_route(profile)))) {
+                  profile_flies_unit_delivery_route(profile)) ||
+                 loiter_station)) {
                 const auto rb = route_planner_->build(
                     team, profile, ft.airbase_vu, ft.target_vu);
                 if (rb.waypoints.size() >= 2) {
                     package_routes[ft.package_id] = rb.waypoints;
+                    ++routes_built_;
+                    if (rb.safe_path_searched) ++route_safe_searches_;
+                    if (rb.direct_fallback) ++route_fallbacks_;
+                } else {
+                    ++routes_failed_;
+                }
+            } else if (route_planner_ != nullptr && cfg_.strategy_layer &&
+                       ft.role == FlightRole::Support &&
+                       ft.airbase_vu != 0 && ft.target_vu != 0 &&
+                       loiter_station) {
+                // P7 — the support filing's OWN station route: the
+                // racetrack over its station objective (never the
+                // package's route — the orbit parks elsewhere).
+                const auto rb = route_planner_->build(
+                    team, profile, ft.airbase_vu, ft.target_vu);
+                if (rb.waypoints.size() >= 2) {
+                    support_routes[ft.flight_id] = rb.waypoints;
                     ++routes_built_;
                     if (rb.safe_path_searched) ++route_safe_searches_;
                     if (rb.direct_fallback) ++route_fallbacks_;
@@ -548,14 +584,24 @@ void Campaign::run_tasking_cycle_atm_() {
             intent.target_objective_id = ft.target_vu;
             intent.flight_role = static_cast<std::uint8_t>(ft.role);
             intent.escorted_flight_id = ft.escorted_flight_id;
+            intent.roe = ft.roe;   // P7 — the flight's RoE byte
 
             // The route: the package's copy (main built it; escorts
-            // carry the same shape with their own TOT).
+            // carry the same shape with their own TOT). P7: support
+            // flights carry their own station route.
             if (route_planner_ != nullptr) {
-                const auto it = package_routes.find(ft.package_id);
-                if (it != package_routes.end()) {
-                    intent.route = it->second;
-                    intent.synthetic = true;
+                if (ft.role == FlightRole::Support) {
+                    const auto sit = support_routes.find(ft.flight_id);
+                    if (sit != support_routes.end()) {
+                        intent.route = sit->second;
+                        intent.synthetic = true;
+                    }
+                } else {
+                    const auto it = package_routes.find(ft.package_id);
+                    if (it != package_routes.end()) {
+                        intent.route = it->second;
+                        intent.synthetic = true;
+                    }
                 }
             }
 
@@ -648,6 +694,18 @@ std::string Campaign::to_summary_json() const {
         w.number_key("recoveries", a.recoveries);
         w.put(",\n    ");
         w.number_key("aircraft_recovered", a.aircraft_recovered);
+        // P7: the strategy layer's counters — only when the arm is on
+        // (the pre-strategy block stays byte-identical).
+        if (cfg_.strategy_layer) {
+            w.put(",\n    ");
+            w.number_key("stations_targeted", a.stations_targeted);
+            w.put(",\n    ");
+            w.number_key("supports_filed", a.supports_filed);
+            w.put(",\n    ");
+            w.number_key("supports_shared", a.supports_shared);
+            w.put(",\n    ");
+            w.number_key("enemy_caps_filed", a.enemy_caps_filed);
+        }
         w.put("\n  }");
     }
 

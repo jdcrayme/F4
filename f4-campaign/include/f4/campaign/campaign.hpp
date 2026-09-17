@@ -136,6 +136,13 @@ struct MissionIntent {
     std::uint8_t flight_role{0};   ///< FlightRole (0 = main)
     std::uint32_t escorted_flight_id{0};  ///< the main flight (0 = main)
 
+    /// P7 — the flight's Rules of Engagement (the wire roe_check byte
+    /// the request carried; 0 = weapons free, the default on every
+    /// pre-P7 intent). The spawner records it per spawned flight; the
+    /// session gates the brain's fire controls with it after arming
+    /// (WeaponsTight → BVR hold, WeaponsHold → everything held).
+    std::uint8_t roe{0};
+
     /// Element-wise equality (tests assert bus content == recorded intents).
     bool operator==(const MissionIntent&) const = default;
 };
@@ -202,6 +209,20 @@ struct CampaignConfig {
     /// route-less, exactly the C3-documented deferral). One flag for
     /// both ladders (the ATM's config inherits it at construction).
     bool unit_strike{false};
+
+    /// P7 — the strategy layer: the ATM gains CAP-family station
+    /// targeting (defensive CAPs orbit ranked OWN objectives, not
+    /// target-less), FindSupportFlights (ADDAWACS/ADDTANKER/ADDECM
+    /// share-or-file — AWACS/tanker/ECM stations flying the
+    /// TPROF_LOITER racetrack routes), and RequestEnemyMission (a
+    /// strike package's ADDBARCAP files a defender BARCAP over the
+    /// threatened objective for the enemy's next cycle); the route
+    /// builder gains the loiter racetrack circuits; the intents carry
+    /// RoE. DEFAULT OFF — the golden identity (target-less CAP,
+    /// package-only routes, no filings; every pinned test unchanged).
+    /// Requires atm_pipeline (the legacy ladder has no strategy
+    /// layer); hosts arm both.
+    bool strategy_layer{false};
 };
 
 class Campaign {

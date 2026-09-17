@@ -87,6 +87,13 @@ struct VisualModelComponent : entities::Component<VisualModelComponent> {
     /// commands them. Hosts staging aircraft on the ground should apply
     /// set_parked_defaults() at spawn.
     f4::anim::AnimValues anim_values{};
+
+    /// ANIM spinners: false until the rig's spinner pass seeds the
+    /// continuous-rotation channels (rotors, radar dishes) with this
+    /// entity's deterministic phase, so formations and radar sites
+    /// don't spin in lockstep. Nothing should write this flag except
+    /// the spinner pass.
+    bool spinners_seeded{false};
 };
 
 } // namespace f4::simulation

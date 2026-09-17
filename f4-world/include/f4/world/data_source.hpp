@@ -132,6 +132,16 @@ struct AtmRequestState {
     int32_t priority = 0;     ///< the strategy layer's own score
     uint32_t target_num = 0;  ///< target entity VU_ID.num (0 = location)
     uint32_t requester_num = 0;  ///< requesting entity VU_ID.num
+
+    // P7 — the request's strategy-layer residue, now carried instead
+    // of skipped: the ACTION-system context bytes and the request's
+    // Rules-of-Engagement check (the wire roe_check byte, passed
+    // through verbatim — 0 = the unrestricted default on every
+    // pre-P7 record). All default-zero: sources whose JSON predates
+    // the fields decode identically.
+    uint8_t action_type = 0;  ///< the filing ACTION's type byte
+    uint8_t context = 0;      ///< the filing ACTION's context byte
+    uint8_t roe_check = 0;    ///< the request's RoE (0 = weapons free)
 };
 
 struct ITeamSource {

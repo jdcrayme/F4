@@ -1,7 +1,9 @@
 {
   "f4": { "v": 1 },
   "family": "airdef",
-  "doc": "Air-defense / ground-unit family mapping from FreeFalcon's AIRDEF_* indices (src/sim/include/dofsnswitches.h). Radar sweep and turret DOFs (0..5) are reserved for the ground-unit rig; they stay unmapped here until that rig exists, so ground models currently export with unknown.N tags.",
-  "dof": {},
+  "doc": "Air-defense / ground-unit family mapping from FreeFalcon's AIRDEF_* indices (src/sim/include/dofsnswitches.h). Index 0 is the radar dish sweep — carried by every air-defense model and bound to the continuous radar.dish_spin channel (driven by the rig's spinner pass). The remaining indices (1..5: dish elevation, turret yaw/pitch) stay unmapped until that part of the ground-unit rig exists, so they export as unknown.N tags.",
+  "dof": {
+    "0": { "id": "radar_sweep", "channel": "radar.dish_spin" }
+  },
   "sw": {}
 }

@@ -119,6 +119,13 @@ bool anim_part_visible(const f4::renderer::RuntimeModel& model,
 }
 
 /// Compose a part's full node-chain matrix (identity for empty chains).
+///
+/// Composition ORDER: outermost chain node pushed first with
+/// m = m·local, giving M_o·M_m·…·M_i — the innermost frame is applied
+/// to the vertex first, matching the flat extractor's accumulated
+/// transform stack (compose(accum, local) — first-pushed outermost in
+/// application). Verified by the rest-pose parity tests: nested-DOF
+/// chains (F-16 gear assemblies) reproduce the flat bake to 0.0 m.
 Matrix anim_part_matrix(const f4::renderer::RuntimeModel& model,
                         const f4::renderer::RuntimePart& part,
                         const f4::anim::AnimValues* anim) {

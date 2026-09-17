@@ -11477,3 +11477,67 @@ seeker_source hook + the radar burn-through take it without API
 change); throttle-driven ir_power (the signature component is
 already shaped for it); VCD countermeasure counts (the Tier-3
 full-data pass replaces the documented defaults).
+
+---
+
+## P7 — the ATM strategy layer (2026-09-16)
+
+Base: c6a50df (P6 landed). Suite at start: 2,617/2,617. The standing
+queue's named item: "the ATM strategy layer (support-flight racetracks,
+GetPriority/ACTION, enemy-requested BARCAP/SWEEP)" — Docs/CAMPAIGN_LOOP
+_PLAN.md §7.
+
+Explored the strategy delta first (the C4 pipeline exists; the filing
+side was the gap): the request-filing strategy layer, the loiter
+racetrack pattern (route_builder.hpp's "the repeat pattern is the loiter
+tranche" — documented since C3), FindSupportFlights, RequestEnemyMission,
+and the campaign RoE vocabulary.
+
+Landed, ONE flag (`CampaignConfig::strategy_layer`, default OFF; the
+golden identity discipline — every pre-strategy pinned test unchanged):
+
+- **RouteBuilder racetrack** (f4-campaign): `loiter_racetracks` config +
+  `RouteWaypoint::station_time_s`/`loop_waypoints`; TPROF_LOITER routes
+  emit anchor (the target WP with the station contract) + 3
+  TURNPOINT-protected corners; WP_ORBIT rides the WP_CAP action byte.
+- **NavigationModule station hold** (f4-ai): the AI plan's deferred rung
+  17 — one-shot timer + span loop (wrap at the span's last corner,
+  release out of it); no new fsm state; `holding_station()` /
+  `station_elapsed_s()`; set_route resets; 0-contract routes identical.
+- **ATM strategy** (f4-campaign): `own_objectives_` ranking +
+  `station_cursor_` (CAP-family station targeting);
+  `file_support_flight_` (share-or-file; `FlightRole::Support = 3`;
+  stations = nearest own objective; support routes built per flight —
+  never the package's; the support profile's ADDESCORT pairs onto the
+  station); `file_enemy_barcap_` (RequestEnemyMission: pending queue,
+  dedup, cap 4, next-cycle pickup, `enemy_filed` flag); AtmStats gains
+  stations_targeted/supports_filed/supports_shared/enemy_caps_filed.
+- **Campaign**: strategy_layer → AtmConfig + the route phase's loiter
+  family + Support-role own routes (flight-id keyed); MissionIntent.roe.
+- **f4-world**: AtmRequestState gains action_type/context/roe_check
+  (reader stops skipping; the converter emits roe_check; Data/
+  manifests untouched — no committed world carries teams).
+- **f4-simulation**: the bridge copies the station contract into the
+  brain's plan; the spawner records per-flight roe;
+  `Simulation::apply_flight_roe` (post-arm: TIGHT = BVR suppressed,
+  HOLD = everything); the session's adopt cadence applies it;
+  `campaign_qc --strategy` (+ the strategy counters, exit gate 17).
+- **Fixture**: `kunsan_strategy.world.json` — the routed session fixture
+  with squadron 4041 re-owned to the ROK (the honest garrison of its
+  airbase), so a belligerent fields a based squadron.
+
+QC acceptance (TestCamp, `--tasking 240 --max-flights 96 --strategy`):
+strategy stations=96 supports=85 shared=115 enemy_caps=48, routes=434
+(wps=2401), exit 0. The strategy arm spawns the stationed CAPs/supports
+the pre-strategy shape skipped (route-less CAPs never spawned) — hosts
+bound the fleet with --max-flights; the uncapped scaling pass is the
+Tier-3 full-data item.
+
+Tests: NavigationStationHold ×4, RouteBuilder racetrack ×3, AtmStrategy
+×9, the strategy sim layer ×6 (the plan-ride pair, the post-arm RoE
+pair, the session pair). Suite at finish: 2,639/2,639.
+
+Queue: the ACTION tables' contextual filings (the objective-damage-driven
+requests), GetPriority's PO/package terms, the campaign RoE doctrine
+(per-team editing + the 32000 overfly walls), SWEEP station lines,
+tanker waypoints, the full-data conversion pass.

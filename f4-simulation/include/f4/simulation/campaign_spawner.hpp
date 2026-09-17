@@ -160,6 +160,15 @@ public:
 
     [[nodiscard]] const Stats& stats() const noexcept { return stats_; }
 
+    /// P7 — a spawned flight's RoE byte (the intent's roe_check
+    /// carry; 0 = weapons free, the default on every flight spawned
+    /// before the field existed). The session applies the gates after
+    /// arming. Returns 0 when the flight id is unknown.
+    [[nodiscard]] std::uint8_t flight_roe(std::uint32_t flight_id) const {
+        const auto it = spawned_flight_roe_.find(flight_id);
+        return it != spawned_flight_roe_.end() ? it->second : 0;
+    }
+
 private:
     f4::entities::EntityWorld& world_;
     std::unordered_map<std::uint32_t, f4::entities::EntityId> unit_id_map_;
@@ -183,6 +192,9 @@ private:
     std::unordered_map<std::uint64_t, int> per_airbase_index_;
     /// flight VU_ID.nums already materialized (duplicate guard).
     std::unordered_set<std::uint32_t> spawned_flight_ids_;
+    /// P7 — per-flight RoE byte (the intent's carry, applied by the
+    /// session after the combat arm).
+    std::unordered_map<std::uint32_t, std::uint8_t> spawned_flight_roe_;
 
     /// FID-5: the synthetic-deferral arm (see set_synthetic_deferred).
     bool synthetic_deferred_ = false;

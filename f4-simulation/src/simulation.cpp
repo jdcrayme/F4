@@ -547,6 +547,27 @@ bool Simulation::arm_campaign_aircraft(entities::EntityId id) {
     return true;
 }
 
+void Simulation::apply_flight_roe(entities::EntityId id, std::uint8_t roe) {
+    // P7 — the flight's RoE on top of the armed doctrine (see the
+    // header's contract). The wire roe_check vocabulary: 0 = weapons
+    // free (no change), 1 = weapons tight (BVR suppressed), 2 =
+    // weapons hold (everything tight).
+    if (!id.valid() || roe == 0) return;
+    entities::EntityHandle h(id, &world_);
+    auto* brain = h.get<f4::ai::BrainComponent>();
+    if (brain == nullptr) return;
+    if (roe == 1) {
+        brain->set_bvr_hold(true);
+        brain->bvr().fire().config().hold_fire = true;
+    } else if (roe == 2) {
+        brain->set_hold_fire(true);
+        brain->set_bvr_hold(true);
+        brain->bvr().fire().config().hold_fire = true;
+        brain->wvr().fire().config().hold_fire = true;
+        brain->wvr().guns().config().hold_fire = true;
+    }
+}
+
 void Simulation::spawn_from_scenario_list() {
     using namespace f4::entities;
     using namespace f4::flight;
@@ -2061,6 +2082,68 @@ void Simulation::tick(double dt) {
             const auto gear_cmd = f4::anim::eval_gear(
                 s.aero.gearPos, nullptr, anim_params);
             f4::anim::apply_gear_command(gear_cmd, vis->anim_values);
+
+            // At either REST state the gear DOF angles return to the
+            // model's authored rest pose (the ground truth every other
+            // view — models-viewer, the flat exports — renders): the
+            // sequencer's transit fractions would otherwise park the
+            // gear at full deflection even sitting on the ramp. Switch
+            // visibility above still gates the variants (down shows the
+            // gear, up hides it). Angles deflect only in transit.
+            if (s.aero.gearPos <= 0.001f || s.aero.gearPos >= 0.999f) {
+                for (uint16_t i = 0; i < f4::anim::kGearStations; ++i) {
+                    vis->anim_values[static_cast<f4::anim::Channel>(
+                        static_cast<uint16_t>(f4::anim::Channel::gear_leg_pos_0) + i)] = 0.0f;
+                    vis->anim_values[static_cast<f4::anim::Channel>(
+                        static_cast<uint16_t>(f4::anim::Channel::gear_door_pos_0) + i)] = 0.0f;
+                }
+            }
+        }
+    }
+
+    // ANIM spinners: continuous rotation channels (helicopter rotors,
+    // radar dishes — AWACS radomes, ground air-defense sweeps) on EVERY
+    // visual entity: aircraft, deaggregated ground vehicles, and base
+    // features. Presentation-only — the angles live in the entity's
+    // anim_values, integrate with sim dt (pause and campaign speed come
+    // along for free) and wrap at 2π. Models without these channels
+    // bound simply ignore the values, so one pass covers the whole
+    // world. Dormant airframes (parked inventory, engines cold) hold
+    // their seeded angle instead of spinning.
+    {
+        constexpr float kRotorMainRate = 30.0f;   // ~4.8 rev/s
+        constexpr float kRotorTailRate = 120.0f;  // tail runs ~4x the head
+        constexpr float kRadarDishRate = 0.7f;    // ~9 s per revolution
+        for (auto& [spinner_eid, spinner_vis] :
+             world_.with_component_ref<VisualModelComponent>()) {
+            if (!spinner_vis) continue;
+            if (!spinner_vis->spinners_seeded) {
+                // Deterministic per-entity phase (entity id) — a
+                // formation of helis or a base full of radars must not
+                // spin in lockstep.
+                const uint64_t raw = spinner_eid.value;
+                f4::anim::seed_spinners(
+                    static_cast<uint32_t>(raw ^ (raw >> 32)),
+                    spinner_vis->anim_values);
+                spinner_vis->spinners_seeded = true;
+            }
+            // Cold airframes hold their phase; everything with power
+            // (live aircraft, ground units, features) integrates.
+            bool powered = true;
+            if (auto* fm = entities::EntityHandle(spinner_eid, &world_)
+                               .get<f4::flight::FlightModelComponent>()) {
+                powered = !fm->is_dormant();
+            }
+            if (!powered) continue;
+            f4::anim::integrate_spinner(f4::anim::Channel::rotor_main,
+                                        kRotorMainRate, dt,
+                                        spinner_vis->anim_values);
+            f4::anim::integrate_spinner(f4::anim::Channel::rotor_tail,
+                                        kRotorTailRate, dt,
+                                        spinner_vis->anim_values);
+            f4::anim::integrate_spinner(f4::anim::Channel::radar_dish_spin,
+                                        kRadarDishRate, dt,
+                                        spinner_vis->anim_values);
         }
     }
     const auto prof_t6 = g_prof.on ? std::chrono::steady_clock::now()

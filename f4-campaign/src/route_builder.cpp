@@ -65,6 +65,11 @@ std::uint8_t target_action_for(const MissionProfile& profile) {
     if (s == "WP_SEAD")     return 19;
     if (s == "WP_SAD")      return 16;
     if (s == "WP_CAP")      return 12;
+    // P7 — the support family's orbit hold rides the WP_CAP action
+    // byte: the racetrack IS the orbit (the sim's nav treats 12 as a
+    // plain station waypoint; no separate wire action exists for it
+    // in the decoded vocabulary).
+    if (s == "WP_ORBIT")    return 12;
     if (s == "WP_INTERCEPT") return 13;
     if (s == "WP_RECON")    return 21;
     if (s == "WP_ELINT")    return 20;
@@ -231,9 +236,67 @@ RouteBuildResult RouteBuilder::build(std::uint8_t team,
             wps.push_back(tpw);
             px = tp.first;
             py = tp.second;
+        } else if (profile.target_profile == "TPROF_LOITER" &&
+                   cfg_.loiter_racetracks && profile.loitertime > 0) {
+            // P7 — the strategy tranche's racetrack: a CLOSED circuit
+            // anchored at the target (see route_builder.hpp's header
+            // doc). The anchor IS the profile's target WP — same
+            // action byte, same kWpfTarget flag, same target_num —
+            // plus the station-hold contract the sim's
+            // NavigationModule executes (loop the following
+            // loop_waypoints until station_time_s elapses). The long
+            // leg runs ALONG the inbound course; corners turn right
+            // (the grid frame's y-down right-hand perpendicular —
+            // deterministic, documented). Corners carry
+            // WPF_TURNPOINT so the eliminator's WP_NOTHING cuts can
+            // never break the box.
+            const int L = std::max(2, cfg_.racetrack_length_grid);
+            const int W = std::max(2, cfg_.racetrack_width_grid);
+            double dx = static_cast<double>(tx) - px;
+            double dy = static_cast<double>(ty) - py;
+            const double len = std::sqrt(dx * dx + dy * dy);
+            double ux = 0.0, uy = 1.0;   // degenerate arrival: fly south
+            if (len > 1.0) {
+                ux = dx / len;
+                uy = dy / len;
+            }
+            // Right of the course in the y-down grid frame.
+            const double rx = -uy, ry = ux;
+            auto corner = [&](double cx, double cy) {
+                RouteWaypoint w;
+                w.x = static_cast<std::int16_t>(std::lround(cx));
+                w.y = static_cast<std::int16_t>(std::lround(cy));
+                w.altitude_ft = mission_alt;
+                w.action = kWpNothing;
+                w.flags = kWpfTurnPoint;   // critical — never eliminated
+                wps.push_back(w);
+                ++result.racetrack_corners;
+            };
+            // The anchor FIRST (the ingress flows into it), then the
+            // three corners: the route's hold-loop span is
+            // [anchor, c1, c2, c3] — the sim-side hold wraps c3 back
+            // to the anchor while the station timer runs, and departs
+            // from c3 (egress) when it expires.
+            RouteWaypoint tw;
+            tw.x = static_cast<std::int16_t>(tx);
+            tw.y = static_cast<std::int16_t>(ty);
+            tw.altitude_ft = mission_alt;
+            tw.action = target_action_for(profile);
+            tw.flags = kWpfTarget;
+            tw.target_num = target_vu;
+            tw.station_time_s = static_cast<std::int32_t>(
+                profile.loitertime) * 60;
+            tw.loop_waypoints = 4;
+            wps.push_back(tw);
+            corner(tx + ux * L, ty + uy * L);                     // c1
+            corner(tx + ux * L + rx * W, ty + uy * L + ry * W);   // c2
+            corner(tx + rx * W, ty + ry * W);                     // c3
+            px = static_cast<int>(wps.back().x);
+            py = static_cast<int>(wps.back().y);
         } else {
-            // TPROF_LOITER and the rest: the target WP only (the
-            // racetrack patterns are the loiter tranche).
+            // TPROF_LOITER with the pattern disarmed (the pre-strategy
+            // default — the golden identity) and every other profile:
+            // the target WP only.
             RouteWaypoint tw;
             tw.x = static_cast<std::int16_t>(tx);
             tw.y = static_cast<std::int16_t>(ty);

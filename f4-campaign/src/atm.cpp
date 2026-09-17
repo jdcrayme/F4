@@ -305,6 +305,10 @@ void AirTaskingManager::seed_backlog_() {
             req.aircraft = wreq.aircraft;
             req.seeded = true;
             req.tot_type = TotType::LE;
+            // P7 — the request's own RoE (the wire roe_check byte,
+            // carried verbatim; 0 = weapons free on every record that
+            // predates the field).
+            req.roe = wreq.roe_check;
 
             const CampaignTime rel = wreq.tot - epoch_;
             if (rel < 0) {
@@ -354,6 +358,22 @@ AirTaskingManager::generate_requests(std::uint8_t team, CampaignTime now) {
         out = std::move(keep);
     }
 
+    // P7 — the strategy layer's RequestEnemyMission filings (a strike
+    // package's ADDBARCAP filed these for THIS team's last cycle's
+    // compose). They ride ahead of the ladder walk — the defender
+    // responds to the threat before its own routine tasking. A filing
+    // whose window slipped gets one 30-minute push (the reference's
+    // delay arithmetic, one push — these are fresh, not backlog
+    // survivors).
+    {
+        auto& pending = pending_enemy_[team];
+        for (auto& preq : pending) {
+            if (preq.tot < now) preq.tot = now + 1800;
+            out.push_back(std::move(preq));
+        }
+        pending.clear();
+    }
+
     // The profile ladder (the C3 walk, now emitting requests): wire
     // byte order, capability + mission-priority gating, deterministic
     // target rotation for the delivery family.
@@ -375,6 +395,16 @@ AirTaskingManager::generate_requests(std::uint8_t team, CampaignTime now) {
             unit_targets = f4::campaign::rank_battalion_targets(
                 units_, teams_, front, team, ledger_);
         }
+    }
+
+    // P7 — the CAP family's station pool: the team's own objectives,
+    // value-ranked (the defensive CAP orbit flies over what the team
+    // values — the reference's strategy layer files its BARCAPs
+    // against the same picture). Computed once per call, only when
+    // the strategy arm is on (the golden identity never walks it).
+    std::vector<std::uint32_t> own_stations;
+    if (cfg_.strategy && objectives_ != nullptr) {
+        own_stations = own_objectives_(team);
     }
 
     // The mission-priority table's presence: the emission writes the
@@ -449,6 +479,24 @@ AirTaskingManager::generate_requests(std::uint8_t team, CampaignTime now) {
             unit_target_cursor_[team] =
                 (unit_target_cursor_[team] + 1) %
                 static_cast<int>(unit_targets.size());
+        }
+
+        // P7 — the CAP family: TPROF_LOITER + WP_CAP profiles (BARCAP,
+        // TARCAP, ALERT...) station over a ranked OWN objective — the
+        // rotation cursor spreads successive CAPs across the value
+        // list (one station per request, deterministic). Off (or no
+        // own objectives): target-less, exactly the C4 shape.
+        if (cfg_.strategy && !own_stations.empty() &&
+            profile.target_profile == "TPROF_LOITER" &&
+            profile.targetwp == "WP_CAP") {
+            const auto idx = static_cast<std::size_t>(
+                                 station_cursor_[team]) %
+                             own_stations.size();
+            req.target_id = own_stations[idx];
+            station_cursor_[team] =
+                (station_cursor_[team] + 1) %
+                static_cast<int>(own_stations.size());
+            ++stats_.stations_targeted;
         }
 
         req.priority = request_priority_(team, profile, req.target_id);
@@ -686,6 +734,7 @@ AirTaskingManager::compose_packages(
         main.flight_id = next_flight_id_++;
         main.role = FlightRole::Main;
         main.separation_sec = 0;
+        main.roe = req.roe;   // P7 — the request's RoE rides the flight
 
         // Takeoff estimate: TOT − travel (the reference's FindBestAir
         // arithmetic — the distance/speed estimate, not the route; the
@@ -748,6 +797,30 @@ AirTaskingManager::compose_packages(
                 ++stats_.escorts_built;
             }
         }
+
+        // --- P7 — the strategy layer (all of it deterministic, all of
+        // it behind cfg_.strategy) --------------------------------
+        if (cfg_.strategy) {
+            // FindSupportFlights: the ADDAWACS/ADDTANKER/ADDECM flags
+            // share-or-file the support family over the package's
+            // target area (AWACS/tanker/ECM racetrack stations). The
+            // support-flight routes are the TPROF_LOITER racetracks —
+            // the Campaign builds them per flight (role Support).
+            file_support_flight_(flights, main, "ADDAWACS", "AMIS_AWACS",
+                                 team, now, package_id);
+            file_support_flight_(flights, main, "ADDTANKER", "AMIS_TANKER",
+                                 team, now, package_id);
+            file_support_flight_(flights, main, "ADDECM", "AMIS_ECM",
+                                 team, now, package_id);
+
+            // RequestEnemyMission: a delivery package over an enemy
+            // objective prompts the DEFENDER — a BARCAP files for the
+            // defender's next cycle (the pending queue).
+            if (profile_flies_delivery_route(profile) &&
+                req.target_id != 0) {
+                file_enemy_barcap_(team, req.target_id, now);
+            }
+        }
     }
     return flights;
 }
@@ -756,16 +829,19 @@ bool AirTaskingManager::build_support_flight_(
         FlightTasking& out, std::uint8_t team, CampaignTime now,
         std::uint32_t package_id, const FlightTasking& main,
         std::string_view support_name, int aircraft,
-        const SquadronState* main_sq) {
+        const SquadronState* main_sq, std::uint32_t target_vu_override) {
     const auto& sprof = profiles_.for_name(support_name);
 
-    // The support request: same target, TOT = main TOT + separation
-    // (the reference's separation arithmetic — package.cpp's
-    // "newmis.tot = mis_request.tot + separation").
+    // The support request: the package target (or the P7 station
+    // override — the support filings orbit their OWN station), TOT =
+    // main TOT + separation (the reference's separation arithmetic —
+    // package.cpp's "newmis.tot = mis_request.tot + separation").
+    const std::uint32_t station_vu =
+        target_vu_override != 0 ? target_vu_override : main.target_vu;
     MissionRequest sreq;
     sreq.mission = sprof.mission_byte;
     sreq.team = team;
-    sreq.target_id = main.target_vu;
+    sreq.target_id = station_vu;
     sreq.priority = 100;   // support parity: high enough to clear
                            // the lowestScore gate (the reference files
                            // its support requests at priority 0 but
@@ -787,7 +863,7 @@ bool AirTaskingManager::build_support_flight_(
     out.squadron_vu = pick.squadron->vu;
     out.squadron_name = pick.squadron->name;
     out.airbase_vu = pick.squadron->airbase;
-    out.target_vu = main.target_vu;
+    out.target_vu = station_vu;
     out.aircraft = sreq.aircraft;
     out.tot = sreq.tot;
     out.takeoff = out.tot - pick.travel_sec;
@@ -1067,6 +1143,194 @@ AirTaskingManager::recover_completed(CampaignTime now) {
     }
     booked_ = std::move(still);
     return out;
+}
+
+// ============================================================================
+// P7 — the strategy layer (own_objectives_ / nearest_own_objective_ /
+//      file_enemy_barcap_ / file_support_flight_)
+// ============================================================================
+
+std::vector<std::uint32_t>
+AirTaskingManager::own_objectives_(std::uint8_t team) const {
+    // The team's own objectives, value-ranked: the same arithmetic the
+    // target term of request_priority_ uses (objtype_priority/2 +
+    // the objective's own priority scaling), stable in wire order.
+    std::vector<std::uint32_t> out;
+    if (objectives_ == nullptr) return out;
+    struct Entry {
+        std::uint32_t vu;
+        int score;
+    };
+    std::vector<Entry> entries;
+    for (int i = 0; i < objectives_->objective_count(); ++i) {
+        if (objectives_->owner(i) != team) continue;
+        int ot_prio = 0;
+        for (int t = 0; t < teams_.team_count(); ++t) {
+            if (teams_.slot(t) != static_cast<int>(team)) continue;
+            ot_prio = teams_.objtype_priority(
+                t, static_cast<int>(objectives_->objective_type(i)));
+            break;
+        }
+        int score = ot_prio / 2;
+        score += (score * static_cast<int>(objectives_->priority(i))) / 100;
+        entries.push_back({objectives_->id_num(i), score});
+    }
+    std::stable_sort(entries.begin(), entries.end(),
+                     [](const Entry& a, const Entry& b) {
+                         return a.score > b.score;   // wire-order ties
+                     });
+    out.reserve(entries.size());
+    for (const auto& e : entries) out.push_back(e.vu);
+    return out;
+}
+
+std::uint32_t AirTaskingManager::nearest_own_objective_(
+        std::uint8_t team, int x, int y) const {
+    if (objectives_ == nullptr) return 0;
+    std::uint32_t best_vu = 0;
+    long long best_d2 = 0;
+    for (int i = 0; i < objectives_->objective_count(); ++i) {
+        if (objectives_->owner(i) != team) continue;
+        const long long dx = objectives_->x(i) - x;
+        const long long dy = objectives_->y(i) - y;
+        const long long d2 = dx * dx + dy * dy;
+        // Strict less-than keeps wire order on ties.
+        if (best_vu == 0 || d2 < best_d2) {
+            best_vu = objectives_->id_num(i);
+            best_d2 = d2;
+        }
+    }
+    return best_vu;
+}
+
+void AirTaskingManager::file_enemy_barcap_(
+        std::uint8_t attacker_team, std::uint32_t target_vu,
+        CampaignTime now) {
+    // RequestEnemyMission's deterministic subset: the threatened
+    // objective gets a DEFENDER BARCAP request for the other
+    // belligerent's next cycle. Dedup (one identical pending) + cap
+    // (max_pending_enemy_requests) keep the queue bounded; no
+    // belligerent pair (peace / odd worlds) files nothing.
+    const auto barcap = mission_type_byte("AMIS_BARCAP");
+    if (!barcap || target_vu == 0 || objectives_ == nullptr) return;
+    const auto pair = f4::campaign::belligerent_pair(teams_);
+    if (pair.size() != 2) return;
+    const std::uint8_t defender =
+        pair[0] == attacker_team ? pair[1] : pair[0];
+    if (defender >= 8) return;   // the pending queues are slot-indexed
+    auto& queue = pending_enemy_[defender];
+    for (const auto& r : queue) {
+        if (r.mission == *barcap && r.target_id == target_vu) return;
+    }
+    if (static_cast<int>(queue.size()) >=
+        std::max(1, cfg_.max_pending_enemy_requests)) {
+        return;
+    }
+    const auto& profile = profiles_.for_mission(*barcap);
+    MissionRequest req;
+    req.mission = *barcap;
+    req.team = defender;
+    req.target_id = target_vu;
+    req.enemy_filed = true;
+    req.tot_type = TotType::LE;
+    req.tot = now + static_cast<CampaignTime>(profile.min_time) * 60;
+    req.priority = request_priority_(defender, profile, target_vu);
+    req.aircraft = profile.str;
+    queue.push_back(req);
+    ++stats_.enemy_caps_filed;
+}
+
+void AirTaskingManager::file_support_flight_(
+        std::vector<FlightTasking>& flights, const FlightTasking& main,
+        std::string_view flag_name, std::string_view support_name,
+        std::uint8_t team, CampaignTime now, std::uint32_t package_id) {
+    const auto& profile = profiles_.for_mission(main.mission);
+    if (!profile.has_flag(flag_name)) return;
+    const auto self_byte = mission_type_byte(support_name);
+    if (!self_byte || main.mission == *self_byte) return;
+    const auto& sprof = profiles_.for_mission(*self_byte);
+
+    // The package's target area (the station pick measures against it).
+    int px = 0, py = 0;
+    const bool have_pkg = resolve_target_xy(
+        objectives_, units_, cfg_.unit_strike, main.target_vu, px, py);
+
+    // The FILE half first (the share check needs the station): the
+    // station is the own objective nearest the package target (the
+    // orbit parks just behind the threatened area). No own territory —
+    // nothing to orbit, nothing files.
+    std::uint32_t station = 0;
+    int stx = 0, sty = 0;
+    if (have_pkg) station = nearest_own_objective_(team, px, py);
+    if (station == 0) return;
+    if (!resolve_target_xy(objectives_, units_, cfg_.unit_strike,
+                           station, stx, sty)) {
+        return;   // unreachable — the station came from the objectives
+    }
+
+    // FindSupportFlights' SHARE half: any booked or on-cycle flight of
+    // the same support byte, same team, STATION within the share
+    // radius of THIS request's station, TOT inside the support window
+    // (on station from its TOT through its loitertime, with a
+    // 30-minute early allowance) COVERS the package — one tanker
+    // feeds a whole raid, no new flight. The radius measures the two
+    // ORBITS against each other (the stations serve the same target
+    // area when they park together), not the orbit-to-target leg.
+    int sx = 0, sy = 0;
+    auto covers = [&](const FlightTasking& f) {
+        if (f.mission != sprof.mission_byte || f.team != main.team) {
+            return false;
+        }
+        if (main.tot < f.tot - 1800) return false;
+        if (main.tot >
+            f.tot + static_cast<CampaignTime>(sprof.loitertime) * 60) {
+            return false;
+        }
+        if (!resolve_target_xy(objectives_, units_, cfg_.unit_strike,
+                               f.target_vu, sx, sy)) {
+            return false;
+        }
+        const long long dx = sx - stx, dy = sy - sty;
+        const long long r = cfg_.support_share_distance_grid;
+        return dx * dx + dy * dy <= r * r;
+    };
+    for (const auto& f : booked_) {
+        if (covers(f)) { ++stats_.supports_shared; return; }
+    }
+    for (const auto& f : flights) {
+        if (covers(f)) { ++stats_.supports_shared; return; }
+    }
+
+    FlightTasking sup;
+    if (!build_support_flight_(sup, team, now, package_id, main,
+                               support_name, sprof.str,
+                               /*main_sq=*/nullptr, station)) {
+        return;   // nobody can fly it — the package still flies
+    }
+    sup.role = FlightRole::Support;   // build_ defaults Escort
+    sup.escorted_flight_id = 0;       // a station, not an escort
+    flights.push_back(sup);
+    ++stats_.supports_filed;
+
+    // The support profile's own fighter escort (AWACS/JSTAR/TANKER
+    // carry ADDESCORT — the big, slow orbit gets its cover). The
+    // escort links to the support flight (build_ sets it) and its
+    // own FindBestAir has no package-lead preference either.
+    if (sprof.has_flag("ADDESCORT")) {
+        const auto escort_byte = sprof.escort_type != 0
+                                     ? sprof.escort_type
+                                     : mission_type_byte("AMIS_ESCORT")
+                                           .value_or(10);
+        FlightTasking esc;
+        if (build_support_flight_(esc, team, now, package_id, sup,
+                                  mission_type_name(escort_byte),
+                                  profiles_.for_mission(escort_byte).str,
+                                  nullptr)) {
+            esc.role = FlightRole::Escort;
+            flights.push_back(esc);
+            ++stats_.escorts_built;
+        }
+    }
 }
 
 } // namespace f4::campaign

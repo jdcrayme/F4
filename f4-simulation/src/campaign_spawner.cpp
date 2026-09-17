@@ -111,6 +111,10 @@ void CampaignSimSpawner::handle(const f4::campaign::MissionIntent& intent) {
             if (spawned_id) {
                 ++stats_.aircraft_spawned;
                 ++stats_.synthetic_spawned;
+                // P7 — the flight's RoE byte rides the intent; the
+                // session gates the brain's fire controls with it
+                // after arming.
+                spawned_flight_roe_[intent.flight_id] = intent.roe;
                 // Route bookkeeping (the QC summary reads it).
                 {
                     f4::entities::EntityHandle h(*spawned_id, &world_);

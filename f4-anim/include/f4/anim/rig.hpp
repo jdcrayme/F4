@@ -132,4 +132,24 @@ float eval_blink(const BlinkPattern& p, double t_seconds) noexcept;
 float integrate_spin(float current_angle_rad, float rate_rad_per_sec,
                      double dt_seconds) noexcept;
 
+// ── Spinners (continuous rotation channels) ───────────────────────────────
+
+/// Seed the continuous-spinner channels (rotor.main, rotor.tail,
+/// radar.dish_spin) with a deterministic per-entity phase derived from
+/// `seed` (typically the entity id) so a formation of helicopters or a
+/// base full of radar sites doesn't spin in lockstep. Same avalanche
+/// idea as the blink patterns. Call once per entity before the first
+/// integrate pass.
+void seed_spinners(uint32_t seed, AnimValues& inout) noexcept;
+
+/// Advance one continuous spinner: angle += rate·dt, wrapped to [0,2π).
+/// rate ≤ 0 (or dt ≤ 0) leaves the value untouched — a stopped rotor or
+/// a dead radar holds its last angle. Unlike the state channels (gear),
+/// spinner angles have NO rest pose: the rig always owns the value.
+inline void integrate_spinner(Channel c, float rate_rad_s, double dt,
+                              AnimValues& inout) noexcept {
+    if (rate_rad_s <= 0.0f || dt <= 0.0) return;
+    inout[c] = integrate_spin(inout[c], rate_rad_s, dt);
+}
+
 } // namespace f4::anim

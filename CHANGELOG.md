@@ -5,7 +5,53 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
-## P6 — IR/visual sensors + countermeasures (the seduction tranche, most recent)
+## P7 — the ATM strategy layer (support flights, racetracks, enemy CAP, RoE)
+
+- **P7** — the C4 pipeline's named queue item "the strategy layer files
+  them" LANDED (Docs/ATM_STRATEGY_PLAN.md is the as-built reference).
+  ONE FLAG (`CampaignConfig::strategy_layer`, default OFF — the golden
+  identity; `campaign_qc --strategy` arms it). FOUR LEGS. (1) The loiter
+  racetrack: `RouteBuilder`'s TPROF_LOITER routes emit a closed 4-WP
+  circuit anchored at the target (the anchor carries the station
+  contract — `station_time_s` = the profile's loitertime,
+  `loop_waypoints` = 4; corners WPF_TURNPOINT-protected), and f4-ai's
+  `NavigationModule` gains the STATION HOLD — the AI plan's deferred
+  rung 17 (LoiterMode/OnStation): the anchor capture arms a one-shot
+  timer and the module loops the circuit until it expires, then flies
+  on (no new fsm state; routes without the contract behave
+  byte-identically). (2) CAP-family station targeting: the ladder's
+  BARCAP/TARCAP/ALERT requests station over ranked OWN objectives
+  (objtype_priority/2 + priority scaling, wire-order ties, rotation
+  cursor) instead of staying target-less. (3) FindSupportFlights:
+  ADDAWACS/ADDTANKER/ADDECM packages share-or-file the support family —
+  a station is the own objective nearest the package target; an
+  existing same-byte flight whose station (and TOT window) covers the
+  request SHARES (one tanker feeds a whole raid), else a
+  `FlightRole::Support` flight files with its OWN racetrack station
+  route and the support profile's ADDESCORT fighter escort (the new
+  FlightRole::Support = 3; `supports_filed`/`supports_shared` count).
+  (4) RequestEnemyMission: a delivery package's ADDBARCAP files a
+  defender BARCAP over the threatened objective for the enemy's NEXT
+  cycle (pending queue, dedup, cap 4; `enemy_caps_filed` counts).
+  PLUS the RoE carry: `AtmRequestState` gains
+  action_type/context/roe_check (the reader stops skipping, the
+  converter emits roe_check), the byte rides seed → request → flight →
+  intent, and `Simulation::apply_flight_roe` gates the armed brain's
+  fire controls post-arm (1 = weapons TIGHT: BVR suppressed; 2 = weapons
+  HOLD: everything; 0 = free, the pre-P7 default). QC acceptance on
+  TestCamp (`--tasking 240 --max-flights 96 --strategy`): stations=96
+  supports=85 shared=115 enemy_caps=48, exit 0 (the strategy gate, exit
+  17, guards a strategy run that stations nothing). 22 new tests; suite
+  2,639/2,639.
+- **P7 queue**: the ACTION tables' contextual filings (the
+  objective-damage-driven CAS/BARCAP/SEAD requests — the reactive BARCAP
+  above is its RequestEnemyMission slice), GetPriority's PO/package
+  terms, the campaign RoE doctrine (per-team/per-mission editing, the
+  threat map's 32000 overfly walls), SWEEP station lines, tanker
+  waypoints, and the full-data scaling pass (the strategy war over the
+  uncapped TestCamp fleet).
+
+## P6 — IR/visual sensors + countermeasures (the seduction tranche)
 
 - **P6** — the AI plan's named queue item "IR/visual sensor models +
   countermeasures" LANDED (Docs/SENSORS_COUNTERMEASURES_PLAN.md is the

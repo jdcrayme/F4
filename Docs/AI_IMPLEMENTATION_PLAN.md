@@ -153,8 +153,12 @@ The priority ladder is implemented as a `LayeredStateMachine` (f4-state-machine)
 > directly as an if/else priority chain (the same order: safety rungs
 > 1-2 first, then missile defense, then the engagement rungs, then
 > formation, then the mission modules). Rungs 0-2, 4-6, 11-12, 15-16,
-> 20, 22 are live; the refueling/loiter/orders rungs (7, 17-19, 21) are
-> deferred with the campaign. The fuel check (FrameExec step 2) gates
+> 20, 22 are live; rung 7 (Refuel) landed with the AAR tranche; rung 17
+> (Loiter) landed with P7 — the NavigationModule's STATION HOLD
+> (loop-until-timer over the strategy racetrack's anchor..corners span;
+> `holding_station()` — the route-loop mechanics, no `NavState`
+> addition; see ATM_STRATEGY_PLAN.md §1); the orders rungs (18-19, 21)
+> are deferred. The fuel check (FrameExec step 2) gates
 > the engagement rungs at bingo.
 
 **AddMode() override rules** (dlogic.cpp:729):

@@ -287,3 +287,141 @@ TEST(RouteBuilder, DeterministicBuilds) {
     }
     EXPECT_EQ(a.route_length_grid, b.route_length_grid);
 }
+
+// ============================================================================
+// P7 — the loiter racetrack (the strategy tranche's station pattern)
+// ============================================================================
+
+MissionProfile barcap_profile() {
+    // The generated BARCAP row's route keys: TPROF_LOITER + WP_CAP,
+    // 15 minutes on station.
+    MissionProfile p;
+    p.name = "AMIS_BARCAP";
+    p.mission_byte = 1;
+    p.target = "OBJECTIVE";
+    p.aro = "ARO_CA";
+    p.altitude_profile = "MPROF_STANDARD";
+    p.target_profile = "TPROF_LOITER";
+    p.target_desc = "TTL";
+    p.routewp = "WP_INGRESS";
+    p.targetwp = "WP_CAP";
+    p.minalt = 20;
+    p.maxalt = 400;
+    p.missionalt = 250;
+    p.loitertime = 15;
+    p.str = 2;
+    return p;
+}
+
+MissionProfile awacs_profile() {
+    // The support family: TPROF_LOITER + WP_ORBIT, 300 minutes.
+    MissionProfile p = barcap_profile();
+    p.name = "AMIS_AWACS";
+    p.mission_byte = 25;
+    p.aro = "ARO_SUPPORT";
+    p.targetwp = "WP_ORBIT";
+    p.loitertime = 300;
+    p.str = 1;
+    return p;
+}
+
+TEST(RouteBuilder, LoiterProfileBuildsARacetrackWhenArmed) {
+    const auto ws = make_world();
+    f4::world::WorldStateAdapters adapters(ws);
+    RouteBuilderConfig cfg;
+    cfg.loiter_racetracks = true;
+    const RouteBuilder builder(adapters.objectives, adapters.units,
+                               adapters.teams, /*viewer=*/1, cfg);
+
+    const auto r = builder.build(1, barcap_profile(), 4281, 9001);
+    ASSERT_GE(r.waypoints.size(), 6u);   // takeoff, [ingress..], anchor,
+                                         // c1, c2, c3, land
+    EXPECT_EQ(r.racetrack_corners, 3);
+
+    // The anchor: the profile's target WP with the station contract —
+    // the target action (WP_CAP = 12), the target VU, the profile's
+    // loitertime as the station timer, the 4-waypoint loop span.
+    const RouteWaypoint* anchor = nullptr;
+    std::size_t anchor_idx = 0;
+    for (std::size_t i = 0; i < r.waypoints.size(); ++i) {
+        if (r.waypoints[i].station_time_s != 0) {
+            anchor = &r.waypoints[i];
+            anchor_idx = i;
+            break;
+        }
+    }
+    ASSERT_NE(anchor, nullptr);
+    EXPECT_EQ(anchor->action, 12);                 // WP_CAP
+    EXPECT_EQ(anchor->flags & kWpfTarget, 0x0001);
+    EXPECT_EQ(anchor->target_num, 9001u);
+    EXPECT_EQ(anchor->station_time_s, 15 * 60);
+    EXPECT_EQ(anchor->loop_waypoints, 4);
+
+    // The three corners follow the anchor in order (span = anchor +
+    // 3 corners), carry no action, and are TURNPOINT-critical — the
+    // eliminator can never cut them.
+    for (std::size_t i = 1; i <= 3; ++i) {
+        const auto& c = r.waypoints[anchor_idx + i];
+        EXPECT_EQ(c.action, 0);
+        EXPECT_EQ(c.flags & kWpfTurnPoint, kWpfTurnPoint);
+        EXPECT_EQ(c.station_time_s, 0);
+        EXPECT_EQ(c.loop_waypoints, 0);
+    }
+
+    // The circuit's long leg runs ALONG the inbound course (USA
+    // airbase 100,100 → DPRK target 400,400: the diagonal), L = 20
+    // grid past the anchor; the box's cross-leg is W = 8 grid wide.
+    const auto& c1 = r.waypoints[anchor_idx + 1];
+    const double leg1 = grid_distance(anchor->x, anchor->y, c1.x, c1.y);
+    EXPECT_NEAR(leg1, 20.0, 1.0);
+
+    // Egress and landing still terminate the route after the circuit.
+    const auto& last = r.waypoints.back();
+    EXPECT_EQ(last.action, kWpLand);
+}
+
+TEST(RouteBuilder, OrbitProfileGetsTheSameCircuitWithItsOwnTimer) {
+    const auto ws = make_world();
+    f4::world::WorldStateAdapters adapters(ws);
+    RouteBuilderConfig cfg;
+    cfg.loiter_racetracks = true;
+    const RouteBuilder builder(adapters.objectives, adapters.units,
+                               adapters.teams, /*viewer=*/1, cfg);
+
+    const auto r = builder.build(1, awacs_profile(), 4281, 9001);
+    ASSERT_GE(r.waypoints.size(), 6u);
+    EXPECT_EQ(r.racetrack_corners, 3);
+    const RouteWaypoint* anchor = nullptr;
+    for (const auto& w : r.waypoints) {
+        if (w.station_time_s != 0) { anchor = &w; break; }
+    }
+    ASSERT_NE(anchor, nullptr);
+    // WP_ORBIT rides the WP_CAP action byte (the orbit IS the
+    // racetrack) with the support profile's 300-minute timer.
+    EXPECT_EQ(anchor->action, 12);
+    EXPECT_EQ(anchor->station_time_s, 300 * 60);
+    EXPECT_EQ(anchor->loop_waypoints, 4);
+}
+
+TEST(RouteBuilder, DisarmedLoiterKeepsThePlainTargetWaypoint) {
+    // The golden identity: without the arm, the pre-strategy shape —
+    // the TPROF_LOITER route stops at the target WP, no station
+    // contract, no corners.
+    const auto ws = make_world();
+    f4::world::WorldStateAdapters adapters(ws);
+    const RouteBuilder builder(adapters.objectives, adapters.units,
+                               adapters.teams, /*viewer=*/1);
+
+    const auto r = builder.build(1, barcap_profile(), 4281, 9001);
+    EXPECT_EQ(r.racetrack_corners, 0);
+    for (const auto& w : r.waypoints) {
+        EXPECT_EQ(w.station_time_s, 0);
+        EXPECT_EQ(w.loop_waypoints, 0);
+    }
+    // The target WP is still there (the pre-strategy single point).
+    bool target_seen = false;
+    for (const auto& w : r.waypoints) {
+        if (w.action == 12 && w.target_num == 9001) target_seen = true;
+    }
+    EXPECT_TRUE(target_seen);
+}

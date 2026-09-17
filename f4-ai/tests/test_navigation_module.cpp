@@ -332,3 +332,129 @@ TEST(NavigationLnav, SpawnFarFromFirstLegFliesToWaypointZero) {
     mod.update(0.1, s.get());
     EXPECT_EQ(mod.current_waypoint_index(), 0u);
 }
+
+// ============================================================================
+// P7 — the station hold (the racetrack anchor's loop-until-timer)
+// ============================================================================
+
+// The strategy tranche's racetrack shape, in feet: PRE → ANCHOR (the
+// station contract) → C1 → C2 → C3 (the loop span = 4, anchor first) →
+// POST. The hold loops ANCHOR..C3 until station_time_s elapses, then
+// releases out of the span toward POST. Post-capture index notes: after
+// waypoint N is captured the ACTIVE waypoint is N+1 (the leg being
+// flown TO it).
+static std::vector<NavigationModule::Waypoint> make_racetrack_route(
+        double station_time_s, std::uint8_t loop) {
+    NavigationModule::Waypoint anchor =
+        make_wp("ANCHOR", 0, 50000, 10000);
+    anchor.station_time_s = station_time_s;
+    anchor.loop_waypoints = loop;
+    return {make_wp("PRE", 0, 0, 10000),
+            anchor,
+            make_wp("C1", 0, 100000, 10000),
+            make_wp("C2", 50000, 100000, 10000),
+            make_wp("C3", 50000, 50000, 10000),
+            make_wp("POST", 0, 150000, 10000)};
+}
+
+TEST(NavigationStationHold, LoopsUntilTheTimerExpiresThenReleases) {
+    NavigationModule mod;
+    mod.set_route(make_racetrack_route(120.0, 4));
+
+    // Capture the anchor (index 1): the hold arms, the clock starts at
+    // zero, the active waypoint is the first corner (index 2).
+    auto s = make_state(0, 49000, 10000);
+    mod.update(0.1, s.get());
+    ASSERT_EQ(mod.current_waypoint_index(), 2u);
+    EXPECT_TRUE(mod.holding_station());
+    EXPECT_NEAR(mod.station_elapsed_s(), 0.0, 1e-9);
+
+    // Fly the circuit (teleport to each corner; each update accrues
+    // 10 s of station time). Capturing C3 (index 4, the span's last
+    // corner) with the timer still running WRAPS back to the anchor.
+    int wraps = 0;
+    for (int i = 0; i < 60; ++i) {
+        const std::size_t idx = mod.current_waypoint_index();
+        if (idx == 1u) {
+            s = make_state(0, 49000, 10000);        // anchor
+        } else if (idx == 2u) {
+            s = make_state(0, 99000, 10000);        // C1
+        } else if (idx == 3u) {
+            s = make_state(49000, 100000, 10000);   // C2
+        } else if (idx == 4u) {
+            s = make_state(50000, 51000, 10000);    // C3 (loop end)
+        } else {
+            break;                                   // released (POST)
+        }
+        mod.update(10.0, s.get());
+        if (idx == 4u && mod.current_waypoint_index() == 1u) ++wraps;
+    }
+
+    // The hold ran to its contract (120 s at 10 s a tick), wrapped the
+    // circuit at least twice, then released out of the span — the
+    // active waypoint left the loop and the module flies on to POST.
+    EXPECT_GE(wraps, 2);
+    EXPECT_FALSE(mod.holding_station());
+    EXPECT_GE(mod.station_elapsed_s(), 120.0);
+    EXPECT_EQ(mod.current_waypoint_index(), 5u);
+
+    // The route still completes after the hold (POST capture).
+    s = make_state(0, 149000, 10000);
+    mod.update(0.1, s.get());
+    EXPECT_TRUE(mod.is_complete());
+}
+
+TEST(NavigationStationHold, RouteWithoutTheContractBehavesIdentically) {
+    // The same geometry with the station fields zero: no hold, no
+    // wrap — the pre-P7 shape (every saved route and every
+    // pre-strategy synthetic route).
+    NavigationModule mod;
+    mod.set_route(make_racetrack_route(0.0, 0));
+
+    auto s = make_state(0, 49000, 10000);
+    mod.update(0.1, s.get());
+    EXPECT_EQ(mod.current_waypoint_index(), 2u);
+    EXPECT_FALSE(mod.holding_station());
+
+    s = make_state(0, 99000, 10000);
+    mod.update(0.1, s.get());
+    EXPECT_EQ(mod.current_waypoint_index(), 3u);
+    EXPECT_FALSE(mod.holding_station());
+
+    s = make_state(49000, 100000, 10000);
+    mod.update(0.1, s.get());
+    EXPECT_EQ(mod.current_waypoint_index(), 4u);
+
+    s = make_state(50000, 51000, 10000);
+    mod.update(0.1, s.get());
+    // C3 captured with no contract: NO wrap — straight to POST.
+    EXPECT_EQ(mod.current_waypoint_index(), 5u);
+    EXPECT_FALSE(mod.holding_station());
+}
+
+TEST(NavigationStationHold, ContractWithoutALoopIsInert) {
+    // station_time_s > 0 with loop_waypoints < 2: no circuit to fly —
+    // the contract is inert (the builder only arms holds on ≥4-WP
+    // spans; the module defends against malformed routes).
+    NavigationModule mod;
+    mod.set_route(make_racetrack_route(120.0, 1));
+
+    auto s = make_state(0, 49000, 10000);
+    mod.update(0.1, s.get());
+    EXPECT_EQ(mod.current_waypoint_index(), 2u);
+    EXPECT_FALSE(mod.holding_station());
+}
+
+TEST(NavigationStationHold, SetRouteResetsTheHold) {
+    NavigationModule mod;
+    mod.set_route(make_racetrack_route(120.0, 4));
+    auto s = make_state(0, 49000, 10000);
+    mod.update(0.1, s.get());
+    ASSERT_TRUE(mod.holding_station());
+
+    // A re-tasked module must not inherit the previous hold's state.
+    mod.set_route(make_racetrack_route(0.0, 0));
+    EXPECT_FALSE(mod.holding_station());
+    EXPECT_NEAR(mod.station_elapsed_s(), 0.0, 1e-9);
+    EXPECT_EQ(mod.current_waypoint_index(), 0u);
+}

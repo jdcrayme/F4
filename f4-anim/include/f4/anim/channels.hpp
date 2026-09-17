@@ -179,6 +179,12 @@ enum class Channel : uint16_t {
     light_strobe,            // tail strobe on (COMP_TAIL_STROBE)
     light_landing,           // landing lights on (COMP_LAND_LIGHTS)
 
+    // ── Sensors / ground ────────────────────────────────────────────────
+    radar_dish_spin,         // dish azimuth spin, continuous (AIRDEF sweep,
+                             // AWACS radome). Angle in radians, integrated
+                             // by the rig's spinner pass — never a rest
+                             // pose; the rig always owns the value.
+
     // ── Sentinel ────────────────────────────────────────────────────────
     Count
 };

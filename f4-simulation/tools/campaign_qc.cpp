@@ -284,6 +284,13 @@ struct Args {
     // unit strike produced nothing — CAS needs its TOT window, so
     // the 1-hour war is the honest horizon).
     bool unit_strike = false;
+    // P7 — the strategy layer (--strategy): the ATM's CAP-family
+    // station targeting, FindSupportFlights (AWACS/tanker/ECM share-
+    // or-file with racetrack station routes), RequestEnemyMission
+    // (a strike package's ADDBARCAP files a defender BARCAP), and
+    // RoE carry. The strategy gate (exit 17) fires when a strategy-
+    // armed tasking run drew aircraft but stationed none.
+    bool strategy = false;
     // Real-data tier: the wcd2json export folded over the built-in table.
     std::string weapon_data;
     // FID-6 — the acceleration certificate (--accel <x>): the tiered
@@ -377,6 +384,7 @@ Args parse_args(int argc, char** argv) {
         else if (k == "--aa-combat")   a.aa_combat = true;
         else if (k == "--ground-war")  a.ground_war = true;
         else if (k == "--unit-strike") a.unit_strike = true;
+        else if (k == "--strategy")   a.strategy = true;
         else if (k == "--weapon-data") a.weapon_data = next();
         else if (k == "--ground-update-sec")
             a.ground_update_sec = std::atoi(next());
@@ -545,6 +553,8 @@ int run_war(const Args& args) {
     hopts.session.ground_resupply_sec = args.ground_resupply_sec;
     // G2: the interdiction link (opt-in, the same contract).
     hopts.session.unit_strike = args.unit_strike;
+    // P7: the strategy layer (opt-in, the same contract).
+    hopts.session.strategy_layer = args.strategy;
     hopts.session.weapon_data_path = args.weapon_data;
     // FID-6: the accel certificate FORCES the tiered policy — the war
     // runs the game's own way (aggregates until observed), which is
@@ -571,7 +581,7 @@ int run_war(const Args& args) {
     std::printf("%s: horizon=%llds (%.2fh) speed=%.0fx tol=%.2f "
                 "max_live=%d runs=%d sample=%.0fs "
                 "wreck_hold=%.0fs cycle=%ds reinforce=%ds aa_combat=%s "
-                "ground=%s unit_strike=%s\n",
+                "ground=%s unit_strike=%s strategy=%s\n",
                 accel ? "accel" : "war",
                 (long long)hopts.horizon_sec,
                 accel ? args.accel_hours : args.war_hours,
@@ -582,7 +592,8 @@ int run_war(const Args& args) {
                 hopts.session.reinforce_period_sec,
                 hopts.session.aa_combat ? "on" : "off",
                 hopts.session.ground_war ? "on" : "off",
-                hopts.session.unit_strike ? "on" : "off");
+                hopts.session.unit_strike ? "on" : "off",
+                hopts.session.strategy_layer ? "on" : "off");
 
     std::string err;
     auto harness = CampaignWarHarness::create(hopts, &err);
@@ -1442,6 +1453,11 @@ int main(int argc, char** argv) {
     int atm_escorts = 0;
     int atm_seeded = 0;
     int atm_unfilled = 0;
+    // P7: the strategy layer's counters (the summary + exit 17).
+    int strategy_stations = 0;
+    int strategy_supports_filed = 0;
+    int strategy_supports_shared = 0;
+    int strategy_enemy_caps = 0;
     if (args.tasking_minutes > 0) {
         if (args.profiles_json.empty() ||
             !std::filesystem::exists(args.profiles_json)) {
@@ -1472,6 +1488,10 @@ int main(int argc, char** argv) {
         // SEAD escort on the sample data.
         ladder_cfg.atm_pipeline = true;
         ladder_cfg.atm.min_seadescort_threat = 25;
+        // P7: the strategy layer — station targeting, support
+        // filings, enemy BARCAP requests (opt-in, the same contract
+        // as the pipeline itself).
+        ladder_cfg.strategy_layer = args.strategy;
         Campaign ladder(
             static_cast<const f4::world::ICampaignSource&>(adapters.campaign),
             static_cast<const f4::world::ITeamSource&>(adapters.teams),
@@ -1500,6 +1520,8 @@ int main(int argc, char** argv) {
         // routes without changing any library default.
         RouteBuilderConfig route_cfg;
         route_cfg.min_avoid_threat = 25;
+        // P7: the loiter racetracks ride the strategy arm.
+        route_cfg.loiter_racetracks = args.strategy;
         const RouteBuilder route_builder(
             static_cast<const f4::world::IObjectiveSource&>(
                 adapters.objectives),
@@ -1576,6 +1598,17 @@ int main(int argc, char** argv) {
                         atm->packages_built, atm->escorts_built,
                         atm->slot_snaps, atm->slot_shifts_sec,
                         atm->aircraft_recovered);
+            // P7: the strategy layer's counters, printed when armed.
+            if (args.strategy) {
+                strategy_stations = atm->stations_targeted;
+                strategy_supports_filed = atm->supports_filed;
+                strategy_supports_shared = atm->supports_shared;
+                strategy_enemy_caps = atm->enemy_caps_filed;
+                std::printf("strategy: stations=%d supports=%d "
+                            "shared=%d enemy_caps=%d\n",
+                            atm->stations_targeted, atm->supports_filed,
+                            atm->supports_shared, atm->enemy_caps_filed);
+            }
         }
         std::printf("threat_map: ad_units=%d threatened_cells=%d\n",
                     threat_ad_units, threat_cells);
@@ -2011,6 +2044,16 @@ int main(int argc, char** argv) {
             w.number_key("atm_seeded_requests", atm_seeded);
             w.put(",    ");
             w.number_key("atm_unfilled_requests", atm_unfilled);
+            // P7: the strategy layer's counters (present whenever the
+            // arm ran — zeros when it filed nothing).
+            w.put(",    ");
+            w.number_key("strategy_stations", strategy_stations);
+            w.put(",    ");
+            w.number_key("strategy_supports_filed", strategy_supports_filed);
+            w.put(",    ");
+            w.number_key("strategy_supports_shared", strategy_supports_shared);
+            w.put(",    ");
+            w.number_key("strategy_enemy_caps", strategy_enemy_caps);
             w.put(",    ");
             w.number_key("aircraft_recovered",
                          result_ledger.aircraft_recovered());
@@ -2338,6 +2381,23 @@ int main(int argc, char** argv) {
                      "block in campaign_qc_summary.json.\n",
                      result_ledger.mission_draw_aircraft(), tasking_cycles);
         return 8;
+    }
+    // P7 gate (exit 17): the strategy layer was armed, the ladder drew
+    // aircraft — yet not one CAP request got a station. The station
+    // chain broke (own-objective ranking / the CAP-family gate); a
+    // strategy run that stations nothing is a silent no-op, which is
+    // exactly what the flag exists to prevent.
+    if (tasking_ran && args.strategy && tasking_had_air &&
+        result_ledger.mission_draw_aircraft() > 0 &&
+        strategy_stations == 0) {
+        std::fprintf(stderr,
+                     "campaign_qc: QC FAILURE — the strategy layer ran %d "
+                     "cycles and drew %d aircraft but stationed no CAP "
+                     "request. The station chain broke (own objectives / "
+                     "the TPROF_LOITER gate); inspect the strategy block "
+                     "in campaign_qc_summary.json.\n",
+                     tasking_cycles, result_ledger.mission_draw_aircraft());
+        return 17;
     }
     return 0;
 }

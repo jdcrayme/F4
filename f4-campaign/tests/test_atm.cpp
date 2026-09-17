@@ -61,6 +61,7 @@ struct WorldOpts {
     bool priority_table = false;   // slot-1 mission_priority table
     bool seeded_schedule = false;  // slot-1 airbase schedule bits
     bool backlog = false;          // slot-1 decoded request backlog
+    std::uint8_t backlog_roe = 0;  // P7 — rq2's roe_check byte
 };
 
 f4::world::WorldState make_atm_world(const WorldOpts& opts = {}) {
@@ -157,6 +158,7 @@ f4::world::WorldState make_atm_world(const WorldOpts& opts = {}) {
         rq2.who = 1;
         rq2.priority = 110;
         rq2.tot = 38574360 + 3600;    // an hour ahead: flows as-is
+        rq2.roe_check = opts.backlog_roe;   // P7 — the RoE carry
         ws.teams[1].atm_requests.push_back(rq2);
         f4::world::AtmRequestState rq3;
         rq3.mission = 1;              // BARCAP, 10 hours stale —
@@ -1009,4 +1011,245 @@ TEST(CampaignAtm, MultiFlightPackagesShareIdsAndPairEscorts) {
     // (ADDESCORT-carrying profiles with available squadrons). If the
     // fixture ever stops producing pairs, this pin fails loudly.
     EXPECT_TRUE(saw_pair);
+}
+
+// ============================================================================
+// P7 — the strategy layer (station targeting, FindSupportFlights,
+//      RequestEnemyMission, RoE carry)
+// ============================================================================
+
+TEST(AtmStrategy, StationsCapRequestsOverRankedOwnObjectives) {
+    AtmConfig cfg;
+    cfg.strategy = true;
+    auto rig = Rig::make(WorldOpts{}, cfg);
+
+    auto reqs = rig->atm->generate_requests(1, kNow);
+    // The USA team owns exactly one objective (4281 at 100,100) —
+    // every TPROF_LOITER+WP_CAP request (BARCAP 1, TARCAP 4, ALERT 8,
+    // AMBUSHCAP 6, ...) stations over it.
+    bool barcap_seen = false;
+    for (const auto& r : reqs) {
+        if (r.mission == 1) {
+            barcap_seen = true;
+            EXPECT_EQ(r.target_id, 4281u);
+        }
+    }
+    ASSERT_TRUE(barcap_seen);
+    EXPECT_GT(rig->atm->stats().stations_targeted, 0);
+}
+
+TEST(AtmStrategy, DisarmedStationsKeepCapsTargetLess) {
+    // The golden identity: the pre-strategy shape — CAP requests stay
+    // target-less (the ladder only targets the delivery family).
+    auto rig = Rig::make(WorldOpts{});
+    auto reqs = rig->atm->generate_requests(1, kNow);
+    for (const auto& r : reqs) {
+        if (r.mission == 1) {
+            EXPECT_EQ(r.target_id, 0u);
+        }
+    }
+    EXPECT_EQ(rig->atm->stats().stations_targeted, 0);
+}
+
+namespace {
+
+// A DEEPSTRIKE request (byte 15): the one generated profile carrying
+// the whole support flag set — ADDAWACS, ADDTANKER, ADDECM, ADDBARCAP,
+// ADDESCORT, ADDSEAD.
+MissionRequest deepstrike_request(std::uint32_t target_vu, CampaignTime tot,
+                                  int aircraft = 4) {
+    MissionRequest r;
+    r.mission = 15;
+    r.team = 1;
+    r.target_id = target_vu;
+    r.priority = 120;
+    r.aircraft = aircraft;
+    r.tot = tot;
+    r.tot_type = TotType::LE;
+    return r;
+}
+
+} // namespace
+
+TEST(AtmStrategy, FindSupportFlightsFilesAwacsAndEcmWithStations) {
+    AtmConfig cfg;
+    cfg.strategy = true;
+    auto rig = Rig::make(WorldOpts{}, cfg);
+
+    auto flights = rig->atm->compose_packages(
+        {deepstrike_request(9001, 5400)}, 1, kNow);
+
+    // The main + its escort + the profile's support filings. The
+    // DEEPSTRIKE flag set carries ADDAWACS + ADDECM (ADDTANKER is on
+    // the CAP family, not this profile) — two support filings, the
+    // AWACS bringing its own ADDESCORT fighter escort; the ECM does
+    // not carry one.
+    int supports = 0;
+    int awacs_seen = 0;
+    int ecm_seen = 0;
+    for (const auto& f : flights) {
+        if (f.role == FlightRole::Support) {
+            ++supports;
+            // Every support flight stations over the OWN objective
+            // nearest the package target — the USA airbase 4281 (the
+            // only USA objective in the world).
+            EXPECT_EQ(f.target_vu, 4281u);
+            if (f.mission == 25) ++awacs_seen;
+            if (f.mission == 28) ++ecm_seen;
+        }
+    }
+    EXPECT_EQ(supports, 2);
+    EXPECT_EQ(awacs_seen, 1);
+    EXPECT_EQ(ecm_seen, 1);
+    EXPECT_EQ(rig->atm->stats().supports_filed, 2);
+    EXPECT_EQ(rig->atm->stats().supports_shared, 0);
+
+    // The package still flies (the main is there, role Main).
+    ASSERT_FALSE(flights.empty());
+    EXPECT_EQ(flights[0].role, FlightRole::Main);
+    EXPECT_EQ(flights[0].mission, 15);
+}
+
+TEST(AtmStrategy, FindSupportFlightsSharesInsteadOfRefiling) {
+    AtmConfig cfg;
+    cfg.strategy = true;
+    auto rig = Rig::make(WorldOpts{}, cfg);
+
+    // Two DEEPSTRIKE packages over the SAME target in one cycle: the
+    // second package's support requests find the first's stations
+    // (same byte, same station, TOT inside the window) — SHARED, not
+    // re-filed. One tanker feeds a whole raid. (The second package is
+    // a 2-ship: the fixture's per-squadron pool is nearly spent by the
+    // first package's draws — the share test wants the second MAIN to
+    // build, and it does at 2 ships.)
+    auto flights = rig->atm->compose_packages(
+        {deepstrike_request(9001, 5400), deepstrike_request(9001, 5400, 2)},
+        1, kNow);
+
+    const int supports = static_cast<int>(std::count_if(
+        flights.begin(), flights.end(), [](const FlightTasking& f) {
+            return f.role == FlightRole::Support;
+        }));
+    EXPECT_EQ(supports, 2);   // one AWACS, one ECM — no re-filings
+    EXPECT_EQ(rig->atm->stats().supports_filed, 2);
+    EXPECT_EQ(rig->atm->stats().supports_shared, 2);   // the 2nd package
+}
+
+TEST(AtmStrategy, RequestEnemyMissionFilesDefenderBarcapNextCycle) {
+    AtmConfig cfg;
+    cfg.strategy = true;
+    auto rig = Rig::make(WorldOpts{}, cfg);
+
+    // The strike over the DPRK objective 9001 files a BARCAP request
+    // for the DEFENDER (DPRK, slot 6) — the pending queue.
+    (void)rig->atm->compose_packages({deepstrike_request(9001, 5400)},
+                                     1, kNow);
+    ASSERT_EQ(rig->atm->stats().enemy_caps_filed, 1);
+
+    // Dedup: a second identical package does not double-file.
+    (void)rig->atm->compose_packages({deepstrike_request(9001, 5400)},
+                                     1, kNow);
+    EXPECT_EQ(rig->atm->stats().enemy_caps_filed, 1);
+
+    // The defender's NEXT cycle picks the filing up: a BARCAP over the
+    // threatened objective, flagged enemy_filed, flying for team 6.
+    auto reqs = rig->atm->generate_requests(6, kNow + 1800);
+    bool filed_seen = false;
+    for (const auto& r : reqs) {
+        if (r.enemy_filed) {
+            filed_seen = true;
+            EXPECT_EQ(r.mission, 1);          // AMIS_BARCAP
+            EXPECT_EQ(r.team, 6);
+            EXPECT_EQ(r.target_id, 9001u);
+        }
+    }
+    ASSERT_TRUE(filed_seen);
+}
+
+TEST(AtmStrategy, BacklogRoeRidesThroughCompose) {
+    // The decoded backlog's roe_check byte flows: seed → request →
+    // flight. WEAPONS HOLD (2) on the INTSTRIKE request.
+    auto rig = Rig::make(WorldOpts{.backlog = true, .backlog_roe = 2});
+    auto reqs = rig->atm->generate_requests(1, kNow);
+
+    MissionRequest* strike = nullptr;
+    for (auto& r : reqs) {
+        if (r.mission == 13 && r.seeded) strike = &r;
+    }
+    ASSERT_NE(strike, nullptr);
+    EXPECT_EQ(strike->roe, 2);
+
+    auto flights = rig->atm->compose_packages(
+        {*(strike)}, 1, kNow);
+    ASSERT_FALSE(flights.empty());
+    EXPECT_EQ(flights[0].roe, 2);   // WEAPONS HOLD rides the flight
+}
+
+TEST(AtmStrategy, DisarmedComposeCarriesNoSupportAndNoFilings) {
+    // The golden identity: the pre-strategy compose — DEEPSTRIKE's
+    // ADDAWACS/ADDTANKER/ADDECM/ADDBARCAP flags file nothing, only the
+    // profile's own ADDESCORT fighter escort pairs.
+    auto rig = Rig::make(WorldOpts{});
+    auto flights = rig->atm->compose_packages(
+        {deepstrike_request(9001, 5400)}, 1, kNow);
+    for (const auto& f : flights) {
+        EXPECT_NE(f.role, FlightRole::Support);
+    }
+    EXPECT_EQ(rig->atm->stats().supports_filed, 0);
+    EXPECT_EQ(rig->atm->stats().supports_shared, 0);
+    EXPECT_EQ(rig->atm->stats().enemy_caps_filed, 0);
+    EXPECT_EQ(rig->atm->stats().stations_targeted, 0);
+}
+
+TEST(AtmStrategy, CampaignStrategyRunIsDeterministic) {
+    CampaignConfig cfg;
+    cfg.atm_pipeline = true;
+    cfg.strategy_layer = true;
+    auto a = CampaignRig::make(cfg);
+    auto b = CampaignRig::make(cfg);
+    a->campaign->tick(1800);
+    b->campaign->tick(1800);
+
+    EXPECT_EQ(a->campaign->to_summary_json(),
+              b->campaign->to_summary_json());
+
+    const auto js = a->campaign->to_summary_json();
+    EXPECT_NE(js.find("\"stations_targeted\":"), std::string::npos);
+    EXPECT_NE(js.find("\"supports_filed\":"), std::string::npos);
+    EXPECT_NE(js.find("\"enemy_caps_filed\":"), std::string::npos);
+}
+
+TEST(AtmStrategy, CampaignStrategyStationsCapsWithARoutePlanner) {
+    // With objectives attached (the route planner's attachment shape),
+    // the CAP family's requests get stations — the kunsan world's
+    // belligerents own objectives and their priority tables task the
+    // BARCAP family (prio 10).
+    CampaignConfig cfg;
+    cfg.atm_pipeline = true;
+    cfg.strategy_layer = true;
+    auto r = CampaignRig::make(cfg);
+    // A second load of the SAME fixture world — the route planner (and
+    // with it the strategy layer's objective view) attaches from its
+    // adapters, exactly the session/QC construction shape.
+    auto ws_ptr = std::make_unique<f4::world::WorldState>();
+    ws_ptr->load(kunsan_world());
+    auto adapters =
+        std::make_unique<f4::world::WorldStateAdapters>(*ws_ptr);
+    RouteBuilderConfig route_cfg;
+    route_cfg.loiter_racetracks = true;
+    auto builder = std::make_unique<RouteBuilder>(
+        static_cast<const f4::world::IObjectiveSource&>(
+            adapters->objectives),
+        static_cast<const f4::world::IUnitCoreSource&>(
+            adapters->units),
+        static_cast<const f4::world::ITeamSource&>(adapters->teams),
+        /*viewer=*/2, route_cfg);
+    r->campaign->set_route_planner(builder.get(),
+        &static_cast<const f4::world::IObjectiveSource&>(
+            adapters->objectives));
+    r->campaign->tick(1800);
+
+    const auto* stats = r->campaign->atm_stats();
+    ASSERT_NE(stats, nullptr);
+    EXPECT_GT(stats->stations_targeted, 0);
 }

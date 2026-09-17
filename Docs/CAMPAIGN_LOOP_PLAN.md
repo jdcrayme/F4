@@ -602,28 +602,34 @@ follow-up refinement, documented here.
   Neutral/Hostile (the two denying classes), but score() still SCORES
   rather than walls — the 32000 lethal denial (and the A*'s >120
   impassable test, already ported) arms with the RoE refinement
-  tranche.
+  tranche. (P7 LANDED the RoE CARRY: the wire roe_check byte rides the
+  backlog → request → flight → intent → the post-arm fire-control
+  gates — see ATM_STRATEGY_PLAN.md.)
 - **ATM scope** (C4): the pipeline composes MAIN + ESCORT flights —
   the reference's multi-strike feature analysis (BestTargetFeature
-  loops vs feature HP) and its support-flight SHARING (FindSupport
-  Flights: AWACS/tanker/JSTAR/ECM racetracks) need the feature-damage
-  loop and loiter-racetrack routes respectively (the weapons and
-  loiter tranches). GetPriority's PO/package/distance/random terms
-  need strategy-layer data (the request's context vocabulary decodes;
-  the ACTION system that files contextual requests is the strategy
-  tranche). Enemy-requested BARCAP/SWEEP (ADDBARCAP/ADDSWEEP →
-  RequestEnemyMission) — the ladder already generates both sides'
-  defensive CAP every cycle; the requester-driven path lands with the
-  strategy layer.
+  loops vs feature HP) needs the feature-damage loop (the weapons
+  tranche). ~~Support-flight SHARING (FindSupportFlights)~~, ~~the
+  loiter-racetrack routes~~, ~~the ACTION system's requester-driven
+  filings (the deterministic subset)~~ and ~~enemy-requested BARCAP
+  (ADDBARCAP → RequestEnemyMission)~~ — LANDED with P7 (the strategy
+  layer: Docs/ATM_STRATEGY_PLAN.md — stationed CAPs over ranked own
+  objectives, AWACS/tanker/ECM share-or-file with racetrack station
+  routes, the defender BARCAP filed for the enemy's next cycle, and
+  the RoE carry). GetPriority's PO/package/distance/random terms still
+  need strategy-layer data; the ACTION tables' contextual filings
+  (objective-damage-driven CAS/BARCAP/SEAD) are the next strategy
+  tranche.
 - **Threat-map coverage** (C3): only AD battalions whose entity
   types resolve into the theater DB's UCD paint — the fixture UCD is
   an 8-entry sample (3 of 247 AD battalions on TestCamp); the full
   theater's UCD (game data) paints the rest with no code change.
-- **Per-action altitude shaping, loiter racetracks, tanker waypoints**
-  (C3): each lands with its consumer (the loiter and fuel tranches) —
-  documented in route_builder.hpp. (Package-shared ingress and TOT
-  slotting landed with C4's package composition — escorts share the
-  main flight's route; takeoffs snap to the airbase schedules.)
+- **Per-action altitude shaping, tanker waypoints** (C3): each lands
+  with its consumer (the fuel tranche) — documented in
+  route_builder.hpp. (Package-shared ingress and TOT slotting landed
+  with C4's package composition — escorts share the main flight's
+  route; takeoffs snap to the airbase schedules. The loiter racetracks
+  landed with P7 — the station circuits the strategy layer's CAP and
+  support flights fly.)
 
 ## 8. Implementation order (C4 onward)
 

@@ -214,6 +214,18 @@ struct CampaignSessionOptions {
     /// session is byte-identical to the pre-G2 shape with it off.
     bool unit_strike = false;
 
+    /// P7: run the STRATEGY layer — the ATM's CAP-family station
+    /// targeting (defensive CAPs orbit ranked OWN objectives),
+    /// FindSupportFlights (ADDAWACS/ADDTANKER/ADDECM share-or-file:
+    /// AWACS/tanker/ECM stations flying the loiter racetrack routes),
+    /// RequestEnemyMission (a strike package's ADDBARCAP files a
+    /// defender BARCAP over the threatened objective for the enemy's
+    /// next cycle), and the racetrack station routes themselves.
+    /// Default false: the session is byte-identical to the pre-P7
+    /// shape with it off. Requires atm_pipeline (the legacy ladder has
+    /// no strategy layer).
+    bool strategy_layer = false;
+
     /// FID-1: the fidelity policy (see FidelityPolicy above). Default
     /// FullFidelity — the session is byte-identical to the pre-FID
     /// shape with it (the same contract aa_combat / ground_war /
@@ -221,6 +233,7 @@ struct CampaignSessionOptions {
     /// defers the saved flights' aircraft spawn, and drives the
     /// deagg/reagg machinery below.
     FidelityPolicy fidelity_policy = FidelityPolicy::FullFidelity;
+
     /// FID-2: the aggregate advance cadence (campaign seconds; 60 =
     /// the ground war's update precedent).
     int air_agg_update_sec = 60;

@@ -29,6 +29,21 @@
 // sequence the last waypoint is the approach entry fix: BrainComponent
 // hands off to LandingModule on completion.
 //
+// P7 — THE STATION HOLD (the AI plan's deferred rung 17, LoiterMode →
+// "NavState::OnStation"): a waypoint that carries a station contract
+// (station_time_s > 0, loop_waypoints ≥ 2) is a RACETRACK ANCHOR. When
+// the anchor is captured the module arms a one-shot station timer and
+// LOOPS the anchor..corners span (it keeps flying the legs — a
+// racetrack is just a closed leg circuit) until the timer expires;
+// only then does it sequence out of the span (egress, landing). The
+// strategy tranche's RouteBuilder emits the circuit: anchor (WP_CAP /
+// WP_ORBIT) + three corners, loop span 4. Everything about the hold is
+// route-loop mechanics INSIDE ToWaypoint — no new fsm state, no new
+// events: the aircraft never stops flying legs, the hold is what the
+// loop IS. Observability: holding_station() / station_elapsed_s().
+// Routes without the contract (station_time_s == 0 — every saved route
+// and every pre-strategy synthetic route) behave byte-identically.
+//
 // State machine (deliberately minimal — the interesting logic is target
 // selection + capture):
 //   ToWaypoint -> Done   (WaypointCaptured on the last waypoint)
@@ -87,6 +102,17 @@ public:
         /// action with a resolvable target (the campaign bridge fills this
         /// from the saved waypoint's target VU_ID); 0 otherwise.
         std::uint64_t target_id{0};
+
+        /// P7 — the station-hold contract (the racetrack anchor's side):
+        /// hold station for this long once captured, looping the next
+        /// `loop_waypoints` waypoints (0 = no hold — the pre-strategy
+        /// default; every route without the contract behaves exactly as
+        /// before). See the module header's station-hold note.
+        double station_time_s{0.0};
+        /// P7 — the hold loop's waypoint span INCLUDING this anchor
+        /// (the wrap returns here after the span's last corner; < 2 =
+        /// no loop, the contract is inert).
+        std::uint8_t loop_waypoints{0};
     };
 
     NavigationModule();
@@ -119,6 +145,18 @@ public:
     /// heading without re-deriving from position deltas.
     [[nodiscard]] double current_heading_rad() const noexcept {
         return current_heading_rad_;
+    }
+
+    /// P7 — true while the station hold is armed and running (the
+    /// racetrack anchor was captured and its timer has not expired).
+    [[nodiscard]] bool holding_station() const noexcept {
+        return holding_;
+    }
+    /// P7 — seconds accumulated inside the current (or completed)
+    /// station hold. Saturates at the contract time when the hold
+    /// releases.
+    [[nodiscard]] double station_elapsed_s() const noexcept {
+        return station_elapsed_;
     }
 
     /// NAV-B: the LNAV desired heading for the ACTIVE leg — leg course +
@@ -232,6 +270,15 @@ private:
     std::vector<Waypoint> route_;
     std::size_t wp_index_{0};
     double wp_timer_{0.0};
+
+    // P7 — the station hold (see the header's note): armed once, at the
+    // anchor's capture; runs until station_time_s elapses, wrapping the
+    // span each time its last corner is captured.
+    bool holding_{false};
+    bool station_done_{false};
+    double station_elapsed_{0.0};
+    std::size_t loop_start_{0};   // the anchor's index
+    std::size_t loop_end_{0};     // the span's last corner
 
     // Cached state for control logic (refreshed each update()).
     geo::WorldPosition current_position_;

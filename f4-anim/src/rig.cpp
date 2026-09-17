@@ -161,4 +161,16 @@ float integrate_spin(float current_angle_rad, float rate_rad_per_sec,
     return angle;
 }
 
+// ── Spinners ──────────────────────────────────────────────────────────────
+
+void seed_spinners(uint32_t seed, AnimValues& inout) noexcept {
+    // One avalanche per channel so the three phases de-correlate.
+    inout[Channel::rotor_main] =
+        static_cast<float>(xorshift32(seed ^ 0x1u)) / 4294967296.0f * kTwoPi;
+    inout[Channel::rotor_tail] =
+        static_cast<float>(xorshift32(seed ^ 0x9E37u)) / 4294967296.0f * kTwoPi;
+    inout[Channel::radar_dish_spin] =
+        static_cast<float>(xorshift32(seed ^ 0x51EDu)) / 4294967296.0f * kTwoPi;
+}
+
 } // namespace f4::anim

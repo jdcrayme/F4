@@ -84,6 +84,12 @@ void NavigationModule::set_route(std::vector<Waypoint> route) {
     route_ = std::move(route);
     wp_index_ = 0;
     wp_timer_ = 0.0;
+    // P7 — the station hold resets with the route (a re-tasked module
+    // must not inherit the previous hold's state).
+    holding_ = false;
+    station_done_ = false;
+    station_elapsed_ = 0.0;
+    loop_start_ = loop_end_ = 0;
     // NAV-B: the first leg emanates from where the aircraft is when the
     // FIRST update() runs (see update() — set_route can be called before
     // any state has been cached, e.g. the Enroute start-phase handoff,
@@ -103,6 +109,9 @@ AIControlOutput NavigationModule::update(double dt, const flight::IAircraftState
 {
     cache_aircraft_state(state);
     wp_timer_ += dt;
+    // P7 — the station hold's clock runs while the hold is armed (the
+    // racetrack keeps flying; the hold is what the loop IS).
+    if (holding_) station_elapsed_ += dt;
 
     // NAV-B: resolve the first leg's anchor on the first cached update —
     // the leg emanates from where the aircraft actually is (an offset
@@ -279,10 +288,40 @@ void NavigationModule::check_waypoint_capture()
     if (captured) {
         // NAV-B: the new leg emanates from the waypoint we just captured.
         leg_from_ = route_[wp_index_].position;
+
+        // P7 — the station hold. Capturing a RACETRACK ANCHOR
+        // (station_time_s > 0, loop_waypoints ≥ 2, span fits the
+        // route) arms the one-shot hold: loop_start_ is the anchor,
+        // loop_end_ the span's last corner. The flag pair guards the
+        // re-captures every wrap produces (the anchor is re-flown each
+        // lap — re-arming would restart the timer forever).
+        const auto& captured_wp = route_[wp_index_];
+        if (!holding_ && !station_done_ && captured_wp.station_time_s > 0.0 &&
+            captured_wp.loop_waypoints >= 2 &&
+            wp_index_ + captured_wp.loop_waypoints <= route_.size()) {
+            holding_ = true;
+            station_elapsed_ = 0.0;
+            loop_start_ = wp_index_;
+            loop_end_ = wp_index_ + captured_wp.loop_waypoints - 1;
+        }
+
         ++wp_index_;
         wp_timer_ = 0.0;
         if (wp_index_ >= route_.size()) {
             sm_.process(NavigationEvent::WaypointCaptured);
+        } else if (holding_ && wp_index_ - 1 == loop_end_) {
+            // The span's last corner was just captured: wrap back to
+            // the anchor while the station timer still runs (the next
+            // leg is corner→anchor, the circuit's closing leg),
+            // release the hold and continue out of the span when it
+            // has expired (leg_from_ is already this corner — the
+            // egress leg departs from where the hold ended).
+            if (station_elapsed_ < route_[loop_start_].station_time_s) {
+                wp_index_ = loop_start_;
+            } else {
+                holding_ = false;
+                station_done_ = true;
+            }
         }
     }
 }

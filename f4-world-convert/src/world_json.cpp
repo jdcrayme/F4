@@ -283,6 +283,10 @@ std::string to_world_json(const CamArchive& cam, const WorldJsonOptions& opts) {
                           << ", \"aircraft\": " << static_cast<int>(mr.aircraft)
                           << ", \"target_num\": " << mr.target_id_num
                           << ", \"requester_num\": " << mr.requester_id_num
+                          // P7 — the request's RoE check byte (the
+                          // strategy tranche carries it into the
+                          // sim's fire-control gates).
+                          << ", \"roe_check\": " << static_cast<int>(mr.roe_check)
                           << "}";
                     }
                     o << "]";

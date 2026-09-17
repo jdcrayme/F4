@@ -1189,6 +1189,11 @@ build_mission_plan_from_route(
         NavigationModule::Waypoint route_wp{name, pos, kDefaultLegSpeedKts};
         route_wp.action = w.action;
         route_wp.target_id = target_id;
+        // P7 — the station-hold contract rides the racetrack anchor
+        // (0/0 on every pre-strategy waypoint: no hold, byte-identical
+        // behavior).
+        route_wp.station_time_s = static_cast<double>(w.station_time_s);
+        route_wp.loop_waypoints = w.loop_waypoints;
         plan.route.push_back(std::move(route_wp));
     }
 

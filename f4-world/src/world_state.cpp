@@ -149,8 +149,9 @@ TeamState parse_team(Reader& r) {
                     else if (rk == "vs")           r.skip_value();
                     else if (rk == "tot")          rq.tot          = static_cast<int32_t>(r.read_int());
                     else if (rk == "priority")     rq.priority     = static_cast<int32_t>(r.read_int());
-                    else if (rk == "action_type")  r.skip_value();
-                    else if (rk == "context")      r.skip_value();
+                    else if (rk == "action_type")  rq.action_type = static_cast<uint8_t>(r.read_int());
+                    else if (rk == "context")      rq.context = static_cast<uint8_t>(r.read_int());
+                    else if (rk == "roe_check")    rq.roe_check = static_cast<uint8_t>(r.read_int());
                     else if (rk == "aircraft")     rq.aircraft     = static_cast<uint8_t>(r.read_int());
                     else if (rk == "target_num")   rq.target_num   = static_cast<uint32_t>(r.read_int());
                     else if (rk == "requester_num") rq.requester_num = static_cast<uint32_t>(r.read_int());

@@ -952,9 +952,13 @@ std::string make_dof_extras(const f4::models::TaggedAncestor& a,
         default:
             // Rotational DOF: FreeFalcon rotates the subtree about the
             // LOCAL X axis after the frame (R = dof_rotation·Rx(v)).
-            // Under the falcon→glTF basis change the local X axis maps
-            // to B·(1,0,0) = (0,0,-1).
-            w.raw(", \"op\": \"rot\", \"axis\": [0, 0, -1]");
+            // Conjugating through the falcon→glTF basis B (glTF =
+            // B·falcon): B·Rx(θ)·Bᵀ = Rot(det(B)·B·x̂, θ). B is
+            // IMPROPER (det = −1 — the handedness flip), so the axis
+            // flips: B·x̂ = (0,0,−1), det·B·x̂ = (0,0,+1). The sign
+            // matters — with B·x̂ every DOF deflects the inverse way
+            // (invisible at rest, wrong as soon as anything moves).
+            w.raw(", \"op\": \"rot\", \"axis\": [0, 0, 1]");
             break;
     }
     w.raw(" } }");

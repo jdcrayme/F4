@@ -224,6 +224,17 @@ public:
     /// aircraft got armed by THIS call.
     bool arm_campaign_aircraft(entities::EntityId id);
 
+    /// P7 — apply a campaign flight's RoE (the wire roe_check byte
+    /// the intent carried) to the entity's brain fire controls, AFTER
+    /// arming (the arm's configure_brain_combat sets the scenario's
+    /// own holds — the flight's RoE rides on top of it). The wire
+    /// vocabulary: 0 = weapons free (no change — the pre-P7 default),
+    /// 1 = weapons TIGHT (BVR missile employment suppressed, WVR
+    /// heaters + guns still employ), 2 = weapons HOLD (every fire
+    /// control tight). Idempotent; a no-op on entities without a
+    /// brain.
+    void apply_flight_roe(entities::EntityId id, std::uint8_t roe);
+
     /// C6 diagnostics: how many campaign aircraft this Simulation armed
     /// (total + per doctrine role). The QC summary + the session stats
     /// read exactly these.

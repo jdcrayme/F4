@@ -434,6 +434,10 @@ CampaignSession::create(const CampaignSessionOptions& opts,
     // sink's unit-loss booking ride this one flag (the aa_combat /
     // ground_war opt-in contract).
     ladder_cfg.unit_strike = opts.unit_strike;
+    // P7: the strategy layer — station targeting, FindSupportFlights,
+    // RequestEnemyMission, racetrack routes (one flag, the same
+    // opt-in contract). The ATM inherits it at construction.
+    ladder_cfg.strategy_layer = opts.strategy_layer;
     session->ladder_ = std::make_unique<f4::campaign::Campaign>(
         static_cast<const f4::world::ICampaignSource&>(
             session->adapters_->campaign),
@@ -544,6 +548,10 @@ CampaignSession::create(const CampaignSessionOptions& opts,
     session->threat_viewer_ = viewer;
     f4::campaign::RouteBuilderConfig route_cfg;
     route_cfg.min_avoid_threat = 25;
+    // P7: the loiter racetracks ride the strategy arm (one source of
+    // truth — the routes only change shape for strategy-armed
+    // sessions).
+    route_cfg.loiter_racetracks = opts.strategy_layer;
     session->route_builder_ = std::make_unique<f4::campaign::RouteBuilder>(
         static_cast<const f4::world::IObjectiveSource&>(
             session->adapters_->objectives),
@@ -696,6 +704,17 @@ void CampaignSession::adopt_new_spawns_() {
         sim_->register_aircraft(spawned[registered_spawns_]);
         sim_->arm_campaign_aircraft(spawned[registered_spawns_]);
         ++registered_spawns_;
+    }
+    // P7 — the flights' RoE rides on top of the armed doctrine (the
+    // arm's configure_brain_combat owns the scenario's holds; the
+    // flight's own roe_check byte gates from here on). Applied every
+    // cadence — the gates are idempotent assignments and the roster
+    // walk is arrival-ordered, so re-applying is a no-op.
+    for (const auto id : spawned) {
+        auto* fp = f4::entities::EntityHandle(id, &sim_->world())
+                       .get<f4::simulation::CampaignOriginComponent>();
+        if (fp == nullptr) continue;
+        sim_->apply_flight_roe(id, spawner_->flight_roe(fp->flight_vu));
     }
 }
 

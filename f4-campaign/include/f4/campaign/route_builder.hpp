@@ -40,9 +40,28 @@
 //   * TOT/speed timing (SetWPTimes — the C4 TOT-slot tranche);
 //   * per-action altitude shaping beyond mission-altitude legs
 //     (CheckBestAltitude's 5-point band sampling; M4.5);
-//   * loiter/sweep racetrack patterns (TPROF_LOITER gets the target
-//     WP; the repeat pattern is the loiter tranche);
 //   * tanker waypoints (fuel planning tranche).
+//
+// THE STRATEGY TRANCHES'S RACETRACK (the loiter pattern, P7): a
+// TPROF_LOITER route armed with loiter_racetracks no longer stops at
+// the target WP — it emits a CLOSED RACETRACK CIRCUIT anchored there:
+//
+//   anchor (the target WP: the profile's WP_CAP/WP_ORBIT action, the
+//           station_time_s = the profile's loitertime, loop_waypoints
+//           = 4 — the sim-side hold contract, see NavigationModule's
+//           station hold — the AI plan's deferred rung 17)
+//   c1     = anchor + L · inbound course  (the long leg runs ALONG the
+//           arrival axis — the box spans the objective across the
+//           threat axis)
+//   c2     = c1 + W · right
+//   c3     = anchor + W · right (the exit corner — egress departs
+//           from here)
+//
+// the loop anchor→c1→c2→c3→anchor repeats station-side for the
+// profile's loitertime; L/W are the port's documented shape constants
+// (RouteBuilderConfig — the reference reads its racetrack dimensions
+// from aiinput.dat values our sources cannot see). Corners carry
+// WPF_TURNPOINT (critical — the eliminator never cuts them).
 //
 // Determinism: a pure function of (threat map, objectives, profile,
 // endpoints) — the reference's own RNG-free path (its randomness lives
@@ -75,6 +94,19 @@ struct RouteWaypoint {
     std::uint16_t flags = 0;  ///< WPF_* bits (IP/TARGET/TURNPOINT/...)
     std::uint32_t target_num = 0;  ///< target objective VU_ID.num
                                    ///< (delivery waypoints)
+
+    /// P7 — the station-hold contract (0 = no hold: every route the
+    /// pre-strategy builder emitted, and every saved route, stay
+    /// exactly as they were). On a racetrack ANCHOR: how long the
+    /// flight holds station (seconds — the profile's loitertime) once
+    /// this waypoint is captured. The sim-side NavigationModule loops
+    /// the following `loop_waypoints` waypoints until the timer
+    /// expires, then resumes the route (egress, landing).
+    std::int32_t station_time_s = 0;
+    /// P7 — the hold loop's waypoint span INCLUDING the anchor (the
+    /// module wraps back to the anchor after the span's last corner;
+    /// 0/1 = no loop — hold only rides a ≥4-waypoint circuit).
+    std::uint8_t loop_waypoints = 0;
 
     /// Element-wise equality (MissionIntent's own comparison needs it).
     bool operator==(const RouteWaypoint&) const = default;
@@ -142,6 +174,18 @@ struct RouteBuilderConfig {
     /// A* node budget for one safe-path search (AirPathMax; bounded by
     /// the 2000-node pool regardless).
     int air_path_max = 2000;
+
+    /// P7 — emit the TPROF_LOITER racetrack circuit (the strategy
+    /// tranche's loiter pattern). DEFAULT OFF: the pre-strategy shape
+    /// (TPROF_LOITER gets the target WP only) is the golden identity;
+    /// the Campaign arms it under its own strategy_layer flag.
+    bool loiter_racetracks = false;
+    /// Racetrack long-leg length, grid units (≈11 nm at the C3 scale).
+    /// Port constant — the reference's own dimensions live in aiinput
+    /// values our sources cannot see (documented deviation).
+    int racetrack_length_grid = 20;
+    /// Racetrack cross-leg width, grid units (≈4.5 nm).
+    int racetrack_width_grid = 8;
 };
 
 /// One route build's outcome + QC counters.
@@ -165,6 +209,9 @@ struct RouteBuildResult {
     bool direct_fallback = false;
     /// Waypoints removed by the eliminator.
     int eliminated = 0;
+    /// P7 — racetrack corners emitted (0 = no station pattern; the
+    /// anchor is not counted — it IS the profile's target WP).
+    int racetrack_corners = 0;
     /// Legs actually flown: waypoint-to-waypoint distances (grid units),
     /// the QC artifact's route length.
     int route_length_grid = 0;

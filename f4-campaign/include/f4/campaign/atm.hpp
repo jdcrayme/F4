@@ -196,6 +196,14 @@ struct MissionRequest {
     TotType tot_type = TotType::LE;
     std::uint8_t delayed = 0;     ///< 30-minute pushes so far
     bool seeded = false;          ///< from the decoded backlog
+    /// P7 — the request's RoE (the wire MissionRequestClass roe_check
+    /// byte, carried from the decoded backlog verbatim; 0 = weapons
+    /// free — every pre-P7 request and every generated request).
+    std::uint8_t roe = 0;
+    /// P7 — filed by the STRATEGY layer on the enemy's behalf (the
+    /// RequestEnemyMission path: a strike package's ADDBARCAP files a
+    /// defender CAP over the threatened objective). Telemetry + QC.
+    bool enemy_filed = false;
 };
 
 /// A flight's role in its package (the support-assignment vocabulary).
@@ -203,6 +211,9 @@ enum class FlightRole : std::uint8_t {
     Main = 0,
     SeadEscort = 1,   ///< ADDSEAD + NEED_SEAD pairing (AMIS_SEADESCORT)
     Escort = 2,       ///< ADDESCORT pairing (AMIS_ESCORT)
+    Support = 3,      ///< P7 — FindSupportFlights filings (AWACS/tanker/
+                      ///< ECM racetrack stations; the flight owns its
+                      ///< route — the station orbit, not the package's)
 };
 
 /// One flight the ATM fields — the publish contract between the ATM
@@ -227,6 +238,10 @@ struct FlightTasking {
     /// TOT offset from the main flight (role != Main; the support
     /// profile's separation, seconds).
     int separation_sec = 0;
+    /// P7 — the flight's RoE (the request's roe_check byte; 0 =
+    /// weapons free). The intent carries it; the sim gates the brain's
+    /// fire controls with it.
+    std::uint8_t roe = 0;
 };
 
 /// One mission-recovery release (a completing flight returning its
@@ -268,6 +283,27 @@ struct AtmConfig {
     /// route-less, exactly the C3-documented shape). The Campaign's
     /// own unit_strike flag arms it (one source of truth).
     bool unit_strike = false;
+
+    /// P7 — the strategy layer: CAP-family station targeting (the
+    /// defensive CAP orbit flies over a ranked OWN objective, not
+    /// target-less), FindSupportFlights (ADDAWACS/ADDTANKER/ADDECM
+    /// share-or-file, FlightRole::Support stations with racetrack
+    /// routes), RequestEnemyMission (a strike package's ADDBARCAP
+    /// files a defender BARCAP over the threatened objective for the
+    /// enemy's NEXT cycle). DEFAULT OFF — the golden identity (CAP
+    /// and support requests stay target-less, no support filings, no
+    /// enemy filings; every pinned ATM pipeline test unchanged). The
+    /// Campaign's own strategy_layer flag arms it (one source of
+    /// truth).
+    bool strategy = false;
+    /// Support-share radius: a booked/on-cycle support flight whose
+    /// station sits within this many grid units of the package's
+    /// target COVERS the package (the reference's FindSupportFlights
+    /// sharing — one tanker feeds a whole raid).
+    int support_share_distance_grid = 30;
+    /// Pending enemy-request queue cap per team (RequestEnemyMission
+    /// filings awaiting the defender's next generate_requests).
+    int max_pending_enemy_requests = 4;
 };
 
 /// The pipeline's own telemetry (the QC gates and the summary read
@@ -285,6 +321,12 @@ struct AtmStats {
     int slot_shifts_sec = 0;      ///< total TOT shift from snapping
     int recoveries = 0;           ///< flights completed (recovery)
     int aircraft_recovered = 0;   ///< survivors released
+    // P7 — the strategy layer's counters (all deterministic).
+    int stations_targeted = 0;    ///< CAP requests given a station
+    int supports_filed = 0;       ///< support flights filed (unshared)
+    int supports_shared = 0;      ///< packages covered by an existing
+                                  ///< support flight (no new flight)
+    int enemy_caps_filed = 0;     ///< RequestEnemyMission filings
 };
 
 // ============================================================================
@@ -487,15 +529,61 @@ private:
     /// the ATM's own counter; ledger mode just tracks outstanding).
     void draw_(SquadronState& sq, int count);
 
+    /// P7 — the strategy layer's helpers (all deterministic; every
+    /// consumer is strategy-gated).
+
+    /// The team's OWN objectives, value-ranked (objtype_priority/2 +
+    /// the objective's own priority scaling — the same arithmetic the
+    /// target term of request_priority_ uses), wire-order ties. The
+    /// CAP-family station pool (the defensive CAP orbit flies over
+    /// what the team values).
+    [[nodiscard]] std::vector<std::uint32_t>
+    own_objectives_(std::uint8_t team) const;
+
+    /// The own objective nearest (grid distance, wire-order ties) to
+    /// (x, y) — the support-flight station pick (the orbit parks just
+    /// behind the threatened area). 0 when the team owns nothing.
+    [[nodiscard]] std::uint32_t
+    nearest_own_objective_(std::uint8_t team, int x, int y) const;
+
+    /// RequestEnemyMission: file a defender BARCAP over `target_vu`
+    /// (the objective a just-built strike package threatens) for the
+    /// other belligerent's NEXT generate_requests — the pending queue
+    /// below. Dedup: one identical pending request; cap:
+    /// max_pending_enemy_requests.
+    void file_enemy_barcap_(std::uint8_t attacker_team,
+                            std::uint32_t target_vu, CampaignTime now);
+
+    /// FindSupportFlights: share-or-file one support mission
+    /// (support_name) requested by `flag_name` on the main flight's
+    /// profile. Share: a booked or on-cycle flight of the same byte,
+    /// same team, station within support_share_distance_grid of the
+    /// package target, TOT inside the support window — no new flight
+    /// (supports_shared). File: station = nearest own objective to
+    /// the package target, FlightRole::Support, its own FindBestAir
+    /// (no package-lead preference — the best SUPPORT squadron),
+    /// plus the support profile's own fighter escort when it carries
+    /// ADDESCORT. Nothing files when the team owns no station.
+    void file_support_flight_(std::vector<FlightTasking>& flights,
+                              const FlightTasking& main,
+                              std::string_view flag_name,
+                              std::string_view support_name,
+                              std::uint8_t team, CampaignTime now,
+                              std::uint32_t package_id);
+
     /// Build one support flight (phase 5's per-escort worker): pick
     /// via FindBestAir (with the package-lead bonuses), TOT = main
     /// TOT + separation, size min-capped per the reference. False when
     /// no squadron could fly it (counted, the package still flies).
+    /// P7: `target_vu_override` re-stations the flight (the support
+    /// filings orbit their OWN station objective, not the package's
+    /// target); 0 keeps the package target.
     bool build_support_flight_(FlightTasking& out, std::uint8_t team,
                                CampaignTime now, std::uint32_t package_id,
                                const FlightTasking& main,
                                std::string_view support_name, int aircraft,
-                               const SquadronState* main_sq);
+                               const SquadronState* main_sq,
+                               std::uint32_t target_vu_override = 0);
 
     /// Seed the decoded ATO backlog once (cached per team).
     void seed_backlog_();
@@ -524,6 +612,12 @@ private:
     /// list (the unit-target family's own spread, decoupled from the
     /// objective rotation).
     std::array<int, 8> unit_target_cursor_{};
+    /// P7 — per-team rotation cursor over the ranked OWN objective
+    /// list (the CAP family's station spread).
+    std::array<int, 8> station_cursor_{};
+    /// P7 — RequestEnemyMission filings awaiting the defender's next
+    /// generate_requests (indexed by team slot).
+    std::array<std::vector<MissionRequest>, 8> pending_enemy_{};
     bool backlog_seeded_ = false;
 
     std::uint32_t next_package_id_ = 1;

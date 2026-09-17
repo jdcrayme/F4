@@ -54,6 +54,8 @@ const char* channel_name(Channel c) noexcept {
         "rotor.main", "rotor.tail", "sw.rotors",
         // lights
         "light.nav", "light.strobe", "light.landing",
+        // sensors / ground
+        "radar.dish_spin",
     };
     constexpr uint16_t kTableSize =
         static_cast<uint16_t>(sizeof(kNames) / sizeof(kNames[0]));
