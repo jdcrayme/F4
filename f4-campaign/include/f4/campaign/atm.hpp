@@ -162,6 +162,8 @@
 
 #pragma once
 
+#include <optional>
+
 #include <f4/campaign/mission_profile.hpp>
 #include <f4/campaign/mission_type.hpp>
 #include <f4/campaign/result_ledger.hpp>
@@ -321,6 +323,10 @@ struct AtmStats {
     int slot_shifts_sec = 0;      ///< total TOT shift from snapping
     int recoveries = 0;           ///< flights completed (recovery)
     int aircraft_recovered = 0;   ///< survivors released
+    // CAMP-CMD-2 — the command-driven closures (deterministic; the
+    // scrub's releases ride the same ledger booking recovery uses).
+    int flights_scrubbed = 0;     ///< bookings closed by flight_abort
+    int aircraft_scrubbed = 0;    ///< survivors released by those scrubs
     // P7 — the strategy layer's counters (all deterministic).
     int stations_targeted = 0;    ///< CAP requests given a station
     int supports_filed = 0;       ///< support flights filed (unshared)
@@ -459,6 +465,29 @@ public:
     /// Returns the releases for the Campaign to book into the ledger.
     [[nodiscard]] std::vector<RecoveryRelease>
     recover_completed(CampaignTime now);
+
+    // --- CAMP-CMD-2 — the booked-flight interventions --------------------
+
+    /// Scrub one booked flight (the mission-scrub half of flight_abort):
+    /// the booking closes NOW — the flight leaves booked_, its survivors
+    /// release exactly as recover_completed would (drawn − booked
+    /// losses; the no-ledger mode refills the squadron pool the same
+    /// way). Returns the release for the caller's ledger booking
+    /// (nullopt when no booking carries the flight id — a save-carried
+    /// flight's books closed in the save's own history; nothing to
+    /// close here).
+    [[nodiscard]] std::optional<RecoveryRelease>
+    scrub_flight(std::uint32_t flight_id);
+
+    /// Retask one booked flight (the flight_retask bookkeeping): the
+    /// booking follows the flight — new mission byte, target, TOT, and
+    /// mission-over deadline. The takeoff slot stays (historical — the
+    /// flight launched or holds per its own gate); deconfliction and
+    /// support sharing see the NEW mission family from the next cycle
+    /// on. False when no booking carries the flight id.
+    bool reschedule_flight(std::uint32_t flight_id, std::uint8_t mission,
+                           std::uint32_t target_vu, CampaignTime tot,
+                           CampaignTime mission_over);
 
     // --- Inspection -------------------------------------------------------
 

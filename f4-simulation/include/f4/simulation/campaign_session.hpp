@@ -521,6 +521,10 @@ public:
         bool destroyed = false;
         std::int32_t to_depart = -1;        ///< seconds (−1 = none)
         std::int32_t to_mission_over = -1;  ///< seconds (−1 = none)
+        /// CAMP-CMD-2: the flight was aborted — scrubbed before launch
+        /// (never flies) or flying its RTB leg home. The row stays for
+        /// the war's history; the tier triggers skip it either way.
+        bool aborted = false;
     };
 
     /// True under the Tiered policy (the aggregate engine exists).
@@ -566,6 +570,64 @@ public:
     std::size_t apply_roe_command(
         const f4::campaign::api::RoEScope& scope,
         f4::campaign::api::RoeLevel roe);
+
+    // --- CAMP-CMD-2 — the retask / abort / priority writes -------------
+
+    /// The command write's outcome (refusal is data; the contract host
+    /// maps these onto the typed CommandAck refusals).
+    enum class CommandWrite {
+        Applied,
+        UnknownFlight,     ///< the flight VU is not in this session's war
+        UnknownObjective,  ///< no objective carries the id
+        InvalidArgument,   ///< well-formed command, nonsensical here
+    };
+    struct CommandWriteResult {
+        CommandWrite status = CommandWrite::Applied;
+        std::string detail;      ///< the ack's factual context
+        std::size_t matched = 0; ///< live aircraft the write touched
+    };
+
+    /// flight_retask: replan the flight FROM WHERE IT IS onto a new
+    /// mission/target. The route rebuilds through the session's own
+    /// RouteBuilder (threat-aware, home airbase → target), splices at
+    /// the new plan's ingress point, and heads with the flight's
+    /// CURRENT position; TOT and the mission-over deadline recompute
+    /// from the cruise-speed estimate (the ATM's own arithmetic). The
+    /// write lands on every shape the flight is in: the aggregate row
+    /// (tiered), the stored synthetic intent (so a later deagg spawns
+    /// the NEW plan), the live aircraft's brains (Enroute re-routes
+    /// immediately), and the ATM booking (the recovery clock follows
+    /// the new plan). Refused: unknown flight/objective, a flight that
+    /// has arrived/been destroyed/aborted, no home airbase, an
+    /// untasked mission byte, a route that cannot build.
+    [[nodiscard]] CommandWriteResult
+    apply_retask_command(std::uint32_t flight_vu, std::uint8_t mission_byte,
+                         std::uint32_t target_objective_vu);
+
+    /// flight_abort: close the sortie. A flight that has not launched
+    /// is SCRUBBED (never flies; a live parked complement retires) and
+    /// a flight in the air flies its RTB leg home (route = [current
+    /// position → home landing waypoint], the brains re-plan onto it).
+    /// Either way the package's books close NOW: an ATM booking releases
+    /// its survivors through the Campaign's scrub (the ledger's
+    /// apply_mission_recovery — the draw's mirror at the current clock).
+    /// Save-carried flights have no booking in THIS session's ledger —
+    /// their books closed in the save's own history; the abort is
+    /// operational only.
+    [[nodiscard]] CommandWriteResult
+    apply_abort_command(std::uint32_t flight_vu);
+
+    /// objective_priority: the commander's weight (0..100, the save's
+    /// own objective-priority scale) REPLACES the objective's priority —
+    /// the first runtime write of the field every tasking score reads
+    /// (the ATM's request target term, the CAP station ranking, the
+    /// enemy target rotation, the legacy ladder's select_target). The
+    /// WorldState objective row is the write target (one truth; the
+    /// next tasking cycle sees it, the `objectives` query echoes it,
+    /// and the contract save() persists it). Re-set replaces.
+    [[nodiscard]] CommandWriteResult
+    apply_objective_priority(std::uint32_t objective_vu,
+                             std::uint8_t weight);
 
     /// EntityId lookup for the LIVE world (the sim's): VU_ID.num →
     /// entity, rebuilt at construction from the sim's own population.
@@ -646,6 +708,45 @@ private:
 
     /// CAMP-CMD-1: the applied roe_set commands, in arrival order.
     std::vector<RoeCommand> roe_commands_;
+
+    // --- CAMP-CMD-2: the retask/abort/priority state ---------------------
+
+    /// The flights a flight_abort has closed (scrubbed before launch or
+    /// RTB-ing home) — the tier triggers and the air picture skip them
+    /// forever (a folded RTB flight must never re-deaggregate into a
+    /// resurrected sortie from its stale intent).
+    std::unordered_set<std::uint32_t> aborted_flights_;
+
+    /// ATM tunables the retask arithmetic reuses (copied at create from
+    /// the ladder config — the options object dies, these outlive it).
+    int atm_reserve_min_ = 20;
+    double atm_cruise_grid_per_min_ = 12.0;
+
+    /// One flight's shapes: the aggregate row (tiered) + the live
+    /// aircraft whose origin stamps carry the flight VU.
+    struct FlightShape {
+        bool found = false;
+        bool aggregate = false;
+        std::size_t agg_index = static_cast<std::size_t>(-1);
+        std::uint8_t team = 0;
+        std::vector<f4::entities::EntityId> live;  ///< arrival order
+    };
+    [[nodiscard]] FlightShape find_flight_shape_(std::uint32_t vu) const;
+
+    /// The flight's home airbase VU (the route builder's anchor):
+    /// the ATM booking's airbase for a synthetic, else the squadron
+    /// entity's airbase, else the origin stamp's. 0 = none resolvable.
+    [[nodiscard]] std::uint32_t
+    home_airbase_for_flight_(std::uint32_t vu) const;
+
+    /// The ATM flight id a flight VU books under (the synthetic
+    /// namespace packs it; every other VU books as itself).
+    [[nodiscard]] std::uint32_t booking_flight_id_(
+        std::uint32_t flight_vu) const noexcept {
+        return synthetic_intents_.count(flight_vu) != 0
+                   ? (flight_vu & 0xFFFFu)
+                   : flight_vu;
+    }
 
     /// One deaggregated flight: the materialized aircraft + the tier
     /// bookkeeping (the trigger that spawned it, when, and until when

@@ -67,6 +67,7 @@
 #include <array>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -310,6 +311,45 @@ public:
     [[nodiscard]] const std::vector<FlightTasking>* atm_booked_flights()
         const noexcept {
         return atm_ ? &atm_->booked_flights() : nullptr;
+    }
+
+    // --- CAMP-CMD-2 — the command-driven booking interventions ---------
+    //
+    // The Campaign is the tasking owner (it books draws and recoveries
+    // — one writer, one clock), so the session's retask/abort commands
+    // reach the ATM's bookings THROUGH it.
+
+    /// Retask one booked flight (flight_retask's bookkeeping): the
+    /// booking follows the flight — new mission byte, target, TOT, and
+    /// mission-over deadline (the recovery clock moves with the new
+    /// plan; the ledger books stay untouched — the draw stands, the
+    /// recovery books when the retasked mission closes). False when no
+    /// booking carries the flight id (save-carried flights have none).
+    bool reschedule_flight(std::uint32_t flight_id, std::uint8_t mission,
+                           std::uint32_t target_vu, CampaignTime tot,
+                           CampaignTime mission_over) {
+        return atm_ && atm_->reschedule_flight(flight_id, mission,
+                                               target_vu, tot,
+                                               mission_over);
+    }
+
+    /// Scrub one booked flight (flight_abort's bookkeeping — the
+    /// mission scrub): the booking closes NOW and the survivors'
+    /// recovery books into the ledger at the CURRENT clock (the same
+    /// apply_mission_recovery recover_missions_ rides — one booking
+    /// site). Returns the release (nullopt when no booking carries the
+    /// flight id — a save-carried flight's books closed in the save's
+    /// own history; nothing to close here and nothing books).
+    [[nodiscard]] std::optional<RecoveryRelease>
+    scrub_flight(std::uint32_t flight_id) {
+        if (!atm_) return std::nullopt;
+        auto rel = atm_->scrub_flight(flight_id);
+        if (rel.has_value() && result_ledger_ != nullptr) {
+            result_ledger_->apply_mission_recovery(
+                static_cast<double>(clock_), rel->team, rel->squadron_vu,
+                rel->flight_id, rel->survivors);
+        }
+        return rel;
     }
 
     /// Attach the C1 result ledger — the war-loop feedback. While

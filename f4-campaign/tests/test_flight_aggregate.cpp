@@ -381,3 +381,141 @@ TEST(FlightAggregate, DeterministicEnginesFinishEqual) {
         EXPECT_EQ(fa.wp_index, fb.wp_index);
     }
 }
+
+// ── CAMP-CMD-2 — the retask/scrub command writes ────────────────────────────
+
+TEST(FlightAggregateCmd, RetaskResumesFromPositionOntoTheNewRoute) {
+    Rig rig;
+    rig.ws = std::make_unique<WorldState>(Rig::base());
+    auto u = flight(5001, 2, 100, 100, 13,
+                    {wp(100, 100, 0), wp(200, 100, 100),
+                     wp(300, 100, 100)},
+                    {group(2)});
+    rig.ws->units.push_back(u);
+    rig.make();
+
+    ASSERT_NE(rig.engine->find(5001), nullptr);
+    // Five minutes east: 5 updates × 12 grid = 60 along leg 1.
+    rig.engine->tick(300);
+    const auto* f = rig.engine->find(5001);
+    ASSERT_NEAR(f->fx, 160.0, 1e-9);
+    ASSERT_NEAR(f->fy, 100.0, 1e-9);
+    ASSERT_FALSE(f->arrived);
+
+    // Retask: from where it is, north instead of east. The head IS the
+    // retask position; the cursor starts at index 1 (the new target).
+    const std::int64_t now_abs = kEpoch + 300;
+    ASSERT_TRUE(rig.engine->retask(
+        5001, 20,
+        {wp(160, 100, 100), wp(160, 220, 100)},
+        static_cast<std::int32_t>(now_abs + 600),
+        static_cast<std::int32_t>(now_abs + 3600)));
+    f = rig.engine->find(5001);
+    EXPECT_EQ(f->mission, 20);
+    EXPECT_EQ(f->time_on_target, now_abs + 600);
+    EXPECT_EQ(f->mission_over_time, now_abs + 3600);
+    EXPECT_EQ(f->wp_index, 1u);
+    EXPECT_TRUE(f->has_route);
+
+    // The next advance walks the NEW leg (north) — no eastward drift,
+    // the fuel clock uninterrupted.
+    const auto fuel_before = f->fuel_burnt;
+    rig.engine->tick(300);
+    f = rig.engine->find(5001);
+    EXPECT_NEAR(f->fx, 160.0, 1e-9);
+    EXPECT_NEAR(f->fy, 160.0, 1e-9);
+    EXPECT_GT(f->fuel_burnt, fuel_before);
+    EXPECT_FALSE(f->arrived);
+}
+
+TEST(FlightAggregateCmd, RetaskFlipsATimeModeFlightOntoSpeedMode) {
+    Rig rig;
+    rig.ws = std::make_unique<WorldState>(Rig::base());
+    // A save schedule: the flight is mid-leg at now + 300 (t = 200/300
+    // of leg 1 → x = 140).
+    rig.ws->units.push_back(
+        flight(5002, 2, 100, 100, 13,
+               {wp(100, 100, 0, 0, kEpoch + 100),
+                wp(160, 100, 100, kEpoch + 400, kEpoch + 500),
+                wp(220, 100, 100, kEpoch + 700)}));
+    rig.make();
+
+    rig.engine->tick(300);
+    const auto* f = rig.engine->find(5002);
+    ASSERT_NEAR(f->fx, 140.0, 1e-9);
+
+    // The retask route carries no leg times — the flight flies it at
+    // the cruise from the retask point (a TIME-mode flight whose new
+    // legs had arrives = 0 would never move again; the flip is the
+    // documented semantics).
+    const std::int64_t now_abs = kEpoch + 300;
+    ASSERT_TRUE(rig.engine->retask(
+        5002, 14,
+        {wp(140, 100, 100), wp(140, 190, 100)},
+        static_cast<std::int32_t>(now_abs + 450),
+        static_cast<std::int32_t>(now_abs + 3000)));
+    rig.engine->tick(120);   // two speed updates → 24 grid north
+    f = rig.engine->find(5002);
+    EXPECT_NEAR(f->fx, 140.0, 1e-9);
+    EXPECT_NEAR(f->fy, 124.0, 1e-9);
+    EXPECT_EQ(f->mission, 14);
+}
+
+TEST(FlightAggregateCmd, RetaskRefusesTerminalFlightsAndEmptyRoutes) {
+    Rig rig;
+    rig.ws = std::make_unique<WorldState>(Rig::base());
+    rig.ws->units.push_back(
+        flight(5003, 2, 0, 0, 13, {wp(0, 0, 0), wp(12, 0, 0)}));
+    rig.make();
+
+    // Unknown vu.
+    EXPECT_FALSE(rig.engine->retask(999, 20, {wp(1, 1, 0), wp(2, 2, 0)}, 1, 2));
+    // Empty route — a retask flies SOMEWHERE.
+    EXPECT_FALSE(rig.engine->retask(5003, 20, {}, 1, 2));
+
+    // Arrived: the books closed, nothing to retask.
+    rig.engine->tick(3600);
+    ASSERT_TRUE(rig.engine->find(5003)->arrived);
+    EXPECT_FALSE(rig.engine->retask(5003, 20, {wp(5, 5, 0), wp(6, 6, 0)}, 1, 2));
+
+    // Destroyed (the fold-back of a dead complement).
+    Rig rig2;
+    rig2.ws = std::make_unique<WorldState>(Rig::base());
+    rig2.ws->units.push_back(
+        flight(5004, 2, 0, 0, 13, {wp(0, 0, 0), wp(12, 0, 0)}));
+    rig2.make();
+    rig2.engine->mark_destroyed(5004);
+    EXPECT_FALSE(rig2.engine->retask(5004, 20, {wp(5, 5, 0), wp(6, 6, 0)}, 1, 2));
+}
+
+TEST(FlightAggregateCmd, ScrubIsTerminalAndSkipsEveryWindow) {
+    Rig rig;
+    rig.ws = std::make_unique<WorldState>(Rig::base());
+    auto u = flight(5005, 2, 30, 30, 13,
+                    {wp(30, 30, 0, 0, kEpoch + 600),
+                     wp(90, 30, 100, 0, kEpoch + 1200)});
+    rig.ws->units.push_back(u);
+    // The engine's snapshot reads mission_over/TOT from the flight row's
+    // source view — set them through the unit state where the adapter
+    // does; a row without them reports −1 and the test pins the guards
+    // on the depart window (the one this route carries).
+    rig.make();
+
+    const auto idx = rig.engine->index_of(5005);
+    ASSERT_NE(idx, std::size_t(-1));
+    EXPECT_GT(rig.engine->seconds_to_depart(idx), 0);   // holds for takeoff
+
+    ASSERT_TRUE(rig.engine->scrub(5005));
+    EXPECT_EQ(rig.engine->stats().scrubbed, 1);
+    // The windows go dark, the flight never moves, and the terminal
+    // state refuses every further write.
+    EXPECT_EQ(rig.engine->seconds_to_depart(idx), -1);
+    rig.engine->tick(3600);
+    const auto* f = rig.engine->find(5005);
+    EXPECT_NEAR(f->fx, 30.0, 1e-9);
+    EXPECT_NEAR(f->fy, 30.0, 1e-9);
+    EXPECT_FALSE(f->arrived);
+    EXPECT_FALSE(f->destroyed);
+    EXPECT_FALSE(rig.engine->scrub(5005));
+    EXPECT_FALSE(rig.engine->retask(5005, 20, {wp(1, 1, 0), wp(2, 2, 0)}, 1, 2));
+}

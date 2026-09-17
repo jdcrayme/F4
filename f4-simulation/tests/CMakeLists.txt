@@ -52,6 +52,14 @@ target_compile_definitions(test_campaign_session_host PRIVATE
     F4_MISSION_PROFILES_JSON="${F4_MISSION_PROFILES_JSON}"
 )
 add_dependencies(test_campaign_session_host mission_profiles_fixture)
+f4_simulation_add_test(test_campaign_commands      test_campaign_commands.cpp)  # CAMP-CMD-2: the retask/abort/priority gates
+target_compile_definitions(test_campaign_commands PRIVATE
+    F4_SIMULATION_TEST_FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures"
+    F4_SOURCE_FIXTURES_DIR="${CMAKE_SOURCE_DIR}/f4-world-convert/tests/fixtures"
+    F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}"
+    F4_MISSION_PROFILES_JSON="${F4_MISSION_PROFILES_JSON}"
+)
+add_dependencies(test_campaign_commands mission_profiles_fixture)
 f4_simulation_add_test(test_fidelity_combat       test_fidelity_combat.cpp)  # FID-5
 target_compile_definitions(test_fidelity_combat PRIVATE
     F4_SOURCE_FIXTURES_DIR="${CMAKE_SOURCE_DIR}/f4-world-convert/tests/fixtures"

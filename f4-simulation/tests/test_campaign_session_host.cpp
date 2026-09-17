@@ -454,21 +454,51 @@ TEST(CampaignSessionHost, ReaggOfAnAggregateRefusesTyped) {
     EXPECT_EQ(ack.refusal, api::CommandAck::Refusal::InvalidArgument);
 }
 
-TEST(CampaignSessionHost, CampCmdQueueRefusesWithTheTrancheNamed) {
+TEST(CampaignSessionHost, CampCmdQueueRefusesTyped) {
     const auto rig = HostRig::make();
 
-    // CAMP-CMD-1 landed roe_set — the remaining CMD queue still refuses
-    // with the tranche named (the wire is stable; CAMP-CMD-2 lands
-    // behind the same protocol without a bump).
-    for (const auto kind : {api::CommandIntent::Kind::FlightRetask,
-                            api::CommandIntent::Kind::FlightAbort,
-                            api::CommandIntent::Kind::ObjectivePriority}) {
-        api::CommandIntent cmd;
-        cmd.kind = kind;
-        const auto ack = rig.host->submit(cmd);
-        EXPECT_EQ(ack.refusal, api::CommandAck::Refusal::NotImplemented);
-        EXPECT_NE(ack.detail.find("CAMP-CMD-2"), std::string::npos);
-    }
+    // CAMP-CMD-2 landed the last of the v1 command set — the queue's
+    // refusals are now the ENGINE's typed semantics, not the tranche
+    // stub. Kind-only intents hit every guard:
+    //   flight_retask — mission byte 0 is not a taskable mission.
+    //   flight_abort  — flight VU 0 is in nobody's war.
+    //   objective_priority — objective 0 is in no world.
+    api::CommandIntent retask;
+    retask.kind = api::CommandIntent::Kind::FlightRetask;
+    auto ack = rig.host->submit(retask);
+    EXPECT_EQ(ack.status, api::CommandAck::Status::Refused);
+    EXPECT_EQ(ack.refusal, api::CommandAck::Refusal::InvalidArgument);
+    EXPECT_NE(ack.detail.find("taskable"), std::string::npos);
+
+    api::CommandIntent abort;
+    abort.kind = api::CommandIntent::Kind::FlightAbort;
+    ack = rig.host->submit(abort);
+    EXPECT_EQ(ack.status, api::CommandAck::Status::Refused);
+    EXPECT_EQ(ack.refusal, api::CommandAck::Refusal::UnknownFlight);
+
+    api::CommandIntent priority;
+    priority.kind = api::CommandIntent::Kind::ObjectivePriority;
+    ack = rig.host->submit(priority);
+    EXPECT_EQ(ack.status, api::CommandAck::Status::Refused);
+    EXPECT_EQ(ack.refusal, api::CommandAck::Refusal::UnknownObjective);
+
+    // The weight scale is the save's own objective-priority byte.
+    priority.weight = 101;
+    priority.objective_id = 4101;
+    ack = rig.host->submit(priority);
+    EXPECT_EQ(ack.refusal, api::CommandAck::Refusal::InvalidArgument);
+
+    // And the write itself: the first runtime write of the objective
+    // priority — the `objectives` query echoes it from the same row
+    // every tasking score reads.
+    priority.weight = 80;
+    ack = rig.host->submit(priority);
+    EXPECT_EQ(ack.status, api::CommandAck::Status::Applied);
+    EXPECT_EQ(ack.refusal, api::CommandAck::Refusal::None);
+    EXPECT_NE(ack.detail.find("4101"), std::string::npos);
+    EXPECT_NE(ack.detail.find("80"), std::string::npos);
+    const auto objectives = rig.query("objectives");
+    EXPECT_NE(objectives.find("\"priority\":80"), std::string::npos);
 }
 
 // ============================================================================
@@ -511,10 +541,13 @@ TEST(CampaignSessionHost, ProtocolEndToEnd) {
                   .find("\"dilated\":0"),
               std::string::npos);
 
-    // a refused command rides the wire as data
+    // a refused command rides the wire as data (CAMP-CMD-2: the abort
+    // of a REAL flight applies now — the refusal is the unknown VU's)
     const auto refused = rig.line(
-        R"({"v":1,"op":"command","intent":"flight_abort","flight":5001})");
+        R"({"v":1,"op":"command","intent":"flight_abort","flight":777})");
     EXPECT_NE(refused.find("\"status\":\"refused\""), std::string::npos);
+    EXPECT_NE(refused.find("\"refusal\":\"unknown_flight\""),
+              std::string::npos);
 
     // malformed is exit 20 with the error object
     std::string out;

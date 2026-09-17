@@ -148,6 +148,17 @@ TEST(CommandWire, AckRefusedGolden) {
               R"({"status":"refused","refusal":"not_implemented","detail":"CAMP-CMD-1 lands roe_set","apply_tick":1234})");
 }
 
+// CAMP-CMD-2 — the fourth refusal: no objective carries the id.
+TEST(CommandWire, AckRefusedUnknownObjectiveGolden) {
+    CommandAck ack;
+    ack.status = CommandAck::Status::Refused;
+    ack.refusal = CommandAck::Refusal::UnknownObjective;
+    ack.detail = "no objective carries id 999999";
+    ack.apply_tick = 99;
+    EXPECT_EQ(ack_json(ack),
+              R"({"status":"refused","refusal":"unknown_objective","detail":"no objective carries id 999999","apply_tick":99})");
+}
+
 // ============================================================================
 // unknown intents are a protocol error, not a silent no-op
 // ============================================================================

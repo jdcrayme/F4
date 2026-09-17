@@ -1146,6 +1146,70 @@ AirTaskingManager::recover_completed(CampaignTime now) {
 }
 
 // ============================================================================
+// CAMP-CMD-2 — the booked-flight interventions
+// ============================================================================
+
+std::optional<RecoveryRelease>
+AirTaskingManager::scrub_flight(std::uint32_t flight_id) {
+    for (std::size_t i = 0; i < booked_.size(); ++i) {
+        if (booked_[i].flight_id != flight_id) continue;
+        const FlightTasking ft = booked_[i];
+        booked_.erase(booked_.begin() + static_cast<std::ptrdiff_t>(i));
+
+        // Survivors: the recover_completed formula verbatim — drawn −
+        // the flight's booked losses (the ledger's per-flight log; 0
+        // when no ledger or no deaths).
+        int losses = 0;
+        if (ledger_ != nullptr) {
+            losses = ledger_->flight_air_losses(ft.flight_id,
+                                                ft.squadron_vu);
+        }
+        const int survivors = std::max(0, ft.aircraft - losses);
+
+        RecoveryRelease rel;
+        rel.team = ft.team;
+        rel.squadron_vu = ft.squadron_vu;
+        rel.flight_id = ft.flight_id;
+        rel.survivors = survivors;
+        ++stats_.flights_scrubbed;
+        stats_.aircraft_scrubbed += survivors;
+
+        // The ATM's own bookkeeping, the recovery shape verbatim: the
+        // outstanding draws drop by the flight's complement; the
+        // no-ledger mode ALSO refills its own pool (the ledger mode's
+        // refill happens when the caller books apply_mission_recovery —
+        // one booking site, the same rule recover_completed obeys).
+        for (auto& sq : squadrons_) {
+            if (sq.vu != ft.squadron_vu) continue;
+            sq.drawn_outstanding = std::max(
+                0, sq.drawn_outstanding - ft.aircraft);
+            if (ledger_ == nullptr) {
+                sq.available += survivors;
+            }
+            break;
+        }
+        return rel;
+    }
+    return std::nullopt;
+}
+
+bool AirTaskingManager::reschedule_flight(std::uint32_t flight_id,
+                                          std::uint8_t mission,
+                                          std::uint32_t target_vu,
+                                          CampaignTime tot,
+                                          CampaignTime mission_over) {
+    for (auto& ft : booked_) {
+        if (ft.flight_id != flight_id) continue;
+        ft.mission = mission;
+        ft.target_vu = target_vu;
+        ft.tot = tot;
+        ft.mission_over = mission_over;
+        return true;
+    }
+    return false;
+}
+
+// ============================================================================
 // P7 — the strategy layer (own_objectives_ / nearest_own_objective_ /
 //      file_enemy_barcap_ / file_support_flight_)
 // ============================================================================

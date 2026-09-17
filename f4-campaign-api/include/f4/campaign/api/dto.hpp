@@ -187,6 +187,10 @@ struct FlightView {
     bool destroyed{false};
     std::int32_t to_depart{-1};
     std::int32_t to_mission_over{-1};
+    /// CAMP-CMD-2 (v1.1 additive, the row's tail): the flight was
+    /// aborted before launch — a scrubbed sortie that never flies (the
+    /// books closed; the row stays for the war's history).
+    bool aborted{false};
 };
 
 inline void encode_flight(f4::json::Writer& w, const FlightView& f) {
@@ -216,6 +220,10 @@ inline void encode_flight(f4::json::Writer& w, const FlightView& f) {
     w.number(static_cast<long long>(f.to_depart));
     w.raw(",\"to_mission_over\":");
     w.number(static_cast<long long>(f.to_mission_over));
+    // CAMP-CMD-2 — the additive tail (the DTO rule: new fields ride at
+    // the END, always present — the canonical form never elides).
+    w.raw(",\"aborted\":");
+    w.raw(f.aborted ? "1" : "0");
     w.put('}');
 }
 

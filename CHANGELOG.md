@@ -5,6 +5,53 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## CAMP-CMD-2 — retask / abort / priority (the command surface completes)
+
+- **CAMP-CMD-2** — the v1 command set completes behind the CMD-1 wire
+  (Docs/CAMP_HOST_PLAN.md §3.3/§8). `flight_retask` replans a flight
+  FROM WHERE IT IS: the session rebuilds the route through its own
+  RouteBuilder (home airbase → target, threat-aware), splices at the
+  new plan's ingress point with the flight's CURRENT position as the
+  head, recomputes TOT and the mission-over deadline with the ATM's own
+  arithmetic (cruise-speed estimate + loiter + doubled reserve), and
+  lands the write on EVERY shape the flight is in — the aggregate row
+  (SPEED mode from the retask point; a TIME-mode save flight retasks
+  into speed), the stored synthetic intent, a save flight's world
+  WaypointPlanComponent (so a later deagg spawn flies the NEW route),
+  the live brains (BrainComponent::retask — the one sanctioned
+  mid-flight plan swap: Enroute hands the route straight to the
+  NavigationModule with reset steering, Approach/Complete refuse), and
+  the ATM booking (the recovery clock follows the new plan; the takeoff
+  slot survives). `flight_abort` closes the sortie: not-yet-launched →
+  the aggregate SCRUBS (a distinct terminal state — tick, tier
+  triggers, ops windows, and the air picture all skip it; a parked
+  complement folds back and retires) and airborne → the RTB leg home
+  ([current position → the route's own landing waypoint]); either way
+  the package's books close NOW — the ATM booking releases its
+  survivors through the Campaign's scrub (the ledger's
+  apply_mission_recovery at the current clock; save-carried flights
+  have no booking in this session's ledger — operational abort only),
+  the abort record keeps the tier triggers from ever resurrecting the
+  sortie, and the flights row reports the additive `aborted` tail.
+  `objective_priority` makes the commander's weight (0..100, the save's
+  own scale) the FIRST runtime write of the objective priority byte —
+  the same field every tasking score reads (the request target term,
+  the CAP station ranking, the enemy target rotation, the legacy
+  select_target), echoed by the `objectives` query and persisted by the
+  contract save(); re-set replaces. Refusals gain `unknown_objective`
+  (the wire's fourth typed reason). Gate: the M4/M5-style pinned
+  retask (a flight retasked mid-crank closes on the new target — or
+  the TOT window deaggregates it and the materialized aircraft carries
+  the new plan), the RTB abort with the books closing exactly once,
+  the next-cycle scoring moving with the priority write, and the CMD-1
+  identity statement extended: a journal carrying retask + priority +
+  abort replays into the SAME ledger fingerprint under different step
+  chunkings; the tampered-flight-id replay exits 23 with both
+  fingerprints named. Engine primitives pinned at their own level
+  (FlightAggregateEngine retask/scrub, ATM scrub_flight/
+  reschedule_flight). No commands → byte-identical; full ctest green
+  (the 3 pre-existing upstream data-drift pins untouched).
+
 ## CAMP-CMD-1 — the command journal + RoE doctrine
 
 - **CAMP-CMD-1** — the identity statement's command half lands

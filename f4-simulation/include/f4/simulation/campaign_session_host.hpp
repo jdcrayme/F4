@@ -21,9 +21,12 @@
 //   - roe_set — CAMP-CMD-1: the P7 fire-control path behind the command
 //     (team / mission / flight scopes; the session owns the doctrine
 //     store and the roe_changed event).
-//   - flight_retask / flight_abort / objective_priority — REFUSED with
-//     Refusal::NotImplemented and the tranche ID in the detail (CAMP-CMD-2
-//     lands behind the same wire; no protocol bump).
+//   - flight_retask / flight_abort / objective_priority — CAMP-CMD-2:
+//     the retask/abort/priority writes. The host validates the
+//     wire-level arguments (mission byte, target, weight range) and
+//     maps the session's command-write outcome onto the typed
+//     refusals; the session owns the flight shapes (aggregate row,
+//     stored intent, live brains, ATM booking).
 //
 // The command journal (CAMP-CMD-1, plan §2.3/§5): every APPLIED command
 // fires the journal sink with the engine tick it applied at; the sink is

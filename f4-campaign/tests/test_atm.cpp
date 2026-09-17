@@ -1253,3 +1253,134 @@ TEST(AtmStrategy, CampaignStrategyStationsCapsWithARoutePlanner) {
     ASSERT_NE(stats, nullptr);
     EXPECT_GT(stats->stations_targeted, 0);
 }
+
+// ── CAMP-CMD-2 — the booked-flight interventions + the priority input ───────
+
+TEST(AtmScrub, ClosesTheBookingAndReleasesSurvivors) {
+    AtmConfig cfg;
+    cfg.min_seadescort_threat = 30;   // the full trio (main + 2 escorts)
+    auto rig = Rig::make(WorldOpts{}, cfg);
+    std::vector<MissionRequest> reqs;
+    MissionRequest r;
+    r.mission = 13;
+    r.team = 1;
+    r.target_id = 9001;
+    r.priority = 100;
+    r.aircraft = 4;
+    r.tot = 5400;
+    reqs.push_back(r);
+    auto flights = rig->atm->compose_packages(reqs, 1, kNow);
+    ASSERT_EQ(flights.size(), 3u);
+    for (auto& ft : flights) (void)rig->atm->schedule_takeoff(ft);
+    ASSERT_EQ(rig->atm->booked_flights().size(), 3u);
+
+    // Scrub the main: the booking closes NOW, the complement releases
+    // (drawn − booked losses; the rig's war has none yet).
+    const auto rel = rig->atm->scrub_flight(flights[0].flight_id);
+    ASSERT_TRUE(rel.has_value());
+    EXPECT_EQ(rel->flight_id, flights[0].flight_id);
+    EXPECT_EQ(rel->survivors, flights[0].aircraft);
+    EXPECT_EQ(rig->atm->booked_flights().size(), 2u);
+    EXPECT_EQ(rig->atm->stats().flights_scrubbed, 1);
+    EXPECT_EQ(rig->atm->stats().aircraft_scrubbed, flights[0].aircraft);
+
+    // Unknown ids answer empty.
+    EXPECT_FALSE(rig->atm->scrub_flight(999999).has_value());
+
+    // The scrubbed flight never double-releases at its old deadline.
+    const auto late =
+        rig->atm->recover_completed(flights[2].mission_over + 1);
+    ASSERT_EQ(late.size(), 2u);   // the escorts only
+    for (const auto& rel2 : late) {
+        EXPECT_NE(rel2.flight_id, flights[0].flight_id);
+    }
+}
+
+TEST(AtmReschedule, BookingFollowsTheRetask) {
+    AtmConfig cfg;
+    cfg.min_seadescort_threat = 30;
+    auto rig = Rig::make(WorldOpts{}, cfg);
+    std::vector<MissionRequest> reqs;
+    MissionRequest r;
+    r.mission = 13;
+    r.team = 1;
+    r.target_id = 9001;
+    r.priority = 100;
+    r.aircraft = 4;
+    r.tot = 5400;
+    reqs.push_back(r);
+    auto flights = rig->atm->compose_packages(reqs, 1, kNow);
+    ASSERT_FALSE(flights.empty());
+    for (auto& ft : flights) (void)rig->atm->schedule_takeoff(ft);
+
+    const auto main_id = flights[0].flight_id;
+    const auto old_over = flights[0].mission_over;
+    // The booking follows the flight: new mission family, target, TOT,
+    // and the recovery deadline (far past the old one).
+    EXPECT_TRUE(rig->atm->reschedule_flight(main_id, 20, 5150,
+                                            kNow + 600, kNow + 100000));
+    const auto& booked = rig->atm->booked_flights();
+    ASSERT_GE(booked.size(), 1u);
+    bool found = false;
+    for (const auto& ft : booked) {
+        if (ft.flight_id != main_id) continue;
+        found = true;
+        EXPECT_EQ(ft.mission, 20);
+        EXPECT_EQ(ft.target_vu, 5150u);
+        EXPECT_EQ(ft.tot, kNow + 600);
+        EXPECT_EQ(ft.mission_over, kNow + 100000);
+    }
+    EXPECT_TRUE(found);
+    EXPECT_GT(kNow + 100000, old_over);
+    // Unknown ids refuse.
+    EXPECT_FALSE(rig->atm->reschedule_flight(424242, 1, 9001, 0, 0));
+
+    // The rescheduled deadline is the one recovery obeys: only the
+    // main stays booked (the escorts scrub), nothing releases before
+    // the NEW deadline, and the main releases at it.
+    (void)rig->atm->scrub_flight(flights[1].flight_id);
+    (void)rig->atm->scrub_flight(flights[2].flight_id);
+    ASSERT_EQ(rig->atm->booked_flights().size(), 1u);
+    EXPECT_TRUE(rig->atm->recover_completed(kNow + 99999).empty());
+    const auto rel = rig->atm->recover_completed(kNow + 100001);
+    ASSERT_EQ(rel.size(), 1u);
+    EXPECT_EQ(rel[0].flight_id, main_id);
+}
+
+TEST(AtmPriorityInput, ObjectivePriorityScalesTheTargetTerm) {
+    // objective_priority's write target is the objective's own priority
+    // byte — the same field request_priority_'s target term scales.
+    // Two worlds differing ONLY in the target objective's priority:
+    // the generated request's score moves with it (the objtype term is
+    // armed so the scaling has something to bite).
+    const auto request_for_target = [](std::uint8_t objective_priority,
+                                       int* out_count) {
+        auto ws = make_atm_world();
+        for (auto& o : ws.objectives) {
+            if (o.id_num == 9001) o.priority = objective_priority;
+        }
+        ws.teams[1].objtype_priority.assign(36, 0);
+        ws.teams[1].objtype_priority[4] = 80;   // the fixture's objtype
+        f4::world::WorldStateAdapters adapters(ws);
+        auto profiles = load_profiles();
+        AirTaskingManager atm(profiles, adapters.campaign, adapters.teams,
+                              adapters.units, &adapters.objectives, {});
+        const auto reqs = atm.generate_requests(1, kNow);
+        *out_count = 0;
+        int best = -1;
+        for (const auto& rq : reqs) {
+            if (rq.target_id != 9001) continue;
+            ++*out_count;
+            best = std::max(best, rq.priority);
+        }
+        return best;
+    };
+    int count_a = 0;
+    int count_b = 0;
+    const int prio_low =
+        request_for_target(7 /* the fixture's own value */, &count_a);
+    const int prio_high = request_for_target(100, &count_b);
+    EXPECT_GT(count_a, 0);   // the delivery ladder files against 9001
+    EXPECT_EQ(count_a, count_b);
+    EXPECT_GT(prio_high, prio_low);   // the commander's weight moved it
+}

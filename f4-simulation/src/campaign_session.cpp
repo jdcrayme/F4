@@ -431,6 +431,11 @@ CampaignSession::create(const CampaignSessionOptions& opts,
     ladder_cfg.reinforcement_period_sec = opts.reinforce_period_sec;
     ladder_cfg.atm_pipeline = opts.atm_pipeline;
     ladder_cfg.atm.min_seadescort_threat = opts.atm_seadescort_threat;
+    // CAMP-CMD-2: the retask arithmetic reuses the ATM's own reserve
+    // and cruise constants (copied — the options object dies).
+    session->atm_reserve_min_ = ladder_cfg.atm.reserve_min;
+    session->atm_cruise_grid_per_min_ =
+        static_cast<double>(ladder_cfg.atm.cruise_grid_per_min);
     // G2: the interdiction arm — BOTH ladders (legacy + ATM) and the
     // sink's unit-loss booking ride this one flag (the aa_combat /
     // ground_war opt-in contract).
@@ -943,6 +948,10 @@ void CampaignSession::evaluate_tiers_() {
         }
 
         // --- the deagg triggers (FID-3): ops > bubble ---
+        // CAMP-CMD-2: a scrubbed sortie and an aborted flight never
+        // deaggregate again (the books closed; the intent is gone or
+        // stale — a resurrected sortie would fork the war).
+        if (f.scrubbed || aborted_flights_.count(f.vu) != 0) continue;
         // FID-5 adds the TOT arm: a flight approaching its TIME ON
         // TARGET deaggregates to fly the attack (the delivery is a
         // per-aircraft phase — §4.3's mission-phase pinning; the same
@@ -1195,6 +1204,633 @@ std::size_t CampaignSession::apply_roe_command(
 }
 
 // ---------------------------------------------------------------------------
+// CAMP-CMD-2 — the retask / abort / priority writes
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// The built-route → engine-waypoint conversion (the synthetic seed's own
+// mapping, factored for the retask write).
+std::vector<f4::entities::WaypointState> to_engine_route(
+        const std::vector<f4::campaign::RouteWaypoint>& route) {
+    std::vector<f4::entities::WaypointState> out;
+    out.reserve(route.size());
+    for (const auto& wp : route) {
+        f4::entities::WaypointState w;
+        w.x = wp.x;
+        w.y = wp.y;
+        w.z = static_cast<std::int16_t>(
+            std::clamp<std::int32_t>(wp.altitude_ft, -32768, 32767));
+        w.action = wp.action;
+        w.flags = static_cast<std::int16_t>(wp.flags);
+        w.target_num = wp.target_num;
+        out.push_back(w);
+    }
+    return out;
+}
+
+// The engine-waypoint → built-route conversion (the RTB land waypoint's
+// ride back into the plan builder's vocabulary).
+f4::campaign::RouteWaypoint to_route_waypoint(
+        const f4::entities::WaypointState& w) {
+    f4::campaign::RouteWaypoint rw;
+    rw.x = w.x;
+    rw.y = w.y;
+    rw.altitude_ft = w.z;
+    rw.action = w.action;
+    rw.flags = static_cast<std::uint16_t>(w.flags);
+    rw.target_num = w.target_num;
+    return rw;
+}
+
+} // namespace
+
+CampaignSession::FlightShape CampaignSession::find_flight_shape_(
+    std::uint32_t vu) const {
+    FlightShape shape;
+    if (flights_ != nullptr) {
+        const auto idx = flights_->index_of(vu);
+        if (idx != static_cast<std::size_t>(-1)) {
+            shape.found = true;
+            shape.aggregate = true;
+            shape.agg_index = idx;
+            shape.team = flights_->flights()[idx].team;
+        }
+    }
+    // The live aircraft (both shapes can coexist — a suspended flight's
+    // aggregate row and its materialized complement). Arrival order.
+    for (const auto id : campaign_aircraft()) {
+        auto* origin = f4::entities::EntityHandle(id, &sim_->world())
+                           .get<CampaignOriginComponent>();
+        if (origin == nullptr || origin->flight_vu != vu) continue;
+        shape.live.push_back(id);
+        if (!shape.aggregate && shape.team == 0) {
+            shape.team = origin->team_slot;
+        }
+    }
+    shape.found = shape.aggregate || !shape.live.empty();
+    return shape;
+}
+
+std::uint32_t CampaignSession::home_airbase_for_flight_(
+    std::uint32_t vu) const {
+    // The squadron's airbase field is an EntityId; the route builder
+    // wants the objective VU. Reverse the session's own objective map.
+    const auto vu_of_base = [&](f4::entities::EntityId base) -> std::uint32_t {
+        if (!base.valid()) return 0;
+        for (const auto& [obj_vu, eid] : objective_id_map_) {
+            if (eid == base) return obj_vu;
+        }
+        return 0;
+    };
+    // 1. The ATM booking (the commit's own record — the authority for
+    //    every filed flight, aggregate or spawned complement).
+    if (const auto* booked = ladder_->atm_booked_flights()) {
+        const auto flight_id = booking_flight_id_(vu);
+        for (const auto& ft : *booked) {
+            if (ft.flight_id == flight_id) return ft.airbase_vu;
+        }
+    }
+    // 2. A synthetic's squadron entity (the deagg path's rule).
+    const auto intent_it = synthetic_intents_.find(vu);
+    if (intent_it != synthetic_intents_.end()) {
+        const auto sq_it = unit_id_map_.find(intent_it->second.squadron_id);
+        if (sq_it != unit_id_map_.end() && sq_it->second.valid()) {
+            auto* sq = f4::entities::EntityHandle(sq_it->second,
+                                                  &sim_->world())
+                           .get<f4::entities::SquadronComponent>();
+            if (sq != nullptr) return vu_of_base(sq->airbase);
+        }
+        return 0;
+    }
+    // 3. A save-carried flight: the world flight entity's plan names
+    //    the squadron; the squadron names the base.
+    const auto it = unit_id_map_.find(vu);
+    if (it != unit_id_map_.end() && it->second.valid()) {
+        auto* fp = f4::entities::EntityHandle(it->second, &sim_->world())
+                       .get<f4::entities::FlightPlanComponent>();
+        if (fp != nullptr && fp->squadron.valid()) {
+            auto* sq = f4::entities::EntityHandle(fp->squadron,
+                                                  &sim_->world())
+                           .get<f4::entities::SquadronComponent>();
+            if (sq != nullptr) return vu_of_base(sq->airbase);
+        }
+        return 0;
+    }
+    // 4. A full-fidelity synthetic with no booking: the origin stamp.
+    for (const auto id : campaign_aircraft()) {
+        auto* origin = f4::entities::EntityHandle(id, &sim_->world())
+                           .get<CampaignOriginComponent>();
+        if (origin != nullptr && origin->flight_vu == vu &&
+            origin->home_airbase_vu != 0) {
+            return origin->home_airbase_vu;
+        }
+    }
+    return 0;
+}
+
+CampaignSession::CommandWriteResult CampaignSession::apply_retask_command(
+    std::uint32_t flight_vu, std::uint8_t mission_byte,
+    std::uint32_t target_vu) {
+    CommandWriteResult res;
+
+    // The mission's profile (the route builder's altitudes/actions and
+    // the loiter term) — an untasked byte or a profile-less one refuses
+    // (for_mission fails loudly; the refusal is the data).
+    const f4::campaign::MissionProfile* profile = nullptr;
+    try {
+        profile = &profiles_.for_mission(mission_byte);
+    } catch (const std::exception&) {
+        res.status = CommandWrite::InvalidArgument;
+        res.detail = "no mission profile for byte " +
+                     std::to_string(mission_byte) + " (" +
+                     std::string(f4::campaign::mission_type_name(
+                         mission_byte)) + ")";
+        return res;
+    }
+
+    // The target must be a real objective (the route builder anchors
+    // the new plan's delivery on it).
+    bool target_found = false;
+    for (const auto& o : ws_.objectives) {
+        if (o.id_num == target_vu) {
+            target_found = true;
+            break;
+        }
+    }
+    if (!target_found) {
+        res.status = CommandWrite::UnknownObjective;
+        res.detail = "no objective carries id " +
+                     std::to_string(target_vu);
+        return res;
+    }
+
+    const FlightShape shape = find_flight_shape_(flight_vu);
+    if (!shape.found) {
+        res.status = CommandWrite::UnknownFlight;
+        res.detail = "no such flight in the session's war";
+        return res;
+    }
+
+    // The aggregate row's own terminal guards (a live-only flight has
+    // no row; its brains refuse through the retask path below).
+    if (shape.aggregate) {
+        const auto& st = flights_->flights()[shape.agg_index];
+        if (st.arrived) {
+            res.status = CommandWrite::InvalidArgument;
+            res.detail = "flight has arrived";
+            return res;
+        }
+        if (st.destroyed) {
+            res.status = CommandWrite::InvalidArgument;
+            res.detail = "flight is destroyed";
+            return res;
+        }
+        if (st.scrubbed) {
+            res.status = CommandWrite::InvalidArgument;
+            res.detail = "flight is aborted";
+            return res;
+        }
+    } else if (shape.live.empty()) {
+        res.status = CommandWrite::UnknownFlight;
+        res.detail = "no such flight in the session's war";
+        return res;
+    }
+
+    // The home airbase anchors the new route's build.
+    const std::uint32_t airbase = home_airbase_for_flight_(flight_vu);
+    if (airbase == 0) {
+        res.status = CommandWrite::InvalidArgument;
+        res.detail = "flight has no resolvable home airbase";
+        return res;
+    }
+
+    // The head position: the aggregate's own truth, or — for a live
+    // complement — the lead aircraft's real position (the suspended
+    // row's state is frozen at deagg time).
+    double hx = 0.0;
+    double hy = 0.0;
+    float halt = 0.0f;
+    bool suspended = false;
+    if (shape.aggregate) {
+        const auto& st = flights_->flights()[shape.agg_index];
+        hx = st.fx;
+        hy = st.fy;
+        halt = st.altitude_ft;
+        suspended = st.suspended;
+    }
+    if (suspended || !shape.aggregate) {
+        for (const auto id : shape.live) {
+            auto* tf = f4::entities::EntityHandle(id, &sim_->world())
+                           .get<f4::entities::TransformComponent>();
+            if (tf != nullptr) {
+                hx = tf->position.x / kFtPerGrid;
+                hy = tf->position.y / kFtPerGrid;
+                halt = static_cast<float>(tf->position.z);
+                break;
+            }
+        }
+    }
+
+    // The new plan's route: home airbase → target through the threat
+    // map (the session's own builder — the C3 planner, deterministic),
+    // spliced at the ingress point (the new plan's IP) and headed with
+    // the flight's CURRENT position. No IP (route-only shapes) splices
+    // after the takeoff waypoint.
+    const auto rb = route_builder_->build(shape.team, *profile, airbase,
+                                          target_vu);
+    if (rb.waypoints.size() < 2) {
+        res.status = CommandWrite::InvalidArgument;
+        res.detail = "route build failed for the new tasking";
+        return res;
+    }
+    std::size_t splice = 1;
+    for (std::size_t i = 0; i < rb.waypoints.size(); ++i) {
+        if ((rb.waypoints[i].flags & f4::campaign::kWpfIp) != 0) {
+            splice = i;
+            break;
+        }
+    }
+    std::vector<f4::campaign::RouteWaypoint> new_route;
+    new_route.reserve(1 + rb.waypoints.size() - splice);
+    f4::campaign::RouteWaypoint head;
+    head.x = static_cast<std::int16_t>(
+        std::clamp<std::int64_t>(std::llround(hx), -32768, 32767));
+    head.y = static_cast<std::int16_t>(
+        std::clamp<std::int64_t>(std::llround(hy), -32768, 32767));
+    head.altitude_ft = static_cast<std::int32_t>(halt);
+    head.action = 0;
+    head.flags = f4::campaign::kWpfTurnPoint;
+    new_route.push_back(head);
+    for (std::size_t i = splice; i < rb.waypoints.size(); ++i) {
+        new_route.push_back(rb.waypoints[i]);
+    }
+
+    // TOT + mission-over: the ATM's own arithmetic on the cruise-speed
+    // estimate (straight-line head → target grid distance; the out and
+    // home legs share it; the profile's loiter + the doubled reserve
+    // close the shape — compose_packages' formula, retask-shaped).
+    const double cruise = flights_ != nullptr
+                              ? flights_->cruise_grid_per_min()
+                              : atm_cruise_grid_per_min_;
+    auto target_wp = rb.waypoints.end() - 1;
+    for (auto it = rb.waypoints.begin(); it != rb.waypoints.end(); ++it) {
+        if ((it->flags & f4::campaign::kWpfTarget) != 0 ||
+            it->target_num == target_vu) {
+            target_wp = it;
+            break;
+        }
+    }
+    const double tgx = static_cast<double>(target_wp->x) - hx;
+    const double tgy = static_cast<double>(target_wp->y) - hy;
+    const int travel_sec = std::max(
+        60, static_cast<int>(std::ceil(
+                std::sqrt(tgx * tgx + tgy * tgy) /
+                (cruise > 0.0 ? cruise : 12.0) * 60.0)));
+    const std::int64_t now_rel = ladder_->clock();
+    const std::int64_t tot_rel = now_rel + travel_sec;
+    const std::int64_t over_rel =
+        tot_rel + static_cast<std::int64_t>(
+                      std::max(0, profile->loitertime)) * 60 +
+        travel_sec +
+        2 * static_cast<std::int64_t>(std::max(0, atm_reserve_min_)) * 60;
+    const auto clamp32 = [](std::int64_t v) {
+        return static_cast<std::int32_t>(
+            std::clamp<std::int64_t>(v, 0, 2147483647));
+    };
+
+    // 1. The aggregate row (tiered): the route, mission, and times.
+    //    The head keeps the ORIGINAL departure on an un-launched
+    //    flight (the takeoff gate holds it to its slot); a departed
+    //    flight's head depart is inert. The value rides to 2b (the
+    //    entity mirror keeps the same takeoff gate).
+    std::int32_t engine_head_depart = 0;
+    if (shape.aggregate) {
+        auto engine_route = to_engine_route(new_route);
+        if (!suspended && flights_->seconds_to_depart(shape.agg_index) > 0 &&
+            !flights_->routes()[shape.agg_index].empty()) {
+            engine_head_depart =
+                flights_->routes()[shape.agg_index].front().depart;
+            engine_route.front().depart = engine_head_depart;
+        }
+        flights_->retask(flight_vu, mission_byte, std::move(engine_route),
+                         clamp32(epoch_ + tot_rel),
+                         clamp32(epoch_ + over_rel));
+    }
+
+    // 2. The stored synthetic intent: a later deagg spawns the NEW
+    //    plan (mission, target, relative TOT, route — the head rides
+    //    as a turnpoint, the plan builder's takeoff drop ignores it).
+    const auto intent_it = synthetic_intents_.find(flight_vu);
+    if (intent_it != synthetic_intents_.end()) {
+        auto& intent = intent_it->second;
+        intent.mission_byte = mission_byte;
+        intent.mission_name = std::string(
+            f4::campaign::mission_type_name(mission_byte));
+        intent.target_objective_id = target_vu;
+        intent.time_on_target = clamp32(tot_rel);
+        intent.route = new_route;
+    }
+
+    // 2b. A save-carried flight's world entity: the WaypointPlanComponent
+    //    is what a later deagg spawn builds the aircraft's plan from —
+    //    without this write the materialized sortie would fly the OLD
+    //    route. The engine route's own form (WaypointState) drops in
+    //    directly; the FID-2 mirror keeps the entity's position/fuel
+    //    truth flowing as before.
+    if (shape.aggregate) {
+        const auto unit_it = unit_id_map_.find(flight_vu);
+        if (unit_it != unit_id_map_.end() && unit_it->second.valid()) {
+            auto* wp = f4::entities::EntityHandle(unit_it->second,
+                                                  &sim_->world())
+                           .get<f4::entities::WaypointPlanComponent>();
+            if (wp != nullptr) {
+                wp->waypoints = to_engine_route(new_route);
+                if (engine_head_depart != 0) {
+                    wp->waypoints.front().depart = engine_head_depart;
+                }
+            }
+        }
+    }
+
+    // 3. The booking: the recovery clock follows the new plan (the
+    //    draw stands — the books close when the retasked mission does).
+    const auto flight_id = booking_flight_id_(flight_vu);
+    const bool rebooked = ladder_->reschedule_flight(
+        flight_id, mission_byte, target_vu, tot_rel, over_rel);
+
+    // 4. The live complement: the brains re-plan from where they are.
+    res.matched = 0;
+    if (!shape.live.empty()) {
+        auto plan_opt = f4::simulation::build_mission_plan_from_route(
+            new_route, target_vu, &objective_id_map_, &unit_id_map_);
+        if (!plan_opt.has_value()) {
+            res.status = CommandWrite::InvalidArgument;
+            res.detail = "the new plan does not build into a mission";
+            return res;
+        }
+        const auto& plan = *plan_opt;
+        for (const auto id : shape.live) {
+            auto* brain = f4::entities::EntityHandle(id, &sim_->world())
+                              .get<f4::ai::BrainComponent>();
+            if (brain == nullptr) continue;
+            if (brain->retask(plan)) ++res.matched;
+        }
+    }
+
+    res.detail =
+        "retasked to " +
+        std::string(f4::campaign::mission_type_name(mission_byte)) +
+        " vs objective " + std::to_string(target_vu) + " (TOT +" +
+        std::to_string(travel_sec) + "s" +
+        (rebooked ? ", booking rescheduled" : "") +
+        (res.matched > 0
+             ? ", " + std::to_string(res.matched) + " aircraft re-planned"
+             : "") +
+        ")";
+    return res;
+}
+
+CampaignSession::CommandWriteResult CampaignSession::apply_abort_command(
+    std::uint32_t flight_vu) {
+    CommandWriteResult res;
+
+    const FlightShape shape = find_flight_shape_(flight_vu);
+    if (!shape.found) {
+        res.status = CommandWrite::UnknownFlight;
+        res.detail = "no such flight in the session's war";
+        return res;
+    }
+    if (shape.aggregate) {
+        const auto& st = flights_->flights()[shape.agg_index];
+        if (st.arrived) {
+            res.status = CommandWrite::InvalidArgument;
+            res.detail = "flight has arrived";
+            return res;
+        }
+        if (st.destroyed) {
+            res.status = CommandWrite::InvalidArgument;
+            res.detail = "flight is destroyed";
+            return res;
+        }
+        if (st.scrubbed || aborted_flights_.count(flight_vu) != 0) {
+            res.status = CommandWrite::InvalidArgument;
+            res.detail = "flight is already aborted";
+            return res;
+        }
+    }
+
+    // The brains' phase decides the scrub-vs-RTB split for a live
+    // complement (a tiered suspended flight materializes ONE aircraft;
+    // full fidelity flies the whole complement).
+    bool any_live = false;
+    bool any_airborne = false;
+    for (const auto id : shape.live) {
+        any_live = true;
+        auto* brain = f4::entities::EntityHandle(id, &sim_->world())
+                          .get<f4::ai::BrainComponent>();
+        if (brain != nullptr &&
+            brain->phase() != f4::ai::BrainComponent::Phase::Ground) {
+            any_airborne = true;
+        }
+    }
+    const bool departed = shape.aggregate
+                              ? (any_airborne ||
+                                 flights_->seconds_to_depart(
+                                     shape.agg_index) <= 0)
+                              : any_airborne;
+
+    // The RTB landing waypoint (the departed branch): the flight's own
+    // route home — the aggregate route's last waypoint, the stored
+    // intent's, or the home airbase objective's position.
+    std::optional<f4::campaign::RouteWaypoint> land;
+    double hx = 0.0;
+    double hy = 0.0;
+    float halt = 0.0f;
+    if (shape.aggregate) {
+        const auto& st = flights_->flights()[shape.agg_index];
+        hx = st.fx;
+        hy = st.fy;
+        halt = st.altitude_ft;
+        if (departed && !flights_->routes()[shape.agg_index].empty()) {
+            land = to_route_waypoint(
+                flights_->routes()[shape.agg_index].back());
+        }
+    }
+    if (departed || any_live) {
+        for (const auto id : shape.live) {
+            auto* tf = f4::entities::EntityHandle(id, &sim_->world())
+                           .get<f4::entities::TransformComponent>();
+            if (tf != nullptr) {
+                hx = tf->position.x / kFtPerGrid;
+                hy = tf->position.y / kFtPerGrid;
+                halt = static_cast<float>(tf->position.z);
+                break;
+            }
+        }
+    }
+    if (departed && !land.has_value()) {
+        const auto intent_it = synthetic_intents_.find(flight_vu);
+        if (intent_it != synthetic_intents_.end() &&
+            !intent_it->second.route.empty()) {
+            land = intent_it->second.route.back();
+        }
+    }
+    if (departed && !land.has_value()) {
+        const std::uint32_t airbase = home_airbase_for_flight_(flight_vu);
+        for (const auto& o : ws_.objectives) {
+            if (o.id_num != airbase) continue;
+            f4::campaign::RouteWaypoint rw;
+            rw.x = static_cast<std::int16_t>(
+                std::clamp<std::int64_t>(o.x, -32768, 32767));
+            rw.y = static_cast<std::int16_t>(
+                std::clamp<std::int64_t>(o.y, -32768, 32767));
+            rw.altitude_ft = 0;
+            rw.action = 7;   // WP_LAND (the fixtures' vocabulary)
+            rw.flags = f4::campaign::kWpfLand;
+            land = rw;
+            break;
+        }
+    }
+    if (departed && !land.has_value()) {
+        res.status = CommandWrite::InvalidArgument;
+        res.detail = "no route home for the flight";
+        return res;
+    }
+
+    // The books close FIRST (the command's own semantics — the scrub's
+    // recovery rides the current clock whether or not the air frames
+    // keep flying): an ATM booking releases its survivors; a
+    // save-carried flight has no booking in this session's ledger.
+    const auto release = ladder_->scrub_flight(booking_flight_id_(flight_vu));
+
+    std::int32_t scrubbed_count = 0;
+    if (!departed) {
+        // The sortie never launches. A live parked complement folds
+        // back first (the parked aircraft rolls into the aggregate and
+        // retires with the fold), then the aggregate row scrubs; a
+        // full-fidelity parked complement retires directly.
+        if (shape.aggregate) {
+            if (deaggregated_.count(flight_vu) != 0) {
+                (void)reaggregate_flight_(flight_vu);
+            }
+            if (flights_->scrub(flight_vu)) {
+                ++scrubbed_count;
+            }
+        } else {
+            for (const auto id : shape.live) {
+                sim_->retire_aircraft(id);
+                ++res.matched;
+            }
+        }
+    } else {
+        // RTB: the aggregate flies home (retask onto [head → land]),
+        // the brains re-plan onto the same leg.
+        if (shape.aggregate) {
+            const double cruise = flights_->cruise_grid_per_min();
+            const double dgx =
+                static_cast<double>(land->x) - hx;
+            const double dgy =
+                static_cast<double>(land->y) - hy;
+            const int home_sec = std::max(
+                60, static_cast<int>(std::ceil(
+                        std::sqrt(dgx * dgx + dgy * dgy) /
+                        (cruise > 0.0 ? cruise : 12.0) * 60.0)));
+            const std::int64_t now_rel = ladder_->clock();
+            const std::int64_t over_rel =
+                now_rel + home_sec +
+                2 * static_cast<std::int64_t>(
+                        std::max(0, atm_reserve_min_)) * 60;
+            std::vector<f4::entities::WaypointState> rtb;
+            rtb.reserve(2);
+            f4::entities::WaypointState head;
+            head.x = static_cast<std::int16_t>(
+                std::clamp<std::int64_t>(std::llround(hx), -32768,
+                                         32767));
+            head.y = static_cast<std::int16_t>(
+                std::clamp<std::int64_t>(std::llround(hy), -32768,
+                                         32767));
+            head.z = static_cast<std::int16_t>(
+                std::clamp<std::int32_t>(
+                    static_cast<std::int32_t>(halt), -32768, 32767));
+            rtb.push_back(head);
+            rtb.push_back(to_engine_route(
+                              std::vector<f4::campaign::RouteWaypoint>{
+                                  land.value()})
+                              .front());
+            flights_->retask(flight_vu,
+                             flights_->flights()[shape.agg_index].mission,
+                             std::move(rtb),
+                             /*time_on_target_abs=*/0,
+                             static_cast<std::int32_t>(
+                                 std::clamp<std::int64_t>(
+                                     over_rel + epoch_, 0, 2147483647)));
+        }
+        if (!shape.live.empty()) {
+            std::vector<f4::campaign::RouteWaypoint> rtb_route;
+            rtb_route.reserve(2);
+            f4::campaign::RouteWaypoint head;
+            head.x = static_cast<std::int16_t>(
+                std::clamp<std::int64_t>(std::llround(hx), -32768,
+                                         32767));
+            head.y = static_cast<std::int16_t>(
+                std::clamp<std::int64_t>(std::llround(hy), -32768,
+                                         32767));
+            head.altitude_ft = static_cast<std::int32_t>(halt);
+            head.flags = f4::campaign::kWpfTurnPoint;
+            rtb_route.push_back(head);
+            rtb_route.push_back(land.value());
+            auto plan_opt = f4::simulation::build_mission_plan_from_route(
+                rtb_route, 0, &objective_id_map_, &unit_id_map_);
+            if (plan_opt.has_value()) {
+                const auto& plan = *plan_opt;
+                for (const auto id : shape.live) {
+                    auto* brain = f4::entities::EntityHandle(
+                                      id, &sim_->world())
+                                      .get<f4::ai::BrainComponent>();
+                    if (brain == nullptr) continue;
+                    if (brain->retask(plan)) ++res.matched;
+                }
+            }
+        }
+    }
+
+    // The abort record: no future deagg trigger ever resurrects the
+    // sortie, and the stored intent (if any) goes with it.
+    aborted_flights_.insert(flight_vu);
+    synthetic_intents_.erase(flight_vu);
+
+    res.detail = departed ? "flight aborted — RTB; the books closed"
+                          : "flight aborted before launch — the books closed";
+    if (scrubbed_count > 0) {
+        res.detail += " (sortie scrubbed)";
+    }
+    if (release.has_value()) {
+        res.detail += " (" + std::to_string(release->survivors) +
+                      " aircraft returned to the pool)";
+    }
+    return res;
+}
+
+CampaignSession::CommandWriteResult
+CampaignSession::apply_objective_priority(std::uint32_t objective_vu,
+                                          std::uint8_t weight) {
+    CommandWriteResult res;
+    for (auto& o : ws_.objectives) {
+        if (o.id_num != objective_vu) continue;
+        const auto before = o.priority;
+        o.priority = weight;
+        res.detail = "objective " + std::to_string(objective_vu) +
+                     " priority " + std::to_string(before) + " → " +
+                     std::to_string(weight);
+        return res;
+    }
+    res.status = CommandWrite::UnknownObjective;
+    res.detail = "no objective carries id " + std::to_string(objective_vu);
+    return res;
+}
+
+// ---------------------------------------------------------------------------
 // FID-5 — event-driven combat deagg (Docs/FIDELITY_TIERS_PLAN.md §4.5–4.6)
 // ---------------------------------------------------------------------------
 
@@ -1282,7 +1918,11 @@ void CampaignSession::rebuild_aggregate_feed_() {
         // coarse): airborne, progressing aggregates only — a ground-held
         // or arrived flight is the ramp, not the air picture; a
         // suspended flight's truth is its live aircraft (real contacts).
-        if (f.suspended || f.destroyed || f.arrived) continue;
+        // CAMP-CMD-2: a scrubbed sortie and an aborted (RTB-ing) flight
+        // never re-enter the picture — the commit/convergence triggers
+        // could otherwise resurrect a closed sortie.
+        if (f.suspended || f.destroyed || f.arrived || f.scrubbed) continue;
+        if (aborted_flights_.count(f.vu) != 0) continue;
         if (f.altitude_ft < 8000.0f) continue;
         f4::ai::AggregateContact c;
         c.flight_vu = f.vu;
@@ -1350,7 +1990,8 @@ void CampaignSession::evaluate_combat_() {
     eligible.reserve(fleet.size());
     for (std::size_t i = 0; i < fleet.size(); ++i) {
         const auto& f = fleet[i];
-        if (f.suspended || f.destroyed || f.arrived) continue;
+        if (f.suspended || f.destroyed || f.arrived || f.scrubbed) continue;
+        if (aborted_flights_.count(f.vu) != 0) continue;   // CAMP-CMD-2
         if (f.altitude_ft < 8000.0f) continue;
         if (!at_war(f.team)) continue;
         eligible.push_back(i);
@@ -1601,6 +2242,9 @@ CampaignSession::flight_tiers() const {
         v.destroyed = f.destroyed;
         v.to_depart = flights_->seconds_to_depart(i);
         v.to_mission_over = flights_->seconds_to_mission_over(i);
+        // CAMP-CMD-2: the abort record (the engine's scrub state or the
+        // session's own abort set — an RTB-ing flight is aborted too).
+        v.aborted = f.scrubbed || aborted_flights_.count(f.vu) != 0;
         out.push_back(v);
     }
     return out;
@@ -1618,6 +2262,12 @@ void CampaignSession::force_deaggregate_flight(std::uint32_t vu) {
     if (flights_ == nullptr) return;
     const std::size_t idx = flights_->index_of(vu);
     if (idx == static_cast<std::size_t>(-1)) return;
+    // CAMP-CMD-2: an aborted flight never materializes again (the
+    // books closed; the same rule the tier triggers obey).
+    if (flights_->flights()[idx].scrubbed ||
+        aborted_flights_.count(vu) != 0) {
+        return;
+    }
     if (deaggregated_.count(vu) > 0) {
         // Already live: pin it (force beats every automatic trigger).
         deaggregated_[vu].trigger = DeaggregatedFlight::Trigger::Force;

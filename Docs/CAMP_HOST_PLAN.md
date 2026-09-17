@@ -6,10 +6,15 @@
 > identity); CAMP-HOST-3 shipped (the world viewer refactored onto the
 > contract — the runner relocated out of the engine, the `threat`
 > query landed additively, the golden identity intact); CAMP-CMD-1
-> ships with this patch (`roe_set` riding the P7 fire-control path, the
+> shipped (`roe_set` riding the P7 fire-control path, the
 > command journal + its tick-exact replay, the `roe_changed` event
-> publishing — 30+ new ctest cases, the golden identity intact). Every
-> other tranche below is an acceptance contract, not a claim.
+> publishing); CAMP-CMD-2 ships with this patch (`flight_retask` /
+> `flight_abort` / `objective_priority` — the v1 command surface
+> completes, the abort scrubs books and routes RTB, the objective
+> priority write feeds every tasking score, the replay identity
+> extends to the full intervention set — 30+ new ctest cases, the
+> golden identity intact). Every other tranche below is an acceptance
+> contract, not a claim.
 
 The campaign engine is the product. Every user experience — the world viewer
 today, a map-first strategy UI, a war-room dashboard, a scripted AI observer,
@@ -168,6 +173,40 @@ spawn cadence's original vocabulary). Zero-values are non-targets
 refusal is data (InvalidArgument / UnknownFlight). Every applied
 roe_set publishes `roe_changed` (the pinned encoder, the scope echoed
 verbatim).
+
+CAMP-CMD-2 as-built (the retask/abort/priority writes): the session is
+the write's composition point and the shapes are explicit. A retask
+rebuilds the route through the session's own RouteBuilder (home
+airbase → target, threat-aware), SPLICES at the new plan's ingress
+point (the kWpfIp waypoint; the takeoff leg is discarded), and heads
+with the flight's CURRENT position; TOT = now + the cruise-speed
+travel estimate and mission-over = TOT + loiter + return + the doubled
+reserve (compose_packages' formula, retask-shaped). The write lands on
+every shape: the aggregate row (FlightAggregateEngine::retask — SPEED
+mode from the retask point, cursor at index 1; a TIME-mode save flight
+retasks INTO speed mode), the stored synthetic intent, a save flight's
+world WaypointPlanComponent (a later deagg spawn flies the NEW plan),
+the live brains (BrainComponent::retask — Enroute hands the route
+straight to the NavigationModule with reset steering; Ground keeps the
+swap for the takeoff handoff; Approach/Complete refuse), and the ATM
+booking (Campaign::reschedule_flight — the recovery clock follows the
+new plan, the takeoff slot survives). An abort of a NOT-LAUNCHED
+flight scrubs the aggregate (FlightAggregateEngine::scrub — a distinct
+terminal state: tick, the tier triggers, the ops windows, and the air
+picture all skip it; a parked live complement folds back and retires)
+and an airborne flight flies its RTB leg (route = [current position →
+the route's own landing waypoint]); either way the books close NOW —
+Campaign::scrub_flight releases the booking's survivors through the
+ledger's apply_mission_recovery at the current clock (save-carried
+flights have no booking in THIS ledger — operational abort only), and
+the session's abort record keeps every future trigger from
+resurrecting the sortie. `objective_priority` writes the objective's
+priority byte (0..100) in the session's WorldState — the first runtime
+write of the field; every scoring site reads it live (the request
+target term, the CAP station ranking, the enemy rotation, the legacy
+select_target), the `objectives` query echoes it, and the contract
+save() persists it. Refused commands mutate nothing; the wire's
+typed refusals gain `unknown_objective`.
 
 Refusals are typed (`CommandAck {status: applied | refused(reason), apply_tick}`),
 not exceptions across the boundary. Refusal is data: a UX may surface "can't
@@ -457,14 +496,63 @@ Default behavior is byte-identical unless a gate says otherwise.
   `--verify-journal` — the full assertion (same war, same commands,
   same events) is one flag pair.
 
-### CAMP-CMD-2 — retask / abort / priority
-- `flight_retask` (NavigationModule replans from current position, TOT
-  recomputed), `flight_abort` (RTB profile, package books close),
-  `objective_priority` feeding the tasking score; `GetPriority`'s
-  PO/package terms (the ATM queue item) become policy inputs.
-- **Gate**: pinned retask scenarios in the M4/M5 acceptance-harness style
-  (a BVR flight retasked to CAS mid-crank flies the new route and its
-  books close correctly).
+### CAMP-CMD-2 — retask / abort / priority (SHIPPED with this patch)
+- `flight_retask` (replan from current position, TOT recomputed),
+  `flight_abort` (RTB profile, package books close), `objective_priority`
+  feeding the tasking score; `GetPriority`'s PO/package terms (the ATM
+  queue item) become policy inputs.
+- **Gate (as built)**: the M4/M5-style pinned retask — a save flight
+  retasked mid-route flies the NEW tasking: the row carries the new
+  mission byte and the recomputed mission-over deadline, the aggregate
+  closes on the new target (or, when the recomputed TOT arms the FID
+  delivery window, the deaggregated aircraft carries the NEW plan with
+  the target waypoint aboard its brain — the retask's entity write at
+  work), no teleport (the retask position IS the head waypoint). The
+  abort gates: a mid-route abort flies the RTB leg home (the row
+  reports the additive `aborted` tail; a second abort refuses) and a
+  kunsan package's abort closes the books EXACTLY once (the complement
+  returns to the pool at the current clock; the booking is gone; no
+  release at the old deadline — pinned engine-side too). The priority
+  gates: the write echoes through the `objectives` query and the
+  generated requests' target term moves with the byte (the ATM unit
+  pin: two worlds differing only in the objective's priority score
+  differently). The identity statement extends to the full
+  intervention set: a kunsan journal carrying retask + priority +
+  abort regenerates the record's `ledger_fnv` through ONE step call
+  and the record's own pattern; the tampered-flight-id replay exits 23
+  with both fingerprints named. The typed refusals (unknown flight /
+  unknown objective / an untaskable mission byte / weight 101) are
+  pinned on the wire.
+- **As-built notes**: (1) the retask route is the session's own
+  RouteBuilder build spliced at the INGRESS point — the new plan's
+  takeoff leg is discarded and the flight's current position rides as
+  the head (RouteWaypoint form for the intent/entity/plan vocabulary,
+  WaypointState for the engine); TOT/mission-over use the ATM's own
+  estimate arithmetic (straight-line travel at the cruise constant +
+  the profile's loiter + the doubled reserve). (2) The ABORT booking
+  rule: a save-carried flight's books closed in the save's own
+  history — the abort is operational only (no phantom recovery); a
+  filed package's booking releases its survivors NOW
+  (drawn − booked losses, the recover_completed formula verbatim,
+  `AtmStats.flights_scrubbed/aircraft_scrubbed` counted). (3) The
+  scrubbed aggregate is a DISTINCT terminal state (not destroyed, not
+  arrived) — the flights row's `aborted` tail (the DTO rule: additive,
+  at the END, always present) reports both it and the RTB-ing abort;
+  the tier triggers, the air picture, and force_deagg skip aborted
+  flights forever (a resurrected sortie would fork the war). (4) The
+  home airbase resolution order: the ATM booking first (the commit's
+  own record — authoritative for every filed flight), then the
+  squadron entity / origin stamp (the session's VU maps are the
+  crafted-world path; the kunsan-shape worlds carry no VU properties
+  into the sim world, so the booking is the reliable anchor).
+  (5) `objective_priority` mutates the session's WorldState row — one
+  truth; the scoring sites, the query, and the save all read the same
+  field, and no new plumbing exists (the decorator/hook alternatives
+  were rejected: the field IS the policy input upstream). (6) campaignd
+  gains no flags — the commands ride the CMD-1 journal/replay
+  machinery verbatim (`--command-journal` / `--replay-commands`), and
+  the reference demo records retask + priority + abort and replays it
+  clean (exit 0) and tampered (exit 23).
 
 ### CAMP-ATM-1 — the ACTION tables (the ATM plan's named queue, now observable)
 - Objective-damage-driven contextual CAS/BARCAP/SEAD filings; SWEEP station

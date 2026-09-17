@@ -9,10 +9,11 @@
 //   focus / clear_focus / select_deagg / select_reagg — the FID machinery
 //     wearing its contract hat (plan §4; the engine implements these
 //     TODAY: set_view_bubble / force_(de|re)aggregate_flight).
-//   roe_set / flight_retask / flight_abort / objective_priority — the
-//     CAMP-CMD queue. The v1 adapter REFUSES these with
-//     Refusal::NotImplemented and the task ID in the detail: the wire is
-//     stable now so CAMP-CMD-1/2 land without a protocol bump.
+//   roe_set — CAMP-CMD-1 (the P7 fire-control path).
+//   flight_retask / flight_abort / objective_priority — CAMP-CMD-2: the
+//     retask/abort/priority writes land behind the same wire, still
+//     without a protocol bump. (The header keeps the refusal vocabulary
+//     for every shape the engine cannot serve.)
 //
 // Command timing (plan §5): a submitted command applies at the NEXT tick
 // boundary (the next step()), in submission order; the ack carries the
@@ -95,6 +96,7 @@ struct CommandAck {
         NotImplemented,   ///< queued behind a named tranche (the detail says which)
         UnknownFlight,    ///< the flight VU id is not in the session's roster
         InvalidArgument,  ///< well-formed wire, nonsensical value
+        UnknownObjective, ///< CAMP-CMD-2: no objective carries the id
     };
 
     Status status{Status::Applied};
@@ -115,6 +117,7 @@ struct CommandAck {
         case CommandAck::Refusal::NotImplemented:  return "not_implemented";
         case CommandAck::Refusal::UnknownFlight:   return "unknown_flight";
         case CommandAck::Refusal::InvalidArgument: return "invalid_argument";
+        case CommandAck::Refusal::UnknownObjective:return "unknown_objective";
         case CommandAck::Refusal::None:            break;
     }
     return "none";

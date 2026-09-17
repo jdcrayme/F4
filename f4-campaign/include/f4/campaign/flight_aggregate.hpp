@@ -130,7 +130,7 @@ struct SyntheticFlightSeed {
 
 /// One flight's aggregate state. Public read-only by convention —
 /// mutation flows through tick()/set_suspended()/reaggregate()/
-/// mark_destroyed() so the invariants hold.
+/// mark_destroyed()/retask()/scrub() so the invariants hold.
 struct FlightAggregateState {
     std::uint32_t vu = 0;               ///< flight VU_ID.num
     std::uint8_t team = 0;              ///< owner slot
@@ -149,6 +149,11 @@ struct FlightAggregateState {
     bool arrived = false;               ///< reached the last waypoint
     bool destroyed = false;             ///< folded back as all-dead
     bool has_route = false;             ///< the save carried waypoints
+    /// CAMP-CMD-2: scrubbed by a flight_abort before departure — the
+    /// sortie never launches. A distinct terminal state (NOT destroyed,
+    /// NOT arrived): the tick skips it, the tier triggers and the air
+    /// picture skip it, and the flights view reports it as aborted.
+    bool scrubbed = false;
 };
 
 /// The aggregate flight propagator. Construction snapshots the world's
@@ -169,8 +174,9 @@ public:
 
     /// Advance the clock and fire whole update ticks at the configured
     /// cadence (the GroundWar accumulator shape). Suspended, arrived,
-    /// and destroyed flights are skipped (suspended: the sim owns the
-    /// truth until the session folds it back).
+    /// destroyed, and scrubbed flights are skipped (suspended: the sim
+    /// owns the truth until the session folds it back; scrubbed: the
+    /// CAMP-CMD-2 abort that never launches).
     void tick(CampaignTime delta_sec);
 
     // --- Tier cooperation (the session's deagg/reagg contract) -------
@@ -191,6 +197,35 @@ public:
     /// flight stops advancing permanently. Losses themselves book at
     /// the C1 sink as today. Unknown vu = no-op.
     void mark_destroyed(std::uint32_t vu);
+
+    // --- CAMP-CMD-2 — the command writes ------------------------------
+
+    /// Retask one flight (the flight_retask write): the route replaces
+    /// whatever the flight flew (the caller builds it FROM the flight's
+    /// current position — the head waypoint IS that position), the
+    /// mission byte and the two absolute times follow the new plan, and
+    /// the flight walks the new route in SPEED mode from the retask
+    /// point (the new route carries no leg times — the intent vocabulary;
+    /// a TIME-mode save flight retasks INTO speed mode, documented).
+    /// The cursor starts at index 1 (flying toward the route's second
+    /// waypoint from the head) unless the flight is SUSPENDED — a live
+    /// aircraft owns the truth; the fold-back's reset_cursor_ re-derives
+    /// the cursor on the new route from the lead aircraft's position.
+    /// Refuses (false, nothing written): unknown vu, arrived, destroyed,
+    /// scrubbed, suspended-cursor is fine but an empty route never is.
+    bool retask(std::uint32_t vu, std::uint8_t mission,
+                std::vector<f4::entities::WaypointState> route,
+                std::int32_t time_on_target_abs,
+                std::int32_t mission_over_abs);
+
+    /// Scrub one flight (the flight_abort write for a sortie that has
+    /// not launched): the flight stops advancing permanently WITHOUT
+    /// being destroyed or arrived — a distinct terminal state the tier
+    /// triggers, the air picture, and every ops window skip. Refuses
+    /// (false): unknown vu, arrived, destroyed, already scrubbed. A
+    /// SUSPENDED flight scrubs too (the caller folds its live aircraft
+    /// back first — the parked complement never launches).
+    bool scrub(std::uint32_t vu);
 
     /// FID-5: register a generated mission as an AGGREGATE (the
     /// synthetic-intent tiering — the FID-6 certificate's "the war's
@@ -263,6 +298,7 @@ public:
         int suspended = 0;    ///< deaggregated (sim-owned) right now
         int arrived = 0;      ///< reached their last waypoint
         int destroyed = 0;    ///< folded as all-dead
+        int scrubbed = 0;     ///< CAMP-CMD-2: aborted before launch
     };
     [[nodiscard]] const Stats& stats() const noexcept { return stats_; }
 

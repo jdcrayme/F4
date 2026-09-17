@@ -846,6 +846,36 @@ public:
     void set_mission_plan(MissionPlan plan) { plan_ = std::move(plan); }
     [[nodiscard]] const MissionPlan& mission_plan() const noexcept { return plan_; }
 
+    // --- CAMP-CMD-2 — the mid-flight plan swap (retask / abort RTB) ---
+    //
+    // Replaces the mission plan of a LIVE aircraft. The phase machine's
+    // own handoffs stay the only route injectors for the takeoff→Enroute
+    // and Enroute→Approach transitions; this is the one sanctioned
+    // mid-flight write, and it mirrors them exactly:
+    //   Enroute  — the new route hands straight to the NavigationModule
+    //              (the steering integrators reset, the same call the
+    //              takeoff→Enroute handoff runs) and the aircraft flies
+    //              on from where it actually is.
+    //   Ground   — the plan swaps; the existing takeoff→Enroute handoff
+    //              picks the new route up when the takeoff completes.
+    //   Approach / Complete — refused (the aircraft is recovering or
+    //              done; the caller surfaces it as a typed refusal).
+    // An empty route refuses in every phase — a retask flies SOMEWHERE
+    // (an abort's RTB route always ends at its approach entry fix).
+    // Returns false on refusal, true when the plan landed.
+    bool retask(MissionPlan plan) {
+        if (phase_ == Phase::Approach || phase_ == Phase::Complete) {
+            return false;
+        }
+        if (plan.route.empty()) return false;
+        plan_ = std::move(plan);
+        if (phase_ == Phase::Enroute) {
+            nav_.set_route(plan_.route);
+            nav_.air_steering.reset_integrators();
+        }
+        return true;
+    }
+
     // --- Phase / state reporting (HUD + recorder) ---
     [[nodiscard]] Phase phase() const noexcept { return phase_; }
     [[nodiscard]] const char* phase_name() const noexcept {

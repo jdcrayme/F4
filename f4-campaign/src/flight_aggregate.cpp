@@ -119,7 +119,9 @@ void FlightAggregateEngine::tick(CampaignTime delta_sec) {
         const std::int64_t now_abs = epoch_ + next_update_;
         for (std::size_t i = 0; i < flights_.size(); ++i) {
             FlightAggregateState& f = flights_[i];
-            if (f.suspended || f.arrived || f.destroyed) continue;
+            if (f.suspended || f.arrived || f.destroyed || f.scrubbed) {
+                continue;
+            }
             advance_flight_(f, i, routes_[i], now_abs);
         }
 
@@ -134,8 +136,10 @@ void FlightAggregateEngine::refresh_stats() {
     stats_.suspended = 0;
     stats_.arrived = 0;
     stats_.destroyed = 0;
+    stats_.scrubbed = 0;
     for (const auto& f : flights_) {
         if (f.destroyed) ++stats_.destroyed;
+        else if (f.scrubbed) ++stats_.scrubbed;
         else if (f.suspended) ++stats_.suspended;
         else if (f.arrived) ++stats_.arrived;
         else ++stats_.aggregate;
@@ -297,6 +301,59 @@ void FlightAggregateEngine::mark_destroyed(std::uint32_t vu) {
     refresh_stats();
 }
 
+// ============================================================================
+// CAMP-CMD-2 — the command writes
+// ============================================================================
+
+bool FlightAggregateEngine::retask(
+        std::uint32_t vu, std::uint8_t mission,
+        std::vector<f4::entities::WaypointState> route,
+        std::int32_t time_on_target_abs, std::int32_t mission_over_abs) {
+    const std::size_t idx = index_of(vu);
+    if (idx == static_cast<std::size_t>(-1)) return false;
+    FlightAggregateState& f = flights_[idx];
+    if (f.arrived || f.destroyed || f.scrubbed) return false;
+    if (route.empty()) return false;   // loud: a retask flies SOMEWHERE
+
+    routes_[idx] = std::move(route);
+    f.mission = mission;
+    f.time_on_target = time_on_target_abs;
+    f.mission_over_time = mission_over_abs;
+    // The retask route carries no leg times (the intent vocabulary) —
+    // a TIME-mode save flight retasks INTO speed mode. The takeoff
+    // gate still reads the head waypoint's depart (the caller keeps
+    // the original departure on an un-launched flight's head).
+    time_mode_[idx] = false;
+    f.has_route = true;
+    f.arrived = false;
+    f.dirty = true;
+    if (!f.suspended) {
+        // Flying toward the route's SECOND waypoint from the head (the
+        // head IS the retask position — the first leg re-derives from
+        // wherever the flight actually is).
+        f.wp_index = routes_[idx].size() > 1 ? 1 : 0;
+    }
+    // A suspended flight keeps its cursor: the fold-back's
+    // reset_cursor_ re-derives it on the new route from the lead
+    // aircraft's true position.
+    f.last_move = static_cast<std::int32_t>(
+        std::min<std::int64_t>(epoch_ + clock_, 2147483647));
+    refresh_stats();
+    return true;
+}
+
+bool FlightAggregateEngine::scrub(std::uint32_t vu) {
+    const std::size_t idx = index_of(vu);
+    if (idx == static_cast<std::size_t>(-1)) return false;
+    FlightAggregateState& f = flights_[idx];
+    if (f.arrived || f.destroyed || f.scrubbed) return false;
+    f.scrubbed = true;
+    f.suspended = false;
+    f.dirty = true;
+    refresh_stats();
+    return true;
+}
+
 std::size_t FlightAggregateEngine::register_synthetic(
     const SyntheticFlightSeed& seed) {
     if (seed.vu == 0) return static_cast<std::size_t>(-1);
@@ -392,6 +449,7 @@ std::size_t FlightAggregateEngine::index_of(std::uint32_t vu) const {
 std::int32_t FlightAggregateEngine::seconds_to_depart(
     std::size_t index) const {
     if (index >= flights_.size() || routes_[index].empty()) return -1;
+    if (flights_[index].scrubbed) return -1;   // CAMP-CMD-2: no sortie
     const std::int64_t depart = routes_[index].front().depart;
     if (depart <= 0) return -1;   // no usable schedule
     const std::int64_t d = depart - (epoch_ + clock_);
@@ -403,6 +461,7 @@ std::int32_t FlightAggregateEngine::seconds_to_depart(
 std::int32_t FlightAggregateEngine::seconds_to_mission_over(
     std::size_t index) const {
     if (index >= flights_.size()) return -1;
+    if (flights_[index].scrubbed) return -1;   // CAMP-CMD-2: no sortie
     const std::int64_t over = flights_[index].mission_over_time;
     if (over <= 0) return -1;     // no mission-over time in the save
     const std::int64_t d = over - (epoch_ + clock_);
@@ -414,6 +473,7 @@ std::int32_t FlightAggregateEngine::seconds_to_mission_over(
 std::int32_t FlightAggregateEngine::seconds_to_time_on_target(
     std::size_t index) const {
     if (index >= flights_.size()) return -1;
+    if (flights_[index].scrubbed) return -1;   // CAMP-CMD-2: no sortie
     const std::int64_t tot = flights_[index].time_on_target;
     if (tot <= 0) return -1;      // no TOT in the save / on the intent
     const std::int64_t d = tot - (epoch_ + clock_);

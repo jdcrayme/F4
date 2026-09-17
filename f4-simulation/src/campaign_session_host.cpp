@@ -37,6 +37,22 @@ namespace {
            name == "objectives" || name == "threat";
 }
 
+// The session's command-write outcome → the contract's typed refusal
+// (CAMP-CMD-2's mapping; one place, the dispatch's only policy).
+[[nodiscard]] api::CommandAck::Refusal map_write_refusal_(
+    CampaignSession::CommandWrite status) noexcept {
+    switch (status) {
+        case CampaignSession::CommandWrite::UnknownFlight:
+            return api::CommandAck::Refusal::UnknownFlight;
+        case CampaignSession::CommandWrite::UnknownObjective:
+            return api::CommandAck::Refusal::UnknownObjective;
+        case CampaignSession::CommandWrite::InvalidArgument:
+        case CampaignSession::CommandWrite::Applied:
+            break;
+    }
+    return api::CommandAck::Refusal::InvalidArgument;
+}
+
 } // namespace
 
 std::unique_ptr<EngineSessionHost> EngineSessionHost::create(
@@ -277,6 +293,9 @@ api::QueryResult EngineSessionHost::query(const api::QuerySpec& spec) {
             f.destroyed = ft.destroyed;
             f.to_depart = ft.to_depart;
             f.to_mission_over = ft.to_mission_over;
+            // CAMP-CMD-2: the abort record rides the row's additive
+            // tail (the DTO rule — new fields land at the END).
+            f.aborted = ft.aborted;
             rows.push_back(f);
             if (spec.limit > 0 && rows.size() >= spec.limit) break;
         }
@@ -691,23 +710,75 @@ api::CommandAck EngineSessionHost::dispatch_command_(
             return ack;
         }
 
-        case api::CommandIntent::Kind::FlightRetask:
-            ack.status = api::CommandAck::Status::Refused;
-            ack.refusal = api::CommandAck::Refusal::NotImplemented;
-            ack.detail = "CAMP-CMD-2 lands flight_retask";
+        case api::CommandIntent::Kind::FlightRetask: {
+            // CAMP-CMD-2 — the replan write. Wire-level validation
+            // first (refusal is data): the mission byte must carry a
+            // real, profiled mission and the target must be a real
+            // objective; the session answers for the flight shape.
+            if (intent.mission_byte == 0 ||
+                !f4::campaign::mission_type_byte(
+                     f4::campaign::mission_type_name(intent.mission_byte))
+                     .has_value()) {
+                ack.status = api::CommandAck::Status::Refused;
+                ack.refusal = api::CommandAck::Refusal::InvalidArgument;
+                ack.detail = "mission byte " +
+                             std::to_string(intent.mission_byte) +
+                             " is not a taskable mission";
+                return ack;
+            }
+            if (intent.target_objective_id == 0) {
+                ack.status = api::CommandAck::Status::Refused;
+                ack.refusal = api::CommandAck::Refusal::InvalidArgument;
+                ack.detail = "retask needs a target objective";
+                return ack;
+            }
+            const auto res = session_->apply_retask_command(
+                intent.flight, intent.mission_byte,
+                intent.target_objective_id);
+            if (res.status != CampaignSession::CommandWrite::Applied) {
+                ack.status = api::CommandAck::Status::Refused;
+                ack.refusal = map_write_refusal_(res.status);
+                ack.detail = res.detail;
+                return ack;
+            }
+            ack.detail = res.detail;
             return ack;
+        }
 
-        case api::CommandIntent::Kind::FlightAbort:
-            ack.status = api::CommandAck::Status::Refused;
-            ack.refusal = api::CommandAck::Refusal::NotImplemented;
-            ack.detail = "CAMP-CMD-2 lands flight_abort";
+        case api::CommandIntent::Kind::FlightAbort: {
+            const auto res = session_->apply_abort_command(intent.flight);
+            if (res.status != CampaignSession::CommandWrite::Applied) {
+                ack.status = api::CommandAck::Status::Refused;
+                ack.refusal = map_write_refusal_(res.status);
+                ack.detail = res.detail;
+                return ack;
+            }
+            ack.detail = res.detail;
             return ack;
+        }
 
-        case api::CommandIntent::Kind::ObjectivePriority:
-            ack.status = api::CommandAck::Status::Refused;
-            ack.refusal = api::CommandAck::Refusal::NotImplemented;
-            ack.detail = "CAMP-CMD-2 lands objective_priority";
+        case api::CommandIntent::Kind::ObjectivePriority: {
+            // The save's own priority scale is 0..100 (the byte the
+            // tasking scores scale against).
+            if (intent.weight < 0 || intent.weight > 100) {
+                ack.status = api::CommandAck::Status::Refused;
+                ack.refusal = api::CommandAck::Refusal::InvalidArgument;
+                ack.detail = "weight must be 0..100 (the objective "
+                             "priority scale)";
+                return ack;
+            }
+            const auto res = session_->apply_objective_priority(
+                intent.objective_id,
+                static_cast<std::uint8_t>(intent.weight));
+            if (res.status != CampaignSession::CommandWrite::Applied) {
+                ack.status = api::CommandAck::Status::Refused;
+                ack.refusal = map_write_refusal_(res.status);
+                ack.detail = res.detail;
+                return ack;
+            }
+            ack.detail = res.detail;
             return ack;
+        }
     }
     // unreachable (the Kind set is closed)
     return ack;

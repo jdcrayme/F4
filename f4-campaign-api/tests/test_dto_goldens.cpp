@@ -103,17 +103,24 @@ TEST(DtoGoldens, FlightViewArray) {
     a.to_mission_over = 900;
     FlightView b; // the defaults (an aggregate that never departed)
     b.to_depart = 600;
+    FlightView c; // CAMP-CMD-2: an aborted flight (the additive tail)
+    c.vu = 55;
+    c.aborted = true;
 
-    std::vector<FlightView> flights{a, b};
+    std::vector<FlightView> flights{a, b, c};
     EXPECT_EQ(encode_json(flights),
               R"([{"vu":118,"team":2,"mission":9,"aircraft_count":2,)"
               R"("x_grid":390.25,"y_grid":455.75,"altitude_ft":20000,)"
               R"("fuel_burnt":1200,"live":1,"arrived":0,"destroyed":0,)"
-              R"("to_depart":-1,"to_mission_over":900},)"
+              R"("to_depart":-1,"to_mission_over":900,"aborted":0},)"
               R"({"vu":0,"team":0,"mission":0,"aircraft_count":0,)"
               R"("x_grid":0,"y_grid":0,"altitude_ft":0,"fuel_burnt":0,)"
               R"("live":0,"arrived":0,"destroyed":0,"to_depart":600,)"
-              R"("to_mission_over":-1}])");
+              R"("to_mission_over":-1,"aborted":0},)"
+              R"({"vu":55,"team":0,"mission":0,"aircraft_count":0,)"
+              R"("x_grid":0,"y_grid":0,"altitude_ft":0,"fuel_burnt":0,)"
+              R"("live":0,"arrived":0,"destroyed":0,"to_depart":-1,)"
+              R"("to_mission_over":-1,"aborted":1}])");
 }
 
 TEST(DtoGoldens, EmptyFlightArray) {
