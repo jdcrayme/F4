@@ -120,6 +120,44 @@ struct CommandAck {
     return "none";
 }
 
+// The intent NAME on the wire/journal (the parse side's vocabulary, made
+// bidirectional — CAMP-CMD-1's journal line carries it back out).
+[[nodiscard]] inline std::string_view
+command_intent_name(CommandIntent::Kind k) noexcept {
+    switch (k) {
+        case CommandIntent::Kind::RoeSet:            return "roe_set";
+        case CommandIntent::Kind::FlightRetask:      return "flight_retask";
+        case CommandIntent::Kind::FlightAbort:       return "flight_abort";
+        case CommandIntent::Kind::ObjectivePriority: return "objective_priority";
+        case CommandIntent::Kind::Focus:             return "focus";
+        case CommandIntent::Kind::ClearFocus:        return "clear_focus";
+        case CommandIntent::Kind::SelectDeagg:       return "select_deagg";
+        case CommandIntent::Kind::SelectReagg:       return "select_reagg";
+    }
+    return "roe_set";
+}
+
+// The scope's canonical wire object — the RoeChangedEvent encoder AND the
+// command journal's roe_set lines share these exact bytes (all four keys,
+// always: the canonical form never elides zeros):
+//
+//   {"kind":"team|mission|flight","team":N,"mission":N,"flight":N}
+inline void encode_roe_scope(f4::json::Writer& w, const RoEScope& scope) {
+    w.raw("{\"kind\":\"");
+    switch (scope.kind) {
+        case RoEScopeKind::Team:    w.raw("team");    break;
+        case RoEScopeKind::Mission: w.raw("mission"); break;
+        case RoEScopeKind::Flight:  w.raw("flight");  break;
+    }
+    w.raw("\",\"team\":");
+    w.number(scope.team);
+    w.raw(",\"mission\":");
+    w.number(scope.mission);
+    w.raw(",\"flight\":");
+    w.number(static_cast<std::uint64_t>(scope.flight));
+    w.put('}');
+}
+
 inline void encode(f4::json::Writer& w, const CommandAck& ack) {
     w.raw("{\"status\":\"");
     w.raw(ack.status == CommandAck::Status::Applied ? "applied" : "refused");
@@ -304,6 +342,62 @@ inline CommandIntent parse_command_body(const std::string& intent,
         closed = r.consume('}');
     }
     return cmd;
+}
+
+// --- the command body encoder (CAMP-CMD-1's journal; byte-stable) --------
+//
+// Writes the intent NAME + payload keys WITHOUT enclosing braces — the
+// body rides inside a caller-owned envelope (the command journal's line
+// carries {"apply_tick":T,"t":S,<body>}). Fixed key order per intent,
+// the exact vocabulary the parser accepts, so a body this writes parses
+// back through parse_command_body verbatim.
+inline void encode_command_body(f4::json::Writer& w, const CommandIntent& cmd) {
+    w.raw("\"intent\":\"");
+    w.raw(command_intent_name(cmd.kind));
+    w.put('"');
+    switch (cmd.kind) {
+        case CommandIntent::Kind::RoeSet:
+            w.raw(",\"scope\":");
+            encode_roe_scope(w, cmd.scope);
+            w.raw(",\"roe\":");
+            w.number(static_cast<unsigned>(cmd.roe));
+            break;
+        case CommandIntent::Kind::FlightRetask:
+            w.raw(",\"flight\":");
+            w.number(static_cast<std::uint64_t>(cmd.flight));
+            w.raw(",\"mission\":");
+            w.number(cmd.mission_byte);
+            w.raw(",\"target\":");
+            w.number(static_cast<std::uint64_t>(cmd.target_objective_id));
+            break;
+        case CommandIntent::Kind::FlightAbort:
+            w.raw(",\"flight\":");
+            w.number(static_cast<std::uint64_t>(cmd.flight));
+            break;
+        case CommandIntent::Kind::ObjectivePriority:
+            w.raw(",\"objective\":");
+            w.number(static_cast<std::uint64_t>(cmd.objective_id));
+            w.raw(",\"weight\":");
+            w.number(static_cast<long long>(cmd.weight));
+            break;
+        case CommandIntent::Kind::Focus:
+            w.raw(",\"x\":");
+            w.number(cmd.x);
+            w.raw(",\"y\":");
+            w.number(cmd.y);
+            w.raw(",\"z\":");
+            w.number(cmd.z);
+            w.raw(",\"radius_ft\":");
+            w.number(cmd.radius_ft);
+            break;
+        case CommandIntent::Kind::ClearFocus:
+            break;
+        case CommandIntent::Kind::SelectDeagg:
+        case CommandIntent::Kind::SelectReagg:
+            w.raw(",\"flight\":");
+            w.number(static_cast<std::uint64_t>(cmd.flight));
+            break;
+    }
 }
 
 } // namespace f4::campaign::api

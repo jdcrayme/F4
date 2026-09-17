@@ -184,19 +184,9 @@ inline void encode(f4::json::Writer& w, const WeatherChangedEvent& e) {
 inline void encode(f4::json::Writer& w, const RoeChangedEvent& e) {
     w.raw("{\"ev\":\"roe_changed\",\"t\":");
     w.number(static_cast<long long>(e.t));
-    w.raw(",\"scope\":{\"kind\":\"");
-    switch (e.scope.kind) {
-        case RoEScopeKind::Team:    w.raw("team");    break;
-        case RoEScopeKind::Mission: w.raw("mission"); break;
-        case RoEScopeKind::Flight:  w.raw("flight");  break;
-    }
-    w.raw("\",\"team\":");
-    w.number(e.scope.team);
-    w.raw(",\"mission\":");
-    w.number(e.scope.mission);
-    w.raw(",\"flight\":");
-    w.number(static_cast<std::uint64_t>(e.scope.flight));
-    w.raw("},\"roe\":");
+    w.raw(",\"scope\":");
+    encode_roe_scope(w, e.scope);
+    w.raw(",\"roe\":");
     w.number(static_cast<unsigned>(e.roe));
     w.put('}');
 }

@@ -53,6 +53,7 @@
 #pragma once
 
 #include <f4/ai/air_picture.hpp>          // FID-5: the aggregate contacts
+#include <f4/campaign/api/commands.hpp>   // CAMP-CMD-1: the RoE scope vocabulary
 #include <f4/campaign/campaign.hpp>
 #include <f4/campaign/flight_aggregate.hpp>
 #include <f4/campaign/flight_writeback.hpp>
@@ -393,6 +394,17 @@ public:
         const noexcept {
         return spawner_->stats();
     }
+    /// The spawner itself (read-only): the spawned roster the campaign
+    /// contract's RoE walk serves, and the flight_roe() byte each
+    /// intent carried. CAMP-CMD-1's tests + the effective-RoE story.
+    [[nodiscard]] const CampaignSimSpawner& spawner() const noexcept {
+        return *spawner_;
+    }
+    /// The campaign aircraft roster: the spawner's materialized
+    /// aircraft + the FID-5 deagg aircraft, in walk order — the exact
+    /// target list the CAMP-CMD-1 RoE walk serves.
+    [[nodiscard]] std::vector<f4::entities::EntityId> campaign_aircraft()
+        const;
     /// The result ledger (draws, losses, reinforcements, damage).
     [[nodiscard]] const f4::campaign::CampaignResultLedger& ledger()
         const noexcept {
@@ -540,6 +552,21 @@ public:
     /// Clears the force-deagg pin. Unknown/not-deaggregated vu = no-op.
     void force_reaggregate_flight(std::uint32_t vu);
 
+    /// CAMP-CMD-1 — the engine write behind the roe_set command: the
+    /// scope joins the doctrine store (arrival order), every campaign
+    /// aircraft's effective RoE recomputes from the doctrine baseline
+    /// (Simulation::set_flight_roe — so a command can LOWER as well as
+    /// tighten), and a roe_changed event publishes on the bus. The
+    /// effective level per aircraft = the TIGHTEST of the carried P7
+    /// byte and every matching scope (a wider scope's hold is a ceiling:
+    /// doctrine cascades down; loosening happens at the scope that
+    /// tightened). Returns the number of live aircraft the scope
+    /// matched (the ack's context — a doctrine for future flights
+    /// matches zero today and is still applied).
+    std::size_t apply_roe_command(
+        const f4::campaign::api::RoEScope& scope,
+        f4::campaign::api::RoeLevel roe);
+
     /// EntityId lookup for the LIVE world (the sim's): VU_ID.num →
     /// entity, rebuilt at construction from the sim's own population.
     [[nodiscard]] const std::unordered_map<std::uint32_t,
@@ -571,6 +598,44 @@ private:
     void emit_capture_events_();   ///< the ground war's objective flips
     void emit_damage_events_();    ///< the damage sync's changed objectives
 
+    // --- CAMP-CMD-1: the roe_set doctrine store --------------------------
+
+    /// One applied roe_set: the command's scope + level. One entry per
+    /// scope — a re-set on the same scope REPLACES its level (the
+    /// later command is the commander's latest word); distinct scopes
+    /// compose by the tightest-wins rule in effective_flight_roe_.
+    struct RoeCommand {
+        f4::campaign::api::RoEScope scope{};
+        std::uint8_t level{0};
+    };
+
+    /// Does this origin sit inside the scope? (team ⊇ mission ⊇ flight:
+    /// a team scope matches every aircraft of the team; a mission scope
+    /// adds the mission byte; a flight scope matches the flight VU.)
+    [[nodiscard]] bool roe_scope_matches_(
+        const f4::campaign::api::RoEScope& scope,
+        const CampaignOriginComponent& origin) const;
+
+    /// The aircraft's effective RoE: the TIGHTEST of the carried P7
+    /// byte (the spawner's recorded flight_roe) and every matching
+    /// roe_set scope in the store.
+    [[nodiscard]] std::uint8_t effective_flight_roe_(
+        const CampaignOriginComponent& origin) const;
+
+    /// One aircraft's effective-RoE write (no-op when the entity is
+    /// gone or carries no origin).
+    void apply_effective_roe_(f4::entities::EntityId id);
+
+    /// Re-walk every campaign aircraft (the spawner's spawns in
+    /// arrival order, then the FID-5 deagg aircraft) and impose the
+    /// effective RoE. Per-entity gate writes are order-independent
+    /// (pure per-brain assignments — no RNG, no cross-entity terms),
+    /// so the RESULT is deterministic regardless of walk order; the
+    /// walk order is still pinned for discipline. Runs on the adopt
+    /// cadence AND after every roe_set (a fresh arm resets the gates
+    /// — the doctrine re-imposes on top).
+    void reapply_roe_();
+
     /// The event-log read cursors (the ledger's arrival-order logs only
     /// ever append; the tail past the cursor is THIS cadence's news).
     std::size_t last_reinforcement_record_ = 0;
@@ -578,6 +643,9 @@ private:
     /// The tasking-cycle counter's last seen value (the diff IS the
     /// fires of this whole-second block — the clock chunks seconds).
     std::int64_t last_cycles_fired_ = 0;
+
+    /// CAMP-CMD-1: the applied roe_set commands, in arrival order.
+    std::vector<RoeCommand> roe_commands_;
 
     /// One deaggregated flight: the materialized aircraft + the tier
     /// bookkeeping (the trigger that spawned it, when, and until when

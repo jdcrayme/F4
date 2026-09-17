@@ -16,6 +16,8 @@
 #include <f4/campaign/threat_map.hpp>  // CAMP-HOST-3: kThreatMapRatio echo
 #include <f4/geo/f4_geo.hpp>
 
+#include <algorithm>
+#include <cmath>
 #include <fstream>
 #include <utility>
 #include <vector>
@@ -82,12 +84,54 @@ api::StepResult EngineSessionHost::step(std::uint32_t ticks) {
     if (ticks == 0) {
         return res;
     }
-    // The engine's accumulator drains whole ticks and carries the
-    // sub-tick residue forward (advance()'s own discipline), and the
-    // override caps the request so rounding can never overshoot. The
-    // boolean is the cap-hit flag — the plan's dilation signal.
-    res.dilated = session_->advance(
-        static_cast<double>(ticks) * opts_.sim_dt, static_cast<int>(ticks));
+    if (replay_cursor_ >= replay_.size()) {
+        // The engine's accumulator drains whole ticks and carries the
+        // sub-tick residue forward (advance()'s own discipline), and the
+        // override caps the request so rounding can never overshoot. The
+        // boolean is the cap-hit flag — the plan's dilation signal.
+        res.dilated = session_->advance(
+            static_cast<double>(ticks) * opts_.sim_dt, static_cast<int>(ticks));
+        return res;
+    }
+    // CAMP-CMD-1 — the replay path: segment the request around the
+    // pending apply ticks so every replayed command lands at EXACTLY
+    // the engine tick the record applied it at, no matter how the
+    // replay's step requests are chunked (step(200) and 2×step(100)
+    // reproduce the same war). A paused session absorbs the budget
+    // without moving ticks (the HOST-1 semantics) — the commands stay
+    // pending until the clock moves again.
+    if (session_->paused()) {
+        apply_due_replay_commands_();
+        return res;
+    }
+    bool dilated = false;
+    std::uint32_t remaining = ticks;
+    while (remaining > 0) {
+        apply_due_replay_commands_();
+        if (replay_cursor_ >= replay_.size()) break;
+        const std::uint64_t now = engine_ticks();
+        const std::uint64_t next = replay_[replay_cursor_].apply_tick;
+        if (next <= now) {
+            // unreachable after apply_due unless the cap dropped the
+            // debt below a pending tick (a replay whose stepping does
+            // not match the record — the footer check fails loudly at
+            // EOF); bail instead of spinning.
+            break;
+        }
+        const std::uint32_t run = static_cast<std::uint32_t>(
+            std::min<std::uint64_t>(remaining, next - now));
+        dilated = session_->advance(
+                      static_cast<double>(run) * opts_.sim_dt,
+                      static_cast<int>(run)) || dilated;
+        remaining -= run;
+    }
+    if (replay_cursor_ >= replay_.size() && remaining > 0) {
+        // the journal exhausted mid-request: finish the budget plainly
+        dilated = session_->advance(
+                      static_cast<double>(remaining) * opts_.sim_dt,
+                      static_cast<int>(remaining)) || dilated;
+    }
+    res.dilated = dilated;
     return res;
 }
 
@@ -411,6 +455,82 @@ void EngineSessionHost::remove_event_sink(std::size_t handle) {
 
 api::CommandAck EngineSessionHost::submit(
     const api::CommandIntent& intent) {
+    if (replay_active_) {
+        // CAMP-CMD-1: the journal is the command source during replay —
+        // a wire command would fork the record (refusal is data).
+        api::CommandAck ack;
+        ack.apply_tick = session_->campaign_time();
+        ack.status = api::CommandAck::Status::Refused;
+        ack.refusal = api::CommandAck::Refusal::InvalidArgument;
+        ack.detail =
+            "command replay is active — this session's commands come "
+            "from its journal";
+        return ack;
+    }
+    return apply_command_(intent);
+}
+
+api::CommandAck EngineSessionHost::apply_command_(
+    const api::CommandIntent& intent) {
+    api::CommandAck ack = dispatch_command_(intent);
+    if (ack.status == api::CommandAck::Status::Applied && journal_sink_) {
+        // the intervention journal: the tick index (the replay axis) +
+        // the campaign seconds (the ack's axis) + the intent. Refused
+        // commands never journal — they mutate nothing.
+        journal_sink_(engine_ticks(), session_->campaign_time(), intent);
+    }
+    return ack;
+}
+
+void EngineSessionHost::set_command_journal_sink(CommandJournalSink sink) {
+    journal_sink_ = std::move(sink);
+}
+
+std::uint64_t EngineSessionHost::engine_ticks() const {
+    // whole sim_dt steps drained since session start, from the engine's
+    // own accumulated sim seconds (llround absorbs the per-tick fp
+    // accumulation drift; a paused session moved no ticks)
+    if (!(opts_.sim_dt > 0.0)) return 0;
+    return static_cast<std::uint64_t>(
+        std::llround(session_->stats().sim_time_s / opts_.sim_dt));
+}
+
+bool EngineSessionHost::start_command_replay(
+    std::vector<api::CommandJournalEntry> entries, std::string* error) {
+    if (replay_active_ || replay_cursor_ < replay_.size()) {
+        if (error != nullptr) *error = "command replay already active";
+        return false;
+    }
+    for (std::size_t i = 1; i < entries.size(); ++i) {
+        if (entries[i].apply_tick < entries[i - 1].apply_tick) {
+            if (error != nullptr) {
+                *error = "replay entries are not in apply order (tick " +
+                         std::to_string(entries[i].apply_tick) + " < " +
+                         std::to_string(entries[i - 1].apply_tick) + ")";
+            }
+            return false;
+        }
+    }
+    replay_ = std::move(entries);
+    replay_cursor_ = 0;
+    replay_active_ = true;
+    // anything already due applies NOW (the record applied it at this
+    // same boundary — a tick-0 command lands before the first step)
+    apply_due_replay_commands_();
+    return true;
+}
+
+void EngineSessionHost::apply_due_replay_commands_() {
+    const std::uint64_t now = engine_ticks();
+    while (replay_cursor_ < replay_.size() &&
+           replay_[replay_cursor_].apply_tick <= now) {
+        (void)apply_command_(replay_[replay_cursor_].intent);
+        ++replay_cursor_;
+    }
+}
+
+api::CommandAck EngineSessionHost::dispatch_command_(
+    const api::CommandIntent& intent) {
     api::CommandAck ack;
     ack.apply_tick = session_->campaign_time();
 
@@ -486,14 +606,90 @@ api::CommandAck EngineSessionHost::submit(
             return ack;
         }
 
-        case api::CommandIntent::Kind::RoeSet:
-            // The CAMP-CMD queue — refused with the tranche named. The
-            // wire is stable now so the commands land WITHOUT a
-            // protocol bump (plan §3.3).
-            ack.status = api::CommandAck::Status::Refused;
-            ack.refusal = api::CommandAck::Refusal::NotImplemented;
-            ack.detail = "CAMP-CMD-1 lands roe_set";
+        case api::CommandIntent::Kind::RoeSet: {
+            // CAMP-CMD-1 — roe_set rides the P7 fire-control path: the
+            // scope joins the session's doctrine store, every campaign
+            // aircraft's effective RoE recomputes (the full write — a
+            // command can LOWER as well as tighten), and roe_changed
+            // publishes. Validation first (refusal is data): a scope's
+            // zero-values are non-targets (team 0 = no team, mission 0
+            // = untasked, flight 0 = no VU), and a flight scope must
+            // name a roster flight (doctrine for FUTURE flights goes
+            // through the team/mission scopes it will spawn under).
+            const auto level_name = [](api::RoeLevel l) {
+                switch (l) {
+                    case api::RoeLevel::Tight: return "tight";
+                    case api::RoeLevel::Hold:  return "hold";
+                    case api::RoeLevel::Free:  break;
+                }
+                return "free";
+            };
+            std::string scope_text;
+            switch (intent.scope.kind) {
+                case api::RoEScopeKind::Team:
+                    if (intent.scope.team == 0) {
+                        ack.status = api::CommandAck::Status::Refused;
+                        ack.refusal =
+                            api::CommandAck::Refusal::InvalidArgument;
+                        ack.detail = "team 0 is not a doctrine target";
+                        return ack;
+                    }
+                    scope_text = "team " +
+                        std::to_string(intent.scope.team);
+                    break;
+                case api::RoEScopeKind::Mission:
+                    if (intent.scope.team == 0 ||
+                        intent.scope.mission == 0) {
+                        ack.status = api::CommandAck::Status::Refused;
+                        ack.refusal =
+                            api::CommandAck::Refusal::InvalidArgument;
+                        ack.detail =
+                            "mission scope needs team >= 1 and "
+                            "mission >= 1";
+                        return ack;
+                    }
+                    scope_text = "team " +
+                        std::to_string(intent.scope.team) + " mission " +
+                        std::to_string(intent.scope.mission);
+                    break;
+                case api::RoEScopeKind::Flight:
+                    if (intent.scope.flight == 0) {
+                        ack.status = api::CommandAck::Status::Refused;
+                        ack.refusal =
+                            api::CommandAck::Refusal::UnknownFlight;
+                        ack.detail = "flight VU 0 is not a roster id";
+                        return ack;
+                    }
+                    {
+                        bool found = false;
+                        for (const auto& ft : session_->flight_tiers()) {
+                            if (ft.vu == intent.scope.flight) {
+                                found = true;
+                                break;
+                            }
+                        }
+                        if (!found) {
+                            ack.status =
+                                api::CommandAck::Status::Refused;
+                            ack.refusal =
+                                api::CommandAck::Refusal::UnknownFlight;
+                            ack.detail =
+                                "no such flight in the session's roster";
+                            return ack;
+                        }
+                    }
+                    scope_text = "flight VU " +
+                        std::to_string(intent.scope.flight);
+                    break;
+            }
+            const auto matched =
+                session_->apply_roe_command(intent.scope, intent.roe);
+            ack.detail =
+                "roe_set applied (" + scope_text + " = " +
+                std::string(level_name(intent.roe)) + "): " +
+                std::to_string(matched) + " live aircraft matched";
             return ack;
+        }
 
         case api::CommandIntent::Kind::FlightRetask:
             ack.status = api::CommandAck::Status::Refused;

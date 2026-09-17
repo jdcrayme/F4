@@ -26,3 +26,8 @@ f4_campaign_api_add_test(test_protocol_dispatch test_protocol_dispatch.cpp)
 # family, replay identity, drift naming) + the subscription filter's
 # per-family team semantics. Still no engine in the link.
 f4_campaign_api_add_test(test_event_journal test_event_journal.cpp)
+
+# CAMP-CMD-1: the command journal's byte discipline (the applied-command
+# line goldens, writer/reader round trip, header drift, monotonic ticks)
+# + the intent body encoder's canonical bytes for every kind.
+f4_campaign_api_add_test(test_command_journal test_command_journal.cpp)

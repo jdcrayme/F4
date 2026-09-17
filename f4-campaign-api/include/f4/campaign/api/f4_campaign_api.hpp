@@ -8,6 +8,8 @@
 //   commands   — commands.hpp  (typed CommandIntent + typed CommandAck)
 //   events     — events.hpp    (the v1 event vocabulary + the bus envelope)
 //   journal    — journal.hpp   (the engine-rate JSONL record + its verifier)
+//   cmdjournal — command_journal.hpp (the applied-command record + its
+//                reader — the replay side of the identity statement)
 //
 // plus protocol.hpp, the line dispatch both `campaignd` (the reference
 // host) and the tests drive.
@@ -22,6 +24,7 @@
 
 #pragma once
 
+#include <f4/campaign/api/command_journal.hpp>
 #include <f4/campaign/api/commands.hpp>
 #include <f4/campaign/api/dto.hpp>
 #include <f4/campaign/api/events.hpp>

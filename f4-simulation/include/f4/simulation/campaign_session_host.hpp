@@ -18,9 +18,23 @@
 //     machinery wearing its contract hat (plan §4): set_view_bubble,
 //     force_(de|re)aggregate_flight. Applied immediately (presentation-
 //     adjacent doctrine, not war state); the ack says so.
-//   - roe_set / flight_retask / flight_abort / objective_priority —
-//     REFUSED with Refusal::NotImplemented and the tranche ID in the
-//     detail (CAMP-CMD-1/2 land behind the same wire; no protocol bump).
+//   - roe_set — CAMP-CMD-1: the P7 fire-control path behind the command
+//     (team / mission / flight scopes; the session owns the doctrine
+//     store and the roe_changed event).
+//   - flight_retask / flight_abort / objective_priority — REFUSED with
+//     Refusal::NotImplemented and the tranche ID in the detail (CAMP-CMD-2
+//     lands behind the same wire; no protocol bump).
+//
+// The command journal (CAMP-CMD-1, plan §2.3/§5): every APPLIED command
+// fires the journal sink with the engine tick it applied at; the sink is
+// the caller's (campaignd's --command-journal writes the lines). The
+// replay side loads the journal's entries and step() segments the
+// request around the pending apply ticks, so each replayed command
+// lands at EXACTLY the engine tick the record applied it at — the
+// identity statement "(save, seed, command journal) → the same
+// fingerprint" runs through the SAME step() a live client drives. While
+// a replay is active the wire's command op is refused: the journal IS
+// the command source.
 //
 // step() semantics (plan §5): advance(ticks * sim_dt, override = ticks)
 // — the engine's own accumulator drains whole ticks and carries any
@@ -30,6 +44,7 @@
 
 #pragma once
 
+#include <f4/campaign/api/command_journal.hpp>
 #include <f4/campaign/api/session.hpp>
 
 #include <f4/simulation/campaign_session.hpp>
@@ -81,6 +96,38 @@ public:
         std::function<void(const f4::campaign::api::CampaignEvent&)> sink);
     void remove_event_sink(std::size_t handle);
 
+    // --- CAMP-CMD-1: the command journal (record + replay) --------------
+
+    /// Install the command journal sink: every APPLIED command fires it
+    /// with the engine tick index it applied at (the journal's axis),
+    /// the campaign seconds (the ack's axis — audit context), and the
+    /// intent. Refused commands never fire it (they mutate nothing).
+    using CommandJournalSink = std::function<void(
+        std::uint64_t apply_tick, std::int64_t campaign_time_s,
+        const f4::campaign::api::CommandIntent&)>;
+    void set_command_journal_sink(CommandJournalSink sink);
+
+    /// Arm replay: the entries (from CommandJournalReader::load) apply
+    /// at their recorded ticks as step() advances — see step(). Ticks
+    /// must be non-decreasing (the record's apply order IS the replay's).
+    /// While active, wire commands are refused (the journal is the
+    /// command source).
+    [[nodiscard]] bool start_command_replay(
+        std::vector<f4::campaign::api::CommandJournalEntry> entries,
+        std::string* error = nullptr);
+
+    /// Journal commands that have not applied yet (a replay that ended
+    /// short of the record — the reference host exits 23 on this).
+    [[nodiscard]] std::size_t pending_replay_commands() const noexcept {
+        return replay_.size() - replay_cursor_;
+    }
+
+    /// The engine tick index: whole sim_dt steps drained since session
+    /// start — the command journal's apply_tick axis. Derived from the
+    /// engine's own accumulated sim seconds (a paused session moves no
+    /// ticks; a capped one moves only what drained).
+    [[nodiscard]] std::uint64_t engine_ticks() const;
+
     // --- direct engine access (CAMP-HOST-3's two planes) ---------------
     //
     // The contract plane (ICampaignSession, above) is the ONLY surface a
@@ -103,6 +150,20 @@ private:
     /// Install the wire buffer's bus subscription (once, on first arm).
     void arm_buffer_();
 
+    /// The command path's shared body: dispatch + the journal sink (an
+    /// applied command always journals, live or replayed).
+    f4::campaign::api::CommandAck apply_command_(
+        const f4::campaign::api::CommandIntent& intent);
+
+    /// The per-kind dispatch (submit()'s original body): validation in,
+    /// ack out, refusals as data.
+    f4::campaign::api::CommandAck dispatch_command_(
+        const f4::campaign::api::CommandIntent& intent);
+
+    /// Apply every replayed command whose tick has come due (in file
+    /// order — same-tick commands keep the record's relative order).
+    void apply_due_replay_commands_();
+
     std::unique_ptr<CampaignSession> session_;
     CampaignSessionOptions opts_{};
     /// The host's pacing presentation (echoed by the `time` query; never
@@ -122,6 +183,12 @@ private:
     std::size_t buffer_subscription_{static_cast<std::size_t>(-1)};
     f4::campaign::api::EventFilter filter_{};
     std::vector<f4::campaign::api::CampaignEvent> buffer_;
+
+    // --- CAMP-CMD-1 command journal plumbing ----------------------------
+    CommandJournalSink journal_sink_{};
+    std::vector<f4::campaign::api::CommandJournalEntry> replay_;
+    std::size_t replay_cursor_{0};
+    bool replay_active_{false};
 };
 
 } // namespace f4::simulation

@@ -235,6 +235,20 @@ public:
     /// brain.
     void apply_flight_roe(entities::EntityId id, std::uint8_t roe);
 
+    /// CAMP-CMD-1 — the FULL RoE write behind the roe_set command:
+    /// recompute every RoE gate from the campaign arm's doctrine
+    /// baseline, then impose the level. Unlike apply_flight_roe's
+    /// tighten-only ratchet this can LOWER — a roe_set that loosens a
+    /// scope must be able to clear holds an earlier command (or a
+    /// tighter level) imposed. The baseline mirrors arm_campaign_combat's
+    /// configure_brain_combat call for campaign aircraft (hold_fire =
+    /// false + the scenario combat's own holds); the envelopes and the
+    /// gun rounds budget are deliberately NOT re-written (a re-arm
+    /// would resurrect spent gun rounds — RoE touches the gates only).
+    /// Same wire vocabulary as apply_flight_roe (0/1/2); idempotent; a
+    /// no-op on entities without a brain.
+    void set_flight_roe(entities::EntityId id, std::uint8_t roe);
+
     /// C6 diagnostics: how many campaign aircraft this Simulation armed
     /// (total + per doctrine role). The QC summary + the session stats
     /// read exactly these.

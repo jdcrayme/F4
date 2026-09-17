@@ -717,15 +717,16 @@ void CampaignSession::adopt_new_spawns_() {
     }
     // P7 — the flights' RoE rides on top of the armed doctrine (the
     // arm's configure_brain_combat owns the scenario's holds; the
-    // flight's own roe_check byte gates from here on). Applied every
-    // cadence — the gates are idempotent assignments and the roster
-    // walk is arrival-ordered, so re-applying is a no-op.
-    for (const auto id : spawned) {
-        auto* fp = f4::entities::EntityHandle(id, &sim_->world())
-                       .get<f4::simulation::CampaignOriginComponent>();
-        if (fp == nullptr) continue;
-        sim_->apply_flight_roe(id, spawner_->flight_roe(fp->flight_vu));
-    }
+    // flight's own roe_check byte gates from here on). CAMP-CMD-1: the
+    // walk serves the COMMAND store too — the effective level is the
+    // tightest of the carried byte and every matching roe_set scope,
+    // recomputed from the doctrine baseline so a command can LOWER as
+    // well as tighten (Simulation::set_flight_roe). Applied every
+    // cadence — the writes are idempotent and the roster walk is
+    // arrival-ordered, so re-applying is a no-op for an un-commanded
+    // session (byte-identity holds: the recomputed values equal the
+    // armed baseline).
+    reapply_roe_();
 }
 
 void CampaignSession::retire_due_wrecks_() {
@@ -1080,6 +1081,120 @@ void CampaignSession::emit_damage_events_() {
 }
 
 // ---------------------------------------------------------------------------
+// CAMP-CMD-1 — the roe_set command path (see the header's block comment)
+// ---------------------------------------------------------------------------
+
+bool CampaignSession::roe_scope_matches_(
+    const f4::campaign::api::RoEScope& scope,
+    const CampaignOriginComponent& origin) const {
+    namespace api = f4::campaign::api;
+    switch (scope.kind) {
+        case api::RoEScopeKind::Team:
+            return origin.team_slot == scope.team;
+        case api::RoEScopeKind::Mission:
+            return origin.team_slot == scope.team &&
+                   origin.mission_byte == scope.mission;
+        case api::RoEScopeKind::Flight:
+            return origin.flight_vu == scope.flight;
+    }
+    return false;
+}
+
+std::uint8_t CampaignSession::effective_flight_roe_(
+    const CampaignOriginComponent& origin) const {
+    // The TIGHTEST wins: the carried P7 byte is the floor the save
+    // asked for, every matching command scope raises it, and a wider
+    // scope's hold is a ceiling a narrower scope cannot cut through
+    // (doctrine cascades down; loosening happens at the scope that
+    // tightened). Two commands on the SAME scope: the later one wins
+    // because it is that scope's current level.
+    std::uint8_t roe = spawner_->flight_roe(origin.flight_vu);
+    for (const auto& rc : roe_commands_) {
+        if (roe_scope_matches_(rc.scope, origin)) {
+            roe = std::max(roe, rc.level);
+        }
+    }
+    return roe;
+}
+
+void CampaignSession::apply_effective_roe_(f4::entities::EntityId id) {
+    auto* origin = f4::entities::EntityHandle(id, &sim_->world())
+                       .get<CampaignOriginComponent>();
+    if (origin == nullptr) return;
+    sim_->set_flight_roe(id, effective_flight_roe_(*origin));
+}
+
+void CampaignSession::reapply_roe_() {
+    // Every campaign aircraft: the spawner's spawns in arrival order,
+    // then the FID-5 deagg aircraft. The per-entity writes are pure
+    // per-brain gate assignments (no RNG, no cross-entity terms), so
+    // the result is walk-order independent; the arrival orders are
+    // pinned anyway. Entities gone (retired wrecks) or without an
+    // origin (scenario aircraft) are skipped by the guards.
+    for (const auto id : campaign_aircraft()) {
+        apply_effective_roe_(id);
+    }
+}
+
+std::vector<f4::entities::EntityId> CampaignSession::campaign_aircraft()
+    const {
+    std::vector<f4::entities::EntityId> out;
+    out.reserve(spawner_->spawned().size() + deaggregated_.size());
+    for (const auto id : spawner_->spawned()) out.push_back(id);
+    for (const auto& [vu, rec] : deaggregated_) out.push_back(rec.aircraft);
+    return out;
+}
+
+std::size_t CampaignSession::apply_roe_command(
+    const f4::campaign::api::RoEScope& scope,
+    f4::campaign::api::RoeLevel roe) {
+    namespace api = f4::campaign::api;
+    // One level per scope: a roe_set on the same scope REPLACES that
+    // scope's level (the later command is the commander's latest word —
+    // without this, max() over the diary would let a loosened scope's
+    // own earlier hold bind forever). Distinct scopes compose by the
+    // tightest-wins rule in effective_flight_roe_.
+    roe_commands_.erase(
+        std::remove_if(roe_commands_.begin(), roe_commands_.end(),
+                       [&](const RoeCommand& rc) {
+                           return rc.scope.kind == scope.kind &&
+                                  rc.scope.team == scope.team &&
+                                  rc.scope.mission == scope.mission &&
+                                  rc.scope.flight == scope.flight;
+                       }),
+        roe_commands_.end());
+    roe_commands_.push_back(RoeCommand{scope, static_cast<std::uint8_t>(roe)});
+
+    // Recompute every aircraft's effective RoE from the doctrine
+    // baseline (the full write — commands lower as well as tighten),
+    // then count the live aircraft the scope matched (the ack's
+    // context; a doctrine for future flights matches zero today).
+    reapply_roe_();
+    std::size_t matched = 0;
+    const auto count_one = [&](f4::entities::EntityId id) {
+        auto* origin = f4::entities::EntityHandle(id, &sim_->world())
+                           .get<CampaignOriginComponent>();
+        if (origin == nullptr) return;
+        if (!roe_scope_matches_(scope, *origin)) return;
+        auto* brain = f4::entities::EntityHandle(id, &sim_->world())
+                          .get<f4::ai::BrainComponent>();
+        if (brain != nullptr) ++matched;
+    };
+    for (const auto id : campaign_aircraft()) count_one(id);
+
+    // roe_changed — the pinned encoder's publisher (HOST-2 note 4's
+    // "waits for CAMP-CMD-1"). t = the ladder's relative seconds, the
+    // books' own axis; the scope echoes the command's verbatim.
+    api::CampaignEvent e;
+    e.kind = api::CampaignEvent::Kind::RoeChanged;
+    e.roe_changed.t = ladder_->clock();
+    e.roe_changed.scope = scope;
+    e.roe_changed.roe = roe;
+    sim_->bus().publish(e);
+    return matched;
+}
+
+// ---------------------------------------------------------------------------
 // FID-5 — event-driven combat deagg (Docs/FIDELITY_TIERS_PLAN.md §4.5–4.6)
 // ---------------------------------------------------------------------------
 
@@ -1393,6 +1508,11 @@ void CampaignSession::deaggregate_flight_(
     // idempotent — the same calls adopt_new_spawns_ makes).
     sim_->register_aircraft(*spawned);
     sim_->arm_campaign_aircraft(*spawned);
+    // CAMP-CMD-1: the deagged aircraft inherits the flight's doctrine
+    // too — the effective RoE (carried byte + the command store) rides
+    // on top of the fresh arm exactly as the adopt cadence would apply
+    // it at the next whole-second boundary.
+    apply_effective_roe_(*spawned);
 
     flights_->set_suspended(f.vu, true);
     DeaggregatedFlight rec;

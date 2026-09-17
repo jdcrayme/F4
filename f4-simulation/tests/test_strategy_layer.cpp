@@ -337,6 +337,119 @@ TEST(ApplyFlightRoe, TightHoldsBvrOnlyAndFreeChangesNothing) {
 }
 
 // ============================================================================
+// Simulation::set_flight_roe — CAMP-CMD-1's FULL RoE write: the
+// recompute-from-doctrine-baseline that lets a command LOWER (the
+// tighten-only ratchet apply_flight_roe could never express)
+// ============================================================================
+
+TEST(SetFlightRoe, RecomputesFromBaselineAndCanLower) {
+    if (!std::filesystem::exists(f16_config())) {
+        GTEST_SKIP() << "f16.json fixture not generated";
+    }
+    f4::data::AircraftConfig cfg;
+    {
+        auto result = f4::data::loadConfig(f16_config().string());
+        ASSERT_TRUE(result.ok);
+        cfg = std::move(result.config);
+    }
+    const std::string json = R"({
+  "name": "roe_full_write",
+  "theater": "korea",
+  "combat": { "enabled": true, "campaign_armed": true },
+  "aircraft": [
+    { "callsign": "ANCHOR", "aircraft_config_path": ")" +
+        f4::json::escape_string(f16_config().string()) + R"(",
+      "aircraft_name": "F-16C_50", "vis_type_index": 1052,
+      "parking_spot": { "x": 0.0, "y": 0.0, "z": 10000.0 },
+      "heading_rad": 0.0, "initial_vt_fps": 500.0,
+      "spawn_in_air": true, "team": "blue" }
+  ],
+  "airfield": {
+    "active_runway_id": 36, "active_runway_name": "Rwy 36",
+    "runway_heading_rad": 0.0,
+    "threshold_position": { "x": 0.0, "y": -5000.0, "z": 0.0 },
+    "runway_end_position":  { "x": 0.0, "y": 5000.0, "z": 0.0 },
+    "threshold_altitude_ft": 0.0, "departure_altitude_ft": 10000.0,
+    "taxi_route": [ { "x": 0.0, "y": -5000.0, "z": 0.0 },
+                    { "x": 0.0, "y": 0.0, "z": 0.0 } ]
+  },
+  "sim_dt": 0.016666666666666,
+  "total_ticks": 60000,
+  "record": false
+})";
+    auto scenario = load_scenario_from_string(json);
+    f4::simulation::Simulation sim(std::move(scenario),
+                                   std::filesystem::path("."));
+    sim.initialize();
+
+    const auto id = make_campaign_aircraft(sim.world(), cfg,
+                                           /*mission_byte=*/1, 9101);
+    ASSERT_TRUE(sim.register_aircraft(id));
+    ASSERT_TRUE(sim.arm_campaign_aircraft(id));
+
+    // The ARMED baseline — the doctrine the recompute must restore.
+    bool bvr_base = false, wvr_base = false, guns_base = false;
+    bool hold_base = false, bvr_hold_base = false;
+    int rounds_base = 0;
+    {
+        f4::entities::EntityHandle h(id, &sim.world());
+        auto* brain = h.get<f4::ai::BrainComponent>();
+        ASSERT_NE(brain, nullptr);
+        hold_base = brain->hold_fire();
+        bvr_hold_base = brain->bvr_hold();
+        bvr_base = brain->bvr().fire().config().hold_fire;
+        wvr_base = brain->wvr().fire().config().hold_fire;
+        guns_base = brain->wvr().guns().config().hold_fire;
+        rounds_base = brain->wvr().guns().rounds_remaining();
+    }
+
+    // 2 — everything held (the P7 gate deltas, same as apply_flight_roe)
+    sim.set_flight_roe(id, 2);
+    {
+        f4::entities::EntityHandle h(id, &sim.world());
+        auto* brain = h.get<f4::ai::BrainComponent>();
+        EXPECT_TRUE(brain->hold_fire());
+        EXPECT_TRUE(brain->bvr_hold());
+        EXPECT_TRUE(brain->bvr().fire().config().hold_fire);
+        EXPECT_TRUE(brain->wvr().fire().config().hold_fire);
+        EXPECT_TRUE(brain->wvr().guns().config().hold_fire);
+    }
+
+    // 1 — the LOWERING: the brain-level hold and the WVR gate CLEAR
+    // (apply_flight_roe could never produce this), BVR stays
+    // suppressed. The guns gate returns to the DOCTRINE baseline —
+    // this scenario's combat block leaves guns_hold at its default
+    // (true, the no-surprise default), so the recompute restores it
+    // rather than freeing the trigger.
+    sim.set_flight_roe(id, 1);
+    {
+        f4::entities::EntityHandle h(id, &sim.world());
+        auto* brain = h.get<f4::ai::BrainComponent>();
+        EXPECT_FALSE(brain->hold_fire());
+        EXPECT_TRUE(brain->bvr_hold());
+        EXPECT_TRUE(brain->bvr().fire().config().hold_fire);
+        EXPECT_FALSE(brain->wvr().fire().config().hold_fire);
+        EXPECT_EQ(brain->wvr().guns().config().hold_fire, guns_base);
+    }
+
+    // 0 — the armed baseline restored exactly (whatever the scenario's
+    // combat block's own holds are).
+    sim.set_flight_roe(id, 0);
+    {
+        f4::entities::EntityHandle h(id, &sim.world());
+        auto* brain = h.get<f4::ai::BrainComponent>();
+        EXPECT_EQ(brain->hold_fire(), hold_base);
+        EXPECT_EQ(brain->bvr_hold(), bvr_hold_base);
+        EXPECT_EQ(brain->bvr().fire().config().hold_fire, bvr_base);
+        EXPECT_EQ(brain->wvr().fire().config().hold_fire, wvr_base);
+        EXPECT_EQ(brain->wvr().guns().config().hold_fire, guns_base);
+        // RoE is a GATE state: the write never re-arms, so the gun
+        // budget never moves (no resurrected rounds).
+        EXPECT_EQ(brain->wvr().guns().rounds_remaining(), rounds_base);
+    }
+}
+
+// ============================================================================
 // The strategy-armed session: stationed CAPs spawn with racetrack plans
 // ============================================================================
 

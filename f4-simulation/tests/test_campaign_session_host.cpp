@@ -29,6 +29,18 @@
 //      kind/team gates, the ARMED WAR journaled and replayed (the C6
 //      gate: the replay reproduces the identity, drift = exit 23), and
 //      the empty-journal save's byte identity.
+//
+// CAMP-CMD-1 adds:
+//   8. roe_set — the P7 fire-control path behind the command: team
+//      scope gates + the roe_changed event + the ack's context, the
+//      mission/flight scopes, the typed refusals (team 0, unknown
+//      flight), and the LOWERING the old tighten-only ratchet could
+//      not express. The outcome gate: a war held at t=2.5 s kills
+//      nobody at t=13 where the un-commanded rig journals the kill
+//      pair. And the identity statement's replay half: the command
+//      journal re-applied at its recorded ticks reproduces the
+//      record's fingerprint regardless of how the replay's steps are
+//      chunked.
 
 #include <f4/simulation/campaign_session_host.hpp>
 
@@ -445,15 +457,9 @@ TEST(CampaignSessionHost, ReaggOfAnAggregateRefusesTyped) {
 TEST(CampaignSessionHost, CampCmdQueueRefusesWithTheTrancheNamed) {
     const auto rig = HostRig::make();
 
-    api::CommandIntent roe;
-    roe.kind = api::CommandIntent::Kind::RoeSet;
-    roe.scope.kind = api::RoEScopeKind::Team;
-    roe.scope.team = 6;
-    roe.roe = api::RoeLevel::Hold;
-    const auto a1 = rig.host->submit(roe);
-    EXPECT_EQ(a1.refusal, api::CommandAck::Refusal::NotImplemented);
-    EXPECT_NE(a1.detail.find("CAMP-CMD-1"), std::string::npos);
-
+    // CAMP-CMD-1 landed roe_set — the remaining CMD queue still refuses
+    // with the tranche named (the wire is stable; CAMP-CMD-2 lands
+    // behind the same protocol without a bump).
     for (const auto kind : {api::CommandIntent::Kind::FlightRetask,
                             api::CommandIntent::Kind::FlightAbort,
                             api::CommandIntent::Kind::ObjectivePriority}) {
@@ -630,6 +636,329 @@ std::string subscribe_step(EngineSessionHost& host, const char* kinds,
 }
 
 } // namespace
+
+// ============================================================================
+// CAMP-CMD-1 — roe_set: the P7 fire-control path behind the command
+// ============================================================================
+
+namespace {
+
+// The first campaign aircraft of a team (the combat rig materializes
+// one flight per side — via the FID-5 deagg in the tiered policy), for
+// the brain-gate assertions.
+f4::entities::EntityId find_team_aircraft(EngineSessionHost& host,
+                                          std::uint8_t team) {
+    for (const auto id : host.engine().campaign_aircraft()) {
+        f4::entities::EntityHandle h(id, &host.engine().sim().world());
+        auto* origin = h.get<CampaignOriginComponent>();
+        if (origin != nullptr && origin->team_slot == team) return id;
+    }
+    return {};
+}
+
+api::CommandIntent roe_team(std::uint8_t team, api::RoeLevel level) {
+    api::CommandIntent cmd;
+    cmd.kind = api::CommandIntent::Kind::RoeSet;
+    cmd.scope.kind = api::RoEScopeKind::Team;
+    cmd.scope.team = team;
+    cmd.roe = level;
+    return cmd;
+}
+
+} // namespace
+
+TEST(CommandRoe, TeamScopeAppliesGatesAndPublishes) {
+    auto rig = WarRig::make_combat();
+    rig.host->step(10);  // the war's clock is at t = 2.5 s
+    // Tiered policy: the flights stay VIRTUAL aggregates until FID
+    // materializes them — force the deagg (the FID-4 commands) so the
+    // aircraft exist to command. The fresh aircraft spawn free (the
+    // session's doctrine store is still empty).
+    rig.host->engine().force_deaggregate_flight(5001);
+    rig.host->engine().force_deaggregate_flight(5002);
+    const auto blue = find_team_aircraft(*rig.host, 2);
+    const auto red = find_team_aircraft(*rig.host, 6);
+    ASSERT_TRUE(blue.valid());
+    ASSERT_TRUE(red.valid());
+
+    // the wire's filter: roe_changed only
+    api::EventFilter filter;
+    filter.kinds.push_back(api::CampaignEvent::Kind::RoeChanged);
+    rig.host->set_event_filter(filter);
+
+    // HOLD team 2 — applied at the CURRENT boundary, red untouched
+    const auto ack = rig.host->submit(roe_team(2, api::RoeLevel::Hold));
+    EXPECT_EQ(ack.status, api::CommandAck::Status::Applied);
+    EXPECT_EQ(ack.refusal, api::CommandAck::Refusal::None);
+    EXPECT_EQ(ack.apply_tick, rig.host->engine().campaign_time());
+    EXPECT_NE(ack.detail.find("team 2 = hold"), std::string::npos);
+    EXPECT_NE(ack.detail.find("1 live aircraft matched"), std::string::npos);
+
+    {
+        f4::entities::EntityHandle hb(blue, &rig.host->engine().sim().world());
+        auto* brain = hb.get<f4::ai::BrainComponent>();
+        ASSERT_NE(brain, nullptr);
+        EXPECT_TRUE(brain->hold_fire());
+        EXPECT_TRUE(brain->bvr_hold());
+        EXPECT_TRUE(brain->bvr().fire().config().hold_fire);
+        EXPECT_TRUE(brain->wvr().fire().config().hold_fire);
+        EXPECT_TRUE(brain->wvr().guns().config().hold_fire);
+    }
+    {
+        f4::entities::EntityHandle hr(red, &rig.host->engine().sim().world());
+        auto* brain = hr.get<f4::ai::BrainComponent>();
+        ASSERT_NE(brain, nullptr);
+        EXPECT_FALSE(brain->hold_fire());
+        EXPECT_FALSE(brain->bvr().fire().config().hold_fire);
+    }
+
+    // roe_changed published — the HOST-2 pinned encoder's bytes, the
+    // scope echoing the command's verbatim
+    auto events = rig.host->drain_events();
+    ASSERT_EQ(events.size(), 1u);
+    EXPECT_EQ(events[0].kind, api::CampaignEvent::Kind::RoeChanged);
+    f4::json::Writer w;
+    api::encode(w, events[0]);
+    EXPECT_NE(w.str().find("\"ev\":\"roe_changed\",\"t\":"), std::string::npos)
+        << w.str();
+    EXPECT_NE(w.str().find(",\"roe\":2}"), std::string::npos) << w.str();
+    EXPECT_NE(w.str().find(
+                  "\"scope\":{\"kind\":\"team\",\"team\":2,\"mission\":0,"
+                  "\"flight\":0}"),
+              std::string::npos)
+        << w.str();
+
+    // The LOWERING apply_flight_roe could never express — the full
+    // recompute restores what the level no longer holds (the combat
+    // session's doctrine baseline is all-free).
+    const auto ack2 = rig.host->submit(roe_team(2, api::RoeLevel::Tight));
+    EXPECT_EQ(ack2.status, api::CommandAck::Status::Applied);
+    {
+        f4::entities::EntityHandle hb(blue, &rig.host->engine().sim().world());
+        auto* brain = hb.get<f4::ai::BrainComponent>();
+        ASSERT_NE(brain, nullptr);
+        EXPECT_FALSE(brain->hold_fire());      // the brain-level hold CLEARED
+        EXPECT_TRUE(brain->bvr_hold());        // tight: BVR still suppressed
+        EXPECT_TRUE(brain->bvr().fire().config().hold_fire);
+        EXPECT_FALSE(brain->wvr().fire().config().hold_fire);
+        EXPECT_FALSE(brain->wvr().guns().config().hold_fire);
+    }
+    const auto ack3 = rig.host->submit(roe_team(2, api::RoeLevel::Free));
+    EXPECT_EQ(ack3.status, api::CommandAck::Status::Applied);
+    {
+        f4::entities::EntityHandle hb(blue, &rig.host->engine().sim().world());
+        auto* brain = hb.get<f4::ai::BrainComponent>();
+        ASSERT_NE(brain, nullptr);
+        EXPECT_FALSE(brain->hold_fire());
+        EXPECT_FALSE(brain->bvr_hold());
+        EXPECT_FALSE(brain->bvr().fire().config().hold_fire);
+        EXPECT_FALSE(brain->wvr().fire().config().hold_fire);
+        EXPECT_FALSE(brain->wvr().guns().config().hold_fire);
+    }
+    EXPECT_EQ(rig.host->drain_events().size(), 2u);  // two more changes
+}
+
+TEST(CommandRoe, ScopesRefuseLoudlyAndMatchByOrigin) {
+    auto rig = WarRig::make_combat();
+    rig.host->step(10);
+    // tiered policy: materialize the flights first (see the sibling test)
+    rig.host->engine().force_deaggregate_flight(5001);
+    rig.host->engine().force_deaggregate_flight(5002);
+    const auto blue = find_team_aircraft(*rig.host, 2);
+    ASSERT_TRUE(blue.valid());
+    std::uint8_t blue_mission = 0;
+    {
+        f4::entities::EntityHandle hb(blue, &rig.host->engine().sim().world());
+        auto* origin = hb.get<CampaignOriginComponent>();
+        ASSERT_NE(origin, nullptr);
+        blue_mission = origin->mission_byte;
+    }
+
+    // zero-values are non-targets (refusal is data)
+    {
+        const auto ack = rig.host->submit(roe_team(0, api::RoeLevel::Hold));
+        EXPECT_EQ(ack.status, api::CommandAck::Status::Refused);
+        EXPECT_EQ(ack.refusal, api::CommandAck::Refusal::InvalidArgument);
+        EXPECT_NE(ack.detail.find("team 0"), std::string::npos);
+    }
+    {
+        api::CommandIntent cmd = roe_team(2, api::RoeLevel::Hold);
+        cmd.scope.kind = api::RoEScopeKind::Mission;
+        cmd.scope.mission = 0;  // untasked is not a doctrine target
+        const auto ack = rig.host->submit(cmd);
+        EXPECT_EQ(ack.status, api::CommandAck::Status::Refused);
+        EXPECT_EQ(ack.refusal, api::CommandAck::Refusal::InvalidArgument);
+    }
+    {
+        api::CommandIntent cmd = roe_team(2, api::RoeLevel::Hold);
+        cmd.scope.kind = api::RoEScopeKind::Flight;
+        cmd.scope.flight = 0;
+        const auto ack = rig.host->submit(cmd);
+        EXPECT_EQ(ack.status, api::CommandAck::Status::Refused);
+        EXPECT_EQ(ack.refusal, api::CommandAck::Refusal::UnknownFlight);
+    }
+    {
+        api::CommandIntent cmd = roe_team(2, api::RoeLevel::Hold);
+        cmd.scope.kind = api::RoEScopeKind::Flight;
+        cmd.scope.flight = 999999;  // not in the session's roster
+        const auto ack = rig.host->submit(cmd);
+        EXPECT_EQ(ack.status, api::CommandAck::Status::Refused);
+        EXPECT_EQ(ack.refusal, api::CommandAck::Refusal::UnknownFlight);
+        EXPECT_NE(ack.detail.find("roster"), std::string::npos);
+    }
+
+    // the FLIGHT scope matches by the origin's flight VU and leaves the
+    // rest of the war alone
+    {
+        api::CommandIntent cmd = roe_team(0, api::RoeLevel::Hold);
+        cmd.scope.kind = api::RoEScopeKind::Flight;
+        cmd.scope.flight = 5001;  // the combat rig's team-2 flight
+        const auto ack = rig.host->submit(cmd);
+        EXPECT_EQ(ack.status, api::CommandAck::Status::Applied);
+        EXPECT_NE(ack.detail.find("flight VU 5001 = hold"),
+                  std::string::npos);
+        EXPECT_NE(ack.detail.find("1 live aircraft matched"),
+                  std::string::npos);
+    }
+
+    // the MISSION scope matches (team, mission_byte) off the same origin
+    {
+        api::CommandIntent cmd = roe_team(0, api::RoeLevel::Free);
+        cmd.scope.kind = api::RoEScopeKind::Mission;
+        cmd.scope.team = 2;
+        cmd.scope.mission = blue_mission;
+        ASSERT_NE(blue_mission, 0) << "the rig's flight must be tasked";
+        const auto ack = rig.host->submit(cmd);
+        EXPECT_EQ(ack.status, api::CommandAck::Status::Applied);
+        EXPECT_NE(ack.detail.find("team 2 mission " +
+                                  std::to_string(blue_mission)),
+                  std::string::npos);
+        EXPECT_NE(ack.detail.find("1 live aircraft matched"),
+                  std::string::npos);
+    }
+
+    // a doctrine for nobody matches zero and still applies (future
+    // flights spawn under it)
+    {
+        const auto ack =
+            rig.host->submit(roe_team(5, api::RoeLevel::Hold));
+        EXPECT_EQ(ack.status, api::CommandAck::Status::Applied);
+        EXPECT_NE(ack.detail.find("0 live aircraft matched"),
+                  std::string::npos);
+    }
+}
+
+TEST(CommandRoe, HoldStopsTheWarInTheBooks) {
+    // The outcome gate (plan §8): the un-commanded combat rig journals
+    // the kill pair at t=13; the same war with BOTH teams held at
+    // t=2.5 s kills nobody — the fire-control gates carried the
+    // command all the way into the books.
+    auto rig = WarRig::make_combat();
+    rig.host->step(10);  // t = 2.5 s — before the merge
+
+    ASSERT_EQ(rig.host->submit(roe_team(2, api::RoeLevel::Hold)).status,
+              api::CommandAck::Status::Applied);
+    ASSERT_EQ(rig.host->submit(roe_team(6, api::RoeLevel::Hold)).status,
+              api::CommandAck::Status::Applied);
+
+    int kills = 0;
+    (void)rig.host->add_event_sink(
+        [&](const api::CampaignEvent& e) {
+            if (e.kind == api::CampaignEvent::Kind::Kill) ++kills;
+        });
+    rig.host->step(600);  // through the merge window and well past it
+    EXPECT_EQ(kills, 0);
+    EXPECT_EQ(rig.host->engine().stats().aa_kills, 0);
+}
+
+TEST(CommandReplay, JournalReproducesTheIdentity) {
+    // The identity statement's replay half (plan §2.3/§5): the same
+    // (save, seed, command journal) reproduces the record's
+    // fingerprint — and the replay's step CHUNKING is irrelevant, the
+    // host segments around the journal's ticks.
+    std::vector<api::CommandJournalEntry> recorded;
+    api::IdentityFingerprint final_a;
+    {
+        auto rig = WarRig::make_combat();
+        rig.host->set_command_journal_sink(
+            [&](std::uint64_t tick, std::int64_t t_s,
+                const api::CommandIntent& intent) {
+                recorded.push_back(api::CommandJournalEntry{tick, t_s, intent});
+            });
+        rig.host->step(10);
+        ASSERT_EQ(rig.host->submit(roe_team(2, api::RoeLevel::Hold)).status,
+                  api::CommandAck::Status::Applied);
+        rig.host->step(20);
+        ASSERT_EQ(rig.host->submit(roe_team(6, api::RoeLevel::Tight)).status,
+                  api::CommandAck::Status::Applied);
+        rig.host->step(30);
+        ASSERT_EQ(rig.host->submit(roe_team(2, api::RoeLevel::Free)).status,
+                  api::CommandAck::Status::Applied);
+        rig.host->step(40);
+        final_a = rig.host->identity();
+    }
+    ASSERT_EQ(recorded.size(), 3u);
+    EXPECT_EQ(recorded[0].apply_tick, 10u);
+    EXPECT_EQ(recorded[1].apply_tick, 30u);
+    EXPECT_EQ(recorded[2].apply_tick, 60u);
+    EXPECT_EQ(recorded[0].intent.roe, api::RoeLevel::Hold);
+
+    // B — the whole journal through ONE step call
+    {
+        auto rig = WarRig::make_combat();
+        ASSERT_TRUE(rig.host->start_command_replay(recorded));
+        EXPECT_EQ(rig.host->pending_replay_commands(), 3u);
+        rig.host->step(100);
+        EXPECT_EQ(rig.host->pending_replay_commands(), 0u);
+        const auto id = rig.host->identity();
+        EXPECT_EQ(id.ledger_fnv, final_a.ledger_fnv);
+        EXPECT_EQ(id.campaign_time_s, final_a.campaign_time_s);
+    }
+
+    // C — the record's own step pattern
+    {
+        auto rig = WarRig::make_combat();
+        ASSERT_TRUE(rig.host->start_command_replay(recorded));
+        rig.host->step(10);
+        rig.host->step(20);
+        rig.host->step(30);
+        rig.host->step(40);
+        const auto id = rig.host->identity();
+        EXPECT_EQ(id.ledger_fnv, final_a.ledger_fnv);
+        EXPECT_EQ(id.campaign_time_s, final_a.campaign_time_s);
+    }
+
+    // D — an odd chunking (25 × step(4)) — same war
+    {
+        auto rig = WarRig::make_combat();
+        ASSERT_TRUE(rig.host->start_command_replay(recorded));
+        for (int i = 0; i < 25; ++i) rig.host->step(4);
+        EXPECT_EQ(rig.host->pending_replay_commands(), 0u);
+        const auto id = rig.host->identity();
+        EXPECT_EQ(id.ledger_fnv, final_a.ledger_fnv);
+    }
+
+    // E — a replay cut short: the commands past its last tick stay
+    // pending (the reference host exits 23 on this)
+    {
+        auto rig = WarRig::make_combat();
+        ASSERT_TRUE(rig.host->start_command_replay(recorded));
+        rig.host->step(20);
+        EXPECT_EQ(rig.host->pending_replay_commands(), 2u);
+    }
+
+    // F — a wire command during replay is refused: the journal is the
+    // command source
+    {
+        auto rig = WarRig::make_combat();
+        ASSERT_TRUE(rig.host->start_command_replay(recorded));
+        const auto ack = rig.host->submit(roe_team(2, api::RoeLevel::Hold));
+        EXPECT_EQ(ack.status, api::CommandAck::Status::Refused);
+        EXPECT_EQ(ack.refusal, api::CommandAck::Refusal::InvalidArgument);
+        EXPECT_NE(ack.detail.find("replay"), std::string::npos);
+    }
+}
+
 
 // The golden-identity rule on the WIRE: an un-subscribed client's step
 // announces zero events (and receives none) — the HOST-1 line shape.

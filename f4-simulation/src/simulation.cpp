@@ -585,6 +585,39 @@ void Simulation::apply_flight_roe(entities::EntityId id, std::uint8_t roe) {
     }
 }
 
+void Simulation::set_flight_roe(entities::EntityId id, std::uint8_t roe) {
+    // CAMP-CMD-1 — the FULL RoE write (see the header's contract).
+    // Recompute from the doctrine baseline, then impose the level: the
+    // same gate assignments arm_campaign_combat's configure_brain_combat
+    // call makes for campaign aircraft (hold_fire=false + the scenario
+    // combat's holds — all-false for a campaign session's generated
+    // combat block), followed by the level's own tightenings. The
+    // envelopes and the gun rounds budget stay untouched: RoE is a gate
+    // state, and re-running the configurator would reset the gun budget
+    // to the drum (resurrecting spent rounds).
+    if (!id.valid()) return;
+    entities::EntityHandle h(id, &world_);
+    auto* brain = h.get<f4::ai::BrainComponent>();
+    if (brain == nullptr) return;
+    const auto& combat = scenario_.combat;
+    brain->set_hold_fire(false);
+    brain->set_bvr_hold(combat.bvr_hold || combat.missiles_hold);
+    brain->bvr().fire().config().hold_fire =
+        combat.bvr_hold || combat.missiles_hold;
+    brain->wvr().fire().config().hold_fire = combat.missiles_hold;
+    brain->wvr().guns().config().hold_fire = combat.guns_hold;
+    if (roe == 1) {
+        brain->set_bvr_hold(true);
+        brain->bvr().fire().config().hold_fire = true;
+    } else if (roe == 2) {
+        brain->set_hold_fire(true);
+        brain->set_bvr_hold(true);
+        brain->bvr().fire().config().hold_fire = true;
+        brain->wvr().fire().config().hold_fire = true;
+        brain->wvr().guns().config().hold_fire = true;
+    }
+}
+
 void Simulation::spawn_from_scenario_list() {
     using namespace f4::entities;
     using namespace f4::flight;

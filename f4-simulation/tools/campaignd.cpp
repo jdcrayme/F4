@@ -12,8 +12,9 @@
 //             [--no-atm] [--aa-combat] [--ground-war] [--strategy] \
 //             [--max-steps-per-advance N]
 //             [--journal war.jsonl | --verify-journal golden.jsonl]
+//             [--command-journal cmds.jsonl | --replay-commands cmds.jsonl]
 //
-// Journal modes (CAMP-HOST-2):
+// Journal modes (CAMP-HOST-2 events; CAMP-CMD-1 commands):
 //   --journal PATH          record the session's COMPLETE event stream
 //                           (engine rate, unfiltered) as append-only
 //                           JSONL: one identity header line, one line
@@ -24,6 +25,24 @@
 //                           moved book, a different seed, a lost event)
 //                           exits 23 — the identity-drift guard. The
 //                           two flags are mutually exclusive (25).
+//   --command-journal PATH  record every APPLIED command as its line:
+//                           the engine tick it applied at + the intent
+//                           (refused commands mutate nothing — they
+//                           stay off the record).
+//   --replay-commands PATH  the identity statement's second half: the
+//                           journal's commands re-apply at their
+//                           recorded ticks as the run steps (the
+//                           step segmentation is the host's job and
+//                           this host does it), wire commands are
+//                           refused while a replay is active, and at
+//                           EOF the final identity must equal the
+//                           journal's footer — "replay-with-commands
+//                           reproduces the books" is a byte comparison.
+//                           Header drift, leftover commands, or a
+//                           footer mismatch exit 23; a malformed
+//                           journal file exits 24. Composable with
+//                           --verify-journal (the full assertion: same
+//                           war, same commands, same events).
 //
 // Session flow: on start the host emits the `hello` response (protocol
 // version + identity fingerprint) and then answers one line per
@@ -42,6 +61,7 @@
 //  24  engine operation failed (save/query/journal IO)
 //  25  session construction failed (bad paths, unloadable data, usage)
 
+#include <f4/campaign/api/command_journal.hpp>
 #include <f4/campaign/api/journal.hpp>
 #include <f4/campaign/api/protocol.hpp>
 #include <f4/simulation/campaign_session_host.hpp>
@@ -92,6 +112,8 @@ struct Args {
     int max_steps = 240;
     std::filesystem::path journal;        // --journal (record)
     std::filesystem::path verify_journal; // --verify-journal (replay)
+    std::filesystem::path command_journal;   // --command-journal (record)
+    std::filesystem::path replay_commands;   // --replay-commands (replay)
 
     [[nodiscard]] bool ok() const noexcept { return !world.empty(); }
 };
@@ -112,7 +134,11 @@ void usage(std::ostream& os) {
           "  --strategy               the ATM strategy layer (P7)\n"
           "  --max-steps-per-advance N (the dilation cap, default 240)\n"
           "  --journal PATH           record the event stream (JSONL)\n"
-          "  --verify-journal PATH    replay-assert against a golden (exit 23 on drift)\n";
+          "  --verify-journal PATH    replay-assert against a golden (exit 23 on drift)\n"
+          "  --command-journal PATH   record applied commands + their ticks (JSONL)\n"
+          "  --replay-commands PATH   re-apply a command journal at its recorded\n"
+          "                           ticks; the final identity must equal the\n"
+          "                           journal's footer (exit 23 on drift)\n";
 }
 
 [[nodiscard]] Args parse_args(int argc, char** argv) {
@@ -170,6 +196,10 @@ void usage(std::ostream& os) {
             a.journal = next();
         } else if (k == "--verify-journal") {
             a.verify_journal = next();
+        } else if (k == "--command-journal") {
+            a.command_journal = next();
+        } else if (k == "--replay-commands") {
+            a.replay_commands = next();
         } else if (k == "--help" || k == "-h") {
             usage(std::cerr);
             std::exit(0);
@@ -194,6 +224,11 @@ int main(int argc, char** argv) {
     if (!args.journal.empty() && !args.verify_journal.empty()) {
         std::cerr << "campaignd: --journal and --verify-journal are "
                      "mutually exclusive\n";
+        return 25;
+    }
+    if (!args.command_journal.empty() && !args.replay_commands.empty()) {
+        std::cerr << "campaignd: --command-journal and --replay-commands "
+                     "are mutually exclusive\n";
         return 25;
     }
 
@@ -262,6 +297,50 @@ int main(int argc, char** argv) {
             });
     }
 
+    // CAMP-CMD-1: the command journal — record (every APPLIED command
+    // journals with its tick) or replay (the journal's commands re-apply
+    // at their recorded ticks through step()'s segmentation; wire
+    // commands refuse while a replay is active). The footer rides along
+    // in replay mode: at EOF the session's final identity must equal it.
+    api::CommandJournalWriter cmd_journal;
+    api::IdentityFingerprint cmd_footer;
+    if (!args.command_journal.empty()) {
+        std::string jerr;
+        if (!cmd_journal.open(args.command_journal.string(),
+                              host->identity(), &jerr)) {
+            std::cerr << "campaignd: command journal open failed: " << jerr
+                      << "\n";
+            return 24;
+        }
+        host->set_command_journal_sink(
+            [&cmd_journal](std::uint64_t tick, std::int64_t t_s,
+                           const api::CommandIntent& intent) {
+                cmd_journal.append(
+                    api::CommandJournalEntry{tick, t_s, intent});
+            });
+    } else if (!args.replay_commands.empty()) {
+        std::vector<api::CommandJournalEntry> entries;
+        std::string jerr;
+        if (!api::CommandJournalReader::load(args.replay_commands.string(),
+                                             host->identity(), entries,
+                                             cmd_footer, &jerr)) {
+            std::cerr << "campaignd: command journal load failed: " << jerr
+                      << "\n";
+            // header drift is identity drift (23); a malformed or
+            // truncated file is operator error (24)
+            return jerr.find("not this session's identity") !=
+                           std::string::npos
+                       ? 23
+                       : 24;
+        }
+        std::string rerr;
+        if (!host->start_command_replay(std::move(entries), &rerr)) {
+            std::cerr << "campaignd: command replay refused: " << rerr
+                      << "\n";
+            return 24;
+        }
+    }
+
     // The hello line goes through the SAME dispatcher a request would —
     // the reference host has no private dialect of its own.
     std::string out;
@@ -293,10 +372,36 @@ int main(int argc, char** argv) {
         }
     }
 
-    // EOF: close the journal (the writer appends the session-end
-    // identity; the verifier asserts the golden's), then the refusal
-    // rule. Drift outranks a refusal — a wrong war is louder than a
-    // refused command (23 before 22, the plan §7 order).
+    // EOF verdicts, loudest first (the plan §7 order: drift outranks a
+    // refusal — 23 before 22). The command replay's verdict: no journal
+    // command may remain past the run's last tick, and the final
+    // identity must equal the journal's footer — "replay-with-commands
+    // reproduces the books" as a byte comparison.
+    if (!args.replay_commands.empty()) {
+        if (const auto pending = host->pending_replay_commands();
+            pending > 0) {
+            std::cerr << "campaignd: identity drift ("
+                      << pending
+                      << " journal command(s) past the replay's last "
+                         "tick)\n";
+            return 23;
+        }
+        const auto id = host->identity();
+        if (id.protocol_version != cmd_footer.protocol_version ||
+            id.campaign_time_s != cmd_footer.campaign_time_s ||
+            id.ledger_fnv != cmd_footer.ledger_fnv) {
+            std::cerr << "campaignd: identity drift (replay books are "
+                         "not the record: want ledger_fnv "
+                      << cmd_footer.ledger_fnv << " @ t="
+                      << cmd_footer.campaign_time_s << ", got "
+                      << id.ledger_fnv << " @ t=" << id.campaign_time_s
+                      << ")\n";
+            return 23;
+        }
+    }
+
+    // EOF: close the event journal (the writer appends the session-end
+    // identity; the verifier asserts the golden's).
     if (!args.journal.empty()) {
         std::string jerr;
         if (!journal.close(host->identity(), &jerr)) {
@@ -309,6 +414,17 @@ int main(int argc, char** argv) {
         if (!verifier.close(host->identity(), &jerr)) {
             std::cerr << "campaignd: identity drift (" << jerr << ")\n";
             return 23;
+        }
+    }
+
+    // EOF: close the command journal (the writer appends the session-end
+    // identity — the artifact a later --replay-commands consumes).
+    if (!args.command_journal.empty()) {
+        std::string jerr;
+        if (!cmd_journal.close(host->identity(), &jerr)) {
+            std::cerr << "campaignd: command journal close failed: "
+                      << jerr << "\n";
+            return 24;
         }
     }
 

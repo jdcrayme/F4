@@ -5,6 +5,37 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## CAMP-CMD-1 — the command journal + RoE doctrine
+
+- **CAMP-CMD-1** — the identity statement's command half lands
+  (Docs/CAMP_HOST_PLAN.md §2.3/§3.3/§5/§8): `roe_set` rides the P7
+  fire-control path — team/mission/flight scopes join the session's
+  doctrine store (one level per scope; an aircraft's effective level is
+  the tightest of its carried byte and every matching scope), and the
+  write is `Simulation::set_flight_roe`, the FULL recompute from the
+  armed doctrine baseline so a command can LOWER as well as tighten
+  (the old `apply_flight_roe` was a tighten-only ratchet; the spawn
+  cadence and the FID-5 deagg path now serve the store too). Refusals
+  are typed data (team 0/mission 0 are non-targets; a flight scope must
+  name a roster flight). Every applied command journals —
+  `f4-campaign-api/command_journal.hpp` (writer + reader + byte
+  goldens; the intent-body encoder gives every intent a canonical wire
+  spelling) — and replays tick-exactly: `EngineSessionHost::step`
+  segments around the journal's pending apply ticks so the replay's
+  step CHUNKING is irrelevant, `campaignd --replay-commands` verifies
+  the final identity against the journal's footer (drift/pending → 23,
+  wrong war at load → 23, malformed → 24) and composes with
+  `--verify-journal` for the full assertion. `roe_changed` publishes
+  (the HOST-2-pinned encoder, unchanged bytes) from the command path.
+  Gate: the fire-control levels pinned at the gate level (2→1→0
+  recompute vs the armed baseline, gun budget untouched) and at the
+  OUTCOME level (the combat rig's t=13 kill pair: holds at t=2.5 s
+  kill nobody); the record's journal regenerates the record's
+  `ledger_fnv` under three different step chunkings; no commands →
+  byte-identical (the C5/C6 identity suites stayed green); 30+ new
+  ctest cases; full ctest green (2796 passed; the 3 pre-existing
+  upstream data-drift pins untouched).
+
 ## CAMP-HOST-3 — the viewer becomes a client
 
 - **CAMP-HOST-3** — the world viewer's campaign session refactored onto the

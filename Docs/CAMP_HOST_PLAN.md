@@ -3,11 +3,13 @@
 > **Status**: Draft v1 — CAMP-HOST-1 shipped (f4-campaign-api + the
 > EngineSessionHost adapter + `campaignd`); CAMP-HOST-2 shipped (the
 > typed event stream over f4-messaging, the JSONL journal, the replay
-> identity); CAMP-HOST-3 ships with this patch (the world viewer
-> refactored onto the contract — the runner relocated out of the
-> engine, the `threat` query landed additively, 23 new ctest cases,
-> the golden identity intact). Every other tranche below is an
-> acceptance contract, not a claim.
+> identity); CAMP-HOST-3 shipped (the world viewer refactored onto the
+> contract — the runner relocated out of the engine, the `threat`
+> query landed additively, the golden identity intact); CAMP-CMD-1
+> ships with this patch (`roe_set` riding the P7 fire-control path, the
+> command journal + its tick-exact replay, the `roe_changed` event
+> publishing — 30+ new ctest cases, the golden identity intact). Every
+> other tranche below is an acceptance contract, not a claim.
 
 The campaign engine is the product. Every user experience — the world viewer
 today, a map-first strategy UI, a war-room dashboard, a scripted AI observer,
@@ -153,6 +155,20 @@ controls).
  "scope":{"kind":"team", "team":1}, "roe":2}
 ```
 
+CAMP-CMD-1 as-built (roe_set): the scope joins the session's doctrine
+store — ONE level per scope (a re-set REPLACES that scope's level),
+and an aircraft's EFFECTIVE level is the tightest of its carried P7
+byte and every matching scope (a wider scope's hold is a ceiling;
+loosening happens at the scope that tightened). The write goes through
+`Simulation::set_flight_roe` — the FULL recompute from the doctrine
+baseline, so a command can LOWER as well as tighten (the old
+`apply_flight_roe` was a tighten-only ratchet; it remains for the
+spawn cadence's original vocabulary). Zero-values are non-targets
+(team 0 / mission 0) and a flight scope must name a roster flight —
+refusal is data (InvalidArgument / UnknownFlight). Every applied
+roe_set publishes `roe_changed` (the pinned encoder, the scope echoed
+verbatim).
+
 Refusals are typed (`CommandAck {status: applied | refused(reason), apply_tick}`),
 not exceptions across the boundary. Refusal is data: a UX may surface "can't
 retask — flight is in merge" as UI.
@@ -216,8 +232,24 @@ machinery wearing its contract hat.
   identical `identity()`**.
 - Commands apply at the next tick boundary of the session's own clock, in
   submission order; the ack states the apply-tick. No wall-clock anywhere.
-- The journal is append-only JSONL (`tick, CommandIntent`), written only
-  when the host passes `--journal` — no file appears for golden runs.
+- The EVENT journal is append-only JSONL (one line per event, engine rate,
+  unfiltered) and the COMMAND journal (CAMP-CMD-1) is its intervention
+  counterpart: one line per APPLIED command — `{"apply_tick":T,"t":S,
+  <intent body>}` — where `apply_tick` is the ENGINE TICK INDEX (whole
+  sim_dt steps since session start; the host owns the stepping
+  accumulator, so it is the one clock a replay reproduces exactly) and
+  `t` is the campaign seconds the record's ack carried (audit context).
+  Refused commands journal nothing — they mutate nothing. Neither file
+  appears for golden runs; both are written only when the host asks
+  (`--journal` / `--command-journal`).
+- Replay mechanics (CAMP-CMD-1 as-built): the replaying host segments
+  its stepping around the journal's pending apply ticks, so each command
+  lands at EXACTLY the tick the record applied it at — the replay's step
+  CHUNKING is irrelevant (step(200) and 2×step(100) reproduce the same
+  war; pinned by tests). At EOF the session's final identity must equal
+  the journal's footer — "replay-with-commands reproduces the books" is
+  a byte comparison, and `campaignd --replay-commands` turns any
+  divergence (header, leftover commands, footer) into exit 23.
 - Identity is checkable by any client: the fingerprint (seed, save hash,
   ledger MD5 on demand) is the same MD5 the C5 harness pins.
 
@@ -317,9 +349,10 @@ Default behavior is byte-identical unless a gate says otherwise.
   (3) weather_changed emits from the scenario session's WeatherSystem
   (a condition-turn observer); campaign sessions build no WeatherSystem
   — the family's golden rides the contract tests until a scenario host
-  needs the wire. (4) roe_changed waits for CAMP-CMD-1's roe_set (the
-  P7 fire-control gate ride) — its encoder is pinned and the wire will
-  not change when it lands. (5) Event `t` is the ENGINE's relative
+  needs the wire. (4) roe_changed LANDED with CAMP-CMD-1: the publisher
+  is the session's roe_set path (apply_roe_command), t = the ladder's
+  relative seconds, the scope echoes the command's verbatim — the
+  pinned encoder's bytes unchanged. (5) Event `t` is the ENGINE's relative
   seconds (the books' own axis); a host adds the epoch from hello's
   campaign_time_s. (6) The wire is HOST-1-identical for a client that
   never subscribes ("events":0 and zero event lines — features arm by
@@ -389,14 +422,40 @@ Default behavior is byte-identical unless a gate says otherwise.
   (write-back + WorldState JSON next to the loaded world) — parity
   or better, and the .cam re-encoder stays the importer's process.
 
-### CAMP-CMD-1 — command journal + RoE doctrine
+### CAMP-CMD-1 — command journal + RoE doctrine (SHIPPED with this patch)
 - `CommandIntent` wire + journal; `roe_set` per team/mission/flight riding
   the P7 fire-control path; RoE-driven threat walls (the 32000 overfly
   denial) as doctrine policy — the ATM plan's "RoE refinement tranche"
   lands here, command-shaped.
-- **Gate**: post-arm fire-control behavior per P7 (1 = BVR suppressed,
-  2 = everything held); replay-with-commands reproduces the books; no
-  commands → byte-identical.
+- **Gate (as built)**: post-arm fire-control behavior per P7 (1 = BVR
+  suppressed, 2 = everything held) — pinned BOTH at the gate level
+  (`SetFlightRoe` recomputes 2→1→0 against the armed baseline, gun
+  budget untouched) and at the OUTCOME level (the combat rig's t=13
+  kill pair: both teams held at t=2.5 s kills nobody — the command
+  rides the fire-control path into the books). Replay-with-commands
+  reproduces the books: the record's 3-command journal re-applied at
+  its recorded ticks regenerates the record's `ledger_fnv` in ONE step
+  call, in the record's own pattern, and in 25 × step(4) — chunking is
+  irrelevant; a replay cut short leaves its commands pending (the
+  reference host exits 23); a released-team tamper diverges the books
+  (exit 23 with the fingerprints named); a wrong war fails the header
+  at load (23); a malformed journal is 24. No commands → byte-identical
+  (the adopt cadence's recompute restores the armed baseline values
+  exactly — the C5/C6 identity suites stayed green).
+- **As-built notes**: (1) the journal lives in f4-campaign-api
+  (`command_journal.hpp` — writer + reader + byte goldens; the
+  intent-body encoder in `commands.hpp` gives every intent a canonical
+  wire spelling), the SINK lives in the host (`set_command_journal_sink`),
+  and the REPLAY segmentation lives in `EngineSessionHost::step` — the
+  identity statement runs through the same step() a live client drives,
+  no private replay dialect. (2) The deagg inheritance: an FID-5 deagg
+  spawn now takes the flight's effective doctrine at spawn (one call —
+  the adopt cadence would re-impose it within a second anyway); the
+  rigs' zero-roe worlds never see a byte move. (3) `roe_changed` uses
+  the scope encoder shared with the journal line (one byte shape, two
+  consumers). (4) campaignd composes `--replay-commands` with
+  `--verify-journal` — the full assertion (same war, same commands,
+  same events) is one flag pair.
 
 ### CAMP-CMD-2 — retask / abort / priority
 - `flight_retask` (NavigationModule replans from current position, TOT
