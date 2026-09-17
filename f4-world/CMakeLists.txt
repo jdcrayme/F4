@@ -8,6 +8,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 add_library(f4-world STATIC
     src/world_state.cpp
     src/world_loader.cpp
+    src/airbase_synthesis.cpp
 )
 target_link_libraries(f4-world PUBLIC f4_warnings)
 

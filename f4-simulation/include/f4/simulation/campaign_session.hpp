@@ -275,6 +275,19 @@ struct CampaignSessionOptions {
     /// triggered deaggregation stays live this long before the standard
     /// reagg rules apply (the transient window; the phase pin).
     int combat_window_sec = 600;
+
+    /// Stock-save bridge: assign every squadron whose wire airbase VU is
+    /// 0 a home base from the objective list (nearest friendly /
+    /// allied airbase-type objective; see
+    /// f4-world's synthesize_squadron_airbases). The stock campaigns
+    /// shipped with the game (save0/1/2 + Instant, .ver 63/65) carry zero
+    /// for every squadron — the link is the game's own campaign engine's
+    /// first-load work, which never ran on them — and with no bases the
+    /// ATM can base nothing: every generated intent comes out route-less
+    /// and the spawner skips it. Default false: the session is
+    /// byte-identical to the pre-bridge shape with it off (the same
+    /// opt-in contract the other arms keep).
+    bool synthesize_airbases = false;
 };
 
 /// The live campaign session. Create via create(); destroy to reset —

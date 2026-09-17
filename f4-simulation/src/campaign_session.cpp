@@ -17,6 +17,8 @@
 #include <f4/data/config_loader.hpp>
 #include <f4/io/read_file.hpp>
 #include <f4/weapons/messages.hpp>
+#include <f4/world/airbase_synthesis.hpp>   // the stock-save bridge
+#include <f4/world/detail/world_state.hpp>  // the bridge mutates the WS
 #include <f4/world/world_loader.hpp>   // populate_world (G1 mirror)
 
 #include <algorithm>
@@ -227,6 +229,21 @@ CampaignSession::create(const CampaignSessionOptions& opts,
     }
     session->epoch_ = session->ws_.campaign.current_time;
 
+    // 1b. The stock-save bridge: BEFORE the adapters (step 4) and the
+    //     ledger snapshot (step 5) — every campaign-side consumer must
+    //     see the same bases the sim's world will carry. When the pass
+    //     changed anything, the mutated state is also written out (step
+    //     6): the Simulation re-loads the world from the SCENARIO's
+    //     world_json_path into its own WorldState copy, so an in-memory
+    //     mutation alone would leave the sim's world unbased while the
+    //     ladder's was based.
+    bool airbases_synthesized = false;
+    if (opts.synthesize_airbases) {
+        const auto synth = f4::world::synthesize_squadron_airbases(
+            session->ws_);
+        airbases_synthesized = synth.assigned > 0;
+    }
+
     // 2. The aircraft config + profiles (throwing loaders wrapped).
     try {
         auto result = f4::data::loadConfig(opts.aircraft_config.string());
@@ -282,7 +299,25 @@ CampaignSession::create(const CampaignSessionOptions& opts,
                     session->scenario_temp_dir_.string() + ": " +
                     ec.message());
     }
-    const auto world_abs = std::filesystem::absolute(opts.world_json);
+    // The sim re-loads the world from the SCENARIO's world_json_path
+    // into its own WorldState copy — when the stock-save bridge changed
+    // anything, materialize the mutated state (the tested §6.1 emitter,
+    // a semantic round-trip) and point the scenario at it. Unchanged
+    // (bridge off, or nothing to do) → the original path verbatim.
+    std::filesystem::path world_abs =
+        std::filesystem::absolute(opts.world_json);
+    if (airbases_synthesized) {
+        const auto patched =
+            session->scenario_temp_dir_ / "world.world.json";
+        {
+            std::ofstream out(patched);
+            out << session->ws_.to_json_string();
+            if (!out.good()) {
+                return fail("cannot write " + patched.string());
+            }
+        }
+        world_abs = std::filesystem::absolute(patched);
+    }
     const auto ct_abs =
         opts.class_table.empty()
             ? std::filesystem::path{}

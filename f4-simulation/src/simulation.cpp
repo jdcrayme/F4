@@ -711,7 +711,6 @@ void Simulation::spawn_from_scenario_list() {
         auto& vis = h.add<VisualModelComponent>();
         vis.vis_type = sc.vis_type_index;  // V-3DLIVE (identity)
         vis.active_lod = 0;  // highest detail
-        vis.gear_switch_child = 0;  // 0 = gear down (switch #10, child 0)
         // Ground-staged aircraft render with FreeFalcon's parked preset
         // (gear shown, doors/holes shown) — all-zero switch masks would
         // hide the gear geometry on hierarchy-emitted models until the
@@ -2108,14 +2107,11 @@ void Simulation::tick(double dt) {
         tf->qy = q_enu.y;
         tf->qz = q_enu.z;
 
-        // Sync VisualModelComponent gear switch from FM gear position.
-        // F-16 gear is switch #10 (per f4-models-viewer comment); 0=down, 1=up.
         // AeroState::gearPos is 1.0 when fully down, 0.0 when fully up (the FM
         // auto-commands gearHandle based on gear.inAir — see flight_model.cpp:263).
-        // Tranche 0d: gear_switch_child replaces the old ModelState.switches vector.
+        // The ANIM gear rig below converts it into the gear channel family.
         auto* vis = h.get<VisualModelComponent>();
         if (vis) {
-            vis->gear_switch_child = (s.aero.gearPos > 0.5) ? 0 : 1;
 
             // ANIM rig: drive the gear channel family from the airframe's
             // gearPos through the sequencer — the same eval the Class
@@ -2148,6 +2144,24 @@ void Simulation::tick(double dt) {
                         static_cast<uint16_t>(f4::anim::Channel::gear_door_pos_0) + i)] = 0.0f;
                 }
             }
+
+            // ANIM rig: pilot surfaces — stabs, flaperons, LEFs, rudder,
+            // speed brake, hook, chute, nozzle and AB plume follow the
+            // FCS stick/pedal shapes and the aero schedules. Models
+            // without a binding simply ignore the channel.
+            f4::anim::SurfaceCommand surfaces;
+            surfaces.pitch_stick = static_cast<float>(s.fcs.pshape);
+            surfaces.roll_stick = static_cast<float>(s.fcs.rshape);
+            surfaces.yaw_pedal = static_cast<float>(s.fcs.yshape);
+            surfaces.tef = static_cast<float>(s.aero.tefPos);
+            surfaces.lef = static_cast<float>(s.aero.lefPos);
+            surfaces.brake = static_cast<float>(s.aero.dbrake);
+            surfaces.hook = static_cast<float>(s.aero.hookPos);
+            surfaces.chute = static_cast<float>(s.aero.dragChutePos);
+            surfaces.nozzle = static_cast<float>(s.engine.nozzlePos);
+            surfaces.afterburner = s.engine.aburnLit;
+            surfaces.rpm = static_cast<float>(s.engine.rpm);
+            f4::anim::apply_surface_command(surfaces, vis->anim_values);
         }
     }
 

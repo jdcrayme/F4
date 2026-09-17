@@ -3,18 +3,21 @@
 // Unit tests for VisualModelComponent — the renderable handle.
 //
 // Tranche 0d: the component no longer carries model_record or ModelState.
-// vis_type IS the identity; gear_switch_child replaces the ModelState.switches
+// vis_type IS the identity; the rig-written anim_values replace the old
+// ModelState.switches vector
 // vector. These tests verify the new shape.
 //
 // Tests verify:
 //   1. Defaults to vis_type=0 (renderer should skip drawing)
-//   2. Carries LOD + gear_switch_child + texture_set that the host can write
+//   2. Carries LOD + texture_set + anim_values that the host can write
 //   3. Lives in the f4::simulation namespace (NOT f4::entities)
 //   4. Plays well with sibling components (TransformComponent) on the same entity
 
 #include <gtest/gtest.h>
 
 #include "f4/simulation/visual_model_component.hpp"
+
+#include <f4/anim/channels.hpp>
 
 #include <f4/entities/entity.hpp>
 
@@ -29,7 +32,6 @@ TEST(VisualModelComponent, DefaultConstructHasZeroVisType) {
     EXPECT_EQ(vmc.vis_type, 0);  // 0 = no model; renderer skips
     EXPECT_EQ(vmc.active_lod, 0);
     EXPECT_EQ(vmc.texture_set, 0);
-    EXPECT_EQ(vmc.gear_switch_child, 0);  // 0 = gear down (default)
 }
 
 TEST(VisualModelComponent, CanAddAndGetFromEntity) {
@@ -40,14 +42,12 @@ TEST(VisualModelComponent, CanAddAndGetFromEntity) {
     vmc.vis_type = 1052;  // F-16
     vmc.active_lod = 2;
     vmc.texture_set = 1;
-    vmc.gear_switch_child = 1;  // gear up
 
     auto* fetched = h.get<VisualModelComponent>();
     ASSERT_NE(fetched, nullptr);
     EXPECT_EQ(fetched->vis_type, 1052);
     EXPECT_EQ(fetched->active_lod, 2);
     EXPECT_EQ(fetched->texture_set, 1);
-    EXPECT_EQ(fetched->gear_switch_child, 1);
 }
 
 TEST(VisualModelComponent, ZeroVisTypeIsSafeForRenderer) {
@@ -62,10 +62,10 @@ TEST(VisualModelComponent, ZeroVisTypeIsSafeForRenderer) {
     ASSERT_EQ(vmc.vis_type, 0);
 
     // Even with vis_type=0, the component's other fields are valid
-    // and can be safely read/written. The host might write gear state
-    // before the model is resolved.
-    vmc.gear_switch_child = 1;
-    EXPECT_EQ(vmc.gear_switch_child, 1);
+    // and can be safely read/written. The host might write animation
+    // state before the model is resolved.
+    vmc.anim_values.set_parked_defaults();
+    EXPECT_FLOAT_EQ(vmc.anim_values[f4::anim::Channel::gear_pos], 1.0f);
 }
 
 TEST(VisualModelComponent, LivesInF4SimulationNamespace) {

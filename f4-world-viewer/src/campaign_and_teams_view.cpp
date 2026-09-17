@@ -1,13 +1,16 @@
 // f4-world-viewer/src/campaign_and_teams_view.cpp
 //
-// Two related ImGui windows:
+// The "Campaign Info" window — one window, two tabs:
 //
-//   1. "Campaign" — shows the CampaignState struct: current_time, the TE
+//   1. "Campaign" — the CampaignState struct: current_time, the TE
 //      (Tactical Engagement) block, and the two 8-element arrays.
-//   2. "Teams" — shows the team roster with both .cmp-supplied fields
+//   2. "Teams" — the team roster with both .cmp-supplied fields
 //      and .tea enrichment fields.
 //
-// Migrated from WorldState to EntityWorld (Step 4c).
+// (Migrated from WorldState to EntityWorld, Step 4c. Was two separate
+// always-open windows on the right edge; merged into one tabbed window
+// during the UI cleanup pass so a loaded world doesn't blanket the
+// screen. Visibility: show_campaign_info — Windows menu / close button.)
 
 #include "viewer_state.hpp"
 #include <f4/viewer/enum_text.hpp>
@@ -23,83 +26,24 @@ namespace f4::viewer {
 // and the inspector since the B.3 QC tranche).
 
 void ViewerApp::draw_campaign_and_teams_view() {
-    if (!impl_->world_loaded) return;
+    if (!impl_->world_loaded || !impl_->show_campaign_info) return;
 
-    // === Campaign window ===
-    ImGui::SetNextWindowPos(ImVec2(impl_->window_w - 340, 30),
-                            ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(330, 360), ImGuiCond_FirstUseEver);
-    if (ImGui::Begin("Campaign", nullptr, ImGuiWindowFlags_NoCollapse)) {
-        // Access campaign entity (Phase C/D: O(1) tag-index lookup via
-        // campaign_entity() helper, which calls with_tag_ref(ROLE="campaign")).
-        auto camp_h = impl_->handle(impl_->campaign_entity());
-        auto* cs = camp_h.get<f4::entities::CampaignStateComponent>();
-
-        if (!impl_->theater_name.empty()) {
-            ImGui::Text("Theater:   %s", impl_->theater_name.c_str());
-        }
-        ImGui::Text("Version:   %d", impl_->world_version);
-        ImGui::Separator();
-
-        if (cs) {
-            ImGui::TextUnformatted("Time");
-            {
-                char buf[64];
-                format_campaign_time(cs->current_time, buf, sizeof(buf));
-                ImGui::Text("  Current:   %s", buf);
-                format_campaign_time(cs->te_start_time, buf, sizeof(buf));
-                ImGui::Text("  TE start:  %s", buf);
-                format_campaign_time(cs->te_time_limit, buf, sizeof(buf));
-                ImGui::Text("  TE limit:  %s", buf);
-            }
-            ImGui::Separator();
-
-            ImGui::TextUnformatted("Tactical Engagement");
-            ImGui::Text("  Type:          %d", cs->te_type);
-            ImGui::Text("  # teams:       %d", cs->te_number_teams);
-            ImGui::Text("  Player team:   %d", cs->te_team);
-            ImGui::Text("  Victory pts:   %d", cs->te_victory_points);
-            ImGui::Text("  Flags:         0x%08x", cs->te_flags);
-            ImGui::Separator();
-
-            ImGui::TextUnformatted("Per-team");
-            ImGui::Text("  slot  name         aircraft  pts");
-            const std::size_t n_teams = std::max<std::size_t>(
-                std::max(cs->te_number_aircraft.size(), cs->te_team_pts.size()),
-                impl_->teams().size());
-            for (std::size_t i = 0; i < n_teams; ++i) {
-                const char* name = "?";
-                std::string team_name_buf;
-                if (i < impl_->teams().size()) {
-                    auto h = impl_->handle(impl_->teams()[i]);
-                    auto* cid = h.get<f4::entities::CampaignIdentityComponent>();
-                    if (cid) {
-                        team_name_buf = cid->callsign;
-                        name = team_name_buf.empty() ? "(empty)" : team_name_buf.c_str();
-                    }
-                }
-                const int32_t aircraft = (i < cs->te_number_aircraft.size())
-                    ? cs->te_number_aircraft[i] : 0;
-                const int32_t pts = (i < cs->te_team_pts.size())
-                    ? cs->te_team_pts[i] : 0;
-                ImGui::Text("  %-5ld %-12s %-9d %d",
-                            static_cast<long>(i), name, aircraft, pts);
-            }
-        }
+    ImGui::SetNextWindowPos(ImVec2(620, 410), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(440, 330), ImGuiCond_FirstUseEver);
+    if (!ImGui::Begin("Campaign Info", &impl_->show_campaign_info,
+                      ImGuiWindowFlags_NoCollapse)) {
+        ImGui::End();
+        return;
     }
-    ImGui::End();
 
-    // === Teams window ===
-    ImGui::SetNextWindowPos(ImVec2(impl_->window_w - 340, 410),
-                            ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(330, 440), ImGuiCond_FirstUseEver);
-    if (ImGui::Begin("Teams", nullptr, ImGuiWindowFlags_NoCollapse)) {
-        if (impl_->teams().empty()) {
-            ImGui::TextDisabled("(no teams loaded)");
-            ImGui::End();
-            return;
-        }
+    if (!ImGui::BeginTabBar("##campaign_info_tabs")) {
+        ImGui::End();
+        return;
+    }
 
+    // The Teams tab body — a lambda so it stays out of the way of the
+    // tab scaffolding above (same pattern as campaign_qc_view's helpers).
+    const auto draw_teams_body = [this]() {
         // Stance matrix
         if (ImGui::TreeNode("Stance Matrix",
                             "Stance Matrix (row → col)")) {
@@ -239,7 +183,80 @@ void ViewerApp::draw_campaign_and_teams_view() {
                 ImGui::TreePop();
             }
         }
+    };
+
+    // === Campaign tab ===
+    if (ImGui::BeginTabItem("Campaign")) {
+        // Access campaign entity (Phase C/D: O(1) tag-index lookup via
+        // campaign_entity() helper, which calls with_tag_ref(ROLE="campaign")).
+        auto camp_h = impl_->handle(impl_->campaign_entity());
+        auto* cs = camp_h.get<f4::entities::CampaignStateComponent>();
+
+        if (!impl_->theater_name.empty()) {
+            ImGui::Text("Theater:   %s", impl_->theater_name.c_str());
+        }
+        ImGui::Text("Version:   %d", impl_->world_version);
+        ImGui::Separator();
+
+        if (cs) {
+            ImGui::TextUnformatted("Time");
+            {
+                char buf[64];
+                format_campaign_time(cs->current_time, buf, sizeof(buf));
+                ImGui::Text("  Current:   %s", buf);
+                format_campaign_time(cs->te_start_time, buf, sizeof(buf));
+                ImGui::Text("  TE start:  %s", buf);
+                format_campaign_time(cs->te_time_limit, buf, sizeof(buf));
+                ImGui::Text("  TE limit:  %s", buf);
+            }
+            ImGui::Separator();
+
+            ImGui::TextUnformatted("Tactical Engagement");
+            ImGui::Text("  Type:          %d", cs->te_type);
+            ImGui::Text("  # teams:       %d", cs->te_number_teams);
+            ImGui::Text("  Player team:   %d", cs->te_team);
+            ImGui::Text("  Victory pts:   %d", cs->te_victory_points);
+            ImGui::Text("  Flags:         0x%08x", cs->te_flags);
+            ImGui::Separator();
+
+            ImGui::TextUnformatted("Per-team");
+            ImGui::Text("  slot  name         aircraft  pts");
+            const std::size_t n_teams = std::max<std::size_t>(
+                std::max(cs->te_number_aircraft.size(), cs->te_team_pts.size()),
+                impl_->teams().size());
+            for (std::size_t i = 0; i < n_teams; ++i) {
+                const char* name = "?";
+                std::string team_name_buf;
+                if (i < impl_->teams().size()) {
+                    auto h = impl_->handle(impl_->teams()[i]);
+                    auto* cid = h.get<f4::entities::CampaignIdentityComponent>();
+                    if (cid) {
+                        team_name_buf = cid->callsign;
+                        name = team_name_buf.empty() ? "(empty)" : team_name_buf.c_str();
+                    }
+                }
+                const int32_t aircraft = (i < cs->te_number_aircraft.size())
+                    ? cs->te_number_aircraft[i] : 0;
+                const int32_t pts = (i < cs->te_team_pts.size())
+                    ? cs->te_team_pts[i] : 0;
+                ImGui::Text("  %-5ld %-12s %-9d %d",
+                            static_cast<long>(i), name, aircraft, pts);
+            }
+        }
+        ImGui::EndTabItem();
     }
+
+    // === Teams tab ===
+    if (ImGui::BeginTabItem("Teams")) {
+        if (impl_->teams().empty()) {
+            ImGui::TextDisabled("(no teams loaded)");
+        } else {
+            draw_teams_body();
+        }
+        ImGui::EndTabItem();
+    }
+
+    ImGui::EndTabBar();
     ImGui::End();
 }
 

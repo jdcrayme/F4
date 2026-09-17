@@ -675,26 +675,36 @@ TEST_F(FeatureMeshGpuTest, DIAG_Model1052_PartPositions) {
 }
 
 // Diagnostic: settle raylib's matrix application convention empirically.
-TEST(FeatureMeshTest, ConvProbe) {
+// LOCKS THE RAYLIB MATRIX CONVENTION the animated draw path is built on:
+//   1. MatrixMultiply(A, B) applies A FIRST, then B (row-vector).
+//   2. QuaternionToMatrix + Vector3Transform = standard RH rotation.
+// If a raylib upgrade flips either, every DOF-framed part displaces —
+// these assertions fail before any model looks wrong.
+TEST(FeatureMeshTest, RaylibMatrixConventionLocked) {
+    constexpr float kHalfPi = 1.5707963267948966f;
+
+    // 1. Multiply(T, R): T applied FIRST (translate +10, then +90° Y
+    //    sends +X to −Z): (1,0,0) → (11,0,0) → (0,0,−11).
     Matrix t = MatrixTranslate(10, 0, 0);
-    Matrix r = MatrixRotateY(3.14159265f / 2.0f);  // +90 deg about +Y
-
+    Matrix r = MatrixRotateY(kHalfPi);
     Vector3 v1 = Vector3Transform({1, 0, 0}, MatrixMultiply(t, r));
-    std::printf("[CONV] Multiply(T,R)*(1,0,0) = (%.2f, %.2f, %.2f)"
-                "   [column: (10,0,-1) | row: (0,0,-11)]\n", v1.x, v1.y, v1.z);
-    Vector3 v2 = Vector3Transform({1, 0, 0}, MatrixMultiply(r, t));
-    std::printf("[CONV] Multiply(R,T)*(1,0,0) = (%.2f, %.2f, %.2f)"
-                "   [column: (0,0,-11) | row: (10,0,-1)]\n", v2.x, v2.y, v2.z);
+    EXPECT_NEAR(v1.x, 0.0f, 1e-4f);
+    EXPECT_NEAR(v1.y, 0.0f, 1e-4f);
+    EXPECT_NEAR(v1.z, -11.0f, 1e-4f);
 
-    Quaternion q = QuaternionFromAxisAngle({0, 1, 0}, 3.14159265f / 2.0f);
+    // 2. QuaternionToMatrix is the standard right-handed rotation.
+    Quaternion q = QuaternionFromAxisAngle({0, 1, 0}, kHalfPi);
     Vector3 v3 = Vector3Transform({1, 0, 0}, QuaternionToMatrix(q));
-    std::printf("[CONV] Quat(+90,Y)*(1,0,0) = (%.2f, %.2f, %.2f)"
-                "   [standard RH: (0,0,-1)]\n", v3.x, v3.y, v3.z);
+    EXPECT_NEAR(v3.x, 0.0f, 1e-4f);
+    EXPECT_NEAR(v3.y, 0.0f, 1e-4f);
+    EXPECT_NEAR(v3.z, -1.0f, 1e-4f);
 
+    // 3. Node-matrix order S·R·T (the animated path's construction):
+    //    the origin lands on the translation, proving T applies LAST.
     Matrix s = MatrixScale(2, 2, 2);
     Matrix srt = MatrixMultiply(MatrixMultiply(s, r), t);
     Vector3 v4 = Vector3Transform({0, 0, 0}, srt);
-    std::printf("[CONV] SRT*(0,0,0) = (%.2f, %.2f, %.2f)"
-                "   [T-last: (10,0,0) | T-first: (0,0,0)]\n", v4.x, v4.y, v4.z);
-    SUCCEED();
+    EXPECT_NEAR(v4.x, 10.0f, 1e-4f);
+    EXPECT_NEAR(v4.y, 0.0f, 1e-4f);
+    EXPECT_NEAR(v4.z, 0.0f, 1e-4f);
 }

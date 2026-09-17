@@ -25,6 +25,9 @@ endfunction()
 
 f4_add_test(test_world_state  test_world_state.cpp)
 f4_add_test(test_world_loader test_world_loader.cpp)
+# The stock-save bridge: squadron airbase synthesis over synthetic
+# WorldStates (the save0/1-style all-zero airbase VUs).
+f4_add_test(test_airbase_synthesis test_airbase_synthesis.cpp)
 # The §6.1 emitter: WorldState → JSON → WorldState round-trip over the
 # same save1-derived fixture (and synthetic edge cases).
 f4_add_test(test_world_emit   test_world_emit.cpp)

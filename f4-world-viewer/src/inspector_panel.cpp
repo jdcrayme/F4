@@ -58,14 +58,16 @@ namespace f4::viewer {
 // tab), the content function shows a placeholder instead of hiding the
 // tab — that way the tab set is stable across selections.
 void ViewerApp::draw_inspector_window() {
-    // Single window position — anchored to the right side of the screen,
-    // below the legend (when legend is shown). The window is wider than
-    // the old Inspector (480 vs 310) to comfortably hold the 2D layout
+    // Single window position — anchored to the top-right of the screen
+    // (the primary information surface). The window is wider than the
+    // old Inspector (480 vs 310) to comfortably hold the 2D layout
     // canvas and the 3D viewport side-by-side with the controls.
-    ImGui::SetNextWindowPos(ImVec2(impl_->window_w - 520, 250),
+    // Visibility: show_inspector (Windows menu / close button).
+    ImGui::SetNextWindowPos(ImVec2(impl_->window_w - 520, 30),
                             ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize(ImVec2(500, 540), ImGuiCond_FirstUseEver);
-    if (!ImGui::Begin("Inspector", nullptr, ImGuiWindowFlags_NoCollapse)) {
+    if (!ImGui::Begin("Inspector", &impl_->show_inspector,
+                      ImGuiWindowFlags_NoCollapse)) {
         ImGui::End();
         return;
     }

@@ -447,18 +447,33 @@ TEST(HierarchyEmit, RestPoseAssemblesToFlatGeometry) {
 // file is absent (CI / fresh clones) — run it locally after any change
 // to the emitter's frame handling or the runtime's chain composition.
 TEST(HierarchyEmit, RestPoseParity_DeepChains_WhenSamplesAvailable) {
-    namespace fs2 = std::filesystem;
-    const fs::path flat_gltf = fs2::temp_directory_path() /
-        "f4_1052_flat" / "Models" / "koreaobj" / "01052.gltf";
-    const fs::path hier_gltf = fs::path("Data") / "Models" / "koreaobj" /
-        "01052.gltf";
-    if (!fs2::exists(flat_gltf) || !fs2::exists(hier_gltf)) {
-        GTEST_SKIP() << "run f4import first";
+    // Deep nested chains: model 1052 (an F-16 variant whose gear
+    // assemblies nest switch → dof → dof → dof) is where composition
+    // order bugs hide — model 1's shallow chains assemble correctly even
+    // under a wrong fold. Both variants emit from the fixture, so this
+    // runs everywhere the other hierarchy tests do.
+    if (!fs::exists(fs::path(KOREAOBJ_FIXTURE_DIR) / "KoreaObj.HDR"))
+        GTEST_SKIP() << "fixture missing";
+    auto db = load_db();
+    if (std::string perr = db->parse_model(1052); !perr.empty()) {
+        GTEST_SKIP() << "model 1052 not in fixture: " << perr;
     }
+
+    auto flat_dir = make_temp_dir("deepparity_flat");
+    auto hier_dir = make_temp_dir("deepparity_hier");
+    GltfEmitOptions flat_opts;
+    const auto flat = emit_model_as_gltf(*db, 1052, flat_dir,
+                                         "koreaobj:01052", flat_opts);
+    GltfEmitOptions hier_opts;
+    hier_opts.emit_hierarchy = true;
+    hier_opts.family_table = &complex_table();
+    const auto hier = emit_model_as_gltf(*db, 1052, hier_dir,
+                                         "koreaobj:01052", hier_opts);
+
     f4::gltf::GltfDocument fd;
-    fd.load(flat_gltf);
+    fd.load(flat.gltf_path);
     f4::gltf::GltfDocument hd;
-    hd.load(hier_gltf);
+    hd.load(hier.gltf_path);
     const auto flatv = mesh_positions(fd, "LOD_0");
     ASSERT_FALSE(flatv.empty());
     const f4::gltf::Node* lod = nullptr;

@@ -1,11 +1,12 @@
 // f4-world-viewer/src/imgui_panels.cpp
 //
-// ViewerApp::draw_imgui — the entire ImGui frame: menu bar, layers panel,
-// legend panel, inspector panel, status bar, and the five modal popups
-// (legacy file dialog, install summary, open campaign, install
-// diagnostics, campaign load error). Plus ViewerApp::open_file_dialog
-// (the legacy text-input modal back door used by some menu items when
-// tinyfiledialogs isn't available).
+// ViewerApp::draw_imgui — the entire ImGui frame: menu bar (File, View,
+// Windows, Campaign, Tools, Help), the Layers panel (collapsible layer
+// groups + filters + camera + map legend + status), inspector panel,
+// status bar, and the modal popups (legacy file dialog, install summary,
+// open campaign, install diagnostics, campaign load error). Plus
+// ViewerApp::open_file_dialog (the legacy text-input modal back door
+// used by some menu items when tinyfiledialogs isn't available).
 //
 // Split out of the original 1920-LoC viewer_app.cpp god-file (item #5
 // of the architecture review). No behavior change.
@@ -42,7 +43,9 @@ namespace f4::viewer {
 // ---------------------------------------------------------------------------
 
 // The View menu and the Layers panel render the same toggle groups through
-// this helper, so the two lists cannot drift apart again.
+// for_each_layer_group(), so the two lists cannot drift apart again.
+// Window toggles (ATO, Campaign Session, Minimap, Legend…) deliberately
+// live in the Windows menu instead — these groups are canvas LAYERS only.
 namespace {
 
 struct LayerToggle {
@@ -50,11 +53,70 @@ struct LayerToggle {
     bool* value;
 };
 
-void draw_layer_group(const char* title, std::initializer_list<LayerToggle> toggles) {
-    ImGui::TextDisabled("%s", title);
-    for (const auto& t : toggles)
-        ImGui::Checkbox(t.label, t.value);
-    ImGui::Separator();
+// Walk every canvas layer group in display order, handing each to `fn`
+// as (group title, group index, toggles). The index lets the panel put
+// the first group open by default. ImplT stays a deduced template
+// parameter — ViewerApp::Impl is a private nested type that file-scope
+// code cannot name (see campaign_qc_view.cpp).
+template <typename ImplT, typename Fn>
+void for_each_layer_group(ImplT* impl, Fn&& fn) {
+    fn("Base layers", 0, {
+        {"Terrain",    &impl->show_terrain},
+        {"Objectives", &impl->show_objectives},
+        {"Units",      &impl->show_units},
+        {"Grid",       &impl->show_grid},
+    });
+    fn("Overlays", 1, {
+        {"Radar arcs",               &impl->show_radar_arcs},
+        {"Ground layout",            &impl->show_ground_layout_overlay},
+        {"Feature 3D models",        &impl->show_feature_meshes},
+        {"Unit destinations",        &impl->show_unit_destinations},
+        {"Waypoints",                &impl->show_waypoints},
+        {"All flight plans",         &impl->show_all_routes},
+        {"Squadron→Airbase",         &impl->show_squadron_links},
+        {"Hierarchy lines (BN→BDE)", &impl->show_hierarchy_lines},
+    });
+    fn("Campaign QC (B.3)", 2, {
+        {"Mission→Target links",  &impl->show_mission_links},
+        {"Package→Element links", &impl->show_package_links},
+        {"Bullseye",              &impl->show_bullseye},
+    });
+    fn("Live session (V-CAMP)", 3, {
+        {"Live aircraft layer", &impl->show_live_layer},
+        {"Live routes",         &impl->show_live_routes},
+        {"Threat map overlay",  &impl->show_threat_overlay},
+    });
+}
+
+// View-menu rendering: one submenu per group (toggle checkmarks).
+template <typename ImplT>
+void draw_layer_groups_menu(ImplT* impl) {
+    for_each_layer_group(impl,
+        [](const char* title, int,
+           std::initializer_list<LayerToggle> toggles) {
+            if (ImGui::BeginMenu(title)) {
+                for (const auto& t : toggles)
+                    ImGui::MenuItem(t.label, nullptr, t.value);
+                ImGui::EndMenu();
+            }
+        });
+}
+
+// Layers-panel rendering: one collapsing header per group. Only the
+// first group (Base layers) is open on first use; ImGui persists the
+// open state per header from there on.
+template <typename ImplT>
+void draw_layer_groups_panel(ImplT* impl) {
+    for_each_layer_group(impl,
+        [](const char* title, int group_idx,
+           std::initializer_list<LayerToggle> toggles) {
+            if (group_idx == 0)
+                ImGui::SetNextItemOpen(true, ImGuiCond_FirstUseEver);
+            if (ImGui::CollapsingHeader(title)) {
+                for (const auto& t : toggles)
+                    ImGui::Checkbox(t.label, t.value);
+            }
+        });
 }
 
 } // namespace
@@ -63,41 +125,6 @@ void draw_layer_group(const char* title, std::initializer_list<LayerToggle> togg
 // ImGui panels
 // ---------------------------------------------------------------------------
 void ViewerApp::draw_imgui() {
-    // All layer toggles, in display order — rendered identically by the
-    // View menu and the Layers panel so the two lists cannot drift apart.
-    const auto draw_layer_groups = [impl = impl_.get()]() {
-        draw_layer_group("Base layers", {
-            {"Terrain",    &impl->show_terrain},
-            {"Objectives", &impl->show_objectives},
-            {"Units",      &impl->show_units},
-            {"Grid",       &impl->show_grid},
-            {"Legend",     &impl->show_legend},
-        });
-        draw_layer_group("Overlays", {
-            {"Radar arcs",              &impl->show_radar_arcs},
-            {"Ground layout",           &impl->show_ground_layout_overlay},
-            {"Feature 3D models",       &impl->show_feature_meshes},
-            {"Unit destinations",       &impl->show_unit_destinations},
-            {"Waypoints",               &impl->show_waypoints},
-            {"All flight plans",        &impl->show_all_routes},
-            {"Squadron→Airbase",        &impl->show_squadron_links},
-            {"Hierarchy lines (BN→BDE)", &impl->show_hierarchy_lines},
-        });
-        draw_layer_group("Campaign QC (B.3)", {
-            {"ATO / Tasking window",  &impl->show_ato},
-            {"Mission→Target links",  &impl->show_mission_links},
-            {"Package→Element links", &impl->show_package_links},
-            {"Bullseye",              &impl->show_bullseye},
-        });
-        draw_layer_group("Live session (V-CAMP)", {
-            {"Campaign Session window", &impl->show_campaign_window},
-            {"Live aircraft layer",     &impl->show_live_layer},
-            {"Live routes",             &impl->show_live_routes},
-            {"Threat map overlay",      &impl->show_threat_overlay},
-            {"Minimap",                 &impl->show_minimap},
-        });
-    };
-
     rlImGuiBegin();
 
     // --- Menu bar ---
@@ -203,8 +230,25 @@ void ViewerApp::draw_imgui() {
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("View")) {
-            draw_layer_groups();
-            if (ImGui::MenuItem("Fit to World")) impl_->fit_to_world();
+            // Canvas layers, grouped into submenus (same table as the
+            // Layers panel).
+            draw_layer_groups_menu(impl_.get());
+            ImGui::Separator();
+            if (ImGui::MenuItem("Fit to World", "F")) impl_->fit_to_world();
+            ImGui::EndMenu();
+        }
+        if (ImGui::BeginMenu("Windows")) {
+            // Every panel in one place: show/hide anything without
+            // hunting for its checkbox in a layer list. The Tools
+            // panels keep their own Tools menu entries.
+            ImGui::MenuItem("Layers", nullptr, &impl_->show_layers_panel);
+            ImGui::MenuItem("Inspector", nullptr, &impl_->show_inspector);
+            ImGui::MenuItem("Map Legend (in Layers)", nullptr, &impl_->show_legend);
+            ImGui::Separator();
+            ImGui::MenuItem("Campaign Info", nullptr, &impl_->show_campaign_info);
+            ImGui::MenuItem("ATO / Tasking", nullptr, &impl_->show_ato);
+            ImGui::MenuItem("Campaign Session", nullptr, &impl_->show_campaign_window);
+            ImGui::MenuItem("Minimap", nullptr, &impl_->show_minimap);
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("Campaign")) {
@@ -316,77 +360,72 @@ void ViewerApp::draw_imgui() {
     }
 
     // --- Layers panel (left side) ---
+    // Organized as collapsing sections so the default view is a few
+    // headers instead of a ~20-checkbox wall: Base layers open, every
+    // optional group (overlays, QC, live session, filters, legend)
+    // collapsed until wanted.
     ImGui::SetNextWindowPos(ImVec2(10, 30), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize(ImVec2(240, 0), ImGuiCond_FirstUseEver);
-    if (ImGui::Begin("Layers", nullptr,
+    if (ImGui::Begin("Layers", &impl_->show_layers_panel,
                      ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_AlwaysAutoResize)) {
         // Same toggle groups as the View menu (single source of truth).
-        draw_layer_groups();
+        draw_layer_groups_panel(impl_.get());
 
-        ImGui::Separator();
         // Phase 2: objective search/filter. Filters objectives by
         // class_name substring (case-insensitive). Empty = show all.
-        ImGui::TextDisabled("Filter");
-        ImGui::TextUnformatted("Search objectives:");
-        ImGui::PushItemWidth(220);
-        // ImGui::InputText returns true if the text changed this frame.
-        // POLISH-2.2: when the text changes, refresh the cached
-        // lowercase needle so the canvas loop doesn't have to lowercase
-        // the search string per-objective per-frame.
-        if (ImGui::InputText("##obj_search", impl_->objective_search,
-                             sizeof(impl_->objective_search))) {
-            impl_->update_search_cache();
-        }
-        ImGui::PopItemWidth();
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Case-insensitive substring match on objective class_name");
-        }
-        // Phase 2: team filter dropdown. 0xFF = no filter (show all teams);
-        // otherwise dim objectives/units owned by other teams.
-        ImGui::TextUnformatted("Team filter:");
-        const char* team_labels[] = {
-            "All teams", "0 Neutral", "1 Enemy", "2 Friendly",
-            "3 ROK", "4 Japan", "5 DPRK", "6 PRC", "7 Other"
-        };
-        int tf_idx = (impl_->team_filter == 0xFF) ? 0 : static_cast<int>(impl_->team_filter) + 1;
-        if (ImGui::Combo("##team_filter", &tf_idx, team_labels, 9)) {
-            impl_->team_filter = (tf_idx == 0) ? 0xFF
-                                              : static_cast<uint8_t>(tf_idx - 1);
+        // Phase 2: team filter dropdown. 0xFF = no filter (show all
+        // teams); otherwise dim objectives/units owned by other teams.
+        if (ImGui::CollapsingHeader("Filters")) {
+            ImGui::TextUnformatted("Search objectives:");
+            ImGui::PushItemWidth(220);
+            // ImGui::InputText returns true if the text changed this frame.
+            // POLISH-2.2: when the text changes, refresh the cached
+            // lowercase needle so the canvas loop doesn't have to lowercase
+            // the search string per-objective per-frame.
+            if (ImGui::InputText("##obj_search", impl_->objective_search,
+                                 sizeof(impl_->objective_search))) {
+                impl_->update_search_cache();
+            }
+            ImGui::PopItemWidth();
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Case-insensitive substring match on objective class_name");
+            }
+            ImGui::TextUnformatted("Team filter:");
+            const char* team_labels[] = {
+                "All teams", "0 Neutral", "1 Enemy", "2 Friendly",
+                "3 ROK", "4 Japan", "5 DPRK", "6 PRC", "7 Other"
+            };
+            int tf_idx = (impl_->team_filter == 0xFF) ? 0 : static_cast<int>(impl_->team_filter) + 1;
+            if (ImGui::Combo("##team_filter", &tf_idx, team_labels, 9)) {
+                impl_->team_filter = (tf_idx == 0) ? 0xFF
+                                                  : static_cast<uint8_t>(tf_idx - 1);
+            }
         }
 
-        ImGui::Separator();
-        ImGui::Text("Camera");
-        ImGui::SliderFloat("Zoom", &impl_->cam_zoom, 0.1f, 150.0f, "%.1f");
-        if (ImGui::Button("Fit to World")) impl_->fit_to_world();
-        // Phase 2: keyboard shortcut hint.
-        ImGui::SameLine();
-        ImGui::TextDisabled("(F)");
-
-        ImGui::Separator();
-        ImGui::Text("Status");
-        if (!impl_->status_msg.empty()) {
-            ImGui::TextWrapped("%s", impl_->status_msg.c_str());
+        if (ImGui::CollapsingHeader("Camera")) {
+            ImGui::SliderFloat("Zoom", &impl_->cam_zoom, 0.1f, 150.0f, "%.1f");
+            if (ImGui::Button("Fit to World")) impl_->fit_to_world();
+            // Phase 2: keyboard shortcut hint.
+            ImGui::SameLine();
+            ImGui::TextDisabled("(F)");
         }
-        if (!impl_->last_error.empty()) {
-            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.4f, 0.4f, 1.0f));
-            ImGui::TextWrapped("Error: %s", impl_->last_error.c_str());
-            ImGui::PopStyleColor();
-        }
-    }
-    ImGui::End();
 
-    // --- Legend (right side, when toggled) ---
-    if (impl_->show_legend) {
-        ImGui::SetNextWindowPos(ImVec2(impl_->window_w - 230, 30), ImGuiCond_FirstUseEver);
-        if (ImGui::Begin("Legend", &impl_->show_legend, ImGuiWindowFlags_NoCollapse)) {
+        // --- Map legend (the old floating Legend window, folded in) ---
+        // SetNextItemOpen(Always) binds the header's open state to
+        // show_legend, so the Windows-menu "Map Legend" toggle and the
+        // header arrow stay in sync in both directions.
+        ImGui::SetNextItemOpen(impl_->show_legend, ImGuiCond_Always);
+        if (ImGui::CollapsingHeader("Map Legend")) {
+            impl_->show_legend = true;
             ImGui::TextUnformatted("Terrain");
             for (int t = 0; t <= 5; ++t) {
                 const auto c = f4::terrain::TerrainData::color_for_tile_type(
                     static_cast<f4::terrain::TileType>(t));
-                ImGui::PushStyleColor(ImGuiCol_Text,
-                    ImVec4(c.r / 255.0f, c.g / 255.0f, c.b / 255.0f, 1.0f));
-                ImGui::TextUnformatted("##");
-                ImGui::PopStyleColor();
+                ImGui::PushID(t);
+                ImGui::ColorButton("##sw",
+                    ImVec4(c.r / 255.0f, c.g / 255.0f, c.b / 255.0f, 1.0f),
+                    ImGuiColorEditFlags_NoTooltip, ImVec2(12, 12));
+                ImGui::PopID();
                 ImGui::SameLine();
                 ImGui::TextUnformatted(f4::terrain::tile_type_name(
                     static_cast<f4::terrain::TileType>(t)));
@@ -406,15 +445,15 @@ void ViewerApp::draw_imgui() {
             };
             for (int i = 0; i < 8; ++i) {
                 const auto c = color_for_owner(static_cast<uint8_t>(i));
-                ImGui::PushStyleColor(ImGuiCol_Text,
-                    ImVec4(c.r / 255.0f, c.g / 255.0f, c.b / 255.0f, 1.0f));
-                ImGui::TextUnformatted("##");
-                ImGui::PopStyleColor();
+                ImGui::PushID(i);
+                ImGui::ColorButton("##sw",
+                    ImVec4(c.r / 255.0f, c.g / 255.0f, c.b / 255.0f, 1.0f),
+                    ImGuiColorEditFlags_NoTooltip, ImVec2(12, 12));
+                ImGui::PopID();
                 ImGui::SameLine();
                 if (impl_->world_loaded && i < static_cast<int>(impl_->teams().size())) {
                     auto h = impl_->handle(impl_->teams()[i]);
                     auto* cid = h.get<f4::entities::CampaignIdentityComponent>();
-                    auto* tc = h.get<f4::entities::TeamComponent>();
                     const auto& t_name = cid ? cid->callsign : std::string();
                     char label[64];
                     if (t_name.empty() || t_name == "XX") {
@@ -427,9 +466,27 @@ void ViewerApp::draw_imgui() {
                     ImGui::TextUnformatted(fallback_names[i]);
                 }
             }
+        } else {
+            impl_->show_legend = false;
         }
-        ImGui::End();
+
+        // Status (only takes rows when there is something to say).
+        if (!impl_->status_msg.empty() || !impl_->last_error.empty()) {
+            ImGui::Separator();
+            if (ImGui::CollapsingHeader("Status",
+                                        ImGuiTreeNodeFlags_DefaultOpen)) {
+                if (!impl_->status_msg.empty()) {
+                    ImGui::TextWrapped("%s", impl_->status_msg.c_str());
+                }
+                if (!impl_->last_error.empty()) {
+                    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.4f, 0.4f, 1.0f));
+                    ImGui::TextWrapped("Error: %s", impl_->last_error.c_str());
+                    ImGui::PopStyleColor();
+                }
+            }
+        }
     }
+    ImGui::End();
 
     // --- Inspector window (right side, below legend) ---
     // INSPECTOR-TABS-1: replaces three separate windows (Inspector,

@@ -173,4 +173,43 @@ void seed_spinners(uint32_t seed, AnimValues& inout) noexcept {
         static_cast<float>(xorshift32(seed ^ 0x51EDu)) / 4294967296.0f * kTwoPi;
 }
 
+// ── Pilot surfaces ────────────────────────────────────────────────────────
+
+void apply_surface_command(const SurfaceCommand& cmd,
+                           AnimValues& inout) noexcept {
+    // Stabilators: symmetric — both sides follow pitch stick. Pull
+    // (positive stick) = trailing edge up.
+    inout[Channel::stab_l] = -cmd.pitch_stick * kStabMaxRad;
+    inout[Channel::stab_r] = -cmd.pitch_stick * kStabMaxRad;
+
+    // Flaperons: TEF schedule is COMMON (droop together), roll is
+    // DIFFERENTIAL (right roll → left TE up, right TE down).
+    const float tef = cmd.tef * kFlapMaxRad;
+    const float roll = cmd.roll_stick * kFlapRollMaxRad;
+    inout[Channel::flap_l] = tef + roll;
+    inout[Channel::flap_r] = tef - roll;
+
+    // Leading-edge flaps: symmetric, follow the schedule.
+    inout[Channel::lef_l] = cmd.lef * kLefMaxRad;
+    inout[Channel::lef_r] = cmd.lef * kLefMaxRad;
+
+    inout[Channel::rudder] = cmd.yaw_pedal * kRudderMaxRad;
+
+    // Speed brake: all four panels together.
+    const float brake = cmd.brake * kBrakeMaxRad;
+    inout[Channel::airbrake_top_l] = brake;
+    inout[Channel::airbrake_bot_l] = brake;
+    inout[Channel::airbrake_top_r] = brake;
+    inout[Channel::airbrake_bot_r] = brake;
+
+    inout[Channel::hook] = cmd.hook * kHookMaxRad;
+    inout[Channel::dragchute] = cmd.chute * kChuteMaxRad;
+
+    // Engine presentation.
+    inout[Channel::nozzle_pos] = cmd.nozzle;
+    inout[Channel::sw_ab] = cmd.afterburner ? 1.0f : 0.0f;
+    inout[Channel::ab_scale] = cmd.afterburner ? 1.0f : 0.0f;
+    inout[Channel::rpm] = cmd.rpm;
+}
+
 } // namespace f4::anim

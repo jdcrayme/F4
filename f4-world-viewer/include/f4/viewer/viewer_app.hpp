@@ -227,8 +227,13 @@ public:
     /// join, the session exit summary, the texture unloads, CloseWindow.
     void request_exit() noexcept;
 
-private:
+public:
+    // Public forward declaration: panel TUs (imgui_panels.cpp's view
+    // templates) receive the impl pointer and need the type name to be
+    // accessible; the full definition lives in viewer_state.hpp.
     struct Impl;
+
+private:
     std::unique_ptr<Impl> impl_;
 
     // Internal helpers

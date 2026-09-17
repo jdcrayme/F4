@@ -430,8 +430,11 @@ struct ViewerApp::Impl {
     /// Docs/FIDELITY_TIERS_PLAN.md). Unchecked = full-fidelity
     /// everything (the pre-FID behavior).
     bool campaign_tiered = true;
-    /// The Campaign window (draw_campaign_session_view).
-    bool show_campaign_window = true;
+    /// The Campaign window (draw_campaign_session_view). Off by default
+    /// so a freshly-loaded world doesn't spawn a window the user hasn't
+    /// asked for yet — the Campaign > Start Session menu item, the
+    /// Windows menu, and adopt_session_start() all open it.
+    bool show_campaign_window = false;
     /// Canvas live layer: the session's aircraft + their routes.
     bool show_live_layer = true;
     /// Canvas: route polylines for live aircraft.
@@ -662,19 +665,37 @@ struct ViewerApp::Impl {
         return "(empty)";
     }
 
-    // Layer toggles
-    bool show_terrain = true;
-    bool show_objectives = true;
-    bool show_units = true;
-    bool show_grid = false;
+    // --- Main window visibility ------------------------------------------
+    //
+    // One bool per ImGui window (the Windows menu and each window's own
+    // close button drive these). Canvas LAYER toggles live below; a
+    // layer toggle colors the map, a window toggle shows/hides a panel.
+    bool show_layers_panel = true;
+    bool show_inspector = true;
+    // The merged "Campaign Info" window (Campaign + Teams tabs). Off by
+    // default — reference data, not something every session needs on
+    // screen; one click in the Windows menu brings it back.
+    bool show_campaign_info = false;
+    // Gates the Layers panel's "Map Legend" section (the old floating
+    // Legend window, folded into the panel). Kept as a flag so the
+    // Windows-menu toggle and the collapsing header stay in sync.
     bool show_legend = true;
+
+    // Canvas layer toggles
+    bool show_terrain = false;    // PROBE-TEMP
+    bool show_objectives = false; // PROBE-TEMP
+    bool show_units = true;       // PROBE-TEMP
+    bool show_grid = false;
     // Visualization overlays — toggled off by default to reduce clutter
     // when the user just wants to see the strategic picture. Enable
     // individually to inspect specific layers.
     bool show_radar_arcs = false;             // 8-wedge detection coverage per radar objective
     bool show_ground_layout_overlay = true;   // runway/taxi/parking shapes on main canvas (zoom-gated)
-    bool show_unit_destinations = true;       // thin line from unit to (dest_x, dest_y)
-    bool show_waypoints = true;               // unit waypoint polyline + dots
+    // Relationship lines default OFF: with hundreds of tasked flights the
+    // whole-web view is unreadable spaghetti; each line family is one
+    // checkbox in View > Overlays / the Layers panel for targeted study.
+    bool show_unit_destinations = false;      // thin line from unit to (dest_x, dest_y)
+    bool show_waypoints = false;              // unit waypoint polyline + dots
     // When true, the 2D canvas overlays real KoreaObj 3D models for each
     // feature on the SELECTED objective (using a top-down orthographic
     // camera that matches the 2D view). Requires KoreaObj.HDR/.LOD/.TEX
@@ -685,7 +706,7 @@ struct ViewerApp::Impl {
     // overlay so the meshes only appear when the user is zoomed in
     // enough to actually see them.
     bool show_feature_meshes = true;
-    bool show_squadron_links = true;          // squadron → home airbase thin line
+    bool show_squadron_links = false;         // squadron → home airbase thin line
     bool show_hierarchy_lines = false;        // battalion → brigade parent lines (planned)
     // --- B.3 campaign-QC layers ------------------------------------------
     // The tasking picture: flights colored by owner already render via the
@@ -693,8 +714,8 @@ struct ViewerApp::Impl {
     // logic actually created (target assignments, package composition,
     // the bullseye reference), and the mission filter isolates one
     // mission type for end-to-end inspection.
-    bool show_mission_links = true;           // flight → mission target line
-    bool show_package_links = true;           // package → element flights lines
+    bool show_mission_links = false;          // flight → mission target line
+    bool show_package_links = false;          // package → element flights lines
     bool show_bullseye = true;                // campaign bullseye crosshair
     /// Mission filter: -1 = all missions. Otherwise only flights whose
     /// FlightPlanComponent::mission == mission_filter render at full
@@ -707,9 +728,11 @@ struct ViewerApp::Impl {
         return mission_filter < 0 || (fp && fp->mission != 0 &&
             static_cast<int>(fp->mission) == mission_filter);
     }
-    /// The "ATO / Tasking" window (draw_campaign_qc_view). ON by default —
-    /// the ATO is the primary QC surface for campaign tasking.
-    bool show_ato = true;
+    /// The "ATO / Tasking" window (draw_campaign_qc_view). Off by
+    /// default — the flight table is a QC deep-dive, not part of the
+    /// everyday map view; the Windows menu and the View > Campaign QC
+    /// group toggle it.
+    bool show_ato = false;
     // POLISH-2.4: minimap in the bottom-right corner of the canvas.
     // Shows the whole 1024×1024 theater at a glance: terrain thumbnail
     // (re-uses the cached terrain texture), objective dots (colored by

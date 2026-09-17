@@ -5,6 +5,37 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## CAMP-BASE-1 — the stock-save airbase bridge (synthesized squadron basing)
+
+- **CAMP-BASE-1** — the stock campaigns shipped with the game
+  (save0/1/2.cam + Instant.cam, .ver 63/65) now run the full ATO loop in
+  the viewer session. They carry airbase VU 0 for every squadron — the
+  link the game's own campaign engine establishes on first load, which
+  never ran on them — so the ATM could base nothing: the ladder
+  generated hundreds of intents per cycle and every one came out
+  route-less, and the spawner (by design) materializes only routed
+  synthetic intents; with zero save flights on top, nothing ever flew.
+  The bridge: `f4-world`'s `synthesize_squadron_airbases()` assigns each
+  unbased squadron the nearest acceptable objective (exact grid first,
+  then nearest; owner = own team or ALLIED/FRIENDLY stance — the US
+  wing's RK-owned fields; War/Hostile and the -5141 garbage slots never)
+  and the session carries it on BOTH legs: the in-memory WorldState the
+  adapters/ladder/ledger read, and — via the §6.1 emitter — a patched
+  world JSON in the scenario temp dir that the sim re-loads (opt-in
+  `CampaignSessionOptions::synthesize_airbases`, byte-identical off;
+  the viewer arms it on every session start, campaign_qc via
+  `--synthesize-airbases`). Validated on the real stock saves: save0
+  94/94 squadrons based (routes 0→179, synthetic spawns 0→4 at the
+  4-flight cap, takeoff slots 0→139), save1 72/72 (routes 0→178);
+  TestCamp with the bridge off stays byte-identical (413 intents / 152
+  routes), with it on the 26 unbased entries join (routes→173). Tests:
+  `test_airbase_synthesis` (7 — acceptance/exact-grid/nearest/war-and-
+  garbage rejection/unresolvable/flight-untouched) and
+  `CampaignSession.SynthesizeAirbasesBasesTheUnbasedWing` (the
+  end-to-end: session WS + sim world agree through the patched JSON on
+  a fixture whose USA wing has no base within the positional fallback's
+  radius).
+
 ## CAMP-CMD-2 — retask / abort / priority (the command surface completes)
 
 - **CAMP-CMD-2** — the v1 command set completes behind the CMD-1 wire

@@ -61,6 +61,117 @@ std::optional<std::array<float, 2>> read_vec2_float(
 
 // ── extract_gltf_lod_geometry ────────────────────────────────────────────────
 
+namespace {
+
+/// One primitive → one GltfMeshData. The single vertex/attribute reader
+/// shared by BOTH extractors (the flat lod collector and the animated
+/// parts collector) so their geometry payloads can never drift.
+/// Returns nullopt for non-triangle or unreadable primitives.
+std::optional<GltfMeshData> read_gltf_primitive(
+    const f4::gltf::GltfDocument& doc, const f4::gltf::Primitive& prim) {
+    // TRIANGLES only — the same filter the old build_raylib_meshes
+    // applied to f4::models::PrimitiveKind (the emitter emits mode 4).
+    if (prim.mode != 4) return std::nullopt;
+    if (!prim.positions || *prim.positions >= doc.accessors.size())
+        return std::nullopt;
+    const auto& pos_acc = doc.accessors[*prim.positions];
+    if (pos_acc.count == 0) return std::nullopt;
+
+    GltfMeshData data;
+
+    // Texture binding through the material chain.
+    data.texture_uri = doc.material_basecolor_uri(prim.material)
+                           .value_or(std::string{});
+    if (!data.texture_uri.empty()) {
+        data.tex_id = tex_id_from_uri(data.texture_uri);
+    }
+
+    // Positions (glTF meters/+Y-up → Raylib feet/RH Y-up).
+    data.positions.reserve(pos_acc.count * 3);
+    for (std::size_t i = 0; i < pos_acc.count; ++i) {
+        auto v = doc.read_vec3_float(*prim.positions, i);
+        if (!v) break;
+        const auto p = gltf_vertex_to_raylib((*v)[0], (*v)[1], (*v)[2]);
+        data.positions.push_back(p.x);
+        data.positions.push_back(p.y);
+        data.positions.push_back(p.z);
+    }
+    if (data.positions.size() != pos_acc.count * 3) {
+        return std::nullopt;  // accessor read failed mid-way — skip
+    }
+    const std::size_t vert_count = pos_acc.count;
+
+    // Normals (directions — no scale, see gltf_normal_to_raylib).
+    if (prim.normals && *prim.normals < doc.accessors.size()) {
+        data.normals.reserve(vert_count * 3);
+        for (std::size_t i = 0; i < vert_count; ++i) {
+            auto n = doc.read_vec3_float(*prim.normals, i);
+            if (!n) break;
+            const auto t = gltf_normal_to_raylib((*n)[0], (*n)[1], (*n)[2]);
+            data.normals.push_back(t.x);
+            data.normals.push_back(t.y);
+            data.normals.push_back(t.z);
+        }
+    }
+    if (data.normals.size() != vert_count * 3) {
+        // Missing/unreadable normals — zero-fill so the attribute
+        // layout stays complete (draws flat-shaded dark, never crashes).
+        data.normals.assign(vert_count * 3, 0.0f);
+    }
+
+    // UVs.
+    if (prim.texcoords0 && *prim.texcoords0 < doc.accessors.size()) {
+        data.texcoords.reserve(vert_count * 2);
+        for (std::size_t i = 0; i < vert_count; ++i) {
+            auto uv = read_vec2_float(doc, *prim.texcoords0, i);
+            if (!uv) break;
+            data.texcoords.push_back((*uv)[0]);
+            data.texcoords.push_back((*uv)[1]);
+        }
+    }
+
+    // Vertex colors (COLOR_0 — the exporter bakes ColorBank
+    // resolution at export time).
+    if (prim.colors0 && *prim.colors0 < doc.accessors.size()) {
+        data.colors.reserve(vert_count * 4);
+        for (std::size_t i = 0; i < vert_count; ++i) {
+            auto c = doc.read_color_rgba(*prim.colors0, i);
+            if (!c) break;
+            auto to_u8 = [](float v) {
+                const float clamped = std::clamp(v, 0.0f, 1.0f) * 255.0f;
+                return static_cast<unsigned char>(clamped + 0.5f);
+            };
+            data.colors.push_back(to_u8((*c)[0]));
+            data.colors.push_back(to_u8((*c)[1]));
+            data.colors.push_back(to_u8((*c)[2]));
+            data.colors.push_back(to_u8((*c)[3]));
+        }
+    }
+
+    // Indices.
+    if (prim.indices && *prim.indices < doc.accessors.size()) {
+        const auto& idx_acc = doc.accessors[*prim.indices];
+        data.indices.reserve(idx_acc.count);
+        for (std::size_t i = 0; i < idx_acc.count; ++i) {
+            auto idx = doc.read_index_u32(*prim.indices, i);
+            if (!idx) break;
+            data.indices.push_back(static_cast<unsigned short>(*idx));
+        }
+    }
+    if (data.indices.size() < 3) {
+        // Non-indexed or unreadable indices — sequential (same
+        // triangle fan every 3 vertices).
+        data.indices.resize(vert_count);
+        for (std::size_t i = 0; i < vert_count; ++i) {
+            data.indices[i] = static_cast<unsigned short>(i);
+        }
+    }
+
+    return data;
+}
+
+}  // namespace
+
 std::vector<GltfMeshData> extract_gltf_lod_geometry(
     const f4::gltf::GltfDocument& doc, int lod_level)
 {
@@ -69,107 +180,9 @@ std::vector<GltfMeshData> extract_gltf_lod_geometry(
     // One primitive → one GltfMeshData (shared by the lod-node and
     // name-based collectors below).
     auto extract_primitive = [&](const f4::gltf::Primitive& prim) {
-        // TRIANGLES only — the same filter the old build_raylib_meshes
-        // applied to f4::models::PrimitiveKind (the emitter emits mode 4).
-        if (prim.mode != 4) return;
-        if (!prim.positions || *prim.positions >= doc.accessors.size()) return;
-        const auto& pos_acc = doc.accessors[*prim.positions];
-        if (pos_acc.count == 0) return;
-
-        GltfMeshData data;
-
-        // Texture binding through the material chain.
-        data.texture_uri = doc.material_basecolor_uri(prim.material)
-                               .value_or(std::string{});
-        if (!data.texture_uri.empty()) {
-            data.tex_id = tex_id_from_uri(data.texture_uri);
+        if (auto data = read_gltf_primitive(doc, prim)) {
+            out.push_back(std::move(*data));
         }
-
-        // Positions (glTF meters/+Y-up → Raylib feet/RH Y-up).
-        data.positions.reserve(pos_acc.count * 3);
-        for (std::size_t i = 0; i < pos_acc.count; ++i) {
-            auto v = doc.read_vec3_float(*prim.positions, i);
-            if (!v) break;
-            const auto p = gltf_vertex_to_raylib((*v)[0], (*v)[1], (*v)[2]);
-            data.positions.push_back(p.x);
-            data.positions.push_back(p.y);
-            data.positions.push_back(p.z);
-        }
-        if (data.positions.size() != pos_acc.count * 3) {
-            return;  // accessor read failed mid-way — skip this primitive
-        }
-        const std::size_t vert_count = pos_acc.count;
-
-        // Normals (directions — no scale, see gltf_normal_to_raylib).
-        if (prim.normals && *prim.normals < doc.accessors.size()) {
-            data.normals.reserve(vert_count * 3);
-            for (std::size_t i = 0; i < vert_count; ++i) {
-                auto n = doc.read_vec3_float(*prim.normals, i);
-                if (!n) break;
-                const auto t = gltf_normal_to_raylib((*n)[0], (*n)[1],
-                                                     (*n)[2]);
-                data.normals.push_back(t.x);
-                data.normals.push_back(t.y);
-                data.normals.push_back(t.z);
-            }
-        }
-        if (data.normals.size() != vert_count * 3) {
-            // Missing/unreadable normals — zero-fill so the attribute
-            // layout stays complete (draws flat-shaded dark, never
-            // crashes).
-            data.normals.assign(vert_count * 3, 0.0f);
-        }
-
-        // UVs.
-        if (prim.texcoords0 && *prim.texcoords0 < doc.accessors.size()) {
-            data.texcoords.reserve(vert_count * 2);
-            for (std::size_t i = 0; i < vert_count; ++i) {
-                auto uv = read_vec2_float(doc, *prim.texcoords0, i);
-                if (!uv) break;
-                data.texcoords.push_back((*uv)[0]);
-                data.texcoords.push_back((*uv)[1]);
-            }
-        }
-
-        // Vertex colors (COLOR_0 — the exporter bakes ColorBank
-        // resolution at export time).
-        if (prim.colors0 && *prim.colors0 < doc.accessors.size()) {
-            data.colors.reserve(vert_count * 4);
-            for (std::size_t i = 0; i < vert_count; ++i) {
-                auto c = doc.read_color_rgba(*prim.colors0, i);
-                if (!c) break;
-                auto to_u8 = [](float v) {
-                    const float clamped =
-                        std::clamp(v, 0.0f, 1.0f) * 255.0f;
-                    return static_cast<unsigned char>(clamped + 0.5f);
-                };
-                data.colors.push_back(to_u8((*c)[0]));
-                data.colors.push_back(to_u8((*c)[1]));
-                data.colors.push_back(to_u8((*c)[2]));
-                data.colors.push_back(to_u8((*c)[3]));
-            }
-        }
-
-        // Indices.
-        if (prim.indices && *prim.indices < doc.accessors.size()) {
-            const auto& idx_acc = doc.accessors[*prim.indices];
-            data.indices.reserve(idx_acc.count);
-            for (std::size_t i = 0; i < idx_acc.count; ++i) {
-                auto idx = doc.read_index_u32(*prim.indices, i);
-                if (!idx) break;
-                data.indices.push_back(static_cast<unsigned short>(*idx));
-            }
-        }
-        if (data.indices.size() < 3) {
-            // Non-indexed or unreadable indices — sequential (same
-            // triangle fan every 3 vertices).
-            data.indices.resize(vert_count);
-            for (std::size_t i = 0; i < vert_count; ++i) {
-                data.indices[i] = static_cast<unsigned short>(i);
-            }
-        }
-
-        out.push_back(std::move(data));
     };
 
     // Collector 1 — the lod:N node (f4 extras kind "lod" + level, with
@@ -313,100 +326,17 @@ std::vector<GltfPartData> extract_gltf_lod_parts(
 
         const auto& node = doc.nodes[fr.node];
         if (node.mesh.has_value()) {
-            // Extract this mesh's primitives as one part.
+            // Extract this mesh's primitives as one part each — the
+            // shared primitive reader keeps the payload identical to
+            // the flat path.
             const auto& mesh = doc.meshes[*node.mesh];
             for (const auto& prim : mesh.primitives) {
-                if (prim.mode != 4) continue;  // same filter as the flat path
-                if (!prim.positions || *prim.positions >= doc.accessors.size())
-                    continue;
-                const auto& pos_acc = doc.accessors[*prim.positions];
-                if (pos_acc.count == 0) continue;
+                auto data = read_gltf_primitive(doc, prim);
+                if (!data) continue;
 
                 GltfPartData part;
                 part.node_chain = path;
-
-                part.data.texture_uri =
-                    doc.material_basecolor_uri(prim.material)
-                        .value_or(std::string{});
-                if (!part.data.texture_uri.empty()) {
-                    part.data.tex_id = tex_id_from_uri(part.data.texture_uri);
-                }
-
-                part.data.positions.reserve(pos_acc.count * 3);
-                for (std::size_t i = 0; i < pos_acc.count; ++i) {
-                    auto v = doc.read_vec3_float(*prim.positions, i);
-                    if (!v) break;
-                    const auto p = gltf_vertex_to_raylib((*v)[0], (*v)[1],
-                                                         (*v)[2]);
-                    part.data.positions.push_back(p.x);
-                    part.data.positions.push_back(p.y);
-                    part.data.positions.push_back(p.z);
-                }
-                if (part.data.positions.size() != pos_acc.count * 3) continue;
-                const std::size_t vert_count = pos_acc.count;
-
-                if (prim.normals && *prim.normals < doc.accessors.size()) {
-                    part.data.normals.reserve(vert_count * 3);
-                    for (std::size_t i = 0; i < vert_count; ++i) {
-                        auto n = doc.read_vec3_float(*prim.normals, i);
-                        if (!n) break;
-                        const auto t = gltf_normal_to_raylib((*n)[0], (*n)[1],
-                                                             (*n)[2]);
-                        part.data.normals.push_back(t.x);
-                        part.data.normals.push_back(t.y);
-                        part.data.normals.push_back(t.z);
-                    }
-                }
-                if (part.data.normals.size() != vert_count * 3) {
-                    part.data.normals.assign(vert_count * 3, 0.0f);
-                }
-
-                if (prim.texcoords0 &&
-                    *prim.texcoords0 < doc.accessors.size()) {
-                    part.data.texcoords.reserve(vert_count * 2);
-                    for (std::size_t i = 0; i < vert_count; ++i) {
-                        auto uv = read_vec2_float(doc, *prim.texcoords0, i);
-                        if (!uv) break;
-                        part.data.texcoords.push_back((*uv)[0]);
-                        part.data.texcoords.push_back((*uv)[1]);
-                    }
-                }
-
-                if (prim.colors0 && *prim.colors0 < doc.accessors.size()) {
-                    part.data.colors.reserve(vert_count * 4);
-                    for (std::size_t i = 0; i < vert_count; ++i) {
-                        auto c = doc.read_color_rgba(*prim.colors0, i);
-                        if (!c) break;
-                        auto to_u8 = [](float v) {
-                            const float clamped =
-                                std::clamp(v, 0.0f, 1.0f) * 255.0f;
-                            return static_cast<unsigned char>(clamped + 0.5f);
-                        };
-                        part.data.colors.push_back(to_u8((*c)[0]));
-                        part.data.colors.push_back(to_u8((*c)[1]));
-                        part.data.colors.push_back(to_u8((*c)[2]));
-                        part.data.colors.push_back(to_u8((*c)[3]));
-                    }
-                }
-
-                if (prim.indices && *prim.indices < doc.accessors.size()) {
-                    const auto& idx_acc = doc.accessors[*prim.indices];
-                    part.data.indices.reserve(idx_acc.count);
-                    for (std::size_t i = 0; i < idx_acc.count; ++i) {
-                        auto idx = doc.read_index_u32(*prim.indices, i);
-                        if (!idx) break;
-                        part.data.indices.push_back(
-                            static_cast<unsigned short>(*idx));
-                    }
-                }
-                if (part.data.indices.size() < 3) {
-                    part.data.indices.resize(vert_count);
-                    for (std::size_t i = 0; i < vert_count; ++i) {
-                        part.data.indices[i] =
-                            static_cast<unsigned short>(i);
-                    }
-                }
-
+                part.data = std::move(*data);
                 out.push_back(std::move(part));
             }
         }

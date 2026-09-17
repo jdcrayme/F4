@@ -31,9 +31,10 @@
 //   type_index key without modifying f4-entities.
 //
 // Why passive (Component<T>, not BehavioralComponent<T>):
-//   The visual state is purely a function of the FM's gear flag and the
-//   entity's transform. The renderer reads it directly; the host syncs
-//   gear_switch_child from the FM each tick. No per-tick update needed.
+//   The visual state is purely a function of the entity's transform and
+//   the rig-written animation channels (anim_values below). The renderer
+//   reads it directly; the host syncs it from the FM each tick. No
+//   per-tick component update needed.
 //
 // Dependencies: f4-entities (Component<T>) only. C++20.
 
@@ -66,14 +67,6 @@ struct VisualModelComponent : entities::Component<VisualModelComponent> {
     /// for the taxi demo we lock to LOD 0 (highest detail) since the
     /// camera is close.
     int active_lod{0};
-
-    /// Gear switch child selection (0=down, 1=up). The host syncs this
-    /// from the FM's gear flag each tick. The renderer maps it to the
-    /// model's switch node child selection (switch #10 on the F-16 per
-    /// f4-models-viewer/src/scene.cpp). Replaces the old
-    /// f4::models::ModelState (which carried a vector of SwitchState +
-    /// DofState — only the gear switch was ever animated by the sim).
-    uint8_t gear_switch_child{0};
 
     /// Optional: which texture set (summer/winter/desert). Default 0.
     int texture_set{0};

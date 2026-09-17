@@ -36,6 +36,7 @@
 #include <cmath>
 #include <filesystem>
 #include <string>
+#include <unordered_map>
 
 using namespace f4::simulation;
 
@@ -174,6 +175,64 @@ TEST(CampaignSession, AdvanceTicksCampaignGeneratesAndMaterializes) {
     EXPECT_GT(session->stats().drawn_aircraft, 0);
     EXPECT_EQ(session->ledger().mission_draw_aircraft(),
               session->stats().drawn_aircraft);
+}
+
+// ── 2a2. The stock-save bridge: synthesis bases the unbased wing ───────────
+// The stock campaigns (save0/1/2 + Instant, .ver 63/65) carry airbase
+// VU 0 for every squadron — the link the game's own campaign engine
+// establishes on first load, which never ran on them. The RAW kunsan
+// world is that shape (both squadrons at airbase 0), and the USA one
+// has NO airbase-type objective within the entity fallback's 5-grid
+// radius — so a valid sim-side airbase proves the synthesized state
+// reached the sim through the patched world JSON, not the fallback.
+TEST(CampaignSession, SynthesizeAirbasesBasesTheUnbasedWing) {
+    if (!std::filesystem::exists(f16_config())) {
+        GTEST_SKIP() << "f16.json fixture not generated";
+    }
+    std::string err;
+    auto opts = make_opts(kunsan_world());
+    opts.synthesize_airbases = true;
+    auto session = CampaignSession::create(opts, &err);
+    ASSERT_NE(session, nullptr) << "create failed: " << err;
+
+    // The session's WorldState (adapters → ladder/ATM/ledger view):
+    // every squadron based, nothing unresolved.
+    const auto& ws = session->world_state();
+    std::unordered_map<std::uint32_t, std::uint32_t> base_by_vu;
+    for (const auto& u : ws.units) {
+        if (u.unit_class != f4::entities::UnitClass::Squadron) continue;
+        EXPECT_NE(u.airbase_id, 0u) << "squadron " << u.id_num
+                                    << " left unbased";
+        base_by_vu[u.id_num] = u.airbase_id;
+    }
+    ASSERT_EQ(base_by_vu.size(), std::size_t{2});
+
+    // The SIM's world (its own WorldState copy, re-loaded from the
+    // scenario's — patched — world_json_path) carries the SAME
+    // assignment: each squadron entity resolves a valid home airbase
+    // whose VU matches the session-side synthesis.
+    const auto& world = session->sim().world();
+    for (const auto eid :
+         world.with_component<f4::entities::SquadronComponent>()) {
+        f4::entities::EntityHandle h(
+            eid, const_cast<f4::entities::EntityWorld*>(&world));
+        auto* sq = h.get<f4::entities::SquadronComponent>();
+        ASSERT_NE(sq, nullptr);
+        ASSERT_TRUE(sq->airbase.valid()) << "sim squadron left unbased";
+        const auto* pb = h.get<f4::entities::PropertyBag>();
+        ASSERT_NE(pb, nullptr);
+        const auto vu = static_cast<std::uint32_t>(pb->ints.at("vu_id_num"));
+        const auto expected = base_by_vu.find(vu);
+        ASSERT_NE(expected, base_by_vu.end());
+        const auto* base_pb =
+            f4::entities::EntityHandle(
+                sq->airbase, const_cast<f4::entities::EntityWorld*>(&world))
+                .get<f4::entities::PropertyBag>();
+        ASSERT_NE(base_pb, nullptr);
+        EXPECT_EQ(static_cast<std::uint32_t>(base_pb->ints.at("vu_id_num")),
+                  expected->second)
+            << "sim squadron " << vu << " based off the synthesized state";
+    }
 }
 
 // ── 2b. The tasking countdown (the campaign view's "next ATO wave") ────────

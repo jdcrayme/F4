@@ -4,6 +4,7 @@
 
 #include <f4/renderer/scene_draw.hpp>
 
+#include <f4/renderer/coord_transform.hpp>   // kMetersToFeet (the basis bridge)
 #include <f4/gltf/anim_map.hpp>
 #include <f4/gltf/gltf_loader.hpp>
 
@@ -165,19 +166,10 @@ DrawStats draw_animated_model(FeatureMeshResources& res,
     // in glTF space. The bridge is that diagonal map; conjugate the
     // composed chain with it — otherwise every DOF-framed part renders
     // displaced (basis-mixed and 3.28× too close to the origin).
-    const float k_ft = 1.0f / 0.3048f;   // meters → feet
-    const Matrix gl_to_rl = {
-        k_ft, 0.0f, 0.0f, 0.0f,
-        0.0f, -k_ft, 0.0f, 0.0f,
-        0.0f, 0.0f, k_ft, 0.0f,
-        0.0f, 0.0f, 0.0f, 1.0f,
-    };
-    const Matrix rl_to_gl = {
-        1.0f / k_ft, 0.0f, 0.0f, 0.0f,
-        0.0f, -1.0f / k_ft, 0.0f, 0.0f,
-        0.0f, 0.0f, 1.0f / k_ft, 0.0f,
-        0.0f, 0.0f, 0.0f, 1.0f,
-    };
+    static const float k_ft = kMetersToFeet;   // m → ft
+    static const Matrix gl_to_rl = MatrixScale(k_ft, -k_ft, k_ft);
+    static const Matrix rl_to_gl = MatrixScale(1.0f / k_ft, -1.0f / k_ft,
+                                               1.0f / k_ft);
 
     for (const auto& part : model.lod0_parts) {
         if (part.entry.mesh.triangleCount <= 0) continue;

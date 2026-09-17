@@ -152,4 +152,48 @@ inline void integrate_spinner(Channel c, float rate_rad_s, double dt,
     inout[c] = integrate_spin(inout[c], rate_rad_s, dt);
 }
 
+// ── Pilot surfaces (FCS → visual deflection) ──────────────────────────────
+
+/// Normalized cockpit commands and scheduled surface positions — exactly
+/// the signals the flight model's FCS/aero state already computes each
+/// tick (pshape / rshape / yshape / tefPos / lefPos / dbrake / ...). The
+/// rig maps them onto the control-surface channels with FreeFalcon-style
+/// max deflections.
+struct SurfaceCommand {
+    float pitch_stick = 0.0f;   // −1 (push) .. +1 (pull)
+    float roll_stick  = 0.0f;   // −1 (left) .. +1 (right)
+    float yaw_pedal   = 0.0f;   // −1 .. +1
+    float tef         = 0.0f;   // 0..1 trailing-edge flaperon schedule
+    float lef         = 0.0f;   // 0..1 leading-edge flap schedule
+    float brake       = 0.0f;   // 0..1 speed brake
+    float hook        = 0.0f;   // 0..1 tail hook
+    float chute       = 0.0f;   // 0..1 drag chute
+    float nozzle      = 0.0f;   // 0..1 exhaust nozzle
+    bool  afterburner = false;  // AB lit (plume visible/scaled)
+    float rpm         = 0.0f;   // 0..1+ engine RPM
+};
+
+/// Max visual deflections (radians) — presentation constants pending
+/// auxaero-sourced per-airframe ranges (M3).
+inline constexpr float kStabMaxRad     = 25.0f * 0.017453292519943295f;
+inline constexpr float kFlapMaxRad     = 20.0f * 0.017453292519943295f;
+inline constexpr float kFlapRollMaxRad = 15.0f * 0.017453292519943295f;
+inline constexpr float kLefMaxRad      = 25.0f * 0.017453292519943295f;
+inline constexpr float kRudderMaxRad   = 30.0f * 0.017453292519943295f;
+inline constexpr float kBrakeMaxRad    = 55.0f * 0.017453292519943295f;
+inline constexpr float kHookMaxRad     = 60.0f * 0.017453292519943295f;
+inline constexpr float kChuteMaxRad    = 90.0f * 0.017453292519943295f;
+
+/// Map the surface commands onto the control-surface channels:
+///   stabs         — symmetric, follow pitch stick (pull = TE up)
+///   flaperons     — TEF schedule common + roll differential
+///   LEFs          — symmetric, follow the schedule
+///   rudder        — follows pedals
+///   airbrakes     — all four panels follow the brake position
+///   hook / chute  — follow their positions
+///   nozzle / AB   — follow the engine state
+/// Signs assume the converter's node frames (verified on model 1052);
+/// a model whose frames differ is corrected per-model via overrides.
+void apply_surface_command(const SurfaceCommand& cmd, AnimValues& inout) noexcept;
+
 } // namespace f4::anim

@@ -299,3 +299,62 @@ TEST(Spinners, IntegrateStoppedRateHoldsAngle) {
     integrate_spinner(Channel::radar_dish_spin, -2.0f, 0.5, v);
     EXPECT_FLOAT_EQ(v[Channel::radar_dish_spin], 1.234f);
 }
+
+// ── Pilot surfaces ────────────────────────────────────────────────────────
+
+TEST(SurfaceCommand, StabsAreSymmetricAndFollowPitch) {
+    AnimValues v;
+    SurfaceCommand cmd;
+    cmd.pitch_stick = 0.5f;   // pull
+    apply_surface_command(cmd, v);
+    // Both stabs deflect identically (symmetric pair, identical frames).
+    EXPECT_NEAR(v[Channel::stab_l], v[Channel::stab_r], 1e-6f);
+    // Pull = trailing edge up = negative deflection.
+    EXPECT_LT(v[Channel::stab_l], 0.0f);
+    // 0.5 stick → half of the 25 deg max.
+    EXPECT_NEAR(v[Channel::stab_l],
+                -0.5f * 25.0f * 0.017453292519943295f, 1e-5f);
+}
+
+TEST(SurfaceCommand, FlaperonsScheduleCommonPlusRollDifferential) {
+    AnimValues v;
+    SurfaceCommand cmd;
+    cmd.tef = 1.0f;          // full droop
+    cmd.roll_stick = 0.0f;
+    apply_surface_command(cmd, v);
+    // Pure schedule: both sides deflect the same amount.
+    EXPECT_NEAR(v[Channel::flap_l], v[Channel::flap_r], 1e-6f);
+    EXPECT_NEAR(v[Channel::flap_l], 20.0f * 0.017453292519943295f, 1e-5f);
+
+    cmd.roll_stick = 1.0f;   // full right roll
+    apply_surface_command(cmd, v);
+    // Differential: left up, right down by the roll amount.
+    EXPECT_GT(v[Channel::flap_l], v[Channel::flap_r]);
+    EXPECT_NEAR(v[Channel::flap_l] - v[Channel::flap_r],
+                2.0f * 15.0f * 0.017453292519943295f, 1e-5f);
+}
+
+TEST(SurfaceCommand, BrakeDrivesAllFourPanels) {
+    AnimValues v;
+    SurfaceCommand cmd;
+    cmd.brake = 0.5f;
+    apply_surface_command(cmd, v);
+    EXPECT_NEAR(v[Channel::airbrake_top_l],
+                0.5f * 55.0f * 0.017453292519943295f, 1e-5f);
+    EXPECT_FLOAT_EQ(v[Channel::airbrake_top_l], v[Channel::airbrake_bot_l]);
+    EXPECT_FLOAT_EQ(v[Channel::airbrake_top_l], v[Channel::airbrake_top_r]);
+    EXPECT_FLOAT_EQ(v[Channel::airbrake_top_l], v[Channel::airbrake_bot_r]);
+}
+
+TEST(SurfaceCommand, AfterburnerLightsPlume) {
+    AnimValues v;
+    SurfaceCommand cmd;
+    cmd.afterburner = true;
+    apply_surface_command(cmd, v);
+    EXPECT_FLOAT_EQ(v[Channel::sw_ab], 1.0f);
+    EXPECT_FLOAT_EQ(v[Channel::ab_scale], 1.0f);
+    cmd.afterburner = false;
+    apply_surface_command(cmd, v);
+    EXPECT_FLOAT_EQ(v[Channel::sw_ab], 0.0f);
+    EXPECT_FLOAT_EQ(v[Channel::ab_scale], 0.0f);
+}

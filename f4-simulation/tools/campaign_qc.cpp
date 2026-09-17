@@ -198,6 +198,7 @@
 #include <f4/weapons/messages.hpp>
 #include <f4/weapons/weapon_store.hpp>
 #include <f4/weapons/weapon_types.hpp>
+#include <f4/world/airbase_synthesis.hpp>
 #include <f4/world/world_loader.hpp>
 #include <f4/world/world_adapters.hpp>
 #include <f4/world_types/class_table.hpp>
@@ -251,6 +252,10 @@ struct Args {
     // C6 — the save-write hand-off (--save-write): emit the mutated
     // WorldState JSON and let the importer assemble the .cam.
     bool save_write = false;
+    // The stock-save bridge (--synthesize-airbases): assign unbased
+    // squadrons (wire airbase VU 0 — the stock v63/65 saves' state)
+    // nearest-friendly airbases before any tasking/spawn runs.
+    bool synthesize_airbases = false;
     // Task 73: optional environment opt-ins for the QC run (raw JSON
     // object contents, injected verbatim into the synthesized scenario;
     // empty = the block is absent).
@@ -321,6 +326,7 @@ struct Args {
         "          [--ground-war] [--ground-update-sec <sec>]\n"
         "          [--ground-orders-sec <sec>] [--ground-resupply-sec <sec>]\n"
         "          [--unit-strike] [--weapon-data <wcd.json>] [--out-dir <dir>]\n"
+        "          [--synthesize-airbases]\n"
         "          [--accel <x>] [--accel-hours <h>] [--accel-max-live <n>]\n"
         "          [--accel-tolerance <f>] [--accel-baseline]\n"
         "          [--weather <json-obj>] [--time <json-obj>] (Task 73 env)\n",
@@ -385,6 +391,7 @@ Args parse_args(int argc, char** argv) {
         else if (k == "--ground-war")  a.ground_war = true;
         else if (k == "--unit-strike") a.unit_strike = true;
         else if (k == "--strategy")   a.strategy = true;
+        else if (k == "--synthesize-airbases") a.synthesize_airbases = true;
         else if (k == "--weapon-data") a.weapon_data = next();
         else if (k == "--ground-update-sec")
             a.ground_update_sec = std::atoi(next());
@@ -1302,6 +1309,19 @@ int main(int argc, char** argv) {
     // -----------------------------------------------------------------------
     f4::world::WorldState ws;
     ws.load(args.world_json);
+
+    // The stock-save bridge, BEFORE populate_world / adapters / ledger —
+    // every consumer (ladder, ATM, spawner's squadron map) must see the
+    // same synthesized bases. Unbased squadrons are invisible to tasking:
+    // FindBestAir bases flights on the squadron's airbase and the route
+    // builder gates on it, so a save whose wire carries all-zero airbase
+    // VUs generates intents that can never spawn.
+    if (args.synthesize_airbases) {
+        const auto synth = f4::world::synthesize_squadron_airbases(ws);
+        std::printf("airbase_synthesis: squadrons=%d assigned=%d "
+                    "unresolved=%d\n",
+                    synth.squadrons, synth.assigned, synth.unresolved);
+    }
 
     int flights_total = 0, flights_tasked = 0;
     std::vector<int> missions_by_byte(

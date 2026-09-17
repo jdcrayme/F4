@@ -237,6 +237,24 @@ broken legs clamp at 0.6×range, nav blink 0.4/0.5 s, strobe 0.08/2.0 s with
 seeded deterministic phase. The fixture F-16 (KoreaObj model 1) drives end to
 end: converter → glTF → anim map → doctor sliders.
 
+Two renderer-side conventions are also locked by tests (the M3 integration
+found both the hard way — each displaced every DOF part while every test of
+the pure math passed):
+
+- **Rotation-op axis conjugation.** The falcon→glTF basis B is improper
+  (det = −1): `B·Rx(θ)·Bᵀ = Rot(−B·x̂, θ)` — the emitted axis is glTF
+  **+Z**, not `B·x̂` = −Z. `AnimatedPoseMatchesFlatBake` fails at 0.5 m on
+  the flipped axis.
+- **Raylib is row-vector, and part vertices live in raylib space.**
+  `MatrixMultiply(A, B)` applies A first; `Vector3Transform` is `v·M`.
+  The node matrix must read S·R·T (translation LAST — `RaylibMatrixConventionLocked`),
+  the chain fold must PREPEND each local matrix (innermost frame touches
+  the vertex first), and the composed chain must be conjugated through the
+  glTF→raylib basis bridge `diag(kMetersToFeet, −kMetersToFeet,
+  kMetersToFeet)` (part vertices are stored raylib-space, chain math is
+  glTF-space meters). The render harness (`DIAG_Model1052_RenderRestPose`)
+  shows any of this regressing on sight.
+
 ## 9. Testing strategy
 
 - **Golden converter tests** — per model: node structure snapshot (names, extras, transforms), reparse equality, doctor-clean.

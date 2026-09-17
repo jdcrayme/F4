@@ -179,6 +179,15 @@ void ViewerApp::start_campaign_session() {
     opts.max_flights = impl_->campaign_start_max_flights;
     opts.tasking_cycle_sec = 1800;  // FreeFalcon's own ATM cadence
     opts.reinforce_period_sec = 43200;  // the QC's armed 12 h
+    // Stock-save bridge: the Steam install's stock campaigns (save0/1/2
+    // + Instant) leave every squadron's home-airbase VU at 0 — the link
+    // the game's own campaign engine establishes on first load, which
+    // never ran on them. Unbased squadrons can carry no ATO (the ATM
+    // bases flights on the squadron's airbase; routes gate on it), so
+    // every session arms the nearest-friendly-airbase synthesis. Saves
+    // that already carry bases (TestCamp, Auto Save) are untouched where
+    // it matters: only wire-zero squadrons are ever assigned.
+    opts.synthesize_airbases = true;
     // FID: the fidelity policy. Tiered is the DEFAULT (the original
     // game's own shape: flights are campaign aggregates until you zoom
     // into or select one) — full-fidelity-everything is the checkbox's
@@ -273,6 +282,10 @@ bool ViewerApp::adopt_session_start() {
                 kSessionSpeedTable[idx],
                 /*paused=*/!impl_->session_auto_play);
         impl_->session_runner->start();
+        // The session's controls live in this window — surface it when
+        // the war actually comes up (the Start menu item already opened
+        // it; this covers programmatic --session starts too).
+        impl_->show_campaign_window = true;
         // V-3DLIVE: reset the camera-bubble tracking (a fresh session
         // re-points the bubble on the next camera move).
         impl_->last_bubble_zoom = -1.0f;
@@ -453,7 +466,8 @@ void ViewerApp::draw_campaign_session_view() {
     if (!impl_->show_campaign_window) return;
     if (!impl_->world_loaded) return;  // nothing to run a session over
 
-    ImGui::SetNextWindowPos(ImVec2(620, 30), ImGuiCond_FirstUseEver);
+    // Left of the Inspector's top-right slot (Windows menu reopens it).
+    ImGui::SetNextWindowPos(ImVec2(260, 30), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize(ImVec2(440, 360), ImGuiCond_FirstUseEver);
     if (!ImGui::Begin("Campaign Session", &impl_->show_campaign_window,
                       ImGuiWindowFlags_NoCollapse)) {

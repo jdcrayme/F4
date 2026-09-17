@@ -16,3 +16,4 @@
 
 #include "data_source.hpp"
 #include "world_loader.hpp"
+#include "airbase_synthesis.hpp"
