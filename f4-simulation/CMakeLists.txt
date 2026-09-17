@@ -41,7 +41,6 @@ add_library(f4-simulation STATIC
     src/campaign_spawner.cpp
     src/campaign_result_sink.cpp
     src/campaign_session.cpp
-    src/campaign_session_runner.cpp
     src/campaign_session_host.cpp
     src/campaign_war_harness.cpp
     src/bvr_intercept_harness.cpp

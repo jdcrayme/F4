@@ -339,8 +339,9 @@ void ViewerApp::draw_entity_model_3d() {
                         static_cast<float>(ftf->position.z), live_ground_z);
                     float facing = 0.0f;
                     if (impl_->session) {
-                        if (auto hdg =
-                                impl_->session->flight_heading_rad(vu)) {
+                        // RENDER-PLANE SEAM (CAMP-HOST-3): the aggregate
+                        // course via the quarantined helper.
+                        if (auto hdg = impl_->flight_heading_rad(vu)) {
                             facing = static_cast<float>(
                                 *hdg * 57.29577951308232);
                         } else {

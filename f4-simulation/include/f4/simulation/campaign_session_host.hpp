@@ -81,8 +81,17 @@ public:
         std::function<void(const f4::campaign::api::CampaignEvent&)> sink);
     void remove_event_sink(std::size_t handle);
 
-    // --- direct engine access (tests; the viewer's later HOST-3 move) --
-
+    // --- direct engine access (CAMP-HOST-3's two planes) ---------------
+    //
+    // The contract plane (ICampaignSession, above) is the ONLY surface a
+    // client needs: campaignd uses exactly it. The reference renderer
+    // (f4-world-viewer) additionally draws the LIVE entity graph — the
+    // per-vehicle transforms, models, and selection rings the FID focus
+    // bubble materializes — which is a RENDER-plane concern (plan §2.2:
+    // pacing/animation are host business), not campaign state. engine()
+    // exists for the contract tests and for that renderer's quarantined
+    // render-plane helpers; everything else a host does goes through the
+    // four surfaces.
     [[nodiscard]] CampaignSession& engine() noexcept { return *session_; }
     [[nodiscard]] const CampaignSessionOptions& options() const noexcept {
         return opts_;

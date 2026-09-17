@@ -72,3 +72,37 @@ target_include_directories(test_enum_text PRIVATE
 )
 target_link_libraries(test_enum_text PRIVATE GTest::gtest_main f4-world-convert f4-world-types)
 gtest_discover_tests(test_enum_text)
+
+# --- CAMP-HOST-3: the campaign client runner (contract tests) ----------
+# The relocated V-THREAD runner, pinned WITHOUT the engine in the link:
+# a scripted f4::campaign::api::ICampaignSession mock (step counts,
+# controllable latency, dilation echo) drives the same cases the old
+# f4-simulation runner test pinned — pacing, pause, speed, the FIFO
+# lock discipline, the serial gate the snapshot refresh rides.
+add_executable(test_campaign_client_runner
+    test_campaign_client_runner.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/campaign_client_runner.cpp
+)
+target_include_directories(test_campaign_client_runner PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src
+)
+target_link_libraries(test_campaign_client_runner PRIVATE
+    GTest::gtest_main f4-campaign-api f4-json)
+gtest_discover_tests(test_campaign_client_runner)
+
+# --- CAMP-HOST-3: the contract-plane query walks -----------------------
+# The fetch layer (campaign_queries.cpp) against golden DTO JSON — the
+# byte-stable encoder outputs the contract pins, walked into the
+# viewer-side structs the windows render. No engine, no raylib.
+add_executable(test_campaign_queries
+    test_campaign_queries.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/campaign_queries.cpp
+)
+target_include_directories(test_campaign_queries PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src
+)
+target_link_libraries(test_campaign_queries PRIVATE
+    GTest::gtest_main f4-campaign-api f4-json)
+gtest_discover_tests(test_campaign_queries)

@@ -1,11 +1,13 @@
 # Campaign Host — the Engine Contract (CAMP)
 
 > **Status**: Draft v1 — CAMP-HOST-1 shipped (f4-campaign-api + the
-> EngineSessionHost adapter + `campaignd`); CAMP-HOST-2 ships with this
-> patch (the typed event stream over f4-messaging, the JSONL journal,
-> the replay identity; 57 API cases + 5 engine-backed e2e cases on
-> top of HOST-1's 58, all green, the golden identity intact). Every
-> other tranche below is an acceptance contract, not a claim.
+> EngineSessionHost adapter + `campaignd`); CAMP-HOST-2 shipped (the
+> typed event stream over f4-messaging, the JSONL journal, the replay
+> identity); CAMP-HOST-3 ships with this patch (the world viewer
+> refactored onto the contract — the runner relocated out of the
+> engine, the `threat` query landed additively, 23 new ctest cases,
+> the golden identity intact). Every other tranche below is an
+> acceptance contract, not a claim.
 
 The campaign engine is the product. Every user experience — the world viewer
 today, a map-first strategy UI, a war-room dashboard, a scripted AI observer,
@@ -116,7 +118,7 @@ things the engine already produces:
 | `objectives` | WorldState `fstatus` (C1 write-back) | per-objective state, damage, team |
 | `flights` | FID tiered view (FID-VIEW-1) | aggregates by default; live entities inside focus (§4) |
 | `routes` | RouteBuilder output (C3) | waypoints, profiles, station contracts — **v1.1 (additive; not in HOST-1)** |
-| `threat` | threat map (C3) | per-cell / per-polygon threat values — **v1.1 (additive)** |
+| `threat` | threat map (C3) | viewer_team, cell_grid, cells, both density bands — **v1.1 additive, LANDED in HOST-3** |
 | `books` | `CampaignResultLedger` (C1/C2) | `{"ledger_json": "…"}` — the byte-stable ledger as one escaped string (its own writer is pretty-printed; one client decode = exact ledger bytes) |
 | `tasking` | the ATM pipeline state (C4/P7) | requests, packages, `next_tasking_sec` |
 | `weather` | Weather v1 (Task 73) | condition, twilight band, daylight factor — **v1.1 (additive)** |
@@ -323,12 +325,69 @@ Default behavior is byte-identical unless a gate says otherwise.
   never subscribes ("events":0 and zero event lines — features arm by
   use).
 
-### CAMP-HOST-3 — the viewer becomes a client
-- World-viewer campaign session refactored onto `CampaignSession`
-  (in-process); direct engine reaching deleted.
-- **Gate**: viewer feature parity (time controls, flights table, routes,
-  campaign view) pinned by the existing viewer tests; the deleted-lines
-  count is the proof.
+### CAMP-HOST-3 — the viewer becomes a client (SHIPPED with this patch)
+- World-viewer campaign session refactored onto `ICampaignSession`
+  (in-process); the V-CAMP window's reads are QUERIES, its acts are
+  typed COMMANDS; the engine session itself is reachable only through
+  a quarantined render-plane seam.
+- **Gate (as built)**: viewer feature parity — time controls (play/
+  pause, the 1x/10x/60x/240x presets, the measured-rate readout, the
+  D# HH:MM:SS clock), the flights table (rows from the `flights`
+  query; D/R as `select_deagg`/`select_reagg` commands with typed
+  refusals surfacing in the status line), the generated-missions
+  table (the `tasking` query with the additive `route_waypoints` +
+  `flight_role` tail; TOT = the epoch captured from the `time` query
+  at adopt + the relative TOT — the engine's own formula), the
+  campaign view (the `stats` query's war-status block; Write Result
+  JSON via the `books` query; Write Back via the contract's runtime-
+  safe `save()`), and the threat overlay (the `threat` query — the
+  v1.1-additive name this tranche lands: viewer_team, the cell-grid
+  echo, and both density bands, 171×171 on the kunsan war).
+  **The deleted-lines count is the proof: 981 deleted / 2327 added** —
+  the engine sheds 825 lines of host-side composition
+  (campaign_session_runner + its test, moved to the viewer and
+  rewritten over the contract), and the viewer's window/canvas code
+  drops every direct engine-session call outside the two seams below.
+  23 new ctest cases: the relocated runner pinned on a MOCK session
+  (no engine in the link — pacing, pause, dilation echo, the FIFO
+  frame-pattern starvation pin, lifecycle idempotence), the query
+  walks pinned against golden DTO JSON (order-independent,
+  additive-tolerant, malformed-reads-as-defaults), the `threat`
+  whitelist dispatch, two ThreatView goldens, and four engine-backed
+  HOST↔engine PARITY cases on the kunsan rig (flights/tasking/stats/
+  threat rows diffed field-for-field against flight_tiers, intents,
+  stats, and the route-builder's map).
+- **As-built notes**: (1) THE TWO PLANES — the contract governs
+  campaign STATE; the live entity graph (per-vehicle transforms,
+  models, selection rings — the FID focus bubble's materialized
+  roster) stays on the engine's EntityWorld through a named,
+  quarantined render-plane seam (the viewer_state.hpp helpers, all
+  commenting their `engine()` reach). That is a RENDER concern (plan
+  §2.2), not state access; a remote 3D client that needs the roster
+  over the wire gets a `vehicles` query in its own additive tranche.
+  (2) THE RUNNER LEFT THE ENGINE — pacing is host-side composition
+  (§2.2 said so all along); `CampaignClientRunner` drives
+  `ICampaignSession::step(ticks)` and owns the wall→tick accumulator
+  the engine's advance() used to carry, with the same FIFO FairMutex
+  discipline (relocated) and an adaptive tick budget — now CEILING-
+  clamped at 4096 ticks, fixing the unbounded-doubling int overflow a
+  real war's advance cost always masked. The step-serial gate keeps
+  the windows' "refresh once per advance, never per draw" contract
+  over JSON round-trips. (3) The factory seam stays: the viewer
+  assembles `CampaignSessionOptions` and calls
+  `EngineSessionHost::create` — exactly what campaignd does with
+  argv; engine config assembly is host work, not client reaching.
+  (4) The epoch: a fresh session's first `time` query (paused, zero
+  ticks) reads campaign_time_s = the save's epoch; the missions
+  table's absolute TOT adds its relative TOT onto that. (5) Data-
+  vocabulary headers (mission names, the world-JSON schema the
+  static layers parse) remain legitimate host-side resources — the
+  boundary quarantines f4-simulation STATE, not display tables; the
+  flights table's team names come from the viewer's own world parse.
+  (6) Write Back upgrades, on purpose: the old in-memory-only
+  writeback button now performs the contract's runtime-safe save
+  (write-back + WorldState JSON next to the loaded world) — parity
+  or better, and the .cam re-encoder stays the importer's process.
 
 ### CAMP-CMD-1 — command journal + RoE doctrine
 - `CommandIntent` wire + journal; `roe_set` per team/mission/flight riding

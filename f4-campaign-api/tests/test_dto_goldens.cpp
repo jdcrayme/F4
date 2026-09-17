@@ -139,12 +139,16 @@ TEST(DtoGoldens, IntentView) {
     m.flight_id = 118;
     m.target_objective_id = 9001;
     m.synthetic = true;
+    // CAMP-HOST-3: the additive tail — the C3 route leg count and the
+    // package role ride at the END (the DTO header's rule).
+    m.route_waypoints = 7;
+    m.flight_role = 2;
     EXPECT_EQ(encode_json(m),
               R"({"issued_time":38574400,"time_on_target":38578000,"team":2,)"
               R"("team_name":"ROK","mission_byte":9,"mission_name":"OCA",)"
               R"("aircraft_count":4,"squadron_id":214,"squadron_name":"111th TFS",)"
               R"("package_id":42,"flight_id":118,"target_objective_id":9001,)"
-              R"("synthetic":1})");
+              R"("synthetic":1,"route_waypoints":7,"flight_role":2})");
 }
 
 // ============================================================================
@@ -261,4 +265,28 @@ TEST(EventGoldens, WeatherAndReinforcement) {
     EXPECT_EQ(encode_json(r),
               R"({"ev":"reinforcement_delivered","t":43200,"aircraft":232,)"
               R"("squadrons_touched":22})");
+}
+
+// ============================================================================
+// threat — the C3 SAM-ring grid (CAMP-HOST-3)
+// ============================================================================
+
+TEST(DtoGoldens, ThreatViewGolden) {
+    ThreatView t;
+    t.viewer_team = 1;
+    t.cell_grid = 6;
+    t.cells_x = 2;
+    t.cells_y = 2;
+    t.low = {0, 3, 1, 0};
+    t.high = {2, 0, 0, 4};
+    EXPECT_EQ(encode_json(t),
+              R"({"viewer_team":1,"cell_grid":6,"cells_x":2,"cells_y":2,)"
+              R"("low":[0,3,1,0],"high":[2,0,0,4]})");
+}
+
+TEST(DtoGoldens, ThreatViewEmptyGrid) {
+    ThreatView t;  // no map built yet: zeros + empty bands
+    EXPECT_EQ(encode_json(t),
+              R"({"viewer_team":0,"cell_grid":0,"cells_x":0,"cells_y":0,)"
+              R"("low":[],"high":[]})");
 }

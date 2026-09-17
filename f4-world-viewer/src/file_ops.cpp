@@ -86,6 +86,15 @@ void ViewerApp::load_world_json(const std::filesystem::path& path) {
     impl_->world_version = ws.version;
     impl_->terrain_file_ref = ws.terrain_file;
 
+    // CAMP-HOST-3: capture the team slot→name table from the world the
+    // viewer itself parsed — the flights table's team column reads this
+    // (the contract's flights rows carry the slot; names are host data
+    // from the same world file every session starts from).
+    impl_->world_team_names.clear();
+    for (const auto& t : ws.teams) {
+        impl_->world_team_names.emplace_back(t.slot, t.name);
+    }
+
     // If the WorldState already has terrain loaded, transfer it.
     if (ws.terrain_loaded) {
         impl_->terrain = std::move(ws.terrain);

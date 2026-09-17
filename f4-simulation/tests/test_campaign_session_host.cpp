@@ -34,6 +34,7 @@
 
 #include <f4/campaign/api/journal.hpp>
 #include <f4/campaign/api/protocol.hpp>
+#include <f4/json/reader.hpp>  // CAMP-HOST-3: the parity probes walk the rows
 
 #include <gtest/gtest.h>
 
@@ -817,4 +818,224 @@ TEST(EventStream, EmptyJournalSaveByteIdentical) {
     EXPECT_EQ(text.find("{\"v\":1,\"journal\":1,\"identity\":{"), 0U);
     EXPECT_NE(text.find("{\"journal_end\":{\"protocol\":1,"),
               std::string::npos);
+}
+
+// ============================================================================
+// CAMP-HOST-3 — the contract↔engine PARITY pin
+//
+// The viewer's contract plane renders ONLY the query rows; the gate is
+// that those rows agree with the ENGINE'S OWN views (flight_tiers, the
+// intents, stats, the threat map) field for field. The adapter is a
+// MAP, not a policy — this test is the proof, on the same kunsan war
+// the event stream rides.
+// ============================================================================
+
+namespace {
+
+// A minimal row walker for the flights rows (vu/team/live/count) —
+// the viewer's own parser is pinned separately (test_campaign_queries);
+// here we only need enough to diff against the engine truth.
+struct FlightRowProbe {
+    std::uint32_t vu = 0;
+    int team = 0;
+    int aircraft_count = 0;
+    bool live = false;
+};
+
+std::vector<FlightRowProbe> probe_flight_rows(const std::string& json) {
+    std::vector<FlightRowProbe> rows;
+    f4::json::Reader r(json);
+    r.expect('[');
+    if (!r.consume(']')) {
+        while (true) {
+            FlightRowProbe p;
+            r.expect('{');
+            while (true) {
+                if (r.consume('}')) break;
+                const auto key = r.read_string();
+                r.expect(':');
+                if (key == "vu") p.vu = static_cast<std::uint32_t>(r.read_int());
+                else if (key == "team") p.team = static_cast<int>(r.read_int());
+                else if (key == "aircraft_count")
+                    p.aircraft_count = static_cast<int>(r.read_int());
+                else if (key == "live") p.live = r.read_int() != 0;
+                else r.skip_value();
+                if (r.consume(',')) continue;
+                r.expect('}');
+                break;
+            }
+            rows.push_back(p);
+            if (r.consume(',')) continue;
+            r.expect(']');
+            break;
+        }
+    }
+    return rows;
+}
+
+struct ThreatProbe {
+    int viewer_team = -1;
+    int cell_grid = 0;
+    int cells_x = 0;
+    int cells_y = 0;
+    std::vector<int> low, high;
+};
+
+ThreatProbe probe_threat(const std::string& json) {
+    ThreatProbe t;
+    f4::json::Reader r(json);
+    r.expect('{');
+    while (true) {
+        if (r.consume('}')) break;
+        const auto key = r.read_string();
+        r.expect(':');
+        if (key == "viewer_team")
+            t.viewer_team = static_cast<int>(r.read_int());
+        else if (key == "cell_grid")
+            t.cell_grid = static_cast<int>(r.read_int());
+        else if (key == "cells_x")
+            t.cells_x = static_cast<int>(r.read_int());
+        else if (key == "cells_y")
+            t.cells_y = static_cast<int>(r.read_int());
+        else if (key == "low" || key == "high") {
+            auto& out = key == "low" ? t.low : t.high;
+            r.expect('[');
+            if (!r.consume(']')) {
+                while (true) {
+                    out.push_back(static_cast<int>(r.read_int()));
+                    if (r.consume(',')) continue;
+                    r.expect(']');
+                    break;
+                }
+            }
+        } else r.skip_value();
+        if (r.consume(',')) continue;
+        r.expect('}');
+        break;
+    }
+    return t;
+}
+
+} // namespace
+
+TEST(CampaignHostParity, FlightsRowsMatchTheEngineTiers) {
+    WarRig rig = WarRig::make(/*atm=*/true, /*armed=*/false);
+    ASSERT_NE(rig.host, nullptr);
+    rig.host->step(60 * 8);  // past the rig's first 5 s tasking cycle
+
+    const auto res = rig.host->query({"flights", -1, 0});
+    ASSERT_TRUE(res.ok) << res.detail;
+    const auto rows = probe_flight_rows(res.data_json);
+    const auto& tiers = rig.host->engine().flight_tiers();
+    ASSERT_EQ(rows.size(), tiers.size());
+    for (std::size_t i = 0; i < rows.size(); ++i) {
+        EXPECT_EQ(rows[i].vu, tiers[i].vu);
+        EXPECT_EQ(rows[i].team, static_cast<int>(tiers[i].team));
+        EXPECT_EQ(rows[i].aircraft_count, tiers[i].aircraft_count);
+        EXPECT_EQ(rows[i].live, tiers[i].live);
+    }
+
+    // The team filter gates the SAME rows the engine's own view would.
+    if (!tiers.empty()) {
+        const auto team = static_cast<int>(tiers[0].team);
+        const auto filtered =
+            rig.host->query({"flights", team, 0});
+        ASSERT_TRUE(filtered.ok);
+        const auto frows = probe_flight_rows(filtered.data_json);
+        const auto expected = std::count_if(
+            tiers.begin(), tiers.end(),
+            [&](const auto& t) {
+                return static_cast<int>(t.team) == team;
+            });
+        EXPECT_EQ(frows.size(), static_cast<std::size_t>(expected));
+    }
+}
+
+TEST(CampaignHostParity, TaskingRowsCarryRouteAndRole) {
+    WarRig rig = WarRig::make(/*atm=*/true, /*armed=*/false);
+    ASSERT_NE(rig.host, nullptr);
+    rig.host->step(60 * 8);
+
+    const auto res = rig.host->query({"tasking", -1, 0});
+    ASSERT_TRUE(res.ok) << res.detail;
+    const auto& intents = rig.host->engine().intents();
+
+    // Row count parity (one row object per intent — the payload is a
+    // bare array, so every '{' is one row).
+    const int n = static_cast<int>(std::count(res.data_json.begin(),
+                                              res.data_json.end(), '{'));
+    EXPECT_EQ(n, static_cast<int>(intents.size()));
+
+    // The additive tail carries the C3 route leg count + the package
+    // role of the FIRST intent, byte-exact against the engine.
+    if (!intents.empty()) {
+        const std::string expect_wps =
+            "\"route_waypoints\":" +
+            std::to_string(intents[0].route.size());
+        EXPECT_NE(res.data_json.find(expect_wps), std::string::npos)
+            << res.data_json;
+        const std::string expect_role =
+            "\"flight_role\":" +
+            std::to_string(static_cast<int>(intents[0].flight_role));
+        EXPECT_NE(res.data_json.find(expect_role), std::string::npos)
+            << res.data_json;
+    }
+}
+
+TEST(CampaignHostParity, TimeAndStatsEchoTheEngine) {
+    WarRig rig = WarRig::make(/*atm=*/true, /*armed=*/false);
+    ASSERT_NE(rig.host, nullptr);
+    rig.host->step(60 * 8);
+
+    const auto t = rig.host->query({"time", -1, 0});
+    ASSERT_TRUE(t.ok);
+    EXPECT_NE(t.data_json.find(
+                  "\"campaign_time_s\":" +
+                  std::to_string(rig.host->engine().campaign_time())),
+              std::string::npos);
+    EXPECT_NE(t.data_json.find("\"paused\":" +
+                               std::string(rig.host->engine().paused()
+                                               ? "1"
+                                               : "0")),
+              std::string::npos);
+
+    const auto s = rig.host->query({"stats", -1, 0});
+    ASSERT_TRUE(s.ok);
+    const auto& st = rig.host->engine().stats();
+    EXPECT_NE(s.data_json.find("\"cycles\":" + std::to_string(st.cycles)),
+              std::string::npos);
+    EXPECT_NE(s.data_json.find("\"intents\":" + std::to_string(st.intents)),
+              std::string::npos);
+    EXPECT_NE(s.data_json.find("\"live_aircraft\":" +
+                               std::to_string(st.live_aircraft)),
+              std::string::npos);
+}
+
+TEST(CampaignHostParity, ThreatGridMatchesTheMap) {
+    WarRig rig = WarRig::make(/*atm=*/true, /*armed=*/false);
+    ASSERT_NE(rig.host, nullptr);
+    rig.host->step(60 * 8);
+
+    const auto res = rig.host->query({"threat", -1, 0});
+    ASSERT_TRUE(res.ok) << res.detail;
+    const auto t = probe_threat(res.data_json);
+    const auto& map = rig.host->engine().route_builder().threat_map();
+    EXPECT_EQ(t.viewer_team,
+              static_cast<int>(rig.host->engine().threat_viewer_team()));
+    EXPECT_EQ(t.cells_x, map.cells_x());
+    EXPECT_EQ(t.cells_y, map.cells_y());
+    ASSERT_EQ(t.low.size(), t.high.size());
+    ASSERT_EQ(t.low.size(),
+              static_cast<std::size_t>(t.cells_x) *
+                  static_cast<std::size_t>(t.cells_y));
+    // Sample cells: the wire carries the SAME densities the engine's
+    // map answers, band by band.
+    for (int cy = 0; cy < t.cells_y; cy += 7) {
+        for (int cx = 0; cx < t.cells_x; cx += 7) {
+            const auto i = static_cast<std::size_t>(cy) * t.cells_x + cx;
+            EXPECT_EQ(t.low[i], map.low_band_density(cx, cy, t.viewer_team));
+            EXPECT_EQ(t.high[i],
+                      map.high_band_density(cx, cy, t.viewer_team));
+        }
+    }
 }

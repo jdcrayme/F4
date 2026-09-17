@@ -261,12 +261,18 @@ void ViewerApp::run() {
         // worker the whole pace window (multiple batches per frame at
         // high speed presets) instead of one.
         {
-            std::unique_lock<f4::simulation::FairMutex> session_frame_lock;
+            std::unique_lock<f4::viewer::FairMutex> session_frame_lock;
             if (impl_->session_runner) {
                 session_frame_lock =
-                    std::unique_lock<f4::simulation::FairMutex>(
+                    std::unique_lock<f4::viewer::FairMutex>(
                         impl_->session_runner->mutex());
             }
+
+            // CAMP-HOST-3: refresh the contract-plane snapshot — once
+            // per advance (the runner's step serial gates it), never
+            // per draw. Every window/table below reads the cached
+            // structs; the queries ran under THIS lock (session-safe).
+            impl_->refresh_session_snapshot();
 
             // Dispatch input handling INSIDE the frame scope — the
             // canvas click path hit-tests the session's live aircraft
@@ -285,8 +291,8 @@ void ViewerApp::run() {
             // frame lock here, which is exactly what it expects.
             if (IsKeyPressed(KEY_SPACE) &&
                 !ImGui::GetIO().WantCaptureKeyboard &&
-                impl_->session) {
-                set_session_paused(!impl_->session->paused());
+                impl_->session_runner) {
+                set_session_paused(!impl_->session_runner->paused());
             }
 
             // V-CAMP speed presets: 1-4 pick a preset, +/- step through
@@ -385,11 +391,18 @@ void ViewerApp::run() {
                         const double radius_ft =
                             std::clamp(0.25 * std::max(vis_w_grid, vis_h_grid),
                                        2.5, 25.0) * 1024.0;
-                        impl_->session->set_view_bubble(
-                            radius_ft,
-                            f4::geo::WorldPosition(
-                                anchor_gx * 1024.0,
-                                anchor_gy * 1024.0, 0.0));
+                        // CAMP-HOST-3: the camera bubble is the `focus`
+                        // COMMAND now (the FID machinery wearing its
+                        // contract hat — plan §4). Applied immediately;
+                        // the ack's detail says so.
+                        f4::campaign::api::CommandIntent focus;
+                        focus.kind =
+                            f4::campaign::api::CommandIntent::Kind::Focus;
+                        focus.x = anchor_gx * 1024.0;   // sim frame, ENU ft
+                        focus.y = anchor_gy * 1024.0;
+                        focus.z = 0.0;
+                        focus.radius_ft = radius_ft;
+                        (void)impl_->session->submit(focus);
                         impl_->last_bubble_gx = anchor_gx;
                         impl_->last_bubble_gy = anchor_gy;
                         impl_->last_bubble_zoom = impl_->cam_zoom;
@@ -400,7 +413,10 @@ void ViewerApp::run() {
                     // immediately. The still-camera guard
                     // (last_bubble_zoom < 0) keeps this a one-shot
                     // per zoom-out, not a per-frame churn.
-                    impl_->session->clear_view_bubble();
+                    f4::campaign::api::CommandIntent clear;
+                    clear.kind =
+                        f4::campaign::api::CommandIntent::Kind::ClearFocus;
+                    impl_->session->submit(clear);
                     impl_->last_bubble_zoom = -1.0f;
                     impl_->last_bubble_gx = -1.0e9f;
                     impl_->last_bubble_gy = -1.0e9f;

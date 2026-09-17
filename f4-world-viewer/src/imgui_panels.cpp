@@ -227,7 +227,7 @@ void ViewerApp::draw_imgui() {
             } else {
                 const bool menu_paused = impl_->session_runner
                     ? impl_->session_runner->paused()
-                    : impl_->session->paused();
+                    : true;  // dead branch: a session always adopts with its runner
                 if (ImGui::MenuItem(menu_paused ? "Play (Space)"
                                                 : "Pause (Space)")) {
                     // The pause contract lives in set_session_paused()

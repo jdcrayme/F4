@@ -5,6 +5,34 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## CAMP-HOST-3 — the viewer becomes a client
+
+- **CAMP-HOST-3** — the world viewer's campaign session refactored onto the
+  f4-campaign-api contract (Docs/CAMP_HOST_PLAN.md §8): every Campaign-window
+  read is a QUERY (time/stats/flights/tasking/books/threat via a per-advance
+  snapshot gated on the runner's step serial — "once per advance, never per
+  draw"), every act is a typed COMMAND (camera bubble → `focus`/`clear_focus`,
+  the flights table's D/R → `select_deagg`/`select_reagg` with refusals
+  surfaced as data, Write Back → the runtime-safe `save()`). The runner left
+  the engine (pacing is host-side composition, plan §2.2): `CampaignClientRunner`
+  drives `step(ticks)` with the FIFO FairMutex discipline relocated and the
+  wall→tick accumulator the engine's advance() used to own — ceiling-clamped,
+  fixing the unbounded budget-doubling overflow the real-session advance cost
+  always masked. The `threat` query lands (v1.1-additive: viewer_team,
+  cell_grid echo, both density bands — 171×171 on the kunsan war) plus the
+  additive `route_waypoints`/`flight_role` tail on tasking rows. The TWO
+  PLANES rule is now explicit in the code: contract = campaign state; the
+  live entity graph stays on the EntityWorld through a named render-plane
+  seam (a remote roster gets a `vehicles` query in its own tranche). Gate:
+  viewer parity — **981 deleted / 2327 added** (the engine sheds 825 lines:
+  campaign_session_runner + its test, relocated and rewritten over the
+  contract); 23 new ctest cases — the runner pinned on a MOCK session (no
+  engine in the link), the query walks pinned on golden DTO JSON
+  (additive-tolerant), the threat dispatch, ThreatView goldens, and four
+  engine-backed HOST↔engine parity cases on the kunsan rig; full ctest green
+  (2781 passed; the 3 pre-existing upstream data-drift pins untouched); the
+  golden identity intact.
+
 ## CAMP-HOST-2 — the event stream + journal
 
 - **CAMP-HOST-2** — the engine's typed event stream lands (Docs/CAMP_HOST_PLAN.md

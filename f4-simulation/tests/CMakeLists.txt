@@ -79,17 +79,11 @@ f4_simulation_add_test(test_combat_transcript      test_combat_transcript.cpp)
 f4_simulation_add_test(test_register_aircraft      test_register_aircraft.cpp)
 f4_simulation_add_test(test_campaign_session       test_campaign_session.cpp)
 
-# V-THREAD + V-3DLIVE (the campaign's own thread + the camera bubble):
-# the runner test drives a real session from the worker thread and pins
-# the view-bubble deaggregation contract (paused session, camera-driven).
-f4_simulation_add_test(test_campaign_session_runner test_campaign_session_runner.cpp)
-target_compile_definitions(test_campaign_session_runner PRIVATE
-    F4_SIMULATION_TEST_FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures"
-    F4_SOURCE_FIXTURES_DIR="${CMAKE_SOURCE_DIR}/f4-world-convert/tests/fixtures"
-    F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}"
-    F4_MISSION_PROFILES_JSON="${F4_MISSION_PROFILES_JSON}"
-)
-add_dependencies(test_campaign_session_runner mission_profiles_fixture)
+# NOTE (CAMP-HOST-3): the V-THREAD runner left the engine — pacing is a
+# HOST concern (plan §2.2), and the runner is host-side composition. It
+# lives in f4-world-viewer now (campaign_client_runner), over the
+# ICampaignSession contract, with its tests beside it. The engine no
+# longer ships a thread wrapper.
 
 # REGRESSION (Start Session access violation): the Simulation owns the
 # ClassTable the BubbleManager borrows for its lifetime — the old code

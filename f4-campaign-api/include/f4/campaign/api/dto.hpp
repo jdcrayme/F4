@@ -232,6 +232,11 @@ inline void encode(f4::json::Writer& w, const std::vector<FlightView>& flights) 
 //
 // The `tasking` query: the generated missions, oldest last (the engine's
 // intents() order — the Campaign window's table).
+//
+// CAMP-HOST-3 (additive, at the END per the header rule): route_waypoints
+// — the intent's C3 route leg count (the window's "wps" column). Saved-
+// flight intents (emit_flight_intents) carry 0 — their routes live in
+// the save's own waypoint list, not the generation plan.
 
 struct IntentView {
     std::int64_t issued_time{0};
@@ -247,6 +252,8 @@ struct IntentView {
     std::uint32_t flight_id{0};
     std::uint32_t target_objective_id{0};
     bool synthetic{false};
+    int route_waypoints{0};
+    std::uint8_t flight_role{0};
 };
 
 inline void encode_intent(f4::json::Writer& w, const IntentView& m) {
@@ -276,6 +283,10 @@ inline void encode_intent(f4::json::Writer& w, const IntentView& m) {
     w.number(static_cast<std::uint64_t>(m.target_objective_id));
     w.raw(",\"synthetic\":");
     w.raw(m.synthetic ? "1" : "0");
+    w.raw(",\"route_waypoints\":");
+    w.number(m.route_waypoints);
+    w.raw(",\"flight_role\":");
+    w.number(m.flight_role);
     w.put('}');
 }
 
@@ -382,6 +393,51 @@ inline void encode(f4::json::Writer& w, const std::vector<ObjectiveView>& object
 
 inline void encode(f4::json::Writer& w, const ObjectiveView& o) {
     encode_objective(w, o);
+}
+
+// --- threat (the C3 SAM-ring picture, CAMP-HOST-3) ------------------------
+//
+// The `threat` query (plan §3.2 named it v1.1-additive; it lands with the
+// viewer's HOST-3 move): the route-builder's threat map viewed from ONE
+// team — the half of each cell's air-defense density that threatens
+// `viewer_team`. Cell (cx,cy) covers the grid square
+// [cx*cell_grid,(cx+1)*cell_grid) × same for y (grid = 1024 ft — the
+// map's own kThreatMapRatio is ECHOED as cell_grid so a client never
+// hardcodes the constant).
+//
+// Bands stay SEPARATE on the wire (low = low-alt threats, high = high-
+// alt) even though today's overlay paints their sum — splitting them is
+// a display decision, merging them here would be a lossy one.
+
+struct ThreatView {
+    std::uint8_t viewer_team{0};
+    int cell_grid{0};
+    int cells_x{0};
+    int cells_y{0};
+    std::vector<int> low;   ///< cells_y * cells_x densities, row-major
+    std::vector<int> high;  ///< same layout, high-alt band
+};
+
+inline void encode(f4::json::Writer& w, const ThreatView& t) {
+    w.raw("{\"viewer_team\":");
+    w.number(t.viewer_team);
+    w.raw(",\"cell_grid\":");
+    w.number(t.cell_grid);
+    w.raw(",\"cells_x\":");
+    w.number(t.cells_x);
+    w.raw(",\"cells_y\":");
+    w.number(t.cells_y);
+    w.raw(",\"low\":[");
+    for (std::size_t i = 0; i < t.low.size(); ++i) {
+        if (i != 0) w.put(',');
+        w.number(t.low[i]);
+    }
+    w.raw("],\"high\":[");
+    for (std::size_t i = 0; i < t.high.size(); ++i) {
+        if (i != 0) w.put(',');
+        w.number(t.high[i]);
+    }
+    w.raw("]}");
 }
 
 } // namespace f4::campaign::api

@@ -14,7 +14,7 @@
 #include <f4/renderer/entity_render.hpp>  // EntityRenderResources, make_entity_render_resources
 #include <f4/ai/brain_component.hpp>      // V-CAMP: MissionPlan routes
 #include <f4/flight/flight_model_component.hpp>  // V-CAMP: airborne state
-#include <f4/campaign/threat_map.hpp>     // V-CAMP: kThreatMapRatio overlay
+#include <f4/campaign/api/session.hpp>     // CAMP-HOST-3: the contract plane
 
 #include <imgui.h>
 
@@ -99,23 +99,23 @@ void ViewerApp::handle_input() {
 
             // FID: aggregate flights — pickable between live aircraft
             // and parked (the flights table's own selection convention:
-            // the flight's session-world entity via unit_id_map, so the
-            // flights-table ring, the inspector pan and this pick all
-            // agree on one selection).
-            if (impl_->session && impl_->session->tiered()) {
+            // the flight's session-world entity via the render-plane
+            // id map, so the flights-table ring, the inspector pan and
+            // this pick all agree on one selection). CAMP-HOST-3: the
+            // candidates come from the SNAPSHOT's flights query rows.
+            if (impl_->session && impl_->campaign_tiered) {
                 const float atol = 10.0f / impl_->cam_zoom;
                 f4::entities::EntityId agg_best;
                 float agg_d2 = atol * atol;
-                for (const auto& t : impl_->session->flight_tiers()) {
+                for (const auto& t : impl_->session_snap.flights) {
                     if (t.live || t.destroyed) continue;
                     const float dx = static_cast<float>(t.x_grid) - gx;
                     const float dy = static_cast<float>(t.y_grid) - gy;
                     const float d2 = dx * dx + dy * dy;
                     if (d2 >= agg_d2) continue;
-                    const auto it =
-                        impl_->session->unit_id_map().find(t.vu);
-                    if (it == impl_->session->unit_id_map().end() ||
-                        !it->second.valid()) {
+                    const auto& vu_map = impl_->unit_id_map();
+                    const auto it = vu_map.find(t.vu);
+                    if (it == vu_map.end() || !it->second.valid()) {
                         continue;
                     }
                     agg_d2 = d2;
@@ -574,18 +574,18 @@ void ViewerApp::draw_canvas() {
     }
 
     // --- V-CAMP: threat-map overlay (the C3 evidence, painted) -----------
-    // The session's route-builder threat map: every cell carrying enemy
-    // air-defense density (the half that threatens the VIEWER team)
-    // shades translucent red. This is what generated routes bend
-    // around — the SAM-ring picture behind the route lines.
-    if (impl_->session && impl_->show_threat_overlay) {
-        const auto& map = impl_->session->route_builder().threat_map();
-        const auto viewer = impl_->session->threat_viewer_team();
-        const float cell = static_cast<float>(f4::campaign::kThreatMapRatio);
-        for (int cy = 0; cy < map.cells_y(); ++cy) {
-            for (int cx = 0; cx < map.cells_x(); ++cx) {
-                const int d = map.high_band_density(cx, cy, viewer) +
-                              map.low_band_density(cx, cy, viewer);
+    // The THREAT QUERY's grid (CAMP-HOST-3): every cell carrying enemy
+    // air-defense density (the half that threatens the VIEWER team —
+    // the DTO carries which team it was built for) shades translucent
+    // red. This is what generated routes bend around — the SAM-ring
+    // picture behind the route lines.
+    if (impl_->session && impl_->show_threat_overlay &&
+        impl_->session_snap.threat.ok) {
+        const auto& th = impl_->session_snap.threat;
+        const float cell = static_cast<float>(th.cell_grid);
+        for (int cy = 0; cy < th.cells_y; ++cy) {
+            for (int cx = 0; cx < th.cells_x; ++cx) {
+                const int d = th.density(cx, cy);
                 if (d <= 0) continue;
                 // Density 1..6 → alpha 24..96 (subtle: it is a
                 // background layer, not the main picture).
@@ -771,7 +771,7 @@ void ViewerApp::draw_canvas() {
     //   * LOST (folded all-dead) draws a small dim gray cross.
     // The selection ring matches the flights table's selection (the
     // flight's session-world entity).
-    if (impl_->session && impl_->session->tiered() &&
+    if (impl_->session && impl_->campaign_tiered &&
         impl_->show_live_layer) {
         const float s = std::clamp(6.0f + impl_->cam_zoom * 1.5f, 9.0f, 24.0f);
         const float cull_margin = s + 8.0f;
@@ -785,14 +785,14 @@ void ViewerApp::draw_canvas() {
         if (impl_->sel_kind == Impl::SelectionKind::Unit) {
             // Reverse-lookup the selected entity's VU once (the tier
             // snapshot is keyed by VU; the selection holds the entity).
-            for (const auto& [vu, eid] : impl_->session->unit_id_map()) {
+            for (const auto& [vu, eid] : impl_->unit_id_map()) {
                 if (eid == impl_->sel_entity) {
                     sel_vu = vu;
                     break;
                 }
             }
         }
-        for (const auto& t : impl_->session->flight_tiers()) {
+        for (const auto& t : impl_->session_snap.flights) {
             if (t.live) continue;  // materialized: the live pass draws it
             const Vector2 p = impl_->world_to_screen(
                 static_cast<float>(t.x_grid),

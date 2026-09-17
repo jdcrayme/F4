@@ -2,10 +2,12 @@
 //
 // The "Campaign Session" window — the V-CAMP interactive surface.
 //
-// This is the UI half of the live campaign session (the headless half
-// is f4-simulation's CampaignSession): time controls, the war-status
-// block, and the generated-missions table. What it shows, top to
-// bottom:
+// This is the UI half of the live campaign session. CAMP-HOST-3: the
+// headless half is the f4-campaign-api CONTRACT — every read here is a
+// QUERY (the per-advance snapshot in Impl), every act a typed COMMAND
+// (focus/select_deagg/select_reagg/set_paused), and the engine session
+// itself is only reachable through the render-plane seam. What it
+// shows, top to bottom:
 //
 //   * When NO session runs: the start row (saved-flight spawn filter:
 //     team combo + max-flights) + Start Session + the last error, if
@@ -31,19 +33,22 @@
 //         routes are SYNTHETIC (generation-to-spawn); clicking selects
 //         the flight's live entity when it materialized, else the
 //         target objective.
-//       - Write Result JSON (the C1 ledger artifact, byte-stable) and
-//         Write Back (apply_to the session's WorldState — in-memory).
+//       - Write Result JSON (the C1 ledger artifact, byte-stable, via
+//         the books query) and Write Back (the contract's runtime-safe
+//         save: ledger write-back + the WorldState JSON, next to the
+//         world the session loaded).
 //
 // The window advances nothing itself — the campaign RUNNER's worker
-// thread drains the session (V-THREAD; run()'s frame scope takes the
-// runner's mutex around input + draw), so the canvas, the ATO window,
-// and this window all see the same tick.
+// thread drains the session (V-THREAD on the contract; run()'s frame
+// scope takes the runner's mutex around input + draw), so the canvas,
+// the ATO window, and this window all see the same tick.
 
 #include "viewer_state.hpp"
 #include <f4/viewer/enum_text.hpp>
 #include <f4/viewer/pipeline_io.hpp>
 
-#include <f4/campaign/mission_type.hpp>
+#include <f4/campaign/mission_type.hpp>   // display vocabulary (row bytes → names)
+#include <f4/campaign/api/commands.hpp>   // the typed command surface
 
 #include <imgui.h>
 
@@ -200,7 +205,7 @@ void ViewerApp::start_campaign_session() {
     std::packaged_task<Impl::SessionStartResult()> task(
         [opts = std::move(opts)]() mutable -> Impl::SessionStartResult {
             Impl::SessionStartResult r;
-            r.session = f4::simulation::CampaignSession::create(
+            r.session = f4::simulation::EngineSessionHost::create(
                 opts, &r.error);
             return r;
         });
@@ -244,6 +249,15 @@ bool ViewerApp::adopt_session_start() {
         // shipped invisible precisely because no smoke ever ran the
         // clock).
         impl_->session->set_paused(!impl_->session_auto_play);
+        // CAMP-HOST-3: capture the save's EPOCH from the time query —
+        // the session is paused at zero ticks here, so campaign_time_s
+        // IS the absolute base (the missions table's TOT adds onto it).
+        // Also reset the snapshot cache (a fresh war = fresh numbers).
+        impl_->session_epoch_s =
+            fetch_time(*impl_->session).campaign_time_s;
+        impl_->session_snap = SessionSnapshot{};
+        impl_->session_snap_serial = 0;
+        impl_->session_snap_valid = false;
         impl_->sel_kind = Impl::SelectionKind::None;
         impl_->sel_entity = f4::entities::EntityId{};
         // V-THREAD: launch the campaign runner — the worker thread that
@@ -254,8 +268,9 @@ bool ViewerApp::adopt_session_start() {
         const int idx = std::clamp(impl_->campaign_speed_index, 0,
                                    kSessionSpeedCount - 1);
         impl_->session_runner =
-            std::make_unique<f4::simulation::CampaignSessionRunner>(
-                *impl_->session, kSessionSpeedTable[idx],
+            std::make_unique<f4::viewer::CampaignClientRunner>(
+                *impl_->session, impl_->session->options().sim_dt,
+                kSessionSpeedTable[idx],
                 /*paused=*/!impl_->session_auto_play);
         impl_->session_runner->start();
         // V-3DLIVE: reset the camera-bubble tracking (a fresh session
@@ -302,6 +317,20 @@ void ViewerApp::request_exit() noexcept {
     impl_->exit_requested.store(true);
 }
 
+// CAMP-HOST-3: the contract-plane snapshot refresh (see viewer_state.hpp)
+// — one query round per advance (or after a command invalidates), never
+// per draw. Runs under the frame session lock; the queries are
+// session-safe there.
+void ViewerApp::Impl::refresh_session_snapshot() {
+    if (!session) return;
+    const std::uint64_t serial =
+        session_runner ? session_runner->step_serial() : 0;
+    if (session_snap_valid && serial == session_snap_serial) return;
+    session_snap = fetch_snapshot(*session, show_threat_overlay);
+    session_snap_serial = serial;
+    session_snap_valid = true;
+}
+
 std::string ViewerApp::session_exit_summary() const {
     // V-SMOKE: one line a headless --session --play run can assert on.
     // Safe any time after run() stopped the runner (the worker is
@@ -309,13 +338,16 @@ std::string ViewerApp::session_exit_summary() const {
     // safe for callers holding the runner's lock — but the intended
     // callers (run()'s exit, main() after run()) run after the join.
     if (!impl_->session) return {};
-    const auto& st = impl_->session->stats();
+    // CAMP-HOST-3: the summary reads the QUERIES (the worker is joined;
+    // the session answers them frozen — the contract plane, end to end).
+    const auto st = fetch_stats(*impl_->session);
+    const auto tm = fetch_time(*impl_->session);
     char buf[192];
     std::snprintf(buf, sizeof(buf),
                   "[session] sim %.1fs  campaign %lld  cycles %d  "
                   "missions %d  live %d",
-                  impl_->session->sim().sim_time_s(),
-                  static_cast<long long>(impl_->session->campaign_time()),
+                  tm.sim_time_s,
+                  static_cast<long long>(tm.campaign_time_s),
                   st.cycles, st.intents, st.live_aircraft);
     return buf;
 }
@@ -367,7 +399,15 @@ void ViewerApp::write_result_json() {
                      "campaign_result.json";
     FILE* f = std::fopen(out.string().c_str(), "wb");
     if (f) {
-        const std::string json = impl_->session->ledger_json();
+        // CAMP-HOST-3: the ledger rides the books query — one string
+        // decode returns the EXACT ledger bytes (the identity hashes
+        // the same bytes).
+        const std::string json = fetch_books_ledger(*impl_->session);
+        if (json.empty()) {
+            std::fclose(f);
+            impl_->status_msg = "books query returned no ledger";
+            return;
+        }
         std::fwrite(json.data(), 1, json.size(), f);
         std::fclose(f);
         impl_->status_msg = "Wrote " + out.string();
@@ -515,7 +555,7 @@ void ViewerApp::draw_campaign_session_view() {
     }
 
     // --- Session running: time controls ---------------------------------
-    const auto& st = impl_->session->stats();
+    const auto& st = impl_->session_snap.stats;
 
     // V-THREAD: Play/pause + speed presets talk to the RUNNER now (its
     // worker thread owns advance()); the presets scale wall-clock time,
@@ -527,7 +567,7 @@ void ViewerApp::draw_campaign_session_view() {
     // mid-advance while we hold the lock. Speed is atomic — lock-free.
     const bool session_paused = impl_->session_runner
         ? impl_->session_runner->paused()
-        : impl_->session->paused();
+        : true;  // dead branch: a session always adopts with its runner
 
     if (ImGui::Button(session_paused ? "Play (Space)"
                                      : "Pause (Space)",
@@ -565,7 +605,10 @@ void ViewerApp::draw_campaign_session_view() {
         // Turning it off mid-run: return to the ownship bubble NOW
         // (we hold the frame lock — the worker can't be mid-advance).
         if (impl_->session && impl_->last_bubble_zoom >= 0.0f) {
-            impl_->session->clear_view_bubble();
+            f4::campaign::api::CommandIntent clear;
+            clear.kind =
+                f4::campaign::api::CommandIntent::Kind::ClearFocus;
+            impl_->session->submit(clear);
             impl_->last_bubble_zoom = -1.0f;
             impl_->last_bubble_gx = -1.0e9f;
             impl_->last_bubble_gy = -1.0e9f;
@@ -573,11 +616,12 @@ void ViewerApp::draw_campaign_session_view() {
     }
 
     // The clock: absolute campaign time (the save's epoch + the
-    // ladder's clock — ONE timeline with the sim).
+    // ladder's clock — ONE timeline with the sim). Contract plane: the
+    // time query's campaign_time_s.
     {
         char tbuf[24];
-        format_abs_campaign_time(impl_->session->campaign_time(), tbuf,
-                                 sizeof(tbuf));
+        format_abs_campaign_time(impl_->session_snap.time.campaign_time_s,
+                                 tbuf, sizeof(tbuf));
         ImGui::Text("campaign time: %s", tbuf);
     }
     // Speed: requested vs MEASURED. When the CPU can't sustain the
@@ -638,7 +682,7 @@ void ViewerApp::draw_campaign_session_view() {
                 st.sim_time_s);
     // FID: the tier machinery's one-line summary (the aggregate/live
     // split the flights table below renders row by row).
-    if (impl_->session->tiered()) {
+    if (impl_->campaign_tiered) {
         ImGui::Text(
             "flights %d (%d aggregate / %d live / %d home / %d lost)"
             "   deaggs %d   reaggs %d",
@@ -664,16 +708,15 @@ void ViewerApp::draw_campaign_session_view() {
     // (the explicit "select an aircraft and de-aggregate it" act).
     // Clicking a row selects the flight entity and pans the map — the
     // same affordance the missions table's target cell uses.
-    if (impl_->session->tiered()) {
-        const auto tiers = impl_->session->flight_tiers();
-        const auto& teams = impl_->session->world_state().teams;
-        const auto team_name = [&teams](std::uint8_t slot) {
-            for (const auto& t : teams) {
-                if (t.slot == static_cast<std::int8_t>(slot)) {
-                    return t.name.c_str();
-                }
-            }
-            return "?";
+    if (impl_->campaign_tiered) {
+        // CAMP-HOST-3: the table reads the snapshot's FLIGHTS QUERY rows
+        // (the FID tier view over the wire — FlightView is FlightTierView
+        // wearing its contract hat). Team names are the viewer's own
+        // world-JSON capture; the mission name maps the row's mission
+        // byte (display vocabulary, not live state).
+        const auto& tiers = impl_->session_snap.flights;
+        const auto team_name = [this](std::uint8_t slot) {
+            return impl_->team_name_for(slot);
         };
         const auto mmss = [](std::int32_t sec, char* buf, size_t cap) {
             if (sec < 0) {
@@ -724,18 +767,15 @@ void ViewerApp::draw_campaign_session_view() {
                         // Click the VU: select the flight entity + pan.
                         char vbuf[16];
                         std::snprintf(vbuf, sizeof(vbuf), "%u", t.vu);
+                        const auto& vu_map = impl_->unit_id_map();
                         const bool selected =
                             impl_->sel_kind == Impl::SelectionKind::Unit &&
                             impl_->session != nullptr &&
-                            impl_->session->unit_id_map().find(t.vu) !=
-                                impl_->session->unit_id_map().end() &&
-                            impl_->session->unit_id_map().at(t.vu) ==
-                                impl_->sel_entity;
+                            vu_map.find(t.vu) != vu_map.end() &&
+                            vu_map.at(t.vu) == impl_->sel_entity;
                         if (ImGui::Selectable(vbuf, selected)) {
-                            const auto it = impl_->session->unit_id_map()
-                                .find(t.vu);
-                            if (it != impl_->session->unit_id_map().end() &&
-                                it->second.valid()) {
+                            const auto it = vu_map.find(t.vu);
+                            if (it != vu_map.end() && it->second.valid()) {
                                 impl_->sel_kind = Impl::SelectionKind::Unit;
                                 impl_->sel_entity = it->second;
                                 impl_->cam_x = static_cast<float>(t.x_grid);
@@ -792,15 +832,42 @@ void ViewerApp::draw_campaign_session_view() {
                         ImGui::PushID(static_cast<int>(t.vu));
                         if (!t.live && !t.destroyed) {
                             if (ImGui::Button("D")) {
-                                impl_->session->force_deaggregate_flight(
-                                    t.vu);
+                                // CAMP-HOST-3: the explicit act is the
+                                // select_deagg COMMAND (FID-4's force
+                                // wearing its wire hat). Applied
+                                // immediately; a typed refusal (unknown
+                                // vu) surfaces instead of a silent no-op.
+                                f4::campaign::api::CommandIntent cmd;
+                                cmd.kind = f4::campaign::api::CommandIntent::
+                                    Kind::SelectDeagg;
+                                cmd.flight = t.vu;
+                                const auto ack = impl_->session->submit(cmd);
+                                if (ack.status != f4::campaign::api::
+                                                     CommandAck::Status::
+                                                         Applied) {
+                                    impl_->status_msg =
+                                        "deagg refused: " + ack.detail;
+                                }
+                                // force-deagg mutates tier state without
+                                // advancing — refresh on the next frame.
+                                impl_->invalidate_session_snapshot();
                             }
                             ImGui::SameLine();
                         }
                         if (t.live) {
                             if (ImGui::Button("R")) {
-                                impl_->session->force_reaggregate_flight(
-                                    t.vu);
+                                f4::campaign::api::CommandIntent cmd;
+                                cmd.kind = f4::campaign::api::CommandIntent::
+                                    Kind::SelectReagg;
+                                cmd.flight = t.vu;
+                                const auto ack = impl_->session->submit(cmd);
+                                if (ack.status != f4::campaign::api::
+                                                     CommandAck::Status::
+                                                         Applied) {
+                                    impl_->status_msg =
+                                        "reagg refused: " + ack.detail;
+                                }
+                                impl_->invalidate_session_snapshot();
                             }
                         }
                         ImGui::PopID();
@@ -813,7 +880,7 @@ void ViewerApp::draw_campaign_session_view() {
     }
 
     // --- Generated missions table ---------------------------------------
-    const auto& intents = impl_->session->intents();
+    const auto& intents = impl_->session_snap.tasking;
     ImGui::TextUnformatted("Generated missions (ATM packages):");
     if (ImGui::BeginTable("session_missions", 7, table_flags,
                           ImVec2(0.0f, 0.0f))) {
@@ -864,13 +931,12 @@ void ViewerApp::draw_campaign_session_view() {
                                          : in.team_name.c_str());
                 ImGui::TableNextColumn();
                 {
-                    // TOT in ABSOLUTE campaign time (epoch + the
-                    // intent's relative TOT).
+                    // TOT in ABSOLUTE campaign time (the save's epoch —
+                    // captured from the time query at adopt — plus the
+                    // intent's relative TOT; the engine's own formula).
                     char tbuf[24];
                     format_abs_campaign_time(
-                        impl_->session->world_state()
-                                .campaign.current_time +
-                            in.time_on_target,
+                        impl_->session_epoch_s + in.time_on_target,
                         tbuf, sizeof(tbuf));
                     ImGui::TextUnformatted(tbuf);
                 }
@@ -878,10 +944,9 @@ void ViewerApp::draw_campaign_session_view() {
                 {
                     // Click the target: select the objective + pan.
                     if (in.target_objective_id != 0) {
-                        const auto it = impl_->session->objective_id_map()
-                            .find(in.target_objective_id);
-                        if (it != impl_->session->objective_id_map().end() &&
-                            it->second.valid()) {
+                        const auto& obj_map = impl_->objective_id_map();
+                        const auto it = obj_map.find(in.target_objective_id);
+                        if (it != obj_map.end() && it->second.valid()) {
                             auto th = impl_->session_handle(it->second);
                             auto* ot = th.get<
                                 f4::entities::ObjectiveTypeComponent>();
@@ -911,7 +976,7 @@ void ViewerApp::draw_campaign_session_view() {
                     }
                 }
                 ImGui::TableNextColumn();
-                ImGui::Text("%zu", in.route.size());
+                ImGui::Text("%d", in.route_waypoints);
                 ImGui::TableNextColumn();
                 ImGui::Text("%d", in.aircraft_count);
             }
@@ -927,19 +992,16 @@ void ViewerApp::draw_campaign_session_view() {
     }
     ImGui::SameLine();
     if (ImGui::Button("Write Back")) {
-        // apply_to the session's WorldState — pools, squadron
-        // counters, objective fstatus (in-memory; the .cam re-encoder
-        // is a future tranche).
-        const auto wb = impl_->session->apply_writeback();
-        char buf[160];
-        std::snprintf(buf, sizeof(buf),
-                      "write-back: %d team pools, %d squadrons, "
-                      "%d objectives (unmatched: %zu sq / %zu obj)",
-                      wb.team_pools_written, wb.squadrons_written,
-                      wb.objectives_written,
-                      wb.unmatched_squadrons.size(),
-                      wb.unmatched_objectives.size());
-        impl_->status_msg = buf;
+        // CAMP-HOST-3: the contract's runtime-safe save — the ledger
+        // write-back (pools, squadron counters, objective fstatus) plus
+        // the WorldState JSON, written next to the world the session
+        // loaded. The detail line carries the same counts the old
+        // in-memory write-back reported.
+        const auto res = impl_->session->save(
+            impl_->last_world_json_path.string());
+        impl_->status_msg = res.ok
+            ? "write-back + world JSON: " + res.detail
+            : "save failed: " + res.detail;
     }
     ImGui::SameLine();
     if (ImGui::Button("Stop Session")) {

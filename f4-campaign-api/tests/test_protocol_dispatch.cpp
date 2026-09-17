@@ -188,6 +188,19 @@ TEST(ProtocolDispatch, UnknownQueryIsExit21) {
     EXPECT_NE(out.find("\"code\":\"unknown_query\""), std::string::npos);
 }
 
+TEST(ProtocolDispatch, ThreatQueryIsWhitelisted) {
+    // CAMP-HOST-3: `threat` joined the v1 whitelist additively (the DTO
+    // landed at the END of dto.hpp) — it dispatches like any served
+    // query, while routes/weather stay future-tranche names.
+    MockSession s;
+    std::string out;
+    const auto o = handle(s, R"({"v":1,"op":"query","q":"threat"})", out);
+    EXPECT_EQ(o.kind, ProtocolOutcome::Kind::Ok);
+    EXPECT_EQ(s.last_query, "threat");
+    EXPECT_EQ(out,
+              R"({"v":1,"op":"query","q":"threat","status":"ok","data":{"mock":1}})" "\n");
+}
+
 TEST(ProtocolDispatch, EngineSideQueryFailureIsExit24) {
     MockSession s;
     s.fail_next = true; // a whitelisted query the ENGINE side fails

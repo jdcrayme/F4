@@ -39,9 +39,24 @@
 #include <f4/install/installation.hpp>
 #include <f4/terrain/terrain_data.hpp>
 #include <f4/world/world_loader.hpp>
-#include <f4/simulation/campaign_session.hpp>  // V-CAMP: the live loop
-#include <f4/simulation/campaign_session_runner.hpp>  // V-THREAD: the campaign thread
-#include <f4/simulation/bubble_manager.hpp>  // V-3DLIVE: vehicle roster
+//
+// CAMP-HOST-3: the live campaign rides the f4-campaign-api contract
+// (Docs/CAMP_HOST_PLAN.md §2.5 — "the viewer is just a client").
+// campaign_session_host.hpp is the ONE f4/simulation header this file
+// names, and it is TWO narrow seams, both deliberate:
+//   1. the FACTORY — EngineSessionHost::create() is where the host
+//      assembles engine config (exactly what campaignd does with argv);
+//   2. the RENDER-PLANE seam — engine(), the quarantined access the
+//      live entity graph draws through (per-vehicle transforms, models,
+//      selection rings; plan §2.2: pacing/animation are host business).
+//  Every campaign-STATE read/write goes through
+//  f4::campaign::api::ICampaignSession — see campaign_queries.hpp.
+#include <f4/simulation/campaign_session_host.hpp>
+#include <f4/campaign/api/session.hpp>       // the contract plane
+#include <f4/simulation/bubble_manager.hpp>  // RENDER plane: vehicle roster types
+
+#include "campaign_client_runner.hpp"        // V-THREAD (the relocated host runner)
+#include "campaign_queries.hpp"              // the contract-plane fetch layer
 
 // Runtime class table (f4-world-types, JSON) — used by the
 // Ground Layout 3D panel and the 3D entity modes to resolve
@@ -336,37 +351,53 @@ struct ViewerApp::Impl {
     /// Defined in file_ops.cpp (next to the load paths that call it).
     void try_load_theater_tiles();
 
-    // --- V-CAMP: the live campaign session --------------------------------
+    // --- V-CAMP: the live campaign session (on the contract) -------------
     //
     // The Phase-C loop (C1 ledger + C2 one-pool tasking + C3 routed
-    // generation) as ONE object the render loop drives — the full
-    // campaign_qc wiring with the one-world improvement (generated
-    // missions materialize INTO the sim's world and fly; see
-    // f4-simulation's campaign_session.hpp). Created by the Campaign >
+    // generation) as ONE object the render loop drives. CAMP-HOST-3:
+    // the viewer holds the CONTRACT adapter (EngineSessionHost implements
+    // f4::campaign::api::ICampaignSession) — every window/table/overlay
+    // reads queries and submits commands; the engine session itself is
+    // reachable ONLY through the quarantined render-plane helpers below
+    // (the live entity graph's draw path). Created by the Campaign >
     // Start Session menu item (impl_->start_campaign_session in
     // campaign_session_view.cpp); destroyed by Stop (a reset is just a
     // new session).
-    std::unique_ptr<f4::simulation::CampaignSession> session;
+    std::unique_ptr<f4::simulation::EngineSessionHost> session;
 
-    // V-THREAD: the campaign's OWN thread. The old run() called
-    // session->advance(wall_dt * speed) inline in the ImGui frame — a
-    // frame's advance could legally run 240 ticks over hundreds of
-    // aircraft (seconds of work inside one BeginDrawing/EndDrawing:
-    // "the UI becomes unresponsive", the user's report). The runner's
-    // worker advances the session in short mutex-guarded batches
+    // V-THREAD: the campaign's OWN thread — the runner is host-side
+    // composition (CAMP-HOST-3 relocated it OUT of f4-simulation; pacing
+    // is a host concern, plan §2.2). It drives the CONTRACT: the worker
+    // calls ICampaignSession::step() in short mutex-guarded batches
     // (adaptive tick budget, ~6-12 ms per hold); the render loop takes
-    // the SAME mutex for its frame read+draw scope, so every existing
-    // session read (canvas layers, Campaign window, inspector, hit
-    // tests through session_handle) stays consistent WITHOUT touching
-    // each call site — one lock scope in run() instead.
+    // the SAME mutex for its frame read+draw scope, so every session
+    // read stays consistent WITHOUT touching each call site — one lock
+    // scope in run() instead.
     //
     // Declared AFTER `session`: reverse-order destruction stops +
     // joins the worker BEFORE the session dies (the runner borrows it).
     // stop_campaign_session()/run()'s exit path stop it explicitly;
     // ~Impl is the belt-and-braces second line.
-    std::unique_ptr<f4::simulation::CampaignSessionRunner> session_runner;
+    std::unique_ptr<f4::viewer::CampaignClientRunner> session_runner;
 
-    // V-CAMP async start: CampaignSession::create() over a real install
+    // --- CAMP-HOST-3: the contract-plane snapshot ------------------------
+    //
+    // "The numbers refresh once per advance(), never per draw": the
+    // frame scope refreshes this snapshot when the runner's step_serial
+    // moved (or a command invalidated it), and every window/table reads
+    // the cached structs — one query round per advance, not per widget.
+    f4::viewer::SessionSnapshot session_snap;
+    std::uint64_t session_snap_serial = 0;
+    bool session_snap_valid = false;
+    /// The save's epoch (absolute campaign time zero), captured from the
+    /// time query at adopt — the session is paused at zero ticks there,
+    /// so campaign_time_s IS the epoch. The missions table's absolute
+    /// TOT adds its relative TOT onto this.
+    std::int64_t session_epoch_s = 0;
+    /// Team slot → display name, captured from the world JSON the viewer
+    /// itself loads (the same file every session starts from) — the
+    /// flights table's team column without an engine reach.
+    std::vector<std::pair<std::int8_t, std::string>> world_team_names;
     // world is SLOW (world-JSON parse + world population + hundreds of
     // flights + thousands of squadron parked aircraft — tens of seconds
     // on the big saves). Running it synchronously inside the ImGui
@@ -379,7 +410,7 @@ struct ViewerApp::Impl {
     // no other data races: the worker touches nothing of Impl's).
     // run() polls adopt_session_start() every frame.
     struct SessionStartResult {
-        std::unique_ptr<f4::simulation::CampaignSession> session;
+        std::unique_ptr<f4::simulation::EngineSessionHost> session;
         std::string error;
     };
     // atomic: written by the frame thread, polled by the --screenshot
@@ -438,7 +469,7 @@ struct ViewerApp::Impl {
     /// drops nothing if a different session was adopted in between (the
     /// menu's Reset flow requests a stop and immediately starts a new
     /// build — if the create won the race, the fresh session survives).
-    const f4::simulation::CampaignSession* session_stop_target = nullptr;
+    const f4::simulation::EngineSessionHost* session_stop_target = nullptr;
     /// V-SMOKE (--play): the adopted session starts RUNNING instead of
     /// paused. Set by the CLI (--play) BEFORE request_campaign_session;
     /// adopt_session_start honors it for both the runner and the
@@ -481,10 +512,20 @@ struct ViewerApp::Impl {
     /// Create an EntityHandle in the SESSION's world (the live campaign
     /// loop's EntityWorld — a different world from eworld, with its own
     /// id space). Only valid while a session runs.
+    ///
+    /// === RENDER-PLANE SEAM (CAMP-HOST-3) ===
+    /// Everything from here down that touches session->engine() is the
+    /// live entity graph's DRAW path — per-vehicle transforms, rosters,
+    /// selection rings, model orientation. It is quarantined to these
+    /// helpers: window/canvas campaign-STATE code must go through the
+    /// contract (ICampaignSession + the snapshot). A new render need
+    /// joins here, deliberately; a new state need joins
+    /// campaign_queries.hpp instead.
     [[nodiscard]] f4::entities::EntityHandle
     session_handle(f4::entities::EntityId id) const {
         return f4::entities::EntityHandle(id,
-            const_cast<f4::entities::EntityWorld*>(&session->sim().world()));
+            const_cast<f4::entities::EntityWorld*>(
+                &session->engine().sim().world()));
     }
     /// The handle for a UNIT selection: the session's entity when a
     /// session runs and one resolves there, else the static world's.
@@ -506,7 +547,7 @@ struct ViewerApp::Impl {
     [[nodiscard]] const std::vector<f4::entities::EntityId>&
     live_aircraft() const {
         static const std::vector<f4::entities::EntityId> empty;
-        return session ? session->sim().aircraft_entities() : empty;
+        return session ? session->engine().sim().aircraft_entities() : empty;
     }
     /// V-3DLIVE: the session's PARKED squadron aircraft roster (empty
     /// when no session) — the aircraft sitting on the ramps. Drawn
@@ -514,8 +555,9 @@ struct ViewerApp::Impl {
     [[nodiscard]] const std::vector<f4::entities::EntityId>&
     parked_aircraft() const {
         static const std::vector<f4::entities::EntityId> empty;
-        return session ? session->sim().squadron_aircraft_entities()
-                       : empty;
+        return session
+                   ? session->engine().sim().squadron_aircraft_entities()
+                   : empty;
     }
     /// V-3DLIVE: the session's DEAGGREGATED vehicle roster (empty when
     /// no session / nothing deaggregated) — individual tanks, trucks,
@@ -524,10 +566,57 @@ struct ViewerApp::Impl {
     [[nodiscard]] const std::vector<f4::entities::EntityId>&
     deaggregated_vehicles() const {
         static const std::vector<f4::entities::EntityId> empty;
-        return (session && session->sim().bubble_manager())
-                   ? session->sim().bubble_manager()->vehicle_entities()
+        return (session && session->engine().sim().bubble_manager())
+                   ? session->engine().sim().bubble_manager()
+                         ->vehicle_entities()
                    : empty;
     }
+
+    /// RENDER-PLANE SEAM: the contract ids → session-world entities
+    /// bridges (flight vu / objective id → the entity the selection
+    /// ring, the pan and the inspector resolve). Contract-plane code
+    /// keys selections on ids from the queries; only the draw path
+    /// crosses here.
+    [[nodiscard]] const std::unordered_map<std::uint32_t,
+        f4::entities::EntityId>& unit_id_map() const {
+        static const std::unordered_map<std::uint32_t, f4::entities::EntityId>
+            empty;
+        return session ? session->engine().unit_id_map() : empty;
+    }
+    [[nodiscard]] const std::unordered_map<std::uint32_t,
+        f4::entities::EntityId>& objective_id_map() const {
+        static const std::unordered_map<std::uint32_t, f4::entities::EntityId>
+            empty;
+        return session ? session->engine().objective_id_map() : empty;
+    }
+
+    /// RENDER-PLANE SEAM: the aggregate flight's course (compass
+    /// radians) for the 3D live pass's model orientation. nullopt when
+    /// no session / unknown vu — the caller falls back to the entity's
+    /// own transform.
+    [[nodiscard]] std::optional<double>
+    flight_heading_rad(std::uint32_t vu) const {
+        if (!session) return std::nullopt;
+        return session->engine().flight_heading_rad(vu);
+    }
+
+    /// Contract-plane: the display name for a team slot (the viewer's
+    /// own world-JSON capture; "?" when unknown — the old flights-table
+    /// lambda's convention).
+    [[nodiscard]] const char* team_name_for(int slot) const {
+        for (const auto& [s, name] : world_team_names) {
+            if (s == static_cast<std::int8_t>(slot)) return name.c_str();
+        }
+        return "?";
+    }
+
+    /// Contract-plane: refresh the per-advance snapshot (a no-op when
+    /// the step serial has not moved). Defined in
+    /// campaign_session_view.cpp next to the windows that read it.
+    void refresh_session_snapshot();
+    /// Contract-plane: drop the snapshot cache (after a command applied
+    /// immediately — focus/deagg change state without advancing).
+    void invalidate_session_snapshot() { session_snap_valid = false; }
     /// Get the grid X coordinate from a TransformComponent (feet → grid).
     static float grid_x(const f4::entities::TransformComponent* tr) {
         return tr ? static_cast<float>(tr->position.x / 1024.0) : 0.0f;

@@ -13,6 +13,7 @@
 #include <f4/campaign/api/dto.hpp>
 #include <f4/campaign/api/identity.hpp>
 #include <f4/campaign/api/protocol.hpp>
+#include <f4/campaign/threat_map.hpp>  // CAMP-HOST-3: kThreatMapRatio echo
 #include <f4/geo/f4_geo.hpp>
 
 #include <fstream>
@@ -30,7 +31,8 @@ namespace {
 // state the engine exposes TODAY — no stubs, no placeholders.
 [[nodiscard]] bool engine_serves_query(std::string_view name) noexcept {
     return name == "time" || name == "stats" || name == "flights" ||
-           name == "tasking" || name == "books" || name == "objectives";
+           name == "tasking" || name == "books" ||
+           name == "objectives" || name == "threat";
 }
 
 } // namespace
@@ -259,6 +261,11 @@ api::QueryResult EngineSessionHost::query(const api::QuerySpec& spec) {
             v.flight_id = mi.flight_id;
             v.target_objective_id = mi.target_objective_id;
             v.synthetic = mi.synthetic;
+            // CAMP-HOST-3: the C3 route leg count (the window's "wps"
+            // column) + the package role (the pairing the ATM composed)
+            // — additive fields, riding at the END of the row.
+            v.route_waypoints = static_cast<int>(mi.route.size());
+            v.flight_role = mi.flight_role;
             rows.push_back(v);
             if (spec.limit > 0 && rows.size() >= spec.limit) break;
         }
@@ -279,6 +286,37 @@ api::QueryResult EngineSessionHost::query(const api::QuerySpec& spec) {
         res.data_json =
             "{\"ledger_json\":\"" +
             f4::json::escape_string(session_->ledger_json()) + "\"}";
+        return res;
+    }
+
+    if (spec.name == "threat") {
+        // The route-builder's threat map (C3) from the session's viewer
+        // team — the SAM-ring picture behind the route lines, painted by
+        // any UX that asks. The map is a pure function of the world (no
+        // RNG), rebuilt by the route builder per tasking cycle; an
+        // unbuilt map (no cycle yet) reads as an empty grid.
+        api::ThreatView t;
+        t.viewer_team = session_->threat_viewer_team();
+        const auto& map = session_->route_builder().threat_map();
+        t.cell_grid = f4::campaign::kThreatMapRatio;
+        t.cells_x = map.cells_x();
+        t.cells_y = map.cells_y();
+        const std::size_t cells =
+            static_cast<std::size_t>(t.cells_x) *
+            static_cast<std::size_t>(t.cells_y);
+        t.low.reserve(cells);
+        t.high.reserve(cells);
+        for (int cy = 0; cy < t.cells_y; ++cy) {
+            for (int cx = 0; cx < t.cells_x; ++cx) {
+                t.low.push_back(map.low_band_density(cx, cy, t.viewer_team));
+                t.high.push_back(
+                    map.high_band_density(cx, cy, t.viewer_team));
+            }
+        }
+        f4::json::Writer w;
+        api::encode(w, t);
+        res.ok = true;
+        res.data_json = std::move(w).str();
         return res;
     }
 
