@@ -539,3 +539,118 @@ TEST(StrategySession, StrategyOffIsThePreP7SessionShape) {
         }
     }
 }
+
+// ============================================================================
+// CAMP-ATM-1 — the ACTION tables' filings visible as events (the plan
+// §8 gate: any UX sees the war react)
+// ============================================================================
+
+TEST(StrategySession, ActionFilingsRideTheEventStream) {
+    // The kunsan save's own damaged objectives drive the strategy-
+    // armed war: DPRK's damaged objectives file the defense (CAS, the
+    // garrison BARCAP at heavy damage), the belligerents at war with
+    // the owner file the suppression (SEADSTRIKE). The filings ride
+    // the action_filed family, AFTER the tasking_cycle that generated
+    // them, and the ledger's optional actions section carries the same
+    // records. The strategy-off run of the same world publishes none
+    // and stays byte-identical (no actions section at all).
+    if (!std::filesystem::exists(f16_config())) {
+        GTEST_SKIP() << "f16.json fixture not generated";
+    }
+    CampaignSessionOptions o = make_opts(kunsan_strategy_world());
+    o.strategy_layer = true;
+    o.tasking_cycle_sec = 5;
+    o.max_flights = 8;
+
+    std::string err;
+    auto a = f4::simulation::CampaignSession::create(o, &err);
+    ASSERT_NE(a, nullptr) << "create failed: " << err;
+
+    std::vector<f4::campaign::api::CampaignEvent> seen;
+    a->sim().bus().subscribe<f4::campaign::api::CampaignEvent>(
+        [&](const f4::campaign::api::CampaignEvent& e) {
+            seen.push_back(e);
+        });
+
+    a->set_paused(false);
+    for (int frame = 0; frame < 60; ++frame) a->advance(1.0);
+
+    // The war reacted: filings on the stream, every payload complete.
+    std::vector<f4::campaign::api::CampaignEvent> actions;
+    for (const auto& e : seen) {
+        if (e.kind == f4::campaign::api::CampaignEvent::Kind::ActionFiled) {
+            actions.push_back(e);
+        }
+    }
+    ASSERT_GT(actions.size(), 0U);
+    for (const auto& e : actions) {
+        EXPECT_TRUE(e.action_filed.team == 1 || e.action_filed.team == 2 ||
+                    e.action_filed.team == 6)
+            << "filing from a non-belligerent";
+        EXPECT_TRUE(e.action_filed.mission_byte == 20 ||   // CAS
+                    e.action_filed.mission_byte == 1 ||    // BARCAP
+                    e.action_filed.mission_byte == 17)     // SEADSTRIKE
+            << "unexpected ACTION mission byte";
+        EXPECT_EQ(e.action_filed.mission_name,
+                  std::string(f4::campaign::mission_type_name(
+                      e.action_filed.mission_byte)));
+        EXPECT_TRUE(e.action_filed.action_type == 1 ||   // Defend
+                    e.action_filed.action_type == 2)     // Punish
+            << "unexpected ACTION type byte";
+        EXPECT_GT(e.action_filed.damage_pct, 0);
+        EXPECT_NE(e.action_filed.objective_id, 0u);
+        EXPECT_GT(e.action_filed.t, 0);
+    }
+
+    // The stream's order IS the engine's: the cycle fires, then its
+    // filings name themselves (the first action follows the first
+    // tasking_cycle).
+    int first_cycle = -1;
+    int first_action = -1;
+    for (std::size_t i = 0; i < seen.size(); ++i) {
+        if (first_cycle < 0 &&
+            seen[i].kind ==
+                f4::campaign::api::CampaignEvent::Kind::TaskingCycle) {
+            first_cycle = static_cast<int>(i);
+        }
+        if (first_action < 0 &&
+            seen[i].kind ==
+                f4::campaign::api::CampaignEvent::Kind::ActionFiled) {
+            first_action = static_cast<int>(i);
+        }
+    }
+    ASSERT_GE(first_cycle, 0);
+    ASSERT_GE(first_action, 0);
+    EXPECT_GT(first_action, first_cycle);
+
+    // The engine-side counters and the ledger's optional actions
+    // section agree with the stream.
+    const auto* atm = a->campaign().atm_stats();
+    ASSERT_NE(atm, nullptr);
+    EXPECT_EQ(atm->actions_filed, static_cast<int>(actions.size()));
+    EXPECT_NE(a->ledger_json().find("\"actions\": ["), std::string::npos);
+
+    // The same world with the arm off: no filings, no events, and the
+    // ledger document carries no actions section (byte-identical
+    // pre-ATM-1).
+    CampaignSessionOptions off = o;
+    off.strategy_layer = false;
+    auto b = f4::simulation::CampaignSession::create(off, &err);
+    ASSERT_NE(b, nullptr) << err;
+    std::vector<f4::campaign::api::CampaignEvent> seen_off;
+    b->sim().bus().subscribe<f4::campaign::api::CampaignEvent>(
+        [&](const f4::campaign::api::CampaignEvent& e) {
+            seen_off.push_back(e);
+        });
+    b->set_paused(false);
+    for (int frame = 0; frame < 60; ++frame) b->advance(1.0);
+
+    for (const auto& e : seen_off) {
+        EXPECT_NE(e.kind,
+                  f4::campaign::api::CampaignEvent::Kind::ActionFiled);
+    }
+    const auto* atm_off = b->campaign().atm_stats();
+    ASSERT_NE(atm_off, nullptr);
+    EXPECT_EQ(atm_off->actions_filed, 0);
+    EXPECT_EQ(b->ledger_json().find("\"actions\""), std::string::npos);
+}

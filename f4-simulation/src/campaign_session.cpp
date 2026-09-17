@@ -591,8 +591,11 @@ CampaignSession::create(const CampaignSessionOptions& opts,
     route_cfg.min_avoid_threat = 25;
     // P7: the loiter racetracks ride the strategy arm (one source of
     // truth — the routes only change shape for strategy-armed
-    // sessions).
+    // sessions). CAMP-ATM-1: the sweep lines and the tanker refuel
+    // waypoints ride the same arm.
     route_cfg.loiter_racetracks = opts.strategy_layer;
+    route_cfg.sweep_lines = opts.strategy_layer;
+    route_cfg.tanker_refuel_waypoints = opts.strategy_layer;
     session->route_builder_ = std::make_unique<f4::campaign::RouteBuilder>(
         static_cast<const f4::world::IObjectiveSource&>(
             session->adapters_->objectives),
@@ -699,6 +702,10 @@ bool CampaignSession::advance(double real_seconds, int max_steps_override) {
             // reinforcement deliveries the tick just booked, published
             // immediately so the stream's order is the engine's order.
             emit_cadence_events_();
+            // CAMP-ATM-1: the ACTION tables' filings the tick just
+            // booked (the war's reactions, right after the cycle that
+            // generated them).
+            emit_action_filed_events_();
             // G1: the ground war rides the same whole-second cadence
             // (its own accumulator gates on the update granularity).
             if (ground_ != nullptr) {
@@ -1099,6 +1106,32 @@ void CampaignSession::emit_capture_events_() {
         sim_->bus().publish(e);
     }
     last_capture_record_ = clog.size();
+}
+
+void CampaignSession::emit_action_filed_events_() {
+    namespace api = f4::campaign::api;
+    // CAMP-ATM-1 — the ACTION tables' filing log tail: one event per
+    // filing, in the ledger's arrival order (the order the ATM scanned
+    // the objectives). The tasking_cycle event has already published
+    // for this whole-second block, so the stream's order stays the
+    // engine's: the cycle fired, THEN its filings name themselves.
+    const auto& alog = ledger_->action_filing_log();
+    for (auto i = last_action_record_; i < alog.size(); ++i) {
+        api::CampaignEvent e;
+        e.kind = api::CampaignEvent::Kind::ActionFiled;
+        e.action_filed.t =
+            static_cast<std::int64_t>(std::llround(alog[i].t_s));
+        e.action_filed.team = alog[i].team;
+        e.action_filed.mission_byte = alog[i].mission;
+        e.action_filed.mission_name =
+            std::string(f4::campaign::mission_type_name(alog[i].mission));
+        e.action_filed.action_type = alog[i].action_type;
+        e.action_filed.context = alog[i].context;
+        e.action_filed.objective_id = alog[i].objective;
+        e.action_filed.damage_pct = alog[i].damage_pct;
+        sim_->bus().publish(e);
+    }
+    last_action_record_ = alog.size();
 }
 
 void CampaignSession::emit_damage_events_() {

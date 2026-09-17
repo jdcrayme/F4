@@ -670,6 +670,8 @@ private:
     // session emits nothing, and no client changes the stream.
     void emit_mission_filed_(const f4::campaign::MissionIntent& intent);
     void emit_cadence_events_();   ///< tasking_cycle + reinforcements
+    void emit_action_filed_events_();  ///< CAMP-ATM-1 — the ACTION tables'
+                                       ///< filings (the log's tail)
     void emit_capture_events_();   ///< the ground war's objective flips
     void emit_damage_events_();    ///< the damage sync's changed objectives
 
@@ -715,6 +717,8 @@ private:
     /// ever append; the tail past the cursor is THIS cadence's news).
     std::size_t last_reinforcement_record_ = 0;
     std::size_t last_capture_record_ = 0;
+    /// CAMP-ATM-1 — the ACTION-filing log's read cursor.
+    std::size_t last_action_record_ = 0;
     /// The tasking-cycle counter's last seen value (the diff IS the
     /// fires of this whole-second block — the clock chunks seconds).
     std::int64_t last_cycles_fired_ = 0;

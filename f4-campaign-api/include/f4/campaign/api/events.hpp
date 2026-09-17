@@ -103,6 +103,25 @@ struct TaskingCycleEvent {
     int intents{0};
 };
 
+// An ACTION-table filing (CAMP-ATM-1): the strategy layer's
+// objective-damage-driven contextual request — the war REACTING. Own
+// damage files the defense (CAS, plus a garrison BARCAP when the
+// damage is heavy); enemy damage files the suppression (SEADSTRIKE).
+// action_type: 1 = Defend (own objective), 2 = Punish (enemy
+// objective), 3 = Sweep (the ladder's sweep lines). context: the
+// driving objective's own type byte. damage_pct: the destroyed
+// features that drove the filing (0..100).
+struct ActionFiledEvent {
+    std::int64_t t{0};
+    std::uint8_t team{0};
+    std::uint8_t mission_byte{0};
+    std::string mission_name;
+    std::uint8_t action_type{0};
+    std::uint8_t context{0};
+    std::uint32_t objective_id{0};
+    int damage_pct{0};
+};
+
 // --- encoders (byte-stable; the family name is the discriminator) -------
 
 inline void encode(f4::json::Writer& w, const MissionFiledEvent& e) {
@@ -203,6 +222,26 @@ inline void encode(f4::json::Writer& w, const TaskingCycleEvent& e) {
     w.put('}');
 }
 
+inline void encode(f4::json::Writer& w, const ActionFiledEvent& e) {
+    w.raw("{\"ev\":\"action_filed\",\"t\":");
+    w.number(static_cast<long long>(e.t));
+    w.raw(",\"team\":");
+    w.number(e.team);
+    w.raw(",\"mission_byte\":");
+    w.number(e.mission_byte);
+    w.raw(",\"mission_name\":\"");
+    w.put(f4::json::escape_string(e.mission_name));
+    w.raw("\",\"action_type\":");
+    w.number(e.action_type);
+    w.raw(",\"context\":");
+    w.number(e.context);
+    w.raw(",\"objective_id\":");
+    w.number(static_cast<std::uint64_t>(e.objective_id));
+    w.raw(",\"damage_pct\":");
+    w.number(e.damage_pct);
+    w.put('}');
+}
+
 // --- the tagged envelope (the ONE bus message type) ---------------------
 //
 // HOST-2 publishes ONE message type onto the session's bus — the bus is
@@ -220,6 +259,7 @@ struct CampaignEvent {
         WeatherChanged,
         RoeChanged,
         TaskingCycle,
+        ActionFiled,
     };
 
     Kind kind{Kind::TaskingCycle};
@@ -232,6 +272,7 @@ struct CampaignEvent {
     WeatherChangedEvent weather_changed{};
     RoeChangedEvent roe_changed{};
     TaskingCycleEvent tasking_cycle{};
+    ActionFiledEvent action_filed{};
 };
 
 // The v1 kind names — the wire's filter vocabulary (the `subscribe`
@@ -247,6 +288,7 @@ event_kind_name(CampaignEvent::Kind k) noexcept {
         case CampaignEvent::Kind::WeatherChanged:        return "weather_changed";
         case CampaignEvent::Kind::RoeChanged:            return "roe_changed";
         case CampaignEvent::Kind::TaskingCycle:          return "tasking_cycle";
+        case CampaignEvent::Kind::ActionFiled:           return "action_filed";
     }
     return "tasking_cycle";
 }
@@ -263,6 +305,7 @@ parse_event_kind(std::string_view name, CampaignEvent::Kind& out) noexcept {
              CampaignEvent::Kind::WeatherChanged,
              CampaignEvent::Kind::RoeChanged,
              CampaignEvent::Kind::TaskingCycle,
+             CampaignEvent::Kind::ActionFiled,
          }) {
         if (name == event_kind_name(k)) {
             out = k;
@@ -282,6 +325,7 @@ inline void encode(f4::json::Writer& w, const CampaignEvent& e) {
         case CampaignEvent::Kind::WeatherChanged:         encode(w, e.weather_changed); break;
         case CampaignEvent::Kind::RoeChanged:             encode(w, e.roe_changed); break;
         case CampaignEvent::Kind::TaskingCycle:           encode(w, e.tasking_cycle); break;
+        case CampaignEvent::Kind::ActionFiled:            encode(w, e.action_filed); break;
     }
 }
 
@@ -296,6 +340,9 @@ inline void encode(f4::json::Writer& w, const CampaignEvent& e) {
 //   kill                    killer OR victim (a war-room sees both)
 //   objective_damage        the owner after the damage
 //   objective_captured      the new owner
+//   action_filed            the filing team (the ACTION reacts FOR
+//                           them — the owner defends, the striker
+//                           punishes)
 //   reinforcement_delivered teamless in v1 (matches any team gate)
 //   weather_changed         teamless (matches any team gate)
 //   roe_changed             the scope's team when scoped to a team;
@@ -331,6 +378,8 @@ listed(const std::vector<int>& teams, int team) noexcept {
     switch (e.kind) {
         case CampaignEvent::Kind::MissionFiled:
             return listed(f.teams, e.mission_filed.team);
+        case CampaignEvent::Kind::ActionFiled:
+            return listed(f.teams, e.action_filed.team);
         case CampaignEvent::Kind::Kill:
             return listed(f.teams, e.kill.killer_team) ||
                    listed(f.teams, e.kill.victim_team);

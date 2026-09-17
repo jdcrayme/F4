@@ -42,6 +42,16 @@ constexpr int kRefAroSb = 5;     // ARO_SB
 constexpr int kRefAroRec = 10;   // ARO_REC
 constexpr int kRefAroOther = 16; // ARO_SUPPORT (no single column — OTHER)
 
+// CAMP-ATM-1 — the ACTION tables' constants (the deterministic subset
+// documented at ActionSystemType; the reference reads its real table
+// from aiinput.dat values our sources cannot see):
+//   the heavy-damage threshold that adds the garrison BARCAP to the
+//   Defend filing, and the priority bonus that puts an ACTION filing
+//   ahead of the routine ladder walk in the tempo budget (the
+//   reference's ACTION filings outrank routine tasking).
+constexpr int kActionHeavyDamagePct = 25;
+constexpr int kActionPriorityBonus = 25;
+
 /// Profile aro name → the reference's UCD Scores index.
 int ref_aro_index(const MissionProfile& profile) {
     const std::string& a = profile.aro;
@@ -309,6 +319,11 @@ void AirTaskingManager::seed_backlog_() {
             // carried verbatim; 0 = weapons free on every record that
             // predates the field).
             req.roe = wreq.roe_check;
+            // CAMP-ATM-1 — the decoded ACTION bytes ride as telemetry
+            // (seeded requests are never booked as THIS run's filings
+            // — the save's own ACTION state is its history, not news).
+            req.action_type = wreq.action_type;
+            req.context = wreq.context;
 
             const CampaignTime rel = wreq.tot - epoch_;
             if (rel < 0) {
@@ -367,6 +382,23 @@ AirTaskingManager::generate_requests(std::uint8_t team, CampaignTime now) {
     // survivors).
     {
         auto& pending = pending_enemy_[team];
+        for (auto& preq : pending) {
+            if (preq.tot < now) preq.tot = now + 1800;
+            out.push_back(std::move(preq));
+        }
+        pending.clear();
+    }
+
+    // CAMP-ATM-1 — the ACTION tables: scan the war's damage (own
+    // objectives → Defend, enemy objectives → Punish) into this team's
+    // pending queue, then drain the queue ahead of the ladder walk —
+    // the war's reactions task before its routine. The scan is a
+    // no-op disarmed (the golden identity never walks the objectives).
+    if (cfg_.strategy && objectives_ != nullptr) {
+        scan_actions_(team, now);
+    }
+    {
+        auto& pending = pending_actions_[team];
         for (auto& preq : pending) {
             if (preq.tot < now) preq.tot = now + 1800;
             out.push_back(std::move(preq));
@@ -497,6 +529,26 @@ AirTaskingManager::generate_requests(std::uint8_t team, CampaignTime now) {
                 (station_cursor_[team] + 1) %
                 static_cast<int>(own_stations.size());
             ++stats_.stations_targeted;
+        }
+
+        // CAMP-ATM-1 — the SWEEP family: the contested-air profile
+        // (LOCATION-targeted TPROF_ATTACK, WP_SWEEP) finally gets a
+        // real target — a ranked enemy objective, its own rotation
+        // cursor (a sweep walks the enemy's territory, decoupled from
+        // the strike rotation) — and the ACTION tag (kActionSweep).
+        // Off (or no enemy objectives): target-less, exactly the
+        // pre-ATM-1 shape (route-less — the C3 documented gap this
+        // tranche closes under the arm).
+        if (cfg_.strategy && !enemy.empty() &&
+            profile_flies_sweep_line(profile)) {
+            const auto idx = static_cast<std::size_t>(
+                                 sweep_cursor_[team]) %
+                             enemy.size();
+            req.target_id = enemy[idx];
+            sweep_cursor_[team] =
+                (sweep_cursor_[team] + 1) %
+                static_cast<int>(enemy.size());
+            req.action_type = kActionSweep;
         }
 
         req.priority = request_priority_(team, profile, req.target_id);
@@ -1302,6 +1354,133 @@ void AirTaskingManager::file_enemy_barcap_(
     req.aircraft = profile.str;
     queue.push_back(req);
     ++stats_.enemy_caps_filed;
+}
+
+// ============================================================================
+// CAMP-ATM-1 — the ACTION tables (scan_actions_ / file_action_ /
+//               objective_damage_pct_)
+// ============================================================================
+
+int AirTaskingManager::objective_damage_pct_(int index) const {
+    // The fstatus bitmap: 2 bits per feature, 0 = intact, 1 = damaged,
+    // 2 = destroyed, 3 = unknown (the reference's no-data nibble —
+    // ignored). The effective feature count: the decoded count, or the
+    // bitmap's own capacity when the save carries none (the kunsan
+    // shape — real features, features_count 0).
+    if (objectives_ == nullptr || !objectives_->has_fstatus(index)) {
+        return 0;
+    }
+    const auto& fs = objectives_->fstatus(index);
+    const int count = std::max<int>(
+        objectives_->features_count(index), static_cast<int>(fs.size()) * 4);
+    if (count <= 0) return 0;
+    int destroyed = 0;
+    bool any_damage = false;
+    for (std::size_t b = 0; b < fs.size(); ++b) {
+        for (int nib = 0; nib < 4; ++nib) {
+            const int field = (fs[b] >> (nib * 2)) & 0x03;
+            if (field == 1) any_damage = true;
+            if (field == 2) {
+                any_damage = true;
+                ++destroyed;
+            }
+        }
+    }
+    if (!any_damage || destroyed == 0) return 0;
+    return (destroyed * 100) / count;
+}
+
+bool AirTaskingManager::file_action_(
+        std::uint8_t team, std::uint8_t mission, std::uint8_t action_type,
+        std::uint8_t context, std::uint32_t objective_vu, int damage_pct,
+        CampaignTime now) {
+    if (objective_vu == 0 || objectives_ == nullptr) return false;
+    if (team >= 8) return false;   // the pending queues are slot-indexed
+    auto& queue = pending_actions_[team];
+    // Dedup: one identical pending filing (the queue is drained each
+    // cycle, so this is the within-scan guard — CAS and BARCAP for the
+    // same objective are different missions and both file).
+    for (const auto& r : queue) {
+        if (r.mission == mission && r.target_id == objective_vu) {
+            return false;
+        }
+    }
+    // The service rule: a standing garrison does not re-file — a
+    // booked flight of the same mission byte over the same target IS
+    // the earlier filing, still flying (the reference's request queue
+    // holds until serviced; ours holds until the package recovers).
+    for (const auto& ft : booked_) {
+        if (ft.mission == mission && ft.target_vu == objective_vu &&
+            ft.team == team) {
+            return false;
+        }
+    }
+    if (static_cast<int>(queue.size()) >=
+        std::max(1, cfg_.max_pending_action_requests)) {
+        return false;
+    }
+    const auto& profile = profiles_.for_mission(mission);
+    MissionRequest req;
+    req.mission = mission;
+    req.team = team;
+    req.target_id = objective_vu;
+    req.tot_type = TotType::LE;
+    req.tot = now + static_cast<CampaignTime>(profile.min_time) * 60;
+    req.priority =
+        request_priority_(team, profile, objective_vu) + kActionPriorityBonus;
+    req.aircraft = profile.str;
+    req.action_type = action_type;
+    req.context = context;
+    req.damage_pct = damage_pct < 0 ? 0 : (damage_pct > 100 ? 100
+                                                            : damage_pct);
+    queue.push_back(req);
+    ++stats_.actions_filed;
+    // The ledger's booking happens at the CAMPAIGN (the one ledger
+    // writer): the filing rides the drained request's ACTION bytes
+    // (run_tasking_cycle_atm_ books apply_action_filing from them).
+    // The counter here is the filing's own truth — the request was
+    // filed even if the tempo budget later drops it.
+    return true;
+}
+
+void AirTaskingManager::scan_actions_(std::uint8_t team, CampaignTime now) {
+    // The ACTION tables' scan, wire order (deterministic — the filing
+    // order IS the wire order of the objectives that drove them):
+    //
+    //   own objective damaged      → Defend: CAS over it; heavy damage
+    //                                adds the garrison BARCAP station.
+    //   enemy objective damaged    → Punish: SEADSTRIKE against it
+    //                                (its defenses are alive — they
+    //                                shot back).
+    //
+    // The context byte is the driving objective's own type byte (the
+    // wire vocabulary — a consumer sees WHICH kind of site spawned the
+    // filing). Missions resolve through the profile table by name —
+    // data-driven, never a byte switch.
+    const auto cas = mission_type_byte("AMIS_CAS");
+    const auto barcap = mission_type_byte("AMIS_BARCAP");
+    const auto sead = mission_type_byte("AMIS_SEADSTRIKE");
+    if (!cas || !barcap || !sead) return;
+    for (int i = 0; i < objectives_->objective_count(); ++i) {
+        const int pct = objective_damage_pct_(i);
+        if (pct <= 0) continue;
+        const std::uint32_t vu = objectives_->id_num(i);
+        const std::uint8_t owner = objectives_->owner(i);
+        const std::uint8_t otype = objectives_->objective_type(i);
+        if (owner == team) {
+            // Defend — the owner helps its own ground defenders.
+            (void)file_action_(team, *cas, kActionDefend, otype, vu, pct,
+                               now);
+            if (pct >= kActionHeavyDamagePct) {
+                (void)file_action_(team, *barcap, kActionDefend, otype, vu,
+                                   pct, now);
+            }
+        } else if (at_war_with(teams_, team, owner)) {
+            // Punish — the enemy's defenses there drew blood; suppress.
+            (void)file_action_(team, *sead, kActionPunish, otype, vu, pct,
+                               now);
+        }
+    }
 }
 
 void AirTaskingManager::file_support_flight_(

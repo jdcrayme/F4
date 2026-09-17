@@ -6,6 +6,8 @@
 
 #include "f4/campaign/route_builder.hpp"
 
+#include <f4/campaign/mission_type.hpp>
+
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -73,6 +75,12 @@ std::uint8_t target_action_for(const MissionProfile& profile) {
     if (s == "WP_INTERCEPT") return 13;
     if (s == "WP_RECON")    return 21;
     if (s == "WP_ELINT")    return 20;
+    // CAMP-ATM-1 — the sweep pass (campwp.h WP_SWEEP): the SWEEP
+    // family's target waypoint. Dead code disarmed (a sweep request
+    // never carried a target before this tranche — nothing reached the
+    // builder); under the strategy arm the ACTION-tagged sweep flies
+    // the line through it.
+    if (s == "WP_SWEEP")    return 22;
     if (s == "WP_CAS")      return 14;   // G2: the CAS delivery action
     return kWpNothing;
 }
@@ -224,6 +232,40 @@ RouteBuildResult RouteBuilder::build(std::uint8_t team,
             tw.target_num = target_vu;
             wps.push_back(tw);
 
+            // CAMP-ATM-1 — the SWEEP LINE: the attack run extends
+            // THROUGH the target along the inbound axis (two
+            // turnpoint legs — the flight sweeps the corridor, not
+            // just the point), then egress departs the far end. The
+            // leg span reuses the racetrack length constant (the
+            // documented shape constant — the reference's own sweep
+            // dimensions live in aiinput.dat values our sources
+            // cannot see).
+            if (cfg_.sweep_lines && profile.targetwp == "WP_SWEEP") {
+                double sdx = static_cast<double>(tx) - px;
+                double sdy = static_cast<double>(ty) - py;
+                const double slen = std::sqrt(sdx * sdx + sdy * sdy);
+                double ux = 0.0, uy = 1.0;   // degenerate arrival: fly south
+                if (slen > 1.0) {
+                    ux = sdx / slen;
+                    uy = sdy / slen;
+                }
+                const int L = std::max(2, cfg_.racetrack_length_grid);
+                auto sweep_leg = [&](double cx, double cy) {
+                    RouteWaypoint w;
+                    w.x = static_cast<std::int16_t>(std::lround(cx));
+                    w.y = static_cast<std::int16_t>(std::lround(cy));
+                    w.altitude_ft = mission_alt;
+                    w.action = kWpNothing;
+                    w.flags = kWpfTurnPoint;   // never eliminated
+                    wps.push_back(w);
+                    ++result.sweep_legs;
+                };
+                sweep_leg(tx + ux * (L / 2.0), ty + uy * (L / 2.0));
+                sweep_leg(tx + ux * static_cast<double>(L),
+                          ty + uy * static_cast<double>(L));
+                px = static_cast<int>(wps.back().x);
+                py = static_cast<int>(wps.back().y);
+            } else {
             // Turn point past the target (the 5-candidate scan).
             const auto tp = turn_point_(px, py, tx, ty, team,
                                         mission_band, ax, ay);
@@ -236,6 +278,7 @@ RouteBuildResult RouteBuilder::build(std::uint8_t team,
             wps.push_back(tpw);
             px = tp.first;
             py = tp.second;
+            }
         } else if (profile.target_profile == "TPROF_LOITER" &&
                    cfg_.loiter_racetracks && profile.loitertime > 0) {
             // P7 — the strategy tranche's racetrack: a CLOSED circuit
@@ -277,6 +320,27 @@ RouteBuildResult RouteBuilder::build(std::uint8_t team,
             // [anchor, c1, c2, c3] — the sim-side hold wraps c3 back
             // to the anchor while the station timer runs, and departs
             // from c3 (egress) when it expires.
+            // CAMP-ATM-1 — the TANKER WAYPOINT: an AMIS_TANKER station
+            // gains one WP_REFUEL turnpoint on the orbit's approach,
+            // backoff grid before the anchor (the package tops off
+            // BEFORE joining the station — the fuel-planning slice's
+            // consumer-facing marker). Outside the hold loop (flown
+            // once on approach; the hold wraps anchor..c3).
+            if (cfg_.tanker_refuel_waypoints &&
+                profile.mission_byte ==
+                    mission_type_byte("AMIS_TANKER").value_or(0)) {
+                const int back = std::max(2, cfg_.tanker_refuel_backoff_grid);
+                RouteWaypoint rw;
+                rw.x = static_cast<std::int16_t>(
+                    std::lround(tx - ux * static_cast<double>(back)));
+                rw.y = static_cast<std::int16_t>(
+                    std::lround(ty - uy * static_cast<double>(back)));
+                rw.altitude_ft = mission_alt;
+                rw.action = kWpRefuel;
+                rw.flags = kWpfTurnPoint;   // never eliminated
+                wps.push_back(rw);
+                ++result.refuel_waypoints;
+            }
             RouteWaypoint tw;
             tw.x = static_cast<std::int16_t>(tx);
             tw.y = static_cast<std::int16_t>(ty);

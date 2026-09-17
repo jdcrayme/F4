@@ -425,3 +425,176 @@ TEST(RouteBuilder, DisarmedLoiterKeepsThePlainTargetWaypoint) {
     }
     EXPECT_TRUE(target_seen);
 }
+
+// ── CAMP-ATM-1 — the SWEEP line + the tanker waypoint ────────────────────────
+
+namespace {
+
+MissionProfile sweep_profile() {
+    // The generated table's own SWEEP row: LOCATION-targeted
+    // TPROF_ATTACK with the WP_SWEEP target action.
+    MissionProfile p;
+    p.name = "AMIS_SWEEP";
+    p.mission_byte = 7;
+    p.target = "LOCATION";
+    p.aro = "ARO_CA";
+    p.altitude_profile = "MPROF_HIGH";
+    p.target_profile = "TPROF_ATTACK";
+    p.target_desc = "TTL";
+    p.routewp = "WP_INGRESS";
+    p.targetwp = "WP_SWEEP";
+    p.minalt = 5;
+    p.maxalt = 400;
+    p.missionalt = 250;
+    p.str = 4;
+    return p;
+}
+
+MissionProfile tanker_profile() {
+    // The generated table's TANKER row: OBJECTIVE-targeted TPROF_LOITER
+    // with the WP_ORBIT orbit action and a station time.
+    MissionProfile p;
+    p.name = "AMIS_TANKER";
+    p.mission_byte = 27;
+    p.target = "OBJECTIVE";
+    p.aro = "ARO_SUPPORT";
+    p.altitude_profile = "MPROF_MED";
+    p.target_profile = "TPROF_LOITER";
+    p.target_desc = "TT";
+    p.routewp = "WP_INGRESS";
+    p.targetwp = "WP_ORBIT";
+    p.minalt = 5;
+    p.maxalt = 400;
+    p.missionalt = 200;
+    p.loitertime = 30;
+    p.str = 1;
+    return p;
+}
+
+} // namespace
+
+TEST(RouteBuilder, SweepLineExtendsThroughTheTargetWhenArmed) {
+    // Armed: the attack run extends THROUGH the target along the
+    // inbound axis — IP → target (the sweep action 22) → two turnpoint
+    // legs (L/2, L past it) → egress from the far end.
+    auto ws = make_world();
+    f4::world::WorldStateAdapters adapters(ws);
+    RouteBuilderConfig cfg;
+    cfg.sweep_lines = true;
+    const RouteBuilder builder(adapters.objectives, adapters.units,
+                               adapters.teams, 1, cfg);
+    const auto rb = builder.build(1, sweep_profile(), 4281, 9001);
+
+    ASSERT_GE(rb.waypoints.size(), 6u);
+    EXPECT_EQ(rb.sweep_legs, 2);
+
+    // The target WP carries the sweep action (campwp.h WP_SWEEP = 22)
+    // and the objective's VU.
+    const RouteWaypoint* tw = nullptr;
+    for (const auto& w : rb.waypoints) {
+        if (w.action == 22) tw = &w;
+    }
+    ASSERT_NE(tw, nullptr);
+    EXPECT_EQ(tw->x, 400);
+    EXPECT_EQ(tw->y, 400);
+    EXPECT_EQ(tw->target_num, 9001u);
+    EXPECT_TRUE(tw->flags & kWpfTarget);
+
+    // The two legs sit ON the inbound axis past the target: the
+    // approach is direct (no threat → no corners), so u is the
+    // airbase→target unit vector ((300,300)/|.| — diagonal).
+    const RouteWaypoint& leg1 = *(tw + 1);
+    const RouteWaypoint& leg2 = *(tw + 2);
+    EXPECT_EQ(leg1.flags, kWpfTurnPoint);
+    EXPECT_EQ(leg2.flags, kWpfTurnPoint);
+    EXPECT_EQ(leg1.x, 407);   // 400 + 10·0.7071 ≈ 407.07 → lround 407
+    EXPECT_EQ(leg1.y, 407);
+    EXPECT_EQ(leg2.x, 414);   // 400 + 20·0.7071 ≈ 414.14 → lround 414
+    EXPECT_EQ(leg2.y, 414);
+}
+
+TEST(RouteBuilder, DisarmedSweepGetsThePlainAttackShape) {
+    // The golden identity: without the sweep arm the SWEEP profile
+    // builds the plain TPROF_ATTACK shape (IP → target → turn point)
+    // — and since pre-ATM-1 sweeps never carried a target, this is a
+    // defensive pin, not a live shape.
+    auto ws = make_world();
+    f4::world::WorldStateAdapters adapters(ws);
+    const RouteBuilder builder(adapters.objectives, adapters.units,
+                               adapters.teams, 1, RouteBuilderConfig{});
+    const auto rb = builder.build(1, sweep_profile(), 4281, 9001);
+    EXPECT_EQ(rb.sweep_legs, 0);
+    EXPECT_EQ(rb.racetrack_corners, 0);
+    bool sweep_action = false;
+    for (const auto& w : rb.waypoints) {
+        sweep_action = sweep_action || w.action == 22;
+    }
+    EXPECT_TRUE(sweep_action);   // the target action rides regardless
+}
+
+TEST(RouteBuilder, TankerStationCarriesTheRefuelWaypoint) {
+    // Armed: the AMIS_TANKER racetrack gains ONE WP_REFUEL turnpoint
+    // on the orbit's approach, backoff grid before the anchor —
+    // outside the hold loop (the package tops off BEFORE joining).
+    auto ws = make_world();
+    f4::world::WorldStateAdapters adapters(ws);
+    RouteBuilderConfig cfg;
+    cfg.loiter_racetracks = true;
+    cfg.tanker_refuel_waypoints = true;
+    const RouteBuilder builder(adapters.objectives, adapters.units,
+                               adapters.teams, 1, cfg);
+    const auto rb = builder.build(1, tanker_profile(), 4281, 9001);
+
+    EXPECT_EQ(rb.refuel_waypoints, 1);
+    EXPECT_EQ(rb.racetrack_corners, 3);
+
+    // The anchor: the orbit action (12) with the station contract.
+    const RouteWaypoint* anchor = nullptr;
+    const RouteWaypoint* refuel = nullptr;
+    for (const auto& w : rb.waypoints) {
+        if (w.action == 12) anchor = &w;
+        if (w.action == kWpRefuel) refuel = &w;
+    }
+    ASSERT_NE(anchor, nullptr);
+    ASSERT_NE(refuel, nullptr);
+    EXPECT_EQ(anchor->station_time_s, 30 * 60);
+    EXPECT_EQ(anchor->loop_waypoints, 4);
+    EXPECT_EQ(refuel->action, kWpRefuel);
+    EXPECT_EQ(refuel->flags, kWpfTurnPoint);
+    // The refuel point sits BEFORE the anchor on the approach (the
+    // diagonal unit vector: 400 − 6·0.7071 ≈ 395.76 → lround 396).
+    EXPECT_EQ(refuel->x, 396);
+    EXPECT_EQ(refuel->y, 396);
+}
+
+TEST(RouteBuilder, NonTankerOrbitsGetNoRefuelWaypoint) {
+    // The mission-byte gate: an AWACS (also WP_ORBIT) station is the
+    // same racetrack with NO refuel point.
+    auto ws = make_world();
+    f4::world::WorldStateAdapters adapters(ws);
+    RouteBuilderConfig cfg;
+    cfg.loiter_racetracks = true;
+    cfg.tanker_refuel_waypoints = true;
+    const RouteBuilder builder(adapters.objectives, adapters.units,
+                               adapters.teams, 1, cfg);
+    auto awacs = tanker_profile();
+    awacs.name = "AMIS_AWACS";
+    awacs.mission_byte = 25;
+    const auto rb = builder.build(1, awacs, 4281, 9001);
+    EXPECT_EQ(rb.refuel_waypoints, 0);
+    EXPECT_EQ(rb.racetrack_corners, 3);
+}
+
+TEST(RouteBuilder, DisarmedTankerGetsNoRefuelWaypoint) {
+    // The golden identity: without the tanker arm the orbit carries no
+    // refuel point (the pre-ATM-1 bytes verbatim).
+    auto ws = make_world();
+    f4::world::WorldStateAdapters adapters(ws);
+    RouteBuilderConfig cfg;
+    cfg.loiter_racetracks = true;
+    const RouteBuilder builder(adapters.objectives, adapters.units,
+                               adapters.teams, 1, cfg);
+    const auto rb = builder.build(1, tanker_profile(), 4281, 9001);
+    EXPECT_EQ(rb.refuel_waypoints, 0);
+    EXPECT_EQ(rb.racetrack_corners, 3);
+}

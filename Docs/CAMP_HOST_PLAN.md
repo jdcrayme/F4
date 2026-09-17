@@ -8,12 +8,16 @@
 > query landed additively, the golden identity intact); CAMP-CMD-1
 > shipped (`roe_set` riding the P7 fire-control path, the
 > command journal + its tick-exact replay, the `roe_changed` event
-> publishing); CAMP-CMD-2 ships with this patch (`flight_retask` /
+> publishing); CAMP-CMD-2 shipped (`flight_retask` /
 > `flight_abort` / `objective_priority` — the v1 command surface
 > completes, the abort scrubs books and routes RTB, the objective
 > priority write feeds every tasking score, the replay identity
-> extends to the full intervention set — 30+ new ctest cases, the
-> golden identity intact). Every other tranche below is an acceptance
+> extends to the full intervention set); CAMP-ATM-1 ships with this
+> patch (the ACTION tables — objective-damage-driven CAS/BARCAP/
+> SEADSTRIKE filings, the SWEEP station lines, the tanker waypoint,
+> the `action_filed` event family — the ninth — plus `actions_filed`
+> in the ledger and on the QC line; 20+ new ctest cases, the golden
+> identity intact). Every other tranche below is an acceptance
 > contract, not a claim.
 
 The campaign engine is the product. Every user experience — the world viewer
@@ -228,6 +232,7 @@ t=356.7 s" — it becomes an event, not just a book entry.
 | `objective_damage` / `objective_captured` | fstatus diff (C1) + GroundWar (G1) |
 | `reinforcement_delivered` | C2's reinforcement fire |
 | `tasking_cycle` | the 7-phase ATM pass + `next_tasking_sec` |
+| `action_filed` | the ACTION tables' damage reactions (CAMP-ATM-1) |
 | `weather_changed` | Task 73's Markov chain |
 | `roe_changed` | P7 fire-control gates |
 
@@ -557,9 +562,67 @@ Default behavior is byte-identical unless a gate says otherwise.
 ### CAMP-ATM-1 — the ACTION tables (the ATM plan's named queue, now observable)
 - Objective-damage-driven contextual CAS/BARCAP/SEAD filings; SWEEP station
   lines; tanker waypoints.
-- **Gate**: the ATM plan's TestCamp QC (`--strategy`) plus `action_filed`
-  counters in the ledger; the filings visible as events (any UX sees the
-  war react).
+- **Gate (as built)**: the ACTION tables scan the objectives' fstatus
+  bitmaps at every strategy-armed `generate_requests` — an OWN objective
+  with destroyed features files CAS over it (`kActionDefend`), heavy
+  damage (≥ 25% destroyed) adds the garrison BARCAP station, an enemy
+  objective at war files SEADSTRIKE against it (`kActionPunish`) —
+  into a per-team pending queue (dedup vs the queue and the booked
+  flights: a standing garrison does not re-file until its flight
+  recovers; capped by `max_pending_action_requests`), drained ahead of
+  the ladder walk with a +25 priority bonus (the war's reactions task
+  before its routine). The SWEEP family (the contested-air line) gets
+  a real enemy-objective target on its own rotation cursor, and under
+  the sweep arm the builder flies the LINE — the attack run extends
+  through the target along the inbound axis (two turnpoint legs, the
+  sweep action byte 22). Tanker stations gain the refuel waypoint (the
+  WP_REFUEL turnpoint, backoff grid before the racetrack anchor, the
+  fuel-planning slice's consumer-facing marker — mission-byte gated to
+  AMIS_TANKER). Every filing books the ledger's action-filing log at
+  the Campaign (the one ledger writer; the optional `actions` section
+  keeps every disarmed document byte-identical) and publishes as
+  `action_filed` — the ninth event family (team-matched to the filing
+  side), after the tasking_cycle that generated it. The kunsan QC run
+  prints `actions=` alongside the strategy counters; the save's own
+  14 damaged objectives drive 96 filings over 8 cycles, and the
+  campaignd demo journals the stream (verify clean exit 0, a tampered
+  filing names its line at exit 23).
+- **As-built notes**: (1) the reference's ACTION tables live in
+  aiinput.dat values our sources cannot see — the same documented
+  limitation as the racetrack dimensions — so the table is the
+  deterministic subset named at `ActionSystemType` (Defend/Punish/
+  Sweep), the context byte IS the driving objective's own type byte,
+  and the damage read is the fstatus bitmap (2 = destroyed, 1 =
+  damaged-present only, 3 = the no-data nibble, ignored; the effective
+  count falls back to the bitmap's own capacity when the save carries
+  none — the kunsan shape). (2) The ACTION filings BYPASS the team's
+  mission-priority table (the reference files what the situation
+  demands; the tempo budget and the deconflict gate still bound the
+  fleet) and persist while the damage persists — the standing-garrison
+  behavior, bounded per cycle by the cap and the pool. (3) The P7
+  acceptance line changes BY DESIGN — the +25 ACTION bonus reorders
+  the tempo budget (reactions before routine), so the kunsan run's
+  support/enemy-CAP counts shifted (`supports=17 shared=7
+  enemy_caps=8 actions=96` vs the pre-ACTION `supports=85 shared=115
+  enemy_caps=48`; `stations=96` unchanged — the CAP station targeting
+  rides generate, not compose). The exit-17 gate (drew aircraft,
+  stationed nothing) stands. (4) The seeded backlog requests carry the
+  save's own action_type/context as telemetry but are never booked as
+  THIS run's filings (the save's history is not news); the SWEEP
+  ladder tag (`kActionSweep`) is telemetry too — the ledger log and
+  the event family carry only the damage reactions. (5) The `action_
+  filed` counter's own booking rides the drained requests at the
+  Campaign (`run_tasking_cycle_atm_`) — the ATM's const ledger pointer
+  stays read-only, the one-ledger-writer discipline holds; the counter
+  (at filing) and the log (at drain) cover the same set. (6) The
+  route predicates gained the sweep-line and objective-CAS families
+  under the strategy arm (`profile_flies_sweep_line` /
+  `profile_flies_objective_cas` — data-driven, never a byte switch);
+  the RouteBuilder arms ride the same host config that arms the
+  racetracks (session opts / QC flag), so disarmed hosts build
+  byte-identical routes. (7) The objective CAS routes to the damaged
+  FRIENDLY objective (the defenders are the point) — the builder
+  resolves objectives first, the WP_CAS action byte rides unchanged.
 
 ### CAMP-INIT-1 — create-from-parameters
 - Scenario pack JSON (theater + OOB template + force levels + date/weather +

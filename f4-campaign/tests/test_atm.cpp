@@ -62,6 +62,11 @@ struct WorldOpts {
     bool seeded_schedule = false;  // slot-1 airbase schedule bits
     bool backlog = false;          // slot-1 decoded request backlog
     std::uint8_t backlog_roe = 0;  // P7 — rq2's roe_check byte
+    // CAMP-ATM-1 — objective damage: 0 = none; 1 = LIGHT damage on the
+    // USA airbase 4281 (1 of 8 features destroyed = 12% — below the
+    // garrison-BARCAP threshold); 2 = the light airbase PLUS HEAVY
+    // damage on the DPRK target 9001 (4 of 8 = 50%).
+    int damage = 0;
 };
 
 f4::world::WorldState make_atm_world(const WorldOpts& opts = {}) {
@@ -95,6 +100,17 @@ f4::world::WorldState make_atm_world(const WorldOpts& opts = {}) {
     ws.objectives.push_back(obj(100, 100, 1, 4281, 5));   // USA airbase
     ws.objectives.push_back(obj(400, 400, 6, 9001, 7));   // DPRK target
     ws.objectives.push_back(obj(300, 300, 3, 5150, 3));   // neutral
+
+    // CAMP-ATM-1 — the ACTION tables' damage state (the fstatus
+    // bitmap: 2 bits per feature, 2 = destroyed; 8 features per
+    // objective, features_count left 0 — the kunsan shape where the
+    // bitmap's own capacity is the count).
+    if (opts.damage >= 1) {
+        ws.objectives[0].fstatus = {0x02, 0x00};   // 1/8 destroyed = 12%
+    }
+    if (opts.damage >= 2) {
+        ws.objectives[1].fstatus = {0xAA, 0x00};   // 4/8 destroyed = 50%
+    }
 
     // The defended target: a DPRK AD battalion ON the objective cell.
     UnitState ad;
@@ -1383,4 +1399,261 @@ TEST(AtmPriorityInput, ObjectivePriorityScalesTheTargetTerm) {
     EXPECT_GT(count_a, 0);   // the delivery ladder files against 9001
     EXPECT_EQ(count_a, count_b);
     EXPECT_GT(prio_high, prio_low);   // the commander's weight moved it
+}
+
+// ── CAMP-ATM-1 — the ACTION tables (the objective-damage-driven
+//    filings) + the SWEEP lines ─────────────────────────────────────────────
+
+TEST(AtmAction, LightOwnDamageFilesCasOnly) {
+    // The USA airbase took light damage (12%): the owner files CAS over
+    // it — and no garrison BARCAP (below the heavy threshold). Nothing
+    // else is damaged, so nothing else files.
+    auto rig = Rig::make(WorldOpts{.damage = 1}, AtmConfig{.strategy = true});
+    const auto reqs = rig->atm->generate_requests(1, kNow);
+    ASSERT_EQ(rig->atm->stats().actions_filed, 1);
+
+    const auto cas = mission_type_byte("AMIS_CAS");
+    bool seen = false;
+    for (const auto& r : reqs) {
+        // The ladder files target-less CAS too (byte 20, no ACTION
+        // tag) — only the ACTION filing carries the bytes.
+        if (r.mission != *cas || r.action_type == kActionNone) continue;
+        seen = true;
+        EXPECT_EQ(r.target_id, 4281u);
+        EXPECT_EQ(r.action_type, kActionDefend);
+        EXPECT_EQ(r.context, 4);   // the driving objective's own type
+        EXPECT_EQ(r.damage_pct, 12);
+        EXPECT_FALSE(r.seeded);
+    }
+    EXPECT_TRUE(seen);
+    // No BARCAP anywhere (light damage — the garrison stays home).
+    const auto barcap = mission_type_byte("AMIS_BARCAP");
+    for (const auto& r : reqs) {
+        ASSERT_FALSE(r.mission == *barcap && r.action_type != kActionNone);
+    }
+}
+
+TEST(AtmAction, HeavyOwnDamageAddsTheGarrisonBarcapAndEnemyDamageFilesSead) {
+    // Both sides damaged: USA (team 1) files CAS over its light-damaged
+    // airbase and a SEADSTRIKE against the heavily damaged DPRK target
+    // (the defenses there are alive — they shot back). DPRK (team 6)
+    // files CAS + the garrison BARCAP over ITS heavy-damaged target and
+    // a SEADSTRIKE against the USA airbase. The context byte is the
+    // driving objective's type; the ACTION byte separates Defend
+    // (own damage) from Punish (enemy damage).
+    auto rig = Rig::make(WorldOpts{.damage = 2}, AtmConfig{.strategy = true});
+    const auto cas = mission_type_byte("AMIS_CAS");
+    const auto barcap = mission_type_byte("AMIS_BARCAP");
+    const auto sead = mission_type_byte("AMIS_SEADSTRIKE");
+
+    auto usa = rig->atm->generate_requests(1, kNow);
+    ASSERT_EQ(rig->atm->stats().actions_filed, 2);   // CAS + SEADSTRIKE
+    for (const auto& r : usa) {
+        if (r.action_type == kActionDefend) {
+            // The owner's defense: CAS over the light-damaged airbase.
+            EXPECT_EQ(r.mission, *cas);
+            EXPECT_EQ(r.target_id, 4281u);
+            EXPECT_EQ(r.damage_pct, 12);
+        } else if (r.action_type == kActionPunish) {
+            // The suppression: SEADSTRIKE against the damaged enemy.
+            EXPECT_EQ(r.mission, *sead);
+            EXPECT_EQ(r.target_id, 9001u);
+            EXPECT_EQ(r.damage_pct, 50);
+        } else {
+            // The ladder's own filings: zero-tagged, except the SWEEP
+            // family's contested-air tag (kActionSweep — not an
+            // ACTION-table filing).
+            EXPECT_TRUE(r.action_type == kActionNone ||
+                        r.action_type == kActionSweep);
+        }
+    }
+    EXPECT_NE(std::find_if(usa.begin(), usa.end(),
+                           [&](const MissionRequest& r) {
+                               return r.mission == *cas &&
+                                      r.action_type == kActionDefend;
+                           }),
+              usa.end());
+    EXPECT_NE(std::find_if(usa.begin(), usa.end(),
+                           [&](const MissionRequest& r) {
+                               return r.mission == *sead &&
+                                      r.action_type == kActionPunish;
+                           }),
+              usa.end());
+
+    auto dprk = rig->atm->generate_requests(6, kNow);
+    ASSERT_EQ(rig->atm->stats().actions_filed, 5);   // + CAS + BARCAP + SEAD
+    int dprk_defend = 0, dprk_punish = 0;
+    for (const auto& r : dprk) {
+        if (r.action_type == kActionDefend) {
+            ++dprk_defend;
+            // Own heavy damage: the CAS AND the garrison BARCAP.
+            EXPECT_EQ(r.target_id, 9001u);
+            EXPECT_EQ(r.damage_pct, 50);
+            EXPECT_TRUE(r.mission == *cas || r.mission == *barcap);
+        } else if (r.action_type == kActionPunish) {
+            ++dprk_punish;
+            EXPECT_EQ(r.mission, *sead);
+            EXPECT_EQ(r.target_id, 4281u);
+            EXPECT_EQ(r.damage_pct, 12);
+        }
+    }
+    EXPECT_EQ(dprk_defend, 2);
+    EXPECT_EQ(dprk_punish, 1);
+}
+
+TEST(AtmAction, DisarmedScanFilesNothing) {
+    // The golden identity: without the strategy arm the damage state is
+    // invisible — no ACTION filings, every request carries the zero
+    // ACTION bytes, the counter stays 0.
+    auto rig = Rig::make(WorldOpts{.damage = 2}, AtmConfig{});
+    const auto reqs = rig->atm->generate_requests(1, kNow);
+    EXPECT_EQ(rig->atm->stats().actions_filed, 0);
+    for (const auto& r : reqs) {
+        EXPECT_EQ(r.action_type, kActionNone);
+        EXPECT_EQ(r.context, 0);
+        EXPECT_EQ(r.damage_pct, 0);
+    }
+}
+
+TEST(AtmAction, CapBoundsThePendingQueue) {
+    // max_pending_action_requests = 1: the wire-order scan files ONE
+    // request (objective 4281 comes first — DPRK's Punish SEADSTRIKE
+    // against the USA airbase) and the rest of the scan is capped.
+    AtmConfig cfg;
+    cfg.strategy = true;
+    cfg.max_pending_action_requests = 1;
+    auto rig = Rig::make(WorldOpts{.damage = 2}, cfg);
+    const auto sead = mission_type_byte("AMIS_SEADSTRIKE");
+
+    // Wire order: 4281 first (DPRK's Punish SEADSTRIKE against the USA
+    // airbase), then 9001 (the own heavy damage — CAS then the garrison
+    // BARCAP). The cap of 1 admits the SEADSTRIKE and drops the rest.
+    (void)rig->atm->generate_requests(6, kNow);
+    ASSERT_EQ(rig->atm->stats().actions_filed, 1);
+
+    // The next cycle: the queue drained (nothing booked — nobody flew
+    // it), so the scan re-files the same first filing and the rest is
+    // capped again. The SWEEP ladder tag never counts here (it is not
+    // an ACTION-table filing).
+    (void)rig->atm->generate_requests(6, kNow);
+    ASSERT_EQ(rig->atm->stats().actions_filed, 2);
+
+    // The drain: exactly one damage filing rides ahead of the ladder,
+    // the SEADSTRIKE the cap admitted.
+    auto reqs = rig->atm->generate_requests(6, kNow);
+    int filed = 0;
+    for (const auto& r : reqs) {
+        if (r.action_type == kActionPunish || r.action_type == kActionDefend) {
+            ++filed;
+            EXPECT_EQ(r.action_type, kActionPunish);
+            EXPECT_EQ(r.mission, *sead);
+            EXPECT_EQ(r.target_id, 4281u);
+        }
+    }
+    EXPECT_EQ(filed, 1);
+}
+
+TEST(AtmAction, CampaignBooksTheActionLogAndTheSummaryCarriesTheCounter) {
+    // The kunsan fixture's own damaged objectives drive the real run:
+    // the ledger books the filings (the action_filed event family's
+    // source), the summary's strategy block carries actions_filed, and
+    // the ledger JSON carries the optional actions section.
+    CampaignConfig cfg;
+    cfg.atm_pipeline = true;
+    cfg.strategy_layer = true;
+    auto r = CampaignRig::make(cfg);
+    CampaignResultLedger ledger(r->adapters->campaign, r->adapters->teams,
+                                r->adapters->units);
+    r->campaign->set_result_ledger(&ledger);
+    // The objectives attach with the route planner (the session/QC
+    // construction shape) — the ACTION scan walks them, the filings'
+    // sorties fly the built routes.
+    auto ws_ptr = std::make_unique<f4::world::WorldState>();
+    ws_ptr->load(kunsan_world());
+    auto adapters =
+        std::make_unique<f4::world::WorldStateAdapters>(*ws_ptr);
+    RouteBuilderConfig route_cfg;
+    route_cfg.loiter_racetracks = true;
+    route_cfg.sweep_lines = true;
+    route_cfg.tanker_refuel_waypoints = true;
+    auto builder = std::make_unique<RouteBuilder>(
+        static_cast<const f4::world::IObjectiveSource&>(
+            adapters->objectives),
+        static_cast<const f4::world::IUnitCoreSource&>(
+            adapters->units),
+        static_cast<const f4::world::ITeamSource&>(adapters->teams),
+        /*viewer=*/2, route_cfg);
+    r->campaign->set_route_planner(builder.get(),
+        &static_cast<const f4::world::IObjectiveSource&>(
+            adapters->objectives));
+    r->campaign->tick(1800);
+    r->campaign->tick(1800);
+
+    const auto* stats = r->campaign->atm_stats();
+    ASSERT_NE(stats, nullptr);
+    ASSERT_GT(stats->actions_filed, 0);
+    EXPECT_EQ(ledger.actions_filed(), stats->actions_filed);
+
+    const auto& log = ledger.action_filing_log();
+    ASSERT_EQ(log.size(), static_cast<std::size_t>(stats->actions_filed));
+    for (const auto& a : log) {
+        EXPECT_TRUE(a.team == 1 || a.team == 2 || a.team == 6);
+        EXPECT_TRUE(a.mission == 20 || a.mission == 1 || a.mission == 17);
+        EXPECT_TRUE(a.action_type == kActionDefend ||
+                    a.action_type == kActionPunish);
+        EXPECT_GT(a.damage_pct, 0);
+        EXPECT_NE(a.objective, 0u);
+    }
+
+    const auto js = r->campaign->to_summary_json();
+    EXPECT_NE(js.find("\"actions_filed\":"), std::string::npos);
+    const auto lj = ledger.to_json();
+    EXPECT_NE(lj.find("\"actions\": ["), std::string::npos);
+    EXPECT_NE(lj.find("\"action_type\":"), std::string::npos);
+}
+
+TEST(AtmAction, NoFilingsKeepsTheLedgerJsonByteIdentical) {
+    // The disarmed run's ledger document has no actions section (the
+    // optional-section discipline — pre-ATM-1 bytes verbatim).
+    CampaignConfig cfg;
+    cfg.atm_pipeline = true;
+    auto r = CampaignRig::make(cfg);
+    CampaignResultLedger ledger(r->adapters->campaign, r->adapters->teams,
+                                r->adapters->units);
+    r->campaign->set_result_ledger(&ledger);
+    r->campaign->tick(1800);
+    const auto lj = ledger.to_json();
+    EXPECT_EQ(lj.find("\"actions\""), std::string::npos);
+}
+
+TEST(AtmSweep, SweepLinesTargetEnemiesAndTagTheAction) {
+    // The contested-air profile finally gets a target: a ranked enemy
+    // objective on its own rotation cursor, ACTION-tagged as the sweep.
+    auto rig = Rig::make(WorldOpts{}, AtmConfig{.strategy = true});
+    const auto sweep = mission_type_byte("AMIS_SWEEP");
+    const auto reqs = rig->atm->generate_requests(1, kNow);
+    int sweeps = 0;
+    for (const auto& r : reqs) {
+        if (r.mission != *sweep) continue;
+        ++sweeps;
+        EXPECT_EQ(r.target_id, 9001u);   // the only enemy objective
+        EXPECT_EQ(r.action_type, kActionSweep);
+    }
+    EXPECT_GT(sweeps, 0);
+}
+
+TEST(AtmSweep, DisarmedSweepStaysTargetLess) {
+    // The pre-ATM-1 shape: the SWEEP profile files target-less (the C3
+    // documented gap — route-less, no ACTION tag).
+    auto rig = Rig::make(WorldOpts{}, AtmConfig{});
+    const auto sweep = mission_type_byte("AMIS_SWEEP");
+    const auto reqs = rig->atm->generate_requests(1, kNow);
+    int sweeps = 0;
+    for (const auto& r : reqs) {
+        if (r.mission != *sweep) continue;
+        ++sweeps;
+        EXPECT_EQ(r.target_id, 0u);
+        EXPECT_EQ(r.action_type, kActionNone);
+    }
+    EXPECT_GT(sweeps, 0);
 }

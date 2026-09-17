@@ -154,6 +154,28 @@ struct ObjectiveCaptureRecord {
     std::uint32_t by_battalion = 0;
 };
 
+/// One ACTION-table filing (CAMP-ATM-1): the objective-damage-driven
+/// contextual request the strategy layer filed (own damage → CAS/
+/// BARCAP Defend, enemy damage → SEADSTRIKE Punish). Arrival order;
+/// campaign-clock seconds (the same time base apply_mission_draw
+/// uses). This is the action_filed event family's source log.
+struct ActionFilingRecord {
+    double t_s = 0.0;
+    /// The filing team slot.
+    std::uint8_t team = 0;
+    /// The filed mission byte (AMIS_CAS / AMIS_BARCAP /
+    /// AMIS_SEADSTRIKE per the ACTION table entry).
+    std::uint8_t mission = 0;
+    /// The ACTION type byte (ActionSystemType — Defend/Punish).
+    std::uint8_t action_type = 0;
+    /// The driving objective's own type byte (the context).
+    std::uint8_t context = 0;
+    /// The objective VU_ID.num the filing reacts to.
+    std::uint32_t objective = 0;
+    /// The destroyed-features percent that drove the filing (0..100).
+    int damage_pct = 0;
+};
+
 /// Per-battalion write state (G1). Seeded lazily by the ground war's
 /// sync (sync_ground_unit) or on the battalion's first loss event; the
 /// ENGINE owns the live numbers, the ledger carries them for the
@@ -409,6 +431,20 @@ public:
                            double miss_distance_ft,
                            int features_destroyed);
 
+    /// One ACTION-table filing (CAMP-ATM-1): the strategy layer's
+    /// objective-damage-driven contextual request. Books the filing
+    /// log (the action_filed event family's source) and the counter.
+    /// Pure observation — the filing moved no books (the request rides
+    /// the ATM's own pipeline; a filled sortie draws through
+    /// apply_mission_draw as any other).
+    void apply_action_filing(double t_s,
+                             std::uint8_t team,
+                             std::uint8_t mission,
+                             std::uint8_t action_type,
+                             std::uint8_t context,
+                             std::uint32_t objective_vu,
+                             int damage_pct);
+
     // ------------------------------------------------------------------
     // Queries (the C2 tasking hooks + the QC gates read these)
     // ------------------------------------------------------------------
@@ -490,6 +526,18 @@ public:
     /// Bomb impacts logged (resolved + unresolved objectives alike).
     [[nodiscard]] int bomb_impacts() const noexcept {
         return static_cast<int>(impacts_.size());
+    }
+
+    /// ACTION-table filings booked this run (CAMP-ATM-1).
+    [[nodiscard]] int actions_filed() const noexcept {
+        return actions_filed_;
+    }
+
+    /// The ACTION-filing log (arrival order — the action_filed event
+    /// family's source).
+    [[nodiscard]] const std::vector<ActionFilingRecord>&
+    action_filing_log() const noexcept {
+        return action_filings_;
     }
 
     /// Mission draws booked this run, all teams (the C2 tasking side).
@@ -667,6 +715,8 @@ private:
     std::vector<GroundUnitLedger> ground_units_;
     std::vector<GroundLossRecord> ground_losses_;
     std::vector<ObjectiveCaptureRecord> captures_;
+    /// CAMP-ATM-1 — the ACTION tables' filing log (arrival order).
+    std::vector<ActionFilingRecord> action_filings_;
     int ground_vehicle_losses_ = 0;
     /// The air-sourced share (G2: the interdiction counter).
     int ground_vehicle_losses_air_ = 0;
@@ -679,6 +729,8 @@ private:
     int air_losses_unattributed_ = 0;
     int ag_kills_ = 0;
     int features_destroyed_ = 0;
+    /// CAMP-ATM-1 — the ACTION tables' filing counter.
+    int actions_filed_ = 0;
     // --- C2 tasking-side totals ---
     int mission_draws_ = 0;          // draw EVENTS (packages)
     int mission_draw_aircraft_ = 0;  // aircraft committed

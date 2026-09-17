@@ -485,6 +485,30 @@ void Campaign::run_tasking_cycle_atm_() {
         // assignment (escort pairing) — composed in the reference's
         // order.
         auto requests = atm_->generate_requests(team, now);
+
+        // CAMP-ATM-1 — book THIS cycle's ACTION filings (the ledger is
+        // the Campaign's write domain; the ATM's const pointer only
+        // reads). Every request the ACTION TABLES filed this cycle
+        // drains out of generate_requests with its ACTION bytes set —
+        // the damage reactions only (Defend/Punish; the SWEEP family's
+        // ladder tag is telemetry, it rides the mission_filed events).
+        // Seeded requests carry the save's own history — never booked;
+        // the kunsan seeds carry zeros anyway. The log and the ATM's
+        // actions_filed counter cover the same set.
+        if (result_ledger_ != nullptr) {
+            for (const auto& req : requests) {
+                if (req.seeded) continue;
+                if (req.action_type != kActionDefend &&
+                    req.action_type != kActionPunish) {
+                    continue;
+                }
+                result_ledger_->apply_action_filing(
+                    static_cast<double>(now), req.team, req.mission,
+                    req.action_type, req.context, req.target_id,
+                    req.damage_pct);
+            }
+        }
+
         requests = atm_->prioritize(std::move(requests));
         requests = atm_->deconflict(std::move(requests));
         auto flights = atm_->compose_packages(requests, team, now);
@@ -513,6 +537,19 @@ void Campaign::run_tasking_cycle_atm_() {
                 profile.target_profile == "TPROF_LOITER" &&
                 profile.loitertime > 0;
 
+            // CAMP-ATM-1 — the SWEEP line family (LOCATION-targeted
+            // TPROF_ATTACK): under the strategy arm the ladder gives
+            // the request an enemy-objective target and the builder's
+            // sweep_lines config (armed by the host alongside the
+            // racetracks) flies the line. The objective-targeted CAS
+            // shape (the ACTION tables' Defend filing) routes like any
+            // strike under the same arm.
+            const bool sweep_line =
+                cfg_.strategy_layer && profile_flies_sweep_line(profile);
+            const bool objective_cas =
+                cfg_.strategy_layer &&
+                profile_flies_objective_cas(profile);
+
             // PHASE 6 — the route (the C3 builder, now package-aware):
             // the MAIN flight's build is the package's route — the
             // escorts share it (package-shared ingress, the C3
@@ -529,7 +566,7 @@ void Campaign::run_tasking_cycle_atm_() {
                 (profile_flies_delivery_route(profile) ||
                  (cfg_.unit_strike &&
                   profile_flies_unit_delivery_route(profile)) ||
-                 loiter_station)) {
+                 loiter_station || sweep_line || objective_cas)) {
                 const auto rb = route_planner_->build(
                     team, profile, ft.airbase_vu, ft.target_vu);
                 if (rb.waypoints.size() >= 2) {
@@ -705,6 +742,10 @@ std::string Campaign::to_summary_json() const {
             w.number_key("supports_shared", a.supports_shared);
             w.put(",\n    ");
             w.number_key("enemy_caps_filed", a.enemy_caps_filed);
+            // CAMP-ATM-1 — the ACTION tables' counter (the strategy
+            // block's fifth; the disarmed block stays byte-identical).
+            w.put(",\n    ");
+            w.number_key("actions_filed", a.actions_filed);
         }
         w.put("\n  }");
     }

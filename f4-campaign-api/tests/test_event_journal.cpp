@@ -58,10 +58,12 @@ IdentityFingerprint fingerprint(std::int64_t t, const char* ledger) {
     return id;
 }
 
-// The eight families, one golden example each (deterministic payloads;
+// The nine families, one golden example each (deterministic payloads;
 // the `roe_changed`/`weather_changed` payloads are the values their
 // eventual emitters will carry — the vocabulary is pinned even where
-// the engine site lands in CAMP-CMD-1 / a scenario session).
+// the engine site lands in CAMP-CMD-1 / a scenario session). The
+// `action_filed` payload is the CAMP-ATM-1 shape: the ACTION tables'
+// objective-damage-driven filing.
 std::vector<CampaignEvent> one_event_per_family() {
     std::vector<CampaignEvent> events;
 
@@ -131,6 +133,18 @@ std::vector<CampaignEvent> one_event_per_family() {
     cycle.tasking_cycle.intents = 96;
     events.push_back(cycle);
 
+    CampaignEvent action;
+    action.kind = CampaignEvent::Kind::ActionFiled;
+    action.action_filed.t = 4000;
+    action.action_filed.team = 2;
+    action.action_filed.mission_byte = 20;
+    action.action_filed.mission_name = "CAS";
+    action.action_filed.action_type = 1;
+    action.action_filed.context = 4;
+    action.action_filed.objective_id = 4281;
+    action.action_filed.damage_pct = 12;
+    events.push_back(action);
+
     return events;
 }
 
@@ -161,7 +175,7 @@ TEST(EventJournal, HeaderAndEndBytes) {
 
 TEST(EventJournal, OneGoldenLinePerFamily) {
     const auto events = one_event_per_family();
-    ASSERT_EQ(events.size(), 8U);
+    ASSERT_EQ(events.size(), 9U);
 
     f4::json::Writer w;
     encode(w, events[0]);
@@ -211,6 +225,15 @@ TEST(EventJournal, OneGoldenLinePerFamily) {
     EXPECT_EQ(w.str(),
               R"({"ev":"tasking_cycle","t":3600,"cycles":2,)"
               R"("next_tasking_sec":1800,"intents":96})");
+
+    // the action_filed family's golden (CAMP-ATM-1 — the ACTION
+    // tables' filing: team 2 defends its damaged airbase with CAS)
+    w = f4::json::Writer{};
+    encode(w, events[8]);
+    EXPECT_EQ(w.str(),
+              R"({"ev":"action_filed","t":4000,"team":2,)"
+              R"("mission_byte":20,"mission_name":"CAS","action_type":1,)"
+              R"("context":4,"objective_id":4281,"damage_pct":12})");
 }
 
 TEST(EventJournal, WrittenFileShape) {
@@ -227,8 +250,8 @@ TEST(EventJournal, WrittenFileShape) {
     EXPECT_EQ(j.detail(), path.string());
 
     const auto text = slurp(path);
-    // 1 header + 8 events + 1 end = 10 lines, every line ending \n
-    EXPECT_EQ(std::count(text.begin(), text.end(), '\n'), 10);
+    // 1 header + 9 events + 1 end = 11 lines, every line ending \n
+    EXPECT_EQ(std::count(text.begin(), text.end(), '\n'), 11);
     EXPECT_EQ(text.find("{\"v\":1,\"journal\":1,\"identity\":{"), 0U);
     EXPECT_NE(text.find("\n{\"ev\":\"kill\""), std::string::npos);
     EXPECT_NE(text.find("{\"journal_end\":{\"protocol\":1,"),
@@ -423,6 +446,16 @@ TEST(EventFilter, OwnedFamiliesMatchTheOwningSide) {
     filed.mission_filed.team = 6;
     EXPECT_FALSE(matches(rok, filed));
 
+    // CAMP-ATM-1 — the ACTION filing belongs to the team it reacts FOR
+    // (the owner defends, the striker punishes).
+    CampaignEvent action;
+    action.kind = CampaignEvent::Kind::ActionFiled;
+    action.action_filed.t = 10;
+    action.action_filed.team = 6;
+    EXPECT_FALSE(matches(rok, action));
+    action.action_filed.team = 2;
+    EXPECT_TRUE(matches(rok, action));
+
     CampaignEvent roe;
     roe.kind = CampaignEvent::Kind::RoeChanged;
     roe.roe_changed.t = 10;
@@ -444,6 +477,7 @@ TEST(EventFilter, KindNamesRoundTrip) {
              CampaignEvent::Kind::WeatherChanged,
              CampaignEvent::Kind::RoeChanged,
              CampaignEvent::Kind::TaskingCycle,
+             CampaignEvent::Kind::ActionFiled,
          }) {
         CampaignEvent::Kind parsed{};
         ASSERT_TRUE(parse_event_kind(event_kind_name(k), parsed));

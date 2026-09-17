@@ -206,6 +206,18 @@ struct MissionRequest {
     /// RequestEnemyMission path: a strike package's ADDBARCAP files a
     /// defender CAP over the threatened objective). Telemetry + QC.
     bool enemy_filed = false;
+    /// CAMP-ATM-1 — the filing ACTION's bytes (the AtmRequestState
+    /// vocabulary, decode-only until this tranche): action_type names
+    /// the ACTION-table entry that filed the request (0 = none — every
+    /// pre-ATM-1 request), context carries the driving objective's own
+    /// type byte. Both ride on generated requests as telemetry; the
+    /// Campaign books the ledger's action-filing log (and the
+    /// action_filed event family rides it) from these bytes.
+    std::uint8_t action_type = 0;
+    std::uint8_t context = 0;
+    /// CAMP-ATM-1 — the destroyed-features percent that drove an
+    /// ACTION filing (0 on every non-ACTION request).
+    int damage_pct = 0;
 };
 
 /// A flight's role in its package (the support-assignment vocabulary).
@@ -306,6 +318,35 @@ struct AtmConfig {
     /// Pending enemy-request queue cap per team (RequestEnemyMission
     /// filings awaiting the defender's next generate_requests).
     int max_pending_enemy_requests = 4;
+    /// CAMP-ATM-1 — pending ACTION-filing queue cap per team (the
+    /// objective-damage-driven CAS/BARCAP/SEAD filings awaiting this
+    /// team's next generate_requests).
+    int max_pending_action_requests = 4;
+};
+
+// CAMP-ATM-1 — the ACTION system's type byte (the wire AtmRequestState
+// action_type vocabulary — decoded until this tranche, generated from
+// here on). The reference's ACTION tables (ObjectiveClass/UnitClass
+// SetAction) live in aiinput.dat values our sources cannot see — the
+// same documented limitation as the racetrack dimensions — so this is
+// the deterministic subset, each entry named for what it reacts to:
+//
+//   Defend — an OWN objective took damage this war (any destroyed
+//            feature): the owner files CAS over it; when the damage is
+//            heavy (>= kActionHeavyDamagePct destroyed) it also files a
+//            BARCAP station (the garrison CAP).
+//   Punish — an ENEMY objective (a team this team is at war with) took
+//            damage: the team files a SEADSTRIKE against it (the
+//            defenses there are alive — they shot back; suppress them
+//            before the next visit).
+//   Sweep  — the ladder's SWEEP lines (not damage-driven — the
+//            contested-air filing — but ACTION-tagged so the wire sees
+//            which requests the ACTION system shaped).
+enum ActionSystemType : std::uint8_t {
+    kActionNone = 0,    ///< not ACTION-filed (every pre-ATM-1 request)
+    kActionDefend = 1,  ///< own objective damaged — CAS (+BARCAP heavy)
+    kActionPunish = 2,  ///< enemy objective damaged — SEADSTRIKE
+    kActionSweep = 3,   ///< the ladder's SWEEP line (contested air)
 };
 
 /// The pipeline's own telemetry (the QC gates and the summary read
@@ -333,6 +374,13 @@ struct AtmStats {
     int supports_shared = 0;      ///< packages covered by an existing
                                   ///< support flight (no new flight)
     int enemy_caps_filed = 0;     ///< RequestEnemyMission filings
+    // CAMP-ATM-1 — the ACTION tables' counter (deterministic).
+    int actions_filed = 0;        ///< objective-damage-driven filings
+                                  ///< (CAS/BARCAP/SEADSTRIKE; the
+                                  ///< ACTION tables' own output — the
+                                  ///< ladder's SWEEP targeting is not
+                                  ///< counted here, it rides
+                                  ///< requests_generated)
 };
 
 // ============================================================================
@@ -583,6 +631,31 @@ private:
     void file_enemy_barcap_(std::uint8_t attacker_team,
                             std::uint32_t target_vu, CampaignTime now);
 
+    /// CAMP-ATM-1 — the ACTION tables' scan: every objective with
+    /// destroyed features drives a filing for the teams it matters to
+    /// (own damage → Defend, enemy damage → Punish), into the pending
+    /// queue below, deduped against the queue AND the booked flights
+    /// (a standing garrison does not re-file until its flight recovers
+    /// — the reference's request-queue service rule). Deterministic:
+    /// wire-order walk, wire-order dedup.
+    void scan_actions_(std::uint8_t team, CampaignTime now);
+
+    /// File one ACTION request into the team's pending queue (the
+    /// shared mechanics of scan_actions_): dedup + cap + the priority
+    /// bonus + the ledger booking (the action-filing log). False when
+    /// deduped/capped (nothing filed).
+    bool file_action_(std::uint8_t team, std::uint8_t mission,
+                      std::uint8_t action_type, std::uint8_t context,
+                      std::uint32_t objective_vu, int damage_pct,
+                      CampaignTime now);
+
+    /// The objective's destroyed-features percentage (0..100): the
+    /// fstatus bitmap's 2-bit fields (2 = destroyed; 1 = damaged —
+    /// damage-present only; 3 = unknown, ignored — the reference's
+    /// no-data nibble) over the effective feature count (the decoded
+    /// count, or the bitmap's own capacity when the save carries none).
+    [[nodiscard]] int objective_damage_pct_(int index) const;
+
     /// FindSupportFlights: share-or-file one support mission
     /// (support_name) requested by `flag_name` on the main flight's
     /// profile. Share: a booked or on-cycle flight of the same byte,
@@ -647,6 +720,15 @@ private:
     /// P7 — RequestEnemyMission filings awaiting the defender's next
     /// generate_requests (indexed by team slot).
     std::array<std::vector<MissionRequest>, 8> pending_enemy_{};
+    /// CAMP-ATM-1 — the ACTION tables' filings awaiting the team's
+    /// next generate_requests (indexed by team slot; drained ahead of
+    /// the ladder walk, after the enemy queue).
+    std::array<std::vector<MissionRequest>, 8> pending_actions_{};
+    /// CAMP-ATM-1 — per-team rotation cursor over the ranked enemy
+    /// objective list (the SWEEP line family's own spread — a sweep
+    /// walks the enemy's territory, decoupled from the strike
+    /// rotation).
+    std::array<int, 8> sweep_cursor_{};
     bool backlog_seeded_ = false;
 
     std::uint32_t next_package_id_ = 1;

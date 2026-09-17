@@ -453,6 +453,40 @@ TEST(ProtocolDispatch, TeamFilterGatesDelivery) {
     EXPECT_EQ(out.find("\"ev\":\"mission_filed\""), std::string::npos);
 }
 
+TEST(ProtocolDispatch, ActionFiledKindSubscribesAndRidesTheStepLine) {
+    // CAMP-ATM-1 — the ninth family on the wire: the ACTION tables'
+    // filing subscribes by name, echoes canonically, and its step line
+    // is byte-pinned.
+    MockSession s;
+    CampaignEvent action;
+    action.kind = CampaignEvent::Kind::ActionFiled;
+    action.action_filed.t = 4000;
+    action.action_filed.team = 2;
+    action.action_filed.mission_byte = 20;
+    action.action_filed.mission_name = "CAS";
+    action.action_filed.action_type = 1;
+    action.action_filed.context = 4;
+    action.action_filed.objective_id = 4281;
+    action.action_filed.damage_pct = 12;
+    s.queued = {action};
+
+    std::string out;
+    (void)handle(s, R"({"v":1,"op":"subscribe","kinds":["action_filed"],"teams":[2]})",
+                 out);
+    EXPECT_EQ(out,
+              R"({"v":1,"op":"subscribe","status":"ok","kinds":["action_filed"],)"
+              R"("teams":[2]})" "\n");
+    out.clear();
+    const auto o = handle(s, R"({"v":1,"op":"step","ticks":60})", out);
+    EXPECT_EQ(o.kind, ProtocolOutcome::Kind::Ok);
+    EXPECT_EQ(
+        out,
+        R"({"v":1,"op":"step","status":"ok","ticks":60,"dilated":0,"events":1})" "\n"
+        R"({"ev":"action_filed","t":4000,"team":2,"mission_byte":20,)"
+        R"("mission_name":"CAS","action_type":1,"context":4,)"
+        R"("objective_id":4281,"damage_pct":12})" "\n");
+}
+
 TEST(ProtocolDispatch, EmptyKindListDeliversNothing) {
     MockSession s;
     CampaignEvent cycle;

@@ -468,6 +468,30 @@ void CampaignResultLedger::apply_bomb_impact(
     impacts_.push_back(rec);
 }
 
+void CampaignResultLedger::apply_action_filing(
+        double t_s,
+        std::uint8_t team,
+        std::uint8_t mission,
+        std::uint8_t action_type,
+        std::uint8_t context,
+        std::uint32_t objective_vu,
+        int damage_pct) {
+    // CAMP-ATM-1 — pure observation: the ACTION filing moved no books
+    // (the request rides the ATM's own pipeline; a filled sortie draws
+    // through apply_mission_draw as any other). Log + counter only.
+    ActionFilingRecord rec;
+    rec.t_s = t_s;
+    rec.team = team;
+    rec.mission = mission;
+    rec.action_type = action_type;
+    rec.context = context;
+    rec.objective = objective_vu;
+    rec.damage_pct = damage_pct < 0 ? 0 : (damage_pct > 100 ? 100
+                                                            : damage_pct);
+    action_filings_.push_back(rec);
+    ++actions_filed_;
+}
+
 // ============================================================================
 // Queries
 // ============================================================================
@@ -938,6 +962,34 @@ std::string CampaignResultLedger::to_json() const {
         w.put(captures_.empty() ? "]" : "\n    ]");
 
         w.put("\n  }");
+    }
+
+    // CAMP-ATM-1 — the ACTION tables' filing log. OPTIONAL (the same
+    // discipline as mission_recoveries): a run with no ACTION filings
+    // (every pre-ATM-1 run, every disarmed run) emits the
+    // byte-identical document.
+    if (!action_filings_.empty()) {
+        w.put(",\n  \"actions\": [");
+        for (std::size_t i = 0; i < action_filings_.size(); ++i) {
+            const auto& a = action_filings_[i];
+            w.put(i ? ",\n    " : "\n    ");
+            w.put("{\"t_ms\": ");
+            w.put(time_ms(a.t_s));
+            w.put(", ");
+            w.number_key("team", a.team);
+            w.put(", ");
+            w.number_key("mission", a.mission);
+            w.put(", ");
+            w.number_key("action_type", a.action_type);
+            w.put(", ");
+            w.number_key("context", a.context);
+            w.put(", ");
+            w.number_key("objective", a.objective);
+            w.put(", ");
+            w.number_key("damage_pct", a.damage_pct);
+            w.put("}");
+        }
+        w.put("\n  ]");
     }
 
     w.put("\n}\n");

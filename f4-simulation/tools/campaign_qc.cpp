@@ -1478,6 +1478,8 @@ int main(int argc, char** argv) {
     int strategy_supports_filed = 0;
     int strategy_supports_shared = 0;
     int strategy_enemy_caps = 0;
+    // CAMP-ATM-1: the ACTION tables' counter.
+    int strategy_actions = 0;
     if (args.tasking_minutes > 0) {
         if (args.profiles_json.empty() ||
             !std::filesystem::exists(args.profiles_json)) {
@@ -1542,6 +1544,10 @@ int main(int argc, char** argv) {
         route_cfg.min_avoid_threat = 25;
         // P7: the loiter racetracks ride the strategy arm.
         route_cfg.loiter_racetracks = args.strategy;
+        // CAMP-ATM-1: the sweep lines and the tanker refuel waypoints
+        // ride the same arm.
+        route_cfg.sweep_lines = args.strategy;
+        route_cfg.tanker_refuel_waypoints = args.strategy;
         const RouteBuilder route_builder(
             static_cast<const f4::world::IObjectiveSource&>(
                 adapters.objectives),
@@ -1624,10 +1630,12 @@ int main(int argc, char** argv) {
                 strategy_supports_filed = atm->supports_filed;
                 strategy_supports_shared = atm->supports_shared;
                 strategy_enemy_caps = atm->enemy_caps_filed;
+                strategy_actions = atm->actions_filed;
                 std::printf("strategy: stations=%d supports=%d "
-                            "shared=%d enemy_caps=%d\n",
+                            "shared=%d enemy_caps=%d actions=%d\n",
                             atm->stations_targeted, atm->supports_filed,
-                            atm->supports_shared, atm->enemy_caps_filed);
+                            atm->supports_shared, atm->enemy_caps_filed,
+                            atm->actions_filed);
             }
         }
         std::printf("threat_map: ad_units=%d threatened_cells=%d\n",
@@ -2074,6 +2082,10 @@ int main(int argc, char** argv) {
             w.number_key("strategy_supports_shared", strategy_supports_shared);
             w.put(",    ");
             w.number_key("strategy_enemy_caps", strategy_enemy_caps);
+            // CAMP-ATM-1: the ACTION tables' counter (present whenever
+            // the arm ran — zeros when it filed nothing).
+            w.put(",    ");
+            w.number_key("strategy_actions", strategy_actions);
             w.put(",    ");
             w.number_key("aircraft_recovered",
                          result_ledger.aircraft_recovered());

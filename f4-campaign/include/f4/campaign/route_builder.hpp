@@ -127,6 +127,10 @@ inline constexpr std::uint16_t kWpfCriticalMask = 0x07FF;
 inline constexpr std::uint8_t kWpNothing = 0;
 inline constexpr std::uint8_t kWpTakeoff = 1;
 inline constexpr std::uint8_t kWpAssemble = 2;
+/// CAMP-ATM-1 — the refuel waypoint (campwp.h WP_REFUEL): the tanker
+/// waypoint — the orbit-approach point where package aircraft top off
+/// before joining the station. Turnpoint-flagged (never eliminated).
+inline constexpr std::uint8_t kWpRefuel = 3;
 inline constexpr std::uint8_t kWpLand = 7;
 
 /// Does this profile's route DELIVER ordnance on an objective? The C3
@@ -159,6 +163,32 @@ inline constexpr std::uint8_t kWpLand = 7;
     return profile.targetwp == "WP_CAS";
 }
 
+/// CAMP-ATM-1 — does this profile fly a SWEEP LINE? The contested-air
+/// family: LOCATION-targeted TPROF_ATTACK profiles (the generated
+/// table carries exactly AMIS_SWEEP; data-driven, never a byte
+/// switch). Under the strategy arm the ladder gives the request an
+/// enemy-objective target, and the builder (sweep_lines armed) flies
+/// the LINE — the attack run extends THROUGH the target along the
+/// inbound axis instead of stopping at the turn point.
+[[nodiscard]] inline bool profile_flies_sweep_line(
+        const MissionProfile& profile) noexcept {
+    if (profile.target != "LOCATION") return false;
+    if (profile.target_profile != "TPROF_ATTACK") return false;
+    return profile.targetwp == "WP_SWEEP";
+}
+
+/// CAMP-ATM-1 — does this profile fly the OBJECTIVE-targeted CAS
+/// shape? The ACTION tables' Defend filing targets the damaged own
+/// OBJECTIVE (not a battalion — the defenders there are the point);
+/// the profile's own target vocabulary is WP_CAS (TPROF_ATTACK).
+/// Under the strategy arm these route to the objective like any
+/// strike (the builder resolves objectives first).
+[[nodiscard]] inline bool profile_flies_objective_cas(
+        const MissionProfile& profile) noexcept {
+    if (profile.target_profile != "TPROF_ATTACK") return false;
+    return profile.targetwp == "WP_CAS";
+}
+
 /// Tunables — FreeFalcon reads these from aiinput.dat ([ATM] section;
 /// aiinput.cpp's GetPrivateProfileInt keys), which is game data, not
 /// source. Defaults are the documented reference values; hosts with a
@@ -186,6 +216,26 @@ struct RouteBuilderConfig {
     int racetrack_length_grid = 20;
     /// Racetrack cross-leg width, grid units (≈4.5 nm).
     int racetrack_width_grid = 8;
+
+    /// CAMP-ATM-1 — emit the SWEEP LINE shape (TPROF_ATTACK +
+    /// WP_SWEEP): the attack run extends THROUGH the target along the
+    /// inbound axis (two turnpoint legs past it — the flight sweeps
+    /// the corridor, not just the point). DEFAULT OFF: the pre-ATM-1
+    /// shape is the golden identity (and SWEEP requests were
+    /// target-less anyway — nothing reached the builder).
+    bool sweep_lines = false;
+    /// CAMP-ATM-1 — emit the TANKER WAYPOINT (the refuel point) on
+    /// AMIS_TANKER racetrack stations: one WP_REFUEL turnpoint on the
+    /// orbit's approach, `tanker_refuel_backoff_grid` before the
+    /// anchor (the package tops off BEFORE joining the station).
+    /// DEFAULT OFF — the golden identity (support orbits carry no
+    /// refuel point).
+    bool tanker_refuel_waypoints = false;
+    /// The refuel point's distance back from the station anchor,
+    /// grid units (the fuel-planning tranche's documented constant —
+    /// the reference's own value lives in aiinput.dat, our sources
+    /// cannot see it).
+    int tanker_refuel_backoff_grid = 6;
 };
 
 /// One route build's outcome + QC counters.
@@ -212,6 +262,12 @@ struct RouteBuildResult {
     /// P7 — racetrack corners emitted (0 = no station pattern; the
     /// anchor is not counted — it IS the profile's target WP).
     int racetrack_corners = 0;
+    /// CAMP-ATM-1 — sweep-line legs past the target (0 = no line; the
+    /// legs are the corridor extensions the sweep arm adds).
+    int sweep_legs = 0;
+    /// CAMP-ATM-1 — the refuel waypoint emitted (0/1 — the tanker
+    /// waypoint; the fuel-planning slice's own counter).
+    int refuel_waypoints = 0;
     /// Legs actually flown: waypoint-to-waypoint distances (grid units),
     /// the QC artifact's route length.
     int route_length_grid = 0;
