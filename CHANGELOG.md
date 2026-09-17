@@ -5,6 +5,42 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## CAMP-HOST-2 — the event stream + journal
+
+- **CAMP-HOST-2** — the engine's typed event stream lands (Docs/CAMP_HOST_PLAN.md
+  §3.4/§8): ONE bus message (`f4::campaign::api::CampaignEvent`, the tagged
+  envelope of the v1 families pinned in HOST-1) published at the sites that
+  move the ledger books — session-side for mission_filed / tasking_cycle /
+  reinforcement_delivered / objective_captured / objective_damage (the sink
+  collects the damage diffs, the session fills owner + time), sink-side for
+  kill (EntityKilledMessage gains a defaulted `cause` literal —
+  "missile"/"gun"), the WeatherSystem observer for weather_changed (scenario
+  sessions; roe_changed waits for CAMP-CMD-1). The journal: `campaignd
+  --journal war.jsonl` records the COMPLETE engine-rate stream as JSONL
+  (identity header + event lines + identity footer); `--verify-journal`
+  replays a golden byte-for-byte and exits 23 at the first divergence (the
+  plan's identity-drift guard; drift outranks the refusal rule at EOF). The
+  wire: `subscribe {"kinds":[...],"teams":[...]}` arms the stream (per-family
+  team matching; a kill matches either side), step responses carry
+  `"events":N` + N event lines, and an un-subscribed client's wire is
+  HOST-1-identical (arms by use). Event `t` is the engine's relative seconds
+  (the books' axis). Gate: journal replay of the C6 fight reproduces the
+  stream AND the ledger fingerprint; empty-journal saves byte-identical; one
+  golden line per family. 62 new ctest cases (57 contract + 5 e2e), all
+  green.
+
+## CAMP-HOST-1 — the engine contract + campaignd
+
+- **CAMP-HOST-1** — the campaign engine's host contract lands
+  (Docs/CAMP_HOST_PLAN.md): `f4-campaign-api` (header-only, f4-json + std
+  only — the session iface, v1 query DTOs with byte-stable encoders, the
+  typed CommandIntent/CommandAck wire, the v1 event vocabulary pinned
+  pre-emission, the line protocol with the exit namespace 20/21/22/24/25),
+  the `EngineSessionHost` adapter in f4-simulation (queries serve the
+  engine's own views verbatim; the FID family forwards; the CAMP-CMD queue
+  refuses with NotImplemented + the tranche named), `campaignd` (the stdio
+  JSON reference host), 58 ctest cases green, the golden identity intact.
+
 ## P7 — the ATM strategy layer (support flights, racetracks, enemy CAP, RoE)
 
 - **P7** — the C4 pipeline's named queue item "the strategy layer files

@@ -40,6 +40,8 @@
 #include <f4/world_types/day_night.hpp>
 #include <f4/world_types/weather.hpp>
 
+#include <functional>
+
 namespace f4::sim {
 
 class WeatherSystem {
@@ -110,6 +112,20 @@ public:
         return options_.advance_clock;
     }
 
+    // --- HOST-2: the condition-turn observer ----------------------------
+
+    /// Fired by check_condition_() whenever the Markov chain MOVES the
+    /// condition (never on a same-state draw, never while locked).
+    /// Signature: (elapsed sim seconds, from, to). Simulation wires this
+    /// to the campaign event bus (the weather_changed family); campaign
+    /// sessions have no WeatherSystem at all, so they never emit it.
+    using ConditionChangeFn = std::function<void(
+        double, f4::world_types::WeatherCondition,
+        f4::world_types::WeatherCondition)>;
+    void set_on_condition_change(ConditionChangeFn fn) {
+        on_change_ = std::move(fn);
+    }
+
 private:
     /// One condition re-check: maybe draw a new condition, refresh the
     /// steered field targets from the (possibly new) profile.
@@ -135,6 +151,13 @@ private:
     std::mt19937 rng_;
     double check_timer_s_{0.0};
     bool checked_once_{false};
+
+    // The system's own elapsed sim time (the weather_changed event's t
+    // axis — the same relative clock the session's sim runs on).
+    double elapsed_s_{0.0};
+
+    // The HOST-2 condition-turn observer (unset = no observer, zero cost).
+    ConditionChangeFn on_change_{};
 
     // Steered-field targets (re-derived per condition check).
     double target_visibility_nm_{40.0};

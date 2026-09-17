@@ -87,6 +87,7 @@ void WeatherSystem::set_state(const f4::world_types::WeatherState& s) {
 }
 
 void WeatherSystem::advance(double dt_s) {
+    elapsed_s_ += dt_s;
     if (dt_s <= 0.0) return;
 
     // The clock first (the band tracks it), unless the scenario froze it.
@@ -141,6 +142,14 @@ void WeatherSystem::check_condition_(double sim_time_s) {
         }
     }
     state_.condition = static_cast<f4::world_types::WeatherCondition>(to);
+
+    // HOST-2: the turn observer fires on a REAL change only (a same-
+    // state draw is weather standing still — no event, no surprise).
+    if (on_change_ != nullptr && to != from) {
+        on_change_(elapsed_s_,
+                   static_cast<f4::world_types::WeatherCondition>(from),
+                   static_cast<f4::world_types::WeatherCondition>(to));
+    }
 
     // Refresh the targets from the (possibly new) condition's profile,
     // with the seeded per-check jitter.

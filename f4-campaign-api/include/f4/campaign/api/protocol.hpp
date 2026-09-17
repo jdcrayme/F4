@@ -16,6 +16,17 @@
 //                                                 {"q":"...",["team":N,["limit":N]]}
 //   command  → a typed CommandIntent             {"intent":"...",...}
 //   save     → runtime-safe save (world JSON)    {"path":"..."}
+//   subscribe → arm the event stream (HOST-2)    {"kinds":[...],["teams":[...]]}
+//
+// Event framing (HOST-2): a step response carries "events":N — the
+// number of event lines that FOLLOW it (each line one pinned event
+// encoder's bytes: {"ev":"kill","t":...,...}). Line types are
+// discriminable by their first keys: responses carry "op", events
+// carry "ev". A client that never subscribes sees "events":0 and NO
+// extra lines — the HOST-1 wire is unchanged for it (the golden-
+// identity rule, now on the wire too). The journal (journal.hpp) is
+// the ENGINE-RATE sink and never filters; the wire is what the host
+// subscribed to.
 //
 // Exit-code mapping (the plan §7 table; campaignd's contract with CI):
 //   20 protocol violation — malformed line, bad version, unknown op
@@ -23,7 +34,11 @@
 //   22 command refused   — data, not fatal mid-stream; the reference host
 //                          exits 22 at EOF when the LAST command was
 //                          refused (a scripted golden fails loudly)
-//   24 engine operation failed — save/query refused by the engine side
+//   23 identity drift    — campaignd --verify-journal's replay
+//                          assertion failed (HOST-2; checked at the
+//                          process level, not in this dispatcher)
+//   24 engine operation failed — save/query/journal refused by the
+//                                 engine side
 //
 // Strictness: UNKNOWN KEYS in the envelope are a protocol violation —
 // the v1 dialect rejects them loudly (the house's loud-failure
@@ -67,14 +82,10 @@ ProtocolOutcome host_handle(ICampaignSession& session,
 
 namespace detail {
 
+// The identity object — the canonical bytes live in identity.hpp (the
+// journal's header/footer lines share them).
 inline void encode(f4::json::Writer& w, const IdentityFingerprint& id) {
-    w.raw("{\"protocol\":");
-    w.number(static_cast<std::uint64_t>(id.protocol_version));
-    w.raw(",\"campaign_time_s\":");
-    w.number(static_cast<long long>(id.campaign_time_s));
-    w.raw(",\"ledger_fnv\":\"");
-    w.put(f4::json::escape_string(id.ledger_fnv));
-    w.raw("\"}");
+    encode_identity(w, id);
 }
 
 // The uniform error line. `op` is the (possibly empty) op string when the
@@ -128,6 +139,9 @@ inline ProtocolOutcome host_handle(ICampaignSession& session,
     CommandIntent intent;
     bool have_intent = false;
     std::string save_path;
+    std::vector<std::string> kind_names;
+    bool have_kinds = false;
+    std::vector<long long> teams;
 
     try {
         f4::json::Reader r(line);
@@ -153,6 +167,28 @@ inline ProtocolOutcome host_handle(ICampaignSession& session,
             } else if (key == "limit") {
                 limit = r.read_int();
                 have_limit = true;
+            } else if (key == "kinds") {
+                // ["kill",...] | [] — the v1 event-vocabulary names
+                // (plus "all"); validated at dispatch, not here.
+                r.expect('[');
+                if (!r.consume(']')) {
+                    while (true) {
+                        kind_names.push_back(r.read_string());
+                        if (r.consume(']')) break;
+                        r.expect(',');
+                    }
+                }
+                have_kinds = true;
+            } else if (key == "teams") {
+                // [] = every team (the filter's own default)
+                r.expect('[');
+                if (!r.consume(']')) {
+                    while (true) {
+                        teams.push_back(r.read_int());
+                        if (r.consume(']')) break;
+                        r.expect(',');
+                    }
+                }
             } else if (key == "intent") {
                 intent_name = r.read_string();
                 // the body parse consumes ':' + {...} — including the
@@ -201,14 +237,26 @@ inline ProtocolOutcome host_handle(ICampaignSession& session,
                                       "step needs ticks >= 0", 20);
         }
         const auto res = session.step(static_cast<std::uint32_t>(ticks));
+        // HOST-2: the events the step produced, delivered per the step
+        // return (the plan §3.4 rule) — N announced in the response, N
+        // lines following. An un-armed session drains to zero lines.
+        auto events = session.drain_events();
         f4::json::Writer w;
         w.raw("{\"v\":1,\"op\":\"step\",\"status\":\"ok\",\"ticks\":");
         w.number(static_cast<std::uint64_t>(ticks));
         w.raw(",\"dilated\":");
         w.raw(res.dilated ? "1" : "0");
+        w.raw(",\"events\":");
+        w.number(static_cast<std::uint64_t>(events.size()));
         w.put('}');
         out.append(w.str());
         out.push_back('\n');
+        for (const auto& e : events) {
+            f4::json::Writer ew;
+            encode(ew, e);
+            out.append(ew.str());
+            out.push_back('\n');
+        }
         return {};
     }
 
@@ -275,6 +323,58 @@ inline ProtocolOutcome host_handle(ICampaignSession& session,
             o.exit_code = 22;
             return o;
         }
+        return {};
+    }
+
+    if (op == "subscribe") {
+        // HOST-2: arm the event stream. kinds REQUIRED (a subscription
+        // that names nothing is a client bug — loud, the strictness
+        // rule); "all" short-circuits the kind gate; teams OPTIONAL
+        // (default: every team). The response echoes the EFFECTIVE
+        // filter in canonical order.
+        if (!have_kinds) {
+            return detail::error_line(out, op, "malformed",
+                                      "subscribe needs kinds", 20);
+        }
+        EventFilter filter;
+        std::vector<std::string> echo_kinds;
+        for (const auto& name : kind_names) {
+            if (name == "all") {
+                filter.all = true;
+                echo_kinds.push_back(name);
+                continue;
+            }
+            CampaignEvent::Kind kind;
+            if (!parse_event_kind(name, kind)) {
+                return detail::error_line(out, op, "malformed",
+                                          "unknown event kind: " + name,
+                                          20);
+            }
+            filter.kinds.push_back(kind);
+            echo_kinds.push_back(name);
+        }
+        for (const auto t : teams) {
+            if (t < 0 || t > 255) {
+                return detail::error_line(out, op, "malformed",
+                                          "team slots are 0..255", 20);
+            }
+            filter.teams.push_back(static_cast<int>(t));
+        }
+        session.set_event_filter(filter);
+        f4::json::Writer w;
+        w.raw("{\"v\":1,\"op\":\"subscribe\",\"status\":\"ok\",\"kinds\":[");
+        for (std::size_t i = 0; i < echo_kinds.size(); ++i) {
+            if (i > 0) w.put(',');
+            w.string(echo_kinds[i]);
+        }
+        w.raw("],\"teams\":[");
+        for (std::size_t i = 0; i < filter.teams.size(); ++i) {
+            if (i > 0) w.put(',');
+            w.number(static_cast<std::uint64_t>(filter.teams[i]));
+        }
+        w.raw("]}");
+        out.append(w.str());
+        out.push_back('\n');
         return {};
     }
 

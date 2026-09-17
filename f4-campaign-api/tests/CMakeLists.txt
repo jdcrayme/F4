@@ -21,3 +21,8 @@ f4_campaign_api_add_test(test_dto_goldens test_dto_goldens.cpp)
 # The protocol dispatcher against a MOCK session: op routing, the strict
 # envelope, exit-code mapping, refusal-as-data. No engine in the link.
 f4_campaign_api_add_test(test_protocol_dispatch test_protocol_dispatch.cpp)
+
+# HOST-2: the journal's byte discipline (one golden line per event
+# family, replay identity, drift naming) + the subscription filter's
+# per-family team semantics. Still no engine in the link.
+f4_campaign_api_add_test(test_event_journal test_event_journal.cpp)

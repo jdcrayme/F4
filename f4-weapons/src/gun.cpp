@@ -163,7 +163,7 @@ std::vector<GunHit> GunStream::tick(double dt,
                 }
                 if (bus_ != nullptr && out.killed) {
                     bus_->publish(EntityKilledMessage{target_id.value, shooter_id,
-                                                      sim_time_s_});
+                                                      sim_time_s_, "gun"});
                 }
             }
             hits.push_back(hit);

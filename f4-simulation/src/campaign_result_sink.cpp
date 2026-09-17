@@ -65,6 +65,7 @@ void CampaignResultSink::snapshot_objectives_() {
 }
 
 std::size_t CampaignResultSink::attach(f4::messaging::MessageBus& bus) {
+    bus_ = &bus;
     kill_subscription_ = bus.subscribe<f4::weapons::EntityKilledMessage>(
         [this](const f4::weapons::EntityKilledMessage& m) {
             handle_kill(m);
@@ -82,6 +83,9 @@ std::size_t CampaignResultSink::attach(f4::messaging::MessageBus& bus) {
 }
 
 void CampaignResultSink::detach(f4::messaging::MessageBus& bus) {
+    if (bus_ == &bus) {
+        bus_ = nullptr;
+    }
     if (kill_subscription_ != static_cast<std::size_t>(-1)) {
         bus.unsubscribe<f4::weapons::EntityKilledMessage>(
             kill_subscription_);
@@ -124,6 +128,24 @@ void CampaignResultSink::handle_kill(
             victim->squadron_vu,
             victim->flight_vu,
             killer != nullptr ? killer->squadron_vu : 0);
+        // HOST-2: the kill event — the books' twin on the bus (the C1
+        // ledger's own kill shape, killer/victim resolved to squadrons
+        // + teams, t = the book time). Published only when the sink
+        // rides a bus; bus-less callers behave exactly as HOST-1.
+        if (bus_ != nullptr) {
+            f4::campaign::api::CampaignEvent e;
+            e.kind = f4::campaign::api::CampaignEvent::Kind::Kill;
+            e.kill.t = static_cast<std::int64_t>(
+                std::llround(m.sim_time_s));
+            e.kill.killer_squadron =
+                killer != nullptr ? killer->squadron_vu : 0;
+            e.kill.killer_team =
+                killer != nullptr ? killer->team_slot : 0;
+            e.kill.victim_squadron = victim->squadron_vu;
+            e.kill.victim_team = victim->team_slot;
+            e.kill.weapon = (m.cause != nullptr) ? m.cause : "";
+            bus_->publish(e);
+        }
         ++stats_.air_losses_recorded;
         if (killer != nullptr) {
             ++stats_.kills_attributed;
@@ -263,6 +285,7 @@ void CampaignResultSink::handle_unit_loss(
 
 void CampaignResultSink::sync_objective_damage() {
     auto& mut_world = const_cast<f4::entities::EntityWorld&>(world_);
+    damage_synced_.clear();
     for (const auto& snap : objective_snapshots_) {
         EntityHandle h(EntityId{snap.entity}, &mut_world);
 
@@ -271,12 +294,16 @@ void CampaignResultSink::sync_objective_damage() {
         if (fs == nullptr || fs->features.empty()) continue;
         double value_total = 0.0, value_destroyed = 0.0;
         int destroyed = 0;
+        int damaged = 0;
         for (const auto& f : fs->features) {
             const double weight = (f.value > 0) ? f.value : 1.0;
             value_total += weight;
             if (f.damage_state == 3) {
                 ++destroyed;
                 value_destroyed += weight;
+            }
+            if (f.damage_state != 0) {
+                ++damaged;
             }
         }
         const int pct_x100 = (value_total > 0.0)
@@ -302,6 +329,8 @@ void CampaignResultSink::sync_objective_damage() {
         rec.destroyed_pct = (pct_x100 + 50) / 100;  // hundredths → percent
         rec.fstatus = current_fstatus;
         ledger_.apply_objective_damage(rec);
+        damage_synced_.push_back(
+            DamageSync{snap.vu, damaged});   // the session publishes it
         ++stats_.objectives_synced;
     }
 }

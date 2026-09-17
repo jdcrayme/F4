@@ -18,7 +18,9 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <vector>
 
+#include <f4/campaign/api/events.hpp>
 #include <f4/campaign/api/identity.hpp>
 
 namespace f4::campaign::api {
@@ -104,6 +106,22 @@ public:
     /// A typed command (§3.3). Refusal is data — never an exception
     /// across the boundary.
     virtual struct CommandAck submit(const struct CommandIntent& intent) = 0;
+
+    // --- events (§3.4, CAMP-HOST-2) ---------------------------------------
+
+    /// Arm the event stream. The filter gates what the session BUFFERS;
+    /// a session that is never armed subscribes to nothing and buffers
+    /// nothing — the golden-identity rule (features arm by use, plan
+    /// §2.4). Calling again replaces the filter (the bus subscription is
+    /// installed once, on the first arm).
+    virtual void set_event_filter(const EventFilter& filter) = 0;
+
+    /// The events observed since the last drain (the last step that
+    /// returned them, or the arm point), filtered by the CURRENT filter
+    /// at the time each event fired. Draining clears. The protocol's
+    /// step op calls this after every step and emits each event as its
+    /// own line (the "events":N framing).
+    [[nodiscard]] virtual std::vector<CampaignEvent> drain_events() = 0;
 };
 
 } // namespace f4::campaign::api

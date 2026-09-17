@@ -34,8 +34,11 @@
 
 #include <f4/simulation/campaign_session.hpp>
 
+#include <cstddef>
+#include <functional>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace f4::simulation {
 
@@ -47,7 +50,7 @@ public:
     [[nodiscard]] static std::unique_ptr<EngineSessionHost>
     create(const CampaignSessionOptions& opts, std::string* error = nullptr);
 
-    ~EngineSessionHost() override = default;
+    ~EngineSessionHost() override;
 
     EngineSessionHost(const EngineSessionHost&) = delete;
     EngineSessionHost& operator=(const EngineSessionHost&) = delete;
@@ -64,6 +67,19 @@ public:
         const f4::campaign::api::QuerySpec& spec) override;
     f4::campaign::api::CommandAck submit(
         const f4::campaign::api::CommandIntent& intent) override;
+    void set_event_filter(
+        const f4::campaign::api::EventFilter& filter) override;
+    [[nodiscard]] std::vector<f4::campaign::api::CampaignEvent>
+    drain_events() override;
+
+    // --- HOST-2: extra engine-rate sinks (the journal; UNFILTERED —
+    // the journal is the complete record, the wire is the filtered one)
+
+    /// Install a sink called for every published event, in engine
+    /// occurrence order. Returns the handle remove_event_sink() takes.
+    [[nodiscard]] std::size_t add_event_sink(
+        std::function<void(const f4::campaign::api::CampaignEvent&)> sink);
+    void remove_event_sink(std::size_t handle);
 
     // --- direct engine access (tests; the viewer's later HOST-3 move) --
 
@@ -75,11 +91,28 @@ public:
 private:
     EngineSessionHost() = default;
 
+    /// Install the wire buffer's bus subscription (once, on first arm).
+    void arm_buffer_();
+
     std::unique_ptr<CampaignSession> session_;
     CampaignSessionOptions opts_{};
     /// The host's pacing presentation (echoed by the `time` query; never
     /// touches the fixed dt — the plan §2.2 rule).
     double time_scale_{1.0};
+
+    // --- HOST-2 event plumbing ------------------------------------------
+    struct EventSink {
+        std::size_t handle{0};
+        std::size_t subscription{0};
+        std::function<void(const f4::campaign::api::CampaignEvent&)> fn;
+    };
+    std::vector<EventSink> sinks_;
+    std::size_t next_sink_handle_{1};
+    /// The wire buffer (armed by set_event_filter; push-time filtered).
+    bool buffer_armed_{false};
+    std::size_t buffer_subscription_{static_cast<std::size_t>(-1)};
+    f4::campaign::api::EventFilter filter_{};
+    std::vector<f4::campaign::api::CampaignEvent> buffer_;
 };
 
 } // namespace f4::simulation

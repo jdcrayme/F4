@@ -23,6 +23,8 @@
 #include <string>
 #include <string_view>
 
+#include <f4/json/writer.hpp>
+
 namespace f4::campaign::api {
 
 // FNV-1a 64 — the dependency-free byte hash. Chosen over pulling f4-assets'
@@ -60,5 +62,20 @@ struct IdentityFingerprint {
     /// fnv1a64 over the byte-stable ledger JSON, hex (see to_hex16).
     std::string ledger_fnv;
 };
+
+// The identity's canonical wire object — the hello reply's "identity"
+// value AND the journal's header/footer lines (f4/campaign/api/journal.hpp)
+// share these exact bytes:
+//
+//   {"protocol":P,"campaign_time_s":T,"ledger_fnv":"XXXXXXXXXXXXXXXX"}
+inline void encode_identity(f4::json::Writer& w, const IdentityFingerprint& id) {
+    w.raw("{\"protocol\":");
+    w.number(static_cast<std::uint64_t>(id.protocol_version));
+    w.raw(",\"campaign_time_s\":");
+    w.number(static_cast<long long>(id.campaign_time_s));
+    w.raw(",\"ledger_fnv\":\"");
+    w.put(f4::json::escape_string(id.ledger_fnv));
+    w.raw("\"}");
+}
 
 } // namespace f4::campaign::api

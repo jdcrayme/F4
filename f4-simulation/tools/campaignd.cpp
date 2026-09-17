@@ -1,7 +1,8 @@
 // campaignd — the campaign engine's REFERENCE HOST (CAMP_HOST_PLAN.md
-// §7, CAMP-HOST-1). A headless process that speaks the contract over
-// line-delimited JSON on stdio: no sockets in the engine, ever — a
-// realtime UX bridges stdio→socket on ITS side of the boundary.
+// §7, CAMP-HOST-1; the journal modes are CAMP-HOST-2). A headless
+// process that speaks the contract over line-delimited JSON on stdio:
+// no sockets in the engine, ever — a realtime UX bridges stdio→socket
+// on ITS side of the boundary.
 //
 //   campaignd --world war.world.json \
 //             [--class-table falcon4.ct.json] [--aircraft f16.json] \
@@ -10,12 +11,26 @@
 //             [--tasking-cycle-sec S] [--reinforce-period-sec S] \
 //             [--no-atm] [--aa-combat] [--ground-war] [--strategy] \
 //             [--max-steps-per-advance N]
+//             [--journal war.jsonl | --verify-journal golden.jsonl]
+//
+// Journal modes (CAMP-HOST-2):
+//   --journal PATH          record the session's COMPLETE event stream
+//                           (engine rate, unfiltered) as append-only
+//                           JSONL: one identity header line, one line
+//                           per event, one identity footer line.
+//   --verify-journal PATH   the replay assertion: the run records as
+//                           above AND compares every line against the
+//                           golden byte-for-byte; any divergence (a
+//                           moved book, a different seed, a lost event)
+//                           exits 23 — the identity-drift guard. The
+//                           two flags are mutually exclusive (25).
 //
 // Session flow: on start the host emits the `hello` response (protocol
 // version + identity fingerprint) and then answers one line per
-// request. Every response is exactly one line; stderr carries the human
-// notes (the diagnostics the QC tool prints to stdout — here stdout IS
-// the wire and must stay clean).
+// request. A step response announces "events":N — the N event lines
+// that follow it (subscribed clients only). Every response is exactly
+// one line; stderr carries the human notes (the diagnostics the QC tool
+// prints to stdout — here stdout IS the wire and must stay clean).
 //
 // Exit codes (the plan §7 table — campaignd's contract with CI):
 //   0  green (EOF, and no refusal on the last command)
@@ -23,9 +38,11 @@
 //  21  unknown query
 //  22  command refused (the refusal rode the wire as data; a scripted
 //       golden fails loudly at EOF when the LAST command was refused)
-//  24  engine operation failed (save/query)
-//  25  session construction failed (bad paths, unloadable data)
+//  23  identity drift (--verify-journal: the replay is not the record)
+//  24  engine operation failed (save/query/journal IO)
+//  25  session construction failed (bad paths, unloadable data, usage)
 
+#include <f4/campaign/api/journal.hpp>
 #include <f4/campaign/api/protocol.hpp>
 #include <f4/simulation/campaign_session_host.hpp>
 
@@ -73,6 +90,8 @@ struct Args {
     bool ground_war = false;
     bool strategy_layer = false;
     int max_steps = 240;
+    std::filesystem::path journal;        // --journal (record)
+    std::filesystem::path verify_journal; // --verify-journal (replay)
 
     [[nodiscard]] bool ok() const noexcept { return !world.empty(); }
 };
@@ -91,7 +110,9 @@ void usage(std::ostream& os) {
           "  --aa-combat              arm the campaign flights for A/A (C6)\n"
           "  --ground-war             the ground war engine (G1)\n"
           "  --strategy               the ATM strategy layer (P7)\n"
-          "  --max-steps-per-advance N (the dilation cap, default 240)\n";
+          "  --max-steps-per-advance N (the dilation cap, default 240)\n"
+          "  --journal PATH           record the event stream (JSONL)\n"
+          "  --verify-journal PATH    replay-assert against a golden (exit 23 on drift)\n";
 }
 
 [[nodiscard]] Args parse_args(int argc, char** argv) {
@@ -145,6 +166,10 @@ void usage(std::ostream& os) {
             a.strategy_layer = true;
         } else if (k == "--max-steps-per-advance") {
             a.max_steps = std::atoi(next().c_str());
+        } else if (k == "--journal") {
+            a.journal = next();
+        } else if (k == "--verify-journal") {
+            a.verify_journal = next();
         } else if (k == "--help" || k == "-h") {
             usage(std::cerr);
             std::exit(0);
@@ -164,6 +189,11 @@ int main(int argc, char** argv) {
     if (!args.ok()) {
         std::cerr << "campaignd: --world is required\n";
         usage(std::cerr);
+        return 25;
+    }
+    if (!args.journal.empty() && !args.verify_journal.empty()) {
+        std::cerr << "campaignd: --journal and --verify-journal are "
+                     "mutually exclusive\n";
         return 25;
     }
 
@@ -188,6 +218,48 @@ int main(int argc, char** argv) {
         std::cerr << "campaignd: session construction failed: " << err
                   << "\n";
         return 25;
+    }
+
+    // CAMP-HOST-2: the journal — the engine-rate, COMPLETE record (the
+    // wire's subscription filter never touches it). The header rides
+    // the session-start identity (hello's), the footer the session-end
+    // one; the verifier mode compares every line byte-for-byte and
+    // exits 23 at the first divergence (identity drift, plan §5).
+    api::EventJournalWriter journal;
+    api::EventJournalVerifier verifier;
+    if (!args.journal.empty() || !args.verify_journal.empty()) {
+        const auto id = host->identity();
+        const bool writer_mode = !args.journal.empty();
+        std::string jerr;
+        if (writer_mode) {
+            if (!journal.open(args.journal.string(), id, &jerr)) {
+                std::cerr << "campaignd: journal open failed: " << jerr
+                          << "\n";
+                return 24;
+            }
+        } else {
+            if (!verifier.open(args.verify_journal.string(), id, &jerr)) {
+                std::cerr << "campaignd: identity drift (" << jerr
+                          << ")\n";
+                return 23;
+            }
+        }
+        // The sink: append (record) or assert (replay). A verifier hit
+        // aborts the process with 23 — the drift IS the run's verdict.
+        (void)host->add_event_sink(
+            [&journal, &verifier, writer_mode](
+                const api::CampaignEvent& e) {
+                if (writer_mode) {
+                    journal.append(e);
+                    return;
+                }
+                std::string jerr;
+                if (!verifier.expect(e, &jerr)) {
+                    std::cerr << "campaignd: identity drift (" << jerr
+                              << ")\n";
+                    std::exit(23);
+                }
+            });
     }
 
     // The hello line goes through the SAME dispatcher a request would —
@@ -218,6 +290,25 @@ int main(int argc, char** argv) {
         }
         if (outcome.kind == api::ProtocolOutcome::Kind::Refused) {
             last_refused = true;
+        }
+    }
+
+    // EOF: close the journal (the writer appends the session-end
+    // identity; the verifier asserts the golden's), then the refusal
+    // rule. Drift outranks a refusal — a wrong war is louder than a
+    // refused command (23 before 22, the plan §7 order).
+    if (!args.journal.empty()) {
+        std::string jerr;
+        if (!journal.close(host->identity(), &jerr)) {
+            std::cerr << "campaignd: journal close failed: " << jerr
+                      << "\n";
+            return 24;
+        }
+    } else if (!args.verify_journal.empty()) {
+        std::string jerr;
+        if (!verifier.close(host->identity(), &jerr)) {
+            std::cerr << "campaignd: identity drift (" << jerr << ")\n";
+            return 23;
         }
     }
 

@@ -138,7 +138,7 @@ void MissileSimComponent::update(double dt, messaging::MessageBus& bus) {
             }
             if (out.killed) {
                 bus.publish(EntityKilledMessage{mc->target_id, mc->shooter_id,
-                                                sim_time()});
+                                                sim_time(), "missile"});
             }
         }
     }

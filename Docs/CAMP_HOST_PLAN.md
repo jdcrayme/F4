@@ -1,9 +1,11 @@
 # Campaign Host — the Engine Contract (CAMP)
 
-> **Status**: Draft v1 — CAMP-HOST-1 ships with this patch (f4-campaign-api
-> + the EngineSessionHost adapter + `campaignd`; 58 ctest cases green, the
-> golden identity intact). Every other tranche below is an acceptance
-> contract, not a claim.
+> **Status**: Draft v1 — CAMP-HOST-1 shipped (f4-campaign-api + the
+> EngineSessionHost adapter + `campaignd`); CAMP-HOST-2 ships with this
+> patch (the typed event stream over f4-messaging, the JSONL journal,
+> the replay identity; 57 API cases + 5 engine-backed e2e cases on
+> top of HOST-1's 58, all green, the golden identity intact). Every
+> other tranche below is an acceptance contract, not a claim.
 
 The campaign engine is the product. Every user experience — the world viewer
 today, a map-first strategy UI, a war-room dashboard, a scripted AI observer,
@@ -282,12 +284,44 @@ Default behavior is byte-identical unless a gate says otherwise.
   that). The campaign clock's whole-second fires follow the same
   accumulator and can chunk several seconds into one fire.
 
-### CAMP-HOST-2 — the event stream + journal
-- Typed `CampaignEvent` over f4-messaging; the diary becomes a consumer, not
-  the source; `--journal` JSONL writer.
-- **Gate**: journal replay of the C6 acceptance fight reproduces the ledger
-  MD5 (exit 23 guards drift); empty-journal saves byte-identical; one golden
-  example per event family.
+### CAMP-HOST-2 — the event stream + journal (SHIPPED with this patch)
+- Typed `CampaignEvent` over f4-messaging (ONE bus message type — the
+  tagged envelope of the pinned v1 families); the `--journal` JSONL
+  writer + the byte-exact verifier; the wire's `subscribe` op and the
+  step response's `"events":N` framing.
+- **Gate (as built)**: journal replay of the C6 acceptance fight (the
+  FID-5 combat rig's head-on merge through the host, armed) reproduces
+  the ENTIRE stream byte-for-byte and closes with the same ledger
+  fingerprint (`--verify-journal` turns any divergence into exit 23,
+  drift outranking the refusal rule at EOF); an empty-journal save is
+  byte-identical to an un-journaled one and an eventless journal is
+  exactly two lines (the identity header + footer); one golden journal
+  line per event family pinned in the contract tests (the engine-backed
+  e2e pins tasking_cycle/mission_filed on the kunsan rig and the kill
+  pair on the combat rig).
+- **As-built notes**: (1) the EMITTER is the session (f4-simulation),
+  not f4-campaign — the ledger books stay the war's truth and their
+  bytes stay untouched (the identity anchor); events are derived at the
+  same call sites that move the books (mission_filed from the intent
+  publish, tasking_cycle/reinforcement_delivered from the cadence
+  call, objective_captured from the capture log's tail, objective_damage
+  from the sink's per-pass collection — the owner needs the session's
+  WorldState), so an event stream REQUIRES no engine-internal redesign
+  (plan §12) and a no-client session emits nothing (no subscription,
+  no buffer, byte-identical). (2) The kill event publishes at the
+  RESULT SINK (f4-simulation), where killer team + weapon family live;
+  `EntityKilledMessage` carries a `cause` literal ("missile"/"gun") —
+  additive, defaulted, no publisher changed but the two batteries.
+  (3) weather_changed emits from the scenario session's WeatherSystem
+  (a condition-turn observer); campaign sessions build no WeatherSystem
+  — the family's golden rides the contract tests until a scenario host
+  needs the wire. (4) roe_changed waits for CAMP-CMD-1's roe_set (the
+  P7 fire-control gate ride) — its encoder is pinned and the wire will
+  not change when it lands. (5) Event `t` is the ENGINE's relative
+  seconds (the books' own axis); a host adds the epoch from hello's
+  campaign_time_s. (6) The wire is HOST-1-identical for a client that
+  never subscribes ("events":0 and zero event lines — features arm by
+  use).
 
 ### CAMP-HOST-3 — the viewer becomes a client
 - World-viewer campaign session refactored onto `CampaignSession`

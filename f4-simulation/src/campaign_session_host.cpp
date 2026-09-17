@@ -47,6 +47,23 @@ std::unique_ptr<EngineSessionHost> EngineSessionHost::create(
     return host;
 }
 
+EngineSessionHost::~EngineSessionHost() {
+    // Unsubscribe EVERYTHING this host installed before the session
+    // (and the bus it owns) dies — the same detach-first discipline the
+    // session's own destructor follows.
+    if (session_ == nullptr) return;
+    auto& bus = session_->sim().bus();
+    if (buffer_subscription_ != static_cast<std::size_t>(-1)) {
+        bus.unsubscribe<f4::campaign::api::CampaignEvent>(
+            buffer_subscription_);
+        buffer_subscription_ = static_cast<std::size_t>(-1);
+    }
+    for (const auto& s : sinks_) {
+        bus.unsubscribe<f4::campaign::api::CampaignEvent>(s.subscription);
+    }
+    sinks_.clear();
+}
+
 // --- lifecycle -----------------------------------------------------------
 
 api::IdentityFingerprint EngineSessionHost::identity() const {
@@ -300,6 +317,56 @@ api::QueryResult EngineSessionHost::query(const api::QuerySpec& spec) {
     res.ok = true;
     res.data_json = std::move(w).str();
     return res;
+}
+
+// --- events (§3.4, CAMP-HOST-2) -------------------------------------------
+
+void EngineSessionHost::arm_buffer_() {
+    if (buffer_armed_) return;
+    buffer_subscription_ = session_->sim().bus()
+        .subscribe<f4::campaign::api::CampaignEvent>(
+            [this](const f4::campaign::api::CampaignEvent& e) {
+                // push-time filtering: a kind/team the host did not
+                // subscribe to never buffers (arms by use, stays small)
+                if (f4::campaign::api::matches(filter_, e)) {
+                    buffer_.push_back(e);
+                }
+            });
+    buffer_armed_ = true;
+}
+
+void EngineSessionHost::set_event_filter(
+    const f4::campaign::api::EventFilter& filter) {
+    filter_ = filter;
+    arm_buffer_();
+}
+
+std::vector<f4::campaign::api::CampaignEvent>
+EngineSessionHost::drain_events() {
+    // the events since the last drain, in engine occurrence order
+    return std::exchange(buffer_, {});
+}
+
+std::size_t EngineSessionHost::add_event_sink(
+    std::function<void(const f4::campaign::api::CampaignEvent&)> sink) {
+    const auto subscription =
+        session_->sim().bus().subscribe<f4::campaign::api::CampaignEvent>(
+            sink);
+    const auto handle = next_sink_handle_++;
+    sinks_.push_back(EventSink{handle, subscription, std::move(sink)});
+    return handle;
+}
+
+void EngineSessionHost::remove_event_sink(std::size_t handle) {
+    for (auto it = sinks_.begin(); it != sinks_.end(); ++it) {
+        if (it->handle == handle) {
+            session_->sim().bus()
+                .unsubscribe<f4::campaign::api::CampaignEvent>(
+                    it->subscription);
+            sinks_.erase(it);
+            return;
+        }
+    }
 }
 
 // --- commands -------------------------------------------------------------

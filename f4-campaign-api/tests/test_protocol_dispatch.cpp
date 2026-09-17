@@ -65,6 +65,23 @@ public:
         return next_ack;
     }
 
+    // --- events (HOST-2: the mock honors the same contract the engine
+    // host does — the filter gates at buffering time, the drain clears)
+    void set_event_filter(const EventFilter& f) override {
+        filter = f;
+        filter_set = true;
+        ++subscriptions;
+    }
+
+    [[nodiscard]] std::vector<CampaignEvent> drain_events() override {
+        std::vector<CampaignEvent> out;
+        for (auto& e : queued) {
+            if (matches(filter, e)) out.push_back(std::move(e));
+        }
+        queued.clear();
+        return out;
+    }
+
     // --- observation
     std::uint32_t stepped{0};
     std::int64_t identity_time{38574360};
@@ -78,6 +95,10 @@ public:
     int submits{0};
     CommandIntent last_intent{};
     CommandAck next_ack{};
+    EventFilter filter{};
+    bool filter_set{false};
+    int subscriptions{0};
+    std::vector<CampaignEvent> queued;
 };
 
 // Run one line through the dispatcher.
@@ -114,14 +135,16 @@ TEST(ProtocolDispatch, StepAdvancesAndReportsDilation) {
     const auto o = handle(s, R"({"v":1,"op":"step","ticks":600})", out);
     EXPECT_EQ(o.kind, ProtocolOutcome::Kind::Ok);
     EXPECT_EQ(s.stepped, 600U);
+    // "events":0 — the HOST-2 framing key; an un-subscribed client's
+    // response shape differs from HOST-1's by exactly this key
     EXPECT_EQ(out,
-              R"({"v":1,"op":"step","status":"ok","ticks":600,"dilated":0})" "\n");
+              R"({"v":1,"op":"step","status":"ok","ticks":600,"dilated":0,"events":0})" "\n");
 
     s.dilate_next = true;
     out.clear();
     (void)handle(s, R"({"v":1,"op":"step","ticks":1})", out);
     EXPECT_EQ(out,
-              R"({"v":1,"op":"step","status":"ok","ticks":1,"dilated":1})" "\n");
+              R"({"v":1,"op":"step","status":"ok","ticks":1,"dilated":1,"events":0})" "\n");
 }
 
 TEST(ProtocolDispatch, NegativeTicksIsMalformed) {
@@ -280,4 +303,152 @@ TEST(ProtocolDispatch, MissingVersionIsBadVersion) {
     const auto o = handle(s, R"({"op":"hello"})", out);
     EXPECT_EQ(o.exit_code, 20);
     EXPECT_NE(out.find("\"code\":\"bad_version\""), std::string::npos);
+}
+
+// ============================================================================
+// subscribe + the event framing (HOST-2 — plan §3.4's delivery rules)
+// ============================================================================
+
+TEST(ProtocolDispatch, SubscribeArmsAndEchoesTheFilter) {
+    MockSession s;
+    std::string out;
+    const auto o = handle(
+        s,
+        R"({"v":1,"op":"subscribe","kinds":["kill","tasking_cycle"],"teams":[0,6]})",
+        out);
+    EXPECT_EQ(o.kind, ProtocolOutcome::Kind::Ok);
+    EXPECT_TRUE(s.filter_set);
+    EXPECT_EQ(s.subscriptions, 1);
+    EXPECT_TRUE(s.filter.all == false);
+    ASSERT_EQ(s.filter.kinds.size(), 2U);
+    EXPECT_EQ(s.filter.kinds[0], CampaignEvent::Kind::Kill);
+    EXPECT_EQ(s.filter.kinds[1], CampaignEvent::Kind::TaskingCycle);
+    ASSERT_EQ(s.filter.teams.size(), 2U);
+    EXPECT_EQ(s.filter.teams[0], 0);
+    EXPECT_EQ(s.filter.teams[1], 6);
+    // the echo is the filter's canonical spelling
+    EXPECT_EQ(out,
+              R"({"v":1,"op":"subscribe","status":"ok","kinds":["kill",)"
+              R"("tasking_cycle"],"teams":[0,6]})" "\n");
+}
+
+TEST(ProtocolDispatch, SubscribeAllEchoesAll) {
+    MockSession s;
+    std::string out;
+    (void)handle(s, R"({"v":1,"op":"subscribe","kinds":["all"]})", out);
+    EXPECT_TRUE(s.filter.all);
+    EXPECT_EQ(out,
+              R"({"v":1,"op":"subscribe","status":"ok","kinds":["all"],)"
+              R"("teams":[]})" "\n");
+}
+
+TEST(ProtocolDispatch, SubscribeWithoutKindsIsMalformed) {
+    MockSession s;
+    std::string out;
+    const auto o = handle(s, R"({"v":1,"op":"subscribe"})", out);
+    EXPECT_EQ(o.exit_code, 20);
+    EXPECT_NE(out.find("subscribe needs kinds"), std::string::npos);
+}
+
+TEST(ProtocolDispatch, SubscribeUnknownKindIsMalformed) {
+    MockSession s;
+    std::string out;
+    const auto o = handle(
+        s, R"({"v":1,"op":"subscribe","kinds":["meteor_shower"]})", out);
+    EXPECT_EQ(o.exit_code, 20);
+    EXPECT_NE(out.find("unknown event kind: meteor_shower"),
+              std::string::npos);
+}
+
+TEST(ProtocolDispatch, StepDeliversSubscribedEventsAfterTheResponse) {
+    MockSession s;
+    // the war fired: one kill, one tasking cycle
+    CampaignEvent kill;
+    kill.kind = CampaignEvent::Kind::Kill;
+    kill.kill.t = 357;
+    kill.kill.killer_squadron = 214;
+    kill.kill.killer_team = 0;
+    kill.kill.victim_squadron = 317;
+    kill.kill.victim_team = 1;
+    kill.kill.weapon = "missile";
+    CampaignEvent cycle;
+    cycle.kind = CampaignEvent::Kind::TaskingCycle;
+    cycle.tasking_cycle.t = 360;
+    cycle.tasking_cycle.cycles = 1;
+    cycle.tasking_cycle.next_tasking_sec = 1800;
+    cycle.tasking_cycle.intents = 3;
+    s.queued = {kill, cycle};
+
+    std::string out;
+    (void)handle(s, R"({"v":1,"op":"subscribe","kinds":["all"]})", out);
+    out.clear();
+    const auto o = handle(s, R"({"v":1,"op":"step","ticks":60})", out);
+    EXPECT_EQ(o.kind, ProtocolOutcome::Kind::Ok);
+    // the response line announces 2; the 2 event lines follow in order
+    EXPECT_EQ(
+        out,
+        R"({"v":1,"op":"step","status":"ok","ticks":60,"dilated":0,"events":2})" "\n"
+        R"({"ev":"kill","t":357,"killer":{"sq":214,"team":0},)"
+        R"("victim":{"sq":317,"team":1},"weapon":"missile"})" "\n"
+        R"({"ev":"tasking_cycle","t":360,"cycles":1,)"
+        R"("next_tasking_sec":1800,"intents":3})" "\n");
+}
+
+TEST(ProtocolDispatch, DrainClearsSoTheNextStepAnnouncesZero) {
+    MockSession s;
+    CampaignEvent cycle;
+    cycle.kind = CampaignEvent::Kind::TaskingCycle;
+    cycle.tasking_cycle.t = 60;
+    cycle.tasking_cycle.cycles = 1;
+    s.queued = {cycle};
+    std::string out;
+    (void)handle(s, R"({"v":1,"op":"subscribe","kinds":["all"]})", out);
+    const auto first = handle(s, R"({"v":1,"op":"step","ticks":60})", out);
+    EXPECT_EQ(s.stepped, 60U);
+    EXPECT_NE(first.kind, ProtocolOutcome::Kind::ProtocolError);
+    EXPECT_NE(out.find("\"events\":1"), std::string::npos);
+
+    out.clear();
+    (void)handle(s, R"({"v":1,"op":"step","ticks":60})", out);
+    EXPECT_NE(out.find("\"events\":0"), std::string::npos);
+    EXPECT_EQ(out.find("\"ev\":"), std::string::npos);
+}
+
+TEST(ProtocolDispatch, TeamFilterGatesDelivery) {
+    MockSession s;
+    CampaignEvent kill;
+    kill.kind = CampaignEvent::Kind::Kill;
+    kill.kill.t = 10;
+    kill.kill.killer_team = 2;   // ROK shoots down...
+    kill.kill.victim_team = 6;   // ...a DPRK aircraft — both sides see it
+    CampaignEvent filed;
+    filed.kind = CampaignEvent::Kind::MissionFiled;
+    filed.mission_filed.t = 10;
+    filed.mission_filed.team = 6;
+    s.queued = {kill, filed};
+
+    // team 2 only: the kill rides (killer side), the DPRK filing does not
+    std::string out;
+    (void)handle(
+        s,
+        R"({"v":1,"op":"subscribe","kinds":["kill","mission_filed"],"teams":[2]})",
+        out);
+    out.clear();
+    (void)handle(s, R"({"v":1,"op":"step","ticks":60})", out);
+    EXPECT_NE(out.find("\"events\":1"), std::string::npos);
+    EXPECT_NE(out.find("\"ev\":\"kill\""), std::string::npos);
+    EXPECT_EQ(out.find("\"ev\":\"mission_filed\""), std::string::npos);
+}
+
+TEST(ProtocolDispatch, EmptyKindListDeliversNothing) {
+    MockSession s;
+    CampaignEvent cycle;
+    cycle.kind = CampaignEvent::Kind::TaskingCycle;
+    s.queued = {cycle};
+    std::string out;
+    (void)handle(s, R"({"v":1,"op":"subscribe","kinds":[]})", out);
+    out.clear();
+    (void)handle(s, R"({"v":1,"op":"step","ticks":60})", out);
+    EXPECT_NE(out.find("\"events\":0"), std::string::npos);
+    EXPECT_EQ(out.find("\"ev\":"), std::string::npos);
 }

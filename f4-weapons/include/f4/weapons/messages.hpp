@@ -91,6 +91,13 @@ struct EntityKilledMessage {
     std::uint64_t target_id{0};
     std::uint64_t shooter_id{0};
     double        sim_time_s{0.0};
+    /// The killing weapon FAMILY — a static literal ("missile", "gun"),
+    /// set by the battery that resolved the kill; empty when the killer
+    /// is not a weapon battery (a test-published or environmental kill).
+    /// Provenance only: the campaign sink rides it into the kill event's
+    /// wire `weapon` field (CAMP-HOST-2). Plain pointer on purpose — the
+    /// message is a by-value bus struct and the buffers are literals.
+    const char*   cause{""};
 };
 
 /// Published when a gun burst begins (one per burst, not per round).

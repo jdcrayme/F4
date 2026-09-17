@@ -62,6 +62,7 @@
 
 #pragma once
 
+#include <f4/campaign/api/events.hpp>
 #include <f4/campaign/result_ledger.hpp>
 #include <f4/entities/entity.hpp>
 #include <f4/messaging/bus.hpp>
@@ -145,6 +146,24 @@ public:
     /// states (the ledger's last-write-wins makes that a no-op).
     void sync_objective_damage();
 
+    // --- CAMP-HOST-2: the event stream ----------------------------------
+
+    /// One objective the last sync_objective_damage() found CHANGED
+    /// (the kill event publishes inline; damage needs the SESSION's
+    /// owner view, so the sync COLLECTS here and the session publishes
+    /// right after the call — detection and publication stay adjacent).
+    struct DamageSync {
+        std::uint32_t vu = 0;
+        int features_damaged = 0;   ///< features at damage state 1+
+    };
+
+    /// What the last sync_objective_damage() collected (the session
+    /// drains it right after the call; the next sync clears first).
+    [[nodiscard]] const std::vector<DamageSync>& damage_synced()
+        const noexcept {
+        return damage_synced_;
+    }
+
     [[nodiscard]] const Stats& stats() const noexcept { return stats_; }
 
 private:
@@ -173,6 +192,12 @@ private:
     std::size_t unit_loss_subscription_ = static_cast<std::size_t>(-1);
     bool book_unit_losses_ = false;   // G2: the unit_strike arm
     Stats stats_;
+
+    // HOST-2: the bus the kill event publishes to (bound by attach();
+    // null when the sink is driven bus-less — tests, QC tools — and
+    // then nothing publishes, exactly like HOST-1).
+    f4::messaging::MessageBus* bus_ = nullptr;
+    std::vector<DamageSync> damage_synced_;
 };
 
 } // namespace f4::simulation

@@ -6,7 +6,8 @@
 //   lifecycle  — session.hpp   (ICampaignSession: identity/step/pause/save)
 //   queries    — session.hpp + dto.hpp (versioned DTOs, byte-stable JSON)
 //   commands   — commands.hpp  (typed CommandIntent + typed CommandAck)
-//   events     — events.hpp    (the v1 event vocabulary; HOST-2 wires it)
+//   events     — events.hpp    (the v1 event vocabulary + the bus envelope)
+//   journal    — journal.hpp   (the engine-rate JSONL record + its verifier)
 //
 // plus protocol.hpp, the line dispatch both `campaignd` (the reference
 // host) and the tests drive.
@@ -25,5 +26,6 @@
 #include <f4/campaign/api/dto.hpp>
 #include <f4/campaign/api/events.hpp>
 #include <f4/campaign/api/identity.hpp>
+#include <f4/campaign/api/journal.hpp>
 #include <f4/campaign/api/protocol.hpp>
 #include <f4/campaign/api/session.hpp>

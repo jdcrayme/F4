@@ -13,11 +13,21 @@
 // Delivery rules (plan §3.4): events are journaled at engine rate
 // (complete) and delivered per step() return, filtered by the host's
 // subscription. No real-time scheduling in the engine — ever.
+//
+// THE TIME AXIS (HOST-2 as built): every event's `t` is the ENGINE's
+// own relative clock, llround'd to whole seconds — the same axis the
+// ledger's books carry (a kill books m.sim_time_s, a capture books the
+// ground war's clock). A host that wants the war's absolute time adds
+// the save epoch it already holds (hello's campaign_time_s of a fresh
+// session IS the epoch). One axis everywhere; no emitter needs the
+// epoch to publish.
 
 #pragma once
 
 #include <cstdint>
 #include <string>
+#include <string_view>
+#include <vector>
 
 #include <f4/campaign/api/commands.hpp>
 #include <f4/json/writer.hpp>
@@ -201,6 +211,153 @@ inline void encode(f4::json::Writer& w, const TaskingCycleEvent& e) {
     w.raw(",\"intents\":");
     w.number(e.intents);
     w.put('}');
+}
+
+// --- the tagged envelope (the ONE bus message type) ---------------------
+//
+// HOST-2 publishes ONE message type onto the session's bus — the bus is
+// type-indexed, and a single type means one subscription point for every
+// sink (the journal, the wire buffer) and one arrival order = engine
+// occurrence order. The payloads are the pinned structs above; unused
+// members stay default-constructed.
+struct CampaignEvent {
+    enum class Kind : std::uint8_t {
+        MissionFiled,
+        Kill,
+        ObjectiveDamage,
+        ObjectiveCaptured,
+        ReinforcementDelivered,
+        WeatherChanged,
+        RoeChanged,
+        TaskingCycle,
+    };
+
+    Kind kind{Kind::TaskingCycle};
+
+    MissionFiledEvent mission_filed{};
+    KillEvent kill{};
+    ObjectiveDamageEvent objective_damage{};
+    ObjectiveCapturedEvent objective_captured{};
+    ReinforcementDeliveredEvent reinforcement_delivered{};
+    WeatherChangedEvent weather_changed{};
+    RoeChangedEvent roe_changed{};
+    TaskingCycleEvent tasking_cycle{};
+};
+
+// The v1 kind names — the wire's filter vocabulary (the `subscribe`
+// op's "kinds" list; the journal stays unfiltered by design).
+[[nodiscard]] inline std::string_view
+event_kind_name(CampaignEvent::Kind k) noexcept {
+    switch (k) {
+        case CampaignEvent::Kind::MissionFiled:          return "mission_filed";
+        case CampaignEvent::Kind::Kill:                  return "kill";
+        case CampaignEvent::Kind::ObjectiveDamage:       return "objective_damage";
+        case CampaignEvent::Kind::ObjectiveCaptured:     return "objective_captured";
+        case CampaignEvent::Kind::ReinforcementDelivered: return "reinforcement_delivered";
+        case CampaignEvent::Kind::WeatherChanged:        return "weather_changed";
+        case CampaignEvent::Kind::RoeChanged:            return "roe_changed";
+        case CampaignEvent::Kind::TaskingCycle:          return "tasking_cycle";
+    }
+    return "tasking_cycle";
+}
+
+/// Exact-name parse (the protocol maps a false return to malformed).
+[[nodiscard]] inline bool
+parse_event_kind(std::string_view name, CampaignEvent::Kind& out) noexcept {
+    for (const auto k : {
+             CampaignEvent::Kind::MissionFiled,
+             CampaignEvent::Kind::Kill,
+             CampaignEvent::Kind::ObjectiveDamage,
+             CampaignEvent::Kind::ObjectiveCaptured,
+             CampaignEvent::Kind::ReinforcementDelivered,
+             CampaignEvent::Kind::WeatherChanged,
+             CampaignEvent::Kind::RoeChanged,
+             CampaignEvent::Kind::TaskingCycle,
+         }) {
+        if (name == event_kind_name(k)) {
+            out = k;
+            return true;
+        }
+    }
+    return false;
+}
+
+inline void encode(f4::json::Writer& w, const CampaignEvent& e) {
+    switch (e.kind) {
+        case CampaignEvent::Kind::MissionFiled:           encode(w, e.mission_filed); break;
+        case CampaignEvent::Kind::Kill:                   encode(w, e.kill); break;
+        case CampaignEvent::Kind::ObjectiveDamage:        encode(w, e.objective_damage); break;
+        case CampaignEvent::Kind::ObjectiveCaptured:      encode(w, e.objective_captured); break;
+        case CampaignEvent::Kind::ReinforcementDelivered: encode(w, e.reinforcement_delivered); break;
+        case CampaignEvent::Kind::WeatherChanged:         encode(w, e.weather_changed); break;
+        case CampaignEvent::Kind::RoeChanged:             encode(w, e.roe_changed); break;
+        case CampaignEvent::Kind::TaskingCycle:           encode(w, e.tasking_cycle); break;
+    }
+}
+
+// --- the subscription filter (the wire's, not the journal's) ------------
+//
+// The journal is engine-rate and COMPLETE (plan §3.4); the wire is what
+// the host subscribed to. `all` short-circuits the kind gate; an empty
+// `teams` list means every team. Team matching is per family (an event
+// belongs to the sides its payload names):
+//
+//   mission_filed           the filing team
+//   kill                    killer OR victim (a war-room sees both)
+//   objective_damage        the owner after the damage
+//   objective_captured      the new owner
+//   reinforcement_delivered teamless in v1 (matches any team gate)
+//   weather_changed         teamless (matches any team gate)
+//   roe_changed             the scope's team when scoped to a team;
+//                           mission/flight scopes match any team gate
+//   tasking_cycle           teamless (the ATM pass is theater-wide)
+struct EventFilter {
+    bool all{false};
+    std::vector<CampaignEvent::Kind> kinds;
+    std::vector<int> teams;
+};
+
+[[nodiscard]] inline bool
+listed(const std::vector<int>& teams, int team) noexcept {
+    if (teams.empty()) return true;
+    for (const auto t : teams) {
+        if (t == team) return true;
+    }
+    return false;
+}
+
+[[nodiscard]] inline bool matches(const EventFilter& f,
+                                  const CampaignEvent& e) noexcept {
+    if (!f.all) {
+        bool kind_ok = false;
+        for (const auto k : f.kinds) {
+            if (k == e.kind) {
+                kind_ok = true;
+                break;
+            }
+        }
+        if (!kind_ok) return false;
+    }
+    switch (e.kind) {
+        case CampaignEvent::Kind::MissionFiled:
+            return listed(f.teams, e.mission_filed.team);
+        case CampaignEvent::Kind::Kill:
+            return listed(f.teams, e.kill.killer_team) ||
+                   listed(f.teams, e.kill.victim_team);
+        case CampaignEvent::Kind::ObjectiveDamage:
+            return listed(f.teams, e.objective_damage.owner);
+        case CampaignEvent::Kind::ObjectiveCaptured:
+            return listed(f.teams, e.objective_captured.new_owner);
+        case CampaignEvent::Kind::RoeChanged:
+            return e.roe_changed.scope.kind == RoEScopeKind::Team
+                       ? listed(f.teams, e.roe_changed.scope.team)
+                       : true;
+        case CampaignEvent::Kind::ReinforcementDelivered:
+        case CampaignEvent::Kind::WeatherChanged:
+        case CampaignEvent::Kind::TaskingCycle:
+            return true;
+    }
+    return true;
 }
 
 } // namespace f4::campaign::api

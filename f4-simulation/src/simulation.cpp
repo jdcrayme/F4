@@ -47,6 +47,8 @@
 #include <f4/weapons/missile_battery.hpp>
 #include <f4/weapons/bomb_battery.hpp>
 #include <f4/weapons/f4_weapons.hpp>
+
+#include <f4/campaign/api/events.hpp>   // CAMP-HOST-2: weather_changed
 #include <f4/sensors/f4_sensors.hpp>
 
 #include <chrono>
@@ -128,6 +130,21 @@ void Simulation::initialize() {
         o.advance_clock = scenario_.environment.time_configured &&
                           scenario_.environment.advance_clock;
         weather_ = std::make_unique<f4::sim::WeatherSystem>(o);
+        // CAMP-HOST-2: the weather_changed event rides the same bus as
+        // every combat message. Campaign sessions never build a
+        // WeatherSystem (no scenario weather block) — this emitter is
+        // the scenario-session path of the family.
+        weather_->set_on_condition_change(
+            [this](double t, f4::world_types::WeatherCondition /*from*/,
+                   f4::world_types::WeatherCondition to) {
+                f4::campaign::api::CampaignEvent e;
+                e.kind = f4::campaign::api::CampaignEvent::Kind::WeatherChanged;
+                e.weather_changed.t =
+                    static_cast<std::int64_t>(std::llround(t));
+                e.weather_changed.condition =
+                    std::string(f4::world_types::condition_name(to));
+                bus_.publish(e);
+            });
     }
 
     // Real-airbase derivation runs FIRST: it rewrites scenario_.airfield

@@ -5,6 +5,7 @@
 
 #include <f4/simulation/campaign_session.hpp>
 
+#include <f4/campaign/api/events.hpp>   // CAMP-HOST-2: the event pump
 #include <f4/ai/brain_component.hpp>   // FID-5: combat_engagement_id
 #include <f4/campaign/ground_writeback.hpp>
 #include <f4/campaign/mission_profile.hpp>
@@ -654,11 +655,17 @@ bool CampaignSession::advance(double real_seconds, int max_steps_override) {
             const auto whole = static_cast<int>(campaign_sec_accum_);
             campaign_sec_accum_ -= static_cast<double>(whole);
             ladder_->tick(whole);
+            // CAMP-HOST-2: the cadence events — the cycle fires and the
+            // reinforcement deliveries the tick just booked, published
+            // immediately so the stream's order is the engine's order.
+            emit_cadence_events_();
             // G1: the ground war rides the same whole-second cadence
             // (its own accumulator gates on the update granularity).
             if (ground_ != nullptr) {
                 ground_sec_accum_ += static_cast<double>(whole);
                 advance_ground_();
+                // CAMP-HOST-2: the flips the ground pass just booked.
+                emit_capture_events_();
             }
             // FID: the aggregate flights ride the same whole-second
             // cadence (the engine accumulates to its own update gate;
@@ -675,6 +682,9 @@ bool CampaignSession::advance(double real_seconds, int max_steps_override) {
             // of every damaged objective (cheap — the diff walks only
             // objectives with damage components).
             sink_->sync_objective_damage();
+            // CAMP-HOST-2: the changed objectives publish here (the
+            // sink collects; the session fills owner + time).
+            emit_damage_events_();
             adopt_new_spawns_();
             retire_due_wrecks_();
         }
@@ -967,11 +977,121 @@ void CampaignSession::evaluate_tiers_() {
 }
 
 // ---------------------------------------------------------------------------
+// CAMP-HOST-2 — the event pump (see the header's block comment)
+// ---------------------------------------------------------------------------
+
+void CampaignSession::emit_mission_filed_(
+    const f4::campaign::MissionIntent& intent) {
+    f4::campaign::api::CampaignEvent e;
+    e.kind = f4::campaign::api::CampaignEvent::Kind::MissionFiled;
+    e.mission_filed.t = intent.issued_time;   // relative ladder seconds
+    e.mission_filed.package_id = intent.package_id;
+    e.mission_filed.flight_id = intent.flight_id;
+    e.mission_filed.team = intent.team;
+    e.mission_filed.mission_byte = intent.mission_byte;
+    e.mission_filed.mission_name = intent.mission_name;
+    e.mission_filed.target_objective_id = intent.target_objective_id;
+    e.mission_filed.synthetic = intent.synthetic;
+    sim_->bus().publish(e);
+}
+
+void CampaignSession::emit_cadence_events_() {
+    namespace api = f4::campaign::api;
+
+    // tasking_cycle — the diff of the fired-cycle counter IS this
+    // whole-second block's fires (the clock can chunk several seconds
+    // into one tick; the event says how many rode together).
+    const auto fired = ladder_->cycles_fired() - last_cycles_fired_;
+    if (fired > 0) {
+        api::CampaignEvent e;
+        e.kind = api::CampaignEvent::Kind::TaskingCycle;
+        e.tasking_cycle.t = ladder_->clock();
+        e.tasking_cycle.cycles = static_cast<int>(fired);
+        e.tasking_cycle.next_tasking_sec = ladder_->seconds_to_next_cycle();
+        e.tasking_cycle.intents =
+            static_cast<int>(ladder_->intents().size());
+        sim_->bus().publish(e);
+        last_cycles_fired_ = ladder_->cycles_fired();
+    }
+
+    // reinforcement_delivered — the reinforcement log's tail, grouped by
+    // fire (records of one delivery share their booked second; one
+    // event per fire with the delivery's totals). A fire that found no
+    // deficit pushes no record and files no event — the family's name
+    // is "delivered", and the books agree.
+    const auto& rlog = ledger_->reinforcement_log();
+    for (auto i = last_reinforcement_record_; i < rlog.size();) {
+        const double t_s = rlog[i].t_s;
+        int aircraft = 0;
+        auto j = i;
+        while (j < rlog.size() && rlog[j].t_s == t_s) {
+            aircraft += rlog[j].delivered;
+            ++j;
+        }
+        api::CampaignEvent e;
+        e.kind = api::CampaignEvent::Kind::ReinforcementDelivered;
+        e.reinforcement_delivered.t =
+            static_cast<std::int64_t>(std::llround(t_s));
+        e.reinforcement_delivered.aircraft = aircraft;
+        e.reinforcement_delivered.squadrons_touched =
+            static_cast<int>(j - i);
+        sim_->bus().publish(e);
+        i = j;
+    }
+    last_reinforcement_record_ = rlog.size();
+}
+
+void CampaignSession::emit_capture_events_() {
+    namespace api = f4::campaign::api;
+    const auto& clog = ledger_->objective_captures();
+    for (auto i = last_capture_record_; i < clog.size(); ++i) {
+        api::CampaignEvent e;
+        e.kind = api::CampaignEvent::Kind::ObjectiveCaptured;
+        e.objective_captured.t =
+            static_cast<std::int64_t>(std::llround(clog[i].t_s));
+        e.objective_captured.objective_id = clog[i].objective;
+        e.objective_captured.new_owner = clog[i].to_team;
+        sim_->bus().publish(e);
+    }
+    last_capture_record_ = clog.size();
+}
+
+void CampaignSession::emit_damage_events_() {
+    namespace api = f4::campaign::api;
+    for (const auto& d : sink_->damage_synced()) {
+        // The owner AFTER the damage — the WorldState's objective row
+        // (the damage pass never moves ownership; the capture family
+        // does, and it publishes from its own site).
+        std::uint8_t owner = 0;
+        for (const auto& o : ws_.objectives) {
+            if (o.id_num == d.vu) {
+                owner = o.owner;
+                break;
+            }
+        }
+        api::CampaignEvent e;
+        e.kind = api::CampaignEvent::Kind::ObjectiveDamage;
+        e.objective_damage.t = ladder_->clock();
+        e.objective_damage.objective_id = d.vu;
+        e.objective_damage.owner = owner;
+        e.objective_damage.features_damaged = d.features_damaged;
+        sim_->bus().publish(e);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // FID-5 — event-driven combat deagg (Docs/FIDELITY_TIERS_PLAN.md §4.5–4.6)
 // ---------------------------------------------------------------------------
 
 void CampaignSession::handle_mission_intent_(
     const f4::campaign::MissionIntent& intent) {
+    // CAMP-HOST-2: EVERY intent the ladder publishes files its event
+    // FIRST (before the FID-5 gates — a full-fidelity session files
+    // missions too; it just never aggregates them). The publish is a
+    // nested one inside the intent's own bus fan-out: the bus defers it
+    // to the outer publish's end, so the stream order stays the engine's.
+    emit_mission_filed_(intent);
+
     // Tiered + the synthetic arm only; full-fidelity sessions never
     // touch this path (the spawner's behavior is byte-identical).
     if (flights_ == nullptr || !synthetic_as_aggregates_) return;

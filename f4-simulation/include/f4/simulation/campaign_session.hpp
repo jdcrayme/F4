@@ -554,6 +554,31 @@ public:
 private:
     CampaignSession() = default;
 
+    // --- CAMP-HOST-2: the event pump (publish; no subscriptions here) --
+    //
+    // The session is the EVENTS' composition point: the ledger books it
+    // feeds are the war's truth, so the stream is derived at the same
+    // call sites that move them — mission_filed from the ladder's own
+    // intent publish, tasking_cycle/reinforcement_delivered from the
+    // cadence call, objective_captured from the capture log's tail,
+    // objective_damage from the sink's per-pass collection (the owner
+    // needs the session's WorldState). One message type, published in
+    // engine occurrence order; nothing here subscribes. No event is
+    // published outside advance()'s own call sites — an un-advanced
+    // session emits nothing, and no client changes the stream.
+    void emit_mission_filed_(const f4::campaign::MissionIntent& intent);
+    void emit_cadence_events_();   ///< tasking_cycle + reinforcements
+    void emit_capture_events_();   ///< the ground war's objective flips
+    void emit_damage_events_();    ///< the damage sync's changed objectives
+
+    /// The event-log read cursors (the ledger's arrival-order logs only
+    /// ever append; the tail past the cursor is THIS cadence's news).
+    std::size_t last_reinforcement_record_ = 0;
+    std::size_t last_capture_record_ = 0;
+    /// The tasking-cycle counter's last seen value (the diff IS the
+    /// fires of this whole-second block — the clock chunks seconds).
+    std::int64_t last_cycles_fired_ = 0;
+
     /// One deaggregated flight: the materialized aircraft + the tier
     /// bookkeeping (the trigger that spawned it, when, and until when
     /// an ops-window pin holds). Declared first — the tier methods'
