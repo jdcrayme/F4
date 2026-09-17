@@ -1,0 +1,283 @@
+// f4-campaign-api/tests/test_protocol_dispatch.cpp
+//
+// The line protocol driven against a MOCK session (CAMP_HOST_PLAN.md
+// §7): op routing, the strict envelope, the exit-code mapping, and
+// refusal-as-data — with NO engine in the link. The engine-backed host
+// gets its own test in f4-simulation (test_campaign_session_host); the
+// point here is that the CONTRACT is provable on its own.
+
+#include <f4/campaign/api/protocol.hpp>
+
+#include <gtest/gtest.h>
+
+#include <string>
+
+using namespace f4::campaign::api;
+
+namespace {
+
+// The mock: records what it was asked, answers canned data.
+class MockSession final : public ICampaignSession {
+public:
+    IdentityFingerprint identity() const override {
+        IdentityFingerprint id;
+        id.protocol_version = kProtocolVersion;
+        id.campaign_time_s = identity_time;
+        id.ledger_fnv = to_hex16(fnv1a64("mock-ledger"));
+        return id;
+    }
+
+    StepResult step(std::uint32_t ticks) override {
+        stepped += ticks;
+        StepResult r;
+        r.dilated = dilate_next;
+        identity_time += static_cast<std::int64_t>(ticks);
+        return r;
+    }
+
+    void set_time_scale(double scale) override { time_scale = scale; }
+    void set_paused(bool on) override { paused = on; }
+
+    SaveResult save(std::string_view path) override {
+        SaveResult r;
+        r.ok = save_ok;
+        r.bytes = save_ok ? 4096 : 0;
+        r.detail = save_ok ? std::string(path) : "disk full (mock)";
+        return r;
+    }
+
+    QueryResult query(const QuerySpec& spec) override {
+        last_query = spec.name;
+        QueryResult r;
+        if (fail_next) {
+            fail_next = false;
+            r.detail = "mock failure";
+            return r;
+        }
+        r.ok = true;
+        r.data_json = "{\"mock\":" + std::to_string(++query_count) + "}";
+        return r;
+    }
+
+    CommandAck submit(const CommandIntent& intent) override {
+        last_intent = intent;
+        ++submits;
+        return next_ack;
+    }
+
+    // --- observation
+    std::uint32_t stepped{0};
+    std::int64_t identity_time{38574360};
+    bool dilate_next{false};
+    double time_scale{1.0};
+    bool paused{false};
+    bool save_ok{true};
+    bool fail_next{false};
+    std::string last_query;
+    int query_count{0};
+    int submits{0};
+    CommandIntent last_intent{};
+    CommandAck next_ack{};
+};
+
+// Run one line through the dispatcher.
+ProtocolOutcome handle(MockSession& s, const char* line, std::string& out) {
+    return host_handle(s, line, out);
+}
+
+} // namespace
+
+// ============================================================================
+// hello — the identity fingerprint
+// ============================================================================
+
+TEST(ProtocolDispatch, HelloCarriesIdentity) {
+    MockSession s;
+    std::string out;
+    const auto o = handle(s, R"({"v":1,"op":"hello"})", out);
+    EXPECT_EQ(o.kind, ProtocolOutcome::Kind::Ok);
+    EXPECT_EQ(o.exit_code, 0);
+    const auto fnv = to_hex16(fnv1a64("mock-ledger"));
+    EXPECT_EQ(out,
+              "{\"v\":1,\"op\":\"hello\",\"status\":\"ok\",\"identity\":"
+              "{\"protocol\":1,\"campaign_time_s\":38574360,"
+              "\"ledger_fnv\":\"" + fnv + "\"}}\n");
+}
+
+// ============================================================================
+// step / pause — the lifecycle
+// ============================================================================
+
+TEST(ProtocolDispatch, StepAdvancesAndReportsDilation) {
+    MockSession s;
+    std::string out;
+    const auto o = handle(s, R"({"v":1,"op":"step","ticks":600})", out);
+    EXPECT_EQ(o.kind, ProtocolOutcome::Kind::Ok);
+    EXPECT_EQ(s.stepped, 600U);
+    EXPECT_EQ(out,
+              R"({"v":1,"op":"step","status":"ok","ticks":600,"dilated":0})" "\n");
+
+    s.dilate_next = true;
+    out.clear();
+    (void)handle(s, R"({"v":1,"op":"step","ticks":1})", out);
+    EXPECT_EQ(out,
+              R"({"v":1,"op":"step","status":"ok","ticks":1,"dilated":1})" "\n");
+}
+
+TEST(ProtocolDispatch, NegativeTicksIsMalformed) {
+    MockSession s;
+    std::string out;
+    const auto o = handle(s, R"({"v":1,"op":"step","ticks":-5})", out);
+    EXPECT_EQ(o.kind, ProtocolOutcome::Kind::ProtocolError);
+    EXPECT_EQ(o.exit_code, 20);
+    EXPECT_NE(out.find("\"code\":\"malformed\""), std::string::npos);
+}
+
+TEST(ProtocolDispatch, PauseRoundTrip) {
+    MockSession s;
+    std::string out;
+    (void)handle(s, R"({"v":1,"op":"pause","on":true})", out);
+    EXPECT_TRUE(s.paused);
+    EXPECT_EQ(out, R"({"v":1,"op":"pause","status":"ok","on":1})" "\n");
+}
+
+// ============================================================================
+// query — the v1 whitelist and the exit-21 miss
+// ============================================================================
+
+TEST(ProtocolDispatch, QueryDispatchesAndEmbedsData) {
+    MockSession s;
+    std::string out;
+    const auto o = handle(
+        s, R"({"v":1,"op":"query","q":"flights","team":2,"limit":10})", out);
+    EXPECT_EQ(o.kind, ProtocolOutcome::Kind::Ok);
+    EXPECT_EQ(s.last_query, "flights");
+    EXPECT_EQ(out,
+              R"({"v":1,"op":"query","q":"flights","status":"ok","data":{"mock":1}})" "\n");
+}
+
+TEST(ProtocolDispatch, UnknownQueryIsExit21) {
+    MockSession s;
+    std::string out;
+    const auto o = handle(s, R"({"v":1,"op":"query","q":"weather"})", out);
+    EXPECT_EQ(o.kind, ProtocolOutcome::Kind::ProtocolError);
+    EXPECT_EQ(o.exit_code, 21);
+    EXPECT_NE(out.find("\"code\":\"unknown_query\""), std::string::npos);
+}
+
+TEST(ProtocolDispatch, EngineSideQueryFailureIsExit24) {
+    MockSession s;
+    s.fail_next = true; // a whitelisted query the ENGINE side fails
+    std::string out;
+    const auto o = handle(s, R"({"v":1,"op":"query","q":"objectives"})", out);
+    EXPECT_EQ(o.kind, ProtocolOutcome::Kind::ProtocolError);
+    EXPECT_EQ(o.exit_code, 24);
+    EXPECT_NE(out.find("\"code\":\"query_failed\""), std::string::npos);
+}
+
+// ============================================================================
+// command — applied and refused (refusal is DATA, exit 22 for scripts)
+// ============================================================================
+
+TEST(ProtocolDispatch, CommandApplied) {
+    MockSession s;
+    s.next_ack.status = CommandAck::Status::Applied;
+    s.next_ack.detail = "view bubble set";
+    std::string out;
+    const auto o = handle(
+        s,
+        R"({"v":1,"op":"command","intent":"focus","x":1.0,"y":2.0,"z":3.0,"radius_ft":120000.0})",
+        out);
+    EXPECT_EQ(o.kind, ProtocolOutcome::Kind::Ok);
+    EXPECT_EQ(s.submits, 1);
+    EXPECT_EQ(s.last_intent.kind, CommandIntent::Kind::Focus);
+    EXPECT_DOUBLE_EQ(s.last_intent.radius_ft, 120000.0);
+    EXPECT_NE(out.find(R"("status":"ok","ack":{"status":"applied")"),
+              std::string::npos);
+}
+
+TEST(ProtocolDispatch, CommandRefusedIsDataPlusExit22) {
+    MockSession s;
+    s.next_ack.status = CommandAck::Status::Refused;
+    s.next_ack.refusal = CommandAck::Refusal::NotImplemented;
+    s.next_ack.detail = "CAMP-CMD-1 lands roe_set";
+    std::string out;
+    const auto o = handle(
+        s,
+        R"({"v":1,"op":"command","intent":"roe_set","scope":{"kind":"team","team":1},"roe":2})",
+        out);
+    EXPECT_EQ(o.kind, ProtocolOutcome::Kind::Refused);
+    EXPECT_EQ(o.exit_code, 22);
+    // AND the refusal still rode the wire as data — a UI renders it
+    EXPECT_NE(out.find(R"("status":"refused")"), std::string::npos);
+    EXPECT_NE(out.find(R"("refusal":"not_implemented")"), std::string::npos);
+    EXPECT_EQ(s.last_intent.roe, RoeLevel::Hold);
+}
+
+// ============================================================================
+// save — the runtime-safe path (exit 24 on engine-side failure)
+// ============================================================================
+
+TEST(ProtocolDispatch, SaveReportsBytesAndPath) {
+    MockSession s;
+    std::string out;
+    const auto o = handle(s, R"({"v":1,"op":"save","path":"/tmp/war.json"})", out);
+    EXPECT_EQ(o.kind, ProtocolOutcome::Kind::Ok);
+    EXPECT_NE(out.find(R"("bytes":4096)"), std::string::npos);
+    EXPECT_NE(out.find(R"("path":"/tmp/war.json")"), std::string::npos);
+}
+
+TEST(ProtocolDispatch, SaveFailureIsExit24) {
+    MockSession s;
+    s.save_ok = false;
+    std::string out;
+    const auto o = handle(s, R"({"v":1,"op":"save","path":"/tmp/war.json"})", out);
+    EXPECT_EQ(o.kind, ProtocolOutcome::Kind::ProtocolError);
+    EXPECT_EQ(o.exit_code, 24);
+    EXPECT_NE(out.find("\"code\":\"save_failed\""), std::string::npos);
+}
+
+// ============================================================================
+// the strict envelope — loud rejections (the P5/P6 discipline)
+// ============================================================================
+
+TEST(ProtocolDispatch, MalformedLineIsExit20) {
+    MockSession s;
+    std::string out;
+    const auto o = handle(s, R"({"v":1,"op":)", out);
+    EXPECT_EQ(o.kind, ProtocolOutcome::Kind::ProtocolError);
+    EXPECT_EQ(o.exit_code, 20);
+    EXPECT_NE(out.find("\"code\":\"malformed\""), std::string::npos);
+}
+
+TEST(ProtocolDispatch, BadVersionIsExit20) {
+    MockSession s;
+    std::string out;
+    const auto o = handle(s, R"({"v":2,"op":"hello"})", out);
+    EXPECT_EQ(o.exit_code, 20);
+    EXPECT_NE(out.find("\"code\":\"bad_version\""), std::string::npos);
+}
+
+TEST(ProtocolDispatch, UnknownOpIsExit20) {
+    MockSession s;
+    std::string out;
+    const auto o = handle(s, R"({"v":1,"op":"teleport"})", out);
+    EXPECT_EQ(o.exit_code, 20);
+    EXPECT_NE(out.find("\"code\":\"unknown_op\""), std::string::npos);
+}
+
+TEST(ProtocolDispatch, UnknownKeyIsMalformed) {
+    MockSession s;
+    std::string out;
+    const auto o = handle(s, R"({"v":1,"op":"hello","cheat":1})", out);
+    EXPECT_EQ(o.exit_code, 20);
+    EXPECT_NE(out.find("\"code\":\"malformed\""), std::string::npos);
+}
+
+TEST(ProtocolDispatch, MissingVersionIsBadVersion) {
+    MockSession s;
+    std::string out;
+    const auto o = handle(s, R"({"op":"hello"})", out);
+    EXPECT_EQ(o.exit_code, 20);
+    EXPECT_NE(out.find("\"code\":\"bad_version\""), std::string::npos);
+}

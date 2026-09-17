@@ -1,0 +1,264 @@
+// f4-campaign-api/tests/test_dto_goldens.cpp
+//
+// The DTO encoders pinned BYTE-FOR-BYTE (CAMP_HOST_PLAN.md §3.2): the
+// canonical key order IS the contract — goldens catch any reordering,
+// pretty-printing, or mid-sequence key addition. The event vocabulary is
+// pinned here too, BEFORE HOST-2 makes the engine emit it (the plan's
+// "versioned in v1 so the wire doesn't break later").
+
+#include <f4/campaign/api/dto.hpp>
+#include <f4/campaign/api/events.hpp>
+
+#include <gtest/gtest.h>
+
+#include <cstring>
+#include <string>
+
+using namespace f4::campaign::api;
+
+namespace {
+
+template <typename T>
+std::string encode_json(const T& value) {
+    f4::json::Writer w;
+    encode(w, value);
+    return w.str();
+}
+
+} // namespace
+
+// ============================================================================
+// time
+// ============================================================================
+
+TEST(DtoGoldens, TimeView) {
+    TimeView t;
+    t.tick_sec = 1.0 / 60.0;
+    t.campaign_time_s = 38574360;
+    t.sim_time_s = 120.5;
+    t.paused = true;
+    t.next_tasking_sec = 1679;
+    t.time_scale = 4.0;
+    // tick_sec encodes %.17g → 0.016666666666666666
+    EXPECT_EQ(encode_json(t),
+              R"({"tick_sec":0.016666666666666666,"campaign_time_s":38574360,)"
+              R"("sim_time_s":120.5,"paused":1,"next_tasking_sec":1679,)"
+              R"("time_scale":4})");
+}
+
+TEST(DtoGoldens, TimeViewDefaultIsDeterministic) {
+    // the default view encodes identically every time (byte-stability)
+    const auto a = encode_json(TimeView{});
+    const auto b = encode_json(TimeView{});
+    EXPECT_EQ(a, b);
+    EXPECT_EQ(a,
+              R"({"tick_sec":0,"campaign_time_s":0,"sim_time_s":0,"paused":0,)"
+              R"("next_tasking_sec":0,"time_scale":1})");
+}
+
+// ============================================================================
+// stats — the engine's counter vocabulary, fixed order
+// ============================================================================
+
+TEST(DtoGoldens, StatsViewGolden) {
+    StatsView s;
+    s.cycles = 3;
+    s.next_tasking_sec = 1500;
+    s.intents = 12;
+    s.live_aircraft = 449;
+    s.aa_kills = 7;
+    s.ground_captures = 2;
+    s.agg_live = 5;
+    s.deferred_releases = 1;
+    const auto json = encode_json(s);
+    // spot-pin the GROUP ORDER: tasking → ledger → ground → tiers
+    EXPECT_NE(json.find("\"cycles\":3,\"next_tasking_sec\":1500,\"intents\":12"),
+              std::string::npos);
+    EXPECT_NE(json.find("\"live_aircraft\":449"), std::string::npos);
+    EXPECT_NE(json.find("\"aa_kills\":7"), std::string::npos);
+    EXPECT_NE(json.find("\"ground_captures\":2"), std::string::npos);
+    EXPECT_NE(json.find("\"agg_live\":5"), std::string::npos);
+    // last key, no trailing comma
+    EXPECT_EQ(json.substr(json.size() - std::strlen("\"deferred_releases\":1}")),
+              "\"deferred_releases\":1}");
+    EXPECT_EQ(json.find(",}"), std::string::npos);
+}
+
+// ============================================================================
+// flights — the FID tier view
+// ============================================================================
+
+TEST(DtoGoldens, FlightViewArray) {
+    FlightView a;
+    a.vu = 118;
+    a.team = 2;
+    a.mission = 9;
+    a.aircraft_count = 2;
+    a.x_grid = 390.25;
+    a.y_grid = 455.75;
+    a.altitude_ft = 20000.0f;
+    a.fuel_burnt = 1200;
+    a.live = true;
+    a.to_depart = -1;
+    a.to_mission_over = 900;
+    FlightView b; // the defaults (an aggregate that never departed)
+    b.to_depart = 600;
+
+    std::vector<FlightView> flights{a, b};
+    EXPECT_EQ(encode_json(flights),
+              R"([{"vu":118,"team":2,"mission":9,"aircraft_count":2,)"
+              R"("x_grid":390.25,"y_grid":455.75,"altitude_ft":20000,)"
+              R"("fuel_burnt":1200,"live":1,"arrived":0,"destroyed":0,)"
+              R"("to_depart":-1,"to_mission_over":900},)"
+              R"({"vu":0,"team":0,"mission":0,"aircraft_count":0,)"
+              R"("x_grid":0,"y_grid":0,"altitude_ft":0,"fuel_burnt":0,)"
+              R"("live":0,"arrived":0,"destroyed":0,"to_depart":600,)"
+              R"("to_mission_over":-1}])");
+}
+
+TEST(DtoGoldens, EmptyFlightArray) {
+    EXPECT_EQ(encode_json(std::vector<FlightView>{}), "[]");
+}
+
+// ============================================================================
+// tasking — the ATO row
+// ============================================================================
+
+TEST(DtoGoldens, IntentView) {
+    IntentView m;
+    m.issued_time = 38574400;
+    m.time_on_target = 38578000;
+    m.team = 2;
+    m.team_name = "ROK";
+    m.mission_byte = 9;
+    m.mission_name = "OCA";
+    m.aircraft_count = 4;
+    m.squadron_id = 214;
+    m.squadron_name = "111th TFS";
+    m.package_id = 42;
+    m.flight_id = 118;
+    m.target_objective_id = 9001;
+    m.synthetic = true;
+    EXPECT_EQ(encode_json(m),
+              R"({"issued_time":38574400,"time_on_target":38578000,"team":2,)"
+              R"("team_name":"ROK","mission_byte":9,"mission_name":"OCA",)"
+              R"("aircraft_count":4,"squadron_id":214,"squadron_name":"111th TFS",)"
+              R"("package_id":42,"flight_id":118,"target_objective_id":9001,)"
+              R"("synthetic":1})");
+}
+
+// ============================================================================
+// objectives — ownership, logistics, the damage bitmap
+// ============================================================================
+
+TEST(DtoGoldens, ObjectiveViewWithFstatus) {
+    ObjectiveView o;
+    o.id_creator = 6;
+    o.id_num = 9001;
+    o.type = 105;
+    o.objective_type = 3;
+    o.entity_type = 105;
+    o.x = 390;
+    o.y = 455;
+    o.z = 120.0f;
+    o.owner = 2;
+    o.first_owner = 2;
+    o.priority = 5;
+    o.nameid = 77;
+    o.obj_flags = 0x400;
+    o.parent_id = 0;
+    o.supply = 80;
+    o.fuel = 65;
+    o.losses = 3;
+    o.last_repair = 38570000;
+    o.has_radar = true;
+    o.radar_range_km = 185.0f;
+    o.fstatus = {0x00, 0x15, 0xFF};
+    EXPECT_EQ(encode_json(o),
+              R"({"id_creator":6,"id_num":9001,"type":105,"objective_type":3,)"
+              R"("entity_type":105,"x":390,"y":455,"z":120,"owner":2,)"
+              R"("first_owner":2,"priority":5,"nameid":77,"obj_flags":1024,)"
+              R"("parent_id":0,"supply":80,"fuel":65,"losses":3,)"
+              R"("last_repair":38570000,"has_radar":1,"radar_range_km":185,)"
+              R"("fstatus":[0,21,255]})");
+}
+
+// ============================================================================
+// the event vocabulary — pinned in v1, emitted in HOST-2
+// ============================================================================
+
+TEST(EventGoldens, KillEvent) {
+    KillEvent e;
+    e.t = 357;
+    e.killer_squadron = 214;
+    e.killer_team = 0;
+    e.victim_squadron = 317;
+    e.victim_team = 1;
+    e.weapon = "aim7";
+    EXPECT_EQ(encode_json(e),
+              R"({"ev":"kill","t":357,"killer":{"sq":214,"team":0},)"
+              R"("victim":{"sq":317,"team":1},"weapon":"aim7"})");
+}
+
+TEST(EventGoldens, MissionFiledEvent) {
+    MissionFiledEvent e;
+    e.t = 1800;
+    e.package_id = 42;
+    e.flight_id = 118;
+    e.team = 2;
+    e.mission_byte = 9;
+    e.mission_name = "OCA";
+    e.target_objective_id = 9001;
+    e.synthetic = true;
+    EXPECT_EQ(encode_json(e),
+              R"({"ev":"mission_filed","t":1800,"package_id":42,"flight_id":118,)"
+              R"("team":2,"mission_byte":9,"mission_name":"OCA",)"
+              R"("target_objective_id":9001,"synthetic":1})");
+}
+
+TEST(EventGoldens, ObjectiveCapturedEvent) {
+    ObjectiveCapturedEvent e;
+    e.t = 72000;
+    e.objective_id = 9001;
+    e.new_owner = 6;
+    EXPECT_EQ(encode_json(e),
+              R"({"ev":"objective_captured","t":72000,"objective_id":9001,"new_owner":6})");
+}
+
+TEST(EventGoldens, RoeChangedEvent) {
+    RoeChangedEvent e;
+    e.t = 90;
+    e.scope.kind = RoEScopeKind::Team;
+    e.scope.team = 1;
+    e.roe = RoeLevel::Tight;
+    EXPECT_EQ(encode_json(e),
+              R"({"ev":"roe_changed","t":90,"scope":{"kind":"team","team":1,)"
+              R"("mission":0,"flight":0},"roe":1})");
+}
+
+TEST(EventGoldens, TaskingCycleEvent) {
+    TaskingCycleEvent e;
+    e.t = 3600;
+    e.cycles = 2;
+    e.next_tasking_sec = 1800;
+    e.intents = 96;
+    EXPECT_EQ(encode_json(e),
+              R"({"ev":"tasking_cycle","t":3600,"cycles":2,)"
+              R"("next_tasking_sec":1800,"intents":96})");
+}
+
+TEST(EventGoldens, WeatherAndReinforcement) {
+    WeatherChangedEvent w;
+    w.t = 43200;
+    w.condition = "overcast";
+    EXPECT_EQ(encode_json(w),
+              R"({"ev":"weather_changed","t":43200,"condition":"overcast"})");
+
+    ReinforcementDeliveredEvent r;
+    r.t = 43200;
+    r.aircraft = 232;
+    r.squadrons_touched = 22;
+    EXPECT_EQ(encode_json(r),
+              R"({"ev":"reinforcement_delivered","t":43200,"aircraft":232,)"
+              R"("squadrons_touched":22})");
+}

@@ -44,6 +44,12 @@ target_compile_definitions(test_fidelity_tiers PRIVATE
     F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}"
     F4_MISSION_PROFILES_JSON="${F4_MISSION_PROFILES_JSON}"
 )
+f4_simulation_add_test(test_campaign_session_host  test_campaign_session_host.cpp)  # CAMP-HOST-1: the engine-backed host
+target_compile_definitions(test_campaign_session_host PRIVATE
+    F4_SOURCE_FIXTURES_DIR="${CMAKE_SOURCE_DIR}/f4-world-convert/tests/fixtures"
+    F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}"
+    F4_MISSION_PROFILES_JSON="${F4_MISSION_PROFILES_JSON}"
+)
 f4_simulation_add_test(test_fidelity_combat       test_fidelity_combat.cpp)  # FID-5
 target_compile_definitions(test_fidelity_combat PRIVATE
     F4_SOURCE_FIXTURES_DIR="${CMAKE_SOURCE_DIR}/f4-world-convert/tests/fixtures"

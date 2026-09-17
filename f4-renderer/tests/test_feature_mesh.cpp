@@ -25,6 +25,7 @@
 
 #include <gtest/gtest.h>
 #include <raylib.h>
+#include <raymath.h>
 
 #include "display_guard.hpp"
 
@@ -520,4 +521,151 @@ TEST_F(FeatureMeshGpuTest, RuntimeModelCache_HierarchyDoc_BuildsParts) {
     model_cache.unload_all();
     tex_cache.unload_all();
     std::filesystem::remove_all(dir);
+}
+
+// TEMPORARY diagnostic: render model 1052's rest pose through the real
+// runtime (RuntimeModelCache + animated draw path) and save screenshots
+// from two angles. Visual ground truth for the DOF-placement reports.
+TEST_F(FeatureMeshGpuTest, DIAG_Model1052_RenderRestPose) {
+    const std::filesystem::path data_root = F4_DATA_ROOT;
+    if (!std::filesystem::exists(data_root / "Models" / "koreaobj" /
+                                 "01052.gltf"))
+        GTEST_SKIP() << "model 1052 not found";
+
+    f4::renderer::TextureCache tex_cache;
+    f4::renderer::LitShader lit_shader;
+    f4::renderer::RuntimeModelCache model_cache;
+    model_cache.set_data_dir(data_root);
+    model_cache.build_model(1052, tex_cache);
+    const auto* model = model_cache.lookup(1052);
+    ASSERT_NE(model, nullptr);
+    ASSERT_TRUE(model->built);
+    ASSERT_NE(model->doc, nullptr);
+
+    ::Material default_mat = LoadMaterialDefault();
+    default_mat.maps[MATERIAL_MAP_DIFFUSE].color = WHITE;
+    f4::renderer::FeatureMeshResources res{};
+    res.model_cache = &model_cache;
+    res.texture_cache = &tex_cache;
+    res.lit_shader = &lit_shader;
+    res.default_material = &default_mat;
+
+    // Draw into a RenderTexture and export it (rear-quarter view).
+    const auto rt = LoadRenderTexture(800, 600);
+    BeginTextureMode(rt);
+    ClearBackground(BLACK);
+    Camera3D cam = {};
+    cam.position = {0.0f, 30.0f, -120.0f};   // behind-left, tail toward +?
+    cam.target = {0.0f, 0.0f, 0.0f};
+    cam.up = {0.0f, 1.0f, 0.0f};
+    cam.fovy = 25.0f;
+    cam.projection = CAMERA_PERSPECTIVE;
+    BeginMode3D(cam);
+    if (lit_shader.ensure()) {
+        lit_shader.set_lighting({0.4f, -0.8f, 0.45f}, {255, 250, 235, 255},
+                                1.2f, {110, 110, 120, 255});
+    }
+    f4::anim::AnimValues parked2;
+    parked2.set_parked_defaults();
+    f4::renderer::draw_vis_type_mesh(res, 1052, 0.0f, 0.0f, 0.0f, 0.0f,
+                                    &parked2);
+    EndMode3D();
+    EndTextureMode();
+
+    Image shot = LoadImageFromTexture(rt.texture);
+    const auto out = std::filesystem::temp_directory_path() / "f4_1052_view.png";
+    ExportImage(shot, out.string().c_str());
+    UnloadImage(shot);
+    UnloadRenderTexture(rt);
+    std::printf("[1052-VIEW] saved %s\n", out.string().c_str());
+
+    model_cache.unload_all();
+    tex_cache.unload_all();
+    UnloadMaterial(default_mat);
+}
+
+// TEMPORARY diagnostic #2: per-part raw vs assembled bbox centers for
+// model 1052, computed with the runtime's own math (raylib fold).
+TEST_F(FeatureMeshGpuTest, DIAG_Model1052_PartPositions) {
+    const std::filesystem::path data_root = F4_DATA_ROOT;
+    f4::gltf::GltfDocument doc;
+    doc.load(data_root / "Models" / "koreaobj" / "01052.gltf");
+
+    // Find lod:0, DFS parts with chains (mirror extract_gltf_lod_parts).
+    const f4::gltf::Node* lod = nullptr;
+    for (const auto& n : doc.nodes) {
+        if (n.has_f4 && n.f4.kind == "lod" &&
+            n.f4.lod_level.value_or(-1) == 0) {
+            lod = &n;
+            break;
+        }
+    }
+    ASSERT_NE(lod, nullptr);
+
+    struct Frame { std::size_t node; std::size_t depth; };
+    std::vector<Frame> stack;
+    for (auto it = lod->children.rbegin(); it != lod->children.rend(); ++it)
+        stack.push_back({*it, 0});
+    std::vector<std::size_t> path;
+
+    auto fold_node = [&](std::size_t ni, Vector3& p) {
+        double t[3], q[4], s[3];
+        f4::gltf::eval_tagged_local(doc, ni, 0.0f, t, q, s);
+        const Matrix rot = QuaternionToMatrix(Quaternion{
+            static_cast<float>(q[0]), static_cast<float>(q[1]),
+            static_cast<float>(q[2]), static_cast<float>(q[3])});
+        const Matrix sc = MatrixScale(static_cast<float>(s[0]),
+                                      static_cast<float>(s[1]),
+                                      static_cast<float>(s[2]));
+        const Matrix tr = MatrixTranslate(static_cast<float>(t[0]),
+                                          static_cast<float>(t[1]),
+                                          static_cast<float>(t[2]));
+        const Matrix m = MatrixMultiply(tr, MatrixMultiply(rot, sc));
+        const Vector3 out = Vector3Transform(p, m);
+        p = out;
+    };
+
+    int reported = 0;
+    while (!stack.empty() && reported < 10) {
+        const auto fr = stack.back();
+        stack.pop_back();
+        if (fr.node >= doc.nodes.size()) continue;
+        path.resize(fr.depth);
+        path.push_back(fr.node);
+        const auto& node = doc.nodes[fr.node];
+        if (node.mesh.has_value() && *node.mesh < doc.meshes.size()) {
+            bool has_dof = false;
+            std::string chain;
+            for (const auto ni : path) {
+                chain += doc.nodes[ni].name + ">";
+                if (doc.nodes[ni].has_f4 && doc.nodes[ni].f4.kind == "dof")
+                    has_dof = true;
+            }
+            if (!has_dof) {
+                for (const auto c : node.children)
+                    stack.push_back({c, fr.depth + 1});
+                continue;
+            }
+            // Raw vs assembled bbox center over the first primitive.
+            const auto& prim = doc.meshes[*node.mesh].primitives[0];
+            const auto& acc = doc.accessors[*prim.positions];
+            Vector3 raw_c{}, asm_c{};
+            for (std::size_t i = 0; i < acc.count; ++i) {
+                auto v = doc.read_vec3_float(*prim.positions, i);
+                if (!v) continue;
+                Vector3 p{(*v)[0], (*v)[1], (*v)[2]};
+                raw_c = Vector3Add(raw_c, Vector3Scale(p, 1.0f / acc.count));
+                Vector3 q2 = p;
+                for (const auto ni : path) fold_node(ni, q2);
+                asm_c = Vector3Add(asm_c, Vector3Scale(q2, 1.0f / acc.count));
+            }
+            std::printf("[1052-PART] chain=%s raw=(%.2f, %.2f, %.2f) "
+                        "assembled=(%.2f, %.2f, %.2f)\n",
+                        chain.c_str(), raw_c.x, raw_c.y, raw_c.z,
+                        asm_c.x, asm_c.y, asm_c.z);
+            ++reported;
+        }
+        for (const auto c : node.children) stack.push_back({c, fr.depth + 1});
+    }
+    SUCCEED();
 }

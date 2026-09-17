@@ -42,6 +42,7 @@ add_library(f4-simulation STATIC
     src/campaign_result_sink.cpp
     src/campaign_session.cpp
     src/campaign_session_runner.cpp
+    src/campaign_session_host.cpp
     src/campaign_war_harness.cpp
     src/bvr_intercept_harness.cpp
     src/wvr_merge_harness.cpp
@@ -84,6 +85,7 @@ target_link_libraries(f4-simulation PUBLIC
     f4-weapons         # M3 combat chain (COMBAT_CHAIN_PLAN.md): stores, launch, sweep
     f4-sensors         # M3 combat chain: radar, tracks, RWR
     f4-campaign        # B.3: MissionIntent (emit_flight_intents → CampaignSimSpawner loop)
+    f4-campaign-api    # CAMP-HOST-1: the host contract (EngineSessionHost implements it; Docs/CAMP_HOST_PLAN.md)
 )
 
 add_library(F4::Simulation ALIAS f4-simulation)
@@ -145,6 +147,27 @@ add_dependencies(campaign_qc mission_profiles_fixture)
 # viewer's V-CAMP fix addresses); CLI-gated target, hence the guard.
 if(TARGET convert_golden_fixtures)
     add_dependencies(campaign_qc convert_golden_fixtures)
+endif()
+
+# ============================================================================
+# campaignd — the campaign engine's REFERENCE HOST (CAMP-HOST-1,
+# tools/campaignd.cpp). The contract's stdio JSON server: hello +
+# identity, step/pause, the v1 query set, typed commands, the
+# runtime-safe save. No sockets, no UI — a realtime UX bridges
+# stdio→socket on ITS side of the boundary (CAMP_HOST_PLAN.md §7).
+# Same fixture defaults as campaign_qc: the mission-profile table +
+# the generated f16.json arrive as compile defs + dependency targets.
+# ============================================================================
+add_executable(campaignd tools/campaignd.cpp)
+target_link_libraries(campaignd PRIVATE f4-simulation)
+target_compile_features(campaignd PRIVATE cxx_std_20)
+target_compile_definitions(campaignd PRIVATE
+    F4_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+    F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}"
+    F4_MISSION_PROFILES_JSON="${F4_MISSION_PROFILES_JSON}")
+add_dependencies(campaignd mission_profiles_fixture)
+if(TARGET convert_golden_fixtures)
+    add_dependencies(campaignd convert_golden_fixtures)
 endif()
 
 # ============================================================================
