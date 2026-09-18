@@ -74,7 +74,10 @@ WorldWritebackResult apply_to(const CampaignResultLedger& ledger,
     // --- Objective damage bitmaps ------------------------------------------
     // VU match; the ledger's fstatus IS the save-format face (2 bits per
     // feature — the .obd delta's own encoding). Only damaged objectives
-    // are in the ledger, so pristine worlds stay untouched.
+    // are in the ledger, so pristine worlds stay untouched. DOM-2: a
+    // repaired objective rides the same map (apply_objective_repair
+    // upserts the post-repair face), so repairs reach the save through
+    // this walk with zero new machinery.
     for (const auto& rec : ledger.objective_damage()) {
         bool matched = false;
         for (auto& obj : ws.objectives) {
@@ -87,6 +90,27 @@ WorldWritebackResult apply_to(const CampaignResultLedger& ledger,
             ++out.objectives_written;
         } else {
             out.unmatched_objectives.push_back(rec.objective);
+        }
+    }
+
+    // --- DOM-2: the strategic reserves -------------------------------------
+    // Only teams the stock flow actually moved (spent > 0 — the same
+    // activity rule the pools above keep; a pristine ledger must leave
+    // the world byte-identical). The WorldState team row carries
+    // replacements_avail since C2; supply/fuel stocks ride their own
+    // face (the engine owns the run-live ground pools, not this walk).
+    for (const auto& team : ledger.teams()) {
+        if (team.replacements_spent <= 0) continue;
+        bool matched = false;
+        for (auto& t : ws.teams) {
+            if (t.slot != team.slot) continue;
+            t.replacements_avail = static_cast<std::uint16_t>(
+                std::max(0, team.replacements_avail));
+            matched = true;
+            break;
+        }
+        if (matched) {
+            ++out.replacement_stocks_written;
         }
     }
 

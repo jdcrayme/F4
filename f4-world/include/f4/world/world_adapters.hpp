@@ -74,6 +74,9 @@ struct TeamAdapter : ITeamSource {
     int16_t last_wingman(int i) const override { return ws_->teams[i].last_wingman; }
     // C2 — the .cmp team block's replacement stock.
     uint16_t replacements_avail(int i) const override { return ws_->teams[i].replacements_avail; }
+    // DOM-2 — the .tea strategic ground stocks (the supply chain's source).
+    uint16_t supply_avail(int i) const override { return ws_->teams[i].supply_avail; }
+    uint16_t fuel_avail(int i) const override { return ws_->teams[i].fuel_avail; }
     // C4 (ATM pipeline) — tasking priorities + ATM schedules/backlog.
     int mission_priority(int i, uint8_t mission) const override {
         const auto& mp = ws_->teams[i].mission_priority;

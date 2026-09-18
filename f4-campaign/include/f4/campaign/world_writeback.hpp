@@ -16,6 +16,10 @@
 //     (clamped to the wire's own ranges — the ledger already saturates,
 //     the clamp here is defense in depth for hand-built fixtures)
 //   * objectives: fstatus := the synced damage bitmap (VU_ID match)
+//   * DOM-2: teams.replacements_avail[slot] := the strategic reserve's
+//     post-run value (only teams whose stock the reinforcement flow
+//     actually moved — the .tea mutation face the save-write path
+//     already carries)
 //
 // After this, the standard pipeline applies: a world JSON written from
 // the mutated state (the open-format save), populate_world into a fresh
@@ -45,6 +49,8 @@ struct WorldWritebackResult {
     int squadrons_written = 0;
     /// Objective fstatus bitmaps written (VU matched an objective).
     int objectives_written = 0;
+    /// DOM-2: strategic reserves written (slot matched a team row).
+    int replacement_stocks_written = 0;
     /// Ledger squadron VUs with activity but no matching unit.
     std::vector<std::uint32_t> unmatched_squadrons;
     /// Ledger objective VUs with damage but no matching objective.

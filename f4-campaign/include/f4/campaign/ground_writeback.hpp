@@ -18,6 +18,10 @@
 //   * objectives: owner := the engine's live owner when it flipped
 //     (first_owner untouched — the wire's own "owner at save start"
 //     semantics)
+//   * DOM-2: objectives with engine-moved LOGISTICS := the live
+//     supply / fuel / last_repair (the per-objective pool's own
+//     write-back face; the fstatus face rides the C1 walk via the
+//     ledger's damage-state map, repairs included)
 //
 // ACTIVITY-gated like the C1 write-back: a unit that never moved,
 // attrited, or was resupplied (dirty flag never set — equivalently:
@@ -50,6 +54,9 @@ struct GroundWritebackResult {
     int battalions_written = 0;
     /// Objective owners flipped (engine owner != snapshot owner).
     int objectives_flipped = 0;
+    /// DOM-2: objective logistics rows written (the engine moved the
+    /// objective's supply/fuel/repair face).
+    int objectives_resupplied = 0;
     /// Battalion VUs with activity but no matching WorldState unit.
     std::vector<std::uint32_t> unmatched_battalions;
     /// Objectives with a flipped owner but no matching WorldState

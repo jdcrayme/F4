@@ -326,6 +326,14 @@ struct WarReport {
     int ground_captures = 0;        ///< ledger: objectives captured
     int ground_front_columns = 0;   ///< contested front columns
     int ground_march_grid = 0;      ///< army distance walked (grid)
+    // CAMP-DOM-2: the supply chain's headline counters (the engine's
+    // own books; the QC summary echoes them — zero when the deepened
+    // flow never armed, keeping the summary byte-identical).
+    int ground_supply_regen = 0;    ///< team stock → objective stocks
+    int ground_supply_drawn = 0;    ///< objective stocks → battalions
+    int ground_cut_off = 0;         ///< battalion×fire cut-offs
+    int ground_repairs = 0;         ///< repair-cadence fires
+    int ground_features_repaired = 0; ///< features flipped to repaired
     // G2: the interdiction link — which arm ran + its headline number
     // (the QC's exit 14 reads these: air never attrited a unit).
     bool unit_strike = false;       ///< the session's G2 opt-in

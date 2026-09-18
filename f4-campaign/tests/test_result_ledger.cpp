@@ -874,3 +874,141 @@ TEST(ResultLedgerC2, ReinforcementDisabledMatchesLegacy) {
     EXPECT_EQ(rig->ledger->reinforcement_fires(), 0);
     EXPECT_EQ(rig->ledger->aircraft_reinforced(), 0);
 }
+
+// ── 10. DOM-2 — the strategic reserve flow + the repair books ─────────────
+
+TEST(ResultLedgerDom2, ReplacementStockRefillsConsumedBudgets) {
+    auto ws = make_ledger_world(/*team_pool=*/10, /*seed_losses=*/2,
+                                /*roster=*/0, /*reinforcement=*/50);
+    ws.teams[0].replacements_avail = 100;   // the strategic reserve
+    WorldStateAdapters adapters(ws);
+    CampaignResultLedger ledger(adapters.campaign, adapters.teams,
+                                adapters.units);
+
+    const auto* sq = ledger.squadron(4281);
+    ASSERT_NE(sq, nullptr);
+    EXPECT_EQ(sq->reinforce_pending, 50);
+    EXPECT_EQ(sq->reinforce_initial, 50);
+    const auto* tl = ledger.teams().data();
+    ASSERT_NE(tl, nullptr);
+    // (find the team row by slot)
+    const TeamLedger* team_row = nullptr;
+    for (const auto& t : ledger.teams()) {
+        if (t.slot == 3) team_row = &t;
+    }
+    ASSERT_NE(team_row, nullptr);
+    EXPECT_EQ(team_row->replacements_initial, 100);
+    EXPECT_EQ(team_row->replacements_avail, 100);
+    EXPECT_EQ(team_row->replacements_spent, 0);
+
+    // A draw opens a deficit (roster 0 → availability 0? no: roster 0
+    // means the shared team-pool share — set the deficit through a
+    // mission draw against the pool the snapshot took).
+    ledger.apply_mission_draw(/*t=*/10.0, /*team=*/3, /*sq=*/4281, 20);
+    // Fire 1: delivery min(deficit 20, budget 50) = 20 → budget 30;
+    // then the stock flow refills want = 50 − 30 = 20 from the reserve.
+    ledger.apply_reinforcements(20.0, /*stock_flow=*/true);
+    sq = ledger.squadron(4281);
+    EXPECT_EQ(sq->reinforce_pending, 50) << "budget topped back up";
+    EXPECT_EQ(team_row->replacements_avail, 80);
+    EXPECT_EQ(team_row->replacements_spent, 20);
+    EXPECT_EQ(ledger.aircraft_reinforced(), 20);
+
+    // Fire 2: another draw + fire — the reserve pays again.
+    ledger.apply_mission_draw(30.0, 3, 4281, 20);
+    ledger.apply_reinforcements(40.0, true);
+    EXPECT_EQ(ledger.squadron(4281)->reinforce_pending, 50);
+    EXPECT_EQ(team_row->replacements_avail, 60);
+    EXPECT_EQ(team_row->replacements_spent, 40);
+    EXPECT_EQ(ledger.aircraft_reinforced(), 40);
+}
+
+TEST(ResultLedgerDom2, ReplacementStockOffKeepsTheC2Shape) {
+    auto ws = make_ledger_world(/*team_pool=*/10, /*seed_losses=*/2,
+                                /*roster=*/0, /*reinforcement=*/50);
+    ws.teams[0].replacements_avail = 100;
+    WorldStateAdapters adapters(ws);
+    CampaignResultLedger ledger(adapters.campaign, adapters.teams,
+                                adapters.units);
+
+    ledger.apply_mission_draw(10.0, 3, 4281, 20);
+    ledger.apply_reinforcements(20.0, /*stock_flow=*/false);
+    // The C2 shape: the budget consumed, the reserve untouched.
+    EXPECT_EQ(ledger.squadron(4281)->reinforce_pending, 30);
+    const TeamLedger* team_row = nullptr;
+    for (const auto& t : ledger.teams()) {
+        if (t.slot == 3) team_row = &t;
+    }
+    ASSERT_NE(team_row, nullptr);
+    EXPECT_EQ(team_row->replacements_avail, 100);
+    EXPECT_EQ(team_row->replacements_spent, 0);
+}
+
+TEST(ResultLedgerDom2, ReplacementStockDriesUpAndStopsRefilling) {
+    auto ws = make_ledger_world(/*team_pool=*/10, /*seed_losses=*/2,
+                                /*roster=*/0, /*reinforcement=*/50);
+    ws.teams[0].replacements_avail = 10;   // a nearly-empty reserve
+    WorldStateAdapters adapters(ws);
+    CampaignResultLedger ledger(adapters.campaign, adapters.teams,
+                                adapters.units);
+
+    ledger.apply_mission_draw(10.0, 3, 4281, 20);
+    ledger.apply_reinforcements(20.0, true);
+    // Delivery 20 first, then the refill wants 20 but the reserve has
+    // only 10: the budget tops to 40, the reserve drains to 0.
+    EXPECT_EQ(ledger.squadron(4281)->reinforce_pending, 40);
+    const TeamLedger* team_row = nullptr;
+    for (const auto& t : ledger.teams()) {
+        if (t.slot == 3) team_row = &t;
+    }
+    ASSERT_NE(team_row, nullptr);
+    EXPECT_EQ(team_row->replacements_avail, 0);
+    EXPECT_EQ(team_row->replacements_spent, 10);
+
+    // Fire 2: delivery drains the budget to 20 and the reserve has
+    // nothing — the budget STAYS consumed (the honest end of the line).
+    ledger.apply_mission_draw(30.0, 3, 4281, 20);
+    ledger.apply_reinforcements(40.0, true);
+    EXPECT_EQ(ledger.squadron(4281)->reinforce_pending, 20);
+    EXPECT_EQ(team_row->replacements_spent, 10);
+}
+
+TEST(ResultLedgerDom2, RepairBooksLogAndUpsertsTheDamageFace) {
+    auto ws = make_ledger_world();
+    WorldStateAdapters adapters(ws);
+    CampaignResultLedger ledger(adapters.campaign, adapters.teams,
+                                adapters.units);
+
+    // A repair of an objective the sink never synced (save-carried
+    // damage): the log books, AND the damage face is created — the
+    // write-back's own source, so the repaired bitmap reaches the save.
+    ObjectiveRepairRecord rec;
+    rec.t_s = 100.0;
+    rec.objective = 77;
+    rec.owner = 3;
+    rec.features_repaired = 2;
+    rec.features_destroyed = 0;
+    rec.supply = 40;
+    rec.last_repair = 1'000'100;
+    rec.fstatus = {0x05};  // f0 repaired(1), f2 repaired(1)
+    ledger.apply_objective_repair(rec);
+
+    EXPECT_EQ(ledger.repair_log().size(), 1u);
+    EXPECT_EQ(ledger.features_repaired(), 2);
+    ASSERT_EQ(ledger.objective_damage().size(), 1u);
+    const auto& face = ledger.objective_damage()[0];
+    EXPECT_EQ(face.objective, 77u);
+    EXPECT_EQ(face.features_destroyed, 0);
+    EXPECT_EQ(face.fstatus[0], 0x05);
+    EXPECT_FALSE(ledger.empty());
+
+    // A second repair REPLACES the face (last write wins) and the
+    // destroyed counter moves by the delta rule.
+    ObjectiveRepairRecord rec2 = rec;
+    rec2.t_s = 200.0;
+    rec2.features_destroyed = 1;   // a fresh strike landed between fires
+    ledger.apply_objective_repair(rec2);
+    EXPECT_EQ(ledger.repair_log().size(), 2u);
+    EXPECT_EQ(ledger.objective_damage().size(), 1u);
+    EXPECT_EQ(ledger.objective_damage()[0].features_destroyed, 1);
+}

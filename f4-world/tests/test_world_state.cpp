@@ -749,6 +749,62 @@ TEST(WorldStateC2, AdaptersExposeTimersAndReplacementStock) {
     EXPECT_EQ(teams.replacements_avail(0), 12u);
 }
 
+TEST(WorldStateDom2, ParsesTeamStrategicStocks) {
+    // CAMP-DOM-2 (supply depth): the .tea TeamClass's strategic ground
+    // stocks (supply_avail / fuel_avail — u16 @52/@54) ride the world
+    // JSON's .tea block (world_json has emitted them all along); the
+    // engine's deepened pool seeds from them, so the parse now carries
+    // them. Absent keys keep the zero default (a legal state).
+    WorldState ws;
+    ws.load_from_string(R"({
+        "version": 71,
+        "campaign": {
+            "current_time": 1,
+            "teams": [
+                {"slot": 2, "name": "ROK", "supply_avail": 1000,
+                 "fuel_avail": 990},
+                {"slot": 6, "name": "DPRK"}
+            ]
+        },
+        "raw_subfiles": {}
+    })");
+    ASSERT_EQ(ws.teams.size(), 2u);
+    EXPECT_EQ(ws.teams[0].supply_avail, 1000u);
+    EXPECT_EQ(ws.teams[0].fuel_avail, 990u);
+    EXPECT_EQ(ws.teams[1].supply_avail, 0u);
+    EXPECT_EQ(ws.teams[1].fuel_avail, 0u);
+}
+
+TEST(WorldStateDom2, TeamStocksRoundTripAndReachTheAdapter) {
+    WorldState ws;
+    ws.load_from_string(R"({
+        "version": 71,
+        "campaign": {
+            "current_time": 1,
+            "teams": [
+                {"slot": 2, "name": "ROK", "supply_avail": 700,
+                 "fuel_avail": 300}
+            ]
+        },
+        "raw_subfiles": {}
+    })");
+    WorldStateAdapters adapters(ws);
+    const auto& teams = static_cast<const f4::world::ITeamSource&>(adapters.teams);
+    ASSERT_EQ(teams.team_count(), 1);
+    EXPECT_EQ(teams.supply_avail(0), 700u);
+    EXPECT_EQ(teams.fuel_avail(0), 300u);
+
+    // The emitter carries the stocks back out (the round-trip face).
+    const std::string json = ws.to_json_string();
+    EXPECT_NE(json.find("\"supply_avail\": 700"), std::string::npos);
+    EXPECT_NE(json.find("\"fuel_avail\": 300"), std::string::npos);
+    WorldState back;
+    back.load_from_string(json);
+    ASSERT_EQ(back.teams.size(), 1u);
+    EXPECT_EQ(back.teams[0].supply_avail, 700u);
+    EXPECT_EQ(back.teams[0].fuel_avail, 300u);
+}
+
 TEST(WorldState, ParsesUcdThreatModelArrays) {
     // C3 (war-loop routing): the world JSON's "hit_chance" /
     // "weapon_range" arrays (UCD HitChance[8]/Range[8], MoveType-indexed)

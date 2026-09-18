@@ -169,6 +169,16 @@ struct CampaignConfig {
     /// the pre-C2 depletion-only behavior.
     CampaignTime reinforcement_period_sec{0};
 
+    /// DOM-2 (supply depth): the strategic reserve flow. When true,
+    /// each reinforcement fire also refills the squadrons' consumed
+    /// reinforcement budgets toward their wire snapshot out of the
+    /// team's `replacements_avail` reserve (decoded since C2, exposed
+    /// on ITeamSource, never consumed until now — the CAMPAIGN_LOOP
+    /// plan's own "stock-to-budget replenishment flow"). Default
+    /// false: the C2 shape (budgets consumed, never replenished) is
+    /// the golden identity; the reserve rides untouched.
+    bool replacement_stock_flow{false};
+
     /// C3: tasking role fallback — when NO squadron of the team
     /// carries a profile's exact ARO role, fall back to the
     /// best-available squadron regardless of specialty (a step toward

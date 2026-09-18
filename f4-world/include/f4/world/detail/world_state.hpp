@@ -101,6 +101,15 @@ struct TeamState {
     // keeps the default (a legal wire state, not a missing adapter).
     uint16_t replacements_avail = 0;  // aircraft-replacement stock
 
+    // --- DOM-2 (supply depth): the .tea TeamClass's strategic ground
+    // stocks (u16 @52/@54 — the national supply/fuel reserve the
+    // objective stocks regenerate from). Decoded and emitted by
+    // world_json's .tea block all along; parsed here since DOM-2 gave
+    // the engine a consumer. 0 = no stock data (a legal state — the
+    // deepened supply flow simply regenerates nothing).
+    uint16_t supply_avail = 0;  // ground-supply stock (0..65535)
+    uint16_t fuel_avail = 0;    // fuel stock (0..65535)
+
     // --- Enrichment from .tea (TeamRecord) ---
     // These fields are emitted by f4-world-convert's world_json when a
     // .tea sub-file was successfully decoded. They're optional — fresh

@@ -195,8 +195,10 @@ void Campaign::fire_reinforcements_() {
         // The delivery: deficits refilled from the wire's per-squadron
         // budgets, into the ledger (the write model — write-back and
         // artifacts see it). Campaign-relative seconds in the log.
+        // DOM-2: the stock flow (default off) lets the team's
+        // strategic reserve keep the order books full after the pass.
         (void)result_ledger_->apply_reinforcements(
-            static_cast<double>(clock_));
+            static_cast<double>(clock_), cfg_.replacement_stock_flow);
     }
 }
 

@@ -30,6 +30,7 @@
 #include <f4/campaign/ground_war.hpp>
 #include <f4/campaign/ground_writeback.hpp>
 #include <f4/campaign/result_ledger.hpp>
+#include <f4/campaign/world_writeback.hpp>
 #include <f4/json/f4_json.hpp>
 #include <f4/world/world_adapters.hpp>
 
@@ -639,4 +640,274 @@ TEST(GroundWar, GroundBlockShapeAndQuietIdentity) {
     EXPECT_EQ(quiet->ledger->to_json().find("\"ground\""),
               std::string::npos);
     EXPECT_TRUE(quiet->ledger->empty());
+}
+
+// ── 10. DOM-2 — the per-objective supply pool ─────────────────────────────
+// The deepened pool: the team's strategic stock (.tea supply_avail /
+// fuel_avail) regenerates its held objectives' stocks, battalions DRAW
+// from the nearest own-held objective within the supply radius (cut
+// off beyond it), and the repair cadence spends that stock restoring
+// features. Every knob defaults OFF — the G1 flat refill above is the
+// byte-identical golden.
+
+TEST(GroundWar, ObjectiveSupplySeedsClampedFromTheSource) {
+    // Real saves carry 0xEB garbage in the supply bytes (kunsan: 235)
+    // where the original game never wrote them — the seed clamps to
+    // the wire's own 0..100 domain, and a negative last_repair (a
+    // kunsan row carries one) clamps to 0.
+    auto rig = Rig::make(fast_cfg(), [](WorldState& w) {
+        w.objectives[0].supply = 235;      // the garbage byte
+        w.objectives[0].fuel = 250;
+        w.objectives[0].last_repair = -2033333296;
+    });
+    const auto& o = rig->war->objectives()[0];
+    EXPECT_EQ(o.supply, 100);
+    EXPECT_EQ(o.fuel, 100);
+    EXPECT_EQ(o.last_repair, 0);
+    // An untouched mirror row is NOT logistics-dirty: the write-back
+    // must never normalize the save's own garbage on a quiet run.
+    EXPECT_FALSE(o.logistics_dirty);
+}
+
+TEST(GroundWar, SourcedResupplyRegeneratesFromTeamStockAndDraws) {
+    GroundWarConfig cfg = fast_cfg();
+    cfg.resupply_period_sec = 100;
+    cfg.objective_supply = true;
+    auto rig = Rig::make(cfg, [&](WorldState& w) {
+        // The strategic stock: ROK (slot 2) carries 1000 supply /
+        // 1000 fuel; the objective seeds 40.
+        w.teams[0].supply_avail = 1000;
+        w.teams[0].fuel_avail = 1000;
+        w.objectives[0].supply = 40;
+        w.objectives[0].fuel = 0;
+        w.units = {battalion(4001, 2, kStMechanized, 50, 90, kRoster12,
+                             360, /*supply=*/10, /*morale=*/40)};
+    });
+
+    rig->war->tick(10);
+    EXPECT_EQ(rig->war->stats().resupply_fires, 1);
+    // REGEN first: EVERY ROK-held objective takes 10 from the team
+    // pool (101: 40 → 50; 102/103: 0 → 10 each — 30 total; the DPRK
+    // pool is empty in this rig, so 201..203 stay dry). Fuel mirrors
+    // on the fuel pool (101: 0 → 10).
+    const auto& o = rig->war->objectives()[0];
+    EXPECT_EQ(rig->war->stats().supply_regen_total, 30);
+    EXPECT_EQ(o.fuel, 10);
+    EXPECT_TRUE(o.logistics_dirty);
+    // Then the DRAW: the battalion tops up min(25, stock 50, room 90)
+    // = 25 from its own-held depot (objective 101 at 50,90 — same
+    // cell), the stock pays for it (50 → 25).
+    const auto& u = rig->war->units()[0];
+    EXPECT_EQ(u.supply, 35) << "10 + 25 drawn";
+    EXPECT_EQ(o.supply, 25);
+    EXPECT_EQ(rig->war->stats().supply_drawn_total, 25);
+    // Fatigue/morale recover flat in the sourced path too.
+    EXPECT_EQ(u.morale, 50);
+}
+
+TEST(GroundWar, CutOffBattalionDrawsNothing) {
+    GroundWarConfig cfg = fast_cfg();
+    cfg.resupply_period_sec = 100;
+    cfg.objective_supply = true;
+    auto rig = Rig::make(cfg, [&](WorldState& w) {
+        // The battalion sits 40+ grid from every own objective —
+        // beyond the default 10-grid line-of-supply radius.
+        w.teams[0].supply_avail = 1000;
+        w.objectives[0].supply = 100;
+        w.units = {battalion(4001, 2, kStMechanized, 90, 130, kRoster12,
+                             360, /*supply=*/10)};
+    });
+
+    rig->war->tick(10);
+    const auto& u = rig->war->units()[0];
+    EXPECT_EQ(u.supply, 10) << "cut off: no depot in radius";
+    EXPECT_EQ(rig->war->stats().cut_off_events, 1);
+    EXPECT_EQ(rig->war->stats().supply_drawn_total, 0);
+    // Rest still happens (fatigue/morale are unit-level, not
+    // logistics).
+    EXPECT_EQ(u.morale, 100);
+    // The depot keeps its stock (nobody drew).
+    EXPECT_EQ(rig->war->objectives()[0].supply, 100);
+}
+
+TEST(GroundWar, DepletedStockDriesTheDepotAndTheDraw) {
+    GroundWarConfig cfg = fast_cfg();
+    cfg.resupply_period_sec = 100;
+    cfg.objective_supply = true;
+    auto rig = Rig::make(cfg, [&](WorldState& w) {
+        // No strategic stock at all (a legal .tea state): the depot
+        // cannot regenerate, and the draw drains what it seeded with.
+        w.objectives[0].supply = 10;
+        w.units = {battalion(4001, 2, kStMechanized, 50, 90, kRoster12,
+                             360, /*supply=*/10)};
+    });
+
+    rig->war->tick(10);
+    // Regen: the pool is 0 → the depot stays at 10. Draw: min(25,
+    // stock 10, room 90) = 10 → the battalion gets 20, the depot 0.
+    EXPECT_EQ(rig->war->objectives()[0].supply, 0);
+    EXPECT_EQ(rig->war->units()[0].supply, 20);
+    EXPECT_EQ(rig->war->stats().supply_regen_total, 0);
+    EXPECT_EQ(rig->war->stats().supply_drawn_total, 10);
+}
+
+// ── 11. DOM-2 — the objective-feature repair cadence ──────────────────────
+
+/// Damage face builder: 2 bits per feature, 0 normal / 1 repaired /
+/// 2 damaged / 3 destroyed (f4vu.h). Features 0..7 fit one byte.
+TEST(GroundWar, RepairFiresFlipsBitsAndBooksTheRecord) {
+    GroundWarConfig cfg = fast_cfg();
+    cfg.repair_period_sec = 100;
+    auto rig = Rig::make(cfg, [&](WorldState& w) {
+        // Objective 101 (ROK-held): feature 0 destroyed, feature 1
+        // damaged, stock 50 (above the repair_min_supply gate).
+        w.objectives[0].supply = 50;
+        w.objectives[0].fstatus = {0x0B};  // f0=3 (destroyed), f1=2
+        w.units = {battalion(4001, 2, kStMechanized, 50, 90, kRoster12,
+                             360)};
+    });
+
+    const std::int64_t epoch = 1'000'000;
+    rig->war->tick(10);   // the first update (t = 0 on the engine's
+                          // own clock) fires the stale anchor
+
+    EXPECT_EQ(rig->war->stats().repair_fires, 1);
+    EXPECT_EQ(rig->war->stats().features_repaired, 1);
+    // Lowest feature index first: feature 0 (destroyed) → repaired;
+    // feature 1 stays damaged. Supply pays the cost (50 − 5).
+    const auto& o = rig->war->objectives()[0];
+    EXPECT_EQ(o.fstatus[0] & 0x03, 1) << "f0 repaired";
+    EXPECT_EQ((o.fstatus[0] >> 2) & 0x03, 2) << "f1 still damaged";
+    EXPECT_EQ(o.supply, 45);
+    EXPECT_EQ(o.last_repair, epoch) << "the fire landed at t = 0";
+    EXPECT_TRUE(o.logistics_dirty);
+
+    // The books: one repair record, and the damage-state face
+    // upserted with the post-repair bitmap (the write-back's source).
+    ASSERT_EQ(rig->ledger->repair_log().size(), 1u);
+    const auto& rec = rig->ledger->repair_log()[0];
+    EXPECT_EQ(rec.objective, 101u);
+    EXPECT_EQ(rec.owner, 2);
+    EXPECT_EQ(rec.features_repaired, 1);
+    EXPECT_EQ(rec.features_destroyed, 0);
+    EXPECT_EQ(rec.supply, 45);
+    EXPECT_EQ(rec.last_repair, epoch);
+    EXPECT_EQ(rec.fstatus[0], 0x09);  // f0=1 (repaired), f1=2
+    EXPECT_EQ(rig->ledger->features_repaired(), 1);
+    ASSERT_EQ(rig->ledger->objective_damage().size(), 1u);
+    EXPECT_EQ(rig->ledger->objective_damage()[0].fstatus[0], 0x09);
+    EXPECT_FALSE(rig->ledger->empty());
+}
+
+TEST(GroundWar, RepairGatedBySupplyAndBelligerentHold) {
+    GroundWarConfig cfg = fast_cfg();
+    cfg.repair_period_sec = 100;
+    auto rig = Rig::make(cfg, [&](WorldState& w) {
+        // 101: ROK-held but stock 10 — below repair_min_supply (25):
+        // no crews. 203: DPRK-held with damage and stock — repairs.
+        w.objectives[0].supply = 10;
+        w.objectives[0].fstatus = {0x02};  // f0 damaged
+        w.objectives[5].supply = 80;       // vu 203 (DPRK)
+        w.objectives[5].fstatus = {0x03};  // f0 destroyed
+        w.units = {battalion(4001, 2, kStMechanized, 50, 90, kRoster12,
+                             360)};
+    });
+
+    rig->war->tick(10);
+    EXPECT_EQ(rig->war->stats().repair_fires, 1);
+    EXPECT_EQ(rig->war->stats().features_repaired, 1);
+    // 101 untouched (starved), 203 healed.
+    EXPECT_EQ(rig->war->objectives()[0].fstatus[0], 0x02);
+    EXPECT_EQ(rig->war->objectives()[5].fstatus[0] & 0x03, 1);
+    ASSERT_EQ(rig->ledger->repair_log().size(), 1u);
+    EXPECT_EQ(rig->ledger->repair_log()[0].objective, 203u);
+    // A starved objective is not logistics-dirty (nothing moved).
+    EXPECT_FALSE(rig->war->objectives()[0].logistics_dirty);
+}
+
+TEST(GroundWar, RepairAdoptsSimSideDamageBeforeWalking) {
+    GroundWarConfig cfg = fast_cfg();
+    cfg.repair_period_sec = 100;
+    auto rig = Rig::make(cfg, [&](WorldState& w) {
+        w.objectives[0].supply = 60;
+        // The mirror seeds CLEAN; the damage arrives mid-run (the
+        // sink's synced record — a strike the sim flew).
+        w.units = {battalion(4001, 2, kStMechanized, 50, 90, kRoster12,
+                             360)};
+    });
+    f4::campaign::ObjectiveDamageRecord strike;
+    strike.objective = 101;
+    strike.features_total = 8;
+    strike.features_destroyed = 1;
+    strike.destroyed_pct = 12;
+    strike.fstatus = {0x03};   // f0 destroyed
+    rig->ledger->apply_objective_damage(strike);
+
+    rig->war->tick(10);
+    // The engine adopted the strike's face, then repaired feature 0.
+    const auto& o = rig->war->objectives()[0];
+    EXPECT_EQ(o.fstatus[0] & 0x03, 1);
+    EXPECT_EQ(rig->ledger->repair_log().size(), 1u);
+    // The damage face now reads post-repair (0 destroyed).
+    EXPECT_EQ(rig->ledger->objective_damage()[0].features_destroyed, 0);
+    EXPECT_EQ(rig->ledger->objective_damage()[0].fstatus[0], 0x01);
+}
+
+TEST(GroundWar, RepairsAndStocksRideTheWriteBack) {
+    GroundWarConfig cfg = fast_cfg();
+    cfg.resupply_period_sec = 100;
+    cfg.objective_supply = true;
+    cfg.repair_period_sec = 100;
+    auto rig = Rig::make(cfg, [&](WorldState& w) {
+        w.teams[0].supply_avail = 1000;
+        w.objectives[0].supply = 40;
+        w.objectives[0].fstatus = {0x0B};  // f0 destroyed, f1 damaged
+        w.units = {battalion(4001, 2, kStMechanized, 50, 90, kRoster12,
+                             360, /*supply=*/10)};
+    });
+
+    rig->war->tick(10);
+
+    // The ground write-back lands the logistics face for the DIRTY
+    // objectives only: 101 (regen + draw + repair), plus 102/103 (the
+    // regen fed them from the ROK pool — three ROK rows, the neutral
+    // 301 untouched); the C1 write-back lands the repaired fstatus.
+    const auto g = apply_ground_to(*rig->war, *rig->ws);
+    EXPECT_EQ(g.objectives_resupplied, 3);
+    EXPECT_EQ(g.objectives_flipped, 0);
+    EXPECT_EQ(rig->ws->objectives[0].supply,
+              rig->war->objectives()[0].supply);
+    EXPECT_EQ(rig->ws->objectives[0].last_repair,
+              rig->war->objectives()[0].last_repair);
+    const auto wv = apply_to(*rig->ledger, *rig->ws);
+    EXPECT_EQ(wv.objectives_written, 1);
+    EXPECT_EQ(rig->ws->objectives[0].fstatus,
+              rig->war->objectives()[0].fstatus);
+    // The neutral objective (301) — untouched by the flow — keeps the
+    // world's own bytes (the garbage-normalization guard).
+    EXPECT_EQ(rig->ws->objectives[6].owner, 3);
+}
+
+TEST(GroundWar, RepairCadenceCatchUpOnce) {
+    GroundWarConfig cfg = fast_cfg();
+    cfg.repair_period_sec = 3600;
+    auto rig = Rig::make(cfg, [&](WorldState& w) {
+        // Stale anchor (0 against the epoch): fires ONE tick.
+        w.objectives[0].supply = 50;
+        w.objectives[0].fstatus = {0x0B};
+        w.units = {battalion(4001, 2, kStMechanized, 50, 90, kRoster12,
+                             360)};
+    });
+
+    rig->war->tick(10);
+    EXPECT_EQ(rig->war->stats().repair_fires, 1);
+    rig->war->tick(10);
+    rig->war->tick(10);
+    EXPECT_EQ(rig->war->stats().repair_fires, 1) << "catch-up-once";
+    // Next boundary: one PERIOD after the catch-up fire.
+    rig->war->tick(3590);
+    EXPECT_EQ(rig->war->stats().repair_fires, 2);
+    // Two fires, one feature each (the budget is per fire).
+    EXPECT_EQ(rig->war->stats().features_repaired, 2);
+    EXPECT_EQ((rig->war->objectives()[0].fstatus[0] >> 2) & 0x03, 1);
 }

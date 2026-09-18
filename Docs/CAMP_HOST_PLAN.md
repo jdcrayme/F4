@@ -31,6 +31,16 @@
 > territorial census weighted by the objective's own priority byte
 > against the session's opening owner, the ledger's team rows riding,
 > the band territorial-only with a tie for the lead being no lead).
+> CAMP-DOM-2 shipped (supply depth — the per-objective pool: the team
+> strategic stocks (`.tea` supply_avail/fuel_avail, now parsed and
+> adapter-exposed) regenerate their held objectives' clamped
+> supply/fuel stocks, battalions DRAW from the nearest own-held
+> objective within the supply radius and are CUT OFF beyond it, the
+> `last_repair` cadence heals features at a supply-gated rate and
+> books the `objective_repaired` family (the eleventh), the strategic
+> reserve (`replacements_avail`) refills consumed reinforcement
+> budgets, the `objectives` query serves the live mirror (the DOM-1
+> seam closes), and every knob defaults OFF — the goldens stand).
 > Every other tranche below is an acceptance contract, not a claim.
 
 The campaign engine is the product. Every user experience — the world viewer
@@ -244,6 +254,7 @@ t=356.7 s" — it becomes an event, not just a book entry.
 | `flight_launched` / `flight_recovered` | spawn path + FID airfield-ops windows |
 | `engagement_opened` / `kill` / `loss` | the combat passes + ledger books (C6) |
 | `objective_damage` / `objective_captured` | fstatus diff (C1) + GroundWar (G1) |
+| `objective_repaired` | the repair cadence's fire — the front healed (CAMP-DOM-2) |
 | `reinforcement_delivered` | C2's reinforcement fire |
 | `tasking_cycle` | the 7-phase ATM pass + `next_tasking_sec` |
 | `action_filed` | the ACTION tables' damage reactions (CAMP-ATM-1) |
@@ -782,10 +793,95 @@ Default behavior is byte-identical unless a gate says otherwise.
   unknown-query exit 21 and exit namespaces stand); the protocol
   whitelist gains `verdict` additively, `kProtocolVersion` stays 1.
 
+### CAMP-DOM-2 — supply depth (the per-objective pool)
+
+AS BUILT (the C2 known-gap's ground face + the repair tranche in one
+series). The chain: the team's strategic stock (`.tea` TeamClass
+`supply_avail`/`fuel_avail` u16 @52/@54 — decoded and emitted by
+world_json all along, parsed into `WorldState::TeamState` and exposed
+on `ITeamSource` since DOM-2) regenerates its held objectives' stocks
+each resupply fire, battalions DRAW from the nearest own-held
+objective within the line-of-supply radius, and the `last_repair`
+cadence (the third `.cmp` maintenance timer — bridged since C2,
+consumed since DOM-2) spends that stock healing features. Notes:
+
+(1) Every knob defaults OFF — `GroundWarConfig::objective_supply`,
+`repair_period_sec` (plus the rates: `supply_radius_grid` 10,
+`supply_regen_per_fire` 10, `repair_min_supply` 25 — the movement
+gate's own threshold echo —, `repair_features_per_fire` 1,
+`repair_supply_cost` 5), `CampaignConfig::replacement_stock_flow`,
+the session's `ground_objective_supply`/`ground_repair_sec`/
+`replacement_stock_flow`, the QC's `--objective-supply`/
+`--repair-period`/`--replacement-stock`. The G1 flat refill is the
+byte-identical golden path; the F6 gate lesson held a third time.
+(2) The seed CLAMPS to the wire's own 0..100 domain — real saves
+carry 0xEB uninitialized garbage where the original game never wrote
+the fields (kunsan: 235), and a negative `last_repair` clamps to 0.
+(3) The fire order inside one resupply tick: REGEN (teams in slot
+order, their held objectives in wire order, each take =
+min(rate, pool remainder, 100 − stock); fuel mirrors on the fuel
+pool — carried, no consumer draws it yet, the wire's battalions
+carry no fuel byte), then DRAW (battalions in wire order, nearest
+own-held depot by squared grid distance, wire-order ties; take =
+min(25 — the flat flow's own amount —, depot stock, headroom); a
+battalion beyond every own objective's radius is CUT OFF: nothing,
+counted in `cut_off_events` — the encirclement effect the
+reference's supply-line targeting exists to create). Fatigue/morale
+recover flat in both paths (rest, not logistics).
+(4) Repair: anchored on `last_repair`, catch-up-once, the same shape
+as resupply/reinforcement. Each fire ADOPTS the ledger's
+damage-state faces into the mirror first (wholesale, idempotent —
+the records ARE final states), then per belligerent-held objective
+with stock ≥ `repair_min_supply`: flips up to
+`repair_features_per_fire` lowest-index damaged/destroyed features
+to VIS_REPAIRED (1 — the honest state: not rubble, not pristine),
+spends `repair_supply_cost` per feature, stamps the objective's own
+`last_repair` wire field.
+(5) The books: `apply_objective_repair` appends to the repair log
+(the `objective_repaired` family's source — the eleventh, all eight
+touch-points, the owner-side team gate) AND upserts the damage-state
+map with the post-repair face — so the C1 fstatus write-back carries
+repairs with zero new machinery. The ground write-back gains the
+logistics face: `logistics_dirty` objectives (regen/draw/repair
+moved them) write supply/fuel/last_repair; the flag is what keeps a
+seeded-but-unmoved mirror from normalizing the save's garbage bytes.
+The strategic reserve write-back: spent reserves land in
+`teams.replacements_avail` (activity = spent > 0).
+(6) The air side's known-gap closure: `apply_reinforcements(t,
+stock_flow)` — OFF (default) keeps the C2 shape (budgets consumed,
+never replenished); ON refills consumed budgets toward their wire
+snapshot out of `replacements_avail` after the delivery pass, slot
+order then wire order, the reserve draining as it gives. The reserve
+is the war's ultimate aircraft source; the budgets are the squadrons'
+order books it keeps full. `TeamLedger` carries the reserve's books
+(initial/avail/spent — the artifact's team rows gain the keys only
+when the flow moved anything), `SquadronLedger` gains
+`reinforce_initial` (the refill target).
+(7) THE SEAM CLOSES (DOM-1's as-built note 7): the `objectives`
+query overlays the engine's live mirror (owner + supply/fuel/losses/
+last_repair/fstatus by VU) when a ground war runs — the kunsan
+garbage bytes are the test signal (235 in the quiet query, 100 in
+the live one); no ground war → the rows stay the WorldState's own,
+byte-identical to the pre-DOM-2 shape. The sink's damaged count
+stops calling VIS_REPAIRED damage (a healed feature is not damage —
+the repair mirror writes state 1 into the entity face, restored hp
+included, so the next damage sync diffs truth).
+(8) `campaignd` untouched (no new query; the family rides the
+subscribe kinds — `parse_event_kind`'s list, `kProtocolVersion`
+stays 1). The QC summary's ground block gains the supply books only
+when the flow moved anything (regen/drawn/cut-off/repairs/
+features_repaired), the certificate line unchanged.
+(9) The certificate: campinit medium war, 0.5 h, the three arms on —
+regen 12 / drawn 12 / cut-off 5 (the army marched past its depots),
+no repairs (nothing broke in 30 minutes — honest zero), two runs one
+MD5 (2e0180b3…), exits stand. The session gates prove the repair
+chain end to end: seeded damage (feature 0 destroyed on every
+belligerent-held kunsan objective) heals on the cadence, the events
+publish one-for-one with the books, the entity face joins
+(VIS_REPAIRED + hp restored), both write-backs land.
+
 ### CAMP-DOM-* — domain tranches (each its own landed series, upstream-mapped)
-- **DOM-2 supply depth**: upstream interdiction targets supply/fuel lines
-  and objectives carry supply; deepen C2's pool into per-objective supply
-  feeding reinforcement and repair rates.
+- ~~**DOM-2 supply depth**~~ — SHIPPED above.
 - **DOM-3 personnel**: `AssignPilots()`, rating decay, squadron rotation —
   blocked on PLT_PARK (CAMP-SCALE-1).
 - **DOM-4 airbase scheduling**: `FindTakeoffSlot()` depth beyond FID's

@@ -130,6 +130,12 @@ struct CampaignSessionOptions {
     int tasking_cycle_sec = 1800;
     /// Reinforcement cadence; 43200 = the QC's armed 12 h.
     int reinforce_period_sec = 43200;
+    /// DOM-2: the strategic reserve flow (CampaignConfig::
+    /// replacement_stock_flow) — the .tea replacements reserve refills
+    /// the squadrons' consumed reinforcement budgets each fire. Default
+    /// false: the C2 shape (budgets consumed, never replenished) is the
+    /// golden identity.
+    bool replacement_stock_flow = false;
     /// C4: the ATM pipeline — the reference's actual tasking (FindBestAir
     /// scoring, escort pairing, TOT slotting, mission recovery) — ON by
     /// default: the session is the C4/C5 development surface. The
@@ -203,6 +209,20 @@ struct CampaignSessionOptions {
     /// the engine's golden-identity default — the QC's war arms
     /// 43200 like the aircraft reinforcement cadence).
     int ground_resupply_sec = 0;
+    /// DOM-2: the deepened per-objective supply pool — the resupply
+    /// fire becomes SOURCED (the team's .tea strategic stock
+    /// regenerates its held objectives' stocks; battalions draw from
+    /// the nearest own-held objective, cut off beyond the supply
+    /// radius). Default false: the G1 flat +25/−25/+10 refill is the
+    /// golden identity. Requires ground_war.
+    bool ground_objective_supply = false;
+    /// DOM-2: the objective-feature repair cadence (campaign seconds;
+    /// 0 = OFF, the golden-identity default). Each fire repairs up to
+    /// one damaged feature per belligerent-held objective with stock
+    /// above the engine's repair_min_supply (25), stamps the
+    /// objective's last_repair, and books an objective_repaired
+    /// event-sourced ledger record. Requires ground_war.
+    int ground_repair_sec = 0;
 
     /// G2: run the INTERDICTION link — UNIT-targeted delivery missions
     /// (the CAS family) resolve real enemy battalion targets (front-
@@ -507,6 +527,20 @@ public:
     /// it; the event pump diffs its coarse state (emit_verdict_events_).
     [[nodiscard]] f4::campaign::TheaterVerdict verdict() const;
 
+    // --- CAMP-DOM-2: the live objective logistics -----------------------
+
+    /// The ground war's live objective mirror (nullptr when no ground
+    /// war runs). The `objectives` query serves WorldState rows OVER-
+    /// LAID with these (owner + supply/fuel/losses/last_repair/fstatus
+    /// by VU) — the DOM-1 seam (static save rows vs the live mirror)
+    /// closes: ownership AND logistics read the engine's truth while
+    /// the war moves, and stay byte-identical to the pre-DOM-2 rows
+    /// when no ground war runs.
+    [[nodiscard]] const std::vector<f4::campaign::GroundObjectiveState>*
+    ground_objectives() const noexcept {
+        return ground_ != nullptr ? &ground_->objectives() : nullptr;
+    }
+
     // --- V-3DLIVE: camera-driven deaggregation (view bubble) ----------
     /// Point the deaggregation bubble at the host's CAMERA position
     /// (ENU feet) with a host-chosen radius (scales with zoom), and
@@ -699,6 +733,8 @@ private:
     void emit_action_filed_events_();  ///< CAMP-ATM-1 — the ACTION tables'
                                        ///< filings (the log's tail)
     void emit_capture_events_();   ///< the ground war's objective flips
+    void emit_repair_events_();    ///< CAMP-DOM-2 — the repair cadence's
+                                   ///< books + the sim-side bitmap mirror
     void emit_damage_events_();    ///< the damage sync's changed objectives
     void emit_verdict_events_();   ///< CAMP-DOM-1 — the books' projection
                                    ///< moved (band or leader changed)
@@ -745,6 +781,7 @@ private:
     /// ever append; the tail past the cursor is THIS cadence's news).
     std::size_t last_reinforcement_record_ = 0;
     std::size_t last_capture_record_ = 0;
+    std::size_t last_repair_record_ = 0;
     /// CAMP-ATM-1 — the ACTION-filing log's read cursor.
     std::size_t last_action_record_ = 0;
     /// The tasking-cycle counter's last seen value (the diff IS the

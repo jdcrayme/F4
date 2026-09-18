@@ -39,6 +39,10 @@ CampaignResultLedger::CampaignResultLedger(
             }
         }
         tl.aircraft_remaining = tl.aircraft_initial;
+        // DOM-2: the strategic reserve's seed (decoded since C2,
+        // consumed since DOM-2 — apply_reinforcements' stock flow).
+        tl.replacements_initial = static_cast<int>(teams.replacements_avail(t));
+        tl.replacements_avail = tl.replacements_initial;
         teams_.push_back(std::move(tl));
     }
 
@@ -78,6 +82,7 @@ CampaignResultLedger::CampaignResultLedger(
         }
         sl.availability = s.available;
         sl.reinforce_pending = s.reinforce_pending;
+        sl.reinforce_initial = s.reinforce_pending;
         squadrons_.push_back(std::move(sl));
     }
 }
@@ -253,7 +258,8 @@ int CampaignResultLedger::flight_air_losses(
     return n;
 }
 
-int CampaignResultLedger::apply_reinforcements(double t_s) {
+int CampaignResultLedger::apply_reinforcements(double t_s,
+                                                bool stock_flow) {
     ++reinforcement_fires_;
 
     int delivered_total = 0;
@@ -290,6 +296,27 @@ int CampaignResultLedger::apply_reinforcements(double t_s) {
         rec.delivered = delivered;
         rec.budget_left = sq.reinforce_pending;
         reinforcements_.push_back(rec);
+    }
+
+    // DOM-2 — the strategic reserve keeps the order books full: each
+    // team's consumed budgets refill toward their wire snapshot out of
+    // replacements_avail, slot order (the teams_ vector) then wire
+    // order (the squadrons_ vector), the reserve draining as it gives.
+    // OFF (default) = the C2 shape: budgets consumed, never
+    // replenished, the reserve untouched.
+    if (stock_flow) {
+        for (auto& tl : teams_) {
+            if (tl.replacements_avail <= 0) continue;
+            for (auto& sq : squadrons_) {
+                if (sq.owner != tl.slot) continue;
+                const int want = sq.reinforce_initial - sq.reinforce_pending;
+                if (want <= 0) continue;
+                const int take = std::min(want, tl.replacements_avail);
+                sq.reinforce_pending += take;
+                tl.replacements_avail -= take;
+                tl.replacements_spent += take;
+            }
+        }
     }
 
     aircraft_reinforced_ += delivered_total;
@@ -449,6 +476,36 @@ void CampaignResultLedger::apply_objective_damage(
     objective_damage_.push_back(rec);
     objective_vus_.push_back(rec.objective);
     features_destroyed_ += rec.features_destroyed;
+}
+
+void CampaignResultLedger::apply_objective_repair(
+        const ObjectiveRepairRecord& rec) {
+    if (rec.objective == 0 || rec.features_repaired <= 0) return;
+    repairs_.push_back(rec);
+    features_repaired_ += rec.features_repaired;
+
+    // The repaired face rides the damage-state map (the write-back's
+    // own source): replace the objective's entry, else create one —
+    // the same last-write-wins rule apply_objective_damage keeps, and
+    // the destroyed counters move by its replace-the-entry arithmetic.
+    ObjectiveDamageRecord face;
+    face.objective = rec.objective;
+    face.features_total = static_cast<int>(rec.fstatus.size()) * 4;
+    face.features_destroyed = rec.features_destroyed;
+    face.destroyed_pct = face.features_total > 0
+        ? (100 * rec.features_destroyed) / face.features_total : 0;
+    face.fstatus = rec.fstatus;
+    for (auto& existing : objective_damage_) {
+        if (existing.objective == rec.objective) {
+            features_destroyed_ += face.features_destroyed
+                                   - existing.features_destroyed;
+            existing = face;
+            return;
+        }
+    }
+    objective_damage_.push_back(face);
+    objective_vus_.push_back(face.objective);
+    features_destroyed_ += face.features_destroyed;
 }
 
 void CampaignResultLedger::apply_bomb_impact(
@@ -627,6 +684,17 @@ std::string CampaignResultLedger::to_json() const {
         w.number_key("aircraft_reinforced", t.reinforced);
         w.put(", ");
         w.number_key("aircraft_tasking", team_aircraft_tasking(t.slot));
+        // DOM-2: the strategic reserve's books, only when the stock
+        // flow moved anything (a pristine ledger emits byte-identical
+        // team rows).
+        if (t.replacements_spent != 0 || t.replacements_avail != t.replacements_initial) {
+            w.put(", ");
+            w.number_key("replacements_initial", t.replacements_initial);
+            w.put(", ");
+            w.number_key("replacements_avail", t.replacements_avail);
+            w.put(", ");
+            w.number_key("replacements_spent", t.replacements_spent);
+        }
         w.put("}");
     }
     w.put(teams_.empty() ? "]" : "\n  ]");
@@ -825,7 +893,7 @@ std::string CampaignResultLedger::to_json() const {
     // states, arrival-ordered loss and capture events). No floats:
     // integer grid positions, whole-byte states, ms times.
     if (!ground_losses_.empty() || !captures_.empty() ||
-        !ground_units_.empty()) {
+        !ground_units_.empty() || !repairs_.empty()) {
         w.put(",\n  \"ground\": {");
         w.put("\n    ");
         w.number_key("vehicle_losses", ground_vehicle_losses_);
@@ -960,6 +1028,41 @@ std::string CampaignResultLedger::to_json() const {
             w.put("}");
         }
         w.put(captures_.empty() ? "]" : "\n    ]");
+
+        // DOM-2 — the repair log: arrival order (the objective_
+        // repaired event family's source). Optional inside the block:
+        // a resupply-only ground war emits byte-identical ground
+        // objects, exactly the ground-quiet rule the block itself
+        // follows.
+        if (!repairs_.empty()) {
+            w.put(",\n    \"repairs\": [");
+            for (std::size_t i = 0; i < repairs_.size(); ++i) {
+                const auto& rp = repairs_[i];
+                w.put(i ? ",\n      " : "\n      ");
+                w.put("{\"t_ms\": ");
+                w.put(time_ms(rp.t_s));
+                w.put(", ");
+                w.number_key("objective", rp.objective);
+                w.put(", ");
+                w.number_key("owner", rp.owner);
+                w.put(", ");
+                w.number_key("repaired", rp.features_repaired);
+                w.put(", ");
+                w.number_key("destroyed", rp.features_destroyed);
+                w.put(", ");
+                w.number_key("supply", rp.supply);
+                w.put(", ");
+                w.number_key("last_repair", rp.last_repair);
+                w.put(", \"fstatus\": \"");
+                static const char kHex[] = "0123456789abcdef";
+                for (const std::uint8_t b : rp.fstatus) {
+                    w.put(kHex[(b >> 4) & 0x0F]);
+                    w.put(kHex[b & 0x0F]);
+                }
+                w.put("\"}");
+            }
+            w.put("\n    ]");
+        }
 
         w.put("\n  }");
     }

@@ -492,6 +492,9 @@ CampaignSession::create(const CampaignSessionOptions& opts,
     f4::campaign::CampaignConfig ladder_cfg;
     ladder_cfg.air_task_cycle_sec = opts.tasking_cycle_sec;
     ladder_cfg.reinforcement_period_sec = opts.reinforce_period_sec;
+    // CAMP-DOM-2: the strategic reserve flow (default off — the C2
+    // golden identity; the QC's --replacement-stock arms it).
+    ladder_cfg.replacement_stock_flow = opts.replacement_stock_flow;
     ladder_cfg.atm_pipeline = opts.atm_pipeline;
     ladder_cfg.atm.min_seadescort_threat = opts.atm_seadescort_threat;
     // CAMP-CMD-2: the retask arithmetic reuses the ATM's own reserve
@@ -530,6 +533,10 @@ CampaignSession::create(const CampaignSessionOptions& opts,
         gcfg.orders_sec = opts.ground_orders_sec > 0
             ? opts.ground_orders_sec : 1800;
         gcfg.resupply_period_sec = opts.ground_resupply_sec;
+        // CAMP-DOM-2: the deepened pool + the repair cadence (both
+        // default-off — the G1 golden identity).
+        gcfg.objective_supply = opts.ground_objective_supply;
+        gcfg.repair_period_sec = opts.ground_repair_sec;
         session->ground_ = std::make_unique<f4::campaign::GroundWar>(
             static_cast<const f4::world::ICampaignSource&>(
                 session->adapters_->campaign),
@@ -760,6 +767,11 @@ bool CampaignSession::advance(double real_seconds, int max_steps_override) {
             // CAMP-HOST-2: the changed objectives publish here (the
             // sink collects; the session fills owner + time).
             emit_damage_events_();
+            // CAMP-DOM-2: the repair cadence's books (the ledger log's
+            // tail) + the sim-side bitmap mirror (a repaired feature's
+            // entity face joins the engine's truth so the NEXT damage
+            // sync diff sees the repair, not the stale rubble).
+            emit_repair_events_();
             // CAMP-DOM-1: the verdict's coarse state — the event fires
             // only when the band or the leader changed (a capture is
             // the only mover today; the diff keeps the stream sparse).
@@ -1138,6 +1150,78 @@ void CampaignSession::emit_capture_events_() {
         sim_->bus().publish(e);
     }
     last_capture_record_ = clog.size();
+}
+
+void CampaignSession::emit_repair_events_() {
+    namespace api = f4::campaign::api;
+    // CAMP-DOM-2 — the repair log's tail: one event per repaired
+    // objective per fire, in the ledger's arrival order. The event is
+    // the books' summary; the repaired BITMAP itself reached the
+    // ledger's damage-state face (apply_objective_repair) and rides
+    // the write-back with the bomb damage it heals.
+    const auto& rlog = ledger_->repair_log();
+    if (last_repair_record_ < rlog.size()) {
+        // The sim-side mirror: the engine's repaired face must join
+        // the objective ENTITY's face, or the next damage sync diffs
+        // stale rubble (state-3 features the engine already healed)
+        // and re-books the pre-repair truth over the repair. Same
+        // one-world rule sync_ground_entities_ keeps for battalions.
+        auto& world = sim_->world();
+        for (auto i = last_repair_record_; i < rlog.size(); ++i) {
+            const auto& rp = rlog[i];
+            const auto it = objective_id_map_.find(rp.objective);
+            if (it != objective_id_map_.end()) {
+                f4::entities::EntityHandle h(it->second, &world);
+                auto* fs = h.get<f4::entities::FeatureSetComponent>();
+                if (fs != nullptr) {
+                    // Repaired indices: the save-side face said
+                    // damaged/destroyed, the record's face says
+                    // repaired (VIS_REPAIRED — the honest state: not
+                    // rubble, not pristine). Restored hit points give
+                    // the feature its structure back (a full-hp
+                    // feature re-kills like a fresh one; the hp
+                    // ledger's lazy init already reads the face).
+                    const int capacity =
+                        static_cast<int>(rp.fstatus.size()) * 4;
+                    const int n = static_cast<int>(fs->features.size());
+                    const int walk = std::min(n, capacity);
+                    for (int fi = 0; fi < walk; ++fi) {
+                        const std::size_t bi = static_cast<std::size_t>(fi);
+                        const std::uint8_t now =
+                            static_cast<std::uint8_t>(
+                                (rp.fstatus[bi / 4] >> ((bi % 4) * 2)) &
+                                0x03);
+                        auto& f = fs->features[bi];
+                        if (now != 1) continue;
+                        if (f.damage_state == 2 || f.damage_state == 3) {
+                            f.damage_state = 1;
+                            if (f.hit_points > 0.0 &&
+                                fs->feature_hp.size() == fs->features.size()) {
+                                fs->feature_hp[bi] = f.hit_points;
+                            }
+                        }
+                    }
+                }
+                auto* db = h.get<f4::entities::DamageBitmapComponent>();
+                if (db == nullptr) db = &h.add<f4::entities::DamageBitmapComponent>();
+                db->fstatus = rp.fstatus;
+            }
+
+            api::CampaignEvent e;
+            e.kind = api::CampaignEvent::Kind::ObjectiveRepaired;
+            e.objective_repaired.t =
+                static_cast<std::int64_t>(std::llround(rp.t_s));
+            e.objective_repaired.objective_id = rp.objective;
+            e.objective_repaired.owner = rp.owner;
+            e.objective_repaired.features_repaired =
+                static_cast<std::uint32_t>(rp.features_repaired);
+            e.objective_repaired.features_destroyed =
+                static_cast<std::uint32_t>(rp.features_destroyed);
+            e.objective_repaired.supply = rp.supply;
+            sim_->bus().publish(e);
+        }
+    }
+    last_repair_record_ = rlog.size();
 }
 
 void CampaignSession::emit_action_filed_events_() {

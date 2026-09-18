@@ -5,6 +5,7 @@
 #include <f4/campaign/ground_writeback.hpp>
 
 #include <algorithm>
+#include <cstdint>
 
 namespace f4::campaign {
 
@@ -77,14 +78,28 @@ GroundWritebackResult apply_ground_to(const GroundWar& war,
 
     // --- Objectives ------------------------------------------------------
     // Owner flips only (first_owner untouched — the wire's "owner at
-    // save start" semantics).
+    // save start" semantics). DOM-2 adds the logistics face: objectives
+    // whose supply/fuel/repair state the ENGINE moved (logistics_dirty)
+    // write supply / fuel / last_repair — the per-objective pool's own
+    // write-back. The activity flag is what keeps a seeded-but-unmoved
+    // mirror from normalizing the save's own garbage bytes (kunsan's
+    // 0xEB supply rows) on a run that never armed the flow.
     for (auto& obj : ws.objectives) {
         const GroundObjectiveState* g = nullptr;
         for (const auto& cand : war.objectives()) {
             if (cand.vu == obj.id_num) { g = &cand; break; }
         }
         if (g == nullptr) continue;
-        if (g->owner == g->initial_owner) continue;
+        if (g->owner == g->initial_owner) {
+            if (!g->logistics_dirty) continue;
+            obj.supply = g->supply;
+            obj.fuel = g->fuel;
+            obj.last_repair = static_cast<std::int32_t>(
+                std::clamp<std::int64_t>(g->last_repair,
+                                         INT32_MIN, INT32_MAX));
+            ++out.objectives_resupplied;
+            continue;
+        }
         if (obj.owner != g->initial_owner) {
             // The world moved under us (a foreign write-back order):
             // last write wins is the C1 discipline, but a mismatched
@@ -93,6 +108,14 @@ GroundWritebackResult apply_ground_to(const GroundWar& war,
         }
         obj.owner = g->owner;
         ++out.objectives_flipped;
+        if (g->logistics_dirty) {
+            obj.supply = g->supply;
+            obj.fuel = g->fuel;
+            obj.last_repair = static_cast<std::int32_t>(
+                std::clamp<std::int64_t>(g->last_repair,
+                                         INT32_MIN, INT32_MAX));
+            ++out.objectives_resupplied;
+        }
     }
 
     return out;

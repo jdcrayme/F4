@@ -33,6 +33,31 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
   Stale-canvas comments about "39 features each" and objective
   vis_types corrected.
   
+## CAMP-DOM-2 — supply depth (the per-objective pool)
+
+- **CAMP-DOM-2** — the war has a SUPPLY CHAIN
+  (Docs/CAMP_HOST_PLAN.md §8). Upstream interdiction targets
+  supply/fuel lines and objectives carry supply; the engine's C2 pool
+  was source-less and repair did not exist. Now: the `.tea` strategic
+  stocks (supply_avail/fuel_avail — decoded by the importer all along)
+  parse into the WorldState and reach the engine through ITeamSource;
+  with `objective_supply` armed the resupply fire becomes SOURCED —
+  the team stock regenerates its held objectives' clamped (garbage-
+  safe, kunsan's 235 → 100) supply/fuel stocks, battalions draw from
+  the nearest own-held objective within the supply radius and are CUT
+  OFF beyond it; the `last_repair` cadence (the third .cmp timer,
+  bridged since C2) heals features at a supply-gated rate — flips to
+  VIS_REPAIRED, spends stock, stamps the wire's own last_repair — and
+  books the `objective_repaired` event family (the eleventh) whose
+  post-repair bitmap rides the existing fstatus write-back; the
+  strategic reserve (`replacements_avail`, exposed since C2, consumed
+  since now) refills consumed reinforcement budgets behind
+  `replacement_stock_flow`; the `objectives` query serves the LIVE
+  mirror (the DOM-1 seam closes). Every knob defaults OFF — the G1/C2
+  goldens stand byte-identically. GroundWarConfig gains the rates;
+  campaign_qc gains --objective-supply/--repair-period/--replacement-
+  stock and the summary echoes the supply books only when they moved.
+
 ## CAMP-DOM-1 — victory scoring (the books' projection)
 
 - **CAMP-DOM-1** — the war can be SCORED

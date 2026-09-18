@@ -153,6 +153,16 @@ std::vector<CampaignEvent> one_event_per_family() {
     verdict.verdict.swing = 30;
     events.push_back(verdict);
 
+    CampaignEvent repaired;
+    repaired.kind = CampaignEvent::Kind::ObjectiveRepaired;
+    repaired.objective_repaired.t = 8000;
+    repaired.objective_repaired.objective_id = 101;
+    repaired.objective_repaired.owner = 2;
+    repaired.objective_repaired.features_repaired = 1;
+    repaired.objective_repaired.features_destroyed = 0;
+    repaired.objective_repaired.supply = 45;
+    events.push_back(repaired);
+
     return events;
 }
 
@@ -183,7 +193,7 @@ TEST(EventJournal, HeaderAndEndBytes) {
 
 TEST(EventJournal, OneGoldenLinePerFamily) {
     const auto events = one_event_per_family();
-    ASSERT_EQ(events.size(), 10U);
+    ASSERT_EQ(events.size(), 11U);
 
     f4::json::Writer w;
     encode(w, events[0]);
@@ -249,6 +259,14 @@ TEST(EventJournal, OneGoldenLinePerFamily) {
     EXPECT_EQ(w.str(),
               R"({"ev":"verdict","t":7260,"band":"advantage",)"
               R"("leader":2,"swing":30})");
+
+    // CAMP-DOM-2 — the eleventh family: the front healed.
+    w = f4::json::Writer{};
+    encode(w, events[10]);
+    EXPECT_EQ(w.str(),
+              R"({"ev":"objective_repaired","t":8000,"objective_id":101,)"
+              R"("owner":2,"features_repaired":1,"features_destroyed":0,)"
+              R"("supply":45})");
 }
 
 TEST(EventJournal, WrittenFileShape) {
@@ -265,8 +283,8 @@ TEST(EventJournal, WrittenFileShape) {
     EXPECT_EQ(j.detail(), path.string());
 
     const auto text = slurp(path);
-    // 1 header + 10 events + 1 end = 12 lines, every line ending \n
-    EXPECT_EQ(std::count(text.begin(), text.end(), '\n'), 12);
+    // 1 header + 11 events + 1 end = 13 lines, every line ending \n
+    EXPECT_EQ(std::count(text.begin(), text.end(), '\n'), 13);
     EXPECT_EQ(text.find("{\"v\":1,\"journal\":1,\"identity\":{"), 0U);
     EXPECT_NE(text.find("\n{\"ev\":\"kill\""), std::string::npos);
     EXPECT_NE(text.find("{\"journal_end\":{\"protocol\":1,"),
@@ -472,6 +490,16 @@ TEST(EventFilter, OwnedFamiliesMatchTheOwningSide) {
     action.action_filed.team = 2;
     EXPECT_TRUE(matches(rok, action));
 
+    // CAMP-DOM-2 — the repair belongs to the holding team (the base
+    // being rebuilt is theirs, the same side objective_damage reports).
+    CampaignEvent repaired;
+    repaired.kind = CampaignEvent::Kind::ObjectiveRepaired;
+    repaired.objective_repaired.t = 10;
+    repaired.objective_repaired.owner = 6;
+    EXPECT_FALSE(matches(rok, repaired));
+    repaired.objective_repaired.owner = 2;
+    EXPECT_TRUE(matches(rok, repaired));
+
     CampaignEvent roe;
     roe.kind = CampaignEvent::Kind::RoeChanged;
     roe.roe_changed.t = 10;
@@ -495,6 +523,7 @@ TEST(EventFilter, KindNamesRoundTrip) {
              CampaignEvent::Kind::TaskingCycle,
              CampaignEvent::Kind::ActionFiled,
              CampaignEvent::Kind::Verdict,
+             CampaignEvent::Kind::ObjectiveRepaired,
          }) {
         CampaignEvent::Kind parsed{};
         ASSERT_TRUE(parse_event_kind(event_kind_name(k), parsed));

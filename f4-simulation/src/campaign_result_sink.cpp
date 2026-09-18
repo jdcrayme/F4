@@ -302,7 +302,11 @@ void CampaignResultSink::sync_objective_damage() {
                 ++destroyed;
                 value_destroyed += weight;
             }
-            if (f.damage_state != 0) {
+            // CAMP-DOM-2: VIS_REPAIRED (1) is not damage — the repair
+            // cadence's mirror writes it into this face, and counting
+            // healed features as damaged would pin the objective at a
+            // permanent damage story the engine's books say is over.
+            if (f.damage_state == 2 || f.damage_state == 3) {
                 ++damaged;
             }
         }

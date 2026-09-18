@@ -285,6 +285,12 @@ struct Args {
     int ground_orders_sec = 1800;  // the engine default
     int ground_resupply_sec = 43200; // 12 h (the QC's own choice —
                                      // same as the air reinforce)
+    // CAMP-DOM-2 — the supply chain's opt-ins (the same contract):
+    // the deepened per-objective pool, the repair cadence, and the
+    // air-side strategic reserve flow. All default off (golden).
+    bool ground_objective_supply = false;
+    int ground_repair_sec = 0;
+    bool replacement_stock_flow = false;
     // G2 — the interdiction link (CAS against real battalions, the
     // bombs booking): opt-in, the same contract. The acceptance
     // story: air attrited the line (exit 14 fires when an armed
@@ -412,6 +418,10 @@ Args parse_args(int argc, char** argv) {
             a.ground_orders_sec = std::atoi(next());
         else if (k == "--ground-resupply-sec")
             a.ground_resupply_sec = std::atoi(next());
+        else if (k == "--objective-supply") a.ground_objective_supply = true;
+        else if (k == "--repair-period")
+            a.ground_repair_sec = std::atoi(next());
+        else if (k == "--replacement-stock") a.replacement_stock_flow = true;
         else if (k == "--mission") {
             const std::string v = next();
             if (!v.empty() && v[0] >= '0' && v[0] <= '9') {
@@ -574,6 +584,10 @@ int run_war(const Args& args) {
     hopts.session.ground_update_sec = args.ground_update_sec;
     hopts.session.ground_orders_sec = args.ground_orders_sec;
     hopts.session.ground_resupply_sec = args.ground_resupply_sec;
+    // CAMP-DOM-2: the supply chain's opt-ins (the same contract).
+    hopts.session.ground_objective_supply = args.ground_objective_supply;
+    hopts.session.ground_repair_sec = args.ground_repair_sec;
+    hopts.session.replacement_stock_flow = args.replacement_stock_flow;
     // G2: the interdiction link (opt-in, the same contract).
     hopts.session.unit_strike = args.unit_strike;
     // P7: the strategy layer (opt-in, the same contract).
@@ -850,6 +864,23 @@ int run_war(const Args& args) {
             w.number_key("ground_front_columns", r.ground_front_columns);
             w.put(",    ");
             w.number_key("ground_march_grid", r.ground_march_grid);
+            // CAMP-DOM-2: the supply chain's books — emitted only when
+            // the deepened flow moved anything (the ground block's own
+            // activity rule; disarmed runs keep their exact bytes).
+            if (r.ground_supply_regen != 0 || r.ground_supply_drawn != 0 ||
+                r.ground_cut_off != 0 || r.ground_repairs != 0) {
+                w.put(",    ");
+                w.number_key("ground_supply_regen", r.ground_supply_regen);
+                w.put(",    ");
+                w.number_key("ground_supply_drawn", r.ground_supply_drawn);
+                w.put(",    ");
+                w.number_key("ground_cut_off", r.ground_cut_off);
+                w.put(",    ");
+                w.number_key("ground_repairs", r.ground_repairs);
+                w.put(",    ");
+                w.number_key("ground_features_repaired",
+                             r.ground_features_repaired);
+            }
         }
         w.put(",\n    ");
         w.put("\"belligerent_air\": ");

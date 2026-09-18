@@ -160,6 +160,19 @@ target_compile_definitions(test_campaign_verdict PRIVATE
 )
 add_dependencies(test_campaign_verdict campinit_fixtures mission_profiles_fixture)
 
+# DOM-2 — the supply chain's war gates: the live objectives query (the
+# DOM-1 seam closes), the sourced resupply pool, the repair cadence end
+# to end (seeded damage heals, events publish, the entity mirror joins,
+# the write-backs land), and the golden identity with every knob off.
+f4_simulation_add_test(test_campaign_supply test_campaign_supply.cpp)
+target_compile_definitions(test_campaign_supply PRIVATE
+    F4_SIMULATION_TEST_FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures"
+    F4_SOURCE_FIXTURES_DIR="${CMAKE_SOURCE_DIR}/f4-world-convert/tests/fixtures"
+    F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}"
+    F4_MISSION_PROFILES_JSON="${F4_MISSION_PROFILES_JSON}"
+)
+add_dependencies(test_campaign_supply mission_profiles_fixture)
+
 # P7 — the strategy layer's sim-side integration: the station contract
 # ride (route → plan → brain), the post-arm RoE gates, and the
 # strategy-armed session (stationed CAPs spawn with racetrack plans;

@@ -589,15 +589,20 @@ follow-up refinement, documented here.
   lives in f4-world-convert over decode structs). The .cam save-side
   re-encoder does not exist for ANY subsystem yet — both land together
   with the campaign save-write tranche.
-- **Reinforcement depth** (C2): the team-level `replacements_avail`
+- ~~**Reinforcement depth** (C2): the team-level `replacements_avail`
   strategic stock is decoded and exposed (ITeamSource) but not
   CONSUMED — the squadron-level wire budgets are the operative source
   this slice; the stock-to-budget replenishment flow (and the
   `last_resupply`/`last_repair` timers for ground supply and objective
   feature repair) land with their consumers (the ground-war and
-  repair tranches). (Drawn aircraft surviving their mission now
-  RETURN via C4 mission recovery — apply_mission_recovery; the
-  remainder of this entry is the resupply-depth story.)
+  repair tranches).~~ — LANDED with **DOM-2** (the supply chain: the
+  `.tea` strategic stocks parsed and adapter-exposed, the sourced
+  resupply pool feeding held objectives, battalions drawing from the
+  nearest own-held depot and cut off beyond the radius, the
+  `last_repair` cadence healing features at a supply-gated rate, the
+  reserve flow refilling consumed reinforcement budgets — see
+  CAMP_HOST_PLAN.md's CAMP-DOM-2 as-built. Drawn aircraft surviving
+  their mission had already RETURNed via C4 mission recovery).
 - **RoE overflight walls** (C3): the stance vocabulary now carries
   Neutral/Hostile (the two denying classes), but score() still SCORES
   rather than walls — the 32000 lethal denial (and the A*'s >120

@@ -528,6 +528,14 @@ void CampaignWarHarness::run_pass_(int run, const ProgressFn& on_sample) {
         if (const auto* gw = session_->ground_war(); gw != nullptr) {
             report_.ground_march_grid = static_cast<int>(
                 gw->stats().army_distance_fp >> 8);
+            // CAMP-DOM-2: the supply chain's books (zeros when the
+            // deepened flow never armed — the summary stays quiet).
+            report_.ground_supply_regen = gw->stats().supply_regen_total;
+            report_.ground_supply_drawn = gw->stats().supply_drawn_total;
+            report_.ground_cut_off = gw->stats().cut_off_events;
+            report_.ground_repairs = gw->stats().repair_fires;
+            report_.ground_features_repaired =
+                gw->stats().features_repaired;
         }
         report_.ledger_teams.clear();
         for (const auto& t : session_->ledger().teams()) {

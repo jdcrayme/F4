@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <cmath>
 #include <fstream>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -423,9 +424,28 @@ api::QueryResult EngineSessionHost::query(const api::QuerySpec& spec) {
 
     // objectives
     const auto& objectives = session_->world_state().objectives;
+    // CAMP-DOM-2: the LIVE objective logistics overlay — when a ground
+    // war runs, the engine's mirror owns owner + supply/fuel/losses/
+    // last_repair/fstatus per VU (the DOM-1 as-built's documented
+    // seam: static save rows vs the live mirror — closes here). No
+    // ground war → the rows stay the WorldState's own, byte-identical
+    // to the pre-DOM-2 shape.
+    const auto* live = session_->ground_objectives();
+    std::unordered_map<std::uint32_t, const f4::campaign::GroundObjectiveState*>
+        live_by_vu;
+    if (live != nullptr) {
+        live_by_vu.reserve(live->size());
+        for (const auto& g : *live) live_by_vu.emplace(g.vu, &g);
+    }
     std::vector<api::ObjectiveView> rows;
     for (const auto& o : objectives) {
-        if (spec.team >= 0 && o.owner != spec.team) continue;
+        const f4::campaign::GroundObjectiveState* g = nullptr;
+        if (live != nullptr) {
+            const auto it = live_by_vu.find(o.id_num);
+            if (it != live_by_vu.end()) g = it->second;
+        }
+        const std::uint8_t view_owner = g ? g->owner : o.owner;
+        if (spec.team >= 0 && view_owner != spec.team) continue;
         api::ObjectiveView v;
         v.id_creator = o.id_creator;
         v.id_num = o.id_num;
@@ -435,19 +455,19 @@ api::QueryResult EngineSessionHost::query(const api::QuerySpec& spec) {
         v.x = o.x;
         v.y = o.y;
         v.z = o.z;
-        v.owner = o.owner;
+        v.owner = view_owner;
         v.first_owner = o.first_owner;
         v.priority = o.priority;
         v.nameid = o.nameid;
         v.obj_flags = o.obj_flags;
         v.parent_id = o.parent_id;
-        v.supply = o.supply;
-        v.fuel = o.fuel;
-        v.losses = o.losses;
-        v.last_repair = o.last_repair;
+        v.supply = g ? g->supply : o.supply;
+        v.fuel = g ? g->fuel : o.fuel;
+        v.losses = g ? g->losses : o.losses;
+        v.last_repair = g ? g->last_repair : o.last_repair;
         v.has_radar = o.has_radar;
         v.radar_range_km = o.radar_range_km;
-        v.fstatus = o.fstatus;
+        v.fstatus = g ? g->fstatus : o.fstatus;
         rows.push_back(v);
         if (spec.limit > 0 && rows.size() >= spec.limit) break;
     }

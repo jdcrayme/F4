@@ -126,6 +126,50 @@ int clamp_i(int v, int lo, int hi) noexcept {
     return v < lo ? lo : (v > hi ? hi : v);
 }
 
+/// The resupply fire's per-battalion amounts (the G1 flat refill's own
+/// numbers — the sourced flow targets the same top-up, the difference
+/// is only WHERE the units come from).
+constexpr int kResupplySupply = 25;
+constexpr int kResupplyFatigue = 25;
+constexpr int kResupplyMorale = 10;
+
+/// The fstatus VIS damage states (f4vu.h): 0 normal, 1 repaired,
+/// 2 damaged, 3 destroyed — the bomb battery's own constants.
+constexpr std::uint8_t kVisRepaired = 1;
+constexpr std::uint8_t kVisDamaged = 2;
+constexpr std::uint8_t kVisDestroyed = 3;
+
+/// Read the 2-bit fstatus entry for feature `i` (the bomb battery's
+/// write_fstatus's mirror — the engine reads what the weapons side
+/// writes).
+[[nodiscard]] std::uint8_t read_fstatus(const std::vector<std::uint8_t>& f,
+                                        std::size_t i) noexcept {
+    const std::size_t byte_idx = i / 4;
+    if (byte_idx >= f.size()) return 0;
+    return static_cast<std::uint8_t>((f[byte_idx] >> ((i % 4) * 2)) & 0x03);
+}
+
+/// Write the 2-bit fstatus entry for feature `i` (grow as needed).
+void write_fstatus(std::vector<std::uint8_t>& f, std::size_t i,
+                   std::uint8_t vis) noexcept {
+    const std::size_t byte_idx = i / 4;
+    if (f.size() <= byte_idx) f.resize(byte_idx + 1, 0);
+    const std::size_t shift = (i % 4) * 2;
+    f[byte_idx] = static_cast<std::uint8_t>(
+        (f[byte_idx] & ~(0x03 << shift)) | (vis << shift));
+}
+
+/// Count features in VIS state `vis` over the bitmap's capacity.
+int count_vis(const std::vector<std::uint8_t>& f,
+              std::uint8_t vis) noexcept {
+    const int capacity = static_cast<int>(f.size()) * 4;
+    int n = 0;
+    for (int i = 0; i < capacity; ++i) {
+        if (read_fstatus(f, static_cast<std::size_t>(i)) == vis) ++n;
+    }
+    return n;
+}
+
 } // namespace
 
 // ============================================================================
@@ -172,10 +216,25 @@ GroundWar::GroundWar(const f4::world::ICampaignSource& camp,
         }
     }
 
-    // --- The epoch + the resupply anchor (absolute campaign times,
-    // the reinforcement cadence's own bridge through ICampaignSource).
+    // --- The epoch + the resupply/repair anchors (absolute campaign
+    // times, the reinforcement cadence's own bridge through
+    // ICampaignSource). last_repair waited since C2 for its consumer —
+    // DOM-2's repair cadence is it.
     epoch_ = camp.current_time();
     last_resupply_ = camp.last_resupply();
+    last_repair_ = camp.last_repair();
+
+    // --- DOM-2: the team strategic stocks (the deepened pool's
+    // source). Seeded per SLOT (the .tea rows are slot-ordered); a
+    // team without stock data simply regenerates nothing.
+    for (int t = 0; t < teams.team_count() && t < 8; ++t) {
+        const int slot = teams.slot(t);
+        if (slot < 0 || slot >= 8) continue;
+        team_supply_[static_cast<std::size_t>(slot)] =
+            static_cast<std::int64_t>(teams.supply_avail(t));
+        team_fuel_[static_cast<std::size_t>(slot)] =
+            static_cast<std::int64_t>(teams.fuel_avail(t));
+    }
 
     // --- The battalion snapshot (wire order preserved).
     const int precompute_fp = static_cast<int>(cfg_.update_sec) > 0
@@ -235,6 +294,22 @@ GroundWar::GroundWar(const f4::world::ICampaignSource& camp,
         o.owner = objectives.owner(i);
         o.initial_owner = o.owner;
         o.priority = objectives.priority(i);
+        // DOM-2: the logistics face. Clamped to the wire's own 0..100
+        // domain — real saves carry 0xEB uninitialized garbage where
+        // the original game never wrote the fields (kunsan: 235), and
+        // a stock above the domain would feed draws forever.
+        o.supply = static_cast<std::uint8_t>(
+            clamp_i(static_cast<int>(objectives.supply(i)), 0, 100));
+        o.fuel = static_cast<std::uint8_t>(
+            clamp_i(static_cast<int>(objectives.fuel(i)), 0, 100));
+        o.losses = objectives.losses(i);
+        // A negative absolute time is garbage (kunsan carries one);
+        // the domain is the epoch onward.
+        o.last_repair = std::max<std::int64_t>(
+            0, static_cast<std::int64_t>(objectives.last_repair(i)));
+        if (objectives.has_fstatus(i)) {
+            o.fstatus = objectives.fstatus(i);
+        }
         objectives_.push_back(o);
         if (max_x_ < min_x_) { min_x_ = o.x; max_x_ = o.x; }
         else {
@@ -281,6 +356,7 @@ void GroundWar::tick(CampaignTime delta_sec) {
         engage_phase_();
         capture_phase_();
         resupply_phase_(next_update_);
+        repair_phase_(next_update_);
         pull_air_losses_();
         sync_ledger_();
 
@@ -940,20 +1016,203 @@ void GroundWar::resupply_phase_(CampaignTime t) {
     const std::int64_t now_abs = epoch_ + t;
     if (now_abs <= last_resupply_ + cfg_.resupply_period_sec) return;
 
-    for (auto& u : units_) {
-        if (u.destroyed) continue;
-        u.supply = static_cast<std::uint8_t>(
-            std::min(100, static_cast<int>(u.supply) + 25));
-        u.fatigue = static_cast<std::uint8_t>(
-            std::max(0, static_cast<int>(u.fatigue) - 25));
-        u.morale = static_cast<std::uint8_t>(
-            std::min(100, static_cast<int>(u.morale) + 10));
-        u.dirty = true;
+    if (!cfg_.objective_supply) {
+        // The G1 flat refill — the golden-identity path, byte-for-byte
+        // what the engine did before DOM-2. Source-less by design.
+        for (auto& u : units_) {
+            if (u.destroyed) continue;
+            u.supply = static_cast<std::uint8_t>(
+                std::min(100, static_cast<int>(u.supply) + kResupplySupply));
+            u.fatigue = static_cast<std::uint8_t>(
+                std::max(0, static_cast<int>(u.fatigue) - kResupplyFatigue));
+            u.morale = static_cast<std::uint8_t>(
+                std::min(100, static_cast<int>(u.morale) + kResupplyMorale));
+            u.dirty = true;
+        }
+    } else {
+        // The deepened pool (DOM-2): the fire becomes SOURCED.
+        //
+        // (1) REGEN — the team's strategic stock (.tea supply_avail /
+        //     fuel_avail, the run-live pool seeded at construction)
+        //     feeds its held objectives in wire order: each objective
+        //     takes up to supply_regen_per_fire (and what remains of
+        //     the pool, and the 0..100 domain cap). Fuel mirrors on
+        //     the fuel pool (carried; no consumer draws it yet — the
+        //     wire's battalions carry no fuel byte).
+        for (const std::uint8_t side : war_pair_) {
+            const std::size_t slot = static_cast<std::size_t>(side);
+            for (auto& o : objectives_) {
+                if (o.owner != side) continue;
+                const int take = static_cast<int>(std::min<std::int64_t>(
+                    {cfg_.supply_regen_per_fire, team_supply_[slot],
+                     100 - static_cast<int>(o.supply)}));
+                if (take > 0) {
+                    o.supply = static_cast<std::uint8_t>(o.supply + take);
+                    team_supply_[slot] -= take;
+                    stats_.supply_regen_total += take;
+                    o.logistics_dirty = true;
+                }
+                const int ftake = static_cast<int>(std::min<std::int64_t>(
+                    {cfg_.supply_regen_per_fire, team_fuel_[slot],
+                     100 - static_cast<int>(o.fuel)}));
+                if (ftake > 0) {
+                    o.fuel = static_cast<std::uint8_t>(o.fuel + ftake);
+                    team_fuel_[slot] -= ftake;
+                    o.logistics_dirty = true;
+                }
+            }
+        }
+        //
+        // (2) DRAW — every non-destroyed battalion tops up from its
+        //     nearest own-held objective within the line-of-supply
+        //     radius (squared Chebyshev rank, wire-order tie-break —
+        //     the engine's own nearest-test conventions). Beyond the
+        //     radius of every own objective the battalion is CUT OFF:
+        //     it draws nothing (the encirclement/interdiction effect
+        //     the reference's supply-line targeting exists to create).
+        //     Fatigue/morale recover flat in both paths (rest, not
+        //     logistics).
+        for (auto& u : units_) {
+            if (u.destroyed) continue;
+            const GroundObjectiveState* depot = nullptr;
+            int best_d2 = 0;
+            for (const auto& o : objectives_) {
+                if (o.owner != u.owner) continue;
+                const int dx = std::abs(u.x - o.x);
+                const int dy = std::abs(u.y - o.y);
+                const int d2 = dx * dx + dy * dy;
+                if (depot == nullptr || d2 < best_d2) {
+                    depot = &o;
+                    best_d2 = d2;
+                }
+            }
+            const int radius = std::max(0, cfg_.supply_radius_grid);
+            if (depot == nullptr ||
+                best_d2 > radius * radius) {
+                ++stats_.cut_off_events;
+            } else {
+                // Draw through a non-const alias (depot points into
+                // objectives_; the walk above is const-by-value over
+                // the same vector).
+                GroundObjectiveState& d =
+                    objectives_[static_cast<std::size_t>(
+                        depot - objectives_.data())];
+                const int want = kResupplySupply;
+                const int take = std::min(
+                    {want, static_cast<int>(d.supply),
+                     100 - static_cast<int>(u.supply)});
+                if (take > 0) {
+                    u.supply = static_cast<std::uint8_t>(u.supply + take);
+                    d.supply = static_cast<std::uint8_t>(d.supply - take);
+                    stats_.supply_drawn_total += take;
+                    d.logistics_dirty = true;
+                }
+            }
+            u.fatigue = static_cast<std::uint8_t>(
+                std::max(0, static_cast<int>(u.fatigue) - kResupplyFatigue));
+            u.morale = static_cast<std::uint8_t>(
+                std::min(100, static_cast<int>(u.morale) + kResupplyMorale));
+            u.dirty = true;
+        }
     }
     ++stats_.resupply_fires;
     // Catch-up-once: the anchor jumps to now (the reinforcement
     // cadence's own shape — a stale .cmp timer fires ONE tick).
     last_resupply_ = now_abs;
+}
+
+// ============================================================================
+// Repair — the last_repair cadence (catch-up-once; the third .cmp
+// maintenance timer, bridged since C2, consumed since DOM-2)
+// ============================================================================
+
+void GroundWar::pull_objective_damage_() {
+    if (ledger_ == nullptr) return;
+    // The ledger's objective damage state IS the sim-side final face
+    // (one record per damaged objective, last write wins — the sink's
+    // own merge discipline). Wholesale adoption is idempotent: every
+    // repair walk works on the current truth, and a later damage sync
+    // simply overwrites the repaired bits again (the war moves on).
+    for (const auto& rec : ledger_->objective_damage()) {
+        for (auto& o : objectives_) {
+            if (o.vu != rec.objective) continue;
+            o.fstatus = rec.fstatus;
+            break;
+        }
+    }
+}
+
+void GroundWar::repair_phase_(CampaignTime t) {
+    if (cfg_.repair_period_sec <= 0) return;
+    const std::int64_t now_abs = epoch_ + t;
+    if (now_abs <= last_repair_ + cfg_.repair_period_sec) return;
+
+    // Current truth first: the sim-side damage that landed since the
+    // last fire (the sink's fstatus diffs) joins the mirror.
+    pull_objective_damage_();
+
+    int repaired_total = 0;
+    for (auto& o : objectives_) {
+        // The engine is a two-side machine: only the belligerents'
+        // objectives get repair crews (a neutral's base is nobody's
+        // line item).
+        bool belligerent_held = false;
+        for (const std::uint8_t side : war_pair_) {
+            if (o.owner == side) { belligerent_held = true; break; }
+        }
+        if (!belligerent_held) continue;
+        if (count_vis(o.fstatus, kVisDamaged) == 0 &&
+            count_vis(o.fstatus, kVisDestroyed) == 0) {
+            continue;
+        }
+        // The supply gate: no parts, no repair (the tranche contract's
+        // own words — per-objective supply FEEDS the repair rate).
+        if (static_cast<int>(o.supply) <
+            std::max(0, cfg_.repair_min_supply)) {
+            continue;
+        }
+        const int capacity = static_cast<int>(o.fstatus.size()) * 4;
+        int budget = std::max(0, cfg_.repair_features_per_fire);
+        int repaired_here = 0;
+        for (int i = 0; i < capacity && budget > 0; ++i) {
+            const std::uint8_t vis = read_fstatus(
+                o.fstatus, static_cast<std::size_t>(i));
+            if (vis != kVisDamaged && vis != kVisDestroyed) continue;
+            // Lowest feature index first (wire order within the
+            // objective); each repair consumes its supply cost.
+            write_fstatus(o.fstatus, static_cast<std::size_t>(i),
+                          kVisRepaired);
+            o.supply = static_cast<std::uint8_t>(
+                std::max(0, static_cast<int>(o.supply) -
+                                std::max(0, cfg_.repair_supply_cost)));
+            --budget;
+            ++repaired_here;
+        }
+        if (repaired_here <= 0) continue;
+        o.last_repair = now_abs;
+        o.logistics_dirty = true;
+        repaired_total += repaired_here;
+        if (ledger_ != nullptr) {
+            ObjectiveRepairRecord rec;
+            rec.t_s = static_cast<double>(clock_);
+            rec.objective = o.vu;
+            rec.owner = o.owner;
+            rec.features_repaired = repaired_here;
+            rec.features_destroyed =
+                count_vis(o.fstatus, kVisDestroyed);
+            rec.supply = o.supply;
+            rec.last_repair = now_abs;
+            rec.fstatus = o.fstatus;
+            ledger_->apply_objective_repair(rec);
+        }
+    }
+
+    if (repaired_total > 0) {
+        ++stats_.repair_fires;
+        stats_.features_repaired += repaired_total;
+    }
+    // Catch-up-once (the resupply cadence's own shape).
+    last_repair_ = now_abs;
 }
 
 // ============================================================================

@@ -529,6 +529,45 @@ TEST(ProtocolDispatch, VerdictKindSubscribesAndRidesTheStepLine) {
         R"("leader":2,"swing":30})" "\n");
 }
 
+TEST(ProtocolDispatch, ObjectiveRepairedKindSubscribesAndRidesTheStepLine) {
+    // CAMP-DOM-2 — the eleventh family on the wire: the repair
+    // subscribes by name (team-owned — the holding side's gate) and
+    // its step line is byte-pinned.
+    MockSession s;
+    CampaignEvent repaired;
+    repaired.kind = CampaignEvent::Kind::ObjectiveRepaired;
+    repaired.objective_repaired.t = 8000;
+    repaired.objective_repaired.objective_id = 101;
+    repaired.objective_repaired.owner = 2;
+    repaired.objective_repaired.features_repaired = 1;
+    repaired.objective_repaired.features_destroyed = 0;
+    repaired.objective_repaired.supply = 45;
+    s.queued = {repaired};
+
+    std::string out;
+    (void)handle(s, R"({"v":1,"op":"subscribe","kinds":["objective_repaired"]})", out);
+    EXPECT_EQ(out,
+              R"({"v":1,"op":"subscribe","status":"ok","kinds":["objective_repaired"],)"
+              R"("teams":[]})" "\n");
+    out.clear();
+    const auto o = handle(s, R"({"v":1,"op":"step","ticks":60})", out);
+    EXPECT_EQ(o.kind, ProtocolOutcome::Kind::Ok);
+    EXPECT_EQ(
+        out,
+        R"({"v":1,"op":"step","status":"ok","ticks":60,"dilated":0,"events":1})" "\n"
+        R"({"ev":"objective_repaired","t":8000,"objective_id":101,)"
+        R"("owner":2,"features_repaired":1,"features_destroyed":0,)"
+        R"("supply":45})" "\n");
+
+    // The team gate: the holding side sees it, the other side does not.
+    out.clear();
+    (void)handle(s, R"({"v":1,"op":"subscribe","kinds":["objective_repaired"],"teams":[6]})", out);
+    out.clear();
+    (void)handle(s, R"({"v":1,"op":"step","ticks":60})", out);
+    EXPECT_EQ(out,
+        R"({"v":1,"op":"step","status":"ok","ticks":60,"dilated":0,"events":0})" "\n");
+}
+
 TEST(ProtocolDispatch, EmptyKindListDeliversNothing) {
     MockSession s;
     CampaignEvent cycle;

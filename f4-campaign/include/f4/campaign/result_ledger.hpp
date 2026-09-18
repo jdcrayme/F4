@@ -118,6 +118,23 @@ struct BombImpactRecord {
     int features_destroyed = 0;       // per the impact message
 };
 
+/// One objective feature repair (DOM-2 — the repair cadence's book).
+/// The engine books one record per repaired objective per fire; the
+/// repaired bitmap rides the DAMAGE-state face (apply_objective_repair
+/// upserts the same map apply_objective_damage keeps), so the existing
+/// fstatus write-back carries repairs with zero new machinery.
+struct ObjectiveRepairRecord {
+    double t_s = 0.0;                 // the ground war's relative clock
+    std::uint32_t objective = 0;      // VU_ID.num
+    std::uint8_t owner = 0;           // holding team slot
+    int features_repaired = 0;        // flipped to VIS_REPAIRED this fire
+    int features_destroyed = 0;       // still VIS_DESTROYED after the fire
+    std::uint8_t supply = 0;          // the objective's stock after the work
+    std::int64_t last_repair = 0;     // the wire field's stamped value (abs)
+    /// The post-repair fstatus face (2 bits per feature).
+    std::vector<std::uint8_t> fstatus;
+};
+
 /// One ground attrition event — vehicle kills on a battalion, from the
 /// ground war's exchange resolution or from air attack. Arrival order;
 /// campaign-clock seconds (the ground war's relative clock, the same
@@ -227,6 +244,14 @@ struct TeamLedger {
     int battalions_destroyed = 0;
     /// Enemy objectives captured BY this team this run.
     int objectives_captured = 0;
+    // --- DOM-2: the strategic reserve's books --------------------------
+    /// The .tea replacements stock at snapshot (the seed).
+    int replacements_initial = 0;
+    /// The reserve NOW (last write wins view) — the reinforcement
+    /// cadence's stock flow drains it to refill squadron budgets.
+    int replacements_avail = 0;
+    /// Reserve units spent THIS RUN (the activity marker).
+    int replacements_spent = 0;
 };
 
 /// Per-squadron write state. Seeded from the source at construction,
@@ -253,8 +278,13 @@ struct SquadronLedger {
     int availability = 0;
     /// The wire's reinforcement budget (aircraft on order — the unit
     /// record's own `reinforcement` i16). Consumed by
-    /// apply_reinforcements; never replenished in this slice.
+    /// apply_reinforcements; with the stock flow OFF, never
+    /// replenished (the C2 shape); with it ON, the team's strategic
+    /// reserve refills consumed budgets toward this snapshot value.
     int reinforce_pending = 0;
+    /// The budget's snapshot value (the refill target for the DOM-2
+    /// stock flow).
+    int reinforce_initial = 0;
     /// Aircraft drawn into missions THIS RUN (tasking debit).
     int run_draws = 0;
     /// Aircraft delivered by reinforcement ticks THIS RUN (tasking
@@ -374,7 +404,15 @@ public:
     /// budget is consumed. Team existence pools gain the deliveries
     /// (capped at aircraft_initial). Returns total aircraft delivered
     /// (0 when nobody has a deficit or a budget — a legal, quiet fire).
-    int apply_reinforcements(double t_s);
+    ///
+    /// DOM-2's stock flow (`stock_flow`, default false — the golden
+    /// identity): after the delivery pass, each team's strategic
+    /// reserve (replacements_avail — decoded since C2, consumed since
+    /// DOM-2) refills its squadrons' consumed budgets toward their
+    /// wire snapshot, slot order then wire order, the reserve draining
+    /// as it gives. The reserve is the war's ultimate aircraft source;
+    /// the budgets are the squadrons' order books it keeps full.
+    int apply_reinforcements(double t_s, bool stock_flow = false);
 
     /// A ground victim died at a campaign shooter's hands (air-to-ground
     /// credit only — ag_kills on the killer's squadron; no team pool
@@ -424,6 +462,15 @@ public:
     /// Final-state objective damage sync (last write wins per
     /// objective). Also updates the objective's destroyed counters.
     void apply_objective_damage(const ObjectiveDamageRecord& rec);
+
+    /// One objective feature repair (DOM-2 — the ground war's repair
+    /// cadence). Books the repair log (the objective_repaired event
+    /// family's source log) and UPSERTS the damage-state map with the
+    /// post-repair fstatus face — the write-back's own source, so a
+    /// repaired base reaches the save through the machinery that
+    /// already carries bomb damage. The destroyed counters move by
+    /// the same replace-the-entry rule damage uses.
+    void apply_objective_repair(const ObjectiveRepairRecord& rec);
 
     /// Bomb impact log entry (counters only).
     void apply_bomb_impact(double sim_time_s,
@@ -516,6 +563,18 @@ public:
     [[nodiscard]] const std::vector<ObjectiveDamageRecord>&
     objective_damage() const noexcept {
         return objective_damage_;
+    }
+
+    /// The repair log, arrival order (the objective_repaired event
+    /// family's source; empty unless the repair cadence fired).
+    [[nodiscard]] const std::vector<ObjectiveRepairRecord>&
+    repair_log() const noexcept {
+        return repairs_;
+    }
+
+    /// Features flipped to VIS_REPAIRED this run (all objectives).
+    [[nodiscard]] int features_repaired() const noexcept {
+        return features_repaired_;
     }
 
     /// Total features destroyed across synced objectives.
@@ -667,7 +726,7 @@ public:
         return losses_.empty() && impacts_.empty() &&
                objective_damage_.empty() && ag_kills_ == 0 &&
                ground_losses_.empty() && captures_.empty() &&
-               ground_units_.empty();
+               ground_units_.empty() && repairs_.empty();
     }
 
     // ------------------------------------------------------------------
@@ -707,6 +766,10 @@ private:
     std::vector<ObjectiveDamageRecord> objective_damage_;
     /// Duplicated VU set for last-write-wins lookups.
     std::vector<std::uint32_t> objective_vus_;
+    /// DOM-2 — the repair log (arrival order; the books behind the
+    /// objective_repaired event family).
+    std::vector<ObjectiveRepairRecord> repairs_;
+    int features_repaired_ = 0;
 
     // --- G1: the ground-war books --------------------------------------
     /// Creation order; find_ground_unit_ does the last-write-wins

@@ -53,6 +53,14 @@ TeamState parse_team(Reader& r) {
         else if (k == "air_defense_experience") { t.air_defense_experience = static_cast<uint8_t>(r.read_int()); }
         else if (k == "ground_experience")      { t.ground_experience      = static_cast<uint8_t>(r.read_int()); }
         else if (k == "naval_experience")       { t.naval_experience       = static_cast<uint8_t>(r.read_int()); }
+        // DOM-2 (supply depth): the .tea TeamClass's strategic ground
+        // stocks — world_json has emitted them inside the .tea block
+        // all along; parsed since the engine consumes them. Their
+        // presence IS .tea enrichment (the cteam/member/stance rule —
+        // the parse sets tea_loaded from the presence of these keys,
+        // so the emitter round-trips them).
+        else if (k == "supply_avail") { t.supply_avail = static_cast<uint16_t>(r.read_int()); t.tea_loaded = true; }
+        else if (k == "fuel_avail")   { t.fuel_avail = static_cast<uint16_t>(r.read_int()); t.tea_loaded = true; }
         else if (k == "member") {
             // Array of NUM_COUNS country membership bytes (0 or 1).
             r.skip_ws(); r.expect('[');
@@ -1028,6 +1036,10 @@ void emit_team(Writer& w, const TeamState& t) {
         o.num("air_defense_experience", t.air_defense_experience);
         o.num("ground_experience", t.ground_experience);
         o.num("naval_experience", t.naval_experience);
+        // DOM-2: the .tea strategic ground stocks (the supply chain's
+        // source of truth on the JSON face — parse_team reads them).
+        o.num("supply_avail", t.supply_avail);
+        o.num("fuel_avail", t.fuel_avail);
         o.key("member");        emit_uint_vec(w, t.member);
         o.key("stance");        emit_short_vec(w, t.stance);
         o.key("mission_priority"); emit_uint_vec(w, t.mission_priority);

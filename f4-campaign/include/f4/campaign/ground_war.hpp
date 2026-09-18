@@ -173,6 +173,70 @@ struct GroundWarConfig {
     /// +10 (cap 100). The anchor is the .cmp header's last_resupply,
     /// bridged through ICampaignSource, catch-up-once.
     CampaignTime resupply_period_sec = 0;
+
+    // --- DOM-2 (supply depth): the per-objective pool ------------------
+    //
+    // Upstream interdiction targets supply/fuel lines and objectives
+    // CARRY supply (ObjectiveClass::Save's supply/fuel u8s — decoded,
+    // bridged, displayed, and until now read by no engine decision).
+    // These knobs deepen the source-less G1 refill into a POOL: the
+    // team's strategic stock (.tea supply_avail/fuel_avail) regenerates
+    // its held objectives' stocks each resupply fire, and battalions
+    // DRAW from the nearest own-held objective (the line of supply) —
+    // a battalion beyond the radius of any own objective is cut off
+    // (gets nothing), which is the encirclement/interdiction effect
+    // the reference's supply-line targeting exists to create.
+
+    /// The deepened pool (default false = the G1 flat +25/−25/+10
+    /// refill, byte-identical goldens). When true (and the resupply
+    /// cadence is armed), the fire becomes SOURCED: objective stocks
+    /// regenerate from the team pools, then battalions draw from their
+    /// nearest own-held objective. Requires objective supply data in
+    /// the source (a save carrying none seeds zeros — legal, the war
+    /// just runs dry; the campinit packs seed 100/100).
+    bool objective_supply = false;
+
+    /// Line-of-supply radius (grid units; ≈ km). A battalion further
+    /// than this from every own-held objective draws nothing — cut
+    /// off. 10 grid ≈ 10 km: a division's logistics tail.
+    int supply_radius_grid = 10;
+
+    /// Per-fire regeneration take per objective from the owning team's
+    /// strategic stock (wire order; the pool depletes, later objectives
+    /// get what remains). The .tea stock is u16 and the objective stock
+    /// caps at 100, so 10/fire feeds a ten-objective front from a
+    /// 1000-unit stock in one fire — a division-level PIPELINE, not a
+    /// trickle; hosts tune the rate (the reference's own rates are
+    /// runtime difficulty settings, not wire data).
+    int supply_regen_per_fire = 10;
+
+    /// The objective-feature repair cadence (campaign seconds; 0 = OFF
+    /// — the golden-identity default, the same discipline as
+    /// resupply_period_sec). The anchor is the .cmp header's
+    /// last_repair (exposed by ICampaignSource since C2, never
+    /// consumed until now), catch-up-once. Each fire repairs up to
+    /// repair_features_per_fire damaged features per objective —
+    /// flipping the fstatus pair to the wire's VIS_REPAIRED state —
+    /// stamped into the objective's own last_repair field and booked
+    /// through the ledger (the repaired bitmap rides the damage-state
+    /// face, so the existing fstatus write-back carries it).
+    CampaignTime repair_period_sec = 0;
+
+    /// Minimum objective supply for repair crews to work (the movement
+    /// gate's own threshold — 25 is where a battalion slows; it is
+    /// also where its depot stops feeding the workshops). Below it an
+    /// objective's damaged features stay damaged.
+    int repair_min_supply = 25;
+
+    /// Features repaired per objective per fire (the rate; upstream
+    /// repair is slow — one feature per fire at the default keeps a
+    /// shattered base rebuilding over days, not minutes).
+    int repair_features_per_fire = 1;
+
+    /// Objective supply consumed per repaired feature (logistics is
+    /// not free — the repair rate is fed BY the pool, the tranche
+    /// contract's own words).
+    int repair_supply_cost = 5;
 };
 
 /// One battalion's live state inside the engine (the sim-side truth;
@@ -221,6 +285,12 @@ struct GroundUnitState {
 
 /// One objective's mirrored state (ownership is ENGINE state here; the
 /// LEDGER books the capture events, the WRITE-BACK lands the owner).
+/// DOM-2 adds the logistics face: the objective's own supply/fuel/
+/// losses stocks (seeded clamped to the wire domain 0..100 — real
+/// saves carry 0xEB garbage where the original game never wrote the
+/// fields) and the fstatus damage bitmap the repair cadence works on
+/// (seeded from the save, kept current by adopting the ledger's
+/// damage-state records before each repair walk).
 struct GroundObjectiveState {
     std::uint32_t vu = 0;
     std::int32_t x = 0;
@@ -228,6 +298,20 @@ struct GroundObjectiveState {
     std::uint8_t owner = 0;          ///< live owner (flips on capture)
     std::uint8_t initial_owner = 0;  ///< snapshot owner (write-back diff)
     std::uint8_t priority = 0;
+    // --- DOM-2: the per-objective pool + the repair work-set ----------
+    std::uint8_t supply = 0;         ///< stock 0..100 (seed clamped)
+    std::uint8_t fuel = 0;           ///< stock 0..100 (seed clamped)
+    std::uint8_t losses = 0;         ///< wire u8, carried (no consumer yet)
+    std::int64_t last_repair = 0;    ///< absolute campaign time (stamped)
+    /// 2 bits per feature — the .obd fstatus face (0 normal, 1
+    /// repaired, 2 damaged, 3 destroyed; f4vu.h). Damaged by the
+    /// ledger's damage-state adoption, restored by the repair cadence.
+    std::vector<std::uint8_t> fstatus;
+    /// DOM-2: the engine moved this objective's logistics (stock
+    /// regen, a battalion draw, a repair stamp). The write-back's
+    /// activity filter — a mirror that only seeded from the save must
+    /// not normalize the save's own garbage bytes on write-back.
+    bool logistics_dirty = false;
 };
 
 /// One front-line column (the FLOT sample at grid column x).
@@ -310,6 +394,18 @@ struct GroundWarStats {
     int battalions_destroyed = 0;
     int captures = 0;
     int resupply_fires = 0;      ///< ground-supply cadence fires
+    // --- DOM-2: the supply chain's books -------------------------------
+    /// Supply units moved team stock → objective stocks (cumulative).
+    int supply_regen_total = 0;
+    /// Supply units moved objective stocks → battalions (cumulative).
+    int supply_drawn_total = 0;
+    /// Battalion×fire cut-offs (no own objective within the supply
+    /// radius — the encirclement counter).
+    int cut_off_events = 0;
+    /// Repair cadence fires (cumulative).
+    int repair_fires = 0;
+    /// Features flipped to VIS_REPAIRED (cumulative).
+    int features_repaired = 0;
     /// Distance walked by the whole army, grid units ×256 (integer).
     std::uint64_t army_distance_fp = 0;
     int battalions_alive = 0;    ///< alive NOW
@@ -391,6 +487,11 @@ private:
     void engage_phase_();         ///< detect + resolve exchanges
     void capture_phase_();        ///< flip undefended enemy objectives
     void resupply_phase_(CampaignTime t);  ///< the last_resupply cadence
+    void repair_phase_(CampaignTime t);    ///< the last_repair cadence
+    /// Adopt the ledger's objective damage state into the mirror's
+    /// fstatus (wholesale, idempotent — the records ARE final faces;
+    /// run before each repair walk so repairs work on current truth).
+    void pull_objective_damage_();
     void pull_air_losses_();      ///< AG kills booked by the sink
     void sync_ledger_();          ///< dirty battalions → ledger state
 
@@ -450,6 +551,14 @@ private:
     /// "now" on each fire — catch-up-once).
     std::int64_t epoch_ = 0;
     std::int64_t last_resupply_ = 0;
+    /// DOM-2: the repair cadence's anchor (the .cmp header's
+    /// last_repair — the third maintenance timer, finally consumed).
+    std::int64_t last_repair_ = 0;
+    /// DOM-2: the team strategic stocks (the deepened pool's source;
+    /// seeded from ITeamSource at construction, run-live here — the
+    /// engine owns the ground face of the supply chain).
+    std::int64_t team_supply_[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+    std::int64_t team_fuel_[8] = {0, 0, 0, 0, 0, 0, 0, 0};
 
     /// Air-loss pullback cursor: the ledger's ground_loss_log() index
     /// already applied (arrival order, so an index is a cursor).

@@ -74,6 +74,18 @@ struct ObjectiveCapturedEvent {
     std::uint8_t new_owner{0};
 };
 
+// An objective's features were repaired (DOM-2 — the repair cadence's
+// event face; the repaired bitmap itself rides the ledger's damage
+// state and the write-back, the event carries the books' summary).
+struct ObjectiveRepairedEvent {
+    std::int64_t t{0};
+    std::uint32_t objective_id{0};
+    std::uint8_t owner{0};              ///< the holding team
+    std::uint32_t features_repaired{0}; ///< flipped to VIS_REPAIRED
+    std::uint32_t features_destroyed{0};///< still VIS_DESTROYED after
+    std::uint8_t supply{0};             ///< the objective's stock after
+};
+
 // A reinforcement fire delivered aircraft (C2).
 struct ReinforcementDeliveredEvent {
     std::int64_t t{0};
@@ -196,6 +208,22 @@ inline void encode(f4::json::Writer& w, const ObjectiveCapturedEvent& e) {
     w.put('}');
 }
 
+inline void encode(f4::json::Writer& w, const ObjectiveRepairedEvent& e) {
+    w.raw("{\"ev\":\"objective_repaired\",\"t\":");
+    w.number(static_cast<long long>(e.t));
+    w.raw(",\"objective_id\":");
+    w.number(static_cast<std::uint64_t>(e.objective_id));
+    w.raw(",\"owner\":");
+    w.number(e.owner);
+    w.raw(",\"features_repaired\":");
+    w.number(static_cast<std::uint64_t>(e.features_repaired));
+    w.raw(",\"features_destroyed\":");
+    w.number(static_cast<std::uint64_t>(e.features_destroyed));
+    w.raw(",\"supply\":");
+    w.number(e.supply);
+    w.put('}');
+}
+
 inline void encode(f4::json::Writer& w, const ReinforcementDeliveredEvent& e) {
     w.raw("{\"ev\":\"reinforcement_delivered\",\"t\":");
     w.number(static_cast<long long>(e.t));
@@ -287,6 +315,7 @@ struct CampaignEvent {
         TaskingCycle,
         ActionFiled,
         Verdict,
+        ObjectiveRepaired,
     };
 
     Kind kind{Kind::TaskingCycle};
@@ -301,6 +330,7 @@ struct CampaignEvent {
     TaskingCycleEvent tasking_cycle{};
     ActionFiledEvent action_filed{};
     VerdictEvent verdict{};
+    ObjectiveRepairedEvent objective_repaired{};
 };
 
 // The v1 kind names — the wire's filter vocabulary (the `subscribe`
@@ -318,6 +348,7 @@ event_kind_name(CampaignEvent::Kind k) noexcept {
         case CampaignEvent::Kind::TaskingCycle:          return "tasking_cycle";
         case CampaignEvent::Kind::ActionFiled:           return "action_filed";
         case CampaignEvent::Kind::Verdict:               return "verdict";
+        case CampaignEvent::Kind::ObjectiveRepaired:     return "objective_repaired";
     }
     return "tasking_cycle";
 }
@@ -336,6 +367,7 @@ parse_event_kind(std::string_view name, CampaignEvent::Kind& out) noexcept {
              CampaignEvent::Kind::TaskingCycle,
              CampaignEvent::Kind::ActionFiled,
              CampaignEvent::Kind::Verdict,
+             CampaignEvent::Kind::ObjectiveRepaired,
          }) {
         if (name == event_kind_name(k)) {
             out = k;
@@ -357,6 +389,7 @@ inline void encode(f4::json::Writer& w, const CampaignEvent& e) {
         case CampaignEvent::Kind::TaskingCycle:           encode(w, e.tasking_cycle); break;
         case CampaignEvent::Kind::ActionFiled:            encode(w, e.action_filed); break;
         case CampaignEvent::Kind::Verdict:                encode(w, e.verdict); break;
+        case CampaignEvent::Kind::ObjectiveRepaired:      encode(w, e.objective_repaired); break;
     }
 }
 
@@ -371,6 +404,9 @@ inline void encode(f4::json::Writer& w, const CampaignEvent& e) {
 //   kill                    killer OR victim (a war-room sees both)
 //   objective_damage        the owner after the damage
 //   objective_captured      the new owner
+//   objective_repaired      the holding team (the base being rebuilt
+//                           is theirs — the same side objective_
+//                           damage reports)
 //   action_filed            the filing team (the ACTION reacts FOR
 //                           them — the owner defends, the striker
 //                           punishes)
@@ -420,6 +456,8 @@ listed(const std::vector<int>& teams, int team) noexcept {
             return listed(f.teams, e.objective_damage.owner);
         case CampaignEvent::Kind::ObjectiveCaptured:
             return listed(f.teams, e.objective_captured.new_owner);
+        case CampaignEvent::Kind::ObjectiveRepaired:
+            return listed(f.teams, e.objective_repaired.owner);
         case CampaignEvent::Kind::RoeChanged:
             return e.roe_changed.scope.kind == RoEScopeKind::Team
                        ? listed(f.teams, e.roe_changed.scope.team)
