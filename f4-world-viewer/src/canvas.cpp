@@ -1492,19 +1492,20 @@ void ViewerApp::draw_canvas() {
     // Three model sources, all sharing one BeginMode3D block:
     //
     //   1. Objective feature models (FeatureSetComponent)
-    //      Airbases/airstrips carry a FeatureSetComponent with 39 features
-    //      each (hangars, towers, runway sections, etc.). RenderEntity()
-    //      dispatches on FeatureSetComponent → draw_feature_mesh per
-    //      feature, offset by the feature's offset_xyz from the objective
-    //      center.
+    //      Airbase-family objectives carry a FeatureSetComponent whose
+    //      placements come from the class's OCD row (Falcon4.FED/FCD):
+    //      airbases 66-145 features each, highway strips 13, armybases 11.
+    //      RenderEntity() dispatches on FeatureSetComponent →
+    //      draw_feature_mesh per feature, offset by the feature's
+    //      offset_xyz from the objective center.
     //
     //   2. Objective entity models (ObjectiveTypeComponent::type)
-    //      Every objective entity_type (100+) maps to a vis_type[0] in
-    //      FALCON4.ct — bridges, factories, cities, radars, ports, depots,
-    //      power plants, etc. all have a single 3D model. We resolve
-    //      entity_type → vis_type[0] → draw_feature_mesh at the objective's
-    //      world position. This is what makes bridges look like bridges and
-    //      factories look like factories on the map.
+    //      Objectives without a FeatureSetComponent would resolve
+    //      entity_type → vis_type[0] → draw_feature_mesh at the
+    //      objective's world position. NOTE: in the stock class table
+    //      every CLASS_OBJECTIVE row has vis_type all-zero (an objective's
+    //      visuals ARE its features), so this pass draws nothing today —
+    //      it exists for theaters/classes that do carry a model.
     //
     //   3. Unit entity models (UnitCoreComponent::class_table_index)
     //      Every unit entity_type (150+) maps to a vis_type[0] — tanks,
@@ -1578,7 +1579,8 @@ void ViewerApp::draw_canvas() {
                 // on FeatureSetComponent and draws each feature's model
                 // at its offset from the objective center. Only objectives
                 // with non-empty FeatureSetComponent produce draws here
-                // (airbases/airstrips with 39 features each).
+                // (the airbase family: airbases, highway strips,
+                // armybases — the classes whose OCD row names features).
                 for (const auto& eid : impl_->objectives()) {
                     auto h = impl_->handle(eid);
                     auto* tr = h.get<f4::entities::TransformComponent>();

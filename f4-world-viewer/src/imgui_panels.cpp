@@ -748,6 +748,11 @@ void ViewerApp::draw_imgui() {
         impl_->ensure_models_3d_loaded();
     }
     impl_->class_table_browser.set_render_resources(&impl_->render_res_3d);
+    // The browser derives objective feature collections (its CLASS_OBJECTIVE
+    // detail section) from the loaded world; the generation counter tells it
+    // when the world changed and the collections must be rebuilt.
+    impl_->class_table_browser.set_entity_world(&impl_->eworld,
+                                                impl_->world_generation);
     impl_->class_table_browser.draw();
 
     // --- Symbol Creator panel (Tools > Symbol Creator) ---

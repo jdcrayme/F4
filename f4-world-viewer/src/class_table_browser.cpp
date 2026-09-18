@@ -426,6 +426,7 @@ void ClassTableBrowser::draw_table() {
                                        ImGuiSelectableFlags_SpanAllColumns)) {
                     selected_entity_type_ = static_cast<int>(et);
                     selected_vis_slot_ = 0;  // reset to primary model
+                    preview_feature_index_ = -1;  // leave any feature preview
                 }
 
                 ImGui::TableSetColumnIndex(1);
@@ -857,6 +858,7 @@ void ClassTableBrowser::draw_detail_panel() {
                 const bool is_sel = (selected_vis_slot_ == s);
                 if (ImGui::Selectable(item_label, is_sel)) {
                     selected_vis_slot_ = s;
+                    preview_feature_index_ = -1;  // leave any feature preview
                 }
                 if (is_sel) ImGui::SetItemDefaultFocus();
             }
@@ -889,10 +891,55 @@ void ClassTableBrowser::draw_detail_panel() {
     float detail_width = panel_width - preview_width - 20.0f;
     if (detail_width < 200.0f) detail_width = 200.0f;
 
-    // Left column: 3D model preview
+    // Left column: 3D model preview. Two sources: the entry's own visType
+    // selection (units, vehicles, weapons — the normal path), or, for
+    // objectives (whose class rows carry vis_type all-zero — an objective
+    // IS its features), the feature row picked in the features section
+    // below.
     int16_t active_vis = (selected_vis_slot_ >= 0 && selected_vis_slot_ < 7)
                             ? entry->vis_type[selected_vis_slot_] : 0;
-    if (active_vis > 0) {
+    const f4::entities::FeatureEntryState* previewed_feature = nullptr;
+    int16_t feature_vis = 0;
+    if (preview_feature_index_ >= 0) {
+        ensure_objective_features();
+        const auto it = objective_features_.find(
+            static_cast<uint16_t>(selected_entity_type_));
+        if (it != objective_features_.end() &&
+            preview_feature_index_ <
+                static_cast<int>(it->second.features.size())) {
+            previewed_feature =
+                &it->second.features[preview_feature_index_];
+            feature_vis = class_table_.vis_type_for(previewed_feature->index, 0);
+        } else {
+            preview_feature_index_ = -1;  // stale pick (world changed) — disarm
+        }
+    }
+    if (previewed_feature != nullptr) {
+        ImGui::BeginGroup();
+        if (feature_vis > 0) {
+            ImGui::Text("Feature[%d] \"%s\" — model [%d] (glTF)",
+                        preview_feature_index_,
+                        previewed_feature->name.c_str(), feature_vis);
+            // Always call draw_model_preview — it handles the "no glTF
+            // export" case gracefully (see the active_vis branch below).
+            draw_model_preview(feature_vis);
+        } else {
+            ImGui::TextWrapped(
+                "Feature[%d] \"%s\" (entity %d) has no model — its "
+                "vis_type is 0 in the class table.",
+                preview_feature_index_, previewed_feature->name.c_str(),
+                static_cast<int>(previewed_feature->index));
+            ImGui::TextDisabled("(preview pane keeps its size)");
+            // Keep the pane's layout stable by drawing the disabled state
+            // at the usual preview size.
+            ImGui::Dummy(ImVec2(320.0f, 320.0f));
+        }
+        if (ImGui::SmallButton("Back to objective")) {
+            preview_feature_index_ = -1;
+        }
+        ImGui::EndGroup();
+        ImGui::SameLine();
+    } else if (active_vis > 0) {
         ImGui::BeginGroup();
         ImGui::Text("Model[%d] (glTF)", active_vis);
         // Always call draw_model_preview — it handles the "no render
@@ -919,11 +966,25 @@ void ClassTableBrowser::draw_detail_panel() {
     ImGui::Text("Type: %d   Subtype: %s", static_cast<int>(entry->type),
                 unit_subtype_name(entry->domain, entry->stype));
     ImGui::Separator();
-    ImGui::TextDisabled("Class-table record detail (OCD/UCD/VCD/FCD/WCD joins)\n"
-                        "moved to the converted JSON artifacts — see\n"
-                        "Data/World/korea.world.json + ct2json output.");
+    if (entry->cls == f4::world_types::CLASS_OBJECTIVE) {
+        ImGui::TextDisabled("Class-table record detail (OCD/UCD/VCD/FCD/WCD joins)\n"
+                            "moved to the converted JSON artifacts — the\n"
+                            "feature collection below is that join, live\n"
+                            "from the loaded world.");
+    } else {
+        ImGui::TextDisabled("Class-table record detail (OCD/UCD/VCD/FCD/WCD joins)\n"
+                            "moved to the converted JSON artifacts — see\n"
+                            "Data/World/korea.world.json + ct2json output.");
+    }
 
     ImGui::EndGroup();
+
+    // Objectives are collections of features — list the class's placements.
+    // (Every CLASS_OBJECTIVE row has vis_type all-zero, so the feature list
+    // is the only meaningful "shape" a class row can offer.)
+    if (entry->cls == f4::world_types::CLASS_OBJECTIVE) {
+        draw_objective_features(*entry);
+    }
 
     // ANIM-DOCTOR: for hierarchy-emitted models, the animation doctor
     // section lives here under the preview (not a separate Inspector
@@ -958,6 +1019,157 @@ void ClassTableBrowser::draw_detail_panel() {
                     active_vis, dof_tags, sw_tags);
             }
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Objective feature collections
+//
+// An objective class is a collection of features: its OCD row names a
+// run of Falcon4.FED placements (offsets + facing per feature entity_type,
+// named by the Falcon4.FCD). The viewer already renders objectives that
+// way on the map (FeatureSetComponent → draw_feature_mesh per feature);
+// this section shows the same collection at class level and lets each
+// feature's model be previewed.
+// ---------------------------------------------------------------------------
+void ClassTableBrowser::ensure_objective_features() {
+    if (!entity_world_) return;
+    if (objective_features_built_ &&
+        objective_features_built_generation_ == entity_world_generation_) {
+        return;   // the loaded world hasn't changed
+    }
+
+    objective_features_.clear();
+    const auto& ids = entity_world_->with_tag_ref(
+        f4::entities::tags::ROLE,
+        f4::entities::TagValue::from(std::string("objective")));
+    for (const auto eid : ids) {
+        const f4::entities::EntityHandle h(eid,
+            const_cast<f4::entities::EntityWorld*>(entity_world_));
+        const auto* ot = h.get<f4::entities::ObjectiveTypeComponent>();
+        const auto* fs = h.get<f4::entities::FeatureSetComponent>();
+        if (!ot || !fs) continue;
+        // world_loader stores the entity_type in both `type` and
+        // `class_table_index`; prefer `type` (canvas.cpp's convention).
+        const auto etype = static_cast<uint16_t>(
+            ot->type >= 100 ? ot->type : ot->class_table_index);
+        if (etype < 100) continue;
+
+        auto& slot = objective_features_[etype];
+        // Every instance of a class shares its placements (they come from
+        // the class's OCD row) — the first non-empty set stands for the
+        // class; an empty set is only kept until a populated one appears.
+        if (slot.features.empty()) {
+            slot.class_name = ot->class_name;
+            slot.features = fs->features;
+        }
+    }
+
+    objective_features_built_ = true;
+    objective_features_built_generation_ = entity_world_generation_;
+}
+
+void ClassTableBrowser::draw_objective_features(
+    const f4::world_types::ClassTableEntry& entry) {
+    const auto etype = static_cast<uint16_t>(selected_entity_type_);
+
+    if (!entity_world_) {
+        ImGui::TextDisabled(
+            "Features: load a world (File menu, or load a campaign from an "
+            "install) to see this objective's feature collection.");
+        return;
+    }
+    ensure_objective_features();
+    const auto it = objective_features_.find(etype);
+    if (it == objective_features_.end()) {
+        ImGui::TextDisabled(
+            "Features: this entity class has no instances in the loaded "
+            "world.");
+        return;
+    }
+    const auto& cf = it->second;
+    if (cf.features.empty()) {
+        // Post-OCD-fix worlds give every airbase-class instance its FED
+        // placements; empty means the world JSON predates the fix (or the
+        // theater DB wasn't loaded at conversion time).
+        ImGui::TextDisabled(
+            "Features: the class's instances in the loaded world carry no "
+            "feature placements — the world JSON may predate the OCD "
+            "dataPtr fix; re-run export-game-data.");
+        return;
+    }
+
+    ImGui::Separator();
+    ImGui::Text("Features (%d)%s", static_cast<int>(cf.features.size()),
+                cf.class_name.empty()
+                    ? "" : (" — " + cf.class_name).c_str());
+    if (ImGui::IsItemHovered() && !cf.class_name.empty()) {
+        ImGui::SetTooltip("Placements from Falcon4.FED, named by the FCD — "
+                          "the class's OCD row (dataPtr %u)",
+                          entry.data_ptr_index);
+    }
+
+    const ImGuiTableFlags flags =
+        ImGuiTableFlags_ScrollY | ImGuiTableFlags_RowBg |
+        ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_Resizable;
+    if (ImGui::BeginTable("objective_features", 6, flags,
+                          ImVec2(0, 230))) {
+        ImGui::TableSetupColumn("#",        ImGuiTableColumnFlags_WidthFixed, 36.0f);
+        ImGui::TableSetupColumn("Name",     ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn("Entity",   ImGuiTableColumnFlags_WidthFixed, 58.0f);
+        ImGui::TableSetupColumn("Offset",   ImGuiTableColumnFlags_WidthFixed, 104.0f);
+        ImGui::TableSetupColumn("State",    ImGuiTableColumnFlags_WidthFixed, 78.0f);
+        ImGui::TableSetupColumn("Preview",  ImGuiTableColumnFlags_WidthFixed, 64.0f);
+        ImGui::TableSetupScrollFreeze(0, 1);
+        ImGui::TableHeadersRow();
+
+        ImGuiListClipper clipper;
+        clipper.Begin(static_cast<int>(cf.features.size()));
+        while (clipper.Step()) {
+            for (int row = clipper.DisplayStart;
+                 row < clipper.DisplayEnd; ++row) {
+                const auto& f = cf.features[static_cast<std::size_t>(row)];
+                ImGui::TableNextRow();
+                ImGui::TableSetColumnIndex(0);
+                ImGui::Text("%d", row);
+                ImGui::TableSetColumnIndex(1);
+                ImGui::TextUnformatted(
+                    f.name.empty() ? "(unnamed)" : f.name.c_str());
+                ImGui::TableSetColumnIndex(2);
+                const int16_t vis = class_table_.vis_type_for(f.index, 0);
+                if (vis > 0) {
+                    ImGui::Text("%d (model %d)",
+                                static_cast<int>(f.index),
+                                static_cast<int>(vis));
+                } else {
+                    ImGui::TextDisabled("%d (no model)",
+                                        static_cast<int>(f.index));
+                }
+                ImGui::TableSetColumnIndex(3);
+                ImGui::Text("(%.0f, %.0f)", f.offset_x, f.offset_y);
+                ImGui::TableSetColumnIndex(4);
+                // f4vu.h VIS states (world_state.cpp's decode contract):
+                // 0 normal, 1 repaired, 2 damaged, 3 destroyed.
+                static const char* kDamage[] = {
+                    "normal", "repaired", "damaged", "destroyed"};
+                if (f.damage_state != 0) {
+                    ImGui::TextUnformatted(kDamage[f.damage_state & 3]);
+                } else {
+                    ImGui::TextDisabled("normal");
+                }
+                ImGui::TableSetColumnIndex(5);
+                if (vis > 0) {
+                    char btn[24];
+                    std::snprintf(btn, sizeof(btn), "Preview##%d", row);
+                    if (ImGui::SmallButton(btn)) {
+                        preview_feature_index_ = row;
+                    }
+                } else {
+                    ImGui::TextDisabled("-");
+                }
+            }
+        }
+        ImGui::EndTable();
     }
 }
 

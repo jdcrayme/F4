@@ -44,6 +44,45 @@ std::string base64_encode(const uint8_t* data, std::size_t len) {
     return out;
 }
 
+// Resolve an objective instance's ObjClassDataType row (Falcon4.OCD).
+//
+// The authoritative row index is the class table's dataPtr: the game
+// indexes ObjDataTable by the FALCON4.ct entry's dataPtr, and every
+// objective entity class owns a row (the airbase family spans rows
+// 1, 36, 44, 54, ... in the stock theater). The cheap alternative —
+// ObjectiveType - 1 — only holds for classes whose single dataPtr happens
+// to equal type-1 (border, bridge, city, ...). The OCD's row 0 is a zeroed
+// placeholder, so for the first three classes that shortcut reads the row
+// one below its own: airbase (type 1) read the placeholder and lost its
+// features + ground layout entirely, airstrip (type 2) read the airbase
+// row, armybase (type 3) read the airstrip row.
+//
+// The ObjectiveType - 1 path is kept only as a fallback for entity_types
+// the class table can't resolve (returns nullptr when neither path can).
+const ObjectiveClassData* resolve_objective_class(
+    const ClassTable* class_table,
+    const TheaterObjectDatabase* theater_db,
+    uint16_t entity_type,
+    uint8_t objective_type) noexcept
+{
+    if (!theater_db || !theater_db->objectives.loaded()) return nullptr;
+    if (class_table && class_table->loaded()) {
+        uint8_t data_type = 0;
+        uint32_t data_ptr = 0;
+        if (class_table->data_ptr_for(entity_type, data_type, data_ptr) &&
+            data_type == DTYPE_OBJECTIVE) {
+            if (const auto* ocd = theater_db->objectives.at(data_ptr)) {
+                return ocd;
+            }
+        }
+    }
+    if (objective_type > 0) {
+        return theater_db->objectives.at(
+            static_cast<std::size_t>(objective_type) - 1);
+    }
+    return nullptr;
+}
+
 } // namespace
 
 std::filesystem::path find_base_objectives(const std::filesystem::path& cam_path) {
@@ -530,14 +569,10 @@ std::string to_world_json(const CamArchive& cam, const WorldJsonOptions& opts) {
                     // class name (e.g. "Airbase A-3", "Bridge B-12") and the
                     // # of features (buildings, runways, etc.). For airbases,
                     // also walk the PtHeader chain to emit ground layout.
-                    if (opts.theater_db && opts.theater_db->objectives.loaded()
-                        && obj_type > 0) {
-                        const auto* ocd = opts.theater_db->objectives.at(
-                            static_cast<std::size_t>(obj_type) - 1);
-                        // Note: ObjDataTable is indexed by (ObjectiveType - 1)
-                        // in FreeFalcon — entry 0 is "Airbase" (type 1), etc.
-                        // (See entity.cpp:234-235: builds NumObjectiveTypes from
-                        // the largest classInfo_[VU_TYPE] value seen.)
+                    if (opts.theater_db && opts.theater_db->objectives.loaded()) {
+                        const auto* ocd = resolve_objective_class(
+                            opts.class_table, opts.theater_db,
+                            ob.entity_type, obj_type);
                         if (ocd) {
                             o << ", \"class_name\": \"" << escape_string(ocd->name) << "\""
                               << ", \"features_count\": " << static_cast<int>(ocd->features)
@@ -645,10 +680,10 @@ std::string to_world_json(const CamArchive& cam, const WorldJsonOptions& opts) {
                         // for ALL radar objectives regardless of type.
                         if (opts.theater_db && opts.theater_db->radars.loaded()
                             && opts.theater_db->features.loaded()
-                            && opts.theater_db->feature_entries.loaded()
-                            && obj_type > 0) {
-                            const auto* ocd_r = opts.theater_db->objectives.at(
-                                static_cast<std::size_t>(obj_type) - 1);
+                            && opts.theater_db->feature_entries.loaded()) {
+                            const auto* ocd_r = resolve_objective_class(
+                                opts.class_table, opts.theater_db,
+                                ob.entity_type, obj_type);
                             if (ocd_r && ocd_r->radar_feature != 255
                                 && ocd_r->radar_feature > 0
                                 && ocd_r->first_feature > 0) {
@@ -694,10 +729,10 @@ std::string to_world_json(const CamArchive& cam, const WorldJsonOptions& opts) {
                     // AND we have an OCD entry with a non-zero pt_data_index.
                     if (opts.theater_db && opts.theater_db->objectives.loaded()
                         && opts.theater_db->pt_headers.loaded()
-                        && opts.theater_db->pt_data.loaded()
-                        && obj_type > 0) {
-                        const auto* ocd = opts.theater_db->objectives.at(
-                            static_cast<std::size_t>(obj_type) - 1);
+                        && opts.theater_db->pt_data.loaded()) {
+                        const auto* ocd = resolve_objective_class(
+                            opts.class_table, opts.theater_db,
+                            ob.entity_type, obj_type);
                         if (ocd && ocd->pt_data_index > 0) {
                             o << ", \"ground_layout\": [";
                             // Walk the nextHeader chain. Hard cap at 64 hops

@@ -238,6 +238,10 @@ struct ViewerApp::Impl {
     int world_version = 0;          // from WorldState.version
     std::string terrain_file_ref;   // from WorldState.terrain_file
     bool world_loaded = false;
+    /// Bumped on every world (re)load. Panels that derive caches from the
+    /// EntityWorld (e.g. the class table browser's objective feature
+    /// collections) compare against this to know when to rebuild.
+    int world_generation = 0;
     std::string world_path_display;
     /// Team entity IDs indexed by team slot (0..7). Built when a world
     /// is loaded so we can resolve owner slot → team entity quickly.

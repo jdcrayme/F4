@@ -299,9 +299,9 @@
       "id":"campaign:save1",
       "path":"World/korea.world.json",
       "format_version":1,
-      "size_bytes":11989759,
-      "sha256":"5dd89edeb5b82704b6d1b8980d5cb4564e81f798b7ffc38d3347b36e1d24f6b5",
-      "fnv1a_64":"533f948d7bd625b8"
+      "size_bytes":10295602,
+      "sha256":"ef79b7fa6eada5f90e8ffe3a0d6f714f7c6857bf085e5079c485c3b7927fa015",
+      "fnv1a_64":"799f60098e653ea9"
     },
     {
       "id":"koreaobj:00001",

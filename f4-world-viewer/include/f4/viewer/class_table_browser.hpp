@@ -29,6 +29,7 @@
 #pragma once
 
 #include <f4/anim/channels.hpp>   // AnimValues — the doctor's scratch channel state
+#include <f4/entities/types.hpp>  // FeatureEntryState — one feature placement
 #include <f4/world_types/class_table.hpp>
 
 #include <cstdint>
@@ -42,6 +43,10 @@
 namespace f4::renderer {
 class RenderResources;   // fwd — the shared GPU resources (models/textures/shader)
 struct RuntimeModel;     // fwd — the loaded model the doctor actuates
+}
+
+namespace f4::entities {
+class EntityWorld;       // fwd — the loaded world (feature-collection source)
 }
 
 namespace f4::viewer {
@@ -80,6 +85,19 @@ public:
         render_resources_ = res;
     }
 
+    /// Provide the loaded world (the ViewerApp's EntityWorld) plus its
+    /// generation counter. Objectives are collections of features — every
+    /// vis_type slot in the class table is zero for CLASS_OBJECTIVE, so a
+    /// class row can't preview a model of its own; the feature collections
+    /// below are what the browser previews instead. May be nullptr (no
+    /// world loaded) — the feature section degrades to a hint. The browser
+    /// does NOT take ownership. Called each frame from the panels pass.
+    void set_entity_world(const f4::entities::EntityWorld* world,
+                          int world_generation) {
+        entity_world_ = world;
+        entity_world_generation_ = world_generation;
+    }
+
     /// Render the panel. Call every frame inside the ImGui frame.
     void draw();
 
@@ -88,6 +106,26 @@ private:
 
     // --- Data sources (set externally) ---
     f4::renderer::RenderResources* render_resources_ = nullptr;
+
+    // --- Objective feature collections (class level) ---
+    // The class table can't show an objective's 3D shape (every
+    // CLASS_OBJECTIVE row has vis_type all-zero — an objective IS its
+    // features). The loaded world's objective entities carry their class's
+    // feature placements (Falcon4.FED + FCD via the converted world JSON),
+    // so we group them per entity_type and list them in the detail panel.
+    // Each class's placements are identical across its instances (they come
+    // from the class's OCD row), so the first instance's set stands for the
+    // class — preferring a non-empty one guards against an instance whose
+    // JSON happened to lack the placements.
+    struct ObjectiveClassFeatures {
+        std::string class_name;    // OCD row name, e.g. "02_20 Airbase 2"
+        std::vector<f4::entities::FeatureEntryState> features;
+    };
+    const f4::entities::EntityWorld* entity_world_ = nullptr;
+    int entity_world_generation_ = -1;
+    bool objective_features_built_ = false;
+    int objective_features_built_generation_ = -1;
+    std::unordered_map<uint16_t, ObjectiveClassFeatures> objective_features_;
 
     // --- Lazy-loaded data (owned by this panel) ---
     // Tranche 0d: the table loads from Data/Classes/falcon4.ct.json via
@@ -115,6 +153,14 @@ private:
     // --- Selection state ---
     int selected_entity_type_ = -1;  // -1 = none
     int selected_vis_slot_ = 0;       // which visType[0..6] to preview
+
+    // --- Feature preview (detail panel) ---
+    // Objectives carry no vis_type of their own; when the user picks a
+    // feature row, the left preview pane shows that feature's model
+    // (feature entity_type → vis_type[0], resolved at draw time) instead.
+    // -1 = no feature picked (previews the entry's own visType selection,
+    // the unit/vehicle path).
+    int preview_feature_index_ = -1;
 
     // --- 3D model preview state ---
     // RenderTexture2D stored as raw GPU texture ids + dimensions
@@ -174,6 +220,16 @@ private:
     void draw_detail_panel();
     void draw_export_bar();
     void rebuild_filtered_entries();
+
+    /// Group the loaded world's objective entities into per-entity-type
+    /// feature collections (objective_features_). Rebuilt when the world
+    /// generation changes. No-op when no world is loaded.
+    void ensure_objective_features();
+
+    /// Detail-panel section listing an objective class's feature
+    /// placements. Each row's Preview button loads the feature's model
+    /// (its vis_type[0]) into the left preview pane.
+    void draw_objective_features(const f4::world_types::ClassTableEntry& entry);
 
     /// Check if an entry matches the current filters.
     [[nodiscard]] bool passes_filter(

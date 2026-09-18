@@ -24,6 +24,7 @@
 #include <f4/world_convert/class_table.hpp>
 #include <f4/world_convert/world_json.hpp>
 #include <f4/world_convert/cam_archive.hpp>
+#include <f4/world_convert/objective_decoder.hpp>
 
 #include <gtest/gtest.h>
 
@@ -31,6 +32,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <string>
 #include <vector>
 
 namespace {
@@ -606,6 +608,154 @@ TEST(TheaterData, WorldJsonEmitsClassNameWhenTheaterDbLoaded) {
     EXPECT_NE(json.find("\"Obj_"), std::string::npos);  // our synthetic names
     EXPECT_NE(json.find("\"features_count\""), std::string::npos);
     EXPECT_NE(json.find("\"pt_data_index\""), std::string::npos);
+
+    std::filesystem::remove_all(dir);
+}
+
+TEST(TheaterData, WorldJsonResolvesOcdRowByClassTableDataPtr) {
+    // REGRESSION: the OCD row used to be looked up by (ObjectiveType - 1),
+    // but the table's row 0 is a zeroed placeholder and the real rows start
+    // at 1 — the game indexes ObjDataTable by the class table's dataPtr.
+    // Airbase (type 1) therefore read the placeholder (losing its features
+    // and ground layout), airstrip (type 2) read the airbase row, and
+    // armybase (type 3) read the airstrip row. The REAL fixture OCD is the
+    // discriminating data — its synthetic sibling cannot express the bug
+    // because every synthetic row describes itself ("Obj_<i>" at row i):
+    //   row 1 = "02_20 Airbase 2"  (features=108, first_feature=1)
+    //   row 2 = "Highway Strip NS" (features=13)
+    //   row 3 = "Armybase 1"       (features=11)
+    // and the fixture class table points the airstrip class at dataPtr 2,
+    // the armybase at 3, and the airbase classes at 1/36/44/... (rows past
+    // the 12-record fixture legitimately fall back — the class table is the
+    // real table, the fixture OCD is trimmed).
+    const std::string cam_path = std::string(FIXTURE_DIR) + "save1.cam";
+    ASSERT_TRUE(std::filesystem::exists(cam_path));
+    f4::world_convert::CamArchive cam;
+    ASSERT_NO_THROW(cam.load(cam_path));
+
+    // The save's objectives, so each instance can be classified by its
+    // class-table dataPtr.
+    const f4::world_convert::SubFile* obj = cam.find("obj");
+    ASSERT_NE(obj, nullptr);
+    const f4::world_convert::DecodedObjectives objs =
+        f4::world_convert::decode_obj(obj->data.data(), obj->data.size());
+    ASSERT_EQ(static_cast<int>(objs.objectives.size()), objs.count);
+
+    f4::world_convert::ClassTable class_table;
+    ASSERT_NO_THROW(class_table.load(std::string(FIXTURE_DIR) + "FALCON4.ct"));
+    ASSERT_TRUE(class_table.loaded());
+
+    const auto dir =
+        std::filesystem::temp_directory_path() / "f4_ocd_dataptr_test";
+    std::filesystem::create_directories(dir);
+    for (const char* name : {"Falcon4.OCD", "Falcon4.FED", "Falcon4.FCD"}) {
+        std::filesystem::copy_file(std::string(FIXTURE_DIR) + name,
+                                   dir / name,
+                                   std::filesystem::copy_options::overwrite_existing);
+    }
+    f4::world_convert::TheaterObjectDatabase theater_db;
+    theater_db.load_all(dir);
+    ASSERT_TRUE(theater_db.objectives.loaded());
+    ASSERT_TRUE(theater_db.feature_entries.loaded());
+    ASSERT_TRUE(theater_db.features.loaded());
+
+    f4::world_convert::WorldJsonOptions opts;
+    opts.class_table = &class_table;
+    opts.theater_db = &theater_db;
+    std::string json;
+    ASSERT_NO_THROW(json = f4::world_convert::to_world_json(cam, opts));
+
+    // Slice the objectives items array (units follow it) and split it into
+    // per-record chunks — each record starts with `      {"type": ` at the
+    // emitter's fixed indent, nested structures indent deeper.
+    const auto sec = json.find("\"objectives\": {");
+    const auto units_sec = json.find("\"units\": {");
+    ASSERT_NE(sec, std::string::npos);
+    ASSERT_NE(units_sec, std::string::npos);
+    ASSERT_LT(sec, units_sec);
+    const std::string section = json.substr(sec, units_sec - sec);
+
+    // Per-record chunk finder: the record carrying `id_num` is the one
+    // whose own id field matches (links/parents reference other ids via
+    // different keys).
+    const auto record_of = [&](uint32_t id_num) -> std::string {
+        const std::string needle =
+            "\"id_num\": " + std::to_string(id_num) + ", \"id_creator\": ";
+        std::size_t pos = section.find(needle);
+        if (pos == std::string::npos) return {};
+        // The record start is the last `{"type": ` before the hit; the end
+        // is the next record start (or the section's end).
+        const auto begin = section.rfind("{\"type\": ", pos);
+        const auto end = section.find("\n      {\"type\": ", pos);
+        return section.substr(
+            begin,
+            (end == std::string::npos ? section.size() : end) - begin);
+    };
+
+    int checked = 0;
+    int airbases_with_features = 0;
+    int airstrips = 0;
+    int airstrips_with_highway_strip_row = 0;
+    for (const auto& ob : objs.objectives) {
+        uint8_t data_type = 0;
+        uint32_t data_ptr = 0;
+        if (!class_table.data_ptr_for(ob.entity_type, data_type, data_ptr) ||
+            data_type != f4::world_convert::DTYPE_OBJECTIVE) {
+            continue;
+        }
+        const auto* ocd = theater_db.objectives.at(data_ptr);
+        if (!ocd) continue;   // row past the trimmed fixture — fallback path
+        const std::string rec = record_of(ob.id_num);
+        if (rec.empty()) {
+            ADD_FAILURE() << "no emitted record for id_num " << ob.id_num;
+            continue;
+        }
+        ++checked;
+
+        // The emitted enrichment must be the row at the instance's OWN
+        // dataPtr, not at (ObjectiveType - 1).
+        const std::string fc = "\"features_count\": " +
+                               std::to_string(static_cast<int>(ocd->features));
+        EXPECT_NE(rec.find(fc), std::string::npos)
+            << "id_num " << ob.id_num << " (dataPtr " << data_ptr
+            << "): expected features_count " << static_cast<int>(ocd->features);
+
+        const bool expect_features =
+            ocd->features > 0 && ocd->first_feature > 0;
+        EXPECT_EQ(rec.find("\"features\": [") != std::string::npos,
+                  expect_features)
+            << "id_num " << ob.id_num << " (dataPtr " << data_ptr << ")";
+
+        const uint8_t obj_type =
+            class_table.objective_type_for(ob.entity_type);
+        if (obj_type == f4::world_convert::TYPE_AIRBASE) {
+            const bool has = rec.find("\"features\": [") != std::string::npos;
+            if (has) ++airbases_with_features;
+            // The dataPtr-1 airbase class is the fixture's row 1.
+            if (data_ptr == 1) {
+                EXPECT_NE(rec.find("\"class_name\": \"02_20 Airbase 2\""),
+                          std::string::npos);
+                EXPECT_NE(rec.find(fc), std::string::npos);
+            }
+        }
+        if (obj_type == f4::world_convert::TYPE_AIRSTRIP) {
+            ++airstrips;
+            // Pre-fix every airstrip showed the airbase's 108 features;
+            // post-fix it must show its own row (13, "Highway Strip NS").
+            if (rec.find("\"features_count\": 13") != std::string::npos &&
+                rec.find("\"class_name\": \"Highway Strip NS\"")
+                    != std::string::npos) {
+                ++airstrips_with_highway_strip_row;
+            }
+        }
+    }
+    EXPECT_GT(checked, 0) << "no objective instance was checked";
+    EXPECT_GT(airbases_with_features, 0)
+        << "no airbase carried feature placements (OCD row 0 placeholder "
+           "still shadowing the airbase rows?)";
+    EXPECT_GT(airstrips, 0) << "fixture save has no airstrip";
+    EXPECT_EQ(airstrips_with_highway_strip_row, airstrips)
+        << "some airstrips did not get the Highway Strip row";
 
     std::filesystem::remove_all(dir);
 }

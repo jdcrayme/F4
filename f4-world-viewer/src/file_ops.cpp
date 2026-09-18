@@ -126,6 +126,7 @@ void ViewerApp::load_world_json(const std::filesystem::path& path) {
     }
 
     impl_->world_loaded = true;
+    ++impl_->world_generation;
     impl_->world_path_display = path.string();
     impl_->last_world_json_path = path;
     impl_->status_msg = "Loaded world: " + path.string() +

@@ -5,6 +5,34 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## WORLD-OCD-1 — the OCD join reads the right row (airbases get their features back)
+
+- **WORLD-OCD-1** — cam2json's theater enrichment resolved an objective's
+  ObjClassDataType row by (ObjectiveType − 1), but the OCD table's row 0
+  is a zeroed placeholder and the game indexes ObjDataTable by the class
+  table's dataPtr. Airbase (type 1) read the placeholder — no class name,
+  no features, no ground layout, so the viewer drew nothing and the sim
+  fell back to synthesized nominal feature grids — while airstrip (type
+  2) and armybase (type 3) each read the row above their own (airstrips
+  were rendering the airbase's 108 buildings). The join now goes through
+  ClassTable::data_ptr_for (type − 1 kept only as fallback), fixing all
+  three consumers in world_json.cpp (class enrichment, radar range,
+  ground layout). Regenerated korea.world.json: all 50 airbases carry
+  their real 66–145 FED placements + runway/taxiway/parking layouts, the
+  42 highway strips show their own 13 features. Regression test
+  (TheaterData.WorldJsonResolvesOcdRowByClassTableDataPtr) sweeps every
+  save1 objective's emitted enrichment against its own OCD row.
+- **Viewer** — the class-table browser now shows objectives as what they
+  are: collections of features. Every CLASS_OBJECTIVE row has vis_type
+  all-zero (the browser's 3D preview could never show anything for one),
+  so the detail panel gains a feature-collection section built from the
+  loaded world's objective entities (grouped per entity_type, rebuilt on
+  world change via a world-generation counter): placements with FCD
+  names, entity types, models, offsets, live damage state, and a Preview
+  button per row that loads that feature's model into the orbit preview.
+  Stale-canvas comments about "39 features each" and objective
+  vis_types corrected.
+
 ## CAMP-ATM-1 — the ACTION tables (the war reacts)
 
 - **CAMP-ATM-1** — the strategy layer's named queue item lands
