@@ -61,6 +61,7 @@
 #include <f4/campaign/ground_writeback.hpp>
 #include <f4/campaign/result_ledger.hpp>
 #include <f4/campaign/route_builder.hpp>
+#include <f4/campaign/war_verdict.hpp>
 #include <f4/campaign/world_writeback.hpp>
 #include <f4/simulation/campaign_result_sink.hpp>
 #include <f4/simulation/campaign_spawner.hpp>
@@ -495,6 +496,17 @@ public:
         return ws_;
     }
 
+    // --- CAMP-DOM-1: the verdict ---------------------------------------
+
+    /// The war's outcome picture, computed FRESH from the books: the
+    /// LIVE owner of every objective (the ground war's mirror when one
+    /// runs, the WorldState otherwise) against the OPENING owner
+    /// snapshot taken at construction, weighted by each objective's own
+    /// priority, plus the ledger's own team books. A read-only
+    /// projection — no engine state moves. The `verdict` query serves
+    /// it; the event pump diffs its coarse state (emit_verdict_events_).
+    [[nodiscard]] f4::campaign::TheaterVerdict verdict() const;
+
     // --- V-3DLIVE: camera-driven deaggregation (view bubble) ----------
     /// Point the deaggregation bubble at the host's CAMERA position
     /// (ENU feet) with a host-chosen radius (scales with zoom), and
@@ -688,6 +700,8 @@ private:
                                        ///< filings (the log's tail)
     void emit_capture_events_();   ///< the ground war's objective flips
     void emit_damage_events_();    ///< the damage sync's changed objectives
+    void emit_verdict_events_();   ///< CAMP-DOM-1 — the books' projection
+                                   ///< moved (band or leader changed)
 
     // --- CAMP-CMD-1: the roe_set doctrine store --------------------------
 
@@ -872,6 +886,18 @@ private:
     // options object is long gone).
     double sim_dt_ = 1.0 / 60.0;
     int max_steps_per_advance_ = 240;
+
+    // CAMP-DOM-1: the verdict's baseline + the event pump's cache. The
+    // opening owner per objective (wire order, snapshotted at
+    // construction — the run-scope the ledger's books keep); the last
+    // coarse state the verdict event family published (a new pump
+    // emits only on CHANGE against this; a fresh session starts
+    // stalemate/no-lead and never opens with a synthetic event).
+    std::vector<std::uint8_t> verdict_opening_owners_;
+    f4::campaign::VerdictBand last_verdict_band_ =
+        f4::campaign::VerdictBand::Stalemate;
+    int last_verdict_leader_ = -1;
+    int last_verdict_swing_ = 0;
 
     // Data layer (the lenders).
     f4::world::WorldState ws_;                 // the write-back target

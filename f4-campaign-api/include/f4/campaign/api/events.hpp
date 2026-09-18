@@ -122,6 +122,20 @@ struct ActionFiledEvent {
     int damage_pct{0};
 };
 
+// The verdict's coarse state changed (CAMP-DOM-1) — the books'
+// projection moved a band or found a (new) leader. The SPARSE war
+// signal: the full rows live on the `verdict` query; the event is the
+// wake-up call a war-room client reacts to. Fires only on CHANGE — a
+// quiet front publishes nothing. leader is the leading team's SLOT
+// (-1 when the lead dissolved); swing is the leader's net gained
+// priority (0 when none).
+struct VerdictEvent {
+    std::int64_t t{0};
+    std::string band;      ///< stalemate | advantage | decisive
+    int leader{-1};
+    int swing{0};
+};
+
 // --- encoders (byte-stable; the family name is the discriminator) -------
 
 inline void encode(f4::json::Writer& w, const MissionFiledEvent& e) {
@@ -242,6 +256,18 @@ inline void encode(f4::json::Writer& w, const ActionFiledEvent& e) {
     w.put('}');
 }
 
+inline void encode(f4::json::Writer& w, const VerdictEvent& e) {
+    w.raw("{\"ev\":\"verdict\",\"t\":");
+    w.number(static_cast<long long>(e.t));
+    w.raw(",\"band\":\"");
+    w.put(f4::json::escape_string(e.band));
+    w.raw("\",\"leader\":");
+    w.number(e.leader);
+    w.raw(",\"swing\":");
+    w.number(e.swing);
+    w.put('}');
+}
+
 // --- the tagged envelope (the ONE bus message type) ---------------------
 //
 // HOST-2 publishes ONE message type onto the session's bus — the bus is
@@ -260,6 +286,7 @@ struct CampaignEvent {
         RoeChanged,
         TaskingCycle,
         ActionFiled,
+        Verdict,
     };
 
     Kind kind{Kind::TaskingCycle};
@@ -273,6 +300,7 @@ struct CampaignEvent {
     RoeChangedEvent roe_changed{};
     TaskingCycleEvent tasking_cycle{};
     ActionFiledEvent action_filed{};
+    VerdictEvent verdict{};
 };
 
 // The v1 kind names — the wire's filter vocabulary (the `subscribe`
@@ -289,6 +317,7 @@ event_kind_name(CampaignEvent::Kind k) noexcept {
         case CampaignEvent::Kind::RoeChanged:            return "roe_changed";
         case CampaignEvent::Kind::TaskingCycle:          return "tasking_cycle";
         case CampaignEvent::Kind::ActionFiled:           return "action_filed";
+        case CampaignEvent::Kind::Verdict:               return "verdict";
     }
     return "tasking_cycle";
 }
@@ -306,6 +335,7 @@ parse_event_kind(std::string_view name, CampaignEvent::Kind& out) noexcept {
              CampaignEvent::Kind::RoeChanged,
              CampaignEvent::Kind::TaskingCycle,
              CampaignEvent::Kind::ActionFiled,
+             CampaignEvent::Kind::Verdict,
          }) {
         if (name == event_kind_name(k)) {
             out = k;
@@ -326,6 +356,7 @@ inline void encode(f4::json::Writer& w, const CampaignEvent& e) {
         case CampaignEvent::Kind::RoeChanged:             encode(w, e.roe_changed); break;
         case CampaignEvent::Kind::TaskingCycle:           encode(w, e.tasking_cycle); break;
         case CampaignEvent::Kind::ActionFiled:            encode(w, e.action_filed); break;
+        case CampaignEvent::Kind::Verdict:                encode(w, e.verdict); break;
     }
 }
 
@@ -348,6 +379,8 @@ inline void encode(f4::json::Writer& w, const CampaignEvent& e) {
 //   roe_changed             the scope's team when scoped to a team;
 //                           mission/flight scopes match any team gate
 //   tasking_cycle           teamless (the ATM pass is theater-wide)
+//   verdict                 teamless (the war's outcome is theater-
+//                           wide; the rows name the teams)
 struct EventFilter {
     bool all{false};
     std::vector<CampaignEvent::Kind> kinds;
@@ -394,6 +427,7 @@ listed(const std::vector<int>& teams, int team) noexcept {
         case CampaignEvent::Kind::ReinforcementDelivered:
         case CampaignEvent::Kind::WeatherChanged:
         case CampaignEvent::Kind::TaskingCycle:
+        case CampaignEvent::Kind::Verdict:
             return true;
     }
     return true;

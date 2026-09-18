@@ -148,6 +148,18 @@ target_compile_definitions(test_campaign_init_wars PRIVATE
 )
 add_dependencies(test_campaign_init_wars campinit_fixtures mission_profiles_fixture)
 
+# DOM-1 — the verdict's war gates: the generated small war over the
+# HOST (ground war armed) — a capture raises the verdict event, and the
+# query answers with the stream's last coarse state.
+f4_simulation_add_test(test_campaign_verdict test_campaign_verdict.cpp)
+target_compile_definitions(test_campaign_verdict PRIVATE
+    F4_CAMPINIT_FIXTURES_DIR="${F4_CAMPINIT_FIXTURES_DIR}"
+    F4_SOURCE_FIXTURES_DIR="${CMAKE_SOURCE_DIR}/f4-world-convert/tests/fixtures"
+    F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}"
+    F4_MISSION_PROFILES_JSON="${F4_MISSION_PROFILES_JSON}"
+)
+add_dependencies(test_campaign_verdict campinit_fixtures mission_profiles_fixture)
+
 # P7 — the strategy layer's sim-side integration: the station contract
 # ride (route → plan → brain), the post-arm RoE gates, and the
 # strategy-armed session (stationed CAPs spawn with racetrack plans;

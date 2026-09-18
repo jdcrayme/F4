@@ -201,6 +201,20 @@ TEST(ProtocolDispatch, ThreatQueryIsWhitelisted) {
               R"({"v":1,"op":"query","q":"threat","status":"ok","data":{"mock":1}})" "\n");
 }
 
+TEST(ProtocolDispatch, VerdictQueryIsWhitelisted) {
+    // CAMP-DOM-1: `verdict` joined the v1 whitelist additively (the DTO
+    // landed at the END of dto.hpp) — it dispatches like any served
+    // query, while the TE threshold/terminal semantics stay future
+    // vocabulary.
+    MockSession s;
+    std::string out;
+    const auto o = handle(s, R"({"v":1,"op":"query","q":"verdict"})", out);
+    EXPECT_EQ(o.kind, ProtocolOutcome::Kind::Ok);
+    EXPECT_EQ(s.last_query, "verdict");
+    EXPECT_EQ(out,
+              R"({"v":1,"op":"query","q":"verdict","status":"ok","data":{"mock":1}})" "\n");
+}
+
 TEST(ProtocolDispatch, EngineSideQueryFailureIsExit24) {
     MockSession s;
     s.fail_next = true; // a whitelisted query the ENGINE side fails
@@ -485,6 +499,34 @@ TEST(ProtocolDispatch, ActionFiledKindSubscribesAndRidesTheStepLine) {
         R"({"ev":"action_filed","t":4000,"team":2,"mission_byte":20,)"
         R"("mission_name":"CAS","action_type":1,"context":4,)"
         R"("objective_id":4281,"damage_pct":12})" "\n");
+}
+
+TEST(ProtocolDispatch, VerdictKindSubscribesAndRidesTheStepLine) {
+    // CAMP-DOM-1 — the tenth family on the wire: the verdict subscribes
+    // by name (teamless — the war's outcome is theater-wide) and its
+    // step line is byte-pinned.
+    MockSession s;
+    CampaignEvent verdict;
+    verdict.kind = CampaignEvent::Kind::Verdict;
+    verdict.verdict.t = 7260;
+    verdict.verdict.band = "advantage";
+    verdict.verdict.leader = 2;
+    verdict.verdict.swing = 30;
+    s.queued = {verdict};
+
+    std::string out;
+    (void)handle(s, R"({"v":1,"op":"subscribe","kinds":["verdict"]})", out);
+    EXPECT_EQ(out,
+              R"({"v":1,"op":"subscribe","status":"ok","kinds":["verdict"],)"
+              R"("teams":[]})" "\n");
+    out.clear();
+    const auto o = handle(s, R"({"v":1,"op":"step","ticks":60})", out);
+    EXPECT_EQ(o.kind, ProtocolOutcome::Kind::Ok);
+    EXPECT_EQ(
+        out,
+        R"({"v":1,"op":"step","status":"ok","ticks":60,"dilated":0,"events":1})" "\n"
+        R"({"ev":"verdict","t":7260,"band":"advantage",)"
+        R"("leader":2,"swing":30})" "\n");
 }
 
 TEST(ProtocolDispatch, EmptyKindListDeliversNothing) {

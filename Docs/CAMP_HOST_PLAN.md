@@ -21,7 +21,16 @@
 > `CampaignInitializer` → fresh `.cam` via the Task-70 encoder stack,
 > byte-identity by construction, the generated save decodes in the
 > existing reader, the C5 24-hour harness passes on a generated war,
-> small/medium/large generated fixtures, the G1 two-war-pair bed).
+> small/medium/large generated fixtures, the G1 two-war-pair bed);
+> CAMP-SCALE-1 shipped (the Tier-3 full-data pass — the complete
+> UCD/VCD/WCD tables as `f4.theater.tables/1` JSON, the runtime
+> `TheaterTables` reader, the VCD countermeasure supply chain, the
+> gated pilot-skill flow, the uncapped-fleet certificate);
+> CAMP-DOM-1 shipped (victory scoring — the books' projection: the
+> `verdict` query + the `verdict` event family (the tenth), the
+> territorial census weighted by the objective's own priority byte
+> against the session's opening owner, the ledger's team rows riding,
+> the band territorial-only with a tie for the lead being no lead).
 > Every other tranche below is an acceptance contract, not a claim.
 
 The campaign engine is the product. Every user experience — the world viewer
@@ -138,6 +147,7 @@ things the engine already produces:
 | `tasking` | the ATM pipeline state (C4/P7) | requests, packages, `next_tasking_sec` |
 | `weather` | Weather v1 (Task 73) | condition, twilight band, daylight factor — **v1.1 (additive)** |
 | `time` | session clock | tick, sim seconds, cycle countdown |
+| `verdict` | the books' projection (DOM-1) | t (relative), threshold, band, leader, per-team census + ledger rows — **v1.1 additive, LANDED in DOM-1** |
 
 ```json
 {"v":1, "op":"query", "q":"flights", "team":0}
@@ -237,6 +247,7 @@ t=356.7 s" — it becomes an event, not just a book entry.
 | `reinforcement_delivered` | C2's reinforcement fire |
 | `tasking_cycle` | the 7-phase ATM pass + `next_tasking_sec` |
 | `action_filed` | the ACTION tables' damage reactions (CAMP-ATM-1) |
+| `verdict` | the books' projection changed — band or leader (CAMP-DOM-1) |
 | `weather_changed` | Task 73's Markov chain |
 | `roe_changed` | P7 fire-control gates |
 
@@ -719,10 +730,59 @@ Default behavior is byte-identical unless a gate says otherwise.
   `--pilot-skill` arm the flows in the certificate. Absent tables or
   rosters leave every pre-SCALE run byte-identical.
 
+### CAMP-DOM-1 — victory scoring (the books' projection)
+- Upstream tracks victory points in the campaign; F4 has books but no
+  verdict. Victory events + a `verdict` query; any UX can say something
+  about the war.
+- **Gate (as built)**: a `verdict` query answers with the per-team
+  census + ledger rows byte-stably (goldens); when the front moves (a
+  capture in the stream) a `verdict` event follows, and the query
+  answers with the SAME coarse state that event carried; a war at rest
+  publishes nothing. Landed on the generated small war's live front
+  (the C5 bed), the quiet HostRig's exact bytes, and the pure model's
+  10 pins.
+- **As-built notes**:
+  (1) The verdict is a READ-ONLY projection — no new engine truth, no
+  accumulation, no save-format change: the territorial half walks the
+  LIVE owner of every objective (the ground war's mirror when one runs
+  — the engine's live truth; the WorldState otherwise) against the
+  session's OPENING owner (snapshotted at construction, step 5b — the
+  same run scope the ledger's books keep), weighted by each objective's
+  own priority byte; the attrition half is the ledger's own team rows
+  (captures, air losses, ground losses, battalions destroyed, the
+  aircraft pool's existence view), reported not folded. (2) The band is
+  territorial ONLY: stalemate / advantage / decisive — the leader's net
+  gained priority ≥ `kDecisiveSwing` (100, one top-priority objective's
+  worth) is decisive; a tie for the lead is no lead; books alone never
+  move the band, so a capture is the only mover today and the event is
+  as sparse as the front moving. (3) The `verdict` event is the
+  coarse-state CHANGE signal (band, leader slot, leader swing — the
+  full rows stay on the query); the pump diffs every whole-second
+  (advance()'s block, after the damage events), starts
+  stalemate/no-lead, and never publishes a synthetic opening event.
+  (4) The DTO (`VerdictView` at dto.hpp's tail — the threat precedent)
+  carries `t` on the engine's RELATIVE axis (the events'; the books it
+  sums are run-scoped) and the band word is the producer's (`band_name`
+  — an unset DTO rides empty, the DTO never invents vocabulary). The
+  `.cmp` header's `te_victory_points` rides as `threshold` context (0 =
+  the save sets none; no terminal semantics claimed — korea carries 0).
+  (5) The census: ledger team rows ∪ belligerent slots ∪
+  territory-holding slots (slot 0 = the neutral control value, never a
+  row of its own; a named slot-0 team keeps its books row), sorted by
+  slot. (6) The pure model lives in f4-campaign (`war_verdict.hpp/.cpp`,
+  `compute_theater_verdict` over `VerdictObjective` arrays + the
+  ledger) — no WorldState detail dependency; the session builds the
+  live view from the mirror-or-WorldState and the host maps it onto the
+  DTO (the stats() pattern). (7) Known seam, documented not fixed: the
+  `objectives` query serves the WorldState's owner rows (the write-back
+  lands at save), while the verdict reads the live mirror — the two
+  agree at save boundaries; a live objectives view is a later tranche's
+  seam (DOM-2 touches the same nerve). (8) `campaign_qc` and
+  `campaignd` are untouched (QC drives the engine directly; the host's
+  unknown-query exit 21 and exit namespaces stand); the protocol
+  whitelist gains `verdict` additively, `kProtocolVersion` stays 1.
+
 ### CAMP-DOM-* — domain tranches (each its own landed series, upstream-mapped)
-- **DOM-1 victory scoring**: upstream tracks victory points in the campaign;
-  F4 has books but no verdict. Victory events + a `verdict` query; any UX
-  can say something about the war.
 - **DOM-2 supply depth**: upstream interdiction targets supply/fuel lines
   and objectives carry supply; deepen C2's pool into per-objective supply
   feeding reinforcement and repair rates.

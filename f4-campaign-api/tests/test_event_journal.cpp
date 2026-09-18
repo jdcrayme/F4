@@ -145,6 +145,14 @@ std::vector<CampaignEvent> one_event_per_family() {
     action.action_filed.damage_pct = 12;
     events.push_back(action);
 
+    CampaignEvent verdict;
+    verdict.kind = CampaignEvent::Kind::Verdict;
+    verdict.verdict.t = 7260;
+    verdict.verdict.band = "advantage";
+    verdict.verdict.leader = 2;
+    verdict.verdict.swing = 30;
+    events.push_back(verdict);
+
     return events;
 }
 
@@ -175,7 +183,7 @@ TEST(EventJournal, HeaderAndEndBytes) {
 
 TEST(EventJournal, OneGoldenLinePerFamily) {
     const auto events = one_event_per_family();
-    ASSERT_EQ(events.size(), 9U);
+    ASSERT_EQ(events.size(), 10U);
 
     f4::json::Writer w;
     encode(w, events[0]);
@@ -234,6 +242,13 @@ TEST(EventJournal, OneGoldenLinePerFamily) {
               R"({"ev":"action_filed","t":4000,"team":2,)"
               R"("mission_byte":20,"mission_name":"CAS","action_type":1,)"
               R"("context":4,"objective_id":4281,"damage_pct":12})");
+
+    // CAMP-DOM-1 — the tenth family: the books' projection moved.
+    w = f4::json::Writer{};
+    encode(w, events[9]);
+    EXPECT_EQ(w.str(),
+              R"({"ev":"verdict","t":7260,"band":"advantage",)"
+              R"("leader":2,"swing":30})");
 }
 
 TEST(EventJournal, WrittenFileShape) {
@@ -250,8 +265,8 @@ TEST(EventJournal, WrittenFileShape) {
     EXPECT_EQ(j.detail(), path.string());
 
     const auto text = slurp(path);
-    // 1 header + 9 events + 1 end = 11 lines, every line ending \n
-    EXPECT_EQ(std::count(text.begin(), text.end(), '\n'), 11);
+    // 1 header + 10 events + 1 end = 12 lines, every line ending \n
+    EXPECT_EQ(std::count(text.begin(), text.end(), '\n'), 12);
     EXPECT_EQ(text.find("{\"v\":1,\"journal\":1,\"identity\":{"), 0U);
     EXPECT_NE(text.find("\n{\"ev\":\"kill\""), std::string::npos);
     EXPECT_NE(text.find("{\"journal_end\":{\"protocol\":1,"),
@@ -419,6 +434,7 @@ TEST(EventFilter, TeamlessFamiliesMatchAnyTeamGate) {
     EXPECT_TRUE(matches(f, events[4])); // reinforcement_delivered
     EXPECT_TRUE(matches(f, events[5])); // weather_changed
     EXPECT_TRUE(matches(f, events[7])); // tasking_cycle
+    EXPECT_TRUE(matches(f, events[9])); // verdict (the war's outcome)
 }
 
 TEST(EventFilter, OwnedFamiliesMatchTheOwningSide) {
@@ -478,6 +494,7 @@ TEST(EventFilter, KindNamesRoundTrip) {
              CampaignEvent::Kind::RoeChanged,
              CampaignEvent::Kind::TaskingCycle,
              CampaignEvent::Kind::ActionFiled,
+             CampaignEvent::Kind::Verdict,
          }) {
         CampaignEvent::Kind parsed{};
         ASSERT_TRUE(parse_event_kind(event_kind_name(k), parsed));

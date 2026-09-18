@@ -19,6 +19,7 @@ add_library(f4-campaign STATIC
     src/campaign.cpp
     src/atm.cpp
     src/result_ledger.cpp
+    src/war_verdict.cpp
     src/world_writeback.cpp
     src/ground_war.cpp
     src/ground_writeback.cpp

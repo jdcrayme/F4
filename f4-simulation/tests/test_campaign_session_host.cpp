@@ -402,6 +402,39 @@ TEST(CampaignSessionHost, ObjectivesQueryCarriesOwnershipAndLogistics) {
     EXPECT_NE(out.find("\"fstatus\":[0,0]"), std::string::npos);
 }
 
+TEST(CampaignSessionHost, VerdictQuerySumsTheBooksInAQuietWar) {
+    // CAMP-DOM-1: the books' projection. The quiet rig holds one
+    // objective (owner 2 == opening owner 2), so the census counts
+    // ROK's holding and moves nothing — stalemate, no lead, empty
+    // books, the exact bytes pinned.
+    const auto rig = HostRig::make();
+    EXPECT_EQ(
+        rig.query("verdict"),
+        R"({"v":1,"op":"query","q":"verdict","status":"ok","data":)"
+        R"({"t":0,"threshold":0,"band":"stalemate","leader":-1,)"
+        R"("leader_swing":0,"teams":[)"
+        R"({"slot":2,"name":"ROK","owned":1,"gained":0,"lost":0,)"
+        R"("gained_value":0,"lost_value":0,"swing":0,"captures":0,)"
+        R"("air_losses":0,"ground_losses":0,"battalions_destroyed":0,)"
+        R"("aircraft_remaining":0},)"
+        R"({"slot":6,"name":"DPRK","owned":0,"gained":0,"lost":0,)"
+        R"("gained_value":0,"lost_value":0,"swing":0,"captures":0,)"
+        R"("air_losses":0,"ground_losses":0,"battalions_destroyed":0,)"
+        R"("aircraft_remaining":0}]}})" "\n");
+}
+
+TEST(CampaignSessionHost, VerdictFamilyStaysSilentInAQuietWar) {
+    // The diff's opening discipline: a fresh session starts
+    // stalemate/no-lead and never publishes a synthetic "here is your
+    // state" event — a war at rest is verdict-silent.
+    const auto rig = HostRig::make();
+    api::EventFilter f;
+    f.kinds = {api::CampaignEvent::Kind::Verdict};
+    rig.host->set_event_filter(f);
+    (void)rig.host->step(600);
+    EXPECT_TRUE(rig.host->drain_events().empty());
+}
+
 // ============================================================================
 // commands — the FID family applies; validation and the queue refuse
 // ============================================================================

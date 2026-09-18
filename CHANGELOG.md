@@ -33,6 +33,34 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
   Stale-canvas comments about "39 features each" and objective
   vis_types corrected.
   
+## CAMP-DOM-1 — victory scoring (the books' projection)
+
+- **CAMP-DOM-1** — the war can be SCORED
+  (Docs/CAMP_HOST_PLAN.md §8). Upstream tracks victory points; F4 had
+  books but no verdict. The verdict is a read-only projection of the
+  books: f4-campaign's `war_verdict` (`compute_theater_verdict`) walks
+  the LIVE owner of every objective (the ground war's mirror when one
+  runs, the WorldState otherwise) against the session's OPENING owner
+  (snapshotted at construction — the run scope the ledger keeps),
+  weighted by each objective's own priority byte, and reports the
+  ledger's team rows beside it. The `verdict` query lands additively on
+  the contract (`VerdictView` at dto.hpp's tail — the threat precedent;
+  the whitelist gains the name, `kProtocolVersion` stays 1) and the
+  `verdict` event family (the tenth) fires only when the coarse state
+  changes — band or leader — so the stream stays as sparse as the front
+  moving. The band is territorial only: stalemate / advantage /
+  decisive at kDecisiveSwing (100); a tie for the lead is no lead; the
+  books alone never move it. The `.cmp` header's own
+  `te_victory_points` rides the DTO as `threshold` context (no terminal
+  semantics claimed — korea's full-campaign save carries 0). Gates: the
+  pure model's 10 pins (swings both ways, neutral origins and
+  reverts, the 99/100 boundary, ties, census rules, slot order), the
+  quiet HostRig's exact query bytes + verdict-silence, and the
+  generated small war's live front — a capture in the stream, a
+  `verdict` event after it, and the query answering with the SAME
+  coarse state the last event carried. campaign_qc and campaignd are
+  untouched.
+
 ## CAMP-SCALE-1 — the Tier-3 full-data pass + the scale certificate
 
 - **CAMP-SCALE-1** — the converted tables reach the fight

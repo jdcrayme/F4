@@ -59,4 +59,9 @@ target_compile_definitions(test_atm PRIVATE
 f4_campaign_add_test(test_ground_war     test_ground_war.cpp)
 f4_campaign_add_test(test_flight_aggregate     test_flight_aggregate.cpp)
 f4_campaign_add_test(test_ground_targeting     test_ground_targeting.cpp)
+# DOM-1 — the verdict over the books (territorial census + the ledger's
+# team rows). Links f4-json explicitly (the DTO-side encoder is the
+# api's; here only the pure model is pinned).
+f4_campaign_add_test(test_war_verdict    test_war_verdict.cpp)
+target_link_libraries(test_war_verdict PRIVATE f4-json)
 target_link_libraries(test_ground_war PRIVATE f4-json)

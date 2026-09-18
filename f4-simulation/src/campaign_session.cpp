@@ -300,6 +300,16 @@ CampaignSession::create(const CampaignSessionOptions& opts,
             session->adapters_->campaign, session->adapters_->teams,
             session->adapters_->units);
 
+    // 5b. CAMP-DOM-1: the verdict's opening baseline — the LIVE owner
+    //     of every objective at session start (wire order), snapshotted
+    //     alongside the ledger (the same run scope: the verdict's
+    //     swings measure this run, exactly like the books do).
+    session->verdict_opening_owners_.reserve(
+        session->ws_.objectives.size());
+    for (const auto& o : session->ws_.objectives) {
+        session->verdict_opening_owners_.push_back(o.owner);
+    }
+
     // 6. The scenario (temp dir; world_json_path ABSOLUTE — the QC's
     //    relative-path lesson: the sim resolves it against the scenario
     //    file's directory).
@@ -750,6 +760,10 @@ bool CampaignSession::advance(double real_seconds, int max_steps_override) {
             // CAMP-HOST-2: the changed objectives publish here (the
             // sink collects; the session fills owner + time).
             emit_damage_events_();
+            // CAMP-DOM-1: the verdict's coarse state — the event fires
+            // only when the band or the leader changed (a capture is
+            // the only mover today; the diff keeps the stream sparse).
+            emit_verdict_events_();
             adopt_new_spawns_();
             retire_due_wrecks_();
         }
@@ -1173,6 +1187,58 @@ void CampaignSession::emit_damage_events_() {
         e.objective_damage.features_damaged = d.features_damaged;
         sim_->bus().publish(e);
     }
+}
+
+// ---------------------------------------------------------------------------
+// CAMP-DOM-1 — the verdict (see the header's block comment)
+// ---------------------------------------------------------------------------
+
+f4::campaign::TheaterVerdict CampaignSession::verdict() const {
+    // The LIVE owner per objective: the ground war's mirror when one
+    // runs (it IS the engine's live truth — the WorldState's owner row
+    // only catches up at the write-back), the WorldState otherwise.
+    // Both walks preserve wire order, so the opening baseline's
+    // indexing holds either way.
+    std::vector<f4::campaign::VerdictObjective> live;
+    if (ground_ != nullptr) {
+        live.reserve(ground_->objectives().size());
+        for (const auto& o : ground_->objectives()) {
+            live.push_back(f4::campaign::VerdictObjective{o.owner,
+                                                          o.priority});
+        }
+    } else {
+        live.reserve(ws_.objectives.size());
+        for (const auto& o : ws_.objectives) {
+            live.push_back(f4::campaign::VerdictObjective{o.owner,
+                                                          o.priority});
+        }
+    }
+    auto v = f4::campaign::compute_theater_verdict(
+        live, verdict_opening_owners_, *ledger_,
+        ladder_->belligerent_teams(), ws_.campaign.te_victory_points);
+    return v;
+}
+
+void CampaignSession::emit_verdict_events_() {
+    namespace api = f4::campaign::api;
+    const auto v = verdict();
+    // Coarse-state diff: the event IS the change signal (the full rows
+    // live on the query). A fresh session starts stalemate/no-lead, so
+    // a war that never moves publishes nothing.
+    if (v.band == last_verdict_band_ && v.leader_slot == last_verdict_leader_ &&
+        v.leader_swing == last_verdict_swing_) {
+        return;
+    }
+    last_verdict_band_ = v.band;
+    last_verdict_leader_ = v.leader_slot;
+    last_verdict_swing_ = v.leader_swing;
+    api::CampaignEvent e;
+    e.kind = api::CampaignEvent::Kind::Verdict;
+    e.verdict.t = ladder_->clock();
+    e.verdict.band = f4::campaign::band_name(v.band);
+    e.verdict.leader = v.leader_slot;
+    e.verdict.swing = v.leader_swing;
+    sim_->bus().publish(e);
 }
 
 // ---------------------------------------------------------------------------

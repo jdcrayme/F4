@@ -274,6 +274,28 @@ TEST(EventGoldens, WeatherAndReinforcement) {
               R"("squadrons_touched":22})");
 }
 
+TEST(EventGoldens, VerdictEvent) {
+    // CAMP-DOM-1 — the tenth family: the books' projection moved (the
+    // leader's slot + swing ride the wake-up; the rows stay on the
+    // query).
+    VerdictEvent v;
+    v.t = 7260;
+    v.band = "decisive";
+    v.leader = 6;
+    v.swing = 130;
+    EXPECT_EQ(encode_json(v),
+              R"({"ev":"verdict","t":7260,"band":"decisive",)"
+              R"("leader":6,"swing":130})");
+
+    VerdictEvent none;  // a DEFAULT payload — the DTO never invents
+                        // vocabulary; the producer always writes the
+                        // band word, so the unset value rides empty
+    none.t = 9000;
+    EXPECT_EQ(encode_json(none),
+              R"({"ev":"verdict","t":9000,"band":"",)"
+              R"("leader":-1,"swing":0})");
+}
+
 // ============================================================================
 // threat — the C3 SAM-ring grid (CAMP-HOST-3)
 // ============================================================================
@@ -296,4 +318,63 @@ TEST(DtoGoldens, ThreatViewEmptyGrid) {
     EXPECT_EQ(encode_json(t),
               R"({"viewer_team":0,"cell_grid":0,"cells_x":0,"cells_y":0,)"
               R"("low":[],"high":[]})");
+}
+
+// ============================================================================
+// verdict — the books' projection (CAMP-DOM-1)
+// ============================================================================
+
+TEST(DtoGoldens, VerdictViewGolden) {
+    VerdictView v;
+    v.t = 7260;
+    v.threshold = 0;
+    v.band = "advantage";
+    v.leader = 2;
+    v.leader_swing = 30;
+    VerdictTeamRow rok;
+    rok.slot = 2;
+    rok.name = "ROK";
+    rok.owned = 2;
+    rok.gained = 1;
+    rok.gained_value = 30;
+    rok.swing = 30;
+    rok.captures = 1;
+    rok.aircraft_remaining = 38;
+    VerdictTeamRow dprk;
+    dprk.slot = 6;
+    dprk.name = "DPRK";
+    dprk.lost = 1;
+    dprk.lost_value = 30;
+    dprk.swing = -30;
+    dprk.ground_losses = 4;
+    v.teams = {rok, dprk};
+    EXPECT_EQ(encode_json(v),
+              R"({"t":7260,"threshold":0,"band":"advantage","leader":2,)"
+              R"("leader_swing":30,"teams":[)"
+              R"({"slot":2,"name":"ROK","owned":2,"gained":1,"lost":0,)"
+              R"("gained_value":30,"lost_value":0,"swing":30,"captures":1,)"
+              R"("air_losses":0,"ground_losses":0,"battalions_destroyed":0,)"
+              R"("aircraft_remaining":38},)"
+              R"({"slot":6,"name":"DPRK","owned":0,"gained":0,"lost":1,)"
+              R"("gained_value":0,"lost_value":30,"swing":-30,"captures":0,)"
+              R"("air_losses":0,"ground_losses":4,"battalions_destroyed":0,)"
+              R"("aircraft_remaining":0}]})");
+}
+
+TEST(DtoGoldens, VerdictViewQuietWar) {
+    VerdictView v;  // a DEFAULT view — the band word is the producer's
+                    // (the session always writes band_name); unset rides
+                    // empty, the no-lead numeric defaults still hold
+    VerdictTeamRow row;
+    row.slot = 2;
+    row.name = "ROK";
+    row.owned = 1;
+    v.teams = {row};
+    EXPECT_EQ(encode_json(v),
+              R"({"t":0,"threshold":0,"band":"","leader":-1,)"
+              R"("leader_swing":0,"teams":[{"slot":2,"name":"ROK",)"
+              R"("owned":1,"gained":0,"lost":0,"gained_value":0,)"
+              R"("lost_value":0,"swing":0,"captures":0,"air_losses":0,)"
+              R"("ground_losses":0,"battalions_destroyed":0,)"
+              R"("aircraft_remaining":0}]})");
 }

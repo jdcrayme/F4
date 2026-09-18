@@ -448,4 +448,98 @@ inline void encode(f4::json::Writer& w, const ThreatView& t) {
     w.raw("]}");
 }
 
+// --- verdict (the war's outcome picture, CAMP-DOM-1) ---------------------
+//
+// The `verdict` query (plan §3.2's DOM-1 row): the books' projection —
+// who is winning, derived from state the engine already keeps, with no
+// new engine truth behind it. Per team: the territorial census (the
+// LIVE owner of every objective against the session's OPENING owner,
+// weighted by the objective's own priority byte) plus the ledger's own
+// run books (captures, air losses, ground losses, battalions
+// destroyed, the aircraft pool's existence view).
+//
+// `band` is territorial only — stalemate / advantage / decisive, the
+// leader's net gained priority deciding (>= 100 = decisive; a tie for
+// the lead is no lead). The attrition books ride the rows; weighing
+// them is a display decision. `threshold` is the .cmp header's own
+// te_victory_points (0 = the save sets none) — reported as context.
+// `t` is the engine's RELATIVE clock (the events' axis — the books the
+// verdict sums are run-scoped); a host that wants the war's absolute
+// time adds the save epoch it already holds.
+
+struct VerdictTeamRow {
+    int slot{0};
+    std::string name;
+    int owned{0};                 ///< objectives held now
+    int gained{0};                ///< held now, not at opening
+    int lost{0};                  ///< held at opening, not now
+    int gained_value{0};          ///< Σ priority(gained)
+    int lost_value{0};            ///< Σ priority(lost)
+    int swing{0};                 ///< gained_value − lost_value
+    int captures{0};              ///< ledger: objectives taken this run
+    int air_losses{0};            ///< ledger: aircraft lost this run
+    int ground_losses{0};         ///< ledger: vehicles lost this run
+    int battalions_destroyed{0};  ///< ledger: battalions lost this run
+    int aircraft_remaining{0};    ///< ledger: the pool's existence view
+};
+
+struct VerdictView {
+    std::int64_t t{0};            ///< engine-relative seconds
+    int threshold{0};             ///< the save's te_victory_points
+    std::string band;             ///< stalemate | advantage | decisive
+    int leader{-1};               ///< the leading team's slot, -1 none
+    int leader_swing{0};          ///< the leader's swing (0 when none)
+    std::vector<VerdictTeamRow> teams;  ///< slot order
+};
+
+inline void encode_verdict_row(f4::json::Writer& w,
+                               const VerdictTeamRow& r) {
+    w.raw("{\"slot\":");
+    w.number(r.slot);
+    w.raw(",\"name\":\"");
+    w.put(f4::json::escape_string(r.name));
+    w.raw("\",\"owned\":");
+    w.number(r.owned);
+    w.raw(",\"gained\":");
+    w.number(r.gained);
+    w.raw(",\"lost\":");
+    w.number(r.lost);
+    w.raw(",\"gained_value\":");
+    w.number(r.gained_value);
+    w.raw(",\"lost_value\":");
+    w.number(r.lost_value);
+    w.raw(",\"swing\":");
+    w.number(r.swing);
+    w.raw(",\"captures\":");
+    w.number(r.captures);
+    w.raw(",\"air_losses\":");
+    w.number(r.air_losses);
+    w.raw(",\"ground_losses\":");
+    w.number(r.ground_losses);
+    w.raw(",\"battalions_destroyed\":");
+    w.number(r.battalions_destroyed);
+    w.raw(",\"aircraft_remaining\":");
+    w.number(r.aircraft_remaining);
+    w.put('}');
+}
+
+inline void encode(f4::json::Writer& w, const VerdictView& v) {
+    w.raw("{\"t\":");
+    w.number(static_cast<long long>(v.t));
+    w.raw(",\"threshold\":");
+    w.number(v.threshold);
+    w.raw(",\"band\":\"");
+    w.put(f4::json::escape_string(v.band));
+    w.raw("\",\"leader\":");
+    w.number(v.leader);
+    w.raw(",\"leader_swing\":");
+    w.number(v.leader_swing);
+    w.raw(",\"teams\":[");
+    for (std::size_t i = 0; i < v.teams.size(); ++i) {
+        if (i != 0) w.put(',');
+        encode_verdict_row(w, v.teams[i]);
+    }
+    w.raw("]}");
+}
+
 } // namespace f4::campaign::api

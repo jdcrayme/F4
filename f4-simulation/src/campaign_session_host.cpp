@@ -34,7 +34,8 @@ namespace {
 [[nodiscard]] bool engine_serves_query(std::string_view name) noexcept {
     return name == "time" || name == "stats" || name == "flights" ||
            name == "tasking" || name == "books" ||
-           name == "objectives" || name == "threat";
+           name == "objectives" || name == "threat" ||
+           name == "verdict";
 }
 
 // The session's command-write outcome → the contract's typed refusal
@@ -378,6 +379,43 @@ api::QueryResult EngineSessionHost::query(const api::QuerySpec& spec) {
         }
         f4::json::Writer w;
         api::encode(w, t);
+        res.ok = true;
+        res.data_json = std::move(w).str();
+        return res;
+    }
+
+    if (spec.name == "verdict") {
+        // CAMP-DOM-1: the books' projection, computed fresh per ask —
+        // the same state the events' coarse diff reads. `t` rides the
+        // engine's RELATIVE clock (the events' axis; the books the
+        // verdict sums are run-scoped).
+        const auto v = session_->verdict();
+        api::VerdictView view;
+        view.t = static_cast<std::int64_t>(session_->campaign().clock());
+        view.threshold = v.victory_threshold;
+        view.band = f4::campaign::band_name(v.band);
+        view.leader = v.leader_slot;
+        view.leader_swing = v.leader_swing;
+        view.teams.reserve(v.teams.size());
+        for (const auto& r : v.teams) {
+            api::VerdictTeamRow row;
+            row.slot = r.slot;
+            row.name = r.name;
+            row.owned = r.owned;
+            row.gained = r.gained;
+            row.lost = r.lost;
+            row.gained_value = r.gained_value;
+            row.lost_value = r.lost_value;
+            row.swing = r.swing;
+            row.captures = r.captures;
+            row.air_losses = r.air_losses;
+            row.ground_losses = r.ground_losses;
+            row.battalions_destroyed = r.battalions_destroyed;
+            row.aircraft_remaining = r.aircraft_remaining;
+            view.teams.push_back(std::move(row));
+        }
+        f4::json::Writer w;
+        api::encode(w, view);
         res.ok = true;
         res.data_json = std::move(w).str();
         return res;
