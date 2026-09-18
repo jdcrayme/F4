@@ -425,7 +425,7 @@ TEST(AtmDeconflict, DropsCollisionsAgainstBookedFlights) {
     reqs.push_back(r);
     auto flights = rig->atm->compose_packages(reqs, 1, kNow);
     ASSERT_EQ(flights.size(), 1u);
-    (void)rig->atm->schedule_takeoff(flights[0]);
+    (void)rig->atm->schedule_takeoff(flights[0], kNow);
 
     // The shipped table's mindistance/mintime are 0 (the gate is a
     // no-op there — pinned): a same-mission request at the same TOT
@@ -665,7 +665,8 @@ TEST(AtmScheduling, SnapsToSeededScheduleAndShiftsTot) {
     ASSERT_EQ(main.squadron_vu, 6002u);
     ASSERT_EQ(main.takeoff, 4620);
 
-    const CampaignTime delta = rig->atm->schedule_takeoff(flights[0]);
+    const CampaignTime delta =
+        rig->atm->schedule_takeoff(flights[0], kNow);
     // Minute 77 (block 15, slot 2) is far from the seed's block-0
     // bits → snapped to exactly 4620 → no shift.
     EXPECT_EQ(delta, 0);
@@ -706,7 +707,7 @@ TEST(AtmScheduling, SeededOccupiedSlotSnapsForward) {
     auto flights = atm.compose_packages(reqs, 1, kNow);
     ASSERT_EQ(flights.size(), 2u);
     ASSERT_EQ(flights[0].takeoff, 4620);
-    const CampaignTime delta = atm.schedule_takeoff(flights[0]);
+    const CampaignTime delta = atm.schedule_takeoff(flights[0], kNow);
     EXPECT_EQ(delta, 60);              // snapped to minute 78
     EXPECT_EQ(flights[0].takeoff, 4680);
     EXPECT_EQ(flights[0].tot, 5460);   // TOT follows the shift
@@ -728,8 +729,8 @@ TEST(AtmScheduling, FillsSlotsSoTheNextFlightShifts) {
     auto flights = rig->atm->compose_packages(reqs, 1, kNow);
     ASSERT_EQ(flights.size(), 2u);
 
-    const CampaignTime d0 = rig->atm->schedule_takeoff(flights[0]);
-    const CampaignTime d1 = rig->atm->schedule_takeoff(flights[1]);
+    const CampaignTime d0 = rig->atm->schedule_takeoff(flights[0], kNow);
+    const CampaignTime d1 = rig->atm->schedule_takeoff(flights[1], kNow);
     // The first flight snaps exactly (empty schedule); the second
     // finds the minute occupied → +60 s (the lookahead).
     EXPECT_EQ(d0, 0);
@@ -757,7 +758,9 @@ TEST(AtmRecovery, SurvivorsReturnWhenTheMissionCompletes) {
     reqs.push_back(r);
     auto flights = rig->atm->compose_packages(reqs, 1, kNow);
     ASSERT_EQ(flights.size(), 3u);
-    for (auto& ft : flights) (void)rig->atm->schedule_takeoff(ft);
+    for (auto& ft : flights) {
+        (void)rig->atm->schedule_takeoff(ft, kNow);
+    }
 
     // Nothing completes before the deadline.
     EXPECT_TRUE(rig->atm->recover_completed(flights[0].mission_over - 1)
@@ -808,7 +811,9 @@ TEST(AtmRecovery, LedgerLossesReduceTheReleasedSurvivors) {
     for (const auto& ft : flights) {
         ledger.apply_mission_draw(0.0, 1, ft.squadron_vu, ft.aircraft);
     }
-    for (auto& ft : flights) (void)atm.schedule_takeoff(ft);
+    for (auto& ft : flights) {
+        (void)atm.schedule_takeoff(ft, kNow);
+    }
 
     // Two of the main flight's four aircraft die (the sink's shape).
     ledger.apply_air_loss(100.0, 1, flights[0].squadron_vu,
@@ -1287,12 +1292,14 @@ TEST(AtmScrub, ClosesTheBookingAndReleasesSurvivors) {
     reqs.push_back(r);
     auto flights = rig->atm->compose_packages(reqs, 1, kNow);
     ASSERT_EQ(flights.size(), 3u);
-    for (auto& ft : flights) (void)rig->atm->schedule_takeoff(ft);
+    for (auto& ft : flights) {
+        (void)rig->atm->schedule_takeoff(ft, kNow);
+    }
     ASSERT_EQ(rig->atm->booked_flights().size(), 3u);
 
     // Scrub the main: the booking closes NOW, the complement releases
     // (drawn − booked losses; the rig's war has none yet).
-    const auto rel = rig->atm->scrub_flight(flights[0].flight_id);
+    const auto rel = rig->atm->scrub_flight(flights[0].flight_id, kNow);
     ASSERT_TRUE(rel.has_value());
     EXPECT_EQ(rel->flight_id, flights[0].flight_id);
     EXPECT_EQ(rel->survivors, flights[0].aircraft);
@@ -1301,7 +1308,7 @@ TEST(AtmScrub, ClosesTheBookingAndReleasesSurvivors) {
     EXPECT_EQ(rig->atm->stats().aircraft_scrubbed, flights[0].aircraft);
 
     // Unknown ids answer empty.
-    EXPECT_FALSE(rig->atm->scrub_flight(999999).has_value());
+    EXPECT_FALSE(rig->atm->scrub_flight(999999, kNow).has_value());
 
     // The scrubbed flight never double-releases at its old deadline.
     const auto late =
@@ -1327,7 +1334,9 @@ TEST(AtmReschedule, BookingFollowsTheRetask) {
     reqs.push_back(r);
     auto flights = rig->atm->compose_packages(reqs, 1, kNow);
     ASSERT_FALSE(flights.empty());
-    for (auto& ft : flights) (void)rig->atm->schedule_takeoff(ft);
+    for (auto& ft : flights) {
+        (void)rig->atm->schedule_takeoff(ft, kNow);
+    }
 
     const auto main_id = flights[0].flight_id;
     const auto old_over = flights[0].mission_over;
@@ -1354,8 +1363,8 @@ TEST(AtmReschedule, BookingFollowsTheRetask) {
     // The rescheduled deadline is the one recovery obeys: only the
     // main stays booked (the escorts scrub), nothing releases before
     // the NEW deadline, and the main releases at it.
-    (void)rig->atm->scrub_flight(flights[1].flight_id);
-    (void)rig->atm->scrub_flight(flights[2].flight_id);
+    (void)rig->atm->scrub_flight(flights[1].flight_id, kNow);
+    (void)rig->atm->scrub_flight(flights[2].flight_id, kNow);
     ASSERT_EQ(rig->atm->booked_flights().size(), 1u);
     EXPECT_TRUE(rig->atm->recover_completed(kNow + 99999).empty());
     const auto rel = rig->atm->recover_completed(kNow + 100001);
@@ -1656,4 +1665,328 @@ TEST(AtmSweep, DisarmedSweepStaysTargetLess) {
         EXPECT_EQ(r.action_type, kActionNone);
     }
     EXPECT_GT(sweeps, 0);
+}
+
+// ── CAMP-DOM-4 — the scheduling depth ────────────────────────────────────────
+//
+// The grid slides with the clock (a moving epoch — past blocks fall
+// off, the 160-minute horizon stops silencing late filings), the pick
+// gate applies the reference's own previous-block rule (denials
+// counted + queued), a horizon refusal counts instead of staying
+// silent, and a scrubbed flight's still-future slot releases. The
+// arm-off faces are pinned beside each: block 0 stays the campaign's
+// start, the single-block gate stands, the overflow stays quiet.
+
+TEST(AirbaseSchedule, SyncSlidesWholeBlocksAndAdvancesTheEpoch) {
+    AirbaseSchedule s(1);
+    std::array<std::uint8_t, 32> blocks{};
+    blocks[2] = 0x1F;   // minutes 10..14 — past after a 30-minute slide
+    blocks[8] = 0x04;   // minutes 40 — minute 40 − 30 = 10 → block 2
+    s.seed(blocks);
+    s.sync(30, 5);
+    // Block 0 now maps to campaign-minute 30; the grid shifted down by
+    // 6 blocks: the minutes 10..14 bits fell off (their time is gone),
+    // minute 40's bits landed at index 2.
+    EXPECT_EQ(s.epoch_min(), 30);
+    EXPECT_EQ(s.blocks()[0], 0x00);
+    EXPECT_EQ(s.blocks()[2], 0x04);
+    // And find_slot now speaks RELATIVE minutes: minute 40 requested →
+    // relative 10 → free (0x04 occupies minute 10 only).
+    EXPECT_EQ(s.find_slot(40 - 30, 5, 32), 10);
+}
+
+TEST(AirbaseSchedule, SyncClearsAllWhenTheClockJumpsTheGrid) {
+    AirbaseSchedule s(1);
+    std::array<std::uint8_t, 32> blocks{};
+    blocks[0] = 0x1F;
+    blocks[31] = 0x1F;
+    s.seed(blocks);
+    s.sync(5000, 5);   // 1000 blocks past the epoch — everything is past
+    EXPECT_EQ(s.epoch_min(), 5000);
+    EXPECT_EQ(s.booked(), 0);
+}
+
+TEST(AirbaseSchedule, SyncNeverSlidesBackward) {
+    AirbaseSchedule s(1);
+    s.sync(30, 5);
+    s.sync(10, 5);
+    EXPECT_EQ(s.epoch_min(), 30);
+    // Idempotent at a fixed clock.
+    s.sync(31, 5);
+    EXPECT_EQ(s.epoch_min(), 30);
+}
+
+TEST(AirbaseSchedule, ReleaseClearsExactlyWhatFillMarked) {
+    AirbaseSchedule s(1);
+    s.fill(7, 2, 5, 32);
+    EXPECT_EQ(s.blocks()[1], 0x04);
+    EXPECT_EQ(s.blocks()[2], 0x04);
+    EXPECT_EQ(s.booked(), 2);
+    s.release(7, 2, 5, 32);
+    EXPECT_EQ(s.blocks()[1], 0x00);
+    EXPECT_EQ(s.blocks()[2], 0x00);
+    EXPECT_EQ(s.booked(), 0);
+    // The large-flight pattern too (the next-minute bits).
+    AirbaseSchedule big(2);
+    big.fill(2, 4, 5, 32);
+    EXPECT_EQ(big.booked(), 4);
+    big.release(2, 4, 5, 32);
+    EXPECT_EQ(big.booked(), 0);
+}
+
+TEST(AtmSchedulingDom4, SlideKeepsLateFlightsScheduled) {
+    // A filing two hours past the static grid's horizon: armed, the
+    // anchor rides the clock and the slot is found; the epoch lands on
+    // the takeoff's own block.
+    AtmConfig cfg;
+    cfg.airbase_scheduling = true;
+    auto rig = Rig::make(WorldOpts{}, cfg);
+
+    FlightTasking ft;
+    ft.mission = 13;
+    ft.team = 1;
+    ft.squadron_vu = 6002;
+    ft.airbase_vu = 4281;
+    ft.aircraft = 2;
+    ft.takeoff = 12600;               // minute 210 — beyond 160
+    ft.tot = ft.takeoff + 780;
+    ft.mission_over = ft.tot + 3600;
+
+    constexpr CampaignTime kLate = 12000;   // minute 200
+    const CampaignTime delta = rig->atm->schedule_takeoff(ft, kLate);
+    EXPECT_EQ(delta, 0);              // minute 210 was free post-slide
+    EXPECT_EQ(ft.takeoff, 12600);
+    EXPECT_EQ(rig->atm->stats().slot_snaps, 1);
+    EXPECT_EQ(rig->atm->stats().slot_overflows, 0);
+    const AirbaseSchedule* sched = rig->atm->airbase_schedule(4281);
+    ASSERT_NE(sched, nullptr);
+    EXPECT_EQ(sched->epoch_min(), 210);   // block 0 = the takeoff's block
+    EXPECT_EQ(sched->booked(), 2);        // the slot + the fudge block
+    ASSERT_EQ(rig->atm->booked_flights().size(), 1u);
+}
+
+TEST(AtmSchedulingDom4, ArmOffKeepsTheStaticGridAndTheQuietOverflow) {
+    // The pre-DOM-4 shape verbatim: minute 210 is past the horizon →
+    // the estimate is kept silently (no counter, no queue, no slide).
+    auto rig = Rig::make(WorldOpts{}, AtmConfig{});
+
+    FlightTasking ft;
+    ft.mission = 13;
+    ft.team = 1;
+    ft.squadron_vu = 6002;
+    ft.airbase_vu = 4281;
+    ft.aircraft = 2;
+    ft.takeoff = 12600;
+    ft.tot = ft.takeoff + 780;
+    ft.mission_over = ft.tot + 3600;
+
+    const CampaignTime delta = rig->atm->schedule_takeoff(ft, 12000);
+    EXPECT_EQ(delta, 0);
+    EXPECT_EQ(ft.takeoff, 12600);     // the estimate stands unbooked-bit
+    EXPECT_EQ(rig->atm->stats().slot_snaps, 0);
+    EXPECT_EQ(rig->atm->stats().slot_overflows, 0);
+    ASSERT_EQ(rig->atm->booked_flights().size(), 1u);
+    const AirbaseSchedule* sched = rig->atm->airbase_schedule(4281);
+    ASSERT_NE(sched, nullptr);
+    EXPECT_EQ(sched->epoch_min(), 0);   // the campaign-start anchor
+    EXPECT_EQ(sched->booked(), 0);
+    EXPECT_TRUE(rig->atm->drain_slot_denials().empty());
+}
+
+TEST(AtmSchedulingDom4, OverflowCountsAndQueuesWhenTheGridSaturates) {
+    // A fully-booked grid: armed, the refusal is a books fact —
+    // counted on the base and queued for the ledger (reason = horizon),
+    // while the flight keeps its estimate and still flies.
+    AtmConfig cfg;
+    cfg.airbase_scheduling = true;
+    auto ws = make_atm_world(WorldOpts{});
+    f4::world::AtmAirbaseState ab;
+    ab.id_num = 4281;
+    for (auto& b : ab.schedule) b = 0x1F;   // every block, every slot
+    ws.teams[1].atm_airbases.push_back(ab);
+    f4::world::WorldStateAdapters adapters(ws);
+    auto profiles = load_profiles();
+    AirTaskingManager atm(profiles, adapters.campaign, adapters.teams,
+                          adapters.units, &adapters.objectives, cfg);
+
+    FlightTasking ft;
+    ft.mission = 13;
+    ft.team = 1;
+    ft.squadron_vu = 6002;
+    ft.airbase_vu = 4281;
+    ft.aircraft = 2;
+    ft.takeoff = 4620;   // minute 77
+    ft.tot = ft.takeoff + 780;
+    ft.mission_over = ft.tot + 3600;
+
+    // The slide (to the takeoff's block) cannot help — the shifted
+    // grid is still full; forward and backward scans find nothing.
+    const CampaignTime delta = atm.schedule_takeoff(ft, 0);
+    EXPECT_EQ(delta, 0);                       // the estimate stands
+    EXPECT_EQ(ft.takeoff, 4620);
+    EXPECT_EQ(atm.stats().slot_overflows, 1);
+    const AirbaseSchedule* sched = atm.airbase_schedule(4281);
+    ASSERT_NE(sched, nullptr);
+    EXPECT_EQ(sched->overflowed(), 1);
+    // The queue: one horizon denial for the flying team's base.
+    const auto denials = atm.drain_slot_denials();
+    ASSERT_EQ(denials.size(), 1u);
+    EXPECT_EQ(denials[0].team, 1);
+    EXPECT_EQ(denials[0].airbase_vu, 4281u);
+    EXPECT_EQ(denials[0].reason, kSlotDeniedHorizon);
+    // And the flight still made the books (it flies unscheduled).
+    EXPECT_EQ(atm.booked_flights().size(), 1u);
+}
+
+TEST(AtmSchedulingDom4, ScrubReleasesTheFutureSlot) {
+    // A booked flight scrubbed before its slot: armed, the bits go
+    // back and the next identical filing snaps exactly again.
+    AtmConfig cfg;
+    cfg.airbase_scheduling = true;
+    auto rig = Rig::make(WorldOpts{}, cfg);
+    std::vector<MissionRequest> reqs;
+    MissionRequest r;
+    r.mission = 13;
+    r.team = 1;
+    r.target_id = 9001;
+    r.priority = 100;
+    r.aircraft = 2;
+    r.tot = 5400;
+    reqs.push_back(r);
+    auto flights = rig->atm->compose_packages(reqs, 1, kNow);
+    ASSERT_EQ(flights.size(), 2u);
+    ASSERT_EQ(flights[0].takeoff, 4620);
+    (void)rig->atm->schedule_takeoff(flights[0], kNow);
+    const AirbaseSchedule* sched = rig->atm->airbase_schedule(4281);
+    ASSERT_NE(sched, nullptr);
+    // The armed grid slid to the takeoff's block (epoch = 75): the bits
+    // live at the RELATIVE positions (minute 77 → relative 2).
+    EXPECT_EQ(sched->epoch_min(), 75);
+    EXPECT_EQ(sched->blocks()[0], 0x04);   // relative minute 2 marked
+    EXPECT_EQ(sched->blocks()[1], 0x04);   // the fudge block too
+
+    // Scrub while the slot is still future → the grid gives it back.
+    const auto rel = rig->atm->scrub_flight(flights[0].flight_id, kNow);
+    ASSERT_TRUE(rel.has_value());
+    EXPECT_EQ(rig->atm->stats().slot_releases, 1);
+    EXPECT_EQ(sched->blocks()[0], 0x00);
+    EXPECT_EQ(sched->blocks()[1], 0x00);
+
+    // The next identical filing takes the SAME minute with no shift.
+    auto flights2 = rig->atm->compose_packages(reqs, 1, kNow);
+    ASSERT_EQ(flights2.size(), 2u);
+    const CampaignTime delta = rig->atm->schedule_takeoff(flights2[0], kNow);
+    EXPECT_EQ(delta, 0);
+    EXPECT_EQ(flights2[0].takeoff, 4620);
+}
+
+TEST(AtmSchedulingDom4, ScrubPastSlotNoOpsAndArmOffKeepsTheBits) {
+    // A scrub AFTER the takeoff minute releases nothing (the time is
+    // gone — clearing it could only invite a backward snap into a
+    // departed minute), and the arm-off scrub keeps the grid verbatim.
+    {   // armed, past slot
+        AtmConfig cfg;
+        cfg.airbase_scheduling = true;
+        auto rig = Rig::make(WorldOpts{}, cfg);
+        std::vector<MissionRequest> reqs;
+        MissionRequest r;
+        r.mission = 13;
+        r.team = 1;
+        r.target_id = 9001;
+        r.priority = 100;
+        r.aircraft = 2;
+        r.tot = 5400;
+        reqs.push_back(r);
+        auto flights = rig->atm->compose_packages(reqs, 1, kNow);
+        ASSERT_EQ(flights.size(), 2u);
+        (void)rig->atm->schedule_takeoff(flights[0], kNow);
+        constexpr CampaignTime kAfter = 4680;   // a minute past the slot
+        const auto rel = rig->atm->scrub_flight(flights[0].flight_id, kAfter);
+        ASSERT_TRUE(rel.has_value());
+        EXPECT_EQ(rig->atm->stats().slot_releases, 0);
+        const AirbaseSchedule* sched = rig->atm->airbase_schedule(4281);
+        ASSERT_NE(sched, nullptr);
+        EXPECT_EQ(sched->blocks()[0], 0x04);   // the bit stays (history)
+    }
+    {   // arm off: the grid keeps everything (the pre-DOM-4 shape)
+        auto rig = Rig::make(WorldOpts{}, AtmConfig{});
+        std::vector<MissionRequest> reqs;
+        MissionRequest r;
+        r.mission = 13;
+        r.team = 1;
+        r.target_id = 9001;
+        r.priority = 100;
+        r.aircraft = 2;
+        r.tot = 5400;
+        reqs.push_back(r);
+        auto flights = rig->atm->compose_packages(reqs, 1, kNow);
+        ASSERT_EQ(flights.size(), 2u);
+        (void)rig->atm->schedule_takeoff(flights[0], kNow);
+        const auto rel = rig->atm->scrub_flight(flights[0].flight_id, kNow);
+        ASSERT_TRUE(rel.has_value());
+        EXPECT_EQ(rig->atm->stats().slot_releases, 0);
+        const AirbaseSchedule* sched = rig->atm->airbase_schedule(4281);
+        ASSERT_NE(sched, nullptr);
+        EXPECT_EQ(sched->blocks()[15], 0x04);
+    }
+}
+
+TEST(AtmSchedulingDom4, PickGateDeniesThePreviousBlockToo) {
+    // The reference's own rule: the start block AND the previous one
+    // are checked. A base still launching the previous block's queue
+    // cannot take this flight — armed, both USA squadrons (one shared
+    // base) deny and the request goes unfilled; the same world
+    // disarmed picks (the start block is free).
+    auto make_reqs = [] {
+        std::vector<MissionRequest> reqs;
+        MissionRequest r;
+        r.mission = 1;   // BARCAP, target-less → travel 0 → block 18
+        r.team = 1;
+        r.priority = 100;
+        r.aircraft = 2;
+        r.tot = 5400;
+        reqs.push_back(r);
+        return reqs;
+    };
+
+    {   // armed: the previous block (17) full → deny
+        auto ws = make_atm_world(WorldOpts{});
+        f4::world::AtmAirbaseState ab;
+        ab.id_num = 4281;
+        ab.schedule[17] = 0x1F;   // block 18 free, block 17 full
+        ws.teams[1].atm_airbases.push_back(ab);
+        f4::world::WorldStateAdapters adapters(ws);
+        auto profiles = load_profiles();
+        AtmConfig cfg;
+        cfg.airbase_scheduling = true;
+        AirTaskingManager atm(profiles, adapters.campaign, adapters.teams,
+                              adapters.units, &adapters.objectives, cfg);
+        auto flights = atm.compose_packages(make_reqs(), 1, kNow);
+        EXPECT_TRUE(flights.empty());
+        EXPECT_EQ(atm.stats().schedule_denials, 2);   // both USA wings
+        EXPECT_EQ(atm.stats().requests_unfilled, 1);
+        const auto denials = atm.drain_slot_denials();
+        ASSERT_EQ(denials.size(), 2u);
+        for (const auto& d : denials) {
+            EXPECT_EQ(d.team, 1);
+            EXPECT_EQ(d.airbase_vu, 4281u);
+            EXPECT_EQ(d.reason, kSlotDeniedPickFull);
+        }
+    }
+    {   // disarmed: the single-block rule stands → the base is taken
+        auto ws = make_atm_world(WorldOpts{});
+        f4::world::AtmAirbaseState ab;
+        ab.id_num = 4281;
+        ab.schedule[17] = 0x1F;
+        ws.teams[1].atm_airbases.push_back(ab);
+        f4::world::WorldStateAdapters adapters(ws);
+        auto profiles = load_profiles();
+        AirTaskingManager atm(profiles, adapters.campaign, adapters.teams,
+                              adapters.units, &adapters.objectives,
+                              AtmConfig{});
+        auto flights = atm.compose_packages(make_reqs(), 1, kNow);
+        EXPECT_FALSE(flights.empty());
+        EXPECT_EQ(atm.stats().schedule_denials, 0);
+        EXPECT_TRUE(atm.drain_slot_denials().empty());
+    }
 }

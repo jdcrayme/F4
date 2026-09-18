@@ -36,7 +36,8 @@ namespace {
     return name == "time" || name == "stats" || name == "flights" ||
            name == "tasking" || name == "books" ||
            name == "objectives" || name == "threat" ||
-           name == "verdict" || name == "squadrons";
+           name == "verdict" || name == "squadrons" ||
+           name == "airfields";
 }
 
 // The session's command-write outcome → the contract's typed refusal
@@ -331,6 +332,9 @@ api::QueryResult EngineSessionHost::query(const api::QuerySpec& spec) {
             // — additive fields, riding at the END of the row.
             v.route_waypoints = static_cast<int>(mi.route.size());
             v.flight_role = mi.flight_role;
+            // CAMP-DOM-4: the scheduled takeoff slot (0 = never
+            // slotted) — the additive tail's newest key.
+            v.takeoff = mi.takeoff;
             rows.push_back(v);
             if (spec.limit > 0 && rows.size() >= spec.limit) break;
         }
@@ -480,6 +484,42 @@ api::QueryResult EngineSessionHost::query(const api::QuerySpec& spec) {
             }
             rows.push_back(std::move(v));
             if (spec.limit > 0 && rows.size() >= spec.limit) break;
+        }
+        f4::json::Writer w;
+        api::encode(w, rows);
+        res.ok = true;
+        res.data_json = std::move(w).str();
+        return res;
+    }
+
+    if (spec.name == "airfields") {
+        // CAMP-DOM-4: the scheduling face — one row per airbase the
+        // tasking pipeline holds a schedule book for, in WIRE order
+        // (the decode walk; lazily-created bases join at the tail).
+        // The grid rides the ATM's live anchor (epoch_min nonzero = the
+        // scheduling arm slid it) and its own denial books. Teamless
+        // rows (the grid is the BASE's truth — every side's flights
+        // deconflict against it); the ATM off = no books, an empty set
+        // (the honest answer, never a stub).
+        std::vector<api::AirfieldView> rows;
+        if (const auto* scheds =
+                session_->campaign().atm_schedules()) {
+            for (const auto& s : *scheds) {
+                api::AirfieldView v;
+                v.vu = s.airbase_vu();
+                v.epoch_min = s.epoch_min();
+                v.schedule.reserve(64);
+                static constexpr char kHex[] = "0123456789abcdef";
+                for (const auto b : s.blocks()) {
+                    v.schedule.push_back(kHex[b >> 4]);
+                    v.schedule.push_back(kHex[b & 0x0F]);
+                }
+                v.booked = s.booked();
+                v.denied = s.denied();
+                v.overflowed = s.overflowed();
+                rows.push_back(std::move(v));
+                if (spec.limit > 0 && rows.size() >= spec.limit) break;
+            }
         }
         f4::json::Writer w;
         api::encode(w, rows);

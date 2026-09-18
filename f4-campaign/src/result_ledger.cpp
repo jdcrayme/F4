@@ -691,6 +691,22 @@ void CampaignResultLedger::apply_action_filing(
     ++actions_filed_;
 }
 
+void CampaignResultLedger::apply_slot_denial(double t_s,
+                                             std::uint8_t team,
+                                             std::uint32_t airbase_vu,
+                                             std::uint8_t reason) {
+    // CAMP-DOM-4 — pure observation: the denial moved no books (the
+    // request fell to the next-best squadron or kept its estimate).
+    // Log only — the totals answer is the log's size (the honest 0 is
+    // the arms-off answer).
+    SlotDenialRecord rec;
+    rec.t_s = t_s;
+    rec.team = team;
+    rec.airbase = airbase_vu;
+    rec.reason = reason;
+    slot_denials_.push_back(rec);
+}
+
 // ============================================================================
 // Queries
 // ============================================================================
@@ -813,6 +829,11 @@ std::string CampaignResultLedger::to_json() const {
     w.put(",\n    ");
     w.number_key("pilot_sorties",
                  static_cast<std::int64_t>(pilot_recoveries_.size()));
+    w.put(",\n    ");
+    // CAMP-DOM-4 — the scheduling books' total (the log's size; the
+    // honest 0 is the arms-off answer).
+    w.number_key("slot_denials",
+                 static_cast<std::int64_t>(slot_denials_.size()));
     w.put("\n  }");
 
     // Teams: slot order (the snapshot's order), initial + remaining +
@@ -1052,6 +1073,28 @@ std::string CampaignResultLedger::to_json() const {
             w.number_key("slot", rc.slot);
             w.put(", ");
             w.number_key("missions_run", rc.missions_run);
+            w.put("}");
+        }
+        w.put("\n  ]");
+    }
+
+    // CAMP-DOM-4 — the slot-denial log: arrival order, one record per
+    // refused flight (the pick gate's skips and the horizon's
+    // refusals). Only present when one exists — the arms-off runs
+    // stay byte-identical.
+    if (!slot_denials_.empty()) {
+        w.put(",\n  \"slot_denials\": [");
+        for (std::size_t i = 0; i < slot_denials_.size(); ++i) {
+            const auto& d = slot_denials_[i];
+            w.put(i ? ",\n    " : "\n    ");
+            w.put("{\"t_ms\": ");
+            w.put(time_ms(d.t_s));
+            w.put(", ");
+            w.number_key("team", d.team);
+            w.put(", ");
+            w.number_key("airbase", d.airbase);
+            w.put(", ");
+            w.number_key("reason", d.reason);
             w.put("}");
         }
         w.put("\n  ]");

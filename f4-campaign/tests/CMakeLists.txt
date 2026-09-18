@@ -72,3 +72,10 @@ target_link_libraries(test_ground_war PRIVATE f4-json)
 # rides the same lib set).
 f4_campaign_add_test(test_campaign_personnel test_campaign_personnel.cpp)
 target_link_libraries(test_campaign_personnel PRIVATE f4-json)
+
+# DOM-4 — the airbase-scheduling depth: the Campaign books the ATM's
+# schedule denials into the ledger (the saturated pick gate, the
+# summary's arm-gated counters, the books' slot_denials total). Links
+# f4-json (the summary + the artifact).
+f4_campaign_add_test(test_campaign_scheduling test_campaign_scheduling.cpp)
+target_link_libraries(test_campaign_scheduling PRIVATE f4-json)

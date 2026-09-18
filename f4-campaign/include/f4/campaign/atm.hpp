@@ -172,6 +172,7 @@
 #include <array>
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace f4::campaign {
@@ -336,6 +337,19 @@ struct AtmConfig {
     /// team's next generate_requests).
     int max_pending_action_requests = 4;
 
+    /// DOM-4 — the scheduling depth arm: the grid slides with the clock
+    /// (a moving epoch — past blocks fall off, the 160-minute horizon
+    /// stops silencing every late filing), FindBestAir's schedule gate
+    /// applies the reference's own previous-block rule (and counts its
+    /// denials), a scrubbed flight's still-future slot releases, and a
+    /// horizon-exhausted booking counts instead of staying silent. The
+    /// denial log books through the Campaign (the ledger's slot_denied
+    /// event family rides it). DEFAULT OFF — the golden identity: block
+    /// 0 stays the campaign's start, the gate keeps the single-block
+    /// skip, and the overflow path stays quiet (every pinned test
+    /// unchanged).
+    bool airbase_scheduling = false;
+
     /// DOM-3 — the AssignPilots arm (the reference's
     /// FlightClass::BuildMission tail): every filed flight draws its
     /// CREW from the squadron's decoded pilot roster — the lead scans
@@ -417,6 +431,35 @@ struct AtmStats {
     int crews_assigned = 0;       ///< flights that drew a crew
     int crew_denials = 0;         ///< squadrons skipped at the crew gate
     int ratings_decayed = 0;      ///< per-role decay fires booked
+    // DOM-4 — the scheduling-depth counters (all deterministic; the
+    // summary emits them only when the arm is on — the disarmed block
+    // stays byte-identical).
+    int schedule_denials = 0;     ///< squadrons skipped at the schedule
+                                  ///< gate (the arm's own rule)
+    int slot_overflows = 0;       ///< bookings the horizon refused
+    int slot_releases = 0;        ///< future slots scrubbed flights gave
+                                  ///< back
+};
+
+/// DOM-4 — why a schedule denied a flight (the slot_denied ledger
+/// record and event family's reason byte).
+enum SlotDenialReason : std::uint8_t {
+    kSlotDeniedPickFull = 0,   ///< FindBestAir's schedule gate: the
+                               ///< start block (and, armed, the previous
+                               ///< one) is full — the base cannot take
+                               ///< the flight this cycle
+    kSlotDeniedHorizon = 1,    ///< phase 7: the grid offered no slot
+                               ///< (saturated) — the estimate kept
+};
+
+/// One schedule denial the ATM queued for the Campaign's ledger
+/// booking (the ATM's ledger pointer is read-only — the Campaign owns
+/// the write domain, the same split the ACTION filings ride). The
+/// denial time is the cycle's clock (the Campaign stamps it).
+struct SlotDenial {
+    std::uint8_t team = 0;         ///< the request's flying team
+    std::uint32_t airbase_vu = 0;  ///< the base that denied
+    std::uint8_t reason = 0;       ///< SlotDenialReason
 };
 
 // ============================================================================
@@ -449,6 +492,36 @@ public:
     void fill(int minute, int aircraft, int plan_block_min,
               int max_cycles) noexcept;
 
+    /// DOM-4 — fill's exact inverse (the scrub release): clear the bits
+    /// a fill(…, aircraft, …) set. Past/out-of-range minutes no-op
+    /// (their time is gone either way).
+    void release(int minute, int aircraft, int plan_block_min,
+                 int max_cycles) noexcept;
+
+    /// DOM-4 — slide the grid so `now_min` (campaign-minute) sits in
+    /// block 0: whole plan_block_min blocks drop off the front, the
+    /// epoch advances, past bits (seeded or booked) fall off with their
+    /// time. The arm's moving anchor — without it the 160-minute grid
+    /// silences every filing past 2.6 h. Idempotent at a fixed clock;
+    /// never slides backward.
+    void sync(int now_min, int plan_block_min) noexcept;
+
+    /// The grid's anchor: the campaign-minute block 0 currently maps
+    /// to (0 = the campaign-start alignment — every pre-DOM-4 grid and
+    /// every disarmed run).
+    [[nodiscard]] int epoch_min() const noexcept { return epoch_min_; }
+
+    /// Set bits in the grid (booked slots — the books' own count).
+    [[nodiscard]] int booked() const noexcept;
+
+    /// DOM-4 — the base's denial books (the airfields query's face).
+    /// Counted whenever the rule fires (both gate shapes); surfaced
+    /// only through the books, never into the disarmed bytes.
+    [[nodiscard]] int denied() const noexcept { return denied_; }
+    [[nodiscard]] int overflowed() const noexcept { return overflowed_; }
+    void count_denial() noexcept { ++denied_; }
+    void count_overflow() noexcept { ++overflowed_; }
+
     /// True when block `block` is full (ATM_CYCLE_FULL — every slot
     /// bit the block width allows is set).
     [[nodiscard]] bool block_full(int block,
@@ -462,6 +535,11 @@ public:
 private:
     std::uint32_t vu_ = 0;
     std::array<std::uint8_t, 32> blocks_{};
+    /// DOM-4 — the grid's anchor (campaign-minute of block 0). 0 until
+    /// the scheduling arm's first sync slides it.
+    int epoch_min_ = 0;
+    int denied_ = 0;
+    int overflowed_ = 0;
 };
 
 // ============================================================================
@@ -539,9 +617,10 @@ public:
     /// free slot on its airbase's schedule, fill the slot, shift the
     /// TOT and mission-over deadline by the snap delta, and BOOK the
     /// flight for recovery (the commit point — compose_packages does
-    /// not). Returns the TOT shift in seconds (0 = exact slot or no
-    /// base).
-    CampaignTime schedule_takeoff(FlightTasking& flight);
+    /// not). `now` is the cycle's clock (the scheduling arm syncs the
+    /// grid's anchor to it — the slide). Returns the TOT shift in
+    /// seconds (0 = exact slot, horizon exhaustion, or no base).
+    CampaignTime schedule_takeoff(FlightTasking& flight, CampaignTime now);
 
     /// Mission recovery: every booked flight whose mission-over time
     /// has passed releases its survivors (drawn − booked flight
@@ -556,12 +635,14 @@ public:
     /// the booking closes NOW — the flight leaves booked_, its survivors
     /// release exactly as recover_completed would (drawn − booked
     /// losses; the no-ledger mode refills the squadron pool the same
-    /// way). Returns the release for the caller's ledger booking
+    /// way), and — the scheduling arm — its still-future takeoff slot
+    /// releases back to the grid (a scrubbed flight holds its slot no
+    /// longer). Returns the release for the caller's ledger booking
     /// (nullopt when no booking carries the flight id — a save-carried
     /// flight's books closed in the save's own history; nothing to
     /// close here).
     [[nodiscard]] std::optional<RecoveryRelease>
-    scrub_flight(std::uint32_t flight_id);
+    scrub_flight(std::uint32_t flight_id, CampaignTime now);
 
     /// Retask one booked flight (the flight_retask bookkeeping): the
     /// booking follows the flight — new mission byte, target, TOT, and
@@ -584,6 +665,21 @@ public:
     /// An airbase's live schedule (nullptr when the airbase has none).
     [[nodiscard]] const AirbaseSchedule*
     airbase_schedule(std::uint32_t airbase_vu) const noexcept;
+
+    /// The schedule books, wire order (the Campaign's airfields query
+    /// walks these; one per decoded/lazily-created airbase).
+    [[nodiscard]] const std::vector<AirbaseSchedule>&
+    schedules() const noexcept {
+        return schedules_;
+    }
+
+    /// DOM-4 — the denials queued since the last drain (the Campaign
+    /// books them into the ledger's slot_denial log after the cycle;
+    /// the slot_denied event family rides that log). Empty when the
+    /// scheduling arm is off (nothing queues).
+    [[nodiscard]] std::vector<SlotDenial> drain_slot_denials() {
+        return std::exchange(denials_, {});
+    }
 
     /// Seed the package/flight id allocation (the Campaign's counter
     /// base; both stay monotonic for the run).
@@ -629,6 +725,11 @@ private:
                                               std::uint8_t team,
                                               CampaignTime now,
                                               const SquadronState* lead);
+
+    /// DOM-4 — the mutable schedule lookup (the gate's slide + denial
+    /// books; the const accessor above stays the read path).
+    [[nodiscard]] AirbaseSchedule*
+    find_schedule_(std::uint32_t airbase_vu) noexcept;
 
     /// The rating term: UCD scores when the unit carries them, else
     /// the specialty-derived fallback (header doc).
@@ -777,6 +878,10 @@ private:
     std::vector<SquadronState> squadrons_;    ///< wire order
     std::vector<AirbaseSchedule> schedules_;  ///< one per decoded airbase
     std::vector<FlightTasking> booked_;       ///< awaiting recovery
+    /// DOM-4 — the cycle's schedule denials awaiting the Campaign's
+    /// ledger booking (the gate and the overflow path queue; the
+    /// Campaign drains after the cycle and stamps the clock).
+    std::vector<SlotDenial> denials_;
     /// Decoded backlog cache, per team slot (seeded once).
     std::array<std::vector<MissionRequest>, 8> backlog_;
     /// Per-team target rotation cursor (enemy objective list index).

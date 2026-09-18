@@ -266,6 +266,19 @@ struct CampaignSessionOptions {
     /// the static specialty fallback stands byte-identically.
     bool rating_decay = false;
 
+    /// CAMP-DOM-4: the airbase-scheduling depth arm — the slot grid
+    /// slides with the clock (a moving epoch, past blocks fall off),
+    /// FindBestAir's schedule gate applies the reference's own
+    /// previous-block rule (denials booked), a scrubbed flight's
+    /// still-future slot releases, a horizon refusal books (the
+    /// slot_denied event family), and the intents' SCHEDULED takeoff
+    /// drives the airfield-ops gate: a slotted flight materializes one
+    /// ops window before its SLOT and rolls on it (the TOT-anchored
+    /// gate stays for slotless flights). Default false: the campaign-
+    /// start anchor, the single-block gate, the TOT-anchored window —
+    /// the golden identity.
+    bool airbase_scheduling = false;
+
     /// CAMP-SCALE-1: path to the converted theater tables (cam2json
     /// --emit-tables output; f4/world/theater_tables.hpp reads it).
     /// Empty (default) = the documented countermeasure defaults stand
@@ -752,6 +765,8 @@ private:
                                        ///< filings (the log's tail)
     void emit_pilot_events_();     ///< CAMP-DOM-3 — the personnel logs'
                                    ///< tails (assigned / lost / recovered)
+    void emit_slot_denied_events_();  ///< CAMP-DOM-4 — the scheduling
+                                      ///< books' denials (the log's tail)
     void emit_capture_events_();   ///< the ground war's objective flips
     void emit_repair_events_();    ///< CAMP-DOM-2 — the repair cadence's
                                    ///< books + the sim-side bitmap mirror
@@ -809,6 +824,11 @@ private:
     std::size_t last_pilot_assignment_record_ = 0;
     std::size_t last_pilot_loss_record_ = 0;
     std::size_t last_pilot_recovery_record_ = 0;
+    /// CAMP-DOM-4 — the slot-denial log's read cursor.
+    std::size_t last_slot_denial_record_ = 0;
+    /// CAMP-DOM-4 — the scheduling arm's session-side copy (the ladder
+    /// config carries it too; this gates the slot-anchored ops gate).
+    bool airbase_scheduling_ = false;
     /// The tasking-cycle counter's last seen value (the diff IS the
     /// fires of this whole-second block — the clock chunks seconds).
     std::int64_t last_cycles_fired_ = 0;

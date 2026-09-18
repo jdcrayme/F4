@@ -263,6 +263,12 @@ struct IntentView {
     bool synthetic{false};
     int route_waypoints{0};
     std::uint8_t flight_role{0};
+    // CAMP-DOM-4 (additive, at the END per the header rule): takeoff —
+    // the flight's SCHEDULED takeoff slot (the phase-7 snap's output,
+    // campaign-relative seconds; the engine's own RELATIVE axis, like
+    // the other times here). 0 = never slotted (the legacy ladder's
+    // intents, the save's own flights, a base-less filing).
+    std::int64_t takeoff{0};
 };
 
 inline void encode_intent(f4::json::Writer& w, const IntentView& m) {
@@ -296,6 +302,8 @@ inline void encode_intent(f4::json::Writer& w, const IntentView& m) {
     w.number(m.route_waypoints);
     w.raw(",\"flight_role\":");
     w.number(m.flight_role);
+    w.raw(",\"takeoff\":");
+    w.number(static_cast<long long>(m.takeoff));
     w.put('}');
 }
 
@@ -602,6 +610,57 @@ inline void encode(f4::json::Writer& w,
     for (std::size_t i = 0; i < squadrons.size(); ++i) {
         if (i != 0) w.put(',');
         encode(w, squadrons[i]);
+    }
+    w.put(']');
+}
+
+// --- the airfields view (CAMP-DOM-4 — the scheduling face) --------------
+//
+// One row per airbase the tasking pipeline holds a schedule book for,
+// in WIRE order (the decode walk; lazily-created bases join at the
+// tail). The grid is the 32-block takeoff bitmask as the ATM holds it
+// RIGHT NOW — `schedule` is its 32 bytes as 64 lowercase hex chars
+// (block 0's byte first), `epoch_min` the campaign-minute block 0
+// currently maps to (0 = the campaign-start anchor; nonzero = the
+// scheduling arm slid the grid), `booked` the set-bit count. The
+// denial books are the base's own: `denied` counts pick-gate skips,
+// `overflowed` horizon refusals. Teamless rows (the grid is the
+// BASE's truth — every side's flights deconflict against it).
+struct AirfieldView {
+    std::uint32_t vu{0};          ///< VU_ID.num (the campaign key)
+    std::int64_t epoch_min{0};    ///< block 0's campaign-minute
+    std::string schedule;         ///< the 32 block bytes, 64 hex chars
+    int booked{0};                ///< set bits (the booked slots)
+    int denied{0};                ///< pick-gate skips on this base
+    int overflowed{0};            ///< horizon refusals on this base
+};
+
+inline void encode_airfield(f4::json::Writer& w, const AirfieldView& a) {
+    w.raw("{\"vu\":");
+    w.number(static_cast<std::uint64_t>(a.vu));
+    w.raw(",\"epoch_min\":");
+    w.number(static_cast<long long>(a.epoch_min));
+    w.raw(",\"schedule\":\"");
+    w.put(a.schedule);
+    w.raw("\",\"booked\":");
+    w.number(a.booked);
+    w.raw(",\"denied\":");
+    w.number(a.denied);
+    w.raw(",\"overflowed\":");
+    w.number(a.overflowed);
+    w.put('}');
+}
+
+inline void encode(f4::json::Writer& w, const AirfieldView& a) {
+    encode_airfield(w, a);
+}
+
+inline void encode(f4::json::Writer& w,
+                   const std::vector<AirfieldView>& airfields) {
+    w.put('[');
+    for (std::size_t i = 0; i < airfields.size(); ++i) {
+        if (i != 0) w.put(',');
+        encode_airfield(w, airfields[i]);
     }
     w.put(']');
 }

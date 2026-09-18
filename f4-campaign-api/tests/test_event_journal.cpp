@@ -196,6 +196,15 @@ std::vector<CampaignEvent> one_event_per_family() {
     recovered.pilot_recovered.missions_run = 1;
     events.push_back(recovered);
 
+    // CAMP-DOM-4 — the fifteenth family: the grid refused a flight.
+    CampaignEvent denied;
+    denied.kind = CampaignEvent::Kind::SlotDenied;
+    denied.slot_denied.t = 11500;
+    denied.slot_denied.team = 2;
+    denied.slot_denied.airbase = 4281;
+    denied.slot_denied.reason = 0;   // the pick gate (the block full)
+    events.push_back(denied);
+
     return events;
 }
 
@@ -226,7 +235,7 @@ TEST(EventJournal, HeaderAndEndBytes) {
 
 TEST(EventJournal, OneGoldenLinePerFamily) {
     const auto events = one_event_per_family();
-    ASSERT_EQ(events.size(), 14U);
+    ASSERT_EQ(events.size(), 15U);
 
     f4::json::Writer w;
     encode(w, events[0]);
@@ -320,6 +329,14 @@ TEST(EventJournal, OneGoldenLinePerFamily) {
     EXPECT_EQ(w.str(),
               R"({"ev":"pilot_recovered","t":10800,"team":2,"squadron":6001,)"
               R"("flight":5101,"pilot":0,"missions_run":1})");
+
+    // CAMP-DOM-4 — the fifteenth family: the grid refused a flight
+    // (the pick gate's block-full skip; reason 1 would be the horizon).
+    w = f4::json::Writer{};
+    encode(w, events[14]);
+    EXPECT_EQ(w.str(),
+              R"({"ev":"slot_denied","t":11500,"team":2,)"
+              R"("airbase":4281,"reason":0})");
 }
 
 TEST(EventJournal, WrittenFileShape) {
@@ -336,10 +353,11 @@ TEST(EventJournal, WrittenFileShape) {
     EXPECT_EQ(j.detail(), path.string());
 
     const auto text = slurp(path);
-    // 1 header + 14 events + 1 end = 16 lines, every line ending \n
-    EXPECT_EQ(std::count(text.begin(), text.end(), '\n'), 16);
+    // 1 header + 15 events + 1 end = 17 lines, every line ending \n
+    EXPECT_EQ(std::count(text.begin(), text.end(), '\n'), 17);
     EXPECT_EQ(text.find("{\"v\":1,\"journal\":1,\"identity\":{"), 0U);
     EXPECT_NE(text.find("\n{\"ev\":\"kill\""), std::string::npos);
+    EXPECT_NE(text.find("\n{\"ev\":\"slot_denied\""), std::string::npos);
     EXPECT_NE(text.find("{\"journal_end\":{\"protocol\":1,"),
               std::string::npos);
     std::filesystem::remove(path);
@@ -580,6 +598,16 @@ TEST(EventFilter, OwnedFamiliesMatchTheOwningSide) {
     recovered.pilot_recovered.team = 2;
     EXPECT_TRUE(matches(rok, recovered));
 
+    // CAMP-DOM-4 — the denial belongs to the denied team (the flight
+    // that could not launch from that base is the request's own side).
+    CampaignEvent denied;
+    denied.kind = CampaignEvent::Kind::SlotDenied;
+    denied.slot_denied.t = 10;
+    denied.slot_denied.team = 6;
+    EXPECT_FALSE(matches(rok, denied));
+    denied.slot_denied.team = 2;
+    EXPECT_TRUE(matches(rok, denied));
+
     CampaignEvent roe;
     roe.kind = CampaignEvent::Kind::RoeChanged;
     roe.roe_changed.t = 10;
@@ -607,6 +635,7 @@ TEST(EventFilter, KindNamesRoundTrip) {
              CampaignEvent::Kind::PilotAssigned,
              CampaignEvent::Kind::PilotLost,
              CampaignEvent::Kind::PilotRecovered,
+             CampaignEvent::Kind::SlotDenied,
          }) {
         CampaignEvent::Kind parsed{};
         ASSERT_TRUE(parse_event_kind(event_kind_name(k), parsed));

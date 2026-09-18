@@ -88,6 +88,7 @@ Campaign::Campaign(const f4::world::ICampaignSource& camp,
         atm_cfg.strategy = cfg_.strategy_layer;
         atm_cfg.pilot_assignment = cfg_.pilot_assignment;
         atm_cfg.rating_decay = cfg_.rating_decay;
+        atm_cfg.airbase_scheduling = cfg_.airbase_scheduling;
         atm_ = std::make_unique<AirTaskingManager>(
             profiles_, camp_, teams_, units_, nullptr, atm_cfg);
         atm_->set_id_base(cfg_.first_package_id);
@@ -601,8 +602,10 @@ void Campaign::run_tasking_cycle_atm_() {
             }
 
             // PHASE 7 — the takeoff slot snap (also the recovery
-            // booking — schedule_takeoff is the commit point).
-            (void)atm_->schedule_takeoff(ft);
+            // booking — schedule_takeoff is the commit point). DOM-4:
+            // the cycle's clock rides along (the arm syncs the grid's
+            // sliding anchor to it).
+            (void)atm_->schedule_takeoff(ft, now);
 
             // The intent — one per flight, the spawner's contract.
             MissionIntent intent;
@@ -627,6 +630,11 @@ void Campaign::run_tasking_cycle_atm_() {
             intent.escorted_flight_id = ft.escorted_flight_id;
             intent.roe = ft.roe;   // P7 — the flight's RoE byte
             intent.crew = ft.crew; // DOM-3 — the flight's crew (slots)
+            // DOM-4 — the scheduled slot (post-snap). A base-less flight
+            // never slotted: its takeoff stays a raw estimate, and the
+            // intent carries 0 (the session keeps the TOT-anchored gate
+            // for it).
+            intent.takeoff = ft.airbase_vu != 0 ? ft.takeoff : 0;
 
             // The route: the package's copy (main built it; escorts
             // carry the same shape with their own TOT). P7: support
@@ -670,6 +678,20 @@ void Campaign::run_tasking_cycle_atm_() {
             bus_.publish(intent);
             intents_.push_back(std::move(intent));
         }
+    }
+
+    // DOM-4 — the cycle's schedule denials (the gate's skips and the
+    // horizon refusals the phase-7 walk just produced) book into the
+    // ledger's slot_denial log — the slot_denied event family's source.
+    // The ATM queues; the Campaign owns the write domain and stamps the
+    // cycle's clock (the ACTION-filing split). Nothing queues disarmed.
+    if (cfg_.airbase_scheduling && result_ledger_ != nullptr) {
+        for (const auto& d : atm_->drain_slot_denials()) {
+            result_ledger_->apply_slot_denial(
+                static_cast<double>(now), d.team, d.airbase_vu, d.reason);
+        }
+    } else {
+        (void)atm_->drain_slot_denials();
     }
 }
 
@@ -761,6 +783,18 @@ std::string Campaign::to_summary_json() const {
             // block's fifth; the disarmed block stays byte-identical).
             w.put(",\n    ");
             w.number_key("actions_filed", a.actions_filed);
+        }
+        // DOM-4: the scheduling-depth counters — only when the arm is
+        // on (the disarmed block stays byte-identical; the pre-DOM-4
+        // overflow path stayed silent, so a 0 would lie about the
+        // shape, not the count).
+        if (cfg_.airbase_scheduling) {
+            w.put(",\n    ");
+            w.number_key("schedule_denials", a.schedule_denials);
+            w.put(",\n    ");
+            w.number_key("slot_overflows", a.slot_overflows);
+            w.put(",\n    ");
+            w.number_key("slot_releases", a.slot_releases);
         }
         w.put("\n  }");
     }

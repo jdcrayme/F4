@@ -186,6 +186,19 @@ target_compile_definitions(test_campaign_personnel_session PRIVATE
 )
 add_dependencies(test_campaign_personnel_session mission_profiles_fixture)
 
+# DOM-4 — the scheduling depth's sim-side gates: the slots ride the
+# intents and the airfield-ops gate arms on them, the airfields query
+# serves the schedule books, the golden identity with the arm off, and
+# the event/books parity (plus the armed run's determinism pin).
+f4_simulation_add_test(test_campaign_scheduling_session test_campaign_scheduling_session.cpp)
+target_compile_definitions(test_campaign_scheduling_session PRIVATE
+    F4_SIMULATION_TEST_FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures"
+    F4_SOURCE_FIXTURES_DIR="${CMAKE_SOURCE_DIR}/f4-world-convert/tests/fixtures"
+    F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}"
+    F4_MISSION_PROFILES_JSON="${F4_MISSION_PROFILES_JSON}"
+)
+add_dependencies(test_campaign_scheduling_session mission_profiles_fixture)
+
 # P7 — the strategy layer's sim-side integration: the station contract
 # ride (route → plan → brain), the post-arm RoE gates, and the
 # strategy-armed session (stationed CAPs spawn with racetrack plans;

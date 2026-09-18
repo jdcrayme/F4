@@ -187,6 +187,18 @@ struct PilotRecoveredEvent {
     int missions_run{0};
 };
 
+// The slot grid refused a flight (CAMP-DOM-4 — the scheduling books'
+// event face). reason: 0 = the pick gate (the base's block — and, on
+// the scheduling arm, the previous one — was full), 1 = the horizon
+// (the grid saturated; the flight kept its estimate). Fires only when
+// the airbase-scheduling arm is on — the books' activity-gated rule.
+struct SlotDeniedEvent {
+    std::int64_t t{0};
+    std::uint8_t team{0};               ///< the request's flying team
+    std::uint32_t airbase{0};           ///< the base that denied
+    std::uint8_t reason{0};             ///< 0 = pick gate, 1 = horizon
+};
+
 // --- encoders (byte-stable; the family name is the discriminator) -------
 
 inline void encode(f4::json::Writer& w, const MissionFiledEvent& e) {
@@ -382,6 +394,18 @@ inline void encode(f4::json::Writer& w, const PilotRecoveredEvent& e) {
     w.put('}');
 }
 
+inline void encode(f4::json::Writer& w, const SlotDeniedEvent& e) {
+    w.raw("{\"ev\":\"slot_denied\",\"t\":");
+    w.number(static_cast<long long>(e.t));
+    w.raw(",\"team\":");
+    w.number(e.team);
+    w.raw(",\"airbase\":");
+    w.number(static_cast<std::uint64_t>(e.airbase));
+    w.raw(",\"reason\":");
+    w.number(e.reason);
+    w.put('}');
+}
+
 // --- the tagged envelope (the ONE bus message type) ---------------------
 //
 // HOST-2 publishes ONE message type onto the session's bus — the bus is
@@ -405,6 +429,7 @@ struct CampaignEvent {
         PilotAssigned,
         PilotLost,
         PilotRecovered,
+        SlotDenied,
     };
 
     Kind kind{Kind::TaskingCycle};
@@ -423,6 +448,7 @@ struct CampaignEvent {
     PilotAssignedEvent pilot_assigned{};
     PilotLostEvent pilot_lost{};
     PilotRecoveredEvent pilot_recovered{};
+    SlotDeniedEvent slot_denied{};
 };
 
 // The v1 kind names — the wire's filter vocabulary (the `subscribe`
@@ -444,6 +470,7 @@ event_kind_name(CampaignEvent::Kind k) noexcept {
         case CampaignEvent::Kind::PilotAssigned:         return "pilot_assigned";
         case CampaignEvent::Kind::PilotLost:             return "pilot_lost";
         case CampaignEvent::Kind::PilotRecovered:        return "pilot_recovered";
+        case CampaignEvent::Kind::SlotDenied:            return "slot_denied";
     }
     return "tasking_cycle";
 }
@@ -466,6 +493,7 @@ parse_event_kind(std::string_view name, CampaignEvent::Kind& out) noexcept {
              CampaignEvent::Kind::PilotAssigned,
              CampaignEvent::Kind::PilotLost,
              CampaignEvent::Kind::PilotRecovered,
+             CampaignEvent::Kind::SlotDenied,
          }) {
         if (name == event_kind_name(k)) {
             out = k;
@@ -491,6 +519,7 @@ inline void encode(f4::json::Writer& w, const CampaignEvent& e) {
         case CampaignEvent::Kind::PilotAssigned:          encode(w, e.pilot_assigned); break;
         case CampaignEvent::Kind::PilotLost:              encode(w, e.pilot_lost); break;
         case CampaignEvent::Kind::PilotRecovered:         encode(w, e.pilot_recovered); break;
+        case CampaignEvent::Kind::SlotDenied:             encode(w, e.slot_denied); break;
     }
 }
 
@@ -514,6 +543,9 @@ inline void encode(f4::json::Writer& w, const CampaignEvent& e) {
 //   pilot_assigned          the flying team (the crew draws FOR them)
 //   pilot_lost              the squadron's team (the slot that died)
 //   pilot_recovered         the squadron's team (the slot that flew)
+//   slot_denied             the denied team (the flight that could not
+//                           launch from that base — the request's own
+//                           side, the pick gate's team gate)
 //   reinforcement_delivered teamless in v1 (matches any team gate)
 //   weather_changed         teamless (matches any team gate)
 //   roe_changed             the scope's team when scoped to a team;
@@ -568,6 +600,8 @@ listed(const std::vector<int>& teams, int team) noexcept {
             return listed(f.teams, e.pilot_lost.team);
         case CampaignEvent::Kind::PilotRecovered:
             return listed(f.teams, e.pilot_recovered.team);
+        case CampaignEvent::Kind::SlotDenied:
+            return listed(f.teams, e.slot_denied.team);
         case CampaignEvent::Kind::RoeChanged:
             return e.roe_changed.scope.kind == RoEScopeKind::Team
                        ? listed(f.teams, e.roe_changed.scope.team)

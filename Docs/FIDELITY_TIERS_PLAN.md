@@ -568,7 +568,12 @@ tiering; the certificate will say so wherever it runs.
   ops pin can land up to ~2× ops_window after its TOT when the ATM's
   takeoff estimate (TOT − travel) runs longer than the aggregate's
   TOT-anchored gate. Bounded, deterministic, documented — upstream had
-  both unbounded.
+  both unbounded. **CAMP-DOM-4 closed the second half**: with the
+  airbase-scheduling arm on, the intent carries the flight's SCHEDULED
+  slot and the gate arms against IT (`depart = takeoff_abs`) — the
+  delivery lands at slot + travel, the engine's own TOT estimate; the
+  TOT-anchored gate remains for slotless flights (the save's own) and
+  disarmed sessions.
 - **The certificate's measured ceiling has two non-FM parts** (FID-6's
   first run): the session's fixed per-tick cost over the theater walk
   and the synthetic Tier-B mass. **FID-OPT-1 CLOSED the first one**

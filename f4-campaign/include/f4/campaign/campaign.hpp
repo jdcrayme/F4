@@ -152,6 +152,15 @@ struct MissionIntent {
     /// pilot-skill flow is armed.
     std::vector<std::uint8_t> crew;
 
+    /// DOM-4 — the flight's SCHEDULED takeoff (the phase-7 slot snap's
+    /// output, campaign-relative seconds; 0 when the flight never
+    /// slotted — the legacy ladder's intents, the save's own flights).
+    /// The session's airfield-ops gate arms against this slot when the
+    /// scheduling arm is on — the ATC window wraps the grid's own
+    /// minute instead of a TOT-derived guess (the FIDELITY_TIERS §7
+    /// delivery-latency divergence closes).
+    CampaignTime takeoff{0};
+
     /// Element-wise equality (tests assert bus content == recorded intents).
     bool operator==(const MissionIntent&) const = default;
 };
@@ -258,6 +267,19 @@ struct CampaignConfig {
     /// assignment — new = (int)(0.75 × rating) + 1 — spreading the
     /// sorties across the wing (the rotation pressure). DEFAULT OFF.
     bool rating_decay{false};
+
+    /// DOM-4 — the airbase-scheduling depth arm: the slot grid slides
+    /// with the clock (a moving epoch — the 160-minute horizon stops
+    /// silencing late filings), FindBestAir's gate applies the
+    /// reference's own previous-block rule and counts its denials, a
+    /// scrubbed flight's still-future slot releases, a horizon refusal
+    /// counts (the slot_denied ledger log + event family ride it), and
+    /// the intents carry the scheduled takeoff so the sim's airfield-
+    /// ops window arms against the SLOT. DEFAULT OFF — the golden
+    /// identity (the campaign-start anchor, the single-block gate, the
+    /// silent overflow; every pinned test unchanged). One flag for the
+    /// whole arm (the ATM's config inherits it at construction).
+    bool airbase_scheduling{false};
 };
 
 class Campaign {
@@ -347,6 +369,14 @@ public:
         return atm_ ? &atm_->booked_flights() : nullptr;
     }
 
+    /// DOM-4: the ATM's airbase schedule books (the airfields query's
+    /// source — the grid, its anchor, and its denial books per base,
+    /// wire order) — null when the pipeline is not armed.
+    [[nodiscard]] const std::vector<AirbaseSchedule>* atm_schedules()
+        const noexcept {
+        return atm_ ? &atm_->schedules() : nullptr;
+    }
+
     // --- CAMP-CMD-2 — the command-driven booking interventions ---------
     //
     // The Campaign is the tasking owner (it books draws and recoveries
@@ -377,7 +407,7 @@ public:
     [[nodiscard]] std::optional<RecoveryRelease>
     scrub_flight(std::uint32_t flight_id) {
         if (!atm_) return std::nullopt;
-        auto rel = atm_->scrub_flight(flight_id);
+        auto rel = atm_->scrub_flight(flight_id, clock_);
         if (rel.has_value() && result_ledger_ != nullptr) {
             result_ledger_->apply_mission_recovery(
                 static_cast<double>(clock_), rel->team, rel->squadron_vu,

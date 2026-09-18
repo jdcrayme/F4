@@ -50,6 +50,20 @@
 > book assignment/loss/recovery, the pilot event trio (the twelfth
 > through fourteenth families) rides the stream, the `squadrons` query
 > serves the personnel face, and every knob defaults OFF — the
+> goldens stand); CAMP-DOM-4 shipped with this patch (airbase
+> scheduling — the reference's FindTakeoffSlot depth beyond FID's
+> airfield-ops windows: the slot grid slides with the clock (a moving
+> epoch — past blocks fall off, the 160-minute horizon stops
+> silencing late filings), FindBestAir's gate applies the reference's
+> own previous-block rule and books its denials, a scrubbed flight's
+> still-future slot releases, a horizon refusal books instead of
+> staying silent, the `slot_denied` event family (the fifteenth) and
+> the `airfields` query serve the scheduling face, and the intents
+> carry the scheduled takeoff so the sim's ops window arms against
+> the SLOT — the FIDELITY_TIERS §7 delivery-latency divergence
+> closes. Also restored here: the DOM-3 personnel test files the
+> previous commit missed (they were untracked — the tree they
+> shipped in could not build). Every knob defaults OFF — the
 > goldens stand).
 > Every other tranche below is an acceptance contract, not a claim.
 
@@ -168,6 +182,8 @@ things the engine already produces:
 | `weather` | Weather v1 (Task 73) | condition, twilight band, daylight factor — **v1.1 (additive)** |
 | `time` | session clock | tick, sim seconds, cycle countdown |
 | `verdict` | the books' projection (DOM-1) | t (relative), threshold, band, leader, per-team census + ledger rows — **v1.1 additive, LANDED in DOM-1** |
+| `squadrons` | the personnel face (DOM-3) | one row per squadron: identity, tasking availability, the roster's run deltas, the ratings — **v1.1 additive, LANDED in DOM-3** |
+| `airfields` | the schedule books (DOM-4) | one row per booked airbase: the 32-block grid as 64 hex chars, the anchor (`epoch_min`), the set-bit count, the denial books — **v1.1 additive, LANDED in DOM-4** |
 
 ```json
 {"v":1, "op":"query", "q":"flights", "team":0}
@@ -269,6 +285,7 @@ t=356.7 s" — it becomes an event, not just a book entry.
 | `tasking_cycle` | the 7-phase ATM pass + `next_tasking_sec` |
 | `action_filed` | the ACTION tables' damage reactions (CAMP-ATM-1) |
 | `verdict` | the books' projection changed — band or leader (CAMP-DOM-1) |
+| `slot_denied` | the slot grid refused a flight — the pick gate or the horizon (CAMP-DOM-4) |
 | `weather_changed` | Task 73's Markov chain |
 | `roe_changed` | P7 fire-control gates |
 
@@ -979,11 +996,111 @@ two runs one MD5, exits stand; the kunsan tasking QC (8 cycles):
 crews=32 denials=57 (the save's non-rostered squadrons deny — the
 reference's flight-fails rule as a pick-time gate) decayed=0.
 
+### CAMP-DOM-4 — airbase scheduling (FindTakeoffSlot depth beyond FID's airfield-ops windows)
+
+SHIPPED with this patch. The contract: `FindTakeoffSlot()` depth
+beyond FID's airfield-ops windows. The slot grid existed (C4 phase 7:
+the 32-block bitmask, the exact/+1/+2/−10 snap, the fudge-block fill,
+the booking commit) but it was RUNTIME-INVISIBLE and RUNTIME-MORTAL:
+block 0 was pinned to the campaign's start (anything past the
+160-minute horizon silently unscheduled — the `-1` path kept the
+estimate and told nobody), the pick gate checked one block and skipped
+without a counter (the reference checked the block AND the previous
+one — a documented deviation), a scrubbed flight held its slot
+forever, the filled grid never reached any book, and the sim re-derived
+its own takeoff gate (`TOT − 2×ops_window`) because the intent carried
+only the post-snap TOT — the two clocks never met (FIDELITY_TIERS §7's
+"up to ~2× ops_window after its TOT" delivery-latency note).
+
+(1) THE SLIDE: `AirbaseSchedule::sync(now_min, plan_block_min)` —
+the grid's anchor (`epoch_min`, the campaign-minute block 0 maps to)
+advances in whole blocks so `now` sits in block 0; past bits fall off
+with their time (the seeded wire bits included — those sorties are
+flown); a clock jump past the whole grid clears it. The gate syncs to
+the cycle's clock (which makes the gate's now-relative block index the
+grid's own), phase 7 syncs to the filing's takeoff minute (the epoch
+never slides past the request — the backward window stays honest).
+Disarmed: epoch stays 0, the campaign-start alignment is the golden
+identity. The reference's own scheduleTime anchor was runtime state —
+so is this one: the grid is NOT written back to the save (the wire's
+32-byte `schedule` seeds the NEXT session at ITS start; a run's
+bookings are this-run truth — the same position upstream took).
+(2) THE GATE: armed, FindBestAir applies the reference's own rule —
+the start block OR the previous one full denies the base (a base
+still launching the previous block's queue cannot take this flight) —
+and the skip is COUNTED (`AtmStats::schedule_denials`, the
+per-schedule `denied()` book) and QUEUED for the ledger. Disarmed:
+the single-block skip stays the pre-DOM-4 shape, silently.
+(3) THE OVERFLOW: phase 7's `-1` path (the grid saturated within the
+±13-minute search window) counts (`slot_overflows`, the per-schedule
+`overflowed()` book) and queues — the saturated grid is a BOOKS FACT,
+not a silent one. The flight keeps its estimate and still flies (the
+reference cancels at 0xFFFFFFFF; the documented deviation stands).
+Far-TOT requests whose block sits past the horizon bypass the gate
+(the same `block < max_cycles` bound as before) and surface at phase 7
+— the slide keeps them IN the grid when armed.
+(4) THE RELEASE: a scrubbed flight's STILL-FUTURE slot goes back
+(`release()` is fill's exact inverse — the fudge block and the
+large-flight minute unmark too); a past slot no-ops (clearing it could
+only invite a backward snap into a departed minute). `slot_releases`
+counts. Recovery releases nothing (the takeoff minute is past by
+then — the slide owns it); the retask keeps its slot (historical, as
+documented since CAMP-CMD-2).
+(5) THE BOOKS: `CampaignResultLedger::apply_slot_denial(t, team,
+airbase, reason)` — the slot-denial log (arrival order = engine
+order), the `slot_denied` family's source; the artifact's totals gain
+`slot_denials` (always — the honest 0 is the arms-off answer), the
+log array only when one exists. The ATM queues (`SlotDenial{team,
+airbase_vu, reason}`; reason 0 = the pick gate, 1 = the horizon — the
+`SlotDenialReason` vocabulary); the Campaign drains after the cycle
+and stamps the clock (the ATM's ledger pointer is read-only — the
+ACTION-filing split). Nothing queues disarmed; a disarmed run's
+artifact stays byte-identical.
+(6) THE EVENT: `slot_denied` — the FIFTEENTH family, all eight
+touch-points (struct, Kind, member, name, parse, encode, the envelope
+dispatch, the team gate: the DENIED side — the flight that could not
+launch is the request's own). `kProtocolVersion` stays 1; campaignd
+untouched (the family rides the subscribe kinds).
+(7) THE QUERY: `airfields` joins the whitelist additively (protocol +
+`engine_serves_query`): one `AirfieldView` row per airbase the ATM
+holds a book for, in WIRE order — the 32-block grid as 64 lowercase
+hex chars, `epoch_min` (the anchor; 0 = the campaign-start
+alignment), `booked` (the set bits), the base's own denial books
+(`denied`/`overflowed`). Teamless rows (the grid is the BASE's truth
+— every side's flights deconflict against it); the pipeline off = an
+empty set (the honest answer, never a stub).
+(8) THE SEAM: `MissionIntent` gains `takeoff` (the phase-7 snap's
+output, campaign-relative; 0 = never slotted — the legacy ladder, the
+save's own flights, a base-less filing; the DTO's `IntentView` gains
+the additive tail key). The session's airfield-ops gate arms against
+the SLOT when the arm is on: the aggregate's head departure IS the
+scheduled minute (`depart = takeoff_abs`, clamped forward) — the
+flight materializes one ops window before its slot and rolls ON it;
+the TOT-anchored gate stays for slotless flights and disarmed
+sessions. The FIDELITY_TIERS §7 divergence closes from the campaign
+side without moving the FID machinery.
+(9) THE SUMMARY: the ATM block gains `schedule_denials` /
+`slot_overflows` / `slot_releases` — only when the arm is on (the
+disarmed block stays byte-identical; the pre-DOM-4 overflow path
+stayed silent, so a 0 would lie about the shape, not the count). The
+QC gains `--airbase-scheduling` (both the session and the tasking
+modes wire it), the `scheduling:` echo line, and the
+`scheduling: denials=… overflow=… releases=…` counter line when
+armed.
+(10) THE CERTIFICATE: the C5 24-hour gate green with the arm
+compiled in and OFF (the MD5 identity stands — the knob is the
+opt-in); the Campaign-level scheduling gate (the saturated USA base
+denies into the books, the disarmed same-world runs silent, the
+armed run deterministic); the session gate (the slots ride the
+intents, the gate arms on them, the airfields query serves the live
+grids — kunsan's own ATM base rows slide and book, the overflow
+books name the saturation honestly — the event/books parity, the
+armed run's determinism).
+
 ### CAMP-DOM-* — domain tranches (each its own landed series, upstream-mapped)
 - ~~**DOM-2 supply depth**~~ — SHIPPED above.
 - ~~**DOM-3 personnel**~~ — SHIPPED above.
-- **DOM-4 airbase scheduling**: `FindTakeoffSlot()` depth beyond FID's
-  airfield-ops windows.
+- ~~**DOM-4 airbase scheduling**~~ — SHIPPED above.
 - **DOM-5 naval**: upstream HAS a naval tasking manager — it is very
   minimal, so this is a WRAP-then-DECIDE, not a from-scratch build: map
   the existing manager onto the ATM pipeline's request vocabulary first

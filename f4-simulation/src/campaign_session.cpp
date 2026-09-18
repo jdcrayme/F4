@@ -516,6 +516,11 @@ CampaignSession::create(const CampaignSessionOptions& opts,
     // Campaign's own pass-through, campaign.cpp's constructor).
     ladder_cfg.pilot_assignment = opts.pilot_assignment;
     ladder_cfg.rating_decay = opts.rating_decay;
+    // CAMP-DOM-4: the airbase-scheduling depth arm (one flag, the same
+    // opt-in contract; the ATM inherits it at construction — the
+    // Campaign's own pass-through).
+    ladder_cfg.airbase_scheduling = opts.airbase_scheduling;
+    session->airbase_scheduling_ = opts.airbase_scheduling;
     session->ladder_ = std::make_unique<f4::campaign::Campaign>(
         static_cast<const f4::world::ICampaignSource&>(
             session->adapters_->campaign),
@@ -785,6 +790,10 @@ bool CampaignSession::advance(double real_seconds, int max_steps_override) {
             // append from three different engines (the tasking cadence,
             // the result sink, the recovery pass).
             emit_pilot_events_();
+            // CAMP-DOM-4: the scheduling books' denials — the refusals
+            // the cycle's tasking walk just produced (the gate's skips
+            // and the horizon's refusals the ledger logged).
+            emit_slot_denied_events_();
             // CAMP-DOM-1: the verdict's coarse state — the event fires
             // only when the band or the leader changed (a capture is
             // the only mover today; the diff keeps the stream sparse).
@@ -1313,6 +1322,26 @@ void CampaignSession::emit_pilot_events_() {
         sim_->bus().publish(e);
     }
     last_pilot_recovery_record_ = rec.size();
+}
+
+void CampaignSession::emit_slot_denied_events_() {
+    namespace api = f4::campaign::api;
+    // CAMP-DOM-4 — the scheduling books' tail: one event per refusal in
+    // the ledger's arrival order. The log grows only when the
+    // scheduling arm is on (the Campaign's drain gates the booking),
+    // so a disarmed session's stream stays the pre-DOM-4 shape.
+    const auto& dlog = ledger_->slot_denial_log();
+    for (auto i = last_slot_denial_record_; i < dlog.size(); ++i) {
+        api::CampaignEvent e;
+        e.kind = api::CampaignEvent::Kind::SlotDenied;
+        e.slot_denied.t =
+            static_cast<std::int64_t>(std::llround(dlog[i].t_s));
+        e.slot_denied.team = dlog[i].team;
+        e.slot_denied.airbase = dlog[i].airbase;
+        e.slot_denied.reason = dlog[i].reason;
+        sim_->bus().publish(e);
+    }
+    last_slot_denial_record_ = dlog.size();
 }
 
 void CampaignSession::emit_damage_events_() {
@@ -2184,12 +2213,26 @@ void CampaignSession::handle_mission_intent_(
     // window to fly it off before the delivery — clamped forward so a
     // late TOT never walks the aggregate immediately (the TOT window
     // arms the ground spawn for late missions anyway).
+    // CAMP-DOM-4: the scheduling arm arms the window against the
+    // flight's SCHEDULED slot instead — the aggregate materializes one
+    // ops window before the grid's own minute and rolls ON it (the
+    // delivery then lands at slot + travel, the engine's own TOT
+    // estimate — the FIDELITY_TIERS §7 divergence closes). Flights
+    // without a slot (the save's own, the legacy ladder, a base-less
+    // filing) and disarmed sessions keep the TOT-anchored gate.
     if (!seed.route.empty()) {
         const std::int64_t earliest = campaign_time() + 1;
-        const std::int64_t depart =
-            std::max(tot_abs - 2 * static_cast<std::int64_t>(
-                                       std::max(0, ops_window_sec_)),
-                     earliest);
+        std::int64_t depart;
+        if (airbase_scheduling_ && intent.takeoff > 0) {
+            const std::int64_t takeoff_abs =
+                epoch_ + static_cast<std::int64_t>(intent.takeoff);
+            depart = std::max(takeoff_abs, earliest);
+        } else {
+            depart =
+                std::max(tot_abs - 2 * static_cast<std::int64_t>(
+                                           std::max(0, ops_window_sec_)),
+                         earliest);
+        }
         seed.route.front().depart = static_cast<std::int32_t>(
             std::clamp<std::int64_t>(depart, 1, 2147483647));
     }

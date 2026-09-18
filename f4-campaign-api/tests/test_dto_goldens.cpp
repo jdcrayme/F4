@@ -150,12 +150,17 @@ TEST(DtoGoldens, IntentView) {
     // package role ride at the END (the DTO header's rule).
     m.route_waypoints = 7;
     m.flight_role = 2;
+    // CAMP-DOM-4: the additive tail's newest key — the scheduled
+    // takeoff slot (the phase-7 snap's output; 0 = never slotted —
+    // this golden pins the never-slotted face, the always-present key).
+    m.takeoff = 0;
     EXPECT_EQ(encode_json(m),
               R"({"issued_time":38574400,"time_on_target":38578000,"team":2,)"
               R"("team_name":"ROK","mission_byte":9,"mission_name":"OCA",)"
               R"("aircraft_count":4,"squadron_id":214,"squadron_name":"111th TFS",)"
               R"("package_id":42,"flight_id":118,"target_objective_id":9001,)"
-              R"("synthetic":1,"route_waypoints":7,"flight_role":2})");
+              R"("synthetic":1,"route_waypoints":7,"flight_role":2,)"
+              R"("takeoff":0})");
 }
 
 // ============================================================================
@@ -377,4 +382,35 @@ TEST(DtoGoldens, VerdictViewQuietWar) {
               R"("lost_value":0,"swing":0,"captures":0,"air_losses":0,)"
               R"("ground_losses":0,"battalions_destroyed":0,)"
               R"("aircraft_remaining":0}]})");
+}
+
+TEST(DtoGoldens, AirfieldView) {
+    // CAMP-DOM-4 — the scheduling face: the grid rides as 64 lowercase
+    // hex chars (block 0's byte first), the anchor is the campaign-
+    // minute block 0 maps to, and the denial books ride the row.
+    AirfieldView a;
+    a.vu = 4281;
+    a.epoch_min = 75;
+    a.schedule = "04000000000000000000000000000000"
+                 "00000000000000000000000000000000";
+    a.booked = 2;
+    a.denied = 1;
+    a.overflowed = 0;
+    EXPECT_EQ(encode_json(a),
+              R"({"vu":4281,"epoch_min":75,"schedule":)"
+              R"("04000000000000000000000000000000)"
+              R"(00000000000000000000000000000000","booked":2,)"
+              R"("denied":1,"overflowed":0})");
+}
+
+TEST(DtoGoldens, AirfieldViewQuietGrid) {
+    // The unset face: a DEFAULT view — the schedule hex is the
+    // producer's (the session always fills the 64 chars from the grid;
+    // the verdict-band rule — an unset DTO rides empty), the anchor
+    // and the honest books stay 0.
+    AirfieldView a;
+    a.vu = 9001;
+    EXPECT_EQ(encode_json(a),
+              R"({"vu":9001,"epoch_min":0,"schedule":"",)"
+              R"("booked":0,"denied":0,"overflowed":0})");
 }

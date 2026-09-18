@@ -314,6 +314,11 @@ struct Args {
     // False = the golden identity (rosters ignored beyond the skill map).
     bool pilot_assignment = false;
     bool rating_decay = false;
+    // CAMP-DOM-4: the airbase-scheduling depth arm (--airbase-scheduling)
+    // — the sliding grid, the deepened pick gate, the slot releases,
+    // the denial books, and the slot-anchored ops gate. False = the
+    // golden identity (the campaign-start anchor, the silent overflow).
+    bool airbase_scheduling = false;
     // Real-data tier: the wcd2json export folded over the built-in table.
     std::string weapon_data;
     // FID-6 — the acceleration certificate (--accel <x>): the tiered
@@ -346,7 +351,7 @@ struct Args {
         "          [--unit-strike] [--weapon-data <wcd.json>] [--out-dir <dir>]\n"
         "          [--synthesize-airbases]\n"
         "          [--theater-tables <tables.json>] [--pilot-skill]\n"
-        "          [--pilot-assignment] [--rating-decay]\n"
+        "          [--pilot-assignment] [--rating-decay] [--airbase-scheduling]\n"
         "          [--accel <x>] [--accel-hours <h>] [--accel-max-live <n>]\n"
         "          [--accel-tolerance <f>] [--accel-baseline]\n"
         "          [--weather <json-obj>] [--time <json-obj>] (Task 73 env)\n",
@@ -418,6 +423,7 @@ Args parse_args(int argc, char** argv) {
         else if (k == "--pilot-skill") a.pilot_skill_flow = true;
         else if (k == "--pilot-assignment") a.pilot_assignment = true;
         else if (k == "--rating-decay") a.rating_decay = true;
+        else if (k == "--airbase-scheduling") a.airbase_scheduling = true;
         else if (k == "--synthesize-airbases") a.synthesize_airbases = true;
         else if (k == "--weapon-data") a.weapon_data = next();
         else if (k == "--ground-update-sec")
@@ -606,6 +612,7 @@ int run_war(const Args& args) {
     // CAMP-DOM-3: the personnel arms (opt-in, the same contract).
     hopts.session.pilot_assignment = args.pilot_assignment;
     hopts.session.rating_decay = args.rating_decay;
+    hopts.session.airbase_scheduling = args.airbase_scheduling;
     hopts.session.weapon_data_path = args.weapon_data;
     // FID-6: the accel certificate FORCES the tiered policy — the war
     // runs the game's own way (aggregates until observed), which is
@@ -655,6 +662,9 @@ int run_war(const Args& args) {
                  "  personnel:    pilot-assignment=%s rating-decay=%s\n",
                  hopts.session.pilot_assignment ? "on" : "off",
                  hopts.session.rating_decay ? "on" : "off");
+    std::fprintf(stderr,
+                 "  scheduling:   airbase-scheduling=%s\n",
+                 hopts.session.airbase_scheduling ? "on" : "off");
 
     std::string err;
     auto harness = CampaignWarHarness::create(hopts, &err);
@@ -1585,6 +1595,9 @@ int main(int argc, char** argv) {
         // decay (the same opt-in contract the session mode wires).
         ladder_cfg.pilot_assignment = args.pilot_assignment;
         ladder_cfg.rating_decay = args.rating_decay;
+        // CAMP-DOM-4: the airbase-scheduling depth arm (the same
+        // opt-in contract the session mode wires).
+        ladder_cfg.airbase_scheduling = args.airbase_scheduling;
         // P7: the strategy layer — station targeting, support
         // filings, enemy BARCAP requests (opt-in, the same contract
         // as the pipeline itself).
@@ -1717,6 +1730,14 @@ int main(int argc, char** argv) {
                 std::printf("personnel: crews=%d denials=%d decayed=%d\n",
                             atm->crews_assigned, atm->crew_denials,
                             atm->ratings_decayed);
+            }
+            // CAMP-DOM-4: the scheduling-depth counters, printed when
+            // armed.
+            if (args.airbase_scheduling) {
+                std::printf("scheduling: denials=%d overflow=%d "
+                            "releases=%d\n",
+                            atm->schedule_denials, atm->slot_overflows,
+                            atm->slot_releases);
             }
         }
         std::printf("threat_map: ad_units=%d threatened_cells=%d\n",

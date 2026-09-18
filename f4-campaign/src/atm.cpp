@@ -196,6 +196,60 @@ bool AirbaseSchedule::block_full(int block,
     return (blocks_[static_cast<std::size_t>(block)] & full) == full;
 }
 
+void AirbaseSchedule::release(int minute, int aircraft, int plan_block_min,
+                              int max_cycles) noexcept {
+    if (minute < 0) return;
+    const int horizon = max_cycles * plan_block_min;
+    const auto clear = [&](int m) {
+        if (m < 0 || m >= horizon) return;
+        const int block = m / plan_block_min;
+        const int slot = m % plan_block_min;
+        blocks_[static_cast<std::size_t>(block)] &=
+            static_cast<std::uint8_t>(~(0x01 << slot));
+    };
+    clear(minute);
+    // The same slot in the next block — fill's fudge time, unmarked.
+    clear(minute + plan_block_min);
+    // Flights larger than 2 ships gave the next minute back too.
+    if (aircraft > 2) {
+        clear(minute + 1);
+        clear(minute + 1 + plan_block_min);
+    }
+}
+
+void AirbaseSchedule::sync(int now_min, int plan_block_min) noexcept {
+    if (plan_block_min <= 0 || now_min < 0) return;
+    // Block 0 should start at (or before) now, aligned to the block
+    // grid — the epoch the wire seeds have been sliding against since
+    // the campaign began.
+    const int target = (now_min / plan_block_min) * plan_block_min;
+    if (target <= epoch_min_) return;
+    const int shift = (target - epoch_min_) / plan_block_min;
+    if (shift >= static_cast<int>(blocks_.size())) {
+        // Everything the grid held is past — the slide clears it.
+        blocks_.fill(0);
+        epoch_min_ = target;
+        return;
+    }
+    for (int s = 0; s < shift; ++s) {
+        for (std::size_t b = 0; b + 1 < blocks_.size(); ++b) {
+            blocks_[b] = blocks_[b + 1];
+        }
+        blocks_.back() = 0;
+    }
+    epoch_min_ += shift * plan_block_min;
+}
+
+int AirbaseSchedule::booked() const noexcept {
+    int bits = 0;
+    for (const auto b : blocks_) {
+        for (int s = 0; s < 8; ++s) {
+            if ((b & (0x01 << s)) != 0) ++bits;
+        }
+    }
+    return bits;
+}
+
 // ============================================================================
 // Construction + state
 // ============================================================================
@@ -287,6 +341,14 @@ AirTaskingManager::AirTaskingManager(
 const AirbaseSchedule*
 AirTaskingManager::airbase_schedule(std::uint32_t airbase_vu) const noexcept {
     for (const auto& s : schedules_) {
+        if (s.airbase_vu() == airbase_vu) return &s;
+    }
+    return nullptr;
+}
+
+AirbaseSchedule*
+AirTaskingManager::find_schedule_(std::uint32_t airbase_vu) noexcept {
+    for (auto& s : schedules_) {
         if (s.airbase_vu() == airbase_vu) return &s;
     }
     return nullptr;
@@ -1179,13 +1241,41 @@ AirTaskingManager::find_best_air_(const MissionRequest& req,
         // The airbase schedule gate: the START block full → skip (the
         // reference checks the block and the previous one; the block
         // derives from the requested takeoff here).
+        // DOM-4 (the arm): the grid syncs to NOW first — the sliding
+        // anchor makes the now-relative block index the grid's own —
+        // and the reference's own rule applies: the start block OR the
+        // previous one full denies the base (a base still launching the
+        // previous block's queue cannot take this flight). The denial
+        // is counted and queued for the ledger; disarmed, the single-
+        // block skip stays exactly the pre-DOM-4 shape.
         if (const AirbaseSchedule* sched = airbase_schedule(sq.airbase)) {
             const CampaignTime to = req.tot - travel;
             const CampaignTime rel = to > now ? to - now : 0;
             const int block =
                 static_cast<int>((rel / 60) / cfg_.plan_block_min);
-            if (block < cfg_.max_cycles &&
-                sched->block_full(block, cfg_.plan_block_min)) {
+            bool full = false;
+            AirbaseSchedule* mut = nullptr;
+            if (cfg_.airbase_scheduling) {
+                mut = find_schedule_(sq.airbase);
+                if (mut != nullptr) {
+                    mut->sync(static_cast<int>(now / 60),
+                              cfg_.plan_block_min);
+                    full = block < cfg_.max_cycles &&
+                           (mut->block_full(block, cfg_.plan_block_min) ||
+                            (block > 0 &&
+                             mut->block_full(block - 1,
+                                             cfg_.plan_block_min)));
+                }
+            } else if (block < cfg_.max_cycles) {
+                full = sched->block_full(block, cfg_.plan_block_min);
+            }
+            if (full) {
+                if (cfg_.airbase_scheduling) {
+                    ++stats_.schedule_denials;
+                    if (mut != nullptr) mut->count_denial();
+                    denials_.push_back(SlotDenial{req.team, sq.airbase,
+                                                  kSlotDeniedPickFull});
+                }
                 continue;
             }
         }
@@ -1290,7 +1380,8 @@ int AirTaskingManager::rating_(const SquadronState& sq,
 // PHASE 7 — TOT slot scheduling
 // ============================================================================
 
-CampaignTime AirTaskingManager::schedule_takeoff(FlightTasking& flight) {
+CampaignTime AirTaskingManager::schedule_takeoff(FlightTasking& flight,
+                                                 CampaignTime now) {
     // Fresh schedule for bases the decoded list never carried (the
     // reference adds airbases lazily in DoCalculations the same way).
     AirbaseSchedule* sched = nullptr;
@@ -1311,22 +1402,43 @@ CampaignTime AirTaskingManager::schedule_takeoff(FlightTasking& flight) {
         sched = &schedules_.back();
     }
 
-    // The requested takeoff minute on the run's block grid (block 0 =
-    // campaign start — the alignment documented in the header).
+    // The requested takeoff minute. DOM-4 (the arm): the grid's anchor
+    // syncs to the takeoff's block first — the slide keeps every
+    // requested minute inside the grid no matter how late the war runs
+    // (the epoch only moves forward, past bits fall off with their
+    // time); disarmed, block 0 stays the campaign's start.
     const int minute =
         flight.takeoff > 0 ? static_cast<int>(flight.takeoff / 60) : 0;
+    if (cfg_.airbase_scheduling) {
+        sched->sync(minute, cfg_.plan_block_min);
+    }
+    const int rel_minute =
+        cfg_.airbase_scheduling ? minute - sched->epoch_min() : minute;
     const int slot =
-        sched->find_slot(minute, cfg_.plan_block_min, cfg_.max_cycles);
+        sched->find_slot(rel_minute, cfg_.plan_block_min, cfg_.max_cycles);
     if (slot < 0) {
         // Horizon exhausted: keep the estimate (the reference cancels
         // at 0xFFFFFFFF; the QC's slot telemetry sees the unscheduled
         // flight — the same spirit as the route builder's documented
         // direct-fallback deviation). Still booked for recovery.
+        // DOM-4 (the arm): the refusal is COUNTED and queued — the
+        // saturated grid is a books fact, not a silent one.
+        if (cfg_.airbase_scheduling) {
+            ++stats_.slot_overflows;
+            sched->count_overflow();
+            denials_.push_back(SlotDenial{flight.team, flight.airbase_vu,
+                                          kSlotDeniedHorizon});
+        }
         booked_.push_back(flight);
         return 0;
     }
 
-    const CampaignTime snapped = static_cast<CampaignTime>(slot) * 60;
+    // The snapped takeoff: the slot is grid-RELATIVE — the absolute
+    // campaign minute rides the grid's anchor (epoch 0 disarmed = the
+    // pre-DOM-4 arithmetic verbatim).
+    const int abs_slot = slot + sched->epoch_min();
+    const CampaignTime snapped =
+        static_cast<CampaignTime>(abs_slot) * 60;
     const CampaignTime delta = snapped - flight.takeoff;
     sched->fill(slot, flight.aircraft, cfg_.plan_block_min, cfg_.max_cycles);
 
@@ -1406,11 +1518,29 @@ AirTaskingManager::recover_completed(CampaignTime now) {
 // ============================================================================
 
 std::optional<RecoveryRelease>
-AirTaskingManager::scrub_flight(std::uint32_t flight_id) {
+AirTaskingManager::scrub_flight(std::uint32_t flight_id, CampaignTime now) {
     for (std::size_t i = 0; i < booked_.size(); ++i) {
         if (booked_[i].flight_id != flight_id) continue;
         const FlightTasking ft = booked_[i];
         booked_.erase(booked_.begin() + static_cast<std::ptrdiff_t>(i));
+
+        // DOM-4 (the arm): a scrubbed flight holds its takeoff slot no
+        // longer — the still-future bits go back to the grid so the
+        // next filing can take them. A past slot no-ops (its time is
+        // gone; the slide already dropped it or no forward search can
+        // reach it — clearing it could only invite a backward snap into
+        // a departed minute).
+        if (cfg_.airbase_scheduling && ft.takeoff > now &&
+            ft.airbase_vu != 0) {
+            if (AirbaseSchedule* sched = find_schedule_(ft.airbase_vu)) {
+                const int minute = static_cast<int>(ft.takeoff / 60);
+                if (minute >= sched->epoch_min()) {
+                    sched->release(minute - sched->epoch_min(), ft.aircraft,
+                                   cfg_.plan_block_min, cfg_.max_cycles);
+                    ++stats_.slot_releases;
+                }
+            }
+        }
 
         // Survivors: the recover_completed formula verbatim — drawn −
         // the flight's booked losses (the ledger's per-flight log; 0

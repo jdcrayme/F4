@@ -5,6 +5,46 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## CAMP-DOM-4 — airbase scheduling (FindTakeoffSlot depth beyond FID's airfield-ops windows)
+
+- **CAMP-DOM-4** — the campaign war's slot grid becomes a living,
+  visible, honest scheduler behind one default-off knob
+  (`airbase_scheduling`, the session opt + the QC's
+  `--airbase-scheduling`): the grid's anchor slides with the clock
+  (`AirbaseSchedule::sync` — whole blocks drop off the front, past
+  bits fall off with their time, the 160-minute horizon stops
+  silencing every filing past 2.6 h; the campaign-start anchor stays
+  the disarmed golden identity); FindBestAir's schedule gate applies
+  the reference's own previous-block rule and its skips book
+  (`schedule_denials` + the per-base `denied()` books + the ledger's
+  slot-denial log); phase 7's horizon refusal counts instead of
+  staying silent (`slot_overflows`, the flight keeps its estimate and
+  still flies — the documented deviation stands); a scrubbed flight's
+  still-future slot releases back to the grid (`slot_releases`,
+  `release()` = fill's exact inverse); the grid is NOT written back to
+  the save (the reference's scheduleTime was runtime state — so is
+  this). The `slot_denied` event family (the fifteenth, the denied
+  side's team gate) rides the stream; the `airfields` query joins the
+  v1 whitelist (the 32-block grid as 64 hex chars, the `epoch_min`
+  anchor, the booked count, the denial books — teamless rows, an empty
+  set when the pipeline is off); the artifact's totals gain
+  `slot_denials` (always, the honest 0) with the log array
+  activity-gated; the summary's ATM block gains the three counters
+  only when the arm is on. The seam: `MissionIntent` (and the
+  `IntentView` DTO's additive tail) carries the flight's SCHEDULED
+  takeoff, and the session's airfield-ops gate arms against the SLOT
+  (`depart = takeoff_abs`) when the arm is on — the flight
+  materializes one ops window before its grid minute and rolls on it,
+  closing FIDELITY_TIERS §7's ~2× ops_window delivery-latency
+  divergence; the TOT-anchored gate stays for slotless flights and
+  disarmed sessions. Also restored here: the DOM-3 personnel test
+  files the previous commit missed (they were untracked — the tree
+  they shipped in could not build). +46 tests (the slide/release/
+  overflow/gate units, the Campaign's denial books, the session's
+  slot-anchored gate + airfields parity, the journal's fifteenth
+  family, the DTO goldens, the whitelist); the C5 24-hour gate green
+  with the knob off and on.
+
 ## CAMP-DOM-3 — personnel (the reference's AssignPilots, the rotation pressure)
 
 - **CAMP-DOM-3** — the campaign war gains a personnel layer behind two

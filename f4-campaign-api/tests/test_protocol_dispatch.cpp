@@ -228,6 +228,20 @@ TEST(ProtocolDispatch, SquadronsQueryIsWhitelisted) {
               R"({"v":1,"op":"query","q":"squadrons","status":"ok","data":{"mock":1}})" "\n");
 }
 
+TEST(ProtocolDispatch, AirfieldsQueryIsWhitelisted) {
+    // CAMP-DOM-4: `airfields` joined the v1 whitelist additively (the
+    // scheduling face — dto.hpp's tail) — it dispatches like any
+    // served query, while runway/parking capacity stays future
+    // vocabulary.
+    MockSession s;
+    std::string out;
+    const auto o = handle(s, R"({"v":1,"op":"query","q":"airfields"})", out);
+    EXPECT_EQ(o.kind, ProtocolOutcome::Kind::Ok);
+    EXPECT_EQ(s.last_query, "airfields");
+    EXPECT_EQ(out,
+              R"({"v":1,"op":"query","q":"airfields","status":"ok","data":{"mock":1}})" "\n");
+}
+
 TEST(ProtocolDispatch, EngineSideQueryFailureIsExit24) {
     MockSession s;
     s.fail_next = true; // a whitelisted query the ENGINE side fails
@@ -594,6 +608,42 @@ TEST(ProtocolDispatch, ObjectiveRepairedKindSubscribesAndRidesTheStepLine) {
     // The team gate: the holding side sees it, the other side does not.
     out.clear();
     (void)handle(s, R"({"v":1,"op":"subscribe","kinds":["objective_repaired"],"teams":[6]})", out);
+    out.clear();
+    (void)handle(s, R"({"v":1,"op":"step","ticks":60})", out);
+    EXPECT_EQ(out,
+        R"({"v":1,"op":"step","status":"ok","ticks":60,"dilated":0,"events":0})" "\n");
+}
+
+TEST(ProtocolDispatch, SlotDeniedKindSubscribesAndRidesTheStepLine) {
+    // CAMP-DOM-4 — the fifteenth family on the wire: the grid's
+    // refusal subscribes by name (the denied side's gate) and its step
+    // line is byte-pinned.
+    MockSession s;
+    CampaignEvent denied;
+    denied.kind = CampaignEvent::Kind::SlotDenied;
+    denied.slot_denied.t = 11500;
+    denied.slot_denied.team = 2;
+    denied.slot_denied.airbase = 4281;
+    denied.slot_denied.reason = 0;
+    s.queued = {denied};
+
+    std::string out;
+    (void)handle(s, R"({"v":1,"op":"subscribe","kinds":["slot_denied"]})", out);
+    EXPECT_EQ(out,
+              R"({"v":1,"op":"subscribe","status":"ok","kinds":["slot_denied"],)"
+              R"("teams":[]})" "\n");
+    out.clear();
+    const auto o = handle(s, R"({"v":1,"op":"step","ticks":60})", out);
+    EXPECT_EQ(o.kind, ProtocolOutcome::Kind::Ok);
+    EXPECT_EQ(
+        out,
+        R"({"v":1,"op":"step","status":"ok","ticks":60,"dilated":0,"events":1})" "\n"
+        R"({"ev":"slot_denied","t":11500,"team":2,)"
+        R"("airbase":4281,"reason":0})" "\n");
+
+    // The team gate: the denied side sees it, the other side does not.
+    out.clear();
+    (void)handle(s, R"({"v":1,"op":"subscribe","kinds":["slot_denied"],"teams":[6]})", out);
     out.clear();
     (void)handle(s, R"({"v":1,"op":"step","ticks":60})", out);
     EXPECT_EQ(out,

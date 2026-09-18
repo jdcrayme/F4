@@ -414,6 +414,22 @@ struct FlightCrew {
     std::vector<std::uint8_t> crew; ///< roster slots, slot order
 };
 
+// --- DOM-4: the scheduling books -------------------------------------------
+// The slot grid refused a flight: FindBestAir's schedule gate skipped a
+// squadron whose base's block (and, armed, the previous one) was full,
+// or phase 7 found the grid saturated and kept the estimate. The books
+// make the saturation a FACT (the pre-DOM-4 overflow path was silent);
+// the log is the slot_denied event family's source (arrival order =
+// engine order), the reason byte is the atm.hpp SlotDenialReason
+// vocabulary.
+
+struct SlotDenialRecord {
+    double t_s = 0.0;
+    std::uint8_t team = 0;          ///< the request's flying team
+    std::uint32_t airbase = 0;      ///< the base that denied (VU_ID.num)
+    std::uint8_t reason = 0;        ///< 0 = pick gate, 1 = horizon
+};
+
 class CampaignResultLedger {
 public:
     /// Snapshot the initial state: per-team aircraft pools (the campaign
@@ -594,6 +610,19 @@ public:
                              std::uint32_t objective_vu,
                              int damage_pct);
 
+    /// One schedule denial (CAMP-DOM-4): the slot grid refused a
+    /// flight — a pick-gate skip (the base's block full) or a horizon
+    /// refusal (the grid saturated). Pure observation — the request
+    /// falls to the next-best squadron or keeps its estimate; the
+    /// books record that the airbase said no (the slot_denied event
+    /// family's source). Books only when the scheduling arm is on (the
+    /// Campaign's drain gates it — a disarmed run's artifact stays
+    /// byte-identical).
+    void apply_slot_denial(double t_s,
+                           std::uint8_t team,
+                           std::uint32_t airbase_vu,
+                           std::uint8_t reason);
+
     // ------------------------------------------------------------------
     // Queries (the C2 tasking hooks + the QC gates read these)
     // ------------------------------------------------------------------
@@ -699,6 +728,19 @@ public:
     [[nodiscard]] const std::vector<ActionFilingRecord>&
     action_filing_log() const noexcept {
         return action_filings_;
+    }
+
+    /// Schedule denials booked this run (CAMP-DOM-4 — the log's size;
+    /// the honest 0 is the arms-off answer).
+    [[nodiscard]] int slot_denials() const noexcept {
+        return static_cast<int>(slot_denials_.size());
+    }
+
+    /// The slot-denial log (arrival order — the slot_denied event
+    /// family's source; empty unless the scheduling arm is on).
+    [[nodiscard]] const std::vector<SlotDenialRecord>&
+    slot_denial_log() const noexcept {
+        return slot_denials_;
     }
 
     /// Mission draws booked this run, all teams (the C2 tasking side).
@@ -925,6 +967,9 @@ private:
     std::vector<ObjectiveCaptureRecord> captures_;
     /// CAMP-ATM-1 — the ACTION tables' filing log (arrival order).
     std::vector<ActionFilingRecord> action_filings_;
+    /// CAMP-DOM-4 — the slot-denial log (arrival order; the
+    /// slot_denied event family's source).
+    std::vector<SlotDenialRecord> slot_denials_;
     int ground_vehicle_losses_ = 0;
     /// The air-sourced share (G2: the interdiction counter).
     int ground_vehicle_losses_air_ = 0;
