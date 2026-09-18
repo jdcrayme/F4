@@ -1045,6 +1045,27 @@ std::string to_world_json(const CamArchive& cam, const WorldJsonOptions& opts) {
                               << "}";
                         }
                         o << "]";
+                        // DOM-3 — the per-role effectiveness table (the
+                        // tail's rating[ARO_OTHER=16], typed). Presence =
+                        // data (the team-stocks rule): an all-zero table
+                        // stays absent so untouched saves keep their exact
+                        // JSON shape; a rating-bearing squadron (and any
+                        // run the decay moved) carries all 16 entries and
+                        // the save-mutation diff sees the values.
+                        bool any_rating = false;
+                        for (std::size_t j = 0; j < u.subclass.rating_raw.size() && j < 16; ++j) {
+                            if (u.subclass.rating_raw[j] != 0) { any_rating = true; break; }
+                        }
+                        if (any_rating) {
+                            o << ", \"role_ratings\": [";
+                            for (std::size_t j = 0; j < 16; ++j) {
+                                if (j) o << ", ";
+                                o << (j < u.subclass.rating_raw.size()
+                                          ? static_cast<int>(u.subclass.rating_raw[j])
+                                          : 0);
+                            }
+                            o << "]";
+                        }
                     } else if (u.unit_class == UnitClass::Flight) {
                         // Phase 1 fix A.1: previously decoded by unit_decoder.cpp
                         // but never emitted. A Flight is a single-aircraft

@@ -40,7 +40,17 @@
 > books the `objective_repaired` family (the eleventh), the strategic
 > reserve (`replacements_avail`) refills consumed reinforcement
 > budgets, the `objectives` query serves the live mirror (the DOM-1
-> seam closes), and every knob defaults OFF — the goldens stand).
+> seam closes), and every knob defaults OFF — the goldens stand);
+> CAMP-DOM-3 shipped with this patch (personnel — the reference's
+> `AssignPilots()`: every filed flight draws its CREW from the
+> squadron's decoded pilot roster (lead = the front-third scan,
+> wingmen backward from the tail, a squadron that cannot crew is
+> skipped), the per-role effectiveness table (`.uni` rating[16]) decays
+> 25% per assignment and re-prices FindBestAir, the personnel books
+> book assignment/loss/recovery, the pilot event trio (the twelfth
+> through fourteenth families) rides the stream, the `squadrons` query
+> serves the personnel face, and every knob defaults OFF — the
+> goldens stand).
 > Every other tranche below is an acceptance contract, not a claim.
 
 The campaign engine is the product. Every user experience — the world viewer
@@ -880,10 +890,98 @@ belligerent-held kunsan objective) heals on the cadence, the events
 publish one-for-one with the books, the entity face joins
 (VIS_REPAIRED + hp restored), both write-backs land.
 
+### CAMP-DOM-3 — personnel (the reference's AssignPilots, the rotation pressure)
+
+AS BUILT (PLT_PARK closed in SCALE-1, the rosters flow — the tranche
+unblocked). The chain: every filed flight draws its CREW from the
+squadron's decoded pilot roster (the wire's own 48-slot array — the
+scan axis the reference itself uses), the crew rides the MissionIntent
+and the personnel books, losses consume slots, recoveries credit
+sorties, and the write-back applies the run's deltas to the wire
+statuses. Notes:
+
+(1) Every knob defaults OFF — `AtmConfig::pilot_assignment`/
+`rating_decay`, `CampaignConfig::pilot_assignment`/`rating_decay` (the
+ATM inherits both at construction), the session's `pilot_assignment`/
+`rating_decay`, the QC's `--pilot-assignment`/`--rating-decay`. The
+rosters are ignored beyond the SCALE-1 skill map — the golden
+identity, the F6 gate lesson's fourth holding. (2) THE PICK
+(AssignPilots' deterministic subset): the lead scans the roster's FRONT
+THIRD for the first free slot (the commanders' seats), the wingmen
+scan BACKWARD from the tail; fewer free pilots than ships → empty crew
+= the flight fails. As a PICK-TIME GATE in FindBestAir (counted in
+`crew_denials` when every other gate passed): a squadron that cannot
+crew never enters the comparison — the scored walk falls to the
+runner-up, the same squadrons fly. The ATM tracks its own pick-time
+OUT-SET (`crew_out_`) so two same-squadron flights in one cycle never
+double-pick (the ledger books at PUBLISH, after compose built the
+whole cycle). Free = status 0, not ledger-dead, not out. (3) THE
+DECAY: the squadron's per-role effectiveness table (the `.uni` tail's
+rating[ARO_OTHER=16], typed through the world pass — emitted only when
+non-zero, presence = data) seeds the live view, else the UCD Scores,
+else nothing (the static specialty fallback never decays — the
+fixture's own artifact). new = (int)(0.75 × rating) + 1 — integer
+truncating, the +1 floors the fixed point at 4 (a rating never decays
+to zero; 1..3 are already fixed). The decayed view rides the flight
+(`ratings_valid`) and the Campaign syncs the ledger (its write domain
+— last-write-wins per squadron, `ratings_fires` the activity);
+`rating_()` reads the LIVE view first, so FindBestAir's base score
+spreads the sorties across the wing (the rotation pressure the
+reference's own docs name). (4) THE BOOKS: `apply_mission_draw`'s
+6-arg shape books the assignment log (the `pilot_assigned` family's
+source), the flight→crew map, and per-slot OUT deltas; `apply_air_loss`
+consumes ONE slot per crewed-flight loss IN PICK ORDER (the lead dies
+first — the deterministic subset; the reference tracks per-aircraft
+pilots in the flight tail the aggregate books do not carry; dead stays
+dead); `apply_mission_recovery` releases the crew, credits each
+survivor one sortie (the `pilot_recovered` family's `missions_run` is
+the slot's THIS-RUN count — the write-back ADDS to the wire's
+history, never replaces). An empty crew books exactly the pre-DOM-3
+4-arg shape. (5) THE EVENTS: the pilot trio — `pilot_assigned`/
+`pilot_lost`/`pilot_recovered` (the twelfth through fourteenth, all
+eight touch-points, the flying team's gate) — published from the
+ledger logs' tails by the session's `emit_pilot_events_` (three
+independent cursors: the logs grow from three engines). (6) THE
+QUERY: `squadrons` joins the whitelist additively (protocol +
+`engine_serves_query`, `kProtocolVersion` stays 1): one
+`SquadronView` row per squadron in WIRE order — the wire's identity +
+counts with the ledger's deltas applied (available = the C2 tasking
+pool; pilots_available = wire-available minus dead minus still-out;
+ratings = the live table when the decay fired, else the wire's own).
+The DTO rule holds: additive, at the END, always present.
+(7) THE WRITE-BACK: the personnel face in `apply_to` — dead slots →
+status 1 (idempotent), per-pilot `missions_flown` += the run's
+credited sorties (clamped i16), the decayed table when
+`ratings_fires > 0`; ACTIVITY = losses/sorties/fires — a draws-only
+run (outs only) writes NOTHING (the out is transient, the save
+carries no phantom states), counted in the new `personnel_written`.
+(8) THE BRIDGE SEAM: a crewed flight's LEAD sets the spawned brain's
+SensorFusion cadence (`intent.crew[0]` indexes the squadron entity's
+own roster) when the SCALE-1 pilot-skill flow is armed — the
+whole point of the front-third scan; the wing-wide best-scan only
+stands for un-crewed intents. (9) The personnel books ride the
+ledger's result document (the `books` query's payload): the totals
+answer always (`pilot_assignments`/`pilot_losses`/`pilot_sorties` —
+the honest 0 is the arms-off answer), the three logs only when one
+exists, the squadron rows carry `run_pilot_losses`/
+`run_pilot_sorties`/the decayed `role_ratings` only when the run
+moved the roster (the personnel activity counts as THIS-RUN
+activity). The WorldState's own save face emits `role_ratings`
+presence-based (the write-back's decayed table reaches the saved
+world; every pre-DOM-3 state emits byte-identically). (10) The QC
+prints `personnel: crews=… denials=… decayed=…` when either arm is
+on (both the session and the tasking modes wire the arms);
+campaignd untouched (the families ride the subscribe kinds, the
+query rides the whitelist). The certificate: campinit medium, 0.5 h,
+both arms on — 95 intents → 95 crews (denials 0, the pack carries no
+rating tables → decayed 0, the honest zero), deterministic=yes,
+two runs one MD5, exits stand; the kunsan tasking QC (8 cycles):
+crews=32 denials=57 (the save's non-rostered squadrons deny — the
+reference's flight-fails rule as a pick-time gate) decayed=0.
+
 ### CAMP-DOM-* — domain tranches (each its own landed series, upstream-mapped)
 - ~~**DOM-2 supply depth**~~ — SHIPPED above.
-- **DOM-3 personnel**: `AssignPilots()`, rating decay, squadron rotation —
-  blocked on PLT_PARK (CAMP-SCALE-1).
+- ~~**DOM-3 personnel**~~ — SHIPPED above.
 - **DOM-4 airbase scheduling**: `FindTakeoffSlot()` depth beyond FID's
   airfield-ops windows.
 - **DOM-5 naval**: upstream HAS a naval tasking manager — it is very

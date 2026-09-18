@@ -248,6 +248,24 @@ struct CampaignSessionOptions {
     /// no strategy layer).
     bool strategy_layer = false;
 
+    /// CAMP-DOM-3: the AssignPilots arm — every filed flight draws its
+    /// CREW from the squadron's decoded pilot roster (the lead scans
+    /// the roster's front third, the wingmen scan backward from the
+    /// tail; a squadron that cannot crew is skipped and the request
+    /// fills from the next-best), the crew rides the MissionIntent and
+    /// the personnel books (assignment / loss / recovery — the three
+    /// pilot event families' sources), and the write-back applies the
+    /// run's status/sortie deltas. Default false: rosters are ignored
+    /// beyond the SCALE-1 skill map — the golden identity.
+    bool pilot_assignment = false;
+    /// CAMP-DOM-3: the rating-decay arm — the squadron's per-role
+    /// effectiveness table (the .uni tail's rating[16]; the UCD Scores
+    /// when the wire carries none) decays 25% per assignment
+    /// (new = (int)(0.75 × rating) + 1), spreading the wing's sorties
+    /// (FindBestAir's base score reads the live table). Default false:
+    /// the static specialty fallback stands byte-identically.
+    bool rating_decay = false;
+
     /// CAMP-SCALE-1: path to the converted theater tables (cam2json
     /// --emit-tables output; f4/world/theater_tables.hpp reads it).
     /// Empty (default) = the documented countermeasure defaults stand
@@ -732,6 +750,8 @@ private:
     void emit_cadence_events_();   ///< tasking_cycle + reinforcements
     void emit_action_filed_events_();  ///< CAMP-ATM-1 — the ACTION tables'
                                        ///< filings (the log's tail)
+    void emit_pilot_events_();     ///< CAMP-DOM-3 — the personnel logs'
+                                   ///< tails (assigned / lost / recovered)
     void emit_capture_events_();   ///< the ground war's objective flips
     void emit_repair_events_();    ///< CAMP-DOM-2 — the repair cadence's
                                    ///< books + the sim-side bitmap mirror
@@ -784,6 +804,11 @@ private:
     std::size_t last_repair_record_ = 0;
     /// CAMP-ATM-1 — the ACTION-filing log's read cursor.
     std::size_t last_action_record_ = 0;
+    /// CAMP-DOM-3 — the personnel logs' read cursors (the assignment,
+    /// loss, and recovery logs append independently; one cursor each).
+    std::size_t last_pilot_assignment_record_ = 0;
+    std::size_t last_pilot_loss_record_ = 0;
+    std::size_t last_pilot_recovery_record_ = 0;
     /// The tasking-cycle counter's last seen value (the diff IS the
     /// fires of this whole-second block — the clock chunks seconds).
     std::int64_t last_cycles_fired_ = 0;

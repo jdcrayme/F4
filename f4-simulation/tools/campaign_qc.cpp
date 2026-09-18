@@ -309,6 +309,11 @@ struct Args {
     // defaults (the golden identity).
     std::string theater_tables;
     bool pilot_skill_flow = false;
+    // CAMP-DOM-3: the personnel arms (--pilot-assignment / --rating-decay)
+    // — the AssignPilots crew pick and the per-role rating decay.
+    // False = the golden identity (rosters ignored beyond the skill map).
+    bool pilot_assignment = false;
+    bool rating_decay = false;
     // Real-data tier: the wcd2json export folded over the built-in table.
     std::string weapon_data;
     // FID-6 — the acceleration certificate (--accel <x>): the tiered
@@ -341,6 +346,7 @@ struct Args {
         "          [--unit-strike] [--weapon-data <wcd.json>] [--out-dir <dir>]\n"
         "          [--synthesize-airbases]\n"
         "          [--theater-tables <tables.json>] [--pilot-skill]\n"
+        "          [--pilot-assignment] [--rating-decay]\n"
         "          [--accel <x>] [--accel-hours <h>] [--accel-max-live <n>]\n"
         "          [--accel-tolerance <f>] [--accel-baseline]\n"
         "          [--weather <json-obj>] [--time <json-obj>] (Task 73 env)\n",
@@ -410,6 +416,8 @@ Args parse_args(int argc, char** argv) {
         else if (k == "--strategy")   a.strategy = true;
         else if (k == "--theater-tables") a.theater_tables = next();
         else if (k == "--pilot-skill") a.pilot_skill_flow = true;
+        else if (k == "--pilot-assignment") a.pilot_assignment = true;
+        else if (k == "--rating-decay") a.rating_decay = true;
         else if (k == "--synthesize-airbases") a.synthesize_airbases = true;
         else if (k == "--weapon-data") a.weapon_data = next();
         else if (k == "--ground-update-sec")
@@ -595,6 +603,9 @@ int run_war(const Args& args) {
     // CAMP-SCALE-1: the converted tables + the pilot-skill flow (opt-in).
     hopts.session.theater_tables = args.theater_tables;
     hopts.session.pilot_skill_flow = args.pilot_skill_flow;
+    // CAMP-DOM-3: the personnel arms (opt-in, the same contract).
+    hopts.session.pilot_assignment = args.pilot_assignment;
+    hopts.session.rating_decay = args.rating_decay;
     hopts.session.weapon_data_path = args.weapon_data;
     // FID-6: the accel certificate FORCES the tiered policy — the war
     // runs the game's own way (aggregates until observed), which is
@@ -640,6 +651,10 @@ int run_war(const Args& args) {
                      ? "(none)"
                      : hopts.session.theater_tables.string().c_str(),
                  hopts.session.pilot_skill_flow ? "on" : "off");
+    std::fprintf(stderr,
+                 "  personnel:    pilot-assignment=%s rating-decay=%s\n",
+                 hopts.session.pilot_assignment ? "on" : "off",
+                 hopts.session.rating_decay ? "on" : "off");
 
     std::string err;
     auto harness = CampaignWarHarness::create(hopts, &err);
@@ -1566,6 +1581,10 @@ int main(int argc, char** argv) {
         // SEAD escort on the sample data.
         ladder_cfg.atm_pipeline = true;
         ladder_cfg.atm.min_seadescort_threat = 25;
+        // CAMP-DOM-3: the personnel arms — the crew pick + the rating
+        // decay (the same opt-in contract the session mode wires).
+        ladder_cfg.pilot_assignment = args.pilot_assignment;
+        ladder_cfg.rating_decay = args.rating_decay;
         // P7: the strategy layer — station targeting, support
         // filings, enemy BARCAP requests (opt-in, the same contract
         // as the pipeline itself).
@@ -1692,6 +1711,12 @@ int main(int argc, char** argv) {
                             atm->stations_targeted, atm->supports_filed,
                             atm->supports_shared, atm->enemy_caps_filed,
                             atm->actions_filed);
+            }
+            // CAMP-DOM-3: the personnel counters, printed when armed.
+            if (args.pilot_assignment || args.rating_decay) {
+                std::printf("personnel: crews=%d denials=%d decayed=%d\n",
+                            atm->crews_assigned, atm->crew_denials,
+                            atm->ratings_decayed);
             }
         }
         std::printf("threat_map: ad_units=%d threatened_cells=%d\n",

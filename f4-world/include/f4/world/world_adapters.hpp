@@ -256,6 +256,7 @@ struct UnitAdapter : IUnitCoreSource,
     uint8_t squadron_patch(int i) const override { return ws_->units[i].squadron_patch; }
     int32_t fuel(int i) const override { return ws_->units[i].fuel; }
     const std::vector<f4::entities::PilotState>& pilots(int i) const override { return ws_->units[i].pilots; }
+    const std::array<uint8_t, 16>& role_ratings(int i) const override { return ws_->units[i].role_ratings; }
 
     // --- IFlightSource ---
     float flight_altitude(int i) const override { return ws_->units[i].flight_altitude; }

@@ -354,6 +354,16 @@ struct ISquadronSource {
     virtual int32_t fuel(int i) const = 0;
     virtual const std::vector<f4::entities::PilotState>& pilots(int i) const = 0;
 
+    // DOM-3 — the squadron's per-role effectiveness table (the .uni
+    // tail's rating[ARO_OTHER=16], the reference's rating-decay seat).
+    // Default-implemented (zeros): sources that predate the tranche
+    // keep compiling — a zeroed table simply has no ratings, the same
+    // rule unit_hit_chance/unit_weapon_range keep on the core source.
+    virtual const std::array<uint8_t, 16>& role_ratings(int) const {
+        static const std::array<uint8_t, 16> kZero{};
+        return kZero;
+    }
+
     virtual ~ISquadronSource() = default;
 };
 

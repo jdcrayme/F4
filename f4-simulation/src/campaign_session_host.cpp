@@ -36,7 +36,7 @@ namespace {
     return name == "time" || name == "stats" || name == "flights" ||
            name == "tasking" || name == "books" ||
            name == "objectives" || name == "threat" ||
-           name == "verdict";
+           name == "verdict" || name == "squadrons";
 }
 
 // The session's command-write outcome → the contract's typed refusal
@@ -417,6 +417,72 @@ api::QueryResult EngineSessionHost::query(const api::QuerySpec& spec) {
         }
         f4::json::Writer w;
         api::encode(w, view);
+        res.ok = true;
+        res.data_json = std::move(w).str();
+        return res;
+    }
+
+    if (spec.name == "squadrons") {
+        // CAMP-DOM-3: the personnel face — one row per squadron in WIRE
+        // order (the world's own walk), the wire's identity + counts
+        // with the run's personnel deltas applied (the ledger overlay —
+        // the books ARE the run's truth; the wire rows only catch up at
+        // the write-back). Ratings: the LIVE table when the decay arm
+        // moved this squadron, else the wire's own (zero when the save
+        // carries none — presence = data, the team-stocks rule).
+        std::vector<api::SquadronView> rows;
+        for (const auto& u : session_->world_state().units) {
+            if (u.unit_class != f4::entities::UnitClass::Squadron) continue;
+            if (spec.team >= 0 && u.owner != spec.team) continue;
+            api::SquadronView v;
+            v.vu = u.id_num;
+            v.team = u.owner;
+            v.name = u.class_name;
+            v.airbase_id = u.airbase_id;
+            v.specialty = u.specialty;
+            v.pilots_total = static_cast<int>(u.pilots.size());
+            v.missions_flown = u.missions_flown;
+            v.ratings = u.role_ratings;
+            const auto* entry = session_->ledger().squadron(u.id_num);
+            if (entry != nullptr) {
+                // The tasking pool's live view (draws netted — the C2
+                // one-pool rule the availability gate itself reads).
+                v.available =
+                    session_->ledger().squadron_tasking_available(u.id_num);
+                v.missions_flown += entry->run_pilot_sorties;
+                if (entry->ratings_fires > 0) {
+                    v.ratings = entry->role_ratings;
+                }
+            }
+            // The roster's run deltas: available = wire-available minus
+            // dead, minus still-out (drawn onto booked flights); dead =
+            // the run's consumed slots. First-touch order, ≤ 48 rows.
+            if (const auto* deltas =
+                    session_->ledger().squadron_personnel(u.id_num)) {
+                for (const auto& d : *deltas) {
+                    if (d.slot >= u.pilots.size()) continue;
+                    if (d.dead) ++v.pilots_dead;
+                }
+                int free_slots = 0;
+                for (const auto& p : u.pilots) {
+                    if (p.status == 0) ++free_slots;
+                }
+                int unavailable = 0;
+                for (const auto& d : *deltas) {
+                    if (d.slot >= u.pilots.size()) continue;
+                    if (d.dead || d.out) ++unavailable;
+                }
+                v.pilots_available = std::max(0, free_slots - unavailable);
+            } else {
+                for (const auto& p : u.pilots) {
+                    if (p.status == 0) ++v.pilots_available;
+                }
+            }
+            rows.push_back(std::move(v));
+            if (spec.limit > 0 && rows.size() >= spec.limit) break;
+        }
+        f4::json::Writer w;
+        api::encode(w, rows);
         res.ok = true;
         res.data_json = std::move(w).str();
         return res;

@@ -510,6 +510,12 @@ CampaignSession::create(const CampaignSessionOptions& opts,
     // RequestEnemyMission, racetrack routes (one flag, the same
     // opt-in contract). The ATM inherits it at construction.
     ladder_cfg.strategy_layer = opts.strategy_layer;
+    // CAMP-DOM-3: the personnel arms — the AssignPilots crew pick and
+    // the per-role rating decay (one flag each, the same opt-in
+    // contract; the ATM inherits both at construction — the
+    // Campaign's own pass-through, campaign.cpp's constructor).
+    ladder_cfg.pilot_assignment = opts.pilot_assignment;
+    ladder_cfg.rating_decay = opts.rating_decay;
     session->ladder_ = std::make_unique<f4::campaign::Campaign>(
         static_cast<const f4::world::ICampaignSource&>(
             session->adapters_->campaign),
@@ -772,6 +778,13 @@ bool CampaignSession::advance(double real_seconds, int max_steps_override) {
             // entity face joins the engine's truth so the NEXT damage
             // sync diff sees the repair, not the stale rubble).
             emit_repair_events_();
+            // CAMP-DOM-3: the personnel logs' tails — the crews the
+            // cycle's filings just drew (assigned), the slots the sink's
+            // losses consumed (lost), and the sorties the recoveries
+            // credited (recovered). Three independent cursors: the logs
+            // append from three different engines (the tasking cadence,
+            // the result sink, the recovery pass).
+            emit_pilot_events_();
             // CAMP-DOM-1: the verdict's coarse state — the event fires
             // only when the band or the leader changed (a capture is
             // the only mover today; the diff keeps the stream sparse).
@@ -1248,6 +1261,58 @@ void CampaignSession::emit_action_filed_events_() {
         sim_->bus().publish(e);
     }
     last_action_record_ = alog.size();
+}
+
+void CampaignSession::emit_pilot_events_() {
+    namespace api = f4::campaign::api;
+    // CAMP-DOM-3 — the personnel logs' tails, one event per record in
+    // the ledger's arrival order. The assignment log grows at the
+    // tasking cadence (the Campaign's draw booking), the loss log at
+    // the result sink (a crewed flight's death), the recovery log at
+    // the mission-recovery pass (a crewed flight came home). The event
+    // IS the books' face — no session-side state beyond the cursors.
+    const auto& asign = ledger_->pilot_assignment_log();
+    for (auto i = last_pilot_assignment_record_; i < asign.size(); ++i) {
+        api::CampaignEvent e;
+        e.kind = api::CampaignEvent::Kind::PilotAssigned;
+        e.pilot_assigned.t =
+            static_cast<std::int64_t>(std::llround(asign[i].t_s));
+        e.pilot_assigned.team = asign[i].team;
+        e.pilot_assigned.squadron = asign[i].squadron;
+        e.pilot_assigned.flight = asign[i].flight;
+        e.pilot_assigned.pilots = asign[i].crew;
+        sim_->bus().publish(e);
+    }
+    last_pilot_assignment_record_ = asign.size();
+
+    const auto& lost = ledger_->pilot_loss_log();
+    for (auto i = last_pilot_loss_record_; i < lost.size(); ++i) {
+        api::CampaignEvent e;
+        e.kind = api::CampaignEvent::Kind::PilotLost;
+        e.pilot_lost.t =
+            static_cast<std::int64_t>(std::llround(lost[i].t_s));
+        e.pilot_lost.team = lost[i].team;
+        e.pilot_lost.squadron = lost[i].squadron;
+        e.pilot_lost.flight = lost[i].flight;
+        e.pilot_lost.pilot = lost[i].slot;
+        sim_->bus().publish(e);
+    }
+    last_pilot_loss_record_ = lost.size();
+
+    const auto& rec = ledger_->pilot_recovery_log();
+    for (auto i = last_pilot_recovery_record_; i < rec.size(); ++i) {
+        api::CampaignEvent e;
+        e.kind = api::CampaignEvent::Kind::PilotRecovered;
+        e.pilot_recovered.t =
+            static_cast<std::int64_t>(std::llround(rec[i].t_s));
+        e.pilot_recovered.team = rec[i].team;
+        e.pilot_recovered.squadron = rec[i].squadron;
+        e.pilot_recovered.flight = rec[i].flight;
+        e.pilot_recovered.pilot = rec[i].slot;
+        e.pilot_recovered.missions_run = rec[i].missions_run;
+        sim_->bus().publish(e);
+    }
+    last_pilot_recovery_record_ = rec.size();
 }
 
 void CampaignSession::emit_damage_events_() {

@@ -86,6 +86,8 @@ Campaign::Campaign(const f4::world::ICampaignSource& camp,
         AtmConfig atm_cfg = cfg_.atm;
         atm_cfg.unit_strike = cfg_.unit_strike;
         atm_cfg.strategy = cfg_.strategy_layer;
+        atm_cfg.pilot_assignment = cfg_.pilot_assignment;
+        atm_cfg.rating_decay = cfg_.rating_decay;
         atm_ = std::make_unique<AirTaskingManager>(
             profiles_, camp_, teams_, units_, nullptr, atm_cfg);
         atm_->set_id_base(cfg_.first_package_id);
@@ -624,6 +626,7 @@ void Campaign::run_tasking_cycle_atm_() {
             intent.flight_role = static_cast<std::uint8_t>(ft.role);
             intent.escorted_flight_id = ft.escorted_flight_id;
             intent.roe = ft.roe;   // P7 — the flight's RoE byte
+            intent.crew = ft.crew; // DOM-3 — the flight's crew (slots)
 
             // The route: the package's copy (main built it; escorts
             // carry the same shape with their own TOT). P7: support
@@ -647,10 +650,20 @@ void Campaign::run_tasking_cycle_atm_() {
             // Draw the aircraft — ONE pool (the ledger when attached;
             // the ATM's own counters otherwise — its draw_ already
             // handled the no-ledger bookkeeping at compose time).
+            // DOM-3: the crew rides the booking (the personnel books
+            // and the pilot_assigned log arm with it), and the flight
+            // carries the squadron's post-decay rating view (the ATM's
+            // ledger pointer is read-only — the Campaign syncs the
+            // write domain; the last flight of a squadron in the cycle
+            // carries the final face).
             if (result_ledger_ != nullptr) {
                 result_ledger_->apply_mission_draw(
                     static_cast<double>(now), team, ft.squadron_vu,
-                    ft.aircraft);
+                    ft.aircraft, ft.flight_id, ft.crew);
+                if (ft.ratings_valid) {
+                    result_ledger_->sync_squadron_ratings(
+                        ft.squadron_vu, ft.squadron_ratings);
+                }
             }
 
             // Publish + record (the campaign's only outward coupling).

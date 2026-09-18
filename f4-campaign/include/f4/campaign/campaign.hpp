@@ -144,6 +144,14 @@ struct MissionIntent {
     /// (WeaponsTight → BVR hold, WeaponsHold → everything held).
     std::uint8_t roe{0};
 
+    /// DOM-3 — the flight's crew (the squadron's ROSTER SLOTS in pick
+    /// order, crew[0] = the lead; empty on every pre-DOM-3 intent and
+    /// on every save-loaded flight — the wire zeroes the flight tail's
+    /// own pilot bytes, the documented gap). The spawner resolves the
+    /// lead's PilotState for the brain-skill stamp when the
+    /// pilot-skill flow is armed.
+    std::vector<std::uint8_t> crew;
+
     /// Element-wise equality (tests assert bus content == recorded intents).
     bool operator==(const MissionIntent&) const = default;
 };
@@ -234,6 +242,22 @@ struct CampaignConfig {
     /// Requires atm_pipeline (the legacy ladder has no strategy
     /// layer); hosts arm both.
     bool strategy_layer{false};
+
+    /// DOM-3 — the AssignPilots arm: filed flights draw their CREW from
+    /// the squadron's decoded pilot roster (the reference's
+    /// front-third lead / backward wingmen scan; a squadron that cannot
+    /// crew is skipped), the crew rides the MissionIntent and the
+    /// personnel books (assignment / loss / recovery), and the events
+    /// name the pilots. DEFAULT OFF — the golden identity (rosters
+    /// ignored beyond the SCALE-1 skill map). One flag for both
+    /// ladders (the ATM's config inherits it at construction).
+    bool pilot_assignment{false};
+
+    /// DOM-3 — the rating-decay arm: the squadron's per-role
+    /// effectiveness table (the .uni rating[16]) decays 25% per
+    /// assignment — new = (int)(0.75 × rating) + 1 — spreading the
+    /// sorties across the wing (the rotation pressure). DEFAULT OFF.
+    bool rating_decay{false};
 };
 
 class Campaign {

@@ -114,6 +114,45 @@ WorldWritebackResult apply_to(const CampaignResultLedger& ledger,
         }
     }
 
+    // --- DOM-3: the squadron personnel face -------------------------------
+    // The run's roster deltas applied to the wire's own pilot array:
+    // dead slots → status 1 (the wire's DEAD byte — idempotent on an
+    // already-dead slot), each surviving slot's credited sorties added
+    // to its missions_flown (the write-back ADDS, it never replaces —
+    // the wire's missions are the save's history), and the decayed
+    // per-role rating table written when the decay arm fired for this
+    // squadron (last-write-wins — the ledger holds the final face).
+    // ACTIVITY = run deltas or rating fires: a roster the run never
+    // touched keeps the wire's own bytes (the zero-event round-trip).
+    for (auto& unit : ws.units) {
+        if (unit.unit_class != f4::entities::UnitClass::Squadron) continue;
+        const auto* entry = ledger.squadron(unit.id_num);
+        if (entry == nullptr) continue;
+        const bool active = entry->run_pilot_losses != 0 ||
+                            entry->run_pilot_sorties != 0 ||
+                            entry->ratings_fires != 0;
+        if (!active) continue;
+        const auto* deltas = ledger.squadron_personnel(unit.id_num);
+        if (deltas != nullptr) {
+            for (const auto& d : *deltas) {
+                if (d.slot >= unit.pilots.size()) continue;
+                auto& p = unit.pilots[d.slot];
+                if (d.dead) p.status = 1;
+                if (d.missions_added > 0) {
+                    p.missions_flown = static_cast<std::int16_t>(
+                        std::min<std::int32_t>(
+                            32767,
+                            static_cast<std::int32_t>(p.missions_flown) +
+                                d.missions_added));
+                }
+            }
+        }
+        if (entry->ratings_fires > 0) {
+            unit.role_ratings = entry->role_ratings;
+        }
+        ++out.personnel_written;
+    }
+
     return out;
 }
 

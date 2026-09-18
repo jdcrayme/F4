@@ -301,6 +301,15 @@ struct UnitState {
     // Squadron pilot roster:
     std::vector<PilotState> pilots;
 
+    // Squadron per-role effectiveness table (the .uni tail's
+    // rating[ARO_OTHER=16] — the decoder captured it verbatim; the
+    // DOM-3 personnel tranche types it). Indexed by the ARO role
+    // constants (falcent.h: CA=1, S=3, GA=4, SB=5, REC=10, OTHER=16);
+    // 0 = no rating for the role. FreeFalcon decays the assigned
+    // role's entry 25% per sortie (new = 0.75*cur + 1) so tasking
+    // spreads across the wing. Zero-filled for non-squadron units.
+    std::array<uint8_t, 16> role_ratings{};
+
     // Flight (AirUnit subclass — Phase 1 fix: was decoded but never emitted):
     // A Flight is a single aircraft mission element (one package contains
     // multiple flights). These fields describe the mission state.

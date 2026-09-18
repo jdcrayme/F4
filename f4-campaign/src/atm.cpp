@@ -239,6 +239,32 @@ AirTaskingManager::AirTaskingManager(
             st.y = units.y(i);
             st.range = units.max_range(i);
             st.scores = units.unit_class_scores(i);
+            // DOM-3 — the personnel seat: the unit source index (the
+            // crew pick reads the roster through as_squadron) and the
+            // wire's per-role ratings. The live decay view seeds from
+            // the wire's own table when it carries one, else from the
+            // UCD Scores (the same chain rating_ reads) — a squadron
+            // with neither keeps the static specialty fallback, which
+            // never decays (documented at rating_).
+            st.unit_index = i;
+            if (const auto* sq = units.as_squadron(i)) {
+                st.wire_ratings = sq->role_ratings(i);
+            }
+            bool any_wire = false;
+            bool any_ucd = false;
+            for (const auto r : st.wire_ratings) {
+                if (r != 0) any_wire = true;
+            }
+            for (const auto r : st.scores) {
+                if (r != 0) any_ucd = true;
+            }
+            if (any_wire) {
+                st.live_ratings = st.wire_ratings;
+                st.ratings_live = true;
+            } else if (any_ucd) {
+                st.live_ratings = st.scores;
+                st.ratings_live = true;
+            }
         }
         squadrons_.push_back(std::move(st));
     }
@@ -273,7 +299,8 @@ int AirTaskingManager::available_(const SquadronState& sq) const {
     return sq.available;
 }
 
-void AirTaskingManager::draw_(SquadronState& sq, int count) {
+void AirTaskingManager::draw_(SquadronState& sq, int count,
+                              const std::vector<std::uint8_t>& crew) {
     // Ledger mode: the CAMPAIGN books apply_mission_draw when it
     // publishes the intent (one booking site, no double counting);
     // the ATM only tracks outstanding for its own bookkeeping.
@@ -284,6 +311,117 @@ void AirTaskingManager::draw_(SquadronState& sq, int count) {
         sq.available -= count;
         if (sq.available < 0) sq.available = 0;
     }
+    // DOM-3 — the crew's slots go out (the pick-time out-set; the
+    // recovery/scrub release brings them home).
+    for (const auto slot : crew) {
+        sq.crew_out_.push_back(slot);
+    }
+}
+
+// ============================================================================
+// DOM-3 — the personnel helpers (AssignPilots + rating decay)
+// ============================================================================
+
+std::vector<std::uint8_t> AirTaskingManager::free_pilot_slots_(
+        const SquadronState& sq) const {
+    // The pick's raw material: the wire roster's available pilots
+    // (status 0 — PILOT_AVAILABLE) minus the LEDGER's dead deltas and
+    // the ATM's own out-set. No ledger → deaths are not tracked (the
+    // no-ledger mode's honest shape: the books ARE the ledger).
+    std::vector<std::uint8_t> free;
+    if (sq.unit_index < 0) return free;
+    const auto* sqs = units_.as_squadron(sq.unit_index);
+    if (sqs == nullptr) return free;
+    const auto& roster = sqs->pilots(sq.unit_index);
+    const auto n = static_cast<int>(roster.size());
+
+    // The ledger's dead set for this squadron (a small delta vector —
+    // first-touch order).
+    const std::vector<PilotDelta>* deltas = nullptr;
+    if (ledger_ != nullptr) deltas = ledger_->squadron_personnel(sq.vu);
+
+    for (int i = 0; i < n; ++i) {
+        const auto slot = static_cast<std::uint8_t>(i);
+        if (roster[i].status != 0) continue;   // dead / leave / hospital
+        bool out = false;
+        for (const auto o : sq.crew_out_) {
+            if (o == slot) { out = true; break; }
+        }
+        if (out) continue;
+        if (deltas != nullptr) {
+            for (const auto& d : *deltas) {
+                if (d.slot == slot && d.dead) { out = true; break; }
+            }
+        }
+        if (out) continue;
+        free.push_back(slot);
+    }
+    return free;
+}
+
+std::vector<std::uint8_t> AirTaskingManager::pick_crew_(
+        const SquadronState& sq, int aircraft) const {
+    // FreeFalcon's AssignPilots (FlightClass::BuildMission's tail):
+    // slot 0 scans the roster's FRONT THIRD for the first available
+    // pilot (the commanders' seats); the remaining slots scan BACKWARD
+    // from the tail (the wingmen); a slot with no pilot fails the
+    // flight. The scan axis is the ROSTER ORDER (the wire's own 48
+    // slots), gated on free-ness — the same walk the pick gate ran.
+    std::vector<std::uint8_t> crew;
+    if (!cfg_.pilot_assignment || aircraft <= 0) return crew;
+    const auto free = free_pilot_slots_(sq);
+    if (static_cast<int>(free.size()) < aircraft) return crew;
+
+    if (sq.unit_index < 0) return crew;
+    const auto* sqs = units_.as_squadron(sq.unit_index);
+    if (sqs == nullptr) return crew;
+    const int n = static_cast<int>(sqs->pilots(sq.unit_index).size());
+    if (n == 0) return crew;
+
+    const auto is_free = [&free](std::uint8_t slot) {
+        for (const auto f : free) {
+            if (f == slot) return true;
+        }
+        return false;
+    };
+
+    // The lead: the first free slot in the front third.
+    const int third = std::max(1, n / 3);
+    for (int i = 0; i < third; ++i) {
+        const auto slot = static_cast<std::uint8_t>(i);
+        if (is_free(slot)) {
+            crew.push_back(slot);
+            break;
+        }
+    }
+    if (crew.empty()) return crew;   // no commander — the flight fails
+
+    // The wingmen: backward from the tail.
+    for (int i = n - 1;
+         i >= 0 && static_cast<int>(crew.size()) < aircraft; --i) {
+        const auto slot = static_cast<std::uint8_t>(i);
+        if (is_free(slot)) crew.push_back(slot);
+    }
+    if (static_cast<int>(crew.size()) < aircraft) return {};
+    return crew;
+}
+
+void AirTaskingManager::decay_rating_(SquadronState& sq,
+                                      const MissionProfile& profile) {
+    // The reference's post-assignment tuning row: new_rating =
+    // (int)(0.75 × rating) + 1 — the ~25% hit spreads the wing's
+    // sorties (FindBestAir's base score reads the same table). Integer
+    // math, truncating (positive values: truncation == floor); the +1
+    // floors the decay's fixed point at 4 — a rating never decays to
+    // zero. The decayed view rides the flight (the Campaign syncs the
+    // ledger — its write domain).
+    if (!sq.ratings_live) return;
+    const int idx = ref_aro_index(profile);
+    if (idx < 0 || idx >= static_cast<int>(sq.live_ratings.size())) return;
+    auto& r = sq.live_ratings[static_cast<std::size_t>(idx)];
+    if (r == 0) return;   // no rating for the role — nothing to decay
+    r = static_cast<std::uint8_t>((3 * r) / 4 + 1);
+    ++stats_.ratings_decayed;
 }
 
 // ============================================================================
@@ -808,7 +946,25 @@ AirTaskingManager::compose_packages(
                             2 * static_cast<CampaignTime>(cfg_.reserve_min) *
                                 60;
 
-        draw_(*main_pick.squadron, main.aircraft);
+        // DOM-3 — the crew and the decay: the main flight's crew rides
+        // the pick (the find_best_air_ gate guarantees it — the second
+        // walk sees the same free slots), the draw claims the slots
+        // into the out-set, and the role's rating decays once per
+        // assignment (the reference's tuning row — sortie-spreading,
+        // the rotation pressure).
+        if (cfg_.pilot_assignment) {
+            main.crew = pick_crew_(*main_pick.squadron, main.aircraft);
+            if (!main.crew.empty()) ++stats_.crews_assigned;
+        }
+        draw_(*main_pick.squadron, main.aircraft, main.crew);
+        if (cfg_.rating_decay) {
+            decay_rating_(*main_pick.squadron, profile);
+            if (main_pick.squadron->ratings_live) {
+                main.squadron_ratings = main_pick.squadron->live_ratings;
+                main.ratings_valid = true;
+            }
+        }
+
         flights.push_back(main);
         ++stats_.packages_built;
 
@@ -933,7 +1089,22 @@ bool AirTaskingManager::build_support_flight_(
     out.separation_sec = sprof.separation;
     out.role = FlightRole::Escort;
 
-    draw_(*pick.squadron, out.aircraft);
+    // DOM-3 — the support flight crews and decays exactly like the
+    // main: the reference's AssignPilots runs per flight build and the
+    // decay is per assignment, support filings included. The pick
+    // precedes the draw (the claimed slots join the out-set).
+    if (cfg_.pilot_assignment) {
+        out.crew = pick_crew_(*pick.squadron, out.aircraft);
+        if (!out.crew.empty()) ++stats_.crews_assigned;
+    }
+    draw_(*pick.squadron, out.aircraft, out.crew);
+    if (cfg_.rating_decay) {
+        decay_rating_(*pick.squadron, sprof);
+        if (pick.squadron->ratings_live) {
+            out.squadron_ratings = pick.squadron->live_ratings;
+            out.ratings_valid = true;
+        }
+    }
     return true;
 }
 
@@ -1019,6 +1190,22 @@ AirTaskingManager::find_best_air_(const MissionRequest& req,
             }
         }
 
+        // DOM-3 — the crew gate (AssignPilots as a pick-time rule): a
+        // squadron that cannot crew the request never enters the
+        // comparison — the scored walk falls to the next-best, the
+        // reference's flight-fails rule reshaped (its AssignPilots
+        // aborts the flight INSIDE the chosen squadron's build; the
+        // same squadrons fly, the request fills from the runner-up).
+        // Counted when every other gate passed — the honest denial
+        // number.
+        if (cfg_.pilot_assignment) {
+            const auto crew = pick_crew_(sq, req.aircraft);
+            if (crew.empty()) {
+                ++stats_.crew_denials;
+                continue;
+            }
+        }
+
         // --- The bonuses -----------------------------------------------
         if (lead != nullptr && lead->vu == sq.vu) {
             score += 3;   // the reference's SetAssigned reuse bonus
@@ -1076,7 +1263,19 @@ int AirTaskingManager::rating_(const SquadronState& sq,
     // numbers are F4's (the reference reads the UCD's 0..100 tables;
     // a fixture without one needs SOME deterministic rating, and the
     // specialty byte is the only role signal the wire itself carries).
+    //
+    // DOM-3 — the decay arm reads the LIVE view first: the seeded
+    // table (wire rating[16], else the UCD Scores) decayed per
+    // assignment. A live view entry of 0 falls through to the
+    // existing chain (a role the tables never rated); a squadron
+    // with no tables at all never decays (the fallback is the
+    // fixture's own artifact, not a rating the wire carries).
     const int idx = ref_aro_index(profile);
+    if (cfg_.rating_decay && sq.ratings_live &&
+        idx >= 0 && idx < static_cast<int>(sq.live_ratings.size())) {
+        const int live = sq.live_ratings[static_cast<std::size_t>(idx)];
+        if (live != 0) return live;
+    }
     const int ucd = idx < static_cast<int>(sq.scores.size())
                         ? sq.scores[static_cast<std::size_t>(idx)]
                         : 0;
@@ -1182,13 +1381,18 @@ AirTaskingManager::recover_completed(CampaignTime now) {
         // The ATM's own bookkeeping: outstanding draws drop by the
         // flight's complement; the no-ledger mode ALSO refills its own
         // pool (the ledger mode's refill happens when the Campaign
-        // books apply_mission_recovery — one booking site).
+        // books apply_mission_recovery — one booking site). DOM-3: the
+        // flight's crew comes home (the dead slots stay dead — the
+        // ledger's books own that face).
         for (auto& sq : squadrons_) {
             if (sq.vu != ft.squadron_vu) continue;
             sq.drawn_outstanding = std::max(
                 0, sq.drawn_outstanding - ft.aircraft);
             if (ledger_ == nullptr) {
                 sq.available += survivors;
+            }
+            for (const auto slot : ft.crew) {
+                std::erase(sq.crew_out_, slot);
             }
             break;
         }
@@ -1231,12 +1435,16 @@ AirTaskingManager::scrub_flight(std::uint32_t flight_id) {
         // no-ledger mode ALSO refills its own pool (the ledger mode's
         // refill happens when the caller books apply_mission_recovery —
         // one booking site, the same rule recover_completed obeys).
+        // DOM-3: the scrubbed flight's crew comes home too.
         for (auto& sq : squadrons_) {
             if (sq.vu != ft.squadron_vu) continue;
             sq.drawn_outstanding = std::max(
                 0, sq.drawn_outstanding - ft.aircraft);
             if (ledger_ == nullptr) {
                 sq.available += survivors;
+            }
+            for (const auto slot : ft.crew) {
+                std::erase(sq.crew_out_, slot);
             }
             break;
         }

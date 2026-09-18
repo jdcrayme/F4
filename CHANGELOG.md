@@ -5,6 +5,36 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## CAMP-DOM-3 — personnel (the reference's AssignPilots, the rotation pressure)
+
+- **CAMP-DOM-3** — the campaign war gains a personnel layer behind two
+  default-off knobs (`pilot_assignment` / `rating_decay`, the session
+  opts + the QC's `--pilot-assignment` / `--rating-decay`): every filed
+  flight draws its crew from the squadron's decoded pilot roster — the
+  lead scans the front third, the wingmen scan backward from the tail,
+  a squadron that cannot crew is skipped at the pick gate and the
+  request fills from the runner-up (the reference's flight-fails rule
+  reshaped; `crew_denials` counts it) — the crew rides the
+  `MissionIntent` and a crewed flight's LEAD sets the spawned brain's
+  skill cadence when the SCALE-1 pilot-skill flow is armed; the
+  squadron's per-role effectiveness table (the `.uni` tail's
+  `rating[16]`, now typed through the world JSON pass) decays 25% per
+  assignment — `new = (int)(0.75 × rating) + 1`, floored at 4 — and
+  the live view re-prices FindBestAir so the sorties spread across the
+  wing; the ledger books the personnel run (assignment / loss /
+  recovery logs, per-slot dead/out/sortie deltas — losses consume
+  slots in pick order, the lead first; recoveries credit the
+  survivors' sorties); the pilot event trio (`pilot_assigned`,
+  `pilot_lost`, `pilot_recovered` — the twelfth through fourteenth
+  families) rides the stream and the `squadrons` query joins the v1
+  whitelist with the personnel face (the wire's counts + the run's
+  deltas, the live rating table when the decay fired); the write-back
+  applies the roster face (dead slots → status 1, per-pilot
+  `missions_flown` += the run's sorties, the decayed table) — a
+  draws-only run writes nothing (the out is transient). With both
+  knobs off, rosters are ignored beyond the SCALE-1 skill map and
+  every golden stands byte-identically.
+
 ## WORLD-OCD-1 — the OCD join reads the right row (airbases get their features back)
 
 - **WORLD-OCD-1** — cam2json's theater enrichment resolved an objective's

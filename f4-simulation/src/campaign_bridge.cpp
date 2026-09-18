@@ -472,6 +472,13 @@ int16_t resolve_unit_aircraft_vis(f4::entities::EntityHandle unit_h,
 // never re-prices a fight (the golden-identity rule).
 // ============================================================================
 
+f4::ai::SkillLevel pilot_skill_from_nibble(int s) noexcept {
+    if (s <= 2) return f4::ai::SkillLevel::Recruit;
+    if (s <= 5) return f4::ai::SkillLevel::Rookie;
+    if (s <= 7) return f4::ai::SkillLevel::Veteran;
+    return f4::ai::SkillLevel::Ace;
+}
+
 f4::ai::SkillLevel pilot_skill_from_roster(
     const std::vector<f4::entities::PilotState>& pilots) noexcept {
     const f4::entities::PilotState* best = nullptr;
@@ -486,11 +493,7 @@ f4::ai::SkillLevel pilot_skill_from_roster(
         }
     }
     if (best == nullptr) return f4::ai::SkillLevel::Veteran;
-    const int s = best->skill;  // the wire nibble, 0..9
-    if (s <= 2) return f4::ai::SkillLevel::Recruit;
-    if (s <= 5) return f4::ai::SkillLevel::Rookie;
-    if (s <= 7) return f4::ai::SkillLevel::Veteran;
-    return f4::ai::SkillLevel::Ace;
+    return pilot_skill_from_nibble(best->skill);  // the wire nibble, 0..9
 }
 
 std::optional<f4::world::CountermeasureCounts> resolve_unit_countermeasures(
@@ -1422,8 +1425,23 @@ spawn_aircraft_for_intent(
     // CAMP-SCALE-1 — the pilot-skill flow (gated): the intent's squadron
     // pilot roster (already resolved as `sq` above) sets the fusion
     // cadence. Off (or no squadron) = the Veteran default.
+    // CAMP-DOM-3 — the crewed flight's LEAD sets the cadence: the
+    // intent's crew[0] IS the roster slot the AssignPilots pick flew
+    // in the front seat (the whole point of the front-third scan), so
+    // when the crew rides, the stamp reads THAT pilot's nibble — the
+    // wing-wide best-scan only stands for un-crewed intents (the
+    // arms-off runs and the save-loaded flights).
     if (pilot_skill_flow && sq != nullptr) {
-        brain.set_pilot_skill(pilot_skill_from_roster(sq->pilots));
+        bool leadStamped = false;
+        if (!intent.crew.empty() &&
+            static_cast<std::size_t>(intent.crew[0]) < sq->pilots.size()) {
+            brain.set_pilot_skill(
+                pilot_skill_from_nibble(sq->pilots[intent.crew[0]].skill));
+            leadStamped = true;
+        }
+        if (!leadStamped) {
+            brain.set_pilot_skill(pilot_skill_from_roster(sq->pilots));
+        }
     }
     // G2: the unit map resolves UNIT targets (a CAS intent's battalion
     // VU) — the flight-resolution map doubles as the target map when

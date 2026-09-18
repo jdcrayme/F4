@@ -58,12 +58,13 @@ IdentityFingerprint fingerprint(std::int64_t t, const char* ledger) {
     return id;
 }
 
-// The nine families, one golden example each (deterministic payloads;
-// the `roe_changed`/`weather_changed` payloads are the values their
+// The families, one golden example each (deterministic payloads; the
+// `roe_changed`/`weather_changed` payloads are the values their
 // eventual emitters will carry — the vocabulary is pinned even where
 // the engine site lands in CAMP-CMD-1 / a scenario session). The
 // `action_filed` payload is the CAMP-ATM-1 shape: the ACTION tables'
-// objective-damage-driven filing.
+// objective-damage-driven filing. The pilot trio is CAMP-DOM-3: the
+// personnel books' event faces.
 std::vector<CampaignEvent> one_event_per_family() {
     std::vector<CampaignEvent> events;
 
@@ -163,6 +164,38 @@ std::vector<CampaignEvent> one_event_per_family() {
     repaired.objective_repaired.supply = 45;
     events.push_back(repaired);
 
+    // CAMP-DOM-3 — the twelfth through fourteenth families: the
+    // personnel books' faces. crew[0] = the lead (the front-third
+    // scan); the loss names the consumed slot; the recovery credits
+    // the slot's THIS-RUN sortie count.
+    CampaignEvent assigned;
+    assigned.kind = CampaignEvent::Kind::PilotAssigned;
+    assigned.pilot_assigned.t = 9000;
+    assigned.pilot_assigned.team = 2;
+    assigned.pilot_assigned.squadron = 6001;
+    assigned.pilot_assigned.flight = 5101;
+    assigned.pilot_assigned.pilots = {0, 11, 10, 9};
+    events.push_back(assigned);
+
+    CampaignEvent lost;
+    lost.kind = CampaignEvent::Kind::PilotLost;
+    lost.pilot_lost.t = 9357;
+    lost.pilot_lost.team = 2;
+    lost.pilot_lost.squadron = 6001;
+    lost.pilot_lost.flight = 5101;
+    lost.pilot_lost.pilot = 11;
+    events.push_back(lost);
+
+    CampaignEvent recovered;
+    recovered.kind = CampaignEvent::Kind::PilotRecovered;
+    recovered.pilot_recovered.t = 10800;
+    recovered.pilot_recovered.team = 2;
+    recovered.pilot_recovered.squadron = 6001;
+    recovered.pilot_recovered.flight = 5101;
+    recovered.pilot_recovered.pilot = 0;
+    recovered.pilot_recovered.missions_run = 1;
+    events.push_back(recovered);
+
     return events;
 }
 
@@ -193,7 +226,7 @@ TEST(EventJournal, HeaderAndEndBytes) {
 
 TEST(EventJournal, OneGoldenLinePerFamily) {
     const auto events = one_event_per_family();
-    ASSERT_EQ(events.size(), 11U);
+    ASSERT_EQ(events.size(), 14U);
 
     f4::json::Writer w;
     encode(w, events[0]);
@@ -267,6 +300,26 @@ TEST(EventJournal, OneGoldenLinePerFamily) {
               R"({"ev":"objective_repaired","t":8000,"objective_id":101,)"
               R"("owner":2,"features_repaired":1,"features_destroyed":0,)"
               R"("supply":45})");
+
+    // CAMP-DOM-3 — the personnel trio: the crew drew, a slot died, a
+    // slot flew. The pick order is the wire's roster slots (lead first).
+    w = f4::json::Writer{};
+    encode(w, events[11]);
+    EXPECT_EQ(w.str(),
+              R"({"ev":"pilot_assigned","t":9000,"team":2,"squadron":6001,)"
+              R"("flight":5101,"pilots":[0,11,10,9]})");
+
+    w = f4::json::Writer{};
+    encode(w, events[12]);
+    EXPECT_EQ(w.str(),
+              R"({"ev":"pilot_lost","t":9357,"team":2,"squadron":6001,)"
+              R"("flight":5101,"pilot":11})");
+
+    w = f4::json::Writer{};
+    encode(w, events[13]);
+    EXPECT_EQ(w.str(),
+              R"({"ev":"pilot_recovered","t":10800,"team":2,"squadron":6001,)"
+              R"("flight":5101,"pilot":0,"missions_run":1})");
 }
 
 TEST(EventJournal, WrittenFileShape) {
@@ -283,8 +336,8 @@ TEST(EventJournal, WrittenFileShape) {
     EXPECT_EQ(j.detail(), path.string());
 
     const auto text = slurp(path);
-    // 1 header + 11 events + 1 end = 13 lines, every line ending \n
-    EXPECT_EQ(std::count(text.begin(), text.end(), '\n'), 13);
+    // 1 header + 14 events + 1 end = 16 lines, every line ending \n
+    EXPECT_EQ(std::count(text.begin(), text.end(), '\n'), 16);
     EXPECT_EQ(text.find("{\"v\":1,\"journal\":1,\"identity\":{"), 0U);
     EXPECT_NE(text.find("\n{\"ev\":\"kill\""), std::string::npos);
     EXPECT_NE(text.find("{\"journal_end\":{\"protocol\":1,"),
@@ -500,6 +553,33 @@ TEST(EventFilter, OwnedFamiliesMatchTheOwningSide) {
     repaired.objective_repaired.owner = 2;
     EXPECT_TRUE(matches(rok, repaired));
 
+    // CAMP-DOM-3 — the personnel trio belongs to the flying team (the
+    // crew draws FOR them, the slot that died and the slot that flew
+    // are the squadron's own).
+    CampaignEvent assigned;
+    assigned.kind = CampaignEvent::Kind::PilotAssigned;
+    assigned.pilot_assigned.t = 10;
+    assigned.pilot_assigned.team = 6;
+    EXPECT_FALSE(matches(rok, assigned));
+    assigned.pilot_assigned.team = 2;
+    EXPECT_TRUE(matches(rok, assigned));
+
+    CampaignEvent lost;
+    lost.kind = CampaignEvent::Kind::PilotLost;
+    lost.pilot_lost.t = 10;
+    lost.pilot_lost.team = 6;
+    EXPECT_FALSE(matches(rok, lost));
+    lost.pilot_lost.team = 2;
+    EXPECT_TRUE(matches(rok, lost));
+
+    CampaignEvent recovered;
+    recovered.kind = CampaignEvent::Kind::PilotRecovered;
+    recovered.pilot_recovered.t = 10;
+    recovered.pilot_recovered.team = 6;
+    EXPECT_FALSE(matches(rok, recovered));
+    recovered.pilot_recovered.team = 2;
+    EXPECT_TRUE(matches(rok, recovered));
+
     CampaignEvent roe;
     roe.kind = CampaignEvent::Kind::RoeChanged;
     roe.roe_changed.t = 10;
@@ -524,6 +604,9 @@ TEST(EventFilter, KindNamesRoundTrip) {
              CampaignEvent::Kind::ActionFiled,
              CampaignEvent::Kind::Verdict,
              CampaignEvent::Kind::ObjectiveRepaired,
+             CampaignEvent::Kind::PilotAssigned,
+             CampaignEvent::Kind::PilotLost,
+             CampaignEvent::Kind::PilotRecovered,
          }) {
         CampaignEvent::Kind parsed{};
         ASSERT_TRUE(parse_event_kind(event_kind_name(k), parsed));

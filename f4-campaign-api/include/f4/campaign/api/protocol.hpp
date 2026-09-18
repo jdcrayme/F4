@@ -274,14 +274,16 @@ inline ProtocolOutcome host_handle(ICampaignSession& session,
     if (op == "query") {
         // the v1 whitelist (additive evolution — plan §11). CAMP-HOST-3
         // adds `threat` (the DTO landed additively; see dto.hpp);
-        // CAMP-DOM-1 adds `verdict` (the books' projection — dto.hpp).
+        // CAMP-DOM-1 adds `verdict` (the books' projection — dto.hpp);
+        // CAMP-DOM-3 adds `squadrons` (the personnel face — dto.hpp).
         const bool known = query_name == "time" || query_name == "stats" ||
                            query_name == "flights" ||
                            query_name == "tasking" ||
                            query_name == "books" ||
                            query_name == "objectives" ||
                            query_name == "threat" ||
-                           query_name == "verdict";
+                           query_name == "verdict" ||
+                           query_name == "squadrons";
         if (!known) {
             return detail::error_line(out, op, "unknown_query",
                                       "no such query: " + query_name, 21);

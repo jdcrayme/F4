@@ -71,7 +71,10 @@
 #include <f4/campaign/mission_type.hpp>
 #include <f4/world/data_source.hpp>
 
+#include <array>
 #include <cstdint>
+#include <map>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -301,6 +304,20 @@ struct SquadronLedger {
     /// aircraft's death consumes the draw, it does not debit the pool
     /// twice; the existence counters still count it).
     int drawn_deaths = 0;
+    // --- DOM-3: the personnel books ----------------------------------
+    /// Pilots lost THIS RUN (crewed-flight deaths; the status-byte
+    /// delta the write-back applies — 1 per dead pilot).
+    int run_pilot_losses = 0;
+    /// Pilot sorties credited THIS RUN (recoveries; each surviving
+    /// crewed pilot of a completing flight flew one).
+    int run_pilot_sorties = 0;
+    /// The per-role effectiveness table (the ATM's live view — seeded
+    /// from the wire's rating[16] and decayed per assignment; the
+    /// write-back's source). Fires only under the rating-decay arm.
+    std::array<std::uint8_t, 16> role_ratings{};
+    /// Rating-decay fires booked (the activity marker — a pristine
+    /// table writes nothing back).
+    int ratings_fires = 0;
 };
 
 /// One mission-recovery event (C4: a mission completed and its
@@ -331,6 +348,70 @@ struct ReinforcementRecord {
     std::uint32_t squadron = 0;
     int delivered = 0;
     int budget_left = 0;            // reinforce_pending after delivery
+};
+
+// --- DOM-3: the personnel books -------------------------------------------
+// FreeFalcon's FlightClass::BuildMission ends with AssignPilots(): the
+// flight lead scans the roster's FRONT THIRD for the first available
+// pilot (the commanders' seats), the wingmen scan BACKWARD from the
+// tail, and a slot with no pilot fails the flight. The engine's crew
+// is ROSTER SLOTS (the wire's own 48-pilot array index — the scan axis
+// the reference itself uses; the pilots' pilot_id bytes ride the
+// records for reference). The books below are DELTAS on that roster:
+// the write-back applies them to the wire statuses, the squadrons
+// query overlays them, and the three logs are the pilot event
+// families' sources (arrival order = engine order).
+
+/// One crew assignment (a filed flight drew its pilots — the
+/// pilot_assigned family's source log). crew = roster slots, slot
+/// order as picked (crew[0] = the lead).
+struct PilotAssignmentRecord {
+    double t_s = 0.0;
+    std::uint8_t team = 0;
+    std::uint32_t squadron = 0;
+    std::uint32_t flight = 0;
+    std::vector<std::uint8_t> crew;
+};
+
+/// One pilot death (a crewed flight's loss consumed a slot — the
+/// pilot_lost family's source log).
+struct PilotLossRecord {
+    double t_s = 0.0;
+    std::uint8_t team = 0;
+    std::uint32_t squadron = 0;
+    std::uint32_t flight = 0;
+    std::uint8_t slot = 0;          ///< the roster slot that died
+};
+
+/// One pilot sortie credited (a crewed flight recovered — the
+/// pilot_recovered family's source log). missions_run = the slot's
+/// sorties credited THIS RUN (the wire's own missions_flown is the
+/// save's history — the write-back ADDS the delta, it never replaces).
+struct PilotRecoveryRecord {
+    double t_s = 0.0;
+    std::uint8_t team = 0;
+    std::uint32_t squadron = 0;
+    std::uint32_t flight = 0;
+    std::uint8_t slot = 0;
+    int missions_run = 0;
+};
+
+/// One pilot's run delta (the personnel book's per-slot row — keyed by
+/// ROSTER SLOT, the wire's own index; matched by slot on write-back).
+struct PilotDelta {
+    std::uint8_t slot = 0;
+    bool dead = false;              ///< status byte 1 (the write's face)
+    bool out = false;               ///< drawn onto a booked flight
+    int missions_added = 0;         ///< sorties credited this run
+};
+
+/// One flight's crew book (the flight→crew map the loss and recovery
+/// paths consume; a flight's dead slots stay listed — the consumed
+/// entries carry dead).
+struct FlightCrew {
+    std::uint8_t team = 0;
+    std::uint32_t squadron = 0;
+    std::vector<std::uint8_t> crew; ///< roster slots, slot order
 };
 
 class CampaignResultLedger {
@@ -381,6 +462,27 @@ public:
                             std::uint8_t team,
                             std::uint32_t squadron_vu,
                             int count);
+
+    /// DOM-3 — the crew draw: the same debit with the flight's crew.
+    /// `crew` = the squadron's ROSTER SLOTS in pick order (crew[0] =
+    /// the lead — the reference's front-third scan; wingmen from the
+    /// tail). Books the assignment log (the pilot_assigned family's
+    /// source) and the flight→crew map the loss/recovery paths
+    /// consume; each drawn slot counts as OUT until its flight
+    /// recovers. An empty crew books exactly the 4-arg shape above
+    /// (the pre-DOM-3 identity).
+    void apply_mission_draw(double t_s,
+                            std::uint8_t team,
+                            std::uint32_t squadron_vu,
+                            int count,
+                            std::uint32_t flight_vu,
+                            const std::vector<std::uint8_t>& crew);
+
+    /// DOM-3 — the ATM's live per-role ratings after a decay fire
+    /// (last-write-wins per squadron; the write-back's source and the
+    /// squadrons query's overlay. ratings_fires is the activity).
+    void sync_squadron_ratings(std::uint32_t squadron_vu,
+                               const std::array<std::uint8_t, 16>& ratings);
 
     /// A mission COMPLETED and its surviving aircraft returned to the
     /// tasking pool — the draw's mirror (C4 mission recovery: drawn
@@ -640,6 +742,41 @@ public:
         return reinforcements_;
     }
 
+    // --- DOM-3: the personnel logs and views ----------------------------
+
+    /// The crew-assignment log, arrival order (the pilot_assigned
+    /// event family's source).
+    [[nodiscard]] const std::vector<PilotAssignmentRecord>&
+    pilot_assignment_log() const noexcept {
+        return pilot_assignments_;
+    }
+
+    /// The pilot-loss log, arrival order (the pilot_lost family's
+    /// source — one record per dead pilot).
+    [[nodiscard]] const std::vector<PilotLossRecord>&
+    pilot_loss_log() const noexcept {
+        return pilot_losses_;
+    }
+
+    /// The pilot-recovery log, arrival order (the pilot_recovered
+    /// family's source — one record per surviving pilot per flight).
+    [[nodiscard]] const std::vector<PilotRecoveryRecord>&
+    pilot_recovery_log() const noexcept {
+        return pilot_recoveries_;
+    }
+
+    /// A squadron's personnel deltas, first-touch order (nullptr when
+    /// the run never touched its roster — the write-back's activity
+    /// gate and the squads query's overlay source).
+    [[nodiscard]] const std::vector<PilotDelta>*
+    squadron_personnel(std::uint32_t squadron_vu) const;
+
+    /// A flight's crew book (nullptr when the flight drew no crew —
+    /// save-loaded flights and un-crewed runs). The loss path reads
+    /// the crew; the recovery path releases it.
+    [[nodiscard]] const FlightCrew*
+    flight_crew(std::uint32_t flight_vu) const;
+
     /// The impact event log (arrival order).
     [[nodiscard]] const std::vector<BombImpactRecord>&
     bomb_impact_log() const noexcept {
@@ -762,6 +899,14 @@ private:
     std::vector<MissionDrawRecord> draws_;
     std::vector<MissionRecoveryRecord> recoveries_;
     std::vector<ReinforcementRecord> reinforcements_;
+    // --- DOM-3: the personnel books -------------------------------------
+    std::vector<PilotAssignmentRecord> pilot_assignments_;
+    std::vector<PilotLossRecord> pilot_losses_;
+    std::vector<PilotRecoveryRecord> pilot_recoveries_;
+    /// Per-squadron run deltas, keyed by VU (first-touch slot order).
+    std::map<std::uint32_t, std::vector<PilotDelta>> personnel_;
+    /// The flight→crew map (still-booked crews; erased at recovery).
+    std::map<std::uint32_t, FlightCrew> flight_crews_;
     /// Sync order with VU keys — to_json() sorts for output stability.
     std::vector<ObjectiveDamageRecord> objective_damage_;
     /// Duplicated VU set for last-write-wins lookups.

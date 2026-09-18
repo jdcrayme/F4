@@ -569,6 +569,26 @@ UnitState parse_unit(Reader& r) {
                 r.expect(',');
             }
         }
+        else if (k == "role_ratings") {
+            // DOM-3 — the squadron's per-role effectiveness table (the
+            // .uni tail's rating[ARO_OTHER=16], typed). Emitted only
+            // when the save carries a non-zero entry (presence = data,
+            // the team-stocks rule). Padded/truncated to 16.
+            r.skip_ws(); r.expect('[');
+            int idx = 0;
+            if (r.consume(']')) { /* empty */ }
+            else for (;;) {
+                if (idx < 16) {
+                    u.role_ratings[static_cast<std::size_t>(idx)] =
+                        static_cast<uint8_t>(r.read_int());
+                } else {
+                    (void)r.read_int();
+                }
+                ++idx;
+                if (r.consume(']')) break;
+                r.expect(',');
+            }
+        }
         // --- Theater static-data enrichment fields (from Falcon4.UCD/VCD) ---
         else if (k == "class_name")          u.class_name          = r.read_string();
         else if (k == "movement_type")       u.movement_type       = static_cast<int32_t>(r.read_int());
@@ -1375,6 +1395,27 @@ void emit_unit(Writer& w, const UnitState& u) {
         w.number(u.unit_weapon_range[static_cast<std::size_t>(mi)]);
     }
     w.raw("]");
+
+    // CAMP-DOM-3 — the squadron's per-role effectiveness table (the
+    // .uni tail's rating[ARO_OTHER=16], typed). Presence = data (the
+    // team-stocks rule): an all-zero table stays absent so every
+    // pre-DOM-3 state emits byte-identically — and the write-back's
+    // decayed table reaches the saved world through this face.
+    {
+        bool any_role_rating = false;
+        for (const auto r : u.role_ratings) {
+            if (r != 0) { any_role_rating = true; break; }
+        }
+        if (any_role_rating) {
+            uo.key("role_ratings");
+            w.raw("[");
+            for (int si = 0; si < 16; ++si) {
+                if (si) w.raw(", ");
+                w.number(u.role_ratings[static_cast<std::size_t>(si)]);
+            }
+            w.raw("]");
+        }
+    }
 
     // --- Flight subclass ---
     uo.numf("flight_altitude", u.flight_altitude);

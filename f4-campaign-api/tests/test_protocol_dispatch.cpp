@@ -215,6 +215,19 @@ TEST(ProtocolDispatch, VerdictQueryIsWhitelisted) {
               R"({"v":1,"op":"query","q":"verdict","status":"ok","data":{"mock":1}})" "\n");
 }
 
+TEST(ProtocolDispatch, SquadronsQueryIsWhitelisted) {
+    // CAMP-DOM-3: `squadrons` joined the v1 whitelist additively (the
+    // personnel face — dto.hpp's tail) — it dispatches like any served
+    // query, while per-pilot detail rows stay future vocabulary.
+    MockSession s;
+    std::string out;
+    const auto o = handle(s, R"({"v":1,"op":"query","q":"squadrons"})", out);
+    EXPECT_EQ(o.kind, ProtocolOutcome::Kind::Ok);
+    EXPECT_EQ(s.last_query, "squadrons");
+    EXPECT_EQ(out,
+              R"({"v":1,"op":"query","q":"squadrons","status":"ok","data":{"mock":1}})" "\n");
+}
+
 TEST(ProtocolDispatch, EngineSideQueryFailureIsExit24) {
     MockSession s;
     s.fail_next = true; // a whitelisted query the ENGINE side fails
@@ -367,6 +380,25 @@ TEST(ProtocolDispatch, SubscribeAllEchoesAll) {
     EXPECT_EQ(out,
               R"({"v":1,"op":"subscribe","status":"ok","kinds":["all"],)"
               R"("teams":[]})" "\n");
+}
+
+TEST(ProtocolDispatch, SubscribePilotFamiliesByName) {
+    // CAMP-DOM-3: the personnel trio joined the subscribe vocabulary —
+    // the wire names parse, the echo carries them back in filter order.
+    MockSession s;
+    std::string out;
+    const auto o = handle(
+        s,
+        R"({"v":1,"op":"subscribe","kinds":["pilot_assigned","pilot_lost","pilot_recovered"],"teams":[2]})",
+        out);
+    EXPECT_EQ(o.kind, ProtocolOutcome::Kind::Ok);
+    ASSERT_EQ(s.filter.kinds.size(), 3U);
+    EXPECT_EQ(s.filter.kinds[0], CampaignEvent::Kind::PilotAssigned);
+    EXPECT_EQ(s.filter.kinds[1], CampaignEvent::Kind::PilotLost);
+    EXPECT_EQ(s.filter.kinds[2], CampaignEvent::Kind::PilotRecovered);
+    EXPECT_EQ(out,
+              R"({"v":1,"op":"subscribe","status":"ok","kinds":["pilot_assigned",)"
+              R"("pilot_lost","pilot_recovered"],"teams":[2]})" "\n");
 }
 
 TEST(ProtocolDispatch, SubscribeWithoutKindsIsMalformed) {

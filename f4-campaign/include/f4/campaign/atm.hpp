@@ -256,6 +256,19 @@ struct FlightTasking {
     /// weapons free). The intent carries it; the sim gates the brain's
     /// fire controls with it.
     std::uint8_t roe = 0;
+    /// DOM-3 — the flight's crew (the squadron's ROSTER SLOTS in pick
+    /// order, crew[0] = the lead — the reference's AssignPilots
+    /// front-third/backward scan). Empty unless the pilot-assignment
+    /// arm is on AND the squadron's roster crewed the flight.
+    std::vector<std::uint8_t> crew;
+    /// DOM-3 — the squadron's live per-role ratings AS OF this flight's
+    /// assignment (the decay arm's push vehicle: the ledger is the
+    /// Campaign's write domain, so the ATM's decayed view rides the
+    /// flight and the Campaign syncs it at booking; the last flight of
+    /// a squadron in a cycle carries the final face). ratings_valid
+    /// gates the push (false on every un-decayed flight).
+    std::array<std::uint8_t, 16> squadron_ratings{};
+    bool ratings_valid = false;
 };
 
 /// One mission-recovery release (a completing flight returning its
@@ -322,6 +335,25 @@ struct AtmConfig {
     /// objective-damage-driven CAS/BARCAP/SEAD filings awaiting this
     /// team's next generate_requests).
     int max_pending_action_requests = 4;
+
+    /// DOM-3 — the AssignPilots arm (the reference's
+    /// FlightClass::BuildMission tail): every filed flight draws its
+    /// CREW from the squadron's decoded pilot roster — the lead scans
+    /// the roster's front third for the first available pilot, the
+    /// wingmen scan backward from the tail, and a squadron that cannot
+    /// crew the request is skipped (the scored walk falls to the
+    /// next-best — the reference's flight-fails rule as a pick-time
+    /// gate). DEFAULT OFF — the golden identity (rosters ignored
+    /// beyond the SCALE-1 skill map).
+    bool pilot_assignment = false;
+    /// DOM-3 — the rating-decay arm (the reference's post-assignment
+    /// tuning row): the squadron's per-role effectiveness table (the
+    /// .uni rating[16], typed since the tranche's world pass) decays
+    /// 25% per assignment — new = (int)(0.75 × rating) + 1 — so
+    /// FindBestAir's base score spreads sorties across the wing
+    /// instead of re-picking the leader every cycle (the rotation
+    /// pressure the reference's own docs name). DEFAULT OFF.
+    bool rating_decay = false;
 };
 
 // CAMP-ATM-1 — the ACTION system's type byte (the wire AtmRequestState
@@ -381,6 +413,10 @@ struct AtmStats {
                                   ///< ladder's SWEEP targeting is not
                                   ///< counted here, it rides
                                   ///< requests_generated)
+    // DOM-3 — the personnel counters (all deterministic).
+    int crews_assigned = 0;       ///< flights that drew a crew
+    int crew_denials = 0;         ///< squadrons skipped at the crew gate
+    int ratings_decayed = 0;      ///< per-role decay fires booked
 };
 
 // ============================================================================
@@ -569,6 +605,17 @@ private:
         int x = 0, y = 0;             ///< home grid position
         std::uint32_t airbase = 0;    ///< home airbase VU_ID.num
         int drawn_outstanding = 0;    ///< no-ledger-mode bookkeeping
+        // DOM-3 — the personnel seat.
+        int unit_index = -1;          ///< the unit source's roster index
+        std::array<std::uint8_t, 16> wire_ratings{};  ///< .uni rating[16]
+        std::array<std::uint8_t, 16> live_ratings{};  ///< the decay seat
+        bool ratings_live = false;    ///< the live view seeded (wire/UCD)
+        /// Roster slots drawn onto flights still owed to the tasking
+        /// pipeline (the pick-time out-set — the ledger books draws at
+        /// PUBLISH, after compose built the whole cycle, so the ATM
+        /// tracks its own out-set to keep two same-squadron flights in
+        /// one cycle from double-picking a pilot).
+        std::vector<std::uint8_t> crew_out_;
     };
 
     /// FindBestAir's result (atm.cpp:1534 — see the header doc for the
@@ -604,7 +651,31 @@ private:
 
     /// Draw `count` aircraft from the squadron (no-ledger mode debits
     /// the ATM's own counter; ledger mode just tracks outstanding).
-    void draw_(SquadronState& sq, int count);
+    /// The crew rides along: its slots join the squadron's out-set
+    /// (DOM-3) until the flight recovers or scrubs.
+    void draw_(SquadronState& sq, int count,
+               const std::vector<std::uint8_t>& crew = {});
+
+    // DOM-3 — the personnel helpers (all deterministic; every consumer
+    // is pilot_assignment/rating_decay-gated).
+
+    /// The squadron's FREE roster slots (the wire's available pilots
+    /// minus the ledger's dead and out deltas — the pick's raw
+    /// material). Empty when no roster is reachable.
+    [[nodiscard]] std::vector<std::uint8_t>
+    free_pilot_slots_(const SquadronState& sq) const;
+
+    /// AssignPilots' pick: the crew for an `aircraft`-ship flight (lead
+    /// = first available in the roster's front third, wingmen backward
+    /// from the tail; fewer pilots than ships → empty = the flight
+    /// fails, the reference's own rule).
+    [[nodiscard]] std::vector<std::uint8_t>
+    pick_crew_(const SquadronState& sq, int aircraft) const;
+
+    /// The rating-decay fire: the squadron's live per-role rating for
+    /// the profile's ARO decays 25% (new = 0.75×cur + 1) and pushes
+    /// the live view to the ledger (the write-back's source).
+    void decay_rating_(SquadronState& sq, const MissionProfile& profile);
 
     /// P7 — the strategy layer's helpers (all deterministic; every
     /// consumer is strategy-gated).

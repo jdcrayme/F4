@@ -114,6 +114,16 @@ CampaignResultLedger::find_team_(int slot) {
     return it == teams_.end() ? nullptr : &*it;
 }
 
+// DOM-3 — the personnel book's per-slot row lookup (first-touch order;
+// the roster is 48 slots so the linear scan is trivially cheap).
+PilotDelta* find_pilot_delta_(std::vector<PilotDelta>& book,
+                              std::uint8_t slot) {
+    for (auto& d : book) {
+        if (d.slot == slot) return &d;
+    }
+    return nullptr;
+}
+
 void CampaignResultLedger::apply_air_loss(
         double sim_time_s,
         std::uint8_t victim_team,
@@ -172,13 +182,56 @@ void CampaignResultLedger::apply_air_loss(
     }
     if (!rec.attributed) ++air_losses_unattributed_;
 
+    // DOM-3 — the crew: a crewed flight's loss consumes a roster slot
+    // (the deterministic subset: losses eat the crew IN PICK ORDER —
+    // the lead's slot first; the reference tracks per-aircraft pilots
+    // in the flight tail our aggregate does not carry). The consumed
+    // slot dies ONCE (a crew caps its flight's pilot losses); flights
+    // without a crew book no personnel movement.
+    const auto cit = flight_crews_.find(victim_flight);
+    if (cit != flight_crews_.end()) {
+        FlightCrew& fc = cit->second;
+        for (const auto slot : fc.crew) {
+            auto& book = personnel_[fc.squadron];
+            PilotDelta* d = find_pilot_delta_(book, slot);
+            if (d == nullptr) {
+                PilotDelta nd;
+                nd.slot = slot;
+                nd.out = true;   // drawn with the flight
+                book.push_back(nd);
+                d = &book.back();
+            }
+            if (d->dead) continue;
+            d->dead = true;
+            if (auto* sq = find_squadron_(fc.squadron)) {
+                ++sq->run_pilot_losses;
+            }
+            PilotLossRecord lrec;
+            lrec.t_s = sim_time_s;
+            lrec.team = fc.team;
+            lrec.squadron = fc.squadron;
+            lrec.flight = victim_flight;
+            lrec.slot = slot;
+            pilot_losses_.push_back(lrec);
+            break;
+        }
+    }
+
     ++air_losses_;
     losses_.push_back(rec);
 }
 
 void CampaignResultLedger::apply_mission_draw(
-        double t_s, std::uint8_t team, std::uint32_t squadron_vu, int count) {
-    if (count <= 0) return;
+        double t_s, std::uint8_t team, std::uint32_t squadron_vu,
+        int count) {
+    apply_mission_draw(t_s, team, squadron_vu, count, 0, {});
+}
+
+void CampaignResultLedger::apply_mission_draw(
+        double t_s, std::uint8_t team, std::uint32_t squadron_vu,
+        int count, std::uint32_t flight_vu,
+        const std::vector<std::uint8_t>& crew) {
+    if (count <= 0 && crew.empty()) return;
 
     MissionDrawRecord rec;
     rec.t_s = t_s;
@@ -203,6 +256,40 @@ void CampaignResultLedger::apply_mission_draw(
     ++mission_draws_;
     mission_draw_aircraft_ += count;
     draws_.push_back(rec);
+
+    // DOM-3 — the crew: the flight's roster slots go OUT (drawn onto
+    // the booked flight), the assignment log records the pick, and the
+    // flight→crew map arms the loss/recovery paths. An unknown
+    // squadron still books the flight map (the crew is flight-keyed);
+    // the personnel deltas need the squadron's own row.
+    if (crew.empty()) return;
+    PilotAssignmentRecord arec;
+    arec.t_s = t_s;
+    arec.team = team;
+    arec.squadron = squadron_vu;
+    arec.flight = flight_vu;
+    arec.crew = crew;
+    pilot_assignments_.push_back(std::move(arec));
+
+    FlightCrew fc;
+    fc.team = team;
+    fc.squadron = squadron_vu;
+    fc.crew = crew;
+    flight_crews_[flight_vu] = std::move(fc);
+
+    if (sq != nullptr) {
+        auto& book = personnel_[squadron_vu];
+        for (const auto slot : crew) {
+            PilotDelta* d = find_pilot_delta_(book, slot);
+            if (d == nullptr) {
+                PilotDelta nd;
+                nd.slot = slot;
+                book.push_back(nd);
+                d = &book.back();
+            }
+            d->out = true;
+        }
+    }
 }
 
 void CampaignResultLedger::apply_mission_recovery(
@@ -240,6 +327,36 @@ void CampaignResultLedger::apply_mission_recovery(
     ++mission_recoveries_;
     aircraft_recovered_ += released;
     recoveries_.push_back(rec);
+
+    // DOM-3 — the crew returns: surviving slots come OFF the books
+    // (out = false) and each flew its sortie (missions credited, the
+    // recovery log records the face the event family rides). Dead
+    // slots stay dead — the flight's losses are spent. The map entry
+    // goes with the flight.
+    const auto cit = flight_crews_.find(flight_vu);
+    if (cit != flight_crews_.end()) {
+        FlightCrew fc = cit->second;
+        flight_crews_.erase(cit);
+        for (const auto slot : fc.crew) {
+            auto& book = personnel_[fc.squadron];
+            PilotDelta* d = find_pilot_delta_(book, slot);
+            if (d == nullptr) continue;
+            d->out = false;
+            if (d->dead) continue;
+            ++d->missions_added;
+            if (auto* sq = find_squadron_(fc.squadron)) {
+                ++sq->run_pilot_sorties;
+            }
+            PilotRecoveryRecord rrec;
+            rrec.t_s = t_s;
+            rrec.team = fc.team;
+            rrec.squadron = fc.squadron;
+            rrec.flight = flight_vu;
+            rrec.slot = slot;
+            rrec.missions_run = d->missions_added;
+            pilot_recoveries_.push_back(rrec);
+        }
+    }
 }
 
 int CampaignResultLedger::flight_air_losses(
@@ -256,6 +373,31 @@ int CampaignResultLedger::flight_air_losses(
         }
     }
     return n;
+}
+
+void CampaignResultLedger::sync_squadron_ratings(
+        std::uint32_t squadron_vu,
+        const std::array<std::uint8_t, 16>& ratings) {
+    // DOM-3 — last-write-wins per squadron (the fstatus discipline):
+    // the ATM pushes its live view after each decay fire; the
+    // write-back reads the final face, the fires counter is the
+    // activity marker (a run the decay never touched writes nothing).
+    if (auto* sq = find_squadron_(squadron_vu)) {
+        sq->role_ratings = ratings;
+        ++sq->ratings_fires;
+    }
+}
+
+const std::vector<PilotDelta>*
+CampaignResultLedger::squadron_personnel(std::uint32_t squadron_vu) const {
+    const auto it = personnel_.find(squadron_vu);
+    return it == personnel_.end() ? nullptr : &it->second;
+}
+
+const FlightCrew*
+CampaignResultLedger::flight_crew(std::uint32_t flight_vu) const {
+    const auto it = flight_crews_.find(flight_vu);
+    return it == flight_crews_.end() ? nullptr : &it->second;
 }
 
 int CampaignResultLedger::apply_reinforcements(double t_s,
@@ -659,6 +801,18 @@ std::string CampaignResultLedger::to_json() const {
     w.number_key("mission_recoveries", mission_recoveries_);
     w.put(",\n    ");
     w.number_key("aircraft_recovered", aircraft_recovered_);
+    w.put(",\n    ");
+    // CAMP-DOM-3 — the personnel totals (the logs' sizes: one crew per
+    // assignment record, one slot per loss/recovery record). The 0 is
+    // the honest "arms off / no rosters" answer.
+    w.number_key("pilot_assignments",
+                 static_cast<std::int64_t>(pilot_assignments_.size()));
+    w.put(",\n    ");
+    w.number_key("pilot_losses",
+                 static_cast<std::int64_t>(pilot_losses_.size()));
+    w.put(",\n    ");
+    w.number_key("pilot_sorties",
+                 static_cast<std::int64_t>(pilot_recoveries_.size()));
     w.put("\n  }");
 
     // Teams: slot order (the snapshot's order), initial + remaining +
@@ -707,10 +861,13 @@ std::string CampaignResultLedger::to_json() const {
         for (const auto& s : squadrons_) {
             // THIS-RUN deltas only — a mid-campaign save seeds non-zero
             // absolutes, and the artifact reports what happened THIS
-            // run, not the save's own history.
+            // run, not the save's own history. DOM-3: the personnel
+            // books count as activity too.
             if (s.run_aa_kills != 0 || s.run_ag_kills != 0 ||
                 s.run_losses != 0 || s.run_draws != 0 ||
-                s.run_reinforced != 0 || s.run_recoveries != 0) {
+                s.run_reinforced != 0 || s.run_recoveries != 0 ||
+                s.run_pilot_losses != 0 || s.run_pilot_sorties != 0 ||
+                s.ratings_fires != 0) {
                 active.push_back(&s);
             }
         }
@@ -750,6 +907,26 @@ std::string CampaignResultLedger::to_json() const {
             w.number_key("run_reinforced", s.run_reinforced);
             w.put(", ");
             w.number_key("reinforce_budget", s.reinforce_pending);
+            // DOM-3: the personnel books, only when the run moved the
+            // roster or the decay fired (a pristine ledger emits
+            // byte-identical squadron rows).
+            if (s.run_pilot_losses != 0 || s.run_pilot_sorties != 0 ||
+                s.ratings_fires != 0) {
+                w.put(", ");
+                w.number_key("run_pilot_losses", s.run_pilot_losses);
+                w.put(", ");
+                w.number_key("run_pilot_sorties", s.run_pilot_sorties);
+                if (s.ratings_fires != 0) {
+                    w.put(", ");
+                    w.put("\"role_ratings\": [");
+                    for (int ri = 0; ri < 16; ++ri) {
+                        if (ri) w.put(", ");
+                        w.number(
+                            s.role_ratings[static_cast<std::size_t>(ri)]);
+                    }
+                    w.put("]");
+                }
+            }
             w.put("}");
         }
         w.put(active.empty() ? "]" : "\n  ]");
@@ -813,6 +990,72 @@ std::string CampaignResultLedger::to_json() const {
         w.put("}");
     }
     w.put(reinforcements_.empty() ? "]" : "\n  ]");
+
+    // CAMP-DOM-3 — the personnel logs: arrival order, one record per
+    // crew/loss/sortie. Only present when one exists — the arms-off
+    // and no-roster runs stay byte-identical.
+    if (!pilot_assignments_.empty()) {
+        w.put(",\n  \"pilot_assignments\": [");
+        for (std::size_t i = 0; i < pilot_assignments_.size(); ++i) {
+            const auto& a = pilot_assignments_[i];
+            w.put(i ? ",\n    " : "\n    ");
+            w.put("{\"t_ms\": ");
+            w.put(time_ms(a.t_s));
+            w.put(", ");
+            w.number_key("team", a.team);
+            w.put(", ");
+            w.number_key("squadron", a.squadron);
+            w.put(", ");
+            w.number_key("flight", a.flight);
+            w.put(", \"crew\": [");
+            for (std::size_t c = 0; c < a.crew.size(); ++c) {
+                if (c) w.put(", ");
+                w.number(a.crew[c]);
+            }
+            w.put("]}");
+        }
+        w.put("\n  ]");
+    }
+    if (!pilot_losses_.empty()) {
+        w.put(",\n  \"pilot_losses\": [");
+        for (std::size_t i = 0; i < pilot_losses_.size(); ++i) {
+            const auto& l = pilot_losses_[i];
+            w.put(i ? ",\n    " : "\n    ");
+            w.put("{\"t_ms\": ");
+            w.put(time_ms(l.t_s));
+            w.put(", ");
+            w.number_key("team", l.team);
+            w.put(", ");
+            w.number_key("squadron", l.squadron);
+            w.put(", ");
+            w.number_key("flight", l.flight);
+            w.put(", ");
+            w.number_key("slot", l.slot);
+            w.put("}");
+        }
+        w.put("\n  ]");
+    }
+    if (!pilot_recoveries_.empty()) {
+        w.put(",\n  \"pilot_recoveries\": [");
+        for (std::size_t i = 0; i < pilot_recoveries_.size(); ++i) {
+            const auto& rc = pilot_recoveries_[i];
+            w.put(i ? ",\n    " : "\n    ");
+            w.put("{\"t_ms\": ");
+            w.put(time_ms(rc.t_s));
+            w.put(", ");
+            w.number_key("team", rc.team);
+            w.put(", ");
+            w.number_key("squadron", rc.squadron);
+            w.put(", ");
+            w.number_key("flight", rc.flight);
+            w.put(", ");
+            w.number_key("slot", rc.slot);
+            w.put(", ");
+            w.number_key("missions_run", rc.missions_run);
+            w.put("}");
+        }
+        w.put("\n  ]");
+    }
 
     // Air-loss events: arrival order (the log).
     w.put(",\n  \"air_losses\": [");

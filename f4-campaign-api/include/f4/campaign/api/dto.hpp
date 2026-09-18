@@ -13,6 +13,7 @@
 
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -540,6 +541,69 @@ inline void encode(f4::json::Writer& w, const VerdictView& v) {
         encode_verdict_row(w, v.teams[i]);
     }
     w.raw("]}");
+}
+
+// --- the squadrons view (CAMP-DOM-3 — the personnel face) ----------------
+//
+// One row per squadron in WIRE ORDER (the same order the books and the
+// write-back walk). Identity + the tasking availability + the pilot
+// roster's overlay face: the wire's own counts with the run's deltas
+// applied (dead = the ledger's crewed-flight losses; missions = the
+// wire's history + the run's credited sorties). ratings is the
+// squadron's per-role effectiveness table — the LIVE view when the
+// rating-decay arm ran, else the wire's own rating[16] (zero when the
+// save carries none; the array is always 16 wide).
+struct SquadronView {
+    std::uint32_t vu{0};          ///< VU_ID.num (the campaign key)
+    std::uint8_t team{0};         ///< owner slot
+    std::string name;             ///< display name
+    std::uint32_t airbase_id{0};  ///< home airbase VU_ID.num (0 = none)
+    std::uint8_t specialty{0};    ///< wire byte (0/1/2: none/AA/AG)
+    int available{0};             ///< tasking availability (the live pool)
+    int pilots_total{0};          ///< the wire roster's size
+    int pilots_available{0};      ///< status 0 and not dead/out this run
+    int pilots_dead{0};           ///< lost this run (crewed-flight deaths)
+    int missions_flown{0};        ///< the wire aggregate (unchanged this run)
+    std::array<std::uint8_t, 16> ratings{};  ///< the per-role table
+};
+
+inline void encode(f4::json::Writer& w, const SquadronView& s) {
+    w.raw("{\"vu\":");
+    w.number(static_cast<std::uint64_t>(s.vu));
+    w.raw(",\"team\":");
+    w.number(s.team);
+    w.raw(",\"name\":\"");
+    w.put(f4::json::escape_string(s.name));
+    w.raw("\",\"airbase_id\":");
+    w.number(static_cast<std::uint64_t>(s.airbase_id));
+    w.raw(",\"specialty\":");
+    w.number(s.specialty);
+    w.raw(",\"available\":");
+    w.number(s.available);
+    w.raw(",\"pilots_total\":");
+    w.number(s.pilots_total);
+    w.raw(",\"pilots_available\":");
+    w.number(s.pilots_available);
+    w.raw(",\"pilots_dead\":");
+    w.number(s.pilots_dead);
+    w.raw(",\"missions_flown\":");
+    w.number(s.missions_flown);
+    w.raw(",\"ratings\":[");
+    for (std::size_t i = 0; i < s.ratings.size(); ++i) {
+        if (i) w.raw(",");
+        w.number(s.ratings[i]);
+    }
+    w.raw("]}");
+}
+
+inline void encode(f4::json::Writer& w,
+                   const std::vector<SquadronView>& squadrons) {
+    w.put('[');
+    for (std::size_t i = 0; i < squadrons.size(); ++i) {
+        if (i != 0) w.put(',');
+        encode(w, squadrons[i]);
+    }
+    w.put(']');
 }
 
 } // namespace f4::campaign::api

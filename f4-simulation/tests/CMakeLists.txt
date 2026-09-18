@@ -173,6 +173,19 @@ target_compile_definitions(test_campaign_supply PRIVATE
 )
 add_dependencies(test_campaign_supply mission_profiles_fixture)
 
+# DOM-3 — the personnel layer's sim-side gates: the crews ride the
+# intents/books/events one-for-one, the squadrons query serves the
+# personnel face, the golden identity with the arms off, and the
+# write-back gate (a draws-only run writes no roster).
+f4_simulation_add_test(test_campaign_personnel_session test_campaign_personnel_session.cpp)
+target_compile_definitions(test_campaign_personnel_session PRIVATE
+    F4_SIMULATION_TEST_FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures"
+    F4_SOURCE_FIXTURES_DIR="${CMAKE_SOURCE_DIR}/f4-world-convert/tests/fixtures"
+    F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}"
+    F4_MISSION_PROFILES_JSON="${F4_MISSION_PROFILES_JSON}"
+)
+add_dependencies(test_campaign_personnel_session mission_profiles_fixture)
+
 # P7 — the strategy layer's sim-side integration: the station contract
 # ride (route → plan → brain), the post-arm RoE gates, and the
 # strategy-armed session (stationed CAPs spawn with racetrack plans;

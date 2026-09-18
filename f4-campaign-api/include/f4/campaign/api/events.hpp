@@ -25,6 +25,7 @@
 #pragma once
 
 #include <cstdint>
+#include <array>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -146,6 +147,44 @@ struct VerdictEvent {
     std::string band;      ///< stalemate | advantage | decisive
     int leader{-1};
     int swing{0};
+};
+
+// A flight drew its crew (CAMP-DOM-3 — AssignPilots' event face). The
+// pilots are the squadron's ROSTER SLOTS in pick order, pilots[0] =
+// the lead (the reference's front-third scan; wingmen from the tail).
+// Fires only when the pilot-assignment arm is on AND the roster
+// crewed the flight — save-loaded flights carry no crew.
+struct PilotAssignedEvent {
+    std::int64_t t{0};
+    std::uint8_t team{0};
+    std::uint32_t squadron{0};
+    std::uint32_t flight{0};
+    std::vector<std::uint8_t> pilots;   ///< roster slots, lead first
+};
+
+// A pilot died (CAMP-DOM-3): a crewed flight's loss consumed its
+// roster slot (losses eat the crew in pick order — the deterministic
+// subset; the reference tracks per-aircraft pilots in the flight tail
+// the aggregate books do not carry).
+struct PilotLostEvent {
+    std::int64_t t{0};
+    std::uint8_t team{0};
+    std::uint32_t squadron{0};
+    std::uint32_t flight{0};
+    std::uint8_t pilot{0};              ///< the roster slot that died
+};
+
+// A pilot came home (CAMP-DOM-3): a crewed flight recovered and its
+// surviving pilots flew their sortie. missions_run = the slot's
+// sorties credited THIS RUN (the wire's own missions_flown is the
+// save's history — the write-back adds, it never replaces).
+struct PilotRecoveredEvent {
+    std::int64_t t{0};
+    std::uint8_t team{0};
+    std::uint32_t squadron{0};
+    std::uint32_t flight{0};
+    std::uint8_t pilot{0};              ///< the roster slot that flew
+    int missions_run{0};
 };
 
 // --- encoders (byte-stable; the family name is the discriminator) -------
@@ -296,6 +335,53 @@ inline void encode(f4::json::Writer& w, const VerdictEvent& e) {
     w.put('}');
 }
 
+inline void encode(f4::json::Writer& w, const PilotAssignedEvent& e) {
+    w.raw("{\"ev\":\"pilot_assigned\",\"t\":");
+    w.number(static_cast<long long>(e.t));
+    w.raw(",\"team\":");
+    w.number(e.team);
+    w.raw(",\"squadron\":");
+    w.number(static_cast<std::uint64_t>(e.squadron));
+    w.raw(",\"flight\":");
+    w.number(static_cast<std::uint64_t>(e.flight));
+    w.raw(",\"pilots\":[");
+    for (std::size_t i = 0; i < e.pilots.size(); ++i) {
+        if (i) w.raw(",");
+        w.number(e.pilots[i]);
+    }
+    w.raw("]}");
+}
+
+inline void encode(f4::json::Writer& w, const PilotLostEvent& e) {
+    w.raw("{\"ev\":\"pilot_lost\",\"t\":");
+    w.number(static_cast<long long>(e.t));
+    w.raw(",\"team\":");
+    w.number(e.team);
+    w.raw(",\"squadron\":");
+    w.number(static_cast<std::uint64_t>(e.squadron));
+    w.raw(",\"flight\":");
+    w.number(static_cast<std::uint64_t>(e.flight));
+    w.raw(",\"pilot\":");
+    w.number(e.pilot);
+    w.put('}');
+}
+
+inline void encode(f4::json::Writer& w, const PilotRecoveredEvent& e) {
+    w.raw("{\"ev\":\"pilot_recovered\",\"t\":");
+    w.number(static_cast<long long>(e.t));
+    w.raw(",\"team\":");
+    w.number(e.team);
+    w.raw(",\"squadron\":");
+    w.number(static_cast<std::uint64_t>(e.squadron));
+    w.raw(",\"flight\":");
+    w.number(static_cast<std::uint64_t>(e.flight));
+    w.raw(",\"pilot\":");
+    w.number(e.pilot);
+    w.raw(",\"missions_run\":");
+    w.number(e.missions_run);
+    w.put('}');
+}
+
 // --- the tagged envelope (the ONE bus message type) ---------------------
 //
 // HOST-2 publishes ONE message type onto the session's bus — the bus is
@@ -316,6 +402,9 @@ struct CampaignEvent {
         ActionFiled,
         Verdict,
         ObjectiveRepaired,
+        PilotAssigned,
+        PilotLost,
+        PilotRecovered,
     };
 
     Kind kind{Kind::TaskingCycle};
@@ -331,6 +420,9 @@ struct CampaignEvent {
     ActionFiledEvent action_filed{};
     VerdictEvent verdict{};
     ObjectiveRepairedEvent objective_repaired{};
+    PilotAssignedEvent pilot_assigned{};
+    PilotLostEvent pilot_lost{};
+    PilotRecoveredEvent pilot_recovered{};
 };
 
 // The v1 kind names — the wire's filter vocabulary (the `subscribe`
@@ -349,6 +441,9 @@ event_kind_name(CampaignEvent::Kind k) noexcept {
         case CampaignEvent::Kind::ActionFiled:           return "action_filed";
         case CampaignEvent::Kind::Verdict:               return "verdict";
         case CampaignEvent::Kind::ObjectiveRepaired:     return "objective_repaired";
+        case CampaignEvent::Kind::PilotAssigned:         return "pilot_assigned";
+        case CampaignEvent::Kind::PilotLost:             return "pilot_lost";
+        case CampaignEvent::Kind::PilotRecovered:        return "pilot_recovered";
     }
     return "tasking_cycle";
 }
@@ -368,6 +463,9 @@ parse_event_kind(std::string_view name, CampaignEvent::Kind& out) noexcept {
              CampaignEvent::Kind::ActionFiled,
              CampaignEvent::Kind::Verdict,
              CampaignEvent::Kind::ObjectiveRepaired,
+             CampaignEvent::Kind::PilotAssigned,
+             CampaignEvent::Kind::PilotLost,
+             CampaignEvent::Kind::PilotRecovered,
          }) {
         if (name == event_kind_name(k)) {
             out = k;
@@ -390,6 +488,9 @@ inline void encode(f4::json::Writer& w, const CampaignEvent& e) {
         case CampaignEvent::Kind::ActionFiled:            encode(w, e.action_filed); break;
         case CampaignEvent::Kind::Verdict:                encode(w, e.verdict); break;
         case CampaignEvent::Kind::ObjectiveRepaired:      encode(w, e.objective_repaired); break;
+        case CampaignEvent::Kind::PilotAssigned:          encode(w, e.pilot_assigned); break;
+        case CampaignEvent::Kind::PilotLost:              encode(w, e.pilot_lost); break;
+        case CampaignEvent::Kind::PilotRecovered:         encode(w, e.pilot_recovered); break;
     }
 }
 
@@ -410,6 +511,9 @@ inline void encode(f4::json::Writer& w, const CampaignEvent& e) {
 //   action_filed            the filing team (the ACTION reacts FOR
 //                           them — the owner defends, the striker
 //                           punishes)
+//   pilot_assigned          the flying team (the crew draws FOR them)
+//   pilot_lost              the squadron's team (the slot that died)
+//   pilot_recovered         the squadron's team (the slot that flew)
 //   reinforcement_delivered teamless in v1 (matches any team gate)
 //   weather_changed         teamless (matches any team gate)
 //   roe_changed             the scope's team when scoped to a team;
@@ -458,6 +562,12 @@ listed(const std::vector<int>& teams, int team) noexcept {
             return listed(f.teams, e.objective_captured.new_owner);
         case CampaignEvent::Kind::ObjectiveRepaired:
             return listed(f.teams, e.objective_repaired.owner);
+        case CampaignEvent::Kind::PilotAssigned:
+            return listed(f.teams, e.pilot_assigned.team);
+        case CampaignEvent::Kind::PilotLost:
+            return listed(f.teams, e.pilot_lost.team);
+        case CampaignEvent::Kind::PilotRecovered:
+            return listed(f.teams, e.pilot_recovered.team);
         case CampaignEvent::Kind::RoeChanged:
             return e.roe_changed.scope.kind == RoEScopeKind::Team
                        ? listed(f.teams, e.roe_changed.scope.team)

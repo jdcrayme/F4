@@ -65,3 +65,10 @@ f4_campaign_add_test(test_ground_targeting     test_ground_targeting.cpp)
 f4_campaign_add_test(test_war_verdict    test_war_verdict.cpp)
 target_link_libraries(test_war_verdict PRIVATE f4-json)
 target_link_libraries(test_ground_war PRIVATE f4-json)
+
+# DOM-3 — the personnel layer: AssignPilots (the crew pick + the
+# pick-time gate), the rating-decay arm, the ledger's personnel books,
+# and the write-back's roster face. Links f4-json (the ledger's to_json
+# rides the same lib set).
+f4_campaign_add_test(test_campaign_personnel test_campaign_personnel.cpp)
+target_link_libraries(test_campaign_personnel PRIVATE f4-json)

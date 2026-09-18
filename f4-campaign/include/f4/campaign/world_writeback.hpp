@@ -20,6 +20,11 @@
 //     post-run value (only teams whose stock the reinforcement flow
 //     actually moved — the .tea mutation face the save-write path
 //     already carries)
+//   * DOM-3: squadron personnel — the run's roster deltas applied to
+//     the wire's own pilot array (dead slots → status 1, per-pilot
+//     missions_flown += the run's credited sorties) and the decayed
+//     per-role rating table (only squadrons whose rosters the run
+//     actually moved or whose ratings the decay arm actually fired)
 //
 // After this, the standard pipeline applies: a world JSON written from
 // the mutated state (the open-format save), populate_world into a fresh
@@ -51,6 +56,9 @@ struct WorldWritebackResult {
     int objectives_written = 0;
     /// DOM-2: strategic reserves written (slot matched a team row).
     int replacement_stocks_written = 0;
+    /// DOM-3: squadron personnel rows written (VU matched a squadron
+    /// whose roster deltas or rating fires had run activity).
+    int personnel_written = 0;
     /// Ledger squadron VUs with activity but no matching unit.
     std::vector<std::uint32_t> unmatched_squadrons;
     /// Ledger objective VUs with damage but no matching objective.
