@@ -9,6 +9,7 @@ add_library(f4-world STATIC
     src/world_state.cpp
     src/world_loader.cpp
     src/airbase_synthesis.cpp
+    src/theater_tables.cpp
 )
 target_link_libraries(f4-world PUBLIC f4_warnings)
 
@@ -25,7 +26,9 @@ target_include_directories(f4-world
 # references through the manifest). It does NOT depend on f4-world-convert
 # itself — the contract between them is JSON, so the library and the
 # converter are independently testable.
-target_link_libraries(f4-world PUBLIC f4-entities f4-terrain PRIVATE f4-geo f4-json f4-assets)
+# f4-world-types is PUBLIC: theater_tables.hpp's resolver signature
+# carries the runtime ClassTable (CAMP-SCALE-1).
+target_link_libraries(f4-world PUBLIC f4-entities f4-terrain f4-world-types PRIVATE f4-geo f4-json f4-assets)
 
 # Tests
 option(F4_WORLD_BUILD_TESTS "Build unit tests" ON)

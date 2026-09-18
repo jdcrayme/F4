@@ -347,6 +347,13 @@ Scenario parse_scenario(f4::json::Reader& r) {
                     s.combat.weapon_data_path = r.read_string();
                 else if (k == "ir_seeker_data_path")
                     s.combat.ir_seeker_data_path = r.read_string();
+                // CAMP-SCALE-1: the converted theater tables + the
+                // pilot-skill flow gate. Unset keys keep the defaults
+                // (the golden identity).
+                else if (k == "theater_tables_path")
+                    s.combat.theater_tables_path = r.read_string();
+                else if (k == "pilot_skill_flow")
+                    s.combat.pilot_skill_flow = r.read_bool();
                 else if (k == "signature_data_path")
                     s.combat.signature_data_path = r.read_string();
                 else if (k == "aircraft_signature_stems") {

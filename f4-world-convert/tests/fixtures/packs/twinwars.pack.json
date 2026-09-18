@@ -1,0 +1,79 @@
+{
+  "pack": 1,
+  "name": "genwar-twinwars",
+  "camp_version": 71,
+  "seed": 77123,
+  "theater": {
+    "name": "GENERATED WAR",
+    "ui_name": "GenWar TwinWars",
+    "id": "korea",
+    "terrain_file": "korea.terrain.json",
+    "size_x": 256,
+    "size_y": 256
+  },
+  "date": { "current_time": 32400000, "day": 1 },
+  "weather": { "seed": 5, "condition": "clear" },
+  "bullseye": { "x": 128, "y": 128, "name": 1 },
+  "player_team": 1,
+  "teams": [
+    { "slot": 1, "name": "USA", "colour": 2, "motto": "First to fight",
+      "air_experience": 80, "ground_experience": 80,
+      "reserve_aircraft": 8, "replacements": 12, "supply": 1000, "fuel": 1000 },
+    { "slot": 2, "name": "ROK", "colour": 3, "motto": "Third armed side",
+      "air_experience": 70, "ground_experience": 75,
+      "reserve_aircraft": 8, "replacements": 12, "supply": 1000, "fuel": 1000 },
+    { "slot": 3, "name": "Neutralia", "colour": 4, "motto": "Second war pair",
+      "air_experience": 60, "ground_experience": 60,
+      "reserve_aircraft": 8, "replacements": 12, "supply": 1000, "fuel": 1000 },
+    { "slot": 6, "name": "DPRK", "colour": 5, "motto": "A world of peace",
+      "air_experience": 60, "ground_experience": 70,
+      "reserve_aircraft": 8, "replacements": 12, "supply": 1000, "fuel": 1000 },
+    { "slot": 7, "name": "Violetia", "colour": 6, "motto": "Second war pair",
+      "air_experience": 60, "ground_experience": 60,
+      "reserve_aircraft": 8, "replacements": 12, "supply": 1000, "fuel": 1000 }
+  ],
+  "relations": [
+    { "a": 1, "b": 6, "stance": "war" },
+    { "a": 2, "b": 6, "stance": "war" },
+    { "a": 1, "b": 2, "stance": "allied" },
+    { "a": 3, "b": 7, "stance": "war" }
+  ],
+  "objectives": [
+    { "name": "Blue Main",     "kind": "airbase",  "x": 64,  "y": 44,  "owner": 1, "priority": 60 },
+    { "name": "Blue Camp",     "kind": "armybase", "x": 88,  "y": 60,  "owner": 1, "priority": 40 },
+    { "name": "Blue City",     "kind": "city",     "x": 60,  "y": 76,  "owner": 1, "priority": 50 },
+    { "name": "Green Base",    "kind": "airbase",  "x": 120, "y": 52,  "owner": 2, "priority": 50 },
+    { "name": "Green Camp",    "kind": "armybase", "x": 136, "y": 68,  "owner": 2, "priority": 35 },
+    { "name": "Red Main",      "kind": "airbase",  "x": 192, "y": 208, "owner": 6, "priority": 60 },
+    { "name": "Red Camp",      "kind": "armybase", "x": 168, "y": 192, "owner": 6, "priority": 40 },
+    { "name": "Red City",      "kind": "city",     "x": 196, "y": 176, "owner": 6, "priority": 50 },
+    { "name": "Orange Base",   "kind": "airbase",  "x": 44,  "y": 208, "owner": 3, "priority": 45 },
+    { "name": "Orange Camp",   "kind": "armybase", "x": 68,  "y": 216, "owner": 3, "priority": 30 },
+    { "name": "Violet Base",   "kind": "airbase",  "x": 216, "y": 56,  "owner": 7, "priority": 45 },
+    { "name": "Violet Camp",   "kind": "armybase", "x": 192, "y": 44,  "owner": 7, "priority": 30 },
+    { "name": "Crossroads",    "kind": "city",     "x": 128, "y": 128, "owner": 0, "priority": 10 },
+    { "name": "Bridge One",    "kind": "bridge",   "x": 100, "y": 108, "owner": 0, "priority": 15 }
+  ],
+  "links": [
+    [0, 1], [1, 2], [0, 3], [3, 4], [2, 13], [13, 7], [4, 7],
+    [8, 9], [10, 11], [12, 13], [2, 12], [12, 7]
+  ],
+  "squadrons": [
+    { "team": 1, "base": "Blue Main",   "name": "1st FW",  "size": 12, "skill": 5, "specialty": "AA", "entity_type": 473 },
+    { "team": 1, "base": "Blue Main",   "name": "2nd FW",  "size": 8,  "skill": 4, "specialty": "AG", "entity_type": 473 },
+    { "team": 2, "base": "Green Base",  "name": "4th FW",  "size": 8,  "skill": 4, "specialty": "AA", "entity_type": 473 },
+    { "team": 6, "base": "Red Main",    "name": "6th FW",  "size": 12, "skill": 4, "specialty": "AA", "entity_type": 473 },
+    { "team": 6, "base": "Red Main",    "name": "7th FW",  "size": 8,  "skill": 3, "specialty": "AG", "entity_type": 473 },
+    { "team": 3, "base": "Orange Base", "name": "3rd FW",  "size": 8,  "skill": 3, "specialty": "AA", "entity_type": 473 },
+    { "team": 7, "base": "Violet Base", "name": "8th FW",  "size": 8,  "skill": 3, "specialty": "AA", "entity_type": 473 }
+  ],
+  "battalions": [
+    { "team": 1, "at": "Blue Camp",   "kind": "armor",       "groups": 4 },
+    { "team": 1, "at": "Blue City",   "kind": "infantry",    "groups": 3 },
+    { "team": 2, "at": "Green Camp",  "kind": "armor",       "groups": 3 },
+    { "team": 6, "at": "Red Camp",    "kind": "armor",       "groups": 4 },
+    { "team": 6, "at": "Red City",    "kind": "infantry",    "groups": 3 },
+    { "team": 3, "at": "Orange Camp", "kind": "armor",       "groups": 2 },
+    { "team": 7, "at": "Violet Camp", "kind": "armor",       "groups": 2 }
+  ]
+}

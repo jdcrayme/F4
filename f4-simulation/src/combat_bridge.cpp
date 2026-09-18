@@ -283,7 +283,15 @@ void attach_combat_loadout(entities::EntityHandle& aircraft,
     // pre-tranche scenarios arm no dispenser and fly byte-identical
     // fights).
     if (countermeasures) {
-        aircraft.add<weapons::CountermeasureComponent>();
+        auto& cm = aircraft.add<weapons::CountermeasureComponent>();
+        // CAMP-SCALE-1: the VCD-resolved supply (stamped at spawn from
+        // the converted tables) replaces the documented 30/15 defaults
+        // when present. No component (no tables / unresolved vehicle) =
+        // the defaults stand — the golden identity.
+        if (auto* supply = aircraft.get<CountermeasureSupplyComponent>()) {
+            cm.chaff_rounds = cm.chaff_capacity = supply->chaff_rounds;
+            cm.flare_rounds = cm.flare_capacity = supply->flare_rounds;
+        }
     }
 
     // The radar: default parameter card + scan volume; per-aircraft seed
@@ -1042,7 +1050,13 @@ CampaignCombatArmament arm_campaign_combat(
     // (the golden identity rule).
     if (countermeasures &&
         aircraft.get<weapons::CountermeasureComponent>() == nullptr) {
-        aircraft.add<weapons::CountermeasureComponent>();
+        auto& cm = aircraft.add<weapons::CountermeasureComponent>();
+        // CAMP-SCALE-1: the VCD-resolved supply (see attach_combat_loadout)
+        // replaces the documented 30/15 defaults when the spawn stamped it.
+        if (auto* supply = aircraft.get<CountermeasureSupplyComponent>()) {
+            cm.chaff_rounds = cm.chaff_capacity = supply->chaff_rounds;
+            cm.flare_rounds = cm.flare_capacity = supply->flare_rounds;
+        }
         out.components_attached = true;
     }
     if (aircraft.get<entities::DamageStateComponent>() == nullptr) {

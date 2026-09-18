@@ -438,7 +438,7 @@ public:
             if (world) {
                 if (!combat_initialized_) {
                     sensors_.initialize(owner_.id().value, *world, bus,
-                                        SkillLevel::Veteran);
+                                        pilot_skill_);
                     combat_initialized_ = true;
                 }
                 // Per the skill interval (Veteran = 5 s)...
@@ -941,6 +941,17 @@ public:
     /// on sensors() (the radar-backed adapter lives in f4-simulation).
     void set_combat_enabled(bool on) noexcept { combat_enabled_ = on; }
     [[nodiscard]] bool combat_enabled() const noexcept { return combat_enabled_; }
+
+    // --- Pilot skill (CAMP-SCALE-1) ---------------------------------------
+    /// The AI skill the SensorFusion cadence runs at. The default stays
+    /// Veteran — every pre-SCALE world (which decodes no pilot roster, or
+    /// whose host has not turned the pilot-skill flow on) builds the exact
+    /// fusion cadence it always built (the golden-identity rule). The
+    /// campaign bridge sets this at spawn from the flight's squadron
+    /// pilot roster when the flow is enabled: the converted tables' pilot
+    /// data finally reaches the fight.
+    void set_pilot_skill(SkillLevel s) noexcept { pilot_skill_ = s; }
+    [[nodiscard]] SkillLevel pilot_skill() const noexcept { return pilot_skill_; }
     [[nodiscard]] CombatMode combat_mode() const noexcept { return combat_mode_; }
     [[nodiscard]] SafetyMode safety_mode() const noexcept { return safety_mode_; }
     [[nodiscard]] const char* safety_mode_name() const noexcept {
@@ -1243,6 +1254,9 @@ private:
     bool hold_fire_{false};
     bool bvr_hold_{false};
     bool in_wvr_{false};
+    /// CAMP-SCALE-1: the fusion cadence's skill. Default Veteran = the
+    /// pre-SCALE identity (see set_pilot_skill).
+    SkillLevel pilot_skill_{SkillLevel::Veteran};
 
     // --- BRAINDAT archetype (see set_brain_archetype) --------------------
     const f4::data::BrainArchetype* archetype_{nullptr};

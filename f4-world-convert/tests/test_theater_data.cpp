@@ -1621,3 +1621,171 @@ TEST(TheaterDataPhase1, UcdThreatModelArraysEmittedWhenTheaterDbLoaded) {
     EXPECT_NE(tail.find("\"weapon_range\": ["), std::string::npos);
     EXPECT_NE(tail.find("\"hit_chance\": ["), std::string::npos);
 }
+
+// ============================================================================
+// CAMP-SCALE-1 — the full theater tables as JSON (the Tier-3 full-data
+// pass) + the PLT_PARK decode closure.
+// ============================================================================
+
+TEST(TheaterData, EmitTablesJsonRealFixtureStrictJsonWithKnownRows) {
+    // The emitter writes the COMPLETE UCD/VCD/WCD tables as one strict
+    // JSON document. Against the real fixtures: 8 UCD rows, 12 VCD rows,
+    // known record values land verbatim, and the document strictly parses
+    // (the same Reader the runtime loader uses).
+    const auto dir = std::filesystem::temp_directory_path() /
+                     "f4_emit_tables_test";
+    std::filesystem::create_directories(dir);
+    for (const char* ext : {"UCD", "VCD", "WCD"}) {
+        const std::string src =
+            std::string(FIXTURE_DIR) + "Falcon4." + ext;
+        const std::string name = std::string("Falcon4.") + ext;
+        if (std::filesystem::exists(src)) {
+            std::filesystem::copy_file(
+                src, dir / name,
+                std::filesystem::copy_options::overwrite_existing);
+        }
+    }
+    f4::world_convert::TheaterObjectDatabase db;
+    db.load_all(dir);
+    ASSERT_TRUE(db.units.loaded());
+    ASSERT_TRUE(db.vehicles.loaded());
+
+    const auto out_path = dir / "tables.json";
+    ASSERT_NO_THROW(f4::world_convert::emit_tables_json(db, out_path.string()));
+
+    std::ifstream f(out_path, std::ios::binary);
+    ASSERT_TRUE(f.good());
+    std::ostringstream ss;
+    ss << f.rdbuf();
+    const std::string json = ss.str();
+
+    // 1. Strict JSON (the runtime loader's own walk).
+    {
+        f4::json::Reader r(json);
+        r.skip_ws();
+        ASSERT_NO_THROW(r.skip_value());
+    }
+
+    // 2. Counts match the decoded tables.
+    EXPECT_NE(json.find("\"format\": \"f4.theater.tables/1\""),
+              std::string::npos);
+    EXPECT_NE(json.find("\"units\": " + std::to_string(db.units.size())),
+              std::string::npos);
+    EXPECT_NE(json.find("\"vehicles\": " + std::to_string(db.vehicles.size())),
+              std::string::npos);
+
+    // 3. Known real rows land verbatim (the pinned record values):
+    //    UCD[1] "Airlift" (Air), VCD[1] "An-70".
+    EXPECT_NE(json.find("\"name\": \"Airlift\""), std::string::npos);
+    EXPECT_NE(json.find("\"name\": \"An-70\""), std::string::npos);
+    // The enrichment vocabulary fields the gate's consumers read.
+    EXPECT_NE(json.find("\"scores\": ["), std::string::npos);
+    EXPECT_NE(json.find("\"number_of_pilots\""), std::string::npos);
+    EXPECT_NE(json.find("\"weapon\": ["), std::string::npos);
+
+    std::filesystem::remove_all(dir);
+}
+
+TEST(TheaterData, EmitTablesJsonFullScaleSynthetic) {
+    // The sample fixtures scale to the FULL theater tables with no
+    // format change: 296 UCD rows (the real Korea count — 37 copies of
+    // the 8-record fixture body under a fresh count header) emit all
+    // 296, and the last row is present and named.
+    const std::string src = std::string(FIXTURE_DIR) + "Falcon4.UCD";
+    ASSERT_TRUE(std::filesystem::exists(src));
+    std::ifstream in(src, std::ios::binary);
+    ASSERT_TRUE(in.good());
+    std::vector<uint8_t> fixture((std::istreambuf_iterator<char>(in)),
+                                 std::istreambuf_iterator<char>());
+    ASSERT_GE(fixture.size(), std::size_t{2} + 8 * f4::world_convert::UCD_RECORD_SIZE);
+
+    // 2-byte count header + 296 records (37 × the fixture's 8-record body).
+    std::vector<uint8_t> full;
+    full.reserve(2 + std::size_t{296} * f4::world_convert::UCD_RECORD_SIZE);
+    full.push_back(static_cast<uint8_t>(296 & 0xFF));
+    full.push_back(static_cast<uint8_t>((296 >> 8) & 0xFF));
+    const auto body_begin = fixture.begin() + 2;
+    for (int i = 0; i < 37; ++i) {
+        full.insert(full.end(), body_begin,
+                    body_begin + static_cast<std::ptrdiff_t>(
+                                     8 * f4::world_convert::UCD_RECORD_SIZE));
+    }
+
+    const auto dir = std::filesystem::temp_directory_path() /
+                     "f4_emit_tables_full_test";
+    std::filesystem::create_directories(dir);
+    {
+        std::ofstream f(dir / "Falcon4.UCD", std::ios::binary);
+        f.write(reinterpret_cast<const char*>(full.data()),
+                static_cast<std::streamsize>(full.size()));
+    }
+    f4::world_convert::TheaterObjectDatabase db;
+    db.load_all(dir);
+    ASSERT_EQ(db.units.size(), 296u);
+
+    const auto out_path = dir / "tables.json";
+    ASSERT_NO_THROW(f4::world_convert::emit_tables_json(db, out_path.string()));
+    std::ifstream f(out_path, std::ios::binary);
+    ASSERT_TRUE(f.good());
+    std::ostringstream ss;
+    ss << f.rdbuf();
+    const std::string json = ss.str();
+
+    EXPECT_NE(json.find("\"units\": 296"), std::string::npos);
+    // Strict JSON at full scale.
+    f4::json::Reader r(json);
+    r.skip_ws();
+    ASSERT_NO_THROW(r.skip_value());
+
+    std::filesystem::remove_all(dir);
+}
+
+TEST(TheaterData, PltParkListsDecodeWithTypeAndPoints) {
+    // Closes LANDING_PRECISION B1 with a test instead of an open
+    // question: the PD decode is type-agnostic — PLT_PARK (type 11)
+    // headers decode with their parking points exactly like the runway
+    // lists do. Korea's PD carries none (documented); theaters that DO
+    // carry them flow to the world JSON's ground_layout (the emission
+    // walks every list type) and campaign_bridge prefers decoded lists
+    // over the synthetic 8-spot row.
+    const auto phd_buf = build_synthetic_phd(8);  // cycles types 1 / 11
+    const auto pd_buf = build_synthetic_pd(40);
+    const auto dir = std::filesystem::temp_directory_path() /
+                     "f4_plt_park_test";
+    std::filesystem::create_directories(dir);
+    {
+        std::ofstream f(dir / "Falcon4.PHD", std::ios::binary);
+        f.write(reinterpret_cast<const char*>(phd_buf.data()),
+                static_cast<std::streamsize>(phd_buf.size()));
+        std::ofstream g(dir / "Falcon4.PD", std::ios::binary);
+        g.write(reinterpret_cast<const char*>(pd_buf.data()),
+                static_cast<std::streamsize>(pd_buf.size()));
+    }
+    f4::world_convert::TheaterObjectDatabase db;
+    db.load_all(dir);
+    ASSERT_TRUE(db.pt_headers.loaded());
+    ASSERT_TRUE(db.pt_data.loaded());
+
+    // The type-11 (parking) headers decoded, named, and chained to their
+    // points (the synthetic builder pairs header i with PD rows [i*3 ..]).
+    int park_lists = 0;
+    for (std::size_t i = 0; i < db.pt_headers.size(); ++i) {
+        const auto* h = db.pt_headers.at(i);
+        ASSERT_NE(h, nullptr);
+        if (h->type == static_cast<uint8_t>(
+                f4::world_convert::PointListType::PLT_PARK)) {
+            ++park_lists;
+            EXPECT_STREQ(
+                f4::world_convert::point_list_type_name(h->type),
+                "Parking");
+            ASSERT_GT(h->count, 0);
+            const auto* pt = db.pt_data.at(
+                static_cast<std::size_t>(h->first));
+            ASSERT_NE(pt, nullptr);
+        }
+    }
+    EXPECT_EQ(park_lists, 4)  // 8 headers, half of them type 11
+        << "the decoder must retain PLT_PARK lists, not skip them";
+
+    std::filesystem::remove_all(dir);
+}

@@ -110,3 +110,19 @@ target_compile_definitions(test_save_writeback PRIVATE
     FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/"
     REPO_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/../../")
 gtest_discover_tests(test_save_writeback)
+
+# CAMP-INIT-1 — the scenario pack parser (strict surface, vocabulary).
+f4_add_test(test_scenario_pack test_scenario_pack.cpp)
+
+# CAMP-INIT-1 — the initializer gates: byte-identity by construction,
+# the generated save decodes cursor-clean in the existing reader, and
+# the world JSON (the reader's own projection) loads through
+# f4-world's WorldState. Links f4-world for the round-trip — the test
+# IS the host, same exemption as test_save_writeback.
+add_executable(test_campaign_initializer test_campaign_initializer.cpp)
+target_link_libraries(test_campaign_initializer PRIVATE GTest::gtest_main
+                                                        f4-world-convert f4-world)
+target_compile_definitions(test_campaign_initializer PRIVATE
+    FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/"
+    REPO_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/../../")
+gtest_discover_tests(test_campaign_initializer)

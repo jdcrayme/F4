@@ -33,6 +33,13 @@
 >   Build/test pending.
 > - **Tranche B (taxi-back)** ⏳ — not started (PLT_PARK data
 >   investigation + Kunsan `taxi_in_route`/`parking_spots` wiring).
+>   **B1 CLOSED by CAMP-SCALE-1 (as a test)**: the PD decode is
+>   type-agnostic — PLT_PARK (type 11) lists decode and flow to the
+>   ground layouts whenever a theater carries them, and
+>   campaign_bridge already prefers decoded lists over the synthetic
+>   8-spot row. Korea's PD genuinely carries none (the original
+>   finding), so Korea parking stays synthetic until a theater/PD with
+>   lists is available — the data, not the code, is the remainder.
 >
 > **Predecessors**: `FLIGHT_CONTROL_NEXT_STEPS.md` (§2 table verified STALE
 > by RECON-1 — 15 of 18 "not done" items are actually done), `AI_IMPLEMENTATION_PLAN.md` §5

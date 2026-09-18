@@ -246,6 +246,23 @@ struct CombatConfig {
     /// but-unloadable path is a LOUD failure (the brain-data
     /// discipline).
     std::string ir_seeker_data_path;
+    /// CAMP-SCALE-1 — the converted theater tables (cam2json
+    /// --emit-tables output; f4-world's TheaterTables reads it). Empty
+    /// (default) = the documented countermeasure defaults (chaff 30 /
+    /// flare 15) stand and no dispenser count is ever re-priced — the
+    /// golden identity. When set, each spawned aircraft's chaff/flare
+    /// supply resolves through the class-table → VCD → WCD chain (the
+    /// SENSORS_COUNTERMEASURES_PLAN's "the VCD's per-unit counts"); a
+    /// vehicle the tables cannot resolve keeps the defaults. A
+    /// configured-but-unloadable path is a LOUD failure.
+    std::string theater_tables_path;
+    /// CAMP-SCALE-1 — the pilot-skill flow: the flight's squadron pilot
+    /// roster (the converted .cam squadron tails) sets the spawned
+    /// brain's SensorFusion skill cadence. Default FALSE — every
+    /// pre-SCALE world flies its Veteran cadence byte-identically (the
+    /// countermeasures gate's own lesson: data that re-prices fights
+    /// lands behind a switch).
+    bool pilot_skill_flow{false};
     /// Real-data tier (Task 64): path to a SignatureDataLibrary JSON
     /// (sig2json output / the shipped Data/SimData/sigdata.json). Empty
     /// (default) = no library — every aircraft keeps the placeholder

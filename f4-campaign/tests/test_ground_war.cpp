@@ -185,6 +185,75 @@ TEST(GroundWar, WarLessWorldIsInert) {
     EXPECT_TRUE(rig->ledger->empty());
 }
 
+// ── 1b. The two-war-pair limitation (CAMP-INIT-1's G1 test bed) ──────────
+// Two DISJOINT at-war pairs in one world: the engine's own rule
+// (belligerent_pair) fights the FIRST pair in wire order, and every
+// other armed side's battalions stand down — G1's documented two-side
+// machine (GROUND_WAR_PLAN.md: "a third armed team's battalions stand
+// down; the multi-side generalization lands with the alliance mapping
+// both sides wait on"). The generated wars (CAMP-INIT-1's twinwars
+// pack) are the fixture source for this bed; the hand-built rig pins
+// the rule itself.
+
+TEST(GroundWar, SecondWarPairStandsDownWhileTheFirstFights) {
+    auto rig = Rig::make(fast_cfg(), [](WorldState& w) {
+        // Wire order matters: the FIRST at-war pair in source order is
+        // (2,6); (3,7) is the second pair the engine must ignore.
+        const std::vector<int16_t> rok{0, 0, 0, 3, 0, 0, 5, 0};
+        const std::vector<int16_t> dprk{0, 0, 5, 3, 0, 0, 0, 0};
+        std::vector<int16_t> neutralia{0, 0, 3, 0, 0, 0, 0, 5};
+        neutralia[7] = 5;   // Neutralia is at war with Violetia
+        std::vector<int16_t> violetia{0, 0, 0, 0, 0, 0, 0, 0};
+        violetia[3] = 5;
+        w.teams = {team(2, "ROK", rok), team(3, "Neutralia", neutralia),
+                   team(6, "DPRK", dprk), team(7, "Violetia", violetia)};
+        w.objectives = {
+            objective(101, 50, 90, 2), objective(201, 50, 110, 6),
+            // The (3,7) "front": bases for battalions that must never
+            // march at each other.
+            objective(301, 150, 90, 3), objective(701, 150, 110, 7),
+        };
+        // Mobile battalions on BOTH "fronts" — only the first pair's
+        // are allowed to move.
+        w.units = {
+            battalion(1101, 2, kStMechanized, 50, 88, kRoster12, 360),
+            battalion(1102, 6, kStMechanized, 50, 112, kRoster12, 360),
+            battalion(1201, 3, kStMechanized, 150, 88, kRoster12, 360),
+            battalion(1202, 7, kStMechanized, 150, 112, kRoster12, 360),
+        };
+    });
+
+    // The first pair in wire order owns the war.
+    ASSERT_EQ(rig->war->belligerents().size(), 2u);
+    EXPECT_EQ(rig->war->belligerents()[0], 2);
+    EXPECT_EQ(rig->war->belligerents()[1], 6);
+
+    // The first pair's war runs: orders fire, the march starts.
+    rig->war->tick(60);
+    ASSERT_EQ(rig->war->units().size(), 4u);
+    EXPECT_NE(rig->war->units()[0].target, 0u)
+        << "the first pair's battalion has a target";
+    EXPECT_GT(rig->war->units()[0].y, 88) << "and it marches north";
+
+    // The second pair's battalions stand down: same grid they started
+    // on, no target, no ledger sync — the engine never saw their war.
+    EXPECT_EQ(rig->war->units()[2].x, 150);
+    EXPECT_EQ(rig->war->units()[2].y, 88);
+    EXPECT_EQ(rig->war->units()[2].target, 0u);
+    EXPECT_EQ(rig->war->units()[3].x, 150);
+    EXPECT_EQ(rig->war->units()[3].y, 112);
+    EXPECT_EQ(rig->war->units()[3].target, 0u);
+    EXPECT_TRUE(rig->ledger->ground_unit(1201) == nullptr);
+    EXPECT_TRUE(rig->ledger->ground_unit(1202) == nullptr);
+
+    // A longer pass does not wake them.
+    for (int i = 0; i < 30; ++i) rig->war->tick(60);
+    EXPECT_EQ(rig->war->units()[2].y, 88);
+    EXPECT_EQ(rig->war->units()[3].y, 112);
+    EXPECT_TRUE(rig->ledger->ground_unit(1201) == nullptr);
+    EXPECT_TRUE(rig->ledger->ground_unit(1202) == nullptr);
+}
+
 // ── 1b. The front line ─────────────────────────────────────────────────────
 
 TEST(GroundWar, FrontLineResolvesBetweenTheSides) {

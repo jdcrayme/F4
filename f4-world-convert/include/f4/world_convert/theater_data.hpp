@@ -598,4 +598,37 @@ struct TheaterObjectDatabase {
 find_theater_file(const std::filesystem::path& base_path,
                   const std::string& ext);
 
+// ============================================================================
+// CAMP-SCALE-1 — the full theater tables as JSON (the Tier-3 full-data
+// pass, CAMP_HOST_PLAN.md §8).
+// ============================================================================
+
+/// Emit the COMPLETE UnitClass (Falcon4.UCD), VehicleClass (Falcon4.VCD)
+/// and WeaponClass (Falcon4.WCD) tables — every record, every field — as
+/// one JSON document:
+///
+///   {
+///     "format": "f4.theater.tables/1",
+///     "counts": {"units": N, "vehicles": M, "weapons": K},
+///     "units":    [ ...one object per UnitClassData record... ],
+///     "vehicles": [ ...one object per VehicleClassData record... ],
+///     "weapons":  [ ...one object per WeaponClassData record... ]
+///   }
+///
+/// This is the Tier-3 conversion surface: the sample fixtures (the 8/12
+/// real rows the tests carry) scale to the FULL theater tables with no
+/// format change — the exporter against a real install emits all 296 UCD
+/// rows and the runtime consumes them unchanged. The runtime-side reader
+/// is f4-world's TheaterTables (f4/world/theater_tables.hpp); the
+/// round-trip test pins the two projections together.
+///
+/// Field names reuse the world JSON's enrichment vocabulary where one
+/// exists (movement_type / movement_speed / max_range / fuel /
+/// scores / hit_chance / range / ...) so the two projections read side
+/// by side. Arrays are positional (element i = column i of the on-disk
+/// array). Additive and total: a table that did not load emits as an
+/// empty array (load_all's Missing discipline). Throws on I/O error.
+void emit_tables_json(const TheaterObjectDatabase& db,
+                      const std::filesystem::path& out_path);
+
 } // namespace f4::world_convert

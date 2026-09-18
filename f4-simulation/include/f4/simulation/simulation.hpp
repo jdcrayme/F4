@@ -45,6 +45,7 @@
 #include <f4/data/sensor_data.hpp>      // SimData SENSDATA/IRST seeker cards
 #include <f4/weapons/weapon_class_table.hpp>
 #include <f4/world_types/class_table.hpp>  // owned here (see class_table_)
+#include <f4/world/theater_tables.hpp>    // CAMP-SCALE-1: converted tables
 #include <f4/ai/air_picture.hpp>       // PERF-1: the shared snapshot
 #include <f4/ai/modules/strike_module.hpp>   // Tranche D: WP_REFUEL predicate
 
@@ -633,6 +634,13 @@ private:
     bool signature_library_loaded_ = false;
     void ensure_signature_data();
 
+    // CAMP-SCALE-1: the converted theater tables (combat.
+    // theater_tables_path), owned here exactly like the signature
+    // library; lent to the spawn paths as a const pointer. Null = the
+    // paths run the documented-defaults identity.
+    std::unique_ptr<f4::world::TheaterTables> theater_tables_;
+    void ensure_theater_tables();
+
 public:
     /// The loaded signature library (null when no signature_data_path
     /// was configured). Grids are pointers INTO this — the Simulation
@@ -640,6 +648,14 @@ public:
     [[nodiscard]] const f4::data::SignatureDataLibrary*
     signature_library() const noexcept {
         return signature_library_.get();
+    }
+
+    /// CAMP-SCALE-1: the loaded converted theater tables (null when no
+    /// theater_tables_path was configured). The session's spawn paths
+    /// lend the same pointer the sim's own spawn path uses.
+    [[nodiscard]] const f4::world::TheaterTables*
+    theater_tables() const noexcept {
+        return theater_tables_.get();
     }
 
     /// FID-OPT-2 test/QC accessor: ticks since the last air-picture

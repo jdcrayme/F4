@@ -36,6 +36,8 @@ add_library(f4-world-convert STATIC
     src/aii_config.cpp
     src/theater_data.cpp
     src/world_json.cpp
+    src/scenario_pack.cpp
+    src/campaign_initializer.cpp
 )
 target_link_libraries(f4-world-convert PUBLIC f4_warnings)
 
@@ -69,6 +71,45 @@ target_link_libraries(ct2json PRIVATE f4-world-convert f4-json f4-io)
 # runtime consumer.
 add_executable(wcd2json cli/wcd2json.cpp)
 target_link_libraries(wcd2json PRIVATE f4-world-convert f4-json f4-io)
+
+# CLI tool: campinit — CAMP-INIT-1's create-from-parameters face. Generates
+# a fresh .cam (Task-70 encoder stack + CamWriter) and its world JSON (the
+# existing reader's own projection) from a scenario pack.
+add_executable(campinit cli/campinit.cpp)
+target_link_libraries(campinit PRIVATE f4-world-convert f4-io)
+target_compile_definitions(campinit PRIVATE
+    F4_CAMPINIT_CT_1="${CMAKE_CURRENT_SOURCE_DIR}/../../Data/Classes/falcon4.ct.json"
+    F4_CAMPINIT_CT_2="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/falcon4.ct.json")
+
+# ── CAMP-INIT-1 generated war fixtures ────────────────────────────────
+# The committed packs (tests/fixtures/packs/) generated at build time into
+# generated_world_fixtures/ — the same discipline as f4-campaign's
+# mission_profiles_fixture. f4-simulation's war-harness test consumes the
+# generated WORLD JSON (which is the decode of the generated .cam — the
+# full loop closes at build time, not by a second projection).
+set(F4_CAMPINIT_PACKS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/packs")
+set(F4_GENERATED_INIT_DIR "${CMAKE_BINARY_DIR}/generated_world_fixtures")
+file(MAKE_DIRECTORY "${F4_GENERATED_INIT_DIR}")
+set(F4_CAMPINIT_FIXTURES
+    "${F4_GENERATED_INIT_DIR}/campinit_small.world.json"
+    "${F4_GENERATED_INIT_DIR}/campinit_medium.world.json"
+    "${F4_GENERATED_INIT_DIR}/campinit_large.world.json"
+    "${F4_GENERATED_INIT_DIR}/campinit_twinwars.world.json")
+set(F4_CAMPINIT_FIXTURES_DIR "${F4_GENERATED_INIT_DIR}"
+    CACHE PATH "Directory of the campinit-generated war fixtures" FORCE)
+foreach(pack_name small medium large twinwars)
+    add_custom_command(
+        OUTPUT  "${F4_GENERATED_INIT_DIR}/campinit_${pack_name}.world.json"
+                "${F4_GENERATED_INIT_DIR}/campinit_${pack_name}.cam"
+        COMMAND campinit --pack "${F4_CAMPINIT_PACKS_DIR}/${pack_name}.pack.json"
+                --out-cam "${F4_GENERATED_INIT_DIR}/campinit_${pack_name}.cam"
+                --out-world "${F4_GENERATED_INIT_DIR}/campinit_${pack_name}.world.json"
+        DEPENDS campinit "${F4_CAMPINIT_PACKS_DIR}/${pack_name}.pack.json"
+        COMMENT "CAMP-INIT-1: generating campinit_${pack_name} (.cam + world JSON)"
+        VERBATIM)
+endforeach()
+add_custom_target(campinit_fixtures ALL
+    DEPENDS ${F4_CAMPINIT_FIXTURES})
 
 # Copy FALCON4.ct (the class table) next to cam2json so the CLI finds it
 # from CWD when run via `cmake --build build --target world`. The class

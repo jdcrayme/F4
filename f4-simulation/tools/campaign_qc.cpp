@@ -98,7 +98,8 @@
 //     --models <KoreaObj.HDR>      (default: <src>/temp/KoreaObj.HDR; .LOD/.TEX inferred)
 //     --team <slot>                (filter: owning team, -1 = any)
 //     --mission <AMIS_*>|<byte>    (filter: mission name or byte)
-//     --max-flights <n>            (filter: cap spawned aircraft)
+//     --max-flights <n>            (filter: cap spawned aircraft; 0 = the
+//                                  UNCAPPED fleet — the SCALE-1 pass)
 //     --ticks <n>                  (sim frames; default 54000 = 15 min)
 //     --minutes <m>                (convenience: sets --ticks to m*60*60)
 //     --sim-dt <sec>               (default 1/60)
@@ -231,6 +232,7 @@ struct Args {
     int team = -1;
     int mission = -1;            // byte; -1 = any
     int max_flights = 0;
+    bool max_flights_set = false;  // --max-flights passed (0 = UNCAPPED)
     int ticks = 54000;           // 15 min at 60 Hz — taxi + takeoff +
                                  // climb + ENROUTE TO THE TARGET (the A-G
                                  // slice needs the release point reached;
@@ -296,6 +298,11 @@ struct Args {
     // RoE carry. The strategy gate (exit 17) fires when a strategy-
     // armed tasking run drew aircraft but stationed none.
     bool strategy = false;
+    // CAMP-SCALE-1: the converted theater tables (the Tier-3 full-data
+    // pass) + the pilot-skill flow gate. Empty/false = the documented
+    // defaults (the golden identity).
+    std::string theater_tables;
+    bool pilot_skill_flow = false;
     // Real-data tier: the wcd2json export folded over the built-in table.
     std::string weapon_data;
     // FID-6 — the acceleration certificate (--accel <x>): the tiered
@@ -327,6 +334,7 @@ struct Args {
         "          [--ground-orders-sec <sec>] [--ground-resupply-sec <sec>]\n"
         "          [--unit-strike] [--weapon-data <wcd.json>] [--out-dir <dir>]\n"
         "          [--synthesize-airbases]\n"
+        "          [--theater-tables <tables.json>] [--pilot-skill]\n"
         "          [--accel <x>] [--accel-hours <h>] [--accel-max-live <n>]\n"
         "          [--accel-tolerance <f>] [--accel-baseline]\n"
         "          [--weather <json-obj>] [--time <json-obj>] (Task 73 env)\n",
@@ -359,7 +367,10 @@ Args parse_args(int argc, char** argv) {
         else if (k == "--config")      a.config = next();
         else if (k == "--profiles")    a.profiles_json = next();
         else if (k == "--team")        a.team = std::atoi(next());
-        else if (k == "--max-flights") a.max_flights = std::atoi(next());
+        else if (k == "--max-flights") {
+            a.max_flights = std::atoi(next());
+            a.max_flights_set = true;
+        }
         else if (k == "--ticks")       a.ticks = std::atoi(next());
         else if (k == "--minutes")     a.ticks = static_cast<int>(std::atof(next()) * 3600.0);
         else if (k == "--sim-dt")      a.sim_dt = std::atof(next());
@@ -391,6 +402,8 @@ Args parse_args(int argc, char** argv) {
         else if (k == "--ground-war")  a.ground_war = true;
         else if (k == "--unit-strike") a.unit_strike = true;
         else if (k == "--strategy")   a.strategy = true;
+        else if (k == "--theater-tables") a.theater_tables = next();
+        else if (k == "--pilot-skill") a.pilot_skill_flow = true;
         else if (k == "--synthesize-airbases") a.synthesize_airbases = true;
         else if (k == "--weapon-data") a.weapon_data = next();
         else if (k == "--ground-update-sec")
@@ -534,9 +547,12 @@ int run_war(const Args& args) {
     // interactivity budget — 449 FMs at 60 Hz is a replay-mode budget;
     // the WAR's story is the generated packages, and the ledger's pool
     // arithmetic counts every drawn aircraft whether it flies here or
-    // not). An explicit --max-flights still wins.
+    // not). An explicit --max-flights still wins — and 0 now means the
+    // UNCAPPED fleet (the CAMP-SCALE-1 pass: the strategy war flies
+    // every drawn aircraft through the tier machinery; the deagg
+    // ceiling --accel-max-live is the Tier-B bound, not this cap).
     hopts.session.max_flights =
-        args.max_flights > 0 ? args.max_flights : 48;
+        args.max_flights_set ? args.max_flights : 48;
     hopts.session.tasking_cycle_sec = args.tasking_cycle_sec;
     hopts.session.reinforce_period_sec =
         args.reinforce_period_sec < 0 ? 43200
@@ -562,6 +578,9 @@ int run_war(const Args& args) {
     hopts.session.unit_strike = args.unit_strike;
     // P7: the strategy layer (opt-in, the same contract).
     hopts.session.strategy_layer = args.strategy;
+    // CAMP-SCALE-1: the converted tables + the pilot-skill flow (opt-in).
+    hopts.session.theater_tables = args.theater_tables;
+    hopts.session.pilot_skill_flow = args.pilot_skill_flow;
     hopts.session.weapon_data_path = args.weapon_data;
     // FID-6: the accel certificate FORCES the tiered policy — the war
     // runs the game's own way (aggregates until observed), which is
@@ -601,6 +620,12 @@ int run_war(const Args& args) {
                 hopts.session.ground_war ? "on" : "off",
                 hopts.session.unit_strike ? "on" : "off",
                 hopts.session.strategy_layer ? "on" : "off");
+    std::fprintf(stderr,
+                 "  scale:        tables=%s pilot-skill=%s\n",
+                 hopts.session.theater_tables.empty()
+                     ? "(none)"
+                     : hopts.session.theater_tables.string().c_str(),
+                 hopts.session.pilot_skill_flow ? "on" : "off");
 
     std::string err;
     auto harness = CampaignWarHarness::create(hopts, &err);

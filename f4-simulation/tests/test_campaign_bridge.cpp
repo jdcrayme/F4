@@ -27,6 +27,7 @@
 #include <gtest/gtest.h>
 
 #include "f4/simulation/campaign_bridge.hpp"
+#include "f4/simulation/combat_bridge.hpp"
 #include "f4/simulation/visual_model_component.hpp"
 
 #include <f4/entities/entity.hpp>
@@ -38,6 +39,9 @@
 #include <f4/world_types/layout_types.hpp>  // PLT_RUNWAY, PLT_PARK
 #include <f4/data/aircraft_config.hpp>
 #include <f4/data/config_loader.hpp>
+
+#include <cstdio>
+#include <fstream>
 
 #include <cstdint>
 #include <cmath>
@@ -479,4 +483,266 @@ TEST(CampaignBridge, SpawnFromFlightsFallsBackToThresholdWithoutSquadron) {
     // top: flight_index=0 → +80 ft east → (580, 8000).
     EXPECT_NEAR(tf->position.x, 580.0, 1e-6);
     EXPECT_NEAR(tf->position.y, 8000.0, 1e-6);
+}
+
+// ============================================================================
+// CAMP-SCALE-1 — the converted tables' data flows: the pilot-skill flow
+// (the squadron roster → the brain's fusion cadence) and the VCD
+// countermeasure supply (spawn resolves, the arm path consumes).
+// ============================================================================
+
+namespace {
+
+/// Build a falcon4.ct.json whose entry at index `vehicle_index`
+/// (entity_type = 100 + vehicle_index) is a DTYPE_VEHICLE row pointing
+/// at VCD row 0 (the F-16X's position in scale_tables_json). Every
+/// other entry is an inert NOTHING row so the file has the full
+/// positional span.
+std::string build_ct_json(int vehicle_index, int entries) {
+    std::string s = "{\"count\": " + std::to_string(entries) +
+                    ", \"entries\": [";
+    for (int i = 0; i < entries; ++i) {
+        if (i) s += ", ";
+        if (i == vehicle_index) {
+            s += "{\"entity_type\": " + std::to_string(100 + i) +
+                 ", \"domain\": 2, \"cls\": 4, \"type\": 0, \"stype\": 3,"
+                 " \"vis_type\": [0,0,0,0,0,0,0], \"data_type\": 5,"
+                 " \"data_ptr_index\": 0}";
+        } else {
+            s += "{\"entity_type\": " + std::to_string(100 + i) +
+                 ", \"domain\": 2, \"cls\": 4, \"type\": 0, \"stype\": 3,"
+                 " \"vis_type\": [0,0,0,0,0,0,0], \"data_type\": 0,"
+                 " \"data_ptr_index\": 0}";
+        }
+    }
+    s += "]}";
+    return s;
+}
+
+/// A minimal tables document: VCD row 1 ("F-16X") carries hardpoints
+/// 7/8/20 = Chaff 30 / Flare 15 / gun 0; VCD row 2 ("Truck") carries no
+/// dispenser rows. WCD rows 7/8 are named Chaff/Flare.
+std::string scale_tables_json() {
+    // WCD rows are POSITIONAL: hardpoint weapon IDs index the table by row
+    // position (Chaff at row 7, Flare at row 8, the gun rounds at 20) —
+    // the same convention the real ~600-row WCD carries.
+    std::string s = "{\n";
+    s += "  \"format\": \"f4.theater.tables/1\",\n";
+    s += "  \"counts\": {\"units\": 0, \"vehicles\": 2, \"weapons\": 21},\n";
+    s += "  \"units\": [],\n";
+    s += "  \"vehicles\": [\n";
+    s +=
+        "    {\"index\": 273, \"name\": \"F-16X\", \"nctr\": \"F16\","
+        " \"hit_points\": 150, \"flags\": 0, \"rcs_factor\": 0.0,"
+        " \"max_wt\": 0, \"empty_wt\": 0, \"fuel_wt\": 0, \"fuel_econ\": 0,"
+        " \"engine_sound\": 0, \"high_alt\": 0, \"low_alt\": 0,"
+        " \"cruise_alt\": 0, \"max_speed\": 800, \"radar_type\": 0,"
+        " \"number_of_pilots\": 1, \"rack_flags\": 0, \"visible_flags\": 0,"
+        " \"callsign_index\": 0, \"callsign_slots\": 0,"
+        " \"hit_chance\": [0,0,0,0,0,0,0,0], \"strength\": [0,0,0,0,0,0,0,0],"
+        " \"range\": [0,0,0,0,0,0,0,0], \"detection\": [0,0,0,0,0,0,0,0],"
+        " \"weapon\": [7, 8, 20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],"
+        " \"weapons\": [30, 15, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],"
+        " \"damage_mod\": [0,0,0,0,0,0,0,0,0,0,0]},\n";
+    s +=
+        "    {\"index\": 274, \"name\": \"Truck\", \"nctr\": \"TRK\","
+        " \"hit_points\": 60, \"flags\": 0, \"rcs_factor\": 2.0,"
+        " \"max_wt\": 0, \"empty_wt\": 0, \"fuel_wt\": 0, \"fuel_econ\": 0,"
+        " \"engine_sound\": 0, \"high_alt\": 0, \"low_alt\": 0,"
+        " \"cruise_alt\": 0, \"max_speed\": 80, \"radar_type\": 0,"
+        " \"number_of_pilots\": 0, \"rack_flags\": 0, \"visible_flags\": 0,"
+        " \"callsign_index\": 0, \"callsign_slots\": 0,"
+        " \"hit_chance\": [0,0,0,0,0,0,0,0], \"strength\": [0,0,0,0,0,0,0,0],"
+        " \"range\": [0,0,0,0,0,0,0,0], \"detection\": [0,0,0,0,0,0,0,0],"
+        " \"weapon\": [20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],"
+        " \"weapons\": [200, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],"
+        " \"damage_mod\": [0,0,0,0,0,0,0,0,0,0,0]}\n";
+    s += "  ],\n";
+    s += "  \"weapons\": [\n";
+    for (int i = 0; i < 21; ++i) {
+        const char* name = (i == 7)  ? "Chaff"
+                         : (i == 8)  ? "Flare"
+                         : (i == 20) ? "M-61 rounds" : "W";
+        const int strength = (i == 20) ? 4 : (i == 7 || i == 8) ? 1 : 0;
+        const int damage_type = (i == 20) ? 6 : 0;
+        const int range_km = (i == 20) ? 2 : 0;
+        const int fire_rate = (i == 20) ? 10 : (i == 7 || i == 8) ? 1 : 0;
+        char row[512];
+        std::snprintf(row, sizeof(row),
+            "    {\"index\": %d, \"name\": \"%s\", \"strength\": %d,"
+            " \"damage_type\": %d, \"range_km\": %d, \"flags\": 0,"
+            " \"fire_rate\": %d, \"rarity\": 100, \"guidance_flags\": 0,"
+            " \"collective\": 0, \"simweap_index\": 0, \"weight\": 0,"
+            " \"drag_index\": 0, \"blast_radius\": 0, \"radar_type\": 0,"
+            " \"sim_data_idx\": 0, \"max_alt\": 0,"
+            " \"hit_chance\": [0,0,0,0,0,0,0,0]}%s\n",
+            i, name, strength, damage_type, range_km, fire_rate,
+            (i == 20) ? "" : ",");
+        s += row;
+    }
+    s += "  ]\n";
+    s += "}\n";
+    return s;
+}
+
+} // namespace
+
+TEST(CampScale1, PilotSkillFromRosterMapsTheWireNibble) {
+    // The documented monotone map: 0-2 Recruit | 3-5 Rookie |
+    // 6-7 Veteran | 8-9 Ace; no AVAILABLE pilot → the Veteran default.
+    using f4::entities::PilotState;
+    using SK = f4::ai::SkillLevel;
+
+    EXPECT_EQ(pilot_skill_from_roster({}), SK::Veteran);  // no roster
+    // A default-constructed pilot is AVAILABLE with skill 0 — the map's
+    // bottom rung (data, not absence, drives the cadence).
+    EXPECT_EQ(pilot_skill_from_roster({PilotState{}}), SK::Recruit);
+
+    // Only dead pilots → default (the sortie flies the stock cadence).
+    PilotState dead{};
+    dead.status = 1;
+    dead.skill = 9;
+    EXPECT_EQ(pilot_skill_from_roster({dead}), SK::Veteran);
+
+    // Boundaries.
+    auto p = [](int skill, int id) {
+        PilotState ps{};
+        ps.skill = static_cast<uint8_t>(skill);
+        ps.pilot_id = static_cast<int16_t>(id);
+        return ps;
+    };
+    EXPECT_EQ(pilot_skill_from_roster({p(0, 1)}), SK::Recruit);
+    EXPECT_EQ(pilot_skill_from_roster({p(2, 1)}), SK::Recruit);
+    EXPECT_EQ(pilot_skill_from_roster({p(3, 1)}), SK::Rookie);
+    EXPECT_EQ(pilot_skill_from_roster({p(5, 1)}), SK::Rookie);
+    EXPECT_EQ(pilot_skill_from_roster({p(6, 1)}), SK::Veteran);
+    EXPECT_EQ(pilot_skill_from_roster({p(7, 1)}), SK::Veteran);
+    EXPECT_EQ(pilot_skill_from_roster({p(8, 1)}), SK::Ace);
+    EXPECT_EQ(pilot_skill_from_roster({p(9, 1)}), SK::Ace);
+
+    // Best AVAILABLE pilot wins (a dead ace never flies), ties break by
+    // rating then the lowest pilot id — deterministic.
+    PilotState dead_ace{dead};
+    PilotState rookie{}; rookie.skill = 3; rookie.pilot_id = 5;
+    EXPECT_EQ(pilot_skill_from_roster({dead_ace, rookie}), SK::Rookie);
+    EXPECT_EQ(pilot_skill_from_roster({p(5, 2), p(5, 1)}), SK::Rookie);
+}
+
+TEST(CampScale1, SpawnFlowsPilotSkillAndCountermeasureSupply) {
+    f4::data::AircraftConfig cfg;
+    if (!loadF16Config(cfg)) GTEST_SKIP() << "F-16 aircraft config fixture not available";
+
+    // Class table: entity_type 273 → VCD row 1 (the F-16X's dispensers).
+    f4::world_types::ClassTable ct;
+    const auto ct_path = std::filesystem::temp_directory_path() /
+                         "f4_scale1_ct.json";
+    {
+        std::ofstream f(ct_path);
+        f << build_ct_json(/*vehicle_index=*/173, /*entries=*/300);
+    }
+    ct.load_json(ct_path);
+    std::filesystem::remove(ct_path);
+    ASSERT_TRUE(ct.loaded());
+
+    const auto tables = f4::world::TheaterTables::parse(scale_tables_json());
+
+    // The world lives in the harness struct — guaranteed copy elision
+    // (C++17) keeps the EntityWorld in place, so the returned EntityIds
+    // stay valid for exactly the harness object's lifetime.
+    struct SpawnHarness {
+        EntityWorld world;
+        f4::entities::EntityId squadron;
+        f4::entities::EntityId flight;
+    };
+    auto make_world = [](std::vector<f4::entities::PilotState> pilots) {
+        SpawnHarness h{};
+        auto airbase_h = h.world.create();
+        airbase_h.add<TransformComponent>().position =
+            f4::geo::WorldPosition(0.0, 0.0, 50.0);
+        auto sq_h = h.world.create();
+        auto& sq = sq_h.add<SquadronComponent>();
+        sq.airbase = airbase_h.id();
+        sq.pilots = std::move(pilots);
+        auto& sq_uc = sq_h.add<UnitCoreComponent>();
+        sq_uc.unit_class = UnitClass::Squadron;
+        sq_uc.class_table_index = 273;
+        auto& sq_vc = sq_h.add<VehicleCompositionComponent>();
+        f4::entities::VehicleGroup g{};
+        g.vehicle_type = 273;  // the F-16X vehicle entity type
+        g.count = 12;
+        sq_vc.groups.push_back(g);
+        auto f_h = h.world.create();
+        auto& fp = f_h.add<FlightPlanComponent>();
+        fp.squadron = sq_h.id();
+        fp.callsign_id = 1;
+        fp.callsign_num = 1;
+        h.squadron = sq_h.id();
+        h.flight = f_h.id();
+        return h;
+    };
+
+    ScenarioAirfield airfield;
+    airfield.runway_heading_rad = 0.0;
+    airfield.threshold_position = f4::geo::WorldPosition(0.0, 5000.0, 50.0);
+    ScenarioAircraft tpl;
+    tpl.vis_type_index = 1052;
+    tpl.callsign = "EAGLE";
+    tpl.aircraft_config_path = "f16.json";
+
+    auto ace = [](int id, int skill, uint8_t status) {
+        f4::entities::PilotState ps{};
+        ps.pilot_id = static_cast<int16_t>(id);
+        ps.skill = static_cast<uint8_t>(skill);
+        ps.status = status;
+        return ps;
+    };
+
+    // 1. The flow ON: the best available pilot (skill 9) sets the brain's
+    //    fusion cadence to Ace, and the vehicle's VCD/WCD supply stamps
+    //    the countermeasure counts on the spawned aircraft.
+    {
+        auto sh = make_world({ace(1, 9, 1), ace(2, 9, 0), ace(3, 4, 0)});
+        const auto spawned = spawn_aircraft_for_flight(
+            sh.world, sh.flight, ct, cfg, airfield, tpl, 0, nullptr, nullptr,
+            nullptr, nullptr, nullptr, &tables, /*pilot_skill_flow=*/true);
+        ASSERT_TRUE(spawned.has_value());
+        EntityHandle eh(*spawned, &sh.world);
+        auto* brain = eh.get<f4::ai::BrainComponent>();
+        ASSERT_NE(brain, nullptr);
+        EXPECT_EQ(brain->pilot_skill(), f4::ai::SkillLevel::Ace);
+        auto* supply = eh.get<CountermeasureSupplyComponent>();
+        ASSERT_NE(supply, nullptr);
+        EXPECT_EQ(supply->chaff_rounds, 30);
+        EXPECT_EQ(supply->flare_rounds, 15);
+    }
+
+    // 2. The flow OFF (the pre-SCALE identity): the same roster, the
+    //    Veteran cadence, no supply stamp without tables.
+    {
+        auto sh = make_world({ace(2, 9, 0)});
+        const auto spawned = spawn_aircraft_for_flight(
+            sh.world, sh.flight, ct, cfg, airfield, tpl, 0);
+        ASSERT_TRUE(spawned.has_value());
+        EntityHandle eh(*spawned, &sh.world);
+        EXPECT_EQ(eh.get<f4::ai::BrainComponent>()->pilot_skill(),
+                  f4::ai::SkillLevel::Veteran);
+        EXPECT_EQ(eh.get<CountermeasureSupplyComponent>(), nullptr);
+    }
+
+    // 3. Tables but nothing resolved (a dispenser-less vehicle) → no
+    //    stamp; the arm path keeps the documented 30/15 defaults.
+    {
+        auto sh = make_world({});
+        EntityHandle(sh.squadron, &sh.world)
+            .get<VehicleCompositionComponent>()
+            ->groups.front()
+            .vehicle_type = 274;  // the Truck — no dispensers
+        const auto spawned = spawn_aircraft_for_flight(
+            sh.world, sh.flight, ct, cfg, airfield, tpl, 0, nullptr, nullptr,
+            nullptr, nullptr, nullptr, &tables, true);
+        ASSERT_TRUE(spawned.has_value());
+        EXPECT_EQ(EntityHandle(*spawned, &sh.world)
+                      .get<CountermeasureSupplyComponent>(),
+                  nullptr);
+    }
 }

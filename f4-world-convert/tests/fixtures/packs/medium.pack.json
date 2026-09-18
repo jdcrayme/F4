@@ -1,0 +1,81 @@
+{
+  "pack": 1,
+  "name": "genwar-medium",
+  "camp_version": 71,
+  "seed": 424242,
+  "theater": {
+    "name": "GENERATED WAR",
+    "ui_name": "GenWar Medium",
+    "id": "korea",
+    "terrain_file": "korea.terrain.json",
+    "size_x": 256,
+    "size_y": 256
+  },
+  "date": { "current_time": 21600000, "day": 1 },
+  "weather": { "seed": 11, "condition": "hazy" },
+  "bullseye": { "x": 128, "y": 128, "name": 1 },
+  "player_team": 6,
+  "teams": [
+    { "slot": 1, "name": "USA", "colour": 2, "motto": "First to fight",
+      "air_experience": 85, "ground_experience": 80,
+      "reserve_aircraft": 16, "replacements": 24, "supply": 1500, "fuel": 1500 },
+    { "slot": 6, "name": "DPRK", "colour": 5, "motto": "A world of peace",
+      "air_experience": 65, "ground_experience": 75,
+      "reserve_aircraft": 16, "replacements": 24, "supply": 1500, "fuel": 1500 }
+  ],
+  "relations": [ { "a": 1, "b": 6, "stance": "war" } ],
+  "objectives": [
+    { "name": "Blue Main",    "kind": "airbase",     "x": 64,  "y": 44,  "owner": 1, "priority": 60 },
+    { "name": "Blue Strip",   "kind": "airstrip",    "x": 36,  "y": 60,  "owner": 1, "priority": 30 },
+    { "name": "Blue Camp",    "kind": "armybase",    "x": 88,  "y": 62,  "owner": 1, "priority": 40 },
+    { "name": "Blue City",    "kind": "city",        "x": 62,  "y": 80,  "owner": 1, "priority": 50 },
+    { "name": "Blue Port",    "kind": "port",        "x": 34,  "y": 92,  "owner": 1, "priority": 45 },
+    { "name": "Blue Factory", "kind": "factory",     "x": 90,  "y": 92,  "owner": 1, "priority": 55 },
+    { "name": "Blue Power",   "kind": "powerplant",  "x": 44,  "y": 40,  "owner": 1, "priority": 50 },
+    { "name": "Blue Radar",   "kind": "radar",       "x": 100, "y": 76,  "owner": 1, "priority": 20 },
+    { "name": "Red Main",     "kind": "airbase",     "x": 192, "y": 212, "owner": 6, "priority": 60 },
+    { "name": "Red Strip",    "kind": "airstrip",    "x": 220, "y": 196, "owner": 6, "priority": 30 },
+    { "name": "Red Camp",     "kind": "armybase",    "x": 168, "y": 194, "owner": 6, "priority": 40 },
+    { "name": "Red City",     "kind": "city",        "x": 194, "y": 176, "owner": 6, "priority": 50 },
+    { "name": "Red Depot",    "kind": "depot",       "x": 222, "y": 164, "owner": 6, "priority": 25 },
+    { "name": "Red Factory",  "kind": "factory",     "x": 166, "y": 164, "owner": 6, "priority": 55 },
+    { "name": "Red Power",    "kind": "powerplant",  "x": 212, "y": 216, "owner": 6, "priority": 50 },
+    { "name": "Red Radar",    "kind": "radar",       "x": 156, "y": 180, "owner": 6, "priority": 20 },
+    { "name": "Crossroads",   "kind": "city",        "x": 128, "y": 128, "owner": 0, "priority": 10 },
+    { "name": "Bridge One",   "kind": "bridge",      "x": 96,  "y": 108, "owner": 0, "priority": 15 },
+    { "name": "Bridge Two",   "kind": "bridge",      "x": 160, "y": 148, "owner": 0, "priority": 15 },
+    { "name": "Mid Depot",    "kind": "depot",       "x": 128, "y": 96,  "owner": 0, "priority": 12 },
+    { "name": "Mid Town",     "kind": "city",        "x": 128, "y": 160, "owner": 0, "priority": 12 },
+    { "name": "Watch Radar",  "kind": "radar",       "x": 112, "y": 120, "owner": 0, "priority": 8 }
+  ],
+  "links": [
+    [0, 1], [0, 2], [2, 3], [3, 4], [3, 5], [0, 6], [2, 7],
+    [8, 9], [8, 10], [10, 11], [11, 12], [11, 13], [8, 14], [10, 15],
+    [3, 16], [16, 11], [4, 17], [17, 16], [16, 18], [18, 12],
+    [19, 16], [16, 20], [7, 19], [15, 18], [5, 19], [13, 20]
+  ],
+  "squadrons": [
+    { "team": 1, "base": "Blue Main",  "name": "1st FW",    "size": 12, "skill": 5, "specialty": "AA", "entity_type": 473 },
+    { "team": 1, "base": "Blue Main",  "name": "2nd FW",    "size": 12, "skill": 4, "specialty": "AG", "entity_type": 473 },
+    { "team": 1, "base": "Blue Strip", "name": "3rd FW",    "size": 8,  "skill": 4, "specialty": "AA", "entity_type": 473 },
+    { "team": 6, "base": "Red Main",   "name": "6th FW",    "size": 12, "skill": 4, "specialty": "AA", "entity_type": 473 },
+    { "team": 6, "base": "Red Main",   "name": "7th FW",    "size": 12, "skill": 3, "specialty": "AG", "entity_type": 473 },
+    { "team": 6, "base": "Red Strip",  "name": "8th FW",    "size": 8,  "skill": 3, "specialty": "AA", "entity_type": 473 }
+  ],
+  "battalions": [
+    { "team": 1, "at": "Blue Camp",   "kind": "armor",       "groups": 4 },
+    { "team": 1, "at": "Blue City",   "kind": "infantry",    "groups": 4 },
+    { "team": 1, "at": "Blue Factory","kind": "armor",       "groups": 3 },
+    { "team": 1, "at": "Blue Main",   "kind": "air_defense", "groups": 2 },
+    { "team": 1, "at": "Blue Strip",  "kind": "armored_cav", "groups": 2 },
+    { "team": 1, "at": "Blue Port",   "kind": "marine",      "groups": 2 },
+    { "team": 1, "at": "Blue City",   "kind": "hq",          "groups": 1 },
+    { "team": 6, "at": "Red Camp",    "kind": "armor",       "groups": 4 },
+    { "team": 6, "at": "Red City",    "kind": "infantry",    "groups": 4 },
+    { "team": 6, "at": "Red Factory", "kind": "armor",       "groups": 3 },
+    { "team": 6, "at": "Red Main",    "kind": "air_defense", "groups": 2 },
+    { "team": 6, "at": "Red Strip",   "kind": "armored_cav", "groups": 2 },
+    { "team": 6, "at": "Red Depot",   "kind": "engineer",    "groups": 2 },
+    { "team": 6, "at": "Red City",    "kind": "hq",          "groups": 1 }
+  ]
+}

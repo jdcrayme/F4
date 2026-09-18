@@ -32,6 +32,9 @@ f4_add_test(test_airbase_synthesis test_airbase_synthesis.cpp)
 # same save1-derived fixture (and synthetic edge cases).
 f4_add_test(test_world_emit   test_world_emit.cpp)
 f4_add_test(test_interface_bridge test_interface_bridge.cpp)
+# CAMP-SCALE-1: the runtime reader for the converted theater tables
+# (f4.theater.tables/1) + the VCD countermeasure resolver.
+f4_add_test(test_theater_tables test_theater_tables.cpp)
 
 # The asset-pipeline test exercises load_terrain_via_assets() — it links
 # f4-assets directly (f4-world links it PRIVATE, since WorldState only

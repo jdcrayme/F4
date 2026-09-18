@@ -12,13 +12,17 @@
 > `flight_abort` / `objective_priority` — the v1 command surface
 > completes, the abort scrubs books and routes RTB, the objective
 > priority write feeds every tasking score, the replay identity
-> extends to the full intervention set); CAMP-ATM-1 ships with this
-> patch (the ACTION tables — objective-damage-driven CAS/BARCAP/
+> extends to the full intervention set); CAMP-ATM-1 shipped (the
+> ACTION tables — objective-damage-driven CAS/BARCAP/
 > SEADSTRIKE filings, the SWEEP station lines, the tanker waypoint,
 > the `action_filed` event family — the ninth — plus `actions_filed`
-> in the ledger and on the QC line; 20+ new ctest cases, the golden
-> identity intact). Every other tranche below is an acceptance
-> contract, not a claim.
+> in the ledger and on the QC line); CAMP-INIT-1 shipped with this
+> patch (create-from-parameters — the scenario pack →
+> `CampaignInitializer` → fresh `.cam` via the Task-70 encoder stack,
+> byte-identity by construction, the generated save decodes in the
+> existing reader, the C5 24-hour harness passes on a generated war,
+> small/medium/large generated fixtures, the G1 two-war-pair bed).
+> Every other tranche below is an acceptance contract, not a claim.
 
 The campaign engine is the product. Every user experience — the world viewer
 today, a map-first strategy UI, a war-room dashboard, a scripted AI observer,
@@ -631,6 +635,54 @@ Default behavior is byte-identical unless a gate says otherwise.
   test fixtures; the G1 two-side war-pair limitation gets its test bed.
 - **Gate**: a generated save decodes in the existing reader; the C5 24-hour
   harness passes on a generated save.
+- **As-built (shipped)**: (1) The initializer lives importer-side
+  (`f4-world-convert`, beside `campaign_saver` — the boundary keeps runtime
+  targets clean of the binary parsers; the `campinit` CLI joins the importer
+  side list). `ScenarioPack` parses STRICT (the wire protocol's own
+  discipline: unknown keys and vocabulary words are named errors; every
+  cross-reference — relation slots, squadron bases, battalion sites, link
+  indices — validated at the parse). (2) Byte-identity by construction: the
+  synthesis is a pure function of pack + class table; the pack's seed lands
+  in the `.cmp`'s CreationRand — two builds are byte-identical (in-test AND
+  as two independent `campinit` runs, same MD5), a different seed moves the
+  bytes. (3) The world JSON is THE EXISTING READER's own projection: build →
+  `CamArchive::load_from_memory` (new additive overload; `load(path)`
+  delegates) → `to_world_json` — no second projection exists to drift; the
+  external `campinit` → `cam2json` chain verified. (4) Fresh-save
+  conventions: the passthrough-typed `.evt/.plt/.pst/.wth` ride EMPTY (no
+  codec exists for them; nothing in this repo's reader or runtime reads
+  them — a donor-copy mode can fill them later without touching the gates);
+  the `.obd` is the canonical zero-delta 10-byte form; the maintenance
+  anchors start at the opening clock (one full cadence period of grace);
+  the camp map is the nearest-objective 2-bit ownership fill (inert for the
+  runtime); all 8 team slots are emitted with the stock `XX` placeholder
+  rows. (5) Every named team carries korea's own live mission/objtype
+  priority profile (a zero row would mean a team that never requests
+  anything), one ATM airbase row per squadron home base (32 free schedule
+  blocks), and squadrons anchored with non-zero airbase VU ids — the
+  primary resolution path (the entity-side positional fallback is dead on
+  real data, world_loader.cpp:356-378). (6) Named kinds resolve to
+  class-table entity types by first-match over the table's own range (the
+  documented rule); the enum's `town` (39) has no entry in Korea's table,
+  so packs use `city`. Squadrons in the committed packs pin
+  `entity_type 473` (the session-proven F-16 class against the f16.json
+  config). (7) Fixtures: small/medium/large/twinwars packs committed under
+  `f4-world-convert/tests/fixtures/packs/` and generated at build time (the
+  mission_profiles_fixture discipline) into `generated_world_fixtures/` —
+  the harness worlds are the DECODE of the generated `.cam`. (8) The gates:
+  12 initializer tests (byte identity, the seed, the container manifest,
+  cursor-clean decodes ×4, the zero-delta `.obd`, the committed packs, the
+  WorldState round-trip, the tasking profile); the C5 24-hour harness
+  passes on the generated small war (24 samples × 2 runs, the MD5
+  certificate equal); medium/large certify at compressed horizons;
+  twinwars certifies with five named teams. (9) The G1 bed: the
+  engine-level pin (`GroundWar.SecondWarPairStandsDownWhileTheFirstFights`)
+  — the first wire-order pair fights, the second pair's mobile battalions
+  never march and never sync to the ledger; the harness-level twinwars run
+  certifies with the third sides in the world. The per-team ATM is
+  deliberately NOT pair-gated (each team tasks against its own war rows —
+  the C4 design); the two-side machine is the C6 air picture + G1 ground
+  war (`belligerent_pair`).
 
 ### CAMP-SCALE-1 — Tier-3 full data + the scale certificate
 - Full UCD/PLT_PARK conversion (the queue item four plans share); the
@@ -638,6 +690,34 @@ Default behavior is byte-identical unless a gate says otherwise.
 - **Gate**: `campaign_qc --accel` certificate on the full fleet (exits
   15/16 stand); tiered sustained rate meets the plan's target; VCD
   countermeasure counts and pilot data flow from the converted tables.
+- **As-built (LANDED)**: the conversion is a surface + the flows behind
+  it, so the real 296-row export is DATA, not a second code pass. The
+  producer: `emit_tables_json` (f4-world-convert) + `cam2json
+  --emit-tables` write the complete UCD/VCD/WCD tables as one
+  `f4.theater.tables/1` JSON document (every record, every field — the
+  round-trip test scales the 8-row real fixture to a 296-row table and
+  pins the shape). The consumer: f4-world's `TheaterTables` loads the
+  same document (the F4_SIDE boundary stays JSON-only). Two flows land:
+  (1) the VCD countermeasure counts — the class-table → VCD → WCD chain
+  (`resolve_countermeasures`; the WCD's name IS the dispenser identity,
+  case-insensitive; the WCD has no type enum) stamps
+  `CountermeasureSupplyComponent` at spawn and the arm path spends the
+  counts instead of the documented 30/15 — SENSORS_COUNTERMEASURES
+  PLAN's named Tier-3 item; (2) the pilot-skill flow — gated
+  (`pilot_skill_flow` / `--pilot-skill`, the countermeasures gate's own
+  lesson: data that re-prices fights lands behind a switch) — the
+  squadron's converted pilot roster picks its best available pilot
+  (highest skill nibble, then rating, then lowest id) and sets the
+  spawned brain's SensorFusion cadence (0-2 Recruit / 3-5 Rookie / 6-7
+  Veteran / 8-9 Ace — documented monotone map; no roster = the Veteran
+  default). PLT_PARK closed as a test: the PD walk is type-agnostic
+  (B1's question), so theaters carrying parking lists flow to the
+  ground layouts and the bridge prefers them (Korea's PD carries none —
+  the parking there stays synthetic, unchanged). The uncapped fleet:
+  `campaign_qc --max-flights 0` now means UNCAPPED (the war mode's
+  48-flight default kept when the flag is absent); `--theater-tables` +
+  `--pilot-skill` arm the flows in the certificate. Absent tables or
+  rosters leave every pre-SCALE run byte-identical.
 
 ### CAMP-DOM-* — domain tranches (each its own landed series, upstream-mapped)
 - **DOM-1 victory scoring**: upstream tracks victory points in the campaign;

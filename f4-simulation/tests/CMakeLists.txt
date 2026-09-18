@@ -134,6 +134,20 @@ target_compile_definitions(test_campaign_war_harness PRIVATE
 )
 add_dependencies(test_campaign_war_harness mission_profiles_fixture)
 
+# CAMP-INIT-1 — the war gates over GENERATED saves: each world is the
+# decode of a campinit-generated .cam (build-time fixtures), so the C5
+# harness runs on exactly the bytes the Task-70 encoder stack produced.
+# The 24-hour run on the small war is the acceptance gate; medium /
+# large / twinwars pin determinism and the two-war-pair bed.
+f4_simulation_add_test(test_campaign_init_wars test_campaign_init_wars.cpp)
+target_compile_definitions(test_campaign_init_wars PRIVATE
+    F4_CAMPINIT_FIXTURES_DIR="${F4_CAMPINIT_FIXTURES_DIR}"
+    F4_SOURCE_FIXTURES_DIR="${CMAKE_SOURCE_DIR}/f4-world-convert/tests/fixtures"
+    F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}"
+    F4_MISSION_PROFILES_JSON="${F4_MISSION_PROFILES_JSON}"
+)
+add_dependencies(test_campaign_init_wars campinit_fixtures mission_profiles_fixture)
+
 # P7 — the strategy layer's sim-side integration: the station contract
 # ride (route → plan → brain), the post-arm RoE gates, and the
 # strategy-armed session (stationed CAPs spawn with racetrack plans;

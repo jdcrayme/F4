@@ -19,14 +19,17 @@ std::string SubFile::stem() const {
 }
 
 void CamArchive::load(const std::filesystem::path& cam_path) {
-    subfiles_.clear();
-    raw_.clear();
-    path_ = cam_path;
-
     // Read the whole file into memory — .cam files are small (~200 KB).
     // Delegates to the shared f4::io::read_file (label "CamArchive" so the
     // diagnostic prefix matches the historical inlined version).
-    raw_ = f4::io::read_file(cam_path, "CamArchive");
+    load_from_memory(f4::io::read_file(cam_path, "CamArchive"), cam_path);
+}
+
+void CamArchive::load_from_memory(std::vector<uint8_t> raw,
+                                  const std::filesystem::path& hint) {
+    subfiles_.clear();
+    raw_ = std::move(raw);
+    path_ = hint;
 
     // The manifest offset lives in the first 4 bytes; an 8-byte file is
     // the minimum viable .cam. Reject anything smaller with a clear

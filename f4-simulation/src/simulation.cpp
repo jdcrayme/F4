@@ -490,6 +490,27 @@ void Simulation::ensure_signature_data() {
             std::move(result.library));
 }
 
+void Simulation::ensure_theater_tables() {
+    // CAMP-SCALE-1: the converted theater tables. No path configured ->
+    // no tables, every dispenser keeps the documented 30/15 defaults and
+    // the pilot-skill flag rides the spawn callers alone (the golden
+    // identity). A configured path that fails is LOUD — the brain-data
+    // discipline (a silently-missing table would drop every resolved
+    // vehicle's countermeasure supply on the floor).
+    if (theater_tables_) return;  // already loaded (idempotent)
+    if (scenario_.combat.theater_tables_path.empty()) return;
+    try {
+        theater_tables_ = std::make_unique<f4::world::TheaterTables>(
+            f4::world::TheaterTables::load(
+                scenario_.combat.theater_tables_path));
+    } catch (const std::exception& e) {
+        throw std::runtime_error(
+            "Simulation::ensure_theater_tables: failed to load converted "
+            "theater tables '" + scenario_.combat.theater_tables_path +
+            "': " + e.what());
+    }
+}
+
 bool Simulation::arm_campaign_aircraft(entities::EntityId id) {
     // The C6 opt-in: everything below exists for the armed campaign
     // only; an unarmed sim answers false without touching the entity
@@ -640,6 +661,7 @@ void Simulation::spawn_from_scenario_list() {
         // rolls resolve against (empty path = the default-flare identity).
         ir_seeker_data_ = resolve_ir_seeker_data(
             scenario_.combat.ir_seeker_data_path);
+        ensure_theater_tables();
     }
     // The real-data signature leg: load for EITHER combat shape (the
     // scenario combat path AND the C6 campaign arming both attach
@@ -1593,6 +1615,7 @@ void Simulation::spawn_from_campaign_flights() {
         scenario_.combat.weapon_data_path, &weapon_import_warnings_);
     ir_seeker_data_ = resolve_ir_seeker_data(
         scenario_.combat.ir_seeker_data_path);
+    ensure_theater_tables();
     if (scenario_.combat.enabled || scenario_.combat.campaign_armed) {
         ensure_signature_data();
     }
@@ -1650,7 +1673,10 @@ void Simulation::spawn_from_campaign_flights() {
         // G2: the populated world's unit map resolves UNIT-targeted
         // delivery waypoints (saved CAS/BAI flights whose strike point
         // carries a battalion VU).
-        &populated.unit_id_map);
+        &populated.unit_id_map,
+        // CAMP-SCALE-1: the converted tables (null = the defaults) + the
+        // pilot-skill gate.
+        theater_tables_.get(), scenario_.combat.pilot_skill_flow);
 
     if (aircraft_entities_.empty()) {
         throw std::runtime_error(

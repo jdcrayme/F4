@@ -106,10 +106,14 @@ sees the ramp. Same gimbal gates as the IRST.
 
 ### CountermeasureComponent (the dispenser, passive)
 
-Chaff 30 / flare 15 (documented constants until the VCD's per-unit
-counts convert), salvo 2 chaff / 1 flare, interval 0.5 s. The interval
-is the pacemaker: the defeat module raises its intents every tick of
-the beam; the dispenser releases one salvo per interval.
+Chaff 30 / flare 15 (the documented defaults — CAMP-SCALE-1 converted
+them: `combat.theater_tables_path` / `--theater-tables` resolves the
+vehicle's own VCD hardpoint supply through the WCD and the arm path
+spends the real counts; a vehicle the tables cannot resolve — or no
+tables at all — keeps these numbers), salvo 2 chaff / 1 flare,
+interval 0.5 s. The interval is the pacemaker: the defeat module raises
+its intents every tick of the beam; the dispenser releases one salvo
+per interval.
 
 ### DecoyComponent + DecoySimComponent (decoys are ENTITIES)
 

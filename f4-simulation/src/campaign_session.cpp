@@ -78,7 +78,9 @@ std::string session_scenario_json(
         double sim_dt,
         bool aa_combat,
         bool tiered,
-        const std::filesystem::path& brain_data) {
+        const std::filesystem::path& brain_data,
+        const std::filesystem::path& theater_tables,
+        bool pilot_skill_flow) {
     std::ostringstream out;
     out << "{\n";
     out << "  \"name\": \"f4_viewer_campaign_session\",\n";
@@ -122,7 +124,20 @@ std::string session_scenario_json(
     if (aa_combat) {
         out << "  \"combat\": {\"enabled\": true, \"campaign_armed\": true,"
                " \"bvr_hold\": false, \"missiles_hold\": false,"
-               " \"guns_hold\": false},\n";
+               " \"guns_hold\": false";
+        if (!theater_tables.empty() || pilot_skill_flow) {
+            // CAMP-SCALE-1: the converted tables + the pilot-skill gate
+            // ride the scenario so the Simulation's bulk spawn path runs
+            // the same flows the session's spawn paths run.
+            if (!theater_tables.empty()) {
+                out << ", \"theater_tables_path\": \""
+                    << json_escape(theater_tables.string()) << "\"";
+            }
+            if (pilot_skill_flow) {
+                out << ", \"pilot_skill_flow\": true";
+            }
+        }
+        out << "},\n";
         if (!brain_data.empty()) {
             out << "  \"brain_data_path\": \""
                 << json_escape(brain_data.string()) << "\",\n";
@@ -340,7 +355,9 @@ CampaignSession::create(const CampaignSessionOptions& opts,
                                      filter, opts.sim_dt, opts.aa_combat,
                                      opts.fidelity_policy ==
                                          FidelityPolicy::Tiered,
-                                     brain_abs);
+                                     brain_abs,
+                                     opts.theater_tables,
+                                     opts.pilot_skill_flow);
         if (!out.good()) {
             return fail("cannot write " + scenario_path.string());
         }
@@ -441,6 +458,7 @@ CampaignSession::create(const CampaignSessionOptions& opts,
     session->synthetic_as_aggregates_ = opts.synthetic_as_aggregates;
     session->combat_deagg_ = opts.combat_deagg;
     session->combat_envelope_ft_ = opts.combat_envelope_ft;
+    session->pilot_skill_flow_ = opts.pilot_skill_flow;
     session->combat_lookahead_sec_ = opts.combat_lookahead_sec;
     session->combat_window_sec_ = opts.combat_window_sec;
     session->spawner_->set_synthetic_deferred(
@@ -2163,7 +2181,9 @@ void CampaignSession::deaggregate_flight_(
                 spawn_tpl_, slot,
                 airbase_airfields_.empty() ? nullptr
                                            : &airbase_airfields_,
-                &objective_id_map_, &weapon_table_, &unit_id_map_);
+                &objective_id_map_, &weapon_table_, &unit_id_map_,
+                /*air_pose=*/nullptr,
+                sim_->theater_tables(), pilot_skill_flow_);
         } else {
             f4::simulation::AirSpawnPose pose;
             pose.position = f4::geo::WorldPosition{
@@ -2182,7 +2202,7 @@ void CampaignSession::deaggregate_flight_(
                 airbase_airfields_.empty() ? nullptr
                                            : &airbase_airfields_,
                 &objective_id_map_, &weapon_table_, &unit_id_map_,
-                &pose);
+                &pose, sim_->theater_tables(), pilot_skill_flow_);
         }
     } else if (ground_spawn) {
         spawned = f4::simulation::spawn_aircraft_for_flight(
@@ -2190,7 +2210,9 @@ void CampaignSession::deaggregate_flight_(
             spawn_tpl_,
             /*parking_slot=*/0,
             airbase_airfields_.empty() ? nullptr : &airbase_airfields_,
-            &objective_id_map_, &weapon_table_, &unit_id_map_);
+            &objective_id_map_, &weapon_table_, &unit_id_map_,
+            /*air_pose=*/nullptr, sim_->theater_tables(),
+            pilot_skill_flow_);
     } else {
         f4::simulation::AirSpawnPose pose;
         pose.position = f4::geo::WorldPosition{
@@ -2209,7 +2231,8 @@ void CampaignSession::deaggregate_flight_(
             sim_->world(), entity_it->second, ct_, cfg_, airfield_,
             spawn_tpl_,
             0, airbase_airfields_.empty() ? nullptr : &airbase_airfields_,
-            &objective_id_map_, &weapon_table_, &unit_id_map_, &pose);
+            &objective_id_map_, &weapon_table_, &unit_id_map_, &pose,
+            sim_->theater_tables(), pilot_skill_flow_);
     }
     if (!spawned.has_value() || !spawned->valid()) return;
 

@@ -40,6 +40,16 @@ public:
     /// Load and parse a .cam file. Throws on I/O error or malformed manifest.
     void load(const std::filesystem::path& cam_path);
 
+    /// Load and parse a .cam image already in memory (CAMP-INIT-1: the
+    /// initializer's freshly built bytes go straight through the EXISTING
+    /// reader — build → load_from_memory → to_world_json — so a generated
+    /// save decodes in the same code path a file-loaded one does).
+    /// `hint` records the path() used for sibling-file discovery
+    /// (optional — generated archives carry every sub-file they need).
+    /// Throws on malformed manifest (same discipline as load()).
+    void load_from_memory(std::vector<uint8_t> raw,
+                          const std::filesystem::path& hint = {});
+
     [[nodiscard]] const std::vector<SubFile>& subfiles() const noexcept { return subfiles_; }
 
     /// Find a sub-file by extension ("cmp", "obj", "tea", ...). Returns

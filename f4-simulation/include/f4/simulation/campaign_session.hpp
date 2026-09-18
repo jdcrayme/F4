@@ -227,6 +227,20 @@ struct CampaignSessionOptions {
     /// no strategy layer).
     bool strategy_layer = false;
 
+    /// CAMP-SCALE-1: path to the converted theater tables (cam2json
+    /// --emit-tables output; f4/world/theater_tables.hpp reads it).
+    /// Empty (default) = the documented countermeasure defaults stand
+    /// byte-identically (the golden identity). When set, the spawned
+    /// aircraft's chaff/flare supply resolves through the VCD/WCD chain
+    /// (the tables load inside the Simulation; an unloadable path fails
+    /// LOUD there).
+    std::filesystem::path theater_tables;
+    /// CAMP-SCALE-1: the pilot-skill flow — the squadron pilot rosters
+    /// (the converted .cam tails) set the spawned brains' SensorFusion
+    /// skill cadence. Default false: every pre-SCALE fight flies its
+    /// Veteran cadence byte-identically.
+    bool pilot_skill_flow = false;
+
     /// FID-1: the fidelity policy (see FidelityPolicy above). Default
     /// FullFidelity — the session is byte-identical to the pre-FID
     /// shape with it (the same contract aa_combat / ground_war /
@@ -945,6 +959,9 @@ private:
     bool synthetic_as_aggregates_ = true;
     bool combat_deagg_ = true;
     double combat_envelope_ft_ = 30000.0;
+    /// CAMP-SCALE-1: the pilot-skill flow gate (the tables ride
+    /// sim_->theater_tables() — the Simulation owns the load).
+    bool pilot_skill_flow_ = false;
     int combat_lookahead_sec_ = 120;
     int combat_window_sec_ = 600;
     /// The generated missions' intents, keyed by the reserved-namespace

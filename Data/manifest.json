@@ -1,7 +1,7 @@
 {
   "f4": {
     "v":1,
-    "generator":"f4import models 0.5.0"
+    "generator":"f4import textures 0.5.0"
   },
   "data_dir":"Data/",
   "theater":"korea",
@@ -14,7 +14,14 @@
       "format_version":1,
       "size_bytes":26851,
       "sha256":"45fe31a7846fb565063607465bad2781708445d2ac2c53dcfe82f762c609e377",
-      "fnv1a_64":"255bd936c7174363"
+      "fnv1a_64":"255bd936c7174363",
+      "sources": [
+        {
+          "path":"C:/Users/jdcra/AppData/Local/Temp/tmp.JZTmJRRM2o/sim/ACDATA/a10.dat",
+          "role":"ACDATA",
+          "sha256":""
+        }
+      ]
     },
     {
       "id":"aircraft:an2",
@@ -22,7 +29,14 @@
       "format_version":1,
       "size_bytes":21935,
       "sha256":"44eac4e4c23a72e89f941ac2b55a84a6c9d8cf09bbe302e86433e033954a0e94",
-      "fnv1a_64":"3d659090929e6c96"
+      "fnv1a_64":"3d659090929e6c96",
+      "sources": [
+        {
+          "path":"C:/Users/jdcra/AppData/Local/Temp/tmp.JZTmJRRM2o/sim/ACDATA/an2.dat",
+          "role":"ACDATA",
+          "sha256":""
+        }
+      ]
     },
     {
       "id":"aircraft:b1b",
@@ -30,7 +44,14 @@
       "format_version":1,
       "size_bytes":28029,
       "sha256":"faace5d9acfeb61b972b3724de1bd793bb322128fd0f62dc984c48e4e0cf47ef",
-      "fnv1a_64":"396cef0df26c652a"
+      "fnv1a_64":"396cef0df26c652a",
+      "sources": [
+        {
+          "path":"C:/Users/jdcra/AppData/Local/Temp/tmp.JZTmJRRM2o/sim/ACDATA/b1b.dat",
+          "role":"ACDATA",
+          "sha256":""
+        }
+      ]
     },
     {
       "id":"aircraft:b52",
@@ -38,7 +59,14 @@
       "format_version":1,
       "size_bytes":28029,
       "sha256":"3485e1169c0759056bdcac49e11ba9b2a4d00db57d0eac41cad3e2545e1dbf2b",
-      "fnv1a_64":"bce460329541ecd1"
+      "fnv1a_64":"bce460329541ecd1",
+      "sources": [
+        {
+          "path":"C:/Users/jdcra/AppData/Local/Temp/tmp.JZTmJRRM2o/sim/ACDATA/b52.dat",
+          "role":"ACDATA",
+          "sha256":""
+        }
+      ]
     },
     {
       "id":"aircraft:c130",
@@ -46,7 +74,14 @@
       "format_version":1,
       "size_bytes":26861,
       "sha256":"3619b4dbf8312708fd4b383edf33302bd8aca1243a98343eaa4d6df1db4b20f7",
-      "fnv1a_64":"b8b703de3f813626"
+      "fnv1a_64":"b8b703de3f813626",
+      "sources": [
+        {
+          "path":"C:/Users/jdcra/AppData/Local/Temp/tmp.JZTmJRRM2o/sim/ACDATA/c130.dat",
+          "role":"ACDATA",
+          "sha256":""
+        }
+      ]
     },
     {
       "id":"aircraft:ea6",
@@ -54,7 +89,14 @@
       "format_version":1,
       "size_bytes":33775,
       "sha256":"39436ed5a04bfca6191f0bdad7e455eec47e42c78e834609bfbe8ba286390e45",
-      "fnv1a_64":"cb559cf3a030abc8"
+      "fnv1a_64":"cb559cf3a030abc8",
+      "sources": [
+        {
+          "path":"C:/Users/jdcra/AppData/Local/Temp/tmp.JZTmJRRM2o/sim/ACDATA/ea6.dat",
+          "role":"ACDATA",
+          "sha256":""
+        }
+      ]
     },
     {
       "id":"aircraft:f111",
@@ -62,7 +104,14 @@
       "format_version":1,
       "size_bytes":33777,
       "sha256":"39db9ea6fffcae6eef48ac3a2a1c26a1b21c43b35c1995f5581786f50db9076b",
-      "fnv1a_64":"4712981543983058"
+      "fnv1a_64":"4712981543983058",
+      "sources": [
+        {
+          "path":"C:/Users/jdcra/AppData/Local/Temp/tmp.JZTmJRRM2o/sim/ACDATA/f111.dat",
+          "role":"ACDATA",
+          "sha256":""
+        }
+      ]
     },
     {
       "id":"aircraft:f14",
@@ -70,7 +119,14 @@
       "format_version":1,
       "size_bytes":33769,
       "sha256":"a4916a1fb632f55789687230b90ac2adf005a5410eedf88536e24d48cecde4a9",
-      "fnv1a_64":"37630f779dc26df9"
+      "fnv1a_64":"37630f779dc26df9",
+      "sources": [
+        {
+          "path":"C:/Users/jdcra/AppData/Local/Temp/tmp.JZTmJRRM2o/sim/ACDATA/f14.dat",
+          "role":"ACDATA",
+          "sha256":""
+        }
+      ]
     },
     {
       "id":"aircraft:f15",
@@ -78,7 +134,14 @@
       "format_version":1,
       "size_bytes":33770,
       "sha256":"a4611b25a13d6bca9059715ae802679e26224efbb038620595cafe9f797feeb8",
-      "fnv1a_64":"e340e63fbfea64e8"
+      "fnv1a_64":"e340e63fbfea64e8",
+      "sources": [
+        {
+          "path":"C:/Users/jdcra/AppData/Local/Temp/tmp.JZTmJRRM2o/sim/ACDATA/f15.dat",
+          "role":"ACDATA",
+          "sha256":""
+        }
+      ]
     },
     {
       "id":"aircraft:f16",
@@ -86,7 +149,14 @@
       "format_version":1,
       "size_bytes":34405,
       "sha256":"d4fb5e17daadaaf5235f82521eb65bb88c9afbb8bf89aad4b9bd15b06109909d",
-      "fnv1a_64":"c4d40c0e1782a6b4"
+      "fnv1a_64":"c4d40c0e1782a6b4",
+      "sources": [
+        {
+          "path":"C:/Users/jdcra/AppData/Local/Temp/tmp.JZTmJRRM2o/sim/ACDATA/f16.dat",
+          "role":"ACDATA",
+          "sha256":""
+        }
+      ]
     },
     {
       "id":"aircraft:f18",
@@ -94,7 +164,14 @@
       "format_version":1,
       "size_bytes":33871,
       "sha256":"db2c7b7c3f532c62527f043ce84d78cc7871f3b4be0b47da91624a4e8456b10e",
-      "fnv1a_64":"c153dedf2d321e3f"
+      "fnv1a_64":"c153dedf2d321e3f",
+      "sources": [
+        {
+          "path":"C:/Users/jdcra/AppData/Local/Temp/tmp.JZTmJRRM2o/sim/ACDATA/f18.dat",
+          "role":"ACDATA",
+          "sha256":""
+        }
+      ]
     },
     {
       "id":"aircraft:f22",
@@ -102,7 +179,14 @@
       "format_version":1,
       "size_bytes":34260,
       "sha256":"cf09a8957af1d37bf76543d09a67cf0f0538992f9d1b052948e499d439e85ed2",
-      "fnv1a_64":"501c91dba341a981"
+      "fnv1a_64":"501c91dba341a981",
+      "sources": [
+        {
+          "path":"C:/Users/jdcra/AppData/Local/Temp/tmp.JZTmJRRM2o/sim/ACDATA/f22.dat",
+          "role":"ACDATA",
+          "sha256":""
+        }
+      ]
     },
     {
       "id":"aircraft:f4",
@@ -110,7 +194,14 @@
       "format_version":1,
       "size_bytes":29936,
       "sha256":"e6cc39dd91ed2730e79ba3f7642367742485818a5e297d3e801fae9264e6e7ba",
-      "fnv1a_64":"79da05d4a5b86406"
+      "fnv1a_64":"79da05d4a5b86406",
+      "sources": [
+        {
+          "path":"C:/Users/jdcra/AppData/Local/Temp/tmp.JZTmJRRM2o/sim/ACDATA/f4.dat",
+          "role":"ACDATA",
+          "sha256":""
+        }
+      ]
     },
     {
       "id":"aircraft:f5",
@@ -118,7 +209,14 @@
       "format_version":1,
       "size_bytes":29935,
       "sha256":"ee58a20134c2adb69210c26a7edab1e72ea1e471cb5476c741253a9eb942330e",
-      "fnv1a_64":"88e6ffb3c0b80b3b"
+      "fnv1a_64":"88e6ffb3c0b80b3b",
+      "sources": [
+        {
+          "path":"C:/Users/jdcra/AppData/Local/Temp/tmp.JZTmJRRM2o/sim/ACDATA/f5.dat",
+          "role":"ACDATA",
+          "sha256":""
+        }
+      ]
     },
     {
       "id":"aircraft:kc10",
@@ -134,7 +232,14 @@
       "format_version":1,
       "size_bytes":29918,
       "sha256":"3e9480376c6c665a5d995bb314b1e214f7c88118a9c2e49ebe2eeb5c12c40790",
-      "fnv1a_64":"170cdebdc8700de4"
+      "fnv1a_64":"170cdebdc8700de4",
+      "sources": [
+        {
+          "path":"C:/Users/jdcra/AppData/Local/Temp/tmp.JZTmJRRM2o/sim/ACDATA/Mig19.dat",
+          "role":"ACDATA",
+          "sha256":""
+        }
+      ]
     },
     {
       "id":"aircraft:mig21",
@@ -142,7 +247,14 @@
       "format_version":1,
       "size_bytes":29945,
       "sha256":"ddb9dee10206c57264c80f245621d53cb486e4d3ab7e6cd960212d01719abf8a",
-      "fnv1a_64":"bd16420ee4e93792"
+      "fnv1a_64":"bd16420ee4e93792",
+      "sources": [
+        {
+          "path":"C:/Users/jdcra/AppData/Local/Temp/tmp.JZTmJRRM2o/sim/ACDATA/Mig21.dat",
+          "role":"ACDATA",
+          "sha256":""
+        }
+      ]
     },
     {
       "id":"aircraft:mig23",
@@ -150,7 +262,14 @@
       "format_version":1,
       "size_bytes":33781,
       "sha256":"3c210138ec71188def226e7d28aea0b976ecbd77acd285c17eb62df6101345dd",
-      "fnv1a_64":"b6994c9f7067fd85"
+      "fnv1a_64":"b6994c9f7067fd85",
+      "sources": [
+        {
+          "path":"C:/Users/jdcra/AppData/Local/Temp/tmp.JZTmJRRM2o/sim/ACDATA/mig23.dat",
+          "role":"ACDATA",
+          "sha256":""
+        }
+      ]
     },
     {
       "id":"aircraft:mig25",
@@ -158,7 +277,14 @@
       "format_version":1,
       "size_bytes":33781,
       "sha256":"1e1fc3f5ce1e82c1161d91ca955a5d4d8769491b8d4a793e46294c3d12092826",
-      "fnv1a_64":"583a9078790eb7cf"
+      "fnv1a_64":"583a9078790eb7cf",
+      "sources": [
+        {
+          "path":"C:/Users/jdcra/AppData/Local/Temp/tmp.JZTmJRRM2o/sim/ACDATA/Mig25.dat",
+          "role":"ACDATA",
+          "sha256":""
+        }
+      ]
     },
     {
       "id":"aircraft:mig27",
@@ -166,7 +292,14 @@
       "format_version":1,
       "size_bytes":33782,
       "sha256":"806d97c5d405eb92cd580196d58b43b7eaa983eb6fc6eb0fd34bbd3d3fceec79",
-      "fnv1a_64":"e5ffb38b54ccbfac"
+      "fnv1a_64":"e5ffb38b54ccbfac",
+      "sources": [
+        {
+          "path":"C:/Users/jdcra/AppData/Local/Temp/tmp.JZTmJRRM2o/sim/ACDATA/Mig27.dat",
+          "role":"ACDATA",
+          "sha256":""
+        }
+      ]
     },
     {
       "id":"aircraft:mig29",
@@ -174,7 +307,14 @@
       "format_version":1,
       "size_bytes":33771,
       "sha256":"10b0ae5e356b602414da005f5b9fd4822d771d507ed2c0dc7b7598aa81c6e2f2",
-      "fnv1a_64":"032bf3d2d132c695"
+      "fnv1a_64":"032bf3d2d132c695",
+      "sources": [
+        {
+          "path":"C:/Users/jdcra/AppData/Local/Temp/tmp.JZTmJRRM2o/sim/ACDATA/mig29.dat",
+          "role":"ACDATA",
+          "sha256":""
+        }
+      ]
     },
     {
       "id":"aircraft:mig31",
@@ -182,7 +322,14 @@
       "format_version":1,
       "size_bytes":33781,
       "sha256":"e9f061efc96e4a5ffdea3a9215c21587205b6a03eaa4fab838f57dae159a0c7b",
-      "fnv1a_64":"0f5e4329b55be766"
+      "fnv1a_64":"0f5e4329b55be766",
+      "sources": [
+        {
+          "path":"C:/Users/jdcra/AppData/Local/Temp/tmp.JZTmJRRM2o/sim/ACDATA/Mig31.dat",
+          "role":"ACDATA",
+          "sha256":""
+        }
+      ]
     },
     {
       "id":"aircraft:su25",
@@ -190,7 +337,14 @@
       "format_version":1,
       "size_bytes":26853,
       "sha256":"6cd3e7f93eb023501573dab527245bf0c9d04a9c3295a7aaed01cb05326344c4",
-      "fnv1a_64":"131828461f574d3c"
+      "fnv1a_64":"131828461f574d3c",
+      "sources": [
+        {
+          "path":"C:/Users/jdcra/AppData/Local/Temp/tmp.JZTmJRRM2o/sim/ACDATA/Su25.dat",
+          "role":"ACDATA",
+          "sha256":""
+        }
+      ]
     },
     {
       "id":"aircraft:su27",
@@ -198,7 +352,14 @@
       "format_version":1,
       "size_bytes":33795,
       "sha256":"d2004dbba52b6e09498eba631f0340e8b5c2b8d6bae14662aab35e4040bc48be",
-      "fnv1a_64":"78ae2f6e5e5ad230"
+      "fnv1a_64":"78ae2f6e5e5ad230",
+      "sources": [
+        {
+          "path":"C:/Users/jdcra/AppData/Local/Temp/tmp.JZTmJRRM2o/sim/ACDATA/Su27.dat",
+          "role":"ACDATA",
+          "sha256":""
+        }
+      ]
     },
     {
       "id":"aircraft:tu95",
@@ -206,7 +367,14 @@
       "format_version":1,
       "size_bytes":28030,
       "sha256":"68d4ab2b76b60f0cb227d55027bacf49679d11692beb76b9a470f9cd120ab2a4",
-      "fnv1a_64":"135caa0d02f420f2"
+      "fnv1a_64":"135caa0d02f420f2",
+      "sources": [
+        {
+          "path":"C:/Users/jdcra/AppData/Local/Temp/tmp.JZTmJRRM2o/sim/ACDATA/tu95.dat",
+          "role":"ACDATA",
+          "sha256":""
+        }
+      ]
     },
     {
       "id":"class:falcon4.ct",
@@ -55074,6 +55242,186 @@
         },
         {
           "path":"D:\\SteamLibrary\\steamapps\\common\\Falcon 4.0\\terrdata\\objects\\KoreaObj.LOD",
+          "role":"art",
+          "sha256":""
+        }
+      ]
+    },
+    {
+      "id":"koreaobj:00000.png",
+      "path":"Models/koreaobj/textures/00000.png",
+      "format_version":1,
+      "size_bytes":89776,
+      "sha256":"4dbed02da3dea9bd66692cccbff3fdba183c9575b7e22374c9ac006595bf7d82",
+      "fnv1a_64":"6d9b993694ca4033",
+      "capabilities": [
+        {
+          "name":"alpha",
+          "status": "present"
+        },
+        {
+          "name":"chroma_key",
+          "status": "present"
+        }
+      ],
+      "sources": [
+        {
+          "path":"D:\\SteamLibrary\\steamapps\\common\\Falcon 4.0\\terrdata\\objects\\KoreaObj.TEX",
+          "role":"art",
+          "sha256":""
+        },
+        {
+          "path":"D:\\SteamLibrary\\steamapps\\common\\Falcon 4.0\\terrdata\\objects\\KoreaObj.HDR",
+          "role":"art",
+          "sha256":""
+        }
+      ]
+    },
+    {
+      "id":"koreaobj:00001.png",
+      "path":"Models/koreaobj/textures/00001.png",
+      "format_version":1,
+      "size_bytes":84293,
+      "sha256":"c46dd9a6c90456455be6d7e2ea4bc0a1953fb2cf51ef06739be3b94603587cab",
+      "fnv1a_64":"0549932413d2d162",
+      "capabilities": [
+        {
+          "name":"alpha",
+          "status": "present"
+        },
+        {
+          "name":"chroma_key",
+          "status": "present"
+        }
+      ],
+      "sources": [
+        {
+          "path":"D:\\SteamLibrary\\steamapps\\common\\Falcon 4.0\\terrdata\\objects\\KoreaObj.TEX",
+          "role":"art",
+          "sha256":""
+        },
+        {
+          "path":"D:\\SteamLibrary\\steamapps\\common\\Falcon 4.0\\terrdata\\objects\\KoreaObj.HDR",
+          "role":"art",
+          "sha256":""
+        }
+      ]
+    },
+    {
+      "id":"koreaobj:00002.png",
+      "path":"Models/koreaobj/textures/00002.png",
+      "format_version":1,
+      "size_bytes":72818,
+      "sha256":"538e0b41081b8093c80bea5cf12b29fd7b8c654138eaeb9cbc4ae62469ed024d",
+      "fnv1a_64":"2d61b3958af75b41",
+      "capabilities": [
+        {
+          "name":"alpha",
+          "status": "present"
+        },
+        {
+          "name":"chroma_key",
+          "status": "present"
+        }
+      ],
+      "sources": [
+        {
+          "path":"D:\\SteamLibrary\\steamapps\\common\\Falcon 4.0\\terrdata\\objects\\KoreaObj.TEX",
+          "role":"art",
+          "sha256":""
+        },
+        {
+          "path":"D:\\SteamLibrary\\steamapps\\common\\Falcon 4.0\\terrdata\\objects\\KoreaObj.HDR",
+          "role":"art",
+          "sha256":""
+        }
+      ]
+    },
+    {
+      "id":"koreaobj:00003.png",
+      "path":"Models/koreaobj/textures/00003.png",
+      "format_version":1,
+      "size_bytes":97263,
+      "sha256":"eca0dfa0a167bed4cae13561c694b034a848ac8fe1de1371d247c3a99051bb61",
+      "fnv1a_64":"ea97a60b5b45a4e8",
+      "capabilities": [
+        {
+          "name":"alpha",
+          "status": "present"
+        },
+        {
+          "name":"chroma_key",
+          "status": "present"
+        }
+      ],
+      "sources": [
+        {
+          "path":"D:\\SteamLibrary\\steamapps\\common\\Falcon 4.0\\terrdata\\objects\\KoreaObj.TEX",
+          "role":"art",
+          "sha256":""
+        },
+        {
+          "path":"D:\\SteamLibrary\\steamapps\\common\\Falcon 4.0\\terrdata\\objects\\KoreaObj.HDR",
+          "role":"art",
+          "sha256":""
+        }
+      ]
+    },
+    {
+      "id":"koreaobj:00004.png",
+      "path":"Models/koreaobj/textures/00004.png",
+      "format_version":1,
+      "size_bytes":88083,
+      "sha256":"a0165332fc6af64c039a4b7c27144cd8aa06a5e2cbc4f27a885cf3b86daa4495",
+      "fnv1a_64":"6ca99ae51a41224e",
+      "capabilities": [
+        {
+          "name":"alpha",
+          "status": "present"
+        },
+        {
+          "name":"chroma_key",
+          "status": "present"
+        }
+      ],
+      "sources": [
+        {
+          "path":"D:\\SteamLibrary\\steamapps\\common\\Falcon 4.0\\terrdata\\objects\\KoreaObj.TEX",
+          "role":"art",
+          "sha256":""
+        },
+        {
+          "path":"D:\\SteamLibrary\\steamapps\\common\\Falcon 4.0\\terrdata\\objects\\KoreaObj.HDR",
+          "role":"art",
+          "sha256":""
+        }
+      ]
+    },
+    {
+      "id":"koreaobj:00005.png",
+      "path":"Models/koreaobj/textures/00005.png",
+      "format_version":1,
+      "size_bytes":67927,
+      "sha256":"84c706c42d7b84e763cd308014fd7c7bd2640a5291fcb78a71dc8025b61db7e3",
+      "fnv1a_64":"335c2325c86f5d2f",
+      "capabilities": [
+        {
+          "name":"alpha",
+          "status": "present"
+        },
+        {
+          "name":"chroma_key",
+          "status": "present"
+        }
+      ],
+      "sources": [
+        {
+          "path":"D:\\SteamLibrary\\steamapps\\common\\Falcon 4.0\\terrdata\\objects\\KoreaObj.TEX",
+          "role":"art",
+          "sha256":""
+        },
+        {
+          "path":"D:\\SteamLibrary\\steamapps\\common\\Falcon 4.0\\terrdata\\objects\\KoreaObj.HDR",
           "role":"art",
           "sha256":""
         }

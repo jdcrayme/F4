@@ -6,6 +6,14 @@
 //   cam2json save1.cam out.json                       -> writes out.json
 //   cam2json save1.cam out.json --theater korea --terrain korea.terrain.json
 //   cam2json save1.cam out.json --theater-data ./terrdata/objects
+//   cam2json save1.cam out.json --theater-data ./terrdata/objects \
+//       --emit-tables korea.tables.json
+//
+// CAMP-SCALE-1 (--emit-tables):
+//   cam2json save1.cam out.json --theater-data <dir> --emit-tables <file>
+//     - Additionally emits the COMPLETE UCD/VCD/WCD tables as one JSON
+//       document (theater_data.hpp emit_tables_json) — the Tier-3
+//       full-data pass. The runtime reader is f4-world's TheaterTables.
 //
 // Asset-pipeline mode (Stage 1, ASSET_PIPELINE_SPEC.md):
 //   cam2json save1.cam --data-dir ./Data [--theater korea]
@@ -38,6 +46,7 @@ int main(int argc, char** argv) {
                      "[--theater-data <dir>] "
                      "[--objectives <base.obj> [--objectives-version <n>]] "
                      "[--preserve-subfiles] "
+                     "[--emit-tables <file>] "
                      "[--data-dir <Data>]\n"
                      "  --theater-data: directory containing Falcon4.OCD/.PHD/.PD/"
                      ".UCD/.VCD/.FED/.FCD (typically <install>/terrdata/objects).\n"
@@ -53,7 +62,11 @@ int main(int argc, char** argv) {
                      "                  reassemble a byte-faithful .cam (save-write path).\n"
                      "  --data-dir:    asset-pipeline mode (Stage 1). Writes to\n"
                      "                  <Data>/World/<id>.world.json, records terrain_file\n"
-                     "                  as @asset:theater:<id>, updates <Data>/manifest.json.\n";
+                     "                  as @asset:theater:<id>, updates <Data>/manifest.json.\n"
+                     "  --emit-tables: emit the FULL Falcon4.UCD/.VCD/.WCD tables as one\n"
+                     "                  JSON document (f4.theater.tables/1) — the Tier-3\n"
+                     "                  full-data pass; consumed by f4-world's TheaterTables.\n"
+                     "                  Requires --theater-data.\n";
         return 2;
     }
     const fs::path in = argv[1];
@@ -70,6 +83,7 @@ int main(int argc, char** argv) {
     fs::path theater_data_dir;
     fs::path data_dir;
     fs::path base_objectives;
+    fs::path emit_tables_path;
     int base_objectives_version = 63;
     bool asset_mode = false;
     for (int i = 2; i < argc; ++i) {
@@ -94,6 +108,8 @@ int main(int argc, char** argv) {
             // every sub-file's raw bytes as base64, so json2cam can
             // reassemble a byte-faithful .cam. See Docs/SAVE_WRITE_PLAN.md.
             opts.preserve_all_subfiles = true;
+        } else if (a == "--emit-tables" && i + 1 < argc) {
+            emit_tables_path = argv[++i];
         }
     }
 
@@ -175,6 +191,20 @@ int main(int argc, char** argv) {
         if (!f) throw std::runtime_error("cannot write " + out.string());
         f << json;
         std::cout << "wrote " << out << " (" << json.size() << " bytes) from " << in << "\n";
+
+        // CAMP-SCALE-1: the full theater tables beside the world JSON.
+        if (!emit_tables_path.empty()) {
+            if (!theater_db.loaded()) {
+                throw std::runtime_error(
+                    "--emit-tables requires a loaded theater DB (pass "
+                    "--theater-data)");
+            }
+            f4::world_convert::emit_tables_json(theater_db, emit_tables_path);
+            std::cout << "wrote " << emit_tables_path << " ("
+                      << theater_db.units.size() << " units, "
+                      << theater_db.vehicles.size() << " vehicles, "
+                      << theater_db.weapons.size() << " weapons)\n";
+        }
 
         std::cerr << "  theater:      " << opts.theater << "\n";
         std::cerr << "  terrain_file: " << opts.terrain_file << "\n";

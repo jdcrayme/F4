@@ -19,8 +19,10 @@
 
 #include "f4/simulation/campaign_bridge.hpp"
 #include "f4/simulation/frames.hpp"
+#include "f4/simulation/combat_bridge.hpp"
 
 #include <f4/simulation/campaign_origin.hpp>
+#include <f4/world/theater_tables.hpp>
 
 #include <f4/entities/entity.hpp>
 #include <f4/entities/types.hpp>
@@ -463,6 +465,47 @@ int16_t resolve_unit_aircraft_vis(f4::entities::EntityHandle unit_h,
         static_cast<uint16_t>(vc->groups.front().vehicle_type), 0);
 }
 
+// ============================================================================
+// CAMP-SCALE-1 — the converted tables' data flows (see the header for
+// the contracts). Both helpers are total: any missing link returns the
+// "no data" answer and the caller keeps today's behavior — absent data
+// never re-prices a fight (the golden-identity rule).
+// ============================================================================
+
+f4::ai::SkillLevel pilot_skill_from_roster(
+    const std::vector<f4::entities::PilotState>& pilots) noexcept {
+    const f4::entities::PilotState* best = nullptr;
+    for (const auto& p : pilots) {
+        if (p.status != 0) continue;  // 0 = available (dead/hospital/leave skip)
+        if (best == nullptr ||
+            p.skill > best->skill ||
+            (p.skill == best->skill && p.rating > best->rating) ||
+            (p.skill == best->skill && p.rating == best->rating &&
+             p.pilot_id < best->pilot_id)) {
+            best = &p;
+        }
+    }
+    if (best == nullptr) return f4::ai::SkillLevel::Veteran;
+    const int s = best->skill;  // the wire nibble, 0..9
+    if (s <= 2) return f4::ai::SkillLevel::Recruit;
+    if (s <= 5) return f4::ai::SkillLevel::Rookie;
+    if (s <= 7) return f4::ai::SkillLevel::Veteran;
+    return f4::ai::SkillLevel::Ace;
+}
+
+std::optional<f4::world::CountermeasureCounts> resolve_unit_countermeasures(
+    const f4::world::TheaterTables* tables,
+    const f4::world_types::ClassTable& ct,
+    f4::entities::EntityHandle unit_h) noexcept {
+    if (tables == nullptr) return std::nullopt;
+    const auto* vc = unit_h.get<f4::entities::VehicleCompositionComponent>();
+    if (vc == nullptr || vc->groups.empty()) return std::nullopt;
+    const auto vehicle_type =
+        static_cast<std::uint16_t>(vc->groups.front().vehicle_type);
+    if (vehicle_type == 0) return std::nullopt;
+    return f4::world::resolve_countermeasures(*tables, ct, vehicle_type);
+}
+
 std::optional<f4::entities::EntityId>
 spawn_aircraft_for_flight(f4::entities::EntityWorld& world,
                           f4::entities::EntityId flight_entity,
@@ -477,7 +520,9 @@ spawn_aircraft_for_flight(f4::entities::EntityWorld& world,
                           const weapons::WeaponClassTable* weapon_table,
                           const std::unordered_map<std::uint32_t,
                               f4::entities::EntityId>* unit_id_map,
-                          const AirSpawnPose* air_pose) {
+                          const AirSpawnPose* air_pose,
+                          const f4::world::TheaterTables* theater_tables,
+                          bool pilot_skill_flow) {
     using namespace f4::entities;
     using namespace f4::flight;
     using namespace f4::ai;
@@ -634,6 +679,16 @@ spawn_aircraft_for_flight(f4::entities::EntityWorld& world,
     brain.module().gear_up_alt_ft = 200.0;
     brain.module().departure_alt_ft = field.departure_altitude_ft;
     brain.module().taxi_speed_kts = 15.0;
+    // CAMP-SCALE-1 — the pilot-skill flow (gated): the flight's squadron
+    // pilot roster sets the fusion cadence. Off (or no squadron) = the
+    // Veteran default — the pre-SCALE identity.
+    if (pilot_skill_flow && fp->squadron.value != 0) {
+        const auto* spawn_sq =
+            EntityHandle(fp->squadron, &world).get<SquadronComponent>();
+        if (spawn_sq != nullptr) {
+            brain.set_pilot_skill(pilot_skill_from_roster(spawn_sq->pilots));
+        }
+    }
     // B.3+: tag the brain's TakeoffModule with the home airbase so its
     // TaxiRequest/TakeoffRequest carry it — the multi-airbase ATC answers
     // from the registered per-base airfield.
@@ -692,6 +747,25 @@ spawn_aircraft_for_flight(f4::entities::EntityWorld& world,
         origin.mission_byte = fp->mission;
     }
 
+    // 7. CAMP-SCALE-1 — the VCD countermeasure supply: the flight's
+    //    vehicle composition (fallback the squadron's) resolves through
+    //    the converted tables; the counts ride the aircraft as DATA and
+    //    the combat arming applies them to the dispenser. No tables (or
+    //    nothing resolved) stamps nothing — the defaults stand.
+    if (theater_tables != nullptr) {
+        auto supply = resolve_unit_countermeasures(theater_tables, ct,
+                                                   flight_h);
+        if (!supply && fp->squadron.value != 0) {
+            supply = resolve_unit_countermeasures(
+                theater_tables, ct, EntityHandle(fp->squadron, &world));
+        }
+        if (supply) {
+            auto& cm_supply = h.add<CountermeasureSupplyComponent>();
+            cm_supply.chaff_rounds = supply->chaff_rounds;
+            cm_supply.flare_rounds = supply->flare_rounds;
+        }
+    }
+
     return h.id();
 }
 
@@ -707,7 +781,9 @@ spawn_aircraft_from_flights(f4::entities::EntityWorld& world,
                                  f4::entities::EntityId>* objective_id_map,
                              const weapons::WeaponClassTable* weapon_table,
                              const std::unordered_map<std::uint32_t,
-                                 f4::entities::EntityId>* unit_id_map) {
+                                 f4::entities::EntityId>* unit_id_map,
+                             const f4::world::TheaterTables* theater_tables,
+                             bool pilot_skill_flow) {
     using namespace f4::entities;
 
     // Find every entity with a FlightPlanComponent. f4-world::populate_units
@@ -759,7 +835,8 @@ spawn_aircraft_from_flights(f4::entities::EntityWorld& world,
         if (auto spawned_id = spawn_aircraft_for_flight(
                 world, flight_id, ct, cfg, airfield,
                 scenario_aircraft, slot, airbase_airfields,
-                objective_id_map, weapon_table, unit_id_map)) {
+                objective_id_map, weapon_table, unit_id_map,
+                /*air_pose=*/nullptr, theater_tables, pilot_skill_flow)) {
             spawned.push_back(*spawned_id);
         }
     }
@@ -1217,7 +1294,9 @@ spawn_aircraft_for_intent(
         const weapons::WeaponClassTable* weapon_table,
         const std::unordered_map<std::uint32_t, f4::entities::EntityId>*
             target_unit_id_map,
-        const AirSpawnPose* air_pose) {
+        const AirSpawnPose* air_pose,
+        const f4::world::TheaterTables* theater_tables,
+        bool pilot_skill_flow) {
     using namespace f4::entities;
     using namespace f4::flight;
     using namespace f4::ai;
@@ -1340,6 +1419,12 @@ spawn_aircraft_for_intent(
     brain.module().departure_alt_ft = field.departure_altitude_ft;
     brain.module().taxi_speed_kts = 15.0;
     brain.module().airbase_id = home_airbase_vu;
+    // CAMP-SCALE-1 — the pilot-skill flow (gated): the intent's squadron
+    // pilot roster (already resolved as `sq` above) sets the fusion
+    // cadence. Off (or no squadron) = the Veteran default.
+    if (pilot_skill_flow && sq != nullptr) {
+        brain.set_pilot_skill(pilot_skill_from_roster(sq->pilots));
+    }
     // G2: the unit map resolves UNIT targets (a CAS intent's battalion
     // VU) — the flight-resolution map doubles as the target map when
     // the caller provides no dedicated one (the spawner's own map
@@ -1384,6 +1469,20 @@ spawn_aircraft_for_intent(
     origin.callsign_num = 0;
     // C6: the intent's mission byte (the synthetic path's role source).
     origin.mission_byte = intent.mission_byte;
+
+    // CAMP-SCALE-1 — the VCD countermeasure supply: the intent's
+    // squadron's vehicle composition resolves through the converted
+    // tables (same contract as the flight path). No tables (or nothing
+    // resolved) stamps nothing — the defaults stand.
+    if (theater_tables != nullptr && squadron_entity.valid()) {
+        if (auto supply = resolve_unit_countermeasures(
+                theater_tables, ct,
+                EntityHandle(squadron_entity, &world))) {
+            auto& cm_supply = h.add<CountermeasureSupplyComponent>();
+            cm_supply.chaff_rounds = supply->chaff_rounds;
+            cm_supply.flare_rounds = supply->flare_rounds;
+        }
+    }
 
     return h.id();
 }

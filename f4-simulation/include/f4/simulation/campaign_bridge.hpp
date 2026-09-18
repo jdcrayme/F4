@@ -40,6 +40,7 @@
 
 #include <f4/entities/entity.hpp>
 #include <f4/world/detail/world_state.hpp>
+#include <f4/world/theater_tables.hpp>  // CAMP-SCALE-1 (tables + counts)
 #include <f4/world_types/class_table.hpp>
 #include <f4/data/aircraft_config.hpp>
 
@@ -217,6 +218,12 @@ struct AirSpawnPose;
 /// override — an in-air FM init at the pose, the plan's Enroute start
 /// phase, the handoff's fuel. Null (every existing caller) keeps the
 /// grounded parking spawn, byte-identical.
+/// CAMP-SCALE-1: `theater_tables` (optional) is the converted theater
+/// tables — when loaded, the intent's squadron vehicle resolves its
+/// chaff/flare supply through the VCD/WCD chain and the spawned aircraft
+/// carries CountermeasureSupplyComponent (consumed at arm time). Null
+/// (the default) stamps nothing. `pilot_skill_flow` gates the squadron
+/// pilot roster → brain skill mapping (false = the Veteran default).
 [[nodiscard]] std::optional<f4::entities::EntityId>
 spawn_aircraft_for_intent(
     f4::entities::EntityWorld& world,
@@ -234,7 +241,34 @@ spawn_aircraft_for_intent(
     const weapons::WeaponClassTable* weapon_table = nullptr,
     const std::unordered_map<std::uint32_t, f4::entities::EntityId>*
         target_unit_id_map = nullptr,
-    const AirSpawnPose* air_pose = nullptr);
+    const AirSpawnPose* air_pose = nullptr,
+    const f4::world::TheaterTables* theater_tables = nullptr,
+    bool pilot_skill_flow = false);
+
+/// CAMP-SCALE-1 — the pilot-skill mapping (the converted .cam squadron
+/// tails reaching the fight). Picks the roster's best AVAILABLE pilot
+/// (status 0; highest skill nibble, then rating, then the lowest pilot
+/// id — deterministic) and maps the wire's 0..9 skill nibble onto the
+/// fusion's four cadence levels:
+///   0-2 Recruit | 3-5 Rookie | 6-7 Veteran | 8-9 Ace
+/// (a documented monotone placeholder — the reference's exact
+/// pilot-stat→skill table is unrecoverable from the sources; the
+/// nibble's own range is the shape). No available pilot (or no roster)
+/// returns the pre-SCALE default Veteran.
+[[nodiscard]] f4::ai::SkillLevel
+pilot_skill_from_roster(
+    const std::vector<f4::entities::PilotState>& pilots) noexcept;
+
+/// CAMP-SCALE-1 — resolve a unit's countermeasure supply from the
+/// converted tables: the unit's first vehicle group's entity type →
+/// class-table DTYPE_VEHICLE row → VCD hardpoints → WCD chaff/flare
+/// shots. nullopt = no tables / no composition / nothing resolved —
+/// the caller keeps the documented defaults (never throws).
+[[nodiscard]] std::optional<f4::world::CountermeasureCounts>
+resolve_unit_countermeasures(
+    const f4::world::TheaterTables* tables,
+    const f4::world_types::ClassTable& ct,
+    f4::entities::EntityHandle unit_h) noexcept;
 
 /// Map a campaign owner slot to the sim's TEAM-tag string vocabulary.
 ///
@@ -397,7 +431,9 @@ spawn_aircraft_for_flight(f4::entities::EntityWorld& world,
                           const weapons::WeaponClassTable* weapon_table = nullptr,
                           const std::unordered_map<std::uint32_t,
                               f4::entities::EntityId>* unit_id_map = nullptr,
-                          const AirSpawnPose* air_pose = nullptr);
+                          const AirSpawnPose* air_pose = nullptr,
+                          const f4::world::TheaterTables* theater_tables = nullptr,
+                          bool pilot_skill_flow = false);
 
 /// Spawn one aircraft entity per Flight-class unit in the EntityWorld.
 ///
@@ -446,6 +482,14 @@ spawn_aircraft_for_flight(f4::entities::EntityWorld& world,
 ///                    AirbaseAirfieldMap). Each flight's home base resolves
 ///                    through it; unknown bases fall back to `airfield`.
 ///                    Default null = legacy single-airfield behavior.
+/// \param theater_tables  CAMP-SCALE-1: the converted theater tables —
+///                    when loaded, each flight's vehicle resolves its
+///                    chaff/flare supply (CountermeasureSupplyComponent,
+///                    consumed at arm time). Null (default) = the
+///                    documented defaults, byte-identical.
+/// \param pilot_skill_flow  CAMP-SCALE-1: the squadron pilot roster →
+///                    brain skill mapping gate (false = the Veteran
+///                    default cadence).
 /// \returns The vector of spawned aircraft EntityIds. Empty if no flights were found.
 [[nodiscard]] std::vector<f4::entities::EntityId>
 spawn_aircraft_from_flights(f4::entities::EntityWorld& world,
@@ -459,7 +503,9 @@ spawn_aircraft_from_flights(f4::entities::EntityWorld& world,
                                  f4::entities::EntityId>* objective_id_map = nullptr,
                              const weapons::WeaponClassTable* weapon_table = nullptr,
                              const std::unordered_map<std::uint32_t,
-                                 f4::entities::EntityId>* unit_id_map = nullptr);
+                                 f4::entities::EntityId>* unit_id_map = nullptr,
+                             const f4::world::TheaterTables* theater_tables = nullptr,
+                             bool pilot_skill_flow = false);
 
 // ============================================================================
 // Mode B: Unit Deaggregation

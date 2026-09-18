@@ -5,6 +5,7 @@
 
 #include <f4/world_convert/theater_data.hpp>
 #include <f4/install/file_finder.hpp>
+#include <f4/json/writer.hpp>
 
 #include <f4/io/cursor.hpp>
 #include <f4/io/read_file.hpp>
@@ -12,6 +13,8 @@
 #include <algorithm>
 #include <cctype>
 #include <cstring>
+#include <fstream>
+#include <ostream>
 #include <stdexcept>
 #include <string>
 
@@ -730,6 +733,194 @@ void TheaterObjectDatabase::load_all(const std::filesystem::path& dir) {
     try_one(load_weapon_data,        base, "WCD", weapons,         load_diagnostics.back());
     load_diagnostics.emplace_back();
     try_one(load_squadron_stores_data, base, "SSD", squad_stores, load_diagnostics.back());
+}
+
+// ============================================================================
+// CAMP-SCALE-1 — emit_tables_json (see theater_data.hpp for the contract).
+// ============================================================================
+
+namespace {
+
+/// A positional byte array as a JSON array (element i = column i).
+template <std::size_t N>
+void emit_byte_array(std::ostream& o, const std::array<uint8_t, N>& a) {
+    o << "[";
+    for (std::size_t i = 0; i < N; ++i) {
+        if (i) o << ", ";
+        o << static_cast<int>(a[i]);
+    }
+    o << "]";
+}
+
+template <std::size_t N>
+void emit_short_array(std::ostream& o, const std::array<int16_t, N>& a) {
+    o << "[";
+    for (std::size_t i = 0; i < N; ++i) {
+        if (i) o << ", ";
+        o << a[i];
+    }
+    o << "]";
+}
+
+template <std::size_t N>
+void emit_int_array(std::ostream& o, const std::array<int32_t, N>& a) {
+    o << "[";
+    for (std::size_t i = 0; i < N; ++i) {
+        if (i) o << ", ";
+        o << a[i];
+    }
+    o << "]";
+}
+
+void emit_unit_row(std::ostream& o, const UnitClassData& u) {
+    o << "{\"index\": " << u.index
+      << ", \"name\": \"" << f4::json::escape_string(u.name) << "\""
+      << ", \"flags\": " << u.flags
+      << ", \"movement_type\": " << u.movement_type
+      << ", \"movement_type_name\": \""
+      << f4::json::escape_string(movement_type_name(u.movement_type)) << "\""
+      << ", \"movement_speed\": " << u.movement_speed
+      << ", \"max_range\": " << u.max_range
+      << ", \"fuel\": " << u.fuel
+      << ", \"rate\": " << u.rate
+      << ", \"pt_data_index\": " << u.pt_data_index
+      << ", \"num_elements\": ";
+    emit_int_array(o, u.num_elements);
+    o << ", \"vehicle_type\": ";
+    emit_short_array(o, u.vehicle_type);
+    o << ", \"scores\": ";
+    emit_byte_array(o, u.scores);
+    o << ", \"role\": " << static_cast<int>(u.role)
+      << ", \"hit_chance\": ";
+    emit_byte_array(o, u.hit_chance);
+    o << ", \"strength\": ";
+    emit_byte_array(o, u.strength);
+    o << ", \"range\": ";
+    emit_byte_array(o, u.range);
+    o << ", \"detection\": ";
+    emit_byte_array(o, u.detection);
+    o << ", \"damage_mod\": ";
+    emit_byte_array(o, u.damage_mod);
+    o << ", \"radar_vehicle\": " << static_cast<int>(u.radar_vehicle)
+      << ", \"special_index\": " << u.special_index
+      << ", \"icon_index\": " << u.icon_index
+      << "}";
+}
+
+void emit_vehicle_row(std::ostream& o, const VehicleClassData& v) {
+    o << "{\"index\": " << v.index
+      << ", \"name\": \"" << f4::json::escape_string(v.name) << "\""
+      << ", \"nctr\": \"" << f4::json::escape_string(v.nctr) << "\""
+      << ", \"hit_points\": " << v.hit_points
+      << ", \"flags\": " << v.flags
+      << ", \"rcs_factor\": " << v.rcs_factor
+      << ", \"max_wt\": " << v.max_wt
+      << ", \"empty_wt\": " << v.empty_wt
+      << ", \"fuel_wt\": " << v.fuel_wt
+      << ", \"fuel_econ\": " << v.fuel_econ
+      << ", \"engine_sound\": " << v.engine_sound
+      << ", \"high_alt\": " << v.high_alt
+      << ", \"low_alt\": " << v.low_alt
+      << ", \"cruise_alt\": " << v.cruise_alt
+      << ", \"max_speed\": " << v.max_speed
+      << ", \"radar_type\": " << v.radar_type
+      << ", \"number_of_pilots\": " << v.number_of_pilots
+      << ", \"rack_flags\": " << v.rack_flags
+      << ", \"visible_flags\": " << v.visible_flags
+      << ", \"callsign_index\": " << static_cast<int>(v.callsign_index)
+      << ", \"callsign_slots\": " << static_cast<int>(v.callsign_slots)
+      << ", \"hit_chance\": ";
+    emit_byte_array(o, v.hit_chance);
+    o << ", \"strength\": ";
+    emit_byte_array(o, v.strength);
+    o << ", \"range\": ";
+    emit_byte_array(o, v.range);
+    o << ", \"detection\": ";
+    emit_byte_array(o, v.detection);
+    o << ", \"weapon\": ";
+    emit_short_array(o, v.weapon);
+    o << ", \"weapons\": ";
+    emit_byte_array(o, v.weapons);
+    o << ", \"damage_mod\": ";
+    emit_byte_array(o, v.damage_mod);
+    o << "}";
+}
+
+void emit_weapon_row(std::ostream& o, const WeaponClassData& w) {
+    o << "{\"index\": " << w.index
+      << ", \"name\": \"" << f4::json::escape_string(w.name) << "\""
+      << ", \"strength\": " << w.strength
+      << ", \"damage_type\": " << w.damage_type
+      << ", \"range_km\": " << w.range_km
+      << ", \"flags\": " << w.flags
+      << ", \"fire_rate\": " << static_cast<int>(w.fire_rate)
+      << ", \"rarity\": " << static_cast<int>(w.rarity)
+      << ", \"guidance_flags\": " << w.guidance_flags
+      << ", \"collective\": " << static_cast<int>(w.collective)
+      << ", \"simweap_index\": " << w.simweap_index
+      << ", \"weight\": " << w.weight
+      << ", \"drag_index\": " << w.drag_index
+      << ", \"blast_radius\": " << w.blast_radius
+      << ", \"radar_type\": " << w.radar_type
+      << ", \"sim_data_idx\": " << w.sim_data_idx
+      << ", \"max_alt\": " << static_cast<int>(w.max_alt)
+      << ", \"hit_chance\": ";
+    emit_byte_array(o, w.hit_chance);
+    o << "}";
+}
+
+} // namespace
+
+void emit_tables_json(const TheaterObjectDatabase& db,
+                      const std::filesystem::path& out_path) {
+    std::ofstream o(out_path, std::ios::binary | std::ios::trunc);
+    if (!o) {
+        throw std::runtime_error(
+            "theater_data: cannot open tables output: " + out_path.string());
+    }
+
+    o << "{\n";
+    o << "  \"format\": \"f4.theater.tables/1\",\n";
+    o << "  \"counts\": {\"units\": " << db.units.size()
+      << ", \"vehicles\": " << db.vehicles.size()
+      << ", \"weapons\": " << db.weapons.size() << "},\n";
+
+    // --- units (Falcon4.UCD) — every record, every field -----------------
+    o << "  \"units\": [\n";
+    for (std::size_t i = 0; i < db.units.entries.size(); ++i) {
+        o << "    ";
+        emit_unit_row(o, db.units.entries[i]);
+        if (i + 1 < db.units.entries.size()) o << ",";
+        o << "\n";
+    }
+    o << "  ],\n";
+
+    // --- vehicles (Falcon4.VCD) ------------------------------------------
+    o << "  \"vehicles\": [\n";
+    for (std::size_t i = 0; i < db.vehicles.entries.size(); ++i) {
+        o << "    ";
+        emit_vehicle_row(o, db.vehicles.entries[i]);
+        if (i + 1 < db.vehicles.entries.size()) o << ",";
+        o << "\n";
+    }
+    o << "  ],\n";
+
+    // --- weapons (Falcon4.WCD) --------------------------------------------
+    o << "  \"weapons\": [\n";
+    for (std::size_t i = 0; i < db.weapons.entries.size(); ++i) {
+        o << "    ";
+        emit_weapon_row(o, db.weapons.entries[i]);
+        if (i + 1 < db.weapons.entries.size()) o << ",";
+        o << "\n";
+    }
+    o << "  ]\n";
+    o << "}\n";
+
+    o.flush();
+    if (!o) {
+        throw std::runtime_error(
+            "theater_data: write failed: " + out_path.string());
+    }
 }
 
 } // namespace f4::world_convert

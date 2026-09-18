@@ -57,6 +57,23 @@ namespace f4::ai { class BrainComponent; }  // spawn wiring below
 
 namespace f4::simulation {
 
+/// CAMP-SCALE-1 — the per-aircraft countermeasure supply resolved from
+/// the converted theater tables (scenario.hpp combat.theater_tables_path)
+/// at SPAWN time and consumed at ARM time. Production: the campaign
+/// spawn paths resolve the flight's vehicle entity type through the
+/// class-table → VCD → WCD chain (f4/world/theater_tables.hpp's
+/// resolve_countermeasures) and stamp the summed hardpoint shots here.
+/// Consumption: arm_campaign_combat's dispenser attach applies the
+/// rounds in place of the documented 30/15 defaults. Absent component
+/// (no tables, or the vehicle resolved nothing) = the defaults stand —
+/// the golden identity. The spawn-resolves/arm-consumes split mirrors
+/// VisualModelComponent's vis_type: resolved once where the campaign
+/// context lives, read later where the consumer lives.
+struct CountermeasureSupplyComponent : entities::Component<CountermeasureSupplyComponent> {
+    int chaff_rounds = 0;
+    int flare_rounds = 0;
+};
+
 class Simulation;  // combat event recording (attach_combat_event_recorder)
 
 /// Add the combat component set to a spawned aircraft entity. Idempotent

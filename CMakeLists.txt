@@ -211,7 +211,7 @@ f4_mark_side(importer
     f4_models_viewer
     f4import cam2json json2cam ct2json wcd2json terrain2json
     dat2json mnvr2json brain2json form2json veh2json sens2json sig2json
-    dat_validate json_diff f4-models-viewer
+    dat_validate json_diff f4-models-viewer campinit
 )
 
 # 0b.2 — Runtime side: must NOT link legacy binary parsers.
