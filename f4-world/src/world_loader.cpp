@@ -275,6 +275,24 @@ std::vector<EntityId> populate_objectives(
             fs.pt_data_index = src.pt_data_index(i);
             fs.objective_detection = src.objective_detection(i);
             fs.features = src.features(i);
+            // Project the save's 2-bit damage face onto the features
+            // (f4vu.h VIS states: 0 normal, 1 repaired, 2 damaged,
+            // 3 destroyed) so display paths read the per-feature state
+            // without unpacking DamageBitmapComponent — the same
+            // convention the session's repair sync writes back.
+            if (src.has_fstatus(i)) {
+                const auto& fst = src.fstatus(i);
+                const int capacity = static_cast<int>(fst.size()) * 4;
+                int walk = static_cast<int>(fs.features.size());
+                if (walk > capacity) walk = capacity;
+                for (int fi = 0; fi < walk; ++fi) {
+                    fs.features[static_cast<std::size_t>(fi)].damage_state =
+                        static_cast<std::uint8_t>(
+                            (fst[static_cast<std::size_t>(fi) / 4] >>
+                             ((static_cast<std::size_t>(fi) % 4) * 2)) &
+                            0x03);
+                }
+            }
         }
 
         // --- PropertyBag for format residue ---

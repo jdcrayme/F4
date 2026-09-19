@@ -27,6 +27,32 @@ namespace f4::viewer {
 
 namespace {
 
+// The per-feature damage vocabulary — the wire's own VIS states
+// (f4vu.h), the same bytes the engine's repair cadence and f4-weapons'
+// bomb ledger write (0 normal, 1 repaired, 2 damaged, 3 destroyed).
+constexpr std::uint8_t kVisNormal = 0;
+constexpr std::uint8_t kVisRepaired = 1;
+constexpr std::uint8_t kVisDamaged = 2;
+constexpr std::uint8_t kVisDestroyed = 3;
+
+ImU32 vis_color(std::uint8_t state) {
+    switch (state) {
+        case kVisRepaired:  return IM_COL32( 80, 180, 220, 220); // teal: hit, then fixed
+        case kVisDamaged:   return IM_COL32(230, 190,  40, 220); // amber
+        case kVisDestroyed: return IM_COL32(210,  50,  30, 220); // red
+        default:            return IM_COL32( 80, 200,  80, 220); // green: intact
+    }
+}
+
+const char* vis_label(std::uint8_t state) {
+    switch (state) {
+        case kVisRepaired:  return "rep";
+        case kVisDamaged:   return "dmg";
+        case kVisDestroyed: return "dest";
+        default:            return "";
+    }
+}
+
 struct LayoutColors {
     ImU32 stroke;
     ImU32 fill;
@@ -67,8 +93,24 @@ void ViewerApp::draw_ground_layout_view() {
     }
     auto h = impl_->handle(impl_->sel_entity);
     auto* gl = h.get<f4::entities::GroundLayoutComponent>();
-    auto* fs = h.get<f4::entities::FeatureSetComponent>();
     auto* ot = h.get<f4::entities::ObjectiveTypeComponent>();
+    // Live damage face: during a session the bomb/repair ledger lands on
+    // the SESSION world's entity (the one-world mirror); the static
+    // world's copy stays at save state. Prefer the session's entity when
+    // the objective is in the session's world.
+    auto vh = h;
+    if (impl_->session) {
+        const std::int64_t vu = impl_->pb_int(
+            h.get<f4::entities::PropertyBag>(), "vu_id_num", 0);
+        if (vu > 0) {
+            const auto& omap = impl_->objective_id_map();
+            const auto it = omap.find(static_cast<std::uint32_t>(vu));
+            if (it != omap.end() && it->second.valid()) {
+                vh = impl_->session_handle(it->second);
+            }
+        }
+    }
+    auto* fs = vh.get<f4::entities::FeatureSetComponent>();
     const bool has_layout = gl && !gl->layouts.empty();
     const bool has_features = fs && !fs->features.empty();
     if (!has_layout && !has_features) {
@@ -97,6 +139,30 @@ void ViewerApp::draw_ground_layout_view() {
     }
     ImGui::SameLine();
     ImGui::TextDisabled("(main canvas)");
+
+    // The damage roll-up: the objective's strike assessment at a glance.
+    if (fs && !fs->features.empty()) {
+        int intact = 0, repaired = 0, damaged = 0, destroyed = 0;
+        for (const auto& f : fs->features) {
+            switch (f.damage_state) {
+                case kVisRepaired:  ++repaired; break;
+                case kVisDamaged:   ++damaged; break;
+                case kVisDestroyed: ++destroyed; break;
+                default:            ++intact; break;
+            }
+        }
+        ImGui::TextColored(ImVec4(0.55f, 0.85f, 0.55f, 1.0f), "%d intact",
+                           intact);
+        ImGui::SameLine();
+        ImGui::TextColored(ImVec4(0.35f, 0.75f, 0.9f, 1.0f), "%d repaired",
+                           repaired);
+        ImGui::SameLine();
+        ImGui::TextColored(ImVec4(0.95f, 0.8f, 0.25f, 1.0f), "%d damaged",
+                           damaged);
+        ImGui::SameLine();
+        ImGui::TextColored(ImVec4(0.95f, 0.35f, 0.25f, 1.0f), "%d destroyed",
+                           destroyed);
+    }
 
     // Compute the layout's bounding box (in feet)
     float min_x = 1e30f, min_y = 1e30f, max_x = -1e30f, max_y = -1e30f;
@@ -229,14 +295,8 @@ void ViewerApp::draw_ground_layout_view() {
             if (px < canvas_pos.x - 20 || px > canvas_pos.x + canvas_size.x + 20 ||
                 py < canvas_pos.y - 20 || py > canvas_pos.y + canvas_size.y + 20) continue;
 
-            ImU32 fill_color;
-            const char* dmg_label = "";
-            switch (f.damage_state) {
-                case 0:  fill_color = IM_COL32( 80, 200,  80, 220); dmg_label = "";       break;
-                case 1:  fill_color = IM_COL32(220, 200,  40, 220); dmg_label = " dmg";   break;
-                case 2:  fill_color = IM_COL32(220,  80,  40, 220); dmg_label = " dest";  break;
-                default: fill_color = IM_COL32(140,  40,  20, 220); dmg_label = " X";     break;
-            }
+            ImU32 fill_color = vis_color(f.damage_state);
+            const char* dmg_label = vis_label(f.damage_state);
 
             const float half = 4.0f;
             const float rad = -f.facing * static_cast<float>(f4::math::DEG_TO_RAD);
@@ -252,6 +312,11 @@ void ViewerApp::draw_ground_layout_view() {
             const ImVec2 c3 = rot(-half, +half);
             dl->AddQuadFilled(c0, c1, c2, c3, fill_color);
             dl->AddQuad(c0, c1, c2, c3, IM_COL32(20, 20, 20, 220), 1.0f);
+            // Rubble is unmissable: the red cross across the footprint.
+            if (f.damage_state == kVisDestroyed) {
+                dl->AddLine(c0, c2, IM_COL32(255, 70, 45, 235), 1.6f);
+                dl->AddLine(c1, c3, IM_COL32(255, 70, 45, 235), 1.6f);
+            }
 
             const ImVec2 facing_tip = rot(half + 3.0f, 0.0f);
             dl->AddLine(ImVec2(px, py), facing_tip,
@@ -298,13 +363,14 @@ void ViewerApp::draw_ground_layout_view() {
         }
         ImGui::Separator();
         ImGui::TextUnformatted("Features (building footprints)");
-        static const struct { const char* name; ImU32 color; } feat_colors[] = {
-            {"Intact",           IM_COL32( 80, 200,  80, 220)},
-            {"Damaged",          IM_COL32(220, 200,  40, 220)},
-            {"Destroyed",        IM_COL32(220,  80,  40, 220)},
-            {"Heavily destroyed",IM_COL32(140,  40,  20, 220)},
+        static const struct { std::uint8_t state; const char* name; } feat_states[] = {
+            {kVisNormal,    "Intact"},
+            {kVisRepaired,  "Repaired"},
+            {kVisDamaged,   "Damaged"},
+            {kVisDestroyed, "Destroyed"},
         };
-        for (const auto& fc : feat_colors) {
+        for (const auto& fsn : feat_states) {
+            const ImU32 color = vis_color(fsn.state);
             const ImVec2 p = ImGui::GetCursorScreenPos();
             const float sy = p.y + ImGui::GetTextLineHeight() * 0.5f;
             dl = ImGui::GetWindowDrawList();
@@ -312,10 +378,10 @@ void ViewerApp::draw_ground_layout_view() {
                 ImVec2(p.x + 2, sy - 4),
                 ImVec2(p.x + 10, sy - 4),
                 ImVec2(p.x + 10, sy + 4),
-                ImVec2(p.x + 2, sy + 4), fc.color);
+                ImVec2(p.x + 2, sy + 4), color);
             ImGui::Dummy(ImVec2(14, ImGui::GetTextLineHeight()));
             ImGui::SameLine();
-            ImGui::TextUnformatted(fc.name);
+            ImGui::TextUnformatted(fsn.name);
         }
     }
 
@@ -345,18 +411,33 @@ void ViewerApp::draw_ground_layout_view() {
             if (fs->features.empty()) {
                 ImGui::TextDisabled("(no feature placements — FED not loaded or empty)");
             } else {
-                ImGui::Text("idx   name              offset        facing  hp    dmg   value");
+                ImGui::Text("idx   name              offset        facing  hp          dmg   value");
                 for (std::size_t i = 0; i < fs->features.size(); ++i) {
                     const auto& f = fs->features[i];
-                    const char* dmg_label =
-                        f.damage_state == 0 ? "OK" :
-                        f.damage_state == 1 ? "dmg" :
-                        f.damage_state == 2 ? "dest" : "X";
-                    ImGui::Text("%-5ld %-16s (%5.0f,%5.0f) %-7d %-5d %-4s %d",
+                    char dmg_label[8];
+                    std::snprintf(dmg_label, sizeof(dmg_label), "%s",
+                                  vis_label(f.damage_state)[0] == '\0'
+                                      ? "OK"
+                                      : vis_label(f.damage_state));
+                    // Live hit points when the A-G ledger has been
+                    // opened (f4-weapons fills it on first impact and
+                    // the repair cadence restores it); the FCD max
+                    // otherwise.
+                    char hp_buf[24];
+                    if (fs->feature_hp.size() == fs->features.size()) {
+                        std::snprintf(hp_buf, sizeof(hp_buf), "%d/%d",
+                                      static_cast<int>(fs->feature_hp[i]),
+                                      static_cast<int>(f.hit_points));
+                    } else {
+                        std::snprintf(hp_buf, sizeof(hp_buf), "%d",
+                                      static_cast<int>(f.hit_points));
+                    }
+                    ImGui::Text("%-5ld %-16s (%5.0f,%5.0f) %-7d %-10s %-4s %d",
                                 static_cast<long>(i),
                                 f.name.empty() ? "?" : f.name.c_str(),
                                 f.offset_x, f.offset_y,
-                                f.facing, f.hit_points, dmg_label,
+                                f.facing, hp_buf,
+                                dmg_label,
                                 static_cast<int>(f.value));
                 }
             }
