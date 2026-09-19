@@ -12,15 +12,25 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
   (wedge4/grid ground formations, the synthesized 8-spot/80-ft ramp row,
   overflow + runway-frame rotation), so the sim and the viewer share one
   definition (behavior unchanged; all spawn-path tests green). The class
-  table browser's detail pane now previews CLASS_UNIT rows: the first
-  populated instance of the class in the loaded world stands for it (UCD
-  rows carry no vis and no vehicle list), its live vehicles resolve
-  through the CT vehicle chain, and the browser draws them exactly where
-  `spawn_vehicles_from_unit` / `spawn_aircraft_from_squadrons` would put
-  them — orbitable, with a layout-provenance note and a per-group
-  composition table. Preview labels say "synthetic" where the real
-  FreeFalcon formation tables (gndai.cpp SquadFormations etc.) are still
-  unported.
+  table browser's detail pane now previews CLASS_UNIT and CLASS_OBJECTIVE
+  rows in 3D: unit rows lay the first populated instance's live vehicles
+  out exactly where `spawn_vehicles_from_unit` would (UCD rows carry no
+  vis and no vehicle list), squadrons draw the synthesized ramp row, and
+  objective rows draw the whole feature layout — feature meshes where
+  exports exist, plus the synthesized airfield plates (runway/taxiway
+  geometry via `build_airfield_geometry_3d`) when the world carries PHD
+  point lists. Models with no glTF export (nearly all vehicle/aircraft
+  vis types — the koreaobj set is features only) draw as flat-colored
+  placeholder boxes on a scaled ground grid, so the layout reads while
+  staying visibly synthetic. Two supporting fixes: the WorldState
+  adapters' `entity_type()` now falls back to `type` (JSON-loaded worlds
+  had class_table_index 0 everywhere, keying nothing per-class), and the
+  group preview composes instance transforms in raylib's row-vector
+  order (rotate first, then translate — matching draw_vis_type_mesh).
+  New `--ct-preview <entity_type>` CLI flag opens the browser
+  pre-selected on a row for headless screenshot proofs (verified: unit
+  170 wedge/grid, squadron 473 ramp row, vehicle 103 real mesh, radar
+  2128 feature layout).
 
 ## SHOWCASE-1 — the mission-QC user concept made real (watch one aircraft fly one mission)
 
