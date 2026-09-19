@@ -3,7 +3,7 @@
 // Scenario JSON loader. Uses f4::json::Reader (the dependency-free recursive-
 // descent parser) to walk the scenario JSON schema.
 //
-// The schema (see f4-scenario-player/scenarios/takeoff_kunsan.json for an example):
+// The schema (see f4-world-viewer/scenarios/takeoff_only.json.in for an example):
 //   {
 //     "name": "takeoff_kunsan",
 //     "theater": "korea",

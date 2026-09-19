@@ -51,6 +51,16 @@ class EntityWorld;       // fwd — the loaded world (feature-collection source)
 
 namespace f4::viewer {
 
+/// One model placement in a formation/ramp preview — viewer-local frame:
+/// X/Z ground plane in feet (x = formation-local east, z = formation-local
+/// north), yaw radians about +Y (0 = model forward).
+struct PlacedModel {
+    int16_t vis_type = 0;
+    float x = 0.0f;
+    float z = 0.0f;
+    float yaw = 0.0f;
+};
+
 // Forward declaration — the full definition lives in class_table_browser.cpp
 // because it contains Raylib types (::Mesh, ::Material, ::Texture2D,
 // ::Shader, ::RenderTexture2D) that we don't want to leak into the public
@@ -126,6 +136,33 @@ private:
     bool objective_features_built_ = false;
     int objective_features_built_generation_ = -1;
     std::unordered_map<uint16_t, ObjectiveClassFeatures> objective_features_;
+
+    // --- Unit layout previews (class level) ---
+    // Units and squadrons carry no vis of their own — every UCD row's
+    // vis_type is all-zero, and the models belong to the VEHICLE types in
+    // the unit's composition. Like objective_features_, the first
+    // populated instance of the class in the loaded world stands for the
+    // class: its live vehicles are laid out exactly the way the session's
+    // deaggregation lays them out (f4/simulation/formation_layout.hpp —
+    // wedge4/grid for ground units, the synthesized 80-ft ramp row for
+    // squadrons).
+    struct UnitClassLayout {
+        std::string class_name;         // instance name, e.g. "52 TFS PAK"
+        bool is_squadron = false;       // domain air → ramp row, else wedge/grid
+        std::string note;               // layout provenance shown under the preview
+        struct GroupRow {
+            int vehicle_type = 0;       // VEHICLE entity_type (100+)
+            int live_count = 0;
+            int16_t vis_type = 0;       // resolved model, 0 = none
+        };
+        std::vector<GroupRow> groups;
+        std::vector<PlacedModel> models; // preview placements; empty = nothing drawable
+    };
+    std::unordered_map<uint16_t, UnitClassLayout> unit_layouts_;
+    bool unit_layouts_built_ = false;
+    int unit_layouts_built_generation_ = -1;
+    // Group-preview camera refit trigger (refit once per selected class).
+    int last_layout_entity_type_ = -1;
 
     // --- Lazy-loaded data (owned by this panel) ---
     // Tranche 0d: the table loads from Data/Classes/falcon4.ct.json via
@@ -225,6 +262,27 @@ private:
     /// feature collections (objective_features_). Rebuilt when the world
     /// generation changes. No-op when no world is loaded.
     void ensure_objective_features();
+
+    /// Group the loaded world's units/squadrons into per-entity-type
+    /// deaggregation layouts (unit_layouts_), one representative instance
+    /// per class. No-op when no world is loaded.
+    void ensure_unit_layouts();
+
+    /// Detail-panel section listing a unit class's vehicle composition
+    /// and the layout provenance (the counterpart of
+    /// draw_objective_features for CLASS_UNIT rows).
+    void draw_unit_layout(const f4::world_types::ClassTableEntry& entry);
+
+    /// Draw the 3D deaggregation preview: every placed model at its
+    /// formation/ramp-row position, orbitable like the single-model
+    /// preview.
+    void draw_group_preview(const std::vector<PlacedModel>& placed,
+                            const UnitClassLayout& layout);
+
+    /// Fit the orbit camera to a group preview: placements determine the
+    /// X/Z extent, the first model's bbox its vertical center and scale.
+    void fit_camera_to_group(const std::vector<PlacedModel>& placed,
+                             const f4::renderer::RuntimeModel& first_model);
 
     /// Detail-panel section listing an objective class's feature
     /// placements. Each row's Preview button loads the feature's model

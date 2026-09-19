@@ -5,7 +5,7 @@
 //
 // Consolidated from 4 duplicated implementations across:
 //   - f4-models-viewer/src/camera3d.cpp
-//   - f4-scenario-player/src/renderer.cpp
+//   - f4-world-viewer/src/scenario_player_view.cpp
 //   - f4-world-viewer/src/ground_layout_3d.cpp
 //   - f4-world-viewer/src/class_table_browser.cpp
 

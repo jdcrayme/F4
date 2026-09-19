@@ -1,4 +1,4 @@
-// f4-scenario-player/src/radio_log.cpp
+// f4-world-viewer/src/radio_log.cpp
 //
 // RadioLog implementation — subscribes to the ATC protocol messages and
 // formats a human-readable transcript.
@@ -10,7 +10,7 @@
 
 #include <utility>
 
-namespace f4::scenario_player {
+namespace f4::viewer {
 
 using namespace f4::ai::atc;
 
@@ -70,4 +70,4 @@ void RadioLog::attach(f4::simulation::Simulation& sim) {
     });
 }
 
-} // namespace f4::scenario_player
+} // namespace f4::viewer

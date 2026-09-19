@@ -1,11 +1,12 @@
-// f4-scenario-player/src/radio_log.hpp
+// f4-world-viewer/src/radio_log.hpp
 //
-// PRIVATE HEADER — internal to the f4-scenario-player library.
+// PRIVATE HEADER — internal to the f4-world-viewer library.
 //
 // RadioLog — observes ATC traffic on the simulation's message bus and
-// keeps a scrolling transcript for the overlay. This is the visible proof
-// of the clearance sequence (taxi request -> clearance -> takeoff request
-// -> clearance -> approach request -> clearance -> cleared to land).
+// keeps a scrolling transcript for the scenario-mode overlay. This is the
+// visible proof of the clearance sequence (taxi request -> clearance ->
+// takeoff request -> clearance -> approach request -> clearance ->
+// cleared to land).
 //
 // Each entry is a short pilot/tower phrase in the style of a comms log,
 // timestamped with the sim time at receipt.
@@ -19,7 +20,7 @@
 #include <cstdint>
 #include <string>
 
-namespace f4::scenario_player {
+namespace f4::viewer {
 
 class RadioLog {
 public:
@@ -59,4 +60,4 @@ private:
     f4::simulation::Simulation* sim_{nullptr};   // time source
 };
 
-} // namespace f4::scenario_player
+} // namespace f4::viewer

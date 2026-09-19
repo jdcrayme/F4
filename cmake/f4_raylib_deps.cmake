@@ -1,8 +1,8 @@
 # f4_raylib_deps.cmake
 #
 # Shared FetchContent configuration for Raylib + Dear ImGui + rlImGui.
-# Used by f4-renderer, f4-world-viewer, f4-models-viewer, and
-# f4-scenario-player. Consolidated from 4 duplicated FetchContent
+# Used by f4-renderer, f4-world-viewer (scenario mode included), and
+# f4-models-viewer. Consolidated from 4 duplicated FetchContent
 # blocks in the 2026 cleanup pass.
 #
 # Call include(f4_raylib_deps) from each module's CMakeLists.txt

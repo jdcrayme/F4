@@ -22,8 +22,9 @@
 // Consolidates the per-app GPU caches that used to live in:
 //   - f4-world-viewer ViewerApp::Impl (mesh_cache_3d, texture_cache_3d,
 //     lit_shader_3d, default_mat_3d, fallback_white_tex_3d, lighting fields)
-//   - f4-scenario-player PlayerApp::Impl (mesh_cache, texture_cache,
-//     lit_shader, lighting fields)
+//     — now shared with the viewer's scenario mode (ScenarioPlayerState
+//     borrows render_res_3d instead of owning its own cache, the
+//     consolidation that removed the standalone f4-scenario-player)
 // and their per-app build/upload/unload methods
 // (build_mesh_for_model / build_mesh_3d, upload_textures,
 // ensure_default_material_3d, unload_meshes / unload_meshes_3d).

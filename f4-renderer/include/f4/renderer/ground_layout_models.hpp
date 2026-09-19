@@ -15,7 +15,7 @@
 // Coordinate convention:
 //   - All output coordinates are in feet, origin = objective center,
 //     +X = East, +Y = North, +Z = Up. (Same frame as
-//     TransformComponent::position and the f4-scenario-player renderer.)
+//     TransformComponent::position and the world viewer's scenario renderer.)
 //   - The renderer converts ENU feet to Raylib's RH Y-up at draw time:
 //     raylib_x = enu_x, raylib_y = enu_z, raylib_z = -enu_y.
 //

@@ -8,8 +8,8 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # ============================================================================
 # f4-renderer — shared rendering library
 #
-# Consolidates the 4x-duplicated rendering code from f4-models-viewer,
-# f4-scenario-player, and f4-world-viewer into a single library:
+# Consolidates the 4x-duplicated rendering code from f4-models-viewer
+# and f4-world-viewer into a single library:
 #
 #   coord_transform  — LH Y-up / ENU → RH Y-up conversion (pure math)
 #   orbit_camera     — spherical orbit camera (Config + input handling)

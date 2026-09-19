@@ -1,4 +1,4 @@
-// f4-scenario-player/src/airfield_overlays.cpp
+// f4-world-viewer/src/airfield_overlays.cpp
 //
 // Builds AirfieldOverlays from a Scenario. See header for rationale.
 //
@@ -20,7 +20,7 @@
 // f4::renderer::LayoutLine / LayoutMarker types so they render through
 // the same draw_layout_line / draw_layout_marker code path.
 
-#include "f4/scenario_player/airfield_overlays.hpp"
+#include "f4/viewer/airfield_overlays.hpp"
 
 #include <f4/entities/types.hpp>             // GroundLayoutList, GroundLayoutPoint
 #include <f4/renderer/ground_layout_models.hpp>  // build_airfield_geometry_3d
@@ -31,7 +31,7 @@
 #include <cstdio>
 #include <vector>
 
-namespace f4::scenario_player {
+namespace f4::viewer {
 
 namespace {
 
@@ -461,4 +461,4 @@ AirfieldOverlays build_airfield_overlays(const f4::simulation::Scenario& s) {
     return g;
 }
 
-} // namespace f4::scenario_player
+} // namespace f4::viewer

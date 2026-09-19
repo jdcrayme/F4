@@ -59,6 +59,7 @@
 #include <f4/viewer/hex_inspector.hpp>
 
 #include <chrono>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -125,6 +126,28 @@ int main(int argc, char** argv) {
                                           // screenshot smoke window open n
                                           // seconds (0 = the 6/12 s default)
 
+    // --- Scenario mode flags (consolidated f4-scenario-player) ------------
+    // --scenario <path> loads a scenario template and switches the viewer to
+    // scenario mode (the 3D live-aircraft render path + in-frame tick loop).
+    // Sibling flags mirror the former f4-scenario-player CLI 1:1 so existing
+    // scripts/smoke tests keep working.
+    std::string scenario_path;            // --scenario <path>
+    bool have_scenario = false;
+    bool start_running = false;           // --run: start the sim RUNNING
+    bool start_follow = false;            // --follow: start with follow-cam on
+    double scenario_speed = 1.0;          // --speed <x>: time scale [0.1, 10]
+    double shot_at_sec = 1.5;             // --shot-at <sec>: screenshot delay
+    double camera_distance = -1.0;        // --camera-distance <ft>
+    std::string record_path;              // --record <path>: force a trace
+    int record_every = 0;                 // --record-every <N>: trace decimation
+    int window_w = 1600;                  // --width <N>
+    int window_h = 900;                   // --height <N>
+    std::string harness_summary_out;      // --harness <path>: headless BVR QC
+    bool run_harness = false;
+    std::int64_t harness_horizon_sec = 300;
+    double harness_sample_sec = 30.0;
+    int harness_runs = 2;
+
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
         if (a == "--screenshot" && i + 1 < argc) {
@@ -185,6 +208,37 @@ int main(int argc, char** argv) {
             // first cycle at the speed presets (180 wall s at 10x).
             smoke_seconds = std::atoi(argv[++i]);
             if (smoke_seconds < 0) smoke_seconds = 0;
+        } else if (a == "--scenario" && i + 1 < argc) {
+            scenario_path = argv[++i];
+            have_scenario = true;
+        } else if (a == "--run") {
+            start_running = true;
+        } else if (a == "--follow") {
+            start_follow = true;
+        } else if (a == "--speed" && i + 1 < argc) {
+            scenario_speed = std::atof(argv[++i]);
+        } else if (a == "--shot-at" && i + 1 < argc) {
+            shot_at_sec = std::atof(argv[++i]);
+        } else if (a == "--camera-distance" && i + 1 < argc) {
+            camera_distance = std::atof(argv[++i]);
+        } else if (a == "--record" && i + 1 < argc) {
+            record_path = argv[++i];
+        } else if (a == "--record-every" && i + 1 < argc) {
+            record_every = std::atoi(argv[++i]);
+        } else if (a == "--width" && i + 1 < argc) {
+            window_w = std::atoi(argv[++i]);
+        } else if (a == "--height" && i + 1 < argc) {
+            window_h = std::atoi(argv[++i]);
+        } else if (a == "--harness" && i + 1 < argc) {
+            harness_summary_out = argv[++i];
+            run_harness = true;
+        } else if (a == "--horizon-sec" && i + 1 < argc) {
+            harness_horizon_sec =
+                static_cast<std::int64_t>(std::atoll(argv[++i]));
+        } else if (a == "--sample-sec" && i + 1 < argc) {
+            harness_sample_sec = std::atof(argv[++i]);
+        } else if (a == "--runs" && i + 1 < argc) {
+            harness_runs = std::atoi(argv[++i]);
         } else if (positional == 0) {
             try { app.load_world_json(a); }
             catch (const std::exception& e) { std::cerr << "world load: " << e.what() << "\n"; }
@@ -304,6 +358,59 @@ int main(int argc, char** argv) {
     // adopt path reads it when the async create() completes).
     if (auto_play) {
         app.set_session_auto_play(true);
+    }
+
+    // ── Scenario mode (consolidated f4-scenario-player) ──────────────────
+    // --scenario <path> loads a scenario template and switches the viewer to
+    // scenario mode. This is exclusive with the campaign canvas / replay:
+    // the scenario render path takes over run() entirely, so we apply the
+    // sibling flags (--run/--follow/--speed/--record/--camera-distance/
+    // --screenshot) and return here — bypassing the campaign --screenshot
+    // detached-thread block below.
+    if (have_scenario) {
+        // --harness and --screenshot are mutually exclusive: the harness runs
+        // headlessly (no GL context), the screenshot needs the render loop.
+        if (run_harness && exit_after_screenshot) {
+            std::cerr << "error: --harness and --screenshot are mutually "
+                         "exclusive — --harness runs headlessly (no GL "
+                         "context), --screenshot needs the render loop.\n";
+            return 1;
+        }
+        // SHOWCASE-1: force recording on BEFORE load_scenario (the override
+        // is applied between the JSON parse and the Simulation build).
+        if (!record_path.empty()) {
+            app.set_recording(record_path, record_every);
+        }
+        try {
+            app.load_scenario(scenario_path);
+        } catch (const std::exception& e) {
+            std::cerr << "error: failed to load scenario: " << e.what() << "\n";
+            return 2;
+        }
+        // --harness: the headless BVR-intercept QC path. Returns the harness's
+        // exit code directly; does NOT open a window.
+        if (run_harness) {
+            try {
+                return app.run_harness(harness_summary_out,
+                                       harness_horizon_sec,
+                                       harness_sample_sec,
+                                       harness_runs);
+            } catch (const std::exception& e) {
+                std::cerr << "error: harness failed: " << e.what() << "\n";
+                return 1;
+            }
+        }
+        app.set_window_size(window_w, window_h);
+        app.set_time_scale(scenario_speed);
+        if (start_running) app.set_paused(false);
+        if (start_follow) app.set_follow_camera(true);
+        if (camera_distance > 0.0) app.set_camera_distance(camera_distance);
+        if (exit_after_screenshot) {
+            app.schedule_screenshot(static_cast<float>(shot_at_sec),
+                                    screenshot_path);
+        }
+        app.run();
+        return 0;
     }
 
     if (exit_after_screenshot) {

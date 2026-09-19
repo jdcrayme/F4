@@ -5,6 +5,23 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## CT-BROWSER-LAYOUT — the class table browser previews unit/squadron deaggregation layouts
+
+- **CT-BROWSER-LAYOUT** — the deaggregation positioning math moved out of
+  `campaign_bridge.cpp` into `f4-simulation/formation_layout.hpp`
+  (wedge4/grid ground formations, the synthesized 8-spot/80-ft ramp row,
+  overflow + runway-frame rotation), so the sim and the viewer share one
+  definition (behavior unchanged; all spawn-path tests green). The class
+  table browser's detail pane now previews CLASS_UNIT rows: the first
+  populated instance of the class in the loaded world stands for it (UCD
+  rows carry no vis and no vehicle list), its live vehicles resolve
+  through the CT vehicle chain, and the browser draws them exactly where
+  `spawn_vehicles_from_unit` / `spawn_aircraft_from_squadrons` would put
+  them — orbitable, with a layout-provenance note and a per-group
+  composition table. Preview labels say "synthetic" where the real
+  FreeFalcon formation tables (gndai.cpp SquadFormations etc.) are still
+  unported.
+
 ## SHOWCASE-1 — the mission-QC user concept made real (watch one aircraft fly one mission)
 
 - **SHOWCASE-1** — the geometry half of the QC question ("follow an

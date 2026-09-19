@@ -9,7 +9,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # f4-simulation — the orchestration layer proposed in
 # Docs/ARCHITECTURE PROPOSAL.md §13. Owns the EntityWorld + MessageBus +
 # ModelDatabase + AircraftConfig registry and runs the tick loop. NO
-# rendering — that's the executable's job (f4-scenario-player).
+# rendering — that's the executable's job (f4-world-viewer, its --scenario mode).
 #
 # This library is where components that depend on BOTH f4-entities and
 # f4-models live (e.g. VisualModelComponent — the renderable handle that's

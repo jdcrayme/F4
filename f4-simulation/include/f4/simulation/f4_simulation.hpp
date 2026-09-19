@@ -5,7 +5,7 @@
 // f4-simulation is the orchestration layer proposed in
 // Docs/ARCHITECTURE PROPOSAL.md §13. It owns the EntityWorld + MessageBus +
 // ModelDatabase + AircraftConfig registry and runs the tick loop. NO
-// rendering — that's the executable's job (f4-scenario-player).
+// rendering — that's the executable's job (f4-world-viewer, its --scenario mode).
 //
 // This library is where new components that depend on BOTH f4-entities and
 // f4-models live (e.g. VisualModelComponent). It's also where the Scenario

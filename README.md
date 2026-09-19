@@ -142,7 +142,7 @@ custom command produces 25 JSONs in `${BUILD_DIR}/generated_fixtures/` for
 `f4-data` tests to consume. The generation lives at the LIBRARY level
 (`f4-convert/CMakeLists.txt`, not under `tests/`): those JSONs are RUNTIME
 inputs for the interactive apps — the world viewer's campaign session
-(`f16.json`), the scenario player (every scenario template's
+(`f16.json`), the world viewer's scenario mode (every scenario template's
 `aircraft_config_path`), and `campaign_qc` — so the app targets declare
 `add_dependencies(convert_golden_fixtures)` and a single-target build of any
 app generates its own data. No manual tool runs, no full-build-first.
@@ -806,7 +806,7 @@ const std::string result_json = session->ledger_json();  // byte-stable
 Both fixtures are BUILD artifacts: `f16.json` comes from
 `convert_golden_fixtures` (f4-convert), `MissionProfiles.json` from
 `mission_profiles_fixture` (f4-campaign), and building the world viewer
-(or scenario player, or `campaign_qc`) target generates them as part of
+(or scenario mode, or `campaign_qc`) target generates them as part of
 the build — no preparation tools to run by hand. The viewer's
 "Start Session" verifies both exist up front and reports the rebuild
 command rather than a bare path when a stale build tree loses them.
@@ -962,9 +962,8 @@ Smaller modules with their own test suites (counts = TEST macros):
 | `f4-import` | `f4import` CLI: install doctor, models/textures import into Data/, per-file emit | 46 |
 | `f4-recorder` | Input/state recorder — the AI demos' flight traces and the viewer's replay format | 59 |
 | `f4-renderer` | Raylib-backed renderer: camera, lit shaders, texture cache, 3D draw, feature meshes, SVG symbol library (GPU-context tests self-skip without a display) | 233 |
-| `f4-world-viewer` | The interactive world viewer (raylib + Dear ImGui): V-CAMP live campaign sessions, hex inspector, class-table browser | 88 |
+| `f4-world-viewer` | The interactive world viewer (raylib + Dear ImGui): V-CAMP live campaign sessions, hex inspector, class-table browser. Also hosts the scenario player (`--scenario <path>` mode — fly a scenario template live, follow cam, speed; `--record` for a FlightRecorder trace; `--screenshot`/`--harness` for headless QC) | 88 |
 | `f4-models-viewer` | The interactive 3D model viewer (BSP/glTF, LOD switching, animation preview) | — |
-| `f4-scenario-player` | The 3D mission player (raylib): fly a scenario template live (--run, follow cam, speed), screenshot capture, --record for a FlightRecorder trace (the world viewer's replay input) | — |
 
 ## Building
 
@@ -1131,6 +1130,39 @@ TestCamp's 449 flights) keeps the interactive budget; raise it in the
 start row if your machine has headroom. Fixture paths (class table,
 F-16 config, mission profiles) resolve from the install when one is
 configured, else the build tree — the campaign_qc defaults.
+
+### Scenario mode (`--scenario`)
+
+The world viewer also hosts the scenario player (the former standalone
+`f4-scenario-player`, now a mode of `f4-world-viewer`): load a scenario
+template (`f4-world-viewer/scenarios/*.json.in`, built to
+`build/scenarios/*.json`) and fly it live with the 3D follow-cam render
+path + in-frame fixed-timestep tick loop. Sibling flags mirror the old
+player CLI 1:1, so existing scripts keep working — just swap the binary
+path.
+
+```bash
+cmake --build build --target f4-world-viewer
+
+# Fly a scenario live (start running, follow cam)
+./build/f4-world-viewer/f4-world-viewer \
+    --scenario build/scenarios/takeoff_only.json --run --follow
+
+# Record a FlightRecorder trace (the world viewer's Mission QC / Open Replay
+# menu loads this) + drop a screenshot + run the headless harness
+./build/f4-world-viewer/f4-world-viewer \
+    --scenario build/scenarios/tanker_track.json \
+    --run \
+    --record qc/tanker_track/trace.json \
+    --screenshot out.png \
+    --harness harness_summary.json
+```
+
+`--scenario` is exclusive with the campaign canvas / replay: the scenario
+render path takes over `run()` entirely. The other scenario flags
+(`--speed`, `--shot-at`, `--camera-distance`, `--record-every`,
+`--width`/`--height`) match the former player; the headless `--harness`
+runs the BVR QC summary before `run()` (no GL context).
 
 ### CLI (for scripts / smoke tests)
 

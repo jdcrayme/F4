@@ -73,7 +73,7 @@ endif()
 # so the apps launched without their runtime inputs and "Start
 # Session" failed with "aircraft config not found". Generating the
 # fixtures at the LIBRARY level + wiring add_dependencies() on the app
-# targets (see f4-world-viewer / f4-scenario-player / f4-simulation
+# targets (see f4-world-viewer / f4-simulation
 # CMakeLists) makes building the app the ONLY preparation step.
 #
 # Target names, output paths, and the generation commands are unchanged

@@ -2,15 +2,15 @@
 //
 // The "Mission QC" window (SHOWCASE-1) — the discovery half of the
 // mission-QC user concept: ONE place that lists every flyable mission-QC
-// scenario (the f4-scenario-player template library — tanker_track,
+// scenario (the world viewer's scenario-template library — tanker_track,
 // landing_only, on_glideslope, digi_full_mission, ...) and, for each, the
 // recorded FlightRecorder trace the headless runs produce.
 //
 // The workflow it fronts:
 //   1. campaign_qc --scenario build/scenarios/<name>.json [--minutes N]
 //        → qc/<name>/trace.json + scenario_qc_summary.json (gates 20–24)
-//      or  f4-scenario-player build/scenarios/<name>.json --run --record
-//          qc/<name>/trace.json   (watch it live in 3D, keep the trace)
+//      or  f4-world-viewer --scenario build/scenarios/<name>.json --run
+//          --record qc/<name>/trace.json   (watch it live in 3D, keep the trace)
 //   2. click "Open replay" here → the trace loads in replay mode (the
 //      scrubber, per-aircraft trail colored by cross-track error, the
 //      dashed intended path, ai_state) — geometry QC without a window.
@@ -152,7 +152,7 @@ void ViewerApp::draw_mission_qc_view() {
     // concept is file-based and the commands belong on the screen.
     ImGui::TextDisabled("1. record:   campaign_qc --scenario "
                         "build/scenarios/<name>.json [--minutes N]");
-    ImGui::TextDisabled("   (or:      f4-scenario-player "
+    ImGui::TextDisabled("   (or:      f4-world-viewer --scenario "
                         "build/scenarios/<name>.json --run "
                         "--record qc/<name>/trace.json)");
     ImGui::TextDisabled("2. replay:   this window's Open replay — trail "

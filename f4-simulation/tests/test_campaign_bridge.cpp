@@ -22,7 +22,7 @@
 // These tests use synthetic ObjectiveState + EntityWorld data so they
 // don't depend on a real .cam fixture. The end-to-end path (load world
 // JSON + spawn) is exercised by the integration smoke test in
-// f4-scenario-player/tests/.
+// f4-world-viewer/src/.
 
 #include <gtest/gtest.h>
 

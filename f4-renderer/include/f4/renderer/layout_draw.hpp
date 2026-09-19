@@ -2,7 +2,7 @@
 //
 // Shared Raylib draw primitives for AirfieldGeometry3D (see
 // ground_layout_models.hpp). Both f4-world-viewer (ground-layout panel)
-// and f4-scenario-player (real-airbase rendering) consume these — the
+// and the world viewer's scenario mode (real-airbase rendering) consume these — the
 // drawing logic lives here once instead of per-app.
 //
 // All functions take an ENU origin offset (feet): the geometry from

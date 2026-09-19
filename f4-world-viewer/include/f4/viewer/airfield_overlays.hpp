@@ -1,6 +1,6 @@
-// f4-scenario-player/include/f4/scenario_player/airfield_overlays.hpp
+// f4-world-viewer/include/f4/viewer/airfield_overlays.hpp
 //
-// Scenario-specific 3D overlays for the scenario player:
+// Scenario-specific 3D overlays for the world viewer's scenario mode:
 //   - taxi route (yellow line strip, parking → hold-short → threshold)
 //   - flight-plan route (cyan lines at altitude + drop lines + markers)
 //   - approach reference (orange extended centerline + 3° glide slope)
@@ -29,7 +29,7 @@
 
 #include <vector>
 
-namespace f4::scenario_player {
+namespace f4::viewer {
 
 /// One scenario's renderable airfield state. Built once at load_scenario()
 /// time from the (possibly derived) Scenario; drawn every frame.
@@ -75,4 +75,4 @@ struct AirfieldOverlays {
 /// scenario's threshold/end/taxi_route.
 [[nodiscard]] AirfieldOverlays build_airfield_overlays(const f4::simulation::Scenario& s);
 
-} // namespace f4::scenario_player
+} // namespace f4::viewer

@@ -93,13 +93,13 @@ if(F4_BUILD_VIEWER)
 endif()
 
 # ── Configure the scenario JSON templates at build time ────────────────────
-# This block runs regardless of whether f4-scenario-player is built (the
-# scenarios are pure JSON consumed by f4-simulation tests + the player).
-# Substitutes @F4_SOURCE_DIR@, @F4_BINARY_DIR@, @F4_DIGI_CLASS_TABLE@ for the
-# committed Data/ JSON paths, the generated f16.json (build/generated_
-# fixtures/), and the class table fallback. Tranche 0d: scenarios carry no
-# model paths — the renderer resolves models per vis_type through
-# Data/Models/koreaobj (RuntimeModelCache).
+# This block configures the scenario templates consumed by the world
+# viewer's scenario mode (the consolidated f4-scenario-player) and by
+# f4-simulation tests. Substitutes @F4_SOURCE_DIR@, @F4_BINARY_DIR@,
+# @F4_DIGI_CLASS_TABLE@ for the committed Data/ JSON paths, the generated
+# f16.json (build/generated_fixtures/), and the class table fallback.
+# Tranche 0d: scenarios carry no model paths — the renderer resolves models
+# per vis_type through Data/Models/koreaobj (RuntimeModelCache).
 #
 # Phase 0c (FLIGHT_CONTROL_NEXT_STEPS.md §3.2): the takeoff_only and
 # landing_only scenarios are isolated diagnostic scenarios. Each emits a
@@ -148,24 +148,24 @@ if(F4_INSTALL AND EXISTS "${F4_INSTALL}/terrdata/korea/texture/TEXTURE.BIN")
 endif()
 
 set(F4_SCENARIO_TEMPLATES
-    f4-scenario-player/scenarios/kunsan_parking.json.in
-    f4-scenario-player/scenarios/digi_full_mission.json.in
-    f4-scenario-player/scenarios/takeoff_only.json.in
-    f4-scenario-player/scenarios/landing_only.json.in
-    f4-scenario-player/scenarios/intercept_final.json.in
-    f4-scenario-player/scenarios/on_glideslope.json.in
-    f4-scenario-player/scenarios/climbout_to_cruise.json.in
-    f4-scenario-player/scenarios/closed_traffic.json.in
-    f4-scenario-player/scenarios/course_intercept.json.in
-    f4-scenario-player/scenarios/standard_rate_turn.json.in
-    f4-scenario-player/scenarios/bvr_intercept.json.in
-    f4-scenario-player/scenarios/wvr_merge.json.in
-    f4-scenario-player/scenarios/ground_strike.json.in
-    f4-scenario-player/scenarios/two_ship.json.in
-    f4-scenario-player/scenarios/guns_merge.json.in
-    f4-scenario-player/scenarios/midair_merge.json.in
-    f4-scenario-player/scenarios/tanker_track.json.in
-    f4-scenario-player/scenarios/formation_acceptance.json.in
+    f4-world-viewer/scenarios/kunsan_parking.json.in
+    f4-world-viewer/scenarios/digi_full_mission.json.in
+    f4-world-viewer/scenarios/takeoff_only.json.in
+    f4-world-viewer/scenarios/landing_only.json.in
+    f4-world-viewer/scenarios/intercept_final.json.in
+    f4-world-viewer/scenarios/on_glideslope.json.in
+    f4-world-viewer/scenarios/climbout_to_cruise.json.in
+    f4-world-viewer/scenarios/closed_traffic.json.in
+    f4-world-viewer/scenarios/course_intercept.json.in
+    f4-world-viewer/scenarios/standard_rate_turn.json.in
+    f4-world-viewer/scenarios/bvr_intercept.json.in
+    f4-world-viewer/scenarios/wvr_merge.json.in
+    f4-world-viewer/scenarios/ground_strike.json.in
+    f4-world-viewer/scenarios/two_ship.json.in
+    f4-world-viewer/scenarios/guns_merge.json.in
+    f4-world-viewer/scenarios/midair_merge.json.in
+    f4-world-viewer/scenarios/tanker_track.json.in
+    f4-world-viewer/scenarios/formation_acceptance.json.in
 )
 foreach(template ${F4_SCENARIO_TEMPLATES})
     get_filename_component(scenario_name ${template} NAME_WE)
@@ -176,10 +176,10 @@ foreach(template ${F4_SCENARIO_TEMPLATES})
     )
 endforeach()
 
-option(F4_BUILD_SCENARIO_PLAYER "Build the f4-scenario-player (requires X11 + OpenGL dev headers)" ON)
-if(F4_BUILD_SCENARIO_PLAYER)
-    add_subdirectory(f4-scenario-player)  # Host executable: loads a scenario, runs the sim, renders with Raylib
-endif()
+# The scenario player has been consolidated into f4-world-viewer (its
+# --scenario mode). There is no standalone f4-scenario-player target anymore;
+# the scenario templates above are configured here and consumed by the world
+# viewer's scenario mode + f4-simulation tests.
 
 # ============================================================================
 # Tranche 0b — CMake boundary enforcement (NO_BINARY_RUNTIME_PLAN.md §0b)
@@ -192,13 +192,12 @@ endif()
 # convert, f4-lzss) is present.
 #
 # This block runs AFTER all add_subdirectory() calls so every target exists.
-# Conditionally-built targets (viewers, scenario player — gated on
-# F4_BUILD_VIEWER etc.) are guarded by f4_mark_side's TARGET check, so the
-# marking list is the same regardless of which optional apps are enabled.
+# Conditionally-built targets (viewers — gated on F4_BUILD_VIEWER etc.) are
+# guarded by f4_mark_side's TARGET check, so the marking list is the same
+# regardless of which optional apps are enabled.
 #
 # Tranche 0d (runtime glTF rewire, Task 59) decoupled the last violators
-# (f4-renderer, the viewers, the scenario player) — the verifier PASSES
-# with every target enabled, and -DF4_ENFORCE_BOUNDARY=ON is the CI gate.
+# (f4-renderer, the viewers) — the verifier PASSES with every target enabled.
 include(verify_boundary)
 
 # 0b.2 — Importer side: may link legacy binary parsers.
@@ -227,8 +226,8 @@ f4_mark_side(runtime
     f4-campaign-api
     f4-sensors f4-weapons f4-entities f4-messaging f4-state-machine
     f4-data f4-geo f4-math f4-units f4-json f4-xml f4-io
-    f4_world_viewer f4_scenario_player_lib
-    f4-world-viewer f4-scenario-player trace_runner campaign_qc campaignd
+    f4_world_viewer
+    f4-world-viewer trace_runner campaign_qc campaignd
 )
 
 # 0b.3 — Run the verifier at configure time.

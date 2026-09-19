@@ -28,6 +28,7 @@
 #include <f4/install/installation.hpp>
 #include <f4/viewer/settings.hpp>
 
+#include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <memory>
@@ -178,6 +179,59 @@ public:
     /// the run() loop will dispatch to the replay render path).
     [[nodiscard]] bool replay_active() const noexcept;
 
+    // --- Scenario mode (consolidated f4-scenario-player) -------------------
+    //
+    // Load a scenario template JSON, build the Simulation, and switch the
+    // viewer to scenario mode: run() dispatches to the 3D scenario render
+    // path (the live aircraft + airfield + terrain + HUD/ATC/COMBAT) with
+    // an in-frame fixed-timestep tick loop, instead of the campaign canvas
+    // or replay view. The scenario mode BORROWS the viewer's shared
+    // RenderResources (the glTF model cache, lit shader) -- the single
+    // biggest code/GPU saving of the consolidation. See
+    // scenario_player_state.hpp + scenario_player_view.cpp.
+    //
+    // Throws on parse / asset load failure. Resolves asset paths relative
+    // to the scenario file's parent directory.
+    void load_scenario(const std::filesystem::path& json_path);
+
+    /// Set the initial window size (the --width/--height CLI flags). Must
+    /// be called before run().
+    void set_window_size(int width, int height) noexcept;
+
+    /// Start the sim RUNNING (default start is paused at parking). Before run().
+    void set_paused(bool paused) noexcept;
+
+    /// Sim speed multiplier [0.1, 10.0]. Scales WALL-CLOCK time fed into the
+    /// fixed-timestep accumulator (never the per-tick dt) so FCS filter
+    /// stability is independent of the slider. Before run().
+    void set_time_scale(double scale) noexcept;
+
+    /// Camera follows the aircraft each frame. Before run().
+    void set_follow_camera(bool follow) noexcept;
+
+    /// SHOWCASE-1: force the FlightRecorder trace on for this run and write
+    /// it to `trace_path` when the sim exits (the replay mode consumes it).
+    /// Overrides the scenario's own record fields. Call BEFORE load_scenario().
+    void set_recording(const std::filesystem::path& trace_path, int record_every);
+
+    /// Override the initial orbit distance (feet). Before run().
+    void set_camera_distance(double dist_ft) noexcept;
+
+    /// True when a scenario is loaded and run() will dispatch to the
+    /// scenario render path.
+    [[nodiscard]] bool scenario_active() const noexcept;
+
+    /// Run the BVR intercept harness headlessly over the loaded scenario
+    /// and write the summary JSON. Sibling to run() — used by the --harness
+    /// CLI flag. Does NOT create a GL context; does NOT enter the render
+    /// loop. Returns the harness's exit code (0 = all green; 1 = abort;
+    /// 2 = non-combat refusal; 3 = fight stalled; 4 = no launch;
+    /// 5 = engagement; 6 = roster leak; 9 = non-deterministic).
+    int run_harness(const std::filesystem::path& summary_out,
+                    std::int64_t horizon_sec = 300,
+                    double sample_sec = 30.0,
+                    int runs = 2);
+
     /// Test/smoke-test helper: schedule a screenshot to be taken after `delay_sec`
     /// seconds. Useful for headless verification on CI / Linux dev boxes.
     void schedule_screenshot(float delay_sec, const std::string& path);
@@ -326,6 +380,18 @@ private:
     void handle_replay_input();
     void draw_replay_canvas();
     void draw_replay_panel();
+
+    // --- Scenario mode private draw path (consolidated f4-scenario-player) -
+    //
+    // Dispatched from run() when scenario_active() is true, INSTEAD of the
+    // campaign canvas or the replay path. handle_scenario_input() also runs
+    // the in-frame fixed-timestep tick via scenario_advance(). The 3D scene
+    // (render_world + HUD/ATC/COMBAT) is draw_scenario(); the ImGui control
+    // window is draw_scenario_panel(). See scenario_player_view.cpp.
+    void handle_scenario_input();
+    void scenario_advance(double dt);
+    void draw_scenario();
+    void draw_scenario_panel();
 };
 
 } // namespace f4::viewer

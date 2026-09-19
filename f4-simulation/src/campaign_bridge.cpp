@@ -19,6 +19,7 @@
 
 #include "f4/simulation/campaign_bridge.hpp"
 #include "f4/simulation/frames.hpp"
+#include "f4/simulation/formation_layout.hpp"
 #include "f4/simulation/combat_bridge.hpp"
 
 #include <f4/simulation/campaign_origin.hpp>
@@ -151,16 +152,18 @@ ScenarioAirfield synthesize_airfield_for_objective(
     };
     af.taxi_in_route = af.taxi_route;
 
-    // Parking: a row of 8 spots offset from the center, perpendicular to
+    // Parking: a row of spots offset from the center, perpendicular to
     // the runway — same shape the decoded-layout path synthesizes.
-    constexpr int N_SPOTS = 8;
-    constexpr double OFF_FT = 300.0;       // perpendicular distance (right side)
-    constexpr double SPACING_FT = 80.0;    // along-runway spacing
-    for (int i = 0; i < N_SPOTS; ++i) {
+    // Constants come from formation_layout.hpp (shared with the viewer's
+    // class-table preview).
+    constexpr double OFF_FT = formation::RAMP_ROW_OFFSET_FT;  // perpendicular (right side)
+    for (int i = 0; i < formation::RAMP_ROW_SPOTS; ++i) {
         ScenarioParkingSpot spot;
+        const formation::Offset slot = formation::rotate_runway_offset(
+            formation::ramp_slot_offset(i), hs);
         spot.position = f4::geo::WorldPosition(
-            center.x + px * OFF_FT - hx * (i * SPACING_FT),
-            center.y + py * OFF_FT - hy * (i * SPACING_FT),
+            center.x + px * OFF_FT + slot.dx,
+            center.y + py * OFF_FT + slot.dy,
             center.z);
         spot.heading_rad = std::atan2(-hx, -hy);   // face back down the runway
         af.parking_spots.push_back(spot);
@@ -1617,84 +1620,12 @@ namespace {
 
 // --- SYNTHETIC FORMATION LAYOUTS -------------------------------------------
 //
-// FreeFalcon's ground-vehicle formation tables (SquadFormations /
-// PlatoonFormations / CompanyFormations, defined in gndai.cpp:110-282 of
-// the original source) are NOT ported into this tree. They are flagged as
-// future work in worklog.md:857. Until they are ported, we use a small
-// set of synthetic layouts:
-//
-//   • wedge4  — 4-vehicle wedge (lead + 2 wingmen + trail). Used for any
-//                unit with ≤4 live vehicles (most battalions: 4 groups ×
-//                1-3 live vehicles collapses to ≤4 after aggregation).
-//   • grid    — N>4 vehicles arranged in a 4-wide grid, 50 ft spacing.
-//                Used for larger aggregations (brigades deaggregated to
-//                their component vehicles).
-//
-// Both layouts are rotated by the unit's heading (from
-// GroundTacticalComponent::heading, uint8_t 0-255 × 1.4°/step) before
-// being added to the unit's TransformComponent::position.
-//
-// All offsets are in FEET, ENU frame, relative to the unit center.
-//   +x = east, +y = north. The unit's heading 0 = facing north (+y);
-//   heading π/2 = facing east (+x). Rotation: standard 2D CCW rotation
-//   of the offset by the heading angle.
-//
-// When the real FreeFalcon formation tables are ported, replace
-// `formation_offset()` with a lookup into the ported tables. The
-// spawn_vehicles_from_unit() contract (offset is in unit-local feet,
-// rotated by unit heading) doesn't change.
-
-constexpr double WEDGE_SPACING_FT = 30.0;  // ~tank length, plausible wedge spacing
-
-/// 4-vehicle wedge offsets (unit-local, unrotated):
-///   slot 0: lead     at ( 0, +30)
-///   slot 1: wing-L   at (-30,  0)
-///   slot 2: wing-R   at (+30,  0)
-///   slot 3: trail    at ( 0, -30)
-/// Lead faces forward (+y); wingmen trail by 30 ft; trail brings up the rear.
-struct Offset { double dx; double dy; };
-constexpr std::array<Offset, 4> WEDGE4{{
-    {  0.0,  30.0 },
-    { -30.0,  0.0 },
-    {  30.0,  0.0 },
-    {  0.0, -30.0 },
-}};
-
-constexpr double GRID_SPACING_FT = 50.0;
-constexpr int    GRID_COLS       = 4;
-
-/// Compute the (dx, dy) offset for the i-th vehicle in a synthetic
-/// formation. Wedge for i < 4, grid for i >= 4.
-/// (When real FreeFalcon formation tables are ported, replace this body
-/// with `return ported_table[unit_class][i]` or similar.)
-Offset formation_offset(int vehicle_index) {
-    if (vehicle_index < 4) {
-        return WEDGE4[static_cast<std::size_t>(vehicle_index)];
-    }
-    // Grid extension: rows of 4, indexed from vehicle_index=4 onward.
-    const int grid_i = vehicle_index - 4;
-    const int row = grid_i / GRID_COLS;
-    const int col = grid_i % GRID_COLS;
-    // Center the grid: col 0..3 → dx -75..+75 (4 * 50 / 2 = 100, half = 50, center -25).
-    // Push rows behind the wedge (negative y).
-    const double dx = (col - (GRID_COLS - 1) * 0.5) * GRID_SPACING_FT;
-    const double dy = -90.0 - static_cast<double>(row) * GRID_SPACING_FT;
-    return { dx, dy };
-}
-
-/// Rotate a unit-local (dx, dy) offset by a compass heading (radians,
-/// 0 = +y / north, CW positive) into world ENU.
-///
-/// Compass heading θ rotates the +y axis (north) toward +x (east). So a
-/// unit-local offset (dx, dy) becomes world offset:
-///   world_dx =  dx · cos θ + dy · sin θ
-///   world_dy = -dx · sin θ + dy · cos θ
-Offset rotate_offset(Offset local, double heading_rad) {
-    const double ch = std::cos(heading_rad);
-    const double sh = std::sin(heading_rad);
-    return { local.dx * ch + local.dy * sh,
-            -local.dx * sh + local.dy * ch };
-}
+// The layouts themselves (wedge4 / grid ground formations, the synthesized
+// squadron ramp row, and the rotate-by-heading math) live in
+// f4/simulation/formation_layout.hpp — shared with the world-viewer's
+// class-table browser so its row previews draw exactly what these spawn
+// paths produce. See that header for the layout rationale and the
+// FreeFalcon-tables-not-ported caveat.
 
 /// Resolve a VEHICLE entity_type → vis_type via the ClassTable.
 /// Returns 0 if the lookup fails (entity_type out of range,
@@ -1767,8 +1698,8 @@ spawn_vehicles_from_unit(f4::entities::EntityWorld& world,
         }
 
         for (int i = 0; i < g.live_count; ++i) {
-            const Offset local = formation_offset(vehicle_index);
-            const Offset world_off = rotate_offset(local, heading_rad);
+            const formation::Offset local = formation::formation_offset(vehicle_index);
+            const formation::Offset world_off = formation::rotate_offset(local, heading_rad);
 
             auto h = world.create();
 
@@ -1926,15 +1857,14 @@ spawn_aircraft_from_squadrons(f4::entities::EntityWorld& world,
                     if (i >= static_cast<int>(spots.size())) {
                         const int pass =
                             i / static_cast<int>(spots.size());
-                        constexpr double ROW_STEP_FT = 60.0;
-                        // Compass h: (east, north) = (sin h, cos h);
-                        // right of the aircraft = (cos h, -sin h).
-                        parking_pos.x += std::cos(heading_rad) *
-                                         static_cast<double>(pass) *
-                                         ROW_STEP_FT;
-                        parking_pos.y -= std::sin(heading_rad) *
-                                         static_cast<double>(pass) *
-                                         ROW_STEP_FT;
+                        // Extra airframes stack one pass-width to the
+                        // aircraft's right per wrap (formation_layout.hpp).
+                        const formation::Offset over = formation::rotate_runway_offset(
+                            { 0.0, formation::RAMP_OVERFLOW_STEP_FT *
+                                  static_cast<double>(pass) },
+                            heading_rad);
+                        parking_pos.x += over.dx;
+                        parking_pos.y += over.dy;
                     }
                 }
             } else {

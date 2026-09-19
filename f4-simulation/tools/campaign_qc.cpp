@@ -26,7 +26,7 @@
 //      the ORDNANCE ledger (A-G slice: releases, impacts, per-objective
 //      damage), the RESULT ledger (C1: the campaign write-back — air
 //      losses, kill credit, objective damage, post-loss pools), plus
-//      the scenario JSON path for replay in the f4-scenario-player.
+//      the scenario JSON path for replay in the world viewer's scenario mode.
 //
 //   4. THE RESULT LEDGER (C1 — the war loop's return leg): the
 //      CampaignResultLedger is snapshotted from the world's own team
@@ -136,7 +136,7 @@
 //
 //   8. THE SCENARIO QC ARM (SHOWCASE-1): --scenario <json> skips the
 //      campaign entirely and runs a scenario-list JSON (the
-//      f4-scenario-player template library — tanker_track, landing_only,
+//      f4-world-viewer --scenario template library — tanker_track, landing_only,
 //      on_glideslope, digi_full_mission, ...) headlessly: load_scenario →
 //      Simulation::initialize → tick → FlightRecorder trace.json + a
 //      per-aircraft scenario_qc_summary.json (states walked, touchdown,
@@ -262,7 +262,7 @@ struct Args {
     int max_flights = 0;
     bool max_flights_set = false;  // --max-flights passed (0 = UNCAPPED)
     // SHOWCASE-1 — the scenario QC arm (--scenario <json>): run a
-    // scenario-list scenario (the f4-scenario-player template library)
+    // scenario-list scenario (the f4-world-viewer --scenario template library)
     // headlessly with the FlightRecorder trace + a per-aircraft QC
     // summary. No world, no campaign: the template IS the mission.
     std::filesystem::path scenario_json;
@@ -1484,7 +1484,7 @@ int run_war(const Args& args) {
 // SHOWCASE-1: THE SCENARIO QC ARM (--scenario <json>)
 // ===========================================================================
 // Headless geometry QC over a scenario-list JSON — the same templates the
-// 3D f4-scenario-player flies, recorded for the world viewer's replay mode:
+// 3D world viewer's scenario mode flies, recorded for the world viewer's replay mode:
 //
 //   campaign_qc --scenario build/scenarios/tanker_track.json --minutes 10
 //   → qc/tanker_track/trace.json          (the viewer's Open Replay /

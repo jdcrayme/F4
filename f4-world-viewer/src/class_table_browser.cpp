@@ -20,6 +20,7 @@
 #include <f4/viewer/file_dialog.hpp>
 
 #include <f4/world_types/class_table.hpp>        // unit_subtype_name, DOMAIN_*, CLASS_*
+#include <f4/simulation/formation_layout.hpp>    // the deaggregation layouts (shared with the sim)
 #include <f4/assets/asset_root.hpp>              // Data/ discovery
 #include <f4/viewer/pipeline_io.hpp>             // discover_data_dir, temp_dir
 
@@ -76,6 +77,34 @@ namespace {
 // std::transform-friendly lowercasing: ::tolower returns int and takes a
 // domain-checked value, so convert through unsigned char explicitly.
 char ascii_lower(unsigned char c) { return static_cast<char>(std::tolower(c)); }
+
+// Scan a preview model's LOD-0 geometry (flat meshes + hierarchy parts at
+// their parked-pose vertices) into an AABB. Returns false when the model
+// has no vertices. Shared by the single-model and group camera fits.
+bool scan_model_aabb(const f4::renderer::RuntimeModel& model,
+                     float& min_x, float& min_y, float& min_z,
+                     float& max_x, float& max_y, float& max_z) {
+    bool any = false;
+    auto scan_mesh = [&](const f4::renderer::MeshEntry& me) {
+        if (!me.mesh.vertices || me.mesh.vertexCount <= 0) return;
+        for (int v = 0; v < me.mesh.vertexCount; ++v) {
+            const float x = me.mesh.vertices[v * 3 + 0];
+            const float y = me.mesh.vertices[v * 3 + 1];
+            const float z = me.mesh.vertices[v * 3 + 2];
+            if (!any) {
+                min_x = max_x = x; min_y = max_y = y; min_z = max_z = z;
+                any = true;
+            } else {
+                min_x = std::min(min_x, x); max_x = std::max(max_x, x);
+                min_y = std::min(min_y, y); max_y = std::max(max_y, y);
+                min_z = std::min(min_z, z); max_z = std::max(max_z, z);
+            }
+        }
+    };
+    for (const auto& me : model.lod0_meshes) scan_mesh(me);
+    for (const auto& part : model.lod0_parts) scan_mesh(part.entry);
+    return any;
+}
 }  // namespace
 
 // ---------------------------------------------------------------------------
@@ -543,26 +572,8 @@ void ClassTableBrowser::fit_camera_to_model(int16_t vis_type_idx) {
         return;
 
     float min_x = 0, min_y = 0, min_z = 0, max_x = 0, max_y = 0, max_z = 0;
-    bool any = false;
-    auto scan_mesh = [&](const f4::renderer::MeshEntry& me) {
-        if (!me.mesh.vertices || me.mesh.vertexCount <= 0) return;
-        for (int v = 0; v < me.mesh.vertexCount; ++v) {
-            const float x = me.mesh.vertices[v * 3 + 0];
-            const float y = me.mesh.vertices[v * 3 + 1];
-            const float z = me.mesh.vertices[v * 3 + 2];
-            if (!any) {
-                min_x = max_x = x; min_y = max_y = y; min_z = max_z = z;
-                any = true;
-            } else {
-                min_x = std::min(min_x, x); max_x = std::max(max_x, x);
-                min_y = std::min(min_y, y); max_y = std::max(max_y, y);
-                min_z = std::min(min_z, z); max_z = std::max(max_z, z);
-            }
-        }
-    };
-    for (const auto& me : model->lod0_meshes) scan_mesh(me);
-    for (const auto& part : model->lod0_parts) scan_mesh(part.entry);
-    if (!any) return;
+    if (!scan_model_aabb(*model, min_x, min_y, min_z, max_x, max_y, max_z))
+        return;
 
     cam_target_x_ = (min_x + max_x) * 0.5f;
     cam_target_y_ = (min_y + max_y) * 0.5f;
@@ -803,6 +814,245 @@ void ClassTableBrowser::draw_model_preview(int16_t vis_type_idx) {
 }
 
 // ---------------------------------------------------------------------------
+// Group preview — a deaggregation layout (ground wedge/grid formation or
+// squadron ramp row) drawn N models wide, one instance per placement.
+// Same render pipeline as draw_model_preview above; only the transforms
+// and the camera fit differ.
+// ---------------------------------------------------------------------------
+
+void ClassTableBrowser::fit_camera_to_group(
+    const std::vector<PlacedModel>& placed,
+    const f4::renderer::RuntimeModel& first_model) {
+    if (placed.empty()) return;
+
+    float min_x = 0, min_z = 0, max_x = 0, max_z = 0;
+    bool any = false;
+    for (const auto& pm : placed) {
+        if (!any) {
+            min_x = max_x = pm.x; min_z = max_z = pm.z;
+            any = true;
+        } else {
+            min_x = std::min(min_x, pm.x); max_x = std::max(max_x, pm.x);
+            min_z = std::min(min_z, pm.z); max_z = std::max(max_z, pm.z);
+        }
+    }
+    if (!any) return;
+    cam_target_x_ = (min_x + max_x) * 0.5f;
+    cam_target_z_ = (min_z + max_z) * 0.5f;
+    const float dx = max_x - min_x, dz = max_z - min_z;
+    const float spread = 0.5f * std::sqrt(dx * dx + dz * dz);
+
+    // The first drawable model's bbox gives the vertical center (models
+    // sit on the y=0 ground plane) and the scale term, so a row of small
+    // vehicles still reads at this distance.
+    float min_y = 0, max_y = 0;
+    scan_model_aabb(first_model, min_x, min_y, min_z, max_x, max_y, max_z);
+    cam_target_y_ = (min_y + max_y) * 0.5f;
+    const float model_radius = 0.5f * std::sqrt(
+        (max_x - min_x) * (max_x - min_x) +
+        (max_y - min_y) * (max_y - min_y) +
+        (max_z - min_z) * (max_z - min_z));
+
+    cam_distance_ = (spread + model_radius) * 2.5f;
+    if (cam_distance_ < 50.0f) cam_distance_ = 50.0f;
+
+    // Layouts read best from above; keep the single-preview azimuth so
+    // orbiting feels continuous when switching rows.
+    cam_azimuth_ = 0.785398f;   // 45°
+    cam_elevation_ = 0.9f;      // ~52° — layout-first view
+}
+
+void ClassTableBrowser::draw_group_preview(
+    const std::vector<PlacedModel>& placed,
+    const UnitClassLayout& layout) {
+    last_preview_drew_meshes_ = false;
+    last_preview_status_.clear();
+
+    if (!render_resources_) {
+        ImGui::TextDisabled("No render resources (glTF models unavailable).");
+        last_preview_status_ = "no render_resources";
+        return;
+    }
+    if (placed.empty()) {
+        ImGui::TextDisabled("No drawable models in the layout.");
+        last_preview_status_ = "no models";
+        return;
+    }
+
+    // Build (or reuse) every unique model the layout needs through the
+    // shared cache; remember the first one with geometry for the fit.
+    const f4::renderer::RuntimeModel* first_model = nullptr;
+    for (const auto& pm : placed) {
+        build_preview_meshes(pm.vis_type);
+        if (!first_model) {
+            const auto* m = render_resources_->model_cache.lookup(pm.vis_type);
+            if (m && (!m->lod0_meshes.empty() || !m->lod0_parts.empty())) {
+                first_model = m;
+            }
+        }
+    }
+    if (!first_model) {
+        ImGui::TextDisabled("Model[%d] (and friends) have no glTF export in "
+                            "Data/Models/koreaobj", placed.front().vis_type);
+        last_preview_status_ = "no geometry";
+        return;
+    }
+
+    // Refit the camera when the user picks a different class row.
+    if (last_layout_entity_type_ != selected_entity_type_) {
+        fit_camera_to_group(placed, *first_model);
+        last_layout_entity_type_ = selected_entity_type_;
+        doctor_anim_.set_parked_defaults();
+    }
+
+    // --- Same RT/camera/shader setup as draw_model_preview ---
+    const int preview_w = 512;
+    const int preview_h = 512;
+    ensure_preview_target(preview_w, preview_h);
+    render_resources_->ensure_default_material();
+
+    const float az = cam_azimuth_;
+    const float el = cam_elevation_;
+    const float dist = cam_distance_;
+    const Vector3 target = { cam_target_x_, cam_target_y_, cam_target_z_ };
+    const Vector3 cam_pos = {
+        target.x + dist * std::cos(el) * std::sin(az),
+        target.y + dist * std::sin(el),
+        target.z + dist * std::cos(el) * std::cos(az)
+    };
+
+    Camera3D camera = {};
+    camera.position = cam_pos;
+    camera.target = target;
+    camera.up = { 0, -1, 0 };
+    camera.fovy = 45.0f;
+    camera.projection = CAMERA_PERSPECTIVE;
+
+    // Full texture descriptor so BeginTextureMode's viewport is real
+    // (see draw_model_preview for why the bare ids are not enough).
+    RenderTexture2D rt = {};
+    rt.id = preview_rt_id_;
+    rt.texture.id      = preview_tex_id_;
+    rt.texture.width   = preview_rt_w_;
+    rt.texture.height  = preview_rt_h_;
+    rt.texture.mipmaps = 1;
+    rt.texture.format  = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8;
+
+    auto& lit_shader = render_resources_->lit_shader;
+    Material* default_mat = render_resources_->default_material_valid()
+        ? &render_resources_->default_material() : nullptr;
+    const bool lighting_active = lit_shader.ensure();
+
+    // One opaque-then-alpha pass over a single instance's meshes at the
+    // given instance transform (the per-model version of draw_one above).
+    auto draw_static_instance = [&](const f4::renderer::RuntimeModel& m,
+                                    Matrix world) {
+        const auto& meshes = m.lod0_meshes;
+        std::vector<std::size_t> opaque_order, alpha_order;
+        opaque_order.reserve(meshes.size());
+        alpha_order.reserve(meshes.size());
+        for (std::size_t i = 0; i < meshes.size(); ++i) {
+            const auto& me = meshes[i];
+            bool has_alpha = false;
+            if (me.tex_id >= 0) {
+                auto* ce = render_resources_->texture_cache.lookup(me.tex_id);
+                if (ce && ce->uploaded) has_alpha = ce->has_alpha;
+            }
+            if (has_alpha) alpha_order.push_back(i);
+            else           opaque_order.push_back(i);
+        }
+        auto draw_one = [&](std::size_t idx) {
+            const auto& me = meshes[idx];
+            if (me.mesh.vaoId == 0 && me.mesh.vboId[0] == 0) return;
+            if (me.mesh.triangleCount <= 0) return;
+            const Material* matToUse = default_mat;
+            if (me.tex_id >= 0) {
+                auto* ce = render_resources_->texture_cache.lookup(me.tex_id);
+                if (ce && ce->uploaded) matToUse = &ce->material;
+            }
+            if (!matToUse) return;
+            DrawMesh(me.mesh, *matToUse, world);
+        };
+        for (auto idx : opaque_order) draw_one(idx);
+        for (auto idx : alpha_order)  draw_one(idx);
+    };
+
+    int drawn_instances = 0;
+    BeginTextureMode(rt);
+        ClearBackground({ 30, 30, 38, 255 });
+        BeginMode3D(camera);
+            if (lighting_active) {
+                lit_shader.set_lighting(
+                    { 0.65f, -1.0f, 0.35f },
+                    { 255, 250, 235, 255 },
+                    1.0f,
+                    { 80, 80, 90, 255 });
+            }
+
+            BeginBlendMode(BLEND_ALPHA);
+            rlDisableBackfaceCulling();
+            for (const auto& pm : placed) {
+                const auto* m = render_resources_->model_cache.lookup(
+                    pm.vis_type);
+                if (!m || (m->lod0_meshes.empty() && m->lod0_parts.empty()))
+                    continue;
+                // Rotate then translate: world = T · R · v.
+                const Matrix world = MatrixMultiply(
+                    MatrixTranslate(pm.x, 0.0f, pm.z),
+                    MatrixRotateY(pm.yaw));
+                if (m->animated && !m->lod0_parts.empty()) {
+                    f4::renderer::FeatureMeshResources base;
+                    base.model_cache      = &render_resources_->model_cache;
+                    base.texture_cache    = &render_resources_->texture_cache;
+                    base.lit_shader       = &lit_shader;
+                    base.default_material = default_mat;
+                    const auto st = f4::renderer::draw_animated_model(
+                        base, *m, world, &doctor_anim_, lighting_active);
+                    if (st.meshes_drawn > 0) ++drawn_instances;
+                } else {
+                    draw_static_instance(*m, world);
+                    ++drawn_instances;
+                }
+            }
+            rlEnableBackfaceCulling();
+            EndBlendMode();
+
+            last_preview_drew_meshes_ = (drawn_instances > 0);
+        EndMode3D();
+    EndTextureMode();
+
+    // Display via the same persistent-texture dance as the single preview
+    // (rlImGuiImageSize dereferences the Texture* after this returns).
+    if (!preview_cache_) preview_cache_ = std::make_unique<PreviewCache>();
+    preview_cache_->preview_display_tex = { preview_tex_id_,
+                                            preview_rt_w_, preview_rt_h_, 1,
+                                            PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 };
+    rlImGuiImageSize(&preview_cache_->preview_display_tex, preview_w, preview_h);
+
+    ImGui::TextDisabled("%d models | %s", static_cast<int>(placed.size()),
+                        layout.note.c_str());
+
+    // Orbit/zoom, same controls as the single-model preview.
+    if (ImGui::IsItemActive()) {
+        ImVec2 delta = ImGui::GetIO().MouseDelta;
+        cam_azimuth_ -= delta.x * 0.01f;
+        cam_elevation_ += delta.y * 0.01f;
+        cam_elevation_ = std::clamp(cam_elevation_, -1.5f, 1.5f);
+    }
+    if (ImGui::IsItemHovered()) {
+        float wheel = ImGui::GetIO().MouseWheel;
+        if (wheel != 0) {
+            cam_distance_ *= (1.0f - wheel * 0.1f);
+            cam_distance_ = std::clamp(cam_distance_, 1.0f, 5000.0f);
+        }
+    }
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Fit")) {
+        fit_camera_to_group(placed, *first_model);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Detail Panel
 // ---------------------------------------------------------------------------
 void ClassTableBrowser::draw_detail_panel() {
@@ -946,7 +1196,32 @@ void ClassTableBrowser::draw_detail_panel() {
         }
         ImGui::EndGroup();
         ImGui::SameLine();
-    } else if (active_vis > 0) {
+    }
+
+    // Unit rows: preview the class's deaggregation layout (formation /
+    // ramp row) from the loaded world. UCD rows carry no vis of their
+    // own, so a single-model preview has nothing to show — the layout IS
+    // the unit's shape.
+    bool unit_layout_shown = false;
+    if (entry->cls == f4::world_types::CLASS_UNIT &&
+        previewed_feature == nullptr && entity_world_ != nullptr) {
+        ensure_unit_layouts();
+        const auto ul_it = unit_layouts_.find(
+            static_cast<uint16_t>(selected_entity_type_));
+        if (ul_it != unit_layouts_.end() && !ul_it->second.models.empty()) {
+            unit_layout_shown = true;
+            ImGui::BeginGroup();
+            ImGui::Text("%s — %s (glTF)",
+                        ul_it->second.is_squadron ? "Ramp row" : "Formation",
+                        ul_it->second.class_name.empty()
+                            ? "(unnamed instance)"
+                            : ul_it->second.class_name.c_str());
+            draw_group_preview(ul_it->second.models, ul_it->second);
+            ImGui::EndGroup();
+            ImGui::SameLine();
+        }
+    }
+    if (!unit_layout_shown && previewed_feature == nullptr && active_vis > 0) {
         ImGui::BeginGroup();
         ImGui::Text("Model[%d] (glTF)", active_vis);
         // Always call draw_model_preview — it handles the "no render
@@ -991,6 +1266,12 @@ void ClassTableBrowser::draw_detail_panel() {
     // is the only meaningful "shape" a class row can offer.)
     if (entry->cls == f4::world_types::CLASS_OBJECTIVE) {
         draw_objective_features(*entry);
+    }
+
+    // Units/squadrons: the vehicle composition behind the layout preview
+    // (the counterpart of the objective feature table).
+    if (entry->cls == f4::world_types::CLASS_UNIT) {
+        draw_unit_layout(*entry);
     }
 
     // ANIM-DOCTOR: for hierarchy-emitted models, the animation doctor
@@ -1178,6 +1459,182 @@ void ClassTableBrowser::draw_objective_features(
         }
         ImGui::EndTable();
     }
+}
+
+// ---------------------------------------------------------------------------
+// Unit layout previews (CLASS_UNIT rows)
+//
+// The class-level counterpart of the objective feature collections: a UCD
+// row names no model and no vehicle list, so the first populated instance
+// of the class in the loaded world stands for it. Its live vehicles are
+// laid out with the sim's own deaggregation math
+// (f4/simulation/formation_layout.hpp) — ground units in the synthetic
+// wedge/grid formation, squadrons in the synthesized ramp row — so the
+// preview shows what the bubble manager actually spawns when it
+// deaggregates this class.
+// ---------------------------------------------------------------------------
+void ClassTableBrowser::ensure_unit_layouts() {
+    if (!entity_world_) return;
+    if (unit_layouts_built_ &&
+        unit_layouts_built_generation_ == entity_world_generation_) {
+        return;   // the loaded world hasn't changed
+    }
+
+    unit_layouts_.clear();
+    for (auto& [eid, uc] :
+         entity_world_->with_component_ref<f4::entities::UnitCoreComponent>()) {
+        const auto etype = static_cast<uint16_t>(uc->class_table_index);
+        if (etype < 100) continue;
+        auto found = unit_layouts_.find(etype);
+        if (found != unit_layouts_.end() && !found->second.groups.empty()) {
+            continue;   // first populated instance stands for the class
+        }
+
+        const f4::entities::EntityHandle h(
+            eid, const_cast<f4::entities::EntityWorld*>(entity_world_));
+        const auto* vc = h.get<f4::entities::VehicleCompositionComponent>();
+        if (!vc || vc->groups.empty()) continue;
+
+        UnitClassLayout layout;
+        layout.class_name = uc->class_name;
+        layout.is_squadron = (uc->domain == f4::world_types::DOMAIN_AIR);
+
+        // Same resolution the spawn paths use: per-group vehicle_type →
+        // CT VCD row → vis slot 0. A group with no model still consumes
+        // its formation slots (spawn_vehicles_from_unit's rule), so two
+        // groups can never land in the same slot.
+        int live_total = 0;
+        int slot_index = 0;
+        for (const auto& g : vc->groups) {
+            if (g.live_count <= 0) continue;
+            const int16_t vis = class_table_.vis_type_for(
+                static_cast<uint16_t>(g.vehicle_type), 0);
+            layout.groups.push_back({g.vehicle_type, g.live_count, vis});
+            live_total += g.live_count;
+            if (layout.is_squadron) continue;  // placed as one row below
+            if (vis <= 0) {
+                slot_index += g.live_count;
+                continue;
+            }
+            for (int i = 0; i < g.live_count; ++i, ++slot_index) {
+                const auto local =
+                    f4::simulation::formation::formation_offset(slot_index);
+                // Preview frame: x = local east, z = local north, heading
+                // 0 (north-facing) so the class preview is stable; the
+                // sim applies the unit's real heading at spawn.
+                layout.models.push_back(
+                    { vis, static_cast<float>(local.dx),
+                      static_cast<float>(local.dy), 0.0f });
+            }
+        }
+
+        if (layout.is_squadron && live_total > 0) {
+            // Ramp row: the sim's resolve_unit_aircraft_vis takes the
+            // first group's vehicle type, so all slots share its model.
+            // The row is centered on the preview origin (the sim anchors
+            // slot 0 at the objective center — formation_layout.hpp).
+            const int16_t vis = layout.groups.empty()
+                ? int16_t{0} : layout.groups.front().vis_type;
+            if (vis > 0) {
+                layout.models.clear();
+                constexpr double spacing =
+                    f4::simulation::formation::RAMP_SPACING_FT;
+                for (int i = 0; i < live_total; ++i) {
+                    const auto slot =
+                        f4::simulation::formation::ramp_slot_offset(i);
+                    const float along = static_cast<float>(
+                        slot.dx + 0.5 * (live_total - 1) * spacing);
+                    layout.models.push_back({ vis, along, 0.0f, 0.0f });
+                }
+            }
+        }
+
+        if (layout.is_squadron) {
+            layout.note =
+                "synthesized ramp row — 80 ft spacing (no PLT_PARK data; "
+                "formation_layout.hpp)";
+        } else {
+            layout.note =
+                "synthetic formation — wedge ≤4, 4-wide 50-ft grid beyond "
+                "(FreeFalcon tables not ported)";
+        }
+
+        auto& slot = unit_layouts_[etype];
+        if (slot.groups.empty()) {
+            slot = std::move(layout);
+        }
+    }
+
+    unit_layouts_built_ = true;
+    unit_layouts_built_generation_ = entity_world_generation_;
+}
+
+void ClassTableBrowser::draw_unit_layout(
+    const f4::world_types::ClassTableEntry& entry) {
+    const auto etype = static_cast<uint16_t>(selected_entity_type_);
+
+    if (!entity_world_) {
+        ImGui::TextDisabled(
+            "Unit layout: load a world (File menu, or load a campaign from "
+            "an install) to see this class's deaggregation layout.");
+        return;
+    }
+    ensure_unit_layouts();
+    const auto it = unit_layouts_.find(etype);
+    if (it == unit_layouts_.end() || it->second.groups.empty()) {
+        ImGui::TextDisabled(
+            "Unit layout: no instance of this class in the loaded world "
+            "— the layout needs a live unit's vehicle composition "
+            "(UCD rows carry no vehicle list).");
+        return;
+    }
+    const auto& ul = it->second;
+
+    int live_total = 0;
+    for (const auto& g : ul.groups) live_total += g.live_count;
+
+    ImGui::Separator();
+    ImGui::Text("%s (%d live)%s",
+                ul.is_squadron ? "Squadron ramp row" : "Ground formation",
+                live_total,
+                ul.class_name.empty()
+                    ? "" : (" — " + ul.class_name).c_str());
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip(
+            "Placements from the sim's deaggregation paths "
+            "(spawn_vehicles_from_unit / spawn_aircraft_from_squadrons), "
+            "built from the first populated instance of class row %u "
+            "(UCD dataPtr %u).",
+            etype, entry.data_ptr_index);
+    }
+
+    const ImGuiTableFlags flags =
+        ImGuiTableFlags_ScrollY | ImGuiTableFlags_RowBg |
+        ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_Resizable;
+    if (ImGui::BeginTable("unit_layout", 3, flags, ImVec2(0, 120))) {
+        ImGui::TableSetupColumn("Vehicle", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn("Model",   ImGuiTableColumnFlags_WidthFixed, 90.0f);
+        ImGui::TableSetupColumn("Live",    ImGuiTableColumnFlags_WidthFixed, 50.0f);
+        ImGui::TableSetupScrollFreeze(0, 1);
+        ImGui::TableHeadersRow();
+        for (int row = 0; row < static_cast<int>(ul.groups.size()); ++row) {
+            const auto& g = ul.groups[static_cast<std::size_t>(row)];
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            ImGui::Text("%d", g.vehicle_type);
+            ImGui::TableSetColumnIndex(1);
+            if (g.vis_type > 0) {
+                ImGui::Text("%d", static_cast<int>(g.vis_type));
+            } else {
+                ImGui::TextDisabled("(no model)");
+            }
+            ImGui::TableSetColumnIndex(2);
+            ImGui::Text("%d", g.live_count);
+        }
+        ImGui::EndTable();
+    }
+
+    ImGui::TextDisabled("%s", ul.note.c_str());
 }
 
 void ClassTableBrowser::draw_export_bar() {

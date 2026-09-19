@@ -380,13 +380,16 @@ target_compile_definitions(test_fcs_trace_pipeline PRIVATE
     F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}"
     F4_MODELS_DIR="${CMAKE_SOURCE_DIR}/f4-models/tests/fixtures"
 )
-# The scenario must exist before the test runs.
-# Only wire the dependency when the scenario player is actually built
-# (it is skipped when F4_BUILD_SCENARIO_PLAYER=OFF — e.g. in headless CI).
-if(TARGET f4_scenario_player_lib)
-    add_dependencies(test_digi_mission f4_scenario_player_lib)
-    add_dependencies(test_aar_e2e f4_scenario_player_lib)
-    add_dependencies(test_formation_acceptance f4_scenario_player_lib)
+# The scenario templates are configured at the top level (always present in
+# build/scenarios/ after cmake configure). The tests also need
+# generated_fixtures/f16.json — the aircraft config every scenario's
+# aircraft_config_path references. Wire convert_golden_fixtures so a
+# single-target test build generates it (the scenario player used to pull
+# this transitively; it has been consolidated into f4-world-viewer).
+if(TARGET convert_golden_fixtures)
+    add_dependencies(test_digi_mission convert_golden_fixtures)
+    add_dependencies(test_aar_e2e convert_golden_fixtures)
+    add_dependencies(test_formation_acceptance convert_golden_fixtures)
 endif()
 
 # Point the scenario loader test at the bundled fixture so it can load a real

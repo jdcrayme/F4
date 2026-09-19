@@ -128,6 +128,9 @@ add_library(f4_world_viewer STATIC
     src/hex/hex_inspector.cpp
     src/class_table_browser.cpp
     src/symbol_creator.cpp
+    src/scenario_player_view.cpp     # Consolidated f4-scenario-player (scenario mode)
+    src/airfield_overlays.cpp        #   scenario airfield overlays (moved from f4-scenario-player)
+    src/radio_log.cpp                #   scenario ATC radio transcript (moved from f4-scenario-player)
     ${IMGUI_SOURCES}
     ${RLIMGUI_SOURCES}
     ${TINYFILEDIALOGS_SOURCES}
@@ -178,6 +181,17 @@ target_compile_definitions(f4_world_viewer PRIVATE
 # code for a command it cannot find.
 add_dependencies(f4_world_viewer
     cam2json terrain2json ct2json f4import)
+# Consolidated f4-scenario-player: the scenario templates reference
+# korea.terrain.json (Path B1 terrain) and, for digi_full_mission, the real
+# Korea world JSON. Both are build artifacts — wire the custom targets so a
+# single-target build of the viewer generates its own scenario data (the
+# same single-target gap the V-CAMP fix addressed for the campaign session).
+if(TARGET terrain-json)
+    add_dependencies(f4_world_viewer terrain-json)
+endif()
+if(TARGET korea-real-world-json)
+    add_dependencies(f4_world_viewer korea-real-world-json)
+endif()
 target_link_libraries(f4_world_viewer PRIVATE raylib)
 # tinyfiledialogs needs to be compiled as C (it's a .c file). Set the
 # language explicitly on the source so CMake doesn't try to compile it

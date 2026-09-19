@@ -70,6 +70,13 @@
 #include <f4/world_types/class_table.hpp>
 #include <f4/world_types/campaign_names.hpp>
 
+// Scenario mode (consolidated f4-scenario-player) — ScenarioPlayerState.
+// Included BEFORE the f4-renderer section + raylib.h below so the flight
+// headers it pulls (f4/flight/constants.hpp's `using f4::math::PI`) parse
+// before Raylib's PI macro. See scenario_player_state.hpp.
+#include "scenario_player_state.hpp"
+#include "radio_log.hpp"
+
 // f4-renderer — consolidated 3D rendering components (orbit camera,
 // lit shader, mesh builder, texture cache, draw helpers, symbols,
 // feature-mesh drawing).
@@ -1115,6 +1122,20 @@ struct ViewerApp::Impl {
             cy - (static_cast<float>(ey_ft) - replay_cam_y) * replay_cam_zoom
         };
     }
+
+    // -----------------------------------------------------------------------
+    // Scenario mode state (consolidated f4-scenario-player)
+    // -----------------------------------------------------------------------
+    //
+    // When a scenario is loaded via load_scenario(), the viewer enters
+    // scenario mode: run() dispatches to handle_scenario_input() +
+    // scenario_advance() + draw_scenario() + draw_scenario_panel() instead
+    // of the campaign canvas or replay view. The scenario owns its own
+    // Simulation + terrain + camera + overlays but BORROWS render_res_3d
+    // (the shared glTF/shader cache) — the consolidation's main win.
+    //
+    // See scenario_player_state.hpp + scenario_player_view.cpp.
+    ScenarioPlayerState scenario_player;
 };
 
 } // namespace f4::viewer

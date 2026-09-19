@@ -203,6 +203,11 @@ void ViewerApp::run() {
                 ? "Saved screenshot: " + impl_->screenshot_path
                 : "Screenshot failed to save: " + impl_->screenshot_path;
             impl_->screenshot_pending = false;
+            // Scenario mode (--scenario --screenshot): exit after the shot,
+            // mirroring the former scenario player's exit-after-screenshot.
+            if (impl_->scenario_player.active()) {
+                impl_->should_exit = true;
+            }
         }
 
         // Phase 2: keyboard shortcuts.
@@ -210,14 +215,15 @@ void ViewerApp::run() {
         //   Esc = clear selection (normal mode only — replay ignores)
         //   / = focus search box (handled in Layers panel via ImGui)
         if (IsKeyPressed(KEY_F) && !ImGui::GetIO().WantCaptureKeyboard) {
-            if (!impl_->replay.active()) {
+            if (!impl_->replay.active() && !impl_->scenario_player.active()) {
                 impl_->fit_to_world();
             }
             // In replay mode, F is handled by handle_replay_input()
-            // (fit_replay_to_trail) — don't double-dispatch.
+            // (fit_replay_to_trail). In scenario mode, F is handled by
+            // handle_scenario_input() (fit_to_aircraft). Don't double-dispatch.
         }
         if (IsKeyPressed(KEY_ESCAPE) && !ImGui::GetIO().WantCaptureKeyboard) {
-            if (!impl_->replay.active()) {
+            if (!impl_->replay.active() && !impl_->scenario_player.active()) {
                 impl_->sel_kind = Impl::SelectionKind::None;
                 impl_->sel_entity = f4::entities::EntityId{};
             }
@@ -278,8 +284,24 @@ void ViewerApp::run() {
             // canvas click path hit-tests the session's live aircraft
             // (session_handle derefs), which must not race the worker.
             // Replay mode has its own input path (arrow keys for
-            // stepping, etc.); it never touches the session.
-            if (impl_->replay.active()) {
+            // stepping, etc.); it never touches the session. Scenario
+            // mode has its own input + its in-frame fixed-timestep tick
+            // (scenario_advance) — it never touches the session either.
+            if (impl_->scenario_player.active()) {
+                handle_scenario_input();
+                // dt for the fixed-timestep accumulator (clamped to the
+                // same 1/15 s ceiling the former player used).
+                const double now_s = GetTime();
+                double dt = 0.0;
+                if (!impl_->scenario_player.first_frame) {
+                    dt = now_s - impl_->scenario_player.last_frame_time;
+                    if (dt > 1.0 / 15.0) dt = 1.0 / 15.0;
+                    if (dt < 0.0) dt = 0.0;
+                }
+                impl_->scenario_player.last_frame_time = now_s;
+                impl_->scenario_player.first_frame = false;
+                scenario_advance(dt);
+            } else if (impl_->replay.active()) {
                 handle_replay_input();
             } else {
                 handle_input();
@@ -289,9 +311,12 @@ void ViewerApp::run() {
             // (the Campaign window's own button mirrors it). The pause
             // contract lives in set_session_paused() — we hold the
             // frame lock here, which is exactly what it expects.
+            // (Scenario mode handles its own Space pause in
+            // handle_scenario_input; it has no session_runner.)
             if (IsKeyPressed(KEY_SPACE) &&
                 !ImGui::GetIO().WantCaptureKeyboard &&
-                impl_->session_runner) {
+                impl_->session_runner &&
+                !impl_->scenario_player.active()) {
                 set_session_paused(!impl_->session_runner->paused());
             }
 
@@ -343,7 +368,8 @@ void ViewerApp::run() {
             // it. A moving anchor re-points often; the session's own
             // deagg/reagg cooldowns absorb the churn.
             if (impl_->session && impl_->campaign_view_bubble &&
-                !impl_->replay.active()) {
+                !impl_->replay.active() &&
+                !impl_->scenario_player.active()) {
                 float anchor_gx = impl_->cam_x;
                 float anchor_gy = impl_->cam_y;
                 bool selection_anchored = false;
@@ -425,7 +451,12 @@ void ViewerApp::run() {
 
             BeginDrawing();
             ClearBackground(Color{20, 22, 28, 255});
-            if (impl_->replay.active()) {
+            if (impl_->scenario_player.active()) {
+                draw_scenario();
+                rlImGuiBegin();
+                draw_scenario_panel();
+                rlImGuiEnd();
+            } else if (impl_->replay.active()) {
                 draw_replay_canvas();
                 // The replay panel uses ImGui, so it must be wrapped in
                 // rlImGuiBegin/End — same as the normal draw_imgui() path.
@@ -535,6 +566,24 @@ void ViewerApp::run() {
     // (which is private). Safe to call when the browser was never opened
     // (cleanup_preview is a no-op in that case).
     impl_->class_table_browser.close();
+
+    // ── Scenario mode epilogue (consolidated f4-scenario-player) ──────────
+    // The scenario owns its own terrain mesh + textured-theater WorldView
+    // (separate from the campaign's impl_->world) — free them while the GL
+    // context is still alive. The shared render_res_3d (aircraft meshes,
+    // lit shader) was already unloaded above. Then flush the FlightRecorder
+    // trace if the scenario enabled recording (the replay mode consumes it).
+    if (impl_->scenario_player.active()) {
+        if (impl_->scenario_player.terrain_mesh_built) {
+            f4::renderer::unload_terrain_mesh(impl_->scenario_player.terrain_mesh);
+            impl_->scenario_player.terrain_mesh_built = false;
+        }
+        impl_->scenario_player.world.unload();
+        if (impl_->scenario_player.sim) {
+            impl_->scenario_player.sim->write_recording();
+        }
+    }
+
     CloseWindow();
 }
 
@@ -549,6 +598,11 @@ void ViewerApp::set_initial_camera(float center_x, float center_y, float zoom) {
     impl_->cam_y = center_y;
     impl_->cam_zoom = zoom;
     impl_->initial_camera_set = true;
+}
+
+void ViewerApp::set_window_size(int width, int height) noexcept {
+    impl_->window_w = width;
+    impl_->window_h = height;
 }
 
 bool ViewerApp::select_by_name(const std::string& substring) {
