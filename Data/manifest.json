@@ -260,6 +260,13 @@
       "fnv1a_64": "ac97fa756505dbc4"
     },
     {
+      "id": "",
+      "path": "Weapons/falcon4.wcd.json",
+      "size_bytes": 64709,
+      "sha256": "f0fb97f7d63af5e29541738afa7d1410f83cadbcc7438651199ef4edb26eafbc",
+      "fnv1a_64": "10b7696dfeaf9f58"
+    },
+    {
       "id": "campaign:save1",
       "path": "World/korea.world.json",
       "size_bytes": 10292091,

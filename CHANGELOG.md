@@ -53,6 +53,35 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
   arm-off ledger MD5s IDENTICAL — movement alone does not move the
   books, by design). The carrier's full 319-grid haul arrives within
   the 24-hour certificate's horizon (engine-pinned).
+  
+## MAINT-2 — the mission QC cookbook + the per-type matrix runner
+
+- **MAINT-2** — the answer to "how do we sanity-check the campaign at
+  a glance?" made into tooling and a runbook. `Docs/MISSION_QC_COOKBOOK.md`
+  writes down the three-layer QC discipline the codebase already
+  implements — the C++ exit-code GATES (`campaign_qc` 2/3/4/5, ladder
+  6–8, war 9–16), the LEDGERS (`campaign_qc_summary.json`'s
+  missions_by_type / tasking / b3_loop / sim_run / ordnance / results
+  blocks), and the viewer as the EYES (ATO/Tasking mission+team filters,
+  click-to-pan rows, replay mode over the FlightRecorder trace) — with
+  the per-category "what good looks like" table and the byte-exact
+  filter traps spelled out (the stock war's CAP is AMIS_BARCAP2; its
+  tanker missions are AMIS_TANK). `scripts/qc_missions.py` (stdlib
+  only) runs the matrix: one `--mission`-filtered `campaign_qc`
+  invocation per type, the category expectations layered on top of the
+  gates (routes == spawned, airborne ≥ 1, Strike/SEAD/CAS
+  "armed → released"), `qc_matrix.json`/`qc_matrix.md` artifacts, and
+  a CI-able exit code. First sweep over TestCamp caught a live one
+  (cookbook §5): strike flights — saved-tasking AND ladder-generated —
+  are armed but never receive a ground target (`target_description`
+  empty for every trace sample; the AI flies the route, then goes
+  home through ProceedToFix/GoAround/Rollout), i.e. the campaign→sim
+  boundary drops the `mission_target` propagation leg the A-G
+  employment needs. Ground-war/supply verification via the same loop
+  (`--war --ground-war [--unit-strike] [--objective-supply]
+  [--replacement-stock]`, exits 13/14) documented with the ladder's
+  window>cycle trap. §7 sketches the curated per-type showcase worlds
+  as the follow-on tranche.
 
 ## CAMP-SEGF-2 — the segfault fix re-land (the engine + test half)
 
