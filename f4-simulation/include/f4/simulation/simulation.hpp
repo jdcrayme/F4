@@ -65,6 +65,7 @@
 
 namespace f4::ai::atc { class IAirTrafficControl; }
 namespace f4::recorder { class FlightRecorder; class FcsTraceWriter; }
+namespace f4::flight { class FlightModelComponent; }  // CAMP-OPT-1 roster ptr
 
 namespace f4::simulation {
 
@@ -740,6 +741,37 @@ private:
     // Phase 1 spawn path (scenario_list) pushes one entry; the Phase 2 path
     // (campaign_flights) pushes one per Flight unit found in the world JSON.
     std::vector<entities::EntityId> aircraft_entities_;
+
+    // CAMP-OPT-1: the per-tick ANIM spinner walk's cached roster. The p7
+    // pass used to call with_component_ref<VisualModelComponent>() EVERY
+    // tick — a bucket copy of every visual entity in the world (4,000+
+    // on a real campaign: base features, ground vehicles, parked inventory)
+    // — plus an EntityHandle + type_index map lookup per entity per tick
+    // just to resolve the powered/dormant check. On TestCamp that walk was
+    // 97% of the whole tick (~2 ms) and collapsed the campaign's certified
+    // 60x acceleration to ~7x. The roster is instead rebuilt only when the
+    // world's structural epoch moves (entity create/destroy, component
+    // add/replace/remove — the same events the world's ref index already
+    // maintains); between rebuilds every id/pointer pair is exactly the
+    // live roster (component addresses are node-stable — see the
+    // FID-OPT-3 notes in entity.hpp), so the per-tick cost is three float
+    // integrations and one dormant-flag read per entity.
+    struct SpinnerEntry {
+        entities::EntityId id;
+        VisualModelComponent* vis;
+        // Resolved once at roster build. nullptr = not an airframe (base
+        // features, ground vehicles) — always powered, the p7 rule.
+        const f4::flight::FlightModelComponent* fm;
+    };
+    std::vector<SpinnerEntry> spinner_roster_;
+    // The epoch the roster was built at; 0 never matches (worlds start at
+    // 1 and only move up), forcing the first build.
+    std::uint64_t spinner_roster_epoch_ = 0;
+
+    // CAMP-OPT-1: (re)resolve the spinner roster from the world's current
+    // visual set. Called from tick() when world_.structural_epoch() moved
+    // off spinner_roster_epoch_.
+    void rebuild_spinner_roster_();
 
     // M5a: per-aircraft WVR-band presence (combat_mode == WVR last time
     // the flip recorder looked), for the WvrEngaged/WvrDisengaged combat

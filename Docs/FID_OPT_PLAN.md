@@ -354,6 +354,34 @@ The 1-h armed ledger MD5 (`76711c97…`) is byte-identical pre/post
 OPT-3 across the 20× and 60× presets — the scan walk's output is
 unchanged to the byte.
 
+## 4a. CAMP-OPT-1 — the spinner-walk spike (LANDED, the post-OPT-3 regression repair)
+
+The acceleration the tiers above certified was silently broken by the
+p7 animation patch (`6e6aae9`, after OPT-3's measurements): the tick
+loop's ANIM spinner pass resolved the world's visual roster EVERY tick
+— `with_component_ref<VisualModelComponent>()`'s bucket copy plus one
+`EntityHandle` + `type_index` lookup per entity for the powered check.
+A real campaign (TestCamp) carries 4,063 visual entities (objectives,
+vehicles, parked inventory) before a single aircraft spawns; the walk
+measured **1.96 ms of a 2.02 ms tick (97%)**, and the 60× preset's
+certificate fell from the certified 61.07× to **7.3× dilated**.
+
+The repair (CAMP-OPT-1): `EntityWorld::structural_epoch()` — bumped on
+entity create/destroy and component add/replace/remove (both sides of
+every move, max+1 so stale captures can't collide) — keys a cached
+spinner roster in `Simulation::tick`; rebuilds happen only when the
+world structurally changes (campaign wars mutate at most once per
+campaign second), and every in-tick mutator runs before the pass, so a
+rebuilt roster sees exactly what the per-tick snapshot saw. Same save,
+same box: tick **2.09 → 0.157 ms (13×)**; the **60× certificate
+sustains 116.1×, zero dilation** (min sample 92.1×); 240× delivers
+~99× (CPU-bound, the runner says so). Tests: `StructuralEpoch.*`
+(f4-entities) + `SpinnerRoster.*` (f4-simulation). Lesson recorded:
+the FID-OPT discipline ("measure the tick budget after EVERY tranche
+that touches `tick()`") was skipped by the p7 patch — a full-world
+per-tick walk landed inside the exact budget the tiers had carved out;
+CAMP-OPT-1 restores it and the pins now guard the walk's shape.
+
 ## 5. What remains (measured, not designed)
 
 - **The flight-model floor** — 33.9 s of the instrumented 3-h war

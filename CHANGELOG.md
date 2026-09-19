@@ -5,6 +5,46 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## CAMP-OPT-1 — the campaign time-acceleration repair (the spinner-walk spike)
+
+- **CAMP-OPT-1** — found and fixed the p7 animation patch's per-tick
+  full-world walk that broke campaign time acceleration. The tick loop's
+  ANIM spinner pass called `with_component_ref<VisualModelComponent>()`
+  EVERY tick — a fresh bucket copy of every visual entity in the world —
+  and resolved the powered/dormant check through an `EntityHandle` +
+  `type_index` map lookup per entity per tick. A real campaign save
+  (TestCamp) carries 4,063 visual entities (2,665 objectives, 1,719
+  units' vehicles/features) even before a single aircraft spawns, and
+  the walk measured **1.96 ms of every 2.02 ms tick (97%)** — capping the
+  engine at ~420 ticks/s, so the viewer's certified 60× preset delivered
+  **7.3×** and the 10× preset itself dilated. The FID-OPT-2-era
+  certificate had cleared 60× at 61.07×; the regression shipped with
+  `f4-p7-20260916` (6e6aae9) and every campaign since ran at ~1/8th its
+  certified speed. The fix: `EntityWorld` grows a **structural epoch**
+  (`structural_epoch()`, bumped on create/destroy/component
+  add-replace-remove and both sides of every move — max+1 so a stale
+  capture can never collide), and `Simulation::tick` keeps a cached
+  spinner roster `(id, VisualModelComponent*, const FlightModelComponent*)`
+  rebuilt only when the epoch moves (wars spawn/retire at most once per
+  campaign second; scenario plays barely mutate after init). Between
+  rebuilds the per-tick cost is three float integrations + one dormant
+  read per entity — the cached pointers are as safe as the snapshot they
+  replaced (component nodes are stable between structural changes, and
+  every mutator in the tick runs BEFORE the spinner pass, so a rebuilt
+  roster sees exactly the post-tick state the old per-tick snapshot
+  saw). Measured, same save, same box: tick **2.09 ms → 0.157 ms (13×)**,
+  spinner phase 1.96 → 0.11 ms; the **60× certificate sustains 116.1×**
+  zero dilation (min sample 92.1×) vs 7.3× dilated before — 240× now
+  delivers ~99× where 7× stood (CPU-bound, surfaced honestly by the
+  runner's effective-speed readout); the FullFidelity 449-aircraft run
+  drops 100 → 75 s for the same 7,200 ticks. Tests: 4 `StructuralEpoch`
+  entity-core pins (queries never bump; every mutation does; both move
+  sides land above every prior value — the move-assignment max+1 rule
+  caught a real collision bug in the first cut; slot recycling bumps) +
+  4 `SpinnerRoster` sim pins (features spin, dormant airframes hold
+  their phase, a late spawn joins the next tick, a destroyed visual
+  leaves the walk without a dangling read).
+
 ## CAMP-DOM-6 — task-force movement (the naval GroundWar sibling)
 
 - **CAMP-DOM-6** — the DOM-5 "how deep" record's first named tranche

@@ -2200,31 +2200,47 @@ void Simulation::tick(double dt) {
     // bound simply ignore the values, so one pass covers the whole
     // world. Dormant airframes (parked inventory, engines cold) hold
     // their seeded angle instead of spinning.
+    //
+    // CAMP-OPT-1: the world's visual roster is resolved ONCE per
+    // structural change, not once per tick. The p7 original called
+    // with_component_ref<VisualModelComponent>() here — a bucket COPY of
+    // every visual entity (4,000+ on a real campaign) — and resolved the
+    // powered check through an EntityHandle + type_index map lookup per
+    // entity per tick. Measured on TestCamp: 1.96 ms of every tick
+    // (97% of the whole budget, aircraft not even spawned yet), which
+    // alone capped the certified 60x campaign acceleration at ~7x. The
+    // cached roster rides the world's structural epoch: entity
+    // create/destroy and component add/replace/remove all bump it (and
+    // all of them happen BEFORE this pass in the tick — the sweep and
+    // combat phases mutate — so a roster rebuilt here is exactly the
+    // post-tick state the old per-tick snapshot saw), and component
+    // addresses are node-stable between structural changes, so the
+    // cached pointers are as safe as the snapshot they replaced.
     {
         constexpr float kRotorMainRate = 30.0f;   // ~4.8 rev/s
         constexpr float kRotorTailRate = 120.0f;  // tail runs ~4x the head
         constexpr float kRadarDishRate = 0.7f;    // ~9 s per revolution
-        for (auto& [spinner_eid, spinner_vis] :
-             world_.with_component_ref<VisualModelComponent>()) {
+        if (spinner_roster_epoch_ != world_.structural_epoch()) {
+            rebuild_spinner_roster_();
+        }
+        for (const auto& entry : spinner_roster_) {
+            auto* spinner_vis = entry.vis;
             if (!spinner_vis) continue;
             if (!spinner_vis->spinners_seeded) {
                 // Deterministic per-entity phase (entity id) — a
                 // formation of helis or a base full of radars must not
                 // spin in lockstep.
-                const uint64_t raw = spinner_eid.value;
+                const uint64_t raw = entry.id.value;
                 f4::anim::seed_spinners(
                     static_cast<uint32_t>(raw ^ (raw >> 32)),
                     spinner_vis->anim_values);
                 spinner_vis->spinners_seeded = true;
             }
             // Cold airframes hold their phase; everything with power
-            // (live aircraft, ground units, features) integrates.
-            bool powered = true;
-            if (auto* fm = entities::EntityHandle(spinner_eid, &world_)
-                               .get<f4::flight::FlightModelComponent>()) {
-                powered = !fm->is_dormant();
-            }
-            if (!powered) continue;
+            // (live aircraft, ground units, features) integrates. The FM
+            // pointer was resolved at roster build (nullptr = feature or
+            // vehicle — always powered, the p7 rule).
+            if (entry.fm != nullptr && entry.fm->is_dormant()) continue;
             f4::anim::integrate_spinner(f4::anim::Channel::rotor_main,
                                         kRotorMainRate, dt,
                                         spinner_vis->anim_values);
@@ -2690,6 +2706,21 @@ double Simulation::air_bubble_radius_ft() const noexcept {
     // FID-1: the AII-parsed SIM_BUBBLE_SIZE (feet) — the tiered
     // session's air-bubble floor (see the header's contract).
     return bubble_manager_ ? bubble_manager_->air_radius_ft() : 2560.0;
+}
+
+void Simulation::rebuild_spinner_roster_() {
+    // CAMP-OPT-1: see the header + the tick()-side comment. One walk per
+    // structural change (campaign wars spawn/retire at most once per
+    // campaign second; scenario plays rarely mutate at all after init),
+    // not one bucket copy per tick.
+    spinner_roster_.clear();
+    for (const auto& [eid, vis] :
+         world_.with_component_ref<VisualModelComponent>()) {
+        const auto* fm = entities::EntityHandle(eid, &world_)
+                             .get<f4::flight::FlightModelComponent>();
+        spinner_roster_.push_back(SpinnerEntry{eid, vis, fm});
+    }
+    spinner_roster_epoch_ = world_.structural_epoch();
 }
 
 void Simulation::update_bubble() {

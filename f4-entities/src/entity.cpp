@@ -52,6 +52,10 @@ EntityHandle EntityWorld::create() {
     // flag the rebuild anyway — one bool write, and it keeps the cache's
     // invariants trivially true regardless of future changes here.
     invalidate_behavioral_cache();
+    // CAMP-OPT-1: slot recycling is a structural change (a reused index can
+    // resurrect a dead id at the same index with a new generation) — bump
+    // so roster caches keyed on the epoch never hold a stale pair.
+    ++structural_epoch_;
     return EntityHandle(EntityId::make(index, entities_[index].generation), this);
 }
 
@@ -77,6 +81,10 @@ void EntityWorld::destroy(EntityId id) {
     rec->components.clear();       // behavioral components destroyed — the
                                    // cache's pointers dangle until rebuilt
     invalidate_behavioral_cache();
+    // CAMP-OPT-1: the per-component ref-index removes above bump the epoch
+    // for the types this entity carried; this bump covers the component-
+    // less-entity case so the destroy is ALWAYS visible to roster caches.
+    ++structural_epoch_;
     free_list_.push_back(id.index());
 }
 
@@ -397,6 +405,10 @@ void EntityWorld::component_index_on_remove(std::type_index tid, EntityId id) {
 void EntityWorld::component_ref_index_on_add(std::type_index tid, EntityId id,
                                              ComponentBase* comp,
                                              bool replacing) {
+    // CAMP-OPT-1: bump BEFORE the unqueried-type early return — a first
+    // add of a type nobody has queried yet is still a structural change
+    // every roster cache must see.
+    ++structural_epoch_;
     auto it = component_ref_index_.find(tid);
     if (it == component_ref_index_.end()) return;  // type never queried yet
     auto& bucket = it->second;
@@ -424,6 +436,10 @@ void EntityWorld::component_ref_index_on_add(std::type_index tid, EntityId id,
 
 void EntityWorld::component_ref_index_on_remove(std::type_index tid,
                                                 EntityId id) {
+    // CAMP-OPT-1: bump BEFORE the unqueried-type early return — removing a
+    // component of a type nobody has queried yet still changes the world's
+    // structure (destroy() routes every component through here).
+    ++structural_epoch_;
     auto it = component_ref_index_.find(tid);
     if (it == component_ref_index_.end()) return;
     auto& bucket = it->second;

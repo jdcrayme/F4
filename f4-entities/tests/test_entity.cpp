@@ -1048,3 +1048,88 @@ TEST(WithComponentRef, WorldMoveDropsTheBucketAndRebuildsCorrectly) {
     EXPECT_EQ(refs[0].first, a.id());
     EXPECT_EQ(refs[0].second->position.z, 3.0);
 }
+
+// ============================================================================
+// CAMP-OPT-1: structural_epoch — the roster-cache invalidation signal.
+// The sim's per-tick spinner walk caches (id, VisualModelComponent*) pairs
+// against this epoch; every structural mutation must move it, and nothing
+// else may.
+// ============================================================================
+TEST(StructuralEpoch, StartsAtOneAndQueriesDoNotBump) {
+    EntityWorld w;
+    EXPECT_EQ(w.structural_epoch(), 1u);
+
+    auto a = w.create(); a.add<TransformComponent>();
+    const auto after_add = w.structural_epoch();
+    EXPECT_GT(after_add, 1u);
+
+    // Queries — the per-tick reads the epoch exists to amortize — must
+    // never bump (they'd turn the cached walk back into a per-tick walk).
+    (void)w.with_component<TransformComponent>();
+    (void)w.with_component_ref<TransformComponent>();
+    (void)w.alive(a.id());
+    (void)w.size();
+    EXPECT_EQ(w.structural_epoch(), after_add);
+}
+
+TEST(StructuralEpoch, EveryStructuralMutationBumps) {
+    EntityWorld w;
+    auto a = w.create();
+    const auto e0 = w.structural_epoch();
+
+    a.add<TransformComponent>();            // first add (type never queried)
+    const auto e1 = w.structural_epoch();
+    EXPECT_GT(e1, e0);
+
+    (void)w.with_component_ref<TransformComponent>();  // build the bucket
+    a.add<TransformComponent>();            // replace-in-place add
+    EXPECT_GT(w.structural_epoch(), e1);
+    const auto e2 = w.structural_epoch();
+
+    a.remove<TransformComponent>();         // explicit remove
+    EXPECT_GT(w.structural_epoch(), e2);
+    const auto e3 = w.structural_epoch();
+
+    a.add<TransformComponent>();
+    const auto e4 = w.structural_epoch();
+    EXPECT_GT(e4, e3);
+
+    w.destroy(a.id());                      // destroy (component-less too)
+    EXPECT_GT(w.structural_epoch(), e4);
+}
+
+TEST(StructuralEpoch, MoveBumpsBothSides) {
+    EntityWorld w;
+    auto a = w.create(); a.add<TransformComponent>();
+    const auto pre_src = w.structural_epoch();
+
+    EntityWorld w2(std::move(w));
+    EXPECT_GT(w2.structural_epoch(), pre_src)   // destination changed
+        << "a move ctor that leaves the destination epoch frozen lets a "
+           "pre-move capture read moved components";
+    // The source object itself was moved-from — its epoch must also move
+    // (its last readers' caches must not silently match again).
+    EXPECT_NE(w.structural_epoch(), pre_src);
+
+    EntityWorld w3;
+    w3.create();
+    const auto pre_dst = w3.structural_epoch();
+    w3 = std::move(w2);
+    EXPECT_GT(w3.structural_epoch(), pre_dst);
+}
+
+TEST(StructuralEpoch, SlotRecyclingBumps) {
+    EntityWorld w;
+    auto a = w.create(); a.add<TransformComponent>();
+    (void)w.with_component_ref<TransformComponent>();
+    w.destroy(a.id());
+    const auto after_destroy = w.structural_epoch();
+
+    auto b = w.create();                    // recycles a's slot
+    EXPECT_GT(w.structural_epoch(), after_destroy);
+    b.add<TransformComponent>();
+    EXPECT_GT(w.structural_epoch(), after_destroy);
+    EXPECT_EQ(b.id().index(), a.id().index());  // same slot, new generation
+    EXPECT_NE(b.id(), a.id());
+}
+

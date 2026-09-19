@@ -96,6 +96,7 @@ target_compile_definitions(test_countermeasure_e2e PRIVATE
 )
 f4_simulation_add_test(test_combat_transcript      test_combat_transcript.cpp)
 f4_simulation_add_test(test_register_aircraft      test_register_aircraft.cpp)
+f4_simulation_add_test(test_spinner_roster         test_spinner_roster.cpp)
 f4_simulation_add_test(test_campaign_session       test_campaign_session.cpp)
 
 # NOTE (CAMP-HOST-3): the V-THREAD runner left the engine — pacing is a
@@ -120,6 +121,13 @@ add_dependencies(test_simulation_lifetime convert_golden_fixtures)
 # The register_aircraft test hand-initializes a FlightModelComponent from
 # the generated F-16 config fixture (real aero tables).
 target_compile_definitions(test_register_aircraft PRIVATE
+    F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}"
+)
+
+# CAMP-OPT-1: the spinner-roster pins — same fixture wiring as
+# test_register_aircraft (the FM-dependent cases load the generated
+# F-16 config; without it the tests skip rather than fail).
+target_compile_definitions(test_spinner_roster PRIVATE
     F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}"
 )
 

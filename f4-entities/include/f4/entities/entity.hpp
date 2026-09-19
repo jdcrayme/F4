@@ -32,6 +32,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <atomic>
 #include <cstdint>
 #include <compare>
@@ -827,6 +828,16 @@ namespace f4::entities {
             // on both sides (the destination rebuilds lazily, one walk),
             // the same defensive move the behavioral cache makes.
             component_ref_index_.clear();
+            // CAMP-OPT-1: a move IS a structural change for both worlds —
+            // the destination's contents arrived from the source and the
+            // source's components were transferred away. Both epochs must
+            // land strictly ABOVE every value either world ever exposed
+            // (a destination that starts at its =1 default and merely bumps
+            // could collide with a stale capture and read moved components;
+            // max+1 makes the new epoch unique against both histories).
+            structural_epoch_ =
+                std::max(structural_epoch_, other.structural_epoch_) + 1;
+            other.structural_epoch_ = structural_epoch_ + 1;
         }
 
         // Move assignment: same reasoning — regenerate the cookie so old
@@ -848,6 +859,12 @@ namespace f4::entities {
                 other.active_behavioral_cache_.clear();
                 other.behavioral_cache_dirty_ = true;
                 component_ref_index_.clear();  // FID-OPT-3: see move ctor
+                // CAMP-OPT-1: both sides changed — same max+1 discipline
+                // as the move ctor (a plain bump could collide with the
+                // destination's own pre-assignment captures).
+                structural_epoch_ =
+                    std::max(structural_epoch_, other.structural_epoch_) + 1;
+                other.structural_epoch_ = structural_epoch_ + 1;
             }
             return *this;
         }
@@ -943,6 +960,19 @@ namespace f4::entities {
 
         [[nodiscard]] std::size_t size() const noexcept { return entities_.size(); }
         [[nodiscard]] std::size_t capacity() const noexcept { return entities_.capacity(); }
+
+        // CAMP-OPT-1: the structural epoch — bumped on every structural
+        // mutation (entity create/destroy, component add/replace/remove).
+        // Roster caches capture it alongside their snapshot and rebuild
+        // when it moves: unchanged means the cached id/pointer pairs are
+        // still EXACTLY the live roster (component addresses are
+        // node-stable between structural changes). Monotonic within a
+        // world; both sides of a move op bump (the moved-from world's
+        // components were transferred away — its caches must invalidate
+        // too). Threading: sim thread only, same rule as update_all().
+        [[nodiscard]] std::uint64_t structural_epoch() const noexcept {
+            return structural_epoch_;
+        }
 
     private:
         friend class EntityHandle;
@@ -1102,6 +1132,20 @@ namespace f4::entities {
         mutable std::unordered_map<
             std::type_index, std::vector<std::pair<EntityId, ComponentBase*>>>
             component_ref_index_;
+
+        // CAMP-OPT-1: structural epoch. Bumped on every structural
+        // mutation — entity create, entity destroy, component add/replace,
+        // component remove — the same set of events the ref index above
+        // maintains (plus slot-recycling create()). Readers that cache
+        // per-entity component rosters (the sim's per-tick spinner walk)
+        // compare their captured epoch against this one: unchanged means
+        // every cached id/pointer pair is still exactly the live roster
+        // (node-stable component addresses included), changed means
+        // rebuild before the next read. Bumped at the TOP of the ref-index
+        // hooks — before the "type never queried" early return — so a
+        // first add of an unqueried type still invalidates. Copy/move ops
+        // start the new world at its own epoch (never copied).
+        std::uint64_t structural_epoch_ = 1;
 
         // Index maintenance (called from EntityHandle::add/remove — the
         // friend declaration covers them — and from destroy()).
