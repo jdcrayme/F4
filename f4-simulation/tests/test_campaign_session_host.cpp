@@ -59,6 +59,7 @@
 #include <fstream>
 #include <memory>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -253,7 +254,14 @@ struct HostRig {
         opts.max_steps_per_advance = 1000;
         std::string err;
         rig.host = EngineSessionHost::create(opts, &err);
-        EXPECT_NE(rig.host, nullptr) << err;
+        // A failed rig must fail the TEST, not segfault it: a factory
+        // cannot ASSERT (non-void return), and EXPECT lets the test
+        // walk on into a null host — the parallel-suite SEGFAULT. gtest
+        // catches the throw and reports the session's own error.
+        if (rig.host == nullptr) {
+            throw std::runtime_error(
+                "HostRig: session create failed: " + err);
+        }
         return rig;
     }
 
@@ -629,7 +637,12 @@ struct WarRig {
         opts.max_steps_per_advance = 4000;
         std::string err;
         rig.host = EngineSessionHost::create(opts, &err);
-        EXPECT_NE(rig.host, nullptr) << err;
+        // Same discipline as HostRig::make: fail the test, never the
+        // process (the factory cannot ASSERT — throw instead).
+        if (rig.host == nullptr) {
+            throw std::runtime_error(
+                "WarRig: session create failed: " + err);
+        }
         return rig;
     }
 
@@ -664,7 +677,12 @@ struct WarRig {
         opts.max_steps_per_advance = 4000;
         std::string err;
         rig.host = EngineSessionHost::create(opts, &err);
-        EXPECT_NE(rig.host, nullptr) << err;
+        // Same discipline as HostRig::make: fail the test, never the
+        // process (the factory cannot ASSERT — throw instead).
+        if (rig.host == nullptr) {
+            throw std::runtime_error(
+                "WarRig::make_combat: session create failed: " + err);
+        }
         return rig;
     }
 

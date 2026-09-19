@@ -5,6 +5,31 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## CAMP-SEGF-2 — the segfault fix re-land (the engine + test half)
+
+- **CAMP-SEGF-2** — CAMP-SEGF-1's data half landed inside MAINT-1, but
+  the actual segfault fix did not: HEAD still authored every session's
+  handoff scenario in the FIXED shared temp dir
+  (`/tmp/f4_viewer_session/`), so two concurrent sessions (ctest -jN,
+  two viewer instances) still raced on the same `scenario.json` —
+  create fails on the other process's world path, a torn write, or a
+  fresh delete, and the five rig factories that cannot ASSERT
+  (non-void returns) walked their non-fatal `EXPECT_NE(host, nullptr)`
+  on into a null-host deref (the flaky `CampCmdQueueRefusesTyped`
+  SEGFAULT). Re-land on the post-MAINT-1 tree, byte-for-byte the
+  audited fix: the session temp dir unique per instance (instance
+  counter + steady-clock nanos — the rigs' own rule) in
+  `campaign_session.cpp`, and the five factories
+  (`HostRig::make`/`WarRig::make`/`WarRig::make_combat`,
+  `CommandRig::make`/`KunsanRig::make`) now throw on a failed create —
+  gtest reports the session's own error instead of the process dying.
+  Verified on the fresh clone: full fast tier 2974/2974 green, 4×
+  concurrent binary runs × 3 rounds clean, and the corruption hammer
+  that deterministically segfaulted (exit 139) the pre-fix build
+  passes the fixed one (the fixed sessions never touch the old shared
+  path). ASAN+UBSAN was clean over the host + command binaries in the
+  original audit; the engine hunk is unchanged.
+
 ## MAINT-1 — data hygiene + docs truthing (the green-baseline repair)
 
 - **MAINT-1** — the fresh-clone baseline is green again and stays green

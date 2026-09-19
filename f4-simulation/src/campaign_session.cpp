@@ -22,6 +22,8 @@
 #include <f4/world/world_loader.hpp>   // populate_world (G1 mirror)
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <cmath>
 #include <fstream>
 #include <memory>
@@ -314,8 +316,22 @@ CampaignSession::create(const CampaignSessionOptions& opts,
     //    relative-path lesson: the sim resolves it against the scenario
     //    file's directory).
     std::error_code ec;
+    // Unique per session INSTANCE (and per process): a fixed
+    // "f4_viewer_session" dir is shared by every session in every
+    // process, so two concurrent sessions (parallel ctest -jN, two
+    // viewer instances) race on the SAME scenario.json — one session's
+    // create() can read the other's world path, a torn write, or a
+    // freshly-removed file and fail outright. Same rule the test rigs
+    // apply (unique per call AND per process): instance counter within
+    // the process, steady-clock nanos across processes.
+    static std::atomic<unsigned> instance_counter{0};
+    const auto instance_tag =
+        std::to_string(instance_counter.fetch_add(1)) + "_" +
+        std::to_string(
+            std::chrono::steady_clock::now().time_since_epoch().count());
     session->scenario_temp_dir_ =
-        std::filesystem::temp_directory_path(ec) / "f4_viewer_session";
+        std::filesystem::temp_directory_path(ec) /
+        ("f4_viewer_session_" + instance_tag);
     if (!ec) {
         std::filesystem::create_directories(session->scenario_temp_dir_, ec);
     }

@@ -34,6 +34,7 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -149,7 +150,13 @@ struct CmdRig {
         opts.max_steps_per_advance = 4000;
         std::string err;
         rig.host = EngineSessionHost::create(opts, &err);
-        EXPECT_NE(rig.host, nullptr) << err;
+        // A failed rig must fail the TEST, not segfault it: the factory
+        // cannot ASSERT (non-void return) — throw, and gtest reports
+        // the session's own error as the failure.
+        if (rig.host == nullptr) {
+            throw std::runtime_error(
+                "CommandRig: session create failed: " + err);
+        }
         return rig;
     }
 };
@@ -183,7 +190,12 @@ struct KunsanRig {
         opts.max_steps_per_advance = 4000;
         std::string err;
         rig.host = EngineSessionHost::create(opts, &err);
-        EXPECT_NE(rig.host, nullptr) << err;
+        // Same discipline as CommandRig::make: fail the test, never
+        // the process.
+        if (rig.host == nullptr) {
+            throw std::runtime_error(
+                "KunsanRig: session create failed: " + err);
+        }
         return rig;
     }
 
