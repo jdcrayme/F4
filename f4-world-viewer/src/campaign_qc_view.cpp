@@ -50,6 +50,7 @@ struct AtoRow {
     int wp_count = 0;
     float gx = 0.0f, gy = 0.0f;           // grid position (camera focus)
     uint8_t owner = 0;
+    int32_t fuel_burnt = 0;               // per-aircraft lbs (the aggregate burn)
 };
 
 } // namespace
@@ -137,6 +138,7 @@ void ViewerApp::draw_campaign_qc_view() {
             row.gx = impl_->grid_x(tr);
             row.gy = impl_->grid_y(tr);
             row.owner = owner;
+            row.fuel_burnt = fp->fuel_burnt;
             rows.push_back(row);
         }
         // TOT order — the natural ATO reading order.
@@ -259,7 +261,7 @@ void ViewerApp::draw_campaign_qc_view() {
         ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersOuterH |
         ImGuiTableFlags_Resizable | ImGuiTableFlags_ScrollY |
         ImGuiTableFlags_Sortable;
-    if (ImGui::BeginTable("ato", 8, table_flags, ImVec2(0.0f, 0.0f))) {
+    if (ImGui::BeginTable("ato", 9, table_flags, ImVec2(0.0f, 0.0f))) {
         ImGui::TableSetupScrollFreeze(0, 1);
         ImGui::TableSetupColumn("callsign", ImGuiTableColumnFlags_WidthFixed,
                                 84.0f, 0);
@@ -277,6 +279,8 @@ void ViewerApp::draw_campaign_qc_view() {
                                 140.0f, 6);
         ImGui::TableSetupColumn("wps", ImGuiTableColumnFlags_WidthFixed,
                                 32.0f, 7);
+        ImGui::TableSetupColumn("fuel", ImGuiTableColumnFlags_WidthFixed,
+                                56.0f, 8);
         ImGui::TableHeadersRow();
 
         // Simple in-place sort when the user clicks a header (stable, on
@@ -295,6 +299,7 @@ void ViewerApp::draw_campaign_qc_view() {
                             case 2: lt = a.owner < b.owner; break;
                             case 4: lt = a.tot < b.tot; break;
                             case 7: lt = a.wp_count < b.wp_count; break;
+                            case 8: lt = a.fuel_burnt < b.fuel_burnt; break;
                             default: lt = a.eid.value < b.eid.value; break;
                         }
                         return dir == ImGuiSortDirection_Ascending ? lt : !lt;
@@ -399,6 +404,9 @@ void ViewerApp::draw_campaign_qc_view() {
 
                 ImGui::TableNextColumn();
                 ImGui::Text("%d", row.wp_count);
+
+                ImGui::TableNextColumn();
+                ImGui::Text("%d", row.fuel_burnt);
             }
         }
         ImGui::EndTable();

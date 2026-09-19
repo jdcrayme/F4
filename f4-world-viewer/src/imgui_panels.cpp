@@ -65,10 +65,11 @@ void for_each_layer_group(ImplT* impl, Fn&& fn) {
         {"Grid",       &impl->show_grid},
     });
     fn("Overlays", 1, {
-        {"Radar arcs",               &impl->show_radar_arcs},
+        {"Radar arcs (static)",      &impl->show_radar_arcs},
+        {"Front line (FLOT)",        &impl->show_flot},
+        {"Supply state",             &impl->show_supply},
         {"All flight plans",         &impl->show_all_routes},
         {"Squadron→Airbase",         &impl->show_squadron_links},
-        {"Hierarchy lines (BN→BDE)", &impl->show_hierarchy_lines},
     });
     fn("Campaign QC", 2, {
         {"Mission→Target links",  &impl->show_mission_links},

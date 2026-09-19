@@ -179,6 +179,17 @@ void ViewerApp::start_campaign_session() {
     opts.max_flights = impl_->campaign_start_max_flights;
     opts.tasking_cycle_sec = 1800;  // FreeFalcon's own ATM cadence
     opts.reinforce_period_sec = 43200;  // the QC's armed 12 h
+    // G1/DOM-2: the ground war runs in viewer sessions — the supply
+    // picture (objective stocks, battalion cut-off), the FLOT, and the
+    // capture events are the mechanics the map is here to show. Without
+    // this the ground layers draw nothing and the war is air-only.
+    opts.ground_war = true;
+    opts.ground_objective_supply = true;
+    // The resupply cadence (team stock → objective stocks → battalion
+    // draws). 6 h of campaign time per fire: at 240x that is one fire
+    // every 90 wall-clock seconds — visible at QC speed, not a tick
+    // storm. (0 = the engine's OFF default.)
+    opts.ground_resupply_sec = 21600;
     // Stock-save bridge: the Steam install's stock campaigns (save0/1/2
     // + Instant) leave every squadron's home-airbase VU at 0 — the link
     // the game's own campaign engine establishes on first load, which
@@ -250,6 +261,16 @@ bool ViewerApp::adopt_session_start() {
             impl_->session_runner.reset();
         }
         impl_->session = std::move(r.session);
+        // CAMP-HOST-2: arm the event stream (all kinds — the viewer is
+        // the war-room client) BEFORE the runner starts, so no event is
+        // fired into an unarmed bus. The filter gates what the session
+        // buffers; drain_events() empties it per frame from
+        // refresh_session_snapshot() (under the frame session lock).
+        {
+            f4::campaign::api::EventFilter all;
+            all.all = true;
+            impl_->session->set_event_filter(all);
+        }
         // A new session starts PAUSED — the user starts the clock
         // deliberately (the tasking cycle is a 30-minute commitment at
         // 1x; an accidentally-live loop is the worse default).
@@ -336,8 +357,58 @@ void ViewerApp::request_exit() noexcept {
 // session-safe there.
 void ViewerApp::Impl::refresh_session_snapshot() {
     if (!session) return;
+
+    // The event stream drains EVERY frame (not per advance) — a paused
+    // session publishes nothing new, but the arm-point backlog and any
+    // stragglers land the frame after they fire. Newest kept last; the
+    // ring is capped (the feed reads the tail).
+    for (auto& ev : session->drain_events()) {
+        if (ev.kind == f4::campaign::api::CampaignEvent::Kind::ObjectiveCaptured) {
+            capture_markers.emplace_back(
+                ev.objective_captured.objective_id, GetTime());
+        }
+        session_events.push_back(std::move(ev));
+        while (session_events.size() > 100) session_events.pop_front();
+    }
+
+    // The cut-off cache: recomputed once per advance while the supply
+    // overlay is on (a battalion beyond the line-of-supply radius from
+    // every own-held objective draws nothing). O(battalions × own
+    // objectives) — a few hundred × a few hundred worst case, once per
+    // advance, not per draw.
     const std::uint64_t serial =
         session_runner ? session_runner->step_serial() : 0;
+    if (show_supply && serial != cutoff_stamp) {
+        cutoff_stamp = serial;
+        cutoff_battalions.clear();
+        const auto* gw = session->engine().ground_war();
+        if (gw) {
+            // The line-of-supply radius (GroundWarConfig's default —
+            // 10 grid ≈ 10 km, a division's logistics tail).
+            constexpr int kSupplyRadiusGrid = 10;
+            const auto& objs = gw->objectives();
+            for (const auto& u : gw->units()) {
+                if (u.destroyed) continue;
+                bool supplied = false;
+                for (const auto& o : objs) {
+                    if (o.owner != u.owner) continue;
+                    const float dx = float(o.x - u.x);
+                    const float dy = float(o.y - u.y);
+                    if (dx * dx + dy * dy <=
+                        float(kSupplyRadiusGrid * kSupplyRadiusGrid)) {
+                        supplied = true;
+                        break;
+                    }
+                }
+                if (!supplied) {
+                    cutoff_battalions.emplace_back(
+                        float(u.x) + float(u.fx) / 256.0f,
+                        float(u.y) + float(u.fy) / 256.0f);
+                }
+            }
+        }
+    }
+
     if (session_snap_valid && serial == session_snap_serial) return;
     session_snap = fetch_snapshot(*session, show_threat_overlay);
     session_snap_serial = serial;
@@ -706,6 +777,21 @@ void ViewerApp::draw_campaign_session_view() {
             st.agg_live, st.agg_arrived, st.agg_destroyed,
             st.tier_deaggs, st.tier_reaggs);
     }
+    // G1/DOM-2: the ground war's books — the front shape, captures,
+    // and the supply chain's counters (the map's FLOT + supply layers
+    // render the same engine state spatially). Live via the
+    // render-plane seam; refreshed per frame like the canvas.
+    if (const auto* gw = impl_->session->engine().ground_war()) {
+        const auto& gs = gw->stats();
+        ImGui::Text(
+            "ground: %d bn (%d mobile)   captures %d   front %d col",
+            gs.battalions_alive, gs.battalions_mobile, gs.captures,
+            gs.front_columns);
+        ImGui::Text(
+            "supply: regen %d   drawn %d   cut-offs %d   fires %d",
+            gs.supply_regen_total, gs.supply_drawn_total,
+            gs.cut_off_events, gs.resupply_fires);
+    }
 
     ImGui::Separator();
 
@@ -997,6 +1083,148 @@ void ViewerApp::draw_campaign_session_view() {
             }
         }
         ImGui::EndTable();
+    }
+
+    ImGui::Separator();
+
+    // --- Event feed (CAMP-HOST-2) ----------------------------------------
+    //
+    // The war's narrative as it happens: missions filed, objectives
+    // captured/damaged/repaired, kills, reinforcements, weather. The
+    // stream is armed at adopt (all kinds) and drained every frame
+    // under the frame session lock (refresh_session_snapshot); this
+    // section renders the newest tail, newest first. Objective ids
+    // resolve through the render-plane bridge (the missions table's
+    // own pattern).
+    if (ImGui::CollapsingHeader("Events",
+                                ImGuiTreeNodeFlags_DefaultOpen)) {
+        const auto objective_name = [this](std::uint32_t id) {
+            const auto& obj_map = impl_->objective_id_map();
+            const auto it = obj_map.find(id);
+            if (it == obj_map.end() || !it->second.valid()) {
+                return std::string{};
+            }
+            auto oh = impl_->session_handle(it->second);
+            auto* ot = oh.get<f4::entities::ObjectiveTypeComponent>();
+            return ot ? ot->class_name : std::string{};
+        };
+        const auto event_time =
+            [](const f4::campaign::api::CampaignEvent& ev) -> std::int64_t {
+            using K = f4::campaign::api::CampaignEvent::Kind;
+            switch (ev.kind) {
+                case K::MissionFiled:          return ev.mission_filed.t;
+                case K::Kill:                  return ev.kill.t;
+                case K::ObjectiveDamage:       return ev.objective_damage.t;
+                case K::ObjectiveCaptured:     return ev.objective_captured.t;
+                case K::ReinforcementDelivered:
+                                               return ev.reinforcement_delivered.t;
+                case K::WeatherChanged:        return ev.weather_changed.t;
+                case K::RoeChanged:            return ev.roe_changed.t;
+                case K::TaskingCycle:          return ev.tasking_cycle.t;
+                case K::ActionFiled:           return ev.action_filed.t;
+                case K::Verdict:               return ev.verdict.t;
+                case K::ObjectiveRepaired:     return ev.objective_repaired.t;
+                case K::PilotAssigned:         return ev.pilot_assigned.t;
+                case K::PilotLost:             return ev.pilot_lost.t;
+                case K::PilotRecovered:        return ev.pilot_recovered.t;
+                case K::SlotDenied:            return ev.slot_denied.t;
+            }
+            return 0;
+        };
+        const auto format_event_label =
+            [&](const f4::campaign::api::CampaignEvent& ev, char* buf,
+                std::size_t cap) -> bool {
+            using K = f4::campaign::api::CampaignEvent::Kind;
+            switch (ev.kind) {
+                case K::MissionFiled: {
+                    const std::string nm = objective_name(
+                        ev.mission_filed.target_objective_id);
+                    std::snprintf(buf, cap, "mission: %s team %u -> %s",
+                                  ev.mission_filed.mission_name.c_str(),
+                                  ev.mission_filed.team,
+                                  nm.empty() ? "?" : nm.c_str());
+                    return true;
+                }
+                case K::Kill:
+                    std::snprintf(buf, cap,
+                                  "air kill: team %u downed team %u (%s)",
+                                  ev.kill.killer_team, ev.kill.victim_team,
+                                  ev.kill.weapon.c_str());
+                    return true;
+                case K::ObjectiveDamage: {
+                    const std::string nm =
+                        objective_name(ev.objective_damage.objective_id);
+                    std::snprintf(buf, cap, "objective damaged: %s (%u features)",
+                                  nm.empty() ? "?" : nm.c_str(),
+                                  ev.objective_damage.features_damaged);
+                    return true;
+                }
+                case K::ObjectiveCaptured: {
+                    const std::string nm = objective_name(
+                        ev.objective_captured.objective_id);
+                    std::snprintf(buf, cap, "CAPTURED: %s -> team %u",
+                                  nm.empty() ? "?" : nm.c_str(),
+                                  ev.objective_captured.new_owner);
+                    return true;
+                }
+                case K::ObjectiveRepaired: {
+                    const std::string nm = objective_name(
+                        ev.objective_repaired.objective_id);
+                    std::snprintf(buf, cap, "repaired %u features at %s",
+                                  ev.objective_repaired.features_repaired,
+                                  nm.empty() ? "?" : nm.c_str());
+                    return true;
+                }
+                case K::ReinforcementDelivered:
+                    std::snprintf(buf, cap,
+                                  "reinforcements: %d aircraft (%d squadrons)",
+                                  ev.reinforcement_delivered.aircraft,
+                                  ev.reinforcement_delivered.squadrons_touched);
+                    return true;
+                case K::WeatherChanged:
+                    std::snprintf(buf, cap, "weather: %s",
+                                  ev.weather_changed.condition.c_str());
+                    return true;
+                case K::TaskingCycle:
+                    std::snprintf(buf, cap, "tasking cycle: %d intents",
+                                  ev.tasking_cycle.intents);
+                    return true;
+                case K::ActionFiled:
+                    std::snprintf(buf, cap, "action filed: %s (team %u, %d%% damage)",
+                                  ev.action_filed.mission_name.c_str(),
+                                  ev.action_filed.team,
+                                  ev.action_filed.damage_pct);
+                    return true;
+                case K::Verdict:
+                    std::snprintf(buf, cap, "verdict: %s (leader team %d, swing %d)",
+                                  ev.verdict.band.c_str(), ev.verdict.leader,
+                                  ev.verdict.swing);
+                    return true;
+                default:
+                    return false;  // pilot/roe/slot lines: shown when the
+                                   // war books grow a face for them
+            }
+        };
+
+        if (impl_->session_events.empty()) {
+            ImGui::TextDisabled("(no events yet)");
+        } else {
+            constexpr std::size_t kMaxRows = 14;
+            const std::size_t n = impl_->session_events.size();
+            const std::size_t first = n > kMaxRows ? n - kMaxRows : 0;
+            char line[192];
+            for (std::size_t i = n; i-- > first;) {
+                if (format_event_label(impl_->session_events[i], line,
+                                       sizeof(line))) {
+                    char tbuf[24];
+                    format_abs_campaign_time(
+                        impl_->session_epoch_s +
+                            event_time(impl_->session_events[i]),
+                        tbuf, sizeof(tbuf));
+                    ImGui::Text("%s  %s", tbuf, line);
+                }
+            }
+        }
     }
 
     ImGui::Separator();

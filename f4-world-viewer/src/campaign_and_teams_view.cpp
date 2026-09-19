@@ -265,6 +265,59 @@ void ViewerApp::draw_campaign_and_teams_view() {
         ImGui::EndTabItem();
     }
 
+    // === Structure tab ===
+    // The brigade → battalion org tree, restored here after the map's
+    // hierarchy lines were removed (the structure is reference data:
+    // no C2 model consumes it yet, so drawing it as map lines implied
+    // a command relationship that doesn't exist).
+    if (ImGui::BeginTabItem("Structure")) {
+        // Entity display name: the NAME tag, else the unit class name.
+        const auto unit_display_name = [this](f4::entities::EntityId eid)
+            -> std::string {
+            if (!eid.valid()) return {};
+            auto h = impl_->handle(eid);
+            auto name_tag = h.get_tag(f4::entities::tags::NAME);
+            if (name_tag && name_tag->as_string() &&
+                !name_tag->as_string()->empty()) {
+                return *name_tag->as_string();
+            }
+            if (auto* uc = h.get<f4::entities::UnitCoreComponent>()) {
+                if (!uc->class_name.empty()) return uc->class_name;
+            }
+            return {};
+        };
+
+        int brigades = 0;
+        for (const auto& eid : impl_->units()) {
+            auto h = impl_->handle(eid);
+            auto* uc = h.get<f4::entities::UnitCoreComponent>();
+            if (!uc || uc->unit_class != f4::entities::UnitClass::Brigade) {
+                continue;
+            }
+            auto* hier = h.get<f4::entities::HierarchyComponent>();
+            if (!hier || hier->children.empty()) continue;
+            ++brigades;
+
+            const std::string label = unit_display_name(eid);
+            if (ImGui::TreeNode(reinterpret_cast<const void*>(eid.value),
+                                "%s", label.empty() ? "(brigade)"
+                                                    : label.c_str())) {
+                for (const auto child : hier->children) {
+                    const std::string bn = unit_display_name(child);
+                    ImGui::BulletText("%s",
+                                      bn.empty() ? "(battalion)"
+                                                 : bn.c_str());
+                }
+                ImGui::TreePop();
+            }
+        }
+        if (brigades == 0) {
+            ImGui::TextDisabled(
+                "(no brigade structure in this world)");
+        }
+        ImGui::EndTabItem();
+    }
+
     ImGui::EndTabBar();
     ImGui::End();
 }

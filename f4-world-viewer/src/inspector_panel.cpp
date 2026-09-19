@@ -334,6 +334,55 @@ void ViewerApp::draw_inspector() {
                 } else {
                     ImGui::TextDisabled("Destination: (no movement orders)");
                 }
+                // Ground-war state — the logistics face the map's
+                // supply overlay keys off. Save values when no session
+                // runs; the engine's live mirror when one does.
+                if (auto* gt = h.get<f4::entities::GroundTacticalComponent>()) {
+                    ImGui::Separator();
+                    ImGui::TextUnformatted("Ground state:");
+                    ImGui::Text("  Supply:    %u%%", unsigned(gt->supply));
+                    ImGui::Text("  Morale:    %u%%", unsigned(gt->morale));
+                    ImGui::Text("  Fatigue:   %u%%", unsigned(gt->fatigue));
+                }
+                if (impl_->session) {
+                    const auto* gw = impl_->session->engine().ground_war();
+                    const std::int64_t vu = impl_->pb_int(pb, "vu_id_num", 0);
+                    if (gw && vu > 0) {
+                        for (const auto& u : gw->units()) {
+                            if (u.vu != static_cast<std::uint32_t>(vu)) continue;
+                            ImGui::Text("  Strength:  %d / %d vehicles",
+                                        u.strength, u.strength_initial);
+                            const char* state =
+                                u.destroyed ? "destroyed"
+                                : u.pinned  ? "in contact (pinned)"
+                                : u.mobile  ? "advancing"
+                                            : "holding";
+                            ImGui::Text("  Activity:  %s", state);
+                            if (u.target != 0) {
+                                const auto& omap =
+                                    impl_->objective_id_map();
+                                const auto found = omap.find(u.target);
+                                if (found != omap.end() &&
+                                    found->second.valid()) {
+                                    auto th =
+                                        impl_->session_handle(found->second);
+                                    auto name_tag =
+                                        th.get_tag(f4::entities::tags::NAME);
+                                    if (name_tag &&
+                                        name_tag->as_string() &&
+                                        !name_tag->as_string()->empty()) {
+                                        ImGui::Text("  Attack:    %s",
+                                            name_tag->as_string()->c_str());
+                                    } else {
+                                        ImGui::Text("  Attack:    objective %u",
+                                                    u.target);
+                                    }
+                                }
+                            }
+                            break;
+                        }
+                    }
+                }
                 ImGui::Text("Name ID:   %d", static_cast<int>(impl_->pb_int(pb, "name_id")));
                 ImGui::Text("Camp ID:   %d", static_cast<int>(impl_->pb_int(pb, "camp_id")));
                 ImGui::Text("Reinforc.: %d", static_cast<int>(impl_->pb_int(pb, "reinforcement")));

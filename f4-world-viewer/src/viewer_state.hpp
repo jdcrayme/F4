@@ -97,6 +97,7 @@
 #include <functional>
 #include <future>
 #include <atomic>
+#include <deque>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -477,6 +478,27 @@ struct ViewerApp::Impl {
     /// menu's Reset flow requests a stop and immediately starts a new
     /// build — if the create won the race, the fresh session survives).
     const f4::simulation::EngineSessionHost* session_stop_target = nullptr;
+
+    // --- Ground-war display state (the supply/FLOT/event layers) --------
+    //
+    // The live ground picture reads the engine's GroundWar through the
+    // render-plane seam (engine().ground_war()) — draw-path needs only;
+    // the numbers in the war-status block ride the same seam (window
+    // counters, refreshed per frame like the canvas).
+    //
+    /// The campaign event stream (armed at adopt, drained under the
+    /// frame session lock once per frame). Capped ring — the feed shows
+    /// the newest tail; capture markers key off it.
+    std::deque<f4::campaign::api::CampaignEvent> session_events;
+    /// Recently captured objectives: (objective contract id, wall-clock
+    /// GetTime() stamp) — the canvas draws a decaying ring for a few
+    /// seconds after the capture event lands.
+    std::vector<std::pair<std::uint32_t, double>> capture_markers;
+    /// Battalions currently cut off from resupply (no own-held objective
+    /// within the line-of-supply radius), recomputed once per advance
+    /// while the supply overlay is on. Grid positions for the markers.
+    std::vector<std::pair<float, float>> cutoff_battalions;
+    std::uint64_t cutoff_stamp = 0;
     /// V-SMOKE (--play): the adopted session starts RUNNING instead of
     /// paused. Set by the CLI (--play) BEFORE request_campaign_session;
     /// adopt_session_start honors it for both the runner and the
@@ -691,9 +713,10 @@ struct ViewerApp::Impl {
     // individually to inspect specific layers. Per-entity data that only
     // makes sense for one entity (a unit's destination, its waypoints)
     // has no toggle — it draws for the SELECTED unit instead.
-    bool show_radar_arcs = false;             // 8-wedge detection coverage per radar objective
+    bool show_radar_arcs = false;             // 8-wedge detection coverage per radar objective (static wire data — no engine updates it)
+    bool show_flot = true;                    // the ground war's front line (live ground-war sessions only)
+    bool show_supply = false;                 // objective supply stocks + battalion cut-off markers
     bool show_squadron_links = false;         // squadron → home airbase thin line
-    bool show_hierarchy_lines = false;        // battalion ↔ brigade parent lines
     // --- B.3 campaign-QC layers ------------------------------------------
     // The tasking picture: flights colored by owner already render via the
     // base unit pass; these overlays add the RELATIONSHIPS the campaign

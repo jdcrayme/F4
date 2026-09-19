@@ -456,6 +456,38 @@ void ViewerApp::draw_canvas() {
         }
     }
 
+    // --- Front line (FLOT) — the ground war's live contact line ---------
+    //
+    // The engine rebuilds its front columns every orders cycle
+    // (GroundWar::front_line()); contested columns carry the midpoint
+    // row between the two sides' forward holdings. Sparse columns (a
+    // gap in the ownership band) break the polyline. Orange-red reads
+    // as "the line where the armies touch" against both sides' colors.
+    if (impl_->show_flot && impl_->session) {
+        const auto* gw = impl_->session->engine().ground_war();
+        if (gw != nullptr) {
+            const Color flot{255, 130, 40, 235};
+            bool have_prev = false;
+            int prev_col = 0;
+            Vector2 prev{};
+            for (const auto& col : gw->front_line()) {
+                if (!col.contested) {
+                    have_prev = false;  // gap — start a new polyline
+                    continue;
+                }
+                const Vector2 p = impl_->world_to_screen(
+                    static_cast<float>(col.x) + 0.5f,
+                    static_cast<float>(col.y));
+                if (have_prev && col.x - prev_col <= 2.0f) {
+                    DrawLineEx(prev, p, 2.5f, flot);
+                }
+                prev = p;
+                prev_col = col.x;
+                have_prev = true;
+            }
+        }
+    }
+
     // --- Objectives ---
     if (impl_->show_objectives && impl_->world_loaded) {
         const float base_size = std::clamp(6.0f + impl_->cam_zoom * 2.0f, 12.0f, 40.0f);
@@ -574,6 +606,80 @@ void ViewerApp::draw_canvas() {
                 DrawCircleLines(static_cast<int>(p.x), static_cast<int>(p.y),
                                 base_size * 0.6f + 4.0f,
                                 Color{255, 255, 0, 255});
+            }
+        }
+    }
+
+    // --- Supply state overlay — the logistics picture --------------------
+    //
+    //   * Objective stock bar: the DOM-2 pool (supply 0..100) the
+    //     resupply cadence feeds and battalions draw from. Green / amber
+    //     / red at the 60 / 25 thresholds — below 25 a battalion's depot
+    //     stops feeding it and its movement halves.
+    //   * Battalion cut-off marker (live sessions): a hollow red ring
+    //     around a battalion beyond the line-of-supply radius from
+    //     every own-held objective — encircled.
+    // Objective data: the save's SupplyStateComponent when no session
+    // runs; the engine's live mirror (ground_war()->objectives()) when
+    // one does — resupply fires and captures keep it current.
+    if (impl_->show_supply && impl_->world_loaded) {
+        constexpr float kBarW = 12.0f;
+        constexpr float kBarH = 3.0f;
+        auto bar_color = [](unsigned v) {
+            return (v >= 60) ? Color{90, 200, 90, 230}
+                 : (v >= 25) ? Color{230, 200, 60, 230}
+                             : Color{220, 70, 60, 230};
+        };
+        auto draw_bar = [&](const Vector2 p, unsigned supply) {
+            // Stock cam: saves carry 0xEB garbage where the original
+            // game never wrote the field (the engine's seed clamps the
+            // same way) — display-clamped so the bar never overflows.
+            if (supply > 100) supply = 100;
+            const float x0 = p.x - kBarW * 0.5f;
+            const float y0 = p.y + 10.0f;
+            DrawRectangleRec(Rectangle{x0, y0, kBarW, kBarH},
+                             Color{0, 0, 0, 160});
+            DrawRectangleRec(
+                Rectangle{x0, y0, kBarW * (float(supply) / 100.0f), kBarH},
+                bar_color(supply));
+        };
+        if (impl_->session) {
+            const auto* gw = impl_->session->engine().ground_war();
+            if (gw != nullptr) {
+                for (const auto& o : gw->objectives()) {
+                    const Vector2 p =
+                        impl_->world_to_screen(float(o.x), float(o.y));
+                    if (p.x < -16.0f || p.x > float(impl_->window_w) + 16.0f ||
+                        p.y < -16.0f || p.y > float(impl_->window_h) + 16.0f) {
+                        continue;
+                    }
+                    draw_bar(p, o.supply);
+                }
+                for (const auto& [gx, gy] : impl_->cutoff_battalions) {
+                    const Vector2 p = impl_->world_to_screen(gx, gy);
+                    if (p.x < -16.0f || p.x > float(impl_->window_w) + 16.0f ||
+                        p.y < -16.0f || p.y > float(impl_->window_h) + 16.0f) {
+                        continue;
+                    }
+                    DrawCircleLines(static_cast<int>(p.x),
+                                    static_cast<int>(p.y), 9,
+                                    Color{255, 80, 60, 235});
+                }
+            }
+        } else {
+            for (const auto& eid : impl_->objectives()) {
+                auto h = impl_->handle(eid);
+                auto* ss = h.get<f4::entities::SupplyStateComponent>();
+                auto* tr = h.get<f4::entities::TransformComponent>();
+                if (!ss || !tr) continue;
+                const Vector2 p =
+                    impl_->world_to_screen(impl_->grid_x(tr),
+                                           impl_->grid_y(tr));
+                if (p.x < -16.0f || p.x > float(impl_->window_w) + 16.0f ||
+                    p.y < -16.0f || p.y > float(impl_->window_h) + 16.0f) {
+                    continue;
+                }
+                draw_bar(p, ss->supply);
             }
         }
     }
@@ -719,36 +825,10 @@ void ViewerApp::draw_canvas() {
                 }
             }
 
-            // Battalion → Brigade hierarchy lines
-            if (impl_->show_hierarchy_lines &&
-                uc->unit_class == f4::entities::UnitClass::Battalion) {
-                auto* hier = h.get<f4::entities::HierarchyComponent>();
-                if (hier && hier->parent.valid()) {
-                    auto ph = impl_->handle(hier->parent);
-                    auto* p_tr = ph.get<f4::entities::TransformComponent>();
-                    if (p_tr) {
-                        const Vector2 pp = impl_->world_to_screen(impl_->grid_x(p_tr), impl_->grid_y(p_tr));
-                        DrawLineEx(p, pp, 1.0f, Color{c.r, c.g, c.b, 140});
-                    }
-                }
-            }
-
-            // Brigade → child Battalion elements
-            if (impl_->show_hierarchy_lines &&
-                uc->unit_class == f4::entities::UnitClass::Brigade) {
-                auto* hier = h.get<f4::entities::HierarchyComponent>();
-                if (hier && !hier->children.empty()) {
-                    for (const auto& child_eid : hier->children) {
-                        if (!child_eid.valid()) continue;
-                        auto ch = impl_->handle(child_eid);
-                        auto* c_tr = ch.get<f4::entities::TransformComponent>();
-                        if (c_tr) {
-                            const Vector2 cp = impl_->world_to_screen(impl_->grid_x(c_tr), impl_->grid_y(c_tr));
-                            DrawLineEx(p, cp, 1.0f, Color{c.r, c.g, c.b, 140});
-                        }
-                    }
-                }
-            }
+            // (The old BN↔BRG hierarchy lines are gone: the org
+            // structure affects no gameplay yet — no C2 model — so the
+            // map drew relationships that didn't exist. The tree lives
+            // in the Campaign Info window's Structure tab.)
 
             // Selection outline
             if (unit_selected) {
@@ -1306,6 +1386,41 @@ void ViewerApp::draw_canvas() {
         const int ly = static_cast<int>(y) - fs - 5;
         DrawText(lbl, lx + 1, ly + 1, fs, Color{0, 0, 0, 200});
         DrawText(lbl, lx, ly, fs, col);
+    }
+
+    // --- Capture markers — decaying rings on freshly flipped objectives
+    //
+    // Events are class-4 displays: they never persist on the map. Each
+    // ObjectiveCaptured event draws an expanding, fading ring for four
+    // seconds of wall time, then the marker is purged.
+    {
+        const double now = GetTime();
+        constexpr double kMarkerLifeSec = 4.0;
+        for (auto it = impl_->capture_markers.begin();
+             it != impl_->capture_markers.end();) {
+            const double age = now - it->second;
+            if (age >= kMarkerLifeSec) {
+                it = impl_->capture_markers.erase(it);
+                continue;
+            }
+            const std::uint32_t vu = it->first;
+            ++it;
+            if (!impl_->session) continue;
+            const auto& id_map = impl_->objective_id_map();
+            const auto found = id_map.find(vu);
+            if (found == id_map.end() || !found->second.valid()) continue;
+            auto h = impl_->session_handle(found->second);
+            auto* tr = h.get<f4::entities::TransformComponent>();
+            if (!tr) continue;
+            const Vector2 p =
+                impl_->world_to_screen(Impl::grid_x(tr), Impl::grid_y(tr));
+            const float t = float(age / kMarkerLifeSec);
+            const float radius = 10.0f + 26.0f * t;
+            const unsigned char alpha =
+                static_cast<unsigned char>(235.0f * (1.0f - t));
+            DrawCircleLines(static_cast<int>(p.x), static_cast<int>(p.y),
+                            radius, Color{255, 230, 90, alpha});
+        }
     }
 
     // --- Minimap ---
