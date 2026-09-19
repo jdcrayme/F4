@@ -97,6 +97,7 @@ void ViewerApp::draw_mission_qc_view() {
             if (!load_replay(path, &err)) {
                 impl_->last_error = err;
                 impl_->status_msg = "Replay load failed: " + err;
+                show_message_box("Replay Load Failed", err, "error");
             }
         }
     }
@@ -135,6 +136,7 @@ void ViewerApp::draw_mission_qc_view() {
                     if (!load_replay(e.trace_path, &err)) {
                         impl_->last_error = err;
                         impl_->status_msg = "Replay load failed: " + err;
+                        show_message_box("Replay Load Failed", err, "error");
                     } else {
                         impl_->status_msg =
                             "Mission QC: opened " + e.name + " replay";

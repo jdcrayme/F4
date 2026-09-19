@@ -605,6 +605,10 @@ void ViewerApp::set_window_size(int width, int height) noexcept {
     impl_->window_h = height;
 }
 
+void ViewerApp::preview_class_table_entity(int entity_type) {
+    impl_->class_table_browser.preview_entity(entity_type);
+}
+
 bool ViewerApp::select_by_name(const std::string& substring) {
     auto entities =
         impl_->eworld.with_component<f4::entities::ObjectiveTypeComponent>();

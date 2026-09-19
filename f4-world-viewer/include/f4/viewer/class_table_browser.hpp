@@ -31,6 +31,7 @@
 #include <f4/anim/channels.hpp>   // AnimValues — the doctor's scratch channel state
 #include <f4/entities/types.hpp>  // FeatureEntryState — one feature placement
 #include <f4/world_types/class_table.hpp>
+#include <f4/renderer/ground_layout_models.hpp>  // AirfieldGeometry3D (pure data — no Raylib types)
 
 #include <cstdint>
 #include <filesystem>
@@ -51,14 +52,18 @@ class EntityWorld;       // fwd — the loaded world (feature-collection source)
 
 namespace f4::viewer {
 
-/// One model placement in a formation/ramp preview — viewer-local frame:
-/// X/Z ground plane in feet (x = formation-local east, z = formation-local
-/// north), yaw radians about +Y (0 = model forward).
+/// One model placement in a formation/ramp/feature-layout preview —
+/// renderer ENU frame (enu_to_raylib): X/Z ground plane in feet
+/// (x = east / along-runway / offset_x, z = -north / -offset_y), yaw
+/// radians about +Y applied Raylib row-vector style (rotate FIRST, then
+/// translate — same composition as draw_vis_type_mesh), 0 = model
+/// forward.
 struct PlacedModel {
     int16_t vis_type = 0;
     float x = 0.0f;
     float z = 0.0f;
     float yaw = 0.0f;
+    uint8_t color_slot = 0;     // placeholder-box palette index (per vehicle group)
 };
 
 // Forward declaration — the full definition lives in class_table_browser.cpp
@@ -86,6 +91,17 @@ public:
     void open() { open_ = true; }
     void close() { open_ = false; cleanup_preview(); }
     [[nodiscard]] bool is_open() const noexcept { return open_; }
+
+    /// Open the panel AND select a class row — the programmatic
+    /// equivalent of clicking a table row (headless screenshot proofs:
+    /// `--ct-preview <entity_type>`). Also resets the vis-slot /
+    /// feature-preview state like a real click does.
+    void preview_entity(int entity_type) {
+        open_ = true;
+        selected_entity_type_ = entity_type;
+        selected_vis_slot_ = 0;
+        preview_feature_index_ = -1;
+    }
 
     /// Provide the shared RenderResources (glTF model cache + PNG texture
     /// cache + lit shader + default material). May be nullptr — the 3D
@@ -130,6 +146,12 @@ private:
     struct ObjectiveClassFeatures {
         std::string class_name;    // OCD row name, e.g. "02_20 Airbase 2"
         std::vector<f4::entities::FeatureEntryState> features;
+        // The source instance's PHD point lists (runway/taxiway/parking
+        // polylines) — the airfield plates the Ground Layout 3D view
+        // synthesizes. Feature MODELS for runway pieces mostly have no
+        // glTF export (their visuals ARE these plates), so the layout
+        // preview draws both.
+        std::vector<f4::entities::GroundLayoutList> layouts;
     };
     const f4::entities::EntityWorld* entity_world_ = nullptr;
     int entity_world_generation_ = -1;
@@ -273,16 +295,25 @@ private:
     /// draw_objective_features for CLASS_UNIT rows).
     void draw_unit_layout(const f4::world_types::ClassTableEntry& entry);
 
-    /// Draw the 3D deaggregation preview: every placed model at its
-    /// formation/ramp-row position, orbitable like the single-model
-    /// preview.
+    /// Draw the 3D deaggregation/layout preview: every placed model at
+    /// its position, orbitable like the single-model preview. Models
+    /// with no glTF export draw as flat-colored placeholder boxes (most
+    /// vehicle/aircraft vis types have no export yet — the koreaobj set
+    /// is features only), so the layout still reads. `airfield` (the
+    /// synthesized runway/taxiway plates, objective-local) draws under
+    /// the placements when provided.
     void draw_group_preview(const std::vector<PlacedModel>& placed,
-                            const UnitClassLayout& layout);
+                            const char* note,
+                            const f4::renderer::AirfieldGeometry3D* airfield =
+                                nullptr);
 
     /// Fit the orbit camera to a group preview: placements determine the
-    /// X/Z extent, the first model's bbox its vertical center and scale.
+    /// X/Z extent (expanded by the airfield bbox when given); first_model
+    /// (may be null — no export) gives the vertical center and scale.
     void fit_camera_to_group(const std::vector<PlacedModel>& placed,
-                             const f4::renderer::RuntimeModel& first_model);
+                             const f4::renderer::RuntimeModel* first_model,
+                             const f4::renderer::AirfieldGeometry3D* airfield =
+                                 nullptr);
 
     /// Detail-panel section listing an objective class's feature
     /// placements. Each row's Preview button loads the feature's model

@@ -107,6 +107,11 @@ public:
     /// and for headless smoke tests. Throws on I/O error.
     void open_hex_inspector_with_file(const std::filesystem::path& path);
 
+    /// Open the Class Table Browser pre-selected on a class row — the
+    /// programmatic equivalent of clicking a table row (used by the
+    /// --ct-preview <entity_type> headless screenshot flag).
+    void preview_class_table_entity(int entity_type);
+
     /// Open the Install Diagnostics modal (Tools > Install Diagnostics).
     /// Builds the full diagnostic report from the current Installation
     /// and shows it in a scrollable, copyable text panel.

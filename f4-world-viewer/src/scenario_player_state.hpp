@@ -37,6 +37,7 @@
 #include <f4/simulation/scenario.hpp>
 #include <f4/simulation/combat_transcript.hpp>
 #include <f4/simulation/visual_model_component.hpp>
+#include "radio_log.hpp"
 #include <f4/renderer/orbit_camera.hpp>
 #include <f4/renderer/terrain_mesh.hpp>
 #include <f4/renderer/world_view.hpp>

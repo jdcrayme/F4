@@ -21,11 +21,13 @@
 
 #include <f4/world_types/class_table.hpp>        // unit_subtype_name, DOMAIN_*, CLASS_*
 #include <f4/simulation/formation_layout.hpp>    // the deaggregation layouts (shared with the sim)
+#include <f4/math/constants.hpp>                 // DEG_TO_RAD (feature facing)
 #include <f4/assets/asset_root.hpp>              // Data/ discovery
 #include <f4/viewer/pipeline_io.hpp>             // discover_data_dir, temp_dir
 
 #include <f4/renderer/feature_mesh.hpp>          // FeatureMeshResources (animated preview)
-#include <f4/renderer/scene_draw.hpp>            // draw_animated_model
+#include <f4/renderer/scene_draw.hpp>            // draw_animated_model, draw_airfield_geometry
+#include <f4/renderer/coord_transform.hpp>       // enu_to_raylib — the renderer's ENU frame
 
 #include <imgui.h>
 #include <rlImGui.h>
@@ -822,8 +824,9 @@ void ClassTableBrowser::draw_model_preview(int16_t vis_type_idx) {
 
 void ClassTableBrowser::fit_camera_to_group(
     const std::vector<PlacedModel>& placed,
-    const f4::renderer::RuntimeModel& first_model) {
-    if (placed.empty()) return;
+    const f4::renderer::RuntimeModel* first_model,
+    const f4::renderer::AirfieldGeometry3D* airfield) {
+    if (placed.empty() && !(airfield && !airfield->empty)) return;
 
     float min_x = 0, min_z = 0, max_x = 0, max_z = 0;
     bool any = false;
@@ -836,6 +839,21 @@ void ClassTableBrowser::fit_camera_to_group(
             min_z = std::min(min_z, pm.z); max_z = std::max(max_z, pm.z);
         }
     }
+    // The airfield plates (objective-local ENU: bbox y = north = -z here)
+    // can exceed the feature placements' extent (runway approach lights
+    // sit thousands of feet out) — the camera must frame them too.
+    if (airfield && !airfield->empty) {
+        if (!any) {
+            min_x = airfield->min_x; max_x = airfield->max_x;
+            min_z = -airfield->max_y; max_z = -airfield->min_y;
+            any = true;
+        } else {
+            min_x = std::min(min_x, airfield->min_x);
+            max_x = std::max(max_x, airfield->max_x);
+            min_z = std::min(min_z, -airfield->max_y);
+            max_z = std::max(max_z, -airfield->min_y);
+        }
+    }
     if (!any) return;
     cam_target_x_ = (min_x + max_x) * 0.5f;
     cam_target_z_ = (min_z + max_z) * 0.5f;
@@ -844,14 +862,20 @@ void ClassTableBrowser::fit_camera_to_group(
 
     // The first drawable model's bbox gives the vertical center (models
     // sit on the y=0 ground plane) and the scale term, so a row of small
-    // vehicles still reads at this distance.
+    // vehicles still reads at this distance. With no export at all
+    // (placeholder-only layout) use a nominal 20 ft vehicle footprint.
     float min_y = 0, max_y = 0;
-    scan_model_aabb(first_model, min_x, min_y, min_z, max_x, max_y, max_z);
-    cam_target_y_ = (min_y + max_y) * 0.5f;
-    const float model_radius = 0.5f * std::sqrt(
-        (max_x - min_x) * (max_x - min_x) +
-        (max_y - min_y) * (max_y - min_y) +
-        (max_z - min_z) * (max_z - min_z));
+    float model_radius = 20.0f;
+    if (first_model &&
+        scan_model_aabb(*first_model, min_x, min_y, min_z, max_x, max_y, max_z)) {
+        cam_target_y_ = (min_y + max_y) * 0.5f;
+        model_radius = 0.5f * std::sqrt(
+            (max_x - min_x) * (max_x - min_x) +
+            (max_y - min_y) * (max_y - min_y) +
+            (max_z - min_z) * (max_z - min_z));
+    } else {
+        cam_target_y_ = 0.0f;
+    }
 
     cam_distance_ = (spread + model_radius) * 2.5f;
     if (cam_distance_ < 50.0f) cam_distance_ = 50.0f;
@@ -864,7 +888,8 @@ void ClassTableBrowser::fit_camera_to_group(
 
 void ClassTableBrowser::draw_group_preview(
     const std::vector<PlacedModel>& placed,
-    const UnitClassLayout& layout) {
+    const char* note,
+    const f4::renderer::AirfieldGeometry3D* airfield) {
     last_preview_drew_meshes_ = false;
     last_preview_status_.clear();
 
@@ -873,7 +898,7 @@ void ClassTableBrowser::draw_group_preview(
         last_preview_status_ = "no render_resources";
         return;
     }
-    if (placed.empty()) {
+    if (placed.empty() && !(airfield && !airfield->empty)) {
         ImGui::TextDisabled("No drawable models in the layout.");
         last_preview_status_ = "no models";
         return;
@@ -881,6 +906,9 @@ void ClassTableBrowser::draw_group_preview(
 
     // Build (or reuse) every unique model the layout needs through the
     // shared cache; remember the first one with geometry for the fit.
+    // Most placements may have no glTF export (vehicle/aircraft vis
+    // types — the koreaobj set is features only); those draw as
+    // placeholder boxes below, so a missing model is NOT a bail-out.
     const f4::renderer::RuntimeModel* first_model = nullptr;
     for (const auto& pm : placed) {
         build_preview_meshes(pm.vis_type);
@@ -891,16 +919,10 @@ void ClassTableBrowser::draw_group_preview(
             }
         }
     }
-    if (!first_model) {
-        ImGui::TextDisabled("Model[%d] (and friends) have no glTF export in "
-                            "Data/Models/koreaobj", placed.front().vis_type);
-        last_preview_status_ = "no geometry";
-        return;
-    }
 
     // Refit the camera when the user picks a different class row.
     if (last_layout_entity_type_ != selected_entity_type_) {
-        fit_camera_to_group(placed, *first_model);
+        fit_camera_to_group(placed, first_model, airfield);
         last_layout_entity_type_ = selected_entity_type_;
         doctor_anim_.set_parked_defaults();
     }
@@ -977,7 +999,63 @@ void ClassTableBrowser::draw_group_preview(
         for (auto idx : alpha_order)  draw_one(idx);
     };
 
+    // Placeholder box for a placement whose vis type has no glTF export.
+    // Immediate-mode shapes use raylib's default (unlit) shader — flat
+    // colors that read as clearly synthetic next to real meshes.
+    // Oriented via the instance matrix: raylib matrices are ROW-VECTOR —
+    // MatrixMultiply(A, B) applies A first (scene_draw.cpp:98).
+    constexpr Color kPlaceholderPalette[] = {
+        { 120, 180, 255, 255 },   // blue    — group 0 / default
+        { 255, 200, 120, 255 },   // orange  — group 1
+        { 140, 230, 140, 255 },   // green   — group 2
+        { 230, 140, 200, 255 },   // pink    — group 3
+        { 200, 200, 120, 255 },   // olive   — group 4
+        { 160, 160, 230, 255 },   // violet  — group 5+
+    };
+    auto draw_placeholder = [&](const PlacedModel& pm) {
+        const Matrix world = MatrixMultiply(
+            MatrixRotateY(pm.yaw), MatrixTranslate(pm.x, 0.0f, pm.z));
+        const Color color = kPlaceholderPalette[
+            pm.color_slot % (sizeof(kPlaceholderPalette) /
+                             sizeof(kPlaceholderPalette[0]))];
+        rlPushMatrix();
+        rlMultMatrixf(MatrixToFloat(world));
+        // ~vehicle footprint in feet; slots are 30-80 ft apart so this
+        // reads as a marker, not a solid.
+        DrawCube({ 0.0f, 4.0f, 0.0f }, 24.0f, 8.0f, 10.0f,
+                 Color{ color.r, color.g, color.b, 140 });
+        DrawCubeWires({ 0.0f, 4.0f, 0.0f }, 24.0f, 8.0f, 10.0f, color);
+        rlPopMatrix();
+    };
+
+    // Ground grid for scale: sized to ~1.5-2x the layout extent in nice
+    // 1/2/5 steps, centered on the layout (DrawGrid draws at the origin,
+    // so translate to the placement centroid — formations extend behind
+    // the wedge and would otherwise sit in a corner of the grid).
+    float min_x = 0, min_z = 0, max_x = 0, max_z = 0;
+    for (std::size_t i = 0; i < placed.size(); ++i) {
+        const auto& pm = placed[i];
+        if (i == 0) { min_x = max_x = pm.x; min_z = max_z = pm.z; continue; }
+        min_x = std::min(min_x, pm.x); max_x = std::max(max_x, pm.x);
+        min_z = std::min(min_z, pm.z); max_z = std::max(max_z, pm.z);
+    }
+    const float centroid_x = (min_x + max_x) * 0.5f;
+    const float centroid_z = (min_z + max_z) * 0.5f;
+    const float spread = std::max(max_x - min_x, max_z - min_z);
+    float grid_step = 10.0f;
+    {
+        // smallest 1/2/5 step covering spread/24
+        const float raw = spread / 24.0f;
+        float mag = 1.0f;
+        while (mag * 10.0f < raw) mag *= 10.0f;
+        for (float m : {1.0f, 2.0f, 5.0f, 10.0f}) {
+            if (m * mag >= raw) { grid_step = m * mag; break; }
+        }
+        grid_step = std::max(grid_step, 10.0f);
+    }
+
     int drawn_instances = 0;
+    int drawn_placeholders = 0;
     BeginTextureMode(rt);
         ClearBackground({ 30, 30, 38, 255 });
         BeginMode3D(camera);
@@ -989,35 +1067,65 @@ void ClassTableBrowser::draw_group_preview(
                     { 80, 80, 90, 255 });
             }
 
+            // Grid centered on the layout centroid.
+            {
+                rlPushMatrix();
+                rlTranslatef(centroid_x, 0.0f, centroid_z);
+                DrawGrid(24, grid_step);
+                rlPopMatrix();
+            }
+
+            // Synthesized airfield plates (runway/taxiway/threshold
+            // geometry) — objective-local frame, same as the feature
+            // placements. This is what the Ground Layout 3D view draws
+            // for the runway pieces, whose feature models mostly have
+            // no glTF export.
+            if (airfield && !airfield->empty) {
+                f4::renderer::AirfieldDrawToggles at;
+                at.runway = true;
+                at.taxiways = true;
+                at.markers = false;
+                at.parking = false;
+                at.helipads = false;
+                at.features = false;   // real placements draw above
+                draw_airfield_geometry(*airfield, at, 0.0f, 0.0f, 0.0f);
+            }
+
             BeginBlendMode(BLEND_ALPHA);
             rlDisableBackfaceCulling();
             for (const auto& pm : placed) {
+                // Raylib matrices are ROW-VECTOR: rotate FIRST, then
+                // translate (MatrixMultiply(A, B) applies A first —
+                // same composition as draw_vis_type_mesh).
+                const Matrix world = MatrixMultiply(
+                    MatrixRotateY(pm.yaw),
+                    MatrixTranslate(pm.x, 0.0f, pm.z));
                 const auto* m = render_resources_->model_cache.lookup(
                     pm.vis_type);
-                if (!m || (m->lod0_meshes.empty() && m->lod0_parts.empty()))
-                    continue;
-                // Rotate then translate: world = T · R · v.
-                const Matrix world = MatrixMultiply(
-                    MatrixTranslate(pm.x, 0.0f, pm.z),
-                    MatrixRotateY(pm.yaw));
-                if (m->animated && !m->lod0_parts.empty()) {
-                    f4::renderer::FeatureMeshResources base;
-                    base.model_cache      = &render_resources_->model_cache;
-                    base.texture_cache    = &render_resources_->texture_cache;
-                    base.lit_shader       = &lit_shader;
-                    base.default_material = default_mat;
-                    const auto st = f4::renderer::draw_animated_model(
-                        base, *m, world, &doctor_anim_, lighting_active);
-                    if (st.meshes_drawn > 0) ++drawn_instances;
+                if (m && (!m->lod0_meshes.empty() || !m->lod0_parts.empty())) {
+                    if (m->animated && !m->lod0_parts.empty()) {
+                        f4::renderer::FeatureMeshResources base;
+                        base.model_cache      = &render_resources_->model_cache;
+                        base.texture_cache    = &render_resources_->texture_cache;
+                        base.lit_shader       = &lit_shader;
+                        base.default_material = default_mat;
+                        const auto st = f4::renderer::draw_animated_model(
+                            base, *m, world, &doctor_anim_, lighting_active);
+                        if (st.meshes_drawn > 0) ++drawn_instances;
+                    } else {
+                        draw_static_instance(*m, world);
+                        ++drawn_instances;
+                    }
                 } else {
-                    draw_static_instance(*m, world);
-                    ++drawn_instances;
+                    draw_placeholder(pm);
+                    ++drawn_placeholders;
                 }
             }
             rlEnableBackfaceCulling();
             EndBlendMode();
 
-            last_preview_drew_meshes_ = (drawn_instances > 0);
+            last_preview_drew_meshes_ =
+                (drawn_instances + drawn_placeholders > 0);
         EndMode3D();
     EndTextureMode();
 
@@ -1029,8 +1137,12 @@ void ClassTableBrowser::draw_group_preview(
                                             PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 };
     rlImGuiImageSize(&preview_cache_->preview_display_tex, preview_w, preview_h);
 
-    ImGui::TextDisabled("%d models | %s", static_cast<int>(placed.size()),
-                        layout.note.c_str());
+    ImGui::TextDisabled("%d placed | %d glTF meshes, %d placeholder boxes",
+                        static_cast<int>(placed.size()),
+                        drawn_instances, drawn_placeholders);
+    if (note && note[0] != '\0') {
+        ImGui::TextDisabled("%s", note);
+    }
 
     // Orbit/zoom, same controls as the single-model preview.
     if (ImGui::IsItemActive()) {
@@ -1048,7 +1160,7 @@ void ClassTableBrowser::draw_group_preview(
     }
     ImGui::SameLine();
     if (ImGui::SmallButton("Fit")) {
-        fit_camera_to_group(placed, *first_model);
+        fit_camera_to_group(placed, first_model, airfield);
     }
 }
 
@@ -1211,17 +1323,67 @@ void ClassTableBrowser::draw_detail_panel() {
         if (ul_it != unit_layouts_.end() && !ul_it->second.models.empty()) {
             unit_layout_shown = true;
             ImGui::BeginGroup();
-            ImGui::Text("%s — %s (glTF)",
+            ImGui::Text("%s: %s (glTF)",
                         ul_it->second.is_squadron ? "Ramp row" : "Formation",
                         ul_it->second.class_name.empty()
                             ? "(unnamed instance)"
                             : ul_it->second.class_name.c_str());
-            draw_group_preview(ul_it->second.models, ul_it->second);
+            draw_group_preview(ul_it->second.models,
+                               ul_it->second.note.c_str());
             ImGui::EndGroup();
             ImGui::SameLine();
         }
     }
-    if (!unit_layout_shown && previewed_feature == nullptr && active_vis > 0) {
+
+    // Objective rows: preview the class's whole feature layout — the
+    // placements the ground-layout view draws per instance, in one
+    // window. Features are the one model set WITH glTF exports
+    // (Data/Models/koreaobj), so this previews real meshes.
+    bool objective_layout_shown = false;
+    if (entry->cls == f4::world_types::CLASS_OBJECTIVE &&
+        previewed_feature == nullptr && entity_world_ != nullptr) {
+        ensure_objective_features();
+        const auto it = objective_features_.find(
+            static_cast<uint16_t>(selected_entity_type_));
+        if (it != objective_features_.end() && !it->second.features.empty()) {
+            std::vector<PlacedModel> placed;
+            for (const auto& f : it->second.features) {
+                // Same placeholder rule as ground_layout_3d.cpp: skip
+                // empty (index 0, no offset) placements.
+                if (f.index == 0 && f.offset_x == 0.0f && f.offset_y == 0.0f) {
+                    continue;
+                }
+                const int16_t vis = class_table_.vis_type_for(f.index, 0);
+                if (vis <= 0) continue;
+                // Renderer ENU frame: x = east (offset_x), z = -north
+                // (-offset_y); yaw = -facing like draw_vis_type_mesh.
+                placed.push_back(
+                    { vis, f.offset_x, -f.offset_y,
+                      -static_cast<float>(f.facing) *
+                          static_cast<float>(f4::math::DEG_TO_RAD),
+                      0 });
+            }
+            // Runway/taxiway plates for the classes whose "features" are
+            // the airfield itself (their models have no glTF export).
+            f4::renderer::AirfieldGeometry3D airfield =
+                f4::renderer::build_airfield_geometry_3d(
+                    it->second.layouts, nullptr);
+            if (!placed.empty() || !airfield.empty) {
+                objective_layout_shown = true;
+                ImGui::BeginGroup();
+                ImGui::Text("Feature layout: %d placements (glTF)",
+                            static_cast<int>(placed.size()));
+                draw_group_preview(placed,
+                    "feature placements from the class's OCD row "
+                    "(ground frame: +x east, -z north, facing applied)",
+                    &airfield);
+                ImGui::EndGroup();
+                ImGui::SameLine();
+            }
+        }
+    }
+    if (!unit_layout_shown && !objective_layout_shown &&
+        previewed_feature == nullptr && active_vis > 0) {
         ImGui::BeginGroup();
         ImGui::Text("Model[%d] (glTF)", active_vis);
         // Always call draw_model_preview — it handles the "no render
@@ -1350,6 +1512,12 @@ void ClassTableBrowser::ensure_objective_features() {
         if (slot.features.empty()) {
             slot.class_name = ot->class_name;
             slot.features = fs->features;
+        }
+        // The PHD point lists (runway/taxiway polylines) come along the
+        // same way — filled from whichever instance carries them.
+        if (slot.layouts.empty()) {
+            const auto* gl = h.get<f4::entities::GroundLayoutComponent>();
+            if (gl && !gl->layouts.empty()) slot.layouts = gl->layouts;
         }
     }
 
@@ -1519,12 +1687,13 @@ void ClassTableBrowser::ensure_unit_layouts() {
             for (int i = 0; i < g.live_count; ++i, ++slot_index) {
                 const auto local =
                     f4::simulation::formation::formation_offset(slot_index);
-                // Preview frame: x = local east, z = local north, heading
-                // 0 (north-facing) so the class preview is stable; the
-                // sim applies the unit's real heading at spawn.
+                // Renderer ENU frame (enu_to_raylib): x = local east,
+                // z = -local north; heading 0 (north-facing) so the
+                // class preview is stable — the sim applies the unit's
+                // real heading at spawn.
                 layout.models.push_back(
                     { vis, static_cast<float>(local.dx),
-                      static_cast<float>(local.dy), 0.0f });
+                      static_cast<float>(-local.dy), 0.0f });
             }
         }
 
@@ -1551,12 +1720,12 @@ void ClassTableBrowser::ensure_unit_layouts() {
 
         if (layout.is_squadron) {
             layout.note =
-                "synthesized ramp row — 80 ft spacing (no PLT_PARK data; "
+                "synthesized ramp row, 80 ft spacing (no PLT_PARK data; "
                 "formation_layout.hpp)";
         } else {
             layout.note =
-                "synthetic formation — wedge ≤4, 4-wide 50-ft grid beyond "
-                "(FreeFalcon tables not ported)";
+                "synthetic formation: wedge to 4 vehicles, 4-wide 50-ft "
+                "grid beyond (FreeFalcon tables not ported)";
         }
 
         auto& slot = unit_layouts_[etype];
@@ -1584,7 +1753,7 @@ void ClassTableBrowser::draw_unit_layout(
     if (it == unit_layouts_.end() || it->second.groups.empty()) {
         ImGui::TextDisabled(
             "Unit layout: no instance of this class in the loaded world "
-            "— the layout needs a live unit's vehicle composition "
+            "- the layout needs a live unit's vehicle composition "
             "(UCD rows carry no vehicle list).");
         return;
     }
@@ -1598,7 +1767,7 @@ void ClassTableBrowser::draw_unit_layout(
                 ul.is_squadron ? "Squadron ramp row" : "Ground formation",
                 live_total,
                 ul.class_name.empty()
-                    ? "" : (" — " + ul.class_name).c_str());
+                    ? "" : (" - " + ul.class_name).c_str());
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip(
             "Placements from the sim's deaggregation paths "

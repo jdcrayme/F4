@@ -89,12 +89,14 @@ std::filesystem::path pick_open_file(const std::string& title,
                                       const std::string& filters,
                                       const std::filesystem::path& default_path) {
     auto fa = split_filters(filters);
-    const char* default_str = default_path.empty() ? nullptr
-                                                    : default_path.string().c_str();
+    // Own the string in a local — default_path.string() is a temporary,
+    // and .c_str() on it in the initializer would dangle by the call.
+    const std::string default_str =
+        default_path.empty() ? std::string{} : default_path.string();
     const char* desc = fa.description.empty() ? nullptr : fa.description.c_str();
     const char* result = tinyfd_openFileDialog(
         title.c_str(),
-        default_str,
+        default_str.empty() ? nullptr : default_str.c_str(),
         static_cast<int>(fa.patterns.size()) - 1,  // -1 for the trailing null
         fa.patterns.empty() ? nullptr : fa.patterns.data(),
         desc,
@@ -107,12 +109,12 @@ std::filesystem::path pick_save_file(const std::string& title,
                                       const std::string& filters,
                                       const std::filesystem::path& default_path) {
     auto fa = split_filters(filters);
-    const char* default_str = default_path.empty() ? nullptr
-                                                    : default_path.string().c_str();
+    const std::string default_str =
+        default_path.empty() ? std::string{} : default_path.string();
     const char* desc = fa.description.empty() ? nullptr : fa.description.c_str();
     const char* result = tinyfd_saveFileDialog(
         title.c_str(),
-        default_str,
+        default_str.empty() ? nullptr : default_str.c_str(),
         static_cast<int>(fa.patterns.size()) - 1,
         fa.patterns.empty() ? nullptr : fa.patterns.data(),
         desc
@@ -122,9 +124,10 @@ std::filesystem::path pick_save_file(const std::string& title,
 
 std::filesystem::path pick_folder(const std::string& title,
                                    const std::filesystem::path& default_path) {
-    const char* default_str = default_path.empty() ? nullptr
-                                                    : default_path.string().c_str();
-    const char* result = tinyfd_selectFolderDialog(title.c_str(), default_str);
+    const std::string default_str =
+        default_path.empty() ? std::string{} : default_path.string();
+    const char* result = tinyfd_selectFolderDialog(
+        title.c_str(), default_str.empty() ? nullptr : default_str.c_str());
     return result ? std::filesystem::path(result) : std::filesystem::path{};
 }
 

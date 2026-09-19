@@ -107,7 +107,14 @@ struct ObjectiveAdapter : IObjectiveSource {
     int16_t y(int i) const override { return ws_->objectives[i].y; }
     float z(int i) const override { return ws_->objectives[i].z; }
     int16_t type(int i) const override { return ws_->objectives[i].type; }
-    uint16_t entity_type(int i) const override { return ws_->objectives[i].entity_type; }
+    uint16_t entity_type(int i) const override {
+        // Older world-JSON exports carry the class row only in `type`
+        // (both fields mean "class table entity_type, 100+"); fall back
+        // so entity_type isn't silently 0 for JSON-loaded worlds.
+        const auto& o = ws_->objectives[i];
+        return o.entity_type != 0 ? o.entity_type
+                                  : static_cast<uint16_t>(o.type);
+    }
     const std::string& class_name(int i) const override { return ws_->objectives[i].class_name; }
     uint8_t owner(int i) const override { return ws_->objectives[i].owner; }
     uint8_t first_owner(int i) const override { return ws_->objectives[i].first_owner; }
@@ -179,7 +186,17 @@ struct UnitAdapter : IUnitCoreSource,
     f4::entities::UnitClass unit_class(int i) const override { return ws_->units[i].unit_class; }
     uint8_t domain(int i) const override { return ws_->units[i].domain; }
     uint8_t unit_subtype(int i) const override { return ws_->units[i].unit_subtype; }
-    uint16_t entity_type(int i) const override { return ws_->units[i].entity_type; }
+    uint16_t entity_type(int i) const override {
+        // Older world-JSON exports carry the class row only in `type`
+        // (UnitState::type is the class-table entity_type; the separate
+        // entity_type column stays 0 there). Fall back so the unit's
+        // class_table_index isn't silently 0 for JSON-loaded worlds —
+        // consumers key per-class views (class table browser layouts,
+        // inspector joins) off this value.
+        const auto& u = ws_->units[i];
+        return u.entity_type != 0 ? u.entity_type
+                                  : static_cast<uint16_t>(u.type);
+    }
     uint32_t roster(int i) const override { return ws_->units[i].roster; }
     const std::string& class_name(int i) const override { return ws_->units[i].class_name; }
     uint8_t owner(int i) const override { return ws_->units[i].owner; }

@@ -118,6 +118,10 @@ int main(int argc, char** argv) {
     std::string replay_path;
     bool have_replay = false;
     std::string select_name;              // --select <substring>
+    int ct_preview_entity = -1;           // --ct-preview <entity_type>:
+                                          // open the Class Table Browser
+                                          // pre-selected on a class row
+                                          // (headless screenshot proofs)
     bool auto_session = false;            // --session: start the campaign loop
     bool auto_play = false;               // --play: session starts RUNNING
                                           // (headless smoke: verify time
@@ -190,6 +194,8 @@ int main(int argc, char** argv) {
             have_replay = true;
         } else if (a == "--select" && i + 1 < argc) {
             select_name = argv[++i];
+        } else if (a == "--ct-preview" && i + 1 < argc) {
+            ct_preview_entity = std::atoi(argv[++i]);
         } else if (a == "--session") {
             // Start the live campaign session over the loaded world
             // right after the CLI loads settle (headless smoke tests:
@@ -282,6 +288,13 @@ int main(int argc, char** argv) {
             std::cerr << "warning: no objective name matches '" << select_name
                       << "'\n";
         }
+    }
+
+    // Apply --ct-preview: open the Class Table Browser pre-selected on a
+    // class row (combine with --screenshot for headless proof of the
+    // 3D preview panes).
+    if (ct_preview_entity >= 0) {
+        app.preview_class_table_entity(ct_preview_entity);
     }
 
     // Print install diagnostics to stderr + exit (no GUI). Useful for

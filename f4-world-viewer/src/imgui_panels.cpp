@@ -210,6 +210,15 @@ void ViewerApp::draw_imgui() {
                     if (!load_replay(path, &err)) {
                         impl_->last_error = err;
                         impl_->status_msg = "Replay load failed: " + err;
+                        // Native box — the in-panel Status section is easy
+                        // to miss, and a failed load otherwise looks like
+                        // the menu item did nothing at all.
+                        show_message_box("Replay Load Failed",
+                            err + "\n\nA replay opens a FlightRecorder trace "
+                            "(trace.json), not a scenario/world JSON. Record "
+                            "one via Mission QC (step 1) or: f4-world-viewer "
+                            "--scenario <template.json> --run --record "
+                            "<out.json>", "error");
                     }
                 }
             }
