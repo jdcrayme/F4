@@ -57,6 +57,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Data/ hygiene gate (sub-second): the committed manifest must match
+      # the committed Data/ tree byte-for-byte — the same invariant the
+      # Sha256.ReproducesCommittedManifestFingerprints test enforces, but
+      # fail-fast before the build instead of after it. Catches the
+      # "regenerated Data/ locally, forgot the manifest" push class.
+      - name: Data/ manifest hygiene check
+        run: python3 scripts/generate_manifest.py --check --output Data/
+
       - name: Install toolchain (g++-14)
         run: |
           sudo apt-get update
@@ -95,6 +103,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Data/ manifest hygiene check
+        run: python3 scripts/generate_manifest.py --check --output Data/
 
       - name: Install toolchain + X11/OpenGL dev packages
         run: |

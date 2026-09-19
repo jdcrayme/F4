@@ -4,7 +4,7 @@
   },
   "format": "f4-data-manifest",
   "version": 1,
-  "generated_at": "2026-09-19T12:18:07Z",
+  "generated_at": "2026-09-19T13:23:52Z",
   "source_install": "D:\\SteamLibrary\\steamapps\\common\\Falcon 4.0",
   "theater": "korea",
   "save": "save1",
@@ -14,6 +14,55 @@
     "Temp"
   ],
   "assets": [
+    {
+      "id": "aircraft:mig19",
+      "path": "Aircraft/Mig19.json",
+      "size_bytes": 29918,
+      "sha256": "3e9480376c6c665a5d995bb314b1e214f7c88118a9c2e49ebe2eeb5c12c40790",
+      "fnv1a_64": "170cdebdc8700de4"
+    },
+    {
+      "id": "aircraft:mig21",
+      "path": "Aircraft/Mig21.json",
+      "size_bytes": 29945,
+      "sha256": "ddb9dee10206c57264c80f245621d53cb486e4d3ab7e6cd960212d01719abf8a",
+      "fnv1a_64": "bd16420ee4e93792"
+    },
+    {
+      "id": "aircraft:mig25",
+      "path": "Aircraft/Mig25.json",
+      "size_bytes": 33781,
+      "sha256": "1e1fc3f5ce1e82c1161d91ca955a5d4d8769491b8d4a793e46294c3d12092826",
+      "fnv1a_64": "583a9078790eb7cf"
+    },
+    {
+      "id": "aircraft:mig27",
+      "path": "Aircraft/Mig27.json",
+      "size_bytes": 33782,
+      "sha256": "806d97c5d405eb92cd580196d58b43b7eaa983eb6fc6eb0fd34bbd3d3fceec79",
+      "fnv1a_64": "e5ffb38b54ccbfac"
+    },
+    {
+      "id": "aircraft:mig31",
+      "path": "Aircraft/Mig31.json",
+      "size_bytes": 33781,
+      "sha256": "e9f061efc96e4a5ffdea3a9215c21587205b6a03eaa4fab838f57dae159a0c7b",
+      "fnv1a_64": "0f5e4329b55be766"
+    },
+    {
+      "id": "aircraft:su25",
+      "path": "Aircraft/Su25.json",
+      "size_bytes": 26853,
+      "sha256": "6cd3e7f93eb023501573dab527245bf0c9d04a9c3295a7aaed01cb05326344c4",
+      "fnv1a_64": "131828461f574d3c"
+    },
+    {
+      "id": "aircraft:su27",
+      "path": "Aircraft/Su27.json",
+      "size_bytes": 33795,
+      "sha256": "d2004dbba52b6e09498eba631f0340e8b5c2b8d6bae14662aab35e4040bc48be",
+      "fnv1a_64": "78ae2f6e5e5ad230"
+    },
     {
       "id": "aircraft:a10",
       "path": "Aircraft/a10.json",
@@ -80,9 +129,9 @@
     {
       "id": "aircraft:f16",
       "path": "Aircraft/f16.json",
-      "size_bytes": 34405,
-      "sha256": "d4fb5e17daadaaf5235f82521eb65bb88c9afbb8bf89aad4b9bd15b06109909d",
-      "fnv1a_64": "c4d40c0e1782a6b4"
+      "size_bytes": 34434,
+      "sha256": "677485bca09901a8a3a5ac3d9584724147ca13676d0251f6a9e965414d688a4f",
+      "fnv1a_64": "b0dcc0415ffab5cf"
     },
     {
       "id": "aircraft:f18",
@@ -115,23 +164,9 @@
     {
       "id": "aircraft:kc10",
       "path": "Aircraft/kc10.json",
-      "size_bytes": 29748,
-      "sha256": "37fa6fc3a21213a07d62f153b4c52c3b787c618720d173a084219f2c2e7fd196",
-      "fnv1a_64": "3d0a0b6662a5cbc5"
-    },
-    {
-      "id": "aircraft:mig19",
-      "path": "Aircraft/Mig19.json",
-      "size_bytes": 29918,
-      "sha256": "3e9480376c6c665a5d995bb314b1e214f7c88118a9c2e49ebe2eeb5c12c40790",
-      "fnv1a_64": "170cdebdc8700de4"
-    },
-    {
-      "id": "aircraft:mig21",
-      "path": "Aircraft/Mig21.json",
-      "size_bytes": 29945,
-      "sha256": "ddb9dee10206c57264c80f245621d53cb486e4d3ab7e6cd960212d01719abf8a",
-      "fnv1a_64": "bd16420ee4e93792"
+      "size_bytes": 28062,
+      "sha256": "9bc20dc6722c2c35afe57590274824690a0502bef353b4d4df2efc5ce35c1417",
+      "fnv1a_64": "e8c8dcb01da2c295"
     },
     {
       "id": "aircraft:mig23",
@@ -141,46 +176,11 @@
       "fnv1a_64": "b6994c9f7067fd85"
     },
     {
-      "id": "aircraft:mig25",
-      "path": "Aircraft/Mig25.json",
-      "size_bytes": 33781,
-      "sha256": "1e1fc3f5ce1e82c1161d91ca955a5d4d8769491b8d4a793e46294c3d12092826",
-      "fnv1a_64": "583a9078790eb7cf"
-    },
-    {
-      "id": "aircraft:mig27",
-      "path": "Aircraft/Mig27.json",
-      "size_bytes": 33782,
-      "sha256": "806d97c5d405eb92cd580196d58b43b7eaa983eb6fc6eb0fd34bbd3d3fceec79",
-      "fnv1a_64": "e5ffb38b54ccbfac"
-    },
-    {
       "id": "aircraft:mig29",
       "path": "Aircraft/mig29.json",
       "size_bytes": 33771,
       "sha256": "10b0ae5e356b602414da005f5b9fd4822d771d507ed2c0dc7b7598aa81c6e2f2",
       "fnv1a_64": "032bf3d2d132c695"
-    },
-    {
-      "id": "aircraft:mig31",
-      "path": "Aircraft/Mig31.json",
-      "size_bytes": 33781,
-      "sha256": "e9f061efc96e4a5ffdea3a9215c21587205b6a03eaa4fab838f57dae159a0c7b",
-      "fnv1a_64": "0f5e4329b55be766"
-    },
-    {
-      "id": "aircraft:su25",
-      "path": "Aircraft/Su25.json",
-      "size_bytes": 26853,
-      "sha256": "6cd3e7f93eb023501573dab527245bf0c9d04a9c3295a7aaed01cb05326344c4",
-      "fnv1a_64": "131828461f574d3c"
-    },
-    {
-      "id": "aircraft:su27",
-      "path": "Aircraft/Su27.json",
-      "size_bytes": 33795,
-      "sha256": "d2004dbba52b6e09498eba631f0340e8b5c2b8d6bae14662aab35e4040bc48be",
-      "fnv1a_64": "78ae2f6e5e5ad230"
     },
     {
       "id": "aircraft:tu95",
@@ -255,23 +255,16 @@
     {
       "id": "theater:korea",
       "path": "Theater/korea/terrain.json",
-      "size_bytes": 85825,
-      "sha256": "0257fb03087d4ae124974cb188762df80186cc37c6436ec44b509c6357f0169f",
-      "fnv1a_64": "a2bcb9daf220874f"
-    },
-    {
-      "id": "",
-      "path": "Weapons/falcon4.wcd.json",
-      "size_bytes": 64709,
-      "sha256": "f0fb97f7d63af5e29541738afa7d1410f83cadbcc7438651199ef4edb26eafbc",
-      "fnv1a_64": "10b7696dfeaf9f58"
+      "size_bytes": 85818,
+      "sha256": "a5b3b76a3388102f358a7045e0b01c1530373cc22de20f7ad340df7bb3952a16",
+      "fnv1a_64": "ac97fa756505dbc4"
     },
     {
       "id": "campaign:save1",
       "path": "World/korea.world.json",
-      "size_bytes": 10295602,
-      "sha256": "ef79b7fa6eada5f90e8ffe3a0d6f714f7c6857bf085e5079c485c3b7927fa015",
-      "fnv1a_64": "799f60098e653ea9"
+      "size_bytes": 10292091,
+      "sha256": "f9e304d98ee27cc86f064906cae3fe9413d7f73687636211d09ab1c4717d4e60",
+      "fnv1a_64": "53637f15e970b6fc"
     }
   ]
 }

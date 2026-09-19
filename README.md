@@ -37,7 +37,7 @@ absolute strong types), `datum.hpp` (`TheaterDatum`), `conversions.hpp` (the
 conversion lattice — exact WGS84 LLA↔ECEF, flat-earth World↔LLA, composed
 World↔ECEF), `relative.hpp` (`BRA`, `BullseyeOffset` with inverse `from_bullseye`).
 
-**Tests**: 30 (WGS84 known points, LLA↔ECEF round-trip, World↔LLA round-trip
+**Tests**: 40 (WGS84 known points, LLA↔ECEF round-trip, World↔LLA round-trip
 identity, heading rotation, BRA/Bullseye geometry). Zero external dependencies
 beyond the standard library — maximally portable and testable.
 
@@ -100,7 +100,7 @@ integ.step([](const Vec3d& s) { return Vec3d{0.0, 0.0, -9.81}; }, 0.01);
 - `quat.hpp` — Quat<T> with Hamilton product, axis-angle, Euler ZYX, slerp
 - `solver.hpp` — Newton-Raphson with bisection fallback, pure bisection
 
-**Tests**: 192 unit tests covering every module, including convergence-order
+**Tests**: 199 unit tests covering every module, including convergence-order
 verification against analytical solutions (exponential decay, harmonic
 oscillator). Zero domain coupling — test targets link only against f4-math.
 
@@ -135,7 +135,7 @@ json_diff old.json new.json --threshold 1e-9
 - CLI tools: `dat2json`, `dat_validate`, `json_diff` — thin `main()`s that
   call into the library. Logic lives in the library where it's testable.
 
-**Tests**: 40 tests (parser unit tests on a synthetic fixture, JSON round-trip
+**Tests**: 139 tests (parser unit tests on a synthetic fixture, JSON round-trip
 tests, dat→json→re-parse integration tests, real-aircraft tests against 24
 genuine FreeFalcon `.dat` files). Build-time fixture generation via CMake
 custom command produces 25 JSONs in `${BUILD_DIR}/generated_fixtures/` for
@@ -182,7 +182,7 @@ double cl = cl_table(0.8, 4.0);  // Mach 0.8, alpha 4 deg
   views from the raw config vectors with Clamp boundary mode and cached-index
   optimization.
 
-**Tests**: 38 tests (validation logic, config loading from all 25 generated
+**Tests**: 105 tests (validation logic, config loading from all 25 generated
 JSONs, f16 field spot-checks, table interpolation correctness, round-trip
 integrity).
 
@@ -263,7 +263,7 @@ auto nearby = world.within_radius(0, 0, 0, 50000.0);
 `CampaignIdentityComponent`), `spatial_index.hpp` (3D hash grid for radius
 queries, cell-sized to the typical query radius).
 
-**Tests**: 20 (entity lifecycle, generation bump on destroy, component
+**Tests**: 95 (entity lifecycle, generation bump on destroy, component
 add/get/has/remove, tag filtering, within-radius, spatial index
 insert/query/update/remove across cell boundaries). Links f4-geo (PUBLIC) —
 the strong-typed position is the design decision made concrete.
@@ -352,7 +352,7 @@ basic `\uXXXX`), `writer.hpp` (`Writer` — `raw` / `string` /
 `number<T>` / `number_key` / `string_key` with templated integral
 overloads to avoid ambiguity).
 
-**Tests**: 45 (peek/expect/consume, escape decoding, integer/float
+**Tests**: 58 (peek/expect/consume, escape decoding, integer/float
 parsing, skip_value across object/array/bare tokens, writer escaping,
 round-trip preservation of all field types, nested-object round-trip).
 Zero external dependencies.
@@ -399,7 +399,7 @@ The viewer and the `cam2json` CLI both call into `f4-install` so the
 install-layout knowledge lives in one place. `f4-world-convert`'s
 existing `find_class_table()` helper now delegates here.
 
-**Tests**: 38 (install validation, FALCON4.ct discovery at root/sim/terrdata,
+**Tests**: 63 (install validation, FALCON4.ct discovery at root/sim/terrdata,
 theater discovery with case-insensitive matching, `theater.lst` parsing
 with comments/quotes/lowercase/inline-comments, `theater.ini` title
 reading, campaign scanning with flat + nested layouts mixed, install-aware
@@ -440,7 +440,7 @@ FreeFalcon's `LZSS_Expand`), `cam_archive.hpp` (`.cam` container parser),
 `CurrentTime`, TE block, `team_name[8][20]`/`team_motto[8][200]`),
 `world_json.hpp` (JSON emitter with base64 preservation of undecoded sub-files).
 
-**Tests**: 16 (LZSS byte-exactness against real `.cmp` payload, container
+**Tests**: 179 (LZSS byte-exactness against real `.cmp` payload, container
 manifest parsing, campaign header decode, team-name extraction, JSON emit).
 Validated against a real Korea-theater `save1.cam` fixture.
 
@@ -467,7 +467,7 @@ auto team_ids = populate_teams(ew, ws);   // 7 entities (skips empty slot 0)
 auto rok = ew.with_tag(tags::TEAM, TagValue::from(std::string("ROK")));
 ```
 
-**Tests**: 7 (JSON field loading, team-slot parsing, entity creation with
+**Tests**: 94 (JSON field loading, team-slot parsing, entity creation with
 correct tags/identity, tag-based queries). End-to-end test loads the real
 `save1.cam`-derived JSON and verifies all 8 team names (ROK, Japan, PRC,
 DPRK, U.S., CIS, Gorn) round-trip from binary → JSON → typed structs.
@@ -520,11 +520,11 @@ double gLoad    = fm.state().loads.nzcgs;
   → Spinning/FlatSpin → Recovering → None), built on f4-state-machine
 - `flight_model.hpp` — orchestrator with sub-stepping, trim solver, and stall SM
 
-**Tests**: 26 tests (atmosphere model validation, trim convergence, 60-second
+**Tests**: 178 tests (atmosphere model validation, trim convergence, 60-second
 stability run, FCS response, throttle response, ground operations, multi-
 aircraft init, stall SM integration with trace verification).
 
-### f4-ai — AI brain (planned)
+### f4-ai — AI brain (landed)
 
 Composed-module AI brain replacing FreeFalcon's 1209-line `DigitalBrain` god-class.
 Each tactical behavior is an independent module with its own state machine and
@@ -545,13 +545,22 @@ for (int frame = 0; frame < 3600 * 60; ++frame) {  // 60 seconds at 60 Hz
 }
 ```
 
-**Modules** (planned — see `Docs/AI_IMPLEMENTATION_PLAN.md`):
-SensorFusion, TakeoffModule, LandingModule, NavigationModule,
-RefuelModule, CollisionAvoidModule, BVRModule, WVRModule,
-MissileModule, WingmanModule, DigitalBrain orchestrator.
+**Modules** (as-built — see `Docs/AI_IMPLEMENTATION_PLAN.md`, Steps 1–12
+LANDED): SensorFusion, TowerATC (+ the ATC protocol), TakeoffModule,
+LandingModule, NavigationModule (station hold / racetrack), RefuelModule,
+CollisionAvoidModule, GroundAvoidModule, BVRModule, WVRModule (+ the merge
+harness), MissileModule, GunModule, StrikeModule, WingmanModule,
+air/ground steering. The open Part-III chapters (FAC/AWACS brain,
+flight-lead behavior) are named in the plan's Appendix A.
 
-**Dependencies**: f4-flight-model, f4-entities, f4-messaging, f4-state-machine,
-f4-geo, f4-data, f4-math.
+**Dependencies**: f4-flight-api (the Phase-2 circular-dep break — the brain
+commands through the flight API, never the FM directly), f4-entities,
+f4-messaging, f4-state-machine, f4-geo, f4-data, f4-math, f4-recorder.
+
+**Tests**: 311 (takeoff/landing/navigation lifecycles, BVR/WVR engagement
+selection, missile/gun employment, wingman roles, refuel/tanker join,
+ground avoidance, collision avoidance, strike routing, tower ATC protocol,
+sensor fusion, layered-priority DigiMode preemption, trace verification).
 
 ### f4-weapons — Weapons & effects core
 
@@ -595,6 +604,11 @@ sweep_spent_missiles(world);   // between ticks
 - `gun.hpp` — `GunStream` ballistic tracers, dispersion, proximity hits
 - `damage.hpp` — `apply_damage()` (power vs hit points, range falloff)
 - `messages.hpp` — launch/detonate/fire/damage/killed bus events
+
+**Tests**: 101 (weapon class table lookup + the built-in placeholder set,
+loadout store debit/validate, guided-missile flyout geometry + fuze +
+self-destruct, gun dispersion/proximity hits, damage falloff, ECS missile
+sweep).
 
 **Dependencies**: f4-geo, f4-math, f4-entities, f4-messaging. Deliberately
 NOT dependent on f4-flight-model or f4-ai.
@@ -646,6 +660,11 @@ host, so f4-sensors stays a leaf library with no AI/weapons dependency.
 - `radar_component.hpp` — `RadarSimComponent` (ECS behavioral, priority 45)
 - `rwr.hpp` — `RwrModel`, `RwrComponent`, `update_rwr()`, `RwrWarningMessage`
 - `messages.hpp` — radar track acquired/dropped bus events
+
+**Tests**: 74 (radar detection geometry + clutter/range gates, track
+acquire/drop hysteresis, RWR warning emission, IR/visual component
+detection over the SIGDATA grids, dispenser/decoy deployment and
+seeker-seduction consumption).
 
 **Dependencies**: f4-geo, f4-math, f4-entities, f4-messaging. Deliberately
 NOT dependent on f4-ai or f4-weapons (the integration hooks are std::function
@@ -792,6 +811,13 @@ the build — no preparation tools to run by hand. The viewer's
 "Start Session" verifies both exist up front and reports the rebuild
 command rather than a bare path when a stale build tree loses them.
 
+**Tests**: 357 (session/tick orchestration, combat chain integration, weather
+system, scenario loading, campaign session hosting + the client event
+stream, command journal + tick-exact replay, spawner/materialization,
+ATC modes, fidelity-tier sessions + the --accel certificate gates,
+campaign init wars, scheduling, verdict events, campaign_qc harness
+contracts).
+
 **Dependencies**: f4-entities, f4-messaging, f4-flight-model, f4-flight-api,
 f4-ai, f4-data, f4-geo, f4-math, f4-units, f4-state-machine, f4-models,
 f4-recorder, f4-json, f4-io, f4-world, f4-world-convert, f4-terrain,
@@ -903,11 +929,42 @@ own field limits; no RNG anywhere. Draw/loss NETTING (C2): a drawn
 aircraft's death consumes its draw — the pool debits once, the debrief
 counts the loss; a parked aircraft's death debits the pool directly.
 
+**Tests**: 253 (tasking cycles + FindBestAir scoring, package build/escort
+staggering, ledger draw/recovery/reinforcement netting, threat map + A*
+route planning, mission profiles, RoE doctrine, retask/abort/priority,
+ACTION tables, create-from-parameters byte-identity, victory scoring,
+supply depth, personnel, airbase slot scheduling, naval tasking).
+
 **Dependencies**: f4-world (IDataSource ONLY — never EntityWorld
 components; the ECS resolution lives in f4-simulation's sink),
 f4-messaging, f4-json (PRIVATE), f4-io. See
 `Docs/CAMPAIGN_LOOP_PLAN.md` (C1 + C2 + C3 + V-CAMP landed, C4–C5 the
 roadmap).
+
+### Supporting libraries
+
+Smaller modules with their own test suites (counts = TEST macros):
+
+| Library | Purpose | Tests |
+|---------|---------|-------|
+| `f4-flight-api` | The Phase-2 command surface between the AI brain and the flight model — the brain issues typed flight commands through this API instead of touching the FM directly (breaks the AI↔FM circular dependency) | 8 |
+| `f4-campaign-api` | The campaign engine contract (CAMP-HOST-1/2/3): the DTO/event/command protocol, the command journal (tick-exact replay), and the session interface `campaignd` and the viewer's client mode speak | 92 |
+| `f4-io` | File I/O helpers: whole-file reads, cursor-based binary parsing, zip reader | 37 |
+| `f4-lzss` | FreeFalcon's LZSS decompressor — byte-exact against real `.cmp` payloads | 45 |
+| `f4-terrain` | Theater terrain runtime: near/far tile databases, post levels, theater geometry, the terrain source adapter behind the viewer's ground | 43 |
+| `f4-terrain-convert` | CLI: `THEATER.*` binary terrain files → `korea.terrain.json` (the only converter without a test suite yet) | — |
+| `f4-world-types` | Shared world vocabulary types: class table, day/night, weather, AII config, layout/campaign names, objective/feature types | 32 |
+| `f4-xml` | XML reading on pugixml (vendored) — the SVG military-symbol importer's substrate | 5 |
+| `f4-gltf` | Minimal glTF reader/writer for the model pipeline (hierarchy emit, textures) | 28 |
+| `f4-models` | KoreaObj BSP model parsing: LODs, materials, the raw DX node stream (full DX parsing deferred) | 36 |
+| `f4-anim` | Aircraft animation: rigs + channels (M0–M2 landed per `Docs/AIRCRAFT_ANIMATION_PLAN.md`; M3–M5 open) | 39 |
+| `f4-assets` | Data/ asset identity + integrity: SHA-256/FNV-1a fingerprints, the `@asset:` id derivation, the manifest reader behind Data/manifest.json | 58 |
+| `f4-import` | `f4import` CLI: install doctor, models/textures import into Data/, per-file emit | 46 |
+| `f4-recorder` | Input/state recorder — the AI demos' flight traces and the viewer's replay format | 59 |
+| `f4-renderer` | Raylib-backed renderer: camera, lit shaders, texture cache, 3D draw, feature meshes, SVG symbol library (GPU-context tests self-skip without a display) | 233 |
+| `f4-world-viewer` | The interactive world viewer (raylib + Dear ImGui): V-CAMP live campaign sessions, hex inspector, class-table browser | 88 |
+| `f4-models-viewer` | The interactive 3D model viewer (BSP/glTF, LOD switching, animation preview) | — |
+| `f4-scenario-player` | Headless scenario runner with screenshot capture (exercised by the `--screenshot` integration test; unit tests removed in favor of it) | — |
 
 ## Building
 

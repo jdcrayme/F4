@@ -1,6 +1,6 @@
 # F4 AI Implementation Plan — f4-ai
 
-> **Status**: Draft — For implementation reference
+> **Status**: As-built implementation reference — Steps 1–12 LANDED (the open Part-III chapters — FAC/AWACS brain, flight-lead behavior — are named in Appendix A)
 > **Source of Truth**: [FreeFalcon/freefalcon-central](https://github.com/FreeFalcon/freefalcon-central) (develop branch)
 > **Companions**: [Architecture Proposal](ARCHITECTURE%20PROPOSAL.md) §12, [FreeFalcon Core Systems Reference](FreeFalcon_Core_Systems_Reference.html), [Falcon4 File Layout](FALCON4_FILE_LAYOUT.md)
 > **Predecessor Lessons**: F4Flight `digi/` module — see §1.5

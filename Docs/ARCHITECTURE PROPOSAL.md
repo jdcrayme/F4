@@ -228,6 +228,7 @@ graph TD
 | `f4-world-convert` | .cam archive ↔ JSON (decode + byte-faithful re-encode) | f4-install, f4-io, f4-json, f4-lzss |
 | `f4-terrain-convert` | THEATER.* → terrain JSON | f4-terrain |
 | `f4-models` | KoreaObj.HDR/.LOD/TEX parser (importer side) | f4-install, f4-json, f4-lzss, f4-math |
+| `f4-anim` | Aircraft animation rigs + channels (AIRCRAFT_ANIMATION_PLAN M0–M2) | — |
 | `f4-import` | f4import CLI + doctor (asset-pipeline importer) | f4-assets, f4-gltf, f4-json, f4-models |
 | `f4-flight-model` | Atmosphere, aero, FCS, engine, EOM, gear, stall SM | f4-data, f4-entities, f4-flight-api, f4-math, f4-messaging, f4-state-machine, f4-units |
 | `f4-weapons` | Gun, bomb, missile flyout, damage, stores, WCD | f4-entities, f4-geo, f4-io, f4-json, f4-math, f4-messaging |
@@ -235,6 +236,7 @@ graph TD
 | `f4-recorder` | Flight snapshots, replay, LLM-friendly trace export | f4-geo, f4-json |
 | `f4-ai` | BrainComponent arbiter + 13 tactic modules, ATC protocol | f4-data, f4-entities, f4-flight-api, f4-geo, f4-math, f4-messaging, f4-recorder, f4-state-machine |
 | `f4-campaign` | Campaign ladder (tasking), ledger, ground war, routes | f4-io, f4-json, f4-messaging, f4-world |
+| `f4-campaign-api` | Campaign engine contract (CAMP-HOST): DTOs, events, commands, tick-exact journal, session | f4-json |
 | `f4-world` | Typed WorldState loader → EntityWorld population | f4-assets, f4-entities, f4-geo, f4-json, f4-terrain |
 | `f4-terrain` | Theater terrain (elevation/palette/overlay) | f4-install, f4-io, f4-json |
 | `f4-simulation` | Orchestration: world + bus + tick loop, session, QC harnesses | 21 libraries (see CMakeLists) |

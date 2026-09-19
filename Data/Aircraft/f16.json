@@ -1988,7 +1988,9 @@
     }
   ],
   "name": "f16.dat",
-  "rawAuxAeroData": {},
+  "rawAuxAeroData": {
+    "criticalAOA": "25.0"
+  },
   "rollCmd": {
     "alpha_deg": [
       -10.0,

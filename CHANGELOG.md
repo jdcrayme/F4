@@ -5,6 +5,46 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## MAINT-1 — data hygiene + docs truthing (the green-baseline repair)
+
+- **MAINT-1** — the fresh-clone baseline is green again and stays green
+  by construction. Data/ had drifted three ways — the committed
+  `Aircraft/f16.json` predated the parser's `criticalAOA` capture
+  (`rawAuxAeroData: {}` where the fixture regenerates
+  `{"criticalAOA": "25.0"}`), `manifest.json` recorded stale
+  fingerprints for `kc10.json` + `Theater/korea/terrain.json`, and it
+  listed `Weapons/falcon4.wcd.json`, which `.gitignore`'s Data/
+  whitelist never allowed to be committed (the manifest was generated
+  against a local export a fresh clone can never have). Fixed:
+  f16.json regenerated from its committed fixture (byte-identity
+  restored — 23 of 24 aircraft were already exact), the manifest
+  regenerated from the committed tree (36 assets, zero phantom
+  entries), and `!Data/Weapons/**` added to the whitelist so the next
+  real export commits cleanly instead of poisoning the manifest. The
+  `Sha256.Reproduces…`, `F16CriticalAOAIsTheDatOverride`, and
+  `DatFixtureRegenerates…` failures are gone. Kept green:
+  `generate_manifest.py --check` — a sub-second read-only
+  manifest↔Data/ verifier (size/sha256/fnv1a + both directions of
+  listed-vs-committed) wired as the first CI step of BOTH jobs
+  (fail-fast before the toolchain install), because direct pushes to
+  main can't be blocked post-hoc and the C++ gate only fires after a
+  full build. Repo hygiene: the stray empty `main` file deleted.
+  Docs truthing (README claims vs tree, audited): f4-ai's section
+  rewritten planned → landed (16 modules, the f4-flight-api +
+  f4-recorder deps, 311 tests), every stale **Tests** count corrected
+  (geo 40, math 199, convert 139, data 105, entities 95, json 58,
+  install 63, world-convert 179, world 94, flight-model 178), the
+  four missing counts added (weapons 101, sensors 74, simulation 357,
+  campaign 253), and a Supporting-libraries table added for the 18
+  undocumented modules. `Docs/README.md`: the `ATM_STRATEGY_PLAN`
+  "named next legs" sentence (CAMP-ATM-1/CMD-1/SCALE-1 landed since),
+  the `ASSET_PIPELINE_SPEC` "pending implementation" row (f4-assets +
+  f4-import are CI-gated), and the missing `AIRCRAFT_ANIMATION_PLAN`
+  index row. `ARCHITECTURE PROPOSAL` §3: `f4-anim` +
+  `f4-campaign-api` added to the as-built table (deps verified against
+  CMake). `AI_IMPLEMENTATION_PLAN` banner: Draft → as-built (matching
+  its index row).
+
 ## CAMP-DOM-5 — naval (the wrap-then-decide)
 
 - **CAMP-DOM-5** — the campaign war's naval face becomes real to the

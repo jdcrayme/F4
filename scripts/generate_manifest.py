@@ -59,16 +59,84 @@ def derive_asset_id(rel_posix: str, theater: str, save: str) -> str:
         return "koreaobj:" + stem(rel_posix)
     return ""
 
+def check(args) -> int:
+    """Verify the on-disk manifest against the on-disk Data/ tree — the
+    generator↔Data invariant the Sha256.ReproducesCommittedManifestFingerprints
+    test enforces, as a sub-second pre-push/CI gate (no build needed).
+    Fails (exit 1) on: missing file, size/sha256/fnv1a drift, a committed
+    file the manifest does not list, or a manifest entry for a file that
+    is not committed (the Weapons/falcon4.wcd.json class of trap).
+    Read-only: never rewrites the manifest."""
+    manifest_path = args.output / "manifest.json"
+    if not manifest_path.is_file():
+        print(f"CHECK FAIL: no manifest at {manifest_path}")
+        return 1
+    m = json.loads(manifest_path.read_text())
+    excludes = set(m.get("excluded_dirs", [])) | {"Temp"}
+
+    problems = []
+    listed = set()
+    for a in m.get("assets", []):
+        rel = a["path"]
+        listed.add(rel)
+        p = args.output / rel
+        if not p.is_file():
+            problems.append(f"manifest lists a file that is absent: {rel}")
+            continue
+        data = p.read_bytes()
+        if p.stat().st_size != a.get("size_bytes"):
+            problems.append(
+                f"size drift: {rel} (manifest {a.get('size_bytes')}, "
+                f"actual {p.stat().st_size})")
+        actual_sha = hashlib.sha256(data).hexdigest()
+        if actual_sha != a.get("sha256"):
+            problems.append(f"sha256 drift: {rel}")
+        if fnv1a_64(data) != a.get("fnv1a_64"):
+            problems.append(f"fnv1a_64 drift: {rel}")
+
+    on_disk = set()
+    for p in sorted(args.output.rglob("*")):
+        if not p.is_file() or p.name == "manifest.json":
+            continue
+        rel = p.relative_to(args.output).as_posix()
+        if rel.split("/")[0] in excludes:
+            continue
+        on_disk.add(rel)
+    for rel in sorted(on_disk - listed):
+        problems.append(f"committed file missing from the manifest: {rel}")
+
+    if problems:
+        print(f"CHECK FAIL: {len(problems)} drift problem(s) in "
+              f"{manifest_path}:")
+        for q in problems:
+            print(f"  - {q}")
+        print("regenerate with: scripts/generate_manifest.py --output Data/ "
+              "--install <path> (repeat the committed flags)")
+        return 1
+    print(f"CHECK OK: {len(listed)} manifest entries match the Data/ tree "
+          f"byte-for-byte")
+    return 0
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--output", required=True, type=Path)
-    ap.add_argument("--install", required=True, type=Path)
+    ap.add_argument("--install", type=Path,
+                    help="source install root (not required with --check)")
+    ap.add_argument("--check", action="store_true",
+                    help="verify the existing manifest against Data/ and "
+                         "exit non-zero on drift; generate nothing")
     ap.add_argument("--theater", default="korea")
     ap.add_argument("--save", default="save1")
     ap.add_argument("--exclude", action="append", default=[],
                     help="top-level dir under --output to skip (repeatable), "
                          "e.g. Models while it stays gitignored")
     args = ap.parse_args()
+
+    if args.check:
+        sys.exit(check(args))
+
+    if not args.install:
+        ap.error("--install is required when generating (not with --check)")
 
     excludes = set(args.exclude)
     # Temp/ is ALWAYS runtime territory (the viewer's on-demand conversions

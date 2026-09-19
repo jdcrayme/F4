@@ -48,6 +48,14 @@ Data/**
 !Data/Aircraft/**
 !Data/SimData/**
 !Data/Classes/**
+!Data/Weapons/**
+# Weapons/ (the wcd2json Falcon4.WCD export) is committed when present:
+# it was previously ABSENT from this whitelist while generate_manifest.py
+# fingerprinted it in from a local export — the manifest then referenced a
+# file no fresh clone could have, and Sha256.Reproduces… failed everywhere.
+# A fresh clone without the export still passes: regenerate the manifest
+# from the committed tree (scripts/generate_manifest.py) and the entry
+# simply does not exist until a real Weapons/falcon4.wcd.json is committed.
 # Models/ stays fully ignored (glTF + PNG land in Tranche 0c/0d) — no
 # !Data/Models/** negation on purpose.
 # Data/Temp/ (on-demand conversions from a personal install, written by
