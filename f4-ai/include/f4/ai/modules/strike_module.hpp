@@ -99,11 +99,27 @@ public:
         /// clearance floor for the delivery pass; the trigger is skipped
         /// below it and re-arms if the aircraft climbs back).
         double min_release_agl_ft{500.0};
-        /// CCIP tolerance: the release fires when the PREDICTED impact
-        /// point falls within this distance of the aim point (ft). The
-        /// host sets it from the weapon's lethal radius (~half) — the
-        /// trigger never sees weapon classes (engine-agnostic).
+        /// Impact-point acceptance distance (ft): the predicted impact
+        /// must sit well inside the blast footprint to start a stick on
+        /// a STRAIGHT-IN delivery (the harness's geometry). The host sets
+        /// it from the weapon's lethal radius (~half). EMPL-1: the
+        /// campaign gate no longer reads this field — at the flat-world
+        /// campaign delivery geometry (dz ~3,000 ft -> throw ~9,500 ft)
+        /// a 150-ft pipper demands sub-0.9-deg alignment, which no
+        /// dynamic approach holds (the "armed, no release" exit 4); the
+        /// gate is range + release_cone_rad instead. Kept settable for
+        /// host compatibility and as the recorded diagnostic threshold;
+        /// a per-mission-mode gate (pipper for aligned run-ins, cone for
+        /// campaign passes) is the named refinement.
         double impact_tolerance_ft{150.0};
+        /// EMPL-1: forward alignment cone (radians) — the aim must sit
+        /// inside this cone off the release track for the trigger to
+        /// arm. This is the mid-turn protection (a 60-deg-off aircraft
+        /// holds its stick) without the pipper gate's sub-degree demand,
+        /// which the flat-world campaign delivery geometry (dz ~3,000 ft
+        /// -> throw ~9,500 ft -> 150 ft = 0.9 deg) made unsatisfiable —
+        /// the TestCamp INTSTRIKE sweep's "armed, no release" exit 4.
+        double release_cone_rad{0.35};
         /// ROE: weapons tight — never pulse (same gate semantics as the
         /// missile fire controls: gate here, not at the intent, so no
         /// phantom shot is ever counted).
@@ -156,6 +172,8 @@ public:
     [[nodiscard]] int salvo_fired() const noexcept { return salvo_fired_; }
     /// True while the trigger is armed (target set, stick incomplete).
     [[nodiscard]] bool armed() const noexcept { return armed_; }
+    /// EMPL-1 diagnostics: true once a ground track was differenced.
+    [[nodiscard]] bool has_track() const noexcept { return has_track_; }
 
     /// Computed release range for the current geometry (ft; 0 when the
     /// aircraft is below the min release AGL) — the THROW distance the
@@ -183,6 +201,24 @@ private:
     double since_release_s = -1.0;   // <0 = not in a stick
     double computed_range_ft_ = 0.0;
     double predicted_miss_ft_ = 0.0;
+
+    // EMPL-1: the throw direction comes from the aircraft's TRACK
+    // (velocity over ground), not its nose. The bomb inherits the
+    // aircraft's VELOCITY; during the attack run's homing turn the nose
+    // leads the track by a couple of degrees, which at a ~9,500 ft
+    // throw is hundreds of feet of pipper offset — the TestCamp
+    // INTSTRIKE run's release gate never satisfied although the flight
+    // path itself crossed the aim within feet. Track is differenced
+    // from consecutive position samples (the engine-agnostic interface
+    // exposes positions, not a velocity vector); until a second sample
+    // exists (or the samples are stationary) the nose is the fallback,
+    // which is exact on a straight-in.
+    bool   has_prev_pos_ = false;
+    bool   has_track_ = false;
+    double prev_east_ft_ = 0.0;
+    double prev_north_ft_ = 0.0;
+    double track_x_ = 0.0;          // unit track vector, ENU
+    double track_y_ = 0.0;
 };
 
 } // namespace f4::ai::modules

@@ -394,6 +394,22 @@ double NavigationModule::nav_heading_rad() const
     if (wp_index_ >= route_.size()) return current_heading_rad_;
     const auto& wp = route_[wp_index_];
 
+    // EMPL-1: a delivery waypoint's leg is an ATTACK RUN, not a
+    // navigation leg. FreeFalcon's strike pass homes the airframe at the
+    // target (the DigitalBrain's pure pursuit on the run-in); the LNAV
+    // centerline law below leaves a residual cross-track through the
+    // release point (the TestCamp INTSTRIKE sweep: ~400 ft at the
+    // |d - R| crossing, 3x the CCIP tolerance — the trigger never
+    // satisfied and the stick never fell). Pursuit guidance converges
+    // the flight path THROUGH the aim point, which is exactly the
+    // geometry the StrikeModule's release gate models. Zero-lead
+    // fly-through (NAV-B) already sequences the corner after the point;
+    // this completes the fly-through contract on the steering side.
+    // Every non-delivery leg keeps the LNAV law byte-identically.
+    if (is_ag_delivery_action(wp.action)) {
+        return AirSteering::bearing_to(current_position_, wp.position);
+    }
+
     // --- Desired heading from the LEG, with cross-track correction ---
     //
     // Old law: desired_hdg = bearing(me -> wp) — pure pursuit, homing.
