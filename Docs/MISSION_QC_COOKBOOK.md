@@ -303,7 +303,15 @@ mode — the scrubber, the focused aircraft's trail colored by
 **cross-track error**, the dashed **intended path** (glide slope,
 pattern legs, AR envelope), and the per-tick inspector (ai_state,
 fuel, vertical error). File → Open Replay… (Ctrl+R) opens any trace
-path directly.
+path directly. The window's **Record / Re-record** button
+(MISSION-QC-RECORD) runs step 1 for you — it spawns the sibling
+`campaign_qc` headlessly with `--out-dir` pinned to the trace
+convention, shows the row as `recording...` while it runs, and
+rescans when it finishes, so the loop is one click each way; a
+`--mission-qc` CLI flag opens the window for headless screenshot
+proofs. The recorder's console output lands in `qc/<stem>.log`
+(the gate messages + the verdict echo), and the exit code is what
+the status line reports ("gate 24 — no touchdown").
 
 **What the first sweep already caught (the summary is the story):**
 

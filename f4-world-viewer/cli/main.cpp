@@ -122,6 +122,10 @@ int main(int argc, char** argv) {
                                           // open the Class Table Browser
                                           // pre-selected on a class row
                                           // (headless screenshot proofs)
+    bool show_mission_qc = false;         // --mission-qc: open the Mission
+                                          // QC window on start (the
+                                          // --ct-preview pattern — headless
+                                          // proofs of roster + record buttons)
     bool auto_session = false;            // --session: start the campaign loop
     bool auto_play = false;               // --play: session starts RUNNING
                                           // (headless smoke: verify time
@@ -196,6 +200,8 @@ int main(int argc, char** argv) {
             select_name = argv[++i];
         } else if (a == "--ct-preview" && i + 1 < argc) {
             ct_preview_entity = std::atoi(argv[++i]);
+        } else if (a == "--mission-qc") {
+            show_mission_qc = true;
         } else if (a == "--session") {
             // Start the live campaign session over the loaded world
             // right after the CLI loads settle (headless smoke tests:
@@ -295,6 +301,12 @@ int main(int argc, char** argv) {
     // 3D preview panes).
     if (ct_preview_entity >= 0) {
         app.preview_class_table_entity(ct_preview_entity);
+    }
+
+    // Apply --mission-qc: open the Mission QC window (combine with
+    // --screenshot for headless proof of the roster + record buttons).
+    if (show_mission_qc) {
+        app.open_mission_qc_window();
     }
 
     // Print install diagnostics to stderr + exit (no GUI). Useful for

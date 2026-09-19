@@ -1716,13 +1716,17 @@ int run_scenario(const Args& args) {
             << "}\n";
         out << "}\n";
     }
+    // c_str() on a Windows fs::path is wchar_t* — hoist the narrow forms
+    // for the printf (%s would print one byte of the wide string).
+    const std::string trace_path_str = (args.out_dir / "trace.json").string();
+    const std::string summary_path_str = summary_path.string();
     std::printf("scenario_qc: %s ticks=%d aircraft=%zu touchdowns=%d "
                 "aar(requests=%d contact=%d complete=%d)\n"
                 "  trace: %s\n  summary: %s\n",
                 scenario.name.c_str(), ticks, n, touchdowns,
                 aar.requests, aar.made, aar.complete,
-                (args.out_dir / "trace.json").c_str(),
-                summary_path.c_str());
+                trace_path_str.c_str(),
+                summary_path_str.c_str());
 
     // 7. The gate ladder (the exit codes are the QC verdict).
     if (frozen) {

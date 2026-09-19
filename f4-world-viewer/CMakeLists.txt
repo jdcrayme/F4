@@ -106,6 +106,7 @@ add_library(f4_world_viewer STATIC
     src/pipeline_io.cpp
     src/diagnostics.cpp
     src/snapshot.cpp
+    src/record_runner.cpp
     src/canvas.cpp
     src/imgui_panels.cpp
     src/inspector_panel.cpp
@@ -244,6 +245,14 @@ set_target_properties(f4-world-viewer PROPERTIES
 add_dependencies(f4-world-viewer mission_profiles_fixture)
 if(TARGET convert_golden_fixtures)
     add_dependencies(f4-world-viewer convert_golden_fixtures)
+endif()
+# MISSION-QC-RECORD: the Mission QC window's Record button spawns the
+# sibling campaign_qc recorder headlessly (same artifacts as the CLI
+# step: qc/<stem>/trace.json + scenario_qc_summary.json). Building THIS
+# target must produce the recorder, or the buttons render "(no
+# recorder)" — the same single-target gap the fixtures above fixed.
+if(TARGET campaign_qc)
+    add_dependencies(f4-world-viewer campaign_qc)
 endif()
 
 # NOTE: The viewer no longer ships or loads any PNG icon assets. Every

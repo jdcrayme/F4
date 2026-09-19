@@ -5,6 +5,46 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## MISSION-QC-RECORD — the Mission QC menu records and re-records its missions
+
+- **MISSION-QC-RECORD** — the Mission QC window's Record/Re-record button
+  (one per template row) spawns the sibling `campaign_qc` recorder
+  headlessly and writes the same artifacts as the CLI step:
+  `<build root>/qc/<stem>/trace.json` + `scenario_qc_summary.json`
+  (gates 20–24). The spawn is the exact CLI command with `--out-dir`
+  pinned to the menu's first trace convention, so viewer-recorded and
+  CLI-recorded traces land on the same file; the button reads
+  **Re-record** when a trace exists (the rerun overwrites both
+  artifacts). One record job at a time; the row shows `recording...`
+  while it runs, and a finished job invalidates the scan cache, so the
+  row flips to `Open replay` the moment the trace lands — verified live
+  end-to-end: `tanker_track` (pass → Open replay/Re-record),
+  `takeoff_only` + `kunsan_parking` (pass), and `landing_only`
+  (gate 24 → "no touchdown" in the status line). Mechanics: the spawn
+  lives in its own TU (`record_runner.cpp` — windows.h cannot coexist
+  with raylib.h, the CloseWindow/ShowCursor extern "C" clash), runs on
+  a detached thread with shared_ptr result flags (a viewer closed
+  mid-record leaves the recorder running to finish its write), and
+  captures the child's stdout/stderr to `qc/<stem>.log` (the parent is
+  a windowless GUI process; CREATE_NO_WINDOW already suppressed any
+  console). Three Windows subtleties the log's first cut got wrong, all
+  fixed and pinned in comments: handles must be created INHERITABLE
+  (bInheritHandles only duplicates so-marked handles — without it the
+  child's output silently vanishes), FILE_WRITE_DATA in the access mask
+  disables append-at-EOF semantics (the log overwrote itself head-first
+  with a 7-byte "exit 0\n"), and the parent's header line goes through
+  its own atomic-append open so the child's buffered CRT flush can't
+  collide with a shared file pointer. Tool discovery walks up from the
+  exe to the build root (the dir containing `f4-simulation/`) and
+  prefers the viewer's own config layer (multi-config MSVC layouts);
+  `f4-world-viewer` gains `add_dependencies(f4-world-viewer
+  campaign_qc)` so a viewer build always produces its recorder, and a
+  `--mission-qc` CLI flag opens the window for headless screenshot
+  proofs (the `--ct-preview` pattern). Also fixed en passant:
+  campaign_qc's console summary printed garbage on Windows
+  (`fs::path::c_str()` is wchar_t* into a printf %s — hoisted narrow
+  copies).
+
 ## CT-BROWSER-LAYOUT — the class table browser previews unit/squadron deaggregation layouts
 
 - **CT-BROWSER-LAYOUT** — the deaggregation positioning math moved out of

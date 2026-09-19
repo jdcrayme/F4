@@ -199,6 +199,27 @@ struct MissionQcEntry {
     bool has_trace = false;
 };
 
+// MISSION-QC-RECORD: one background record job — the window's Record
+// button spawns the sibling campaign_qc recorder headlessly (the same
+// artifacts the CLI run writes: qc/<stem>/trace.json +
+// scenario_qc_summary.json). The worker thread owns the process; the
+// UI only polls `done` (never touches the thread — it is detached at
+// spawn, and the shared_ptr state outlives both sides even if the
+// viewer closes mid-run, letting the orphan recorder finish its
+// write). One job at a time; `reported` marks the result as consumed
+// by the UI so the completion is announced exactly once.
+struct MissionQcJob {
+    std::string stem;
+    std::shared_ptr<std::atomic_bool> done;
+    std::shared_ptr<std::atomic_int> exit_code;   // the recorder's gate code
+    std::shared_ptr<std::string> diag;            // spawn-failure detail
+    bool reported = false;
+
+    [[nodiscard]] bool running() const noexcept {
+        return done && !done->load();
+    }
+};
+
 struct ViewerApp::Impl {
     // Window / camera
     int window_w = 1400;
@@ -765,6 +786,14 @@ struct ViewerApp::Impl {
     bool show_mission_qc = false;
     bool mission_qc_scanned = false;
     std::vector<MissionQcEntry> mission_qc_entries;
+    // MISSION-QC-RECORD: the Record button's background recorder — the
+    // resolved campaign_qc path (empty = not found; buttons disabled
+    // with a hint), resolved lazily on first window draw, plus the
+    // in-flight/unreported job (at most one; the buttons refuse a
+    // second while it runs).
+    std::string mission_qc_tool;
+    bool mission_qc_tool_checked = false;
+    std::vector<MissionQcJob> mission_qc_jobs;
     // POLISH-2.4: minimap in the bottom-right corner of the canvas.
     // Shows the whole 1024×1024 theater at a glance: terrain thumbnail
     // (re-uses the cached terrain texture), objective dots (colored by

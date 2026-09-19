@@ -112,6 +112,11 @@ public:
     /// --ct-preview <entity_type> headless screenshot flag).
     void preview_class_table_entity(int entity_type);
 
+    /// MISSION-QC-RECORD: open the Mission QC window programmatically
+    /// (the --mission-qc CLI flag — headless screenshot proofs, the
+    /// --ct-preview pattern).
+    void open_mission_qc_window();
+
     /// Open the Install Diagnostics modal (Tools > Install Diagnostics).
     /// Builds the full diagnostic report from the current Installation
     /// and shows it in a scrollable, copyable text panel.
@@ -330,7 +335,8 @@ private:
     void draw_campaign_qc_view();
     /// SHOWCASE-1: the "Mission QC" window — the scenario-template
     /// roster with their recorded FlightRecorder traces; one click
-    /// opens the trace in replay mode. See mission_qc_view.cpp.
+    /// opens the trace in replay mode, one click (re-)records a trace
+    /// via the sibling campaign_qc recorder. See mission_qc_view.cpp.
     void draw_mission_qc_view();
     /// The lazy directory scan behind the Mission QC window (first open
     /// + the Rescan button).
