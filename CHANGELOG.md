@@ -5,6 +5,55 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## CAMP-DOM-6 — task-force movement (the naval GroundWar sibling)
+
+- **CAMP-DOM-6** — the DOM-5 "how deep" record's first named tranche
+  lands: the wire's `dest_x`/`dest_y` — decoded on every domain-4 row
+  since the .uni decoder and consumed by no engine — becomes the
+  ORDER. `NavalWar` (f4-campaign, `naval_war.hpp` + `naval_writeback.hpp`)
+  is the GroundWar structural twin, movement-only: every belligerent
+  task force walks toward its wire dest at its movement speed (the UCD
+  enrichment when present, else the sea family default table —
+  carrier/battleship 25, cruiser/destroyer/frigate 30, patrol 35,
+  amphib 12, replenishment 15 kph — the ground table's own
+  documented-limitation pattern), in the ground move phase's exact
+  fixed-point arithmetic (1/256 sub-grid, integer-truncated sqrt
+  normalization, the arrival snap, the heading byte via
+  atan2 ÷ 1.40625°), on its own 60-s update wheel (one big tick == N
+  small ones), behind the shared `belligerent_pair` gate (neutrals
+  stand down; a war-less world is inert). NO LEDGER — movement is not
+  a war fact the books own (GroundWar syncs the ledger because it
+  ATTRITES; NavalWar only moves); no orders cycle, no engage/capture,
+  no supply doctrine — each stays in the "how deep" record. The
+  session arms it with `naval_movement` (default OFF — no engine, no
+  row touched, byte-identical everywhere): the moved rows sync live
+  into the WorldState per update (`apply_naval_to`, the ground
+  write-back's twin — activity-gated, identity-verified, dest consumed
+  never written), the `taskforces` query serves them (the wire-state
+  rule: the sync IS the serving face), the 3D task-force entities
+  mirror the transform, the save carries the moved rows (the host
+  save's idempotent second touch), and the DTO gains the additive
+  `heading` tail (always present, at the END; kProtocolVersion stays
+  1). The QC arms it with `--naval-movement`: the war block's
+  `naval_move: updates/moved/arrivals/march` counters + the summary's
+  naval block (armed-only) + exit 18 (armed & moved nothing — the
+  exit-13 philosophy; arrivals NOT required, a fleet at its
+  destination holds). Verified: 15 engine tests (the snapshot filter,
+  the war-pair gate, the exact walk/heading/last-move pins, the
+  arrival snap + hold, the static hold, the big-tick identity, the
+  two-engine determinism, the sync's activity/loudness/idempotence
+  gates), 5 new session tests over the kunsan pair (the frigate's
+  1.4-grid haul SNAPS on the third 60-s update and the carrier's
+  sub-grid truncation lands (753,264) → (752,265) — both served live
+  on the query and carried by the save; movement-off leaves every
+  wire row byte-identical; movement armed moves ONLY task-force
+  rows; two armed runs answer identically), the DTO goldens, and the
+  QC war run (kunsan 0.5 h: `naval_move updates=31 moved=31
+  arrivals=1 march=14 grid`, deterministic=yes, and the arm-on/
+  arm-off ledger MD5s IDENTICAL — movement alone does not move the
+  books, by design). The carrier's full 319-grid haul arrives within
+  the 24-hour certificate's horizon (engine-pinned).
+
 ## CAMP-SEGF-2 — the segfault fix re-land (the engine + test half)
 
 - **CAMP-SEGF-2** — CAMP-SEGF-1's data half landed inside MAINT-1, but

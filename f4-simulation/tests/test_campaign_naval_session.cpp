@@ -35,6 +35,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <set>
 #include <string>
 #include <vector>
@@ -231,6 +233,233 @@ TEST(CampaignNavalSession, TwoArmedRunsAnswerTheQueryIdentically) {
         EXPECT_NE(host, nullptr) << "create failed: " << err;
         host->set_paused(false);
         for (int frame = 0; frame < 20; ++frame) {
+            host->step(60);
+        }
+        return run_query(*host, "\"taskforces\"");
+    };
+    const auto a = run();
+    const auto b = run();
+    EXPECT_EQ(a, b);
+}
+
+// ── 5. CAMP-DOM-6 — the task-force movement (the naval sibling) ──────────
+//
+// The engine's mechanics are pinned in f4-campaign's own tests
+// (test_naval_war.cpp — the snapshot, the walk, the arrival, the
+// sync's activity gate); here we pin what the SESSION adds over the
+// kunsan fixture (the same 2 task forces):
+//
+//   a. movement armed: the fleet walks (the frigate's 1.4-grid haul
+//      ARRIVES — snap exact), the moved rows land in the session's
+//      WorldState per update, and the `taskforces` query serves them
+//      live (the wire-state rule — the sync IS the serving face);
+//   b. movement off: every wire row stays byte-identical (the golden
+//      identity, naval edition);
+//   c. movement armed moves ONLY task-force rows (the activity gate
+//      at session scale — every battalion and squadron row keeps the
+//      fixture's own coordinates);
+//   d. the save carries the moved rows (the host's save path);
+//   e. two movement-armed runs answer the query identically.
+
+namespace {
+
+// The fixture's own rows, for the untouched-row diffs.
+struct FixtureRow {
+    int x = 0;
+    int y = 0;
+};
+
+std::vector<FixtureRow> fixture_unit_rows() {
+    std::ifstream in(kunsan_world(), std::ios::binary);
+    if (!in) return {};
+    std::string json((std::istreambuf_iterator<char>(in)),
+                     std::istreambuf_iterator<char>());
+    f4::world::WorldState ws;
+    ws.load_from_string(json);
+    std::vector<FixtureRow> rows;
+    rows.reserve(ws.units.size());
+    for (const auto& u : ws.units) {
+        rows.push_back(FixtureRow{u.x, u.y});
+    }
+    return rows;
+}
+
+} // namespace
+
+TEST(CampaignNavalSession, MovementArmedWalksTheFleetAndServesItLive) {
+    if (!std::filesystem::exists(f16_config())) {
+        GTEST_SKIP() << "f16.json fixture not generated";
+    }
+    std::string err;
+    auto opts = make_opts(false);
+    opts.naval_movement = true;   // the DOM-6 arm (the 60 s cadence)
+    auto host = EngineSessionHost::create(opts, &err);
+    ASSERT_NE(host, nullptr) << "create failed: " << err;
+
+    // 121 s of campaign time: the naval engine fires updates at
+    // t=0/60/120 — the frigate's 1.4-grid haul (362 fp at 128 fp per
+    // update) SNAPS on the third.
+    host->set_paused(false);
+    for (int frame = 0; frame < 121; ++frame) {
+        host->step(60);
+    }
+    auto& session = host->engine();
+
+    // The engine ran and the fleet is home-bound.
+    ASSERT_NE(session.naval_war(), nullptr);
+    EXPECT_GE(session.naval_war()->stats().updates, 3);
+    EXPECT_GE(session.naval_war()->stats().arrivals, 1);
+
+    // The WorldState rows moved (the sync IS the serving face):
+    int carrier_x = -1, carrier_y = -1, carrier_hdg = -1;
+    int frigate_x = -1, frigate_y = -1, frigate_hdg = -1;
+    for (const auto& u : session.world_state().units) {
+        if (u.unit_class != f4::entities::UnitClass::TaskForce) continue;
+        if (u.id_num == 4040) {
+            carrier_x = u.x;
+            carrier_y = u.y;
+            carrier_hdg = u.heading;
+        } else if (u.id_num == 4624) {
+            frigate_x = u.x;
+            frigate_y = u.y;
+            frigate_hdg = u.heading;
+        }
+    }
+    // The frigate arrived: snapped exactly onto the wire's own dest.
+    EXPECT_EQ(frigate_x, 305);
+    EXPECT_EQ(frigate_y, 469);
+    // Its heading: the walk's last bearing (45 deg → 32 in the wire's
+    // byte convention).
+    EXPECT_EQ(frigate_hdg, 32);
+    // The carrier walked ~1.2 grid south toward (743,583) — the
+    // deterministic 3-update position (sub-grid truncation included).
+    EXPECT_EQ(carrier_x, 752);
+    EXPECT_EQ(carrier_y, 265);
+    // Its heading: SSE (atan2(-10, +319) → −1.8 deg → 255).
+    EXPECT_EQ(carrier_hdg, 255);
+
+    // The query serves the moved rows LIVE.
+    const auto json = run_query(*host, "\"taskforces\"");
+    ASSERT_NE(json.find("\"status\":\"ok\""), std::string::npos) << json;
+    EXPECT_NE(json.find("\"x\":305,\"y\":469"), std::string::npos)
+        << "the frigate's arrived position is not served: " << json;
+    EXPECT_NE(json.find("\"heading\":255"), std::string::npos)
+        << "the carrier's movement heading is not served: " << json;
+    EXPECT_NE(json.find("\"heading\":32"), std::string::npos);
+    // The wire's own destination rode untouched (consumed, never
+    // written).
+    EXPECT_NE(json.find("\"dest_x\":743"), std::string::npos);
+}
+
+TEST(CampaignNavalSession, MovementOffLeavesEveryWireRowUntouched) {
+    if (!std::filesystem::exists(f16_config())) {
+        GTEST_SKIP() << "f16.json fixture not generated";
+    }
+    const auto fixture = fixture_unit_rows();
+    ASSERT_FALSE(fixture.empty());
+
+    std::string err;
+    auto host = EngineSessionHost::create(make_opts(false), &err);
+    ASSERT_NE(host, nullptr) << "create failed: " << err;
+    ASSERT_EQ(host->engine().naval_war(), nullptr)
+        << "the engine constructed with the arm off";
+
+    host->set_paused(false);
+    for (int frame = 0; frame < 20; ++frame) {
+        host->step(60);
+    }
+
+    const auto& ws = host->engine().world_state();
+    ASSERT_EQ(ws.units.size(), fixture.size());
+    for (std::size_t i = 0; i < ws.units.size(); ++i) {
+        EXPECT_EQ(ws.units[i].x, fixture[i].x) << "unit index " << i;
+        EXPECT_EQ(ws.units[i].y, fixture[i].y) << "unit index " << i;
+    }
+}
+
+TEST(CampaignNavalSession, MovementArmedMovesOnlyTaskForceRows) {
+    if (!std::filesystem::exists(f16_config())) {
+        GTEST_SKIP() << "f16.json fixture not generated";
+    }
+    const auto fixture = fixture_unit_rows();
+    ASSERT_FALSE(fixture.empty());
+
+    std::string err;
+    auto opts = make_opts(false);
+    opts.naval_movement = true;
+    auto host = EngineSessionHost::create(opts, &err);
+    ASSERT_NE(host, nullptr) << "create failed: " << err;
+    host->set_paused(false);
+    for (int frame = 0; frame < 121; ++frame) {
+        host->step(60);
+    }
+
+    const auto& ws = host->engine().world_state();
+    ASSERT_EQ(ws.units.size(), fixture.size());
+    for (std::size_t i = 0; i < ws.units.size(); ++i) {
+        if (ws.units[i].unit_class == f4::entities::UnitClass::TaskForce) {
+            continue;   // the naval face may move
+        }
+        EXPECT_EQ(ws.units[i].x, fixture[i].x) << "unit index " << i;
+        EXPECT_EQ(ws.units[i].y, fixture[i].y) << "unit index " << i;
+    }
+}
+
+TEST(CampaignNavalSession, MovementArmedSaveCarriesTheMovedRows) {
+    if (!std::filesystem::exists(f16_config())) {
+        GTEST_SKIP() << "f16.json fixture not generated";
+    }
+    std::string err;
+    auto opts = make_opts(false);
+    opts.naval_movement = true;
+    auto host = EngineSessionHost::create(opts, &err);
+    ASSERT_NE(host, nullptr) << "create failed: " << err;
+    host->set_paused(false);
+    for (int frame = 0; frame < 121; ++frame) {
+        host->step(60);
+    }
+
+    const auto path = std::filesystem::temp_directory_path() /
+                      "f4_dom6_naval_save.json";
+    const auto res = host->save(path.string());
+    ASSERT_TRUE(res.ok) << res.detail;
+
+    std::FILE* f = std::fopen(path.string().c_str(), "rb");
+    ASSERT_NE(f, nullptr);
+    std::string json;
+    char buf[65536];
+    std::size_t n = 0;
+    while ((n = std::fread(buf, 1, sizeof(buf), f)) > 0) {
+        json.append(buf, n);
+    }
+    std::fclose(f);
+    std::error_code ec;
+    std::filesystem::remove(path, ec);
+
+    // The frigate's arrived row: the emitter's own key order puts
+    // x/y a few fields after id_num (pretty-printed, "key": value) —
+    // the arrived pair must sit in the frigate's own row.
+    const auto row_at = json.find("\"id_num\": 4624,");
+    ASSERT_NE(row_at, std::string::npos);
+    const auto x_at = json.find("\"x\": 305,", row_at);
+    ASSERT_NE(x_at, std::string::npos);
+    EXPECT_LT(x_at, json.find("\"unit_subtype\"", row_at))
+        << "the frigate's arrived x did not land in its own row";
+    EXPECT_NE(json.find("\"y\": 469,", x_at), std::string::npos);
+}
+
+TEST(CampaignNavalSession, TwoMovementArmedRunsAnswerIdentically) {
+    if (!std::filesystem::exists(f16_config())) {
+        GTEST_SKIP() << "f16.json fixture not generated";
+    }
+    auto run = [&]() {
+        std::string err;
+        auto opts = make_opts(false);
+        opts.naval_movement = true;
+        auto host = EngineSessionHost::create(opts, &err);
+        EXPECT_NE(host, nullptr) << "create failed: " << err;
+        host->set_paused(false);
+        for (int frame = 0; frame < 25; ++frame) {
             host->step(60);
         }
         return run_query(*host, "\"taskforces\"");

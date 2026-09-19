@@ -59,6 +59,8 @@
 #include <f4/campaign/flight_writeback.hpp>
 #include <f4/campaign/ground_war.hpp>
 #include <f4/campaign/ground_writeback.hpp>
+#include <f4/campaign/naval_war.hpp>
+#include <f4/campaign/naval_writeback.hpp>
 #include <f4/campaign/result_ledger.hpp>
 #include <f4/campaign/route_builder.hpp>
 #include <f4/campaign/war_verdict.hpp>
@@ -287,6 +289,23 @@ struct CampaignSessionOptions {
     /// other package rides. Default false: anti-ship requests stay
     /// target-less — the golden identity.
     bool naval_tasking = false;
+
+    /// CAMP-DOM-6: run the task-force movement engine (the naval
+    /// GroundWar sibling) — the wire's own dest_x/dest_y IS the
+    /// order: every belligerent task force walks toward it at its
+    /// speed (the UCD enrichment when present, else the sea family
+    /// default), the moved rows sync into the session's WorldState
+    /// per update (the `taskforces` query serves them live), the
+    /// 3D task-force entities mirror the transform, and the save
+    /// carries the moved rows. No ledger books (movement is not a
+    /// war fact the books own), no orders cycle, no engage/capture —
+    /// the deeper naval tranches stay out (the DOM-5 "how deep"
+    /// record). Default false: the engine never constructs, the
+    /// WorldState never moves — the golden identity.
+    bool naval_movement = false;
+    /// CAMP-DOM-6: the naval update cadence (campaign seconds; 60 =
+    /// the engine default — the ground update's own granularity).
+    int naval_update_sec = 60;
 
     /// CAMP-SCALE-1: path to the converted theater tables (cam2json
     /// --emit-tables output; f4/world/theater_tables.hpp reads it).
@@ -547,6 +566,26 @@ public:
     [[nodiscard]] const f4::campaign::GroundWar* ground_war() const
         noexcept {
         return ground_.get();
+    }
+
+    /// CAMP-DOM-6: write the naval engine's moved task forces into
+    /// the session's WorldState (the per-update sync's own method —
+    /// idempotent: the save path's second touch writes nothing; the
+    /// rows are already current). Null-engine no-op (movement off).
+    [[nodiscard]] f4::campaign::NavalWritebackResult
+    apply_naval_writeback() {
+        if (naval_ == nullptr) {
+            return f4::campaign::NavalWritebackResult{};
+        }
+        return f4::campaign::apply_naval_to(*naval_, ws_);
+    }
+
+    /// CAMP-DOM-6: the naval movement engine (null when the session
+    /// ran without naval_movement). Read access for the viewer's
+    /// naval face and the QC's counters.
+    [[nodiscard]] const f4::campaign::NavalWar* naval_war() const
+        noexcept {
+        return naval_.get();
     }
 
     /// The session's own WorldState (the write-back target; the world
@@ -934,6 +973,18 @@ private:
     /// battalions (the write-back's own activity rule).
     void sync_ground_entities_();
 
+    /// CAMP-DOM-6: fire the naval engine's update ticks for every
+    /// whole naval-second owed by the campaign clock (the ground
+    /// cadence's twin), then sync the moved task-force rows into the
+    /// session's WorldState (the `taskforces` query's serving face —
+    /// the wire-state rule) and mirror the 3D task-force entities.
+    void advance_naval_();
+
+    /// CAMP-DOM-6: the entity-side mirror — one pass over the
+    /// engine's task forces (transform only; read-first-write, the
+    /// ground mirror's own rule).
+    void sync_naval_entities_();
+
     /// FID-2: fire the aggregate engine's update ticks for every whole
     /// air-aggregate second owed by the campaign clock (the ground
     /// cadence's twin), then mirror moved flights into the sim's
@@ -1021,6 +1072,7 @@ private:
     std::unique_ptr<f4::campaign::RouteBuilder> route_builder_;
     std::unique_ptr<f4::campaign::Campaign> ladder_;
     std::unique_ptr<f4::campaign::GroundWar> ground_;
+    std::unique_ptr<f4::campaign::NavalWar> naval_;
     std::unique_ptr<f4::simulation::CampaignSimSpawner> spawner_;
     std::unique_ptr<f4::simulation::CampaignResultSink> sink_;
 
@@ -1055,6 +1107,10 @@ private:
     // the entity mirror only walks when the engine actually advanced).
     double ground_sec_accum_ = 0.0;
     int ground_synced_updates_ = 0;
+    /// CAMP-DOM-6: the naval cadence's accumulators (the ground
+    /// pair's twins).
+    double naval_sec_accum_ = 0.0;
+    int naval_synced_updates_ = 0;
 
     // FID: the fidelity-tier machinery. flights_ is null unless the
     // Tiered policy armed it (tiered() reads that); every member below

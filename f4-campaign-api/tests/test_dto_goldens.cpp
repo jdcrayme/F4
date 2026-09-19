@@ -418,9 +418,10 @@ TEST(DtoGoldens, AirfieldViewQuietGrid) {
 TEST(DtoGoldens, TaskForceView) {
     // CAMP-DOM-5 — the naval face: the wire's identity (the VU pair),
     // the owner slot, the sea subtype + the class table's name, the
-    // position AND the wire's own destination (the engine does not
-    // consume it yet — the as-built's "how deep" note rides the row),
-    // the TaskForce tail's supply byte, and this run's filing book.
+    // position AND the wire's own destination (CAMP-DOM-6's naval
+    // movement engine consumes it as the order), the TaskForce tail's
+    // supply byte, this run's filing book, and the movement face's
+    // heading byte (the additive tail, always present — the DTO rule).
     TaskForceView t;
     t.id_creator = 4040;
     t.id_num = 4040;
@@ -433,21 +434,24 @@ TEST(DtoGoldens, TaskForceView) {
     t.dest_y = 583;
     t.supply = 0;
     t.filings = 4;
+    t.heading = 190;
     EXPECT_EQ(encode_json(t),
               R"({"id_creator":4040,"id_num":4040,"team":1,)"
               R"("unit_subtype":3,"subtype_name":"Carrier",)"
               R"("x":753,"y":264,"dest_x":743,"dest_y":583,)"
-              R"("supply":0,"filings":4})");
+              R"("supply":0,"filings":4,"heading":190})");
 }
 
 TEST(DtoGoldens, TaskForceViewQuietRow) {
     // The unset face: a DEFAULT view — every wire fact 0, the
     // subtype name empty (the producer's word — the session always
-    // fills it from the class table), the honest book at 0.
+    // fills it from the class table), the honest book at 0, the
+    // heading byte at the wire's 0 (a force that never moved in this
+    // run reports the wire's own byte).
     TaskForceView t;
     EXPECT_EQ(encode_json(t),
               R"({"id_creator":0,"id_num":0,"team":0,)"
               R"("unit_subtype":0,"subtype_name":"",)"
               R"("x":0,"y":0,"dest_x":0,"dest_y":0,)"
-              R"("supply":0,"filings":0})");
+              R"("supply":0,"filings":0,"heading":0})");
 }

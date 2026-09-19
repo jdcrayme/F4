@@ -339,6 +339,14 @@ struct WarReport {
     bool unit_strike = false;       ///< the session's G2 opt-in
     int ground_losses_air = 0;      ///< ledger: vehicles lost to air
 
+    // CAMP-DOM-6: the task-force movement arm + its headline counters
+    // (the same provenance-echo pattern; the QC's exit 18 reads these).
+    bool naval_movement = false;    ///< the session's DOM-6 opt-in
+    int naval_updates = 0;          ///< engine update ticks fired
+    int naval_moved_events = 0;     ///< updates with >= 1 force moved
+    int naval_arrivals = 0;         ///< destination arrivals
+    int naval_march_grid = 0;       ///< fleet distance sailed (grid)
+
     // FID: which fidelity ran + the tier headline counters (the same
     // provenance-echo pattern as aa_combat; the summary's accel block
     // and the QC's exit 15/16 read these).

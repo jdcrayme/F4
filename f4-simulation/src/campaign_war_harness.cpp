@@ -537,6 +537,16 @@ void CampaignWarHarness::run_pass_(int run, const ProgressFn& on_sample) {
             report_.ground_features_repaired =
                 gw->stats().features_repaired;
         }
+        // CAMP-DOM-6: the task-force movement's headline counters (the
+        // QC's exit 18 + the summary's naval_move block read these).
+        report_.naval_movement = opts_.session.naval_movement;
+        if (const auto* nw = session_->naval_war(); nw != nullptr) {
+            report_.naval_updates = nw->stats().updates;
+            report_.naval_moved_events = nw->stats().moved_events;
+            report_.naval_arrivals = nw->stats().arrivals;
+            report_.naval_march_grid = static_cast<int>(
+                nw->stats().fleet_distance_fp >> 8);
+        }
         report_.ledger_teams.clear();
         for (const auto& t : session_->ledger().teams()) {
             WarHourSample::TeamPool p;

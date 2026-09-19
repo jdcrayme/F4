@@ -171,6 +171,12 @@ api::SaveResult EngineSessionHost::save(std::string_view path) {
     try {
         const auto writeback = session_->apply_writeback();
         (void)session_->apply_ground_writeback();
+        // CAMP-DOM-6: the naval rows are synced live per update (the
+        // `taskforces` query's serving face) — this second touch is
+        // the idempotent belt-and-braces (writes nothing when the
+        // sync already ran; covers a constructed-but-never-stepped
+        // engine).
+        (void)session_->apply_naval_writeback();
         const std::string json = session_->world_state().to_json_string();
         std::ofstream out(std::string(path), std::ios::binary);
         if (!out) {
@@ -557,6 +563,10 @@ api::QueryResult EngineSessionHost::query(const api::QuerySpec& spec) {
             v.dest_x = u.dest_x;
             v.dest_y = u.dest_y;
             v.supply = u.supply;
+            // CAMP-DOM-6: the movement face — the wire's heading byte
+            // (the naval engine stamps it when armed; otherwise the
+            // wire's own value rides verbatim).
+            v.heading = u.heading;
             if (filings != nullptr) {
                 const auto it = filings->find(u.id_num);
                 if (it != filings->end()) v.filings = it->second;

@@ -90,3 +90,9 @@ f4_campaign_add_test(test_naval_tasking test_naval_tasking.cpp)
 target_link_libraries(test_naval_tasking PRIVATE f4-json)
 target_compile_definitions(test_naval_tasking PRIVATE
     F4_SIMULATION_TEST_FIXTURES_DIR="${CMAKE_SOURCE_DIR}/f4-simulation/tests/fixtures")
+
+# DOM-6 — the task-force movement engine (the naval GroundWar sibling):
+# the snapshot filter, the war-pair gate, the fixed-point walk, the
+# arrival snap + hold, the cadence/determinism pins, and the
+# WorldState sync's activity gate.
+f4_campaign_add_test(test_naval_war test_naval_war.cpp)

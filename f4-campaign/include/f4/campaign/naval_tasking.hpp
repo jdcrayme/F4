@@ -17,13 +17,15 @@
 // the sibling of rank_battalion_targets (ground_war.hpp): same shape,
 // sea metric.
 //
-// WHAT STAYS OUT (the "how deep" record — plan §8 DOM-5 as-built):
-// task-force MOVEMENT (the wire's dest_x/dest_y is decoded but never
-// consumed — a naval GroundWar sibling is its own tranche), naval
-// threat-map painting (MoveType Naval=6 arrays exist on the wire, the
-// map paints land AD only), carrier airbases (the reference's naval
+// WHAT STAYS OUT (the "how deep" record — plan §8 DOM-5 as-built;
+// CAMP-DOM-6 landed the first item: the task-force MOVEMENT engine,
+// naval_war.hpp — the wire's dest_x/dest_y is now consumed as the
+// order). Still out: a naval ORDERS cycle (re-tasking an arrived
+// force onto a new objective — the GTM sibling), naval threat-map
+// painting (MoveType Naval=6 arrays exist on the wire, the map
+// paints land AD only), carrier airbases (the reference's naval
 // airbase scoring), task groups / CVN ops. The wrap makes the naval
-// targets REAL to the tasking pipeline; it does not make them MOVE.
+// targets REAL to the tasking pipeline; DOM-6 makes them MOVE.
 
 #pragma once
 

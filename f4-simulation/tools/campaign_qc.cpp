@@ -324,6 +324,12 @@ struct Args {
     // pool), routes like strikes, books per target. False = the golden
     // identity (anti-ship requests stay target-less).
     bool naval_tasking = false;
+    // CAMP-DOM-6: the task-force movement arm (--naval-movement) — the
+    // naval GroundWar sibling: every belligerent task force walks
+    // toward the wire's own dest, the moved rows serve live on the
+    // taskforces query, the save carries them. False = the golden
+    // identity (the engine never constructs; the fleet stays put).
+    bool naval_movement = false;
     // Real-data tier: the wcd2json export folded over the built-in table.
     std::string weapon_data;
     // FID-6 — the acceleration certificate (--accel <x>): the tiered
@@ -353,6 +359,7 @@ struct Args {
         "          [--wreck-hold <sec>] [--war-max-wall <sec>] [--aa-combat]\n"
         "          [--ground-war] [--ground-update-sec <sec>]\n"
         "          [--ground-orders-sec <sec>] [--ground-resupply-sec <sec>]\n"
+        "          [--naval-tasking] [--naval-movement]\n"
         "          [--unit-strike] [--weapon-data <wcd.json>] [--out-dir <dir>]\n"
         "          [--synthesize-airbases]\n"
         "          [--theater-tables <tables.json>] [--pilot-skill]\n"
@@ -430,6 +437,7 @@ Args parse_args(int argc, char** argv) {
         else if (k == "--rating-decay") a.rating_decay = true;
         else if (k == "--airbase-scheduling") a.airbase_scheduling = true;
         else if (k == "--naval-tasking") a.naval_tasking = true;
+        else if (k == "--naval-movement") a.naval_movement = true;
         else if (k == "--synthesize-airbases") a.synthesize_airbases = true;
         else if (k == "--weapon-data") a.weapon_data = next();
         else if (k == "--ground-update-sec")
@@ -620,6 +628,9 @@ int run_war(const Args& args) {
     hopts.session.rating_decay = args.rating_decay;
     hopts.session.airbase_scheduling = args.airbase_scheduling;
     hopts.session.naval_tasking = args.naval_tasking;
+    // CAMP-DOM-6: the task-force movement arm (opt-in, the same
+    // contract).
+    hopts.session.naval_movement = args.naval_movement;
     hopts.session.weapon_data_path = args.weapon_data;
     // FID-6: the accel certificate FORCES the tiered policy — the war
     // runs the game's own way (aggregates until observed), which is
@@ -673,8 +684,9 @@ int run_war(const Args& args) {
                  "  scheduling:   airbase-scheduling=%s\n",
                  hopts.session.airbase_scheduling ? "on" : "off");
     std::fprintf(stderr,
-                 "  naval:        naval-tasking=%s\n",
-                 hopts.session.naval_tasking ? "on" : "off");
+                 "  naval:        naval-tasking=%s naval-movement=%s\n",
+                 hopts.session.naval_tasking ? "on" : "off",
+                 hopts.session.naval_movement ? "on" : "off");
 
     std::string err;
     auto harness = CampaignWarHarness::create(hopts, &err);
@@ -916,6 +928,22 @@ int run_war(const Args& args) {
                 w.number_key("ground_features_repaired",
                              r.ground_features_repaired);
             }
+        }
+        // CAMP-DOM-6: the naval movement block — emitted only when
+        // armed (the ground block's own provenance rule; disarmed runs
+        // keep their exact bytes).
+        if (r.naval_movement) {
+            w.put(",\n    ");
+            w.put("\"naval_movement\": ");
+            w.put("true");
+            w.put(",    ");
+            w.number_key("naval_updates", r.naval_updates);
+            w.put(",    ");
+            w.number_key("naval_moved_events", r.naval_moved_events);
+            w.put(",    ");
+            w.number_key("naval_arrivals", r.naval_arrivals);
+            w.put(",    ");
+            w.number_key("naval_march_grid", r.naval_march_grid);
         }
         w.put(",\n    ");
         w.put("\"belligerent_air\": ");
@@ -1211,6 +1239,14 @@ int run_war(const Args& args) {
                     r.ground_captures, r.ground_front_columns,
                     r.ground_march_grid);
     }
+    // CAMP-DOM-6: the naval movement block, printed when armed (the
+    // tasking mode's own naval-counter pattern).
+    if (r.naval_movement) {
+        std::printf("war: naval_move updates=%d moved=%d arrivals=%d "
+                    "march=%d grid\n",
+                    r.naval_updates, r.naval_moved_events,
+                    r.naval_arrivals, r.naval_march_grid);
+    }
     std::printf("war: deterministic=%s drift=%s leak=%s alive=%s "
                 "md5=%s\n",
                 r.verdict.deterministic ? "yes" : "NO",
@@ -1336,6 +1372,24 @@ int run_war(const Args& args) {
                      "rows (air=true) in campaign_result.json; a short "
                      "horizon (CAS TOT ~15 min) needs --war >= 0.5.\n");
         return 14;
+    }
+    // CAMP-DOM-6: the naval movement's own gate — the exit-13
+    // philosophy, naval edition. An ARMED movement engine that fired
+    // no updates or moved no task force is a wiring failure (the
+    // domain-4 filter, the cadence, the sync), not a quiet fleet:
+    // arrivals are NOT required (a fleet already at its destination
+    // holds — movement alone passes).
+    if (r.naval_movement && (r.naval_updates <= 0 ||
+                             r.naval_moved_events == 0)) {
+        std::fprintf(stderr,
+                     "campaign_qc: QC FAILURE — the naval movement was "
+                     "armed and moved NOTHING (updates=%d, moved=%d) "
+                     "(exit 18). Inspect the war block's naval_move "
+                     "counters and the taskforces query's rows; a "
+                     "fleet with no pending destination is a legal "
+                     "hold — check the save's dest_x/dest_y bytes.\n",
+                     r.naval_updates, r.naval_moved_events);
+        return 18;
     }
     // FID-6, gate 15: DILATION. The certificate's whole point — the
     // interactive preset the tiered campaign actually sustains. A

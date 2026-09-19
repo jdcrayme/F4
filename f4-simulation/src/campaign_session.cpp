@@ -580,6 +580,28 @@ CampaignSession::create(const CampaignSessionOptions& opts,
             session->ledger_.get(), gcfg);
     }
 
+    // 11b-2. CAMP-DOM-6 — the task-force movement engine (the naval
+    //      GroundWar sibling): snapshot the wire's domain-4 TaskForce
+    //      rows, walk each belligerent force toward its own dest at
+    //      the update cadence, and sync the moved rows into the
+    //      session's WorldState per update (the `taskforces` query's
+    //      serving face). NO ledger — the engine books nothing (see
+    //      f4/campaign/naval_war.hpp). Default off: never constructed,
+    //      never touches a byte (the golden identity).
+    if (opts.naval_movement) {
+        f4::campaign::NavalWarConfig ncfg;
+        ncfg.update_sec = opts.naval_update_sec > 0
+            ? opts.naval_update_sec : 60;
+        session->naval_ = std::make_unique<f4::campaign::NavalWar>(
+            static_cast<const f4::world::ICampaignSource&>(
+                session->adapters_->campaign),
+            static_cast<const f4::world::ITeamSource&>(
+                session->adapters_->teams),
+            static_cast<const f4::world::IUnitCoreSource&>(
+                session->adapters_->units),
+            ncfg);
+    }
+
     // 11c. FID — the aggregate flight engine (Tier-A truth; see
     //      Docs/FIDELITY_TIERS_PLAN.md). Tiered sessions only: a
     //      FullFidelity session never constructs it and never defers
@@ -780,6 +802,13 @@ bool CampaignSession::advance(double real_seconds, int max_steps_override) {
                 // CAMP-HOST-2: the flips the ground pass just booked.
                 emit_capture_events_();
             }
+            // CAMP-DOM-6: the naval movement rides the same cadence
+            // (its own accumulator; the moved rows sync inside —
+            // the query face reads the WorldState, not the engine).
+            if (naval_ != nullptr) {
+                naval_sec_accum_ += static_cast<double>(whole);
+                advance_naval_();
+            }
             // FID: the aggregate flights ride the same whole-second
             // cadence (the engine accumulates to its own update gate;
             // the tier pass runs per second — O(flights)).
@@ -975,6 +1004,61 @@ void CampaignSession::sync_ground_entities_() {
             if (!alive.has_value() || alive->as_bool()) {
                 h.set_tag(f4::entities::tags::ALIVE,
                           f4::entities::TagValue::from(false));
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// CAMP-DOM-6 — the task-force movement (the naval GroundWar sibling)
+// ---------------------------------------------------------------------------
+
+void CampaignSession::advance_naval_() {
+    if (naval_ == nullptr) return;
+
+    // The engine's tick() accumulates on its own clock; feed it the
+    // whole campaign seconds owed (the ground cadence's twin — one
+    // big tick == N small ones, the C2 pin).
+    if (naval_sec_accum_ >= 1.0) {
+        const auto whole = static_cast<f4::campaign::CampaignTime>(
+            naval_sec_accum_);
+        naval_sec_accum_ -= static_cast<double>(whole);
+        naval_->tick(whole);
+    }
+
+    // Sync whenever the engine actually advanced: the moved rows land
+    // in the session's WorldState (the `taskforces` query reads the
+    // WorldState — the wire-state rule — so the sync IS the serving
+    // face), then the 3D task-force entities mirror.
+    if (naval_->stats().updates != naval_synced_updates_) {
+        naval_synced_updates_ = naval_->stats().updates;
+        (void)apply_naval_writeback();
+        sync_naval_entities_();
+    }
+}
+
+void CampaignSession::sync_naval_entities_() {
+    // One full pass per engine update over the engine's task forces —
+    // only CHANGED transforms write (read first, the ground mirror's
+    // own rule). Sea hulls that never got a sim entity (the spawner's
+    // own population rule) simply miss the id map and are skipped:
+    // the WorldState row is the serving face either way.
+    auto& world = sim_->world();
+    for (const auto& n : naval_->units()) {
+        const auto it = unit_id_map_.find(n.vu);
+        if (it == unit_id_map_.end()) continue;
+        f4::entities::EntityHandle h(it->second, &world);
+
+        auto* tf = h.get<f4::entities::TransformComponent>();
+        if (tf != nullptr) {
+            const f4::geo::WorldPosition want{
+                static_cast<double>(n.x) * kFtPerGrid,
+                static_cast<double>(n.y) * kFtPerGrid,
+                tf->position.z   // sea level is not modeled; z keeps
+                                 // the populate-time value
+            };
+            if (want.x != tf->position.x || want.y != tf->position.y) {
+                tf->position = want;
             }
         }
     }

@@ -1192,8 +1192,8 @@ wire's own dest_x/dest_y (unconsumed — note 10), the supply byte,
 `filings`. spec.team filters on the owner slot. (10) THE "HOW
 DEEP" RECORD (the tranche's decide-half): the wrap makes the
 naval targets REAL to the tasking pipeline — it does not make
-them MOVE. Task-force movement (the wire's dest_x/dest_y is
-decoded but never consumed — a naval GroundWar sibling), naval
+them MOVE. ~~Task-force movement~~ — SHIPPED below as
+**CAMP-DOM-6** (the naval GroundWar sibling). Naval
 threat-map painting (the MoveType Naval=6 arrays exist on the
 wire; the map paints land AD only), carrier airbases (the
 reference's naval airbase scoring), task groups / CVN ops, and a
@@ -1218,6 +1218,74 @@ one-for-one, the based-squadron route pin), and the session gates
 mission_filed one-for-one, the arm-off golden identity, the
 two-run query determinism).
 
+### CAMP-DOM-6 — task-force movement (the naval GroundWar sibling)
+- The DOM-5 as-built's "how deep" record named it first: the wire's
+  `dest_x`/`dest_y` is decoded on every domain-4 row and no engine
+  consumed it — the tasking pipeline could file anti-ship packages at
+  a fleet that sat frozen at its save-time grid cells. This tranche
+  lands the movement half of the ground war's shape, behind the same
+  opt-in contract (`naval_movement`, the session opt + the QC's
+  `--naval-movement`).
+- **Gate (as built)**: `NavalWar` (f4-campaign, `naval_war.hpp`) —
+  the GroundWar structural twin, movement-only: the wire's own
+  dest IS the order (no naval orders cycle, no re-tasking — the GTM
+  sibling stays in the "how deep" record), every belligerent task
+  force walks toward it at its movement speed (the UCD enrichment
+  when the wire carries it, else the sea family default table — the
+  ground table's own documented-limitation pattern: the reference's
+  naval speeds ride UCD data our exports cannot see), sub-grid travel
+  in 1/256 fixed point with the ground move_phase_'s exact arithmetic
+  (integer-truncated sqrt normalization, the arrival snap, the
+  heading byte via atan2 ÷ 1.40625°), the due-time update wheel on
+  its own clock (update_sec = 60 — one big tick == N small ones, the
+  C2 pin), the war-pair gate (the shared `belligerent_pair`
+  derivation; neutrals stand down — a legal pinned state, the ground
+  engine's own rule), and a war-less world is inert. NO LEDGER —
+  movement is not a war fact the books own (the one-ledger-writer
+  discipline; GroundWar syncs the ledger because it ATTRITES,
+  NavalWar only moves — the map must know, the books don't care), no
+  engage/capture (a naval-loss book stays a later tranche's), no
+  supply/fatigue gates (the TaskForce tail's supply byte is carried,
+  not doctrine — its naval semantics are unseen wire). THE SERVING
+  FACE: the session syncs the moved rows into its own WorldState per
+  update (`apply_naval_to`, the ground write-back's twin, called live
+  — the `taskforces` query reads the WorldState, the wire-state rule,
+  so the sync IS the serving face; the save path's own call is the
+  idempotent second touch), the 3D task-force entities mirror the
+  transform, and the DTO gains the additive `heading` tail (always
+  present, at the END — the DTO rule; kProtocolVersion stays 1). The
+  identity statement: movement OFF — no engine, no row touched,
+  byte-identical everywhere (pinned); movement ON with tasking OFF —
+  the books don't move (the QC war's ledger MD5 is identical
+  arm-on/arm-off; positions are not book facts); movement + tasking —
+  the pool ranks the moving map (the live positions feed
+  rank_taskforce_targets through the same adapters).
+- **As-built notes**: (1) THE SPEEDS: carrier/battleship 25, cruiser/
+  destroyer/frigate 30, patrol 35, amphib 12, supply/tanker/transport
+  15 kph — cruise rates in the reference's own scale (≈ knots ×
+  1.852), the same honest-invention bar as the ground family table;
+  a UCD `movement_speed` on the wire overrides (the ground rule
+  verbatim). (2) THE KUNSAN GEOMETRY IS THE PIN: the carrier's
+  25 kph over the ~319-grid haul (753,264 → 743,583) sails it home
+  inside the 24-hour certificate's horizon; the frigate's 1.4-grid
+  diag (304,468 → 305,469) snaps on the third 60-s update — the
+  session test pins the arrived row, the heading bytes (the
+  frigate's 45° → 32; the carrier's −1.8° → 255), and the sub-grid
+  truncation (the carrier's first 3 campaign minutes move it exactly
+  (753,264) → (752,265)). (3) THE SYNC's ACTIVITY GATE: only rows
+  the engine dirtied are written — x/y/heading/last_move; dest is
+  CONSUMED never written (no orders cycle exists to reassign it),
+  roster/supply are carried never mutated (a mirror that only moved
+  must not normalize the row's other bytes); a row-identity mismatch
+  is loud (the result's unmatched list), a movement-quiet war
+  round-trips byte-identically. (4) THE QC: the war mode's
+  `naval_move: updates=… moved=… arrivals=… march=… grid` counter
+  line + the summary's naval block (armed-only — disarmed runs keep
+  their exact bytes) + exit 18 (armed & moved nothing — the exit-13
+  philosophy; arrivals NOT required, a fleet at its destination
+  holds). (5) The tasking mode gains nothing — it runs no session,
+  and movement is a war-mode arm like the ground war's.
+
 ### CAMP-DOM-* — domain tranches (each its own landed series, upstream-mapped)
 - ~~**DOM-2 supply depth**~~ — SHIPPED above.
 - ~~**DOM-3 personnel**~~ — SHIPPED above.
@@ -1225,6 +1293,10 @@ two-run query determinism).
 - ~~**DOM-5 naval**~~ — SHIPPED above (the wrap; the "how deep"
   record in the as-built notes names what a deeper naval tranche
   would take).
+- ~~**DOM-6 task-force movement**~~ — SHIPPED above (the naval
+  GroundWar sibling; the record's remaining naval depth — the
+  orders cycle, the threat-map painting, the carrier airbases, the
+  task groups, the loss book — stays exactly where DOM-5 left it).
 
 ## 9. What does NOT change
 

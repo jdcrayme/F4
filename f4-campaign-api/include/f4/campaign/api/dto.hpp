@@ -685,12 +685,19 @@ struct TaskForceView {
     int x{0};                      ///< grid column
     int y{0};                      ///< grid row
     int dest_x{0};                 ///< movement destination (the wire's
-    int dest_y{0};                 ///< own field; the engine does not
-                                   ///< consume it yet — the as-built's
-                                   ///< "how deep" note)
+    int dest_y{0};                 ///< own field — CAMP-DOM-6's naval
+                                   ///< movement engine consumes it as
+                                   ///< the order; the row's x/y walk
+                                   ///< toward it while it holds)
     int supply{0};                 ///< the TaskForce tail's supply byte
     int filings{0};                ///< this run's anti-ship filings at
                                    ///< this task force
+    /// CAMP-DOM-6: the movement face — the wire's heading byte
+    /// (0-255, ×1.40625 deg, 0 = north) the naval movement engine
+    /// stamps; a force that never moved in this run reports the
+    /// wire's own byte (additive, at the END, always present — the
+    /// DTO rule).
+    int heading{0};
 };
 
 inline void encode_taskforce(f4::json::Writer& w, const TaskForceView& t) {
@@ -716,6 +723,8 @@ inline void encode_taskforce(f4::json::Writer& w, const TaskForceView& t) {
     w.number(t.supply);
     w.raw(",\"filings\":");
     w.number(t.filings);
+    w.raw(",\"heading\":");
+    w.number(t.heading);
     w.put('}');
 }
 

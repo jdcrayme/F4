@@ -23,6 +23,8 @@ add_library(f4-campaign STATIC
     src/world_writeback.cpp
     src/ground_war.cpp
     src/ground_writeback.cpp
+    src/naval_war.cpp
+    src/naval_writeback.cpp
     src/naval_tasking.cpp
     src/flight_aggregate.cpp
     src/flight_writeback.cpp
