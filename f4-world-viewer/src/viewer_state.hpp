@@ -680,10 +680,6 @@ struct ViewerApp::Impl {
     // default — reference data, not something every session needs on
     // screen; one click in the Windows menu brings it back.
     bool show_campaign_info = false;
-    // Gates the Layers panel's "Map Legend" section (the old floating
-    // Legend window, folded into the panel). Kept as a flag so the
-    // Windows-menu toggle and the collapsing header stay in sync.
-    bool show_legend = true;
 
     // Canvas layer toggles
     bool show_terrain = true;
@@ -692,26 +688,12 @@ struct ViewerApp::Impl {
     bool show_grid = false;
     // Visualization overlays — toggled off by default to reduce clutter
     // when the user just wants to see the strategic picture. Enable
-    // individually to inspect specific layers.
+    // individually to inspect specific layers. Per-entity data that only
+    // makes sense for one entity (a unit's destination, its waypoints)
+    // has no toggle — it draws for the SELECTED unit instead.
     bool show_radar_arcs = false;             // 8-wedge detection coverage per radar objective
-    bool show_ground_layout_overlay = true;   // runway/taxi/parking shapes on main canvas (zoom-gated)
-    // Relationship lines default OFF: with hundreds of tasked flights the
-    // whole-web view is unreadable spaghetti; each line family is one
-    // checkbox in View > Overlays / the Layers panel for targeted study.
-    bool show_unit_destinations = false;      // thin line from unit to (dest_x, dest_y)
-    bool show_waypoints = false;              // unit waypoint polyline + dots
-    // When true, the 2D canvas overlays real KoreaObj 3D models for each
-    // feature on the SELECTED objective (using a top-down orthographic
-    // camera that matches the 2D view). Requires KoreaObj.HDR/.LOD/.TEX
-    // to be discoverable under the current Installation. Shares the
-    // mesh+texture cache with the 3D Ground Layout panel, so models
-    // already loaded by either view are free for the other. Zoom-gated
-    // via the same `cam_zoom > 4.0f` threshold as the 2D ground-layout
-    // overlay so the meshes only appear when the user is zoomed in
-    // enough to actually see them.
-    bool show_feature_meshes = true;
     bool show_squadron_links = false;         // squadron → home airbase thin line
-    bool show_hierarchy_lines = false;        // battalion → brigade parent lines (planned)
+    bool show_hierarchy_lines = false;        // battalion ↔ brigade parent lines
     // --- B.3 campaign-QC layers ------------------------------------------
     // The tasking picture: flights colored by owner already render via the
     // base unit pass; these overlays add the RELATIONSHIPS the campaign
@@ -871,6 +853,11 @@ struct ViewerApp::Impl {
     /// with a zoom that fits the bbox with a small margin. No-op
     /// if the objective has no layout or features.
     void fit_to_selection_layout();
+
+    /// The zoom (pixels per grid unit) at which the whole 1024×1024
+    /// theater fits the window — the scale-out extent. The wheel zoom
+    /// clamps to this; fit_to_world() centers on it.
+    [[nodiscard]] float fit_zoom() const;
 
     // -----------------------------------------------------------------------
     // Ground Layout 3D panel state

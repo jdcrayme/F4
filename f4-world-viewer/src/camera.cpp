@@ -34,13 +34,17 @@ void ViewerApp::Impl::screen_to_world(float sx, float sy, float* gx, float* gy) 
     *gy = cam_y - (sy - cy) / cam_zoom;   // un-flip y
 }
 
-void ViewerApp::Impl::fit_to_world() {
-    const float grid_size = 1024.0f;
-    cam_x = grid_size * 0.5f;
-    cam_y = grid_size * 0.5f;
+float ViewerApp::Impl::fit_zoom() const {
+    constexpr float grid_size = 1024.0f;
     const float zoom_x = static_cast<float>(window_w) / grid_size;
     const float zoom_y = static_cast<float>(window_h) / grid_size;
-    cam_zoom = std::min(zoom_x, zoom_y) * 0.95f;
+    return std::min(zoom_x, zoom_y) * 0.95f;
+}
+
+void ViewerApp::Impl::fit_to_world() {
+    cam_x = 1024.0f * 0.5f;
+    cam_y = 1024.0f * 0.5f;
+    cam_zoom = fit_zoom();
 }
 
 void ViewerApp::Impl::fit_to_selection_layout() {

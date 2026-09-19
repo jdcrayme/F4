@@ -121,7 +121,9 @@ void ViewerApp::draw_campaign_and_teams_view() {
 
         ImGui::Separator();
 
-        // Per-team detail tree.
+        // Per-team detail tree. Each row leads with the team's map
+        // color — the color key the old Legend window carried, moved
+        // here where the team data actually lives.
         for (std::size_t i = 0; i < impl_->teams().size(); ++i) {
             auto h = impl_->handle(impl_->teams()[i]);
             auto* cid = h.get<f4::entities::CampaignIdentityComponent>();
@@ -131,6 +133,13 @@ void ViewerApp::draw_campaign_and_teams_view() {
             std::snprintf(label, sizeof(label), "[%ld] %s",
                           static_cast<long>(i),
                           t_name.empty() ? "(empty)" : t_name.c_str());
+            ImGui::PushID(static_cast<int>(i));
+            const auto cc = color_for_owner(static_cast<uint8_t>(i));
+            ImGui::ColorButton("##teamcolor",
+                ImVec4(cc.r / 255.0f, cc.g / 255.0f, cc.b / 255.0f, 1.0f),
+                ImGuiColorEditFlags_NoTooltip, ImVec2(12, 12));
+            ImGui::PopID();
+            ImGui::SameLine();
             if (ImGui::TreeNode(label)) {
                 if (tc) {
                     ImGui::Text("flags:     0x%02x", tc->flags);

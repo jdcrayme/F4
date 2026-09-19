@@ -22,8 +22,6 @@
 #include "viewer_state.hpp"
 #include "diagnostics.hpp"
 
-#include <f4/terrain/terrain_data.hpp>
-#include <f4/viewer/enum_text.hpp>
 #include <f4/viewer/file_dialog.hpp>
 #include <f4/world_types/class_table.hpp>        // unit_subtype_name(), DOMAIN_*
 
@@ -44,8 +42,8 @@ namespace f4::viewer {
 
 // The View menu and the Layers panel render the same toggle groups through
 // for_each_layer_group(), so the two lists cannot drift apart again.
-// Window toggles (ATO, Campaign Session, Minimap, Legend…) deliberately
-// live in the Windows menu instead — these groups are canvas LAYERS only.
+// Window toggles (ATO, Campaign Session, Minimap…) deliberately live in
+// the Windows menu instead — these groups are canvas LAYERS only.
 namespace {
 
 struct LayerToggle {
@@ -68,20 +66,16 @@ void for_each_layer_group(ImplT* impl, Fn&& fn) {
     });
     fn("Overlays", 1, {
         {"Radar arcs",               &impl->show_radar_arcs},
-        {"Ground layout",            &impl->show_ground_layout_overlay},
-        {"Feature 3D models",        &impl->show_feature_meshes},
-        {"Unit destinations",        &impl->show_unit_destinations},
-        {"Waypoints",                &impl->show_waypoints},
         {"All flight plans",         &impl->show_all_routes},
         {"Squadron→Airbase",         &impl->show_squadron_links},
         {"Hierarchy lines (BN→BDE)", &impl->show_hierarchy_lines},
     });
-    fn("Campaign QC (B.3)", 2, {
+    fn("Campaign QC", 2, {
         {"Mission→Target links",  &impl->show_mission_links},
         {"Package→Element links", &impl->show_package_links},
         {"Bullseye",              &impl->show_bullseye},
     });
-    fn("Live session (V-CAMP)", 3, {
+    fn("Live session", 3, {
         {"Live aircraft layer", &impl->show_live_layer},
         {"Live routes",         &impl->show_live_routes},
         {"Threat map overlay",  &impl->show_threat_overlay},
@@ -233,8 +227,6 @@ void ViewerApp::draw_imgui() {
             // Canvas layers, grouped into submenus (same table as the
             // Layers panel).
             draw_layer_groups_menu(impl_.get());
-            ImGui::Separator();
-            if (ImGui::MenuItem("Fit to World", "F")) impl_->fit_to_world();
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("Windows")) {
@@ -243,7 +235,6 @@ void ViewerApp::draw_imgui() {
             // panels keep their own Tools menu entries.
             ImGui::MenuItem("Layers", nullptr, &impl_->show_layers_panel);
             ImGui::MenuItem("Inspector", nullptr, &impl_->show_inspector);
-            ImGui::MenuItem("Map Legend (in Layers)", nullptr, &impl_->show_legend);
             ImGui::Separator();
             ImGui::MenuItem("Campaign Info", nullptr, &impl_->show_campaign_info);
             ImGui::MenuItem("ATO / Tasking", nullptr, &impl_->show_ato);
@@ -352,7 +343,7 @@ void ViewerApp::draw_imgui() {
         }
         if (ImGui::BeginMenu("Help")) {
             ImGui::TextDisabled("F4 World Viewer");
-            ImGui::TextDisabled("Pan: drag  Zoom: wheel  Select: click");
+            ImGui::TextDisabled("Pan: drag  Zoom: wheel  Select: click  Fit: F");
             ImGui::TextDisabled("Engine-agnostic F4 world inspector");
             ImGui::EndMenu();
         }
@@ -361,9 +352,9 @@ void ViewerApp::draw_imgui() {
 
     // --- Layers panel (left side) ---
     // Organized as collapsing sections so the default view is a few
-    // headers instead of a ~20-checkbox wall: Base layers open, every
-    // optional group (overlays, QC, live session, filters, legend)
-    // collapsed until wanted.
+    // headers instead of a checkbox wall: Base layers open, every
+    // optional group (overlays, QC, live session, filters) collapsed
+    // until wanted.
     ImGui::SetNextWindowPos(ImVec2(10, 30), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize(ImVec2(240, 0), ImGuiCond_FirstUseEver);
     if (ImGui::Begin("Layers", &impl_->show_layers_panel,
@@ -402,73 +393,9 @@ void ViewerApp::draw_imgui() {
             }
         }
 
-        if (ImGui::CollapsingHeader("Camera")) {
-            ImGui::SliderFloat("Zoom", &impl_->cam_zoom, 0.1f, 150.0f, "%.1f");
-            if (ImGui::Button("Fit to World")) impl_->fit_to_world();
-            // Phase 2: keyboard shortcut hint.
-            ImGui::SameLine();
-            ImGui::TextDisabled("(F)");
-        }
-
-        // --- Map legend (the old floating Legend window, folded in) ---
-        // SetNextItemOpen(Always) binds the header's open state to
-        // show_legend, so the Windows-menu "Map Legend" toggle and the
-        // header arrow stay in sync in both directions.
-        ImGui::SetNextItemOpen(impl_->show_legend, ImGuiCond_Always);
-        if (ImGui::CollapsingHeader("Map Legend")) {
-            impl_->show_legend = true;
-            ImGui::TextUnformatted("Terrain");
-            for (int t = 0; t <= 5; ++t) {
-                const auto c = f4::terrain::TerrainData::color_for_tile_type(
-                    static_cast<f4::terrain::TileType>(t));
-                ImGui::PushID(t);
-                ImGui::ColorButton("##sw",
-                    ImVec4(c.r / 255.0f, c.g / 255.0f, c.b / 255.0f, 1.0f),
-                    ImGuiColorEditFlags_NoTooltip, ImVec2(12, 12));
-                ImGui::PopID();
-                ImGui::SameLine();
-                ImGui::TextUnformatted(f4::terrain::tile_type_name(
-                    static_cast<f4::terrain::TileType>(t)));
-            }
-            ImGui::Separator();
-            ImGui::TextUnformatted("Teams (color)");
-            // Resolve team names from the loaded WorldState.teams[] when
-            // available. Falls back to the legacy hardcoded names only
-            // when no world is loaded. The .cmp file's 8 team slots each
-            // carry a 20-byte name string — using them ensures the legend
-            // matches whatever campaign is actually loaded (e.g. slot 1
-            // is "U.S." in the Korea fixture, NOT "Enemy" as the legacy
-            // array claimed).
-            const char* fallback_names[] = {
-                "0 Neutral", "1 Enemy", "2 Friendly", "3 ROK",
-                "4 Japan", "5 DPRK", "6 PRC", "7 Other"
-            };
-            for (int i = 0; i < 8; ++i) {
-                const auto c = color_for_owner(static_cast<uint8_t>(i));
-                ImGui::PushID(i);
-                ImGui::ColorButton("##sw",
-                    ImVec4(c.r / 255.0f, c.g / 255.0f, c.b / 255.0f, 1.0f),
-                    ImGuiColorEditFlags_NoTooltip, ImVec2(12, 12));
-                ImGui::PopID();
-                ImGui::SameLine();
-                if (impl_->world_loaded && i < static_cast<int>(impl_->teams().size())) {
-                    auto h = impl_->handle(impl_->teams()[i]);
-                    auto* cid = h.get<f4::entities::CampaignIdentityComponent>();
-                    const auto& t_name = cid ? cid->callsign : std::string();
-                    char label[64];
-                    if (t_name.empty() || t_name == "XX") {
-                        std::snprintf(label, sizeof(label), "%d (empty)", i);
-                    } else {
-                        std::snprintf(label, sizeof(label), "%d %s", i, t_name.c_str());
-                    }
-                    ImGui::TextUnformatted(label);
-                } else {
-                    ImGui::TextUnformatted(fallback_names[i]);
-                }
-            }
-        } else {
-            impl_->show_legend = false;
-        }
+        // (The old Camera zoom slider + Fit-to-World button are gone:
+        // the wheel zoom clamps to the fit extent, and the map scale
+        // reference line replaces the numeric zoom readout.)
 
         // Status (only takes rows when there is something to say).
         if (!impl_->status_msg.empty() || !impl_->last_error.empty()) {

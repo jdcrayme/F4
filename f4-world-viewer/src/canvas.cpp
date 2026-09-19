@@ -61,7 +61,12 @@ void ViewerApp::handle_input() {
         float gx_before, gy_before;
         impl_->screen_to_world(mouse.x, mouse.y, &gx_before, &gy_before);
         impl_->cam_zoom *= (wheel > 0) ? 1.15f : (1.0f / 1.15f);
-        impl_->cam_zoom = std::clamp(impl_->cam_zoom, 0.05f, 2000.0f);
+        // Scale-out stops at the fit-to-world extent (the whole theater
+        // fills the window — the most zoomed-out useful view, and what
+        // the old Fit-to-World button/slider gave); scale-in ceiling is
+        // unchanged.
+        impl_->cam_zoom =
+            std::clamp(impl_->cam_zoom, impl_->fit_zoom(), 2000.0f);
         float gx_after, gy_after;
         impl_->screen_to_world(mouse.x, mouse.y, &gx_after, &gy_after);
         impl_->cam_x += gx_before - gx_after;
@@ -654,24 +659,11 @@ void ViewerApp::draw_canvas() {
                 255};
             f4::renderer::RenderEntityIcon(h, p.x, p.y, s, c, outline);
 
-            // Destination line — reads from MovementOrdersComponent.
-            if (impl_->show_unit_destinations) {
-                auto* mo = h.get<f4::entities::MovementOrdersComponent>();
-                if (mo) {
-                    const int16_t dest_x = mo->dest_x;
-                    const int16_t dest_y = mo->dest_y;
-                    if (dest_x != static_cast<int16_t>(ux) || dest_y != static_cast<int16_t>(uy)) {
-                        const Vector2 d = impl_->world_to_screen(
-                            static_cast<float>(dest_x), static_cast<float>(dest_y));
-                        DrawLineEx(p, d, 1.0f, Color{c.r, c.g, c.b, 160});
-                    }
-                }
-            }
-
-            // Waypoint polyline — only for the selected unit, the
-            // selected squadron's flights, or every unit when "all
-            // flight plans" is on (default: selected-only, so the
-            // polylines don't cover the map).
+            // Selection state for the per-unit detail lines below:
+            // destinations and waypoints are drawn ONLY for the selected
+            // unit (its squadron's flights when a squadron is selected,
+            // or everything under "all flight plans") — as map-wide
+            // overlays they were an unreadable tangle.
             const bool unit_selected =
                 impl_->sel_kind == Impl::SelectionKind::Unit &&
                 impl_->sel_entity == eid;
@@ -681,9 +673,25 @@ void ViewerApp::draw_canvas() {
                 auto* fp = h.get<f4::entities::FlightPlanComponent>();
                 squadron_selected = fp && fp->squadron == impl_->sel_entity;
             }
-            if (impl_->show_waypoints &&
-                (unit_selected || squadron_selected ||
-                 impl_->show_all_routes)) {
+
+            // Destination line — reads from MovementOrdersComponent.
+            if (unit_selected) {
+                auto* mo = h.get<f4::entities::MovementOrdersComponent>();
+                if (mo) {
+                    const int16_t dest_x = mo->dest_x;
+                    const int16_t dest_y = mo->dest_y;
+                    if (dest_x != static_cast<int16_t>(ux) || dest_y != static_cast<int16_t>(uy)) {
+                        const Vector2 d = impl_->world_to_screen(
+                            static_cast<float>(dest_x), static_cast<float>(dest_y));
+                        DrawLineEx(p, d, 1.5f, Color{c.r, c.g, c.b, 200});
+                    }
+                }
+            }
+
+            // Waypoint polyline — selected unit, the selected squadron's
+            // flights, or every unit when "all flight plans" is on.
+            if (unit_selected || squadron_selected ||
+                impl_->show_all_routes) {
                 auto* wp = h.get<f4::entities::WaypointPlanComponent>();
                 if (wp && !wp->waypoints.empty()) {
                     Vector2 prev = p;
@@ -1033,150 +1041,6 @@ void ViewerApp::draw_canvas() {
         }
     }
 
-    // --- V-3DLIVE: the LIVE 3D pass (session entities as models) -------
-    //
-    // The static 3D pass above renders the LOADED world's objectives
-    // and units; the SESSION's entities — flying aircraft, parked
-    // squadron aircraft, deaggregated vehicles — had only 2D glyphs.
-    // This pass resolves each session entity's vis type
-    // (VisualModelComponent::vis_type, recorded at spawn against the
-    // session's own class table) through the VIEWER's model db + mesh
-    // cache and draw_vis_type_mesh-es it under the same top-down ortho
-    // camera the static pass uses, so live models land on the same
-    // pixels as the static ones. Zoom-gated like the static pass
-    // (> 6 px/grid: sub-pixel models are clutter, not detail).
-    if (impl_->session && impl_->show_live_layer &&
-        impl_->world_loaded && impl_->cam_zoom > 6.0f) {
-        if (!impl_->models_3d_load_attempted) {
-            impl_->ensure_models_3d_loaded();
-        }
-        const bool models_ready = impl_->models_3d_loaded &&
-                                  impl_->render_res_3d.model_cache.ready() &&
-                                  impl_->class_table_3d.loaded();
-        if (models_ready &&
-            impl_->render_res_3d.ensure_default_material()) {
-            constexpr float FT_PER_GRID = 1024.0f;
-            const float cam_east_ft  = impl_->cam_x * FT_PER_GRID;
-            const float cam_north_ft = impl_->cam_y * FT_PER_GRID;
-            const float visible_h_ft =
-                (static_cast<float>(impl_->window_h) / impl_->cam_zoom) *
-                FT_PER_GRID;
-            constexpr float CAM_ALT_FT = 5000.0f;
-
-            Camera3D cam3d = {};
-            cam3d.position   = { cam_east_ft,  CAM_ALT_FT, -cam_north_ft };
-            cam3d.target     = { cam_east_ft,         0.0f, -cam_north_ft };
-            cam3d.up         = { 0.0f, 0.0f, -1.0f };
-            cam3d.fovy       = visible_h_ft;
-            cam3d.projection = CAMERA_ORTHOGRAPHIC;
-
-            // View-cull margin (models can extend a few hundred feet).
-            const float cull_margin_px = 600.0f * impl_->cam_zoom /
-                                         FT_PER_GRID;
-            const float sx_min = -cull_margin_px;
-            const float sx_max =
-                static_cast<float>(impl_->window_w) + cull_margin_px;
-            const float sy_min = -cull_margin_px;
-            const float sy_max =
-                static_cast<float>(impl_->window_h) + cull_margin_px;
-
-            BeginMode3D(cam3d);
-            {
-                f4::renderer::EntityRenderResources res =
-                    f4::renderer::make_entity_render_resources(
-                        impl_->render_res_3d,
-                        &impl_->class_table_3d);
-                res.show_ground_layout = false;
-
-                // Facing: aircraft models point along their motion when
-                // moving (velocity → compass), else their parked
-                // heading (the spawn-time compass quaternion). Compass
-                // = 0 north, clockwise east (atan2(east, north)).
-                const auto facing_deg_from_transform =
-                    [](const f4::entities::TransformComponent* tf) {
-                        if (!tf) return 0.0f;
-                        const double v2 = tf->vx * tf->vx + tf->vy * tf->vy;
-                        if (v2 > 400.0) {  // > 20 ft/s ground speed
-                            const double rad = std::atan2(tf->vx, tf->vy);
-                            return static_cast<float>(rad * 57.29577951308232);
-                        }
-                        // enu_quat_from_compass(h) = (cos(h/2),0,0,
-                        // -sin(h/2)): h = -2*atan2(qz, qw), wrapped.
-                        double rad = -2.0 * std::atan2(tf->qz, tf->qw);
-                        while (rad < 0.0) rad += 6.283185307179586;
-                        while (rad >= 6.283185307179586) {
-                            rad -= 6.283185307179586;
-                        }
-                        return static_cast<float>(rad * 57.29577951308232);
-                    };
-
-                // (1) Aircraft — the save's flights + the synthetic
-                // spawns (one roster; both have FM + Transform + VMC).
-                for (const auto eid : impl_->live_aircraft()) {
-                    auto h = impl_->session_handle(eid);
-                    auto* tf = h.get<f4::entities::TransformComponent>();
-                    auto* vmc =
-                        h.get<f4::simulation::VisualModelComponent>();
-                    if (!tf || !vmc || vmc->vis_type <= 0) continue;
-                    const float gx = Impl::grid_x(tf), gy = Impl::grid_y(tf);
-                    const Vector2 p = impl_->world_to_screen(gx, gy);
-                    if (p.x < sx_min || p.x > sx_max ||
-                        p.y < sy_min || p.y > sy_max) {
-                        continue;
-                    }
-                    f4::renderer::draw_vis_type_mesh(
-                        res, vmc->vis_type,
-                        gx * FT_PER_GRID, gy * FT_PER_GRID,
-                        static_cast<float>(tf->position.z),
-                        facing_deg_from_transform(tf));
-                }
-
-                // (2) Parked squadron aircraft — same shape, dormant.
-                for (const auto eid : impl_->parked_aircraft()) {
-                    auto h = impl_->session_handle(eid);
-                    auto* tf = h.get<f4::entities::TransformComponent>();
-                    auto* vmc =
-                        h.get<f4::simulation::VisualModelComponent>();
-                    if (!tf || !vmc || vmc->vis_type <= 0) continue;
-                    const float gx = Impl::grid_x(tf), gy = Impl::grid_y(tf);
-                    const Vector2 p = impl_->world_to_screen(gx, gy);
-                    if (p.x < sx_min || p.x > sx_max ||
-                        p.y < sy_min || p.y > sy_max) {
-                        continue;
-                    }
-                    f4::renderer::draw_vis_type_mesh(
-                        res, vmc->vis_type,
-                        gx * FT_PER_GRID, gy * FT_PER_GRID,
-                        static_cast<float>(tf->position.z),
-                        facing_deg_from_transform(tf));
-                }
-
-                // (3) Deaggregated vehicles — tanks, trucks, personnel;
-                // the formation offsets were baked into their transforms
-                // at spawn (unit heading included via the quaternion).
-                for (const auto eid : impl_->deaggregated_vehicles()) {
-                    auto h = impl_->session_handle(eid);
-                    auto* tf = h.get<f4::entities::TransformComponent>();
-                    auto* vmc =
-                        h.get<f4::simulation::VisualModelComponent>();
-                    if (!tf || !vmc || vmc->vis_type <= 0) continue;
-                    const float gx = Impl::grid_x(tf), gy = Impl::grid_y(tf);
-                    const Vector2 p = impl_->world_to_screen(gx, gy);
-                    if (p.x < sx_min || p.x > sx_max ||
-                        p.y < sy_min || p.y > sy_max) {
-                        continue;
-                    }
-                    f4::renderer::draw_vis_type_mesh(
-                        res, vmc->vis_type,
-                        gx * FT_PER_GRID, gy * FT_PER_GRID,
-                        static_cast<float>(tf->position.z),
-                        facing_deg_from_transform(tf));
-                }
-            }
-            EndMode3D();
-        }
-    }
-
     // --- B.3 QC overlays: mission links, package links, bullseye -------
     //
     // These three passes draw the campaign's tasking RELATIONSHIPS over
@@ -1409,456 +1273,39 @@ void ViewerApp::draw_canvas() {
         }
     }
 
-    // --- Ground Layout overlay (selected objective only, zoom-gated) ---
-    if (impl_->world_loaded &&
-        impl_->show_ground_layout_overlay &&
-        impl_->sel_kind == Impl::SelectionKind::Objective &&
-        impl_->sel_entity.valid() &&
-        impl_->cam_zoom > 4.0f) {
-        auto h = impl_->handle(impl_->sel_entity);
-        auto* tr = h.get<f4::entities::TransformComponent>();
-        auto* gl = h.get<f4::entities::GroundLayoutComponent>();
-        if (tr && gl && !gl->layouts.empty()) {
-            constexpr float FT_PER_GRID = 1024.0f;
-            const float ox = impl_->grid_x(tr), oy = impl_->grid_y(tr);
-            const Vector2 origin = impl_->world_to_screen(ox, oy);
-            const float px_per_ft = impl_->cam_zoom / FT_PER_GRID;
-            bool worth_drawing = false;
-            for (const auto& layout : gl->layouts) {
-                for (const auto& pt : layout.points) {
-                    const float dx = pt.x * px_per_ft;
-                    const float dy = pt.y * px_per_ft;
-                    if (dx * dx + dy * dy > 4.0f) {
-                        worth_drawing = true;
-                        break;
-                    }
-                }
-                if (worth_drawing) break;
-            }
-            if (worth_drawing) {
-                for (const auto& layout : gl->layouts) {
-                    Color stroke;
-                    float line_w;
-                    switch (layout.type) {
-                        case 1:  stroke = Color{ 30,  30,  30, 230}; line_w = 2.0f; break;
-                        case 8:  stroke = Color{120, 120, 120, 180}; line_w = 1.0f; break;
-                        case 11: stroke = Color{ 60, 200,  80, 230}; line_w = 1.0f; break;
-                        case 14: stroke = Color{ 80, 200, 220, 230}; line_w = 1.0f; break;
-                        case 16: stroke = Color{ 60, 120, 220, 230}; line_w = 1.0f; break;
-                        case 17: stroke = Color{140, 100,  60, 220}; line_w = 1.0f; break;
-                        case 4:  stroke = Color{220,  60,  60, 230}; line_w = 0.0f; break;
-                        case 5:  stroke = Color{220, 140,  40, 230}; line_w = 0.0f; break;
-                        case 6:  stroke = Color{220, 200,  40, 230}; line_w = 0.0f; break;
-                        case 10: stroke = Color{180,  60, 220, 230}; line_w = 1.0f; break;
-                        default: stroke = Color{160, 160, 160, 180}; line_w = 1.0f; break;
-                    }
-                    const std::size_t n = layout.points.size();
-                    if (n < 2) {
-                        if (n == 1) {
-                            const float px = origin.x + layout.points[0].x * px_per_ft;
-                            const float py = origin.y - layout.points[0].y * px_per_ft;
-                            DrawCircleV({px, py}, 3.0f, stroke);
-                        }
-                        continue;
-                    }
-                    if(line_w>0)
-                        for (std::size_t i = 0; i + 1 < n; ++i) {
-                            const float x0 = origin.x + layout.points[i].x * px_per_ft;
-                            const float y0 = origin.y - layout.points[i].y * px_per_ft;
-                            const float x1 = origin.x + layout.points[i + 1].x * px_per_ft;
-                            const float y1 = origin.y - layout.points[i + 1].y * px_per_ft;
-                            DrawLineEx({ x0, y0 }, { x1, y1 }, line_w, stroke);
-                        }
-                    for (const auto& pt : layout.points) {
-                        const float px = origin.x + pt.x * px_per_ft;
-                        const float py = origin.y - pt.y * px_per_ft;
-                        DrawCircleV({px, py}, 2.0f, stroke);
-                    }
-                }
-            }
+    // --- Map scale reference (bottom-left, above the status bar) -------
+    //
+    // The zoom slider's replacement: a ladder step (1/2/5/…/500 nm)
+    // whose bar fits ~160 px at the current zoom. The wheel zoom clamps
+    // to the fit-to-world extent, so the bar also shows the widest view
+    // the camera allows.
+    if (impl_->terrain_loaded || impl_->world_loaded) {
+        constexpr float GRID_FT = 1024.0f;
+        constexpr float FT_PER_NM = 6076.12f;
+        const float px_per_nm =
+            impl_->cam_zoom * (FT_PER_NM / GRID_FT);
+        static constexpr float kNmLadder[] = {
+            1.0f, 2.0f, 5.0f, 10.0f, 20.0f, 50.0f, 100.0f, 200.0f, 500.0f};
+        float nm = kNmLadder[0];
+        for (const float rung : kNmLadder) {
+            if (rung * px_per_nm <= 160.0f) nm = rung;
         }
-    }
-
-    // --- Feature + entity 3D model overlay (ALL objectives + units, zoom-gated) --
-    //
-    // Draws 2D feature dots AND optional 3D KoreaObj models for every
-    // objective and unit in view, not just the selected objective. This
-    // is the user-facing "show me the world" view — without it, the only
-    // way to see features was to click an objective first, which made the
-    // map look empty.
-    //
-    // Three model sources, all sharing one BeginMode3D block:
-    //
-    //   1. Objective feature models (FeatureSetComponent)
-    //      Airbase-family objectives carry a FeatureSetComponent whose
-    //      placements come from the class's OCD row (Falcon4.FED/FCD):
-    //      airbases 66-145 features each, highway strips 13, armybases 11.
-    //      RenderEntity() dispatches on FeatureSetComponent →
-    //      draw_feature_mesh per feature, offset by the feature's
-    //      offset_xyz from the objective center.
-    //
-    //   2. Objective entity models (ObjectiveTypeComponent::type)
-    //      Objectives without a FeatureSetComponent would resolve
-    //      entity_type → vis_type[0] → draw_feature_mesh at the
-    //      objective's world position. NOTE: in the stock class table
-    //      every CLASS_OBJECTIVE row has vis_type all-zero (an objective's
-    //      visuals ARE its features), so this pass draws nothing today —
-    //      it exists for theaters/classes that do carry a model.
-    //
-    //   3. Unit entity models (UnitCoreComponent::class_table_index)
-    //      Every unit entity_type (150+) maps to a vis_type[0] — tanks,
-    //      ships, aircraft, SAM launchers, etc. We resolve and draw the
-    //      same way, at the unit's world position.
-    //
-    // Zoom-gating: requires zoom > 4. At lower zoom the models would be
-    // sub-pixel and the 2D dots would overlap and clutter the view.
-    //
-    // View culling: each entity's center is projected to screen and
-    // skipped if outside the viewport + a margin (features can extend
-    // ~3000 ft = ~3 grid units from the center).
-    //
-    // 3D models: when show_feature_meshes + models_3d_loaded + class_table
-    // are all set, we wrap the whole pass in a single BeginMode3D/EndMode3D
-    // block with a top-down ortho camera matching the 2D world_to_screen
-    // transform so 3D meshes land on the same screen pixels as the 2D
-    // dots.
-    if (impl_->world_loaded &&
-        impl_->show_feature_meshes &&
-        impl_->cam_zoom > 6.0f) {
-
-        // Lazily load KoreaObj models + FALCON4.ct the first time we have
-        // an entity in view. The load is ~50-150ms; once loaded, subsequent
-        // calls are no-ops. On failure, we silently fall back to 2D-dots-
-        // only (the 3D pass below checks models_ready).
-        if (!impl_->models_3d_load_attempted) {
-            impl_->ensure_models_3d_loaded();
-        }
-        const bool models_ready = impl_->models_3d_loaded &&
-                                  impl_->render_res_3d.model_cache.ready() &&
-                                  impl_->class_table_3d.loaded();
-
-        constexpr float FT_PER_GRID = 1024.0f;
-        const float px_per_ft = impl_->cam_zoom / FT_PER_GRID;
-
-        // View-cull margin: features can extend ~3000 ft (~3 grid units)
-        // from an objective's center. Convert to pixels.
-        const float cull_margin_px = 3000.0f * px_per_ft;
-        const float sx_min = -cull_margin_px;
-        const float sx_max = static_cast<float>(impl_->window_w) + cull_margin_px;
-        const float sy_min = -cull_margin_px;
-        const float sy_max = static_cast<float>(impl_->window_h) + cull_margin_px;
-
-        // --- 3D KoreaObj model pass (one BeginMode3D for all entities) ---
-        if (models_ready && impl_->render_res_3d.ensure_default_material()) {
-            const float cam_east_ft  = impl_->cam_x * FT_PER_GRID;
-            const float cam_north_ft = impl_->cam_y * FT_PER_GRID;
-            const float visible_h_ft =
-                (static_cast<float>(impl_->window_h) / impl_->cam_zoom) * FT_PER_GRID;
-            constexpr float CAM_ALT_FT = 5000.0f;
-
-            Camera3D cam3d = {};
-            cam3d.position   = { cam_east_ft,  CAM_ALT_FT, -cam_north_ft };
-            cam3d.target     = { cam_east_ft,         0.0f, -cam_north_ft };
-            cam3d.up         = { 0.0f, 0.0f, -1.0f };
-            cam3d.fovy       = visible_h_ft;
-            cam3d.projection = CAMERA_ORTHOGRAPHIC;
-
-            BeginMode3D(cam3d);
-            {
-                f4::renderer::EntityRenderResources res =
-                    f4::renderer::make_entity_render_resources(
-                        impl_->render_res_3d,
-                        &impl_->class_table_3d);
-                // Don't draw the GroundLayoutComponent airfield geometry
-                // here — that's the selected-objective overlay above.
-                res.show_ground_layout = false;
-
-                // (1) Objective feature models — RenderEntity dispatches
-                // on FeatureSetComponent and draws each feature's model
-                // at its offset from the objective center. Only objectives
-                // with non-empty FeatureSetComponent produce draws here
-                // (the airbase family: airbases, highway strips,
-                // armybases — the classes whose OCD row names features).
-                for (const auto& eid : impl_->objectives()) {
-                    auto h = impl_->handle(eid);
-                    auto* tr = h.get<f4::entities::TransformComponent>();
-                    auto* fe = h.get<f4::entities::FeatureSetComponent>();
-                    if (!tr || !fe || fe->features.empty()) continue;
-
-                    // View cull (objective center).
-                    const float ox = impl_->grid_x(tr), oy = impl_->grid_y(tr);
-                    const Vector2 origin = impl_->world_to_screen(ox, oy);
-                    if (origin.x < sx_min || origin.x > sx_max ||
-                        origin.y < sy_min || origin.y > sy_max) continue;
-
-                    f4::renderer::RenderEntity(res, h);
-                }
-
-                // (2) Objective entity models — every objective (bridge,
-                // factory, city, radar, port, etc.) has a vis_type[0]
-                // from FALCON4.ct. Draw the model at the objective's
-                // world position. Skips objectives already covered by (1)
-                // (airbases with features) — they'd double-draw.
-                for (const auto& eid : impl_->objectives()) {
-                    auto h = impl_->handle(eid);
-                    auto* tr = h.get<f4::entities::TransformComponent>();
-                    auto* ot = h.get<f4::entities::ObjectiveTypeComponent>();
-                    auto* fe = h.get<f4::entities::FeatureSetComponent>();
-                    if (!tr || !ot) continue;
-                    // Skip if this objective has features — already drawn
-                    // by pass (1) via RenderEntity (and the feature models
-                    // are more detailed than the single entity model).
-                    if (fe && !fe->features.empty()) continue;
-                    // entity_type 0 or < 100 means no class table entry.
-                    if (ot->type < 100) continue;
-
-                    // View cull.
-                    const float ox = impl_->grid_x(tr), oy = impl_->grid_y(tr);
-                    const Vector2 origin = impl_->world_to_screen(ox, oy);
-                    if (origin.x < sx_min || origin.x > sx_max ||
-                        origin.y < sy_min || origin.y > sy_max) continue;
-
-                    // Resolve entity_type → vis_type[0] and draw.
-                    const uint16_t entity_type =
-                        static_cast<uint16_t>(ot->type);
-                    const float pos_east_ft  = ox * FT_PER_GRID;
-                    const float pos_north_ft = oy * FT_PER_GRID;
-                    const float pos_up_ft    = static_cast<float>(tr->position.z);
-                    f4::renderer::draw_feature_mesh(
-                        res, entity_type,
-                        pos_east_ft, pos_north_ft, pos_up_ft,
-                        0.0f);  // facing — objectives don't carry one
-                }
-
-                // (3) Unit entity models — every unit (tank, ship, aircraft,
-                // SAM launcher, etc.) has a vis_type[0]. Draw at the unit's
-                // world position, rotated by the unit's heading.
-                //
-                // Units don't carry a quaternion in TransformComponent
-                // (the world bridge leaves it identity). Ground units store
-                // heading in GroundTacticalComponent::heading (0-255, scaled
-                // by 1.4 deg/unit → 0-358 deg). Air/naval units may not have
-                // a GroundTacticalComponent — they default to facing 0.
-                for (const auto& eid : impl_->units()) {
-                    auto h = impl_->handle(eid);
-                    auto* tr = h.get<f4::entities::TransformComponent>();
-                    auto* uc = h.get<f4::entities::UnitCoreComponent>();
-                    if (!tr || !uc) continue;
-                    // class_table_index is the entity_type (150+ for units).
-                    if (uc->class_table_index < 100) continue;
-
-                    // View cull.
-                    const float ux = impl_->grid_x(tr), uy = impl_->grid_y(tr);
-                    const Vector2 origin = impl_->world_to_screen(ux, uy);
-                    if (origin.x < sx_min || origin.x > sx_max ||
-                        origin.y < sy_min || origin.y > sy_max) continue;
-
-                    const uint16_t entity_type =
-                        static_cast<uint16_t>(uc->class_table_index);
-                    const float pos_east_ft  = ux * FT_PER_GRID;
-                    const float pos_north_ft = uy * FT_PER_GRID;
-                    const float pos_up_ft    = static_cast<float>(tr->position.z);
-                    // Resolve heading: GroundTacticalComponent::heading is
-                    // 0-255 with 1.4 deg/unit (0 → 0 deg, 255 → 357 deg).
-                    // Default to 0 (north-facing) when absent.
-                    float facing_deg = 0.0f;
-                    if (auto* gt = h.get<f4::entities::GroundTacticalComponent>()) {
-                        facing_deg = static_cast<float>(gt->heading) * 1.4f;
-                    }
-                    f4::renderer::draw_feature_mesh(
-                        res, entity_type,
-                        pos_east_ft, pos_north_ft, pos_up_ft,
-                        facing_deg);
-                }
-            }
-            EndMode3D();
-        }
-
-        // --- 2D feature dots + labels (over the 3D pass) ----------------
-        // Only for objectives with FeatureSetComponent — objectives
-        // without features (bridges, factories, etc.) are represented by
-        // their 3D model alone (no 2D dots to draw).
-        const int font_size = 10;
-        const Color shadow = { 0, 0, 0, 200 };
-        const Color text = { 235, 235, 235, 230 };
-        auto draw_text = [&](const char* buf, float px, float py, Color c) {
-            DrawText(buf, static_cast<int>(px) + 1, static_cast<int>(py) + 1,
-                     font_size, shadow);
-            DrawText(buf, static_cast<int>(px), static_cast<int>(py),
-                     font_size, c);
-        };
-
-        // Only draw labels when zoomed in enough to read them.
-        const bool draw_labels = impl_->cam_zoom > 8.0f;
-
-        for (const auto& eid : impl_->objectives()) {
-            auto h = impl_->handle(eid);
-            auto* tr = h.get<f4::entities::TransformComponent>();
-            auto* fe = h.get<f4::entities::FeatureSetComponent>();
-            if (!tr || !fe || fe->features.empty()) continue;
-
-            const float ox = impl_->grid_x(tr), oy = impl_->grid_y(tr);
-            const Vector2 origin = impl_->world_to_screen(ox, oy);
-            if (origin.x < sx_min || origin.x > sx_max ||
-                origin.y < sy_min || origin.y > sy_max) continue;
-
-            const bool is_selected =
-                (impl_->sel_kind == Impl::SelectionKind::Objective &&
-                 impl_->sel_entity == eid);
-            // Selected objective's features get a brighter dot.
-            const Color stroke = is_selected
-                ? Color{ 255, 255, 180, 255 }
-                : Color{ 180, 180, 220, 230 };
-
-            for (const auto& feature : fe->features) {
-                const float px = origin.x + feature.offset_x * px_per_ft;
-                const float py = origin.y - feature.offset_y * px_per_ft;
-                // Skip features outside the viewport (per-feature cull
-                // so we don't spend time drawing dots the user can't see).
-                if (px < -10.0f || px > impl_->window_w + 10.0f ||
-                    py < -10.0f || py > impl_->window_h + 10.0f) continue;
-                DrawCircleV({ px, py }, 3.0f, stroke);
-                if (draw_labels && !feature.name.empty()) {
-                    draw_text(feature.name.c_str(), px, py, text);
-                }
-            }
-        }
-    }
-
-    // --- HUD overlay ---
-    {
-        const int pad = 6;
-        int y = 30 + pad;
-        const int x = pad;
-        const int line_h = 14;
-        const int font_size = 10;
-        const Color shadow = {0, 0, 0, 200};
-        const Color text = {235, 235, 235, 230};
-        const Color accent = {120, 200, 255, 230};
-        const Color ok_color = {120, 220, 120, 230};
-        const Color warn_color = {240, 220, 120, 230};
-        const Color bad_color = {240, 120, 120, 230};
-
-        auto draw_text = [&](const char* buf, Color c) {
-            DrawText(buf, x + 1, y + 1, font_size, shadow);
-            DrawText(buf, x, y, font_size, c);
-            y += line_h;
-        };
-
-        const int fps = GetFPS();
-        char buf[160];
-        const Color fps_c = (fps >= 55) ? ok_color
-                          : (fps >= 30) ? warn_color
-                                        : bad_color;
-        snprintf(buf, sizeof(buf), "FPS %d", fps);
-        draw_text(buf, fps_c);
-
-        if (impl_->world_loaded) {
-            const Vector2 mouse = GetMousePosition();
-            float gx = 0.0f, gy = 0.0f;
-            impl_->screen_to_world(mouse.x, mouse.y, &gx, &gy);
-            snprintf(buf, sizeof(buf), "Cursor  grid (%.1f, %.1f)", gx, gy);
-            draw_text(buf, accent);
-
-            snprintf(buf, sizeof(buf), "Objectives %zu   Units %zu   Teams %zu",
-                     impl_->objectives().size(),
-                     impl_->units().size(),
-                     impl_->teams().size());
-            draw_text(buf, text);
-
-            snprintf(buf, sizeof(buf), "Cam  (%.1f, %.1f)  zoom %.2fx",
-                     impl_->cam_x, impl_->cam_y, impl_->cam_zoom);
-            draw_text(buf, text);
-
-            // Selection summary
-            if (impl_->sel_kind == Impl::SelectionKind::Objective && impl_->sel_entity.valid()) {
-                auto h = impl_->handle(impl_->sel_entity);
-                auto* ot = h.get<f4::entities::ObjectiveTypeComponent>();
-                auto* own = h.get<f4::entities::OwnershipComponent>();
-                auto* pb = h.get<f4::entities::PropertyBag>();
-                if (ot && own) {
-                    std::string sel_name;
-                    if (!ot->class_name.empty()) {
-                        sel_name = ot->class_name;
-                    } else {
-                        sel_name = f4::world_types::objective_type_name(
-                            static_cast<int16_t>(impl_->obj_type_from_pb(pb)));
-                    }
-                    snprintf(buf, sizeof(buf), "Sel: [Obj] %s  owner=%u",
-                             sel_name.c_str(), own->team);
-                    draw_text(buf, accent);
-                }
-            } else if (impl_->sel_kind == Impl::SelectionKind::Unit && impl_->sel_entity.valid()) {
-                auto h = impl_->handle(impl_->sel_entity);
-                auto* uc = h.get<f4::entities::UnitCoreComponent>();
-                if (uc) {
-                    const char* name = uc->class_name.empty() ? "(no class)" : uc->class_name.c_str();
-                    auto team_tag = h.get_tag(f4::entities::tags::TEAM);
-                    const uint8_t owner = (team_tag && team_tag->as_int()) ? static_cast<uint8_t>(*team_tag->as_int()) : 0;
-                    snprintf(buf, sizeof(buf), "Sel: [Unit] %s  owner=%u", name, owner);
-                    draw_text(buf, accent);
-                }
-            } else if (impl_->sel_kind == Impl::SelectionKind::LiveAircraft &&
-                       impl_->sel_entity.valid()) {
-                auto h = impl_->session_handle(impl_->sel_entity);
-                auto* org = h.get<f4::simulation::CampaignOriginComponent>();
-                snprintf(buf, sizeof(buf),
-                         "Sel: [Live] flight VU %u  team=%u",
-                         org ? org->flight_vu : 0,
-                         org ? org->team_slot : 0);
-                draw_text(buf, accent);
-            }
-        } else {
-            draw_text("No world loaded", warn_color);
-        }
-
-        // 3D-model hint: the session's aircraft/vehicles gain real
-        // models past 6x zoom — point the user at what they're missing.
-        if (impl_->session && impl_->show_live_layer &&
-            impl_->cam_zoom <= 6.0f) {
-            snprintf(buf, sizeof(buf),
-                     "zoom past 6x for 3D models (aircraft, vehicles)");
-            draw_text(buf, text);
-        }
-
-        // Hovered-entity hint
-        if (impl_->world_loaded &&
-            impl_->sel_kind == Impl::SelectionKind::None &&
-            !ImGui::GetIO().WantCaptureMouse) {
-            const Vector2 mouse = GetMousePosition();
-            float gx = 0.0f, gy = 0.0f;
-            impl_->screen_to_world(mouse.x, mouse.y, &gx, &gy);
-            f4::entities::EntityId best_id;
-            float best_dist_sq = 100.0f;  // 10px radius squared
-            for (const auto& eid : impl_->objectives()) {
-                auto h = impl_->handle(eid);
-                auto* tr = h.get<f4::entities::TransformComponent>();
-                if (!tr) continue;
-                const float ox = impl_->grid_x(tr), oy = impl_->grid_y(tr);
-                const Vector2 p = impl_->world_to_screen(ox, oy);
-                const float dx = p.x - mouse.x;
-                const float dy = p.y - mouse.y;
-                const float d2 = dx * dx + dy * dy;
-                if (d2 < best_dist_sq) {
-                    best_dist_sq = d2;
-                    best_id = eid;
-                }
-            }
-            if (best_id.valid()) {
-                auto h = impl_->handle(best_id);
-                auto* ot = h.get<f4::entities::ObjectiveTypeComponent>();
-                auto* pb = h.get<f4::entities::PropertyBag>();
-                std::string hover_name;
-                if (ot && !ot->class_name.empty()) {
-                    hover_name = ot->class_name;
-                } else {
-                    hover_name = f4::world_types::objective_type_name(
-                        static_cast<int16_t>(impl_->obj_type_from_pb(pb)));
-                }
-                snprintf(buf, sizeof(buf), "Hover: [Obj] %s", hover_name.c_str());
-                draw_text(buf, text);
-            }
-        }
+        const float len_px = nm * px_per_nm;
+        const float x1 = 14.0f;
+        const float y = impl_->window_h - 24.0f - 16.0f;
+        const float x2 = x1 + len_px;
+        const Color col = {235, 235, 235, 220};
+        DrawLineEx({x1, y}, {x2, y}, 1.5f, col);
+        DrawLineEx({x1, y - 4.0f}, {x1, y + 4.0f}, 1.5f, col);
+        DrawLineEx({x2, y - 4.0f}, {x2, y + 4.0f}, 1.5f, col);
+        char lbl[16];
+        std::snprintf(lbl, sizeof(lbl), "%g nm", nm);
+        constexpr int fs = 10;
+        const int tw = MeasureText(lbl, fs);
+        const int lx = static_cast<int>(x1 + len_px * 0.5f) - tw / 2;
+        const int ly = static_cast<int>(y) - fs - 5;
+        DrawText(lbl, lx + 1, ly + 1, fs, Color{0, 0, 0, 200});
+        DrawText(lbl, lx, ly, fs, col);
     }
 
     // --- Minimap ---
