@@ -161,6 +161,15 @@ DrawStats draw_vis_type_mesh(
 ///                           (= FeatureEntryState.index + 100).
 /// @param enu_x, enu_y, enu_z  Feature world position in ENU feet.
 /// @param facing_deg         Feature facing in degrees (CCW around +Z up).
+/// @param vis_slot           Class-table visType slot to draw. Feature
+///                           classes carry per-damage models: slot 0 =
+///                           intact, 1 = damaged, 2 = destroyed (the
+///                           Falcon convention — vis_slot_for_damage()
+///                           maps a FeatureEntryState VIS state to it).
+///                           A slot with no model (vis_type 0) falls
+///                           back to the intact model, the original
+///                           game's behavior for classes that only
+///                           carry one.
 /// @return  DrawStats describing what was drawn. draw_calls == 0 means
 ///          the feature was skipped (no vis_type, no mesh, empty
 ///          geometry, or model_cache/class_table pointers were null).
@@ -168,6 +177,19 @@ DrawStats draw_feature_mesh(
     FeatureMeshResources& res,
     uint16_t class_table_index,
     float enu_x, float enu_y, float enu_z,
-    float facing_deg);
+    float facing_deg,
+    int vis_slot = 0);
+
+/// FeatureEntryState::damage_state (the f4vu.h VIS face: 0 normal,
+/// 1 repaired, 2 damaged, 3 destroyed) → class-table visType slot.
+/// Repaired features draw their intact model (they are operational
+/// again); damaged/destroyed draw slots 1/2.
+[[nodiscard]] inline int vis_slot_for_damage(std::uint8_t damage_state) noexcept {
+    switch (damage_state) {
+        case 2: return 1;   // damaged → visType[1]
+        case 3: return 2;   // destroyed → visType[2]
+        default: return 0;  // intact + repaired → visType[0]
+    }
+}
 
 } // namespace f4::renderer

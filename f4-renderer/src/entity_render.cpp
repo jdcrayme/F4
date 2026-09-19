@@ -136,9 +136,10 @@ DrawStats RenderEntity(EntityRenderResources& res,
                 }
 
                 // Skip fully-destroyed features if configured.
-                // damage_state 0=intact, 1=damaged, 2=heavily damaged,
-                // 3=destroyed. Rendering destroyed buildings as rubble
-                // is a future enhancement; for now we just skip them.
+                // damage_state is the f4vu.h VIS face (0 intact,
+                // 1 repaired, 2 damaged, 3 destroyed). Rendering
+                // destroyed buildings as rubble is a future enhancement;
+                // for now we just skip them.
                 if (res.skip_destroyed_features &&
                     feature.damage_state >= 3) {
                     continue;
@@ -159,11 +160,14 @@ DrawStats RenderEntity(EntityRenderResources& res,
                 const float feat_north_ft = obj_north_ft + feature.offset_y;
                 const float feat_up_ft    = feature.offset_z;
 
-                // Delegate to the existing feature mesh pipeline.
+                // Delegate to the existing feature mesh pipeline — the
+                // damage state picks the model (classes carry intact/
+                // damaged/destroyed variants in visType slots 0/1/2).
                 const auto stats = draw_feature_mesh(
                     res, entity_type,
                     feat_east_ft, feat_north_ft, feat_up_ft,
-                    static_cast<float>(feature.facing));
+                    static_cast<float>(feature.facing),
+                    vis_slot_for_damage(feature.damage_state));
 
                 total.draw_calls   += stats.draw_calls;
                 total.meshes_drawn += stats.meshes_drawn;

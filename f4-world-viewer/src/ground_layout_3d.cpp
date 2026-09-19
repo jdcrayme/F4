@@ -734,7 +734,9 @@ void ViewerApp::draw_ground_layout_3d() {
                             nf.offset_x + nx,
                             nf.offset_y + ny,
                             nf.offset_z + nz,
-                            static_cast<float>(nf.facing));
+                            static_cast<float>(nf.facing),
+                            f4::renderer::vis_slot_for_damage(
+                                nf.damage_state));
                     }
                 }
             }
@@ -762,9 +764,20 @@ void ViewerApp::draw_ground_layout_3d() {
                     constexpr uint16_t VU_LAST_ENTITY_TYPE = 100;
                     const uint16_t entity_type = static_cast<uint16_t>(
                         VU_LAST_ENTITY_TYPE + static_cast<uint16_t>(f.index));
+                    // The damage state picks the class table's model
+                    // variant (visType slots: 0 intact, 1 damaged,
+                    // 2 destroyed). The pre-check mirrors
+                    // draw_feature_mesh's fallback: no model in the
+                    // damage slot → the intact model; no model at all →
+                    // the feature is skipped (and counted).
+                    const int vis_slot =
+                        f4::renderer::vis_slot_for_damage(f.damage_state);
                     const auto vis_type =
+                        impl_->class_table_3d.vis_type_for(entity_type,
+                                                           vis_slot);
+                    const auto vis_type_intact =
                         impl_->class_table_3d.vis_type_for(entity_type, 0);
-                    if (vis_type <= 0) {
+                    if (vis_type <= 0 && vis_type_intact <= 0) {
                         ++impl_->diag_3d_features_no_vistype;
                         continue;
                     }
@@ -773,7 +786,8 @@ void ViewerApp::draw_ground_layout_3d() {
                         f.offset_x + obj_world_x,
                         f.offset_y + obj_world_y,
                         f.offset_z + obj_world_z,
-                        static_cast<float>(f.facing));
+                        static_cast<float>(f.facing),
+                        vis_slot);
                     if (stats.meshes_drawn > 0) {
                         ++impl_->diag_3d_features_drawn;
                         impl_->diag_3d_meshes_drawn += stats.meshes_drawn;

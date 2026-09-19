@@ -708,3 +708,122 @@ TEST(FeatureMeshTest, RaylibMatrixConventionLocked) {
     EXPECT_NEAR(v4.y, 0.0f, 1e-4f);
     EXPECT_NEAR(v4.z, 0.0f, 1e-4f);
 }
+
+// ── Damage-variant model selection ────────────────────────────────────────
+//
+// Feature classes carry per-damage models in their visType slots
+// (0 intact, 1 damaged, 2 destroyed). The wire's VIS face maps onto
+// those slots; a slot with no model falls back to the intact one.
+
+TEST(FeatureMeshTest, VisSlotForDamage_MapsWireStates) {
+    // 0 normal and 1 repaired are operational → the intact model.
+    EXPECT_EQ(f4::renderer::vis_slot_for_damage(0), 0);
+    EXPECT_EQ(f4::renderer::vis_slot_for_damage(1), 0);
+    // 2 damaged / 3 destroyed → the alternate-model slots.
+    EXPECT_EQ(f4::renderer::vis_slot_for_damage(2), 1);
+    EXPECT_EQ(f4::renderer::vis_slot_for_damage(3), 2);
+    // Garbage clamps to the intact slot (the save bytes are u8).
+    EXPECT_EQ(f4::renderer::vis_slot_for_damage(200), 0);
+}
+
+// An entry whose class table row carries a DISTINCT damaged-slot model
+// must draw through that slot; an entry with no alternate model falls
+// back to the intact one instead of vanishing.
+TEST_F(FeatureMeshGpuTest, DrawFeatureMesh_DamageSlotSelectsOrFallsBack) {
+    const auto data_dir = koreaobj_data_dir();
+    const auto ct_path = class_table_json();
+    if (data_dir.empty() ||
+        !std::filesystem::exists(data_dir / "Models" / "koreaobj")) {
+        GTEST_SKIP() << "glTF koreaobj fixture not found — skipping GPU test";
+    }
+    if (ct_path.empty() || !std::filesystem::exists(ct_path)) {
+        GTEST_SKIP() << "JSON class table not found — skipping GPU test";
+    }
+
+    f4::world_types::ClassTable class_table;
+    ASSERT_NO_THROW(class_table.load_auto(ct_path.string()));
+    ASSERT_TRUE(class_table.loaded());
+
+    // Two probe classes: one with a damaged-slot model present in the
+    // fixture tree, one with an empty damaged slot (intact-only row).
+    uint16_t with_alternate = 0;
+    uint16_t without_alternate = 0;
+    const std::size_t n_entries = class_table.size();
+    for (std::size_t i = 0; i < n_entries; ++i) {
+        const uint16_t entity_type = static_cast<uint16_t>(
+            f4::world_types::VU_LAST_ENTITY_TYPE + i);
+        const auto* entry = class_table.lookup(entity_type);
+        if (!entry) continue;
+        const int16_t vis0 = class_table.vis_type_for(entity_type, 0);
+        if (vis0 <= 0 || !gltf_model_exists(data_dir, vis0)) continue;
+        const int16_t vis1 = class_table.vis_type_for(entity_type, 1);
+        if (vis1 > 0 && gltf_model_exists(data_dir, vis1)) {
+            if (with_alternate == 0) with_alternate = entity_type;
+        } else if (without_alternate == 0) {
+            without_alternate = entity_type;
+        }
+        if (with_alternate != 0 && without_alternate != 0) break;
+    }
+    if (with_alternate == 0 && without_alternate == 0) {
+        GTEST_SKIP() << "No class-table entry with a glTF fixture found";
+    }
+
+    f4::renderer::TextureCache tex_cache;
+    f4::renderer::LitShader lit_shader;
+    f4::renderer::RuntimeModelCache model_cache;
+    model_cache.set_data_dir(data_dir);
+    ::Material default_mat = LoadMaterialDefault();
+    default_mat.maps[MATERIAL_MAP_DIFFUSE].color = WHITE;
+
+    f4::renderer::FeatureMeshResources res{};
+    res.model_cache = &model_cache;
+    res.class_table = &class_table;
+    res.texture_cache = &tex_cache;
+    res.lit_shader = &lit_shader;
+    res.default_material = &default_mat;
+
+    Camera3D cam = {};
+    cam.position = {0.0f, 100.0f, 0.0f};
+    cam.target   = {0.0f, 0.0f, 0.0f};
+    cam.up       = {0.0f, 0.0f, -1.0f};
+    cam.fovy     = 200.0f;
+    cam.projection = CAMERA_ORTHOGRAPHIC;
+
+    // (1) A class WITH an alternate model draws it through the damaged
+    // slot (its own vis_type[1], not the intact fallback).
+    if (with_alternate != 0) {
+        BeginDrawing();
+        ClearBackground(BLACK);
+        BeginMode3D(cam);
+        auto stats = f4::renderer::draw_feature_mesh(
+            res, with_alternate,
+            0.0f, 0.0f, 0.0f, 0.0f,
+            f4::renderer::vis_slot_for_damage(2));
+        EndMode3D();
+        EndDrawing();
+        EXPECT_GT(stats.meshes_drawn, 0)
+            << "damaged slot draw failed for entity_type="
+            << with_alternate;
+    }
+
+    // (2) A class WITHOUT an alternate model falls back to the intact
+    // model instead of drawing nothing.
+    if (without_alternate != 0) {
+        BeginDrawing();
+        ClearBackground(BLACK);
+        BeginMode3D(cam);
+        auto stats = f4::renderer::draw_feature_mesh(
+            res, without_alternate,
+            0.0f, 0.0f, 0.0f, 0.0f,
+            f4::renderer::vis_slot_for_damage(3));
+        EndMode3D();
+        EndDrawing();
+        EXPECT_GT(stats.meshes_drawn, 0)
+            << "intact fallback failed for entity_type="
+            << without_alternate;
+    }
+
+    tex_cache.unload_all();
+    model_cache.unload_all();
+    UnloadMaterial(default_mat);
+}

@@ -177,7 +177,8 @@ DrawStats draw_feature_mesh(
     FeatureMeshResources& res,
     uint16_t class_table_index,
     float enu_x, float enu_y, float enu_z,
-    float facing_deg)
+    float facing_deg,
+    int vis_slot)
 {
     DrawStats stats{};
     if (!res.model_cache || !res.class_table || !res.texture_cache ||
@@ -185,11 +186,20 @@ DrawStats draw_feature_mesh(
         return stats;  // incompletely configured
     }
 
-    // Step 1: entity_type → vis_type[0] via the class table.
-    // The caller is responsible for converting FeatureEntryState.index
-    // (a descriptionIndex) to entity_type (descriptionIndex + 100) before
-    // calling — this matches ClassTable::vis_type_for()'s convention.
-    const auto vis_type = res.class_table->vis_type_for(class_table_index, 0);
+    // Step 1: entity_type → vis_type[slot] via the class table. The
+    // caller is responsible for converting FeatureEntryState.index
+    // (a descriptionIndex) to entity_type (descriptionIndex + 100)
+    // before calling — this matches ClassTable::vis_type_for()'s
+    // convention. Feature classes carry per-damage models (slot 0
+    // intact, 1 damaged, 2 destroyed); a slot with no model falls back
+    // to the intact one — the original game's behavior for classes
+    // that only carry one model.
+    if (vis_slot < 0 || vis_slot >= 7) vis_slot = 0;
+    auto vis_type = res.class_table->vis_type_for(class_table_index,
+                                                  vis_slot);
+    if (vis_type <= 0 && vis_slot != 0) {
+        vis_type = res.class_table->vis_type_for(class_table_index, 0);
+    }
     if (vis_type <= 0) {
         return stats;  // no model for this entity_type
     }
